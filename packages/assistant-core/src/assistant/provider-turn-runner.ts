@@ -341,6 +341,8 @@ async function resolveAssistantRouteTurnPlan(input: {
   const assistantMemoryRecallToolsAvailable =
     input.toolCatalog.hasTool('assistant.memory.search') &&
     input.toolCatalog.hasTool('assistant.memory.get')
+  const assistantMemoryAppendToolAvailable =
+    input.toolCatalog.hasTool('assistant.memory.file.append')
   const assistantMemoryFileEditToolsAvailable =
     input.toolCatalog.hasTool('assistant.memory.file.read') &&
     input.toolCatalog.hasTool('assistant.memory.file.write')
@@ -359,6 +361,7 @@ async function resolveAssistantRouteTurnPlan(input: {
     workingDirectory,
     systemPrompt: buildAssistantSystemPrompt({
       assistantStateToolsAvailable,
+      assistantMemoryAppendToolAvailable,
       assistantCronToolsAvailable,
       cliAccess: input.sharedPlan.cliAccess,
       assistantMemoryDailyPath: resolveAssistantDailyMemoryPath(assistantMemoryPaths),
@@ -913,6 +916,7 @@ function isAssistantConversationTranscriptEntry(entry: {
 }
 
 function buildAssistantSystemPrompt(input: {
+  assistantMemoryAppendToolAvailable: boolean
   assistantStateToolsAvailable: boolean
   assistantCronToolsAvailable: boolean
   assistantMemoryDailyPath: string
@@ -965,6 +969,7 @@ function buildAssistantSystemPrompt(input: {
     }),
     buildAssistantMemoryGuidanceText({
       rawCommand: input.cliAccess.rawCommand,
+      assistantMemoryAppendToolAvailable: input.assistantMemoryAppendToolAvailable,
       assistantMemoryDailyPath: input.assistantMemoryDailyPath,
       assistantMemoryFileEditToolsAvailable: input.assistantMemoryFileEditToolsAvailable,
       assistantMemoryLongTermPath: input.assistantMemoryLongTermPath,
@@ -1058,6 +1063,7 @@ function isAssistantSystemPromptOutboundReplyChannel(channel: string | null): bo
 
 function buildAssistantMemoryGuidanceText(
   input: {
+    assistantMemoryAppendToolAvailable: boolean
     assistantMemoryDailyPath: string
     assistantMemoryFileEditToolsAvailable: boolean
     assistantMemoryLongTermPath: string
@@ -1082,8 +1088,15 @@ function buildAssistantMemoryGuidanceText(
     input.assistantMemoryFileEditToolsAvailable
   ) {
     return [
-      'Assistant memory recall tools and direct Markdown memory-file edit tools are exposed in this session. Use `assistant.memory.search`/`assistant.memory.get` for recall and `assistant.memory.file.read`/`assistant.memory.file.write` for normal Markdown memory edits.',
+      input.assistantMemoryAppendToolAvailable
+        ? 'Assistant memory recall tools and direct Markdown memory-file edit tools are exposed in this session. Use `assistant.memory.search`/`assistant.memory.get` for recall, `assistant.memory.file.append` for safe additive memory bullets, and `assistant.memory.file.read`/`assistant.memory.file.write` when you truly need full-file Markdown edits.'
+        : 'Assistant memory recall tools and direct Markdown memory-file edit tools are exposed in this session. Use `assistant.memory.search`/`assistant.memory.get` for recall and `assistant.memory.file.read`/`assistant.memory.file.write` for Markdown memory-file edits.',
       'When the current request depends on prior preferences, ongoing goals, recurring health context, or earlier plans, search assistant memory before answering.',
+      input.assistantMemoryAppendToolAvailable
+        ? 'Prefer `assistant.memory.file.append` for straightforward new memory. It adds one bullet to the end of the target section without rewriting the whole file.'
+        : 'Read the latest memory file before changing it so your edit stays grounded in the current Markdown.',
+      'Treat `assistant.memory.file.write` as dangerous: it replaces the entire file and can accidentally delete or overwrite older memories if you write stale content.',
+      'Use `assistant.memory.file.write` only for deliberate edits, removals, or restructures that append cannot express, and read the latest file immediately before any full write.',
       `Use \`${input.rawCommand} assistant memory search|get\` only as a fallback when the bound assistant-memory recall tools are unavailable in this session.`,
       'You do not need a separate remember request first. If something is clearly useful for future continuity, update the appropriate Markdown memory file directly.',
       ...sharedLines,

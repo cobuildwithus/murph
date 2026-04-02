@@ -5,25 +5,38 @@ import path from 'node:path'
 import { z } from 'zod'
 import {
   assistantCronScheduleInputSchema,
+  assistantMemoryLongTermSectionValues,
   assistantMemoryQueryScopeValues,
   assistantMemoryVisibleSectionValues,
 } from './assistant-cli-contracts.js'
 import {
   getAssistantMemory,
+  redactAssistantMemoryRecord,
+  redactAssistantMemorySearchHit,
   resolveAssistantMemoryStoragePaths,
   searchAssistantMemory,
 } from './assistant/memory.js'
 import {
   createDefaultDailyMemoryDocument,
   createDefaultLongTermMemoryDocument,
+  findOrCreateSection,
+  getDailySectionBullets,
+  getSectionBullets,
   parseMarkdownDocument,
   renderMarkdownDocument,
 } from './assistant/memory/storage-format.js'
 import { withAssistantMemoryWriteLock } from './assistant/memory/locking.js'
-import { longTermMemorySections } from './assistant/memory/text.js'
+import {
+  buildDailyMemoryMapKey,
+  deriveLongTermReplaceKey,
+  isLongTermSection,
+  longTermMemorySections,
+  normalizeMemoryLookup,
+} from './assistant/memory/text.js'
 import {
   ensureAssistantStateDirectory,
   isMissingFileError,
+  normalizeNullableString,
   writeTextFileAtomic,
 } from './assistant/shared.js'
 import {
@@ -74,6 +87,7 @@ const shareEntitySelectorSchema = z
     message: 'Provide either an id or slug.',
   })
 const assistantMemoryQueryScopeSchema = z.enum(assistantMemoryQueryScopeValues)
+const assistantMemoryLongTermSectionSchema = z.enum(assistantMemoryLongTermSectionValues)
 const assistantMemoryVisibleSectionSchema = z.enum(assistantMemoryVisibleSectionValues)
 const assistantMemoryMarkdownFilePathSchema = z
   .string()
@@ -252,15 +266,20 @@ function createAssistantRuntimeToolDefinitions(
         text: 'tone',
         limit: 5,
       },
-      execute: ({ text, scope, section, limit }) =>
-        searchAssistantMemory({
+      execute: async ({ text, scope, section, limit }) => {
+        const result = await searchAssistantMemory({
           vault: input.vault,
           text,
           scope,
           section: section ?? null,
           limit,
           includeSensitiveHealthContext: allowSensitiveHealthContextForAssistantTools(input),
-        }),
+        })
+        return {
+          ...result,
+          results: result.results.map(redactAssistantMemorySearchHit),
+        }
+      },
     }),
     defineAssistantTool({
       name: 'assistant.memory.get',
@@ -272,12 +291,14 @@ function createAssistantRuntimeToolDefinitions(
       inputExample: {
         id: 'long-term:preferences%7Cslot%3Aassistant-style%3Atone',
       },
-      execute: ({ id }) =>
-        getAssistantMemory({
+      execute: async ({ id }) =>
+        redactAssistantMemoryRecord(
+          await getAssistantMemory({
           id,
           vault: input.vault,
           includeSensitiveHealthContext: allowSensitiveHealthContextForAssistantTools(input),
-        }),
+          }),
+        ),
     }),
     defineAssistantTool({
       name: 'assistant.memory.file.read',
@@ -429,9 +450,32 @@ function createAssistantRuntimeToolDefinitions(
   return [
     ...readOnlyTools,
     defineAssistantTool({
+      name: 'assistant.memory.file.append',
+      description:
+        'Safely append one new bullet to an assistant memory Markdown section without rewriting the whole file. Use this for straightforward new memory; use the dangerous full-file write tool only for deliberate edits, removals, or restructures after reading the latest file.',
+      inputSchema: z.object({
+        path: assistantMemoryMarkdownFilePathSchema,
+        section: assistantMemoryVisibleSectionSchema.optional(),
+        text: z.string().min(1),
+      }),
+      inputExample: {
+        path: 'MEMORY.md',
+        section: 'Identity',
+        text: 'Call the user Alex.',
+      },
+      execute: ({ path: candidatePath, section, text }) =>
+        appendAssistantMemoryMarkdownFile(
+          input.vault,
+          candidatePath,
+          text,
+          section,
+          allowSensitiveHealthContextForAssistantTools(input),
+        ),
+    }),
+    defineAssistantTool({
       name: 'assistant.memory.file.write',
       description:
-        'Replace one assistant memory Markdown file (`MEMORY.md` or `memory/YYYY-MM-DD.md`) with the provided UTF-8 text.',
+        'Dangerous: replace one entire assistant memory Markdown file (`MEMORY.md` or `memory/YYYY-MM-DD.md`) with the provided UTF-8 text. Read the latest file immediately before using this, because a stale write can accidentally delete older memories.',
       inputSchema: z.object({
         path: assistantMemoryMarkdownFilePathSchema,
         text: z.string().min(1),
@@ -1434,6 +1478,123 @@ async function writeAssistantMemoryMarkdownFile(
   }
 }
 
+async function appendAssistantMemoryMarkdownFile(
+  vaultRoot: string,
+  candidatePath: string,
+  text: string,
+  section: z.infer<typeof assistantMemoryVisibleSectionSchema> | undefined,
+  allowSensitiveHealthContext = false,
+): Promise<{
+  appended: boolean
+  path: string
+  section: z.infer<typeof assistantMemoryVisibleSectionSchema>
+  totalBullets: number
+}> {
+  const resolved = resolveAssistantMemoryMarkdownFile(vaultRoot, candidatePath)
+  await ensureAssistantStateDirectory(path.dirname(resolved.absolutePath))
+  const normalizedText = normalizeAssistantMemoryAppendText(text)
+
+  return await withAssistantMemoryWriteLock(
+    resolveAssistantMemoryStoragePaths(vaultRoot),
+    async () => {
+      const existingText = await readAssistantMemoryMarkdownFileForAppend(resolved)
+      const document = parseMarkdownDocument(existingText)
+
+      if (resolved.relativePath === 'MEMORY.md') {
+        const targetSection = resolveAssistantLongTermAppendSection(
+          section,
+          allowSensitiveHealthContext,
+        )
+        const target = findOrCreateSection(document, targetSection)
+        const existingBullets = getSectionBullets(target, targetSection)
+        const key = normalizeMemoryLookup(normalizedText)
+        if (!key) {
+          throw new VaultCliError(
+            'ASSISTANT_MEMORY_FILE_APPEND_INVALID',
+            'Assistant memory append text must be one non-empty bullet line.',
+          )
+        }
+
+        const existingExact = existingBullets.find((bullet) => bullet.key === key)
+        if (existingExact) {
+          return {
+            appended: false,
+            path: resolved.relativePath,
+            section: targetSection,
+            totalBullets: existingBullets.length,
+          }
+        }
+
+        const replaceKey = deriveLongTermReplaceKey(targetSection, normalizedText)
+        if (
+          replaceKey &&
+          existingBullets.some((bullet) => bullet.replaceKey === replaceKey)
+        ) {
+          throw new VaultCliError(
+            'ASSISTANT_MEMORY_FILE_APPEND_REQUIRES_EDIT',
+            `Assistant memory section \`${targetSection}\` already has a conflicting bullet for this slot. Read the latest file and use \`assistant.memory.file.write\` only for the deliberate edit.`,
+          )
+        }
+
+        target.lines = appendAssistantMemoryBulletLine(target.lines, normalizedText)
+        const rendered = validateAssistantMemoryMarkdownWrite({
+          allowSensitiveHealthContext,
+          allowExistingHiddenHealthContext: !allowSensitiveHealthContext,
+          path: resolved.relativePath,
+          text: renderMarkdownDocument(document),
+        })
+        await writeTextFileAtomic(resolved.absolutePath, rendered)
+
+        return {
+          appended: true,
+          path: resolved.relativePath,
+          section: targetSection,
+          totalBullets: existingBullets.length + 1,
+        }
+      }
+
+      const targetSection = resolveAssistantDailyAppendSection(
+        section,
+        allowSensitiveHealthContext,
+      )
+      const target = findOrCreateSection(document, targetSection)
+      const existingBullets = getDailySectionBullets(target)
+      const key = buildDailyMemoryMapKey(normalizedText)
+      if (!key) {
+        throw new VaultCliError(
+          'ASSISTANT_MEMORY_FILE_APPEND_INVALID',
+          'Assistant memory append text must be one non-empty bullet line.',
+        )
+      }
+
+      const existingExact = existingBullets.find((bullet) => bullet.key === key)
+      if (existingExact) {
+        return {
+          appended: false,
+          path: resolved.relativePath,
+          section: targetSection,
+          totalBullets: existingBullets.length,
+        }
+      }
+
+      target.lines = appendAssistantMemoryBulletLine(target.lines, normalizedText)
+      const rendered = validateAssistantMemoryMarkdownWrite({
+        allowSensitiveHealthContext,
+        path: resolved.relativePath,
+        text: renderMarkdownDocument(document),
+      })
+      await writeTextFileAtomic(resolved.absolutePath, rendered)
+
+      return {
+        appended: true,
+        path: resolved.relativePath,
+        section: targetSection,
+        totalBullets: existingBullets.length + 1,
+      }
+    },
+  )
+}
+
 function resolveAssistantMemoryMarkdownFile(
   vaultRoot: string,
   candidatePath: string,
@@ -1492,8 +1653,100 @@ function sanitizeAssistantMemoryMarkdownForSharedContext(
   return renderMarkdownDocument(document)
 }
 
+async function readAssistantMemoryMarkdownFileForAppend(input: {
+  absolutePath: string
+  defaultText: string
+}): Promise<string> {
+  try {
+    return await readFile(input.absolutePath, 'utf8')
+  } catch (error) {
+    if (!isMissingFileError(error)) {
+      throw error
+    }
+    return input.defaultText
+  }
+}
+
+function resolveAssistantLongTermAppendSection(
+  section: z.infer<typeof assistantMemoryVisibleSectionSchema> | undefined,
+  allowSensitiveHealthContext: boolean,
+): z.infer<typeof assistantMemoryLongTermSectionSchema> {
+  if (!section || !isLongTermSection(section)) {
+    throw new VaultCliError(
+      'ASSISTANT_MEMORY_FILE_APPEND_INVALID',
+      'Appending to `MEMORY.md` requires one long-term section such as `Identity` or `Preferences`.',
+    )
+  }
+
+  if (section === 'Health context' && !allowSensitiveHealthContext) {
+    throw new VaultCliError(
+      'ASSISTANT_MEMORY_FILE_ACCESS_DENIED',
+      'Shared assistant contexts must not append durable health context into `MEMORY.md`.',
+    )
+  }
+
+  return section
+}
+
+function resolveAssistantDailyAppendSection(
+  section: z.infer<typeof assistantMemoryVisibleSectionSchema> | undefined,
+  allowSensitiveHealthContext: boolean,
+): 'Notes' {
+  if (!allowSensitiveHealthContext) {
+    throw new VaultCliError(
+      'ASSISTANT_MEMORY_FILE_ACCESS_DENIED',
+      'Daily assistant memory file access requires a private assistant context.',
+    )
+  }
+
+  if (section && section !== 'Notes') {
+    throw new VaultCliError(
+      'ASSISTANT_MEMORY_FILE_APPEND_INVALID',
+      'Daily assistant memory appends must target the `Notes` section.',
+    )
+  }
+
+  return 'Notes'
+}
+
+function normalizeAssistantMemoryAppendText(text: string): string {
+  if (/\r|\n/u.test(text)) {
+    throw new VaultCliError(
+      'ASSISTANT_MEMORY_FILE_APPEND_INVALID',
+      'Assistant memory append accepts exactly one bullet line at a time.',
+    )
+  }
+
+  const normalized = normalizeNullableString(text.replace(/^\s*-\s+/u, ''))
+  if (!normalized || /^##\s+/u.test(normalized)) {
+    throw new VaultCliError(
+      'ASSISTANT_MEMORY_FILE_APPEND_INVALID',
+      'Assistant memory append text must be one non-empty bullet line.',
+    )
+  }
+
+  return normalized
+}
+
+function appendAssistantMemoryBulletLine(
+  existingLines: string[],
+  bulletText: string,
+): string[] {
+  const nextLines = [...existingLines]
+  while (nextLines.length > 0 && nextLines[nextLines.length - 1] === '') {
+    nextLines.pop()
+  }
+
+  if (nextLines.length > 0) {
+    nextLines.push('')
+  }
+  nextLines.push(`- ${bulletText}`)
+  return nextLines
+}
+
 function validateAssistantMemoryMarkdownWrite(input: {
   allowSensitiveHealthContext: boolean
+  allowExistingHiddenHealthContext?: boolean
   path: string
   text: string
 }): string {
@@ -1514,7 +1767,7 @@ function validateAssistantMemoryMarkdownWrite(input: {
     if (!input.allowSensitiveHealthContext) {
       const healthSection = document.sections.find((section) => section.heading === 'Health context')
       const hasHealthBullets = healthSection?.lines.some((line) => /^\s*-\s+\S/u.test(line)) ?? false
-      if (hasHealthBullets) {
+      if (hasHealthBullets && !input.allowExistingHiddenHealthContext) {
         throw new VaultCliError(
           'ASSISTANT_MEMORY_FILE_ACCESS_DENIED',
           'Shared assistant contexts must not write durable health context into `MEMORY.md`.',
