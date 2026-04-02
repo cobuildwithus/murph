@@ -438,6 +438,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     if (result.status === 'blocked') {
       return createBlockedGroupOutcome({
         captureCount: input.context.captureCount,
+        errorCode: result.blocked?.code ?? null,
         reason: result.blocked?.message ?? 'assistant reply was blocked',
       })
     }
@@ -605,6 +606,7 @@ function createSkippedGroupOutcome(input: {
 
 function createBlockedGroupOutcome(input: {
   captureCount: number
+  errorCode: string | null
   reason: string
 }): AssistantAutoReplyGroupOutcome {
   return {
@@ -612,14 +614,22 @@ function createBlockedGroupOutcome(input: {
     artifact: { kind: 'none' },
     event: {
       details: input.reason,
-      type: 'capture.reply-skipped',
+      errorCode: input.errorCode ?? undefined,
+      safeDetails: summarizeBlockedAutoReply(input.errorCode),
+      type: 'capture.reply-failed',
     },
     kind: 'blocked',
     stopScanning: false,
     summary: createAssistantAutoReplyOutcomeSummary({
-      skipped: input.captureCount,
+      failed: input.captureCount,
     }),
   }
+}
+
+function summarizeBlockedAutoReply(errorCode: string | null): string {
+  return errorCode
+    ? `assistant reply blocked by write safety check (${errorCode})`
+    : 'assistant reply blocked by write safety check'
 }
 
 function createDeferredGroupOutcome(input: {

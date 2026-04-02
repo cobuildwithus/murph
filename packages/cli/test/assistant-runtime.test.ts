@@ -6317,6 +6317,110 @@ test('scanAssistantAutoReplyOnce keeps scanning after a failed Telegram delivery
   assert.equal(successArtifact.captureId, 'cap-pass')
 })
 
+test('scanAssistantAutoReplyOnce records canonical write guard blocks as reply failures', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-auto-reply-guard-block-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  runtimeMocks.executeAssistantProviderTurn.mockRejectedValueOnce(
+    new VaultCliError(
+      'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED',
+      'Blocked canonical write guard because audited write state is corrupted (invalid_write_operation_metadata at .runtime/operations/op_demo.json). Use vault-cli or audited core mutations for canonical files.',
+    ),
+  )
+
+  const events: Array<{
+    captureId?: string
+    details?: string
+    errorCode?: string
+    safeDetails?: string
+    type: string
+  }> = []
+
+  const result = await scanAssistantAutoReplyOnce({
+    afterCursor: null,
+    autoReplyPrimed: true,
+    enabledChannels: ['telegram'],
+    inboxServices: {
+      async list() {
+        return {
+          items: [
+            {
+              captureId: 'cap-guard-blocked',
+              source: 'telegram',
+              accountId: 'bot',
+              externalId: 'update:guard-blocked',
+              threadId: '123',
+              threadTitle: 'Direct',
+              actorId: '111',
+              actorName: 'Bob',
+              actorIsSelf: false,
+              occurredAt: '2026-03-18T09:00:00Z',
+              receivedAt: null,
+              text: 'please update my morning drink',
+              attachmentCount: 0,
+              envelopePath: 'raw/inbox/guard-blocked.json',
+              eventId: 'evt-guard-blocked',
+              promotions: [],
+            },
+          ],
+        }
+      },
+      async show() {
+        return {
+          capture: {
+            captureId: 'cap-guard-blocked',
+            source: 'telegram',
+            accountId: 'bot',
+            externalId: 'update:guard-blocked',
+            threadId: '123',
+            threadTitle: 'Direct',
+            threadIsDirect: true,
+            actorId: '111',
+            actorName: 'Bob',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:00:00Z',
+            receivedAt: null,
+            text: 'please update my morning drink',
+            attachmentCount: 0,
+            envelopePath: 'raw/inbox/guard-blocked.json',
+            eventId: 'evt-guard-blocked',
+            createdAt: '2026-03-18T09:00:00Z',
+            promotions: [],
+            attachments: [],
+          },
+        }
+      },
+    } as any,
+    onEvent(event) {
+      events.push(event)
+    },
+    vault: vaultRoot,
+  })
+
+  assert.deepEqual(result, {
+    considered: 1,
+    failed: 1,
+    replied: 0,
+    skipped: 0,
+  })
+  assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 1)
+  assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 0)
+  assert.equal(
+    events.some(
+      (event) =>
+        event.type === 'capture.reply-failed' &&
+        event.captureId === 'cap-guard-blocked' &&
+        event.errorCode === 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED' &&
+        event.safeDetails ===
+          'assistant reply blocked by write safety check (ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED)' &&
+        event.details?.includes('Blocked canonical write guard'),
+    ),
+    true,
+  )
+})
+
 test('scanAssistantAutoReplyOnce records provider quota failures with a safe summary', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-auto-reply-usage-limit-'))
   const vaultRoot = path.join(parent, 'vault')
