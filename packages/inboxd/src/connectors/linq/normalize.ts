@@ -116,7 +116,7 @@ async function buildLinqAttachments(
   const attachments: InboundAttachment[] = [];
 
   for (const [index, part] of (parts ?? []).entries()) {
-    if (part.type !== "media") {
+    if (!isLinqAttachmentPart(part)) {
       continue;
     }
 
@@ -126,12 +126,14 @@ async function buildLinqAttachments(
       signal,
       attachmentDownloadTimeoutMs,
     );
-    const fileName = normalizeTextValue(part.filename ?? null) ?? inferAttachmentFileName(part);
     const mime = normalizeTextValue(part.mime_type ?? null);
+    const fileName = normalizeTextValue(part.filename ?? null)
+      ?? inferAttachmentFileName(part)
+      ?? inferFallbackAttachmentFileName(part, mime, index);
 
     attachments.push({
       externalId: normalizeTextValue(part.attachment_id ?? null) ?? `part:${index + 1}`,
-      kind: inferLinqAttachmentKind(mime, fileName),
+      kind: inferLinqAttachmentKind(part.type, mime, fileName),
       mime,
       fileName,
       byteSize: normalizeAttachmentByteSize(part.size, data),
@@ -238,17 +240,36 @@ function inferAttachmentFileName(part: LinqMediaPart): string | null {
   }
 }
 
+function inferFallbackAttachmentFileName(
+  part: LinqMediaPart,
+  mime: string | null,
+  index: number,
+): string | null {
+  if (part.type !== "voice_memo") {
+    return null;
+  }
+
+  const suffix = inferFileExtensionFromMime(mime) ?? "m4a";
+  const identifier = normalizeTextValue(part.attachment_id ?? null) ?? `part-${index + 1}`;
+  return `voice-memo-${identifier}.${suffix}`;
+}
+
 function inferLinqAttachmentKind(
+  partType: LinqMediaPart["type"],
   mime: string | null,
   fileName: string | null,
 ): InboundAttachment["kind"] {
+  if (partType === "voice_memo") {
+    return "audio";
+  }
+
   const lowerMime = String(mime ?? "").toLowerCase();
   const lowerName = String(fileName ?? "").toLowerCase();
 
-  if (lowerMime.startsWith("image/") || /\.(gif|heic|heif|jpe?g|png|webp)$/u.test(lowerName)) {
+  if (lowerMime.startsWith("image/") || /\.(bmp|gif|heic|heif|jpe?g|png|tiff?|webp)$/u.test(lowerName)) {
     return "image";
   }
-  if (lowerMime.startsWith("audio/") || /\.(aac|m4a|mp3|ogg|wav)$/u.test(lowerName)) {
+  if (lowerMime.startsWith("audio/") || /\.(aac|aif|aiff|amr|caf|m4a|mp3|ogg|wav)$/u.test(lowerName)) {
     return "audio";
   }
   if (lowerMime.startsWith("video/") || /\.(m4v|mov|mp4|webm)$/u.test(lowerName)) {
@@ -262,6 +283,42 @@ function inferLinqAttachmentKind(
   }
 
   return "other";
+}
+
+function inferFileExtensionFromMime(value: string | null): string | null {
+  const normalized = String(value ?? "").trim().toLowerCase();
+
+  switch (normalized) {
+    case "audio/aac":
+    case "audio/x-aac":
+      return "aac";
+    case "audio/aiff":
+    case "audio/x-aiff":
+      return "aiff";
+    case "audio/amr":
+      return "amr";
+    case "audio/caf":
+    case "audio/x-caf":
+      return "caf";
+    case "audio/m4a":
+    case "audio/mp4":
+    case "audio/x-m4a":
+      return "m4a";
+    case "audio/mpeg":
+      return "mp3";
+    case "audio/ogg":
+      return "ogg";
+    case "audio/wav":
+    case "audio/wave":
+    case "audio/x-wav":
+      return "wav";
+    default:
+      return null;
+  }
+}
+
+function isLinqAttachmentPart(part: LinqMessagePart): part is LinqMediaPart {
+  return part.type === "media" || part.type === "voice_memo";
 }
 
 function normalizeAttachmentByteSize(

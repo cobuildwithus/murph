@@ -112,6 +112,120 @@ test("normalizeLinqWebhookEvent falls back to created_at when received_at is mis
   assert.equal(capture.receivedAt, "2026-03-24T10:00:05.000Z");
 });
 
+test("normalizeLinqWebhookEvent treats multiple media parts and voice memos as attachments", async () => {
+  const capture = await normalizeLinqWebhookEvent({
+    defaultAccountId: "hbidx:phone:v1:test",
+    downloadDriver: {
+      async downloadUrl(url) {
+        return new TextEncoder().encode(`downloaded:${url}`);
+      },
+    },
+    event: {
+      api_version: "v3",
+      created_at: "2026-04-02T04:00:00.000Z",
+      data: {
+        chat_id: "chat_attachments",
+        from: "+15551234567",
+        is_from_me: false,
+        message: {
+          id: "msg_attachments",
+          parts: [
+            {
+              filename: "photo-1.heic",
+              mime_type: "image/heic",
+              size: 1024,
+              type: "media",
+              url: "https://cdn.linqapp.com/media/photo-1.heic",
+            },
+            {
+              filename: "photo-2.jpg",
+              mime_type: "image/jpeg",
+              size: 2048,
+              type: "media",
+              url: "https://cdn.linqapp.com/media/photo-2.jpg",
+            },
+            {
+              attachment_id: "att_voice_1",
+              mime_type: "audio/m4a",
+              size: 4096,
+              type: "voice_memo",
+              url: "https://cdn.linqapp.com/media/voice-1.m4a",
+            },
+          ],
+        },
+        received_at: "2026-04-02T04:00:01.000Z",
+        recipient_phone: "+15557654321",
+        service: "iMessage",
+      },
+      event_id: "evt_attachments",
+      event_type: "message.received",
+      trace_id: "trace_attachments",
+    },
+  });
+
+  assert.equal(capture.attachments.length, 3);
+  assert.deepEqual(
+    capture.attachments.map((attachment) => attachment.kind),
+    ["image", "image", "audio"],
+  );
+  assert.deepEqual(
+    capture.attachments.map((attachment) => attachment.fileName),
+    ["photo-1.heic", "photo-2.jpg", "voice-1.m4a"],
+  );
+  assert.deepEqual(
+    capture.attachments.map((attachment) => attachment.byteSize),
+    [1024, 2048, 4096],
+  );
+  assert.equal(
+    capture.attachments.every((attachment) => attachment.data instanceof Uint8Array),
+    true,
+  );
+});
+
+test("normalizeLinqWebhookEvent keeps metadata-only voice memo attachments when downloads fail", async () => {
+  const capture = await normalizeLinqWebhookEvent({
+    defaultAccountId: "hbidx:phone:v1:test",
+    downloadDriver: {
+      async downloadUrl() {
+        throw new Error("download failed");
+      },
+    },
+    event: {
+      api_version: "v3",
+      created_at: "2026-04-02T04:00:00.000Z",
+      data: {
+        chat_id: "chat_voice",
+        from: "+15551234567",
+        is_from_me: false,
+        message: {
+          id: "msg_voice",
+          parts: [
+            {
+              mime_type: "audio/amr",
+              size: 512,
+              type: "voice_memo",
+              url: "https://cdn.linqapp.com/media/voice-2.amr",
+            },
+          ],
+        },
+      },
+      event_id: "evt_voice",
+      event_type: "message.received",
+    },
+  });
+
+  assert.deepEqual(capture.attachments, [
+    {
+      byteSize: 512,
+      data: null,
+      externalId: "part:1",
+      fileName: "voice-2.amr",
+      kind: "audio",
+      mime: "audio/amr",
+    },
+  ]);
+});
+
 test("createLinqWebhookConnector accepts signed webhook requests and emits captures", async () => {
   const port = await reservePort();
   const controller = new AbortController();
