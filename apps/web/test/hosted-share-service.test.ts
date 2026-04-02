@@ -122,30 +122,20 @@ describe("hosted share service", () => {
     });
 
     const result = await acceptHostedShareLink({
+      member: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+      } as never,
       prisma: prisma as never,
       shareCode: created.shareCode,
-      sessionRecord: {
-        member: {
-          billingStatus: HostedBillingStatus.active,
-          id: "member_123",
-        },
-        session: {
-          expiresAt: new Date("2026-04-01T00:00:00.000Z"),
-        },
-      } as never,
     });
     const pageData = await buildHostedSharePageData({
+      authenticatedMember: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+      } as never,
       prisma: prisma as never,
       shareCode: created.shareCode,
-      sessionRecord: {
-        member: {
-          billingStatus: HostedBillingStatus.active,
-          id: "member_123",
-        },
-        session: {
-          expiresAt: new Date("2026-04-01T00:00:00.000Z"),
-        },
-      } as never,
     });
 
     expect(result.imported).toBe(false);
@@ -162,17 +152,12 @@ describe("hosted share service", () => {
       shareCode: created.shareCode,
     });
     const finalizedPageData = await buildHostedSharePageData({
+      authenticatedMember: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+      } as never,
       prisma: prisma as never,
       shareCode: created.shareCode,
-      sessionRecord: {
-        member: {
-          billingStatus: HostedBillingStatus.active,
-          id: "member_123",
-        },
-        session: {
-          expiresAt: new Date("2026-04-01T00:00:00.000Z"),
-        },
-      } as never,
     });
 
     expect(finalizedPageData.stage).toBe("consumed");
@@ -195,17 +180,12 @@ describe("hosted share service", () => {
     });
 
     await expect(acceptHostedShareLink({
+      member: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+      } as never,
       prisma: prisma as never,
       shareCode: created.shareCode,
-      sessionRecord: {
-        member: {
-          billingStatus: HostedBillingStatus.active,
-          id: "member_123",
-        },
-        session: {
-          expiresAt: new Date("2026-04-01T00:00:00.000Z"),
-        },
-      } as never,
     })).resolves.toMatchObject({
       imported: false,
       pending: true,
@@ -214,17 +194,12 @@ describe("hosted share service", () => {
     expect(prisma.rows[0]?.consumedAt).toBeNull();
 
     const retried = await acceptHostedShareLink({
+      member: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+      } as never,
       prisma: prisma as never,
       shareCode: created.shareCode,
-      sessionRecord: {
-        member: {
-          billingStatus: HostedBillingStatus.active,
-          id: "member_123",
-        },
-        session: {
-          expiresAt: new Date("2026-04-01T00:00:00.000Z"),
-        },
-      } as never,
     });
 
     expect(retried.imported).toBe(false);
@@ -240,17 +215,12 @@ describe("hosted share service", () => {
     });
 
     const finalized = await acceptHostedShareLink({
+      member: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+      } as never,
       prisma: prisma as never,
       shareCode: created.shareCode,
-      sessionRecord: {
-        member: {
-          billingStatus: HostedBillingStatus.active,
-          id: "member_123",
-        },
-        session: {
-          expiresAt: new Date("2026-04-01T00:00:00.000Z"),
-        },
-      } as never,
     });
 
     expect(finalized.alreadyImported).toBe(true);
@@ -276,17 +246,12 @@ describe("hosted share service", () => {
     });
 
     await acceptHostedShareLink({
+      member: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+      } as never,
       prisma: prisma as never,
       shareCode: created.shareCode,
-      sessionRecord: {
-        member: {
-          billingStatus: HostedBillingStatus.active,
-          id: "member_123",
-        },
-        session: {
-          expiresAt: new Date("2026-04-01T00:00:00.000Z"),
-        },
-      } as never,
     });
 
     await expect(readHostedSharePackByReference({

@@ -3,10 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import type { HostedPrivyIdentity } from "@/src/lib/hosted-onboarding/privy";
 
-const mocks = vi.hoisted(() => ({
-  createHostedSession: vi.fn(),
-}));
-
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingEnvironment: () => ({
     encryptionKeyVersion: "v1",
@@ -18,8 +14,6 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     privyAppId: "cm_app_123",
     privyVerificationKey: "privy-verification-key",
     publicBaseUrl: "https://join.example.test",
-    sessionCookieName: "hosted_session",
-    sessionTtlDays: 30,
     stripeBillingMode: "payment",
     stripePriceId: "price_123",
     stripeSecretKey: "sk_test_123",
@@ -32,17 +26,6 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   }),
   requireHostedOnboardingPublicBaseUrl: () => "https://join.example.test",
 }));
-
-vi.mock("@/src/lib/hosted-onboarding/session", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/session")>(
-    "@/src/lib/hosted-onboarding/session",
-  );
-
-  return {
-    ...actual,
-    createHostedSession: mocks.createHostedSession,
-  };
-});
 
 import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/member-service";
 
@@ -137,14 +120,9 @@ function makeInvite(member: ReturnType<typeof makeMember>, overrides: Record<str
 describe("completeHostedPrivyVerification", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.createHostedSession.mockResolvedValue({
-      expiresAt: new Date("2026-04-25T12:00:00.000Z"),
-      sessionId: "session_123",
-      token: "session-token",
-    });
   });
 
-  it("binds a verified Privy identity onto an invite-bound member and creates a hosted session", async () => {
+  it("binds a verified Privy identity onto an invite-bound member", async () => {
     const inviteMember = makeMember();
     const invite = makeInvite(inviteMember);
     const prisma = asCompleteHostedPrivyVerificationPrisma({
@@ -269,7 +247,6 @@ describe("completeHostedPrivyVerification", () => {
         status: HostedInviteStatus.authenticated,
       },
     });
-    expect(mocks.createHostedSession).not.toHaveBeenCalled();
     expect(result.joinUrl).toBe("https://join.example.test/join/public-invite-code");
     expect(result.inviteCode).toBe("public-invite-code");
     expect(result.stage).toBe("checkout");
@@ -323,7 +300,7 @@ describe("completeHostedPrivyVerification", () => {
     expect(result.stage).toBe("active");
   });
 
-  it("preserves suspension and refuses to create a new session for a suspended invited member", async () => {
+  it("preserves suspension for a suspended invited member", async () => {
     const suspendedMember = makeMember({
       billingStatus: HostedBillingStatus.active,
       phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
@@ -369,7 +346,6 @@ describe("completeHostedPrivyVerification", () => {
       }),
     });
     expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
-    expect(mocks.createHostedSession).not.toHaveBeenCalled();
   });
 
   it("refuses a returning suspended member during public Privy verification before issuing a fresh invite", async () => {
@@ -418,7 +394,6 @@ describe("completeHostedPrivyVerification", () => {
 
     expect(prisma.hostedMember.create).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.create).not.toHaveBeenCalled();
-    expect(mocks.createHostedSession).not.toHaveBeenCalled();
   });
 
   it("rejects a verified phone that conflicts across two existing hosted members", async () => {
@@ -468,7 +443,6 @@ describe("completeHostedPrivyVerification", () => {
 
     expect(prisma.hostedMember.create).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.create).not.toHaveBeenCalled();
-    expect(mocks.createHostedSession).not.toHaveBeenCalled();
   });
 
   it("rejects invite verification when the Privy phone number does not match the invited number", async () => {
@@ -501,7 +475,6 @@ describe("completeHostedPrivyVerification", () => {
     });
 
     expect(prisma.hostedMember.update).not.toHaveBeenCalled();
-    expect(mocks.createHostedSession).not.toHaveBeenCalled();
   });
 
   it("rejects invite verification when the existing member wallet conflicts with the verified Privy wallet", async () => {
@@ -541,7 +514,6 @@ describe("completeHostedPrivyVerification", () => {
     });
 
     expect(prisma.hostedMember.update).not.toHaveBeenCalled();
-    expect(mocks.createHostedSession).not.toHaveBeenCalled();
   });
 });
 

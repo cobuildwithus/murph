@@ -1,4 +1,4 @@
-import { verifyIdentityToken } from "@privy-io/node";
+import { verifyAccessToken, verifyIdentityToken } from "@privy-io/node";
 import { cookies } from "next/headers";
 
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
@@ -6,13 +6,10 @@ import {
   HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE,
   type HostedPrivyLinkedAccountContainer,
   type HostedPrivyPhoneAccount,
-  type PrivyLinkedAccountLike,
   type HostedPrivyWalletAccount,
-  resolveHostedPrivyLinkedAccounts,
   resolveHostedPrivyLinkedAccountState,
 } from "./privy-shared";
 import { getHostedOnboardingEnvironment } from "./runtime";
-import type { HostedSessionRecord } from "./session";
 
 export interface HostedPrivyUser extends HostedPrivyLinkedAccountContainer {
   id: string;
@@ -31,9 +28,13 @@ export interface HostedPrivyIdentity {
   wallet: HostedPrivyWalletAccount;
 }
 
-export interface HostedPrivySessionUser {
-  linkedAccounts: PrivyLinkedAccountLike[];
-  verifiedPrivyUser: HostedPrivyUser;
+export interface HostedPrivyAccessTokenClaims {
+  appId: string;
+  expiration: number;
+  issuedAt: number;
+  issuer: string;
+  sessionId: string;
+  userId: string;
 }
 
 export async function requireHostedPrivyIdentity(identityToken: string): Promise<HostedPrivyIdentity> {
@@ -84,36 +85,6 @@ export async function requireHostedPrivyCompletionIdentityFromRequest(request: R
   } catch (error) {
     throw remapHostedPrivyCompletionLagError(error);
   }
-}
-
-export async function requireHostedPrivyUserForSession(
-  cookieStore: HostedPrivyCookieStore,
-  hostedSession: HostedSessionRecord,
-): Promise<HostedPrivySessionUser> {
-  const identityToken = readHostedPrivyIdentityTokenFromCookieStore(cookieStore);
-
-  if (!identityToken) {
-    throw hostedOnboardingError({
-      code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
-      message: "Refresh the page and restore the matching Privy session before continuing.",
-      httpStatus: 401,
-    });
-  }
-
-  const verifiedPrivyUser = await verifyHostedPrivyIdentityToken(identityToken);
-
-  if (!hostedSession.member.privyUserId || verifiedPrivyUser.id !== hostedSession.member.privyUserId) {
-    throw hostedOnboardingError({
-      code: "PRIVY_SESSION_MISMATCH",
-      message: "This Privy session does not match the current hosted account. Reopen the latest invite and try again.",
-      httpStatus: 403,
-    });
-  }
-
-  return {
-    linkedAccounts: resolveHostedPrivyLinkedAccounts(verifiedPrivyUser),
-    verifiedPrivyUser,
-  };
 }
 
 export async function verifyHostedPrivyIdentityToken(identityToken: string): Promise<HostedPrivyUser> {
@@ -188,6 +159,50 @@ export function readHostedPrivyIdentityTokenFromRequest(request: Request): strin
   return normalizeEnvValue(request.headers.get(HOSTED_PRIVY_IDENTITY_TOKEN_HEADER_NAME));
 }
 
+export function readHostedPrivyAccessTokenFromRequest(request: Request): string | null {
+  return normalizeHostedPrivyAccessToken(request.headers.get("authorization"));
+}
+
+export async function verifyHostedPrivyAccessToken(accessToken: string): Promise<HostedPrivyAccessTokenClaims> {
+  const token = accessToken.trim();
+
+  if (!token) {
+    throw hostedOnboardingError({
+      code: "AUTH_REQUIRED",
+      message: "Verify your phone to continue.",
+      httpStatus: 401,
+    });
+  }
+
+  const { appId, verificationKey } = requireHostedPrivyVerificationConfig();
+
+  try {
+    const claims = await verifyAccessToken({
+      access_token: token,
+      app_id: appId,
+      verification_key: verificationKey,
+    });
+
+    return {
+      appId: claims.app_id,
+      expiration: claims.expiration,
+      issuedAt: claims.issued_at,
+      issuer: claims.issuer,
+      sessionId: claims.session_id,
+      userId: claims.user_id,
+    };
+  } catch (error) {
+    throw hostedOnboardingError({
+      code: "PRIVY_AUTH_FAILED",
+      message: "We could not verify your Privy session. Request a fresh code and try again.",
+      httpStatus: 401,
+      details: {
+        cause: error instanceof Error ? error.name : typeof error,
+      },
+    });
+  }
+}
+
 export function hasHostedPrivyPhoneAuthConfig(source: NodeJS.ProcessEnv = process.env): boolean {
   return Boolean(normalizeEnvValue(source.NEXT_PUBLIC_PRIVY_APP_ID) && normalizeEnvValue(source.PRIVY_VERIFICATION_KEY));
 }
@@ -218,6 +233,17 @@ function normalizeEnvValue(value: string | null | undefined): string | null {
   }
 
   return null;
+}
+
+function normalizeHostedPrivyAccessToken(value: string | null | undefined): string | null {
+  const normalized = normalizeEnvValue(value);
+
+  if (!normalized) {
+    return null;
+  }
+
+  const match = /^Bearer\s+(.+)$/iu.exec(normalized);
+  return normalizeEnvValue(match?.[1]);
 }
 
 function remapHostedPrivyCompletionLagError(error: unknown): unknown {

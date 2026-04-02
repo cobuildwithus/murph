@@ -8,10 +8,12 @@ const mocks = vi.hoisted(() => ({
     telegramBotUsername: null as string | null,
     telegramWebhookSecret: null as string | null,
   },
+  verifyAccessToken: vi.fn(),
   verifyIdentityToken: vi.fn(),
 }));
 
 vi.mock("@privy-io/node", () => ({
+  verifyAccessToken: mocks.verifyAccessToken,
   verifyIdentityToken: mocks.verifyIdentityToken,
 }));
 
@@ -25,15 +27,14 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 
 import {
   hasHostedPrivyPhoneAuthConfig,
+  readHostedPrivyAccessTokenFromRequest,
   readHostedPrivyIdentityTokenFromCookieStore,
   requireHostedPrivyCompletionIdentityFromCookies,
   requireHostedPrivyIdentity,
   requireHostedPrivyIdentityFromCookies,
-  requireHostedPrivyUserForSession,
+  verifyHostedPrivyAccessToken,
   verifyHostedPrivyIdentityToken,
 } from "@/src/lib/hosted-onboarding/privy";
-
-type HostedPrivySessionRecord = Parameters<typeof requireHostedPrivyUserForSession>[1];
 
 describe("hosted Privy verification", () => {
   beforeEach(() => {
@@ -109,6 +110,37 @@ describe("hosted Privy verification", () => {
     });
   });
 
+  it("reads and verifies the Privy bearer token from the authorization header", async () => {
+    const request = new Request("https://join.example.test/api/settings/email/sync", {
+      headers: {
+        authorization: "Bearer signed-access-token",
+      },
+    });
+    mocks.verifyAccessToken.mockResolvedValue({
+      app_id: "cm_app_123",
+      expiration: 1743067800,
+      issued_at: 1743064200,
+      issuer: "privy.io",
+      session_id: "session_123",
+      user_id: "did:privy:user_123",
+    });
+
+    expect(readHostedPrivyAccessTokenFromRequest(request)).toBe("signed-access-token");
+    await expect(verifyHostedPrivyAccessToken("  signed-access-token  ")).resolves.toEqual({
+      appId: "cm_app_123",
+      expiration: 1743067800,
+      issuedAt: 1743064200,
+      issuer: "privy.io",
+      sessionId: "session_123",
+      userId: "did:privy:user_123",
+    });
+    expect(mocks.verifyAccessToken).toHaveBeenCalledWith({
+      access_token: "signed-access-token",
+      app_id: "cm_app_123",
+      verification_key: "line-1\nline-2",
+    });
+  });
+
   it("reads and verifies the hosted Privy identity from request cookies", async () => {
     mocks.cookies.mockResolvedValue({
       get: vi.fn().mockImplementation((name: string) =>
@@ -153,115 +185,6 @@ describe("hosted Privy verification", () => {
     );
   });
 
-  it("binds a verified Privy user to the current hosted session before exposing linked accounts", async () => {
-    mocks.verifyIdentityToken.mockResolvedValue({
-      id: "did:privy:user_123",
-      linked_accounts: [
-        {
-          address: "user@example.com",
-          latest_verified_at: 1741194420,
-          type: "email",
-        },
-      ],
-    });
-
-    await expect(
-      requireHostedPrivyUserForSession(
-        {
-          get: (name: string) => (name === "privy-id-token" ? { value: "cookie-token" } : undefined),
-        },
-        {
-          member: {
-            privyUserId: "did:privy:user_123",
-          },
-        } as HostedPrivySessionRecord,
-      ),
-    ).resolves.toEqual({
-      linkedAccounts: [
-        {
-          address: "user@example.com",
-          latest_verified_at: 1741194420,
-          type: "email",
-        },
-      ],
-      verifiedPrivyUser: {
-        id: "did:privy:user_123",
-        linked_accounts: [
-          {
-            address: "user@example.com",
-            latest_verified_at: 1741194420,
-            type: "email",
-          },
-        ],
-      },
-    });
-  });
-
-  it("requires the Privy identity cookie before binding a verified user to a hosted session", async () => {
-    await expect(
-      requireHostedPrivyUserForSession(
-        {
-          get: () => undefined,
-        },
-        {
-          member: {
-            privyUserId: "did:privy:user_123",
-          },
-        } as HostedPrivySessionRecord,
-      ),
-    ).rejects.toMatchObject({
-      code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
-      httpStatus: 401,
-    });
-    expect(mocks.verifyIdentityToken).not.toHaveBeenCalled();
-  });
-
-  it("rejects hosted sessions whose verified Privy user id does not match the member binding", async () => {
-    mocks.verifyIdentityToken.mockResolvedValue({
-      id: "did:privy:user_other",
-      linked_accounts: [],
-    });
-
-    await expect(
-      requireHostedPrivyUserForSession(
-        {
-          get: (name: string) => (name === "privy-id-token" ? { value: "cookie-token" } : undefined),
-        },
-        {
-          member: {
-            privyUserId: "did:privy:user_123",
-          },
-        } as HostedPrivySessionRecord,
-      ),
-    ).rejects.toMatchObject({
-      code: "PRIVY_SESSION_MISMATCH",
-      httpStatus: 403,
-    });
-  });
-
-  it("rejects hosted sessions that are missing a bound Privy user id", async () => {
-    mocks.verifyIdentityToken.mockResolvedValue({
-      id: "did:privy:user_123",
-      linked_accounts: [],
-    });
-
-    await expect(
-      requireHostedPrivyUserForSession(
-        {
-          get: (name: string) => (name === "privy-id-token" ? { value: "cookie-token" } : undefined),
-        },
-        {
-          member: {
-            privyUserId: null,
-          },
-        } as HostedPrivySessionRecord,
-      ),
-    ).rejects.toMatchObject({
-      code: "PRIVY_SESSION_MISMATCH",
-      httpStatus: 403,
-    });
-  });
-
   it("requires the Privy identity cookie when reading hosted identity from cookies", async () => {
     await expect(requireHostedPrivyIdentityFromCookies()).rejects.toMatchObject({
       code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
@@ -284,6 +207,15 @@ describe("hosted Privy verification", () => {
     mocks.verifyIdentityToken.mockRejectedValue(new Error("bad token"));
 
     await expect(verifyHostedPrivyIdentityToken("signed-identity-token")).rejects.toMatchObject({
+      code: "PRIVY_AUTH_FAILED",
+      httpStatus: 401,
+    });
+  });
+
+  it("maps local access-token verifier failures to hosted auth errors", async () => {
+    mocks.verifyAccessToken.mockRejectedValue(new Error("bad token"));
+
+    await expect(verifyHostedPrivyAccessToken("signed-access-token")).rejects.toMatchObject({
       code: "PRIVY_AUTH_FAILED",
       httpStatus: 401,
     });

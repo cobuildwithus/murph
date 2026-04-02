@@ -15,10 +15,8 @@ import {
   coerceStripeSubscriptionId,
   mapStripeSubscriptionStatusToHostedBillingStatus,
 } from "./billing";
-import { deriveHostedEntitlement } from "./entitlement";
 import { isHostedOnboardingRevnetEnabled } from "./revnet";
 import { normalizeNullableString } from "./shared";
-import { revokeHostedSessionsForMember } from "./session";
 import {
   activateHostedMemberForPositiveSource,
   findMemberForStripeObject,
@@ -147,11 +145,6 @@ export async function applyStripeSubscriptionUpdated(
     currentBillingStatus: member.billingStatus,
     nextBillingStatus: mapStripeSubscriptionStatusToHostedBillingStatus(subscription.status),
   });
-  const previousEntitlement = deriveHostedEntitlement({
-    billingMode: HostedBillingMode.subscription,
-    billingStatus: member.billingStatus,
-    memberStatus: member.status,
-  });
   const updatedMember = await updateHostedMemberStripeBillingIfFresh({
     billingMode: HostedBillingMode.subscription,
     billingStatus: nextBillingStatus,
@@ -164,21 +157,6 @@ export async function applyStripeSubscriptionUpdated(
 
   if (!updatedMember) {
     return;
-  }
-
-  const nextEntitlement = deriveHostedEntitlement({
-    billingMode: HostedBillingMode.subscription,
-    billingStatus: updatedMember.billingStatus,
-    memberStatus: updatedMember.status,
-  });
-
-  if (previousEntitlement.accessAllowed && !nextEntitlement.accessAllowed) {
-    await revokeHostedSessionsForMember({
-      memberId: updatedMember.id,
-      now: dispatchContext.eventCreatedAt,
-      prisma,
-      reason: `billing_status:${updatedMember.billingStatus}`,
-    });
   }
 }
 

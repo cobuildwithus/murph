@@ -20,8 +20,6 @@ const mocks = vi.hoisted(() => ({
     revnetTerminalAddress: null as string | null,
     revnetTreasuryPrivateKey: null as string | null,
     revnetWeiPerStripeMinorUnit: null as string | null,
-    sessionCookieName: "hosted_session",
-    sessionTtlDays: 30,
     stripeBillingMode: "payment" as const,
     stripePriceId: "price_123",
     stripeSecretKey: "sk_test_123",

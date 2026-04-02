@@ -20,7 +20,6 @@ import {
   isHostedAccessBlockedBillingStatus,
 } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
-import { revokeHostedSessionsForMember } from "./session";
 import { requireHostedStripeApi } from "./runtime";
 
 export type HostedStripeDispatchContext = {
@@ -399,13 +398,6 @@ export async function suspendHostedMemberForBillingReversal(input: {
   if (!updatedMember) {
     return;
   }
-
-  await revokeHostedSessionsForMember({
-    memberId: updatedMember.id,
-    now: input.dispatchContext.eventCreatedAt,
-    prisma: input.prisma,
-    reason: `billing_reversal:${input.reason}`,
-  });
 }
 
 export async function findMemberForStripeObject(input: {

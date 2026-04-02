@@ -2,8 +2,7 @@ import { randomBytes } from "node:crypto";
 
 import { Prisma, type PrismaClient } from "@prisma/client";
 
-import { normalizeNullableString as normalizeDeviceSyncNullableString, sha256Hex } from "../device-sync/shared";
-import { maskPhoneNumber, normalizePhoneNumber, normalizePhoneNumberForCountry } from "./phone";
+import { normalizeNullableString as normalizeDeviceSyncNullableString } from "../device-sync/shared";
 
 const HOSTED_ONBOARDING_TRIGGER_PATTERNS = [
   /\bi\s*want\s*to\s*get\s*healthy\b/iu,
@@ -87,10 +86,6 @@ export function generateHostedInviteCode(): string {
   return randomBytes(15).toString("base64url");
 }
 
-export function generateHostedSessionId(): string {
-  return `hbs_${randomBytes(12).toString("base64url")}`;
-}
-
 export function generateHostedCheckoutId(): string {
   return `hbco_${randomBytes(12).toString("base64url")}`;
 }
@@ -99,24 +94,12 @@ export function generateHostedRevnetIssuanceId(): string {
   return `hbrv_${randomBytes(12).toString("base64url")}`;
 }
 
-export function generateHostedSessionToken(): string {
-  return randomBytes(32).toString("base64url");
-}
-
-export function hashHostedSessionToken(value: string): string {
-  return sha256Hex(value);
-}
-
 export function generateHostedBootstrapSecret(): string {
   return randomBytes(32).toString("base64url");
 }
 
 export function inviteExpiresAt(now: Date, ttlHours: number): Date {
   return new Date(now.getTime() + ttlHours * 60 * 60 * 1000);
-}
-
-export function sessionExpiresAt(now: Date, ttlDays: number): Date {
-  return new Date(now.getTime() + ttlDays * 24 * 60 * 60 * 1000);
 }
 
 export function normalizeNullableString(value: unknown): string | null {

@@ -12,8 +12,6 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     linqWebhookSecret: process.env.LINQ_WEBHOOK_SECRET ?? null,
     linqWebhookTimestampToleranceMs: Number(process.env.LINQ_WEBHOOK_TIMESTAMP_TOLERANCE_MS ?? 5 * 60_000),
     publicBaseUrl: "https://join.example.test",
-    sessionCookieName: "hosted_session",
-    sessionTtlDays: 30,
     stripeBillingMode: "payment",
     stripePriceId: "price_123",
     stripeSecretKey: "sk_test_123",

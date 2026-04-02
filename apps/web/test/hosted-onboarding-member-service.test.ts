@@ -16,8 +16,6 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
       linqApiToken: "linq-token",
       linqWebhookSecret: "linq-secret",
       publicBaseUrl: "https://join.example.test",
-      sessionCookieName: "hosted_session",
-      sessionTtlDays: 30,
       stripeBillingMode: "payment",
       stripePriceId: "price_123",
       stripeSecretKey: "sk_test_123",

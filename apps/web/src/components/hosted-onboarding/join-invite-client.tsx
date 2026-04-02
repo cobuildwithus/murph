@@ -13,7 +13,7 @@ import type {
   HostedSharePageData,
   HostedSharePreview,
 } from "@/src/lib/hosted-share/service";
-import type { HostedInviteStatusPayload, HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 
 import { requestHostedOnboardingJson } from "./client-api";
 import { HostedPhoneAuth } from "./hosted-phone-auth";
@@ -165,7 +165,7 @@ export function JoinInviteClient({
     }
   }
 
-  async function handleClearHostedSession() {
+  async function handleSignOut() {
     setErrorMessage(null);
     setPendingAction("logout");
 
@@ -183,7 +183,7 @@ export function JoinInviteClient({
     }
   }
 
-  async function handlePhoneVerified(_: HostedPrivyCompletionPayload) {
+  async function handlePhoneVerified() {
     const nextStatus = await refreshStatus();
 
     if (nextStatus.stage === "checkout" && nextStatus.capabilities.billingReady) {
@@ -249,7 +249,7 @@ export function JoinInviteClient({
               <div className="mt-3">
                 <Button
                   type="button"
-                  onClick={handleClearHostedSession}
+                  onClick={handleSignOut}
                   disabled={pendingAction !== null}
                   variant="outline"
                   size="lg"
@@ -266,7 +266,7 @@ export function JoinInviteClient({
                 <HostedPhoneAuth
                   inviteCode={inviteCode}
                   mode="invite"
-                  onClearHostedSession={async () => {
+                  onSignOut={async () => {
                     await refreshStatus();
                   }}
                   onCompleted={handlePhoneVerified}

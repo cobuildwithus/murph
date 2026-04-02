@@ -65,8 +65,6 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     revnetTerminalAddress: null,
     revnetTreasuryPrivateKey: null,
     revnetWeiPerStripeMinorUnit: null,
-    sessionCookieName: "hosted_session",
-    sessionTtlDays: 30,
     stripeBillingMode: "payment",
     stripePriceId: "price_123",
     stripeSecretKey: "sk_test_123",
