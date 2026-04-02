@@ -822,7 +822,7 @@ test("rebuildRuntimeFromVault rejects envelopes missing canonical attachment met
 });
 
 test("openInboxRuntime rejects runtime rows missing canonical attachment ids", async () => {
-  const vaultRoot = await makeTempDirectory("murph-inbox-legacy-runtime-vault");
+  const vaultRoot = await makeTempDirectory("murph-inbox-runtime-vault");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const databasePath = resolveRuntimePaths(vaultRoot).inboxDbPath;
@@ -848,6 +848,7 @@ test("openInboxRuntime rejects runtime rows missing canonical attachment ids", a
         vault_event_id text not null,
         envelope_path text not null,
         created_at text not null,
+        mutation_cursor integer not null default 0,
         unique (source, account_id, external_id)
       );
 
@@ -866,6 +867,10 @@ test("openInboxRuntime rejects runtime rows missing canonical attachment ids", a
         size_bytes integer,
         extracted_text text,
         transcript_text text,
+        derived_path text,
+        parser_provider_id text,
+        parser_state text,
+        parse_updated_at text,
         created_at text not null
       );
     `);
@@ -931,8 +936,12 @@ test("openInboxRuntime rejects runtime rows missing canonical attachment ids", a
             size_bytes,
             extracted_text,
             transcript_text,
+            derived_path,
+            parser_provider_id,
+            parser_state,
+            parse_updated_at,
             created_at
-          ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
       )
       .run(
@@ -947,6 +956,10 @@ test("openInboxRuntime rejects runtime rows missing canonical attachment ids", a
         "legacy.txt",
         null,
         6,
+        null,
+        null,
+        null,
+        null,
         null,
         null,
         "2026-03-13T11:31:00.000Z",

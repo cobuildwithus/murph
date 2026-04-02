@@ -162,7 +162,6 @@ export async function openInboxRuntime({
       tags
     );
   `);
-  migrateLegacyInboxRuntimeSchema(database);
 
   database.exec(`
     insert into capture_mutation_counter (singleton, next_cursor)
@@ -290,67 +289,6 @@ export async function openInboxRuntime({
   `);
 
   return createInboxRuntimeStore(database, databasePath);
-}
-
-function migrateLegacyInboxRuntimeSchema(database: DatabaseSync): void {
-  ensureTableColumns(database, "capture", [
-    {
-      name: "mutation_cursor",
-      definition: "integer not null default 0",
-    },
-  ]);
-  ensureTableColumns(database, "capture_attachment", [
-    {
-      name: "derived_path",
-      definition: "text",
-    },
-    {
-      name: "parser_provider_id",
-      definition: "text",
-    },
-    {
-      name: "parser_state",
-      definition: "text",
-    },
-    {
-      name: "parse_updated_at",
-      definition: "text",
-    },
-  ]);
-}
-
-function ensureTableColumns(
-  database: DatabaseSync,
-  tableName: string,
-  columns: ReadonlyArray<{
-    definition: string;
-    name: string;
-  }>,
-): void {
-  const existingColumns = new Set(
-    (
-      database.prepare(`pragma table_info(${quoteSqliteIdentifier(tableName)})`).all() as Array<{
-        name?: unknown;
-      }>
-    )
-      .map((row) => (typeof row.name === "string" ? row.name : null))
-      .filter((name): name is string => name !== null),
-  );
-
-  for (const column of columns) {
-    if (existingColumns.has(column.name)) {
-      continue;
-    }
-
-    database.exec(
-      `alter table ${quoteSqliteIdentifier(tableName)} add column ${quoteSqliteIdentifier(column.name)} ${column.definition}`,
-    );
-    existingColumns.add(column.name);
-  }
-}
-
-function quoteSqliteIdentifier(value: string): string {
-  return `"${value.replaceAll('"', '""')}"`;
 }
 
 
