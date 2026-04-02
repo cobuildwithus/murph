@@ -5,5 +5,5 @@ title: Demo Web Vault
 ---
 # Demo Web Vault
 
-This fixture exists so the local web observatory has a stable, human-reviewable
-vault with enough canonical data to render meaningfully.
+This fixture exists so QA and manual review have a stable, human-reviewable
+vault with enough canonical data to inspect meaningful behavior.

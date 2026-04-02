@@ -26,7 +26,6 @@ readonly shell_syntax_check_scripts=(
   "scripts/update-changelog.sh"
   "scripts/generate-release-notes.sh"
   "scripts/workspace-verify.sh"
-  "packages/local-web/scripts/verify-fast.sh"
   "apps/web/scripts/verify-fast.sh"
   "apps/cloudflare/scripts/verify-fast.sh"
 )
@@ -58,7 +57,6 @@ readonly typecheck_package_dirs=(
   "packages/cli"
   "packages/assistantd"
   "packages/assistant-runtime"
-  "packages/local-web"
   "apps/web"
   "apps/cloudflare"
 )
@@ -284,10 +282,6 @@ run_test_apps() {
     local pids=()
 
     # App verification should not emit V8 coverage into the repo coverage workspace.
-    run_package_command_without_node_v8_coverage_with_retry "packages/local-web" verify &
-    local local_web_verify_pid="$!"
-    pids+=("$local_web_verify_pid")
-    register_background_pid "$local_web_verify_pid"
     run_package_command_without_node_v8_coverage_with_retry "apps/web" verify &
     local hosted_web_verify_pid="$!"
     pids+=("$hosted_web_verify_pid")
@@ -304,7 +298,6 @@ run_test_apps() {
     return 0
   fi
 
-  run_package_command_without_node_v8_coverage_with_retry "packages/local-web" verify
   run_package_command_without_node_v8_coverage_with_retry "apps/web" verify
   run_package_command_without_node_v8_coverage_with_retry "apps/cloudflare" verify
 }

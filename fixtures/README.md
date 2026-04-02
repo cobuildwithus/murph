@@ -5,7 +5,7 @@ This directory holds deterministic QA scaffolding for the first Murph implementa
 ## Contents
 
 - `minimal-vault/`: human-readable vault skeleton without unresolved `vault.json` or JSONL record payloads
-- `demo-web-vault/`: small but populated vault fixture intended for the local web observatory demo flow rather than CLI smoke scenarios
+- `demo-web-vault/`: small but populated vault fixture for richer manual review and QA scenarios than `minimal-vault`
 - `sample-imports/`: placeholder source files for document, meal, and sample-import scenarios
 - `golden-outputs/`: per-command directories documenting the current stable smoke expectations for each command surface
 - `fixture-corpus.json`: machine-readable inventory consumed by the smoke verifier

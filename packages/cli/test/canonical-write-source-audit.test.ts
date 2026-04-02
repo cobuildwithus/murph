@@ -19,7 +19,6 @@ const SOURCE_ROOTS = [
   'packages/parsers/src',
   'packages/query/src',
   'packages/runtime-state/src',
-  'packages/local-web/src',
 ] as const
 
 const ALLOWED_NON_CORE_CANONICAL_MUTATORS = [

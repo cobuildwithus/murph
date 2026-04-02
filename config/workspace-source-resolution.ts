@@ -17,14 +17,6 @@ export const HOSTED_WEB_WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/device-syncd": "../../packages/device-syncd/src/index.ts",
 } as const satisfies WorkspaceSourceEntryRelativePaths;
 
-export const LOCAL_WEB_WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
-  "@murphai/contracts": "../contracts/src/index.ts",
-  "@murphai/device-syncd": "../device-syncd/src/index.ts",
-  "@murphai/hosted-execution": "../hosted-execution/src/index.ts",
-  "@murphai/runtime-state": "../runtime-state/src/index.ts",
-  "@murphai/query": "../query/src/index.ts",
-} as const satisfies WorkspaceSourceEntryRelativePaths;
-
 type VitestAlias = {
   find: RegExp;
   replacement: string;
@@ -71,21 +63,10 @@ export const HOSTED_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES = createWorkspaceSourcePa
   HOSTED_WEB_WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS,
 );
 
-export const LOCAL_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES = createWorkspaceSourcePackageNames(
-  LOCAL_WEB_WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS,
-);
-
 export function resolveHostedWebWorkspaceSourceEntries(workspaceDir: string) {
   return resolveWorkspaceSourceEntries(
     workspaceDir,
     HOSTED_WEB_WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS,
-  );
-}
-
-export function resolveLocalWebWorkspaceSourceEntries(workspaceDir: string) {
-  return resolveWorkspaceSourceEntries(
-    workspaceDir,
-    LOCAL_WEB_WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS,
   );
 }
 

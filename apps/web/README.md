@@ -2,10 +2,7 @@
 
 Hosted integration control plane for Vercel deployments.
 
-This app is intentionally separate from `packages/local-web`:
-
-- `packages/local-web` stays local-only and reads a local Murph vault.
-- `apps/web` is the hosted integration control plane for OAuth callbacks, webhooks, token escrow, sparse Linq routing state, and sparse local-agent APIs.
+`apps/web` is the hosted integration control plane for OAuth callbacks, webhooks, token escrow, sparse Linq routing state, and sparse local-agent APIs.
 
 ## Core responsibilities
 

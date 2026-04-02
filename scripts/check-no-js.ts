@@ -8,8 +8,6 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const scanRoots = ["packages", "apps", "e2e"] as const;
 const blockedExtensions = new Set([".js", ".mjs", ".cjs", ".d.ts"]);
 const allowedSourceArtifacts = new Set([
-  "packages/local-web/postcss.config.mjs",
-  "packages/local-web/eslint.config.mjs",
   "apps/web/postcss.config.mjs",
   "apps/web/eslint.config.mjs",
 ]);
@@ -46,13 +44,6 @@ export function buildNextEnvDeclarationArtifacts(
 }
 
 export const allowedDeclarationArtifacts = new Map<string, string[]>([
-  [
-    "packages/local-web/next-env.d.ts",
-    buildNextEnvDeclarationArtifacts([
-      "./.next/types/routes.d.ts",
-      "./.next/dev/types/routes.d.ts",
-    ]),
-  ],
   [
     "apps/web/next-env.d.ts",
     buildNextEnvDeclarationArtifacts([
