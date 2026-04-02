@@ -1925,6 +1925,7 @@ describe("runHostedExecutionJob", () => {
             record: {
               delivery: {
                 channel: "linq",
+                idempotencyKey: `assistant-outbox:${intentId}`,
                 sentAt: "2026-03-26T12:00:05.000Z",
                 target: "chat_123",
                 targetKind: "thread",
@@ -1935,6 +1936,7 @@ describe("runHostedExecutionJob", () => {
               intentId,
               kind: "assistant.delivery",
               recordedAt: "2026-03-26T12:00:05.000Z",
+              state: "sent",
             },
           }), { status: 200 });
         }

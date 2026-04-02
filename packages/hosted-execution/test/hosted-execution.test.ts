@@ -959,6 +959,7 @@ describe("@murphai/hosted-execution", () => {
       intentId: "outbox_intent_123",
       kind: "assistant.delivery",
       recordedAt: "2026-03-28T10:00:00.000Z",
+      state: "sent",
     })).toThrow("Hosted assistant side effect record delivery.idempotencyKey must be a non-empty string.");
   });
 
@@ -977,6 +978,7 @@ describe("@murphai/hosted-execution", () => {
       intentId: "outbox_intent_123",
       kind: "assistant.delivery",
       recordedAt: "2026-03-28T10:00:00.000Z",
+      state: "sent",
     });
 
     expect(record.delivery.idempotencyKey).toBe("assistant-outbox:intent_123");
@@ -997,6 +999,7 @@ describe("@murphai/hosted-execution", () => {
       intentId: "outbox_intent_123",
       kind: "assistant.delivery",
       recordedAt: "2026-03-28T10:00:00.000Z",
+      state: "sent",
     })).toThrow("Hosted assistant side effect record delivery.idempotencyKey must be a non-empty string.");
   });
 

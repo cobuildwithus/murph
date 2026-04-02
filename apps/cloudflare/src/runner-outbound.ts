@@ -27,7 +27,10 @@ import type {
   HostedExecutionFinalizePayload,
 } from "./execution-journal.ts";
 import { json, methodNotAllowed, notFound, readJsonObject } from "./json.ts";
-import { createHostedExecutionSideEffectJournalStore } from "./outbox-delivery-journal.ts";
+import {
+  HostedExecutionSideEffectConflictError,
+  createHostedExecutionSideEffectJournalStore,
+} from "./outbox-delivery-journal.ts";
 import {
   readHostedEmailConfig,
   readHostedEmailRawMessage,
@@ -151,7 +154,7 @@ export async function handleRunnerOutboundRequest(
       return notFound();
     }
 
-    if (request.method !== "GET" && request.method !== "PUT") {
+    if (request.method !== "DELETE" && request.method !== "GET" && request.method !== "PUT") {
       return methodNotAllowed();
     }
 
@@ -360,43 +363,75 @@ async function handleRunnerSideEffectRequest(input: {
     keysById: input.environment.bundleEncryptionKeysById,
   });
 
-  if (input.request.method === "GET") {
-    const kindValue = input.url.searchParams.get("kind");
-    const fingerprint = input.url.searchParams.get("fingerprint");
+  try {
+    if (input.request.method === "GET" || input.request.method === "DELETE") {
+      const kindValue = input.url.searchParams.get("kind");
+      const fingerprint = input.url.searchParams.get("fingerprint");
 
-    if (!kindValue || !fingerprint) {
-      return notFound();
+      if (!kindValue || !fingerprint) {
+        return notFound();
+      }
+
+      const kind = requireSideEffectKind(kindValue);
+
+      if (input.request.method === "DELETE") {
+        await journalStore.deletePrepared({
+          effectId: input.effectId,
+          fingerprint,
+          kind,
+          userId: input.userId,
+        });
+
+        return json({
+          effectId: input.effectId,
+          ok: true,
+        });
+      }
+
+      const record = await journalStore.read({
+        effectId: input.effectId,
+        fingerprint,
+        kind,
+        userId: input.userId,
+      });
+
+      return json({
+        effectId: record?.effectId ?? input.effectId,
+        record: record ?? null,
+      });
     }
 
-    const kind = requireSideEffectKind(kindValue);
-    const record = await journalStore.read({
-      effectId: input.effectId,
-      fingerprint,
-      kind,
+    const nextRecord = parseHostedExecutionSideEffectRecord(await readJsonObject(input.request));
+    if (nextRecord.effectId !== input.effectId) {
+      return json({
+        error: `effectId mismatch: expected ${input.effectId}, received ${nextRecord.effectId}.`,
+      }, 400);
+    }
+
+    if (nextRecord.intentId !== input.effectId) {
+      return json({
+        error: `intentId mismatch: expected ${input.effectId}, received ${nextRecord.intentId}.`,
+      }, 400);
+    }
+
+    const savedRecord = await journalStore.write({
+      record: nextRecord,
       userId: input.userId,
     });
 
     return json({
-      effectId: record?.effectId ?? input.effectId,
-      record: record ?? null,
+      effectId: savedRecord.effectId,
+      record: savedRecord,
     });
-  }
+  } catch (error) {
+    if (error instanceof HostedExecutionSideEffectConflictError) {
+      return json({
+        error: error.message,
+      }, 409);
+    }
 
-  const nextRecord = parseHostedExecutionSideEffectRecord(await readJsonObject(input.request));
-  if (nextRecord.effectId !== input.effectId) {
-    return json({
-      error: `effectId mismatch: expected ${input.effectId}, received ${nextRecord.effectId}.`,
-    }, 400);
+    throw error;
   }
-  const savedRecord = await journalStore.write({
-    record: nextRecord,
-    userId: input.userId,
-  });
-
-  return json({
-    effectId: savedRecord.effectId,
-    record: savedRecord,
-  });
 }
 
 async function handleRunnerDeviceSyncControlRequest(input: {
