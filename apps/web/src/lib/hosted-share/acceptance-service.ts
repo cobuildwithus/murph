@@ -1,9 +1,9 @@
-import { HostedBillingStatus, Prisma, type PrismaClient } from "@prisma/client";
+import { HostedBillingStatus, Prisma, type HostedMember, type PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
 import { enqueueHostedExecutionOutbox } from "../hosted-execution/outbox";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
-import type { HostedSessionRecord } from "../hosted-onboarding/session";
+import { type HostedSessionRecord } from "../hosted-onboarding/session";
 
 import {
   buildHostedShareAcceptanceDispatch,
@@ -18,12 +18,14 @@ import type { AcceptHostedShareResult } from "./types";
 
 export async function acceptHostedShareLink(input: {
   prisma?: PrismaClient;
-  sessionRecord: HostedSessionRecord;
   shareCode: string;
+  member?: HostedMember;
+  sessionRecord?: HostedSessionRecord;
 }): Promise<AcceptHostedShareResult> {
   const prisma = input.prisma ?? getPrisma();
   const now = new Date();
   const shareCode = normalizeOptionalString(input.shareCode);
+  const member = input.member ?? input.sessionRecord?.member;
 
   if (!shareCode) {
     throw hostedOnboardingError({
@@ -33,7 +35,15 @@ export async function acceptHostedShareLink(input: {
     });
   }
 
-  if (input.sessionRecord.member.billingStatus !== HostedBillingStatus.active) {
+  if (!member) {
+    throw hostedOnboardingError({
+      code: "AUTH_REQUIRED",
+      message: "Sign in again before adding a shared bundle.",
+      httpStatus: 401,
+    });
+  }
+
+  if (member.billingStatus !== HostedBillingStatus.active) {
     throw hostedOnboardingError({
       code: "HOSTED_SHARE_ACTIVE_REQUIRED",
       message: "Finish hosted activation before adding a shared bundle.",
@@ -41,7 +51,7 @@ export async function acceptHostedShareLink(input: {
     });
   }
 
-  const memberId = input.sessionRecord.member.id;
+  const memberId = member.id;
   const codeHash = hashHostedShareCode(shareCode);
   const claim = await prisma.$transaction(async (tx) => {
     await lockHostedShareLinkRow(tx, codeHash);

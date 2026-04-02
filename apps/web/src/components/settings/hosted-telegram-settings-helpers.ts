@@ -11,6 +11,10 @@ import {
   retrySyncOperation,
   toErrorMessage,
 } from "./hosted-settings-sync-helpers";
+import {
+  HostedOnboardingApiError,
+  requestHostedOnboardingJson,
+} from "../hosted-onboarding/client-api";
 
 export interface HostedTelegramSyncResult {
   botLink: string | null;
@@ -109,6 +113,37 @@ async function syncHostedTelegramConnection(
   expectedTelegramUserId: string,
   fetchImpl: typeof fetch,
 ): Promise<HostedTelegramSyncResult> {
+  if (fetchImpl === fetch) {
+    try {
+      const payload = await requestHostedOnboardingJson<{
+        botLink?: string | null;
+        runTriggered?: boolean;
+        telegramUserId: string;
+        telegramUsername?: string | null;
+      }>({
+        payload: {
+          expectedTelegramUserId,
+        },
+        url: "/api/settings/telegram/sync",
+      });
+
+      return {
+        botLink: typeof payload.botLink === "string" ? payload.botLink : null,
+        runTriggered: payload.runTriggered === true,
+        telegramUserId: payload.telegramUserId,
+        telegramUsername: typeof payload.telegramUsername === "string" ? payload.telegramUsername : null,
+      };
+    } catch (error) {
+      if (error instanceof HostedOnboardingApiError) {
+        throw new HostedTelegramSyncError(
+          error.code,
+          error.message,
+        );
+      }
+      throw error;
+    }
+  }
+
   const response = await fetchImpl("/api/settings/telegram/sync", {
     body: JSON.stringify({
       expectedTelegramUserId,

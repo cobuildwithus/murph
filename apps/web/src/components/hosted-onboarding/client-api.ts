@@ -1,3 +1,5 @@
+import { getAccessToken, getIdentityToken } from "@privy-io/react-auth";
+
 interface ApiErrorPayload {
   error: {
     code?: string;
@@ -5,6 +7,8 @@ interface ApiErrorPayload {
     retryable?: boolean;
   };
 }
+
+const HOSTED_PRIVY_IDENTITY_TOKEN_HEADER_NAME = "x-privy-identity-token";
 
 export class HostedOnboardingApiError extends Error {
   readonly code: string | null;
@@ -23,13 +27,17 @@ export async function requestHostedOnboardingJson<T>(input: {
   payload?: Record<string, unknown>;
   url: string;
 }): Promise<T> {
+  const authHeaders = await buildHostedOnboardingAuthHeaders();
   const response = await fetch(input.url, {
     method: input.method ?? (input.payload ? "POST" : "GET"),
-    headers: input.payload
-      ? {
-          "content-type": "application/json",
-        }
-      : undefined,
+    headers: {
+      ...(input.payload
+        ? {
+            "content-type": "application/json",
+          }
+        : {}),
+      ...authHeaders,
+    },
     credentials: "same-origin",
     cache: "no-store",
     body: input.payload ? JSON.stringify(input.payload) : undefined,
@@ -53,6 +61,28 @@ export async function requestHostedOnboardingJson<T>(input: {
   }
 
   return data as T;
+}
+
+async function buildHostedOnboardingAuthHeaders(): Promise<Record<string, string>> {
+  try {
+    const accessToken = await getAccessToken();
+    const identityToken = await getIdentityToken();
+
+    return {
+      ...(accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : {}),
+      ...(identityToken
+        ? {
+            [HOSTED_PRIVY_IDENTITY_TOKEN_HEADER_NAME]: identityToken,
+          }
+        : {}),
+    };
+  } catch {
+    return {};
+  }
 }
 
 async function readOptionalJsonValue(response: Response): Promise<unknown> {

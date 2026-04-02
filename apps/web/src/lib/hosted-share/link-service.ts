@@ -1,14 +1,14 @@
-import { HostedBillingStatus, PrismaClient } from "@prisma/client";
+import { HostedBillingStatus, PrismaClient, type HostedMember } from "@prisma/client";
 import { assertContract, sharePackSchema, type SharePack } from "@murphai/contracts";
 
 import { getPrisma } from "../prisma";
 import {
   issueHostedInviteForPhone,
 } from "../hosted-onboarding/invite-service";
-import type { HostedSessionRecord } from "../hosted-onboarding/session";
 import {
   getHostedOnboardingSecretCodec,
 } from "../hosted-onboarding/runtime";
+import { type HostedSessionRecord } from "../hosted-onboarding/session";
 
 import {
   buildHostedSharePreview,
@@ -87,21 +87,23 @@ export async function createHostedShareLink(input: {
 }
 
 export async function buildHostedSharePageData(input: {
+  authenticatedMember?: HostedMember | null;
   inviteCode?: string | null;
   prisma?: PrismaClient;
-  sessionRecord?: HostedSessionRecord | null;
   shareCode: string;
+  sessionRecord?: HostedSessionRecord | null;
 }): Promise<HostedSharePageData> {
   const prisma = input.prisma ?? getPrisma();
   const record = await findHostedShareLinkByCode(input.shareCode, prisma);
-  const sessionActive = input.sessionRecord?.member.billingStatus === HostedBillingStatus.active;
+  const authenticatedMember = input.authenticatedMember ?? input.sessionRecord?.member ?? null;
+  const sessionActive = authenticatedMember?.billingStatus === HostedBillingStatus.active;
 
   if (!record) {
     return {
       inviteCode: normalizeOptionalString(input.inviteCode) ?? null,
       session: {
         active: Boolean(sessionActive),
-        authenticated: Boolean(input.sessionRecord),
+        authenticated: Boolean(authenticatedMember),
       },
       share: null,
       stage: "invalid",
@@ -111,8 +113,8 @@ export async function buildHostedSharePageData(input: {
   const preview = readHostedSharePreview(record.previewJson, () => readHostedSharePack(record).pack);
   const now = new Date();
   const consumed = Boolean(record.consumedAt);
-  const acceptedByCurrentMember = record.consumedByMemberId === input.sessionRecord?.member.id
-    || record.acceptedByMemberId === input.sessionRecord?.member.id;
+  const acceptedByCurrentMember = record.consumedByMemberId === authenticatedMember?.id
+    || record.acceptedByMemberId === authenticatedMember?.id;
   const stage = consumed
     ? "consumed"
     : acceptedByCurrentMember
@@ -127,7 +129,7 @@ export async function buildHostedSharePageData(input: {
     inviteCode: normalizeOptionalString(input.inviteCode) ?? null,
     session: {
       active: Boolean(sessionActive),
-      authenticated: Boolean(input.sessionRecord),
+      authenticated: Boolean(authenticatedMember),
     },
     share: {
       acceptedByCurrentMember,

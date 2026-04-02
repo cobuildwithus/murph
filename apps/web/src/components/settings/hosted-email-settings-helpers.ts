@@ -13,6 +13,10 @@ import {
   retrySyncOperation,
   toErrorMessage,
 } from "./hosted-settings-sync-helpers";
+import {
+  HostedOnboardingApiError,
+  requestHostedOnboardingJson,
+} from "../hosted-onboarding/client-api";
 
 export interface HostedEmailSyncResult {
   emailAddress: string;
@@ -140,6 +144,35 @@ async function syncHostedEmailConnection(
   expectedEmailAddress: string,
   fetchImpl: typeof fetch,
 ): Promise<HostedEmailSyncResult> {
+  if (fetchImpl === fetch) {
+    try {
+      const payload = await requestHostedOnboardingJson<{
+        emailAddress: string;
+        runTriggered?: boolean;
+        verifiedAt: string;
+      }>({
+        payload: {
+          expectedEmailAddress,
+        },
+        url: "/api/settings/email/sync",
+      });
+
+      return {
+        emailAddress: payload.emailAddress,
+        runTriggered: payload.runTriggered !== false,
+        verifiedAt: payload.verifiedAt,
+      };
+    } catch (error) {
+      if (error instanceof HostedOnboardingApiError) {
+        throw new HostedEmailSyncError(
+          error.code,
+          error.message,
+        );
+      }
+      throw error;
+    }
+  }
+
   const response = await fetchImpl("/api/settings/email/sync", {
     body: JSON.stringify({
       expectedEmailAddress,

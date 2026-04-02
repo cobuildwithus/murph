@@ -57,6 +57,7 @@ interface HostedPhoneAuthProps {
   phoneHint?: string | null;
   privyAppId: string;
   privyClientId?: string | null;
+  wrapProvider?: boolean;
 }
 
 interface HostedPhoneCountryOption {
@@ -73,10 +74,16 @@ const HOSTED_PHONE_COUNTRY_OPTIONS: HostedPhoneCountryOption[] = [
 
 const DEFAULT_HOSTED_PHONE_COUNTRY_CODE = "US";
 
-export function HostedPhoneAuth({ privyAppId, privyClientId, ...props }: HostedPhoneAuthProps) {
+export function HostedPhoneAuth({ privyAppId, privyClientId, wrapProvider = true, ...props }: HostedPhoneAuthProps) {
+  const content = <HostedPhoneAuthInner {...props} />;
+
+  if (!wrapProvider) {
+    return content;
+  }
+
   return (
     <HostedPrivyProvider appId={privyAppId} clientId={privyClientId}>
-      <HostedPhoneAuthInner {...props} />
+      {content}
     </HostedPrivyProvider>
   );
 }
@@ -87,7 +94,7 @@ function HostedPhoneAuthInner({
   onClearHostedSession,
   onCompleted,
   phoneHint,
-}: Omit<HostedPhoneAuthProps, "privyAppId">) {
+}: Omit<HostedPhoneAuthProps, "privyAppId" | "wrapProvider">) {
   const { authenticated, logout, ready } = usePrivy();
   const { createWallet } = useCreateWallet();
   const { loginWithCode, sendCode } = useLoginWithSms();

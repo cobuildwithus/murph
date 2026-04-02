@@ -4,7 +4,10 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { test } from "vitest";
 
-import { ShareLinkClient } from "@/src/components/hosted-share/share-link-client";
+import {
+  buildHostedShareStatusUrl,
+  ShareLinkClient,
+} from "@/src/components/hosted-share/share-link-client";
 
 test("ShareLinkClient links invite sign-in flows through the hosted join route", () => {
   const markup = renderToStaticMarkup(
@@ -40,4 +43,15 @@ test("ShareLinkClient links invite sign-in flows through the hosted join route",
 
   assert.ok(markup.includes('href="/join/invite-code?share=share-code"'));
   assert.match(markup, /Verify your phone and checkout/);
+});
+
+test("buildHostedShareStatusUrl preserves the invite query for authenticated refreshes", () => {
+  assert.equal(
+    buildHostedShareStatusUrl("share-code", "invite-code"),
+    "/api/hosted-share/share-code/status?invite=invite-code",
+  );
+  assert.equal(
+    buildHostedShareStatusUrl("share code", null),
+    "/api/hosted-share/share%20code/status",
+  );
 });

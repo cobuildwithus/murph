@@ -1,29 +1,17 @@
 import { Prisma } from "@prisma/client";
-import { cookies } from "next/headers";
 
 import { getPrisma } from "@/src/lib/prisma";
 import { createHostedTelegramUserLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
-import { requireHostedPrivyUserForSession } from "@/src/lib/hosted-onboarding/privy";
 import { resolveHostedPrivyTelegramAccountSelection } from "@/src/lib/hosted-onboarding/privy-shared";
-import { resolveHostedSessionFromCookieStore } from "@/src/lib/hosted-onboarding/session";
+import { requireHostedPrivyRequestAuthContext } from "@/src/lib/hosted-onboarding/request-auth";
 import { buildHostedTelegramBotLink } from "@/src/lib/hosted-onboarding/telegram";
 
 export const POST = withJsonError(async (request: Request) => {
     assertHostedOnboardingMutationOrigin(request);
-    const cookieStore = await cookies();
-    const hostedSession = await resolveHostedSessionFromCookieStore(cookieStore);
-
-    if (!hostedSession) {
-      throw hostedOnboardingError({
-        code: "AUTH_REQUIRED",
-        message: "Sign in again before you sync Telegram.",
-        httpStatus: 401,
-      });
-    }
-
+    const auth = await requireHostedPrivyRequestAuthContext(request);
     const body = await readOptionalJsonObject(request);
     const expectedTelegramUserId = normalizeComparableTelegramUserId(
       typeof body.expectedTelegramUserId === "string" ? body.expectedTelegramUserId : null,
@@ -36,8 +24,8 @@ export const POST = withJsonError(async (request: Request) => {
         httpStatus: 400,
       });
     }
-    const { verifiedPrivyUser } = await requireHostedPrivyUserForSession(cookieStore, hostedSession);
-    const telegramSelection = resolveHostedPrivyTelegramAccountSelection(verifiedPrivyUser);
+
+    const telegramSelection = resolveHostedPrivyTelegramAccountSelection(auth.verifiedPrivyUser);
 
     if (telegramSelection.ambiguous) {
       throw hostedOnboardingError({
@@ -69,7 +57,7 @@ export const POST = withJsonError(async (request: Request) => {
     try {
       await getPrisma().hostedMember.update({
         where: {
-          id: hostedSession.member.id,
+          id: auth.member.id,
         },
         data: {
           telegramUserId: telegramLookupKey,

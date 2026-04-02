@@ -18,7 +18,6 @@ import {
   ensureHostedMemberForPrivyIdentity,
   reconcileHostedPrivyIdentityOnMember,
 } from "./member-identity-service";
-import { createHostedSession } from "./session";
 
 export async function completeHostedPrivyVerification(input: {
   identity: HostedPrivyIdentity;
@@ -74,18 +73,9 @@ export async function completeHostedPrivyVerification(input: {
     },
   });
 
-  const session = await createHostedSession({
-    inviteId: activeInvite.id,
-    memberId: member.id,
-    now,
-    prisma,
-  });
-
   return {
-    expiresAt: session.expiresAt,
     inviteCode: activeInvite.inviteCode,
     joinUrl: buildHostedInviteUrl(activeInvite.inviteCode),
     stage,
-    token: session.token,
   };
 }

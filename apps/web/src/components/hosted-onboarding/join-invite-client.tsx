@@ -1,5 +1,6 @@
 "use client";
 
+import { usePrivy } from "@privy-io/react-auth";
 import Link from "next/link";
 import { startTransition, useEffect, useState } from "react";
 
@@ -36,6 +37,7 @@ export function JoinInviteClient({
   shareCode,
   sharePreview,
 }: JoinInviteClientProps) {
+  const { authenticated, logout, ready } = usePrivy();
   const [status, setStatus] = useState(initialStatus);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<"checkout" | "logout" | "share" | null>(null);
@@ -91,6 +93,14 @@ export function JoinInviteClient({
       window.clearInterval(timer);
     };
   }, [inviteCode, shareCode, shareImportState]);
+
+  useEffect(() => {
+    if (!ready || !authenticated) {
+      return;
+    }
+
+    void refreshStatus().catch(() => null);
+  }, [authenticated, ready]);
 
   async function refreshStatus(): Promise<HostedInviteStatusPayload> {
     const payload = await requestHostedOnboardingJson<HostedInviteStatusPayload>({
@@ -160,10 +170,9 @@ export function JoinInviteClient({
     setPendingAction("logout");
 
     try {
-      await requestHostedOnboardingJson<{ ok: true }>({
-        payload: {},
-        url: "/api/hosted-onboarding/session/logout",
-      });
+      if (authenticated) {
+        await logout();
+      }
       await refreshStatus();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -257,11 +266,14 @@ export function JoinInviteClient({
                 <HostedPhoneAuth
                   inviteCode={inviteCode}
                   mode="invite"
-                  onClearHostedSession={handleClearHostedSession}
+                  onClearHostedSession={async () => {
+                    await refreshStatus();
+                  }}
                   onCompleted={handlePhoneVerified}
                   phoneHint={status.invite?.phoneHint ?? status.member?.phoneHint ?? null}
                   privyAppId={privyAppId}
                   privyClientId={privyClientId}
+                  wrapProvider={false}
                 />
               </div>
             ) : (
@@ -293,7 +305,7 @@ export function JoinInviteClient({
             <Alert className="border-green-200 bg-green-50 text-green-800">
               <AlertTitle>Your hosted identity is active.</AlertTitle>
               <AlertDescription>
-                Your hosted identity is active. Your phone-verified account and hosted session are all ready.
+                Your hosted identity is active. Your phone-verified account is ready to use.
               </AlertDescription>
               <div className="mt-3 flex flex-wrap gap-3">
                 <Button render={<Link href="/settings" />} nativeButton={false} variant="outline" size="lg">

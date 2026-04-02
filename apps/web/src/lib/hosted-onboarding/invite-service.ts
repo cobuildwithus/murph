@@ -18,7 +18,6 @@ import {
   getHostedOnboardingEnvironment,
   requireHostedOnboardingPublicBaseUrl,
 } from "./runtime";
-import type { HostedSessionRecord } from "./session";
 import {
   generateHostedInviteCode,
   generateHostedInviteId,
@@ -28,10 +27,10 @@ import {
 } from "./shared";
 
 export async function getHostedInviteStatus(input: {
+  authenticatedMember?: HostedMember | null;
   inviteCode: string;
   now?: Date;
   prisma?: PrismaClient;
-  sessionRecord?: HostedSessionRecord | null;
 }): Promise<HostedInviteStatusPayload> {
   const prisma = input.prisma ?? getPrisma();
   const environment = getHostedOnboardingEnvironment();
@@ -49,8 +48,8 @@ export async function getHostedInviteStatus(input: {
       invite: null,
       member: null,
       session: {
-        authenticated: Boolean(input.sessionRecord),
-        expiresAt: input.sessionRecord?.session.expiresAt.toISOString() ?? null,
+        authenticated: Boolean(input.authenticatedMember),
+        expiresAt: null,
         matchesInvite: false,
       },
       stage: "invalid",
@@ -85,7 +84,7 @@ export async function getHostedInviteStatus(input: {
     inviteStatus = openedInvite.status;
   }
 
-  const sessionMatchesInvite = input.sessionRecord?.member.id === invite.memberId;
+  const sessionMatchesInvite = input.authenticatedMember?.id === invite.memberId;
   const hasPrivyIdentity = Boolean(invite.member.privyUserId && invite.member.walletAddress);
   const isActive = invite.member.billingStatus === HostedBillingStatus.active;
   const stage =
@@ -115,8 +114,8 @@ export async function getHostedInviteStatus(input: {
       status: invite.member.status,
     },
     session: {
-      authenticated: Boolean(input.sessionRecord),
-      expiresAt: input.sessionRecord?.session.expiresAt.toISOString() ?? null,
+      authenticated: Boolean(input.authenticatedMember),
+      expiresAt: null,
       matchesInvite: Boolean(sessionMatchesInvite),
     },
     stage,
@@ -124,9 +123,9 @@ export async function getHostedInviteStatus(input: {
 }
 
 export async function buildHostedInvitePageData(input: {
+  authenticatedMember?: HostedMember | null;
   inviteCode: string;
   prisma?: PrismaClient;
-  sessionRecord?: HostedSessionRecord | null;
 }) {
   return getHostedInviteStatus(input);
 }
