@@ -89,7 +89,6 @@ export async function runAssistantRuntimeMaintenance(input: {
       caches: listAssistantRuntimeCacheSnapshots(),
       maintenance: {
         lastRunAt: nowIso,
-        staleProviderRecoveryPruned: 0,
         staleQuarantinePruned,
         staleLocksCleared,
         notes,
@@ -106,7 +105,6 @@ export async function runAssistantRuntimeMaintenance(input: {
           ? notes.join(' ')
           : 'Assistant runtime maintenance ran with no corrective actions.',
       data: {
-        staleProviderRecoveryPruned: 0,
         staleQuarantinePruned,
         staleLocksCleared,
       },
@@ -188,7 +186,6 @@ function buildDefaultAssistantRuntimeBudgetSnapshot(
     caches: listAssistantRuntimeCacheSnapshots(),
     maintenance: {
       lastRunAt: null,
-      staleProviderRecoveryPruned: 0,
       staleQuarantinePruned: 0,
       staleLocksCleared: 0,
       notes: [],

@@ -1,4 +1,7 @@
 import {
+  prepareAssistantDirectCliEnv,
+} from '../../assistant-cli-access.js'
+import {
   executeCodexPrompt,
 } from '../../assistant-codex.js'
 import { VaultCliError } from '../../vault-cli-errors.js'
@@ -14,17 +17,15 @@ import type { AssistantProviderDefinition } from './types.js'
 
 export const codexCliProviderDefinition: AssistantProviderDefinition = {
   capabilities: {
-    supportsHostToolRuntime: false,
-    supportsDirectCliExecution: true,
     supportsModelDiscovery: false,
+    supportsNativeResume: true,
     supportsReasoningEffort: true,
     supportsRichUserMessageContent: false,
   },
-  traits: {
-    resumeKeyMode: 'provider-session-id',
-    sessionMode: 'stateful',
-    transcriptContextMode: 'provider-session',
-    workspaceMode: 'direct-cli',
+  resolveRuntime() {
+    return {
+      requiresCanonicalWriteGuard: true,
+    }
   },
   async discoverModels() {
     return {
@@ -47,10 +48,9 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
       approvalPolicy: providerConfig.approvalPolicy ?? undefined,
       codexCommand: providerConfig.codexCommand ?? undefined,
       configOverrides: mergeCodexConfigOverrides({
-        configOverrides: input.configOverrides,
         showThinkingTraces: input.showThinkingTraces ?? false,
       }),
-      env: input.env,
+      env: prepareAssistantDirectCliEnv(input.env),
       model: providerConfig.model ?? undefined,
       onProgress: input.onEvent ?? undefined,
       onTraceEvent: input.onTraceEvent,

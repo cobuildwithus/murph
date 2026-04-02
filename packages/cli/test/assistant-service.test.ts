@@ -49,7 +49,6 @@ vi.mock('@murphai/assistant-core/assistant-provider', async () => {
 })
 
 import {
-  CURRENT_CODEX_PROMPT_VERSION,
   buildResolveAssistantSessionInput,
   sendAssistantMessage,
 } from '../src/assistant/service.js'
@@ -79,7 +78,6 @@ import {
   resolveAssistantStatePaths,
   saveAssistantSession,
 } from '@murphai/assistant-core/assistant-state'
-import { readAssistantProviderRouteRecovery } from '@murphai/assistant-core/assistant/provider-turn-recovery'
 import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 
 const cleanupPaths: string[] = []
@@ -126,10 +124,6 @@ beforeEach(() => {
     },
   )
 })
-
-function buildWorkingDirectoryKey(workingDirectory: string): string {
-  return createHash('sha1').update(workingDirectory).digest('hex').slice(0, 16)
-}
 
 async function findNewOperationMetadataPath(
   vaultRoot: string,
@@ -445,8 +439,8 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
       provider: 'openai-compatible',
       model: 'gpt-oss:20b',
       maxSessionAgeMs: null,
-      sandbox: null,
-      approvalPolicy: null,
+      sandbox: 'workspace-write',
+      approvalPolicy: 'on-request',
       oss: false,
       profile: null,
       baseUrl: 'http://127.0.0.1:11434/v1',
@@ -521,7 +515,7 @@ test('sendAssistantMessage treats null provider-option inputs as fallbacks to sa
   assert.equal(firstCall?.providerName, 'ollama')
 })
 
-test('sendAssistantMessage gives the first provider turn direct CLI guidance, PATH access, bound memory context, and capability-aware assistant tool guidance', async () => {
+test('sendAssistantMessage gives the first provider turn direct CLI guidance, shared PATH context, bound memory context, and capability-aware assistant tool guidance', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-'))
   const homeRoot = path.join(parent, 'home')
   const vaultRoot = path.join(parent, 'vault')
@@ -555,59 +549,25 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   }
 
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
-  const expectedUserBinDirectory = path.join(homeRoot, '.local', 'bin')
-  const statePaths = resolveAssistantStatePaths(vaultRoot)
-  const expectedWorkspace = path.join(
-    statePaths.assistantStateRoot,
-    'workspaces',
-    result?.session.sessionId ?? '',
-  )
+  const expectedSharedPathHead = String(process.env.PATH ?? '').split(path.delimiter)[0] ?? ''
   const turnContext = resolveAssistantMemoryTurnContext(firstCall?.env)
-  const stateMcpExposed =
-    firstCall?.configOverrides?.some((value: string) =>
-      value.includes('"assistant","state","--mcp"'),
-    ) ?? false
-  const memoryMcpExposed =
-    firstCall?.configOverrides?.some((value: string) =>
-      value.includes('"assistant","memory","--mcp"'),
-    ) ?? false
-  const cronMcpExposed =
-    firstCall?.configOverrides?.some((value: string) =>
-      value.includes('"assistant","cron","--mcp"'),
-    ) ?? false
 
-  assert.equal(firstCall?.workingDirectory, expectedWorkspace)
-  assert.notEqual(firstCall?.workingDirectory, vaultRoot)
-  assert.match(path.relative(vaultRoot, expectedWorkspace), /^\.\.(?:[\\/]|$)/u)
+  assert.equal(firstCall?.workingDirectory, vaultRoot)
   assert.match(firstCall?.systemPrompt ?? '', /bound to one active vault/u)
-  assert.match(firstCall?.systemPrompt ?? '', /isolated assistant workspace/u)
   assert.match(firstCall?.systemPrompt ?? '', /Murph philosophy:/u)
   assert.match(firstCall?.systemPrompt ?? '', /calm, observant companion/u)
   assert.match(firstCall?.systemPrompt ?? '', /Support the user's judgment; do not replace it/u)
   assert.match(firstCall?.systemPrompt ?? '', /numbers\./u)
   assert.match(firstCall?.systemPrompt ?? '', /Default to synthesis over interruption/u)
   assert.match(firstCall?.systemPrompt ?? '', /normal variation, probably noise, not worth optimizing right now/u)
-  assert.match(firstCall?.systemPrompt ?? '', /Vault operator mode \(default\)/u)
-  assert.match(firstCall?.systemPrompt ?? '', /Repo coding mode/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
-    /read and follow `AGENTS\.md`, `agent-docs\/index\.md`, and `agent-docs\/PRODUCT_CONSTITUTION\.md`/u,
+    /This assistant runtime is for Murph vault and assistant operations, not repo coding work/u,
   )
+  assert.match(firstCall?.systemPrompt ?? '', /This assistant runtime is for Murph vault and assistant operations, not repo coding work/u)
   assert.match(firstCall?.systemPrompt ?? '', /murph chat/u)
   assert.match(firstCall?.systemPrompt ?? '', /murph run/u)
   assert.match(firstCall?.systemPrompt ?? '', /Start with the smallest relevant context/u)
-  assert.match(
-    firstCall?.systemPrompt ?? '',
-    /bump `CURRENT_CODEX_PROMPT_VERSION` so stale Codex provider sessions rotate cleanly/u,
-  )
-  assert.match(
-    firstCall?.systemPrompt ?? '',
-    /Do not run repo tests, typechecks, coverage, coordination-ledger updates, or auto-commit workflows/u,
-  )
-  assert.match(
-    firstCall?.systemPrompt ?? '',
-    /Only use repo coding workflows when you edit repo code\/docs or the user explicitly asks for software changes/u,
-  )
   assert.match(
     firstCall?.systemPrompt ?? '',
     /Treat capture-style requests like meal logging as explicit permission/u,
@@ -620,10 +580,7 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
     firstCall?.systemPrompt ?? '',
     /use the matching `vault-cli` write surface so the write follows Murph's intended validation and audit path/u,
   )
-  assert.match(
-    firstCall?.systemPrompt ?? '',
-    /Direct Murph CLI execution is available in this session/u,
-  )
+  assert.match(firstCall?.systemPrompt ?? '', /canonical Murph operator\/data-plane surface/u)
   assert.match(firstCall?.systemPrompt ?? '', /vault-cli <command> --help/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
@@ -656,7 +613,6 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   assert.match(firstCall?.systemPrompt ?? '', /vault-cli research <prompt>/u)
   assert.match(firstCall?.systemPrompt ?? '', /review:gpt --deep-research --send --wait/u)
   assert.match(firstCall?.systemPrompt ?? '', /10 to 60 minutes/u)
-  assert.match(firstCall?.systemPrompt ?? '', /defaults the overall timeout to 40m/u)
   assert.match(firstCall?.systemPrompt ?? '', /vault-cli deepthink <prompt>/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
@@ -689,51 +645,13 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   assert.equal(turnContext?.vault, path.resolve(vaultRoot))
   assert.equal(turnContext?.sourcePrompt, 'Inspect the vault with the CLI.')
   assert.equal(turnContext?.provenance.sessionId?.startsWith('asst_'), true)
-  assert.match(
-    await readFile(path.join(expectedWorkspace, 'README.md'), 'utf8'),
-    /isolated assistant workspace/u,
-  )
-  assert.match(
-    await readFile(path.join(expectedWorkspace, 'README.md'), 'utf8'),
-    /`VAULT` environment variable/u,
-  )
-  if (stateMcpExposed) {
-    assert.match(
-      firstCall?.systemPrompt ?? '',
-      /Assistant state tools are exposed in this session/u,
-    )
-  } else {
-    assert.match(
-      firstCall?.systemPrompt ?? '',
-      /Assistant state tools are not exposed in this session, but direct Murph CLI execution is available/u,
-    )
-  }
-  if (memoryMcpExposed) {
-    assert.match(firstCall?.systemPrompt ?? '', /Assistant memory tools are exposed in this session/u)
-  } else {
-    assert.match(
-      firstCall?.systemPrompt ?? '',
-      /Assistant memory tools are not exposed in this session, but direct Murph CLI execution is available/u,
-    )
-  }
-  if (cronMcpExposed) {
-    assert.match(
-      firstCall?.systemPrompt ?? '',
-      /Scheduled assistant automation tools are exposed in this session/u,
-    )
-  } else {
-    assert.match(
-      firstCall?.systemPrompt ?? '',
-      /Scheduled assistant automation tools are not exposed in this session, but direct Murph CLI execution is available/u,
-    )
-  }
-  assert.equal(
-    Boolean(firstCall?.configOverrides?.some((value: string) => value.includes('.args=['))),
-    stateMcpExposed || memoryMcpExposed || cronMcpExposed,
-  )
+  assert.match(firstCall?.systemPrompt ?? '', /Assistant state tools are exposed in this session/u)
+  assert.match(firstCall?.systemPrompt ?? '', /Assistant memory tools are exposed in this session/u)
+  assert.match(firstCall?.systemPrompt ?? '', /Scheduled assistant automation tools are exposed in this session/u)
+  assert.equal(firstCall?.toolRuntime?.vault, vaultRoot)
   assert.equal(
     String(firstCall?.env?.PATH ?? '').split(path.delimiter)[0],
-    expectedUserBinDirectory,
+    expectedSharedPathHead,
   )
   assert.doesNotMatch(
     firstCall?.systemPrompt ?? '',
@@ -745,7 +663,7 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   )
 })
 
-test('sendAssistantMessage reuses the same isolated provider workspace across repeated turns in one session', async () => {
+test('sendAssistantMessage reuses the same requested working directory across repeated turns in one session', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-workspace-reuse-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -783,20 +701,12 @@ test('sendAssistantMessage reuses the same isolated provider workspace across re
 
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
   const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
-  const expectedWorkspace = path.join(
-    resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
-    'workspaces',
-    first.session.sessionId,
-  )
-
   assert.equal(second.session.sessionId, first.session.sessionId)
-  assert.equal(firstCall?.workingDirectory, expectedWorkspace)
-  assert.equal(secondCall?.workingDirectory, expectedWorkspace)
-  assert.notEqual(firstCall?.workingDirectory, vaultRoot)
-  assert.match(path.relative(vaultRoot, expectedWorkspace), /^\.\.(?:[\\/]|$)/u)
+  assert.equal(firstCall?.workingDirectory, vaultRoot)
+  assert.equal(secondCall?.workingDirectory, vaultRoot)
 })
 
-test('sendAssistantMessage preserves nested in-vault working directories inside the isolated workspace', async () => {
+test('sendAssistantMessage preserves nested in-vault working directories directly', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-nested-working-dir-'))
   const vaultRoot = path.join(parent, 'vault')
   const nestedWorkingDirectory = path.join(vaultRoot, 'notes', 'daily')
@@ -821,30 +731,12 @@ test('sendAssistantMessage preserves nested in-vault working directories inside 
   })
 
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
-  const expectedWorkspaceRoot = path.join(
-    resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
-    'workspaces',
-    result.session.sessionId,
-  )
-  const expectedWorkspaceDirectory = path.join(
-    expectedWorkspaceRoot,
-    'notes',
-    'daily',
-  )
-
-  assert.equal(firstCall?.workingDirectory, expectedWorkspaceDirectory)
+  assert.equal(result.session.sessionId.length > 0, true)
+  assert.equal(firstCall?.workingDirectory, nestedWorkingDirectory)
   assert.equal(firstCall?.env?.[VAULT_ENV], path.resolve(vaultRoot))
-  assert.equal(
-    path.relative(expectedWorkspaceRoot, firstCall?.workingDirectory ?? ''),
-    path.join('notes', 'daily'),
-  )
-  assert.match(
-    await readFile(path.join(expectedWorkspaceRoot, 'README.md'), 'utf8'),
-    /isolated assistant workspace/u,
-  )
 })
 
-test('sendAssistantMessage cold-starts Codex again when the requested working directory changes', async () => {
+test('sendAssistantMessage keeps the saved provider session when the requested working directory changes', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-working-dir-change-'))
   const vaultRoot = path.join(parent, 'vault')
   const nestedWorkingDirectory = path.join(vaultRoot, 'notes', 'daily')
@@ -863,7 +755,7 @@ test('sendAssistantMessage cold-starts Codex again when the requested working di
     })
     .mockResolvedValueOnce({
       provider: 'codex-cli',
-      providerSessionId: 'thread-workspace-change-2',
+      providerSessionId: 'thread-workspace-change-1',
       response: 'second reply',
       stderr: '',
       stdout: '',
@@ -884,22 +776,13 @@ test('sendAssistantMessage cold-starts Codex again when the requested working di
 
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
   const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
-  const expectedWorkspaceRoot = path.join(
-    resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
-    'workspaces',
-    first.session.sessionId,
-  )
-
   assert.equal(firstCall?.resumeProviderSessionId, null)
-  assert.equal(secondCall?.resumeProviderSessionId, null)
-  assert.equal(firstCall?.workingDirectory, expectedWorkspaceRoot)
-  assert.equal(
-    secondCall?.workingDirectory,
-    path.join(expectedWorkspaceRoot, 'notes', 'daily'),
-  )
+  assert.equal(secondCall?.resumeProviderSessionId, 'thread-workspace-change-1')
+  assert.equal(firstCall?.workingDirectory, vaultRoot)
+  assert.equal(secondCall?.workingDirectory, nestedWorkingDirectory)
   assert.equal(
     second.session.providerBinding?.providerSessionId,
-    'thread-workspace-change-2',
+    'thread-workspace-change-1',
   )
 })
 
@@ -919,7 +802,7 @@ test('sendAssistantMessage keeps the requested working directory for non-shell p
     rawEvents: [],
   })
 
-  const result = await sendAssistantMessage({
+  await sendAssistantMessage({
     vault: vaultRoot,
     alias: 'chat:nonshell-working-dir',
     provider: 'openai-compatible',
@@ -931,18 +814,9 @@ test('sendAssistantMessage keeps the requested working directory for non-shell p
   })
 
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
-  const unexpectedWorkspace = path.join(
-    resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
-    'workspaces',
-    result.session.sessionId,
-  )
 
   assert.equal(firstCall?.provider, 'openai-compatible')
   assert.equal(firstCall?.workingDirectory, vaultRoot)
-  await assert.rejects(
-    readFile(path.join(unexpectedWorkspace, 'README.md'), 'utf8'),
-    /ENOENT/u,
-  )
 })
 
 test('sendAssistantMessage keeps an outside-vault working directory for direct-CLI providers', async () => {
@@ -963,7 +837,7 @@ test('sendAssistantMessage keeps an outside-vault working directory for direct-C
     rawEvents: [],
   })
 
-  const result = await sendAssistantMessage({
+  await sendAssistantMessage({
     vault: vaultRoot,
     alias: 'chat:external-working-dir',
     provider: 'codex-cli',
@@ -972,19 +846,10 @@ test('sendAssistantMessage keeps an outside-vault working directory for direct-C
   })
 
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
-  const unexpectedWorkspace = path.join(
-    resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
-    'workspaces',
-    result.session.sessionId,
-  )
 
   assert.equal(firstCall?.provider, 'codex-cli')
   assert.equal(firstCall?.workingDirectory, externalRoot)
   assert.equal(firstCall?.env?.[VAULT_ENV], path.resolve(vaultRoot))
-  await assert.rejects(
-    readFile(path.join(unexpectedWorkspace, 'README.md'), 'utf8'),
-    /ENOENT/u,
-  )
 })
 
 test('sendAssistantMessage clamps vault-bound danger-full-access requests back to workspace-write', async () => {
@@ -1802,7 +1667,7 @@ test('sendAssistantMessage replays the local transcript for OpenAI-compatible se
     )
     assert.match(
       firstCall?.systemPrompt ?? '',
-      /does not expose direct CLI execution/u,
+      /canonical Murph operator\/data-plane surface/u,
     )
     assert.doesNotMatch(
       firstCall?.systemPrompt ?? '',
@@ -2011,22 +1876,22 @@ test('sendAssistantMessage lets Codex auto-reply turns use the full Murph runtim
     const providerCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
 
     assert.equal(providerCall?.provider, 'codex-cli')
-    assert.equal(providerCall?.toolRuntime, undefined)
+    assert.equal(providerCall?.toolRuntime?.vault, vaultRoot)
     assert.match(
       providerCall?.systemPrompt ?? '',
-      /Assistant state tools are not exposed in this session, but direct Murph CLI execution is available/u,
+      /Assistant state tools are exposed in this session/u,
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
-      /Assistant memory tools are not exposed in this session, but direct Murph CLI execution is available/u,
+      /Assistant memory tools are exposed in this session/u,
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
-      /Scheduled assistant automation tools are not exposed in this session, but direct Murph CLI execution is available/u,
+      /Scheduled assistant automation tools are exposed in this session/u,
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
-      /Direct Murph CLI execution is available in this session/u,
+      /canonical Murph operator\/data-plane surface/u,
     )
     assert.equal(result.response, 'auto-reply')
   } finally {
@@ -2034,8 +1899,8 @@ test('sendAssistantMessage lets Codex auto-reply turns use the full Murph runtim
   }
 })
 
-test('sendAssistantMessage rotates stale Codex provider sessions after a prompt-version change while keeping local transcript continuity', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-codex-prompt-version-'))
+test('sendAssistantMessage resumes a saved Codex provider session by route', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-codex-route-resume-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -2056,11 +1921,6 @@ test('sendAssistantMessage rotates stale Codex provider sessions after a prompt-
       text: 'Old answer about dinner.',
     },
   ])
-  const expectedWorkingDirectory = path.join(
-    resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
-    'workspaces',
-    resolved.session.sessionId,
-  )
   const [primaryRoute] = buildAssistantFailoverRoutes({
     provider: 'codex-cli',
     providerOptions: resolved.session.providerOptions,
@@ -2075,11 +1935,7 @@ test('sendAssistantMessage rotates stale Codex provider sessions after a prompt-
       providerSessionId: 'thread-stale-codex',
       providerOptions: resolved.session.providerOptions,
       providerState: {
-        codexCli: {
-          promptVersion: '2026-03-20.1',
-        },
         resumeRouteId: primaryRoute!.routeId,
-        resumeWorkspaceKey: buildWorkingDirectoryKey(expectedWorkingDirectory),
       },
     },
     updatedAt: '2026-03-26T00:00:00.000Z',
@@ -2089,8 +1945,8 @@ test('sendAssistantMessage rotates stale Codex provider sessions after a prompt-
 
   serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
     provider: 'codex-cli',
-    providerSessionId: 'thread-fresh-codex',
-    response: 'Fresh reply.',
+    providerSessionId: 'thread-stale-codex',
+    response: 'Resumed reply.',
     stderr: '',
     stdout: '',
     rawEvents: [],
@@ -2103,25 +1959,13 @@ test('sendAssistantMessage rotates stale Codex provider sessions after a prompt-
   })
 
   const call = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
-  assert.equal(call?.resumeProviderSessionId, null)
-  assert.match(
-    call?.continuityContext ?? '',
-    /Recent local conversation transcript from this same Murph session/u,
-  )
-  assert.match(call?.continuityContext ?? '', /User: Old question about dinner\./u)
-  assert.match(call?.continuityContext ?? '', /Assistant: Old answer about dinner\./u)
-  assert.match(
-    call?.continuityContext ?? '',
-    /bootstrapping the fresh Codex provider session/u,
-  )
+  assert.equal(call?.resumeProviderSessionId, 'thread-stale-codex')
+  assert.equal(call?.continuityContext ?? '', '')
   assert.equal(
     result.session.providerBinding?.providerSessionId,
-    'thread-fresh-codex',
+    'thread-stale-codex',
   )
-  assert.equal(
-    result.session.providerBinding?.providerState?.codexCli?.promptVersion,
-    CURRENT_CODEX_PROMPT_VERSION,
-  )
+  assert.equal(result.session.providerBinding?.providerState?.resumeRouteId, primaryRoute!.routeId)
   assert.equal(result.session.turnCount, 3)
 })
 
@@ -2155,9 +1999,7 @@ test('sendAssistantMessage cold-starts when a saved provider binding is missing 
       providerSessionId: 'thread-legacy-binding',
       providerOptions: resolved.session.providerOptions,
       providerState: {
-        codexCli: null,
         resumeRouteId: null,
-        resumeWorkspaceKey: null,
       },
     },
     updatedAt: '2026-03-26T00:00:00.000Z',
@@ -2188,8 +2030,8 @@ test('sendAssistantMessage cold-starts when a saved provider binding is missing 
   )
 })
 
-test('sendAssistantMessage cold-starts when a saved provider binding is missing explicit resume workspace metadata', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-legacy-workspace-binding-'))
+test('sendAssistantMessage resumes when a saved provider binding still has matching route metadata', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-legacy-resume-binding-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -2200,11 +2042,6 @@ test('sendAssistantMessage cold-starts when a saved provider binding is missing 
     alias: 'chat:legacy-workspace-binding',
     provider: 'codex-cli',
   })
-  const expectedWorkingDirectory = path.join(
-    resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
-    'workspaces',
-    resolved.session.sessionId,
-  )
   const [primaryRoute] = buildAssistantFailoverRoutes({
     provider: 'codex-cli',
     providerOptions: resolved.session.providerOptions,
@@ -2219,9 +2056,7 @@ test('sendAssistantMessage cold-starts when a saved provider binding is missing 
       providerSessionId: 'thread-legacy-workspace-binding',
       providerOptions: resolved.session.providerOptions,
       providerState: {
-        codexCli: null,
         resumeRouteId: primaryRoute!.routeId,
-        resumeWorkspaceKey: null,
       },
     },
     updatedAt: '2026-03-26T00:00:00.000Z',
@@ -2231,8 +2066,8 @@ test('sendAssistantMessage cold-starts when a saved provider binding is missing 
 
   serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
     provider: 'codex-cli',
-    providerSessionId: 'thread-fresh-after-legacy-workspace-binding',
-    response: 'Fresh reply.',
+    providerSessionId: 'thread-legacy-workspace-binding',
+    response: 'Resumed reply.',
     stderr: '',
     stdout: '',
     rawEvents: [],
@@ -2245,11 +2080,11 @@ test('sendAssistantMessage cold-starts when a saved provider binding is missing 
   })
 
   const call = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
-  assert.equal(call?.resumeProviderSessionId, null)
-  assert.equal(call?.workingDirectory, expectedWorkingDirectory)
+  assert.equal(call?.resumeProviderSessionId, 'thread-legacy-workspace-binding')
+  assert.equal(call?.workingDirectory, vaultRoot)
   assert.equal(
     result.session.providerBinding?.providerSessionId,
-    'thread-fresh-after-legacy-workspace-binding',
+    'thread-legacy-workspace-binding',
   )
 })
 
@@ -2877,7 +2712,7 @@ test('sendAssistantMessage forwards provider progress callbacks to the provider 
   assert.equal(firstCall?.onEvent, onProviderEvent)
 })
 
-test('sendAssistantMessage recreates a missing local session from the live session snapshot and retries the turn', async () => {
+test('sendAssistantMessage fails closed when the local session file disappears', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-session-restore-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -2888,11 +2723,6 @@ test('sendAssistantMessage recreates a missing local session from the live sessi
     vault: vaultRoot,
     alias: 'chat:restore',
   })
-  const expectedWorkingDirectory = path.join(
-    resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
-    'workspaces',
-    created.session.sessionId,
-  )
   const [primaryRoute] = buildAssistantFailoverRoutes({
     provider: 'codex-cli',
     providerOptions: created.session.providerOptions,
@@ -2906,9 +2736,7 @@ test('sendAssistantMessage recreates a missing local session from the live sessi
       providerSessionId: 'thread-live-1',
       providerOptions: created.session.providerOptions,
       providerState: {
-        codexCli: null,
         resumeRouteId: primaryRoute!.routeId,
-        resumeWorkspaceKey: buildWorkingDirectoryKey(expectedWorkingDirectory),
       },
     },
     updatedAt: '2026-03-22T06:27:12.000Z',
@@ -2921,54 +2749,19 @@ test('sendAssistantMessage recreates a missing local session from the live sessi
     force: true,
   })
 
-  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
-    provider: 'codex-cli',
-    providerSessionId: 'thread-live-1',
-    response: 'Recovered.',
-    stderr: '',
-    stdout: '',
-    rawEvents: [],
-  })
-
-  const result = await sendAssistantMessage({
-    vault: vaultRoot,
-    prompt: 'Keep going.',
-    sessionId: hydrated.sessionId,
-    sessionSnapshot: hydrated,
-  })
-
-  assert.equal(result.session.sessionId, hydrated.sessionId)
-  assert.equal(result.session.providerBinding?.providerSessionId, 'thread-live-1')
-  assert.equal(result.session.turnCount, 2)
-
-  const persisted = await resolveAssistantSession({
-    vault: vaultRoot,
-    sessionId: hydrated.sessionId,
-    createIfMissing: false,
-  })
-  assert.equal(persisted.session.sessionId, hydrated.sessionId)
-  assert.equal(persisted.session.turnCount, 2)
-
-  const transcript = await listAssistantTranscriptEntries(vaultRoot, hydrated.sessionId)
-  assert.deepEqual(
-    transcript.map((entry) => ({
-      kind: entry.kind,
-      text: entry.text,
-    })),
-    [
-      {
-        kind: 'user',
-        text: 'Keep going.',
-      },
-      {
-        kind: 'assistant',
-        text: 'Recovered.',
-      },
-    ],
+  await assert.rejects(
+    sendAssistantMessage({
+      vault: vaultRoot,
+      prompt: 'Keep going.',
+      sessionId: hydrated.sessionId,
+    }),
+    (error: any) => {
+      assert.equal(error.code, 'ASSISTANT_SESSION_NOT_FOUND')
+      return true
+    },
   )
 
-  const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
-  assert.equal(firstCall?.resumeProviderSessionId, 'thread-live-1')
+  assert.equal(serviceMocks.executeAssistantProviderTurn.mock.calls.length, 0)
 })
 
 test('sendAssistantMessage keeps a recovered provider session id out of the canonical session after a resumable provider failure', async () => {
@@ -3020,16 +2813,8 @@ test('sendAssistantMessage keeps a recovered provider session id out of the cano
     alias: 'chat:recoverable-error',
   })
 
-  assert.equal(resolved.session.providerBinding?.providerSessionId ?? null, null)
+  assert.equal(resolved.session.providerBinding?.providerSessionId, 'thread-resume-1')
   assert.equal(resolved.session.turnCount, 0)
-  const recovery = await readAssistantProviderRouteRecovery(
-    vaultRoot,
-    resolved.session.sessionId,
-  )
-  assert.equal(
-    recovery?.routes[0]?.providerSessionId,
-    'thread-resume-1',
-  )
 
   const retried = await sendAssistantMessage({
     vault: vaultRoot,
@@ -3044,7 +2829,7 @@ test('sendAssistantMessage keeps a recovered provider session id out of the cano
   )
 })
 
-test('sendAssistantMessage does not resume a recovered provider session after the working directory changes', async () => {
+test('sendAssistantMessage keeps resuming a recovered provider session after the working directory changes', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-recoverable-workdir-'))
   const vaultRoot = path.join(parent, 'vault')
   const alternateWorkingDirectory = path.join(parent, 'alternate-workdir')
@@ -3067,8 +2852,8 @@ test('sendAssistantMessage does not resume a recovered provider session after th
     )
     .mockResolvedValueOnce({
       provider: 'codex-cli',
-      providerSessionId: 'thread-fresh-workdir',
-      response: 'Started fresh.',
+      providerSessionId: 'thread-recover-default-workdir',
+      response: 'Resumed safely.',
       stderr: '',
       stdout: '',
       rawEvents: [],
@@ -3087,12 +2872,8 @@ test('sendAssistantMessage does not resume a recovered provider session after th
     vault: vaultRoot,
     alias: 'chat:recoverable-workdir-change',
   })
-  const recovery = await readAssistantProviderRouteRecovery(
-    vaultRoot,
-    resolved.session.sessionId,
-  )
   assert.equal(
-    recovery?.routes[0]?.providerSessionId,
+    resolved.session.providerBinding?.providerSessionId,
     'thread-recover-default-workdir',
   )
 
@@ -3103,10 +2884,10 @@ test('sendAssistantMessage does not resume a recovered provider session after th
     workingDirectory: alternateWorkingDirectory,
   })
 
-  assert.equal(retried.session.providerBinding?.providerSessionId, 'thread-fresh-workdir')
+  assert.equal(retried.session.providerBinding?.providerSessionId, 'thread-recover-default-workdir')
   assert.equal(
     serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]?.resumeProviderSessionId,
-    null,
+    'thread-recover-default-workdir',
   )
   assert.equal(
     serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]?.workingDirectory,
@@ -4387,16 +4168,8 @@ test('sendAssistantMessage keeps recovered provider sessions out of the canonica
     vault: vaultRoot,
     alias: 'chat:canonical-recoverable-error',
   })
-  assert.equal(session.session.providerBinding?.providerSessionId ?? null, null)
+  assert.equal(session.session.providerBinding?.providerSessionId, 'thread-recover-blocked-1')
   assert.equal(session.session.turnCount, 0)
-  const recovery = await readAssistantProviderRouteRecovery(
-    vaultRoot,
-    session.session.sessionId,
-  )
-  assert.equal(
-    recovery?.routes[0]?.providerSessionId,
-    'thread-recover-blocked-1',
-  )
 
   serviceMocks.executeAssistantProviderTurn.mockResolvedValueOnce({
     provider: 'codex-cli',
@@ -4631,9 +4404,7 @@ test('sendAssistantMessage does not reuse an OpenAI Responses session on a coole
       providerSessionId: 'resp_primary_route',
       providerOptions,
       providerState: {
-        codexCli: null,
         resumeRouteId: primaryRoute.routeId,
-        resumeWorkspaceKey: null,
       },
     },
     updatedAt: '2026-04-02T08:05:00.000Z',
@@ -5123,7 +4894,7 @@ test('sendAssistantMessage preserves the primary provider error for tool-bound o
   assert.equal(serviceMocks.executeAssistantProviderTurnAttempt.mock.calls.length, 1)
 })
 
-test('sendAssistantMessage restores a missing local transcript snapshot for openai-compatible sessions before retrying the turn', async () => {
+test('sendAssistantMessage fails closed when openai-compatible session state disappears', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-openai-restore-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -5164,75 +4935,22 @@ test('sendAssistantMessage restores a missing local transcript snapshot for open
     force: true,
   })
 
-  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
-    provider: 'openai-compatible',
-    providerSessionId: null,
-    response: 'Recovered.',
-    stderr: '',
-    stdout: '',
-    rawEvents: [],
-  })
-
-  const result = await sendAssistantMessage({
-    vault: vaultRoot,
-    prompt: 'Keep going.',
-    sessionId: hydrated.sessionId,
-    sessionSnapshot: hydrated,
-    transcriptSnapshot: [
-      {
-        kind: 'user',
-        text: 'First question',
-        createdAt: '2026-03-22T06:20:00.000Z',
-      },
-      {
-        kind: 'assistant',
-        text: 'First answer',
-        createdAt: '2026-03-22T06:20:05.000Z',
-      },
-    ],
-  })
-
-  assert.equal(result.session.sessionId, hydrated.sessionId)
-  const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
-  assert.deepEqual(firstCall?.conversationMessages, [
-    {
-      role: 'user',
-      content: 'First question',
+  await assert.rejects(
+    sendAssistantMessage({
+      vault: vaultRoot,
+      prompt: 'Keep going.',
+      sessionId: hydrated.sessionId,
+    }),
+    (error: any) => {
+      assert.equal(error.code, 'ASSISTANT_SESSION_NOT_FOUND')
+      return true
     },
-    {
-      role: 'assistant',
-      content: 'First answer',
-    },
-  ])
-
-  const transcript = await listAssistantTranscriptEntries(vaultRoot, hydrated.sessionId)
-  assert.deepEqual(
-    transcript.map((entry) => ({
-      kind: entry.kind,
-      text: entry.text,
-    })),
-    [
-      {
-        kind: 'user',
-        text: 'First question',
-      },
-      {
-        kind: 'assistant',
-        text: 'First answer',
-      },
-      {
-        kind: 'user',
-        text: 'Keep going.',
-      },
-      {
-        kind: 'assistant',
-        text: 'Recovered.',
-      },
-    ],
   )
+
+  assert.equal(serviceMocks.executeAssistantProviderTurn.mock.calls.length, 0)
 })
 
-test('sendAssistantMessage refuses session-only restore for openai-compatible sessions when the local transcript is also missing', async () => {
+test('sendAssistantMessage fails closed for missing openai-compatible sessions', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-openai-restore-missing-transcript-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -5260,10 +4978,9 @@ test('sendAssistantMessage refuses session-only restore for openai-compatible se
       vault: vaultRoot,
       prompt: 'Keep going.',
       sessionId: created.session.sessionId,
-      sessionSnapshot: created.session,
     }),
     (error: any) => {
-      assert.equal(error.code, 'ASSISTANT_SESSION_TRANSCRIPT_RESTORE_REQUIRED')
+      assert.equal(error.code, 'ASSISTANT_SESSION_NOT_FOUND')
       return true
     },
   )
@@ -5271,7 +4988,7 @@ test('sendAssistantMessage refuses session-only restore for openai-compatible se
   assert.equal(serviceMocks.executeAssistantProviderTurn.mock.calls.length, 0)
 })
 
-test('sendAssistantMessage accepts an explicitly empty transcript snapshot for openai-compatible session restore', async () => {
+test('sendAssistantMessage does not accept transcript snapshot fallbacks for openai-compatible sessions', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-openai-restore-empty-transcript-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -5294,45 +5011,17 @@ test('sendAssistantMessage accepts an explicitly empty transcript snapshot for o
     force: true,
   })
 
-  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
-    provider: 'openai-compatible',
-    providerSessionId: null,
-    response: 'Recovered from empty transcript.',
-    stderr: '',
-    stdout: '',
-    rawEvents: [],
-  })
-
-  const result = await sendAssistantMessage({
-    vault: vaultRoot,
-    prompt: 'Keep going.',
-    sessionId: created.session.sessionId,
-    sessionSnapshot: created.session,
-    transcriptSnapshot: [],
-  })
-
-  assert.equal(result.session.sessionId, created.session.sessionId)
-  const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
-  assert.deepEqual(firstCall?.conversationMessages, [])
-
-  const transcript = await listAssistantTranscriptEntries(
-    vaultRoot,
-    created.session.sessionId,
+  await assert.rejects(
+    sendAssistantMessage({
+      vault: vaultRoot,
+      prompt: 'Keep going.',
+      sessionId: created.session.sessionId,
+    }),
+    (error: any) => {
+      assert.equal(error.code, 'ASSISTANT_SESSION_NOT_FOUND')
+      return true
+    },
   )
-  assert.deepEqual(
-    transcript.map((entry) => ({
-      kind: entry.kind,
-      text: entry.text,
-    })),
-    [
-      {
-        kind: 'user',
-        text: 'Keep going.',
-      },
-      {
-        kind: 'assistant',
-        text: 'Recovered from empty transcript.',
-      },
-    ],
-  )
+
+  assert.equal(serviceMocks.executeAssistantProviderTurn.mock.calls.length, 0)
 })

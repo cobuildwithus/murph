@@ -56,7 +56,7 @@ import {
   executeAssistantProviderTurnAttempt,
   executeAssistantProviderTurn,
   resolveAssistantProviderCapabilities,
-  resolveAssistantProviderTraits,
+  resolveAssistantProviderRuntime,
 } from '@murphai/assistant-core/assistant/provider-registry'
 import {
   defaultDiscoverOpenAICompatibleModels,
@@ -67,6 +67,7 @@ import {
   buildAssistantProviderDefaultsPatch,
   resolveAssistantProviderDefaults,
 } from '@murphai/assistant-core/operator-config'
+import { prepareAssistantDirectCliEnv } from '@murphai/assistant-core/assistant-cli-access'
 import { serializeAssistantProviderSessionOptions } from '@murphai/assistant-core/assistant/provider-config'
 import { createSetupAssistantResolver } from '../src/setup-assistant.js'
 
@@ -248,35 +249,32 @@ test('resolveAssistantProviderDefaults can read inactive saved provider entries'
   })
 })
 
-test('resolveAssistantProviderCapabilities keeps prompt-only providers from claiming direct CLI execution', () => {
+test('resolveAssistantProviderCapabilities reports shared backend-facing capabilities', () => {
   assert.deepEqual(resolveAssistantProviderCapabilities('codex-cli'), {
-    supportsHostToolRuntime: false,
-    supportsDirectCliExecution: true,
     supportsModelDiscovery: false,
+    supportsNativeResume: true,
     supportsReasoningEffort: true,
     supportsRichUserMessageContent: false,
   })
   assert.deepEqual(resolveAssistantProviderCapabilities('openai-compatible'), {
-    supportsHostToolRuntime: true,
-    supportsDirectCliExecution: false,
     supportsModelDiscovery: true,
+    supportsNativeResume: true,
     supportsReasoningEffort: false,
     supportsRichUserMessageContent: true,
   })
 })
 
-test('resolveAssistantProviderTraits makes session/workspace behavior explicit', () => {
-  assert.deepEqual(resolveAssistantProviderTraits('codex-cli'), {
-    resumeKeyMode: 'provider-session-id',
-    sessionMode: 'stateful',
-    transcriptContextMode: 'provider-session',
-    workspaceMode: 'direct-cli',
+test('resolveAssistantProviderRuntime keeps canonical write authority in Murph', () => {
+  assert.deepEqual(resolveAssistantProviderRuntime({
+    provider: 'codex-cli',
+  }), {
+    requiresCanonicalWriteGuard: true,
   })
-  assert.deepEqual(resolveAssistantProviderTraits('openai-compatible'), {
-    resumeKeyMode: 'none',
-    sessionMode: 'stateless',
-    transcriptContextMode: 'local-transcript',
-    workspaceMode: 'none',
+  assert.deepEqual(resolveAssistantProviderRuntime({
+    provider: 'openai-compatible',
+    baseUrl: 'http://127.0.0.1:11434/v1',
+  }), {
+    requiresCanonicalWriteGuard: false,
   })
 })
 
@@ -500,7 +498,6 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
   const result = await executeAssistantProviderTurn({
     abortSignal: abortController.signal,
     provider: 'codex-cli',
-    configOverrides: ['mcp_servers.murph_memory.command="node"'],
     continuityContext: 'Recent local conversation transcript:\nUser: prior question',
     env: {
       PATH: '/tmp/murph-bin',
@@ -535,10 +532,13 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
   const call = providerMocks.executeCodexPrompt.mock.calls[0]?.[0]
   assert.equal(call?.abortSignal, abortController.signal)
   assert.equal(call?.codexCommand, '/opt/homebrew/bin/codex')
-  assert.deepEqual(call?.configOverrides, ['mcp_servers.murph_memory.command="node"'])
-  assert.deepEqual(call?.env, {
-    PATH: '/tmp/murph-bin',
-  })
+  assert.equal(call?.configOverrides, undefined)
+  assert.deepEqual(
+    call?.env,
+    prepareAssistantDirectCliEnv({
+      PATH: '/tmp/murph-bin',
+    }),
+  )
   assert.equal(call?.workingDirectory, '/tmp/vault')
   assert.equal(call?.resumeSessionId, 'thread-existing')
   assert.equal(call?.model, 'gpt-oss:20b')
@@ -1393,7 +1393,6 @@ test('executeAssistantProviderTurn enables reasoning summary traces when request
 
   await executeAssistantProviderTurn({
     provider: 'codex-cli',
-    configOverrides: ['mcp_servers.murph_memory.command="node"'],
     workingDirectory: '/tmp/vault',
     userPrompt: 'hello',
     showThinkingTraces: true,
@@ -1402,7 +1401,6 @@ test('executeAssistantProviderTurn enables reasoning summary traces when request
 
   const call = providerMocks.executeCodexPrompt.mock.calls[0]?.[0]
   assert.deepEqual(call?.configOverrides, [
-    'mcp_servers.murph_memory.command="node"',
     'model_reasoning_summary="auto"',
     'hide_agent_reasoning=false',
   ])

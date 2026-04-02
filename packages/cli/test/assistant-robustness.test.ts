@@ -8,20 +8,6 @@ const robustnessMocks = vi.hoisted(() => ({
   deliverAssistantMessageOverBinding: vi.fn(),
   executeAssistantProviderTurnAttempt: vi.fn(),
   executeAssistantProviderTurn: vi.fn(),
-  resolveAssistantProviderTraits: vi.fn((provider: string) =>
-    provider === 'openai-compatible'
-      ? {
-          resumeKeyMode: 'none' as const,
-          sessionMode: 'stateless' as const,
-          transcriptContextMode: 'local-transcript' as const,
-          workspaceMode: 'none' as const,
-        }
-      : {
-          resumeKeyMode: 'provider-session-id' as const,
-          sessionMode: 'stateful' as const,
-          transcriptContextMode: 'provider-session' as const,
-          workspaceMode: 'direct-cli' as const,
-        }),
 }))
 
 vi.mock('@murphai/assistant-core/outbound-channel', async () => {
@@ -46,7 +32,6 @@ vi.mock('@murphai/assistant-core/assistant-provider', async () => {
     executeAssistantProviderTurnAttempt:
       robustnessMocks.executeAssistantProviderTurnAttempt,
     executeAssistantProviderTurn: robustnessMocks.executeAssistantProviderTurn,
-    resolveAssistantProviderTraits: robustnessMocks.resolveAssistantProviderTraits,
   }
 })
 
@@ -78,21 +63,6 @@ beforeEach(() => {
   robustnessMocks.deliverAssistantMessageOverBinding.mockReset()
   robustnessMocks.executeAssistantProviderTurnAttempt.mockReset()
   robustnessMocks.executeAssistantProviderTurn.mockReset()
-  robustnessMocks.resolveAssistantProviderTraits.mockReset()
-  robustnessMocks.resolveAssistantProviderTraits.mockImplementation((provider: string) =>
-    provider === 'openai-compatible'
-      ? {
-          resumeKeyMode: 'none',
-          sessionMode: 'stateless',
-          transcriptContextMode: 'local-transcript',
-          workspaceMode: 'none',
-        }
-      : {
-          resumeKeyMode: 'provider-session-id',
-          sessionMode: 'stateful',
-          transcriptContextMode: 'provider-session',
-          workspaceMode: 'direct-cli',
-        })
   robustnessMocks.executeAssistantProviderTurnAttempt.mockImplementation(
     async (...args: Parameters<typeof robustnessMocks.executeAssistantProviderTurn>) => {
       try {
@@ -722,9 +692,7 @@ test('sendAssistantMessage fails over across provider routes and records cooldow
       'openai-compatible',
     )
     assert.equal(backupCall?.model, 'backup-model')
-    assert.equal(primaryCall?.conversationMessages, undefined)
-    assert.equal(primaryCall?.configOverrides, undefined)
-    assert.equal(backupCall?.configOverrides, undefined)
+    assert.equal(primaryCall?.conversationMessages?.length ?? 0, 0)
     assert.equal(backupCall?.conversationMessages?.length ?? 0, 0)
     assert.equal(backupCall?.userPrompt, 'summarize the latest updates')
 

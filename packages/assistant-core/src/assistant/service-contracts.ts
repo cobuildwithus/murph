@@ -18,7 +18,6 @@ import type { AssistantUserMessageContentPart } from '../model-harness.js'
 import type { AssistantCliAccessContext } from '../assistant-cli-access.js'
 import type { AssistantOutboxDispatchMode } from './outbox.js'
 import type {
-  AssistantTranscriptEntryInput,
   ResolvedAssistantSession,
 } from './store.js'
 import type {
@@ -35,7 +34,6 @@ import type {
 } from './failover.js'
 import type { recordAssistantDiagnosticEvent } from './diagnostics.js'
 import type { finalizeAssistantTurnReceipt } from './turns.js'
-import type { readAssistantProviderRouteRecovery } from './provider-turn-recovery.js'
 
 export interface AssistantSessionResolutionFields {
   actorId?: string | null
@@ -81,9 +79,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   prompt: string
   userMessageContent?: AssistantUserMessageContentPart[] | null
   receiptMetadata?: Record<string, string> | null
-  sessionSnapshot?: AssistantSession | null
   showThinkingTraces?: boolean
-  transcriptSnapshot?: readonly AssistantTranscriptEntryInput[] | null
   turnTrigger?: AssistantTurnTrigger
   workingDirectory?: string
 }
@@ -105,7 +101,6 @@ export interface AssistantTurnSharedPlan {
 
 export interface AssistantRouteTurnPlan {
   cliEnv: NodeJS.ProcessEnv
-  configOverrides?: readonly string[]
   conversationMessages?: ReadonlyArray<{
     content: string
     role: 'assistant' | 'user'
@@ -138,9 +133,6 @@ export interface ExecutedAssistantProviderTurnResult extends AssistantProviderTu
 export type AssistantProviderFailoverState = Awaited<
   ReturnType<typeof readAssistantFailoverState>
 >
-export type AssistantProviderRouteRecoveryState = Awaited<
-  ReturnType<typeof readAssistantProviderRouteRecovery>
->
 
 export interface AssistantProviderTurnExecutionPlan {
   input: AssistantMessageInput
@@ -165,27 +157,23 @@ export type AssistantProviderAttemptOutcome =
       kind: 'blocked'
       error: unknown
       failoverState: AssistantProviderFailoverState
-      providerRecovery: AssistantProviderRouteRecoveryState
       session: AssistantSession
     }
   | {
       kind: 'failed_terminal'
       error: unknown
       failoverState: AssistantProviderFailoverState
-      providerRecovery: AssistantProviderRouteRecoveryState
       session: AssistantSession
     }
   | {
       kind: 'retry_next_route'
       error: unknown
       failoverState: AssistantProviderFailoverState
-      providerRecovery: AssistantProviderRouteRecoveryState
       session: AssistantSession
     }
   | {
       kind: 'succeeded'
       failoverState: AssistantProviderFailoverState
-      providerRecovery: AssistantProviderRouteRecoveryState
       result: ExecutedAssistantProviderTurnResult
     }
 

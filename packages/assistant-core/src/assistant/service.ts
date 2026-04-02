@@ -10,7 +10,6 @@ import {
   updateAssistantSessionOptionsLocal,
 } from './local-service.js'
 
-export { CURRENT_CODEX_PROMPT_VERSION } from './local-service.js'
 export { buildResolveAssistantSessionInput } from './session-resolution.js'
 export {
   openAssistantConversationLocal,

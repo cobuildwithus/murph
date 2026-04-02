@@ -433,7 +433,6 @@ test('assistant daemon client routes serializable assistant operations through t
               caches: [],
               maintenance: {
                 lastRunAt: null,
-                staleProviderRecoveryPruned: 0,
                 staleQuarantinePruned: 0,
                 staleLocksCleared: 0,
                 notes: [],

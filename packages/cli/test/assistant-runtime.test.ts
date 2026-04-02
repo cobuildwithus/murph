@@ -50,26 +50,21 @@ const runtimeMocks = vi.hoisted(() => ({
   routeInboxCaptureWithModel: vi.fn(),
   runAssistantChatWithInk: vi.fn(),
   resolveAssistantProviderCapabilities: vi.fn((provider: string) => ({
-    supportsHostToolRuntime: provider === 'openai-compatible',
-    supportsDirectCliExecution: provider !== 'openai-compatible',
     supportsModelDiscovery: provider === 'openai-compatible',
+    supportsNativeResume: true,
     supportsReasoningEffort: provider !== 'openai-compatible',
     supportsRichUserMessageContent: provider === 'openai-compatible',
   })),
-  resolveAssistantProviderTraits: vi.fn((provider: string) =>
-    provider === 'openai-compatible'
+  resolveAssistantProviderRuntime: vi.fn((provider: string, baseUrl?: string | null) => {
+    void baseUrl
+    return provider === 'openai-compatible'
       ? {
-          resumeKeyMode: 'none' as const,
-          sessionMode: 'stateless' as const,
-          transcriptContextMode: 'local-transcript' as const,
-          workspaceMode: 'none' as const,
+          requiresCanonicalWriteGuard: false,
         }
       : {
-          resumeKeyMode: 'provider-session-id' as const,
-          sessionMode: 'stateful' as const,
-          transcriptContextMode: 'provider-session' as const,
-          workspaceMode: 'direct-cli' as const,
-        }),
+          requiresCanonicalWriteGuard: true,
+        }
+  }),
 }))
 
 vi.mock('../src/assistant-chat-ink.js', () => ({
@@ -100,7 +95,14 @@ vi.mock('@murphai/assistant-core/assistant-provider', async () => {
     executeAssistantProviderTurn: runtimeMocks.executeAssistantProviderTurn,
     resolveAssistantProviderCapabilities:
       runtimeMocks.resolveAssistantProviderCapabilities,
-    resolveAssistantProviderTraits: runtimeMocks.resolveAssistantProviderTraits,
+    resolveAssistantProviderRuntime: (input: {
+      provider: string
+      baseUrl?: string | null
+    }) =>
+      runtimeMocks.resolveAssistantProviderRuntime(
+        input.provider,
+        input.baseUrl ?? null,
+      ),
   }
 })
 
@@ -426,28 +428,23 @@ beforeEach(() => {
   runtimeMocks.routeInboxCaptureWithModel.mockReset()
   runtimeMocks.runAssistantChatWithInk.mockReset()
   runtimeMocks.resolveAssistantProviderCapabilities.mockReset()
-  runtimeMocks.resolveAssistantProviderTraits.mockReset()
+  runtimeMocks.resolveAssistantProviderRuntime.mockReset()
   runtimeMocks.resolveAssistantProviderCapabilities.mockImplementation((provider: string) => ({
-    supportsHostToolRuntime: provider === 'openai-compatible',
-    supportsDirectCliExecution: provider !== 'openai-compatible',
     supportsModelDiscovery: provider === 'openai-compatible',
+    supportsNativeResume: true,
     supportsReasoningEffort: provider !== 'openai-compatible',
     supportsRichUserMessageContent: provider === 'openai-compatible',
   }))
-  runtimeMocks.resolveAssistantProviderTraits.mockImplementation((provider: string) =>
-    provider === 'openai-compatible'
+  runtimeMocks.resolveAssistantProviderRuntime.mockImplementation((provider: string, baseUrl?: string | null) => {
+    void baseUrl
+    return provider === 'openai-compatible'
       ? {
-          resumeKeyMode: 'none',
-          sessionMode: 'stateless',
-          transcriptContextMode: 'local-transcript',
-          workspaceMode: 'none',
+          requiresCanonicalWriteGuard: false,
         }
       : {
-          resumeKeyMode: 'provider-session-id',
-          sessionMode: 'stateful',
-          transcriptContextMode: 'provider-session',
-          workspaceMode: 'direct-cli',
-        })
+          requiresCanonicalWriteGuard: true,
+        }
+  })
   runtimeMocks.executeAssistantProviderTurnAttempt.mockImplementation(
     async (...args: Parameters<typeof runtimeMocks.executeAssistantProviderTurn>) => {
       try {
@@ -528,7 +525,7 @@ test('sendAssistantMessage writes append-only transcript distillations once loca
   )
 })
 
-test('sendAssistantMessage chains official OpenAI responses without local transcript distillation', async () => {
+test('sendAssistantMessage chains official OpenAI responses while retaining local transcript continuity without distillation', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-openai-responses-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
@@ -578,7 +575,16 @@ test('sendAssistantMessage chains official OpenAI responses without local transc
   )
   assert.equal(providerCalls[0]?.resumeProviderSessionId, null)
   assert.equal(providerCalls[1]?.resumeProviderSessionId, 'resp_1')
-  assert.equal(providerCalls[1]?.conversationMessages, undefined)
+  assert.deepEqual(providerCalls[1]?.conversationMessages, [
+    {
+      content: 'What changed on day 1?',
+      role: 'user',
+    },
+    {
+      content: 'acknowledged 1',
+      role: 'assistant',
+    },
+  ])
   assert.equal(providerCalls[1]?.continuityContext, null)
   assert.equal(typeof providerCalls[1]?.systemPrompt, 'string')
 
@@ -586,14 +592,16 @@ test('sendAssistantMessage chains official OpenAI responses without local transc
     vaultRoot,
     latest!.session.sessionId,
   )
-  assert.equal(distillation, null)
+  assert.ok(distillation)
+  assert.equal(distillation.preview, 'What changed on day 1?')
+  assert.equal(distillation.preservedRecentConversationCount, 8)
 
   const receipts = await listAssistantTurnReceipts(vaultRoot)
   const latestReceipt = receipts[0]
   assert.ok(latestReceipt)
   assert.equal(
     latestReceipt?.timeline.some((event) => event.kind === 'provider.context.refreshed'),
-    false,
+    true,
   )
 })
 
@@ -778,7 +786,7 @@ test('sendAssistantMessage persists only assistant session metadata and reuses p
   assert.match(firstCall.systemPrompt ?? '', /You are Murph/u)
   assert.equal(firstCall.userPrompt, 'What did Bob eat?')
   assert.equal(firstCall.sessionContext?.binding.channel, 'imessage')
-  assert.equal(secondCall.systemPrompt, null)
+  assert.equal(typeof secondCall.systemPrompt, 'string')
   assert.equal(secondCall.userPrompt, 'What about today?')
 })
 
@@ -948,7 +956,10 @@ test('sendAssistantMessage recovers provider sessions after user interruptions a
     maxSessionAgeMs: null,
   })
 
-  assert.equal(resolved.session.providerBinding?.providerSessionId ?? null, null)
+  assert.equal(
+    resolved.session.providerBinding?.providerSessionId ?? null,
+    'thread-pause-1',
+  )
   assert.equal(resolved.session.turnCount, 0)
 })
 
@@ -5437,7 +5448,7 @@ test('scanAssistantAutoReplyOnce only auto-replies to Telegram direct chats', as
   )
 })
 
-test('scanAssistantAutoReplyOnce aborts stalled provider turns and retries the same capture with a cold restart', async () => {
+test('scanAssistantAutoReplyOnce aborts stalled provider turns and retries the same capture with recovered provider continuity', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-auto-reply-stall-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
@@ -5680,7 +5691,7 @@ test('scanAssistantAutoReplyOnce aborts stalled provider turns and retries the s
   assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 1)
   assert.equal(
     runtimeMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]?.resumeProviderSessionId,
-    null,
+    'thread-stall-1',
   )
   assert.equal(
     events.some(
@@ -6009,7 +6020,7 @@ test('scanAssistantAutoReplyOnce defers reconnectable provider failures and pres
   })
   assert.equal(
     runtimeMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]?.resumeProviderSessionId,
-    null,
+    'thread-retry-1',
   )
   assert.equal(
     events.some(
@@ -6037,7 +6048,10 @@ test('scanAssistantAutoReplyOnce defers reconnectable provider failures and pres
     maxSessionAgeMs: null,
   })
 
-  assert.equal(resolved.session.providerBinding?.providerSessionId ?? null, null)
+  assert.equal(
+    resolved.session.providerBinding?.providerSessionId ?? null,
+    'thread-retry-1',
+  )
   assert.equal(resolved.session.turnCount, 0)
   assert.deepEqual(
     (await listAssistantTranscriptEntries(vaultRoot, resolved.session.sessionId)).map(

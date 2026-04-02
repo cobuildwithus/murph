@@ -1,18 +1,7 @@
-import { existsSync } from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { resolveOperatorHomeDirectory } from './operator-config.js'
-import { assistantMemoryTurnEnvKeys } from './assistant/memory.js'
 
 const DEFAULT_USER_BIN_SEGMENTS = ['.local', 'bin'] as const
-const ASSISTANT_STATE_MCP_SERVER_NAME = 'murph_state'
-const ASSISTANT_MEMORY_MCP_SERVER_NAME = 'murph_memory'
-const ASSISTANT_CRON_MCP_SERVER_NAME = 'murph_cron'
-const ASSISTANT_CLI_MCP_FORWARD_ENV_VARS = [
-  'HOME',
-  'PATH',
-  ...assistantMemoryTurnEnvKeys,
-] as const
 
 export interface AssistantCliAccessContext {
   env: NodeJS.ProcessEnv
@@ -20,22 +9,11 @@ export interface AssistantCliAccessContext {
   setupCommand: 'murph'
 }
 
-export interface AssistantCliMcpConfig {
-  configOverrides: string[]
-}
-
-export interface AssistantCliGuidanceCapabilities {
-  supportsDirectCliExecution: boolean
-}
-
 export function resolveAssistantCliAccessContext(
   env: NodeJS.ProcessEnv = process.env,
 ): AssistantCliAccessContext {
-  const homeDirectory = resolveOperatorHomeDirectory(env)
-  const userBinDirectory = path.join(homeDirectory, ...DEFAULT_USER_BIN_SEGMENTS)
-
   return {
-    env: withPrependedPath(env, [userBinDirectory]),
+    env,
     rawCommand: 'vault-cli',
     setupCommand: 'murph',
   }
@@ -43,18 +21,15 @@ export function resolveAssistantCliAccessContext(
 
 export function buildAssistantCliGuidanceText(
   access: Pick<AssistantCliAccessContext, 'rawCommand' | 'setupCommand'>,
-  capabilities: AssistantCliGuidanceCapabilities,
 ): string {
   return [
-    capabilities.supportsDirectCliExecution
-      ? `Direct Murph CLI execution is available in this session. \`${access.rawCommand}\` is the raw Murph operator/data-plane surface for vault, inbox, and assistant operations, so prefer the \`${access.rawCommand}\` spelling when you need the exact command.`
-      : `\`${access.rawCommand}\` is the raw Murph operator/data-plane surface for vault, inbox, and assistant operations, but this provider path does not expose direct CLI execution. If the user needs a CLI operation here, give them the exact \`${access.rawCommand} ...\` command to run or switch to a Codex-backed Murph chat session.`,
-    `\`${access.setupCommand}\` is the setup/onboarding entrypoint and also exposes the same top-level \`chat\` and \`run\` aliases after setup. Do not treat \`${access.setupCommand} chat\` or \`${access.setupCommand} run\` as separate products from the assistant surfaces.`,
+    'Murph tools are the primary runtime surface in this session.',
+    `\`${access.rawCommand}\` is the canonical Murph operator/data-plane surface for vault, inbox, and assistant operations. Prefer assistant tools when they are exposed in this session, and use the exact \`${access.rawCommand}\` spelling when you need CLI semantics or a fallback command.`,
+    `\`${access.setupCommand}\` is the setup and onboarding entrypoint and also exposes the same top-level \`chat\` and \`run\` aliases after setup. Do not treat \`${access.setupCommand} chat\` or \`${access.setupCommand} run\` as separate products from the assistant surfaces.`,
     `Do not rely on this prompt for command semantics. Start with the narrowest CLI discovery that answers the user: use \`${access.rawCommand} <command> --help\` for syntax and examples, \`${access.rawCommand} <command> --schema --format json\` when you need exact flags or output shapes, and \`${access.rawCommand} --llms\` or \`${access.rawCommand} --llms-full\` only for broad CLI discovery.`,
-    capabilities.supportsDirectCliExecution
-      ? 'When a user asks you to inspect or operate through Murph, prefer using the CLI directly over manually inferring behavior from files alone.'
-      : 'When this prompt-only provider path cannot execute a command directly, map the request onto the canonical CLI surface and tell the user the exact command they should run instead of pretending you already ran it.',
-    'Do not edit canonical vault files such as `vault.json`, `CORE.md`, `ledger/**`, `bank/**`, or `raw/**` directly through shell or file tools in vault-operator mode. When the user wants to change canonical data, use the matching `vault-cli` write surface so the write follows Murph\'s intended validation and audit path.',
+    'When the user asks you to inspect or operate through Murph, prefer the bound assistant tools first and otherwise map the request onto the canonical CLI surface instead of improvising from raw files.',
+    'If a needed CLI action is unavailable through the bound tools in this session, give the user the exact command instead of pretending it already ran.',
+    'Do not edit canonical vault files such as `vault.json`, `CORE.md`, `ledger/**`, `bank/**`, or `raw/**` directly through shell or file tools. When the user wants to change canonical data, use the matching Murph write surface. Concretely, use the matching `vault-cli` write surface so the write follows Murph\'s intended validation and audit path.',
     `When an action needs outbound contact details such as a phone number, Telegram chat/thread, email address, or AgentMail identity, first inspect saved local self-targets with \`${access.rawCommand} assistant self-target list\` or \`${access.rawCommand} assistant self-target show <channel>\`. If the needed route is not already saved, ask the user explicitly for the missing details instead of guessing, and save them later with \`${access.rawCommand} assistant self-target set <channel> ...\` only after the user provides them.`,
     `If the user shares a meal photo, audio note, or a text-only description of what they ate or drank, treat that as a meal-logging request that maps to \`${access.rawCommand} meal add\` instead of generic chat. Log the meal without asking whether they want it logged first. Meal logging no longer requires a photo, so use the same meal surface for meals, snacks, and drinks even when only freeform text is available, preserving "snack" or "drink" in the note when that is the right label.`,
     `If the user logs the same detailed meal more than once, such as an acai bowl with basically the same components on different days, still log the current meal first. Only then ask one short follow-up that could make it reusable, such as where it is from or what the specific version is, so you can add it as a food for future reuse. Do not infer this from broad generic repeats alone: two separate logs like "I ate steak" are not enough to make a reusable food. Do not silently create the food record unless the user clearly asks for that.`,
@@ -70,69 +45,12 @@ export function buildAssistantCliGuidanceText(
   ].join('\n\n')
 }
 
-export function buildAssistantMemoryMcpConfig(
-  workingDirectory: string,
-): AssistantCliMcpConfig | null {
-  return buildAssistantCliSubtreeMcpConfig({
-    serverName: ASSISTANT_MEMORY_MCP_SERVER_NAME,
-    subcommandPath: ['memory'],
-    workingDirectory,
-  })
-}
-
-export function buildAssistantStateMcpConfig(
-  workingDirectory: string,
-): AssistantCliMcpConfig | null {
-  return buildAssistantCliSubtreeMcpConfig({
-    serverName: ASSISTANT_STATE_MCP_SERVER_NAME,
-    subcommandPath: ['state'],
-    workingDirectory,
-  })
-}
-
-export function buildAssistantCronMcpConfig(
-  workingDirectory: string,
-): AssistantCliMcpConfig | null {
-  return buildAssistantCliSubtreeMcpConfig({
-    serverName: ASSISTANT_CRON_MCP_SERVER_NAME,
-    subcommandPath: ['cron'],
-    workingDirectory,
-  })
-}
-
-function buildAssistantCliSubtreeMcpConfig(input: {
-  serverName: string
-  subcommandPath: readonly string[]
-  workingDirectory: string
-}): AssistantCliMcpConfig | null {
-  const packageDirectory = resolveCliPackageDirectory()
-  const distBinPath = path.join(packageDirectory, 'dist', 'bin.js')
-  if (!existsSync(distBinPath)) {
-    return null
-  }
-
-  return {
-    configOverrides: [
-      `mcp_servers.${input.serverName}.command=${JSON.stringify(process.execPath)}`,
-      `mcp_servers.${input.serverName}.args=${JSON.stringify([
-        distBinPath,
-        'assistant',
-        ...input.subcommandPath,
-        '--mcp',
-      ])}`,
-      `mcp_servers.${input.serverName}.cwd=${JSON.stringify(
-        path.resolve(input.workingDirectory),
-      )}`,
-      `mcp_servers.${input.serverName}.env_vars=${JSON.stringify(
-        ASSISTANT_CLI_MCP_FORWARD_ENV_VARS,
-      )}`,
-      `mcp_servers.${input.serverName}.required=true`,
-    ],
-  }
-}
-
-function resolveCliPackageDirectory(): string {
-  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+export function prepareAssistantDirectCliEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const homeDirectory = resolveOperatorHomeDirectory(env)
+  const userBinDirectory = path.join(homeDirectory, ...DEFAULT_USER_BIN_SEGMENTS)
+  return withPrependedPath(env, [userBinDirectory])
 }
 
 function withPrependedPath(

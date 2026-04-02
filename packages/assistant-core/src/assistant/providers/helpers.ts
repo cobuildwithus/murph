@@ -18,7 +18,7 @@ import type {
 } from './types.js'
 
 export function buildOpenAICompatibleDiscoveryHeaders(input: {
-  config: Extract<AssistantProviderConfig, { provider: 'openai-compatible' }>
+  config: AssistantProviderConfig
   env?: NodeJS.ProcessEnv
 }): Record<string, string> {
   const headers =
@@ -288,13 +288,12 @@ export function buildAssistantProviderMessages(
 }
 
 export function mergeCodexConfigOverrides(input: {
-  configOverrides?: readonly string[]
   showThinkingTraces: boolean
 }): readonly string[] | undefined {
-  const overrides = [...(input.configOverrides ?? [])]
+  const overrides: string[] = []
 
   if (!input.showThinkingTraces) {
-    return overrides.length > 0 ? overrides : input.configOverrides
+    return undefined
   }
 
   upsertCodexConfigOverride(overrides, 'model_reasoning_summary', '"auto"')
@@ -322,7 +321,7 @@ function upsertCodexConfigOverride(
 }
 
 export function extractOpenAICompatibleAssistantProviderUsage(input: {
-  providerConfig: Extract<AssistantProviderConfig, { provider: 'openai-compatible' }>
+  providerConfig: AssistantProviderConfig
   result: unknown
 }): AssistantProviderUsage {
   const resultRecord = readAssistantProviderRecord(input.result)
@@ -419,7 +418,7 @@ export function extractOpenAICompatibleProviderSessionId(
 }
 
 export function extractCodexAssistantProviderUsage(input: {
-  providerConfig: Extract<AssistantProviderConfig, { provider: 'codex-cli' }>
+  providerConfig: AssistantProviderConfig
   rawEvents: readonly unknown[]
 }): AssistantProviderUsage {
   const completionEvent = findAssistantCodexCompletionEvent(input.rawEvents)
