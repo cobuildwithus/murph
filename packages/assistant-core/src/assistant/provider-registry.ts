@@ -24,6 +24,7 @@ export {
   listAssistantProviderDefinitions,
   listAssistantProviders,
   resolveAssistantProviderCapabilities,
+  resolveAssistantProviderTargetCapabilities,
   resolveAssistantProviderLabel,
   resolveAssistantProviderStaticModels,
 } from './providers/registry.js'
