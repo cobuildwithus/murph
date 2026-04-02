@@ -72,6 +72,72 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
     });
   });
 
+  it("preserves hosted reasoning effort for named OpenAI profiles", async () => {
+    const homeDirectory = await createTemporaryHomeDirectory();
+
+    const result = await ensureHostedAssistantOperatorDefaults({
+      allowMissing: false,
+      env: {
+        HOSTED_ASSISTANT_MODEL: "gpt-5.4",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
+      },
+      homeDirectory,
+    });
+
+    expect(result).toMatchObject({
+      configured: true,
+      provider: "openai-compatible",
+      seeded: true,
+      source: "hosted-env",
+    });
+
+    await expect(resolveHostedAssistantConfig(homeDirectory)).resolves.toMatchObject({
+      activeProfileId: "platform-default",
+      profiles: [
+        {
+          id: "platform-default",
+          model: "gpt-5.4",
+          provider: "openai-compatible",
+          providerName: "openai",
+          reasoningEffort: "medium",
+        },
+      ],
+    });
+
+    await expect(resolveAssistantOperatorDefaults(homeDirectory)).resolves.toMatchObject({
+      defaultsByProvider: {
+        "openai-compatible": {
+          apiKeyEnv: "OPENAI_API_KEY",
+          baseUrl: "https://api.openai.com/v1",
+          model: "gpt-5.4",
+          providerName: "openai",
+          reasoningEffort: "medium",
+        },
+      },
+      provider: "openai-compatible",
+    });
+  });
+
+  it("rejects hosted reasoning effort for non-OpenAI-compatible endpoints", async () => {
+    const homeDirectory = await createTemporaryHomeDirectory();
+
+    await expect(
+      ensureHostedAssistantOperatorDefaults({
+        allowMissing: false,
+        env: {
+          HOSTED_ASSISTANT_MODEL: "openrouter/openai/gpt-5.4",
+          HOSTED_ASSISTANT_PROVIDER: "openrouter",
+          HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
+        },
+        homeDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_ASSISTANT_CONFIG_INVALID",
+      name: "HostedAssistantConfigurationError",
+    });
+  });
+
   it("allows activation bootstrap to stay missing when no hosted assistant seed exists", async () => {
     const homeDirectory = await createTemporaryHomeDirectory();
 

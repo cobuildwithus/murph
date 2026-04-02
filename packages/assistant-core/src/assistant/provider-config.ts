@@ -106,7 +106,7 @@ export function sanitizeAssistantProviderConfig(
         oss: false,
         profile: null,
         providerName: normalizeNullableString(input?.providerName),
-        reasoningEffort: null,
+        reasoningEffort: normalizeNullableString(input?.reasoningEffort),
         sandbox: null,
       }
     case 'codex-cli':
