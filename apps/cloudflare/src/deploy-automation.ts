@@ -1,9 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  readHostedAssistantApiKeyEnvName,
-} from "@murphai/assistant-core";
 import { hostedAssistantAutomationEnabledFromEnv } from "@murphai/hosted-execution";
 
 import { isAllowedHostedAssistantReferencedRunnerEnvKey } from "./hosted-env-policy.ts";
@@ -474,7 +471,7 @@ function readHostedAssistantReferencedSecret(
     return {};
   }
 
-  const envName = readHostedAssistantApiKeyEnvName(source);
+  const envName = normalizeString(source.HOSTED_ASSISTANT_API_KEY_ENV);
 
   if (!envName || !isAllowedHostedAssistantReferencedRunnerEnvKey(envName)) {
     return {};
