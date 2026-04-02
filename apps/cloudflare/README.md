@@ -12,7 +12,7 @@ This app is intentionally separate from `apps/web`:
 - verify signed internal dispatch from `apps/web`
 - coordinate per-user runs through a `USER_RUNNER` Durable Object
 - store one encrypted hosted workspace snapshot in the existing `vault` bundle slot plus separately encrypted raw-artifact objects in the `BUNDLES` R2 bucket
-- perform durable hosted bootstrap explicitly on `member.activated` instead of mutating vault/assistant config during every run
+- perform durable hosted bootstrap explicitly on `member.activated` and keep later runs on explicit compiled assistant config instead of implicit provider fallback
 - restore a temporary execution context for one-shot runs
 - start the Durable Object's native Cloudflare container on demand for the runner process
 - run the existing Murph inbox, parser, assistant, device-sync, and hosted share-import seams for member activation, direct Linq messages, hosted share acceptance, hosted device-sync wake events, and periodic assistant ticks through the headless `@murphai/assistant-runtime` package
@@ -52,6 +52,7 @@ Current worker env/config names read directly by `src/env.ts`:
 - optional non-secret: `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS` defaults to `60000`
 - optional non-secret: `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS` defaults to `30000` and is forwarded into the container runtime
 - optional non-secret: `HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION` defaults to enabled; set it to `false`, `0`, `no`, `off`, or `disabled` to keep the hosted runner on deterministic inbox/parser/device-sync/share-import work only, strip automation-only provider/channel secrets, skip auto-enabling assistant reply channels, and skip the general assistant automation loop
+- optional non-secret: `HOSTED_ASSISTANT_*` vars choose the explicit platform-managed hosted assistant profile that `member.activated` persists into `~/.murph/config.json`; that durable hosted config compiles into the existing assistant defaults artifact so later runs do not depend on implicit provider fallback. `HOSTED_ASSISTANT_API_KEY_ENV` names the env var to read at runtime; it is never the raw API key itself
 - optional non-secret: `HOSTED_WEB_BASE_URL` gives the worker a shared hosted-web base URL for runner proxy calls back into `apps/web` and is also available to the runtime when `src/runner-env.ts` allows it
 - optional non-secret: `HOSTED_DEVICE_SYNC_CONTROL_BASE_URL`, `HOSTED_AI_USAGE_BASE_URL`, and `HOSTED_SHARE_API_BASE_URL` are worker-side runner proxy overrides for hosted web control-plane routes that intentionally live on separate hosts
 - optional provider/toolchain vars and secrets configured on the Worker are forwarded into the container only when `src/runner-env.ts` explicitly allowlists them; the worker-side hosted web proxy inputs above stay on the Worker side unless that file names them
@@ -141,6 +142,7 @@ The Cloudflare app now keeps two focused Vitest lanes:
 ## Operational notes
 
 - The worker never stores plaintext vault material in Durable Object storage. It stores only per-user coordination state plus encrypted bundle references.
+- Hosted assistant provider selection now has one explicit durable seam: a top-level `hostedAssistant` config in the operator config artifact. The runtime compiles that into `assistant.provider` / `assistant.defaultsByProvider` for compatibility, while raw credentials still stay in Worker secrets or the separately encrypted per-user env object.
 - Hosted bundle reads/writes and per-user env object updates happen outside the Durable Object's SQLite mutation step; only the final bundle-ref/version compare-and-swap is committed inside Durable Object storage.
 - Hosted execution now writes one encrypted workspace snapshot back through the existing `vault` bundle slot. That workspace snapshot includes canonical `vault/**`, durable `vault/.runtime/**`, sibling `assistant-state/**`, and the minimal operator-home config needed for explicit `member.activated` bootstrap. Large raw artifacts under `vault/raw/**` are externalized into separately encrypted content-addressed objects; the runner restores inline workspace files first, only materializes the externalized artifact paths the current run actually needs, and preserves untouched artifact refs across later snapshots so old media does not churn through download/upload cycles just to stay referenced. Per-user runner env overrides live in their own encrypted hosted object.
 - Bundle writes are skipped when the bundle content hash and byte length are unchanged, which helps avoid unnecessary R2 write churn on no-op assistant/device-sync passes.

@@ -14,7 +14,10 @@ import type {
 import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
-import type { AssistantExecutionContext } from "@murphai/assistant-core";
+import {
+  HostedAssistantConfigurationError,
+  type AssistantExecutionContext,
+} from "@murphai/assistant-core";
 
 import {
   commitHostedExecutionResult,
@@ -56,7 +59,9 @@ export {
 interface HostedAssistantRuntimeChildResult {
   ok: boolean;
   error?: {
+    code?: string | null;
     message: string;
+    name?: string | null;
     stack?: string | null;
   };
   result?: HostedExecutionRunnerResult;
@@ -284,12 +289,7 @@ export async function runHostedAssistantRuntimeJobIsolated(
           const payload = parseHostedRuntimeChildResult(stdout);
 
           if (!payload.ok) {
-            settleError(
-              new Error(
-                payload.error?.message
-                  ?? `Hosted assistant runtime child exited with code ${code ?? "unknown"}.`,
-              ),
-            );
+            settleError(createHostedRuntimeChildError(payload.error, code));
             return;
           }
 
@@ -373,6 +373,34 @@ function createHostedRuntimeAbortError(signal: AbortSignal | null): Error {
   }
 
   return new Error("Hosted assistant runtime child was aborted.");
+}
+
+function createHostedRuntimeChildError(
+  error: HostedAssistantRuntimeChildResult["error"] | undefined,
+  code: number | null,
+): Error {
+  const message = error?.message
+    ?? `Hosted assistant runtime child exited with code ${code ?? "unknown"}.`;
+
+  if (error?.name === "HostedAssistantConfigurationError") {
+    const classified = new HostedAssistantConfigurationError(
+      error.code === "HOSTED_ASSISTANT_CONFIG_REQUIRED"
+        ? "HOSTED_ASSISTANT_CONFIG_REQUIRED"
+        : "HOSTED_ASSISTANT_CONFIG_INVALID",
+      message,
+    );
+    classified.stack = error.stack ?? classified.stack;
+    return classified;
+  }
+
+  const untyped = new Error(message);
+  if (error?.name) {
+    untyped.name = error.name;
+  }
+  if (error?.stack) {
+    untyped.stack = error.stack;
+  }
+  return untyped;
 }
 
 export function formatHostedRuntimeChildResult(

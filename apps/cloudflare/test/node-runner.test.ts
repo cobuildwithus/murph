@@ -185,7 +185,8 @@ describe("runHostedExecutionJob", () => {
 
     expect(result.result.summary).toContain("Processed member activation");
     expect(result.result.summary).toContain("created the canonical vault");
-    expect(result.result.summary).toContain("kept hosted email auto-reply unchanged");
+    expect(result.result.summary).toContain("hosted assistant config unavailable");
+    expect(result.result.summary).toContain("hosted email auto-reply unavailable");
     expect(result.result.summary).toContain("Parser jobs: 0.");
     expect(automationState.autoReplyChannels).not.toContain("linq");
     expect(automationState.autoReplyChannels).not.toContain("email");
@@ -228,15 +229,19 @@ describe("runHostedExecutionJob", () => {
 
     expect(secondActivation.result.summary).toContain("Processed member activation");
     expect(secondActivation.result.summary).toContain("reused the canonical vault");
-    expect(secondActivation.result.summary).toContain("kept hosted email auto-reply unchanged");
+    expect(secondActivation.result.summary).toContain("hosted assistant config unavailable");
+    expect(secondActivation.result.summary).toContain("hosted email auto-reply unavailable");
   });
 
 
   it("does not bootstrap hosted email auto-reply when ingress is configured but send credentials are missing", async () => {
+    const previousAutomationEnabled = process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION;
     const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
     const previousHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
     const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
+    const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
 
+    delete process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION;
     process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
     process.env.HOSTED_EMAIL_LOCAL_PART = "assistant";
     process.env.HOSTED_EMAIL_SIGNING_SECRET = "email-secret";
@@ -267,12 +272,15 @@ describe("runHostedExecutionJob", () => {
         await readFile(path.join(restored.assistantStateRoot, "automation.json"), "utf8"),
       ) as { autoReplyChannels: string[] };
 
-      expect(result.result.summary).toContain("kept hosted email auto-reply unchanged");
+      expect(result.result.summary).toContain("seeded explicit hosted assistant config (openai-compatible)");
+      expect(result.result.summary).toContain("hosted email auto-reply unavailable");
       expect(automationState.autoReplyChannels).not.toContain("email");
     } finally {
+      restoreEnvVar("HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION", previousAutomationEnabled);
       restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
       restoreEnvVar("HOSTED_EMAIL_LOCAL_PART", previousHostedEmailLocalPart);
       restoreEnvVar("HOSTED_EMAIL_SIGNING_SECRET", previousHostedEmailSigningSecret);
+      restoreEnvVars(previousHostedAssistantEnv);
     }
   });
 
@@ -355,6 +363,7 @@ describe("runHostedExecutionJob", () => {
     const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
     const previousHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
     const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
+    const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
 
     delete process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION;
     process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID = "acct_123";
@@ -389,7 +398,8 @@ describe("runHostedExecutionJob", () => {
         await readFile(path.join(restored.assistantStateRoot, "automation.json"), "utf8"),
       ) as { autoReplyChannels: string[] };
 
-      expect(result.result.summary).toContain("enabled hosted email auto-reply");
+      expect(result.result.summary).toContain("seeded explicit hosted assistant config (openai-compatible)");
+      expect(result.result.summary).toContain("hosted email auto-reply ready");
       expect(automationState.autoReplyChannels).toContain("email");
       expect(automationState.autoReplyChannels).not.toContain("linq");
     } finally {
@@ -399,16 +409,20 @@ describe("runHostedExecutionJob", () => {
       restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
       restoreEnvVar("HOSTED_EMAIL_LOCAL_PART", previousHostedEmailLocalPart);
       restoreEnvVar("HOSTED_EMAIL_SIGNING_SECRET", previousHostedEmailSigningSecret);
+      restoreEnvVars(previousHostedAssistantEnv);
     }
   });
 
   it("does not bootstrap hosted email auto-reply when sender credentials exist without a hosted email domain", async () => {
+    const previousAutomationEnabled = process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION;
     const previousHostedEmailAccountId = process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID;
     const previousHostedEmailApiToken = process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN;
     const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
     const previousHostedEmailFromAddress = process.env.HOSTED_EMAIL_FROM_ADDRESS;
     const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
+    const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
 
+    delete process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION;
     process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID = "acct_123";
     process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN = "cf-token";
     process.env.HOSTED_EMAIL_FROM_ADDRESS = "assistant@mail.example.test";
@@ -441,14 +455,17 @@ describe("runHostedExecutionJob", () => {
         await readFile(path.join(restored.assistantStateRoot, "automation.json"), "utf8"),
       ) as { autoReplyChannels: string[] };
 
-      expect(result.result.summary).toContain("kept hosted email auto-reply unchanged");
+      expect(result.result.summary).toContain("seeded explicit hosted assistant config (openai-compatible)");
+      expect(result.result.summary).toContain("hosted email auto-reply unavailable");
       expect(automationState.autoReplyChannels).not.toContain("email");
     } finally {
+      restoreEnvVar("HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION", previousAutomationEnabled);
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_API_TOKEN", previousHostedEmailApiToken);
       restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
       restoreEnvVar("HOSTED_EMAIL_FROM_ADDRESS", previousHostedEmailFromAddress);
       restoreEnvVar("HOSTED_EMAIL_SIGNING_SECRET", previousHostedEmailSigningSecret);
+      restoreEnvVars(previousHostedAssistantEnv);
     }
   });
 
@@ -512,6 +529,9 @@ describe("runHostedExecutionJob", () => {
 
       expect(result.result.summary).toContain("Processed assistant cron tick");
       expect(automationState.autoReplyChannels).not.toContain("email");
+      await expect(
+        readFile(path.join(restored.operatorHomeRoot, ".murph", "config.json"), "utf8"),
+      ).rejects.toThrow();
     } finally {
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_API_TOKEN", previousHostedEmailApiToken);
@@ -2001,6 +2021,7 @@ describe("runHostedExecutionJob", () => {
 
   it("journals hosted assistant deliveries after the durable commit before finalizing returned bundles", async () => {
     const previousAutomationEnabled = process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION;
+    const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
     const parent = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-journal-"));
     cleanupPaths.push(parent);
     process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION = "true";
@@ -2216,6 +2237,7 @@ describe("runHostedExecutionJob", () => {
       expect(statusSnapshot.recentTurns).toEqual([]);
     } finally {
       restoreEnvVar("HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION", previousAutomationEnabled);
+      restoreEnvVars(previousHostedAssistantEnv);
     }
   });
 
@@ -2226,6 +2248,7 @@ describe("runHostedExecutionJob", () => {
     const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
     const previousHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
     const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
+    const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
 
     process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION = "off";
     process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID = "acct_123";
@@ -2260,8 +2283,12 @@ describe("runHostedExecutionJob", () => {
         await readFile(path.join(restored.assistantStateRoot, "automation.json"), "utf8"),
       ) as { autoReplyChannels: string[] };
 
-      expect(result.result.summary).toContain("kept hosted email auto-reply unchanged");
+      expect(result.result.summary).toContain("seeded explicit hosted assistant config (openai-compatible)");
+      expect(result.result.summary).toContain("hosted email auto-reply unavailable");
       expect(automationState.autoReplyChannels).toEqual([]);
+      await expect(
+        readFile(path.join(restored.operatorHomeRoot, ".murph", "config.json"), "utf8"),
+      ).resolves.toContain("\"hostedAssistant\"");
     } finally {
       restoreEnvVar("HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION", previousAutomationEnabled);
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
@@ -2269,6 +2296,7 @@ describe("runHostedExecutionJob", () => {
       restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
       restoreEnvVar("HOSTED_EMAIL_LOCAL_PART", previousHostedEmailLocalPart);
       restoreEnvVar("HOSTED_EMAIL_SIGNING_SECRET", previousHostedEmailSigningSecret);
+      restoreEnvVars(previousHostedAssistantEnv);
     }
   });
 
@@ -2700,6 +2728,26 @@ function restoreEnvVar(key: string, value: string | undefined): void {
   }
 
   process.env[key] = value;
+}
+
+function setHostedAssistantSeedEnv(): Record<string, string | undefined> {
+  const previousEnv = captureEnvVars([
+    "HOSTED_ASSISTANT_MODEL",
+    "HOSTED_ASSISTANT_PROVIDER",
+  ]);
+  process.env.HOSTED_ASSISTANT_MODEL = "gpt-4.1-mini";
+  process.env.HOSTED_ASSISTANT_PROVIDER = "openai";
+  return previousEnv;
+}
+
+function captureEnvVars(keys: readonly string[]): Record<string, string | undefined> {
+  return Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+}
+
+function restoreEnvVars(values: Record<string, string | undefined>): void {
+  for (const [key, value] of Object.entries(values)) {
+    restoreEnvVar(key, value);
+  }
 }
 
 function createDeferred<T>() {

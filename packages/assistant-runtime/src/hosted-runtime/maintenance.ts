@@ -28,6 +28,7 @@ import {
   syncHostedDeviceSyncControlPlaneState,
   type HostedDeviceSyncRuntimeSyncState,
 } from "../hosted-device-sync-runtime.ts";
+import { readHostedAssistantRuntimeState } from "./context.ts";
 import type {
   HostedExecutionDispatchRequest,
   HostedExecutionWebControlPlaneEnvironment,
@@ -40,12 +41,58 @@ import {
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
 const HOSTED_MAX_PARSER_JOBS = 50;
 
+interface HostedAssistantAutomationReadiness {
+  configured: boolean;
+  enabled: boolean;
+  provider: "codex-cli" | "openai-compatible" | null;
+  shouldRun: boolean;
+}
+
+async function resolveHostedAssistantAutomationReadiness(input: {
+  runtimeEnv: Readonly<Record<string, string>>;
+  skipAssistantAutomation: boolean;
+}): Promise<HostedAssistantAutomationReadiness> {
+  if (!hostedAssistantAutomationEnabledFromEnv(input.runtimeEnv)) {
+    return {
+      configured: false,
+      enabled: false,
+      provider: null,
+      shouldRun: false,
+    };
+  }
+
+  const assistantState = await readHostedAssistantRuntimeState();
+
+  return {
+    configured: assistantState.assistantConfigured,
+    enabled: true,
+    provider: assistantState.assistantProvider,
+    shouldRun: assistantState.assistantConfigured && !input.skipAssistantAutomation,
+  };
+}
+
+function reportHostedAssistantAutomationSkipped(
+  dispatch: HostedExecutionDispatchRequest,
+  provider: "codex-cli" | "openai-compatible" | null,
+): void {
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    dispatch,
+    level: "warn",
+    message: provider
+      ? `Hosted assistant automation skipped because the active hosted assistant profile (${provider}) is not ready.`
+      : "Hosted assistant automation skipped because no explicit hosted assistant profile is configured.",
+    phase: "dispatch.running",
+  });
+}
+
 export async function runHostedMaintenanceLoop(input: {
   artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
   dispatch: HostedExecutionDispatchRequest;
   executionContext: AssistantExecutionContext;
   internalWorkerFetch?: typeof fetch;
   requestId: string;
+  skipAssistantAutomation?: boolean;
   timeoutMs: number | null;
   runtimeEnv: Readonly<Record<string, string>>;
   webControlPlane?: HostedExecutionWebControlPlaneEnvironment;
@@ -57,14 +104,26 @@ export async function runHostedMaintenanceLoop(input: {
     artifactMaterializer: input.artifactMaterializer ?? null,
     vaultRoot: input.vaultRoot,
   });
-  if (hostedAssistantAutomationEnabledFromEnv(input.runtimeEnv)) {
+  const assistantAutomation = await resolveHostedAssistantAutomationReadiness({
+    runtimeEnv: input.runtimeEnv,
+    skipAssistantAutomation: input.skipAssistantAutomation ?? false,
+  });
+
+  if (assistantAutomation.enabled && !assistantAutomation.configured) {
+    reportHostedAssistantAutomationSkipped(input.dispatch, assistantAutomation.provider);
+  }
+
+  if (assistantAutomation.shouldRun) {
     await runHostedAssistantAutomation(
       input.vaultRoot,
       input.requestId,
       input.executionContext,
     );
   }
-  const assistantCronStatus = await getAssistantCronStatus(input.vaultRoot);
+
+  const assistantNextWakeAt = assistantAutomation.shouldRun
+    ? (await getAssistantCronStatus(input.vaultRoot)).nextRunAt
+    : null;
   const deviceSyncResult = await runHostedDeviceSyncPass(
     input.dispatch,
     input.vaultRoot,
@@ -78,7 +137,7 @@ export async function runHostedMaintenanceLoop(input: {
     deviceSyncProcessed: deviceSyncResult.processedJobs,
     deviceSyncSkipped: deviceSyncResult.skipped,
     nextWakeAt: earliestHostedWakeAt(
-      assistantCronStatus.nextRunAt,
+      assistantNextWakeAt,
       deviceSyncResult.nextWakeAt,
     ),
     parserProcessed: parserResult.processedJobs,

@@ -1,4 +1,7 @@
 import {
+  readHostedAssistantApiKeyEnvName,
+} from "@murphai/assistant-core";
+import {
   hostedAssistantAutomationEnabledFromEnv,
   readHostedEmailCapabilities,
 } from "@murphai/hosted-execution";
@@ -74,6 +77,7 @@ const DISALLOWED_USER_ENV_KEYS = new Set([
 
 const DISALLOWED_USER_ENV_PREFIXES = [
   "CF_",
+  "HOSTED_ASSISTANT_",
   "HOSTED_EMAIL_",
   "HOSTED_EXECUTION_",
   "WRANGLER_",
@@ -179,6 +183,7 @@ const RUNNER_ALLOWED_ENV_PREFIXES = [
   "GOOGLE_",
   "GROQ_",
   "HF_",
+  "HOSTED_ASSISTANT_",
   "HUGGINGFACE_",
   "HUGGING_FACE_",
   "LINQ_",
@@ -252,6 +257,22 @@ export function buildHostedRunnerContainerEnv(
     values[key] = value;
   }
 
+  if (automationEnabled) {
+    const hostedAssistantApiKeyEnv = readHostedAssistantApiKeyEnvName(source);
+    const hostedAssistantApiKeyValue = hostedAssistantApiKeyEnv
+      ? source[hostedAssistantApiKeyEnv]
+      : undefined;
+
+    if (
+      hostedAssistantApiKeyEnv
+      && isAllowedHostedAssistantReferencedRunnerEnvKey(hostedAssistantApiKeyEnv)
+      && typeof hostedAssistantApiKeyValue === "string"
+      && hostedAssistantApiKeyValue.length > 0
+    ) {
+      values[hostedAssistantApiKeyEnv] = hostedAssistantApiKeyValue;
+    }
+  }
+
   if (!values.NODE_ENV) {
     values.NODE_ENV = "production";
   }
@@ -279,6 +300,10 @@ export function filterHostedRunnerUserEnv(
   }
 
   return values;
+}
+
+export function isAllowedHostedAssistantReferencedRunnerEnvKey(key: string): boolean {
+  return isAllowedRunnerEnvKey(key);
 }
 
 function shouldForwardHostedRunnerEnv(key: string, automationEnabled: boolean): boolean {

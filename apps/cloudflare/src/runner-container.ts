@@ -22,8 +22,11 @@ const DEFAULT_CONTAINER_SLEEP_AFTER = "5m";
 const RUNNER_CONTROL_AUTH_SCHEME = "Bearer";
 
 export class HostedExecutionConfigurationError extends Error {
-  constructor(message: string) {
+  readonly code: string | null;
+
+  constructor(message: string, code: string | null = null) {
     super(message);
+    this.code = code;
     this.name = "HostedExecutionConfigurationError";
   }
 }
@@ -229,7 +232,7 @@ export class RunnerContainer extends Container {
       }, RUNNER_PORT);
 
       if (!response.ok) {
-        throw new Error(`Hosted runner container returned HTTP ${response.status}.`);
+        throw await classifyHostedRunnerContainerErrorResponse(response);
       }
 
       return (await response.json()) as HostedExecutionRunnerResult;
@@ -292,6 +295,37 @@ export async function invokeHostedExecutionContainerRunner(
     timeoutMs: input.timeoutMs,
     userId: input.userId,
   });
+}
+
+async function classifyHostedRunnerContainerErrorResponse(
+  response: Response,
+): Promise<Error> {
+  let payload: {
+    code?: unknown;
+    error?: unknown;
+  } | null = null;
+
+  try {
+    payload = await response.clone().json() as {
+      code?: unknown;
+      error?: unknown;
+    };
+  } catch {
+    payload = null;
+  }
+
+  const message = typeof payload?.error === "string" && payload.error.trim().length > 0
+    ? payload.error
+    : `Hosted runner container returned HTTP ${response.status}.`;
+  const code = typeof payload?.code === "string" && payload.code.trim().length > 0
+    ? payload.code
+    : null;
+
+  if (response.status === 503) {
+    return new HostedExecutionConfigurationError(message, code);
+  }
+
+  return new Error(message);
 }
 
 function createRunnerOutboundHandler() {

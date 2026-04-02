@@ -6,6 +6,9 @@ import {
   type HostedAssistantRuntimeJobInput,
 } from "@murphai/assistant-runtime";
 import {
+  HostedAssistantConfigurationError,
+} from "@murphai/assistant-core";
+import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 
@@ -110,9 +113,8 @@ export async function startHostedContainerEntrypoint(input: {
         phase: "failed",
         run: typeof job === "object" && job ? job.request.run ?? null : null,
       });
-      writeJsonResponse(response, 500, {
-        error: "Internal error.",
-      });
+      const classified = classifyRunnerJobError(error);
+      writeJsonResponse(response, classified.statusCode, classified.payload);
     } finally {
       requestAbort.cleanup();
     }
@@ -175,6 +177,28 @@ function createRequestAbortController(
       response.off("close", handleResponseClose);
     },
     signal: controller.signal,
+  };
+}
+
+export function classifyRunnerJobError(error: unknown): {
+  payload: Record<string, unknown>;
+  statusCode: number;
+} {
+  if (error instanceof HostedAssistantConfigurationError) {
+    return {
+      payload: {
+        code: error.code,
+        error: error.message,
+      },
+      statusCode: 503,
+    };
+  }
+
+  return {
+    payload: {
+      error: "Internal error.",
+    },
+    statusCode: 500,
   };
 }
 

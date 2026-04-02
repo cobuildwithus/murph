@@ -3,7 +3,12 @@ import { once } from "node:events";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { startHostedContainerEntrypoint } from "../src/container-entrypoint.js";
+import { HostedAssistantConfigurationError } from "@murphai/assistant-core";
+
+import {
+  classifyRunnerJobError,
+  startHostedContainerEntrypoint,
+} from "../src/container-entrypoint.js";
 import * as nodeRunner from "../src/node-runner.js";
 
 const servers: Array<Awaited<ReturnType<typeof startHostedContainerEntrypoint>>> = [];
@@ -473,5 +478,33 @@ describe("startHostedContainerEntrypoint", () => {
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+describe("classifyRunnerJobError", () => {
+  it("returns a configuration failure payload for hosted assistant config errors", () => {
+    const classified = classifyRunnerJobError(
+      new HostedAssistantConfigurationError(
+        "HOSTED_ASSISTANT_CONFIG_REQUIRED",
+        "Hosted assistant defaults are missing.",
+      ),
+    );
+
+    expect(classified).toEqual({
+      payload: {
+        code: "HOSTED_ASSISTANT_CONFIG_REQUIRED",
+        error: "Hosted assistant defaults are missing.",
+      },
+      statusCode: 503,
+    });
+  });
+
+  it("keeps generic runner failures opaque", () => {
+    expect(classifyRunnerJobError(new Error("boom"))).toEqual({
+      payload: {
+        error: "Internal error.",
+      },
+      statusCode: 500,
+    });
   });
 });

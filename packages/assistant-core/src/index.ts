@@ -106,6 +106,44 @@ export {
 } from './assistant/service.js'
 
 export {
+  HOSTED_ASSISTANT_API_KEY_ENV,
+  HOSTED_ASSISTANT_APPROVAL_POLICY_ENV,
+  HOSTED_ASSISTANT_BASE_URL_ENV,
+  HOSTED_ASSISTANT_CODEX_COMMAND_ENV,
+  HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
+  HOSTED_ASSISTANT_MODEL_ENV,
+  HOSTED_ASSISTANT_OSS_ENV,
+  HOSTED_ASSISTANT_PROFILE_ENV,
+  HOSTED_ASSISTANT_PROVIDER_ENV,
+  HOSTED_ASSISTANT_PROVIDER_NAME_ENV,
+  HOSTED_ASSISTANT_REASONING_EFFORT_ENV,
+  HOSTED_ASSISTANT_SANDBOX_ENV,
+  HostedAssistantConfigurationError,
+  ensureHostedAssistantOperatorDefaults,
+  readHostedAssistantApiKeyEnvName,
+  resolveHostedAssistantOperatorDefaultsState,
+  type HostedAssistantBootstrapResult,
+  type HostedAssistantConfigurationErrorCode,
+  type HostedAssistantOperatorConfigState,
+} from './hosted-assistant-config.js'
+
+export {
+  compileHostedAssistantProfileProviderConfig,
+  HOSTED_ASSISTANT_CONFIG_SCHEMA,
+  isHostedAssistantProfileReady,
+  parseHostedAssistantConfig,
+  parseHostedAssistantConfigJson,
+  prepareHostedAssistantConfigForWrite,
+  resolveActiveHostedAssistantProfile,
+  resolveHostedAssistantProfile,
+  resolveHostedAssistantProviderConfig,
+  resolveReadyHostedAssistantProfile,
+  tryParseHostedAssistantConfig,
+  type HostedAssistantConfig,
+  type HostedAssistantProfile,
+} from './hosted-assistant-config.js'
+
+export {
   ROOT_OPTIONS_WITH_VALUES,
   TOP_LEVEL_COMMANDS_REQUIRING_VAULT,
   VAULT_ENV,
@@ -124,11 +162,13 @@ export {
   resolveAssistantSelfDeliveryTarget,
   resolveDefaultVault,
   resolveEffectiveTopLevelToken,
+  resolveHostedAssistantConfig,
   resolveOperatorConfigPath,
   resolveOperatorHomeDirectory,
   saveAssistantOperatorDefaultsPatch,
   saveAssistantSelfDeliveryTarget,
   saveDefaultVaultConfig,
+  saveHostedAssistantConfig,
   type AssistantOperatorDefaults,
   type OperatorConfig,
 } from './operator-config.js'

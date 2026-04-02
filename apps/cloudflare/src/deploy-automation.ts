@@ -1,6 +1,13 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  readHostedAssistantApiKeyEnvName,
+} from "@murphai/assistant-core";
+import { hostedAssistantAutomationEnabledFromEnv } from "@murphai/hosted-execution";
+
+import { isAllowedHostedAssistantReferencedRunnerEnvKey } from "./hosted-env-policy.ts";
+
 export const HOSTED_WORKER_REQUIRED_SECRET_NAMES = [
   "HOSTED_EXECUTION_SIGNING_SECRET",
   "HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY",
@@ -48,6 +55,17 @@ const HOSTED_WORKER_OPTIONAL_VAR_NAMES = [
   "AGENTMAIL_BASE_URL",
   "DEVICE_SYNC_PUBLIC_BASE_URL",
   "FFMPEG_COMMAND",
+  "HOSTED_ASSISTANT_API_KEY_ENV",
+  "HOSTED_ASSISTANT_APPROVAL_POLICY",
+  "HOSTED_ASSISTANT_BASE_URL",
+  "HOSTED_ASSISTANT_CODEX_COMMAND",
+  "HOSTED_ASSISTANT_MODEL",
+  "HOSTED_ASSISTANT_OSS",
+  "HOSTED_ASSISTANT_PROFILE",
+  "HOSTED_ASSISTANT_PROVIDER",
+  "HOSTED_ASSISTANT_PROVIDER_NAME",
+  "HOSTED_ASSISTANT_REASONING_EFFORT",
+  "HOSTED_ASSISTANT_SANDBOX",
   "HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS",
   "HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION",
   "HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER",
@@ -309,6 +327,7 @@ export function buildHostedWorkerSecretsPayload(
   return {
     ...readRequiredStringMap(source, HOSTED_WORKER_REQUIRED_SECRET_NAMES),
     ...readPresentStringMap(source, HOSTED_WORKER_OPTIONAL_SECRET_NAMES),
+    ...readHostedAssistantReferencedSecret(source),
   };
 }
 
@@ -433,11 +452,36 @@ function resolveHostedWorkerVar(
 ): string | null {
   const value = normalizeString(source[key]);
 
+  if (
+    key === "HOSTED_ASSISTANT_API_KEY_ENV"
+    && value
+    && !isAllowedHostedAssistantReferencedRunnerEnvKey(value)
+  ) {
+    return null;
+  }
+
   if (value) {
     return value;
   }
 
   return key === "HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER" ? DEFAULT_CONTAINER_SLEEP_AFTER : null;
+}
+
+function readHostedAssistantReferencedSecret(
+  source: EnvSource,
+): Record<string, string> {
+  if (!hostedAssistantAutomationEnabledFromEnv(source)) {
+    return {};
+  }
+
+  const envName = readHostedAssistantApiKeyEnvName(source);
+
+  if (!envName || !isAllowedHostedAssistantReferencedRunnerEnvKey(envName)) {
+    return {};
+  }
+
+  const value = normalizeString(source[envName]);
+  return value ? { [envName]: value } : {};
 }
 
 function requirePositiveNumber(value: unknown, label: string): number {

@@ -203,6 +203,31 @@ describe("hosted deploy automation helpers", () => {
     });
   });
 
+  it("keeps a referenced hosted assistant api key env only when it is runner-safe", () => {
+    expect(buildHostedWorkerSecretsPayload({
+      HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_API_KEY",
+      HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: "bundle-key",
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+      HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION: "true",
+      HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
+      HOSTED_EXECUTION_SIGNING_SECRET: "signing-secret",
+      OPENAI_API_KEY: "sk-user",
+    })).toMatchObject({
+      OPENAI_API_KEY: "sk-user",
+    });
+
+    expect(readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_WORKER_NAME: "hosted-worker",
+      HOSTED_ASSISTANT_API_KEY_ENV: "HOSTED_EXECUTION_CONTROL_TOKEN",
+      HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+    }).workerVars.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
+  });
+
   it("does not accept legacy HB_CF deploy variable names", () => {
     expect(() =>
       readHostedDeployAutomationEnvironment({

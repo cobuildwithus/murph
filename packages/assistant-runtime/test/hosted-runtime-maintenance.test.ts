@@ -27,6 +27,12 @@ const mocks = vi.hoisted(() => ({
       init: vi.fn(async () => undefined),
     },
   })),
+  ensureHostedAssistantOperatorDefaults: vi.fn(async () => ({
+    configured: false,
+    provider: null,
+    seeded: false,
+    source: "missing",
+  })),
   getAssistantCronStatus: vi.fn(async () => ({
     nextRunAt: null,
   })),
@@ -52,6 +58,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@murphai/assistant-core", () => ({
   createIntegratedInboxServices: mocks.createIntegratedInboxServices,
   createIntegratedVaultServices: mocks.createIntegratedVaultServices,
+  ensureHostedAssistantOperatorDefaults: mocks.ensureHostedAssistantOperatorDefaults,
   getAssistantCronStatus: mocks.getAssistantCronStatus,
   readAssistantAutomationState: mocks.readAssistantAutomationState,
   runAssistantAutomation: mocks.runAssistantAutomation,
@@ -131,7 +138,7 @@ test("hosted maintenance loop preserves the empty-vault no-op baseline after act
       nextWakeAt: null,
       parserProcessed: 0,
     });
-    assert.equal(mocks.runAssistantAutomation.mock.calls.length, 1);
+    assert.equal(mocks.runAssistantAutomation.mock.calls.length, 0);
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
   }
@@ -193,6 +200,12 @@ test("hosted maintenance loop prefers the earliest device-sync or assistant wake
       register: vi.fn(),
     });
     mocks.createDeviceSyncService.mockReturnValue(deviceSyncService);
+    mocks.ensureHostedAssistantOperatorDefaults.mockResolvedValue({
+      configured: true,
+      provider: "openai-compatible",
+      seeded: false,
+      source: "saved",
+    });
     mocks.getAssistantCronStatus.mockResolvedValue({
       nextRunAt: "2026-03-28T10:00:00.000Z",
     });
@@ -225,6 +238,7 @@ test("hosted maintenance loop prefers the earliest device-sync or assistant wake
       nextWakeAt: "2026-03-28T09:30:00.000Z",
       parserProcessed: 0,
     });
+    assert.equal(mocks.runAssistantAutomation.mock.calls.length, 1);
     assert.deepEqual(deviceSyncService.getNextWakeAt.mock.calls, [[]]);
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
