@@ -7,10 +7,29 @@ export function shapeHostedDeviceSyncJobHintPayload(
   const payload = job.payload ?? {};
 
   switch (provider) {
+    case "garmin":
+      return shapeHostedGarminJobHintPayload(job.kind, payload);
     case "oura":
       return shapeHostedOuraJobHintPayload(job.kind, payload);
     case "whoop":
       return shapeHostedWhoopJobHintPayload(job.kind, payload);
+    default:
+      return {};
+  }
+}
+
+function shapeHostedGarminJobHintPayload(
+  kind: string,
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  switch (kind) {
+    case "backfill":
+    case "reconcile":
+      return pickHostedWakePayloadFields(payload, {
+        includeProfile: "boolean",
+        windowEnd: "string",
+        windowStart: "string",
+      });
     default:
       return {};
   }

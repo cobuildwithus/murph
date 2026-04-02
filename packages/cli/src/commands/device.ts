@@ -17,7 +17,7 @@ import type { VaultServices } from '@murphai/assistant-core/vault-services'
 const providerNameSchema = z
   .string()
   .min(1)
-  .describe('Live device-sync provider key such as whoop or oura. Garmin snapshot imports use the importer path instead.')
+  .describe('Live device-sync provider key such as garmin, whoop, or oura.')
 
 const accountIdSchema = z
   .string()

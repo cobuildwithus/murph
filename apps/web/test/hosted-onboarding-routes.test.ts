@@ -3,29 +3,24 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
-  applyHostedSessionCookie: vi.fn(),
-  cookies: vi.fn(),
+  clearHostedSessionCookie: vi.fn(),
   completeHostedPrivyVerification: vi.fn(),
   createHostedBillingCheckout: vi.fn(),
-  clearHostedSessionCookie: vi.fn(),
-  requireHostedPrivyCompletionIdentityFromCookies: vi.fn(),
-  requireHostedSessionFromCookieStore: vi.fn(),
+  requireHostedInviteCodeFromRequest: vi.fn(),
+  requireHostedPrivyCompletionIdentityFromRequest: vi.fn(),
+  requireHostedPrivyRequestAuthContext: vi.fn(),
+  revokeHostedSessionFromRequest: vi.fn(),
   runtimeEnv: {
     privyAppId: "cm_app_123" as string | null,
     privyVerificationKey: "line-1\\nline-2" as string | null,
     telegramBotUsername: null as string | null,
     telegramWebhookSecret: null as string | null,
   },
-  revokeHostedSessionFromRequest: vi.fn(),
   verifyIdentityToken: vi.fn(),
 }));
 
 vi.mock("@privy-io/node", () => ({
   verifyIdentityToken: mocks.verifyIdentityToken,
-}));
-
-vi.mock("next/headers", () => ({
-  cookies: mocks.cookies,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -40,14 +35,20 @@ vi.mock("@/src/lib/hosted-onboarding/billing-service", () => ({
   createHostedBillingCheckout: mocks.createHostedBillingCheckout,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
+  requireHostedPrivyRequestAuthContext: mocks.requireHostedPrivyRequestAuthContext,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
-  requireHostedPrivyCompletionIdentityFromCookies: mocks.requireHostedPrivyCompletionIdentityFromCookies,
+  requireHostedPrivyCompletionIdentityFromRequest: mocks.requireHostedPrivyCompletionIdentityFromRequest,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/route-helpers", () => ({
+  requireHostedInviteCodeFromRequest: mocks.requireHostedInviteCodeFromRequest,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/session", () => ({
-  applyHostedSessionCookie: mocks.applyHostedSessionCookie,
   clearHostedSessionCookie: mocks.clearHostedSessionCookie,
-  requireHostedSessionFromCookieStore: mocks.requireHostedSessionFromCookieStore,
   revokeHostedSessionFromRequest: mocks.revokeHostedSessionFromRequest,
 }));
 
@@ -77,10 +78,7 @@ describe("hosted onboarding routes", () => {
     vi.clearAllMocks();
     mocks.runtimeEnv.privyAppId = "cm_app_123";
     mocks.runtimeEnv.privyVerificationKey = "line-1\\nline-2";
-    mocks.cookies.mockResolvedValue({
-      get: vi.fn().mockReturnValue(undefined),
-    });
-    mocks.requireHostedPrivyCompletionIdentityFromCookies.mockResolvedValue({
+    mocks.requireHostedPrivyCompletionIdentityFromRequest.mockResolvedValue({
       phone: {
         number: "+15551234567",
         verifiedAt: 1742990400,
@@ -94,30 +92,40 @@ describe("hosted onboarding routes", () => {
       },
     });
     mocks.completeHostedPrivyVerification.mockResolvedValue({
-      expiresAt: new Date("2026-03-27T12:00:00.000Z"),
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
       stage: "checkout",
-      token: "session-token",
     });
     mocks.createHostedBillingCheckout.mockResolvedValue({
       alreadyActive: false,
       url: "https://billing.example.test/session_123",
     });
-    mocks.requireHostedSessionFromCookieStore.mockResolvedValue({
+    mocks.requireHostedPrivyRequestAuthContext.mockResolvedValue({
+      linkedAccounts: [
+        {
+          address: "user@example.com",
+          type: "email",
+        },
+      ],
       member: { id: "member_123" },
-      session: { id: "session_123" },
+    });
+    mocks.requireHostedInviteCodeFromRequest.mockResolvedValue({
+      body: {
+        inviteCode: "invite-code",
+      },
+      inviteCode: "invite-code",
     });
     mocks.revokeHostedSessionFromRequest.mockResolvedValue(true);
   });
 
-  it("marks Privy verification responses as no-store and still attaches the session cookie", async () => {
+  it("marks Privy verification responses as no-store", async () => {
     const response = await privyCompleteRoute.POST(
       new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
         body: JSON.stringify({
           inviteCode: "invite-code",
         }),
         headers: {
+          "x-privy-identity-token": "header-token",
           cookie: "privy-id-token=identity-token; hosted_session=session-token",
           origin: SAME_ORIGIN_HEADERS.origin,
           "user-agent": "test-agent",
@@ -144,11 +152,6 @@ describe("hosted onboarding routes", () => {
       },
       inviteCode: "invite-code",
     });
-    expect(mocks.applyHostedSessionCookie).toHaveBeenCalledWith(
-      expect.anything(),
-      "session-token",
-      new Date("2026-03-27T12:00:00.000Z"),
-    );
     await expect(response.json()).resolves.toEqual({
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
@@ -161,7 +164,7 @@ describe("hosted onboarding routes", () => {
     const response = await privyCompleteRoute.POST(
       new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
         headers: {
-          cookie: "privy-id-token=identity-token",
+          "x-privy-identity-token": "header-token",
           origin: SAME_ORIGIN_HEADERS.origin,
           "user-agent": "test-agent",
         },
@@ -187,11 +190,6 @@ describe("hosted onboarding routes", () => {
       },
       inviteCode: null,
     });
-    expect(mocks.applyHostedSessionCookie).toHaveBeenCalledWith(
-      expect.anything(),
-      "session-token",
-      new Date("2026-03-27T12:00:00.000Z"),
-    );
   });
 
   it("ignores any body identity token and keeps the cookie authoritative", async () => {
@@ -202,7 +200,7 @@ describe("hosted onboarding routes", () => {
           inviteCode: "invite-code",
         }),
         headers: {
-          cookie: "privy-id-token=cookie-token",
+          "x-privy-identity-token": "header-token",
           origin: SAME_ORIGIN_HEADERS.origin,
           "user-agent": "test-agent",
         },
@@ -230,11 +228,11 @@ describe("hosted onboarding routes", () => {
   });
 
   it("rejects hosted Privy completion requests that are missing the Privy identity cookie", async () => {
-    mocks.requireHostedPrivyCompletionIdentityFromCookies.mockRejectedValue(
+    mocks.requireHostedPrivyCompletionIdentityFromRequest.mockRejectedValue(
       hostedOnboardingError({
         code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
         httpStatus: 401,
-        message: "A Privy identity cookie is required to continue. Refresh and verify your phone again.",
+        message: "A Privy identity token is required to continue. Refresh and verify your phone again.",
       }),
     );
 
@@ -257,18 +255,18 @@ describe("hosted onboarding routes", () => {
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
-        message: "A Privy identity cookie is required to continue. Refresh and verify your phone again.",
+        message: "A Privy identity token is required to continue. Refresh and verify your phone again.",
         retryable: false,
       },
     });
   });
 
   it("checks the Privy identity cookie before parsing malformed request JSON", async () => {
-    mocks.requireHostedPrivyCompletionIdentityFromCookies.mockRejectedValue(
+    mocks.requireHostedPrivyCompletionIdentityFromRequest.mockRejectedValue(
       hostedOnboardingError({
         code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
         httpStatus: 401,
-        message: "A Privy identity cookie is required to continue. Refresh and verify your phone again.",
+        message: "A Privy identity token is required to continue. Refresh and verify your phone again.",
       }),
     );
 
@@ -285,23 +283,23 @@ describe("hosted onboarding routes", () => {
 
     expect(response.status).toBe(401);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireHostedPrivyCompletionIdentityFromCookies).toHaveBeenCalledTimes(1);
+    expect(mocks.requireHostedPrivyCompletionIdentityFromRequest).toHaveBeenCalledTimes(1);
     expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
-        message: "A Privy identity cookie is required to continue. Refresh and verify your phone again.",
+        message: "A Privy identity token is required to continue. Refresh and verify your phone again.",
         retryable: false,
       },
     });
   });
 
   it("does not accept a body identity token when the Privy identity cookie is missing", async () => {
-    mocks.requireHostedPrivyCompletionIdentityFromCookies.mockRejectedValue(
+    mocks.requireHostedPrivyCompletionIdentityFromRequest.mockRejectedValue(
       hostedOnboardingError({
         code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
         httpStatus: 401,
-        message: "A Privy identity cookie is required to continue. Refresh and verify your phone again.",
+        message: "A Privy identity token is required to continue. Refresh and verify your phone again.",
       }),
     );
 
@@ -324,14 +322,14 @@ describe("hosted onboarding routes", () => {
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
-        message: "A Privy identity cookie is required to continue. Refresh and verify your phone again.",
+        message: "A Privy identity token is required to continue. Refresh and verify your phone again.",
         retryable: false,
       },
     });
   });
 
   it("serializes retryable server-side Privy lag errors during completion", async () => {
-    mocks.requireHostedPrivyCompletionIdentityFromCookies.mockRejectedValue(
+    mocks.requireHostedPrivyCompletionIdentityFromRequest.mockRejectedValue(
       hostedOnboardingError({
         code: "PRIVY_WALLET_NOT_READY",
         httpStatus: 409,
@@ -413,14 +411,16 @@ describe("hosted onboarding routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireHostedSessionFromCookieStore).toHaveBeenCalledWith({ get: expect.any(Function) });
+    expect(mocks.requireHostedPrivyRequestAuthContext).toHaveBeenCalledWith(request);
     expect(mocks.createHostedBillingCheckout).toHaveBeenCalledWith({
-      cookieStore: { get: expect.any(Function) },
       inviteCode: "invite-code",
-      sessionRecord: {
-        member: { id: "member_123" },
-        session: { id: "session_123" },
-      },
+      linkedAccounts: [
+        {
+          address: "user@example.com",
+          type: "email",
+        },
+      ],
+      member: { id: "member_123" },
     });
     await expect(response.json()).resolves.toEqual({
       alreadyActive: false,
@@ -442,14 +442,16 @@ describe("hosted onboarding routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireHostedSessionFromCookieStore).toHaveBeenCalledWith({ get: expect.any(Function) });
+    expect(mocks.requireHostedPrivyRequestAuthContext).toHaveBeenCalledWith(request);
     expect(mocks.createHostedBillingCheckout).toHaveBeenCalledWith({
-      cookieStore: { get: expect.any(Function) },
       inviteCode: "invite-code",
-      sessionRecord: {
-        member: { id: "member_123" },
-        session: { id: "session_123" },
-      },
+      linkedAccounts: [
+        {
+          address: "user@example.com",
+          type: "email",
+        },
+      ],
+      member: { id: "member_123" },
     });
     await expect(response.json()).resolves.toEqual({
       alreadyActive: false,
@@ -458,6 +460,13 @@ describe("hosted onboarding routes", () => {
   });
 
   it("forwards share state through the hosted billing checkout route when present", async () => {
+    mocks.requireHostedInviteCodeFromRequest.mockResolvedValue({
+      body: {
+        inviteCode: "invite-code",
+        shareCode: "share_123",
+      },
+      inviteCode: "invite-code",
+    });
     const request = new Request("https://join.example.test/api/hosted-onboarding/billing/checkout", {
       body: JSON.stringify({
         inviteCode: "invite-code",
@@ -471,15 +480,17 @@ describe("hosted onboarding routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireHostedSessionFromCookieStore).toHaveBeenCalledWith({ get: expect.any(Function) });
+    expect(mocks.requireHostedPrivyRequestAuthContext).toHaveBeenCalledWith(request);
     expect(mocks.createHostedBillingCheckout).toHaveBeenCalledWith({
-      cookieStore: { get: expect.any(Function) },
       inviteCode: "invite-code",
+      linkedAccounts: [
+        {
+          address: "user@example.com",
+          type: "email",
+        },
+      ],
+      member: { id: "member_123" },
       shareCode: "share_123",
-      sessionRecord: {
-        member: { id: "member_123" },
-        session: { id: "session_123" },
-      },
     });
     await expect(response.json()).resolves.toEqual({
       alreadyActive: false,
@@ -502,13 +513,12 @@ describe("hosted onboarding routes", () => {
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(mocks.revokeHostedSessionFromRequest).toHaveBeenCalledWith(request);
     expect(mocks.clearHostedSessionCookie).toHaveBeenCalledWith(response);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+    });
   });
 
-  it("uses the real Privy cookie verifier at the route boundary and ignores any body token", async () => {
-    mocks.cookies.mockResolvedValue({
-      get: vi.fn().mockImplementation((name: string) =>
-        name === "privy-id-token" ? { value: "cookie-token" } : undefined),
-    });
+  it("uses the real Privy header verifier at the route boundary and ignores any body token", async () => {
     mocks.verifyIdentityToken.mockResolvedValue({
       id: "did:privy:user_123",
       linked_accounts: [
@@ -543,6 +553,7 @@ describe("hosted onboarding routes", () => {
             inviteCode: "invite-code",
           }),
           headers: {
+            "x-privy-identity-token": "header-token",
             origin: SAME_ORIGIN_HEADERS.origin,
             "user-agent": "test-agent",
           },
@@ -553,7 +564,7 @@ describe("hosted onboarding routes", () => {
       expect(response.status).toBe(200);
       expect(mocks.verifyIdentityToken).toHaveBeenCalledWith({
         app_id: "cm_app_123",
-        identity_token: "cookie-token",
+        identity_token: "header-token",
         verification_key: "line-1\nline-2",
       });
       expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
@@ -574,7 +585,7 @@ describe("hosted onboarding routes", () => {
       });
     } finally {
       vi.doMock("@/src/lib/hosted-onboarding/privy", () => ({
-        requireHostedPrivyCompletionIdentityFromCookies: mocks.requireHostedPrivyCompletionIdentityFromCookies,
+        requireHostedPrivyCompletionIdentityFromRequest: mocks.requireHostedPrivyCompletionIdentityFromRequest,
       }));
       vi.resetModules();
     }

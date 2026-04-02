@@ -26,6 +26,20 @@ test("loadDeviceSyncEnvironment supports Oura-only deployments", () => {
   assert.equal(loaded.http.controlToken, "control-token-for-tests");
 });
 
+test("loadDeviceSyncEnvironment supports Garmin-only deployments", () => {
+  const loaded = loadDeviceSyncEnvironment({
+    DEVICE_SYNC_VAULT_ROOT: "/tmp/murph-vault",
+    DEVICE_SYNC_PUBLIC_BASE_URL: "https://sync.example.test/device-sync",
+    DEVICE_SYNC_SECRET: "secret-for-tests",
+    DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
+    GARMIN_CLIENT_ID: "garmin-client-id",
+    GARMIN_CLIENT_SECRET: "garmin-client-secret",
+  });
+
+  assert.equal(loaded.service.providers.length, 1);
+  assert.equal(loaded.service.providers[0]?.provider, "garmin");
+});
+
 test("loadDeviceSyncEnvironment supports mixed WHOOP and Oura deployments", () => {
   const loaded = loadDeviceSyncEnvironment({
     DEVICE_SYNC_VAULT_ROOT: "/tmp/murph-vault",
@@ -41,6 +55,26 @@ test("loadDeviceSyncEnvironment supports mixed WHOOP and Oura deployments", () =
   assert.deepEqual(
     loaded.service.providers.map((provider) => provider.provider),
     ["whoop", "oura"],
+  );
+});
+
+test("loadDeviceSyncEnvironment supports Garmin, WHOOP, and Oura together", () => {
+  const loaded = loadDeviceSyncEnvironment({
+    DEVICE_SYNC_VAULT_ROOT: "/tmp/murph-vault",
+    DEVICE_SYNC_PUBLIC_BASE_URL: "https://sync.example.test/device-sync",
+    DEVICE_SYNC_SECRET: "secret-for-tests",
+    DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
+    GARMIN_CLIENT_ID: "garmin-client-id",
+    GARMIN_CLIENT_SECRET: "garmin-client-secret",
+    WHOOP_CLIENT_ID: "whoop-client-id",
+    WHOOP_CLIENT_SECRET: "whoop-client-secret",
+    OURA_CLIENT_ID: "oura-client-id",
+    OURA_CLIENT_SECRET: "oura-client-secret",
+  });
+
+  assert.deepEqual(
+    loaded.service.providers.map((provider) => provider.provider),
+    ["garmin", "whoop", "oura"],
   );
 });
 

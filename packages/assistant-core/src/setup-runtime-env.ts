@@ -12,6 +12,9 @@ const TELEGRAM_TOKEN_KEYS = ['TELEGRAM_BOT_TOKEN'] as const
 const EMAIL_API_KEY_KEYS = ['AGENTMAIL_API_KEY'] as const
 const LINQ_TOKEN_KEYS = ['LINQ_API_TOKEN'] as const
 const LINQ_WEBHOOK_SECRET_KEYS = ['LINQ_WEBHOOK_SECRET'] as const
+const GARMIN_CLIENT_ID_KEYS = ['GARMIN_CLIENT_ID'] as const
+const GARMIN_CLIENT_SECRET_KEYS = ['GARMIN_CLIENT_SECRET'] as const
+const GARMIN_CLIENT_KEY_GROUPS = [GARMIN_CLIENT_ID_KEYS, GARMIN_CLIENT_SECRET_KEYS] as const
 const WHOOP_CLIENT_ID_KEYS = ['WHOOP_CLIENT_ID'] as const
 const WHOOP_CLIENT_SECRET_KEYS = ['WHOOP_CLIENT_SECRET'] as const
 const WHOOP_CLIENT_KEY_GROUPS = [WHOOP_CLIENT_ID_KEYS, WHOOP_CLIENT_SECRET_KEYS] as const
@@ -112,6 +115,8 @@ export function resolveSetupWearableMissingEnv(
   env: NodeJS.ProcessEnv,
 ): string[] {
   switch (wearable) {
+    case 'garmin':
+      return resolvePreferredEnvKeys(env, GARMIN_CLIENT_KEY_GROUPS)
     case 'oura':
       return resolvePreferredEnvKeys(env, OURA_CLIENT_KEY_GROUPS)
     case 'whoop':
@@ -198,37 +203,53 @@ export function describeSetupWearableStatus(
 ): SetupWizardRuntimeStatus {
   const missingEnv = resolveSetupWearableMissingEnv(wearable, env)
 
-  if (wearable === 'oura') {
-    return missingEnv.length === 0
-      ? {
-          badge: 'ready',
-          detail: 'OAuth connect can open after setup.',
-          missingEnv,
-          ready: true,
-        }
-      : {
-          badge: 'needs client keys',
-          detail:
-            'Add OURA_CLIENT_ID and OURA_CLIENT_SECRET to the current environment to enable Oura connect.',
-          missingEnv,
-          ready: false,
-        }
+  switch (wearable) {
+    case 'garmin':
+      return missingEnv.length === 0
+        ? {
+            badge: 'ready',
+            detail: 'OAuth connect can open after setup.',
+            missingEnv,
+            ready: true,
+          }
+        : {
+            badge: 'needs client keys',
+            detail:
+              'Add GARMIN_CLIENT_ID and GARMIN_CLIENT_SECRET to the current environment to enable Garmin connect.',
+            missingEnv,
+            ready: false,
+          }
+    case 'oura':
+      return missingEnv.length === 0
+        ? {
+            badge: 'ready',
+            detail: 'OAuth connect can open after setup.',
+            missingEnv,
+            ready: true,
+          }
+        : {
+            badge: 'needs client keys',
+            detail:
+              'Add OURA_CLIENT_ID and OURA_CLIENT_SECRET to the current environment to enable Oura connect.',
+            missingEnv,
+            ready: false,
+          }
+    case 'whoop':
+      return missingEnv.length === 0
+        ? {
+            badge: 'ready',
+            detail: 'OAuth connect can open after setup.',
+            missingEnv,
+            ready: true,
+          }
+        : {
+            badge: 'needs client keys',
+            detail:
+              'Add WHOOP_CLIENT_ID and WHOOP_CLIENT_SECRET to the current environment to enable WHOOP connect.',
+            missingEnv,
+            ready: false,
+          }
   }
-
-  return missingEnv.length === 0
-    ? {
-        badge: 'ready',
-        detail: 'OAuth connect can open after setup.',
-        missingEnv,
-        ready: true,
-      }
-    : {
-        badge: 'needs client keys',
-        detail:
-          'Add WHOOP_CLIENT_ID and WHOOP_CLIENT_SECRET to the current environment to enable WHOOP connect.',
-        missingEnv,
-        ready: false,
-      }
 }
 
 export function describeSelectedSetupWearables(input: {
@@ -342,7 +363,14 @@ async function promptForRuntimeEnvValue(question: string): Promise<string> {
 }
 
 function formatSetupWearableName(wearable: SetupWearable): string {
-  return wearable === 'oura' ? 'Oura' : 'WHOOP'
+  switch (wearable) {
+    case 'garmin':
+      return 'Garmin'
+    case 'oura':
+      return 'Oura'
+    case 'whoop':
+      return 'WHOOP'
+  }
 }
 
 function formatSetupMissingEnvList(missingEnv: readonly string[]): string {

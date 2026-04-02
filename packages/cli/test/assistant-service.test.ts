@@ -2445,7 +2445,7 @@ test('sendAssistantMessage injects the first-chat check-in for first-turn messag
   )
   assert.match(
     firstCall?.systemPrompt ?? '',
-    /Oura, WHOOP, or Garmin connections or uploads/u,
+    /Garmin, Oura, or WHOOP connections/u,
   )
 })
 

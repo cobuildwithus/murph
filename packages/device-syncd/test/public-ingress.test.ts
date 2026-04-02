@@ -272,10 +272,38 @@ function createFakeProvider(overrides: Partial<DeviceSyncProvider> = {}): Device
 test("public ingress reuses shared OAuth callback logic independently of the local daemon", async () => {
   const store = new InMemoryPublicIngressStore();
   const connectionEvents: Array<{ accountId: string; initialJobs: number }> = [];
+  const seenStates: string[] = [];
   const ingress = createDeviceSyncPublicIngress({
     publicBaseUrl: "https://sync.example.test/device-sync",
     allowedReturnOrigins: ["https://app.example.test"],
-    registry: createDeviceSyncRegistry([createFakeProvider()]),
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async exchangeAuthorizationCode(context, code) {
+          seenStates.push(context.state);
+          return {
+            externalAccountId: `demo-${code}`,
+            displayName: `Demo ${code}`,
+            scopes: ["offline", "read:data"],
+            metadata: {
+              connectedBy: code,
+            },
+            tokens: {
+              accessToken: "access-token",
+              refreshToken: "refresh-token",
+            } satisfies ProviderAuthTokens,
+            initialJobs: [
+              {
+                kind: "backfill",
+                payload: {
+                  windowStart: "2026-01-01T00:00:00.000Z",
+                },
+              },
+            ],
+            nextReconcileAt: "2026-03-24T00:00:00.000Z",
+          };
+        },
+      }),
+    ]),
     store,
     hooks: {
       onConnectionEstablished({ account, connection }) {
@@ -309,6 +337,7 @@ test("public ingress reuses shared OAuth callback logic independently of the loc
       initialJobs: 1,
     },
   ]);
+  assert.deepEqual(seenStates, [begin.state]);
 });
 
 test("public ingress dedupes unknown-account webhook deliveries before rerunning unknown hooks", async () => {

@@ -1,9 +1,6 @@
-import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
 
 import { describe, expect, it } from "vitest";
 
@@ -19,14 +16,7 @@ import {
   resolveHostedWorkerDeploymentTraffic,
   selectHostedContainerImageTagsForCleanup,
 } from "../src/deploy-automation.js";
-
-const execFileAsync = promisify(execFile);
-const require = createRequire(import.meta.url);
-const tsxCliPath = require.resolve("tsx/cli");
-const renderWorkerSecretsScriptPath = path.resolve(
-  import.meta.dirname,
-  "../scripts/render-worker-secrets.ts",
-);
+import { renderWorkerSecretsFile } from "../scripts/render-worker-secrets.ts";
 
 describe("hosted deploy automation helpers", () => {
   it("builds a generated wrangler config for the native container worker", () => {
@@ -254,19 +244,10 @@ describe("hosted deploy automation helpers", () => {
         HOSTED_WORKER_REQUIRED_SECRET_NAMES.map((name) => [name, `${name.toLowerCase()}-value`]),
       );
 
-      await execFileAsync(
-        process.execPath,
-        [tsxCliPath, renderWorkerSecretsScriptPath, outputPath],
-        {
-          cwd: path.resolve(import.meta.dirname, "..", ".."),
-          env: {
-            HOME: process.env.HOME,
-            PATH: process.env.PATH,
-            TMPDIR: process.env.TMPDIR,
-            ...requiredSecrets,
-          },
-        },
-      );
+      await renderWorkerSecretsFile({
+        outputPath,
+        source: requiredSecrets,
+      });
 
       expect(JSON.parse(await readFile(outputPath, "utf8"))).toEqual(requiredSecrets);
       expect((await stat(path.dirname(outputPath))).mode & 0o777).toBe(0o700);

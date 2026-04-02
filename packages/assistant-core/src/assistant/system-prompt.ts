@@ -184,7 +184,7 @@ function buildAssistantFirstTurnCheckInGuidanceText(
     'If the first user message already asks for something concrete, do not add the check-in.',
     'Do not search or write assistant memory just because this is the first chat turn or because you are doing the optional check-in.',
     'You may follow that intro with at most one more short sentence explaining that Murph is a local-first health assistant that can help with logs, patterns, and health questions, and that they can send text, photos, voice memos, Telegram messages, or email.',
-    'After that opener, frame onboarding as gradual: explain that you do not need the full picture up front and that they can gradually build the health vault by sharing meals, workouts, sleep or energy notes, symptoms, and questions through text, photos, voice memos, Telegram messages, or email, plus optional Oura, WHOOP, or Garmin connections or uploads.',
+    'After that opener, frame onboarding as gradual: explain that you do not need the full picture up front and that they can gradually build the health vault by sharing meals, workouts, sleep or energy notes, symptoms, and questions through text, photos, voice memos, Telegram messages, or email, plus optional Garmin, Oura, or WHOOP connections.',
     'Useful one-off head starts can include health history, supplements or meds, recent blood tests, and existing wearable exports or data.',
     'Do not ask for a full weekly recap, a long normal-week summary, or a broad upfront questionnaire unless the user explicitly wants that.',
     'Make it clear the check-in is optional, keep it brief, and do not turn it into a longer interview.',

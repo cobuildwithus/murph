@@ -7,14 +7,8 @@ import { beforeEach, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   buildHostedInvitePageData: vi.fn(),
   buildHostedSharePageData: vi.fn(),
-  cookies: vi.fn(),
   resolveHostedPrivyClientAppId: vi.fn(),
   resolveHostedPrivyClientId: vi.fn(),
-  resolveHostedSessionFromCookieStore: vi.fn(),
-}));
-
-vi.mock("next/headers", () => ({
-  cookies: mocks.cookies,
 }));
 
 vi.mock("@/src/components/hosted-onboarding/join-invite-client", () => ({
@@ -39,6 +33,12 @@ vi.mock("@/src/components/hosted-onboarding/join-invite-client", () => ({
   },
 }));
 
+vi.mock("@/src/components/hosted-onboarding/privy-provider", () => ({
+  HostedPrivyProvider(input: { children: unknown }) {
+    return input.children;
+  },
+}));
+
 vi.mock("@/src/lib/hosted-share/service", () => ({
   buildHostedSharePageData: mocks.buildHostedSharePageData,
 }));
@@ -52,14 +52,8 @@ vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
   buildHostedInvitePageData: mocks.buildHostedInvitePageData,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/session", () => ({
-  resolveHostedSessionFromCookieStore: mocks.resolveHostedSessionFromCookieStore,
-}));
-
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.cookies.mockResolvedValue({ get: vi.fn() });
-  mocks.resolveHostedSessionFromCookieStore.mockResolvedValue({ member: { id: "member_123" } });
   mocks.resolveHostedPrivyClientAppId.mockReturnValue("cm_app_123");
   mocks.resolveHostedPrivyClientId.mockReturnValue("client_123");
   mocks.buildHostedInvitePageData.mockResolvedValue({
@@ -97,12 +91,12 @@ test("JoinInvitePage passes the server-resolved Privy app id into the client tre
   );
 
   expect(mocks.buildHostedInvitePageData).toHaveBeenCalledWith({
+    authenticatedMember: null,
     inviteCode: "invite-code",
-    sessionRecord: { member: { id: "member_123" } },
   });
   expect(mocks.buildHostedSharePageData).toHaveBeenCalledWith({
+    authenticatedMember: null,
     inviteCode: "invite-code",
-    sessionRecord: { member: { id: "member_123" } },
     shareCode: "share-code",
   });
   assert.match(markup, /data-invite-code="invite-code"/);

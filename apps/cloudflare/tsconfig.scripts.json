@@ -1,0 +1,76 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@murphai/assistant-core": [
+        "packages/assistant-core/src/index.ts"
+      ],
+      "@murphai/assistant-core/*": [
+        "packages/assistant-core/src/*"
+      ],
+      "@murphai/assistant-runtime": [
+        "packages/assistant-runtime/src/index.ts"
+      ],
+      "@murphai/assistant-runtime/*": [
+        "packages/assistant-runtime/src/*"
+      ],
+      "@murphai/core": [
+        "packages/core/src/index.ts"
+      ],
+      "@murphai/core/*": [
+        "packages/core/src/*"
+      ],
+      "@murphai/device-syncd": [
+        "packages/device-syncd/src/index.ts"
+      ],
+      "@murphai/device-syncd/*": [
+        "packages/device-syncd/src/*"
+      ],
+      "@murphai/gateway-core": [
+        "packages/gateway-core/src/index.ts"
+      ],
+      "@murphai/gateway-core/*": [
+        "packages/gateway-core/src/*"
+      ],
+      "@murphai/gateway-local": [
+        "packages/gateway-local/src/index.ts"
+      ],
+      "@murphai/gateway-local/*": [
+        "packages/gateway-local/src/*"
+      ],
+      "@murphai/hosted-execution": [
+        "packages/hosted-execution/src/index.ts"
+      ],
+      "@murphai/hosted-execution/*": [
+        "packages/hosted-execution/src/*"
+      ],
+      "@murphai/inboxd": [
+        "packages/inboxd/src/index.ts"
+      ],
+      "@murphai/inboxd/*": [
+        "packages/inboxd/src/*"
+      ],
+      "@murphai/messaging-ingress": [
+        "packages/messaging-ingress/src/index.ts"
+      ],
+      "@murphai/messaging-ingress/*": [
+        "packages/messaging-ingress/src/*"
+      ],
+      "@murphai/parsers": [
+        "packages/parsers/src/index.ts"
+      ],
+      "@murphai/parsers/*": [
+        "packages/parsers/src/*"
+      ],
+      "@murphai/runtime-state": [
+        "packages/runtime-state/src/index.ts"
+      ],
+      "@murphai/runtime-state/node": [
+        "packages/runtime-state/src/node/index.ts"
+      ],
+      "@murphai/runtime-state/*": [
+        "packages/runtime-state/src/*"
+      ]
+    }
+  }
+}

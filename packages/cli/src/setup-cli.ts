@@ -332,7 +332,14 @@ export function listSetupPendingWearables(
 }
 
 export function formatSetupWearableLabel(wearable: SetupWearable): string {
-  return wearable === 'oura' ? 'Oura' : 'WHOOP'
+  switch (wearable) {
+    case 'garmin':
+      return 'Garmin'
+    case 'oura':
+      return 'Oura'
+    case 'whoop':
+      return 'WHOOP'
+  }
 }
 
 export async function resolveInitialSetupWizardChannels(

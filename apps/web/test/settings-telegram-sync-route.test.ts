@@ -6,27 +6,17 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
   buildHostedTelegramBotLink: vi.fn(),
-  cookies: vi.fn(),
   getPrisma: vi.fn(),
   hostedMemberUpdate: vi.fn(),
-  requireHostedPrivyUserForSession: vi.fn(),
-  resolveHostedSessionFromCookieStore: vi.fn(),
-}));
-
-vi.mock("next/headers", () => ({
-  cookies: mocks.cookies,
+  requireHostedPrivyRequestAuthContext: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
-  requireHostedPrivyUserForSession: mocks.requireHostedPrivyUserForSession,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/session", () => ({
-  resolveHostedSessionFromCookieStore: mocks.resolveHostedSessionFromCookieStore,
+vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
+  requireHostedPrivyRequestAuthContext: mocks.requireHostedPrivyRequestAuthContext,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/telegram", () => ({
@@ -53,23 +43,18 @@ describe("settings telegram sync route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.cookies.mockResolvedValue({
-      get: vi.fn(),
-    });
     mocks.getPrisma.mockReturnValue({
       hostedMember: {
         update: mocks.hostedMemberUpdate,
       },
     });
     mocks.hostedMemberUpdate.mockResolvedValue({});
-    mocks.resolveHostedSessionFromCookieStore.mockResolvedValue({
+    mocks.requireHostedPrivyRequestAuthContext.mockResolvedValue({
+      linkedAccounts: [],
       member: {
         id: "member_123",
         privyUserId: "did:privy:user_123",
       },
-    });
-    mocks.requireHostedPrivyUserForSession.mockResolvedValue({
-      linkedAccounts: [],
       verifiedPrivyUser: {
         id: "did:privy:user_123",
         linked_accounts: [
@@ -101,16 +86,7 @@ describe("settings telegram sync route", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.resolveHostedSessionFromCookieStore).toHaveBeenCalledWith({ get: expect.any(Function) });
-    expect(mocks.requireHostedPrivyUserForSession).toHaveBeenCalledWith(
-      { get: expect.any(Function) },
-      {
-        member: {
-          id: "member_123",
-          privyUserId: "did:privy:user_123",
-        },
-      },
-    );
+    expect(mocks.requireHostedPrivyRequestAuthContext).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.hostedMemberUpdate).toHaveBeenCalledWith({
       data: {
         telegramUserId: createHostedTelegramUserLookupKey("456"),
@@ -131,7 +107,11 @@ describe("settings telegram sync route", () => {
   });
 
   it("requires an active hosted session before syncing Telegram", async () => {
-    mocks.resolveHostedSessionFromCookieStore.mockResolvedValue(null);
+    mocks.requireHostedPrivyRequestAuthContext.mockRejectedValue(hostedOnboardingError({
+      code: "AUTH_REQUIRED",
+      httpStatus: 401,
+      message: "Verify your phone to continue.",
+    }));
 
     const response = await settingsTelegramSyncRoute.POST(
       new Request("https://join.example.test/api/settings/telegram/sync", {
@@ -147,12 +127,11 @@ describe("settings telegram sync route", () => {
     );
 
     expect(response.status).toBe(401);
-    expect(mocks.requireHostedPrivyUserForSession).not.toHaveBeenCalled();
     expect(mocks.hostedMemberUpdate).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "AUTH_REQUIRED",
-        message: "Sign in again before you sync Telegram.",
+        message: "Verify your phone to continue.",
         retryable: false,
       },
     });
@@ -167,7 +146,6 @@ describe("settings telegram sync route", () => {
     );
 
     expect(response.status).toBe(400);
-    expect(mocks.requireHostedPrivyUserForSession).not.toHaveBeenCalled();
     expect(mocks.hostedMemberUpdate).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
@@ -179,7 +157,7 @@ describe("settings telegram sync route", () => {
   });
 
   it("rejects sync attempts whose Privy session does not match the hosted session", async () => {
-    mocks.requireHostedPrivyUserForSession.mockRejectedValue(hostedOnboardingError({
+    mocks.requireHostedPrivyRequestAuthContext.mockRejectedValue(hostedOnboardingError({
       code: "PRIVY_SESSION_MISMATCH",
       httpStatus: 403,
       message: "This Privy session does not match the current hosted account. Reopen the latest invite and try again.",
@@ -210,7 +188,7 @@ describe("settings telegram sync route", () => {
   });
 
   it("returns a retryable conflict while the Telegram account has not reached the server-side Privy session yet", async () => {
-    mocks.requireHostedPrivyUserForSession.mockResolvedValue({
+    mocks.requireHostedPrivyRequestAuthContext.mockResolvedValue({
       linkedAccounts: [],
       verifiedPrivyUser: {
         id: "did:privy:user_123",
@@ -269,7 +247,7 @@ describe("settings telegram sync route", () => {
   });
 
   it("returns a retryable conflict when the server-side Privy cookie is still on an older Telegram account", async () => {
-    mocks.requireHostedPrivyUserForSession.mockResolvedValue({
+    mocks.requireHostedPrivyRequestAuthContext.mockResolvedValue({
       linkedAccounts: [],
       verifiedPrivyUser: {
         id: "did:privy:user_123",
@@ -309,7 +287,7 @@ describe("settings telegram sync route", () => {
   });
 
   it("rejects ambiguous Telegram state when top-level and linked Telegram accounts disagree", async () => {
-    mocks.requireHostedPrivyUserForSession.mockResolvedValue({
+    mocks.requireHostedPrivyRequestAuthContext.mockResolvedValue({
       linkedAccounts: [],
       verifiedPrivyUser: {
         id: "did:privy:user_123",
