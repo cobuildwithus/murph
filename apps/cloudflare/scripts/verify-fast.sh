@@ -24,7 +24,11 @@ unregister_background_pid() {
     fi
   done
 
-  tracked_background_pids=("${remaining_pids[@]}")
+  if [[ ${#remaining_pids[@]} -eq 0 ]]; then
+    tracked_background_pids=()
+  else
+    tracked_background_pids=("${remaining_pids[@]}")
+  fi
 }
 
 terminate_background_pid() {

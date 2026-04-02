@@ -129,8 +129,7 @@ describe("hosted device-sync internal routes", () => {
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "INVALID_REQUEST",
-        message: "userId must match the authenticated hosted execution user.",
-        retryable: false,
+        message: "Invalid request.",
       },
     });
     expect(mocks.ensureHostedWebhookAdminUpkeepForRuntimeSnapshot).not.toHaveBeenCalled();
@@ -231,8 +230,7 @@ describe("hosted device-sync internal routes", () => {
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "INVALID_REQUEST",
-        message: "userId must match the authenticated hosted execution user.",
-        retryable: false,
+        message: "Invalid request.",
       },
     });
   });

@@ -68,7 +68,7 @@ test("HomePage renders the fallback copy when hosted phone auth is not ready", a
   assert.match(markup, /Open source/);
   assert.match(markup, /Murph is licensed under GPL 3\.0\./);
   assert.match(markup, /View the GitHub repo/);
-  assert.match(markup, /Syncs with Oura and WHOOP, imports Garmin exports/);
+  assert.match(markup, /Syncs with Garmin, Oura, and WHOOP/);
   assert.match(markup, /Local mode keeps your data on your device\. Hosted runs use encrypted cloud snapshots\./);
   assert.match(markup, /Local mode keeps your data on your device, and hosted runs use encrypted cloud snapshots\./);
   assert.match(markup, /Encrypted cloud snapshots for hosted runs/);

@@ -13,6 +13,7 @@ export {
   createConfiguredDeviceSyncProviders,
   createConsoleDeviceSyncLogger,
   loadDeviceSyncEnvironment,
+  readConfiguredGarminDeviceSyncProviderConfig,
   readConfiguredOuraDeviceSyncProviderConfig,
   readConfiguredWhoopDeviceSyncProviderConfig,
 } from "./config.ts";
@@ -20,6 +21,8 @@ export type { LoadedDeviceSyncEnvironment } from "./config.ts";
 export { buildPublicDeviceSyncErrorPayload, startDeviceSyncHttpServer } from "./http.ts";
 export type { CreateDeviceSyncHttpServerInput } from "./http.ts";
 export { SqliteDeviceSyncStore } from "./store.ts";
+export { createGarminDeviceSyncProvider } from "./providers/garmin.ts";
+export type { GarminDeviceSyncProviderConfig } from "./providers/garmin.ts";
 export { createOuraDeviceSyncProvider, resolveOuraWebhookVerificationChallenge } from "./providers/oura.ts";
 export type { OuraDeviceSyncProviderConfig } from "./providers/oura.ts";
 export {

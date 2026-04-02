@@ -3,7 +3,7 @@ set -euo pipefail
 
 verify_step_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 verify_step_parallel="${MURPH_VERIFY_STEP_PARALLEL:-$verify_step_parallel_default}"
-tracked_background_pids=("")
+tracked_background_pids=()
 
 register_background_pid() {
   tracked_background_pids+=("$1")
@@ -11,19 +11,24 @@ register_background_pid() {
 
 unregister_background_pid() {
   local target_pid="$1"
-  local remaining_pids=("")
+  local remaining_pids=()
   local pid
 
+  if [[ ${#tracked_background_pids[@]} -eq 0 ]]; then
+    return
+  fi
+
   for pid in "${tracked_background_pids[@]}"; do
-    if [[ -z "$pid" ]]; then
-      continue
-    fi
     if [[ "$pid" != "$target_pid" ]]; then
       remaining_pids+=("$pid")
     fi
   done
 
-  tracked_background_pids=("${remaining_pids[@]}")
+  if [[ ${#remaining_pids[@]} -eq 0 ]]; then
+    tracked_background_pids=()
+  else
+    tracked_background_pids=("${remaining_pids[@]}")
+  fi
 }
 
 terminate_background_pid() {
@@ -37,10 +42,11 @@ terminate_background_pid() {
 cleanup_background_jobs() {
   local pid
 
+  if [[ ${#tracked_background_pids[@]} -eq 0 ]]; then
+    return
+  fi
+
   for pid in "${tracked_background_pids[@]}"; do
-    if [[ -z "$pid" ]]; then
-      continue
-    fi
     terminate_background_pid "$pid"
   done
 }

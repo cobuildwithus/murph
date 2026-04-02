@@ -262,6 +262,11 @@ const DEFAULT_SETUP_WIZARD_SCHEDULED_UPDATE_IDS = [
 
 const setupWizardWearableOptions: readonly SetupWizardWearableOption[] = [
   {
+    description: 'Sync sleep, daily health metrics, and activities from Garmin Connect.',
+    title: 'Garmin',
+    wearable: 'garmin',
+  },
+  {
     description: 'Import sleep, readiness, and recovery from Oura.',
     title: 'Oura',
     wearable: 'oura',
@@ -1659,7 +1664,14 @@ function formatSetupChannel(channel: SetupChannel): string {
 }
 
 function formatSetupWearable(wearable: SetupWearable): string {
-  return wearable === 'oura' ? 'Oura' : 'WHOOP'
+  switch (wearable) {
+    case 'garmin':
+      return 'Garmin'
+    case 'oura':
+      return 'Oura'
+    case 'whoop':
+      return 'WHOOP'
+  }
 }
 
 function formatSetupScheduledUpdate(presetId: string): string {
@@ -2288,15 +2300,15 @@ export function describeSetupWizardPublicUrlStrategyChoice(input: {
   if (input.strategy === 'hosted') {
     const hasLinq = input.review.targets.some((target) => target.label === 'Linq webhook')
     return hasLinq
-      ? 'Use hosted `apps/web` for WHOOP/Oura, but keep Linq on the local webhook path for now.'
-      : 'Use hosted `apps/web` for WHOOP/Oura so callbacks and webhooks stay on one stable public base.'
+      ? 'Use hosted `apps/web` for Garmin/WHOOP/Oura, but keep Linq on the local webhook path for now.'
+      : 'Use hosted `apps/web` for Garmin/WHOOP/Oura so callbacks stay on one stable public base.'
   }
 
   const hasWearableTargets = input.review.targets.some((target) =>
-    target.label.startsWith('WHOOP') || target.label.startsWith('Oura'),
+    target.label.startsWith('Garmin') || target.label.startsWith('WHOOP') || target.label.startsWith('Oura'),
   )
   if (hasWearableTargets) {
-    return 'Expose the local callback and webhook routes through a tunnel instead of setting up hosted `apps/web` first.'
+    return 'Expose the local callback routes through a tunnel instead of setting up hosted `apps/web` first.'
   }
 
   return 'Expose the local Linq webhook through a tunnel. Murph does not have a hosted Linq webhook yet.'
@@ -2307,11 +2319,11 @@ function describeSetupWizardPublicUrlSummary(input: {
   wearables: readonly SetupWearable[]
 }): string {
   if (input.wearables.length > 0 && input.hasLinq) {
-    return 'WHOOP/Oura are easiest through hosted `apps/web`, while Linq still needs the local inbox webhook today.'
+    return 'Garmin/WHOOP/Oura are easiest through hosted `apps/web`, while Linq still needs the local inbox webhook today.'
   }
 
   if (input.wearables.length > 0) {
-    return 'WHOOP/Oura need a public callback URL. Hosted `apps/web` is the easiest stable base.'
+    return 'Garmin/WHOOP/Oura need a public callback URL. Hosted `apps/web` is the easiest stable base.'
   }
 
   return 'Linq still uses the local inbox webhook today, so a tunnel to your machine is the simplest public path.'
@@ -2324,6 +2336,14 @@ function buildSetupWizardPublicUrlTargets(input: {
   linqLocalWebhookUrl: string
 }): SetupWizardPublicUrlTarget[] {
   const targets: SetupWizardPublicUrlTarget[] = []
+
+  if (input.wearables.includes('garmin')) {
+    targets.push({
+      label: 'Garmin callback',
+      url: new URL('/oauth/garmin/callback', input.deviceSyncLocalBaseUrl).toString(),
+      detail: 'Use this if Garmin finishes sign-in on your machine through a tunnel.',
+    })
+  }
 
   if (input.wearables.includes('whoop')) {
     targets.push({

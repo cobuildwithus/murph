@@ -32,7 +32,7 @@ export const whisperModelSchema = z.enum(whisperModelValues)
 export const setupChannelValues = ['imessage', 'telegram', 'linq', 'email'] as const
 export const setupChannelSchema = z.enum(setupChannelValues)
 
-export const setupWearableValues = ['oura', 'whoop'] as const
+export const setupWearableValues = ['garmin', 'oura', 'whoop'] as const
 export const setupWearableSchema = z.enum(setupWearableValues)
 
 export const setupAssistantPresetValues = [

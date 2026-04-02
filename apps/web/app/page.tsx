@@ -23,7 +23,7 @@ const capabilities = [
   },
   {
     title: "Wearable sync",
-    body: "Pulls sleep, activity, and recovery data from Oura and WHOOP automatically, and can import Garmin snapshot exports.",
+    body: "Pulls sleep, activity, and recovery data from Garmin, Oura, and WHOOP automatically.",
   },
   {
     title: "Persistent memory",
@@ -65,7 +65,7 @@ const conversations = [
 ] as const;
 
 const integrations = [
-  "iMessage", "Telegram", "Email", "Oura", "WHOOP", "Garmin exports",
+  "iMessage", "Telegram", "Email", "Garmin", "Oura", "WHOOP",
 ] as const;
 
 const faqItems = [
@@ -75,7 +75,7 @@ const faqItems = [
   },
   {
     question: "How does wearable syncing work?",
-    answer: "You connect Oura or WHOOP once for ongoing sync. Garmin data is currently supported through snapshot imports rather than a live account connection.",
+    answer: "You connect Garmin, Oura, or WHOOP once for ongoing sync.",
   },
   {
     question: "Is my health data private?",
@@ -368,7 +368,7 @@ export default function HomePage() {
             <div key={repeat} className="flex shrink-0 items-center gap-10 px-5">
               {[
                 "Works on iMessage, Telegram, and email",
-                "Syncs with Oura and WHOOP, imports Garmin exports",
+                "Syncs with Garmin, Oura, and WHOOP",
                 "Plain English — no jargon",
                 "Encrypted cloud snapshots for hosted runs",
               ].map((text) => (

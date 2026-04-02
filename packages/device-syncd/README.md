@@ -20,6 +20,7 @@ What it does:
 - imports provider snapshots through `@murphai/importers`
 
 Current providers:
+- Garmin
 - WHOOP
 - Oura
 
@@ -48,6 +49,8 @@ It does **not** own canonical health-data import. The local data plane should st
 - optional webhook fan-in
 - normalized snapshot import through `@murphai/importers`
 
+Garmin uses OAuth plus scheduled polling. Once the operator configures the Garmin client ID and secret, the end-user flow is connect once and let scheduled sync keep the account fresh.
+
 WHOOP uses OAuth plus webhooks.
 
 Oura uses OAuth plus refresh tokens and works well in a polling-first mode, so the basic Murph setup does not require Oura webhooks. Once the operator configures the Oura client ID and secret, the end-user flow is just connect once and let scheduled sync keep the account fresh.
@@ -74,6 +77,17 @@ Common optional settings:
 - `DEVICE_SYNC_WORKER_LEASE_MS`
 - `DEVICE_SYNC_PUBLIC_HOST` plus `DEVICE_SYNC_PUBLIC_PORT` to expose only `/oauth/*/callback` and `/webhooks/*`
 - `OURA_WEBHOOK_VERIFICATION_TOKEN` when you want the daemon to answer Oura's webhook verification challenge over `GET /webhooks/oura`
+
+Garmin settings:
+- `GARMIN_CLIENT_ID`
+- `GARMIN_CLIENT_SECRET`
+- `GARMIN_AUTH_BASE_URL`
+- `GARMIN_TOKEN_BASE_URL`
+- `GARMIN_API_BASE_URL`
+- `GARMIN_BACKFILL_DAYS`
+- `GARMIN_RECONCILE_DAYS`
+- `GARMIN_RECONCILE_INTERVAL_MS`
+- `GARMIN_REQUEST_TIMEOUT_MS`
 
 WHOOP settings:
 - `WHOOP_CLIENT_ID`
@@ -135,6 +149,14 @@ Public routes: keep them on localhost unless you explicitly expose a separate ca
 - `GET /oauth/:provider/callback`
 - `GET /webhooks/:provider` for provider webhook verification/health checks (`GET /webhooks/oura` answers Oura's verification challenge when configured)
 - `POST /webhooks/:provider` for providers that support webhooks
+
+## Notes for Garmin
+
+Murph's Garmin connector is designed for the same connect-once experience as the other first-class wearable providers:
+- the operator registers one Garmin API application once
+- users connect their Garmin account through the normal OAuth PKCE consent flow
+- `device-syncd` keeps the account alive with refresh tokens
+- scheduled backfill and reconcile jobs pull recent Garmin windows directly so sync keeps working without requiring a public Garmin webhook path
 
 ## Notes for Oura
 

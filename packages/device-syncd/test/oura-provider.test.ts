@@ -109,6 +109,7 @@ test("Oura provider exchanges an auth code into a refreshable connection", async
   const connection = await provider.exchangeAuthorizationCode(
     {
       callbackUrl: "https://sync.example.test/device-sync/oauth/oura/callback",
+      state: "state-1",
       now: "2026-03-16T10:00:00.000Z",
       grantedScopes: [],
     },
@@ -157,6 +158,7 @@ test("Oura provider normalizes extapi-prefixed token scopes from token responses
   const connection = await provider.exchangeAuthorizationCode(
     {
       callbackUrl: "https://sync.example.test/device-sync/oauth/oura/callback",
+      state: "state-1",
       now: "2026-03-16T10:00:00.000Z",
       grantedScopes: [],
     },

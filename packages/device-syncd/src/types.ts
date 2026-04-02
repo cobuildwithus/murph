@@ -152,6 +152,7 @@ export interface DeviceSyncJobRecord {
 
 export interface ProviderCallbackContext {
   callbackUrl: string;
+  state: string;
   now: string;
   grantedScopes: string[];
 }

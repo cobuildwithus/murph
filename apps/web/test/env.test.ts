@@ -62,6 +62,31 @@ describe("readHostedDeviceSyncEnvironment", () => {
     expect(environment.providers.oura?.scopes).toContain("custom");
   });
 
+  it("passes Garmin provider tuning through the shared hosted config reader", () => {
+    const environment = readHostedDeviceSyncEnvironment({
+      NODE_ENV: "test",
+      DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
+      DEVICE_SYNC_PUBLIC_BASE_URL: "https://example.test/device-sync",
+      GARMIN_AUTH_BASE_URL: "https://garmin-auth.test",
+      GARMIN_API_BASE_URL: "https://garmin-api.test",
+      GARMIN_CLIENT_ID: "garmin-client",
+      GARMIN_CLIENT_SECRET: "garmin-secret",
+      GARMIN_TOKEN_BASE_URL: "https://garmin-token.test",
+      GARMIN_RECONCILE_INTERVAL_MS: "600000",
+      GARMIN_REQUEST_TIMEOUT_MS: "30000",
+    });
+
+    expect(environment.providers.garmin).toEqual(expect.objectContaining({
+      apiBaseUrl: "https://garmin-api.test",
+      authBaseUrl: "https://garmin-auth.test",
+      clientId: "garmin-client",
+      clientSecret: "garmin-secret",
+      reconcileIntervalMs: 600000,
+      requestTimeoutMs: 30000,
+      tokenBaseUrl: "https://garmin-token.test",
+    }));
+  });
+
   it("falls back to the Vercel production domain for hosted defaults", () => {
     const environment = readHostedDeviceSyncEnvironment({
       NODE_ENV: "test",

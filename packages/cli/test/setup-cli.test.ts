@@ -292,7 +292,7 @@ test('setup scheduled updates can be fully opted out during onboarding', async (
 test('public URL review recommends hosted apps/web for wearable ingress when no public base is configured', () => {
   const review = buildSetupWizardPublicUrlReview({
     channels: [],
-    wearables: ['oura', 'whoop'],
+    wearables: ['garmin', 'oura', 'whoop'],
   })
 
   assert.equal(review.enabled, true)
@@ -301,6 +301,7 @@ test('public URL review recommends hosted apps/web for wearable ingress when no 
   assert.deepEqual(
     review.targets.map((target) => target.url),
     [
+      'http://localhost:8788/oauth/garmin/callback',
       'http://localhost:8788/oauth/whoop/callback',
       'http://localhost:8788/webhooks/whoop',
       'http://localhost:8788/oauth/oura/callback',
@@ -345,7 +346,7 @@ test('public URL review recommends tunnel mode for Linq-only ingress and keeps t
 test('public URL review keeps hosted wearable guidance while preserving the local Linq webhook when both are selected', () => {
   const review = buildSetupWizardPublicUrlReview({
     channels: ['linq'],
-    wearables: ['oura', 'whoop'],
+    wearables: ['garmin', 'oura', 'whoop'],
   })
 
   assert.equal(review.enabled, true)
@@ -355,6 +356,7 @@ test('public URL review keeps hosted wearable guidance while preserving the loca
   assert.deepEqual(
     review.targets.map((target) => target.label),
     [
+      'Garmin callback',
       'WHOOP callback',
       'WHOOP webhook',
       'Oura callback',
@@ -1636,6 +1638,12 @@ test('runtime env helpers honor channel aliases and require explicit wearable cl
     'LINQ_WEBHOOK_SECRET',
   ])
   assert.deepEqual(
+    resolveSetupWearableMissingEnv('garmin', {
+      GARMIN_CLIENT_ID: 'garmin-client',
+    }),
+    ['GARMIN_CLIENT_SECRET'],
+  )
+  assert.deepEqual(
     resolveSetupWearableMissingEnv('oura', {
       OURA_CLIENT_ID: 'oura-client',
     }),
@@ -1644,12 +1652,21 @@ test('runtime env helpers honor channel aliases and require explicit wearable cl
   assert.deepEqual(
     describeSelectedSetupWearables({
       env: {
+        GARMIN_CLIENT_ID: 'garmin-client',
+        GARMIN_CLIENT_SECRET: 'garmin-secret',
         WHOOP_CLIENT_ID: 'whoop-client',
         WHOOP_CLIENT_SECRET: 'whoop-secret',
       },
-      wearables: ['whoop'],
+      wearables: ['garmin', 'whoop'],
     }),
     [
+      {
+        detail: 'Selected Garmin. Murph can open the connect flow after setup.',
+        enabled: true,
+        missingEnv: [],
+        ready: true,
+        wearable: 'garmin',
+      },
       {
         detail: 'Selected WHOOP. Murph can open the connect flow after setup.',
         enabled: true,
@@ -2103,6 +2120,13 @@ test('setup wearable helpers split ready and pending selections', () => {
     ...makeSetupResult('./vault'),
     wearables: [
       {
+        detail: 'Garmin can connect now.',
+        enabled: true,
+        missingEnv: [],
+        ready: true,
+        wearable: 'garmin' as const,
+      },
+      {
         detail: 'Oura can connect now.',
         enabled: true,
         missingEnv: [],
@@ -2119,8 +2143,8 @@ test('setup wearable helpers split ready and pending selections', () => {
     ],
   }
 
-  assert.deepEqual(listSetupReadyWearables(result), ['oura'])
-  assert.deepEqual(listSetupPendingWearables(result), [result.wearables[1]])
+  assert.deepEqual(listSetupReadyWearables(result), ['garmin', 'oura'])
+  assert.deepEqual(listSetupPendingWearables(result), [result.wearables[2]])
 })
 
 test('onboard resolves assistant defaults from explicit assistant options when the wizard is skipped', async () => {

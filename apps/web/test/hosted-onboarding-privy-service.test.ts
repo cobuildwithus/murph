@@ -191,18 +191,10 @@ describe("completeHostedPrivyVerification", () => {
         status: HostedInviteStatus.authenticated,
       },
     });
-    expect(mocks.createHostedSession).toHaveBeenCalledWith({
-      inviteId: "invite_123",
-      memberId: "member_123",
-      now: NOW,
-      prisma,
-    });
     expect(result).toEqual({
-      expiresAt: new Date("2026-04-25T12:00:00.000Z"),
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
       stage: "checkout",
-      token: "session-token",
     });
   });
 
@@ -277,12 +269,7 @@ describe("completeHostedPrivyVerification", () => {
         status: HostedInviteStatus.authenticated,
       },
     });
-    expect(mocks.createHostedSession).toHaveBeenCalledWith({
-      inviteId: "invite_new",
-      memberId: "member_new",
-      now: NOW,
-      prisma,
-    });
+    expect(mocks.createHostedSession).not.toHaveBeenCalled();
     expect(result.joinUrl).toBe("https://join.example.test/join/public-invite-code");
     expect(result.inviteCode).toBe("public-invite-code");
     expect(result.stage).toBe("checkout");

@@ -28,6 +28,7 @@ const BASE_ENVIRONMENT: HostedDeviceSyncEnvironment = {
   devUserId: "dev-user",
   devUserName: "Dev User",
   providers: {
+    garmin: null,
     whoop: null,
     oura: null,
   },

@@ -149,6 +149,7 @@ test("WHOOP provider builds a connect URL and exchanges an auth code into a refr
   const connection = await provider.exchangeAuthorizationCode(
     {
       callbackUrl: "https://sync.example.test/device-sync/oauth/whoop/callback",
+      state: "state-1",
       now: "2026-03-16T10:00:00.000Z",
       grantedScopes: [],
     },
@@ -210,6 +211,7 @@ test("WHOOP provider avoids persisting connect-time profile or body measurement 
   const connection = await provider.exchangeAuthorizationCode(
     {
       callbackUrl: "https://sync.example.test/device-sync/oauth/whoop/callback",
+      state: "state-1",
       now: "2026-03-16T10:00:00.000Z",
       grantedScopes: [],
     },

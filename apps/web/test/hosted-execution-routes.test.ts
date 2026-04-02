@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   requireHostedExecutionInternalToken: vi.fn(),
   requireHostedExecutionSchedulerToken: vi.fn(),
   requireHostedExecutionUserId: vi.fn(),
-  resolveHostedSessionFromRequest: vi.fn(),
+  resolveHostedPrivyRequestAuthContext: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/internal", () => ({
@@ -42,8 +42,8 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/session", () => ({
-  resolveHostedSessionFromRequest: mocks.resolveHostedSessionFromRequest,
+vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
+  resolveHostedPrivyRequestAuthContext: mocks.resolveHostedPrivyRequestAuthContext,
 }));
 
 type HostedExecutionCronRouteModule = typeof import("../app/api/internal/hosted-execution/outbox/cron/route");
@@ -73,7 +73,7 @@ describe("hosted execution async routes", () => {
     mocks.requireHostedExecutionSchedulerToken.mockImplementation(() => {});
     mocks.requireHostedExecutionUserId.mockReturnValue("member_123");
     mocks.getPrisma.mockReturnValue({ prisma: true });
-    mocks.resolveHostedSessionFromRequest.mockResolvedValue({
+    mocks.resolveHostedPrivyRequestAuthContext.mockResolvedValue({
       member: {
         id: "member_123",
       },
@@ -294,17 +294,17 @@ describe("hosted execution async routes", () => {
     });
   });
 
-  it("decodes shareCode, forwards inviteCode, and passes the resolved session into the share status route", async () => {
+  it("decodes shareCode, forwards inviteCode, and passes the resolved auth member into the share status route", async () => {
     const prisma = {
       prisma: true,
     };
-    const sessionRecord = {
+    const auth = {
       member: {
         id: "member_123",
       },
     };
     mocks.getPrisma.mockReturnValue(prisma);
-    mocks.resolveHostedSessionFromRequest.mockResolvedValue(sessionRecord);
+    mocks.resolveHostedPrivyRequestAuthContext.mockResolvedValue(auth);
     mocks.buildHostedSharePageData.mockResolvedValue({
       inviteCode: "invite code",
       session: {
@@ -326,11 +326,11 @@ describe("hosted execution async routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.resolveHostedSessionFromRequest).toHaveBeenCalledWith(expect.any(Request), prisma);
+    expect(mocks.resolveHostedPrivyRequestAuthContext).toHaveBeenCalledWith(expect.any(Request), prisma);
     expect(mocks.buildHostedSharePageData).toHaveBeenCalledWith({
+      authenticatedMember: { id: "member_123" },
       inviteCode: "invite code",
       prisma,
-      sessionRecord,
       shareCode: "share code",
     });
   });

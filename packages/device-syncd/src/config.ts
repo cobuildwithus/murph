@@ -3,10 +3,12 @@ import {
   DEVICE_SYNC_SECRET_ENV_KEYS,
 } from "./client.ts";
 
+import { createGarminDeviceSyncProvider } from "./providers/garmin.ts";
 import { createOuraDeviceSyncProvider } from "./providers/oura.ts";
 import { createWhoopDeviceSyncProvider } from "./providers/whoop.ts";
 import { DEFAULT_DEVICE_SYNC_HOST, normalizeString } from "./shared.ts";
 
+import type { GarminDeviceSyncProviderConfig } from "./providers/garmin.ts";
 import type { OuraDeviceSyncProviderConfig } from "./providers/oura.ts";
 import type { WhoopDeviceSyncProviderConfig } from "./providers/whoop.ts";
 import type { CreateDeviceSyncServiceInput } from "./service.ts";
@@ -57,6 +59,21 @@ const DEVICE_SYNC_WORKER_LEASE_MS_ENV_KEYS = [
 const DEVICE_SYNC_WORKER_POLL_MS_ENV_KEYS = [
   "DEVICE_SYNC_WORKER_POLL_MS",
 ] as const;
+const GARMIN_API_BASE_URL_ENV_KEYS = ["GARMIN_API_BASE_URL"] as const;
+const GARMIN_AUTH_BASE_URL_ENV_KEYS = ["GARMIN_AUTH_BASE_URL"] as const;
+const GARMIN_BACKFILL_DAYS_ENV_KEYS = ["GARMIN_BACKFILL_DAYS"] as const;
+const GARMIN_CLIENT_ID_ENV_KEYS = ["GARMIN_CLIENT_ID"] as const;
+const GARMIN_CLIENT_SECRET_ENV_KEYS = ["GARMIN_CLIENT_SECRET"] as const;
+const GARMIN_TOKEN_BASE_URL_ENV_KEYS = ["GARMIN_TOKEN_BASE_URL"] as const;
+const GARMIN_RECONCILE_DAYS_ENV_KEYS = [
+  "GARMIN_RECONCILE_DAYS",
+] as const;
+const GARMIN_RECONCILE_INTERVAL_MS_ENV_KEYS = [
+  "GARMIN_RECONCILE_INTERVAL_MS",
+] as const;
+const GARMIN_REQUEST_TIMEOUT_MS_ENV_KEYS = [
+  "GARMIN_REQUEST_TIMEOUT_MS",
+] as const;
 const OURA_API_BASE_URL_ENV_KEYS = ["OURA_API_BASE_URL"] as const;
 const OURA_AUTH_BASE_URL_ENV_KEYS = ["OURA_AUTH_BASE_URL"] as const;
 const OURA_BACKFILL_DAYS_ENV_KEYS = ["OURA_BACKFILL_DAYS"] as const;
@@ -105,7 +122,7 @@ export function loadDeviceSyncEnvironment(env: NodeJS.ProcessEnv = process.env):
 
   if (providers.length === 0) {
     throw new TypeError(
-      "No device sync providers are configured. Set WHOOP and/or Oura client credentials before starting device-syncd.",
+      "No device sync providers are configured. Set Garmin, WHOOP, and/or Oura client credentials before starting device-syncd.",
     );
   }
 
@@ -157,8 +174,13 @@ export function createConsoleDeviceSyncLogger(consoleLike: Console = console): D
 
 export function createConfiguredDeviceSyncProviders(env: DeviceSyncEnvSource): DeviceSyncProvider[] {
   const providers: DeviceSyncProvider[] = [];
+  const garminConfig = readConfiguredGarminDeviceSyncProviderConfig(env);
   const whoopConfig = readConfiguredWhoopDeviceSyncProviderConfig(env);
   const ouraConfig = readConfiguredOuraDeviceSyncProviderConfig(env);
+
+  if (garminConfig) {
+    providers.push(createGarminDeviceSyncProvider(garminConfig));
+  }
 
   if (whoopConfig) {
     providers.push(createWhoopDeviceSyncProvider(whoopConfig));
@@ -169,6 +191,33 @@ export function createConfiguredDeviceSyncProviders(env: DeviceSyncEnvSource): D
   }
 
   return providers;
+}
+
+export function readConfiguredGarminDeviceSyncProviderConfig(
+  env: DeviceSyncEnvSource,
+): GarminDeviceSyncProviderConfig | null {
+  const credentials = readOptionalCredentialPair(
+    env,
+    GARMIN_CLIENT_ID_ENV_KEYS,
+    GARMIN_CLIENT_SECRET_ENV_KEYS,
+    "Garmin",
+  );
+
+  if (!credentials) {
+    return null;
+  }
+
+  return {
+    clientId: credentials.clientId,
+    clientSecret: credentials.clientSecret,
+    authBaseUrl: optionalEnv(env, GARMIN_AUTH_BASE_URL_ENV_KEYS),
+    tokenBaseUrl: optionalEnv(env, GARMIN_TOKEN_BASE_URL_ENV_KEYS),
+    apiBaseUrl: optionalEnv(env, GARMIN_API_BASE_URL_ENV_KEYS),
+    backfillDays: parseIntegerEnv(env, GARMIN_BACKFILL_DAYS_ENV_KEYS),
+    reconcileDays: parseIntegerEnv(env, GARMIN_RECONCILE_DAYS_ENV_KEYS),
+    reconcileIntervalMs: parseIntegerEnv(env, GARMIN_RECONCILE_INTERVAL_MS_ENV_KEYS),
+    requestTimeoutMs: parseIntegerEnv(env, GARMIN_REQUEST_TIMEOUT_MS_ENV_KEYS),
+  };
 }
 
 export function readConfiguredWhoopDeviceSyncProviderConfig(
