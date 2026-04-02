@@ -8,7 +8,6 @@ import {
   assistantDoctorResultSchema,
   assistantFailoverStateSchema,
   assistantOutboxIntentSchema,
-  assistantProviderRouteRecoverySchema,
   assistantRuntimeBudgetSnapshotSchema,
   assistantRuntimeEventSchema,
   assistantSessionSchema,
@@ -63,7 +62,6 @@ async function runAssistantDoctorAtPaths(
   const [
     quarantine,
     sessionScan,
-    providerRouteRecoveryScan,
     automationScan,
     transcriptScan,
     receiptScan,
@@ -78,7 +76,6 @@ async function runAssistantDoctorAtPaths(
   ] = await Promise.all([
     summarizeAssistantQuarantines({ paths }),
     scanSessionFiles(paths.sessionsDirectory),
-    scanJsonDirectory(paths.providerRouteRecoveryDirectory, assistantProviderRouteRecoverySchema),
     scanJsonFile(paths.automationPath, assistantAutomationStateSchema),
     scanTranscriptFiles(paths.transcriptsDirectory),
     scanTurnReceiptFiles(paths.turnsDirectory),
@@ -124,37 +121,6 @@ async function runAssistantDoctorAtPaths(
     }),
     createDoctorCheck({
       details: {
-        fileCount: providerRouteRecoveryScan.fileCount,
-        parseErrors: providerRouteRecoveryScan.parseErrors,
-      },
-      message:
-        providerRouteRecoveryScan.parseErrors > 0
-          ? `${providerRouteRecoveryScan.parseErrors} provider route recovery file(s) could not be parsed.`
-          : providerRouteRecoveryScan.fileCount === 0
-            ? 'assistant provider route recovery state has not been written yet.'
-            : `${providerRouteRecoveryScan.fileCount} provider route recovery file(s) parsed cleanly.`,
-      name: 'provider-route-recovery-files',
-      status: providerRouteRecoveryScan.parseErrors > 0 ? 'fail' : 'pass',
-    }),
-    buildAssistantStatePermissionCheck(secrecyAudit),
-    buildAssistantStateSessionSecretCheck(secrecyAudit, input.repair),
-    buildAssistantStateProviderRouteRecoverySecretCheck(secrecyAudit, input.repair),
-    createDoctorCheck({
-      details: {
-        present: automationScan.present,
-        parseError: automationScan.parseError,
-      },
-      message:
-        !automationScan.present
-          ? 'assistant automation state has not been initialized yet.'
-          : automationScan.parseError
-            ? 'assistant automation state could not be parsed.'
-            : 'assistant automation state parsed cleanly.',
-      name: 'automation-state',
-      status: automationScan.parseError ? 'fail' : 'pass',
-    }),
-    createDoctorCheck({
-      details: {
         malformedLines: transcriptScan.malformedLines,
         orphanedTranscripts: transcriptOrphans.length,
         salvagedTailLines: transcriptScan.salvagedTailLines,
@@ -177,6 +143,22 @@ async function runAssistantDoctorAtPaths(
             : transcriptOrphans.length > 0
               ? 'warn'
               : 'pass',
+    }),
+    buildAssistantStatePermissionCheck(secrecyAudit),
+    buildAssistantStateSessionSecretCheck(secrecyAudit, input.repair),
+    createDoctorCheck({
+      details: {
+        present: automationScan.present,
+        parseError: automationScan.parseError,
+      },
+      message:
+        !automationScan.present
+          ? 'assistant automation state has not been initialized yet.'
+          : automationScan.parseError
+            ? 'assistant automation state could not be parsed.'
+            : 'assistant automation state parsed cleanly.',
+      name: 'automation-state',
+      status: automationScan.parseError ? 'fail' : 'pass',
     }),
     createDoctorCheck({
       details: {
@@ -431,47 +413,6 @@ function buildAssistantStateSessionSecretCheck(
               ? `${secrecyAudit.repairedSessionFiles} assistant session file(s) were repaired and secrets were moved into private sidecars${repair ? '' : ' during this run'}.`
               : 'assistant session secrets are stored only in private sidecars.',
     name: 'assistant-session-secrets',
-    status,
-  })
-}
-
-function buildAssistantStateProviderRouteRecoverySecretCheck(
-  secrecyAudit: AssistantStateSecrecyAudit,
-  repair: boolean,
-): AssistantDoctorCheck {
-  const blockingIssues =
-    secrecyAudit.providerRouteRecoveryInlineSecretFiles +
-    secrecyAudit.malformedProviderRouteRecoverySecretSidecars
-  const status: AssistantDoctorCheckStatus =
-    blockingIssues > 0
-      ? 'fail'
-      : secrecyAudit.orphanProviderRouteRecoverySecretSidecars > 0 ||
-          secrecyAudit.repairedProviderRouteRecoveryFiles > 0
-        ? 'warn'
-        : 'pass'
-
-  return createDoctorCheck({
-    details: {
-      filesScanned: secrecyAudit.providerRouteRecoveryFilesScanned,
-      inlineSecretFiles: secrecyAudit.providerRouteRecoveryInlineSecretFiles,
-      inlineSecretHeaders: secrecyAudit.providerRouteRecoveryInlineSecretHeaders,
-      malformedSecretSidecars:
-        secrecyAudit.malformedProviderRouteRecoverySecretSidecars,
-      orphanSecretSidecars: secrecyAudit.orphanProviderRouteRecoverySecretSidecars,
-      repairedFiles: secrecyAudit.repairedProviderRouteRecoveryFiles,
-      sidecarFiles: secrecyAudit.providerRouteRecoverySecretSidecarFiles,
-    },
-    message:
-      secrecyAudit.providerRouteRecoveryInlineSecretFiles > 0
-        ? `${secrecyAudit.providerRouteRecoveryInlineSecretFiles} provider route recovery file(s) still embed secret headers inline.`
-        : secrecyAudit.malformedProviderRouteRecoverySecretSidecars > 0
-          ? `${secrecyAudit.malformedProviderRouteRecoverySecretSidecars} provider route recovery secret sidecar(s) are malformed.`
-          : secrecyAudit.orphanProviderRouteRecoverySecretSidecars > 0
-            ? `${secrecyAudit.orphanProviderRouteRecoverySecretSidecars} provider route recovery secret sidecar(s) are orphaned.`
-            : secrecyAudit.repairedProviderRouteRecoveryFiles > 0
-              ? `${secrecyAudit.repairedProviderRouteRecoveryFiles} provider route recovery file(s) were repaired and secrets were moved into private sidecars${repair ? '' : ' during this run'}.`
-              : 'provider route recovery secrets are stored only in private sidecars.',
-    name: 'provider-route-recovery-secrets',
     status,
   })
 }
