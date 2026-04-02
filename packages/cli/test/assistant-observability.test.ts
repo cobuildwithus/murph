@@ -5,7 +5,6 @@ import path from 'node:path'
 import { afterEach, test } from 'vitest'
 import { runAssistantDoctor } from '../src/assistant/doctor.js'
 import { recordAssistantDiagnosticEvent } from '@murphai/assistant-core/assistant/diagnostics'
-import { clearAssistantProviderRouteRecovery } from '@murphai/assistant-core/assistant/provider-turn-recovery'
 import { appendAssistantRuntimeEvent } from '@murphai/assistant-core/assistant/runtime-events'
 import {
   createAssistantOutboxIntent,
@@ -421,15 +420,9 @@ test('assistant doctor can repair legacy inline secret headers and assistant-sta
   await Promise.all([
     mkdir(statePaths.sessionsDirectory, { recursive: true }),
     mkdir(statePaths.sessionSecretsDirectory, { recursive: true }),
-    mkdir(statePaths.providerRouteRecoveryDirectory, { recursive: true }),
-    mkdir(statePaths.providerRouteRecoverySecretsDirectory, { recursive: true }),
   ])
 
   const sessionPath = path.join(statePaths.sessionsDirectory, 'asst_legacyrepair.json')
-  const recoveryPath = path.join(
-    statePaths.providerRouteRecoveryDirectory,
-    'asst_legacyrepair.json',
-  )
 
   await writeFile(
     sessionPath,
@@ -494,51 +487,11 @@ test('assistant doctor can repair legacy inline secret headers and assistant-sta
 `,
     'utf8',
   )
-  await writeFile(
-    recoveryPath,
-    `${JSON.stringify(
-      {
-        schema: 'murph.assistant-provider-route-recovery.v1',
-        sessionId: 'asst_legacyrepair',
-        updatedAt: '2026-03-29T12:05:00.000Z',
-        routes: [
-          {
-            routeId: 'route_primary',
-            provider: 'openai-compatible',
-            providerSessionId: 'route-session-1',
-            providerOptions: {
-              model: 'gpt-4.1-mini',
-              reasoningEffort: null,
-              sandbox: null,
-              approvalPolicy: null,
-              profile: null,
-              oss: false,
-              baseUrl: 'https://api.example.test/v1',
-              apiKeyEnv: 'OPENAI_API_KEY',
-              providerName: 'legacy',
-              headers: {
-                Authorization: 'Bearer legacy-route-secret',
-                'X-Route-Visible': 'route-public',
-              },
-            },
-            providerState: null,
-            recoveredAt: '2026-03-29T12:05:00.000Z',
-          },
-        ],
-      },
-      null,
-      2,
-    )}
-`,
-    'utf8',
-  )
 
   await Promise.all([
     chmod(statePaths.assistantStateRoot, 0o755),
     chmod(statePaths.sessionsDirectory, 0o755),
-    chmod(statePaths.providerRouteRecoveryDirectory, 0o755),
     chmod(sessionPath, 0o644),
-    chmod(recoveryPath, 0o644),
   ])
 
   const doctorBefore = await runAssistantDoctor(vaultRoot)
@@ -549,10 +502,6 @@ test('assistant doctor can repair legacy inline secret headers and assistant-sta
   )
   assert.equal(
     doctorBefore.checks.find((check) => check.name === 'assistant-session-secrets')?.status,
-    'fail',
-  )
-  assert.equal(
-    doctorBefore.checks.find((check) => check.name === 'provider-route-recovery-secrets')?.status,
     'fail',
   )
 
@@ -566,48 +515,29 @@ test('assistant doctor can repair legacy inline secret headers and assistant-sta
     repaired.checks.find((check) => check.name === 'assistant-session-secrets')?.status,
     'warn',
   )
-  assert.equal(
-    repaired.checks.find((check) => check.name === 'provider-route-recovery-secrets')?.status,
-    'warn',
-  )
 
   const repairedSessionRaw = await readFile(sessionPath, 'utf8')
-  const repairedRecoveryRaw = await readFile(recoveryPath, 'utf8')
   const sessionSecretsPath = path.join(
     statePaths.sessionSecretsDirectory,
-    'asst_legacyrepair.json',
-  )
-  const recoverySecretsPath = path.join(
-    statePaths.providerRouteRecoverySecretsDirectory,
     'asst_legacyrepair.json',
   )
   const sessionSecrets = JSON.parse(await readFile(sessionSecretsPath, 'utf8')) as {
     providerBindingHeaders?: Record<string, string> | null
     providerHeaders?: Record<string, string> | null
   }
-  const recoverySecrets = JSON.parse(await readFile(recoverySecretsPath, 'utf8')) as {
-    routes: Array<{ providerHeaders?: Record<string, string> | null }>
-  }
 
   assert.equal(/legacy-session-secret|legacy-binding-secret/u.test(repairedSessionRaw), false)
-  assert.equal(/legacy-route-secret/u.test(repairedRecoveryRaw), false)
   assert.deepEqual(sessionSecrets.providerHeaders, {
     Authorization: 'Bearer legacy-session-secret',
   })
   assert.deepEqual(sessionSecrets.providerBindingHeaders, {
     Authorization: 'Bearer legacy-binding-secret',
   })
-  assert.deepEqual(recoverySecrets.routes[0]?.providerHeaders, {
-    Authorization: 'Bearer legacy-route-secret',
-  })
 
   assert.equal((await stat(statePaths.assistantStateRoot)).mode & 0o777, 0o700)
   assert.equal((await stat(statePaths.sessionsDirectory)).mode & 0o777, 0o700)
-  assert.equal((await stat(statePaths.providerRouteRecoveryDirectory)).mode & 0o777, 0o700)
   assert.equal((await stat(sessionPath)).mode & 0o777, 0o600)
-  assert.equal((await stat(recoveryPath)).mode & 0o777, 0o600)
   assert.equal((await stat(sessionSecretsPath)).mode & 0o777, 0o600)
-  assert.equal((await stat(recoverySecretsPath)).mode & 0o777, 0o600)
 
   const doctorAfter = await runAssistantDoctor(vaultRoot)
   assert.equal(doctorAfter.ok, true)
@@ -617,10 +547,6 @@ test('assistant doctor can repair legacy inline secret headers and assistant-sta
   )
   assert.equal(
     doctorAfter.checks.find((check) => check.name === 'assistant-session-secrets')?.status,
-    'pass',
-  )
-  assert.equal(
-    doctorAfter.checks.find((check) => check.name === 'provider-route-recovery-secrets')?.status,
     'pass',
   )
 })
@@ -666,91 +592,4 @@ test('assistant observability logs redact inline secret material before persiste
   assert.equal(/runtime-secret-token|session-secret-cookie/u.test(runtimeRaw), false)
   assert.match(diagnosticRaw, /\[REDACTED\]/u)
   assert.match(runtimeRaw, /\[REDACTED\]/u)
-})
-
-test('clearing provider route recovery removes the private secret sidecar too', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-recovery-clear-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
-
-  const statePaths = resolveAssistantStatePaths(vaultRoot)
-  await Promise.all([
-    mkdir(statePaths.providerRouteRecoveryDirectory, { recursive: true }),
-    mkdir(statePaths.providerRouteRecoverySecretsDirectory, { recursive: true }),
-  ])
-
-  const recoveryPath = path.join(
-    statePaths.providerRouteRecoveryDirectory,
-    'asst_recovery_clear.json',
-  )
-  const recoverySecretsPath = path.join(
-    statePaths.providerRouteRecoverySecretsDirectory,
-    'asst_recovery_clear.json',
-  )
-
-  await writeFile(
-    recoveryPath,
-    `${JSON.stringify({
-      schema: 'murph.assistant-provider-route-recovery.v1',
-      sessionId: 'asst_recovery_clear',
-      updatedAt: '2026-03-29T12:05:00.000Z',
-      routes: [
-        {
-          routeId: 'route_primary',
-          provider: 'openai-compatible',
-          providerSessionId: 'route-session-1',
-          providerOptions: {
-            model: 'gpt-4.1-mini',
-            reasoningEffort: null,
-            sandbox: null,
-            approvalPolicy: null,
-            profile: null,
-            oss: false,
-            baseUrl: 'https://api.example.test/v1',
-            apiKeyEnv: 'OPENAI_API_KEY',
-            providerName: 'legacy',
-            headers: {
-              'X-Route-Visible': 'route-public',
-            },
-          },
-          providerState: null,
-          recoveredAt: '2026-03-29T12:05:00.000Z',
-        },
-      ],
-    }, null, 2)}\n`,
-    'utf8',
-  )
-  await writeFile(
-    recoverySecretsPath,
-    `${JSON.stringify({
-      schema: 'murph.assistant-provider-route-recovery-secrets.v1',
-      sessionId: 'asst_recovery_clear',
-      updatedAt: '2026-03-29T12:05:00.000Z',
-      routes: [
-        {
-          routeId: 'route_primary',
-          providerHeaders: {
-            Authorization: 'Bearer recovery-secret-token',
-          },
-        },
-      ],
-    }, null, 2)}\n`,
-    'utf8',
-  )
-
-  await clearAssistantProviderRouteRecovery({
-    sessionId: 'asst_recovery_clear',
-    vault: vaultRoot,
-  })
-
-  await assert.rejects(() => stat(recoveryPath))
-  await assert.rejects(() => stat(recoverySecretsPath))
-
-  const doctor = await runAssistantDoctor(vaultRoot)
-  assert.equal(doctor.ok, true)
-  assert.equal(
-    doctor.checks.find((check) => check.name === 'provider-route-recovery-secrets')?.status,
-    'pass',
-  )
 })
