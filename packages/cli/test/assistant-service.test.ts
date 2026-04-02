@@ -84,6 +84,7 @@ import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 const cleanupPaths: string[] = []
 const CANONICAL_WRITE_GUARD_RECEIPT_DIRECTORY_ENV =
   'MURPH_CANONICAL_WRITE_GUARD_RECEIPT_DIR'
+const DEFAULT_CODEX_REASONING_EFFORT = 'medium'
 
 afterEach(async () => {
   await Promise.all(
@@ -171,8 +172,9 @@ function assertPromptHasFirstTurnCheckInGuidance(
   systemPrompt: string | null | undefined,
 ): void {
   const text = systemPrompt ?? ''
-  assert.match(text, /what name they want you to use/u)
-  assert.match(text, /what health goals they want help with/u)
+  assert.match(text, /what they want help with most right now/u)
+  assert.match(text, /what you should call them/u)
+  assert.match(text, /Ask about goals first and the name alongside it/u)
   assert.match(
     text,
     /greeting, a brief opener, or a vague request for general help/u,
@@ -181,14 +183,20 @@ function assertPromptHasFirstTurnCheckInGuidance(
     text,
     /first user message already asks for something concrete/u,
   )
+  assert.match(text, /gradually build the health vault/u)
+  assert.match(
+    text,
+    /sharing meals, workouts, sleep or energy notes, symptoms, and questions through text, photos, voice memos, Telegram messages, or email/u,
+  )
+  assert.match(text, /Do not ask for a full weekly recap/u)
 }
 
 function assertPromptDoesNotHaveFirstTurnCheckInGuidance(
   systemPrompt: string | null | undefined,
 ): void {
   const text = systemPrompt ?? ''
-  assert.doesNotMatch(text, /what name they want you to use/u)
-  assert.doesNotMatch(text, /what health goals they want help with/u)
+  assert.doesNotMatch(text, /what they want help with most right now/u)
+  assert.doesNotMatch(text, /what you should call them/u)
 }
 
 async function writeGuardReceipt(input: {
@@ -450,6 +458,33 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
       providerName: null,
       headers: null,
       reasoningEffort: null,
+    },
+  )
+
+  assert.deepEqual(
+    buildResolveAssistantSessionInput(
+      {
+        vault: '/tmp/vault',
+        alias: 'chat:codex-defaults',
+        provider: 'codex-cli',
+      },
+      null,
+    ),
+    {
+      vault: '/tmp/vault',
+      alias: 'chat:codex-defaults',
+      provider: 'codex-cli',
+      model: null,
+      maxSessionAgeMs: null,
+      sandbox: 'danger-full-access',
+      approvalPolicy: 'never',
+      oss: false,
+      profile: null,
+      baseUrl: null,
+      apiKeyEnv: null,
+      providerName: null,
+      headers: null,
+      reasoningEffort: DEFAULT_CODEX_REASONING_EFFORT,
     },
   )
 })
@@ -2308,6 +2343,10 @@ test('sendAssistantMessage injects the first-chat check-in only for an opted-in 
     firstCall?.systemPrompt ?? '',
     /text, photos, voice memos, Telegram messages, or email/u,
   )
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /health history, supplements or meds, recent blood tests/u,
+  )
   assertPromptDoesNotHaveFirstTurnCheckInGuidance(secondCall?.systemPrompt)
 })
 
@@ -2401,6 +2440,10 @@ test('sendAssistantMessage injects the first-chat check-in for first-turn messag
   assert.match(
     firstCall?.systemPrompt ?? '',
     /text, photos, voice memos, Telegram messages, or email/u,
+  )
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /Oura, WHOOP, or Garmin connections or uploads/u,
   )
 })
 

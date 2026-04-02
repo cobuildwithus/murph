@@ -3110,8 +3110,7 @@ function useAssistantChatController(
   const initialActiveReasoningEffort =
     normalizeNullableString(input.input.reasoningEffort) ??
     normalizeNullableString(input.selectedProviderDefaults?.reasoningEffort) ??
-    normalizeNullableString(input.resolvedSession.providerOptions.reasoningEffort) ??
-    normalizeNullableString(input.codexDisplay.reasoningEffort)
+    normalizeNullableString(input.resolvedSession.providerOptions.reasoningEffort)
   const [activeModel, setActiveModel] = React.useState<string | null>(
     initialActiveModel,
   )
@@ -3726,7 +3725,7 @@ function useAssistantChatController(
       baseUrl: session.providerOptions.baseUrl,
       provider: session.provider,
       model: activeModel ?? session.providerOptions.model ?? input.codexDisplay.model,
-      reasoningEffort: activeReasoningEffort ?? input.codexDisplay.reasoningEffort,
+      reasoningEffort: activeReasoningEffort,
     },
     input.redactedVault,
   )
