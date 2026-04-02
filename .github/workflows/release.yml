@@ -159,4 +159,18 @@ jobs:
           path: dist/npm
 
       - name: Publish tarballs in dependency order
-        run: node scripts/publish-publishables.mjs --pack-output dist/npm/pack-output.json --npm-tag "${{ needs.tag-check.outputs.npm_tag }}" --provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          publish_args=(
+            scripts/publish-publishables.mjs
+            --pack-output
+            dist/npm/pack-output.json
+            --provenance
+          )
+
+          if [[ -n "${{ needs.tag-check.outputs.npm_tag }}" ]]; then
+            publish_args+=(--npm-tag "${{ needs.tag-check.outputs.npm_tag }}")
+          fi
+
+          node "${publish_args[@]}"
