@@ -5,7 +5,7 @@ import { sanitizeHostedLinqEventForStorage } from "@/src/lib/hosted-onboarding/c
 import { minimizeHostedLinqMessageReceivedEvent } from "@/src/lib/hosted-onboarding/webhook-event-snapshots";
 
 describe("hosted contact privacy", () => {
-  it("omits Linq attachment URLs from minimized webhook snapshots", () => {
+  it("preserves Linq attachment URLs in minimized webhook snapshots", () => {
     const minimized = minimizeHostedLinqMessageReceivedEvent({
       api_version: "2026-04-01",
       created_at: "2026-04-01T00:00:00.000Z",
@@ -23,7 +23,13 @@ describe("hosted contact privacy", () => {
               mime_type: "application/pdf",
               size: 1234,
               type: "media",
-              url: "https://files.example/signed?token=secret",
+              url: "https://cdn.linqapp.com/media/lab-results.pdf",
+            },
+            {
+              mime_type: "audio/m4a",
+              size: 4321,
+              type: "voice_memo",
+              url: "https://cdn.linqapp.com/media/voice.m4a",
             },
           ],
           reply_to: null,
@@ -47,15 +53,20 @@ describe("hosted contact privacy", () => {
             mime_type: "application/pdf",
             size: 1234,
             type: "media",
+            url: "https://cdn.linqapp.com/media/lab-results.pdf",
+          },
+          {
+            mime_type: "audio/m4a",
+            size: 4321,
+            type: "voice_memo",
+            url: "https://cdn.linqapp.com/media/voice.m4a",
           },
         ],
       },
     });
-    expect((minimized.data as { message: { parts: Array<Record<string, unknown>> } }).message.parts[0])
-      .not.toHaveProperty("url");
   });
 
-  it("scrubs Linq attachment URLs before storage while preserving id redaction", () => {
+  it("retains allowlisted Linq CDN attachment URLs before storage while preserving id redaction", () => {
     const sanitized = sanitizeHostedLinqEventForStorage({
       data: {
         chat_id: "chat_123",
@@ -69,7 +80,20 @@ describe("hosted contact privacy", () => {
               mime_type: "application/pdf",
               size: 1234,
               type: "media",
-              url: "https://files.example/signed?token=secret",
+              url: "https://cdn.linqapp.com/media/lab-results.pdf",
+            },
+            {
+              mime_type: "audio/m4a",
+              size: 4321,
+              type: "voice_memo",
+              url: "https://cdn.linqapp.com/media/voice.m4a",
+            },
+            {
+              filename: "ignored.jpg",
+              mime_type: "image/jpeg",
+              size: 111,
+              type: "media",
+              url: "https://example.com/media/ignored.jpg",
             },
           ],
           reply_to: {
@@ -91,6 +115,19 @@ describe("hosted contact privacy", () => {
             mime_type: "application/pdf",
             size: 1234,
             type: "media",
+            url: "https://cdn.linqapp.com/media/lab-results.pdf",
+          },
+          {
+            mime_type: "audio/m4a",
+            size: 4321,
+            type: "voice_memo",
+            url: "https://cdn.linqapp.com/media/voice.m4a",
+          },
+          {
+            filename: "ignored.jpg",
+            mime_type: "image/jpeg",
+            size: 111,
+            type: "media",
           },
         ],
         reply_to: {
@@ -99,7 +136,7 @@ describe("hosted contact privacy", () => {
       },
       recipient_phone: expect.stringMatching(/^hbid:linq\.recipient:/u),
     });
-    expect((sanitized.data as { message: { parts: Array<Record<string, unknown>> } }).message.parts[0])
+    expect((sanitized.data as { message: { parts: Array<Record<string, unknown>> } }).message.parts[2])
       .not.toHaveProperty("url");
   });
 

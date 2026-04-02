@@ -265,6 +265,7 @@ test("parseCanonicalLinqMessageReceivedEvent exposes summaries and minimizers", 
             mime_type: "image/jpeg",
             size: 1234,
             type: "media",
+            url: "https://files.example.test/photo.jpg",
           },
         ],
         reply_to: {
@@ -323,6 +324,104 @@ test("parseCanonicalLinqMessageReceivedEvent exposes summaries and minimizers", 
     partner_id: null,
     trace_id: null,
   });
+});
+
+test("parseCanonicalLinqMessageReceivedEvent accepts voice memos and preserves URLs in hosted minimization", () => {
+  const event = parseCanonicalLinqMessageReceivedEvent({
+    api_version: "v3",
+    created_at: "2026-04-02T04:00:00.000Z",
+    data: {
+      chat_id: "chat_123",
+      from: "+15551234567",
+      is_from_me: false,
+      message: {
+        id: "msg_123",
+        parts: [
+          {
+            attachment_id: null,
+            filename: null,
+            mime_type: "audio/m4a",
+            size: 2048,
+            type: "voice_memo",
+            url: "https://cdn.linqapp.com/media/voice-123.m4a",
+          },
+        ],
+      },
+      recipient_phone: "+15557654321",
+      received_at: "2026-04-02T04:00:01.000Z",
+      service: "iMessage",
+    },
+    event_id: "evt_123",
+    event_type: "message.received",
+    trace_id: "trace_123",
+  });
+
+  assert.deepEqual(event.data.message.parts, [
+    {
+      attachment_id: null,
+      filename: null,
+      mime_type: "audio/m4a",
+      size: 2048,
+      type: "voice_memo",
+      url: "https://cdn.linqapp.com/media/voice-123.m4a",
+    },
+  ]);
+
+  assert.deepEqual(minimizeLinqMessageReceivedEvent(event), {
+    api_version: "v3",
+    created_at: "2026-04-02T04:00:00.000Z",
+    data: {
+      chat_id: "chat_123",
+      from: "+15551234567",
+      is_from_me: false,
+      message: {
+        id: "msg_123",
+        parts: [
+          {
+            attachment_id: null,
+            filename: null,
+            mime_type: "audio/m4a",
+            size: 2048,
+            type: "voice_memo",
+            url: "https://cdn.linqapp.com/media/voice-123.m4a",
+          },
+        ],
+      },
+      received_at: "2026-04-02T04:00:01.000Z",
+      recipient_phone: "+15557654321",
+      service: "iMessage",
+    },
+    event_id: "evt_123",
+    event_type: "message.received",
+    partner_id: null,
+    trace_id: "trace_123",
+  });
+});
+
+test("parseCanonicalLinqMessageReceivedEvent rejects unknown part types", () => {
+  assert.throws(
+    () =>
+      parseCanonicalLinqMessageReceivedEvent({
+        api_version: "v3",
+        created_at: "2026-04-02T04:00:00.000Z",
+        data: {
+          chat_id: "chat_456",
+          from: "+15551234567",
+          is_from_me: false,
+          message: {
+            id: "msg_456",
+            parts: [
+              {
+                type: "sticker",
+              },
+            ],
+          },
+        },
+        event_id: "evt_456",
+        event_type: "message.received",
+      }),
+    /type must be "text", "media", or "voice_memo"/u,
+  );
 });
 
 test("parseCanonicalLinqMessageReceivedEvent rejects a missing message object", () => {

@@ -52,7 +52,7 @@ export interface LinqTextPart {
 }
 
 export interface LinqMediaPart {
-  type: "media";
+  type: "media" | "voice_memo";
   url?: string | null;
   attachment_id?: string | null;
   filename?: string | null;
@@ -478,7 +478,7 @@ function parseLinqMessagePart(part: unknown, index: number): LinqMessagePart {
     };
   }
 
-  if (type === "media") {
+  if (type === "media" || type === "voice_memo") {
     return {
       type,
       url: normalizeNullableString(record.url),
@@ -490,7 +490,7 @@ function parseLinqMessagePart(part: unknown, index: number): LinqMessagePart {
   }
 
   throw new TypeError(
-    `Linq message.received message.parts[${index}] type must be "text" or "media".`,
+    `Linq message.received message.parts[${index}] type must be "text", "media", or "voice_memo".`,
   );
 }
 
@@ -571,6 +571,7 @@ function pickHostedLinqMessagePart(part: LinqMessagePart): Record<string, unknow
     mime_type: part.mime_type,
     size: part.size,
     type: part.type,
+    url: part.url,
   });
 }
 

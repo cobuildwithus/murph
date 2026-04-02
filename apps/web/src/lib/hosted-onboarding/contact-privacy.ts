@@ -9,6 +9,7 @@ const HOSTED_PRIVACY_KEY_VERSION = "v1";
 const HOSTED_BLIND_INDEX_PREFIX = "hbidx";
 const HOSTED_OPAQUE_ID_PREFIX = "hbid";
 const MASKED_PHONE_HINT_PATTERN = /^\*{3}\s+\d{4}$/u;
+const HOSTED_LINQ_ATTACHMENT_CDN_HOST = "cdn.linqapp.com";
 const TEST_HOSTED_PRIVACY_ROOT_KEY = Buffer.from(
   "vitest-hosted-contact-privacy-root-key",
   "utf8",
@@ -255,8 +256,39 @@ function sanitizeHostedLinqMessagePart(value: unknown): unknown {
     return value;
   }
 
-  delete record.url;
+  const sanitizedUrl = normalizeHostedLinqAttachmentUrl(record.url);
+  if (sanitizedUrl) {
+    record.url = sanitizedUrl;
+  } else {
+    delete record.url;
+  }
+
   return record;
+}
+
+function normalizeHostedLinqAttachmentUrl(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  try {
+    const url = new URL(normalized);
+    if (
+      url.protocol !== "https:"
+      || url.hostname.toLowerCase() !== HOSTED_LINQ_ATTACHMENT_CDN_HOST
+    ) {
+      return null;
+    }
+
+    return url.toString();
+  } catch {
+    return null;
+  }
 }
 
 function createHostedBlindIndex(kind: string, value: string): string {
