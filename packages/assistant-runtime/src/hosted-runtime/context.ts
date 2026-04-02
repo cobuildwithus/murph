@@ -10,6 +10,7 @@ import {
   createIntegratedVaultServices,
   ensureHostedAssistantOperatorDefaults,
   readAssistantAutomationState,
+  readOperatorConfig,
   resolveHostedAssistantConfig,
   resolveHostedAssistantOperatorDefaultsState,
   saveAssistantAutomationState,
@@ -24,6 +25,7 @@ interface HostedMemberBootstrapResult {
 
 type HostedAssistantRuntimeState = Pick<
   HostedBootstrapResult,
+  | "assistantConfigStatus"
   | "assistantConfigured"
   | "assistantProvider"
   | "assistantSeeded"
@@ -43,12 +45,13 @@ export async function prepareHostedDispatchContext(
 
   await requireHostedBootstrapForDispatch(vaultRoot, dispatch);
 
-  const assistantRuntimeState = isMemberActivation
-    ? await bootstrapHostedAssistantRuntimeState(
-        vaultRoot,
-        runtimeEnv,
-      )
-    : null;
+  const assistantRuntimeState = await bootstrapHostedAssistantRuntimeState(
+    vaultRoot,
+    runtimeEnv,
+    {
+      enableChannelCapabilityReconciliation: isMemberActivation,
+    },
+  );
 
   await prepareHostedLocalRuntime(vaultRoot, dispatch.eventId);
 
@@ -84,19 +87,28 @@ export async function bootstrapHostedMemberContext(
 async function bootstrapHostedAssistantRuntimeState(
   vaultRoot: string,
   runtimeEnv: Readonly<Record<string, string>>,
+  options: {
+    enableChannelCapabilityReconciliation: boolean;
+  },
 ): Promise<HostedAssistantRuntimeState> {
   const automationEnabled = hostedAssistantAutomationEnabledFromEnv(runtimeEnv);
   const assistantBootstrap = await ensureHostedAssistantOperatorDefaults({
     allowMissing: true,
     env: runtimeEnv,
   });
-  const channelCapabilities = await reconcileHostedAssistantChannelCapabilities(
-    vaultRoot,
-    runtimeEnv,
-    automationEnabled && assistantBootstrap.configured,
-  );
+  const channelCapabilities = options.enableChannelCapabilityReconciliation
+    ? await reconcileHostedAssistantChannelCapabilities(
+        vaultRoot,
+        runtimeEnv,
+        automationEnabled && assistantBootstrap.configured,
+      )
+    : {
+        emailAutoReplyEnabled: false,
+        telegramAutoReplyEnabled: false,
+      };
 
   return {
+    assistantConfigStatus: normalizeHostedAssistantBootstrapStatus(assistantBootstrap),
     assistantConfigured: assistantBootstrap.configured,
     assistantProvider: assistantBootstrap.provider,
     assistantSeeded: assistantBootstrap.seeded,
@@ -106,12 +118,22 @@ async function bootstrapHostedAssistantRuntimeState(
 
 export async function readHostedAssistantRuntimeState(): Promise<Pick<
   HostedAssistantRuntimeState,
-  "assistantConfigured" | "assistantProvider"
+  "assistantConfigStatus" | "assistantConfigured" | "assistantProvider"
 >> {
-  const hostedAssistantConfig = await resolveHostedAssistantConfig();
+  const operatorConfig = await readOperatorConfig();
+  const hostedAssistantConfig = operatorConfig?.hostedAssistant
+    ?? (await resolveHostedAssistantConfig());
   const hostedAssistantState = resolveHostedAssistantOperatorDefaultsState(hostedAssistantConfig);
+  const assistantConfigStatus = operatorConfig?.hostedAssistantInvalid === true
+    ? "invalid"
+    : hostedAssistantConfig === null
+      ? "missing"
+      : hostedAssistantState.configured
+        ? "saved"
+        : "unready";
 
   return {
+    assistantConfigStatus,
     assistantConfigured: hostedAssistantState.configured,
     assistantProvider: hostedAssistantState.provider,
   };
@@ -231,6 +253,20 @@ function normalizeNullableString(value: string | null | undefined): string | nul
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeHostedAssistantBootstrapStatus(
+  result: Awaited<ReturnType<typeof ensureHostedAssistantOperatorDefaults>>,
+): HostedBootstrapResult["assistantConfigStatus"] {
+  if (result.source === "invalid" || result.source === "missing") {
+    return result.source;
+  }
+
+  if (!result.configured) {
+    return "unready";
+  }
+
+  return result.source;
 }
 
 export async function requireHostedBootstrapForDispatch(

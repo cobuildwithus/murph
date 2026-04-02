@@ -42,6 +42,7 @@ const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
 const HOSTED_MAX_PARSER_JOBS = 50;
 
 interface HostedAssistantAutomationReadiness {
+  configStatus: "hosted-env" | "invalid" | "legacy-defaults" | "missing" | "saved" | "unready";
   configured: boolean;
   enabled: boolean;
   provider: "codex-cli" | "openai-compatible" | null;
@@ -54,6 +55,7 @@ async function resolveHostedAssistantAutomationReadiness(input: {
 }): Promise<HostedAssistantAutomationReadiness> {
   if (!hostedAssistantAutomationEnabledFromEnv(input.runtimeEnv)) {
     return {
+      configStatus: "missing",
       configured: false,
       enabled: false,
       provider: null,
@@ -64,6 +66,7 @@ async function resolveHostedAssistantAutomationReadiness(input: {
   const assistantState = await readHostedAssistantRuntimeState();
 
   return {
+    configStatus: assistantState.assistantConfigStatus,
     configured: assistantState.assistantConfigured,
     enabled: true,
     provider: assistantState.assistantProvider,
@@ -73,15 +76,21 @@ async function resolveHostedAssistantAutomationReadiness(input: {
 
 function reportHostedAssistantAutomationSkipped(
   dispatch: HostedExecutionDispatchRequest,
+  configStatus: HostedAssistantAutomationReadiness["configStatus"],
   provider: "codex-cli" | "openai-compatible" | null,
 ): void {
   emitHostedExecutionStructuredLog({
     component: "runtime",
     dispatch,
     level: "warn",
-    message: provider
-      ? `Hosted assistant automation skipped because the active hosted assistant profile (${provider}) is not ready.`
-      : "Hosted assistant automation skipped because no explicit hosted assistant profile is configured.",
+    message:
+      configStatus === "invalid"
+        ? "Hosted assistant automation skipped because the saved hosted assistant config is invalid."
+        : configStatus === "missing"
+          ? "Hosted assistant automation skipped because no explicit hosted assistant profile is configured."
+          : provider
+            ? `Hosted assistant automation skipped because the active hosted assistant profile (${provider}) is not ready.`
+            : "Hosted assistant automation skipped because the hosted assistant config is not ready.",
     phase: "dispatch.running",
   });
 }
@@ -110,7 +119,11 @@ export async function runHostedMaintenanceLoop(input: {
   });
 
   if (assistantAutomation.enabled && !assistantAutomation.configured) {
-    reportHostedAssistantAutomationSkipped(input.dispatch, assistantAutomation.provider);
+    reportHostedAssistantAutomationSkipped(
+      input.dispatch,
+      assistantAutomation.configStatus,
+      assistantAutomation.provider,
+    );
   }
 
   if (assistantAutomation.shouldRun) {

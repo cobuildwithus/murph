@@ -2,13 +2,11 @@ import { z } from 'zod'
 import {
   assistantApprovalPolicyValues,
   assistantChatProviderValues,
-  assistantHeadersSchema,
   assistantSandboxValues,
   type AssistantChatProvider,
 } from '../assistant-cli-contracts.js'
 import {
   normalizeAssistantProviderConfig,
-  serializeAssistantProviderOperatorDefaults,
   type AssistantProviderConfigInput,
 } from './provider-config.js'
 import {
@@ -21,11 +19,6 @@ export const hostedAssistantProfileManagedByValues = [
   'member',
   'platform',
 ] as const
-
-const hostedAssistantProfileOptionsSchema = z
-  .record(z.string().min(1), z.unknown())
-  .nullable()
-  .default(null)
 
 export const hostedAssistantProfileSchema = z
   .object({
@@ -43,8 +36,6 @@ export const hostedAssistantProfileSchema = z
     baseUrl: z.string().min(1).nullable(),
     apiKeyEnv: z.string().min(1).nullable(),
     providerName: z.string().min(1).nullable(),
-    headers: assistantHeadersSchema.nullable(),
-    options: hostedAssistantProfileOptionsSchema,
   })
   .strict()
 
@@ -62,17 +53,6 @@ export type HostedAssistantProfileManagedBy =
 export type HostedAssistantProfile = z.infer<typeof hostedAssistantProfileSchema>
 export type HostedAssistantConfig = z.infer<typeof hostedAssistantConfigSchema>
 
-export interface HostedAssistantOperatorDefaultsPatch {
-  defaultsByProvider: {
-    'codex-cli': ReturnType<typeof serializeAssistantProviderOperatorDefaults> | null
-    'openai-compatible': ReturnType<
-      typeof serializeAssistantProviderOperatorDefaults
-    > | null
-  }
-  hostedConfig: HostedAssistantConfig | null
-  provider: AssistantChatProvider | null
-}
-
 export function createHostedAssistantConfig(input: {
   activeProfileId?: string | null
   profiles: readonly HostedAssistantProfile[]
@@ -83,7 +63,6 @@ export function createHostedAssistantConfig(input: {
       id: profile.id,
       label: profile.label,
       managedBy: profile.managedBy,
-      options: profile.options,
       providerConfig: hostedAssistantProfileToProviderConfigInput(profile),
     }),
   )
@@ -104,7 +83,6 @@ export function createHostedAssistantProfile(input: {
   id: string
   label?: string | null
   managedBy?: HostedAssistantProfileManagedBy | null
-  options?: Record<string, unknown> | null
   providerConfig: AssistantProviderConfigInput | null | undefined
 }): HostedAssistantProfile {
   const normalizedConfig = normalizeAssistantProviderConfig(input.providerConfig)
@@ -121,8 +99,16 @@ export function createHostedAssistantProfile(input: {
       }),
     managedBy: input.managedBy ?? 'member',
     provider: normalizedConfig.provider,
-    ...serializeAssistantProviderOperatorDefaults(normalizedConfig),
-    options: normalizeHostedAssistantOptions(input.options),
+    codexCommand: normalizedConfig.codexCommand,
+    model: normalizedConfig.model,
+    reasoningEffort: normalizedConfig.reasoningEffort,
+    sandbox: normalizedConfig.sandbox,
+    approvalPolicy: normalizedConfig.approvalPolicy,
+    profile: normalizedConfig.profile,
+    oss: normalizedConfig.oss,
+    baseUrl: normalizedConfig.baseUrl,
+    apiKeyEnv: normalizedConfig.apiKeyEnv,
+    providerName: normalizedConfig.providerName,
   })
 }
 
@@ -176,50 +162,12 @@ export function hostedAssistantProfileToProviderConfigInput(
     apiKeyEnv: profile.apiKeyEnv,
     baseUrl: profile.baseUrl,
     codexCommand: profile.codexCommand,
-    headers: profile.headers,
     model: profile.model,
     oss: profile.oss,
     profile: profile.profile,
     providerName: profile.providerName,
     reasoningEffort: profile.reasoningEffort,
     sandbox: profile.sandbox,
-  }
-}
-
-export function buildHostedAssistantOperatorDefaultsPatch(
-  config: HostedAssistantConfig | null | undefined,
-): HostedAssistantOperatorDefaultsPatch {
-  const normalized = normalizeHostedAssistantConfig(config)
-  const activeProfile = resolveHostedAssistantActiveProfile(normalized)
-
-  if (!normalized || !activeProfile) {
-    return {
-      defaultsByProvider: {
-        'codex-cli': null,
-        'openai-compatible': null,
-      },
-      hostedConfig: normalized,
-      provider: null,
-    }
-  }
-
-  return {
-    defaultsByProvider: {
-      'codex-cli':
-        activeProfile.provider === 'codex-cli'
-          ? serializeAssistantProviderOperatorDefaults(
-              hostedAssistantProfileToProviderConfigInput(activeProfile),
-            )
-          : null,
-      'openai-compatible':
-        activeProfile.provider === 'openai-compatible'
-          ? serializeAssistantProviderOperatorDefaults(
-              hostedAssistantProfileToProviderConfigInput(activeProfile),
-            )
-          : null,
-    },
-    hostedConfig: normalized,
-    provider: activeProfile.provider,
   }
 }
 
@@ -244,7 +192,6 @@ export function hostedAssistantProfilesEqual(
         id: left.id,
         label: left.label,
         managedBy: left.managedBy,
-        options: left.options,
         providerConfig: hostedAssistantProfileToProviderConfigInput(left),
       })
     : null
@@ -253,7 +200,6 @@ export function hostedAssistantProfilesEqual(
         id: right.id,
         label: right.label,
         managedBy: right.managedBy,
-        options: right.options,
         providerConfig: hostedAssistantProfileToProviderConfigInput(right),
       })
     : null
@@ -312,18 +258,6 @@ function resolveHostedAssistantActiveProfileId(
 
   return profiles[0]?.id ?? null
 }
-
-function normalizeHostedAssistantOptions(
-  options: Record<string, unknown> | null | undefined,
-): Record<string, unknown> | null {
-  if (!options) {
-    return null
-  }
-
-  const parsed = hostedAssistantProfileOptionsSchema.parse(options)
-  return parsed && Object.keys(parsed).length > 0 ? parsed : null
-}
-
 function stripHostedAssistantConfigTimestamps(
   config: HostedAssistantConfig | null,
 ): Omit<HostedAssistantConfig, 'updatedAt'> | null {

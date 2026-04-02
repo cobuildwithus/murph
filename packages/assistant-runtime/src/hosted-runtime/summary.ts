@@ -62,7 +62,20 @@ function formatHostedBootstrapResult(result: HostedBootstrapResult | null): stri
 
 function formatHostedAssistantBootstrap(result: HostedBootstrapResult): string {
   if (!result.assistantConfigured || !result.assistantProvider) {
-    return "hosted assistant config unavailable";
+    switch (result.assistantConfigStatus) {
+      case "invalid":
+        return "hosted assistant config invalid";
+      case "missing":
+        return "hosted assistant config missing";
+      case "unready":
+        return "hosted assistant config not ready";
+      default:
+        return "hosted assistant config unavailable";
+    }
+  }
+
+  if (result.assistantConfigStatus === "legacy-defaults") {
+    return `backfilled hosted assistant config from saved assistant backend (${result.assistantProvider})`;
   }
 
   return result.assistantSeeded
