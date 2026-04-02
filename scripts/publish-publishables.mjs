@@ -16,6 +16,10 @@ function isAlreadyPublished(output) {
   );
 }
 
+function isPermissionOrScopeNotFound(output) {
+  return /npm error 404 Not Found - PUT https:\/\/registry\.npmjs\.org\/@/ui.test(output);
+}
+
 const options = parseReleaseArgs(process.argv.slice(2), {
   defaults: {
     npmTag: '',
@@ -102,6 +106,14 @@ for (const entry of summary.packages) {
     if (isAlreadyPublished(output)) {
       console.log(`Skipping ${entry.name}@${entry.version}; version already published.`);
       continue;
+    }
+
+    if (isPermissionOrScopeNotFound(output)) {
+      throw new Error(
+        `npm publish failed for ${entry.name}@${entry.version}. `
+          + 'The package exists on npm but this workflow could not publish to the scoped package. '
+          + 'Configure npm trusted publishing for this repository/package or provide NPM_TOKEN to the publish job.',
+      );
     }
 
     throw error;

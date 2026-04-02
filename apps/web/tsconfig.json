@@ -70,6 +70,12 @@
       "@murphai/inboxd/*": [
         "packages/inboxd/src/*"
       ],
+      "@murphai/parsers": [
+        "packages/parsers/src/index.ts"
+      ],
+      "@murphai/parsers/*": [
+        "packages/parsers/src/*"
+      ],
       "@murphai/device-syncd": [
         "packages/device-syncd/src/index.ts"
       ],

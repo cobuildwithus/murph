@@ -32,6 +32,10 @@ test("resolveHostedWebWorkspaceSourceEntries points at hosted source package ent
     path.resolve("/repo/packages/device-syncd/src/index.ts"),
   );
   assert.equal(
+    resolveHostedWebWorkspaceSourceEntries("/repo/apps/web")["@murphai/parsers"],
+    path.resolve("/repo/packages/parsers/src/index.ts"),
+  );
+  assert.equal(
     resolveHostedWebWorkspaceSourceEntries("/repo/apps/web")["@murphai/core"],
     path.resolve("/repo/packages/core/src/index.ts"),
   );
