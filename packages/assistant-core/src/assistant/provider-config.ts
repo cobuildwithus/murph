@@ -259,6 +259,16 @@ export function shouldUseAssistantOpenAIResponsesApi(
   )
 }
 
+export function supportsAssistantReasoningEffort(
+  input: AssistantProviderConfigInput | null | undefined,
+): boolean {
+  const normalized = normalizeAssistantProviderConfig(input)
+  return (
+    normalized.provider === 'codex-cli' ||
+    shouldUseAssistantOpenAIResponsesApi(normalized)
+  )
+}
+
 export function resolveAssistantModelSpecFromProviderConfig(
   input: AssistantProviderConfigInput | null | undefined,
   env: NodeJS.ProcessEnv = process.env,

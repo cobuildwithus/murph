@@ -7,6 +7,7 @@ import {
 import {
   createCatalogModel,
   discoverAssistantProviderModels as discoverAssistantProviderModelsWithRegistry,
+  resolveAssistantProviderTargetCapabilities as resolveAssistantProviderRegistryTargetCapabilities,
   resolveAssistantProviderCapabilities as resolveAssistantProviderRegistryCapabilities,
   resolveAssistantProviderLabel,
   resolveAssistantProviderStaticModels,
@@ -84,6 +85,12 @@ export function resolveAssistantProviderCapabilities(
   return resolveAssistantProviderRegistryCapabilities(provider)
 }
 
+export function resolveAssistantTargetCapabilities(
+  input: AssistantProviderConfigInput | null | undefined,
+): AssistantProviderCapabilities {
+  return resolveAssistantProviderRegistryTargetCapabilities(input)
+}
+
 export function resolveAssistantProviderProfile(
   input: AssistantProviderConfigInput | null | undefined,
 ): AssistantProviderProfile {
@@ -108,35 +115,37 @@ export function resolveAssistantModelCatalog(input: {
   providerName?: string | null
 }): AssistantModelCatalog {
   const profile = resolveAssistantProviderProfile(input)
-  const capabilities = resolveAssistantProviderCapabilities(profile.provider)
+  const capabilities = resolveAssistantTargetCapabilities(profile)
   const staticModels = resolveAssistantProviderStaticModels(profile)
-  const discovery =
-    input.discovery ??
-    (input.discoveredModels
-      ? {
-          models: input.discoveredModels.map((model) =>
-            createCatalogModel({
-              id: model,
-              description: `Discovered from ${profile.providerLabel}.`,
-              source: 'discovered',
-              capabilities: {
-                images: false,
-                pdf: false,
-                reasoning: false,
-                streaming: true,
-                tools: true,
-              },
-            }),
-          ),
-          status: 'ok' as const,
-          message: null,
-        }
-      : null)
+  const discovery = normalizeAssistantModelDiscoveryResult({
+    capabilities,
+    discovery:
+      input.discovery ??
+      (input.discoveredModels
+        ? {
+            models: input.discoveredModels.map((model) =>
+              createCatalogModel({
+                id: model,
+                description: `Discovered from ${profile.providerLabel}.`,
+                source: 'discovered',
+                capabilities: resolveAssistantCatalogModelCapabilities(
+                  profile,
+                  capabilities,
+                ),
+              }),
+            ),
+            status: 'ok' as const,
+            message: null,
+          }
+        : null),
+    profile,
+  })
   const models = buildAssistantCatalogModels({
     currentModel: input.currentModel,
     discovery,
     profile,
     staticModels,
+    targetCapabilities: capabilities,
   })
   const selectedModel =
     models.find((model) => model.id === normalizeNullableString(input.currentModel)) ??
@@ -229,6 +238,7 @@ function buildAssistantCatalogModels(input: {
   discovery?: AssistantModelDiscoveryResult | null
   profile: AssistantProviderProfile
   staticModels: readonly AssistantCatalogModel[]
+  targetCapabilities: AssistantProviderCapabilities
 }): readonly AssistantCatalogModel[] {
   const normalizedCurrentModel = normalizeNullableString(input.currentModel)
   const models: AssistantCatalogModel[] = []
@@ -262,13 +272,11 @@ function buildAssistantCatalogModels(input: {
           input.staticModels.find((model) => model.id === normalizedCurrentModel)
             ?.capabilities ??
           input.discovery?.models.find((model) => model.id === normalizedCurrentModel)
-            ?.capabilities ?? {
-            images: false,
-            pdf: false,
-            reasoning: input.profile.provider === 'codex-cli',
-            streaming: true,
-            tools: true,
-          },
+            ?.capabilities ??
+          resolveAssistantCatalogModelCapabilities(
+            input.profile,
+            input.targetCapabilities,
+          ),
       }),
     )
   }
@@ -292,5 +300,53 @@ function buildCurrentModelDescription(profile: AssistantProviderProfile): string
       return profile.oss ? 'Current Codex OSS model.' : 'Current Codex model.'
     default:
       return 'Current model.'
+  }
+}
+
+function normalizeAssistantModelDiscoveryResult(input: {
+  capabilities: AssistantProviderCapabilities
+  discovery: AssistantModelDiscoveryResult | null
+  profile: AssistantProviderProfile
+}): AssistantModelDiscoveryResult | null {
+  if (!input.discovery) {
+    return null
+  }
+
+  if (input.profile.provider === 'codex-cli') {
+    return input.discovery
+  }
+
+  return {
+    ...input.discovery,
+    models: input.discovery.models.map((model) => ({
+      ...model,
+      capabilities: resolveAssistantCatalogModelCapabilities(
+        input.profile,
+        input.capabilities,
+      ),
+    })),
+  }
+}
+
+function resolveAssistantCatalogModelCapabilities(
+  profile: AssistantProviderProfile,
+  capabilities: AssistantProviderCapabilities,
+): AssistantCatalogModel['capabilities'] {
+  if (profile.provider === 'codex-cli') {
+    return {
+      images: false,
+      pdf: false,
+      reasoning: true,
+      streaming: true,
+      tools: true,
+    }
+  }
+
+  return {
+    images: false,
+    pdf: false,
+    reasoning: capabilities.supportsReasoningEffort,
+    streaming: true,
+    tools: true,
   }
 }

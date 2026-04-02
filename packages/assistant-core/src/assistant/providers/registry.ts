@@ -1,6 +1,7 @@
 import type { AssistantChatProvider } from '../../assistant-cli-contracts.js'
 import {
   normalizeAssistantProviderConfig,
+  supportsAssistantReasoningEffort,
   type AssistantProviderConfigInput,
 } from '../provider-config.js'
 import { codexCliProviderDefinition } from './codex-cli.js'
@@ -52,6 +53,16 @@ export function resolveAssistantProviderCapabilities(
 ): AssistantProviderCapabilities {
   return {
     ...resolveAssistantProviderDefinition(provider).capabilities,
+  }
+}
+
+export function resolveAssistantProviderTargetCapabilities(
+  input: AssistantProviderConfigInput | null | undefined,
+): AssistantProviderCapabilities {
+  const normalized = normalizeAssistantProviderConfig(input)
+  return {
+    ...resolveAssistantProviderDefinition(normalized.provider).capabilities,
+    supportsReasoningEffort: supportsAssistantReasoningEffort(normalized),
   }
 }
 

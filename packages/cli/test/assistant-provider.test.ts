@@ -61,6 +61,7 @@ import {
   defaultDiscoverOpenAICompatibleModels,
   type AssistantModelDiscoveryResult,
   resolveAssistantModelCatalog,
+  resolveAssistantTargetCapabilities,
 } from '../src/assistant/provider-catalog.js'
 import {
   buildAssistantProviderDefaultsPatch,
@@ -124,24 +125,17 @@ test('buildAssistantProviderDefaultsPatch keeps OpenAI-compatible endpoint auth 
   assert.deepEqual(
     buildAssistantProviderDefaultsPatch({
       defaults: {
-        provider: 'openai-compatible',
-        defaultsByProvider: {
-          'openai-compatible': {
-            codexCommand: null,
-            model: 'llama3.2:latest',
-            reasoningEffort: null,
-            sandbox: null,
-            approvalPolicy: null,
-            profile: null,
-            oss: false,
-            baseUrl: 'http://127.0.0.1:11434/v1',
-            apiKeyEnv: 'OLLAMA_API_KEY',
-            providerName: 'ollama',
-            headers: {
-              Authorization: 'Bearer override-token',
-              'X-Foo': 'bar',
-            },
+        backend: {
+          adapter: 'openai-compatible',
+          model: 'llama3.2:latest',
+          endpoint: 'http://127.0.0.1:11434/v1',
+          apiKeyEnv: 'OLLAMA_API_KEY',
+          providerName: 'ollama',
+          headers: {
+            Authorization: 'Bearer override-token',
+            'X-Foo': 'bar',
           },
+          options: null,
         },
         identityId: null,
         failoverRoutes: null,
@@ -166,61 +160,39 @@ test('buildAssistantProviderDefaultsPatch keeps OpenAI-compatible endpoint auth 
       },
     }),
     {
-      provider: 'openai-compatible',
-      defaultsByProvider: {
-        'openai-compatible': {
-          codexCommand: null,
-          model: 'gpt-oss:20b',
-          reasoningEffort: null,
-          sandbox: null,
-          approvalPolicy: null,
-          profile: null,
-          oss: false,
-          baseUrl: 'http://127.0.0.1:11434/v1',
-          apiKeyEnv: 'OLLAMA_API_KEY',
-          providerName: 'ollama',
-          headers: {
-            Authorization: 'Bearer override-token',
-            'X-Foo': 'bar',
-          },
+      backend: {
+        adapter: 'openai-compatible',
+        model: 'gpt-oss:20b',
+        endpoint: 'http://127.0.0.1:11434/v1',
+        apiKeyEnv: 'OLLAMA_API_KEY',
+        providerName: 'ollama',
+        headers: {
+          Authorization: 'Bearer override-token',
+          'X-Foo': 'bar',
         },
+        options: null,
       },
     },
   )
 })
 
-test('resolveAssistantProviderDefaults can read inactive saved provider entries', () => {
+test('resolveAssistantProviderDefaults only returns the active saved backend target', () => {
   const openAiDefaults = resolveAssistantProviderDefaults(
     {
-      provider: 'codex-cli',
-      defaultsByProvider: {
-        'codex-cli': {
+      backend: {
+        adapter: 'codex-cli',
+        model: 'gpt-5.4',
+        endpoint: null,
+        apiKeyEnv: null,
+        providerName: null,
+        headers: null,
+        options: {
+          approvalPolicy: 'on-request',
           codexCommand: '/opt/bin/codex',
-          model: 'gpt-5.4',
+          oss: true,
+          profile: 'ops',
           reasoningEffort: 'high',
           sandbox: 'workspace-write',
-          approvalPolicy: 'on-request',
-          profile: 'ops',
-          oss: true,
-          baseUrl: null,
-          apiKeyEnv: null,
-          providerName: null,
-          headers: null,
-        },
-        'openai-compatible': {
-          codexCommand: null,
-          model: 'llama3.2:latest',
-          reasoningEffort: null,
-          sandbox: null,
-          approvalPolicy: null,
-          profile: null,
-          oss: false,
-          baseUrl: 'http://127.0.0.1:11434/v1',
-          apiKeyEnv: 'OLLAMA_API_KEY',
-          providerName: 'ollama',
-          headers: {
-            Authorization: 'Bearer override-token',
-          },
         },
       },
       identityId: null,
@@ -231,21 +203,7 @@ test('resolveAssistantProviderDefaults can read inactive saved provider entries'
     'openai-compatible',
   )
 
-  assert.deepEqual(openAiDefaults, {
-    codexCommand: null,
-    model: 'llama3.2:latest',
-    reasoningEffort: null,
-    sandbox: null,
-    approvalPolicy: null,
-    profile: null,
-    oss: false,
-    baseUrl: 'http://127.0.0.1:11434/v1',
-    apiKeyEnv: 'OLLAMA_API_KEY',
-    providerName: 'ollama',
-    headers: {
-      Authorization: 'Bearer override-token',
-    },
-  })
+  assert.equal(openAiDefaults, null)
 })
 
 test('resolveAssistantProviderCapabilities reports shared backend-facing capabilities', () => {
@@ -261,6 +219,37 @@ test('resolveAssistantProviderCapabilities reports shared backend-facing capabil
     supportsReasoningEffort: false,
     supportsRichUserMessageContent: true,
   })
+})
+
+test('resolveAssistantTargetCapabilities enables reasoning effort for the official OpenAI target', () => {
+  assert.deepEqual(
+    resolveAssistantTargetCapabilities({
+      provider: 'openai-compatible',
+      baseUrl: 'https://api.openai.com/v1',
+      model: 'gpt-5.4',
+      providerName: 'openai',
+    }),
+    {
+      supportsModelDiscovery: true,
+      supportsNativeResume: true,
+      supportsReasoningEffort: true,
+      supportsRichUserMessageContent: true,
+    },
+  )
+  assert.deepEqual(
+    resolveAssistantTargetCapabilities({
+      provider: 'openai-compatible',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      model: 'gpt-oss:20b',
+      providerName: 'ollama',
+    }),
+    {
+      supportsModelDiscovery: true,
+      supportsNativeResume: true,
+      supportsReasoningEffort: false,
+      supportsRichUserMessageContent: true,
+    },
+  )
 })
 
 test('resolveAssistantModelCatalog keeps custom Codex models first-class in the picker', () => {
@@ -295,6 +284,55 @@ test('resolveAssistantModelCatalog uses discovered OpenAI-compatible models and 
   )
   assert.equal(catalog.providerLabel, 'Ollama')
   assert.deepEqual(catalog.reasoningOptions, [])
+})
+
+test('resolveAssistantModelCatalog exposes reasoning options for official OpenAI-compatible targets', () => {
+  const catalog = resolveAssistantModelCatalog({
+    provider: 'openai-compatible',
+    baseUrl: 'https://api.openai.com/v1',
+    providerName: 'openai',
+    currentModel: 'gpt-5.4',
+    currentReasoningEffort: 'medium',
+    discoveredModels: ['gpt-5.4', 'gpt-4.1-mini'],
+  })
+
+  assert.equal(catalog.providerLabel, 'OpenAI')
+  assert.equal(catalog.capabilities.supportsReasoningEffort, true)
+  assert.equal(catalog.selectedModel?.id, 'gpt-5.4')
+  assert.equal(catalog.selectedModel?.capabilities.reasoning, true)
+  assert.equal(catalog.reasoningOptions.length, 4)
+})
+
+test('resolveAssistantModelCatalog normalizes discovery objects for official OpenAI-compatible targets', () => {
+  const catalog = resolveAssistantModelCatalog({
+    provider: 'openai-compatible',
+    baseUrl: 'https://api.openai.com/v1',
+    providerName: 'openai',
+    currentModel: 'gpt-5.4',
+    discovery: {
+      status: 'ok',
+      message: null,
+      models: [
+        {
+          id: 'gpt-5.4',
+          label: 'gpt-5.4',
+          description: 'Discovered from OpenAI.',
+          source: 'discovered',
+          capabilities: {
+            images: false,
+            pdf: false,
+            reasoning: false,
+            streaming: true,
+            tools: true,
+          },
+        },
+      ],
+    },
+  })
+
+  assert.equal(catalog.selectedModel?.id, 'gpt-5.4')
+  assert.equal(catalog.selectedModel?.capabilities.reasoning, true)
+  assert.equal(catalog.reasoningOptions.length, 4)
 })
 
 test('resolveAssistantModelCatalog keeps undiscovered OpenAI-compatible endpoints empty until the operator chooses a model', () => {
@@ -1369,7 +1407,32 @@ test('createSetupAssistantResolver applies named provider preset defaults before
   assert.match(resolved.detail, /OpenRouter/u)
 })
 
-test('createSetupAssistantResolver rejects unsupported OpenAI-compatible reasoning effort overrides', async () => {
+test('createSetupAssistantResolver accepts reasoning effort for the official OpenAI-compatible target', async () => {
+  const resolver = createSetupAssistantResolver({
+    assistantAccount: {
+      resolve: async () => null,
+    },
+    input: new PassThrough(),
+    output: new PassThrough(),
+  })
+
+  const resolved = await resolver.resolve({
+    allowPrompt: false,
+    commandName: 'setup',
+    preset: 'openai-compatible',
+    options: {
+      assistantModel: 'gpt-5.4',
+      assistantProviderPreset: 'openai',
+      assistantReasoningEffort: 'medium',
+    } as any,
+  })
+
+  assert.equal(resolved.baseUrl, 'https://api.openai.com/v1')
+  assert.equal(resolved.providerName, 'openai')
+  assert.equal(resolved.reasoningEffort, 'medium')
+})
+
+test('createSetupAssistantResolver rejects reasoning effort for non-OpenAI-compatible targets', async () => {
   const resolver = createSetupAssistantResolver({
     assistantAccount: {
       resolve: async () => null,
@@ -1385,6 +1448,7 @@ test('createSetupAssistantResolver rejects unsupported OpenAI-compatible reasoni
         commandName: 'setup',
         preset: 'openai-compatible',
         options: {
+          assistantProviderPreset: 'ollama',
           assistantModel: 'gpt-oss:20b',
           assistantReasoningEffort: 'high',
         } as any,

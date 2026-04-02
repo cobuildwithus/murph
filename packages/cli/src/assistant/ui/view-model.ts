@@ -5,7 +5,7 @@ import type {
 import {
   findAssistantCatalogModelOptionIndex,
   findAssistantCatalogReasoningOptionIndex,
-  resolveAssistantProviderCapabilities,
+  resolveAssistantTargetCapabilities,
   type AssistantModelOption,
   type AssistantReasoningOption,
 } from '../provider-catalog.js'
@@ -400,6 +400,7 @@ export function shouldClearComposerForSubmitAction(
 
 export function formatChatMetadata(
   input: {
+    baseUrl?: string | null
     model: string | null
     provider: AssistantSession['provider']
     reasoningEffort: string | null
@@ -414,6 +415,7 @@ export function formatChatMetadata(
 
 export function resolveChatMetadataBadges(
   input: {
+    baseUrl?: string | null
     model: string | null
     provider: AssistantSession['provider']
     reasoningEffort: string | null
@@ -422,7 +424,11 @@ export function resolveChatMetadataBadges(
 ): ChatMetadataBadge[] {
   const normalizedModel = normalizeNullableString(input.model) ?? input.provider
   const normalizedReasoningEffort = normalizeNullableString(input.reasoningEffort)
-  const capabilities = resolveAssistantProviderCapabilities(input.provider)
+  const capabilities = resolveAssistantTargetCapabilities({
+    provider: input.provider,
+    baseUrl: input.baseUrl ?? null,
+    model: input.model,
+  })
 
   return [
     {
@@ -483,12 +489,17 @@ function normalizeTraceText(value: string): string | null {
 }
 
 function formatModelSummary(input: {
+  baseUrl?: string | null
   model: string | null
   provider: AssistantSession['provider']
   reasoningEffort: string | null
 }): string {
   const model = input.model?.trim()
-  const capabilities = resolveAssistantProviderCapabilities(input.provider)
+  const capabilities = resolveAssistantTargetCapabilities({
+    provider: input.provider,
+    baseUrl: input.baseUrl ?? null,
+    model: input.model,
+  })
   const reasoningEffort = capabilities.supportsReasoningEffort
     ? input.reasoningEffort?.trim()
     : null

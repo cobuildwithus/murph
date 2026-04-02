@@ -2,6 +2,7 @@ import readline from 'node:readline/promises'
 import { stderr as defaultOutput, stdin as defaultInput } from 'node:process'
 import {
   discoverAssistantProviderModels,
+  resolveAssistantTargetCapabilities,
   type AssistantModelDiscoveryResult,
 } from './assistant/provider-catalog.js'
 import {
@@ -23,7 +24,7 @@ import {
   type SetupConfiguredAssistant,
 } from '@murphai/assistant-core/setup-cli-contracts'
 
-export const DEFAULT_SETUP_ASSISTANT_PRESET: SetupAssistantPreset = 'codex-cli'
+export const DEFAULT_SETUP_ASSISTANT_PRESET: SetupAssistantPreset = 'codex'
 export const DEFAULT_SETUP_CODEX_MODEL = 'gpt-5.4'
 export const DEFAULT_SETUP_CODEX_OSS_MODEL = 'gpt-oss:20b'
 export const DEFAULT_SETUP_OPENAI_COMPATIBLE_BASE_URL =
@@ -69,6 +70,7 @@ export function hasExplicitSetupAssistantOptions(
     | 'assistantCodexCommand'
     | 'assistantProfile'
     | 'assistantReasoningEffort'
+    | 'assistantOss'
   >,
 ): boolean {
   return Boolean(
@@ -80,7 +82,8 @@ export function hasExplicitSetupAssistantOptions(
       options.assistantProviderName ||
       options.assistantCodexCommand ||
       options.assistantProfile ||
-      options.assistantReasoningEffort,
+      options.assistantReasoningEffort ||
+      options.assistantOss,
   )
 }
 
@@ -96,6 +99,7 @@ export function inferSetupAssistantPresetFromOptions(
     | 'assistantCodexCommand'
     | 'assistantProfile'
     | 'assistantReasoningEffort'
+    | 'assistantOss'
   >,
 ): SetupAssistantPreset | null {
   if (options.assistantPreset) {
@@ -115,9 +119,10 @@ export function inferSetupAssistantPresetFromOptions(
     options.assistantModel ||
     options.assistantCodexCommand ||
     options.assistantProfile ||
-    options.assistantReasoningEffort
+    options.assistantReasoningEffort ||
+    options.assistantOss
   ) {
-    return 'codex-cli'
+    return 'codex'
   }
 
   return null
@@ -192,20 +197,24 @@ export function createSetupAssistantResolver(
           }
           break
 
-        case 'codex-cli': {
+        case 'codex': {
+          const useLocalModel = resolutionInput.options.assistantOss === true
           const model = await resolvePromptedValue({
             allowPrompt: resolutionInput.allowPrompt,
             defaultValue:
               normalizeNullableString(resolutionInput.options.assistantModel) ??
-              DEFAULT_SETUP_CODEX_MODEL,
+              (useLocalModel
+                ? DEFAULT_SETUP_CODEX_OSS_MODEL
+                : DEFAULT_SETUP_CODEX_MODEL),
             input,
             output,
-            prompt:
-              'Default model to use with Codex',
+            prompt: useLocalModel
+              ? 'Default local model to use with Codex'
+              : 'Default model to use with Codex',
           })
 
           resolvedAssistant = {
-            preset: 'codex-cli',
+            preset: 'codex',
             enabled: true,
             provider: 'codex-cli',
             model,
@@ -225,54 +234,11 @@ export function createSetupAssistantResolver(
               ) ?? null,
             sandbox: DEFAULT_SETUP_SANDBOX,
             approvalPolicy: DEFAULT_SETUP_APPROVAL_POLICY,
-            oss: false,
+            oss: useLocalModel,
             account: null,
             detail: buildCodexAssistantDetail({
               model,
-              oss: false,
-            }),
-          }
-          break
-        }
-
-        case 'codex-oss': {
-          const model = await resolvePromptedValue({
-            allowPrompt: resolutionInput.allowPrompt,
-            defaultValue:
-              normalizeNullableString(resolutionInput.options.assistantModel) ??
-              DEFAULT_SETUP_CODEX_OSS_MODEL,
-            input,
-            output,
-            prompt:
-              'Default local model to use with Codex',
-          })
-
-          resolvedAssistant = {
-            preset: 'codex-oss',
-            enabled: true,
-            provider: 'codex-cli',
-            model,
-            baseUrl: null,
-            apiKeyEnv: null,
-            providerName: null,
-            codexCommand:
-              normalizeNullableString(
-                resolutionInput.options.assistantCodexCommand,
-              ) ?? null,
-            profile:
-              normalizeNullableString(resolutionInput.options.assistantProfile) ??
-              null,
-            reasoningEffort:
-              normalizeNullableString(
-                resolutionInput.options.assistantReasoningEffort,
-              ) ?? null,
-            sandbox: DEFAULT_SETUP_SANDBOX,
-            approvalPolicy: DEFAULT_SETUP_APPROVAL_POLICY,
-            oss: true,
-            account: null,
-            detail: buildCodexAssistantDetail({
-              model,
-              oss: true,
+              oss: useLocalModel,
             }),
           }
           break
@@ -282,11 +248,6 @@ export function createSetupAssistantResolver(
           const explicitReasoningEffort = normalizeNullableString(
             resolutionInput.options.assistantReasoningEffort,
           )
-          if (explicitReasoningEffort) {
-            throw new Error(
-              'OpenAI-compatible setup does not support assistantReasoningEffort.',
-            )
-          }
 
           const providerPreset =
             resolveSetupAssistantProviderPreset(resolutionInput.options) ??
@@ -339,6 +300,20 @@ export function createSetupAssistantResolver(
             input,
             output,
           })
+          if (
+            explicitReasoningEffort &&
+            !resolveAssistantTargetCapabilities({
+              provider: 'openai-compatible',
+              apiKeyEnv,
+              baseUrl,
+              model,
+              providerName,
+            }).supportsReasoningEffort
+          ) {
+            throw new Error(
+              'The resolved OpenAI-compatible target does not support assistantReasoningEffort.',
+            )
+          }
 
           resolvedAssistant = {
             preset: 'openai-compatible',
@@ -350,7 +325,7 @@ export function createSetupAssistantResolver(
             providerName,
             codexCommand: null,
             profile: null,
-            reasoningEffort: null,
+            reasoningEffort: explicitReasoningEffort,
             sandbox: null,
             approvalPolicy: null,
             oss: false,
