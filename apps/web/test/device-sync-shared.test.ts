@@ -20,7 +20,7 @@ import {
 } from "@/src/lib/device-sync/shared";
 
 describe("device-sync shared helpers", () => {
-  it("reuses the canonical device-syncd timestamp validation", () => {
+  it("keeps hosted timestamp validation local while preserving the shared behavior", () => {
     assert.equal(toIsoTimestamp("2026-03-26T12:00:00Z"), "2026-03-26T12:00:00.000Z");
     expect(() => toIsoTimestamp("not-a-date")).toThrowError(new TypeError("Invalid timestamp: not-a-date"));
   });

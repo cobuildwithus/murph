@@ -426,7 +426,7 @@ function attachOAuthCallbackContext(
 export { DeviceSyncError, deviceSyncError, isDeviceSyncError } from "./errors.ts";
 export { createDeviceSyncRegistry } from "./registry.ts";
 export { toRedactedPublicDeviceSyncAccount } from "./public-account.ts";
-export { sanitizeStoredDeviceSyncMetadata, toIsoTimestamp } from "./shared.ts";
+export { sanitizeStoredDeviceSyncMetadata } from "./shared.ts";
 export { resolveDeviceSyncWebhookVerificationResponse } from "./webhook-verification.ts";
 export { buildPublicDeviceSyncErrorPayload } from "./http.ts";
 export {
