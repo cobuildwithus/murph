@@ -13,7 +13,6 @@ import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import {
   resolveAssistantOperatorDefaults,
-  resolveAssistantProviderDefaults,
 } from '../../operator-config.js'
 import {
   isAssistantProviderConnectionLostError,
@@ -22,16 +21,12 @@ import {
 import { listAssistantTurnReceipts } from '../receipts.js'
 import { errorMessage, normalizeNullableString } from '../shared.js'
 import { sendAssistantMessage } from '../service.js'
-import { buildAssistantFailoverRoutes } from '../failover.js'
 import {
-  compactAssistantProviderConfigInput,
-  mergeAssistantProviderConfigsForProvider,
-  serializeAssistantProviderSessionOptions,
-} from '../provider-config.js'
-import { buildResolveAssistantSessionInput } from '../session-resolution.js'
-import { resolveAssistantTurnRoutes } from '../service-turn-routes.js'
+  type AssistantTurnRouteOverride,
+  resolveAssistantTurnRoutesForMessage,
+  selectAssistantTurnRouteOverride,
+} from '../service-turn-routes.js'
 import {
-  isAssistantSessionNotFoundError,
   listAssistantTranscriptEntries,
   resolveAssistantSession,
 } from '../store.js'
@@ -113,21 +108,7 @@ type AssistantAutoReplySendResult = Awaited<
   ReturnType<typeof sendAssistantMessage>
 >
 
-type AssistantAutoReplyProviderOverride = Pick<
-  AssistantMessageInput,
-  | 'apiKeyEnv'
-  | 'approvalPolicy'
-  | 'baseUrl'
-  | 'codexCommand'
-  | 'headers'
-  | 'model'
-  | 'oss'
-  | 'profile'
-  | 'provider'
-  | 'providerName'
-  | 'reasoningEffort'
-  | 'sandbox'
->
+type AssistantAutoReplyProviderOverride = AssistantTurnRouteOverride
 
 interface AssistantAutoReplyOutcomeSummary {
   failed: number
@@ -1208,101 +1189,29 @@ async function resolveAutoReplyRichContentRoute(input: {
     userMessageContent: input.userMessageContent,
     vault: input.vault,
   } satisfies AssistantMessageInput
-  const sessionInput = buildResolveAssistantSessionInput(messageInput, defaults)
-
-  try {
-    const resolved = await resolveAssistantSession({
-      ...sessionInput,
-      createIfMissing: false,
-    })
-    return selectAutoReplyRichContentRouteOverride(
-      resolveAssistantTurnRoutes(messageInput, defaults, resolved),
-    )
-  } catch (error) {
-    if (!isAssistantSessionNotFoundError(error)) {
-      throw error
-    }
-
-    const provider = sessionInput.provider ?? 'codex-cli'
-    const providerDefaults = resolveAssistantProviderDefaults(defaults, provider)
-    const providerOptions = serializeAssistantProviderSessionOptions(
-      mergeAssistantProviderConfigsForProvider(
-        provider,
-        providerDefaults ? { provider, ...providerDefaults } : null,
-        compactAssistantProviderConfigInput({
-          provider,
-          ...messageInput,
-        }),
-      ),
-    )
-
-    return selectAutoReplyRichContentRouteOverride(
-      buildAssistantFailoverRoutes({
-        backups: defaults?.failoverRoutes ?? null,
-        codexCommand: null,
-        defaults,
-        provider,
-        providerOptions,
-      }),
-    )
-  }
+  const routes = await resolveAssistantTurnRoutesForMessage(messageInput, defaults)
+  return selectAutoReplyRichContentRouteOverride(routes)
 }
 
 function selectAutoReplyRichContentRouteOverride(
-  routes: ReadonlyArray<{
-    codexCommand: string | null
-    provider: AssistantMessageInput['provider']
-    providerOptions: {
-      apiKeyEnv?: string | null
-      approvalPolicy: AssistantMessageInput['approvalPolicy']
-      baseUrl?: string | null
-      headers?: Record<string, string> | null
-      model: AssistantMessageInput['model']
-      oss: boolean
-      profile: string | null
-      providerName?: string | null
-      reasoningEffort: string | null
-      sandbox: AssistantMessageInput['sandbox']
-    }
-  }>,
+  routes: Parameters<typeof selectAssistantTurnRouteOverride>[0],
 ): {
   providerOverride: AssistantAutoReplyProviderOverride | null
   supported: boolean
 } {
-  const richRoute = routes.find((route) =>
+  const richRoute = selectAssistantTurnRouteOverride(routes, (route) =>
     resolveAssistantProviderCapabilities(route.provider ?? 'codex-cli')
       .supportsRichUserMessageContent,
   )
-  if (!richRoute) {
+  if (!richRoute.route) {
     return {
       providerOverride: null,
       supported: false,
     }
   }
 
-  const primaryRoute = routes[0] ?? null
-  if (primaryRoute === richRoute) {
-    return {
-      providerOverride: null,
-      supported: true,
-    }
-  }
-
   return {
-    providerOverride: {
-      apiKeyEnv: richRoute.providerOptions.apiKeyEnv ?? null,
-      approvalPolicy: richRoute.providerOptions.approvalPolicy ?? null,
-      baseUrl: richRoute.providerOptions.baseUrl ?? null,
-      codexCommand: richRoute.codexCommand ?? undefined,
-      headers: richRoute.providerOptions.headers ?? null,
-      model: richRoute.providerOptions.model ?? null,
-      oss: richRoute.providerOptions.oss,
-      profile: richRoute.providerOptions.profile ?? null,
-      provider: richRoute.provider ?? 'codex-cli',
-      providerName: richRoute.providerOptions.providerName ?? null,
-      reasoningEffort: richRoute.providerOptions.reasoningEffort ?? null,
-      sandbox: richRoute.providerOptions.sandbox ?? null,
-    },
+    providerOverride: richRoute.providerOverride,
     supported: true,
   }
 }

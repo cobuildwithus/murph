@@ -42,15 +42,7 @@ export type AssistantAutoReplyPreparedInput =
 export function buildAssistantAutoReplyPrompt(
   captures: readonly AssistantAutoReplyPromptCapture[],
 ): AssistantAutoReplyPrompt {
-  if (
-    captures.some(({ capture }) =>
-      capture.attachments.some(
-        (attachment) =>
-          attachment.parseState === 'pending' ||
-          attachment.parseState === 'running',
-      ),
-    )
-  ) {
+  if (hasAssistantAutoReplyPendingAttachments(captures)) {
     return {
       kind: 'defer',
       reason: 'waiting for parser completion',
@@ -59,43 +51,28 @@ export function buildAssistantAutoReplyPrompt(
 
   const sections = captures
     .map((entry, index) =>
-      renderAssistantAutoReplyCaptureSection(entry, index, captures.length),
+      renderAssistantAutoReplyCaptureSection({
+        attachmentSections: entry.capture.attachments
+          .map((attachment) => renderAttachmentPromptSection(attachment))
+          .filter((section): section is string => section !== null),
+        captureText: normalizeNullableString(entry.capture.text),
+        index,
+        replyContext: entry.telegramMetadata?.replyContext ?? null,
+        totalCaptures: captures.length,
+      }),
     )
     .filter((section): section is string => section !== null)
 
-  if (sections.length === 0) {
+  if (sections.length === 0 || captures.length === 0) {
     return {
       kind: 'skip',
       reason: 'capture has no text or parsed attachment content',
     }
   }
-
-  const firstCapture = captures[0]?.capture
-  const lastCapture = captures[captures.length - 1]?.capture
-  if (!firstCapture || !lastCapture) {
-    return {
-      kind: 'skip',
-      reason: 'capture has no text or parsed attachment content',
-    }
-  }
-
-  const mediaGroupId = captures[0]?.telegramMetadata?.mediaGroupId ?? null
-  const contextLines = [
-    `Source: ${firstCapture.source}`,
-    `Occurred at: ${
-      firstCapture.occurredAt === lastCapture.occurredAt
-        ? firstCapture.occurredAt
-        : `${firstCapture.occurredAt} -> ${lastCapture.occurredAt}`
-    }`,
-    `Thread: ${firstCapture.threadId}${firstCapture.threadTitle ? ` (${firstCapture.threadTitle})` : ''}`,
-    `Actor: ${firstCapture.actorName ?? firstCapture.actorId ?? 'unknown'} | self=${String(firstCapture.actorIsSelf)}`,
-    captures.length > 1 ? `Grouped captures: ${captures.length}` : null,
-    mediaGroupId ? `Telegram media group: ${mediaGroupId}` : null,
-  ]
 
   return {
     kind: 'ready',
-    prompt: [...contextLines.filter((line): line is string => line !== null), '', ...sections].join('\n'),
+    prompt: buildAssistantAutoReplyPromptText(captures, sections),
   }
 }
 
@@ -103,9 +80,11 @@ export async function prepareAssistantAutoReplyInput(
   captures: readonly AssistantAutoReplyPromptCapture[],
   vaultRoot: string,
 ): Promise<AssistantAutoReplyPreparedInput> {
-  const prompt = buildAssistantAutoReplyPrompt(captures)
-  if (prompt.kind === 'defer') {
-    return prompt
+  if (hasAssistantAutoReplyPendingAttachments(captures)) {
+    return {
+      kind: 'defer',
+      reason: 'waiting for parser completion',
+    }
   }
 
   const preparedCaptures = await Promise.all(
@@ -120,31 +99,22 @@ export async function prepareAssistantAutoReplyInput(
   )
   const textualSections = preparedCaptures
     .map((entry, index) =>
-      renderPreparedAssistantAutoReplyCaptureSection(
-        entry,
+      renderAssistantAutoReplyCaptureSection({
+        attachmentSections: entry.attachmentBundles
+          .map((attachment) => renderPreparedAttachmentPromptSection(attachment))
+          .filter((section): section is string => section !== null),
+        captureText: normalizeNullableString(entry.capture.text),
         index,
-        preparedCaptures.length,
-      ),
+        replyContext: entry.telegramMetadata?.replyContext ?? null,
+        totalCaptures: preparedCaptures.length,
+      }),
     )
     .filter((section): section is string => section !== null)
 
   const hasTextualContent = preparedCaptures.some((entry) =>
     captureHasPreparedTextualContent(entry),
   )
-  const nextPrompt =
-    textualSections.length > 0
-      ? [
-          ...buildAssistantAutoReplyContextLines(captures).filter(
-            (line): line is string => line !== null,
-          ),
-          '',
-          ...textualSections,
-        ].join('\n')
-      : prompt.kind === 'ready'
-        ? prompt.prompt
-        : buildAssistantAutoReplyContextLines(captures)
-            .filter((line): line is string => line !== null)
-            .join('\n')
+  const nextPrompt = buildAssistantAutoReplyPromptText(captures, textualSections)
 
   const preparedMultimodalInput =
     await prepareInboxMultimodalUserMessageContent({
@@ -211,40 +181,47 @@ export async function loadTelegramAutoReplyMetadata(
   }
 }
 
-function renderAssistantAutoReplyCaptureSection(
-  entry: AssistantAutoReplyPromptCapture,
-  index: number,
-  totalCaptures: number,
-): string | null {
+function hasAssistantAutoReplyPendingAttachments(
+  captures: readonly AssistantAutoReplyPromptCapture[],
+): boolean {
+  return captures.some(({ capture }) =>
+    capture.attachments.some(
+      (attachment) =>
+        attachment.parseState === 'pending' || attachment.parseState === 'running',
+    ),
+  )
+}
+
+function renderAssistantAutoReplyCaptureSection(input: {
+  attachmentSections: readonly string[]
+  captureText: string | null
+  index: number
+  replyContext: string | null
+  totalCaptures: number
+}): string | null {
   const sections: string[] = []
-  const captureText = normalizeNullableString(entry.capture.text)
-  if (entry.telegramMetadata?.replyContext) {
+  if (input.replyContext) {
     sections.push(`Reply context:
-${entry.telegramMetadata.replyContext}`)
+${input.replyContext}`)
   }
-  if (captureText) {
+  if (input.captureText) {
     sections.push(`Message text:
-${captureText}`)
+${input.captureText}`)
   }
-
-  const attachmentSections = entry.capture.attachments
-    .map((attachment) => renderAttachmentPromptSection(attachment))
-    .filter((section): section is string => section !== null)
-
-  if (attachmentSections.length > 0) {
+  if (input.attachmentSections.length > 0) {
     sections.push(`Attachment context:
-${attachmentSections.join('\n\n')}`)
+${input.attachmentSections.join('\n\n')}`)
   }
 
   if (sections.length === 0) {
     return null
   }
 
-  if (totalCaptures === 1) {
+  if (input.totalCaptures === 1) {
     return sections.join('\n\n')
   }
 
-  return `Capture ${index + 1}:
+  return `Capture ${input.index + 1}:
 ${sections.join('\n\n')}`
 }
 
@@ -323,43 +300,16 @@ function buildAssistantAutoReplyContextLines(
   ]
 }
 
-function renderPreparedAssistantAutoReplyCaptureSection(
-  entry: AssistantAutoReplyPromptCapture & {
-    attachmentBundles: readonly InboxModelAttachmentBundle[]
-  },
-  index: number,
-  totalCaptures: number,
-): string | null {
-  const sections: string[] = []
-  const captureText = normalizeNullableString(entry.capture.text)
-  if (entry.telegramMetadata?.replyContext) {
-    sections.push(`Reply context:
-${entry.telegramMetadata.replyContext}`)
-  }
-  if (captureText) {
-    sections.push(`Message text:
-${captureText}`)
-  }
-
-  const attachmentSections = entry.attachmentBundles
-    .map((attachment) => renderPreparedAttachmentPromptSection(attachment))
-    .filter((section): section is string => section !== null)
-
-  if (attachmentSections.length > 0) {
-    sections.push(`Attachment context:
-${attachmentSections.join('\n\n')}`)
-  }
-
-  if (sections.length === 0) {
-    return null
-  }
-
-  if (totalCaptures === 1) {
-    return sections.join('\n\n')
-  }
-
-  return `Capture ${index + 1}:
-${sections.join('\n\n')}`
+function buildAssistantAutoReplyPromptText(
+  captures: readonly AssistantAutoReplyPromptCapture[],
+  sections: readonly string[],
+): string {
+  const contextLines = buildAssistantAutoReplyContextLines(captures).filter(
+    (line): line is string => line !== null,
+  )
+  return sections.length > 0
+    ? [...contextLines, '', ...sections].join('\n')
+    : contextLines.join('\n')
 }
 
 function captureHasPreparedTextualContent(

@@ -23,6 +23,7 @@ import {
   resolveAssistantProviderDefaults,
   saveAssistantOperatorDefaultsPatch,
 } from '@murphai/assistant-core/operator-config'
+import type { InboxServices } from '@murphai/assistant-core/inbox-services'
 import {
   extractRecoveredAssistantSession,
   isAssistantProviderInterruptedError,
@@ -181,6 +182,204 @@ import {
 import { LIGHT_ASSISTANT_INK_THEME } from '../src/assistant/ui/theme.js'
 
 const cleanupPaths: string[] = []
+const PHOTO_ONLY_CAPTURE_ID = 'cap-photo'
+const PHOTO_ONLY_OCCURED_AT = '2026-03-18T09:00:00Z'
+const PHOTO_ONLY_ATTACHMENT_BUFFER = Buffer.from([0xff, 0xd8, 0xff])
+const OPENAI_COMPATIBLE_OPERATOR_DEFAULTS = {
+  provider: 'openai-compatible',
+  defaultsByProvider: {
+    'openai-compatible': {
+      codexCommand: null,
+      model: 'gpt-oss:20b',
+      reasoningEffort: null,
+      sandbox: null,
+      approvalPolicy: null,
+      profile: null,
+      oss: false,
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      apiKeyEnv: 'OLLAMA_API_KEY',
+      providerName: 'ollama',
+      headers: null,
+    },
+  },
+} as const
+
+function buildPhotoOnlyAutoReplyCapture() {
+  return {
+    captureId: PHOTO_ONLY_CAPTURE_ID,
+    source: 'telegram' as const,
+    accountId: 'bot',
+    externalId: 'ext-photo',
+    threadId: 'chat-photo',
+    threadTitle: 'Photo Chat',
+    threadIsDirect: true,
+    actorId: 'user-1',
+    actorName: 'Photo User',
+    actorIsSelf: false,
+    occurredAt: PHOTO_ONLY_OCCURED_AT,
+    receivedAt: null,
+    text: null,
+    attachmentCount: 1,
+    envelopePath: 'raw/inbox/photo.json',
+    eventId: 'evt-photo',
+    createdAt: PHOTO_ONLY_OCCURED_AT,
+    promotions: [],
+    attachments: [
+      {
+        attachmentId: 'att-photo',
+        ordinal: 1,
+        kind: 'image' as const,
+        mime: 'image/jpeg',
+        fileName: 'meal.jpg',
+        storedPath: 'raw/inbox/captures/cap-photo/attachments/1/meal.jpg',
+        transcriptText: null,
+        extractedText: null,
+        parseState: 'succeeded' as const,
+      },
+    ],
+  }
+}
+
+function createPhotoOnlyAutoReplyInboxServices(): InboxServices {
+  const capture = buildPhotoOnlyAutoReplyCapture()
+  const unsupportedInboxServiceCall = async (): Promise<never> => {
+    throw new Error('unexpected inbox service call in photo-only auto-reply test')
+  }
+
+  return {
+    bootstrap: unsupportedInboxServiceCall,
+    init: unsupportedInboxServiceCall,
+    sourceAdd: unsupportedInboxServiceCall,
+    sourceList: unsupportedInboxServiceCall,
+    sourceRemove: unsupportedInboxServiceCall,
+    sourceSetEnabled: unsupportedInboxServiceCall,
+    doctor: unsupportedInboxServiceCall,
+    setup: unsupportedInboxServiceCall,
+    parse: unsupportedInboxServiceCall,
+    requeue: unsupportedInboxServiceCall,
+    backfill: unsupportedInboxServiceCall,
+    run: unsupportedInboxServiceCall,
+    status: unsupportedInboxServiceCall,
+    stop: unsupportedInboxServiceCall,
+    async list(input) {
+      return {
+        filters: {
+          afterCaptureId: input.afterCaptureId ?? null,
+          afterOccurredAt: input.afterOccurredAt ?? null,
+          limit: input.limit ?? 50,
+          oldestFirst: input.oldestFirst ?? false,
+          sourceId: input.sourceId ?? null,
+        },
+        items: [
+          {
+            captureId: capture.captureId,
+            source: capture.source,
+            accountId: capture.accountId,
+            externalId: capture.externalId,
+            threadId: capture.threadId,
+            threadTitle: capture.threadTitle,
+            threadIsDirect: capture.threadIsDirect,
+            actorId: capture.actorId,
+            actorName: capture.actorName,
+            actorIsSelf: capture.actorIsSelf,
+            occurredAt: capture.occurredAt,
+            receivedAt: capture.receivedAt,
+            text: capture.text,
+            attachmentCount: capture.attachmentCount,
+            envelopePath: capture.envelopePath,
+            eventId: capture.eventId,
+            promotions: capture.promotions,
+          },
+        ],
+        vault: input.vault,
+      }
+    },
+    listAttachments: unsupportedInboxServiceCall,
+    showAttachment: unsupportedInboxServiceCall,
+    showAttachmentStatus: unsupportedInboxServiceCall,
+    parseAttachment: unsupportedInboxServiceCall,
+    reparseAttachment: unsupportedInboxServiceCall,
+    async show(input) {
+      return {
+        capture,
+        vault: input.vault,
+      }
+    },
+    search: unsupportedInboxServiceCall,
+    promoteMeal: unsupportedInboxServiceCall,
+    promoteDocument: unsupportedInboxServiceCall,
+    promoteJournal: unsupportedInboxServiceCall,
+    promoteExperimentNote: unsupportedInboxServiceCall,
+  }
+}
+
+async function createPhotoOnlyAutoReplyFixture(prefix: string): Promise<{
+  homeRoot: string
+  inboxServices: InboxServices
+  vaultRoot: string
+}> {
+  const parent = await mkdtemp(path.join(tmpdir(), prefix))
+  const homeRoot = path.join(parent, 'home')
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(homeRoot, { recursive: true })
+  await mkdir(vaultRoot, { recursive: true })
+  cleanupPaths.push(parent)
+
+  const attachmentDirectory = path.join(
+    vaultRoot,
+    'raw',
+    'inbox',
+    'captures',
+    PHOTO_ONLY_CAPTURE_ID,
+    'attachments',
+    '1',
+  )
+  await mkdir(attachmentDirectory, { recursive: true })
+  await writeFile(
+    path.join(attachmentDirectory, 'meal.jpg'),
+    PHOTO_ONLY_ATTACHMENT_BUFFER,
+  )
+
+  return {
+    homeRoot,
+    inboxServices: createPhotoOnlyAutoReplyInboxServices(),
+    vaultRoot,
+  }
+}
+
+async function withTemporaryHome<T>(
+  homeRoot: string,
+  run: () => Promise<T>,
+): Promise<T> {
+  const originalHome = process.env.HOME
+  process.env.HOME = homeRoot
+
+  try {
+    return await run()
+  } finally {
+    process.env.HOME = originalHome
+  }
+}
+
+function mockSuccessfulPhotoOnlyAutoReply(): void {
+  runtimeMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'openai-compatible',
+    providerSessionId: null,
+    response: 'logged it',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+  runtimeMocks.deliverAssistantMessageOverBinding.mockResolvedValue({
+    delivery: {
+      channel: 'telegram',
+      target: 'chat-photo',
+      targetKind: 'thread',
+      sentAt: '2026-03-18T09:00:05Z',
+      messageLength: 9,
+    },
+  })
+}
 
 function createComposerKey(overrides: Partial<Key> = {}): Key {
   return {
@@ -4318,135 +4517,13 @@ test('scanAssistantAutoReplyOnce keeps the cursor on prompt defers but advances 
 })
 
 test('scanAssistantAutoReplyOnce forwards multimodal content for photo-only captures', async () => {
-  const parent = await mkdtemp(
-    path.join(tmpdir(), 'murph-auto-reply-multimodal-'),
-  )
-  const homeRoot = path.join(parent, 'home')
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(homeRoot, { recursive: true })
-  await mkdir(vaultRoot, { recursive: true })
-  cleanupPaths.push(parent)
-  const attachmentDirectory = path.join(
-    vaultRoot,
-    'raw',
-    'inbox',
-    'captures',
-    'cap-photo',
-    'attachments',
-    '1',
-  )
-  await mkdir(attachmentDirectory, { recursive: true })
-  await writeFile(
-    path.join(attachmentDirectory, 'meal.jpg'),
-    Buffer.from([0xff, 0xd8, 0xff]),
-  )
+  const { homeRoot, inboxServices, vaultRoot } =
+    await createPhotoOnlyAutoReplyFixture('murph-auto-reply-multimodal-')
+  mockSuccessfulPhotoOnlyAutoReply()
 
-  runtimeMocks.executeAssistantProviderTurn.mockResolvedValue({
-    provider: 'openai-compatible',
-    providerSessionId: null,
-    response: 'logged it',
-    stderr: '',
-    stdout: '',
-    rawEvents: [],
-  })
-  runtimeMocks.deliverAssistantMessageOverBinding.mockResolvedValue({
-    delivery: {
-      channel: 'telegram',
-      target: 'chat-photo',
-      targetKind: 'thread',
-      sentAt: '2026-03-18T09:00:05Z',
-      messageLength: 9,
-    },
-  })
-
-  const inboxServices = {
-    async list() {
-      return {
-        items: [
-          {
-            captureId: 'cap-photo',
-            source: 'telegram',
-            accountId: 'bot',
-            externalId: 'ext-photo',
-            threadId: 'chat-photo',
-            threadTitle: 'Photo Chat',
-            actorId: 'user-1',
-            actorName: 'Photo User',
-            actorIsSelf: false,
-            occurredAt: '2026-03-18T09:00:00Z',
-            receivedAt: null,
-            text: null,
-            attachmentCount: 1,
-            envelopePath: 'raw/inbox/photo.json',
-            eventId: 'evt-photo',
-            promotions: [],
-          },
-        ],
-      }
-    },
-    async show() {
-      return {
-        capture: {
-          captureId: 'cap-photo',
-          source: 'telegram',
-          accountId: 'bot',
-          externalId: 'ext-photo',
-          threadId: 'chat-photo',
-          threadTitle: 'Photo Chat',
-          threadIsDirect: true,
-          actorId: 'user-1',
-          actorName: 'Photo User',
-          actorIsSelf: false,
-          occurredAt: '2026-03-18T09:00:00Z',
-          receivedAt: null,
-          text: null,
-          attachmentCount: 1,
-          envelopePath: 'raw/inbox/photo.json',
-          eventId: 'evt-photo',
-          createdAt: '2026-03-18T09:00:00Z',
-          promotions: [],
-          attachments: [
-            {
-              attachmentId: 'att-photo',
-              ordinal: 1,
-              kind: 'image',
-              mime: 'image/jpeg',
-              fileName: 'meal.jpg',
-              storedPath:
-                'raw/inbox/captures/cap-photo/attachments/1/meal.jpg',
-              transcriptText: null,
-              extractedText: null,
-              parseState: 'succeeded',
-            },
-          ],
-        },
-      }
-    },
-  } as any
-
-  const originalHome = process.env.HOME
-  process.env.HOME = homeRoot
-
-  try {
+  await withTemporaryHome(homeRoot, async () => {
     await saveAssistantOperatorDefaultsPatch(
-      {
-        provider: 'openai-compatible',
-        defaultsByProvider: {
-          'openai-compatible': {
-            codexCommand: null,
-            model: 'gpt-oss:20b',
-            reasoningEffort: null,
-            sandbox: null,
-            approvalPolicy: null,
-            profile: null,
-            oss: false,
-            baseUrl: 'http://127.0.0.1:11434/v1',
-            apiKeyEnv: 'OLLAMA_API_KEY',
-            providerName: 'ollama',
-            headers: null,
-          },
-        },
-      },
+      OPENAI_COMPATIBLE_OPERATOR_DEFAULTS,
       homeRoot,
     )
 
@@ -4471,107 +4548,18 @@ test('scanAssistantAutoReplyOnce forwards multimodal content for photo-only capt
     assert.equal(providerCall?.userMessageContent?.[2]?.type, 'image')
     assert.deepEqual(
       providerCall?.userMessageContent?.[2]?.image,
-      Buffer.from([0xff, 0xd8, 0xff]),
+      PHOTO_ONLY_ATTACHMENT_BUFFER,
     )
-  } finally {
-    process.env.HOME = originalHome
-  }
+  })
 })
 
 test('scanAssistantAutoReplyOnce skips photo-only captures when the configured provider cannot consume rich user content', async () => {
-  const parent = await mkdtemp(
-    path.join(tmpdir(), 'murph-auto-reply-text-only-provider-'),
-  )
-  const homeRoot = path.join(parent, 'home')
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(homeRoot, { recursive: true })
-  await mkdir(vaultRoot, { recursive: true })
-  cleanupPaths.push(parent)
+  const { homeRoot, inboxServices, vaultRoot } =
+    await createPhotoOnlyAutoReplyFixture(
+      'murph-auto-reply-text-only-provider-',
+    )
 
-  const attachmentDirectory = path.join(
-    vaultRoot,
-    'raw',
-    'inbox',
-    'captures',
-    'cap-photo',
-    'attachments',
-    '1',
-  )
-  await mkdir(attachmentDirectory, { recursive: true })
-  await writeFile(
-    path.join(attachmentDirectory, 'meal.jpg'),
-    Buffer.from([0xff, 0xd8, 0xff]),
-  )
-
-  const originalHome = process.env.HOME
-  process.env.HOME = homeRoot
-
-  const inboxServices = {
-    async list() {
-      return {
-        items: [
-          {
-            captureId: 'cap-photo',
-            source: 'telegram',
-            accountId: 'bot',
-            externalId: 'ext-photo',
-            threadId: 'chat-photo',
-            threadTitle: 'Photo Chat',
-            actorId: 'user-1',
-            actorName: 'Photo User',
-            actorIsSelf: false,
-            occurredAt: '2026-03-18T09:00:00Z',
-            receivedAt: null,
-            text: null,
-            attachmentCount: 1,
-            envelopePath: 'raw/inbox/photo.json',
-            eventId: 'evt-photo',
-            promotions: [],
-          },
-        ],
-      }
-    },
-    async show() {
-      return {
-        capture: {
-          captureId: 'cap-photo',
-          source: 'telegram',
-          accountId: 'bot',
-          externalId: 'ext-photo',
-          threadId: 'chat-photo',
-          threadTitle: 'Photo Chat',
-          threadIsDirect: true,
-          actorId: 'user-1',
-          actorName: 'Photo User',
-          actorIsSelf: false,
-          occurredAt: '2026-03-18T09:00:00Z',
-          receivedAt: null,
-          text: null,
-          attachmentCount: 1,
-          envelopePath: 'raw/inbox/photo.json',
-          eventId: 'evt-photo',
-          createdAt: '2026-03-18T09:00:00Z',
-          promotions: [],
-          attachments: [
-            {
-              attachmentId: 'att-photo',
-              ordinal: 1,
-              kind: 'image',
-              mime: 'image/jpeg',
-              fileName: 'meal.jpg',
-              storedPath:
-                'raw/inbox/captures/cap-photo/attachments/1/meal.jpg',
-              transcriptText: null,
-              extractedText: null,
-              parseState: 'succeeded',
-            },
-          ],
-        },
-      }
-    },
-  } as any
-
-  try {
+  await withTemporaryHome(homeRoot, async () => {
     await saveAssistantOperatorDefaultsPatch(
       {
         provider: 'codex-cli',
@@ -4613,129 +4601,23 @@ test('scanAssistantAutoReplyOnce skips photo-only captures when the configured p
       events.some(
         (event) =>
           event.type === 'capture.reply-skipped' &&
-          event.captureId === 'cap-photo' &&
+          event.captureId === PHOTO_ONLY_CAPTURE_ID &&
           event.details ===
             'capture has image/PDF evidence but the configured assistant provider only accepts text input',
       ),
       true,
     )
-  } finally {
-    process.env.HOME = originalHome
-  }
+  })
 })
 
 test('scanAssistantAutoReplyOnce reroutes photo-only captures to a multimodal failover provider when one is configured', async () => {
-  const parent = await mkdtemp(
-    path.join(tmpdir(), 'murph-auto-reply-rich-failover-'),
-  )
-  const homeRoot = path.join(parent, 'home')
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(homeRoot, { recursive: true })
-  await mkdir(vaultRoot, { recursive: true })
-  cleanupPaths.push(parent)
+  const { homeRoot, inboxServices, vaultRoot } =
+    await createPhotoOnlyAutoReplyFixture(
+      'murph-auto-reply-rich-failover-',
+    )
+  mockSuccessfulPhotoOnlyAutoReply()
 
-  const attachmentDirectory = path.join(
-    vaultRoot,
-    'raw',
-    'inbox',
-    'captures',
-    'cap-photo',
-    'attachments',
-    '1',
-  )
-  await mkdir(attachmentDirectory, { recursive: true })
-  await writeFile(
-    path.join(attachmentDirectory, 'meal.jpg'),
-    Buffer.from([0xff, 0xd8, 0xff]),
-  )
-
-  runtimeMocks.executeAssistantProviderTurn.mockResolvedValue({
-    provider: 'openai-compatible',
-    providerSessionId: null,
-    response: 'logged it',
-    stderr: '',
-    stdout: '',
-    rawEvents: [],
-  })
-  runtimeMocks.deliverAssistantMessageOverBinding.mockResolvedValue({
-    delivery: {
-      channel: 'telegram',
-      target: 'chat-photo',
-      targetKind: 'thread',
-      sentAt: '2026-03-18T09:00:05Z',
-      messageLength: 9,
-    },
-  })
-
-  const inboxServices = {
-    async list() {
-      return {
-        items: [
-          {
-            captureId: 'cap-photo',
-            source: 'telegram',
-            accountId: 'bot',
-            externalId: 'ext-photo',
-            threadId: 'chat-photo',
-            threadTitle: 'Photo Chat',
-            actorId: 'user-1',
-            actorName: 'Photo User',
-            actorIsSelf: false,
-            occurredAt: '2026-03-18T09:00:00Z',
-            receivedAt: null,
-            text: null,
-            attachmentCount: 1,
-            envelopePath: 'raw/inbox/photo.json',
-            eventId: 'evt-photo',
-            promotions: [],
-          },
-        ],
-      }
-    },
-    async show() {
-      return {
-        capture: {
-          captureId: 'cap-photo',
-          source: 'telegram',
-          accountId: 'bot',
-          externalId: 'ext-photo',
-          threadId: 'chat-photo',
-          threadTitle: 'Photo Chat',
-          threadIsDirect: true,
-          actorId: 'user-1',
-          actorName: 'Photo User',
-          actorIsSelf: false,
-          occurredAt: '2026-03-18T09:00:00Z',
-          receivedAt: null,
-          text: null,
-          attachmentCount: 1,
-          envelopePath: 'raw/inbox/photo.json',
-          eventId: 'evt-photo',
-          createdAt: '2026-03-18T09:00:00Z',
-          promotions: [],
-          attachments: [
-            {
-              attachmentId: 'att-photo',
-              ordinal: 1,
-              kind: 'image',
-              mime: 'image/jpeg',
-              fileName: 'meal.jpg',
-              storedPath:
-                'raw/inbox/captures/cap-photo/attachments/1/meal.jpg',
-              transcriptText: null,
-              extractedText: null,
-              parseState: 'succeeded',
-            },
-          ],
-        },
-      }
-    },
-  } as any
-
-  const originalHome = process.env.HOME
-  process.env.HOME = homeRoot
-
-  try {
+  await withTemporaryHome(homeRoot, async () => {
     await saveAssistantOperatorDefaultsPatch(
       {
         provider: 'codex-cli',
@@ -4801,11 +4683,16 @@ test('scanAssistantAutoReplyOnce reroutes photo-only captures to a multimodal fa
     })
     const providerCall = runtimeMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
     assert.equal(providerCall?.provider, 'openai-compatible')
+    assert.equal(providerCall?.apiKeyEnv, 'OLLAMA_API_KEY')
+    assert.equal(providerCall?.approvalPolicy, null)
+    assert.equal(providerCall?.baseUrl, 'http://127.0.0.1:11434/v1')
+    assert.equal(providerCall?.codexCommand, undefined)
+    assert.equal(providerCall?.model, 'gpt-oss:20b')
+    assert.equal(providerCall?.providerName, 'ollama')
+    assert.equal(providerCall?.sandbox, null)
     assert.equal(Array.isArray(providerCall?.userMessageContent), true)
     assert.equal(providerCall?.userMessageContent?.[2]?.type, 'image')
-  } finally {
-    process.env.HOME = originalHome
-  }
+  })
 })
 
 test('buildAssistantAutoReplyPrompt omits oversized parsed attachment bodies but keeps attachment handles', () => {
