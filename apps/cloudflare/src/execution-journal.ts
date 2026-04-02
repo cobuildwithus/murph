@@ -228,10 +228,19 @@ function normalizeHostedExecutionCommittedResult(
             (value as { gatewayProjectionSnapshot: unknown }).gatewayProjectionSnapshot,
           ),
     sideEffects: parseHostedExecutionSideEffects((value as { sideEffects?: unknown }).sideEffects),
-    userId: typeof (value as { userId?: unknown }).userId === "string"
-      ? (value as { userId: string }).userId
-      : "",
+    userId: requireCommittedResultString(
+      (value as { userId?: unknown }).userId,
+      "Hosted execution committed result userId",
+    ),
   };
+}
+
+function requireCommittedResultString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new TypeError(`${label} must be a non-empty string.`);
+  }
+
+  return value;
 }
 
 function assertEquivalentDuplicateCommit(

@@ -14,6 +14,8 @@ import {
   RECIPE_STATUSES as CONTRACT_RECIPE_STATUSES,
   WORKOUT_FORMAT_STATUSES as CONTRACT_WORKOUT_FORMAT_STATUSES,
   type ActivityStrengthExercise,
+  type MarkdownDocumentEnvelope as ContractMarkdownDocumentEnvelope,
+  type StoredMarkdownDocument as ContractStoredMarkdownDocument,
 } from "@murphai/contracts";
 
 import type { DateInput } from "../types.ts";
@@ -72,15 +74,12 @@ export type WorkoutFormatStatus = (typeof WORKOUT_FORMAT_STATUSES)[number];
 export type ProtocolKind = (typeof PROTOCOL_KINDS)[number];
 export type ProtocolStatus = (typeof PROTOCOL_STATUSES)[number];
 
-export interface MarkdownRegistryDocumentEnvelope {
-  relativePath: string;
-  markdown: string;
-}
+export type MarkdownRegistryDocumentEnvelope = ContractMarkdownDocumentEnvelope;
 
-export interface StoredMarkdownRegistryEntity<TEntity> {
-  entity: TEntity;
-  document: MarkdownRegistryDocumentEnvelope;
-}
+export type StoredMarkdownRegistryEntity<TEntity> = ContractStoredMarkdownDocument<
+  TEntity,
+  MarkdownRegistryDocumentEnvelope
+>;
 
 export interface FoodAutoLogDailyRule {
   time: string;

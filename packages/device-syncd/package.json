@@ -30,9 +30,45 @@
       "types": "./dist/client.d.ts",
       "default": "./dist/client.js"
     },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "default": "./dist/config.js"
+    },
+    "./crypto": {
+      "types": "./dist/crypto.d.ts",
+      "default": "./dist/crypto.js"
+    },
     "./hosted-hints": {
       "types": "./dist/hosted-hints.d.ts",
       "default": "./dist/hosted-hints.js"
+    },
+    "./http": {
+      "types": "./dist/http.d.ts",
+      "default": "./dist/http.js"
+    },
+    "./providers/garmin": {
+      "types": "./dist/providers/garmin.d.ts",
+      "default": "./dist/providers/garmin.js"
+    },
+    "./providers/oura": {
+      "types": "./dist/providers/oura.d.ts",
+      "default": "./dist/providers/oura.js"
+    },
+    "./providers/whoop": {
+      "types": "./dist/providers/whoop.d.ts",
+      "default": "./dist/providers/whoop.js"
+    },
+    "./registry": {
+      "types": "./dist/registry.d.ts",
+      "default": "./dist/registry.js"
+    },
+    "./service": {
+      "types": "./dist/service.d.ts",
+      "default": "./dist/service.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "default": "./dist/types.js"
     }
   },
   "publishConfig": {

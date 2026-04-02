@@ -93,18 +93,23 @@ export async function applyHostedDeviceSyncRuntimeUpdates(
       const requestedAccessTokenExpiresAt = update.tokenBundle?.accessTokenExpiresAt;
       const connectionMutationRequested = hasHostedDeviceSyncRuntimeConnectionMutation(update);
       const localStateMutationRequested = hasHostedDeviceSyncRuntimeLocalStateMutation(update);
-      const tokenMutationRequested = update.tokenBundle !== undefined;
-      const connectionVersionMismatch = hasHostedDeviceSyncRuntimeConnectionVersionMismatch(
+      const tokenMutationRequested = update.tokenBundle !== undefined && update.tokenBundle !== null;
+      const authoritativeMutationRequested = connectionMutationRequested || tokenMutationRequested;
+      const missingObservedUpdatedAt = authoritativeMutationRequested
+        && (update.observedUpdatedAt === undefined || update.observedUpdatedAt === null);
+      const connectionVersionMismatch = missingObservedUpdatedAt || hasHostedDeviceSyncRuntimeConnectionVersionMismatch(
         existing.updatedAt,
         update.observedUpdatedAt,
-        connectionMutationRequested || tokenMutationRequested,
+        authoritativeMutationRequested,
       );
       const tokenVersionMismatch = Boolean(
         tokenMutationRequested
         && existing.secret
-        && typeof update.observedTokenVersion === "number"
-        && update.observedTokenVersion > 0
-        && existing.secret.tokenVersion !== update.observedTokenVersion,
+        && (
+          update.observedTokenVersion === undefined
+          || update.observedTokenVersion === null
+          || existing.secret.tokenVersion !== update.observedTokenVersion
+        ),
       );
       const tokenBlockedByDisconnectedStatus = Boolean(
         update.tokenBundle

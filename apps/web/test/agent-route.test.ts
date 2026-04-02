@@ -1,7 +1,7 @@
 import {
-  createOuraDeviceSyncProvider,
   deviceSyncError,
 } from "@murphai/device-syncd/public-ingress";
+import { createOuraDeviceSyncProvider } from "@murphai/device-syncd/providers/oura";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({

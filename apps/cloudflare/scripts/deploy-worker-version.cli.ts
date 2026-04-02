@@ -56,9 +56,7 @@ export async function runDeployWorkerVersionCli(
           "--yes",
         ]);
       },
-      async mkdir(target, mkdirOptions) {
-        await mkdir(target, mkdirOptions);
-      },
+      mkdir,
       readCurrentDeployment,
       readRenderedDeployConfig,
       async uploadVersion(input) {

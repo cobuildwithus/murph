@@ -1,5 +1,5 @@
+import { buildPublicDeviceSyncErrorPayload } from "@murphai/device-syncd/http";
 import {
-  buildPublicDeviceSyncErrorPayload,
   DeviceSyncError,
   isDeviceSyncError,
 } from "@murphai/device-syncd/public-ingress";

@@ -52,7 +52,7 @@ export interface HostedWorkerDeploymentDependencies {
   }): Promise<void>;
   mkdir(target: string, options: {
     recursive: boolean;
-  }): Promise<void>;
+  }): Promise<unknown>;
   readCurrentDeployment(workerName: string, configPath: string): Promise<DeploymentStatusPayload | null>;
   readRenderedDeployConfig(configPath: string): Promise<Record<string, unknown>>;
   uploadVersion(input: {

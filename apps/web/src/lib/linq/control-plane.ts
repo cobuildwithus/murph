@@ -1,7 +1,16 @@
 import type { PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
-import { createHostedDeviceSyncControlPlane } from "../device-sync/control-plane";
+import {
+  assertBrowserMutationOrigin,
+  requireAuthenticatedHostedUser,
+  type AuthenticatedHostedUser,
+} from "../device-sync/auth";
+import { HostedDeviceSyncAgentSessionService } from "../device-sync/agent-session-service";
+import {
+  createHostedDeviceSyncControlPlaneContext,
+  type HostedDeviceSyncControlPlaneContext,
+} from "../device-sync/control-plane-context";
 import { normalizeNullableString, parseInteger, toIsoTimestamp } from "../device-sync/shared";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { readHostedPhoneHint } from "../hosted-onboarding/contact-privacy";
@@ -52,18 +61,53 @@ export class HostedLinqControlPlane {
   readonly request: Request;
   readonly env = readHostedLinqEnvironment();
   private store: PrismaLinqControlPlaneStore | null = null;
-  private authControlPlane: ReturnType<typeof createHostedDeviceSyncControlPlane> | null = null;
+  private deviceSyncContext: HostedDeviceSyncControlPlaneContext | null = null;
+  private agentSessions: HostedDeviceSyncAgentSessionService | null = null;
+  private authenticatedUserPromise: Promise<AuthenticatedHostedUser> | null = null;
 
   constructor(request: Request) {
     this.request = request;
   }
 
-  private getAuthControlPlane() {
-    if (!this.authControlPlane) {
-      this.authControlPlane = createHostedDeviceSyncControlPlane(this.request);
+  private getDeviceSyncContext() {
+    if (!this.deviceSyncContext) {
+      this.deviceSyncContext = createHostedDeviceSyncControlPlaneContext(this.request);
     }
 
-    return this.authControlPlane;
+    return this.deviceSyncContext;
+  }
+
+  private getAgentSessions() {
+    if (!this.agentSessions) {
+      const context = this.getDeviceSyncContext();
+      this.agentSessions = new HostedDeviceSyncAgentSessionService({
+        request: this.request,
+        store: context.store,
+        registry: context.registry,
+        codec: context.codec,
+      });
+    }
+
+    return this.agentSessions;
+  }
+
+  private requireAuthenticatedUser(): Promise<AuthenticatedHostedUser> {
+    if (!this.authenticatedUserPromise) {
+      const context = this.getDeviceSyncContext();
+      this.authenticatedUserPromise = requireAuthenticatedHostedUser(this.request, context.env, {
+        nonceStore: context.store,
+      });
+    }
+
+    return this.authenticatedUserPromise;
+  }
+
+  private assertBrowserMutationOrigin(): void {
+    const context = this.getDeviceSyncContext();
+    assertBrowserMutationOrigin(this.request, {
+      ...context.env,
+      allowedReturnOrigins: context.allowedReturnOrigins,
+    });
   }
 
   private getStore() {
@@ -95,7 +139,7 @@ export class HostedLinqControlPlane {
   }
 
   async listBindings() {
-    const user = await this.getAuthControlPlane().requireAuthenticatedUser();
+    const user = await this.requireAuthenticatedUser();
 
     return {
       bindings: await this.getStore().listBindingsForUser(user.id),
@@ -103,8 +147,8 @@ export class HostedLinqControlPlane {
   }
 
   async upsertBinding(body: Record<string, unknown>) {
-    this.getAuthControlPlane().assertBrowserMutationOrigin();
-    const user = await this.getAuthControlPlane().requireAuthenticatedUser();
+    this.assertBrowserMutationOrigin();
+    const user = await this.requireAuthenticatedUser();
     const recipientPhone = normalizeRequiredRecipientPhone(body.recipientPhone);
     const label = normalizeNullableString(typeof body.label === "string" ? body.label : null);
     await this.assertRecipientPhoneOwnedByConfiguredAccount(recipientPhone);
@@ -119,14 +163,17 @@ export class HostedLinqControlPlane {
   }
 
   async pairAgent(body: Record<string, unknown>) {
-    this.getAuthControlPlane().assertBrowserMutationOrigin();
+    this.assertBrowserMutationOrigin();
     const label = normalizeNullableString(typeof body.label === "string" ? body.label : null);
 
-    return await this.getAuthControlPlane().pairAgent(label);
+    return await this.getAgentSessions().createAgentSession(
+      await this.requireAuthenticatedUser(),
+      label,
+    );
   }
 
   async listAgentEvents(url: URL) {
-    const session = await this.getAuthControlPlane().requireAgentSession();
+    const session = await this.getAgentSessions().requireAgentSession();
     const afterId = parseInteger(url.searchParams.get("after"));
     const limit = parseInteger(url.searchParams.get("limit")) ?? 100;
     const events = await this.getStore().listEventsForUser(session.userId, {

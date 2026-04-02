@@ -1,14 +1,19 @@
 import {
   createDeviceSyncRegistry,
-  createOuraDeviceSyncProvider,
-  createWhoopDeviceSyncProvider,
   deviceSyncError,
 } from "@murphai/device-syncd/public-ingress";
+import { createGarminDeviceSyncProvider } from "@murphai/device-syncd/providers/garmin";
+import { createOuraDeviceSyncProvider } from "@murphai/device-syncd/providers/oura";
+import { createWhoopDeviceSyncProvider } from "@murphai/device-syncd/providers/whoop";
 import type { DeviceSyncProvider, DeviceSyncRegistry } from "@murphai/device-syncd/public-ingress";
 import type { HostedDeviceSyncEnvironment } from "./env";
 
 export function createHostedDeviceSyncRegistry(env: HostedDeviceSyncEnvironment): DeviceSyncRegistry {
   const registry = createDeviceSyncRegistry();
+
+  if (env.providers.garmin) {
+    registry.register(createGarminDeviceSyncProvider(env.providers.garmin));
+  }
 
   if (env.providers.whoop) {
     registry.register(createWhoopDeviceSyncProvider(env.providers.whoop));

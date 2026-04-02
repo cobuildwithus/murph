@@ -1,27 +1,22 @@
 import {
   buildHostedExecutionUserRunPath,
   buildHostedExecutionUserStatusPath,
-  type HostedExecutionBundleRef,
+  parseHostedExecutionUserStatus,
+  type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
 type FetchLike = typeof fetch;
 
-type SmokeBundleRef = HostedExecutionBundleRef;
-
-interface SmokeUserStatus {
-  bundleRefs: {
-    agentState: SmokeBundleRef | null;
-    vault: SmokeBundleRef | null;
-  };
-  inFlight: boolean;
-  lastError: string | null;
-  lastRunAt: string | null;
-  pendingEventCount: number;
-  poisonedEventIds: string[];
-  retryingEventId: string | null;
+interface SmokeControlRequest {
+  controlToken: string;
+  fetchImpl: FetchLike;
+  headers: Record<string, string> | undefined;
+  url: string;
 }
+
+type SmokeUserStatus = HostedExecutionUserStatus;
 
 const DEFAULT_SMOKE_STATUS_POLL_INTERVAL_MS = 2_000;
 const DEFAULT_SMOKE_STATUS_TIMEOUT_MS = 60_000;
@@ -83,35 +78,32 @@ export async function runSmokeHostedDeploy(input: {
       throw new Error("HOSTED_EXECUTION_CONTROL_TOKEN is required when HOSTED_EXECUTION_SMOKE_USER_ID is set.");
     }
 
-    const statusUrl = new URL(buildHostedExecutionUserStatusPath(smokeUserId), `${workerBaseUrl}/`).toString();
-    const initialStatus = await readSmokeUserStatus({
+    const statusRequest: SmokeControlRequest = {
       controlToken,
       fetchImpl,
       headers: versionOverrideHeaders,
-      url: statusUrl,
-    });
+      url: new URL(buildHostedExecutionUserStatusPath(smokeUserId), `${workerBaseUrl}/`).toString(),
+    };
+    const initialStatus = await readSmokeUserStatus(statusRequest);
     await invokeManualRun({
-      controlToken,
-      fetchImpl,
-      headers: versionOverrideHeaders,
+      ...statusRequest,
       url: new URL(buildHostedExecutionUserRunPath(smokeUserId), `${workerBaseUrl}/`).toString(),
     });
+    const pollIntervalMs = readPositiveInteger(
+      source.HOSTED_EXECUTION_SMOKE_STATUS_POLL_INTERVAL_MS,
+      DEFAULT_SMOKE_STATUS_POLL_INTERVAL_MS,
+      "HOSTED_EXECUTION_SMOKE_STATUS_POLL_INTERVAL_MS",
+    );
+    const timeoutMs = readPositiveInteger(
+      source.HOSTED_EXECUTION_SMOKE_STATUS_TIMEOUT_MS,
+      DEFAULT_SMOKE_STATUS_TIMEOUT_MS,
+      "HOSTED_EXECUTION_SMOKE_STATUS_TIMEOUT_MS",
+    );
     const finalStatus = await waitForSmokeCompletion({
-      controlToken,
-      fetchImpl,
-      headers: versionOverrideHeaders,
       initialStatus,
-      pollIntervalMs: readPositiveInteger(
-        source.HOSTED_EXECUTION_SMOKE_STATUS_POLL_INTERVAL_MS,
-        DEFAULT_SMOKE_STATUS_POLL_INTERVAL_MS,
-        "HOSTED_EXECUTION_SMOKE_STATUS_POLL_INTERVAL_MS",
-      ),
-      timeoutMs: readPositiveInteger(
-        source.HOSTED_EXECUTION_SMOKE_STATUS_TIMEOUT_MS,
-        DEFAULT_SMOKE_STATUS_TIMEOUT_MS,
-        "HOSTED_EXECUTION_SMOKE_STATUS_TIMEOUT_MS",
-      ),
-      url: statusUrl,
+      pollIntervalMs,
+      statusRequest,
+      timeoutMs,
     });
 
     log(
@@ -144,60 +136,34 @@ async function assertHealth(
   }
 }
 
-async function invokeManualRun(input: {
-  controlToken: string;
-  fetchImpl: FetchLike;
-  headers: Record<string, string> | undefined;
-  url: string;
-}): Promise<void> {
-  const response = await input.fetchImpl(input.url, {
+async function invokeManualRun(input: SmokeControlRequest): Promise<void> {
+  await sendSmokeControlRequest({
+    ...input,
+    action: "Manual smoke run",
     body: JSON.stringify({}),
-    headers: {
-      authorization: `Bearer ${input.controlToken}`,
-      "content-type": "application/json; charset=utf-8",
-      ...input.headers,
-    },
     method: "POST",
   });
-
-  if (!response.ok) {
-    throw new Error(`Manual smoke run failed with HTTP ${response.status}: ${(await response.text()).slice(0, 500)}.`);
-  }
 }
 
-async function readSmokeUserStatus(input: {
-  controlToken: string;
-  fetchImpl: FetchLike;
-  headers: Record<string, string> | undefined;
-  url: string;
-}): Promise<SmokeUserStatus> {
-  const response = await input.fetchImpl(input.url, {
-    headers: {
-      authorization: `Bearer ${input.controlToken}`,
-      ...input.headers,
-    },
+async function readSmokeUserStatus(input: SmokeControlRequest): Promise<SmokeUserStatus> {
+  const response = await sendSmokeControlRequest({
+    ...input,
+    action: "Manual smoke status check",
   });
 
-  if (!response.ok) {
-    throw new Error(`Manual smoke status check failed with HTTP ${response.status}: ${(await response.text()).slice(0, 500)}.`);
-  }
-
-  return parseSmokeUserStatus(await response.json());
+  return parseHostedExecutionUserStatus(await response.json());
 }
 
 async function waitForSmokeCompletion(input: {
-  controlToken: string;
-  fetchImpl: FetchLike;
-  headers: Record<string, string> | undefined;
   initialStatus: SmokeUserStatus;
   pollIntervalMs: number;
+  statusRequest: SmokeControlRequest;
   timeoutMs: number;
-  url: string;
 }): Promise<SmokeUserStatus> {
   const startedAt = Date.now();
 
   while (true) {
-    const status = await readSmokeUserStatus(input);
+    const status = await readSmokeUserStatus(input.statusRequest);
 
     if (didSmokeRunComplete(input.initialStatus, status)) {
       return status;
@@ -218,6 +184,28 @@ async function waitForSmokeCompletion(input: {
 
     await sleep(input.pollIntervalMs);
   }
+}
+
+async function sendSmokeControlRequest(input: SmokeControlRequest & {
+  action: string;
+  body?: string;
+  method?: "GET" | "POST";
+}): Promise<Response> {
+  const response = await input.fetchImpl(input.url, {
+    body: input.body,
+    headers: {
+      authorization: `Bearer ${input.controlToken}`,
+      ...(input.body ? { "content-type": "application/json; charset=utf-8" } : {}),
+      ...input.headers,
+    },
+    method: input.method ?? "GET",
+  });
+
+  if (!response.ok) {
+    throw new Error(`${input.action} failed with HTTP ${response.status}: ${(await response.text()).slice(0, 500)}.`);
+  }
+
+  return response;
 }
 
 function didSmokeRunComplete(
@@ -254,56 +242,6 @@ function hasBundleRefs(status: SmokeUserStatus): boolean {
   return status.bundleRefs.agentState !== null || status.bundleRefs.vault !== null;
 }
 
-function normalizeConfiguredString(value: string | undefined): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
-function parseSmokeUserStatus(value: unknown): SmokeUserStatus {
-  const record = requireRecord(value, "Manual smoke status");
-
-  return {
-    bundleRefs: parseBundleRefs(record.bundleRefs),
-    inFlight: requireBoolean(record.inFlight, "Manual smoke status inFlight"),
-    lastError: readOptionalString(record.lastError, "Manual smoke status lastError"),
-    lastRunAt: readOptionalString(record.lastRunAt, "Manual smoke status lastRunAt"),
-    pendingEventCount: requireNonNegativeInteger(
-      record.pendingEventCount,
-      "Manual smoke status pendingEventCount",
-    ),
-    poisonedEventIds: readStringArray(record.poisonedEventIds, "Manual smoke status poisonedEventIds"),
-    retryingEventId: readOptionalString(record.retryingEventId, "Manual smoke status retryingEventId"),
-  };
-}
-
-function parseBundleRefs(value: unknown): SmokeUserStatus["bundleRefs"] {
-  const record = requireRecord(value, "Manual smoke status bundleRefs");
-
-  return {
-    agentState: parseBundleRef(record.agentState, "Manual smoke status bundleRefs.agentState"),
-    vault: parseBundleRef(record.vault, "Manual smoke status bundleRefs.vault"),
-  };
-}
-
-function parseBundleRef(value: unknown, label: string): SmokeBundleRef | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  const record = requireRecord(value, label);
-
-  return {
-    hash: requireString(record.hash, `${label}.hash`),
-    key: requireString(record.key, `${label}.key`),
-    size: requireNonNegativeInteger(record.size, `${label}.size`),
-    updatedAt: requireString(record.updatedAt, `${label}.updatedAt`),
-  };
-}
-
 function readPositiveInteger(value: string | undefined, fallback: number, label: string): number {
   const normalized = normalizeConfiguredString(value);
 
@@ -320,52 +258,13 @@ function readPositiveInteger(value: string | undefined, fallback: number, label:
   return parsed;
 }
 
-function requireRecord(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`${label} must be a JSON object.`);
-  }
-
-  return value as Record<string, unknown>;
-}
-
-function requireString(value: unknown, label: string): string {
-  if (typeof value !== "string" || value.length === 0) {
-    throw new Error(`${label} must be a non-empty string.`);
-  }
-
-  return value;
-}
-
-function requireBoolean(value: unknown, label: string): boolean {
-  if (typeof value !== "boolean") {
-    throw new Error(`${label} must be a boolean.`);
-  }
-
-  return value;
-}
-
-function requireNonNegativeInteger(value: unknown, label: string): number {
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
-    throw new Error(`${label} must be a non-negative integer.`);
-  }
-
-  return value;
-}
-
-function readOptionalString(value: unknown, label: string): string | null {
-  if (value === null || value === undefined) {
+function normalizeConfiguredString(value: string | undefined): string | null {
+  if (typeof value !== "string") {
     return null;
   }
 
-  return requireString(value, label);
-}
-
-function readStringArray(value: unknown, label: string): string[] {
-  if (!Array.isArray(value)) {
-    throw new Error(`${label} must be an array.`);
-  }
-
-  return value.map((entry, index) => requireString(entry, `${label}[${index}]`));
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 }
 
 function sleep(durationMs: number): Promise<void> {
