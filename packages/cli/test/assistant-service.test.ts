@@ -215,52 +215,6 @@ async function waitForPredicate(
   }
 }
 
-function assertBlockedAssistantResult(
-  result: Awaited<ReturnType<typeof sendAssistantMessage>>,
-  input?: {
-    actionKind?: 'jsonl_append' | 'text_write' | null
-    guardFailureCode?: string | null
-    guardFailurePathPattern?: RegExp
-    guardFailureReason?:
-      | 'invalid_committed_payload'
-      | 'invalid_write_operation_metadata'
-      | null
-    guardFailureTargetPath?: string | null
-    paths?: string[]
-    providerErrorCode?: string | null
-  },
-): void {
-  assert.equal(result.status, 'blocked')
-  assert.equal(result.response, '')
-  assert.equal(result.delivery, null)
-  assert.equal(result.deliveryDeferred, false)
-  assert.equal(result.deliveryIntentId, null)
-  assert.equal(result.deliveryError, null)
-  assert.equal(result.blocked?.code, 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED')
-  assert.equal(result.blocked?.pathCount, input?.paths?.length ?? result.blocked?.paths.length ?? 0)
-  if (input?.paths) {
-    assert.deepEqual(result.blocked?.paths, input.paths)
-  }
-  if (input?.guardFailureReason !== undefined) {
-    assert.equal(result.blocked?.guardFailureReason, input.guardFailureReason)
-  }
-  if (input?.guardFailureCode !== undefined) {
-    assert.equal(result.blocked?.guardFailureCode, input.guardFailureCode)
-  }
-  if (input?.guardFailureTargetPath !== undefined) {
-    assert.equal(result.blocked?.guardFailureTargetPath, input.guardFailureTargetPath)
-  }
-  if (input?.actionKind !== undefined) {
-    assert.equal(result.blocked?.guardFailureActionKind, input.actionKind)
-  }
-  if (input?.providerErrorCode !== undefined) {
-    assert.equal(result.blocked?.providerErrorCode, input.providerErrorCode)
-  }
-  if (input?.guardFailurePathPattern) {
-    assert.match(result.blocked?.guardFailurePath ?? '', input.guardFailurePathPattern)
-  }
-}
-
 test('buildResolveAssistantSessionInput keeps locator shaping and operator default fallbacks stable', () => {
   const defaults = {
     provider: 'codex-cli' as const,
@@ -2233,6 +2187,276 @@ test('sendAssistantMessage injects the first-chat check-in for each later opted-
   assert.match(firstCall?.systemPrompt ?? '', /what name they want you to use/u)
   assert.match(secondCall?.systemPrompt ?? '', /optional first-chat check-in/u)
   assert.match(secondCall?.systemPrompt ?? '', /what tone or response style they want/u)
+})
+
+test('sendAssistantMessage injects the first-chat check-in for first-turn messaging replies', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-first-message-check-in-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-telegram-first-contact',
+    response: 'Hello there.',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+  serviceMocks.deliverAssistantMessageOverBinding.mockResolvedValue({
+    delivery: {
+      channel: 'telegram',
+      target: 'telegram-thread-1',
+      targetKind: 'thread',
+      sentAt: '2026-04-02T03:15:00.000Z',
+      messageLength: 'Hello there.'.length,
+    },
+    deliveryDeduplicated: false,
+    outboxIntentId: 'outbox_telegram_first_contact',
+  })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    channel: 'telegram',
+    participantId: 'telegram-user-1',
+    sourceThreadId: 'telegram-thread-1',
+    threadIsDirect: true,
+    prompt: 'hello sir',
+    includeFirstTurnCheckIn: true,
+    deliverResponse: true,
+  })
+
+  const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  assert.match(firstCall?.systemPrompt ?? '', /optional first-chat check-in/u)
+  assert.match(firstCall?.systemPrompt ?? '', /what name they want you to use/u)
+  assert.match(firstCall?.systemPrompt ?? '', /at most two sentences/u)
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /text, photos, voice memos, Telegram messages, or email/u,
+  )
+})
+
+test('sendAssistantMessage does not inject the first-chat check-in for proactive first-turn messaging deliveries without explicit opt-in', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-proactive-message-no-check-in-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-proactive-message',
+    response: 'Checking in.',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+  serviceMocks.deliverAssistantMessageOverBinding.mockResolvedValue({
+    delivery: {
+      channel: 'telegram',
+      target: 'telegram-thread-proactive',
+      targetKind: 'thread',
+      sentAt: '2026-04-02T03:15:30.000Z',
+      messageLength: 'Checking in.'.length,
+    },
+    deliveryDeduplicated: false,
+    outboxIntentId: 'outbox_telegram_proactive',
+  })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    channel: 'telegram',
+    participantId: 'telegram-user-proactive',
+    sourceThreadId: 'telegram-thread-proactive',
+    threadIsDirect: true,
+    prompt: 'Send a quick hello.',
+    deliverResponse: true,
+  })
+
+  const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /optional first-chat check-in/u)
+  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /what name they want you to use/u)
+})
+
+test('sendAssistantMessage injects the first-chat check-in only on the first messaging reply turn', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-message-first-turn-only-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  serviceMocks.executeAssistantProviderTurn
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-telegram-repeat',
+      response: 'First reply.',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-telegram-repeat',
+      response: 'Second reply.',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+  serviceMocks.deliverAssistantMessageOverBinding.mockResolvedValue({
+    delivery: {
+      channel: 'telegram',
+      target: 'telegram-thread-repeat',
+      targetKind: 'thread',
+      sentAt: '2026-04-02T03:15:45.000Z',
+      messageLength: 'First reply.'.length,
+    },
+    deliveryDeduplicated: false,
+    outboxIntentId: 'outbox_telegram_repeat',
+  })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    channel: 'telegram',
+    participantId: 'telegram-user-repeat',
+    sourceThreadId: 'telegram-thread-repeat',
+    threadIsDirect: true,
+    prompt: 'hello again',
+    includeFirstTurnCheckIn: true,
+    deliverResponse: true,
+  })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    channel: 'telegram',
+    participantId: 'telegram-user-repeat',
+    sourceThreadId: 'telegram-thread-repeat',
+    threadIsDirect: true,
+    prompt: 'another follow-up',
+    includeFirstTurnCheckIn: true,
+    deliverResponse: true,
+  })
+
+  const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
+  assert.match(firstCall?.systemPrompt ?? '', /optional first-chat check-in/u)
+  assert.doesNotMatch(secondCall?.systemPrompt ?? '', /optional first-chat check-in/u)
+})
+
+test('sendAssistantMessage does not inject the first-chat check-in when a messaging thread resumes a saved provider session', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-message-resume-no-check-in-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    channel: 'telegram',
+    participantId: 'telegram-user-resume',
+    sourceThreadId: 'telegram-thread-resume',
+    threadIsDirect: true,
+    provider: 'codex-cli',
+  })
+  const [primaryRoute] = buildAssistantFailoverRoutes({
+    provider: 'codex-cli',
+    providerOptions: resolved.session.providerOptions,
+    defaults: null,
+    codexCommand: null,
+  })
+  await saveAssistantSession(vaultRoot, {
+    ...resolved.session,
+    provider: 'codex-cli',
+    providerBinding: {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-telegram-resume',
+      providerOptions: resolved.session.providerOptions,
+      providerState: {
+        resumeRouteId: primaryRoute!.routeId,
+      },
+    },
+    updatedAt: '2026-04-02T03:17:00.000Z',
+    lastTurnAt: '2026-04-02T03:17:00.000Z',
+    turnCount: 0,
+  })
+
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-telegram-resume',
+    response: 'Resumed reply.',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+  serviceMocks.deliverAssistantMessageOverBinding.mockResolvedValue({
+    delivery: {
+      channel: 'telegram',
+      target: 'telegram-thread-resume',
+      targetKind: 'thread',
+      sentAt: '2026-04-02T03:17:30.000Z',
+      messageLength: 'Resumed reply.'.length,
+    },
+    deliveryDeduplicated: false,
+    outboxIntentId: 'outbox_telegram_resume',
+  })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    channel: 'telegram',
+    participantId: 'telegram-user-resume',
+    sourceThreadId: 'telegram-thread-resume',
+    threadIsDirect: true,
+    prompt: 'picking this back up',
+    includeFirstTurnCheckIn: true,
+    deliverResponse: true,
+  })
+
+  const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  assert.equal(firstCall?.resumeProviderSessionId, 'thread-telegram-resume')
+  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /optional first-chat check-in/u)
+})
+
+test('sendAssistantMessage does not inject the first-chat check-in for cron deliveries', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-message-no-check-in-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-cron-message',
+    response: 'Scheduled update.',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+  serviceMocks.deliverAssistantMessageOverBinding.mockResolvedValue({
+    delivery: {
+      channel: 'telegram',
+      target: 'telegram-thread-cron',
+      targetKind: 'thread',
+      sentAt: '2026-04-02T03:16:00.000Z',
+      messageLength: 'Scheduled update.'.length,
+    },
+    deliveryDeduplicated: false,
+    outboxIntentId: 'outbox_telegram_cron',
+  })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    channel: 'telegram',
+    participantId: 'telegram-user-cron',
+    sourceThreadId: 'telegram-thread-cron',
+    threadIsDirect: true,
+    prompt: 'Daily reminder',
+    deliverResponse: true,
+    turnTrigger: 'automation-cron',
+  })
+
+  const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /optional first-chat check-in/u)
+  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /what name they want you to use/u)
 })
 
 test('sendAssistantMessage clears stale provider session ids when switching providers', async () => {
