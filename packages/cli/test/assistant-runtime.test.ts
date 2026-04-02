@@ -12,6 +12,7 @@ import {
   resolveAssistantStatePaths,
   saveAssistantAutomationState,
 } from '@murphai/assistant-core/assistant-state'
+import { upsertAssistantMemory } from '@murphai/assistant-core/assistant/memory'
 import { listPendingAssistantUsageRecords } from '@murphai/runtime-state/node'
 import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 import { listAssistantTurnReceipts } from '@murphai/assistant-core/assistant/receipts'
@@ -3473,8 +3474,8 @@ test('scanAssistantAutoReplyOnce primes backlog cursors and replies to new inbou
     ),
     true,
   )
-  assert.match(providerCall?.systemPrompt ?? '', /optional onboarding check-in/u)
-  assert.match(providerCall?.systemPrompt ?? '', /what tone or response style they want/u)
+  assert.doesNotMatch(providerCall?.systemPrompt ?? '', /optional onboarding check-in/u)
+  assert.doesNotMatch(providerCall?.systemPrompt ?? '', /what tone or response style they want/u)
   assert.deepEqual(listCalls, [
     {
       vault: vaultRoot,
@@ -3735,7 +3736,7 @@ test('scanAssistantAutoReplyOnce queues hosted auto-replies without sending befo
   assert.equal(snapshot?.recentTurns[0]?.deliveryDisposition, 'queued')
 })
 
-test('scanAssistantAutoReplyOnce injects persisted onboarding answers and asks only for missing items', async () => {
+test('scanAssistantAutoReplyOnce injects persisted assistant memory into auto-reply turns', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-auto-reply-onboarding-memory-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot, { recursive: true })
@@ -3768,12 +3769,20 @@ test('scanAssistantAutoReplyOnce injects persisted onboarding answers and asks o
     },
   })
 
-  await sendAssistantMessage({
-    vault: vaultRoot,
-    alias: 'chat:onboarding-prefill',
-    enableFirstTurnOnboarding: true,
-    prompt: 'Call me Chris. Keep answers concise.',
-  })
+  await Promise.all([
+    upsertAssistantMemory({
+      vault: vaultRoot,
+      text: 'Call the user Chris.',
+      scope: 'long-term',
+      section: 'Identity',
+    }),
+    upsertAssistantMemory({
+      vault: vaultRoot,
+      text: 'Keep answers concise.',
+      scope: 'long-term',
+      section: 'Standing instructions',
+    }),
+  ])
 
   const inboxServices = {
     async list() {
@@ -3827,19 +3836,12 @@ test('scanAssistantAutoReplyOnce injects persisted onboarding answers and asks o
     vault: vaultRoot,
   })
 
-  const providerCall = runtimeMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
-  assert.match(providerCall?.systemPrompt ?? '', /Known onboarding answers/u)
-  assert.match(providerCall?.systemPrompt ?? '', /Name: Call the user Chris\./u)
-  assert.match(providerCall?.systemPrompt ?? '', /Tone\/style: Keep answers concise\./u)
-  assert.match(providerCall?.systemPrompt ?? '', /what goals they want help with/u)
-  assert.doesNotMatch(
-    providerCall?.systemPrompt ?? '',
-    /whether they want to give you a name/u,
-  )
-  assert.doesNotMatch(
-    providerCall?.systemPrompt ?? '',
-    /what tone or response style they want/u,
-  )
+  const providerCall = runtimeMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  assert.match(providerCall?.systemPrompt ?? '', /Core assistant memory:/u)
+  assert.match(providerCall?.systemPrompt ?? '', /Call the user Chris\./u)
+  assert.match(providerCall?.systemPrompt ?? '', /Keep answers concise\./u)
+  assert.doesNotMatch(providerCall?.systemPrompt ?? '', /Known onboarding answers/u)
+  assert.doesNotMatch(providerCall?.systemPrompt ?? '', /what goals they want help with/u)
 })
 
 test('scanAssistantAutoReplyOnce coalesces same-thread email backlog into one reply', async () => {

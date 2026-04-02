@@ -33,7 +33,6 @@ import {
   createAssistantMemoryTurnContextEnv,
   loadAssistantMemoryPromptBlock,
 } from './memory.js'
-import type { AssistantOnboardingSummary } from './onboarding.js'
 import {
   buildRecoveredAssistantProviderBindingSeed as buildRecoveredProviderBindingSeed,
   resolveAssistantProviderResumeKey as readAssistantProviderResumeKey,
@@ -62,7 +61,6 @@ import type { AssistantMessageInput } from './service-contracts.js'
 interface AssistantTurnSharedPlan {
   allowSensitiveHealthContext: boolean
   cliAccess: ReturnType<typeof resolveAssistantCliAccessContext>
-  onboardingSummary: AssistantOnboardingSummary | null
   requestedWorkingDirectory: string
 }
 
@@ -307,10 +305,6 @@ async function resolveAssistantRouteTurnPlan(input: {
         })
       : null
   const shouldInjectBootstrapContext = resumeProviderSessionId === null
-  const shouldInjectFirstTurnOnboarding =
-    input.input.enableFirstTurnOnboarding === true &&
-    input.session.turnCount === 0 &&
-    shouldInjectBootstrapContext
   const conversationMessages = removeTrailingCurrentUserPrompt(
     await loadAssistantConversationMessages({
       limit: 20,
@@ -357,10 +351,6 @@ async function resolveAssistantRouteTurnPlan(input: {
       assistantMemoryToolsAvailable,
       assistantMemoryPrompt,
       channel: input.input.channel ?? input.session.binding.channel,
-      onboardingSummary:
-        shouldInjectFirstTurnOnboarding
-          ? input.sharedPlan.onboardingSummary
-          : null,
     }),
   }
 }
@@ -915,7 +905,6 @@ function buildAssistantSystemPrompt(input: {
   }
   assistantMemoryPrompt: string | null
   channel: string | null
-  onboardingSummary: AssistantOnboardingSummary | null
 }): string {
   return [
     'You are Murph, a local-first health assistant bound to one active vault for this session.',
@@ -947,7 +936,6 @@ function buildAssistantSystemPrompt(input: {
     'Use canonical vault records and structured CLI output as the source of truth for health data. Read raw files directly only when the CLI or bound Murph tools lack the view you need or the user explicitly asks for targeted file-level inspection. Prefer narrow vault text-file reads over broad scans when file inspection is necessary.',
     buildAssistantVaultEvidenceFormattingGuidance(input.channel),
     buildAssistantSystemPromptOutboundReplyGuidance(input.channel),
-    buildAssistantFirstTurnOnboardingGuidanceText(input.onboardingSummary),
     input.assistantMemoryPrompt,
     buildAssistantStateGuidanceText({
       rawCommand: input.cliAccess.rawCommand,
@@ -1000,42 +988,6 @@ function buildAssistantVaultEvidenceFormattingGuidance(
   }
 
   return 'When you reference evidence from the vault, mention relative file paths when practical.'
-}
-
-function buildAssistantFirstTurnOnboardingGuidanceText(
-  summary: AssistantOnboardingSummary | null,
-): string | null {
-  if (!summary || summary.missingSlots.length === 0) {
-    return null
-  }
-
-  const known = [
-    summary.answered.name ? `Name: ${summary.answered.name}` : null,
-    summary.answered.tone ? `Tone/style: ${summary.answered.tone}` : null,
-    summary.answered.goals.length > 0
-      ? `Goals: ${summary.answered.goals.join(' | ')}`
-      : null,
-  ].filter((value): value is string => value !== null)
-  const missing = summary.missingSlots.map((slot) => {
-    switch (slot) {
-      case 'name':
-        return 'whether they want to give you a name'
-      case 'tone':
-        return 'what tone or response style they want'
-      case 'goals':
-        return 'what goals they want help with'
-    }
-  })
-
-  return [
-    known.length > 0
-      ? `Known onboarding answers from prior sessions or the current message:\n- ${known.join('\n- ')}`
-      : null,
-    `On the first reply of a brand-new interactive chat session, include one short optional onboarding check-in only for the still-missing items:\n- ${missing.join('\n- ')}`,
-    'If the first user message already asks for something concrete, answer that request first and then add the optional check-in as a brief closing note.',
-    'Ask only about the missing items above, make it clear they are optional, and skip anything the user already told you.',
-    'Stop asking once all onboarding items are filled. Do not repeat answered items or turn the check-in into a longer interview.',
-  ].join('\n\n')
 }
 
 function buildAssistantSystemPromptOutboundReplyGuidance(channel: string | null): string | null {
