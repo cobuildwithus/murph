@@ -43,7 +43,6 @@ required_files=(
   "agent-docs/prompts/simplify.md"
   "agent-docs/prompts/task-finish-review.md"
   "agent-docs/generated/README.md"
-  "agent-docs/generated/doc-inventory.md"
   "agent-docs/generated/doc-gardening-report.md"
   "agent-docs/exec-plans/active/README.md"
   "agent-docs/exec-plans/active/COORDINATION_LEDGER.md"
