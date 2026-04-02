@@ -6,7 +6,7 @@ export type {
   AssistantProviderCapabilities,
   AssistantProviderDefinition,
   AssistantProviderProgressEvent,
-  AssistantProviderTraits,
+  AssistantProviderRuntime,
   AssistantProviderTurnAttemptResult,
   AssistantProviderTurnExecutionInput,
   AssistantProviderTurnExecutionResult,
@@ -26,7 +26,6 @@ export {
   listAssistantProviders,
   resolveAssistantProviderCapabilities,
   resolveAssistantProviderLabel,
+  resolveAssistantProviderRuntime,
   resolveAssistantProviderStaticModels,
-  resolveAssistantProviderTraits,
-  shouldUseAssistantLocalTranscriptContext,
 } from './providers/registry.js'

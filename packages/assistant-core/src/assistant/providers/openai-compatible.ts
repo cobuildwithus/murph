@@ -32,17 +32,16 @@ const MODEL_DISCOVERY_TIMEOUT_MS = 2_500
 
 export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
   capabilities: {
-    supportsHostToolRuntime: true,
-    supportsDirectCliExecution: false,
     supportsModelDiscovery: true,
+    supportsNativeResume: true,
     supportsReasoningEffort: false,
     supportsRichUserMessageContent: true,
   },
-  traits: {
-    resumeKeyMode: 'none',
-    sessionMode: 'stateless',
-    transcriptContextMode: 'local-transcript',
-    workspaceMode: 'none',
+  resolveRuntime(config) {
+    void config
+    return {
+      requiresCanonicalWriteGuard: false,
+    }
   },
   async discoverModels(input) {
     const providerConfig = input.config

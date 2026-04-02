@@ -2858,7 +2858,6 @@ interface RunAssistantPromptTurnInput {
   session: AssistantSession
   setEntries: React.Dispatch<React.SetStateAction<InkChatEntry[]>>
   setStatus: React.Dispatch<React.SetStateAction<AssistantChatStatus | null>>
-  transcriptSnapshot: NonNullable<AssistantChatInput['transcriptSnapshot']>
   turnTracePrefix: string
 }
 
@@ -3029,26 +3028,6 @@ function resolveAssistantSessionTurnSelection(
   })
 }
 
-function buildAssistantTranscriptSnapshotFromInkEntries(input: {
-  entries: readonly InkChatEntry[]
-  pendingPrompt: string
-}): NonNullable<AssistantChatInput['transcriptSnapshot']> {
-  const transcriptEntries = input.entries.flatMap((entry) =>
-    entry.kind === 'assistant' || entry.kind === 'error' || entry.kind === 'user'
-      ? [{
-          kind: entry.kind,
-          text: entry.text,
-        }]
-      : [],
-  )
-  const lastEntry = transcriptEntries.at(-1)
-  if (lastEntry?.kind === 'user' && lastEntry.text === input.pendingPrompt) {
-    return transcriptEntries.slice(0, -1)
-  }
-
-  return transcriptEntries
-}
-
 export function resolveAssistantSelectionAfterSessionSync(input: {
   currentSelection: AssistantTurnSelection
   previousSession: AssistantSession
@@ -3124,8 +3103,6 @@ export async function runAssistantPromptTurn(
       onTraceEvent: handleTraceEvent,
       prompt: input.prompt,
       reasoningEffort: input.activeReasoningEffort,
-      sessionSnapshot: input.session,
-      transcriptSnapshot: input.transcriptSnapshot,
       showThinkingTraces: true,
     })
 
@@ -3368,10 +3345,6 @@ function useAssistantChatController(
   }
 
   const startPromptTurn = (prompt: string) => {
-    const transcriptSnapshot = buildAssistantTranscriptSnapshotFromInkEntries({
-      entries: entriesRef.current,
-      pendingPrompt: prompt,
-    })
     setEntries((previous: InkChatEntry[]) => [
       ...previous,
       {
@@ -3401,7 +3374,6 @@ function useAssistantChatController(
         session: latestSessionRef.current,
         setEntries,
         setStatus,
-        transcriptSnapshot,
         turnTracePrefix,
       })
 

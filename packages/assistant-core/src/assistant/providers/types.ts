@@ -41,18 +41,14 @@ export interface AssistantModelDiscoveryResult {
 }
 
 export interface AssistantProviderCapabilities {
-  supportsHostToolRuntime: boolean
-  supportsDirectCliExecution: boolean
   supportsModelDiscovery: boolean
+  supportsNativeResume: boolean
   supportsReasoningEffort: boolean
   supportsRichUserMessageContent: boolean
 }
 
-export interface AssistantProviderTraits {
-  resumeKeyMode: 'none' | 'provider-session-id'
-  sessionMode: 'stateful' | 'stateless'
-  transcriptContextMode: 'local-transcript' | 'provider-session'
-  workspaceMode: 'direct-cli' | 'none'
+export interface AssistantProviderRuntime {
+  requiresCanonicalWriteGuard: boolean
 }
 
 export interface AssistantProviderProgressEvent extends CodexProgressEvent {}
@@ -71,7 +67,6 @@ export interface AssistantProviderTurnInput {
   apiKeyEnv?: string | null
   baseUrl?: string | null
   codexCommand?: string | null
-  configOverrides?: readonly string[]
   continuityContext?: string | null
   conversationMessages?: ReadonlyArray<{
     content: string | AssistantUserMessageContentPart[]
@@ -103,7 +98,6 @@ export interface AssistantProviderTurnInput {
 
 export interface AssistantProviderTurnExecutionInput {
   abortSignal?: AbortSignal
-  configOverrides?: readonly string[]
   continuityContext?: string | null
   conversationMessages?: ReadonlyArray<{
     content: string | AssistantUserMessageContentPart[]
@@ -172,11 +166,11 @@ export type AssistantProviderTurnAttemptResult =
 
 export interface AssistantProviderDefinition {
   capabilities: AssistantProviderCapabilities
-  traits: AssistantProviderTraits
   discoverModels(input: {
     config: AssistantProviderConfig
     env?: NodeJS.ProcessEnv
   }): Promise<AssistantModelDiscoveryResult>
+  resolveRuntime(config: AssistantProviderConfig): AssistantProviderRuntime
   executeTurn(
     input: AssistantProviderTurnExecutionInput,
   ): Promise<AssistantProviderTurnAttemptResult>

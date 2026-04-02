@@ -26,18 +26,16 @@ test('buildAssistantCliGuidanceText tells the assistant to escalate from help to
   const guidance = buildAssistantCliGuidanceText({
     rawCommand: 'vault-cli',
     setupCommand: 'murph',
-  }, {
-    supportsDirectCliExecution: true,
   })
 
-  assert.match(guidance, /Direct Murph CLI execution is available in this session/u)
+  assert.match(guidance, /canonical Murph operator\/data-plane surface/u)
   assert.match(guidance, /vault-cli <command> --help/u)
   assert.match(guidance, /vault-cli <command> --schema --format json/u)
   assert.match(guidance, /vault-cli --llms/u)
   assert.match(guidance, /vault-cli --llms-full/u)
   assert.match(guidance, /broad CLI discovery/u)
   assert.match(guidance, /Do not edit canonical vault files such as `vault\.json`, `CORE\.md`, `ledger\/\*\*`, `bank\/\*\*`, or `raw\/\*\*` directly/u)
-  assert.match(guidance, /use the matching `vault-cli` write surface/u)
+  assert.match(guidance, /use the matching Murph write surface/u)
   assert.match(guidance, /assistant self-target list/u)
   assert.match(guidance, /assistant self-target show <channel>/u)
   assert.match(guidance, /phone number, Telegram chat\/thread, email address, or AgentMail identity/u)
@@ -105,20 +103,14 @@ test('buildAssistantCliGuidanceText falls back to exact command suggestions when
   const guidance = buildAssistantCliGuidanceText({
     rawCommand: 'vault-cli',
     setupCommand: 'murph',
-  }, {
-    supportsDirectCliExecution: false,
   })
 
   assert.match(
     guidance,
-    /does not expose direct CLI execution/u,
+    /prefer the bound assistant tools first and otherwise map the request onto the canonical CLI surface instead of improvising from raw files/u,
   )
   assert.match(
     guidance,
-    /give them the exact `vault-cli \.\.\.` command to run or switch to a Codex-backed Murph chat session/u,
-  )
-  assert.match(
-    guidance,
-    /instead of pretending you already ran it/u,
+    /instead of pretending it already ran/u,
   )
 })

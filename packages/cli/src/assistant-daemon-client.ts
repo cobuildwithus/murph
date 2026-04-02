@@ -61,9 +61,7 @@ export function canUseAssistantDaemonForMessage(
     input.abortSignal === undefined &&
     input.executionContext === undefined &&
     input.onProviderEvent === undefined &&
-    input.onTraceEvent === undefined &&
-    input.sessionSnapshot === undefined &&
-    input.transcriptSnapshot === undefined
+    input.onTraceEvent === undefined
   )
 }
 
@@ -578,14 +576,12 @@ function serializeAssistantMessageInput(
   input: AssistantMessageInput,
 ): Omit<
   AssistantMessageInput,
-  'abortSignal' | 'onProviderEvent' | 'onTraceEvent' | 'sessionSnapshot' | 'transcriptSnapshot'
+  'abortSignal' | 'onProviderEvent' | 'onTraceEvent'
 > {
   const {
     abortSignal: _abortSignal,
     onProviderEvent: _onProviderEvent,
     onTraceEvent: _onTraceEvent,
-    sessionSnapshot: _sessionSnapshot,
-    transcriptSnapshot: _transcriptSnapshot,
     ...serializableInput
   } = input
   return serializableInput

@@ -63,9 +63,6 @@ import type {
 } from './service-contracts.js'
 import { withAssistantTurnLock } from './turn-lock.js'
 
-// Bump this when changing the durable Codex bootstrap prompt text so existing
-// Codex provider sessions re-bootstrap cleanly on their next turn.
-export const CURRENT_CODEX_PROMPT_VERSION = '2026-03-30.1'
 export { buildResolveAssistantSessionInput } from './session-resolution.js'
 
 async function persistUserTurn(
@@ -175,7 +172,6 @@ export async function sendAssistantMessageLocal(
     vault: input.vault,
     run: async () => {
       const resolved = await resolveAssistantMessageSession({
-        currentCodexPromptVersion: CURRENT_CODEX_PROMPT_VERSION,
         defaults,
         message: input,
       })
@@ -210,7 +206,6 @@ export async function sendAssistantMessageLocal(
       try {
         userTurn = await persistUserTurn(input, resolved, sharedPlan, receipt.turnId)
         const providerOutcome = await executeProviderTurnWithRecovery({
-          currentCodexPromptVersion: CURRENT_CODEX_PROMPT_VERSION,
           input,
           routes,
           plan: sharedPlan,
@@ -241,7 +236,6 @@ export async function sendAssistantMessageLocal(
           vault: input.vault,
         })
         const session = await finalizeAssistantTurnArtifacts({
-          currentCodexPromptVersion: CURRENT_CODEX_PROMPT_VERSION,
           input,
           plan: sharedPlan,
           providerResult,

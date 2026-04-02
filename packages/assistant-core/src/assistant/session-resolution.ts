@@ -1,28 +1,14 @@
 import type {
   AssistantSandbox,
-  AssistantSession,
 } from '../assistant-cli-contracts.js'
-import { resolveAssistantProviderTraits } from '../assistant-provider.js'
 import type { AssistantOperatorDefaults } from '../operator-config.js'
 import { resolveAssistantProviderDefaults } from '../operator-config.js'
-import { VaultCliError } from '../vault-cli-errors.js'
 import {
   compactAssistantProviderConfigInput,
   mergeAssistantProviderConfigs,
   mergeAssistantProviderConfigsForProvider,
 } from './provider-config.js'
-import {
-  normalizeAssistantSessionSnapshot,
-  readAssistantCodexPromptVersion,
-  readAssistantProviderBinding,
-  writeAssistantCodexPromptVersion,
-} from './provider-state.js'
-import {
-  isAssistantSessionNotFoundError,
-  resolveAssistantSession,
-  restoreAssistantSessionSnapshot,
-  type ResolveAssistantSessionInput,
-} from './store.js'
+import { resolveAssistantSession, type ResolveAssistantSessionInput } from './store.js'
 import type {
   AssistantMessageInput,
   AssistantSessionResolutionFields,
@@ -88,14 +74,8 @@ export function buildResolveAssistantSessionInput(
           : undefined
 
   const resolvedSandbox = clampVaultBoundAssistantSandbox(providerConfig.sandbox)
-  const defaultSandbox =
-    providerConfig.provider === 'openai-compatible'
-      ? resolvedSandbox ?? null
-      : resolvedSandbox ?? 'workspace-write'
-  const defaultApprovalPolicy =
-    providerConfig.provider === 'openai-compatible'
-      ? providerConfig.approvalPolicy ?? null
-      : providerConfig.approvalPolicy ?? 'on-request'
+  const defaultSandbox = resolvedSandbox ?? 'workspace-write'
+  const defaultApprovalPolicy = providerConfig.approvalPolicy ?? 'on-request'
 
   return {
     vault: input.vault,
@@ -185,114 +165,11 @@ function readAssistantSessionResolutionDirectness(
 }
 
 export async function resolveAssistantSessionForMessage(input: {
-  currentCodexPromptVersion: string
   defaults: AssistantOperatorDefaults | null
   message: AssistantMessageInput
 }) {
-  const sessionInput = buildResolveAssistantSessionInput(
+  return resolveAssistantSession(buildResolveAssistantSessionInput(
     input.message,
     input.defaults,
-  )
-
-  try {
-    return await resolveAssistantSession(sessionInput)
-  } catch (error) {
-    const restored = await restoreMissingAssistantSessionSnapshot({
-      currentCodexPromptVersion: input.currentCodexPromptVersion,
-      error,
-      message: input.message,
-      sessionInput,
-    })
-    if (!restored) {
-      throw error
-    }
-
-    return resolveAssistantSession({
-      ...sessionInput,
-      createIfMissing: false,
-    })
-  }
-}
-
-async function restoreMissingAssistantSessionSnapshot(input: {
-  currentCodexPromptVersion: string
-  error: unknown
-  message: AssistantMessageInput
-  sessionInput: ResolveAssistantSessionInput
-}): Promise<boolean> {
-  if (!isAssistantSessionNotFoundError(input.error)) {
-    return false
-  }
-
-  const requestedSessionId =
-    input.sessionInput.conversation?.sessionId ?? input.sessionInput.sessionId
-  const snapshot = input.message.sessionSnapshot
-  if (
-    typeof requestedSessionId !== 'string' ||
-    requestedSessionId.trim().length === 0 ||
-    !snapshot ||
-    snapshot.sessionId !== requestedSessionId
-  ) {
-    return false
-  }
-
-  const normalizedSnapshot = normalizeRestoredAssistantSessionSnapshot({
-    currentCodexPromptVersion: input.currentCodexPromptVersion,
-    snapshot,
-  })
-  const transcriptSnapshot = input.message.transcriptSnapshot ?? null
-  const transcriptExists = readAssistantSessionNotFoundTranscriptExists(input.error)
-
-  if (
-    resolveAssistantProviderTraits(normalizedSnapshot.provider).transcriptContextMode ===
-      'local-transcript' &&
-    transcriptExists !== true &&
-    transcriptSnapshot === null
-  ) {
-    throw new VaultCliError(
-      'ASSISTANT_SESSION_TRANSCRIPT_RESTORE_REQUIRED',
-      'Restoring this transcript-backed assistant session requires a local transcript snapshot. Resume from the original live chat or start a new session.',
-    )
-  }
-
-  await restoreAssistantSessionSnapshot({
-    vault: input.message.vault,
-    session: normalizedSnapshot,
-    transcriptEntries: transcriptExists === true ? null : transcriptSnapshot,
-  })
-  return true
-}
-
-function normalizeRestoredAssistantSessionSnapshot(input: {
-  currentCodexPromptVersion: string
-  snapshot: AssistantSession
-}): AssistantSession {
-  const normalized = normalizeAssistantSessionSnapshot(input.snapshot)
-  const providerBinding = readAssistantProviderBinding(normalized)
-  if (providerBinding?.provider !== 'codex-cli') {
-    return normalized
-  }
-
-  return {
-    ...normalized,
-    providerBinding: writeAssistantCodexPromptVersion(
-      providerBinding,
-      readAssistantCodexPromptVersion(normalized) ?? input.currentCodexPromptVersion,
-    ),
-  }
-}
-
-function readAssistantSessionNotFoundTranscriptExists(error: unknown): boolean | null {
-  if (!error || typeof error !== 'object' || !('context' in error)) {
-    return null
-  }
-
-  const context = (error as { context?: unknown }).context
-  if (!context || typeof context !== 'object' || Array.isArray(context)) {
-    return null
-  }
-
-  return typeof (context as { transcriptExists?: unknown }).transcriptExists === 'boolean'
-    ? (context as { transcriptExists: boolean }).transcriptExists
-    : null
+  ))
 }

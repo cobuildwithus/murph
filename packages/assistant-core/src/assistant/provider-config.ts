@@ -11,39 +11,20 @@ import {
   readAssistantEnvString,
 } from './shared.js'
 
-export interface AssistantCodexProviderConfig {
+export interface AssistantProviderConfig {
   approvalPolicy: AssistantApprovalPolicy | null
-  apiKeyEnv: null
-  baseUrl: null
+  apiKeyEnv: string | null
+  baseUrl: string | null
   codexCommand: string | null
-  headers: null
+  headers: Record<string, string> | null
   model: string | null
   oss: boolean
   profile: string | null
-  provider: 'codex-cli'
-  providerName: null
+  provider: AssistantChatProvider
+  providerName: string | null
   reasoningEffort: string | null
   sandbox: AssistantSandbox | null
 }
-
-export interface AssistantOpenAICompatibleProviderConfig {
-  approvalPolicy: null
-  apiKeyEnv: string | null
-  baseUrl: string | null
-  codexCommand: null
-  headers: Record<string, string> | null
-  model: string | null
-  oss: false
-  profile: null
-  provider: 'openai-compatible'
-  providerName: string | null
-  reasoningEffort: null
-  sandbox: null
-}
-
-export type AssistantProviderConfig =
-  | AssistantCodexProviderConfig
-  | AssistantOpenAICompatibleProviderConfig
 
 export type AssistantProviderConfigInput = {
   approvalPolicy?: AssistantApprovalPolicy | null

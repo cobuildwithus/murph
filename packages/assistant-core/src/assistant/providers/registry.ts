@@ -13,7 +13,7 @@ import type {
   AssistantProviderAttemptMetadata,
   AssistantProviderCapabilities,
   AssistantProviderDefinition,
-  AssistantProviderTraits,
+  AssistantProviderRuntime,
   AssistantProviderTurnAttemptResult,
   AssistantProviderTurnExecutionInput,
   AssistantProviderTurnExecutionResult,
@@ -56,14 +56,6 @@ export function resolveAssistantProviderCapabilities(
   }
 }
 
-export function resolveAssistantProviderTraits(
-  provider: AssistantChatProvider,
-): AssistantProviderTraits {
-  return {
-    ...resolveAssistantProviderDefinition(provider).traits,
-  }
-}
-
 export function resolveAssistantProviderLabel(
   input: AssistantProviderConfigInput | null | undefined,
 ): string {
@@ -85,6 +77,15 @@ export async function discoverAssistantProviderModels(input: {
     config: normalized,
     env: input.env,
   })
+}
+
+export function resolveAssistantProviderRuntime(
+  input: AssistantProviderConfigInput | null | undefined,
+): AssistantProviderRuntime {
+  const normalized = normalizeAssistantProviderConfig(input)
+  return resolveAssistantProviderDefinition(normalized.provider).resolveRuntime(
+    normalized,
+  )
 }
 
 export function resolveAssistantProviderStaticModels(
@@ -130,7 +131,6 @@ export async function executeAssistantProviderTurn(
 
   return await executeAssistantProviderTurnWithDefinition({
     abortSignal: input.abortSignal,
-    configOverrides: input.configOverrides,
     continuityContext: input.continuityContext,
     conversationMessages: input.conversationMessages,
     env: input.env,
@@ -156,7 +156,6 @@ export async function executeAssistantProviderTurnAttempt(
 
   return await executeAssistantProviderTurnAttemptWithDefinition({
     abortSignal: input.abortSignal,
-    configOverrides: input.configOverrides,
     continuityContext: input.continuityContext,
     conversationMessages: input.conversationMessages,
     env: input.env,
@@ -175,15 +174,6 @@ export async function executeAssistantProviderTurnAttempt(
   })
 }
 
-export function shouldUseAssistantLocalTranscriptContext(
-  provider: AssistantChatProvider,
-): boolean {
-  return (
-    resolveAssistantProviderDefinition(provider).traits.transcriptContextMode ===
-    'local-transcript'
-  )
-}
-
 export { createCatalogModel }
 export { ASSISTANT_PROVIDER_DEFINITIONS }
 export type {
@@ -193,7 +183,7 @@ export type {
   AssistantProviderAttemptMetadata,
   AssistantProviderCapabilities,
   AssistantProviderDefinition,
-  AssistantProviderTraits,
+  AssistantProviderRuntime,
   AssistantProviderTurnAttemptResult,
   AssistantProviderTurnExecutionInput,
   AssistantProviderTurnExecutionResult,

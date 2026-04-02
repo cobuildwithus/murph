@@ -6,9 +6,6 @@ import type {
 } from '../assistant-cli-contracts.js'
 import {
   buildAssistantCliGuidanceText,
-  buildAssistantCronMcpConfig,
-  buildAssistantMemoryMcpConfig,
-  buildAssistantStateMcpConfig,
   resolveAssistantCliAccessContext,
 } from '../assistant-cli-access.js'
 import {
@@ -17,7 +14,7 @@ import {
 import {
   executeAssistantProviderTurnAttempt,
   resolveAssistantProviderCapabilities,
-  resolveAssistantProviderTraits,
+  resolveAssistantProviderRuntime,
   type AssistantProviderTurnExecutionResult,
 } from '../assistant-provider.js'
 import {
@@ -43,23 +40,16 @@ import {
 import type { AssistantOnboardingSummary } from './onboarding.js'
 import {
   buildRecoveredAssistantProviderBindingSeed as buildRecoveredProviderBindingSeed,
-  hashAssistantProviderWorkingDirectory as hashProviderWorkingDirectory,
   resolveAssistantProviderResumeKey as readAssistantProviderResumeKey,
   resolveAssistantRouteResumeBinding as resolveAssistantResumeBinding,
-  shouldResumeAssistantProviderRecovery as shouldResumeProviderRecovery,
 } from './provider-binding.js'
 import {
   attachRecoveredAssistantSession,
-  clearAssistantProviderRouteRecovery,
-  readAssistantProviderRouteRecovery,
-  readRecoveredAssistantProviderBindingForRoute,
   recoverAssistantSessionAfterProviderFailure,
 } from './provider-turn-recovery.js'
 import {
-  readAssistantCodexPromptVersion,
   readAssistantProviderBinding,
 } from './provider-state.js'
-import { resolveAssistantProviderWorkingDirectory } from './provider-workspace.js'
 import {
   listAssistantTranscriptEntries,
 } from './store.js'
@@ -67,7 +57,6 @@ import {
   buildAssistantTranscriptDistillationContinuityText,
   readLatestAssistantTranscriptDistillation,
 } from './transcript-distillation.js'
-import { shouldUseAssistantOpenAIResponsesApi } from './provider-config.js'
 import {
   appendAssistantTurnReceiptEvent,
 } from './turns.js'
@@ -83,7 +72,6 @@ interface AssistantTurnSharedPlan {
 
 interface AssistantRouteTurnPlan {
   cliEnv: NodeJS.ProcessEnv
-  configOverrides?: readonly string[]
   conversationMessages?: ReadonlyArray<{
     content: string
     role: 'assistant' | 'user'
@@ -109,12 +97,8 @@ export interface ExecutedAssistantProviderTurnResult
 type AssistantProviderFailoverState = Awaited<
   ReturnType<typeof readAssistantFailoverState>
 >
-type AssistantProviderRouteRecoveryState = Awaited<
-  ReturnType<typeof readAssistantProviderRouteRecovery>
->
 
 interface AssistantProviderTurnExecutionPlan {
-  currentCodexPromptVersion: string
   input: AssistantMessageInput
   memoryTurnEnv: NodeJS.ProcessEnv
   primaryRoute: ResolvedAssistantFailoverRoute | null
@@ -138,27 +122,23 @@ type AssistantProviderAttemptOutcome =
       kind: 'blocked'
       error: unknown
       failoverState: AssistantProviderFailoverState
-      providerRecovery: AssistantProviderRouteRecoveryState
       session: AssistantSession
     }
   | {
       kind: 'failed_terminal'
       error: unknown
       failoverState: AssistantProviderFailoverState
-      providerRecovery: AssistantProviderRouteRecoveryState
       session: AssistantSession
     }
   | {
       kind: 'retry_next_route'
       error: unknown
       failoverState: AssistantProviderFailoverState
-      providerRecovery: AssistantProviderRouteRecoveryState
       session: AssistantSession
     }
   | {
       kind: 'succeeded'
       failoverState: AssistantProviderFailoverState
-      providerRecovery: AssistantProviderRouteRecoveryState
       result: ExecutedAssistantProviderTurnResult
     }
 
@@ -179,7 +159,6 @@ export type AssistantProviderTurnRecoveryOutcome =
     }
 
 export async function executeProviderTurnWithRecovery(input: {
-  currentCodexPromptVersion: string
   input: AssistantMessageInput
   plan: AssistantTurnSharedPlan
   resolvedSession: AssistantSession
@@ -189,11 +168,6 @@ export async function executeProviderTurnWithRecovery(input: {
 }): Promise<AssistantProviderTurnRecoveryOutcome> {
   const executionPlan = buildAssistantProviderTurnExecutionPlan(input)
   let failoverState = await readAssistantFailoverState(input.input.vault)
-  let providerRecovery: AssistantProviderRouteRecoveryState =
-    await readAssistantProviderRouteRecovery(
-      input.input.vault,
-      input.resolvedSession.sessionId,
-    )
   const attemptedRouteIds = new Set<string>()
   let lastRetriableFailure: unknown = null
   let nextAttemptCount = 1
@@ -204,7 +178,6 @@ export async function executeProviderTurnWithRecovery(input: {
       attemptedRouteIds,
       executionPlan,
       failoverState,
-      providerRecovery,
       session: input.resolvedSession,
     })
     if (!attemptPlan) {
@@ -218,11 +191,9 @@ export async function executeProviderTurnWithRecovery(input: {
       attemptPlan,
       executionPlan,
       failoverState,
-      providerRecovery,
     })
 
     failoverState = attemptOutcome.failoverState
-    providerRecovery = attemptOutcome.providerRecovery
 
     switch (attemptOutcome.kind) {
       case 'succeeded':
@@ -264,7 +235,6 @@ export async function executeProviderTurnWithRecovery(input: {
 }
 
 function buildAssistantProviderTurnExecutionPlan(input: {
-  currentCodexPromptVersion: string
   input: AssistantMessageInput
   plan: AssistantTurnSharedPlan
   resolvedSession: AssistantSession
@@ -283,7 +253,6 @@ function buildAssistantProviderTurnExecutionPlan(input: {
   })
 
   return {
-    currentCodexPromptVersion: input.currentCodexPromptVersion,
     input: input.input,
     memoryTurnEnv: createAssistantMemoryTurnContextEnv({
       allowSensitiveHealthContext: input.plan.allowSensitiveHealthContext,
@@ -300,16 +269,11 @@ function buildAssistantProviderTurnExecutionPlan(input: {
   }
 }
 
-function providerSupportsHostToolRuntime(provider: AssistantChatProvider): boolean {
-  return resolveAssistantProviderCapabilities(provider).supportsHostToolRuntime
-}
-
 async function resolveAssistantProviderAttemptPlan(input: {
   attemptCount: number
   attemptedRouteIds: ReadonlySet<string>
   executionPlan: AssistantProviderTurnExecutionPlan
   failoverState: AssistantProviderFailoverState
-  providerRecovery: AssistantProviderRouteRecoveryState
   session: AssistantSession
 }): Promise<AssistantProviderAttemptPlan | null> {
   const prioritizedRoutes = prioritizeAssistantFailoverRoutes(
@@ -332,9 +296,7 @@ async function resolveAssistantProviderAttemptPlan(input: {
     remainingRoutes: prioritizedRoutes.slice(1),
     route,
     routePlan: await resolveAssistantRouteTurnPlan({
-      currentCodexPromptVersion: input.executionPlan.currentCodexPromptVersion,
       input: input.executionPlan.input,
-      providerRecovery: input.providerRecovery,
       route,
       session: input.session,
       sharedPlan: input.executionPlan.sharedPlan,
@@ -345,146 +307,61 @@ async function resolveAssistantProviderAttemptPlan(input: {
 }
 
 async function resolveAssistantRouteTurnPlan(input: {
-  currentCodexPromptVersion: string
   input: AssistantMessageInput
-  providerRecovery: AssistantProviderRouteRecoveryState
   route: ResolvedAssistantFailoverRoute
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
   toolCatalog: ReturnType<typeof createDefaultAssistantToolCatalog>
 }): Promise<AssistantRouteTurnPlan> {
-  const routeTraits = resolveAssistantProviderTraits(input.route.provider)
-  const supportsDirectCliExecution = routeTraits.workspaceMode === 'direct-cli'
-  const workingDirectory = supportsDirectCliExecution
-    ? await resolveAssistantProviderWorkingDirectory({
-        requestedWorkingDirectory: input.sharedPlan.requestedWorkingDirectory,
-        sessionId: input.session.sessionId,
-        vault: input.input.vault,
-      })
-    : input.sharedPlan.requestedWorkingDirectory
-  const workingDirectoryKey =
-    supportsDirectCliExecution
-      ? hashProviderWorkingDirectory(workingDirectory)
-      : null
+  const workingDirectory = input.sharedPlan.requestedWorkingDirectory
   const activeProviderBinding = readAssistantProviderBinding(input.session)
-  const recoveredProviderBinding = shouldResumeProviderRecovery(
-    input.input.turnTrigger ?? 'manual-ask',
-  )
-    ? readRecoveredAssistantProviderBindingForRoute({
-        provider: input.route.provider,
-        recovery: input.providerRecovery,
-        routeId: input.route.routeId,
-        session: input.session,
-      })
-    : null
   const resumeProviderBinding = resolveAssistantResumeBinding({
     provider: input.route.provider,
-    providerOptions: input.route.providerOptions,
-    recoveredBinding: recoveredProviderBinding,
     routeId: input.route.routeId,
     sessionBinding: activeProviderBinding,
-    workingDirectoryKey,
   })
-  const usesOpenAIResponsesApi = shouldUseAssistantOpenAIResponsesApi({
-    provider: input.route.provider,
-    ...input.route.providerOptions,
-  })
-  const shouldResetCodexProviderSession =
-    shouldResetCodexProviderSessionForPromptVersion({
-      binding: resumeProviderBinding,
-      currentCodexPromptVersion: input.currentCodexPromptVersion,
-      provider: input.route.provider,
-    })
-  const resumeKeyBinding = resumeProviderBinding
   const resumeProviderSessionId =
-    shouldResetCodexProviderSession
-      ? null
-      : readAssistantProviderResumeKey({
-          binding: resumeKeyBinding,
+    resolveAssistantProviderCapabilities(input.route.provider).supportsNativeResume
+      ? readAssistantProviderResumeKey({
+          binding: resumeProviderBinding,
           provider: input.route.provider,
         })
-  const shouldInjectBootstrapContext =
-    usesOpenAIResponsesApi
-      ? resumeProviderSessionId === null || shouldResetCodexProviderSession
-      : (
-          routeTraits.sessionMode === 'stateless' ||
-          resumeProviderSessionId === null ||
-          shouldResetCodexProviderSession
-        )
+      : null
+  const shouldInjectBootstrapContext = resumeProviderSessionId === null
   const shouldInjectFirstTurnOnboarding =
     input.input.enableFirstTurnOnboarding === true &&
     input.session.turnCount === 0 &&
     shouldInjectBootstrapContext
-  const shouldLoadConversationMessages =
-    routeTraits.transcriptContextMode === 'local-transcript' &&
-    (!usesOpenAIResponsesApi || resumeProviderSessionId === null)
-  const conversationMessages =
-    shouldLoadConversationMessages
-      ? removeTrailingCurrentUserPrompt(
-          await loadAssistantConversationMessages({
-            limit: 20,
-            sessionId: input.session.sessionId,
-            vault: input.input.vault,
-          }),
-          input.input.prompt,
-        )
-      : undefined
-  const shouldBuildSystemPrompt =
-    shouldInjectBootstrapContext || usesOpenAIResponsesApi
-  const assistantMemoryPrompt = shouldBuildSystemPrompt
+  const conversationMessages = removeTrailingCurrentUserPrompt(
+    await loadAssistantConversationMessages({
+      limit: 20,
+      sessionId: input.session.sessionId,
+      vault: input.input.vault,
+    }),
+    input.input.prompt,
+  )
+  const assistantMemoryPrompt =
+    true
     ? await loadAssistantMemoryPromptBlock({
         includeSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
         vault: input.input.vault,
       })
     : null
-  const transcriptDistillation =
-    shouldInjectBootstrapContext && !usesOpenAIResponsesApi
-      ? await readLatestAssistantTranscriptDistillation(
-          input.input.vault,
-          input.session.sessionId,
-        )
-      : null
+  const transcriptDistillation = await readLatestAssistantTranscriptDistillation(
+    input.input.vault,
+    input.session.sessionId,
+  )
   const continuityContext = [
     buildAssistantTranscriptDistillationContinuityText(transcriptDistillation),
-    shouldResetCodexProviderSession
-      ? await buildCodexPromptResetContinuityContext({
-          sessionId: input.session.sessionId,
-          vault: input.input.vault,
-        })
-      : null,
   ]
     .filter((part): part is string => Boolean(part))
     .join('\n\n') || null
-  const stateMcpConfig = buildAssistantStateMcpConfig(
-    workingDirectory,
-  )
-  const memoryMcpConfig = buildAssistantMemoryMcpConfig(
-    workingDirectory,
-  )
-  const cronMcpConfig = buildAssistantCronMcpConfig(
-    workingDirectory,
-  )
-  const exposesHostToolRuntime = providerSupportsHostToolRuntime(input.route.provider)
-  const assistantStateToolsAvailable =
-    (exposesHostToolRuntime && input.toolCatalog.hasTool('assistant.state.show')) ||
-    (supportsDirectCliExecution && stateMcpConfig !== null)
-  const assistantMemoryToolsAvailable =
-    (exposesHostToolRuntime && input.toolCatalog.hasTool('assistant.memory.search')) ||
-    (supportsDirectCliExecution && memoryMcpConfig !== null)
-  const assistantCronToolsAvailable =
-    (exposesHostToolRuntime && input.toolCatalog.hasTool('assistant.cron.status')) ||
-    (supportsDirectCliExecution && cronMcpConfig !== null)
-  const configOverrides = supportsDirectCliExecution
-    ? [
-        ...(stateMcpConfig?.configOverrides ?? []),
-        ...(memoryMcpConfig?.configOverrides ?? []),
-        ...(cronMcpConfig?.configOverrides ?? []),
-      ]
-    : []
+  const assistantStateToolsAvailable = input.toolCatalog.hasTool('assistant.state.show')
+  const assistantMemoryToolsAvailable = input.toolCatalog.hasTool('assistant.memory.search')
+  const assistantCronToolsAvailable = input.toolCatalog.hasTool('assistant.cron.status')
 
   return {
     cliEnv: input.sharedPlan.cliAccess.env,
-    configOverrides: configOverrides.length > 0 ? configOverrides : undefined,
     conversationMessages,
     continuityContext,
     resumeProviderSessionId,
@@ -494,21 +371,18 @@ async function resolveAssistantRouteTurnPlan(input: {
         }
       : undefined,
     workingDirectory,
-    systemPrompt: shouldBuildSystemPrompt
-      ? buildAssistantSystemPrompt({
-          assistantStateToolsAvailable,
-          assistantCronToolsAvailable,
-          cliAccess: input.sharedPlan.cliAccess,
-          assistantMemoryToolsAvailable,
-          assistantMemoryPrompt,
-          channel: input.input.channel ?? input.session.binding.channel,
-          onboardingSummary:
-            shouldInjectFirstTurnOnboarding
-              ? input.sharedPlan.onboardingSummary
-              : null,
-          supportsDirectCliExecution,
-        })
-      : null,
+    systemPrompt: buildAssistantSystemPrompt({
+      assistantStateToolsAvailable,
+      assistantCronToolsAvailable,
+      cliAccess: input.sharedPlan.cliAccess,
+      assistantMemoryToolsAvailable,
+      assistantMemoryPrompt,
+      channel: input.input.channel ?? input.session.binding.channel,
+      onboardingSummary:
+        shouldInjectFirstTurnOnboarding
+          ? input.sharedPlan.onboardingSummary
+          : null,
+    }),
   }
 }
 
@@ -516,7 +390,6 @@ async function executeAssistantProviderAttempt(input: {
   attemptPlan: AssistantProviderAttemptPlan
   executionPlan: AssistantProviderTurnExecutionPlan
   failoverState: AssistantProviderFailoverState
-  providerRecovery: AssistantProviderRouteRecoveryState
 }): Promise<AssistantProviderAttemptOutcome> {
   const { attemptPlan, executionPlan } = input
   let attemptMetadata = {
@@ -550,27 +423,26 @@ async function executeAssistantProviderAttempt(input: {
       fault: 'provider',
       message: 'Injected assistant provider failure.',
     })
-    const routeTraits = resolveAssistantProviderTraits(attemptPlan.route.provider)
     const toolCatalog = executionPlan.toolCatalog
-    const toolRuntime =
-      providerSupportsHostToolRuntime(attemptPlan.route.provider)
-        ? {
-            allowSensitiveHealthContext: executionPlan.sharedPlan.allowSensitiveHealthContext,
-            requestId: executionPlan.turnId,
-            sessionId: attemptPlan.session.sessionId,
-            toolCatalog,
-            vault: executionPlan.input.vault,
-          }
-        : null
+    const runtime = resolveAssistantProviderRuntime({
+      provider: attemptPlan.route.provider,
+      ...attemptPlan.route.providerOptions,
+    })
+    const toolRuntime = {
+      allowSensitiveHealthContext: executionPlan.sharedPlan.allowSensitiveHealthContext,
+      requestId: executionPlan.turnId,
+      sessionId: attemptPlan.session.sessionId,
+      toolCatalog,
+      vault: executionPlan.input.vault,
+    }
     const result = await executeWithCanonicalWriteGuard({
-      enabled: routeTraits.workspaceMode === 'direct-cli',
+      enabled: runtime.requiresCanonicalWriteGuard,
       vaultRoot: executionPlan.input.vault,
       execute: async () => {
         const attemptResult = await executeAssistantProviderTurnAttempt({
           abortSignal: executionPlan.input.abortSignal,
           provider: attemptPlan.route.provider,
           workingDirectory: attemptPlan.routePlan.workingDirectory,
-          configOverrides: attemptPlan.routePlan.configOverrides,
           env: {
             ...attemptPlan.routePlan.cliEnv,
             ...executionPlan.memoryTurnEnv,
@@ -579,7 +451,7 @@ async function executeAssistantProviderAttempt(input: {
           userMessageContent: executionPlan.input.userMessageContent,
           continuityContext: attemptPlan.routePlan.continuityContext,
           systemPrompt: attemptPlan.routePlan.systemPrompt,
-          toolRuntime: toolRuntime ?? undefined,
+          toolRuntime,
           sessionContext: attemptPlan.routePlan.sessionContext
             ? {
                 binding: attemptPlan.session.binding,
@@ -625,15 +497,9 @@ async function executeAssistantProviderAttempt(input: {
       turnId: executionPlan.turnId,
       vault: executionPlan.input.vault,
     })
-    await clearAssistantProviderRouteRecovery({
-      sessionId: attemptPlan.session.sessionId,
-      vault: executionPlan.input.vault,
-    }).catch(() => undefined)
-
     return {
       kind: 'succeeded',
       failoverState: nextFailoverState,
-      providerRecovery: null,
       result: {
         ...result,
         attemptCount: attemptPlan.attemptCount,
@@ -651,26 +517,15 @@ async function executeAssistantProviderAttempt(input: {
       provider: attemptPlan.route.provider,
       providerOptions: attemptPlan.route.providerOptions,
       providerBinding: buildRecoveredProviderBindingSeed({
-        currentCodexPromptVersion: executionPlan.currentCodexPromptVersion,
-        previousBinding,
         provider: attemptPlan.route.provider,
         providerOptions: attemptPlan.route.providerOptions,
       }),
       routeId: attemptPlan.route.routeId,
       session: attemptPlan.session,
       vault: executionPlan.input.vault,
-      workspaceKey: hashProviderWorkingDirectory(
-        attemptPlan.routePlan.workingDirectory,
-      ),
     })
     const session = recoveredSession ?? attemptPlan.session
     attachRecoveredAssistantSession(error, recoveredSession)
-    const nextProviderRecovery = recoveredSession
-      ? await readAssistantProviderRouteRecovery(
-          executionPlan.input.vault,
-          attemptPlan.session.sessionId,
-        )
-      : input.providerRecovery
 
     let nextFailoverState = input.failoverState
     const shouldRecordRouteFailure = shouldRecordAssistantRouteFailure(errorCode)
@@ -724,7 +579,6 @@ async function executeAssistantProviderAttempt(input: {
       return {
         kind: 'retry_next_route',
         failoverState: nextFailoverState,
-        providerRecovery: nextProviderRecovery,
         error,
         session,
       }
@@ -734,7 +588,6 @@ async function executeAssistantProviderAttempt(input: {
       kind: outcomeKind,
       error,
       failoverState: nextFailoverState,
-      providerRecovery: nextProviderRecovery,
       session,
     }
   }
@@ -1044,53 +897,6 @@ function shouldRecordAssistantRouteFailure(errorCode: string | null): boolean {
   return errorCode !== 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED'
 }
 
-function shouldResetCodexProviderSessionForPromptVersion(input: {
-  binding: AssistantProviderBinding | null
-  currentCodexPromptVersion: string
-  provider: AssistantChatProvider
-}): boolean {
-  return (
-    input.provider === 'codex-cli' &&
-    input.binding?.provider === 'codex-cli' &&
-    input.binding.providerSessionId !== null &&
-    readAssistantCodexPromptVersion({
-      providerBinding: input.binding,
-    }) !==
-      input.currentCodexPromptVersion
-  )
-}
-
-async function buildCodexPromptResetContinuityContext(input: {
-  sessionId: string
-  vault: string
-}): Promise<string | null> {
-  const transcript = await listAssistantTranscriptEntries(
-    input.vault,
-    input.sessionId,
-  )
-  const recentConversation = transcript
-    .flatMap((entry) =>
-      isAssistantConversationTranscriptEntry(entry)
-        ? [
-            `${entry.kind === 'user' ? 'User' : 'Assistant'}: ${truncateAssistantContinuityText(
-              entry.text,
-            )}`,
-          ]
-        : [],
-    )
-    .slice(-6)
-
-  if (recentConversation.length === 0) {
-    return null
-  }
-
-  return [
-    'Recent local conversation transcript from this same Murph session:',
-    recentConversation.join('\n\n'),
-    'Use this only as continuity context while bootstrapping the fresh Codex provider session.',
-  ].join('\n\n')
-}
-
 function truncateAssistantContinuityText(text: string): string {
   const normalized = text.replace(/\s+/gu, ' ').trim()
   if (normalized.length <= 400) {
@@ -1146,11 +952,10 @@ function buildAssistantSystemPrompt(input: {
   assistantMemoryPrompt: string | null
   channel: string | null
   onboardingSummary: AssistantOnboardingSummary | null
-  supportsDirectCliExecution: boolean
 }): string {
   return [
     'You are Murph, a local-first health assistant bound to one active vault for this session.',
-    'The active vault is already selected for this turn through the `VAULT` environment variable and Murph tools. The shell may start in an isolated assistant workspace instead of the live vault, so use `vault-cli` or assistant tools for vault work and do not treat direct file edits as the canonical path. Unless the user explicitly targets another vault, operate on this bound vault only.',
+    'The active vault is already selected for this turn through Murph runtime bindings and tools. Unless the user explicitly targets another vault, operate on this bound vault only.',
     [
       'Murph philosophy:',
       '- Murph is a calm, observant companion for understanding the body in the context of a life.',
@@ -1162,21 +967,17 @@ function buildAssistantSystemPrompt(input: {
       '- Speak plainly and casually. Never moralize, use purity language, or make the body sound like a failing project.',
     ].join('\n'),
     [
-      'Choose the right mode before acting:',
-      '- Vault operator mode (default): inspect or change Murph vault/runtime state through `vault-cli` semantics and any Murph assistant tools exposed in this session. This is not repo coding work.',
-      '- Repo coding mode: only when the user explicitly asks to change repository code, tests, or docs.',
-      '- In repo coding mode, read and follow `AGENTS.md`, `agent-docs/index.md`, and `agent-docs/PRODUCT_CONSTITUTION.md` before making product, UX, copy, or behavior decisions.',
-      '- If repo coding changes the durable Codex bootstrap prompt, bump `CURRENT_CODEX_PROMPT_VERSION` so stale Codex provider sessions rotate cleanly.',
+      'This assistant runtime is for Murph vault and assistant operations, not repo coding work.',
+      '- Inspect or change Murph vault/runtime state through Murph tools first and `vault-cli` semantics when you need exact command behavior.',
+      '- Default to read-only inspection. Only write canonical vault data when the user is clearly asking to log, create, update, or delete something in the vault.',
+      '- Treat capture-style requests like meal logging as explicit permission to use the matching canonical write surface.',
+      '- Do not enter repo coding workflows, read repo engineering docs, or talk like a software agent unless the user explicitly switches to software work outside this assistant runtime.',
     ].join('\n'),
     [
-      'In vault operator mode:',
-      '- `vault-cli` is the raw Murph operator/data-plane surface for vault, inbox, and assistant operations.',
-      '- `murph` is the setup/onboarding entrypoint and also exposes the same top-level `chat` and `run` aliases after setup.',
-      '- `chat` / `assistant chat` / `murph chat` are the same local interactive terminal chat surface.',
-      '- `run` / `assistant run` / `murph run` are the long-lived automation loop for inbox watch, scheduled prompts, and configured channel auto-reply; with a model they can also triage inbox captures into structured vault updates.',
-      '- Default to read-only inspection. Only write canonical vault data when the user is clearly asking to log, create, update, or delete something in the vault. Treat capture-style requests like meal logging as explicit permission to use the matching CLI write surface.',
-      '- For vault-only tasks, do not read repo `AGENTS.md`, `agent-docs/**`, or `COORDINATION_LEDGER.md`, and do not enter repo coding workflows unless the user explicitly asks for repository changes.',
-      '- Do not run repo tests, typechecks, coverage, coordination-ledger updates, or auto-commit workflows just because a vault CLI command changed data. Only use repo coding workflows when you edit repo code/docs or the user explicitly asks for software changes.',
+      '`vault-cli` is the raw Murph operator/data-plane surface for vault, inbox, and assistant operations.',
+      '`murph` is the setup/onboarding entrypoint and also exposes the same top-level `chat` and `run` aliases after setup.',
+      '`chat` / `assistant chat` / `murph chat` are the same local interactive terminal chat surface.',
+      '`run` / `assistant run` / `murph run` are the long-lived automation loop for inbox watch, scheduled prompts, and configured channel auto-reply; with a model they can also triage inbox captures into structured vault updates.',
     ].join('\n'),
     'Start with the smallest relevant context. Do not scan the whole vault or broad CLI manifests unless the task actually requires that coverage.',
     'Use canonical vault records and structured CLI output as the source of truth for health data. Read raw files directly only when the CLI or bound Murph tools lack the view you need or the user explicitly asks for targeted file-level inspection. Prefer narrow vault text-file reads over broad scans when file inspection is necessary.',
@@ -1187,21 +988,16 @@ function buildAssistantSystemPrompt(input: {
     buildAssistantStateGuidanceText({
       rawCommand: input.cliAccess.rawCommand,
       assistantStateToolsAvailable: input.assistantStateToolsAvailable,
-      supportsDirectCliExecution: input.supportsDirectCliExecution,
     }),
     buildAssistantMemoryGuidanceText({
       rawCommand: input.cliAccess.rawCommand,
       assistantMemoryToolsAvailable: input.assistantMemoryToolsAvailable,
-      supportsDirectCliExecution: input.supportsDirectCliExecution,
     }),
     buildAssistantCronGuidanceText({
       rawCommand: input.cliAccess.rawCommand,
       assistantCronToolsAvailable: input.assistantCronToolsAvailable,
-      supportsDirectCliExecution: input.supportsDirectCliExecution,
     }),
-    buildAssistantCliGuidanceText(input.cliAccess, {
-      supportsDirectCliExecution: input.supportsDirectCliExecution,
-    }),
+    buildAssistantCliGuidanceText(input.cliAccess),
   ]
     .filter((value): value is string => Boolean(value))
     .join('\n\n')
@@ -1211,11 +1007,9 @@ function buildAssistantStateGuidanceText(
   input: {
     assistantStateToolsAvailable: boolean
     rawCommand: 'vault-cli'
-    supportsDirectCliExecution: boolean
   },
 ): string {
   return buildAssistantToolAccessGuidanceText({
-    directCliAvailable: input.supportsDirectCliExecution,
     preferredAccessAvailable: input.assistantStateToolsAvailable,
     preferredAccessLines: [
       'Assistant state tools are exposed in this session. Prefer the bound assistant-state tools over shelling out, and do not edit `assistant-state/state/` files directly.',
@@ -1224,15 +1018,11 @@ function buildAssistantStateGuidanceText(
       'Use `assistant state show` and `assistant state list` to inspect scratch state before repeating a question or suggestion, and use `assistant state patch` for incremental updates.',
       `Use \`${input.rawCommand} assistant state ...\` only as a fallback when the bound assistant-state tools are unavailable in this session.`,
     ],
-    directCliLines: [
-      'Assistant state tools are not exposed in this session, but direct Murph CLI execution is available.',
+    unavailableLines: [
+      'Assistant state tools are not exposed in this session.',
       `Use \`${input.rawCommand} assistant state list|show|put|patch|delete\` for small runtime scratchpads, and do not edit \`assistant-state/state/\` files directly.`,
       'Use assistant state only for small non-canonical runtime scratchpads such as cron cooldowns, unresolved follow-ups, pending hypotheses, or delivery policy decisions.',
       'Assistant state is not long-term memory and not canonical vault data. Do not store durable confirmed facts there when they belong in assistant memory or the vault.',
-    ],
-    unavailableLines: [
-      'This provider path does not expose Murph assistant-state tools or direct shell access.',
-      `If the user needs assistant scratch state inspected or changed here, give them the exact \`${input.rawCommand} assistant state ...\` command to run or switch to a Codex-backed Murph chat session.`,
       'Do not claim you inspected or updated assistant scratch state in this session unless a real tool call happened.',
     ],
   })
@@ -1311,11 +1101,9 @@ function buildAssistantMemoryGuidanceText(
   input: {
     assistantMemoryToolsAvailable: boolean
     rawCommand: 'vault-cli'
-    supportsDirectCliExecution: boolean
   },
 ): string {
   return buildAssistantToolAccessGuidanceText({
-    directCliAvailable: input.supportsDirectCliExecution,
     preferredAccessAvailable: input.assistantMemoryToolsAvailable,
     preferredAccessLines: [
       'Assistant memory tools are exposed in this session. Prefer the bound assistant-memory tools over shelling out, and do not edit `assistant-state/` files directly.',
@@ -1328,20 +1116,10 @@ function buildAssistantMemoryGuidanceText(
       'Use `assistant memory forget` to remove mistaken or obsolete memory instead of appending a contradiction.',
       'Health memory is stricter: only store durable health context when the user explicitly asks you to remember it, and only in private assistant contexts.',
     ],
-    directCliLines: [
-      'Assistant memory tools are not exposed in this session, but direct Murph CLI execution is available.',
-      `Use \`${input.rawCommand} assistant memory search|get|upsert|forget\` when you need stored memory, and do not edit \`assistant-state/\` files directly.`,
-      'When the current request depends on prior preferences, ongoing goals, recurring health context, or earlier plans, search assistant memory before answering.',
-      'Use memory upserts only when the user wants something remembered or when a stable identity, preference, or standing instruction clearly should persist.',
-      'After a substantive conversation that surfaces a stable identity, preference, standing instruction, or durable health baseline, consider offering one short remember suggestion and only upsert after explicit user intent or acceptance.',
-      'When manually upserting durable memory outside a live assistant turn, phrase `text` as the exact stored sentence you want committed, such as `Call the user Alex.`, `User prefers the default assistant tone.`, or `Keep responses brief.`',
-      'Use `assistant memory forget` to remove mistaken or obsolete memory instead of appending a contradiction.',
-      'Health memory is stricter: only store durable health context when the user explicitly asks you to remember it, and only in private assistant contexts.',
-    ],
     unavailableLines: [
-      'This provider path does not expose Murph assistant-memory tools or direct shell access.',
+      'Assistant memory tools are not exposed in this session.',
       'Use the injected core memory block if present, but do not claim you searched, updated, or forgot assistant memory unless a real tool call happened.',
-      `If the user wants stored memory inspected or changed here, give them the exact \`${input.rawCommand} assistant memory ...\` command to run or switch to a Codex-backed Murph chat session.`,
+      `Use \`${input.rawCommand} assistant memory search|get|upsert|forget\` when you need stored memory and the bound tools are unavailable.`,
       'When prior continuity would matter and you cannot search memory in this session, ask a brief clarifying question instead of inventing recall.',
       'Health memory is stricter: only store durable health context when the user explicitly asks you to remember it, and only in private assistant contexts.',
     ],
@@ -1352,11 +1130,9 @@ function buildAssistantCronGuidanceText(
   input: {
     assistantCronToolsAvailable: boolean
     rawCommand: 'vault-cli'
-    supportsDirectCliExecution: boolean
   },
 ): string {
   return buildAssistantToolAccessGuidanceText({
-    directCliAvailable: input.supportsDirectCliExecution,
     preferredAccessAvailable: input.assistantCronToolsAvailable,
     preferredAccessLines: [
       'Scheduled assistant automation tools are exposed in this session. Prefer the bound assistant-cron tools over shelling out, and do not edit `assistant-state/cron/` files directly.',
@@ -1375,21 +1151,9 @@ function buildAssistantCronGuidanceText(
       'Both research commands wait for completion and save a markdown note under `research/` inside the vault.',
       `Use \`${input.rawCommand} assistant cron ...\` only as a fallback when the bound assistant-cron tools are unavailable in this session.`,
     ],
-    directCliLines: [
-      'Scheduled assistant automation tools are not exposed in this session, but direct Murph CLI execution is available.',
-      `Use \`${input.rawCommand} assistant cron ...\` when you need to inspect or change scheduled automation, and do not edit \`assistant-state/cron/\` files directly.`,
-      'Built-in cron presets are available through `assistant cron preset list`, `assistant cron preset show`, and `assistant cron preset install`.',
-      'When a user is onboarding or asks for automation ideas, offer the relevant preset first, then customize its variables, schedule, and outbound channel settings for them.',
-      'Prefer digest-style or summary-style automation over nagging coaching. Default to weekly or daily summaries unless the user clearly asks for a higher-frequency nudge.',
-      'Before asking the user to repeat phone, Telegram, or email routing details for an outbound cron job, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.',
-      'Use `assistant cron add` for one-shot reminders with `--at` and recurring jobs with `--every` or `--cron`.',
-      'Inspect the scheduler with `assistant cron status`, `assistant cron list`, `assistant cron show`, `assistant cron target show`, and `assistant cron runs` before changing an existing job.',
-      'When the user wants to retarget an existing cron job without recreating it, use `assistant cron target set`.',
-      'Cron schedules execute while `assistant run` is active for the vault.',
-    ],
     unavailableLines: [
-      'This provider path does not expose Murph cron tools or direct shell access.',
-      `If the user wants automation here, explain the relevant \`${input.rawCommand} assistant cron ...\` command or suggest switching to a Codex-backed Murph chat session.`,
+      'Scheduled assistant automation tools are not exposed in this session.',
+      `Use \`${input.rawCommand} assistant cron ...\` when you need to inspect or change scheduled automation and the bound tools are unavailable.`,
       'Built-in cron presets are available through `assistant cron preset list`, `assistant cron preset show`, and `assistant cron preset install`.',
       'When a user is onboarding or asks for automation ideas, offer the relevant preset first, then customize its variables, schedule, and outbound channel settings for them.',
       'Prefer digest-style or summary-style automation over nagging coaching. Default to weekly or daily summaries unless the user clearly asks for a higher-frequency nudge.',
@@ -1401,18 +1165,12 @@ function buildAssistantCronGuidanceText(
 }
 
 function buildAssistantToolAccessGuidanceText(input: {
-  directCliAvailable: boolean
   preferredAccessAvailable: boolean
   preferredAccessLines: readonly string[]
-  directCliLines: readonly string[]
   unavailableLines: readonly string[]
 }): string {
   if (input.preferredAccessAvailable) {
     return input.preferredAccessLines.join('\n\n')
-  }
-
-  if (input.directCliAvailable) {
-    return input.directCliLines.join('\n\n')
   }
 
   return input.unavailableLines.join('\n\n')

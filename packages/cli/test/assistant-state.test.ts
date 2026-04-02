@@ -42,7 +42,6 @@ import {
 import { readAssistantCronRuns } from '@murphai/assistant-core/assistant/cron/store'
 import { withAssistantMemoryWriteLock } from '@murphai/assistant-core/assistant/memory/locking'
 import { readAssistantOutboxIntent } from '../src/assistant/outbox.js'
-import { readAssistantProviderRouteRecovery } from '@murphai/assistant-core/assistant/provider-turn-recovery'
 import { summarizeAssistantQuarantines } from '@murphai/assistant-core/assistant/quarantine'
 import { withAssistantRuntimeWriteLock } from '@murphai/assistant-core/assistant/runtime-write-lock'
 import { readAssistantSession } from '@murphai/assistant-core/assistant/store/persistence'
@@ -2003,9 +2002,6 @@ test('assistant storage readers reject traversal-like opaque ids at the filesyst
   await expectInvalidRuntimeId(() => readAssistantOutboxIntent(vaultRoot, invalidId))
   await expectInvalidRuntimeId(() => readAssistantTurnReceipt(vaultRoot, invalidId))
   await expectInvalidRuntimeId(() => readAssistantCronRuns(paths, invalidId))
-  await expectInvalidRuntimeId(() =>
-    readAssistantProviderRouteRecovery(vaultRoot, invalidId),
-  )
 })
 
 test('assistant runtime budget snapshots are quarantined, recreated, and fully pruned with orphan payload cleanup', async () => {
@@ -2226,7 +2222,7 @@ test('assistant session secrets persist in private sidecars with private permiss
   assert.equal((await stat(sessionSecretsPath)).mode & 0o777, 0o600)
 })
 
-test('malformed secret sidecars are quarantined instead of being treated as cleanly missing', async () => {
+test('malformed session secret sidecars are quarantined instead of being treated as cleanly missing', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-sidecar-corruption-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
@@ -2281,76 +2277,9 @@ test('malformed secret sidecars are quarantined instead of being treated as clea
   )
   await assert.rejects(() => stat(sessionSecretsPath))
 
-  const recoveryPath = path.join(
-    statePaths.providerRouteRecoveryDirectory,
-    `${updatedSession.sessionId}.json`,
-  )
-  const recoverySecretsPath = path.join(
-    statePaths.providerRouteRecoverySecretsDirectory,
-    `${updatedSession.sessionId}.json`,
-  )
-  await Promise.all([
-    mkdir(statePaths.providerRouteRecoveryDirectory, { recursive: true }),
-    mkdir(statePaths.providerRouteRecoverySecretsDirectory, { recursive: true }),
-  ])
-  await writeFile(
-    recoveryPath,
-    `${JSON.stringify({
-      schema: 'murph.assistant-provider-route-recovery.v1',
-      sessionId: updatedSession.sessionId,
-      updatedAt: '2026-03-29T12:11:00.000Z',
-      routes: [
-        {
-          routeId: 'route_primary',
-          provider: 'openai-compatible',
-          providerSessionId: 'route-session-1',
-          providerOptions: {
-            model: 'gpt-4.1-mini',
-            reasoningEffort: null,
-            sandbox: null,
-            approvalPolicy: null,
-            profile: null,
-            oss: false,
-            baseUrl: 'https://api.example.test/v1',
-            apiKeyEnv: 'OPENAI_API_KEY',
-            providerName: 'example',
-            headers: {
-              'X-Visible': 'public-header',
-            },
-          },
-          providerState: null,
-          recoveredAt: '2026-03-29T12:11:00.000Z',
-        },
-      ],
-    }, null, 2)}\n`,
-    'utf8',
-  )
-  await writeFile(
-    recoverySecretsPath,
-    '{"schema":"murph.assistant-provider-route-recovery-secrets.v1"',
-    'utf8',
-  )
-
-  await assert.rejects(
-    () => readAssistantProviderRouteRecovery(vaultRoot, updatedSession.sessionId),
-    (error) => {
-      assert.equal(
-        (error as { code?: unknown }).code,
-        'ASSISTANT_PROVIDER_ROUTE_RECOVERY_SECRETS_CORRUPTED',
-      )
-      assert.match(
-        String((error as { message?: unknown }).message),
-        /secret sidecar.*corrupted and was quarantined/u,
-      )
-      return true
-    },
-  )
-  await assert.rejects(() => stat(recoverySecretsPath))
-
   const quarantine = await summarizeAssistantQuarantines({
     paths: statePaths,
   })
-  assert.equal(quarantine.total >= 2, true)
+  assert.equal(quarantine.total >= 1, true)
   assert.equal(quarantine.byKind.session >= 1, true)
-  assert.equal(quarantine.byKind['provider-route-recovery'] >= 1, true)
 })

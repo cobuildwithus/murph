@@ -178,8 +178,6 @@ function mapAssistantQuarantineRuntimeEventKind(
       return 'diagnostics.snapshot.quarantined' as const
     case 'failover':
       return 'failover.state.quarantined' as const
-    case 'provider-route-recovery':
-      return 'provider-route-recovery.quarantined' as const
     case 'runtime-budget':
       return 'runtime-budget.quarantined' as const
     case 'cron-store':
