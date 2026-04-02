@@ -42,7 +42,6 @@ export interface HostedBootstrapResult {
   assistantConfigStatus:
     | "hosted-env"
     | "invalid"
-    | "legacy-defaults"
     | "missing"
     | "saved"
     | "unready";

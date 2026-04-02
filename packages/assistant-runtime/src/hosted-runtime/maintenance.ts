@@ -42,7 +42,7 @@ const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
 const HOSTED_MAX_PARSER_JOBS = 50;
 
 interface HostedAssistantAutomationReadiness {
-  configStatus: "hosted-env" | "invalid" | "legacy-defaults" | "missing" | "saved" | "unready";
+  configStatus: "hosted-env" | "invalid" | "missing" | "saved" | "unready";
   configured: boolean;
   enabled: boolean;
   provider: "codex-cli" | "openai-compatible" | null;

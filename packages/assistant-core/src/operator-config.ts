@@ -3,11 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { z } from 'zod'
 import {
-  assistantApprovalPolicyValues,
-  assistantChatProviderValues,
   assistantProviderFailoverRouteSchema,
-  assistantReasoningEffortValues,
-  assistantSandboxValues,
   assistantSelfDeliveryTargetSchema,
   type AssistantSelfDeliveryTarget,
 } from './assistant-cli-contracts.js'
@@ -92,31 +88,6 @@ const assistantOperatorDefaultsSchema = z.object({
   ...assistantOperatorSharedFields,
 }).strict()
 
-const legacyAssistantProviderDefaultsEntrySchema = z
-  .object({
-    approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable().optional(),
-    apiKeyEnv: z.string().min(1).nullable().optional(),
-    baseUrl: z.string().min(1).nullable().optional(),
-    codexCommand: z.string().min(1).nullable().optional(),
-    headers: z.record(z.string().min(1), z.string()).nullable().optional(),
-    model: z.string().min(1).nullable().optional(),
-    oss: z.boolean().nullable().optional(),
-    profile: z.string().min(1).nullable().optional(),
-    providerName: z.string().min(1).nullable().optional(),
-    reasoningEffort: z.enum(assistantReasoningEffortValues).nullable().optional(),
-    sandbox: z.enum(assistantSandboxValues).nullable().optional(),
-  })
-  .passthrough()
-
-const legacyAssistantDefaultsByProviderSchema = z
-  .object({
-    'codex-cli': legacyAssistantProviderDefaultsEntrySchema.nullable().optional(),
-    'openai-compatible': legacyAssistantProviderDefaultsEntrySchema
-      .nullable()
-      .optional(),
-  })
-  .passthrough()
-
 const operatorConfigSchema = z.object({
   schema: z.literal(OPERATOR_CONFIG_SCHEMA),
   defaultVault: z.string().min(1).nullable(),
@@ -136,7 +107,7 @@ export type AssistantOperatorDefaults = z.infer<
   typeof assistantOperatorDefaultsSchema
 >
 export type AssistantProviderDefaultsEntry = Omit<AssistantProviderConfig, 'provider'>
-type AssistantChatProviderValue = (typeof assistantChatProviderValues)[number]
+type AssistantChatProviderValue = 'codex-cli' | 'openai-compatible'
 export interface AssistantSelfDeliveryTargetLookupInput {
   channel?: string | null
   deliveryTarget?: string | null
@@ -731,9 +702,7 @@ function normalizeAssistantOperatorDefaults(
   const record = defaults as Record<string, unknown>
 
   return compactAssistantOperatorDefaults({
-    backend:
-      resolveLegacyAssistantBackendTarget(record) ??
-      normalizeUnknownAssistantBackendTarget(record.backend),
+    backend: normalizeUnknownAssistantBackendTarget(record.backend),
     identityId: normalizeUnknownAssistantIdentityId(record.identityId),
     failoverRoutes: normalizeUnknownAssistantFailoverRoutes(record.failoverRoutes),
     account: normalizeUnknownAssistantAccount(record.account),
@@ -840,76 +809,6 @@ function hasAssistantOperatorDefaultsValues(
         ? 'selfDeliveryTargets'
         : null),
   )
-}
-
-function resolveLegacyAssistantBackendTarget(
-  defaults: Record<string, unknown>,
-): AssistantBackendTarget | null {
-  const provider = resolveLegacyAssistantSelectedProvider(defaults)
-  if (!provider) {
-    return null
-  }
-
-  const defaultsByProvider = normalizeLegacyAssistantDefaultsByProvider(
-    defaults.defaultsByProvider,
-  )
-  const providerDefaults = defaultsByProvider?.[provider]
-
-  if (!providerDefaults) {
-    return null
-  }
-
-  return createAssistantBackendTarget({
-    provider,
-    approvalPolicy: providerDefaults.approvalPolicy ?? null,
-    apiKeyEnv: providerDefaults.apiKeyEnv ?? null,
-    baseUrl: providerDefaults.baseUrl ?? null,
-    codexCommand: providerDefaults.codexCommand ?? null,
-    headers: providerDefaults.headers ?? null,
-    model: providerDefaults.model ?? null,
-    oss: providerDefaults.oss ?? null,
-    profile: providerDefaults.profile ?? null,
-    providerName: providerDefaults.providerName ?? null,
-    reasoningEffort: providerDefaults.reasoningEffort ?? null,
-    sandbox: providerDefaults.sandbox ?? null,
-  })
-}
-
-function resolveLegacyAssistantSelectedProvider(
-  defaults: Record<string, unknown>,
-): AssistantChatProviderValue | null {
-  const provider = normalizeOperatorConfigString(
-    typeof defaults.provider === 'string' ? defaults.provider : null,
-  )
-
-  if (
-    provider &&
-    assistantChatProviderValues.includes(provider as AssistantChatProviderValue)
-  ) {
-    return provider as AssistantChatProviderValue
-  }
-
-  const defaultsByProvider = normalizeLegacyAssistantDefaultsByProvider(
-    defaults.defaultsByProvider,
-  )
-  if (!defaultsByProvider) {
-    return null
-  }
-
-  for (const candidate of assistantChatProviderValues) {
-    if (defaultsByProvider[candidate]) {
-      return candidate
-    }
-  }
-
-  return null
-}
-
-function normalizeLegacyAssistantDefaultsByProvider(
-  value: unknown,
-): z.infer<typeof legacyAssistantDefaultsByProviderSchema> | null {
-  const parsed = legacyAssistantDefaultsByProviderSchema.safeParse(value)
-  return parsed.success ? parsed.data : null
 }
 
 function normalizeUnknownAssistantBackendTarget(
