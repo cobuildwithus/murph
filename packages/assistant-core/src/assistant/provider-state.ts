@@ -7,31 +7,11 @@ import {
 } from '../assistant-cli-contracts.js'
 import { normalizeNullableString } from './shared.js'
 
-export function readAssistantCodexPromptVersion(input: {
-  providerBinding?: AssistantProviderBinding | null
-} | AssistantSession): string | null {
-  const providerBinding = readAssistantProviderBinding(input)
-  return (
-    normalizeNullableString(providerBinding?.providerState?.codexCli?.promptVersion) ??
-    null
-  )
-}
-
 export function readAssistantProviderResumeRouteId(input: {
   providerBinding?: AssistantProviderBinding | null
 } | AssistantSession): string | null {
   const providerBinding = readAssistantProviderBinding(input)
   return normalizeNullableString(providerBinding?.providerState?.resumeRouteId) ?? null
-}
-
-export function readAssistantProviderResumeWorkspaceKey(input: {
-  providerBinding?: AssistantProviderBinding | null
-} | AssistantSession): string | null {
-  const providerBinding = readAssistantProviderBinding(input)
-  return (
-    normalizeNullableString(providerBinding?.providerState?.resumeWorkspaceKey) ??
-    null
-  )
 }
 
 export function readAssistantProviderSessionId(input: {
@@ -59,24 +39,6 @@ export function readAssistantProviderBinding(
   )
 }
 
-export function writeAssistantCodexPromptVersion(
-  providerBinding: AssistantProviderBinding | null | undefined,
-  promptVersion: string | null | undefined,
-): AssistantProviderBinding | null {
-  const current = normalizeAssistantProviderBinding(providerBinding)
-  if (!current || current.provider !== 'codex-cli') {
-    return current
-  }
-
-  return assistantProviderBindingSchema.parse({
-    ...current,
-    providerState: writeAssistantSessionProviderStatePromptVersion(
-      current.providerState,
-      promptVersion,
-    ),
-  })
-}
-
 export function writeAssistantProviderResumeRouteId(
   providerBinding: AssistantProviderBinding | null | undefined,
   routeId: string | null | undefined,
@@ -100,42 +62,6 @@ export function writeAssistantProviderStateResumeRouteId(
   routeId: string | null | undefined,
 ): AssistantSessionProviderState | null {
   return writeAssistantSessionProviderStateResumeRouteId(providerState, routeId)
-}
-
-export function writeAssistantProviderStateResumeWorkspaceKey(
-  providerState: AssistantSessionProviderState | null | undefined,
-  workspaceKey: string | null | undefined,
-): AssistantSessionProviderState | null {
-  return writeAssistantSessionProviderStateResumeWorkspaceKey(
-    providerState,
-    workspaceKey,
-  )
-}
-
-function writeAssistantSessionProviderStatePromptVersion(
-  providerState: AssistantSessionProviderState | null | undefined,
-  promptVersion: string | null | undefined,
-): AssistantSessionProviderState | null {
-  const normalizedPromptVersion = normalizeNullableString(promptVersion)
-  const current = normalizeAssistantSessionProviderState(providerState)
-
-  if (!normalizedPromptVersion) {
-    if (!current?.codexCli) {
-      return current
-    }
-
-    return assistantSessionProviderStateSchema.parse({
-      ...current,
-      codexCli: null,
-    })
-  }
-
-  return assistantSessionProviderStateSchema.parse({
-    ...(current ?? {}),
-    codexCli: {
-      promptVersion: normalizedPromptVersion,
-    },
-  })
 }
 
 function writeAssistantSessionProviderStateResumeRouteId(
@@ -162,30 +88,6 @@ function writeAssistantSessionProviderStateResumeRouteId(
   })
 }
 
-function writeAssistantSessionProviderStateResumeWorkspaceKey(
-  providerState: AssistantSessionProviderState | null | undefined,
-  workspaceKey: string | null | undefined,
-): AssistantSessionProviderState | null {
-  const normalizedWorkspaceKey = normalizeNullableString(workspaceKey)
-  const current = normalizeAssistantSessionProviderState(providerState)
-
-  if (!normalizedWorkspaceKey) {
-    if (!current?.resumeWorkspaceKey) {
-      return current
-    }
-
-    return assistantSessionProviderStateSchema.parse({
-      ...current,
-      resumeWorkspaceKey: null,
-    })
-  }
-
-  return assistantSessionProviderStateSchema.parse({
-    ...(current ?? {}),
-    resumeWorkspaceKey: normalizedWorkspaceKey,
-  })
-}
-
 export function normalizeAssistantProviderBinding(
   value: AssistantProviderBinding | null | undefined,
 ): AssistantProviderBinding | null {
@@ -206,18 +108,10 @@ export function normalizeAssistantSessionProviderState(
     return null
   }
 
-  const promptVersion = normalizeNullableString(value.codexCli?.promptVersion)
   const resumeRouteId = normalizeNullableString(value.resumeRouteId)
-  const resumeWorkspaceKey = normalizeNullableString(value.resumeWorkspaceKey)
-  return promptVersion || resumeRouteId || resumeWorkspaceKey
+  return resumeRouteId
     ? assistantSessionProviderStateSchema.parse({
-        codexCli: promptVersion
-          ? {
-              promptVersion,
-            }
-          : null,
         resumeRouteId,
-        resumeWorkspaceKey,
       })
     : null
 }
