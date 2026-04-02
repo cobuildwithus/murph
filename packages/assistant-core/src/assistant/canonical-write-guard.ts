@@ -333,44 +333,74 @@ async function applyCommittedOperationEffects(input: {
     ) {
       guardFailure = operationEntry.guardFailure
     }
-
-    if (
-      operationEntry.snapshotStatus !== 'committed' &&
-      operationEntry.operation?.status === 'committed' &&
-      operationTouchesProtectedCanonicalPath(operationEntry.operation) &&
-      operationEntry.operationId &&
-      !receiptByOperationId.has(operationEntry.operationId) &&
-      !guardFailure
-    ) {
-      guardFailure = createGuardAuditStateFailure({
-        cause: new Error(
-          'Committed write operation did not produce a trusted canonical-write guard receipt.',
-        ),
-        metadataPath: operationEntry.relativePath,
-        operationId: operationEntry.operationId,
-        reason: 'invalid_write_operation_metadata',
-      })
-    }
   }
 
-  const committedOperations = receipts
+  const committedOperations = operations
+    .filter(
+      (
+        operationEntry,
+      ): operationEntry is GuardOperationEntry & {
+        operation: GuardRecoveredOperation
+        operationId: string
+      } =>
+        operationEntry.snapshotStatus !== 'committed' &&
+        operationEntry.operation?.status === 'committed' &&
+        typeof operationEntry.operationId === 'string',
+    )
     .sort((left, right) =>
-      compareOperationOrder(left, right, left.receiptPath, right.receiptPath),
+      compareOperationOrder(
+        left.operation,
+        right.operation,
+        left.relativePath,
+        right.relativePath,
+      ),
     )
 
-  for (const receipt of committedOperations) {
-    const operationEntry = operationById.get(receipt.operationId) ?? null
-    const transitionedToCommitted =
-      operationEntry?.snapshotStatus !== 'committed' ||
-      operationEntry === null
-    if (!transitionedToCommitted) {
+  for (const operationEntry of committedOperations) {
+    if (!operationTouchesProtectedCanonicalPath(operationEntry.operation)) {
       continue
     }
 
-    if (operationEntry?.guardFailure && !guardFailure) {
+    if (operationEntry.guardFailure && !guardFailure) {
       guardFailure = operationEntry.guardFailure
     }
-    if (!operationEntry && !guardFailure) {
+    if (operationEntry.guardFailure) {
+      continue
+    }
+
+    const receipt = receiptByOperationId.get(operationEntry.operationId) ?? null
+    if (receipt) {
+      const receiptGuardFailure = await applyCommittedOperationReceipt({
+        metadataPath: operationEntry.relativePath,
+        operationId: operationEntry.operationId,
+        receipt,
+        receiptRoot: input.snapshot.guardReceiptRoot,
+        snapshot: input.snapshot,
+      })
+      if (receiptGuardFailure && !guardFailure) {
+        guardFailure = receiptGuardFailure
+      }
+      continue
+    }
+
+    const receiptlessGuardFailure = await applyCommittedOperationWithoutReceipt({
+      metadataPath: operationEntry.relativePath,
+      operationId: operationEntry.operationId,
+      operation: operationEntry.operation,
+      snapshot: input.snapshot,
+      vaultRoot: input.vaultRoot,
+    })
+    if (receiptlessGuardFailure && !guardFailure) {
+      guardFailure = receiptlessGuardFailure
+    }
+  }
+
+  for (const receipt of receipts) {
+    if (operationById.has(receipt.operationId)) {
+      continue
+    }
+
+    if (!guardFailure) {
       guardFailure = createGuardAuditStateFailure({
         cause: new Error(
           'Committed write guard receipt has no matching vault metadata file.',
@@ -380,60 +410,243 @@ async function applyCommittedOperationEffects(input: {
         reason: 'invalid_write_operation_metadata',
       })
     }
-    if (!operationEntry || operationEntry.guardFailure) {
+  }
+
+  return guardFailure
+}
+
+async function applyCommittedOperationReceipt(input: {
+  metadataPath: string
+  operationId: string
+  receipt: GuardReceiptOperation
+  receiptRoot: string
+  snapshot: GuardSnapshot
+}): Promise<GuardAuditStateFailure | null> {
+  for (const action of input.receipt.actions) {
+    if (!isProtectedCanonicalPath(action.targetRelativePath)) {
       continue
     }
 
-    for (const action of receipt.actions) {
-      if (!isProtectedCanonicalPath(action.targetRelativePath)) {
-        continue
-      }
-
-      if (action.kind === 'delete') {
-        input.snapshot.expectedStates.set(action.targetRelativePath, {
-          exists: false,
-        })
-        continue
-      }
-
-      const payload = await readGuardReceiptPayload({
-        action,
-        metadataPath: operationEntry?.relativePath ?? receipt.receiptPath,
-        operationId: receipt.operationId,
-        receiptPath: receipt.receiptPath,
-        receiptRoot: input.snapshot.guardReceiptRoot,
-        targetRelativePath: action.targetRelativePath,
+    if (action.kind === 'delete') {
+      input.snapshot.expectedStates.set(action.targetRelativePath, {
+        exists: false,
       })
-      if (payload.guardFailure && !guardFailure) {
-        guardFailure = payload.guardFailure
-      }
-      if (!payload.buffer) {
-        continue
+      continue
+    }
+
+    const payload = await readGuardReceiptPayload({
+      action,
+      metadataPath: input.metadataPath,
+      operationId: input.operationId,
+      receiptPath: input.receipt.receiptPath,
+      receiptRoot: input.receiptRoot,
+      targetRelativePath: action.targetRelativePath,
+    })
+    if (payload.guardFailure) {
+      return payload.guardFailure
+    }
+    if (!payload.buffer) {
+      continue
+    }
+
+    if (action.kind === 'jsonl_append') {
+      const previous = input.snapshot.expectedStates.get(action.targetRelativePath)
+      const previousBuffer =
+        previous && previous.exists
+          ? await readExpectedBuffer(previous)
+          : Buffer.alloc(0)
+      input.snapshot.expectedStates.set(action.targetRelativePath, {
+        exists: true,
+        kind: 'buffer',
+        buffer: Buffer.concat([previousBuffer, payload.buffer]),
+      })
+      continue
+    }
+
+    input.snapshot.expectedStates.set(action.targetRelativePath, {
+      exists: true,
+      kind: 'buffer',
+      buffer: payload.buffer,
+    })
+  }
+
+  return null
+}
+
+async function applyCommittedOperationWithoutReceipt(input: {
+  metadataPath: string
+  operation: GuardRecoveredOperation
+  operationId: string
+  snapshot: GuardSnapshot
+  vaultRoot: string
+}): Promise<GuardAuditStateFailure | null> {
+  for (const action of input.operation.actions) {
+    if (!isProtectedCanonicalPath(action.targetRelativePath)) {
+      continue
+    }
+
+    if (action.kind === 'delete') {
+      const currentBuffer = await readProtectedFileIfPresent(
+        input.vaultRoot,
+        action.targetRelativePath,
+      )
+      if (currentBuffer !== null) {
+        return createGuardAuditStateFailure({
+          cause: new Error(
+            'Committed delete operation without a trusted receipt does not match the current protected file state.',
+          ),
+          metadataPath: input.metadataPath,
+          operationId: input.operationId,
+          reason: 'invalid_committed_payload',
+          targetRelativePath: action.targetRelativePath,
+        })
       }
 
-      if (action.kind === 'jsonl_append') {
-        const previous = input.snapshot.expectedStates.get(action.targetRelativePath)
-        const previousBuffer =
-          previous && previous.exists
-            ? await readExpectedBuffer(previous)
-            : Buffer.alloc(0)
-        input.snapshot.expectedStates.set(action.targetRelativePath, {
-          exists: true,
-          kind: 'buffer',
-          buffer: Buffer.concat([previousBuffer, payload.buffer]),
+      input.snapshot.expectedStates.set(action.targetRelativePath, {
+        exists: false,
+      })
+      continue
+    }
+
+    if (action.kind === 'raw_copy') {
+      continue
+    }
+
+    const currentBuffer = await readProtectedFileIfPresent(
+      input.vaultRoot,
+      action.targetRelativePath,
+    )
+    if (currentBuffer === null) {
+      return createGuardAuditStateFailure({
+        cause: new Error(
+          'Committed protected write without a trusted receipt is missing from the current vault state.',
+        ),
+        metadataPath: input.metadataPath,
+        operationId: input.operationId,
+        reason: 'invalid_committed_payload',
+        targetRelativePath: action.targetRelativePath,
+        actionKind: action.kind,
+      })
+    }
+
+    if (action.kind === 'text_write') {
+      const committedPayloadReceipt = action.committedPayloadReceipt
+      if (!committedPayloadReceipt) {
+        return createGuardAuditStateFailure({
+          cause: new Error(
+            'Committed protected write metadata is missing its durable payload receipt.',
+          ),
+          metadataPath: input.metadataPath,
+          operationId: input.operationId,
+          reason: 'invalid_write_operation_metadata',
+          targetRelativePath: action.targetRelativePath,
+          actionKind: action.kind,
         })
-        continue
+      }
+
+      if (!doesBufferMatchCommittedPayloadReceipt(currentBuffer, committedPayloadReceipt)) {
+        return createGuardAuditStateFailure({
+          cause: new Error(
+            'Committed protected file content does not match the durable payload receipt embedded in write metadata.',
+          ),
+          metadataPath: input.metadataPath,
+          operationId: input.operationId,
+          reason: 'invalid_committed_payload',
+          targetRelativePath: action.targetRelativePath,
+          actionKind: action.kind,
+        })
       }
 
       input.snapshot.expectedStates.set(action.targetRelativePath, {
         exists: true,
         kind: 'buffer',
-        buffer: payload.buffer,
+        buffer: currentBuffer,
+      })
+      continue
+    }
+
+    const previous = input.snapshot.expectedStates.get(action.targetRelativePath)
+    const previousBuffer =
+      previous && previous.exists
+        ? await readExpectedBuffer(previous)
+        : Buffer.alloc(0)
+    const committedPayloadReceipt = action.committedPayloadReceipt
+    if (!committedPayloadReceipt) {
+      return createGuardAuditStateFailure({
+        cause: new Error(
+          'Committed JSONL append metadata is missing its durable payload receipt.',
+        ),
+        metadataPath: input.metadataPath,
+        operationId: input.operationId,
+        reason: 'invalid_write_operation_metadata',
+        targetRelativePath: action.targetRelativePath,
+        actionKind: action.kind,
       })
     }
+
+    if (
+      currentBuffer.byteLength < previousBuffer.byteLength ||
+      !currentBuffer.subarray(0, previousBuffer.byteLength).equals(previousBuffer)
+    ) {
+      return createGuardAuditStateFailure({
+        cause: new Error(
+          'Committed JSONL append without a trusted receipt does not preserve the previously trusted file prefix.',
+        ),
+        metadataPath: input.metadataPath,
+        operationId: input.operationId,
+        reason: 'invalid_committed_payload',
+        targetRelativePath: action.targetRelativePath,
+        actionKind: action.kind,
+      })
+    }
+
+    const appendedBuffer = currentBuffer.subarray(previousBuffer.byteLength)
+    if (!doesBufferMatchCommittedPayloadReceipt(appendedBuffer, committedPayloadReceipt)) {
+      return createGuardAuditStateFailure({
+        cause: new Error(
+          'Committed JSONL append without a trusted receipt does not match the durable appended payload receipt.',
+        ),
+        metadataPath: input.metadataPath,
+        operationId: input.operationId,
+        reason: 'invalid_committed_payload',
+        targetRelativePath: action.targetRelativePath,
+        actionKind: action.kind,
+      })
+    }
+
+    input.snapshot.expectedStates.set(action.targetRelativePath, {
+      exists: true,
+      kind: 'buffer',
+      buffer: currentBuffer,
+    })
   }
 
-  return guardFailure
+  return null
+}
+
+function doesBufferMatchCommittedPayloadReceipt(
+  buffer: Buffer,
+  receipt: GuardCommittedPayloadReceipt,
+): boolean {
+  return (
+    buffer.byteLength === receipt.byteLength &&
+    createHash('sha256').update(buffer).digest('hex') === receipt.sha256
+  )
+}
+
+async function readProtectedFileIfPresent(
+  vaultRoot: string,
+  relativePath: string,
+): Promise<Buffer | null> {
+  try {
+    return await readFile(resolveVaultPath(vaultRoot, relativePath).absolutePath)
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return null
+    }
+
+    throw error
+  }
 }
 
 function operationTouchesProtectedCanonicalPath(
