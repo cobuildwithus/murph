@@ -774,12 +774,7 @@ async function executeClaimedAssistantCronJob(input: {
       })
 
       sessionId = result.session.sessionId
-      if (result.status === 'blocked') {
-        errorText = result.blocked?.message ?? 'assistant turn was blocked'
-        status = 'skipped'
-      } else {
-        response = result.response
-      }
+      response = result.response
     }
     if (status === 'failed') {
       status = 'succeeded'

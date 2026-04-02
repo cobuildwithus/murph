@@ -56,6 +56,16 @@ const runtimeMocks = vi.hoisted(() => ({
     supportsReasoningEffort: provider !== 'openai-compatible',
     supportsRichUserMessageContent: provider === 'openai-compatible',
   })),
+  resolveAssistantProviderTargetCapabilities: vi.fn(
+    (input: { provider?: string | null; baseUrl?: string | null }) => ({
+      supportsModelDiscovery: input?.provider === 'openai-compatible',
+      supportsNativeResume: true,
+      supportsReasoningEffort:
+        input?.provider === 'codex-cli' ||
+        input?.baseUrl === 'https://api.openai.com/v1',
+      supportsRichUserMessageContent: input?.provider === 'openai-compatible',
+    }),
+  ),
 }))
 
 vi.mock('../src/assistant-chat-ink.js', () => ({
@@ -86,6 +96,8 @@ vi.mock('@murphai/assistant-core/assistant-provider', async () => {
     executeAssistantProviderTurn: runtimeMocks.executeAssistantProviderTurn,
     resolveAssistantProviderCapabilities:
       runtimeMocks.resolveAssistantProviderCapabilities,
+    resolveAssistantProviderTargetCapabilities:
+      runtimeMocks.resolveAssistantProviderTargetCapabilities,
   }
 })
 
@@ -154,7 +166,6 @@ import {
   resolveComposerTerminalAction,
   resolveComposerVerticalCursorMove,
   reconcileComposerControlledValue,
-  resolveAssistantBlockedTurnFeedback,
   resolveAssistantSelectionAfterSessionSync,
   shouldShowBusyStatus,
   resolveAssistantQueuedPromptDisposition,
@@ -170,24 +181,16 @@ const cleanupPaths: string[] = []
 const PHOTO_ONLY_CAPTURE_ID = 'cap-photo'
 const PHOTO_ONLY_OCCURED_AT = '2026-03-18T09:00:00Z'
 const PHOTO_ONLY_ATTACHMENT_BUFFER = Buffer.from([0xff, 0xd8, 0xff])
-const OPENAI_COMPATIBLE_OPERATOR_DEFAULTS = {
+const OPENAI_COMPATIBLE_OPERATOR_DEFAULTS = buildAssistantProviderDefaultsPatch({
+  defaults: null,
   provider: 'openai-compatible',
-  defaultsByProvider: {
-    'openai-compatible': {
-      codexCommand: null,
-      model: 'gpt-oss:20b',
-      reasoningEffort: null,
-      sandbox: null,
-      approvalPolicy: null,
-      profile: null,
-      oss: false,
-      baseUrl: 'http://127.0.0.1:11434/v1',
-      apiKeyEnv: 'OLLAMA_API_KEY',
-      providerName: 'ollama',
-      headers: null,
-    },
+  providerConfig: {
+    model: 'gpt-oss:20b',
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    apiKeyEnv: 'OLLAMA_API_KEY',
+    providerName: 'ollama',
   },
-} as const
+})
 
 function buildPhotoOnlyAutoReplyCapture() {
   return {
@@ -417,6 +420,17 @@ beforeEach(() => {
     supportsReasoningEffort: provider !== 'openai-compatible',
     supportsRichUserMessageContent: provider === 'openai-compatible',
   }))
+  runtimeMocks.resolveAssistantProviderTargetCapabilities.mockReset()
+  runtimeMocks.resolveAssistantProviderTargetCapabilities.mockImplementation(
+    (input: { provider?: string | null; baseUrl?: string | null }) => ({
+      supportsModelDiscovery: input?.provider === 'openai-compatible',
+      supportsNativeResume: true,
+      supportsReasoningEffort:
+        input?.provider === 'codex-cli' ||
+        input?.baseUrl === 'https://api.openai.com/v1',
+      supportsRichUserMessageContent: input?.provider === 'openai-compatible',
+    }),
+  )
   runtimeMocks.executeAssistantProviderTurnAttempt.mockImplementation(
     async (...args: Parameters<typeof runtimeMocks.executeAssistantProviderTurn>) => {
       try {
@@ -1078,24 +1092,15 @@ test('sendAssistantMessage reuses saved assistant model defaults and persists re
 
   try {
     await saveAssistantOperatorDefaultsPatch(
-      {
+      buildAssistantProviderDefaultsPatch({
+        defaults: null,
         provider: 'codex-cli',
-        defaultsByProvider: {
-          'codex-cli': {
-            codexCommand: null,
-            model: 'gpt-5.4-mini',
-            reasoningEffort: 'high',
-            sandbox: null,
-            approvalPolicy: null,
-            profile: null,
-            oss: false,
-            baseUrl: null,
-            apiKeyEnv: null,
-            providerName: null,
-            headers: null,
-          },
+        providerConfig: {
+          model: 'gpt-5.4-mini',
+          reasoningEffort: 'high',
+          oss: false,
         },
-      },
+      }),
       homeRoot,
     )
 
@@ -1138,26 +1143,19 @@ test('sendAssistantMessage reuses saved OpenAI-compatible assistant defaults', a
 
   try {
     await saveAssistantOperatorDefaultsPatch(
-      {
+      buildAssistantProviderDefaultsPatch({
+        defaults: null,
         provider: 'openai-compatible',
-        defaultsByProvider: {
-          'openai-compatible': {
-            codexCommand: null,
-            model: 'gpt-oss:20b',
-            reasoningEffort: null,
-            sandbox: null,
-            approvalPolicy: null,
-            profile: null,
-            oss: false,
-            baseUrl: 'http://127.0.0.1:11434/v1',
-            apiKeyEnv: 'OLLAMA_API_KEY',
-            providerName: 'ollama',
-            headers: {
-              'X-Test': 'hello',
-            },
+        providerConfig: {
+          model: 'gpt-oss:20b',
+          baseUrl: 'http://127.0.0.1:11434/v1',
+          apiKeyEnv: 'OLLAMA_API_KEY',
+          providerName: 'ollama',
+          headers: {
+            'X-Test': 'hello',
           },
         },
-      },
+      }),
       homeRoot,
     )
 
@@ -1585,24 +1583,17 @@ test('assistant operator config keeps nested provider defaults across unrelated 
         schema: 'murph.operator-config.v1',
         defaultVault: null,
         assistant: {
-          provider: 'openai-compatible',
-          defaultsByProvider: {
-            'openai-compatible': {
-              codexCommand: null,
-              model: 'llama3.2:latest',
-              reasoningEffort: null,
-              sandbox: null,
-              approvalPolicy: null,
-              profile: null,
-              oss: false,
-              baseUrl: 'http://127.0.0.1:11434/v1',
-              apiKeyEnv: 'OLLAMA_API_KEY',
-              providerName: 'ollama',
-              headers: {
-                Authorization: 'Bearer override-token',
-                'X-Foo': 'bar',
-              },
+          backend: {
+            adapter: 'openai-compatible',
+            model: 'llama3.2:latest',
+            endpoint: 'http://127.0.0.1:11434/v1',
+            apiKeyEnv: 'OLLAMA_API_KEY',
+            providerName: 'ollama',
+            headers: {
+              Authorization: 'Bearer override-token',
+              'X-Foo': 'bar',
             },
+            options: null,
           },
           identityId: 'assistant:primary',
           failoverRoutes: null,
@@ -1637,7 +1628,7 @@ test('assistant operator config keeps nested provider defaults across unrelated 
     defaults,
     'openai-compatible',
   )
-  assert.equal(defaults?.provider, 'openai-compatible')
+  assert.equal(defaults?.backend?.adapter, 'openai-compatible')
   assert.equal(providerDefaults?.model, 'llama3.2:latest')
   assert.equal(providerDefaults?.baseUrl, 'http://127.0.0.1:11434/v1')
   assert.equal(providerDefaults?.apiKeyEnv, 'OLLAMA_API_KEY')
@@ -1650,72 +1641,46 @@ test('assistant operator config keeps nested provider defaults across unrelated 
 
   const stored = JSON.parse(await readFile(configPath, 'utf8')) as {
     assistant?: Record<string, unknown> & {
-      defaultsByProvider?: Record<string, unknown>
+      backend?: Record<string, unknown>
     }
   }
   assert.equal('model' in (stored.assistant ?? {}), false)
   assert.equal('baseUrl' in (stored.assistant ?? {}), false)
   assert.equal('apiKeyEnv' in (stored.assistant ?? {}), false)
-  assert.deepEqual(stored.assistant?.defaultsByProvider, {
-    'openai-compatible': {
-      codexCommand: null,
-      model: 'llama3.2:latest',
-      reasoningEffort: null,
-      sandbox: null,
-      approvalPolicy: null,
-      profile: null,
-      oss: false,
-      baseUrl: 'http://127.0.0.1:11434/v1',
-      apiKeyEnv: 'OLLAMA_API_KEY',
-      providerName: 'ollama',
-      headers: {
-        Authorization: 'Bearer override-token',
-        'X-Foo': 'bar',
-      },
+  assert.deepEqual(stored.assistant?.backend, {
+    adapter: 'openai-compatible',
+    model: 'llama3.2:latest',
+    endpoint: 'http://127.0.0.1:11434/v1',
+    apiKeyEnv: 'OLLAMA_API_KEY',
+    providerName: 'ollama',
+    headers: {
+      Authorization: 'Bearer override-token',
+      'X-Foo': 'bar',
     },
+    options: null,
   })
 })
 
-test('updating one provider defaults entry preserves other saved provider entries', async () => {
+test('updating the saved backend target replaces the previous backend cleanly', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-provider-map-'))
   const homeRoot = path.join(parent, 'home')
   cleanupPaths.push(parent)
 
   await mkdir(homeRoot, { recursive: true })
   await saveAssistantOperatorDefaultsPatch(
-    {
+    buildAssistantProviderDefaultsPatch({
+      defaults: null,
       provider: 'codex-cli',
-      defaultsByProvider: {
-        'codex-cli': {
-          codexCommand: '/opt/bin/codex',
-          model: 'gpt-5.4-mini',
-          reasoningEffort: 'high',
-          sandbox: 'danger-full-access',
-          approvalPolicy: 'never',
-          profile: 'ops',
-          oss: true,
-          baseUrl: null,
-          apiKeyEnv: null,
-          providerName: null,
-          headers: null,
-        },
-        'openai-compatible': {
-          codexCommand: null,
-          model: 'llama3.2:latest',
-          reasoningEffort: null,
-          sandbox: null,
-          approvalPolicy: null,
-          profile: null,
-          oss: false,
-          baseUrl: 'http://127.0.0.1:11434/v1',
-          apiKeyEnv: 'OLLAMA_API_KEY',
-          providerName: 'ollama',
-          headers: {
-            Authorization: 'Bearer override-token',
-          },
-        },
+      providerConfig: {
+        codexCommand: '/opt/bin/codex',
+        model: 'gpt-5.4-mini',
+        reasoningEffort: 'high',
+        sandbox: 'danger-full-access',
+        approvalPolicy: 'never',
+        profile: 'ops',
+        oss: true,
       },
-    },
+    }),
     homeRoot,
   )
 
@@ -1743,33 +1708,16 @@ test('updating one provider defaults entry preserves other saved provider entrie
   )
 
   const updated = await resolveAssistantOperatorDefaults(homeRoot)
-  assert.deepEqual(updated?.defaultsByProvider?.['codex-cli'], {
-    codexCommand: '/opt/bin/codex',
-    model: 'gpt-5.4-mini',
-    reasoningEffort: 'high',
-    sandbox: 'danger-full-access',
-    approvalPolicy: 'never',
-    profile: 'ops',
-    oss: true,
-    baseUrl: null,
-    apiKeyEnv: null,
-    providerName: null,
-    headers: null,
-  })
-  assert.deepEqual(updated?.defaultsByProvider?.['openai-compatible'], {
-    codexCommand: null,
+  assert.deepEqual(updated?.backend, {
+    adapter: 'openai-compatible',
     model: 'gpt-oss:20b',
-    reasoningEffort: null,
-    sandbox: null,
-    approvalPolicy: null,
-    profile: null,
-    oss: false,
-    baseUrl: 'http://127.0.0.1:11434/v1',
+    endpoint: 'http://127.0.0.1:11434/v1',
     apiKeyEnv: 'OLLAMA_API_KEY',
     providerName: 'ollama',
     headers: {
       Authorization: 'Bearer override-token',
     },
+    options: null,
   })
 })
 
@@ -4546,20 +4494,17 @@ test('scanAssistantAutoReplyOnce skips photo-only captures when the configured p
 
   await withTemporaryHome(homeRoot, async () => {
     await saveAssistantOperatorDefaultsPatch(
-      {
+      buildAssistantProviderDefaultsPatch({
+        defaults: null,
         provider: 'codex-cli',
-        defaultsByProvider: {
-          'codex-cli': {
-            codexCommand: null,
-            model: 'gpt-5.4-mini',
-            reasoningEffort: 'medium',
-            sandbox: 'danger-full-access',
-            approvalPolicy: 'never',
-            profile: null,
-            oss: false,
-          },
+        providerConfig: {
+          model: 'gpt-5.4-mini',
+          reasoningEffort: 'medium',
+          sandbox: 'danger-full-access',
+          approvalPolicy: 'never',
+          oss: false,
         },
-      },
+      }),
       homeRoot,
     )
 
@@ -4605,31 +4550,17 @@ test('scanAssistantAutoReplyOnce reroutes photo-only captures to a multimodal fa
   await withTemporaryHome(homeRoot, async () => {
     await saveAssistantOperatorDefaultsPatch(
       {
-        provider: 'codex-cli',
-        defaultsByProvider: {
-          'codex-cli': {
-            codexCommand: null,
+        ...buildAssistantProviderDefaultsPatch({
+          defaults: null,
+          provider: 'codex-cli',
+          providerConfig: {
             model: 'gpt-5.4-mini',
             reasoningEffort: 'medium',
             sandbox: 'danger-full-access',
             approvalPolicy: 'never',
-            profile: null,
             oss: false,
           },
-          'openai-compatible': {
-            codexCommand: null,
-            model: 'gpt-oss:20b',
-            reasoningEffort: null,
-            sandbox: null,
-            approvalPolicy: null,
-            profile: null,
-            oss: false,
-            baseUrl: 'http://127.0.0.1:11434/v1',
-            apiKeyEnv: 'OLLAMA_API_KEY',
-            providerName: 'ollama',
-            headers: null,
-          },
-        },
+        }),
         failoverRoutes: [
           {
             name: 'vision-backup',
@@ -6305,110 +6236,6 @@ test('scanAssistantAutoReplyOnce keeps scanning after a failed Telegram delivery
   assert.equal(successArtifact.captureId, 'cap-pass')
 })
 
-test('scanAssistantAutoReplyOnce records canonical write guard blocks as reply failures', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-auto-reply-guard-block-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
-
-  runtimeMocks.executeAssistantProviderTurn.mockRejectedValueOnce(
-    new VaultCliError(
-      'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED',
-      'Blocked canonical write guard because audited write state is corrupted (invalid_write_operation_metadata at .runtime/operations/op_demo.json). Use vault-cli or audited core mutations for canonical files.',
-    ),
-  )
-
-  const events: Array<{
-    captureId?: string
-    details?: string
-    errorCode?: string
-    safeDetails?: string
-    type: string
-  }> = []
-
-  const result = await scanAssistantAutoReplyOnce({
-    afterCursor: null,
-    autoReplyPrimed: true,
-    enabledChannels: ['telegram'],
-    inboxServices: {
-      async list() {
-        return {
-          items: [
-            {
-              captureId: 'cap-guard-blocked',
-              source: 'telegram',
-              accountId: 'bot',
-              externalId: 'update:guard-blocked',
-              threadId: '123',
-              threadTitle: 'Direct',
-              actorId: '111',
-              actorName: 'Bob',
-              actorIsSelf: false,
-              occurredAt: '2026-03-18T09:00:00Z',
-              receivedAt: null,
-              text: 'please update my morning drink',
-              attachmentCount: 0,
-              envelopePath: 'raw/inbox/guard-blocked.json',
-              eventId: 'evt-guard-blocked',
-              promotions: [],
-            },
-          ],
-        }
-      },
-      async show() {
-        return {
-          capture: {
-            captureId: 'cap-guard-blocked',
-            source: 'telegram',
-            accountId: 'bot',
-            externalId: 'update:guard-blocked',
-            threadId: '123',
-            threadTitle: 'Direct',
-            threadIsDirect: true,
-            actorId: '111',
-            actorName: 'Bob',
-            actorIsSelf: false,
-            occurredAt: '2026-03-18T09:00:00Z',
-            receivedAt: null,
-            text: 'please update my morning drink',
-            attachmentCount: 0,
-            envelopePath: 'raw/inbox/guard-blocked.json',
-            eventId: 'evt-guard-blocked',
-            createdAt: '2026-03-18T09:00:00Z',
-            promotions: [],
-            attachments: [],
-          },
-        }
-      },
-    } as any,
-    onEvent(event) {
-      events.push(event)
-    },
-    vault: vaultRoot,
-  })
-
-  assert.deepEqual(result, {
-    considered: 1,
-    failed: 1,
-    replied: 0,
-    skipped: 0,
-  })
-  assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 1)
-  assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 0)
-  assert.equal(
-    events.some(
-      (event) =>
-        event.type === 'capture.reply-failed' &&
-        event.captureId === 'cap-guard-blocked' &&
-        event.errorCode === 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED' &&
-        event.safeDetails ===
-          'assistant reply blocked by write safety check (ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED)' &&
-        event.details?.includes('Blocked canonical write guard'),
-    ),
-    true,
-  )
-})
-
 test('scanAssistantAutoReplyOnce records provider quota failures with a safe summary', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-auto-reply-usage-limit-'))
   const vaultRoot = path.join(parent, 'vault')
@@ -7653,32 +7480,6 @@ test('assistant Ink view-model replays persisted local transcript entries', () =
   ])
 })
 
-test('assistant Ink error presentation treats canonical write blocks as informational status only', () => {
-  const presentation = resolveAssistantTurnErrorPresentation({
-    error: new VaultCliError(
-      'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED',
-      'Direct canonical vault writes are blocked.',
-    ),
-    restoredQueuedPromptCount: 1,
-  })
-
-  assert.deepEqual(presentation.entry, {
-    kind: 'status',
-    text: 'Direct canonical vault writes are blocked.',
-  })
-  assert.equal(presentation.persistTranscriptError, false)
-  assert.deepEqual(presentation.status.kind, 'info')
-  assert.match(
-    presentation.status.text,
-    /Blocked a direct canonical vault write and kept the live vault unchanged\./u,
-  )
-  assert.match(
-    presentation.status.text,
-    /Queued follow-ups are back in the composer\./u,
-  )
-})
-
-
 test('assistant Ink view-model merges streaming trace updates by stream key', () => {
   const entries = applyInkChatTraceUpdates(
     [
@@ -8038,6 +7839,7 @@ test('assistant Ink view-model exposes codex-style footer metadata and busy copy
   assert.equal(
     formatChatMetadata(
       {
+        baseUrl: 'http://127.0.0.1:11434/v1',
         provider: 'openai-compatible',
         model: 'gpt-oss:20b',
         reasoningEffort: 'xhigh',
@@ -8049,6 +7851,7 @@ test('assistant Ink view-model exposes codex-style footer metadata and busy copy
   assert.deepEqual(
     resolveChatMetadataBadges(
       {
+        baseUrl: 'http://127.0.0.1:11434/v1',
         provider: 'openai-compatible',
         model: 'gpt-oss:20b',
         reasoningEffort: 'xhigh',
@@ -8060,6 +7863,46 @@ test('assistant Ink view-model exposes codex-style footer metadata and busy copy
         key: 'model',
         label: 'model',
         value: 'gpt-oss:20b',
+      },
+      {
+        key: 'vault',
+        label: 'vault',
+        value: '~/vault',
+      },
+    ],
+  )
+  assert.equal(
+    formatChatMetadata(
+      {
+        baseUrl: 'https://api.openai.com/v1',
+        provider: 'openai-compatible',
+        model: 'gpt-5.4',
+        reasoningEffort: 'medium',
+      },
+      '~/vault',
+    ),
+    'gpt-5.4 medium · ~/vault',
+  )
+  assert.deepEqual(
+    resolveChatMetadataBadges(
+      {
+        baseUrl: 'https://api.openai.com/v1',
+        provider: 'openai-compatible',
+        model: 'gpt-5.4',
+        reasoningEffort: 'medium',
+      },
+      '~/vault',
+    ),
+    [
+      {
+        key: 'model',
+        label: 'model',
+        value: 'gpt-5.4',
+      },
+      {
+        key: 'reasoning',
+        label: 'reasoning',
+        value: 'medium',
       },
       {
         key: 'vault',
@@ -8329,27 +8172,11 @@ test('assistant Ink queued prompt disposition replays completed follow-ups and r
     resolveAssistantQueuedPromptDisposition({
       pauseRequested: true,
       queuedPrompts: ['queued next'],
-      turnOutcome: 'blocked',
+      turnOutcome: 'completed',
     }),
     {
       kind: 'restore-composer',
       restoredQueuedPromptCount: 1,
-    },
-  )
-})
-
-test('assistant Ink blocked-turn feedback stays informational and status-only', () => {
-  assert.deepEqual(
-    resolveAssistantBlockedTurnFeedback('Assistant turn was blocked by the canonical write guard.'),
-    {
-      entry: {
-        kind: 'status',
-        text: 'Assistant turn was blocked by the canonical write guard.',
-      },
-      status: {
-        kind: 'info',
-        text: 'Assistant turn was blocked by the canonical write guard.',
-      },
     },
   )
 })

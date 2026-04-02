@@ -131,7 +131,7 @@ export const assistantTurnTimelineEventKindValues = [
   'turn.completed',
   'turn.deferred',
 ] as const
-export const assistantAskResultStatusValues = ['completed', 'blocked'] as const
+export const assistantAskResultStatusValues = ['completed'] as const
 export const assistantOutboxStatusValues = [
   'pending',
   'sending',
@@ -351,30 +351,6 @@ export const assistantDeliveryErrorSchema = z.object({
   code: z.string().min(1).nullable(),
   message: z.string().min(1),
 })
-
-export const assistantCanonicalWriteBlockSchema = z
-  .object({
-    code: z.literal('ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED'),
-    message: z.string().min(1),
-    paths: z.array(z.string().min(1)),
-    pathCount: z.number().int().nonnegative(),
-    guardFailureReason: z
-      .enum(['invalid_committed_payload', 'invalid_write_operation_metadata'])
-      .nullable()
-      .default(null),
-    guardFailurePath: z.string().min(1).nullable().default(null),
-    guardFailureMessage: z.string().min(1).nullable().default(null),
-    guardFailureCode: z.string().min(1).nullable().default(null),
-    guardFailureOperationId: z.string().min(1).nullable().default(null),
-    guardFailureTargetPath: z.string().min(1).nullable().default(null),
-    guardFailureActionKind: z
-      .enum(['jsonl_append', 'text_write'])
-      .nullable()
-      .default(null),
-    providerErrorCode: z.string().min(1).nullable().default(null),
-    providerErrorMessage: z.string().min(1).nullable().default(null),
-  })
-  .strict()
 
 export const assistantTurnReceiptContextSchema = z
   .object({
@@ -871,7 +847,6 @@ export const assistantAskResultSchema = z.object({
   deliveryDeferred: z.boolean().default(false),
   deliveryIntentId: z.string().min(1).nullable().default(null),
   deliveryError: assistantDeliveryErrorSchema.nullable(),
-  blocked: assistantCanonicalWriteBlockSchema.nullable().default(null),
 })
 
 export const assistantChatResultSchema = z.object({

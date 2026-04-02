@@ -150,12 +150,6 @@ export interface AssistantProviderAttemptPlan {
 
 export type AssistantProviderAttemptOutcome =
   | {
-      kind: 'blocked'
-      error: unknown
-      failoverState: AssistantProviderFailoverState
-      session: AssistantSession
-    }
-  | {
       kind: 'failed_terminal'
       error: unknown
       failoverState: AssistantProviderFailoverState
@@ -174,11 +168,6 @@ export type AssistantProviderAttemptOutcome =
     }
 
 export type AssistantProviderTurnRecoveryOutcome =
-  | {
-      kind: 'blocked'
-      error: unknown
-      session: AssistantSession
-    }
   | {
       kind: 'failed_terminal'
       error: unknown

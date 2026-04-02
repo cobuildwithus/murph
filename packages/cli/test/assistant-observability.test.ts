@@ -6,6 +6,7 @@ import { afterEach, test } from 'vitest'
 import { runAssistantDoctor } from '../src/assistant/doctor.js'
 import { recordAssistantDiagnosticEvent } from '@murphai/assistant-core/assistant/diagnostics'
 import { appendAssistantRuntimeEvent } from '@murphai/assistant-core/assistant/runtime-events'
+import { readAssistantTurnReceipt } from '@murphai/assistant-core/assistant/turns'
 import {
   createAssistantOutboxIntent,
   drainAssistantOutbox,
@@ -71,6 +72,87 @@ test('assistant status surfaces recent receipts and doctor passes on healthy loc
     ),
     true,
   )
+})
+
+test('assistant observability still reads legacy blocked turn receipts and status snapshots', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-observability-legacy-blocked-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+  await mkdir(statePaths.turnsDirectory, { recursive: true })
+
+  const legacyReceipt = {
+    schema: 'murph.assistant-turn-receipt.v1',
+    turnId: 'turn_legacy_blocked',
+    sessionId: 'asst_legacy_blocked',
+    provider: 'codex-cli',
+    providerModel: 'gpt-5.4-mini',
+    promptPreview: 'legacy blocked prompt',
+    responsePreview: null,
+    status: 'blocked',
+    deliveryRequested: true,
+    deliveryDisposition: 'blocked',
+    deliveryIntentId: null,
+    startedAt: '2026-03-30T10:00:00.000Z',
+    updatedAt: '2026-03-30T10:00:05.000Z',
+    completedAt: '2026-03-30T10:00:05.000Z',
+    lastError: {
+      code: 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED',
+      message: 'Legacy blocked turn.',
+    },
+    timeline: [
+      {
+        at: '2026-03-30T10:00:00.000Z',
+        kind: 'turn.started',
+        detail: null,
+        metadata: {},
+      },
+      {
+        at: '2026-03-30T10:00:05.000Z',
+        kind: 'turn.blocked',
+        detail: 'Legacy blocked turn.',
+        metadata: {},
+      },
+    ],
+  } as const
+
+  await writeFile(
+    path.join(statePaths.turnsDirectory, `${legacyReceipt.turnId}.json`),
+    `${JSON.stringify(legacyReceipt, null, 2)}\n`,
+    'utf8',
+  )
+
+  const baselineStatus = await getAssistantStatus({
+    vault: vaultRoot,
+    limit: 5,
+  })
+  await writeFile(
+    statePaths.statusPath,
+    `${JSON.stringify(
+      {
+        ...baselineStatus,
+        recentTurns: [legacyReceipt],
+      },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  )
+
+  const receipt = await readAssistantTurnReceipt(vaultRoot, legacyReceipt.turnId)
+  assert.equal(receipt?.status, 'blocked')
+  assert.equal(receipt?.deliveryDisposition, 'blocked')
+
+  const statusSnapshot = await readAssistantStatusSnapshot(vaultRoot)
+  assert.equal(statusSnapshot?.recentTurns[0]?.status, 'blocked')
+  assert.equal(statusSnapshot?.recentTurns[0]?.timeline[1]?.kind, 'turn.blocked')
+
+  const doctor = await runAssistantDoctor(vaultRoot)
+  const receiptCheck = doctor.checks.find((check) => check.name === 'turn-receipts')
+  assert.equal(receiptCheck?.details.parseErrors, 0)
+  assert.notEqual(receiptCheck?.status, 'fail')
 })
 
 test('assistant doctor flags malformed transcript lines without breaking status', async () => {

@@ -484,8 +484,8 @@ export function isProtectedCanonicalPath(relativePath: string): boolean {
     return false;
   }
 
-  // Raw artifacts remain enforced by the isolated provider workspace +
-  // sandbox boundary rather than full snapshot/replay in the assistant guard.
+  // Raw artifacts stay outside the protected canonical-write set; assistant turns
+  // rely on the shared Murph runtime/tool boundary rather than a second workspace guard.
   return (
     PROTECTED_CANONICAL_ROOT_FILES.has(normalizedRelativePath) ||
     normalizedRelativePath.startsWith(`${VAULT_LAYOUT.journalDirectory}/`) ||
