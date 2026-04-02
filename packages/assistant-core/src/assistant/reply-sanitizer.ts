@@ -1,4 +1,4 @@
-import { normalizeNullableString } from './shared.js'
+import { isAssistantUserFacingChannel } from './channel-presentation.js'
 
 const ASSISTANT_MARKDOWN_LINK_PATTERN = /\[([^\]\n]+)\]\(([^)\n]+)\)/gu
 const ASSISTANT_INLINE_SOURCE_REFERENCE_PATTERN =
@@ -36,11 +36,7 @@ export function buildOutboundReplyFormattingGuidance(channel: string | null): st
 }
 
 export function isAssistantOutboundReplyChannel(channel: string | null): boolean {
-  const normalized = normalizeNullableString(channel)?.toLowerCase() ?? null
-  if (!normalized) {
-    return false
-  }
-  return normalized !== 'local' && normalized !== 'null'
+  return isAssistantUserFacingChannel(channel)
 }
 
 export function stripAssistantSourceCalloutPrefix(line: string): string {
