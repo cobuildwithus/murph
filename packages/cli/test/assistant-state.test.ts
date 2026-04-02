@@ -1871,6 +1871,7 @@ test('loadAssistantMemoryPromptBlock keeps daily notes out of the core bootstrap
     text: 'User has asthma.',
     scope: 'long-term',
     section: 'Health context',
+    allowSensitiveHealthContext: true,
     sourcePrompt: 'Remember that I have asthma.',
   })
 
@@ -1891,8 +1892,28 @@ test('loadAssistantMemoryPromptBlock keeps daily notes out of the core bootstrap
   assert.doesNotMatch(sharedPrompt ?? '', /User has asthma\./u)
 })
 
-test('upsertAssistantMemory requires explicit remember intent for health context', async () => {
+test('upsertAssistantMemory accepts durable health context without explicit remember phrasing in private contexts', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-health-policy-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const result = await upsertAssistantMemory({
+    vault: vaultRoot,
+    text: 'User has diabetes.',
+    scope: 'both',
+    section: 'Health context',
+    allowSensitiveHealthContext: true,
+    sourcePrompt: 'I have diabetes.',
+  })
+
+  assert.equal(result.longTermAdded, 1)
+  assert.equal(result.dailyAdded, 1)
+  assert.equal(result.memories.some((memory) => memory.text === 'User has diabetes.'), true)
+})
+
+test('upsertAssistantMemory still blocks health context outside private assistant contexts', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-health-private-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -1903,8 +1924,9 @@ test('upsertAssistantMemory requires explicit remember intent for health context
       text: 'User has diabetes.',
       scope: 'long-term',
       section: 'Health context',
+      sourcePrompt: 'I have diabetes.',
     }),
-    /explicit remember request/u,
+    /private assistant contexts/u,
   )
 })
 

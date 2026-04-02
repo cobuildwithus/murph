@@ -197,7 +197,7 @@ export async function loadAssistantMemoryPromptBlock(
   return truncateMemoryPromptText(
     [
       'Assistant memory lives outside the canonical vault and is only for conversational continuity.',
-      'Use this core block only for durable naming, response preferences, standing instructions, and approved private-context health memory.',
+      'Use this core block only for durable naming, response preferences, standing instructions, useful long-lived context, and private-context health memory.',
       'If assistant memory conflicts with the vault, trust the vault.',
       `Core assistant memory:\n${blocks.join('\n\n')}`,
     ].join('\n\n'),
@@ -535,7 +535,7 @@ function normalizeAssistantMemoryUpsert(
   const allowSensitiveHealthContext =
     turnContext?.allowSensitiveHealthContext ??
     input.allowSensitiveHealthContext ??
-    true
+    false
   const provenance = turnContext?.provenance ??
     input.provenance ??
     {

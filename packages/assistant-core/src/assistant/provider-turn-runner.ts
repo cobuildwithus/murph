@@ -305,6 +305,10 @@ async function resolveAssistantRouteTurnPlan(input: {
         })
       : null
   const shouldInjectBootstrapContext = resumeProviderSessionId === null
+  const shouldInjectFirstTurnCheckIn =
+    input.input.includeFirstTurnCheckIn === true &&
+    shouldInjectBootstrapContext &&
+    input.session.turnCount === 0
   const conversationMessages = removeTrailingCurrentUserPrompt(
     await loadAssistantConversationMessages({
       limit: 20,
@@ -351,6 +355,7 @@ async function resolveAssistantRouteTurnPlan(input: {
       assistantMemoryToolsAvailable,
       assistantMemoryPrompt,
       channel: input.input.channel ?? input.session.binding.channel,
+      firstTurnCheckIn: shouldInjectFirstTurnCheckIn,
     }),
   }
 }
@@ -905,6 +910,7 @@ function buildAssistantSystemPrompt(input: {
   }
   assistantMemoryPrompt: string | null
   channel: string | null
+  firstTurnCheckIn: boolean
 }): string {
   return [
     'You are Murph, a local-first health assistant bound to one active vault for this session.',
@@ -936,6 +942,7 @@ function buildAssistantSystemPrompt(input: {
     'Use canonical vault records and structured CLI output as the source of truth for health data. Read raw files directly only when the CLI or bound Murph tools lack the view you need or the user explicitly asks for targeted file-level inspection. Prefer narrow vault text-file reads over broad scans when file inspection is necessary.',
     buildAssistantVaultEvidenceFormattingGuidance(input.channel),
     buildAssistantSystemPromptOutboundReplyGuidance(input.channel),
+    buildAssistantFirstTurnCheckInGuidanceText(input.firstTurnCheckIn),
     input.assistantMemoryPrompt,
     buildAssistantStateGuidanceText({
       rawCommand: input.cliAccess.rawCommand,
@@ -978,6 +985,24 @@ function buildAssistantStateGuidanceText(
       'Do not claim you inspected or updated assistant scratch state in this session unless a real tool call happened.',
     ],
   })
+}
+
+function buildAssistantFirstTurnCheckInGuidanceText(
+  enabled: boolean,
+): string | null {
+  if (!enabled) {
+    return null
+  }
+
+  return [
+    'On the first reply of a brand-new interactive chat session, include one short optional first-chat check-in covering:',
+    '- what name they want you to use',
+    '- what tone or response style they want',
+    '- what health goals they want help with',
+    'Also include a very brief Murph overview in at most two sentences: explain that Murph is a local-first health assistant that can help with logs, patterns, and health questions, and that they can send text, photos, voice memos, Telegram messages, or email.',
+    'If the first user message already asks for something concrete, answer that request first and then add the optional check-in as a brief closing note.',
+    'Make it clear the check-in is optional, keep it brief, and do not turn it into a longer interview.',
+  ].join('\n')
 }
 
 function buildAssistantVaultEvidenceFormattingGuidance(
@@ -1026,18 +1051,19 @@ function buildAssistantMemoryGuidanceText(
       'When the current request depends on prior preferences, ongoing goals, recurring health context, or earlier plans, search assistant memory before answering.',
       'The active vault is already bound in this session. Do not switch vaults unless the user explicitly targets a different vault.',
       `Use \`${input.rawCommand} assistant memory ...\` only as a fallback when the bound assistant-memory tools are unavailable in this session.`,
-      'Use memory upserts only when the user wants something remembered or when a stable identity, preference, or standing instruction clearly should persist.',
-      'After a substantive conversation that surfaces a stable identity, preference, standing instruction, or durable health baseline, consider offering one short remember suggestion and only upsert after explicit user intent or acceptance.',
+      'Use assistant memory proactively when a stable identity, preference, standing instruction, useful project context, or other future-relevant context is likely to help later conversations.',
+      'You do not need a separate remember request first. If something is clearly useful for future continuity, upsert it directly.',
+      'Use daily memory for short-lived context from the current stretch of conversation and long-term memory for durable preferences, identity, standing instructions, and durable health context.',
       'When manually upserting durable memory outside a live assistant turn, phrase `text` as the exact stored sentence you want committed, such as `Call the user Alex.`, `User prefers the default assistant tone.`, or `Keep responses brief.`',
       'Use `assistant memory forget` to remove mistaken or obsolete memory instead of appending a contradiction.',
-      'Health memory is stricter: only store durable health context when the user explicitly asks you to remember it, and only in private assistant contexts.',
+      'Sensitive health memory still requires a private assistant context. Do not store it from shared or non-private conversations.',
     ],
     unavailableLines: [
       'Assistant memory tools are not exposed in this session.',
       'Use the injected core memory block if present, but do not claim you searched, updated, or forgot assistant memory unless a real tool call happened.',
       `Use \`${input.rawCommand} assistant memory search|get|upsert|forget\` when you need stored memory and the bound tools are unavailable.`,
       'When prior continuity would matter and you cannot search memory in this session, ask a brief clarifying question instead of inventing recall.',
-      'Health memory is stricter: only store durable health context when the user explicitly asks you to remember it, and only in private assistant contexts.',
+      'Sensitive health memory still requires a private assistant context. Do not store it from shared or non-private conversations.',
     ],
   })
 }

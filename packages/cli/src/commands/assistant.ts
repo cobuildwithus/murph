@@ -731,6 +731,7 @@ async function runAssistantChatCommand(context: {
 }) {
   const result = await runAssistantChat({
     vault: context.options.vault,
+    includeFirstTurnCheckIn: true,
     initialPrompt: context.args.prompt,
     ...assistantConversationOptionsFromCli(context.options),
     ...assistantProviderOverridesFromCli(context.options),

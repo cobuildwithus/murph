@@ -334,7 +334,7 @@ function parseAssistantMessageRequestBody(payload: unknown): AssistantMessageReq
   assertOptionalNullableStringField(record, 'operatorAuthority', 'message')
   assertOptionalNullableStringField(record, 'turnTrigger', 'message')
   assertOptionalBooleanField(record, 'deliverResponse', 'message')
-  assertOptionalBooleanField(record, 'enableFirstTurnOnboarding', 'message')
+  assertOptionalBooleanField(record, 'includeFirstTurnCheckIn', 'message')
   assertOptionalBooleanField(record, 'persistUserPromptOnFailure', 'message')
   assertOptionalObjectField(record, 'modelSpec', 'message')
   if (

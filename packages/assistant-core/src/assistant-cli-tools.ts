@@ -481,7 +481,7 @@ function createAssistantRuntimeToolDefinitions(
     defineAssistantTool({
       name: 'assistant.memory.upsert',
       description:
-        'Upsert one assistant memory sentence into long-term or daily memory. Use this only when the user wants something remembered or a durable instruction clearly should persist.',
+        'Upsert one assistant memory sentence into long-term or daily memory when useful future continuity should persist.',
       inputSchema: z.object({
         text: z.string().min(1),
         scope: assistantMemoryWriteScopeSchema.optional(),
