@@ -12,7 +12,7 @@ This app is intentionally separate from `apps/web`:
 - verify signed internal dispatch from `apps/web`
 - coordinate per-user runs through a `USER_RUNNER` Durable Object
 - store one encrypted hosted workspace snapshot in the existing `vault` bundle slot plus separately encrypted raw-artifact objects in the `BUNDLES` R2 bucket
-- perform durable hosted bootstrap explicitly on `member.activated`, then let later runs backfill missing durable hosted assistant config for older workspaces instead of relying on implicit provider fallback
+- perform durable hosted bootstrap explicitly on `member.activated`
 - restore a temporary execution context for one-shot runs
 - start the Durable Object's native Cloudflare container on demand for the runner process
 - run the existing Murph inbox, parser, assistant, device-sync, and hosted share-import seams for member activation, direct Linq messages, hosted share acceptance, hosted device-sync wake events, and periodic assistant ticks through the headless `@murphai/assistant-runtime` package
@@ -52,7 +52,7 @@ Current worker env/config names read directly by `src/env.ts`:
 - optional non-secret: `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS` defaults to `60000`
 - optional non-secret: `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS` defaults to `30000` and is forwarded into the container runtime
 - optional non-secret: `HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION` defaults to enabled; set it to `false`, `0`, `no`, `off`, or `disabled` to keep the hosted runner on deterministic inbox/parser/device-sync/share-import work only, strip automation-only provider/channel secrets, skip auto-enabling assistant reply channels, and skip the general assistant automation loop
-- optional non-secret: `HOSTED_ASSISTANT_*` vars choose the explicit platform-managed hosted assistant profile that hosted bootstrap persists into `~/.murph/config.json`; later runs can also backfill older workspaces that are still missing that durable hosted profile. `HOSTED_ASSISTANT_API_KEY_ENV` names the env var to read at runtime; it is never the raw API key itself
+- optional non-secret: `HOSTED_ASSISTANT_*` vars choose the explicit platform-managed hosted assistant profile that hosted bootstrap persists into `~/.murph/config.json`. `HOSTED_ASSISTANT_API_KEY_ENV` names the env var to read at runtime; it is never the raw API key itself
 - optional non-secret: `HOSTED_WEB_BASE_URL` gives the worker a shared hosted-web base URL for runner proxy calls back into `apps/web` and is also available to the runtime when `src/runner-env.ts` allows it
 - optional non-secret: `HOSTED_DEVICE_SYNC_CONTROL_BASE_URL`, `HOSTED_AI_USAGE_BASE_URL`, and `HOSTED_SHARE_API_BASE_URL` are worker-side runner proxy overrides for hosted web control-plane routes that intentionally live on separate hosts
 - optional provider/toolchain vars and secrets configured on the Worker are forwarded into the container only when `src/runner-env.ts` explicitly allowlists them; the worker-side hosted web proxy inputs above stay on the Worker side unless that file names them

@@ -27,10 +27,7 @@ import { isAssistantOpenAIBaseUrl } from './assistant/shared.js'
 import type { AssistantProviderConfigInput } from './assistant/provider-config.js'
 import {
   readOperatorConfig,
-  resolveAssistantOperatorDefaults,
-  resolveAssistantProviderDefaults,
   saveHostedAssistantConfig,
-  type AssistantOperatorDefaults,
 } from './operator-config.js'
 
 export const HOSTED_ASSISTANT_PROVIDER_ENV = 'HOSTED_ASSISTANT_PROVIDER'
@@ -59,7 +56,6 @@ export const HOSTED_ASSISTANT_CONFIG_ENV_NAMES = [
   HOSTED_ASSISTANT_OSS_ENV,
 ] as const
 
-const HOSTED_ASSISTANT_LEGACY_PROFILE_ID = 'saved-default'
 const HOSTED_ASSISTANT_PLATFORM_PROFILE_ID = 'platform-default'
 
 export type HostedAssistantConfigurationErrorCode =
@@ -86,7 +82,7 @@ export interface HostedAssistantOperatorConfigState {
 
 export interface HostedAssistantBootstrapResult extends HostedAssistantOperatorConfigState {
   seeded: boolean
-  source: 'hosted-env' | 'invalid' | 'legacy-defaults' | 'missing' | 'saved'
+  source: 'hosted-env' | 'invalid' | 'missing' | 'saved'
 }
 
 interface HostedAssistantSeedPlan {
@@ -262,29 +258,6 @@ export async function ensureHostedAssistantOperatorDefaults(input: {
     }
   }
 
-  if (!existingHostedConfig) {
-    const legacyHostedConfig = resolveHostedAssistantLegacyConfig(
-      existingOperatorConfig?.assistant ??
-        (await resolveAssistantOperatorDefaults(input.homeDirectory)),
-    )
-
-    if (legacyHostedConfig) {
-      const saved = await saveHostedAssistantConfig(
-        legacyHostedConfig,
-        input.homeDirectory,
-      )
-      const savedState = resolveHostedAssistantOperatorDefaultsState(
-        saved.hostedAssistant,
-      )
-
-      return {
-        ...savedState,
-        seeded: true,
-        source: 'legacy-defaults',
-      }
-    }
-  }
-
   if (
     existingActiveProfile?.managedBy === 'platform' &&
     envProfile
@@ -336,7 +309,7 @@ export async function ensureHostedAssistantOperatorDefaults(input: {
     [
       'Hosted assistant automation requires explicit hosted assistant config.',
       `Set ${HOSTED_ASSISTANT_PROVIDER_ENV} and ${HOSTED_ASSISTANT_MODEL_ENV}`,
-      'or save assistant operator defaults or an explicit hosted assistant profile before hosted runs.',
+      'or save an explicit hosted assistant profile before hosted runs.',
     ].join(' '),
   )
 }
@@ -386,46 +359,6 @@ function resolveHostedAssistantEnvProfile(
     managedBy: 'platform',
     providerConfig: seedPlan.providerConfig,
   })
-}
-
-function resolveHostedAssistantLegacyConfig(
-  defaults: AssistantOperatorDefaults | null | undefined,
-): HostedAssistantConfig | null {
-  const provider = resolveHostedAssistantConfiguredProvider(defaults)
-  if (!provider) {
-    return null
-  }
-
-  const providerDefaults = resolveAssistantProviderDefaults(defaults, provider)
-  if (!providerDefaults) {
-    return null
-  }
-
-  const profile = createHostedAssistantProfile({
-    id: HOSTED_ASSISTANT_LEGACY_PROFILE_ID,
-    managedBy: 'member',
-    providerConfig: {
-      provider,
-      ...providerDefaults,
-    },
-  })
-
-  return createHostedAssistantConfig({
-    activeProfileId: profile.id,
-    profiles: [profile],
-  })
-}
-
-function resolveHostedAssistantConfiguredProvider(
-  defaults: AssistantOperatorDefaults | null | undefined,
-): AssistantChatProvider | null {
-  for (const provider of ['openai-compatible', 'codex-cli'] as const) {
-    if (resolveAssistantProviderDefaults(defaults, provider)) {
-      return provider
-    }
-  }
-
-  return null
 }
 
 function upsertHostedAssistantProfile(

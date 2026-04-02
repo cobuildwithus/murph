@@ -139,77 +139,6 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
     await expect(resolveAssistantOperatorDefaults(homeDirectory)).resolves.toBeNull();
   });
 
-  it("backfills hosted config from legacy saved assistant defaults without persisting hosted headers or options", async () => {
-    const homeDirectory = await createTemporaryHomeDirectory();
-    const operatorConfigPath = resolveOperatorConfigPath(homeDirectory);
-
-    await mkdir(path.dirname(operatorConfigPath), { recursive: true });
-    await writeFile(
-      operatorConfigPath,
-      `${JSON.stringify({
-        assistant: {
-          defaultsByProvider: {
-            "openai-compatible": {
-              apiKeyEnv: "OPENAI_API_KEY",
-              baseUrl: "https://api.openai.com/v1",
-              headers: {
-                Authorization: "Bearer should-not-copy-into-hosted-profile",
-              },
-              model: "gpt-5.4",
-              options: {
-                unsupported: true,
-              },
-              providerName: "openai",
-            },
-          },
-          provider: "openai-compatible",
-        },
-        defaultVault: null,
-        schema: "murph.operator-config.v1",
-        updatedAt: "2026-03-28T00:00:00.000Z",
-      }, null, 2)}\n`,
-      "utf8",
-    );
-
-    const result = await ensureHostedAssistantOperatorDefaults({
-      allowMissing: false,
-      env: {},
-      homeDirectory,
-    });
-
-    expect(result).toMatchObject({
-      configured: true,
-      provider: "openai-compatible",
-      seeded: true,
-      source: "legacy-defaults",
-    });
-
-    await expect(resolveHostedAssistantConfig(homeDirectory)).resolves.toMatchObject({
-      activeProfileId: "saved-default",
-      profiles: [
-        {
-          apiKeyEnv: "OPENAI_API_KEY",
-          baseUrl: "https://api.openai.com/v1",
-          id: "saved-default",
-          managedBy: "member",
-          model: "gpt-5.4",
-          provider: "openai-compatible",
-          providerName: "openai",
-        },
-      ],
-    });
-
-    const rawConfig = JSON.parse(
-      await readFile(operatorConfigPath, "utf8"),
-    ) as {
-      hostedAssistant?: {
-        profiles?: Array<Record<string, unknown>>;
-      } | null;
-    };
-    expect(rawConfig.hostedAssistant?.profiles?.[0]?.headers).toBeUndefined();
-    expect(rawConfig.hostedAssistant?.profiles?.[0]?.options).toBeUndefined();
-  });
-
   it("rejects incomplete custom OpenAI-compatible configuration", async () => {
     const homeDirectory = await createTemporaryHomeDirectory();
 
@@ -351,7 +280,7 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
     await expect(resolveAssistantOperatorDefaults(homeDirectory)).resolves.toBeNull();
   });
 
-  it("fails closed instead of migrating legacy defaults when durable hosted config is invalid", async () => {
+  it("fails closed when durable hosted config is invalid even if assistant defaults exist", async () => {
     const homeDirectory = await createTemporaryHomeDirectory();
     const operatorConfigPath = resolveOperatorConfigPath(homeDirectory);
 

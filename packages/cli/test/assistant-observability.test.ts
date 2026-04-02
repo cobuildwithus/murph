@@ -151,8 +151,10 @@ test('assistant observability still reads legacy blocked turn receipts and statu
 
   const doctor = await runAssistantDoctor(vaultRoot)
   const receiptCheck = doctor.checks.find((check) => check.name === 'turn-receipts')
-  assert.equal(receiptCheck?.details.parseErrors, 0)
-  assert.notEqual(receiptCheck?.status, 'fail')
+  assert.ok(receiptCheck)
+  assert.ok(receiptCheck.details)
+  assert.equal(receiptCheck.details.parseErrors, 0)
+  assert.notEqual(receiptCheck.status, 'fail')
 })
 
 test('assistant doctor flags malformed transcript lines without breaking status', async () => {

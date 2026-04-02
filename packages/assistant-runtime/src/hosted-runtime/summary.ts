@@ -74,10 +74,6 @@ function formatHostedAssistantBootstrap(result: HostedBootstrapResult): string {
     }
   }
 
-  if (result.assistantConfigStatus === "legacy-defaults") {
-    return `backfilled hosted assistant config from saved assistant backend (${result.assistantProvider})`;
-  }
-
   return result.assistantSeeded
     ? `seeded explicit hosted assistant config (${result.assistantProvider})`
     : `reused explicit hosted assistant config (${result.assistantProvider})`;
