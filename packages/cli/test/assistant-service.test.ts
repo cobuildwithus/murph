@@ -144,6 +144,55 @@ async function findGuardReceiptRoot(): Promise<string> {
   return receiptRoot
 }
 
+function assertPromptHasSelectiveMemoryGuidance(
+  systemPrompt: string | null | undefined,
+): void {
+  const text = systemPrompt ?? ''
+  assert.match(
+    text,
+    /Search assistant memory only when .*prior preferences.*ongoing goals.*earlier plans/u,
+  )
+  assert.match(text, /Use assistant memory lightly and selectively/u)
+  assert.match(
+    text,
+    /lightweight chat, greetings, obvious one-off questions, or simple acknowledgements/u,
+  )
+  assert.match(
+    text,
+    /Do not search or write assistant memory solely because this is the first chat turn/u,
+  )
+  assert.match(
+    text,
+    /durable fact .* likely to help later conversations/u,
+  )
+}
+
+function assertPromptHasFirstTurnCheckInGuidance(
+  systemPrompt: string | null | undefined,
+): void {
+  const text = systemPrompt ?? ''
+  assert.match(text, /what name they want you to use/u)
+  assert.match(text, /what tone or response style they want/u)
+  assert.match(text, /what health goals they want help with/u)
+  assert.match(
+    text,
+    /greeting, a brief opener, or a vague request for general help/u,
+  )
+  assert.match(
+    text,
+    /first user message already asks for something concrete/u,
+  )
+}
+
+function assertPromptDoesNotHaveFirstTurnCheckInGuidance(
+  systemPrompt: string | null | undefined,
+): void {
+  const text = systemPrompt ?? ''
+  assert.doesNotMatch(text, /what name they want you to use/u)
+  assert.doesNotMatch(text, /what tone or response style they want/u)
+  assert.doesNotMatch(text, /what health goals they want help with/u)
+}
+
 async function writeGuardReceipt(input: {
   operationId: string
   createdAt: string
@@ -573,18 +622,10 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, sh
     /assistant\.state\.(show|list)/u,
   )
   assert.match(firstCall?.systemPrompt ?? '', /non-canonical runtime scratchpads/u)
-  assert.match(firstCall?.systemPrompt ?? '', /search assistant memory before answering/u)
-  assert.match(
-    firstCall?.systemPrompt ?? '',
-    /Use assistant memory proactively/u,
-  )
+  assertPromptHasSelectiveMemoryGuidance(firstCall?.systemPrompt)
   assert.match(
     firstCall?.systemPrompt ?? '',
     /Before asking again for a stable preference, standing instruction, or recurring context, search assistant memory first/u,
-  )
-  assert.match(
-    firstCall?.systemPrompt ?? '',
-    /do not need a separate remember request first/u,
   )
   assert.match(
     firstCall?.systemPrompt ?? '',
@@ -638,10 +679,7 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, sh
     firstCall?.systemPrompt ?? '',
     /Never include citations, source lists, footnotes/u,
   )
-  assert.doesNotMatch(
-    firstCall?.systemPrompt ?? '',
-    /optional first-chat check-in/u,
-  )
+  assertPromptDoesNotHaveFirstTurnCheckInGuidance(firstCall?.systemPrompt)
 })
 
 test('sendAssistantMessage reuses the same requested working directory across repeated turns in one session', async () => {
@@ -2262,16 +2300,17 @@ test('sendAssistantMessage injects the first-chat check-in only for an opted-in 
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
   const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
 
-  assert.match(firstCall?.systemPrompt ?? '', /optional first-chat check-in/u)
-  assert.match(firstCall?.systemPrompt ?? '', /what name they want you to use/u)
-  assert.match(firstCall?.systemPrompt ?? '', /what tone or response style they want/u)
-  assert.match(firstCall?.systemPrompt ?? '', /what health goals they want help with/u)
+  assertPromptHasFirstTurnCheckInGuidance(firstCall?.systemPrompt)
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /Do not search or write assistant memory just because this is the first chat turn or because you are doing the optional check-in/u,
+  )
   assert.match(firstCall?.systemPrompt ?? '', /at most two sentences/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
     /text, photos, voice memos, Telegram messages, or email/u,
   )
-  assert.doesNotMatch(secondCall?.systemPrompt ?? '', /optional first-chat check-in/u)
+  assertPromptDoesNotHaveFirstTurnCheckInGuidance(secondCall?.systemPrompt)
 })
 
 test('sendAssistantMessage injects the first-chat check-in for each later opted-in new session', async () => {
@@ -2316,10 +2355,8 @@ test('sendAssistantMessage injects the first-chat check-in for each later opted-
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
   const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
 
-  assert.match(firstCall?.systemPrompt ?? '', /optional first-chat check-in/u)
-  assert.match(firstCall?.systemPrompt ?? '', /what name they want you to use/u)
-  assert.match(secondCall?.systemPrompt ?? '', /optional first-chat check-in/u)
-  assert.match(secondCall?.systemPrompt ?? '', /what tone or response style they want/u)
+  assertPromptHasFirstTurnCheckInGuidance(firstCall?.systemPrompt)
+  assertPromptHasFirstTurnCheckInGuidance(secondCall?.systemPrompt)
 })
 
 test('sendAssistantMessage injects the first-chat check-in for first-turn messaging replies', async () => {
@@ -2361,8 +2398,7 @@ test('sendAssistantMessage injects the first-chat check-in for first-turn messag
   })
 
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
-  assert.match(firstCall?.systemPrompt ?? '', /optional first-chat check-in/u)
-  assert.match(firstCall?.systemPrompt ?? '', /what name they want you to use/u)
+  assertPromptHasFirstTurnCheckInGuidance(firstCall?.systemPrompt)
   assert.match(firstCall?.systemPrompt ?? '', /at most two sentences/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
@@ -2408,8 +2444,7 @@ test('sendAssistantMessage does not inject the first-chat check-in for proactive
   })
 
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
-  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /optional first-chat check-in/u)
-  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /what name they want you to use/u)
+  assertPromptDoesNotHaveFirstTurnCheckInGuidance(firstCall?.systemPrompt)
 })
 
 test('sendAssistantMessage injects the first-chat check-in only on the first messaging reply turn', async () => {
@@ -2472,8 +2507,8 @@ test('sendAssistantMessage injects the first-chat check-in only on the first mes
 
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
   const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
-  assert.match(firstCall?.systemPrompt ?? '', /optional first-chat check-in/u)
-  assert.doesNotMatch(secondCall?.systemPrompt ?? '', /optional first-chat check-in/u)
+  assertPromptHasFirstTurnCheckInGuidance(firstCall?.systemPrompt)
+  assertPromptDoesNotHaveFirstTurnCheckInGuidance(secondCall?.systemPrompt)
 })
 
 test('sendAssistantMessage does not inject the first-chat check-in when a messaging thread resumes a saved provider session', async () => {
@@ -2546,7 +2581,7 @@ test('sendAssistantMessage does not inject the first-chat check-in when a messag
 
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
   assert.equal(firstCall?.resumeProviderSessionId, 'thread-telegram-resume')
-  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /optional first-chat check-in/u)
+  assertPromptDoesNotHaveFirstTurnCheckInGuidance(firstCall?.systemPrompt)
 })
 
 test('sendAssistantMessage does not inject the first-chat check-in for cron deliveries', async () => {
@@ -2588,8 +2623,7 @@ test('sendAssistantMessage does not inject the first-chat check-in for cron deli
   })
 
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
-  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /optional first-chat check-in/u)
-  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /what name they want you to use/u)
+  assertPromptDoesNotHaveFirstTurnCheckInGuidance(firstCall?.systemPrompt)
 })
 
 test('sendAssistantMessage clears stale provider session ids when switching providers', async () => {
