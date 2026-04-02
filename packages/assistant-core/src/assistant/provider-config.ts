@@ -26,6 +26,8 @@ export interface AssistantProviderConfig {
   sandbox: AssistantSandbox | null
 }
 
+export const DEFAULT_MURPH_CODEX_REASONING_EFFORT = 'medium'
+
 export type AssistantProviderConfigInput = {
   approvalPolicy?: AssistantApprovalPolicy | null
   apiKeyEnv?: string | null
@@ -122,7 +124,9 @@ export function sanitizeAssistantProviderConfig(
         oss: input?.oss === true,
         profile: normalizeNullableString(input?.profile),
         providerName: null,
-        reasoningEffort: normalizeNullableString(input?.reasoningEffort),
+        reasoningEffort:
+          normalizeNullableString(input?.reasoningEffort) ??
+          DEFAULT_MURPH_CODEX_REASONING_EFFORT,
         sandbox: input?.sandbox ?? null,
       }
   }

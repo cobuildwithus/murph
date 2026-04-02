@@ -178,6 +178,7 @@ import {
 import { LIGHT_ASSISTANT_INK_THEME } from '../src/assistant/ui/theme.js'
 
 const cleanupPaths: string[] = []
+const DEFAULT_CODEX_REASONING_EFFORT = 'medium'
 const PHOTO_ONLY_CAPTURE_ID = 'cap-photo'
 const PHOTO_ONLY_OCCURED_AT = '2026-03-18T09:00:00Z'
 const PHOTO_ONLY_ATTACHMENT_BUFFER = Buffer.from([0xff, 0xd8, 0xff])
@@ -826,6 +827,43 @@ test('sendAssistantMessage does not persist hosted usage records without hosted 
   )
 
   assert.deepEqual(usageEntries, [])
+})
+
+test('sendAssistantMessage defaults Codex reasoning to the Murph-owned default', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-runtime-default-reasoning-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  runtimeMocks.executeAssistantProviderTurn.mockResolvedValueOnce({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-default-reasoning',
+    response: 'default reasoning reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'imessage:bob',
+    channel: 'imessage',
+    identityId: 'assistant:primary',
+    participantId: 'contact:bob',
+    sourceThreadId: 'chat-123',
+    provider: 'codex-cli',
+    prompt: 'Use the normal default.',
+  })
+
+  const providerCall = runtimeMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  assert.equal(
+    providerCall?.reasoningEffort,
+    DEFAULT_CODEX_REASONING_EFFORT,
+  )
+  assert.equal(
+    result.session.providerOptions.reasoningEffort,
+    DEFAULT_CODEX_REASONING_EFFORT,
+  )
 })
 
 test('sendAssistantMessage freezes hosted usage credential ownership from the provided execution context', async () => {
@@ -3414,7 +3452,8 @@ test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound 
     true,
   )
   assert.match(providerCall?.systemPrompt ?? '', /optional first-chat check-in/u)
-  assert.match(providerCall?.systemPrompt ?? '', /what health goals they want help with/u)
+  assert.match(providerCall?.systemPrompt ?? '', /what they want help with most right now/u)
+  assert.match(providerCall?.systemPrompt ?? '', /what you should call them/u)
   assert.match(providerCall?.systemPrompt ?? '', /at most two sentences/u)
   assert.deepEqual(listCalls, [
     {

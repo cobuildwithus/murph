@@ -68,8 +68,13 @@ import {
   resolveAssistantProviderDefaults,
 } from '@murphai/assistant-core/operator-config'
 import { prepareAssistantDirectCliEnv } from '@murphai/assistant-core/assistant-cli-access'
-import { serializeAssistantProviderSessionOptions } from '@murphai/assistant-core/assistant/provider-config'
-import { createSetupAssistantResolver } from '../src/setup-assistant.js'
+import {
+  serializeAssistantProviderSessionOptions,
+} from '@murphai/assistant-core/assistant/provider-config'
+import {
+  createSetupAssistantResolver,
+  DEFAULT_SETUP_CODEX_REASONING_EFFORT,
+} from '../src/setup-assistant.js'
 
 beforeEach(() => {
   providerMocks.executeCodexPrompt.mockReset()
@@ -461,7 +466,7 @@ test('defaultDiscoverOpenAICompatibleModels merges process env lookup with norma
   )
 })
 
-test('executeAssistantProviderTurn keeps absent Codex runtime overrides undefined', async () => {
+test('executeAssistantProviderTurn defaults absent Codex reasoning to the Murph-owned default', async () => {
   providerMocks.executeCodexPrompt.mockResolvedValue({
     finalMessage: 'assistant reply',
     jsonEvents: [],
@@ -479,7 +484,7 @@ test('executeAssistantProviderTurn keeps absent Codex runtime overrides undefine
   const call = providerMocks.executeCodexPrompt.mock.calls[0]?.[0]
   assert.equal(call?.codexCommand, undefined)
   assert.equal(call?.model, undefined)
-  assert.equal(call?.reasoningEffort, undefined)
+  assert.equal(call?.reasoningEffort, DEFAULT_SETUP_CODEX_REASONING_EFFORT)
   assert.equal(call?.sandbox, undefined)
   assert.equal(call?.approvalPolicy, undefined)
   assert.equal(call?.profile, undefined)
@@ -1405,6 +1410,31 @@ test('createSetupAssistantResolver applies named provider preset defaults before
   assert.equal(resolved.providerName, 'openrouter')
   assert.equal(resolved.model, 'openai/gpt-4.1-mini')
   assert.match(resolved.detail, /OpenRouter/u)
+})
+
+test('createSetupAssistantResolver defaults Codex reasoning effort when it is not specified', async () => {
+  const resolver = createSetupAssistantResolver({
+    assistantAccount: {
+      resolve: async () => null,
+    },
+    input: new PassThrough(),
+    output: new PassThrough(),
+  })
+
+  const resolved = await resolver.resolve({
+    allowPrompt: false,
+    commandName: 'setup',
+    preset: 'codex',
+    options: {
+      assistantModel: 'gpt-5.4',
+    } as any,
+  })
+
+  assert.equal(resolved.provider, 'codex-cli')
+  assert.equal(
+    resolved.reasoningEffort,
+    DEFAULT_SETUP_CODEX_REASONING_EFFORT,
+  )
 })
 
 test('createSetupAssistantResolver accepts reasoning effort for the official OpenAI-compatible target', async () => {
