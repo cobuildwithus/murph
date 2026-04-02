@@ -112,7 +112,7 @@ for (const entry of summary.packages) {
       throw new Error(
         `npm publish failed for ${entry.name}@${entry.version}. `
           + 'The package exists on npm but this workflow could not publish to the scoped package. '
-          + 'Configure npm trusted publishing for this repository/package or provide NPM_TOKEN to the publish job.',
+          + 'Configure npm trusted publishing for this repository/package.',
       );
     }
 
