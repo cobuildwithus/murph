@@ -2,6 +2,1049 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.1.1] - 2026-04-02
+
+### Added
+- add safe markdown memory append
+- flatten setup to one backend target
+- restore first-chat check-in and proactive memory
+- preserve hosted openai reasoning effort
+- land explicit hosted config
+- unify auto-reply multimodal inputs
+- land pending hosted web updates
+- add loading fallbacks and eslint cli
+- support hosted privy app clients
+- default hosted phone signup to us
+- cut over local capture sync to inbox cursor
+- use openai responses auto-compaction
+- add two-step linq intro flow
+- add openai-compatible tool runtime parity
+- preserve cron target continuity
+- finish cutover remainder
+- add assistant cron target commands
+- strengthen research-first cron presets
+- require research for condition roundups
+- personalize condition roundup preset
+- complete hosted gateway cutover
+- add local read projection
+- add gateway core boundary
+- refresh onboarding setup flow
+- add canonical inbox capture ledger
+- land bank entity seam
+- add hosted run trace
+- extract local assistant runtime daemon
+- add chatgpt patch wake helpers
+- add chatgpt thread check helpers
+- add data model composability preset
+- add ai usage ledger
+- share callback seams and keyring reads
+- add hosted parity bridge
+- externalize hosted workspace artifacts
+- add hosted telegram ingress
+- add architecture preset
+- add hosted install script
+- sync privy verified email into hosted runtime
+- add hosted email bridge
+- add oura webhook subscription support
+- land hosted web updates
+- add hosted email settings
+- add revnet repair tooling
+- add assistant state scratchpads
+- extract hosted runtime surface
+- add record edit and delete commands
+- finalize hosted outbox queue-before-commit flow
+- add revnet issuance
+- cut over hosted onboarding to privy
+- add workout format commands
+- add hosted share bundle flow
+- add hosted user env overrides
+- add compass-first quiet-default posture
+- add food and supplement rename commands
+- complete cloudflare runner phase 2
+- add food schedule command
+- add cloudflare execution runner
+- save assistant self delivery targets
+- add morning mindfulness cron preset
+- add recurring food daily autolog
+- add resilient observability and recovery
+- add food registry surface
+- add scheduled update onboarding step
+- add hosted onboarding flow
+- add hosted linq ingress
+- add public URL onboarding guidance
+- add garmin device adapter
+- warn on unsupported research plans
+- add research note commands
+- add intervention quick capture
+- add linux host support
+- persist onboarding account metadata
+- add linq inbox integration
+- add assistant cron presets
+- persist partial assistant onboarding
+- add first-class recipe records
+- add blood-test ingestion surface
+- allow note-only meal capture
+- add assistant chat queue and pause controls
+- add foreground run terminal logging
+- add hosted device sync control plane
+- add supplement compound ledger
+- rework setup onboarding flow
+- load local dotenv files
+- add agentmail email channel
+- add cron scheduling
+- add provider-first assistant setup
+- add multimodal inbox routing
+- add data bundle chatgpt flow
+- add structured strength session data
+- add dark theme support
+- add telegram assistant channel
+- bundle and manage local daemon
+- add iMessage self-chat mode
+- add onboard wizard and iMessage auto-reply
+- add explicit assistant memory tools
+- add workout quick capture
+- add assistant markdown memory
+- add assistant chat dark mode
+- persist chat model preferences
+- add root chat alias
+- add model switcher
+- show onboarding install summary
+- add oura polling integration
+- add cli and web auth controls
+- add whoop sync runtime
+- launch chat after setup
+- persist default vault
+- add graph-backed resting heart rate page
+- add whoop device provider foundation
+- add assistant iMessage delivery and ink chat
+- add telegram local-first connector
+- add provider-backed assistant runtime
+- add demo web vault
+- scaffold local observatory app
+- add macos setup wizard
+- add inbox model routing harness
+- support stdin payload input
+- expand vault command surface
+- add inbox parser setup controls
+- expand inbox attachment inspection
+- integrate parsed inbox runtime
+- expand vault-facing command surface
+- add staged write operations
+- add inbox attachment parser layer
+- add sqlite search runtime
+- add inbox runtime command surface
+- add source-agnostic inbox foundation
+- add source-agnostic inbox runtime
+- add retrieval search and timeline commands
+- add package-scoped release flow
+- harden raw import manifests
+- finish cutover follow-through
+- add payload-first health extension surfaces
+- add baseline vault packages
+
+### Fixed
+- backfill durable config
+- resolve reasoning effort by target
+- add messaging first-contact check-in
+- migrate legacy runtime schema
+- harden verify against CI env
+- alias messaging-ingress in vitest
+- classify guard-blocked auto replies as failures
+- trust committed writes without temp receipts
+- land greenfield side-effect cutover
+- hard-cut hosted device-sync mirror arbitration
+- harden client JSON parsing and wrangler helpers
+- persist onboard scheduled update selections
+- restore green checks and harden murph shim
+- fence stale webhook and token updates
+- restore green verification and hard-cut hosted runtime
+- close gateway and env replay seams
+- harden bundle and control-plane reads
+- retry stripe billing CAS misses
+- tolerate legacy runtime payloads
+- harden linq webhook ingress
+- reserve checkout before Stripe
+- stop leaking shareCode in internal URLs
+- harden linq webhook receipts
+- preserve refresh and webhook ordering
+- land hosted web review patch
+- scope provider resume recovery
+- serialize hosted onboarding transactions
+- harden poll wake and reply threading
+- land hosted runner review patches
+- handle empty forwarded args
+- land architecture review patch
+- consume review-gpt 0.5.21
+- land security audit patch
+- consume review-gpt 0.5.20
+- build assistantd before cli
+- unify thread helpers on package flow
+- restore verification green
+- support macos bash in release script
+- harden bundle restore and scrub linq urls
+- give auto-reply full murph autonomy
+- improve preset list output
+- clear hosted-web lint blockers
+- break source-level type cycles
+- land contact privacy hard cutover
+- tighten hosted Privy session recovery
+- harden dev smoke cleanup
+- allow tracked next eslint configs
+- land hosted privacy minimization without wallet deferral
+- minimize hosted webhook payload retention
+- align hosted and local web review patch
+- retry prepared build for onboard shim
+- restore green verification
+- omit absent optional event fields
+- fail loudly when build output is incomplete
+- stop privy completion auto-loop
+- recover murph onboard and stale default vaults
+- simplify hosted phone country picker
+- align next manifest with lockfile
+- remove package ESM boundary
+- preserve signup phone spacing
+- auto-finish hosted privy setup
+- resolve smoke script workspace imports
+- defer sqlite require for cloudflare deploy
+- cut iMessage sdk from worker bundle
+- recover local shims after repo move
+- resolve rollout artifacts from app deploy dir
+- install before cloudflare preflight
+- restore simplify preset
+- slim default audit bundle
+- sanitize stored metadata writes
+- drop registry self related ids
+- redact hosted HTTP error logs
+- redact public metadata
+- stabilize empty snapshots and drop cli shims
+- harden chatgpt thread wake fallback
+- narrow webhook imports and wake hints
+- remove legacy assistant-state migration shim
+- migrate assistant state off legacy repo path
+- lazy-load sqlite and narrow hosted inbox imports
+- preflight finish-task paths
+- remove root setup entrypoint
+- harden assistant auto-reply tool profile
+- repair ubuntu ci regressions
+- pass hosted web control env through deploy pipeline
+- enable hosted assistant automation by default
+- harden local gateway reply targets
+- refresh workspace importers
+- include root harness configs in audit bundle
+- add vercel production url fallbacks
+- load startup env defaults
+- ignore stale gateway snapshot replays
+- derive hosted urls from vercel production domain
+- share gateway event log helpers
+- bound auto-reply attachment prompts
+- land hosted review patch
+- restore green verification
+- tighten recurring food prompt heuristics
+- restore package-local vitest semantics
+- restore root package suite policy
+- refine onboarding assistant setup
+- tighten gateway route delivery rules
+- improve auto-reply failure observability
+- remove greenfield legacy fallbacks
+- harden atomic writes and returnTo validation
+- harden atomic writes and device-sync returnTo validation
+- preserve typed daemon errors
+- harden headless core boundary
+- land daemon and loopback followups
+- land workout-format followups
+- declare cloudflare assistant-core dependency
+- finish daemon runtime routing
+- harden assistant-state secrecy
+- remove assistant-services boundary
+- narrow stripe credential source
+- hard-cut remaining compatibility
+- harden storage id paths
+- land final cleanup follow-up
+- harden assistant delivery privacy gating
+- isolate session routing bindings
+- remove legacy workout compatibility
+- harden hosted run trace logs
+- harden daemon runtime follow-up
+- narrow outbound reply sanitization
+- preserve runner rpc request payloads
+- harden daemon trust boundaries
+- harden inbound sender authorization
+- harden hosted runner isolation
+- harden metering and export
+- harden hosted usage and commit invariants
+- clean up proxy web control clients
+- keep runtime type errors internal
+- harden web control boundaries
+- hydrate hosted attachment bytes
+- clarify hosted privacy copy
+- harden stripe freshness and retry recovery
+- proxy hosted usage export through worker
+- harden hosted runner trust boundary
+- harden hosted oura webhook handling
+- harden outbox and hosted recovery
+- harden share auth and replay follow-ups
+- filter automation-only user env
+- harden assistant resume and setup persistence
+- harden hosted trust boundaries
+- harden hosted sync fencing
+- harden local state durability
+- preserve legacy binding compatibility
+- align local and hosted remediation boundaries
+- restore garmin compatibility
+- close webhook contract gaps
+- harden stripe reconciliation
+- harden assistant session reliability
+- harden hosted and local webhook flows
+- simplify Oura webhook upkeep
+- simplify Oura webhook upkeep and idempotency
+- close garmin snapshot parse gap
+- harden hosted whoop sync state
+- harden runner trust boundaries and replay retention
+- finalize route-scoped recovery state
+- restore green verification and telegram parity
+- close hosted production blockers
+- harden privy session boundaries
+- harden hosted artifact hydration and key handling
+- preserve assistant headers on setup rerun
+- close final duplicate-send gaps
+- harden hosted and local Linq flows
+- harden hosted webhook boundaries
+- harden garmin snapshot normalization
+- ignore coverage artifacts in no-js guard
+- harden oura webhook imports
+- harden hosted production followups
+- harden assistant backlog reply scanning
+- harden hosted production followups
+- preserve pending replies after backlog drain
+- harden auto-reply outcome retries
+- tighten hosted webhook dispatch prisma boundary
+- repair non-vercel action lanes
+- validate stored write operation parsing
+- restore profile list date filters
+- harden oura import cleanup
+- keep hosted bootstrap explicit
+- centralize provider markdown registry writes
+- include cloudflare deploy artifacts in zip
+- tighten trust-boundary follow-up checks
+- schedule hosted execution drain
+- fix Oura import contract mismatches
+- use localhost instead of 127.0.0.1 and fix Oura scope parsing
+- trim install quickstart copy
+- harden write and inbox trust boundaries
+- finish cloudflare cleanup
+- use hosted sender identity for verified email sync
+- tighten hosted bridge readiness
+- drop legacy compatibility paths
+- harden hosted runner predeploy
+- harden staging deploy followups
+- harden assistant config durability
+- restore tolerant hydration
+- use root murph domain in test fixture
+- restore cli snippet and prove murph trigger
+- harden revnet repair replay
+- close assistant canonical-write review findings
+- finalize assistant canonical-write followups
+- harden revnet billing issuance flow
+- finalize predeploy hardening
+- harden hosted runner controls
+- clamp assistant vault turns
+- harden privy reauth flows
+- default local dev to webpack
+- harden hosted onboarding billing trust
+- harden hosted deploy config
+- suspend refunded members
+- isolate assistant provider workspace
+- accept pnpm argv separator in image cleanup
+- close production advice follow-ups
+- separate bootstrap from user env state
+- salvage assistant cleanup lanes
+- harden hosted bundles and webhook boundaries
+- track workout format source
+- stabilize hosted privy hydration
+- harden privy csp headers
+- harden privy csp headers
+- apply hosted webhook audit follow-ups
+- repair landing privy import
+- harden hosted webhook side effects
+- repair edit record rename flows
+- require explicit day-key policy on event edits
+- repair ink composer sync
+- use privy cookies for onboarding
+- harden cloudflare runner dispatch
+- repair local day handling and scheduling
+- harden hosted runner deploy review
+- harden canonical write boundary
+- audit inbox canonical persistence
+- guard canonical vault writes during codex turns
+- harden hosted execution boundaries
+- handle inbox envelope evidence correctly
+- stabilize repo verification checks
+- hard cut over legacy cron routing
+- harden hosted runner deploy scaffold
+- migrate legacy cron delivery targets
+- stabilize built runtime verification
+- rotate codex sessions for vault prompt change
+- harden failover runtime state
+- surface structured assistant run errors
+- rotate codex sessions on prompt version changes
+- patch 0.5.0 model selection
+- soften restaurant meal follow-ups
+- enrich restaurant meal logging guidance
+- harden passkey lifecycle
+- look up restaurant menus for foods
+- look up branded food ingredients
+- auto-log described meals
+- narrow recurring meal food prompts
+- suggest reusable foods for repeat meals
+- lock assistant runs and honor retry-after
+- keep wrapped ink status rows colored
+- harden inbox restart and transport retries
+- guard generated source sidecars
+- keep wrapped ink rows colored
+- normalize assistant chat arrow keys
+- restore green verification
+- auto-start deep research after send
+- clarify prompt routing and tool guidance
+- default research timeout to 40m
+- tighten prompt guidance copy
+- clarify research wait semantics
+- restart failed connector watches
+- default complex research to deep research
+- use shared audit bundle tool
+- protect long-running auto-replies
+- retry stalled auto-replies
+- sanitize audit bundles
+- surface auto-reply provider progress
+- strip outbound assistant source callouts
+- harden hosted control-plane boundaries
+- refresh assistant chat theme after macos appearance changes
+- harden device sync boundaries
+- add metadata compatibility repair
+- ask onboarding tone only once
+- harden memory upserts and help discovery
+- restyle queued follow-up UI
+- ask onboarding name only once
+- harden whoop and oura callbacks
+- add first-turn onboarding for interactive chats
+- harden incur command handling
+- harden inbox discovery and email normalization
+- harden assistant delivery and polling
+- stop retrying mcp bootstrap failures as disconnects
+- bias assistant toward meal logging
+- suppress citations in outbound assistant replies
+- coalesce email thread backlog replies
+- isolate connector failures in daemon runs
+- process email backlog on first auto-reply
+- snapshot ephemeral imessage attachments
+- persist onboard channel preferences
+- tolerate missing local attachments
+- keep onboard prompts alive after review
+- recover agentmail inbox onboarding
+- correct ink transcript viewport widths
+- reuse saved onboarding channels
+- hide stale working status
+- keep working dot static
+- harden shim dist checks
+- pulse working loader dot
+- preserve tty in installed shim
+- remove working loader background
+- recover ink chat raw mode input
+- bound foreground ctrl-c shutdown
+- revert sent bubble width change
+- widen sent chat bubbles
+- repair missing runtime shim deps
+- wrap assistant prose by word
+- exempt Healthy Bob chat vault ops from repo workflow
+- harden ink chat transcript layout
+- force-stop stuck inbox loops
+- recover suspended inbox stop
+- fallback to saved default vault
+- add top-level run alias
+- allow bare healthybob assistant
+- stabilize verification for web and smoke coverage
+- harden timestamps and backfills
+- preserve assistant tool schema typing
+- remove ink chat borders
+- remove assistant chat intro banner
+- reduce assistant chat redraw churn
+- harden assistant session drift
+- shorten assistant starter prompts
+- restore composer spacing
+- simplify assistant footer badges
+- harden assistant provider recovery
+- refresh assistant chat guidance
+- harden assistant adapter
+- wire codex trace streaming
+- bind assistant vault for memory
+- stabilize root verification
+- render assistant transcript links
+- reflow ink chat transcript
+- hard-cut canonical read paths
+- make healthybob shims resilient
+- harden assistant memory tooling
+- correct Ink chat width and cursor
+- harden ink composer input
+- require adapter and statically bind sdk
+- narrow assistant prompt discovery
+- restore assistant ink blue cursor
+- tighten assistant memory extraction
+- harden assistant ink terminal input
+- harden assistant ink composer input
+- restore green verification checks
+- replay local assistant transcripts
+- trim chat exit output
+- refine chat layout
+- inject default vault for root chat
+- match user turns to composer
+- harden non-core path helpers against symlink escapes
+- lock down local control plane
+- redact secret-bearing raw metadata
+- batch canonical write mutations
+- repair partial capture replay
+- stop persisting assistant-state excerpts
+- apply wearable audit fixes
+- enable assistant incur cli access
+- streamline chat waiting copy
+- order codex approval flag correctly
+- harden local next runtime boot
+- rebuild query before local next boot
+- restore clean verification baseline
+- trim homepage chrome
+- install healthybob shims
+- simplify observatory overview
+- restore green verification
+- harden macos onboarding flow
+- tighten inbox routing assistant safety
+- redact setup home paths
+- align incur search routing
+- unify read output envelopes
+- normalize selector and filter surface
+- harden parser daemon reruns
+- use repeatable multi-value flags
+- regularize export and search subcommands
+- tighten bootstrap and parser operator flow
+- persist export packs in vault
+- persist export packs in vault
+- add bootstrap setup command
+- include root bootstrap config
+- harden adapter artifact checks
+- keep readVault tolerant during cli cutover
+- add canonical write lock
+- harden inbox follow-up correctness
+- harden inbox durability and ops
+- harden sample import retries
+- remove unused list cursor
+- harden write boundaries
+- reserve cursor until pagination exists
+- restore incur schema surfaces
+- support merge-preserving registry lookups
+- enforce contract discipline across health surfaces
+- wire repo-local prompt presets
+- harden health export pack inputs
+- remove explicit any seams
+- enrich export packs with health context
+- tighten export pack health readers
+- stabilize final ts runtime gates
+- restore runtime package loading
+- type legacy mutation APIs
+- resolve review-found runtime bugs
+
+### Changed
+- upgrade incur and green workspace
+- hard-cut greenfield cleanup
+- switch memory writes to markdown edits
+- remove local-web package
+- close reasoning capability bookkeeping
+- remove stale guard workspace path
+- hard-cut runtime schema
+- remove onboarding summary path
+- make codex a privileged local adapter
+- finish shared runtime cutover
+- hard-cut route recovery tooling
+- hard-cut legacy provider state
+- simplify auto-reply multimodal cleanup
+- remove legacy provider compatibility shims
+- require simplify for 200+ LOC local changes
+- hard-cut runtime override contract
+- cover override hard cut
+- remove dead compatibility paths
+- clear closed hosted-risk-fixes lane
+- extract shared ingress package
+- hard cut explicit entrypoints
+- hard-cut hosted runtime ownership
+- split stripe billing event handlers
+- keep attempt metadata out of errors
+- drop legacy responses resume fallback
+- hard-cut execution context and provider attempt metadata
+- split runtime state ownership
+- hard-cut query read model to canonical entities
+- converge query read model ownership
+- centralize apps-web json route helpers
+- land data model review patch
+- remove assistant session compatibility shims
+- tighten device-sync package boundary
+- land code quality audit patch
+- split composability seams
+- land simplification pass
+- pin stale-channel reconciliation to darwin
+- Update doc-inventory.md
+- v0.1.0
+- centralize operator authority and tool concerns
+- clarify provider transport capability naming
+- remove compatibility-only paths
+- simplify device-sync route params and provider-turn helpers
+- forbid unsafe cast shortcuts
+- require apps/web lint
+- add package boundaries preset
+- move npm packages to @murphai scope
+- hard cut over sparse receipt refs
+- land follow-up service splits
+- add app skill locks
+- clear completed privy fix ledger row
+- Improve hosted phone country picker
+- Apply simplification, code-quality, and architecture review patches
+- update pnpm
+- Update package.json
+- upgrade pnpm action to v5
+- remove sqlite lazy loader
+- split root and node exports
+- clarify audit-pass authorization
+- harden pnpm policy and simplify runtime seams
+- finish architecture patch alignment
+- land architecture review patch slices
+- harden supply chain — remove unused deps, add lockfile policy guard, frozen-lockfile installs
+- normalize preset response contracts
+- close cloudflare deploy ordering record
+- bump to 0.5.19
+- bump to 0.5.17 and add simplify script
+- clean pending worktree changes
+- split local surface into gateway-local
+- add workspace package cycle guard
+- remove low-value aliases
+- hard cut client ownership
+- split outbox and inbox persistence helpers
+- hard cut stale compatibility paths
+- bump review-gpt to 0.5.13
+- relax simplify audit default
+- simplify scoped env and email helpers
+- hard cut hosted-execution shim
+- simplify hosted webhook helpers
+- hard cut shared assistant-core layers
+- finish concurrency hardening
+- hard cut assistant-core facades
+- return text findings from review prompts
+- bump review-gpt to 0.5.12
+- harden suite concurrency defaults
+- split gateway and hosted device-sync helpers
+- move assistant facades behind assistant-core
+- speed up harness and hosted web verify
+- emit patched composability artifacts
+- add composability review snapshot
+- Harden hosted device sync inputs and snapshots
+- restore audit delegation reminder
+- hard-cut gateway core ownership
+- rename local web package
+- Update pnpm-lock.yaml
+- clarify finish-task vs committer usage
+- finish pending boundary and gateway cleanup
+- land ddia cleanup patch
+- finalize local-only hard cut
+- expand suite concurrency and fast verify lanes
+- restore explicit commit workflow
+- land pending worktree changes
+- refresh generated inventory
+- add text-only docs verification fast path
+- remove obsolete continuity docs
+- add heart emoji to title
+- refine product pitch
+- clean up local scaffold leftovers
+- turn AGENTS into a router
+- drop licensed gitleaks step
+- streamline repo guidance
+- make review subagents read-only
+- split vitest lanes for faster local verification
+- clear completed cron target lane
+- speed up verification runtime builds
+- document hosted vercel secrets
+- clarify coordination ledger path
+- snapshot remaining worktree and close active plans
+- dedupe root vitest package list
+- remove closed paddleocr row
+- hard-cut paddleocr
+- split app verification lane
+- split health projectors by family
+- land residual provider and registry fixes
+- bump repo tools and review gpt
+- revert patch output contract
+- bump review-gpt to 0.5.8
+- simplify webhook receipt helpers
+- clean up headless service naming
+- apply behavior-preserving simplify patch
+- clarify no-plan patch landing commit path
+- smooth patch landing workflow
+- request patch output in prompts
+- remove stale assistantd seam lane
+- clear completed assistant-core boundary lane
+- hard-cut remaining compat seams
+- clear assistant hardening row
+- clear completed routing isolation lane
+- bump review-gpt to v0.5.7
+- clear cloudflare prod sweep row
+- add assistant-core boundary
+- align sender helper regression
+- clear hosted run trace row
+- clarify watch-only thread flow
+- bump review-gpt to v0.5.6
+- split registry entity documents
+- bump review-gpt to v0.5.5
+- simplify control plane clients
+- simplify assistant quality audit paths
+- bump review-gpt to v0.5.2
+- centralize protocol registry adapters
+- integrate assistant runtime seams
+- clear completed chatgpt tooling ledger row
+- hard-cut legacy stored-state readers
+- normalize internal relation links
+- close hosted control-plane ledger
+- fold coverage audit into final review
+- cover assessment cutover path
+- add vault record family map
+- hard-cut typed snapshot seam
+- cover patch clears and drop family alias
+- clear stale coordination row
+- type profile snapshots and event drafts
+- centralize registry seams for condition allergy family and genetics
+- hard cut strict frontmatter reads
+- centralize goal registry definition
+- restore ai usage meter coverage
+- align ai usage meter tests
+- cover proxied device sync fetch plumbing
+- cover non-hosted usage ledger skip
+- clear completed linq lane
+- cover hosted signature and http failure paths
+- tighten hosted webhook regressions
+- clean up hosted parity intake
+- clear assistant route-scoped recovery ledger
+- clear completed privy lane
+- separate assistant provider bindings
+- sync garmin plan index
+- tighten hosted execution trust boundaries
+- centralize privy session checks
+- cover cli and hosted id invariants
+- merge origin main
+- sync origin main
+- remove stale active worker prompts
+- clean lingering worktree
+- cover food recipe edit input flow
+- extract shared food recipe scaffolding
+- dedupe wrangler runners
+- clarify hosted device-sync helpers
+- dedupe hosted wake persistence
+- dedupe hosted worker contracts
+- cover webhook receipt cas retries
+- resolve PR #2 conflicts with main
+- resolve pr-2 conflicts
+- resolve main conflicts for pr 2
+- unify assistant inbox automation
+- centralize hosted webhook receipt transitions
+- cover localhost daemon auth regressions
+- centralize hosted webhook receipt transitions
+- split hosted stripe dispatch and revnet flow
+- simplify assistant ink runtime
+- make assistant provider recovery explicit
+- finish health adapter migration
+- split webhook internals
+- add current-profile recency tie-break audit
+- refresh index for store split plan
+- clear completed device sync lane
+- cover device sync store boundaries
+- make hosted runtime use package boundary
+- simplify current-profile seam
+- move dispatch-ref ownership
+- split hosted device sync store internals
+- cover current profile markdown retention
+- split hosted runtime seams
+- move overview selectors out of web
+- share current profile projection helpers
+- clear cli health lane
+- tighten markdown registry seam coverage
+- simplify health service ownership
+- guard shared taxonomy seam
+- unify health projection pipeline
+- clarify current-profile seam
+- remove stripe invoice subscription fallback
+- hard-cut greenfield-only shims
+- remove legacy hosted execution compatibility
+- add finish-task plan closure
+- simplify final async cleanup
+- add legacy-removal preset
+- hard-cut assistant legacy state
+- cover deploy preflight helpers
+- harden hosted next artifact ownership
+- add audit wait guidance
+- remove legacy healthybob surfaces
+- drop healthybob hard-cut fallbacks
+- ignore codex scratch artifacts
+- keep setup surface murph-only
+- ignore .next-dev audit artifacts
+- migrate healthy bob surfaces to murph
+- integrate six-worker cleanup batch
+- finish runtime boundary integration
+- minimize outbox payloads
+- hard-cut assistant model config
+- minimize outbox payloads
+- integrate runtime boundary refactor
+- expand assistant provider hard-cutover coverage
+- cut back webhook cleanup
+- align receipt helper expectations
+- align trust-boundary helpers
+- add murph migration plan
+- minimize outbox payloads
+- rename hosted copy to murph
+- restore truthful source resolution
+- drop stale revnet env knob
+- cover Stripe reversal suspension
+- harden hosted deploy lane
+- archive production advice follow-up
+- clarify postcss allowlist wording
+- allow hosted web postcss config
+- clarify cron state binding
+- use outbound worker handlers
+- share hosted control-plane helpers
+- journal hosted side effects
+- close hosted execution outbox lane
+- split hosted service boundaries
+- cover assistant model catalog fallbacks
+- centralize assistant provider model catalog
+- upgrade next 16 and drop webpack flag
+- split hosted runner state machine
+- simplify privy onboarding boundaries
+- land cleanup batch
+- cover hosted privy cookie route boundary
+- ban branded prefixes
+- verify privy onboarding from tokens only
+- remove branded error codes
+- import revnet pay from wire
+- switch revnet issuance to native eth
+- hard-cut native container execution
+- remove branded env prefixes
+- drop hb deploy env prefix
+- add hosted deploy automation
+- cover history local-day timezone writes
+- clarify audit delegation
+- simplify duplicated helpers across packages
+- simplify assistant setup and onboarding flows
+- cover duplicate webhook receipts
+- clear completed cron repair row
+- require audit subagents
+- exempt data-only tasks from repo workflow
+- remove food add-daily command
+- require explicit cron delivery
+- add constitution guidance
+- simplify duplicated helper scaffolding
+- bump @cobuild/review-gpt to 0.5.1
+- hard-cut regimen to protocol
+- stabilize coverage and food smoke fixtures
+- clear outbox debug ledger row
+- close assistant stop recovery plan
+- bump review-gpt to 0.4.4
+- migrate hosted passkeys to webauthx
+- remove first legacy shims
+- tighten workflow audits
+- remove daemon restart shim
+- extract workspace verification wrapper
+- close bundle hygiene plan
+- integrate worker refactor lanes
+- simplify duplicated cli and core flows
+- enforce source import boundaries
+- bump review-gpt to 0.4.2
+- cover assistant cron presets
+- bump review-gpt to 0.4.1
+- checkpoint local worktree
+- extract inbox app layer
+- split registry and mutation domains
+- share runtime unavailable guidance
+- dedupe workspace source config
+- clarify auth alias compatibility
+- dedupe importer runtime contracts
+- share release argv parsing
+- reuse shared returnTo helper
+- dedupe device-sync connect routes
+- cover recipe and supplement commands
+- hard cut HEALTHYBOB aliases
+- prefer unprefixed runtime vars
+- resolve workspace packages from source
+- harden runtime artifact rebuild helper
+- extract shared ulid helper
+- simplify canonical health collector
+- dedupe assistant state write locks
+- reuse markdown registry api for bank
+- share public wire types
+- dedupe frontmatter readers
+- simplify experiment journal vault
+- remove dead helper code
+- ignore assistant state
+- extract shared public ingress
+- refresh generated inventory
+- add operator ui guidance
+- clarify experiment mutation boundary
+- simplify health command factory
+- share registry api flow
+- simplify raw key redaction rules
+- share transport helpers
+- simplify whoop provider branching
+- simplify inbox doctor flow
+- simplify conversation runtime
+- centralize current profile resolution
+- share provider normalization helpers
+- remove unreachable helper exports
+- reuse markdown registry helpers
+- share oauth session helpers
+- simplify inbox service helpers
+- split runtime state adapters
+- move canonical mutation semantics out of cli
+- polish assistant ink chat ui
+- centralize command manifest
+- cap file size guidance
+- add env example template
+- add fixed-version monorepo flow
+- stabilize ink chat input path
+- share oauth provider plumbing
+- dedupe assistant session resolution
+- narrow assistant memory paths
+- share device normalization helpers
+- dedupe profile current materialization
+- dedupe inbox daemon state
+- share bank write audit helper
+- drop legacy read fallbacks
+- record imessage delivery preflight
+- restore assistant composer padding
+- widen assistant chat blocks
+- tighten assistant chat blocks
+- cover assistant ink keybindings
+- reduce assistant chat rerenders
+- reduce assistant ink typing rerenders
+- centralize id-family helpers
+- unify document meal read path
+- cover attachment inbox service helpers
+- simplify health descriptor matrix
+- add repo chat alias
+- centralize id-or-slug lookup
+- dedupe inbox canonical promotions
+- simplify current profile resolution
+- stop forcing dev host
+- add repo onboarding aliases
+- add security audit preset
+- unify query runtime boundary
+- share vault usecase helpers
+- share current-profile fallback resolution
+- share raw import manifest contract
+- simplify health command factory
+- dedupe small helper utilities
+- dedupe pure helper utilities
+- unify vault write policy
+- unify inbox promotion helpers
+- share overview scoring
+- unify query filter helpers
+- harden bindings and inbox cursoring
+- remove resting heart rate page
+- add react types for ink chat
+- drop ink chat react ts-ignore
+- make assistant chat ink-only
+- standardize telegram on grammy
+- ignore package-local skill artifacts
+- upgrade incur to 0.3.4
+- upgrade vercel ai sdk
+- include setup vitest coverage
+- drop incur-specific cleanup
+- point cli work to incur note
+- archive stale plans and incur notes
+- archive stale work
+- add incur cli guardrails
+- split helper kitchen sinks
+- generalize artifact-backed health commands
+- remove unused binding-layer list type
+- remove obsolete command helper shims
+- make command handlers delegate through services
+- define capability bundles
+- simplify capability bundle metadata
+- add capability bundle model
+- add GPL-3.0 metadata
+- add bootstrap setup command
+- align inbox parser bootstrap docs
+- finish usecase type plumbing
+- extract internal usecase layer
+- dedupe executable lookup plumbing
+- cover genetics registry target stability
+- reuse shared health crud binder
+- extract family genetics registry skeleton
+- inline simple health crud registration
+- dedupe canonical constants
+- make strict reads final
+- soften ledger exclusivity
+- clear write-batch ownership
+- update write-batch verification
+- finish write-batch migration
+- cut over inbox runtime ownership
+- finish generic entity cutover
+- share canonical health collector
+- unify canonical health entities
+- share entity registry metadata
+- split search sqlite ownership
+- archive cli descriptor wiring plan
+- tighten health descriptor wiring
+- simplify family genetics registries
+- simplify health health-loaders
+- unify frontmatter markdown parsing
+- simplify vault fs write boundary
+- centralize raw import manifest assembly
+- align search coverage fixtures
+- close inbox followup fixes
+- close inbox cli ops plan
+- factor health command group setup
+- tighten runtime row decoding
+- simplify health readers
+- add parallel-agent output prompts
+- simplify read model readers
+- simplify health command factory
+- simplify runtime boundaries
+- simplify bank registry helpers
+- unify parsing engine
+- reuse health descriptor schemas
+- clarify record id semantics
+- share export-pack health loaders
+- unify history normalization
+- clear inboxd lane
+- simplify lazy module loading
+- simplify bank registry reads
+- normalize health extracts with zod
+- use contracts parser for assessment storage
+- use contract parser for profile snapshots
+- clarify zod-first contracts
+- make zod canonical
+- trim unused presets
+- align incur integration
+- align vault-cli with incur
+- adopt repo-defined presets
+- use native incur commands
+- clean up ts workspace plumbing
+- finish ts package cleanup
+- bump review-gpt to 0.2.16
+- strengthen export pack health assertions
+- tighten tone
+- expand healthy bob overview
+- clear completed health entries
+- simplify package script runner wiring
+- tighten legacy core test typings
+- align vitest package gates
+- migrate runtime packages to typescript
+- migrate package to typescript
+- ignore audit bundles
+- add review gpt wiring
+- tighten worker ownership for vault batch
+- add vault baseline contract fence
+- add repo harness
+
 ## [0.1.0] - 2026-04-01
 
 ### Added
@@ -964,4 +2007,3 @@ All notable changes to `@murphai/murph` will be documented in this file.
 - tighten worker ownership for vault batch
 - add vault baseline contract fence
 - add repo harness
-
