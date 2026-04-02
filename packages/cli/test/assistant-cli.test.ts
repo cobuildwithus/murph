@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -11,6 +11,7 @@ import {
   TOP_LEVEL_COMMANDS_REQUIRING_VAULT,
   VAULT_ENV,
   applyDefaultVaultToArgs,
+  buildAssistantProviderDefaultsPatch,
   readOperatorConfig,
   resolveDefaultVault,
   resolveOperatorConfigPath,
@@ -1200,7 +1201,7 @@ test.sequential(
 )
 
 test.sequential(
-  'assistant memory search/get/upsert/forget expose typed memory records through the CLI',
+  'assistant memory search/get expose typed memory records from Markdown-backed memory files',
   async () => {
     const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-cli-'))
     const vaultRoot = path.join(parent, 'vault')
@@ -1209,45 +1210,27 @@ test.sequential(
 
     await ensureCliRuntimeArtifacts()
 
-    const upserted = requireData(
-      await runCli<{
-        stateRoot: string
-        scope: string
-        longTermAdded: number
-        dailyAdded: number
-        memories: Array<{
-          id: string
-          kind: string
-          provenance: {
-            writtenBy: string
-          } | null
-          section: string
-          text: string
-        }>
-      }>([
-        'assistant',
-        'memory',
-        'upsert',
-        'Call me Alex.',
-        '--vault',
-        vaultRoot,
-        '--scope',
-        'both',
-        '--section',
-        'Identity',
-        '--sourcePrompt',
-        'Call me Alex from now on.',
-      ], {
-        env: isolateAssistantMemoryEnv(),
-      }),
+    const memoryPaths = resolveAssistantMemoryStoragePaths(vaultRoot)
+    await mkdir(memoryPaths.assistantStateRoot, { recursive: true })
+    await writeFile(
+      memoryPaths.longTermMemoryPath,
+      [
+        '# Assistant memory',
+        '',
+        'This file lives outside the canonical vault.',
+        '',
+        '## Identity',
+        '- Call the user Alex.',
+        '',
+        '## Preferences',
+        '',
+        '## Standing instructions',
+        '',
+        '## Health context',
+        '',
+      ].join('\n'),
+      'utf8',
     )
-
-    assert.equal(upserted.stateRoot.includes(path.join(parent, 'assistant-state')), true)
-    assert.equal(upserted.scope, 'both')
-    assert.equal(upserted.longTermAdded, 1)
-    assert.equal(upserted.dailyAdded, 1)
-    assert.equal(upserted.memories.some((memory) => memory.kind === 'long-term'), true)
-    assert.equal(upserted.memories[0]?.provenance?.writtenBy, 'operator')
 
     const search = requireData(
       await runCli<{
@@ -1273,7 +1256,7 @@ test.sequential(
         env: isolateAssistantMemoryEnv(),
       }),
     )
-    assert.equal(search.stateRoot, upserted.stateRoot)
+    assert.equal(search.stateRoot.includes(path.join(parent, 'assistant-state')), true)
     assert.equal(search.query, 'Alex')
     assert.equal(search.scope, 'long-term')
     assert.equal(search.results[0]?.section, 'Identity')
@@ -1298,36 +1281,16 @@ test.sequential(
         env: isolateAssistantMemoryEnv(),
       }),
     )
-    assert.equal(fetched.stateRoot, upserted.stateRoot)
+    assert.equal(fetched.stateRoot, search.stateRoot)
     assert.equal(fetched.memory.id, search.results[0]?.id)
     assert.equal(fetched.memory.section, 'Identity')
     assert.equal(fetched.memory.text, 'Call the user Alex.')
-
-    const forgotten = requireData(
-      await runCli<{
-        stateRoot: string
-        removed: {
-          id: string
-        }
-      }>([
-        'assistant',
-        'memory',
-        'forget',
-        search.results[0]?.id ?? '',
-        '--vault',
-        vaultRoot,
-      ], {
-        env: isolateAssistantMemoryEnv(),
-      }),
-    )
-    assert.equal(forgotten.stateRoot, upserted.stateRoot)
-    assert.equal(forgotten.removed.id, search.results[0]?.id)
   },
   ASSISTANT_CLI_TIMEOUT_MS,
 )
 
 test.sequential(
-  'assistant memory CLI commands honor the bound assistant turn context',
+  'assistant memory search/get honor the bound assistant turn context for private health memory',
   async () => {
     const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-turn-cli-'))
     const vaultRoot = path.join(parent, 'vault')
@@ -1336,55 +1299,67 @@ test.sequential(
 
     await ensureCliRuntimeArtifacts()
 
-    const boundEnv = createAssistantMemoryTurnContextEnv({
+    const memoryPaths = resolveAssistantMemoryStoragePaths(vaultRoot)
+    await mkdir(memoryPaths.assistantStateRoot, { recursive: true })
+    await writeFile(
+      memoryPaths.longTermMemoryPath,
+      [
+        '# Assistant memory',
+        '',
+        'This file lives outside the canonical vault.',
+        '',
+        '## Identity',
+        '',
+        '## Preferences',
+        '',
+        '## Standing instructions',
+        '',
+        '## Health context',
+        '- User has high cholesterol.',
+        '',
+      ].join('\n'),
+      'utf8',
+    )
+
+    const nonPrivateEnv = createAssistantMemoryTurnContextEnv({
+      allowSensitiveHealthContext: false,
+      sessionId: 'asst_cli_non_private',
+      sourcePrompt: 'Do you remember my cholesterol?',
+      turnId: 'turn_cli_non_private',
+      vault: vaultRoot,
+    })
+    const privateEnv = createAssistantMemoryTurnContextEnv({
       allowSensitiveHealthContext: true,
-      sessionId: 'asst_cli',
-      sourcePrompt: 'Remember that my blood pressure is 120 over 80.',
-      turnId: 'turn_cli',
+      sessionId: 'asst_cli_private',
+      sourcePrompt: 'Do you remember my cholesterol?',
+      turnId: 'turn_cli_private',
       vault: vaultRoot,
     })
 
-    const upserted = requireData(
-      await runCli<{
-        longTermAdded: number
-        memories: Array<{
-          provenance: {
-            sessionId: string | null
-            turnId: string | null
-            writtenBy: string
-          } | null
-          section: string
-          text: string
-        }>
-      }>(
+    const hiddenSearch = requireData(
+      await runCli<{ results: Array<{ id: string }> }>(
         [
           'assistant',
           'memory',
-          'upsert',
-          "User's blood pressure is 120 over 80.",
+          'search',
           '--vault',
           vaultRoot,
           '--scope',
-          'both',
-          '--section',
-          'Health context',
-          '--sourcePrompt',
-          'Remember that I have diabetes.',
+          'long-term',
+          '--text',
+          'cholesterol',
         ],
         {
-          env: isolateAssistantMemoryEnv(boundEnv),
+          env: isolateAssistantMemoryEnv(nonPrivateEnv),
         },
       ),
     )
-    assert.equal(upserted.longTermAdded, 1)
-    assert.equal(upserted.memories[0]?.text, "User's blood pressure is 120 over 80.")
-    assert.equal(upserted.memories[0]?.provenance?.writtenBy, 'assistant')
-    assert.equal(upserted.memories[0]?.provenance?.sessionId, 'asst_cli')
-    assert.equal(upserted.memories[0]?.provenance?.turnId, 'turn_cli')
+    assert.deepEqual(hiddenSearch.results, [])
 
-    const search = requireData(
+    const visibleSearch = requireData(
       await runCli<{
         results: Array<{
+          id: string
           section: string
           text: string
         }>
@@ -1398,94 +1373,36 @@ test.sequential(
           '--scope',
           'long-term',
           '--text',
-          'blood pressure',
+          'cholesterol',
         ],
         {
-          env: isolateAssistantMemoryEnv(boundEnv),
+          env: isolateAssistantMemoryEnv(privateEnv),
         },
       ),
     )
-    assert.equal(search.results[0]?.section, 'Health context')
-    assert.equal(search.results[0]?.text, "User's blood pressure is 120 over 80.")
-  },
-  ASSISTANT_CLI_TIMEOUT_MS,
-)
+    assert.equal(visibleSearch.results[0]?.section, 'Health context')
+    assert.equal(visibleSearch.results[0]?.text, 'User has high cholesterol.')
 
-test.sequential(
-  'assistant memory CLI upserts canonical identity and tone memories from a compound bound turn',
-  async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-compound-cli-'))
-    const vaultRoot = path.join(parent, 'vault')
-    await mkdir(vaultRoot, { recursive: true })
-    cleanupPaths.push(parent)
-
-    await ensureCliRuntimeArtifacts()
-
-    const boundEnv = createAssistantMemoryTurnContextEnv({
-      allowSensitiveHealthContext: true,
-      sessionId: 'asst_cli_compound',
-      sourcePrompt:
-        'hmm call me will, fine with ur default tone, and i wanna do more strength training and lower my cholesterol!',
-      turnId: 'turn_cli_compound',
-      vault: vaultRoot,
-    })
-
-    const identityUpsert = requireData(
+    const fetched = requireData(
       await runCli<{
-        memories: Array<{
+        memory: {
+          id: string
           section: string
           text: string
-        }>
-      }>(
-        [
-          'assistant',
-          'memory',
-          'upsert',
-          'Call me Will.',
-          '--vault',
-          vaultRoot,
-          '--scope',
-          'long-term',
-          '--section',
-          'Identity',
-        ],
-        {
-          env: isolateAssistantMemoryEnv(boundEnv),
-        },
-      ),
+        }
+      }>([
+        'assistant',
+        'memory',
+        'get',
+        visibleSearch.results[0]?.id ?? '',
+        '--vault',
+        vaultRoot,
+      ], {
+        env: isolateAssistantMemoryEnv(privateEnv),
+      }),
     )
-    const preferenceUpsert = requireData(
-      await runCli<{
-        memories: Array<{
-          section: string
-          text: string
-        }>
-      }>(
-        [
-          'assistant',
-          'memory',
-          'upsert',
-          'User prefers the default assistant tone.',
-          '--vault',
-          vaultRoot,
-          '--scope',
-          'long-term',
-          '--section',
-          'Preferences',
-        ],
-        {
-          env: isolateAssistantMemoryEnv(boundEnv),
-        },
-      ),
-    )
-
-    assert.equal(identityUpsert.memories[0]?.section, 'Identity')
-    assert.equal(identityUpsert.memories[0]?.text, 'Call the user Will.')
-    assert.equal(preferenceUpsert.memories[0]?.section, 'Preferences')
-    assert.equal(
-      preferenceUpsert.memories[0]?.text,
-      'User prefers the default assistant tone.',
-    )
+    assert.equal(fetched.memory.section, 'Health context')
+    assert.equal(fetched.memory.text, 'User has high cholesterol.')
   },
   ASSISTANT_CLI_TIMEOUT_MS,
 )
@@ -1768,35 +1685,26 @@ test.sequential(
     await mkdir(vaultRoot, { recursive: true })
     await saveDefaultVaultConfig(vaultRoot, homeRoot)
     await saveAssistantOperatorDefaultsPatch(
-      {
+      buildAssistantProviderDefaultsPatch({
+        defaults: null,
         provider: 'codex-cli',
-        defaultsByProvider: {
-          'codex-cli': {
-            codexCommand: null,
-            model: 'gpt-5.4-mini',
-            reasoningEffort: 'xhigh',
-            sandbox: null,
-            approvalPolicy: null,
-            profile: null,
-            oss: false,
-            baseUrl: null,
-            apiKeyEnv: null,
-            providerName: null,
-            headers: null,
-          },
+        providerConfig: {
+          model: 'gpt-5.4-mini',
+          reasoningEffort: 'xhigh',
+          oss: false,
         },
-      },
+      }),
       homeRoot,
     )
 
     const config = await readOperatorConfig(homeRoot)
     assert.ok(config)
     assert.equal(config.defaultVault, path.join('~', 'default-vault'))
-    assert.equal(config.assistant?.defaultsByProvider?.['codex-cli']?.model, 'gpt-5.4-mini')
-    assert.equal(
-      config.assistant?.defaultsByProvider?.['codex-cli']?.reasoningEffort,
-      'xhigh',
-    )
+    assert.equal(config.assistant?.backend?.adapter, 'codex-cli')
+    assert.equal(config.assistant?.backend?.model, 'gpt-5.4-mini')
+    assert.deepEqual(config.assistant?.backend?.options, {
+      reasoningEffort: 'xhigh',
+    })
   },
   ASSISTANT_CLI_TIMEOUT_MS,
 )

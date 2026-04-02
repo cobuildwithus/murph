@@ -577,10 +577,17 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, sh
     firstCall?.systemPrompt ?? '',
     /do not need a separate remember request first/u,
   )
-  assert.match(firstCall?.systemPrompt ?? '', /assistant memory .*forget/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
-    /phrase `text` as the exact stored sentence you want committed/u,
+    /direct Markdown memory-file edit tools are exposed in this session/u,
+  )
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /Write durable memory in `.*MEMORY\.md` and short-lived recent-context notes in `.*memory\/\d{4}-\d{2}-\d{2}\.md`/u,
+  )
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /edit or remove the stale bullet directly instead of appending a contradiction/u,
   )
   assert.match(firstCall?.systemPrompt ?? '', /assistant cron add/u)
   assert.match(firstCall?.systemPrompt ?? '', /assistant cron preset install/u)
@@ -599,7 +606,10 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, sh
   assert.equal(turnContext?.sourcePrompt, 'Inspect the vault with the CLI.')
   assert.equal(turnContext?.provenance.sessionId?.startsWith('asst_'), true)
   assert.match(firstCall?.systemPrompt ?? '', /Assistant state tools are exposed in this session/u)
-  assert.match(firstCall?.systemPrompt ?? '', /Assistant memory tools are exposed in this session/u)
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /Assistant memory recall tools and direct Markdown memory-file edit tools are exposed in this session/u,
+  )
   assert.match(firstCall?.systemPrompt ?? '', /Scheduled assistant automation tools are exposed in this session/u)
   assert.equal(firstCall?.toolRuntime?.vault, vaultRoot)
   assert.equal(
@@ -1609,7 +1619,10 @@ test('sendAssistantMessage replays the local transcript for OpenAI-compatible se
     assert.match(firstCall?.systemPrompt ?? '', /You are Murph/u)
     assert.match(secondCall?.systemPrompt ?? '', /You are Murph/u)
     assert.match(firstCall?.systemPrompt ?? '', /Assistant state tools are exposed in this session/u)
-    assert.match(firstCall?.systemPrompt ?? '', /Assistant memory tools are exposed in this session/u)
+    assert.match(
+      firstCall?.systemPrompt ?? '',
+      /Assistant memory recall tools and direct Markdown memory-file edit tools are exposed in this session/u,
+    )
     assert.match(
       firstCall?.systemPrompt ?? '',
       /Scheduled assistant automation tools are exposed in this session/u,
@@ -1724,13 +1737,18 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the full Mur
     assert.equal(toolCatalog?.hasTool('vault.fs.readText'), true)
     assert.equal(toolCatalog?.hasTool('assistant.state.show'), true)
     assert.equal(toolCatalog?.hasTool('assistant.memory.search'), true)
+    assert.equal(toolCatalog?.hasTool('assistant.memory.get'), true)
+    assert.equal(toolCatalog?.hasTool('assistant.memory.file.read'), true)
+    assert.equal(toolCatalog?.hasTool('assistant.memory.file.write'), true)
+    assert.equal(toolCatalog?.hasTool('assistant.memory.upsert'), false)
+    assert.equal(toolCatalog?.hasTool('assistant.memory.forget'), false)
     assert.equal(toolCatalog?.hasTool('assistant.cron.status'), true)
     assert.equal(toolCatalog?.hasTool('assistant.selfTarget.list'), true)
     assert.equal(toolCatalog?.hasTool('vault.show'), true)
     assert.equal(toolCatalog?.hasTool('vault.journal.append'), true)
     assert.match(
       providerCall?.systemPrompt ?? '',
-      /Assistant memory tools are exposed in this session/u,
+      /Assistant memory recall tools and direct Markdown memory-file edit tools are exposed in this session/u,
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
@@ -1740,6 +1758,32 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the full Mur
     const toolResults = await toolCatalog!.executeCalls({
       mode: 'apply',
       calls: [
+        {
+          tool: 'assistant.memory.file.write',
+          input: {
+            path: 'MEMORY.md',
+            text: [
+              '# Assistant memory',
+              '',
+              'This file lives outside the canonical vault.',
+              '',
+              '## Identity',
+              '- Call the user Alex.',
+              '',
+              '## Preferences',
+              '',
+              '## Standing instructions',
+              '',
+              '## Health context',
+            ].join('\n'),
+          },
+        },
+        {
+          tool: 'assistant.memory.file.read',
+          input: {
+            path: 'MEMORY.md',
+          },
+        },
         {
           tool: 'assistant.state.put',
           input: {
@@ -1757,12 +1801,45 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the full Mur
             text: 'Auto-reply mutation proof.',
           },
         },
+        {
+          tool: 'assistant.memory.file.write',
+          input: {
+            path: 'MEMORY.md',
+            text: [
+              '# Assistant memory',
+              '',
+              'This file lives outside the canonical vault.',
+              '',
+              '## Identity',
+              '',
+              '## Preferences',
+              '',
+              '## Standing instructions',
+              '',
+              '## Health context',
+              '- User has high cholesterol.',
+            ].join('\n'),
+          },
+        },
+        {
+          tool: 'assistant.memory.file.read',
+          input: {
+            path: 'memory/2026-03-31.md',
+          },
+        },
       ],
     })
     assert.deepEqual(
       toolResults.map((result) => result.status),
-      ['succeeded', 'succeeded'],
+      ['succeeded', 'succeeded', 'succeeded', 'succeeded', 'succeeded', 'succeeded'],
     )
+    assert.match(
+      String((toolResults[1]?.result as { text?: string } | undefined)?.text ?? ''),
+      /Call the user Alex\./u,
+    )
+    const statePaths = resolveAssistantStatePaths(vaultRoot)
+    const memoryMarkdown = await readFile(statePaths.longTermMemoryPath, 'utf8')
+    assert.match(memoryMarkdown, /high cholesterol/u)
 
     const stateSnapshot = await getAssistantStateDocument({
       vault: vaultRoot,
@@ -1774,7 +1851,7 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the full Mur
       source: 'auto-reply',
     })
 
-    const journalRelativePath = toolResults[1]?.result?.journalPath
+    const journalRelativePath = toolResults[3]?.result?.journalPath
     assert.equal(typeof journalRelativePath, 'string')
     const journalMarkdown = await readFile(
       path.join(vaultRoot, journalRelativePath as string),
@@ -1827,7 +1904,7 @@ test('sendAssistantMessage lets Codex auto-reply turns use the full Murph runtim
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
-      /Assistant memory tools are exposed in this session/u,
+      /Assistant memory recall tools and direct Markdown memory-file edit tools are exposed in this session/u,
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
@@ -2637,7 +2714,7 @@ test('sendAssistantMessage no longer auto-persists memory without explicit assis
   assert.doesNotMatch(secondCall?.systemPrompt ?? '', /Core assistant memory:/u)
 })
 
-test('sendAssistantMessage bootstraps only the latest mutable long-term memory written through assistant memory upserts', async () => {
+test('sendAssistantMessage bootstraps only the latest mutable long-term memory written into the Markdown memory files', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-upsert-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)

@@ -17,6 +17,7 @@ import {
 import { materializeInboxModelBundle } from '@murphai/assistant-core/inbox-model-harness'
 import type { InboxServices } from '@murphai/assistant-core/inbox-services'
 import type { VaultServices } from '@murphai/assistant-core/vault-services'
+import { resolveAssistantStatePaths } from '@murphai/runtime-state/node'
 
 const test = baseTest.sequential
 
@@ -1221,6 +1222,118 @@ test('createDefaultAssistantToolCatalog vault.fs.readText enforces bounded UTF-8
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
     await rm(outsideRoot, { recursive: true, force: true })
+  }
+})
+
+test('createDefaultAssistantToolCatalog memory file tools redact or block sensitive health access outside private contexts', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-file-tools-'))
+
+  try {
+    const statePaths = resolveAssistantStatePaths(vaultRoot)
+    await mkdir(statePaths.assistantStateRoot, { recursive: true })
+    await writeFile(
+      statePaths.longTermMemoryPath,
+      [
+        '# Assistant memory',
+        '',
+        'This file lives outside the canonical vault.',
+        '',
+        '## Identity',
+        '- Call the user Alex.',
+        '',
+        '## Preferences',
+        '',
+        '## Standing instructions',
+        '',
+        '## Health context',
+        '- User has high cholesterol.',
+        '',
+      ].join('\n'),
+      'utf8',
+    )
+
+    const sharedCatalog = createDefaultAssistantToolCatalog({
+      allowSensitiveHealthContext: false,
+      requestId: 'req_memory_files_shared',
+      vault: vaultRoot,
+      vaultServices: createStubVaultServices(),
+    })
+
+    const sharedResults = await sharedCatalog.executeCalls({
+      calls: [
+        {
+          tool: 'assistant.memory.file.read',
+          input: {
+            path: 'MEMORY.md',
+          },
+        },
+        {
+          tool: 'assistant.memory.file.write',
+          input: {
+            path: 'MEMORY.md',
+            text: [
+              '# Assistant memory',
+              '',
+              'This file lives outside the canonical vault.',
+              '',
+              '## Identity',
+              '- Call the user Alex.',
+              '',
+              '## Preferences',
+              '',
+              '## Standing instructions',
+              '',
+              '## Health context',
+              '- User has high cholesterol.',
+            ].join('\n'),
+          },
+        },
+        {
+          tool: 'assistant.memory.file.read',
+          input: {
+            path: 'memory/2026-04-02.md',
+          },
+        },
+      ],
+      mode: 'apply',
+    })
+
+    assert.equal(sharedResults[0]?.status, 'succeeded')
+    assert.doesNotMatch(
+      String((sharedResults[0]?.result as { text?: string } | undefined)?.text ?? ''),
+      /high cholesterol/u,
+    )
+    assert.equal(sharedResults[1]?.status, 'failed')
+    assert.equal(sharedResults[1]?.errorCode, 'ASSISTANT_MEMORY_FILE_ACCESS_DENIED')
+    assert.equal(sharedResults[2]?.status, 'failed')
+    assert.equal(sharedResults[2]?.errorCode, 'ASSISTANT_MEMORY_FILE_ACCESS_DENIED')
+
+    const privateCatalog = createDefaultAssistantToolCatalog({
+      allowSensitiveHealthContext: true,
+      requestId: 'req_memory_files_private',
+      vault: vaultRoot,
+      vaultServices: createStubVaultServices(),
+    })
+
+    const privateResults = await privateCatalog.executeCalls({
+      calls: [
+        {
+          tool: 'assistant.memory.file.read',
+          input: {
+            path: 'MEMORY.md',
+          },
+        },
+      ],
+      mode: 'apply',
+    })
+
+    assert.equal(privateResults[0]?.status, 'succeeded')
+    assert.match(
+      String((privateResults[0]?.result as { text?: string } | undefined)?.text ?? ''),
+      /high cholesterol/u,
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
   }
 })
 
