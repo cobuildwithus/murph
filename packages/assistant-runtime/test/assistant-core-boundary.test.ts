@@ -305,7 +305,7 @@ test("assistant-core operator-config rewrites schema-invalid assistant config in
 
     const config = await readOperatorConfig(homeRoot);
     assert.ok(config);
-    assert.equal(config.defaultVault, null);
+    assert.equal(config.defaultVault, "/tmp/invalid-preserved-value");
     assert.equal(config.assistant?.backend ?? null, null);
     assert.deepEqual(config.assistant?.selfDeliveryTargets?.email, saved);
     assert.deepEqual(

@@ -3,8 +3,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { z } from 'zod'
 import {
+  assistantApprovalPolicyValues,
   assistantChatProviderValues,
   assistantProviderFailoverRouteSchema,
+  assistantReasoningEffortValues,
+  assistantSandboxValues,
   assistantSelfDeliveryTargetSchema,
   type AssistantSelfDeliveryTarget,
 } from './assistant-cli-contracts.js'
@@ -89,10 +92,35 @@ const assistantOperatorDefaultsSchema = z.object({
   ...assistantOperatorSharedFields,
 }).strict()
 
+const legacyAssistantProviderDefaultsEntrySchema = z
+  .object({
+    approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable().optional(),
+    apiKeyEnv: z.string().min(1).nullable().optional(),
+    baseUrl: z.string().min(1).nullable().optional(),
+    codexCommand: z.string().min(1).nullable().optional(),
+    headers: z.record(z.string().min(1), z.string()).nullable().optional(),
+    model: z.string().min(1).nullable().optional(),
+    oss: z.boolean().nullable().optional(),
+    profile: z.string().min(1).nullable().optional(),
+    providerName: z.string().min(1).nullable().optional(),
+    reasoningEffort: z.enum(assistantReasoningEffortValues).nullable().optional(),
+    sandbox: z.enum(assistantSandboxValues).nullable().optional(),
+  })
+  .passthrough()
+
+const legacyAssistantDefaultsByProviderSchema = z
+  .object({
+    'codex-cli': legacyAssistantProviderDefaultsEntrySchema.nullable().optional(),
+    'openai-compatible': legacyAssistantProviderDefaultsEntrySchema
+      .nullable()
+      .optional(),
+  })
+  .passthrough()
+
 const operatorConfigSchema = z.object({
   schema: z.literal(OPERATOR_CONFIG_SCHEMA),
   defaultVault: z.string().min(1).nullable(),
-  assistant: assistantOperatorDefaultsSchema.nullable().default(null),
+  assistant: z.unknown().nullable().default(null),
   hostedAssistant: z.unknown().nullable().optional(),
   updatedAt: z.string().datetime({ offset: true }),
 })
@@ -685,19 +713,32 @@ function mergeAssistantOperatorDefaults(
 }
 
 function normalizeAssistantOperatorDefaults(
-  defaults: AssistantOperatorDefaults | null | undefined,
+  defaults: unknown,
 ): AssistantOperatorDefaults | null {
   if (!defaults) {
     return null
   }
 
-  return assistantOperatorDefaultsSchema.parse({
-    backend: normalizeAssistantBackendTarget(defaults.backend ?? null),
-    identityId: defaults.identityId ?? null,
-    failoverRoutes: defaults.failoverRoutes ?? null,
-    account: defaults.account ?? null,
-    selfDeliveryTargets: normalizeAssistantSelfDeliveryTargetMap(
-      defaults.selfDeliveryTargets ?? null,
+  const currentParsed = assistantOperatorDefaultsSchema.safeParse(defaults)
+  if (currentParsed.success) {
+    return compactAssistantOperatorDefaults(currentParsed.data)
+  }
+
+  if (typeof defaults !== 'object' || defaults === null) {
+    return null
+  }
+
+  const record = defaults as Record<string, unknown>
+
+  return compactAssistantOperatorDefaults({
+    backend:
+      resolveLegacyAssistantBackendTarget(record) ??
+      normalizeUnknownAssistantBackendTarget(record.backend),
+    identityId: normalizeUnknownAssistantIdentityId(record.identityId),
+    failoverRoutes: normalizeUnknownAssistantFailoverRoutes(record.failoverRoutes),
+    account: normalizeUnknownAssistantAccount(record.account),
+    selfDeliveryTargets: normalizeUnknownAssistantSelfDeliveryTargets(
+      record.selfDeliveryTargets,
     ),
   })
 }
@@ -768,6 +809,146 @@ async function resolveSingleAssistantSelfDeliveryTarget(
 function normalizeOperatorConfigString(value: string | null | undefined): string | null {
   const trimmed = value?.trim()
   return trimmed && trimmed.length > 0 ? trimmed : null
+}
+
+function compactAssistantOperatorDefaults(
+  defaults: AssistantOperatorDefaults,
+): AssistantOperatorDefaults | null {
+  const normalized = assistantOperatorDefaultsSchema.parse({
+    backend: normalizeAssistantBackendTarget(defaults.backend ?? null),
+    identityId: defaults.identityId ?? null,
+    failoverRoutes: defaults.failoverRoutes ?? null,
+    account: defaults.account ?? null,
+    selfDeliveryTargets: normalizeAssistantSelfDeliveryTargetMap(
+      defaults.selfDeliveryTargets ?? null,
+    ),
+  })
+
+  return hasAssistantOperatorDefaultsValues(normalized) ? normalized : null
+}
+
+function hasAssistantOperatorDefaultsValues(
+  defaults: AssistantOperatorDefaults,
+): boolean {
+  return Boolean(
+    defaults.backend ??
+      defaults.identityId ??
+      defaults.failoverRoutes?.length ??
+      defaults.account ??
+      (defaults.selfDeliveryTargets &&
+      Object.keys(defaults.selfDeliveryTargets).length > 0
+        ? 'selfDeliveryTargets'
+        : null),
+  )
+}
+
+function resolveLegacyAssistantBackendTarget(
+  defaults: Record<string, unknown>,
+): AssistantBackendTarget | null {
+  const provider = resolveLegacyAssistantSelectedProvider(defaults)
+  if (!provider) {
+    return null
+  }
+
+  const defaultsByProvider = normalizeLegacyAssistantDefaultsByProvider(
+    defaults.defaultsByProvider,
+  )
+  const providerDefaults = defaultsByProvider?.[provider]
+
+  if (!providerDefaults) {
+    return null
+  }
+
+  return createAssistantBackendTarget({
+    provider,
+    approvalPolicy: providerDefaults.approvalPolicy ?? null,
+    apiKeyEnv: providerDefaults.apiKeyEnv ?? null,
+    baseUrl: providerDefaults.baseUrl ?? null,
+    codexCommand: providerDefaults.codexCommand ?? null,
+    headers: providerDefaults.headers ?? null,
+    model: providerDefaults.model ?? null,
+    oss: providerDefaults.oss ?? null,
+    profile: providerDefaults.profile ?? null,
+    providerName: providerDefaults.providerName ?? null,
+    reasoningEffort: providerDefaults.reasoningEffort ?? null,
+    sandbox: providerDefaults.sandbox ?? null,
+  })
+}
+
+function resolveLegacyAssistantSelectedProvider(
+  defaults: Record<string, unknown>,
+): AssistantChatProviderValue | null {
+  const provider = normalizeOperatorConfigString(
+    typeof defaults.provider === 'string' ? defaults.provider : null,
+  )
+
+  if (
+    provider &&
+    assistantChatProviderValues.includes(provider as AssistantChatProviderValue)
+  ) {
+    return provider as AssistantChatProviderValue
+  }
+
+  const defaultsByProvider = normalizeLegacyAssistantDefaultsByProvider(
+    defaults.defaultsByProvider,
+  )
+  if (!defaultsByProvider) {
+    return null
+  }
+
+  for (const candidate of assistantChatProviderValues) {
+    if (defaultsByProvider[candidate]) {
+      return candidate
+    }
+  }
+
+  return null
+}
+
+function normalizeLegacyAssistantDefaultsByProvider(
+  value: unknown,
+): z.infer<typeof legacyAssistantDefaultsByProviderSchema> | null {
+  const parsed = legacyAssistantDefaultsByProviderSchema.safeParse(value)
+  return parsed.success ? parsed.data : null
+}
+
+function normalizeUnknownAssistantBackendTarget(
+  value: unknown,
+): AssistantBackendTarget | null {
+  const parsed = assistantBackendTargetSchema.safeParse(value)
+  return parsed.success ? normalizeAssistantBackendTarget(parsed.data) : null
+}
+
+function normalizeUnknownAssistantIdentityId(value: unknown): string | null {
+  return normalizeOperatorConfigString(typeof value === 'string' ? value : null)
+}
+
+function normalizeUnknownAssistantFailoverRoutes(
+  value: unknown,
+): AssistantOperatorDefaults['failoverRoutes'] {
+  const schema = z.array(assistantProviderFailoverRouteSchema).nullable()
+  const parsed = schema.safeParse(value)
+  return parsed.success ? parsed.data : null
+}
+
+function normalizeUnknownAssistantAccount(
+  value: unknown,
+): AssistantOperatorDefaults['account'] {
+  const schema = assistantOperatorDefaultsSchema.shape.account
+  const parsed = schema.safeParse(value)
+  return parsed.success ? parsed.data : null
+}
+
+function normalizeUnknownAssistantSelfDeliveryTargets(
+  value: unknown,
+): AssistantOperatorDefaults['selfDeliveryTargets'] {
+  const schema = z
+    .record(z.string().min(1), assistantSelfDeliveryTargetSchema)
+    .nullable()
+  const parsed = schema.safeParse(value)
+  return parsed.success
+    ? normalizeAssistantSelfDeliveryTargetMap(parsed.data)
+    : null
 }
 
 export function hasExplicitVaultOption(args: readonly string[]): boolean {

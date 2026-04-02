@@ -185,7 +185,7 @@ describe("runHostedExecutionJob", () => {
 
     expect(result.result.summary).toContain("Processed member activation");
     expect(result.result.summary).toContain("created the canonical vault");
-    expect(result.result.summary).toContain("hosted assistant config unavailable");
+    expect(result.result.summary).toContain("hosted assistant config missing");
     expect(result.result.summary).toContain("hosted email auto-reply unavailable");
     expect(result.result.summary).toContain("Parser jobs: 0.");
     expect(automationState.autoReplyChannels).not.toContain("linq");
@@ -229,7 +229,7 @@ describe("runHostedExecutionJob", () => {
 
     expect(secondActivation.result.summary).toContain("Processed member activation");
     expect(secondActivation.result.summary).toContain("reused the canonical vault");
-    expect(secondActivation.result.summary).toContain("hosted assistant config unavailable");
+    expect(secondActivation.result.summary).toContain("hosted assistant config missing");
     expect(secondActivation.result.summary).toContain("hosted email auto-reply unavailable");
   });
 

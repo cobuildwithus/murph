@@ -6,6 +6,11 @@ import path from "node:path";
 import { test } from "vitest";
 
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
+import {
+  buildAssistantProviderDefaultsPatch,
+  resolveHostedAssistantConfig,
+  saveAssistantOperatorDefaultsPatch,
+} from "@murphai/assistant-core";
 
 import {
   prepareHostedDispatchContext,
@@ -119,6 +124,7 @@ test("hosted dispatch context still requires member activation bootstrap before 
     );
 
     assert.deepEqual(bootstrapResult, {
+      assistantConfigStatus: "missing",
       assistantConfigured: false,
       assistantProvider: null,
       assistantSeeded: false,
@@ -177,6 +183,79 @@ test("hosted dispatch context does not enable new auto-reply channels on non-act
 
     assert.deepEqual(automationState.autoReplyChannels, []);
   } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted dispatch context backfills existing workspaces on non-activation events without enabling new auto-reply channels", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runtime-context-"));
+  const vaultRoot = path.join(workspaceRoot, "vault");
+  const previousHome = process.env.HOME;
+
+  try {
+    process.env.HOME = workspaceRoot;
+
+    await prepareHostedDispatchContext(
+      vaultRoot,
+      {
+        event: {
+          kind: "member.activated",
+          userId: "member_123",
+        },
+        eventId: "evt_activation",
+        occurredAt: "2026-03-28T09:05:00.000Z",
+      },
+      {},
+    );
+
+    await saveAssistantOperatorDefaultsPatch(
+      buildAssistantProviderDefaultsPatch({
+        defaults: null,
+        provider: "openai-compatible",
+        providerConfig: {
+          provider: "openai-compatible",
+          apiKeyEnv: "OPENAI_API_KEY",
+          baseUrl: "https://api.openai.com/v1",
+          model: "gpt-4.1-mini",
+          providerName: "openai",
+        },
+      }),
+      workspaceRoot,
+    );
+
+    await prepareHostedDispatchContext(
+      vaultRoot,
+      {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_tick_backfill",
+        occurredAt: "2026-03-28T09:10:00.000Z",
+      },
+      {
+        HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
+        HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
+        HOSTED_EMAIL_DOMAIN: "mail.example.test",
+        HOSTED_EMAIL_LOCAL_PART: "assistant",
+        HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      },
+    );
+
+    await access(path.join(vaultRoot, "vault.json"));
+
+    const hostedConfig = await resolveHostedAssistantConfig(workspaceRoot);
+    assert.equal(hostedConfig?.activeProfileId, "saved-default");
+    assert.equal(hostedConfig?.profiles[0]?.provider, "openai-compatible");
+
+    const automationState = JSON.parse(
+      await readFile(resolveAssistantStatePaths(vaultRoot).automationPath, "utf8"),
+    ) as { autoReplyChannels: string[] };
+    assert.deepEqual(automationState.autoReplyChannels, []);
+  } finally {
+    process.env.HOME = previousHome;
     await rm(workspaceRoot, { force: true, recursive: true });
   }
 });

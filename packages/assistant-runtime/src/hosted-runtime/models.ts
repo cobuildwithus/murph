@@ -39,6 +39,13 @@ export interface HostedAssistantRuntimeJobInput {
 }
 
 export interface HostedBootstrapResult {
+  assistantConfigStatus:
+    | "hosted-env"
+    | "invalid"
+    | "legacy-defaults"
+    | "missing"
+    | "saved"
+    | "unready";
   assistantConfigured: boolean;
   assistantProvider: "codex-cli" | "openai-compatible" | null;
   assistantSeeded: boolean;
