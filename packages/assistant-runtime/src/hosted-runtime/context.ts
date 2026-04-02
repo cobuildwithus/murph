@@ -8,32 +8,62 @@ import {
 import {
   createIntegratedInboxServices,
   createIntegratedVaultServices,
+  ensureHostedAssistantOperatorDefaults,
   readAssistantAutomationState,
+  resolveHostedAssistantConfig,
+  resolveHostedAssistantOperatorDefaultsState,
   saveAssistantAutomationState,
 } from "@murphai/assistant-core";
 
 import type { HostedBootstrapResult } from "./models.ts";
 import { hostedAssistantAutomationEnabledFromEnv } from "./environment.ts";
 
+interface HostedMemberBootstrapResult {
+  vaultCreated: boolean;
+}
+
+type HostedAssistantRuntimeState = Pick<
+  HostedBootstrapResult,
+  | "assistantConfigured"
+  | "assistantProvider"
+  | "assistantSeeded"
+  | "emailAutoReplyEnabled"
+  | "telegramAutoReplyEnabled"
+>;
+
 export async function prepareHostedDispatchContext(
   vaultRoot: string,
   dispatch: HostedExecutionDispatchRequest,
   runtimeEnv: Readonly<Record<string, string>>,
 ): Promise<HostedBootstrapResult | null> {
-  const bootstrapResult = dispatch.event.kind === "member.activated"
-    ? await bootstrapHostedMemberContext(vaultRoot, dispatch, runtimeEnv)
+  const isMemberActivation = dispatch.event.kind === "member.activated";
+  const memberBootstrap = isMemberActivation
+    ? await bootstrapHostedMemberContext(vaultRoot, dispatch)
     : null;
 
   await requireHostedBootstrapForDispatch(vaultRoot, dispatch);
+
+  const assistantRuntimeState = isMemberActivation
+    ? await bootstrapHostedAssistantRuntimeState(
+        vaultRoot,
+        runtimeEnv,
+      )
+    : null;
+
   await prepareHostedLocalRuntime(vaultRoot, dispatch.eventId);
-  return bootstrapResult;
+
+  return memberBootstrap
+    ? {
+        ...assistantRuntimeState!,
+        vaultCreated: memberBootstrap.vaultCreated,
+      }
+    : null;
 }
 
 export async function bootstrapHostedMemberContext(
   vaultRoot: string,
   dispatch: HostedExecutionDispatchRequest,
-  runtimeEnv: Readonly<Record<string, string>>,
-): Promise<HostedBootstrapResult> {
+): Promise<HostedMemberBootstrapResult> {
   const requestId = dispatch.eventId;
   const vaultServices = createIntegratedVaultServices();
   const vaultMetadataPath = path.join(vaultRoot, "vault.json");
@@ -46,47 +76,99 @@ export async function bootstrapHostedMemberContext(
     });
   }
 
-  const channelCapabilities = await reconcileHostedAssistantChannelCapabilities(vaultRoot, runtimeEnv);
+  return {
+    vaultCreated,
+  };
+}
+
+async function bootstrapHostedAssistantRuntimeState(
+  vaultRoot: string,
+  runtimeEnv: Readonly<Record<string, string>>,
+): Promise<HostedAssistantRuntimeState> {
+  const automationEnabled = hostedAssistantAutomationEnabledFromEnv(runtimeEnv);
+  const assistantBootstrap = await ensureHostedAssistantOperatorDefaults({
+    allowMissing: true,
+    env: runtimeEnv,
+  });
+  const channelCapabilities = await reconcileHostedAssistantChannelCapabilities(
+    vaultRoot,
+    runtimeEnv,
+    automationEnabled && assistantBootstrap.configured,
+  );
 
   return {
+    assistantConfigured: assistantBootstrap.configured,
+    assistantProvider: assistantBootstrap.provider,
+    assistantSeeded: assistantBootstrap.seeded,
     ...channelCapabilities,
-    vaultCreated,
+  };
+}
+
+export async function readHostedAssistantRuntimeState(): Promise<Pick<
+  HostedAssistantRuntimeState,
+  "assistantConfigured" | "assistantProvider"
+>> {
+  const hostedAssistantConfig = await resolveHostedAssistantConfig();
+  const hostedAssistantState = resolveHostedAssistantOperatorDefaultsState(hostedAssistantConfig);
+
+  return {
+    assistantConfigured: hostedAssistantState.configured,
+    assistantProvider: hostedAssistantState.provider,
   };
 }
 
 export async function reconcileHostedAssistantChannelCapabilities(
   vaultRoot: string,
   runtimeEnv: Readonly<Record<string, string>>,
+  assistantConfigured: boolean,
 ): Promise<Pick<HostedBootstrapResult, "emailAutoReplyEnabled" | "telegramAutoReplyEnabled">> {
-  if (!hostedAssistantAutomationEnabledFromEnv(runtimeEnv)) {
-    return {
-      emailAutoReplyEnabled: false,
-      telegramAutoReplyEnabled: false,
-    };
-  }
+  const automationEnabled = hostedAssistantAutomationEnabledFromEnv(runtimeEnv);
+  const emailAutoReplyEnabled = automationEnabled
+    && assistantConfigured
+    && readHostedEmailCapabilities(runtimeEnv).sendReady;
+  const telegramAutoReplyEnabled = automationEnabled
+    && assistantConfigured
+    && Boolean(normalizeNullableString(runtimeEnv.TELEGRAM_BOT_TOKEN));
 
   const automationState = await readAssistantAutomationState(vaultRoot);
-  const nextAutoReplyChannels = [...automationState.autoReplyChannels];
-  let changed = false;
-  const emailAutoReplyEnabled = readHostedEmailCapabilities(runtimeEnv).sendReady
-    && !nextAutoReplyChannels.includes("email");
-  const telegramAutoReplyEnabled = Boolean(normalizeNullableString(runtimeEnv.TELEGRAM_BOT_TOKEN))
-    && !nextAutoReplyChannels.includes("telegram");
+  const nextAutoReplyChannels = reconcileHostedAssistantChannels(
+    automationState.autoReplyChannels,
+    {
+      emailAutoReplyEnabled,
+      telegramAutoReplyEnabled,
+    },
+  );
+  const nextPreferredChannels = reconcileHostedAssistantChannels(
+    automationState.preferredChannels,
+    {
+      emailAutoReplyEnabled,
+      telegramAutoReplyEnabled,
+    },
+  );
+  const nextBacklogChannels = reconcileHostedAssistantBacklogChannels(
+    automationState.autoReplyBacklogChannels,
+    nextAutoReplyChannels,
+    emailAutoReplyEnabled,
+  );
+  const channelsChanged = !sameHostedAssistantChannels(
+    automationState.autoReplyChannels,
+    nextAutoReplyChannels,
+  ) || !sameHostedAssistantChannels(
+    automationState.preferredChannels,
+    nextPreferredChannels,
+  ) || !sameHostedAssistantChannels(
+    automationState.autoReplyBacklogChannels,
+    nextBacklogChannels,
+  );
 
-  if (emailAutoReplyEnabled) {
-    nextAutoReplyChannels.push("email");
-    changed = true;
-  }
-
-  if (telegramAutoReplyEnabled) {
-    nextAutoReplyChannels.push("telegram");
-    changed = true;
-  }
-
-  if (changed) {
+  if (channelsChanged) {
     await saveAssistantAutomationState(vaultRoot, {
       ...automationState,
+      autoReplyScanCursor: null,
       autoReplyChannels: nextAutoReplyChannels,
+      preferredChannels: nextPreferredChannels,
+      autoReplyBacklogChannels: nextBacklogChannels,
+      autoReplyPrimed: false,
       updatedAt: new Date().toISOString(),
     });
   }
@@ -95,6 +177,51 @@ export async function reconcileHostedAssistantChannelCapabilities(
     emailAutoReplyEnabled,
     telegramAutoReplyEnabled,
   };
+}
+
+function reconcileHostedAssistantChannels(
+  currentChannels: readonly string[],
+  input: {
+    emailAutoReplyEnabled: boolean;
+    telegramAutoReplyEnabled: boolean;
+  },
+): string[] {
+  const nextChannels = currentChannels.filter(
+    (channel) => channel !== "email" && channel !== "telegram",
+  );
+
+  if (input.emailAutoReplyEnabled) {
+    nextChannels.push("email");
+  }
+
+  if (input.telegramAutoReplyEnabled) {
+    nextChannels.push("telegram");
+  }
+
+  return nextChannels;
+}
+
+function reconcileHostedAssistantBacklogChannels(
+  currentChannels: readonly string[],
+  nextAutoReplyChannels: readonly string[],
+  emailAutoReplyEnabled: boolean,
+): string[] {
+  const nextChannels = currentChannels.filter(
+    (channel) => channel !== "email" && nextAutoReplyChannels.includes(channel),
+  );
+
+  if (emailAutoReplyEnabled) {
+    nextChannels.push("email");
+  }
+
+  return nextChannels;
+}
+
+function sameHostedAssistantChannels(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function normalizeNullableString(value: string | null | undefined): string | null {

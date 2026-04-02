@@ -24,7 +24,7 @@ test("hosted channel capability reconciliation enables email and telegram auto-r
       HOSTED_EMAIL_LOCAL_PART: "assistant",
       HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
       TELEGRAM_BOT_TOKEN: "telegram-token",
-    });
+    }, true);
 
     assert.deepEqual(firstResult, {
       emailAutoReplyEnabled: true,
@@ -44,11 +44,11 @@ test("hosted channel capability reconciliation enables email and telegram auto-r
       HOSTED_EMAIL_LOCAL_PART: "assistant",
       HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
       TELEGRAM_BOT_TOKEN: "telegram-token",
-    });
+    }, true);
 
     assert.deepEqual(secondResult, {
-      emailAutoReplyEnabled: false,
-      telegramAutoReplyEnabled: false,
+      emailAutoReplyEnabled: true,
+      telegramAutoReplyEnabled: true,
     });
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
@@ -68,7 +68,7 @@ test("hosted channel capability reconciliation can still disable automation expl
       HOSTED_EMAIL_LOCAL_PART: "assistant",
       HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
       TELEGRAM_BOT_TOKEN: "telegram-token",
-    });
+    }, true);
 
     assert.deepEqual(result, {
       emailAutoReplyEnabled: false,
@@ -119,6 +119,9 @@ test("hosted dispatch context still requires member activation bootstrap before 
     );
 
     assert.deepEqual(bootstrapResult, {
+      assistantConfigured: false,
+      assistantProvider: null,
+      assistantSeeded: false,
       emailAutoReplyEnabled: false,
       telegramAutoReplyEnabled: false,
       vaultCreated: true,

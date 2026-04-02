@@ -17,9 +17,15 @@ import {
 } from './command-helpers.js'
 import { readEnvValue } from './env-values.js'
 import {
+  inferAssistantProviderFromConfigInput,
   type AssistantProviderConfigInput,
   serializeAssistantProviderOperatorDefaults,
 } from './assistant/provider-config.js'
+import {
+  resolveHostedAssistantProviderConfig,
+  parseHostedAssistantConfig,
+  type HostedAssistantConfig,
+} from './hosted-assistant-config.js'
 export {
   ROOT_OPTIONS_WITH_VALUES,
   resolveEffectiveTopLevelToken,
@@ -104,10 +110,16 @@ const operatorConfigSchema = z.object({
   schema: z.literal(OPERATOR_CONFIG_SCHEMA),
   defaultVault: z.string().min(1).nullable(),
   assistant: assistantOperatorDefaultsSchema.nullable().default(null),
+  hostedAssistant: z.unknown().nullable().optional(),
   updatedAt: z.string().datetime({ offset: true }),
 })
 
-export type OperatorConfig = z.infer<typeof operatorConfigSchema>
+type RawOperatorConfig = z.infer<typeof operatorConfigSchema>
+
+export interface OperatorConfig extends Omit<RawOperatorConfig, 'hostedAssistant'> {
+  hostedAssistant: HostedAssistantConfig | null
+  hostedAssistantInvalid?: boolean
+}
 export type AssistantOperatorDefaults = z.infer<
   typeof assistantOperatorDefaultsSchema
 >
@@ -348,38 +360,100 @@ export async function saveAssistantOperatorDefaultsPatch(
   return config
 }
 
+export async function saveHostedAssistantConfig(
+  hostedAssistant: HostedAssistantConfig | null,
+  homeDirectory = resolveOperatorHomeDirectory(),
+): Promise<OperatorConfig> {
+  const existing = await readOperatorConfig(homeDirectory)
+  const config = buildOperatorConfig(
+    {
+      hostedAssistant,
+    },
+    existing,
+  )
+  const configPath = resolveOperatorConfigPath(homeDirectory)
+
+  await mkdir(path.dirname(configPath), { recursive: true })
+  await writeFile(
+    configPath,
+    `${JSON.stringify(serializeOperatorConfigForWrite(config), null, 2)}\n`,
+    'utf8',
+  )
+
+  return config
+}
+
 function buildOperatorConfig(
   patch: {
     assistant?: AssistantOperatorDefaults | null
     defaultVault?: string | null
+    hostedAssistant?: HostedAssistantConfig | null
   },
   existing: OperatorConfig | null,
 ): OperatorConfig {
-  return operatorConfigSchema.parse({
-    schema: OPERATOR_CONFIG_SCHEMA,
-    defaultVault:
-      patch.defaultVault !== undefined
-        ? patch.defaultVault
-        : existing?.defaultVault ?? null,
-    assistant:
-      patch.assistant !== undefined
-        ? patch.assistant
-        : existing?.assistant ?? null,
-    updatedAt: new Date().toISOString(),
-  })
+  return normalizeParsedOperatorConfig(
+    operatorConfigSchema.parse({
+      schema: OPERATOR_CONFIG_SCHEMA,
+      defaultVault:
+        patch.defaultVault !== undefined
+          ? patch.defaultVault
+          : existing?.defaultVault ?? null,
+      assistant:
+        patch.assistant !== undefined
+          ? patch.assistant
+          : existing?.assistant ?? null,
+      hostedAssistant:
+        patch.hostedAssistant !== undefined
+          ? patch.hostedAssistant
+          : existing?.hostedAssistant ?? null,
+      updatedAt: new Date().toISOString(),
+    }),
+  )
 }
 
-function normalizeParsedOperatorConfig(config: OperatorConfig): OperatorConfig {
-  return operatorConfigSchema.parse({
-    ...config,
-    assistant: normalizeAssistantOperatorDefaults(config.assistant),
-  })
+function normalizeParsedOperatorConfig(
+  config: RawOperatorConfig | OperatorConfig,
+): OperatorConfig {
+  const rawHostedAssistant = config.hostedAssistant ?? null
+  let hostedAssistant: HostedAssistantConfig | null = null
+  let hostedAssistantInvalid = false
+
+  if (rawHostedAssistant) {
+    try {
+      hostedAssistant = parseHostedAssistantConfig(rawHostedAssistant)
+    } catch {
+      hostedAssistantInvalid = true
+    }
+  }
+
+  const assistant = applyHostedAssistantConfigToAssistantDefaults(
+    hostedAssistantInvalid ? null : normalizeAssistantOperatorDefaults(config.assistant),
+    hostedAssistant,
+  )
+
+  return {
+    schema: OPERATOR_CONFIG_SCHEMA,
+    defaultVault: config.defaultVault ?? null,
+    assistant,
+    hostedAssistant,
+    ...(hostedAssistantInvalid ? { hostedAssistantInvalid: true } : {}),
+    updatedAt: config.updatedAt,
+  }
 }
 
 function serializeOperatorConfigForWrite(config: OperatorConfig): unknown {
   return {
-    ...config,
+    schema: config.schema,
+    defaultVault: config.defaultVault,
     assistant: serializeAssistantOperatorDefaultsForWrite(config.assistant),
+    hostedAssistant:
+      config.hostedAssistant
+        ? {
+            ...config.hostedAssistant,
+            updatedAt: config.hostedAssistant.updatedAt ?? config.updatedAt,
+          }
+        : null,
+    updatedAt: config.updatedAt,
   }
 }
 
@@ -434,6 +508,13 @@ export async function resolveAssistantOperatorDefaults(
 ): Promise<AssistantOperatorDefaults | null> {
   const config = await readOperatorConfig(homeDirectory)
   return normalizeAssistantOperatorDefaults(config?.assistant ?? null)
+}
+
+export async function resolveHostedAssistantConfig(
+  homeDirectory = resolveOperatorHomeDirectory(),
+): Promise<HostedAssistantConfig | null> {
+  const config = await readOperatorConfig(homeDirectory)
+  return config?.hostedAssistant ?? null
 }
 
 export function resolveAssistantProviderDefaults(
@@ -598,6 +679,39 @@ export async function applyAssistantSelfDeliveryTargetDefaults(
       savedTarget.deliveryTarget ??
       null,
   }
+}
+
+function applyHostedAssistantConfigToAssistantDefaults(
+  defaults: AssistantOperatorDefaults | null | undefined,
+  hostedAssistant: HostedAssistantConfig | null | undefined,
+): AssistantOperatorDefaults | null {
+  const normalizedDefaults = normalizeAssistantOperatorDefaults(defaults)
+
+  if (!hostedAssistant) {
+    return normalizedDefaults
+  }
+
+  const hostedProviderConfig = resolveHostedAssistantProviderConfig(hostedAssistant)
+  const provider = inferAssistantProviderFromConfigInput(hostedProviderConfig)
+
+  if (!provider || !hostedProviderConfig) {
+    return mergeAssistantOperatorDefaults(normalizedDefaults, {
+      defaultsByProvider: {
+        'codex-cli': null,
+        'openai-compatible': null,
+      },
+      provider: null,
+    })
+  }
+
+  return mergeAssistantOperatorDefaults(
+    normalizedDefaults,
+    buildAssistantProviderDefaultsPatch({
+      defaults: normalizedDefaults,
+      provider,
+      providerConfig: hostedProviderConfig,
+    }),
+  )
 }
 
 function mergeAssistantOperatorDefaults(

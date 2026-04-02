@@ -15,7 +15,15 @@ async function main(): Promise<void> {
       `${formatHostedRuntimeChildResult({
         ok: false,
         error: {
+          code:
+            error
+            && typeof error === "object"
+            && "code" in error
+            && typeof error.code === "string"
+              ? error.code
+              : null,
           message: error instanceof Error ? error.message : String(error),
+          name: error instanceof Error ? error.name : null,
           stack: error instanceof Error ? error.stack ?? null : null,
         },
       })}\n`,

@@ -35,6 +35,21 @@ HOSTED_EXECUTION_RUNNER_TIMEOUT_MS=60000
 # HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL=https://api.cloudflare.com/client/v4
 # HOSTED_EMAIL_DEFAULT_SUBJECT=Murph update
 
+# Optional explicit hosted assistant seed for member activation.
+# These are operator-level Worker vars, not per-user env overrides. The hosted runtime persists
+# the selected active profile into ~/.murph/config.json during bootstrap so later runs stay explicit.
+# HOSTED_ASSISTANT_PROVIDER=openai
+# HOSTED_ASSISTANT_MODEL=gpt-4.1-mini
+# HOSTED_ASSISTANT_BASE_URL=https://api.openai.com/v1
+# HOSTED_ASSISTANT_API_KEY_ENV=OPENAI_API_KEY
+# HOSTED_ASSISTANT_PROVIDER_NAME=openai
+# HOSTED_ASSISTANT_CODEX_COMMAND=codex
+# HOSTED_ASSISTANT_APPROVAL_POLICY=on-request
+# HOSTED_ASSISTANT_SANDBOX=workspace-write
+# HOSTED_ASSISTANT_PROFILE=default
+# HOSTED_ASSISTANT_REASONING_EFFORT=medium
+# HOSTED_ASSISTANT_OSS=false
+
 # Optional allowlist extensions for encrypted per-user runner env overrides.
 # Keep these in sync with the native container runtime when you extend the allowlist.
 # HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS=OPENAI_API_KEY,AGENTMAIL_API_KEY,TELEGRAM_BOT_TOKEN

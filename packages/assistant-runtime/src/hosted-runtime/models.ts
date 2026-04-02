@@ -39,6 +39,9 @@ export interface HostedAssistantRuntimeJobInput {
 }
 
 export interface HostedBootstrapResult {
+  assistantConfigured: boolean;
+  assistantProvider: "codex-cli" | "openai-compatible" | null;
+  assistantSeeded: boolean;
   emailAutoReplyEnabled: boolean;
   telegramAutoReplyEnabled: boolean;
   vaultCreated: boolean;

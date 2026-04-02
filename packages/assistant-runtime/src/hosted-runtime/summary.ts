@@ -50,11 +50,22 @@ function formatHostedBootstrapResult(result: HostedBootstrapResult | null): stri
     result.vaultCreated
       ? "created the canonical vault"
       : "reused the canonical vault",
+    formatHostedAssistantBootstrap(result),
     result.emailAutoReplyEnabled
-      ? "enabled hosted email auto-reply"
-      : "kept hosted email auto-reply unchanged",
+      ? "hosted email auto-reply ready"
+      : "hosted email auto-reply unavailable",
     result.telegramAutoReplyEnabled
-      ? "enabled hosted Telegram auto-reply"
-      : "kept hosted Telegram auto-reply unchanged",
+      ? "hosted Telegram auto-reply ready"
+      : "hosted Telegram auto-reply unavailable",
   ].join("; ");
+}
+
+function formatHostedAssistantBootstrap(result: HostedBootstrapResult): string {
+  if (!result.assistantConfigured || !result.assistantProvider) {
+    return "hosted assistant config unavailable";
+  }
+
+  return result.assistantSeeded
+    ? `seeded explicit hosted assistant config (${result.assistantProvider})`
+    : `reused explicit hosted assistant config (${result.assistantProvider})`;
 }

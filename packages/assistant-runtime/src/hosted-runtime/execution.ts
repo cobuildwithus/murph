@@ -73,6 +73,8 @@ export async function executeHostedDispatchForCommit(input: {
     executionContext: input.executionContext,
     internalWorkerFetch: input.internalWorkerFetch,
     requestId: input.request.dispatch.eventId,
+    skipAssistantAutomation: input.request.dispatch.event.kind === "member.activated"
+      && dispatchMetrics.bootstrapResult?.assistantConfigured === false,
     timeoutMs: input.runtime.commitTimeoutMs,
     runtimeEnv: input.runtimeEnv,
     webControlPlane: input.runtime.webControlPlane,
