@@ -1,6 +1,13 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { InboxShowResult } from '../../inbox-cli-contracts.js'
+import type { AssistantUserMessageContentPart } from '../../model-harness.js'
+import {
+  buildInboxModelAttachmentBundles,
+  hasInboxMultimodalAttachmentEvidenceCandidate,
+  prepareInboxMultimodalUserMessageContent,
+} from '../../inbox-multimodal.js'
+import type { InboxModelAttachmentBundle } from '../../inbox-model-contracts.js'
 import { normalizeNullableString } from '../shared.js'
 
 const MAX_INLINE_ATTACHMENT_TEXT_CHARS = 2000
@@ -20,6 +27,16 @@ export interface AssistantAutoReplyPromptCapture {
 export type AssistantAutoReplyPrompt =
   | { kind: 'defer'; reason: string }
   | { kind: 'ready'; prompt: string }
+  | { kind: 'skip'; reason: string }
+
+export type AssistantAutoReplyPreparedInput =
+  | { kind: 'defer'; reason: string }
+  | {
+      kind: 'ready'
+      prompt: string
+      requiresRichUserMessageContent: boolean
+      userMessageContent: AssistantUserMessageContentPart[] | null
+    }
   | { kind: 'skip'; reason: string }
 
 export function buildAssistantAutoReplyPrompt(
@@ -79,6 +96,83 @@ export function buildAssistantAutoReplyPrompt(
   return {
     kind: 'ready',
     prompt: [...contextLines.filter((line): line is string => line !== null), '', ...sections].join('\n'),
+  }
+}
+
+export async function prepareAssistantAutoReplyInput(
+  captures: readonly AssistantAutoReplyPromptCapture[],
+  vaultRoot: string,
+): Promise<AssistantAutoReplyPreparedInput> {
+  const prompt = buildAssistantAutoReplyPrompt(captures)
+  if (prompt.kind === 'defer') {
+    return prompt
+  }
+
+  const preparedCaptures = await Promise.all(
+    captures.map(async (entry) => ({
+      ...entry,
+      attachmentBundles: await buildInboxModelAttachmentBundles({
+        attachments: entry.capture.attachments,
+        captureId: entry.capture.captureId,
+        vaultRoot,
+      }),
+    })),
+  )
+  const textualSections = preparedCaptures
+    .map((entry, index) =>
+      renderPreparedAssistantAutoReplyCaptureSection(
+        entry,
+        index,
+        preparedCaptures.length,
+      ),
+    )
+    .filter((section): section is string => section !== null)
+
+  const hasTextualContent = preparedCaptures.some((entry) =>
+    captureHasPreparedTextualContent(entry),
+  )
+  const nextPrompt =
+    textualSections.length > 0
+      ? [
+          ...buildAssistantAutoReplyContextLines(captures).filter(
+            (line): line is string => line !== null,
+          ),
+          '',
+          ...textualSections,
+        ].join('\n')
+      : prompt.kind === 'ready'
+        ? prompt.prompt
+        : buildAssistantAutoReplyContextLines(captures)
+            .filter((line): line is string => line !== null)
+            .join('\n')
+
+  const preparedMultimodalInput =
+    await prepareInboxMultimodalUserMessageContent({
+      attachmentSources: preparedCaptures.flatMap((entry) =>
+        entry.attachmentBundles.map((attachment) => ({
+          attachment,
+          captureId: entry.capture.captureId,
+        })),
+      ),
+      prompt: nextPrompt,
+      vaultRoot,
+    })
+
+  if (!hasTextualContent && preparedMultimodalInput.userMessageContent === null) {
+    return {
+      kind: 'skip',
+      reason:
+        preparedMultimodalInput.fallbackError ??
+        'capture has no text or parsed attachment content',
+    }
+  }
+
+  return {
+    kind: 'ready',
+    prompt: nextPrompt,
+    requiresRichUserMessageContent:
+      !hasTextualContent && preparedMultimodalInput.userMessageContent !== null,
+    userMessageContent: preparedMultimodalInput.userMessageContent,
   }
 }
 
@@ -203,6 +297,108 @@ ${buildAttachmentTextExcerpt(extractedText)}`)
 
   const label = `Attachment ${attachment.ordinal} (${attachment.kind}${attachment.fileName ? `, ${attachment.fileName}` : ''})`
   return `${label}\n${chunks.join('\n\n')}`
+}
+
+function buildAssistantAutoReplyContextLines(
+  captures: readonly AssistantAutoReplyPromptCapture[],
+): Array<string | null> {
+  const firstCapture = captures[0]?.capture
+  const lastCapture = captures[captures.length - 1]?.capture
+  if (!firstCapture || !lastCapture) {
+    return []
+  }
+
+  const mediaGroupId = captures[0]?.telegramMetadata?.mediaGroupId ?? null
+  return [
+    `Source: ${firstCapture.source}`,
+    `Occurred at: ${
+      firstCapture.occurredAt === lastCapture.occurredAt
+        ? firstCapture.occurredAt
+        : `${firstCapture.occurredAt} -> ${lastCapture.occurredAt}`
+    }`,
+    `Thread: ${firstCapture.threadId}${firstCapture.threadTitle ? ` (${firstCapture.threadTitle})` : ''}`,
+    `Actor: ${firstCapture.actorName ?? firstCapture.actorId ?? 'unknown'} | self=${String(firstCapture.actorIsSelf)}`,
+    captures.length > 1 ? `Grouped captures: ${captures.length}` : null,
+    mediaGroupId ? `Telegram media group: ${mediaGroupId}` : null,
+  ]
+}
+
+function renderPreparedAssistantAutoReplyCaptureSection(
+  entry: AssistantAutoReplyPromptCapture & {
+    attachmentBundles: readonly InboxModelAttachmentBundle[]
+  },
+  index: number,
+  totalCaptures: number,
+): string | null {
+  const sections: string[] = []
+  const captureText = normalizeNullableString(entry.capture.text)
+  if (entry.telegramMetadata?.replyContext) {
+    sections.push(`Reply context:
+${entry.telegramMetadata.replyContext}`)
+  }
+  if (captureText) {
+    sections.push(`Message text:
+${captureText}`)
+  }
+
+  const attachmentSections = entry.attachmentBundles
+    .map((attachment) => renderPreparedAttachmentPromptSection(attachment))
+    .filter((section): section is string => section !== null)
+
+  if (attachmentSections.length > 0) {
+    sections.push(`Attachment context:
+${attachmentSections.join('\n\n')}`)
+  }
+
+  if (sections.length === 0) {
+    return null
+  }
+
+  if (totalCaptures === 1) {
+    return sections.join('\n\n')
+  }
+
+  return `Capture ${index + 1}:
+${sections.join('\n\n')}`
+}
+
+function captureHasPreparedTextualContent(
+  entry: AssistantAutoReplyPromptCapture & {
+    attachmentBundles: readonly InboxModelAttachmentBundle[]
+  },
+): boolean {
+  return (
+    Boolean(normalizeNullableString(entry.capture.text)) ||
+    Boolean(entry.telegramMetadata?.replyContext) ||
+    entry.attachmentBundles.some((attachment) =>
+      attachment.fragments.some(
+        (fragment) => fragment.kind !== 'attachment_metadata',
+      ),
+    )
+  )
+}
+
+function renderPreparedAttachmentPromptSection(
+  attachment: InboxModelAttachmentBundle,
+): string | null {
+  const hasTextFragments = attachment.fragments.some(
+    (fragment) => fragment.kind !== 'attachment_metadata',
+  )
+  const richEvidenceCandidate =
+    hasInboxMultimodalAttachmentEvidenceCandidate(attachment)
+  if (!hasTextFragments && !richEvidenceCandidate) {
+    return null
+  }
+
+  const sections = attachment.combinedText.length > 0 ? [attachment.combinedText] : []
+  if (!hasTextFragments) {
+    sections.push(
+      'No parsed attachment text is available. Use attached image or PDF evidence if present.',
+    )
+  }
+
+  const label = `Attachment ${attachment.ordinal} (${attachment.kind}${attachment.fileName ? `, ${attachment.fileName}` : ''})`
+  return `${label}\n${sections.join('\n\n')}`
 }
 
 function buildAttachmentTextExcerpt(text: string): string {

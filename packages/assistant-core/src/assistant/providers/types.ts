@@ -45,6 +45,7 @@ export interface AssistantProviderCapabilities {
   supportsDirectCliExecution: boolean
   supportsModelDiscovery: boolean
   supportsReasoningEffort: boolean
+  supportsRichUserMessageContent: boolean
 }
 
 export interface AssistantProviderTraits {

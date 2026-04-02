@@ -144,6 +144,7 @@ export async function executeAssistantProviderTurn(
     systemPrompt: input.systemPrompt,
     toolRuntime: input.toolRuntime,
     userPrompt: input.userPrompt,
+    userMessageContent: input.userMessageContent,
     workingDirectory: input.workingDirectory,
   })
 }
@@ -169,6 +170,7 @@ export async function executeAssistantProviderTurnAttempt(
     systemPrompt: input.systemPrompt,
     toolRuntime: input.toolRuntime,
     userPrompt: input.userPrompt,
+    userMessageContent: input.userMessageContent,
     workingDirectory: input.workingDirectory,
   })
 }

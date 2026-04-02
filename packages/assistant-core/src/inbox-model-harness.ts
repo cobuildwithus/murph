@@ -1,10 +1,6 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import path from 'node:path'
-import { z } from 'incur'
-import { normalizeOpaquePathSegment, normalizeRelativeVaultPath } from '@murphai/core'
+import { mkdir, writeFile } from 'node:fs/promises'
 import {
   resolveAssistantInboxArtifactPath,
-  resolveAssistantVaultPath,
 } from './assistant-vault-paths.js'
 import {
   createInboxRoutingAssistantToolCatalog,
@@ -19,7 +15,6 @@ import type { InboxShowResult } from './inbox-cli-contracts.js'
 import type { InboxServices } from './inbox-services.js'
 import {
   assistantExecutionPlanSchema,
-  inboxModelAttachmentBundleSchema,
   inboxModelBundleResultSchema,
   inboxModelBundleSchema,
   inboxModelRouteResultSchema,
@@ -30,41 +25,15 @@ import {
   type InboxModelRouteResult,
 } from './inbox-model-contracts.js'
 import {
-  getRoutingImageEligibility,
-  type RoutingImageEligibility,
-} from './inbox-routing-vision.js'
+  buildInboxModelAttachmentBundles,
+  inferInboxMultimodalInputMode,
+  prepareInboxMultimodalUserMessageContent,
+} from './inbox-multimodal.js'
 import { errorMessage, normalizeNullableString } from './text/shared.js'
 import type { VaultServices } from './vault-services.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
-const DEFAULT_MAX_FRAGMENT_CHARS = 6000
 const DEFAULT_MAX_ROUTING_CHARS = 24000
-
-const parserManifestSchema = z.object({
-  schema: z.literal('murph.parser-manifest.v1'),
-  paths: z.object({
-    plainTextPath: z.string().min(1),
-    markdownPath: z.string().min(1),
-    tablesPath: z.string().min(1).nullable().optional(),
-  }),
-})
-
-interface PreparedRoutingImage {
-  kind: 'image'
-  ordinal: number
-  fileName: string | null
-  mediaType: string | null
-  bytes: Buffer
-}
-
-interface PreparedRoutingPdf {
-  kind: 'pdf'
-  ordinal: number
-  fileName: string | null
-  bytes: Buffer
-}
-
-type PreparedRoutingEvidence = PreparedRoutingImage | PreparedRoutingPdf
 
 interface PreparedInboxPlacementInput {
   prompt: string
@@ -218,16 +187,12 @@ async function prepareInboxModelSession(
     vaultServices: input.vaultServices,
   })
   const tools = toolCatalog.listTools()
-  const attachments = await Promise.all(
-    shown.capture.attachments.map((attachment) =>
-      buildAttachmentBundle({
-        attachment,
-        captureId: shown.capture.captureId,
-        vaultRoot: input.vault,
-      }),
-    ),
-  )
-  const preparedInputMode = inferPreparedInputMode(attachments)
+  const attachments = await buildInboxModelAttachmentBundles({
+    attachments: shown.capture.attachments,
+    captureId: shown.capture.captureId,
+    vaultRoot: input.vault,
+  })
+  const preparedInputMode = inferInboxMultimodalInputMode(attachments)
   const routingText = clampText(
     renderRoutingText(shown.capture, attachments, preparedInputMode),
     DEFAULT_MAX_ROUTING_CHARS,
@@ -327,66 +292,22 @@ async function prepareInboxPlacementInput(input: {
   vaultRoot: string
 }): Promise<PreparedInboxPlacementInput> {
   const prompt = buildInboxPlacementPrompt(input.bundle)
-  if (input.bundle.preparedInputMode === 'text-only') {
-    return {
-      prompt,
-      inputMode: 'text-only',
-      fallbackError: null,
-    }
-  }
-
-  const routingEvidence = await readPreparedRoutingEvidence({
-    attachments: input.bundle.attachments,
-    captureId: input.bundle.captureId,
+  const preparedMultimodalInput = await prepareInboxMultimodalUserMessageContent({
+    attachmentSources: input.bundle.attachments.map((attachment) => ({
+      attachment,
+      captureId: input.bundle.captureId,
+    })),
+    fallbackContextLabel: 'routing',
+    prompt,
     vaultRoot: input.vaultRoot,
   })
 
-  if (routingEvidence.evidence.length === 0) {
+  if (preparedMultimodalInput.userMessageContent === null) {
     return {
       prompt,
       inputMode: 'text-only',
-      fallbackError:
-        routingEvidence.error ??
-        'Falling back to text-only routing because rich evidence could not be loaded.',
+      fallbackError: preparedMultimodalInput.fallbackError,
     }
-  }
-
-  const content: AssistantModelMessage['content'] = [
-    {
-      type: 'text',
-      text: prompt,
-    },
-  ]
-
-  for (const item of routingEvidence.evidence) {
-    if (item.kind === 'image') {
-      content.push({
-        type: 'text',
-        text: `Routing image ${item.ordinal}${item.fileName ? ` (${item.fileName})` : ''}.`,
-      })
-      content.push({
-        type: 'image',
-        image: item.bytes,
-        ...(item.mediaType
-          ? {
-              mediaType: item.mediaType,
-              mimeType: item.mediaType,
-            }
-          : {}),
-      })
-      continue
-    }
-
-    content.push({
-      type: 'text',
-      text: `Routing PDF ${item.ordinal}${item.fileName ? ` (${item.fileName})` : ''}.`,
-    })
-    content.push({
-      type: 'file',
-      data: item.bytes,
-      mediaType: 'application/pdf',
-      ...(item.fileName ? { filename: item.fileName } : {}),
-    })
   }
 
   return {
@@ -395,7 +316,7 @@ async function prepareInboxPlacementInput(input: {
     messages: [
       {
         role: 'user',
-        content,
+        content: preparedMultimodalInput.userMessageContent,
       },
     ],
     fallbackError: null,
@@ -420,191 +341,6 @@ function validateAssistantPlan(
   return plan
 }
 
-async function buildAttachmentBundle(input: {
-  attachment: InboxShowResult['capture']['attachments'][number]
-  captureId: string
-  vaultRoot: string
-}): Promise<InboxModelAttachmentBundle> {
-  const routingImage = getRoutingImageEligibility(input.attachment)
-  const fragments = [
-    buildMetadataFragment(input.attachment, routingImage),
-    ...buildInlineTextFragments(input.attachment),
-    ...(await buildDerivedTextFragments({
-      attachment: input.attachment,
-      captureId: input.captureId,
-      vaultRoot: input.vaultRoot,
-    })),
-  ]
-  const combinedText = fragments
-    .map((fragment) => `[${fragment.label}]\n${fragment.text}`)
-    .join('\n\n')
-
-  return inboxModelAttachmentBundleSchema.parse({
-    attachmentId:
-      input.attachment.attachmentId ?? `attachment-${input.attachment.ordinal}`,
-    ordinal: input.attachment.ordinal,
-    kind: input.attachment.kind,
-    mime: input.attachment.mime ?? null,
-    fileName: input.attachment.fileName ?? null,
-    storedPath: input.attachment.storedPath ?? null,
-    parseState: input.attachment.parseState ?? null,
-    routingImage,
-    fragments,
-    combinedText,
-  })
-}
-
-function buildMetadataFragment(
-  attachment: InboxShowResult['capture']['attachments'][number],
-  routingImage: RoutingImageEligibility,
-) {
-  const metadataLines = [
-    `attachmentId: ${attachment.attachmentId ?? `attachment-${attachment.ordinal}`}`,
-    `ordinal: ${attachment.ordinal}`,
-    `kind: ${attachment.kind}`,
-    `mime: ${attachment.mime ?? 'unknown'}`,
-    `fileName: ${attachment.fileName ?? 'unknown'}`,
-    `storedPath: ${attachment.storedPath ?? 'missing'}`,
-    `parseState: ${attachment.parseState ?? 'unknown'}`,
-    `routingImageEligible: ${String(routingImage.eligible)}`,
-    `routingImageReason: ${routingImage.reason}`,
-    `routingImageMediaType: ${routingImage.mediaType ?? 'unknown'}`,
-    `routingImageExtension: ${routingImage.extension ?? 'unknown'}`,
-  ]
-  const text = metadataLines.join('\n')
-  return {
-    kind: 'attachment_metadata' as const,
-    label: `attachment-${attachment.ordinal}-metadata`,
-    path: attachment.storedPath ?? null,
-    text,
-    truncated: false,
-  }
-}
-
-function buildInlineTextFragments(
-  attachment: InboxShowResult['capture']['attachments'][number],
-) {
-  const fragments: Array<{
-    kind: 'attachment_extracted_text' | 'attachment_transcript'
-    label: string
-    path: string | null
-    text: string
-    truncated: boolean
-  }> = []
-
-  const extracted = normalizeNullableString(attachment.extractedText)
-  if (extracted) {
-    const clamped = clampText(extracted, DEFAULT_MAX_FRAGMENT_CHARS)
-    fragments.push({
-      kind: 'attachment_extracted_text',
-      label: `attachment-${attachment.ordinal}-extracted-text`,
-      path: attachment.derivedPath ?? attachment.storedPath ?? null,
-      text: clamped.text,
-      truncated: clamped.truncated,
-    })
-  }
-
-  const transcript = normalizeNullableString(attachment.transcriptText)
-  if (transcript) {
-    const clamped = clampText(transcript, DEFAULT_MAX_FRAGMENT_CHARS)
-    fragments.push({
-      kind: 'attachment_transcript',
-      label: `attachment-${attachment.ordinal}-transcript`,
-      path: attachment.derivedPath ?? attachment.storedPath ?? null,
-      text: clamped.text,
-      truncated: clamped.truncated,
-    })
-  }
-
-  return fragments
-}
-
-async function buildDerivedTextFragments(input: {
-  attachment: InboxShowResult['capture']['attachments'][number]
-  captureId: string
-  vaultRoot: string
-}) {
-  const allowedDerivedPrefixes = buildAllowedDerivedPrefixes(
-    input.captureId,
-    input.attachment,
-  )
-  const normalizedManifestPath = normalizeAnchoredVaultRelativePath(
-    input.attachment.derivedPath,
-    allowedDerivedPrefixes,
-  )
-  if (!normalizedManifestPath) {
-    return []
-  }
-
-  const manifest = await readParserManifest(input.vaultRoot, normalizedManifestPath)
-  if (!manifest) {
-    return []
-  }
-
-  const fragments: Array<{
-    kind: 'derived_plain_text' | 'derived_markdown' | 'derived_tables'
-    label: string
-    path: string | null
-    text: string
-    truncated: boolean
-  }> = []
-
-  const plainTextPath = normalizeAnchoredVaultRelativePath(
-    manifest.paths.plainTextPath,
-    allowedDerivedPrefixes,
-  )
-  const plainText = plainTextPath
-    ? await readRelativeTextFile(input.vaultRoot, plainTextPath)
-    : null
-  if (plainText) {
-    const clamped = clampText(plainText, DEFAULT_MAX_FRAGMENT_CHARS)
-    fragments.push({
-      kind: 'derived_plain_text',
-      label: 'derived-plain-text',
-      path: plainTextPath,
-      text: clamped.text,
-      truncated: clamped.truncated,
-    })
-  }
-
-  const markdownPath = normalizeAnchoredVaultRelativePath(
-    manifest.paths.markdownPath,
-    allowedDerivedPrefixes,
-  )
-  const markdown = markdownPath
-    ? await readRelativeTextFile(input.vaultRoot, markdownPath)
-    : null
-  if (markdown) {
-    const clamped = clampText(markdown, DEFAULT_MAX_FRAGMENT_CHARS)
-    fragments.push({
-      kind: 'derived_markdown',
-      label: 'derived-markdown',
-      path: markdownPath,
-      text: clamped.text,
-      truncated: clamped.truncated,
-    })
-  }
-
-  const tablesPath = normalizeAnchoredVaultRelativePath(
-    manifest.paths.tablesPath ?? null,
-    allowedDerivedPrefixes,
-  )
-  if (tablesPath) {
-    const tables = await readRelativeTextFile(input.vaultRoot, tablesPath)
-    if (tables) {
-      const clamped = clampText(tables, DEFAULT_MAX_FRAGMENT_CHARS)
-      fragments.push({
-        kind: 'derived_tables',
-        label: 'derived-tables',
-        path: tablesPath,
-        text: clamped.text,
-        truncated: clamped.truncated,
-      })
-    }
-  }
-
-  return fragments
-}
 
 function renderRoutingText(
   capture: InboxShowResult['capture'],
@@ -649,191 +385,6 @@ function renderToolCatalog(tools: InboxModelBundle['tools']): string {
     .join('\n\n')
 }
 
-async function readParserManifest(
-  vaultRoot: string,
-  relativePath: string,
-): Promise<z.infer<typeof parserManifestSchema> | null> {
-  try {
-    const raw = await readFile(await resolveAssistantVaultPath(vaultRoot, relativePath), 'utf8')
-    return parserManifestSchema.parse(JSON.parse(raw))
-  } catch {
-    return null
-  }
-}
-
-async function readRelativeTextFile(
-  vaultRoot: string,
-  relativePath: string,
-): Promise<string | null> {
-  try {
-    return normalizeNullableString(
-      await readFile(await resolveAssistantVaultPath(vaultRoot, relativePath), 'utf8'),
-    )
-  } catch {
-    return null
-  }
-}
-
-async function readPreparedRoutingEvidence(input: {
-  attachments: InboxModelBundle['attachments']
-  captureId: string
-  vaultRoot: string
-}): Promise<{
-  evidence: PreparedRoutingEvidence[]
-  error: string | null
-}> {
-  const evidence: PreparedRoutingEvidence[] = []
-  const errors: string[] = []
-
-  for (const attachment of input.attachments) {
-    const storedPath = normalizeCaptureStoredAttachmentPath(
-      attachment.storedPath ?? null,
-      input.captureId,
-    )
-    const shouldLoadImage = attachment.routingImage.eligible
-    const shouldLoadPdf = isRoutingPdfFallbackCandidate(attachment)
-    if ((!shouldLoadImage && !shouldLoadPdf) || !attachment.storedPath) {
-      continue
-    }
-
-    try {
-      if (!storedPath) {
-        throw new Error('attachment stored path is outside the capture attachment subtree')
-      }
-      const absolutePath = await resolveAssistantVaultPath(
-        input.vaultRoot,
-        storedPath,
-        'file path',
-      )
-      const bytes = await readFile(absolutePath)
-
-      if (shouldLoadImage) {
-        evidence.push({
-          kind: 'image',
-          ordinal: attachment.ordinal,
-          fileName: attachment.fileName ?? null,
-          mediaType: attachment.routingImage.mediaType ?? null,
-          bytes,
-        })
-      } else {
-        evidence.push({
-          kind: 'pdf',
-          ordinal: attachment.ordinal,
-          fileName: attachment.fileName ?? null,
-          bytes,
-        })
-      }
-    } catch (error) {
-      errors.push(
-        `attachment ${attachment.ordinal} (${shouldLoadPdf ? 'pdf' : 'image'}): ${errorMessage(error)}`,
-      )
-    }
-  }
-
-  return {
-    evidence,
-    error:
-      evidence.length === 0 && errors.length > 0
-        ? `Falling back to text-only routing because rich evidence could not be loaded (${errors.join('; ')}).`
-        : null,
-  }
-}
-
-function buildAllowedDerivedPrefixes(
-  captureId: string,
-  attachment: InboxShowResult['capture']['attachments'][number],
-): string[] {
-  const normalizedCaptureId = normalizeOpaquePathSegment(captureId, 'Capture id')
-  const prefixes = [
-    normalizeRelativeVaultPath(
-      path.posix.join(
-        'derived',
-        'inbox',
-        normalizedCaptureId,
-        `attachment-${attachment.ordinal}`,
-      ),
-    ),
-  ]
-  const attachmentId = normalizeNullableString(attachment.attachmentId)
-  if (attachmentId) {
-    prefixes.push(
-      normalizeRelativeVaultPath(
-        path.posix.join(
-          'derived',
-          'inbox',
-          normalizedCaptureId,
-          'attachments',
-          normalizeOpaquePathSegment(attachmentId, 'Attachment id'),
-        ),
-      ),
-    )
-  }
-  return prefixes.map((prefix) => `${prefix}/`)
-}
-
-function normalizeCaptureStoredAttachmentPath(
-  candidatePath: string | null | undefined,
-  captureId: string,
-): string | null {
-  const normalizedCandidate = normalizeNullableString(candidatePath)
-  if (!normalizedCandidate) {
-    return null
-  }
-
-  try {
-    const normalized = normalizeRelativeVaultPath(normalizedCandidate)
-    return isCaptureStoredAttachmentPath(normalized, captureId) ? normalized : null
-  } catch {
-    return null
-  }
-}
-
-function isCaptureStoredAttachmentPath(
-  normalizedStoredPath: string,
-  captureId: string,
-): boolean {
-  const normalizedCaptureId = normalizeOpaquePathSegment(captureId, 'Capture id')
-  const segments = normalizedStoredPath.split('/')
-  const attachmentsIndex = segments.indexOf('attachments')
-  return (
-    segments[0] === 'raw' &&
-    segments[1] === 'inbox' &&
-    attachmentsIndex >= 3 &&
-    attachmentsIndex < segments.length - 1 &&
-    segments[attachmentsIndex - 1] === normalizedCaptureId
-  )
-}
-
-function normalizeAnchoredVaultRelativePath(
-  candidatePath: string | null | undefined,
-  allowedPrefixes: readonly string[],
-): string | null {
-  const normalizedCandidate = normalizeNullableString(candidatePath)
-  if (!normalizedCandidate) {
-    return null
-  }
-
-  try {
-    const normalized = normalizeRelativeVaultPath(normalizedCandidate)
-    return allowedPrefixes.some((prefix) => normalized.startsWith(prefix))
-      ? normalized
-      : null
-  } catch {
-    return null
-  }
-}
-
-function inferPreparedInputMode(
-  attachments: InboxModelAttachmentBundle[],
-): InboxModelInputMode {
-  return attachments.some(
-    (attachment) =>
-      attachment.routingImage.eligible || isRoutingPdfFallbackCandidate(attachment),
-  )
-    ? 'multimodal'
-    : 'text-only'
-}
-
 function shouldRetryMultimodalAsTextOnly(error: unknown): boolean {
   const message = errorMessage(error).toLowerCase()
   const mentionsImageInput = [
@@ -860,32 +411,6 @@ function shouldRetryMultimodalAsTextOnly(error: unknown): boolean {
   ].some((token) => message.includes(token))
 
   return mentionsImageInput && signalsUnsupported
-}
-
-function isRoutingPdfFallbackCandidate(
-  attachment: InboxModelAttachmentBundle,
-): boolean {
-  return (
-    attachment.kind === 'document' &&
-    isPdfAttachment({
-      fileName: attachment.fileName,
-      mime: attachment.mime,
-    }) &&
-    typeof attachment.storedPath === 'string' &&
-    attachment.storedPath.length > 0 &&
-    attachment.parseState !== 'pending' &&
-    attachment.parseState !== 'running' &&
-    !attachment.fragments.some((fragment) => fragment.kind !== 'attachment_metadata')
-  )
-}
-
-function isPdfAttachment(input: {
-  fileName: string | null
-  mime: string | null
-}): boolean {
-  const fileName = input.fileName?.toLowerCase() ?? ''
-  const mime = input.mime?.toLowerCase() ?? ''
-  return fileName.endsWith('.pdf') || mime === 'application/pdf'
 }
 
 async function writeAssistantArtifact(
