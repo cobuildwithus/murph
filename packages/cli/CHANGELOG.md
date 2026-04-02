@@ -2,6 +2,17 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.1.3] - 2026-04-02
+
+### Fixed
+- soften first-turn and memory prompt guidance
+- support hosted inbound attachments
+
+### Changed
+- move gateway and assistant schemas to zod
+- centralize system prompt
+- clarify npm package messaging
+
 ## [0.1.2] - 2026-04-02
 
 ### Changed
