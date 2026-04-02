@@ -139,7 +139,7 @@ interface AssistantAutoReplyGroupOutcome {
   advanceCursor: boolean
   artifact: AssistantAutoReplyOutcomeArtifact
   event: AssistantAutoReplyOutcomeEvent
-  kind: 'blocked' | 'deferred' | 'failed' | 'ignored' | 'replied' | 'skipped'
+  kind: 'deferred' | 'failed' | 'ignored' | 'replied' | 'skipped'
   stopScanning: boolean
   summary: AssistantAutoReplyOutcomeSummary
 }
@@ -435,13 +435,6 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
       userMessageContent: decision.userMessageContent,
       vault: input.vault,
     })
-    if (result.status === 'blocked') {
-      return createBlockedGroupOutcome({
-        captureCount: input.context.captureCount,
-        errorCode: result.blocked?.code ?? null,
-        reason: result.blocked?.message ?? 'assistant reply was blocked',
-      })
-    }
     if (result.deliveryDeferred) {
       return createDeferredDeliveryGroupOutcome(result)
     }
@@ -602,34 +595,6 @@ function createSkippedGroupOutcome(input: {
       skipped: input.captureCount,
     }),
   }
-}
-
-function createBlockedGroupOutcome(input: {
-  captureCount: number
-  errorCode: string | null
-  reason: string
-}): AssistantAutoReplyGroupOutcome {
-  return {
-    advanceCursor: true,
-    artifact: { kind: 'none' },
-    event: {
-      details: input.reason,
-      errorCode: input.errorCode ?? undefined,
-      safeDetails: summarizeBlockedAutoReply(input.errorCode),
-      type: 'capture.reply-failed',
-    },
-    kind: 'blocked',
-    stopScanning: false,
-    summary: createAssistantAutoReplyOutcomeSummary({
-      failed: input.captureCount,
-    }),
-  }
-}
-
-function summarizeBlockedAutoReply(errorCode: string | null): string {
-  return errorCode
-    ? `assistant reply blocked by write safety check (${errorCode})`
-    : 'assistant reply blocked by write safety check'
 }
 
 function createDeferredGroupOutcome(input: {
@@ -911,6 +876,7 @@ async function executeAssistantAutoReply(input: {
       prompt: input.prompt,
       ...(input.providerOverride ?? {}),
       userMessageContent: input.userMessageContent,
+      includeFirstTurnCheckIn: true,
       deliverResponse: true,
       deliveryDispatchMode: input.deliveryDispatchMode,
       deliveryReplyToMessageId: input.deliveryReplyToMessageId,
@@ -980,10 +946,6 @@ function resolveAssistantAutoReplySendResult(input: {
   replyCaptureId: string
   result: Awaited<ReturnType<typeof sendAssistantMessage>>
 }): Awaited<ReturnType<typeof sendAssistantMessage>> {
-  if (input.result.status === 'blocked') {
-    return input.result
-  }
-
   if (input.result.deliveryDeferred) {
     input.onEvent?.({
       type: 'capture.reply-progress',

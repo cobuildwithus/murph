@@ -3200,7 +3200,7 @@ test('scanAssistantInboxOnce still waits for unsupported pending HEIC photos', a
   )
 })
 
-test('scanAssistantAutoReplyOnce primes backlog cursors and replies to new inbound iMessages', async () => {
+test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound iMessages, and injects the first-contact check-in', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-auto-reply-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
@@ -3474,8 +3474,9 @@ test('scanAssistantAutoReplyOnce primes backlog cursors and replies to new inbou
     ),
     true,
   )
-  assert.doesNotMatch(providerCall?.systemPrompt ?? '', /optional first-chat check-in/u)
-  assert.doesNotMatch(providerCall?.systemPrompt ?? '', /what tone or response style they want/u)
+  assert.match(providerCall?.systemPrompt ?? '', /optional first-chat check-in/u)
+  assert.match(providerCall?.systemPrompt ?? '', /what tone or response style they want/u)
+  assert.match(providerCall?.systemPrompt ?? '', /at most two sentences/u)
   assert.deepEqual(listCalls, [
     {
       vault: vaultRoot,

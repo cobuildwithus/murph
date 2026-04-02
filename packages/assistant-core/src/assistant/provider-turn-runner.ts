@@ -305,6 +305,7 @@ async function resolveAssistantRouteTurnPlan(input: {
         })
       : null
   const shouldInjectBootstrapContext = resumeProviderSessionId === null
+  const resolvedChannel = input.input.channel ?? input.session.binding.channel
   const shouldInjectFirstTurnCheckIn =
     input.input.includeFirstTurnCheckIn === true &&
     shouldInjectBootstrapContext &&
@@ -354,7 +355,7 @@ async function resolveAssistantRouteTurnPlan(input: {
       cliAccess: input.sharedPlan.cliAccess,
       assistantMemoryToolsAvailable,
       assistantMemoryPrompt,
-      channel: input.input.channel ?? input.session.binding.channel,
+      channel: resolvedChannel,
       firstTurnCheckIn: shouldInjectFirstTurnCheckIn,
     }),
   }
@@ -853,7 +854,7 @@ function attachAssistantFailoverExhaustionContext(input: {
 }
 
 function shouldRecordAssistantRouteFailure(errorCode: string | null): boolean {
-  return errorCode !== 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED'
+  return true
 }
 
 function truncateAssistantContinuityText(text: string): string {
