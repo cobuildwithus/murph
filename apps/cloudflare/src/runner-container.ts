@@ -242,6 +242,7 @@ export class RunnerContainer extends Container {
         phase: "failed",
         run,
       });
+      await this.destroyIfRunning();
       throw error;
     }
   }

@@ -507,7 +507,8 @@ test('drainAssistantOutbox keeps post-send hosted journal persistence failures r
 
     const intents = await listAssistantOutboxIntents(vaultRoot)
     assert.equal(intents[0]?.status, 'retryable')
-    assert.equal(intents[0]?.delivery, null)
+    assert.equal(intents[0]?.deliveryConfirmationPending, true)
+    assert.equal(intents[0]?.delivery?.channel, 'telegram')
     assert.equal(intents[0]?.attemptCount, 1)
     const firstAttemptAt = intents[0]?.lastAttemptAt
 

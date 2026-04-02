@@ -1,23 +1,29 @@
-import { createHash } from "node:crypto";
-
 import { describe, expect, it } from "vitest";
 
-import { readEncryptedR2Json, writeEncryptedR2Json } from "../src/crypto.ts";
-import { createHostedExecutionSideEffectJournalStore } from "../src/outbox-delivery-journal.ts";
+import {
+  buildHostedAssistantDeliveryPreparedRecord,
+  buildHostedAssistantDeliverySentRecord,
+} from "@murphai/hosted-execution";
+
+import { writeEncryptedR2Json } from "../src/crypto.ts";
+import {
+  HostedExecutionSideEffectConflictError,
+  createHostedExecutionSideEffectJournalStore,
+} from "../src/outbox-delivery-journal.ts";
 
 describe("createHostedExecutionSideEffectJournalStore", () => {
-  it("reads canonical fingerprint records even when the effect alias is missing", async () => {
+  it("reads side-effect records stored at the authoritative effect key", async () => {
     const bucket = createMemoryBucket();
     const key = Buffer.alloc(32, 9);
-    const record = createSideEffectRecord({
-      effectId: "outbox_missing_alias",
-      fingerprint: "dedupe_missing_alias",
+    const record = createSentRecord({
+      effectId: "outbox_authoritative",
+      fingerprint: "dedupe_authoritative",
     });
 
     await writeEncryptedR2Json({
       bucket: bucket.api,
       cryptoKey: key,
-      key: fingerprintRecordKey("member_123", record.kind, record.fingerprint),
+      key: sideEffectRecordKey("member_123", record.effectId),
       keyId: "v1",
       value: record,
     });
@@ -36,60 +42,21 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
     })).resolves.toEqual(record);
   });
 
-  it("ignores legacy effect-path record payloads that do not have a canonical alias", async () => {
-    const bucket = createMemoryBucket();
-    const key = Buffer.alloc(32, 9);
-    const record = createSideEffectRecord({
-      effectId: "outbox_legacy_only",
-      fingerprint: "dedupe_legacy_only",
-    });
-
-    await writeEncryptedR2Json({
-      bucket: bucket.api,
-      cryptoKey: key,
-      key: effectRecordKey("member_123", record.effectId),
-      keyId: "v1",
-      value: record,
-    });
-
-    await expect(createHostedExecutionSideEffectJournalStore({
-      bucket: bucket.api,
-      key,
-      keyId: "v1",
-    }).read({
-      effectId: record.effectId,
-      fingerprint: record.fingerprint,
-      kind: record.kind,
-      userId: "member_123",
-    })).resolves.toBeNull();
-  });
-
-  it("reads alias-backed canonical side-effect records encrypted with a previous key id after rotation", async () => {
+  it("reads side-effect journal records encrypted with a previous key id after rotation", async () => {
     const bucket = createMemoryBucket();
     const previousKey = Buffer.alloc(32, 8);
     const currentKey = Buffer.alloc(32, 9);
-    const record = createSideEffectRecord({
+    const record = createSentRecord({
       effectId: "outbox_rotated",
       fingerprint: "dedupe_rotated",
     });
-    const canonicalKey = fingerprintRecordKey("member_123", record.kind, record.fingerprint);
 
     await writeEncryptedR2Json({
       bucket: bucket.api,
       cryptoKey: previousKey,
-      key: canonicalKey,
+      key: sideEffectRecordKey("member_123", record.effectId),
       keyId: "v1",
       value: record,
-    });
-    await writeEncryptedR2Json({
-      bucket: bucket.api,
-      cryptoKey: previousKey,
-      key: effectRecordKey("member_123", record.effectId),
-      keyId: "v1",
-      value: {
-        recordKey: canonicalKey,
-        schema: "murph.hosted-side-effect-alias.v1",
-      },
     });
 
     await expect(createHostedExecutionSideEffectJournalStore({
@@ -108,16 +75,16 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
     })).resolves.toEqual(record);
   });
 
-  it("keeps the first canonical side-effect record stable when the same fingerprint is written again", async () => {
+  it("promotes prepared records to sent and keeps sent delivery stable on duplicate writes", async () => {
     const bucket = createMemoryBucket();
     const key = Buffer.alloc(32, 9);
-    const firstRecord = createSideEffectRecord({
-      effectId: "outbox_a",
-      fingerprint: "dedupe_same",
+    const preparedRecord = createPreparedRecord({
+      effectId: "outbox_promote",
+      fingerprint: "dedupe_promote",
     });
-    const secondRecord = createSideEffectRecord({
-      effectId: "outbox_b",
-      fingerprint: "dedupe_same",
+    const sentRecord = createSentRecord({
+      effectId: "outbox_promote",
+      fingerprint: "dedupe_promote",
     });
     const store = createHostedExecutionSideEffectJournalStore({
       bucket: bucket.api,
@@ -126,59 +93,133 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
     });
 
     await expect(store.write({
+      record: preparedRecord,
+      userId: "member_123",
+    })).resolves.toEqual(preparedRecord);
+    await expect(store.write({
+      record: sentRecord,
+      userId: "member_123",
+    })).resolves.toEqual(sentRecord);
+    await expect(store.write({
+      record: preparedRecord,
+      userId: "member_123",
+    })).resolves.toEqual(sentRecord);
+  });
+
+  it("rejects identity conflicts instead of aliasing mismatched records", async () => {
+    const bucket = createMemoryBucket();
+    const key = Buffer.alloc(32, 9);
+    const firstRecord = createPreparedRecord({
+      effectId: "outbox_conflict",
+      fingerprint: "dedupe_a",
+    });
+    const store = createHostedExecutionSideEffectJournalStore({
+      bucket: bucket.api,
+      key,
+      keyId: "v1",
+    });
+
+    await store.write({
       record: firstRecord,
       userId: "member_123",
-    })).resolves.toEqual(firstRecord);
+    });
+
     await expect(store.write({
-      record: secondRecord,
+      record: createPreparedRecord({
+        effectId: "outbox_conflict",
+        fingerprint: "dedupe_b",
+      }),
       userId: "member_123",
-    })).resolves.toEqual(firstRecord);
+    })).rejects.toBeInstanceOf(HostedExecutionSideEffectConflictError);
+  });
+
+  it("deletes only prepared reservations", async () => {
+    const bucket = createMemoryBucket();
+    const key = Buffer.alloc(32, 9);
+    const preparedRecord = createPreparedRecord({
+      effectId: "outbox_prepared",
+      fingerprint: "dedupe_prepared",
+    });
+    const sentRecord = createSentRecord({
+      effectId: "outbox_sent",
+      fingerprint: "dedupe_sent",
+    });
+    const store = createHostedExecutionSideEffectJournalStore({
+      bucket: bucket.api,
+      key,
+      keyId: "v1",
+    });
+
+    await store.write({
+      record: preparedRecord,
+      userId: "member_123",
+    });
+    await store.write({
+      record: sentRecord,
+      userId: "member_123",
+    });
+
+    await expect(store.deletePrepared({
+      effectId: preparedRecord.effectId,
+      fingerprint: preparedRecord.fingerprint,
+      kind: preparedRecord.kind,
+      userId: "member_123",
+    })).resolves.toBe(true);
     await expect(store.read({
-      effectId: secondRecord.effectId,
-      fingerprint: secondRecord.fingerprint,
-      kind: secondRecord.kind,
+      effectId: preparedRecord.effectId,
+      fingerprint: preparedRecord.fingerprint,
+      kind: preparedRecord.kind,
       userId: "member_123",
-    })).resolves.toEqual(firstRecord);
+    })).resolves.toBeNull();
+
+    await expect(store.deletePrepared({
+      effectId: sentRecord.effectId,
+      fingerprint: sentRecord.fingerprint,
+      kind: sentRecord.kind,
+      userId: "member_123",
+    })).resolves.toBe(false);
+    await expect(store.read({
+      effectId: sentRecord.effectId,
+      fingerprint: sentRecord.fingerprint,
+      kind: sentRecord.kind,
+      userId: "member_123",
+    })).resolves.toEqual(sentRecord);
   });
 });
 
-function createSideEffectRecord(input: {
+function createPreparedRecord(input: {
   effectId: string;
   fingerprint: string;
 }) {
-  return {
+  return buildHostedAssistantDeliveryPreparedRecord({
+    dedupeKey: input.fingerprint,
+    intentId: input.effectId,
+    recordedAt: "2026-03-29T10:00:05.000Z",
+  });
+}
+
+function createSentRecord(input: {
+  effectId: string;
+  fingerprint: string;
+}) {
+  return buildHostedAssistantDeliverySentRecord({
+    dedupeKey: input.fingerprint,
     delivery: {
-      channel: "telegram" as const,
+      channel: "telegram",
       idempotencyKey: `assistant-outbox:${input.effectId}`,
       messageLength: 12,
       providerMessageId: null,
       providerThreadId: null,
       sentAt: "2026-03-29T10:00:00.000Z",
       target: "thread_123",
-      targetKind: "thread" as const,
+      targetKind: "thread",
     },
-    effectId: input.effectId,
-    fingerprint: input.fingerprint,
     intentId: input.effectId,
-    kind: "assistant.delivery" as const,
-    recordedAt: "2026-03-29T10:00:05.000Z",
-  };
+  });
 }
 
-function effectRecordKey(userId: string, effectId: string): string {
-  return `transient/side-effects/by-effect/${encodeURIComponent(userId)}/${encodeURIComponent(effectId)}.json`;
-}
-
-function fingerprintRecordKey(
-  userId: string,
-  kind: string,
-  fingerprint: string,
-): string {
-  return `transient/side-effects/by-fingerprint/${hashFingerprint(kind, fingerprint)}/${encodeURIComponent(userId)}.json`;
-}
-
-function hashFingerprint(kind: string, fingerprint: string): string {
-  return createHash("sha256").update(`${kind}:${fingerprint}`).digest("hex");
+function sideEffectRecordKey(userId: string, effectId: string): string {
+  return `transient/side-effects/${encodeURIComponent(userId)}/${encodeURIComponent(effectId)}.json`;
 }
 
 function createMemoryBucket() {

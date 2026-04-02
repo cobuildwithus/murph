@@ -303,19 +303,12 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       new Request("http://side-effects.worker/effects/outbox_123", {
         body: JSON.stringify({
-          delivery: {
-            channel: "telegram",
-            idempotencyKey: "assistant-outbox:intent_123",
-            messageLength: 12,
-            sentAt: "2026-03-26T12:00:00.000Z",
-            target: "thread_123",
-            targetKind: "thread",
-          },
           effectId: "outbox_999",
           fingerprint: "dedupe_123",
           intentId: "outbox_123",
           kind: "assistant.delivery",
           recordedAt: "2026-03-26T12:00:05.000Z",
+          state: "prepared",
         }),
         headers: createRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",

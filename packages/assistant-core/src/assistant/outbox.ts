@@ -63,8 +63,16 @@ export interface DispatchAssistantOutboxIntentResult {
 export type AssistantOutboxDispatchMode = 'immediate' | 'queue-only'
 
 export interface AssistantOutboxDispatchHooks {
+  clearPreparedIntent?: (input: {
+    intent: AssistantOutboxIntent
+    vault: string
+  }) => Promise<void>
   persistDeliveredIntent?: (input: {
     delivery: AssistantChannelDelivery
+    intent: AssistantOutboxIntent
+    vault: string
+  }) => Promise<void>
+  prepareDispatchIntent?: (input: {
     intent: AssistantOutboxIntent
     vault: string
   }) => Promise<void>
@@ -340,6 +348,7 @@ export async function dispatchAssistantOutboxIntent(input: {
   const dispatchIntentPath = prepared.intentPath
   let deliveryMayHaveSucceeded = false
   let deliveryTransportIdempotent = dispatchIntent.deliveryTransportIdempotent
+  let preparedDispatchReserved = false
 
   try {
     const reconciledDelivery =
@@ -386,6 +395,13 @@ export async function dispatchAssistantOutboxIntent(input: {
       fault: 'delivery',
       message: 'Injected assistant delivery failure.',
     })
+
+    await input.dispatchHooks?.prepareDispatchIntent?.({
+      intent: dispatchIntent,
+      vault: input.vault,
+    })
+    preparedDispatchReserved = input.dispatchHooks?.prepareDispatchIntent !== undefined
+
     const delivered = await deliverAssistantMessageOverBinding({
       vault: input.vault,
       sessionId: dispatchIntent.sessionId,
@@ -422,14 +438,23 @@ export async function dispatchAssistantOutboxIntent(input: {
       ...dispatchIntent,
       deliveryTransportIdempotent,
     })
+    const durableDeliveredIntent = input.dispatchHooks?.persistDeliveredIntent
+      ? await persistAssistantOutboxIntentDeliveryPendingConfirmation({
+          delivery,
+          deliveryTransportIdempotent,
+          intent: deliveredIntent,
+          intentPath: dispatchIntentPath,
+          vault: input.vault,
+        })
+      : deliveredIntent
 
     await input.dispatchHooks?.persistDeliveredIntent?.({
       delivery,
-      intent: deliveredIntent,
+      intent: durableDeliveredIntent,
       vault: input.vault,
     })
+    preparedDispatchReserved = false
 
-    const completedAt = delivery.sentAt
     if (delivered.session) {
       try {
         await saveAssistantSession(input.vault, delivered.session)
@@ -442,7 +467,7 @@ export async function dispatchAssistantOutboxIntent(input: {
     }
     const sentIntent = await markAssistantOutboxIntentSent({
       delivery,
-      intent: deliveredIntent,
+      intent: durableDeliveredIntent,
       intentPath: dispatchIntentPath,
       vault: input.vault,
     })
@@ -453,10 +478,31 @@ export async function dispatchAssistantOutboxIntent(input: {
       session: delivered.session ?? null,
     }
   } catch (error) {
+    let failure = error
+    let effectiveDeliveryMayHaveSucceeded =
+      deliveryMayHaveSucceeded || errorImpliesAssistantDeliveryMayHaveSucceeded(error)
+
+    if (preparedDispatchReserved && !effectiveDeliveryMayHaveSucceeded) {
+      if (input.dispatchHooks?.clearPreparedIntent) {
+        try {
+          await input.dispatchHooks.clearPreparedIntent({
+            intent: dispatchIntent,
+            vault: input.vault,
+          })
+          preparedDispatchReserved = false
+        } catch (clearError) {
+          failure = clearError
+          effectiveDeliveryMayHaveSucceeded = true
+        }
+      } else {
+        effectiveDeliveryMayHaveSucceeded = true
+      }
+    }
+
     const failedIntent = await updateAssistantOutboxAfterDispatchFailure({
-      deliveryMayHaveSucceeded,
+      deliveryMayHaveSucceeded: effectiveDeliveryMayHaveSucceeded,
       deliveryTransportIdempotent,
-      error,
+      error: failure,
       intentPath: dispatchIntentPath,
       now,
       sending: dispatchIntent,
@@ -653,6 +699,63 @@ export async function drainAssistantOutboxLocal(input: {
   }
 }
 
+async function persistAssistantOutboxIntentDeliveryPendingConfirmation(input: {
+  delivery: AssistantChannelDelivery
+  deliveryTransportIdempotent: boolean
+  intent: AssistantOutboxIntent
+  intentPath: string
+  vault: string
+}): Promise<AssistantOutboxIntent> {
+  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const current = await readAssistantOutboxIntentAtPath(input.intentPath)
+    const baseIntent = current ?? input.intent
+    const pendingIntent = assistantOutboxIntentSchema.parse({
+      ...baseIntent,
+      deliveryConfirmationPending: true,
+      deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+      deliveryIdempotencyKey:
+        input.delivery.idempotencyKey ?? baseIntent.deliveryIdempotencyKey,
+      updatedAt: input.delivery.sentAt,
+      nextAttemptAt: null,
+      status: 'sending',
+      delivery: input.delivery,
+      lastError: createAssistantDeliveryConfirmationPendingError(),
+    })
+    await writeJsonFileAtomic(input.intentPath, pendingIntent)
+    return pendingIntent
+  })
+}
+
+function errorImpliesAssistantDeliveryMayHaveSucceeded(error: unknown): boolean {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'deliveryMayHaveSucceeded' in error &&
+    typeof (error as { deliveryMayHaveSucceeded?: unknown }).deliveryMayHaveSucceeded === 'boolean'
+  ) {
+    return (error as { deliveryMayHaveSucceeded: boolean }).deliveryMayHaveSucceeded
+  }
+
+  return normalizeAssistantDeliveryError(error).code === 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING'
+}
+
+function sameAssistantChannelDelivery(
+  left: AssistantChannelDelivery,
+  right: AssistantChannelDelivery,
+): boolean {
+  return (
+    left.channel === right.channel &&
+    left.idempotencyKey === right.idempotencyKey &&
+    left.target === right.target &&
+    left.targetKind === right.targetKind &&
+    left.sentAt === right.sentAt &&
+    left.messageLength === right.messageLength &&
+    left.providerMessageId === right.providerMessageId &&
+    left.providerThreadId === right.providerThreadId
+  )
+}
+
 async function markAssistantOutboxIntentSent(input: {
   delivery: AssistantChannelDelivery
   intent: AssistantOutboxIntent
@@ -665,6 +768,15 @@ async function markAssistantOutboxIntentSent(input: {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
     const current = await readAssistantOutboxIntentAtPath(input.intentPath)
+
+    if (
+      current?.status === 'sent' &&
+      current.delivery &&
+      sameAssistantChannelDelivery(current.delivery, input.delivery)
+    ) {
+      return current
+    }
+
     const baseIntent =
       input.preserveCurrentDispatchMetadata === false
         ? input.intent

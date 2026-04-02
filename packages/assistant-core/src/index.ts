@@ -68,6 +68,7 @@ export {
   deliverAssistantOutboxMessage,
   dispatchAssistantOutboxIntent,
   drainAssistantOutbox,
+  normalizeAssistantDeliveryError,
   listAssistantOutboxIntents,
   readAssistantOutboxIntent,
   shouldDispatchAssistantOutboxIntent,

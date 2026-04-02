@@ -1,17 +1,30 @@
-import { createHash } from "node:crypto";
-
 import {
   parseHostedExecutionSideEffectRecord,
+  sameHostedExecutionAssistantDelivery,
+  sameHostedExecutionSideEffectIdentity,
   type HostedExecutionSideEffectRecord,
 } from "@murphai/hosted-execution";
 
+import type { R2BucketLike } from "./bundle-store.ts";
 import {
   readEncryptedR2Json,
   writeEncryptedR2Json,
-  type EncryptedR2BucketLike,
 } from "./crypto.js";
 
+export class HostedExecutionSideEffectConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "HostedExecutionSideEffectConflictError";
+  }
+}
+
 export interface HostedExecutionSideEffectJournalStore {
+  deletePrepared(input: {
+    effectId: string;
+    fingerprint: string;
+    kind: HostedExecutionSideEffectRecord["kind"];
+    userId: string;
+  }): Promise<boolean>;
   read(input: {
     effectId: string;
     fingerprint: string;
@@ -24,54 +37,60 @@ export interface HostedExecutionSideEffectJournalStore {
   }): Promise<HostedExecutionSideEffectRecord>;
 }
 
-const HOSTED_EXECUTION_SIDE_EFFECT_ALIAS_SCHEMA =
-  "murph.hosted-side-effect-alias.v1";
-
-interface HostedExecutionSideEffectAlias {
-  recordKey: string;
-  schema: typeof HOSTED_EXECUTION_SIDE_EFFECT_ALIAS_SCHEMA;
-}
-
 export function createHostedExecutionSideEffectJournalStore(input: {
-  bucket: EncryptedR2BucketLike;
+  bucket: R2BucketLike;
   key: Uint8Array;
   keyId: string;
   keysById?: Readonly<Record<string, Uint8Array>>;
 }): HostedExecutionSideEffectJournalStore {
   return {
-    async read(query) {
-      const aliasedRecordKey = await readAliasRecordKeyAtKey(
-        input,
-        effectRecordKey(query.userId, query.effectId),
-      );
+    async deletePrepared(query) {
+      const key = sideEffectRecordKey(query.userId, query.effectId);
+      const existing = await readRecordAtKey(input, key);
 
-      if (aliasedRecordKey) {
-        const byEffectAlias = await readRecordAtKey(input, aliasedRecordKey);
-
-        if (byEffectAlias) {
-          return byEffectAlias;
-        }
+      if (!existing) {
+        return false;
       }
 
-      return readRecordAtKey(
+      assertSideEffectQueryMatchesRecord(query, existing);
+      if (existing.state !== "prepared") {
+        return false;
+      }
+
+      if (!input.bucket.delete) {
+        throw new Error("Hosted side-effect journal cleanup requires R2 delete support.");
+      }
+
+      await input.bucket.delete(key);
+      return true;
+    },
+
+    async read(query) {
+      const existing = await readRecordAtKey(
         input,
-        fingerprintRecordKey(query.userId, query.kind, query.fingerprint),
+        sideEffectRecordKey(query.userId, query.effectId),
       );
+
+      if (!existing) {
+        return null;
+      }
+
+      assertSideEffectQueryMatchesRecord(query, existing);
+      return existing;
     },
 
     async write(writeInput) {
       const record = parseHostedExecutionSideEffectRecord(writeInput.record);
-      const canonicalKey = fingerprintRecordKey(
-        writeInput.userId,
-        record.kind,
-        record.fingerprint,
-      );
-      const effectKey = effectRecordKey(writeInput.userId, record.effectId);
-      const existing = await readRecordAtKey(input, canonicalKey);
-      const durableRecord = existing ?? record;
+      assertSideEffectRecordIsSelfConsistent(record);
+      const key = sideEffectRecordKey(writeInput.userId, record.effectId);
+      const existing = await readRecordAtKey(input, key);
+      const durableRecord = mergeHostedExecutionSideEffectRecord(existing, record);
 
-      await writeRecordAtKey(input, canonicalKey, durableRecord);
-      await writeAliasAtKey(input, effectKey, canonicalKey);
+      if (durableRecord === existing) {
+        return durableRecord;
+      }
+
+      await writeRecordAtKey(input, key, durableRecord);
       return durableRecord;
     },
   };
@@ -79,7 +98,7 @@ export function createHostedExecutionSideEffectJournalStore(input: {
 
 async function readRecordAtKey(
   input: {
-    bucket: EncryptedR2BucketLike;
+    bucket: R2BucketLike;
     key: Uint8Array;
     keyId: string;
     keysById?: Readonly<Record<string, Uint8Array>>;
@@ -104,32 +123,9 @@ async function readRecordAtKey(
   return parseHostedExecutionSideEffectRecord(value);
 }
 
-async function readAliasRecordKeyAtKey(
-  input: {
-    bucket: EncryptedR2BucketLike;
-    key: Uint8Array;
-    keyId: string;
-    keysById?: Readonly<Record<string, Uint8Array>>;
-  },
-  key: string,
-): Promise<string | null> {
-  const value = await readEncryptedR2Json({
-    bucket: input.bucket,
-    cryptoKey: input.key,
-    cryptoKeysById: input.keysById,
-    expectedKeyId: input.keyId,
-    key,
-    parse(value) {
-      return value;
-    },
-  });
-
-  return isHostedExecutionSideEffectAlias(value) ? value.recordKey : null;
-}
-
 async function writeRecordAtKey(
   input: {
-    bucket: EncryptedR2BucketLike;
+    bucket: R2BucketLike;
     key: Uint8Array;
     keyId: string;
     keysById?: Readonly<Record<string, Uint8Array>>;
@@ -146,53 +142,69 @@ async function writeRecordAtKey(
   });
 }
 
-async function writeAliasAtKey(
-  input: {
-    bucket: EncryptedR2BucketLike;
-    key: Uint8Array;
-    keyId: string;
-    keysById?: Readonly<Record<string, Uint8Array>>;
+function sideEffectRecordKey(userId: string, effectId: string): string {
+  return `transient/side-effects/${encodeURIComponent(userId)}/${encodeURIComponent(effectId)}.json`;
+}
+
+function assertSideEffectRecordIsSelfConsistent(
+  record: HostedExecutionSideEffectRecord,
+): void {
+  if (record.effectId !== record.intentId) {
+    throw new HostedExecutionSideEffectConflictError(
+      `Hosted side effect ${record.effectId} must reuse the same intentId as effectId.`,
+    );
+  }
+}
+
+function assertSideEffectQueryMatchesRecord(
+  query: {
+    effectId: string;
+    fingerprint: string;
+    kind: HostedExecutionSideEffectRecord["kind"];
   },
-  key: string,
-  recordKey: string,
-): Promise<void> {
-  await writeEncryptedR2Json({
-    bucket: input.bucket,
-    cryptoKey: input.key,
-    key,
-    keyId: input.keyId,
-    value: {
-      recordKey,
-      schema: HOSTED_EXECUTION_SIDE_EFFECT_ALIAS_SCHEMA,
-    } satisfies HostedExecutionSideEffectAlias,
-  });
-}
+  record: HostedExecutionSideEffectRecord,
+): void {
+  if (
+    record.effectId === query.effectId
+    && record.intentId === query.effectId
+    && record.fingerprint === query.fingerprint
+    && record.kind === query.kind
+  ) {
+    return;
+  }
 
-function effectRecordKey(userId: string, effectId: string): string {
-  return `transient/side-effects/by-effect/${encodeURIComponent(userId)}/${encodeURIComponent(effectId)}.json`;
-}
-
-function fingerprintRecordKey(
-  userId: string,
-  kind: HostedExecutionSideEffectRecord["kind"],
-  fingerprint: string,
-): string {
-  return `transient/side-effects/by-fingerprint/${hashFingerprint(kind, fingerprint)}/${encodeURIComponent(userId)}.json`;
-}
-
-function hashFingerprint(kind: string, fingerprint: string): string {
-  return createHash("sha256").update(`${kind}:${fingerprint}`).digest("hex");
-}
-
-function isHostedExecutionSideEffectAlias(
-  value: unknown,
-): value is HostedExecutionSideEffectAlias {
-  return Boolean(
-    value
-      && typeof value === "object"
-      && !Array.isArray(value)
-      && (value as { schema?: unknown }).schema
-        === HOSTED_EXECUTION_SIDE_EFFECT_ALIAS_SCHEMA
-      && typeof (value as { recordKey?: unknown }).recordKey === "string",
+  throw new HostedExecutionSideEffectConflictError(
+    `Hosted side effect ${query.effectId} does not match the stored side-effect identity.`,
   );
+}
+
+function mergeHostedExecutionSideEffectRecord(
+  existing: HostedExecutionSideEffectRecord | null,
+  next: HostedExecutionSideEffectRecord,
+): HostedExecutionSideEffectRecord {
+  if (!existing) {
+    return next;
+  }
+
+  if (!sameHostedExecutionSideEffectIdentity(existing, next)) {
+    throw new HostedExecutionSideEffectConflictError(
+      `Hosted side effect ${next.effectId} cannot change identity after it has been recorded.`,
+    );
+  }
+
+  if (existing.state === "sent") {
+    if (next.state === "prepared") {
+      return existing;
+    }
+
+    if (!sameHostedExecutionAssistantDelivery(existing.delivery, next.delivery)) {
+      throw new HostedExecutionSideEffectConflictError(
+        `Hosted side effect ${next.effectId} cannot change delivery details after it has been sent.`,
+      );
+    }
+
+    return existing;
+  }
+
+  return next.state === "prepared" ? existing : next;
 }

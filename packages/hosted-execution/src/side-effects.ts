@@ -2,8 +2,16 @@ export const HOSTED_EXECUTION_SIDE_EFFECT_KINDS = [
   "assistant.delivery",
 ] as const;
 
+export const HOSTED_EXECUTION_SIDE_EFFECT_RECORD_STATES = [
+  "prepared",
+  "sent",
+] as const;
+
 export type HostedExecutionSideEffectKind =
   (typeof HOSTED_EXECUTION_SIDE_EFFECT_KINDS)[number];
+
+export type HostedExecutionSideEffectRecordState =
+  (typeof HOSTED_EXECUTION_SIDE_EFFECT_RECORD_STATES)[number];
 
 export interface HostedAssistantDeliverySideEffect {
   effectId: string;
@@ -25,8 +33,7 @@ export interface HostedExecutionAssistantDelivery {
   targetKind: "explicit" | "participant" | "thread";
 }
 
-export interface HostedAssistantDeliverySideEffectRecord {
-  delivery: HostedExecutionAssistantDelivery;
+interface HostedAssistantDeliverySideEffectRecordBase {
   effectId: string;
   fingerprint: string;
   intentId: string;
@@ -34,7 +41,20 @@ export interface HostedAssistantDeliverySideEffectRecord {
   recordedAt: string;
 }
 
-export type HostedExecutionSideEffectRecord = HostedAssistantDeliverySideEffectRecord;
+export interface HostedAssistantDeliveryPreparedSideEffectRecord
+  extends HostedAssistantDeliverySideEffectRecordBase {
+  state: "prepared";
+}
+
+export interface HostedAssistantDeliverySentSideEffectRecord
+  extends HostedAssistantDeliverySideEffectRecordBase {
+  delivery: HostedExecutionAssistantDelivery;
+  state: "sent";
+}
+
+export type HostedExecutionSideEffectRecord =
+  | HostedAssistantDeliveryPreparedSideEffectRecord
+  | HostedAssistantDeliverySentSideEffectRecord;
 
 export function buildHostedAssistantDeliverySideEffect(input: {
   dedupeKey: string;
@@ -45,6 +65,34 @@ export function buildHostedAssistantDeliverySideEffect(input: {
     fingerprint: input.dedupeKey,
     intentId: input.intentId,
     kind: "assistant.delivery",
+  };
+}
+
+export function buildHostedAssistantDeliveryPreparedRecord(input: {
+  dedupeKey: string;
+  intentId: string;
+  recordedAt: string;
+}): HostedAssistantDeliveryPreparedSideEffectRecord {
+  return {
+    ...buildHostedAssistantDeliverySideEffect(input),
+    recordedAt: requireString(input.recordedAt, "Hosted assistant prepared side effect recordedAt"),
+    state: "prepared",
+  };
+}
+
+export function buildHostedAssistantDeliverySentRecord(input: {
+  dedupeKey: string;
+  delivery: HostedExecutionAssistantDelivery;
+  intentId: string;
+}): HostedAssistantDeliverySentSideEffectRecord {
+  return {
+    ...buildHostedAssistantDeliverySideEffect(input),
+    delivery: parseHostedExecutionAssistantDelivery(
+      input.delivery,
+      "Hosted assistant sent side effect delivery",
+    ),
+    recordedAt: input.delivery.sentAt,
+    state: "sent",
   };
 }
 
@@ -89,12 +137,8 @@ export function parseHostedExecutionSideEffectRecord(
   );
 
   switch (kind) {
-    case "assistant.delivery":
-      return {
-        delivery: parseHostedExecutionAssistantDelivery(
-          record.delivery,
-          "Hosted assistant side effect record delivery",
-        ),
+    case "assistant.delivery": {
+      const baseRecord = {
         effectId: requireString(
           record.effectId,
           "Hosted assistant side effect record effectId",
@@ -113,9 +157,56 @@ export function parseHostedExecutionSideEffectRecord(
           "Hosted assistant side effect record recordedAt",
         ),
       };
+      const state = requireHostedExecutionSideEffectRecordState(
+        record.state,
+        "Hosted assistant side effect record state",
+      );
+
+      return state === "sent"
+        ? {
+            ...baseRecord,
+            delivery: parseHostedExecutionAssistantDelivery(
+              record.delivery,
+              "Hosted assistant side effect record delivery",
+            ),
+            state,
+          }
+        : {
+            ...baseRecord,
+            state,
+          };
+    }
     default:
       throw new TypeError(`Unsupported hosted execution side effect record kind: ${kind}`);
   }
+}
+
+export function sameHostedExecutionSideEffectIdentity(
+  left: Pick<HostedExecutionSideEffectRecord, "effectId" | "fingerprint" | "intentId" | "kind">,
+  right: Pick<HostedExecutionSideEffectRecord, "effectId" | "fingerprint" | "intentId" | "kind">,
+): boolean {
+  return (
+    left.effectId === right.effectId
+    && left.fingerprint === right.fingerprint
+    && left.intentId === right.intentId
+    && left.kind === right.kind
+  );
+}
+
+export function sameHostedExecutionAssistantDelivery(
+  left: HostedExecutionAssistantDelivery,
+  right: HostedExecutionAssistantDelivery,
+): boolean {
+  return (
+    left.channel === right.channel
+    && left.idempotencyKey === right.idempotencyKey
+    && left.messageLength === right.messageLength
+    && left.providerMessageId === right.providerMessageId
+    && left.providerThreadId === right.providerThreadId
+    && left.sentAt === right.sentAt
+    && left.target === right.target
+    && left.targetKind === right.targetKind
+  );
 }
 
 function requireObject(value: unknown, label: string): Record<string, unknown> {
@@ -155,10 +246,29 @@ function requireHostedExecutionSideEffectKind(
   throw new TypeError(`Unsupported hosted execution side effect kind: ${kind}`);
 }
 
+function requireHostedExecutionSideEffectRecordState(
+  value: unknown,
+  label: string,
+): HostedExecutionSideEffectRecordState {
+  const state = requireString(value, label);
+
+  if (isHostedExecutionSideEffectRecordState(state)) {
+    return state;
+  }
+
+  throw new TypeError(`Unsupported hosted execution side effect record state: ${state}`);
+}
+
 export function isHostedExecutionSideEffectKind(
   value: string,
 ): value is HostedExecutionSideEffectKind {
   return (HOSTED_EXECUTION_SIDE_EFFECT_KINDS as readonly string[]).includes(value);
+}
+
+export function isHostedExecutionSideEffectRecordState(
+  value: string,
+): value is HostedExecutionSideEffectRecordState {
+  return (HOSTED_EXECUTION_SIDE_EFFECT_RECORD_STATES as readonly string[]).includes(value);
 }
 
 function parseHostedExecutionAssistantDelivery(

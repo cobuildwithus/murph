@@ -1,4 +1,6 @@
 import {
+  buildHostedAssistantDeliveryPreparedRecord,
+  buildHostedAssistantDeliverySentRecord,
   buildHostedAssistantDeliverySideEffect,
   parseHostedExecutionSideEffects,
   type HostedExecutionDispatchRequest,
@@ -16,7 +18,9 @@ import {
   shouldDispatchAssistantOutboxIntent,
   type AssistantChannelDelivery,
   type AssistantOutboxDispatchHooks,
+  type AssistantOutboxIntent,
 } from "@murphai/assistant-core";
+import { normalizeAssistantDeliveryError } from "@murphai/assistant-core/assistant-outbox";
 
 import type {
   HostedCommittedExecutionState,
@@ -229,56 +233,70 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
   userId: string;
 }): AssistantOutboxDispatchHooks {
   return {
-    persistDeliveredIntent: async ({ delivery, intent }: {
-      delivery: AssistantChannelDelivery;
-      intent: {
-        dedupeKey: string;
-        intentId: string;
-      };
+    clearPreparedIntent: async ({ intent }: {
+      intent: AssistantOutboxIntent;
       vault: string;
     }) => {
-      if (!delivery.idempotencyKey) {
-        throw new Error(
-          "Hosted assistant delivery side effects require a non-empty idempotencyKey.",
-        );
-      }
-
+      await callHostedRunnerSideEffectJournal({
+        commit: input.commit,
+        commitTimeoutMs: input.commitTimeoutMs,
+        fetchImpl: input.fetchImpl,
+        method: "DELETE",
+        sideEffect: buildHostedAssistantDeliverySideEffect({
+          dedupeKey: intent.dedupeKey,
+          intentId: intent.intentId,
+        }),
+        sideEffectsBaseUrl: input.sideEffectsBaseUrl,
+        userId: input.userId,
+      });
+    },
+    persistDeliveredIntent: async ({ delivery, intent }: {
+      delivery: AssistantChannelDelivery;
+      intent: AssistantOutboxIntent;
+      vault: string;
+    }) => {
+      await persistHostedAssistantDeliveryRecord({
+        commit: input.commit,
+        commitTimeoutMs: input.commitTimeoutMs,
+        delivery,
+        fetchImpl: input.fetchImpl,
+        intent,
+        sideEffectsBaseUrl: input.sideEffectsBaseUrl,
+        userId: input.userId,
+      });
+    },
+    prepareDispatchIntent: async ({ intent }: {
+      intent: AssistantOutboxIntent;
+      vault: string;
+    }) => {
       await callHostedRunnerSideEffectJournal({
         commit: input.commit,
         commitTimeoutMs: input.commitTimeoutMs,
         fetchImpl: input.fetchImpl,
         method: "PUT",
-        record: {
-          delivery: {
-            ...delivery,
-            idempotencyKey: delivery.idempotencyKey,
-          },
-          effectId: intent.intentId,
-          fingerprint: intent.dedupeKey,
+        record: buildHostedAssistantDeliveryPreparedRecord({
+          dedupeKey: intent.dedupeKey,
           intentId: intent.intentId,
-          kind: "assistant.delivery",
-          recordedAt: delivery.sentAt,
-        },
+          recordedAt: intent.lastAttemptAt ?? new Date().toISOString(),
+        }),
         sideEffectsBaseUrl: input.sideEffectsBaseUrl,
         userId: input.userId,
       });
     },
     resolveDeliveredIntent: async ({ intent }: {
-      intent: {
-        dedupeKey: string;
-        intentId: string;
-      };
+      intent: AssistantOutboxIntent;
       vault: string;
     }) => {
+      const sideEffect = buildHostedAssistantDeliverySideEffect({
+        dedupeKey: intent.dedupeKey,
+        intentId: intent.intentId,
+      });
       const record = await callHostedRunnerSideEffectJournal({
         commit: input.commit,
         commitTimeoutMs: input.commitTimeoutMs,
         fetchImpl: input.fetchImpl,
         method: "GET",
-        sideEffect: buildHostedAssistantDeliverySideEffect({
-          dedupeKey: intent.dedupeKey,
-          intentId: intent.intentId,
-        }),
+        sideEffect,
         sideEffectsBaseUrl: input.sideEffectsBaseUrl,
         userId: input.userId,
       });
@@ -287,17 +305,98 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
         return null;
       }
 
-      return {
-        channel: record.delivery.channel,
-        idempotencyKey: record.delivery.idempotencyKey,
-        messageLength: record.delivery.messageLength,
-        providerMessageId: record.delivery.providerMessageId ?? null,
-        providerThreadId: record.delivery.providerThreadId ?? null,
-        sentAt: record.delivery.sentAt,
-        target: record.delivery.target,
-        targetKind: record.delivery.targetKind,
-      } satisfies AssistantChannelDelivery;
+      if (record.state === "sent") {
+        return {
+          channel: record.delivery.channel,
+          idempotencyKey: record.delivery.idempotencyKey,
+          messageLength: record.delivery.messageLength,
+          providerMessageId: record.delivery.providerMessageId ?? null,
+          providerThreadId: record.delivery.providerThreadId ?? null,
+          sentAt: record.delivery.sentAt,
+          target: record.delivery.target,
+          targetKind: record.delivery.targetKind,
+        } satisfies AssistantChannelDelivery;
+      }
+
+      const localDelivery = readLocallyRecordedAssistantDelivery(intent);
+      if (!localDelivery) {
+        throw createHostedAssistantDeliveryConfirmationPendingError({
+          effectId: intent.intentId,
+          userId: input.userId,
+        });
+      }
+
+      try {
+        await persistHostedAssistantDeliveryRecord({
+          commit: input.commit,
+          commitTimeoutMs: input.commitTimeoutMs,
+          delivery: localDelivery,
+          fetchImpl: input.fetchImpl,
+          intent,
+          sideEffectsBaseUrl: input.sideEffectsBaseUrl,
+          userId: input.userId,
+        });
+      } catch (error) {
+        throw createHostedAssistantDeliveryConfirmationPendingError({
+          cause: error,
+          effectId: intent.intentId,
+          userId: input.userId,
+        });
+      }
+
+      return localDelivery;
     },
+  };
+}
+
+async function persistHostedAssistantDeliveryRecord(input: {
+  commit: HostedExecutionCommitCallback;
+  commitTimeoutMs: number | null;
+  delivery: AssistantChannelDelivery;
+  fetchImpl?: typeof fetch;
+  intent: Pick<AssistantOutboxIntent, "dedupeKey" | "intentId">;
+  sideEffectsBaseUrl: string;
+  userId: string;
+}): Promise<void> {
+  if (!input.delivery.idempotencyKey) {
+    throw new Error(
+      "Hosted assistant delivery side effects require a non-empty idempotencyKey.",
+    );
+  }
+
+  await callHostedRunnerSideEffectJournal({
+    commit: input.commit,
+    commitTimeoutMs: input.commitTimeoutMs,
+    fetchImpl: input.fetchImpl,
+    method: "PUT",
+    record: buildHostedAssistantDeliverySentRecord({
+      dedupeKey: input.intent.dedupeKey,
+      delivery: {
+        ...input.delivery,
+        idempotencyKey: input.delivery.idempotencyKey,
+      },
+      intentId: input.intent.intentId,
+    }),
+    sideEffectsBaseUrl: input.sideEffectsBaseUrl,
+    userId: input.userId,
+  });
+}
+
+function readLocallyRecordedAssistantDelivery(
+  intent: Pick<AssistantOutboxIntent, "delivery" | "deliveryIdempotencyKey">,
+): AssistantChannelDelivery | null {
+  if (!intent.delivery) {
+    return null;
+  }
+
+  const idempotencyKey = intent.delivery.idempotencyKey ?? intent.deliveryIdempotencyKey;
+  if (!idempotencyKey) {
+    return null;
+  }
+
+  return {
+    ...intent.delivery,
+    idempotencyKey,
   };
 }
 
@@ -306,7 +405,7 @@ async function callHostedRunnerSideEffectJournal(input:
       commit: HostedExecutionCommitCallback;
       commitTimeoutMs: number | null;
       fetchImpl?: typeof fetch;
-      method: "GET";
+      method: "DELETE" | "GET";
       sideEffect: HostedExecutionSideEffect;
       sideEffectsBaseUrl: string;
       userId: string;
@@ -320,12 +419,12 @@ async function callHostedRunnerSideEffectJournal(input:
       sideEffectsBaseUrl: string;
       userId: string;
     }): Promise<HostedExecutionSideEffectRecord | null> {
-  const sideEffect = input.method === "GET"
-    ? input.sideEffect
-    : buildHostedAssistantDeliverySideEffect({
+  const sideEffect = input.method === "PUT"
+    ? buildHostedAssistantDeliverySideEffect({
         dedupeKey: input.record.fingerprint,
         intentId: input.record.intentId,
-      });
+      })
+    : input.sideEffect;
   const url = buildHostedRunnerSideEffectUrl(input.sideEffectsBaseUrl, sideEffect.effectId);
   url.searchParams.set("fingerprint", sideEffect.fingerprint);
   url.searchParams.set("kind", sideEffect.kind);
@@ -352,12 +451,58 @@ async function callHostedRunnerSideEffectJournal(input:
     throw createHostedRunnerSideEffectJournalError(input, response.status);
   }
 
+  if (input.method === "DELETE") {
+    return null;
+  }
+
   const payload = (await response.json()) as {
     effectId: string;
     record: HostedExecutionSideEffectRecord | null;
   };
 
   return payload.record;
+}
+
+function createHostedAssistantDeliveryConfirmationPendingError(input: {
+  cause?: unknown;
+  effectId: string;
+  userId: string;
+}): Error & {
+  code: string;
+  context: {
+    retryable: true;
+    status: null;
+  };
+  deliveryMayHaveSucceeded: true;
+  retryable: true;
+} {
+  const detail = input.cause ? normalizeAssistantDeliveryError(input.cause).message : null;
+  const error = new Error(
+    detail
+      ? `Hosted assistant delivery may have succeeded already for ${input.userId}/${input.effectId} and must be reconciled before resend. ${detail}`
+      : `Hosted assistant delivery may have succeeded already for ${input.userId}/${input.effectId} and must be reconciled before resend.`,
+  ) as Error & {
+    code: string;
+    context: {
+      retryable: true;
+      status: null;
+    };
+    cause?: unknown;
+    deliveryMayHaveSucceeded: true;
+    retryable: true;
+  };
+
+  error.code = "ASSISTANT_DELIVERY_CONFIRMATION_PENDING";
+  error.context = {
+    retryable: true,
+    status: null,
+  };
+  error.deliveryMayHaveSucceeded = true;
+  error.retryable = true;
+  if (input.cause !== undefined) {
+    error.cause = input.cause;
+  }
+  return error;
 }
 
 function buildHostedRunnerCommitUrl(
@@ -385,7 +530,7 @@ function sameHostedExecutionBundles(
 function createHostedRunnerSideEffectJournalError(
   input:
     | {
-        method: "GET";
+        method: "DELETE" | "GET";
         sideEffect: HostedExecutionSideEffect;
         userId: string;
       }
@@ -404,7 +549,7 @@ function createHostedRunnerSideEffectJournalError(
   };
   retryable: true;
 } {
-  const effectId = input.method === "GET" ? input.sideEffect.effectId : input.record.effectId;
+  const effectId = input.method === "PUT" ? input.record.effectId : input.sideEffect.effectId;
   const error = new Error(
     status === null
       ? `Hosted runner side-effect journal ${input.method} failed for ${input.userId}/${effectId}.`

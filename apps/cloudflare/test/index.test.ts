@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -528,12 +527,10 @@ describe("cloudflare worker routes", () => {
     const response = await callRunnerOutbound(
       new Request("http://side-effects.worker/effects/outbox_123?kind=assistant.delivery&fingerprint=dedupe_123", {
         body: JSON.stringify({
-          delivery: createOutboxDelivery(),
-          effectId: "outbox_123",
-          fingerprint: "dedupe_123",
-          intentId: "outbox_123",
-          kind: "assistant.delivery",
-          recordedAt: "2026-03-26T12:00:05.000Z",
+          ...createPreparedSideEffectRecord({
+            effectId: "outbox_123",
+            fingerprint: "dedupe_123",
+          }),
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -556,29 +553,24 @@ describe("cloudflare worker routes", () => {
     await expect(readResponse.json()).resolves.toMatchObject({
       effectId: "outbox_123",
       record: {
-        delivery: {
-          channel: "telegram",
-          target: "thread_123",
-        },
         effectId: "outbox_123",
         intentId: "outbox_123",
         kind: "assistant.delivery",
+        state: "prepared",
       },
     });
   });
 
-  it("falls back to fingerprint side-effect records across the outbox and side-effects routes", async () => {
+  it("returns 409 when the same effect id is reused with a mismatched fingerprint", async () => {
     const env = createWorkerEnv();
 
     await callRunnerOutbound(
       new Request("http://side-effects.worker/intents/outbox_a?kind=assistant.delivery&fingerprint=dedupe_123", {
         body: JSON.stringify({
-          delivery: createOutboxDelivery(),
-          effectId: "outbox_a",
-          fingerprint: "dedupe_123",
-          intentId: "outbox_a",
-          kind: "assistant.delivery",
-          recordedAt: "2026-03-26T12:00:05.000Z",
+          ...createPreparedSideEffectRecord({
+            effectId: "outbox_a",
+            fingerprint: "dedupe_123",
+          }),
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -588,23 +580,97 @@ describe("cloudflare worker routes", () => {
       env,
     );
 
-    const readResponse = await callRunnerOutbound(
-      new Request("http://side-effects.worker/effects/outbox_b?kind=assistant.delivery&fingerprint=dedupe_123", {
-        method: "GET",
+    const conflictResponse = await callRunnerOutbound(
+      new Request("http://side-effects.worker/effects/outbox_a?kind=assistant.delivery&fingerprint=dedupe_conflict", {
+        body: JSON.stringify({
+          ...createPreparedSideEffectRecord({
+            effectId: "outbox_a",
+            fingerprint: "dedupe_conflict",
+          }),
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "PUT",
       }),
       env,
     );
 
-    expect(readResponse.status).toBe(200);
-    await expect(readResponse.json()).resolves.toMatchObject({
-      effectId: "outbox_a",
-      record: {
-        delivery: {
-          channel: "telegram",
+    expect(conflictResponse.status).toBe(409);
+    await expect(conflictResponse.json()).resolves.toMatchObject({
+      error: expect.stringContaining("cannot change identity"),
+    });
+  });
+
+  it("deletes only prepared side-effect reservations through the side-effects route", async () => {
+    const env = createWorkerEnv();
+
+    await callRunnerOutbound(
+      new Request("http://side-effects.worker/effects/outbox_prepared?kind=assistant.delivery&fingerprint=dedupe_prepared", {
+        body: JSON.stringify(createPreparedSideEffectRecord({
+          effectId: "outbox_prepared",
+          fingerprint: "dedupe_prepared",
+        })),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
         },
-        effectId: "outbox_a",
-        intentId: "outbox_a",
+        method: "PUT",
+      }),
+      env,
+    );
+    await callRunnerOutbound(
+      new Request("http://side-effects.worker/effects/outbox_sent?kind=assistant.delivery&fingerprint=dedupe_sent", {
+        body: JSON.stringify(createSentSideEffectRecord({
+          effectId: "outbox_sent",
+          fingerprint: "dedupe_sent",
+        })),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "PUT",
+      }),
+      env,
+    );
+
+    const deletePreparedResponse = await callRunnerOutbound(
+      new Request("http://side-effects.worker/effects/outbox_prepared?kind=assistant.delivery&fingerprint=dedupe_prepared", {
+        method: "DELETE",
+      }),
+      env,
+    );
+    expect(deletePreparedResponse.status).toBe(200);
+
+    const readPreparedResponse = await callRunnerOutbound(
+      new Request("http://side-effects.worker/effects/outbox_prepared?kind=assistant.delivery&fingerprint=dedupe_prepared", {
+        method: "GET",
+      }),
+      env,
+    );
+    await expect(readPreparedResponse.json()).resolves.toMatchObject({
+      effectId: "outbox_prepared",
+      record: null,
+    });
+
+    const deleteSentResponse = await callRunnerOutbound(
+      new Request("http://side-effects.worker/effects/outbox_sent?kind=assistant.delivery&fingerprint=dedupe_sent", {
+        method: "DELETE",
+      }),
+      env,
+    );
+    expect(deleteSentResponse.status).toBe(200);
+
+    const readSentResponse = await callRunnerOutbound(
+      new Request("http://side-effects.worker/effects/outbox_sent?kind=assistant.delivery&fingerprint=dedupe_sent", {
+        method: "GET",
+      }),
+      env,
+    );
+    await expect(readSentResponse.json()).resolves.toMatchObject({
+      effectId: "outbox_sent",
+      record: {
+        effectId: "outbox_sent",
         kind: "assistant.delivery",
+        state: "sent",
       },
     });
   });
@@ -617,32 +683,17 @@ describe("cloudflare worker routes", () => {
         v1: previousKey.toString("base64"),
       }),
     });
-    const record = {
-      delivery: createOutboxDelivery(),
+    const record = createSentSideEffectRecord({
       effectId: "outbox_rotated",
       fingerprint: "dedupe_rotated",
-      intentId: "outbox_rotated",
-      kind: "assistant.delivery" as const,
-      recordedAt: "2026-03-26T12:00:05.000Z",
-    };
-    const canonicalKey = fingerprintRecordKey("member_123", record.kind, record.fingerprint);
+    });
 
     await writeEncryptedR2Json({
       bucket: env.BUNDLES,
       cryptoKey: previousKey,
-      key: canonicalKey,
+      key: sideEffectRecordKey("member_123", record.effectId),
       keyId: "v1",
       value: record,
-    });
-    await writeEncryptedR2Json({
-      bucket: env.BUNDLES,
-      cryptoKey: previousKey,
-      key: effectRecordKey("member_123", record.effectId),
-      keyId: "v1",
-      value: {
-        recordKey: canonicalKey,
-        schema: "murph.hosted-side-effect-alias.v1",
-      },
     });
 
     const response = await callRunnerOutbound(
@@ -663,6 +714,7 @@ describe("cloudflare worker routes", () => {
         effectId: "outbox_rotated",
         intentId: "outbox_rotated",
         kind: "assistant.delivery",
+        state: "sent",
       },
     });
   });
@@ -2149,20 +2201,34 @@ function createOutboxDelivery() {
   };
 }
 
-function effectRecordKey(userId: string, effectId: string): string {
-  return `transient/side-effects/by-effect/${encodeURIComponent(userId)}/${encodeURIComponent(effectId)}.json`;
+function createPreparedSideEffectRecord(input: {
+  effectId: string;
+  fingerprint: string;
+}) {
+  return {
+    effectId: input.effectId,
+    fingerprint: input.fingerprint,
+    intentId: input.effectId,
+    kind: "assistant.delivery" as const,
+    recordedAt: "2026-03-26T12:00:05.000Z",
+    state: "prepared" as const,
+  };
 }
 
-function fingerprintRecordKey(
-  userId: string,
-  kind: string,
-  fingerprint: string,
-): string {
-  return `transient/side-effects/by-fingerprint/${hashFingerprint(kind, fingerprint)}/${encodeURIComponent(userId)}.json`;
+function createSentSideEffectRecord(input: {
+  effectId: string;
+  fingerprint: string;
+}) {
+  return {
+    ...createPreparedSideEffectRecord(input),
+    delivery: createOutboxDelivery(),
+    recordedAt: "2026-03-26T12:00:00.000Z",
+    state: "sent" as const,
+  };
 }
 
-function hashFingerprint(kind: string, fingerprint: string): string {
-  return createHash("sha256").update(`${kind}:${fingerprint}`).digest("hex");
+function sideEffectRecordKey(userId: string, effectId: string): string {
+  return `transient/side-effects/${encodeURIComponent(userId)}/${encodeURIComponent(effectId)}.json`;
 }
 
 async function createCommittedRunnerSuccessResponse(input: {
