@@ -2,6 +2,18 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.1.4] - 2026-04-02
+
+### Fixed
+- tune first-turn onboarding prompt
+- default codex reasoning to medium
+- omit empty npm tag in publish workflow
+- drop onboarding tone prompt
+
+### Changed
+- clear finished boundary-cleanup ledger row
+- clean parser and gateway boundaries
+
 ## [0.1.3] - 2026-04-02
 
 ### Fixed
