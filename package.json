@@ -37,6 +37,7 @@
     "release:check": "bash scripts/release-check.sh",
     "release:dry-run": "bash scripts/release.sh patch --dry-run",
     "release:patch": "bash scripts/release.sh patch",
+    "release:patch:rc": "bash scripts/release.sh prepatch --preid rc",
     "release:minor": "bash scripts/release.sh minor",
     "release:major": "bash scripts/release.sh major",
     "plan:open": "bash scripts/open-exec-plan.sh",
