@@ -1,9 +1,9 @@
-import {
-  createSecretCodec,
-  type DeviceSyncJobInput,
-  type DeviceSyncService,
-  type StoredDeviceSyncAccount,
-} from "@murphai/device-syncd";
+import { createSecretCodec } from "@murphai/device-syncd/crypto";
+import type { DeviceSyncService } from "@murphai/device-syncd/service";
+import type {
+  DeviceSyncJobInput,
+  StoredDeviceSyncAccount,
+} from "@murphai/device-syncd/types";
 import type {
   HostedExecutionDeviceSyncJobHint,
   HostedExecutionDispatchRequest,

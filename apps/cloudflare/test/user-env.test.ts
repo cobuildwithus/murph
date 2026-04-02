@@ -191,9 +191,16 @@ describe("hosted user env helpers", () => {
     expect(() => decodeHostedUserEnvPayload(payload)).toThrow("Hosted user env config is invalid.");
   });
 
-  it("accepts shorthand payloads and returns the canonical shared update shape", () => {
-    expect(parseHostedUserEnvUpdate({
+  it("requires the canonical env wrapper and returns the shared update shape", () => {
+    expect(() => parseHostedUserEnvUpdate({
       OPENAI_API_KEY: "sk-test",
+      mode: "replace",
+    })).toThrow("Hosted user env request body field `env` must be a JSON object.");
+
+    expect(parseHostedUserEnvUpdate({
+      env: {
+        OPENAI_API_KEY: "sk-test",
+      },
       mode: "replace",
     })).toEqual({
       env: {
@@ -225,6 +232,7 @@ describe("hosted user env helpers", () => {
       env: {
         OPENAI_API_KEY: 123,
       },
+      mode: "merge",
     })).toThrow(
       "Hosted execution user env update env.OPENAI_API_KEY must be a string or null.",
     );
@@ -239,6 +247,7 @@ describe("hosted user env helpers", () => {
         env: {
           OPENAI_API_KEY: "",
         },
+        mode: "merge",
       }),
     })).toEqual({});
   });

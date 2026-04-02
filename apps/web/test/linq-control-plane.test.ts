@@ -11,9 +11,12 @@ import {
 } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  createHostedDeviceSyncControlPlane: vi.fn(),
+  assertBrowserMutationOrigin: vi.fn(),
+  createHostedDeviceSyncControlPlaneContext: vi.fn(),
   fetch: vi.fn(),
+  hostedDeviceSyncAgentSessionService: vi.fn(),
   getPrisma: vi.fn(),
+  requireAuthenticatedHostedUser: vi.fn(),
   verifyAndParseLinqWebhookRequest: vi.fn(),
   parseCanonicalLinqMessageReceivedEvent: vi.fn(),
   store: {
@@ -30,8 +33,17 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("@/src/lib/device-sync/control-plane", () => ({
-  createHostedDeviceSyncControlPlane: mocks.createHostedDeviceSyncControlPlane,
+vi.mock("@/src/lib/device-sync/auth", () => ({
+  assertBrowserMutationOrigin: mocks.assertBrowserMutationOrigin,
+  requireAuthenticatedHostedUser: mocks.requireAuthenticatedHostedUser,
+}));
+
+vi.mock("@/src/lib/device-sync/control-plane-context", () => ({
+  createHostedDeviceSyncControlPlaneContext: mocks.createHostedDeviceSyncControlPlaneContext,
+}));
+
+vi.mock("@/src/lib/device-sync/agent-session-service", () => ({
+  HostedDeviceSyncAgentSessionService: mocks.hostedDeviceSyncAgentSessionService,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -86,8 +98,25 @@ describe("HostedLinqControlPlane", () => {
     mocks.hostedWebhookReceipt.create.mockResolvedValue({});
     mocks.hostedWebhookReceipt.findUnique.mockResolvedValue(null);
     mocks.hostedWebhookReceipt.updateMany.mockResolvedValue({ count: 1 });
+    mocks.assertBrowserMutationOrigin.mockReset();
+    mocks.createHostedDeviceSyncControlPlaneContext.mockReturnValue({
+      allowedReturnOrigins: ["https://example.test"],
+      codec: {},
+      env: {
+        allowedReturnOrigins: ["https://example.test"],
+      },
+      registry: {},
+      store: {},
+    });
     mocks.getPrisma.mockReturnValue({
       hostedWebhookReceipt: mocks.hostedWebhookReceipt,
+    });
+    mocks.hostedDeviceSyncAgentSessionService.mockImplementation(() => ({
+      createAgentSession: vi.fn(),
+      requireAgentSession: vi.fn(),
+    }));
+    mocks.requireAuthenticatedHostedUser.mockResolvedValue({
+      id: "user-123",
     });
     mocks.store.getBindingByRecipientPhone.mockResolvedValue(null);
     mocks.fetch.mockResolvedValue({
@@ -118,7 +147,7 @@ describe("HostedLinqControlPlane", () => {
       httpStatus: 500,
     });
     expect(mocks.verifyAndParseLinqWebhookRequest).not.toHaveBeenCalled();
-    expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
+    expect(mocks.createHostedDeviceSyncControlPlaneContext).not.toHaveBeenCalled();
   });
 
   it("handles public webhook ingestion without constructing the hosted device-sync auth control plane", async () => {
@@ -156,7 +185,7 @@ describe("HostedLinqControlPlane", () => {
       recipientPhone: "*** 4321",
       eventId: "evt_123",
     });
-    expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
+    expect(mocks.createHostedDeviceSyncControlPlaneContext).not.toHaveBeenCalled();
     expect(mocks.verifyAndParseLinqWebhookRequest).toHaveBeenCalledTimes(1);
     expect(mocks.store.getBindingByRecipientPhone).toHaveBeenCalledWith("+15557654321");
     expect(mocks.hostedWebhookReceipt.create).toHaveBeenCalledWith(
@@ -170,13 +199,6 @@ describe("HostedLinqControlPlane", () => {
   });
 
   it("reuses the hosted device-sync browser auth flow for binding reads", async () => {
-    const authControlPlane = {
-      requireAuthenticatedUser: vi.fn().mockResolvedValue({
-        id: "user-123",
-      }),
-    };
-
-    mocks.createHostedDeviceSyncControlPlane.mockReturnValue(authControlPlane);
     mocks.store.listBindingsForUser.mockResolvedValue([
       {
         id: "linqb_123",
@@ -204,20 +226,12 @@ describe("HostedLinqControlPlane", () => {
         },
       ],
     });
-    expect(authControlPlane.requireAuthenticatedUser).toHaveBeenCalledTimes(1);
-    expect(mocks.createHostedDeviceSyncControlPlane).toHaveBeenCalledTimes(1);
+    expect(mocks.requireAuthenticatedHostedUser).toHaveBeenCalledTimes(1);
+    expect(mocks.createHostedDeviceSyncControlPlaneContext).toHaveBeenCalledTimes(1);
     expect(mocks.store.listBindingsForUser).toHaveBeenCalledWith("user-123");
   });
 
   it("verifies browser binding claims against the configured Linq account inventory", async () => {
-    const authControlPlane = {
-      assertBrowserMutationOrigin: vi.fn(),
-      requireAuthenticatedUser: vi.fn().mockResolvedValue({
-        id: "user-123",
-      }),
-    };
-
-    mocks.createHostedDeviceSyncControlPlane.mockReturnValue(authControlPlane);
     mocks.store.upsertBinding.mockResolvedValue({
       id: "linqb_123",
       userId: "user-123",
@@ -262,17 +276,10 @@ describe("HostedLinqControlPlane", () => {
       recipientPhone: "+15557654321",
       label: "Primary",
     });
+    expect(mocks.assertBrowserMutationOrigin).toHaveBeenCalledTimes(1);
   });
 
   it("rejects binding claims for recipient phones the configured Linq account does not control", async () => {
-    const authControlPlane = {
-      assertBrowserMutationOrigin: vi.fn(),
-      requireAuthenticatedUser: vi.fn().mockResolvedValue({
-        id: "user-123",
-      }),
-    };
-
-    mocks.createHostedDeviceSyncControlPlane.mockReturnValue(authControlPlane);
     mocks.fetch.mockResolvedValue({
       ok: true,
       status: 200,
@@ -302,14 +309,6 @@ describe("HostedLinqControlPlane", () => {
 
   it("fails hosted recipient verification when LINQ_API_TOKEN is missing", async () => {
     delete process.env.LINQ_API_TOKEN;
-    const authControlPlane = {
-      assertBrowserMutationOrigin: vi.fn(),
-      requireAuthenticatedUser: vi.fn().mockResolvedValue({
-        id: "user-123",
-      }),
-    };
-
-    mocks.createHostedDeviceSyncControlPlane.mockReturnValue(authControlPlane);
 
     const controlPlane = new linqControlPlane.HostedLinqControlPlane(
       new Request("https://example.test/api/linq/bindings", {
@@ -328,14 +327,6 @@ describe("HostedLinqControlPlane", () => {
   });
 
   it("fails hosted recipient verification when the Linq phone-number probe returns a non-OK response", async () => {
-    const authControlPlane = {
-      assertBrowserMutationOrigin: vi.fn(),
-      requireAuthenticatedUser: vi.fn().mockResolvedValue({
-        id: "user-123",
-      }),
-    };
-
-    mocks.createHostedDeviceSyncControlPlane.mockReturnValue(authControlPlane);
     mocks.fetch.mockResolvedValue({
       ok: false,
       status: 503,
@@ -361,14 +352,6 @@ describe("HostedLinqControlPlane", () => {
   });
 
   it("treats hosted Linq phone-number rate limits as retryable probe failures", async () => {
-    const authControlPlane = {
-      assertBrowserMutationOrigin: vi.fn(),
-      requireAuthenticatedUser: vi.fn().mockResolvedValue({
-        id: "user-123",
-      }),
-    };
-
-    mocks.createHostedDeviceSyncControlPlane.mockReturnValue(authControlPlane);
     mocks.fetch.mockResolvedValue({
       ok: false,
       status: 429,
@@ -639,14 +622,6 @@ describe("HostedLinqControlPlane", () => {
 
   it("fails hosted recipient verification when the Linq phone-number probe times out", async () => {
     vi.useFakeTimers();
-    const authControlPlane = {
-      assertBrowserMutationOrigin: vi.fn(),
-      requireAuthenticatedUser: vi.fn().mockResolvedValue({
-        id: "user-123",
-      }),
-    };
-
-    mocks.createHostedDeviceSyncControlPlane.mockReturnValue(authControlPlane);
     mocks.fetch.mockImplementation((_url: unknown, init?: RequestInit) =>
       new Promise((_resolve, reject) => {
         const signal = init?.signal as AbortSignal | undefined;

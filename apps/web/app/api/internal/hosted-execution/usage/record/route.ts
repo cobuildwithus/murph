@@ -5,6 +5,11 @@ import {
 import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
 
 export const POST = withJsonError(async (request: Request) => {
+    authorizeHostedExecutionInternalRequest({
+      acceptedToken: "internal",
+      request,
+      requireBoundUserId: true,
+    });
     const body = await readOptionalJsonObject(request);
     const usage = Array.isArray(body.usage) ? body.usage : [];
     const { trustedUserId } = authorizeHostedExecutionInternalRequest({

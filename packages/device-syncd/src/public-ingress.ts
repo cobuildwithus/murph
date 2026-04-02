@@ -181,6 +181,7 @@ export class DeviceSyncPublicIngress {
       const connection = await provider.exchangeAuthorizationCode(
         {
           callbackUrl: descriptor.callbackUrl,
+          state,
           now,
           grantedScopes,
         },
@@ -429,9 +430,12 @@ export { sanitizeStoredDeviceSyncMetadata, toIsoTimestamp } from "./shared.ts";
 export { resolveDeviceSyncWebhookVerificationResponse } from "./webhook-verification.ts";
 export { buildPublicDeviceSyncErrorPayload } from "./http.ts";
 export {
+  readConfiguredGarminDeviceSyncProviderConfig,
   readConfiguredOuraDeviceSyncProviderConfig,
   readConfiguredWhoopDeviceSyncProviderConfig,
 } from "./config.ts";
+export { createGarminDeviceSyncProvider } from "./providers/garmin.ts";
+export type { GarminDeviceSyncProviderConfig } from "./providers/garmin.ts";
 export { createOuraDeviceSyncProvider } from "./providers/oura.ts";
 export type { OuraDeviceSyncProviderConfig } from "./providers/oura.ts";
 export { createWhoopDeviceSyncProvider } from "./providers/whoop.ts";

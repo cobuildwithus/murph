@@ -49,24 +49,7 @@ export async function decryptHostedBundle(input: {
     throw new Error("Hosted bundle envelope is invalid.");
   }
 
-  let selectedKey = input.key;
-
-  if (input.keysById) {
-    const keyForEnvelope = input.keysById[input.envelope.keyId];
-
-    if (!keyForEnvelope) {
-      throw new Error(
-        `Hosted bundle envelope keyId mismatch: expected ${input.expectedKeyId ?? "configured keyring"}, got ${input.envelope.keyId}.`,
-      );
-    }
-    selectedKey = keyForEnvelope;
-  } else if (input.expectedKeyId && input.envelope.keyId !== input.expectedKeyId) {
-    throw new Error(
-      `Hosted bundle envelope keyId mismatch: expected ${input.expectedKeyId}, got ${input.envelope.keyId}. No keyring is configured for multi-key decryption.`,
-    );
-  }
-
-  const cryptoKey = await importAesKey(selectedKey);
+  const cryptoKey = await importAesKey(resolveHostedBundleDecryptionKey(input));
 
   return new Uint8Array(
     await crypto.subtle.decrypt(
@@ -171,6 +154,33 @@ export async function writeEncryptedR2Json(input: {
     keyId: input.keyId,
     plaintext: utf8Encoder.encode(JSON.stringify(input.value)),
   });
+}
+
+function resolveHostedBundleDecryptionKey(input: {
+  envelope: HostedCipherEnvelope;
+  expectedKeyId?: string;
+  key: Uint8Array;
+  keysById?: Readonly<Record<string, Uint8Array>>;
+}): Uint8Array {
+  if (input.keysById) {
+    const keyForEnvelope = input.keysById[input.envelope.keyId];
+
+    if (!keyForEnvelope) {
+      throw new Error(
+        `Hosted bundle envelope keyId mismatch: expected ${input.expectedKeyId ?? "configured keyring"}, got ${input.envelope.keyId}.`,
+      );
+    }
+
+    return keyForEnvelope;
+  }
+
+  if (input.expectedKeyId && input.envelope.keyId !== input.expectedKeyId) {
+    throw new Error(
+      `Hosted bundle envelope keyId mismatch: expected ${input.expectedKeyId}, got ${input.envelope.keyId}. No keyring is configured for multi-key decryption.`,
+    );
+  }
+
+  return input.key;
 }
 
 async function importAesKey(keyBytes: Uint8Array): Promise<CryptoKey> {

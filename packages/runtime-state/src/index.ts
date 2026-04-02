@@ -1,6 +1,8 @@
 export {
+  parseHostedExecutionBundleRef,
   sameHostedBundlePayloadRef,
   sameHostedExecutionBundleRef,
+  serializeHostedExecutionBundleRef,
   type HostedExecutionBundleKind,
   type HostedExecutionBundleRef,
   type HostedExecutionBundleRefIdentity,

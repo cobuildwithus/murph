@@ -71,22 +71,31 @@ export class RunnerCommitRecovery {
     userId: string,
     committed: HostedExecutionCommittedResult,
   ): Promise<RunnerStateRecord> {
-    const previousBundleRefs = (await this.queueStore.readBundleMetaState()).bundleRefs;
-    await this.queueStore.applyCommittedDispatch(committed);
-    await this.cleanupBundleTransitionBestEffort({
-      nextBundleRefs: committed.bundleRefs,
-      previousBundleRefs,
+    return this.applyCommittedQueueTransition(
       userId,
-    });
-    return this.scheduler.syncNextWake(committed.result.nextWakeAt ?? null);
+      committed,
+      () => this.queueStore.applyCommittedDispatch(committed),
+    );
   }
 
   async syncCommittedBundlesWithoutConsuming(
     userId: string,
     committed: HostedExecutionCommittedResult,
   ): Promise<RunnerStateRecord> {
+    return this.applyCommittedQueueTransition(
+      userId,
+      committed,
+      () => this.queueStore.syncCommittedBundles(committed),
+    );
+  }
+
+  private async applyCommittedQueueTransition(
+    userId: string,
+    committed: HostedExecutionCommittedResult,
+    apply: () => Promise<RunnerStateRecord>,
+  ): Promise<RunnerStateRecord> {
     const previousBundleRefs = (await this.queueStore.readBundleMetaState()).bundleRefs;
-    await this.queueStore.syncCommittedBundles(committed);
+    await apply();
     await this.cleanupBundleTransitionBestEffort({
       nextBundleRefs: committed.bundleRefs,
       previousBundleRefs,

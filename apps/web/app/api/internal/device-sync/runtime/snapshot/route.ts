@@ -5,13 +5,12 @@ import { authorizeHostedExecutionInternalRequest } from "@/src/lib/hosted-execut
 import { jsonOk, withJsonError, readJsonObject } from "@/src/lib/hosted-onboarding/http";
 
 export const POST = withJsonError(async (request: Request) => {
-  const body = await readJsonObject(request);
   const { trustedUserId } = authorizeHostedExecutionInternalRequest({
     acceptedToken: "internal",
-    bodyUserIds: [typeof body.userId === "string" ? body.userId : null],
     request,
     requireBoundUserId: true,
   });
+  const body = await readJsonObject(request);
   const controlPlane = createHostedDeviceSyncControlPlane(request);
   const snapshotRequest = parseHostedDeviceSyncRuntimeSnapshotRequest(
     body,

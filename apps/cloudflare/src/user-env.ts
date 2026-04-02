@@ -107,25 +107,13 @@ export function parseHostedUserEnvUpdate(value: unknown): HostedUserEnvUpdate {
     value,
     "Hosted user env request body must be a JSON object.",
   );
-  const rawEnv = Object.hasOwn(payload, "env")
-    ? requireHostedUserEnvObject(
-        payload.env,
-        "Hosted user env request body field `env` must be a JSON object.",
-      )
-    : payload;
-  const env: Record<string, unknown> = {};
-
-  for (const [key, rawValue] of Object.entries(rawEnv)) {
-    if (key === "env" || key === "mode") {
-      continue;
-    }
-
-    env[key] = rawValue;
-  }
 
   return parseHostedExecutionUserEnvUpdate({
-    env,
-    mode: payload.mode === "replace" ? "replace" : "merge",
+    env: requireHostedUserEnvObject(
+      payload.env,
+      "Hosted user env request body field `env` must be a JSON object.",
+    ),
+    mode: payload.mode,
   });
 }
 
@@ -155,7 +143,7 @@ function parseHostedUserEnvConfig(
   return {
     env,
     schema: HOSTED_USER_ENV_SCHEMA,
-    updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date().toISOString(),
+    updatedAt: requireHostedUserEnvString(parsed.updatedAt, "Hosted user env config updatedAt"),
   };
 }
 
@@ -186,6 +174,14 @@ function normalizeHostedUserEnvValue(value: string, key: string): string | null 
 function requireHostedUserEnvObject(value: unknown, message: string): Record<string, unknown> {
   if (!isHostedUserEnvObject(value)) {
     throw new TypeError(message);
+  }
+
+  return value;
+}
+
+function requireHostedUserEnvString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new TypeError(`${label} must be a non-empty string.`);
   }
 
   return value;

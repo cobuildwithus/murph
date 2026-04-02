@@ -13,7 +13,9 @@ import {
   type HostedExecutionTimelineEntry,
 } from "@murphai/hosted-execution";
 import {
+  parseHostedExecutionBundleRef,
   sameHostedBundlePayloadRef,
+  serializeHostedExecutionBundleRef,
   type HostedExecutionBundleRef,
 } from "@murphai/runtime-state";
 
@@ -84,12 +86,12 @@ export function assignRunnerBundleRefs(
   const currentVaultRef = parseHostedBundleRefJson(meta.vault_bundle_ref_json);
 
   if (!sameHostedBundlePayloadRef(currentAgentStateRef, nextBundleRefs.agentState)) {
-    meta.agent_state_bundle_ref_json = stringifyHostedBundleRef(nextBundleRefs.agentState);
+    meta.agent_state_bundle_ref_json = serializeHostedExecutionBundleRef(nextBundleRefs.agentState);
     meta.agent_state_bundle_version += 1;
   }
 
   if (!sameHostedBundlePayloadRef(currentVaultRef, nextBundleRefs.vault)) {
-    meta.vault_bundle_ref_json = stringifyHostedBundleRef(nextBundleRefs.vault);
+    meta.vault_bundle_ref_json = serializeHostedExecutionBundleRef(nextBundleRefs.vault);
     meta.vault_bundle_version += 1;
   }
 }
@@ -200,11 +202,11 @@ export function projectRunnerStateRecord(input: {
       userId: input.meta.user_id,
     },
     sanitizedMeta: {
-      agent_state_bundle_ref_json: stringifyHostedBundleRef(bundleRefState.agentState),
+      agent_state_bundle_ref_json: serializeHostedExecutionBundleRef(bundleRefState.agentState),
       last_error: nextLastError,
       run_json: stringifyRunStatus(runTraceState.run),
       timeline_json: JSON.stringify(runTraceState.timeline),
-      vault_bundle_ref_json: stringifyHostedBundleRef(bundleRefState.vault),
+      vault_bundle_ref_json: serializeHostedExecutionBundleRef(bundleRefState.vault),
     },
   };
 }
@@ -286,16 +288,7 @@ function parseHostedBundleRefJson(value: string | null): HostedExecutionBundleRe
   }
 
   try {
-    const parsed = JSON.parse(value) as HostedExecutionBundleRef;
-    return (
-      parsed
-      && typeof parsed.hash === "string"
-      && typeof parsed.key === "string"
-      && typeof parsed.size === "number"
-      && typeof parsed.updatedAt === "string"
-    )
-      ? parsed
-      : null;
+    return parseHostedExecutionBundleRef(JSON.parse(value) as unknown, "Hosted runner bundle ref");
   } catch {
     return null;
   }
@@ -379,10 +372,6 @@ function sanitizeStoredRunTrace(meta: RunnerMetaRow): {
       ? `Hosted runner normalized run trace field(s): ${clearedKinds.join(", ")}.`
       : null,
   };
-}
-
-function stringifyHostedBundleRef(value: HostedExecutionBundleRef | null): string | null {
-  return value ? JSON.stringify(value) : null;
 }
 
 function stringifyRunStatus(value: HostedExecutionRunStatus | null): string | null {

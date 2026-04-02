@@ -197,6 +197,10 @@ function verifyWorkspaceImportPolicy({
     return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} from the device-sync daemon root; hosted web must use @murphai/device-syncd/public-ingress or another explicit subpath so callback/webhook code does not depend on daemon/server exports.`;
   }
 
+  if (sourceMember === "packages/assistant-runtime" && specifier === "@murphai/device-syncd") {
+    return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} from the device-sync daemon root; assistant-runtime must use explicit device-sync subpaths so hosted runtime code does not depend on the daemon root convenience surface.`;
+  }
+
   return null;
 }
 

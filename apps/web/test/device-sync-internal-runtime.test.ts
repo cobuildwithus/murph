@@ -337,6 +337,7 @@ describe("device-sync hosted runtime helpers", () => {
               lastErrorCode: "PROVIDER_AUTH",
               lastErrorMessage: "Reconnect required",
             },
+            observedUpdatedAt: "2026-03-20T10:00:00.000Z",
             observedTokenVersion: 1,
             tokenBundle: {
               accessToken: "new-access-token",
@@ -572,6 +573,7 @@ describe("device-sync hosted runtime helpers", () => {
               },
             },
             connectionId: "dsc_metadata",
+            observedUpdatedAt: "2026-03-26T12:05:00.000Z",
           },
         ],
         userId: "user-123",
@@ -923,6 +925,7 @@ describe("device-sync hosted runtime helpers", () => {
         updates: [
           {
             connectionId: "dsc_123",
+            observedUpdatedAt: "2026-03-20T10:00:00.000Z",
             observedTokenVersion: 2,
             tokenBundle: {
               accessToken: "access-token",
@@ -1112,6 +1115,7 @@ describe("device-sync hosted runtime helpers", () => {
               displayName: "Hosted Rename",
             },
             connectionId: "dsc_789",
+            observedUpdatedAt: "2026-03-20T10:00:00.000Z",
             observedTokenVersion: 1,
           },
         ],

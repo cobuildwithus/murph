@@ -107,13 +107,14 @@ describe("runSmokeHostedDeploy", () => {
                 }
               : null,
           },
-          inFlight: statusReadCount < 2,
-          lastError: null,
-          lastRunAt: statusReadCount >= 2 ? "2026-03-27T01:00:00.000Z" : "2026-03-27T00:59:00.000Z",
-          pendingEventCount: statusReadCount < 2 ? 1 : 0,
-          poisonedEventIds: [],
-          retryingEventId: null,
-        }), { status: 200 });
+        inFlight: statusReadCount < 2,
+        lastError: null,
+        lastRunAt: statusReadCount >= 2 ? "2026-03-27T01:00:00.000Z" : "2026-03-27T00:59:00.000Z",
+        pendingEventCount: statusReadCount < 2 ? 1 : 0,
+        poisonedEventIds: [],
+        retryingEventId: null,
+        userId: "member_123",
+      }), { status: 200 });
       }
 
       return new Response(null, { status: 204 });
@@ -148,7 +149,7 @@ describe("runSmokeHostedDeploy", () => {
           "Cloudflare-Workers-Version-Overrides": "hosted-worker=\"version-123\"",
           authorization: "Bearer control-token",
         },
-        method: undefined,
+        method: "GET",
         url: "https://worker.example.test/internal/users/member_123/status",
       },
       {
@@ -167,7 +168,7 @@ describe("runSmokeHostedDeploy", () => {
           "Cloudflare-Workers-Version-Overrides": "hosted-worker=\"version-123\"",
           authorization: "Bearer control-token",
         },
-        method: undefined,
+        method: "GET",
         url: "https://worker.example.test/internal/users/member_123/status",
       },
     ]);
@@ -221,6 +222,7 @@ describe("runSmokeHostedDeploy", () => {
         pendingEventCount: 1,
         poisonedEventIds: [],
         retryingEventId: "evt_stalled",
+        userId: "member_123",
       }), { status: 200 });
     };
 

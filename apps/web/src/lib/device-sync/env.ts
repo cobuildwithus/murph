@@ -1,11 +1,11 @@
-import type {
-  OuraDeviceSyncProviderConfig,
-  WhoopDeviceSyncProviderConfig,
-} from "@murphai/device-syncd/public-ingress";
 import {
+  readConfiguredGarminDeviceSyncProviderConfig,
   readConfiguredOuraDeviceSyncProviderConfig,
   readConfiguredWhoopDeviceSyncProviderConfig,
-} from "@murphai/device-syncd/public-ingress";
+} from "@murphai/device-syncd/config";
+import type { GarminDeviceSyncProviderConfig } from "@murphai/device-syncd/providers/garmin";
+import type { OuraDeviceSyncProviderConfig } from "@murphai/device-syncd/providers/oura";
+import type { WhoopDeviceSyncProviderConfig } from "@murphai/device-syncd/providers/whoop";
 
 import { decodeHostedEncryptionKey } from "./crypto";
 import { normalizeNullableString, parseCommaSeparatedList } from "./shared";
@@ -29,6 +29,7 @@ export interface HostedDeviceSyncEnvironment {
   devUserId: string | null;
   devUserName: string | null;
   providers: {
+    garmin: GarminDeviceSyncProviderConfig | null;
     whoop: WhoopDeviceSyncProviderConfig | null;
     oura: OuraDeviceSyncProviderConfig | null;
   };
@@ -112,6 +113,7 @@ export function readHostedDeviceSyncEnvironment(source: NodeJS.ProcessEnv = proc
     devUserId: readEnv(source, DEVICE_SYNC_DEV_USER_ID_ENV_KEYS) ?? null,
     devUserName: readEnv(source, DEVICE_SYNC_DEV_USER_NAME_ENV_KEYS) ?? null,
     providers: {
+      garmin: readConfiguredGarminDeviceSyncProviderConfig(source),
       whoop: readConfiguredWhoopDeviceSyncProviderConfig(source),
       oura: readConfiguredOuraDeviceSyncProviderConfig(source),
     },

@@ -1,4 +1,5 @@
 import { assertContract, sharePackSchema } from "@murphai/contracts";
+import { parseHostedExecutionBundleRef as parseRuntimeHostedExecutionBundleRef } from "@murphai/runtime-state";
 
 import type {
   HostedExecutionAssistantCronTickEvent,
@@ -317,18 +318,7 @@ export function parseHostedExecutionBundleRef(
   value: unknown,
   label = "Hosted execution bundle ref",
 ): HostedExecutionBundleRef | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  const record = requireObject(value, label);
-
-  return {
-    hash: requireString(record.hash, `${label}.hash`),
-    key: requireString(record.key, `${label}.key`),
-    size: requireNumber(record.size, `${label}.size`),
-    updatedAt: requireString(record.updatedAt, `${label}.updatedAt`),
-  };
+  return parseRuntimeHostedExecutionBundleRef(value, label);
 }
 
 function parseHostedExecutionDeviceSyncRuntimeConnectionSnapshot(

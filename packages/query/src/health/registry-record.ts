@@ -1,11 +1,11 @@
+import type {
+  ParsedMarkdownDocumentEnvelope,
+  StoredMarkdownDocument,
+} from "@murphai/contracts";
+
 import type { FrontmatterObject } from "./shared.ts";
 
-export interface RegistryDocumentEnvelope {
-  relativePath: string;
-  markdown: string;
-  body: string;
-  attributes: FrontmatterObject;
-}
+export type RegistryDocumentEnvelope = ParsedMarkdownDocumentEnvelope<FrontmatterObject>;
 
 export interface RegistryQueryEntity {
   id: string;
@@ -14,11 +14,8 @@ export interface RegistryQueryEntity {
   status: string | null;
 }
 
-export interface RegistryStoredDocument<
+export type RegistryStoredDocument<
   TEntity extends RegistryQueryEntity = RegistryQueryEntity,
-> {
-  entity: TEntity;
-  document: RegistryDocumentEnvelope;
-}
+> = StoredMarkdownDocument<TEntity, RegistryDocumentEnvelope>;
 
 export type RegistryMarkdownRecord = RegistryStoredDocument<RegistryQueryEntity>;

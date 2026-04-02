@@ -25,6 +25,19 @@
           "maxAge": 2592000
         }
       }
+    },
+    {
+      "id": "delete-transient-hosted-email-raw-messages-after-30d",
+      "enabled": true,
+      "conditions": {
+        "prefix": "transient/hosted-email/messages/"
+      },
+      "deleteObjectsTransition": {
+        "condition": {
+          "type": "Age",
+          "maxAge": 2592000
+        }
+      }
     }
   ]
 }

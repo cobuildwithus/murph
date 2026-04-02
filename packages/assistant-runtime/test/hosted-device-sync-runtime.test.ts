@@ -1297,7 +1297,7 @@ describe("hosted device-sync runtime", () => {
     expect(tokens?.accessToken).toBe("hosted-access-v5");
     expect(tokens?.refreshToken).toBe("hosted-refresh-v5");
 
-    const { createSecretCodec } = await import("@murphai/device-syncd");
+    const { createSecretCodec } = await import("@murphai/device-syncd/crypto");
     const codec = createSecretCodec("secret-for-tests");
     expect(codec.decrypt(String(tokens?.accessTokenEncrypted))).toBe("hosted-access-v5");
     expect(codec.decrypt(String(tokens?.refreshTokenEncrypted))).toBe("hosted-refresh-v5");
@@ -1511,7 +1511,7 @@ describe("hosted device-sync runtime", () => {
 
   it("does not push a regressed nextReconcileAt back to the hosted control plane", async () => {
     const { reconcileHostedDeviceSyncControlPlaneState } = await import("../src/hosted-device-sync-runtime.ts");
-    const { createSecretCodec } = await import("@murphai/device-syncd");
+    const { createSecretCodec } = await import("@murphai/device-syncd/crypto");
     const codec = createSecretCodec("secret-for-tests");
     const service = {
       store: {
@@ -1612,7 +1612,7 @@ describe("hosted device-sync runtime", () => {
 
   it("reconciles only forward-moving timestamps and clears stale hosted errors even outside active status", async () => {
     const { reconcileHostedDeviceSyncControlPlaneState } = await import("../src/hosted-device-sync-runtime.ts");
-    const { createSecretCodec } = await import("@murphai/device-syncd");
+    const { createSecretCodec } = await import("@murphai/device-syncd/crypto");
     const codec = createSecretCodec("secret-for-tests");
     const service = {
       store: {

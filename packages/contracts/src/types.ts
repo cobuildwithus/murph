@@ -1,5 +1,25 @@
 import type { ErrorCodeValue, JsonValue } from "./zod.ts";
 
+export interface MarkdownDocumentEnvelope {
+  relativePath: string;
+  markdown: string;
+}
+
+export interface ParsedMarkdownDocumentEnvelope<
+  TAttributes extends Record<string, unknown> = Record<string, unknown>,
+> extends MarkdownDocumentEnvelope {
+  body: string;
+  attributes: TAttributes;
+}
+
+export interface StoredMarkdownDocument<
+  TEntity,
+  TDocument extends MarkdownDocumentEnvelope = MarkdownDocumentEnvelope,
+> {
+  entity: TEntity;
+  document: TDocument;
+}
+
 export interface ErrorCodeEntry {
   code: ErrorCodeValue;
   retryable: boolean;

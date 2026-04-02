@@ -1,8 +1,6 @@
-import {
-  createConfiguredDeviceSyncProviders,
-  createDeviceSyncRegistry,
-  createDeviceSyncService,
-} from "@murphai/device-syncd";
+import { createConfiguredDeviceSyncProviders } from "@murphai/device-syncd/config";
+import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
+import { createDeviceSyncService } from "@murphai/device-syncd/service";
 import {
   openInboxRuntime,
   rebuildRuntimeFromVault,

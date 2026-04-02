@@ -81,7 +81,7 @@ function parseHostedDeviceSyncRuntimeConnectionUpdate(
     ...(record.observedTokenVersion === undefined
       ? {}
       : {
-          observedTokenVersion: readNullableNumber(
+          observedTokenVersion: readNullablePositiveInteger(
             record.observedTokenVersion,
             `updates[${index}].observedTokenVersion`,
           ),
@@ -306,12 +306,12 @@ function readNullableIsoTimestamp(value: unknown, label: string): string | null 
   return requireIsoTimestamp(value, label);
 }
 
-function readNullableNumber(value: unknown, label: string): number | null {
+function readNullablePositiveInteger(value: unknown, label: string): number | null {
   if (value === null || value === undefined) {
     return null;
   }
 
-  return requireNumber(value, label);
+  return requirePositiveInteger(value, label);
 }
 
 function requireNumber(value: unknown, label: string): number {
@@ -320,6 +320,16 @@ function requireNumber(value: unknown, label: string): number {
   }
 
   return value;
+}
+
+function requirePositiveInteger(value: unknown, label: string): number {
+  const parsed = requireNumber(value, label);
+
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new TypeError(`${label} must be a positive integer.`);
+  }
+
+  return parsed;
 }
 
 function requireBoolean(value: unknown, label: string): boolean {
