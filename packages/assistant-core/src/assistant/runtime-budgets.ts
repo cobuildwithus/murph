@@ -1,7 +1,6 @@
 import { readdir, readFile, rm, rmdir, stat } from 'node:fs/promises'
 import path from 'node:path'
 import {
-  assistantProviderRouteRecoverySchema,
   assistantQuarantineEntrySchema,
   assistantRuntimeBudgetSnapshotSchema,
   type AssistantQuarantineEntry,
@@ -32,7 +31,6 @@ import type { AssistantStatePaths } from './store/paths.js'
 const ASSISTANT_RUNTIME_BUDGET_SCHEMA = 'murph.assistant-runtime-budget.v1'
 const ASSISTANT_RUNTIME_MAINTENANCE_MIN_INTERVAL_MS = 5 * 60 * 1000
 const ASSISTANT_QUARANTINE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
-const ASSISTANT_PROVIDER_ROUTE_RECOVERY_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
 const QUARANTINE_METADATA_SUFFIX = '.meta.json'
 
 export async function maybeRunAssistantRuntimeMaintenance(input: {
@@ -71,15 +69,6 @@ export async function runAssistantRuntimeMaintenance(input: {
         `${expiredCacheEntries} expired runtime cache entr${expiredCacheEntries === 1 ? 'y was' : 'ies were'} pruned.`,
       )
     }
-    const staleProviderRecoveryPruned = await pruneAssistantProviderRouteRecoveryFiles(
-      paths,
-      now,
-    )
-    if (staleProviderRecoveryPruned > 0) {
-      notes.push(
-        `${staleProviderRecoveryPruned} stale provider recovery file(s) were removed.`,
-      )
-    }
     const staleQuarantinePruned = await pruneAssistantQuarantineFiles(paths, now)
     if (staleQuarantinePruned > 0) {
       notes.push(
@@ -100,7 +89,7 @@ export async function runAssistantRuntimeMaintenance(input: {
       caches: listAssistantRuntimeCacheSnapshots(),
       maintenance: {
         lastRunAt: nowIso,
-        staleProviderRecoveryPruned,
+        staleProviderRecoveryPruned: 0,
         staleQuarantinePruned,
         staleLocksCleared,
         notes,
@@ -117,7 +106,7 @@ export async function runAssistantRuntimeMaintenance(input: {
           ? notes.join(' ')
           : 'Assistant runtime maintenance ran with no corrective actions.',
       data: {
-        staleProviderRecoveryPruned,
+        staleProviderRecoveryPruned: 0,
         staleQuarantinePruned,
         staleLocksCleared,
       },
@@ -205,45 +194,6 @@ function buildDefaultAssistantRuntimeBudgetSnapshot(
       notes: [],
     },
   })
-}
-
-async function pruneAssistantProviderRouteRecoveryFiles(
-  paths: AssistantStatePaths,
-  now: Date,
-): Promise<number> {
-  const entries = await readDirectoryFiles(paths.providerRouteRecoveryDirectory)
-  const cutoffMs = now.getTime() - ASSISTANT_PROVIDER_ROUTE_RECOVERY_RETENTION_MS
-  let removed = 0
-
-  for (const entry of entries) {
-    if (!entry.endsWith('.json')) {
-      continue
-    }
-    const filePath = path.join(paths.providerRouteRecoveryDirectory, entry)
-    try {
-      const raw = await readFile(filePath, 'utf8')
-      const parsed = assistantProviderRouteRecoverySchema.parse(
-        JSON.parse(raw) as unknown,
-      )
-      const updatedAtMs = Date.parse(parsed.updatedAt)
-      if (!Number.isFinite(updatedAtMs) || updatedAtMs > cutoffMs) {
-        continue
-      }
-      await rm(filePath, {
-        force: true,
-      })
-      removed += 1
-    } catch (error) {
-      await quarantineAssistantStateFile({
-        artifactKind: 'provider-route-recovery',
-        error,
-        filePath,
-        paths,
-      })
-    }
-  }
-
-  return removed
 }
 
 async function pruneAssistantQuarantineFiles(

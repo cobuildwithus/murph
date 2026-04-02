@@ -169,7 +169,6 @@ export const assistantQuarantineArtifactKindValues = [
   'failover',
   'turn-receipt',
   'outbox-intent',
-  'provider-route-recovery',
   'runtime-budget',
   'cron-store',
   'cron-run',
@@ -194,8 +193,6 @@ export const assistantRuntimeEventKindValues = [
   'failover.state.quarantined',
   'status.snapshot.refreshed',
   'status.snapshot.quarantined',
-  'provider-route-recovery.upserted',
-  'provider-route-recovery.quarantined',
   'runtime-budget.recovered',
   'runtime-budget.quarantined',
   'cron.store.quarantined',
@@ -210,17 +207,9 @@ export const assistantHeadersSchema = z.record(
   z.string(),
 )
 
-export const assistantCodexProviderStateSchema = z
-  .object({
-    promptVersion: z.string().min(1).nullable().default(null),
-  })
-  .strict()
-
 export const assistantSessionProviderStateSchema = z
   .object({
-    codexCli: assistantCodexProviderStateSchema.nullable().default(null),
     resumeRouteId: z.string().min(1).nullable().default(null),
-    resumeWorkspaceKey: z.string().min(1).nullable().default(null),
   })
   .strict()
 
@@ -242,26 +231,6 @@ export const assistantProviderSessionOptionsSchema = z.object({
   headers: assistantHeadersSchema.nullable().optional(),
 })
 
-export const assistantProviderRouteRecoveryEntrySchema = z
-  .object({
-    routeId: z.string().min(1),
-    provider: z.enum(assistantChatProviderValues),
-    providerSessionId: z.string().min(1),
-    providerOptions: assistantProviderSessionOptionsSchema,
-    providerState: assistantSessionProviderStateSchema.nullable().default(null),
-    recoveredAt: isoTimestampSchema,
-  })
-  .strict()
-
-export const assistantProviderRouteRecoverySchema = z
-  .object({
-    schema: z.literal('murph.assistant-provider-route-recovery.v1'),
-    sessionId: assistantSessionIdSchema,
-    updatedAt: isoTimestampSchema,
-    routes: z.array(assistantProviderRouteRecoveryEntrySchema),
-  })
-  .strict()
-
 export const assistantSessionSecretsSchema = z
   .object({
     schema: z.literal('murph.assistant-session-secrets.v1'),
@@ -269,22 +238,6 @@ export const assistantSessionSecretsSchema = z
     updatedAt: isoTimestampSchema,
     providerHeaders: assistantHeadersSchema.nullable().default(null),
     providerBindingHeaders: assistantHeadersSchema.nullable().default(null),
-  })
-  .strict()
-
-export const assistantProviderRouteRecoverySecretsRouteSchema = z
-  .object({
-    routeId: z.string().min(1),
-    providerHeaders: assistantHeadersSchema.nullable().default(null),
-  })
-  .strict()
-
-export const assistantProviderRouteRecoverySecretsSchema = z
-  .object({
-    schema: z.literal('murph.assistant-provider-route-recovery-secrets.v1'),
-    sessionId: z.string().min(1),
-    updatedAt: isoTimestampSchema,
-    routes: z.array(assistantProviderRouteRecoverySecretsRouteSchema),
   })
   .strict()
 
@@ -596,7 +549,6 @@ export const assistantRuntimeCacheBudgetSchema = z
 export const assistantRuntimeMaintenanceSnapshotSchema = z
   .object({
     lastRunAt: isoTimestampSchema.nullable(),
-    staleProviderRecoveryPruned: z.number().int().nonnegative(),
     staleQuarantinePruned: z.number().int().nonnegative(),
     staleLocksCleared: z.number().int().nonnegative(),
     notes: z.array(z.string()),
@@ -1217,12 +1169,6 @@ type AssistantSessionRecord = z.infer<typeof assistantSessionSchema>
 export type AssistantSession = Omit<AssistantSessionRecord, 'providerBinding'> & {
   providerBinding?: AssistantProviderBinding | null
 }
-export type AssistantProviderRouteRecovery = z.infer<
-  typeof assistantProviderRouteRecoverySchema
->
-export type AssistantProviderRouteRecoveryEntry = z.infer<
-  typeof assistantProviderRouteRecoveryEntrySchema
->
 export type AssistantTranscriptEntry = z.infer<
   typeof assistantTranscriptEntrySchema
 >
@@ -1426,12 +1372,6 @@ export type AssistantDoctorResult = z.infer<
   typeof assistantDoctorResultSchema
 >
 export type AssistantSessionSecrets = z.infer<typeof assistantSessionSecretsSchema>
-export type AssistantProviderRouteRecoverySecretsRoute = z.infer<
-  typeof assistantProviderRouteRecoverySecretsRouteSchema
->
-export type AssistantProviderRouteRecoverySecrets = z.infer<
-  typeof assistantProviderRouteRecoverySecretsSchema
->
 export type AssistantAutomationCursor = z.infer<
   typeof assistantAutomationCursorSchema
 >
