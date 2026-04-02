@@ -1,8 +1,10 @@
+import { execFile } from 'node:child_process'
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { promisify } from 'node:util'
 import { Cli } from 'incur'
 import { localParallelCliTest as test } from './local-parallel-test.js'
 import {
@@ -13,27 +15,147 @@ import {
 import { createIntegratedInboxServices } from '@murphai/assistant-core/inbox-services'
 import { createUnwiredVaultServices } from '@murphai/assistant-core/vault-services'
 import { createVaultCli } from '../src/vault-cli.js'
-import { requireData, runCli, runRawCli } from './cli-test-helpers.js'
+import {
+  binPath,
+  requireData,
+  runCli,
+  runRawCli,
+  withoutNodeV8Coverage,
+} from './cli-test-helpers.js'
 
 const require = createRequire(import.meta.url)
+const execFileAsync = promisify(execFile)
 const packageJson = require('../package.json') as { version?: string }
 const INCUR_HELP_TIMEOUT_MS = 45_000
 const INCUR_SCHEMA_TIMEOUT_MS = 45_000
+
+async function runBuiltCliFromCwd(
+  args: string[],
+  options: {
+    cwd: string
+    env?: NodeJS.ProcessEnv
+  },
+): Promise<string> {
+  const { stdout } = await execFileAsync(
+    process.execPath,
+    [binPath, ...args],
+    {
+      cwd: options.cwd,
+      encoding: 'utf8',
+      env: withoutNodeV8Coverage({
+        ...process.env,
+        ...options.env,
+      }),
+    },
+  )
+
+  return stdout.trim()
+}
 
 test('root help exposes the Incur built-ins', async () => {
   const help = await runRawCli(['--help'])
 
   assert.match(help, new RegExp(`vault-cli@${packageJson.version ?? '0.0.0'}`, 'u'))
-  assert.match(help, /Built-in Commands:/u)
+  assert.match(help, /Integrations:/u)
   assert.match(help, /chat\s+Open the same assistant chat UI as/u)
   assert.match(help, /search\s+Search commands for the local read model/u)
   assert.match(help, /timeline\s+Build a descending timeline/u)
   assert.match(help, /completions\s+Generate shell completion script/u)
   assert.match(help, /mcp add\s+Register as MCP server/u)
   assert.match(help, /skills add\s+Sync skill files to agents/u)
+  assert.match(help, /--config/u)
+  assert.match(help, /--no-config/u)
   assert.match(help, /--schema\s+Show JSON Schema for command/u)
   assert.match(help, /--verbose\s+Show full output envelope/u)
   assert.match(help, /--llms, --llms-full\s+Print LLM-readable manifest/u)
+})
+
+test('root config file can provide command option defaults', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-config-'))
+  const vaultRoot = path.join(tempRoot, 'vault')
+  const configPath = path.join(tempRoot, 'murph.json')
+
+  try {
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        commands: {
+          vault: {
+            commands: {
+              paths: {
+                options: {
+                  vault: vaultRoot,
+                },
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    const pathsResult = requireData(
+      await runCli<{ vault: string }>(['--config', configPath, 'vault', 'paths']),
+    )
+    assert.equal(pathsResult.vault, vaultRoot)
+
+    const withoutConfig = await runCli([
+      '--config',
+      configPath,
+      '--no-config',
+      'vault',
+      'paths',
+    ])
+    assert.equal(withoutConfig.ok, false)
+
+    if (!withoutConfig.ok) {
+      assert.match(
+        withoutConfig.error.message ?? withoutConfig.error.code ?? '',
+        /vault/u,
+      )
+    }
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test('root config autodiscovery resolves ~/.config/murph/config.json', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-config-home-'))
+  const homeRoot = path.join(tempRoot, 'home')
+  const homeVaultRoot = path.join(tempRoot, 'home-default')
+  const configDir = path.join(homeRoot, '.config', 'murph')
+
+  try {
+    await mkdir(configDir, { recursive: true })
+    await writeFile(
+      path.join(configDir, 'config.json'),
+      JSON.stringify({
+        commands: {
+          vault: {
+            commands: {
+              paths: {
+                options: {
+                  vault: homeVaultRoot,
+                },
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    const output = await runBuiltCliFromCwd(
+      ['vault', 'paths', '--format', 'json', '--filter-output', 'vault'],
+      {
+        cwd: tempRoot,
+        env: {
+          HOME: homeRoot,
+        },
+      },
+    )
+    assert.equal(JSON.parse(output), homeVaultRoot)
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
 })
 
 test('root help lists the simple health CRUD command groups', async () => {
