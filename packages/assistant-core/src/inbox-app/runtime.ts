@@ -446,7 +446,7 @@ export function createInboxRuntimeOps(
         const runtime = await inboxd.openInboxRuntime({
           vaultRoot: paths.absoluteVaultRoot,
         })
-        await parsers.runInboxDaemonWithParsers({
+        await inboxd.runInboxDaemonWithParsers({
           vaultRoot: paths.absoluteVaultRoot,
           runtime,
           registry: configured.registry,

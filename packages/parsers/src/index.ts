@@ -1,5 +1,18 @@
 export type { ParserArtifactKind, ParserArtifactRef, ParserArtifactSummary } from "./contracts/artifact.js";
 export type {
+  AttachmentParseJobClaimFilters,
+  AttachmentParseJobFinalizeResult,
+  AttachmentParseJobRecord,
+  AttachmentParsePipeline,
+  AttachmentParseState,
+  CompleteAttachmentParseJobInput,
+  FailAttachmentParseJobInput,
+  ParserRuntimeAttachmentRecord,
+  ParserRuntimeCaptureRecord,
+  ParserRuntimeStore,
+  RequeueAttachmentParseJobsInput,
+} from "./contracts/runtime.js";
+export type {
   ParseBlockKind,
   ParseIntent,
   ParseOutputMetadata,
@@ -60,12 +73,6 @@ export type {
   InboxParserServiceDrainInput,
 } from "./service.js";
 export { createInboxParserService } from "./service.js";
-export type {
-  CreateParsedInboxPipelineInput,
-  ParsedInboxPipeline,
-  RunInboxDaemonWithParsersInput,
-} from "./inboxd/pipeline.js";
-export { createParsedInboxPipeline, runInboxDaemonWithParsers } from "./inboxd/pipeline.js";
 export type { ParseAttachmentInput, ParseAttachmentResult } from "./pipelines/parse-attachment.js";
 export { parseAttachment } from "./pipelines/parse-attachment.js";
 export type { RunAttachmentParseJobResult, RunAttachmentParseWorkerInput } from "./pipelines/worker.js";

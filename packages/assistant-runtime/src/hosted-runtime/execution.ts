@@ -17,6 +17,7 @@ import {
   refreshAssistantStatusSnapshot,
 } from "@murphai/assistant-core";
 import type { AssistantExecutionContext } from "@murphai/assistant-core";
+import { assistantGatewayLocalProjectionSourceReader } from "@murphai/assistant-core/gateway-local-adapter";
 import { exportGatewayProjectionSnapshotLocal } from "@murphai/gateway-local";
 
 import { reconcileHostedVerifiedEmailSelfTarget } from "../hosted-email-route.ts";
@@ -97,7 +98,12 @@ export async function executeHostedDispatchForCommit(input: {
     vaultRoot: input.restored.vaultRoot,
   });
   const committedSideEffects = await collectHostedExecutionSideEffects(input.restored.vaultRoot);
-  const committedGatewayProjectionSnapshot = await exportGatewayProjectionSnapshotLocal(input.restored.vaultRoot);
+  const committedGatewayProjectionSnapshot = await exportGatewayProjectionSnapshotLocal(
+    input.restored.vaultRoot,
+    {
+      sourceReader: assistantGatewayLocalProjectionSourceReader,
+    },
+  );
 
   return {
     committedGatewayProjectionSnapshot,
@@ -180,7 +186,12 @@ export async function completeHostedExecutionAfterCommit(input: {
     }),
     vaultRoot: input.restored.vaultRoot,
   });
-  const finalGatewayProjectionSnapshot = await exportGatewayProjectionSnapshotLocal(input.restored.vaultRoot);
+  const finalGatewayProjectionSnapshot = await exportGatewayProjectionSnapshotLocal(
+    input.restored.vaultRoot,
+    {
+      sourceReader: assistantGatewayLocalProjectionSourceReader,
+    },
+  );
   const finalResult: HostedExecutionRunnerResult = {
     bundles: {
       agentState: encodeHostedBundleBase64(finalSnapshot.agentStateBundle),

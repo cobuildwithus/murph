@@ -3,8 +3,8 @@ import path from "node:path";
 import type {
   AttachmentParseJobClaimFilters,
   AttachmentParseJobRecord,
-  InboxRuntimeStore,
-} from "@murphai/inboxd";
+  ParserRuntimeStore,
+} from "../contracts/runtime.js";
 
 import type { ParserArtifactKind } from "../contracts/artifact.js";
 import type { ParserRegistry } from "../registry/registry.js";
@@ -28,7 +28,7 @@ export interface RunAttachmentParseJobResult {
 
 export interface RunAttachmentParseWorkerInput {
   vaultRoot: string;
-  runtime: InboxRuntimeStore;
+  runtime: ParserRuntimeStore;
   registry: ParserRegistry;
   scratchRoot?: string;
   ffmpeg?: FfmpegToolOptions;

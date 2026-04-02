@@ -2,6 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
+    "paths": {},
     "rootDir": ".",
     "composite": false,
     "incremental": false
@@ -15,9 +16,6 @@
     },
     {
       "path": "../core/tsconfig.build.json"
-    },
-    {
-      "path": "../inboxd"
     }
   ],
   "include": [

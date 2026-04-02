@@ -60,6 +60,7 @@
     "@murphai/contracts": "workspace:*",
     "@murphai/core": "workspace:*",
     "@murphai/messaging-ingress": "workspace:*",
+    "@murphai/parsers": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
     "@photon-ai/imessage-kit": "2.1.2",
     "grammy": "1.41.1"

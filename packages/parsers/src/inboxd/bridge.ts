@@ -1,11 +1,10 @@
-import type { InboxRuntimeStore } from "@murphai/inboxd";
-
+import type { ParserRuntimeStore } from "../contracts/runtime.js";
 import type { ParserArtifactRef } from "../contracts/artifact.js";
 import { resolveVaultRelativePath } from "../shared.js";
 
 export async function resolveInboxAttachmentArtifact(input: {
   vaultRoot: string;
-  runtime: InboxRuntimeStore;
+  runtime: ParserRuntimeStore;
   captureId: string;
   attachmentId: string;
 }): Promise<ParserArtifactRef> {

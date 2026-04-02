@@ -30,6 +30,10 @@ afterEach(() => {
 
 test("hosted gateway dispatch forwards clientRequestId to the local gateway send path", async () => {
   const { executeHostedDispatchEvent } = await import("../src/hosted-runtime/events.ts");
+  const {
+    assistantGatewayLocalMessageSender,
+    assistantGatewayLocalProjectionSourceReader,
+  } = await import("@murphai/assistant-core/gateway-local-adapter");
 
   const dispatch = {
     event: {
@@ -68,11 +72,15 @@ test("hosted gateway dispatch forwards clientRequestId to the local gateway send
     shareImportTitle: null,
   });
   assert.equal(mocks.prepareHostedDispatchContext.mock.calls.length, 1);
-  assert.deepEqual(mocks.sendGatewayMessageLocal.mock.calls[0]?.[0], {
+  const sendInput = mocks.sendGatewayMessageLocal.mock.calls[0]?.[0];
+  assert.notEqual(sendInput, null);
+  assert.deepEqual(sendInput, {
     clientRequestId: "req-123",
     dispatchMode: "queue-only",
+    messageSender: assistantGatewayLocalMessageSender,
     replyToMessageId: "5001",
     sessionKey: "gwcs_example",
+    sourceReader: assistantGatewayLocalProjectionSourceReader,
     text: "Please follow up.",
     vault: "/tmp/hosted-gateway-test",
   });

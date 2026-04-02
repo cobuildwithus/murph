@@ -12,15 +12,12 @@ import {
   getGatewayConversationFromSnapshot,
   readGatewayConversationSessionToken,
   readGatewayMessageRouteToken,
-  type GatewaySendMessageInput,
-  type GatewaySendMessageResult,
-} from '@murphai/gateway-core'
-import {
-  assistantGatewayLocalMessageSender,
   type GatewayLocalDispatchMode,
   type GatewayLocalMessageSender,
   type GatewayLocalProjectionSourceReader,
-} from './assistant-adapter.js'
+  type GatewaySendMessageInput,
+  type GatewaySendMessageResult,
+} from '@murphai/gateway-core'
 import { LocalGatewayProjectionStore } from './store.js'
 
 export async function sendGatewayMessageLocal(input: {
@@ -31,12 +28,18 @@ export async function sendGatewayMessageLocal(input: {
 } & GatewaySendMessageInput): Promise<GatewaySendMessageResult> {
   const {
     dispatchMode,
-    messageSender = assistantGatewayLocalMessageSender,
+    messageSender,
     sourceReader,
     vault,
     ...gatewayInput
   } = input
+  const resolvedMessageSender = messageSender ?? null
   const parsed = gatewaySendMessageInputSchema.parse(gatewayInput)
+  if (!resolvedMessageSender) {
+    throw createGatewayUnsupportedOperationError(
+      'Gateway local message sending requires a configured local message sender.',
+    )
+  }
   const routeToken = readGatewayConversationSessionTokenOrThrow(parsed.sessionKey)
   const store = new LocalGatewayProjectionStore(vault, {
     sourceReader,
@@ -78,7 +81,7 @@ export async function sendGatewayMessageLocal(input: {
       routeToken,
       parsed.clientRequestId,
     )
-    const delivered = await messageSender.deliver({
+    const delivered = await resolvedMessageSender.deliver({
       actorId: conversation.route.participantId,
       bindingDelivery,
       channel: conversation.route.channel,

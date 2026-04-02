@@ -208,6 +208,9 @@ importers:
       '@murphai/device-syncd':
         specifier: workspace:*
         version: link:../device-syncd
+      '@murphai/gateway-core':
+        specifier: workspace:*
+        version: link:../gateway-core
       '@murphai/importers':
         specifier: workspace:*
         version: link:../importers
@@ -371,9 +374,6 @@ importers:
 
   packages/gateway-local:
     dependencies:
-      '@murphai/assistant-core':
-        specifier: workspace:*
-        version: link:../assistant-core
       '@murphai/gateway-core':
         specifier: workspace:*
         version: link:../gateway-core
@@ -416,6 +416,9 @@ importers:
       '@murphai/messaging-ingress':
         specifier: workspace:*
         version: link:../messaging-ingress
+      '@murphai/parsers':
+        specifier: workspace:*
+        version: link:../parsers
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
@@ -433,9 +436,6 @@ importers:
       '@murphai/core':
         specifier: workspace:*
         version: link:../core
-      '@murphai/inboxd':
-        specifier: workspace:*
-        version: link:../inboxd
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state

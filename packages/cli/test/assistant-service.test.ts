@@ -172,9 +172,10 @@ function assertPromptHasFirstTurnCheckInGuidance(
   systemPrompt: string | null | undefined,
 ): void {
   const text = systemPrompt ?? ''
-  assert.match(text, /what they want help with most right now/u)
+  assert.match(text, /Hey, I'm Murph\. I'm your personal health assistant\./u)
+  assert.match(text, /what are some of their health goals right now/u)
   assert.match(text, /what you should call them/u)
-  assert.match(text, /Ask about goals first and the name alongside it/u)
+  assert.match(text, /Ask about health goals first and the name alongside it/u)
   assert.match(
     text,
     /greeting, a brief opener, or a vague request for general help/u,
@@ -195,7 +196,8 @@ function assertPromptDoesNotHaveFirstTurnCheckInGuidance(
   systemPrompt: string | null | undefined,
 ): void {
   const text = systemPrompt ?? ''
-  assert.doesNotMatch(text, /what they want help with most right now/u)
+  assert.doesNotMatch(text, /Hey, I'm Murph\. I'm your personal health assistant\./u)
+  assert.doesNotMatch(text, /what are some of their health goals right now/u)
   assert.doesNotMatch(text, /what you should call them/u)
 }
 
@@ -2338,7 +2340,7 @@ test('sendAssistantMessage injects the first-chat check-in only for an opted-in 
     firstCall?.systemPrompt ?? '',
     /Do not search or write assistant memory just because this is the first chat turn or because you are doing the optional check-in/u,
   )
-  assert.match(firstCall?.systemPrompt ?? '', /at most two sentences/u)
+  assert.match(firstCall?.systemPrompt ?? '', /at most one more short sentence/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
     /text, photos, voice memos, Telegram messages, or email/u,
@@ -2436,7 +2438,7 @@ test('sendAssistantMessage injects the first-chat check-in for first-turn messag
 
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
   assertPromptHasFirstTurnCheckInGuidance(firstCall?.systemPrompt)
-  assert.match(firstCall?.systemPrompt ?? '', /at most two sentences/u)
+  assert.match(firstCall?.systemPrompt ?? '', /at most one more short sentence/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
     /text, photos, voice memos, Telegram messages, or email/u,

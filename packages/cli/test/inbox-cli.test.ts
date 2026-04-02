@@ -249,6 +249,45 @@ function createFakeInboxRuntimeModule(input?: {
     }
     signal: AbortSignal
   }): Promise<void> | void
+  onRunInboxDaemonWithParsers?(payload: {
+    connectors: Array<{
+      accountId?: string | null
+      id: string
+      source: string
+      backfill?(
+        cursor: Record<string, unknown> | null,
+        emit: (
+          capture: any,
+          checkpoint?: Record<string, unknown> | null,
+        ) => Promise<{ captureId?: string; deduped: boolean }>,
+      ): Promise<Record<string, unknown> | null>
+      watch?(
+        cursor: Record<string, unknown> | null,
+        emit: (
+          capture: any,
+          checkpoint?: Record<string, unknown> | null,
+        ) => Promise<{ captureId?: string; deduped: boolean }>,
+        signal: AbortSignal,
+      ): Promise<void>
+    }>
+    runtime: {
+      close(): void
+      getCursor(source: string, accountId?: string | null): Record<string, unknown> | null
+      setCursor(
+        source: string,
+        accountId: string | null | undefined,
+        cursor: Record<string, unknown> | null,
+      ): void
+    }
+    signal: AbortSignal
+    vaultRoot: string
+    continueOnConnectorFailure?: boolean
+    connectorRestartPolicy?: {
+      enabled?: boolean
+      backoffMs?: readonly number[]
+      maxAttempts?: number | null
+    }
+  }): Promise<void> | void
   rebuiltCaptureCount?: number
 }): any {
   const cursorStore = new Map<string, Record<string, unknown> | null>()
@@ -425,6 +464,50 @@ function createFakeInboxRuntimeModule(input?: {
         runtime: payload.pipeline.runtime,
         signal: payload.signal,
       })
+    },
+    async runInboxDaemonWithParsers(payload: {
+      connectors: Array<{
+        accountId?: string | null
+        id: string
+        source: string
+        backfill?(
+          cursor: Record<string, unknown> | null,
+          emit: (
+            capture: any,
+            checkpoint?: Record<string, unknown> | null,
+          ) => Promise<{ captureId?: string; deduped: boolean }>,
+        ): Promise<Record<string, unknown> | null>
+        watch?(
+          cursor: Record<string, unknown> | null,
+          emit: (
+            capture: any,
+            checkpoint?: Record<string, unknown> | null,
+          ) => Promise<{ captureId?: string; deduped: boolean }>,
+          signal: AbortSignal,
+        ): Promise<void>
+      }>
+      runtime: typeof runtime
+      signal: AbortSignal
+      vaultRoot: string
+      continueOnConnectorFailure?: boolean
+      connectorRestartPolicy?: {
+        enabled?: boolean
+        backoffMs?: readonly number[]
+        maxAttempts?: number | null
+      }
+    }) {
+      try {
+        await input?.onRunInboxDaemonWithParsers?.({
+          connectors: payload.connectors,
+          continueOnConnectorFailure: payload.continueOnConnectorFailure,
+          connectorRestartPolicy: payload.connectorRestartPolicy,
+          runtime: payload.runtime,
+          signal: payload.signal,
+          vaultRoot: payload.vaultRoot,
+        })
+      } finally {
+        payload.runtime.close()
+      }
     },
   }
 }
@@ -2054,15 +2137,7 @@ test.sequential('run forwards the configured connector id and account namespace 
   let createdConnectorAccountId: string | null = null
   let seenDaemonConnectorId: string | null = null
   let seenDaemonConnectorAccountId: string | null = null
-  const fakeParsers = createFakeParsersRuntimeModule({
-    onRunInboxDaemonWithParsers({ connectors, runtime }) {
-      seenDaemonConnectorId = connectors[0]?.id ?? null
-      seenDaemonConnectorAccountId = connectors[0]?.accountId ?? null
-      runtime.setCursor('imessage', connectors[0]?.accountId ?? null, {
-        externalId: 'daemon-cursor',
-      })
-    },
-  })
+  const fakeParsers = createFakeParsersRuntimeModule()
   const services = createIntegratedInboxServices({
     getHomeDirectory: () => fixture.homeRoot,
     getPid: () => 4242,
@@ -2076,6 +2151,13 @@ test.sequential('run forwards the configured connector id and account namespace 
         },
         onRunInboxDaemon() {
           throw new Error('expected parser-aware daemon path')
+        },
+        onRunInboxDaemonWithParsers({ connectors, runtime }) {
+          seenDaemonConnectorId = connectors[0]?.id ?? null
+          seenDaemonConnectorAccountId = connectors[0]?.accountId ?? null
+          runtime.setCursor('imessage', connectors[0]?.accountId ?? null, {
+            externalId: 'daemon-cursor',
+          })
         },
       }),
     loadParsersModule: async () => fakeParsers,
@@ -2219,16 +2301,10 @@ test.sequential('run emits foreground connector events for backfill summaries an
           },
         }
       },
-    }),
-    loadImessageDriver: async () =>
-      createFakeImessageDriver({
-        photoPath: fixture.photoPath,
-      }),
-    loadParsersModule: async () =>
-      createFakeParsersRuntimeModule({
-        async onRunInboxDaemonWithParsers({ connectors, signal }) {
-          const connector = connectors[0]
-          assert.ok(connector)
+      async runInboxDaemonWithParsers({ connectors, runtime, signal, vaultRoot }) {
+        const connector = connectors[0]
+        assert.ok(connector)
+        try {
           await connector.backfill?.(
             null,
             async () => ({
@@ -2244,8 +2320,16 @@ test.sequential('run emits foreground connector events for backfill summaries an
             }),
             signal,
           )
-        },
+        } finally {
+          runtime.close()
+        }
+      },
+    }),
+    loadImessageDriver: async () =>
+      createFakeImessageDriver({
+        photoPath: fixture.photoPath,
       }),
+    loadParsersModule: async () => createFakeParsersRuntimeModule(),
   })
 
   try {
@@ -2447,6 +2531,31 @@ test.sequential('run on Linux skips unsupported iMessage connectors and continue
           async close() {},
         }
       },
+      async runInboxDaemonWithParsers({ connectors, runtime, signal }) {
+        assert.equal(connectors.length, 1)
+        assert.equal(connectors[0]?.id, 'telegram:bot')
+        const connector = connectors[0]
+        assert.ok(connector)
+        try {
+          await connector.backfill?.(
+            null,
+            async () => ({
+              captureId: 'cap-telegram-backfill',
+              deduped: false,
+            }),
+          )
+          await connector.watch?.(
+            null,
+            async () => ({
+              captureId: 'cap-telegram-watch',
+              deduped: false,
+            }),
+            signal,
+          )
+        } finally {
+          runtime.close()
+        }
+      },
     }),
     loadTelegramDriver: async () => ({
       async getMe() {
@@ -2463,30 +2572,7 @@ test.sequential('run on Linux skips unsupported iMessage connectors and continue
         return new Uint8Array()
       },
     }),
-    loadParsersModule: async () =>
-      createFakeParsersRuntimeModule({
-        async onRunInboxDaemonWithParsers({ connectors, signal }) {
-          assert.equal(connectors.length, 1)
-          assert.equal(connectors[0]?.id, 'telegram:bot')
-          const connector = connectors[0]
-          assert.ok(connector)
-          await connector.backfill?.(
-            null,
-            async () => ({
-              captureId: 'cap-telegram-backfill',
-              deduped: false,
-            }),
-          )
-          await connector.watch?.(
-            null,
-            async () => ({
-              captureId: 'cap-telegram-watch',
-              deduped: false,
-            }),
-            signal,
-          )
-        },
-      }),
+    loadParsersModule: async () => createFakeParsersRuntimeModule(),
   })
 
   try {
@@ -2600,29 +2686,32 @@ test.sequential('run on Linux fails cleanly when only unsupported iMessage conne
 
 test.sequential('run writes daemon state and status updates after abort', async () => {
   const fixture = await makeVaultFixture('murph-inbox-run')
-  const fakeParsers = createFakeParsersRuntimeModule({
-    async onRunInboxDaemonWithParsers({ signal }) {
-      if (signal.aborted) {
-        return
-      }
-
-      await new Promise<void>((resolve) => {
-        signal.addEventListener('abort', () => resolve(), { once: true })
-      })
-    },
-  })
   const services = createIntegratedInboxServices({
     getHomeDirectory: () => fixture.homeRoot,
     getPid: () => 4242,
     getPlatform: () => 'darwin',
     loadCoreModule: loadBuiltCoreRuntime,
-    loadInboxModule: loadBuiltInboxRuntime,
+    loadInboxModule: async () => {
+      const inboxd = await loadBuiltInboxRuntime()
+      return {
+        ...inboxd,
+        async runInboxDaemonWithParsers({ signal }: { signal: AbortSignal }) {
+          if (signal.aborted) {
+            return
+          }
+
+          await new Promise<void>((resolve) => {
+            signal.addEventListener('abort', () => resolve(), { once: true })
+          })
+        },
+      }
+    },
     loadImessageDriver: async () =>
       createFakeImessageDriver({
         photoPath: fixture.photoPath,
         watchDelayMs: 1000,
       }),
-    loadParsersModule: async () => fakeParsers,
+    loadParsersModule: async () => createFakeParsersRuntimeModule(),
   })
 
   try {
@@ -2681,24 +2770,32 @@ test.sequential('run enables connector isolation and connector restarts for pars
     continueOnConnectorFailure: boolean
     connectorRestartPolicyEnabled: boolean
   }> = []
-  const fakeParsers = createFakeParsersRuntimeModule({
-    async onRunInboxDaemonWithParsers(payload) {
-      observedSettings.push({
-        continueOnConnectorFailure: payload.continueOnConnectorFailure === true,
-        connectorRestartPolicyEnabled: payload.connectorRestartPolicy?.enabled === true,
-      })
-    },
-  })
   const services = createIntegratedInboxServices({
     getHomeDirectory: () => fixture.homeRoot,
     getPlatform: () => 'darwin',
     loadCoreModule: loadBuiltCoreRuntime,
-    loadInboxModule: loadBuiltInboxRuntime,
+    loadInboxModule: async () => {
+      const inboxd = await loadBuiltInboxRuntime()
+      return {
+        ...inboxd,
+        async runInboxDaemonWithParsers(payload: {
+          continueOnConnectorFailure?: boolean
+          connectorRestartPolicy?: {
+            enabled?: boolean
+          }
+        }) {
+          observedSettings.push({
+            continueOnConnectorFailure: payload.continueOnConnectorFailure === true,
+            connectorRestartPolicyEnabled: payload.connectorRestartPolicy?.enabled === true,
+          })
+        },
+      }
+    },
     loadImessageDriver: async () =>
       createFakeImessageDriver({
         photoPath: fixture.photoPath,
       }),
-    loadParsersModule: async () => fakeParsers,
+    loadParsersModule: async () => createFakeParsersRuntimeModule(),
   })
 
   try {
@@ -2863,14 +2960,17 @@ test.sequential(
       getPid: () => 5151,
       getPlatform: () => 'darwin',
       loadCoreModule: loadBuiltCoreRuntime,
-      loadInboxModule: loadBuiltInboxRuntime,
-      loadImessageDriver: async () => driver,
-      loadParsersModule: async () =>
-        createFakeParsersRuntimeModule({
-          async onRunInboxDaemonWithParsers() {
+      loadInboxModule: async () => {
+        const inboxd = await loadBuiltInboxRuntime()
+        return {
+          ...inboxd,
+          async runInboxDaemonWithParsers() {
             throw new Error('daemon failed while polling')
           },
-        }),
+        }
+      },
+      loadImessageDriver: async () => driver,
+      loadParsersModule: async () => createFakeParsersRuntimeModule(),
     })
 
     try {

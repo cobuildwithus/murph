@@ -21,6 +21,9 @@
       "path": "../core/tsconfig.build.json"
     },
     {
+      "path": "../gateway-core"
+    },
+    {
       "path": "../importers"
     },
     {
