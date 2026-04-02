@@ -1,17 +1,16 @@
+import type { FfmpegToolOptions } from "./adapters/ffmpeg.js";
 import type {
   AttachmentParseJobClaimFilters,
-  InboxRuntimeStore,
+  ParserRuntimeStore,
   RequeueAttachmentParseJobsInput,
-} from "@murphai/inboxd";
-
-import type { FfmpegToolOptions } from "./adapters/ffmpeg.js";
+} from "./contracts/runtime.js";
 import type { ParserRegistry } from "./registry/registry.js";
 import type { RunAttachmentParseJobResult } from "./pipelines/worker.js";
 import { runAttachmentParseJobOnce, runAttachmentParseWorker } from "./pipelines/worker.js";
 
 export interface CreateInboxParserServiceInput {
   vaultRoot: string;
-  runtime: InboxRuntimeStore;
+  runtime: ParserRuntimeStore;
   registry: ParserRegistry;
   scratchRoot?: string;
   ffmpeg?: FfmpegToolOptions;

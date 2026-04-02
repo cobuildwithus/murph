@@ -1,14 +1,18 @@
+import type { PollConnector } from "./connectors/types.ts";
 import {
-  createInboxPipeline,
   runInboxDaemon,
   type ConnectorRestartPolicy,
+} from "./kernel/daemon.ts";
+import {
+  createInboxPipeline,
   type CreateInboxPipelineInput,
   type InboxPipeline,
-  type PollConnector,
-} from "@murphai/inboxd";
-
-import type { CreateInboxParserServiceInput, InboxParserService } from "../service.js";
-import { createInboxParserService } from "../service.js";
+} from "./kernel/pipeline.ts";
+import {
+  createInboxParserService,
+  type CreateInboxParserServiceInput,
+  type InboxParserService,
+} from "@murphai/parsers";
 
 export interface CreateParsedInboxPipelineInput
   extends CreateInboxPipelineInput,

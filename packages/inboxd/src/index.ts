@@ -242,6 +242,15 @@ export type {
   PipelineContext,
 } from "./kernel/pipeline.ts";
 export {
+  createParsedInboxPipeline,
+  runInboxDaemonWithParsers,
+} from "./parsers.ts";
+export type {
+  CreateParsedInboxPipelineInput,
+  ParsedInboxPipeline,
+  RunInboxDaemonWithParsersInput,
+} from "./parsers.ts";
+export {
   listInboxCaptureMutations,
   openInboxRuntime,
   readInboxCaptureMutationHead,

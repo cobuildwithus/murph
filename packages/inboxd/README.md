@@ -55,6 +55,11 @@ These methods mutate only inbox-local runtime state such as `.runtime/inboxd.sql
 
 When combined with `@murphai/parsers`, operators can drive those queues through `vault-cli inbox setup|doctor|parse|requeue` without mixing parser state into canonical health records.
 
+`@murphai/inboxd` also owns the optional inbox-plus-parser composition helpers
+`createParsedInboxPipeline(...)` and `runInboxDaemonWithParsers(...)`, so the
+parser package stays focused on parser contracts, registry/toolchain discovery,
+and parse execution rather than on inbox runtime orchestration.
+
 ## Telegram adapter contract
 
 The Telegram connector is local-first and poll-first by default.

@@ -31,7 +31,6 @@
     "node": ">=22.16.0"
   },
   "dependencies": {
-    "@murphai/assistant-core": "workspace:*",
     "@murphai/gateway-core": "workspace:*",
     "@murphai/inboxd": "workspace:*",
     "@murphai/runtime-state": "workspace:*"

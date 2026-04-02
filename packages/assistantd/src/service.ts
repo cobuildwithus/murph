@@ -33,6 +33,10 @@ import {
   type AssistantStatusResult,
   type RunAssistantAutomationInput,
 } from '@murphai/assistant-core'
+import {
+  assistantGatewayLocalMessageSender,
+  assistantGatewayLocalProjectionSourceReader,
+} from '@murphai/assistant-core/gateway-local-adapter'
 import { createLocalGatewayService } from '@murphai/gateway-local'
 import type { GatewayService } from '@murphai/gateway-core'
 
@@ -149,7 +153,10 @@ export function createAssistantLocalService(vaultRoot: string): AssistantLocalSe
 
   const inboxServices = createIntegratedInboxServices()
   const vaultServices = createIntegratedVaultServices()
-  const gateway = createLocalGatewayService(vaultRoot)
+  const gateway = createLocalGatewayService(vaultRoot, {
+    messageSender: assistantGatewayLocalMessageSender,
+    sourceReader: assistantGatewayLocalProjectionSourceReader,
+  })
 
   return {
     gateway,

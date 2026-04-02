@@ -222,6 +222,10 @@
       "types": "./dist/device-sync-client.d.ts",
       "default": "./dist/device-sync-client.js"
     },
+    "./gateway-local-adapter": {
+      "types": "./dist/gateway-local-adapter.d.ts",
+      "default": "./dist/gateway-local-adapter.js"
+    },
     "./health-cli-descriptors": {
       "types": "./dist/health-cli-descriptors.d.ts",
       "default": "./dist/health-cli-descriptors.js"
@@ -412,6 +416,7 @@
     "@murphai/contracts": "workspace:*",
     "@murphai/core": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
+    "@murphai/gateway-core": "workspace:*",
     "@murphai/importers": "workspace:*",
     "@murphai/inboxd": "workspace:*",
     "@murphai/parsers": "workspace:*",

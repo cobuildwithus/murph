@@ -4,6 +4,7 @@ import {
   resolveRuntimePaths,
   withImmediateTransaction as withTransaction,
 } from "@murphai/runtime-state/node";
+import type { ParserRuntimeStore } from "@murphai/parsers";
 
 import type {
   AttachmentParseJobClaimFilters,
@@ -43,7 +44,7 @@ export interface InboxCaptureMutationRecord {
   cursor: number;
 }
 
-export interface InboxRuntimeStore {
+export interface InboxRuntimeStore extends ParserRuntimeStore {
   readonly databasePath: string;
   close(): void;
   getCursor(source: string, accountId?: string | null): Record<string, unknown> | null;
@@ -61,10 +62,6 @@ export interface InboxRuntimeStore {
   }): string;
   enqueueDerivedJobs(input: { captureId: string; stored: StoredCapture }): void;
   listAttachmentParseJobs(filters?: AttachmentParseJobFilters): AttachmentParseJobRecord[];
-  claimNextAttachmentParseJob(filters?: AttachmentParseJobClaimFilters): AttachmentParseJobRecord | null;
-  requeueAttachmentParseJobs(filters?: RequeueAttachmentParseJobsInput): number;
-  completeAttachmentParseJob(input: CompleteAttachmentParseJobInput): AttachmentParseJobFinalizeResult;
-  failAttachmentParseJob(input: FailAttachmentParseJobInput): AttachmentParseJobFinalizeResult;
   listCaptures(filters?: InboxListFilters): InboxCaptureRecord[];
   searchCaptures(filters: InboxSearchFilters): InboxSearchHit[];
   getCapture(captureId: string): InboxCaptureRecord | null;

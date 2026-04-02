@@ -14,19 +14,68 @@ import { test } from 'vitest'
 
 import { assistantSessionSchema } from '@murphai/assistant-core/assistant-cli-contracts'
 import { createAssistantBinding } from '@murphai/assistant-core/assistant/bindings'
+import {
+  assistantGatewayLocalMessageSender,
+  assistantGatewayLocalProjectionSourceReader,
+} from '@murphai/assistant-core/gateway-local-adapter'
 import { listAssistantOutboxIntentsLocal, saveAssistantOutboxIntent } from '../src/assistant/outbox.js'
 import { saveAssistantSession } from '../src/assistant/store.js'
 import {
-  exportGatewayProjectionSnapshotLocal,
-  fetchGatewayAttachmentsLocal,
-  getGatewayConversationLocal,
-  listGatewayConversationsLocal,
-  listGatewayOpenPermissionsLocalWrapper,
-  pollGatewayEventsLocalWrapper,
-  readGatewayMessagesLocal,
-  respondToGatewayPermissionLocalWrapper,
-  sendGatewayMessageLocal,
+  exportGatewayProjectionSnapshotLocal as exportGatewayProjectionSnapshotLocalRaw,
+  fetchGatewayAttachmentsLocal as fetchGatewayAttachmentsLocalRaw,
+  getGatewayConversationLocal as getGatewayConversationLocalRaw,
+  listGatewayConversationsLocal as listGatewayConversationsLocalRaw,
+  listGatewayOpenPermissionsLocalWrapper as listGatewayOpenPermissionsLocalWrapperRaw,
+  pollGatewayEventsLocalWrapper as pollGatewayEventsLocalWrapperRaw,
+  readGatewayMessagesLocal as readGatewayMessagesLocalRaw,
+  respondToGatewayPermissionLocalWrapper as respondToGatewayPermissionLocalWrapperRaw,
+  sendGatewayMessageLocal as sendGatewayMessageLocalRaw,
 } from '@murphai/gateway-local'
+
+const gatewayLocalDependencies = {
+  messageSender: assistantGatewayLocalMessageSender,
+  sourceReader: assistantGatewayLocalProjectionSourceReader,
+}
+
+const exportGatewayProjectionSnapshotLocal = (
+  ...args: Parameters<typeof exportGatewayProjectionSnapshotLocalRaw>
+) => exportGatewayProjectionSnapshotLocalRaw(args[0], gatewayLocalDependencies)
+
+const fetchGatewayAttachmentsLocal = (
+  ...args: Parameters<typeof fetchGatewayAttachmentsLocalRaw>
+) => fetchGatewayAttachmentsLocalRaw(args[0], args[1], gatewayLocalDependencies)
+
+const getGatewayConversationLocal = (
+  ...args: Parameters<typeof getGatewayConversationLocalRaw>
+) => getGatewayConversationLocalRaw(args[0], args[1], gatewayLocalDependencies)
+
+const listGatewayConversationsLocal = (
+  ...args: Parameters<typeof listGatewayConversationsLocalRaw>
+) => listGatewayConversationsLocalRaw(args[0], args[1], gatewayLocalDependencies)
+
+const listGatewayOpenPermissionsLocalWrapper = (
+  ...args: Parameters<typeof listGatewayOpenPermissionsLocalWrapperRaw>
+) => listGatewayOpenPermissionsLocalWrapperRaw(args[0], args[1], gatewayLocalDependencies)
+
+const pollGatewayEventsLocalWrapper = (
+  ...args: Parameters<typeof pollGatewayEventsLocalWrapperRaw>
+) => pollGatewayEventsLocalWrapperRaw(args[0], args[1], gatewayLocalDependencies)
+
+const readGatewayMessagesLocal = (
+  ...args: Parameters<typeof readGatewayMessagesLocalRaw>
+) => readGatewayMessagesLocalRaw(args[0], args[1], gatewayLocalDependencies)
+
+const respondToGatewayPermissionLocalWrapper = (
+  ...args: Parameters<typeof respondToGatewayPermissionLocalWrapperRaw>
+) => respondToGatewayPermissionLocalWrapperRaw(args[0], args[1], gatewayLocalDependencies)
+
+const sendGatewayMessageLocal = (
+  input: Parameters<typeof sendGatewayMessageLocalRaw>[0],
+) => sendGatewayMessageLocalRaw({
+  ...input,
+  messageSender: input.messageSender ?? gatewayLocalDependencies.messageSender,
+  sourceReader: input.sourceReader ?? gatewayLocalDependencies.sourceReader,
+})
 
 async function rewriteInboxCaptureRuntimeRecord(input: {
   accountId?: string | null

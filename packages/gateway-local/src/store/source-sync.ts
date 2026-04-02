@@ -16,7 +16,7 @@ import type { GatewayAttachment, GatewayConversationRoute } from '@murphai/gatew
 import type {
   GatewayLocalOutboxSource,
   GatewayLocalSessionSource,
-} from '../assistant-adapter.js'
+} from '@murphai/gateway-core'
 import {
   createGatewayAttachmentId,
   createGatewayCaptureMessageId,

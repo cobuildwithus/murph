@@ -391,6 +391,19 @@ export interface InboxRuntimeModule {
     continueOnConnectorFailure?: boolean
     connectorRestartPolicy?: ConnectorRestartPolicy
   }): Promise<void>
+  runInboxDaemonWithParsers(input: {
+    vaultRoot: string
+    runtime: RuntimeStore
+    registry: unknown
+    ffmpeg?: {
+      commandCandidates?: string[]
+      allowSystemLookup?: boolean
+    }
+    connectors: PollConnector[]
+    signal: AbortSignal
+    continueOnConnectorFailure?: boolean
+    connectorRestartPolicy?: ConnectorRestartPolicy
+  }): Promise<void>
 }
 
 export interface ParserToolRuntimeStatus {
@@ -446,19 +459,6 @@ export interface ParsersRuntimeModule {
   createConfiguredParserRegistry(input: {
     vaultRoot: string
   }): Promise<ConfiguredParserRegistryRuntime>
-  runInboxDaemonWithParsers(input: {
-    vaultRoot: string
-    runtime: RuntimeStore
-    registry: unknown
-    ffmpeg?: {
-      commandCandidates?: string[]
-      allowSystemLookup?: boolean
-    }
-    connectors: PollConnector[]
-    signal: AbortSignal
-    continueOnConnectorFailure?: boolean
-    connectorRestartPolicy?: ConnectorRestartPolicy
-  }): Promise<void>
   createInboxParserService(input: {
     vaultRoot: string
     runtime: RuntimeStore

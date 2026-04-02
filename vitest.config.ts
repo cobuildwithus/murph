@@ -83,6 +83,7 @@ const ROOT_REPO_PROJECTS: RootRepoProject[] = [
       "packages/assistant-runtime/test/assistant-core-boundary.test.ts",
       "packages/assistant-runtime/test/hosted-assistant-bootstrap.test.ts",
       "packages/assistant-runtime/test/hosted-email-route.test.ts",
+      "packages/assistant-runtime/test/hosted-runtime-events.test.ts",
       "packages/assistant-runtime/test/hosted-runtime-usage.test.ts",
     ],
   },

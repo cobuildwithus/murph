@@ -8,9 +8,6 @@
   },
   "references": [
     {
-      "path": "../assistant-core"
-    },
-    {
       "path": "../gateway-core"
     },
     {

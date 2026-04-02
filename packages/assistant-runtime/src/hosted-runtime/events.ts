@@ -1,4 +1,8 @@
 import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
+import {
+  assistantGatewayLocalMessageSender,
+  assistantGatewayLocalProjectionSourceReader,
+} from "@murphai/assistant-core/gateway-local-adapter";
 import { sendGatewayMessageLocal } from "@murphai/gateway-local";
 
 import { prepareHostedDispatchContext } from "./context.ts";
@@ -101,8 +105,10 @@ async function handleHostedDispatchEvent(input: {
       await sendGatewayMessageLocal({
         clientRequestId: dispatch.event.clientRequestId,
         dispatchMode: "queue-only",
+        messageSender: assistantGatewayLocalMessageSender,
         replyToMessageId: dispatch.event.replyToMessageId,
         sessionKey: dispatch.event.sessionKey,
+        sourceReader: assistantGatewayLocalProjectionSourceReader,
         text: dispatch.event.text,
         vault: input.vaultRoot,
       });

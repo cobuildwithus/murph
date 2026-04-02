@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite'
 
 import {
   DEFAULT_GATEWAY_EVENT_POLL_INTERVAL_MS,
+  type GatewayLocalProjectionSourceReader,
   pollGatewayEventLogState,
   waitForGatewayEventsByPolling,
   type GatewayListOpenPermissionsInput,
@@ -14,10 +15,6 @@ import {
 } from '@murphai/gateway-core'
 import { openSqliteRuntimeDatabase, resolveGatewayRuntimePaths } from '@murphai/runtime-state/node'
 
-import {
-  assistantGatewayLocalProjectionSourceReader,
-  type GatewayLocalProjectionSourceReader,
-} from './assistant-adapter.js'
 import { normalizeNullableString } from './shared.js'
 import {
   listOpenPermissionsFromDatabase,
@@ -55,10 +52,20 @@ const CAPTURE_INITIALIZED_META_KEY = 'captures.initialized'
 const SESSION_SIGNATURE_META_KEY = 'sessions.signature'
 const OUTBOX_SIGNATURE_META_KEY = 'outbox.signature'
 
+const EMPTY_GATEWAY_LOCAL_PROJECTION_SOURCE_READER: GatewayLocalProjectionSourceReader = {
+  async listOutboxSources() {
+    return []
+  },
+  async listSessionSources() {
+    return []
+  },
+}
+
 export async function exportGatewayProjectionSnapshotLocal(
   vault: string,
+  dependencies: LocalGatewayProjectionStoreDependencies = {},
 ): Promise<GatewayProjectionSnapshot> {
-  const store = new LocalGatewayProjectionStore(vault)
+  const store = new LocalGatewayProjectionStore(vault, dependencies)
   try {
     return await store.syncAndReadSnapshot()
   } finally {
@@ -69,8 +76,9 @@ export async function exportGatewayProjectionSnapshotLocal(
 export async function listGatewayOpenPermissionsLocal(
   vault: string,
   input?: GatewayListOpenPermissionsInput,
+  dependencies: LocalGatewayProjectionStoreDependencies = {},
 ): Promise<GatewayPermissionRequest[]> {
-  const store = new LocalGatewayProjectionStore(vault)
+  const store = new LocalGatewayProjectionStore(vault, dependencies)
   try {
     await store.sync()
     return store.listOpenPermissions(input)
@@ -82,8 +90,9 @@ export async function listGatewayOpenPermissionsLocal(
 export async function respondToGatewayPermissionLocal(
   vault: string,
   input: GatewayRespondToPermissionInput,
+  dependencies: LocalGatewayProjectionStoreDependencies = {},
 ): Promise<GatewayPermissionRequest | null> {
-  const store = new LocalGatewayProjectionStore(vault)
+  const store = new LocalGatewayProjectionStore(vault, dependencies)
   try {
     await store.sync()
     return store.respondToPermission(input)
@@ -95,8 +104,9 @@ export async function respondToGatewayPermissionLocal(
 export async function pollGatewayEventsLocal(
   vault: string,
   input?: GatewayPollEventsInput,
+  dependencies: LocalGatewayProjectionStoreDependencies = {},
 ): Promise<GatewayPollEventsResult> {
-  const store = new LocalGatewayProjectionStore(vault)
+  const store = new LocalGatewayProjectionStore(vault, dependencies)
   try {
     await store.sync()
     return store.pollEvents(input)
@@ -108,8 +118,9 @@ export async function pollGatewayEventsLocal(
 export async function waitForGatewayEventsLocal(
   vault: string,
   input?: GatewayWaitForEventsInput,
+  dependencies: LocalGatewayProjectionStoreDependencies = {},
 ): Promise<GatewayPollEventsResult> {
-  const store = new LocalGatewayProjectionStore(vault)
+  const store = new LocalGatewayProjectionStore(vault, dependencies)
   try {
     return await waitForGatewayEventsByPolling(async (pollInput) => {
       await store.sync()
@@ -137,7 +148,7 @@ export class LocalGatewayProjectionStore {
     this.database = openSqliteRuntimeDatabase(resolveGatewayRuntimePaths(vault).gatewayDbPath)
     ensureGatewayStoreSchema(this.database)
     this.sourceReader =
-      dependencies.sourceReader ?? assistantGatewayLocalProjectionSourceReader
+      dependencies.sourceReader ?? EMPTY_GATEWAY_LOCAL_PROJECTION_SOURCE_READER
   }
 
   close(): void {

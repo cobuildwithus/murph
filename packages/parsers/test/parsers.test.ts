@@ -6,16 +6,17 @@ import { test } from "vitest";
 
 import { initializeVault } from "@murphai/core";
 import {
+  createParsedInboxPipeline,
   createInboxPipeline,
   openInboxRuntime,
   rebuildRuntimeFromVault,
+  runInboxDaemonWithParsers,
   type InboxRuntimeStore,
 } from "@murphai/inboxd";
 
 import {
   createConfiguredParserRegistry,
   createInboxParserService,
-  createParsedInboxPipeline,
   createParserRegistry,
   createPdfToTextProvider,
   createTextFileProvider,
@@ -25,7 +26,6 @@ import {
   parseAttachment,
   prepareAudioInput,
   readParserToolchainConfig,
-  runInboxDaemonWithParsers,
   runAttachmentParseJobOnce,
   runAttachmentParseWorker,
   writeParserArtifacts,

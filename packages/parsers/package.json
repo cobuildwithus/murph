@@ -30,7 +30,6 @@
   },
   "dependencies": {
     "@murphai/core": "workspace:*",
-    "@murphai/inboxd": "workspace:*",
     "@murphai/runtime-state": "workspace:*"
   },
   "engines": {
