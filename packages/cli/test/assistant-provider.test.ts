@@ -56,7 +56,6 @@ import {
   executeAssistantProviderTurnAttempt,
   executeAssistantProviderTurn,
   resolveAssistantProviderCapabilities,
-  resolveAssistantProviderRuntime,
 } from '@murphai/assistant-core/assistant/provider-registry'
 import {
   defaultDiscoverOpenAICompatibleModels,
@@ -261,20 +260,6 @@ test('resolveAssistantProviderCapabilities reports shared backend-facing capabil
     supportsNativeResume: true,
     supportsReasoningEffort: false,
     supportsRichUserMessageContent: true,
-  })
-})
-
-test('resolveAssistantProviderRuntime keeps canonical write authority in Murph', () => {
-  assert.deepEqual(resolveAssistantProviderRuntime({
-    provider: 'codex-cli',
-  }), {
-    requiresCanonicalWriteGuard: true,
-  })
-  assert.deepEqual(resolveAssistantProviderRuntime({
-    provider: 'openai-compatible',
-    baseUrl: 'http://127.0.0.1:11434/v1',
-  }), {
-    requiresCanonicalWriteGuard: false,
   })
 })
 
@@ -781,6 +766,33 @@ test('executeAssistantProviderTurn chains official OpenAI responses and stores t
   assert.equal(result.providerSessionId, 'resp_123')
   assert.ok(result.usage)
   assert.equal(result.usage.providerRequestId, 'resp_123')
+})
+
+test('executeAssistantProviderTurn forwards reasoning effort to official OpenAI responses', async () => {
+  const languageModel = { provider: 'mock-model' }
+  providerMocks.resolveAssistantLanguageModel.mockReturnValue(languageModel)
+  providerMocks.generateText.mockResolvedValue({
+    text: 'assistant reply',
+  })
+
+  await executeAssistantProviderTurn({
+    provider: 'openai-compatible',
+    workingDirectory: '/tmp/vault',
+    baseUrl: 'https://api.openai.com/v1',
+    apiKeyEnv: 'OPENAI_API_KEY',
+    providerName: 'openai',
+    model: 'gpt-5.4',
+    reasoningEffort: 'medium',
+    userPrompt: 'hello',
+  })
+
+  const generateCall = providerMocks.generateText.mock.calls[0]?.[0]
+  assert.deepEqual(generateCall?.providerOptions, {
+    openai: {
+      reasoningEffort: 'medium',
+      store: false,
+    },
+  })
 })
 
 test('executeAssistantProviderTurn uses the prebuilt canonical assistant tool catalog for OpenAI-compatible tool-runtime turns', async () => {

@@ -13,7 +13,6 @@ import type {
   AssistantProviderAttemptMetadata,
   AssistantProviderCapabilities,
   AssistantProviderDefinition,
-  AssistantProviderRuntime,
   AssistantProviderTurnAttemptResult,
   AssistantProviderTurnExecutionInput,
   AssistantProviderTurnExecutionResult,
@@ -77,15 +76,6 @@ export async function discoverAssistantProviderModels(input: {
     config: normalized,
     env: input.env,
   })
-}
-
-export function resolveAssistantProviderRuntime(
-  input: AssistantProviderConfigInput | null | undefined,
-): AssistantProviderRuntime {
-  const normalized = normalizeAssistantProviderConfig(input)
-  return resolveAssistantProviderDefinition(normalized.provider).resolveRuntime(
-    normalized,
-  )
 }
 
 export function resolveAssistantProviderStaticModels(
@@ -183,7 +173,6 @@ export type {
   AssistantProviderAttemptMetadata,
   AssistantProviderCapabilities,
   AssistantProviderDefinition,
-  AssistantProviderRuntime,
   AssistantProviderTurnAttemptResult,
   AssistantProviderTurnExecutionInput,
   AssistantProviderTurnExecutionResult,

@@ -47,10 +47,6 @@ export interface AssistantProviderCapabilities {
   supportsRichUserMessageContent: boolean
 }
 
-export interface AssistantProviderRuntime {
-  requiresCanonicalWriteGuard: boolean
-}
-
 export interface AssistantProviderProgressEvent extends CodexProgressEvent {}
 
 export interface AssistantProviderToolRuntime {
@@ -170,7 +166,6 @@ export interface AssistantProviderDefinition {
     config: AssistantProviderConfig
     env?: NodeJS.ProcessEnv
   }): Promise<AssistantModelDiscoveryResult>
-  resolveRuntime(config: AssistantProviderConfig): AssistantProviderRuntime
   executeTurn(
     input: AssistantProviderTurnExecutionInput,
   ): Promise<AssistantProviderTurnAttemptResult>

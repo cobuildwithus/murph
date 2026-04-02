@@ -1,6 +1,3 @@
-import type {
-  AssistantSandbox,
-} from '../assistant-cli-contracts.js'
 import type { AssistantOperatorDefaults } from '../operator-config.js'
 import { resolveAssistantProviderDefaults } from '../operator-config.js'
 import {
@@ -13,12 +10,6 @@ import type {
   AssistantMessageInput,
   AssistantSessionResolutionFields,
 } from './service-contracts.js'
-
-export function clampVaultBoundAssistantSandbox(
-  sandbox: AssistantSandbox | null | undefined,
-): AssistantSandbox | null | undefined {
-  return sandbox === 'danger-full-access' ? 'workspace-write' : sandbox
-}
 
 export function buildResolveAssistantSessionInput(
   input: AssistantSessionResolutionFields,
@@ -73,9 +64,14 @@ export function buildResolveAssistantSessionInput(
           ? false
           : undefined
 
-  const resolvedSandbox = clampVaultBoundAssistantSandbox(providerConfig.sandbox)
-  const defaultSandbox = resolvedSandbox ?? 'workspace-write'
-  const defaultApprovalPolicy = providerConfig.approvalPolicy ?? 'on-request'
+  const defaultSandbox =
+    providerConfig.provider === 'codex-cli'
+      ? (providerConfig.sandbox ?? 'danger-full-access')
+      : providerConfig.sandbox
+  const defaultApprovalPolicy =
+    providerConfig.provider === 'codex-cli'
+      ? (providerConfig.approvalPolicy ?? 'never')
+      : providerConfig.approvalPolicy
 
   return {
     vault: input.vault,

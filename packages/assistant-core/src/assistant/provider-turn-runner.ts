@@ -14,12 +14,8 @@ import {
 import {
   executeAssistantProviderTurnAttempt,
   resolveAssistantProviderCapabilities,
-  resolveAssistantProviderRuntime,
   type AssistantProviderTurnExecutionResult,
 } from '../assistant-provider.js'
-import {
-  executeWithCanonicalWriteGuard,
-} from './canonical-write-guard.js'
 import { recordAssistantDiagnosticEvent } from './diagnostics.js'
 import { normalizeAssistantExecutionContext } from './execution-context.js'
 import { errorMessage } from './shared.js'
@@ -119,12 +115,6 @@ interface AssistantProviderAttemptPlan {
 
 type AssistantProviderAttemptOutcome =
   | {
-      kind: 'blocked'
-      error: unknown
-      failoverState: AssistantProviderFailoverState
-      session: AssistantSession
-    }
-  | {
       kind: 'failed_terminal'
       error: unknown
       failoverState: AssistantProviderFailoverState
@@ -143,11 +133,6 @@ type AssistantProviderAttemptOutcome =
     }
 
 export type AssistantProviderTurnRecoveryOutcome =
-  | {
-      kind: 'blocked'
-      error: unknown
-      session: AssistantSession
-    }
   | {
       kind: 'failed_terminal'
       error: unknown
@@ -204,12 +189,6 @@ export async function executeProviderTurnWithRecovery(input: {
       case 'retry_next_route':
         lastRetriableFailure = attemptOutcome.error
         break
-      case 'blocked':
-        return {
-          kind: 'blocked',
-          error: attemptOutcome.error,
-          session: attemptOutcome.session,
-        }
       case 'failed_terminal':
         return {
           kind: 'failed_terminal',
@@ -424,10 +403,6 @@ async function executeAssistantProviderAttempt(input: {
       message: 'Injected assistant provider failure.',
     })
     const toolCatalog = executionPlan.toolCatalog
-    const runtime = resolveAssistantProviderRuntime({
-      provider: attemptPlan.route.provider,
-      ...attemptPlan.route.providerOptions,
-    })
     const toolRuntime = {
       allowSensitiveHealthContext: executionPlan.sharedPlan.allowSensitiveHealthContext,
       requestId: executionPlan.turnId,
@@ -435,56 +410,49 @@ async function executeAssistantProviderAttempt(input: {
       toolCatalog,
       vault: executionPlan.input.vault,
     }
-    const result = await executeWithCanonicalWriteGuard({
-      enabled: runtime.requiresCanonicalWriteGuard,
-      vaultRoot: executionPlan.input.vault,
-      execute: async () => {
-        const attemptResult = await executeAssistantProviderTurnAttempt({
-          abortSignal: executionPlan.input.abortSignal,
-          provider: attemptPlan.route.provider,
-          workingDirectory: attemptPlan.routePlan.workingDirectory,
-          env: {
-            ...attemptPlan.routePlan.cliEnv,
-            ...executionPlan.memoryTurnEnv,
-          },
-          userPrompt: executionPlan.input.prompt,
-          userMessageContent: executionPlan.input.userMessageContent,
-          continuityContext: attemptPlan.routePlan.continuityContext,
-          systemPrompt: attemptPlan.routePlan.systemPrompt,
-          toolRuntime,
-          sessionContext: attemptPlan.routePlan.sessionContext
-            ? {
-                binding: attemptPlan.session.binding,
-              }
-            : undefined,
-          resumeProviderSessionId: attemptPlan.routePlan.resumeProviderSessionId,
-          codexCommand:
-            attemptPlan.route.codexCommand ??
-            executionPlan.input.codexCommand ??
-            undefined,
-          model: attemptPlan.route.providerOptions.model,
-          reasoningEffort: attemptPlan.route.providerOptions.reasoningEffort,
-          sandbox: attemptPlan.route.providerOptions.sandbox,
-          approvalPolicy: attemptPlan.route.providerOptions.approvalPolicy,
-          baseUrl: attemptPlan.route.providerOptions.baseUrl,
-          apiKeyEnv: attemptPlan.route.providerOptions.apiKeyEnv,
-          providerName: attemptPlan.route.providerOptions.providerName,
-          headers: attemptPlan.route.providerOptions.headers,
-          conversationMessages: attemptPlan.routePlan.conversationMessages,
-          onEvent: executionPlan.input.onProviderEvent ?? undefined,
-          profile: attemptPlan.route.providerOptions.profile,
-          oss: attemptPlan.route.providerOptions.oss,
-          onTraceEvent: executionPlan.input.onTraceEvent,
-          showThinkingTraces: executionPlan.input.showThinkingTraces ?? false,
-        })
-        attemptMetadata = attemptResult.metadata
-        if (!attemptResult.ok) {
-          throw attemptResult.error
-        }
-
-        return attemptResult.result
+    const attemptResult = await executeAssistantProviderTurnAttempt({
+      abortSignal: executionPlan.input.abortSignal,
+      provider: attemptPlan.route.provider,
+      workingDirectory: attemptPlan.routePlan.workingDirectory,
+      env: {
+        ...attemptPlan.routePlan.cliEnv,
+        ...executionPlan.memoryTurnEnv,
       },
+      userPrompt: executionPlan.input.prompt,
+      userMessageContent: executionPlan.input.userMessageContent,
+      continuityContext: attemptPlan.routePlan.continuityContext,
+      systemPrompt: attemptPlan.routePlan.systemPrompt,
+      toolRuntime,
+      sessionContext: attemptPlan.routePlan.sessionContext
+        ? {
+            binding: attemptPlan.session.binding,
+          }
+        : undefined,
+      resumeProviderSessionId: attemptPlan.routePlan.resumeProviderSessionId,
+      codexCommand:
+        attemptPlan.route.codexCommand ??
+        executionPlan.input.codexCommand ??
+        undefined,
+      model: attemptPlan.route.providerOptions.model,
+      reasoningEffort: attemptPlan.route.providerOptions.reasoningEffort,
+      sandbox: attemptPlan.route.providerOptions.sandbox,
+      approvalPolicy: attemptPlan.route.providerOptions.approvalPolicy,
+      baseUrl: attemptPlan.route.providerOptions.baseUrl,
+      apiKeyEnv: attemptPlan.route.providerOptions.apiKeyEnv,
+      providerName: attemptPlan.route.providerOptions.providerName,
+      headers: attemptPlan.route.providerOptions.headers,
+      conversationMessages: attemptPlan.routePlan.conversationMessages,
+      onEvent: executionPlan.input.onProviderEvent ?? undefined,
+      profile: attemptPlan.route.providerOptions.profile,
+      oss: attemptPlan.route.providerOptions.oss,
+      onTraceEvent: executionPlan.input.onTraceEvent,
+      showThinkingTraces: executionPlan.input.showThinkingTraces ?? false,
     })
+    attemptMetadata = attemptResult.metadata
+    if (!attemptResult.ok) {
+      throw attemptResult.error
+    }
+    const result = attemptResult.result
 
     const nextFailoverState = await recordAssistantFailoverRouteSuccess({
       vault: executionPlan.input.vault,
@@ -598,11 +566,7 @@ function classifyAssistantProviderAttemptFailure(input: {
   error: unknown
   executedBoundAssistantTool: boolean
   nextRoute: ResolvedAssistantFailoverRoute | null
-}): 'blocked' | 'failed_terminal' | 'retry_next_route' {
-  if (readAssistantErrorCode(input.error) === 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED') {
-    return 'blocked'
-  }
-
+}): 'failed_terminal' | 'retry_next_route' {
   if (input.executedBoundAssistantTool) {
     return 'failed_terminal'
   }

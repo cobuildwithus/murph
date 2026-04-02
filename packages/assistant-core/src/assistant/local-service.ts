@@ -49,7 +49,6 @@ import {
 import {
   buildAssistantCanonicalWriteBlockedResult,
   buildBlockedAssistantTurnError,
-  clampVaultBoundAssistantSandbox,
   normalizeAssistantAskResultForReturn,
   serializeAssistantSessionForResult,
 } from './service-result.js'
@@ -213,16 +212,6 @@ export async function sendAssistantMessageLocal(
           turnCreatedAt: userTurn.turnCreatedAt,
           turnId: userTurn.turnId,
         })
-        if (providerOutcome.kind === 'blocked') {
-          return finalizeBlockedAssistantTurn({
-            error: providerOutcome.error,
-            prompt: input.prompt,
-            response: responseText,
-            session: providerOutcome.session,
-            turnId: receipt.turnId,
-            vault: input.vault,
-          })
-        }
         if (providerOutcome.kind === 'failed_terminal') {
           throw providerOutcome.error
         }
@@ -380,10 +369,7 @@ export async function updateAssistantSessionOptionsLocal(input: {
 
   return saveAssistantSession(input.vault, {
     ...session.session,
-    providerOptions: serializeAssistantProviderSessionOptions({
-      ...providerConfig,
-      sandbox: clampVaultBoundAssistantSandbox(providerConfig.sandbox),
-    }),
+    providerOptions: serializeAssistantProviderSessionOptions(providerConfig),
     updatedAt: new Date().toISOString(),
   })
 }

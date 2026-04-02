@@ -17,7 +17,6 @@ import type {
   AssistantMessageInput,
   ResolvedAssistantSession,
 } from './service-contracts.js'
-import { clampVaultBoundAssistantSandbox } from './service-result.js'
 import {
   isAssistantSessionNotFoundError,
   resolveAssistantSession,
@@ -58,7 +57,6 @@ export function resolveAssistantTurnRoutes(
       compactAssistantProviderConfigInput({
         provider,
         ...input,
-        sandbox: clampVaultBoundAssistantSandbox(input.sandbox),
       }),
     ),
   )
@@ -163,9 +161,6 @@ function normalizeAssistantTurnRoutes(
 ): ResolvedAssistantFailoverRoute[] {
   return routes.map((route) => ({
     ...route,
-    providerOptions: serializeAssistantProviderSessionOptions({
-      ...route.providerOptions,
-      sandbox: clampVaultBoundAssistantSandbox(route.providerOptions.sandbox),
-    }),
+    providerOptions: serializeAssistantProviderSessionOptions(route.providerOptions),
   }))
 }

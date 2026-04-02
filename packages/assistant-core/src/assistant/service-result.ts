@@ -2,19 +2,12 @@ import {
   assistantCanonicalWriteBlockSchema,
   assistantAskResultSchema,
   type AssistantAskResult,
-  type AssistantSandbox,
   type AssistantSession,
 } from '../assistant-cli-contracts.js'
 import { redactAssistantDisplayPath } from './store.js'
 import { normalizeAssistantSessionSnapshot } from './provider-state.js'
 import { redactAssistantSessionForDisplay } from './redaction.js'
 import { isAssistantCanonicalWriteBlockedError } from './canonical-write-guard.js'
-
-export function clampVaultBoundAssistantSandbox(
-  sandbox: AssistantSandbox | null | undefined,
-): AssistantSandbox | null | undefined {
-  return sandbox === 'danger-full-access' ? 'workspace-write' : sandbox
-}
 
 export function serializeAssistantSessionForResult(
   session: AssistantSession,

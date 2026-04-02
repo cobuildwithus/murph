@@ -55,16 +55,6 @@ const runtimeMocks = vi.hoisted(() => ({
     supportsReasoningEffort: provider !== 'openai-compatible',
     supportsRichUserMessageContent: provider === 'openai-compatible',
   })),
-  resolveAssistantProviderRuntime: vi.fn((provider: string, baseUrl?: string | null) => {
-    void baseUrl
-    return provider === 'openai-compatible'
-      ? {
-          requiresCanonicalWriteGuard: false,
-        }
-      : {
-          requiresCanonicalWriteGuard: true,
-        }
-  }),
 }))
 
 vi.mock('../src/assistant-chat-ink.js', () => ({
@@ -95,14 +85,6 @@ vi.mock('@murphai/assistant-core/assistant-provider', async () => {
     executeAssistantProviderTurn: runtimeMocks.executeAssistantProviderTurn,
     resolveAssistantProviderCapabilities:
       runtimeMocks.resolveAssistantProviderCapabilities,
-    resolveAssistantProviderRuntime: (input: {
-      provider: string
-      baseUrl?: string | null
-    }) =>
-      runtimeMocks.resolveAssistantProviderRuntime(
-        input.provider,
-        input.baseUrl ?? null,
-      ),
   }
 })
 
@@ -428,23 +410,12 @@ beforeEach(() => {
   runtimeMocks.routeInboxCaptureWithModel.mockReset()
   runtimeMocks.runAssistantChatWithInk.mockReset()
   runtimeMocks.resolveAssistantProviderCapabilities.mockReset()
-  runtimeMocks.resolveAssistantProviderRuntime.mockReset()
   runtimeMocks.resolveAssistantProviderCapabilities.mockImplementation((provider: string) => ({
     supportsModelDiscovery: provider === 'openai-compatible',
     supportsNativeResume: true,
     supportsReasoningEffort: provider !== 'openai-compatible',
     supportsRichUserMessageContent: provider === 'openai-compatible',
   }))
-  runtimeMocks.resolveAssistantProviderRuntime.mockImplementation((provider: string, baseUrl?: string | null) => {
-    void baseUrl
-    return provider === 'openai-compatible'
-      ? {
-          requiresCanonicalWriteGuard: false,
-        }
-      : {
-          requiresCanonicalWriteGuard: true,
-        }
-  })
   runtimeMocks.executeAssistantProviderTurnAttempt.mockImplementation(
     async (...args: Parameters<typeof runtimeMocks.executeAssistantProviderTurn>) => {
       try {
@@ -1349,8 +1320,8 @@ test('sendAssistantMessage applies assistant defaults from operator config when 
                 codexCommand: '/opt/bin/codex',
                 model: 'gpt-oss:20b',
                 reasoningEffort: null,
-                sandbox: 'workspace-write',
-                approvalPolicy: 'on-request',
+                sandbox: 'danger-full-access',
+                approvalPolicy: 'never',
                 profile: 'ops',
                 oss: true,
                 baseUrl: null,
@@ -1377,8 +1348,8 @@ test('sendAssistantMessage applies assistant defaults from operator config when 
                 secondaryWindow: null,
               },
             },
-            sandbox: 'workspace-write',
-            approvalPolicy: 'on-request',
+            sandbox: 'danger-full-access',
+            approvalPolicy: 'never',
             profile: 'ops',
             oss: true,
             baseUrl: null,
@@ -1403,16 +1374,16 @@ test('sendAssistantMessage applies assistant defaults from operator config when 
 
     assert.equal(result.session.binding.identityId, 'assistant:primary')
     assert.equal(result.session.providerOptions.model, 'gpt-oss:20b')
-    assert.equal(result.session.providerOptions.sandbox, 'workspace-write')
-    assert.equal(result.session.providerOptions.approvalPolicy, 'on-request')
+    assert.equal(result.session.providerOptions.sandbox, 'danger-full-access')
+    assert.equal(result.session.providerOptions.approvalPolicy, 'never')
     assert.equal(result.session.providerOptions.profile, 'ops')
     assert.equal(result.session.providerOptions.oss, true)
 
     const call = runtimeMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
     assert.equal(call?.codexCommand, '/opt/bin/codex')
     assert.equal(call?.model, 'gpt-oss:20b')
-    assert.equal(call?.sandbox, 'workspace-write')
-    assert.equal(call?.approvalPolicy, 'on-request')
+    assert.equal(call?.sandbox, 'danger-full-access')
+    assert.equal(call?.approvalPolicy, 'never')
     assert.equal(call?.profile, 'ops')
     assert.equal(call?.oss, true)
   } finally {
@@ -1718,8 +1689,8 @@ test('updating one provider defaults entry preserves other saved provider entrie
           codexCommand: '/opt/bin/codex',
           model: 'gpt-5.4-mini',
           reasoningEffort: 'high',
-          sandbox: 'workspace-write',
-          approvalPolicy: 'on-request',
+          sandbox: 'danger-full-access',
+          approvalPolicy: 'never',
           profile: 'ops',
           oss: true,
           baseUrl: null,
@@ -1775,8 +1746,8 @@ test('updating one provider defaults entry preserves other saved provider entrie
     codexCommand: '/opt/bin/codex',
     model: 'gpt-5.4-mini',
     reasoningEffort: 'high',
-    sandbox: 'workspace-write',
-    approvalPolicy: 'on-request',
+    sandbox: 'danger-full-access',
+    approvalPolicy: 'never',
     profile: 'ops',
     oss: true,
     baseUrl: null,
@@ -4579,8 +4550,8 @@ test('scanAssistantAutoReplyOnce skips photo-only captures when the configured p
             codexCommand: null,
             model: 'gpt-5.4-mini',
             reasoningEffort: 'medium',
-            sandbox: 'workspace-write',
-            approvalPolicy: 'on-request',
+            sandbox: 'danger-full-access',
+            approvalPolicy: 'never',
             profile: null,
             oss: false,
           },
@@ -4637,8 +4608,8 @@ test('scanAssistantAutoReplyOnce reroutes photo-only captures to a multimodal fa
             codexCommand: null,
             model: 'gpt-5.4-mini',
             reasoningEffort: 'medium',
-            sandbox: 'workspace-write',
-            approvalPolicy: 'on-request',
+            sandbox: 'danger-full-access',
+            approvalPolicy: 'never',
             profile: null,
             oss: false,
           },
