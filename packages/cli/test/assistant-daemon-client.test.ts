@@ -332,7 +332,6 @@ test('assistant daemon client routes serializable assistant operations through t
             deliveryDeferred: false,
             deliveryIntentId: null,
             deliveryError: null,
-            blocked: null,
           }),
           { status: 200 },
         )

@@ -152,7 +152,6 @@ function createStubAssistantResult(vault: string): AssistantAskResult {
     deliveryDeferred: false,
     deliveryIntentId: null,
     deliveryError: null,
-    blocked: null,
   }
 }
 

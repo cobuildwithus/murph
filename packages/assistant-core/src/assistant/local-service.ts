@@ -47,8 +47,6 @@ import {
   executeProviderTurnWithRecovery,
 } from './provider-turn-runner.js'
 import {
-  buildAssistantCanonicalWriteBlockedResult,
-  buildBlockedAssistantTurnError,
   normalizeAssistantAskResultForReturn,
   serializeAssistantSessionForResult,
 } from './service-result.js'
@@ -101,57 +99,6 @@ async function persistUserTurn(
     turnId,
     userPersisted,
   }
-}
-
-async function finalizeBlockedAssistantTurn(input: {
-  error: unknown
-  prompt: string
-  response: string | null
-  session: AssistantSession
-  turnId: string
-  vault: string
-}): Promise<AssistantAskResult> {
-  const blockedResult = buildAssistantCanonicalWriteBlockedResult({
-    error: input.error,
-    prompt: input.prompt,
-    session: input.session,
-    vault: input.vault,
-  })
-  if (!blockedResult) {
-    throw input.error
-  }
-
-  const blockedAt = new Date().toISOString()
-  const blockedError = buildBlockedAssistantTurnError(blockedResult)
-
-  await runAssistantTurnBestEffort(() =>
-    finalizeAssistantTurnReceipt({
-      vault: input.vault,
-      turnId: input.turnId,
-      status: 'blocked',
-      deliveryDisposition: 'blocked',
-      error: blockedError,
-      response: input.response,
-      completedAt: blockedAt,
-    }),
-  )
-
-  await runAssistantTurnBestEffort(() =>
-    recordAssistantDiagnosticEvent({
-      vault: input.vault,
-      component: 'assistant',
-      kind: 'turn.blocked',
-      level: 'warn',
-      message: blockedError.message,
-      code: blockedError.code,
-      sessionId: blockedResult.session.sessionId,
-      turnId: input.turnId,
-      data: blockedResult.blocked,
-      at: blockedAt,
-    }),
-  )
-
-  return blockedResult
 }
 
 export async function openAssistantConversationLocal(
@@ -265,27 +212,8 @@ export async function sendAssistantMessageLocal(
             deliveryOutcome.kind === 'queued' || deliveryOutcome.kind === 'failed'
               ? deliveryOutcome.error
               : null,
-          blocked: null,
         }))
       } catch (error) {
-        const blockedResult = buildAssistantCanonicalWriteBlockedResult({
-          error,
-          prompt: input.prompt,
-          session: extractRecoveredAssistantSession(error) ?? resolved.session,
-          vault: input.vault,
-        })
-
-        if (blockedResult) {
-          return finalizeBlockedAssistantTurn({
-            error,
-            prompt: input.prompt,
-            response: responseText,
-            session: blockedResult.session,
-            turnId: receipt.turnId,
-            vault: input.vault,
-          })
-        }
-
         const normalizedError = normalizeAssistantDeliveryError(error)
         const failedAt = new Date().toISOString()
         const failedSession =

@@ -602,7 +602,6 @@ export function resolveAssistantTurnErrorPresentation(input: {
 }): AssistantTurnErrorPresentation {
   const errorText =
     input.error instanceof Error ? input.error.message : String(input.error)
-  const canonicalWriteBlocked = isAssistantCanonicalWriteBlockedError(input.error)
   const connectionLost = isAssistantProviderConnectionLostError(input.error)
   const missingSession = isAssistantSessionNotFoundError(input.error)
   const queuedFollowUpSuffix =
@@ -612,29 +611,24 @@ export function resolveAssistantTurnErrorPresentation(input: {
 
   return {
     entry: {
-      kind: canonicalWriteBlocked ? 'status' : 'error',
+      kind: 'error',
       text: errorText,
     },
-    persistTranscriptError: !missingSession && !canonicalWriteBlocked,
-    status: canonicalWriteBlocked
+    persistTranscriptError: !missingSession,
+    status: connectionLost
       ? {
-          kind: 'info',
-          text: `Blocked a direct canonical vault write and kept the live vault unchanged. Retry after using vault-cli or other audited Murph tools.${queuedFollowUpSuffix}`,
+          kind: 'error',
+          text: `The assistant lost its provider connection. Restore connectivity, then keep chatting to resume.${queuedFollowUpSuffix}`,
         }
-      : connectionLost
+      : missingSession
         ? {
             kind: 'error',
-            text: `The assistant lost its provider connection. Restore connectivity, then keep chatting to resume.${queuedFollowUpSuffix}`,
+            text: `The local assistant session record is missing. Check the current vault/default vault or start a new chat.${queuedFollowUpSuffix}`,
           }
-        : missingSession
-          ? {
-              kind: 'error',
-              text: `The local assistant session record is missing. Check the current vault/default vault or start a new chat.${queuedFollowUpSuffix}`,
-            }
-          : {
-              kind: 'error',
-              text: `The assistant hit an error. Fix it or keep chatting.${queuedFollowUpSuffix}`,
-            },
+        : {
+            kind: 'error',
+            text: `The assistant hit an error. Fix it or keep chatting.${queuedFollowUpSuffix}`,
+          },
   }
 }
 
@@ -2757,15 +2751,6 @@ interface AssistantChatStatus {
   text: string
 }
 
-interface AssistantBlockedTurnFeedback {
-  entry: {
-    kind: 'status'
-    streamKey?: string | null
-    text: string
-  }
-  status: AssistantChatStatus
-}
-
 interface AssistantPromptQueueState {
   prompts: readonly string[]
 }
@@ -2811,11 +2796,6 @@ type AssistantSendMessageResult = Awaited<
 >
 
 type AssistantPromptTurnOutcome =
-  | {
-      kind: 'blocked'
-      message: string
-      session: AssistantSession
-    }
   | {
       delivery: AssistantSendMessageResult['delivery']
       deliveryError: AssistantSendMessageResult['deliveryError']
@@ -2906,21 +2886,6 @@ const IDLE_ASSISTANT_TURN_STATE: AssistantTurnState = {
   phase: 'idle',
 }
 
-export function resolveAssistantBlockedTurnFeedback(
-  message: string,
-): AssistantBlockedTurnFeedback {
-  return {
-    entry: {
-      kind: 'status' as const,
-      text: message,
-    },
-    status: {
-      kind: 'info' as const,
-      text: message,
-    },
-  }
-}
-
 export function reduceAssistantPromptQueueState(
   state: AssistantPromptQueueState,
   action: AssistantPromptQueueAction,
@@ -2985,8 +2950,7 @@ export function resolveAssistantQueuedPromptDisposition(input: {
   if (
     input.turnOutcome === 'failed' ||
     input.turnOutcome === 'interrupted' ||
-    (input.pauseRequested &&
-      (input.turnOutcome === 'blocked' || input.turnOutcome === 'completed'))
+    (input.pauseRequested && input.turnOutcome === 'completed')
   ) {
     return {
       kind: 'restore-composer',
@@ -2994,10 +2958,7 @@ export function resolveAssistantQueuedPromptDisposition(input: {
     }
   }
 
-  if (
-    (input.turnOutcome === 'blocked' || input.turnOutcome === 'completed') &&
-    input.queuedPrompts.length > 0
-  ) {
+  if (input.turnOutcome === 'completed' && input.queuedPrompts.length > 0) {
     return {
       kind: 'replay-next',
       nextQueuedPrompt: input.queuedPrompts[0] ?? '',
@@ -3105,16 +3066,6 @@ export async function runAssistantPromptTurn(
       reasoningEffort: input.activeReasoningEffort,
       showThinkingTraces: true,
     })
-
-    if (result.status === 'blocked') {
-      return {
-        kind: 'blocked',
-        message:
-          result.blocked?.message ??
-          'Assistant turn was blocked by the canonical write guard.',
-        session: result.session,
-      }
-    }
 
     return {
       delivery: result.delivery,
@@ -3419,15 +3370,6 @@ function useAssistantChatController(
         )
       }
 
-      if (outcome.kind === 'blocked') {
-        const blockedTurnFeedback = resolveAssistantBlockedTurnFeedback(outcome.message)
-        setEntries((previous: InkChatEntry[]) => [
-          ...previous,
-          blockedTurnFeedback.entry,
-        ])
-        setStatus(blockedTurnFeedback.status)
-      }
-
       if (outcome.kind === 'failed') {
         if (outcome.recoveredSession) {
           commitSession(outcome.recoveredSession)
@@ -3507,7 +3449,7 @@ function useAssistantChatController(
 
       if (
         queuedPromptDisposition.kind === 'restore-composer' &&
-        (outcome.kind === 'completed' || outcome.kind === 'blocked') &&
+        outcome.kind === 'completed' &&
         pauseRequested
       ) {
         applyQueuedPromptDisposition(queuedPromptDisposition, queuedPrompts)
@@ -3521,7 +3463,7 @@ function useAssistantChatController(
         return
       }
 
-      if (outcome.kind === 'completed' || outcome.kind === 'blocked') {
+      if (outcome.kind === 'completed') {
         const nextQueuedPrompt = applyQueuedPromptDisposition(
           queuedPromptDisposition,
           queuedPrompts,
@@ -3781,6 +3723,7 @@ function useAssistantChatController(
   const bindingSummary = formatSessionBinding(session)
   const metadataBadges = resolveChatMetadataBadges(
     {
+      baseUrl: session.providerOptions.baseUrl,
       provider: session.provider,
       model: activeModel ?? session.providerOptions.model ?? input.codexDisplay.model,
       reasoningEffort: activeReasoningEffort ?? input.codexDisplay.reasoningEffort,
@@ -4010,14 +3953,4 @@ export async function runAssistantChatWithInk(
       rejectOnce(new Error('Ink chat failed to initialize.'))
     }
   })
-}
-
-function isAssistantCanonicalWriteBlockedError(error: unknown): boolean {
-  return Boolean(
-    error &&
-      typeof error === 'object' &&
-      'code' in error &&
-      (error as { code?: unknown }).code ===
-        'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED',
-  )
 }

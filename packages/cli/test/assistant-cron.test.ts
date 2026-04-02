@@ -672,7 +672,6 @@ test('assistant cron manual runs record history and remove completed one-shot jo
     deliveryDeferred: false,
     deliveryIntentId: null,
     deliveryError: null,
-    blocked: null,
   })
 
   const job = await addAssistantCronJob({

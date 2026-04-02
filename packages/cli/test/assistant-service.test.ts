@@ -65,6 +65,7 @@ import {
 import { sanitizeAssistantOutboundReply } from '@murphai/assistant-core/assistant/reply-sanitizer'
 import {
   VAULT_ENV,
+  buildAssistantProviderDefaultsPatch,
   saveAssistantOperatorDefaultsPatch,
 } from '@murphai/assistant-core/operator-config'
 import {
@@ -217,20 +218,20 @@ async function waitForPredicate(
 
 test('buildResolveAssistantSessionInput keeps locator shaping and operator default fallbacks stable', () => {
   const defaults = {
-    provider: 'codex-cli' as const,
-    defaultsByProvider: {
-      'codex-cli': {
+    backend: {
+      adapter: 'codex-cli' as const,
+      model: 'gpt-5.4-mini',
+      endpoint: null,
+      apiKeyEnv: null,
+      providerName: null,
+      headers: null,
+      options: {
+        approvalPolicy: 'on-request',
         codexCommand: '/opt/bin/codex',
-        model: 'gpt-5.4-mini',
-        reasoningEffort: 'high',
-        sandbox: 'workspace-write' as const,
-        approvalPolicy: 'on-request' as const,
-        profile: 'ops',
         oss: true,
-        baseUrl: null,
-        apiKeyEnv: null,
-        providerName: null,
-        headers: null,
+        profile: 'ops',
+        reasoningEffort: 'high',
+        sandbox: 'workspace-write',
       },
     },
     identityId: 'assistant:primary',
@@ -429,24 +430,18 @@ test('sendAssistantMessage treats null provider-option inputs as fallbacks to sa
   })
 
   try {
-    await saveAssistantOperatorDefaultsPatch({
-      provider: 'openai-compatible',
-      defaultsByProvider: {
-        'openai-compatible': {
-          codexCommand: null,
+    await saveAssistantOperatorDefaultsPatch(
+      buildAssistantProviderDefaultsPatch({
+        defaults: null,
+        provider: 'openai-compatible',
+        providerConfig: {
           model: 'gpt-oss:20b',
-          reasoningEffort: null,
-          sandbox: null,
-          approvalPolicy: null,
-          profile: null,
-          oss: false,
           baseUrl: 'http://127.0.0.1:11434/v1',
           apiKeyEnv: 'OLLAMA_API_KEY',
           providerName: 'ollama',
-          headers: null,
         },
-      },
-    })
+      }),
+    )
 
     await sendAssistantMessage({
       vault: vaultRoot,
@@ -1586,9 +1581,7 @@ test('sendAssistantMessage replays the local transcript for OpenAI-compatible se
 
   try {
     await saveAssistantOperatorDefaultsPatch(
-      {
-        provider: 'codex-cli',
-      },
+      { backend: null },
       homeRoot,
     )
 
@@ -3601,100 +3594,6 @@ test('sendAssistantMessage preserves audited protected deletes', async () => {
 
   assert.equal(result.response, 'assistant reply')
   await assert.rejects(readFile(targetPath, 'utf8'), /ENOENT/u)
-})
-
-test('sendAssistantMessage preserves the primary route after a legacy canonical-write block', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-legacy-guard-no-cooldown-'))
-  const vaultRoot = path.join(parent, 'vault')
-  cleanupPaths.push(parent)
-
-  await mkdir(vaultRoot, { recursive: true })
-  await initializeVault({ vaultRoot })
-
-  serviceMocks.executeAssistantProviderTurn
-    .mockRejectedValueOnce(
-      new VaultCliError(
-        'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED',
-        'Blocked canonical write guard because audited write state is corrupted (invalid_write_operation_metadata at .runtime/operations/op_demo.json). Use vault-cli or audited core mutations for canonical files.',
-        {
-          guardFailurePath: '.runtime/operations/op_demo.json',
-          guardFailureReason: 'invalid_write_operation_metadata',
-          pathCount: 1,
-          paths: ['vault.json'],
-        },
-      ),
-    )
-    .mockResolvedValueOnce({
-      provider: 'codex-cli',
-      providerSessionId: 'thread-primary-still-healthy',
-      response: 'safe reply',
-      stderr: '',
-      stdout: '',
-      rawEvents: [],
-    })
-
-  const first = await sendAssistantMessage({
-    vault: vaultRoot,
-    alias: 'chat:legacy-guard-no-cooldown',
-    prompt: 'Inspect the vault.',
-    failoverRoutes: [
-      {
-        name: 'backup',
-        provider: 'openai-compatible',
-        codexCommand: null,
-        model: null,
-        reasoningEffort: null,
-        sandbox: null,
-        approvalPolicy: null,
-        profile: null,
-        oss: false,
-        cooldownMs: null,
-        baseUrl: null,
-        apiKeyEnv: null,
-        providerName: null,
-      },
-    ],
-  })
-
-  assertBlockedAssistantResult(first, {
-    guardFailurePathPattern: /^\.runtime\/operations\/op_demo\.json$/u,
-    guardFailureReason: 'invalid_write_operation_metadata',
-    paths: ['vault.json'],
-  })
-
-  const second = await sendAssistantMessage({
-    vault: vaultRoot,
-    alias: 'chat:legacy-guard-no-cooldown',
-    prompt: 'Try again safely.',
-    failoverRoutes: [
-      {
-        name: 'backup',
-        provider: 'openai-compatible',
-        codexCommand: null,
-        model: null,
-        reasoningEffort: null,
-        sandbox: null,
-        approvalPolicy: null,
-        profile: null,
-        oss: false,
-        cooldownMs: null,
-        baseUrl: null,
-        apiKeyEnv: null,
-        providerName: null,
-      },
-    ],
-  })
-
-  assert.equal(second.response, 'safe reply')
-  assert.equal(serviceMocks.executeAssistantProviderTurn.mock.calls.length, 2)
-  assert.equal(
-    serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]?.provider,
-    'codex-cli',
-  )
-  assert.equal(
-    serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]?.provider,
-    'codex-cli',
-  )
 })
 
 test('sendAssistantMessage does not fail over on interrupted provider errors that mark themselves non-retryable', async () => {
