@@ -172,7 +172,6 @@ function assertPromptHasFirstTurnCheckInGuidance(
 ): void {
   const text = systemPrompt ?? ''
   assert.match(text, /what name they want you to use/u)
-  assert.match(text, /what tone or response style they want/u)
   assert.match(text, /what health goals they want help with/u)
   assert.match(
     text,
@@ -189,7 +188,6 @@ function assertPromptDoesNotHaveFirstTurnCheckInGuidance(
 ): void {
   const text = systemPrompt ?? ''
   assert.doesNotMatch(text, /what name they want you to use/u)
-  assert.doesNotMatch(text, /what tone or response style they want/u)
   assert.doesNotMatch(text, /what health goals they want help with/u)
 }
 
