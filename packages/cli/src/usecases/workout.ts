@@ -1,21 +1,32 @@
-import { type ActivityStrengthExercise } from '@murphai/contracts'
-import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 import {
-  inferDurationMinutes,
-  validateDurationMinutes,
-} from './text-duration.js'
+  type ActivityStrengthExercise,
+  type JsonObject,
+  type WorkoutSession,
+  workoutSessionSchema,
+} from '@murphai/contracts'
+import { loadJsonInputObject } from '@murphai/assistant-core/json-input'
+import { showWorkoutRecord } from '@murphai/assistant-core/usecases/workout-read'
+import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 import {
   deleteEventRecord,
   editEventRecord,
 } from '@murphai/assistant-core/usecases/event-record-mutations'
 import {
-  showEventRecord,
   upsertEventRecord,
 } from '@murphai/assistant-core/usecases/provider-event'
 import {
   compactObject,
   normalizeOptionalText,
 } from '@murphai/assistant-core/usecases/vault-usecase-helpers'
+import {
+  inferDurationMinutes,
+  validateDurationMinutes,
+} from './text-duration.js'
+import {
+  buildWorkoutTitle,
+  deriveDurationMinutesFromTimestamps,
+  summarizeWorkoutSessionExercises,
+} from './workout-model.js'
 
 const MILES_TO_KM = 1.609344
 
@@ -115,13 +126,16 @@ interface ParsedStrengthExerciseDetails {
 
 export interface AddWorkoutRecordInput {
   vault: string
-  text: string
+  text?: string
+  inputFile?: string
   occurredAt?: string
   source?: 'manual' | 'import' | 'device' | 'derived'
   durationMinutes?: number
   activityType?: string
   distanceKm?: number
   strengthExercises?: ActivityStrengthExercise[] | null
+  workout?: WorkoutSession | null
+  title?: string
 }
 
 export interface ResolveWorkoutCaptureInput {
@@ -157,7 +171,7 @@ export function resolveWorkoutCapture(
 
   return {
     note,
-    title: buildWorkoutTitle(activity.label, durationMinutes),
+    title: buildWorkoutTitle(activity.activityType, durationMinutes),
     activityType: activity.activityType,
     durationMinutes,
     distanceKm: distanceKm ?? null,
@@ -165,23 +179,241 @@ export function resolveWorkoutCapture(
   }
 }
 
-export async function addWorkoutRecord(input: AddWorkoutRecordInput) {
-  const capture = resolveWorkoutCapture(input)
-  const occurredAt = input.occurredAt ?? new Date().toISOString()
-  const payload = {
+function asJsonObject(value: unknown): JsonObject | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as JsonObject)
+    : null
+}
+
+function valueAsString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined
+}
+
+function valueAsNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function formatSchemaIssues(issues: readonly { path: PropertyKey[]; message: string }[]): string {
+  return issues
+    .map((issue) => {
+      const path = issue.path.length > 0 ? issue.path.join('.') : 'value'
+      return `${path}: ${issue.message}`
+    })
+    .join('; ')
+}
+
+function resolveStructuredDurationMinutes(input: {
+  explicitDurationMinutes?: number
+  payloadDurationMinutes?: number
+  structuredWorkout?: WorkoutSession
+  fallbackText?: string
+}): number {
+  const explicitDurationMinutes =
+    typeof input.explicitDurationMinutes === 'number'
+      ? validateDurationMinutes(input.explicitDurationMinutes)
+      : undefined
+  if (explicitDurationMinutes !== undefined) {
+    return explicitDurationMinutes
+  }
+
+  const payloadDurationMinutes =
+    typeof input.payloadDurationMinutes === 'number'
+      ? validateDurationMinutes(input.payloadDurationMinutes)
+      : undefined
+  if (payloadDurationMinutes !== undefined) {
+    return payloadDurationMinutes
+  }
+
+  const derivedDurationMinutes = deriveDurationMinutesFromTimestamps(
+    input.structuredWorkout?.startedAt,
+    input.structuredWorkout?.endedAt,
+  )
+  if (derivedDurationMinutes !== null) {
+    return derivedDurationMinutes
+  }
+
+  if (input.fallbackText) {
+    return resolveDurationMinutes(input.fallbackText, undefined)
+  }
+
+  throw new VaultCliError(
+    'invalid_option',
+    'Workout duration is missing. Pass --duration <minutes> to record it explicitly.',
+  )
+}
+
+function normalizeStructuredWorkout(
+  value: unknown,
+  fieldName = 'workout',
+): WorkoutSession | undefined {
+  if (value === undefined || value === null) {
+    return undefined
+  }
+
+  const parsed = workoutSessionSchema.safeParse(value)
+  if (!parsed.success) {
+    throw new VaultCliError(
+      'invalid_payload',
+      `${fieldName} is not a valid workout session payload. ${formatSchemaIssues(parsed.error.issues)}`,
+    )
+  }
+
+  return parsed.data
+}
+
+function pickPassthroughEventFields(payload: JsonObject): JsonObject {
+  const keys = ['rawRefs', 'externalRef', 'relatedIds', 'tags', 'timeZone'] as const
+  const entries = keys.flatMap((key) =>
+    payload[key] !== undefined ? [[key, payload[key]] as const] : [],
+  )
+
+  return Object.fromEntries(entries)
+}
+
+export function buildStructuredWorkoutEventPayload(input: {
+  payload: JsonObject
+  occurredAt?: string
+  source?: AddWorkoutRecordInput['source']
+  durationMinutes?: number
+  activityType?: string
+  distanceKm?: number
+  strengthExercises?: ActivityStrengthExercise[] | null
+  workout?: WorkoutSession | null
+  text?: string
+  title?: string
+}): JsonObject {
+  const sourcePayload = input.payload
+  const structuredWorkout =
+    normalizeStructuredWorkout(input.workout, 'workout')
+    ?? (sourcePayload.workout !== undefined
+      ? normalizeStructuredWorkout(sourcePayload.workout, 'payload.workout')
+      : undefined)
+    ?? (Array.isArray(sourcePayload.exercises)
+      ? normalizeStructuredWorkout(sourcePayload, 'payload')
+      : undefined)
+
+  const fallbackText =
+    normalizeOptionalText(valueAsString(sourcePayload.note))
+    ?? normalizeOptionalText(valueAsString(sourcePayload.text))
+    ?? normalizeOptionalText(input.text)
+    ?? normalizeOptionalText(structuredWorkout?.sessionNote)
+    ?? normalizeOptionalText(structuredWorkout?.routineName)
+
+  const activityDescriptor = fallbackText
+    ? resolveWorkoutActivityDescriptor(
+        fallbackText,
+        input.activityType ?? valueAsString(sourcePayload.activityType) ?? 'strength-training',
+      )
+    : resolveWorkoutActivityDescriptor(
+        input.activityType ?? valueAsString(sourcePayload.activityType) ?? 'strength-training',
+        input.activityType ?? valueAsString(sourcePayload.activityType) ?? 'strength-training',
+      )
+
+  const durationMinutes =
+    resolveStructuredDurationMinutes({
+      explicitDurationMinutes: input.durationMinutes,
+      payloadDurationMinutes: valueAsNumber(sourcePayload.durationMinutes),
+      structuredWorkout,
+      fallbackText: fallbackText ?? undefined,
+    })
+  const distanceKm =
+    typeof input.distanceKm === 'number'
+      ? input.distanceKm
+      : typeof sourcePayload.distanceKm === 'number'
+        ? sourcePayload.distanceKm
+        : resolveDistanceKm(fallbackText ?? '', undefined)
+  const strengthExercises =
+    input.strengthExercises
+    ?? (Array.isArray(sourcePayload.strengthExercises)
+      ? (sourcePayload.strengthExercises as ActivityStrengthExercise[])
+      : null)
+    ?? summarizeWorkoutSessionExercises(structuredWorkout)
+    ?? null
+  const occurredAt =
+    input.occurredAt
+    ?? valueAsString(sourcePayload.occurredAt)
+    ?? structuredWorkout?.startedAt
+    ?? new Date().toISOString()
+  const title =
+    normalizeOptionalText(input.title)
+    ?? normalizeOptionalText(valueAsString(sourcePayload.title))
+    ?? buildWorkoutTitle(
+      activityDescriptor.activityType,
+      durationMinutes,
+    )
+  const note = fallbackText ?? title
+
+  return {
+    ...pickPassthroughEventFields(sourcePayload),
     kind: 'activity_session',
     occurredAt,
-    source: input.source ?? 'manual',
-    title: capture.title,
-    activityType: capture.activityType,
-    durationMinutes: capture.durationMinutes,
-    ...(typeof capture.distanceKm === 'number'
-      ? { distanceKm: capture.distanceKm }
-      : {}),
-    ...(capture.strengthExercises
-      ? { strengthExercises: capture.strengthExercises }
-      : {}),
-    note: capture.note,
+    source: input.source ?? valueAsString(sourcePayload.source) ?? 'manual',
+    title,
+    activityType: activityDescriptor.activityType,
+    durationMinutes,
+    ...(typeof distanceKm === 'number' ? { distanceKm } : {}),
+    ...(strengthExercises ? { strengthExercises } : {}),
+    ...(structuredWorkout ? { workout: structuredWorkout } : {}),
+    note,
+  }
+}
+
+async function loadStructuredWorkoutPayload(inputFile: string) {
+  return loadJsonInputObject(inputFile, 'workout payload')
+}
+
+export async function addWorkoutRecord(input: AddWorkoutRecordInput) {
+  let payload: JsonObject
+
+  if (typeof input.inputFile === 'string') {
+    payload = buildStructuredWorkoutEventPayload({
+      payload: await loadStructuredWorkoutPayload(input.inputFile),
+      occurredAt: input.occurredAt,
+      source: input.source,
+      durationMinutes: input.durationMinutes,
+      activityType: input.activityType,
+      distanceKm: input.distanceKm,
+      strengthExercises: input.strengthExercises,
+      workout: input.workout,
+      text: input.text,
+      title: input.title,
+    })
+  } else if (input.workout) {
+    payload = buildStructuredWorkoutEventPayload({
+      payload: {},
+      occurredAt: input.occurredAt,
+      source: input.source,
+      durationMinutes: input.durationMinutes,
+      activityType: input.activityType ?? 'strength-training',
+      distanceKm: input.distanceKm,
+      strengthExercises: input.strengthExercises,
+      workout: input.workout,
+      text: input.text,
+      title: input.title,
+    })
+  } else {
+    const capture = resolveWorkoutCapture({
+      text: input.text ?? '',
+      durationMinutes: input.durationMinutes,
+      activityType: input.activityType,
+      distanceKm: input.distanceKm,
+      strengthExercises: input.strengthExercises,
+    })
+    payload = {
+      kind: 'activity_session',
+      occurredAt: input.occurredAt ?? new Date().toISOString(),
+      source: input.source ?? 'manual',
+      title: capture.title,
+      activityType: capture.activityType,
+      durationMinutes: capture.durationMinutes,
+      ...(typeof capture.distanceKm === 'number'
+        ? { distanceKm: capture.distanceKm }
+        : {}),
+      ...(capture.strengthExercises
+        ? { strengthExercises: capture.strengthExercises }
+        : {}),
+      note: capture.note,
+    }
   }
 
   const result = await upsertEventRecord({
@@ -191,14 +423,17 @@ export async function addWorkoutRecord(input: AddWorkoutRecordInput) {
 
   return {
     ...result,
-    occurredAt,
+    occurredAt: String(payload.occurredAt ?? input.occurredAt ?? new Date().toISOString()),
     kind: 'activity_session' as const,
-    title: capture.title,
-    activityType: capture.activityType,
-    durationMinutes: capture.durationMinutes,
-    distanceKm: capture.distanceKm,
-    strengthExercises: capture.strengthExercises,
-    note: capture.note,
+    title: String(payload.title ?? ''),
+    activityType: String(payload.activityType ?? ''),
+    durationMinutes: Number(payload.durationMinutes ?? 1),
+    distanceKm: typeof payload.distanceKm === 'number' ? payload.distanceKm : null,
+    strengthExercises: Array.isArray(payload.strengthExercises)
+      ? (payload.strengthExercises as ActivityStrengthExercise[])
+      : null,
+    workout: normalizeStructuredWorkout(payload.workout) ?? null,
+    note: String(payload.note ?? payload.title ?? ''),
   }
 }
 
@@ -221,7 +456,7 @@ export async function editWorkoutRecord(input: {
     expectedKinds: ['activity_session'],
   })
 
-  return showEventRecord(input.vault, result.lookupId)
+  return showWorkoutRecord(input.vault, result.lookupId)
 }
 
 export async function deleteWorkoutRecord(input: {
@@ -258,19 +493,26 @@ function resolveWorkoutActivityDescriptor(
 
     return {
       activityType,
-      label: humanizeRequestedWorkoutType(requested),
+      label: requested,
     }
   }
 
-  return inferKnownWorkoutType(text) ?? {
+  const inferred = inferKnownWorkoutType(text)
+  if (inferred) {
+    return inferred
+  }
+
+  return {
     activityType: 'workout',
     label: 'Workout',
   }
 }
 
-function inferKnownWorkoutType(text: string) {
+function inferKnownWorkoutType(text: string): WorkoutActivityDescriptor | null {
+  const normalized = text.toLowerCase()
+
   for (const candidate of knownWorkoutTypes) {
-    if (candidate.patterns.some((pattern) => pattern.test(text))) {
+    if (candidate.patterns.some((pattern) => pattern.test(normalized))) {
       return {
         activityType: candidate.activityType,
         label: candidate.label,
@@ -281,66 +523,67 @@ function inferKnownWorkoutType(text: string) {
   return null
 }
 
+function slugifyWorkoutType(value: string): string | null {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, '-')
+    .replace(/^-+|-+$/gu, '')
+
+  return normalized.length > 0 ? normalized : null
+}
+
 function resolveDurationMinutes(
   text: string,
-  requestedDurationMinutes: number | undefined,
-) {
-  if (typeof requestedDurationMinutes === 'number') {
-    return validateDurationMinutes(requestedDurationMinutes, 'Workout duration')
+  explicitDurationMinutes: number | undefined,
+): number {
+  if (typeof explicitDurationMinutes === 'number') {
+    return validateDurationMinutes(explicitDurationMinutes)
   }
 
   const inferred = inferDurationMinutes(text)
-  if (inferred === 'ambiguous') {
-    throw new VaultCliError(
-      'invalid_option',
-      'Workout duration is ambiguous in the note. Pass --duration <minutes> to record it explicitly.',
-    )
-  }
-
   if (typeof inferred === 'number') {
     return inferred
   }
 
-  throw new VaultCliError(
-    'invalid_option',
-    'Could not infer a workout duration from the note. Pass --duration <minutes> to record it explicitly.',
-  )
+  if (inferred === 'ambiguous') {
+    throw new VaultCliError(
+      'invalid_option',
+      'Workout duration is ambiguous. Pass --duration <minutes> to record it explicitly.',
+    )
+  }
+
+  return 30
 }
 
 function resolveDistanceKm(
   text: string,
-  requestedDistanceKm: number | undefined,
-) {
-  if (typeof requestedDistanceKm === 'number') {
-    return validateDistanceKm(requestedDistanceKm)
+  explicitDistanceKm: number | undefined,
+): number | undefined {
+  if (typeof explicitDistanceKm === 'number' && Number.isFinite(explicitDistanceKm)) {
+    return explicitDistanceKm > 0 ? explicitDistanceKm : undefined
   }
 
-  return inferDistanceKm(text)
-}
-
-function inferDistanceKm(text: string) {
-  if (ambiguousDistancePattern.test(text)) {
-    return null
+  if (!text || ambiguousDistancePattern.test(text)) {
+    return undefined
   }
 
-  const kilometerMatch = text.match(kilometerDistancePattern)
+  const kilometerMatch = kilometerDistancePattern.exec(text)
   if (kilometerMatch) {
-    return validateDistanceKm(Number.parseFloat(kilometerMatch[1] ?? ''))
+    return parseFloat(kilometerMatch[1])
   }
 
-  const kilometerShortMatch = text.match(kilometerShortDistancePattern)
-  if (kilometerShortMatch) {
-    return validateDistanceKm(Number.parseFloat(kilometerShortMatch[1] ?? ''))
+  const shortKilometerMatch = kilometerShortDistancePattern.exec(text)
+  if (shortKilometerMatch) {
+    return parseFloat(shortKilometerMatch[1])
   }
 
-  const mileMatch = text.match(mileDistancePattern)
+  const mileMatch = mileDistancePattern.exec(text)
   if (mileMatch) {
-    return validateDistanceKm(
-      Number.parseFloat(mileMatch[1] ?? '') * MILES_TO_KM,
-    )
+    return parseFloat(mileMatch[1]) * MILES_TO_KM
   }
 
-  return null
+  return undefined
 }
 
 function inferStrengthExercises(
@@ -352,250 +595,90 @@ function inferStrengthExercises(
   }
 
   const exercises: ActivityStrengthExercise[] = []
-
   for (const match of text.matchAll(strengthExercisePattern)) {
-    const setCount = Number.parseInt(match[1] ?? '', 10)
-    const repsPerSet = Number.parseInt(match[2] ?? '', 10)
-    const details = parseStrengthExerciseDetails(match[3] ?? '')
+    const [, rawSetCount, rawRepsPerSet, rawDescription] = match
+    const setCount = Number.parseInt(rawSetCount ?? '', 10)
+    const repsPerSet = Number.parseInt(rawRepsPerSet ?? '', 10)
+    const details = parseStrengthExerciseDetails(rawDescription ?? '')
 
-    if (
-      !details ||
-      !Number.isInteger(setCount) ||
-      setCount < 1 ||
-      !Number.isInteger(repsPerSet) ||
-      repsPerSet < 1
-    ) {
+    if (!Number.isFinite(setCount) || !Number.isFinite(repsPerSet) || !details) {
       continue
     }
 
-    exercises.push(buildStrengthExerciseRecord(details, setCount, repsPerSet))
-  }
-
-  return exercises.length > 0 ? exercises : null
-}
-
-function parseStrengthExerciseDetails(
-  value: string,
-): ParsedStrengthExerciseDetails | null {
-  const normalized = normalizeExerciseFragment(value)
-  if (!normalized) {
-    return null
-  }
-
-  const barbellLoadMatch = normalized.match(strengthBarbellLoadPattern)
-  if (barbellLoadMatch) {
-    const exercise = normalizeStrengthExerciseName(barbellLoadMatch[1] ?? '')
-    if (!exercise) {
-      return null
-    }
-
-    const loadDescription = extractStrengthLoadDescription(
-      normalized,
-      barbellLoadMatch[1] ?? '',
-    )
-    const barUnit = normalizeStrengthLoadUnit(barbellLoadMatch[3] ?? '')
-    const plateUnit = normalizeStrengthLoadUnit(barbellLoadMatch[5] ?? '')
-    const barWeight = Number.parseFloat(barbellLoadMatch[2] ?? '')
-    const plateWeight = Number.parseFloat(barbellLoadMatch[4] ?? '')
-
-    if (
-      barUnit &&
-      plateUnit &&
-      barUnit === plateUnit &&
-      Number.isFinite(barWeight) &&
-      Number.isFinite(plateWeight)
-    ) {
-      const load = normalizeStrengthLoadValue(barWeight + (plateWeight * 2))
-      return loadDescription
-        ? {
-            exercise,
-            load,
-            loadUnit: barUnit,
-            loadDescription,
-          }
-        : {
-            exercise,
-            load,
-            loadUnit: barUnit,
-          }
-    }
-
-    return loadDescription
-      ? {
-          exercise,
-          loadDescription,
-        }
-      : {
-          exercise,
-        }
-  }
-
-  const simpleLoadMatch = normalized.match(strengthSimpleLoadPattern)
-  if (simpleLoadMatch) {
-    const exercise = normalizeStrengthExerciseName(simpleLoadMatch[1] ?? '')
-    const loadUnit = normalizeStrengthLoadUnit(simpleLoadMatch[3] ?? '')
-    const load = Number.parseFloat(simpleLoadMatch[2] ?? '')
-    if (!exercise) {
-      return null
-    }
-
-    if (loadUnit && Number.isFinite(load)) {
-      const normalizedLoad = normalizeStrengthLoadValue(load)
-      const loadDescription = extractStrengthLoadDescription(
-        normalized,
-        simpleLoadMatch[1] ?? '',
-      )
-      return loadDescription
-        ? {
-            exercise,
-            load: normalizedLoad,
-            loadUnit,
-            loadDescription,
-          }
-        : {
-            exercise,
-            load: normalizedLoad,
-            loadUnit,
-          }
-    }
-
-    const loadDescription = extractStrengthLoadDescription(
-      normalized,
-      simpleLoadMatch[1] ?? '',
-    )
-    return loadDescription
-      ? {
-          exercise,
-          loadDescription,
-        }
-      : {
-          exercise,
-        }
-  }
-
-  const exercise = normalizeStrengthExerciseName(normalized)
-  if (!exercise) {
-    return null
-  }
-
-  return { exercise }
-}
-
-function buildStrengthExerciseRecord(
-  details: ParsedStrengthExerciseDetails,
-  setCount: number,
-  repsPerSet: number,
-): ActivityStrengthExercise {
-  if (typeof details.load === 'number' && details.loadUnit) {
-    return compactObject({
+    exercises.push(compactObject({
       exercise: details.exercise,
       setCount,
       repsPerSet,
       load: details.load,
       loadUnit: details.loadUnit,
       loadDescription: details.loadDescription,
-    }) as ActivityStrengthExercise
+    }) as ActivityStrengthExercise)
   }
 
-  return compactObject({
-    exercise: details.exercise,
-    setCount,
-    repsPerSet,
-    loadDescription: details.loadDescription,
-  }) as ActivityStrengthExercise
+  return exercises.length > 0 ? exercises : null
 }
 
-function normalizeExerciseFragment(value: string) {
-  return normalizeOptionalText(
-    value.replace(/[.,;:!?]+$/gu, '').replace(/\s+/gu, ' '),
-  )
+function parseStrengthExerciseDetails(
+  rawDescription: string,
+): ParsedStrengthExerciseDetails | null {
+  const description = normalizeOptionalText(rawDescription)
+  if (!description) {
+    return null
+  }
+
+  const barbellMatch = description.match(strengthBarbellLoadPattern)
+  if (barbellMatch) {
+    const [, rawExercise, rawBarWeight, rawBarUnit, rawPlateWeight, rawPlateUnit] = barbellMatch
+    const exercise = normalizeOptionalText(rawExercise)
+    const barWeight = Number.parseFloat(rawBarWeight ?? '')
+    const plateWeight = Number.parseFloat(rawPlateWeight ?? '')
+    const barUnit = normalizeLoadUnit(rawBarUnit)
+    const plateUnit = normalizeLoadUnit(rawPlateUnit)
+
+    if (exercise && Number.isFinite(barWeight) && Number.isFinite(plateWeight) && barUnit && plateUnit && barUnit === plateUnit) {
+      return {
+        exercise,
+        load: barWeight + plateWeight * 2,
+        loadUnit: barUnit,
+        loadDescription: `${barWeight} ${barUnit} bar plus ${plateWeight} ${plateUnit} plates on both sides`,
+      }
+    }
+  }
+
+  const simpleLoadMatch = description.match(strengthSimpleLoadPattern)
+  if (simpleLoadMatch) {
+    const [, rawExercise, rawLoad, rawUnit] = simpleLoadMatch
+    const exercise = normalizeOptionalText(rawExercise)
+    const load = Number.parseFloat(rawLoad ?? '')
+    const loadUnit = normalizeLoadUnit(rawUnit)
+
+    if (exercise && Number.isFinite(load) && loadUnit) {
+      return {
+        exercise,
+        load,
+        loadUnit,
+      }
+    }
+  }
+
+  return {
+    exercise: description,
+  }
 }
 
-function normalizeStrengthExerciseName(value: string) {
-  const normalized = normalizeOptionalText(
-    value
-      .replace(/[.,;:!?]+$/gu, '')
-      .replace(/^(?:an?|the)\s+/iu, '')
-      .replace(/\s+/gu, ' '),
-  )
-
-  return normalized ? normalized.toLowerCase() : null
-}
-
-function extractStrengthLoadDescription(
-  fragment: string,
-  exerciseText: string,
-) {
-  const exerciseLength = exerciseText.length
-  if (exerciseLength <= 0 || exerciseLength >= fragment.length) {
+function normalizeLoadUnit(value: string | undefined): 'lb' | 'kg' | undefined {
+  if (!value) {
     return undefined
   }
 
-  return normalizeOptionalText(
-    fragment
-      .slice(exerciseLength)
-      .replace(/^\s+(?:with|at)\s+/iu, '')
-      .replace(/^(?:an?\s+)/iu, ''),
-  )
-}
-
-function normalizeStrengthLoadUnit(value: string) {
-  const normalized = value.trim().toLowerCase()
-  if (
-    normalized === 'lb' ||
-    normalized === 'lbs' ||
-    normalized === 'pound' ||
-    normalized === 'pounds'
-  ) {
-    return 'lb' as const
+  const normalized = value.toLowerCase()
+  if (normalized.startsWith('lb') || normalized.startsWith('pound')) {
+    return 'lb'
   }
 
-  if (
-    normalized === 'kg' ||
-    normalized === 'kgs' ||
-    normalized === 'kilogram' ||
-    normalized === 'kilograms'
-  ) {
-    return 'kg' as const
+  if (normalized.startsWith('kg') || normalized.startsWith('kilo')) {
+    return 'kg'
   }
 
   return undefined
-}
-
-function normalizeStrengthLoadValue(value: number) {
-  return Number(value.toFixed(3))
-}
-
-function validateDistanceKm(value: number) {
-  if (!Number.isFinite(value) || value <= 0) {
-    throw new VaultCliError(
-      'invalid_option',
-      'Workout distance must be a positive number of kilometers.',
-    )
-  }
-
-  return Number(value.toFixed(3))
-}
-
-function buildWorkoutTitle(label: string, durationMinutes: number) {
-  const loweredLabel = label.trim().toLowerCase() || 'workout'
-  const title = `${durationMinutes}-minute ${loweredLabel}`
-  return title.slice(0, 160)
-}
-
-function humanizeRequestedWorkoutType(value: string) {
-  const normalized = value.trim().replace(/\s+/gu, ' ')
-  if (normalized.length === 0) {
-    return 'Workout'
-  }
-
-  return normalized[0].toUpperCase() + normalized.slice(1)
-}
-
-function slugifyWorkoutType(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, '-')
-    .replace(/^-+|-+$/gu, '')
 }

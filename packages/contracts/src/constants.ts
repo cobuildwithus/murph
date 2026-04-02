@@ -107,6 +107,7 @@ export const RAW_IMPORT_KINDS = Object.freeze([
   "document",
   "meal",
   "sample_batch",
+  "workout_batch",
 ] as const);
 
 export const PROFILE_SNAPSHOT_SOURCES = Object.freeze(["assessment_projection", "manual", "derived"] as const);
@@ -180,7 +181,8 @@ export const AUDIT_ACTIONS = Object.freeze([
   "samples_import_csv",
   "show",
   "validate",
-  "workout_format_upsert",
+  "workout_format_save",
+  "workout_import_csv",
 ] as const);
 
 export const AUDIT_ACTORS = Object.freeze(["cli", "core", "importer", "query"] as const);

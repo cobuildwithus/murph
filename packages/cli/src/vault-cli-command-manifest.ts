@@ -360,7 +360,19 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['workout', 'add'],
         description:
-          'Record one workout from a freeform note with lightweight structured inference.',
+          'Record one workout either from a freeform note or from a structured JSON payload.',
+      },
+      {
+        path: ['workout', 'show'],
+        description: 'Show one workout session by canonical event id.',
+      },
+      {
+        path: ['workout', 'list'],
+        description: 'List workout sessions with optional date bounds.',
+      },
+      {
+        path: ['workout', 'manifest'],
+        description: 'Show the immutable raw import manifest for an imported workout event.',
       },
       {
         path: ['workout', 'edit'],
@@ -372,9 +384,18 @@ export const vaultCliCommandDescriptors = [
         description: 'Delete one workout activity event.',
       },
       {
+        path: ['workout', 'import', 'inspect'],
+        description: 'Inspect one workout CSV file without writing anything.',
+      },
+      {
+        path: ['workout', 'import', 'csv'],
+        description:
+          'Copy one workout CSV export into raw/workouts/** and optionally map it into activity_session events.',
+      },
+      {
         path: ['workout', 'format', 'save'],
         description:
-          'Save or update one reusable workout format from a name plus workout text.',
+          'Save or update one reusable workout format from freeform text or a structured JSON payload.',
       },
       {
         path: ['workout', 'format', 'show'],
@@ -387,7 +408,7 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['workout', 'format', 'log'],
         description:
-          'Log one dated workout from a saved workout format through the same canonical event path as workout add.',
+          'Log one dated workout from a saved workout format through the canonical activity_session path.',
       },
     ],
     register({ cli, services }) {

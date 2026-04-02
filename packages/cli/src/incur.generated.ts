@@ -210,13 +210,18 @@ declare module 'incur' {
       'vault show': { args: {}; options: { vault: string; requestId: string } }
       'vault stats': { args: {}; options: { vault: string; requestId: string } }
       'vault update': { args: {}; options: { vault: string; requestId: string; title: string; timezone: string } }
-      'workout add': { args: { text: string }; options: { vault: string; requestId: string; duration: number; type: string; distanceKm: number; occurredAt: string; source: "manual" | "import" | "device" | "derived" } }
+      'workout add': { args: { text: string }; options: { vault: string; requestId: string; input: string; duration: number; type: string; distanceKm: number; occurredAt: string; source: "manual" | "import" | "device" | "derived" } }
       'workout delete': { args: { id: string }; options: { vault: string; requestId: string } }
       'workout edit': { args: { id: string }; options: { vault: string; requestId: string; input: string; set: string[]; clear: string[]; dayKeyPolicy: "keep" | "recompute" } }
       'workout format list': { args: {}; options: { vault: string; requestId: string; limit: number } }
       'workout format log': { args: { name: string }; options: { vault: string; requestId: string; duration: number; type: string; distanceKm: number; occurredAt: string; source: "manual" | "import" | "device" | "derived" } }
-      'workout format save': { args: { name: string; text: string }; options: { vault: string; requestId: string; duration: number; type: string; distanceKm: number } }
+      'workout format save': { args: { name: string; text: string }; options: { vault: string; requestId: string; input: string; duration: number; type: string; distanceKm: number } }
       'workout format show': { args: { name: string }; options: { vault: string; requestId: string } }
+      'workout import csv': { args: { file: string }; options: { vault: string; requestId: string; source: string; delimiter: string; storeRawOnly: boolean } }
+      'workout import inspect': { args: { file: string }; options: { vault: string; requestId: string; source: string; delimiter: string } }
+      'workout list': { args: {}; options: { vault: string; requestId: string; from: string; to: string; limit: number } }
+      'workout manifest': { args: { id: string }; options: { vault: string; requestId: string } }
+      'workout show': { args: { id: string }; options: { vault: string; requestId: string } }
     }
   }
 }

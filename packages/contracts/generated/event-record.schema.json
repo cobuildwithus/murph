@@ -2060,6 +2060,172 @@
               }
             ]
           }
+        },
+        "workout": {
+          "type": "object",
+          "properties": {
+            "sourceApp": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "sourceWorkoutId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "startedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "endedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "routineId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "routineName": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "sessionNote": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            },
+            "exercises": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  "sourceExerciseId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "order": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "groupId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "weight_reps",
+                      "bodyweight",
+                      "assisted_bodyweight",
+                      "weighted_bodyweight",
+                      "duration",
+                      "cardio"
+                    ]
+                  },
+                  "unitOverride": {
+                    "type": "string",
+                    "enum": [
+                      "lb",
+                      "kg"
+                    ]
+                  },
+                  "note": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000
+                  },
+                  "sets": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 150,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "order": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "normal",
+                            "warmup",
+                            "dropset",
+                            "failure"
+                          ]
+                        },
+                        "reps": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "weight": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "weightUnit": {
+                          "type": "string",
+                          "enum": [
+                            "lb",
+                            "kg"
+                          ]
+                        },
+                        "durationSeconds": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "distanceMeters": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "rpe": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 10
+                        },
+                        "bodyweightKg": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "assistanceKg": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "addedWeightKg": {
+                          "type": "number",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "order"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "name",
+                  "order",
+                  "sets"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "exercises"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [

@@ -20,6 +20,7 @@ import {
 } from "./constants.ts";
 import {
   activityStrengthExerciseSchema,
+  workoutTemplateSchema,
   FAMILY_MEMBER_LIMITS,
   GENETIC_VARIANT_LIMITS,
 } from "./zod.ts";
@@ -238,6 +239,7 @@ export const workoutFormatUpsertPayloadSchema = withContractMetadata(
       strengthExercises: uniqueArray(activityStrengthExerciseSchema, {
         maxItems: 50,
       }).optional(),
+      template: workoutTemplateSchema.optional(),
       tags: uniqueArray(slugSchema, { uniqueItems: true }).optional(),
       note: boundedString(1, 4000).optional(),
       templateText: boundedString(1, 4000).optional(),

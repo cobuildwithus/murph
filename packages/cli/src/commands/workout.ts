@@ -1,13 +1,28 @@
 import { Cli, z } from 'incur'
 import { withBaseOptions } from '@murphai/assistant-core/command-helpers'
 import {
+  inputFileOptionSchema,
+  normalizeInputFileOption,
+} from '@murphai/assistant-core/json-input'
+import {
   isoTimestampSchema,
+  listResultSchema,
+  pathSchema,
   showResultSchema,
   workoutAddResultSchema,
   workoutFormatListResultSchema,
   workoutFormatSaveResultSchema,
+  workoutImportCsvResultSchema,
+  workoutImportInspectResultSchema,
 } from '@murphai/assistant-core/vault-cli-contracts'
 import type { VaultServices } from '@murphai/assistant-core/vault-services'
+import {
+  listWorkoutRecords,
+  showWorkoutManifest,
+  showWorkoutRecord,
+  workoutImportManifestResultSchema,
+  workoutLookupSchema,
+} from '@murphai/assistant-core/usecases/workout-read'
 import {
   listWorkoutFormats,
   logWorkoutFormat,
@@ -19,6 +34,10 @@ import {
   deleteWorkoutRecord,
   editWorkoutRecord,
 } from '../usecases/workout.js'
+import {
+  importWorkoutCsv,
+  inspectWorkoutCsvImport,
+} from '../usecases/workout-import.js'
 import {
   createDirectEntityDeleteCommandDefinition,
   createDirectEventBackedEntityEditCommandDefinition,
@@ -32,12 +51,12 @@ export function registerWorkoutCommands(
 ) {
   const workout = Cli.create('workout', {
     description:
-      'Quick workout capture commands routed through canonical activity-session events.',
+      'Workout capture, reusable routine, and CSV import commands routed through canonical activity-session events plus bank workout-format docs.',
   })
 
   workout.command('add', {
     description:
-      'Record one workout from a freeform note with lightweight structured inference.',
+      'Record one workout either from a freeform note or from a structured JSON payload.',
     args: z.object({
       text: z
         .string()
@@ -58,19 +77,20 @@ export function registerWorkoutCommands(
         },
       },
       {
-        description:
-          'Capture strength-session exercise details from one note.',
-        args: {
-          text: '20 min strength training. 4 sets of 20 pushups. 4 sets of 12 incline bench with a 45 lb bar plus 10 lb plates on both sides.',
-        },
+        description: 'Capture a structured workout payload from disk.',
+        args: {},
         options: {
+          input: '@workout.json',
           vault: './vault',
         },
       },
     ],
     hint:
-      'The freeform note is stored on the canonical activity_session event. Explicit strength notes can also capture exercise/set/load structure; pass --duration or --type when the note is ambiguous.',
+      'Use freeform text for lightweight logging, or pass --input @workout.json to store a rich nested workout payload with exercises, sets, notes, grouping, and source metadata.',
     options: withBaseOptions({
+      input: inputFileOptionSchema
+        .optional()
+        .describe('Optional structured workout payload in @file.json form or - for stdin.'),
       duration: z
         .number()
         .int()
@@ -78,7 +98,7 @@ export function registerWorkoutCommands(
         .max(24 * 60)
         .optional()
         .describe(
-          'Optional duration override in minutes when the note is missing or ambiguous.',
+          'Optional duration override in minutes when the note or structured payload is missing or ambiguous.',
         ),
       type: z
         .string()
@@ -107,7 +127,11 @@ export function registerWorkoutCommands(
     async run({ args, options }) {
       return addWorkoutRecord({
         vault: options.vault,
-        text: args.text,
+        text: typeof args.text === 'string' ? args.text : undefined,
+        inputFile:
+          typeof options.input === 'string'
+            ? normalizeInputFileOption(options.input)
+            : undefined,
         durationMinutes: options.duration,
         activityType:
           typeof options.type === 'string' ? options.type : undefined,
@@ -124,13 +148,53 @@ export function registerWorkoutCommands(
     },
   })
 
+  workout.command('show', {
+    description: 'Show one workout session by canonical event id.',
+    args: z.object({
+      id: workoutLookupSchema,
+    }),
+    options: withBaseOptions(),
+    output: showResultSchema,
+    async run({ args, options }) {
+      return showWorkoutRecord(options.vault, args.id)
+    },
+  })
+
+  workout.command('list', {
+    description: 'List workout sessions with optional date bounds.',
+    args: z.object({}),
+    options: withBaseOptions({
+      from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
+      to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
+      limit: z.number().int().positive().max(200).default(50),
+    }),
+    output: listResultSchema,
+    async run({ options }) {
+      return listWorkoutRecords({
+        vault: options.vault,
+        from: typeof options.from === 'string' ? options.from : undefined,
+        to: typeof options.to === 'string' ? options.to : undefined,
+        limit: typeof options.limit === 'number' ? options.limit : undefined,
+      })
+    },
+  })
+
+  workout.command('manifest', {
+    description: 'Show the immutable raw import manifest for an imported workout event.',
+    args: z.object({
+      id: workoutLookupSchema,
+    }),
+    options: withBaseOptions(),
+    output: workoutImportManifestResultSchema,
+    async run({ args, options }) {
+      return showWorkoutManifest(options.vault, args.id)
+    },
+  })
+
   workout.command('edit', createDirectEventBackedEntityEditCommandDefinition({
     arg: {
       name: 'id',
-      schema: z
-        .string()
-        .regex(/^evt_[0-9A-Za-z]+$/u, 'Expected a canonical workout event id in evt_* form.')
-        .describe('Canonical workout event id such as evt_<ULID>.'),
+      schema: workoutLookupSchema,
     },
     description:
       'Edit one workout session by merging a partial JSON patch or one or more path assignments into the saved activity event.',
@@ -149,10 +213,7 @@ export function registerWorkoutCommands(
   workout.command('delete', createDirectEntityDeleteCommandDefinition({
     arg: {
       name: 'id',
-      schema: z
-        .string()
-        .regex(/^evt_[0-9A-Za-z]+$/u, 'Expected a canonical workout event id in evt_* form.')
-        .describe('Canonical workout event id such as evt_<ULID>.'),
+      schema: workoutLookupSchema,
     },
     description: 'Delete one workout activity_session event.',
     run(input) {
@@ -163,14 +224,84 @@ export function registerWorkoutCommands(
     },
   }))
 
+  const importGroup = Cli.create('import', {
+    description:
+      'Inspect and import Strong/Hevy-style workout CSV exports into immutable raw batches plus canonical workout events.',
+  })
+
+  importGroup.command('inspect', {
+    description: 'Inspect one workout CSV file without writing anything.',
+    args: z.object({
+      file: pathSchema.describe('Path to the workout CSV export to inspect.'),
+    }),
+    options: withBaseOptions({
+      source: z
+        .string()
+        .min(1)
+        .max(80)
+        .optional()
+        .describe('Optional source hint such as strong or hevy.'),
+      delimiter: z
+        .string()
+        .min(1)
+        .max(1)
+        .optional()
+        .describe('Optional single-character CSV delimiter override.'),
+    }),
+    output: workoutImportInspectResultSchema,
+    async run({ args, options }) {
+      return inspectWorkoutCsvImport({
+        vault: options.vault,
+        file: args.file,
+        source: typeof options.source === 'string' ? options.source : undefined,
+        delimiter: typeof options.delimiter === 'string' ? options.delimiter : undefined,
+      })
+    },
+  })
+
+  importGroup.command('csv', {
+    description: 'Copy one workout CSV export into raw/workouts/** and optionally map it into activity_session events.',
+    args: z.object({
+      file: pathSchema.describe('Path to the workout CSV export to import.'),
+    }),
+    options: withBaseOptions({
+      source: z
+        .string()
+        .min(1)
+        .max(80)
+        .optional()
+        .describe('Optional source hint such as strong or hevy.'),
+      delimiter: z
+        .string()
+        .min(1)
+        .max(1)
+        .optional()
+        .describe('Optional single-character CSV delimiter override.'),
+      storeRawOnly: z
+        .boolean()
+        .optional()
+        .describe('Store the raw CSV + manifest without creating workout events.'),
+    }),
+    output: workoutImportCsvResultSchema,
+    async run({ args, options }) {
+      return importWorkoutCsv({
+        vault: options.vault,
+        file: args.file,
+        source: typeof options.source === 'string' ? options.source : undefined,
+        delimiter: typeof options.delimiter === 'string' ? options.delimiter : undefined,
+        storeRawOnly: options.storeRawOnly === true,
+      })
+    },
+  })
+
   const format = Cli.create('format', {
     description:
-      'Saved workout-format defaults that feed the same canonical workout add pipeline.',
+      'Saved workout-format defaults that store structured routine templates in bank/workout-formats.',
   })
 
   format.command('save', {
     description:
-      'Save or update one reusable workout format from a name plus workout text.',
+      'Save or update one reusable workout format from a name plus freeform text, or from a structured JSON payload.',
     args: z.object({
       name: z
         .string()
@@ -181,11 +312,11 @@ export function registerWorkoutCommands(
         .string()
         .min(1)
         .max(4000)
-        .describe('Saved workout text that should later log through workout add.'),
+        .describe('Saved workout text.'),
     }),
     examples: [
       {
-        description: 'Save one reusable strength workout format.',
+        description: 'Save one reusable strength workout format from freeform text.',
         args: {
           name: 'Push Day A',
           text: '20 min strength training. 4 sets of 20 pushups. 4 sets of 12 incline bench with a 45 lb bar plus 10 lb plates on both sides.',
@@ -194,10 +325,21 @@ export function registerWorkoutCommands(
           vault: './vault',
         },
       },
+      {
+        description: 'Save a structured routine template from disk.',
+        args: {},
+        options: {
+          input: '@routine.json',
+          vault: './vault',
+        },
+      },
     ],
     hint:
-      'This stores thin reusable defaults only. Saved workout formats are validated up front by the same inference rules that power workout add so later logging stays on the canonical activity_session path.',
+      'Saved workout formats now support a structured template payload for routine exercises, planned sets, grouping, and persistent notes. Freeform text still works and is converted into a simple template when possible.',
     options: withBaseOptions({
+      input: inputFileOptionSchema
+        .optional()
+        .describe('Optional structured workout format payload in @file.json form or - for stdin.'),
       duration: z
         .number()
         .int()
@@ -205,7 +347,7 @@ export function registerWorkoutCommands(
         .max(24 * 60)
         .optional()
         .describe(
-          'Optional default duration override in minutes when the saved note is missing or ambiguous.',
+          'Optional default duration override in minutes when the saved note or payload is missing or ambiguous.',
         ),
       type: z
         .string()
@@ -226,8 +368,12 @@ export function registerWorkoutCommands(
     async run({ args, options }) {
       return saveWorkoutFormat({
         vault: options.vault,
-        name: args.name,
-        text: args.text,
+        name: typeof args.name === 'string' ? args.name : undefined,
+        text: typeof args.text === 'string' ? args.text : undefined,
+        inputFile:
+          typeof options.input === 'string'
+            ? normalizeInputFileOption(options.input)
+            : undefined,
         durationMinutes: options.duration,
         activityType:
           typeof options.type === 'string' ? options.type : undefined,
@@ -272,7 +418,7 @@ export function registerWorkoutCommands(
 
   format.command('log', {
     description:
-      'Log one dated workout from a saved workout format through the same canonical event path as workout add.',
+      'Log one dated workout from a saved workout format through the canonical activity_session write path.',
     args: z.object({
       name: z
         .string()
@@ -292,7 +438,7 @@ export function registerWorkoutCommands(
       },
     ],
     hint:
-      'This is a thin source-of-defaults layer only. The saved workout text and defaults feed the exact same activity_session write path and strength inference behavior used by workout add.',
+      'Structured routine templates log directly into the rich workout session payload. Older thin formats still fall back to their saved freeform text.',
     options: withBaseOptions({
       duration: z
         .number()
@@ -345,6 +491,7 @@ export function registerWorkoutCommands(
     },
   })
 
+  workout.command(importGroup)
   workout.command(format)
   cli.command(workout)
 }

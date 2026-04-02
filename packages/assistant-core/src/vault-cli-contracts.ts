@@ -93,6 +93,86 @@ const strengthExerciseResultSchema = z.object({
   loadDescription: z.string().min(1).optional(),
 })
 
+const workoutSetResultSchema = z.object({
+  order: z.number().int().positive(),
+  type: z.enum(['normal', 'warmup', 'dropset', 'failure']).optional(),
+  reps: z.number().int().nonnegative().optional(),
+  weight: z.number().nonnegative().optional(),
+  weightUnit: z.enum(['lb', 'kg']).optional(),
+  durationSeconds: z.number().int().nonnegative().optional(),
+  distanceMeters: z.number().nonnegative().optional(),
+  rpe: z.number().min(0).max(10).optional(),
+  bodyweightKg: z.number().nonnegative().optional(),
+  assistanceKg: z.number().nonnegative().optional(),
+  addedWeightKg: z.number().nonnegative().optional(),
+})
+
+const workoutExerciseResultSchema = z.object({
+  name: z.string().min(1),
+  sourceExerciseId: z.string().min(1).optional(),
+  order: z.number().int().positive(),
+  groupId: z.string().min(1).optional(),
+  mode: z
+    .enum([
+      'weight_reps',
+      'bodyweight',
+      'assisted_bodyweight',
+      'weighted_bodyweight',
+      'duration',
+      'cardio',
+    ])
+    .optional(),
+  unitOverride: z.enum(['lb', 'kg']).optional(),
+  note: z.string().min(1).optional(),
+  sets: z.array(workoutSetResultSchema).min(1).max(150),
+})
+
+const workoutSessionResultSchema = z.object({
+  sourceApp: z.string().min(1).optional(),
+  sourceWorkoutId: z.string().min(1).optional(),
+  startedAt: isoTimestampSchema.optional(),
+  endedAt: isoTimestampSchema.optional(),
+  routineId: z.string().min(1).optional(),
+  routineName: z.string().min(1).optional(),
+  sessionNote: z.string().min(1).optional(),
+  exercises: z.array(workoutExerciseResultSchema).min(1).max(100),
+})
+
+const workoutTemplateSetResultSchema = z.object({
+  order: z.number().int().positive(),
+  type: z.enum(['normal', 'warmup', 'dropset', 'failure']).optional(),
+  targetReps: z.number().int().nonnegative().optional(),
+  targetWeight: z.number().nonnegative().optional(),
+  targetWeightUnit: z.enum(['lb', 'kg']).optional(),
+  targetDurationSeconds: z.number().int().nonnegative().optional(),
+  targetDistanceMeters: z.number().nonnegative().optional(),
+  targetRpe: z.number().min(0).max(10).optional(),
+})
+
+const workoutTemplateExerciseResultSchema = z.object({
+  name: z.string().min(1),
+  order: z.number().int().positive(),
+  groupId: z.string().min(1).optional(),
+  mode: z
+    .enum([
+      'weight_reps',
+      'bodyweight',
+      'assisted_bodyweight',
+      'weighted_bodyweight',
+      'duration',
+      'cardio',
+    ])
+    .optional(),
+  unitOverride: z.enum(['lb', 'kg']).optional(),
+  note: z.string().min(1).optional(),
+  plannedSets: z.array(workoutTemplateSetResultSchema).min(1).max(150),
+})
+
+export const workoutTemplateResultSchema = z.object({
+  routineNote: z.string().min(1).optional(),
+  exercises: z.array(workoutTemplateExerciseResultSchema).min(1).max(100),
+})
+
 export const workoutAddResultSchema = z.object({
   vault: pathSchema,
   eventId: z.string().min(1),
@@ -104,9 +184,36 @@ export const workoutAddResultSchema = z.object({
   title: z.string().min(1),
   activityType: z.string().min(1),
   durationMinutes: z.number().int().positive(),
-  distanceKm: z.number().positive().nullable(),
+  distanceKm: z.number().nonnegative().nullable(),
   strengthExercises: z.array(strengthExerciseResultSchema).nullable(),
+  workout: workoutSessionResultSchema.nullable(),
   note: z.string().min(1),
+})
+
+export const workoutImportInspectResultSchema = z.object({
+  vault: pathSchema,
+  sourceFile: pathSchema,
+  source: z.string().min(1),
+  detectedSource: z.string().min(1).nullable(),
+  delimiter: z.string().min(1),
+  headers: z.array(z.string()),
+  rowCount: z.number().int().nonnegative(),
+  estimatedWorkouts: z.number().int().nonnegative(),
+  importable: z.boolean(),
+  warnings: z.array(z.string()),
+})
+
+export const workoutImportCsvResultSchema = z.object({
+  vault: pathSchema,
+  sourceFile: pathSchema,
+  rawFile: pathSchema,
+  manifestFile: pathSchema,
+  source: z.string().min(1),
+  importedCount: z.number().int().nonnegative(),
+  rawOnly: z.boolean(),
+  lookupIds: z.array(z.string().min(1)),
+  ledgerFiles: z.array(pathSchema),
+  warnings: z.array(z.string()),
 })
 
 export const workoutFormatSaveResultSchema = z.object({
@@ -241,6 +348,8 @@ export type MealAddResult = z.infer<typeof mealAddResultSchema>
 export type WorkoutAddResult = z.infer<typeof workoutAddResultSchema>
 export type WorkoutFormatSaveResult = z.infer<typeof workoutFormatSaveResultSchema>
 export type WorkoutFormatListResult = z.infer<typeof workoutFormatListResultSchema>
+export type WorkoutImportInspectResult = z.infer<typeof workoutImportInspectResultSchema>
+export type WorkoutImportCsvResult = z.infer<typeof workoutImportCsvResultSchema>
 export type InterventionAddResult = z.infer<typeof interventionAddResultSchema>
 export type SamplesImportCsvResult = z.infer<
   typeof samplesImportCsvResultSchema

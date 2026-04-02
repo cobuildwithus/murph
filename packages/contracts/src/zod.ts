@@ -281,6 +281,91 @@ export const activityStrengthExerciseSchema = z.union([
   activityStrengthExerciseWithLoadSchema,
 ]);
 
+export const workoutSetTypeSchema = z.enum(["normal", "warmup", "dropset", "failure"]);
+export const workoutExerciseModeSchema = z.enum([
+  "weight_reps",
+  "bodyweight",
+  "assisted_bodyweight",
+  "weighted_bodyweight",
+  "duration",
+  "cardio",
+]);
+export const workoutLoadUnitSchema = z.enum(["lb", "kg"]);
+
+export const workoutSetSchema = z
+  .object({
+    order: integerSchema(1),
+    type: workoutSetTypeSchema.optional(),
+    reps: integerSchema(0).optional(),
+    weight: numberSchema(0).optional(),
+    weightUnit: workoutLoadUnitSchema.optional(),
+    durationSeconds: integerSchema(0).optional(),
+    distanceMeters: numberSchema(0).optional(),
+    rpe: numberSchema(0, 10).optional(),
+    bodyweightKg: numberSchema(0).optional(),
+    assistanceKg: numberSchema(0).optional(),
+    addedWeightKg: numberSchema(0).optional(),
+  })
+  .strict();
+
+export const workoutExerciseSchema = z
+  .object({
+    name: boundedString(1, 160),
+    sourceExerciseId: boundedString(1, 200).optional(),
+    order: integerSchema(1),
+    groupId: boundedString(1, 80).optional(),
+    mode: workoutExerciseModeSchema.optional(),
+    unitOverride: workoutLoadUnitSchema.optional(),
+    note: boundedString(1, 4000).optional(),
+    sets: z.array(workoutSetSchema).min(1).max(150),
+  })
+  .strict();
+
+export const workoutSessionSchema = z
+  .object({
+    sourceApp: patternedString(SLUG_PATTERN).optional(),
+    sourceWorkoutId: boundedString(1, 200).optional(),
+    startedAt: isoDateTimeString().optional(),
+    endedAt: isoDateTimeString().optional(),
+    routineId: boundedString(1, 200).optional(),
+    routineName: boundedString(1, 160).optional(),
+    sessionNote: boundedString(1, 4000).optional(),
+    exercises: z.array(workoutExerciseSchema).min(1).max(100),
+  })
+  .strict();
+
+export const workoutTemplateSetSchema = z
+  .object({
+    order: integerSchema(1),
+    type: workoutSetTypeSchema.optional(),
+    targetReps: integerSchema(0).optional(),
+    targetWeight: numberSchema(0).optional(),
+    targetWeightUnit: workoutLoadUnitSchema.optional(),
+    targetDurationSeconds: integerSchema(0).optional(),
+    targetDistanceMeters: numberSchema(0).optional(),
+    targetRpe: numberSchema(0, 10).optional(),
+  })
+  .strict();
+
+export const workoutTemplateExerciseSchema = z
+  .object({
+    name: boundedString(1, 160),
+    order: integerSchema(1),
+    groupId: boundedString(1, 80).optional(),
+    mode: workoutExerciseModeSchema.optional(),
+    unitOverride: workoutLoadUnitSchema.optional(),
+    note: boundedString(1, 4000).optional(),
+    plannedSets: z.array(workoutTemplateSetSchema).min(1).max(150),
+  })
+  .strict();
+
+export const workoutTemplateSchema = z
+  .object({
+    routineNote: boundedString(1, 4000).optional(),
+    exercises: z.array(workoutTemplateExerciseSchema).min(1).max(100),
+  })
+  .strict();
+
 const bloodTestResultComparatorSchema = z.enum(["<", "<=", ">", ">="]);
 
 export const bloodTestReferenceRangeSchema = z
@@ -544,6 +629,7 @@ export const eventRecordSchema = withContractMetadata(
       durationMinutes: integerSchema(1),
       distanceKm: numberSchema(0).optional(),
       strengthExercises: z.array(activityStrengthExerciseSchema).min(1).max(50).optional(),
+      workout: workoutSessionSchema.optional(),
     }),
     eventSchema("sleep_session", {
       startAt: isoDateTimeString(),
@@ -848,6 +934,7 @@ export const workoutFormatFrontmatterSchema = withContractMetadata(
       durationMinutes: integerSchema(1, 24 * 60).optional(),
       distanceKm: numberSchema(0, 1_000).optional(),
       strengthExercises: z.array(activityStrengthExerciseSchema).min(1).max(50).optional(),
+      template: workoutTemplateSchema.optional(),
       tags: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
       note: boundedString(1, 4000).optional(),
       templateText: boundedString(1, 4000).optional(),
@@ -1106,6 +1193,15 @@ export const geneticVariantFrontmatterSchema = withContractMetadata(
 
 export type ExternalRef = z.infer<typeof externalRefSchema>;
 export type ActivityStrengthExercise = z.infer<typeof activityStrengthExerciseSchema>;
+export type WorkoutSetType = z.infer<typeof workoutSetTypeSchema>;
+export type WorkoutExerciseMode = z.infer<typeof workoutExerciseModeSchema>;
+export type WorkoutLoadUnit = z.infer<typeof workoutLoadUnitSchema>;
+export type WorkoutSet = z.infer<typeof workoutSetSchema>;
+export type WorkoutExercise = z.infer<typeof workoutExerciseSchema>;
+export type WorkoutSession = z.infer<typeof workoutSessionSchema>;
+export type WorkoutTemplateSet = z.infer<typeof workoutTemplateSetSchema>;
+export type WorkoutTemplateExercise = z.infer<typeof workoutTemplateExerciseSchema>;
+export type WorkoutTemplate = z.infer<typeof workoutTemplateSchema>;
 export type BloodTestReferenceRange = z.infer<typeof bloodTestReferenceRangeSchema>;
 export type BloodTestResultRecord = z.infer<typeof bloodTestResultSchema>;
 export type VaultMetadata = z.infer<typeof vaultMetadataSchema>;

@@ -190,7 +190,7 @@ const checkedBankEntityDefinitions = [
       title: "Push Day A",
       status: "active",
       activityType: "strength-training",
-      durationMinutes: 20,
+      durationMinutes: 45,
     },
     registry: {
       frontmatterSchema: workoutFormatFrontmatterSchema as ZodTypeAny,
