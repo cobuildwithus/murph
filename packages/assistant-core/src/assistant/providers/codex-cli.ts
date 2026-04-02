@@ -22,11 +22,6 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
     supportsReasoningEffort: true,
     supportsRichUserMessageContent: false,
   },
-  resolveRuntime() {
-    return {
-      requiresCanonicalWriteGuard: true,
-    }
-  },
   async discoverModels() {
     return {
       models: [],

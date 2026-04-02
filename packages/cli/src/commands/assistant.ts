@@ -206,13 +206,13 @@ const assistantProviderOptionFields = {
     .enum(assistantSandboxValues)
     .optional()
     .describe(
-      'Codex sandbox mode for local assistant chat. Vault-bound assistant turns clamp danger-full-access back to workspace-write.',
+      'Codex sandbox mode for local assistant chat. Codex runs as a privileged local adapter by default, so leaving this unset keeps its normal unsandboxed behavior.',
     ),
   approvalPolicy: z
     .enum(assistantApprovalPolicyValues)
     .optional()
     .describe(
-      'Codex approval policy for local assistant chat. Defaults to on-request with workspace-write sandboxing.',
+      'Codex approval policy for local assistant chat. Defaults to never for the privileged local Codex adapter.',
     ),
   profile: z
     .string()

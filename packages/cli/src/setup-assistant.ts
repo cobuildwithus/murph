@@ -28,8 +28,8 @@ export const DEFAULT_SETUP_CODEX_MODEL = 'gpt-5.4'
 export const DEFAULT_SETUP_CODEX_OSS_MODEL = 'gpt-oss:20b'
 export const DEFAULT_SETUP_OPENAI_COMPATIBLE_BASE_URL =
   'http://127.0.0.1:11434/v1'
-const DEFAULT_SETUP_SANDBOX = 'workspace-write' as const
-const DEFAULT_SETUP_APPROVAL_POLICY = 'on-request' as const
+const DEFAULT_SETUP_SANDBOX = 'danger-full-access' as const
+const DEFAULT_SETUP_APPROVAL_POLICY = 'never' as const
 
 export interface ResolveSetupAssistantInput {
   allowPrompt: boolean

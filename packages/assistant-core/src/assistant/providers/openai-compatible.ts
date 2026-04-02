@@ -37,12 +37,6 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
     supportsReasoningEffort: false,
     supportsRichUserMessageContent: true,
   },
-  resolveRuntime(config) {
-    void config
-    return {
-      requiresCanonicalWriteGuard: false,
-    }
-  },
   async discoverModels(input) {
     const providerConfig = input.config
     if (providerConfig.provider !== 'openai-compatible') {
@@ -182,6 +176,7 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
 
     try {
       const messages = buildAssistantProviderMessages(input)
+      const reasoningEffort = normalizeNullableString(providerConfig.reasoningEffort)
       const result = await generateText({
         abortSignal: input.abortSignal,
         maxRetries: tools ? 0 : OPENAI_COMPATIBLE_PROVIDER_MAX_RETRIES,
@@ -198,6 +193,11 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
               providerOptions: {
                 openai: {
                   store: false,
+                  ...(reasoningEffort
+                    ? {
+                        reasoningEffort,
+                      }
+                    : {}),
                   ...(normalizeNullableString(input.resumeProviderSessionId)
                     ? {
                         previousResponseId: normalizeNullableString(
