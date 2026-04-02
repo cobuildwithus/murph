@@ -1,6 +1,14 @@
 import { createHash, randomBytes } from "node:crypto";
 
-export { toIsoTimestamp } from "@murphai/device-syncd/public-ingress";
+export function toIsoTimestamp(value: string | number | Date): string {
+  const date = value instanceof Date ? value : new Date(value);
+
+  if (Number.isNaN(date.valueOf())) {
+    throw new TypeError(`Invalid timestamp: ${String(value)}`);
+  }
+
+  return date.toISOString();
+}
 
 export function normalizeNullableString(value: string | null | undefined): string | null {
   if (typeof value !== "string") {
@@ -38,7 +46,7 @@ export function generateHostedRandomPrefixedId(prefix: string): string {
 }
 
 // Keep this hosted-local on purpose. Importing the daemon helper would widen
-// the `@murphai/device-syncd` public surface just to reuse a trivial primitive.
+// the device-sync ingress surface just to reuse a trivial primitive.
 export function sha256Hex(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
