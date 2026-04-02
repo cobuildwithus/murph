@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-04-01
+Last verified: 2026-04-02
 
 ## Non-Negotiable Rules
 
@@ -30,4 +30,5 @@ Last verified: 2026-04-01
 - Assistant-state is high-sensitivity local runtime data: directories under `assistant-state/**` must be `0700`, files under `assistant-state/**` must be `0600`, secret-bearing provider headers must never remain inline in persisted session or provider-route-recovery JSON, and operator-facing repair flows should use `assistant doctor --repair` so legacy inline headers are migrated into private sidecars under `assistant-state/secrets/**` before wider diagnostics continue.
 - Runtime observability writes under `assistant-state/diagnostics/**`, `assistant-state/journals/**`, quarantine metadata, and persisted delivery errors must redact inline bearer tokens, cookies, API keys, and similar secret material before the artifact is committed.
 - Device-sync account metadata is internal diagnostic state only. Hosted and local storage writes must sanitize it down to a compact shallow scalar record instead of persisting provider profile payloads, nested JSON blobs, or oversized string fields.
+- For direct-CLI assistant turns, the canonical write guard now prefers validated committed core write metadata over the temporary per-process guard receipt copy when reconciling protected canonical files. This intentionally loosens tamper detection for those turns: a well-formed committed protected write that matches its durable payload receipts may be preserved even if the temporary guard receipt copy is missing.
 - Tool-enabled OpenAI-compatible assistant turns may execute the same canonical local assistant/vault tool catalog shape as Codex-backed turns, but only against the active vault and only through the active vault's per-turn Murph runtime context. Message-triggered assistant auto-reply now has the same full Murph autonomy as other assistant turns, including assistant memory/state/cron and canonical vault write surfaces, so any accepted inbound channel message is effectively an operator-authorized action for that bound user and vault. Provider family still changes the transport mechanism for reaching that authority, not whether the authority exists. That parity still does not grant arbitrary host shell access, broad hosted control-plane authority, or host-wide filesystem reads.

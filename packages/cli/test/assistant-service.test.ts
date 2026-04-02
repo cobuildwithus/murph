@@ -3324,6 +3324,123 @@ test('sendAssistantMessage allows concurrent inbox canonical writes that go thro
   assert.match(persisted.envelopePath, /^raw\/inbox\/telegram\/bot\/2026\/03\/cap_/u)
 })
 
+test('sendAssistantMessage allows committed inbox canonical writes after the temporary guard receipt copy is removed', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-canonical-inbox-missing-receipt-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  await initializeVault({ vaultRoot })
+  let persistedCapture:
+    | {
+        createdAt: string
+        eventId: string
+        auditId?: string
+        envelopePath: string
+      }
+    | null = null
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async () => {
+    const existingOperationPaths = new Set(
+      await listWriteOperationMetadataPaths(vaultRoot),
+    )
+    const runtime = await openInboxRuntime({ vaultRoot })
+    const pipeline = await createInboxPipeline({ vaultRoot, runtime })
+
+    try {
+      persistedCapture = await pipeline.processCapture({
+        source: 'telegram',
+        externalId: 'assistant-guarded-inbox-missing-receipt',
+        accountId: 'bot',
+        thread: {
+          id: 'thread-guarded-receiptless',
+        },
+        actor: {
+          isSelf: false,
+        },
+        occurredAt: '2026-03-27T00:41:00.000Z',
+        receivedAt: '2026-03-27T00:41:01.000Z',
+        text: 'Guard-safe inbox capture without temp receipt',
+        attachments: [],
+        raw: {},
+      })
+    } finally {
+      pipeline.close()
+    }
+
+    const operationRelativePath = await findNewOperationMetadataPath(
+      vaultRoot,
+      existingOperationPaths,
+    )
+    const operation = JSON.parse(
+      await readFile(path.join(vaultRoot, operationRelativePath), 'utf8'),
+    ) as {
+      operationId: string
+    }
+    const receiptRoot = await findGuardReceiptRoot()
+    await rm(path.join(receiptRoot, `${operation.operationId}.json`), {
+      force: true,
+    })
+    await rm(path.join(receiptRoot, operation.operationId), {
+      force: true,
+      recursive: true,
+    })
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-inbox-guard-missing-receipt',
+      response: 'assistant reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:canonical-inbox-missing-receipt',
+    prompt: 'Handle the inbound capture.',
+  })
+
+  assert.equal(result.response, 'assistant reply')
+  assert.equal(result.session.turnCount, 1)
+  assert.equal(
+    result.session.providerBinding?.providerSessionId,
+    'thread-inbox-guard-missing-receipt',
+  )
+  assert.ok(persistedCapture)
+  if (!persistedCapture) {
+    throw new Error('Expected persisted inbox capture result.')
+  }
+  const persisted = persistedCapture as {
+    createdAt: string
+    eventId: string
+    auditId?: string
+    envelopePath: string
+  }
+  const auditRelativePath = `audit/${persisted.createdAt.slice(0, 4)}/${persisted.createdAt.slice(0, 7)}.jsonl`
+  const eventRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: 'ledger/events/2026/2026-03.jsonl',
+  })
+  const auditRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: auditRelativePath,
+  })
+  assert.equal(
+    eventRecords.filter((record) => record.id === persisted.eventId).length,
+    1,
+  )
+  assert.equal(
+    auditRecords.filter((record) => record.id === persisted.auditId).length,
+    1,
+  )
+  assert.match(
+    persisted.envelopePath,
+    /^raw\/inbox\/telegram\/bot\/2026\/03\/cap_/u,
+  )
+})
+
 test('sendAssistantMessage preserves canonical writes from operations staged before the guard snapshot and committed during the provider turn', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-canonical-staged-before-snapshot-'))
   const vaultRoot = path.join(parent, 'vault')
@@ -3950,7 +4067,7 @@ test('sendAssistantMessage blocks rogue guard receipts that have no matching ope
   await assert.rejects(readFile(targetPath, 'utf8'), /ENOENT/u)
 })
 
-test('sendAssistantMessage blocks brand-new fake committed metadata from authorizing direct bank writes', async () => {
+test('sendAssistantMessage trusts committed protected write metadata when the current file matches its durable payload receipt even without a guard receipt copy', async () => {
   const parent = await mkdtemp(
     path.join(tmpdir(), 'murph-assistant-service-fake-committed-metadata-'),
   )
@@ -4016,13 +4133,13 @@ test('sendAssistantMessage blocks brand-new fake committed metadata from authori
     prompt: 'Write directly to the bank file.',
   })
 
-  assertBlockedAssistantResult(result, {
-    guardFailureReason: 'invalid_write_operation_metadata',
-    guardFailureTargetPath: null,
-    guardFailurePathPattern: /^\.runtime\/operations\/op_fake_provider_write\.json$/u,
-    paths: [targetRelativePath],
-  })
-  await assert.rejects(readFile(targetPath, 'utf8'), /ENOENT/u)
+  assert.equal(result.response, 'assistant reply')
+  assert.equal(result.session.turnCount, 1)
+  assert.equal(
+    result.session.providerBinding?.providerSessionId,
+    'thread-fake-committed-metadata',
+  )
+  assert.equal(await readFile(targetPath, 'utf8'), 'provider direct write\n')
 })
 
 test('sendAssistantMessage does not create raw files from smuggled protected target paths in fake metadata', async () => {
