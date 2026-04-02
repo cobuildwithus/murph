@@ -357,25 +357,58 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     recordedAt: "2026-03-12T18:02:00Z",
     dayKey: "2026-03-12",
     source: "manual",
-    title: "20-minute strength training",
-    note: "20 min strength training. 4 sets of 20 pushups. 4 sets of 12 incline bench with a 45 lb bar plus 10 lb plates on both sides.",
+    title: "Push Day A",
+    note: "Paused the first rep on each work set.",
     activityType: "strength-training",
     durationMinutes: 20,
     strengthExercises: [
       {
-        exercise: "pushups",
+        exercise: "Pushups",
         setCount: 4,
         repsPerSet: 20,
       },
       {
-        exercise: "incline bench",
+        exercise: "Incline Bench Press",
         setCount: 4,
         repsPerSet: 12,
         load: 65,
         loadUnit: "lb",
-        loadDescription: "45 lb bar plus 10 lb plates on both sides",
       },
     ],
+    workout: {
+      sourceApp: "manual",
+      startedAt: "2026-03-12T17:55:00Z",
+      endedAt: "2026-03-12T18:15:00Z",
+      routineId: "wfmt_01JNV422Y2M5ZBV64ZP4N1DRB1",
+      routineName: "Push Day A",
+      sessionNote: "Paused the first rep on each work set.",
+      exercises: [
+        {
+          name: "Pushups",
+          order: 1,
+          mode: "bodyweight",
+          note: "Controlled tempo",
+          sets: [
+            { order: 1, reps: 20 },
+            { order: 2, reps: 20 },
+            { order: 3, reps: 20 },
+            { order: 4, reps: 20 }
+          ]
+        },
+        {
+          name: "Incline Bench Press",
+          order: 2,
+          mode: "weight_reps",
+          unitOverride: "lb",
+          sets: [
+            { order: 1, type: "warmup", reps: 12, weight: 45, weightUnit: "lb" },
+            { order: 2, reps: 12, weight: 65, weightUnit: "lb", rpe: 8 },
+            { order: 3, reps: 12, weight: 65, weightUnit: "lb", rpe: 8 },
+            { order: 4, reps: 12, weight: 65, weightUnit: "lb", rpe: 9 }
+          ]
+        }
+      ]
+    }
   },
   {
     schemaVersion: "murph.event.v1",
@@ -687,29 +720,57 @@ export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.f
     schemaVersion: "murph.frontmatter.workout-format.v1",
     docType: "workout_format",
     workoutFormatId: "wfmt_01JNV422Y2M5ZBV64ZP4N1DRB1",
-    slug: "upper-body-a",
-    title: "Upper Body A",
+    slug: "push-day-a",
+    title: "Push Day A",
     status: "active",
-    summary: "Default upper-body strength session I repeat most weeks.",
+    summary: "Default push-focused strength session I repeat most weeks.",
     activityType: "strength-training",
     durationMinutes: 45,
     strengthExercises: [
       {
-        exercise: "pushups",
+        exercise: "Pushups",
         setCount: 4,
         repsPerSet: 20,
       },
       {
-        exercise: "incline bench",
+        exercise: "Incline Bench Press",
         setCount: 4,
         repsPerSet: 12,
         load: 65,
         loadUnit: "lb",
-        loadDescription: "45 lb bar plus 10 lb plates on both sides",
       },
     ],
+    template: {
+      routineNote: "Add one extra triceps set if the session feels easy.",
+      exercises: [
+        {
+          name: "Pushups",
+          order: 1,
+          mode: "bodyweight",
+          note: "Controlled tempo",
+          plannedSets: [
+            { order: 1, targetReps: 20 },
+            { order: 2, targetReps: 20 },
+            { order: 3, targetReps: 20 },
+            { order: 4, targetReps: 20 }
+          ]
+        },
+        {
+          name: "Incline Bench Press",
+          order: 2,
+          mode: "weight_reps",
+          unitOverride: "lb",
+          plannedSets: [
+            { order: 1, type: "warmup", targetReps: 12, targetWeight: 45, targetWeightUnit: "lb" },
+            { order: 2, targetReps: 12, targetWeight: 65, targetWeightUnit: "lb", targetRpe: 8 },
+            { order: 3, targetReps: 12, targetWeight: 65, targetWeightUnit: "lb", targetRpe: 8 },
+            { order: 4, targetReps: 12, targetWeight: 65, targetWeightUnit: "lb", targetRpe: 9 }
+          ]
+        }
+      ]
+    },
     tags: ["gym", "strength"],
-    note: "Usual upper-body session when I do not need to vary the lifts.",
+    note: "Usual push session when I do not need to vary the lifts.",
   },
 });
 
@@ -966,30 +1027,80 @@ relatedConditionIds:
 schemaVersion: murph.frontmatter.workout-format.v1
 docType: workout_format
 workoutFormatId: wfmt_01JNV422Y2M5ZBV64ZP4N1DRB1
-slug: upper-body-a
-title: Upper Body A
+slug: push-day-a
+title: Push Day A
 status: active
-summary: Default upper-body strength session I repeat most weeks.
+summary: Default push-focused strength session I repeat most weeks.
 activityType: strength-training
 durationMinutes: 45
 strengthExercises:
   -
-    exercise: pushups
+    exercise: Pushups
     setCount: 4
     repsPerSet: 20
   -
-    exercise: incline bench
+    exercise: Incline Bench Press
     setCount: 4
     repsPerSet: 12
     load: 65
     loadUnit: lb
-    loadDescription: 45 lb bar plus 10 lb plates on both sides
+template:
+  routineNote: Add one extra triceps set if the session feels easy.
+  exercises:
+    -
+      name: Pushups
+      order: 1
+      mode: bodyweight
+      note: Controlled tempo
+      plannedSets:
+        -
+          order: 1
+          targetReps: 20
+        -
+          order: 2
+          targetReps: 20
+        -
+          order: 3
+          targetReps: 20
+        -
+          order: 4
+          targetReps: 20
+    -
+      name: Incline Bench Press
+      order: 2
+      mode: weight_reps
+      unitOverride: lb
+      plannedSets:
+        -
+          order: 1
+          type: warmup
+          targetReps: 12
+          targetWeight: 45
+          targetWeightUnit: lb
+        -
+          order: 2
+          targetReps: 12
+          targetWeight: 65
+          targetWeightUnit: lb
+          targetRpe: 8
+        -
+          order: 3
+          targetReps: 12
+          targetWeight: 65
+          targetWeightUnit: lb
+          targetRpe: 8
+        -
+          order: 4
+          targetReps: 12
+          targetWeight: 65
+          targetWeightUnit: lb
+          targetRpe: 9
 tags:
   - gym
   - strength
-note: Usual upper-body session when I do not need to vary the lifts.
+note: Usual push session when I do not need to vary the lifts.
 ---
 
-# Upper Body A
+# Push Day A
 `,
 });

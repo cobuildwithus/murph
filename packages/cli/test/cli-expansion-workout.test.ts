@@ -12,6 +12,7 @@ import {
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { registerWorkoutCommands } from '../src/commands/workout.js'
 import { createIntegratedVaultServices } from '@murphai/assistant-core/vault-services'
+import { addWorkoutRecord } from '../src/usecases/workout.js'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData, runCli } from './cli-test-helpers.js'
 
@@ -224,7 +225,15 @@ test(
             kind: 'text_write',
             targetRelativePath: 'bank/workout-formats/push-day-a.md',
           },
+          {
+            kind: 'jsonl_append',
+            targetRelativePath: workoutFormatOperation.actions[1]?.targetRelativePath ?? '',
+          },
         ],
+      )
+      assert.match(
+        workoutFormatOperation.actions[1]?.targetRelativePath ?? '',
+        /^audit\/\d{4}\/\d{4}-\d{2}\.jsonl$/u,
       )
       if (firstAction.kind !== 'text_write') {
         throw new Error('Expected workout_format_save to stage a text_write action.')
@@ -520,9 +529,13 @@ test(
         workoutFormatOperations.every(
           (operation) =>
             operation.status === 'committed' &&
-            operation.actions.length === 1 &&
+            operation.actions.length === 2 &&
             operation.actions[0]?.kind === 'text_write' &&
-            operation.actions[0]?.targetRelativePath === 'bank/workout-formats/push-day-a.md',
+            operation.actions[0]?.targetRelativePath === 'bank/workout-formats/push-day-a.md' &&
+            operation.actions[1]?.kind === 'jsonl_append' &&
+            /^audit\/\d{4}\/\d{4}-\d{2}\.jsonl$/u.test(
+              operation.actions[1]?.targetRelativePath ?? '',
+            ),
         ),
         true,
       )
@@ -709,6 +722,89 @@ durationMinutes: 30
       assert.equal(logged.ok, false)
       assert.equal(logged.error.code, 'contract_invalid')
       assert.match(logged.error.message ?? '', /missing templateText/u)
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test(
+  'workout format log prefers saved workout text over format metadata notes for first-class docs',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-format-'))
+
+    try {
+      const initResult = await runCli<{ created: boolean }>([
+        'init',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(initResult.ok, true)
+      assert.equal(requireData(initResult).created, true)
+
+      await mkdir(path.join(vaultRoot, 'bank/workout-formats'), { recursive: true })
+      await writeFile(
+        path.join(vaultRoot, 'bank/workout-formats/garage-day.md'),
+        `---
+schemaVersion: murph.frontmatter.workout-format.v1
+docType: workout_format
+workoutFormatId: wfmt_01JNV422Y2M5ZBV64ZP4N1DRB1
+slug: garage-day
+title: Garage Day
+status: active
+activityType: strength-training
+durationMinutes: 40
+note: Keep one kettlebell near the rack.
+templateText: Garage day template.
+template:
+  routineNote: Garage day template.
+  exercises:
+    -
+      name: kettlebell swing
+      order: 1
+      mode: weight_reps
+      plannedSets:
+        -
+          order: 1
+          targetReps: 15
+        -
+          order: 2
+          targetReps: 15
+        -
+          order: 3
+          targetReps: 15
+        -
+          order: 4
+          targetReps: 15
+        -
+          order: 5
+          targetReps: 15
+---
+# Garage Day
+`,
+        'utf8',
+      )
+
+      const logged = await runCli<WorkoutAddEnvelope>([
+        'workout',
+        'format',
+        'log',
+        'garage-day',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(logged.ok, true)
+      assert.equal(requireData(logged).note, 'Garage day template.')
+
+      const shown = await runCli<ShowEnvelope>([
+        'event',
+        'show',
+        requireData(logged).lookupId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(shown.ok, true)
+      assert.equal(requireData(shown).entity.data.note, 'Garage day template.')
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }
@@ -1040,6 +1136,59 @@ test(
       assert.equal(invalidTimestamp.ok, false)
       assert.equal(invalidTimestamp.error.code, 'VALIDATION_ERROR')
       assert.match(invalidTimestamp.error.message ?? '', /Invalid ISO datetime/u)
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test(
+  'workout add rejects structured payloads that omit duration, timestamps, and freeform note text',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-'))
+    const payloadPath = path.join(vaultRoot, 'workout.json')
+
+    try {
+      const initResult = await runCli<{ created: boolean }>([
+        'init',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(initResult.ok, true)
+      assert.equal(requireData(initResult).created, true)
+
+      await writeFile(
+        payloadPath,
+        JSON.stringify({
+          exercises: [
+            {
+              name: 'pushups',
+              order: 1,
+              mode: 'weight_reps',
+              sets: [
+                {
+                  order: 1,
+                  reps: 20,
+                },
+              ],
+            },
+          ],
+        }),
+        'utf8',
+      )
+
+      await assert.rejects(
+        () =>
+          addWorkoutRecord({
+            vault: vaultRoot,
+            inputFile: payloadPath,
+          }),
+        (error: unknown) =>
+          error instanceof Error
+          && 'code' in error
+          && error.code === 'invalid_option'
+          && /Pass --duration <minutes> to record it explicitly/u.test(error.message),
+      )
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

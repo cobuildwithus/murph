@@ -386,6 +386,10 @@
       "types": "./dist/usecases/vault-usecase-helpers.d.ts",
       "default": "./dist/usecases/vault-usecase-helpers.js"
     },
+    "./usecases/workout-read": {
+      "types": "./dist/usecases/workout-read.d.ts",
+      "default": "./dist/usecases/workout-read.js"
+    },
     "./vault-cli-contracts": {
       "types": "./dist/vault-cli-contracts.d.ts",
       "default": "./dist/vault-cli-contracts.js"

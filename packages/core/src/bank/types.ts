@@ -14,6 +14,7 @@ import {
   RECIPE_STATUSES as CONTRACT_RECIPE_STATUSES,
   WORKOUT_FORMAT_STATUSES as CONTRACT_WORKOUT_FORMAT_STATUSES,
   type ActivityStrengthExercise,
+  type WorkoutTemplate,
   type MarkdownDocumentEnvelope as ContractMarkdownDocumentEnvelope,
   type StoredMarkdownDocument as ContractStoredMarkdownDocument,
 } from "@murphai/contracts";
@@ -97,6 +98,7 @@ export interface WorkoutFormatRecord {
   durationMinutes?: number;
   distanceKm?: number;
   strengthExercises?: ActivityStrengthExercise[];
+  template?: WorkoutTemplate;
   tags?: string[];
   note?: string;
   templateText?: string;
@@ -116,6 +118,7 @@ export interface UpsertWorkoutFormatInput {
   durationMinutes?: number;
   distanceKm?: number;
   strengthExercises?: ActivityStrengthExercise[];
+  template?: WorkoutTemplate;
   tags?: string[];
   note?: string;
   templateText?: string;

@@ -276,6 +276,7 @@ const bankRegistryQueryMetadataByKind: Record<BankEntityKind, BankRegistryQueryM
         durationMinutes: helpers.firstNumber(attributes, ["durationMinutes"]),
         distanceKm: helpers.firstNumber(attributes, ["distanceKm"]),
         strengthExercises: projectWorkoutStrengthExercises(attributes.strengthExercises),
+        template: helpers.firstObject(attributes, ["template"]),
         tags: helpers.firstStringArray(attributes, ["tags"]),
         note: helpers.firstString(attributes, ["note"]),
         templateText: helpers.firstString(attributes, ["templateText"]),

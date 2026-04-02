@@ -67,6 +67,13 @@ export {
   upsertProtocolItem,
   validateVault,
 } from "./public-mutations.ts";
+export {
+  listWorkoutFormats,
+  readWorkoutFormat,
+} from "./bank/workout-formats.ts";
+export type {
+  WorkoutFormatRecord,
+} from "./bank/types.ts";
 export type {
   ApplyCanonicalWriteBatchInput,
   ApplyCanonicalWriteBatchResult,

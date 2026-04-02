@@ -304,6 +304,7 @@ function buildTypedEventRecord(
           durationMinutes: draft.durationMinutes,
           distanceKm: draft.distanceKm,
           strengthExercises: draft.strengthExercises,
+          workout: draft.workout,
         });
       case "sleep_session":
         return compactObject({

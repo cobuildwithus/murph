@@ -40,7 +40,8 @@
         "samples_import_csv",
         "show",
         "validate",
-        "workout_format_upsert"
+        "workout_format_save",
+        "workout_import_csv"
       ]
     },
     "status": {

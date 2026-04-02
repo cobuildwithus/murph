@@ -555,6 +555,7 @@ export interface WorkoutFormatQueryEntity extends RegistryQueryEntity {
   durationMinutes: number | null;
   distanceKm: number | null;
   strengthExercises: Record<string, unknown>[];
+  template: Record<string, unknown> | null;
   tags: string[];
   note: string | null;
   templateText: string | null;
