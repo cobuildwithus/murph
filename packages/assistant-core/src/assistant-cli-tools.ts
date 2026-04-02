@@ -27,6 +27,12 @@ import {
 } from './assistant/memory/storage-format.js'
 import { withAssistantMemoryWriteLock } from './assistant/memory/locking.js'
 import {
+  assistantWebSearchFreshnessValues,
+  assistantWebSearchProviderValues,
+  resolveConfiguredAssistantWebSearchProvider,
+  searchAssistantWeb,
+} from './assistant/web-search.js'
+import {
   buildDailyMemoryMapKey,
   deriveLongTermReplaceKey,
   isLongTermSection,
@@ -77,6 +83,9 @@ const isoTimestampSchema = z.string().min(1)
 const vaultFilePathSchema = z.string().min(1)
 const jsonObjectSchema = z.record(z.string(), z.unknown())
 const optionalStringArraySchema = z.array(z.string().min(1)).optional()
+const assistantWebSearchProviderSchema = z.enum(assistantWebSearchProviderValues)
+const assistantWebSearchFreshnessSchema = z.enum(assistantWebSearchFreshnessValues)
+const assistantWebSearchDomainFilterSchema = z.array(z.string().min(1)).max(20).optional()
 const shareEntitySelectorSchema = z
   .object({
     id: z.string().min(1).optional(),
@@ -126,6 +135,7 @@ export interface AssistantToolCatalogOptions {
   includeStatefulWriteTools?: boolean
   includeVaultTextReadTool?: boolean
   includeVaultWriteTools?: boolean
+  includeWebSearchTools?: boolean
 }
 
 interface AssistantToolConcernDefinitions {
@@ -157,6 +167,7 @@ export function createInboxRoutingAssistantToolCatalog(
     includeStatefulWriteTools: false,
     includeVaultTextReadTool: false,
     includeVaultWriteTools: true,
+    includeWebSearchTools: false,
   })
 }
 
@@ -209,6 +220,59 @@ function createVaultTextReadToolDefinitions(
       },
       execute: ({ path: candidatePath, maxChars }) =>
         readAssistantTextFile(input.vault, candidatePath, maxChars),
+    }),
+  ]
+}
+
+function createWebSearchToolDefinitions() {
+  if (resolveConfiguredAssistantWebSearchProvider() === null) {
+    return []
+  }
+
+  return [
+    defineAssistantTool({
+      name: 'web.search',
+      description:
+        'Search the public web through the configured Murph search backend. Use this for current events, provider docs, product pages, release notes, and other information that is not available inside the active vault.',
+      inputSchema: z.object({
+        query: z.string().min(1),
+        provider: assistantWebSearchProviderSchema.optional(),
+        count: z.number().int().positive().max(10).optional(),
+        country: z.string().min(1).optional(),
+        language: z.string().min(1).optional(),
+        freshness: assistantWebSearchFreshnessSchema.optional(),
+        dateAfter: localDateSchema.optional(),
+        dateBefore: localDateSchema.optional(),
+        domainFilter: assistantWebSearchDomainFilterSchema,
+      }),
+      inputExample: {
+        query: 'OpenAI Responses API web search tool',
+        provider: 'auto',
+        count: 5,
+        domainFilter: ['platform.openai.com', 'openai.com'],
+      },
+      execute: async ({
+        count,
+        country,
+        dateAfter,
+        dateBefore,
+        domainFilter,
+        freshness,
+        language,
+        provider,
+        query,
+      }) =>
+        await searchAssistantWeb({
+          query,
+          provider,
+          count,
+          country,
+          language,
+          freshness,
+          dateAfter,
+          dateBefore,
+          domainFilter,
+        }),
     }),
   ]
 }
@@ -919,6 +983,9 @@ function createQueryAndReadToolDefinitions(
       : []),
     ...(options.includeQueryTools ?? true
       ? createVaultQueryToolDefinitions(input)
+      : []),
+    ...(options.includeWebSearchTools ?? true
+      ? createWebSearchToolDefinitions()
       : []),
   ]
 }
