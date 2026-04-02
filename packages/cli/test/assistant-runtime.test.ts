@@ -3474,7 +3474,7 @@ test('scanAssistantAutoReplyOnce primes backlog cursors and replies to new inbou
     ),
     true,
   )
-  assert.doesNotMatch(providerCall?.systemPrompt ?? '', /optional onboarding check-in/u)
+  assert.doesNotMatch(providerCall?.systemPrompt ?? '', /optional first-chat check-in/u)
   assert.doesNotMatch(providerCall?.systemPrompt ?? '', /what tone or response style they want/u)
   assert.deepEqual(listCalls, [
     {

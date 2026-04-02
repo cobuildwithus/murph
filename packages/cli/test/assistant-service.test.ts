@@ -622,7 +622,11 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, sh
   assert.match(firstCall?.systemPrompt ?? '', /search assistant memory before answering/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
-    /consider offering one short remember suggestion/u,
+    /Use assistant memory proactively/u,
+  )
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /do not need a separate remember request first/u,
   )
   assert.match(firstCall?.systemPrompt ?? '', /assistant memory .*forget/u)
   assert.match(
@@ -659,7 +663,7 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, sh
   )
   assert.doesNotMatch(
     firstCall?.systemPrompt ?? '',
-    /optional onboarding check-in/u,
+    /optional first-chat check-in/u,
   )
 })
 
@@ -2128,8 +2132,8 @@ test('sendAssistantMessage does not auto-persist identity or preference memory f
   assert.doesNotMatch(secondCall?.systemPrompt ?? '', /Core assistant memory:/u)
 })
 
-test('sendAssistantMessage does not add onboarding prompts even when the first user turn mentions preferences', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-no-onboarding-prompts-'))
+test('sendAssistantMessage injects the first-chat check-in only for an opted-in first turn', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-first-chat-check-in-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -2155,29 +2159,36 @@ test('sendAssistantMessage does not add onboarding prompts even when the first u
 
   await sendAssistantMessage({
     vault: vaultRoot,
-    alias: 'chat:onboarding-complete-one',
+    alias: 'chat:first-check-in',
+    includeFirstTurnCheckIn: true,
     prompt:
       'Call me Chris. Keep answers concise. I want help with training and cholesterol.',
   })
 
   await sendAssistantMessage({
     vault: vaultRoot,
-    alias: 'chat:onboarding-complete-two',
+    alias: 'chat:first-check-in',
+    includeFirstTurnCheckIn: true,
     prompt: 'What should you remember across sessions?',
   })
 
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
   const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
 
-  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /optional onboarding check-in/u)
-  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /what tone or response style they want/u)
-  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /whether they want to give you a name/u)
-  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /what goals they want help with/u)
-  assert.doesNotMatch(secondCall?.systemPrompt ?? '', /optional onboarding check-in/u)
+  assert.match(firstCall?.systemPrompt ?? '', /optional first-chat check-in/u)
+  assert.match(firstCall?.systemPrompt ?? '', /what name they want you to use/u)
+  assert.match(firstCall?.systemPrompt ?? '', /what tone or response style they want/u)
+  assert.match(firstCall?.systemPrompt ?? '', /what health goals they want help with/u)
+  assert.match(firstCall?.systemPrompt ?? '', /at most two sentences/u)
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /text, photos, voice memos, Telegram messages, or email/u,
+  )
+  assert.doesNotMatch(secondCall?.systemPrompt ?? '', /optional first-chat check-in/u)
 })
 
-test('sendAssistantMessage no longer injects first-turn onboarding prompts for later new sessions', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-no-onboarding-repeat-'))
+test('sendAssistantMessage injects the first-chat check-in for each later opted-in new session', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-first-chat-repeat-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -2203,25 +2214,25 @@ test('sendAssistantMessage no longer injects first-turn onboarding prompts for l
 
   await sendAssistantMessage({
     vault: vaultRoot,
-    alias: 'chat:onboarding-name-once-one',
+    alias: 'chat:first-check-in-one',
+    includeFirstTurnCheckIn: true,
     prompt: 'first question',
   })
 
   await sendAssistantMessage({
     vault: vaultRoot,
-    alias: 'chat:onboarding-name-once-two',
+    alias: 'chat:first-check-in-two',
+    includeFirstTurnCheckIn: true,
     prompt: 'second question',
   })
 
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
   const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
 
-  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /whether they want to give you a name/u)
-  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /what tone or response style they want/u)
-  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /what goals they want help with/u)
-  assert.doesNotMatch(secondCall?.systemPrompt ?? '', /whether they want to give you a name/u)
-  assert.doesNotMatch(secondCall?.systemPrompt ?? '', /what tone or response style they want/u)
-  assert.doesNotMatch(secondCall?.systemPrompt ?? '', /what goals they want help with/u)
+  assert.match(firstCall?.systemPrompt ?? '', /optional first-chat check-in/u)
+  assert.match(firstCall?.systemPrompt ?? '', /what name they want you to use/u)
+  assert.match(secondCall?.systemPrompt ?? '', /optional first-chat check-in/u)
+  assert.match(secondCall?.systemPrompt ?? '', /what tone or response style they want/u)
 })
 
 test('sendAssistantMessage clears stale provider session ids when switching providers', async () => {
@@ -2546,7 +2557,7 @@ test('sendAssistantMessage can persist selected health context into assistant me
     .mockImplementationOnce(async (input: { env?: NodeJS.ProcessEnv }) => {
       await upsertAssistantMemory({
         vault: vaultRoot,
-        text: "User's blood pressure is 120 over 80.",
+        text: 'User has diabetes.',
         scope: 'both',
         section: 'Health context',
         turnContext: requireTurnContext(input.env),
@@ -2573,7 +2584,7 @@ test('sendAssistantMessage can persist selected health context into assistant me
   await sendAssistantMessage({
     vault: vaultRoot,
     alias: 'chat:health-one',
-    prompt: 'Remember that my blood pressure is 120 over 80.',
+    prompt: 'I have diabetes.',
   })
 
   await sendAssistantMessage({
@@ -2587,9 +2598,9 @@ test('sendAssistantMessage can persist selected health context into assistant me
   const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
 
   assert.match(longTermMemory, /## Health context/u)
-  assert.match(longTermMemory, /User's blood pressure is 120 over 80\./u)
+  assert.match(longTermMemory, /User has diabetes\./u)
   assert.match(secondCall?.systemPrompt ?? '', /Core assistant memory:/u)
-  assert.match(secondCall?.systemPrompt ?? '', /User's blood pressure is 120 over 80\./u)
+  assert.match(secondCall?.systemPrompt ?? '', /User has diabetes\./u)
 })
 
 test('sendAssistantMessage blocks health-memory upserts in non-private assistant contexts', async () => {

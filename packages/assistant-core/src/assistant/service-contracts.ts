@@ -68,6 +68,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   deliveryTarget?: string | null
   executionContext?: AssistantExecutionContext | null
   failoverRoutes?: readonly AssistantProviderFailoverRoute[] | null
+  includeFirstTurnCheckIn?: boolean
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   operatorAuthority?: AssistantOperatorAuthority

@@ -136,16 +136,6 @@ export function normalizeAssistantLongTermMemoryText(input: {
   }
 
   if (resolvedCandidate) {
-    if (
-      input.section === 'Health context' &&
-      !hasExplicitHealthMemoryLeadIn(input.sourcePrompt ?? input.text)
-    ) {
-      throw new VaultCliError(
-        'ASSISTANT_MEMORY_HEALTH_EXPLICIT_REMEMBER_REQUIRED',
-        'Health-context assistant memory requires an explicit remember request.',
-      )
-    }
-
     if (input.section === 'Health context' && !input.allowSensitiveHealthContext) {
       throw new VaultCliError(
         'ASSISTANT_MEMORY_HEALTH_PRIVATE_CONTEXT_REQUIRED',
@@ -179,13 +169,6 @@ export function normalizeAssistantLongTermMemoryText(input: {
         throw new VaultCliError(
           'ASSISTANT_MEMORY_HEALTH_PRIVATE_CONTEXT_REQUIRED',
           'Health-context assistant memory is only available in private assistant contexts.',
-        )
-      }
-
-      if (!hasExplicitHealthMemoryLeadIn(input.sourcePrompt ?? input.text)) {
-        throw new VaultCliError(
-          'ASSISTANT_MEMORY_HEALTH_EXPLICIT_REMEMBER_REQUIRED',
-          'Health-context assistant memory requires an explicit remember request.',
         )
       }
 
@@ -225,12 +208,11 @@ export function normalizeAssistantDailyMemoryText(input: {
   const sentence = toSentence(input.text)
   if (
     looksLikeSensitiveHealthFact(sentence) &&
-    (!input.allowSensitiveHealthContext ||
-      !hasExplicitHealthMemoryLeadIn(input.sourcePrompt ?? input.text))
+    !input.allowSensitiveHealthContext
   ) {
     throw new VaultCliError(
       'ASSISTANT_MEMORY_DAILY_HEALTH_REJECTED',
-      'Daily assistant memory cannot store sensitive health context without an explicit remember request in a private context.',
+      'Daily assistant memory cannot store sensitive health context outside private assistant contexts.',
     )
   }
 
