@@ -8,6 +8,7 @@ import {
   resolveAssistantOperatorAuthority,
   type AssistantOperatorAuthority,
 } from './operator-authority.js'
+import { isAssistantUserFacingChannel } from './channel-presentation.js'
 import { normalizeNullableString } from './shared.js'
 
 export type AssistantConversationDeliveryPolicy =
@@ -145,11 +146,7 @@ export function resolveAssistantConversationAutoReplyEligibility(input: {
 export function shouldExposeSensitiveHealthContext(
   audience: AssistantConversationAudience,
 ): boolean {
-  const channel = normalizeNullableString(audience.channel)?.toLowerCase() ?? null
-  if (channel === null) {
-    return true
-  }
-  if (channel === 'local' || channel === 'null') {
+  if (!isAssistantUserFacingChannel(audience.channel)) {
     return true
   }
 

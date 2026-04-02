@@ -509,18 +509,21 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, sh
   assert.match(firstCall?.systemPrompt ?? '', /numbers\./u)
   assert.match(firstCall?.systemPrompt ?? '', /Default to synthesis over interruption/u)
   assert.match(firstCall?.systemPrompt ?? '', /normal variation, probably noise, not worth optimizing right now/u)
+  assert.match(firstCall?.systemPrompt ?? '', /Separate observation, inference, and suggestion/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
     /This assistant runtime is for Murph vault and assistant operations, not repo coding work/u,
   )
   assert.match(firstCall?.systemPrompt ?? '', /This assistant runtime is for Murph vault and assistant operations, not repo coding work/u)
-  assert.match(firstCall?.systemPrompt ?? '', /murph chat/u)
-  assert.match(firstCall?.systemPrompt ?? '', /murph run/u)
-  assert.match(firstCall?.systemPrompt ?? '', /Start with the smallest relevant context/u)
+  assert.match(firstCall?.systemPrompt ?? '', /bound Murph tools that are actually exposed in this session/u)
+  assert.match(firstCall?.systemPrompt ?? '', /Start with the user's concrete ask and the smallest relevant context/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
-    /Treat capture-style requests like meal logging as explicit permission/u,
+    /Treat capture-style requests such as meal logging, journal updates, or an explicit "add this" request as permission/u,
   )
+  assert.match(firstCall?.systemPrompt ?? '', /vault\.show/u)
+  assert.match(firstCall?.systemPrompt ?? '', /vault\.list/u)
+  assert.match(firstCall?.systemPrompt ?? '', /vault\.fs\.readText/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
     /Do not edit canonical vault files such as `vault\.json`, `CORE\.md`, `ledger\/\*\*`, `bank\/\*\*`, or `raw\/\*\*` directly/u,
@@ -530,7 +533,9 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, sh
     /use the matching `vault-cli` write surface so the write follows Murph's intended validation and audit path/u,
   )
   assert.match(firstCall?.systemPrompt ?? '', /canonical Murph operator\/data-plane surface/u)
+  assert.match(firstCall?.systemPrompt ?? '', /Incur-backed CLIs/u)
   assert.match(firstCall?.systemPrompt ?? '', /vault-cli <command> --help/u)
+  assert.match(firstCall?.systemPrompt ?? '', /--schema --format json/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
     /meal photo, audio note, or a text-only description/u,
@@ -565,7 +570,7 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, sh
   assert.match(firstCall?.systemPrompt ?? '', /vault-cli deepthink <prompt>/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
-    /assistant state (show|list|patch)/u,
+    /assistant\.state\.(show|list)/u,
   )
   assert.match(firstCall?.systemPrompt ?? '', /non-canonical runtime scratchpads/u)
   assert.match(firstCall?.systemPrompt ?? '', /search assistant memory before answering/u)
@@ -575,15 +580,28 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, sh
   )
   assert.match(
     firstCall?.systemPrompt ?? '',
+    /Before asking again for a stable preference, standing instruction, or recurring context, search assistant memory first/u,
+  )
+  assert.match(
+    firstCall?.systemPrompt ?? '',
     /do not need a separate remember request first/u,
   )
   assert.match(
     firstCall?.systemPrompt ?? '',
     /direct Markdown memory-file edit tools are exposed in this session/u,
   )
+  assert.match(firstCall?.systemPrompt ?? '', /assistant\.memory\.file\.append/u)
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /Treat `assistant\.memory\.file\.write` as dangerous/u,
+  )
   assert.match(
     firstCall?.systemPrompt ?? '',
     /Write durable memory in `.*MEMORY\.md` and short-lived recent-context notes in `.*memory\/\d{4}-\d{2}-\d{2}\.md`/u,
+  )
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /Store confirmed durable facts, not speculative diagnoses/u,
   )
   assert.match(
     firstCall?.systemPrompt ?? '',
@@ -595,7 +613,7 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, sh
   assert.match(firstCall?.systemPrompt ?? '', /assistant run/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
-    /Do not scan the whole vault or broad CLI manifests unless the task actually requires that coverage/u,
+    /Do not scan the whole vault, broad CLI manifests, or unrelated records unless the task truly requires it/u,
   )
   assert.match(firstCall?.systemPrompt ?? '', /keep waiting unless the command actually errors/u)
   assert.match(firstCall?.systemPrompt ?? '', /`--timeout` is the normal knob/u)
@@ -1754,6 +1772,10 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the full Mur
     assert.match(
       providerCall?.systemPrompt ?? '',
       /Treat `assistant\.memory\.file\.write` as dangerous/u,
+    )
+    assert.match(
+      providerCall?.systemPrompt ?? '',
+      /Store confirmed durable facts, not speculative diagnoses/u,
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
