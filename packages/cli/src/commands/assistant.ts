@@ -18,14 +18,10 @@ import {
   assistantCronTargetShowResultSchema,
   assistantDeliverResultSchema,
   assistantDoctorResultSchema,
-  assistantMemoryForgetResultSchema,
   assistantMemoryGetResultSchema,
-  assistantMemoryLongTermSectionValues,
   assistantMemoryQueryScopeValues,
   assistantMemorySearchResultSchema,
-  assistantMemoryUpsertResultSchema,
   assistantMemoryVisibleSectionValues,
-  assistantMemoryWriteScopeValues,
   assistantRunResultSchema,
   assistantStateDeleteResultSchema,
   assistantStateListResultSchema,
@@ -77,14 +73,12 @@ import {
 } from '@murphai/assistant-core/assistant-runtime'
 import {
   assertAssistantMemoryTurnContextVault,
-  forgetAssistantMemory,
   getAssistantMemory,
   redactAssistantMemoryRecord,
   redactAssistantMemorySearchHit,
   resolveAssistantMemoryStoragePaths,
   resolveAssistantMemoryTurnContext,
   searchAssistantMemory,
-  upsertAssistantMemory,
 } from '@murphai/assistant-core/assistant-runtime'
 import {
   redactAssistantDisplayPath,
@@ -1296,7 +1290,7 @@ export function registerAssistantCommands(
   const registerMemoryCommands = () => {
     const memory = Cli.create('memory', {
       description:
-        'Inspect and update non-canonical assistant memory stored outside the vault under assistant-state/.',
+        'Inspect non-canonical assistant memory stored as Markdown outside the vault under assistant-state/.',
     })
 
     memory.command('search', {
@@ -1395,120 +1389,6 @@ export function registerAssistantCommands(
         return {
           ...buildAssistantMemoryResultPaths(context.options.vault),
           memory: redactAssistantMemoryRecord(memoryRecord),
-        }
-      },
-    })
-
-    memory.command('upsert', {
-      args: z.object({
-        text: z
-          .string()
-          .min(1)
-          .describe('Assistant memory text to persist. Outside live turns, use the exact sentence you want stored.'),
-      }),
-      description:
-        'Create or update assistant memory through the typed memory commit layer.',
-      hint:
-        'Use --scope both to mirror durable long-term memory into today\'s daily note. Outside live assistant turns, phrase durable memory as the final stored sentence, such as "Call the user Alex.", "User prefers the default assistant tone.", or "Keep responses brief.". In live assistant turns, the host binds writes to the real user message and ignores any client-supplied --sourcePrompt.',
-      examples: [
-        {
-          args: {
-            text: 'Call the user Alex.',
-          },
-          options: {
-            vault: './vault',
-            scope: 'long-term',
-            section: 'Identity',
-          },
-          description: 'Persist a durable naming preference when you already know the canonical stored wording.',
-        },
-        {
-          args: {
-            text: 'Call me Alex.',
-          },
-          options: {
-            vault: './vault',
-            scope: 'both',
-            section: 'Identity',
-            sourcePrompt: 'Call me Alex from now on.',
-          },
-          description: 'Persist a durable naming preference from natural user wording and mirror it into the daily note.',
-        },
-        {
-          args: {
-            text: 'We are working on assistant memory tools.',
-          },
-          options: {
-            vault: './vault',
-            scope: 'daily',
-          },
-          description: 'Store short-lived project context only in the daily memory log.',
-        },
-      ],
-      options: withBaseOptions({
-        scope: z
-          .enum(assistantMemoryWriteScopeValues)
-          .default('long-term')
-          .describe('Persist long-term memory, a daily note, or both.'),
-        section: z
-          .enum(assistantMemoryLongTermSectionValues)
-          .optional()
-          .describe('Required for long-term memory writes; ignored for daily-only notes.'),
-        sourcePrompt: z
-          .string()
-          .min(1)
-          .optional()
-          .describe('Optional source user wording used for assistant-memory validation.'),
-      }),
-      output: assistantMemoryUpsertResultSchema,
-      async run(context) {
-        const turnContext = resolveAssistantMemoryTurnContext()
-        if (turnContext) {
-          assertAssistantMemoryTurnContextVault(turnContext, context.options.vault)
-        }
-
-        const result = await upsertAssistantMemory({
-          vault: context.options.vault,
-          text: context.args.text,
-          scope: context.options.scope,
-          section: context.options.section,
-          sourcePrompt: context.options.sourcePrompt,
-          turnContext,
-        })
-
-        return {
-          ...buildAssistantMemoryResultPaths(context.options.vault),
-          scope: result.scope,
-          longTermAdded: result.longTermAdded,
-          dailyAdded: result.dailyAdded,
-          memories: result.memories.map(redactAssistantMemoryRecord),
-        }
-      },
-    })
-
-    memory.command('forget', {
-      args: z.object({
-        memoryId: z.string().min(1).describe('Assistant memory id returned by search.'),
-      }),
-      description: 'Remove one assistant memory record by id.',
-      hint:
-        'Use this when a memory item is mistaken or obsolete; prefer forgetting it over appending a contradiction.',
-      options: withBaseOptions(),
-      output: assistantMemoryForgetResultSchema,
-      async run(context) {
-        const turnContext = resolveAssistantMemoryTurnContext()
-        if (turnContext) {
-          assertAssistantMemoryTurnContextVault(turnContext, context.options.vault)
-        }
-
-        const result = await forgetAssistantMemory({
-          vault: context.options.vault,
-          id: context.args.memoryId,
-        })
-
-        return {
-          ...buildAssistantMemoryResultPaths(context.options.vault),
-          removed: redactAssistantMemoryRecord(result.removed),
         }
       },
     })

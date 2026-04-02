@@ -1,21 +1,31 @@
-import { mkdir, open, writeFile } from 'node:fs/promises'
+import { mkdir, open, readFile, writeFile } from 'node:fs/promises'
 import { FOOD_STATUSES, RECIPE_STATUSES } from '@murphai/contracts'
 import { buildSharePackFromVault } from '@murphai/core'
 import path from 'node:path'
 import { z } from 'zod'
 import {
   assistantCronScheduleInputSchema,
-  assistantMemoryLongTermSectionValues,
   assistantMemoryQueryScopeValues,
   assistantMemoryVisibleSectionValues,
-  assistantMemoryWriteScopeValues,
 } from './assistant-cli-contracts.js'
 import {
-  forgetAssistantMemory,
   getAssistantMemory,
+  resolveAssistantMemoryStoragePaths,
   searchAssistantMemory,
-  upsertAssistantMemory,
 } from './assistant/memory.js'
+import {
+  createDefaultDailyMemoryDocument,
+  createDefaultLongTermMemoryDocument,
+  parseMarkdownDocument,
+  renderMarkdownDocument,
+} from './assistant/memory/storage-format.js'
+import { withAssistantMemoryWriteLock } from './assistant/memory/locking.js'
+import { longTermMemorySections } from './assistant/memory/text.js'
+import {
+  ensureAssistantStateDirectory,
+  isMissingFileError,
+  writeTextFileAtomic,
+} from './assistant/shared.js'
 import {
   deleteAssistantStateDocument,
   getAssistantStateDocument,
@@ -64,9 +74,10 @@ const shareEntitySelectorSchema = z
     message: 'Provide either an id or slug.',
   })
 const assistantMemoryQueryScopeSchema = z.enum(assistantMemoryQueryScopeValues)
-const assistantMemoryWriteScopeSchema = z.enum(assistantMemoryWriteScopeValues)
-const assistantMemoryLongTermSectionSchema = z.enum(assistantMemoryLongTermSectionValues)
 const assistantMemoryVisibleSectionSchema = z.enum(assistantMemoryVisibleSectionValues)
+const assistantMemoryMarkdownFilePathSchema = z
+  .string()
+  .regex(/^(MEMORY\.md|memory\/\d{4}-\d{2}-\d{2}\.md)$/u)
 const assistantCronDeliveryTargetSchema = z.object({
   channel: z.string().min(1).optional(),
   deliveryTarget: z.string().min(1).optional(),
@@ -163,21 +174,8 @@ async function loadAssistantCronTools() {
   return await import('./assistant/cron.js')
 }
 
-function allowSensitiveHealthContextForAssistantTools(
-  input: AssistantToolContext,
-): boolean {
+function allowSensitiveHealthContextForAssistantTools(input: AssistantToolContext): boolean {
   return input.allowSensitiveHealthContext === true
-}
-
-async function requireAssistantMemoryToolRecord(
-  input: AssistantToolContext,
-  id: string,
-) {
-  return await getAssistantMemory({
-    id,
-    vault: input.vault,
-    includeSensitiveHealthContext: allowSensitiveHealthContextForAssistantTools(input),
-  })
 }
 
 function createVaultTextReadToolDefinitions(
@@ -280,6 +278,25 @@ function createAssistantRuntimeToolDefinitions(
           vault: input.vault,
           includeSensitiveHealthContext: allowSensitiveHealthContextForAssistantTools(input),
         }),
+    }),
+    defineAssistantTool({
+      name: 'assistant.memory.file.read',
+      description:
+        'Read one assistant memory Markdown file (`MEMORY.md` or `memory/YYYY-MM-DD.md`) so you can edit memory like a normal Markdown file.',
+      inputSchema: z.object({
+        path: assistantMemoryMarkdownFilePathSchema,
+        maxChars: z.number().int().positive().max(assistantToolTextReadMaxChars).optional(),
+      }),
+      inputExample: {
+        path: 'MEMORY.md',
+      },
+      execute: ({ path: candidatePath, maxChars }) =>
+        readAssistantMemoryMarkdownFile(
+          input.vault,
+          candidatePath,
+          maxChars,
+          allowSensitiveHealthContextForAssistantTools(input),
+        ),
     }),
     defineAssistantTool({
       name: 'assistant.cron.status',
@@ -412,6 +429,26 @@ function createAssistantRuntimeToolDefinitions(
   return [
     ...readOnlyTools,
     defineAssistantTool({
+      name: 'assistant.memory.file.write',
+      description:
+        'Replace one assistant memory Markdown file (`MEMORY.md` or `memory/YYYY-MM-DD.md`) with the provided UTF-8 text.',
+      inputSchema: z.object({
+        path: assistantMemoryMarkdownFilePathSchema,
+        text: z.string().min(1),
+      }),
+      inputExample: {
+        path: 'MEMORY.md',
+        text: '# Assistant memory\n\n## Identity\n- Call the user Alex.\n',
+      },
+      execute: ({ path: candidatePath, text }) =>
+        writeAssistantMemoryMarkdownFile(
+          input.vault,
+          candidatePath,
+          text,
+          allowSensitiveHealthContextForAssistantTools(input),
+        ),
+    }),
+    defineAssistantTool({
       name: 'assistant.state.put',
       description:
         'Replace one assistant scratch-state document with the provided JSON object.',
@@ -476,52 +513,6 @@ function createAssistantRuntimeToolDefinitions(
           ...deleted,
           documentPath: redactAssistantDisplayPath(deleted.documentPath),
         }
-      },
-    }),
-    defineAssistantTool({
-      name: 'assistant.memory.upsert',
-      description:
-        'Upsert one assistant memory sentence into long-term or daily memory when useful future continuity should persist.',
-      inputSchema: z.object({
-        text: z.string().min(1),
-        scope: assistantMemoryWriteScopeSchema.optional(),
-        section: assistantMemoryLongTermSectionSchema.optional(),
-      }),
-      inputExample: {
-        text: 'User prefers concise replies.',
-        scope: 'long-term',
-        section: 'Preferences',
-      },
-      execute: ({ scope, section, text }) =>
-        upsertAssistantMemory({
-          vault: input.vault,
-          text,
-          scope,
-          section: section ?? null,
-          allowSensitiveHealthContext: allowSensitiveHealthContextForAssistantTools(input),
-          provenance: {
-            writtenBy: 'assistant',
-            sessionId: input.sessionId ?? null,
-            turnId: input.requestId ?? null,
-          },
-        }),
-    }),
-    defineAssistantTool({
-      name: 'assistant.memory.forget',
-      description:
-        'Remove one assistant memory record by id when it is mistaken or obsolete.',
-      inputSchema: z.object({
-        id: z.string().min(1),
-      }),
-      inputExample: {
-        id: 'long-term:preferences%7Cslot%3Aassistant-style%3Atone',
-      },
-      execute: async ({ id }) => {
-        await requireAssistantMemoryToolRecord(input, id)
-        return forgetAssistantMemory({
-          id,
-          vault: input.vault,
-        })
       },
     }),
     defineAssistantTool({
@@ -1369,6 +1360,187 @@ async function readAssistantTextFile(
     totalChars,
     truncated,
   }
+}
+
+async function readAssistantMemoryMarkdownFile(
+  vaultRoot: string,
+  candidatePath: string,
+  maxChars?: number,
+  allowSensitiveHealthContext = false,
+): Promise<{
+  path: string
+  present: boolean
+  text: string
+  totalChars: number
+  truncated: boolean
+}> {
+  const resolved = resolveAssistantMemoryMarkdownFile(vaultRoot, candidatePath)
+  const limit = maxChars ?? assistantToolTextReadDefaultMaxChars
+  let present = true
+  let text: string
+
+  try {
+    text = await readFile(resolved.absolutePath, 'utf8')
+  } catch (error) {
+    if (!isMissingFileError(error)) {
+      throw error
+    }
+    present = false
+    text = resolved.defaultText
+  }
+
+  if (!allowSensitiveHealthContext) {
+    text = sanitizeAssistantMemoryMarkdownForSharedContext(resolved.relativePath, text)
+  }
+
+  const totalChars = text.length
+  const truncated = totalChars > limit
+
+  return {
+    path: resolved.relativePath,
+    present,
+    text:
+      truncated
+        ? `${text.slice(0, limit)}\n\n[truncated ${totalChars - limit} characters]`
+        : text,
+    totalChars,
+    truncated,
+  }
+}
+
+async function writeAssistantMemoryMarkdownFile(
+  vaultRoot: string,
+  candidatePath: string,
+  text: string,
+  allowSensitiveHealthContext = false,
+): Promise<{
+  path: string
+  totalChars: number
+}> {
+  const resolved = resolveAssistantMemoryMarkdownFile(vaultRoot, candidatePath)
+  await ensureAssistantStateDirectory(path.dirname(resolved.absolutePath))
+  const normalizedText = validateAssistantMemoryMarkdownWrite({
+    allowSensitiveHealthContext,
+    path: resolved.relativePath,
+    text,
+  })
+  await withAssistantMemoryWriteLock(resolveAssistantMemoryStoragePaths(vaultRoot), async () => {
+    await writeTextFileAtomic(resolved.absolutePath, normalizedText)
+  })
+
+  return {
+    path: resolved.relativePath,
+    totalChars: normalizedText.length,
+  }
+}
+
+function resolveAssistantMemoryMarkdownFile(
+  vaultRoot: string,
+  candidatePath: string,
+): {
+  absolutePath: string
+  defaultText: string
+  relativePath: string
+} {
+  const normalizedPath = candidatePath.replaceAll('\\', '/').replace(/^\.\//u, '')
+  const memoryPaths = resolveAssistantMemoryStoragePaths(vaultRoot)
+
+  if (normalizedPath === 'MEMORY.md') {
+    return {
+      absolutePath: memoryPaths.longTermMemoryPath,
+      defaultText: renderMarkdownDocument(createDefaultLongTermMemoryDocument()),
+      relativePath: normalizedPath,
+    }
+  }
+
+  const dailyMatch = /^memory\/(\d{4})-(\d{2})-(\d{2})\.md$/u.exec(normalizedPath)
+  if (dailyMatch) {
+    const year = Number(dailyMatch[1])
+    const month = Number(dailyMatch[2])
+    const day = Number(dailyMatch[3])
+    return {
+      absolutePath: path.join(memoryPaths.assistantStateRoot, normalizedPath),
+      defaultText: renderMarkdownDocument(
+        createDefaultDailyMemoryDocument(new Date(year, month - 1, day)),
+      ),
+      relativePath: normalizedPath,
+    }
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_MEMORY_FILE_PATH_INVALID',
+    'Assistant memory file paths must be `MEMORY.md` or `memory/YYYY-MM-DD.md`.',
+  )
+}
+
+function sanitizeAssistantMemoryMarkdownForSharedContext(
+  relativePath: string,
+  text: string,
+): string {
+  if (relativePath !== 'MEMORY.md') {
+    throw new VaultCliError(
+      'ASSISTANT_MEMORY_FILE_ACCESS_DENIED',
+      'Daily assistant memory file access requires a private assistant context.',
+    )
+  }
+
+  const document = parseMarkdownDocument(text)
+  const healthSection = document.sections.find((section) => section.heading === 'Health context')
+  if (healthSection) {
+    healthSection.lines = []
+  }
+  return renderMarkdownDocument(document)
+}
+
+function validateAssistantMemoryMarkdownWrite(input: {
+  allowSensitiveHealthContext: boolean
+  path: string
+  text: string
+}): string {
+  const normalizedText = input.text.endsWith('\n') ? input.text : `${input.text}\n`
+  const document = parseMarkdownDocument(normalizedText)
+
+  if (input.path === 'MEMORY.md') {
+    const headings = new Set(document.sections.map((section) => section.heading))
+    for (const heading of longTermMemorySections) {
+      if (!headings.has(heading)) {
+        throw new VaultCliError(
+          'ASSISTANT_MEMORY_FILE_INVALID',
+          `Assistant long-term memory must keep the \`${heading}\` section heading.`,
+        )
+      }
+    }
+
+    if (!input.allowSensitiveHealthContext) {
+      const healthSection = document.sections.find((section) => section.heading === 'Health context')
+      const hasHealthBullets = healthSection?.lines.some((line) => /^\s*-\s+\S/u.test(line)) ?? false
+      if (hasHealthBullets) {
+        throw new VaultCliError(
+          'ASSISTANT_MEMORY_FILE_ACCESS_DENIED',
+          'Shared assistant contexts must not write durable health context into `MEMORY.md`.',
+        )
+      }
+    }
+
+    return normalizedText
+  }
+
+  if (!input.allowSensitiveHealthContext) {
+    throw new VaultCliError(
+      'ASSISTANT_MEMORY_FILE_ACCESS_DENIED',
+      'Daily assistant memory file access requires a private assistant context.',
+    )
+  }
+
+  const hasNotesSection = document.sections.some((section) => section.heading === 'Notes')
+  if (!hasNotesSection) {
+    throw new VaultCliError(
+      'ASSISTANT_MEMORY_FILE_INVALID',
+      'Daily assistant memory must keep the `Notes` section heading.',
+    )
+  }
+
+  return normalizedText
 }
 
 function createAssistantToolFileNotTextError(candidatePath: string) {

@@ -32,6 +32,8 @@ import { maybeThrowInjectedAssistantFault } from './fault-injection.js'
 import {
   createAssistantMemoryTurnContextEnv,
   loadAssistantMemoryPromptBlock,
+  resolveAssistantDailyMemoryPath,
+  resolveAssistantMemoryStoragePaths,
 } from './memory.js'
 import {
   buildRecoveredAssistantProviderBindingSeed as buildRecoveredProviderBindingSeed,
@@ -325,6 +327,7 @@ async function resolveAssistantRouteTurnPlan(input: {
         vault: input.input.vault,
       })
     : null
+  const assistantMemoryPaths = resolveAssistantMemoryStoragePaths(input.input.vault)
   const transcriptDistillation = await readLatestAssistantTranscriptDistillation(
     input.input.vault,
     input.session.sessionId,
@@ -335,7 +338,12 @@ async function resolveAssistantRouteTurnPlan(input: {
     .filter((part): part is string => Boolean(part))
     .join('\n\n') || null
   const assistantStateToolsAvailable = input.toolCatalog.hasTool('assistant.state.show')
-  const assistantMemoryToolsAvailable = input.toolCatalog.hasTool('assistant.memory.search')
+  const assistantMemoryRecallToolsAvailable =
+    input.toolCatalog.hasTool('assistant.memory.search') &&
+    input.toolCatalog.hasTool('assistant.memory.get')
+  const assistantMemoryFileEditToolsAvailable =
+    input.toolCatalog.hasTool('assistant.memory.file.read') &&
+    input.toolCatalog.hasTool('assistant.memory.file.write')
   const assistantCronToolsAvailable = input.toolCatalog.hasTool('assistant.cron.status')
 
   return {
@@ -353,7 +361,10 @@ async function resolveAssistantRouteTurnPlan(input: {
       assistantStateToolsAvailable,
       assistantCronToolsAvailable,
       cliAccess: input.sharedPlan.cliAccess,
-      assistantMemoryToolsAvailable,
+      assistantMemoryDailyPath: resolveAssistantDailyMemoryPath(assistantMemoryPaths),
+      assistantMemoryFileEditToolsAvailable,
+      assistantMemoryLongTermPath: assistantMemoryPaths.longTermMemoryPath,
+      assistantMemoryRecallToolsAvailable,
       assistantMemoryPrompt,
       channel: resolvedChannel,
       firstTurnCheckIn: shouldInjectFirstTurnCheckIn,
@@ -904,7 +915,10 @@ function isAssistantConversationTranscriptEntry(entry: {
 function buildAssistantSystemPrompt(input: {
   assistantStateToolsAvailable: boolean
   assistantCronToolsAvailable: boolean
-  assistantMemoryToolsAvailable: boolean
+  assistantMemoryDailyPath: string
+  assistantMemoryFileEditToolsAvailable: boolean
+  assistantMemoryLongTermPath: string
+  assistantMemoryRecallToolsAvailable: boolean
   cliAccess: {
     rawCommand: 'vault-cli'
     setupCommand: 'murph'
@@ -951,7 +965,10 @@ function buildAssistantSystemPrompt(input: {
     }),
     buildAssistantMemoryGuidanceText({
       rawCommand: input.cliAccess.rawCommand,
-      assistantMemoryToolsAvailable: input.assistantMemoryToolsAvailable,
+      assistantMemoryDailyPath: input.assistantMemoryDailyPath,
+      assistantMemoryFileEditToolsAvailable: input.assistantMemoryFileEditToolsAvailable,
+      assistantMemoryLongTermPath: input.assistantMemoryLongTermPath,
+      assistantMemoryRecallToolsAvailable: input.assistantMemoryRecallToolsAvailable,
     }),
     buildAssistantCronGuidanceText({
       rawCommand: input.cliAccess.rawCommand,
@@ -1041,32 +1058,56 @@ function isAssistantSystemPromptOutboundReplyChannel(channel: string | null): bo
 
 function buildAssistantMemoryGuidanceText(
   input: {
-    assistantMemoryToolsAvailable: boolean
+    assistantMemoryDailyPath: string
+    assistantMemoryFileEditToolsAvailable: boolean
+    assistantMemoryLongTermPath: string
+    assistantMemoryRecallToolsAvailable: boolean
     rawCommand: 'vault-cli'
   },
 ): string {
-  return buildAssistantToolAccessGuidanceText({
-    preferredAccessAvailable: input.assistantMemoryToolsAvailable,
-    preferredAccessLines: [
-      'Assistant memory tools are exposed in this session. Prefer the bound assistant-memory tools over shelling out, and do not edit `assistant-state/` files directly.',
+  const memoryPathsLine = `Write durable memory in \`${input.assistantMemoryLongTermPath}\` and short-lived recent-context notes in \`${input.assistantMemoryDailyPath}\`.`
+  const sharedLines = [
+    'The active vault is already bound in this session. Do not switch vaults unless the user explicitly targets a different vault.',
+    memoryPathsLine,
+    'Keep the Markdown structure intact: preserve the preamble, keep long-term facts under the existing section headings, and add or update concise bullet lines instead of freeform sprawl.',
+    'Use long-term memory for durable preferences, identity, standing instructions, and durable health context. Use daily memory for short-lived context from the current stretch of conversation.',
+    'Use assistant memory proactively when a stable identity, preference, standing instruction, useful project context, or other future-relevant context is likely to help later conversations.',
+    'When writing durable memory, phrase the stored sentence cleanly and canonically, such as `Call the user Alex.`, `User prefers the default assistant tone.`, or `Keep responses brief.`',
+    'If a memory item is mistaken or obsolete, edit or remove the stale bullet directly instead of appending a contradiction.',
+    'Sensitive health memory still requires a private assistant context. Do not store it from shared or non-private conversations.',
+  ]
+
+  if (
+    input.assistantMemoryRecallToolsAvailable &&
+    input.assistantMemoryFileEditToolsAvailable
+  ) {
+    return [
+      'Assistant memory recall tools and direct Markdown memory-file edit tools are exposed in this session. Use `assistant.memory.search`/`assistant.memory.get` for recall and `assistant.memory.file.read`/`assistant.memory.file.write` for normal Markdown memory edits.',
       'When the current request depends on prior preferences, ongoing goals, recurring health context, or earlier plans, search assistant memory before answering.',
-      'The active vault is already bound in this session. Do not switch vaults unless the user explicitly targets a different vault.',
-      `Use \`${input.rawCommand} assistant memory ...\` only as a fallback when the bound assistant-memory tools are unavailable in this session.`,
-      'Use assistant memory proactively when a stable identity, preference, standing instruction, useful project context, or other future-relevant context is likely to help later conversations.',
-      'You do not need a separate remember request first. If something is clearly useful for future continuity, upsert it directly.',
-      'Use daily memory for short-lived context from the current stretch of conversation and long-term memory for durable preferences, identity, standing instructions, and durable health context.',
-      'When manually upserting durable memory outside a live assistant turn, phrase `text` as the exact stored sentence you want committed, such as `Call the user Alex.`, `User prefers the default assistant tone.`, or `Keep responses brief.`',
-      'Use `assistant memory forget` to remove mistaken or obsolete memory instead of appending a contradiction.',
-      'Sensitive health memory still requires a private assistant context. Do not store it from shared or non-private conversations.',
-    ],
-    unavailableLines: [
-      'Assistant memory tools are not exposed in this session.',
-      'Use the injected core memory block if present, but do not claim you searched, updated, or forgot assistant memory unless a real tool call happened.',
-      `Use \`${input.rawCommand} assistant memory search|get|upsert|forget\` when you need stored memory and the bound tools are unavailable.`,
-      'When prior continuity would matter and you cannot search memory in this session, ask a brief clarifying question instead of inventing recall.',
-      'Sensitive health memory still requires a private assistant context. Do not store it from shared or non-private conversations.',
-    ],
-  })
+      `Use \`${input.rawCommand} assistant memory search|get\` only as a fallback when the bound assistant-memory recall tools are unavailable in this session.`,
+      'You do not need a separate remember request first. If something is clearly useful for future continuity, update the appropriate Markdown memory file directly.',
+      ...sharedLines,
+    ].join('\n\n')
+  }
+
+  if (input.assistantMemoryRecallToolsAvailable) {
+    return [
+      'Assistant memory recall tools are exposed in this session, but direct Markdown memory-file edit tools are not.',
+      'When the current request depends on prior preferences, ongoing goals, recurring health context, or earlier plans, search assistant memory before answering.',
+      `Use \`${input.rawCommand} assistant memory search|get\` only as a fallback when the bound assistant-memory recall tools are unavailable in this session.`,
+      'Do not claim you updated assistant memory in this session unless a real memory-file edit happened.',
+      ...sharedLines,
+    ].join('\n\n')
+  }
+
+  return [
+    'Assistant memory recall tools are not exposed in this session.',
+    'Use the injected core memory block if present, but do not claim you searched assistant memory unless a real tool call happened.',
+    `Use \`${input.rawCommand} assistant memory search|get\` when you need stored memory and the bound tools are unavailable.`,
+    'When prior continuity would matter and you cannot search memory in this session, ask a brief clarifying question instead of inventing recall.',
+    'Do not claim you updated assistant memory in this session unless a real memory-file edit happened.',
+    ...sharedLines,
+  ].join('\n\n')
 }
 
 function buildAssistantCronGuidanceText(

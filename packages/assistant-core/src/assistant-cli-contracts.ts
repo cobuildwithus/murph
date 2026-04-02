@@ -891,21 +891,6 @@ export const assistantMemoryGetResultSchema = z.object({
   memory: assistantMemoryRecordSchema,
 })
 
-export const assistantMemoryUpsertResultSchema = z.object({
-  vault: pathSchema,
-  stateRoot: pathSchema,
-  scope: z.enum(assistantMemoryWriteScopeValues),
-  longTermAdded: z.number().int().nonnegative(),
-  dailyAdded: z.number().int().nonnegative(),
-  memories: z.array(assistantMemoryRecordSchema),
-})
-
-export const assistantMemoryForgetResultSchema = z.object({
-  vault: pathSchema,
-  stateRoot: pathSchema,
-  removed: assistantMemoryRecordSchema,
-})
-
 export const assistantStateDocumentValueSchema = z.record(
   z.string(),
   z.unknown(),
@@ -1234,12 +1219,6 @@ export type AssistantMemorySearchResult = z.infer<
 >
 export type AssistantMemoryGetResult = z.infer<
   typeof assistantMemoryGetResultSchema
->
-export type AssistantMemoryUpsertResult = z.infer<
-  typeof assistantMemoryUpsertResultSchema
->
-export type AssistantMemoryForgetResult = z.infer<
-  typeof assistantMemoryForgetResultSchema
 >
 export type AssistantStateDocumentValue = z.infer<
   typeof assistantStateDocumentValueSchema
