@@ -3414,7 +3414,7 @@ test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound 
     true,
   )
   assert.match(providerCall?.systemPrompt ?? '', /optional first-chat check-in/u)
-  assert.match(providerCall?.systemPrompt ?? '', /what tone or response style they want/u)
+  assert.match(providerCall?.systemPrompt ?? '', /what health goals they want help with/u)
   assert.match(providerCall?.systemPrompt ?? '', /at most two sentences/u)
   assert.deepEqual(listCalls, [
     {

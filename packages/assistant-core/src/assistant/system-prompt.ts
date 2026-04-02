@@ -177,7 +177,6 @@ function buildAssistantFirstTurnCheckInGuidanceText(
   return [
     'On the first reply of a brand-new interactive chat session, you may include one short optional first-chat check-in, but only when the user\'s opening message is just a greeting, a brief opener, or a vague request for general help.',
     '- what name they want you to use',
-    '- what tone or response style they want',
     '- what health goals they want help with',
     'If any of those are already clear from the current conversation or stored memory, do not ask for them again.',
     'If the first user message already asks for something concrete, do not add the check-in.',
