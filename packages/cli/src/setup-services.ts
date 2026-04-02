@@ -16,7 +16,7 @@ import {
   buildAssistantProviderDefaultsPatch,
   normalizeVaultForConfig,
   readOperatorConfig,
-  resolveAssistantProviderDefaults,
+  resolveAssistantBackendTarget,
   saveAssistantOperatorDefaultsPatch,
   saveDefaultVaultConfig,
   type AssistantOperatorDefaults,
@@ -57,9 +57,6 @@ import {
   redactHomePathsInValue,
   redactNullableHomePath,
 } from './setup-services/shell.js'
-import {
-  assistantProviderConfigsEqual,
-} from '@murphai/assistant-core/assistant-provider'
 import {
   buildBaseFormulaSpecs,
   createStep,
@@ -1061,7 +1058,7 @@ function assistantSelectionToOperatorDefaults(
 ): Partial<AssistantOperatorDefaults> {
   if (!assistant.provider) {
     return {
-      provider: null,
+      backend: null,
       account: assistant.account ?? null,
     }
   }
@@ -1095,29 +1092,9 @@ function assistantOperatorDefaultsMatch(
   existing: AssistantOperatorDefaults | null,
   next: Partial<AssistantOperatorDefaults>,
 ): boolean {
-  const nextProvider = next.provider ?? null
-  const nextProviderDefaults =
-    nextProvider && next.defaultsByProvider
-      ? next.defaultsByProvider[nextProvider] ?? null
-      : null
-
   return (
-    normalizeNullableConfigField(existing?.provider) ===
-      normalizeNullableConfigField(nextProvider) &&
-    assistantProviderConfigsEqual(
-      existing?.provider
-        ? {
-            provider: existing.provider,
-            ...(resolveAssistantProviderDefaults(existing, existing.provider) ?? {}),
-          }
-        : null,
-      nextProvider
-        ? {
-            provider: nextProvider,
-            ...(nextProviderDefaults ?? {}),
-          }
-        : null,
-    ) &&
+    JSON.stringify(resolveAssistantBackendTarget(existing)) ===
+      JSON.stringify(next.backend ?? null) &&
     JSON.stringify(existing?.account ?? null) ===
       JSON.stringify(next.account ?? null)
   )

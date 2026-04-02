@@ -156,16 +156,14 @@ test("assistant-core operator-config writes the canonical local config shape", a
     await saveDefaultVaultConfig("/tmp/existing-vault", homeRoot);
     await saveAssistantOperatorDefaultsPatch(
       {
-        defaultsByProvider: {
-          "openai-compatible": {
-            approvalPolicy: null,
-            codexCommand: null,
-            model: "gpt-5.4",
-            oss: null,
-            profile: null,
-            reasoningEffort: null,
-            sandbox: null,
-          },
+        backend: {
+          adapter: "openai-compatible",
+          apiKeyEnv: null,
+          endpoint: null,
+          headers: null,
+          model: "gpt-5.4",
+          options: null,
+          providerName: null,
         },
         selfDeliveryTargets: {
           telegram: {
@@ -203,10 +201,8 @@ test("assistant-core operator-config writes the canonical local config shape", a
     assert.ok(config);
     assert.equal(config.schema, "murph.operator-config.v1");
     assert.equal(config.defaultVault, "/tmp/existing-vault");
-    assert.equal(
-      config.assistant?.defaultsByProvider?.["openai-compatible"]?.model,
-      "gpt-5.4",
-    );
+    assert.equal(config.assistant?.backend?.adapter, "openai-compatible");
+    assert.equal(config.assistant?.backend?.model, "gpt-5.4");
     assert.deepEqual(config.assistant?.selfDeliveryTargets?.telegram, {
       channel: "telegram",
       deliveryTarget: null,
@@ -219,7 +215,10 @@ test("assistant-core operator-config writes the canonical local config shape", a
 
     const rawConfig = JSON.parse(await readFile(configPath, "utf8")) as {
       assistant?: {
-        defaultsByProvider?: Record<string, { model?: string | null } | undefined>;
+        backend?: {
+          adapter?: string | null;
+          model?: string | null;
+        } | null;
         selfDeliveryTargets?: Record<string, unknown>;
       };
       defaultVault?: string | null;
@@ -227,7 +226,8 @@ test("assistant-core operator-config writes the canonical local config shape", a
     };
     assert.equal(rawConfig.schema, "murph.operator-config.v1");
     assert.equal(rawConfig.defaultVault, "/tmp/existing-vault");
-    assert.equal(rawConfig.assistant?.defaultsByProvider?.["openai-compatible"]?.model, "gpt-5.4");
+    assert.equal(rawConfig.assistant?.backend?.adapter, "openai-compatible");
+    assert.equal(rawConfig.assistant?.backend?.model, "gpt-5.4");
     assert.deepEqual(rawConfig.assistant?.selfDeliveryTargets?.email, saved);
 
     assert.deepEqual(
@@ -262,14 +262,14 @@ test("assistant-core operator-config tolerates malformed existing config", async
     const config = await readOperatorConfig(homeRoot);
     assert.ok(config);
     assert.equal(config.defaultVault, null);
-    assert.equal(config.assistant?.defaultsByProvider ?? null, null);
+    assert.equal(config.assistant?.backend ?? null, null);
     assert.deepEqual(config.assistant?.selfDeliveryTargets?.email, saved);
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
   }
 });
 
-test("assistant-core operator-config rewrites schema-invalid assistant defaults into a readable config", async () => {
+test("assistant-core operator-config rewrites schema-invalid assistant config into a readable config", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "assistant-core-boundary-"));
 
   try {
@@ -280,10 +280,9 @@ test("assistant-core operator-config rewrites schema-invalid assistant defaults 
       configPath,
       `${JSON.stringify({
         assistant: {
-          defaultsByProvider: {
-            openai: {
-              model: "gpt-5.4",
-            },
+          backend: {
+            adapter: "not-a-provider",
+            model: "gpt-5.4",
           },
         },
         defaultVault: "/tmp/invalid-preserved-value",
@@ -307,7 +306,7 @@ test("assistant-core operator-config rewrites schema-invalid assistant defaults 
     const config = await readOperatorConfig(homeRoot);
     assert.ok(config);
     assert.equal(config.defaultVault, null);
-    assert.equal(config.assistant?.defaultsByProvider ?? null, null);
+    assert.equal(config.assistant?.backend ?? null, null);
     assert.deepEqual(config.assistant?.selfDeliveryTargets?.email, saved);
     assert.deepEqual(
       await resolveAssistantSelfDeliveryTarget("email", homeRoot),

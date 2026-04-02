@@ -144,6 +144,15 @@ export {
 } from './hosted-assistant-config.js'
 
 export {
+  assistantBackendTargetSchema,
+  assistantBackendTargetsEqual,
+  assistantBackendTargetToProviderConfigInput,
+  createAssistantBackendTarget,
+  normalizeAssistantBackendTarget,
+  type AssistantBackendTarget,
+} from './assistant-backend.js'
+
+export {
   ROOT_OPTIONS_WITH_VALUES,
   TOP_LEVEL_COMMANDS_REQUIRING_VAULT,
   VAULT_ENV,
@@ -157,6 +166,7 @@ export {
   listAssistantSelfDeliveryTargets,
   normalizeVaultForConfig,
   readOperatorConfig,
+  resolveAssistantBackendTarget,
   resolveAssistantOperatorDefaults,
   resolveAssistantProviderDefaults,
   resolveAssistantSelfDeliveryTarget,

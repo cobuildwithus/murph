@@ -7,10 +7,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   buildAssistantProviderDefaultsPatch,
   ensureHostedAssistantOperatorDefaults,
+  resolveAssistantBackendTarget,
   resolveAssistantOperatorDefaults,
   resolveHostedAssistantConfig,
   resolveOperatorConfigPath,
   saveAssistantOperatorDefaultsPatch,
+  saveHostedAssistantConfig,
 } from "@murphai/assistant-core";
 
 const temporaryPaths: string[] = [];
@@ -59,17 +61,7 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
       schema: "murph.hosted-assistant-config.v1",
     });
 
-    await expect(resolveAssistantOperatorDefaults(homeDirectory)).resolves.toMatchObject({
-      defaultsByProvider: {
-        "openai-compatible": {
-          apiKeyEnv: "OPENAI_API_KEY",
-          baseUrl: "https://api.openai.com/v1",
-          model: "gpt-4.1-mini",
-          providerName: "openai",
-        },
-      },
-      provider: "openai-compatible",
-    });
+    await expect(resolveAssistantOperatorDefaults(homeDirectory)).resolves.toBeNull();
   });
 
   it("preserves hosted reasoning effort for named OpenAI profiles", async () => {
@@ -105,18 +97,7 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
       ],
     });
 
-    await expect(resolveAssistantOperatorDefaults(homeDirectory)).resolves.toMatchObject({
-      defaultsByProvider: {
-        "openai-compatible": {
-          apiKeyEnv: "OPENAI_API_KEY",
-          baseUrl: "https://api.openai.com/v1",
-          model: "gpt-5.4",
-          providerName: "openai",
-          reasoningEffort: "medium",
-        },
-      },
-      provider: "openai-compatible",
-    });
+    await expect(resolveAssistantOperatorDefaults(homeDirectory)).resolves.toBeNull();
   });
 
   it("rejects hosted reasoning effort for non-OpenAI-compatible endpoints", async () => {
@@ -219,34 +200,36 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
       ],
     });
 
-    await expect(resolveAssistantOperatorDefaults(homeDirectory)).resolves.toMatchObject({
-      defaultsByProvider: {
-        "openai-compatible": {
-          apiKeyEnv: "OPENAI_API_KEY",
-          baseUrl: "https://api.openai.com/v1",
-          model: "gpt-4.1-mini",
-          providerName: "openai",
-        },
-      },
-      provider: "openai-compatible",
-    });
+    await expect(resolveAssistantOperatorDefaults(homeDirectory)).resolves.toBeNull();
   });
 
   it("preserves member-managed hosted config instead of overwriting it from worker env", async () => {
     const homeDirectory = await createTemporaryHomeDirectory();
 
-    await saveAssistantOperatorDefaultsPatch(
-      buildAssistantProviderDefaultsPatch({
-        defaults: null,
-        provider: "openai-compatible",
-        providerConfig: {
-          provider: "openai-compatible",
-          apiKeyEnv: "OPENAI_API_KEY",
-          baseUrl: "https://api.openai.com/v1",
-          model: "gpt-4.1-mini",
-          providerName: "openai",
-        },
-      }),
+    await saveHostedAssistantConfig(
+      {
+        activeProfileId: "saved-default",
+        profiles: [
+          {
+            id: "saved-default",
+            label: "OpenAI",
+            managedBy: "member",
+            provider: "openai-compatible",
+            apiKeyEnv: "OPENAI_API_KEY",
+            baseUrl: "https://api.openai.com/v1",
+            model: "gpt-4.1-mini",
+            providerName: "openai",
+            approvalPolicy: null,
+            codexCommand: null,
+            oss: false,
+            profile: null,
+            reasoningEffort: null,
+            sandbox: null,
+          },
+        ],
+        schema: "murph.hosted-assistant-config.v1",
+        updatedAt: "2026-03-28T00:00:00.000Z",
+      },
       homeDirectory,
     );
 
@@ -259,8 +242,8 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
     expect(firstResult).toMatchObject({
       configured: true,
       provider: "openai-compatible",
-      seeded: true,
-      source: "legacy-defaults",
+      seeded: false,
+      source: "saved",
     });
 
     const secondResult = await ensureHostedAssistantOperatorDefaults({
@@ -294,17 +277,7 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
       ],
     });
 
-    await expect(resolveAssistantOperatorDefaults(homeDirectory)).resolves.toMatchObject({
-      defaultsByProvider: {
-        "openai-compatible": {
-          apiKeyEnv: "OPENAI_API_KEY",
-          baseUrl: "https://api.openai.com/v1",
-          model: "gpt-4.1-mini",
-          providerName: "openai",
-        },
-      },
-      provider: "openai-compatible",
-    });
+    await expect(resolveAssistantOperatorDefaults(homeDirectory)).resolves.toBeNull();
   });
 
   it("fails closed instead of migrating legacy defaults when durable hosted config is invalid", async () => {
@@ -367,7 +340,14 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
     });
 
     await expect(resolveHostedAssistantConfig(homeDirectory)).resolves.toBeNull();
-    await expect(resolveAssistantOperatorDefaults(homeDirectory)).resolves.toBeNull();
+    const defaults = await resolveAssistantOperatorDefaults(homeDirectory);
+    expect(resolveAssistantBackendTarget(defaults)).toMatchObject({
+      adapter: "openai-compatible",
+      apiKeyEnv: "OPENAI_API_KEY",
+      endpoint: "https://api.openai.com/v1",
+      model: "gpt-4.1-mini",
+      providerName: "openai",
+    });
   });
 });
 

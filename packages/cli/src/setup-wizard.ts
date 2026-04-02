@@ -28,6 +28,7 @@ import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 export interface SetupWizardResult {
   assistantApiKeyEnv?: string | null
   assistantBaseUrl?: string | null
+  assistantOss?: boolean | null
   assistantPreset?: SetupAssistantPreset
   assistantProviderName?: string | null
   channels: SetupChannel[]
@@ -41,6 +42,7 @@ export interface SetupWizardInput {
   deviceSyncLocalBaseUrl?: string | null
   initialAssistantApiKeyEnv?: string | null
   initialAssistantBaseUrl?: string | null
+  initialAssistantOss?: boolean | null
   initialAssistantPreset?: SetupAssistantPreset
   initialAssistantProviderPreset?: SetupAssistantProviderPreset | null
   initialAssistantProviderName?: string | null
@@ -68,7 +70,7 @@ export type SetupWizardAssistantMethod =
   | 'openai-api-key'
   | 'compatible-provider'
   | 'compatible-endpoint'
-  | 'compatible-codex-oss'
+  | 'compatible-codex-local'
   | 'skip'
 
 interface SetupWizardAssistantProviderOption {
@@ -90,6 +92,7 @@ export interface SetupWizardResolvedAssistantSelection {
   baseUrl: string | null
   detail: string
   methodLabel: string | null
+  oss: boolean | null
   preset: SetupAssistantPreset
   providerLabel: string
   providerName: string | null
@@ -214,7 +217,7 @@ const setupWizardCompatibleAssistantMethodOptions: readonly SetupWizardAssistant
     badges: [{ label: 'manual', tone: 'accent' }],
   },
   {
-    method: 'compatible-codex-oss',
+    method: 'compatible-codex-local',
     title: 'Codex local model',
     description: 'Keep the Codex flow, but point it at a local OSS model.',
     detail: 'Good if you want the Codex tooling path with a local model by default.',
@@ -455,11 +458,13 @@ export async function runSetupWizard(
     const initialAssistantProvider = inferSetupWizardAssistantProvider({
       apiKeyEnv: input.initialAssistantApiKeyEnv,
       baseUrl: input.initialAssistantBaseUrl,
+      oss: input.initialAssistantOss,
       preset: initialAssistantPreset,
       providerName: input.initialAssistantProviderName,
       providerPreset: input.initialAssistantProviderPreset,
     })
     const initialAssistantMethod = inferSetupWizardAssistantMethod({
+      oss: input.initialAssistantOss,
       preset: initialAssistantPreset,
       provider: initialAssistantProvider,
     })
@@ -841,6 +846,7 @@ export async function runSetupWizard(
           completion.submit({
             assistantApiKeyEnv: latestAssistantRef.current.apiKeyEnv,
             assistantBaseUrl: latestAssistantRef.current.baseUrl,
+            assistantOss: latestAssistantRef.current.oss,
             assistantPreset: latestAssistantRef.current.preset,
             assistantProviderName: latestAssistantRef.current.providerName,
             channels: sortSetupWizardChannels(latestChannelsRef.current),
@@ -1342,15 +1348,17 @@ function findSetupWizardAssistantMethodIndex(
 export function inferSetupWizardAssistantProvider(input: {
   apiKeyEnv?: string | null
   baseUrl?: string | null
+  oss?: boolean | null
   preset: SetupAssistantPreset
   providerName?: string | null
   providerPreset?: SetupAssistantProviderPreset | null
 }): SetupWizardAssistantProvider {
   switch (input.preset) {
-    case 'codex-cli':
+    case 'codex':
+      if (input.oss === true) {
+        return resolveSetupWizardCompatibleProviderPreset(input)?.id ?? 'custom'
+      }
       return 'openai'
-    case 'codex-oss':
-      return resolveSetupWizardCompatibleProviderPreset(input)?.id ?? 'custom'
     case 'skip':
       return 'skip'
     case 'openai-compatible':
@@ -1367,14 +1375,13 @@ export function inferSetupWizardAssistantProvider(input: {
 }
 
 function inferSetupWizardAssistantMethod(input: {
+  oss?: boolean | null
   preset: SetupAssistantPreset
   provider: SetupWizardAssistantProvider
 }): SetupWizardAssistantMethod {
   switch (input.preset) {
-    case 'codex-cli':
-      return 'openai-codex'
-    case 'codex-oss':
-      return 'compatible-codex-oss'
+    case 'codex':
+      return input.oss === true ? 'compatible-codex-local' : 'openai-codex'
     case 'skip':
       return 'skip'
     case 'openai-compatible':
@@ -1409,8 +1416,8 @@ function resolveSetupWizardAssistantMethodForProvider(input: {
   }
 
   if (input.provider === 'custom') {
-    return input.currentMethod === 'compatible-codex-oss'
-      ? 'compatible-codex-oss'
+    return input.currentMethod === 'compatible-codex-local'
+      ? 'compatible-codex-local'
       : 'compatible-endpoint'
   }
 
@@ -1459,6 +1466,7 @@ export function resolveSetupWizardAssistantSelection(input: {
       baseUrl: null,
       detail: 'Murph will leave your current assistant settings alone for now.',
       methodLabel: null,
+      oss: null,
       preset: 'skip',
       providerLabel: 'Skip for now',
       providerName: null,
@@ -1474,6 +1482,7 @@ export function resolveSetupWizardAssistantSelection(input: {
         baseUrl: preservedSelection.baseUrl ?? DEFAULT_SETUP_OPENAI_API_BASE_URL,
         detail: `Murph will use ${apiKeyEnv} and ask which model to save next.`,
         methodLabel: 'OpenAI API key',
+        oss: false,
         preset: 'openai-compatible',
         providerLabel: 'OpenAI',
         providerName: preservedSelection.providerName ?? 'openai',
@@ -1486,7 +1495,8 @@ export function resolveSetupWizardAssistantSelection(input: {
       baseUrl: null,
       detail: 'Murph will use your saved Codex / ChatGPT sign-in and ask which default model to use next.',
       methodLabel: 'ChatGPT / Codex sign-in',
-      preset: 'codex-cli',
+      oss: false,
+      preset: 'codex',
       providerLabel: 'OpenAI',
       providerName: null,
       summary: 'OpenAI · ChatGPT / Codex sign-in',
@@ -1494,13 +1504,14 @@ export function resolveSetupWizardAssistantSelection(input: {
   }
 
   if (input.provider === 'custom') {
-    if (input.method === 'compatible-codex-oss') {
+    if (input.method === 'compatible-codex-local') {
       return {
         apiKeyEnv: null,
         baseUrl: null,
         detail: 'Murph will keep the Codex flow and ask which local model to save next.',
         methodLabel: 'Codex local model',
-        preset: 'codex-oss',
+        oss: true,
+        preset: 'codex',
         providerLabel: 'Custom endpoint',
         providerName: null,
         summary: 'Custom endpoint · Codex local model',
@@ -1513,6 +1524,7 @@ export function resolveSetupWizardAssistantSelection(input: {
         preservedSelection.baseUrl ?? DEFAULT_SETUP_OPENAI_COMPATIBLE_BASE_URL,
       detail: 'Murph will ask for the endpoint URL and then let you choose a model.',
       methodLabel: 'Compatible endpoint',
+      oss: false,
       preset: 'openai-compatible',
       providerLabel: 'Custom endpoint',
       providerName: preservedSelection.providerName,
@@ -1535,6 +1547,7 @@ export function resolveSetupWizardAssistantSelection(input: {
       preset: providerPreset,
     }),
     methodLabel: null,
+    oss: false,
     preset: 'openai-compatible',
     providerLabel: providerPreset?.title ?? 'OpenAI-compatible provider',
     providerName:

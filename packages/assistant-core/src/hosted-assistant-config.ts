@@ -86,7 +86,7 @@ export interface HostedAssistantOperatorConfigState {
 
 export interface HostedAssistantBootstrapResult extends HostedAssistantOperatorConfigState {
   seeded: boolean
-  source: 'hosted-env' | 'invalid' | 'legacy-defaults' | 'missing' | 'saved'
+  source: 'hosted-env' | 'invalid' | 'missing' | 'saved'
 }
 
 interface HostedAssistantSeedPlan {
@@ -277,32 +277,18 @@ export async function ensureHostedAssistantOperatorDefaults(input: {
     }
   }
 
-  if (!existingHostedConfig) {
-    const legacyConfig = await resolveHostedAssistantLegacyConfig(input.homeDirectory)
-    if (legacyConfig) {
-      const saved = await saveHostedAssistantConfig(legacyConfig, input.homeDirectory)
-      const savedState = resolveHostedAssistantOperatorDefaultsState(saved.hostedAssistant)
+  if (!existingHostedConfig && envProfile) {
+    const nextConfig = createHostedAssistantConfig({
+      activeProfileId: envProfile.id,
+      profiles: [envProfile],
+    })
+    const saved = await saveHostedAssistantConfig(nextConfig, input.homeDirectory)
+    const savedState = resolveHostedAssistantOperatorDefaultsState(saved.hostedAssistant)
 
-      return {
-        ...savedState,
-        seeded: true,
-        source: 'legacy-defaults',
-      }
-    }
-
-    if (envProfile) {
-      const nextConfig = createHostedAssistantConfig({
-        activeProfileId: envProfile.id,
-        profiles: [envProfile],
-      })
-      const saved = await saveHostedAssistantConfig(nextConfig, input.homeDirectory)
-      const savedState = resolveHostedAssistantOperatorDefaultsState(saved.hostedAssistant)
-
-      return {
-        ...savedState,
-        seeded: true,
-        source: 'hosted-env',
-      }
+    return {
+      ...savedState,
+      seeded: true,
+      source: 'hosted-env',
     }
   }
 
@@ -325,17 +311,17 @@ export async function ensureHostedAssistantOperatorDefaults(input: {
   throw new HostedAssistantConfigurationError(
     'HOSTED_ASSISTANT_CONFIG_REQUIRED',
     [
-      'Hosted assistant automation requires explicit assistant defaults.',
+      'Hosted assistant automation requires explicit hosted assistant config.',
       `Set ${HOSTED_ASSISTANT_PROVIDER_ENV} and ${HOSTED_ASSISTANT_MODEL_ENV}`,
-      'or save explicit assistant operator defaults before hosted runs.',
+      'or save an explicit hosted assistant profile before hosted runs.',
     ].join(' '),
   )
 }
 
 export function resolveHostedAssistantOperatorDefaultsState(
-  defaultsOrConfig: AssistantOperatorDefaults | HostedAssistantConfig | null | undefined,
+  config: HostedAssistantConfig | null | undefined,
 ): HostedAssistantOperatorConfigState {
-  const hostedConfig = tryParseHostedAssistantConfig(defaultsOrConfig)
+  const hostedConfig = tryParseHostedAssistantConfig(config)
   if (hostedConfig) {
     const activeProfile = resolveActiveHostedAssistantProfile(hostedConfig)
     const readyProfile = resolveReadyHostedAssistantProfile(hostedConfig)
@@ -346,39 +332,9 @@ export function resolveHostedAssistantOperatorDefaultsState(
     }
   }
 
-  const provider = resolveHostedAssistantConfiguredProvider(
-    defaultsOrConfig as AssistantOperatorDefaults | null | undefined,
-  )
-
-  if (!provider) {
-    return {
-      configured: false,
-      provider: null,
-    }
-  }
-
-  const providerDefaults = resolveAssistantProviderDefaults(
-    defaultsOrConfig as AssistantOperatorDefaults | null | undefined,
-    provider,
-  )
-
-  if (!providerDefaults?.model) {
-    return {
-      configured: false,
-      provider,
-    }
-  }
-
-  if (provider === 'openai-compatible' && !providerDefaults.baseUrl) {
-    return {
-      configured: false,
-      provider,
-    }
-  }
-
   return {
-    configured: true,
-    provider,
+    configured: false,
+    provider: null,
   }
 }
 
@@ -386,36 +342,6 @@ export function readHostedAssistantApiKeyEnvName(
   source: Readonly<Record<string, unknown>>,
 ): string | null {
   return normalizeHostedAssistantString(source[HOSTED_ASSISTANT_API_KEY_ENV])
-}
-
-async function resolveHostedAssistantLegacyConfig(
-  homeDirectory: string | undefined,
-): Promise<HostedAssistantConfig | null> {
-  const defaults = await resolveAssistantOperatorDefaults(homeDirectory)
-  const state = resolveHostedAssistantOperatorDefaultsState(defaults)
-
-  if (!state.configured || !state.provider) {
-    return null
-  }
-
-  const providerDefaults = resolveAssistantProviderDefaults(defaults, state.provider)
-  if (!providerDefaults) {
-    return null
-  }
-
-  const profile = createHostedAssistantProfile({
-    id: HOSTED_ASSISTANT_LEGACY_PROFILE_ID,
-    managedBy: 'member',
-    providerConfig: {
-      provider: state.provider,
-      ...providerDefaults,
-    },
-  })
-
-  return createHostedAssistantConfig({
-    activeProfileId: profile.id,
-    profiles: [profile],
-  })
 }
 
 function resolveHostedAssistantEnvProfile(
@@ -550,24 +476,6 @@ function resolveHostedAssistantSeedPlan(
       }
     }
   }
-}
-
-function resolveHostedAssistantConfiguredProvider(
-  defaults: AssistantOperatorDefaults | null | undefined,
-): AssistantChatProvider | null {
-  if (defaults?.provider === 'codex-cli' || defaults?.provider === 'openai-compatible') {
-    return defaults.provider
-  }
-
-  if (resolveAssistantProviderDefaults(defaults, 'openai-compatible')) {
-    return 'openai-compatible'
-  }
-
-  if (resolveAssistantProviderDefaults(defaults, 'codex-cli')) {
-    return 'codex-cli'
-  }
-
-  return null
 }
 
 function readHostedAssistantRawEnvConfig(

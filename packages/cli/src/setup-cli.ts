@@ -59,6 +59,7 @@ export interface SetupWizardRunner {
     deviceSyncLocalBaseUrl?: string | null
     initialAssistantApiKeyEnv?: string | null
     initialAssistantBaseUrl?: string | null
+    initialAssistantOss?: boolean | null
     initialAssistantPreset?: SetupAssistantPreset
     initialAssistantProviderPreset?: SetupAssistantProviderPreset | null
     initialAssistantProviderName?: string | null
@@ -129,6 +130,7 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
       context.options.assistantBaseUrl
     let selectedAssistantApiKeyEnv: string | null | undefined =
       context.options.assistantApiKeyEnv
+    let selectedAssistantOss: boolean | undefined = context.options.assistantOss
     let selectedAssistantProviderName: string | null | undefined =
       context.options.assistantProviderName
     let envOverrides: NodeJS.ProcessEnv | undefined
@@ -142,6 +144,7 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
           resolveSetupWizardDeviceSyncLocalBaseUrl(currentEnv),
         initialAssistantApiKeyEnv: context.options.assistantApiKeyEnv,
         initialAssistantBaseUrl: context.options.assistantBaseUrl,
+        initialAssistantOss: context.options.assistantOss ?? null,
         initialAssistantPreset:
           inferSetupAssistantPresetFromOptions(context.options) ??
           getDefaultSetupAssistantPreset(),
@@ -176,6 +179,9 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
       if ('assistantApiKeyEnv' in wizardResult) {
         selectedAssistantApiKeyEnv = wizardResult.assistantApiKeyEnv
       }
+      if ('assistantOss' in wizardResult) {
+        selectedAssistantOss = wizardResult.assistantOss ?? false
+      }
       if ('assistantProviderName' in wizardResult) {
         selectedAssistantProviderName = wizardResult.assistantProviderName
       }
@@ -197,6 +203,7 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
       assistantProviderPreset: selectedAssistantProviderPreset,
       assistantApiKeyEnv: selectedAssistantApiKeyEnv,
       assistantBaseUrl: selectedAssistantBaseUrl,
+      assistantOss: selectedAssistantOss,
       assistantProviderName: selectedAssistantProviderName,
     }
 

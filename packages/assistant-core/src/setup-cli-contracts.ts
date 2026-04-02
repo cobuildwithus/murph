@@ -36,8 +36,7 @@ export const setupWearableValues = ['oura', 'whoop'] as const
 export const setupWearableSchema = z.enum(setupWearableValues)
 
 export const setupAssistantPresetValues = [
-  'codex-cli',
-  'codex-oss',
+  'codex',
   'openai-compatible',
   'skip',
 ] as const
@@ -173,7 +172,7 @@ export const setupCommandOptionsSchema = z.object({
     .describe('whisper.cpp model to download for local transcription.'),
   assistantPreset: setupAssistantPresetSchema
     .optional()
-    .describe('Optional onboarding assistant preset: Codex CLI, Codex OSS/local model, OpenAI-compatible endpoint, or skip.'),
+    .describe('Optional onboarding assistant preset: Codex, OpenAI-compatible endpoint, or skip.'),
   assistantProviderPreset: setupAssistantProviderPresetSchema
     .optional()
     .describe('Optional named OpenAI-compatible provider preset to save during setup, such as openrouter, venice, groq, ollama, or custom.'),
@@ -212,6 +211,10 @@ export const setupCommandOptionsSchema = z.object({
     .min(1)
     .optional()
     .describe('Optional assistant reasoning effort default to save during setup.'),
+  assistantOss: z
+    .boolean()
+    .optional()
+    .describe('Optional Codex backend flag to save a local model target instead of the signed-in Codex cloud path.'),
 })
 
 export const setupResultSchema = z.object({

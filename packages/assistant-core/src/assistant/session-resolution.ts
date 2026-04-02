@@ -1,5 +1,9 @@
+import { assistantBackendTargetToProviderConfigInput } from '../assistant-backend.js'
 import type { AssistantOperatorDefaults } from '../operator-config.js'
-import { resolveAssistantProviderDefaults } from '../operator-config.js'
+import {
+  resolveAssistantBackendTarget,
+  resolveAssistantProviderDefaults,
+} from '../operator-config.js'
 import {
   compactAssistantProviderConfigInput,
   mergeAssistantProviderConfigs,
@@ -15,7 +19,13 @@ export function buildResolveAssistantSessionInput(
   input: AssistantSessionResolutionFields,
   defaults: AssistantOperatorDefaults | null,
 ): ResolveAssistantSessionInput {
-  const inferredProvider = mergeAssistantProviderConfigs(defaults, input).provider
+  const defaultProviderConfig = resolveAssistantBackendTarget(defaults)
+  const inferredProvider = mergeAssistantProviderConfigs(
+    defaultProviderConfig
+      ? assistantBackendTargetToProviderConfigInput(defaultProviderConfig)
+      : null,
+    input,
+  ).provider
   const providerDefaults = resolveAssistantProviderDefaults(defaults, inferredProvider)
   const providerConfig = mergeAssistantProviderConfigsForProvider(
     inferredProvider,
