@@ -175,13 +175,14 @@ function buildAssistantFirstTurnCheckInGuidanceText(
   }
 
   return [
-    'On the first reply of a brand-new interactive chat session, include one short optional first-chat check-in covering:',
+    'On the first reply of a brand-new interactive chat session, you may include one short optional first-chat check-in, but only when the user\'s opening message is just a greeting, a brief opener, or a vague request for general help.',
     '- what name they want you to use',
     '- what tone or response style they want',
     '- what health goals they want help with',
     'If any of those are already clear from the current conversation or stored memory, do not ask for them again.',
-    'Also include a very brief Murph overview in at most two sentences: explain that Murph is a local-first health assistant that can help with logs, patterns, and health questions, and that they can send text, photos, voice memos, Telegram messages, or email.',
-    'If the first user message already asks for something concrete, answer that request first and then add the optional check-in as a brief closing note.',
+    'If the first user message already asks for something concrete, do not add the check-in.',
+    'Do not search or write assistant memory just because this is the first chat turn or because you are doing the optional check-in.',
+    'If you include the check-in, also include a very brief Murph overview in at most two sentences: explain that Murph is a local-first health assistant that can help with logs, patterns, and health questions, and that they can send text, photos, voice memos, Telegram messages, or email.',
     'Make it clear the check-in is optional, keep it brief, and do not turn it into a longer interview.',
   ].join('\n')
 }
@@ -202,11 +203,13 @@ function buildAssistantMemoryGuidanceText(
     memoryPathsLine,
     'Keep the Markdown structure intact: preserve the preamble, keep long-term facts under the existing section headings, and add or update concise bullet lines instead of freeform sprawl.',
     'Use long-term memory for durable preferences, identity, standing instructions, recurring practical constraints, and durable health context. Use daily memory for short-lived context from the current stretch of conversation.',
+    'For lightweight chat, greetings, obvious one-off questions, or simple acknowledgements, reply directly without searching or updating assistant memory.',
     'Before asking again for a stable preference, standing instruction, or recurring context, search assistant memory first.',
-    'Use assistant memory proactively when a stable identity, preference, standing instruction, useful project context, or other future-relevant context is likely to help later conversations.',
+    'Use assistant memory lightly and selectively when a stable identity, preference, standing instruction, useful project context, or other future-relevant context is likely to help later conversations.',
     'When writing durable memory, phrase the stored sentence cleanly and canonically, such as `Call the user Alex.`, `User prefers the default assistant tone.`, or `Keep responses brief.`',
     'Store confirmed durable facts, not speculative diagnoses, not one-off passing chatter, and not conclusions you merely inferred without user confirmation.',
     'If a memory item is mistaken or obsolete, edit or remove the stale bullet directly instead of appending a contradiction.',
+    'Do not search or write assistant memory solely because this is the first chat turn or because you are doing the optional first-chat check-in.',
     'Sensitive health memory still requires a private assistant context. Do not store it from shared or non-private conversations.',
   ]
 
@@ -218,14 +221,14 @@ function buildAssistantMemoryGuidanceText(
       input.assistantMemoryAppendToolAvailable
         ? 'Assistant memory recall tools and direct Markdown memory-file edit tools are exposed in this session. Use `assistant.memory.search`/`assistant.memory.get` for recall, `assistant.memory.file.append` for safe additive memory bullets, and `assistant.memory.file.read`/`assistant.memory.file.write` when you truly need full-file Markdown edits.'
         : 'Assistant memory recall tools and direct Markdown memory-file edit tools are exposed in this session. Use `assistant.memory.search`/`assistant.memory.get` for recall and `assistant.memory.file.read`/`assistant.memory.file.write` for normal Markdown memory edits.',
-      'When the current request depends on prior preferences, ongoing goals, recurring health context, or earlier plans, search assistant memory before answering.',
+      'Search assistant memory only when the current request likely depends on prior preferences, ongoing goals, recurring health context, or earlier plans.',
       input.assistantMemoryAppendToolAvailable
         ? 'Prefer `assistant.memory.file.append` for straightforward new memory. It adds one bullet without rewriting the whole file.'
         : 'Read the latest memory file before changing it so your edit stays grounded in the current Markdown.',
       'Treat `assistant.memory.file.write` as dangerous: it replaces the entire file and can accidentally delete or overwrite older memories if you write stale content.',
       'Use `assistant.memory.file.write` only for deliberate edits, removals, or restructures that append cannot express, and read the latest file immediately before any full write.',
       `Use \`${input.rawCommand} assistant memory search|get\` only as a fallback when the bound assistant-memory recall tools are unavailable in this session.`,
-      'You do not need a separate remember request first. If something is clearly useful for future continuity, update the appropriate Markdown memory file directly.',
+      'You may update assistant memory without a separate remember request, but only when the user has clearly stated a durable fact that is likely to help later conversations.',
       ...sharedLines,
     ].join('\n\n')
   }
@@ -233,7 +236,7 @@ function buildAssistantMemoryGuidanceText(
   if (input.assistantMemoryRecallToolsAvailable) {
     return [
       'Assistant memory recall tools are exposed in this session, but direct Markdown memory-file edit tools are not.',
-      'When the current request depends on prior preferences, ongoing goals, recurring health context, or earlier plans, search assistant memory before answering.',
+      'Search assistant memory only when the current request likely depends on prior preferences, ongoing goals, recurring health context, or earlier plans.',
       `Use \`${input.rawCommand} assistant memory search|get\` only as a fallback when the bound assistant-memory recall tools are unavailable in this session.`,
       'Do not claim you updated assistant memory in this session unless a real memory-file edit happened.',
       ...sharedLines,
