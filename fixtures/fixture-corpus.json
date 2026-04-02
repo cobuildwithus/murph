@@ -21,7 +21,7 @@
     {
       "id": "demo-web-vault",
       "path": "fixtures/demo-web-vault",
-      "purpose": "Small but populated demo vault intended for the local web observatory run path.",
+      "purpose": "Small but populated demo vault used for richer manual review and QA scenarios.",
       "requireSmokeScenarioReference": false,
       "requiredPaths": [
         "README.md",

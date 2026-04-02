@@ -234,8 +234,8 @@ export default defineConfig({
       },
       reportOnFailure: true,
     },
-    // packages/local-web, apps/web, and apps/cloudflare stay in their dedicated
-    // verify lanes so the root multi-project run does not execute them twice.
+    // apps/web and apps/cloudflare stay in their dedicated verify lanes so the
+    // root multi-project run does not execute them twice.
     projects: [
       ...ROOT_REPO_PROJECTS.map(({ config, include }) =>
         mergeConfig(

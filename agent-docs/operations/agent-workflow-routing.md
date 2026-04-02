@@ -28,7 +28,6 @@ Then load only the task-relevant docs listed below.
 
 ## Speciality Reads
 
-- Read `agent-docs/FRONTEND.md` and `packages/local-web/AGENTS.md` for UI or `packages/local-web` work.
 - Read `agent-docs/PRODUCT_SENSE.md` and `agent-docs/PRODUCT_CONSTITUTION.md` for product behavior, UX tradeoffs, or user-facing spec decisions.
 - Read `agent-docs/references/testing-ci-map.md` when selecting, adding, or debugging tests.
 - Read `agent-docs/SECURITY.md` for auth, secrets, external interfaces, or trust-boundary changes.

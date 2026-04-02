@@ -116,8 +116,7 @@ The published bin name is also `murph-device-syncd`.
 - `@murphai/device-syncd/client` is the canonical shared client/helper surface for device-sync control-plane callers
 - `@murphai/device-syncd/public-ingress` is the canonical shared callback/webhook ingress surface for hosted or alternate HTTP adapters
 - `vault-cli device ...` can auto-start and reuse this daemon for the selected vault, or it can target an explicit control plane through `DEVICE_SYNC_BASE_URL`
-- `vault-cli` and `packages/local-web` authenticate local control routes with `DEVICE_SYNC_CONTROL_TOKEN`
-- `packages/local-web` can show provider/account status and redirect through this daemon for one-click auth
+- `vault-cli` authenticates local control routes with `DEVICE_SYNC_CONTROL_TOKEN`
 - cross-origin `returnTo` URLs are accepted only when their origin appears in `DEVICE_SYNC_ALLOWED_RETURN_ORIGINS`; relative paths remain allowed by default
 
 ## HTTP routes
