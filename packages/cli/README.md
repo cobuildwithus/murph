@@ -7,7 +7,7 @@ Owns the `vault-cli` command surface. The CLI may validate inputs and format out
 - Package-local Incur command structure is present under `src/`.
 - Command handlers are thin and dependency-injected through `createVaultCli()`.
 - Machine-facing callers should rely on Incur's native envelope via `--verbose --format json` instead of a Murph-specific wrapper contract.
-- Built-in Incur surfaces such as `--help`, `--schema`, `--llms`, and `completions bash` are part of the package verification surface and should remain truthful as command metadata evolves.
+- Built-in Incur surfaces such as `--help`, `--schema`, `--llms`, `completions bash`, and the root `--config` / `--no-config` flags are part of the package verification surface and should remain truthful as command metadata evolves.
 - Library exports and the executable bin are now split: `src/index.ts` is the package entrypoint, and `src/bin.ts` is the CLI launcher.
 - Default runtime services now lazy-load the workspace `@murphai/core`, `@murphai/importers`, and `@murphai/query` package boundaries instead of reaching into sibling `src/` trees.
 - `packages/cli` now extends the shared `../../tsconfig.base.json`; `tsconfig.json` is the buildable package project, `tsconfig.build.json` stays as the local build alias, and `tsconfig.typecheck.json` covers package-local scripts and tests.
@@ -20,6 +20,24 @@ Owns the `vault-cli` command surface. The CLI may validate inputs and format out
 - The dedicated `@murphai/assistant-core` package owns the headless assistant/inbox/vault/operator-config modules plus the shared inbox-app, usecase, and setup/runtime helper layers directly; the CLI now imports that package in place and keeps only command/setup orchestration plus the daemon-aware wrappers that genuinely belong at the CLI transport boundary.
 - iMessage-backed inbox and assistant delivery flows now depend directly on `@photon-ai/imessage-kit` instead of late-loading that package at call time, while Telegram delivery and ingestion share the same assistant channel binding abstraction.
 - The published CLI package is `@murphai/murph`, and it exposes both `vault-cli` and an onboarding-focused `murph` alias from the same entrypoint; `murph`, `murph --help`, and `murph onboard ...` land on the setup surface, while other operator/data-plane commands stay under `vault-cli`.
+
+## Config defaults
+
+The root CLI now supports incur's built-in config loading for command option defaults. By default it searches `~/.config/murph/config.json` and then `~/.config/vault-cli/config.json`; `vault-cli --config <path> ...` selects an explicit file, including a repo-local JSON file, and `vault-cli --no-config ...` disables config loading for a single run.
+
+Config files only supply command `options`, following incur's nested `commands` shape. For example, this file makes `vault-cli init` default to a chosen vault path:
+
+```json
+{
+  "commands": {
+    "init": {
+      "options": {
+        "vault": "./vault"
+      }
+    }
+  }
+}
+```
 
 ## Host setup (macOS and Linux)
 

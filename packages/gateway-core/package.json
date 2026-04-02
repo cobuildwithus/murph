@@ -31,6 +31,6 @@
     "node": ">=22.16.0"
   },
   "dependencies": {
-    "incur": "0.3.4"
+    "incur": "0.3.13"
   }
 }

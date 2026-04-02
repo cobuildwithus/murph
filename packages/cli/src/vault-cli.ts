@@ -22,12 +22,21 @@ const CLI_SYNC_SUGGESTIONS = [
   'bootstrap the Murph inbox runtime',
 ]
 
+const CLI_CONFIG_FILES = [
+  '~/.config/murph/config.json',
+  '~/.config/vault-cli/config.json',
+] as const
+
 export function createVaultCli(
   services: VaultServices = createIntegratedVaultServices(),
   inboxServices: InboxServices = createIntegratedInboxServices(),
 ): Cli.Cli {
   const cli = Cli.create('vault-cli', {
     description: CLI_DESCRIPTION,
+    config: {
+      flag: 'config',
+      files: [...CLI_CONFIG_FILES],
+    },
     sync: {
       depth: 1,
       suggestions: CLI_SYNC_SUGGESTIONS,
