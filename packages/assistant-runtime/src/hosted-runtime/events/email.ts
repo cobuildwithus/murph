@@ -45,6 +45,7 @@ export async function ingestHostedEmailMessage(
     accountId: dispatch.event.identityId,
     message: parsedMessage,
     selfAddresses: resolveHostedEmailSelfAddresses({
+      extra: [dispatch.event.selfAddress],
       senderIdentity: dispatch.event.identityId,
     }),
     source: "email",

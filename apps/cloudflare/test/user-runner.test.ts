@@ -2488,9 +2488,7 @@ describe("HostedUserRunner", () => {
     expect(firstStatus.pendingEventCount).toBe(1);
     expect(firstStatus.poisonedEventIds).toEqual([]);
     expect(firstStatus.retryingEventId).toBeNull();
-    expect(firstStatus.lastError).toBe(
-      "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN must be configured for native hosted execution.",
-    );
+    expect(firstStatus.lastError).toBe("Hosted execution configuration is invalid.");
     expect(firstStatus.lastErrorCode).toBe("configuration_error");
     expect(firstStatus.run).toMatchObject({
       attempt: 1,
@@ -2506,9 +2504,7 @@ describe("HostedUserRunner", () => {
     expect(retryStatus.pendingEventCount).toBe(1);
     expect(retryStatus.poisonedEventIds).toEqual([]);
     expect(retryStatus.retryingEventId).toBeNull();
-    expect(retryStatus.lastError).toBe(
-      "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN must be configured for native hosted execution.",
-    );
+    expect(retryStatus.lastError).toBe("Hosted execution configuration is invalid.");
     expect(retryStatus.lastErrorCode).toBe("configuration_error");
     expect(retryStatus.run).toMatchObject({
       attempt: 2,

@@ -26,7 +26,6 @@ import {
 } from "./bundle-store.js";
 import {
   buildHostedStorageAad,
-  deriveHostedStorageOpaqueId,
 } from "./crypto-context.js";
 import { readEncryptedR2Json, writeEncryptedR2Json } from "./crypto.js";
 
@@ -230,21 +229,8 @@ export async function persistHostedExecutionFinalBundles(input: {
   return finalizedResult;
 }
 
-async function committedResultObjectKey(rootKey: Uint8Array, userId: string, eventId: string): Promise<string> {
-  const userSegment = await deriveHostedStorageOpaqueId({
-    length: 24,
-    rootKey,
-    scope: "execution-journal",
-    value: `user:${userId}`,
-  });
-  const eventSegment = await deriveHostedStorageOpaqueId({
-    length: 40,
-    rootKey,
-    scope: "execution-journal",
-    value: `event:${userId}:${eventId}`,
-  });
-
-  return `transient/execution-journal/${userSegment}/${eventSegment}.json`;
+async function committedResultObjectKey(_rootKey: Uint8Array, userId: string, eventId: string): Promise<string> {
+  return `transient/execution-journal/${encodeURIComponent(userId)}/${encodeURIComponent(eventId)}.json`;
 }
 
 function normalizeHostedExecutionCommittedResult(

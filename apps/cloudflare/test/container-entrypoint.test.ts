@@ -15,6 +15,7 @@ const servers: Array<Awaited<ReturnType<typeof startHostedContainerEntrypoint>>>
 
 afterEach(async () => {
   await Promise.all(servers.splice(0).map(async (server) => {
+    server.closeAllConnections?.();
     server.close();
     await once(server, "close");
   }));
@@ -44,7 +45,7 @@ function buildJobBody(input: {
 describe("startHostedContainerEntrypoint", () => {
   it("serves a lightweight health endpoint", async () => {
     const server = await startHostedContainerEntrypoint({
-      controlToken: null,
+      controlTokens: [],
       port: 0,
     });
     servers.push(server);
@@ -65,7 +66,7 @@ describe("startHostedContainerEntrypoint", () => {
 
   it("fails closed when the runner control token is missing", async () => {
     const server = await startHostedContainerEntrypoint({
-      controlToken: null,
+      controlTokens: [],
       port: 0,
     });
     servers.push(server);
@@ -91,13 +92,13 @@ describe("startHostedContainerEntrypoint", () => {
 
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toEqual({
-      error: "Hosted runner control token is not configured.",
+      error: "Hosted runner control tokens are not configured.",
     });
   });
 
   it("returns a stable invalid JSON error for malformed run requests", async () => {
     const server = await startHostedContainerEntrypoint({
-      controlToken: "runner-token",
+      controlTokens: ["runner-token"],
       port: 0,
     });
     servers.push(server);
@@ -124,7 +125,7 @@ describe("startHostedContainerEntrypoint", () => {
 
   it("returns a stable invalid request error when the run body is not an object", async () => {
     const server = await startHostedContainerEntrypoint({
-      controlToken: "runner-token",
+      controlTokens: ["runner-token"],
       port: 0,
     });
     servers.push(server);
@@ -156,7 +157,7 @@ describe("startHostedContainerEntrypoint", () => {
 
     try {
       const server = await startHostedContainerEntrypoint({
-        controlToken: "runner-token",
+        controlTokens: ["runner-token"],
         port: 0,
       });
       servers.push(server);
@@ -198,7 +199,7 @@ describe("startHostedContainerEntrypoint", () => {
 
     try {
       const server = await startHostedContainerEntrypoint({
-        controlToken: "runner-token",
+        controlTokens: ["runner-token"],
         port: 0,
       });
       servers.push(server);
@@ -273,7 +274,7 @@ describe("startHostedContainerEntrypoint", () => {
     });
 
     try {
-      const server = await startHostedContainerEntrypoint({ controlToken: "runner-token", port: 0 });
+      const server = await startHostedContainerEntrypoint({ controlTokens: ["runner-token"], port: 0 });
       servers.push(server);
       const address = server.address();
 
@@ -350,7 +351,7 @@ describe("startHostedContainerEntrypoint", () => {
     });
 
     try {
-      const server = await startHostedContainerEntrypoint({ controlToken: "runner-token", port: 0 });
+      const server = await startHostedContainerEntrypoint({ controlTokens: ["runner-token"], port: 0 });
       servers.push(server);
       const address = server.address();
 
@@ -439,7 +440,7 @@ describe("startHostedContainerEntrypoint", () => {
     });
 
     try {
-      const server = await startHostedContainerEntrypoint({ controlToken: "runner-token", port: 0 });
+      const server = await startHostedContainerEntrypoint({ controlTokens: ["runner-token"], port: 0 });
       servers.push(server);
       const address = server.address();
 

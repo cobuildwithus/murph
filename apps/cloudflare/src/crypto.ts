@@ -14,7 +14,7 @@ export interface HostedCipherEnvelope {
   iv: string;
   keyId: string;
   schema: HostedCipherSchema;
-  scope: HostedStorageScope;
+  scope?: HostedStorageScope;
 }
 
 export async function encryptHostedBundle(input: {
@@ -65,31 +65,39 @@ export async function decryptHostedBundle(input: {
     throw new Error("Hosted bundle envelope is invalid.");
   }
 
-  if (input.envelope.scope !== input.scope) {
+  if (input.envelope.scope !== undefined && input.envelope.scope !== input.scope) {
     throw new Error(
       `Hosted bundle envelope scope mismatch: expected ${input.scope}, got ${input.envelope.scope}.`,
     );
   }
 
   const rootKey = resolveHostedBundleDecryptionKey(input);
-  const scopedKey = await deriveHostedStorageKey(rootKey, input.scope);
-  const cryptoKey = await importAesKey(scopedKey);
+  if (input.envelope.scope === undefined) {
+    try {
+      return await decryptHostedEnvelopePayload({
+        aad: input.aad,
+        ciphertext: decodeBase64(input.envelope.ciphertext),
+        iv: decodeBase64(input.envelope.iv),
+        rootKey,
+        scope: "",
+      });
+    } catch {
+      return decryptHostedEnvelopePayload({
+        ciphertext: decodeBase64(input.envelope.ciphertext),
+        iv: decodeBase64(input.envelope.iv),
+        rootKey,
+        scope: "",
+      });
+    }
+  }
 
-  return new Uint8Array(
-    await crypto.subtle.decrypt(
-      {
-        ...(input.aad && input.aad.byteLength > 0
-          ? {
-              additionalData: toArrayBuffer(input.aad),
-            }
-          : {}),
-        iv: toArrayBuffer(decodeBase64(input.envelope.iv)),
-        name: "AES-GCM",
-      },
-      cryptoKey,
-      toArrayBuffer(decodeBase64(input.envelope.ciphertext)),
-    ),
-  );
+  return decryptHostedEnvelopePayload({
+    aad: input.aad,
+    ciphertext: decodeBase64(input.envelope.ciphertext),
+    iv: decodeBase64(input.envelope.iv),
+    rootKey,
+    scope: input.envelope.scope,
+  });
 }
 
 export interface EncryptedR2ObjectBodyLike {
@@ -230,6 +238,33 @@ function resolveHostedBundleDecryptionKey(input: {
 
 async function importAesKey(keyBytes: Uint8Array): Promise<CryptoKey> {
   return crypto.subtle.importKey("raw", toArrayBuffer(keyBytes), "AES-GCM", false, ["encrypt", "decrypt"]);
+}
+
+async function decryptHostedEnvelopePayload(input: {
+  aad?: Uint8Array;
+  ciphertext: Uint8Array;
+  iv: Uint8Array;
+  rootKey: Uint8Array;
+  scope: HostedStorageScope | "";
+}): Promise<Uint8Array> {
+  const scopedKey = await deriveHostedStorageKey(input.rootKey, input.scope);
+  const cryptoKey = await importAesKey(scopedKey);
+
+  return new Uint8Array(
+    await crypto.subtle.decrypt(
+      {
+        ...(input.aad && input.aad.byteLength > 0
+          ? {
+              additionalData: toArrayBuffer(input.aad),
+            }
+          : {}),
+        iv: toArrayBuffer(input.iv),
+        name: "AES-GCM",
+      },
+      cryptoKey,
+      toArrayBuffer(input.ciphertext),
+    ),
+  );
 }
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {

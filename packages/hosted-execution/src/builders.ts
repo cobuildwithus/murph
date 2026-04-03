@@ -68,6 +68,7 @@ export function buildHostedExecutionEmailMessageReceivedDispatch(input: {
   identityId: string;
   occurredAt: string;
   rawMessageKey: string;
+  selfAddress?: string | null;
   userId: string;
 }): HostedExecutionDispatchRequest {
   return buildHostedExecutionDispatch({
@@ -75,6 +76,7 @@ export function buildHostedExecutionEmailMessageReceivedDispatch(input: {
       identityId: input.identityId,
       kind: "email.message.received",
       rawMessageKey: input.rawMessageKey,
+      ...(input.selfAddress === undefined ? {} : { selfAddress: input.selfAddress }),
       userId: input.userId,
     } satisfies HostedExecutionEmailMessageReceivedEvent,
     eventId: input.eventId,

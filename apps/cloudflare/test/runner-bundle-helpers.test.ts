@@ -5,6 +5,7 @@ import { encodeHostedBundleBase64 } from "@murphai/runtime-state/node";
 
 import {
   createHostedArtifactStore,
+  artifactObjectKey,
   createHostedBundleStore,
   describeHostedBase64BundleRef,
   describeHostedBundleBytesRef,
@@ -13,7 +14,6 @@ import {
 } from "../src/bundle-store.js";
 import {
   buildHostedStorageAad,
-  deriveHostedStorageOpaqueId,
 } from "../src/crypto-context.js";
 import { encryptHostedBundle } from "../src/crypto.js";
 import { resolveHostedEmailIngressRoute } from "../src/hosted-email/routes.js";
@@ -328,19 +328,6 @@ function createBucketStore() {
   };
 }
 
-async function artifactObjectKeyForTest(rootKey: Uint8Array, userId: string, sha256: string): Promise<string> {
-  const userSegment = await deriveHostedStorageOpaqueId({
-    length: 24,
-    rootKey,
-    scope: "artifact",
-    value: `user:${userId}`,
-  });
-  const artifactSegment = await deriveHostedStorageOpaqueId({
-    length: 48,
-    rootKey,
-    scope: "artifact",
-    value: `artifact:${userId}:${sha256}`,
-  });
-
-  return `users/${userSegment}/artifacts/${artifactSegment}.artifact.bin`;
+async function artifactObjectKeyForTest(_rootKey: Uint8Array, userId: string, sha256: string): Promise<string> {
+  return artifactObjectKey(userId, sha256);
 }

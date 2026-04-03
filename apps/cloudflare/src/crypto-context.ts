@@ -13,7 +13,7 @@ export type HostedStorageScope =
 
 export async function deriveHostedStorageKey(
   rootKey: Uint8Array,
-  scope: HostedStorageScope | `id:${string}`,
+  scope: HostedStorageScope | `id:${string}` | "",
 ): Promise<Uint8Array> {
   const baseKey = await crypto.subtle.importKey(
     "raw",
