@@ -2,6 +2,11 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.1.7] - 2026-04-03
+
+### Fixed
+- restore npm token fallback
+
 ## [0.1.6] - 2026-04-03
 
 ### Added
