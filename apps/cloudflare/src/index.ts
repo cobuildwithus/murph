@@ -66,7 +66,7 @@ import {
   type HostedEmailInboundRoute,
   readHostedEmailConfig,
   readHostedEmailMessageBytes,
-  resolveHostedEmailInboundRoute,
+  resolveHostedEmailIngressRoute,
   writeHostedEmailRawMessage,
   type HostedEmailWorkerRequest,
 } from "./hosted-email.ts";
@@ -667,12 +667,20 @@ async function handleHostedEmailIngress(
   const config = readHostedEmailConfig(
     env as unknown as Readonly<Record<string, string | undefined>>,
   );
-  const route = await resolveHostedEmailInboundRoute({
+  const rawBytes = await readHostedEmailMessageBytes(message.raw);
+  const parsedMessage = parseRawEmailMessage(rawBytes);
+  const routeHeader = readRawEmailHeaderValue(rawBytes, "x-murph-route");
+  const headerFrom = readRawEmailHeaderValue(rawBytes, "from");
+  const route = await resolveHostedEmailIngressRoute({
     bucket: env.BUNDLES,
     config,
+    envelopeFrom: message.from,
+    hasRepeatedHeaderFrom: headerFrom.repeated,
+    headerFrom: headerFrom.value ?? parsedMessage.from,
     key: environment.bundleEncryptionKey,
     keyId: environment.bundleEncryptionKeyId,
     keysById: environment.bundleEncryptionKeysById,
+    routeHeader: routeHeader.value ?? null,
     to: message.to,
   });
 
@@ -680,10 +688,6 @@ async function handleHostedEmailIngress(
     message.setReject?.("Hosted email address is not recognized.");
     return;
   }
-
-  const rawBytes = await readHostedEmailMessageBytes(message.raw);
-  const parsedMessage = parseRawEmailMessage(rawBytes);
-  const headerFrom = readRawEmailHeaderValue(rawBytes, "from");
 
   if (!await authorizeHostedEmailIngress({
     env,
@@ -712,6 +716,7 @@ async function handleHostedEmailIngress(
     identityId: route.identityId,
     occurredAt: new Date().toISOString(),
     rawMessageKey,
+    selfAddress: route.routeAddress,
     userId: route.userId,
   }));
 }

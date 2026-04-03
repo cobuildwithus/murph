@@ -178,7 +178,7 @@ Add whichever hosted features you actually want the containerized runner to supp
 - `XAI_API_KEY`
 - `MISTRAL_API_KEY`
 
-Hosted email on this path is Cloudflare-native. Keep `HOSTED_EMAIL_*` configured when you want hosted ingress or sends; `AGENTMAIL_*` is intentionally not part of the hosted deploy surface.
+Hosted email on this path is Cloudflare-native. Keep `HOSTED_EMAIL_*` configured when you want hosted ingress or sends; the worker keeps a fixed public sender identity, new outbound mail reuses one stable per-user reply alias instead of writing fresh per-thread routes, registered members can initiate new threads by emailing that fixed public sender address once their verified email has been synced into hosted execution, and ingress still re-authorizes the verified owner before raw-message persistence or hosted dispatch. `AGENTMAIL_*` is intentionally not part of the hosted deploy surface.
 
 ## Local dry run before touching production
 

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { createHostedVerifiedEmailUserEnv } from "@murphai/runtime-state";
 import { encodeHostedBundleBase64 } from "@murphai/runtime-state/node";
 
 import {
@@ -12,6 +13,7 @@ import {
   type HostedBundleStore,
 } from "../src/bundle-store.js";
 import { encryptHostedBundle } from "../src/crypto.js";
+import { resolveHostedEmailIngressRoute } from "../src/hosted-email/routes.js";
 import { RunnerBundleSync } from "../src/user-runner/runner-bundle-sync.js";
 import { RunnerQueueStore } from "../src/user-runner/runner-queue-store.js";
 import { createTestSqlStorage } from "./sql-storage.js";
@@ -112,6 +114,12 @@ describe("hosted bundle reads", () => {
 
 describe("RunnerBundleSync", () => {
   const bundleKey = Uint8Array.from({ length: 32 }, () => 9);
+  const hostedEmailConfig = {
+    domain: "mail.example.test",
+    fromAddress: "assistant@mail.example.test",
+    localPart: "assistant",
+    signingSecret: "email-secret",
+  };
 
   it("fails closed when durable bundle refs point at missing R2 objects", async () => {
     const bucket = createBucketStore();
@@ -153,6 +161,123 @@ describe("RunnerBundleSync", () => {
     await expect(bundleSync.readBundlesForRunner()).rejects.toThrow(
       `Hosted vault bundle ${missingRef.key} is missing from R2.`,
     );
+  });
+
+  it("syncs, moves, clears, and conflict-checks the public sender verified-owner index", async () => {
+    const bucket = createBucketStore();
+    const sharedUserEnvSource = {
+      HOSTED_EMAIL_DOMAIN: hostedEmailConfig.domain,
+      HOSTED_EMAIL_FROM_ADDRESS: hostedEmailConfig.fromAddress,
+      HOSTED_EMAIL_LOCAL_PART: hostedEmailConfig.localPart,
+      HOSTED_EMAIL_SIGNING_SECRET: hostedEmailConfig.signingSecret,
+    };
+    const firstQueueStore = new RunnerQueueStore({
+      storage: {
+        sql: createTestSqlStorage(),
+      },
+    } as never);
+    const secondQueueStore = new RunnerQueueStore({
+      storage: {
+        sql: createTestSqlStorage(),
+      },
+    } as never);
+    await firstQueueStore.bootstrapUser("member_123");
+    await secondQueueStore.bootstrapUser("member_456");
+
+    const firstBundleSync = new RunnerBundleSync(
+      bucket.api,
+      bundleKey,
+      "v1",
+      {
+        v1: bundleKey,
+      },
+      firstQueueStore,
+      sharedUserEnvSource,
+    );
+    const secondBundleSync = new RunnerBundleSync(
+      bucket.api,
+      bundleKey,
+      "v1",
+      {
+        v1: bundleKey,
+      },
+      secondQueueStore,
+      sharedUserEnvSource,
+    );
+
+    await firstBundleSync.updateUserEnv("member_123", {
+      env: createHostedVerifiedEmailUserEnv({
+        address: "owner@example.test",
+      }),
+      mode: "replace",
+    });
+
+    await expect(resolveHostedEmailIngressRoute({
+      bucket: bucket.api,
+      config: hostedEmailConfig,
+      envelopeFrom: "owner@example.test",
+      hasRepeatedHeaderFrom: false,
+      headerFrom: "owner@example.test",
+      key: bundleKey,
+      keyId: "v1",
+      to: hostedEmailConfig.fromAddress,
+    })).resolves.toMatchObject({
+      routeAddress: hostedEmailConfig.fromAddress,
+      userId: "member_123",
+    });
+
+    await firstBundleSync.updateUserEnv("member_123", {
+      env: createHostedVerifiedEmailUserEnv({
+        address: "new-owner@example.test",
+      }),
+      mode: "replace",
+    });
+
+    await expect(resolveHostedEmailIngressRoute({
+      bucket: bucket.api,
+      config: hostedEmailConfig,
+      envelopeFrom: "owner@example.test",
+      hasRepeatedHeaderFrom: false,
+      headerFrom: "owner@example.test",
+      key: bundleKey,
+      keyId: "v1",
+      to: hostedEmailConfig.fromAddress,
+    })).resolves.toBeNull();
+    await expect(resolveHostedEmailIngressRoute({
+      bucket: bucket.api,
+      config: hostedEmailConfig,
+      envelopeFrom: "new-owner@example.test",
+      hasRepeatedHeaderFrom: false,
+      headerFrom: "new-owner@example.test",
+      key: bundleKey,
+      keyId: "v1",
+      to: hostedEmailConfig.fromAddress,
+    })).resolves.toMatchObject({
+      userId: "member_123",
+    });
+
+    await expect(secondBundleSync.updateUserEnv("member_456", {
+      env: createHostedVerifiedEmailUserEnv({
+        address: "new-owner@example.test",
+      }),
+      mode: "replace",
+    })).rejects.toThrow("Hosted verified email sender route is already assigned to a different user.");
+
+    await firstBundleSync.updateUserEnv("member_123", {
+      env: {},
+      mode: "replace",
+    });
+
+    await expect(resolveHostedEmailIngressRoute({
+      bucket: bucket.api,
+      config: hostedEmailConfig,
+      envelopeFrom: "new-owner@example.test",
+      hasRepeatedHeaderFrom: false,
+      headerFrom: "new-owner@example.test",
+      key: bundleKey,
+      keyId: "v1",
+      to: hostedEmailConfig.fromAddress,
+    })).resolves.toBeNull();
   });
 });
 

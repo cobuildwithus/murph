@@ -48,7 +48,7 @@ Current worker env/config names read directly by `src/env.ts`:
 - optional non-secret: `HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID` selects the Cloudflare account used for hosted email sends
 - optional non-secret: `HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL` overrides the Cloudflare API base URL for hosted email delivery
 - optional non-secret: `HOSTED_EMAIL_DEFAULT_SUBJECT` overrides the default hosted email subject
-- optional non-secret: `HOSTED_EMAIL_DOMAIN`, `HOSTED_EMAIL_FROM_ADDRESS`, and `HOSTED_EMAIL_LOCAL_PART` configure the hosted email sender and stable reply aliases
+- optional non-secret: `HOSTED_EMAIL_DOMAIN`, `HOSTED_EMAIL_FROM_ADDRESS`, and `HOSTED_EMAIL_LOCAL_PART` configure the fixed hosted email sender identity plus stable per-user reply aliases
 - optional non-secret: `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID` defaults to `v1`
 - optional secret: `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON` may provide a JSON object of `{ keyId: base64Key }` entries so older encrypted hosted objects remain readable during key rotation
 - optional non-secret: `HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS` defaults to `21600000` in the checked-in Wrangler scaffold
@@ -60,6 +60,8 @@ Current worker env/config names read directly by `src/env.ts`:
 - optional non-secret: `HOSTED_WEB_BASE_URL` gives the worker a shared hosted-web base URL for runner proxy calls back into `apps/web` and is also available to the runtime when `src/runner-env.ts` allows it
 - optional non-secret: `HOSTED_DEVICE_SYNC_CONTROL_BASE_URL`, `HOSTED_AI_USAGE_BASE_URL`, and `HOSTED_SHARE_API_BASE_URL` are worker-side runner proxy overrides for hosted web control-plane routes that still resolve on the same host as `HOSTED_WEB_BASE_URL`
 - optional provider/toolchain vars and secrets configured on the Worker are forwarded into the container only when `src/runner-env.ts` explicitly allowlists them; the worker-side hosted web proxy inputs above stay on the Worker side unless that file names them
+
+Hosted email on this worker keeps the public `From` identity fixed while new outbound sends reuse one stable per-user reply alias. Registered members can also start a thread by emailing that fixed public sender address once their verified email has been synced into hosted execution; the worker resolves that direct inbox only through an encrypted verified-owner index and still re-authorizes the sender before raw-message persistence or hosted dispatch. Learning another member's alias is not enough to reach that member's vault, and neither is addressing the public mailbox from an unregistered or mismatched sender. Legacy per-thread reply aliases still resolve during the cutover, but the worker no longer mints new per-thread route records.
 
 Current worker routes:
 
