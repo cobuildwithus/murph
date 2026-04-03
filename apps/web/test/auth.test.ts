@@ -39,7 +39,9 @@ describe("requireAuthenticatedHostedUser", () => {
   it("accepts a fresh signed hosted user assertion and consumes its nonce", async () => {
     const nonceStore = createNonceStore();
     const request = createSignedRequest({
-      url: "https://control.example.test/api/device-sync/connections",
+      url: "https://control.example.test/api/device-sync/agents/pair",
+      method: "POST",
+      origin: "https://operator.example.test",
       nonce: "nonce-accepted-123456",
     });
 
@@ -58,7 +60,9 @@ describe("requireAuthenticatedHostedUser", () => {
 
   it("rejects forged hosted user assertions instead of falling back to the development user", async () => {
     const claims = createClaims({
-      url: "https://control.example.test/api/device-sync/connections",
+      url: "https://control.example.test/api/device-sync/agents/pair",
+      method: "POST",
+      origin: "https://operator.example.test",
       nonce: "nonce-forged-123456",
     });
     const signedAssertion = encodeHostedUserAssertion(claims);
@@ -67,7 +71,9 @@ describe("requireAuthenticatedHostedUser", () => {
       email: "attacker@example.com",
     });
     const request = createRequestWithAssertion({
-      url: "https://control.example.test/api/device-sync/connections",
+      url: "https://control.example.test/api/device-sync/agents/pair",
+      method: "POST",
+      origin: "https://operator.example.test",
       assertion: forgedAssertion,
       signature: createHostedUserAssertionSignature(
         signedAssertion,
@@ -88,7 +94,9 @@ describe("requireAuthenticatedHostedUser", () => {
 
   it("rejects expired hosted user assertions", async () => {
     const request = createSignedRequest({
-      url: "https://control.example.test/api/device-sync/connections",
+      url: "https://control.example.test/api/device-sync/agents/pair",
+      method: "POST",
+      origin: "https://operator.example.test",
       nonce: "nonce-expired-123456",
       iat: toEpochSeconds("2026-03-25T11:40:00.000Z"),
       exp: toEpochSeconds("2026-03-25T11:45:00.000Z"),
@@ -107,8 +115,10 @@ describe("requireAuthenticatedHostedUser", () => {
 
   it("rejects assertions whose signed path does not match the request path", async () => {
     const request = createSignedRequest({
-      url: "https://control.example.test/api/device-sync/connections/dsc_123/status",
-      path: "/api/device-sync/connections",
+      url: "https://control.example.test/api/device-sync/agents/pair",
+      method: "POST",
+      origin: "https://operator.example.test",
+      path: "/api/device-sync/agents",
       nonce: "nonce-path-123456",
     });
 
@@ -174,7 +184,7 @@ describe("assertBrowserMutationOrigin", () => {
     await expectDeviceSyncError(
       async () =>
         assertBrowserMutationOrigin(
-          new Request("https://control.example.test/api/device-sync/providers/whoop/connect", {
+          new Request("https://control.example.test/api/device-sync/agents/pair", {
             method: "POST",
           }),
           BASE_ENVIRONMENT,
@@ -188,7 +198,7 @@ describe("assertBrowserMutationOrigin", () => {
     await expectDeviceSyncError(
       async () =>
         assertBrowserMutationOrigin(
-          new Request("https://control.example.test/api/device-sync/providers/whoop/connect", {
+          new Request("https://control.example.test/api/device-sync/agents/pair", {
             method: "POST",
             headers: {
               origin: "https://return.example.test",
@@ -207,7 +217,7 @@ describe("assertBrowserMutationOrigin", () => {
   it("allows configured cross-origin POST requests only from the mutation-origin allowlist", () => {
     expect(() =>
       assertBrowserMutationOrigin(
-        new Request("https://control.example.test/api/device-sync/providers/whoop/connect", {
+        new Request("https://control.example.test/api/device-sync/agents/pair", {
           method: "POST",
           headers: {
             origin: "https://operator.example.test",

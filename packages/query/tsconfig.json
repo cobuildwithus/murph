@@ -2,6 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": false,
+    "paths": {},
     "rootDir": "src",
     "outDir": "dist",
     "tsBuildInfoFile": "dist/.tsbuildinfo"
@@ -12,6 +13,9 @@
     },
     {
       "path": "../runtime-state"
+    },
+    {
+      "path": "../importers"
     }
   ],
   "include": [

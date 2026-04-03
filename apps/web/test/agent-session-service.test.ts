@@ -106,9 +106,14 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
 
 function createWhoopProvider(): DeviceSyncProvider {
   return {
-    ...WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
-    callbackPath: WHOOP_DEVICE_PROVIDER_DESCRIPTOR.oauth?.callbackPath ?? "/oauth/whoop/callback",
-    defaultScopes: ["offline"],
+    provider: WHOOP_DEVICE_PROVIDER_DESCRIPTOR.provider,
+    descriptor: {
+      ...WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
+      oauth: {
+        ...WHOOP_DEVICE_PROVIDER_DESCRIPTOR.oauth,
+        defaultScopes: ["offline"],
+      },
+    },
     buildConnectUrl: () => "https://provider.example/connect",
     async exchangeAuthorizationCode() {
       throw new Error("not used");

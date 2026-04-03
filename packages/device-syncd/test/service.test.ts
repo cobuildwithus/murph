@@ -48,9 +48,30 @@ function createWhoopWebhookHeaders(clientSecret: string, rawBody: Buffer, timest
 function createFakeProvider(overrides: Partial<DeviceSyncProvider> = {}): DeviceSyncProvider {
   const baseProvider: DeviceSyncProvider = {
     provider: "demo",
-    callbackPath: "/oauth/demo/callback",
-    webhookPath: "/webhooks/demo",
-    defaultScopes: ["offline", "read:data"],
+    descriptor: {
+      provider: "demo",
+      displayName: "Demo",
+      transportModes: ["oauth_callback", "scheduled_poll", "webhook_push"],
+      oauth: {
+        callbackPath: "/oauth/demo/callback",
+        defaultScopes: ["offline", "read:data"],
+      },
+      webhook: {
+        path: "/webhooks/demo",
+        deliveryMode: "notification",
+        supportsAdmin: false,
+      },
+      normalization: {
+        metricFamilies: ["activity"],
+        snapshotParser: "schema",
+      },
+      sourcePriorityHints: {
+        defaultPriority: 50,
+        metricFamilies: {
+          activity: 50,
+        },
+      },
+    },
     buildConnectUrl(context) {
       return `https://example.test/oauth?state=${context.state}`;
     },
@@ -536,10 +557,26 @@ test("device sync service records granted callback scopes and describes polling-
     providers: [
       createFakeProvider({
         provider: "polling",
-        callbackPath: "/oauth/polling/callback",
-        webhookPath: undefined,
+        descriptor: {
+          provider: "polling",
+          displayName: "Polling",
+          transportModes: ["oauth_callback", "scheduled_poll"],
+          oauth: {
+            callbackPath: "/oauth/polling/callback",
+            defaultScopes: ["personal", "daily"],
+          },
+          normalization: {
+            metricFamilies: ["activity"],
+            snapshotParser: "schema",
+          },
+          sourcePriorityHints: {
+            defaultPriority: 50,
+            metricFamilies: {
+              activity: 50,
+            },
+          },
+        },
         verifyAndParseWebhook: undefined,
-        defaultScopes: ["personal", "daily"],
         async exchangeAuthorizationCode(_context, code) {
           return {
             externalAccountId: `polling-${code}`,

@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { defaultDeviceProviderAdapters } from "../src/device-providers/defaults.ts";
 import {
   defaultDeviceProviderDescriptors,
+  OURA_DEVICE_PROVIDER_DESCRIPTOR,
+  resolveDeviceProviderSourcePriority,
   resolveDeviceProviderDescriptor,
 } from "../src/device-providers/provider-descriptors.ts";
 import { createDeviceProviderRegistry } from "../src/device-providers/registry.ts";
@@ -33,5 +35,17 @@ describe("device provider descriptors", () => {
     expect(registry.get(" WhOoP ")?.provider).toBe("whoop");
     expect(registry.get("OURA")?.provider).toBe("oura");
     expect(registry.get("garmin")?.provider).toBe("garmin");
+  });
+
+  it("resolves metric priority from the shared descriptor policy", () => {
+    expect(resolveDeviceProviderSourcePriority(OURA_DEVICE_PROVIDER_DESCRIPTOR, {
+      metric: "sleepScore",
+      metricFamily: "sleep",
+    })).toBeGreaterThan(
+      resolveDeviceProviderSourcePriority(OURA_DEVICE_PROVIDER_DESCRIPTOR, {
+        metric: "steps",
+        metricFamily: "activity",
+      }),
+    );
   });
 });

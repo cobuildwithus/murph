@@ -39,6 +39,8 @@ import {
   summarizeDailySamples,
   summarizeOverviewExperiments,
   summarizeRecentOverviewJournals,
+  summarizeWearableDay,
+  summarizeWearableSleep,
   summarizeWearableSourceHealth,
 } from "../src/index.ts";
 import {
@@ -282,6 +284,256 @@ test("wearable source health reports derived sleep-window metrics for session-on
       "timeInBedMinutes",
       "totalSleepMinutes",
     ]);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("wearable source health keeps provider-scoped evidence when external provenance is partial", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-wearables-partial-provenance-"));
+
+  try {
+    await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
+
+    await writeFile(
+      path.join(vaultRoot, "ledger/events/2026/2026-04.jsonl"),
+      `${JSON.stringify({
+        schemaVersion: "murph.event.v1",
+        id: "evt_readiness_partial_01",
+        kind: "observation",
+        occurredAt: "2026-04-01T07:00:00Z",
+        recordedAt: "2026-04-01T07:05:00Z",
+        dayKey: "2026-04-01",
+        source: "device",
+        title: "Readiness",
+        metric: "readiness-score",
+        value: 82,
+        unit: "%",
+        externalRef: {
+          system: "oura",
+        },
+      })}\n`,
+      "utf8",
+    );
+
+    const vault = await readVault(vaultRoot);
+    const sourceHealth = summarizeWearableSourceHealth(vault);
+    const filteredSourceHealth = summarizeWearableSourceHealth(vault, {
+      providers: ["oura"],
+    });
+
+    assert.equal(sourceHealth.length, 1);
+    assert.equal(sourceHealth[0]?.provider, "oura");
+    assert.equal(sourceHealth[0]?.candidateMetrics, 1);
+    assert.equal(sourceHealth[0]?.selectedMetrics, 1);
+    assert.equal(filteredSourceHealth.length, 1);
+    assert.equal(filteredSourceHealth[0]?.provider, "oura");
+    assert.equal(
+      sourceHealth[0]?.notes.some((note) => note.includes("Included 1 Oura record with incomplete provenance")),
+      true,
+    );
+    assert.equal(
+      sourceHealth[0]?.notes.some((note) => note.includes("missing resourceId, resourceType")),
+      true,
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("wearable source health reports excluded records when provider provenance is missing", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-wearables-provenance-diagnostics-"));
+
+  try {
+    await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
+
+    await writeFile(
+      path.join(vaultRoot, "ledger/events/2026/2026-04.jsonl"),
+      `${JSON.stringify({
+        schemaVersion: "murph.event.v1",
+        id: "evt_sleep_missing_provider_01",
+        kind: "observation",
+        occurredAt: "2026-04-01T06:45:00Z",
+        recordedAt: "2026-04-01T06:50:00Z",
+        dayKey: "2026-04-01",
+        source: "device",
+        title: "Sleep total",
+        metric: "sleep-total-minutes",
+        value: 430,
+        unit: "minutes",
+        externalRef: {
+          resourceType: "sleep",
+          resourceId: "sleep_01",
+        },
+      })}\n`,
+      "utf8",
+    );
+
+    const vault = await readVault(vaultRoot);
+    const sourceHealth = summarizeWearableSourceHealth(vault);
+    const filteredSourceHealth = summarizeWearableSourceHealth(vault, {
+      providers: ["oura"],
+    });
+    const summary = summarizeWearableDay(vault, "2026-04-01");
+    const filteredSummary = summarizeWearableDay(vault, "2026-04-01", {
+      providers: ["oura"],
+    });
+
+    assert.equal(sourceHealth.length, 1);
+    assert.equal(sourceHealth[0]?.provider, "unknown");
+    assert.equal(sourceHealth[0]?.candidateMetrics, 1);
+    assert.equal(filteredSourceHealth[0]?.provider, "unknown");
+    assert.equal(
+      sourceHealth[0]?.notes[0]?.includes("Excluded 1 wearable record from semantic wearables"),
+      true,
+    );
+    assert.equal(summary?.sourceHealth[0]?.provider, "unknown");
+    assert.equal(filteredSummary?.sourceHealth[0]?.provider, "unknown");
+    assert.equal(
+      summary?.notes.some((note) => note.includes("Excluded 1 wearable record from semantic wearables")),
+      true,
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("wearable metric ranking balances specificity and recency ahead of provider preference alone", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-wearables-scored-metrics-"));
+
+  try {
+    await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
+
+    await writeFile(
+      path.join(vaultRoot, "ledger/events/2026/2026-04.jsonl"),
+      [
+        {
+          schemaVersion: "murph.event.v1",
+          id: "evt_sleep_total_oura_01",
+          kind: "observation",
+          occurredAt: "2026-04-01T06:00:00Z",
+          recordedAt: "2026-04-01T06:10:00Z",
+          dayKey: "2026-04-01",
+          source: "device",
+          title: "Oura sleep summary",
+          metric: "sleep-total-minutes",
+          value: 420,
+          unit: "minutes",
+          externalRef: {
+            system: "oura",
+            resourceType: "summary",
+            resourceId: "summary_01",
+          },
+        },
+        {
+          schemaVersion: "murph.event.v1",
+          id: "evt_sleep_total_garmin_01",
+          kind: "observation",
+          occurredAt: "2026-04-01T07:00:00Z",
+          recordedAt: "2026-04-01T07:20:00Z",
+          dayKey: "2026-04-01",
+          source: "device",
+          title: "Garmin sleep",
+          metric: "sleep-total-minutes",
+          value: 432,
+          unit: "minutes",
+          externalRef: {
+            system: "garmin",
+            resourceType: "sleep",
+            resourceId: "sleep_01",
+          },
+        },
+      ]
+        .map((record) => JSON.stringify(record))
+        .join("\n")
+        .concat("\n"),
+      "utf8",
+    );
+
+    const vault = await readVault(vaultRoot);
+    const sleep = summarizeWearableSleep(vault);
+
+    assert.equal(sleep[0]?.totalSleepMinutes.selection.provider, "garmin");
+    assert.equal(
+      sleep[0]?.totalSleepMinutes.confidence.reasons[0]?.includes("scored highest"),
+      true,
+    );
+    assert.equal(
+      sleep[0]?.totalSleepMinutes.confidence.reasons[0]?.includes("ahead of Oura observation:sleep-total-minutes"),
+      true,
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("sleep-window ranking uses scored evidence and marks session-derived fallbacks explicitly", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-wearables-sleep-window-ranking-"));
+
+  try {
+    await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
+
+    await writeFile(
+      path.join(vaultRoot, "ledger/events/2026/2026-04.jsonl"),
+      [
+        {
+          schemaVersion: "murph.event.v1",
+          id: "evt_sleep_window_oura_01",
+          kind: "sleep_session",
+          occurredAt: "2026-03-31T22:15:00Z",
+          recordedAt: "2026-04-01T05:45:00Z",
+          dayKey: "2026-04-01",
+          source: "device",
+          title: "Oura overnight sleep",
+          startAt: "2026-03-31T22:15:00Z",
+          endAt: "2026-04-01T05:45:00Z",
+          durationMinutes: 450,
+          externalRef: {
+            system: "oura",
+            resourceType: "sleep_session",
+            resourceId: "sleep_oura_01",
+          },
+        },
+        {
+          schemaVersion: "murph.event.v1",
+          id: "evt_sleep_window_garmin_01",
+          kind: "sleep_session",
+          occurredAt: "2026-03-31T22:05:00Z",
+          recordedAt: "2026-04-01T06:20:00Z",
+          dayKey: "2026-04-01",
+          source: "device",
+          title: "Garmin overnight sleep",
+          startAt: "2026-03-31T22:05:00Z",
+          endAt: "2026-04-01T06:20:00Z",
+          durationMinutes: 495,
+          externalRef: {
+            system: "garmin",
+            resourceType: "sleep_session",
+            resourceId: "sleep_garmin_01",
+          },
+        },
+      ]
+        .map((record) => JSON.stringify(record))
+        .join("\n")
+        .concat("\n"),
+      "utf8",
+    );
+
+    const vault = await readVault(vaultRoot);
+    const sleep = summarizeWearableSleep(vault);
+
+    assert.equal(sleep[0]?.sleepWindowProvider, "garmin");
+    assert.equal(sleep[0]?.totalSleepMinutes.selection.provider, "garmin");
+    assert.equal(sleep[0]?.totalSleepMinutes.selection.resolution, "fallback");
+    assert.equal(sleep[0]?.totalSleepMinutes.selection.fallbackFromMetric, "sessionMinutes");
+    assert.equal(
+      sleep[0]?.notes.some((note) => note.includes("Selected Garmin sleep window recorded")),
+      true,
+    );
+    assert.equal(
+      sleep[0]?.notes.some((note) => note.includes("Used the selected sleep session duration because no direct total-sleep metric was available.")),
+      true,
+    );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

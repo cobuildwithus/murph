@@ -249,12 +249,10 @@ export interface ProviderJobResult {
   nextReconcileAt?: string | null;
 }
 
-export interface DeviceSyncProvider extends DeviceProviderDescriptor {
+export interface DeviceSyncProvider {
   provider: string;
-  callbackPath: string;
-  webhookPath?: string;
+  descriptor: DeviceProviderDescriptor;
   webhookAdmin?: ProviderWebhookAdminCapability;
-  defaultScopes: string[];
   buildConnectUrl(input: {
     state: string;
     callbackUrl: string;

@@ -252,7 +252,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
     }));
 
     expect(() => new HostedDeviceSyncControlPlane(
-      new Request("https://attacker.example/api/device-sync/connections"),
+      new Request("https://attacker.example/api/settings/device-sync"),
     )).toThrow(
       "Hosted device-sync public callback and webhook routes require DEVICE_SYNC_PUBLIC_BASE_URL or a canonical hosted public URL in production.",
     );
@@ -265,7 +265,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
     }));
 
     const controlPlane = new HostedDeviceSyncControlPlane(
-      new Request("https://preview.example.test/api/device-sync/connections"),
+      new Request("https://preview.example.test/api/settings/device-sync"),
     );
 
     expect(controlPlane.allowedReturnOrigins).toEqual([
@@ -280,7 +280,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
     }));
 
     const controlPlane = new HostedDeviceSyncControlPlane(
-      new Request("http://localhost:3000/api/device-sync/connections"),
+      new Request("http://localhost:3000/api/settings/device-sync"),
     );
 
     expect(controlPlane.publicIngressBaseUrl).toBe("http://localhost:3000/api/device-sync");
@@ -421,7 +421,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
 
   it("queues a disconnected signal and wake together inside the disconnect flow", async () => {
     const controlPlane = new HostedDeviceSyncControlPlane(
-      new Request("https://control.example.test/api/device-sync/connections/dsc_123/disconnect"),
+      new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
     );
     mocks.listConnectionsForUser.mockResolvedValue([
       {
@@ -494,7 +494,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
 
   it("returns opaque browser connection ids and omits external account ids from browser reads", async () => {
     const controlPlane = new HostedDeviceSyncControlPlane(
-      new Request("https://control.example.test/api/device-sync/connections"),
+      new Request("https://control.example.test/api/settings/device-sync"),
     );
     mocks.listConnectionsForUser.mockResolvedValue([
       {
@@ -547,7 +547,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
 
   it("resolves browser status reads through the opaque browser connection id", async () => {
     const controlPlane = new HostedDeviceSyncControlPlane(
-      new Request("https://control.example.test/api/device-sync/connections/dspc_demo/status"),
+      new Request("https://control.example.test/api/settings/device-sync/connections/dspc_demo/status"),
     );
     mocks.listConnectionsForUser.mockResolvedValue([
       {

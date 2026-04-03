@@ -564,9 +564,8 @@ export function createGarminDeviceSyncProvider(config: GarminDeviceSyncProviderC
   }
 
   return {
-    ...descriptor,
-    callbackPath: descriptor.oauth?.callbackPath ?? GARMIN_CALLBACK_PATH,
-    defaultScopes: [...(descriptor.oauth?.defaultScopes ?? [])],
+    provider: descriptor.provider,
+    descriptor,
     buildConnectUrl(context) {
       const verifier = buildGarminPkceVerifier(context.state, config.clientSecret);
       const search = new URLSearchParams({

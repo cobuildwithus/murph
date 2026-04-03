@@ -454,6 +454,9 @@ importers:
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@murphai/importers':
+        specifier: workspace:*
+        version: link:../importers
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state

@@ -331,7 +331,7 @@ test("Oura provider backfills snapshot windows with polling-friendly collection 
   });
   assert.ok(requests.some((url) => url.includes("/v2/usercollection/daily_activity?")));
   assert.ok(requests.some((url) => url.includes("/v2/usercollection/heartrate?")));
-  assert.equal(provider.webhookPath, "/webhooks/oura");
+  assert.equal(provider.descriptor.webhook?.path, "/webhooks/oura");
 });
 
 test("Oura provider splits heartrate backfills into 30-day chunks", async () => {

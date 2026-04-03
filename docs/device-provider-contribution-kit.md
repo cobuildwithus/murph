@@ -42,6 +42,8 @@ Both `packages/device-syncd` and `packages/importers` consume that descriptor su
 - optional webhook verification and fan-in
 - local token storage and runtime state outside the vault
 
+The runtime provider object should expose the shared `descriptor` plus behavior hooks only. Do not mirror callback paths, webhook paths, default scopes, or other lifecycle metadata onto extra top-level runtime fields.
+
 If you need the same callback or webhook behavior on a different HTTP surface, reuse `@murphai/device-syncd/public-ingress` instead of forking provider-specific ingress logic.
 
 ### 3. `packages/importers` owns parsing and normalization
@@ -164,11 +166,13 @@ Use the template in [`./templates/device-sync-provider.template.md`](./templates
 
 The provider implementation should:
 - import the shared descriptor
-- derive callback path, default scopes, webhook path, and sync defaults from that descriptor
+- derive its runtime `descriptor` from the shared descriptor
 - implement OAuth exchange and token refresh when required
 - implement scheduled jobs with bounded reconcile windows
 - keep webhook handlers light: verify, parse, dedupe, and enqueue
 - fetch one provider snapshot inside `executeJob()` and hand that snapshot to `context.importSnapshot()`
+
+Do not widen the runtime provider shape with duplicated metadata fields. Shared lifecycle metadata belongs in `descriptor`; the runtime provider surface should own behavior only.
 
 Strong recommendations:
 - Treat `externalAccountId` as the stable cross-job identity boundary.

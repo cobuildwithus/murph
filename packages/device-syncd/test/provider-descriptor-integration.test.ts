@@ -18,11 +18,11 @@ describe("device-sync providers", () => {
     });
 
     expect(provider.provider).toBe(GARMIN_DEVICE_PROVIDER_DESCRIPTOR.provider);
-    expect(provider.displayName).toBe(GARMIN_DEVICE_PROVIDER_DESCRIPTOR.displayName);
-    expect(provider.transportModes).toEqual(GARMIN_DEVICE_PROVIDER_DESCRIPTOR.transportModes);
-    expect(provider.callbackPath).toBe(GARMIN_DEVICE_PROVIDER_DESCRIPTOR.oauth?.callbackPath);
-    expect(provider.defaultScopes).toEqual([...GARMIN_DEVICE_PROVIDER_DESCRIPTOR.oauth?.defaultScopes ?? []]);
-    expect(provider.sync?.windows).toEqual(GARMIN_DEVICE_PROVIDER_DESCRIPTOR.sync?.windows);
+    expect(provider.descriptor.displayName).toBe(GARMIN_DEVICE_PROVIDER_DESCRIPTOR.displayName);
+    expect(provider.descriptor.transportModes).toEqual(GARMIN_DEVICE_PROVIDER_DESCRIPTOR.transportModes);
+    expect(provider.descriptor.oauth?.callbackPath).toBe(GARMIN_DEVICE_PROVIDER_DESCRIPTOR.oauth?.callbackPath);
+    expect(provider.descriptor.oauth?.defaultScopes).toEqual([...GARMIN_DEVICE_PROVIDER_DESCRIPTOR.oauth?.defaultScopes ?? []]);
+    expect(provider.descriptor.sync?.windows).toEqual(GARMIN_DEVICE_PROVIDER_DESCRIPTOR.sync?.windows);
     expect(Boolean(provider.revokeAccess)).toBe(
       GARMIN_DEVICE_PROVIDER_DESCRIPTOR.sync?.supportsRemoteDisconnect,
     );
@@ -41,11 +41,10 @@ describe("device-sync providers", () => {
     });
 
     expect(provider.provider).toBe(OURA_DEVICE_PROVIDER_DESCRIPTOR.provider);
-    expect(provider.displayName).toBe(OURA_DEVICE_PROVIDER_DESCRIPTOR.displayName);
-    expect(provider.webhookPath).toBe(OURA_DEVICE_PROVIDER_DESCRIPTOR.webhook?.path);
-    expect(provider.oauth?.defaultScopes).toContain("custom-scope");
-    expect(provider.defaultScopes).toContain("custom-scope");
-    expect(provider.sync?.windows).toEqual({
+    expect(provider.descriptor.displayName).toBe(OURA_DEVICE_PROVIDER_DESCRIPTOR.displayName);
+    expect(provider.descriptor.webhook?.path).toBe(OURA_DEVICE_PROVIDER_DESCRIPTOR.webhook?.path);
+    expect(provider.descriptor.oauth?.defaultScopes).toContain("custom-scope");
+    expect(provider.descriptor.sync?.windows).toEqual({
       backfillDays: 14,
       reconcileDays: 5,
       reconcileIntervalMs: 123_000,
@@ -70,11 +69,10 @@ describe("device-sync providers", () => {
     });
 
     expect(provider.provider).toBe(WHOOP_DEVICE_PROVIDER_DESCRIPTOR.provider);
-    expect(provider.displayName).toBe(WHOOP_DEVICE_PROVIDER_DESCRIPTOR.displayName);
-    expect(provider.webhookPath).toBe(WHOOP_DEVICE_PROVIDER_DESCRIPTOR.webhook?.path);
-    expect(provider.oauth?.defaultScopes).toContain("read:team");
-    expect(provider.defaultScopes).toContain("read:team");
-    expect(provider.sync?.windows).toEqual({
+    expect(provider.descriptor.displayName).toBe(WHOOP_DEVICE_PROVIDER_DESCRIPTOR.displayName);
+    expect(provider.descriptor.webhook?.path).toBe(WHOOP_DEVICE_PROVIDER_DESCRIPTOR.webhook?.path);
+    expect(provider.descriptor.oauth?.defaultScopes).toContain("read:team");
+    expect(provider.descriptor.sync?.windows).toEqual({
       backfillDays: 11,
       reconcileDays: 4,
       reconcileIntervalMs: 456_000,

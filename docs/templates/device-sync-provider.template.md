@@ -103,14 +103,31 @@ function normalizeAcmeExternalAccountId(value: unknown): string | null {
 export function createAcmeDeviceSyncProvider(
   config: AcmeDeviceSyncProviderConfig,
 ): DeviceSyncProvider {
-  const descriptor = ACME_DESCRIPTOR;
   const fetchImpl = config.fetchImpl ?? fetch;
   const baseUrl = (config.baseUrl ?? DEFAULT_ACME_BASE_URL).replace(/\/+$/u, "");
   const timeoutMs = config.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS;
   const backfillDays = config.backfillDays ?? DEFAULT_BACKFILL_DAYS;
   const reconcileDays = config.reconcileDays ?? DEFAULT_RECONCILE_DAYS;
   const reconcileIntervalMs = config.reconcileIntervalMs ?? DEFAULT_RECONCILE_INTERVAL_MS;
-  const defaultScopes = [...(config.scopes ?? descriptor.oauth?.defaultScopes ?? [])];
+  const descriptor = {
+    ...ACME_DESCRIPTOR,
+    oauth: ACME_DESCRIPTOR.oauth
+      ? {
+          ...ACME_DESCRIPTOR.oauth,
+          defaultScopes: [...(config.scopes ?? ACME_DESCRIPTOR.oauth.defaultScopes)],
+        }
+      : undefined,
+    sync: {
+      ...ACME_DESCRIPTOR.sync,
+      windows: {
+        ...ACME_DESCRIPTOR.sync.windows,
+        backfillDays,
+        reconcileDays,
+        reconcileIntervalMs,
+      },
+    },
+  };
+  const defaultScopes = [...(descriptor.oauth?.defaultScopes ?? [])];
 
   async function postTokenRequest(parameters: Record<string, string>) {
     return postOAuthTokenRequest<AcmeTokenResponse>({
@@ -151,10 +168,8 @@ export function createAcmeDeviceSyncProvider(
   }
 
   return {
-    ...descriptor,
-    callbackPath: descriptor.oauth?.callbackPath ?? ACME_OAUTH.callbackPath,
-    webhookPath: descriptor.webhook?.path,
-    defaultScopes,
+    provider: descriptor.provider,
+    descriptor,
     buildConnectUrl({ state, callbackUrl, scopes }) {
       return buildOAuthConnectUrl({
         baseUrl,
@@ -323,5 +338,5 @@ Do not stop at the provider file. Wire the provider into:
 
 Keep the implementation descriptor-first:
 - add or update shared metadata in `provider-descriptors.ts`
-- derive callback path, scopes, webhook path, and sync defaults from that descriptor
+- expose the merged shared metadata under `descriptor`
 - avoid duplicating provider metadata in local constants unless it is truly transport-only

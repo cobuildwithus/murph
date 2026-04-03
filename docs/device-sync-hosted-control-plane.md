@@ -211,19 +211,26 @@ These are internet-facing and provider-facing only.
 - `POST /api/device-sync/webhooks/whoop`
 - `POST /api/device-sync/webhooks/oura`
 
-### Hosted browser-authenticated routes
+### Hosted settings-authenticated wearable routes
 
-These are for the signed-in user and return only safe metadata.
+These are the only browser-facing wearable-management routes.
 
-Browser auth for these routes should come from a trusted front-end/auth proxy that mints a fresh signed assertion per request. The signed payload should include the user claims plus `iat`, `exp`, `nonce`, `aud`, `method`, `path`, and `origin`, with a lifetime no longer than a few minutes. Sensitive mutations such as pairing or disconnect should reject replayed assertions by consuming each nonce once server-side.
+They rely on the hosted onboarding Privy identity-token flow plus the hosted onboarding `Origin` checks, not the signed browser-assertion contract used by the lower-level bridge routes.
 
-- `GET /api/device-sync/connections`
-- `POST /api/device-sync/connections/:provider/connect`
-- `POST /api/device-sync/connections/:connectionId/disconnect`
+- `GET /api/settings/device-sync`
+- `GET /api/settings/device-sync/connections/:connectionId/status`
+- `POST /api/settings/device-sync/providers/:provider/connect`
+- `POST /api/settings/device-sync/connections/:connectionId/disconnect`
+
+The browser should see provider label, display name, status, scopes, last webhook time, and local-sync-needed indicators. It should never see raw provider tokens, raw `externalAccountId` values, or raw hosted connection ids; settings-facing `id` values should be opaque handles.
+
+### Hosted assertion-authenticated browser bridge routes
+
+These are browser-initiated but intentionally lower-level than the settings wearable surface.
+
+Browser auth for these routes should come from a trusted front-end/auth proxy that mints a fresh signed assertion per request. The signed payload should include the user claims plus `iat`, `exp`, `nonce`, `aud`, `method`, `path`, and `origin`, with a lifetime no longer than a few minutes. Sensitive mutations such as agent pairing should reject replayed assertions by consuming each nonce once server-side.
+
 - `POST /api/device-sync/agents/pair`
-- `GET /api/device-sync/connections/:connectionId/status`
-
-The browser should see provider label, display name, status, scopes, last webhook time, and local-sync-needed indicators. It should never see raw provider tokens, raw `externalAccountId` values, or raw hosted connection ids; browser-facing `id` values should be opaque handles.
 
 ### Hosted local-agent routes
 
@@ -263,7 +270,7 @@ Move to the hosted control plane in hosted mode:
 - webhook dedupe traces
 - pending-sync mailbox/signals for the local app
 - provider webhook subscription management
-- browser-facing connect/disconnect metadata surface
+- settings-facing connect/disconnect metadata surface
 - optional token-refresh helper if client secrets remain hosted-only
 
 ## What should stay local

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   createHostedDeviceSyncControlPlane: vi.fn(),
   disconnectConnection: vi.fn(),
+  getConnectionStatus: vi.fn(),
   listConnections: vi.fn(),
   requireHostedPrivyActiveRequestAuthContext: vi.fn(),
   startConnection: vi.fn(),
@@ -26,16 +27,19 @@ vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
 type SettingsDeviceSyncRouteModule = typeof import("../app/api/settings/device-sync/route");
 type SettingsDeviceSyncConnectRouteModule = typeof import("../app/api/settings/device-sync/providers/[provider]/connect/route");
 type SettingsDeviceSyncDisconnectRouteModule = typeof import("../app/api/settings/device-sync/connections/[connectionId]/disconnect/route");
+type SettingsDeviceSyncStatusRouteModule = typeof import("../app/api/settings/device-sync/connections/[connectionId]/status/route");
 
 let settingsDeviceSyncRoute: SettingsDeviceSyncRouteModule;
 let settingsDeviceSyncConnectRoute: SettingsDeviceSyncConnectRouteModule;
 let settingsDeviceSyncDisconnectRoute: SettingsDeviceSyncDisconnectRouteModule;
+let settingsDeviceSyncStatusRoute: SettingsDeviceSyncStatusRouteModule;
 
 describe("device sync settings routes", () => {
   beforeAll(async () => {
     settingsDeviceSyncRoute = await import("../app/api/settings/device-sync/route");
     settingsDeviceSyncConnectRoute = await import("../app/api/settings/device-sync/providers/[provider]/connect/route");
     settingsDeviceSyncDisconnectRoute = await import("../app/api/settings/device-sync/connections/[connectionId]/disconnect/route");
+    settingsDeviceSyncStatusRoute = await import("../app/api/settings/device-sync/connections/[connectionId]/status/route");
   });
 
   beforeEach(() => {
@@ -48,8 +52,30 @@ describe("device sync settings routes", () => {
     });
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
       disconnectConnection: mocks.disconnectConnection,
+      getConnectionStatus: mocks.getConnectionStatus,
       listConnections: mocks.listConnections,
       startConnection: mocks.startConnection,
+    });
+    mocks.getConnectionStatus.mockResolvedValue({
+      connection: {
+        accessTokenExpiresAt: null,
+        connectedAt: "2026-04-01T08:00:00.000Z",
+        createdAt: "2026-04-01T08:00:00.000Z",
+        displayName: "Alice Oura",
+        id: "dspc_oura_123",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: "2026-04-03T07:00:00.000Z",
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: "2026-04-03T06:55:00.000Z",
+        lastWebhookAt: "2026-04-03T07:01:00.000Z",
+        metadata: {},
+        nextReconcileAt: "2026-04-03T16:00:00.000Z",
+        provider: "oura",
+        scopes: ["daily"],
+        status: "active",
+        updatedAt: "2026-04-03T07:05:00.000Z",
+      },
     });
     mocks.listConnections.mockResolvedValue({
       connections: [
@@ -144,6 +170,47 @@ describe("device sync settings routes", () => {
     expect(mocks.startConnection).toHaveBeenCalledWith("member_123", "oura", "/settings?tab=wearables");
     await expect(response.json()).resolves.toEqual({
       authorizationUrl: "https://provider.example.test/oauth/start",
+    });
+  });
+
+  it("rejects GET requests on the hosted settings connect route", async () => {
+    const response = await settingsDeviceSyncConnectRoute.GET();
+
+    expect(response.status).toBe(405);
+    expect(response.headers.get("allow")).toBe("POST");
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "METHOD_NOT_ALLOWED",
+        message:
+          "Hosted settings device-sync connect routes only allow POST because starting a connection mutates server state.",
+      },
+    });
+    expect(mocks.assertHostedOnboardingMutationOrigin).not.toHaveBeenCalled();
+    expect(mocks.requireHostedPrivyActiveRequestAuthContext).not.toHaveBeenCalled();
+    expect(mocks.startConnection).not.toHaveBeenCalled();
+  });
+
+  it("returns one settings source for an opaque connection id status lookup", async () => {
+    const response = await settingsDeviceSyncStatusRoute.GET(
+      new Request("https://join.example.test/api/settings/device-sync/connections/dspc_oura_123/status"),
+      {
+        params: Promise.resolve({
+          connectionId: "dspc_oura_123",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.getConnectionStatus).toHaveBeenCalledWith("member_123", "dspc_oura_123");
+    expect(mocks.listConnections).toHaveBeenCalledWith("member_123");
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      source: {
+        connectionId: "dspc_oura_123",
+        provider: "oura",
+        statusLabel: "Connected",
+        tone: "calm",
+      },
     });
   });
 
