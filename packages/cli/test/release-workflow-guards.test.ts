@@ -44,6 +44,7 @@ describe('release workflow guards', () => {
     expect(workflow).toContain('NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}')
     expect(workflow).toContain('Using NPM_TOKEN authentication for npm publish.')
     expect(workflow).toContain('NPM_TOKEN is not set; falling back to trusted publishing.')
+    expect(workflow).not.toContain('npm install -g npm@latest')
     expect(workflow).toContain('if [[ -n "${{ needs.tag-check.outputs.npm_tag }}" ]]; then')
     expect(workflow).toContain('publish_args+=(--npm-tag "${{ needs.tag-check.outputs.npm_tag }}")')
     expect(workflow).toContain('node "${publish_args[@]}"')
