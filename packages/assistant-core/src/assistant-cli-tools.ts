@@ -27,6 +27,11 @@ import {
 } from './assistant/memory/storage-format.js'
 import { withAssistantMemoryWriteLock } from './assistant/memory/locking.js'
 import {
+  assistantWebFetchExtractModeValues,
+  fetchAssistantWeb,
+  resolveAssistantWebFetchEnabled,
+} from './assistant/web-fetch.js'
+import {
   assistantWebSearchFreshnessValues,
   assistantWebSearchProviderValues,
   resolveConfiguredAssistantWebSearchProvider,
@@ -83,6 +88,7 @@ const isoTimestampSchema = z.string().min(1)
 const vaultFilePathSchema = z.string().min(1)
 const jsonObjectSchema = z.record(z.string(), z.unknown())
 const optionalStringArraySchema = z.array(z.string().min(1)).optional()
+const assistantWebFetchExtractModeSchema = z.enum(assistantWebFetchExtractModeValues)
 const assistantWebSearchProviderSchema = z.enum(assistantWebSearchProviderValues)
 const assistantWebSearchFreshnessSchema = z.enum(assistantWebSearchFreshnessValues)
 const assistantWebSearchDomainFilterSchema = z.array(z.string().min(1)).max(20).optional()
@@ -272,6 +278,36 @@ function createWebSearchToolDefinitions() {
           dateAfter,
           dateBefore,
           domainFilter,
+        }),
+    }),
+  ]
+}
+
+function createWebFetchToolDefinitions() {
+  if (!resolveAssistantWebFetchEnabled()) {
+    return []
+  }
+
+  return [
+    defineAssistantTool({
+      name: 'web.fetch',
+      description:
+        'Fetch one public webpage over HTTP(S), block private-network targets, and extract readable text for the assistant. Use this after discovery tools like web.search when you need the actual page contents of a docs page, menu, article, or product page.',
+      inputSchema: z.object({
+        url: z.string().url(),
+        extractMode: assistantWebFetchExtractModeSchema.optional(),
+        maxChars: z.number().int().positive().max(40_000).optional(),
+      }),
+      inputExample: {
+        url: 'https://example.com/menu',
+        extractMode: 'markdown',
+        maxChars: 8_000,
+      },
+      execute: async ({ extractMode, maxChars, url }) =>
+        await fetchAssistantWeb({
+          url,
+          extractMode,
+          maxChars,
         }),
     }),
   ]
@@ -985,7 +1021,10 @@ function createQueryAndReadToolDefinitions(
       ? createVaultQueryToolDefinitions(input)
       : []),
     ...(options.includeWebSearchTools ?? true
-      ? createWebSearchToolDefinitions()
+      ? [
+          ...createWebFetchToolDefinitions(),
+          ...createWebSearchToolDefinitions(),
+        ]
       : []),
   ]
 }
