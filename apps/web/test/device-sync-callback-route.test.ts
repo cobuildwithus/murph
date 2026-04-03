@@ -75,4 +75,51 @@ describe("hosted device-sync callback route", () => {
     expect(html).toContain("Connected oura successfully.");
     expect(html).not.toContain("dsc_123");
   });
+
+  it("returns callback html instead of json for unexpected callback failures", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.handleOAuthCallback.mockRejectedValue(new Error("boom"));
+
+    const response = await callbackRoute.GET(
+      new Request("https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz"),
+      createRouteContext("oura"),
+    );
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    const html = await response.text();
+    expect(html).toContain("Device connection failed");
+    expect(html).toContain("Please retry from Murph.");
+    expect(html).not.toContain('"error"');
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Hosted device-sync OAuth callback failed unexpectedly.",
+      expect.objectContaining({
+        error: expect.any(Error),
+        provider: "oura",
+      }),
+    );
+  });
+
+  it("returns callback html when provider route-param decoding fails", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await callbackRoute.GET(
+      new Request("https://control.example.test/api/device-sync/oauth/%25E0%25A4%25A/callback?code=abc&state=xyz"),
+      createRouteContext("%E0%A4%A"),
+    );
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    const html = await response.text();
+    expect(html).toContain("Device connection failed");
+    expect(html).toContain("Please retry from Murph.");
+    expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Hosted device-sync OAuth callback failed unexpectedly.",
+      expect.objectContaining({
+        error: expect.any(Error),
+        provider: null,
+      }),
+    );
+  });
 });

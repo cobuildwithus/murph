@@ -197,7 +197,7 @@ describe("device-sync hosted runtime helpers", () => {
             accessTokenExpiresAt: "2026-03-30T01:30:00+01:30",
             keyVersion: "local-runtime",
             refreshToken: "new-refresh-token",
-            tokenVersion: 0,
+            tokenVersion: 1,
           },
         },
       ],
@@ -217,7 +217,7 @@ describe("device-sync hosted runtime helpers", () => {
             accessTokenExpiresAt: "2026-03-30T00:00:00.000Z",
             keyVersion: "local-runtime",
             refreshToken: "new-refresh-token",
-            tokenVersion: 0,
+            tokenVersion: 1,
           },
         },
       ],
@@ -266,6 +266,21 @@ describe("device-sync hosted runtime helpers", () => {
       ],
       userId: "user-123",
     })).toThrow("updates[0].localState must be used for local observation fields.");
+
+    expect(() => parseHostedDeviceSyncRuntimeApplyRequest({
+      updates: [
+        {
+          connectionId: "dsc_123",
+          tokenBundle: {
+            accessToken: "new-access-token",
+            keyVersion: "local-runtime",
+            refreshToken: "new-refresh-token",
+            tokenVersion: 0,
+          },
+        },
+      ],
+      userId: "user-123",
+    })).toThrow("updates[0].tokenBundle.tokenVersion must be a positive integer.");
   });
 
   it("skips stale token writes, fences expiry metadata, and emits a reauthorization signal when runtime state requires reconnect", async () => {
@@ -965,6 +980,86 @@ describe("device-sync hosted runtime helpers", () => {
         },
       ],
       userId: "user-123",
+    });
+  });
+
+  it("ignores null local error timestamps unless clearError is explicitly set", async () => {
+    const { applyHostedDeviceSyncRuntimeUpdates } = await import(
+      "@/src/lib/device-sync/internal-runtime"
+    );
+    const existing = {
+      accessTokenExpiresAt: null,
+      connectedAt: "2026-03-20T10:00:00.000Z",
+      createdAt: "2026-03-20T10:00:00.000Z",
+      displayName: "Alice Oura",
+      externalAccountId: "oura_alice",
+      id: "dsc_error_timestamp",
+      lastErrorCode: "PROVIDER_AUTH",
+      lastErrorMessage: "Reconnect required",
+      lastSyncErrorAt: new Date("2026-03-26T11:00:00.000Z"),
+      metadataJson: { source: "oauth" },
+      provider: "oura",
+      scopes: ["heartrate"],
+      secret: null,
+      status: "reauthorization_required",
+      updatedAt: "2026-03-20T10:00:00.000Z",
+      userId: "user-123",
+    };
+    const updated = {
+      ...existing,
+      lastErrorCode: "PROVIDER_AUTH",
+      lastErrorMessage: "Still waiting for reconnect",
+    };
+    const tx = {
+      deviceConnection: {
+        findFirst: vi.fn().mockResolvedValue(existing),
+        update: vi.fn().mockResolvedValue(updated),
+      },
+      deviceConnectionSecret: {
+        create: vi.fn(),
+        update: vi.fn(),
+      },
+    };
+    const store = {
+      codec: {
+        decrypt: (value: string) => value.replace(/^enc:/u, ""),
+        encrypt: (value: string) => `enc:${value}`,
+        keyVersion: "v1",
+      },
+      createSignal: vi.fn(),
+      markConnectionDisconnected: vi.fn(),
+      prisma: {},
+      withConnectionRefreshLock: vi.fn(async (_connectionId: string, callback: (input: typeof tx) => Promise<unknown>) =>
+        callback(tx),
+      ),
+    };
+
+    await applyHostedDeviceSyncRuntimeUpdates(
+      store as never,
+      {
+        occurredAt: "2026-03-26T12:00:00.000Z",
+        updates: [
+          {
+            connectionId: "dsc_error_timestamp",
+            localState: {
+              lastErrorCode: "PROVIDER_AUTH",
+              lastErrorMessage: "Still waiting for reconnect",
+              lastSyncErrorAt: null,
+            },
+          },
+        ],
+        userId: "user-123",
+      },
+    );
+
+    expect(tx.deviceConnection.update).toHaveBeenCalledWith({
+      where: {
+        id: "dsc_error_timestamp",
+      },
+      data: {
+        lastErrorCode: "PROVIDER_AUTH",
+        lastErrorMessage: "Still waiting for reconnect",
+      },
     });
   });
 

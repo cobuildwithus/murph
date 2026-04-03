@@ -45,6 +45,18 @@ export function redirectTo(url: string): NextResponse {
   });
 }
 
+function resetDeviceSyncCallbackParams(destination: URL): void {
+  for (const key of [
+    "deviceSyncStatus",
+    "deviceSyncProvider",
+    "deviceSyncConnectionId",
+    "deviceSyncError",
+    "deviceSyncErrorMessage",
+  ]) {
+    destination.searchParams.delete(key);
+  }
+}
+
 function updateCallbackRedirect(
   returnTo: string | null,
   mutate: (destination: URL) => void,
@@ -54,6 +66,7 @@ function updateCallbackRedirect(
   }
 
   const destination = new URL(returnTo);
+  resetDeviceSyncCallbackParams(destination);
   mutate(destination);
   return redirectTo(destination.toString());
 }

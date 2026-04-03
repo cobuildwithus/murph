@@ -236,7 +236,7 @@ function parseHostedDeviceSyncRuntimeTokenBundle(
     accessTokenExpiresAt: readNullableIsoTimestamp(record.accessTokenExpiresAt, `${label}.accessTokenExpiresAt`),
     keyVersion: requireString(record.keyVersion, `${label}.keyVersion`),
     refreshToken: readNullableString(record.refreshToken, `${label}.refreshToken`),
-    tokenVersion: requireNumber(record.tokenVersion, `${label}.tokenVersion`),
+    tokenVersion: requirePositiveInteger(record.tokenVersion, `${label}.tokenVersion`),
   };
 }
 

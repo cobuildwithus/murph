@@ -312,7 +312,8 @@ describe("device sync callback redirect helpers", () => {
 
   it("adds connected callback params while preserving existing query state", () => {
     const response = httpModule.providerCallbackRedirect({
-      returnTo: "https://app.example.test/settings/devices?tab=wearables",
+      returnTo:
+        "https://app.example.test/settings/devices?tab=wearables&deviceSyncStatus=error&deviceSyncProvider=legacy&deviceSyncError=stale&deviceSyncErrorMessage=leak",
       provider: "demo",
       connectionId: "conn_123",
     });
@@ -331,11 +332,14 @@ describe("device sync callback redirect helpers", () => {
     expect(destination.searchParams.get("deviceSyncStatus")).toBe("connected");
     expect(destination.searchParams.get("deviceSyncProvider")).toBe("demo");
     expect(destination.searchParams.get("deviceSyncConnectionId")).toBe("conn_123");
+    expect(destination.searchParams.get("deviceSyncError")).toBeNull();
+    expect(destination.searchParams.get("deviceSyncErrorMessage")).toBeNull();
   });
 
   it("keeps raw callback error text out of redirect query params", () => {
     const response = httpModule.errorToCallbackRedirect({
-      returnTo: "https://app.example.test/settings/devices?tab=wearables",
+      returnTo:
+        "https://app.example.test/settings/devices?tab=wearables&deviceSyncStatus=connected&deviceSyncProvider=demo&deviceSyncConnectionId=conn_123&deviceSyncErrorMessage=leak",
       provider: "demo",
       error: mocks.deviceSyncError({
         code: "OAUTH_CALLBACK_REJECTED",
@@ -358,6 +362,7 @@ describe("device sync callback redirect helpers", () => {
     expect(destination.searchParams.get("tab")).toBe("wearables");
     expect(destination.searchParams.get("deviceSyncStatus")).toBe("error");
     expect(destination.searchParams.get("deviceSyncProvider")).toBe("demo");
+    expect(destination.searchParams.get("deviceSyncConnectionId")).toBeNull();
     expect(destination.searchParams.get("deviceSyncError")).toBe("OAUTH_CALLBACK_REJECTED");
     expect(destination.searchParams.get("deviceSyncErrorMessage")).toBeNull();
   });
