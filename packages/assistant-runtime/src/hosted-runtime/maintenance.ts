@@ -20,7 +20,6 @@ import type {
   HostedMaintenanceMetrics,
   HostedWorkspaceArtifactMaterializer,
 } from "./models.ts";
-import { hostedAssistantAutomationEnabledFromEnv } from "./environment.ts";
 import {
   reconcileHostedDeviceSyncControlPlaneState,
   syncHostedDeviceSyncControlPlaneState,
@@ -42,31 +41,18 @@ const HOSTED_MAX_PARSER_JOBS = 50;
 interface HostedAssistantAutomationReadiness {
   configStatus: "hosted-env" | "invalid" | "missing" | "saved" | "unready";
   configured: boolean;
-  enabled: boolean;
   provider: "codex-cli" | "openai-compatible" | null;
   shouldRun: boolean;
 }
 
 async function resolveHostedAssistantAutomationReadiness(input: {
-  runtimeEnv: Readonly<Record<string, string>>;
   skipAssistantAutomation: boolean;
 }): Promise<HostedAssistantAutomationReadiness> {
-  if (!hostedAssistantAutomationEnabledFromEnv(input.runtimeEnv)) {
-    return {
-      configStatus: "missing",
-      configured: false,
-      enabled: false,
-      provider: null,
-      shouldRun: false,
-    };
-  }
-
   const assistantState = await readHostedAssistantRuntimeState();
 
   return {
     configStatus: assistantState.assistantConfigStatus,
     configured: assistantState.assistantConfigured,
-    enabled: true,
     provider: assistantState.assistantProvider,
     shouldRun: assistantState.assistantConfigured && !input.skipAssistantAutomation,
   };
@@ -112,11 +98,10 @@ export async function runHostedMaintenanceLoop(input: {
     vaultRoot: input.vaultRoot,
   });
   const assistantAutomation = await resolveHostedAssistantAutomationReadiness({
-    runtimeEnv: input.runtimeEnv,
     skipAssistantAutomation: input.skipAssistantAutomation ?? false,
   });
 
-  if (assistantAutomation.enabled && !assistantAutomation.configured) {
+  if (!assistantAutomation.configured) {
     reportHostedAssistantAutomationSkipped(
       input.dispatch,
       assistantAutomation.configStatus,
