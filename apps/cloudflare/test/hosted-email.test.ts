@@ -249,7 +249,7 @@ describe("hosted email routing and transport", () => {
     })).resolves.toBeNull();
   });
 
-  it("keeps reading legacy verified-owner records during the hash-only cutover", async () => {
+  it("does not resolve removed legacy verified-owner records and rewrites them on sync", async () => {
     const bucket = new MemoryBucket();
     const verifiedEmailAddress = "owner@example.com";
     const senderKey = await deriveVerifiedSenderKey(TEST_CONFIG.signingSecret!, verifiedEmailAddress);
@@ -275,6 +275,41 @@ describe("hosted email routing and transport", () => {
         userId: "legacy-user",
         verifiedEmailAddress,
       },
+    });
+
+    await expect(resolveHostedEmailIngressRoute({
+      bucket,
+      config: TEST_CONFIG,
+      envelopeFrom: verifiedEmailAddress,
+      hasRepeatedHeaderFrom: false,
+      headerFrom: "Owner <owner@example.com>",
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      to: TEST_CONFIG.fromAddress!,
+    })).resolves.toBeNull();
+
+    await reconcileHostedEmailVerifiedSenderRoute({
+      bucket,
+      config: TEST_CONFIG,
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      nextVerifiedEmailAddress: verifiedEmailAddress,
+      previousVerifiedEmailAddress: null,
+      userId: "legacy-user",
+    });
+
+    expect(await readStoredVerifiedSenderRoute({
+      bucket,
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      secret: TEST_CONFIG.signingSecret!,
+      verifiedEmailAddress,
+    })).toMatchObject({
+      identityId: TEST_CONFIG.fromAddress,
+      schema: "murph.hosted-email-verified-sender-route.v2",
+      senderHash: await deriveVerifiedSenderHash(TEST_CONFIG.signingSecret!, verifiedEmailAddress),
+      senderKey,
+      userId: "legacy-user",
     });
 
     await expect(resolveHostedEmailIngressRoute({
@@ -522,7 +557,7 @@ describe("hosted email routing and transport", () => {
     });
   });
 
-  it("keeps resolving legacy per-thread aliases during the transition with the current sender identity", async () => {
+  it("does not resolve removed legacy per-thread aliases", async () => {
     const bucket = new MemoryBucket();
     const threadTarget = createHostedEmailThreadTarget({
       cc: ["teammate@example.com"],
@@ -577,13 +612,7 @@ describe("hosted email routing and transport", () => {
       to: legacyAddress,
     });
 
-    expect(route).toMatchObject({
-      identityId: "murph@mail.example.test",
-      kind: "thread",
-      routeAddress: legacyAddress,
-      userId: "user_123",
-    });
-    expect(route?.target).toEqual(threadTarget);
+    expect(route).toBeNull();
   });
 
   it("sends with one stable per-user reply alias and does not persist new thread routes", async () => {
