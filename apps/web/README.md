@@ -109,7 +109,7 @@ Set these under `Settings -> Environment Variables` in the Vercel project that d
 - `HOSTED_EXECUTION_INTERNAL_TOKENS`: generate a distinct comma-separated bearer-token set and use the same value in Vercel and the Cloudflare runner environment. The runner uses the first token for outbound internal route calls and hosted web accepts any configured token inbound.
 - `HOSTED_EXECUTION_SCHEDULER_TOKENS`: generate a distinct comma-separated bearer-token set for hosted cron routes. `CRON_SECRET` is still accepted as a fallback because Vercel cron sends `Authorization: Bearer <CRON_SECRET>` automatically.
 - `HOSTED_SHARE_INTERNAL_TOKENS`: generate a distinct comma-separated bearer-token set for trusted server-to-server hosted share routes.
-- `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET`: generate a distinct strong random secret and use the same value in Vercel plus whichever trusted auth proxy or middleware signs the hosted user assertion headers. `apps/web` verifies that signature before trusting browser-authenticated device-sync requests.
+- `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET`: generate a distinct strong random secret and use the same value in Vercel plus whichever trusted auth proxy or middleware signs the hosted user assertion headers. `apps/web` verifies that signature before trusting the lower-level assertion-backed device-sync bridge routes.
 
 If you prefer the CLI, Vercel's current docs cover `vercel env add`, `vercel env update`, and `vercel env pull` for managing these project environment variables.
 
@@ -121,7 +121,7 @@ Development fallback only:
 
 ## Browser auth contract
 
-Hosted browser routes trust a front-end/auth proxy only when it attaches:
+The lower-level assertion-backed device-sync bridge routes, such as `POST /api/device-sync/agents/pair`, trust a front-end/auth proxy only when it attaches:
 
 - a base64url JSON assertion in `DEVICE_SYNC_TRUSTED_USER_ASSERTION_HEADER`
 - an HMAC signature for that exact assertion in `DEVICE_SYNC_TRUSTED_USER_SIGNATURE_HEADER`
@@ -170,22 +170,19 @@ pnpm --dir apps/web prisma:migrate:deploy
 Hosted settings-authenticated wearable routes:
 
 - `GET /api/settings/device-sync`
+- `GET /api/settings/device-sync/connections/:connectionId/status`
 - `POST /api/settings/device-sync/providers/:provider/connect`
 - `POST /api/settings/device-sync/connections/:connectionId/disconnect`
 
-These power the `/settings` wearable-sources card. They use the hosted onboarding Privy bearer + identity-token contract so the browser can manage calm connect, reconnect, refresh, and disconnect flows without the separate signed browser-assertion headers required by the lower-level `/api/device-sync/**` browser surface.
+These are the only browser-facing wearable-management routes. They power the `/settings` wearable-sources card and use the hosted onboarding Privy bearer + identity-token contract so the browser can manage calm connect, reconnect, refresh, and disconnect flows without the separate signed browser-assertion headers required by the lower-level agent bridge.
 
-Browser-authenticated routes:
+Assertion-authenticated browser-to-agent bridge routes:
 
-- `GET /api/device-sync/connections`
-- `GET /api/device-sync/connections/:connectionId/status`
-- `POST /api/device-sync/connections/:connectionId/disconnect`
-- `POST /api/device-sync/providers/:provider/connect`
 - `POST /api/device-sync/agents/pair`
 - `GET /api/linq/bindings`
 - `POST /api/linq/bindings`
 
-Hosted browser-facing device-sync responses intentionally omit `externalAccountId`, and the `id` returned from browser-facing connection routes is an opaque handle rather than the raw hosted `device_connection.id` value.
+Hosted settings device-sync responses intentionally omit `externalAccountId`, and the `id` returned from settings connection routes is an opaque handle rather than the raw hosted `device_connection.id` value.
 
 Public provider-facing routes:
 

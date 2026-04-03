@@ -6,6 +6,22 @@ import { requireHostedPrivyActiveRequestAuthContext } from "@/src/lib/hosted-onb
 
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 
+export async function GET(): Promise<Response> {
+  return Response.json({
+    error: {
+      code: "METHOD_NOT_ALLOWED",
+      message:
+        "Hosted settings device-sync connect routes only allow POST because starting a connection mutates server state.",
+    },
+  }, {
+    status: 405,
+    headers: {
+      Allow: "POST",
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
 export const POST = withJsonError(async (
   request: Request,
   context: { params: Promise<{ provider: string }> },

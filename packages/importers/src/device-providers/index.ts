@@ -42,6 +42,7 @@ export {
   requireDeviceProviderOAuthDescriptor,
   requireDeviceProviderSyncDescriptor,
   requireDeviceProviderWebhookDescriptor,
+  resolveDeviceProviderSourcePriority,
   resolveDeviceProviderDescriptor,
 } from "./provider-descriptors.ts";
 export type {
@@ -57,4 +58,5 @@ export type {
   DeviceProviderWebhookDeliveryMode,
   DeviceProviderWebhookDescriptor,
   NamedDeviceProviderRegistry,
+  ResolveDeviceProviderSourcePriorityInput,
 } from "./provider-descriptors.ts";

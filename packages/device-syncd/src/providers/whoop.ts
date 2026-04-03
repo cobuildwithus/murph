@@ -575,10 +575,8 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
   }
 
   const provider: DeviceSyncProvider = {
-    ...descriptor,
-    callbackPath: descriptor.oauth?.callbackPath ?? WHOOP_CALLBACK_PATH,
-    webhookPath: descriptor.webhook?.path ?? WHOOP_WEBHOOK_PATH,
-    defaultScopes: [...(descriptor.oauth?.defaultScopes ?? scopes)],
+    provider: descriptor.provider,
+    descriptor,
     buildConnectUrl(context) {
       return buildOAuthConnectUrl({
         baseUrl,

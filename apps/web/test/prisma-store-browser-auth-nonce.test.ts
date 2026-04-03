@@ -106,8 +106,8 @@ describe("PrismaDeviceSyncControlPlaneStore browser assertion nonces", () => {
       {
         nonceHash: "nonce-hash-expired",
         userId: "user-123",
-        method: "GET",
-        path: "/api/device-sync/connections",
+        method: "POST",
+        path: "/api/device-sync/agents/pair",
         createdAt: new Date("2026-03-25T11:50:00.000Z"),
         expiresAt: new Date("2026-03-25T11:55:00.000Z"),
       },
@@ -117,8 +117,8 @@ describe("PrismaDeviceSyncControlPlaneStore browser assertion nonces", () => {
       store.consumeBrowserAssertionNonce({
         nonceHash: "nonce-hash-expired",
         userId: "user-123",
-        method: "GET",
-        path: "/api/device-sync/connections",
+        method: "POST",
+        path: "/api/device-sync/agents/pair",
         now: "2026-03-25T12:00:00.000Z",
         expiresAt: "2026-03-25T12:05:00.000Z",
       }),
@@ -126,8 +126,8 @@ describe("PrismaDeviceSyncControlPlaneStore browser assertion nonces", () => {
 
     expect(nonces.get("nonce-hash-expired")).toMatchObject({
       userId: "user-123",
-      method: "GET",
-      path: "/api/device-sync/connections",
+      method: "POST",
+      path: "/api/device-sync/agents/pair",
     });
     expect(nonces.get("nonce-hash-expired")?.expiresAt.toISOString()).toBe("2026-03-25T12:05:00.000Z");
   });

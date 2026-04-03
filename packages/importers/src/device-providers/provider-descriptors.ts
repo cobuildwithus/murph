@@ -54,6 +54,7 @@ export interface DeviceProviderNormalizationDescriptor {
 export interface DeviceProviderSourcePriorityHints {
   defaultPriority: number;
   metricFamilies: Partial<Record<DeviceProviderMetricFamily, number>>;
+  metrics?: Partial<Record<string, number>>;
 }
 
 export interface DeviceProviderDescriptor {
@@ -65,6 +66,11 @@ export interface DeviceProviderDescriptor {
   sync?: DeviceProviderSyncDescriptor;
   normalization: DeviceProviderNormalizationDescriptor;
   sourcePriorityHints: DeviceProviderSourcePriorityHints;
+}
+
+export interface ResolveDeviceProviderSourcePriorityInput {
+  metric?: string | null;
+  metricFamily?: DeviceProviderMetricFamily | null;
 }
 
 export interface DeviceProviderDescriptorLike {
@@ -152,6 +158,142 @@ export function requireDeviceProviderSyncDescriptor(
   return descriptor.sync;
 }
 
+export function resolveDeviceProviderSourcePriority(
+  descriptor: DeviceProviderDescriptor,
+  input: ResolveDeviceProviderSourcePriorityInput = {},
+): number {
+  const metric = normalizeDeviceProviderMetricKey(input.metric);
+  const metricPriority = metric ? descriptor.sourcePriorityHints.metrics?.[metric] : undefined;
+
+  if (typeof metricPriority === "number" && Number.isFinite(metricPriority)) {
+    return metricPriority;
+  }
+
+  const familyPriority = input.metricFamily
+    ? descriptor.sourcePriorityHints.metricFamilies[input.metricFamily]
+    : undefined;
+
+  if (typeof familyPriority === "number" && Number.isFinite(familyPriority)) {
+    return familyPriority;
+  }
+
+  return descriptor.sourcePriorityHints.defaultPriority;
+}
+
+function normalizeDeviceProviderMetricKey(metric: string | null | undefined): string | null {
+  if (typeof metric !== "string") {
+    return null;
+  }
+
+  const normalized = metric.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+const GARMIN_DEVICE_PROVIDER_METRIC_PRIORITIES = Object.freeze({
+  activeCalories: 100,
+  activityScore: 90,
+  averageHeartRate: 80,
+  awakeMinutes: 80,
+  bmi: 100,
+  bodyBattery: 100,
+  bodyFatPercentage: 100,
+  dayStrain: 90,
+  deepMinutes: 80,
+  distanceKm: 100,
+  hrv: 80,
+  lightMinutes: 80,
+  lowestHeartRate: 90,
+  readinessScore: 80,
+  recoveryScore: 80,
+  remMinutes: 80,
+  respiratoryRate: 80,
+  restingHeartRate: 90,
+  sessionCount: 100,
+  sessionMinutes: 90,
+  sleepConsistency: 80,
+  sleepEfficiency: 80,
+  sleepPerformance: 80,
+  sleepScore: 90,
+  spo2: 80,
+  steps: 100,
+  stressLevel: 100,
+  temperature: 90,
+  temperatureDeviation: 80,
+  timeInBedMinutes: 90,
+  totalSleepMinutes: 80,
+  weightKg: 100,
+} as const satisfies Record<string, number>);
+
+const OURA_DEVICE_PROVIDER_METRIC_PRIORITIES = Object.freeze({
+  activeCalories: 90,
+  activityScore: 100,
+  averageHeartRate: 100,
+  awakeMinutes: 100,
+  bmi: 90,
+  bodyBattery: 90,
+  bodyFatPercentage: 90,
+  dayStrain: 80,
+  deepMinutes: 100,
+  distanceKm: 90,
+  hrv: 100,
+  lightMinutes: 100,
+  lowestHeartRate: 100,
+  readinessScore: 100,
+  recoveryScore: 90,
+  remMinutes: 100,
+  respiratoryRate: 100,
+  restingHeartRate: 80,
+  sessionCount: 80,
+  sessionMinutes: 100,
+  sleepConsistency: 90,
+  sleepEfficiency: 100,
+  sleepPerformance: 90,
+  sleepScore: 100,
+  spo2: 100,
+  steps: 90,
+  stressLevel: 80,
+  temperature: 80,
+  temperatureDeviation: 100,
+  timeInBedMinutes: 100,
+  totalSleepMinutes: 100,
+  weightKg: 90,
+} as const satisfies Record<string, number>);
+
+const WHOOP_DEVICE_PROVIDER_METRIC_PRIORITIES = Object.freeze({
+  activeCalories: 80,
+  activityScore: 80,
+  averageHeartRate: 90,
+  awakeMinutes: 90,
+  bmi: 80,
+  bodyBattery: 80,
+  bodyFatPercentage: 80,
+  dayStrain: 100,
+  deepMinutes: 90,
+  distanceKm: 80,
+  hrv: 90,
+  lightMinutes: 90,
+  lowestHeartRate: 80,
+  readinessScore: 90,
+  recoveryScore: 100,
+  remMinutes: 90,
+  respiratoryRate: 90,
+  restingHeartRate: 100,
+  sessionCount: 90,
+  sessionMinutes: 80,
+  sleepConsistency: 100,
+  sleepEfficiency: 90,
+  sleepPerformance: 100,
+  sleepScore: 80,
+  spo2: 90,
+  steps: 80,
+  stressLevel: 90,
+  temperature: 100,
+  temperatureDeviation: 90,
+  timeInBedMinutes: 80,
+  totalSleepMinutes: 90,
+  weightKg: 80,
+} as const satisfies Record<string, number>);
+
 export const GARMIN_DEVICE_PROVIDER_DESCRIPTOR = {
   provider: "garmin",
   displayName: "Garmin",
@@ -191,6 +333,7 @@ export const GARMIN_DEVICE_PROVIDER_DESCRIPTOR = {
       temperature: 60,
       women_health: 100,
     },
+    metrics: GARMIN_DEVICE_PROVIDER_METRIC_PRIORITIES,
   },
 } as const satisfies DeviceProviderDescriptor;
 
@@ -240,6 +383,7 @@ export const OURA_DEVICE_PROVIDER_DESCRIPTOR = {
       respiration: 80,
       activity: 75,
     },
+    metrics: OURA_DEVICE_PROVIDER_METRIC_PRIORITIES,
   },
 } as const satisfies DeviceProviderDescriptor;
 
@@ -288,6 +432,7 @@ export const WHOOP_DEVICE_PROVIDER_DESCRIPTOR = {
       temperature: 85,
       activity: 80,
     },
+    metrics: WHOOP_DEVICE_PROVIDER_METRIC_PRIORITIES,
   },
 } as const satisfies DeviceProviderDescriptor;
 

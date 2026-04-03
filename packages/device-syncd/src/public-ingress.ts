@@ -63,16 +63,26 @@ export class DeviceSyncPublicIngress {
 
   describeProvider(providerName: string | DeviceSyncProvider): PublicProviderDescriptor {
     const provider = typeof providerName === "string" ? this.requireProvider(providerName) : providerName;
-    const webhookPath = provider.webhookPath ?? null;
+    const callbackPath = provider.descriptor.oauth?.callbackPath;
+    const webhookPath = provider.descriptor.webhook?.path ?? null;
+
+    if (!callbackPath) {
+      throw deviceSyncError({
+        code: "OAUTH_NOT_SUPPORTED",
+        message: `Device sync provider ${provider.provider} does not define an OAuth callback path.`,
+        retryable: false,
+        httpStatus: 500,
+      });
+    }
 
     return {
       provider: provider.provider,
-      callbackPath: provider.callbackPath,
-      callbackUrl: joinUrl(this.publicBaseUrl, provider.callbackPath),
+      callbackPath,
+      callbackUrl: joinUrl(this.publicBaseUrl, callbackPath),
       webhookPath,
       webhookUrl: webhookPath ? joinUrl(this.publicBaseUrl, webhookPath) : null,
       supportsWebhooks: Boolean(webhookPath && provider.verifyAndParseWebhook),
-      defaultScopes: [...provider.defaultScopes],
+      defaultScopes: [...(provider.descriptor.oauth?.defaultScopes ?? [])],
     };
   }
 
@@ -101,7 +111,7 @@ export class DeviceSyncPublicIngress {
       authorizationUrl: provider.buildConnectUrl({
         state,
         callbackUrl: descriptor.callbackUrl,
-        scopes: provider.defaultScopes,
+        scopes: descriptor.defaultScopes,
         now,
       }),
     };
@@ -200,7 +210,7 @@ export class DeviceSyncPublicIngress {
           ? [...connection.scopes]
           : grantedScopes.length > 0
             ? [...grantedScopes]
-            : [...provider.defaultScopes],
+            : [...descriptor.defaultScopes],
         tokens: connection.tokens,
         metadata: connection.metadata ?? {},
         connectedAt: now,
@@ -229,7 +239,7 @@ export class DeviceSyncPublicIngress {
   async handleWebhook(providerName: string, headers: Headers, rawBody: Buffer): Promise<HandleWebhookResult> {
     const provider = this.requireProvider(providerName);
 
-    if (!provider.webhookPath || !provider.verifyAndParseWebhook) {
+    if (!provider.descriptor.webhook?.path || !provider.verifyAndParseWebhook) {
       throw deviceSyncError({
         code: "WEBHOOKS_NOT_SUPPORTED",
         message: `Device sync provider ${provider.provider} does not accept webhooks.`,

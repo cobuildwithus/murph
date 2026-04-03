@@ -890,10 +890,9 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
   }
 
   const provider: DeviceSyncProvider = {
-    ...descriptor,
-    callbackPath: descriptor.oauth?.callbackPath ?? OURA_CALLBACK_PATH,
+    provider: descriptor.provider,
+    descriptor,
     webhookAdmin,
-    defaultScopes: [...(descriptor.oauth?.defaultScopes ?? scopes)],
     buildConnectUrl(context) {
       return buildOAuthConnectUrl({
         baseUrl: authBaseUrl,
@@ -995,7 +994,6 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
           ),
       });
     },
-    webhookPath: descriptor.webhook?.path ?? OURA_WEBHOOK_PATH,
     async verifyAndParseWebhook(context: ProviderWebhookContext): Promise<ProviderWebhookResult> {
       const signature = normalizeString(context.headers.get("x-oura-signature"));
       const timestamp = normalizeString(context.headers.get("x-oura-timestamp"));

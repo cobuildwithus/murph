@@ -39,12 +39,12 @@
       "path": "packages/core"
     },
     {
-      "name": "@murphai/query",
-      "path": "packages/query"
-    },
-    {
       "name": "@murphai/importers",
       "path": "packages/importers"
+    },
+    {
+      "name": "@murphai/query",
+      "path": "packages/query"
     },
     {
       "name": "@murphai/device-syncd",
