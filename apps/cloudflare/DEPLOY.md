@@ -95,6 +95,12 @@ Optional tuning variables:
 Optional non-secret worker variables:
 
 - `DEVICE_SYNC_PUBLIC_BASE_URL`
+- `HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID`
+- `HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL`
+- `HOSTED_EMAIL_DEFAULT_SUBJECT`
+- `HOSTED_EMAIL_DOMAIN`
+- `HOSTED_EMAIL_FROM_ADDRESS`
+- `HOSTED_EMAIL_LOCAL_PART`
 - `HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION`
 - `HOSTED_WEB_BASE_URL`
 - `HOSTED_DEVICE_SYNC_CONTROL_BASE_URL`
@@ -107,14 +113,15 @@ Optional non-secret provider/toolchain variables to expose through the worker an
 
 - `HOSTED_ASSISTANT_API_KEY_ENV` points at the env var name to read for the active hosted assistant profile. Keep the actual secret in Worker secrets or the encrypted per-user env object, not in the hosted config document.
 - `LINQ_API_BASE_URL`
-- `AGENTMAIL_BASE_URL`
 - `TELEGRAM_BOT_USERNAME`
 - `TELEGRAM_API_BASE_URL`
 - `TELEGRAM_FILE_BASE_URL`
-- `WHISPER_MODEL_PATH`
 - `FFMPEG_COMMAND`
 - `PDFTOTEXT_COMMAND`
+- `WHISPER_MODEL_PATH`
 - `WHISPER_COMMAND`
+
+The default container image already installs `ffmpeg`, `pdftotext`, a pinned `whisper.cpp` `whisper-cli`, and the default `base.en` model, and it sets `FFMPEG_COMMAND`, `PDFTOTEXT_COMMAND`, `WHISPER_COMMAND`, and `WHISPER_MODEL_PATH` inside the image. Only set those vars in Worker config when you want to override the baked defaults.
 
 ### Required environment secrets
 
@@ -135,6 +142,11 @@ Additional hosted-web control-plane secrets:
 
 - `HOSTED_EXECUTION_INTERNAL_TOKEN`
 - `HOSTED_SHARE_INTERNAL_TOKEN`
+
+Optional hosted email bridge secrets:
+
+- `HOSTED_EMAIL_CLOUDFLARE_API_TOKEN`
+- `HOSTED_EMAIL_SIGNING_SECRET`
 
 The checked-in scaffold and rendered deploy config both declare those four names in Wrangler's experimental `secrets.required` field, so `wrangler deploy` and `wrangler versions upload` fail early when any of them are missing from the Worker.
 
@@ -157,7 +169,6 @@ Add whichever hosted features you actually want the containerized runner to supp
 - `OURA_CLIENT_SECRET`
 - `LINQ_API_TOKEN`
 - `LINQ_WEBHOOK_SECRET`
-- `AGENTMAIL_API_KEY`
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_WEBHOOK_SECRET`
 - `OPENAI_API_KEY`
@@ -169,6 +180,8 @@ Add whichever hosted features you actually want the containerized runner to supp
 - `GROQ_API_KEY`
 - `XAI_API_KEY`
 - `MISTRAL_API_KEY`
+
+Hosted email on this path is Cloudflare-native. Keep `HOSTED_EMAIL_*` configured when you want hosted ingress or sends; `AGENTMAIL_*` is intentionally not part of the hosted deploy surface.
 
 ## Local dry run before touching production
 
@@ -200,6 +213,11 @@ export HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY=...
 export HOSTED_EXECUTION_CONTROL_TOKEN=...
 export HOSTED_EXECUTION_INTERNAL_TOKEN=...
 export HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN=...
+export HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID=...
+export HOSTED_EMAIL_CLOUDFLARE_API_TOKEN=...
+export HOSTED_EMAIL_DOMAIN=mail.example.test
+export HOSTED_EMAIL_LOCAL_PART=assistant
+export HOSTED_EMAIL_SIGNING_SECRET=...
 export HOSTED_WEB_BASE_URL=https://your-hosted-web.example.com
 export HOSTED_SHARE_INTERNAL_TOKEN=...
 export CF_LOG_HEAD_SAMPLING_RATE=1
