@@ -32,6 +32,7 @@ import type {
   SampleMetricDescriptor,
 } from "./shared-normalization.ts";
 import type { DeviceProviderAdapter, NormalizedDeviceBatch } from "./types.ts";
+import { OURA_DEVICE_PROVIDER_DESCRIPTOR } from "./provider-descriptors.ts";
 
 export interface OuraSnapshotInput {
   accountId?: string | number;
@@ -769,6 +770,6 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
 }
 
 export const ouraProviderAdapter: DeviceProviderAdapter<OuraSnapshotInput> = {
-  provider: "oura",
+  ...OURA_DEVICE_PROVIDER_DESCRIPTOR,
   normalizeSnapshot: normalizeOuraSnapshot,
 };

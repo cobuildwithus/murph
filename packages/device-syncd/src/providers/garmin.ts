@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
 
+import {
+  GARMIN_DEVICE_PROVIDER_DESCRIPTOR,
+  requireDeviceProviderOAuthDescriptor,
+  requireDeviceProviderSyncDescriptor,
+} from "@murphai/importers/device-providers/provider-descriptors";
+
 import { deviceSyncError } from "../errors.ts";
 import {
   addMilliseconds,
@@ -39,11 +45,14 @@ const DEFAULT_GARMIN_API_BASE_URL = "https://apis.garmin.com";
 const GARMIN_AUTHORIZE_PATH = "/oauth2Confirm";
 const GARMIN_TOKEN_PATH = "/di-oauth2-service/oauth/token";
 const GARMIN_API_PREFIX = "/wellness-api/rest";
-const GARMIN_CALLBACK_PATH = "/oauth/garmin/callback";
+const GARMIN_PROVIDER_DESCRIPTOR = GARMIN_DEVICE_PROVIDER_DESCRIPTOR;
+const GARMIN_OAUTH = requireDeviceProviderOAuthDescriptor(GARMIN_PROVIDER_DESCRIPTOR);
+const GARMIN_SYNC = requireDeviceProviderSyncDescriptor(GARMIN_PROVIDER_DESCRIPTOR);
+const GARMIN_CALLBACK_PATH = GARMIN_OAUTH.callbackPath;
 const DEFAULT_TIMEOUT_MS = 15_000;
-const DEFAULT_BACKFILL_DAYS = 30;
-const DEFAULT_RECONCILE_DAYS = 7;
-const DEFAULT_RECONCILE_INTERVAL_MS = 6 * 60 * 60_000;
+const DEFAULT_BACKFILL_DAYS = GARMIN_SYNC.windows.backfillDays;
+const DEFAULT_RECONCILE_DAYS = GARMIN_SYNC.windows.reconcileDays;
+const DEFAULT_RECONCILE_INTERVAL_MS = GARMIN_SYNC.windows.reconcileIntervalMs;
 
 type GarminSnapshotKey =
   | "dailySummaries"
@@ -346,6 +355,21 @@ export function createGarminDeviceSyncProvider(config: GarminDeviceSyncProviderC
   const reconcileDays = Math.max(1, config.reconcileDays ?? DEFAULT_RECONCILE_DAYS);
   const reconcileIntervalMs = Math.max(60_000, config.reconcileIntervalMs ?? DEFAULT_RECONCILE_INTERVAL_MS);
   const timeoutMs = Math.max(1_000, config.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const descriptor = {
+    ...GARMIN_PROVIDER_DESCRIPTOR,
+    oauth: {
+      ...GARMIN_OAUTH,
+      defaultScopes: [...GARMIN_OAUTH.defaultScopes],
+    },
+    sync: {
+      ...GARMIN_SYNC,
+      windows: {
+        backfillDays,
+        reconcileDays,
+        reconcileIntervalMs,
+      },
+    },
+  };
 
   async function postTokenRequest(parameters: Record<string, string>): Promise<GarminTokenResponse> {
     return postOAuthTokenRequest<GarminTokenResponse>({
@@ -540,9 +564,9 @@ export function createGarminDeviceSyncProvider(config: GarminDeviceSyncProviderC
   }
 
   return {
-    provider: "garmin",
-    callbackPath: GARMIN_CALLBACK_PATH,
-    defaultScopes: [],
+    ...descriptor,
+    callbackPath: descriptor.oauth?.callbackPath ?? GARMIN_CALLBACK_PATH,
+    defaultScopes: [...(descriptor.oauth?.defaultScopes ?? [])],
     buildConnectUrl(context) {
       const verifier = buildGarminPkceVerifier(context.state, config.clientSecret);
       const search = new URLSearchParams({

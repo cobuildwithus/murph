@@ -29,6 +29,7 @@ import type {
   SampleMetricDescriptor,
 } from "./shared-normalization.ts";
 import type { DeviceProviderAdapter, NormalizedDeviceBatch } from "./types.ts";
+import { WHOOP_DEVICE_PROVIDER_DESCRIPTOR } from "./provider-descriptors.ts";
 
 export interface WhoopSnapshotInput {
   accountId?: string;
@@ -537,6 +538,6 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
 }
 
 export const whoopProviderAdapter: DeviceProviderAdapter<WhoopSnapshotInput> = {
-  provider: "whoop",
+  ...WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
   normalizeSnapshot: normalizeWhoopSnapshot,
 };

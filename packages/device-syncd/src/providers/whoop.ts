@@ -1,5 +1,12 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
+import {
+  WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
+  requireDeviceProviderOAuthDescriptor,
+  requireDeviceProviderSyncDescriptor,
+  requireDeviceProviderWebhookDescriptor,
+} from "@murphai/importers/device-providers/provider-descriptors";
+
 import { deviceSyncError } from "../errors.ts";
 import {
   addMilliseconds,
@@ -42,23 +49,19 @@ import type {
 const WHOOP_AUTH_PATH = "/oauth/oauth2/auth";
 const WHOOP_TOKEN_PATH = "/oauth/oauth2/token";
 const WHOOP_API_PREFIX = "/developer";
-const WHOOP_CALLBACK_PATH = "/oauth/whoop/callback";
-const WHOOP_WEBHOOK_PATH = "/webhooks/whoop";
+const WHOOP_PROVIDER_DESCRIPTOR = WHOOP_DEVICE_PROVIDER_DESCRIPTOR;
+const WHOOP_OAUTH = requireDeviceProviderOAuthDescriptor(WHOOP_PROVIDER_DESCRIPTOR);
+const WHOOP_WEBHOOK = requireDeviceProviderWebhookDescriptor(WHOOP_PROVIDER_DESCRIPTOR);
+const WHOOP_SYNC = requireDeviceProviderSyncDescriptor(WHOOP_PROVIDER_DESCRIPTOR);
+const WHOOP_CALLBACK_PATH = WHOOP_OAUTH.callbackPath;
+const WHOOP_WEBHOOK_PATH = WHOOP_WEBHOOK.path;
 const DEFAULT_WHOOP_BASE_URL = "https://api.prod.whoop.com";
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_WEBHOOK_TOLERANCE_MS = 5 * 60_000;
-const DEFAULT_BACKFILL_DAYS = 90;
-const DEFAULT_RECONCILE_DAYS = 21;
-const DEFAULT_RECONCILE_INTERVAL_MS = 6 * 60 * 60_000;
-const WHOOP_DEFAULT_SCOPES = Object.freeze([
-  "offline",
-  "read:profile",
-  "read:body_measurement",
-  "read:sleep",
-  "read:recovery",
-  "read:cycles",
-  "read:workout",
-]);
+const DEFAULT_BACKFILL_DAYS = WHOOP_SYNC.windows.backfillDays;
+const DEFAULT_RECONCILE_DAYS = WHOOP_SYNC.windows.reconcileDays;
+const DEFAULT_RECONCILE_INTERVAL_MS = WHOOP_SYNC.windows.reconcileIntervalMs;
+const WHOOP_DEFAULT_SCOPES = Object.freeze([...WHOOP_OAUTH.defaultScopes]);
 
 interface WhoopTokenResponse {
   access_token?: unknown;
@@ -306,6 +309,21 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
   const reconcileIntervalMs = Math.max(60_000, config.reconcileIntervalMs ?? DEFAULT_RECONCILE_INTERVAL_MS);
   const webhookToleranceMs = Math.max(1_000, config.webhookTimestampToleranceMs ?? DEFAULT_WEBHOOK_TOLERANCE_MS);
   const timeoutMs = Math.max(1_000, config.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const descriptor = {
+    ...WHOOP_PROVIDER_DESCRIPTOR,
+    oauth: {
+      ...WHOOP_OAUTH,
+      defaultScopes: [...scopes],
+    },
+    sync: {
+      ...WHOOP_SYNC,
+      windows: {
+        backfillDays,
+        reconcileDays,
+        reconcileIntervalMs,
+      },
+    },
+  };
 
   async function postTokenRequest(parameters: Record<string, string>): Promise<WhoopTokenResponse> {
     return postOAuthTokenRequest<WhoopTokenResponse>({
@@ -557,10 +575,10 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
   }
 
   const provider: DeviceSyncProvider = {
-    provider: "whoop",
-    callbackPath: WHOOP_CALLBACK_PATH,
-    webhookPath: WHOOP_WEBHOOK_PATH,
-    defaultScopes: scopes,
+    ...descriptor,
+    callbackPath: descriptor.oauth?.callbackPath ?? WHOOP_CALLBACK_PATH,
+    webhookPath: descriptor.webhook?.path ?? WHOOP_WEBHOOK_PATH,
+    defaultScopes: [...(descriptor.oauth?.defaultScopes ?? scopes)],
     buildConnectUrl(context) {
       return buildOAuthConnectUrl({
         baseUrl,

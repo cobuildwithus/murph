@@ -1,5 +1,12 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
+import {
+  OURA_DEVICE_PROVIDER_DESCRIPTOR,
+  requireDeviceProviderOAuthDescriptor,
+  requireDeviceProviderSyncDescriptor,
+  requireDeviceProviderWebhookDescriptor,
+} from "@murphai/importers/device-providers/provider-descriptors";
+
 import { deviceSyncError } from "../errors.ts";
 import {
   addMilliseconds,
@@ -45,24 +52,21 @@ const OURA_AUTH_BASE_URL = "https://cloud.ouraring.com";
 const OURA_API_BASE_URL = "https://api.ouraring.com";
 const OURA_AUTHORIZE_PATH = "/oauth/authorize";
 const OURA_TOKEN_PATH = "/oauth/token";
-const OURA_CALLBACK_PATH = "/oauth/oura/callback";
-const OURA_WEBHOOK_PATH = "/webhooks/oura";
+const OURA_PROVIDER_DESCRIPTOR = OURA_DEVICE_PROVIDER_DESCRIPTOR;
+const OURA_OAUTH = requireDeviceProviderOAuthDescriptor(OURA_PROVIDER_DESCRIPTOR);
+const OURA_WEBHOOK = requireDeviceProviderWebhookDescriptor(OURA_PROVIDER_DESCRIPTOR);
+const OURA_SYNC = requireDeviceProviderSyncDescriptor(OURA_PROVIDER_DESCRIPTOR);
+const OURA_CALLBACK_PATH = OURA_OAUTH.callbackPath;
+const OURA_WEBHOOK_PATH = OURA_WEBHOOK.path;
 const DEFAULT_TIMEOUT_MS = 15_000;
-const DEFAULT_BACKFILL_DAYS = 90;
-const DEFAULT_RECONCILE_DAYS = 21;
-const DEFAULT_RECONCILE_INTERVAL_MS = 6 * 60 * 60_000;
+const DEFAULT_BACKFILL_DAYS = OURA_SYNC.windows.backfillDays;
+const DEFAULT_RECONCILE_DAYS = OURA_SYNC.windows.reconcileDays;
+const DEFAULT_RECONCILE_INTERVAL_MS = OURA_SYNC.windows.reconcileIntervalMs;
 const DEFAULT_WEBHOOK_TOLERANCE_MS = 5 * 60_000;
 const OURA_SECONDS_TIMESTAMP_THRESHOLD = 10_000_000_000;
 const OURA_WEBHOOK_RESOURCE_PRIORITY = 90;
 const OURA_WEBHOOK_DELETE_PRIORITY = 95;
-const OURA_DEFAULT_SCOPES = Object.freeze([
-  "personal",
-  "daily",
-  "heartrate",
-  "workout",
-  "session",
-  "spo2",
-]);
+const OURA_DEFAULT_SCOPES = Object.freeze([...OURA_OAUTH.defaultScopes]);
 
 interface OuraTokenResponse {
   access_token?: unknown;
@@ -564,6 +568,21 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
   const reconcileIntervalMs = Math.max(60_000, config.reconcileIntervalMs ?? DEFAULT_RECONCILE_INTERVAL_MS);
   const timeoutMs = Math.max(1_000, config.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
   const webhookTimestampToleranceMs = Math.max(1_000, config.webhookTimestampToleranceMs ?? DEFAULT_WEBHOOK_TOLERANCE_MS);
+  const descriptor = {
+    ...OURA_PROVIDER_DESCRIPTOR,
+    oauth: {
+      ...OURA_OAUTH,
+      defaultScopes: [...scopes],
+    },
+    sync: {
+      ...OURA_SYNC,
+      windows: {
+        backfillDays,
+        reconcileDays,
+        reconcileIntervalMs,
+      },
+    },
+  };
   let webhookSubscriptionClient: OuraWebhookSubscriptionClient | null = null;
 
   async function postTokenRequest(parameters: Record<string, string>): Promise<OuraTokenResponse> {
@@ -871,10 +890,10 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
   }
 
   const provider: DeviceSyncProvider = {
-    provider: "oura",
-    callbackPath: OURA_CALLBACK_PATH,
+    ...descriptor,
+    callbackPath: descriptor.oauth?.callbackPath ?? OURA_CALLBACK_PATH,
     webhookAdmin,
-    defaultScopes: scopes,
+    defaultScopes: [...(descriptor.oauth?.defaultScopes ?? scopes)],
     buildConnectUrl(context) {
       return buildOAuthConnectUrl({
         baseUrl: authBaseUrl,
@@ -976,7 +995,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
           ),
       });
     },
-    webhookPath: OURA_WEBHOOK_PATH,
+    webhookPath: descriptor.webhook?.path ?? OURA_WEBHOOK_PATH,
     async verifyAndParseWebhook(context: ProviderWebhookContext): Promise<ProviderWebhookResult> {
       const signature = normalizeString(context.headers.get("x-oura-signature"));
       const timestamp = normalizeString(context.headers.get("x-oura-timestamp"));

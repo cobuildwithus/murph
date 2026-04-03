@@ -5,6 +5,7 @@ import {
   deviceSyncError,
   type DeviceSyncProvider,
 } from "@murphai/device-syncd/public-ingress";
+import { WHOOP_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-providers/provider-descriptors";
 
 import { HostedDeviceSyncAgentSessionService } from "@/src/lib/device-sync/agent-session-service";
 import type { HostedSecretCodec } from "@/src/lib/device-sync/crypto";
@@ -105,8 +106,8 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
 
 function createWhoopProvider(): DeviceSyncProvider {
   return {
-    provider: "whoop",
-    callbackPath: "/oauth/whoop/callback",
+    ...WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
+    callbackPath: WHOOP_DEVICE_PROVIDER_DESCRIPTOR.oauth?.callbackPath ?? "/oauth/whoop/callback",
     defaultScopes: ["offline"],
     buildConnectUrl: () => "https://provider.example/connect",
     async exchangeAuthorizationCode() {

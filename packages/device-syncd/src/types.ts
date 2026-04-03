@@ -3,6 +3,10 @@ import type {
   DeviceSyncAccountRecord,
   DeviceSyncProviderDescriptor,
 } from "./client.ts";
+import type {
+  DeviceProviderDescriptor,
+  NamedDeviceProviderRegistry,
+} from "@murphai/importers/device-providers/provider-descriptors";
 
 export type { DeviceSyncAccountStatus } from "./client.ts";
 
@@ -245,7 +249,7 @@ export interface ProviderJobResult {
   nextReconcileAt?: string | null;
 }
 
-export interface DeviceSyncProvider {
+export interface DeviceSyncProvider extends DeviceProviderDescriptor {
   provider: string;
   callbackPath: string;
   webhookPath?: string;
@@ -265,7 +269,7 @@ export interface DeviceSyncProvider {
   executeJob(context: ProviderJobContext, job: DeviceSyncJobRecord): Promise<ProviderJobResult>;
 }
 
-export interface DeviceSyncRegistry {
+export interface DeviceSyncRegistry extends NamedDeviceProviderRegistry<DeviceSyncProvider> {
   register(provider: DeviceSyncProvider): void;
   get(provider: string): DeviceSyncProvider | undefined;
   list(): DeviceSyncProvider[];
