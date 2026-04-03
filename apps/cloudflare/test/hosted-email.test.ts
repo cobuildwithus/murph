@@ -5,6 +5,10 @@ import {
   parseHostedEmailThreadTarget,
 } from "@murphai/runtime-state";
 
+import {
+  buildHostedStorageAad,
+  deriveHostedStorageOpaqueId,
+} from "../src/crypto-context.ts";
 import { writeEncryptedR2Json } from "../src/crypto.ts";
 import type { HostedEmailConfig } from "../src/hosted-email/config.ts";
 import {
@@ -24,6 +28,10 @@ const TEST_CONFIG: HostedEmailConfig = {
   fromAddress: "assistant@mail.example.test",
   localPart: "assistant",
   signingSecret: "super-secret-signing-key",
+};
+const ROTATED_IDENTITY_CONFIG: HostedEmailConfig = {
+  ...TEST_CONFIG,
+  fromAddress: "murph@mail.example.test",
 };
 const TEST_KEY = new Uint8Array(Array.from({ length: 32 }, (_, index) => index + 1));
 const TEST_KEY_ID = "v1";
@@ -59,7 +67,7 @@ afterEach(() => {
 });
 
 describe("hosted email routing and transport", () => {
-  it("falls back to the signed route header and returns the matched self address", async () => {
+  it("falls back to the signed route header and resolves the current sender identity", async () => {
     const bucket = new MemoryBucket();
     const replyAddress = await createHostedEmailUserAddress({
       bucket,
@@ -71,7 +79,7 @@ describe("hosted email routing and transport", () => {
 
     const route = await resolveHostedEmailInboundRoute({
       bucket,
-      config: TEST_CONFIG,
+      config: ROTATED_IDENTITY_CONFIG,
       key: TEST_KEY,
       keyId: TEST_KEY_ID,
       routeHeader: replyAddress,
@@ -79,12 +87,37 @@ describe("hosted email routing and transport", () => {
     });
 
     expect(route).toMatchObject({
-      identityId: "assistant@mail.example.test",
+      identityId: "murph@mail.example.test",
       kind: "user",
       routeAddress: replyAddress,
       target: null,
       userId: "user_123",
     });
+  });
+
+  it("does not rewrite the stable user alias route when the same user address is recreated", async () => {
+    const bucket = new MemoryBucket();
+    const putSpy = vi.spyOn(bucket, "put");
+
+    const firstAddress = await createHostedEmailUserAddress({
+      bucket,
+      config: TEST_CONFIG,
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      userId: "user_123",
+    });
+    const objectSnapshot = new Map(bucket.objects);
+    const secondAddress = await createHostedEmailUserAddress({
+      bucket,
+      config: TEST_CONFIG,
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      userId: "user_123",
+    });
+
+    expect(firstAddress).toBe(secondAddress);
+    expect(putSpy).toHaveBeenCalledTimes(1);
+    expect(bucket.objects).toEqual(objectSnapshot);
   });
 
   it("routes direct mail to the fixed public sender through the synced verified owner index", async () => {
@@ -211,6 +244,89 @@ describe("hosted email routing and transport", () => {
     })).rejects.toThrow("Hosted verified email sender route is already assigned to a different user.");
   });
 
+  it("does not rewrite the verified-owner route when the verified sender sync is a no-op", async () => {
+    const bucket = new MemoryBucket();
+    const putSpy = vi.spyOn(bucket, "put");
+
+    await reconcileHostedEmailVerifiedSenderRoute({
+      bucket,
+      config: TEST_CONFIG,
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      nextVerifiedEmailAddress: "owner@example.com",
+      previousVerifiedEmailAddress: null,
+      userId: "user_123",
+    });
+    const objectSnapshot = new Map(bucket.objects);
+    await reconcileHostedEmailVerifiedSenderRoute({
+      bucket,
+      config: TEST_CONFIG,
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      nextVerifiedEmailAddress: "owner@example.com",
+      previousVerifiedEmailAddress: "owner@example.com",
+      userId: "user_123",
+    });
+
+    expect(putSpy).toHaveBeenCalledTimes(1);
+    expect(bucket.objects).toEqual(objectSnapshot);
+  });
+
+  it("cleans up the previous verified-owner route when a move is retried after the destination was already written", async () => {
+    const bucket = new MemoryBucket();
+
+    await reconcileHostedEmailVerifiedSenderRoute({
+      bucket,
+      config: TEST_CONFIG,
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      nextVerifiedEmailAddress: "old-owner@example.com",
+      previousVerifiedEmailAddress: null,
+      userId: "user_123",
+    });
+    await reconcileHostedEmailVerifiedSenderRoute({
+      bucket,
+      config: TEST_CONFIG,
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      nextVerifiedEmailAddress: "new-owner@example.com",
+      previousVerifiedEmailAddress: null,
+      userId: "user_123",
+    });
+    await reconcileHostedEmailVerifiedSenderRoute({
+      bucket,
+      config: TEST_CONFIG,
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      nextVerifiedEmailAddress: "new-owner@example.com",
+      previousVerifiedEmailAddress: "old-owner@example.com",
+      userId: "user_123",
+    });
+
+    await expect(resolveHostedEmailIngressRoute({
+      bucket,
+      config: TEST_CONFIG,
+      envelopeFrom: "old-owner@example.com",
+      hasRepeatedHeaderFrom: false,
+      headerFrom: "old-owner@example.com",
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      to: TEST_CONFIG.fromAddress!,
+    })).resolves.toBeNull();
+    await expect(resolveHostedEmailIngressRoute({
+      bucket,
+      config: TEST_CONFIG,
+      envelopeFrom: "new-owner@example.com",
+      hasRepeatedHeaderFrom: false,
+      headerFrom: "new-owner@example.com",
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      to: TEST_CONFIG.fromAddress!,
+    })).resolves.toMatchObject({
+      userId: "user_123",
+    });
+  });
+
   it("keeps the previous public sender route when a move conflicts", async () => {
     const bucket = new MemoryBucket();
     await reconcileHostedEmailVerifiedSenderRoute({
@@ -256,7 +372,7 @@ describe("hosted email routing and transport", () => {
     });
   });
 
-  it("keeps resolving legacy per-thread aliases during the transition", async () => {
+  it("keeps resolving legacy per-thread aliases during the transition with the current sender identity", async () => {
     const bucket = new MemoryBucket();
     const threadTarget = createHostedEmailThreadTarget({
       cc: ["teammate@example.com"],
@@ -268,12 +384,26 @@ describe("hosted email routing and transport", () => {
       to: ["owner@example.com"],
     });
     const replyKey = "legacyreplykey123";
+    const routeSegment = await deriveHostedStorageOpaqueId({
+      length: 40,
+      rootKey: TEST_KEY,
+      scope: "email-route",
+      value: `thread:${replyKey}`,
+    });
+    const objectKey = `transient/hosted-email/threads/${routeSegment}.json`;
 
     await writeEncryptedR2Json({
+      aad: buildHostedStorageAad({
+        key: objectKey,
+        purpose: "email-route",
+        replyKey,
+        routeKind: "thread",
+      }),
       bucket,
       cryptoKey: TEST_KEY,
-      key: `transient/hosted-email/threads/${replyKey}.json`,
+      key: objectKey,
       keyId: TEST_KEY_ID,
+      scope: "email-route",
       value: {
         identityId: TEST_CONFIG.fromAddress,
         replyKey,
@@ -291,14 +421,14 @@ describe("hosted email routing and transport", () => {
     })}@${TEST_CONFIG.domain}`;
     const route = await resolveHostedEmailInboundRoute({
       bucket,
-      config: TEST_CONFIG,
+      config: ROTATED_IDENTITY_CONFIG,
       key: TEST_KEY,
       keyId: TEST_KEY_ID,
       to: legacyAddress,
     });
 
     expect(route).toMatchObject({
-      identityId: "assistant@mail.example.test",
+      identityId: "murph@mail.example.test",
       kind: "thread",
       routeAddress: legacyAddress,
       userId: "user_123",

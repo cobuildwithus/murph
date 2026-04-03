@@ -1,6 +1,8 @@
 /**
- * Owns outbound hosted email preparation and Cloudflare transport delivery. The
- * routing module still owns alias creation and persisted thread routes.
+ * Owns outbound hosted email preparation and Cloudflare transport delivery. New
+ * outbound mail always uses one stable per-user reply alias while ingress keeps
+ * temporary support for legacy per-thread aliases separately in the routing
+ * module.
  */
 
 import type { HostedEmailSendRequest } from "@murphai/assistant-runtime";
@@ -15,16 +17,14 @@ import {
 
 import type { R2BucketLike } from "../bundle-store.ts";
 import type { HostedEmailConfig } from "./config.ts";
-import {
-  createHostedEmailThreadAddress,
-  writeHostedEmailThreadRoute,
-} from "./routes.ts";
+import { createHostedEmailUserAddress } from "./routes.ts";
 
 export async function sendHostedEmailMessage(input: {
   bucket: R2BucketLike;
   config: HostedEmailConfig;
   key: Uint8Array;
   keyId: string;
+  keysById?: Readonly<Record<string, Uint8Array>>;
   request: HostedEmailSendRequest;
   userId: string;
 }): Promise<{
@@ -37,9 +37,18 @@ export async function sendHostedEmailMessage(input: {
     throw new Error("Hosted email sending is not configured.");
   }
 
+  const replyAddress = await createHostedEmailUserAddress({
+    bucket: input.bucket,
+    config: input.config,
+    key: input.key,
+    keyId: input.keyId,
+    keysById: input.keysById,
+    userId: input.userId,
+  });
   const prepared = await prepareHostedEmailSend({
     config: input.config,
     message: input.request.message,
+    replyAddress,
     target: input.request.target,
     targetKind: input.request.targetKind,
   });
@@ -83,16 +92,6 @@ export async function sendHostedEmailMessage(input: {
     );
   }
 
-  await writeHostedEmailThreadRoute({
-    bucket: input.bucket,
-    identityId: prepared.fromAddress,
-    key: input.key,
-    keyId: input.keyId,
-    replyKey: prepared.threadTarget.replyKey ?? prepared.replyKey,
-    target: prepared.threadTarget,
-    userId: input.userId,
-  });
-
   return {
     target: serializeHostedEmailThreadTarget(prepared.threadTarget),
   };
@@ -101,13 +100,13 @@ export async function sendHostedEmailMessage(input: {
 async function prepareHostedEmailSend(input: {
   config: HostedEmailConfig;
   message: string;
+  replyAddress: string;
   target: string;
   targetKind: HostedEmailSendRequest["targetKind"];
 }): Promise<{
   fromAddress: string;
   mimeMessage: string;
   recipients: string[];
-  replyKey: string;
   threadTarget: HostedEmailThreadTarget;
 }> {
   const fromAddress = input.config.fromAddress;
@@ -122,11 +121,6 @@ async function prepareHostedEmailSend(input: {
     throw new Error("Hosted email thread delivery requires a serialized thread target.");
   }
 
-  const replyKey = existingThreadTarget?.replyKey ?? randomHostedEmailKey();
-  const replyAliasAddress = await createHostedEmailThreadAddress({
-    config: input.config,
-    replyKey,
-  });
   const to = existingThreadTarget
     ? existingThreadTarget.to
     : normalizeHostedEmailAddressList([input.target]);
@@ -147,8 +141,8 @@ async function prepareHostedEmailSend(input: {
       existingThreadTarget?.lastMessageId,
       messageId,
     ].filter((value): value is string => Boolean(value && value.trim())),
-    replyAliasAddress,
-    replyKey,
+    replyAliasAddress: input.replyAddress,
+    replyKey: null,
     subject,
     to,
   });
@@ -157,17 +151,17 @@ async function prepareHostedEmailSend(input: {
     fromAddress,
     mimeMessage: buildRawMimeMessage({
       bodyText: input.message,
+      cc,
       fromAddress,
       inReplyTo: existingThreadTarget?.lastMessageId ?? null,
       messageId,
       references: existingThreadTarget?.references ?? [],
-      replyToAddress: replyAliasAddress,
+      replyToAddress: input.replyAddress,
+      routingAddress: input.replyAddress,
       subject,
       to,
-      cc,
     }),
     recipients: normalizeHostedEmailAddressList([...to, ...cc]),
-    replyKey,
     threadTarget,
   };
 }
@@ -180,6 +174,7 @@ function buildRawMimeMessage(input: {
   messageId: string;
   references: string[];
   replyToAddress: string | null;
+  routingAddress: string | null;
   subject: string;
   to: string[];
 }): string {
@@ -191,6 +186,7 @@ function buildRawMimeMessage(input: {
     `Message-ID: ${input.messageId}`,
     `Date: ${new Date().toUTCString()}`,
     input.replyToAddress ? `Reply-To: ${input.replyToAddress}` : null,
+    input.routingAddress ? `X-Murph-Route: ${input.routingAddress}` : null,
     input.inReplyTo ? `In-Reply-To: ${input.inReplyTo}` : null,
     input.references.length > 0 ? `References: ${input.references.join(" ")}` : null,
     "MIME-Version: 1.0",

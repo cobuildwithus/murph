@@ -463,6 +463,7 @@ async function handleUserEmailAddressRoute(
     config,
     key: context.environment.bundleEncryptionKey,
     keyId: context.environment.bundleEncryptionKeyId,
+    keysById: context.environment.bundleEncryptionKeysById,
     userId,
   });
 
@@ -671,6 +672,7 @@ async function handleHostedEmailIngress(
   const parsedMessage = parseRawEmailMessage(rawBytes);
   const routeHeader = readRawEmailHeaderValue(rawBytes, "x-murph-route");
   const headerFrom = readRawEmailHeaderValue(rawBytes, "from");
+  const rejectReason = "Hosted email message was not accepted.";
   const route = await resolveHostedEmailIngressRoute({
     bucket: env.BUNDLES,
     config,
@@ -685,7 +687,7 @@ async function handleHostedEmailIngress(
   });
 
   if (!route) {
-    message.setReject?.("Hosted email address is not recognized.");
+    message.setReject?.(rejectReason);
     return;
   }
 
@@ -697,7 +699,7 @@ async function handleHostedEmailIngress(
     headerFrom: headerFrom.value ?? parsedMessage.from,
     route,
   })) {
-    message.setReject?.("Hosted email sender is not authorized for this route.");
+    message.setReject?.(rejectReason);
     return;
   }
 
