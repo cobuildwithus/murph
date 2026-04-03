@@ -1127,8 +1127,8 @@ test('createDefaultAssistantToolCatalog exposes assistant runtime, recipe, and f
   assert.equal(catalog.hasTool('assistant.cron.list'), true)
   assert.equal(catalog.hasTool('assistant.selfTarget.list'), true)
   assert.equal(catalog.hasTool('vault.fs.readText'), true)
-  assert.equal(catalog.hasTool('web.fetch'), true)
-  assert.equal(catalog.hasTool('web.pdf.read'), true)
+  assert.equal(catalog.hasTool('web.fetch'), false)
+  assert.equal(catalog.hasTool('web.pdf.read'), false)
   assert.equal(catalog.hasTool('vault.recipe.show'), true)
   assert.equal(catalog.hasTool('vault.recipe.list'), true)
   assert.equal(catalog.hasTool('vault.recipe.upsert'), true)
@@ -1138,7 +1138,7 @@ test('createDefaultAssistantToolCatalog exposes assistant runtime, recipe, and f
   assert.equal(catalog.hasTool('vault.share.createLink'), true)
 })
 
-test('createDefaultAssistantToolCatalog exposes web.fetch unless explicitly disabled in env', () => {
+test('createDefaultAssistantToolCatalog exposes web.fetch only when explicitly enabled in env', () => {
   const previousEnv = Object.fromEntries(
     assistantWebFetchEnvKeys.map((key) => [key, process.env[key]]),
   ) as Record<(typeof assistantWebFetchEnvKeys)[number], string | undefined>
@@ -1152,8 +1152,17 @@ test('createDefaultAssistantToolCatalog exposes web.fetch unless explicitly disa
       vault: '/tmp/murph-vault',
       vaultServices: createStubVaultServices(),
     })
-    assert.equal(enabledCatalog.hasTool('web.fetch'), true)
-    assert.equal(enabledCatalog.hasTool('web.pdf.read'), true)
+    assert.equal(enabledCatalog.hasTool('web.fetch'), false)
+    assert.equal(enabledCatalog.hasTool('web.pdf.read'), false)
+
+    process.env.MURPH_WEB_FETCH_ENABLED = 'true'
+
+    const optInCatalog = createDefaultAssistantToolCatalog({
+      vault: '/tmp/murph-vault',
+      vaultServices: createStubVaultServices(),
+    })
+    assert.equal(optInCatalog.hasTool('web.fetch'), true)
+    assert.equal(optInCatalog.hasTool('web.pdf.read'), true)
 
     process.env.MURPH_WEB_FETCH_ENABLED = 'false'
 
@@ -1175,13 +1184,19 @@ test('createDefaultAssistantToolCatalog exposes web.fetch unless explicitly disa
   }
 })
 
-test('createDefaultAssistantToolCatalog exposes web.search only when a backend is configured', () => {
-  const previousEnv = Object.fromEntries(
+test('createDefaultAssistantToolCatalog keeps web.fetch disabled when only web.search backend is configured', () => {
+  const previousSearchEnv = Object.fromEntries(
     assistantWebSearchEnvKeys.map((key) => [key, process.env[key]]),
   ) as Record<(typeof assistantWebSearchEnvKeys)[number], string | undefined>
+  const previousFetchEnv = Object.fromEntries(
+    assistantWebFetchEnvKeys.map((key) => [key, process.env[key]]),
+  ) as Record<(typeof assistantWebFetchEnvKeys)[number], string | undefined>
 
   try {
     for (const key of assistantWebSearchEnvKeys) {
+      delete process.env[key]
+    }
+    for (const key of assistantWebFetchEnvKeys) {
       delete process.env[key]
     }
 
@@ -1189,8 +1204,8 @@ test('createDefaultAssistantToolCatalog exposes web.search only when a backend i
       vault: '/tmp/murph-vault',
       vaultServices: createStubVaultServices(),
     })
-    assert.equal(withoutBackend.hasTool('web.fetch'), true)
-    assert.equal(withoutBackend.hasTool('web.pdf.read'), true)
+    assert.equal(withoutBackend.hasTool('web.fetch'), false)
+    assert.equal(withoutBackend.hasTool('web.pdf.read'), false)
     assert.equal(withoutBackend.hasTool('web.search'), false)
 
     process.env.SEARXNG_BASE_URL = 'https://search.example.test'
@@ -1199,12 +1214,20 @@ test('createDefaultAssistantToolCatalog exposes web.search only when a backend i
       vault: '/tmp/murph-vault',
       vaultServices: createStubVaultServices(),
     })
-    assert.equal(withBackend.hasTool('web.fetch'), true)
-    assert.equal(withBackend.hasTool('web.pdf.read'), true)
+    assert.equal(withBackend.hasTool('web.fetch'), false)
+    assert.equal(withBackend.hasTool('web.pdf.read'), false)
     assert.equal(withBackend.hasTool('web.search'), true)
   } finally {
     for (const key of assistantWebSearchEnvKeys) {
-      const previousValue = previousEnv[key]
+      const previousValue = previousSearchEnv[key]
+      if (previousValue === undefined) {
+        delete process.env[key]
+      } else {
+        process.env[key] = previousValue
+      }
+    }
+    for (const key of assistantWebFetchEnvKeys) {
+      const previousValue = previousFetchEnv[key]
       if (previousValue === undefined) {
         delete process.env[key]
       } else {
@@ -1298,6 +1321,7 @@ test('createDefaultAssistantToolCatalog web.fetch extracts readable HTML content
     for (const key of assistantWebFetchEnvKeys) {
       delete process.env[key]
     }
+    process.env.MURPH_WEB_FETCH_ENABLED = 'true'
     vi.stubGlobal('fetch', fetchMock)
 
     const catalog = createDefaultAssistantToolCatalog({
@@ -1309,7 +1333,7 @@ test('createDefaultAssistantToolCatalog web.fetch extracts readable HTML content
         {
           tool: 'web.fetch',
           input: {
-            url: 'https://93.184.216.34/menu',
+            url: 'https://93.184.216.34/menu?token=secret#lunch',
             extractMode: 'markdown',
             maxChars: 4_000,
           },
@@ -1319,7 +1343,7 @@ test('createDefaultAssistantToolCatalog web.fetch extracts readable HTML content
     })
 
     assert.equal(fetchMock.mock.calls.length, 1)
-    assert.equal(String(fetchMock.mock.calls[0]?.[0]), 'https://93.184.216.34/menu')
+    assert.equal(String(fetchMock.mock.calls[0]?.[0]), 'https://93.184.216.34/menu?token=secret')
     assert.equal(results[0]?.status, 'succeeded')
 
     const fetchResult = results[0]?.result as {
@@ -1379,6 +1403,7 @@ test('createDefaultAssistantToolCatalog web.pdf.read extracts text from a public
     for (const key of assistantWebFetchEnvKeys) {
       delete process.env[key]
     }
+    process.env.MURPH_WEB_FETCH_ENABLED = 'true'
     vi.stubGlobal('fetch', fetchMock)
 
     const catalog = createDefaultAssistantToolCatalog({
@@ -1390,7 +1415,7 @@ test('createDefaultAssistantToolCatalog web.pdf.read extracts text from a public
         {
           tool: 'web.pdf.read',
           input: {
-            url: 'https://93.184.216.34/menu.pdf',
+            url: 'https://93.184.216.34/menu.pdf?token=secret#page=2',
             maxPages: 2,
             maxChars: 4_000,
           },
@@ -1400,7 +1425,7 @@ test('createDefaultAssistantToolCatalog web.pdf.read extracts text from a public
     })
 
     assert.equal(fetchMock.mock.calls.length, 1)
-    assert.equal(String(fetchMock.mock.calls[0]?.[0]), 'https://93.184.216.34/menu.pdf')
+    assert.equal(String(fetchMock.mock.calls[0]?.[0]), 'https://93.184.216.34/menu.pdf?token=secret')
     assert.equal(results[0]?.status, 'succeeded')
 
     const pdfResult = results[0]?.result as {
@@ -1448,6 +1473,7 @@ test('createDefaultAssistantToolCatalog web.fetch blocks loopback targets before
     for (const key of assistantWebFetchEnvKeys) {
       delete process.env[key]
     }
+    process.env.MURPH_WEB_FETCH_ENABLED = 'true'
     vi.stubGlobal('fetch', fetchMock)
 
     const catalog = createDefaultAssistantToolCatalog({
@@ -1482,6 +1508,52 @@ test('createDefaultAssistantToolCatalog web.fetch blocks loopback targets before
   }
 })
 
+test('createDefaultAssistantToolCatalog web.fetch blocks IPv6-mapped loopback literals before making a request', async () => {
+  const previousEnv = Object.fromEntries(
+    assistantWebFetchEnvKeys.map((key) => [key, process.env[key]]),
+  ) as Record<(typeof assistantWebFetchEnvKeys)[number], string | undefined>
+
+  const fetchMock = vi.fn<typeof fetch>()
+
+  try {
+    for (const key of assistantWebFetchEnvKeys) {
+      delete process.env[key]
+    }
+    process.env.MURPH_WEB_FETCH_ENABLED = 'true'
+    vi.stubGlobal('fetch', fetchMock)
+
+    const catalog = createDefaultAssistantToolCatalog({
+      vault: '/tmp/murph-vault',
+      vaultServices: createStubVaultServices(),
+    })
+    const results = await catalog.executeCalls({
+      calls: [
+        {
+          tool: 'web.fetch',
+          input: {
+            url: 'http://[::ffff:127.0.0.1]/private',
+          },
+        },
+      ],
+      mode: 'apply',
+    })
+
+    assert.equal(fetchMock.mock.calls.length, 0)
+    assert.equal(results[0]?.status, 'failed')
+    assert.equal(results[0]?.errorCode, 'WEB_FETCH_PRIVATE_HOST_BLOCKED')
+  } finally {
+    vi.unstubAllGlobals()
+    for (const key of assistantWebFetchEnvKeys) {
+      const previousValue = previousEnv[key]
+      if (previousValue === undefined) {
+        delete process.env[key]
+      } else {
+        process.env[key] = previousValue
+      }
+    }
+  }
+})
+
 test('createDefaultAssistantToolCatalog web.pdf.read blocks loopback targets before making a request', async () => {
   const previousEnv = Object.fromEntries(
     assistantWebFetchEnvKeys.map((key) => [key, process.env[key]]),
@@ -1493,6 +1565,7 @@ test('createDefaultAssistantToolCatalog web.pdf.read blocks loopback targets bef
     for (const key of assistantWebFetchEnvKeys) {
       delete process.env[key]
     }
+    process.env.MURPH_WEB_FETCH_ENABLED = 'true'
     vi.stubGlobal('fetch', fetchMock)
 
     const catalog = createDefaultAssistantToolCatalog({
@@ -1514,6 +1587,54 @@ test('createDefaultAssistantToolCatalog web.pdf.read blocks loopback targets bef
     assert.equal(fetchMock.mock.calls.length, 0)
     assert.equal(results[0]?.status, 'failed')
     assert.equal(results[0]?.errorCode, 'WEB_FETCH_PRIVATE_HOST_BLOCKED')
+  } finally {
+    vi.unstubAllGlobals()
+    for (const key of assistantWebFetchEnvKeys) {
+      const previousValue = previousEnv[key]
+      if (previousValue === undefined) {
+        delete process.env[key]
+      } else {
+        process.env[key] = previousValue
+      }
+    }
+  }
+})
+
+test('createDefaultAssistantToolCatalog web.fetch redacts query-bearing URLs in failure output', async () => {
+  const previousEnv = Object.fromEntries(
+    assistantWebFetchEnvKeys.map((key) => [key, process.env[key]]),
+  ) as Record<(typeof assistantWebFetchEnvKeys)[number], string | undefined>
+
+  const fetchMock = vi.fn<typeof fetch>().mockRejectedValue(new Error('connection reset'))
+
+  try {
+    for (const key of assistantWebFetchEnvKeys) {
+      delete process.env[key]
+    }
+    process.env.MURPH_WEB_FETCH_ENABLED = 'true'
+    vi.stubGlobal('fetch', fetchMock)
+
+    const catalog = createDefaultAssistantToolCatalog({
+      vault: '/tmp/murph-vault',
+      vaultServices: createStubVaultServices(),
+    })
+    const results = await catalog.executeCalls({
+      calls: [
+        {
+          tool: 'web.fetch',
+          input: {
+            url: 'https://93.184.216.34/menu?token=secret#lunch',
+          },
+        },
+      ],
+      mode: 'apply',
+    })
+
+    assert.equal(results[0]?.status, 'failed')
+    assert.equal(results[0]?.errorCode, 'WEB_FETCH_REQUEST_FAILED')
+    assert.match(results[0]?.errorMessage ?? '', /https:\/\/93\.184\.216\.34\/menu/u)
+    assert.doesNotMatch(results[0]?.errorMessage ?? '', /token=secret/u)
+    assert.doesNotMatch(results[0]?.errorMessage ?? '', /#lunch/u)
   } finally {
     vi.unstubAllGlobals()
     for (const key of assistantWebFetchEnvKeys) {

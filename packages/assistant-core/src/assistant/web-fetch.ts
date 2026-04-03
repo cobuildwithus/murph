@@ -103,6 +103,7 @@ const ASSISTANT_WEB_FETCH_MAX_TIMEOUT_MS = 60_000
 const ASSISTANT_WEB_FETCH_DEFAULT_MAX_REDIRECTS = 5
 const ASSISTANT_WEB_FETCH_MAX_REDIRECTS = 10
 const ASSISTANT_WEB_FETCH_BLOCKED_HOSTNAMES = [
+  'home.arpa',
   'localhost',
   'localhost.localdomain',
 ] as const
@@ -122,11 +123,11 @@ export function resolveAssistantWebFetchEnabled(
 
   const raw = normalizeNullableString(env.MURPH_WEB_FETCH_ENABLED)
   if (!raw) {
-    return true
+    return false
   }
 
   const normalized = raw.toLowerCase()
-  return !['0', 'false', 'no', 'off', 'disabled'].includes(normalized)
+  return ['1', 'true', 'yes', 'on', 'enabled'].includes(normalized)
 }
 
 export async function fetchAssistantWeb(
@@ -159,8 +160,8 @@ export async function fetchAssistantWeb(
     })
 
     return {
-      url: normalizedRequest.url.toString(),
-      finalUrl: fetched.finalUrl.toString(),
+      url: redactAssistantWebFetchUrl(normalizedRequest.url),
+      finalUrl: redactAssistantWebFetchUrl(fetched.finalUrl),
       status: fetched.response.status,
       contentType,
       title: extracted.title,
@@ -213,14 +214,17 @@ function normalizeAssistantWebFetchRequest(
     )
   }
 
+  parsedUrl.hash = ''
+
   const extractMode = isAssistantWebFetchExtractMode(request.extractMode)
     ? request.extractMode
     : 'markdown'
+  const configuredMaxChars = resolveAssistantWebFetchMaxChars(env)
   const maxChars = Math.max(
     1,
     Math.min(
-      Math.trunc(request.maxChars ?? resolveAssistantWebFetchMaxChars(env)),
-      resolveAssistantWebFetchMaxChars(env),
+      Math.trunc(request.maxChars ?? configuredMaxChars),
+      configuredMaxChars,
       ASSISTANT_WEB_FETCH_MAX_CHARS,
     ),
   )
@@ -282,7 +286,7 @@ export async function fetchAssistantWebResponse(input: {
     } catch (error) {
       throw new VaultCliError(
         'WEB_FETCH_REQUEST_FAILED',
-        `${input.toolName} could not reach ${currentUrl.toString()}: ${errorMessage(error)}`,
+        `${input.toolName} could not reach ${redactAssistantWebFetchUrl(currentUrl)}: ${errorMessage(error)}`,
       )
     }
 
@@ -337,7 +341,7 @@ async function assertAssistantWebUrlIsPublic(
     )
   }
 
-  const hostname = normalizeNullableString(candidateUrl.hostname)?.toLowerCase()
+  const hostname = normalizeAssistantWebHostname(candidateUrl.hostname)
   if (!hostname) {
     throw new VaultCliError(
       'WEB_FETCH_HOST_INVALID',
@@ -1012,7 +1016,9 @@ function isAssistantWebBlockedHostname(
     return true
   }
 
-  return hostname.endsWith('.localhost') || hostname.endsWith('.local')
+  return hostname.endsWith('.localhost') ||
+    hostname.endsWith('.local') ||
+    hostname.endsWith('.home.arpa')
 }
 
 function isAssistantWebBlockedIpAddress(
@@ -1024,10 +1030,66 @@ function isAssistantWebBlockedIpAddress(
   }
 
   if (family === 6) {
+    const mappedIpv4 = resolveAssistantWebIpv4MappedAddress(address)
+    if (mappedIpv4) {
+      return assistantWebFetchBlockedAddressList.check(mappedIpv4, 'ipv4')
+    }
+
     return assistantWebFetchBlockedAddressList.check(address, 'ipv6')
   }
 
   return false
+}
+
+function normalizeAssistantWebHostname(
+  value: string | null | undefined,
+): string | null {
+  const normalized = normalizeNullableString(value)?.toLowerCase()
+  if (!normalized) {
+    return null
+  }
+
+  const unwrapped = normalized.startsWith('[') && normalized.endsWith(']')
+    ? normalized.slice(1, -1)
+    : normalized
+  const trimmed = unwrapped.replace(/\.+$/u, '')
+
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function resolveAssistantWebIpv4MappedAddress(
+  address: string,
+): string | null {
+  const normalized = address.toLowerCase()
+  if (!normalized.startsWith('::ffff:')) {
+    return null
+  }
+
+  const suffix = normalized.slice('::ffff:'.length)
+  if (isIP(suffix) === 4) {
+    return suffix
+  }
+
+  const parts = suffix.split(':')
+  if (
+    parts.length !== 2 ||
+    !parts.every((part) => /^[0-9a-f]{1,4}$/u.test(part))
+  ) {
+    return null
+  }
+
+  const left = Number.parseInt(parts[0] ?? '', 16)
+  const right = Number.parseInt(parts[1] ?? '', 16)
+  if (!Number.isFinite(left) || !Number.isFinite(right)) {
+    return null
+  }
+
+  return [
+    (left >> 8) & 0xff,
+    left & 0xff,
+    (right >> 8) & 0xff,
+    right & 0xff,
+  ].join('.')
 }
 
 function createAssistantWebFetchBlockedAddressList(): BlockList {
@@ -1043,6 +1105,7 @@ function createAssistantWebFetchBlockedAddressList(): BlockList {
   blockList.addSubnet('192.168.0.0', 16)
   blockList.addSubnet('198.18.0.0', 15)
   blockList.addSubnet('224.0.0.0', 4)
+  blockList.addSubnet('240.0.0.0', 4)
   blockList.addSubnet('::', 128, 'ipv6')
   blockList.addSubnet('::1', 128, 'ipv6')
   blockList.addSubnet('fc00::', 7, 'ipv6')
@@ -1052,7 +1115,7 @@ function createAssistantWebFetchBlockedAddressList(): BlockList {
   return blockList
 }
 
-function redactAssistantWebFetchUrl(url: URL): string {
+export function redactAssistantWebFetchUrl(url: URL): string {
   return `${url.origin}${url.pathname}`
 }
 

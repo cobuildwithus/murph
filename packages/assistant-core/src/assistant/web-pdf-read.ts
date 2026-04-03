@@ -1,4 +1,4 @@
-import { createTimeoutAbortController } from '../http-retry.js'
+import { createAbortError, createTimeoutAbortController } from '../http-retry.js'
 import { VaultCliError } from '../vault-cli-errors.js'
 import {
   errorMessage,
@@ -10,6 +10,7 @@ import {
   readAssistantWebResponseBytes,
   resolveAssistantWebMediaType,
   truncateAssistantWebText,
+  redactAssistantWebFetchUrl,
 } from './web-fetch.js'
 
 const ASSISTANT_WEB_PDF_READ_DEFAULT_MAX_CHARS = 12_000
@@ -90,6 +91,7 @@ export async function readAssistantWebPdf(
       maxChars: normalizedRequest.maxChars,
       maxPages: normalizedRequest.maxPages,
       responseWasTruncated: responseBytes.truncated,
+      signal: timeout.signal,
     })
 
     const warnings = [
@@ -103,8 +105,8 @@ export async function readAssistantWebPdf(
     ]
 
     return {
-      url: normalizedRequest.url.toString(),
-      finalUrl: fetched.finalUrl.toString(),
+      url: redactAssistantWebFetchUrl(normalizedRequest.url),
+      finalUrl: redactAssistantWebFetchUrl(fetched.finalUrl),
       status: fetched.response.status,
       contentType,
       pageCount: extraction.pageCount,
@@ -147,6 +149,8 @@ function normalizeAssistantWebPdfReadRequest(
       'web.pdf.read requires a valid absolute URL.',
     )
   }
+
+  parsedUrl.hash = ''
 
   return {
     url: parsedUrl,
@@ -211,6 +215,7 @@ async function extractAssistantPdfText(input: {
   maxChars: number
   maxPages: number
   responseWasTruncated: boolean
+  signal: AbortSignal
 }): Promise<{
   pageCount: number
   text: string
@@ -225,11 +230,20 @@ async function extractAssistantPdfText(input: {
       data: input.bytes,
       verbosity: pdfjs.VerbosityLevel.ERRORS,
     })
-    const pdfDocument = await documentLoadingTask.promise
+    const pdfDocument = await waitForAssistantPdfOperation({
+      promise: documentLoadingTask.promise,
+      signal: input.signal,
+      onAbort: () => documentLoadingTask?.destroy(),
+    })
 
     try {
       const pageCount = pdfDocument.numPages
       const warnings: string[] = []
+      if (input.responseWasTruncated) {
+        warnings.push(
+          'The PDF response hit the configured byte limit before parsing, so extracted text may be incomplete or malformed.',
+        )
+      }
       const pageTexts: string[] = []
       const pagesToRead = Math.min(pageCount, input.maxPages)
       let truncated = input.responseWasTruncated
@@ -242,8 +256,16 @@ async function extractAssistantPdfText(input: {
       }
 
       for (let pageNumber = 1; pageNumber <= pagesToRead; pageNumber += 1) {
-        const page = await pdfDocument.getPage(pageNumber)
-        const textContent = await page.getTextContent()
+        const page = await waitForAssistantPdfOperation({
+          promise: pdfDocument.getPage(pageNumber),
+          signal: input.signal,
+          onAbort: () => pdfDocument.destroy(),
+        })
+        const textContent = await waitForAssistantPdfOperation({
+          promise: page.getTextContent(),
+          signal: input.signal,
+          onAbort: () => pdfDocument.destroy(),
+        })
         const pageText = renderAssistantPdfPageText(textContent.items)
         if (pageText.length > 0) {
           pageTexts.push(pageText)
@@ -275,12 +297,16 @@ async function extractAssistantPdfText(input: {
       await pdfDocument.destroy()
     }
   } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw error
+    }
+
     const truncationNote = input.responseWasTruncated
       ? ' The PDF response was truncated by the configured byte limit before parsing.'
       : ''
     throw new VaultCliError(
       'WEB_PDF_READ_PARSE_FAILED',
-      `web.pdf.read could not extract text from ${input.finalUrl.toString()}: ${errorMessage(error)}.${truncationNote}`,
+      `web.pdf.read could not extract text from ${redactAssistantWebFetchUrl(input.finalUrl)}: ${errorMessage(error)}.${truncationNote}`,
     )
   } finally {
     await documentLoadingTask?.destroy()
@@ -363,4 +389,37 @@ function isAssistantWebPdfContentType(contentType: string | null): boolean {
 
 async function loadAssistantPdfJs(): Promise<AssistantPdfJsModule> {
   return await import('pdfjs-dist/legacy/build/pdf.mjs')
+}
+
+async function waitForAssistantPdfOperation<T>(input: {
+  onAbort: (() => void | Promise<void>) | undefined
+  promise: Promise<T>
+  signal: AbortSignal
+}): Promise<T> {
+  if (input.signal.aborted) {
+    void input.promise.catch(() => {})
+    void Promise.resolve(input.onAbort?.()).catch(() => {})
+    throw createAbortError()
+  }
+
+  return await new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      cleanup()
+      void Promise.resolve(input.onAbort?.()).catch(() => {})
+      reject(createAbortError())
+    }
+    const cleanup = () => input.signal.removeEventListener('abort', onAbort)
+
+    input.signal.addEventListener('abort', onAbort, { once: true })
+    input.promise.then(
+      (value) => {
+        cleanup()
+        resolve(value)
+      },
+      (error) => {
+        cleanup()
+        reject(error)
+      },
+    )
+  })
 }
