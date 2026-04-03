@@ -17,6 +17,7 @@ const BASE_ENVIRONMENT: HostedDeviceSyncEnvironment = {
   allowedMutationOrigins: [],
   allowedReturnOrigins: [],
   encryptionKey: Buffer.alloc(32, 0),
+  encryptionKeysByVersion: { v1: Buffer.alloc(32, 0) },
   encryptionKeyVersion: "v1",
   isProduction: false,
   ouraWebhookVerificationToken: null,

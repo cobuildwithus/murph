@@ -4,7 +4,6 @@ import { createHostedVerifiedEmailUserEnv } from "@murphai/runtime-state";
 import { encodeHostedBundleBase64 } from "@murphai/runtime-state/node";
 
 import {
-  artifactObjectKey,
   createHostedArtifactStore,
   createHostedBundleStore,
   describeHostedBase64BundleRef,
@@ -12,6 +11,10 @@ import {
   writeHostedBundleBytesIfChanged,
   type HostedBundleStore,
 } from "../src/bundle-store.js";
+import {
+  buildHostedStorageAad,
+  deriveHostedStorageOpaqueId,
+} from "../src/crypto-context.js";
 import { encryptHostedBundle } from "../src/crypto.js";
 import { resolveHostedEmailIngressRoute } from "../src/hosted-email/routes.js";
 import { RunnerBundleSync } from "../src/user-runner/runner-bundle-sync.js";
@@ -71,9 +74,17 @@ describe("hosted bundle reads", () => {
     });
     const ref = await bundleStore.writeBundle("vault", Uint8Array.from(Buffer.from("vault")));
     const corruptedEnvelope = await encryptHostedBundle({
+      aad: buildHostedStorageAad({
+        hash: ref.hash,
+        key: ref.key,
+        kind: "vault",
+        purpose: "bundle",
+        size: ref.size,
+      }),
       key: bundleKey,
       keyId: "v1",
       plaintext: Uint8Array.from(Buffer.from("vault-corrupted")),
+      scope: "bundle",
     });
 
     await bucket.api.put(ref.key, JSON.stringify(corruptedEnvelope));
@@ -83,7 +94,7 @@ describe("hosted bundle reads", () => {
     );
   });
 
-  it("fails closed when stored artifact bytes no longer match the requested sha", async () => {
+  it("fails closed when artifact ciphertext is rebound with mismatched AAD", async () => {
     const bucket = createBucketStore();
     const artifactStore = createHostedArtifactStore({
       bucket: bucket.api,
@@ -95,20 +106,26 @@ describe("hosted bundle reads", () => {
     const artifactSha = "c7c5c1d70c5dec4416ab6158afd0b223ef40c29b1dc1f97ed9428b94d4cadb1c";
 
     await artifactStore.writeArtifact(artifactSha, artifactBytes);
+    const objectKey = await artifactObjectKeyForTest(bundleKey, "member_123", artifactSha);
     const corruptedEnvelope = await encryptHostedBundle({
+      aad: buildHostedStorageAad({
+        key: objectKey,
+        purpose: "artifact",
+        sha256: "0".repeat(64),
+        userId: "member_123",
+      }),
       key: bundleKey,
       keyId: "v1",
       plaintext: Uint8Array.from(Buffer.from("artifact-corrupted")),
+      scope: "artifact",
     });
 
     await bucket.api.put(
-      artifactObjectKey("member_123", artifactSha),
+      objectKey,
       JSON.stringify(corruptedEnvelope),
     );
 
-    await expect(artifactStore.readArtifact(artifactSha)).rejects.toThrow(
-      `Hosted artifact hash mismatch: expected ${artifactSha}`,
-    );
+    await expect(artifactStore.readArtifact(artifactSha)).rejects.toThrow();
   });
 });
 
@@ -309,4 +326,21 @@ function createBucketStore() {
       },
     },
   };
+}
+
+async function artifactObjectKeyForTest(rootKey: Uint8Array, userId: string, sha256: string): Promise<string> {
+  const userSegment = await deriveHostedStorageOpaqueId({
+    length: 24,
+    rootKey,
+    scope: "artifact",
+    value: `user:${userId}`,
+  });
+  const artifactSegment = await deriveHostedStorageOpaqueId({
+    length: 48,
+    rootKey,
+    scope: "artifact",
+    value: `artifact:${userId}:${sha256}`,
+  });
+
+  return `users/${userSegment}/artifacts/${artifactSegment}.artifact.bin`;
 }

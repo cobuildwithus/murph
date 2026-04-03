@@ -721,7 +721,6 @@ export class HostedUserRunner {
   private readUserEnvSource(): Readonly<Record<string, string | undefined>> {
     return {
       HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: this.env.allowedUserEnvKeys ?? undefined,
-      HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES: this.env.allowedUserEnvPrefixes ?? undefined,
     };
   }
 

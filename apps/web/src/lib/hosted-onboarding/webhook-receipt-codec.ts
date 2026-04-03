@@ -5,6 +5,7 @@ import {
 } from "@murphai/hosted-execution";
 import { Prisma } from "@prisma/client";
 
+import { buildHostedSecretAad } from "../device-sync/crypto";
 import { createHostedOpaqueIdentifier } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
 import { getHostedOnboardingSecretCodec } from "./runtime";
@@ -208,12 +209,18 @@ function readHostedWebhookErrorState<TErrorState extends HostedWebhookReceiptErr
 }
 
 function serializeHostedLinqMessageSideEffectPayload(
+  effectId: string,
   payload: HostedWebhookLinqMessageSideEffect["payload"],
 ): Prisma.InputJsonObject {
   const codec = getHostedOnboardingSecretCodec();
 
   return {
-    encryptedPayload: codec.encrypt(JSON.stringify(payload)),
+    encryptedPayload: codec.encrypt(JSON.stringify(payload), {
+      aad: buildHostedSecretAad({
+        effectId,
+        purpose: "hosted-webhook-side-effect",
+      }),
+    }),
     keyVersion: codec.keyVersion,
   } satisfies Prisma.InputJsonObject;
 }
@@ -240,7 +247,12 @@ function readHostedWebhookLinqMessageSideEffectPayload(
   if (encryptedPayload) {
     try {
       const decrypted = JSON.parse(
-        getHostedOnboardingSecretCodec().decrypt(encryptedPayload),
+        getHostedOnboardingSecretCodec().decrypt(encryptedPayload, {
+          aad: buildHostedSecretAad({
+            effectId,
+            purpose: "hosted-webhook-side-effect",
+          }),
+        }),
       ) as Record<string, unknown>;
       const chatId = readHostedWebhookReceiptString(decrypted.chatId as Prisma.InputJsonValue);
       const message = readHostedWebhookReceiptString(decrypted.message as Prisma.InputJsonValue);
@@ -276,7 +288,7 @@ function serializeHostedWebhookSideEffect(
     lastError: effect.lastError,
     payload:
       effect.kind === "linq_message_send"
-        ? serializeHostedLinqMessageSideEffectPayload(effect.payload)
+        ? serializeHostedLinqMessageSideEffectPayload(effect.effectId, effect.payload)
         : effect.payload as unknown as Prisma.InputJsonValue,
     result:
       effect.kind === "linq_message_send"

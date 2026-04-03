@@ -12,6 +12,7 @@ import {
   requireHostedOnboardingPublicBaseUrl,
 } from "../hosted-onboarding/runtime";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import { buildHostedSecretAad } from "../device-sync/crypto";
 
 import type { HostedSharePreview, HostedSharePrismaClient } from "./types";
 
@@ -64,9 +65,15 @@ export async function requireHostedShareLink(shareCode: string, prisma: HostedSh
 }
 
 export function readHostedSharePack(record: {
+  id: string;
   encryptedPayload: string;
 }): { pack: SharePack } {
-  const payload = getHostedOnboardingSecretCodec().decrypt(record.encryptedPayload);
+  const payload = getHostedOnboardingSecretCodec().decrypt(record.encryptedPayload, {
+    aad: buildHostedSecretAad({
+      purpose: "hosted-share-pack",
+      shareId: record.id,
+    }),
+  });
   const parsed = JSON.parse(payload) as SharePack;
 
   return {

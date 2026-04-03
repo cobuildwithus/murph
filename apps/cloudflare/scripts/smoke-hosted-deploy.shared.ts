@@ -68,14 +68,19 @@ export async function runSmokeHostedDeploy(input: {
   const log = input.log ?? console.log;
   const workerBaseUrl = resolveSmokeWorkerBaseUrl(source);
   const smokeUserId = normalizeConfiguredString(source.HOSTED_EXECUTION_SMOKE_USER_ID);
-  const controlToken = normalizeConfiguredString(source.HOSTED_EXECUTION_CONTROL_TOKEN);
+  const controlToken = readFirstConfiguredToken(
+    source.HOSTED_EXECUTION_CONTROL_TOKENS,
+    source.HOSTED_EXECUTION_CONTROL_TOKEN,
+  );
   const versionOverrideHeaders = buildVersionOverrideHeaders(source);
 
   await assertHealth(fetchImpl, new URL("/health", `${workerBaseUrl}/`).toString(), versionOverrideHeaders);
 
   if (smokeUserId) {
     if (!controlToken) {
-      throw new Error("HOSTED_EXECUTION_CONTROL_TOKEN is required when HOSTED_EXECUTION_SMOKE_USER_ID is set.");
+      throw new Error(
+        "HOSTED_EXECUTION_CONTROL_TOKENS is required when HOSTED_EXECUTION_SMOKE_USER_ID is set.",
+      );
     }
 
     const statusRequest: SmokeControlRequest = {
@@ -114,6 +119,27 @@ export async function runSmokeHostedDeploy(input: {
   }
 
   log("Cloudflare hosted execution smoke checks passed.");
+}
+
+function readFirstConfiguredToken(...values: Array<string | undefined>): string | null {
+  for (const value of values) {
+    const normalized = normalizeConfiguredString(value);
+
+    if (!normalized) {
+      continue;
+    }
+
+    const [firstToken] = normalized
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+
+    if (firstToken) {
+      return firstToken;
+    }
+  }
+
+  return null;
 }
 
 async function assertHealth(

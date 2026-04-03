@@ -1,7 +1,7 @@
 {
   "rules": [
     {
-      "id": "delete-transient-execution-journal-after-30d",
+      "id": "delete-transient-execution-journal-after-7d",
       "enabled": true,
       "conditions": {
         "prefix": "transient/execution-journal/"
@@ -9,12 +9,12 @@
       "deleteObjectsTransition": {
         "condition": {
           "type": "Age",
-          "maxAge": 2592000
+          "maxAge": 604800
         }
       }
     },
     {
-      "id": "delete-transient-side-effects-after-30d",
+      "id": "delete-transient-side-effects-after-7d",
       "enabled": true,
       "conditions": {
         "prefix": "transient/side-effects/"
@@ -22,12 +22,12 @@
       "deleteObjectsTransition": {
         "condition": {
           "type": "Age",
-          "maxAge": 2592000
+          "maxAge": 604800
         }
       }
     },
     {
-      "id": "delete-transient-hosted-email-raw-messages-after-30d",
+      "id": "delete-transient-hosted-email-raw-messages-after-7d",
       "enabled": true,
       "conditions": {
         "prefix": "transient/hosted-email/messages/"
@@ -35,7 +35,7 @@
       "deleteObjectsTransition": {
         "condition": {
           "type": "Age",
-          "maxAge": 2592000
+          "maxAge": 604800
         }
       }
     }

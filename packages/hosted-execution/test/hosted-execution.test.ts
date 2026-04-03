@@ -160,6 +160,7 @@ describe("@murphai/hosted-execution", () => {
     ).toEqual({
       baseUrl: "https://dispatch.example.test",
       controlToken: "control-token",
+      controlTokens: ["control-token"],
     });
 
     expect(
@@ -170,6 +171,7 @@ describe("@murphai/hosted-execution", () => {
     ).toEqual({
       baseUrl: null,
       controlToken: null,
+      controlTokens: [],
     });
   });
 
@@ -185,9 +187,12 @@ describe("@murphai/hosted-execution", () => {
     ).toEqual({
       deviceSyncRuntimeBaseUrl: "https://device-sync.example.test",
       internalToken: "internal-token",
+      internalTokens: ["internal-token"],
       schedulerToken: "cron-token",
+      schedulerTokens: ["cron-token"],
       shareBaseUrl: "https://web.example.test",
       shareToken: "share-token",
+      shareTokens: ["share-token"],
       usageBaseUrl: "https://web.example.test",
     });
 
@@ -199,9 +204,12 @@ describe("@murphai/hosted-execution", () => {
     ).toEqual({
       deviceSyncRuntimeBaseUrl: "https://web.example.test",
       internalToken: null,
+      internalTokens: [],
       schedulerToken: null,
+      schedulerTokens: [],
       shareBaseUrl: "https://share.example.test/internal",
       shareToken: null,
+      shareTokens: [],
       usageBaseUrl: "https://web.example.test",
     });
   });
@@ -215,9 +223,12 @@ describe("@murphai/hosted-execution", () => {
     ).toEqual({
       deviceSyncRuntimeBaseUrl: "https://www.withmurph.ai",
       internalToken: "internal-token",
+      internalTokens: ["internal-token"],
       schedulerToken: null,
+      schedulerTokens: [],
       shareBaseUrl: "https://www.withmurph.ai",
       shareToken: null,
+      shareTokens: [],
       usageBaseUrl: "https://www.withmurph.ai",
     });
   });
@@ -239,16 +250,17 @@ describe("@murphai/hosted-execution", () => {
       }),
     ).toEqual({
       allowedUserEnvKeys: "OPENAI_API_KEY",
-      allowedUserEnvPrefixes: null,
       bundleEncryptionKeyBase64: "Zm9v",
       bundleEncryptionKeyId: "v1",
       bundleEncryptionKeyringJson: null,
       controlToken: null,
+      controlTokens: [],
       defaultAlarmDelayMs: 15 * 60 * 1000,
       dispatchSigningSecret: "dispatch-secret",
       maxEventAttempts: 3,
       retryDelayMs: 30_000,
       runnerControlToken: null,
+      runnerControlTokens: [],
       runnerTimeoutMs: 60_000,
     });
   });

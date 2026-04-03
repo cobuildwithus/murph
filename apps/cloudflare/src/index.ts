@@ -376,7 +376,7 @@ async function authorizeRoute(
 ): Promise<Response | null> {
   switch (authorization) {
     case "control":
-      return requireBearerAuthorization(context.request, context.environment?.controlToken);
+      return requireBearerAuthorization(context.request, context.environment?.controlTokens ?? []);
     case "signed-dispatch": {
       const secret = context.environment?.dispatchSigningSecret;
       if (!secret) {
@@ -859,13 +859,18 @@ function isBackpressuredStatus(
 
 function requireBearerAuthorization(
   request: Request,
-  token: string | null | undefined,
+  tokens: readonly string[] | string | null | undefined,
 ): Response | null {
-  if (!token) {
+  const acceptedTokens = Array.isArray(tokens)
+    ? tokens.filter((token) => typeof token === "string" && token.length > 0)
+    : (typeof tokens === "string" && tokens.length > 0 ? [tokens] : []);
+
+  if (acceptedTokens.length === 0) {
     return json({ error: "Hosted execution control token is not configured." }, 503);
   }
 
-  return request.headers.get("authorization") === `Bearer ${token}`
+  const authorization = request.headers.get("authorization");
+  return authorization && acceptedTokens.some((token) => authorization === `Bearer ${token}`)
     ? null
     : json({ error: "Unauthorized" }, 401);
 }

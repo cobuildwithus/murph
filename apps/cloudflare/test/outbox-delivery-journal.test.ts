@@ -5,6 +5,10 @@ import {
   buildHostedAssistantDeliverySentRecord,
 } from "@murphai/hosted-execution";
 
+import {
+  buildHostedStorageAad,
+  deriveHostedStorageOpaqueId,
+} from "../src/crypto-context.ts";
 import { writeEncryptedR2Json } from "../src/crypto.ts";
 import {
   HostedExecutionSideEffectConflictError,
@@ -19,12 +23,20 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
       effectId: "outbox_authoritative",
       fingerprint: "dedupe_authoritative",
     });
+    const objectKey = await sideEffectRecordKey(key, "member_123", record.effectId);
 
     await writeEncryptedR2Json({
+      aad: buildHostedStorageAad({
+        effectId: record.effectId,
+        key: objectKey,
+        purpose: "side-effect-journal",
+        userId: "member_123",
+      }),
       bucket: bucket.api,
       cryptoKey: key,
-      key: sideEffectRecordKey("member_123", record.effectId),
+      key: objectKey,
       keyId: "v1",
+      scope: "side-effect-journal",
       value: record,
     });
 
@@ -50,12 +62,20 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
       effectId: "outbox_rotated",
       fingerprint: "dedupe_rotated",
     });
+    const objectKey = await sideEffectRecordKey(currentKey, "member_123", record.effectId);
 
     await writeEncryptedR2Json({
+      aad: buildHostedStorageAad({
+        effectId: record.effectId,
+        key: objectKey,
+        purpose: "side-effect-journal",
+        userId: "member_123",
+      }),
       bucket: bucket.api,
       cryptoKey: previousKey,
-      key: sideEffectRecordKey("member_123", record.effectId),
+      key: objectKey,
       keyId: "v1",
+      scope: "side-effect-journal",
       value: record,
     });
 
@@ -218,8 +238,21 @@ function createSentRecord(input: {
   });
 }
 
-function sideEffectRecordKey(userId: string, effectId: string): string {
-  return `transient/side-effects/${encodeURIComponent(userId)}/${encodeURIComponent(effectId)}.json`;
+async function sideEffectRecordKey(rootKey: Uint8Array, userId: string, effectId: string): Promise<string> {
+  const userSegment = await deriveHostedStorageOpaqueId({
+    length: 24,
+    rootKey,
+    scope: "side-effect-journal",
+    value: `user:${userId}`,
+  });
+  const effectSegment = await deriveHostedStorageOpaqueId({
+    length: 40,
+    rootKey,
+    scope: "side-effect-journal",
+    value: `effect:${userId}:${effectId}`,
+  });
+
+  return `transient/side-effects/${userSegment}/${effectSegment}.json`;
 }
 
 function createMemoryBucket() {

@@ -28,6 +28,7 @@ export function createHostedDeviceSyncControlPlaneContext(
   const codec = createHostedSecretCodec({
     key: env.encryptionKey,
     keyVersion: env.encryptionKeyVersion,
+    keysByVersion: env.encryptionKeysByVersion,
   });
 
   return {

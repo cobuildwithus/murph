@@ -7,7 +7,7 @@ import type { GarminDeviceSyncProviderConfig } from "@murphai/device-syncd/provi
 import type { OuraDeviceSyncProviderConfig } from "@murphai/device-syncd/providers/oura";
 import type { WhoopDeviceSyncProviderConfig } from "@murphai/device-syncd/providers/whoop";
 
-import { decodeHostedEncryptionKey } from "./crypto";
+import { decodeHostedEncryptionKey, decodeHostedEncryptionKeyring } from "./crypto";
 import { normalizeNullableString, parseCommaSeparatedList } from "./shared";
 import {
   readHostedDeviceSyncPublicBaseUrl,
@@ -18,6 +18,7 @@ export interface HostedDeviceSyncEnvironment {
   allowedMutationOrigins: string[];
   allowedReturnOrigins: string[];
   encryptionKey: Buffer;
+  encryptionKeysByVersion: Readonly<Record<string, Buffer>>;
   encryptionKeyVersion: string;
   isProduction: boolean;
   ouraWebhookVerificationToken: string | null;
@@ -56,6 +57,9 @@ const DEVICE_SYNC_ENCRYPTION_KEY_ENV_KEYS = [
 const DEVICE_SYNC_ENCRYPTION_KEY_VERSION_ENV_KEYS = [
   "DEVICE_SYNC_ENCRYPTION_KEY_VERSION",
 ] as const;
+const DEVICE_SYNC_ENCRYPTION_KEYRING_JSON_ENV_KEYS = [
+  "DEVICE_SYNC_ENCRYPTION_KEYRING_JSON",
+] as const;
 const DEVICE_SYNC_TRUSTED_USER_ASSERTION_HEADER_ENV_KEYS = [
   "DEVICE_SYNC_TRUSTED_USER_ASSERTION_HEADER",
 ] as const;
@@ -70,8 +74,9 @@ const OURA_WEBHOOK_VERIFICATION_TOKEN_ENV_KEYS = [
 ] as const;
 
 export function readHostedDeviceSyncEnvironment(source: NodeJS.ProcessEnv = process.env): HostedDeviceSyncEnvironment {
-  const encryptionKey = readEnv(source, DEVICE_SYNC_ENCRYPTION_KEY_ENV_KEYS);
+  const encryptionKeyValue = readEnv(source, DEVICE_SYNC_ENCRYPTION_KEY_ENV_KEYS);
   const encryptionKeyVersion = readEnv(source, DEVICE_SYNC_ENCRYPTION_KEY_VERSION_ENV_KEYS) ?? "v1";
+  const encryptionKeyringJson = readEnv(source, DEVICE_SYNC_ENCRYPTION_KEYRING_JSON_ENV_KEYS);
   const hasExplicitAllowedMutationOrigins = hasExplicitEnv(
     source,
     DEVICE_SYNC_ALLOWED_MUTATION_ORIGINS_ENV_KEYS,
@@ -83,10 +88,11 @@ export function readHostedDeviceSyncEnvironment(source: NodeJS.ProcessEnv = proc
   const allowedMutationOrigins = parseCommaSeparatedList(source.DEVICE_SYNC_ALLOWED_MUTATION_ORIGINS);
   const allowedReturnOrigins = parseCommaSeparatedList(source.DEVICE_SYNC_ALLOWED_RETURN_ORIGINS);
 
-  if (!encryptionKey) {
+  if (!encryptionKeyValue) {
     throw new TypeError("DEVICE_SYNC_ENCRYPTION_KEY is required for the hosted device-sync control plane.");
   }
 
+  const encryptionKey = decodeHostedEncryptionKey(encryptionKeyValue);
   const hostedPublicOrigin =
     hasExplicitAllowedMutationOrigins && hasExplicitAllowedReturnOrigins
       ? null
@@ -97,7 +103,13 @@ export function readHostedDeviceSyncEnvironment(source: NodeJS.ProcessEnv = proc
       hasExplicitAllowedMutationOrigins ? allowedMutationOrigins : buildFallbackAllowedOrigins(hostedPublicOrigin),
     allowedReturnOrigins:
       hasExplicitAllowedReturnOrigins ? allowedReturnOrigins : buildFallbackAllowedOrigins(hostedPublicOrigin),
-    encryptionKey: decodeHostedEncryptionKey(encryptionKey),
+    encryptionKey,
+    encryptionKeysByVersion: decodeHostedEncryptionKeyring({
+      currentKey: encryptionKey,
+      currentKeyVersion: encryptionKeyVersion,
+      keyringJson: encryptionKeyringJson,
+      label: "DEVICE_SYNC_ENCRYPTION_KEYRING_JSON",
+    }),
     encryptionKeyVersion,
     isProduction: (source.NODE_ENV ?? "development") === "production",
     ouraWebhookVerificationToken: readEnv(source, OURA_WEBHOOK_VERIFICATION_TOKEN_ENV_KEYS) ?? null,

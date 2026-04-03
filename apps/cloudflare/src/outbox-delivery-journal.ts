@@ -7,6 +7,10 @@ import {
 
 import type { R2BucketLike } from "./bundle-store.ts";
 import {
+  buildHostedStorageAad,
+  deriveHostedStorageOpaqueId,
+} from "./crypto-context.js";
+import {
   readEncryptedR2Json,
   writeEncryptedR2Json,
 } from "./crypto.js";
@@ -45,8 +49,8 @@ export function createHostedExecutionSideEffectJournalStore(input: {
 }): HostedExecutionSideEffectJournalStore {
   return {
     async deletePrepared(query) {
-      const key = sideEffectRecordKey(query.userId, query.effectId);
-      const existing = await readRecordAtKey(input, key);
+      const key = await sideEffectRecordKey(input.key, query.userId, query.effectId);
+      const existing = await readRecordAtKey(input, key, query.userId, query.effectId);
 
       if (!existing) {
         return false;
@@ -68,7 +72,9 @@ export function createHostedExecutionSideEffectJournalStore(input: {
     async read(query) {
       const existing = await readRecordAtKey(
         input,
-        sideEffectRecordKey(query.userId, query.effectId),
+        await sideEffectRecordKey(input.key, query.userId, query.effectId),
+        query.userId,
+        query.effectId,
       );
 
       if (!existing) {
@@ -82,15 +88,15 @@ export function createHostedExecutionSideEffectJournalStore(input: {
     async write(writeInput) {
       const record = parseHostedExecutionSideEffectRecord(writeInput.record);
       assertSideEffectRecordIsSelfConsistent(record);
-      const key = sideEffectRecordKey(writeInput.userId, record.effectId);
-      const existing = await readRecordAtKey(input, key);
+      const key = await sideEffectRecordKey(input.key, writeInput.userId, record.effectId);
+      const existing = await readRecordAtKey(input, key, writeInput.userId, record.effectId);
       const durableRecord = mergeHostedExecutionSideEffectRecord(existing, record);
 
       if (durableRecord === existing) {
         return durableRecord;
       }
 
-      await writeRecordAtKey(input, key, durableRecord);
+      await writeRecordAtKey(input, key, writeInput.userId, record.effectId, durableRecord);
       return durableRecord;
     },
   };
@@ -104,8 +110,16 @@ async function readRecordAtKey(
     keysById?: Readonly<Record<string, Uint8Array>>;
   },
   key: string,
+  userId: string,
+  effectId: string,
 ): Promise<HostedExecutionSideEffectRecord | null> {
   const value = await readEncryptedR2Json({
+    aad: buildHostedStorageAad({
+      effectId,
+      key,
+      purpose: "side-effect-journal",
+      userId,
+    }),
     bucket: input.bucket,
     cryptoKey: input.key,
     cryptoKeysById: input.keysById,
@@ -114,6 +128,7 @@ async function readRecordAtKey(
     parse(value) {
       return value;
     },
+    scope: "side-effect-journal",
   });
 
   if (!value) {
@@ -131,19 +146,41 @@ async function writeRecordAtKey(
     keysById?: Readonly<Record<string, Uint8Array>>;
   },
   key: string,
+  userId: string,
+  effectId: string,
   value: HostedExecutionSideEffectRecord,
 ): Promise<void> {
   await writeEncryptedR2Json({
+    aad: buildHostedStorageAad({
+      effectId,
+      key,
+      purpose: "side-effect-journal",
+      userId,
+    }),
     bucket: input.bucket,
     cryptoKey: input.key,
     key,
     keyId: input.keyId,
+    scope: "side-effect-journal",
     value,
   });
 }
 
-function sideEffectRecordKey(userId: string, effectId: string): string {
-  return `transient/side-effects/${encodeURIComponent(userId)}/${encodeURIComponent(effectId)}.json`;
+async function sideEffectRecordKey(rootKey: Uint8Array, userId: string, effectId: string): Promise<string> {
+  const userSegment = await deriveHostedStorageOpaqueId({
+    length: 24,
+    rootKey,
+    scope: "side-effect-journal",
+    value: `user:${userId}`,
+  });
+  const effectSegment = await deriveHostedStorageOpaqueId({
+    length: 40,
+    rootKey,
+    scope: "side-effect-journal",
+    value: `effect:${userId}:${effectId}`,
+  });
+
+  return `transient/side-effects/${userSegment}/${effectSegment}.json`;
 }
 
 function assertSideEffectRecordIsSelfConsistent(

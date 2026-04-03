@@ -8,6 +8,7 @@ import {
 import {
   getHostedOnboardingSecretCodec,
 } from "../hosted-onboarding/runtime";
+import { buildHostedSecretAad } from "../device-sync/crypto";
 
 import {
   buildHostedSharePreview,
@@ -41,6 +42,7 @@ export async function createHostedShareLink(input: {
   const pack = assertContract(sharePackSchema, input.pack, "share pack");
   const preview = buildHostedSharePreview(pack);
   const shareCode = generateHostedShareCode();
+  const shareId = generateHostedShareId();
   const publicBaseUrl = requireHostedSharePublicBaseUrl();
   const codec = getHostedOnboardingSecretCodec();
   let inviteCode = normalizeOptionalString(input.inviteCode) ?? null;
@@ -56,11 +58,16 @@ export async function createHostedShareLink(input: {
 
   await prisma.hostedShareLink.create({
     data: {
-      id: generateHostedShareId(),
+      id: shareId,
       codeHash: hashHostedShareCode(shareCode),
       senderMemberId: normalizeOptionalString(input.senderMemberId) ?? null,
       previewTitle: HOSTED_SHARE_PRIVATE_PREVIEW_TITLE,
-      encryptedPayload: codec.encrypt(JSON.stringify(pack)),
+      encryptedPayload: codec.encrypt(JSON.stringify(pack), {
+        aad: buildHostedSecretAad({
+          purpose: "hosted-share-pack",
+          shareId,
+        }),
+      }),
       encryptionKeyVersion: codec.keyVersion,
       expiresAt: hostedShareExpiresAt(input.expiresInHours),
     },

@@ -1,6 +1,10 @@
 import { decodeBase64, encodeBase64 } from "./base64.js";
+import {
+  deriveHostedStorageKey,
+  type HostedStorageScope,
+} from "./crypto-context.js";
 
-const HOSTED_CIPHER_SCHEMA = "murph.hosted-cipher.v1";
+const HOSTED_CIPHER_SCHEMA = "murph.hosted-cipher.v2";
 
 type HostedCipherSchema = typeof HOSTED_CIPHER_SCHEMA;
 
@@ -10,18 +14,27 @@ export interface HostedCipherEnvelope {
   iv: string;
   keyId: string;
   schema: HostedCipherSchema;
+  scope: HostedStorageScope;
 }
 
 export async function encryptHostedBundle(input: {
+  aad?: Uint8Array;
   key: Uint8Array;
   keyId: string;
   plaintext: Uint8Array;
+  scope: HostedStorageScope;
 }): Promise<HostedCipherEnvelope> {
-  const cryptoKey = await importAesKey(input.key);
+  const scopedKey = await deriveHostedStorageKey(input.key, input.scope);
+  const cryptoKey = await importAesKey(scopedKey);
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ciphertext = new Uint8Array(
     await crypto.subtle.encrypt(
       {
+        ...(input.aad && input.aad.byteLength > 0
+          ? {
+              additionalData: toArrayBuffer(input.aad),
+            }
+          : {}),
         iv,
         name: "AES-GCM",
       },
@@ -36,24 +49,40 @@ export async function encryptHostedBundle(input: {
     iv: encodeBase64(iv),
     keyId: input.keyId,
     schema: HOSTED_CIPHER_SCHEMA,
+    scope: input.scope,
   };
 }
 
 export async function decryptHostedBundle(input: {
+  aad?: Uint8Array;
   envelope: HostedCipherEnvelope;
   expectedKeyId?: string;
   key: Uint8Array;
   keysById?: Readonly<Record<string, Uint8Array>>;
+  scope: HostedStorageScope;
 }): Promise<Uint8Array> {
   if (!isSupportedHostedCipherSchema(input.envelope.schema) || input.envelope.algorithm !== "AES-GCM") {
     throw new Error("Hosted bundle envelope is invalid.");
   }
 
-  const cryptoKey = await importAesKey(resolveHostedBundleDecryptionKey(input));
+  if (input.envelope.scope !== input.scope) {
+    throw new Error(
+      `Hosted bundle envelope scope mismatch: expected ${input.scope}, got ${input.envelope.scope}.`,
+    );
+  }
+
+  const rootKey = resolveHostedBundleDecryptionKey(input);
+  const scopedKey = await deriveHostedStorageKey(rootKey, input.scope);
+  const cryptoKey = await importAesKey(scopedKey);
 
   return new Uint8Array(
     await crypto.subtle.decrypt(
       {
+        ...(input.aad && input.aad.byteLength > 0
+          ? {
+              additionalData: toArrayBuffer(input.aad),
+            }
+          : {}),
         iv: toArrayBuffer(decodeBase64(input.envelope.iv)),
         name: "AES-GCM",
       },
@@ -76,11 +105,13 @@ const utf8Decoder = new TextDecoder();
 const utf8Encoder = new TextEncoder();
 
 export async function readEncryptedR2Payload(input: {
+  aad?: Uint8Array;
   bucket: EncryptedR2BucketLike;
   cryptoKey: Uint8Array;
   cryptoKeysById?: Readonly<Record<string, Uint8Array>>;
   expectedKeyId?: string;
   key: string;
+  scope: HostedStorageScope;
 }): Promise<Uint8Array | null> {
   const object = await input.bucket.get(input.key);
 
@@ -92,45 +123,55 @@ export async function readEncryptedR2Payload(input: {
     utf8Decoder.decode(await object.arrayBuffer()),
   ) as HostedCipherEnvelope;
   const plaintext = await decryptHostedBundle({
+    aad: input.aad,
     envelope,
     expectedKeyId: input.expectedKeyId,
     key: input.cryptoKey,
     keysById: input.cryptoKeysById,
+    scope: input.scope,
   });
 
   return plaintext;
 }
 
 export async function writeEncryptedR2Payload(input: {
+  aad?: Uint8Array;
   bucket: EncryptedR2BucketLike;
   cryptoKey: Uint8Array;
   key: string;
   keyId: string;
   plaintext: Uint8Array;
+  scope: HostedStorageScope;
 }): Promise<void> {
   const envelope = await encryptHostedBundle({
+    aad: input.aad,
     key: input.cryptoKey,
     keyId: input.keyId,
     plaintext: input.plaintext,
+    scope: input.scope,
   });
 
   await input.bucket.put(input.key, JSON.stringify(envelope));
 }
 
 export async function readEncryptedR2Json<T>(input: {
+  aad?: Uint8Array;
   bucket: EncryptedR2BucketLike;
   cryptoKey: Uint8Array;
   cryptoKeysById?: Readonly<Record<string, Uint8Array>>;
   expectedKeyId?: string;
   key: string;
   parse(value: unknown): T;
+  scope: HostedStorageScope;
 }): Promise<T | null> {
   const plaintext = await readEncryptedR2Payload({
+    aad: input.aad,
     bucket: input.bucket,
     cryptoKey: input.cryptoKey,
     cryptoKeysById: input.cryptoKeysById,
     expectedKeyId: input.expectedKeyId,
     key: input.key,
+    scope: input.scope,
   });
 
   if (!plaintext) {
@@ -141,18 +182,22 @@ export async function readEncryptedR2Json<T>(input: {
 }
 
 export async function writeEncryptedR2Json(input: {
+  aad?: Uint8Array;
   bucket: EncryptedR2BucketLike;
   cryptoKey: Uint8Array;
   key: string;
   keyId: string;
+  scope: HostedStorageScope;
   value: unknown;
 }): Promise<void> {
   await writeEncryptedR2Payload({
+    aad: input.aad,
     bucket: input.bucket,
     cryptoKey: input.cryptoKey,
     key: input.key,
     keyId: input.keyId,
     plaintext: utf8Encoder.encode(JSON.stringify(input.value)),
+    scope: input.scope,
   });
 }
 

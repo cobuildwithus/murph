@@ -39,6 +39,7 @@ interface HostedExecutionContainerInvokeRequest {
 
 interface HostedExecutionContainerInvokeInput extends HostedExecutionContainerInvokeRequest {
   runnerControlToken: string;
+  runnerControlTokens: string[];
 }
 
 interface HostedExecutionContainerRunnerInput {
@@ -66,6 +67,7 @@ type RunnerOutboundHandlerContext = OutboundHandlerContext<{
 interface RunnerContainerEnvironmentSource extends Readonly<Record<string, unknown>> {
   HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER?: string;
   HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN?: string;
+  HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS?: string;
 }
 
 type RunnerOutboundHandlerName =
@@ -102,17 +104,20 @@ export class RunnerContainer extends Container {
   requiredPorts = [RUNNER_PORT];
   pingEndpoint = RUNNER_PING_ENDPOINT;
   sleepAfter = DEFAULT_CONTAINER_SLEEP_AFTER;
-  private readonly runnerControlToken: string | null;
+  private readonly runnerControlTokens: string[];
 
   constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
     super(state as never, env as never);
     this.sleepAfter = readContainerSleepAfter(env);
-    this.runnerControlToken = readOptionalString(env.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN);
+    this.runnerControlTokens = readTokenList(
+      env.HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS,
+      env.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN,
+    );
   }
 
   async invoke(payload: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerResult> {
     return this.invokeHostedExecution(
-      parseHostedExecutionContainerInvokeInput(payload, this.runnerControlToken),
+      parseHostedExecutionContainerInvokeInput(payload, this.runnerControlTokens),
     );
   }
 
@@ -130,7 +135,7 @@ export class RunnerContainer extends Container {
 
       const authorizationError = requireRunnerContainerAuthorization(
         request,
-        this.runnerControlToken,
+        this.runnerControlTokens,
       );
       if (authorizationError) {
         return authorizationError;
@@ -154,7 +159,7 @@ export class RunnerContainer extends Container {
 
       const authorizationError = requireRunnerContainerAuthorization(
         request,
-        this.runnerControlToken,
+        this.runnerControlTokens,
       );
       if (authorizationError) {
         return authorizationError;
@@ -169,7 +174,7 @@ export class RunnerContainer extends Container {
 
   private async handleInvokeRequest(payload: Record<string, unknown>): Promise<Response> {
     const result = await this.invokeHostedExecution(
-      parseHostedExecutionContainerInvokeInput(payload, this.runnerControlToken),
+      parseHostedExecutionContainerInvokeInput(payload, this.runnerControlTokens),
     );
 
     return json(result);
@@ -205,6 +210,7 @@ export class RunnerContainer extends Container {
           enableInternet: true,
           envVars: {
             HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: input.runnerControlToken,
+            HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS: input.runnerControlTokens.join(","),
             PORT: String(RUNNER_PORT),
           },
         },
@@ -373,11 +379,14 @@ function parseHostedExecutionContainerInvokeInput(
     timeoutMs?: unknown;
     userId?: unknown;
   },
-  runnerControlToken: string | null,
+  runnerControlTokens: readonly string[] | string | null,
 ): HostedExecutionContainerInvokeInput {
+  const acceptedRunnerControlTokens = requireHostedExecutionRunnerControlTokens(runnerControlTokens);
+
   return {
     job: parseHostedAssistantRuntimeJobInput(payload.job),
-    runnerControlToken: requireHostedExecutionRunnerControlToken(runnerControlToken),
+    runnerControlToken: acceptedRunnerControlTokens[0]!,
+    runnerControlTokens: [...acceptedRunnerControlTokens],
     timeoutMs: readTimeoutMs(payload.timeoutMs, RUNNER_READY_TIMEOUT_MS),
     userId: requireString(payload.userId, "payload.userId"),
   };
@@ -404,27 +413,40 @@ function requireString(value: unknown, label: string): string {
   return value;
 }
 
-function requireHostedExecutionRunnerControlToken(value: string | null): string {
-  if (!value) {
+function requireHostedExecutionRunnerControlToken(value: readonly string[] | string | null): string {
+  return requireHostedExecutionRunnerControlTokens(value)[0]!;
+}
+
+function requireHostedExecutionRunnerControlTokens(value: readonly string[] | string | null): string[] {
+  const tokens = Array.isArray(value)
+    ? value.filter((token) => typeof token === "string" && token.trim().length > 0)
+    : (typeof value === "string" && value.trim().length > 0 ? [value.trim()] : []);
+
+  if (tokens.length === 0) {
     throw new HostedExecutionConfigurationError(
-      "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN must be configured for native hosted execution.",
+      "HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS must include at least one token for native hosted execution.",
     );
   }
 
-  return value;
+  return tokens;
 }
 
 function requireRunnerContainerAuthorization(
   request: Request,
-  expectedToken: string | null,
+  expectedTokens: readonly string[] | string | null,
 ): Response | null {
-  if (!expectedToken) {
+  const tokens = Array.isArray(expectedTokens)
+    ? expectedTokens.filter((token) => typeof token === "string" && token.length > 0)
+    : (typeof expectedTokens === "string" && expectedTokens.length > 0 ? [expectedTokens] : []);
+
+  if (tokens.length === 0) {
     return json({
       error: "Hosted runner control token is not configured.",
     }, 503);
   }
 
-  if (request.headers.get("authorization") !== `${RUNNER_CONTROL_AUTH_SCHEME} ${expectedToken}`) {
+  const authorization = request.headers.get("authorization");
+  if (!authorization || !tokens.some((token) => authorization === `${RUNNER_CONTROL_AUTH_SCHEME} ${token}`)) {
     return json({
       error: "Unauthorized",
     }, 401);
@@ -443,6 +465,20 @@ function readTimeoutMs(value: unknown, fallback: number): number {
   }
 
   return Math.trunc(value);
+}
+
+function readTokenList(primary: unknown, fallback: unknown): string[] {
+  const primaryValue = readOptionalString(primary);
+
+  if (primaryValue) {
+    return primaryValue
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  }
+
+  const fallbackValue = readOptionalString(fallback);
+  return fallbackValue ? [fallbackValue] : [];
 }
 
 function readOptionalString(value: unknown): string | null {

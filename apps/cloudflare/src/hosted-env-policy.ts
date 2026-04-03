@@ -16,6 +16,8 @@ const DEFAULT_ALLOWED_USER_ENV_KEYS = [
   "GOOGLE_GENERATIVE_AI_API_KEY",
   "GROQ_API_KEY",
   "HF_TOKEN",
+  "HOSTED_USER_VERIFIED_EMAIL",
+  "HOSTED_USER_VERIFIED_EMAIL_VERIFIED_AT",
   "HUGGINGFACEHUB_API_TOKEN",
   "HUGGINGFACE_API_KEY",
   "HUGGING_FACE_HUB_TOKEN",
@@ -25,8 +27,8 @@ const DEFAULT_ALLOWED_USER_ENV_KEYS = [
   "NGC_API_KEY",
   "OPENAI_API_KEY",
   "OPENROUTER_API_KEY",
-  "PERPLEXITY_API_KEY",
   "PDFTOTEXT_COMMAND",
+  "PERPLEXITY_API_KEY",
   "TOGETHER_API_KEY",
   "VENICE_API_KEY",
   "WHISPER_COMMAND",
@@ -34,40 +36,14 @@ const DEFAULT_ALLOWED_USER_ENV_KEYS = [
   "XAI_API_KEY",
 ] as const;
 
-const DEFAULT_ALLOWED_USER_ENV_PREFIXES = [
-  "ANTHROPIC_",
-  "BRAVE_",
-  "CEREBRAS_",
-  "DEEPSEEK_",
-  "FIREWORKS_",
-  "GOOGLE_",
-  "GOOGLE_GENERATIVE_AI_",
-  "GROQ_",
-  "HF_",
-  "HOSTED_USER_",
-  "HUGGINGFACE_",
-  "HUGGING_FACE_",
-  "LITELLM_",
-  "LM_STUDIO_",
-  "MISTRAL_",
-  "NGC_",
-  "NVIDIA_",
-  "OPENAI_",
-  "OPENROUTER_",
-  "PERPLEXITY_",
-  "PDFTOTEXT_",
-  "TOGETHER_",
-  "VENICE_",
-  "VLLM_",
-  "WHISPER_",
-  "XAI_",
-] as const;
-
 const DISALLOWED_USER_ENV_KEYS = new Set([
   "HOME",
   "HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY",
+  "HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON",
   "HOSTED_EXECUTION_CONTROL_TOKEN",
+  "HOSTED_EXECUTION_CONTROL_TOKENS",
   "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN",
+  "HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS",
   "HOSTED_EXECUTION_SIGNING_SECRET",
   "NODE_ENV",
   "PATH",
@@ -95,7 +71,6 @@ const RUNNER_EXACT_ALLOWED_ENV_KEYS = new Set<string>([
   "GOOGLE_GENERATIVE_AI_API_KEY",
   "HF_TOKEN",
   "HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS",
-  "HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES",
   "HOSTED_WEB_BASE_URL",
   "HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER",
   "HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS",
@@ -181,16 +156,8 @@ export function isHostedUserEnvKeyAllowed(
     ...DEFAULT_ALLOWED_USER_ENV_KEYS,
     ...parseHostedEnvCsvList(source.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS),
   ]);
-  if (allowedKeys.has(key)) {
-    return true;
-  }
 
-  const allowedPrefixes = [
-    ...DEFAULT_ALLOWED_USER_ENV_PREFIXES,
-    ...parseHostedEnvCsvList(source.HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES),
-  ];
-
-  return allowedPrefixes.some((prefix) => key.startsWith(prefix));
+  return allowedKeys.has(key);
 }
 
 export function buildHostedRunnerContainerEnv(
@@ -237,8 +204,15 @@ export function buildHostedRunnerContainerEnv(
 
 export function filterHostedRunnerUserEnv(
   env: Readonly<Record<string, string>>,
+  source: StringEnvSource = process.env,
 ): Record<string, string> {
-  return { ...env };
+  return Object.fromEntries(
+    Object.entries(env).filter(([key, value]) =>
+      typeof value === "string"
+      && value.length > 0
+      && isHostedUserEnvKeyAllowed(key, source)
+    ),
+  );
 }
 
 export function isAllowedHostedAssistantReferencedRunnerEnvKey(key: string): boolean {
