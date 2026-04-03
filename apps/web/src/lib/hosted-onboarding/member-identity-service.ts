@@ -8,6 +8,7 @@ import {
   createHostedPhoneLookupKey,
   readHostedPhoneHint,
 } from "./contact-privacy";
+import { buildHostedSecretAad } from "../device-sync/crypto";
 import { hostedOnboardingError } from "./errors";
 import { type HostedPrivyIdentity } from "./privy";
 import { getHostedOnboardingEnvironment, getHostedOnboardingSecretCodec } from "./runtime";
@@ -45,15 +46,17 @@ export async function ensureHostedMemberForPhone(input: {
     });
   }
 
+  const memberId = generateHostedMemberId();
+
   try {
     return await input.prisma.hostedMember.create({
       data: {
         ...buildHostedMemberPhoneStorage(input.phoneNumber),
-        id: generateHostedMemberId(),
+        id: memberId,
         status: HostedMemberStatus.invited,
         billingStatus: HostedBillingStatus.not_started,
         linqChatId: null,
-        encryptedBootstrapSecret: encryptHostedBootstrapSecret(),
+        encryptedBootstrapSecret: encryptHostedBootstrapSecret(memberId),
         encryptionKeyVersion: getHostedOnboardingEnvironment().encryptionKeyVersion,
       },
     });
@@ -93,7 +96,7 @@ async function refreshHostedMemberForPhone(input: {
       encryptedBootstrapSecret:
         input.member.encryptedBootstrapSecret
           ? undefined
-          : encryptHostedBootstrapSecret(),
+          : encryptHostedBootstrapSecret(input.member.id),
       encryptionKeyVersion:
         input.member.encryptionKeyVersion
           ? undefined
@@ -129,9 +132,11 @@ export async function ensureHostedMemberForPrivyIdentity(input: {
   });
 
   if (!existingMember) {
+    const memberId = generateHostedMemberId();
+
     return input.prisma.hostedMember.create({
       data: {
-        id: generateHostedMemberId(),
+        id: memberId,
         ...buildHostedMemberPhoneStorage(input.identity.phone.number),
         phoneNumberVerifiedAt: input.now,
         privyUserId: input.identity.userId,
@@ -141,7 +146,7 @@ export async function ensureHostedMemberForPrivyIdentity(input: {
         walletChainType: input.identity.wallet.chainType,
         walletProvider: "privy",
         walletCreatedAt: input.now,
-        encryptedBootstrapSecret: encryptHostedBootstrapSecret(),
+        encryptedBootstrapSecret: encryptHostedBootstrapSecret(memberId),
         encryptionKeyVersion: getHostedOnboardingEnvironment().encryptionKeyVersion,
       },
     });
@@ -227,7 +232,7 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
         encryptedBootstrapSecret:
           input.member.encryptedBootstrapSecret
             ? undefined
-            : encryptHostedBootstrapSecret(),
+            : encryptHostedBootstrapSecret(input.member.id),
         encryptionKeyVersion:
           input.member.encryptionKeyVersion
             ? undefined
@@ -302,6 +307,11 @@ export async function findHostedMemberForPrivyIdentity(input: {
   return matches.values().next().value ?? null;
 }
 
-function encryptHostedBootstrapSecret(): string {
-  return getHostedOnboardingSecretCodec().encrypt(generateHostedBootstrapSecret());
+function encryptHostedBootstrapSecret(memberId: string): string {
+  return getHostedOnboardingSecretCodec().encrypt(generateHostedBootstrapSecret(), {
+    aad: buildHostedSecretAad({
+      memberId,
+      purpose: "hosted-bootstrap-secret",
+    }),
+  });
 }

@@ -28,6 +28,7 @@ export function getHostedOnboardingSecretCodec() {
   return createHostedSecretCodec({
     key: environment.encryptionKey,
     keyVersion: environment.encryptionKeyVersion,
+    keysByVersion: environment.encryptionKeysByVersion,
   });
 }
 

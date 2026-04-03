@@ -87,7 +87,6 @@ Optional tuning variables:
 - `CF_RUNNER_COMMIT_TIMEOUT_MS` (default `30000`)
 - `CF_TRACE_HEAD_SAMPLING_RATE` (default `0.1`)
 - `CF_ALLOWED_USER_ENV_KEYS`
-- `CF_ALLOWED_USER_ENV_PREFIXES`
 - `HOSTED_ASSISTANT_PROVIDER`, `HOSTED_ASSISTANT_MODEL`, and the rest of the `HOSTED_ASSISTANT_*` seed vars when you want hosted member activation to persist one explicit platform-managed assistant profile into `~/.murph/config.json` instead of relying on runtime fallback
 
 Optional non-secret worker variables:
@@ -128,8 +127,8 @@ Set these in the selected GitHub environment as secrets:
 - `CLOUDFLARE_ACCOUNT_ID`
 - `HOSTED_EXECUTION_SIGNING_SECRET`
 - `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY`
-- `HOSTED_EXECUTION_CONTROL_TOKEN`
-- `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN`
+- `HOSTED_EXECUTION_CONTROL_TOKENS`
+- `HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS`
 
 Optional secret for staged bundle-key rotation:
 
@@ -137,8 +136,8 @@ Optional secret for staged bundle-key rotation:
 
 Additional hosted-web control-plane secrets:
 
-- `HOSTED_EXECUTION_INTERNAL_TOKEN`
-- `HOSTED_SHARE_INTERNAL_TOKEN`
+- `HOSTED_EXECUTION_INTERNAL_TOKENS`
+- `HOSTED_SHARE_INTERNAL_TOKENS`
 
 Optional hosted email bridge secrets:
 
@@ -149,10 +148,10 @@ The checked-in scaffold and rendered deploy config both declare those four names
 
 Both control tokens are treated as required runtime inputs now, not just deploy-time placeholders:
 
-- missing `HOSTED_EXECUTION_CONTROL_TOKEN` makes `/internal/users/:userId/{status,run,env}` fail closed
-- missing `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN` makes native container invoke requests fail closed before the runner job starts
-- missing `HOSTED_EXECUTION_INTERNAL_TOKEN` makes runner proxy calls to hosted web internal device-sync and usage routes fail closed
-- missing `HOSTED_SHARE_INTERNAL_TOKEN` makes hosted share payload fetches fail closed
+- missing `HOSTED_EXECUTION_CONTROL_TOKENS` makes `/internal/users/:userId/{status,run,env}` fail closed
+- missing `HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS` makes native container invoke requests fail closed before the runner job starts
+- missing `HOSTED_EXECUTION_INTERNAL_TOKENS` makes runner proxy calls to hosted web internal device-sync and usage routes fail closed
+- missing `HOSTED_SHARE_INTERNAL_TOKENS` makes hosted share payload fetches fail closed
 - changing `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY` or `CF_BUNDLE_KEY_ID` in place still requires staging older keys in `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON`; missing keyring entries fail closed on `keyId` mismatch
 
 ### Optional provider/runtime secrets
@@ -206,16 +205,16 @@ export CF_CONTAINER_INSTANCE_TYPE=standard-1
 export HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER=1m
 export HOSTED_EXECUTION_SIGNING_SECRET=...
 export HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY=...
-export HOSTED_EXECUTION_CONTROL_TOKEN=...
-export HOSTED_EXECUTION_INTERNAL_TOKEN=...
-export HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN=...
+export HOSTED_EXECUTION_CONTROL_TOKENS=current-operator-token,previous-operator-token
+export HOSTED_EXECUTION_INTERNAL_TOKENS=current-web-internal-token,previous-web-internal-token
+export HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS=current-runner-token,previous-runner-token
 export HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID=...
 export HOSTED_EMAIL_CLOUDFLARE_API_TOKEN=...
 export HOSTED_EMAIL_DOMAIN=mail.example.test
 export HOSTED_EMAIL_LOCAL_PART=assistant
 export HOSTED_EMAIL_SIGNING_SECRET=...
 export HOSTED_WEB_BASE_URL=https://your-hosted-web.example.com
-export HOSTED_SHARE_INTERNAL_TOKEN=...
+export HOSTED_SHARE_INTERNAL_TOKENS=current-share-token,previous-share-token
 export CF_RUNNER_TIMEOUT_MS=120000
 export CF_LOG_HEAD_SAMPLING_RATE=1
 export CF_TRACE_HEAD_SAMPLING_RATE=0.1
@@ -339,8 +338,8 @@ Before the first real production deploy, confirm all of these are true:
 
 - Docker is running wherever `wrangler deploy` will execute
 - the Worker answers `GET /health`
-- `HOSTED_EXECUTION_CONTROL_TOKEN` is set
-- `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN` is set and stable
+- `HOSTED_EXECUTION_CONTROL_TOKENS` is set
+- `HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS` is set and stable
 - local `wrangler dev` also has those two tokens set before you test protected control flows
 - `HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL` is set when you plan to run smoke checks against a non-default public Worker URL
 - `CF_CONTAINER_INSTANCE_TYPE` is set explicitly to at least `standard-1`, or to a custom JSON object if you have an enterprise plan and need higher fixed limits

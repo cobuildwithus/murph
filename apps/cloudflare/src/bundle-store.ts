@@ -8,6 +8,10 @@ import {
 } from "@murphai/runtime-state/node";
 
 import {
+  buildHostedStorageAad,
+  deriveHostedStorageOpaqueId,
+} from "./crypto-context.js";
+import {
   readEncryptedR2Payload,
   writeEncryptedR2Payload,
   type EncryptedR2BucketLike,
@@ -42,7 +46,7 @@ export function describeHostedBundleBytesRef(
 
   return {
     hash,
-    key: bundleObjectKey(kind, hash),
+    key: pendingBundleRefKey(kind, hash),
     size: plaintext.byteLength,
   };
 }
@@ -121,12 +125,21 @@ export function createHostedBundleStore(input: {
         return null;
       }
 
+      const kind = inferBundleKindFromKey(ref.key);
       const plaintext = await readEncryptedR2Payload({
+        aad: buildHostedStorageAad({
+          hash: ref.hash,
+          key: ref.key,
+          kind,
+          purpose: "bundle",
+          size: ref.size,
+        }),
         bucket: input.bucket,
         cryptoKey: input.key,
         cryptoKeysById: input.keysById,
         expectedKeyId: input.keyId,
         key: ref.key,
+        scope: "bundle",
       });
 
       if (!plaintext) {
@@ -139,13 +152,21 @@ export function createHostedBundleStore(input: {
 
     async writeBundle(kind, plaintext) {
       const hash = sha256HostedBundleHex(plaintext);
-      const key = bundleObjectKey(kind, hash);
+      const key = bundleObjectKey(kind);
       await writeEncryptedR2Payload({
+        aad: buildHostedStorageAad({
+          hash,
+          key,
+          kind,
+          purpose: "bundle",
+          size: plaintext.byteLength,
+        }),
         bucket: input.bucket,
         cryptoKey: input.key,
         key,
         keyId: input.keyId,
         plaintext,
+        scope: "bundle",
       });
 
       return {
@@ -167,42 +188,42 @@ export function createHostedArtifactStore(input: {
 }): HostedArtifactStore {
   return {
     async deleteArtifact(sha256) {
-      await input.bucket.delete?.(artifactObjectKey(input.userId, sha256));
+      await input.bucket.delete?.(await artifactObjectKey(input.key, input.userId, sha256));
     },
 
     async readArtifact(sha256) {
-      const plaintext = await readEncryptedR2Payload({
+      const key = await artifactObjectKey(input.key, input.userId, sha256);
+      return readEncryptedR2Payload({
+        aad: buildHostedStorageAad({
+          key,
+          purpose: "artifact",
+          sha256,
+          userId: input.userId,
+        }),
         bucket: input.bucket,
         cryptoKey: input.key,
         cryptoKeysById: input.keysById,
         expectedKeyId: input.keyId,
-        key: artifactObjectKey(input.userId, sha256),
+        key,
+        scope: "artifact",
       });
-
-      if (!plaintext) {
-        return null;
-      }
-
-      const actualSha256 = sha256HostedBundleHex(plaintext);
-      if (actualSha256 !== sha256) {
-        throw new Error(`Hosted artifact hash mismatch: expected ${sha256}, got ${actualSha256}.`);
-      }
-
-      return plaintext;
     },
 
     async writeArtifact(sha256, plaintext) {
-      const actualSha256 = sha256HostedBundleHex(plaintext);
-      if (actualSha256 !== sha256) {
-        throw new Error(`Hosted artifact hash mismatch: expected ${sha256}, got ${actualSha256}.`);
-      }
-
+      const key = await artifactObjectKey(input.key, input.userId, sha256);
       await writeEncryptedR2Payload({
+        aad: buildHostedStorageAad({
+          key,
+          purpose: "artifact",
+          sha256,
+          userId: input.userId,
+        }),
         bucket: input.bucket,
         cryptoKey: input.key,
-        key: artifactObjectKey(input.userId, sha256),
+        key,
         keyId: input.keyId,
         plaintext,
+        scope: "artifact",
       });
     },
   };
@@ -216,37 +237,80 @@ export function createHostedUserEnvStore(input: {
 }): HostedUserEnvStore {
   return {
     async clearUserEnv(userId) {
-      await input.bucket.delete?.(userEnvObjectKey(userId));
+      await input.bucket.delete?.(await userEnvObjectKey(input.key, userId));
     },
 
     async readUserEnv(userId) {
+      const key = await userEnvObjectKey(input.key, userId);
       return readEncryptedR2Payload({
+        aad: buildHostedStorageAad({
+          key,
+          purpose: "user-env",
+          userId,
+        }),
         bucket: input.bucket,
         cryptoKey: input.key,
         cryptoKeysById: input.keysById,
         expectedKeyId: input.keyId,
-        key: userEnvObjectKey(userId),
+        key,
+        scope: "user-env",
       });
     },
 
     async writeUserEnv(userId, plaintext) {
+      const key = await userEnvObjectKey(input.key, userId);
       await writeEncryptedR2Payload({
+        aad: buildHostedStorageAad({
+          key,
+          purpose: "user-env",
+          userId,
+        }),
         bucket: input.bucket,
         cryptoKey: input.key,
-        key: userEnvObjectKey(userId),
+        key,
         keyId: input.keyId,
         plaintext,
+        scope: "user-env",
       });
     },
   };
 }
 
-export function bundleObjectKey(kind: HostedExecutionBundleKind, hash: string): string {
-  return `bundles/${kind}/${hash}.bundle.json`;
+function bundleObjectKey(kind: HostedExecutionBundleKind): string {
+  return `bundles/${kind}/${randomOpaqueToken(24)}.bundle.json`;
 }
 
-export function artifactObjectKey(userId: string, sha256: string): string {
-  return `users/${encodeURIComponent(userId)}/artifacts/${sha256}.artifact.bin`;
+function pendingBundleRefKey(kind: HostedExecutionBundleKind, hash: string): string {
+  return `pending/${kind}/${hash}`;
+}
+
+async function artifactObjectKey(rootKey: Uint8Array, userId: string, sha256: string): Promise<string> {
+  const userSegment = await deriveHostedStorageOpaqueId({
+    length: 24,
+    rootKey,
+    scope: "artifact",
+    value: `user:${userId}`,
+  });
+  const artifactSegment = await deriveHostedStorageOpaqueId({
+    length: 48,
+    rootKey,
+    scope: "artifact",
+    value: `artifact:${userId}:${sha256}`,
+  });
+
+  return `users/${userSegment}/artifacts/${artifactSegment}.artifact.bin`;
+}
+
+function inferBundleKindFromKey(key: string): HostedExecutionBundleKind {
+  if (key.startsWith("bundles/vault/")) {
+    return "vault";
+  }
+
+  if (key.startsWith("bundles/agent-state/")) {
+    return "agent-state";
+  }
+
+  throw new Error(`Hosted bundle key ${key} does not encode a recognized bundle kind.`);
 }
 
 function assertHostedBundleMatchesRef(
@@ -267,6 +331,29 @@ function assertHostedBundleMatchesRef(
   }
 }
 
-function userEnvObjectKey(userId: string): string {
-  return `users/${encodeURIComponent(userId)}/user-env.json`;
+async function userEnvObjectKey(rootKey: Uint8Array, userId: string): Promise<string> {
+  const userSegment = await deriveHostedStorageOpaqueId({
+    length: 24,
+    rootKey,
+    scope: "user-env",
+    value: `user:${userId}`,
+  });
+  const envSegment = await deriveHostedStorageOpaqueId({
+    length: 32,
+    rootKey,
+    scope: "user-env",
+    value: `env:${userId}`,
+  });
+
+  return `users/${userSegment}/env/${envSegment}.json`;
+}
+
+function randomOpaqueToken(bytes: number): string {
+  return encodeHex(crypto.getRandomValues(new Uint8Array(bytes)));
+}
+
+function encodeHex(bytes: Uint8Array): string {
+  return [...bytes]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }

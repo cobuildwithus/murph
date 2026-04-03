@@ -24,6 +24,10 @@ import {
   writeHostedBase64BundleIfChanged,
   type R2BucketLike,
 } from "./bundle-store.js";
+import {
+  buildHostedStorageAad,
+  deriveHostedStorageOpaqueId,
+} from "./crypto-context.js";
 import { readEncryptedR2Json, writeEncryptedR2Json } from "./crypto.js";
 
 export interface HostedExecutionRunnerCommitRequest {
@@ -67,28 +71,44 @@ export function createHostedExecutionJournalStore(input: {
 }): HostedExecutionJournalStore {
   return {
     async deleteCommittedResult(userId, eventId) {
-      await input.bucket.delete?.(committedResultObjectKey(userId, eventId));
+      await input.bucket.delete?.(await committedResultObjectKey(input.key, userId, eventId));
     },
 
     async readCommittedResult(userId, eventId) {
+      const key = await committedResultObjectKey(input.key, userId, eventId);
       return readEncryptedR2Json({
+        aad: buildHostedStorageAad({
+          eventId,
+          key,
+          purpose: "execution-journal",
+          userId,
+        }),
         bucket: input.bucket,
         cryptoKey: input.key,
         cryptoKeysById: input.keysById,
         expectedKeyId: input.keyId,
-        key: committedResultObjectKey(userId, eventId),
+        key,
         parse(value) {
           return normalizeHostedExecutionCommittedResult(value as HostedExecutionCommittedResult);
         },
+        scope: "execution-journal",
       });
     },
 
     async writeCommittedResult(userId, eventId, value) {
+      const key = await committedResultObjectKey(input.key, userId, eventId);
       await writeEncryptedR2Json({
+        aad: buildHostedStorageAad({
+          eventId,
+          key,
+          purpose: "execution-journal",
+          userId,
+        }),
         bucket: input.bucket,
         cryptoKey: input.key,
-        key: committedResultObjectKey(userId, eventId),
+        key,
         keyId: input.keyId,
+        scope: "execution-journal",
         value,
       });
     },
@@ -210,8 +230,21 @@ export async function persistHostedExecutionFinalBundles(input: {
   return finalizedResult;
 }
 
-function committedResultObjectKey(userId: string, eventId: string): string {
-  return `transient/execution-journal/${encodeURIComponent(userId)}/${encodeURIComponent(eventId)}.json`;
+async function committedResultObjectKey(rootKey: Uint8Array, userId: string, eventId: string): Promise<string> {
+  const userSegment = await deriveHostedStorageOpaqueId({
+    length: 24,
+    rootKey,
+    scope: "execution-journal",
+    value: `user:${userId}`,
+  });
+  const eventSegment = await deriveHostedStorageOpaqueId({
+    length: 40,
+    rootKey,
+    scope: "execution-journal",
+    value: `event:${userId}:${eventId}`,
+  });
+
+  return `transient/execution-journal/${userSegment}/${eventSegment}.json`;
 }
 
 function normalizeHostedExecutionCommittedResult(

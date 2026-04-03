@@ -320,16 +320,16 @@ function readHostedPrivacyRootKey(): string | Buffer {
 
   if (
     environment
-    && (typeof environment.encryptionKey === "string" || Buffer.isBuffer(environment.encryptionKey))
+    && (typeof environment.contactPrivacyKey === "string" || Buffer.isBuffer(environment.contactPrivacyKey))
   ) {
-    return environment.encryptionKey;
+    return environment.contactPrivacyKey;
   }
 
   if (process.env.NODE_ENV === "test" || typeof process.env.VITEST === "string") {
     return TEST_HOSTED_PRIVACY_ROOT_KEY;
   }
 
-  throw new TypeError("DEVICE_SYNC_ENCRYPTION_KEY is required for hosted contact privacy.");
+  throw new TypeError("HOSTED_CONTACT_PRIVACY_KEY is required for hosted contact privacy.");
 }
 
 function normalizeHostedOpaqueInput(

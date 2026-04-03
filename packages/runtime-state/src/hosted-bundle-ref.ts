@@ -4,7 +4,7 @@ export interface HostedExecutionBundleRef {
   hash: string;
   key: string;
   size: number;
-  // updatedAt is write metadata. Payload identity is hash + key + size.
+  // updatedAt is write metadata. Payload identity is hash + size; key is an opaque storage locator.
   updatedAt: string;
 }
 
@@ -25,7 +25,7 @@ export function sameHostedBundlePayloadRef(
     return false;
   }
 
-  return left.hash === right.hash && left.key === right.key && left.size === right.size;
+  return left.hash === right.hash && left.size === right.size;
 }
 
 export function sameHostedExecutionBundleRef(

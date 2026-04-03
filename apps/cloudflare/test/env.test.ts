@@ -35,13 +35,11 @@ describe("readHostedExecutionEnvironment", () => {
   it("reads optional user env allowlist extensions", () => {
     const environment = readHostedExecutionEnvironment({
       HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "OPENAI_API_KEY,TELEGRAM_BOT_TOKEN",
-      HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES: "HOSTED_USER_,CUSTOM_",
       HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
       HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
     });
 
     expect(environment.allowedUserEnvKeys).toBe("OPENAI_API_KEY,TELEGRAM_BOT_TOKEN");
-    expect(environment.allowedUserEnvPrefixes).toBe("HOSTED_USER_,CUSTOM_");
   });
 
   it("reads optional bundle decryption keyrings", () => {

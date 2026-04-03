@@ -58,6 +58,7 @@ describe("RunnerContainer", () => {
         enableInternet: true,
         envVars: {
           HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
+          HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS: "runner-token",
           PORT: "8080",
         },
       },
@@ -452,7 +453,7 @@ describe("RunnerContainer", () => {
         userId: "member_123",
       }),
     ).rejects.toThrow(
-      "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN must be configured for native hosted execution.",
+      "HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS must include at least one token for native hosted execution.",
     );
 
     expect(getByName).not.toHaveBeenCalled();

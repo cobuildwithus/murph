@@ -6,8 +6,8 @@ import { isAllowedHostedAssistantReferencedRunnerEnvKey } from "./hosted-env-pol
 export const HOSTED_WORKER_REQUIRED_SECRET_NAMES = [
   "HOSTED_EXECUTION_SIGNING_SECRET",
   "HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY",
-  "HOSTED_EXECUTION_CONTROL_TOKEN",
-  "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN",
+  "HOSTED_EXECUTION_CONTROL_TOKENS",
+  "HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS",
 ] as const;
 
 const HOSTED_WORKER_OPTIONAL_SECRET_NAMES = [
@@ -24,8 +24,8 @@ const HOSTED_WORKER_OPTIONAL_SECRET_NAMES = [
   "HOSTED_EMAIL_CLOUDFLARE_API_TOKEN",
   "HOSTED_EMAIL_SIGNING_SECRET",
   "HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON",
-  "HOSTED_EXECUTION_INTERNAL_TOKEN",
-  "HOSTED_SHARE_INTERNAL_TOKEN",
+  "HOSTED_EXECUTION_INTERNAL_TOKENS",
+  "HOSTED_SHARE_INTERNAL_TOKENS",
   "HUGGINGFACEHUB_API_TOKEN",
   "HUGGINGFACE_API_KEY",
   "HUGGING_FACE_HUB_TOKEN",
@@ -125,7 +125,6 @@ export type HostedContainerInstanceType =
 
 export interface HostedDeployAutomationEnvironment {
   allowedUserEnvKeys: string | null;
-  allowedUserEnvPrefixes: string | null;
   bundlesBucketName: string;
   bundlesPreviewBucketName: string;
   bundleEncryptionKeyId: string;
@@ -168,7 +167,6 @@ export function readHostedDeployAutomationEnvironment(
 ): HostedDeployAutomationEnvironment {
   return {
     allowedUserEnvKeys: normalizeString(source.CF_ALLOWED_USER_ENV_KEYS),
-    allowedUserEnvPrefixes: normalizeString(source.CF_ALLOWED_USER_ENV_PREFIXES),
     bundlesBucketName: requireString(source.CF_BUNDLES_BUCKET, "CF_BUNDLES_BUCKET"),
     bundlesPreviewBucketName: requireString(
       source.CF_BUNDLES_PREVIEW_BUCKET,
@@ -241,10 +239,6 @@ export function buildHostedWranglerDeployConfig(
 
   if (environment.allowedUserEnvKeys) {
     vars.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS = environment.allowedUserEnvKeys;
-  }
-
-  if (environment.allowedUserEnvPrefixes) {
-    vars.HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES = environment.allowedUserEnvPrefixes;
   }
 
   return {

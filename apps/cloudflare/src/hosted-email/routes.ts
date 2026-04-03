@@ -16,6 +16,10 @@ import {
 
 import type { R2BucketLike } from "../bundle-store.ts";
 import {
+  buildHostedStorageAad,
+  deriveHostedStorageOpaqueId,
+} from "../crypto-context.js";
+import {
   readEncryptedR2Json,
   writeEncryptedR2Json,
 } from "../crypto.ts";
@@ -362,54 +366,86 @@ export function isHostedEmailPublicSenderAddress(
 function createHostedEmailRouteStore(input: HostedEmailRouteStoreInput) {
   return {
     async readThreadRoute(replyKey: string): Promise<HostedEmailThreadRouteRecord | null> {
+      const key = await hostedEmailThreadRouteObjectKey(input.key, replyKey);
       return readEncryptedR2Json({
+        aad: buildHostedStorageAad({
+          key,
+          purpose: "email-route",
+          replyKey,
+          routeKind: "thread",
+        }),
         bucket: input.bucket,
         cryptoKey: input.key,
         cryptoKeysById: input.keysById,
         expectedKeyId: input.keyId,
-        key: hostedEmailThreadRouteObjectKey(replyKey),
+        key,
         parse(value) {
           return parseHostedEmailThreadRouteRecord(value);
         },
+        scope: "email-route",
       });
     },
     async readUserRoute(aliasKey: string): Promise<HostedEmailUserRouteRecord | null> {
+      const key = await hostedEmailUserRouteObjectKey(input.key, aliasKey);
       return readEncryptedR2Json({
+        aad: buildHostedStorageAad({
+          aliasKey,
+          key,
+          purpose: "email-route",
+          routeKind: "user",
+        }),
         bucket: input.bucket,
         cryptoKey: input.key,
         cryptoKeysById: input.keysById,
         expectedKeyId: input.keyId,
-        key: hostedEmailUserRouteObjectKey(aliasKey),
+        key,
         parse(value) {
           return parseHostedEmailUserRouteRecord(value);
         },
+        scope: "email-route",
       });
     },
     async readVerifiedSenderRoute(senderKey: string): Promise<HostedEmailVerifiedSenderRouteRecord | null> {
+      const key = await hostedEmailVerifiedSenderRouteObjectKey(input.key, senderKey);
       return readEncryptedR2Json({
+        aad: buildHostedStorageAad({
+          key,
+          purpose: "email-route",
+          routeKind: "verified-sender",
+          senderKey,
+        }),
         bucket: input.bucket,
         cryptoKey: input.key,
         cryptoKeysById: input.keysById,
         expectedKeyId: input.keyId,
-        key: hostedEmailVerifiedSenderRouteObjectKey(senderKey),
+        key,
         parse(value) {
           return parseHostedEmailVerifiedSenderRouteRecord(value);
         },
+        scope: "email-route",
       });
     },
     async deleteVerifiedSenderRoute(senderKey: string): Promise<void> {
-      await input.bucket.delete?.(hostedEmailVerifiedSenderRouteObjectKey(senderKey));
+      await input.bucket.delete?.(await hostedEmailVerifiedSenderRouteObjectKey(input.key, senderKey));
     },
     async writeUserRoute(writeInput: {
       aliasKey: string;
       identityId: string;
       userId: string;
     }): Promise<void> {
+      const key = await hostedEmailUserRouteObjectKey(input.key, writeInput.aliasKey);
       await writeEncryptedR2Json({
+        aad: buildHostedStorageAad({
+          aliasKey: writeInput.aliasKey,
+          key,
+          purpose: "email-route",
+          routeKind: "user",
+        }),
         bucket: input.bucket,
         cryptoKey: input.key,
-        key: hostedEmailUserRouteObjectKey(writeInput.aliasKey),
+        key,
         keyId: input.keyId,
+        scope: "email-route",
         value: {
           aliasKey: writeInput.aliasKey,
           identityId: writeInput.identityId,
@@ -425,11 +461,19 @@ function createHostedEmailRouteStore(input: HostedEmailRouteStoreInput) {
       userId: string;
       verifiedEmailAddress: string;
     }): Promise<void> {
+      const key = await hostedEmailVerifiedSenderRouteObjectKey(input.key, writeInput.senderKey);
       await writeEncryptedR2Json({
+        aad: buildHostedStorageAad({
+          key,
+          purpose: "email-route",
+          routeKind: "verified-sender",
+          senderKey: writeInput.senderKey,
+        }),
         bucket: input.bucket,
         cryptoKey: input.key,
-        key: hostedEmailVerifiedSenderRouteObjectKey(writeInput.senderKey),
+        key,
         keyId: input.keyId,
+        scope: "email-route",
         value: {
           identityId: writeInput.identityId,
           schema: HOSTED_EMAIL_VERIFIED_SENDER_ROUTE_SCHEMA,
@@ -614,16 +658,40 @@ function formatHostedEmailAddress(config: HostedEmailConfig, detail: string): st
   return `${config.localPart}+${detail}@${config.domain}`;
 }
 
-function hostedEmailThreadRouteObjectKey(replyKey: string): string {
-  return `transient/hosted-email/threads/${replyKey}.json`;
+async function hostedEmailThreadRouteObjectKey(rootKey: Uint8Array, replyKey: string): Promise<string> {
+  const routeSegment = await deriveHostedStorageOpaqueId({
+    length: 40,
+    rootKey,
+    scope: "email-route",
+    value: `thread:${replyKey}`,
+  });
+
+  return `transient/hosted-email/threads/${routeSegment}.json`;
 }
 
-function hostedEmailUserRouteObjectKey(aliasKey: string): string {
-  return `transient/hosted-email/users/${aliasKey}.json`;
+async function hostedEmailUserRouteObjectKey(rootKey: Uint8Array, aliasKey: string): Promise<string> {
+  const routeSegment = await deriveHostedStorageOpaqueId({
+    length: 40,
+    rootKey,
+    scope: "email-route",
+    value: `user:${aliasKey}`,
+  });
+
+  return `hosted-email/users/${routeSegment}.json`;
 }
 
-function hostedEmailVerifiedSenderRouteObjectKey(senderKey: string): string {
-  return `transient/hosted-email/verified-senders/${senderKey}.json`;
+async function hostedEmailVerifiedSenderRouteObjectKey(
+  rootKey: Uint8Array,
+  senderKey: string,
+): Promise<string> {
+  const routeSegment = await deriveHostedStorageOpaqueId({
+    length: 40,
+    rootKey,
+    scope: "email-route",
+    value: `verified-sender:${senderKey}`,
+  });
+
+  return `hosted-email/verified-senders/${routeSegment}.json`;
 }
 
 function parseHostedEmailUserRouteRecord(value: unknown): HostedEmailUserRouteRecord {

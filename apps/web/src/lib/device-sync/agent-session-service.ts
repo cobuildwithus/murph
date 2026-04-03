@@ -8,7 +8,7 @@ import type {
   PublicDeviceSyncAccount,
 } from "@murphai/device-syncd/public-ingress";
 import type { AuthenticatedHostedUser } from "./auth";
-import type { HostedSecretCodec } from "./crypto";
+import { buildHostedSecretAad, type HostedSecretCodec } from "./crypto";
 import { requireHostedDeviceSyncProvider } from "./providers";
 import {
   generateHostedAgentBearerToken,
@@ -280,8 +280,22 @@ export class HostedDeviceSyncAgentSessionService {
           connectionId,
         },
         data: {
-          accessTokenEncrypted: this.codec.encrypt(nextTokens.accessToken),
-          refreshTokenEncrypted: nextRefreshToken ? this.codec.encrypt(nextRefreshToken) : null,
+          accessTokenEncrypted: this.codec.encrypt(nextTokens.accessToken, {
+            aad: buildHostedSecretAad({
+              connectionId,
+              provider: bundle.account.provider,
+              purpose: "device-sync-access-token",
+            }),
+          }),
+          refreshTokenEncrypted: nextRefreshToken
+            ? this.codec.encrypt(nextRefreshToken, {
+                aad: buildHostedSecretAad({
+                  connectionId,
+                  provider: bundle.account.provider,
+                  purpose: "device-sync-refresh-token",
+                }),
+              })
+            : null,
           tokenVersion: {
             increment: 1,
           },

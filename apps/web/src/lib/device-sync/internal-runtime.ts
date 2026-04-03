@@ -17,6 +17,7 @@ import {
   PrismaDeviceSyncControlPlaneStore,
   requireHostedConnectionBundleRecord,
 } from "./prisma-store";
+import { buildHostedSecretAad } from "./crypto";
 import { toIsoTimestamp } from "./shared";
 
 export {
@@ -211,9 +212,27 @@ export async function applyHostedDeviceSyncRuntimeUpdates(
         } else if (tokenBlockedByDisconnectedStatus) {
           tokenUpdate = existing.secret ? "unchanged" : "missing";
         } else {
-          const nextAccessTokenEncrypted = store.codec.encrypt(update.tokenBundle.accessToken);
+          const nextAccessTokenEncrypted = store.codec.encrypt(
+            update.tokenBundle.accessToken,
+            {
+              aad: buildHostedSecretAad({
+                connectionId: update.connectionId,
+                provider: existing.provider,
+                purpose: "device-sync-access-token",
+              }),
+            },
+          );
           const nextRefreshTokenEncrypted = update.tokenBundle.refreshToken
-            ? store.codec.encrypt(update.tokenBundle.refreshToken)
+            ? store.codec.encrypt(
+                update.tokenBundle.refreshToken,
+                {
+                  aad: buildHostedSecretAad({
+                    connectionId: update.connectionId,
+                    provider: existing.provider,
+                    purpose: "device-sync-refresh-token",
+                  }),
+                },
+              )
             : null;
           const tokenChanged = !existing.secret
             || existing.secret.accessTokenEncrypted !== nextAccessTokenEncrypted

@@ -6,6 +6,10 @@
 
 import type { R2BucketLike } from "./bundle-store.ts";
 import {
+  buildHostedStorageAad,
+  deriveHostedStorageOpaqueId,
+} from "./crypto-context.js";
+import {
   readEncryptedR2Payload,
   writeEncryptedR2Payload,
 } from "./crypto.ts";
@@ -41,12 +45,20 @@ export async function readHostedEmailRawMessage(input: {
   rawMessageKey: string;
   userId: string;
 }): Promise<Uint8Array | null> {
+  const key = await hostedEmailRawMessageObjectKey(input.key, input.userId, input.rawMessageKey);
   return readEncryptedR2Payload({
+    aad: buildHostedStorageAad({
+      key,
+      purpose: "email-raw",
+      rawMessageKey: input.rawMessageKey,
+      userId: input.userId,
+    }),
     bucket: input.bucket,
     cryptoKey: input.key,
     cryptoKeysById: input.keysById,
     expectedKeyId: input.keyId,
-    key: hostedEmailRawMessageObjectKey(input.userId, input.rawMessageKey),
+    key,
+    scope: "email-raw",
   });
 }
 
@@ -57,13 +69,21 @@ export async function writeHostedEmailRawMessage(input: {
   plaintext: Uint8Array;
   userId: string;
 }): Promise<string> {
-  const rawMessageKey = (await sha256Hex(input.plaintext)).slice(0, 32);
+  const rawMessageKey = randomOpaqueToken(16);
+  const key = await hostedEmailRawMessageObjectKey(input.key, input.userId, rawMessageKey);
   await writeEncryptedR2Payload({
+    aad: buildHostedStorageAad({
+      key,
+      purpose: "email-raw",
+      rawMessageKey,
+      userId: input.userId,
+    }),
     bucket: input.bucket,
     cryptoKey: input.key,
-    key: hostedEmailRawMessageObjectKey(input.userId, rawMessageKey),
+    key,
     keyId: input.keyId,
     plaintext: input.plaintext,
+    scope: "email-raw",
   });
   return rawMessageKey;
 }
@@ -119,16 +139,29 @@ async function readHostedEmailReadableStream(
   return combined;
 }
 
-function hostedEmailRawMessageObjectKey(userId: string, rawMessageKey: string): string {
-  return `transient/hosted-email/messages/${encodeURIComponent(userId)}/${rawMessageKey}.eml`;
+async function hostedEmailRawMessageObjectKey(
+  rootKey: Uint8Array,
+  userId: string,
+  rawMessageKey: string,
+): Promise<string> {
+  const userSegment = await deriveHostedStorageOpaqueId({
+    length: 24,
+    rootKey,
+    scope: "email-raw",
+    value: `user:${userId}`,
+  });
+  const messageSegment = await deriveHostedStorageOpaqueId({
+    length: 40,
+    rootKey,
+    scope: "email-raw",
+    value: `message:${userId}:${rawMessageKey}`,
+  });
+
+  return `transient/hosted-email/messages/${userSegment}/${messageSegment}.eml`;
 }
 
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  return [...new Uint8Array(await crypto.subtle.digest("SHA-256", toArrayBuffer(bytes)))]
+function randomOpaqueToken(bytes: number): string {
+  return [...crypto.getRandomValues(new Uint8Array(bytes))]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
-}
-
-function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }

@@ -29,9 +29,12 @@ describe("hosted user env helpers", () => {
     });
   });
 
-  it("accepts HOSTED_USER_ overrides but rejects the removed HB_USER_ prefix", () => {
+  it("accepts explicitly allowlisted keys but rejects removed or prefix-only keys", () => {
     expect(applyHostedUserEnvUpdate({
       current: {},
+      source: {
+        HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "HOSTED_USER_SAMPLE_FLAG",
+      },
       update: {
         env: {
           HOSTED_USER_SAMPLE_FLAG: "enabled",
@@ -47,6 +50,19 @@ describe("hosted user env helpers", () => {
       update: {
         env: {
           [REMOVED_HOSTED_USER_PREFIX_KEY]: "enabled",
+        },
+        mode: "merge",
+      },
+    })).toThrow(/not allowed/u);
+
+    expect(() => applyHostedUserEnvUpdate({
+      current: {},
+      source: {
+        HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "OPENAI_API_KEY",
+      },
+      update: {
+        env: {
+          HOSTED_USER_OTHER_FLAG: "enabled",
         },
         mode: "merge",
       },

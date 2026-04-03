@@ -9,7 +9,6 @@ const REMOVED_LINQ_BASE_URL_ALIAS = ["HEALTHY", "BOB", "LINQ", "API", "BASE", "U
 describe("readHostedOnboardingEnvironment", () => {
   it("reads hosted onboarding defaults and surfaces Privy config", () => {
     const environment = readHostedOnboardingEnvironment(createProcessEnv({
-      DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
       HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.test",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID: "price_123",
       NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123",
@@ -28,7 +27,6 @@ describe("readHostedOnboardingEnvironment", () => {
 
   it("reads explicit Linq config and Stripe subscription mode", () => {
     const environment = readHostedOnboardingEnvironment(createProcessEnv({
-      DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
       LINQ_API_TOKEN: "linq-token",
       LINQ_API_BASE_URL: "https://linq.example.test/api",
       HOSTED_ONBOARDING_STRIPE_BILLING_MODE: "subscription",
@@ -47,7 +45,6 @@ describe("readHostedOnboardingEnvironment", () => {
 
   it("falls back to the Vercel production domain for the public base URL", () => {
     const environment = readHostedOnboardingEnvironment(createProcessEnv({
-      DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
       VERCEL_PROJECT_PRODUCTION_URL: "www.withmurph.ai",
     }));
 
@@ -56,7 +53,6 @@ describe("readHostedOnboardingEnvironment", () => {
 
   it("reads hosted RevNet config when the full subscription configuration is present", () => {
     const environment = readHostedOnboardingEnvironment(createProcessEnv({
-      DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
       HOSTED_ONBOARDING_REVNET_CHAIN_ID: "8453",
       HOSTED_ONBOARDING_REVNET_PROJECT_ID: "1",
       HOSTED_ONBOARDING_REVNET_RPC_URL: "https://rpc.example.test/base",
@@ -78,7 +74,6 @@ describe("readHostedOnboardingEnvironment", () => {
   it("rejects partial hosted RevNet configuration", () => {
     expect(() =>
       readHostedOnboardingEnvironment(createProcessEnv({
-        DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
         HOSTED_ONBOARDING_REVNET_CHAIN_ID: "8453",
         HOSTED_ONBOARDING_STRIPE_BILLING_MODE: "subscription",
       })),
@@ -88,7 +83,6 @@ describe("readHostedOnboardingEnvironment", () => {
   it("requires subscription billing mode when hosted RevNet issuance is configured", () => {
     expect(() =>
       readHostedOnboardingEnvironment(createProcessEnv({
-        DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
         HOSTED_ONBOARDING_REVNET_CHAIN_ID: "8453",
         HOSTED_ONBOARDING_REVNET_PROJECT_ID: "1",
         HOSTED_ONBOARDING_REVNET_RPC_URL: "https://rpc.example.test/base",
@@ -104,7 +98,6 @@ describe("readHostedOnboardingEnvironment", () => {
   it("rejects a non-numeric RevNet wei pricing multiplier", () => {
     expect(() =>
       readHostedOnboardingEnvironment(createProcessEnv({
-        DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
         HOSTED_ONBOARDING_REVNET_CHAIN_ID: "8453",
         HOSTED_ONBOARDING_REVNET_PROJECT_ID: "1",
         HOSTED_ONBOARDING_REVNET_RPC_URL: "https://rpc.example.test/base",
@@ -119,7 +112,6 @@ describe("readHostedOnboardingEnvironment", () => {
 
   it("ignores removed branded Linq aliases", () => {
     const environment = readHostedOnboardingEnvironment(createProcessEnv({
-      DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
       [REMOVED_LINQ_TOKEN_ALIAS]: "linq-token",
       [REMOVED_LINQ_BASE_URL_ALIAS]: "https://linq.example.test/api",
     }));
@@ -128,14 +120,27 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.linqApiBaseUrl).toBe("https://api.linqapp.com/api/partner/v3");
   });
 
-  it("requires DEVICE_SYNC_ENCRYPTION_KEY", () => {
-    expect(() => readHostedOnboardingEnvironment(createProcessEnv({}))).toThrow(/DEVICE_SYNC_ENCRYPTION_KEY/u);
+  it("requires HOSTED_ONBOARDING_ENCRYPTION_KEY", () => {
+    expect(() =>
+      readHostedOnboardingEnvironment({
+        HOSTED_CONTACT_PRIVACY_KEY: TEST_KEY,
+        NODE_ENV: "test",
+      }),
+    ).toThrow(/HOSTED_ONBOARDING_ENCRYPTION_KEY/u);
+  });
+
+  it("requires HOSTED_CONTACT_PRIVACY_KEY", () => {
+    expect(() =>
+      readHostedOnboardingEnvironment({
+        HOSTED_ONBOARDING_ENCRYPTION_KEY: TEST_KEY,
+        NODE_ENV: "test",
+      }),
+    ).toThrow(/HOSTED_CONTACT_PRIVACY_KEY/u);
   });
 
   it("rejects non-localhost HTTP public base URLs", () => {
     expect(() =>
       readHostedOnboardingEnvironment(createProcessEnv({
-        DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
         HOSTED_ONBOARDING_PUBLIC_BASE_URL: "http://join.example.test",
       })),
     ).toThrow(/Hosted execution base URLs must use HTTPS/u);
@@ -144,7 +149,6 @@ describe("readHostedOnboardingEnvironment", () => {
   it("rejects embedded credentials in the public base URL", () => {
     expect(() =>
       readHostedOnboardingEnvironment(createProcessEnv({
-        DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
         HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://user:pass@join.example.test",
       })),
     ).toThrow(/must not include embedded credentials/u);
@@ -153,6 +157,8 @@ describe("readHostedOnboardingEnvironment", () => {
 
 function createProcessEnv(values: Record<string, string>): NodeJS.ProcessEnv {
   return {
+    HOSTED_CONTACT_PRIVACY_KEY: TEST_KEY,
+    HOSTED_ONBOARDING_ENCRYPTION_KEY: TEST_KEY,
     NODE_ENV: "test",
     ...values,
   };

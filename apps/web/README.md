@@ -58,13 +58,17 @@ Optional but recommended:
 - `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET`
 - `HOSTED_WEB_BASE_URL` as the shared hosted control-plane base for internal device-sync, share, and usage routes; route-specific overrides must stay on the same host
 - `OURA_WEBHOOK_VERIFICATION_TOKEN`
-- `HOSTED_SHARE_INTERNAL_TOKEN` for server-to-server share-link issuance from the assistant or other trusted callers
+- `HOSTED_SHARE_INTERNAL_TOKENS` for server-to-server share-link issuance from the assistant or other trusted callers; the first token is used for outbound calls and any configured token is accepted inbound during rotation
 
 On Vercel, the hosted web app now falls back to `VERCEL_PROJECT_PRODUCTION_URL` for the canonical public origin when the explicit hosted public-base envs are unset. Explicit envs still win, and you should keep setting them if you need a non-default path or additional allowed origins.
 
 Hosted onboarding extras:
 
 - `HOSTED_ONBOARDING_PUBLIC_BASE_URL`
+- `HOSTED_ONBOARDING_ENCRYPTION_KEY`
+- `HOSTED_ONBOARDING_ENCRYPTION_KEY_VERSION`
+- `HOSTED_ONBOARDING_ENCRYPTION_KEYRING_JSON`
+- `HOSTED_CONTACT_PRIVACY_KEY`
 - `HOSTED_ONBOARDING_SIGNUP_PHONE_NUMBER` to show a public `Text to start` CTA on `/`
 - `NEXT_PUBLIC_PRIVY_APP_ID`
 - `NEXT_PUBLIC_PRIVY_CLIENT_ID` if you want the hosted web app to select a specific Privy web client per environment
@@ -84,9 +88,10 @@ Hosted onboarding extras:
 - `HOSTED_EXECUTION_DISPATCH_URL`
 - `HOSTED_EXECUTION_SIGNING_SECRET`
 - `HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS`
-- `HOSTED_EXECUTION_CONTROL_TOKEN` so `/settings` can sync a verified email into hosted user env and trigger a hosted run
-- `HOSTED_EXECUTION_INTERNAL_TOKEN` so the Cloudflare runner can call hosted web internal routes
-- `CRON_SECRET` so the deployed Vercel cron can authenticate `/api/internal/hosted-execution/outbox/cron`
+- `HOSTED_EXECUTION_CONTROL_TOKENS` so `/settings` can sync a verified email into hosted user env and trigger a hosted run
+- `HOSTED_EXECUTION_INTERNAL_TOKENS` so the Cloudflare runner can call hosted web internal routes
+- `HOSTED_EXECUTION_SCHEDULER_TOKENS` so the deployed Vercel cron can authenticate `/api/internal/hosted-execution/outbox/cron`
+- `CRON_SECRET` is still accepted as a scheduler-token fallback when Vercel injects it automatically
 
 Optional hosted AI usage metering:
 
@@ -100,9 +105,10 @@ When you set `DEVICE_SYNC_PUBLIC_BASE_URL`, point it at the stable production pr
 Set these under `Settings -> Environment Variables` in the Vercel project that deploys `apps/web`. Production is the minimum. Only set Preview if you also have matching preview peers and secrets instead of pointing preview deploys at production control planes.
 
 - `HOSTED_EXECUTION_SIGNING_SECRET`: generate a strong random secret and use the exact same value in Vercel and the Cloudflare hosted-execution worker. `apps/web` signs dispatch payloads with it and Cloudflare verifies them.
-- `HOSTED_EXECUTION_CONTROL_TOKEN`: generate a distinct strong random bearer token and use the same value in Vercel and the Cloudflare hosted-execution worker. `apps/web` uses it to call the worker's operator/internal control routes.
-- `HOSTED_EXECUTION_INTERNAL_TOKEN`: generate a distinct strong random bearer token and use the same value in Vercel and the Cloudflare runner environment. The runner uses it when calling `apps/web` internal hosted-execution and device-sync routes.
-- `CRON_SECRET`: generate a distinct strong random bearer token and set it in Vercel for `apps/web`. Vercel cron requests send `Authorization: Bearer <CRON_SECRET>` to the cron endpoints declared in `vercel.json`.
+- `HOSTED_EXECUTION_CONTROL_TOKENS`: generate a distinct comma-separated bearer-token set and use the same value in Vercel and the Cloudflare hosted-execution worker. `apps/web` uses the first token for outbound worker control calls and accepts any configured token inbound.
+- `HOSTED_EXECUTION_INTERNAL_TOKENS`: generate a distinct comma-separated bearer-token set and use the same value in Vercel and the Cloudflare runner environment. The runner uses the first token for outbound internal route calls and hosted web accepts any configured token inbound.
+- `HOSTED_EXECUTION_SCHEDULER_TOKENS`: generate a distinct comma-separated bearer-token set for hosted cron routes. `CRON_SECRET` is still accepted as a fallback because Vercel cron sends `Authorization: Bearer <CRON_SECRET>` automatically.
+- `HOSTED_SHARE_INTERNAL_TOKENS`: generate a distinct comma-separated bearer-token set for trusted server-to-server hosted share routes.
 - `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET`: generate a distinct strong random secret and use the same value in Vercel plus whichever trusted auth proxy or middleware signs the hosted user assertion headers. `apps/web` verifies that signature before trusting browser-authenticated device-sync requests.
 
 If you prefer the CLI, Vercel's current docs cover `vercel env add`, `vercel env update`, and `vercel env pull` for managing these project environment variables.

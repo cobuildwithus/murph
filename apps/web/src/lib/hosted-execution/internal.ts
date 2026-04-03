@@ -20,10 +20,10 @@ export function authorizeHostedExecutionInternalRequest(input: {
   request: Request;
   requireBoundUserId?: boolean;
 }): { trustedUserId: string | null } {
-  const { requiredCode, requiredMessage, unauthorizedCode, unauthorizedMessage, token } =
-    readHostedExecutionAcceptedRouteToken(input.acceptedToken);
+  const { requiredCode, requiredMessage, tokens, unauthorizedCode, unauthorizedMessage } =
+    readHostedExecutionAcceptedRouteTokens(input.acceptedToken);
 
-  if (!token) {
+  if (tokens.length === 0) {
     throw hostedOnboardingError({
       code: requiredCode,
       message: requiredMessage,
@@ -31,7 +31,8 @@ export function authorizeHostedExecutionInternalRequest(input: {
     });
   }
 
-  if (input.request.headers.get("authorization") !== `Bearer ${token}`) {
+  const authorization = input.request.headers.get("authorization");
+  if (!authorization || !tokens.some((token) => authorization === `Bearer ${token}`)) {
     throw hostedOnboardingError({
       code: unauthorizedCode,
       message: unauthorizedMessage,
@@ -96,18 +97,18 @@ export function requireHostedExecutionUserId(request: Request): string {
   return userId;
 }
 
-function readHostedExecutionAcceptedRouteToken(kind: HostedExecutionAcceptedRouteToken): {
+function readHostedExecutionAcceptedRouteTokens(kind: HostedExecutionAcceptedRouteToken): {
   requiredCode: string;
   requiredMessage: string;
-  token: string | null;
+  tokens: string[];
   unauthorizedCode: string;
   unauthorizedMessage: string;
 } {
   if (kind === "scheduler") {
     return {
       requiredCode: "HOSTED_EXECUTION_SCHEDULER_TOKEN_REQUIRED",
-      requiredMessage: "CRON_SECRET must be configured for scheduled hosted execution drains.",
-      token: normalizeOptionalString(process.env.CRON_SECRET),
+      requiredMessage: "HOSTED_EXECUTION_SCHEDULER_TOKENS or CRON_SECRET must be configured for scheduled hosted execution drains.",
+      tokens: readTokenListFromEnv("HOSTED_EXECUTION_SCHEDULER_TOKENS", "CRON_SECRET"),
       unauthorizedCode: "HOSTED_EXECUTION_UNAUTHORIZED",
       unauthorizedMessage: "Unauthorized hosted execution request.",
     };
@@ -116,8 +117,8 @@ function readHostedExecutionAcceptedRouteToken(kind: HostedExecutionAcceptedRout
   if (kind === "share") {
     return {
       requiredCode: "HOSTED_SHARE_INTERNAL_TOKEN_REQUIRED",
-      requiredMessage: "HOSTED_SHARE_INTERNAL_TOKEN must be configured for internal hosted share routes.",
-      token: normalizeOptionalString(process.env.HOSTED_SHARE_INTERNAL_TOKEN),
+      requiredMessage: "HOSTED_SHARE_INTERNAL_TOKENS must be configured for internal hosted share routes.",
+      tokens: readTokenListFromEnv("HOSTED_SHARE_INTERNAL_TOKENS", "HOSTED_SHARE_INTERNAL_TOKEN"),
       unauthorizedCode: "HOSTED_SHARE_UNAUTHORIZED",
       unauthorizedMessage: "Unauthorized hosted share request.",
     };
@@ -125,9 +126,23 @@ function readHostedExecutionAcceptedRouteToken(kind: HostedExecutionAcceptedRout
 
   return {
     requiredCode: "HOSTED_EXECUTION_INTERNAL_TOKEN_REQUIRED",
-    requiredMessage: "HOSTED_EXECUTION_INTERNAL_TOKEN must be configured for internal hosted execution control routes.",
-    token: normalizeOptionalString(process.env.HOSTED_EXECUTION_INTERNAL_TOKEN),
+    requiredMessage: "HOSTED_EXECUTION_INTERNAL_TOKENS must be configured for internal hosted execution control routes.",
+    tokens: readTokenListFromEnv("HOSTED_EXECUTION_INTERNAL_TOKENS", "HOSTED_EXECUTION_INTERNAL_TOKEN"),
     unauthorizedCode: "HOSTED_EXECUTION_UNAUTHORIZED",
     unauthorizedMessage: "Unauthorized hosted execution request.",
   };
+}
+
+function readTokenListFromEnv(primaryKey: string, fallbackKey: string): string[] {
+  const explicit = normalizeOptionalString(process.env[primaryKey]);
+
+  if (explicit) {
+    return explicit
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  }
+
+  const fallback = normalizeOptionalString(process.env[fallbackKey]);
+  return fallback ? [fallback] : [];
 }

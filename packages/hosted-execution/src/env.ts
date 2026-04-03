@@ -7,29 +7,34 @@ export interface HostedExecutionDispatchEnvironment {
 export interface HostedExecutionControlEnvironment {
   baseUrl: string | null;
   controlToken: string | null;
+  controlTokens: string[];
 }
 
 export interface HostedExecutionWebControlPlaneEnvironment {
   deviceSyncRuntimeBaseUrl: string | null;
   internalToken: string | null;
+  internalTokens: string[];
   schedulerToken: string | null;
+  schedulerTokens: string[];
   shareBaseUrl: string | null;
   shareToken: string | null;
+  shareTokens: string[];
   usageBaseUrl?: string | null;
 }
 
 export interface HostedExecutionWorkerEnvironment {
   allowedUserEnvKeys: string | null;
-  allowedUserEnvPrefixes: string | null;
   bundleEncryptionKeyBase64: string;
   bundleEncryptionKeyId: string;
   bundleEncryptionKeyringJson: string | null;
   controlToken: string | null;
+  controlTokens: string[];
   defaultAlarmDelayMs: number;
   dispatchSigningSecret: string;
   maxEventAttempts: number;
   retryDelayMs: number;
   runnerControlToken: string | null;
+  runnerControlTokens: string[];
   runnerTimeoutMs: number;
 }
 
@@ -62,10 +67,16 @@ export function readHostedExecutionControlEnvironment(
   source: EnvSource = process.env,
 ): HostedExecutionControlEnvironment {
   const dispatchUrl = normalizeHostedExecutionBaseUrl(source.HOSTED_EXECUTION_DISPATCH_URL);
+  const controlTokens = readHostedExecutionTokenList(
+    source,
+    "HOSTED_EXECUTION_CONTROL_TOKENS",
+    "HOSTED_EXECUTION_CONTROL_TOKEN",
+  );
 
   return {
     baseUrl: dispatchUrl,
-    controlToken: normalizeHostedExecutionString(source.HOSTED_EXECUTION_CONTROL_TOKEN),
+    controlToken: controlTokens[0] ?? null,
+    controlTokens,
   };
 }
 
@@ -76,19 +87,37 @@ export function readHostedExecutionWebControlPlaneEnvironment(
   const sharedBaseUrl =
     normalizeHostedExecutionBaseUrl(source.HOSTED_WEB_BASE_URL, options)
     ?? readHostedExecutionVercelProductionBaseUrl(source, options);
+  const internalTokens = readHostedExecutionTokenList(
+    source,
+    "HOSTED_EXECUTION_INTERNAL_TOKENS",
+    "HOSTED_EXECUTION_INTERNAL_TOKEN",
+  );
+  const schedulerTokens = readHostedExecutionTokenList(
+    source,
+    "HOSTED_EXECUTION_SCHEDULER_TOKENS",
+    "CRON_SECRET",
+  );
+  const shareTokens = readHostedExecutionTokenList(
+    source,
+    "HOSTED_SHARE_INTERNAL_TOKENS",
+    "HOSTED_SHARE_INTERNAL_TOKEN",
+  );
 
   return {
     deviceSyncRuntimeBaseUrl: normalizeHostedExecutionBaseUrl(
       source.HOSTED_DEVICE_SYNC_CONTROL_BASE_URL,
       options,
     ) ?? sharedBaseUrl,
-    internalToken: normalizeHostedExecutionString(source.HOSTED_EXECUTION_INTERNAL_TOKEN),
-    schedulerToken: normalizeHostedExecutionString(source.CRON_SECRET),
+    internalToken: internalTokens[0] ?? null,
+    internalTokens,
+    schedulerToken: schedulerTokens[0] ?? null,
+    schedulerTokens,
     shareBaseUrl: normalizeHostedExecutionBaseUrl(
       source.HOSTED_SHARE_API_BASE_URL,
       options,
     ) ?? sharedBaseUrl,
-    shareToken: normalizeHostedExecutionString(source.HOSTED_SHARE_INTERNAL_TOKEN),
+    shareToken: shareTokens[0] ?? null,
+    shareTokens,
     usageBaseUrl: normalizeHostedExecutionBaseUrl(source.HOSTED_AI_USAGE_BASE_URL, options) ?? sharedBaseUrl,
   };
 }
@@ -113,9 +142,19 @@ export function readHostedExecutionVercelProductionBaseUrl(
 export function readHostedExecutionWorkerEnvironment(
   source: EnvSource = process.env,
 ): HostedExecutionWorkerEnvironment {
+  const controlTokens = readHostedExecutionTokenList(
+    source,
+    "HOSTED_EXECUTION_CONTROL_TOKENS",
+    "HOSTED_EXECUTION_CONTROL_TOKEN",
+  );
+  const runnerControlTokens = readHostedExecutionTokenList(
+    source,
+    "HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS",
+    "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN",
+  );
+
   return {
     allowedUserEnvKeys: normalizeHostedExecutionString(source.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS),
-    allowedUserEnvPrefixes: normalizeHostedExecutionString(source.HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES),
     bundleEncryptionKeyBase64: requireHostedExecutionString(
       source.HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY,
       "HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY",
@@ -126,7 +165,8 @@ export function readHostedExecutionWorkerEnvironment(
     bundleEncryptionKeyringJson: normalizeHostedExecutionString(
       source.HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON,
     ),
-    controlToken: normalizeHostedExecutionString(source.HOSTED_EXECUTION_CONTROL_TOKEN),
+    controlToken: controlTokens[0] ?? null,
+    controlTokens,
     defaultAlarmDelayMs: parsePositiveInteger(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS),
       15 * 60 * 1000,
@@ -146,7 +186,8 @@ export function readHostedExecutionWorkerEnvironment(
       30_000,
       "HOSTED_EXECUTION_RETRY_DELAY_MS",
     ),
-    runnerControlToken: normalizeHostedExecutionString(source.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN),
+    runnerControlToken: runnerControlTokens[0] ?? null,
+    runnerControlTokens,
     runnerTimeoutMs: parsePositiveInteger(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS),
       60_000,
@@ -229,4 +270,22 @@ function parsePositiveInteger(value: string | null, fallback: number, label: str
 
 function isHostedExecutionLoopbackHost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
+}
+
+function readHostedExecutionTokenList(
+  source: EnvSource,
+  listKey: string,
+  fallbackKey: string,
+): string[] {
+  const explicit = normalizeHostedExecutionString(source[listKey]);
+
+  if (explicit) {
+    return explicit
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  }
+
+  const fallback = normalizeHostedExecutionString(source[fallbackKey]);
+  return fallback ? [fallback] : [];
 }
