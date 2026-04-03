@@ -56,7 +56,7 @@ Optional but recommended:
 - `DEVICE_SYNC_TRUSTED_USER_ASSERTION_HEADER`
 - `DEVICE_SYNC_TRUSTED_USER_SIGNATURE_HEADER`
 - `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET`
-- `HOSTED_WEB_BASE_URL` as the shared hosted control-plane base for internal device-sync, share, and usage routes unless a specific route needs its own host override
+- `HOSTED_WEB_BASE_URL` as the shared hosted control-plane base for internal device-sync, share, and usage routes; route-specific overrides must stay on the same host
 - `OURA_WEBHOOK_VERIFICATION_TOKEN`
 - `HOSTED_SHARE_INTERNAL_TOKEN` for server-to-server share-link issuance from the assistant or other trusted callers
 

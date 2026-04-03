@@ -88,7 +88,6 @@ Optional tuning variables:
 - `CF_TRACE_HEAD_SAMPLING_RATE` (default `0.1`)
 - `CF_ALLOWED_USER_ENV_KEYS`
 - `CF_ALLOWED_USER_ENV_PREFIXES`
-- `HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS` (comma-separated `host[:port]` entries for runner web-control targets that do not share the public hosted-web host)
 - `HOSTED_ASSISTANT_PROVIDER`, `HOSTED_ASSISTANT_MODEL`, and the rest of the `HOSTED_ASSISTANT_*` seed vars when you want hosted member activation to persist one explicit platform-managed assistant profile into `~/.murph/config.json` instead of relying on runtime fallback
 
 Optional non-secret worker variables:
@@ -105,7 +104,7 @@ Optional non-secret worker variables:
 - `HOSTED_AI_USAGE_BASE_URL`
 - `HOSTED_SHARE_API_BASE_URL`
 
-The hosted-web control-plane URLs above are consumed by the worker-side runner proxy layer. Only the subset allowlisted in `apps/cloudflare/src/runner-env.ts` is forwarded into the native container runtime.
+The hosted-web control-plane URLs above are consumed by the worker-side runner proxy layer. They must stay on the same host as `HOSTED_WEB_BASE_URL`. Only the subset allowlisted in `apps/cloudflare/src/runner-env.ts` is forwarded into the native container runtime.
 
 Optional non-secret provider/toolchain variables to expose through the worker and forward into the container:
 
