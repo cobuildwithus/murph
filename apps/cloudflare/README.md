@@ -41,9 +41,15 @@ Current worker env/config names read directly by `src/env.ts`:
 - required secret: `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN` gates the private container HTTP server and native container invoke path; missing values now fail closed instead of silently skipping auth
 - optional secret: `HOSTED_EXECUTION_INTERNAL_TOKEN` lets the worker proxy runner callbacks into hosted web internal routes such as device-sync snapshot/apply and hosted AI usage recording
 - optional secret: `HOSTED_SHARE_INTERNAL_TOKEN` lets the worker proxy hosted share payload fetches into the hosted web control plane
+- optional secret: `HOSTED_EMAIL_CLOUDFLARE_API_TOKEN` enables hosted email delivery through Cloudflare Email Routing
+- optional secret: `HOSTED_EMAIL_SIGNING_SECRET` enables trusted hosted email ingress token generation and verification
 - optional non-secret: `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` extends the per-user encrypted env key allowlist in both the worker and container
 - optional non-secret: `HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES` extends the per-user encrypted env prefix allowlist in both the worker and container
 - optional non-secret: `HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS` extends the host allowlist for runner-to-web control-plane base URLs when they do not share the `HOSTED_WEB_BASE_URL` host
+- optional non-secret: `HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID` selects the Cloudflare account used for hosted email sends
+- optional non-secret: `HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL` overrides the Cloudflare API base URL for hosted email delivery
+- optional non-secret: `HOSTED_EMAIL_DEFAULT_SUBJECT` overrides the default hosted email subject
+- optional non-secret: `HOSTED_EMAIL_DOMAIN`, `HOSTED_EMAIL_FROM_ADDRESS`, and `HOSTED_EMAIL_LOCAL_PART` configure the hosted email sender and stable reply aliases
 - optional non-secret: `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID` defaults to `v1`
 - optional secret: `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON` may provide a JSON object of `{ keyId: base64Key }` entries so older encrypted hosted objects remain readable during key rotation
 - optional non-secret: `HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS` defaults to `21600000` in the checked-in Wrangler scaffold
@@ -99,6 +105,8 @@ The native container image is declared in `apps/cloudflare/wrangler.jsonc` under
 
 That HTTP bridge is an internal container implementation detail, not a separately supported hosted service or repo-supported local command surface. The repo no longer supports an external `HOSTED_EXECUTION_RUNNER_BASE_URL` path.
 
+The default image now bakes the local parser toolchain directly into the container: `ffmpeg`, `pdftotext`, a pinned `whisper.cpp` `whisper-cli` build, and the default `base.en` Whisper model under `~/.murph/models/whisper/ggml-base.en.bin`. `FFMPEG_COMMAND`, `PDFTOTEXT_COMMAND`, `WHISPER_COMMAND`, and `WHISPER_MODEL_PATH` are set in the image by default, and operators only need to override the Whisper vars when they intentionally want a different binary or model.
+
 Current expectations for the container image:
 
 - Node `>=22.16.0`
@@ -106,7 +114,7 @@ Current expectations for the container image:
 - writable temp storage for ephemeral hosted bundle restore/snapshot work
 - the baked `/app` tree remains root-owned while the runtime executes as a dedicated non-root user, so any job that needs scratch space must use temp/vault paths rather than mutating shipped source
 - `PORT` for the internal bridge listen port, defaulting to `8080`
-- provider/runtime env such as WHOOP, Oura, Linq, AgentMail, Telegram, and model-provider keys when the one-shot runner should execute those surfaces instead of skipping them
+- provider/runtime env such as WHOOP, Oura, Linq, Telegram, hosted email bridge config, and model-provider keys when the one-shot runner should execute those surfaces instead of skipping them
 - automation-only provider/channel secrets are forwarded by default and stripped only when `HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION` is set to an explicit opt-out value such as `false`
 - optional allowlist extension vars `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` and `HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES` when separately encrypted per-user env overrides need to cover additional key names
 - optional `HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS` when hosted device-sync/share/usage control routes intentionally live on a different host than `HOSTED_WEB_BASE_URL`
@@ -155,7 +163,8 @@ The Cloudflare app now keeps two focused Vitest lanes:
 - The checked-in Wrangler scaffold now explicitly enables Workers Logs and Workers Traces so request logs, container logs, and trace spans are available before production rollout. The generated deploy config exposes log and trace sampling through `CF_LOG_HEAD_SAMPLING_RATE` and `CF_TRACE_HEAD_SAMPLING_RATE`.
 - Normal deployment flow now separates version upload from deployment. After the first deploy, the GitHub Actions workflow and local rollout helper upload a version, create a gradual deployment, and pin smoke checks to the candidate version. First deploys still require a direct `wrangler deploy`, and the rollout helper now refuses gradual mode when the rendered config introduces a newer Durable Object migration tag than the currently allowed gradual-deploy set.
 - Frequent deploys can accumulate old managed-registry tags. Use `pnpm --dir apps/cloudflare images:cleanup -- --filter '<repo-regex>' --keep 10` first, then add `--apply` once the dry-run plan looks correct.
-- The checked-in deploy surface now documents and forwards only the canonical runtime vars that the container actually consumes, such as `AGENTMAIL_BASE_URL`, `FFMPEG_COMMAND`, `WHISPER_COMMAND`, `WHISPER_MODEL_PATH`, and the explicit runner web-control host allowlist override.
+- The checked-in deploy surface now documents and forwards only the canonical runtime vars that the container actually consumes, such as `HOSTED_EMAIL_*`, `FFMPEG_COMMAND`, `PDFTOTEXT_COMMAND`, `WHISPER_COMMAND`, `WHISPER_MODEL_PATH`, and the explicit runner web-control host allowlist override. The default image already bakes the standard parser-toolchain values, so the parser vars are override knobs rather than baseline deployment requirements. AgentMail stays a local-only integration and is not part of the hosted deploy surface.
+- The deploy automation now also forwards the hosted email bridge config (`HOSTED_EMAIL_*`) into the generated Worker vars/secrets payload and the manual GitHub Actions deploy workflow, so the documented hosted email contract matches the deploy surface.
 - Manual deploy smoke no longer stops at `POST /run` acceptance. It now polls the operator status route until the queue drains, `lastRunAt` advances, and durable bundle refs exist, so a broken containerized run does not look healthy just because the enqueue succeeded.
 - The checked-in Wrangler scaffold and rendered deploy config now declare the four required hosted runtime secrets through Wrangler's experimental `secrets.required` support, so local `wrangler` validation and deploy/version uploads fail early when those names are unset. Keep that list tight and treat optional provider secrets as separately managed Worker configuration.
 - The repo now ships `apps/cloudflare/r2-bundles-lifecycle.json` plus `pnpm --dir apps/cloudflare r2:lifecycle:apply` so the configured bundles buckets can expire transient execution journals and committed side-effect journal objects under `transient/execution-journal/` and `transient/side-effects/` after 30 days.

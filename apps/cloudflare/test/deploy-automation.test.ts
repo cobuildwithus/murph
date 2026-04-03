@@ -21,13 +21,18 @@ import { renderWorkerSecretsFile } from "../scripts/render-worker-secrets.ts";
 describe("hosted deploy automation helpers", () => {
   it("builds a generated wrangler config for the native container worker", () => {
     const environment = readHostedDeployAutomationEnvironment({
-      AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_CONTAINER_INSTANCE_TYPE: "standard-1",
       CF_CONTAINER_MAX_INSTANCES: "250",
       CF_RUNNER_COMMIT_TIMEOUT_MS: "45000",
       CF_WORKER_NAME: "hosted-worker",
+      HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
+      HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL: "https://api.cloudflare.com/client/v4",
+      HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph note",
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
       HOSTED_AI_USAGE_BASE_URL: "https://web.example.test",
       HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS: "api.example.test",
       HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION: "true",
@@ -118,6 +123,12 @@ describe("hosted deploy automation helpers", () => {
       },
     });
     expect(config.vars.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS).toBe("45000");
+    expect(config.vars.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID).toBe("acct_123");
+    expect(config.vars.HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL).toBe("https://api.cloudflare.com/client/v4");
+    expect(config.vars.HOSTED_EMAIL_DEFAULT_SUBJECT).toBe("Murph note");
+    expect(config.vars.HOSTED_EMAIL_DOMAIN).toBe("mail.example.test");
+    expect(config.vars.HOSTED_EMAIL_FROM_ADDRESS).toBe("assistant@mail.example.test");
+    expect(config.vars.HOSTED_EMAIL_LOCAL_PART).toBe("assistant");
     expect(config.vars.HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS).toBe("api.example.test");
     expect(config.vars.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION).toBe("true");
     expect(config.vars.HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER).toBe("7m");
@@ -125,7 +136,7 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_DEVICE_SYNC_CONTROL_BASE_URL).toBe("https://web.example.test");
     expect(config.vars.HOSTED_SHARE_API_BASE_URL).toBe("https://web.example.test");
     expect(config.vars.HOSTED_WEB_BASE_URL).toBe("https://web.example.test");
-    expect(config.vars.AGENTMAIL_BASE_URL).toBe("https://mail.example.test/v0");
+    expect(config.vars.AGENTMAIL_BASE_URL).toBeUndefined();
     expect(config.vars.TELEGRAM_BOT_USERNAME).toBe("hosted_bot");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_BASE_URL).toBeUndefined();
     expect(config.secrets?.required).toEqual([...HOSTED_WORKER_REQUIRED_SECRET_NAMES]);
@@ -173,6 +184,9 @@ describe("hosted deploy automation helpers", () => {
 
   it("renders required and optional worker secrets from CI secrets", () => {
     expect(buildHostedWorkerSecretsPayload({
+      AGENTMAIL_API_KEY: "agentmail-secret",
+      HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "email-cf-token",
+      HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
       HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: "bundle-key",
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
       HOSTED_EXECUTION_INTERNAL_TOKEN: "internal-token",
@@ -182,6 +196,8 @@ describe("hosted deploy automation helpers", () => {
       OPENAI_API_KEY: "sk-user",
       TELEGRAM_BOT_TOKEN: "bot-token",
     })).toEqual({
+      HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "email-cf-token",
+      HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
       HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: "bundle-key",
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
       HOSTED_EXECUTION_INTERNAL_TOKEN: "internal-token",
