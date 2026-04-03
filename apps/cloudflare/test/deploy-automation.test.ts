@@ -34,7 +34,6 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
       HOSTED_AI_USAGE_BASE_URL: "https://web.example.test",
-      HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS: "api.example.test",
       HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER: "7m",
       HOSTED_DEVICE_SYNC_CONTROL_BASE_URL: "https://web.example.test",
       HOSTED_SHARE_API_BASE_URL: "https://web.example.test",
@@ -123,7 +122,6 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_EMAIL_DOMAIN).toBe("mail.example.test");
     expect(config.vars.HOSTED_EMAIL_FROM_ADDRESS).toBe("assistant@mail.example.test");
     expect(config.vars.HOSTED_EMAIL_LOCAL_PART).toBe("assistant");
-    expect(config.vars.HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS).toBe("api.example.test");
     expect(config.vars.HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER).toBe("7m");
     expect(config.vars.HOSTED_AI_USAGE_BASE_URL).toBe("https://web.example.test");
     expect(config.vars.HOSTED_DEVICE_SYNC_CONTROL_BASE_URL).toBe("https://web.example.test");

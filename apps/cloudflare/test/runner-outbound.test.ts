@@ -24,7 +24,7 @@ describe("handleRunnerOutboundRequest", () => {
         method: "POST",
       }),
       createRunnerOutboundEnv({
-        HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS: "web.example.test",
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
         HOSTED_DEVICE_SYNC_CONTROL_BASE_URL: "https://web.example.test",
       }),
       "member_123",
@@ -58,7 +58,7 @@ describe("handleRunnerOutboundRequest", () => {
         method: "POST",
       }),
       createRunnerOutboundEnv({
-        HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS: "web.example.test",
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
         HOSTED_DEVICE_SYNC_CONTROL_BASE_URL: "https://web.example.test",
       }),
       "member_123",
@@ -105,7 +105,7 @@ describe("handleRunnerOutboundRequest", () => {
     )).rejects.toThrow(/HOSTED_DEVICE_SYNC_CONTROL_BASE_URL host is not allowlisted/u);
   });
 
-  it("accepts extra allowlisted runner web-control hosts", async () => {
+  it("accepts runner web-control overrides that stay on the shared hosted-web host", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
       headers: {
         "content-type": "application/json; charset=utf-8",
@@ -125,8 +125,8 @@ describe("handleRunnerOutboundRequest", () => {
         method: "POST",
       }),
       createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test/app",
         HOSTED_DEVICE_SYNC_CONTROL_BASE_URL: "https://web.example.test",
-        HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS: "api.example.test, web.example.test",
       }),
       "member_123",
       RUNNER_PROXY_TOKEN,

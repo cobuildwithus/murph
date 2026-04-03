@@ -758,40 +758,5 @@ function readAllowedRunnerWebControlHosts(
     allowedHosts.add(new URL(sharedBaseUrl).host.toLowerCase());
   }
 
-  const extraHosts = readOptionalString(
-    env.HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS,
-    "HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS",
-  );
-
-  for (const hostEntry of (extraHosts ?? "").split(",")) {
-    const normalizedHost = normalizeRunnerWebControlHost(hostEntry);
-
-    if (normalizedHost) {
-      allowedHosts.add(normalizedHost);
-    }
-  }
-
   return allowedHosts;
-}
-
-function normalizeRunnerWebControlHost(value: string): string | null {
-  const normalized = value.trim().toLowerCase();
-
-  if (normalized.length === 0) {
-    return null;
-  }
-
-  if (
-    normalized.includes("://")
-    || normalized.includes("/")
-    || normalized.includes("?")
-    || normalized.includes("#")
-    || normalized.includes("@")
-  ) {
-    throw new TypeError(
-      "HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS must contain comma-separated host[:port] entries.",
-    );
-  }
-
-  return normalized;
 }
