@@ -417,6 +417,7 @@
   "dependencies": {
     "@ai-sdk/openai": "^2.0.35",
     "@ai-sdk/openai-compatible": "^2.0.35",
+    "@mozilla/readability": "0.6.0",
     "@murphai/contracts": "workspace:*",
     "@murphai/core": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
@@ -428,6 +429,7 @@
     "@murphai/runtime-state": "workspace:*",
     "@photon-ai/imessage-kit": "2.1.2",
     "ai": "^6.0.116",
+    "linkedom": "0.18.12",
     "zod": "^4.1.8"
   }
 }

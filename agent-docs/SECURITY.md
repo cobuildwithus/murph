@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-04-02
+Last verified: 2026-04-03
 
 ## Non-Negotiable Rules
 
@@ -27,6 +27,7 @@ Last verified: 2026-04-02
 - `vault-cli inbox model route` sends only the normalized text bundle plus tool catalog to the configured model backend, but that bundle can still contain sensitive health data and must be treated as high-sensitivity operator input.
 - Persist only audited bundle/plan/result artifacts for inbox model routing; never persist provider secrets alongside those artifacts.
 - Web-search provider credentials must stay in environment variables only, and `web.search` results remain untrusted external content rather than canonical Murph truth. Search result snippets, URLs, and provider response bodies may be returned to the model at turn time, but they must not be persisted as secret-bearing runtime artifacts or treated as validated health facts without canonical import/write steps.
+- `web.fetch` may retrieve public webpages over outbound HTTP(S), but it must stay a guarded read-only surface: block loopback/private-network targets before fetch, keep redirects bounded and revalidated, enforce timeout and byte limits, and treat fetched page bodies as untrusted external context rather than canonical Murph data. `web.fetch` does not imply browser automation, cookie/session replay, or private-network reachability.
 - AgentMail-backed email polling and delivery must keep API keys in environment variables only, must not write raw Authorization headers to vault/runtime artifacts, and must limit assistant auto-reply to direct email threads.
 - Assistant-state is high-sensitivity local runtime data: directories under `assistant-state/**` must be `0700`, files under `assistant-state/**` must be `0600`, secret-bearing provider headers must never remain inline in persisted session JSON, and operator-facing repair flows should use `assistant doctor --repair` so legacy inline headers are migrated into private sidecars under `assistant-state/secrets/**` before wider diagnostics continue.
 - Runtime observability writes under `assistant-state/diagnostics/**`, `assistant-state/journals/**`, quarantine metadata, and persisted delivery errors must redact inline bearer tokens, cookies, API keys, and similar secret material before the artifact is committed.
