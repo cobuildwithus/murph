@@ -53,7 +53,7 @@ interface NormalizedAssistantWebFetchRequest {
   url: URL
 }
 
-interface AssistantWebFetchRuntimeContext {
+export interface AssistantWebFetchRuntimeContext {
   fetchImplementation: typeof fetch
   lookupImplementation: typeof lookup
   maxRedirects: number
@@ -61,7 +61,7 @@ interface AssistantWebFetchRuntimeContext {
   timeoutMs: number
 }
 
-interface AssistantWebFetchedResponse {
+export interface AssistantWebFetchedResponse {
   finalUrl: URL
   response: Response
   warnings: string[]
@@ -69,6 +69,12 @@ interface AssistantWebFetchedResponse {
 
 interface AssistantWebResponseText {
   text: string
+  truncated: boolean
+  warnings: string[]
+}
+
+export interface AssistantWebResponseBytes {
+  bytes: Uint8Array
   truncated: boolean
   warnings: string[]
 }
@@ -100,6 +106,8 @@ const ASSISTANT_WEB_FETCH_BLOCKED_HOSTNAMES = [
   'localhost',
   'localhost.localdomain',
 ] as const
+const ASSISTANT_WEB_FETCH_DEFAULT_ACCEPT_HEADER =
+  'text/html, application/xhtml+xml, application/json, text/plain;q=0.9, */*;q=0.1'
 const ASSISTANT_WEB_FETCH_TEXT_NODE = 3
 const ASSISTANT_WEB_FETCH_ELEMENT_NODE = 1
 
@@ -134,11 +142,12 @@ export async function fetchAssistantWeb(
 
   try {
     const fetched = await fetchAssistantWebResponse({
-      request: normalizedRequest,
+      toolName: 'web.fetch',
+      url: normalizedRequest.url,
       runtime,
       signal: timeout.signal,
     })
-    const contentType = resolveMediaType(
+    const contentType = resolveAssistantWebMediaType(
       fetched.response.headers.get('content-type'),
     )
     const extracted = await extractAssistantWebResponse({
@@ -224,7 +233,7 @@ function normalizeAssistantWebFetchRequest(
   }
 }
 
-function createAssistantWebFetchRuntimeContext(
+export function createAssistantWebFetchRuntimeContext(
   env: NodeJS.ProcessEnv,
 ): AssistantWebFetchRuntimeContext {
   if (!resolveAssistantWebFetchEnabled(env)) {
@@ -243,18 +252,21 @@ function createAssistantWebFetchRuntimeContext(
   }
 }
 
-async function fetchAssistantWebResponse(input: {
-  request: NormalizedAssistantWebFetchRequest
+export async function fetchAssistantWebResponse(input: {
+  acceptHeader?: string
   runtime: AssistantWebFetchRuntimeContext
   signal: AbortSignal
+  toolName: string
+  url: URL
 }): Promise<AssistantWebFetchedResponse> {
-  let currentUrl = input.request.url
+  let currentUrl = input.url
   const warnings: string[] = []
 
   for (let redirectCount = 0; ; redirectCount += 1) {
     await assertAssistantWebUrlIsPublic(
       currentUrl,
       input.runtime.lookupImplementation,
+      input.toolName,
     )
 
     let response: Response
@@ -262,7 +274,7 @@ async function fetchAssistantWebResponse(input: {
       response = await input.runtime.fetchImplementation(currentUrl.toString(), {
         method: 'GET',
         headers: {
-          accept: 'text/html, application/xhtml+xml, application/json, text/plain;q=0.9, */*;q=0.1',
+          accept: input.acceptHeader ?? ASSISTANT_WEB_FETCH_DEFAULT_ACCEPT_HEADER,
         },
         redirect: 'manual',
         signal: input.signal,
@@ -270,7 +282,7 @@ async function fetchAssistantWebResponse(input: {
     } catch (error) {
       throw new VaultCliError(
         'WEB_FETCH_REQUEST_FAILED',
-        `web.fetch could not reach ${currentUrl.toString()}: ${errorMessage(error)}`,
+        `${input.toolName} could not reach ${currentUrl.toString()}: ${errorMessage(error)}`,
       )
     }
 
@@ -286,14 +298,14 @@ async function fetchAssistantWebResponse(input: {
     if (!location) {
       throw new VaultCliError(
         'WEB_FETCH_REDIRECT_INVALID',
-        `web.fetch received HTTP ${response.status} without a redirect location.`,
+        `${input.toolName} received HTTP ${response.status} without a redirect location.`,
       )
     }
 
     if (redirectCount >= input.runtime.maxRedirects) {
       throw new VaultCliError(
         'WEB_FETCH_REDIRECT_LIMIT',
-        `web.fetch followed too many redirects (>${input.runtime.maxRedirects}).`,
+        `${input.toolName} followed too many redirects (>${input.runtime.maxRedirects}).`,
       )
     }
 
@@ -308,19 +320,20 @@ async function fetchAssistantWebResponse(input: {
 async function assertAssistantWebUrlIsPublic(
   candidateUrl: URL,
   lookupImplementation: typeof lookup,
+  toolName: string,
 ): Promise<void> {
   const protocol = candidateUrl.protocol.toLowerCase()
   if (protocol !== 'http:' && protocol !== 'https:') {
     throw new VaultCliError(
       'WEB_FETCH_URL_UNSUPPORTED_SCHEME',
-      'web.fetch only supports http:// and https:// URLs.',
+      `${toolName} only supports http:// and https:// URLs.`,
     )
   }
 
   if (candidateUrl.username || candidateUrl.password) {
     throw new VaultCliError(
       'WEB_FETCH_URL_CREDENTIALS_FORBIDDEN',
-      'web.fetch does not allow credentials in URLs.',
+      `${toolName} does not allow credentials in URLs.`,
     )
   }
 
@@ -328,14 +341,14 @@ async function assertAssistantWebUrlIsPublic(
   if (!hostname) {
     throw new VaultCliError(
       'WEB_FETCH_HOST_INVALID',
-      'web.fetch requires a URL with a hostname.',
+      `${toolName} requires a URL with a hostname.`,
     )
   }
 
   if (isAssistantWebBlockedHostname(hostname)) {
     throw new VaultCliError(
       'WEB_FETCH_PRIVATE_HOST_BLOCKED',
-      `web.fetch blocked ${hostname} because private or loopback hosts are not allowed.`,
+      `${toolName} blocked ${hostname} because private or loopback hosts are not allowed.`,
     )
   }
 
@@ -344,7 +357,7 @@ async function assertAssistantWebUrlIsPublic(
     if (isAssistantWebBlockedIpAddress(hostname, hostAddressFamily)) {
       throw new VaultCliError(
         'WEB_FETCH_PRIVATE_HOST_BLOCKED',
-        `web.fetch blocked ${hostname} because private or loopback hosts are not allowed.`,
+        `${toolName} blocked ${hostname} because private or loopback hosts are not allowed.`,
       )
     }
 
@@ -360,14 +373,14 @@ async function assertAssistantWebUrlIsPublic(
   } catch (error) {
     throw new VaultCliError(
       'WEB_FETCH_DNS_LOOKUP_FAILED',
-      `web.fetch could not resolve ${hostname}: ${errorMessage(error)}`,
+      `${toolName} could not resolve ${hostname}: ${errorMessage(error)}`,
     )
   }
 
   if (resolvedAddresses.length === 0) {
     throw new VaultCliError(
       'WEB_FETCH_DNS_LOOKUP_FAILED',
-      `web.fetch could not resolve ${hostname} to any IP address.`,
+      `${toolName} could not resolve ${hostname} to any IP address.`,
     )
   }
 
@@ -375,7 +388,7 @@ async function assertAssistantWebUrlIsPublic(
     if (isAssistantWebBlockedIpAddress(address.address, address.family)) {
       throw new VaultCliError(
         'WEB_FETCH_PRIVATE_HOST_BLOCKED',
-        `web.fetch blocked ${hostname} because it resolved to a private or loopback address.`,
+        `${toolName} blocked ${hostname} because it resolved to a private or loopback address.`,
       )
     }
   }
@@ -397,7 +410,7 @@ async function extractAssistantWebResponse(input: {
   if (input.contentType === 'application/pdf') {
     throw new VaultCliError(
       'WEB_FETCH_PDF_UNSUPPORTED',
-      'web.fetch does not parse PDFs. Use the planned web.pdf.read tool instead.',
+      'web.fetch does not parse PDFs. Use web.pdf.read for PDF content.',
     )
   }
 
@@ -455,6 +468,20 @@ async function readAssistantWebResponseText(input: {
   maxResponseBytes: number
   response: Response
 }): Promise<AssistantWebResponseText> {
+  const body = await readAssistantWebResponseBytes(input)
+  const decoder = new TextDecoder()
+
+  return {
+    text: decoder.decode(body.bytes),
+    truncated: body.truncated,
+    warnings: body.warnings,
+  }
+}
+
+export async function readAssistantWebResponseBytes(input: {
+  maxResponseBytes: number
+  response: Response
+}): Promise<AssistantWebResponseBytes> {
   const warnings: string[] = []
   const contentLength = parsePositiveInteger(
     input.response.headers.get('content-length'),
@@ -470,16 +497,15 @@ async function readAssistantWebResponseText(input: {
 
   if (!input.response.body) {
     return {
-      text: '',
+      bytes: new Uint8Array(),
       truncated: false,
       warnings,
     }
   }
 
   const reader = input.response.body.getReader()
-  const decoder = new TextDecoder()
   let totalBytes = 0
-  let text = ''
+  const chunks: Uint8Array[] = []
   let truncated = false
 
   while (true) {
@@ -502,17 +528,13 @@ async function readAssistantWebResponseText(input: {
       ? value.subarray(0, remainingBytes)
       : value
     totalBytes += chunk.length
-    text += decoder.decode(chunk, {
-      stream: value.length <= remainingBytes,
-    })
+    chunks.push(chunk)
 
     if (value.length > remainingBytes) {
       truncated = true
       break
     }
   }
-
-  text += decoder.decode()
 
   if (truncated) {
     warnings.push(
@@ -526,7 +548,7 @@ async function readAssistantWebResponseText(input: {
   }
 
   return {
-    text,
+    bytes: concatAssistantWebResponseBytes(chunks, totalBytes),
     truncated,
     warnings,
   }
@@ -795,7 +817,7 @@ function renderAssistantListToMarkdown(
   return markdown
 }
 
-function truncateAssistantWebText(input: string, maxChars: number): {
+export function truncateAssistantWebText(input: string, maxChars: number): {
   text: string
   truncated: boolean
 } {
@@ -883,7 +905,7 @@ function readAssistantBoundedIntegerEnv(input: {
   )
 }
 
-function resolveMediaType(
+export function resolveAssistantWebMediaType(
   contentType: string | null,
 ): string | null {
   const normalized = normalizeNullableString(contentType)
@@ -906,6 +928,28 @@ function parsePositiveInteger(value: string | null): number | null {
   }
 
   return Math.trunc(parsed)
+}
+
+function concatAssistantWebResponseBytes(
+  chunks: Uint8Array[],
+  totalBytes: number,
+): Uint8Array {
+  if (chunks.length === 0) {
+    return new Uint8Array()
+  }
+
+  if (chunks.length === 1) {
+    return chunks[0] ?? new Uint8Array()
+  }
+
+  const bytes = new Uint8Array(totalBytes)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.length
+  }
+
+  return bytes
 }
 
 function isAssistantWebRedirectStatus(status: number): boolean {

@@ -32,6 +32,11 @@ import {
   resolveAssistantWebFetchEnabled,
 } from './assistant/web-fetch.js'
 import {
+  assistantWebPdfReadMaxChars,
+  assistantWebPdfReadMaxPages,
+  readAssistantWebPdf,
+} from './assistant/web-pdf-read.js'
+import {
   assistantWebSearchFreshnessValues,
   assistantWebSearchProviderValues,
   resolveConfiguredAssistantWebSearchProvider,
@@ -308,6 +313,36 @@ function createWebFetchToolDefinitions() {
           url,
           extractMode,
           maxChars,
+        }),
+    }),
+  ]
+}
+
+function createWebPdfReadToolDefinitions() {
+  if (!resolveAssistantWebFetchEnabled()) {
+    return []
+  }
+
+  return [
+    defineAssistantTool({
+      name: 'web.pdf.read',
+      description:
+        'Fetch one public PDF over HTTP(S), block private-network targets, and extract readable text with bounded page and character limits. Use this for menus, manuals, reports, or docs that are published as PDFs.',
+      inputSchema: z.object({
+        url: z.string().url(),
+        maxChars: z.number().int().positive().max(assistantWebPdfReadMaxChars).optional(),
+        maxPages: z.number().int().positive().max(assistantWebPdfReadMaxPages).optional(),
+      }),
+      inputExample: {
+        url: 'https://example.com/menu.pdf',
+        maxPages: 4,
+        maxChars: 8_000,
+      },
+      execute: async ({ maxChars, maxPages, url }) =>
+        await readAssistantWebPdf({
+          url,
+          maxChars,
+          maxPages,
         }),
     }),
   ]
@@ -1023,6 +1058,7 @@ function createQueryAndReadToolDefinitions(
     ...(options.includeWebSearchTools ?? true
       ? [
           ...createWebFetchToolDefinitions(),
+          ...createWebPdfReadToolDefinitions(),
           ...createWebSearchToolDefinitions(),
         ]
       : []),
