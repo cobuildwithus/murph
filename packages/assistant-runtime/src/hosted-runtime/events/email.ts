@@ -1,7 +1,9 @@
 import {
   normalizeParsedEmailMessage,
+} from "@murphai/inboxd/connectors/email/normalize-parsed";
+import {
   parseRawEmailMessage,
-} from "@murphai/inboxd";
+} from "@murphai/inboxd/connectors/email/parsed";
 import {
   resolveHostedEmailSelfAddresses,
   type HostedExecutionDispatchRequest,

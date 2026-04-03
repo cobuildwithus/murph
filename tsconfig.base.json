@@ -79,6 +79,9 @@
       "@murphai/inboxd/connectors/email/parsed": [
         "packages/inboxd/src/connectors/email/parsed.ts"
       ],
+      "@murphai/inboxd/runtime": [
+        "packages/inboxd/src/runtime.ts"
+      ],
       "@murphai/inboxd/*": [
         "packages/inboxd/src/*"
       ],

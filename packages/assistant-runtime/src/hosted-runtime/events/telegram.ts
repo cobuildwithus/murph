@@ -2,7 +2,7 @@ import {
   normalizeTelegramUpdate,
   type TelegramAttachmentDownloadDriver,
   type TelegramFile,
-} from "@murphai/inboxd";
+} from "@murphai/inboxd/telegram";
 import type { TelegramUpdateLike } from "@murphai/messaging-ingress/telegram-webhook";
 import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
 
