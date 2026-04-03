@@ -73,6 +73,18 @@
       "@murphai/inboxd": [
         "packages/inboxd/src/index.ts"
       ],
+      "@murphai/inboxd/linq": [
+        "packages/inboxd/src/linq.ts"
+      ],
+      "@murphai/inboxd/linq-webhook": [
+        "packages/inboxd/src/linq-webhook.ts"
+      ],
+      "@murphai/inboxd/telegram": [
+        "packages/inboxd/src/telegram.ts"
+      ],
+      "@murphai/inboxd/telegram-webhook": [
+        "packages/inboxd/src/telegram-webhook.ts"
+      ],
       "@murphai/inboxd/connectors/email/normalize-parsed": [
         "packages/inboxd/src/connectors/email/normalize-parsed.ts"
       ],
