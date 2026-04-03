@@ -36,7 +36,6 @@ const assistantWebSearchEnvKeys = [
 ] as const
 
 const assistantWebFetchEnvKeys = [
-  'MURPH_WEB_FETCH_ENABLED',
   'MURPH_WEB_FETCH_MAX_CHARS',
   'MURPH_WEB_FETCH_MAX_RESPONSE_BYTES',
   'MURPH_WEB_FETCH_TIMEOUT_MS',
@@ -1127,8 +1126,8 @@ test('createDefaultAssistantToolCatalog exposes assistant runtime, recipe, and f
   assert.equal(catalog.hasTool('assistant.cron.list'), true)
   assert.equal(catalog.hasTool('assistant.selfTarget.list'), true)
   assert.equal(catalog.hasTool('vault.fs.readText'), true)
-  assert.equal(catalog.hasTool('web.fetch'), false)
-  assert.equal(catalog.hasTool('web.pdf.read'), false)
+  assert.equal(catalog.hasTool('web.fetch'), true)
+  assert.equal(catalog.hasTool('web.pdf.read'), true)
   assert.equal(catalog.hasTool('vault.recipe.show'), true)
   assert.equal(catalog.hasTool('vault.recipe.list'), true)
   assert.equal(catalog.hasTool('vault.recipe.upsert'), true)
@@ -1138,7 +1137,7 @@ test('createDefaultAssistantToolCatalog exposes assistant runtime, recipe, and f
   assert.equal(catalog.hasTool('vault.share.createLink'), true)
 })
 
-test('createDefaultAssistantToolCatalog exposes web.fetch only when explicitly enabled in env', () => {
+test('createDefaultAssistantToolCatalog exposes web.fetch by default', () => {
   const previousEnv = Object.fromEntries(
     assistantWebFetchEnvKeys.map((key) => [key, process.env[key]]),
   ) as Record<(typeof assistantWebFetchEnvKeys)[number], string | undefined>
@@ -1152,26 +1151,8 @@ test('createDefaultAssistantToolCatalog exposes web.fetch only when explicitly e
       vault: '/tmp/murph-vault',
       vaultServices: createStubVaultServices(),
     })
-    assert.equal(enabledCatalog.hasTool('web.fetch'), false)
-    assert.equal(enabledCatalog.hasTool('web.pdf.read'), false)
-
-    process.env.MURPH_WEB_FETCH_ENABLED = 'true'
-
-    const optInCatalog = createDefaultAssistantToolCatalog({
-      vault: '/tmp/murph-vault',
-      vaultServices: createStubVaultServices(),
-    })
-    assert.equal(optInCatalog.hasTool('web.fetch'), true)
-    assert.equal(optInCatalog.hasTool('web.pdf.read'), true)
-
-    process.env.MURPH_WEB_FETCH_ENABLED = 'false'
-
-    const disabledCatalog = createDefaultAssistantToolCatalog({
-      vault: '/tmp/murph-vault',
-      vaultServices: createStubVaultServices(),
-    })
-    assert.equal(disabledCatalog.hasTool('web.fetch'), false)
-    assert.equal(disabledCatalog.hasTool('web.pdf.read'), false)
+    assert.equal(enabledCatalog.hasTool('web.fetch'), true)
+    assert.equal(enabledCatalog.hasTool('web.pdf.read'), true)
   } finally {
     for (const key of assistantWebFetchEnvKeys) {
       const previousValue = previousEnv[key]
@@ -1184,7 +1165,7 @@ test('createDefaultAssistantToolCatalog exposes web.fetch only when explicitly e
   }
 })
 
-test('createDefaultAssistantToolCatalog keeps web.fetch disabled when only web.search backend is configured', () => {
+test('createDefaultAssistantToolCatalog keeps web.fetch available regardless of web.search backend configuration', () => {
   const previousSearchEnv = Object.fromEntries(
     assistantWebSearchEnvKeys.map((key) => [key, process.env[key]]),
   ) as Record<(typeof assistantWebSearchEnvKeys)[number], string | undefined>
@@ -1204,8 +1185,8 @@ test('createDefaultAssistantToolCatalog keeps web.fetch disabled when only web.s
       vault: '/tmp/murph-vault',
       vaultServices: createStubVaultServices(),
     })
-    assert.equal(withoutBackend.hasTool('web.fetch'), false)
-    assert.equal(withoutBackend.hasTool('web.pdf.read'), false)
+    assert.equal(withoutBackend.hasTool('web.fetch'), true)
+    assert.equal(withoutBackend.hasTool('web.pdf.read'), true)
     assert.equal(withoutBackend.hasTool('web.search'), false)
 
     process.env.SEARXNG_BASE_URL = 'https://search.example.test'
@@ -1214,8 +1195,8 @@ test('createDefaultAssistantToolCatalog keeps web.fetch disabled when only web.s
       vault: '/tmp/murph-vault',
       vaultServices: createStubVaultServices(),
     })
-    assert.equal(withBackend.hasTool('web.fetch'), false)
-    assert.equal(withBackend.hasTool('web.pdf.read'), false)
+    assert.equal(withBackend.hasTool('web.fetch'), true)
+    assert.equal(withBackend.hasTool('web.pdf.read'), true)
     assert.equal(withBackend.hasTool('web.search'), true)
   } finally {
     for (const key of assistantWebSearchEnvKeys) {
@@ -1321,7 +1302,6 @@ test('createDefaultAssistantToolCatalog web.fetch extracts readable HTML content
     for (const key of assistantWebFetchEnvKeys) {
       delete process.env[key]
     }
-    process.env.MURPH_WEB_FETCH_ENABLED = 'true'
     vi.stubGlobal('fetch', fetchMock)
 
     const catalog = createDefaultAssistantToolCatalog({
@@ -1403,7 +1383,6 @@ test('createDefaultAssistantToolCatalog web.pdf.read extracts text from a public
     for (const key of assistantWebFetchEnvKeys) {
       delete process.env[key]
     }
-    process.env.MURPH_WEB_FETCH_ENABLED = 'true'
     vi.stubGlobal('fetch', fetchMock)
 
     const catalog = createDefaultAssistantToolCatalog({
@@ -1473,7 +1452,6 @@ test('createDefaultAssistantToolCatalog web.fetch blocks loopback targets before
     for (const key of assistantWebFetchEnvKeys) {
       delete process.env[key]
     }
-    process.env.MURPH_WEB_FETCH_ENABLED = 'true'
     vi.stubGlobal('fetch', fetchMock)
 
     const catalog = createDefaultAssistantToolCatalog({
@@ -1519,7 +1497,6 @@ test('createDefaultAssistantToolCatalog web.fetch blocks IPv6-mapped loopback li
     for (const key of assistantWebFetchEnvKeys) {
       delete process.env[key]
     }
-    process.env.MURPH_WEB_FETCH_ENABLED = 'true'
     vi.stubGlobal('fetch', fetchMock)
 
     const catalog = createDefaultAssistantToolCatalog({
@@ -1565,7 +1542,6 @@ test('createDefaultAssistantToolCatalog web.pdf.read blocks loopback targets bef
     for (const key of assistantWebFetchEnvKeys) {
       delete process.env[key]
     }
-    process.env.MURPH_WEB_FETCH_ENABLED = 'true'
     vi.stubGlobal('fetch', fetchMock)
 
     const catalog = createDefaultAssistantToolCatalog({
@@ -1611,7 +1587,6 @@ test('createDefaultAssistantToolCatalog web.fetch redacts query-bearing URLs in 
     for (const key of assistantWebFetchEnvKeys) {
       delete process.env[key]
     }
-    process.env.MURPH_WEB_FETCH_ENABLED = 'true'
     vi.stubGlobal('fetch', fetchMock)
 
     const catalog = createDefaultAssistantToolCatalog({
