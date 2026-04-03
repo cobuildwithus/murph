@@ -15,7 +15,6 @@ export const assistantWebFetchExtractModeValues = [
 ] as const
 
 export const assistantWebFetchEnvKeys = [
-  'MURPH_WEB_FETCH_ENABLED',
   'MURPH_WEB_FETCH_MAX_CHARS',
   'MURPH_WEB_FETCH_MAX_RESPONSE_BYTES',
   'MURPH_WEB_FETCH_TIMEOUT_MS',
@@ -115,19 +114,9 @@ const ASSISTANT_WEB_FETCH_ELEMENT_NODE = 1
 const assistantWebFetchBlockedAddressList = createAssistantWebFetchBlockedAddressList()
 
 export function resolveAssistantWebFetchEnabled(
-  env: NodeJS.ProcessEnv = process.env,
+  _env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  if (typeof globalThis.fetch !== 'function') {
-    return false
-  }
-
-  const raw = normalizeNullableString(env.MURPH_WEB_FETCH_ENABLED)
-  if (!raw) {
-    return false
-  }
-
-  const normalized = raw.toLowerCase()
-  return ['1', 'true', 'yes', 'on', 'enabled'].includes(normalized)
+  return typeof globalThis.fetch === 'function'
 }
 
 export async function fetchAssistantWeb(
