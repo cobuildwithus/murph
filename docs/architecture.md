@@ -49,7 +49,7 @@ repo/
 - `packages/device-syncd` owns local provider OAuth state, reconnect/disconnect control, scheduled wearable imports, and optional webhook intake while keeping provider credentials outside the canonical vault.
 - `packages/inboxd` owns source-agnostic inbox capture, raw evidence persistence, the append-only `ledger/inbox-captures` canonical capture log, inbox-local runtime cursors/source-specific checkpoints/capture indexes, and attachment-level derived-job orchestration.
 - `packages/parsers` owns local-first multimedia parsing for inbox attachments and writes only derived artifacts under `derived/inbox/**`.
-- `packages/query` reads canonical vault state, builds derived export packs, and owns the optional lexical search index under `.runtime/search.sqlite`.
+- `packages/query` reads canonical vault state, builds derived export packs, owns the optional lexical search index under `.runtime/search.sqlite`, and exposes read helpers for the non-canonical compiled knowledge wiki under `derived/knowledge/**`.
 - `packages/cli` exposes the `vault-cli` command surface, provider-backed assistant orchestration plus outbound channel delivery, and must not bypass core for canonical writes.
 
 ## Storage Model
@@ -68,6 +68,9 @@ repo/
   - including provider/device snapshots under `raw/integrations/**`
 - Rebuildable parser artifacts:
   - `derived/inbox/**`
+- Rebuildable model-authored knowledge wiki:
+  - `derived/knowledge/index.md`
+  - `derived/knowledge/pages/*.md`
 - Local runtime state:
   - `.runtime/inboxd.sqlite`
   - `.runtime/inboxd/*.json`

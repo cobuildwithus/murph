@@ -30,7 +30,15 @@ import { registerRecipeCommands } from './commands/recipe.js'
 import { registerProviderCommands } from './commands/provider.js'
 import { registerFoodCommands } from './commands/food.js'
 import { registerResearchCommands } from './commands/research.js'
+import { registerKnowledgeCommands } from './commands/knowledge.js'
 import { researchRunResultSchema } from './research-cli-contracts.js'
+import {
+  knowledgeCompileResultSchema,
+  knowledgeIndexRebuildResultSchema,
+  knowledgeLintResultSchema,
+  knowledgeListResultSchema,
+  knowledgeShowResultSchema,
+} from './knowledge-cli-contracts.js'
 import { registerReadCommands } from './commands/read.js'
 import { registerProtocolCommands } from './commands/protocol.js'
 import { registerSamplesCommands } from './commands/samples.js'
@@ -743,6 +751,43 @@ export const vaultCliCommandDescriptors = [
     rootCommandNames: ['search', 'timeline'],
     register({ cli, services }) {
       registerSearchCommands(cli, services)
+    },
+  },
+  {
+    id: 'knowledge',
+    bindingMode: 'none',
+    rootCommandNames: ['knowledge'],
+    leafCommands: [
+      {
+        path: ['knowledge', 'compile'],
+        description:
+          'Use review:gpt to compile or refresh one derived knowledge page from local vault sources. Writes under derived/knowledge/pages/** and rebuilds the derived knowledge index.',
+        output: knowledgeCompileResultSchema,
+      },
+      {
+        path: ['knowledge', 'list'],
+        description: 'List derived knowledge pages currently compiled under derived/knowledge/pages/**.',
+        output: knowledgeListResultSchema,
+      },
+      {
+        path: ['knowledge', 'show'],
+        description: 'Show one derived knowledge page by slug.',
+        output: knowledgeShowResultSchema,
+      },
+      {
+        path: ['knowledge', 'lint'],
+        description:
+          'Run deterministic health checks over derived knowledge pages, including parse failures, missing sources, and missing related pages.',
+        output: knowledgeLintResultSchema,
+      },
+      {
+        path: ['knowledge', 'index', 'rebuild'],
+        description: 'Rebuild derived/knowledge/index.md from the current knowledge pages.',
+        output: knowledgeIndexRebuildResultSchema,
+      },
+    ],
+    register({ cli }) {
+      registerKnowledgeCommands(cli)
     },
   },
   {

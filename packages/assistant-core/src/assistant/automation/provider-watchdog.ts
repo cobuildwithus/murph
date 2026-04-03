@@ -316,14 +316,14 @@ function matchAssistantAutoReplyLongRunningCommand(
     return null
   }
 
-  const cliCommandMatch = /(?:^|\s)(?:[^\s]+\/)?(?:vault-cli|murph)\s+(research|deepthink)(?:\s|$)/iu.exec(
+  const cliCommandMatch = /(?:^|\s)(?:[^\s]+\/)?(?:vault-cli|murph)\s+(research|deepthink|knowledge\s+compile)(?:\s|$)/iu.exec(
     commandText,
   )
   if (cliCommandMatch) {
     const commandName = cliCommandMatch[1]!.toLowerCase()
     return {
       key: event.id ?? `command:${commandName}`,
-      label: `${commandName} command`,
+      label: `${commandName.replace(/\s+/gu, ' ')} command`,
     }
   }
 
@@ -354,6 +354,13 @@ function matchAssistantAutoReplyLongRunningTool(
     return {
       key: event.id ?? 'tool:deepthink',
       label: 'deepthink tool',
+    }
+  }
+
+  if (/\bknowledge\b/iu.test(toolText) && /\bcompile\b/iu.test(toolText)) {
+    return {
+      key: event.id ?? 'tool:knowledge-compile',
+      label: 'knowledge compile tool',
     }
   }
 

@@ -52,6 +52,12 @@ export {
 } from './assistant/automation.js'
 
 export {
+  resolveAssistantInboxArtifactPath,
+  resolveAssistantVaultPath,
+  type AssistantInboxArtifactPath,
+} from './assistant-vault-paths.js'
+
+export {
   getAssistantCronJob,
   getAssistantCronJobTarget,
   getAssistantCronStatus,

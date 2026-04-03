@@ -280,6 +280,8 @@ function buildAssistantCronGuidanceText(
       '`--timeout` is the normal control. `--wait-timeout` is only for the uncommon case where you want the assistant-response wait cap different from the overall timeout.',
       'Cron prompts may explicitly tell you to use the research tool. In that case, run `research` for Deep Research or `deepthink` for GPT Pro before composing the final cron reply.',
       'Both research commands wait for completion and save a markdown note under `research/` inside the vault.',
+      'When the user wants a durable local wiki page, dossier, or synthesis from vault files or saved research, use `knowledge compile` with one or more `--source-path` inputs. It writes a non-canonical page under `derived/knowledge/pages/**` and rebuilds `derived/knowledge/index.md` automatically.',
+      'Use `knowledge list`, `knowledge show`, `knowledge lint`, and `knowledge index rebuild` to inspect or maintain that derived wiki instead of editing `derived/knowledge/**` files directly.',
       `Use \`${input.rawCommand} assistant cron ...\` only as a fallback when the bound assistant-cron tools are unavailable in this session.`,
     ],
     unavailableLines: [
