@@ -123,4 +123,15 @@ export {
   type HealthLibraryGraph,
   type HealthLibraryNode,
 } from "./health-library.ts";
+export {
+  DERIVED_KNOWLEDGE_INDEX_PATH,
+  DERIVED_KNOWLEDGE_PAGES_ROOT,
+  DERIVED_KNOWLEDGE_ROOT,
+  readDerivedKnowledgeGraph,
+  readDerivedKnowledgeGraphWithIssues,
+  type DerivedKnowledgeGraph,
+  type DerivedKnowledgeGraphIssue,
+  type DerivedKnowledgeGraphReadResult,
+  type DerivedKnowledgeNode,
+} from "./knowledge-graph.ts";
 export * from "./health/index.ts";

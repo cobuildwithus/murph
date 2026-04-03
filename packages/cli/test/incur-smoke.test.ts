@@ -374,6 +374,41 @@ test('search index status schema stays scoped to index-management options', asyn
   assert.deepEqual(schema.options.required, ['vault'])
 })
 
+test('knowledge commands expose the expected schema at the built CLI boundary', async () => {
+  const compileSchema = JSON.parse(
+    await runRawCli(['knowledge', 'compile', '--schema', '--format', 'json']),
+  ) as {
+    args: {
+      required?: string[]
+    }
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+  const showSchema = JSON.parse(
+    await runRawCli(['knowledge', 'show', '--schema', '--format', 'json']),
+  ) as {
+    args: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+
+  assert.deepEqual(compileSchema.args.required, ['prompt'])
+  assert.equal('sourcePath' in compileSchema.options.properties, true)
+  assert.equal('mode' in compileSchema.options.properties, true)
+  assert.deepEqual(compileSchema.options.required, ['vault'])
+
+  assert.equal('slug' in showSchema.args.properties, true)
+  assert.deepEqual(showSchema.args.required, ['slug'])
+  assert.deepEqual(showSchema.options.required, ['vault'])
+})
+
 test('root chat alias keeps the same command schema as assistant chat', async () => {
   const rootSchema = JSON.parse(
     await runRawCli(['chat', '--schema', '--format', 'json']),

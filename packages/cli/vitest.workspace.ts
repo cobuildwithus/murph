@@ -124,6 +124,7 @@ export const cliVitestProjectSpecs: readonly CliVitestProjectSpec[] = [
       "assistant-core-facades.test.ts",
       "assistant-web-search.test.ts",
       "research-runtime.test.ts",
+      "knowledge-runtime.test.ts",
     ],
   },
   {

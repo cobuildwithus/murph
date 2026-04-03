@@ -43,6 +43,8 @@ export function buildAssistantCliGuidanceText(
     'Deep Research can legitimately take 10 to 60 minutes, sometimes longer. Treat it as a long-running operation and keep waiting unless the command actually errors. Murph defaults the overall timeout to 40m.',
     '`--timeout` is the normal knob. `--wait-timeout` is the advanced override only when you want the assistant-response wait cap to differ from the overall timeout.',
     `Use \`${access.rawCommand} deepthink <prompt>\` when you want the same auto-send and save-to-vault flow through GPT Pro instead of Deep Research.`,
+    `When the user wants a durable local wiki page, dossier, or synthesis that should keep adding up inside the vault, use \`${access.rawCommand} knowledge compile <prompt> --source-path <path> ...\` instead of freehand editing markdown. Knowledge compile writes a non-canonical page under \`derived/knowledge/pages/**\`, rebuilds \`derived/knowledge/index.md\`, and keeps the page inspectable and rebuildable.`,
+    `Use \`${access.rawCommand} knowledge list\`, \`${access.rawCommand} knowledge show <slug>\`, \`${access.rawCommand} knowledge lint\`, and \`${access.rawCommand} knowledge index rebuild\` to inspect or maintain that derived wiki instead of editing \`derived/knowledge/**\` directly.`,
   ].join('\n\n')
 }
 

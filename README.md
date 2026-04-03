@@ -13,6 +13,7 @@ The main installable product entrypoint is `@murphai/murph`, which gives you the
 - a file-native vault with canonical writes owned by `packages/core`
 - the installable `@murphai/murph` package, which provides the `murph` CLI and onboarding flow
 - provider-backed local assistant chat and automation, with runtime state in sibling `assistant-state/**`
+- a non-canonical compiled knowledge wiki under `derived/knowledge/**`, built by the model through CLI tools and kept rebuildable
 - inbox capture, indexing, and parser-driven attachment extraction
 - local wearable/device sync through `@murphai/device-syncd`
 - a hosted Next.js integration control plane in `apps/web`
@@ -84,7 +85,7 @@ Murph is opinionated about storage boundaries:
 - Markdown is the human-facing source of truth for durable documents such as `CORE.md`, journals, profile state, goals, conditions, protocols, and registries.
 - JSONL ledgers are the machine-facing source of truth for append-only records such as events, samples, assessments, and audit entries.
 - Imported source artifacts are copied into `raw/**` and treated as immutable.
-- Derived parser output lives under `derived/**` and stays rebuildable.
+- Derived parser output and compiled knowledge pages live under `derived/**` and stay rebuildable.
 - Local machine state lives under `.runtime/**` and stays rebuildable.
 - Assistant transcripts, metadata, and assistant memory live outside the vault under `assistant-state/**` and are not canonical health truth.
 
@@ -101,7 +102,7 @@ The result is a system you can inspect with normal filesystem tools while still 
 | `packages/importers` | External adapters that normalize inputs and delegate writes to `core`. |
 | `packages/inboxd` | Inbox capture, canonical evidence persistence, runtime indexing, and attachment parse-job orchestration. |
 | `packages/parsers` | Local-first attachment parsing and derived artifact publication. |
-| `packages/query` | Read helpers, summaries, list/search helpers, and export-pack generation. |
+| `packages/query` | Read helpers, summaries, list/search helpers, export-pack generation, and derived knowledge graph reads. |
 | `packages/device-syncd` | Local wearable/device OAuth, webhook, and reconcile daemon. |
 | `packages/assistant-core` | Headless local-only assistant/inbox/vault/operator-config boundary for non-CLI consumers. |
 | `packages/gateway-core` | Headless transport-neutral gateway boundary. |
@@ -142,7 +143,7 @@ The root CLI is no longer just a vault editor. The built command surface include
 - `inbox` for inbox runtime setup, review, and daemon operations
 - `device` for local wearable/device auth, status, and daemon control
 - root shortcuts such as `chat`, `run`, `status`, `doctor`, and `stop`
-- AI-assisted maintainer helpers such as `research` and `deepthink`
+- AI-assisted synthesis helpers such as `research`, `deepthink`, and `knowledge`
 
 Quick help:
 

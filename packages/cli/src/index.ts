@@ -22,3 +22,5 @@ export {
 export { refreshAssistantStatusSnapshot } from './assistant/status.js'
 export * from './research-runtime.js'
 export * from './research-cli-contracts.js'
+export * from './knowledge-runtime.js'
+export * from './knowledge-cli-contracts.js'
