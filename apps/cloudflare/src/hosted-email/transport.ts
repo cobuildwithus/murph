@@ -1,8 +1,7 @@
 /**
  * Owns outbound hosted email preparation and Cloudflare transport delivery. New
- * outbound mail always uses one stable per-user reply alias while ingress keeps
- * temporary support for legacy per-thread aliases separately in the routing
- * module.
+ * outbound mail always uses one stable per-user reply alias, and ingress no
+ * longer keeps a compatibility lane for legacy per-thread aliases.
  */
 
 import type { HostedEmailSendRequest } from "@murphai/assistant-runtime";
