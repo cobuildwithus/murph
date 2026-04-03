@@ -1,5 +1,10 @@
 import { lookup } from 'node:dns/promises'
+import { request as requestHttp, type IncomingMessage } from 'node:http'
+import { request as requestHttps } from 'node:https'
 import { BlockList, isIP } from 'node:net'
+import { Readable } from 'node:stream'
+import { urlToHttpOptions } from 'node:url'
+import { createBrotliDecompress, createUnzip } from 'node:zlib'
 import { Readability } from '@mozilla/readability'
 import { DOMParser } from 'linkedom'
 import { createTimeoutAbortController } from '../http-retry.js'
@@ -15,6 +20,7 @@ export const assistantWebFetchExtractModeValues = [
 ] as const
 
 export const assistantWebFetchEnvKeys = [
+  'MURPH_WEB_FETCH_ENABLED',
   'MURPH_WEB_FETCH_MAX_CHARS',
   'MURPH_WEB_FETCH_MAX_RESPONSE_BYTES',
   'MURPH_WEB_FETCH_TIMEOUT_MS',
@@ -53,7 +59,6 @@ interface NormalizedAssistantWebFetchRequest {
 }
 
 export interface AssistantWebFetchRuntimeContext {
-  fetchImplementation: typeof fetch
   lookupImplementation: typeof lookup
   maxRedirects: number
   maxResponseBytes: number
@@ -72,11 +77,24 @@ interface AssistantWebResponseText {
   warnings: string[]
 }
 
+interface AssistantWebResolvedAddress {
+  address: string
+  family: number
+}
+
+interface AssistantWebResolvedTarget {
+  addresses: AssistantWebResolvedAddress[]
+  hostname: string
+}
+
 export interface AssistantWebResponseBytes {
   bytes: Uint8Array
   truncated: boolean
   warnings: string[]
 }
+
+type AssistantWebLookupFunction =
+  NonNullable<import('node:http').RequestOptions['lookup']>
 
 interface AssistantHtmlNodeLike {
   childNodes?: ArrayLike<AssistantHtmlNodeLike>
@@ -114,9 +132,18 @@ const ASSISTANT_WEB_FETCH_ELEMENT_NODE = 1
 const assistantWebFetchBlockedAddressList = createAssistantWebFetchBlockedAddressList()
 
 export function resolveAssistantWebFetchEnabled(
-  _env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return typeof globalThis.fetch === 'function'
+  if (typeof globalThis.Headers !== 'function' || typeof globalThis.Response !== 'function') {
+    return false
+  }
+
+  const raw = normalizeNullableString(env.MURPH_WEB_FETCH_ENABLED)
+  if (!raw) {
+    return false
+  }
+
+  return ['1', 'true', 'yes', 'on', 'enabled'].includes(raw.toLowerCase())
 }
 
 export async function fetchAssistantWeb(
@@ -204,6 +231,10 @@ function normalizeAssistantWebFetchRequest(
   }
 
   parsedUrl.hash = ''
+  const normalizedHostname = normalizeAssistantWebHostname(parsedUrl.hostname)
+  if (normalizedHostname) {
+    parsedUrl.hostname = normalizedHostname
+  }
 
   const extractMode = isAssistantWebFetchExtractMode(request.extractMode)
     ? request.extractMode
@@ -237,7 +268,6 @@ export function createAssistantWebFetchRuntimeContext(
   }
 
   return {
-    fetchImplementation: globalThis.fetch,
     lookupImplementation: lookup,
     timeoutMs: resolveAssistantWebFetchTimeoutMs(env),
     maxResponseBytes: resolveAssistantWebFetchMaxResponseBytes(env),
@@ -256,7 +286,7 @@ export async function fetchAssistantWebResponse(input: {
   const warnings: string[] = []
 
   for (let redirectCount = 0; ; redirectCount += 1) {
-    await assertAssistantWebUrlIsPublic(
+    const resolvedTarget = await resolveAssistantWebPublicTarget(
       currentUrl,
       input.runtime.lookupImplementation,
       input.toolName,
@@ -264,13 +294,11 @@ export async function fetchAssistantWebResponse(input: {
 
     let response: Response
     try {
-      response = await input.runtime.fetchImplementation(currentUrl.toString(), {
-        method: 'GET',
-        headers: {
-          accept: input.acceptHeader ?? ASSISTANT_WEB_FETCH_DEFAULT_ACCEPT_HEADER,
-        },
-        redirect: 'manual',
+      response = await requestAssistantWebResponseAtPublicTarget({
+        acceptHeader: input.acceptHeader ?? ASSISTANT_WEB_FETCH_DEFAULT_ACCEPT_HEADER,
+        resolvedTarget,
         signal: input.signal,
+        url: currentUrl,
       })
     } catch (error) {
       throw new VaultCliError(
@@ -289,6 +317,7 @@ export async function fetchAssistantWebResponse(input: {
 
     const location = normalizeNullableString(response.headers.get('location'))
     if (!location) {
+      await cancelAssistantWebResponseBody(response)
       throw new VaultCliError(
         'WEB_FETCH_REDIRECT_INVALID',
         `${input.toolName} received HTTP ${response.status} without a redirect location.`,
@@ -296,6 +325,7 @@ export async function fetchAssistantWebResponse(input: {
     }
 
     if (redirectCount >= input.runtime.maxRedirects) {
+      await cancelAssistantWebResponseBody(response)
       throw new VaultCliError(
         'WEB_FETCH_REDIRECT_LIMIT',
         `${input.toolName} followed too many redirects (>${input.runtime.maxRedirects}).`,
@@ -303,18 +333,20 @@ export async function fetchAssistantWebResponse(input: {
     }
 
     const nextUrl = new URL(location, currentUrl)
+    nextUrl.hash = ''
     warnings.push(
       `Followed redirect ${redirectCount + 1} to ${redactAssistantWebFetchUrl(nextUrl)}.`,
     )
+    await cancelAssistantWebResponseBody(response)
     currentUrl = nextUrl
   }
 }
 
-async function assertAssistantWebUrlIsPublic(
+async function resolveAssistantWebPublicTarget(
   candidateUrl: URL,
   lookupImplementation: typeof lookup,
   toolName: string,
-): Promise<void> {
+): Promise<AssistantWebResolvedTarget> {
   const protocol = candidateUrl.protocol.toLowerCase()
   if (protocol !== 'http:' && protocol !== 'https:') {
     throw new VaultCliError(
@@ -354,10 +386,18 @@ async function assertAssistantWebUrlIsPublic(
       )
     }
 
-    return
+    return {
+      hostname,
+      addresses: [
+        {
+          address: hostname,
+          family: hostAddressFamily,
+        },
+      ],
+    }
   }
 
-  let resolvedAddresses: Array<{ address: string; family: number }>
+  let resolvedAddresses: AssistantWebResolvedAddress[]
   try {
     resolvedAddresses = await lookupAllAssistantWebAddresses(
       lookupImplementation,
@@ -385,6 +425,11 @@ async function assertAssistantWebUrlIsPublic(
       )
     }
   }
+
+  return {
+    hostname,
+    addresses: resolvedAddresses,
+  }
 }
 
 async function extractAssistantWebResponse(input: {
@@ -401,6 +446,7 @@ async function extractAssistantWebResponse(input: {
   warnings: string[]
 }> {
   if (input.contentType === 'application/pdf') {
+    await cancelAssistantWebResponseBody(input.response)
     throw new VaultCliError(
       'WEB_FETCH_PDF_UNSUPPORTED',
       'web.fetch does not parse PDFs. Use web.pdf.read for PDF content.',
@@ -408,6 +454,7 @@ async function extractAssistantWebResponse(input: {
   }
 
   if (isAssistantWebLikelyBinaryContentType(input.contentType)) {
+    await cancelAssistantWebResponseBody(input.response)
     throw new VaultCliError(
       'WEB_FETCH_CONTENT_TYPE_UNSUPPORTED',
       `web.fetch cannot extract readable text from ${input.contentType}.`,
@@ -1096,6 +1143,7 @@ function createAssistantWebFetchBlockedAddressList(): BlockList {
   blockList.addSubnet('224.0.0.0', 4)
   blockList.addSubnet('240.0.0.0', 4)
   blockList.addSubnet('::', 128, 'ipv6')
+  blockList.addSubnet('::ffff:0:0', 96, 'ipv6')
   blockList.addSubnet('::1', 128, 'ipv6')
   blockList.addSubnet('fc00::', 7, 'ipv6')
   blockList.addSubnet('fe80::', 10, 'ipv6')
@@ -1106,6 +1154,191 @@ function createAssistantWebFetchBlockedAddressList(): BlockList {
 
 export function redactAssistantWebFetchUrl(url: URL): string {
   return `${url.origin}${url.pathname}`
+}
+
+async function requestAssistantWebResponseAtPublicTarget(input: {
+  acceptHeader: string
+  resolvedTarget: AssistantWebResolvedTarget
+  signal: AbortSignal
+  url: URL
+}): Promise<Response> {
+  const failures: string[] = []
+
+  for (const address of input.resolvedTarget.addresses) {
+    try {
+      return await requestAssistantWebResponseAtAddress({
+        acceptHeader: input.acceptHeader,
+        address,
+        hostname: input.resolvedTarget.hostname,
+        signal: input.signal,
+        url: input.url,
+      })
+    } catch (error) {
+      if (input.signal.aborted || isAssistantWebAbortError(error)) {
+        throw error
+      }
+
+      failures.push(errorMessage(error))
+    }
+  }
+
+  throw new Error(
+    failures.length > 0
+      ? `All vetted public addresses failed: ${failures.join('; ')}`
+      : 'All vetted public addresses failed.',
+  )
+}
+
+async function requestAssistantWebResponseAtAddress(input: {
+  acceptHeader: string
+  address: AssistantWebResolvedAddress
+  hostname: string
+  signal: AbortSignal
+  url: URL
+}): Promise<Response> {
+  const options = {
+    ...urlToHttpOptions(input.url),
+    method: 'GET',
+    headers: {
+      accept: input.acceptHeader,
+      'accept-encoding': 'identity',
+    },
+    autoSelectFamily: false,
+    family: input.address.family,
+    // Use a one-shot socket so the request cannot reuse a pooled connection that resolved differently.
+    agent: false,
+    lookup: isIP(input.hostname) === 0
+      ? createAssistantWebPinnedLookup(input.address)
+      : undefined,
+    servername:
+      input.url.protocol === 'https:' && isIP(input.hostname) === 0
+        ? input.hostname
+        : undefined,
+    signal: input.signal,
+  }
+  const requestImplementation = input.url.protocol === 'https:'
+    ? requestHttps
+    : requestHttp
+
+  return await new Promise<Response>((resolve, reject) => {
+    const request = requestImplementation(options, (response) => {
+      try {
+        resolve(createAssistantWebNodeResponse(response))
+      } catch (error) {
+        reject(error)
+      }
+    })
+
+    request.once('error', reject)
+    request.end()
+  })
+}
+
+function createAssistantWebPinnedLookup(
+  address: AssistantWebResolvedAddress,
+): AssistantWebLookupFunction {
+  return (
+    _hostname: Parameters<AssistantWebLookupFunction>[0],
+    options: Parameters<AssistantWebLookupFunction>[1],
+    callback: Parameters<AssistantWebLookupFunction>[2],
+  ) => {
+    const requestedFamily = typeof options === 'number'
+      ? options
+      : options.family === 'IPv4'
+        ? 4
+        : options.family === 'IPv6'
+          ? 6
+          : options.family ?? 0
+
+    queueMicrotask(() => {
+      if (requestedFamily !== 0 && requestedFamily !== address.family) {
+        callback(
+          new Error(
+            `Pinned address family ${address.family} did not match requested family ${requestedFamily}.`,
+          ),
+          address.address,
+          address.family,
+        )
+        return
+      }
+
+      callback(null, address.address, address.family)
+    })
+  }
+}
+
+function createAssistantWebNodeResponse(
+  response: IncomingMessage,
+): Response {
+  const headers = createAssistantWebResponseHeaders(response)
+  const body = decodeAssistantWebResponseBody(response, headers)
+  const status = response.statusCode ?? 500
+  const statusText = normalizeNullableString(response.statusMessage)
+
+  return new Response(Readable.toWeb(body) as ReadableStream<Uint8Array>, {
+    status,
+    headers,
+    ...(statusText ? { statusText } : {}),
+  })
+}
+
+function createAssistantWebResponseHeaders(
+  response: IncomingMessage,
+): Headers {
+  const headers = new Headers()
+
+  for (const [name, value] of Object.entries(response.headers)) {
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        headers.append(name, entry)
+      }
+      continue
+    }
+
+    if (typeof value === 'string') {
+      headers.append(name, value)
+    }
+  }
+
+  return headers
+}
+
+function decodeAssistantWebResponseBody(
+  response: IncomingMessage,
+  headers: Headers,
+): Readable {
+  const contentEncoding = normalizeNullableString(headers.get('content-encoding'))?.toLowerCase()
+
+  switch (contentEncoding) {
+    case 'br':
+      headers.delete('content-encoding')
+      headers.delete('content-length')
+      return response.pipe(createBrotliDecompress())
+    case 'deflate':
+    case 'gzip':
+    case 'x-gzip':
+      headers.delete('content-encoding')
+      headers.delete('content-length')
+      return response.pipe(createUnzip())
+    default:
+      return response
+  }
+}
+
+async function cancelAssistantWebResponseBody(response: Response): Promise<void> {
+  if (!response.body) {
+    return
+  }
+
+  try {
+    await response.body.cancel()
+  } catch {
+    // Ignore response-body cancellation failures during cleanup.
+  }
+}
+
+function isAssistantWebAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
 }
 
 function normalizeAssistantText(input: string): string {
@@ -1144,13 +1377,26 @@ function parseAssistantHtmlWithReadability(
 async function lookupAllAssistantWebAddresses(
   lookupImplementation: typeof lookup,
   hostname: string,
-): Promise<Array<{ address: string; family: number }>> {
+): Promise<AssistantWebResolvedAddress[]> {
   const resolved = await lookupImplementation(hostname, {
     all: true,
     verbatim: true,
   })
+  const normalized = Array.isArray(resolved) ? resolved : [resolved]
+  const seen = new Set<string>()
+  const addresses: AssistantWebResolvedAddress[] = []
 
-  return Array.isArray(resolved) ? resolved : [resolved]
+  for (const entry of normalized) {
+    const key = `${entry.family}:${entry.address}`
+    if (seen.has(key)) {
+      continue
+    }
+
+    seen.add(key)
+    addresses.push(entry)
+  }
+
+  return addresses
 }
 
 function resolveAssistantHtmlDocumentTitle(
