@@ -3,7 +3,8 @@
  * in R2. New outbound mail now uses one stable per-user reply alias, direct mail
  * to the fixed public sender address can resolve through a synced verified-owner
  * index, and ingress still understands legacy per-thread aliases until they age
- * out.
+ * out. Stable user aliases and verified-owner records only rewrite R2 when
+ * ownership actually changes.
  */
 
 import {
@@ -190,13 +191,14 @@ export async function reconcileHostedEmailVerifiedSenderRoute(input: {
   if (existing && existing.userId !== input.userId) {
     throw new Error("Hosted verified email sender route is already assigned to a different user.");
   }
-
-  await store.writeVerifiedSenderRoute({
-    identityId: publicSenderAddress,
-    senderKey,
-    userId: input.userId,
-    verifiedEmailAddress: nextVerifiedEmailAddress,
-  });
+  if (!existing || existing.verifiedEmailAddress !== nextVerifiedEmailAddress) {
+    await store.writeVerifiedSenderRoute({
+      identityId: publicSenderAddress,
+      senderKey,
+      userId: input.userId,
+      verifiedEmailAddress: nextVerifiedEmailAddress,
+    });
+  }
 
   if (shouldMovePreviousRoute) {
     await deleteHostedEmailVerifiedSenderRoute({
@@ -213,6 +215,7 @@ export async function createHostedEmailUserAddress(input: {
   config: HostedEmailConfig;
   key: Uint8Array;
   keyId: string;
+  keysById?: Readonly<Record<string, Uint8Array>>;
   userId: string;
 }): Promise<string> {
   if (!input.config.domain || !input.config.signingSecret || !input.config.fromAddress) {
@@ -220,15 +223,23 @@ export async function createHostedEmailUserAddress(input: {
   }
 
   const aliasKey = await deriveStableHostedEmailKey(input.config.signingSecret, `user:${input.userId}`);
-  await createHostedEmailRouteStore({
+  const store = createHostedEmailRouteStore({
     bucket: input.bucket,
     key: input.key,
     keyId: input.keyId,
-  }).writeUserRoute({
-    aliasKey,
-    identityId: input.config.fromAddress,
-    userId: input.userId,
+    keysById: input.keysById,
   });
+  const existing = await store.readUserRoute(aliasKey);
+  if (existing && existing.userId !== input.userId) {
+    throw new Error("Hosted email user route is already assigned to a different user.");
+  }
+  if (!existing) {
+    await store.writeUserRoute({
+      aliasKey,
+      identityId: input.config.fromAddress,
+      userId: input.userId,
+    });
+  }
 
   return formatHostedEmailAddress(input.config, await createHostedEmailRouteToken({
     key: aliasKey,
@@ -277,7 +288,7 @@ export async function resolveHostedEmailInboundRoute(input: {
       }
 
       return {
-        identityId: record.identityId,
+        identityId: resolveHostedEmailRouteIdentity(record.identityId, input.config),
         kind: "user",
         routeAddress: candidate.address,
         target: null,
@@ -291,7 +302,7 @@ export async function resolveHostedEmailInboundRoute(input: {
     }
 
     return {
-      identityId: record.identityId,
+      identityId: resolveHostedEmailRouteIdentity(record.identityId, input.config),
       kind: "thread",
       routeAddress: candidate.address,
       target: record.target,
@@ -302,7 +313,7 @@ export async function resolveHostedEmailInboundRoute(input: {
   return null;
 }
 
-export async function resolveHostedEmailDirectSenderRoute(input: {
+async function resolveHostedEmailDirectSenderRoute(input: {
   bucket: R2BucketLike;
   config: HostedEmailConfig;
   envelopeFrom?: string | null;
@@ -353,7 +364,7 @@ export async function resolveHostedEmailDirectSenderRoute(input: {
   };
 }
 
-export function isHostedEmailPublicSenderAddress(
+function isHostedEmailPublicSenderAddress(
   address: string | null | undefined,
   config: HostedEmailConfig,
 ): boolean {
@@ -498,6 +509,13 @@ async function createHostedEmailRouteToken(input: {
     secret: input.secret,
   });
   return `${scopeCode}-${input.key}-${signature}`;
+}
+
+function resolveHostedEmailRouteIdentity(
+  fallbackIdentityId: string,
+  config: HostedEmailConfig,
+): string {
+  return normalizeHostedEmailAddress(config.fromAddress) ?? fallbackIdentityId;
 }
 
 function resolveHostedEmailRouteCandidates(input: {

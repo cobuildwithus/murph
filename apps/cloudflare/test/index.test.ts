@@ -1323,6 +1323,55 @@ describe("cloudflare worker routes", () => {
     await expect(readResponse.text()).resolves.toBe(raw);
   });
 
+  it("routes inbound hosted email through X-Murph-Route when the delivered To address was rewritten", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub, {
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
+    });
+
+    const addressResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/email-address", {
+        headers: {
+          authorization: "Bearer control-token",
+        },
+        method: "GET",
+      }),
+      env,
+    );
+    const { address } = await addressResponse.json() as { address: string };
+    await seedHostedVerifiedEmailUserEnv(env, "member_123", "alice@example.test");
+    const raw = [
+      "From: Alice Example <alice@example.test>",
+      "To: rewritten@example.test",
+      `X-Murph-Route: ${address}`,
+      "Subject: Routed by header",
+      "Message-ID: <msg_route_header@example.test>",
+      "Date: Thu, 26 Mar 2026 12:05:00 +0000",
+      "",
+      "Hello from the routed header path.",
+      "",
+    ].join("\r\n");
+
+    await worker.email?.({
+      from: "alice@example.test",
+      raw,
+      to: "rewritten@example.test",
+    } as never, env as never);
+
+    expect(stub.dispatch).toHaveBeenCalledTimes(1);
+    expect(stub.dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      event: expect.objectContaining({
+        identityId: "assistant@mail.example.test",
+        kind: "email.message.received",
+        selfAddress: address,
+        userId: "member_123",
+      }),
+    }));
+  });
+
   it("rejects inbound hosted email on the stable alias when the sender does not match the verified email", async () => {
     const stub = createUserRunnerStub();
     const env = createWorkerEnv(stub, {
@@ -1359,7 +1408,7 @@ describe("cloudflare worker routes", () => {
       to: address,
     } as never, env as never);
 
-    expect(setReject).toHaveBeenCalledWith("Hosted email sender is not authorized for this route.");
+    expect(setReject).toHaveBeenCalledWith("Hosted email message was not accepted.");
     expect(stub.dispatch).not.toHaveBeenCalled();
     expect(env.__bucketStore.keys().filter((key) => key.includes("/messages/"))).toEqual([]);
   });
@@ -1400,7 +1449,7 @@ describe("cloudflare worker routes", () => {
       to: address,
     } as never, env as never);
 
-    expect(setReject).toHaveBeenCalledWith("Hosted email sender is not authorized for this route.");
+    expect(setReject).toHaveBeenCalledWith("Hosted email message was not accepted.");
     expect(stub.dispatch).not.toHaveBeenCalled();
     expect(env.__bucketStore.keys().filter((key) => key.includes("/messages/"))).toEqual([]);
   });
@@ -1442,7 +1491,7 @@ describe("cloudflare worker routes", () => {
       to: address,
     } as never, env as never);
 
-    expect(setReject).toHaveBeenCalledWith("Hosted email sender is not authorized for this route.");
+    expect(setReject).toHaveBeenCalledWith("Hosted email message was not accepted.");
     expect(stub.dispatch).not.toHaveBeenCalled();
     expect(env.__bucketStore.keys().filter((key) => key.includes("/messages/"))).toEqual([]);
   });
@@ -1487,7 +1536,8 @@ describe("cloudflare worker routes", () => {
         };
         expect(body.from).toBe("assistant@mail.example.test");
         expect(body.recipients).toEqual(["user@example.test"]);
-        expect(body.mime_message).toContain("Reply-To: assistant+t-");
+        expect(body.mime_message).toContain("Reply-To: assistant+u-");
+        expect(body.mime_message).toContain("X-Murph-Route: assistant+u-");
         expect(body.mime_message).toContain("To: user@example.test");
         return new Response(JSON.stringify({
           result: {
@@ -1523,8 +1573,9 @@ describe("cloudflare worker routes", () => {
     const threadTarget = parseHostedEmailThreadTarget(payload.target);
     expect(threadTarget).not.toBeNull();
     expect(threadTarget?.to).toEqual(["user@example.test"]);
-    expect(threadTarget?.replyAliasAddress).toContain("assistant+t-");
+    expect(threadTarget?.replyAliasAddress).toContain("assistant+u-");
     expect(threadTarget?.replyAliasAddress?.endsWith("@mail.example.test")).toBe(true);
+    expect(threadTarget?.replyKey).toBeNull();
     expect(threadTarget?.lastMessageId).toMatch(/^<hosted\./u);
     expect(threadTarget?.subject).toBe("Murph update");
   });
@@ -1572,29 +1623,12 @@ describe("cloudflare worker routes", () => {
       target: string;
     };
     const threadTarget = parseHostedEmailThreadTarget(sendPayload.target);
-    const threadRouteKey = env.__bucketStore.keys().find((key) =>
-      key.startsWith("transient/hosted-email/threads/"),
-    );
 
     expect(threadTarget?.replyAliasAddress).toBeTruthy();
-    if (!threadRouteKey || !threadTarget) {
-      throw new Error("Expected the hosted email thread route object to be written.");
+    if (!threadTarget) {
+      throw new Error("Expected the hosted email thread target to be returned.");
     }
-
-    await writeEncryptedR2Json({
-      bucket: env.BUNDLES,
-      cryptoKey: Buffer.alloc(32, 9),
-      key: threadRouteKey,
-      keyId: "v2",
-      value: {
-        identityId: "assistant@mail.example.test",
-        replyKey: threadRouteKey.slice("transient/hosted-email/threads/".length, -".json".length),
-        schema: "murph.hosted-email-thread-route.v1",
-        target: threadTarget,
-        updatedAt: "2026-03-26T12:00:00.000Z",
-        userId: "member_123",
-      },
-    });
+    await seedHostedVerifiedEmailUserEnv(env, "member_123", "user@example.test");
 
     await worker.email?.({
       from: "user@example.test",
@@ -1615,12 +1649,13 @@ describe("cloudflare worker routes", () => {
         identityId: "assistant@mail.example.test",
         kind: "email.message.received",
         rawMessageKey: expect.stringMatching(/^[0-9a-f]{32}$/u),
+        selfAddress: threadTarget.replyAliasAddress,
         userId: "member_123",
       }),
     }));
   });
 
-  it("rejects hosted thread replies from senders outside the saved participant list", async () => {
+  it("rejects hosted replies from saved participants when owner-only authorization is in effect", async () => {
     const stub = createUserRunnerStub();
     const env = createWorkerEnv(stub, {
       HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID: "v2",
@@ -1663,34 +1698,16 @@ describe("cloudflare worker routes", () => {
       target: string;
     };
     const threadTarget = parseHostedEmailThreadTarget(sendPayload.target);
-    const threadRouteKey = env.__bucketStore.keys().find((key) =>
-      key.startsWith("transient/hosted-email/threads/"),
-    );
-
-    if (!threadRouteKey || !threadTarget) {
-      throw new Error("Expected the hosted email thread route object to be written.");
+    if (!threadTarget) {
+      throw new Error("Expected the hosted email thread target to be returned.");
     }
-
-    await writeEncryptedR2Json({
-      bucket: env.BUNDLES,
-      cryptoKey: Buffer.alloc(32, 9),
-      key: threadRouteKey,
-      keyId: "v2",
-      value: {
-        identityId: "assistant@mail.example.test",
-        replyKey: threadRouteKey.slice("transient/hosted-email/threads/".length, -".json".length),
-        schema: "murph.hosted-email-thread-route.v1",
-        target: threadTarget,
-        updatedAt: "2026-03-26T12:00:00.000Z",
-        userId: "member_123",
-      },
-    });
+    await seedHostedVerifiedEmailUserEnv(env, "member_123", "user@example.test");
 
     const setReject = vi.fn();
     await worker.email?.({
-      from: "intruder@example.test",
+      from: "participant@example.test",
       raw: [
-        "From: intruder@example.test",
+        "From: participant@example.test",
         `To: ${threadTarget.replyAliasAddress}`,
         "Subject: Re: Murph update",
         "",
@@ -1701,7 +1718,7 @@ describe("cloudflare worker routes", () => {
       to: threadTarget.replyAliasAddress ?? "",
     } as never, env as never);
 
-    expect(setReject).toHaveBeenCalledWith("Hosted email sender is not authorized for this route.");
+    expect(setReject).toHaveBeenCalledWith("Hosted email message was not accepted.");
     expect(stub.dispatch).not.toHaveBeenCalled();
     expect(env.__bucketStore.keys().filter((key) => key.includes("/messages/"))).toEqual([]);
   });
@@ -1749,28 +1766,10 @@ describe("cloudflare worker routes", () => {
       target: string;
     };
     const threadTarget = parseHostedEmailThreadTarget(sendPayload.target);
-    const threadRouteKey = env.__bucketStore.keys().find((key) =>
-      key.startsWith("transient/hosted-email/threads/"),
-    );
-
-    if (!threadRouteKey || !threadTarget) {
-      throw new Error("Expected the hosted email thread route object to be written.");
+    if (!threadTarget) {
+      throw new Error("Expected the hosted email thread target to be returned.");
     }
-
-    await writeEncryptedR2Json({
-      bucket: env.BUNDLES,
-      cryptoKey: Buffer.alloc(32, 9),
-      key: threadRouteKey,
-      keyId: "v2",
-      value: {
-        identityId: "assistant@mail.example.test",
-        replyKey: threadRouteKey.slice("transient/hosted-email/threads/".length, -".json".length),
-        schema: "murph.hosted-email-thread-route.v1",
-        target: threadTarget,
-        updatedAt: "2026-03-26T12:00:00.000Z",
-        userId: "member_123",
-      },
-    });
+    await seedHostedVerifiedEmailUserEnv(env, "member_123", "user@example.test");
 
     const setReject = vi.fn();
     await worker.email?.({
@@ -1787,7 +1786,7 @@ describe("cloudflare worker routes", () => {
       to: threadTarget.replyAliasAddress ?? "",
     } as never, env as never);
 
-    expect(setReject).toHaveBeenCalledWith("Hosted email sender is not authorized for this route.");
+    expect(setReject).toHaveBeenCalledWith("Hosted email message was not accepted.");
     expect(stub.dispatch).not.toHaveBeenCalled();
     expect(env.__bucketStore.keys().filter((key) => key.includes("/messages/"))).toEqual([]);
   });

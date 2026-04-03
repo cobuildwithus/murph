@@ -247,6 +247,7 @@ async function handleRunnerEmailSendRequest(input: {
     ),
     key: input.environment.bundleEncryptionKey,
     keyId: input.environment.bundleEncryptionKeyId,
+    keysById: input.environment.bundleEncryptionKeysById,
     request: parseHostedEmailSendRequest(await readJsonObject(input.request)),
     userId: input.userId,
   });
