@@ -38,6 +38,9 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_DEVICE_SYNC_CONTROL_BASE_URL: "https://web.example.test",
       HOSTED_SHARE_API_BASE_URL: "https://web.example.test",
       HOSTED_WEB_BASE_URL: "https://web.example.test",
+      MURPH_WEB_SEARCH_MAX_RESULTS: "8",
+      MURPH_WEB_SEARCH_PROVIDER: "brave",
+      MURPH_WEB_SEARCH_TIMEOUT_MS: "10000",
       TELEGRAM_BOT_USERNAME: "hosted_bot",
     });
     const config = buildHostedWranglerDeployConfig(environment) as {
@@ -129,6 +132,9 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_SHARE_API_BASE_URL).toBe("https://web.example.test");
     expect(config.vars.HOSTED_WEB_BASE_URL).toBe("https://web.example.test");
     expect(config.vars.AGENTMAIL_BASE_URL).toBeUndefined();
+    expect(config.vars.MURPH_WEB_SEARCH_MAX_RESULTS).toBe("8");
+    expect(config.vars.MURPH_WEB_SEARCH_PROVIDER).toBe("brave");
+    expect(config.vars.MURPH_WEB_SEARCH_TIMEOUT_MS).toBe("10000");
     expect(config.vars.TELEGRAM_BOT_USERNAME).toBe("hosted_bot");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_BASE_URL).toBeUndefined();
     expect(config.secrets?.required).toEqual([...HOSTED_WORKER_REQUIRED_SECRET_NAMES]);
@@ -189,6 +195,7 @@ describe("hosted deploy automation helpers", () => {
   it("renders required and optional worker secrets from CI secrets", () => {
     expect(buildHostedWorkerSecretsPayload({
       AGENTMAIL_API_KEY: "agentmail-secret",
+      BRAVE_API_KEY: "brave-key",
       HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "email-cf-token",
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
       HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: "bundle-key",
@@ -200,6 +207,7 @@ describe("hosted deploy automation helpers", () => {
       OPENAI_API_KEY: "sk-user",
       TELEGRAM_BOT_TOKEN: "bot-token",
     })).toEqual({
+      BRAVE_API_KEY: "brave-key",
       HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "email-cf-token",
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
       HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: "bundle-key",

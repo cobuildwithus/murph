@@ -22,12 +22,20 @@ describe("buildHostedRunnerContainerEnv", () => {
 
   it("forwards hosted automation provider and channel keys", () => {
     expect(buildHostedRunnerContainerEnv({
+      BRAVE_API_KEY: "brave-key",
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
+      MURPH_WEB_SEARCH_MAX_RESULTS: "8",
+      MURPH_WEB_SEARCH_PROVIDER: "brave",
+      MURPH_WEB_SEARCH_TIMEOUT_MS: "10000",
       TELEGRAM_BOT_TOKEN: "telegram-token",
     })).toEqual({
+      BRAVE_API_KEY: "brave-key",
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
+      MURPH_WEB_SEARCH_MAX_RESULTS: "8",
+      MURPH_WEB_SEARCH_PROVIDER: "brave",
+      MURPH_WEB_SEARCH_TIMEOUT_MS: "10000",
       NODE_ENV: "production",
       TELEGRAM_BOT_TOKEN: "telegram-token",
     });
