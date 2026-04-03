@@ -108,6 +108,10 @@ export {
   ASSESSMENT_LEDGER_DIRECTORY,
   ASSESSMENT_RESPONSE_SCHEMA_VERSION,
 } from "./assessment/index.ts";
+export {
+  listProfileSnapshots,
+  readCurrentProfile,
+} from "./profile/storage.ts";
 export type {
   AllergyProposal,
   AssessmentProposalSource,
@@ -131,6 +135,7 @@ export * from "./genetics/index.ts";
 export * from "./shares.ts";
 export {
   buildActivitySessionEventDraft,
+  buildBodyMeasurementEventDraft,
   buildInterventionSessionEventDraft,
   buildMedicationIntakeEventDraft,
   buildNoteEventDraft,

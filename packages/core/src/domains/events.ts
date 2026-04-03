@@ -30,6 +30,7 @@ const PUBLIC_EVENT_WRITE_KIND_LIST = [
   "medication_intake",
   "supplement_intake",
   "activity_session",
+  "body_measurement",
   "sleep_session",
   "intervention_session",
 ] as const;
@@ -306,6 +307,13 @@ function buildTypedEventRecord(
           strengthExercises: draft.strengthExercises,
           workout: draft.workout,
         });
+      case "body_measurement":
+        return compactObject({
+          ...base,
+          kind: "body_measurement",
+          measurements: draft.measurements,
+          media: draft.media,
+        });
       case "sleep_session":
         return compactObject({
           ...base,
@@ -380,6 +388,12 @@ export function buildActivitySessionEventDraft(
   input: Omit<EventDraftByKind<"activity_session">, "kind">,
 ): EventDraftByKind<"activity_session"> {
   return buildTypedEventDraft("activity_session", input);
+}
+
+export function buildBodyMeasurementEventDraft(
+  input: Omit<EventDraftByKind<"body_measurement">, "kind">,
+): EventDraftByKind<"body_measurement"> {
+  return buildTypedEventDraft("body_measurement", input);
 }
 
 export function buildSleepSessionEventDraft(
@@ -547,6 +561,22 @@ function extractRetainedPaths(record: EventRecord): string[] {
   const documentPath = valueAsString((record as { documentPath?: unknown }).documentPath);
   if (documentPath) {
     retained.add(documentPath);
+  }
+
+  const mediaSources = [
+    (record as { media?: Array<{ relativePath?: unknown }> }).media,
+    (record as { workout?: { media?: Array<{ relativePath?: unknown }> } }).workout?.media,
+  ];
+  for (const mediaList of mediaSources) {
+    if (!Array.isArray(mediaList)) {
+      continue;
+    }
+    for (const entry of mediaList) {
+      const relativePath = valueAsString(entry?.relativePath);
+      if (relativePath) {
+        retained.add(relativePath);
+      }
+    }
   }
 
   return [...retained].sort((left, right) => left.localeCompare(right));

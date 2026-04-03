@@ -382,6 +382,13 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
       routineId: "wfmt_01JNV422Y2M5ZBV64ZP4N1DRB1",
       routineName: "Push Day A",
       sessionNote: "Paused the first rep on each work set.",
+      media: [
+        {
+          kind: "photo",
+          relativePath: "raw/workouts/2026/03/evt_01JNV44WS3W0R27XPTKFC3QFJB/progress-front.jpg",
+          mediaType: "image/jpeg",
+        }
+      ],
       exercises: [
         {
           name: "Pushups",
@@ -409,6 +416,32 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
         }
       ]
     }
+  },
+  {
+    schemaVersion: "murph.event.v1",
+    id: "evt_01JNV450A1B2C3D4E5F6G7H8JK",
+    kind: "body_measurement",
+    occurredAt: "2026-03-12T07:00:00Z",
+    recordedAt: "2026-03-12T07:00:10Z",
+    dayKey: "2026-03-12",
+    source: "manual",
+    title: "Weekly check-in",
+    note: "Morning fasted check-in.",
+    measurements: [
+      { type: "weight", value: 182.4, unit: "lb" },
+      { type: "waist", value: 33.5, unit: "in" },
+      { type: "body_fat_pct", value: 18.2, unit: "percent" }
+    ],
+    media: [
+      {
+        kind: "photo",
+        relativePath: "raw/measurements/2026/03/evt_01JNV450A1B2C3D4E5F6G7H8JK/front.jpg",
+        mediaType: "image/jpeg",
+      }
+    ],
+    rawRefs: [
+      "raw/measurements/2026/03/evt_01JNV450A1B2C3D4E5F6G7H8JK/front.jpg"
+    ],
   },
   {
     schemaVersion: "murph.event.v1",
@@ -599,6 +632,11 @@ export const exampleProfileSnapshots: readonly Readonly<ProfileSnapshotRecord>[]
       goals: {
         topGoalIds: ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"],
       },
+      unitPreferences: {
+        weight: "lb",
+        distance: "mi",
+        bodyMeasurement: "in",
+      },
       custom: {
         sleep: {
           averageHours: 6.5,
@@ -783,6 +821,11 @@ export const exampleHealthFrontmatterObjects: Readonly<HealthFrontmatterExamples
     sourceAssessmentIds: ["asmt_01JNV40W8VFYQ2H7CMJY5A9R4K"],
     sourceEventIds: ["evt_01JNV46VFEV8Q05M8NSEJ2MZXG"],
     topGoalIds: ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"],
+    unitPreferences: {
+      weight: "lb",
+      distance: "mi",
+      bodyMeasurement: "in",
+    },
   },
   goal: {
     schemaVersion: "murph.frontmatter.goal.v1",

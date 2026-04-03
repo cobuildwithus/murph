@@ -2096,10 +2096,47 @@
               "minLength": 1,
               "maxLength": 4000
             },
-            "exercises": {
+            "media": {
+              "maxItems": 10,
               "type": "array",
-              "minItems": 1,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "photo",
+                      "video",
+                      "gif",
+                      "image",
+                      "other"
+                    ]
+                  },
+                  "relativePath": {
+                    "type": "string",
+                    "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+                  },
+                  "mediaType": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255
+                  },
+                  "caption": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000
+                  }
+                },
+                "required": [
+                  "kind",
+                  "relativePath"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "exercises": {
               "maxItems": 100,
+              "type": "array",
               "items": {
                 "type": "object",
                 "properties": {
@@ -2146,9 +2183,9 @@
                     "maxLength": 4000
                   },
                   "sets": {
-                    "type": "array",
                     "minItems": 1,
                     "maxItems": 150,
+                    "type": "array",
                     "items": {
                       "type": "object",
                       "properties": {
@@ -2239,6 +2276,237 @@
         "kind",
         "activityType",
         "durationMinutes"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "const": "murph.event.v1"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^evt_[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "recordedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "dayKey": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "manual",
+            "import",
+            "device",
+            "derived"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "kind": {
+          "type": "string",
+          "const": "body_measurement"
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "uniqueItems": true
+        },
+        "relatedIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+          },
+          "uniqueItems": true
+        },
+        "rawRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+          },
+          "uniqueItems": true
+        },
+        "externalRef": {
+          "type": "object",
+          "properties": {
+            "system": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceType": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "facet": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            }
+          },
+          "required": [
+            "system",
+            "resourceType",
+            "resourceId"
+          ],
+          "additionalProperties": false
+        },
+        "lifecycle": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "deleted"
+              ]
+            }
+          },
+          "required": [
+            "revision"
+          ],
+          "additionalProperties": false
+        },
+        "timeZone": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64
+        },
+        "measurements": {
+          "minItems": 1,
+          "maxItems": 25,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "weight",
+                  "body_fat_pct",
+                  "waist",
+                  "neck",
+                  "shoulders",
+                  "chest",
+                  "biceps",
+                  "forearms",
+                  "abdomen",
+                  "hips",
+                  "thighs",
+                  "calves"
+                ]
+              },
+              "value": {
+                "type": "number",
+                "minimum": 0
+              },
+              "unit": {
+                "type": "string",
+                "enum": [
+                  "lb",
+                  "kg",
+                  "percent",
+                  "cm",
+                  "in"
+                ]
+              },
+              "note": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000
+              }
+            },
+            "required": [
+              "type",
+              "value",
+              "unit"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "media": {
+          "maxItems": 10,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "photo",
+                  "video",
+                  "gif",
+                  "image",
+                  "other"
+                ]
+              },
+              "relativePath": {
+                "type": "string",
+                "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+              },
+              "mediaType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "caption": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000
+              }
+            },
+            "required": [
+              "kind",
+              "relativePath"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "id",
+        "occurredAt",
+        "recordedAt",
+        "dayKey",
+        "source",
+        "title",
+        "kind",
+        "measurements"
       ],
       "additionalProperties": false
     },

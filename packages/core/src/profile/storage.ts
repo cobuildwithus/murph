@@ -122,6 +122,7 @@ export function buildCurrentProfileMarkdown(snapshot: ProfileSnapshotRecord): st
     sourceAssessmentIds: snapshot.sourceAssessmentIds,
     sourceEventIds: snapshot.sourceEventIds,
     topGoalIds: snapshot.profile.goals?.topGoalIds,
+    unitPreferences: snapshot.profile.unitPreferences,
   });
 
   if (!attributesResult.success) {

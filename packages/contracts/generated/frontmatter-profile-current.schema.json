@@ -41,6 +41,33 @@
         "pattern": "^goal_[0-9A-HJKMNP-TV-Z]{26}$"
       },
       "uniqueItems": true
+    },
+    "unitPreferences": {
+      "type": "object",
+      "properties": {
+        "weight": {
+          "type": "string",
+          "enum": [
+            "lb",
+            "kg"
+          ]
+        },
+        "distance": {
+          "type": "string",
+          "enum": [
+            "km",
+            "mi"
+          ]
+        },
+        "bodyMeasurement": {
+          "type": "string",
+          "enum": [
+            "cm",
+            "in"
+          ]
+        }
+      },
+      "additionalProperties": false
     }
   },
   "required": [

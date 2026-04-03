@@ -291,6 +291,34 @@ export const workoutExerciseModeSchema = z.enum([
   "cardio",
 ]);
 export const workoutLoadUnitSchema = z.enum(["lb", "kg"]);
+export const storedMediaKindSchema = z.enum(["photo", "video", "gif", "image", "other"]);
+export const bodyMeasurementTypeSchema = z.enum([
+  "weight",
+  "body_fat_pct",
+  "waist",
+  "neck",
+  "shoulders",
+  "chest",
+  "biceps",
+  "forearms",
+  "abdomen",
+  "hips",
+  "thighs",
+  "calves",
+]);
+export const bodyMeasurementUnitSchema = z.enum(["lb", "kg", "percent", "cm", "in"]);
+export const profileWeightUnitSchema = z.enum(["lb", "kg"]);
+export const profileDistanceUnitSchema = z.enum(["km", "mi"]);
+export const profileBodyMeasurementUnitSchema = z.enum(["cm", "in"]);
+
+export const storedMediaSchema = z
+  .object({
+    kind: storedMediaKindSchema,
+    relativePath: patternedString(RAW_PATH_PATTERN),
+    mediaType: boundedString(1, 255).optional(),
+    caption: boundedString(1, 4000).optional(),
+  })
+  .strict();
 
 export const workoutSetSchema = z
   .object({
@@ -330,7 +358,63 @@ export const workoutSessionSchema = z
     routineId: boundedString(1, 200).optional(),
     routineName: boundedString(1, 160).optional(),
     sessionNote: boundedString(1, 4000).optional(),
-    exercises: z.array(workoutExerciseSchema).min(1).max(100),
+    media: z.array(storedMediaSchema).max(10).optional(),
+    exercises: z.array(workoutExerciseSchema).max(100),
+  })
+  .strict();
+
+export const bodyMeasurementEntrySchema = z
+  .object({
+    type: bodyMeasurementTypeSchema,
+    value: numberSchema(0),
+    unit: bodyMeasurementUnitSchema,
+    note: boundedString(1, 4000).optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const circumferenceTypes = new Set([
+      "waist",
+      "neck",
+      "shoulders",
+      "chest",
+      "biceps",
+      "forearms",
+      "abdomen",
+      "hips",
+      "thighs",
+      "calves",
+    ]);
+
+    if (value.type === "weight" && !["lb", "kg"].includes(value.unit)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Weight measurements must use lb or kg.',
+        path: ["unit"],
+      });
+    }
+
+    if (value.type === "body_fat_pct" && value.unit !== "percent") {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Body-fat measurements must use percent.',
+        path: ["unit"],
+      });
+    }
+
+    if (circumferenceTypes.has(value.type) && !["cm", "in"].includes(value.unit)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Circumference measurements must use cm or in.',
+        path: ["unit"],
+      });
+    }
+  });
+
+export const profileUnitPreferencesSchema = z
+  .object({
+    weight: profileWeightUnitSchema.optional(),
+    distance: profileDistanceUnitSchema.optional(),
+    bodyMeasurement: profileBodyMeasurementUnitSchema.optional(),
   })
   .strict();
 
@@ -630,6 +714,10 @@ export const eventRecordSchema = withContractMetadata(
       distanceKm: numberSchema(0).optional(),
       strengthExercises: z.array(activityStrengthExerciseSchema).min(1).max(50).optional(),
       workout: workoutSessionSchema.optional(),
+    }),
+    eventSchema("body_measurement", {
+      measurements: z.array(bodyMeasurementEntrySchema).min(1).max(25),
+      media: z.array(storedMediaSchema).max(10).optional(),
     }),
     eventSchema("sleep_session", {
       startAt: isoDateTimeString(),
@@ -1004,6 +1092,7 @@ export const profileSnapshotProfileSchema = z
   .object({
     narrative: profileSnapshotNarrativeSchema.optional(),
     goals: profileSnapshotGoalsSchema.optional(),
+    unitPreferences: profileUnitPreferencesSchema.optional(),
     custom: jsonObjectSchema.optional(),
   })
   .strict();
@@ -1034,6 +1123,7 @@ export const profileCurrentFrontmatterSchema = withContractMetadata(
       sourceAssessmentIds: uniqueArray(idSchema(ID_PREFIXES.assessment), { uniqueItems: true }).optional(),
       sourceEventIds: uniqueArray(idSchema(ID_PREFIXES.event), { uniqueItems: true }).optional(),
       topGoalIds: uniqueArray(idSchema(ID_PREFIXES.goal), { uniqueItems: true }).optional(),
+      unitPreferences: profileUnitPreferencesSchema.optional(),
     })
     .strict(),
   "@murphai/contracts/frontmatter-profile-current.schema.json",
@@ -1196,6 +1286,15 @@ export type ActivityStrengthExercise = z.infer<typeof activityStrengthExerciseSc
 export type WorkoutSetType = z.infer<typeof workoutSetTypeSchema>;
 export type WorkoutExerciseMode = z.infer<typeof workoutExerciseModeSchema>;
 export type WorkoutLoadUnit = z.infer<typeof workoutLoadUnitSchema>;
+export type StoredMediaKind = z.infer<typeof storedMediaKindSchema>;
+export type StoredMedia = z.infer<typeof storedMediaSchema>;
+export type BodyMeasurementType = z.infer<typeof bodyMeasurementTypeSchema>;
+export type BodyMeasurementUnit = z.infer<typeof bodyMeasurementUnitSchema>;
+export type BodyMeasurementEntry = z.infer<typeof bodyMeasurementEntrySchema>;
+export type ProfileWeightUnit = z.infer<typeof profileWeightUnitSchema>;
+export type ProfileDistanceUnit = z.infer<typeof profileDistanceUnitSchema>;
+export type ProfileBodyMeasurementUnit = z.infer<typeof profileBodyMeasurementUnitSchema>;
+export type ProfileUnitPreferences = z.infer<typeof profileUnitPreferencesSchema>;
 export type WorkoutSet = z.infer<typeof workoutSetSchema>;
 export type WorkoutExercise = z.infer<typeof workoutExerciseSchema>;
 export type WorkoutSession = z.infer<typeof workoutSessionSchema>;
@@ -1214,6 +1313,7 @@ export type ExperimentEventRecord = Extract<z.infer<typeof eventRecordSchema>, {
 export type MedicationIntakeEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "medication_intake" }>;
 export type SupplementIntakeEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "supplement_intake" }>;
 export type ActivitySessionEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "activity_session" }>;
+export type BodyMeasurementEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "body_measurement" }>;
 export type SleepSessionEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "sleep_session" }>;
 export type InterventionSessionEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "intervention_session" }>;
 export type EncounterEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "encounter" }>;

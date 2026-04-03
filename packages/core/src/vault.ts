@@ -569,6 +569,27 @@ async function validateEventRecordReferences(
     }
   }
 
+  const mediaLists = [
+    Array.isArray((record as { media?: unknown }).media)
+      ? ((record as { media: unknown[] }).media)
+      : [],
+    Array.isArray((record as { workout?: { media?: unknown } }).workout?.media)
+      ? (((record as { workout: { media: unknown[] } }).workout.media))
+      : [],
+  ];
+
+  for (const mediaList of mediaLists) {
+    for (const media of mediaList) {
+      if (
+        media &&
+        typeof media === "object" &&
+        typeof (media as { relativePath?: unknown }).relativePath === "string"
+      ) {
+        referencedPaths.add((media as { relativePath: string }).relativePath);
+      }
+    }
+  }
+
   const issues: ValidationIssue[] = [];
   const manifestPaths = new Set<string>();
 

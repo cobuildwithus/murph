@@ -47,6 +47,7 @@ export interface LogWorkoutFormatInput {
   durationMinutes?: number
   activityType?: string
   distanceKm?: number
+  mediaPaths?: string[]
 }
 
 function requireTitle(value: string | undefined, label: string): string {
@@ -339,6 +340,7 @@ export async function logWorkoutFormat(input: LogWorkoutFormatInput) {
           : record.distanceKm,
       occurredAt: input.occurredAt,
       source: input.source,
+      mediaPaths: input.mediaPaths,
     })
   }
 
@@ -362,6 +364,7 @@ export async function logWorkoutFormat(input: LogWorkoutFormatInput) {
       occurredAt: input.occurredAt,
       source: input.source,
       title: record.title,
+      mediaPaths: input.mediaPaths,
     })
   }
 

@@ -1474,6 +1474,124 @@ test("validateVault checks raw manifests, referenced artifacts, and current-prof
   );
 });
 
+test("validateVault accepts workout and body-measurement media references", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+
+  async function writeMediaBatch(input: {
+    eventId: string;
+    rawDirectory: string;
+    mediaRelativePath: string;
+    importKind: "workout_batch" | "measurement_batch";
+    family: "workout" | "measurement";
+  }) {
+    const mediaBuffer = Buffer.from(`${input.family}-media`, "utf8");
+    const manifestRelativePath = `${input.rawDirectory}/manifest.json`;
+    await fs.mkdir(path.join(vaultRoot, input.rawDirectory), { recursive: true });
+    await fs.writeFile(path.join(vaultRoot, input.mediaRelativePath), mediaBuffer);
+    await fs.writeFile(
+      path.join(vaultRoot, manifestRelativePath),
+      `${JSON.stringify({
+        schemaVersion: CONTRACT_SCHEMA_VERSION.rawImportManifest,
+        importId: "xfm_01JNW000A1B2C3D4E5F6G7H8JK",
+        importKind: input.importKind,
+        importedAt: "2026-03-12T08:00:00.000Z",
+        source: "manual",
+        rawDirectory: input.rawDirectory,
+        artifacts: [
+          {
+            role: "media_1",
+            relativePath: input.mediaRelativePath,
+            originalFileName: "progress-front.jpg",
+            mediaType: "image/jpeg",
+            byteSize: mediaBuffer.byteLength,
+            sha256: createHash("sha256").update(mediaBuffer).digest("hex"),
+          },
+        ],
+        provenance: {
+          eventId: input.eventId,
+          family: input.family,
+          mediaCount: 1,
+        },
+      }, null, 2)}\n`,
+      "utf8",
+    );
+  }
+
+  const workoutEventId = "evt_01JNW000A1B2C3D4E5F6G7H8JK";
+  const workoutRawDirectory = `raw/workouts/2026/03/${workoutEventId}`;
+  const workoutMediaRelativePath = `${workoutRawDirectory}/01-progress-front.jpg`;
+  await writeMediaBatch({
+    eventId: workoutEventId,
+    rawDirectory: workoutRawDirectory,
+    mediaRelativePath: workoutMediaRelativePath,
+    importKind: "workout_batch",
+    family: "workout",
+  });
+  await upsertEvent({
+    vaultRoot,
+    payload: {
+      id: workoutEventId,
+      kind: "activity_session",
+      occurredAt: "2026-03-12T08:00:00.000Z",
+      title: "Gym check-in",
+      activityType: "strength-training",
+      durationMinutes: 45,
+      rawRefs: [workoutMediaRelativePath],
+      workout: {
+        media: [
+          {
+            kind: "photo",
+            relativePath: workoutMediaRelativePath,
+            mediaType: "image/jpeg",
+          },
+        ],
+        exercises: [],
+      },
+    },
+  });
+
+  const measurementEventId = "evt_01JNW000Z9Y8X7W6V5T4S3R2QP";
+  const measurementRawDirectory = `raw/measurements/2026/03/${measurementEventId}`;
+  const measurementMediaRelativePath = `${measurementRawDirectory}/01-progress-front.jpg`;
+  await writeMediaBatch({
+    eventId: measurementEventId,
+    rawDirectory: measurementRawDirectory,
+    mediaRelativePath: measurementMediaRelativePath,
+    importKind: "measurement_batch",
+    family: "measurement",
+  });
+  await upsertEvent({
+    vaultRoot,
+    payload: {
+      id: measurementEventId,
+      kind: "body_measurement",
+      occurredAt: "2026-03-12T08:05:00.000Z",
+      title: "Weekly check-in",
+      measurements: [
+        {
+          type: "weight",
+          value: 182.4,
+          unit: "lb",
+        },
+      ],
+      rawRefs: [measurementMediaRelativePath],
+      media: [
+        {
+          kind: "photo",
+          relativePath: measurementMediaRelativePath,
+          mediaType: "image/jpeg",
+        },
+      ],
+    },
+  });
+
+  const validation = await validateVault({ vaultRoot });
+
+  assert.equal(validation.valid, true);
+  assert.deepEqual(validation.issues, []);
+});
+
 test("write batches roll back earlier writes when a later action fails", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });

@@ -384,6 +384,31 @@ export const vaultCliCommandDescriptors = [
         description: 'Delete one workout activity event.',
       },
       {
+        path: ['workout', 'measurement', 'add'],
+        description:
+          'Record one body-measurement check-in from a structured JSON payload or a single typed measurement, with optional progress photos.',
+      },
+      {
+        path: ['workout', 'measurement', 'show'],
+        description: 'Show one body-measurement event by canonical event id.',
+      },
+      {
+        path: ['workout', 'measurement', 'list'],
+        description: 'List body-measurement events with optional date bounds.',
+      },
+      {
+        path: ['workout', 'measurement', 'manifest'],
+        description: 'Show the immutable raw import manifest for an imported body-measurement event.',
+      },
+      {
+        path: ['workout', 'units', 'show'],
+        description: 'Show the saved workout unit preferences from the current profile snapshot.',
+      },
+      {
+        path: ['workout', 'units', 'set'],
+        description: 'Set one or more workout unit preferences on the current profile snapshot.',
+      },
+      {
         path: ['workout', 'import', 'inspect'],
         description: 'Inspect one workout CSV file without writing anything.',
       },

@@ -76,6 +76,33 @@
           },
           "additionalProperties": false
         },
+        "unitPreferences": {
+          "type": "object",
+          "properties": {
+            "weight": {
+              "type": "string",
+              "enum": [
+                "lb",
+                "kg"
+              ]
+            },
+            "distance": {
+              "type": "string",
+              "enum": [
+                "km",
+                "mi"
+              ]
+            },
+            "bodyMeasurement": {
+              "type": "string",
+              "enum": [
+                "cm",
+                "in"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
         "custom": {
           "type": "object",
           "properties": {},
