@@ -36,6 +36,7 @@ import type {
 } from "../core-port.ts";
 import type { PlainObject } from "./shared-normalization.ts";
 import type { DeviceProviderAdapter, NormalizedDeviceBatch } from "./types.ts";
+import { GARMIN_DEVICE_PROVIDER_DESCRIPTOR } from "./provider-descriptors.ts";
 
 export interface GarminSnapshotInput {
   accountId?: string | number;
@@ -243,7 +244,7 @@ export function normalizeGarminSnapshot(snapshot: GarminSnapshotInput): Normaliz
 }
 
 export const garminProviderAdapter: DeviceProviderAdapter<GarminSnapshotInput> = {
-  provider: "garmin",
+  ...GARMIN_DEVICE_PROVIDER_DESCRIPTOR,
   parseSnapshot: parseGarminSnapshot,
   normalizeSnapshot: normalizeGarminSnapshot,
 };

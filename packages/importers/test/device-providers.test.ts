@@ -38,6 +38,25 @@ type _deviceProviderSnapshotImportPayloadLayersSnapshotOntoCorePayload = AssertT
   >
 >;
 
+function makeTestDeviceProviderAdapter<TSnapshot>(
+  adapter: Pick<DeviceProviderAdapter<TSnapshot>, "provider" | "normalizeSnapshot"> &
+    Partial<Omit<DeviceProviderAdapter<TSnapshot>, "provider" | "normalizeSnapshot">>,
+): DeviceProviderAdapter<TSnapshot> {
+  return {
+    displayName: adapter.provider,
+    transportModes: ["scheduled_poll"],
+    normalization: {
+      metricFamilies: ["activity"],
+      snapshotParser: "passthrough",
+    },
+    sourcePriorityHints: {
+      defaultPriority: 50,
+      metricFamilies: {},
+    },
+    ...adapter,
+  };
+}
+
 async function makeTempDirectory(name: string): Promise<string> {
   return mkdtemp(join(tmpdir(), `${name}-`));
 }
@@ -1498,7 +1517,7 @@ test("importDeviceProviderSnapshot strips snapshot input fields before delegatin
   const registry = createDeviceProviderRegistry();
   const calls: DeviceBatchImportPayload[] = [];
 
-  registry.register({
+  registry.register(makeTestDeviceProviderAdapter({
     provider: "polar",
     normalizeSnapshot() {
       return makeNormalizedDeviceBatch({
@@ -1518,7 +1537,7 @@ test("importDeviceProviderSnapshot strips snapshot input fields before delegatin
         ],
       });
     },
-  });
+  }));
 
   await importDeviceProviderSnapshot(
     {
@@ -1564,7 +1583,7 @@ test("createImporters composes custom device providers behind the same core seam
   const registry = createDeviceProviderRegistry();
   const calls: DeviceBatchImportPayload[] = [];
 
-  const polarAdapter: DeviceProviderAdapter<{ accountId?: string; steps?: number }> = {
+  const polarAdapter: DeviceProviderAdapter<{ accountId?: string; steps?: number }> = makeTestDeviceProviderAdapter({
     provider: "polar",
     normalizeSnapshot(snapshot) {
       return {
@@ -1599,7 +1618,7 @@ test("createImporters composes custom device providers behind the same core seam
         ],
       };
     },
-  };
+  });
 
   registry.register(polarAdapter);
 
@@ -1665,7 +1684,7 @@ test("prepareDeviceProviderSnapshotImport records WHOOP deletions as append-only
 
 test("device provider registry normalizes provider keys and rejects invalid registrations", () => {
   const registry = createDeviceProviderRegistry();
-  const garminAdapter: DeviceProviderAdapter<{ steps?: number }> = {
+  const garminAdapter: DeviceProviderAdapter<{ steps?: number }> = makeTestDeviceProviderAdapter({
     provider: "Garmin",
     normalizeSnapshot(snapshot) {
       return {
@@ -1685,7 +1704,7 @@ test("device provider registry normalizes provider keys and rejects invalid regi
         ],
       };
     },
-  };
+  });
 
   registry.register(garminAdapter);
 
@@ -1694,22 +1713,22 @@ test("device provider registry normalizes provider keys and rejects invalid regi
   assert.deepEqual(registry.list().map((adapter) => adapter.provider), ["Garmin"]);
   assert.throws(
     () =>
-      registry.register({
+      registry.register(makeTestDeviceProviderAdapter({
         provider: "garmin",
         normalizeSnapshot() {
           return { provider: "garmin", events: [] };
         },
-      }),
+      })),
     /already registered/u,
   );
   assert.throws(
     () =>
-      registry.register({
+      registry.register(makeTestDeviceProviderAdapter({
         provider: "   ",
         normalizeSnapshot() {
           return { provider: "empty", events: [] };
         },
-      }),
+      })),
     /provider must be a non-empty string/u,
   );
 });
