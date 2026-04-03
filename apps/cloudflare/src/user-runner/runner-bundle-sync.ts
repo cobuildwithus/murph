@@ -3,10 +3,14 @@ import {
   encodeHostedBundleBase64,
   sameHostedBundlePayloadRef,
 } from "@murphai/runtime-state/node";
-import type {
-  HostedExecutionBundleRefs,
-  HostedExecutionRunnerResult,
-  HostedExecutionUserEnvStatus,
+import {
+  HOSTED_EXECUTION_BUNDLE_SLOTS,
+  mapHostedExecutionBundleSlotsAsync,
+  resolveHostedExecutionBundleKind,
+  type HostedExecutionBundleRefs,
+  type HostedExecutionBundleSlot,
+  type HostedExecutionRunnerResult,
+  type HostedExecutionUserEnvStatus,
 } from "@murphai/hosted-execution";
 
 import {
@@ -54,18 +58,13 @@ export class RunnerBundleSync {
   async readBundlesForRunner(): Promise<HostedExecutionRunnerResult["bundles"]> {
     const store = this.createBundleStore();
     const bundleState = await this.queueStore.readBundleMetaState();
-    return {
-      agentState: encodeHostedBundleBase64(await readRequiredBundleForRunner({
+    return mapHostedExecutionBundleSlotsAsync(async (slot) =>
+      encodeHostedBundleBase64(await readRequiredBundleForRunner({
         bundleStore: store,
-        kind: "agent-state",
-        ref: bundleState.bundleRefs.agentState,
-      })),
-      vault: encodeHostedBundleBase64(await readRequiredBundleForRunner({
-        bundleStore: store,
-        kind: "vault",
-        ref: bundleState.bundleRefs.vault,
-      })),
-    };
+        ref: bundleState.bundleRefs[slot],
+        slot,
+      }))
+    );
   }
 
   async readUserEnv(userId: string): Promise<Record<string, string>> {
@@ -114,29 +113,22 @@ export class RunnerBundleSync {
   ): Promise<RunnerStateRecord> {
     let nextExpectedVersions = expectedVersions;
     const bundleStore = this.createBundleStore();
-    const nextAgentStateBytes = decodeHostedBundleBase64(bundles.agentState);
-    const nextVaultBytes = decodeHostedBundleBase64(bundles.vault);
+    const nextBundleBytesBySlot = await mapHostedExecutionBundleSlotsAsync((slot) =>
+      decodeHostedBundleBase64(bundles[slot])
+    );
 
     for (let attempt = 0; attempt < BUNDLE_SWAP_RETRY_LIMIT; attempt += 1) {
       const bundleState = await this.queueStore.readBundleMetaState();
-      const nextBundleRefs = {
-        agentState: bundles.agentState === null
+      const nextBundleRefs = await mapHostedExecutionBundleSlotsAsync(async (slot) =>
+        bundles[slot] === null
           ? null
-          : await writeHostedBundleBytesIfChanged({
+          : writeHostedBundleBytesIfChanged({
               bundleStore,
-              currentRef: bundleState.bundleRefs.agentState,
-              kind: "agent-state",
-              plaintext: nextAgentStateBytes ?? new Uint8Array(),
-            }),
-        vault: bundles.vault === null
-          ? null
-          : await writeHostedBundleBytesIfChanged({
-              bundleStore,
-              currentRef: bundleState.bundleRefs.vault,
-              kind: "vault",
-              plaintext: nextVaultBytes ?? new Uint8Array(),
-            }),
-      };
+              currentRef: bundleState.bundleRefs[slot],
+              kind: resolveHostedExecutionBundleKind(slot),
+              plaintext: nextBundleBytesBySlot[slot] ?? new Uint8Array(),
+            })
+      );
 
       const swapped = await this.queueStore.compareAndSwapBundleRefs({
         expectedVersions: nextExpectedVersions,
@@ -199,8 +191,8 @@ export class RunnerBundleSync {
 
 async function readRequiredBundleForRunner(input: {
   bundleStore: HostedBundleStore;
-  kind: "agent-state" | "vault";
-  ref: HostedExecutionBundleRefs["agentState"] | HostedExecutionBundleRefs["vault"];
+  ref: HostedExecutionBundleRefs[HostedExecutionBundleSlot];
+  slot: HostedExecutionBundleSlot;
 }): Promise<Uint8Array | null> {
   if (!input.ref) {
     return null;
@@ -208,7 +200,9 @@ async function readRequiredBundleForRunner(input: {
 
   const bytes = await input.bundleStore.readBundle(input.ref);
   if (!bytes) {
-    throw new Error(`Hosted ${input.kind} bundle ${input.ref.key} is missing from R2.`);
+    throw new Error(
+      `Hosted ${resolveHostedExecutionBundleKind(input.slot)} bundle ${input.ref.key} is missing from R2.`,
+    );
   }
 
   return bytes;
@@ -221,27 +215,19 @@ function assertBundleRefsStillCompatible(input: {
   previousExpectedVersions: RunnerBundleVersions;
   userId: string;
 }): void {
-  if (
-    input.currentVersions.agentState !== input.previousExpectedVersions.agentState
-    && !sameHostedBundlePayloadRef(
-      input.currentBundleRefs.agentState,
-      input.nextBundleRefs.agentState,
-    )
-  ) {
-    throw new Error(
-      `Hosted agent-state bundle changed while applying the runner result for ${input.userId}.`,
-    );
-  }
+  for (const slot of HOSTED_EXECUTION_BUNDLE_SLOTS) {
+    if (
+      input.currentVersions[slot] === input.previousExpectedVersions[slot]
+      || sameHostedBundlePayloadRef(
+        input.currentBundleRefs[slot],
+        input.nextBundleRefs[slot],
+      )
+    ) {
+      continue;
+    }
 
-  if (
-    input.currentVersions.vault !== input.previousExpectedVersions.vault
-    && !sameHostedBundlePayloadRef(
-      input.currentBundleRefs.vault,
-      input.nextBundleRefs.vault,
-    )
-  ) {
     throw new Error(
-      `Hosted vault bundle changed while applying the runner result for ${input.userId}.`,
+      `Hosted ${resolveHostedExecutionBundleKind(slot)} bundle changed while applying the runner result for ${input.userId}.`,
     );
   }
 }

@@ -101,13 +101,20 @@ describe("RunnerQueueStore", () => {
 
     const sql = state.storage.sql!;
     sql.exec(
-      `UPDATE runner_meta
-        SET agent_state_bundle_ref_json = ?, vault_bundle_ref_json = ?
-        WHERE singleton = 1`,
+      `UPDATE runner_bundle_slots
+        SET bundle_ref_json = ?
+        WHERE slot = ?`,
       "{not-json",
+      "agentState",
+    );
+    sql.exec(
+      `UPDATE runner_bundle_slots
+        SET bundle_ref_json = ?
+        WHERE slot = ?`,
       JSON.stringify({
         hash: 7,
       }),
+      "vault",
     );
 
     const repairedStore = new RunnerQueueStore(state as never);
@@ -116,16 +123,24 @@ describe("RunnerQueueStore", () => {
     expect(record.bundleRefs.vault).toBeNull();
     expect(record.lastError).toContain("cleared malformed bundle ref(s): agent-state, vault");
 
-    const meta = sql.exec<{
-      agent_state_bundle_ref_json: string | null;
-      vault_bundle_ref_json: string | null;
+    const bundleSlots = sql.exec<{
+      bundle_ref_json: string | null;
+      slot: string;
     }>(
-      `SELECT agent_state_bundle_ref_json, vault_bundle_ref_json
-      FROM runner_meta
-      WHERE singleton = 1`,
-    ).one();
-    expect(meta.agent_state_bundle_ref_json).toBeNull();
-    expect(meta.vault_bundle_ref_json).toBeNull();
+      `SELECT slot, bundle_ref_json
+      FROM runner_bundle_slots
+      ORDER BY slot ASC`,
+    ).toArray();
+    expect(bundleSlots).toEqual([
+      {
+        bundle_ref_json: null,
+        slot: "agentState",
+      },
+      {
+        bundle_ref_json: null,
+        slot: "vault",
+      },
+    ]);
   });
 
   it("sanitizes malformed bundle refs when callers only read bundle meta state", async () => {
@@ -135,30 +150,52 @@ describe("RunnerQueueStore", () => {
 
     const sql = state.storage.sql!;
     sql.exec(
-      `UPDATE runner_meta
-        SET agent_state_bundle_ref_json = ?, vault_bundle_ref_json = ?
-        WHERE singleton = 1`,
+      `UPDATE runner_bundle_slots
+        SET bundle_ref_json = ?
+        WHERE slot = ?`,
       "{not-json",
+      "agentState",
+    );
+    sql.exec(
+      `UPDATE runner_bundle_slots
+        SET bundle_ref_json = ?
+        WHERE slot = ?`,
       JSON.stringify({
         hash: 7,
       }),
+      "vault",
     );
 
     const bundleMetaState = await store.readBundleMetaState();
     expect(bundleMetaState.bundleRefs.agentState).toBeNull();
     expect(bundleMetaState.bundleRefs.vault).toBeNull();
 
-    const meta = sql.exec<{
-      agent_state_bundle_ref_json: string | null;
-      last_error: string | null;
-      vault_bundle_ref_json: string | null;
+    const bundleSlots = sql.exec<{
+      bundle_ref_json: string | null;
+      slot: string;
     }>(
-      `SELECT agent_state_bundle_ref_json, vault_bundle_ref_json, last_error
+      `SELECT slot, bundle_ref_json
+      FROM runner_bundle_slots
+      ORDER BY slot ASC`,
+    ).toArray();
+    expect(bundleSlots).toEqual([
+      {
+        bundle_ref_json: null,
+        slot: "agentState",
+      },
+      {
+        bundle_ref_json: null,
+        slot: "vault",
+      },
+    ]);
+
+    const meta = sql.exec<{
+      last_error: string | null;
+    }>(
+      `SELECT last_error
       FROM runner_meta
       WHERE singleton = 1`,
     ).one();
-    expect(meta.agent_state_bundle_ref_json).toBeNull();
-    expect(meta.vault_bundle_ref_json).toBeNull();
     expect(meta.last_error).toContain("cleared malformed bundle ref(s): agent-state, vault");
   });
 

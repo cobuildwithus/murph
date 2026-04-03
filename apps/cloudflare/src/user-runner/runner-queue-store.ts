@@ -1,8 +1,10 @@
 import {
+  HOSTED_EXECUTION_BUNDLE_SLOTS,
   deriveHostedExecutionErrorCode,
   normalizeHostedExecutionOperatorMessage,
   parseHostedExecutionDispatchRequest,
   summarizeHostedExecutionError,
+  type HostedExecutionBundleSlot,
   type HostedExecutionDispatchRequest,
   type HostedExecutionRunLevel,
   type HostedExecutionRunPhase,
@@ -16,15 +18,17 @@ import {
   appendBoundedRunnerTimelineEntry,
   assignRunnerBundleRefs,
   classifyMalformedPendingDispatchError,
+  createDefaultRunnerBundleSlots,
   createDefaultRunnerMetaRow,
   mergeRunnerLastError,
   nextConsumedEventExactExpiryIso,
   parseRunnerStringArray,
   parseStoredRunnerTimelineEntries,
   projectRunnerStateRecord,
-  readRunnerBundleMetaStateFromMeta,
   resolveRunnerNextWakeAt,
+  type RunnerBundleSlotRow,
   type RunnerMetaRow,
+  type RunnerStoredBundleSlots,
 } from "./runner-queue-state.js";
 import {
   MAX_BACKPRESSURED_EVENT_IDS,
@@ -70,6 +74,7 @@ export class RunnerQueueStore {
 
   constructor(private readonly state: DurableObjectStateLike) {
     ensureRunnerQueueSchema(this.sql);
+    this.ensureCanonicalBundleSlotRowsSync();
     this.repairStoredMetaStateSync();
   }
 
@@ -258,10 +263,11 @@ export class RunnerQueueStore {
     this.pruneExpiredConsumedEventsSync();
 
     const meta = this.requireMetaRowSync();
+    const bundleSlots = this.selectBundleSlotStateSync();
     this.removePendingDispatchSync(committed.eventId);
     this.deletePoisonedEventSync(committed.eventId);
     this.writeConsumedEventSync(committed.eventId, nextConsumedEventExactExpiryIso());
-    assignRunnerBundleRefs(meta, committed.bundleRefs);
+    assignRunnerBundleRefs(bundleSlots, committed.bundleRefs);
     meta.backpressured_event_ids_json = JSON.stringify(
       parseRunnerStringArray(meta.backpressured_event_ids_json)
         .filter((eventId) => eventId !== committed.eventId),
@@ -272,6 +278,7 @@ export class RunnerQueueStore {
     meta.last_run_at = committed.committedAt;
     meta.retrying_event_id = null;
     this.writeMetaRowSync(meta);
+    this.writeBundleSlotStateSync(bundleSlots);
 
     return this.readStateFromMetaSync(meta);
   }
@@ -283,7 +290,8 @@ export class RunnerQueueStore {
     this.pruneExpiredConsumedEventsSync();
 
     const meta = this.requireMetaRowSync();
-    assignRunnerBundleRefs(meta, committed.bundleRefs);
+    const bundleSlots = this.selectBundleSlotStateSync();
+    assignRunnerBundleRefs(bundleSlots, committed.bundleRefs);
     meta.in_flight = 0;
     this.clearLastErrorMetaSync(meta);
     meta.last_event_id = committed.eventId;
@@ -292,6 +300,7 @@ export class RunnerQueueStore {
       ? committed.eventId
       : meta.retrying_event_id;
     this.writeMetaRowSync(meta);
+    this.writeBundleSlotStateSync(bundleSlots);
 
     return this.readStateFromMetaSync(meta);
   }
@@ -409,8 +418,9 @@ export class RunnerQueueStore {
     this.pruneExpiredConsumedEventsSync();
 
     const meta = this.requireMetaRowSync();
+    const bundleSlots = this.selectBundleSlotStateSync();
     const errorMessage = summarizeHostedExecutionError(input.error);
-    assignRunnerBundleRefs(meta, input.committed.bundleRefs);
+    assignRunnerBundleRefs(bundleSlots, input.committed.bundleRefs);
     meta.in_flight = 0;
     meta.last_error = errorMessage;
     meta.last_error_at = new Date().toISOString();
@@ -419,6 +429,7 @@ export class RunnerQueueStore {
     meta.last_run_at = input.committed.committedAt;
     meta.retrying_event_id = input.committed.eventId;
     this.writeMetaRowSync(meta);
+    this.writeBundleSlotStateSync(bundleSlots);
 
     this.sql.exec(
       `UPDATE pending_events
@@ -520,18 +531,18 @@ export class RunnerQueueStore {
     this.pruneExpiredConsumedEventsSync();
 
     const meta = this.requireMetaRowSync();
-    if (
-      meta.agent_state_bundle_version !== input.expectedVersions.agentState
-      || meta.vault_bundle_version !== input.expectedVersions.vault
-    ) {
+    const bundleSlots = this.selectBundleSlotStateSync();
+    if (HOSTED_EXECUTION_BUNDLE_SLOTS.some(
+      (slot) => bundleSlots.bundleVersions[slot] !== input.expectedVersions[slot],
+    )) {
       return {
         applied: false,
         record: this.readStateFromMetaSync(meta),
       };
     }
 
-    assignRunnerBundleRefs(meta, input.nextBundleRefs);
-    this.writeMetaRowSync(meta);
+    assignRunnerBundleRefs(bundleSlots, input.nextBundleRefs);
+    this.writeBundleSlotStateSync(bundleSlots);
     return {
       applied: true,
       record: this.readStateFromMetaSync(meta),
@@ -595,6 +606,7 @@ export class RunnerQueueStore {
     nextPendingAvailableAtOverride: string | null = null,
   ): RunnerStateRecord {
     const projected = projectRunnerStateRecord({
+      bundleSlots: this.selectBundleSlotStateSync(),
       meta,
       nextPendingAvailableAtOverride,
       pendingDispatches: this.readPendingDispatchesSync(),
@@ -604,6 +616,7 @@ export class RunnerQueueStore {
     if (projected.changed) {
       Object.assign(meta, projected.sanitizedMeta);
       this.writeMetaRowSync(meta);
+      this.writeBundleSlotStateSync(projected.sanitizedBundleSlots);
     }
 
     return projected.record;
@@ -616,6 +629,7 @@ export class RunnerQueueStore {
     }
 
     const projected = projectRunnerStateRecord({
+      bundleSlots: this.selectBundleSlotStateSync(),
       meta,
       pendingDispatches: [],
       poisonedEventIds: [],
@@ -626,6 +640,7 @@ export class RunnerQueueStore {
 
     Object.assign(meta, projected.sanitizedMeta);
     this.writeMetaRowSync(meta);
+    this.writeBundleSlotStateSync(projected.sanitizedBundleSlots);
   }
 
   private requireMetaRowSync(): RunnerMetaRow {
@@ -672,12 +687,8 @@ export class RunnerQueueStore {
         next_wake_at,
         retrying_event_id,
         backpressured_event_ids_json,
-        agent_state_bundle_ref_json,
-        vault_bundle_ref_json,
         run_json,
-        timeline_json,
-        agent_state_bundle_version,
-        vault_bundle_version
+        timeline_json
       FROM runner_meta
       WHERE singleton = 1`,
     ).toArray()[0] ?? null;
@@ -704,13 +715,9 @@ export class RunnerQueueStore {
         next_wake_at,
         retrying_event_id,
         backpressured_event_ids_json,
-        agent_state_bundle_ref_json,
-        vault_bundle_ref_json,
         run_json,
-        timeline_json,
-        agent_state_bundle_version,
-        vault_bundle_version
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        timeline_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
       meta.activated,
@@ -723,18 +730,66 @@ export class RunnerQueueStore {
       meta.next_wake_at,
       meta.retrying_event_id,
       meta.backpressured_event_ids_json,
-      meta.agent_state_bundle_ref_json,
-      meta.vault_bundle_ref_json,
       meta.run_json,
       meta.timeline_json,
-      meta.agent_state_bundle_version,
-      meta.vault_bundle_version,
     );
   }
 
   private writeMetaRowSync(meta: RunnerMetaRow): void {
     this.insertMetaRowSync(meta);
     this.userId = meta.user_id;
+  }
+
+  private ensureCanonicalBundleSlotRowsSync(): void {
+    for (const slot of HOSTED_EXECUTION_BUNDLE_SLOTS) {
+      this.sql.exec(
+        `INSERT OR IGNORE INTO runner_bundle_slots (
+          slot,
+          bundle_ref_json,
+          bundle_version
+        ) VALUES (?, ?, ?)`,
+        slot,
+        null,
+        0,
+      );
+    }
+  }
+
+  private selectBundleSlotStateSync(): RunnerStoredBundleSlots {
+    const bundleSlots = createDefaultRunnerBundleSlots();
+
+    for (const row of this.sql.exec<RunnerBundleSlotRow>(
+      `SELECT
+        slot,
+        bundle_ref_json,
+        bundle_version
+      FROM runner_bundle_slots`,
+    ).toArray()) {
+      if (!HOSTED_EXECUTION_BUNDLE_SLOTS.includes(row.slot as HostedExecutionBundleSlot)) {
+        continue;
+      }
+
+      const slot = row.slot as HostedExecutionBundleSlot;
+      bundleSlots.bundleRefJsonBySlot[slot] = row.bundle_ref_json;
+      bundleSlots.bundleVersions[slot] = row.bundle_version;
+    }
+
+    return bundleSlots;
+  }
+
+  private writeBundleSlotStateSync(bundleSlots: RunnerStoredBundleSlots): void {
+    for (const slot of HOSTED_EXECUTION_BUNDLE_SLOTS) {
+      this.sql.exec(
+        `INSERT OR REPLACE INTO runner_bundle_slots (
+          slot,
+          bundle_ref_json,
+          bundle_version
+        ) VALUES (?, ?, ?)`,
+        slot,
+        bundleSlots.bundleRefJsonBySlot[slot],
+        bundleSlots.bundleVersions[slot],
+      );
+    }
   }
 
   private readPendingDispatchesSync(): PendingDispatchRecord[] {
