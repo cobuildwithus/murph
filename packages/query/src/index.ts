@@ -129,6 +129,7 @@ export {
   DERIVED_KNOWLEDGE_ROOT,
   readDerivedKnowledgeGraph,
   readDerivedKnowledgeGraphWithIssues,
+  renderDerivedKnowledgeIndex,
   searchDerivedKnowledgeGraph,
   searchDerivedKnowledgeVault,
   type DerivedKnowledgeGraph,
@@ -139,4 +140,15 @@ export {
   type DerivedKnowledgeSearchHit,
   type DerivedKnowledgeSearchResult,
 } from "./knowledge-graph.ts";
+export {
+  DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT,
+  extractDerivedKnowledgeRelatedSlugs,
+  extractDerivedKnowledgeSourcePaths,
+  humanizeDerivedKnowledgeValue,
+  normalizeDerivedKnowledgeSlug,
+  normalizeDerivedKnowledgeTag,
+  sameDerivedKnowledgeStringSet,
+  summarizeDerivedKnowledgeBody,
+  uniqueKnowledgeStrings,
+} from "./knowledge-page-model.ts";
 export * from "./health/index.ts";
