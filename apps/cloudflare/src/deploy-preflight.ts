@@ -20,6 +20,13 @@ export function listMissingHostedDeployEnvironment(
     missing.push("CF_PUBLIC_BASE_URL");
   }
 
+  if (
+    normalizeString(source.MURPH_WEB_SEARCH_PROVIDER)?.toLowerCase() === "brave"
+    && normalizeString(source.BRAVE_API_KEY) === null
+  ) {
+    missing.push("BRAVE_API_KEY");
+  }
+
   return missing;
 }
 
