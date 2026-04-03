@@ -94,6 +94,7 @@ export const cliVitestProjectSpecs: readonly CliVitestProjectSpec[] = [
       "incur-smoke.test.ts",
       "inbox-incur-smoke.test.ts",
       "cli-test-helpers.test.ts",
+      "wearables-schema.test.ts",
       "release-script-coverage-audit.test.ts",
       "release-workflow-guards.test.ts",
       "assistant-cli-access.test.ts",
