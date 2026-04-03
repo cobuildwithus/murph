@@ -206,6 +206,7 @@ Those are contributor workflows, not the main product entrypoint, which is why t
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) for the top-level system map and trust boundaries
 - [`docs/architecture.md`](docs/architecture.md) for the one-page architecture summary
+- [`docs/device-provider-contribution-kit.md`](docs/device-provider-contribution-kit.md) for the wearable-provider contribution guide, compatibility matrix, and scaffolds
 - [`packages/cli/README.md`](packages/cli/README.md) for the CLI package and release flow
 - [`apps/web/README.md`](apps/web/README.md) for the hosted control plane
 - [`apps/cloudflare/README.md`](apps/cloudflare/README.md) for the hosted execution plane

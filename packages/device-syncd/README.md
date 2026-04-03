@@ -2,6 +2,8 @@
 
 Published local device sync runtime for Murph.
 
+Contributing a new wearable provider? Start with `docs/device-provider-contribution-kit.md` in the repo root, then use the scaffolds listed in `docs/templates/README.md`.
+
 Murph's CLI can install, start, reuse, and stop this daemon for the selected vault through `murph device daemon ...`, so most operators should treat it as a built-in local service rather than a separately managed sidecar.
 
 The daemon binds the control plane to localhost by default. CLI and web clients must authenticate that control plane with a bearer token. If provider callbacks or webhooks need public reachability, expose only the public callback/webhook routes through a separate listener or reverse proxy instead of widening `/accounts/*` and `/providers/*/connect`.
