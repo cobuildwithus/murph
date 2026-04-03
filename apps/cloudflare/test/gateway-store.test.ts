@@ -1,9 +1,29 @@
 import { describe, expect, it } from "vitest";
 
+import { buildHostedStorageAad } from "../src/crypto-context.ts";
+import {
+  decryptHostedBundle,
+  encryptHostedBundle,
+  type HostedCipherEnvelope,
+} from "../src/crypto.ts";
 import { HostedGatewayProjectionStore } from "../src/gateway-store.ts";
+import type { DurableObjectStateLike } from "../src/user-runner/types.js";
 
 const EMAIL_THREAD_SESSION_KEY =
   "gwcs_eyJraW5kIjoiY29udmVyc2F0aW9uIiwicm91dGVUb2tlbiI6ImQ3ZTZiMDU4Y2MzZWZmMWQ5NzNjZGM5YTM0ZjVjNGJjYWU3YzQxNjBlNzRjY2MwZmIyZDU5NGU3ZGEyYjkzNmQiLCJ2ZXJzaW9uIjoyfQ";
+const GATEWAY_STATE_STORAGE_AAD = buildHostedStorageAad({
+  key: "gateway.state",
+  purpose: "gateway-store",
+  record: "state",
+});
+const TEST_KEY = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+const TEST_CRYPTO = {
+  key: TEST_KEY,
+  keyId: "v1",
+  keysById: {
+    v1: TEST_KEY,
+  },
+};
 
 function createState(options?: {
   initialValues?: Record<string, unknown>;
@@ -13,22 +33,41 @@ function createState(options?: {
     Object.entries(options?.initialValues ?? {}),
   );
 
-  return {
+  const state: DurableObjectStateLike = {
     storage: {
       async get<T>(key: string): Promise<T | undefined> {
         return values.get(key) as T | undefined;
+      },
+      async getAlarm(): Promise<number | null> {
+        return null;
       },
       async put<T>(key: string, value: T): Promise<void> {
         await options?.onPut?.(key, value);
         values.set(key, value);
       },
+      async setAlarm(): Promise<void> {},
     },
+  };
+
+  return {
+    state,
+    values,
+  };
+}
+
+function createStore(options?: Parameters<typeof createState>[0]) {
+  const { state, values } = createState(options);
+
+  return {
+    state,
+    store: new HostedGatewayProjectionStore(state, TEST_CRYPTO),
+    values,
   };
 }
 
 describe("HostedGatewayProjectionStore", () => {
   it("resolves permission requests and emits permission events through the shared event-log helper", async () => {
-    const store = new HostedGatewayProjectionStore(createState());
+    const { store } = createStore();
 
     await store.applySnapshot({
       schema: "murph.gateway-projection-snapshot.v1",
@@ -79,8 +118,81 @@ describe("HostedGatewayProjectionStore", () => {
     });
   });
 
+  it("encrypts durable gateway state and round-trips conversation and message reads", async () => {
+    const { store, values } = createStore();
+
+    await store.applySnapshot({
+      schema: "murph.gateway-projection-snapshot.v1",
+      generatedAt: "2026-04-03T00:00:00.000Z",
+      conversations: [{
+        schema: "murph.gateway-conversation.v1",
+        sessionKey: EMAIL_THREAD_SESSION_KEY,
+        title: "Sensitive thread",
+        titleSource: "alias",
+        lastMessagePreview: "super secret preview",
+        lastActivityAt: "2026-04-03T00:00:00.000Z",
+        messageCount: 1,
+        canSend: true,
+        route: {
+          channel: "email",
+          identityId: "identity-1",
+          participantId: "participant-1",
+          threadId: "thread-1",
+          directness: "direct",
+          reply: {
+            kind: "thread",
+            target: "reply-1",
+          },
+        },
+      }],
+      messages: [{
+        schema: "murph.gateway-message.v1",
+        messageId: "message-1",
+        sessionKey: EMAIL_THREAD_SESSION_KEY,
+        direction: "inbound",
+        createdAt: "2026-04-03T00:00:00.000Z",
+        actorDisplayName: "Alice",
+        text: "super secret body",
+        attachments: [],
+      }],
+      permissions: [{
+        schema: "murph.gateway-permission-request.v1",
+        requestId: "perm-1",
+        sessionKey: EMAIL_THREAD_SESSION_KEY,
+        action: "send-message",
+        description: "Send a reply",
+        status: "open",
+        requestedAt: "2026-04-03T00:00:00.000Z",
+        resolvedAt: null,
+        note: null,
+      }],
+    });
+
+    const rawState = values.get("gateway.state") as HostedCipherEnvelope | undefined;
+    expect(rawState).toBeTruthy();
+    expect(rawState).toHaveProperty("ciphertext");
+    expect(values.has("gateway.snapshot")).toBe(false);
+    expect(values.has("gateway.events")).toBe(false);
+    expect(values.has("gateway.next-cursor")).toBe(false);
+    expect(values.has("gateway.permission-overrides")).toBe(false);
+    expect(JSON.stringify(rawState)).not.toContain("super secret preview");
+    expect(JSON.stringify(rawState)).not.toContain("super secret body");
+
+    const conversations = await store.listConversations();
+    expect(conversations.conversations).toHaveLength(1);
+    expect(conversations.conversations[0]?.title).toBe("Sensitive thread");
+
+    const messages = await store.readMessages({
+      sessionKey: EMAIL_THREAD_SESSION_KEY,
+      oldestFirst: true,
+      limit: 10,
+    });
+    expect(messages.messages).toHaveLength(1);
+    expect(messages.messages[0]?.text).toBe("super secret body");
+  });
+
   it("ignores replayed older snapshots after a newer projection was already stored", async () => {
-    const store = new HostedGatewayProjectionStore(createState());
+    const { store } = createStore();
 
     await store.applySnapshot({
       schema: "murph.gateway-projection-snapshot.v1",
@@ -188,20 +300,30 @@ describe("HostedGatewayProjectionStore", () => {
     const snapshotWriteSeen = new Promise<void>((resolve) => {
       markSnapshotWriteBlocked = resolve;
     });
-    const store = new HostedGatewayProjectionStore(createState({
+    const { store } = createStore({
       async onPut(key, value) {
+        if (key !== "gateway.state" || releaseSnapshotWrite !== null) {
+          return;
+        }
+
+        const plaintext = await decryptHostedBundle({
+          aad: GATEWAY_STATE_STORAGE_AAD,
+          envelope: value as HostedCipherEnvelope,
+          expectedKeyId: TEST_CRYPTO.keyId,
+          key: TEST_CRYPTO.key,
+          keysById: TEST_CRYPTO.keysById,
+          scope: "gateway-store",
+        });
+        const record = JSON.parse(new TextDecoder().decode(plaintext)) as {
+          baseSnapshot?: {
+            conversations?: Array<{
+              lastMessagePreview?: string;
+            }>;
+          } | null;
+        };
+
         if (
-          key === "gateway.snapshot"
-          && releaseSnapshotWrite === null
-          && typeof value === "object"
-          && value !== null
-          && "conversations" in value
-          && Array.isArray(value.conversations)
-          && value.conversations[0]
-          && typeof value.conversations[0] === "object"
-          && value.conversations[0] !== null
-          && "lastMessagePreview" in value.conversations[0]
-          && value.conversations[0].lastMessagePreview === "newest message"
+          record.baseSnapshot?.conversations?.[0]?.lastMessagePreview === "newest message"
         ) {
           const releasePromise = new Promise<void>((resolve) => {
             releaseSnapshotWrite = resolve;
@@ -210,7 +332,7 @@ describe("HostedGatewayProjectionStore", () => {
           await releasePromise;
         }
       },
-    }));
+    });
 
     await store.applySnapshot({
       schema: "murph.gateway-projection-snapshot.v1",
@@ -339,7 +461,7 @@ describe("HostedGatewayProjectionStore", () => {
   });
 
   it("keeps operator permission decisions applied across later runtime snapshots", async () => {
-    const store = new HostedGatewayProjectionStore(createState());
+    const { store } = createStore();
 
     await store.applySnapshot({
       schema: "murph.gateway-projection-snapshot.v1",
@@ -404,7 +526,7 @@ describe("HostedGatewayProjectionStore", () => {
   });
 
   it("treats identical permission retries as idempotent and preserves the original resolved timestamp", async () => {
-    const store = new HostedGatewayProjectionStore(createState());
+    const { store } = createStore();
 
     await store.applySnapshot({
       schema: "murph.gateway-projection-snapshot.v1",
@@ -446,18 +568,31 @@ describe("HostedGatewayProjectionStore", () => {
     expect(events.events).toHaveLength(1);
   });
 
-  it("fails closed when stored permission overrides are malformed", async () => {
-    const store = new HostedGatewayProjectionStore(createState({
-      initialValues: {
-        "gateway.permission-overrides": [{
+  it("fails closed when encrypted gateway state is malformed after decryption", async () => {
+    const encryptedInvalidState = await encryptHostedBundle({
+      aad: GATEWAY_STATE_STORAGE_AAD,
+      key: TEST_CRYPTO.key,
+      keyId: TEST_CRYPTO.keyId,
+      plaintext: new TextEncoder().encode(JSON.stringify({
+        baseSnapshot: null,
+        events: [],
+        nextCursor: 0,
+        permissionOverrides: [{
           requestId: "perm_invalid",
           status: "approved",
         }],
+        schema: "murph.hosted-gateway-state.v1",
+      })),
+      scope: "gateway-store",
+    });
+    const { store } = createStore({
+      initialValues: {
+        "gateway.state": encryptedInvalidState,
       },
-    }));
+    });
 
     await expect(store.listOpenPermissions()).rejects.toThrow(
-      "gateway.permission-overrides storage is invalid.",
+      "gateway.state storage is invalid.",
     );
   });
 });

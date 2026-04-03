@@ -90,7 +90,11 @@ export class HostedUserRunner {
     this.runnerContainerNamespace = runnerContainerNamespace;
     this.queueStore = new RunnerQueueStore(state);
     this.scheduler = new RunnerScheduler(this.queueStore, state, env.defaultAlarmDelayMs);
-    this.gatewayStore = new HostedGatewayProjectionStore(state);
+    this.gatewayStore = new HostedGatewayProjectionStore(state, {
+      key: env.bundleEncryptionKey,
+      keyId: env.bundleEncryptionKeyId,
+      keysById: env.bundleEncryptionKeysById,
+    });
     this.bundleSync = new RunnerBundleSync(
       bucket,
       env.bundleEncryptionKey,

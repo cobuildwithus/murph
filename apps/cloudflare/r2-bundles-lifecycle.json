@@ -27,6 +27,19 @@
       }
     },
     {
+      "id": "delete-transient-hosted-email-thread-routes-after-7d",
+      "enabled": true,
+      "conditions": {
+        "prefix": "transient/hosted-email/threads/"
+      },
+      "deleteObjectsTransition": {
+        "condition": {
+          "type": "Age",
+          "maxAge": 604800
+        }
+      }
+    },
+    {
       "id": "delete-transient-hosted-email-raw-messages-after-7d",
       "enabled": true,
       "conditions": {
