@@ -109,6 +109,20 @@ test("loadDeviceSyncEnvironment supports an explicit control token and public li
   assert.equal(loaded.http.publicPort, 9876);
 });
 
+test("loadDeviceSyncEnvironment ignores the removed bare PORT alias", () => {
+  const loaded = loadDeviceSyncEnvironment({
+    DEVICE_SYNC_VAULT_ROOT: "/tmp/murph-vault",
+    DEVICE_SYNC_PUBLIC_BASE_URL: "https://sync.example.test/device-sync",
+    DEVICE_SYNC_SECRET: "secret-for-tests",
+    DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
+    OURA_CLIENT_ID: "oura-client-id",
+    OURA_CLIENT_SECRET: "oura-client-secret",
+    PORT: "9999",
+  } as NodeJS.ProcessEnv);
+
+  assert.equal(loaded.http.port, 8788);
+});
+
 test("loadDeviceSyncEnvironment rejects partial public listener configuration", () => {
   assert.throws(
     () =>

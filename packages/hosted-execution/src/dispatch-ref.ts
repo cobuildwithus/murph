@@ -16,13 +16,6 @@ export interface HostedExecutionDispatchRef {
   userId: string;
 }
 
-export interface HostedExecutionDispatchRefFallback {
-  eventId: string;
-  eventKind: string;
-  occurredAt: string | null;
-  userId: string;
-}
-
 export function buildHostedExecutionDispatchRef(
   dispatch: HostedExecutionDispatchRequest,
 ): HostedExecutionDispatchRef {
@@ -44,7 +37,6 @@ export function buildHostedExecutionDispatchRef(
 
 export function readHostedExecutionDispatchRef(
   payloadJson: unknown,
-  fallback: HostedExecutionDispatchRefFallback,
 ): HostedExecutionDispatchRef | null {
   const payloadObject = toHostedExecutionObject(payloadJson);
   const nestedRef = toHostedExecutionObject(payloadObject.dispatchRef);
@@ -55,11 +47,11 @@ export function readHostedExecutionDispatchRef(
     return null;
   }
 
-  const eventId = readHostedExecutionText(nestedRef.eventId) ?? fallback.eventId;
-  const eventKind = readHostedExecutionEventKind(nestedRef.eventKind) ?? readHostedExecutionEventKind(fallback.eventKind);
-  const occurredAt = readHostedExecutionText(nestedRef.occurredAt) ?? fallback.occurredAt;
+  const eventId = readHostedExecutionText(nestedRef.eventId);
+  const eventKind = readHostedExecutionEventKind(nestedRef.eventKind);
+  const occurredAt = readHostedExecutionText(nestedRef.occurredAt);
   const share = readHostedExecutionShareReference(nestedRef.share);
-  const userId = readHostedExecutionText(nestedRef.userId) ?? fallback.userId;
+  const userId = readHostedExecutionText(nestedRef.userId);
 
   if (!eventId || !eventKind || !occurredAt || !userId) {
     return null;

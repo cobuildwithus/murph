@@ -308,15 +308,7 @@ function readHostedWebhookSideEffect(
 
   switch (kind) {
     case "hosted_execution_dispatch": {
-      const dispatchRef = readHostedExecutionDispatchRef(
-        payload,
-        {
-          eventId: "",
-          eventKind: "",
-          occurredAt: null,
-          userId: "",
-        },
-      );
+      const dispatchRef = readHostedExecutionDispatchRef(payload);
 
       if (!dispatchRef) {
         return null;

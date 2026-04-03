@@ -368,18 +368,8 @@ function assertHostedExecutionOutboxRecordMatches(
     || record.sourceType !== expected.sourceType
     || record.userId !== expected.userId
     || !isDeepStrictEqual(
-      readHostedExecutionOutboxPayload(record.payloadJson, {
-        eventId: record.eventId,
-        eventKind: record.eventKind,
-        occurredAt: null,
-        userId: record.userId,
-      }),
-      readHostedExecutionOutboxPayload(expected.payloadJson, {
-        eventId: expected.eventId,
-        eventKind: expected.eventKind,
-        occurredAt: null,
-        userId: expected.userId,
-      }),
+      readHostedExecutionOutboxPayload(record.payloadJson),
+      readHostedExecutionOutboxPayload(expected.payloadJson),
     )
   ) {
     throw new Error(

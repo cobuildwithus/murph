@@ -13,13 +13,6 @@ import {
 import { createHostedPhoneLookupKey } from "./contact-privacy";
 import type { HostedWebhookDispatchSideEffect } from "./webhook-receipt-types";
 
-const EMPTY_DISPATCH_REF_FALLBACK = {
-  eventId: "",
-  eventKind: "",
-  occurredAt: null,
-  userId: "",
-} as const;
-
 export function readHostedWebhookReceiptDispatchByEventId(
   payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
   eventId: string,
@@ -45,7 +38,6 @@ export function buildHostedWebhookDispatchFromPayload(
 ): HostedExecutionDispatchRequest | null {
   const dispatchRef = readHostedExecutionDispatchRef(
     payload as unknown as Prisma.InputJsonValue | Prisma.JsonValue,
-    EMPTY_DISPATCH_REF_FALLBACK,
   );
 
   if (!dispatchRef) {

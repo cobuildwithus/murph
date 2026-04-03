@@ -871,24 +871,12 @@ describe("@murphai/hosted-execution", () => {
         dispatchRef,
         schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
       },
-      {
-        eventId: dispatch.eventId,
-        eventKind: dispatch.event.kind,
-        occurredAt: dispatch.occurredAt,
-        userId: dispatch.event.userId,
-      },
     )).toBeNull();
     expect(readHostedExecutionDispatchRef(
       {
         dispatchRef,
         schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
         storage: "reference",
-      },
-      {
-        eventId: dispatch.eventId,
-        eventKind: dispatch.event.kind,
-        occurredAt: dispatch.occurredAt,
-        userId: dispatch.event.userId,
       },
     )).toEqual(dispatchRef);
     expect(dispatchRef).toEqual({
@@ -897,6 +885,20 @@ describe("@murphai/hosted-execution", () => {
       occurredAt: "2026-03-28T09:00:00.000Z",
       userId: "member_123",
     });
+  });
+
+  it("rejects incomplete stored dispatch refs instead of backfilling them", () => {
+    expect(readHostedExecutionDispatchRef(
+      {
+        dispatchRef: {
+          eventId: "email:raw_email_123",
+          eventKind: "email.message.received",
+          occurredAt: "2026-03-28T09:00:00.000Z",
+        },
+        schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+        storage: "reference",
+      },
+    )).toBeNull();
   });
 
   it("builds and reads inline and reference outbox payloads", () => {
@@ -928,20 +930,10 @@ describe("@murphai/hosted-execution", () => {
       storage: "reference",
     });
     expect(
-      readHostedExecutionOutboxPayload(inlinePayload, {
-        eventId: inlineDispatch.eventId,
-        eventKind: inlineDispatch.event.kind,
-        occurredAt: inlineDispatch.occurredAt,
-        userId: inlineDispatch.event.userId,
-      }),
+      readHostedExecutionOutboxPayload(inlinePayload),
     ).toEqual(inlinePayload);
     expect(
-      readHostedExecutionOutboxPayload(referencePayload, {
-        eventId: referenceDispatch.eventId,
-        eventKind: referenceDispatch.event.kind,
-        occurredAt: referenceDispatch.occurredAt,
-        userId: referenceDispatch.event.userId,
-      }),
+      readHostedExecutionOutboxPayload(referencePayload),
     ).toEqual(referencePayload);
   });
 

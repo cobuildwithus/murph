@@ -39,7 +39,6 @@ import {
   sampleRecordSchema,
   vaultMetadataSchema,
   workoutFormatFrontmatterSchema,
-  parseFrontmatterMarkdown,
   parseFrontmatterDocument,
 } from "@murphai/contracts";
 import { schemaCatalog } from "@murphai/contracts/schemas";
@@ -233,18 +232,26 @@ assertHasErrors(
   [/startedOn/u, /Invalid ISO date string/u],
 );
 
-assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.core), exampleFrontmatterObjects.core);
-assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.journalDay), exampleFrontmatterObjects.journalDay);
-assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.experiment), exampleFrontmatterObjects.experiment);
-assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.food), exampleFrontmatterObjects.food);
-assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.provider), exampleFrontmatterObjects.provider);
-assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.recipe), {
-  ...exampleFrontmatterObjects.recipe,
-  servings: "2",
-  prepTimeMinutes: "15",
-  cookTimeMinutes: "20",
-  totalTimeMinutes: "35",
-});
+assert.deepEqual(
+  parseFrontmatterDocument(exampleFrontmatterMarkdown.core).attributes,
+  exampleFrontmatterObjects.core,
+);
+assert.deepEqual(
+  parseFrontmatterDocument(exampleFrontmatterMarkdown.journalDay).attributes,
+  exampleFrontmatterObjects.journalDay,
+);
+assert.deepEqual(
+  parseFrontmatterDocument(exampleFrontmatterMarkdown.experiment).attributes,
+  exampleFrontmatterObjects.experiment,
+);
+assert.deepEqual(
+  parseFrontmatterDocument(exampleFrontmatterMarkdown.food).attributes,
+  exampleFrontmatterObjects.food,
+);
+assert.deepEqual(
+  parseFrontmatterDocument(exampleFrontmatterMarkdown.provider).attributes,
+  exampleFrontmatterObjects.provider,
+);
 assert.deepEqual(
   parseFrontmatterDocument(exampleFrontmatterMarkdown.recipe).attributes,
   exampleFrontmatterObjects.recipe,
@@ -252,52 +259,6 @@ assert.deepEqual(
 assert.deepEqual(
   parseFrontmatterDocument(exampleFrontmatterMarkdown.workoutFormat).attributes,
   exampleFrontmatterObjects.workoutFormat,
-);
-assert.deepEqual(
-  parseFrontmatterMarkdown(`---
-flag: true
-count: 42
-tags:
-  - true
-  - 42
----
-`),
-  {
-    flag: "true",
-    count: "42",
-    tags: ["true", "42"],
-  },
-);
-assert.deepEqual(
-  parseFrontmatterMarkdown(`---
-details:
-  nested: true
----
-`),
-  {
-    details: {
-      nested: "true",
-    },
-  },
-);
-assert.throws(
-  () =>
-    parseFrontmatterMarkdown(`---
-schema-version: murph.frontmatter.core.v1
----
-`),
-  /Unsupported frontmatter line: schema-version: murph\.frontmatter\.core\.v1/,
-);
-assert.throws(
-  () =>
-    parseFrontmatterMarkdown(`---
-title: Example
-`),
-  /Frontmatter terminator --- not found/,
-);
-assert.throws(
-  () => parseFrontmatterMarkdown("title: Example"),
-  /Frontmatter must start with ---/,
 );
 assert.deepEqual(
   parseFrontmatterDocument(`---

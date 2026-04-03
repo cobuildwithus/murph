@@ -123,12 +123,7 @@ describe("hosted execution contract parity", () => {
       const dispatch = dispatchBuilders[kind]();
       const dispatchRef = buildHostedExecutionDispatchRef(dispatch);
       const payload = serializeHostedExecutionOutboxPayload(dispatch);
-      const parsedDispatchRef = readHostedExecutionDispatchRef(payload, {
-        eventId: dispatch.eventId,
-        eventKind: dispatch.event.kind,
-        occurredAt: dispatch.occurredAt,
-        userId: dispatch.event.userId,
-      });
+      const parsedDispatchRef = readHostedExecutionDispatchRef(payload);
 
       expect(dispatch.event.kind).toBe(kind);
       expect(parseHostedExecutionEvent(dispatch.event)).toEqual(dispatch.event);
