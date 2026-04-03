@@ -10,6 +10,7 @@ import {
   isHostedWebDevFileSystemCacheEnabled,
   resolveHostedWebDistDir,
 } from "./next-artifacts";
+import { readHostedPublicOrigin } from "./src/lib/hosted-web/public-url";
 
 interface StaticHeader {
   key: string;
@@ -17,6 +18,16 @@ interface StaticHeader {
 }
 
 const HOSTED_WEB_HEADER_SOURCE = "/(.*)";
+const PRIVY_CUSTOM_DOMAIN_ENV_KEYS = [
+  "PRIVY_CUSTOM_AUTH_DOMAIN",
+  "NEXT_PUBLIC_PRIVY_CUSTOM_AUTH_DOMAIN",
+  "PRIVY_AUTH_DOMAIN",
+  "NEXT_PUBLIC_PRIVY_AUTH_DOMAIN",
+] as const;
+const PRIVY_BASE_DOMAIN_ENV_KEYS = [
+  "PRIVY_BASE_DOMAIN",
+  "NEXT_PUBLIC_PRIVY_BASE_DOMAIN",
+] as const;
 const PRIVY_REQUIRED_CHILD_FRAME_SOURCES = [
   "https://auth.privy.io",
   "https://verify.walletconnect.com",
@@ -37,27 +48,37 @@ const require = createRequire(import.meta.url);
 export const WORKSPACE_SOURCE_PACKAGE_NAMES = HOSTED_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES;
 
 export function resolvePrivyBaseDomainOrigin(value: string | null | undefined): string | null {
-  if (typeof value !== "string") {
+  const parsed = parseConfiguredOrigin(value);
+
+  if (!parsed || isLoopbackHostname(parsed.hostname)) {
     return null;
   }
 
-  const normalized = value.trim();
-  if (!normalized) {
-    return null;
+  const normalizedHostname = parsed.hostname.startsWith("privy.")
+    ? parsed.hostname
+    : `privy.${parsed.hostname.replace(/^www\./u, "")}`;
+
+  return buildOrigin(parsed.protocol, normalizedHostname, parsed.port);
+}
+
+export function resolveHostedPrivyOrigin(
+  environment: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const configuredCustomOrigin = resolveConfiguredOrigin(readFirstConfiguredValue(environment, PRIVY_CUSTOM_DOMAIN_ENV_KEYS));
+
+  if (configuredCustomOrigin) {
+    return configuredCustomOrigin;
   }
 
-  try {
-    const parsed = new URL(normalized.includes("://") ? normalized : `https://${normalized}`);
-    const host = parsed.host.trim();
+  const configuredBaseDomainOrigin = resolvePrivyBaseDomainOrigin(
+    readFirstConfiguredValue(environment, PRIVY_BASE_DOMAIN_ENV_KEYS),
+  );
 
-    if (!host) {
-      return null;
-    }
-
-    return `https://${host.startsWith("privy.") ? host : `privy.${host}`}`;
-  } catch {
-    return null;
+  if (configuredBaseDomainOrigin) {
+    return configuredBaseDomainOrigin;
   }
+
+  return resolvePrivyBaseDomainOrigin(readHostedPublicOrigin(environment));
 }
 
 export function buildHostedWebContentSecurityPolicy(
@@ -65,7 +86,7 @@ export function buildHostedWebContentSecurityPolicy(
 ): string {
   const isDevelopment = environment.NODE_ENV === "development";
   const isProduction = environment.NODE_ENV === "production";
-  const privyBaseDomainOrigin = resolvePrivyBaseDomainOrigin(environment.PRIVY_BASE_DOMAIN);
+  const privyBaseDomainOrigin = resolveHostedPrivyOrigin(environment);
   const privyFrameSources = uniqueSources([
     ...PRIVY_REQUIRED_CHILD_FRAME_SOURCES,
     privyBaseDomainOrigin,
@@ -184,4 +205,55 @@ export default function nextConfig(phase: string): NextConfig {
 
 function uniqueSources(sources: readonly (string | null | undefined)[]): string[] {
   return [...new Set(sources.filter((value): value is string => Boolean(value)))];
+}
+
+function readFirstConfiguredValue(
+  environment: NodeJS.ProcessEnv,
+  keys: readonly string[],
+): string | null {
+  for (const key of keys) {
+    const value = environment[key];
+
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function resolveConfiguredOrigin(value: string | null | undefined): string | null {
+  const parsed = parseConfiguredOrigin(value);
+
+  if (!parsed) {
+    return null;
+  }
+
+  return buildOrigin(parsed.protocol, parsed.hostname, parsed.port);
+}
+
+function parseConfiguredOrigin(value: string | null | undefined): URL | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+
+  if (!normalized) {
+    return null;
+  }
+
+  try {
+    return new URL(normalized.includes("://") ? normalized : `https://${normalized}`);
+  } catch {
+    return null;
+  }
+}
+
+function buildOrigin(protocol: string, hostname: string, port: string): string {
+  return `${protocol}//${hostname}${port ? `:${port}` : ""}`;
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
 }
