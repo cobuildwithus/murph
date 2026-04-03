@@ -160,6 +160,23 @@ export function resolveHostedEmailInboundSenderAddress(input: {
     : null;
 }
 
+export function resolveHostedEmailDirectSenderLookupAddress(input: {
+  envelopeFrom?: string | null;
+  hasRepeatedHeaderFrom?: boolean;
+  headerFrom?: string | null;
+}): string | null {
+  if (input.hasRepeatedHeaderFrom) {
+    return null;
+  }
+
+  const envelopeSender = normalizeHostedEmailAddress(input.envelopeFrom);
+  const headerSender = resolveHostedEmailHeaderSenderAddress(input.headerFrom);
+
+  return envelopeSender && headerSender && envelopeSender === headerSender
+    ? headerSender
+    : null;
+}
+
 export function resolveHostedEmailAuthorizedSenderAddresses(input: {
   allowThreadParticipants?: boolean;
   threadTarget?: HostedEmailThreadTarget | null;

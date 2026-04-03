@@ -168,6 +168,7 @@ const ROOT_REPO_PROJECTS: RootRepoProject[] = [
       "packages/runtime-state/test/hosted-bundle.test.ts",
       "packages/runtime-state/test/assistant-usage.test.ts",
       "packages/runtime-state/test/hosted-execution-reexport.test.ts",
+      "packages/runtime-state/test/hosted-email.test.ts",
       "packages/runtime-state/test/hosted-user-env.test.ts",
       "packages/runtime-state/test/ulid.test.ts",
     ],

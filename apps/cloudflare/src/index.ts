@@ -67,6 +67,7 @@ import {
   readHostedEmailConfig,
   readHostedEmailMessageBytes,
   resolveHostedEmailIngressRoute,
+  shouldRejectHostedEmailIngressFailure,
   writeHostedEmailRawMessage,
   type HostedEmailWorkerRequest,
 } from "./hosted-email.ts";
@@ -687,7 +688,12 @@ async function handleHostedEmailIngress(
   });
 
   if (!route) {
-    message.setReject?.(rejectReason);
+    if (shouldRejectHostedEmailIngressFailure({
+      config,
+      to: message.to,
+    })) {
+      message.setReject?.(rejectReason);
+    }
     return;
   }
 
@@ -699,7 +705,12 @@ async function handleHostedEmailIngress(
     headerFrom: headerFrom.value ?? parsedMessage.from,
     route,
   })) {
-    message.setReject?.(rejectReason);
+    if (shouldRejectHostedEmailIngressFailure({
+      config,
+      to: message.to,
+    })) {
+      message.setReject?.(rejectReason);
+    }
     return;
   }
 

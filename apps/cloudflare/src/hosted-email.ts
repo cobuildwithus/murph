@@ -24,6 +24,7 @@ export {
   resolveHostedEmailIngressRoute,
   resolveHostedEmailInboundRoute,
 } from "./hosted-email/routes.ts";
+export { shouldRejectHostedEmailIngressFailure } from "./hosted-email/ingress-policy.ts";
 export { sendHostedEmailMessage } from "./hosted-email/transport.ts";
 
 export interface HostedEmailWorkerRequest {

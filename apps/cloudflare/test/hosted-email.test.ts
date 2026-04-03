@@ -9,7 +9,7 @@ import {
   buildHostedStorageAad,
   deriveHostedStorageOpaqueId,
 } from "../src/crypto-context.ts";
-import { writeEncryptedR2Json } from "../src/crypto.ts";
+import { readEncryptedR2Json, writeEncryptedR2Json } from "../src/crypto.ts";
 import type { HostedEmailConfig } from "../src/hosted-email/config.ts";
 import {
   createHostedEmailUserAddress,
@@ -17,6 +17,7 @@ import {
   resolveHostedEmailIngressRoute,
   resolveHostedEmailInboundRoute,
 } from "../src/hosted-email/routes.ts";
+import { shouldRejectHostedEmailIngressFailure } from "../src/hosted-email/ingress-policy.ts";
 import { sendHostedEmailMessage } from "../src/hosted-email/transport.ts";
 
 const TEST_CONFIG: HostedEmailConfig = {
@@ -150,6 +151,155 @@ describe("hosted email routing and transport", () => {
       target: null,
       userId: "user_123",
     });
+  });
+
+  it("stores only a sender hash in new verified-owner index records", async () => {
+    const bucket = new MemoryBucket();
+    const verifiedEmailAddress = "owner@example.com";
+
+    await reconcileHostedEmailVerifiedSenderRoute({
+      bucket,
+      config: TEST_CONFIG,
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      nextVerifiedEmailAddress: verifiedEmailAddress,
+      previousVerifiedEmailAddress: null,
+      userId: "user_123",
+    });
+
+    const storedRecord = await readStoredVerifiedSenderRoute({
+      bucket,
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      secret: TEST_CONFIG.signingSecret!,
+      verifiedEmailAddress,
+    });
+
+    expect(storedRecord).toMatchObject({
+      identityId: TEST_CONFIG.fromAddress,
+      schema: "murph.hosted-email-verified-sender-route.v2",
+      senderHash: await deriveVerifiedSenderHash(TEST_CONFIG.signingSecret!, verifiedEmailAddress),
+      senderKey: await deriveVerifiedSenderKey(TEST_CONFIG.signingSecret!, verifiedEmailAddress),
+      userId: "user_123",
+    });
+    expect(storedRecord).not.toHaveProperty("verifiedEmailAddress");
+  });
+
+  it("resolves direct-public routes only when the envelope sender matches the single From header", async () => {
+    const bucket = new MemoryBucket();
+    const verifiedEmailAddress = "owner@example.com";
+
+    await reconcileHostedEmailVerifiedSenderRoute({
+      bucket,
+      config: TEST_CONFIG,
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      nextVerifiedEmailAddress: verifiedEmailAddress,
+      previousVerifiedEmailAddress: null,
+      userId: "user_123",
+    });
+
+    await expect(resolveHostedEmailIngressRoute({
+      bucket,
+      config: TEST_CONFIG,
+      envelopeFrom: verifiedEmailAddress,
+      hasRepeatedHeaderFrom: false,
+      headerFrom: "Owner <owner@example.com>",
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      to: TEST_CONFIG.fromAddress!,
+    })).resolves.toMatchObject({
+      identityId: TEST_CONFIG.fromAddress,
+      kind: "user",
+      routeAddress: TEST_CONFIG.fromAddress,
+      userId: "user_123",
+    });
+
+    await expect(resolveHostedEmailIngressRoute({
+      bucket,
+      config: TEST_CONFIG,
+      envelopeFrom: verifiedEmailAddress,
+      hasRepeatedHeaderFrom: false,
+      headerFrom: null,
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      to: TEST_CONFIG.fromAddress!,
+    })).resolves.toBeNull();
+
+    await expect(resolveHostedEmailIngressRoute({
+      bucket,
+      config: TEST_CONFIG,
+      envelopeFrom: null,
+      hasRepeatedHeaderFrom: false,
+      headerFrom: "Owner <owner@example.com>",
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      to: TEST_CONFIG.fromAddress!,
+    })).resolves.toBeNull();
+
+    await expect(resolveHostedEmailIngressRoute({
+      bucket,
+      config: TEST_CONFIG,
+      envelopeFrom: verifiedEmailAddress,
+      hasRepeatedHeaderFrom: false,
+      headerFrom: "Attacker <attacker@example.com>",
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      to: TEST_CONFIG.fromAddress!,
+    })).resolves.toBeNull();
+  });
+
+  it("keeps reading legacy verified-owner records during the hash-only cutover", async () => {
+    const bucket = new MemoryBucket();
+    const verifiedEmailAddress = "owner@example.com";
+    const senderKey = await deriveVerifiedSenderKey(TEST_CONFIG.signingSecret!, verifiedEmailAddress);
+    const objectKey = await deriveVerifiedSenderRouteObjectKey(TEST_KEY, senderKey);
+
+    await writeEncryptedR2Json({
+      aad: buildHostedStorageAad({
+        key: objectKey,
+        purpose: "email-route",
+        routeKind: "verified-sender",
+        senderKey,
+      }),
+      bucket,
+      cryptoKey: TEST_KEY,
+      key: objectKey,
+      keyId: TEST_KEY_ID,
+      scope: "email-route",
+      value: {
+        identityId: TEST_CONFIG.fromAddress,
+        schema: "murph.hosted-email-verified-sender-route.v1",
+        senderKey,
+        updatedAt: "2026-04-03T00:00:00.000Z",
+        userId: "legacy-user",
+        verifiedEmailAddress,
+      },
+    });
+
+    await expect(resolveHostedEmailIngressRoute({
+      bucket,
+      config: TEST_CONFIG,
+      envelopeFrom: verifiedEmailAddress,
+      hasRepeatedHeaderFrom: false,
+      headerFrom: "Owner <owner@example.com>",
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      to: TEST_CONFIG.fromAddress!,
+    })).resolves.toMatchObject({
+      userId: "legacy-user",
+    });
+  });
+
+  it("rejects non-public alias misses but sink-accepts public mailbox misses", () => {
+    expect(shouldRejectHostedEmailIngressFailure({
+      config: TEST_CONFIG,
+      to: TEST_CONFIG.fromAddress,
+    })).toBe(false);
+    expect(shouldRejectHostedEmailIngressFailure({
+      config: TEST_CONFIG,
+      to: `assistant+u-route@${TEST_CONFIG.domain}`,
+    })).toBe(true);
   });
 
   it("ignores X-Murph-Route overrides when mail is addressed to the fixed public sender", async () => {
@@ -540,6 +690,82 @@ async function createRouteSignature(input: {
   );
 
   return [...signature.slice(0, 16)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function readStoredVerifiedSenderRoute(input: {
+  bucket: MemoryBucket;
+  key: Uint8Array;
+  keyId: string;
+  secret: string;
+  verifiedEmailAddress: string;
+}): Promise<Record<string, unknown>> {
+  const senderKey = await deriveVerifiedSenderKey(input.secret, input.verifiedEmailAddress);
+  const objectKey = await deriveVerifiedSenderRouteObjectKey(input.key, senderKey);
+  const record = await readEncryptedR2Json({
+    aad: buildHostedStorageAad({
+      key: objectKey,
+      purpose: "email-route",
+      routeKind: "verified-sender",
+      senderKey,
+    }),
+    bucket: input.bucket,
+    cryptoKey: input.key,
+    expectedKeyId: input.keyId,
+    key: objectKey,
+    parse(value) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new TypeError("Stored verified sender route must be an object.");
+      }
+
+      return value as Record<string, unknown>;
+    },
+    scope: "email-route",
+  });
+
+  if (!record) {
+    throw new Error("Expected a stored verified sender route.");
+  }
+
+  return record;
+}
+
+async function deriveVerifiedSenderRouteObjectKey(rootKey: Uint8Array, senderKey: string): Promise<string> {
+  const routeSegment = await deriveHostedStorageOpaqueId({
+    length: 40,
+    rootKey,
+    scope: "email-route",
+    value: `verified-sender:${senderKey}`,
+  });
+
+  return `hosted-email/verified-senders/${routeSegment}.json`;
+}
+
+async function deriveVerifiedSenderKey(secret: string, verifiedEmailAddress: string): Promise<string> {
+  return (await createRouteHash(`verified-sender:${verifiedEmailAddress}`, secret)).slice(0, 16);
+}
+
+async function deriveVerifiedSenderHash(secret: string, verifiedEmailAddress: string): Promise<string> {
+  return createRouteHash(`verified-owner:${verifiedEmailAddress}`, secret);
+}
+
+async function createRouteHash(payload: string, secret: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    {
+      hash: "SHA-256",
+      name: "HMAC",
+    },
+    false,
+    ["sign"],
+  );
+  const signature = new Uint8Array(
+    await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload)),
+  );
+
+  return [...signature]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
 }

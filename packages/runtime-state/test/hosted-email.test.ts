@@ -10,6 +10,7 @@ import {
   normalizeHostedEmailRouteKey,
   normalizeHostedEmailSubject,
   resolveHostedEmailAuthorizedSenderAddresses,
+  resolveHostedEmailDirectSenderLookupAddress,
   resolveHostedEmailInboundSenderAddress,
 } from "../src/index.ts";
 
@@ -39,6 +40,45 @@ test("hosted email sender helpers reject mismatched sender identities and normal
       verifiedEmailAddress: "Owner@Example.Test",
     }),
     ["owner@example.test"],
+  );
+});
+
+test("hosted email direct sender lookup requires one matching envelope and header sender", () => {
+  assert.equal(
+    resolveHostedEmailDirectSenderLookupAddress({
+      envelopeFrom: "owner@example.com",
+      headerFrom: "Owner <owner@example.com>",
+    }),
+    "owner@example.com",
+  );
+  assert.equal(
+    resolveHostedEmailDirectSenderLookupAddress({
+      envelopeFrom: "owner@example.com",
+      headerFrom: null,
+    }),
+    null,
+  );
+  assert.equal(
+    resolveHostedEmailDirectSenderLookupAddress({
+      envelopeFrom: null,
+      headerFrom: "Owner <owner@example.com>",
+    }),
+    null,
+  );
+  assert.equal(
+    resolveHostedEmailDirectSenderLookupAddress({
+      envelopeFrom: "owner@example.com",
+      hasRepeatedHeaderFrom: true,
+      headerFrom: "Owner <owner@example.com>",
+    }),
+    null,
+  );
+  assert.equal(
+    resolveHostedEmailDirectSenderLookupAddress({
+      envelopeFrom: "owner@example.com",
+      headerFrom: "Attacker <attacker@example.com>",
+    }),
+    null,
   );
 });
 
