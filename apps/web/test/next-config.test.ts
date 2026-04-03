@@ -162,6 +162,15 @@ test("resolveHostedPrivyOrigin prefers an explicit custom auth domain and otherw
   );
 });
 
+test("resolveHostedPrivyOrigin falls back to the Vercel production URL when no hosted public base URL is configured", () => {
+  assert.equal(
+    resolveHostedPrivyOrigin(createProcessEnv({
+      VERCEL_PROJECT_PRODUCTION_URL: "www.example.com",
+    })),
+    "https://privy.example.com",
+  );
+});
+
 test("buildHostedWebContentSecurityPolicy includes Privy, WalletConnect, and hosted browser protections", () => {
   const csp = buildHostedWebContentSecurityPolicy({
     NODE_ENV: "production",
