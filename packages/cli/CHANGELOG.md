@@ -2,6 +2,11 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.1.8] - 2026-04-03
+
+### Fixed
+- drop npm self-update from publish workflow
+
 ## [0.1.7] - 2026-04-03
 
 ### Fixed
