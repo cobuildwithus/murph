@@ -9,7 +9,7 @@ managePackageManagerVersions: true
 verifyDepsBeforeRun: error
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
-  - '@cobuild/review-gpt@0.5.21'
+  - '@cobuild/review-gpt@0.5.24'
   - next@16.2.2
   - '@next/env@16.2.2'
   - '@next/swc-darwin-arm64@16.2.2'
