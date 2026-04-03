@@ -10,7 +10,6 @@ import {
   isHostedWebDevFileSystemCacheEnabled,
   resolveHostedWebDistDir,
 } from "./next-artifacts";
-import { readHostedPublicOrigin } from "./src/lib/hosted-web/public-url";
 
 interface StaticHeader {
   key: string;
@@ -28,6 +27,12 @@ const PRIVY_BASE_DOMAIN_ENV_KEYS = [
   "PRIVY_BASE_DOMAIN",
   "NEXT_PUBLIC_PRIVY_BASE_DOMAIN",
 ] as const;
+const HOSTED_PUBLIC_BASE_URL_ENV_KEYS = [
+  "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
+  "NEXT_PUBLIC_SITE_URL",
+  "HOSTED_WEB_BASE_URL",
+] as const;
+const HOSTED_PUBLIC_VERCEL_URL_ENV_KEY = "VERCEL_PROJECT_PRODUCTION_URL";
 const PRIVY_REQUIRED_CHILD_FRAME_SOURCES = [
   "https://auth.privy.io",
   "https://verify.walletconnect.com",
@@ -78,7 +83,7 @@ export function resolveHostedPrivyOrigin(
     return configuredBaseDomainOrigin;
   }
 
-  return resolvePrivyBaseDomainOrigin(readHostedPublicOrigin(environment));
+  return resolvePrivyBaseDomainOrigin(readHostedPublicOriginFromEnvironment(environment));
 }
 
 export function buildHostedWebContentSecurityPolicy(
@@ -248,6 +253,77 @@ function parseConfiguredOrigin(value: string | null | undefined): URL | null {
   } catch {
     return null;
   }
+}
+
+function readHostedPublicOriginFromEnvironment(
+  environment: NodeJS.ProcessEnv,
+): string | null {
+  const baseUrl = readHostedPublicBaseUrlFromEnvironment(environment);
+  return baseUrl ? new URL(baseUrl).origin : null;
+}
+
+function readHostedPublicBaseUrlFromEnvironment(
+  environment: NodeJS.ProcessEnv,
+): string | null {
+  const configuredBaseUrl = readFirstNormalizedBaseUrl(environment, HOSTED_PUBLIC_BASE_URL_ENV_KEYS);
+
+  if (configuredBaseUrl) {
+    return configuredBaseUrl;
+  }
+
+  return normalizeConfiguredBaseUrl(environment[HOSTED_PUBLIC_VERCEL_URL_ENV_KEY], {
+    allowHttpLoopback: true,
+  });
+}
+
+function readFirstNormalizedBaseUrl(
+  environment: NodeJS.ProcessEnv,
+  keys: readonly string[],
+): string | null {
+  for (const key of keys) {
+    const value = environment[key];
+
+    const normalized = normalizeConfiguredBaseUrl(value, {
+      allowHttpLoopback: true,
+    });
+
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return null;
+}
+
+function normalizeConfiguredBaseUrl(
+  value: string | null | undefined,
+  options?: {
+    allowHttpLoopback?: boolean;
+  },
+): string | null {
+  const parsed = parseConfiguredOrigin(value);
+
+  if (!parsed) {
+    return null;
+  }
+
+  const protocol = parsed.protocol.toLowerCase();
+  const hostname = parsed.hostname.toLowerCase();
+  const allowHttp = protocol === "http:" && options?.allowHttpLoopback === true && isLoopbackHostname(hostname);
+
+  if (protocol !== "https:" && !allowHttp) {
+    throw new TypeError(
+      "Hosted public base URLs must use HTTPS unless the host is a loopback address.",
+    );
+  }
+
+  if (parsed.username || parsed.password) {
+    throw new TypeError("Hosted public base URLs must not include embedded credentials.");
+  }
+
+  parsed.hash = "";
+  parsed.search = "";
+  return parsed.toString().replace(/\/$/u, "");
 }
 
 function buildOrigin(protocol: string, hostname: string, port: string): string {
