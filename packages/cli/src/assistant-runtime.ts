@@ -15,17 +15,6 @@ export type {
 export {
   createAssistantRuntimeStateService,
 } from '@murphai/assistant-core/assistant-state'
-export type {
-  AssistantTranscriptDistillation,
-} from '@murphai/assistant-core/assistant-cli-contracts'
-export {
-  appendAssistantTranscriptDistillation,
-  buildAssistantTranscriptDistillationContinuityText,
-  listAssistantTranscriptDistillations,
-  maybeRefreshAssistantTranscriptDistillation,
-  readLatestAssistantTranscriptDistillation,
-  resolveAssistantTranscriptDistillationPath,
-} from '@murphai/assistant-core/assistant-runtime'
 
 export type {
   AddAssistantCronJobInput,

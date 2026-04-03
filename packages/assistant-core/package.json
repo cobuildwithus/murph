@@ -190,10 +190,6 @@
       "types": "./dist/assistant/store/persistence.d.ts",
       "default": "./dist/assistant/store/persistence.js"
     },
-    "./assistant/transcript-distillation": {
-      "types": "./dist/assistant/transcript-distillation.d.ts",
-      "default": "./dist/assistant/transcript-distillation.js"
-    },
     "./assistant/turns": {
       "types": "./dist/assistant/turns.d.ts",
       "default": "./dist/assistant/turns.js"

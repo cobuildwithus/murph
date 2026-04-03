@@ -39,10 +39,8 @@ import {
   assertAssistantCronRunId,
   assertAssistantOutboxIntentId,
   assertAssistantSessionId,
-  assertAssistantTranscriptDistillationId,
   assertAssistantTurnId,
 } from '@murphai/assistant-core/assistant/state-ids'
-import { buildAssistantTranscriptDistillationContinuityText } from '@murphai/assistant-core/assistant/transcript-distillation'
 
 const runtimeMocks = vi.hoisted(() => ({
   deliverAssistantMessageOverBinding: vi.fn(),
@@ -107,7 +105,6 @@ vi.mock('@murphai/assistant-core/inbox-model-harness', () => ({
 
 import {
   readAssistantStatusSnapshot,
-  readLatestAssistantTranscriptDistillation,
   runAssistantAutomation,
   runAssistantChat,
   scanAssistantAutomationOnce,
@@ -459,8 +456,8 @@ beforeEach(() => {
 
 
 
-test('sendAssistantMessage writes append-only transcript distillations once local history grows beyond the retained raw window', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-distillation-'))
+test('sendAssistantMessage keeps older local history in raw transcript files without synthetic continuity summaries', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-long-history-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -491,25 +488,19 @@ test('sendAssistantMessage writes append-only transcript distillations once loca
   }
 
   assert.ok(latest)
-  const distillation = await readLatestAssistantTranscriptDistillation(
-    vaultRoot,
-    latest!.session.sessionId,
+  const providerCalls = runtimeMocks.executeAssistantProviderTurn.mock.calls.map(
+    (call) => call[0],
   )
-  assert.ok(distillation)
-  assert.equal(distillation?.sessionId, latest!.session.sessionId)
-  assert.equal(distillation?.conversationEntryCount, 18)
-  assert.equal(distillation?.startEntryOffset, 0)
-  assert.equal(distillation?.endEntryOffset, 9)
-  assert.equal(distillation?.preservedRecentConversationCount, 8)
-  assert.ok((distillation?.summaryLines.length ?? 0) > 0)
+  const latestProviderCall = providerCalls.at(-1)
+  assert.equal(latestProviderCall?.continuityContext, null)
+  assert.equal((latestProviderCall?.conversationMessages?.length ?? 0) > 0, true)
+
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+  const stateEntries = await readdir(statePaths.assistantStateRoot)
+  assert.equal(stateEntries.includes('distillations'), false)
 
   const receipts = await listAssistantTurnReceipts(vaultRoot)
-  const latestReceipt = receipts[0]
-  assert.ok(latestReceipt)
-  assert.equal(
-    latestReceipt?.timeline.some((event) => event.kind === 'provider.context.refreshed'),
-    true,
-  )
+  assert.ok(receipts[0])
 })
 
 test('sendAssistantMessage chains official OpenAI responses while retaining local transcript continuity without distillation', async () => {
@@ -575,21 +566,8 @@ test('sendAssistantMessage chains official OpenAI responses while retaining loca
   assert.equal(providerCalls[1]?.continuityContext, null)
   assert.equal(typeof providerCalls[1]?.systemPrompt, 'string')
 
-  const distillation = await readLatestAssistantTranscriptDistillation(
-    vaultRoot,
-    latest!.session.sessionId,
-  )
-  assert.ok(distillation)
-  assert.equal(distillation.preview, 'What changed on day 1?')
-  assert.equal(distillation.preservedRecentConversationCount, 8)
-
   const receipts = await listAssistantTurnReceipts(vaultRoot)
-  const latestReceipt = receipts[0]
-  assert.ok(latestReceipt)
-  assert.equal(
-    latestReceipt?.timeline.some((event) => event.kind === 'provider.context.refreshed'),
-    true,
-  )
+  assert.ok(receipts[0])
 })
 
 test('sanitizeAssistantOutboundReply removes local source scaffolding for outbound channels', () => {
@@ -618,36 +596,12 @@ test('sanitizeAssistantOutboundReply removes local source scaffolding for outbou
   )
 })
 
-test('buildAssistantTranscriptDistillationContinuityText keeps distillations non-canonical', () => {
-  const continuity = buildAssistantTranscriptDistillationContinuityText({
-    schema: 'murph.assistant-transcript-distillation.v1',
-    distillationId: 'distill_test',
-    sessionId: 'session_test',
-    createdAt: '2026-03-29T00:00:00.000Z',
-    conversationEntryCount: 24,
-    startEntryOffset: 0,
-    endEntryOffset: 9,
-    preservedRecentConversationCount: 8,
-    preview: 'User asked about sleep.',
-    summaryLines: ['User asked: sleep timing Assistant replied: keep the routine steady'],
-  })
-
-  assert.ok(continuity)
-  assert.equal(continuity?.includes('operator-authored'), false)
-  assert.equal(continuity?.includes('non-canonical'), true)
-  assert.equal(continuity?.includes('vault evidence'), true)
-})
-
 test('assistant runtime opaque ids reject traversal-shaped values', () => {
   assert.equal(assertAssistantSessionId('session_safe'), 'session_safe')
   assert.equal(assertAssistantTurnId('turn_safe'), 'turn_safe')
   assert.equal(assertAssistantOutboxIntentId('outbox_safe'), 'outbox_safe')
   assert.equal(assertAssistantCronJobId('cron_safe'), 'cron_safe')
   assert.equal(assertAssistantCronRunId('cronrun_safe'), 'cronrun_safe')
-  assert.equal(
-    assertAssistantTranscriptDistillationId('distill_safe'),
-    'distill_safe',
-  )
 
   assert.throws(
     () => assertAssistantSessionId('../escape'),
@@ -669,40 +623,6 @@ test('assistant runtime opaque ids reject traversal-shaped values', () => {
     () => assertAssistantCronRunId('cronrun/escape'),
     /opaque runtime ids/u,
   )
-})
-
-test('readLatestAssistantTranscriptDistillation quarantines malformed distillation files instead of silently accepting them', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-distillation-corrupt-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
-
-  const resolved = await resolveAssistantSession({
-    vault: vaultRoot,
-    alias: 'chat:distillation-corrupt',
-  })
-  const paths = resolveAssistantStatePaths(vaultRoot)
-  const distillationPath = path.join(
-    paths.distillationsDirectory,
-    `${resolved.session.sessionId}.jsonl`,
-  )
-
-  await writeFile(
-    distillationPath,
-    '{"schema":"murph.assistant-transcript-distillation.v1"}\n',
-    'utf8',
-  )
-
-  const distillation = await readLatestAssistantTranscriptDistillation(
-    vaultRoot,
-    resolved.session.sessionId,
-  )
-  assert.equal(distillation, null)
-
-  const quarantineEntries = await readdir(
-    path.join(paths.quarantineDirectory, 'transcript-distillation'),
-  )
-  assert.ok(quarantineEntries.some((entry) => entry.endsWith('.meta.json')))
 })
 
 test('sendAssistantMessage persists only assistant session metadata and reuses provider sessions via alias keys', async () => {

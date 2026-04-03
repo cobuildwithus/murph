@@ -14,7 +14,6 @@ export interface AssistantStatePaths {
   cronRunsDirectory: string;
   dailyMemoryDirectory: string;
   diagnosticsDirectory: string;
-  distillationsDirectory: string;
   diagnosticEventsPath: string;
   diagnosticSnapshotPath: string;
   failoverStatePath: string;
@@ -46,7 +45,6 @@ export function resolveAssistantStatePaths(vaultRoot: string): AssistantStatePat
   );
   const cronDirectory = path.join(rootPath, "cron");
   const diagnosticsDirectory = path.join(rootPath, "diagnostics");
-  const distillationsDirectory = path.join(rootPath, "distillations");
   const journalsDirectory = path.join(rootPath, "journals");
   const outboxDirectory = path.join(rootPath, "outbox");
   const turnsDirectory = path.join(rootPath, "receipts");
@@ -68,7 +66,6 @@ export function resolveAssistantStatePaths(vaultRoot: string): AssistantStatePat
     dailyMemoryDirectory: path.join(rootPath, "memory"),
     diagnosticsDirectory,
     diagnosticEventsPath: path.join(diagnosticsDirectory, "events.jsonl"),
-    distillationsDirectory,
     diagnosticSnapshotPath: path.join(diagnosticsDirectory, "snapshot.json"),
     failoverStatePath: path.join(rootPath, "failover.json"),
     indexesPath: path.join(rootPath, "indexes.json"),

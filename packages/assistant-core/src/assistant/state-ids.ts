@@ -9,7 +9,6 @@ type AssistantOpaqueIdKind =
   | 'outbox intent'
   | 'cron job'
   | 'cron run'
-  | 'transcript distillation'
 
 export function assertAssistantSessionId(value: string | null | undefined): string {
   return assertAssistantOpaqueId('session', value)
@@ -31,12 +30,6 @@ export function assertAssistantCronJobId(value: string | null | undefined): stri
 
 export function assertAssistantCronRunId(value: string | null | undefined): string {
   return assertAssistantOpaqueId('cron run', value)
-}
-
-export function assertAssistantTranscriptDistillationId(
-  value: string | null | undefined,
-): string {
-  return assertAssistantOpaqueId('transcript distillation', value)
 }
 
 export function isValidAssistantOpaqueId(

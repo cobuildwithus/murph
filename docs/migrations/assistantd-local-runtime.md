@@ -69,13 +69,9 @@ This makes the local assistant runtime explicit about:
 - no fan-out / no delivery mirroring
 - session reset policy
 
-### 5. Append-only transcript distillation
+### 5. Long transcript continuity
 
-Older transcript history can now be distilled into append-only continuity records at:
-
-- `assistant-state/distillations/<session-id>.jsonl`
-
-These are **non-canonical runtime artifacts**. They are meant to preserve older conversational continuity without making model-authored summaries into source-of-truth health records.
+Local assistant continuity now relies on the recent raw transcript window plus provider-native resume or compaction instead of Murph-authored transcript distillation artifacts.
 
 Murph still treats the canonical vault as authoritative.
 
@@ -91,7 +87,6 @@ The main local assistant orchestration path has been split further into dedicate
 - `assistant/delivery-service.ts`
 - `assistant/turn-finalizer.ts`
 - `assistant/reply-sanitizer.ts`
-- `assistant/transcript-distillation.ts`
 
 `assistant/service.ts` still exists, but it is now more clearly the coordinator rather than the sole owner of every runtime concern.
 
@@ -144,9 +139,9 @@ Prefer `resolveAssistantConversationPolicy(...)` in new code when making decisio
 
 ### Long transcript handling
 
-Use transcript distillation as **runtime continuity only**.
+Use recent raw transcript replay plus provider-native resume or compaction for conversational continuity.
 
-Do not treat `assistant-state/distillations/**` as canonical memory, and do not read it as if it were vault truth.
+Do not treat assistant runtime context as canonical memory, and do not read it as if it were vault truth.
 
 ## Compatibility notes
 
