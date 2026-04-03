@@ -54,6 +54,7 @@ export function createTestSqlStorage(): TestSqlStorageLike {
     reset() {
       database.exec(`
         DROP TABLE IF EXISTS runner_meta;
+        DROP TABLE IF EXISTS runner_bundle_slots;
         DROP TABLE IF EXISTS pending_events;
         DROP TABLE IF EXISTS consumed_events;
         DROP TABLE IF EXISTS poisoned_events;
@@ -78,12 +79,13 @@ function initializeSchema(database: DatabaseSync): void {
       next_wake_at TEXT,
       retrying_event_id TEXT,
       backpressured_event_ids_json TEXT NOT NULL DEFAULT '[]',
-      agent_state_bundle_ref_json TEXT,
-      vault_bundle_ref_json TEXT,
       run_json TEXT,
-      timeline_json TEXT NOT NULL DEFAULT '[]',
-      agent_state_bundle_version INTEGER NOT NULL DEFAULT 0,
-      vault_bundle_version INTEGER NOT NULL DEFAULT 0
+      timeline_json TEXT NOT NULL DEFAULT '[]'
+    );
+    CREATE TABLE IF NOT EXISTS runner_bundle_slots (
+      slot TEXT PRIMARY KEY,
+      bundle_ref_json TEXT,
+      bundle_version INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS pending_events (
       event_id TEXT PRIMARY KEY,

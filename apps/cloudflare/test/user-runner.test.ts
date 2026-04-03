@@ -402,14 +402,20 @@ describe("HostedUserRunner", () => {
         throw new Error("Test storage.sql is required.");
       }
       sql.exec(
-        `UPDATE runner_meta
-         SET agent_state_bundle_ref_json = ?, vault_bundle_ref_json = ?,
-             agent_state_bundle_version = ?, vault_bundle_version = ?
-         WHERE singleton = 1`,
+        `UPDATE runner_bundle_slots
+         SET bundle_ref_json = ?, bundle_version = ?
+         WHERE slot = ?`,
         JSON.stringify(previousAgentRef),
+        1,
+        "agentState",
+      );
+      sql.exec(
+        `UPDATE runner_bundle_slots
+         SET bundle_ref_json = ?, bundle_version = ?
+         WHERE slot = ?`,
         JSON.stringify(previousVaultRef),
         1,
-        1,
+        "vault",
       );
 
       await persistHostedExecutionCommit({
@@ -3068,6 +3074,7 @@ function seedRunnerQueueState(
   sql.exec("DELETE FROM pending_events");
   sql.exec("DELETE FROM consumed_events");
   sql.exec("DELETE FROM poisoned_events");
+  sql.exec("DELETE FROM runner_bundle_slots");
   sql.exec("DELETE FROM runner_meta");
 
   sql.exec(
@@ -3084,13 +3091,9 @@ function seedRunnerQueueState(
       next_wake_at,
       retrying_event_id,
       backpressured_event_ids_json,
-      agent_state_bundle_ref_json,
-      vault_bundle_ref_json,
       run_json,
-      timeline_json,
-      agent_state_bundle_version,
-      vault_bundle_version
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      timeline_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     1,
     input.userId,
     input.activated ? 1 : 0,
@@ -3103,11 +3106,18 @@ function seedRunnerQueueState(
     input.nextWakeAt ?? null,
     input.retryingEventId ?? null,
     JSON.stringify(input.backpressuredEventIds ?? []),
-    null,
-    null,
     input.run ? JSON.stringify(input.run) : null,
     JSON.stringify(input.timeline ?? []),
+  );
+
+  sql.exec(
+    `INSERT INTO runner_bundle_slots (slot, bundle_ref_json, bundle_version)
+    VALUES (?, ?, ?), (?, ?, ?)`,
+    "agentState",
+    null,
     0,
+    "vault",
+    null,
     0,
   );
 

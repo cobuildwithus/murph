@@ -1,5 +1,6 @@
 import type {
   HostedExecutionBundleRefs,
+  HostedExecutionBundleSlotMap,
   HostedExecutionRunStatus,
   HostedExecutionTimelineEntry,
   HostedExecutionDispatchRequest,
@@ -49,10 +50,7 @@ export interface PendingDispatchRecord {
   lastError: string | null;
 }
 
-export interface RunnerBundleVersions {
-  agentState: number;
-  vault: number;
-}
+export type RunnerBundleVersions = HostedExecutionBundleSlotMap<number>;
 
 export interface RunnerStateRecord {
   activated: boolean;
