@@ -45,7 +45,6 @@ import { readAssistantOutboxIntent } from '../src/assistant/outbox.js'
 import { summarizeAssistantQuarantines } from '@murphai/assistant-core/assistant/quarantine'
 import { withAssistantRuntimeWriteLock } from '@murphai/assistant-core/assistant/runtime-write-lock'
 import { readAssistantSession } from '@murphai/assistant-core/assistant/store/persistence'
-import { listAssistantTranscriptDistillations } from '@murphai/assistant-core/assistant/transcript-distillation'
 import { readAssistantTurnReceipt } from '@murphai/assistant-core/assistant/turns'
 import {
   assistantSessionSchema,
@@ -163,7 +162,6 @@ test('assistant sessions live outside the vault, omit redundant path metadata, a
   assert.equal(statePaths.stateDirectory, path.join(statePaths.assistantStateRoot, 'state'))
   assert.equal(statePaths.turnsDirectory, path.join(statePaths.assistantStateRoot, 'receipts'))
   assert.equal(statePaths.outboxDirectory, path.join(statePaths.assistantStateRoot, 'outbox'))
-  assert.equal(statePaths.distillationsDirectory, path.join(statePaths.assistantStateRoot, 'distillations'))
 
   const first = await resolveAssistantSession({
     vault: vaultRoot,
@@ -2017,9 +2015,6 @@ test('assistant storage readers reject traversal-like opaque ids at the filesyst
       paths,
       sessionId: invalidId,
     }),
-  )
-  await expectInvalidRuntimeId(() =>
-    listAssistantTranscriptDistillations(vaultRoot, invalidId),
   )
   await expectInvalidRuntimeId(() => readAssistantOutboxIntent(vaultRoot, invalidId))
   await expectInvalidRuntimeId(() => readAssistantTurnReceipt(vaultRoot, invalidId))

@@ -51,10 +51,6 @@ import {
   listAssistantTranscriptEntries,
 } from './store.js'
 import {
-  buildAssistantTranscriptDistillationContinuityText,
-  readLatestAssistantTranscriptDistillation,
-} from './transcript-distillation.js'
-import {
   appendAssistantTurnReceiptEvent,
 } from './turns.js'
 import { createIntegratedVaultServices } from '../vault-services.js'
@@ -328,15 +324,6 @@ async function resolveAssistantRouteTurnPlan(input: {
       })
     : null
   const assistantMemoryPaths = resolveAssistantMemoryStoragePaths(input.input.vault)
-  const transcriptDistillation = await readLatestAssistantTranscriptDistillation(
-    input.input.vault,
-    input.session.sessionId,
-  )
-  const continuityContext = [
-    buildAssistantTranscriptDistillationContinuityText(transcriptDistillation),
-  ]
-    .filter((part): part is string => Boolean(part))
-    .join('\n\n') || null
   const assistantStateToolsAvailable = input.toolCatalog.hasTool('assistant.state.show')
   const assistantMemoryRecallToolsAvailable =
     input.toolCatalog.hasTool('assistant.memory.search') &&
@@ -351,7 +338,7 @@ async function resolveAssistantRouteTurnPlan(input: {
   return {
     cliEnv: input.sharedPlan.cliAccess.env,
     conversationMessages,
-    continuityContext,
+    continuityContext: null,
     resumeProviderSessionId,
     sessionContext: shouldInjectBootstrapContext
       ? {

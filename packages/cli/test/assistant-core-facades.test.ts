@@ -25,7 +25,6 @@ const preservedAssistantCoreLeafExports = [
   './assistant/provider-registry',
   './assistant/state',
   './assistant/state-ids',
-  './assistant/transcript-distillation',
   './assistant-cli-access',
   './assistant-cli-tools',
   './device-daemon',

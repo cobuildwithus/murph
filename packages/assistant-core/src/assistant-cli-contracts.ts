@@ -121,7 +121,6 @@ export const assistantTurnTimelineEventKindValues = [
   'provider.attempt.failed',
   'provider.failover.applied',
   'provider.cooldown.started',
-  'provider.context.refreshed',
   'delivery.queued',
   'delivery.attempt.started',
   'delivery.sent',
@@ -161,7 +160,6 @@ export const assistantStatusRunLockStateValues = [
 
 export const assistantQuarantineArtifactKindValues = [
   'session',
-  'transcript-distillation',
   'indexes',
   'automation',
   'status',
@@ -177,7 +175,6 @@ export const assistantQuarantineArtifactKindValues = [
 export const assistantRuntimeEventKindValues = [
   'session.upserted',
   'session.quarantined',
-  'transcript-distillation.quarantined',
   'indexes.rebuilt',
   'indexes.quarantined',
   'automation.recovered',
@@ -320,21 +317,6 @@ export const assistantTranscriptEntrySchema = z.object({
   text: z.string(),
   createdAt: isoTimestampSchema,
 })
-
-export const assistantTranscriptDistillationSchema = z
-  .object({
-    schema: z.literal('murph.assistant-transcript-distillation.v1'),
-    distillationId: z.string().min(1),
-    sessionId: assistantSessionIdSchema,
-    createdAt: isoTimestampSchema,
-    conversationEntryCount: z.number().int().nonnegative(),
-    startEntryOffset: z.number().int().nonnegative(),
-    endEntryOffset: z.number().int().nonnegative(),
-    preservedRecentConversationCount: z.number().int().nonnegative(),
-    preview: z.string().nullable().default(null),
-    summaryLines: z.array(z.string().min(1)).min(1),
-  })
-  .strict()
 
 export const assistantChannelDeliverySchema = z.object({
   channel: z.string().min(1),
@@ -1131,9 +1113,6 @@ export type AssistantSession = Omit<AssistantSessionRecord, 'providerBinding'> &
 }
 export type AssistantTranscriptEntry = z.infer<
   typeof assistantTranscriptEntrySchema
->
-export type AssistantTranscriptDistillation = z.infer<
-  typeof assistantTranscriptDistillationSchema
 >
 export type AssistantChannelDelivery = z.infer<
   typeof assistantChannelDeliverySchema

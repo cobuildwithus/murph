@@ -86,7 +86,7 @@ Murph is opinionated about storage boundaries:
 - Imported source artifacts are copied into `raw/**` and treated as immutable.
 - Derived parser output lives under `derived/**` and stays rebuildable.
 - Local machine state lives under `.runtime/**` and stays rebuildable.
-- Assistant transcripts, metadata, and distilled memory live outside the vault under `assistant-state/**` and are not canonical health truth.
+- Assistant transcripts, metadata, and assistant memory live outside the vault under `assistant-state/**` and are not canonical health truth.
 
 The result is a system you can inspect with normal filesystem tools while still keeping write paths disciplined.
 

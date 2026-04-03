@@ -74,7 +74,6 @@ export async function ensureAssistantState(
     ensureAssistantStateDirectory(paths.outboxQuarantineDirectory),
     ensureAssistantStateDirectory(paths.turnsDirectory),
     ensureAssistantStateDirectory(paths.diagnosticsDirectory),
-    ensureAssistantStateDirectory(paths.distillationsDirectory),
     ensureAssistantStateDirectory(paths.journalsDirectory),
     ensureAssistantStateDirectory(paths.quarantineDirectory),
     ensureAssistantStateDirectory(paths.stateDirectory),
