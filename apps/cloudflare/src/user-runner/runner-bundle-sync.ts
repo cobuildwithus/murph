@@ -3,6 +3,7 @@ import {
   encodeHostedBundleBase64,
   sameHostedBundlePayloadRef,
 } from "@murphai/runtime-state/node";
+import { readHostedVerifiedEmailFromEnv } from "@murphai/runtime-state";
 import {
   HOSTED_EXECUTION_BUNDLE_SLOTS,
   mapHostedExecutionBundleSlotsAsync,
@@ -13,6 +14,11 @@ import {
   type HostedExecutionUserEnvStatus,
 } from "@murphai/hosted-execution";
 
+import {
+  ensureHostedEmailVerifiedSenderRouteAvailable,
+  readHostedEmailConfig,
+  reconcileHostedEmailVerifiedSenderRoute,
+} from "../hosted-email.js";
 import {
   createHostedBundleStore,
   createHostedUserEnvStore,
@@ -84,9 +90,32 @@ export class RunnerBundleSync {
       source: this.userEnvSource,
       update,
     });
+    const hostedEmailConfig = readHostedEmailConfig(this.userEnvSource);
+    const previousVerifiedEmailAddress = readHostedVerifiedEmailFromEnv(currentUserEnv)?.address ?? null;
+    const nextVerifiedEmailAddress = readHostedVerifiedEmailFromEnv(nextUserEnv)?.address ?? null;
+
+    await ensureHostedEmailVerifiedSenderRouteAvailable({
+      bucket: this.bucket,
+      config: hostedEmailConfig,
+      key: this.bundleEncryptionKey,
+      keyId: this.bundleEncryptionKeyId,
+      keysById: this.bundleEncryptionKeysById,
+      userId,
+      verifiedEmailAddress: nextVerifiedEmailAddress,
+    });
 
     if (Object.keys(nextUserEnv).length === 0) {
       await this.createUserEnvStore().clearUserEnv(userId);
+      await reconcileHostedEmailVerifiedSenderRoute({
+        bucket: this.bucket,
+        config: hostedEmailConfig,
+        key: this.bundleEncryptionKey,
+        keyId: this.bundleEncryptionKeyId,
+        keysById: this.bundleEncryptionKeysById,
+        nextVerifiedEmailAddress,
+        previousVerifiedEmailAddress,
+        userId,
+      });
       return {
         configuredUserEnvKeys: [],
         userId,
@@ -99,6 +128,16 @@ export class RunnerBundleSync {
         env: nextUserEnv,
       }) as Uint8Array,
     );
+    await reconcileHostedEmailVerifiedSenderRoute({
+      bucket: this.bucket,
+      config: hostedEmailConfig,
+      key: this.bundleEncryptionKey,
+      keyId: this.bundleEncryptionKeyId,
+      keysById: this.bundleEncryptionKeysById,
+      nextVerifiedEmailAddress,
+      previousVerifiedEmailAddress,
+      userId,
+    });
 
     return {
       configuredUserEnvKeys: listHostedUserEnvKeys(nextUserEnv),
