@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   compileKnowledgePage,
   lintKnowledgePages,
+  searchKnowledgePages,
   showKnowledgePage,
 } from '../src/knowledge-runtime.js'
 
@@ -113,6 +114,117 @@ describe('compileKnowledgePage', () => {
     })
     expect(shown.page.markdown).toContain('# Sleep quality')
     expect(shown.page.relatedSlugs).toEqual(['magnesium'])
+  })
+
+  it('preserves previously known source paths when recompiling with new local sources', async () => {
+    const vaultRoot = await createVaultRoot()
+    const firstSourcePath = 'research/2026/04/sleep-note.md'
+    const secondSourcePath = 'research/2026/04/magnesium-note.md'
+    await writeVaultFile(
+      vaultRoot,
+      firstSourcePath,
+      '# Sleep note\n\nEarlier notes linked better sleep to magnesium.\n',
+    )
+    await writeVaultFile(
+      vaultRoot,
+      secondSourcePath,
+      '# Magnesium note\n\nA newer note pointed to fewer wakeups.\n',
+    )
+
+    let compileCount = 0
+    const dependencies = {
+      async runProcess(input: { command: string; args: string[] }) {
+        const responseFile = readArgValue(input.args, '--response-file')
+        expect(input.command).toBe('pnpm')
+        expect(responseFile).toBeTruthy()
+        compileCount += 1
+        await writeFile(
+          responseFile!,
+          compileCount === 1
+            ? '# Sleep quality\n\nThe first pass mostly referenced the older sleep note.\n'
+            : '# Sleep quality\n\nThe refreshed page now includes the newer magnesium note too.\n',
+          'utf8',
+        )
+
+        return {
+          stdout: '',
+          stderr: '',
+        }
+      },
+      async saveText(input: { relativePath: string; content: string }) {
+        await writeVaultFile(vaultRoot, input.relativePath, input.content)
+      },
+      async resolveAssistantDefaults() {
+        return null
+      },
+    }
+
+    await compileKnowledgePage(
+      {
+        vault: vaultRoot,
+        prompt: 'Summarize my current sleep-quality notes.',
+        title: 'Sleep quality',
+        sourcePaths: [firstSourcePath],
+      },
+      dependencies,
+    )
+
+    const refreshed = await compileKnowledgePage(
+      {
+        vault: vaultRoot,
+        prompt: 'Refresh the sleep-quality page with the latest magnesium note.',
+        slug: 'sleep-quality',
+        sourcePaths: [secondSourcePath],
+      },
+      dependencies,
+    )
+
+    expect(refreshed.page.sourcePaths).toEqual([firstSourcePath, secondSourcePath])
+
+    const savedPage = await readFile(
+      path.join(vaultRoot, 'derived/knowledge/pages/sleep-quality.md'),
+      'utf8',
+    )
+    expect(savedPage).toContain('`research/2026/04/sleep-note.md`')
+    expect(savedPage).toContain('`research/2026/04/magnesium-note.md`')
+  })
+
+  it('searches the derived knowledge wiki without recompiling pages', async () => {
+    const vaultRoot = await createVaultRoot()
+    await writeVaultFile(
+      vaultRoot,
+      'derived/knowledge/pages/sleep-quality.md',
+      [
+        '---',
+        'title: Sleep quality',
+        'slug: sleep-quality',
+        'pageType: concept',
+        'status: active',
+        'summary: Magnesium seemed to help recent sleep continuity.',
+        'sourcePaths:',
+        '  - research/2026/04/sleep-note.md',
+        '---',
+        '',
+        '# Sleep quality',
+        '',
+        'Magnesium looked helpful for fewer wakeups.',
+        '',
+      ].join('\n'),
+    )
+
+    const result = await searchKnowledgePages({
+      vault: vaultRoot,
+      query: 'sleep magnesium',
+    })
+
+    expect(result.format).toBe('murph.knowledge-search.v1')
+    expect(result.vault).toBe(vaultRoot)
+    expect(result.hits[0]).toMatchObject({
+      slug: 'sleep-quality',
+      matchedTerms: ['magnesium', 'sleep'],
+      pageType: 'concept',
+      status: 'active',
+    })
   })
 
   it('reports missing related pages and missing source files during lint', async () => {

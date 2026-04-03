@@ -9,6 +9,7 @@ import {
   DERIVED_KNOWLEDGE_PAGES_ROOT,
   readDerivedKnowledgeGraph,
   readDerivedKnowledgeGraphWithIssues,
+  searchDerivedKnowledgeVault,
   type DerivedKnowledgeGraph,
   type DerivedKnowledgeNode,
 } from '@murphai/query'
@@ -26,6 +27,7 @@ import {
   type KnowledgeListResult,
   type KnowledgePage,
   type KnowledgePageMetadata,
+  type KnowledgeSearchResult,
   type KnowledgeShowResult,
 } from './knowledge-cli-contracts.js'
 import { type ResearchExecutionMode } from './research-cli-contracts.js'
@@ -75,6 +77,14 @@ export interface KnowledgeListInput {
   status?: string | null
 }
 
+export interface KnowledgeSearchInput {
+  vault: string
+  query: string
+  limit?: number | null
+  pageType?: string | null
+  status?: string | null
+}
+
 export interface KnowledgeShowInput {
   vault: string
   slug: string
@@ -113,17 +123,20 @@ export async function compileKnowledgePage(
     normalizeKnowledgeTag(input.status) ??
     normalizeKnowledgeTag(existingPage?.status) ??
     DEFAULT_KNOWLEDGE_STATUS
-  const sourcePaths = orderedUniqueStrings(
-    normalizeSourcePathInputs(input.sourcePaths).length > 0
-      ? normalizeSourcePathInputs(input.sourcePaths)
-      : (existingPage?.sourcePaths ?? []),
-  )
+  const existingSourcePaths = existingPage?.sourcePaths ?? []
+  const explicitSourcePaths = normalizeSourcePathInputs(input.sourcePaths)
+  const compileSourcePaths =
+    explicitSourcePaths.length > 0 ? explicitSourcePaths : existingSourcePaths
 
   const sourceBundle = await collectKnowledgeSourceEntries(
     input.vault,
-    sourcePaths,
+    compileSourcePaths,
     dependencies.readTextFile ?? defaultReadTextFile,
   )
+  const sourcePaths = orderedUniqueStrings([
+    ...existingSourcePaths,
+    ...sourceBundle.entries.map((entry) => entry.relativePath),
+  ])
   const knowledgePrompt = buildKnowledgeCompilePrompt({
     existingPage,
     pageType,
@@ -158,7 +171,7 @@ export async function compileKnowledgePage(
     pageType,
     relatedSlugs,
     slug,
-    sourcePaths: sourceBundle.entries.map((entry) => entry.relativePath),
+    sourcePaths,
     status,
     summary: summarizeKnowledgeBody(normalizedBody),
     title,
@@ -200,6 +213,33 @@ export async function compileKnowledgePage(
     responseLength: review.responseLength,
     savedAt,
     warnings: [...review.warnings, ...sourceBundle.warnings],
+  }
+}
+
+export async function searchKnowledgePages(
+  input: KnowledgeSearchInput,
+): Promise<KnowledgeSearchResult> {
+  const query = input.query.trim()
+  if (query.length === 0) {
+    throw new VaultCliError(
+      'knowledge_search_query_required',
+      'Knowledge search query must not be blank.',
+    )
+  }
+
+  const pageType = normalizeKnowledgeTag(input.pageType)
+  const status = normalizeKnowledgeTag(input.status)
+  const result = await searchDerivedKnowledgeVault(input.vault, query, {
+    limit: input.limit ?? undefined,
+    pageType,
+    status,
+  })
+
+  return {
+    ...result,
+    pageType,
+    status,
+    vault: input.vault,
   }
 }
 

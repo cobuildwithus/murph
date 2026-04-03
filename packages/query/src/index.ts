@@ -129,9 +129,14 @@ export {
   DERIVED_KNOWLEDGE_ROOT,
   readDerivedKnowledgeGraph,
   readDerivedKnowledgeGraphWithIssues,
+  searchDerivedKnowledgeGraph,
+  searchDerivedKnowledgeVault,
   type DerivedKnowledgeGraph,
   type DerivedKnowledgeGraphIssue,
   type DerivedKnowledgeGraphReadResult,
   type DerivedKnowledgeNode,
+  type DerivedKnowledgeSearchFilters,
+  type DerivedKnowledgeSearchHit,
+  type DerivedKnowledgeSearchResult,
 } from "./knowledge-graph.ts";
 export * from "./health/index.ts";

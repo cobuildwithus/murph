@@ -12,6 +12,7 @@ import {
   knowledgeIndexRebuildResultSchema,
   knowledgeLintResultSchema,
   knowledgeListResultSchema,
+  knowledgeSearchResultSchema,
   knowledgeShowResultSchema,
 } from '../knowledge-cli-contracts.js'
 import {
@@ -19,6 +20,7 @@ import {
   lintKnowledgePages,
   listKnowledgePages,
   rebuildKnowledgeIndex,
+  searchKnowledgePages,
   showKnowledgePage,
 } from '../knowledge-runtime.js'
 import { researchExecutionModeValues } from '../research-cli-contracts.js'
@@ -124,6 +126,46 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
     async run({ options }) {
       return await listKnowledgePages({
         vault: options.vault,
+        pageType: options.pageType,
+        status: options.status,
+      })
+    },
+  })
+
+  knowledge.command('search', {
+    description:
+      'Search derived knowledge pages by lexical match across titles, summaries, body text, related slugs, and source paths.',
+    args: z.object({
+      query: z
+        .string()
+        .min(1)
+        .describe('Search query for the compiled knowledge wiki.'),
+    }),
+    options: withBaseOptions({
+      pageType: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional page-type filter.'),
+      status: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional status filter.'),
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(200)
+        .optional()
+        .describe('Optional result limit. Defaults to 20 and is capped at 200.'),
+    }),
+    output: knowledgeSearchResultSchema,
+    async run({ args, options }) {
+      return await searchKnowledgePages({
+        vault: options.vault,
+        query: args.query,
+        limit: options.limit,
         pageType: options.pageType,
         status: options.status,
       })

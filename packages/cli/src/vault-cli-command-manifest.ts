@@ -37,6 +37,7 @@ import {
   knowledgeIndexRebuildResultSchema,
   knowledgeLintResultSchema,
   knowledgeListResultSchema,
+  knowledgeSearchResultSchema,
   knowledgeShowResultSchema,
 } from './knowledge-cli-contracts.js'
 import { registerReadCommands } from './commands/read.js'
@@ -768,6 +769,12 @@ export const vaultCliCommandDescriptors = [
         path: ['knowledge', 'list'],
         description: 'List derived knowledge pages currently compiled under derived/knowledge/pages/**.',
         output: knowledgeListResultSchema,
+      },
+      {
+        path: ['knowledge', 'search'],
+        description:
+          'Search derived knowledge pages by lexical match across titles, summaries, body text, related slugs, and source paths.',
+        output: knowledgeSearchResultSchema,
       },
       {
         path: ['knowledge', 'show'],

@@ -386,6 +386,18 @@ test('knowledge commands expose the expected schema at the built CLI boundary', 
       required?: string[]
     }
   }
+  const searchSchema = JSON.parse(
+    await runRawCli(['knowledge', 'search', '--schema', '--format', 'json']),
+  ) as {
+    args: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
   const showSchema = JSON.parse(
     await runRawCli(['knowledge', 'show', '--schema', '--format', 'json']),
   ) as {
@@ -403,6 +415,11 @@ test('knowledge commands expose the expected schema at the built CLI boundary', 
   assert.equal('sourcePath' in compileSchema.options.properties, true)
   assert.equal('mode' in compileSchema.options.properties, true)
   assert.deepEqual(compileSchema.options.required, ['vault'])
+
+  assert.equal('query' in searchSchema.args.properties, true)
+  assert.deepEqual(searchSchema.args.required, ['query'])
+  assert.equal('limit' in searchSchema.options.properties, true)
+  assert.deepEqual(searchSchema.options.required, ['vault'])
 
   assert.equal('slug' in showSchema.args.properties, true)
   assert.deepEqual(showSchema.args.required, ['slug'])

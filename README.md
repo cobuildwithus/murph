@@ -13,7 +13,7 @@ The main installable product entrypoint is `@murphai/murph`, which gives you the
 - a file-native vault with canonical writes owned by `packages/core`
 - the installable `@murphai/murph` package, which provides the `murph` CLI and onboarding flow
 - provider-backed local assistant chat and automation, with runtime state in sibling `assistant-state/**`
-- a non-canonical compiled knowledge wiki under `derived/knowledge/**`, built by the model through CLI tools and kept rebuildable
+- a non-canonical compiled knowledge wiki under `derived/knowledge/**`, built by the model through CLI tools, searchable locally, and kept rebuildable
 - inbox capture, indexing, and parser-driven attachment extraction
 - local wearable/device sync through `@murphai/device-syncd`
 - a hosted Next.js integration control plane in `apps/web`

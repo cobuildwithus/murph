@@ -8,6 +8,7 @@ import {
   DERIVED_KNOWLEDGE_PAGES_ROOT,
   readDerivedKnowledgeGraph,
   readDerivedKnowledgeGraphWithIssues,
+  searchDerivedKnowledgeGraph,
 } from '../src/index.ts'
 
 const createdVaultRoots: string[] = []
@@ -67,6 +68,67 @@ describe('readDerivedKnowledgeGraph', () => {
       summary: 'What seems to improve or disrupt sleep quality.',
       title: 'Sleep quality',
     })
+  })
+
+  it('searches derived knowledge pages by title, summary, body, and filters', async () => {
+    const vaultRoot = await createVaultRoot()
+    await writeKnowledgePage(
+      vaultRoot,
+      'sleep-quality',
+      [
+        '---',
+        'title: Sleep quality',
+        'slug: sleep-quality',
+        'pageType: concept',
+        'status: active',
+        'summary: Magnesium seemed to help sleep continuity.',
+        'sourcePaths:',
+        '  - research/2026/04/sleep-note.md',
+        '---',
+        '',
+        '# Sleep quality',
+        '',
+        'Murph noticed fewer wakeups when [[magnesium]] showed up in recent notes.',
+        '',
+      ].join('\n'),
+    )
+    await writeKnowledgePage(
+      vaultRoot,
+      'magnesium',
+      [
+        '---',
+        'title: Magnesium',
+        'slug: magnesium',
+        'pageType: supplement',
+        'status: archived',
+        'summary: Supplement notes and forms.',
+        '---',
+        '',
+        '# Magnesium',
+        '',
+        'Reference page for the supplement itself.',
+        '',
+      ].join('\n'),
+    )
+
+    const graph = await readDerivedKnowledgeGraph(vaultRoot)
+    const search = searchDerivedKnowledgeGraph(graph, 'sleep magnesium')
+
+    expect(search.format).toBe('murph.knowledge-search.v1')
+    expect(search.total).toBeGreaterThanOrEqual(1)
+    expect(search.hits[0]).toMatchObject({
+      slug: 'sleep-quality',
+      matchedTerms: ['magnesium', 'sleep'],
+      pageType: 'concept',
+      status: 'active',
+    })
+
+    const filtered = searchDerivedKnowledgeGraph(graph, 'magnesium', {
+      status: 'archived',
+      pageType: 'supplement',
+    })
+    expect(filtered.hits).toHaveLength(1)
+    expect(filtered.hits[0]?.slug).toBe('magnesium')
   })
 
   it('reports frontmatter parse failures separately from the loaded graph', async () => {
