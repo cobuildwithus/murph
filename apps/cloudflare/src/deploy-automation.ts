@@ -82,10 +82,6 @@ const HOSTED_WORKER_OPTIONAL_VAR_NAMES = [
   "WHISPER_MODEL_PATH",
 ] as const;
 
-const HOSTED_CONTAINER_IMAGE_VAR_NAMES = [
-  "INSTALL_PADDLEOCR",
-] as const;
-
 const DEFAULT_DEPLOY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_CONTAINER_INSTANCE_TYPE = "standard-1";
 const DEFAULT_CONTAINER_MAX_INSTANCES = 50;
@@ -133,7 +129,6 @@ export interface HostedDeployAutomationEnvironment {
   containerInstanceType: HostedContainerInstanceType;
   containerMaxInstances: number;
   defaultAlarmDelayMs: string;
-  imageVars: Record<string, string>;
   logHeadSamplingRate: number;
   maxEventAttempts: string;
   retryDelayMs: string;
@@ -192,7 +187,6 @@ export function readHostedDeployAutomationEnvironment(
       "21600000",
       "CF_DEFAULT_ALARM_DELAY_MS",
     ),
-    imageVars: readPresentStringMap(source, HOSTED_CONTAINER_IMAGE_VAR_NAMES),
     logHeadSamplingRate: normalizeSamplingRate(
       source.CF_LOG_HEAD_SAMPLING_RATE,
       DEFAULT_LOG_HEAD_SAMPLING_RATE,
@@ -260,11 +254,6 @@ export function buildHostedWranglerDeployConfig(
         class_name: "RunnerContainer",
         image: "../../../Dockerfile.cloudflare-hosted-runner",
         instance_type: environment.containerInstanceType,
-        ...(Object.keys(environment.imageVars).length > 0
-          ? {
-              image_vars: environment.imageVars,
-            }
-          : {}),
         max_instances: environment.containerMaxInstances,
       },
     ],
