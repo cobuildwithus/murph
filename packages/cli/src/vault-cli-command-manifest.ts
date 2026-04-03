@@ -38,6 +38,15 @@ import { registerSearchCommands } from './commands/search.js'
 import { registerSupplementCommands } from './commands/supplement.js'
 import { registerVaultCommands } from './commands/vault.js'
 import { registerWorkoutCommands } from './commands/workout.js'
+import {
+  registerWearablesCommands,
+  wearablesActivityListResultSchema,
+  wearablesBodyStateListResultSchema,
+  wearablesDayResultSchema,
+  wearablesRecoveryListResultSchema,
+  wearablesSleepListResultSchema,
+  wearablesSourcesListResultSchema,
+} from './commands/wearables.js'
 
 type VaultServiceGroupName = Extract<keyof VaultServices, string>
 type InboxServiceMethodName = Extract<keyof InboxServices, string>
@@ -629,6 +638,56 @@ export const vaultCliCommandDescriptors = [
     },
     register({ cli, services }) {
       registerSamplesCommands(cli, services)
+    },
+  },
+  {
+    id: 'wearables',
+    bindingMode: 'direct',
+    rootCommandNames: ['wearables'],
+    leafCommands: [
+      {
+        path: ['wearables', 'day'],
+        description: 'Show one semantic wearable day mirror with deduped sleep, activity, body-state, recovery, and source-confidence notes.',
+        output: wearablesDayResultSchema,
+      },
+      {
+        path: ['wearables', 'sleep', 'list'],
+        description: 'List semantic daily sleep summaries with selected-provider reasoning and confidence details.',
+        output: wearablesSleepListResultSchema,
+      },
+      {
+        path: ['wearables', 'activity', 'list'],
+        description: 'List semantic daily activity summaries with deduped workouts, steps, and distance details.',
+        output: wearablesActivityListResultSchema,
+      },
+      {
+        path: ['wearables', 'body', 'list'],
+        description: 'List semantic daily body-state summaries with deduped weight, body-fat, BMI, temperature, and source-confidence details.',
+        output: wearablesBodyStateListResultSchema,
+      },
+      {
+        path: ['wearables', 'recovery', 'list'],
+        description: 'List semantic daily recovery summaries with readiness, HRV, respiratory, and temperature details.',
+        output: wearablesRecoveryListResultSchema,
+      },
+      {
+        path: ['wearables', 'sources', 'list'],
+        description: 'List wearable source health, coverage, freshness, and evidence counts by provider.',
+        output: wearablesSourcesListResultSchema,
+      },
+    ],
+    directVaultServiceBindings: {
+      query: [
+        'showWearableDay',
+        'listWearableSleep',
+        'listWearableActivity',
+        'listWearableBodyState',
+        'listWearableRecovery',
+        'listWearableSources',
+      ],
+    },
+    register({ cli, services }) {
+      registerWearablesCommands(cli, services)
     },
   },
   {

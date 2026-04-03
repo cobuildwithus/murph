@@ -39,6 +39,7 @@ import {
   summarizeDailySamples,
   summarizeOverviewExperiments,
   summarizeRecentOverviewJournals,
+  summarizeWearableSourceHealth,
 } from "../src/index.ts";
 import {
   type CanonicalEntity,
@@ -235,6 +236,52 @@ test("readVault collapses append-only event revisions to the latest active curre
     assert.equal(revivedEvent?.title, "Revived note");
     assert.equal(revivedEvent?.occurredAt, "2026-05-01T09:30:00.000Z");
     assert.deepEqual(revivedEvent?.attributes.lifecycle, { revision: 4 });
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("wearable source health reports derived sleep-window metrics for session-only providers", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-wearables-source-health-"));
+
+  try {
+    await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
+
+    await writeFile(
+      path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl"),
+      `${JSON.stringify({
+        schemaVersion: "murph.event.v1",
+        id: "evt_sleep_01",
+        kind: "sleep_session",
+        occurredAt: "2026-03-31T21:30:00Z",
+        recordedAt: "2026-04-01T05:45:00Z",
+        dayKey: "2026-03-31",
+        source: "device",
+        title: "Overnight sleep",
+        startAt: "2026-03-31T21:30:00Z",
+        endAt: "2026-04-01T05:45:00Z",
+        durationMinutes: 495,
+        externalRef: {
+          system: "whoop",
+          resourceType: "sleep_session",
+          resourceId: "sleep_01",
+        },
+      })}\n`,
+      "utf8",
+    );
+
+    const vault = await readVault(vaultRoot);
+    const sourceHealth = summarizeWearableSourceHealth(vault);
+
+    assert.equal(sourceHealth.length, 1);
+    assert.equal(sourceHealth[0]?.provider, "whoop");
+    assert.equal(sourceHealth[0]?.candidateMetrics, 1);
+    assert.equal(sourceHealth[0]?.selectedMetrics, 3);
+    assert.deepEqual(sourceHealth[0]?.metricsContributed, [
+      "sessionMinutes",
+      "timeInBedMinutes",
+      "totalSleepMinutes",
+    ]);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

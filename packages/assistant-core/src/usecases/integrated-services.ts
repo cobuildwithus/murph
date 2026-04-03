@@ -597,6 +597,122 @@ function createIntegratedQueryServices(): QueryServices {
         limit,
       }, items)
     },
+    async showWearableDay(input: CommandContext & {
+      date: string
+      providers?: string[]
+    }) {
+      const normalized = normalizeWearableDayInput(input)
+      const { query } = await loadIntegratedRuntime()
+      const readModel = await query.readVault(input.vault)
+      const summary = query.summarizeWearableDay(readModel, normalized.date, {
+        providers:
+          normalized.filters.providers.length > 0
+            ? normalized.filters.providers
+            : undefined,
+      })
+
+      return {
+        vault: input.vault,
+        date: normalized.date,
+        filters: normalized.filters,
+        summary,
+      }
+    },
+    async listWearableSleep(input: CommandContext & {
+      date?: string
+      from?: string
+      to?: string
+      providers?: string[]
+      limit: number
+    }) {
+      const normalized = normalizeWearableSummaryInput(input)
+      const { query } = await loadIntegratedRuntime()
+      const readModel = await query.readVault(input.vault)
+      const items = query.summarizeWearableSleep(readModel, normalized.queryFilters)
+
+      return {
+        vault: input.vault,
+        filters: normalized.filters,
+        items,
+        count: items.length,
+      }
+    },
+    async listWearableActivity(input: CommandContext & {
+      date?: string
+      from?: string
+      to?: string
+      providers?: string[]
+      limit: number
+    }) {
+      const normalized = normalizeWearableSummaryInput(input)
+      const { query } = await loadIntegratedRuntime()
+      const readModel = await query.readVault(input.vault)
+      const items = query.summarizeWearableActivity(readModel, normalized.queryFilters)
+
+      return {
+        vault: input.vault,
+        filters: normalized.filters,
+        items,
+        count: items.length,
+      }
+    },
+    async listWearableBodyState(input: CommandContext & {
+      date?: string
+      from?: string
+      to?: string
+      providers?: string[]
+      limit: number
+    }) {
+      const normalized = normalizeWearableSummaryInput(input)
+      const { query } = await loadIntegratedRuntime()
+      const readModel = await query.readVault(input.vault)
+      const items = query.summarizeWearableBodyState(readModel, normalized.queryFilters)
+
+      return {
+        vault: input.vault,
+        filters: normalized.filters,
+        items,
+        count: items.length,
+      }
+    },
+    async listWearableRecovery(input: CommandContext & {
+      date?: string
+      from?: string
+      to?: string
+      providers?: string[]
+      limit: number
+    }) {
+      const normalized = normalizeWearableSummaryInput(input)
+      const { query } = await loadIntegratedRuntime()
+      const readModel = await query.readVault(input.vault)
+      const items = query.summarizeWearableRecovery(readModel, normalized.queryFilters)
+
+      return {
+        vault: input.vault,
+        filters: normalized.filters,
+        items,
+        count: items.length,
+      }
+    },
+    async listWearableSources(input: CommandContext & {
+      date?: string
+      from?: string
+      to?: string
+      providers?: string[]
+      limit: number
+    }) {
+      const normalized = normalizeWearableSummaryInput(input)
+      const { query } = await loadIntegratedRuntime()
+      const readModel = await query.readVault(input.vault)
+      const items = query.summarizeWearableSourceHealth(readModel, normalized.queryFilters)
+
+      return {
+        vault: input.vault,
+        filters: normalized.filters,
+        items,
+        count: items.length,
+      }
+    },
     async exportPack(input: CommandContext & {
       from: string
       to: string
@@ -629,6 +745,86 @@ function createIntegratedQueryServices(): QueryServices {
       }
     },
   } satisfies QueryServices
+}
+
+function normalizeWearableDayInput(input: {
+  date: string
+  providers?: string[]
+}): {
+  date: string
+  filters: {
+    providers: string[]
+  }
+} {
+  const date = input.date.trim()
+  const providers = normalizeWearableProviders(input.providers)
+
+  return {
+    date,
+    filters: {
+      providers,
+    },
+  }
+}
+
+function normalizeWearableSummaryInput(input: {
+  date?: string
+  from?: string
+  to?: string
+  providers?: string[]
+  limit: number
+}): {
+  filters: {
+    date: string | null
+    from: string | null
+    to: string | null
+    providers: string[]
+    limit: number
+  }
+  queryFilters: {
+    from?: string
+    to?: string
+    providers?: string[]
+    limit: number
+  }
+} {
+  const date = typeof input.date === 'string' && input.date.trim() ? input.date.trim() : undefined
+  const from = date ?? input.from
+  const to = date ?? input.to
+  const providers = normalizeWearableProviders(input.providers)
+  const limit = normalizeWearableLimit(input.limit)
+
+  return {
+    filters: {
+      date: date ?? null,
+      from: from ?? null,
+      to: to ?? null,
+      providers,
+      limit,
+    },
+    queryFilters: {
+      from,
+      to,
+      providers: providers.length > 0 ? providers : undefined,
+      limit,
+    },
+  }
+}
+
+function normalizeWearableProviders(providers: readonly string[] | undefined): string[] {
+  return [...new Set(
+    (providers ?? [])
+      .map((provider) => provider.trim())
+      .filter((provider) => provider.length > 0),
+  )]
+}
+
+function normalizeWearableLimit(limit: number): number {
+  if (!Number.isInteger(limit) || limit <= 0) {
+    return 30
+  }
+
+  return Math.min(limit, 200)
 }
 
 function createIntegratedDeviceSyncServices(): DeviceSyncServices {

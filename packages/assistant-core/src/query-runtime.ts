@@ -1,4 +1,13 @@
 import type { JsonObject } from '@murphai/contracts'
+import type {
+  WearableActivitySummary as WearableActivitySummaryShape,
+  WearableBodyStateSummary as WearableBodyStateSummaryShape,
+  WearableDaySummary as WearableDaySummaryShape,
+  WearableRecoverySummary as WearableRecoverySummaryShape,
+  WearableSleepSummary as WearableSleepSummaryShape,
+  WearableSourceHealthSummary as WearableSourceHealthSummaryShape,
+  WearableSummaryFilters as WearableSummaryFiltersShape,
+} from '@murphai/query'
 import { loadRuntimeModule } from './runtime-import.js'
 
 interface IdFamilyDefinition {
@@ -315,6 +324,14 @@ export interface QueryExportPack {
   files: QueryExportPackFile[]
 }
 
+export type QueryWearableSummaryFilters = WearableSummaryFiltersShape
+export type QueryWearableSleepSummary = WearableSleepSummaryShape
+export type QueryWearableActivitySummary = WearableActivitySummaryShape
+export type QueryWearableBodyStateSummary = WearableBodyStateSummaryShape
+export type QueryWearableDaySummary = WearableDaySummaryShape
+export type QueryWearableRecoverySummary = WearableRecoverySummaryShape
+export type QueryWearableSourceHealthSummary = WearableSourceHealthSummaryShape
+
 export interface QueryRuntimeModule {
   ALL_QUERY_ENTITY_FAMILIES: readonly QueryEntityFamily[]
   buildExportPack(
@@ -352,6 +369,31 @@ export interface QueryRuntimeModule {
     filters?: QuerySearchFilters,
     options?: QuerySearchOptions,
   ): Promise<QuerySearchResult>
+  summarizeWearableSleep(
+    vault: QueryVaultReadModel,
+    filters?: QueryWearableSummaryFilters,
+  ): QueryWearableSleepSummary[]
+  summarizeWearableActivity(
+    vault: QueryVaultReadModel,
+    filters?: QueryWearableSummaryFilters,
+  ): QueryWearableActivitySummary[]
+  summarizeWearableBodyState(
+    vault: QueryVaultReadModel,
+    filters?: QueryWearableSummaryFilters,
+  ): QueryWearableBodyStateSummary[]
+  summarizeWearableDay(
+    vault: QueryVaultReadModel,
+    date: string,
+    filters?: Omit<QueryWearableSummaryFilters, 'from' | 'to' | 'limit'>,
+  ): QueryWearableDaySummary | null
+  summarizeWearableRecovery(
+    vault: QueryVaultReadModel,
+    filters?: QueryWearableSummaryFilters,
+  ): QueryWearableRecoverySummary[]
+  summarizeWearableSourceHealth(
+    vault: QueryVaultReadModel,
+    filters?: QueryWearableSummaryFilters,
+  ): QueryWearableSourceHealthSummary[]
   showSupplement(vaultRoot: string, lookup: string): Promise<JsonObject | null>
   showSupplementCompound(
     vaultRoot: string,
