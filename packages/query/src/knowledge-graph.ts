@@ -15,6 +15,8 @@ import {
 export const DERIVED_KNOWLEDGE_ROOT = 'derived/knowledge'
 export const DERIVED_KNOWLEDGE_PAGES_ROOT = `${DERIVED_KNOWLEDGE_ROOT}/pages`
 export const DERIVED_KNOWLEDGE_INDEX_PATH = `${DERIVED_KNOWLEDGE_ROOT}/index.md`
+const DEFAULT_KNOWLEDGE_SEARCH_LIMIT = 20
+const MAX_KNOWLEDGE_SEARCH_LIMIT = 200
 
 export interface DerivedKnowledgeNode {
   attributes: FrontmatterObject
@@ -51,9 +53,53 @@ export interface DerivedKnowledgeGraphReadResult {
   issues: DerivedKnowledgeGraphIssue[]
 }
 
+export interface DerivedKnowledgeSearchFilters {
+  limit?: number
+  pageType?: string | null
+  status?: string | null
+}
+
+export interface DerivedKnowledgeSearchHit {
+  compiledAt: string | null
+  matchedTerms: string[]
+  pagePath: string
+  pageType: string | null
+  relatedSlugs: string[]
+  score: number
+  slug: string
+  snippet: string
+  sourcePaths: string[]
+  status: string | null
+  summary: string | null
+  title: string
+}
+
+export interface DerivedKnowledgeSearchResult {
+  format: 'murph.knowledge-search.v1'
+  hits: DerivedKnowledgeSearchHit[]
+  query: string
+  total: number
+}
+
 interface DerivedKnowledgeNodeParseResult {
   issue?: DerivedKnowledgeGraphIssue
   node?: DerivedKnowledgeNode
+}
+
+interface DerivedKnowledgeSearchableDocument {
+  bodyText: string
+  compiledAt: string | null
+  pagePath: string
+  pageType: string | null
+  relatedSlugs: string[]
+  slug: string
+  sourcePaths: string[]
+  status: string | null
+  structuredText: string
+  summary: string | null
+  summaryText: string
+  title: string
+  titleText: string
 }
 
 export async function readDerivedKnowledgeGraph(
@@ -111,6 +157,50 @@ export async function readDerivedKnowledgeGraphWithIssues(
       pagesRoot: DERIVED_KNOWLEDGE_PAGES_ROOT,
     },
     issues,
+  }
+}
+
+export async function searchDerivedKnowledgeVault(
+  vaultRoot: string,
+  query: string,
+  filters: DerivedKnowledgeSearchFilters = {},
+): Promise<DerivedKnowledgeSearchResult> {
+  const graph = await readDerivedKnowledgeGraph(vaultRoot)
+  return searchDerivedKnowledgeGraph(graph, query, filters)
+}
+
+export function searchDerivedKnowledgeGraph(
+  graph: DerivedKnowledgeGraph,
+  query: string,
+  filters: DerivedKnowledgeSearchFilters = {},
+): DerivedKnowledgeSearchResult {
+  const normalizedQuery = query.trim()
+  const terms = tokenize(normalizedQuery)
+
+  if (terms.length === 0) {
+    return {
+      format: 'murph.knowledge-search.v1',
+      hits: [],
+      query: normalizedQuery,
+      total: 0,
+    }
+  }
+
+  const pageType = normalizeKnowledgeSearchTag(filters.pageType)
+  const status = normalizeKnowledgeSearchTag(filters.status)
+  const hits = graph.nodes
+    .filter((node) => matchesKnowledgeSearchFilter(node.pageType, pageType))
+    .filter((node) => matchesKnowledgeSearchFilter(node.status, status))
+    .map(materializeKnowledgeSearchDocument)
+    .map((candidate) => scoreKnowledgeSearchDocument(candidate, normalizedQuery, terms))
+    .filter((entry): entry is DerivedKnowledgeSearchHit => entry !== null)
+    .sort(compareKnowledgeSearchHits)
+
+  return {
+    format: 'murph.knowledge-search.v1',
+    hits: hits.slice(0, normalizeKnowledgeSearchLimit(filters.limit)),
+    query: normalizedQuery,
+    total: hits.length,
   }
 }
 
@@ -187,6 +277,143 @@ function parseFailureToIssue(failure: ParseFailure): DerivedKnowledgeGraphIssue 
     reason: failure.reason,
     relativePath: failure.relativePath,
   }
+}
+
+function materializeKnowledgeSearchDocument(
+  node: DerivedKnowledgeNode,
+): DerivedKnowledgeSearchableDocument {
+  return {
+    bodyText: compactStrings([node.body]).join('\n').trim(),
+    compiledAt: node.compiledAt,
+    pagePath: node.relativePath,
+    pageType: node.pageType,
+    relatedSlugs: node.relatedSlugs,
+    slug: node.slug,
+    sourcePaths: node.sourcePaths,
+    status: node.status,
+    structuredText: compactStrings([
+      node.slug,
+      node.relativePath,
+      node.pageType,
+      node.status,
+      ...node.sourcePaths,
+      ...node.relatedSlugs,
+    ]).join('\n'),
+    summary: node.summary,
+    summaryText: compactStrings([node.summary]).join(' ').trim(),
+    title: node.title,
+    titleText: compactStrings([
+      node.title,
+      node.pageType,
+      node.status,
+      node.slug,
+    ]).join(' · '),
+  }
+}
+
+function scoreKnowledgeSearchDocument(
+  candidate: DerivedKnowledgeSearchableDocument,
+  normalizedQuery: string,
+  terms: readonly string[],
+): DerivedKnowledgeSearchHit | null {
+  const normalizedPhrase = normalizedQuery.toLowerCase()
+  const matchedTerms = new Set<string>()
+  let score = 0
+
+  const titleLower = candidate.titleText.toLowerCase()
+  const summaryLower = candidate.summaryText.toLowerCase()
+  const bodyLower = candidate.bodyText.toLowerCase()
+  const structuredLower = candidate.structuredText.toLowerCase()
+
+  const titleMetrics = scoreText(titleLower, terms)
+  const summaryMetrics = scoreText(summaryLower, terms)
+  const bodyMetrics = scoreText(bodyLower, terms)
+  const structuredMetrics = scoreText(structuredLower, terms)
+
+  accumulateMatchedTerms(matchedTerms, titleMetrics.matchedTerms)
+  accumulateMatchedTerms(matchedTerms, summaryMetrics.matchedTerms)
+  accumulateMatchedTerms(matchedTerms, bodyMetrics.matchedTerms)
+  accumulateMatchedTerms(matchedTerms, structuredMetrics.matchedTerms)
+
+  if (titleLower.includes(normalizedPhrase)) {
+    score += 12
+  }
+  if (summaryLower.includes(normalizedPhrase)) {
+    score += 8
+  }
+  if (bodyLower.includes(normalizedPhrase)) {
+    score += 6
+  }
+  if (structuredLower.includes(normalizedPhrase)) {
+    score += 4
+  }
+
+  score += titleMetrics.count * 4.5
+  score += summaryMetrics.count * 3.25
+  score += bodyMetrics.count * 1.75
+  score += structuredMetrics.count * 1
+
+  const coverage = matchedTerms.size / terms.length
+  score += coverage * 6
+
+  if (matchedTerms.size === terms.length && terms.length > 1) {
+    score += 3
+  }
+
+  if (score <= 0) {
+    return null
+  }
+
+  return {
+    compiledAt: candidate.compiledAt,
+    matchedTerms: [...matchedTerms].sort(),
+    pagePath: candidate.pagePath,
+    pageType: candidate.pageType,
+    relatedSlugs: candidate.relatedSlugs,
+    score: Number(score.toFixed(4)),
+    slug: candidate.slug,
+    snippet: buildKnowledgeSnippet(candidate, terms),
+    sourcePaths: candidate.sourcePaths,
+    status: candidate.status,
+    summary: candidate.summary,
+    title: candidate.title,
+  }
+}
+
+function compareKnowledgeSearchHits(
+  left: DerivedKnowledgeSearchHit,
+  right: DerivedKnowledgeSearchHit,
+): number {
+  if (left.score !== right.score) {
+    return right.score - left.score
+  }
+
+  const leftDateLike = left.compiledAt ?? ''
+  const rightDateLike = right.compiledAt ?? ''
+  if (leftDateLike !== rightDateLike) {
+    return rightDateLike.localeCompare(leftDateLike)
+  }
+
+  return left.slug.localeCompare(right.slug)
+}
+
+function buildKnowledgeSnippet(
+  candidate: DerivedKnowledgeSearchableDocument,
+  terms: readonly string[],
+): string {
+  for (const source of [
+    candidate.summaryText,
+    candidate.bodyText,
+    candidate.titleText,
+    candidate.structuredText,
+  ]) {
+    const snippet = findSnippet(source, terms)
+    if (snippet) {
+      return snippet
+    }
+  }
+
+  return candidate.title || candidate.slug
 }
 
 function summarizeBody(body: string): string | null {
@@ -273,4 +500,124 @@ function orderedUniqueStrings(values: readonly string[]): string[] {
   }
 
   return uniqueValues
+}
+
+function normalizeKnowledgeSearchTag(value: string | null | undefined): string | null {
+  if (!value) {
+    return null
+  }
+
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, '-')
+    .replace(/^-+|-+$/gu, '')
+  return normalized || null
+}
+
+function matchesKnowledgeSearchFilter(
+  value: string | null | undefined,
+  filter: string | null,
+): boolean {
+  if (!filter) {
+    return true
+  }
+
+  return normalizeKnowledgeSearchTag(value) === filter
+}
+
+function normalizeKnowledgeSearchLimit(limit: number | undefined): number {
+  if (!Number.isFinite(limit)) {
+    return DEFAULT_KNOWLEDGE_SEARCH_LIMIT
+  }
+
+  return Math.max(
+    1,
+    Math.min(MAX_KNOWLEDGE_SEARCH_LIMIT, Math.trunc(limit ?? DEFAULT_KNOWLEDGE_SEARCH_LIMIT)),
+  )
+}
+
+function tokenize(value: string): string[] {
+  const matches = value.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? []
+  return [...new Set(matches.filter((term) => term.length > 1))]
+}
+
+function scoreText(
+  sourceText: string,
+  terms: readonly string[],
+): { count: number; matchedTerms: string[] } {
+  let count = 0
+  const matchedTerms: string[] = []
+
+  for (const term of terms) {
+    const occurrences = countOccurrences(sourceText, term)
+    if (occurrences > 0) {
+      count += occurrences
+      matchedTerms.push(term)
+    }
+  }
+
+  return {
+    count,
+    matchedTerms,
+  }
+}
+
+function countOccurrences(sourceText: string, term: string): number {
+  if (!sourceText || !term) {
+    return 0
+  }
+
+  let occurrences = 0
+  let startIndex = 0
+  while (true) {
+    const index = sourceText.indexOf(term, startIndex)
+    if (index === -1) {
+      return occurrences
+    }
+
+    occurrences += 1
+    startIndex = index + term.length
+  }
+}
+
+function accumulateMatchedTerms(target: Set<string>, terms: readonly string[]): void {
+  for (const term of terms) {
+    target.add(term)
+  }
+}
+
+function findSnippet(sourceText: string, terms: readonly string[]): string | null {
+  const normalizedSource = sourceText.replace(/\s+/gu, ' ').trim()
+  if (!normalizedSource) {
+    return null
+  }
+
+  const lowerSource = normalizedSource.toLowerCase()
+  let bestIndex = -1
+  for (const term of terms) {
+    const index = lowerSource.indexOf(term)
+    if (index !== -1 && (bestIndex === -1 || index < bestIndex)) {
+      bestIndex = index
+    }
+  }
+
+  if (bestIndex === -1) {
+    return normalizedSource.length <= 200
+      ? normalizedSource
+      : `${normalizedSource.slice(0, 197).trimEnd()}...`
+  }
+
+  const windowRadius = 90
+  const start = Math.max(0, bestIndex - windowRadius)
+  const end = Math.min(normalizedSource.length, bestIndex + windowRadius)
+  const prefix = start > 0 ? '...' : ''
+  const suffix = end < normalizedSource.length ? '...' : ''
+  return `${prefix}${normalizedSource.slice(start, end).trim()}${suffix}`
+}
+
+function compactStrings(values: readonly (string | null | undefined)[]): string[] {
+  return values
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .filter((value) => value.length > 0)
 }

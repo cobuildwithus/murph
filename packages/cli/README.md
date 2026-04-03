@@ -45,6 +45,7 @@ For durable local synthesis that should keep adding up inside the vault, use the
 
 ```bash
 vault-cli knowledge compile "Summarize my current sleep notes" --source-path research/2026/04/sleep-note.md
+vault-cli knowledge search "sleep magnesium"
 vault-cli knowledge list
 vault-cli knowledge lint
 ```
