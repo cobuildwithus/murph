@@ -92,9 +92,15 @@ unregister_background_pid() {
 terminate_background_pid() {
   local pid="$1"
 
-  if kill -0 "$pid" 2>/dev/null; then
-    kill "$pid" 2>/dev/null || true
+  if ! kill -0 "$pid" 2>/dev/null; then
+    return
   fi
+
+  if [[ "$pid" -gt 0 && "${OSTYPE:-}" != msys* && "${OSTYPE:-}" != cygwin* ]]; then
+    kill "-$pid" 2>/dev/null || true
+  fi
+
+  kill "$pid" 2>/dev/null || true
 }
 
 cleanup_background_jobs() {
@@ -239,6 +245,7 @@ wait_for_background_jobs() {
       for other_pid in "$@"; do
         if [[ "$other_pid" != "$pid" ]]; then
           terminate_background_pid "$other_pid"
+          wait "$other_pid" 2>/dev/null || true
         fi
       done
     fi
