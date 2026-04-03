@@ -21,6 +21,12 @@ vi.mock("@/src/components/settings/hosted-telegram-settings", () => ({
   },
 }));
 
+vi.mock("@/src/components/settings/hosted-device-sync-settings", () => ({
+  HostedDeviceSyncSettings() {
+    return createElement("div", null, "Hosted device sync settings");
+  },
+}));
+
 vi.mock("@/src/components/hosted-onboarding/privy-provider", () => ({
   HostedPrivyProvider(input: { children: React.ReactNode }) {
     return createElement("div", { "data-privy-provider": "true" }, input.children);
@@ -45,6 +51,7 @@ test("SettingsPage renders the Privy-backed settings tree when client auth is co
 
   assert.match(markup, /Hosted email settings/);
   assert.match(markup, /Hosted Telegram settings/);
+  assert.match(markup, /Hosted device sync settings/);
   assert.match(markup, /data-privy-provider="true"/);
   assert.match(markup, /Sign in with the same phone-backed Privy account you use for Murph/);
 });
@@ -59,4 +66,5 @@ test("SettingsPage renders a config warning when Privy client auth is unavailabl
   assert.match(markup, /NEXT_PUBLIC_PRIVY_APP_ID/);
   assert.doesNotMatch(markup, /Hosted email settings/);
   assert.doesNotMatch(markup, /Hosted Telegram settings/);
+  assert.doesNotMatch(markup, /Hosted device sync settings/);
 });

@@ -159,6 +159,14 @@ pnpm --dir apps/web prisma:migrate:deploy
 
 ## Main routes
 
+Hosted settings-authenticated wearable routes:
+
+- `GET /api/settings/device-sync`
+- `POST /api/settings/device-sync/providers/:provider/connect`
+- `POST /api/settings/device-sync/connections/:connectionId/disconnect`
+
+These power the `/settings` wearable-sources card. They use the hosted onboarding Privy bearer + identity-token contract so the browser can manage calm connect, reconnect, refresh, and disconnect flows without the separate signed browser-assertion headers required by the lower-level `/api/device-sync/**` browser surface.
+
 Browser-authenticated routes:
 
 - `GET /api/device-sync/connections`
