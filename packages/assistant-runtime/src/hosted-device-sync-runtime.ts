@@ -283,7 +283,7 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
         refreshToken: input.account.refreshTokenEncrypted
           ? input.codec.decrypt(input.account.refreshTokenEncrypted)
           : null,
-        tokenVersion: input.observedTokenVersion ?? 0,
+        tokenVersion: input.observedTokenVersion ?? 1,
       } satisfies HostedDeviceSyncRuntimeTokenBundle;
   const update: HostedDeviceSyncRuntimeConnectionUpdate = {
     connectionId: input.hostedConnectionId,

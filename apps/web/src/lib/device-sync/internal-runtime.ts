@@ -463,12 +463,7 @@ function assignMonotonicRuntimeLocalStateDate(
   existingValue: string | null,
   nextValue: string | null | undefined,
 ): void {
-  if (nextValue === undefined) {
-    return;
-  }
-
-  if (nextValue === null) {
-    data[key] = null;
+  if (nextValue === undefined || nextValue === null) {
     return;
   }
 

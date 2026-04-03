@@ -1719,6 +1719,7 @@ describe("hosted device-sync runtime", () => {
           tokenBundle: expect.objectContaining({
             accessToken: "access",
             refreshToken: "refresh",
+            tokenVersion: 1,
           }),
         }),
       ],
