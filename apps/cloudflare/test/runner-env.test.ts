@@ -6,8 +6,6 @@ import {
   filterHostedRunnerUserEnv,
 } from "../src/runner-env.js";
 
-const HOSTED_ASSISTANT_AUTOMATION_DISABLE_ALIASES = ["0", "false", "no", "off", "disabled"] as const;
-
 describe("buildHostedRunnerContainerEnv", () => {
   it("forwards non-automation runner env without leaking worker proxy base URLs", () => {
     expect(buildHostedRunnerContainerEnv({
@@ -22,7 +20,7 @@ describe("buildHostedRunnerContainerEnv", () => {
     });
   });
 
-  it("forwards automation-only keys by default", () => {
+  it("forwards hosted automation provider and channel keys", () => {
     expect(buildHostedRunnerContainerEnv({
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       TELEGRAM_BOT_TOKEN: "telegram-token",
@@ -34,23 +32,6 @@ describe("buildHostedRunnerContainerEnv", () => {
       TELEGRAM_BOT_TOKEN: "telegram-token",
     });
   });
-
-  it.each(HOSTED_ASSISTANT_AUTOMATION_DISABLE_ALIASES)(
-    "can still strip automation-only keys when hosted assistant automation is explicitly disabled via %s",
-    (disableValue) => {
-      expect(buildHostedRunnerContainerEnv({
-        FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
-        HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION: disableValue,
-        TELEGRAM_BOT_TOKEN: "telegram-token",
-      })).toEqual({
-        FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
-        HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION: disableValue,
-        HOSTED_EMAIL_INGRESS_READY: "false",
-        HOSTED_EMAIL_SEND_READY: "false",
-        NODE_ENV: "production",
-      });
-    },
-  );
 
   it("does not forward stale AgentMail hosted vars into the runner", () => {
     expect(buildHostedRunnerContainerEnv({
@@ -112,7 +93,7 @@ describe("buildHostedRunnerContainerEnv", () => {
     });
   });
 
-  it("preserves automation-only per-user env by default", () => {
+  it("preserves hosted automation per-user env", () => {
     expect(filterHostedRunnerUserEnv({
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       DEEPSEEK_API_KEY: "deepseek-user",
@@ -120,44 +101,6 @@ describe("buildHostedRunnerContainerEnv", () => {
       OPENAI_API_KEY: "sk-user",
       VENICE_API_KEY: "venice-user",
       XAI_API_KEY: "xai-user",
-    }, {})).toEqual({
-      FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
-      DEEPSEEK_API_KEY: "deepseek-user",
-      HF_TOKEN: "hf-user",
-      OPENAI_API_KEY: "sk-user",
-      VENICE_API_KEY: "venice-user",
-      XAI_API_KEY: "xai-user",
-    });
-  });
-
-  it.each(HOSTED_ASSISTANT_AUTOMATION_DISABLE_ALIASES)(
-    "strips automation-only per-user env when hosted assistant automation is explicitly disabled via %s",
-    (disableValue) => {
-      expect(filterHostedRunnerUserEnv({
-        FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
-        DEEPSEEK_API_KEY: "deepseek-user",
-        HF_TOKEN: "hf-user",
-        OPENAI_API_KEY: "sk-user",
-        VENICE_API_KEY: "venice-user",
-        XAI_API_KEY: "xai-user",
-      }, {
-        HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION: disableValue,
-      })).toEqual({
-        FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
-      });
-    },
-  );
-
-  it("preserves automation-only per-user env when hosted assistant automation is explicitly enabled", () => {
-    expect(filterHostedRunnerUserEnv({
-      FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
-      DEEPSEEK_API_KEY: "deepseek-user",
-      HF_TOKEN: "hf-user",
-      OPENAI_API_KEY: "sk-user",
-      VENICE_API_KEY: "venice-user",
-      XAI_API_KEY: "xai-user",
-    }, {
-      HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION: "true",
     })).toEqual({
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       DEEPSEEK_API_KEY: "deepseek-user",

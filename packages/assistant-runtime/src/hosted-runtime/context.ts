@@ -17,7 +17,6 @@ import {
 } from "@murphai/assistant-core";
 
 import type { HostedBootstrapResult } from "./models.ts";
-import { hostedAssistantAutomationEnabledFromEnv } from "./environment.ts";
 
 interface HostedMemberBootstrapResult {
   vaultCreated: boolean;
@@ -91,7 +90,6 @@ async function bootstrapHostedAssistantRuntimeState(
     enableChannelCapabilityReconciliation: boolean;
   },
 ): Promise<HostedAssistantRuntimeState> {
-  const automationEnabled = hostedAssistantAutomationEnabledFromEnv(runtimeEnv);
   const assistantBootstrap = await ensureHostedAssistantOperatorDefaults({
     allowMissing: true,
     env: runtimeEnv,
@@ -100,7 +98,7 @@ async function bootstrapHostedAssistantRuntimeState(
     ? await reconcileHostedAssistantChannelCapabilities(
         vaultRoot,
         runtimeEnv,
-        automationEnabled && assistantBootstrap.configured,
+        assistantBootstrap.configured,
       )
     : {
         emailAutoReplyEnabled: false,
@@ -144,12 +142,9 @@ export async function reconcileHostedAssistantChannelCapabilities(
   runtimeEnv: Readonly<Record<string, string>>,
   assistantConfigured: boolean,
 ): Promise<Pick<HostedBootstrapResult, "emailAutoReplyEnabled" | "telegramAutoReplyEnabled">> {
-  const automationEnabled = hostedAssistantAutomationEnabledFromEnv(runtimeEnv);
-  const emailAutoReplyEnabled = automationEnabled
-    && assistantConfigured
+  const emailAutoReplyEnabled = assistantConfigured
     && readHostedEmailCapabilities(runtimeEnv).sendReady;
-  const telegramAutoReplyEnabled = automationEnabled
-    && assistantConfigured
+  const telegramAutoReplyEnabled = assistantConfigured
     && Boolean(normalizeNullableString(runtimeEnv.TELEGRAM_BOT_TOKEN));
 
   const automationState = await readAssistantAutomationState(vaultRoot);

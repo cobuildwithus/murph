@@ -55,34 +55,6 @@ test("hosted channel capability reconciliation enables email and telegram auto-r
   }
 });
 
-test("hosted channel capability reconciliation can still disable automation explicitly", async () => {
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runtime-context-"));
-  const vaultRoot = path.join(workspaceRoot, "vault");
-
-  try {
-    const result = await reconcileHostedAssistantChannelCapabilities(vaultRoot, {
-      HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION: "disabled",
-      HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
-      HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
-      HOSTED_EMAIL_DOMAIN: "mail.example.test",
-      HOSTED_EMAIL_LOCAL_PART: "assistant",
-      HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
-      TELEGRAM_BOT_TOKEN: "telegram-token",
-    }, true);
-
-    assert.deepEqual(result, {
-      emailAutoReplyEnabled: false,
-      telegramAutoReplyEnabled: false,
-    });
-    await assert.rejects(
-      readFile(resolveAssistantStatePaths(vaultRoot).automationPath, "utf8"),
-      /ENOENT/u,
-    );
-  } finally {
-    await rm(workspaceRoot, { force: true, recursive: true });
-  }
-});
-
 test("hosted dispatch context still requires member activation bootstrap before follow-up events", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runtime-context-"));
   const vaultRoot = path.join(workspaceRoot, "vault");

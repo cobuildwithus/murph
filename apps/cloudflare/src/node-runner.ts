@@ -74,9 +74,6 @@ function buildHostedExecutionJobRuntime(
     ),
     forwardedEnv: resolvedForwardedEnv,
     internalWorkerProxyToken: requestedRuntime.internalWorkerProxyToken ?? null,
-    userEnv: filterHostedRunnerUserEnv(
-      normalizeHostedUserEnv(requestedRuntime.userEnv ?? {}, resolvedForwardedEnv),
-      resolvedForwardedEnv,
-    ),
+    userEnv: filterHostedRunnerUserEnv(normalizeHostedUserEnv(requestedRuntime.userEnv ?? {}, resolvedForwardedEnv)),
   };
 }

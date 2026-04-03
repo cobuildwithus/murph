@@ -18,8 +18,6 @@ import {
   normalizeHostedExecutionString,
   readHostedExecutionWebControlPlaneEnvironment,
 } from "@murphai/hosted-execution";
-
-export { hostedAssistantAutomationEnabledFromEnv } from "@murphai/hosted-execution";
 import type {
   HostedAssistantRuntimeConfig,
   NormalizedHostedAssistantRuntimeConfig,

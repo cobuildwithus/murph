@@ -130,11 +130,9 @@ function installHostedFetchBaseUrlProxy(input: {
 
 describe("runHostedExecutionJob", () => {
   const cleanupPaths: string[] = [];
-  const initialHostedAssistantAutomation = process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION;
 
   beforeEach(async () => {
     vi.restoreAllMocks();
-    process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION = "off";
     setHostedExecutionRunModeForTests("in-process");
     const actualAssistantCore = await vi.importActual<typeof import("@murphai/assistant-core")>(
       "@murphai/assistant-core",
@@ -146,7 +144,6 @@ describe("runHostedExecutionJob", () => {
   });
 
   afterEach(async () => {
-    restoreEnvVar("HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION", initialHostedAssistantAutomation);
     setHostedExecutionRunModeForTests(null);
     setHostedExecutionRunStartHookForTests(null);
     if (initialGlobalFetch) {
@@ -235,13 +232,11 @@ describe("runHostedExecutionJob", () => {
 
 
   it("does not bootstrap hosted email auto-reply when ingress is configured but send credentials are missing", async () => {
-    const previousAutomationEnabled = process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION;
     const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
     const previousHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
     const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
     const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
 
-    delete process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION;
     process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
     process.env.HOSTED_EMAIL_LOCAL_PART = "assistant";
     process.env.HOSTED_EMAIL_SIGNING_SECRET = "email-secret";
@@ -276,7 +271,6 @@ describe("runHostedExecutionJob", () => {
       expect(result.result.summary).toContain("hosted email auto-reply unavailable");
       expect(automationState.autoReplyChannels).not.toContain("email");
     } finally {
-      restoreEnvVar("HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION", previousAutomationEnabled);
       restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
       restoreEnvVar("HOSTED_EMAIL_LOCAL_PART", previousHostedEmailLocalPart);
       restoreEnvVar("HOSTED_EMAIL_SIGNING_SECRET", previousHostedEmailSigningSecret);
@@ -357,7 +351,6 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("bootstraps hosted email auto-reply when the hosted email bridge is configured", async () => {
-    const previousAutomationEnabled = process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION;
     const previousHostedEmailAccountId = process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID;
     const previousHostedEmailApiToken = process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN;
     const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
@@ -365,7 +358,6 @@ describe("runHostedExecutionJob", () => {
     const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
     const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
 
-    delete process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION;
     process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID = "acct_123";
     process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN = "cf-token";
     process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
@@ -403,7 +395,6 @@ describe("runHostedExecutionJob", () => {
       expect(automationState.autoReplyChannels).toContain("email");
       expect(automationState.autoReplyChannels).not.toContain("linq");
     } finally {
-      restoreEnvVar("HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION", previousAutomationEnabled);
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_API_TOKEN", previousHostedEmailApiToken);
       restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
@@ -414,7 +405,6 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("does not bootstrap hosted email auto-reply when sender credentials exist without a hosted email domain", async () => {
-    const previousAutomationEnabled = process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION;
     const previousHostedEmailAccountId = process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID;
     const previousHostedEmailApiToken = process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN;
     const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
@@ -422,7 +412,6 @@ describe("runHostedExecutionJob", () => {
     const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
     const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
 
-    delete process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION;
     process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID = "acct_123";
     process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN = "cf-token";
     process.env.HOSTED_EMAIL_FROM_ADDRESS = "assistant@mail.example.test";
@@ -459,7 +448,6 @@ describe("runHostedExecutionJob", () => {
       expect(result.result.summary).toContain("hosted email auto-reply unavailable");
       expect(automationState.autoReplyChannels).not.toContain("email");
     } finally {
-      restoreEnvVar("HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION", previousAutomationEnabled);
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_API_TOKEN", previousHostedEmailApiToken);
       restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
@@ -2032,11 +2020,9 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("journals hosted assistant deliveries after the durable commit before finalizing returned bundles", async () => {
-    const previousAutomationEnabled = process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION;
     const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
     const parent = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-journal-"));
     cleanupPaths.push(parent);
-    process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION = "true";
     const intentId = "outbox_hosted_send";
     const createdAt = "2026-03-26T12:00:00.000Z";
     const sentAt = "2026-03-26T12:00:05.000Z";
@@ -2248,66 +2234,6 @@ describe("runHostedExecutionJob", () => {
       expect(statusSnapshot.outbox.sent).toBe(1);
       expect(statusSnapshot.recentTurns).toEqual([]);
     } finally {
-      restoreEnvVar("HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION", previousAutomationEnabled);
-      restoreEnvVars(previousHostedAssistantEnv);
-    }
-  });
-
-  it("keeps hosted assistant automation disabled when the worker env opts out explicitly", async () => {
-    const previousAutomationEnabled = process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION;
-    const previousHostedEmailAccountId = process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID;
-    const previousHostedEmailApiToken = process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN;
-    const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
-    const previousHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
-    const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
-    const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
-
-    process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION = "off";
-    process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID = "acct_123";
-    process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN = "cf-token";
-    process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
-    process.env.HOSTED_EMAIL_LOCAL_PART = "assistant";
-    process.env.HOSTED_EMAIL_SIGNING_SECRET = "email-secret";
-
-    try {
-      const result = await runHostedExecutionJob({
-        bundles: {
-          agentState: null,
-          vault: null,
-        },
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            userId: "member_email_disabled",
-          },
-          eventId: "evt_activation_email_disabled",
-          occurredAt: "2026-03-26T12:00:00.000Z",
-        },
-      });
-      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-email-disabled-"));
-      cleanupPaths.push(workspaceRoot);
-      const restored = await restoreHostedExecutionContext({
-        agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
-        vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
-        workspaceRoot,
-      });
-      const automationState = JSON.parse(
-        await readFile(path.join(restored.assistantStateRoot, "automation.json"), "utf8"),
-      ) as { autoReplyChannels: string[] };
-
-      expect(result.result.summary).toContain("seeded explicit hosted assistant config (openai-compatible)");
-      expect(result.result.summary).toContain("hosted email auto-reply unavailable");
-      expect(automationState.autoReplyChannels).toEqual([]);
-      await expect(
-        readFile(path.join(restored.operatorHomeRoot, ".murph", "config.json"), "utf8"),
-      ).resolves.toContain("\"hostedAssistant\"");
-    } finally {
-      restoreEnvVar("HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION", previousAutomationEnabled);
-      restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
-      restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_API_TOKEN", previousHostedEmailApiToken);
-      restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
-      restoreEnvVar("HOSTED_EMAIL_LOCAL_PART", previousHostedEmailLocalPart);
-      restoreEnvVar("HOSTED_EMAIL_SIGNING_SECRET", previousHostedEmailSigningSecret);
       restoreEnvVars(previousHostedAssistantEnv);
     }
   });

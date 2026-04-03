@@ -41,10 +41,18 @@ const mocks = vi.hoisted(() => ({
   })),
   readAssistantAutomationState: vi.fn(async () => ({
     autoReplyChannels: [],
+    autoReplyBacklogChannels: [],
+    preferredChannels: [],
     updatedAt: "2026-03-28T09:00:00.000Z",
   })),
+  readOperatorConfig: vi.fn(async () => null),
   reconcileHostedDeviceSyncControlPlaneState: vi.fn(async () => undefined),
   rebuildRuntimeFromVault: vi.fn(async () => undefined),
+  resolveHostedAssistantConfig: vi.fn(async () => null),
+  resolveHostedAssistantOperatorDefaultsState: vi.fn(() => ({
+    configured: false,
+    provider: null,
+  })),
   runAssistantAutomation: vi.fn(async () => undefined),
   saveAssistantAutomationState: vi.fn(async () => undefined),
   syncHostedDeviceSyncControlPlaneState: vi.fn(async () => ({
@@ -61,13 +69,22 @@ vi.mock("@murphai/assistant-core", () => ({
   ensureHostedAssistantOperatorDefaults: mocks.ensureHostedAssistantOperatorDefaults,
   getAssistantCronStatus: mocks.getAssistantCronStatus,
   readAssistantAutomationState: mocks.readAssistantAutomationState,
+  readOperatorConfig: mocks.readOperatorConfig,
+  resolveHostedAssistantConfig: mocks.resolveHostedAssistantConfig,
+  resolveHostedAssistantOperatorDefaultsState: mocks.resolveHostedAssistantOperatorDefaultsState,
   runAssistantAutomation: mocks.runAssistantAutomation,
   saveAssistantAutomationState: mocks.saveAssistantAutomationState,
 }));
 
-vi.mock("@murphai/device-syncd", () => ({
+vi.mock("@murphai/device-syncd/config", () => ({
   createConfiguredDeviceSyncProviders: mocks.createConfiguredDeviceSyncProviders,
+}));
+
+vi.mock("@murphai/device-syncd/registry", () => ({
   createDeviceSyncRegistry: mocks.createDeviceSyncRegistry,
+}));
+
+vi.mock("@murphai/device-syncd/service", () => ({
   createDeviceSyncService: mocks.createDeviceSyncService,
 }));
 
@@ -88,6 +105,12 @@ vi.mock("../src/hosted-device-sync-runtime.ts", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.readOperatorConfig.mockResolvedValue(null);
+  mocks.resolveHostedAssistantConfig.mockResolvedValue(null);
+  mocks.resolveHostedAssistantOperatorDefaultsState.mockImplementation(() => ({
+    configured: false,
+    provider: null,
+  }));
 });
 
 const hostedWebControlPlane = {
@@ -144,43 +167,6 @@ test("hosted maintenance loop preserves the empty-vault no-op baseline after act
   }
 });
 
-test("hosted maintenance loop can still skip assistant automation when explicitly disabled", async () => {
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runtime-maintenance-"));
-  const vaultRoot = path.join(workspaceRoot, "vault");
-
-  try {
-    const { runHostedMaintenanceLoop } = await import("../src/hosted-runtime/maintenance.ts");
-
-    const metrics = await runHostedMaintenanceLoop({
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          userId: "member_123",
-        },
-        eventId: "evt_activation_disabled",
-        occurredAt: "2026-03-28T09:00:00.000Z",
-      },
-      requestId: "evt_activation_disabled",
-      timeoutMs: null,
-      runtimeEnv: {
-        HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION: "false",
-      },
-      webControlPlane: hostedWebControlPlane,
-      vaultRoot,
-    });
-
-    assert.deepEqual(metrics, {
-      deviceSyncProcessed: 0,
-      deviceSyncSkipped: true,
-      nextWakeAt: null,
-      parserProcessed: 0,
-    });
-    assert.equal(mocks.runAssistantAutomation.mock.calls.length, 0);
-  } finally {
-    await rm(workspaceRoot, { force: true, recursive: true });
-  }
-});
-
 test("hosted maintenance loop prefers the earliest device-sync or assistant wake", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runtime-maintenance-"));
   const vaultRoot = path.join(workspaceRoot, "vault");
@@ -206,6 +192,15 @@ test("hosted maintenance loop prefers the earliest device-sync or assistant wake
       seeded: false,
       source: "saved",
     });
+    mocks.readOperatorConfig.mockResolvedValue({
+      hostedAssistant: {
+        provider: "openai-compatible",
+      },
+    });
+    mocks.resolveHostedAssistantOperatorDefaultsState.mockImplementation(() => ({
+      configured: true,
+      provider: "openai-compatible",
+    }));
     mocks.getAssistantCronStatus.mockResolvedValue({
       nextRunAt: "2026-03-28T10:00:00.000Z",
     });

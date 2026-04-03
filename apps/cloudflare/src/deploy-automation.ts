@@ -1,8 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { hostedAssistantAutomationEnabledFromEnv } from "@murphai/hosted-execution";
-
 import { isAllowedHostedAssistantReferencedRunnerEnvKey } from "./hosted-env-policy.ts";
 
 export const HOSTED_WORKER_REQUIRED_SECRET_NAMES = [
@@ -70,7 +68,6 @@ const HOSTED_WORKER_OPTIONAL_VAR_NAMES = [
   "HOSTED_ASSISTANT_REASONING_EFFORT",
   "HOSTED_ASSISTANT_SANDBOX",
   "HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS",
-  "HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION",
   "HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER",
   "HOSTED_AI_USAGE_BASE_URL",
   "HOSTED_DEVICE_SYNC_CONTROL_BASE_URL",
@@ -473,10 +470,6 @@ function resolveHostedWorkerVar(
 function readHostedAssistantReferencedSecret(
   source: EnvSource,
 ): Record<string, string> {
-  if (!hostedAssistantAutomationEnabledFromEnv(source)) {
-    return {};
-  }
-
   const envName = normalizeString(source.HOSTED_ASSISTANT_API_KEY_ENV);
 
   if (!envName || !isAllowedHostedAssistantReferencedRunnerEnvKey(envName)) {
