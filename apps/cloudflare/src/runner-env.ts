@@ -22,6 +22,6 @@ export function buildHostedRunnerJobRuntimeConfig(input: {
       Number.parseInt(forwardedEnv.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS ?? "", 10),
     ),
     forwardedEnv,
-    userEnv: filterHostedRunnerUserEnv(input.userEnv, forwardedEnv),
+    userEnv: filterHostedRunnerUserEnv(input.userEnv),
   };
 }
