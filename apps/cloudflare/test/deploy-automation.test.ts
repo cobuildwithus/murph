@@ -39,14 +39,12 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_DEVICE_SYNC_CONTROL_BASE_URL: "https://web.example.test",
       HOSTED_SHARE_API_BASE_URL: "https://web.example.test",
       HOSTED_WEB_BASE_URL: "https://web.example.test",
-      INSTALL_PADDLEOCR: "1",
       TELEGRAM_BOT_USERNAME: "hosted_bot",
     });
     const config = buildHostedWranglerDeployConfig(environment) as {
       containers: Array<{
         class_name: string;
         image: string;
-        image_vars?: Record<string, string>;
         instance_type: string | {
           disk_mb: number;
           memory_mib: number;
@@ -86,9 +84,6 @@ describe("hosted deploy automation helpers", () => {
         class_name: "RunnerContainer",
         image: "../../../Dockerfile.cloudflare-hosted-runner",
         instance_type: "standard-1",
-        image_vars: {
-          INSTALL_PADDLEOCR: "1",
-        },
         max_instances: 250,
       },
     ]);

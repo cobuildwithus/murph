@@ -78,7 +78,6 @@ Optional tuning variables:
 - `CF_COMPATIBILITY_DATE` (default `2026-03-27`)
 - `CF_CONTAINER_INSTANCE_TYPE` (default `standard-1`; also accepts a custom JSON object with `vcpu`, `memory_mib`, and `disk_mb`)
 - `CF_CONTAINER_MAX_INSTANCES` (default `50`)
-- `INSTALL_PADDLEOCR` (default `0`, passed to Wrangler as a container `image_vars` build-time input)
 - `HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER` (default `1m`)
 - `CF_DEFAULT_ALARM_DELAY_MS` (default `21600000`)
 - `CF_LOG_HEAD_SAMPLING_RATE` (default `1`)
