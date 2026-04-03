@@ -297,7 +297,7 @@ function createWebFetchToolDefinitions() {
     defineAssistantTool({
       name: 'web.fetch',
       description:
-        'Fetch one public webpage over HTTP(S), block private-network targets, and extract readable text for the assistant. Use this after discovery tools like web.search when you need the actual page contents of a docs page, menu, article, or product page.',
+        'Fetch one public webpage over HTTP(S) from Murph\'s explicitly enabled web-read surface, block private-network targets, redact query/fragment-bearing URL details in tool output, and extract readable text for the assistant. Use this after discovery tools like web.search when you need the actual page contents of a docs page, menu, article, or product page. Use only stable public URLs; do not pass signed or session-bound links.',
       inputSchema: z.object({
         url: z.string().url(),
         extractMode: assistantWebFetchExtractModeSchema.optional(),
@@ -327,7 +327,7 @@ function createWebPdfReadToolDefinitions() {
     defineAssistantTool({
       name: 'web.pdf.read',
       description:
-        'Fetch one public PDF over HTTP(S), block private-network targets, and extract readable text with bounded page and character limits. Use this for menus, manuals, reports, or docs that are published as PDFs.',
+        'Fetch one public PDF over HTTP(S) from Murph\'s explicitly enabled web-read surface, block private-network targets, redact query/fragment-bearing URL details in tool output, and extract readable text with bounded page and character limits. Use this for menus, manuals, reports, or docs that are published as PDFs. Use only stable public URLs; do not pass signed or session-bound links.',
       inputSchema: z.object({
         url: z.string().url(),
         maxChars: z.number().int().positive().max(assistantWebPdfReadMaxChars).optional(),
