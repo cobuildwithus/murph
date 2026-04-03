@@ -1491,7 +1491,12 @@ test('default-vault injection skips incomplete command groups', () => {
     ['assistant', 'session'],
   )
   assert.deepEqual(applyDefaultVaultToArgs(['device'], '/tmp/default-vault'), ['device'])
+  assert.deepEqual(applyDefaultVaultToArgs(['wearables'], '/tmp/default-vault'), ['wearables'])
   assert.deepEqual(applyDefaultVaultToArgs(['workout'], '/tmp/default-vault'), ['workout'])
+  assert.deepEqual(
+    applyDefaultVaultToArgs(['wearables', 'sleep'], '/tmp/default-vault'),
+    ['wearables', 'sleep'],
+  )
   assert.deepEqual(
     applyDefaultVaultToArgs(['workout', 'format'], '/tmp/default-vault'),
     ['workout', 'format'],
@@ -1504,6 +1509,10 @@ test('default-vault injection skips incomplete command groups', () => {
   assert.deepEqual(
     applyDefaultVaultToArgs(['workout', 'format', 'list'], '/tmp/default-vault'),
     ['workout', 'format', 'list', '--vault', '/tmp/default-vault'],
+  )
+  assert.deepEqual(
+    applyDefaultVaultToArgs(['wearables', 'sleep', 'list'], '/tmp/default-vault'),
+    ['wearables', 'sleep', 'list', '--vault', '/tmp/default-vault'],
   )
   assert.deepEqual(
     applyDefaultVaultToArgs(['assistant', 'self-target', 'list'], '/tmp/default-vault'),

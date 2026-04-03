@@ -82,6 +82,12 @@ function isQueryRuntimeModule(value: unknown): value is QueryRuntimeModule {
       "listSupplements",
       "showSupplementCompound",
       "listSupplementCompounds",
+      "summarizeWearableSleep",
+      "summarizeWearableActivity",
+      "summarizeWearableBodyState",
+      "summarizeWearableDay",
+      "summarizeWearableRecovery",
+      "summarizeWearableSourceHealth",
       ...healthQueryRuntimeMethodNames,
     ])
   )

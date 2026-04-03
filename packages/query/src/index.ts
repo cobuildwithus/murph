@@ -56,6 +56,45 @@ export {
   type SqliteSearchStatus,
 } from "./search-sqlite.ts";
 export { summarizeDailySamples } from "./summaries.ts";
+export {
+  buildWearableAssistantSummary,
+  listWearableActivityDays,
+  listWearableBodyStateDays,
+  listWearableRecoveryDays,
+  listWearableSleepNights,
+  listWearableSourceHealth,
+  summarizeWearableActivity,
+  summarizeWearableBodyState,
+  summarizeWearableDay,
+  summarizeWearableRecovery,
+  summarizeWearableSleep,
+  summarizeWearableSourceHealth,
+} from "./wearables.ts";
+export type {
+  WearableActivityDay,
+  WearableActivitySummary,
+  WearableAssistantSummary,
+  WearableBodyStateDay,
+  WearableBodyStateSummary,
+  WearableCandidateSourceFamily,
+  WearableConfidenceLevel,
+  WearableExternalRef,
+  WearableFilters,
+  WearableDaySummary,
+  WearableMetricCandidate,
+  WearableMetricConfidence,
+  WearableMetricSelection,
+  WearableMetricValue,
+  WearableRecoveryDay,
+  WearableRecoverySummary,
+  WearableResolvedMetric,
+  WearableSleepNight,
+  WearableSleepSummary,
+  WearableSourceHealth,
+  WearableSourceHealthSummary,
+  WearableSummaryConfidence,
+  WearableSummaryFilters,
+} from "./wearables.ts";
 export { buildTimeline } from "./timeline.ts";
 export type { TimelineEntry, TimelineFilters } from "./timeline.ts";
 export { buildExportPack } from "./export-pack.ts";

@@ -157,6 +157,7 @@ export const TOP_LEVEL_COMMANDS_REQUIRING_VAULT = new Set([
   'timeline',
   'validate',
   'vault',
+  'wearables',
   'workout',
 ])
 
@@ -215,6 +216,12 @@ const COMMAND_GROUP_PATHS_REQUIRING_SUBCOMMAND = new Set([
   'supplement',
   'supplement compound',
   'vault',
+  'wearables',
+  'wearables activity',
+  'wearables body',
+  'wearables recovery',
+  'wearables sleep',
+  'wearables sources',
   'workout',
   'workout format',
 ])

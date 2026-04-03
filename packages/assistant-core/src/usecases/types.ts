@@ -38,6 +38,12 @@ import type {
 import type {
   QueryCanonicalEntity,
   QueryRuntimeModule as SharedQueryRuntimeModule,
+  QueryWearableActivitySummary,
+  QueryWearableBodyStateSummary,
+  QueryWearableDaySummary,
+  QueryWearableRecoverySummary,
+  QueryWearableSleepSummary,
+  QueryWearableSourceHealthSummary,
 } from "../query-runtime.js"
 
 export type { CommandContext } from "../health-cli-method-types.js"
@@ -268,6 +274,38 @@ export interface JournalListResult {
   count: number
   nextCursor: string | null
 }
+
+export interface WearableDayFiltersResult {
+  providers: string[]
+}
+
+export interface WearableDayResult {
+  vault: string
+  date: string
+  filters: WearableDayFiltersResult
+  summary: QueryWearableDaySummary | null
+}
+
+export interface WearableListFiltersResult {
+  date: string | null
+  from: string | null
+  to: string | null
+  providers: string[]
+  limit: number
+}
+
+export interface WearableListResult<TItem> {
+  vault: string
+  filters: WearableListFiltersResult
+  items: TItem[]
+  count: number
+}
+
+export type WearableSleepListResult = WearableListResult<QueryWearableSleepSummary>
+export type WearableActivityListResult = WearableListResult<QueryWearableActivitySummary>
+export type WearableBodyStateListResult = WearableListResult<QueryWearableBodyStateSummary>
+export type WearableRecoveryListResult = WearableListResult<QueryWearableRecoverySummary>
+export type WearableSourceListResult = WearableListResult<QueryWearableSourceHealthSummary>
 
 export interface VaultShowResult {
   vault: string
@@ -699,6 +737,57 @@ export interface QueryServices extends HealthQueryServiceMethods {
   list(
     input: CommandContext & ListFilters,
   ): Promise<ListResult>
+  showWearableDay(
+    input: CommandContext & {
+      date: string
+      providers?: string[]
+    },
+  ): Promise<WearableDayResult>
+  listWearableSleep(
+    input: CommandContext & {
+      date?: string
+      from?: string
+      to?: string
+      providers?: string[]
+      limit: number
+    },
+  ): Promise<WearableSleepListResult>
+  listWearableActivity(
+    input: CommandContext & {
+      date?: string
+      from?: string
+      to?: string
+      providers?: string[]
+      limit: number
+    },
+  ): Promise<WearableActivityListResult>
+  listWearableBodyState(
+    input: CommandContext & {
+      date?: string
+      from?: string
+      to?: string
+      providers?: string[]
+      limit: number
+    },
+  ): Promise<WearableBodyStateListResult>
+  listWearableRecovery(
+    input: CommandContext & {
+      date?: string
+      from?: string
+      to?: string
+      providers?: string[]
+      limit: number
+    },
+  ): Promise<WearableRecoveryListResult>
+  listWearableSources(
+    input: CommandContext & {
+      date?: string
+      from?: string
+      to?: string
+      providers?: string[]
+      limit: number
+    },
+  ): Promise<WearableSourceListResult>
   exportPack(
     input: CommandContext & {
       from: string
