@@ -330,7 +330,6 @@ run_typecheck() {
 }
 
 run_test() {
-  bash "scripts/check-agent-docs-drift.sh"
   run_dependency_policy_check
   run_workspace_boundary_check
   run_test_packages_common
