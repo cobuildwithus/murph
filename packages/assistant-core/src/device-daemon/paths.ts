@@ -23,8 +23,6 @@ import {
 } from './types.js'
 import { readEnvValue } from '../env-values.js'
 
-const require = createRequire(import.meta.url)
-
 export function resolveDeviceDaemonPaths(vaultRoot: string): DeviceDaemonPaths {
   const runtimePaths = resolveDeviceSyncRuntimePaths(vaultRoot)
 
@@ -47,7 +45,11 @@ export function resolveDeviceSyncDaemonBinPath(
 }
 
 export function resolveInstalledDeviceSyncPackageEntry(): string {
-  return require.resolve('@murphai/device-syncd')
+  return resolveNodeRequire().resolve('@murphai/device-syncd')
+}
+
+function resolveNodeRequire(): NodeJS.Require {
+  return createRequire(import.meta.url)
 }
 
 export function buildManagedDeviceSyncEnvironment(input: {

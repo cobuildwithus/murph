@@ -22,8 +22,6 @@ import type {
   HostedAssistantRuntimeConfig,
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
-
-const hostedRuntimeModuleRequire = createRequire(import.meta.url);
 const HOSTED_RUNTIME_CHILD_AMBIENT_ENV_KEYS = [
   "LANG",
   "LC_ALL",
@@ -100,10 +98,14 @@ export function resolveHostedRuntimeTsconfigPath(): string {
 
 export function resolveHostedRuntimeTsxImportSpecifier(): string {
   try {
-    return pathToFileURL(hostedRuntimeModuleRequire.resolve("tsx")).href;
+    return pathToFileURL(resolveHostedRuntimeModuleRequire().resolve("tsx")).href;
   } catch {
     return "tsx";
   }
+}
+
+function resolveHostedRuntimeModuleRequire(): NodeJS.Require {
+  return createRequire(import.meta.url);
 }
 
 function resolveHostedRuntimeCallbackBaseUrls(
