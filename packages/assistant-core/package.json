@@ -430,6 +430,7 @@
     "@photon-ai/imessage-kit": "2.1.2",
     "ai": "^6.0.116",
     "linkedom": "0.18.12",
+    "pdfjs-dist": "5.6.205",
     "zod": "^4.1.8"
   }
 }

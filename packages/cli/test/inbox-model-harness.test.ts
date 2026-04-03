@@ -43,6 +43,51 @@ const assistantWebFetchEnvKeys = [
   'MURPH_WEB_FETCH_MAX_REDIRECTS',
 ] as const
 
+function createTestPdfBytes(text: string): Uint8Array {
+  const escapedText = text
+    .replace(/\\/gu, '\\\\')
+    .replace(/\(/gu, '\\(')
+    .replace(/\)/gu, '\\)')
+  const contentStream = [
+    'BT',
+    '/F1 18 Tf',
+    '72 720 Td',
+    `(${escapedText}) Tj`,
+    'ET',
+  ].join('\n')
+  const objects = [
+    '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n',
+    '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n',
+    '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n',
+    '4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n',
+    `5 0 obj\n<< /Length ${contentStream.length} >>\nstream\n${contentStream}\nendstream\nendobj\n`,
+  ]
+
+  let pdf = '%PDF-1.4\n'
+  const offsets = [0]
+  for (const object of objects) {
+    offsets.push(pdf.length)
+    pdf += object
+  }
+
+  const xrefOffset = pdf.length
+  pdf += `xref
+0 ${objects.length + 1}
+0000000000 65535 f 
+${offsets
+  .slice(1)
+  .map((offset) => `${String(offset).padStart(10, '0')} 00000 n `)
+  .join('\n')}
+trailer
+<< /Root 1 0 R /Size ${objects.length + 1} >>
+startxref
+${xrefOffset}
+%%EOF
+`
+
+  return new TextEncoder().encode(pdf)
+}
+
 function createStubVaultServices(overrides: Partial<VaultServices> = {}): VaultServices {
   return {
     core: {} as VaultServices['core'],
@@ -1083,6 +1128,7 @@ test('createDefaultAssistantToolCatalog exposes assistant runtime, recipe, and f
   assert.equal(catalog.hasTool('assistant.selfTarget.list'), true)
   assert.equal(catalog.hasTool('vault.fs.readText'), true)
   assert.equal(catalog.hasTool('web.fetch'), true)
+  assert.equal(catalog.hasTool('web.pdf.read'), true)
   assert.equal(catalog.hasTool('vault.recipe.show'), true)
   assert.equal(catalog.hasTool('vault.recipe.list'), true)
   assert.equal(catalog.hasTool('vault.recipe.upsert'), true)
@@ -1107,6 +1153,7 @@ test('createDefaultAssistantToolCatalog exposes web.fetch unless explicitly disa
       vaultServices: createStubVaultServices(),
     })
     assert.equal(enabledCatalog.hasTool('web.fetch'), true)
+    assert.equal(enabledCatalog.hasTool('web.pdf.read'), true)
 
     process.env.MURPH_WEB_FETCH_ENABLED = 'false'
 
@@ -1115,6 +1162,7 @@ test('createDefaultAssistantToolCatalog exposes web.fetch unless explicitly disa
       vaultServices: createStubVaultServices(),
     })
     assert.equal(disabledCatalog.hasTool('web.fetch'), false)
+    assert.equal(disabledCatalog.hasTool('web.pdf.read'), false)
   } finally {
     for (const key of assistantWebFetchEnvKeys) {
       const previousValue = previousEnv[key]
@@ -1142,6 +1190,7 @@ test('createDefaultAssistantToolCatalog exposes web.search only when a backend i
       vaultServices: createStubVaultServices(),
     })
     assert.equal(withoutBackend.hasTool('web.fetch'), true)
+    assert.equal(withoutBackend.hasTool('web.pdf.read'), true)
     assert.equal(withoutBackend.hasTool('web.search'), false)
 
     process.env.SEARXNG_BASE_URL = 'https://search.example.test'
@@ -1151,6 +1200,7 @@ test('createDefaultAssistantToolCatalog exposes web.search only when a backend i
       vaultServices: createStubVaultServices(),
     })
     assert.equal(withBackend.hasTool('web.fetch'), true)
+    assert.equal(withBackend.hasTool('web.pdf.read'), true)
     assert.equal(withBackend.hasTool('web.search'), true)
   } finally {
     for (const key of assistantWebSearchEnvKeys) {
@@ -1187,6 +1237,7 @@ test('createInboxRoutingAssistantToolCatalog keeps web.search disabled even when
       vaultServices: createStubVaultServices(),
     })
     assert.equal(catalog.hasTool('web.fetch'), false)
+    assert.equal(catalog.hasTool('web.pdf.read'), false)
     assert.equal(catalog.hasTool('web.search'), false)
   } finally {
     for (const key of assistantWebSearchEnvKeys) {
@@ -1310,6 +1361,82 @@ test('createDefaultAssistantToolCatalog web.fetch extracts readable HTML content
   }
 })
 
+test('createDefaultAssistantToolCatalog web.pdf.read extracts text from a public PDF', async () => {
+  const previousEnv = Object.fromEntries(
+    assistantWebFetchEnvKeys.map((key) => [key, process.env[key]]),
+  ) as Record<(typeof assistantWebFetchEnvKeys)[number], string | undefined>
+
+  const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+    new Response(Buffer.from(createTestPdfBytes('Sea Moss PDF')), {
+      headers: {
+        'content-type': 'application/pdf',
+      },
+      status: 200,
+    }),
+  )
+
+  try {
+    for (const key of assistantWebFetchEnvKeys) {
+      delete process.env[key]
+    }
+    vi.stubGlobal('fetch', fetchMock)
+
+    const catalog = createDefaultAssistantToolCatalog({
+      vault: '/tmp/murph-vault',
+      vaultServices: createStubVaultServices(),
+    })
+    const results = await catalog.executeCalls({
+      calls: [
+        {
+          tool: 'web.pdf.read',
+          input: {
+            url: 'https://93.184.216.34/menu.pdf',
+            maxPages: 2,
+            maxChars: 4_000,
+          },
+        },
+      ],
+      mode: 'apply',
+    })
+
+    assert.equal(fetchMock.mock.calls.length, 1)
+    assert.equal(String(fetchMock.mock.calls[0]?.[0]), 'https://93.184.216.34/menu.pdf')
+    assert.equal(results[0]?.status, 'succeeded')
+
+    const pdfResult = results[0]?.result as {
+      contentType: string | null
+      finalUrl: string
+      fetchedAt: string
+      pageCount: number
+      status: number
+      text: string
+      truncated: boolean
+      url: string
+      warnings: string[]
+    }
+
+    assert.equal(pdfResult.url, 'https://93.184.216.34/menu.pdf')
+    assert.equal(pdfResult.finalUrl, 'https://93.184.216.34/menu.pdf')
+    assert.equal(pdfResult.status, 200)
+    assert.equal(pdfResult.contentType, 'application/pdf')
+    assert.equal(pdfResult.pageCount, 1)
+    assert.equal(typeof pdfResult.fetchedAt, 'string')
+    assert.equal(pdfResult.truncated, false)
+    assert.equal(pdfResult.warnings.length, 0)
+    assert.match(pdfResult.text, /Sea Moss PDF/u)
+  } finally {
+    vi.unstubAllGlobals()
+    for (const key of assistantWebFetchEnvKeys) {
+      const previousValue = previousEnv[key]
+      if (previousValue === undefined) {
+        delete process.env[key]
+      } else {
+        process.env[key] = previousValue
+      }
+    }
+  }
+})
+
 test('createDefaultAssistantToolCatalog web.fetch blocks loopback targets before making a request', async () => {
   const previousEnv = Object.fromEntries(
     assistantWebFetchEnvKeys.map((key) => [key, process.env[key]]),
@@ -1333,6 +1460,51 @@ test('createDefaultAssistantToolCatalog web.fetch blocks loopback targets before
           tool: 'web.fetch',
           input: {
             url: 'http://127.0.0.1:8080/private',
+          },
+        },
+      ],
+      mode: 'apply',
+    })
+
+    assert.equal(fetchMock.mock.calls.length, 0)
+    assert.equal(results[0]?.status, 'failed')
+    assert.equal(results[0]?.errorCode, 'WEB_FETCH_PRIVATE_HOST_BLOCKED')
+  } finally {
+    vi.unstubAllGlobals()
+    for (const key of assistantWebFetchEnvKeys) {
+      const previousValue = previousEnv[key]
+      if (previousValue === undefined) {
+        delete process.env[key]
+      } else {
+        process.env[key] = previousValue
+      }
+    }
+  }
+})
+
+test('createDefaultAssistantToolCatalog web.pdf.read blocks loopback targets before making a request', async () => {
+  const previousEnv = Object.fromEntries(
+    assistantWebFetchEnvKeys.map((key) => [key, process.env[key]]),
+  ) as Record<(typeof assistantWebFetchEnvKeys)[number], string | undefined>
+
+  const fetchMock = vi.fn<typeof fetch>()
+
+  try {
+    for (const key of assistantWebFetchEnvKeys) {
+      delete process.env[key]
+    }
+    vi.stubGlobal('fetch', fetchMock)
+
+    const catalog = createDefaultAssistantToolCatalog({
+      vault: '/tmp/murph-vault',
+      vaultServices: createStubVaultServices(),
+    })
+    const results = await catalog.executeCalls({
+      calls: [
+        {
+          tool: 'web.pdf.read',
+          input: {
+            url: 'http://127.0.0.1:8080/private.pdf',
           },
         },
       ],
