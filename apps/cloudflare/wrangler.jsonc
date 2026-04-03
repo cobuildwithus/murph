@@ -8,7 +8,7 @@
     {
       "class_name": "RunnerContainer",
       "image": "../../Dockerfile.cloudflare-hosted-runner",
-      "instance_type": "basic",
+      "instance_type": "standard-1",
       "max_instances": 50
     }
   ],
@@ -59,12 +59,12 @@
   },
   "vars": {
     "HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID": "v1",
-    "HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER": "5m",
+    "HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER": "1m",
     "HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS": "21600000",
     "HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS": "3",
     "HOSTED_EXECUTION_RETRY_DELAY_MS": "30000",
     "HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS": "30000",
-    "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS": "60000"
+    "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS": "120000"
   },
   // Configure these outside source control for real deployments:
   // - HOSTED_EXECUTION_SIGNING_SECRET

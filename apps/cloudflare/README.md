@@ -55,7 +55,7 @@ Current worker env/config names read directly by `src/env.ts`:
 - optional non-secret: `HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS` defaults to `21600000` in the checked-in Wrangler scaffold
 - optional non-secret: `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS` defaults to `3`
 - optional non-secret: `HOSTED_EXECUTION_RETRY_DELAY_MS` defaults to `30000`
-- optional non-secret: `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS` defaults to `60000`
+- optional non-secret: `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS` defaults to `120000`
 - optional non-secret: `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS` defaults to `30000` and is forwarded into the container runtime
 - optional non-secret: `HOSTED_ASSISTANT_*` vars choose the explicit platform-managed hosted assistant profile that hosted bootstrap persists into `~/.murph/config.json`. `HOSTED_ASSISTANT_API_KEY_ENV` names the env var to read at runtime; it is never the raw API key itself
 - optional non-secret: `HOSTED_WEB_BASE_URL` gives the worker a shared hosted-web base URL for runner proxy calls back into `apps/web` and is also available to the runtime when `src/runner-env.ts` allows it
@@ -73,7 +73,7 @@ Current worker routes:
 - `PUT /internal/users/:userId/env` merges or replaces the user's separately encrypted hosted env object
 - `DELETE /internal/users/:userId/env` clears the user's separately encrypted hosted env object without rewriting `agent-state`
 
-`apps/cloudflare/wrangler.jsonc` is the checked-in scaffold for those bindings, env names, and the native container image reference. It intentionally leaves bucket names, worker name, and secrets as placeholders until a real Cloudflare account target exists, but it now pins the native container to the baseline `basic` instance type instead of relying on Cloudflare defaults.
+`apps/cloudflare/wrangler.jsonc` is the checked-in scaffold for those bindings, env names, and the native container image reference. It intentionally leaves bucket names, worker name, and secrets as placeholders until a real Cloudflare account target exists, but it now pins the native container to the baseline `standard-1` instance type instead of relying on Cloudflare defaults.
 
 ## Native container contract
 
@@ -91,9 +91,9 @@ That means:
 - worker-owned callback and web-control base URLs now normalize to HTTPS by default and only permit explicit loopback or internal worker-host HTTP exceptions
 - the runner process posts durable commit/finalize and assistant-delivery reconciliation requests to `http://commit.worker` and `http://side-effects.worker`; those outbound handlers run inside Workers, call Durable Objects and R2 directly, and never traverse the public Worker URL
 - the container-local bridge is intentionally thin; the execution core lives in `packages/assistant-runtime`
-- the queue Durable Object keeps the per-user container warm across drained batches and relies on the container's configurable `sleepAfter` idle timeout, defaulting to `5m`, instead of forcing immediate teardown after every run
+- the queue Durable Object keeps the per-user container warm across drained batches and relies on the container's configurable `sleepAfter` idle timeout, defaulting to `1m`, instead of forcing immediate teardown after every run
 
-The native container image is declared in `apps/cloudflare/wrangler.jsonc` under the `containers` section, points at `../../Dockerfile.cloudflare-hosted-runner`, uses `instance_type: "basic"` in the checked-in scaffold, and now keeps the default `max_instances` at `50` until deploy automation raises it explicitly. Generated deploy config accepts `CF_CONTAINER_INSTANCE_TYPE` as either a named Wrangler preset such as `basic` or a JSON object with `vcpu`, `memory_mib`, and `disk_mb`.
+The native container image is declared in `apps/cloudflare/wrangler.jsonc` under the `containers` section, points at `../../Dockerfile.cloudflare-hosted-runner`, uses `instance_type: "standard-1"` in the checked-in scaffold, and now keeps the default `max_instances` at `50` until deploy automation raises it explicitly. Generated deploy config accepts `CF_CONTAINER_INSTANCE_TYPE` as either a named Wrangler preset such as `standard-1` or a JSON object with `vcpu`, `memory_mib`, and `disk_mb`.
 
 ## Container image
 
@@ -132,7 +132,7 @@ Still intentionally placeholder:
 
 - real Cloudflare account ids, domains, and worker names
 - final bucket names
-- final container-capacity tuning beyond the explicit `basic` baseline
+- final container-capacity tuning beyond the explicit `standard-1` baseline
 - fully automatic canary promotion without an operator decision
 
 For the end-to-end deployment path, including the GitHub Actions workflow and generated deploy artifacts, see `apps/cloudflare/DEPLOY.md`.

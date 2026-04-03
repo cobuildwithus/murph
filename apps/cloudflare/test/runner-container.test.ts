@@ -7,8 +7,8 @@ import {
 } from "../src/runner-container.ts";
 
 describe("RunnerContainer", () => {
-  it("defaults idle retention to five minutes and accepts an env override", () => {
-    expect(new RunnerContainer({} as never, {} as never).sleepAfter).toBe("5m");
+  it("defaults idle retention to one minute and accepts an env override", () => {
+    expect(new RunnerContainer({} as never, {} as never).sleepAfter).toBe("1m");
     expect(
       new RunnerContainer(
         {} as never,
