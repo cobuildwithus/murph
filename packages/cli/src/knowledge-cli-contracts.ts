@@ -4,12 +4,11 @@ import {
   pathSchema,
   slugSchema,
 } from '@murphai/assistant-core/vault-cli-contracts'
+import { DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT } from '@murphai/query'
 import { researchExecutionModeValues } from './research-cli-contracts.js'
 
-export const knowledgePageMetadataSchema = z.object({
-  compiler: z.string().min(1).nullable(),
+export const knowledgePageReferenceSchema = z.object({
   compiledAt: isoTimestampSchema.nullable(),
-  mode: z.enum(researchExecutionModeValues).nullable(),
   pagePath: pathSchema,
   pageType: z.string().min(1).nullable(),
   relatedSlugs: z.array(z.string().min(1)),
@@ -18,6 +17,11 @@ export const knowledgePageMetadataSchema = z.object({
   status: z.string().min(1).nullable(),
   summary: z.string().min(1).nullable(),
   title: z.string().min(1),
+})
+
+export const knowledgePageMetadataSchema = knowledgePageReferenceSchema.extend({
+  compiler: z.string().min(1).nullable(),
+  mode: z.enum(researchExecutionModeValues).nullable(),
 })
 
 export const knowledgePageSchema = knowledgePageMetadataSchema.extend({
@@ -44,23 +48,14 @@ export const knowledgeListResultSchema = z.object({
   vault: pathSchema,
 })
 
-export const knowledgeSearchHitSchema = z.object({
-  compiledAt: isoTimestampSchema.nullable(),
+export const knowledgeSearchHitSchema = knowledgePageReferenceSchema.extend({
   matchedTerms: z.array(z.string().min(1)),
-  pagePath: pathSchema,
-  pageType: z.string().min(1).nullable(),
-  relatedSlugs: z.array(z.string().min(1)),
   score: z.number(),
-  slug: slugSchema,
   snippet: z.string().min(1),
-  sourcePaths: z.array(pathSchema),
-  status: z.string().min(1).nullable(),
-  summary: z.string().min(1).nullable(),
-  title: z.string().min(1),
 })
 
 export const knowledgeSearchResultSchema = z.object({
-  format: z.literal('murph.knowledge-search.v1'),
+  format: z.literal(DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT),
   hits: z.array(knowledgeSearchHitSchema),
   pageType: z.string().min(1).nullable(),
   query: z.string().min(1),
@@ -86,7 +81,7 @@ export const knowledgeLintProblemSchema = z.object({
   code: z.string().min(1),
   message: z.string().min(1),
   pagePath: pathSchema,
-  slug: z.string().min(1).nullable(),
+  slug: slugSchema.nullable(),
   severity: z.enum(['error', 'warning']),
 })
 
@@ -105,6 +100,7 @@ export type KnowledgeLintProblem = z.infer<typeof knowledgeLintProblemSchema>
 export type KnowledgeListResult = z.infer<typeof knowledgeListResultSchema>
 export type KnowledgePage = z.infer<typeof knowledgePageSchema>
 export type KnowledgePageMetadata = z.infer<typeof knowledgePageMetadataSchema>
+export type KnowledgePageReference = z.infer<typeof knowledgePageReferenceSchema>
 export type KnowledgeSearchHit = z.infer<typeof knowledgeSearchHitSchema>
 export type KnowledgeSearchResult = z.infer<typeof knowledgeSearchResultSchema>
 export type KnowledgeShowResult = z.infer<typeof knowledgeShowResultSchema>

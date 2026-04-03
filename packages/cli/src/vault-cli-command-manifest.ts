@@ -762,7 +762,7 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['knowledge', 'compile'],
         description:
-          'Use review:gpt to compile or refresh one derived knowledge page from local vault sources. Writes under derived/knowledge/pages/** and rebuilds the derived knowledge index.',
+          'Use review:gpt to compile or refresh one derived knowledge page from local vault sources. Writes under derived/knowledge/pages/** and rebuilds the derived knowledge index. Derived/runtime inputs such as derived/** and .runtime/** are rejected.',
         output: knowledgeCompileResultSchema,
       },
       {
@@ -784,7 +784,7 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['knowledge', 'lint'],
         description:
-          'Run deterministic health checks over derived knowledge pages, including parse failures, missing sources, and missing related pages.',
+          'Run deterministic health checks over derived knowledge pages, including parse failures, duplicate slugs, missing sources, metadata drift, and missing related pages.',
         output: knowledgeLintResultSchema,
       },
       {

@@ -62,7 +62,7 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
       sourcePath: z
         .array(pathSchema)
         .optional()
-        .describe('Optional vault-relative or absolute source file paths. Repeat --source-path to include multiple files.'),
+        .describe('Optional vault-relative or absolute source file paths that resolve inside the vault. Repeat --source-path to include multiple files. Derived/runtime paths such as derived/** and .runtime/** are rejected.'),
       mode: z
         .enum(researchExecutionModeValues)
         .optional()
@@ -89,8 +89,8 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
         .describe('Optional assistant-response timeout override. Usually leave this unset.'),
     }),
     output: knowledgeCompileResultSchema,
-    async run({ args, options }) {
-      return await compileKnowledgePage({
+    run({ args, options }) {
+      return compileKnowledgePage({
         vault: options.vault,
         prompt: args.prompt,
         title: options.title,
@@ -123,8 +123,8 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
         .describe('Optional status filter.'),
     }),
     output: knowledgeListResultSchema,
-    async run({ options }) {
-      return await listKnowledgePages({
+    run({ options }) {
+      return listKnowledgePages({
         vault: options.vault,
         pageType: options.pageType,
         status: options.status,
@@ -161,8 +161,8 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
         .describe('Optional result limit. Defaults to 20 and is capped at 200.'),
     }),
     output: knowledgeSearchResultSchema,
-    async run({ args, options }) {
-      return await searchKnowledgePages({
+    run({ args, options }) {
+      return searchKnowledgePages({
         vault: options.vault,
         query: args.query,
         limit: options.limit,
@@ -179,8 +179,8 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
     }),
     options: withBaseOptions(),
     output: knowledgeShowResultSchema,
-    async run({ args, options }) {
-      return await showKnowledgePage({
+    run({ args, options }) {
+      return showKnowledgePage({
         vault: options.vault,
         slug: args.slug,
       })
@@ -193,8 +193,8 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
     args: emptyArgsSchema,
     options: withBaseOptions(),
     output: knowledgeLintResultSchema,
-    async run({ options }) {
-      return await lintKnowledgePages({
+    run({ options }) {
+      return lintKnowledgePages({
         vault: options.vault,
       })
     },
@@ -209,8 +209,8 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
     args: emptyArgsSchema,
     options: withBaseOptions(),
     output: knowledgeIndexRebuildResultSchema,
-    async run({ options }) {
-      return await rebuildKnowledgeIndex({
+    run({ options }) {
+      return rebuildKnowledgeIndex({
         vault: options.vault,
       })
     },

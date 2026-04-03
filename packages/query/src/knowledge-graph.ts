@@ -11,6 +11,13 @@ import {
   firstStringArray,
   type FrontmatterObject,
 } from './health/shared.ts'
+import {
+  DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT,
+  humanizeDerivedKnowledgeValue,
+  normalizeDerivedKnowledgeTag,
+  summarizeDerivedKnowledgeBody,
+  uniqueKnowledgeStrings,
+} from './knowledge-page-model.ts'
 
 export const DERIVED_KNOWLEDGE_ROOT = 'derived/knowledge'
 export const DERIVED_KNOWLEDGE_PAGES_ROOT = `${DERIVED_KNOWLEDGE_ROOT}/pages`
@@ -75,7 +82,7 @@ export interface DerivedKnowledgeSearchHit {
 }
 
 export interface DerivedKnowledgeSearchResult {
-  format: 'murph.knowledge-search.v1'
+  format: typeof DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT
   hits: DerivedKnowledgeSearchHit[]
   query: string
   total: number
@@ -100,6 +107,14 @@ interface DerivedKnowledgeSearchableDocument {
   summaryText: string
   title: string
   titleText: string
+}
+
+interface DerivedKnowledgeSearchFieldScore {
+  count: number
+  matchedTerms: string[]
+  phraseWeight: number
+  termWeight: number
+  text: string
 }
 
 export async function readDerivedKnowledgeGraph(
@@ -179,15 +194,15 @@ export function searchDerivedKnowledgeGraph(
 
   if (terms.length === 0) {
     return {
-      format: 'murph.knowledge-search.v1',
+      format: DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT,
       hits: [],
       query: normalizedQuery,
       total: 0,
     }
   }
 
-  const pageType = normalizeKnowledgeSearchTag(filters.pageType)
-  const status = normalizeKnowledgeSearchTag(filters.status)
+  const pageType = normalizeDerivedKnowledgeTag(filters.pageType)
+  const status = normalizeDerivedKnowledgeTag(filters.status)
   const hits = graph.nodes
     .filter((node) => matchesKnowledgeSearchFilter(node.pageType, pageType))
     .filter((node) => matchesKnowledgeSearchFilter(node.status, status))
@@ -197,11 +212,83 @@ export function searchDerivedKnowledgeGraph(
     .sort(compareKnowledgeSearchHits)
 
   return {
-    format: 'murph.knowledge-search.v1',
+    format: DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT,
     hits: hits.slice(0, normalizeKnowledgeSearchLimit(filters.limit)),
     query: normalizedQuery,
     total: hits.length,
   }
+}
+
+export function renderDerivedKnowledgeIndex(
+  graph: DerivedKnowledgeGraph,
+  generatedAt: string,
+): string {
+  const pagesByType = new Map<string, DerivedKnowledgeNode[]>()
+
+  for (const node of graph.nodes) {
+    const pageType = node.pageType ?? 'uncategorized'
+    const pages = pagesByType.get(pageType) ?? []
+    pages.push(node)
+    pagesByType.set(pageType, pages)
+  }
+
+  const orderedTypes = [...pagesByType.keys()].sort((left, right) => {
+    if (left === 'uncategorized') {
+      return 1
+    }
+    if (right === 'uncategorized') {
+      return -1
+    }
+    return left.localeCompare(right)
+  })
+
+  const lines = [
+    '# Derived knowledge index',
+    '',
+    '_This wiki is model-authored, non-canonical, and rebuildable from local sources._',
+    '',
+    `_Generated:_ ${generatedAt}`,
+    `_Pages:_ ${graph.nodes.length}`,
+    '',
+  ]
+
+  if (graph.nodes.length === 0) {
+    lines.push('No derived knowledge pages have been compiled yet.', '')
+    return lines.join('\n')
+  }
+
+  for (const pageType of orderedTypes) {
+    lines.push(`## ${humanizeDerivedKnowledgeValue(pageType)}`, '')
+    const nodes = pagesByType.get(pageType) ?? []
+
+    for (const node of nodes) {
+      lines.push(
+        `- [${node.title}](pages/${path.posix.basename(node.relativePath)})${node.summary ? ` — ${node.summary}` : ''}`,
+      )
+      const details: string[] = []
+
+      if (node.status) {
+        details.push(`status: ${node.status}`)
+      }
+      if (node.relatedSlugs.length > 0) {
+        details.push(
+          `related: ${node.relatedSlugs
+            .map((slug) => renderDerivedKnowledgePageLink(graph, slug))
+            .join(', ')}`,
+        )
+      }
+      if (node.sourcePaths.length > 0) {
+        details.push(`sources: ${node.sourcePaths.length}`)
+      }
+      if (details.length > 0) {
+        lines.push(`  - ${details.join(' · ')}`)
+      }
+    }
+
+    lines.push('')
+  }
+
+  return lines.join('\n')
 }
 
 function toDerivedKnowledgeNode(
@@ -233,38 +320,24 @@ function toDerivedKnowledgeNode(
   const title =
     firstString(source, ['title']) ??
     extractFirstHeading(body) ??
-    humanizeSlug(slug)
-  const frontmatterSourcePaths = orderedUniqueStrings(
-    firstStringArray(source, ['sourcePaths', 'source_paths', 'sources']),
-  )
-  const bodySourcePaths = extractSourcePaths(body)
-  const sourcePaths =
-    bodySourcePaths.length > 0
-      ? bodySourcePaths
-      : frontmatterSourcePaths
-  const frontmatterRelatedSlugs = orderedUniqueStrings(
-    firstStringArray(source, ['relatedSlugs', 'related_slugs', 'related']),
-  )
-  const bodyRelatedSlugs = extractRelatedSlugs(body, slug)
-  const relatedSlugs =
-    bodyRelatedSlugs.length > 0
-      ? bodyRelatedSlugs
-      : frontmatterRelatedSlugs
+    humanizeDerivedKnowledgeValue(slug)
+  const sourcePaths = uniqueKnowledgeStrings(firstStringArray(source, ['sourcePaths']))
+  const relatedSlugs = uniqueKnowledgeStrings(firstStringArray(source, ['relatedSlugs']))
 
   return {
     node: {
       attributes,
       body,
-      compiledAt: firstString(source, ['compiledAt', 'compiled_at']),
+      compiledAt: firstString(source, ['compiledAt']),
       compiler: firstString(source, ['compiler']),
       mode: firstString(source, ['mode']),
-      pageType: firstString(source, ['pageType', 'page_type', 'entityType', 'entity_type']),
+      pageType: firstString(source, ['pageType']),
       relativePath,
       relatedSlugs,
       slug,
       sourcePaths,
       status: firstString(source, ['status']),
-      summary: firstString(source, ['summary']) ?? summarizeBody(body),
+      summary: firstString(source, ['summary']) ?? summarizeDerivedKnowledgeBody(body),
       title,
     },
   }
@@ -283,7 +356,7 @@ function materializeKnowledgeSearchDocument(
   node: DerivedKnowledgeNode,
 ): DerivedKnowledgeSearchableDocument {
   return {
-    bodyText: compactStrings([node.body]).join('\n').trim(),
+    bodyText: joinCompactStrings([node.body], '\n'),
     compiledAt: node.compiledAt,
     pagePath: node.relativePath,
     pageType: node.pageType,
@@ -291,23 +364,23 @@ function materializeKnowledgeSearchDocument(
     slug: node.slug,
     sourcePaths: node.sourcePaths,
     status: node.status,
-    structuredText: compactStrings([
+    structuredText: joinCompactStrings([
       node.slug,
       node.relativePath,
       node.pageType,
       node.status,
       ...node.sourcePaths,
       ...node.relatedSlugs,
-    ]).join('\n'),
+    ], '\n'),
     summary: node.summary,
-    summaryText: compactStrings([node.summary]).join(' ').trim(),
+    summaryText: joinCompactStrings([node.summary], ' '),
     title: node.title,
-    titleText: compactStrings([
+    titleText: joinCompactStrings([
       node.title,
       node.pageType,
       node.status,
       node.slug,
-    ]).join(' · '),
+    ], ' · '),
   }
 }
 
@@ -319,39 +392,21 @@ function scoreKnowledgeSearchDocument(
   const normalizedPhrase = normalizedQuery.toLowerCase()
   const matchedTerms = new Set<string>()
   let score = 0
+  const fieldScores = buildKnowledgeSearchFieldScores(candidate, terms)
 
-  const titleLower = candidate.titleText.toLowerCase()
-  const summaryLower = candidate.summaryText.toLowerCase()
-  const bodyLower = candidate.bodyText.toLowerCase()
-  const structuredLower = candidate.structuredText.toLowerCase()
-
-  const titleMetrics = scoreText(titleLower, terms)
-  const summaryMetrics = scoreText(summaryLower, terms)
-  const bodyMetrics = scoreText(bodyLower, terms)
-  const structuredMetrics = scoreText(structuredLower, terms)
-
-  accumulateMatchedTerms(matchedTerms, titleMetrics.matchedTerms)
-  accumulateMatchedTerms(matchedTerms, summaryMetrics.matchedTerms)
-  accumulateMatchedTerms(matchedTerms, bodyMetrics.matchedTerms)
-  accumulateMatchedTerms(matchedTerms, structuredMetrics.matchedTerms)
-
-  if (titleLower.includes(normalizedPhrase)) {
-    score += 12
-  }
-  if (summaryLower.includes(normalizedPhrase)) {
-    score += 8
-  }
-  if (bodyLower.includes(normalizedPhrase)) {
-    score += 6
-  }
-  if (structuredLower.includes(normalizedPhrase)) {
-    score += 4
+  for (const fieldScore of fieldScores) {
+    accumulateMatchedTerms(matchedTerms, fieldScore.matchedTerms)
   }
 
-  score += titleMetrics.count * 4.5
-  score += summaryMetrics.count * 3.25
-  score += bodyMetrics.count * 1.75
-  score += structuredMetrics.count * 1
+  for (const fieldScore of fieldScores) {
+    if (fieldScore.text.includes(normalizedPhrase)) {
+      score += fieldScore.phraseWeight
+    }
+  }
+
+  for (const fieldScore of fieldScores) {
+    score += fieldScore.count * fieldScore.termWeight
+  }
 
   const coverage = matchedTerms.size / terms.length
   score += coverage * 6
@@ -416,53 +471,40 @@ function buildKnowledgeSnippet(
   return candidate.title || candidate.slug
 }
 
-function summarizeBody(body: string): string | null {
-  const normalized = body
-    .split('\n')
-    .map((line) => line.replace(/^#+\s+/u, '').trim())
-    .filter(Boolean)
-    .join(' ')
+function buildKnowledgeSearchFieldScores(
+  candidate: DerivedKnowledgeSearchableDocument,
+  terms: readonly string[],
+): DerivedKnowledgeSearchFieldScore[] {
+  return [
+    {
+      phraseWeight: 12,
+      termWeight: 4.5,
+      text: candidate.titleText.toLowerCase(),
+    },
+    {
+      phraseWeight: 8,
+      termWeight: 3.25,
+      text: candidate.summaryText.toLowerCase(),
+    },
+    {
+      phraseWeight: 6,
+      termWeight: 1.75,
+      text: candidate.bodyText.toLowerCase(),
+    },
+    {
+      phraseWeight: 4,
+      termWeight: 1,
+      text: candidate.structuredText.toLowerCase(),
+    },
+  ].map((field) => {
+    const metrics = scoreText(field.text, terms)
 
-  if (!normalized) {
-    return null
-  }
-
-  return normalized.length <= 220 ? normalized : `${normalized.slice(0, 217)}...`
-}
-
-function extractRelatedSlugs(body: string, currentSlug: string): string[] {
-  const matches = body.matchAll(/\[\[([a-z0-9]+(?:-[a-z0-9]+)*)\]\]/gu)
-  const relatedSlugs: string[] = []
-
-  for (const match of matches) {
-    const relatedSlug = match[1]?.trim()
-    if (!relatedSlug || relatedSlug === currentSlug) {
-      continue
+    return {
+      ...field,
+      count: metrics.count,
+      matchedTerms: metrics.matchedTerms,
     }
-
-    relatedSlugs.push(relatedSlug)
-  }
-
-  return orderedUniqueStrings(relatedSlugs)
-}
-
-function extractSourcePaths(body: string): string[] {
-  const sectionMatch = /(?:^|\n)##\s+Sources\s*\n([\s\S]*?)(?=\n##\s+|$)/iu.exec(body)
-  if (!sectionMatch?.[1]) {
-    return []
-  }
-
-  const sourcePaths: string[] = []
-  for (const line of sectionMatch[1].split('\n')) {
-    const match = /^[-*]\s+`([^`]+)`\s*$/u.exec(line.trim())
-    if (!match?.[1]) {
-      continue
-    }
-
-    sourcePaths.push(match[1].trim())
-  }
-
-  return orderedUniqueStrings(sourcePaths)
+  })
 }
 
 function extractFirstHeading(body: string): string | null {
@@ -476,43 +518,20 @@ function extractFirstHeading(body: string): string | null {
   return null
 }
 
-function humanizeSlug(slug: string): string {
-  return slug
-    .split('-')
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ')
+function renderDerivedKnowledgePageLink(
+  graph: DerivedKnowledgeGraph,
+  slug: string,
+): string {
+  const target = graph.bySlug.get(slug)
+  if (!target) {
+    return `\`${slug}\``
+  }
+
+  return `[${target.title}](pages/${path.posix.basename(target.relativePath)})`
 }
 
 function isKnowledgeSlug(value: string): boolean {
   return /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(value)
-}
-
-function orderedUniqueStrings(values: readonly string[]): string[] {
-  const seen = new Set<string>()
-  const uniqueValues: string[] = []
-
-  for (const value of values) {
-    if (!seen.has(value)) {
-      seen.add(value)
-      uniqueValues.push(value)
-    }
-  }
-
-  return uniqueValues
-}
-
-function normalizeKnowledgeSearchTag(value: string | null | undefined): string | null {
-  if (!value) {
-    return null
-  }
-
-  const normalized = value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, '-')
-    .replace(/^-+|-+$/gu, '')
-  return normalized || null
 }
 
 function matchesKnowledgeSearchFilter(
@@ -523,7 +542,7 @@ function matchesKnowledgeSearchFilter(
     return true
   }
 
-  return normalizeKnowledgeSearchTag(value) === filter
+  return normalizeDerivedKnowledgeTag(value) === filter
 }
 
 function normalizeKnowledgeSearchLimit(limit: number | undefined): number {
@@ -614,6 +633,13 @@ function findSnippet(sourceText: string, terms: readonly string[]): string | nul
   const prefix = start > 0 ? '...' : ''
   const suffix = end < normalizedSource.length ? '...' : ''
   return `${prefix}${normalizedSource.slice(start, end).trim()}${suffix}`
+}
+
+function joinCompactStrings(
+  values: readonly (string | null | undefined)[],
+  separator: string,
+): string {
+  return compactStrings(values).join(separator)
 }
 
 function compactStrings(values: readonly (string | null | undefined)[]): string[] {

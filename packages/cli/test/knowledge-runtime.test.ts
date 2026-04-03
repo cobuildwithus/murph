@@ -189,6 +189,93 @@ describe('compileKnowledgePage', () => {
     expect(savedPage).toContain('`research/2026/04/magnesium-note.md`')
   })
 
+  it('stores truncated summaries without the local truncation marker', async () => {
+    const vaultRoot = await createVaultRoot()
+    const sourcePath = 'research/2026/04/long-note.md'
+    const longParagraph = Array.from(
+      { length: 80 },
+      (_, index) => `detail-${index.toString().padStart(2, '0')}`,
+    ).join(' ')
+    await writeVaultFile(
+      vaultRoot,
+      sourcePath,
+      '# Long note\n\nA longer note backs the generated summary.\n',
+    )
+
+    const result = await compileKnowledgePage(
+      {
+        vault: vaultRoot,
+        prompt: 'Summarize the long note.',
+        title: 'Long note',
+        sourcePaths: [sourcePath],
+      },
+      {
+        async runProcess(input) {
+          const responseFile = readArgValue(input.args, '--response-file')
+          expect(input.command).toBe('pnpm')
+          expect(responseFile).toBeTruthy()
+          await writeFile(
+            responseFile!,
+            ['# Long note', '', longParagraph, ''].join('\n'),
+            'utf8',
+          )
+
+          return {
+            stdout: '',
+            stderr: '',
+          }
+        },
+        async saveText(input) {
+          await writeVaultFile(vaultRoot, input.relativePath, input.content)
+        },
+        async resolveAssistantDefaults() {
+          return null
+        },
+      },
+    )
+
+    const summary = result.page.summary ?? ''
+    expect(summary).toBeTruthy()
+    expect(summary).not.toContain('[truncated locally]')
+    expect(summary.length).toBeLessThanOrEqual(220)
+    expect(summary).toMatch(/\.\.\.$/u)
+
+    const savedPage = await readFile(
+      path.join(vaultRoot, 'derived/knowledge/pages/long-note.md'),
+      'utf8',
+    )
+    expect(savedPage).not.toContain('[truncated locally]')
+  })
+
+  it('rejects derived or runtime paths as knowledge compile sources', async () => {
+    const vaultRoot = await createVaultRoot()
+    await writeVaultFile(
+      vaultRoot,
+      'derived/knowledge/pages/existing.md',
+      '# Existing\n',
+    )
+
+    await expect(
+      compileKnowledgePage(
+        {
+          vault: vaultRoot,
+          prompt: 'Compile from a forbidden source path.',
+          sourcePaths: ['derived/knowledge/pages/existing.md'],
+        },
+        {
+          async runProcess() {
+            throw new Error('runProcess should not be reached for forbidden sources')
+          },
+          async resolveAssistantDefaults() {
+            return null
+          },
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'knowledge_forbidden_source_path',
+    })
+  })
+
   it('searches the derived knowledge wiki without recompiling pages', async () => {
     const vaultRoot = await createVaultRoot()
     await writeVaultFile(
@@ -224,6 +311,38 @@ describe('compileKnowledgePage', () => {
       matchedTerms: ['magnesium', 'sleep'],
       pageType: 'concept',
       status: 'active',
+    })
+  })
+
+  it('fails closed when duplicate slugs exist in derived knowledge pages', async () => {
+    const vaultRoot = await createVaultRoot()
+    const pageBody = [
+      '---',
+      'title: Sleep quality',
+      'slug: sleep-quality',
+      'pageType: concept',
+      'status: active',
+      'summary: Duplicate page.',
+      'sourcePaths:',
+      '  - research/2026/04/sleep-note.md',
+      '---',
+      '',
+      '# Sleep quality',
+      '',
+      'Duplicate content.',
+      '',
+    ].join('\n')
+    await writeVaultFile(vaultRoot, 'research/2026/04/sleep-note.md', '# Note\n')
+    await writeVaultFile(vaultRoot, 'derived/knowledge/pages/sleep-quality.md', pageBody)
+    await writeVaultFile(vaultRoot, 'derived/knowledge/pages/sleep-quality-copy.md', pageBody)
+
+    await expect(
+      showKnowledgePage({
+        vault: vaultRoot,
+        slug: 'sleep-quality',
+      }),
+    ).rejects.toMatchObject({
+      code: 'knowledge_duplicate_slug',
     })
   })
 
@@ -266,6 +385,65 @@ describe('compileKnowledgePage', () => {
           code: 'missing_source_path',
           slug: 'sleep-quality',
           severity: 'error',
+        }),
+        ]),
+    )
+  })
+
+  it('reports metadata drift and forbidden body source sections during lint', async () => {
+    const vaultRoot = await createVaultRoot()
+    await writeVaultFile(
+      vaultRoot,
+      'research/2026/04/current-note.md',
+      '# Current note\n',
+    )
+    await writeVaultFile(
+      vaultRoot,
+      'derived/knowledge/pages/sleep-quality.md',
+      [
+        '---',
+        'title: Sleep quality',
+        'slug: sleep-quality',
+        'pageType: concept',
+        'status: active',
+        'summary: Sleep continuity notes.',
+        'sourcePaths:',
+        '  - research/2026/04/current-note.md',
+        'relatedSlugs:',
+        '  - magnesium',
+        '---',
+        '',
+        '# Sleep quality',
+        '',
+        'Body still points at [[stale-link]].',
+        '',
+        '## Sources',
+        '',
+        '- `derived/knowledge/pages/old.md`',
+        '',
+      ].join('\n'),
+    )
+
+    const lint = await lintKnowledgePages({
+      vault: vaultRoot,
+    })
+
+    expect(lint.problems).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'forbidden_source_path',
+          slug: 'sleep-quality',
+          severity: 'error',
+        }),
+        expect.objectContaining({
+          code: 'sources_section_drift',
+          slug: 'sleep-quality',
+          severity: 'warning',
+        }),
+        expect.objectContaining({
+          code: 'related_slugs_drift',
+          slug: 'sleep-quality',
+          severity: 'warning',
         }),
       ]),
     )
