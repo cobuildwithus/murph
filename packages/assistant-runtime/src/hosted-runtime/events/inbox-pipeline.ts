@@ -2,7 +2,7 @@ import {
   createInboxPipeline,
   openInboxRuntime,
   rebuildRuntimeFromVault,
-} from "@murphai/inboxd";
+} from "@murphai/inboxd/runtime";
 
 type HostedInboxPipeline = Awaited<ReturnType<typeof createInboxPipeline>>;
 

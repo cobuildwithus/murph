@@ -1,7 +1,7 @@
 import {
   normalizeLinqWebhookEvent,
   type LinqAttachmentDownloadDriver,
-} from "@murphai/inboxd";
+} from "@murphai/inboxd/linq";
 import { parseLinqWebhookEvent } from "@murphai/messaging-ingress/linq-webhook";
 import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
 

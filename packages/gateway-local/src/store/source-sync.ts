@@ -6,7 +6,7 @@ import {
   readInboxCaptureMutationHead,
   type InboxCaptureRecord,
   type IndexedAttachment,
-} from '@murphai/inboxd'
+} from '@murphai/inboxd/runtime'
 import {
   openSqliteRuntimeDatabase,
   resolveInboxRuntimePaths,

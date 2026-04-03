@@ -4,7 +4,7 @@ import { createDeviceSyncService } from "@murphai/device-syncd/service";
 import {
   openInboxRuntime,
   rebuildRuntimeFromVault,
-} from "@murphai/inboxd";
+} from "@murphai/inboxd/runtime";
 import {
   createConfiguredParserRegistry,
   createInboxParserService,
