@@ -100,6 +100,16 @@ describe("hosted user env helpers", () => {
       current: {},
       update: {
         env: {
+          AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
+        },
+        mode: "replace",
+      },
+    })).toThrow(/not allowed/u);
+
+    expect(() => applyHostedUserEnvUpdate({
+      current: {},
+      update: {
+        env: {
           AGENTMAIL_API_KEY: "agentmail-secret",
         },
         mode: "replace",
@@ -131,6 +141,34 @@ describe("hosted user env helpers", () => {
       update: {
         env: {
           FFMPEG_THREADS: "2",
+        },
+        mode: "replace",
+      },
+    })).toThrow(/not allowed/u);
+  });
+
+  it("does not let hosted user env extensions re-enable AgentMail keys", () => {
+    expect(() => applyHostedUserEnvUpdate({
+      current: {},
+      source: {
+        HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "AGENTMAIL_API_KEY",
+      },
+      update: {
+        env: {
+          AGENTMAIL_API_KEY: "agentmail-secret",
+        },
+        mode: "replace",
+      },
+    })).toThrow(/not allowed/u);
+
+    expect(() => applyHostedUserEnvUpdate({
+      current: {},
+      source: {
+        HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES: "AGENTMAIL_",
+      },
+      update: {
+        env: {
+          AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
         },
         mode: "replace",
       },
