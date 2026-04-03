@@ -2,6 +2,7 @@ import {
   applyGatewayProjectionSnapshotToEventLog,
   DEFAULT_GATEWAY_EVENT_RETENTION,
   fetchGatewayAttachmentsFromSnapshot,
+  gatewayEventSchema,
   gatewayListOpenPermissionsInputSchema,
   gatewayPermissionRequestSchema,
   gatewayPollEventsInputSchema,
@@ -27,18 +28,37 @@ import {
   type GatewayRespondToPermissionInput,
 } from "@murphai/gateway-core";
 
+import { buildHostedStorageAad } from "./crypto-context.js";
+import {
+  decryptHostedBundle,
+  encryptHostedBundle,
+  type HostedCipherEnvelope,
+} from "./crypto.js";
 import type { DurableObjectStateLike } from "./user-runner/types.js";
 
-const GATEWAY_EVENTS_KEY = "gateway.events";
-const GATEWAY_NEXT_CURSOR_KEY = "gateway.next-cursor";
-const GATEWAY_PERMISSION_OVERRIDES_KEY = "gateway.permission-overrides";
-const GATEWAY_SNAPSHOT_KEY = "gateway.snapshot";
+const GATEWAY_STATE_SCHEMA = "murph.hosted-gateway-state.v1";
+const GATEWAY_STATE_STORAGE_KEY = "gateway.state";
+const GATEWAY_STATE_STORAGE_AAD = buildHostedStorageAad({
+  key: GATEWAY_STATE_STORAGE_KEY,
+  purpose: "gateway-store",
+  record: "state",
+});
+const utf8Decoder = new TextDecoder();
+const utf8Encoder = new TextEncoder();
 
 interface GatewayPermissionResolutionOverride {
   note: string | null;
   requestId: string;
   resolvedAt: string;
   status: Exclude<GatewayPermissionRequest["status"], "open">;
+}
+
+interface StoredGatewayStateRecord {
+  baseSnapshot: GatewayProjectionSnapshot | null;
+  events: GatewayEvent[];
+  nextCursor: number;
+  permissionOverrides: GatewayPermissionResolutionOverride[];
+  schema: typeof GATEWAY_STATE_SCHEMA;
 }
 
 interface StoredGatewayState {
@@ -49,10 +69,19 @@ interface StoredGatewayState {
   snapshot: GatewayProjectionSnapshot | null;
 }
 
+interface HostedGatewayProjectionStoreCrypto {
+  key: Uint8Array;
+  keyId: string;
+  keysById?: Readonly<Record<string, Uint8Array>>;
+}
+
 export class HostedGatewayProjectionStore {
   private stateLock: Promise<void> | null = null;
 
-  constructor(private readonly state: DurableObjectStateLike) {}
+  constructor(
+    private readonly state: DurableObjectStateLike,
+    private readonly crypto: HostedGatewayProjectionStoreCrypto,
+  ) {}
 
   async applySnapshot(snapshot: GatewayProjectionSnapshot | null): Promise<void> {
     if (!snapshot) {
@@ -213,24 +242,37 @@ export class HostedGatewayProjectionStore {
   }
 
   private async readStoredState(): Promise<StoredGatewayState> {
-    const [snapshot, events, nextCursor, permissionOverrides] = await Promise.all([
-      this.state.storage.get<GatewayProjectionSnapshot>(GATEWAY_SNAPSHOT_KEY),
-      this.state.storage.get<GatewayEvent[]>(GATEWAY_EVENTS_KEY),
-      this.state.storage.get<number>(GATEWAY_NEXT_CURSOR_KEY),
-      this.state.storage.get<GatewayPermissionResolutionOverride[]>(GATEWAY_PERMISSION_OVERRIDES_KEY),
-    ]);
-    const baseSnapshot = snapshot ? gatewayProjectionSnapshotSchema.parse(snapshot) : null;
-    const normalizedOverrides = readGatewayPermissionOverrides(permissionOverrides);
+    const envelope = await this.state.storage.get<HostedCipherEnvelope>(GATEWAY_STATE_STORAGE_KEY);
+
+    if (!envelope) {
+      return {
+        baseSnapshot: null,
+        events: [],
+        nextCursor: 0,
+        permissionOverrides: [],
+        snapshot: null,
+      };
+    }
+
+    const plaintext = await decryptHostedBundle({
+      aad: GATEWAY_STATE_STORAGE_AAD,
+      envelope,
+      expectedKeyId: this.crypto.keyId,
+      key: this.crypto.key,
+      keysById: this.crypto.keysById,
+      scope: "gateway-store",
+    });
+    const record = parseStoredGatewayStateRecord(
+      JSON.parse(utf8Decoder.decode(plaintext)) as unknown,
+    );
+    const normalizedOverrides = readGatewayPermissionOverrides(record.permissionOverrides);
 
     return {
-      baseSnapshot,
-      events: events ?? [],
-      nextCursor:
-        typeof nextCursor === "number" && Number.isFinite(nextCursor) && nextCursor >= 0
-          ? nextCursor
-          : 0,
+      baseSnapshot: record.baseSnapshot,
+      events: record.events,
+      nextCursor: record.nextCursor,
       permissionOverrides: normalizedOverrides,
-      snapshot: mergeGatewayPermissionOverrides(baseSnapshot, normalizedOverrides),
+      snapshot: mergeGatewayPermissionOverrides(record.baseSnapshot, normalizedOverrides),
     };
   }
 
@@ -240,12 +282,21 @@ export class HostedGatewayProjectionStore {
     nextCursor: number;
     permissionOverrides: GatewayPermissionResolutionOverride[];
   }): Promise<void> {
-    await Promise.all([
-      this.state.storage.put(GATEWAY_SNAPSHOT_KEY, state.baseSnapshot),
-      this.state.storage.put(GATEWAY_EVENTS_KEY, state.events),
-      this.state.storage.put(GATEWAY_NEXT_CURSOR_KEY, state.nextCursor),
-      this.state.storage.put(GATEWAY_PERMISSION_OVERRIDES_KEY, state.permissionOverrides),
-    ]);
+    const envelope = await encryptHostedBundle({
+      aad: GATEWAY_STATE_STORAGE_AAD,
+      key: this.crypto.key,
+      keyId: this.crypto.keyId,
+      plaintext: utf8Encoder.encode(JSON.stringify({
+        baseSnapshot: state.baseSnapshot,
+        events: state.events,
+        nextCursor: state.nextCursor,
+        permissionOverrides: state.permissionOverrides,
+        schema: GATEWAY_STATE_SCHEMA,
+      } satisfies StoredGatewayStateRecord)),
+      scope: "gateway-store",
+    });
+
+    await this.state.storage.put(GATEWAY_STATE_STORAGE_KEY, envelope);
   }
 
   private async withStateLock<T>(run: () => Promise<T>): Promise<T> {
@@ -267,6 +318,38 @@ export class HostedGatewayProjectionStore {
       }
     }
   }
+}
+
+function parseStoredGatewayStateRecord(value: unknown): StoredGatewayStateRecord {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("gateway.state storage is invalid.");
+  }
+
+  const record = value as Record<string, unknown>;
+  if (record.schema !== GATEWAY_STATE_SCHEMA) {
+    throw new TypeError("gateway.state storage schema is invalid.");
+  }
+
+  const baseSnapshotValue = record.baseSnapshot;
+  const eventsValue = record.events;
+  const permissionOverridesValue = record.permissionOverrides;
+  const nextCursorValue = record.nextCursor;
+
+  return {
+    baseSnapshot:
+      baseSnapshotValue === null || baseSnapshotValue === undefined
+        ? null
+        : gatewayProjectionSnapshotSchema.parse(baseSnapshotValue),
+    events: Array.isArray(eventsValue)
+      ? eventsValue.map((event) => gatewayEventSchema.parse(event))
+      : [],
+    nextCursor:
+      typeof nextCursorValue === "number" && Number.isFinite(nextCursorValue) && nextCursorValue >= 0
+        ? nextCursorValue
+        : 0,
+    permissionOverrides: readGatewayPermissionOverrides(permissionOverridesValue),
+    schema: GATEWAY_STATE_SCHEMA,
+  };
 }
 
 function createEmptyGatewaySnapshot(): GatewayProjectionSnapshot {
@@ -331,17 +414,17 @@ function readGatewayPermissionOverrides(
   }
 
   if (!Array.isArray(value)) {
-    throw new TypeError("gateway.permission-overrides storage is invalid.");
+    throw new TypeError("gateway.state storage is invalid.");
   }
 
   return value.map((entry): GatewayPermissionResolutionOverride => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-      throw new TypeError("gateway.permission-overrides storage is invalid.");
+      throw new TypeError("gateway.state storage is invalid.");
     }
 
     const record = entry as Record<string, unknown>;
     if (typeof record.requestId !== "string" || record.requestId.length === 0) {
-      throw new TypeError("gateway.permission-overrides storage is invalid.");
+      throw new TypeError("gateway.state storage is invalid.");
     }
 
     const status = record.status;
@@ -350,15 +433,15 @@ function readGatewayPermissionOverrides(
       && status !== "denied"
       && status !== "expired"
     ) {
-      throw new TypeError("gateway.permission-overrides storage is invalid.");
+      throw new TypeError("gateway.state storage is invalid.");
     }
 
     if (typeof record.resolvedAt !== "string" || Number.isNaN(Date.parse(record.resolvedAt))) {
-      throw new TypeError("gateway.permission-overrides storage is invalid.");
+      throw new TypeError("gateway.state storage is invalid.");
     }
 
     if (record.note !== null && record.note !== undefined && typeof record.note !== "string") {
-      throw new TypeError("gateway.permission-overrides storage is invalid.");
+      throw new TypeError("gateway.state storage is invalid.");
     }
 
     return {
