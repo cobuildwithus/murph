@@ -131,6 +131,7 @@ const EVENT_WRITE_KINDS = [
   'medication_intake',
   'supplement_intake',
   'activity_session',
+  'body_measurement',
   'sleep_session',
   'intervention_session',
 ] as const
@@ -248,6 +249,15 @@ const eventTemplates: Record<(typeof EVENT_KINDS)[number], JsonObject> = {
     activityType: 'walking',
     durationMinutes: 35,
     distanceKm: 2.7,
+  },
+  body_measurement: {
+    kind: 'body_measurement',
+    occurredAt: '2026-03-12T07:00:00.000Z',
+    title: 'Weekly check-in',
+    measurements: [
+      { type: 'weight', value: 182.4, unit: 'lb' },
+      { type: 'waist', value: 33.5, unit: 'in' },
+    ],
   },
   sleep_session: {
     kind: 'sleep_session',

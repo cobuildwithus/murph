@@ -171,6 +171,7 @@ export interface EventScaffoldResult {
     | "medication_intake"
     | "supplement_intake"
     | "activity_session"
+    | "body_measurement"
     | "sleep_session"
     | "intervention_session"
   payload: JsonObject

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Cli } from 'incur'
@@ -13,6 +13,7 @@ import { registerVaultCommands } from '../src/commands/vault.js'
 import { registerWorkoutCommands } from '../src/commands/workout.js'
 import { createIntegratedVaultServices } from '@murphai/assistant-core/vault-services'
 import { addWorkoutRecord } from '../src/usecases/workout.js'
+import { addWorkoutMeasurementRecord } from '../src/usecases/workout-measurement.js'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData, runCli } from './cli-test-helpers.js'
 
@@ -82,6 +83,13 @@ interface DeleteEnvelope {
   kind: string
   deleted: true
   retainedPaths: string[]
+}
+
+interface WorkoutManifestEnvelope {
+  manifestFile: string
+  manifest: {
+    rawDirectory: string
+  }
 }
 
 function createSliceCli() {
@@ -1265,6 +1273,134 @@ test(
       ])
       assert.equal(missing.ok, false)
       assert.equal(missing.error?.code, 'not_found')
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test(
+  'workout manifest resolves from workout media paths even after rawRefs are cleared',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-manifest-'))
+    const mediaPath = path.join(vaultRoot, 'workout-photo.jpg')
+
+    try {
+      const initResult = await runCli<{ created: boolean }>([
+        'init',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(initResult.ok, true)
+      assert.equal(requireData(initResult).created, true)
+
+      await writeFile(mediaPath, 'workout-photo', 'utf8')
+
+      const created = await runCli<WorkoutAddEnvelope>([
+        'workout',
+        'add',
+        'Went for a 45-minute walk.',
+        '--media',
+        mediaPath,
+        '--occurred-at',
+        '2026-03-12T18:00:00Z',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(created.ok, true)
+
+      const cleared = await runCli<ShowEnvelope>([
+        'workout',
+        'edit',
+        requireData(created).eventId,
+        '--clear',
+        'rawRefs',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(cleared.ok, true)
+      assert.equal(requireData(cleared).entity.data.rawRefs, undefined)
+
+      const manifest = await runCli<WorkoutManifestEnvelope>([
+        'workout',
+        'manifest',
+        requireData(created).eventId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(manifest.ok, true)
+      assert.match(requireData(manifest).manifestFile, /^raw\/workouts\/2026\/03\/evt[-_]/u)
+      assert.match(requireData(manifest).manifest.rawDirectory, /^raw\/workouts\/2026\/03\/evt[-_]/u)
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test(
+  'workout media staging is cleaned up when the later event write fails',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-stage-cleanup-'))
+    const mediaPath = path.join(vaultRoot, 'workout-photo.jpg')
+
+    try {
+      const initResult = await runCli<{ created: boolean }>([
+        'init',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(initResult.ok, true)
+      assert.equal(requireData(initResult).created, true)
+
+      await writeFile(mediaPath, 'workout-photo', 'utf8')
+
+      await assert.rejects(
+        () =>
+          addWorkoutRecord({
+            vault: vaultRoot,
+            text: 'Went for a 45-minute walk.',
+            occurredAt: 'not-a-timestamp',
+            mediaPaths: [mediaPath],
+          }),
+      )
+
+      await assert.rejects(() => access(path.join(vaultRoot, 'raw/workouts/2026/03')))
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test(
+  'measurement media staging is cleaned up when the later event write fails',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-measurement-stage-cleanup-'))
+    const mediaPath = path.join(vaultRoot, 'measurement-photo.jpg')
+
+    try {
+      const initResult = await runCli<{ created: boolean }>([
+        'init',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(initResult.ok, true)
+      assert.equal(requireData(initResult).created, true)
+
+      await writeFile(mediaPath, 'measurement-photo', 'utf8')
+
+      await assert.rejects(
+        () =>
+          addWorkoutMeasurementRecord({
+            vault: vaultRoot,
+            type: 'waist',
+            value: 33.5,
+            unit: 'in',
+            occurredAt: 'not-a-timestamp',
+            mediaPaths: [mediaPath],
+          }),
+      )
+
+      await assert.rejects(() => access(path.join(vaultRoot, 'raw/measurements/2026/03')))
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

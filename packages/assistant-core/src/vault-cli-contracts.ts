@@ -107,6 +107,39 @@ const workoutSetResultSchema = z.object({
   addedWeightKg: z.number().nonnegative().optional(),
 })
 
+const storedMediaResultSchema = z.object({
+  kind: z.enum(['photo', 'video', 'gif', 'image', 'other']),
+  relativePath: pathSchema,
+  mediaType: z.string().min(1).optional(),
+  caption: z.string().min(1).optional(),
+})
+
+const bodyMeasurementEntryResultSchema = z.object({
+  type: z.enum([
+    'weight',
+    'body_fat_pct',
+    'waist',
+    'neck',
+    'shoulders',
+    'chest',
+    'biceps',
+    'forearms',
+    'abdomen',
+    'hips',
+    'thighs',
+    'calves',
+  ]),
+  value: z.number().nonnegative(),
+  unit: z.enum(['lb', 'kg', 'percent', 'cm', 'in']),
+  note: z.string().min(1).optional(),
+})
+
+export const profileUnitPreferencesResultSchema = z.object({
+  weight: z.enum(['lb', 'kg']).nullable(),
+  distance: z.enum(['km', 'mi']).nullable(),
+  bodyMeasurement: z.enum(['cm', 'in']).nullable(),
+})
+
 const workoutExerciseResultSchema = z.object({
   name: z.string().min(1),
   sourceExerciseId: z.string().min(1).optional(),
@@ -135,7 +168,8 @@ const workoutSessionResultSchema = z.object({
   routineId: z.string().min(1).optional(),
   routineName: z.string().min(1).optional(),
   sessionNote: z.string().min(1).optional(),
-  exercises: z.array(workoutExerciseResultSchema).min(1).max(100),
+  media: z.array(storedMediaResultSchema).max(10).optional(),
+  exercises: z.array(workoutExerciseResultSchema).max(100),
 })
 
 const workoutTemplateSetResultSchema = z.object({
@@ -188,6 +222,29 @@ export const workoutAddResultSchema = z.object({
   strengthExercises: z.array(strengthExerciseResultSchema).nullable(),
   workout: workoutSessionResultSchema.nullable(),
   note: z.string().min(1),
+})
+
+export const workoutMeasurementAddResultSchema = z.object({
+  vault: pathSchema,
+  eventId: z.string().min(1),
+  lookupId: z.string().min(1),
+  ledgerFile: pathSchema,
+  created: z.boolean(),
+  occurredAt: isoTimestampSchema,
+  kind: z.literal('body_measurement'),
+  title: z.string().min(1),
+  measurements: z.array(bodyMeasurementEntryResultSchema).min(1).max(25),
+  media: z.array(storedMediaResultSchema).max(10),
+  manifestFile: pathSchema.nullable(),
+  note: z.string().min(1).nullable(),
+})
+
+export const workoutUnitPreferencesResultSchema = z.object({
+  vault: pathSchema,
+  snapshotId: z.string().min(1).nullable(),
+  updated: z.boolean(),
+  recordedAt: isoTimestampSchema.nullable(),
+  unitPreferences: profileUnitPreferencesResultSchema,
 })
 
 export const workoutImportInspectResultSchema = z.object({

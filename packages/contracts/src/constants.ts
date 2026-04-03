@@ -52,6 +52,7 @@ export const ID_PREFIXES = Object.freeze({
 
 export const EVENT_KINDS = Object.freeze([
   "adverse_effect",
+  "body_measurement",
   "document",
   "encounter",
   "exposure",
@@ -105,6 +106,7 @@ export const RAW_IMPORT_KINDS = Object.freeze([
   "assessment",
   "device_batch",
   "document",
+  "measurement_batch",
   "meal",
   "sample_batch",
   "workout_batch",

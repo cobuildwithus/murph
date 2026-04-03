@@ -14,11 +14,16 @@ import {
   workoutFormatSaveResultSchema,
   workoutImportCsvResultSchema,
   workoutImportInspectResultSchema,
+  workoutMeasurementAddResultSchema,
+  workoutUnitPreferencesResultSchema,
 } from '@murphai/assistant-core/vault-cli-contracts'
 import type { VaultServices } from '@murphai/assistant-core/vault-services'
 import {
   listWorkoutRecords,
+  listWorkoutMeasurementRecords,
   showWorkoutManifest,
+  showWorkoutMeasurementManifest,
+  showWorkoutMeasurementRecord,
   showWorkoutRecord,
   workoutImportManifestResultSchema,
   workoutLookupSchema,
@@ -38,6 +43,11 @@ import {
   importWorkoutCsv,
   inspectWorkoutCsvImport,
 } from '../usecases/workout-import.js'
+import {
+  addWorkoutMeasurementRecord,
+  setWorkoutUnitPreferences,
+  showWorkoutUnitPreferences,
+} from '../usecases/workout-measurement.js'
 import {
   createDirectEntityDeleteCommandDefinition,
   createDirectEventBackedEntityEditCommandDefinition,
@@ -122,6 +132,10 @@ export function registerWorkoutCommands(
         .describe(
           'Optional event source (`manual`, `import`, `device`, or `derived`).',
         ),
+      media: z
+        .array(pathSchema)
+        .optional()
+        .describe('Optional workout photo or video file paths to copy into raw/workouts/** and attach to the workout event.'),
     }),
     output: workoutAddResultSchema,
     async run({ args, options }) {
@@ -144,6 +158,9 @@ export function registerWorkoutCommands(
             ? options.occurredAt
             : undefined,
         source: typeof options.source === 'string' ? options.source : undefined,
+        mediaPaths: Array.isArray(options.media)
+          ? options.media.filter((entry): entry is string => typeof entry === 'string')
+          : undefined,
       })
     },
   })
@@ -223,6 +240,183 @@ export function registerWorkoutCommands(
       })
     },
   }))
+
+  const measurement = Cli.create('measurement', {
+    description:
+      'Body-measurement capture routed through canonical body_measurement events plus optional progress photos under raw/measurements/**.',
+  })
+
+  measurement.command('add', {
+    description:
+      'Record one body-measurement check-in either from a structured JSON payload or a single typed measurement.',
+    args: z.object({}),
+    options: withBaseOptions({
+      input: inputFileOptionSchema
+        .optional()
+        .describe('Optional structured body-measurement payload in @file.json form or - for stdin.'),
+      type: z
+        .enum([
+          'weight',
+          'body_fat_pct',
+          'waist',
+          'neck',
+          'shoulders',
+          'chest',
+          'biceps',
+          'forearms',
+          'abdomen',
+          'hips',
+          'thighs',
+          'calves',
+        ])
+        .optional()
+        .describe('Single measurement type to record when --input is not provided.'),
+      value: z
+        .number()
+        .nonnegative()
+        .optional()
+        .describe('Single measurement numeric value when --input is not provided.'),
+      unit: z
+        .enum(['lb', 'kg', 'percent', 'cm', 'in'])
+        .optional()
+        .describe('Optional measurement unit. When omitted, Murph falls back to saved workout unit preferences where possible.'),
+      note: z
+        .string()
+        .min(1)
+        .max(4000)
+        .optional()
+        .describe('Optional measurement note.'),
+      title: z
+        .string()
+        .min(1)
+        .max(160)
+        .optional()
+        .describe('Optional measurement title override.'),
+      occurredAt: isoTimestampSchema
+        .optional()
+        .describe('Optional occurrence timestamp in ISO 8601 form.'),
+      source: eventSourceSchema
+        .optional()
+        .describe('Optional event source (`manual`, `import`, `device`, or `derived`).'),
+      media: z
+        .array(pathSchema)
+        .optional()
+        .describe('Optional progress photo or video file paths to copy into raw/measurements/** and attach to the measurement event.'),
+    }),
+    output: workoutMeasurementAddResultSchema,
+    async run({ options }) {
+      return addWorkoutMeasurementRecord({
+        vault: options.vault,
+        inputFile:
+          typeof options.input === 'string'
+            ? normalizeInputFileOption(options.input)
+            : undefined,
+        type: typeof options.type === 'string' ? options.type : undefined,
+        value: typeof options.value === 'number' ? options.value : undefined,
+        unit: typeof options.unit === 'string' ? options.unit : undefined,
+        note: typeof options.note === 'string' ? options.note : undefined,
+        title: typeof options.title === 'string' ? options.title : undefined,
+        occurredAt:
+          typeof options.occurredAt === 'string'
+            ? options.occurredAt
+            : undefined,
+        source: typeof options.source === 'string' ? options.source : undefined,
+        mediaPaths: Array.isArray(options.media)
+          ? options.media.filter((entry): entry is string => typeof entry === 'string')
+          : undefined,
+      })
+    },
+  })
+
+  measurement.command('show', {
+    description: 'Show one body-measurement event by canonical event id.',
+    args: z.object({
+      id: workoutLookupSchema,
+    }),
+    options: withBaseOptions(),
+    output: showResultSchema,
+    async run({ args, options }) {
+      return showWorkoutMeasurementRecord(options.vault, args.id)
+    },
+  })
+
+  measurement.command('list', {
+    description: 'List body-measurement events with optional date bounds.',
+    args: z.object({}),
+    options: withBaseOptions({
+      from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
+      to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
+      limit: z.number().int().positive().max(200).default(50),
+    }),
+    output: listResultSchema,
+    async run({ options }) {
+      return listWorkoutMeasurementRecords({
+        vault: options.vault,
+        from: typeof options.from === 'string' ? options.from : undefined,
+        to: typeof options.to === 'string' ? options.to : undefined,
+        limit: typeof options.limit === 'number' ? options.limit : undefined,
+      })
+    },
+  })
+
+  measurement.command('manifest', {
+    description: 'Show the immutable raw import manifest for an imported body-measurement event.',
+    args: z.object({
+      id: workoutLookupSchema,
+    }),
+    options: withBaseOptions(),
+    output: workoutImportManifestResultSchema,
+    async run({ args, options }) {
+      return showWorkoutMeasurementManifest(options.vault, args.id)
+    },
+  })
+
+  const units = Cli.create('units', {
+    description:
+      'Profile-level workout unit preferences used by workout and body-measurement capture flows.',
+  })
+
+  units.command('show', {
+    description: 'Show the saved workout unit preferences from the current profile snapshot.',
+    args: z.object({}),
+    options: withBaseOptions(),
+    output: workoutUnitPreferencesResultSchema,
+    async run({ options }) {
+      return showWorkoutUnitPreferences(options.vault)
+    },
+  })
+
+  units.command('set', {
+    description: 'Set one or more workout unit preferences on the current profile snapshot.',
+    args: z.object({}),
+    options: withBaseOptions({
+      weight: z.enum(['lb', 'kg']).optional(),
+      distance: z.enum(['km', 'mi']).optional(),
+      bodyMeasurement: z
+        .enum(['cm', 'in'])
+        .optional()
+        .describe('Preferred circumference/body-measurement unit.'),
+      recordedAt: isoTimestampSchema
+        .optional()
+        .describe('Optional profile-snapshot timestamp override in ISO 8601 form.'),
+    }),
+    output: workoutUnitPreferencesResultSchema,
+    async run({ options }) {
+      return setWorkoutUnitPreferences({
+        vault: options.vault,
+        weight: typeof options.weight === 'string' ? options.weight : undefined,
+        distance: typeof options.distance === 'string' ? options.distance : undefined,
+        bodyMeasurement:
+          typeof options.bodyMeasurement === 'string'
+            ? options.bodyMeasurement
+            : undefined,
+        recordedAt:
+          typeof options.recordedAt === 'string'
+            ? options.recordedAt
+            : undefined,
+      })
+    },
+  })
 
   const importGroup = Cli.create('import', {
     description:
@@ -469,6 +663,10 @@ export function registerWorkoutCommands(
         .describe(
           'Optional event source (`manual`, `import`, `device`, or `derived`).',
         ),
+      media: z
+        .array(pathSchema)
+        .optional()
+        .describe('Optional workout photo or video file paths to copy into raw/workouts/** and attach to the workout event.'),
     }),
     output: workoutAddResultSchema,
     async run({ args, options }) {
@@ -487,10 +685,15 @@ export function registerWorkoutCommands(
             ? options.occurredAt
             : undefined,
         source: typeof options.source === 'string' ? options.source : undefined,
+        mediaPaths: Array.isArray(options.media)
+          ? options.media.filter((entry): entry is string => typeof entry === 'string')
+          : undefined,
       })
     },
   })
 
+  workout.command(measurement)
+  workout.command(units)
   workout.command(importGroup)
   workout.command(format)
   cli.command(workout)

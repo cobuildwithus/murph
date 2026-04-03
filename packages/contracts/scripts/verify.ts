@@ -138,7 +138,7 @@ assert.deepEqual(Object.keys(schemaCatalog).sort(), [
   "sample-record",
   "vault-metadata",
 ]);
-assert.equal((schemaCatalog["event-record"] as { oneOf?: unknown[] }).oneOf?.length, 16);
+assert.equal((schemaCatalog["event-record"] as { oneOf?: unknown[] }).oneOf?.length, 17);
 assert.equal((schemaCatalog["sample-record"] as { oneOf?: unknown[] }).oneOf?.length, 7);
 assert.deepEqual(commandNounCapabilityByNoun.get("food")?.bundles, ["payloadCrud"]);
 assert.deepEqual(commandNounCapabilityByNoun.get("food")?.additionalCapabilities ?? [], []);

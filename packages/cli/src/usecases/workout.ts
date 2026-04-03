@@ -1,6 +1,7 @@
 import {
   type ActivityStrengthExercise,
   type JsonObject,
+  type StoredMedia,
   type WorkoutSession,
   workoutSessionSchema,
 } from '@murphai/contracts'
@@ -27,6 +28,11 @@ import {
   deriveDurationMinutesFromTimestamps,
   summarizeWorkoutSessionExercises,
 } from './workout-model.js'
+import {
+  cleanupStagedWorkoutMediaBatch,
+  stageWorkoutMediaBatch,
+} from './workout-artifacts.js'
+import { generateUlid } from '@murphai/runtime-state'
 
 const MILES_TO_KM = 1.609344
 
@@ -136,6 +142,7 @@ export interface AddWorkoutRecordInput {
   strengthExercises?: ActivityStrengthExercise[] | null
   workout?: WorkoutSession | null
   title?: string
+  mediaPaths?: string[]
 }
 
 export interface ResolveWorkoutCaptureInput {
@@ -191,6 +198,72 @@ function valueAsString(value: unknown): string | undefined {
 
 function valueAsNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+    : []
+}
+
+function mergeStoredMedia(
+  existing: StoredMedia[] | undefined,
+  additions: readonly StoredMedia[],
+): StoredMedia[] {
+  const merged = new Map<string, StoredMedia>()
+
+  for (const entry of existing ?? []) {
+    merged.set(entry.relativePath, entry)
+  }
+
+  for (const entry of additions) {
+    merged.set(entry.relativePath, entry)
+  }
+
+  return [...merged.values()]
+}
+
+function ensureWorkoutEventId(payload: JsonObject): string {
+  const explicitId = valueAsString(payload.id)
+  if (explicitId) {
+    return explicitId
+  }
+
+  const eventId = `evt_${generateUlid()}`
+  payload.id = eventId
+  return eventId
+}
+
+function applyStagedWorkoutMedia(input: {
+  payload: JsonObject
+  eventId: string
+  media: readonly StoredMedia[]
+  rawRefs: readonly string[]
+}): JsonObject {
+  if (input.media.length === 0 && input.rawRefs.length === 0) {
+    return input.payload
+  }
+
+  const payload: JsonObject = { ...input.payload, id: input.eventId }
+  const existingWorkout = normalizeStructuredWorkout(payload.workout)
+  const mergedRawRefs = [...new Set([...stringArray(payload.rawRefs), ...input.rawRefs])]
+  const mergedWorkoutMedia = mergeStoredMedia(existingWorkout?.media, input.media)
+
+  const workout = existingWorkout
+    ? {
+        ...existingWorkout,
+        ...(mergedWorkoutMedia.length > 0 ? { media: mergedWorkoutMedia } : {}),
+      }
+    : {
+        media: mergedWorkoutMedia,
+        exercises: [],
+      }
+
+  return {
+    ...payload,
+    rawRefs: mergedRawRefs,
+    workout,
+  }
 }
 
 function formatSchemaIssues(issues: readonly { path: PropertyKey[]; message: string }[]): string {
@@ -416,10 +489,50 @@ export async function addWorkoutRecord(input: AddWorkoutRecordInput) {
     }
   }
 
-  const result = await upsertEventRecord({
-    vault: input.vault,
-    payload,
-  })
+  const mediaPaths = Array.isArray(input.mediaPaths)
+    ? input.mediaPaths.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+    : []
+  let manifestFile: string | null = null
+
+  if (mediaPaths.length > 0) {
+    const eventId = ensureWorkoutEventId(payload)
+    const occurredAt = String(payload.occurredAt ?? input.occurredAt ?? new Date().toISOString())
+    const stagedMedia = await stageWorkoutMediaBatch({
+      vault: input.vault,
+      eventId,
+      occurredAt,
+      family: 'workout',
+      source: valueAsString(payload.source) ?? input.source ?? 'manual',
+      mediaPaths,
+    })
+
+    if (stagedMedia) {
+      manifestFile = stagedMedia.manifestFile
+      payload = applyStagedWorkoutMedia({
+        payload,
+        eventId,
+        media: stagedMedia.media,
+        rawRefs: stagedMedia.rawRefs,
+      })
+    }
+  }
+
+  const result = await (async () => {
+    try {
+      return await upsertEventRecord({
+        vault: input.vault,
+        payload,
+      })
+    } catch (error) {
+      if (manifestFile) {
+        await cleanupStagedWorkoutMediaBatch({
+          vault: input.vault,
+          manifestFile,
+        })
+      }
+      throw error
+    }
+  })()
 
   return {
     ...result,
@@ -433,6 +546,7 @@ export async function addWorkoutRecord(input: AddWorkoutRecordInput) {
       ? (payload.strengthExercises as ActivityStrengthExercise[])
       : null,
     workout: normalizeStructuredWorkout(payload.workout) ?? null,
+    manifestFile,
     note: String(payload.note ?? payload.title ?? ''),
   }
 }

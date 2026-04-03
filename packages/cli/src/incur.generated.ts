@@ -71,7 +71,7 @@ declare module 'incur' {
       'event delete': { args: { id: string }; options: { vault: string; requestId: string } }
       'event edit': { args: { id: string }; options: { vault: string; requestId: string; input: string; set: string[]; clear: string[]; dayKeyPolicy: "keep" | "recompute" } }
       'event list': { args: {}; options: { vault: string; requestId: string; kind: string; from: string; to: string; tag: string[]; experiment: string; limit: number } }
-      'event scaffold': { args: {}; options: { vault: string; requestId: string; kind: "symptom" | "note" | "observation" | "medication_intake" | "supplement_intake" | "activity_session" | "sleep_session" | "intervention_session" } }
+      'event scaffold': { args: {}; options: { vault: string; requestId: string; kind: "symptom" | "note" | "observation" | "medication_intake" | "supplement_intake" | "activity_session" | "body_measurement" | "sleep_session" | "intervention_session" } }
       'event show': { args: { id: string }; options: { vault: string; requestId: string } }
       'event upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
       'experiment checkpoint': { args: {}; options: { vault: string; requestId: string; input: string } }
@@ -210,13 +210,19 @@ declare module 'incur' {
       'vault show': { args: {}; options: { vault: string; requestId: string } }
       'vault stats': { args: {}; options: { vault: string; requestId: string } }
       'vault update': { args: {}; options: { vault: string; requestId: string; title: string; timezone: string } }
-      'workout add': { args: { text: string }; options: { vault: string; requestId: string; input: string; duration: number; type: string; distanceKm: number; occurredAt: string; source: "manual" | "import" | "device" | "derived" } }
+      'workout add': { args: { text: string }; options: { vault: string; requestId: string; input: string; duration: number; type: string; distanceKm: number; occurredAt: string; source: "manual" | "import" | "device" | "derived"; media: string[] } }
       'workout delete': { args: { id: string }; options: { vault: string; requestId: string } }
       'workout edit': { args: { id: string }; options: { vault: string; requestId: string; input: string; set: string[]; clear: string[]; dayKeyPolicy: "keep" | "recompute" } }
       'workout format list': { args: {}; options: { vault: string; requestId: string; limit: number } }
-      'workout format log': { args: { name: string }; options: { vault: string; requestId: string; duration: number; type: string; distanceKm: number; occurredAt: string; source: "manual" | "import" | "device" | "derived" } }
+      'workout format log': { args: { name: string }; options: { vault: string; requestId: string; duration: number; type: string; distanceKm: number; occurredAt: string; source: "manual" | "import" | "device" | "derived"; media: string[] } }
       'workout format save': { args: { name: string; text: string }; options: { vault: string; requestId: string; input: string; duration: number; type: string; distanceKm: number } }
       'workout format show': { args: { name: string }; options: { vault: string; requestId: string } }
+      'workout measurement add': { args: {}; options: { vault: string; requestId: string; input: string; type: "weight" | "body_fat_pct" | "waist" | "neck" | "shoulders" | "chest" | "biceps" | "forearms" | "abdomen" | "hips" | "thighs" | "calves"; value: number; unit: "lb" | "kg" | "percent" | "cm" | "in"; note: string; title: string; occurredAt: string; source: "manual" | "import" | "device" | "derived"; media: string[] } }
+      'workout measurement list': { args: {}; options: { vault: string; requestId: string; from: string; to: string; limit: number } }
+      'workout measurement manifest': { args: { id: string }; options: { vault: string; requestId: string } }
+      'workout measurement show': { args: { id: string }; options: { vault: string; requestId: string } }
+      'workout units set': { args: {}; options: { vault: string; requestId: string; weight: "lb" | "kg"; distance: "km" | "mi"; bodyMeasurement: "cm" | "in"; recordedAt: string } }
+      'workout units show': { args: {}; options: { vault: string; requestId: string } }
       'workout import csv': { args: { file: string }; options: { vault: string; requestId: string; source: string; delimiter: string; storeRawOnly: boolean } }
       'workout import inspect': { args: { file: string }; options: { vault: string; requestId: string; source: string; delimiter: string } }
       'workout list': { args: {}; options: { vault: string; requestId: string; from: string; to: string; limit: number } }
