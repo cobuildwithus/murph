@@ -17,6 +17,10 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import {
+  formatAbsoluteTime,
+  formatRelativeTime,
+} from "@/src/components/settings/hosted-device-sync-settings-time";
+import {
   formatHostedDeviceSyncProviderLabel,
   type HostedDeviceSyncSettingsResponse,
   type HostedDeviceSyncSettingsSource,
@@ -447,44 +451,6 @@ function TimestampStat(input: {
       </dd>
     </div>
   );
-}
-
-function formatRelativeTime(value: string): string {
-  const parsed = Date.parse(value);
-
-  if (Number.isNaN(parsed)) {
-    return "Unknown";
-  }
-
-  const deltaMs = parsed - Date.now();
-  const absoluteMs = Math.abs(deltaMs);
-  const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
-  const units: Array<[Intl.RelativeTimeFormatUnit, number]> = [
-    ["day", 86_400_000],
-    ["hour", 3_600_000],
-    ["minute", 60_000],
-  ];
-
-  for (const [unit, size] of units) {
-    if (absoluteMs >= size || unit === "minute") {
-      return formatter.format(Math.round(deltaMs / size), unit);
-    }
-  }
-
-  return "just now";
-}
-
-function formatAbsoluteTime(value: string): string {
-  const parsed = Date.parse(value);
-
-  if (Number.isNaN(parsed)) {
-    return value;
-  }
-
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(parsed));
 }
 
 function describeDeviceSyncCallbackError(providerLabel: string, errorCode: string | null): string {

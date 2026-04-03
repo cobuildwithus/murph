@@ -48,11 +48,14 @@ const wearableMetricCandidateSchema = z.object({
 })
 
 const wearableMetricSelectionSchema = z.object({
+  fallbackFromMetric: nullableTextSchema,
+  fallbackReason: nullableTextSchema,
   occurredAt: nullableTimestampSchema,
   paths: z.array(z.string().min(1)),
   provider: nullableTextSchema,
   recordedAt: nullableTimestampSchema,
   recordIds: z.array(z.string().min(1)),
+  resolution: z.enum(['direct', 'fallback', 'none']),
   sourceFamily: wearableSourceFamilySchema.nullable(),
   sourceKind: nullableTextSchema,
   title: nullableTextSchema,

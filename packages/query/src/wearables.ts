@@ -38,6 +38,7 @@ import type {
   WearableBodyStateSummary,
   WearableCandidateSourceFamily,
   WearableConfidenceLevel,
+  WearableDataset,
   WearableDaySummary,
   WearableExternalRef,
   WearableFilters,
@@ -93,7 +94,10 @@ export function listWearableActivityDays(
   vault: VaultReadModel,
   filters: WearableFilters = {},
 ): WearableActivityDay[] {
-  const dataset = collectWearableDataset(vault, filters);
+  return listWearableActivityDaysFromDataset(collectWearableDataset(vault, filters));
+}
+
+function listWearableActivityDaysFromDataset(dataset: WearableDataset): WearableActivityDay[] {
   const metricCandidatesByDate = groupMetricCandidatesByDate(
     dataset.metricCandidates.filter((candidate) => metricSetHas(ACTIVITY_METRIC_KEYS, candidate.metric)),
   );
@@ -168,7 +172,10 @@ export function listWearableSleepNights(
   vault: VaultReadModel,
   filters: WearableFilters = {},
 ): WearableSleepNight[] {
-  const dataset = collectWearableDataset(vault, filters);
+  return listWearableSleepNightsFromDataset(collectWearableDataset(vault, filters));
+}
+
+function listWearableSleepNightsFromDataset(dataset: WearableDataset): WearableSleepNight[] {
   const metricCandidatesByDate = groupMetricCandidatesByDate(
     dataset.metricCandidates.filter((candidate) => metricSetHas(SLEEP_METRIC_KEYS, candidate.metric)),
   );
@@ -295,7 +302,10 @@ export function listWearableRecoveryDays(
   vault: VaultReadModel,
   filters: WearableFilters = {},
 ): WearableRecoveryDay[] {
-  const dataset = collectWearableDataset(vault, filters);
+  return listWearableRecoveryDaysFromDataset(collectWearableDataset(vault, filters));
+}
+
+function listWearableRecoveryDaysFromDataset(dataset: WearableDataset): WearableRecoveryDay[] {
   const metricCandidatesByDate = groupMetricCandidatesByDate(
     dataset.metricCandidates.filter((candidate) => metricSetHas(RECOVERY_METRIC_KEYS, candidate.metric)),
   );
@@ -377,7 +387,10 @@ export function listWearableBodyStateDays(
   vault: VaultReadModel,
   filters: WearableFilters = {},
 ): WearableBodyStateDay[] {
-  const dataset = collectWearableDataset(vault, filters);
+  return listWearableBodyStateDaysFromDataset(collectWearableDataset(vault, filters));
+}
+
+function listWearableBodyStateDaysFromDataset(dataset: WearableDataset): WearableBodyStateDay[] {
   const metricCandidatesByDate = groupMetricCandidatesByDate(
     dataset.metricCandidates.filter((candidate) => metricSetHas(BODY_METRIC_KEYS, candidate.metric)),
   );
@@ -423,30 +436,51 @@ export function listWearableBodyStateDays(
   });
 }
 
+function buildWearableSummaryBundleFromDataset(dataset: WearableDataset): {
+  activityDays: WearableActivityDay[];
+  bodyStateDays: WearableBodyStateDay[];
+  recoveryDays: WearableRecoveryDay[];
+  sleepNights: WearableSleepNight[];
+  sourceHealth: WearableSourceHealth[];
+} {
+  const activityDays = listWearableActivityDaysFromDataset(dataset);
+  const sleepNights = listWearableSleepNightsFromDataset(dataset);
+  const recoveryDays = listWearableRecoveryDaysFromDataset(dataset);
+  const bodyStateDays = listWearableBodyStateDaysFromDataset(dataset);
+
+  return {
+    activityDays,
+    bodyStateDays,
+    recoveryDays,
+    sleepNights,
+    sourceHealth: buildWearableSourceHealth({
+      activityDays,
+      bodyStateDays,
+      dataset,
+      recoveryDays,
+      sleepNights,
+    }),
+  };
+}
+
 export function listWearableSourceHealth(
   vault: VaultReadModel,
   filters: WearableFilters = {},
 ): WearableSourceHealth[] {
-  const dataset = collectWearableDataset(vault, filters);
-
-  return buildWearableSourceHealth({
-    activityDays: listWearableActivityDays(vault, filters),
-    bodyStateDays: listWearableBodyStateDays(vault, filters),
-    dataset,
-    recoveryDays: listWearableRecoveryDays(vault, filters),
-    sleepNights: listWearableSleepNights(vault, filters),
-  });
+  return buildWearableSummaryBundleFromDataset(collectWearableDataset(vault, filters)).sourceHealth;
 }
 
 export function buildWearableAssistantSummary(
   vault: VaultReadModel,
   filters: WearableFilters = {},
 ): WearableAssistantSummary {
-  const activityDays = listWearableActivityDays(vault, filters);
-  const sleepNights = listWearableSleepNights(vault, filters);
-  const recoveryDays = listWearableRecoveryDays(vault, filters);
-  const bodyStateDays = listWearableBodyStateDays(vault, filters);
-  const sourceHealth = listWearableSourceHealth(vault, filters);
+  const {
+    activityDays,
+    bodyStateDays,
+    recoveryDays,
+    sleepNights,
+    sourceHealth,
+  } = buildWearableSummaryBundleFromDataset(collectWearableDataset(vault, filters));
   const latestDate = collectLatestDate([
     activityDays[0]?.date,
     sleepNights[0]?.date,
@@ -542,11 +576,17 @@ export function summarizeWearableDay(
     date: normalizedDate,
     providers: filters.providers,
   };
-  const sleep = listWearableSleepNights(vault, dayFilters)[0] ?? null;
-  const activity = listWearableActivityDays(vault, dayFilters)[0] ?? null;
-  const recovery = listWearableRecoveryDays(vault, dayFilters)[0] ?? null;
-  const bodyState = listWearableBodyStateDays(vault, dayFilters)[0] ?? null;
-  const sourceHealth = listWearableSourceHealth(vault, dayFilters);
+  const {
+    activityDays,
+    bodyStateDays,
+    recoveryDays,
+    sleepNights,
+    sourceHealth,
+  } = buildWearableSummaryBundleFromDataset(collectWearableDataset(vault, dayFilters));
+  const sleep = sleepNights[0] ?? null;
+  const activity = activityDays[0] ?? null;
+  const recovery = recoveryDays[0] ?? null;
+  const bodyState = bodyStateDays[0] ?? null;
 
   if (!sleep && !activity && !recovery && !bodyState && sourceHealth.length === 0) {
     return null;
