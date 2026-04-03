@@ -20,6 +20,7 @@ import {
   buildHostedWebTurbopackConfig,
   buildHostedWebContentSecurityPolicy,
   buildHostedWebSecurityHeaders,
+  resolveHostedPrivyOrigin,
   resolvePrivyBaseDomainOrigin,
 } from "../next.config";
 
@@ -141,13 +142,30 @@ test("resolvePrivyBaseDomainOrigin normalizes base-domain inputs into a Privy or
     resolvePrivyBaseDomainOrigin("https://privy.example.com/dashboard"),
     "https://privy.example.com",
   );
+  assert.equal(resolvePrivyBaseDomainOrigin("https://www.example.com/join"), "https://privy.example.com");
   assert.equal(resolvePrivyBaseDomainOrigin("   "), null);
+});
+
+test("resolveHostedPrivyOrigin prefers an explicit custom auth domain and otherwise falls back to the hosted public origin", () => {
+  assert.equal(
+    resolveHostedPrivyOrigin(createProcessEnv({
+      PRIVY_CUSTOM_AUTH_DOMAIN: "privy.custom.example.com",
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://www.example.com/join",
+    })),
+    "https://privy.custom.example.com",
+  );
+  assert.equal(
+    resolveHostedPrivyOrigin(createProcessEnv({
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://www.example.com/join",
+    })),
+    "https://privy.example.com",
+  );
 });
 
 test("buildHostedWebContentSecurityPolicy includes Privy, WalletConnect, and hosted browser protections", () => {
   const csp = buildHostedWebContentSecurityPolicy({
     NODE_ENV: "production",
-    PRIVY_BASE_DOMAIN: "example.com",
+    PRIVY_CUSTOM_AUTH_DOMAIN: "https://privy.custom.example.com",
   } as NodeJS.ProcessEnv);
 
   assert.match(csp, /default-src 'self'/);
@@ -156,8 +174,10 @@ test("buildHostedWebContentSecurityPolicy includes Privy, WalletConnect, and hos
   assert.match(csp, /object-src 'none'/);
   assert.match(csp, /frame-ancestors 'none'/);
   assert.match(csp, /child-src [^;]*https:\/\/auth\.privy\.io/);
-  assert.match(csp, /child-src [^;]*https:\/\/privy\.example\.com/);
+  assert.match(csp, /child-src [^;]*https:\/\/privy\.custom\.example\.com/);
+  assert.match(csp, /frame-src [^;]*https:\/\/privy\.custom\.example\.com/);
   assert.match(csp, /frame-src [^;]*https:\/\/verify\.walletconnect\.com/);
+  assert.match(csp, /connect-src [^;]*https:\/\/privy\.custom\.example\.com/);
   assert.match(csp, /connect-src [^;]*https:\/\/\*\.rpc\.privy\.systems/);
   assert.match(csp, /connect-src [^;]*https:\/\/explorer-api\.walletconnect\.com/);
   assert.match(csp, /upgrade-insecure-requests/);
@@ -228,4 +248,11 @@ function resolveHostedOptionalModule(): boolean {
   } catch {
     return false;
   }
+}
+
+function createProcessEnv(values: Record<string, string>): NodeJS.ProcessEnv {
+  return {
+    NODE_ENV: "test",
+    ...values,
+  };
 }
