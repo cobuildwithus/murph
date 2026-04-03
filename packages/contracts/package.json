@@ -49,6 +49,11 @@
       "import": "./dist/schemas.js",
       "default": "./dist/schemas.js"
     },
+    "./time": {
+      "types": "./dist/time.d.ts",
+      "import": "./dist/time.js",
+      "default": "./dist/time.js"
+    },
     "./validate": {
       "types": "./dist/validate.d.ts",
       "import": "./dist/validate.js",

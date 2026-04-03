@@ -31,9 +31,6 @@ import {
   profileSnapshotSchema,
   providerFrontmatterSchema,
   recipeFrontmatterSchema,
-  isStrictIsoDate,
-  isStrictIsoDateTime,
-  normalizeStrictIsoTimestamp,
   protocolFrontmatterSchema,
   safeParseContract,
   sampleRecordSchema,
@@ -42,6 +39,11 @@ import {
   parseFrontmatterDocument,
 } from "@murphai/contracts";
 import { schemaCatalog } from "@murphai/contracts/schemas";
+import {
+  isStrictIsoDate,
+  isStrictIsoDateTime,
+  normalizeStrictIsoTimestamp,
+} from "@murphai/contracts/time";
 
 interface PackageJsonShape {
   main?: string;

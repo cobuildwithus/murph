@@ -8,6 +8,9 @@
       ],
       "@murphai/contracts/schemas": [
         "./dist/schemas.d.ts"
+      ],
+      "@murphai/contracts/time": [
+        "./dist/time.d.ts"
       ]
     },
     "noEmit": false,
