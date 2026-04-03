@@ -116,6 +116,7 @@ describe("hosted deploy automation helpers", () => {
       },
     });
     expect(config.vars.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS).toBe("45000");
+    expect(config.vars.MURPH_WEB_FETCH_ENABLED).toBe("true");
     expect(config.vars.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID).toBe("acct_123");
     expect(config.vars.HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL).toBe("https://api.cloudflare.com/client/v4");
     expect(config.vars.HOSTED_EMAIL_DEFAULT_SUBJECT).toBe("Murph note");
@@ -144,7 +145,19 @@ describe("hosted deploy automation helpers", () => {
 
     expect(environment.workerVars).toEqual({
       HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER: "1m",
+      MURPH_WEB_FETCH_ENABLED: "true",
     });
+  });
+
+  it("lets operators explicitly disable hosted web reads", () => {
+    const environment = readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_WORKER_NAME: "hosted-worker",
+      MURPH_WEB_FETCH_ENABLED: "false",
+    });
+
+    expect(environment.workerVars.MURPH_WEB_FETCH_ENABLED).toBe("false");
   });
 
   it("accepts a custom JSON container instance type for generated deploy config", () => {

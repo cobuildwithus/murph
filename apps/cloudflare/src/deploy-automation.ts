@@ -50,6 +50,7 @@ const HOSTED_WORKER_OPTIONAL_SECRET_NAMES = [
 const HOSTED_WORKER_OPTIONAL_VAR_NAMES = [
   "DEVICE_SYNC_PUBLIC_BASE_URL",
   "FFMPEG_COMMAND",
+  "MURPH_WEB_FETCH_ENABLED",
   "HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID",
   "HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL",
   "HOSTED_EMAIL_DEFAULT_SUBJECT",
@@ -452,7 +453,15 @@ function resolveHostedWorkerVar(
     return value;
   }
 
-  return key === "HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER" ? DEFAULT_CONTAINER_SLEEP_AFTER : null;
+  if (key === "HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER") {
+    return DEFAULT_CONTAINER_SLEEP_AFTER;
+  }
+
+  if (key === "MURPH_WEB_FETCH_ENABLED") {
+    return "true";
+  }
+
+  return null;
 }
 
 function readHostedAssistantReferencedSecret(
