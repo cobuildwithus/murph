@@ -2,6 +2,77 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.1.6] - 2026-04-03
+
+### Added
+- harden wiki runtime
+- add wiki search surface
+- add derived knowledge wiki
+- add calm device sync sources
+- add wearables query surfaces
+- add workout measurements media and units
+- add web pdf read tool
+- add guarded web fetch tool
+- land data model cutover
+- add web search tool
+- land Garmin provider and green checks
+- move hosted auth to privy request tokens
+
+### Fixed
+- expose time helpers for package verification
+- harden public sender ingress
+- tighten hosted callback/runtime guards
+- encrypt hosted gateway durable state
+- land pro cleanup patch
+- simplify hosted email routes
+- land crypto hardening patch
+- add hosted email public sender routing
+- keep next config self-contained
+- allow Privy custom auth domains in csp
+- wire hosted brave web search
+- default hosted web reads on
+- pin vetted web fetch destinations
+- defer node require helpers
+- prebuild workspace before rollout
+- inherit canonical script path aliases
+- keep web fetch tools always on
+- align inbox subpath ts paths
+- narrow inbox runtime bundle surface
+- harden web fetch and pdf tools
+- stabilize repo green checks
+- remove hosted agentmail env
+- bake whisper into hosted runner
+- wire hosted email deploy config
+
+### Changed
+- split query search helpers
+- hard cut over ingress routes
+- land queued web and runtime updates
+- update review-gpt to 0.5.30
+- record wearables semantic correctness completion
+- unify descriptor and wearables policy seams
+- remove transcript distillation
+- remove docs drift from default test lane
+- add contribution kit
+- unify shared descriptors
+- hard-cut hosted web control host allowlist
+- remove stale paddleocr deploy residue
+- align deploy workflow default
+- raise hosted runner baseline
+- remove hosted assistant automation opt-out
+- clear stale coordination ledger
+- clear completed ledger row
+- remove doc inventory
+- remove legacy fallback paths
+- split web search module
+- normalize runner bundle slot storage
+- bump review-gpt to v0.5.24
+- remove npm token fallback
+- remove hosted session helpers
+- narrow shared export surfaces
+- clear completed review-gpt row
+- land pro audit patch set
+
 ## [0.1.5] - 2026-04-02
 
 ### Fixed
