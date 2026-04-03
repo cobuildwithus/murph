@@ -87,9 +87,9 @@ const HOSTED_CONTAINER_IMAGE_VAR_NAMES = [
 ] as const;
 
 const DEFAULT_DEPLOY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const DEFAULT_CONTAINER_INSTANCE_TYPE = "basic";
+const DEFAULT_CONTAINER_INSTANCE_TYPE = "standard-1";
 const DEFAULT_CONTAINER_MAX_INSTANCES = 50;
-const DEFAULT_CONTAINER_SLEEP_AFTER = "5m";
+const DEFAULT_CONTAINER_SLEEP_AFTER = "1m";
 const DEFAULT_LOG_HEAD_SAMPLING_RATE = 1;
 const DEFAULT_TRACE_HEAD_SAMPLING_RATE = 0.1;
 const NAMED_CONTAINER_INSTANCE_TYPES = new Set([
@@ -215,7 +215,7 @@ export function readHostedDeployAutomationEnvironment(
     ),
     runnerTimeoutMs: normalizePositiveIntegerString(
       source.CF_RUNNER_TIMEOUT_MS,
-      "60000",
+      "120000",
       "CF_RUNNER_TIMEOUT_MS",
     ),
     traceHeadSamplingRate: normalizeSamplingRate(

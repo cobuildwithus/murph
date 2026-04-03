@@ -76,15 +76,15 @@ Optional tuning variables:
 
 - `CF_BUNDLE_KEY_ID` (default `v1`; metadata only today, because runtime reads still support one active key id at a time)
 - `CF_COMPATIBILITY_DATE` (default `2026-03-27`)
-- `CF_CONTAINER_INSTANCE_TYPE` (default `basic`; also accepts a custom JSON object with `vcpu`, `memory_mib`, and `disk_mb`)
+- `CF_CONTAINER_INSTANCE_TYPE` (default `standard-1`; also accepts a custom JSON object with `vcpu`, `memory_mib`, and `disk_mb`)
 - `CF_CONTAINER_MAX_INSTANCES` (default `50`)
 - `INSTALL_PADDLEOCR` (default `0`, passed to Wrangler as a container `image_vars` build-time input)
-- `HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER` (default `5m`)
+- `HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER` (default `1m`)
 - `CF_DEFAULT_ALARM_DELAY_MS` (default `21600000`)
 - `CF_LOG_HEAD_SAMPLING_RATE` (default `1`)
 - `CF_MAX_EVENT_ATTEMPTS` (default `3`)
 - `CF_RETRY_DELAY_MS` (default `30000`)
-- `CF_RUNNER_TIMEOUT_MS` (default `60000`)
+- `CF_RUNNER_TIMEOUT_MS` (default `120000`)
 - `CF_RUNNER_COMMIT_TIMEOUT_MS` (default `30000`)
 - `CF_TRACE_HEAD_SAMPLING_RATE` (default `0.1`)
 - `CF_ALLOWED_USER_ENV_KEYS`
@@ -204,8 +204,8 @@ Render the generated deploy artifacts from your shell environment:
 export CF_WORKER_NAME=hosted-runner-staging
 export CF_BUNDLES_BUCKET=hosted-execution-bundles-staging
 export CF_BUNDLES_PREVIEW_BUCKET=hosted-execution-bundles-staging-preview
-export CF_CONTAINER_INSTANCE_TYPE=basic
-export HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER=5m
+export CF_CONTAINER_INSTANCE_TYPE=standard-1
+export HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER=1m
 export HOSTED_EXECUTION_SIGNING_SECRET=...
 export HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY=...
 export HOSTED_EXECUTION_CONTROL_TOKEN=...
@@ -218,6 +218,7 @@ export HOSTED_EMAIL_LOCAL_PART=assistant
 export HOSTED_EMAIL_SIGNING_SECRET=...
 export HOSTED_WEB_BASE_URL=https://your-hosted-web.example.com
 export HOSTED_SHARE_INTERNAL_TOKEN=...
+export CF_RUNNER_TIMEOUT_MS=120000
 export CF_LOG_HEAD_SAMPLING_RATE=1
 export CF_TRACE_HEAD_SAMPLING_RATE=0.1
 
@@ -344,7 +345,7 @@ Before the first real production deploy, confirm all of these are true:
 - `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN` is set and stable
 - local `wrangler dev` also has those two tokens set before you test protected control flows
 - `HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL` is set when you plan to run smoke checks against a non-default public Worker URL
-- `CF_CONTAINER_INSTANCE_TYPE` is set explicitly to at least `basic`, or to a custom JSON object if you have an enterprise plan and need higher fixed limits
+- `CF_CONTAINER_INSTANCE_TYPE` is set explicitly to at least `standard-1`, or to a custom JSON object if you have an enterprise plan and need higher fixed limits
 - Workers Logs and Workers Traces are enabled and visible in the Cloudflare dashboard for the target Worker
 - the R2 bucket names in the generated config are correct
 - the bundle encryption key is present and stable

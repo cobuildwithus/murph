@@ -150,7 +150,7 @@ describe("hosted deploy automation helpers", () => {
     });
 
     expect(environment.workerVars).toEqual({
-      HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER: "5m",
+      HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER: "1m",
     });
   });
 
