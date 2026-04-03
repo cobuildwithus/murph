@@ -67,7 +67,7 @@
   },
   "devDependencies": {
     "@cobuild/repo-tools": "^0.1.15",
-    "@cobuild/review-gpt": "^0.5.21",
+    "@cobuild/review-gpt": "^0.5.24",
     "@types/node": "^25.5.0",
     "@vitest/coverage-v8": "^4.1.2",
     "tsx": "^4.20.6",
