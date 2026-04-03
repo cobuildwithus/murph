@@ -10,7 +10,7 @@
 import {
   normalizeHostedEmailAddress,
   parseHostedEmailThreadTarget,
-  resolveHostedEmailInboundSenderAddress,
+  resolveHostedEmailDirectSenderLookupAddress,
   serializeHostedEmailThreadTarget,
   type HostedEmailThreadTarget,
 } from "@murphai/runtime-state";
@@ -43,14 +43,23 @@ interface HostedEmailThreadRouteRecord {
   userId: string;
 }
 
-interface HostedEmailVerifiedSenderRouteRecord {
-  identityId: string;
-  schema: "murph.hosted-email-verified-sender-route.v1";
-  senderKey: string;
-  updatedAt: string;
-  userId: string;
-  verifiedEmailAddress: string;
-}
+type HostedEmailVerifiedSenderRouteRecord =
+  | {
+      identityId: string;
+      schema: "murph.hosted-email-verified-sender-route.v1";
+      senderKey: string;
+      updatedAt: string;
+      userId: string;
+      verifiedEmailAddress: string;
+    }
+  | {
+      identityId: string;
+      schema: "murph.hosted-email-verified-sender-route.v2";
+      senderHash: string;
+      senderKey: string;
+      updatedAt: string;
+      userId: string;
+    };
 
 export interface HostedEmailInboundRoute {
   identityId: string;
@@ -69,7 +78,8 @@ interface HostedEmailRouteStoreInput {
 
 const HOSTED_EMAIL_THREAD_ROUTE_SCHEMA = "murph.hosted-email-thread-route.v1";
 const HOSTED_EMAIL_USER_ROUTE_SCHEMA = "murph.hosted-email-user-route.v1";
-const HOSTED_EMAIL_VERIFIED_SENDER_ROUTE_SCHEMA = "murph.hosted-email-verified-sender-route.v1";
+const HOSTED_EMAIL_VERIFIED_SENDER_ROUTE_LEGACY_SCHEMA = "murph.hosted-email-verified-sender-route.v1";
+const HOSTED_EMAIL_VERIFIED_SENDER_ROUTE_SCHEMA = "murph.hosted-email-verified-sender-route.v2";
 
 export async function resolveHostedEmailIngressRoute(input: {
   bucket: R2BucketLike;
@@ -137,6 +147,13 @@ export async function ensureHostedEmailVerifiedSenderRouteAvailable(input: {
     verifiedEmailAddress,
   );
   const existing = await store.readVerifiedSenderRoute(senderKey);
+  if (existing && !await matchesHostedEmailVerifiedSenderRoute({
+    record: existing,
+    secret: input.config.signingSecret,
+    senderAddress: verifiedEmailAddress,
+  })) {
+    throw new Error("Hosted verified email sender route is already assigned to a different sender hash.");
+  }
 
   if (existing && existing.userId !== input.userId) {
     throw new Error("Hosted verified email sender route is already assigned to a different user.");
@@ -188,15 +205,25 @@ export async function reconcileHostedEmailVerifiedSenderRoute(input: {
     nextVerifiedEmailAddress,
   );
   const existing = await store.readVerifiedSenderRoute(senderKey);
+  if (existing && !await matchesHostedEmailVerifiedSenderRoute({
+    record: existing,
+    secret: input.config.signingSecret,
+    senderAddress: nextVerifiedEmailAddress,
+  })) {
+    throw new Error("Hosted verified email sender route is already assigned to a different sender hash.");
+  }
   if (existing && existing.userId !== input.userId) {
     throw new Error("Hosted verified email sender route is already assigned to a different user.");
   }
-  if (!existing || existing.verifiedEmailAddress !== nextVerifiedEmailAddress) {
+  if (!existing) {
     await store.writeVerifiedSenderRoute({
       identityId: publicSenderAddress,
+      senderHash: await deriveHostedEmailVerifiedSenderHash(
+        input.config.signingSecret,
+        nextVerifiedEmailAddress,
+      ),
       senderKey,
       userId: input.userId,
-      verifiedEmailAddress: nextVerifiedEmailAddress,
     });
   }
 
@@ -333,7 +360,7 @@ async function resolveHostedEmailDirectSenderRoute(input: {
     return null;
   }
 
-  const senderAddress = resolveHostedEmailInboundSenderAddress({
+  const senderAddress = resolveHostedEmailDirectSenderLookupAddress({
     envelopeFrom: input.envelopeFrom,
     hasRepeatedHeaderFrom: input.hasRepeatedHeaderFrom,
     headerFrom: input.headerFrom,
@@ -351,7 +378,11 @@ async function resolveHostedEmailDirectSenderRoute(input: {
   const record = await store.readVerifiedSenderRoute(
     await deriveHostedEmailVerifiedSenderKey(input.config.signingSecret, senderAddress),
   );
-  if (!record || record.verifiedEmailAddress !== senderAddress) {
+  if (!record || !await matchesHostedEmailVerifiedSenderRoute({
+    record,
+    secret: input.config.signingSecret,
+    senderAddress,
+  })) {
     return null;
   }
 
@@ -364,7 +395,7 @@ async function resolveHostedEmailDirectSenderRoute(input: {
   };
 }
 
-function isHostedEmailPublicSenderAddress(
+export function isHostedEmailPublicSenderAddress(
   address: string | null | undefined,
   config: HostedEmailConfig,
 ): boolean {
@@ -468,9 +499,9 @@ function createHostedEmailRouteStore(input: HostedEmailRouteStoreInput) {
     },
     async writeVerifiedSenderRoute(writeInput: {
       identityId: string;
+      senderHash: string;
       senderKey: string;
       userId: string;
-      verifiedEmailAddress: string;
     }): Promise<void> {
       const key = await hostedEmailVerifiedSenderRouteObjectKey(input.key, writeInput.senderKey);
       await writeEncryptedR2Json({
@@ -488,10 +519,10 @@ function createHostedEmailRouteStore(input: HostedEmailRouteStoreInput) {
         value: {
           identityId: writeInput.identityId,
           schema: HOSTED_EMAIL_VERIFIED_SENDER_ROUTE_SCHEMA,
+          senderHash: writeInput.senderHash,
           senderKey: writeInput.senderKey,
           updatedAt: new Date().toISOString(),
           userId: writeInput.userId,
-          verifiedEmailAddress: writeInput.verifiedEmailAddress,
         } satisfies HostedEmailVerifiedSenderRouteRecord,
       });
     },
@@ -607,6 +638,16 @@ async function deriveHostedEmailVerifiedSenderKey(secret: string, verifiedEmailA
   return deriveStableHostedEmailKey(secret, `verified-sender:${verifiedEmailAddress}`);
 }
 
+async function deriveHostedEmailVerifiedSenderHash(
+  secret: string,
+  verifiedEmailAddress: string,
+): Promise<string> {
+  return createHostedEmailRouteHash({
+    payload: `verified-owner:${verifiedEmailAddress}`,
+    secret,
+  });
+}
+
 async function deleteHostedEmailVerifiedSenderRoute(input: {
   secret: string;
   store: ReturnType<typeof createHostedEmailRouteStore>;
@@ -618,14 +659,37 @@ async function deleteHostedEmailVerifiedSenderRoute(input: {
     input.verifiedEmailAddress,
   );
   const existing = await input.store.readVerifiedSenderRoute(senderKey);
-  if (!existing || existing.userId !== input.userId) {
+  if (
+    !existing
+    || existing.userId !== input.userId
+    || !await matchesHostedEmailVerifiedSenderRoute({
+      record: existing,
+      secret: input.secret,
+      senderAddress: input.verifiedEmailAddress,
+    })
+  ) {
     return;
   }
 
   await input.store.deleteVerifiedSenderRoute(senderKey);
 }
 
-async function createHostedEmailRouteSignature(input: {
+async function matchesHostedEmailVerifiedSenderRoute(input: {
+  record: HostedEmailVerifiedSenderRouteRecord;
+  secret: string;
+  senderAddress: string;
+}): Promise<boolean> {
+  if (input.record.schema === HOSTED_EMAIL_VERIFIED_SENDER_ROUTE_LEGACY_SCHEMA) {
+    return input.record.verifiedEmailAddress === input.senderAddress;
+  }
+
+  return input.record.senderHash === await deriveHostedEmailVerifiedSenderHash(
+    input.secret,
+    input.senderAddress,
+  );
+}
+
+async function createHostedEmailRouteHash(input: {
   payload: string;
   secret: string;
 }): Promise<string> {
@@ -642,9 +706,16 @@ async function createHostedEmailRouteSignature(input: {
   const signature = new Uint8Array(
     await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(input.payload)),
   );
-  return [...signature.slice(0, 16)]
+  return [...signature]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
+}
+
+async function createHostedEmailRouteSignature(input: {
+  payload: string;
+  secret: string;
+}): Promise<string> {
+  return (await createHostedEmailRouteHash(input)).slice(0, 32);
 }
 
 function parseHostedEmailAddressDetail(address: string, config: HostedEmailConfig): string | null {
@@ -765,17 +836,20 @@ function parseHostedEmailVerifiedSenderRouteRecord(value: unknown): HostedEmailV
     throw new TypeError("Hosted email verified sender route must be an object.");
   }
 
-  const record = value as Partial<HostedEmailVerifiedSenderRouteRecord>;
-  if (record.schema !== HOSTED_EMAIL_VERIFIED_SENDER_ROUTE_SCHEMA) {
+  const record = value as Record<string, unknown>;
+  const schema = record.schema;
+  if (
+    schema !== HOSTED_EMAIL_VERIFIED_SENDER_ROUTE_SCHEMA
+    && schema !== HOSTED_EMAIL_VERIFIED_SENDER_ROUTE_LEGACY_SCHEMA
+  ) {
     throw new TypeError("Hosted email verified sender route schema is invalid.");
   }
 
-  return {
+  const baseRecord = {
     identityId: requireHostedEmailRecordString(
       record.identityId,
       "Hosted email verified sender route identityId",
     ),
-    schema: HOSTED_EMAIL_VERIFIED_SENDER_ROUTE_SCHEMA,
     senderKey: requireHostedEmailRecordString(
       record.senderKey,
       "Hosted email verified sender route senderKey",
@@ -788,9 +862,25 @@ function parseHostedEmailVerifiedSenderRouteRecord(value: unknown): HostedEmailV
       record.userId,
       "Hosted email verified sender route userId",
     ),
-    verifiedEmailAddress: requireHostedEmailRecordString(
-      record.verifiedEmailAddress,
-      "Hosted email verified sender route verifiedEmailAddress",
+  } as const;
+
+  if (schema === HOSTED_EMAIL_VERIFIED_SENDER_ROUTE_LEGACY_SCHEMA) {
+    return {
+      ...baseRecord,
+      schema: HOSTED_EMAIL_VERIFIED_SENDER_ROUTE_LEGACY_SCHEMA,
+      verifiedEmailAddress: requireHostedEmailRecordString(
+        record.verifiedEmailAddress,
+        "Hosted email verified sender route verifiedEmailAddress",
+      ),
+    };
+  }
+
+  return {
+    ...baseRecord,
+    schema: HOSTED_EMAIL_VERIFIED_SENDER_ROUTE_SCHEMA,
+    senderHash: requireHostedEmailRecordString(
+      record.senderHash,
+      "Hosted email verified sender route senderHash",
     ),
   };
 }

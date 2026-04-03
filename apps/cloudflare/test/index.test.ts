@@ -1413,6 +1413,65 @@ describe("cloudflare worker routes", () => {
     expect(env.__bucketStore.keys().filter((key) => key.includes("/messages/"))).toEqual([]);
   });
 
+  it("sink-accepts unresolved public-sender mail so public inbox probes leak less account state", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub, {
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
+    });
+    const setReject = vi.fn();
+
+    await worker.email?.({
+      from: "unknown@example.test",
+      raw: [
+        "From: Unknown <unknown@example.test>",
+        "To: assistant@mail.example.test",
+        "Subject: Probe",
+        "",
+        "hello",
+        "",
+      ].join("\r\n"),
+      setReject,
+      to: "assistant@mail.example.test",
+    } as never, env as never);
+
+    expect(setReject).not.toHaveBeenCalled();
+    expect(stub.dispatch).not.toHaveBeenCalled();
+    expect(env.__bucketStore.keys().filter((key) => key.includes("/messages/"))).toEqual([]);
+  });
+
+  it("sink-accepts unauthorized public-sender mail while keeping owner-only authorization in place", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub, {
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
+    });
+    await seedHostedVerifiedEmailUserEnv(env, "member_123", "owner@example.test");
+    const setReject = vi.fn();
+
+    await worker.email?.({
+      from: "intruder@example.test",
+      raw: [
+        "From: Intruder <intruder@example.test>",
+        "To: assistant@mail.example.test",
+        "Subject: Probe",
+        "",
+        "hello",
+        "",
+      ].join("\r\n"),
+      setReject,
+      to: "assistant@mail.example.test",
+    } as never, env as never);
+
+    expect(setReject).not.toHaveBeenCalled();
+    expect(stub.dispatch).not.toHaveBeenCalled();
+    expect(env.__bucketStore.keys().filter((key) => key.includes("/messages/"))).toEqual([]);
+  });
+
   it("rejects inbound hosted email when the header sender and envelope sender disagree", async () => {
     const stub = createUserRunnerStub();
     const env = createWorkerEnv(stub, {

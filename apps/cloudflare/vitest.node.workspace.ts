@@ -58,6 +58,7 @@ export const cloudflareNodeVitestProjects = [
     "container-entrypoint.test.ts",
     "crypto.test.ts",
     "env.test.ts",
+    "hosted-email*.test.ts",
     "index.test.ts",
     "wrangler-runner.test.ts",
   ]),
