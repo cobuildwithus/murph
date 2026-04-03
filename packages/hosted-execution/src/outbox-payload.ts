@@ -6,7 +6,6 @@ import {
   buildHostedExecutionDispatchRef,
   readHostedExecutionDispatchRef,
   type HostedExecutionDispatchRef,
-  type HostedExecutionDispatchRefFallback,
 } from "./dispatch-ref.ts";
 
 export const HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION = "murph.execution-outbox.v2";
@@ -54,7 +53,6 @@ export function buildHostedExecutionOutboxPayload(
 
 export function readHostedExecutionOutboxPayload(
   payloadJson: unknown,
-  fallback: HostedExecutionDispatchRefFallback,
 ): HostedExecutionOutboxPayload | null {
   const payloadObject = toObject(payloadJson);
   const schemaVersion = readText(payloadObject.schemaVersion);
@@ -71,7 +69,7 @@ export function readHostedExecutionOutboxPayload(
     }
 
     if (storage === "reference") {
-      const dispatchRef = readHostedExecutionDispatchRef(payloadObject, fallback);
+      const dispatchRef = readHostedExecutionDispatchRef(payloadObject);
       return dispatchRef
         ? {
             dispatchRef,

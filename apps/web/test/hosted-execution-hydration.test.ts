@@ -241,6 +241,23 @@ describe("hydrateHostedExecutionDispatch", () => {
     ).rejects.toThrow("missing a dispatch payload");
   });
 
+  it("rejects stored reference payloads with incomplete dispatch refs", async () => {
+    await expect(
+      hydrateHostedExecutionDispatch(
+        buildWebhookOutboxRecord({
+          storage: "reference",
+          schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+          dispatchRef: {
+            eventId: "evt_linq_123",
+            eventKind: "linq.message.received",
+            occurredAt: "2026-03-26T12:30:00.000Z",
+          },
+        }) as never,
+        {} as never,
+      ),
+    ).rejects.toThrow("missing a dispatch payload");
+  });
+
   it("marks malformed device-sync source ids as permanent hydration failures", async () => {
     await expect(
       hydrateHostedExecutionDispatch(

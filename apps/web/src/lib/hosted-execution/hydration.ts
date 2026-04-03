@@ -21,12 +21,7 @@ export async function hydrateHostedExecutionDispatch(
   record: ExecutionOutbox,
   prisma: HostedExecutionHydrationClient,
 ): Promise<HostedExecutionDispatchRequest> {
-  const payload = readHostedExecutionOutboxPayload(record.payloadJson, {
-    eventId: record.eventId,
-    eventKind: record.eventKind,
-    occurredAt: null,
-    userId: record.userId,
-  });
+  const payload = readHostedExecutionOutboxPayload(record.payloadJson);
 
   if (!payload) {
     throw createHostedExecutionHydrationError(

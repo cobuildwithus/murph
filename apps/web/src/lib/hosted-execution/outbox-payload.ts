@@ -5,7 +5,6 @@ import type {
   HostedExecutionDispatchRef as SharedHostedExecutionDispatchRef,
 } from "@murphai/hosted-execution";
 import {
-  HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
   buildHostedExecutionOutboxPayload as buildSharedHostedExecutionOutboxPayload,
   buildHostedExecutionDispatchRef as buildSharedHostedExecutionDispatchRef,
   readHostedExecutionOutboxPayload as readSharedHostedExecutionOutboxPayload,
@@ -31,14 +30,8 @@ export function serializeHostedExecutionOutboxPayload(
 
 export function readHostedExecutionDispatchRef(
   payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
-  fallback: {
-    eventId: string;
-    eventKind: string;
-    occurredAt: string | null;
-    userId: string;
-  },
 ): HostedExecutionDispatchRef | null {
-  const dispatchRef = readSharedHostedExecutionDispatchRef(payloadJson, fallback);
+  const dispatchRef = readSharedHostedExecutionDispatchRef(payloadJson);
 
   return dispatchRef
     ? dispatchRef as HostedExecutionDispatchRef
@@ -47,12 +40,6 @@ export function readHostedExecutionDispatchRef(
 
 export function readHostedExecutionOutboxPayload(
   payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
-  fallback: {
-    eventId: string;
-    eventKind: string;
-    occurredAt: string | null;
-    userId: string;
-  },
 ): HostedExecutionOutboxPayload | null {
-  return readSharedHostedExecutionOutboxPayload(payloadJson, fallback);
+  return readSharedHostedExecutionOutboxPayload(payloadJson);
 }
