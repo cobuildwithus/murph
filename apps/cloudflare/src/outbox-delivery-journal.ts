@@ -8,7 +8,6 @@ import {
 import type { R2BucketLike } from "./bundle-store.ts";
 import {
   buildHostedStorageAad,
-  deriveHostedStorageOpaqueId,
 } from "./crypto-context.js";
 import {
   readEncryptedR2Json,
@@ -166,21 +165,8 @@ async function writeRecordAtKey(
   });
 }
 
-async function sideEffectRecordKey(rootKey: Uint8Array, userId: string, effectId: string): Promise<string> {
-  const userSegment = await deriveHostedStorageOpaqueId({
-    length: 24,
-    rootKey,
-    scope: "side-effect-journal",
-    value: `user:${userId}`,
-  });
-  const effectSegment = await deriveHostedStorageOpaqueId({
-    length: 40,
-    rootKey,
-    scope: "side-effect-journal",
-    value: `effect:${userId}:${effectId}`,
-  });
-
-  return `transient/side-effects/${userSegment}/${effectSegment}.json`;
+async function sideEffectRecordKey(_rootKey: Uint8Array, userId: string, effectId: string): Promise<string> {
+  return `transient/side-effects/${encodeURIComponent(userId)}/${encodeURIComponent(effectId)}.json`;
 }
 
 function assertSideEffectRecordIsSelfConsistent(

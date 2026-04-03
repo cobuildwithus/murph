@@ -5,12 +5,19 @@ import path from "node:path";
 
 import { afterEach, test as baseTest, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({
-  withHostedInboxPipeline: vi.fn(async (_vaultRoot: string, callback: (pipeline: { processCapture: (capture: unknown) => Promise<void> }) => Promise<void>) =>
-    callback({
-      processCapture: async () => undefined,
-    })),
-}));
+const mocks = vi.hoisted(() => {
+  const processCapture = vi.fn(async () => undefined);
+  return {
+    processCapture,
+    withHostedInboxPipeline: vi.fn(async (
+      _vaultRoot: string,
+      callback: (pipeline: { processCapture: (capture: unknown) => Promise<void> }) => Promise<void>,
+    ) =>
+      callback({
+        processCapture,
+      })),
+  };
+});
 
 vi.mock("../src/hosted-runtime/events/inbox-pipeline.ts", () => ({
   withHostedInboxPipeline: mocks.withHostedInboxPipeline,
@@ -20,6 +27,7 @@ import {
   createHostedExecutionServerDeviceSyncRuntimeClient,
   createHostedExecutionServerSharePackClient,
 } from "@murphai/hosted-execution";
+import { parseHostedEmailThreadTarget } from "@murphai/runtime-state";
 import { syncHostedDeviceSyncControlPlaneState } from "../src/hosted-device-sync-runtime.ts";
 import { sendHostedEmailOverWorker } from "../src/hosted-email.ts";
 import { createHostedInternalWorkerFetch } from "../src/hosted-runtime/internal-http.ts";
@@ -33,6 +41,7 @@ const tempDirs: string[] = [];
 
 afterEach(() => {
   vi.restoreAllMocks();
+  mocks.processCapture.mockClear();
   mocks.withHostedInboxPipeline.mockClear();
 
   if (originalFetch) {
@@ -437,4 +446,56 @@ test("hosted email message ingestion no longer relies on stored envelope metadat
       ),
   );
   assert.equal(mocks.withHostedInboxPipeline.mock.calls.length, 1);
+});
+
+test("hosted email message ingestion preserves the routed alias as a self address", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "hosted-email-self-address-"));
+  tempDirs.push(vaultRoot);
+  global.fetch = vi.fn(async () =>
+    new Response([
+      "From: Friend <friend@example.test>",
+      "To: assistant+u-member_123@mail.example.test",
+      "Reply-To: Owner <owner@example.test>",
+      "Subject: Routed alias",
+      "Message-ID: <routed_alias@example.test>",
+      "",
+      "hello",
+      "",
+    ].join("\r\n"), {
+      status: 200,
+      headers: {
+        "content-type": "message/rfc822",
+      },
+    }));
+
+  await assert.doesNotReject(
+    () =>
+      ingestHostedEmailMessage(
+        vaultRoot,
+        {
+          event: {
+            identityId: "assistant@mail.example.test",
+            kind: "email.message.received",
+            rawMessageKey: "raw_self_address",
+            selfAddress: "assistant+u-member_123@mail.example.test",
+            userId: "member_123",
+          },
+          eventId: "evt_email_self_address",
+          occurredAt: "2026-03-28T09:00:00.000Z",
+        },
+        "https://email.example.test",
+        undefined,
+        5_000,
+        {},
+      ),
+  );
+
+  assert.equal(mocks.processCapture.mock.calls.length, 1);
+  const capture = mocks.processCapture.mock.calls[0]?.[0] as {
+    thread: { id: string };
+  };
+  const threadTarget = parseHostedEmailThreadTarget(capture.thread.id);
+  assert.ok(threadTarget);
+  assert.deepEqual(threadTarget.to, ["owner@example.test"]);
+  assert.deepEqual(threadTarget.cc, []);
 });

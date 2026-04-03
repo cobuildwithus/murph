@@ -55,6 +55,7 @@ export interface HostedExecutionEmailMessageReceivedEvent extends HostedExecutio
   kind: "email.message.received";
   identityId: string;
   rawMessageKey: string;
+  selfAddress?: string | null;
 }
 export interface HostedExecutionAssistantCronTickEvent extends HostedExecutionBaseEvent {
   kind: "assistant.cron.tick";

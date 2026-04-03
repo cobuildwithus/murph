@@ -503,6 +503,14 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
           record.rawMessageKey,
           "Hosted execution email message rawMessageKey",
         ),
+        ...(record.selfAddress === undefined
+          ? {}
+          : {
+              selfAddress: readNullableString(
+                record.selfAddress,
+                "Hosted execution email message selfAddress",
+              ),
+            }),
         userId,
       } satisfies HostedExecutionEmailMessageReceivedEvent;
     case "assistant.cron.tick":

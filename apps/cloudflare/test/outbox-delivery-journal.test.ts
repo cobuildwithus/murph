@@ -7,7 +7,6 @@ import {
 
 import {
   buildHostedStorageAad,
-  deriveHostedStorageOpaqueId,
 } from "../src/crypto-context.ts";
 import { writeEncryptedR2Json } from "../src/crypto.ts";
 import {
@@ -238,21 +237,8 @@ function createSentRecord(input: {
   });
 }
 
-async function sideEffectRecordKey(rootKey: Uint8Array, userId: string, effectId: string): Promise<string> {
-  const userSegment = await deriveHostedStorageOpaqueId({
-    length: 24,
-    rootKey,
-    scope: "side-effect-journal",
-    value: `user:${userId}`,
-  });
-  const effectSegment = await deriveHostedStorageOpaqueId({
-    length: 40,
-    rootKey,
-    scope: "side-effect-journal",
-    value: `effect:${userId}:${effectId}`,
-  });
-
-  return `transient/side-effects/${userSegment}/${effectSegment}.json`;
+async function sideEffectRecordKey(_rootKey: Uint8Array, userId: string, effectId: string): Promise<string> {
+  return `transient/side-effects/${encodeURIComponent(userId)}/${encodeURIComponent(effectId)}.json`;
 }
 
 function createMemoryBucket() {

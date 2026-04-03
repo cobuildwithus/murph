@@ -4,7 +4,7 @@ import {
   GARMIN_DEVICE_PROVIDER_DESCRIPTOR,
   requireDeviceProviderOAuthDescriptor,
   requireDeviceProviderSyncDescriptor,
-} from "@murphai/importers/device-providers/provider-descriptors";
+} from "@murphai/importers";
 
 import { deviceSyncError } from "../errors.ts";
 import {

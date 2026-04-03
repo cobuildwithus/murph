@@ -5,7 +5,7 @@ import {
   requireDeviceProviderOAuthDescriptor,
   requireDeviceProviderSyncDescriptor,
   requireDeviceProviderWebhookDescriptor,
-} from "@murphai/importers/device-providers/provider-descriptors";
+} from "@murphai/importers";
 
 import { deviceSyncError } from "../errors.ts";
 import {

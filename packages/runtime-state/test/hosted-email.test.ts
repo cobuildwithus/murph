@@ -38,7 +38,7 @@ test("hosted email sender helpers reject mismatched sender identities and normal
       threadTarget,
       verifiedEmailAddress: "Owner@Example.Test",
     }),
-    ["owner@example.test", "teammate@example.test", "friend@example.test"],
+    ["owner@example.test"],
   );
 });
 
@@ -54,7 +54,7 @@ test("hosted email shared text normalization trims empty message ids, route keys
   assert.equal(normalizeHostedEmailSubject(undefined), null);
 });
 
-test("hosted email sender helpers authorize only the verified email or saved thread participants", () => {
+test("hosted email sender helpers authorize only the verified email by default", () => {
   const threadTarget = createHostedEmailThreadTarget({
     cc: ["friend@example.test"],
     to: ["teammate@example.test"],
@@ -71,15 +71,17 @@ test("hosted email sender helpers authorize only the verified email or saved thr
     isHostedEmailInboundSenderAuthorized({
       headerFrom: "friend@example.test",
       threadTarget,
+      verifiedEmailAddress: "owner@example.test",
     }),
-    true,
+    false,
   );
   assert.equal(
     isHostedEmailInboundSenderAuthorized({
       envelopeFrom: "teammate@example.test",
       threadTarget,
+      verifiedEmailAddress: "owner@example.test",
     }),
-    true,
+    false,
   );
   assert.equal(
     isHostedEmailInboundSenderAuthorized({
@@ -120,5 +122,30 @@ test("hosted email sender helpers authorize only the verified email or saved thr
       verifiedEmailAddress: "owner@example.test",
     }),
     false,
+  );
+});
+
+test("hosted email sender helpers can opt into saved thread participants", () => {
+  const threadTarget = createHostedEmailThreadTarget({
+    cc: ["friend@example.test"],
+    to: ["teammate@example.test"],
+  });
+
+  assert.deepEqual(
+    resolveHostedEmailAuthorizedSenderAddresses({
+      allowThreadParticipants: true,
+      threadTarget,
+      verifiedEmailAddress: "owner@example.test",
+    }),
+    ["owner@example.test", "teammate@example.test", "friend@example.test"],
+  );
+  assert.equal(
+    isHostedEmailInboundSenderAuthorized({
+      allowThreadParticipants: true,
+      envelopeFrom: "teammate@example.test",
+      threadTarget,
+      verifiedEmailAddress: "owner@example.test",
+    }),
+    true,
   );
 });

@@ -161,17 +161,21 @@ export function resolveHostedEmailInboundSenderAddress(input: {
 }
 
 export function resolveHostedEmailAuthorizedSenderAddresses(input: {
+  allowThreadParticipants?: boolean;
   threadTarget?: HostedEmailThreadTarget | null;
   verifiedEmailAddress?: string | null;
 }): string[] {
+  const allowThreadParticipants = input.allowThreadParticipants === true;
+
   return normalizeHostedEmailAddressList([
     input.verifiedEmailAddress,
-    ...(input.threadTarget?.to ?? []),
-    ...(input.threadTarget?.cc ?? []),
+    ...(allowThreadParticipants ? input.threadTarget?.to ?? [] : []),
+    ...(allowThreadParticipants ? input.threadTarget?.cc ?? [] : []),
   ]);
 }
 
 export function isHostedEmailInboundSenderAuthorized(input: {
+  allowThreadParticipants?: boolean;
   envelopeFrom?: string | null;
   hasRepeatedHeaderFrom?: boolean;
   headerFrom?: string | null;

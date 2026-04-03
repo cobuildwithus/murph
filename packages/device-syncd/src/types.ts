@@ -6,7 +6,7 @@ import type {
 import type {
   DeviceProviderDescriptor,
   NamedDeviceProviderRegistry,
-} from "@murphai/importers/device-providers/provider-descriptors";
+} from "@murphai/importers";
 
 export type { DeviceSyncAccountStatus } from "./client.ts";
 
