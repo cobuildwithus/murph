@@ -11,10 +11,10 @@ const HOSTED_ASSISTANT_AUTOMATION_DISABLE_ALIASES = ["0", "false", "no", "off", 
 describe("buildHostedRunnerContainerEnv", () => {
   it("forwards non-automation runner env without leaking worker proxy base URLs", () => {
     expect(buildHostedRunnerContainerEnv({
-      AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
+      HOSTED_AI_USAGE_BASE_URL: "https://web.example.test",
+      HOSTED_DEVICE_SYNC_CONTROL_BASE_URL: "https://web.example.test",
     })).toEqual({
-      AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
@@ -24,11 +24,9 @@ describe("buildHostedRunnerContainerEnv", () => {
 
   it("forwards automation-only keys by default", () => {
     expect(buildHostedRunnerContainerEnv({
-      AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       TELEGRAM_BOT_TOKEN: "telegram-token",
     })).toEqual({
-      AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
@@ -41,12 +39,10 @@ describe("buildHostedRunnerContainerEnv", () => {
     "can still strip automation-only keys when hosted assistant automation is explicitly disabled via %s",
     (disableValue) => {
       expect(buildHostedRunnerContainerEnv({
-        AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
         FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
         HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION: disableValue,
         TELEGRAM_BOT_TOKEN: "telegram-token",
       })).toEqual({
-        AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
         FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
         HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION: disableValue,
         HOSTED_EMAIL_INGRESS_READY: "false",
@@ -56,12 +52,11 @@ describe("buildHostedRunnerContainerEnv", () => {
     },
   );
 
-  it("does not forward unused AgentMail platform secrets into the runner", () => {
+  it("does not forward stale AgentMail hosted vars into the runner", () => {
     expect(buildHostedRunnerContainerEnv({
       AGENTMAIL_API_KEY: "agentmail-secret",
       AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
     })).toEqual({
-      AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "production",
