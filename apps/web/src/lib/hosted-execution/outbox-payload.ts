@@ -3,6 +3,7 @@ import type {
   HostedExecutionDispatchRequest,
   HostedExecutionOutboxPayload as SharedHostedExecutionOutboxPayload,
   HostedExecutionDispatchRef as SharedHostedExecutionDispatchRef,
+  HostedExecutionOutboxPayloadStorage,
 } from "@murphai/hosted-execution";
 import {
   buildHostedExecutionOutboxPayload as buildSharedHostedExecutionOutboxPayload,
@@ -24,8 +25,11 @@ export function buildHostedExecutionDispatchRef(
 
 export function serializeHostedExecutionOutboxPayload(
   dispatch: HostedExecutionDispatchRequest,
+  options: {
+    storage?: HostedExecutionOutboxPayloadStorage | "auto";
+  } = {},
 ): Prisma.InputJsonObject {
-  return buildSharedHostedExecutionOutboxPayload(dispatch) as unknown as Prisma.InputJsonObject;
+  return buildSharedHostedExecutionOutboxPayload(dispatch, options) as unknown as Prisma.InputJsonObject;
 }
 
 export function readHostedExecutionDispatchRef(

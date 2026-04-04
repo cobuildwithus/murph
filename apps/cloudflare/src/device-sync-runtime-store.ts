@@ -13,6 +13,7 @@ import {
   buildHostedStorageAad,
   deriveHostedStorageOpaqueId,
 } from "./crypto-context.js";
+import { listHostedStorageObjectKeys } from "./storage-paths.js";
 import {
   readEncryptedR2Json,
   writeEncryptedR2Json,
@@ -373,30 +374,9 @@ async function deviceSyncRuntimeMirrorObjectKeys(
   keysById: Readonly<Record<string, Uint8Array>> | undefined,
   userId: string,
 ): Promise<string[]> {
-  return Promise.all(
-    listHostedStorageRootKeys(rootKey, keysById).map((candidateRootKey) =>
-      deviceSyncRuntimeMirrorObjectKey(candidateRootKey, userId)
-    ),
-  ).then((keys) => [...new Set(keys)]);
-}
-
-function listHostedStorageRootKeys(
-  rootKey: Uint8Array,
-  keysById: Readonly<Record<string, Uint8Array>> | undefined,
-): Uint8Array[] {
-  const seen = new Set<string>();
-  const unique: Uint8Array[] = [];
-
-  for (const key of [rootKey, ...Object.values(keysById ?? {})]) {
-    const signature = [...key].join(",");
-    if (seen.has(signature)) {
-      continue;
-    }
-    seen.add(signature);
-    unique.push(key);
-  }
-
-  return unique;
+  return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
+    deviceSyncRuntimeMirrorObjectKey(candidateRootKey, userId)
+  );
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {

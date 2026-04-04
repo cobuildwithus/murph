@@ -128,8 +128,8 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_EMAIL_LOCAL_PART).toBe("assistant");
     expect(config.vars.HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER).toBe("7m");
     expect(config.vars.HOSTED_AI_USAGE_BASE_URL).toBe("https://web.example.test");
-    expect(config.vars.HOSTED_DEVICE_SYNC_CONTROL_BASE_URL).toBe("https://web.example.test");
-    expect(config.vars.HOSTED_SHARE_API_BASE_URL).toBe("https://web.example.test");
+    expect(config.vars.HOSTED_DEVICE_SYNC_CONTROL_BASE_URL).toBeUndefined();
+    expect(config.vars.HOSTED_SHARE_API_BASE_URL).toBeUndefined();
     expect(config.vars.HOSTED_WEB_BASE_URL).toBe("https://web.example.test");
     expect(config.vars.AGENTMAIL_BASE_URL).toBeUndefined();
     expect(config.vars.MURPH_WEB_SEARCH_MAX_RESULTS).toBe("8");
@@ -211,7 +211,6 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: "bundle-key",
       HOSTED_EXECUTION_INTERNAL_TOKENS: "internal-token,previous-internal-token",
       HOSTED_EXECUTION_SIGNING_SECRET: "signing-secret",
-      HOSTED_SHARE_INTERNAL_TOKENS: "share-token,previous-share-token",
       OPENAI_API_KEY: "sk-user",
       TELEGRAM_BOT_TOKEN: "bot-token",
     });

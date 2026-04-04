@@ -83,7 +83,6 @@ describe("exportHostedPendingAssistantUsage", () => {
 
     const result = await exportHostedPendingAssistantUsage({
       baseUrl: "https://join.example.test",
-      internalToken: "internal-token",
       timeoutMs: 10_000,
       userId: "member_123",
       vaultRoot: "/tmp/vault",
@@ -98,7 +97,6 @@ describe("exportHostedPendingAssistantUsage", () => {
       baseUrl: "https://join.example.test",
       boundUserId: "member_123",
       fetchImpl: undefined,
-      internalToken: "internal-token",
       timeoutMs: 10_000,
     });
     expect(mocks.recordUsage).toHaveBeenCalledWith([
@@ -150,7 +148,6 @@ describe("exportHostedPendingAssistantUsage", () => {
 
     const result = await exportHostedPendingAssistantUsage({
       baseUrl: "https://join.example.test",
-      internalToken: "internal-token",
       timeoutMs: 10_000,
       userId: "member_123",
       vaultRoot: "/tmp/vault",
@@ -235,7 +232,6 @@ describe("exportHostedPendingAssistantUsage", () => {
 
     const result = await exportHostedPendingAssistantUsage({
       baseUrl: "https://join.example.test",
-      internalToken: "internal-token",
       timeoutMs: 10_000,
       userId: "member_123",
       vaultRoot: "/tmp/vault",
@@ -335,7 +331,6 @@ describe("exportHostedPendingAssistantUsage", () => {
 
     const result = await exportHostedPendingAssistantUsage({
       baseUrl: "https://join.example.test",
-      internalToken: "internal-token",
       timeoutMs: 10_000,
       userId: "member_123",
       vaultRoot: "/tmp/vault",
@@ -421,7 +416,6 @@ describe("exportHostedPendingAssistantUsage", () => {
 
     const result = await exportHostedPendingAssistantUsage({
       baseUrl: "https://join.example.test",
-      internalToken: "internal-token",
       timeoutMs: 10_000,
       userId: "member_123",
       vaultRoot: "/tmp/vault",

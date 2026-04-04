@@ -3,8 +3,17 @@ import { describe, expect, it, vi } from "vitest";
 import { ExecutionOutboxStatus } from "@prisma/client";
 import { HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION } from "@murphai/hosted-execution";
 import { normalizeLinqWebhookEvent } from "@murphai/inboxd";
+import type { SharePack } from "@murphai/contracts";
 import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { createHostedWebhookDispatchSideEffect } from "@/src/lib/hosted-onboarding/webhook-receipts";
+
+const mocks = vi.hoisted(() => ({
+  buildHostedDeviceSyncRuntimeSnapshot: vi.fn(() => ({
+    connections: [],
+    generatedAt: "2026-03-26T12:30:00.000Z",
+    userId: "member_123",
+  })),
+}));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingSecretCodec: () => ({
@@ -15,16 +24,57 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedOnboardingPublicBaseUrl: () => "https://join.example.test",
 }));
 
+vi.mock("@/src/lib/device-sync/crypto", () => ({
+  buildHostedSecretAad: (input: Record<string, unknown>) => JSON.stringify(input),
+  createHostedSecretCodec: () => ({
+    decrypt: vi.fn(),
+    encrypt: vi.fn(),
+    keyVersion: "v1",
+  }),
+}));
+
+vi.mock("@/src/lib/device-sync/env", () => ({
+  readHostedDeviceSyncEnvironment: () => ({
+    encryptionKey: "01234567890123456789012345678901",
+    encryptionKeyVersion: "v1",
+    encryptionKeysByVersion: {
+      v1: "01234567890123456789012345678901",
+    },
+  }),
+}));
+
+vi.mock("@/src/lib/device-sync/internal-runtime", () => ({
+  buildHostedDeviceSyncRuntimeSnapshot: mocks.buildHostedDeviceSyncRuntimeSnapshot,
+}));
+
 import {
   hydrateHostedExecutionDispatch,
   isPermanentHostedExecutionHydrationError,
 } from "@/src/lib/hosted-execution/hydration";
-import { serializeHostedExecutionOutboxPayload } from "@/src/lib/hosted-execution/outbox-payload";
 
 function buildShareReference() {
   return {
     shareCode: "share_code_123",
     shareId: "share_123",
+  };
+}
+
+function buildSharePack(): SharePack {
+  return {
+    createdAt: "2026-03-26T12:00:00.000Z",
+    entities: [
+      {
+        kind: "food",
+        payload: {
+          kind: "smoothie",
+          status: "active",
+          title: "Morning Smoothie",
+        },
+        ref: "food:morning-smoothie",
+      },
+    ],
+    schemaVersion: "murph.share-pack.v1",
+    title: "Morning Smoothie",
   };
 }
 
@@ -186,6 +236,11 @@ describe("hydrateHostedExecutionDispatch", () => {
         kind: "device-sync.wake",
         provider: "oura",
         reason: "webhook_hint",
+        runtimeSnapshot: {
+          connections: [],
+          generatedAt: "2026-03-26T12:30:00.000Z",
+          userId: "member_123",
+        },
         userId: "member_123",
       },
       eventId: "evt_device_sync_123",
@@ -193,28 +248,40 @@ describe("hydrateHostedExecutionDispatch", () => {
     });
   });
 
-  it("hydrates minimized share outbox refs from the hosted share link payload", async () => {
+  it("rehydrates share outbox refs with the encrypted share pack from the hosted share link", async () => {
     const share = buildShareReference();
+    const pack = buildSharePack();
+    const prisma = {
+      hostedShareLink: {
+        findUnique: vi.fn().mockResolvedValue({
+          encryptedPayload: JSON.stringify(pack),
+          id: "share_123",
+        }),
+      },
+    };
 
     const dispatch = await hydrateHostedExecutionDispatch(
-      buildShareOutboxRecord(
-        serializeHostedExecutionOutboxPayload({
-          event: {
-            kind: "vault.share.accepted",
-            share,
-            userId: "member_123",
-          },
+      buildShareOutboxRecord({
+        dispatchRef: {
           eventId: "evt_share_123",
+          eventKind: "vault.share.accepted",
           occurredAt: "2026-03-26T12:30:00.000Z",
-        }),
-      ) as never,
-      {} as never,
+          share,
+          userId: "member_123",
+        },
+        schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+        storage: "reference",
+      }) as never,
+      prisma as never,
     );
 
     expect(dispatch).toEqual({
       event: {
         kind: "vault.share.accepted",
-        share,
+        share: {
+          ...share,
+          pack,
+        },
         userId: "member_123",
       },
       eventId: "evt_share_123",

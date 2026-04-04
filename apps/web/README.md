@@ -56,7 +56,7 @@ Optional but recommended:
 - `DEVICE_SYNC_TRUSTED_USER_ASSERTION_HEADER`
 - `DEVICE_SYNC_TRUSTED_USER_SIGNATURE_HEADER`
 - `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET`
-- `HOSTED_WEB_BASE_URL` as the shared hosted control-plane base for internal device-sync, share, and usage routes; route-specific overrides must stay on the same host
+- `HOSTED_WEB_BASE_URL` as an optional fallback canonical public base URL for hosted-web links when the explicit hosted public-base envs are unset
 - `OURA_WEBHOOK_VERIFICATION_TOKEN`
 - `HOSTED_SHARE_INTERNAL_TOKENS` for server-to-server share-link issuance from the assistant or other trusted callers; the first token is used for outbound calls and any configured token is accepted inbound during rotation
 
@@ -89,7 +89,6 @@ Hosted onboarding extras:
 - `HOSTED_EXECUTION_SIGNING_SECRET`
 - `HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS`
 - `HOSTED_EXECUTION_CONTROL_TOKENS` so `/settings` can sync a verified email into hosted user env and trigger a hosted run
-- `HOSTED_EXECUTION_INTERNAL_TOKENS` so the Cloudflare runner can call hosted web internal routes
 - `HOSTED_EXECUTION_SCHEDULER_TOKENS` so the deployed Vercel cron can authenticate `/api/internal/hosted-execution/outbox/cron`
 - `CRON_SECRET` is still accepted as a scheduler-token fallback when Vercel injects it automatically
 
@@ -106,7 +105,7 @@ Set these under `Settings -> Environment Variables` in the Vercel project that d
 
 - `HOSTED_EXECUTION_SIGNING_SECRET`: generate a strong random secret and use the exact same value in Vercel and the Cloudflare hosted-execution worker. `apps/web` signs dispatch payloads with it and Cloudflare verifies them.
 - `HOSTED_EXECUTION_CONTROL_TOKENS`: generate a distinct comma-separated bearer-token set and use the same value in Vercel and the Cloudflare hosted-execution worker. `apps/web` uses the first token for outbound worker control calls and accepts any configured token inbound.
-- `HOSTED_EXECUTION_INTERNAL_TOKENS`: generate a distinct comma-separated bearer-token set and use the same value in Vercel and the Cloudflare runner environment. The runner uses the first token for outbound internal route calls and hosted web accepts any configured token inbound.
+- `HOSTED_EXECUTION_INTERNAL_TOKENS`: generate a distinct comma-separated bearer-token set for trusted hosted execution maintenance routes that still use bearer auth. Hosted web accepts any configured token inbound.
 - `HOSTED_EXECUTION_SCHEDULER_TOKENS`: generate a distinct comma-separated bearer-token set for hosted cron routes. `CRON_SECRET` is still accepted as a fallback because Vercel cron sends `Authorization: Bearer <CRON_SECRET>` automatically.
 - `HOSTED_SHARE_INTERNAL_TOKENS`: generate a distinct comma-separated bearer-token set for trusted server-to-server hosted share routes.
 - `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET`: generate a distinct strong random secret and use the same value in Vercel plus whichever trusted auth proxy or middleware signs the hosted user assertion headers. `apps/web` verifies that signature before trusting the lower-level assertion-backed device-sync bridge routes.
@@ -206,15 +205,11 @@ Hosted device-sync agent signals stay sparse by design:
 - webhook wake hints expose only sparse metadata plus normalized job hints and reconcile metadata that the hosted runner can safely replay
 - hosted Postgres/API state must not persist or return raw provider webhook payload blobs or provider tokens
 
-Hosted internal runner routes:
+Hosted execution maintenance routes:
 
-- `POST /api/internal/device-sync/runtime/snapshot`
-- `POST /api/internal/device-sync/runtime/apply`
-- `POST /api/internal/hosted-execution/usage/record`
 - `GET /api/internal/hosted-execution/usage/cron`
 
-These routes are internal-only server-to-server seams for the Cloudflare runner. They let the runner hydrate escrowed device-sync connections before a one-shot pass and reconcile status/token changes back into Postgres afterward.
-The device-sync runtime routes and the hosted AI usage record route now require both the internal bearer token and the trusted worker-injected `x-hosted-execution-user-id` header. The hosted AI usage record route rejects any usage row whose `memberId` does not match that bound user, then imports the immutable per-attempt usage rows after a hosted commit succeeds. The optional usage cron later sends total-token meter events to Stripe while skipping member-supplied API-key runs.
+Cloudflare no longer round-trips through hosted-web runtime snapshot/apply routes in the hot path. Device-sync hydration and usage buffering now stay on the Cloudflare side during execution, the worker later imports buffered usage through the internal hosted-web usage route after commit/finalize, and the optional usage cron sends total-token meter events to Stripe while skipping member-supplied API-key runs.
 
 ## Hosted onboarding routes
 

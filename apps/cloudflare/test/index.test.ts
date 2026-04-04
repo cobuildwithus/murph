@@ -257,9 +257,7 @@ describe("cloudflare worker routes", () => {
     expect(harness.bucket.keys()).toContainEqual(expect.stringMatching(
       /^transient\/execution-journal\/[0-9a-f]+\/[0-9a-f]+\.json$/u,
     ));
-    expect(harness.bucket.keys()).toContainEqual(expect.stringMatching(
-      /^users\/keys\/[0-9a-f]+\.json$/u,
-    ));
+    expect(harness.bucket.keys()).toContain("users/keys/member_123.json");
     expect(harness.bucket.keys()).toHaveLength(4);
     const journalStore = await createHostedExecutionJournalStoreForTest(harness.env, "member_123");
     await expect(journalStore.readCommittedResult("member_123", "evt_commit")).resolves.toMatchObject({
@@ -321,7 +319,7 @@ describe("cloudflare worker routes", () => {
       "Hosted artifact hash mismatch: expected fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b",
     );
     expect(harness.bucket.keys()).toHaveLength(1);
-    expect(harness.bucket.keys()[0]).toMatch(/^users\/keys\/[0-9a-f]+\.json$/u);
+    expect(harness.bucket.keys()[0]).toBe("users/keys/member_123.json");
   });
 
   it("keeps hosted artifact objects isolated per user", async () => {
@@ -1176,7 +1174,9 @@ describe("cloudflare worker routes", () => {
   });
 
   it("treats envelope GET as a read-only control route in greenfield environments", async () => {
-    const env = createWorkerEnv();
+    const stub = createUserRunnerStub();
+    stub.getUserKeyEnvelope = vi.fn(async () => null);
+    const env = createWorkerEnv(stub);
 
     const response = await worker.fetch(
       await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/keys/envelope", {

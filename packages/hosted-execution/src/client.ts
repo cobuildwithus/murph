@@ -322,6 +322,12 @@ async function requestHostedExecutionSignedJson<TResponse>(input: {
     timestamp,
   });
 
+  const headers = normalizeHostedExecutionRequestHeaders(input.request.headers);
+
+  for (const [key, value] of Object.entries(signatureHeaders)) {
+    headers.set(key, value);
+  }
+
   return requestHostedExecutionJson({
     baseUrl: input.baseUrl,
     fetchImpl: input.fetchImpl,
@@ -330,13 +336,14 @@ async function requestHostedExecutionSignedJson<TResponse>(input: {
     path: input.path,
     request: {
       ...input.request,
-      headers: {
-        ...(input.request.headers ?? {}),
-        ...signatureHeaders,
-      },
+      headers,
       signal: resolveHostedExecutionTimeoutSignal(input.timeoutMs),
     },
   });
+}
+
+function normalizeHostedExecutionRequestHeaders(headers: HeadersInit | undefined): Headers {
+  return new Headers(headers);
 }
 
 function readHostedExecutionRequestBody(body: BodyInit | null | undefined): string {

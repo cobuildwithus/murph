@@ -7,11 +7,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   DEFAULT_HOSTED_EXECUTION_ARTIFACTS_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_COMMIT_BASE_URL,
-  DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_EMAIL_BASE_URL,
-  DEFAULT_HOSTED_EXECUTION_SHARE_PACK_PROXY_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_SIDE_EFFECTS_BASE_URL,
-  DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
   HOSTED_EXECUTION_CALLBACK_HOSTS,
   HOSTED_EXECUTION_PROXY_HOSTS,
   normalizeHostedExecutionBaseUrl,
@@ -67,18 +64,7 @@ export function normalizeHostedAssistantRuntimeConfig(
     forwardedEnv,
     sideEffectsBaseUrl: callbackBaseUrls.sideEffectsBaseUrl,
     userEnv: { ...(input?.userEnv ?? {}) },
-    webControlPlane: {
-      ...webControlPlane,
-      deviceSyncRuntimeBaseUrl:
-        webControlPlane.deviceSyncRuntimeBaseUrl
-        ?? DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
-      shareBaseUrl:
-        webControlPlane.shareBaseUrl
-        ?? DEFAULT_HOSTED_EXECUTION_SHARE_PACK_PROXY_BASE_URL,
-      usageBaseUrl:
-        webControlPlane.usageBaseUrl
-        ?? DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
-    },
+    webControlPlane,
   };
 }
 

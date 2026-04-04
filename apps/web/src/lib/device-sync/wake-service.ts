@@ -18,7 +18,6 @@ import { getPrisma } from "../prisma";
 import { enqueueHostedExecutionOutbox } from "../hosted-execution/outbox";
 import { createHostedSecretCodec } from "./crypto";
 import { readHostedDeviceSyncEnvironment } from "./env";
-import { buildHostedDeviceSyncRuntimeSnapshot } from "./internal-runtime";
 import {
   buildHostedDeviceSyncWakeDispatch,
   type HostedDeviceSyncWakeSource,
@@ -74,12 +73,6 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     hint,
     occurredAt: now,
     provider: existing.provider,
-    runtimeSnapshot: await buildHostedDeviceSyncRuntimeSnapshotForDispatch({
-      store: input.store,
-      userId: input.userId,
-      connectionId: input.connectionId,
-      provider: existing.provider,
-    }),
     source: "disconnect",
     userId: input.userId,
   });
@@ -148,12 +141,6 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
     hint,
     occurredAt: input.now,
     provider: input.account.provider,
-    runtimeSnapshot: await buildHostedDeviceSyncRuntimeSnapshotForDispatch({
-      store: input.store,
-      userId: ownerId,
-      connectionId: input.account.id,
-      provider: input.account.provider,
-    }),
     source: "connection-established",
     userId: ownerId,
   });
@@ -221,12 +208,6 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     hint,
     occurredAt: input.now,
     provider: input.account.provider,
-    runtimeSnapshot: await buildHostedDeviceSyncRuntimeSnapshotForDispatch({
-      store: input.store,
-      userId: ownerId,
-      connectionId: input.account.id,
-      provider: input.account.provider,
-    }),
     source: "webhook-accepted",
     traceId: input.webhook.traceId ?? null,
     userId: ownerId,
@@ -275,12 +256,6 @@ export async function dispatchHostedDeviceSyncWake(input: {
   const dispatch = buildHostedDeviceSyncWakeDispatch({
     ...input,
     hint,
-    runtimeSnapshot: await buildHostedDeviceSyncRuntimeSnapshotForDispatch({
-      store,
-      userId: input.userId,
-      connectionId: input.connectionId,
-      provider: input.provider,
-    }),
   });
 
   await prisma.$transaction(async (tx) => {
@@ -306,18 +281,6 @@ export async function dispatchHostedDeviceSyncWake(input: {
   };
 }
 
-async function buildHostedDeviceSyncRuntimeSnapshotForDispatch(input: {
-  connectionId?: string | null;
-  provider?: string | null;
-  store: PrismaDeviceSyncControlPlaneStore;
-  userId: string;
-}) {
-  return buildHostedDeviceSyncRuntimeSnapshot(input.store, {
-    connectionId: input.connectionId ?? null,
-    provider: input.provider ?? null,
-    userId: input.userId,
-  });
-}
 
 async function createHostedDeviceSyncSignalAndEnqueueWake(input: {
   createSignal: () => Promise<{ id: number }>;
@@ -329,6 +292,7 @@ async function createHostedDeviceSyncSignalAndEnqueueWake(input: {
     dispatch: input.dispatch,
     sourceId: String(signal.id),
     sourceType: "device_sync_signal",
+    storage: "reference",
     tx: input.tx,
   });
 }

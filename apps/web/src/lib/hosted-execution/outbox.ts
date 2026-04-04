@@ -10,6 +10,7 @@ import {
 import {
   type HostedExecutionDispatchRequest,
   type HostedExecutionDispatchResult,
+  type HostedExecutionOutboxPayloadStorage,
   resolveHostedExecutionDispatchLifecycle,
 } from "@murphai/hosted-execution";
 
@@ -38,6 +39,7 @@ export interface EnqueueHostedExecutionOutboxInput {
   now?: string;
   sourceId?: string | null;
   sourceType: string;
+  storage?: HostedExecutionOutboxPayloadStorage | "auto";
   tx: HostedExecutionOutboxClient;
 }
 
@@ -45,7 +47,9 @@ export async function enqueueHostedExecutionOutbox(
   input: EnqueueHostedExecutionOutboxInput,
 ): Promise<ExecutionOutbox> {
   const now = new Date(input.now ?? new Date().toISOString());
-  const payloadJson = serializeHostedExecutionOutboxPayload(input.dispatch);
+  const payloadJson = serializeHostedExecutionOutboxPayload(input.dispatch, {
+    storage: input.storage ?? "auto",
+  });
 
   const record = await input.tx.executionOutbox.upsert({
     where: {

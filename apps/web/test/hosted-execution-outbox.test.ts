@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ExecutionOutbox, PrismaClient } from "@prisma/client";
 import type { HostedExecutionDispatchRequest, HostedExecutionDispatchResult } from "@murphai/hosted-execution";
+import { serializeHostedExecutionOutboxPayload } from "@/src/lib/hosted-execution/outbox-payload";
 
 const mocks = vi.hoisted(() => ({
   dispatchHostedExecutionStatus: vi.fn(),
@@ -216,20 +217,7 @@ describe("drainHostedExecutionOutbox", () => {
     const prisma = createEnqueueOutboxPrisma(createOutboxRecord({
       eventId: dispatch.eventId,
       eventKind: dispatch.event.kind,
-      payloadJson: {
-        dispatchRef: {
-          eventId: dispatch.eventId,
-          eventKind: dispatch.event.kind,
-          occurredAt: dispatch.occurredAt,
-          share: {
-            shareCode: "share-code",
-            shareId: "share_123",
-          },
-          userId: dispatch.event.userId,
-        },
-        schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
-        storage: "reference",
-      },
+      payloadJson: JSON.parse(JSON.stringify(serializeHostedExecutionOutboxPayload(dispatch))),
       sourceId: "share_123",
       sourceType: "hosted_share_link",
       userId: dispatch.event.userId,
@@ -263,6 +251,22 @@ function createShareDispatch(): HostedExecutionDispatchRequest {
     event: {
       kind: "vault.share.accepted",
       share: {
+        pack: {
+          createdAt: "2026-03-28T11:00:00.000Z",
+          entities: [
+            {
+              kind: "food",
+              payload: {
+                kind: "smoothie",
+                status: "active",
+                title: "Shared Smoothie",
+              },
+              ref: "food:shared-smoothie",
+            },
+          ],
+          schemaVersion: "murph.share-pack.v1",
+          title: "Shared Smoothie",
+        },
         shareCode: "share-code",
         shareId: "share_123",
       },

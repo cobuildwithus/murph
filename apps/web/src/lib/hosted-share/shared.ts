@@ -3,7 +3,6 @@ import { createHash, randomBytes } from "node:crypto";
 import {
   buildHostedExecutionVaultShareAcceptedDispatch,
   type HostedExecutionDispatchRequest,
-  type HostedExecutionSharePackResponse,
 } from "@murphai/hosted-execution";
 import { assertContract, sharePackSchema, type SharePack } from "@murphai/contracts";
 
@@ -98,31 +97,6 @@ export function readHostedSharePreview(
   return buildHostedSharePreview(typeof fallbackPack === "function" ? fallbackPack() : fallbackPack);
 }
 
-export async function readHostedSharePackByReference(input: {
-  boundMemberId: string;
-  prisma: HostedSharePrismaClient;
-  shareCode: string;
-  shareId: string;
-}): Promise<HostedExecutionSharePackResponse> {
-  const record = await findHostedShareLinkById(input.shareId, input.prisma);
-
-  if (
-    !record
-    || record.codeHash !== hashHostedShareCode(input.shareCode)
-    || !isHostedShareReadableByMember(record, input.boundMemberId)
-  ) {
-    throw hostedOnboardingError({
-      code: "HOSTED_SHARE_NOT_FOUND",
-      message: "That share link is not valid.",
-      httpStatus: 404,
-    });
-  }
-
-  return {
-    pack: readHostedSharePack(record).pack,
-    shareId: input.shareId,
-  };
-}
 
 export async function releaseHostedShareAcceptance(input: {
   memberId: string;

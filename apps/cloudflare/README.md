@@ -39,8 +39,6 @@ Current worker env/config names read directly by `src/env.ts`:
 - required secret: `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY`
 - required secret: `HOSTED_EXECUTION_CONTROL_TOKENS` gates the operator control routes; the first token is used for new outbound requests and any configured token is accepted inbound so rotation can overlap old/new values
 - required secret: `HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS` gates the private container HTTP server and native container invoke path with the same overlapping-rotation model
-- optional secret: `HOSTED_EXECUTION_INTERNAL_TOKENS` lets the worker proxy runner callbacks into hosted web internal routes such as device-sync snapshot/apply and hosted AI usage recording
-- optional secret: `HOSTED_SHARE_INTERNAL_TOKENS` lets the worker proxy hosted share payload fetches into the hosted web control plane
 - optional secret: `HOSTED_EMAIL_CLOUDFLARE_API_TOKEN` enables hosted email delivery through Cloudflare Email Routing
 - optional secret: `HOSTED_EMAIL_SIGNING_SECRET` enables trusted hosted email ingress token generation and verification
 - optional non-secret: `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` extends the exact per-user encrypted env key allowlist in both the worker and container
@@ -56,8 +54,6 @@ Current worker env/config names read directly by `src/env.ts`:
 - optional non-secret: `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS` defaults to `120000`
 - optional non-secret: `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS` defaults to `30000` and is forwarded into the container runtime
 - optional non-secret: `HOSTED_ASSISTANT_*` vars choose the explicit platform-managed hosted assistant profile that hosted bootstrap persists into `~/.murph/config.json`. `HOSTED_ASSISTANT_API_KEY_ENV` names the env var to read at runtime; it is never the raw API key itself
-- optional non-secret: `HOSTED_WEB_BASE_URL` gives the worker a shared hosted-web base URL for runner proxy calls back into `apps/web` and is also available to the runtime when `src/runner-env.ts` allows it
-- optional non-secret: `HOSTED_DEVICE_SYNC_CONTROL_BASE_URL`, `HOSTED_AI_USAGE_BASE_URL`, and `HOSTED_SHARE_API_BASE_URL` are worker-side runner proxy overrides for hosted web control-plane routes that still resolve on the same host as `HOSTED_WEB_BASE_URL`
 - optional provider/toolchain vars and secrets configured on the Worker are forwarded into the container only when `src/runner-env.ts` explicitly allowlists them; the worker-side hosted web proxy inputs above stay on the Worker side unless that file names them
 
 Hosted email on this worker keeps the public `From` identity fixed while new outbound sends reuse one stable per-user reply alias. Registered members can also start a thread by emailing that fixed public sender address once their verified email has been synced into hosted execution; the worker resolves that direct inbox only through an encrypted verified-owner index and still re-authorizes the sender before raw-message persistence or hosted dispatch. Learning another member's alias is not enough to reach that member's vault, and neither is addressing the public mailbox from an unregistered or mismatched sender. Legacy per-thread reply aliases still resolve during the cutover, but the worker no longer mints new per-thread route records.
@@ -87,7 +83,7 @@ That means:
 - the per-user Durable Object invokes a same-name `RunnerContainer` instance on demand
 - the `RunnerContainer` uses the official `@cloudflare/containers` `Container` class to handle startup, port readiness, per-run env injection, and host-specific outbound interception before forwarding the encrypted bundle payloads and dispatch into the internal runner bridge
 - those worker-owned outbound proxy hosts now require an in-memory per-run proxy token from the trusted Worker/container bridge in addition to the bound `userId`, so random code inside one warm runner container cannot call them directly with `curl` or borrowed env
-- the worker-owned share and hosted-AI-usage proxy hosts inject the Durable Object's bound `userId` into the web request and keep the broader web control tokens out of the runner environment
+- the worker-owned hosted-AI-usage proxy host injects the Durable Object's bound `userId` into the worker-side usage buffer path, and any later web import still happens from the Durable Object with the broader web control token kept out of the runner environment
 - worker-owned callback and web-control base URLs now normalize to HTTPS by default and only permit explicit loopback or internal worker-host HTTP exceptions
 - the runner process posts durable commit/finalize and assistant-delivery reconciliation requests to `http://commit.worker` and `http://side-effects.worker`; those outbound handlers run inside Workers, call Durable Objects and R2 directly, and never traverse the public Worker URL
 - the container-local bridge is intentionally thin; the execution core lives in `packages/assistant-runtime`

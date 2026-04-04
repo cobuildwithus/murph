@@ -129,10 +129,10 @@ describe("hosted execution contract parity", () => {
       expect(parseHostedExecutionEvent(dispatch.event)).toEqual(dispatch.event);
       expect(payload.schemaVersion).toBe(HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION);
       expect(payload.storage).toBe(
-        kind === "linq.message.received"
+        kind === "device-sync.wake"
+          || kind === "linq.message.received"
           || kind === "telegram.message.received"
           || kind === "email.message.received"
-          || kind === "vault.share.accepted"
           ? "reference"
           : "inline",
       );

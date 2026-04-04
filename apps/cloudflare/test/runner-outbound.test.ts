@@ -163,9 +163,9 @@ describe("handleRunnerOutboundRequest", () => {
       RUNNER_PROXY_TOKEN,
     );
 
-    expect(response.status).toBe(410);
+    expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({
-      error: "Hosted share payload fetches are no longer available in the runtime hot path. Dispatches must include an encrypted share pack reference payload.",
+      error: "Not found",
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -195,9 +195,9 @@ describe("handleRunnerOutboundRequest", () => {
       RUNNER_PROXY_TOKEN,
     );
 
-    expect(response.status).toBe(410);
+    expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({
-      error: "Hosted share payload fetches are no longer available in the runtime hot path. Dispatches must include an encrypted share pack reference payload.",
+      error: "Not found",
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -226,9 +226,9 @@ describe("handleRunnerOutboundRequest", () => {
       RUNNER_PROXY_TOKEN,
     );
 
-    expect(response.status).toBe(410);
+    expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({
-      error: "Hosted share payload fetches are no longer available in the runtime hot path. Dispatches must include an encrypted share pack reference payload.",
+      error: "Not found",
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });

@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -45,6 +45,7 @@ export async function ensureNextRouteTypeStub(nextEnvPath: string): Promise<stri
   }
 
   await ensureNextRouteTypesRuntimeStub(stubPath);
+  await removeStaleNextValidatorStub(stubPath);
 
   return stubPath;
 }
@@ -61,6 +62,15 @@ async function ensureNextRouteTypesRuntimeStub(routeTypesStubPath: string): Prom
   } catch {
     await writeFile(runtimeStubPath, routeTypesRuntimeStubContents, "utf8");
   }
+}
+
+async function removeStaleNextValidatorStub(routeTypesStubPath: string): Promise<void> {
+  if (!routeTypesStubPath.endsWith("/routes.d.ts")) {
+    return;
+  }
+
+  const validatorPath = routeTypesStubPath.replace(/routes\.d\.ts$/u, "validator.ts");
+  await rm(validatorPath, { force: true });
 }
 
 async function main(): Promise<void> {
