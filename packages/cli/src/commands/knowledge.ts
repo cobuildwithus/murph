@@ -62,7 +62,7 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
       sourcePath: z
         .array(pathSchema)
         .optional()
-        .describe('Optional vault-relative or absolute source file paths that resolve inside the vault. Repeat --source-path to include multiple files. Derived/runtime paths such as derived/** and .runtime/** are rejected.'),
+        .describe('Optional vault-relative paths, or absolute paths that still resolve inside the selected vault. Repeat --source-path to include multiple files. Derived/runtime paths such as derived/** and .runtime/** are rejected.'),
       mode: z
         .enum(researchExecutionModeValues)
         .optional()

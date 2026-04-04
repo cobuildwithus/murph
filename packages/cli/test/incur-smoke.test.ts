@@ -415,6 +415,10 @@ test('knowledge commands expose the expected schema at the built CLI boundary', 
   assert.equal('sourcePath' in compileSchema.options.properties, true)
   assert.equal('mode' in compileSchema.options.properties, true)
   assert.deepEqual(compileSchema.options.required, ['vault'])
+  assert.match(
+    String((compileSchema.options.properties.sourcePath as { description?: unknown }).description),
+    /vault-relative paths, or absolute paths that still resolve inside the selected vault/u,
+  )
 
   assert.equal('query' in searchSchema.args.properties, true)
   assert.deepEqual(searchSchema.args.required, ['query'])

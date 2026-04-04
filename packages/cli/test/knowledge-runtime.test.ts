@@ -134,11 +134,15 @@ describe('compileKnowledgePage', () => {
     )
 
     let compileCount = 0
+    const prompts: string[] = []
     const dependencies = {
       async runProcess(input: { command: string; args: string[] }) {
         const responseFile = readArgValue(input.args, '--response-file')
+        const prompt = readArgValue(input.args, '--prompt')
         expect(input.command).toBe('pnpm')
         expect(responseFile).toBeTruthy()
+        expect(prompt).toBeTruthy()
+        prompts.push(prompt!)
         compileCount += 1
         await writeFile(
           responseFile!,
@@ -182,6 +186,9 @@ describe('compileKnowledgePage', () => {
     )
 
     expect(refreshed.page.sourcePaths).toEqual([firstSourcePath, secondSourcePath])
+    expect(prompts).toHaveLength(2)
+    expect(prompts[1]).toContain(`### ${firstSourcePath}`)
+    expect(prompts[1]).toContain(`### ${secondSourcePath}`)
 
     const savedPage = await readFile(
       path.join(vaultRoot, 'derived/knowledge/pages/sleep-quality.md'),
