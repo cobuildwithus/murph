@@ -2,6 +2,11 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.1.9] - 2026-04-04
+
+### Fixed
+- clear empty npm auth fallback
+
 ## [0.1.8] - 2026-04-03
 
 ### Fixed
