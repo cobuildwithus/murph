@@ -111,8 +111,10 @@ export const cliVitestProjectSpecs: readonly CliVitestProjectSpec[] = [
     fileNames: [
       "assistant-cli.test.ts",
       "assistant-runtime.test.ts",
+      "assistant-chat-controller.test.ts",
       "assistant-service.test.ts",
       "assistant-chat-composer.test.ts",
+      "assistant-model-switcher.test.ts",
       "assistant-channel.test.ts",
       "assistant-cron.test.ts",
       "assistant-state.test.ts",
