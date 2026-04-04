@@ -1175,6 +1175,21 @@ describe("cloudflare worker routes", () => {
     expect(stub.status).not.toHaveBeenCalled();
   });
 
+  it("treats envelope GET as a read-only control route in greenfield environments", async () => {
+    const env = createWorkerEnv();
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/keys/envelope", {
+        method: "GET",
+      })),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toBeNull();
+    expect(env.__bucketStore.keys()).toEqual([]);
+  });
+
 
   it("returns a stable hosted email address for a user through the control route", async () => {
     const stub = createUserRunnerStub();
