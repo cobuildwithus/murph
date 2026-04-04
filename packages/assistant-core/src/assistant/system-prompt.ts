@@ -9,6 +9,7 @@ export interface AssistantSystemPromptInput {
   allowSensitiveHealthContext: boolean;
   assistantCliExecutorAvailable: boolean;
   assistantCronToolsAvailable: boolean;
+  assistantHostedDeviceConnectAvailable?: boolean;
   assistantMemoryDailyPath: string;
   assistantMemoryLongTermPath: string;
   assistantMemoryPrompt: string | null;
@@ -25,7 +26,10 @@ export function buildAssistantSystemPrompt(
     buildAssistantIdentityAndScopeText(),
     buildAssistantProductPrinciplesText(),
     buildAssistantHealthReasoningText(),
-    buildAssistantVaultNavigationText(input.assistantCliExecutorAvailable),
+    buildAssistantVaultNavigationText({
+      assistantCliExecutorAvailable: input.assistantCliExecutorAvailable,
+      assistantHostedDeviceConnectAvailable: input.assistantHostedDeviceConnectAvailable ?? false,
+    }),
     buildAssistantAudienceSafetyText(input.allowSensitiveHealthContext),
     buildAssistantEvidenceAndReplyStyleText(input.channel),
     buildAssistantFirstTurnCheckInGuidanceText(input.firstTurnCheckIn),
@@ -88,15 +92,19 @@ function buildAssistantHealthReasoningText(): string {
   ].join("\n");
 }
 
-function buildAssistantVaultNavigationText(
-  assistantCliExecutorAvailable: boolean
-): string {
+function buildAssistantVaultNavigationText(input: {
+  assistantCliExecutorAvailable: boolean;
+  assistantHostedDeviceConnectAvailable: boolean;
+}): string {
   return [
     "This assistant runtime is for Murph vault and assistant operations, not repo coding work.",
-    assistantCliExecutorAvailable
+    input.assistantHostedDeviceConnectAvailable
+      ? "- When the user wants help connecting a hosted wearable provider such as WHOOP, Oura, or Garmin, use `murph.device.connect` first so you can return a clickable hosted authorization link. Do not route that hosted connect flow through local `device connect` CLI commands."
+      : null,
+    input.assistantCliExecutorAvailable
       ? "- Inspect or change Murph vault/runtime state through `murph.cli.run`. That tool shells out to the real local `vault-cli`, so treat it as the primary Murph runtime surface for provider turns."
       : "- Inspect or change Murph vault/runtime state through `vault-cli` semantics when the direct CLI executor is unavailable.",
-    assistantCliExecutorAvailable
+    input.assistantCliExecutorAvailable
       ? "- Use `murph.cli.run` with exact `vault-cli` semantics instead of guessing command shapes. Start narrow with `--help` or `--schema --format json`, and use `--llms` or `--llms-full` only when you truly need broad discovery."
       : "- Use exact `vault-cli` semantics instead of guessing command shapes. Start narrow with `--help` or `--schema --format json`, and use `--llms` or `--llms-full` only when you truly need broad discovery.",
     "- Use canonical query surfaces as the source of truth for health data. For one known record or date, start with `vault-cli show`. For recent history, candidate matching, or narrowing a target, start with `vault-cli list`. For remembered foods or recipes, use `vault-cli food ...` and `vault-cli recipe ...`.",
@@ -106,7 +114,9 @@ function buildAssistantVaultNavigationText(
     "- Default to read-only inspection. Only write canonical vault data when the user is clearly asking to log, create, update, or delete something in the vault.",
     '- Treat capture-style requests such as meal logging, journal updates, or an explicit "add this" request as permission to use the matching canonical write surface.',
     "- Never claim you searched, read, wrote, logged, or updated something unless a real tool call happened.",
-  ].join("\n");
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join("\n");
 }
 
 function buildAssistantAudienceSafetyText(

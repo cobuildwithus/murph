@@ -326,6 +326,7 @@ async function resolveAssistantRouteTurnPlan(input: {
   const assistantMemoryPaths = resolveAssistantMemoryStoragePaths(input.input.vault)
   const assistantCliExecutorAvailable =
     input.route.provider === 'openai-compatible' && input.toolCatalog.hasTool('murph.cli.run')
+  const assistantHostedDeviceConnectAvailable = input.toolCatalog.hasTool('murph.device.connect')
   const assistantStateToolsAvailable = assistantCliExecutorAvailable
   const assistantMemoryRecallToolsAvailable = assistantCliExecutorAvailable
   const assistantMemoryPrompt =
@@ -354,6 +355,7 @@ async function resolveAssistantRouteTurnPlan(input: {
       assistantCliExecutorAvailable,
       assistantStateToolsAvailable,
       assistantCronToolsAvailable,
+      assistantHostedDeviceConnectAvailable,
       cliAccess: input.sharedPlan.cliAccess,
       assistantMemoryDailyPath: resolveAssistantDailyMemoryPath(assistantMemoryPaths),
       assistantMemoryLongTermPath: assistantMemoryPaths.longTermMemoryPath,
