@@ -237,6 +237,8 @@ model HostedMember {
   stripeLatestBillingEventCreatedAt DateTime?      @map("stripe_latest_billing_event_created_at")
   stripeLatestBillingEventId  String?              @map("stripe_latest_billing_event_id")
   linqChatId                   String?             @map("linq_chat_id")
+  onboardingWelcomeQueuedAt    DateTime?           @map("onboarding_welcome_queued_at")
+  onboardingWelcomeSentAt      DateTime?           @map("onboarding_welcome_sent_at")
   telegramUserId               String?             @unique @map("telegram_user_id")
   telegramUsername             String?             @map("telegram_username")
   encryptedBootstrapSecret     String?             @map("encrypted_bootstrap_secret")
@@ -248,6 +250,7 @@ model HostedMember {
   checkouts                    HostedBillingCheckout[]
   revnetIssuances              HostedRevnetIssuance[]
   aiUsage                      HostedAiUsage[]
+  linqDailyStates              HostedLinqDailyState[]
 
   @@index([status])
   @@index([billingStatus])
@@ -498,6 +501,24 @@ model HostedAiUsage {
   @@index([stripeMeterStatus, occurredAt])
   @@index([turnId, attemptCount])
   @@map("hosted_ai_usage")
+}
+
+model HostedLinqDailyState {
+  memberId             String       @map("member_id")
+  dayUtc               DateTime     @map("day_utc")
+  inboundCount         Int          @default(0) @map("inbound_count")
+  outboundCount        Int          @default(0) @map("outbound_count")
+  onboardingLinkSentAt DateTime?    @map("onboarding_link_sent_at")
+  quotaReplySentAt     DateTime?    @map("quota_reply_sent_at")
+  firstSeenAt          DateTime     @map("first_seen_at")
+  lastSeenAt           DateTime     @map("last_seen_at")
+  createdAt            DateTime     @default(now()) @map("created_at")
+  updatedAt            DateTime     @updatedAt @map("updated_at")
+  member               HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@id([memberId, dayUtc])
+  @@index([dayUtc])
+  @@map("hosted_linq_daily_state")
 }
 
 model LinqRecipientBinding {
