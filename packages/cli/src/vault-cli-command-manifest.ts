@@ -762,7 +762,7 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['knowledge', 'compile'],
         description:
-          'Use review:gpt to compile or refresh one derived knowledge page from local vault sources. Writes under derived/knowledge/pages/** and rebuilds the derived knowledge index. Derived/runtime inputs such as derived/** and .runtime/** are rejected.',
+          'Persist one assistant-authored derived knowledge page from local vault context. Writes under derived/knowledge/pages/**, rebuilds the derived knowledge index, and rejects derived/runtime source inputs such as derived/** and .runtime/**.',
         output: knowledgeCompileResultSchema,
       },
       {

@@ -35,45 +35,28 @@ describe('compileKnowledgePage', () => {
 
     const result = await compileKnowledgePage(
       {
+        body: [
+          '# Temporary heading',
+          '',
+          'Magnesium looked helpful in the recent notes.',
+          '',
+          '## Sources',
+          '',
+          '- `research/2026/04/stale-note.md`',
+          '',
+          '## Related',
+          '',
+          '- [[magnesium]]',
+          '',
+        ].join('\n'),
         vault: vaultRoot,
         prompt: 'Summarize the current sleep-quality notes.',
         title: 'Sleep quality',
         sourcePaths: [sourcePath],
       },
       {
-        async runProcess(input) {
-          const responseFile = readArgValue(input.args, '--response-file')
-          expect(input.command).toBe('pnpm')
-          expect(responseFile).toBeTruthy()
-          await writeFile(
-            responseFile!,
-            [
-              '# Temporary heading',
-              '',
-              'Magnesium looked helpful in the recent notes.',
-              '',
-              '## Sources',
-              '',
-              '- `research/2026/04/stale-note.md`',
-              '',
-              '## Related',
-              '',
-              '- [[magnesium]]',
-              '',
-            ].join('\n'),
-            'utf8',
-          )
-
-          return {
-            stdout: '',
-            stderr: '',
-          }
-        },
         async saveText(input) {
           await writeVaultFile(vaultRoot, input.relativePath, input.content)
-        },
-        async resolveAssistantDefaults() {
-          return null
         },
       },
     )
@@ -94,7 +77,7 @@ describe('compileKnowledgePage', () => {
       'utf8',
     )
     expect(savedPage).toContain('slug: sleep-quality')
-    expect(savedPage).toContain('compiler: review:gpt')
+    expect(savedPage).toContain('compiler: assistant')
     expect(savedPage).toContain('# Sleep quality')
     expect(savedPage).not.toContain('stale-note.md')
     expect(savedPage).toContain('## Sources')
@@ -118,84 +101,106 @@ describe('compileKnowledgePage', () => {
     expect(shown.page.relatedSlugs).toEqual(['magnesium'])
   })
 
-  it('preserves previously known source paths when recompiling with new local sources', async () => {
+  it('reuses existing source paths when refreshing without new source paths', async () => {
     const vaultRoot = await createVaultRoot()
     const firstSourcePath = 'research/2026/04/sleep-note.md'
-    const secondSourcePath = 'research/2026/04/magnesium-note.md'
     await writeVaultFile(
       vaultRoot,
       firstSourcePath,
       '# Sleep note\n\nEarlier notes linked better sleep to magnesium.\n',
     )
-    await writeVaultFile(
-      vaultRoot,
-      secondSourcePath,
-      '# Magnesium note\n\nA newer note pointed to fewer wakeups.\n',
-    )
-
-    let compileCount = 0
-    const prompts: string[] = []
-    const dependencies = {
-      async runProcess(input: { command: string; args: string[] }) {
-        const responseFile = readArgValue(input.args, '--response-file')
-        const prompt = readArgValue(input.args, '--prompt')
-        expect(input.command).toBe('pnpm')
-        expect(responseFile).toBeTruthy()
-        expect(prompt).toBeTruthy()
-        prompts.push(prompt!)
-        compileCount += 1
-        await writeFile(
-          responseFile!,
-          compileCount === 1
-            ? '# Sleep quality\n\nThe first pass mostly referenced the older sleep note.\n'
-            : '# Sleep quality\n\nThe refreshed page now includes the newer magnesium note too.\n',
-          'utf8',
-        )
-
-        return {
-          stdout: '',
-          stderr: '',
-        }
-      },
-      async saveText(input: { relativePath: string; content: string }) {
-        await writeVaultFile(vaultRoot, input.relativePath, input.content)
-      },
-      async resolveAssistantDefaults() {
-        return null
-      },
-    }
 
     await compileKnowledgePage(
       {
+        body: '# Sleep quality\n\nThe first pass mostly referenced the older sleep note.\n',
         vault: vaultRoot,
         prompt: 'Summarize my current sleep-quality notes.',
         title: 'Sleep quality',
         sourcePaths: [firstSourcePath],
       },
-      dependencies,
+      {
+        async saveText(input: { relativePath: string; content: string }) {
+          await writeVaultFile(vaultRoot, input.relativePath, input.content)
+        },
+      },
     )
 
     const refreshed = await compileKnowledgePage(
       {
+        body: '# Sleep quality\n\nThe refreshed page keeps the same source set.\n',
         vault: vaultRoot,
-        prompt: 'Refresh the sleep-quality page with the latest magnesium note.',
+        prompt: 'Refresh the sleep-quality page with the latest framing.',
         slug: 'sleep-quality',
-        sourcePaths: [secondSourcePath],
       },
-      dependencies,
+      {
+        async saveText(input: { relativePath: string; content: string }) {
+          await writeVaultFile(vaultRoot, input.relativePath, input.content)
+        },
+      },
     )
 
-    expect(refreshed.page.sourcePaths).toEqual([firstSourcePath, secondSourcePath])
-    expect(prompts).toHaveLength(2)
-    expect(prompts[1]).toContain(`### ${firstSourcePath}`)
-    expect(prompts[1]).toContain(`### ${secondSourcePath}`)
+    expect(refreshed.page.sourcePaths).toEqual([firstSourcePath])
 
     const savedPage = await readFile(
       path.join(vaultRoot, 'derived/knowledge/pages/sleep-quality.md'),
       'utf8',
     )
     expect(savedPage).toContain('`research/2026/04/sleep-note.md`')
-    expect(savedPage).toContain('`research/2026/04/magnesium-note.md`')
+  })
+
+  it('preserves existing source paths when explicit new sources are provided on refresh', async () => {
+    const vaultRoot = await createVaultRoot()
+    const firstSourcePath = 'research/2026/04/sleep-note.md'
+    const secondSourcePath = 'research/2026/04/magnesium-note.md'
+    await writeVaultFile(vaultRoot, firstSourcePath, '# Sleep note\n')
+    await writeVaultFile(vaultRoot, secondSourcePath, '# Magnesium note\n')
+
+    const saveText = async (input: { relativePath: string; content: string }) => {
+      await writeVaultFile(vaultRoot, input.relativePath, input.content)
+    }
+
+    await compileKnowledgePage(
+      {
+        body: '# Sleep quality\n\nInitial page body.\n',
+        vault: vaultRoot,
+        prompt: 'Create the sleep-quality page.',
+        title: 'Sleep quality',
+        sourcePaths: [firstSourcePath],
+      },
+      { saveText },
+    )
+
+    const refreshed = await compileKnowledgePage(
+      {
+        body: '# Sleep quality\n\nRefreshed with the new source only.\n',
+        vault: vaultRoot,
+        prompt: 'Refresh from the magnesium note only.',
+        slug: 'sleep-quality',
+        sourcePaths: [secondSourcePath],
+      },
+      { saveText },
+    )
+
+    expect(refreshed.page.sourcePaths).toEqual([firstSourcePath, secondSourcePath])
+  })
+
+  it('rejects directory source paths', async () => {
+    const vaultRoot = await createVaultRoot()
+    await writeVaultFile(vaultRoot, 'research/2026/04/sleep-note.md', '# Sleep note\n')
+    await mkdir(path.join(vaultRoot, 'research/2026/04/folder-source'), {
+      recursive: true,
+    })
+
+    await expect(
+      compileKnowledgePage({
+        body: '# Sleep quality\n\nBody.\n',
+        vault: vaultRoot,
+        prompt: 'Compile from a directory source path.',
+        sourcePaths: ['research/2026/04/folder-source'],
+      }),
+    ).rejects.toMatchObject({
+      code: 'knowledge_source_unreadable',
+    })
   })
 
   it('stores truncated summaries without the local truncation marker', async () => {
@@ -213,32 +218,15 @@ describe('compileKnowledgePage', () => {
 
     const result = await compileKnowledgePage(
       {
+        body: ['# Long note', '', longParagraph, ''].join('\n'),
         vault: vaultRoot,
         prompt: 'Summarize the long note.',
         title: 'Long note',
         sourcePaths: [sourcePath],
       },
       {
-        async runProcess(input) {
-          const responseFile = readArgValue(input.args, '--response-file')
-          expect(input.command).toBe('pnpm')
-          expect(responseFile).toBeTruthy()
-          await writeFile(
-            responseFile!,
-            ['# Long note', '', longParagraph, ''].join('\n'),
-            'utf8',
-          )
-
-          return {
-            stdout: '',
-            stderr: '',
-          }
-        },
         async saveText(input) {
           await writeVaultFile(vaultRoot, input.relativePath, input.content)
-        },
-        async resolveAssistantDefaults() {
-          return null
         },
       },
     )
@@ -267,17 +255,10 @@ describe('compileKnowledgePage', () => {
     await expect(
       compileKnowledgePage(
         {
+          body: '# Existing\n\nBody.\n',
           vault: vaultRoot,
           prompt: 'Compile from a forbidden source path.',
           sourcePaths: ['derived/knowledge/pages/existing.md'],
-        },
-        {
-          async runProcess() {
-            throw new Error('runProcess should not be reached for forbidden sources')
-          },
-          async resolveAssistantDefaults() {
-            return null
-          },
         },
       ),
     ).rejects.toMatchObject({
@@ -500,13 +481,4 @@ async function writeVaultFile(
     recursive: true,
   })
   await writeFile(absolutePath, content, 'utf8')
-}
-
-function readArgValue(args: readonly string[], flag: string): string | null {
-  const index = args.indexOf(flag)
-  if (index === -1 || index + 1 >= args.length) {
-    return null
-  }
-
-  return args[index + 1] ?? null
 }

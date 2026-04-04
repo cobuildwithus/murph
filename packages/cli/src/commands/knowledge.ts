@@ -23,7 +23,6 @@ import {
   searchKnowledgePages,
   showKnowledgePage,
 } from '../knowledge-runtime.js'
-import { researchExecutionModeValues } from '../research-cli-contracts.js'
 
 export function registerKnowledgeCommands(cli: Cli.Cli) {
   const knowledge = Cli.create('knowledge', {
@@ -33,7 +32,7 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
 
   knowledge.command('compile', {
     description:
-      'Use review:gpt to compile or refresh one derived knowledge page from local vault sources and rebuild the knowledge index.',
+      'Persist one assistant-authored derived knowledge page from local vault context and rebuild the knowledge index.',
     args: z.object({
       prompt: z
         .string()
@@ -41,6 +40,10 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
         .describe('What the knowledge page should explain, synthesize, or update.'),
     }),
     options: withBaseOptions({
+      body: z
+        .string()
+        .min(1)
+        .describe('Assistant-authored markdown body for the page. Do not include YAML frontmatter; Murph normalizes the title heading and sources section.'),
       title: z
         .string()
         .min(1)
@@ -63,46 +66,18 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
         .array(pathSchema)
         .optional()
         .describe('Optional vault-relative paths, or absolute paths that still resolve inside the selected vault. Repeat --source-path to include multiple files. Derived/runtime paths such as derived/** and .runtime/** are rejected.'),
-      mode: z
-        .enum(researchExecutionModeValues)
-        .optional()
-        .describe('Model mode. Defaults to gpt-pro for local synthesis; use deep-research when you want a slower current-evidence scan.'),
-      chat: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Optional ChatGPT chat URL or id to target instead of opening a fresh thread.'),
-      browserPath: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Optional Chromium-compatible browser binary override for review:gpt.'),
-      timeout: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Optional overall browser automation timeout such as 10m or 40m.'),
-      waitTimeout: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Optional assistant-response timeout override. Usually leave this unset.'),
     }),
     output: knowledgeCompileResultSchema,
     run({ args, options }) {
       return compileKnowledgePage({
         vault: options.vault,
+        body: options.body,
         prompt: args.prompt,
         title: options.title,
         slug: options.slug,
         pageType: options.pageType,
         status: options.status,
         sourcePaths: options.sourcePath,
-        mode: options.mode,
-        chat: options.chat,
-        browserPath: options.browserPath,
-        timeout: options.timeout,
-        waitTimeout: options.waitTimeout,
       })
     },
   })

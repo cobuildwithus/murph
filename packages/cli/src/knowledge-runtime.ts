@@ -1,6 +1,7 @@
-import { access, readFile } from 'node:fs/promises'
+import { access, readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { resolveAssistantVaultPath } from '@murphai/assistant-core'
+import { loadIntegratedRuntime } from '@murphai/assistant-core/usecases/runtime'
 import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 import {
   DERIVED_KNOWLEDGE_INDEX_PATH,
@@ -15,13 +16,6 @@ import {
   type DerivedKnowledgeNode,
 } from '@murphai/query'
 import {
-  runReviewGptPrompt,
-  saveVaultTextNote,
-  type BuildReviewGptWarnings,
-  type ReviewGptRuntimeDependencies,
-} from './review-gpt-runtime.js'
-import {
-  buildKnowledgeCompilePrompt,
   buildKnowledgeMarkdown,
   buildKnowledgePageRelativePath,
   deriveKnowledgeTitle,
@@ -30,8 +24,6 @@ import {
   normalizeSourcePathInputs,
   toKnowledgeMetadata,
   toKnowledgePage,
-  truncateContextText,
-  type KnowledgeSourceEntry,
 } from './knowledge-documents.js'
 import {
   type KnowledgeCompileResult,
@@ -46,15 +38,13 @@ import {
   collectKnowledgeLintProblems,
   requireUniqueKnowledgePageBySlug,
 } from './knowledge-lint.js'
-import { type ResearchExecutionMode } from './research-cli-contracts.js'
 
-const DEFAULT_KNOWLEDGE_MODE: ResearchExecutionMode = 'gpt-pro'
+const DEFAULT_KNOWLEDGE_COMPILER = 'assistant'
 const DEFAULT_KNOWLEDGE_PAGE_TYPE = 'concept'
 const DEFAULT_KNOWLEDGE_STATUS = 'active'
-const MAX_KNOWLEDGE_SOURCE_FILES = 12
-const MAX_KNOWLEDGE_SOURCE_CHARS = 16_000
 
 export interface KnowledgeCompileInput {
+  body: string
   vault: string
   prompt: string
   title?: string | null
@@ -62,15 +52,11 @@ export interface KnowledgeCompileInput {
   pageType?: string | null
   status?: string | null
   sourcePaths?: string[] | null
-  mode?: ResearchExecutionMode | null
-  chat?: string | null
-  browserPath?: string | null
-  timeout?: string | null
-  waitTimeout?: string | null
 }
 
-export interface KnowledgeCompileDependencies extends ReviewGptRuntimeDependencies {
+export interface KnowledgeCompileDependencies {
   now?: () => Date
+  readTextFile?: (filePath: string) => Promise<string>
   saveText?: (input: {
     vault: string
     relativePath: string
@@ -142,47 +128,18 @@ export async function compileKnowledgePage(
   )
   const existingSourcePaths = existingPage?.sourcePaths ?? []
   const explicitSourcePaths = normalizeSourcePathInputs(input.sourcePaths)
-  const compileSourcePaths = orderedUniqueStrings([
-    ...existingSourcePaths,
-    ...explicitSourcePaths,
-  ])
-
-  const sourceBundle = await collectKnowledgeSourceEntries(
+  const sourcePaths = await normalizeKnowledgeSourcePaths(
     input.vault,
-    compileSourcePaths,
-    dependencies.readTextFile ?? defaultReadTextFile,
+    explicitSourcePaths.length > 0
+      ? orderedUniqueStrings([...existingSourcePaths, ...explicitSourcePaths])
+      : existingSourcePaths,
   )
-  const sourcePaths = sourceBundle.entries.map((entry) => entry.relativePath)
-  const knowledgePrompt = buildKnowledgeCompilePrompt({
-    existingPage,
-    pageType,
-    prompt: input.prompt,
-    slug,
-    sourceEntries: sourceBundle.entries,
-    status,
-    title,
-  })
-  const review = await runReviewGptPrompt(
-    {
-      vault: input.vault,
-      prompt: knowledgePrompt,
-      mode: input.mode ?? DEFAULT_KNOWLEDGE_MODE,
-      chat: input.chat,
-      browserPath: input.browserPath,
-      timeout: input.timeout,
-      waitTimeout: input.waitTimeout,
-    },
-    dependencies,
-    {
-      buildWarnings: buildKnowledgeWarnings,
-    },
-  )
-
-  const normalizedBody = normalizeKnowledgeBody(review.response, title)
+  const normalizedBody = normalizeKnowledgeBody(input.body, title)
   const markdown = buildKnowledgeMarkdown({
     body: normalizedBody,
     compiledAt: savedAt,
-    mode: review.mode,
+    compiler: DEFAULT_KNOWLEDGE_COMPILER,
+    mode: null,
     pageType,
     slug,
     sourcePaths,
@@ -221,12 +178,11 @@ export async function compileKnowledgePage(
   return {
     vault: input.vault,
     indexPath: indexResult.indexPath,
-    mode: review.mode,
     page: toKnowledgeMetadata(page),
     prompt: input.prompt.trim(),
-    responseLength: review.responseLength,
+    bodyLength: normalizedBody.length,
     savedAt,
-    warnings: [...review.warnings, ...sourceBundle.warnings],
+    warnings: [],
   }
 }
 
@@ -350,67 +306,6 @@ export async function lintKnowledgePages(
   }
 }
 
-async function collectKnowledgeSourceEntries(
-  vaultRoot: string,
-  sourcePaths: readonly string[],
-  readTextFile: (filePath: string) => Promise<string>,
-): Promise<{ entries: KnowledgeSourceEntry[]; warnings: string[] }> {
-  const warnings: string[] = []
-  const entries: KnowledgeSourceEntry[] = []
-  const limitedSourcePaths = sourcePaths.slice(0, MAX_KNOWLEDGE_SOURCE_FILES)
-
-  if (sourcePaths.length > MAX_KNOWLEDGE_SOURCE_FILES) {
-    warnings.push(
-      `Knowledge compile only included the first ${MAX_KNOWLEDGE_SOURCE_FILES} source paths in this run.`,
-    )
-  }
-
-  for (const sourcePath of limitedSourcePaths) {
-    const absolutePath = await resolveAssistantVaultPath(vaultRoot, sourcePath, 'file path')
-    const relativePath = toVaultRelativePath(vaultRoot, absolutePath)
-    assertKnowledgeSourcePathAllowed(relativePath)
-    let content: string
-
-    try {
-      content = await readTextFile(absolutePath)
-    } catch (error) {
-      throw new VaultCliError(
-        'knowledge_source_unreadable',
-        `Could not read knowledge source path "${sourcePath}".`,
-        {
-          cause:
-            error instanceof Error && error.message.length > 0
-              ? error.message
-              : String(error),
-          sourcePath,
-        },
-      )
-    }
-
-    const normalizedContent = normalizeSourceText(content)
-    const { text: truncatedContent, truncated } = truncateContextText(
-      normalizedContent,
-      MAX_KNOWLEDGE_SOURCE_CHARS,
-    )
-
-    if (truncated) {
-      warnings.push(
-        `Knowledge source "${relativePath}" was truncated to ${MAX_KNOWLEDGE_SOURCE_CHARS} characters before compilation.`,
-      )
-    }
-
-    entries.push({
-      content: truncatedContent,
-      relativePath,
-    })
-  }
-
-  return {
-    entries,
-    warnings,
-  }
-}
-
 function normalizeKnowledgeFilters(input: {
   pageType?: string | null
   status?: string | null
@@ -443,7 +338,44 @@ async function knowledgePathExists(vaultRoot: string, candidatePath: string): Pr
   }
 }
 
-function saveKnowledgeText(input: {
+async function normalizeKnowledgeSourcePaths(
+  vaultRoot: string,
+  sourcePaths: readonly string[],
+): Promise<string[]> {
+  const normalizedSourcePaths: string[] = []
+
+  for (const sourcePath of sourcePaths) {
+    const absolutePath = await resolveAssistantVaultPath(vaultRoot, sourcePath, 'file path')
+    const relativePath = toVaultRelativePath(vaultRoot, absolutePath)
+    assertKnowledgeSourcePathAllowed(relativePath)
+
+    try {
+      const stats = await stat(absolutePath)
+
+      if (!stats.isFile()) {
+        throw new Error('Path is not a file.')
+      }
+    } catch (error) {
+      throw new VaultCliError(
+        'knowledge_source_unreadable',
+        `Could not read knowledge source path "${sourcePath}".`,
+        {
+          cause:
+            error instanceof Error && error.message.length > 0
+              ? error.message
+              : String(error),
+          sourcePath,
+        },
+      )
+    }
+
+    normalizedSourcePaths.push(relativePath)
+  }
+
+  return orderedUniqueStrings(normalizedSourcePaths)
+}
+
+async function saveKnowledgeText(input: {
   vault: string
   relativePath: string
   content: string
@@ -451,13 +383,18 @@ function saveKnowledgeText(input: {
   overwrite: boolean
   summary: string
 }): Promise<void> {
-  return saveVaultTextNote({
-    vault: input.vault,
-    relativePath: input.relativePath,
-    content: input.content,
+  const runtime = await loadIntegratedRuntime()
+  await runtime.core.applyCanonicalWriteBatch({
+    vaultRoot: input.vault,
     operationType: input.operationType,
-    overwrite: input.overwrite,
     summary: input.summary,
+    textWrites: [
+      {
+        relativePath: input.relativePath,
+        content: input.content,
+        overwrite: input.overwrite,
+      },
+    ],
   })
 }
 
@@ -468,42 +405,4 @@ function defaultReadTextFile(filePath: string): Promise<string> {
 function toVaultRelativePath(vaultRoot: string, absolutePath: string): string {
   const relativePath = path.relative(path.resolve(vaultRoot), absolutePath)
   return relativePath.split(path.sep).join(path.posix.sep)
-}
-
-function normalizeSourceText(value: string): string {
-  return String(value ?? '').replace(/\r\n?/gu, '\n').trim()
-}
-
-const buildKnowledgeWarnings: BuildReviewGptWarnings = (input) => {
-  const account = input.defaults?.account ?? null
-  const planCode =
-    typeof account?.planCode === 'string' ? account.planCode.trim().toLowerCase() : null
-  const planName =
-    typeof account?.planName === 'string' && account.planName.trim().length > 0
-      ? account.planName.trim()
-      : null
-
-  if (input.mode === 'gpt-pro') {
-    if (planCode === 'pro') {
-      return []
-    }
-
-    if (planName) {
-      return [
-        `Knowledge compile targets GPT Pro mode and may fail because the saved assistant account is ${planName}, not Pro.`,
-      ]
-    }
-
-    return [
-      'Knowledge compile targets GPT Pro mode and may fail because Murph could not verify a saved Pro assistant account on this machine.',
-    ]
-  }
-
-  if (planCode === 'free' || planCode === 'guest') {
-    return [
-      `Knowledge compile uses Deep Research and may be unavailable or more limited on the saved ${planName ?? 'Free'} account.`,
-    ]
-  }
-
-  return []
 }

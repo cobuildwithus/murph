@@ -5,7 +5,6 @@ import {
   slugSchema,
 } from '@murphai/assistant-core/vault-cli-contracts'
 import { DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT } from '@murphai/query'
-import { researchExecutionModeValues } from './research-cli-contracts.js'
 
 export const knowledgePageReferenceSchema = z.object({
   compiledAt: isoTimestampSchema.nullable(),
@@ -21,7 +20,7 @@ export const knowledgePageReferenceSchema = z.object({
 
 export const knowledgePageMetadataSchema = knowledgePageReferenceSchema.extend({
   compiler: z.string().min(1).nullable(),
-  mode: z.enum(researchExecutionModeValues).nullable(),
+  mode: z.string().min(1).nullable(),
 })
 
 export const knowledgePageSchema = knowledgePageMetadataSchema.extend({
@@ -32,10 +31,9 @@ export const knowledgePageSchema = knowledgePageMetadataSchema.extend({
 export const knowledgeCompileResultSchema = z.object({
   vault: pathSchema,
   indexPath: pathSchema,
-  mode: z.enum(researchExecutionModeValues),
   page: knowledgePageMetadataSchema,
   prompt: z.string().min(1),
-  responseLength: z.number().int().positive(),
+  bodyLength: z.number().int().positive(),
   savedAt: isoTimestampSchema,
   warnings: z.array(z.string().min(1)),
 })

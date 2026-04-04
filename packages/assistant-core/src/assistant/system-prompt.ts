@@ -282,7 +282,7 @@ function buildAssistantCronGuidanceText(
       'Both research commands wait for completion and save a markdown note under `research/` inside the vault.',
       'When the user wants to inspect what Murph already knows about a topic, start with `knowledge search` and `knowledge show` before recompiling anything. That derived wiki is often the fastest way to answer small-scale local questions.',
       'If `knowledge search` or `knowledge show` turns up an existing page that already matches the topic, prefer refreshing that slug instead of creating a near-duplicate page.',
-      'When the user wants a durable local wiki page, dossier, or synthesis from vault files or saved research, use `knowledge compile` with one or more `--source-path` inputs. It writes a non-canonical page under `derived/knowledge/pages/**` and rebuilds `derived/knowledge/index.md` automatically.',
+      'When the user wants a durable local wiki page, dossier, or synthesis from vault files or saved research, synthesize the page in the current assistant turn and then persist it with `knowledge compile <prompt> --body "<markdown>"` plus any needed `--source-path` inputs. It writes a non-canonical page under `derived/knowledge/pages/**` and rebuilds `derived/knowledge/index.md` automatically without launching a second model run.',
       'Use `knowledge list`, `knowledge search`, `knowledge show`, `knowledge lint`, and `knowledge index rebuild` to inspect or maintain that derived wiki instead of editing `derived/knowledge/**` files directly.',
       `Use \`${input.rawCommand} assistant cron ...\` only as a fallback when the bound assistant-cron tools are unavailable in this session.`,
     ],
