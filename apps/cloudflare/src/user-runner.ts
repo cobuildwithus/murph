@@ -1,5 +1,6 @@
 import type {
   HostedExecutionBundleRefs,
+  HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   HostedExecutionDispatchResult,
   HostedExecutionDispatchRequest,
   HostedExecutionRunLevel,
@@ -33,7 +34,7 @@ import {
 } from "@murphai/hosted-execution";
 
 import type { R2BucketLike } from "./bundle-store.js";
-import { createHostedDispatchPayloadStore } from "./dispatch-payload-store.js";
+import { createHostedExecutionDispatchPayloadStore } from "./dispatch-payload-store.js";
 import { createHostedDeviceSyncRuntimeStore } from "./device-sync-runtime-store.ts";
 import { createHostedPendingUsageStore } from "./usage-store.ts";
 import { HostedGatewayProjectionStore } from "./gateway-store.js";
@@ -120,9 +121,13 @@ export class HostedUserRunner {
     ).runnerContainerNamespace ?? null,
   ) {
     this.runnerContainerNamespace = runnerContainerNamespace;
-    this.queueStore = new RunnerQueueStore(state, null);
-    this.scheduler = new RunnerScheduler(this.queueStore, state, env.defaultAlarmDelayMs);
-    this.userKeyStore = createHostedUserKeyStore({
+    const dispatchPayloadStore = createHostedExecutionDispatchPayloadStore({
+      bucket,
+      key: env.bundleEncryptionKey,
+      keyId: env.bundleEncryptionKeyId,
+      keysById: env.bundleEncryptionKeysById,
+    });
+    const userKeyStore = createHostedUserKeyStore({
       automationRecipientKeyId: env.automationRecipientKeyId,
       automationRecipientPrivateKey: env.automationRecipientPrivateKey,
       automationRecipientPrivateKeysById: env.automationRecipientPrivateKeysById,
@@ -132,6 +137,30 @@ export class HostedUserRunner {
       envelopeEncryptionKeyId: env.bundleEncryptionKeyId,
       envelopeEncryptionKeysById: env.bundleEncryptionKeysById,
     });
+    this.userKeyStore = userKeyStore;
+    this.queueStore = new RunnerQueueStore(
+      state,
+      dispatchPayloadStore,
+      async (payloadJson) => {
+        try {
+          return await dispatchPayloadStore.readStoredDispatch(payloadJson);
+        } catch (error) {
+          const dispatchRef = dispatchPayloadStore.readStoredDispatchRef(payloadJson);
+          if (!dispatchRef) {
+            throw error;
+          }
+
+          const crypto = await userKeyStore.ensureUserCryptoContext(dispatchRef.userId);
+          return createHostedExecutionDispatchPayloadStore({
+            bucket,
+            key: crypto.rootKey,
+            keyId: crypto.rootKeyId,
+            keysById: crypto.keysById,
+          }).readStoredDispatch(payloadJson);
+        }
+      },
+    );
+    this.scheduler = new RunnerScheduler(this.queueStore, state, env.defaultAlarmDelayMs);
   }
 
   private async ensureRunnerStores(userId?: string): Promise<RunnerUserStores> {
@@ -160,12 +189,6 @@ export class HostedUserRunner {
 
   private async refreshRunnerStores(userId: string): Promise<RunnerUserStores> {
     const crypto = await this.userKeyStore.ensureUserCryptoContext(userId);
-    this.queueStore.setDispatchPayloadStore(createHostedDispatchPayloadStore({
-      bucket: this.bucket,
-      key: crypto.rootKey,
-      keyId: crypto.rootKeyId,
-      keysById: crypto.keysById,
-    }));
     const allowedUserEnvSource = this.readAllowedUserEnvSource();
     const hostedEmailConfig = readHostedEmailConfig(this.readWorkerStringEnvSource());
 
@@ -271,6 +294,24 @@ export class HostedUserRunner {
 
   async getUserKeyEnvelope(): Promise<HostedUserCryptoContext["envelope"]> {
     return (await this.ensureRunnerStores()).crypto.envelope;
+  }
+
+  async putDeviceSyncRuntimeSnapshot(input: {
+    snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse;
+  }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse> {
+    const userId = await this.requireBoundUserId();
+
+    if (input.snapshot.userId !== userId) {
+      throw new TypeError("Hosted device-sync runtime snapshot userId does not match the bound user.");
+    }
+
+    const { crypto } = await this.ensureRunnerStores(userId);
+    return createHostedDeviceSyncRuntimeStore({
+      bucket: this.bucket,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
+    }).mergeSnapshot(input.snapshot);
   }
 
   async putPendingUsage(input: {

@@ -29,6 +29,10 @@ export function buildHostedExecutionUserKeyRecipientPath(userId: string, kind: s
   return `/internal/users/${encodeURIComponent(userId)}/keys/recipients/${encodeURIComponent(kind)}`;
 }
 
+export function buildHostedExecutionUserDeviceSyncRuntimeSnapshotPath(userId: string): string {
+  return `/internal/users/${encodeURIComponent(userId)}/device-sync/runtime/snapshot`;
+}
+
 export function buildHostedExecutionUserPendingUsagePath(userId: string): string {
   return `/internal/users/${encodeURIComponent(userId)}/usage/pending`;
 }

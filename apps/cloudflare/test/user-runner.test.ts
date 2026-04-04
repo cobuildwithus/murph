@@ -30,6 +30,7 @@ import {
   persistHostedExecutionCommit,
   persistHostedExecutionFinalBundles,
 } from "../src/execution-journal.js";
+import { createHostedDispatchPayloadStore } from "../src/dispatch-payload-store.js";
 import { createHostedPendingUsageStore } from "../src/usage-store.js";
 import { createHostedUserKeyStore } from "../src/user-key-store.js";
 import { HostedUserRunner } from "../src/user-runner.js";
@@ -406,8 +407,10 @@ describe("HostedUserRunner", () => {
       const previousAgentRef = await bundleStore.writeBundle("agent-state", previousAgentBytes);
       const previousVaultRef = await bundleStore.writeBundle("vault", previousVaultBundle!);
 
-      seedRunnerQueueState(storage, {
+      await seedRunnerQueueState({
         activated: true,
+        bucket,
+        environment,
         pendingEvents: [
           {
             attempts: 1,
@@ -426,6 +429,7 @@ describe("HostedUserRunner", () => {
           },
         ],
         retryingEventId: "evt_recovered_gc",
+        storage,
         userId: "member_recovered_gc",
       });
 
@@ -892,8 +896,10 @@ describe("HostedUserRunner", () => {
       environment,
       userId: "member_123",
     });
-    seedRunnerQueueState(storage, {
+    await seedRunnerQueueState({
       activated: true,
+      bucket,
+      environment,
       pendingEvents: [{
         attempts: 1,
         availableAt: "2026-03-26T12:00:00.000Z",
@@ -902,6 +908,7 @@ describe("HostedUserRunner", () => {
         lastError: "lost ack",
       }],
       retryingEventId: "evt_gateway_recovery",
+      storage,
       userId: "member_123",
     });
 
@@ -1047,8 +1054,10 @@ describe("HostedUserRunner", () => {
       userId: dispatch.event.userId,
     });
 
-    seedRunnerQueueState(storage, {
+    await seedRunnerQueueState({
       activated: true,
+      bucket,
+      environment: rotatedEnvironment,
       pendingEvents: [
         {
           attempts: 1,
@@ -1059,6 +1068,7 @@ describe("HostedUserRunner", () => {
         },
       ],
       retryingEventId: dispatch.eventId,
+      storage,
       userId: dispatch.event.userId,
     });
 
@@ -1331,12 +1341,15 @@ describe("HostedUserRunner", () => {
         });
       }),
     );
-    seedRunnerQueueState(storage, {
+    await seedRunnerQueueState({
       activated: true,
+      bucket,
+      environment,
       lastError: null,
       lastEventId: "evt_seed_wake",
       lastRunAt: "2026-03-26T11:59:00.000Z",
       nextWakeAt: "2026-03-26T12:00:05.000Z",
+      storage,
       userId: "member_123",
     });
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
@@ -1890,7 +1903,7 @@ describe("HostedUserRunner", () => {
     });
 
     expect(second.bundleRefs).toEqual(first.bundleRefs);
-    expect(bucket.putCount()).toBe(writeCountAfterFirstRun + 1);
+    expect(bucket.putCount()).toBe(writeCountAfterFirstRun + 2);
   });
 
   it("serializes commit and finalize for the same event through one transition lock", async () => {
@@ -2068,7 +2081,9 @@ describe("HostedUserRunner", () => {
       });
     });
     vi.stubGlobal("fetch", fetchMock);
-    seedRunnerQueueState(storage, {
+    await seedRunnerQueueState({
+      bucket,
+      environment,
       pendingEvents: [
         {
           attempts: 0,
@@ -2085,6 +2100,7 @@ describe("HostedUserRunner", () => {
           lastError: null,
         },
       ],
+      storage,
       userId: "member_123",
     });
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
@@ -2516,8 +2532,10 @@ describe("HostedUserRunner", () => {
       eventId: "evt_ack_lost",
       occurredAt: "2026-03-26T12:20:00.000Z",
     };
-    seedRunnerQueueState(storage, {
+    await seedRunnerQueueState({
       activated: false,
+      bucket,
+      environment,
       lastError: "timeout",
       lastEventId: dispatch.eventId,
       pendingEvents: [
@@ -2530,6 +2548,7 @@ describe("HostedUserRunner", () => {
         },
       ],
       retryingEventId: dispatch.eventId,
+      storage,
       userId: dispatch.event.userId,
     });
     const crypto = await resolveHostedUserCryptoContextForTest({
@@ -3251,11 +3270,16 @@ function createStorage() {
   return storage;
 }
 
-function seedRunnerQueueState(
-  storage: ReturnType<typeof createStorage>,
+async function seedRunnerQueueState(
   input: {
     activated?: boolean;
     backpressuredEventIds?: string[];
+    bucket: ReturnType<typeof createBucket>;
+    environment: {
+      bundleEncryptionKey: Uint8Array;
+      bundleEncryptionKeyId: string;
+      bundleEncryptionKeysById?: Readonly<Record<string, Uint8Array>>;
+    };
     inFlight?: boolean;
     lastError?: string | null;
     lastErrorAt?: string | null;
@@ -3299,9 +3323,11 @@ function seedRunnerQueueState(
       poisonedAt: string;
     }>;
     retryingEventId?: string | null;
+    storage: ReturnType<typeof createStorage>;
     userId: string;
   },
-): void {
+): Promise<void> {
+  const { storage } = input;
   const sql = storage.state.storage.sql;
   if (!sql) {
     throw new Error("Test storage.sql is required.");
@@ -3357,18 +3383,28 @@ function seedRunnerQueueState(
     0,
   );
 
+  const dispatchPayloadStore = createHostedDispatchPayloadStore({
+    bucket: input.bucket.api,
+    key: input.environment.bundleEncryptionKey,
+    keyId: input.environment.bundleEncryptionKeyId,
+    keysById: input.environment.bundleEncryptionKeysById,
+  });
+
   for (const pendingEvent of input.pendingEvents ?? []) {
+    const payloadRef = await dispatchPayloadStore.writeDispatchPayload(
+      pendingEvent.dispatch as never,
+    );
     sql.exec(
       `INSERT INTO pending_events (
         event_id,
-        dispatch_json,
+        payload_key,
         attempts,
         available_at,
         enqueued_at,
         last_error
       ) VALUES (?, ?, ?, ?, ?, ?)`,
       pendingEvent.dispatch.eventId,
-      JSON.stringify(pendingEvent.dispatch),
+      payloadRef.key,
       pendingEvent.attempts,
       pendingEvent.availableAt,
       pendingEvent.enqueuedAt,

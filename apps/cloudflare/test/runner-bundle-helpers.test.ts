@@ -16,10 +16,13 @@ import {
   buildHostedStorageAad,
 } from "../src/crypto-context.js";
 import { encryptHostedBundle } from "../src/crypto.js";
+import { createHostedDispatchPayloadStore } from "../src/dispatch-payload-store.js";
 import { resolveHostedEmailIngressRoute } from "../src/hosted-email/routes.js";
 import { RunnerBundleSync } from "../src/user-runner/runner-bundle-sync.js";
 import { RunnerQueueStore } from "../src/user-runner/runner-queue-store.js";
+import { RunnerUserEnvService } from "../src/user-runner/runner-user-env.js";
 import { createTestSqlStorage } from "./sql-storage.js";
+import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers";
 
 describe("writeHostedBundleBytesIfChanged", () => {
   it("reuses the current ref when the payload identity is unchanged", async () => {
@@ -146,7 +149,14 @@ describe("RunnerBundleSync", () => {
         sql,
       },
     };
-    const queueStore = new RunnerQueueStore(state as never);
+    const queueStore = new RunnerQueueStore(
+      state as never,
+      createHostedDispatchPayloadStore({
+        bucket: new MemoryEncryptedR2Bucket(),
+        key: createTestRootKey(51),
+        keyId: "k-test",
+      }),
+    );
     await queueStore.bootstrapUser("member_123");
 
     const missingRef = {
@@ -172,7 +182,6 @@ describe("RunnerBundleSync", () => {
         v1: bundleKey,
       },
       queueStore,
-      {},
     );
 
     await expect(bundleSync.readBundlesForRunner()).rejects.toThrow(
@@ -182,47 +191,29 @@ describe("RunnerBundleSync", () => {
 
   it("syncs, moves, clears, and conflict-checks the public sender verified-owner index", async () => {
     const bucket = createBucketStore();
-    const sharedUserEnvSource = {
-      HOSTED_EMAIL_DOMAIN: hostedEmailConfig.domain,
-      HOSTED_EMAIL_FROM_ADDRESS: hostedEmailConfig.fromAddress,
-      HOSTED_EMAIL_LOCAL_PART: hostedEmailConfig.localPart,
-      HOSTED_EMAIL_SIGNING_SECRET: hostedEmailConfig.signingSecret,
-    };
-    const firstQueueStore = new RunnerQueueStore({
-      storage: {
-        sql: createTestSqlStorage(),
-      },
-    } as never);
-    const secondQueueStore = new RunnerQueueStore({
-      storage: {
-        sql: createTestSqlStorage(),
-      },
-    } as never);
-    await firstQueueStore.bootstrapUser("member_123");
-    await secondQueueStore.bootstrapUser("member_456");
 
-    const firstBundleSync = new RunnerBundleSync(
+    const firstUserEnv = new RunnerUserEnvService(
       bucket.api,
       bundleKey,
       "v1",
       {
         v1: bundleKey,
       },
-      firstQueueStore,
-      sharedUserEnvSource,
+      {},
+      hostedEmailConfig,
     );
-    const secondBundleSync = new RunnerBundleSync(
+    const secondUserEnv = new RunnerUserEnvService(
       bucket.api,
       bundleKey,
       "v1",
       {
         v1: bundleKey,
       },
-      secondQueueStore,
-      sharedUserEnvSource,
+      {},
+      hostedEmailConfig,
     );
 
-    await firstBundleSync.updateUserEnv("member_123", {
+    await firstUserEnv.updateUserEnv("member_123", {
       env: createHostedVerifiedEmailUserEnv({
         address: "owner@example.test",
       }),
@@ -243,7 +234,7 @@ describe("RunnerBundleSync", () => {
       userId: "member_123",
     });
 
-    await firstBundleSync.updateUserEnv("member_123", {
+    await firstUserEnv.updateUserEnv("member_123", {
       env: createHostedVerifiedEmailUserEnv({
         address: "new-owner@example.test",
       }),
@@ -273,14 +264,14 @@ describe("RunnerBundleSync", () => {
       userId: "member_123",
     });
 
-    await expect(secondBundleSync.updateUserEnv("member_456", {
+    await expect(secondUserEnv.updateUserEnv("member_456", {
       env: createHostedVerifiedEmailUserEnv({
         address: "new-owner@example.test",
       }),
       mode: "replace",
     })).rejects.toThrow("Hosted verified email sender route is already assigned to a different user.");
 
-    await firstBundleSync.updateUserEnv("member_123", {
+    await firstUserEnv.updateUserEnv("member_123", {
       env: {},
       mode: "replace",
     });

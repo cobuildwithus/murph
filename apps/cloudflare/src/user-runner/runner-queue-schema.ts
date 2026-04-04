@@ -31,16 +31,7 @@ export function ensureRunnerQueueSchema(sql: DurableObjectSqlStorageLike): void 
       bundle_version INTEGER NOT NULL DEFAULT 0
     )
   `);
-  sql.exec(`
-    CREATE TABLE IF NOT EXISTS pending_events (
-      event_id TEXT PRIMARY KEY,
-      dispatch_json TEXT NOT NULL,
-      attempts INTEGER NOT NULL,
-      available_at TEXT NOT NULL,
-      enqueued_at TEXT NOT NULL,
-      last_error TEXT
-    )
-  `);
+  ensurePendingEventsTable(sql);
   sql.exec(`
     CREATE INDEX IF NOT EXISTS pending_events_available_at_idx
     ON pending_events (available_at, enqueued_at, event_id)
@@ -75,6 +66,34 @@ export function ensureRunnerQueueSchema(sql: DurableObjectSqlStorageLike): void 
     ensureRunnerMetaColumn(sql, columnName, columnDefinition);
   }
   sql.exec("DROP TABLE IF EXISTS consumed_event_replay_filter");
+}
+
+export function readRunnerPendingEventsColumns(sql: DurableObjectSqlStorageLike): string[] {
+  return sql.exec<{ name: DurableObjectSqlValue }>(
+    "PRAGMA table_info(pending_events)",
+  ).toArray().map((row) => row.name).filter((name): name is string => typeof name === "string");
+}
+
+export function runnerPendingEventsNeedsPayloadMigration(sql: DurableObjectSqlStorageLike): boolean {
+  const columns = readRunnerPendingEventsColumns(sql);
+  return columns.length > 0 && !columns.includes("payload_key");
+}
+
+function ensurePendingEventsTable(sql: DurableObjectSqlStorageLike): void {
+  if (readRunnerPendingEventsColumns(sql).length > 0) {
+    return;
+  }
+
+  sql.exec(`
+    CREATE TABLE IF NOT EXISTS pending_events (
+      event_id TEXT PRIMARY KEY,
+      payload_key TEXT NOT NULL,
+      attempts INTEGER NOT NULL,
+      available_at TEXT NOT NULL,
+      enqueued_at TEXT NOT NULL,
+      last_error TEXT
+    )
+  `);
 }
 
 function ensureRunnerMetaColumn(

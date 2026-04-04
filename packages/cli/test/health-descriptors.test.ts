@@ -75,6 +75,18 @@ test("protocol CLI descriptor reuses CLI-owned registry command and runtime meta
   assert.equal(descriptor?.core?.resultIdField, protocolRegistryEntityDefinition.registry.idField);
 });
 
+test("registry command metadata derives spaced method stems and status labels from shared nouns", () => {
+  const family = getHealthRegistryCommandMetadata("family");
+  const genetics = getHealthRegistryCommandMetadata("genetics");
+
+  assert.equal(family.listServiceMethod, "listFamilyMembers");
+  assert.equal(family.runtimeMethod, "upsertFamilyMember");
+  assert.equal(family.runtimeShowMethod, "showFamilyMember");
+  assert.equal(genetics.listServiceMethod, "listGeneticVariants");
+  assert.equal(genetics.runtimeMethod, "upsertGeneticVariant");
+  assert.equal(genetics.listStatusDescription, "Optional genetic-variant status to filter by.");
+});
+
 test("explicit health services reuse shared protocol metadata and nested registry envelopes", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "protocol.json");

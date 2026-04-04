@@ -3,27 +3,39 @@ import {
   buildHostedExecutionOutboxPayload,
   parseHostedExecutionDispatchRequest,
   readHostedExecutionOutboxPayload,
+  resolveHostedExecutionOutboxPayloadStorage,
   type HostedExecutionDispatchRef,
   type HostedExecutionDispatchRequest,
   type HostedExecutionOutboxPayload,
-  type HostedExecutionOutboxPayloadStorage,
 } from "@murphai/hosted-execution";
 
 import type { R2BucketLike } from "./bundle-store.js";
+import { buildHostedStorageAad } from "./crypto-context.js";
 import {
-  buildHostedStorageAad,
-  deriveHostedStorageOpaqueId,
-} from "./crypto-context.js";
-import { listHostedStorageObjectKeys } from "./storage-paths.js";
+  hostedDispatchPayloadObjectKey,
+  hostedDispatchPayloadObjectKeys,
+} from "./storage-paths.js";
 import {
   readEncryptedR2Json,
   writeEncryptedR2Json,
 } from "./crypto.js";
 
+export interface HostedExecutionDispatchPayloadRef {
+  legacyDispatchRef?: HostedExecutionDispatchRef;
+  key: string;
+}
+
 export interface HostedDispatchPayloadStore {
+  deleteDispatchPayload(ref: HostedExecutionDispatchPayloadRef): Promise<void>;
   deleteStoredDispatchPayload(payloadJson: string): Promise<void>;
+  readDispatchPayload(
+    ref: HostedExecutionDispatchPayloadRef,
+  ): Promise<HostedExecutionDispatchRequest | null>;
   readStoredDispatch(payloadJson: string): Promise<HostedExecutionDispatchRequest>;
   readStoredDispatchRef(payloadJson: string): HostedExecutionDispatchRef | null;
+  writeDispatchPayload(
+    dispatch: HostedExecutionDispatchRequest,
+  ): Promise<HostedExecutionDispatchPayloadRef>;
   writeStoredDispatch(dispatch: HostedExecutionDispatchRequest): Promise<string>;
 }
 
@@ -34,20 +46,63 @@ export function createHostedDispatchPayloadStore(input: {
   keysById?: Readonly<Record<string, Uint8Array>>;
 }): HostedDispatchPayloadStore {
   return {
-    async deleteStoredDispatchPayload(payloadJson) {
-      const dispatchRef = readStoredReferenceDispatchRef(payloadJson);
-
-      if (!dispatchRef) {
-        return;
-      }
-
+    async deleteDispatchPayload(ref) {
       if (!input.bucket.delete) {
         return;
       }
 
-      for (const key of await hostedDispatchPayloadObjectKeys(input.key, input.keysById, dispatchRef)) {
+      await input.bucket.delete(ref.key);
+    },
+
+    async deleteStoredDispatchPayload(payloadJson) {
+      const dispatchRef = readStoredReferenceDispatchRef(payloadJson);
+
+      if (!dispatchRef || !input.bucket.delete) {
+        return;
+      }
+
+      for (const key of await hostedDispatchPayloadObjectKeys(
+        input.key,
+        input.keysById,
+        dispatchRef.userId,
+        dispatchRef.eventId,
+      )) {
         await input.bucket.delete(key);
       }
+    },
+
+    async readDispatchPayload(ref) {
+      try {
+        return await readEncryptedR2Json({
+          aad: buildCurrentDispatchPayloadAad(ref.key),
+          bucket: input.bucket,
+          cryptoKey: input.key,
+          cryptoKeysById: input.keysById,
+          expectedKeyId: input.keyId,
+          key: ref.key,
+          parse(value) {
+            return parseHostedExecutionDispatchRequest(value);
+          },
+          scope: "dispatch-payload",
+        });
+      } catch (error) {
+        if (!ref.legacyDispatchRef) {
+          throw error;
+        }
+      }
+
+      return readEncryptedR2Json({
+        aad: buildLegacyDispatchPayloadAad(ref.key, ref.legacyDispatchRef),
+        bucket: input.bucket,
+        cryptoKey: input.key,
+        cryptoKeysById: input.keysById,
+        expectedKeyId: input.keyId,
+        key: ref.key,
+        parse(value) {
+          return parseHostedExecutionDispatchRequest(value);
+        },
+        scope: "dispatch-payload",
+      });
     },
 
     async readStoredDispatch(payloadJson) {
@@ -61,26 +116,12 @@ export function createHostedDispatchPayloadStore(input: {
         for (const key of await hostedDispatchPayloadObjectKeys(
           input.key,
           input.keysById,
-          payload.dispatchRef,
+          payload.dispatchRef.userId,
+          payload.dispatchRef.eventId,
         )) {
-          const dispatch = await readEncryptedR2Json({
-            aad: buildHostedStorageAad({
-              eventId: payload.dispatchRef.eventId,
-              eventKind: payload.dispatchRef.eventKind,
-              key,
-              occurredAt: payload.dispatchRef.occurredAt,
-              purpose: "dispatch-payload",
-              userId: payload.dispatchRef.userId,
-            }),
-            bucket: input.bucket,
-            cryptoKey: input.key,
-            cryptoKeysById: input.keysById,
-            expectedKeyId: input.keyId,
+          const dispatch = await this.readDispatchPayload({
             key,
-            parse(value) {
-              return parseHostedExecutionDispatchRequest(value);
-            },
-            scope: "dispatch-payload",
+            legacyDispatchRef: payload.dispatchRef,
           });
 
           if (!dispatch) {
@@ -119,26 +160,14 @@ export function createHostedDispatchPayloadStore(input: {
       }
     },
 
-    async writeStoredDispatch(dispatch) {
-      const storage = resolveHostedRunnerDispatchPayloadStorage(dispatch);
-      const payload = buildHostedExecutionOutboxPayload(dispatch, {
-        storage,
-      });
-
-      if (payload.storage === "inline") {
-        return JSON.stringify(payload);
-      }
-
-      const key = await hostedDispatchPayloadObjectKey(input.key, payload.dispatchRef);
+    async writeDispatchPayload(dispatch) {
+      const key = await hostedDispatchPayloadObjectKey(
+        input.key,
+        dispatch.event.userId,
+        dispatch.eventId,
+      );
       await writeEncryptedR2Json({
-        aad: buildHostedStorageAad({
-          eventId: payload.dispatchRef.eventId,
-          eventKind: payload.dispatchRef.eventKind,
-          key,
-          occurredAt: payload.dispatchRef.occurredAt,
-          purpose: "dispatch-payload",
-          userId: payload.dispatchRef.userId,
-        }),
+        aad: buildCurrentDispatchPayloadAad(key),
         bucket: input.bucket,
         cryptoKey: input.key,
         key,
@@ -147,29 +176,20 @@ export function createHostedDispatchPayloadStore(input: {
         value: dispatch,
       });
 
+      return { key };
+    },
+
+    async writeStoredDispatch(dispatch) {
+      const payload = buildHostedExecutionOutboxPayload(dispatch);
+
+      if (payload.storage === "inline") {
+        return JSON.stringify(payload);
+      }
+
+      await this.writeDispatchPayload(dispatch);
       return JSON.stringify(payload);
     },
   };
-}
-
-export function resolveHostedRunnerDispatchPayloadStorage(
-  dispatch: HostedExecutionDispatchRequest,
-): HostedExecutionOutboxPayloadStorage {
-  switch (dispatch.event.kind) {
-    case "member.activated":
-    case "linq.message.received":
-    case "telegram.message.received":
-    case "device-sync.wake":
-    case "gateway.message.send":
-      return "reference";
-    case "assistant.cron.tick":
-    case "email.message.received":
-      return "inline";
-    case "vault.share.accepted":
-      return "reference";
-    default:
-      throw new TypeError("Unsupported hosted dispatch payload storage event kind.");
-  }
 }
 
 function readStoredDispatchPayloadEnvelope(payloadJson: string): HostedExecutionOutboxPayload | null {
@@ -182,34 +202,25 @@ function readStoredReferenceDispatchRef(payloadJson: string): HostedExecutionDis
   return payload?.storage === "reference" ? payload.dispatchRef : null;
 }
 
-async function hostedDispatchPayloadObjectKey(
-  rootKey: Uint8Array,
-  dispatchRef: HostedExecutionDispatchRef,
-): Promise<string> {
-  const userSegment = await deriveHostedStorageOpaqueId({
-    length: 24,
-    rootKey,
-    scope: "dispatch-payload-path",
-    value: `user:${dispatchRef.userId}`,
+function buildCurrentDispatchPayloadAad(key: string): Uint8Array {
+  return buildHostedStorageAad({
+    key,
+    purpose: "dispatch-payload",
   });
-  const eventSegment = await deriveHostedStorageOpaqueId({
-    length: 40,
-    rootKey,
-    scope: "dispatch-payload-path",
-    value: `event:${dispatchRef.userId}:${dispatchRef.eventId}`,
-  });
-
-  return `transient/dispatch-payloads/${userSegment}/${eventSegment}.json`;
 }
 
-async function hostedDispatchPayloadObjectKeys(
-  rootKey: Uint8Array,
-  keysById: Readonly<Record<string, Uint8Array>> | undefined,
+function buildLegacyDispatchPayloadAad(
+  key: string,
   dispatchRef: HostedExecutionDispatchRef,
-): Promise<string[]> {
-  return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
-    hostedDispatchPayloadObjectKey(candidateRootKey, dispatchRef)
-  );
+): Uint8Array {
+  return buildHostedStorageAad({
+    eventId: dispatchRef.eventId,
+    eventKind: dispatchRef.eventKind,
+    key,
+    occurredAt: dispatchRef.occurredAt,
+    purpose: "dispatch-payload",
+    userId: dispatchRef.userId,
+  });
 }
 
 function assertHostedDispatchMatchesRef(
@@ -229,3 +240,11 @@ function assertHostedDispatchMatchesRef(
     `Hosted dispatch payload ${dispatchRef.userId}/${dispatchRef.eventId} does not match its stored dispatch ref.`,
   );
 }
+
+export function resolveHostedRunnerDispatchPayloadStorage(
+  dispatch: HostedExecutionDispatchRequest,
+) {
+  return resolveHostedExecutionOutboxPayloadStorage(dispatch, "auto");
+}
+
+export const createHostedExecutionDispatchPayloadStore = createHostedDispatchPayloadStore;

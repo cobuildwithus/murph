@@ -9,9 +9,9 @@ import {
 
 import {
   buildHostedStorageAad,
-  deriveHostedStorageOpaqueId,
 } from "./crypto-context.js";
 import {
+  hostedBundleObjectKey,
   hostedArtifactObjectKey,
   hostedArtifactObjectKeys,
   hostedUserEnvObjectKey,
@@ -158,7 +158,7 @@ export function createHostedBundleStore(input: {
 
     async writeBundle(kind, plaintext) {
       const hash = sha256HostedBundleHex(plaintext);
-      const key = await bundleObjectKey(input.key, kind, hash);
+      const key = await hostedBundleObjectKey(input.key, kind, hash);
       await writeEncryptedR2Payload({
         aad: buildHostedStorageAad({
           hash,
@@ -317,21 +317,6 @@ export function createHostedUserEnvStore(input: {
       });
     },
   };
-}
-
-async function bundleObjectKey(
-  rootKey: Uint8Array,
-  kind: HostedExecutionBundleKind,
-  hash: string,
-): Promise<string> {
-  const hashSegment = await deriveHostedStorageOpaqueId({
-    length: 48,
-    rootKey,
-    scope: "bundle-path",
-    value: `${kind}:${hash}`,
-  });
-
-  return `bundles/${kind}/${hashSegment}.bundle.json`;
 }
 
 function pendingBundleRefKey(kind: HostedExecutionBundleKind): string {

@@ -34,7 +34,7 @@ export function buildHostedExecutionOutboxPayload(
     storage?: HostedExecutionOutboxPayloadStorage | "auto";
   } = {},
 ): HostedExecutionOutboxPayload {
-  const storage = resolveHostedExecutionOutboxPayloadStorage(dispatch, options.storage ?? "auto");
+  const storage = resolveHostedExecutionDispatchPayloadStorage(dispatch, options.storage ?? "auto");
 
   if (storage === "inline") {
     return {
@@ -84,7 +84,7 @@ export function readHostedExecutionOutboxPayload(
   return null;
 }
 
-export function resolveHostedExecutionOutboxPayloadStorage(
+export function resolveHostedExecutionDispatchPayloadStorage(
   dispatch: HostedExecutionDispatchRequest,
   requested: HostedExecutionOutboxPayloadStorage | "auto",
 ): HostedExecutionOutboxPayloadStorage {
@@ -107,6 +107,9 @@ export function resolveHostedExecutionOutboxPayloadStorage(
       throw new TypeError("Unsupported hosted execution event kind.");
   }
 }
+
+export const resolveHostedExecutionOutboxPayloadStorage =
+  resolveHostedExecutionDispatchPayloadStorage;
 
 function readText(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;

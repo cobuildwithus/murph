@@ -27,6 +27,7 @@ import {
   CONSUMED_EVENT_EXACT_TTL_MS,
   MAX_RUN_TIMELINE_ENTRIES,
   type DurableObjectSqlValue,
+  type PendingDispatchMetaRecord,
   type RunnerBundleVersions,
   type RunnerStateRecord,
   earliestIsoTimestamp,
@@ -169,7 +170,7 @@ export function projectRunnerStateRecord(input: {
   bundleSlots: RunnerStoredBundleSlots;
   meta: RunnerMetaRow;
   nextPendingAvailableAt: string | null;
-  pendingEventCount: number;
+  pendingDispatches: readonly PendingDispatchMetaRecord[];
   poisonedEventIds: readonly string[];
 }): RunnerStateProjection {
   const bundleRefState = sanitizeStoredBundleRefs(input.bundleSlots);
@@ -194,7 +195,7 @@ export function projectRunnerStateRecord(input: {
       lastRunAt: input.meta.last_run_at,
       nextPendingAvailableAt: input.nextPendingAvailableAt,
       nextWakeAt: input.meta.next_wake_at,
-      pendingEventCount: input.pendingEventCount,
+      pendingEventCount: input.pendingDispatches.length,
       poisonedEventIds: [...input.poisonedEventIds],
       run: runTraceState.run,
       retryingEventId: input.meta.retrying_event_id,

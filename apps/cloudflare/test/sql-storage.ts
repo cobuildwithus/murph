@@ -89,7 +89,7 @@ function initializeSchema(database: DatabaseSync): void {
     );
     CREATE TABLE IF NOT EXISTS pending_events (
       event_id TEXT PRIMARY KEY,
-      dispatch_json TEXT NOT NULL,
+      payload_key TEXT NOT NULL,
       attempts INTEGER NOT NULL,
       available_at TEXT NOT NULL,
       enqueued_at TEXT NOT NULL,

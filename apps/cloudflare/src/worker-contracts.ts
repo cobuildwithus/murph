@@ -20,6 +20,7 @@ import type {
 } from "@murphai/gateway-core";
 import type {
   HostedExecutionBundleRefs,
+  HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/hosted-execution";
 
 import type { R2BucketLike } from "./bundle-store.ts";
@@ -53,6 +54,9 @@ export interface WorkerUserRunnerStubLike {
   gatewayPollEvents?(input?: GatewayPollEventsInput): Promise<GatewayPollEventsResult>;
   gatewayReadMessages?(input: GatewayReadMessagesInput): Promise<GatewayReadMessagesResult>;
   gatewayRespondToPermission?(input: GatewayRespondToPermissionInput): Promise<GatewayPermissionRequest | null>;
+  putDeviceSyncRuntimeSnapshot?(input: {
+    snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse;
+  }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
   putPendingUsage?(input: {
     usage: readonly Record<string, unknown>[];
   }): Promise<{ recorded: number; usageIds: string[] }>;

@@ -6,10 +6,6 @@ import {
 } from "@murphai/hosted-execution";
 
 import { buildHostedDeviceSyncWakeDispatchFromSignal } from "../device-sync/hosted-dispatch";
-import { createHostedSecretCodec } from "../device-sync/crypto";
-import { readHostedDeviceSyncEnvironment } from "../device-sync/env";
-import { buildHostedDeviceSyncRuntimeSnapshot } from "../device-sync/internal-runtime";
-import { PrismaDeviceSyncControlPlaneStore } from "../device-sync/prisma-store";
 import { toJsonRecord } from "../device-sync/shared";
 import { buildHostedMemberActivationFirstContact } from "../hosted-onboarding/member-activation";
 import { readHostedWebhookReceiptDispatchByEventId } from "../hosted-onboarding/webhook-receipt-dispatch";
@@ -215,47 +211,17 @@ async function hydrateHostedExecutionDispatchFromDeviceSyncSignal(
     );
   }
 
-  const runtimeSnapshot = await hydrateHostedDeviceSyncRuntimeSnapshot({
-    connectionId: signal.connectionId,
-    prisma,
-    provider: signal.provider,
-    userId: signal.userId,
-  });
   const dispatch = buildHostedDeviceSyncWakeDispatchFromSignal({
     connectionId: signal.connectionId,
     eventId: record.eventId,
     occurredAt: signal.createdAt.toISOString(),
     provider: signal.provider,
-    runtimeSnapshot,
     signalKind: signal.kind,
     signalPayload: toJsonRecord(signal.payloadJson),
     userId: signal.userId,
   });
 
   return validateHydratedHostedExecutionDispatch(dispatch, record);
-}
-
-async function hydrateHostedDeviceSyncRuntimeSnapshot(input: {
-  connectionId: string | null;
-  prisma: HostedExecutionHydrationClient;
-  provider: string | null;
-  userId: string;
-}) {
-  const environment = readHostedDeviceSyncEnvironment();
-  const store = new PrismaDeviceSyncControlPlaneStore({
-    prisma: input.prisma,
-    codec: createHostedSecretCodec({
-      key: environment.encryptionKey,
-      keyVersion: environment.encryptionKeyVersion,
-      keysByVersion: environment.encryptionKeysByVersion,
-    }),
-  });
-
-  return buildHostedDeviceSyncRuntimeSnapshot(store, {
-    ...(input.connectionId ? { connectionId: input.connectionId } : {}),
-    ...(input.provider ? { provider: input.provider } : {}),
-    userId: input.userId,
-  });
 }
 
 function parseHostedWebhookReceiptSourceId(
