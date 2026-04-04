@@ -5,12 +5,13 @@ import {
   DERIVED_KNOWLEDGE_PAGES_ROOT,
   type DerivedKnowledgeNode,
   humanizeKnowledgeTag,
+  normalizeKnowledgeTag,
+  orderedUniqueStrings,
 } from '@murphai/query'
 import {
   type KnowledgePage,
   type KnowledgePageMetadata,
 } from './knowledge-cli-contracts.js'
-import { type ResearchExecutionMode } from './research-cli-contracts.js'
 
 const MAX_EXISTING_PAGE_CHARS = 18_000
 const LOCAL_CONTEXT_TRUNCATION_SUFFIX = '\n\n[truncated locally]'
@@ -132,7 +133,8 @@ export function normalizeKnowledgeBody(response: string, title: string): string 
 export function buildKnowledgeMarkdown(input: {
   body: string
   compiledAt: string
-  mode: ResearchExecutionMode
+  compiler: string
+  mode?: string | null
   pageType: string
   slug: string
   sourcePaths: string[]
@@ -142,7 +144,7 @@ export function buildKnowledgeMarkdown(input: {
 }): string {
   const attributes = compactRecord({
     compiledAt: input.compiledAt,
-    compiler: 'review:gpt',
+    compiler: input.compiler,
     mode: input.mode,
     pageType: input.pageType,
     slug: input.slug,
@@ -185,6 +187,29 @@ export function toKnowledgePage(page: DerivedKnowledgeNode, markdown: string): K
   }
 }
 
+export function normalizeSourcePathInputs(value: readonly string[] | null | undefined): string[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return orderedUniqueStrings(
+    value
+      .map((entry) => String(entry ?? '').trim())
+      .filter((entry) => entry.length > 0),
+  )
+}
+
+export function matchesKnowledgeFilter(
+  value: string | null | undefined,
+  filter: string | null,
+): boolean {
+  if (!filter) {
+    return true
+  }
+
+  return normalizeKnowledgeTag(value) === filter
+}
+
 export function truncateContextText(
   value: string,
   limit: number,
@@ -203,8 +228,9 @@ export function truncateContextText(
   }
 }
 
-function normalizeKnowledgeMode(value: string | null): ResearchExecutionMode | null {
-  return value === 'deep-research' || value === 'gpt-pro' ? value : null
+function normalizeKnowledgeMode(value: string | null): string | null {
+  const normalized = normalizeOptionalText(value)
+  return normalized ?? null
 }
 
 function appendKnowledgeSourcesSection(body: string, sourcePaths: readonly string[]): string {

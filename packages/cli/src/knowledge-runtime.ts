@@ -25,7 +25,9 @@ import {
   buildKnowledgeMarkdown,
   buildKnowledgePageRelativePath,
   deriveKnowledgeTitle,
+  matchesKnowledgeFilter,
   normalizeKnowledgeBody,
+  normalizeSourcePathInputs,
   toKnowledgeMetadata,
   toKnowledgePage,
   truncateContextText,
@@ -429,26 +431,6 @@ function resolveKnowledgeMetadataTag(
     normalizeKnowledgeTag(fallbackValue) ??
     defaultValue
   )
-}
-
-function normalizeSourcePathInputs(value: readonly string[] | null | undefined): string[] {
-  if (!Array.isArray(value)) {
-    return []
-  }
-
-  return orderedUniqueStrings(
-    value
-      .map((entry) => String(entry ?? '').trim())
-      .filter((entry) => entry.length > 0),
-  )
-}
-
-function matchesKnowledgeFilter(value: string | null | undefined, filter: string | null): boolean {
-  if (!filter) {
-    return true
-  }
-
-  return normalizeKnowledgeTag(value) === filter
 }
 
 async function knowledgePathExists(vaultRoot: string, candidatePath: string): Promise<boolean> {
