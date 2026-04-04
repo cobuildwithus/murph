@@ -1,6 +1,7 @@
 import type {
   AssistantSession,
 } from '../assistant-cli-contracts.js'
+import { markAssistantFirstContactSeen } from './first-contact.js'
 import { normalizeAssistantDeliveryError } from './outbox.js'
 import { sanitizeAssistantOutboundReply } from './reply-sanitizer.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
@@ -83,6 +84,8 @@ export async function deliverAssistantReply(input: {
 }
 
 export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
+  firstTurnCheckInInjected?: boolean
+  firstTurnCheckInStateDocId?: string | null
   outcome: AssistantDeliveryOutcome
   response: string
   turnId: string
@@ -98,6 +101,13 @@ export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
   const state = createAssistantRuntimeStateService(input.vault)
   await state.turns.finalizeReceipt(plan.receipt)
   await state.diagnostics.recordEvent(plan.diagnostic)
+  if (input.firstTurnCheckInInjected === true && input.outcome.kind === 'sent') {
+    await markAssistantFirstContactSeen({
+      docId: input.firstTurnCheckInStateDocId ?? null,
+      seenAt: completedAt,
+      vault: input.vault,
+    })
+  }
 }
 
 export function buildAssistantTurnDeliveryFinalizationPlan(input: {
