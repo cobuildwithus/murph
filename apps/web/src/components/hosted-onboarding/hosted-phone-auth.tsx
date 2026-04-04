@@ -7,7 +7,7 @@ import {
   useUser,
 } from "@privy-io/react-auth";
 import { LoaderCircleIcon } from "lucide-react";
-import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -30,13 +30,8 @@ import {
   HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS,
   readHostedPrivyClientSessionState,
   resolveHostedPrivyClientSessionIssue,
-  shouldShowHostedPrivyManualResumeState,
   shouldShowHostedPrivyRestartState,
-  shouldResetHostedPrivyAutoContinueTrigger,
-  shouldShowHostedPrivyAuthenticatedLoadingState,
-  shouldSuppressHostedPrivyAutoContinueAfterError,
-  shouldResetHostedPrivyClientSessionToSms,
-  shouldAutoContinueHostedPrivyClientSession,
+  shouldShowHostedPrivyManualResumeState,
   type HostedPrivyFinalizationState,
   type HostedPrivyClientPendingAction,
   type HostedPrivyClientSessionIssue,
@@ -65,6 +60,14 @@ interface HostedPhoneCountryOption {
   dialCode: string;
   label: string;
   placeholder: string;
+}
+
+interface HostedPrivyFinalizationAttemptInput {
+  action: "continue" | "verify-code";
+  finalize: () => Promise<void>;
+  getFinalizationState: () => HostedPrivyFinalizationState;
+  setPendingAction: (action: HostedPrivyClientPendingAction) => void;
+  updateFinalizationState: (nextState: HostedPrivyFinalizationState) => void;
 }
 
 const HOSTED_PHONE_COUNTRY_OPTIONS: HostedPhoneCountryOption[] = [
@@ -100,7 +103,6 @@ function HostedPhoneAuthInner({
   const { loginWithCode, sendCode } = useLoginWithSms();
   const { refreshUser, user } = useUser();
   const [authenticatedSessionIssue, setAuthenticatedSessionIssue] = useState<HostedPrivyClientSessionIssue | null>(null);
-  const [autoContinueSuppressed, setAutoContinueSuppressed] = useState(false);
   const [checkingAuthenticatedSession, setCheckingAuthenticatedSession] = useState(false);
   const [code, setCode] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -109,10 +111,7 @@ function HostedPhoneAuthInner({
   const [phoneCountryCode, setPhoneCountryCode] = useState<string>(DEFAULT_HOSTED_PHONE_COUNTRY_CODE);
   const [phoneNumber, setPhoneNumber] = useState("");
   const [step, setStep] = useState<"phone" | "code">("phone");
-  const autoContinueTriggered = useRef(false);
-  const autoResetTriggered = useRef(false);
   const finalizationStateRef = useRef<HostedPrivyFinalizationState>("idle");
-  const allowAuthenticatedAutoContinue = mode === "invite";
 
   const selectedPhoneCountry = useMemo(
     () =>
@@ -124,14 +123,7 @@ function HostedPhoneAuthInner({
     () => normalizePhoneNumberForCountry(phoneNumber, selectedPhoneCountry.dialCode),
     [phoneNumber, selectedPhoneCountry.dialCode],
   );
-  const showAuthenticatedLoadingState = finalizationState !== "idle" || (
-    allowAuthenticatedAutoContinue
-    && shouldShowHostedPrivyAuthenticatedLoadingState({
-      authenticated,
-      autoContinueSuppressed,
-      issue: authenticatedSessionIssue,
-    })
-  );
+  const showAuthenticatedLoadingState = authenticated && (checkingAuthenticatedSession || finalizationState !== "idle");
   const showAuthenticatedManualResumeState = shouldShowHostedPrivyManualResumeState({
     authenticated,
     issue: authenticatedSessionIssue,
@@ -145,26 +137,14 @@ function HostedPhoneAuthInner({
   const authenticatedLoadingTitle =
     checkingAuthenticatedSession
       ? "Checking your setup..."
-      : pendingAction === "continue" || pendingAction === "verify-code" || finalizationState !== "idle"
-        ? "Finishing setup..."
-        : "Preparing your account...";
+      : "Finishing setup...";
   const authenticatedLoadingBody =
-    pendingAction === "continue" || pendingAction === "verify-code" || finalizationState !== "idle"
-      ? "Keep this tab open. We are verifying your number, preparing your account, and moving you to the next step."
-      : "Keep this tab open while we confirm your verified session and prepare the next step.";
+    "Keep this tab open. We are verifying your number, preparing your account, and moving you to the next step.";
 
   function updateFinalizationState(nextState: HostedPrivyFinalizationState) {
     finalizationStateRef.current = nextState;
     setFinalizationState(nextState);
   }
-
-  const continueAuthenticatedEffect = useEffectEvent(() => {
-    void handleContinueAuthenticated();
-  });
-
-  const logoutEffect = useEffectEvent(() => {
-    void handleLogout();
-  });
 
   useEffect(() => {
     let cancelled = false;
@@ -196,74 +176,11 @@ function HostedPhoneAuthInner({
 
   useEffect(() => {
     if (!authenticated) {
-      setAutoContinueSuppressed(false);
-      autoContinueTriggered.current = false;
+      setAuthenticatedSessionIssue(null);
+      setCheckingAuthenticatedSession(false);
       updateFinalizationState("idle");
     }
   }, [authenticated]);
-
-  useEffect(() => {
-    if (!allowAuthenticatedAutoContinue) {
-      autoContinueTriggered.current = false;
-      return;
-    }
-
-    if (
-      !shouldAutoContinueHostedPrivyClientSession({
-        authenticated,
-        autoContinueSuppressed,
-        autoContinueTriggered: autoContinueTriggered.current,
-        checkingAuthenticatedSession,
-        finalizationState,
-        issue: authenticatedSessionIssue,
-        pendingAction,
-      })
-    ) {
-      if (
-        shouldResetHostedPrivyAutoContinueTrigger({
-          authenticated,
-          autoContinueSuppressed,
-          issue: authenticatedSessionIssue,
-        })
-      ) {
-        autoContinueTriggered.current = false;
-      }
-      return;
-    }
-
-    autoContinueTriggered.current = true;
-    continueAuthenticatedEffect();
-  }, [
-    authenticated,
-    authenticatedSessionIssue,
-    allowAuthenticatedAutoContinue,
-    autoContinueSuppressed,
-    checkingAuthenticatedSession,
-    finalizationState,
-    pendingAction,
-  ]);
-
-  useEffect(() => {
-    if (!authenticated || authenticatedSessionIssue !== "missing-phone") {
-      autoResetTriggered.current = false;
-      return;
-    }
-
-    if (
-      !shouldResetHostedPrivyClientSessionToSms({
-        authenticated,
-        autoResetTriggered: autoResetTriggered.current,
-        checkingAuthenticatedSession,
-        issue: authenticatedSessionIssue,
-        pendingAction,
-      })
-    ) {
-      return;
-    }
-
-    autoResetTriggered.current = true;
-    logoutEffect();
-  }, [authenticated, authenticatedSessionIssue, checkingAuthenticatedSession, pendingAction]);
 
   async function handleSendCode() {
     setErrorMessage(null);
@@ -324,10 +241,6 @@ function HostedPhoneAuthInner({
         setAuthenticatedSessionIssue(latestSessionIssue);
       }
 
-      if (shouldSuppressHostedPrivyAutoContinueAfterError(error)) {
-        setAutoContinueSuppressed(true);
-      }
-
       if (!canContinueHostedPrivyClientSession(latestSessionIssue)) {
         return;
       }
@@ -356,26 +269,19 @@ function HostedPhoneAuthInner({
   }
 
   async function runHostedPrivyFinalization(action: "continue" | "verify-code") {
-    if (finalizationStateRef.current !== "idle") {
-      return;
-    }
-
-    setPendingAction(action);
-    updateFinalizationState("running");
-
-    try {
-      await finalizeHostedPrivyVerification({
+    await runHostedPrivyFinalizationAttempt({
+      action,
+      finalize: async () => finalizeHostedPrivyVerification({
         createWallet,
         inviteCode,
         onCompleted,
         refreshUser,
         user,
-      });
-      updateFinalizationState("completed");
-    } catch (error) {
-      updateFinalizationState("idle");
-      throw error;
-    }
+      }),
+      getFinalizationState: () => finalizationStateRef.current,
+      setPendingAction,
+      updateFinalizationState,
+    });
   }
 
   return (
@@ -557,6 +463,33 @@ async function readLatestAuthenticatedSessionIssue(input: {
   });
 
   return resolveHostedPrivyClientSessionIssue(sessionState);
+}
+
+export async function runHostedPrivyFinalizationAttempt({
+  action,
+  finalize,
+  getFinalizationState,
+  setPendingAction,
+  updateFinalizationState,
+}: HostedPrivyFinalizationAttemptInput): Promise<void> {
+  if (getFinalizationState() !== "idle") {
+    return;
+  }
+
+  setPendingAction(action);
+  updateFinalizationState("running");
+
+  try {
+    await finalize();
+    updateFinalizationState("completed");
+  } catch (error) {
+    updateFinalizationState("idle");
+    throw error;
+  } finally {
+    if (getFinalizationState() !== "running") {
+      setPendingAction(null);
+    }
+  }
 }
 
 async function finalizeHostedPrivyVerification(input: {

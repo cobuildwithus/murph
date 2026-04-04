@@ -67,7 +67,7 @@ describe("HostedPhoneAuth", () => {
     assert.doesNotMatch(markup, /Defaulting to United States/);
   });
 
-  it("removes the authenticated-session banner copy from the rendered markup", async () => {
+  it("renders the explicit manual-resume banner for authenticated invite sessions", async () => {
     mocks.usePrivy.mockReturnValue({
       authenticated: true,
       logout: mocks.logout,
@@ -84,10 +84,10 @@ describe("HostedPhoneAuth", () => {
       }),
     );
 
-    assert.doesNotMatch(markup, /Verified Privy session found/);
-    assert.doesNotMatch(markup, /Finishing setup with your current verified phone number now/);
-    assert.match(markup, /Preparing your account/);
-    assert.doesNotMatch(markup, /Use a different number/);
+    assert.match(markup, /You already started signup in this browser/);
+    assert.match(markup, /Continue signup/);
+    assert.match(markup, /Use a different number/);
+    assert.doesNotMatch(markup, /Preparing your account/);
   });
 
   it("keeps the public homepage in a manual resume state for authenticated sessions", async () => {
@@ -112,7 +112,7 @@ describe("HostedPhoneAuth", () => {
     assert.doesNotMatch(markup, /Preparing your account/);
   });
 
-  it("keeps invite-mode authenticated sessions in the loading state instead of rendering the manual resume banner", async () => {
+  it("keeps invite-mode authenticated sessions in the manual resume state instead of auto-loading", async () => {
     mocks.usePrivy.mockReturnValue({
       authenticated: true,
       logout: mocks.logout,
@@ -128,8 +128,35 @@ describe("HostedPhoneAuth", () => {
       }),
     );
 
-    assert.match(markup, /Preparing your account/);
-    assert.doesNotMatch(markup, /You already started signup in this browser/);
-    assert.doesNotMatch(markup, /Continue signup/);
+    assert.match(markup, /You already started signup in this browser/);
+    assert.match(markup, /Continue signup/);
+    assert.doesNotMatch(markup, /Preparing your account/);
+  });
+
+  it("clears the pending action after a failed manual continue finalization attempt", async () => {
+    const { runHostedPrivyFinalizationAttempt } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+
+    let finalizationState: "idle" | "running" | "completed" = "idle";
+    const pendingActions: Array<string | null> = [];
+
+    await assert.rejects(
+      () => runHostedPrivyFinalizationAttempt({
+        action: "continue",
+        finalize: async () => {
+          throw new Error("Privy lag");
+        },
+        getFinalizationState: () => finalizationState,
+        setPendingAction(action) {
+          pendingActions.push(action);
+        },
+        updateFinalizationState(nextState) {
+          finalizationState = nextState;
+        },
+      }),
+      /Privy lag/,
+    );
+
+    assert.equal(finalizationState, "idle");
+    assert.deepEqual(pendingActions, ["continue", null]);
   });
 });

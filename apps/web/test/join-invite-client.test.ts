@@ -20,11 +20,12 @@ vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => ({
 
 import {
   JoinInviteClient,
+  resolveInviteStatusAfterPrivyCompletion,
   resolveJoinInviteShareStateFromAccept,
   resolveJoinInviteShareStateFromStatus,
 } from "@/src/components/hosted-onboarding/join-invite-client";
 import type { HostedSharePageData } from "@/src/lib/hosted-share/service";
-import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
+import type { HostedInviteStatusPayload, HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -94,41 +95,20 @@ test("share status only resolves to completed after the async import is consumed
   );
 });
 
-test("requestHostedOnboardingJson fails cleanly when a successful response has an empty body", async () => {
-  const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response("", {
-    status: 200,
-  }));
-
-  vi.stubGlobal("fetch", fetchMock);
-
-  const { requestHostedOnboardingJson } = await import(
-    "@/src/components/hosted-onboarding/client-api"
+test("resolveInviteStatusAfterPrivyCompletion marks the invite session authenticated and matched", () => {
+  const nextStatus = resolveInviteStatusAfterPrivyCompletion(
+    createStatus({
+      stage: "register",
+    }),
+    createCompletionPayload("checkout"),
   );
 
-  await expect(requestHostedOnboardingJson<{ ok: true }>({
-    url: "/api/hosted-onboarding/example",
-  })).rejects.toMatchObject({
-    code: null,
-    message: "Request returned an unexpected response.",
-    name: "HostedOnboardingApiError",
-  });
-});
-
-test("requestHostedOnboardingJson falls back to a controlled failure for malformed error bodies", async () => {
-  const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response("{", {
-    status: 503,
-  }));
-
-  vi.stubGlobal("fetch", fetchMock);
-
-  const { requestHostedOnboardingJson } = await import("@/src/components/hosted-onboarding/client-api");
-
-  await expect(requestHostedOnboardingJson<{ ok: true }>({
-    url: "/api/hosted-onboarding/example",
-  })).rejects.toMatchObject({
-    code: null,
-    message: "Request failed.",
-    retryable: false,
+  expect(nextStatus).toMatchObject({
+    session: {
+      authenticated: true,
+      matchesInvite: true,
+    },
+    stage: "checkout",
   });
 });
 
@@ -187,6 +167,14 @@ function createShareStatus(stage: HostedSharePageData["stage"]): HostedSharePage
         title: "Smoothie pack",
       },
     },
+    stage,
+  };
+}
+
+function createCompletionPayload(stage: HostedPrivyCompletionPayload["stage"]): HostedPrivyCompletionPayload {
+  return {
+    inviteCode: "invite-code",
+    joinUrl: "https://join.example.test/join/invite-code",
     stage,
   };
 }

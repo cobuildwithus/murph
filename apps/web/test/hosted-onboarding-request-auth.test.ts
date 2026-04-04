@@ -24,6 +24,7 @@ vi.mock("@/src/lib/hosted-onboarding/privy", async () => {
 });
 
 import {
+  requireHostedPrivyCompletionRequestAuthContext,
   requireHostedPrivyActiveRequestAuthContext,
   requireHostedPrivyRequestAuthContext,
   resolveHostedPrivyRequestAuthContext,
@@ -129,6 +130,46 @@ describe("hosted Privy request auth", () => {
     });
     expect(mocks.verifyHostedPrivyAccessToken).toHaveBeenCalledWith("signed-access-token");
     expect(mocks.verifyHostedPrivyIdentityToken).toHaveBeenCalledWith("signed-identity-token");
+  });
+
+  it("allows the completion route to verify the same strict auth contract before a member exists", async () => {
+    mocks.findHostedMemberForPrivyIdentity.mockResolvedValue(null);
+
+    await expect(requireHostedPrivyCompletionRequestAuthContext(createAuthenticatedRequest(), prisma)).resolves.toMatchObject({
+      identity: {
+        phone: {
+          number: "+14155552671",
+        },
+        userId: "did:privy:user_123",
+        wallet: {
+          address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+        },
+      },
+      member: null,
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+      },
+    });
+  });
+
+  it("remaps missing wallet readiness into the completion retryable conflict response", async () => {
+    mocks.verifyHostedPrivyIdentityToken.mockResolvedValue({
+      id: "did:privy:user_123",
+      linked_accounts: [
+        {
+          latest_verified_at: 1741194420,
+          phone_number: "+1 415 555 2671",
+          type: "phone",
+        },
+      ],
+    });
+
+    await expect(requireHostedPrivyCompletionRequestAuthContext(createAuthenticatedRequest(), prisma)).rejects.toMatchObject({
+      code: "PRIVY_WALLET_NOT_READY",
+      httpStatus: 409,
+      retryable: true,
+    });
+    expect(mocks.findHostedMemberForPrivyIdentity).not.toHaveBeenCalled();
   });
 
   it("blocks suspended members from active hosted mutations", async () => {
