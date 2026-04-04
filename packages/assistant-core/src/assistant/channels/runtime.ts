@@ -168,6 +168,7 @@ export async function sendLinqMessage(
   const delivered = await sendLinqChatMessage(
     {
       chatId: input.target,
+      idempotencyKey: input.idempotencyKey ?? null,
       message: input.message,
       replyToMessageId: input.replyToMessageId ?? null,
     },

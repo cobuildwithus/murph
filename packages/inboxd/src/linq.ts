@@ -33,6 +33,8 @@ export type {
   NormalizeLinqWebhookEventInput,
 } from "./connectors/linq/normalize.ts";
 export type {
+  LinqCreateChatResponse,
+  LinqCreateWebhookSubscriptionResponse,
   LinqIncomingMessage,
   LinqListPhoneNumbersResponse,
   LinqMediaPart,

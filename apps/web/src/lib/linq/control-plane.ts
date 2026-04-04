@@ -262,7 +262,7 @@ export class HostedLinqControlPlane {
       response = await fetchLinqApi({
         apiBaseUrl: this.env.apiBaseUrl,
         apiToken: this.env.apiToken,
-        path: "phonenumbers",
+        path: "phone_numbers",
         signal: this.request.signal,
       });
     } catch (error) {
@@ -505,6 +505,16 @@ function buildIgnoredWebhookResult(
 function resolveWebhookOccurredAt(event: LinqWebhookEvent): string | null {
   if (event.event_type !== "message.received") {
     return normalizeIsoTimestamp(event.created_at);
+  }
+
+  const sentAt = normalizeIsoTimestamp(
+    typeof event.data === "object" && event.data && "sent_at" in event.data
+      ? String((event.data as { sent_at?: unknown }).sent_at ?? "")
+      : null,
+  );
+
+  if (sentAt) {
+    return sentAt;
   }
 
   const receivedAt = normalizeIsoTimestamp(

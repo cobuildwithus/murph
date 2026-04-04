@@ -89,6 +89,7 @@ async function performHostedWebhookSideEffect(
     case "linq_message_send":
       return sendHostedLinqChatMessage({
         chatId: effect.payload.chatId,
+        idempotencyKey: effect.effectId,
         message: effect.payload.message,
         replyToMessageId: effect.payload.replyToMessageId,
         signal: options.signal,

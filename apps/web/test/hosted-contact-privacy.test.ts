@@ -9,9 +9,25 @@ describe("hosted contact privacy", () => {
     const minimized = minimizeHostedLinqMessageReceivedEvent({
       api_version: "2026-04-01",
       created_at: "2026-04-01T00:00:00.000Z",
+      webhook_version: "2026-02-03",
       data: {
+        chat: {
+          id: "chat_123",
+          owner_handle: {
+            handle: "+15557654321",
+            id: "handle_owner_123",
+            is_me: true,
+            service: "iMessage",
+          },
+        },
         chat_id: "chat_123",
+        direction: "inbound",
         from: "+15551230000",
+        from_handle: {
+          handle: "+15551230000",
+          id: "handle_sender_legacy_123",
+          service: "iMessage",
+        },
         is_from_me: false,
         message: {
           effect: null,
@@ -34,9 +50,21 @@ describe("hosted contact privacy", () => {
           ],
           reply_to: null,
         },
+        recipient_handle: {
+          handle: "+15557654321",
+          id: "handle_owner_123",
+          is_me: true,
+          service: "iMessage",
+        },
         received_at: "2026-04-01T00:00:00.000Z",
         recipient_phone: "+15557654321",
         service: "imessage",
+        sender_handle: {
+          handle: "+15551230000",
+          id: "handle_sender_123",
+          service: "iMessage",
+        },
+        sent_at: "2026-04-01T00:00:00.000Z",
       },
       event_id: "evt_123",
       event_type: "message.received",
@@ -69,8 +97,20 @@ describe("hosted contact privacy", () => {
   it("retains allowlisted Linq CDN attachment URLs before storage while preserving id redaction", () => {
     const sanitized = sanitizeHostedLinqEventForStorage({
       data: {
+        chat: {
+          id: "chat_123",
+          owner_handle: {
+            handle: "+15557654321",
+            id: "handle_owner_123",
+            is_me: true,
+          },
+        },
         chat_id: "chat_123",
         from: "+15551230000",
+        from_handle: {
+          handle: "+15551230000",
+          id: "handle_sender_legacy_123",
+        },
         message: {
           id: "msg_123",
           parts: [
@@ -100,12 +140,32 @@ describe("hosted contact privacy", () => {
             message_id: "msg_122",
           },
         },
+        recipient_handle: {
+          handle: "+15557654321",
+          id: "handle_owner_123",
+          is_me: true,
+        },
         recipient_phone: "+15557654321",
+        sender_handle: {
+          handle: "+15551230000",
+          id: "handle_sender_123",
+        },
       },
     });
 
     expect(sanitized.data).toMatchObject({
+      chat: {
+        owner_handle: {
+          handle: expect.stringMatching(/^hbid:linq\.recipient:/u),
+          id: "handle_owner_123",
+          is_me: true,
+        },
+      },
       from: expect.stringMatching(/^hbid:linq\.from:/u),
+      from_handle: {
+        handle: expect.stringMatching(/^hbid:linq\.from:/u),
+        id: "handle_sender_legacy_123",
+      },
       message: {
         id: expect.stringMatching(/^hbid:linq\.message:/u),
         parts: [
@@ -134,7 +194,16 @@ describe("hosted contact privacy", () => {
           message_id: expect.stringMatching(/^hbid:linq\.message:/u),
         },
       },
+      recipient_handle: {
+        handle: expect.stringMatching(/^hbid:linq\.recipient:/u),
+        id: "handle_owner_123",
+        is_me: true,
+      },
       recipient_phone: expect.stringMatching(/^hbid:linq\.recipient:/u),
+      sender_handle: {
+        handle: expect.stringMatching(/^hbid:linq\.from:/u),
+        id: "handle_sender_123",
+      },
     });
     expect((sanitized.data as { message: { parts: Array<Record<string, unknown>> } }).message.parts[2])
       .not.toHaveProperty("url");
@@ -144,6 +213,10 @@ describe("hosted contact privacy", () => {
     const sanitized = sanitizeHostedLinqEventForStorage({
       data: {
         from: "+15551230000",
+        sender_handle: {
+          handle: "+15551230000",
+          id: "handle_sender_123",
+        },
         message: {
           id: "msg_123",
           parts: [
@@ -154,15 +227,34 @@ describe("hosted contact privacy", () => {
           ],
         },
         recipient_phone: "+15557654321",
+        chat: {
+          id: "chat_123",
+          owner_handle: {
+            handle: "+15557654321",
+            id: "handle_owner_123",
+            is_me: true,
+          },
+        },
       },
     }, {
       omitRecipientPhone: true,
     });
 
     expect(sanitized.data).toMatchObject({
+      chat: {
+        owner_handle: {
+          handle: expect.stringMatching(/^hbid:linq\.recipient:/u),
+          id: "handle_owner_123",
+          is_me: true,
+        },
+      },
       from: expect.stringMatching(/^hbid:linq\.from:/u),
       message: {
         id: expect.stringMatching(/^hbid:linq\.message:/u),
+      },
+      sender_handle: {
+        handle: expect.stringMatching(/^hbid:linq\.from:/u),
+        id: "handle_sender_123",
       },
     });
     expect(sanitized.data).not.toHaveProperty("recipient_phone");

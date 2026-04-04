@@ -1,4 +1,6 @@
 export type {
+  LinqCreateChatResponse,
+  LinqCreateWebhookSubscriptionResponse,
   LinqIncomingMessage,
   LinqListPhoneNumbersResponse,
   LinqMediaPart,

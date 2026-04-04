@@ -24,37 +24,26 @@ function createPersistedCapture(capture: InboundCapture): PersistedCapture {
 
 test("normalizeLinqWebhookEvent builds direct chat captures and hydrates downloadable attachments", async () => {
   const capture = await normalizeLinqWebhookEvent({
-    event: {
-      api_version: "v3",
-      event_id: "evt_123",
-      created_at: "2026-03-24T10:00:05.000Z",
-      event_type: "message.received",
+    event: buildV2026LinqWebhookEvent({
+      createdAt: "2026-03-24T10:00:05.000Z",
       data: {
-        chat_id: "chat_123",
-        from: "+15551234567",
-        recipient_phone: "+15557654321",
-        received_at: "2026-03-24T10:00:00.000Z",
-        is_from_me: false,
-        service: "SMS",
-        message: {
-          id: "msg_123",
-          parts: [
-            {
-              type: "text",
-              value: "Photo attached",
-            },
-            {
-              type: "media",
-              url: "https://cdn.example.test/photo.jpg",
-              attachment_id: "att_1",
-              filename: "photo.jpg",
-              mime_type: "image/jpeg",
-              size: 4,
-            },
-          ],
-        },
+        parts: [
+          {
+            type: "text",
+            value: "Photo attached",
+          },
+          {
+            type: "media",
+            url: "https://cdn.example.test/photo.jpg",
+            attachment_id: "att_1",
+            filename: "photo.jpg",
+            mime_type: "image/jpeg",
+            size: 4,
+          },
+        ],
+        sent_at: "2026-03-24T10:00:00.000Z",
       },
-    },
+    }),
     downloadDriver: {
       async downloadUrl(url) {
         assert.equal(url, "https://cdn.example.test/photo.jpg");
@@ -83,28 +72,29 @@ test("normalizeLinqWebhookEvent builds direct chat captures and hydrates downloa
 
 test("normalizeLinqWebhookEvent falls back to created_at when received_at is missing", async () => {
   const capture = await normalizeLinqWebhookEvent({
-    event: {
-      api_version: "v3",
-      event_id: "evt_missing_received_at",
-      created_at: "2026-03-24T10:00:05.000Z",
-      event_type: "message.received",
+    event: buildV2026LinqWebhookEvent({
+      createdAt: "2026-03-24T10:00:05.000Z",
       data: {
-        chat_id: "chat_missing_received_at",
-        from: "+15551234567",
-        recipient_phone: "+15557654321",
-        is_from_me: false,
-        service: "SMS",
-        message: {
-          id: "msg_missing_received_at",
-          parts: [
-            {
-              type: "text",
-              value: "Fallback timestamp",
-            },
-          ],
+        chat: {
+          id: "chat_missing_received_at",
+          owner_handle: {
+            handle: "+15557654321",
+            id: "handle_owner_missing_received_at",
+            is_me: true,
+            service: "SMS",
+          },
         },
+        id: "msg_missing_received_at",
+        parts: [
+          {
+            type: "text",
+            value: "Fallback timestamp",
+          },
+        ],
+        sent_at: null,
       },
-    },
+      eventId: "evt_missing_received_at",
+    }),
   });
 
   assert.equal(capture.externalId, "linq:msg_missing_received_at");
@@ -121,13 +111,18 @@ test("normalizeLinqWebhookEvent treats multiple media parts and voice memos as a
       },
     },
     event: {
-      api_version: "v3",
-      created_at: "2026-04-02T04:00:00.000Z",
-      data: {
-        chat_id: "chat_attachments",
-        from: "+15551234567",
-        is_from_me: false,
-        message: {
+      ...buildV2026LinqWebhookEvent({
+        createdAt: "2026-04-02T04:00:00.000Z",
+        data: {
+          chat: {
+            id: "chat_attachments",
+            owner_handle: {
+              handle: "+15557654321",
+              id: "handle_owner_attachments",
+              is_me: true,
+              service: "iMessage",
+            },
+          },
           id: "msg_attachments",
           parts: [
             {
@@ -152,14 +147,17 @@ test("normalizeLinqWebhookEvent treats multiple media parts and voice memos as a
               url: "https://cdn.linqapp.com/media/voice-1.m4a",
             },
           ],
+          sender_handle: {
+            handle: "+15551234567",
+            id: "handle_sender_attachments",
+            service: "iMessage",
+          },
+          sent_at: "2026-04-02T04:00:01.000Z",
+          service: "iMessage",
         },
-        received_at: "2026-04-02T04:00:01.000Z",
-        recipient_phone: "+15557654321",
-        service: "iMessage",
-      },
-      event_id: "evt_attachments",
-      event_type: "message.received",
-      trace_id: "trace_attachments",
+        eventId: "evt_attachments",
+        traceId: "trace_attachments",
+      }),
     },
   });
 
@@ -191,13 +189,18 @@ test("normalizeLinqWebhookEvent keeps metadata-only voice memo attachments when 
       },
     },
     event: {
-      api_version: "v3",
-      created_at: "2026-04-02T04:00:00.000Z",
-      data: {
-        chat_id: "chat_voice",
-        from: "+15551234567",
-        is_from_me: false,
-        message: {
+      ...buildV2026LinqWebhookEvent({
+        createdAt: "2026-04-02T04:00:00.000Z",
+        data: {
+          chat: {
+            id: "chat_voice",
+            owner_handle: {
+              handle: "+15557654321",
+              id: "handle_owner_voice",
+              is_me: true,
+              service: "SMS",
+            },
+          },
           id: "msg_voice",
           parts: [
             {
@@ -208,9 +211,8 @@ test("normalizeLinqWebhookEvent keeps metadata-only voice memo attachments when 
             },
           ],
         },
-      },
-      event_id: "evt_voice",
-      event_type: "message.received",
+        eventId: "evt_voice",
+      }),
     },
   });
 
@@ -266,36 +268,42 @@ test("createLinqWebhookConnector accepts signed webhook requests and emits captu
     const listenerUrl = `http://127.0.0.1:${port}/hooks/linq`;
     await waitForWebhookListener(listenerUrl);
 
-    const payload = JSON.stringify({
-      api_version: "v3",
-      event_id: "evt_456",
-      created_at: "2026-03-24T11:00:05.000Z",
-      event_type: "message.received",
+    const payload = JSON.stringify(buildV2026LinqWebhookEvent({
+      createdAt: "2026-03-24T11:00:05.000Z",
       data: {
-        chat_id: "chat_456",
-        from: "+15550001111",
-        recipient_phone: "+15559990000",
-        received_at: "2026-03-24T11:00:00.000Z",
-        is_from_me: false,
-        service: "iMessage",
-        message: {
-          id: "msg_456",
-          parts: [
-            {
-              type: "text",
-              value: "Webhook payload",
-            },
-            {
-              type: "media",
-              url: "https://cdn.example.test/att_2.pdf",
-              attachment_id: "att_2",
-              filename: "summary.pdf",
-              mime_type: "application/pdf",
-            },
-          ],
+        chat: {
+          id: "chat_456",
+          owner_handle: {
+            handle: "+15559990000",
+            id: "handle_owner_456",
+            is_me: true,
+            service: "iMessage",
+          },
         },
+        id: "msg_456",
+        parts: [
+          {
+            type: "text",
+            value: "Webhook payload",
+          },
+          {
+            type: "media",
+            url: "https://cdn.example.test/att_2.pdf",
+            attachment_id: "att_2",
+            filename: "summary.pdf",
+            mime_type: "application/pdf",
+          },
+        ],
+        sender_handle: {
+          handle: "+15550001111",
+          id: "handle_sender_456",
+          service: "iMessage",
+        },
+        sent_at: "2026-03-24T11:00:00.000Z",
+        service: "iMessage",
       },
-    });
+      eventId: "evt_456",
+    }));
     const timestamp = "1711278000";
     const response = await fetch(listenerUrl, {
       method: "POST",
@@ -378,32 +386,38 @@ test("createLinqWebhookConnector still accepts a webhook when attachment downloa
     const listenerUrl = `http://127.0.0.1:${port}/hooks/linq`;
     await waitForWebhookListener(listenerUrl);
 
-    const payload = JSON.stringify({
-      api_version: "v3",
-      event_id: "evt_download_failure",
-      created_at: "2026-03-24T11:00:05.000Z",
-      event_type: "message.received",
+    const payload = JSON.stringify(buildV2026LinqWebhookEvent({
+      createdAt: "2026-03-24T11:00:05.000Z",
       data: {
-        chat_id: "chat_456",
-        from: "+15550001111",
-        recipient_phone: "+15559990000",
-        received_at: "2026-03-24T11:00:00.000Z",
-        is_from_me: false,
-        service: "iMessage",
-        message: {
-          id: "msg_456",
-          parts: [
-            {
-              type: "media",
-              url: "https://cdn.example.test/att_2.pdf",
-              attachment_id: "att_2",
-              filename: "summary.pdf",
-              mime_type: "application/pdf",
-            },
-          ],
+        chat: {
+          id: "chat_456",
+          owner_handle: {
+            handle: "+15559990000",
+            id: "handle_owner_456",
+            is_me: true,
+            service: "iMessage",
+          },
         },
+        id: "msg_456",
+        parts: [
+          {
+            type: "media",
+            url: "https://cdn.example.test/att_2.pdf",
+            attachment_id: "att_2",
+            filename: "summary.pdf",
+            mime_type: "application/pdf",
+          },
+        ],
+        sender_handle: {
+          handle: "+15550001111",
+          id: "handle_sender_456",
+          service: "iMessage",
+        },
+        sent_at: "2026-03-24T11:00:00.000Z",
+        service: "iMessage",
       },
-    });
+      eventId: "evt_download_failure",
+    }));
     const timestamp = "1711278000";
     const response = await fetch(listenerUrl, {
       method: "POST",
@@ -465,32 +479,38 @@ test("createLinqWebhookConnector waits for successful attachment downloads that 
     const listenerUrl = `http://127.0.0.1:${port}/hooks/linq`;
     await waitForWebhookListener(listenerUrl);
 
-    const payload = JSON.stringify({
-      api_version: "v3",
-      event_id: "evt_delayed_download",
-      created_at: "2026-03-24T11:00:05.000Z",
-      event_type: "message.received",
+    const payload = JSON.stringify(buildV2026LinqWebhookEvent({
+      createdAt: "2026-03-24T11:00:05.000Z",
       data: {
-        chat_id: "chat_delayed_download",
-        from: "+15550001111",
-        recipient_phone: "+15559990000",
-        received_at: "2026-03-24T11:00:00.000Z",
-        is_from_me: false,
-        service: "iMessage",
-        message: {
-          id: "msg_delayed_download",
-          parts: [
-            {
-              type: "media",
-              url: "https://cdn.example.test/att_2.pdf",
-              attachment_id: "att_2",
-              filename: "summary.pdf",
-              mime_type: "application/pdf",
-            },
-          ],
+        chat: {
+          id: "chat_delayed_download",
+          owner_handle: {
+            handle: "+15559990000",
+            id: "handle_owner_delayed_download",
+            is_me: true,
+            service: "iMessage",
+          },
         },
+        id: "msg_delayed_download",
+        parts: [
+          {
+            type: "media",
+            url: "https://cdn.example.test/att_2.pdf",
+            attachment_id: "att_2",
+            filename: "summary.pdf",
+            mime_type: "application/pdf",
+          },
+        ],
+        sender_handle: {
+          handle: "+15550001111",
+          id: "handle_sender_delayed_download",
+          service: "iMessage",
+        },
+        sent_at: "2026-03-24T11:00:00.000Z",
+        service: "iMessage",
       },
-    });
+      eventId: "evt_delayed_download",
+    }));
     const timestamp = "1711278000";
     const responsePromise = fetch(listenerUrl, {
       method: "POST",
@@ -564,32 +584,38 @@ test("createLinqWebhookConnector acknowledges webhooks promptly even when attach
     const listenerUrl = `http://127.0.0.1:${port}/hooks/linq`;
     await waitForWebhookListener(listenerUrl);
 
-    const payload = JSON.stringify({
-      api_version: "v3",
-      event_id: "evt_abort_download",
-      created_at: "2026-03-24T11:00:05.000Z",
-      event_type: "message.received",
+    const payload = JSON.stringify(buildV2026LinqWebhookEvent({
+      createdAt: "2026-03-24T11:00:05.000Z",
       data: {
-        chat_id: "chat_456",
-        from: "+15550001111",
-        recipient_phone: "+15559990000",
-        received_at: "2026-03-24T11:00:00.000Z",
-        is_from_me: false,
-        service: "iMessage",
-        message: {
-          id: "msg_abort_download",
-          parts: [
-            {
-              type: "media",
-              url: "https://cdn.example.test/att_2.pdf",
-              attachment_id: "att_2",
-              filename: "summary.pdf",
-              mime_type: "application/pdf",
-            },
-          ],
+        chat: {
+          id: "chat_456",
+          owner_handle: {
+            handle: "+15559990000",
+            id: "handle_owner_456",
+            is_me: true,
+            service: "iMessage",
+          },
         },
+        id: "msg_abort_download",
+        parts: [
+          {
+            type: "media",
+            url: "https://cdn.example.test/att_2.pdf",
+            attachment_id: "att_2",
+            filename: "summary.pdf",
+            mime_type: "application/pdf",
+          },
+        ],
+        sender_handle: {
+          handle: "+15550001111",
+          id: "handle_sender_456",
+          service: "iMessage",
+        },
+        sent_at: "2026-03-24T11:00:00.000Z",
+        service: "iMessage",
       },
-    });
+      eventId: "evt_abort_download",
+    }));
     const timestamp = "1711278000";
     const responsePromise = fetch(listenerUrl, {
       method: "POST",
@@ -641,23 +667,29 @@ test("createLinqWebhookConnector rejects signed payloads that fail strict Linq m
     const listenerUrl = `http://127.0.0.1:${port}/hooks/linq`;
     await waitForWebhookListener(listenerUrl);
 
-    const payload = JSON.stringify({
-      api_version: "v3",
-      event_id: "evt_bad_parts",
-      created_at: "2026-03-24T11:00:05.000Z",
-      event_type: "message.received",
+    const payload = JSON.stringify(buildV2026LinqWebhookEvent({
+      createdAt: "2026-03-24T11:00:05.000Z",
       data: {
-        chat_id: "chat_456",
-        from: "+15550001111",
-        recipient_phone: "+15559990000",
-        received_at: "2026-03-24T11:00:00.000Z",
-        is_from_me: false,
-        message: {
-          id: "msg_456",
-          parts: "not-an-array",
+        chat: {
+          id: "chat_456",
+          owner_handle: {
+            handle: "+15559990000",
+            id: "handle_owner_456",
+            is_me: true,
+            service: "iMessage",
+          },
         },
+        id: "msg_456",
+        parts: "not-an-array",
+        sender_handle: {
+          handle: "+15550001111",
+          id: "handle_sender_456",
+          service: "iMessage",
+        },
+        sent_at: "2026-03-24T11:00:00.000Z",
       },
-    });
+      eventId: "evt_bad_parts",
+    }));
     const timestamp = "1711278000";
     const response = await fetch(listenerUrl, {
       method: "POST",
@@ -706,6 +738,44 @@ function signLinqWebhook(secret: string, payload: string, timestamp: string): st
     .update(`${timestamp}.${payload}`)
     .digest("hex");
   return `sha256=${signature}`;
+}
+
+function buildV2026LinqWebhookEvent(input: {
+  createdAt?: string;
+  data?: Record<string, unknown>;
+  eventId?: string;
+  traceId?: string | null;
+} = {}): Record<string, unknown> {
+  return {
+    api_version: "v3",
+    created_at: input.createdAt ?? "2026-03-24T10:00:05.000Z",
+    webhook_version: "2026-02-03",
+    data: {
+      chat: {
+        id: "chat_123",
+        owner_handle: {
+          handle: "+15557654321",
+          id: "handle_owner_123",
+          is_me: true,
+          service: "SMS",
+        },
+      },
+      direction: "inbound",
+      id: "msg_123",
+      parts: [],
+      sender_handle: {
+        handle: "+15551234567",
+        id: "handle_sender_123",
+        service: "SMS",
+      },
+      sent_at: "2026-03-24T10:00:00.000Z",
+      service: "SMS",
+      ...(input.data ?? {}),
+    },
+    event_id: input.eventId ?? "evt_123",
+    event_type: "message.received",
+    trace_id: input.traceId ?? undefined,
+  };
 }
 
 async function waitForWebhookListener(url: string): Promise<void> {

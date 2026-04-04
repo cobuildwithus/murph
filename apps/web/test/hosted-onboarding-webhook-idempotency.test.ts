@@ -2118,23 +2118,33 @@ function buildLinqMessageWebhookBody(input: {
   text?: string;
 } = {}): string {
   return JSON.stringify({
-    api_version: "v1",
+    api_version: "v3",
     created_at: "2026-03-26T12:00:00.000Z",
+    webhook_version: "2026-02-03",
     data: {
-      chat_id: "chat_123",
-      from: input.from ?? "+15551234567",
-      is_from_me: input.isFromMe ?? false,
-      message: {
-        id: "msg_123",
-        parts: [
-          {
-            type: "text",
-            value: input.text ?? "hello",
-          },
-        ],
+      chat: {
+        id: "chat_123",
+        owner_handle: {
+          handle: "+15550000000",
+          id: "handle_owner_123",
+          is_me: true,
+          service: "sms",
+        },
       },
-      recipient_phone: "+15550000000",
-      received_at: "2026-03-26T12:00:00.000Z",
+      direction: input.isFromMe ? "outbound" : "inbound",
+      id: "msg_123",
+      parts: [
+        {
+          type: "text",
+          value: input.text ?? "hello",
+        },
+      ],
+      sender_handle: {
+        handle: input.from ?? "+15551234567",
+        id: "handle_sender_123",
+        service: "sms",
+      },
+      sent_at: "2026-03-26T12:00:00.000Z",
       service: "sms",
     },
     event_id: "evt_123",
@@ -2224,11 +2234,27 @@ function buildDispatchSideEffect(input: {
 }) {
   const occurredAt = input.occurredAt ?? "2026-03-26T12:00:00.000Z";
   const linqEvent = {
-    api_version: "v1",
+    api_version: "v3",
     created_at: occurredAt,
+    webhook_version: "2026-02-03",
     data: {
+      chat: {
+        id: "chat_123",
+        owner_handle: {
+          handle: createHostedOpaqueIdentifier("linq.recipient", "+15550000000"),
+          id: "handle_owner_123",
+          is_me: true,
+          service: "sms",
+        },
+      },
       chat_id: "chat_123",
+      direction: "inbound",
       from: createHostedOpaqueIdentifier("linq.from", "+15551234567"),
+      from_handle: {
+        handle: createHostedOpaqueIdentifier("linq.from", "+15551234567"),
+        id: "handle_sender_123",
+        service: "sms",
+      },
       is_from_me: false,
       message: {
         id: createHostedOpaqueIdentifier("linq.message", "msg_123"),
@@ -2239,8 +2265,20 @@ function buildDispatchSideEffect(input: {
           },
         ],
       },
+      recipient_handle: {
+        handle: createHostedOpaqueIdentifier("linq.recipient", "+15550000000"),
+        id: "handle_owner_123",
+        is_me: true,
+        service: "sms",
+      },
       received_at: "2026-03-26T12:00:00.000Z",
       service: "sms",
+      sender_handle: {
+        handle: createHostedOpaqueIdentifier("linq.from", "+15551234567"),
+        id: "handle_sender_123",
+        service: "sms",
+      },
+      sent_at: "2026-03-26T12:00:00.000Z",
     },
     event_id: input.eventId,
     event_type: "message.received",

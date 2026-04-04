@@ -400,7 +400,7 @@ const runLinqDoctorChecks: DoctorStrategy = async (
     onError: (error) =>
       failCheck(
         'probe',
-        'The Linq API token could not authenticate with /phonenumbers.',
+        'The Linq API token could not authenticate with /phone_numbers.',
         { error: errorMessage(error) },
       ),
   })

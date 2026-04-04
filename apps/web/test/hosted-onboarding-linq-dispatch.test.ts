@@ -85,30 +85,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
     const response = await handleHostedOnboardingLinqWebhook({
       prisma,
-      rawBody: JSON.stringify({
-        api_version: "v1",
-        created_at: "2026-03-26T12:00:00.000Z",
+      rawBody: buildHostedLinqWebhookBody({
         data: {
-          chat_id: "chat_123",
           extra_field: "discard-me",
-          from: "+15551234567",
-          is_from_me: false,
-          message: {
-            extra_message_field: "discard-me-too",
-            id: "msg_123",
-            parts: [
-              {
-                type: "text",
-                value: "hello",
-              },
-            ],
-          },
-          recipient_phone: "+15550000000",
-          received_at: "2026-03-26T12:00:00.000Z",
-          service: "sms",
+          extra_message_field: "discard-me-too",
         },
-        event_id: "evt_123",
-        event_type: "message.received",
       }),
       signature: null,
       timestamp: null,
@@ -221,29 +202,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
     const response = await handleHostedOnboardingLinqWebhook({
       prisma,
-      rawBody: JSON.stringify({
-        api_version: "v1",
-        created_at: "2026-03-26T12:00:00.000Z",
-        data: {
-          chat_id: "chat_123",
-          from: "+15551234567",
-          is_from_me: false,
-          message: {
-            id: "msg_123",
-            parts: [
-              {
-                type: "text",
-                value: "hello",
-              },
-            ],
-          },
-          recipient_phone: "+15550000000",
-          received_at: "2026-03-26T12:00:00.000Z",
-          service: "sms",
-        },
-        event_id: "evt_123",
-        event_type: "message.received",
-      }),
+      rawBody: buildHostedLinqWebhookBody(),
       signature: null,
       timestamp: null,
     });
@@ -321,28 +280,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
     await expect(handleHostedOnboardingLinqWebhook({
       prisma,
-      rawBody: JSON.stringify({
-        api_version: "v1",
-        created_at: "2026-03-26T12:00:00.000Z",
+      rawBody: buildHostedLinqWebhookBody({
         data: {
-          chat_id: "chat_123",
-          from: "+15551234567",
-          is_from_me: false,
-          message: {
-            id: null,
-            parts: [
-              {
-                type: "text",
-                value: "hello",
-              },
-            ],
-          },
-          recipient_phone: "+15550000000",
-          received_at: "2026-03-26T12:00:05.000Z",
-          service: "sms",
+          id: null,
+          sent_at: "2026-03-26T12:00:05.000Z",
         },
-        event_id: "evt_missing_message_id",
-        event_type: "message.received",
+        eventId: "evt_missing_message_id",
       }),
       signature: null,
       timestamp: null,
@@ -371,32 +314,15 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
     await expect(handleHostedOnboardingLinqWebhook({
       prisma,
-      rawBody: JSON.stringify({
-        api_version: "v1",
-        created_at: "2026-03-26T12:00:00.000Z",
+      rawBody: buildHostedLinqWebhookBody({
         data: {
-          chat_id: "chat_123",
-          from: "+15551234567",
-          is_from_me: false,
-          message: {
-            id: "msg_123",
-            parts: [
-              {
-                type: "text",
-                value: "hello",
-              },
-            ],
-          },
-          recipient_phone: "+15550000000",
-          received_at: "not-a-timestamp",
-          service: "sms",
+          sent_at: "not-a-timestamp",
         },
-        event_id: "evt_invalid_received_at",
-        event_type: "message.received",
+        eventId: "evt_invalid_sent_at",
       }),
       signature: null,
       timestamp: null,
-    })).rejects.toThrow("received_at must be a valid timestamp");
+    })).rejects.toThrow("sent_at must be a valid timestamp");
 
     expect(hostedWebhookReceiptCreate).not.toHaveBeenCalled();
     expect(hostedWebhookReceiptUpdateMany).not.toHaveBeenCalled();
@@ -405,7 +331,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("prefers received_at when building active-member dispatch metadata", async () => {
+  it("prefers sent_at when building active-member dispatch metadata", async () => {
     const transactionReceiptUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
     const transactionClient = {
       hostedWebhookReceipt: {
@@ -448,28 +374,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
     await handleHostedOnboardingLinqWebhook({
       prisma,
-      rawBody: JSON.stringify({
-        api_version: "v1",
-        created_at: "2026-03-26T12:00:00.000Z",
+      rawBody: buildHostedLinqWebhookBody({
         data: {
-          chat_id: "chat_123",
-          from: "+15551234567",
-          is_from_me: false,
-          message: {
-            id: "msg_123",
-            parts: [
-              {
-                type: "text",
-                value: "hello",
-              },
-            ],
-          },
-          recipient_phone: "+15550000000",
-          received_at: "2026-03-26T12:00:05.000Z",
-          service: "sms",
+          sent_at: "2026-03-26T12:00:05.000Z",
         },
-        event_id: "evt_456",
-        event_type: "message.received",
+        eventId: "evt_456",
       }),
       signature: null,
       timestamp: null,
@@ -534,28 +443,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
     const response = await handleHostedOnboardingLinqWebhook({
       prisma,
-      rawBody: JSON.stringify({
-        api_version: "v1",
-        created_at: "2026-03-26T12:00:00.000Z",
-        data: {
-          chat_id: "chat_123",
-          from: "+15551234567",
-          is_from_me: false,
-          message: {
-            id: "msg_123",
-            parts: [
-              {
-                type: "text",
-                value: "hello",
-              },
-            ],
-          },
-          recipient_phone: "+15550000000",
-          received_at: "2026-03-26T12:00:00.000Z",
-          service: "sms",
-        },
-        event_id: "evt_suspended",
-        event_type: "message.received",
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_suspended",
       }),
       signature: null,
       timestamp: null,
@@ -598,28 +487,16 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
     const response = await handleHostedOnboardingLinqWebhook({
       prisma,
-      rawBody: JSON.stringify({
-        api_version: "v1",
-        created_at: "2026-03-26T12:00:00.000Z",
+      rawBody: buildHostedLinqWebhookBody({
         data: {
-          chat_id: "chat_123",
-          from: "+15551234567",
-          is_from_me: false,
-          message: {
-            id: "msg_123",
-            parts: [
-              {
-                type: "text",
-                value: "hello there",
-              },
-            ],
-          },
-          recipient_phone: "+15550000000",
-          received_at: "2026-03-26T12:00:00.000Z",
-          service: "sms",
+          parts: [
+            {
+              type: "text",
+              value: "hello there",
+            },
+          ],
         },
-        event_id: "evt_non_trigger",
-        event_type: "message.received",
+        eventId: "evt_non_trigger",
       }),
       signature: null,
       timestamp: null,
@@ -658,20 +535,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
     await expect(handleHostedOnboardingLinqWebhook({
       prisma,
-      rawBody: JSON.stringify({
-        api_version: "v1",
-        created_at: "2026-03-26T12:00:00.000Z",
+      rawBody: buildHostedLinqWebhookBody({
         data: {
-          chat_id: "chat_123",
-          from: "+15551234567",
-          is_from_me: "false",
-          message: {
-            id: "msg_123",
-            parts: "not-an-array",
-          },
+          parts: "not-an-array",
         },
-        event_id: "evt_invalid_payload",
-        event_type: "message.received",
+        eventId: "evt_invalid_payload",
       }),
       signature: null,
       timestamp: null,
@@ -733,4 +601,45 @@ function readPersistedLinqDispatchEvent(
   return payload?.linqEvent && typeof payload.linqEvent === "object"
     ? (payload.linqEvent as Record<string, unknown>)
     : undefined;
+}
+
+function buildHostedLinqWebhookBody(input: {
+  createdAt?: string;
+  data?: Record<string, unknown>;
+  eventId?: string;
+} = {}): string {
+  return JSON.stringify({
+    api_version: "v3",
+    created_at: input.createdAt ?? "2026-03-26T12:00:00.000Z",
+    webhook_version: "2026-02-03",
+    data: {
+      chat: {
+        id: "chat_123",
+        owner_handle: {
+          handle: "+15550000000",
+          id: "handle_owner_123",
+          is_me: true,
+          service: "sms",
+        },
+      },
+      direction: "inbound",
+      id: "msg_123",
+      parts: [
+        {
+          type: "text",
+          value: "hello",
+        },
+      ],
+      sender_handle: {
+        handle: "+15551234567",
+        id: "handle_sender_123",
+        service: "sms",
+      },
+      sent_at: "2026-03-26T12:00:00.000Z",
+      service: "sms",
+      ...(input.data ?? {}),
+    },
+    event_id: input.eventId ?? "evt_123",
+    event_type: "message.received",
+  });
 }
