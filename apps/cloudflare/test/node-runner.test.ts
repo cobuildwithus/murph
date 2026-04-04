@@ -1368,7 +1368,6 @@ describe("runHostedExecutionJob", () => {
             kind: "vault.share.accepted",
             share: {
               pack,
-              shareCode: "share_code_123",
               shareId: "share_123",
             },
             userId: "member_456",
@@ -1377,7 +1376,6 @@ describe("runHostedExecutionJob", () => {
           occurredAt: "2026-03-26T12:30:00.000Z",
         },
         forwardedEnv: {
-          HOSTED_SHARE_API_BASE_URL: `http://127.0.0.1:${address.port}`,
           HOSTED_SHARE_INTERNAL_TOKENS: "share-pack-token",
         },
       });
@@ -1403,11 +1401,9 @@ describe("runHostedExecutionJob", () => {
 
   it("imports a hosted share from the inline dispatch pack without fetching through the worker proxy", async () => {
     const previousHostedExecutionInternalTokens = process.env.HOSTED_EXECUTION_INTERNAL_TOKENS;
-    const previousHostedShareApiBaseUrl = process.env.HOSTED_SHARE_API_BASE_URL;
     const previousHostedShareInternalTokens = process.env.HOSTED_SHARE_INTERNAL_TOKENS;
     const previousHostedWebBaseUrl = process.env.HOSTED_WEB_BASE_URL;
     process.env.HOSTED_EXECUTION_INTERNAL_TOKENS = "worker-control-token";
-    delete process.env.HOSTED_SHARE_API_BASE_URL;
     delete process.env.HOSTED_SHARE_INTERNAL_TOKENS;
     delete process.env.HOSTED_WEB_BASE_URL;
 
@@ -1479,7 +1475,6 @@ describe("runHostedExecutionJob", () => {
             kind: "vault.share.accepted",
             share: {
               pack,
-              shareCode: "share_code_proxy",
               shareId: "share_proxy_123",
             },
             userId: "member_proxy",
@@ -1506,7 +1501,6 @@ describe("runHostedExecutionJob", () => {
       expect(result.result.summary).toContain(`Imported share pack "${pack.title}"`);
     } finally {
       restoreEnvVar("HOSTED_EXECUTION_INTERNAL_TOKENS", previousHostedExecutionInternalTokens);
-      restoreEnvVar("HOSTED_SHARE_API_BASE_URL", previousHostedShareApiBaseUrl);
       restoreEnvVar("HOSTED_SHARE_INTERNAL_TOKENS", previousHostedShareInternalTokens);
       restoreEnvVar("HOSTED_WEB_BASE_URL", previousHostedWebBaseUrl);
     }
@@ -1569,10 +1563,8 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("exports pending hosted AI usage through the worker proxy without exposing the internal web token", async () => {
-    const previousHostedAiUsageBaseUrl = process.env.HOSTED_AI_USAGE_BASE_URL;
     const previousHostedExecutionInternalTokens = process.env.HOSTED_EXECUTION_INTERNAL_TOKENS;
     const previousHostedWebBaseUrl = process.env.HOSTED_WEB_BASE_URL;
-    delete process.env.HOSTED_AI_USAGE_BASE_URL;
     process.env.HOSTED_EXECUTION_INTERNAL_TOKENS = "worker-control-token";
     delete process.env.HOSTED_WEB_BASE_URL;
 
@@ -1688,7 +1680,6 @@ describe("runHostedExecutionJob", () => {
         vault: restored.vaultRoot,
       })).resolves.toEqual([]);
     } finally {
-      restoreEnvVar("HOSTED_AI_USAGE_BASE_URL", previousHostedAiUsageBaseUrl);
       restoreEnvVar("HOSTED_EXECUTION_INTERNAL_TOKENS", previousHostedExecutionInternalTokens);
       restoreEnvVar("HOSTED_WEB_BASE_URL", previousHostedWebBaseUrl);
     }

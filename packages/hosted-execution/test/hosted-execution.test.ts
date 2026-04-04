@@ -16,6 +16,7 @@ import {
   buildHostedExecutionEmailMessageReceivedDispatch,
   buildHostedExecutionGatewayMessageSendDispatch,
   buildHostedExecutionTelegramMessageReceivedDispatch,
+  buildHostedExecutionVaultShareAcceptedDispatch,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
   buildHostedExecutionUserEnvPath,
@@ -179,7 +180,6 @@ describe("@murphai/hosted-execution", () => {
     expect(
       readHostedExecutionWebControlPlaneEnvironment({
         HOSTED_EXECUTION_SCHEDULER_TOKENS: "cron-token",
-        HOSTED_DEVICE_SYNC_CONTROL_BASE_URL: "https://device-sync.example.test/",
         HOSTED_EXECUTION_INTERNAL_TOKENS: "internal-token",
         HOSTED_WEB_BASE_URL: "https://web.example.test/",
         HOSTED_SHARE_INTERNAL_TOKENS: "share-token",
@@ -192,7 +192,6 @@ describe("@murphai/hosted-execution", () => {
     expect(
       readHostedExecutionWebControlPlaneEnvironment({
         HOSTED_WEB_BASE_URL: "https://web.example.test/",
-        HOSTED_SHARE_API_BASE_URL: "https://share.example.test/internal/",
       }),
     ).toEqual({
       deviceSyncRuntimeBaseUrl: DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
@@ -823,9 +822,18 @@ describe("@murphai/hosted-execution", () => {
       rawMessageKey: "raw_email_456",
       userId: "member_123",
     });
+    const shareDispatch = buildHostedExecutionVaultShareAcceptedDispatch({
+      eventId: "share_456",
+      memberId: "member_123",
+      occurredAt: "2026-03-28T09:20:00.000Z",
+      share: {
+        shareId: "share_456",
+      },
+    });
 
     const inlinePayload = buildHostedExecutionOutboxPayload(inlineDispatch);
     const referencePayload = buildHostedExecutionOutboxPayload(referenceDispatch);
+    const sharePayload = buildHostedExecutionOutboxPayload(shareDispatch);
 
     expect(inlinePayload).toEqual({
       dispatch: inlineDispatch,
@@ -837,12 +845,20 @@ describe("@murphai/hosted-execution", () => {
       schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
       storage: "reference",
     });
+    expect(sharePayload).toEqual({
+      dispatchRef: buildHostedExecutionDispatchRef(shareDispatch),
+      schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+      storage: "reference",
+    });
     expect(
       readHostedExecutionOutboxPayload(inlinePayload),
     ).toEqual(inlinePayload);
     expect(
       readHostedExecutionOutboxPayload(referencePayload),
     ).toEqual(referencePayload);
+    expect(
+      readHostedExecutionOutboxPayload(sharePayload),
+    ).toEqual(sharePayload);
   });
 
   it("rejects hosted assistant delivery side effects without idempotency keys", () => {

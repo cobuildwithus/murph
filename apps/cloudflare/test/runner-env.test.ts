@@ -10,7 +10,6 @@ describe("buildHostedRunnerContainerEnv", () => {
   it("forwards non-automation runner env without leaking worker proxy base URLs", () => {
     expect(buildHostedRunnerContainerEnv({
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
-      HOSTED_AI_USAGE_BASE_URL: "https://web.example.test",
       HOSTED_DEVICE_SYNC_CONTROL_BASE_URL: "https://web.example.test",
     })).toEqual({
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",

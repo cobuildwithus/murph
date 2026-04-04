@@ -95,14 +95,13 @@ Optional tuning variables:
 Optional non-secret worker variables:
 
 - `DEVICE_SYNC_PUBLIC_BASE_URL`
-- `HOSTED_AI_USAGE_BASE_URL` when post-commit usage flushes should import into a dedicated hosted-web endpoint instead of falling back to `HOSTED_WEB_BASE_URL`
 - `HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID`
 - `HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL`
 - `HOSTED_EMAIL_DEFAULT_SUBJECT`
 - `HOSTED_EMAIL_DOMAIN`
 - `HOSTED_EMAIL_FROM_ADDRESS`
 - `HOSTED_EMAIL_LOCAL_PART`
-- `HOSTED_WEB_BASE_URL` as the shared hosted-web fallback for post-commit usage imports
+- `HOSTED_WEB_BASE_URL` as the shared hosted-web base URL for worker-side proxy calls and post-commit usage imports
 
 
 Optional non-secret provider/toolchain variables to expose through the worker and forward into the container:

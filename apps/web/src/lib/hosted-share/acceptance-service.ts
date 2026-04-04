@@ -114,7 +114,6 @@ export async function acceptHostedShareLink(input: {
         eventId,
         memberId,
         pack: readHostedSharePack(record).pack,
-        shareCode,
         shareId: record.id,
       }),
       sourceId: record.id,

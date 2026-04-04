@@ -587,7 +587,6 @@ export function parseHostedExecutionShareReference(value: unknown): HostedExecut
 
   return {
     ...(record.pack === undefined ? {} : { pack: assertContract(sharePackSchema, record.pack, "share pack") }),
-    shareCode: requireString(record.shareCode, "Hosted execution share reference shareCode"),
     shareId: requireString(record.shareId, "Hosted execution share reference shareId"),
   };
 }

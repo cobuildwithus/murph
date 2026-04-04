@@ -96,14 +96,12 @@ export function resolveHostedExecutionOutboxPayloadStorage(
     case "linq.message.received":
     case "telegram.message.received":
     case "email.message.received":
+    case "device-sync.wake":
+    case "vault.share.accepted":
       return "reference";
     case "member.activated":
     case "assistant.cron.tick":
     case "gateway.message.send":
-      return "inline";
-    case "device-sync.wake":
-      return "reference";
-    case "vault.share.accepted":
       return "inline";
     default:
       throw new TypeError("Unsupported hosted execution event kind.");

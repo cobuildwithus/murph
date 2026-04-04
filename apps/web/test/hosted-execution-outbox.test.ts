@@ -69,7 +69,7 @@ describe("drainHostedExecutionOutbox", () => {
       eventId: dispatch.eventId,
       memberId: dispatch.event.userId,
       prisma,
-      shareCode: "share-code",
+      shareId: "share_123",
     });
   });
 
@@ -267,7 +267,6 @@ function createShareDispatch(): HostedExecutionDispatchRequest {
           schemaVersion: "murph.share-pack.v1",
           title: "Shared Smoothie",
         },
-        shareCode: "share-code",
         shareId: "share_123",
       },
       userId: "member_123",

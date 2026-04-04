@@ -37,14 +37,8 @@ export function decodeHostedEncryptionKey(value: string): Buffer {
     return base64Decoded;
   }
 
-  const utf8Decoded = Buffer.from(normalized, "utf8");
-
-  if (utf8Decoded.length === 32) {
-    return utf8Decoded;
-  }
-
   throw new TypeError(
-    "Hosted encryption key must decode to exactly 32 bytes (hex, base64/base64url, or raw 32-byte text).",
+    "Hosted encryption key must decode to exactly 32 bytes (hex or base64/base64url).",
   );
 }
 

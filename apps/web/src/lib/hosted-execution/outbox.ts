@@ -417,7 +417,7 @@ async function finalizeHostedExecutionSourceIfNeeded(input: {
     eventId: input.record.eventId,
     memberId: input.record.userId,
     prisma: input.prisma,
-    shareCode: input.dispatch.event.share.shareCode,
+    shareId: input.dispatch.event.share.shareId,
   });
 }
 

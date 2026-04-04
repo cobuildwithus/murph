@@ -25,7 +25,6 @@ describe("handleRunnerOutboundRequest", () => {
       }),
       createRunnerOutboundEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
-        HOSTED_DEVICE_SYNC_CONTROL_BASE_URL: "https://web.example.test",
       }),
       "member_123",
       RUNNER_PROXY_TOKEN,
@@ -58,7 +57,6 @@ describe("handleRunnerOutboundRequest", () => {
       }),
       createRunnerOutboundEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
-        HOSTED_DEVICE_SYNC_CONTROL_BASE_URL: "https://web.example.test",
       }),
       "member_123",
       RUNNER_PROXY_TOKEN,
@@ -88,7 +86,7 @@ describe("handleRunnerOutboundRequest", () => {
         method: "POST",
       }),
       createRunnerOutboundEnv({
-        HOSTED_DEVICE_SYNC_CONTROL_BASE_URL: "https://web.example.test",
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
       }),
       "member_123",
       RUNNER_PROXY_TOKEN,
@@ -124,7 +122,6 @@ describe("handleRunnerOutboundRequest", () => {
       }),
       createRunnerOutboundEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test/app",
-        HOSTED_DEVICE_SYNC_CONTROL_BASE_URL: "https://web.example.test",
       }),
       "member_123",
       RUNNER_PROXY_TOKEN,
