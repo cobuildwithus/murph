@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -1403,6 +1403,289 @@ test.sequential(
     )
     assert.equal(fetched.memory.section, 'Health context')
     assert.equal(fetched.memory.text, 'User has high cholesterol.')
+  },
+  ASSISTANT_CLI_TIMEOUT_MS,
+)
+
+test.sequential(
+  'assistant memory file read/append/write expose the canonical Markdown memory file surface',
+  async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-file-cli-'))
+    const vaultRoot = path.join(parent, 'vault')
+    await mkdir(vaultRoot, { recursive: true })
+    cleanupPaths.push(parent)
+
+    await ensureCliRuntimeArtifacts()
+
+    const memoryPaths = resolveAssistantMemoryStoragePaths(vaultRoot)
+    await mkdir(memoryPaths.assistantStateRoot, { recursive: true })
+    await writeFile(
+      memoryPaths.longTermMemoryPath,
+      [
+        '# Assistant memory',
+        '',
+        'This file lives outside the canonical vault.',
+        '',
+        '## Identity',
+        '- Call the user Alex.',
+        '',
+        '## Preferences',
+        '',
+        '## Standing instructions',
+        '',
+        '## Health context',
+        '- User has high cholesterol.',
+        '',
+      ].join('\n'),
+      'utf8',
+    )
+
+    const sharedEnv = isolateAssistantMemoryEnv(
+      createAssistantMemoryTurnContextEnv({
+        allowSensitiveHealthContext: false,
+        sessionId: 'asst_cli_memory_file_shared',
+        sourcePrompt: 'Remember my preference.',
+        turnId: 'turn_cli_memory_file_shared',
+        vault: vaultRoot,
+      }),
+    )
+    const privateEnv = isolateAssistantMemoryEnv(
+      createAssistantMemoryTurnContextEnv({
+        allowSensitiveHealthContext: true,
+        sessionId: 'asst_cli_memory_file_private',
+        sourcePrompt: 'Remember my health context.',
+        turnId: 'turn_cli_memory_file_private',
+        vault: vaultRoot,
+      }),
+    )
+
+    const sharedRead = requireData(
+      await runCli<{
+        text: string
+        present: boolean
+      }>(['assistant', 'memory', 'file', 'read', 'MEMORY.md', '--vault', vaultRoot], {
+        env: sharedEnv,
+      }),
+    )
+    assert.equal(sharedRead.present, true)
+    assert.doesNotMatch(sharedRead.text, /high cholesterol/u)
+
+    const sharedAppend = requireData(
+      await runCli<{
+        appended: boolean
+        section: string
+        totalBullets: number
+      }>([
+        'assistant',
+        'memory',
+        'file',
+        'append',
+        'MEMORY.md',
+        '--vault',
+        vaultRoot,
+        '--section',
+        'Preferences',
+        '--text',
+        'Keep responses concise.',
+      ], {
+        env: sharedEnv,
+      }),
+    )
+    assert.equal(sharedAppend.appended, true)
+    assert.equal(sharedAppend.section, 'Preferences')
+    assert.equal(sharedAppend.totalBullets, 1)
+
+    const sharedRewriteFile = path.join(parent, 'memory-shared-rewrite.md')
+    await writeFile(
+      sharedRewriteFile,
+      [
+        '# Assistant memory',
+        '',
+        'This file lives outside the canonical vault.',
+        '',
+        '## Identity',
+        '- Call the user Alex.',
+        '',
+        '## Preferences',
+        '- Keep responses concise.',
+        '',
+        '## Standing instructions',
+        '',
+        '## Health context',
+        '',
+      ].join('\n'),
+      'utf8',
+    )
+    const deniedSharedWrite = await runCli(
+      [
+        'assistant',
+        'memory',
+        'file',
+        'write',
+        'MEMORY.md',
+        '--vault',
+        vaultRoot,
+        '--input',
+        `@${sharedRewriteFile}`,
+      ],
+      {
+        env: sharedEnv,
+      },
+    )
+    assert.equal(deniedSharedWrite.ok, false)
+    if (deniedSharedWrite.ok) {
+      assert.fail('Expected shared assistant memory rewrite to fail when hidden health context exists.')
+    }
+    assert.match(deniedSharedWrite.error.code ?? '', /ASSISTANT_MEMORY_FILE_ACCESS_DENIED/u)
+
+    const conflictingAppend = await runCli(
+      [
+        'assistant',
+        'memory',
+        'file',
+        'append',
+        'MEMORY.md',
+        '--vault',
+        vaultRoot,
+        '--section',
+        'Identity',
+        '--text',
+        'Call the user Jordan.',
+      ],
+      {
+        env: sharedEnv,
+      },
+    )
+    assert.equal(conflictingAppend.ok, false)
+    if (conflictingAppend.ok) {
+      assert.fail('Expected conflicting assistant memory append to fail.')
+    }
+    assert.match(conflictingAppend.error.code ?? '', /ASSISTANT_MEMORY_FILE_APPEND_REQUIRES_EDIT/u)
+
+    const deniedDailyAppend = await runCli(
+      [
+        'assistant',
+        'memory',
+        'file',
+        'append',
+        'memory/2026-04-02.md',
+        '--vault',
+        vaultRoot,
+        '--text',
+        'Working on onboarding.',
+      ],
+      {
+        env: sharedEnv,
+      },
+    )
+    assert.equal(deniedDailyAppend.ok, false)
+    if (deniedDailyAppend.ok) {
+      assert.fail('Expected shared daily assistant memory append to fail.')
+    }
+    assert.match(deniedDailyAppend.error.code ?? '', /ASSISTANT_MEMORY_FILE_ACCESS_DENIED/u)
+
+    const privateDailyAppend = requireData(
+      await runCli<{
+        appended: boolean
+        path: string
+      }>([
+        'assistant',
+        'memory',
+        'file',
+        'append',
+        'memory/2026-04-02.md',
+        '--vault',
+        vaultRoot,
+        '--text',
+        'Working on onboarding.',
+      ], {
+        env: privateEnv,
+      }),
+    )
+    assert.equal(privateDailyAppend.appended, true)
+    assert.equal(privateDailyAppend.path, 'memory/2026-04-02.md')
+
+    const operatorHealthAppend = requireData(
+      await runCli<{
+        appended: boolean
+        section: string
+      }>([
+        'assistant',
+        'memory',
+        'file',
+        'append',
+        'MEMORY.md',
+        '--vault',
+        vaultRoot,
+        '--section',
+        'Health context',
+        '--text',
+        'User is tracking ApoB.',
+      ]),
+    )
+    assert.equal(operatorHealthAppend.appended, true)
+    assert.equal(operatorHealthAppend.section, 'Health context')
+
+    const operatorDailyRead = requireData(
+      await runCli<{
+        text: string
+      }>([
+        'assistant',
+        'memory',
+        'file',
+        'read',
+        'memory/2026-04-02.md',
+        '--vault',
+        vaultRoot,
+      ]),
+    )
+    assert.match(operatorDailyRead.text, /Working on onboarding\./u)
+
+    const replacementFile = path.join(parent, 'memory-rewrite.md')
+    await writeFile(
+      replacementFile,
+      [
+        '# Assistant memory',
+        '',
+        'This file lives outside the canonical vault.',
+        '',
+        '## Identity',
+        '- Call the user Alex.',
+        '',
+        '## Preferences',
+        '- Keep responses concise.',
+        '',
+        '## Standing instructions',
+        '- Ask one clarifying question when context is thin.',
+        '',
+        '## Health context',
+        '- User has high cholesterol.',
+        '',
+      ].join('\n'),
+      'utf8',
+    )
+
+    const rewrite = requireData(
+      await runCli<{
+        totalChars: number
+      }>([
+        'assistant',
+        'memory',
+        'file',
+        'write',
+        'MEMORY.md',
+        '--vault',
+        vaultRoot,
+        '--input',
+        `@${replacementFile}`,
+      ]),
+    )
+    assert.ok(rewrite.totalChars > 0)
+
+    const finalMarkdown = await readFile(memoryPaths.longTermMemoryPath, 'utf8')
+    assert.match(finalMarkdown, /Keep responses concise\./u)
+    assert.match(finalMarkdown, /Ask one clarifying question when context is thin\./u)
+    assert.match(finalMarkdown, /high cholesterol/u)
   },
   ASSISTANT_CLI_TIMEOUT_MS,
 )
