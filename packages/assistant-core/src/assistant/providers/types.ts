@@ -5,18 +5,20 @@ import type {
   AssistantSessionBinding,
 } from '../../assistant-cli-contracts.js'
 import type {
-  CodexProgressEvent,
-} from '../../assistant-codex.js'
-import type {
   AssistantProviderTraceEvent,
 } from '../provider-traces.js'
 import type {
   AssistantProviderConfig,
 } from '../provider-config.js'
 import type {
+  AssistantProviderProgressEvent as SharedAssistantProviderProgressEvent,
+} from '../provider-progress.js'
+import type {
   AssistantUserMessageContentPart,
   AssistantToolCatalog,
 } from '../../model-harness.js'
+
+export type AssistantProviderProgressEvent = SharedAssistantProviderProgressEvent
 
 export interface AssistantModelCapabilities {
   images: boolean
@@ -46,8 +48,6 @@ export interface AssistantProviderCapabilities {
   supportsReasoningEffort: boolean
   supportsRichUserMessageContent: boolean
 }
-
-export interface AssistantProviderProgressEvent extends CodexProgressEvent {}
 
 export interface AssistantProviderToolRuntime {
   allowSensitiveHealthContext?: boolean
@@ -144,6 +144,7 @@ export interface AssistantProviderTurnExecutionResult {
 }
 
 export interface AssistantProviderAttemptMetadata {
+  activityLabels: readonly string[]
   executedToolCount: number
   rawToolEvents: readonly unknown[]
 }

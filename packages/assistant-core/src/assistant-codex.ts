@@ -10,6 +10,9 @@ import type {
   AssistantProviderTraceEvent,
   AssistantProviderTraceUpdate,
 } from './assistant/provider-traces.js'
+import type {
+  AssistantProviderProgressEvent,
+} from './assistant/provider-progress.js'
 import { sanitizeChildProcessEnv } from './child-process-env.js'
 import { normalizeNullableString } from './text/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
@@ -45,21 +48,7 @@ export interface CodexDisplayOptions {
   reasoningEffort: string | null
 }
 
-export interface CodexProgressEvent {
-  id: string | null
-  kind:
-    | 'command'
-    | 'file'
-    | 'message'
-    | 'plan'
-    | 'reasoning'
-    | 'search'
-    | 'status'
-    | 'tool'
-  rawEvent: unknown
-  state: 'completed' | 'running'
-  text: string
-}
+export type CodexProgressEvent = AssistantProviderProgressEvent
 
 export async function executeCodexPrompt(
   input: CodexExecInput,
@@ -815,20 +804,38 @@ function extractCodexProgressEventFromNormalized(
       return null
     }
 
+    const safeLabel =
+      normalized.itemType === 'command.execution'
+        ? summarizeCodexCommandProgressLabel(normalized.commandLabel)
+        : null
+
     return {
       id: normalized.itemId,
       kind: statusItemProgressKind(normalized),
+      label:
+        normalized.itemType === 'command.execution'
+          ? normalized.commandLabel
+          : null,
       rawEvent: normalized.rawEvent,
+      safeLabel,
+      safeText:
+        normalized.itemType === 'command.execution'
+          ? commandProgressSafeText(normalized.itemState, safeLabel)
+          : null,
       state: normalized.itemState,
       text,
     }
   }
 
   if (normalized.kind === 'tool_call') {
+    const safeLabel = toolCallSafeLabel(normalized)
     return {
       id: normalized.itemId,
       kind: 'tool',
+      label: toolCallLabel(normalized),
       rawEvent: normalized.rawEvent,
+      safeLabel,
+      safeText: toolCallSafeText(normalized.itemState, safeLabel),
       state: normalized.itemState,
       text: toolCallText(normalized),
     }
@@ -1133,13 +1140,37 @@ function toolCallText(
         : 'Used a tool.'
 }
 
+function toolCallLabel(
+  event: Extract<CodexNormalizedEvent, { kind: 'tool_call' }>,
+): string | null {
+  return event.toolServer && event.toolName
+    ? `${event.toolServer}/${event.toolName}`
+    : event.toolName ?? event.toolServer ?? null
+}
+
+function toolCallSafeLabel(
+  event: Extract<CodexNormalizedEvent, { kind: 'tool_call' }>,
+): string | null {
+  return normalizeStatusText(toolCallLabel(event))
+}
+
+function toolCallSafeText(
+  state: 'completed' | 'running',
+  safeLabel: string | null,
+): string | null {
+  if (!safeLabel) {
+    return null
+  }
+
+  return state === 'running'
+    ? `using ${safeLabel}`
+    : `finished ${safeLabel}`
+}
+
 function toolCallTraceText(
   event: Extract<CodexNormalizedEvent, { kind: 'tool_call' }>,
 ): string | null {
-  const label =
-    event.toolServer && event.toolName
-      ? `${event.toolServer}/${event.toolName}`
-      : event.toolName ?? event.toolServer ?? 'tool call'
+  const label = toolCallLabel(event) ?? 'tool call'
 
   return event.itemState === 'running'
     ? `Using ${label}.`
@@ -1162,6 +1193,19 @@ function webSearchTraceText(
     : event.query
       ? `Finished web search for ${JSON.stringify(event.query)}.`
       : 'Finished web search.'
+}
+
+function commandProgressSafeText(
+  state: 'completed' | 'running',
+  safeLabel: string | null,
+): string | null {
+  if (!safeLabel) {
+    return null
+  }
+
+  return state === 'running'
+    ? `running ${safeLabel}`
+    : `finished ${safeLabel}`
 }
 
 function statusItemTraceStreamId(
@@ -1378,6 +1422,85 @@ function extractCommandLikeLabel(item: Record<string, unknown> | null): string |
       'query',
     ]) ?? null,
   )
+}
+
+function summarizeCodexCommandProgressLabel(value: string | null | undefined): string | null {
+  const normalized = normalizeStatusText(value)
+  if (!normalized) {
+    return null
+  }
+
+  const tokens = splitCodexCommandLabel(normalized)
+  if (tokens.length === 0) {
+    return normalized
+  }
+
+  if (
+    tokens.length >= 3 &&
+    ['bash', 'sh', 'zsh'].includes(tokens[0]!.toLowerCase()) &&
+    tokens[1] === '-lc'
+  ) {
+    return summarizeCodexCommandProgressLabel(tokens.slice(2).join(' '))
+  }
+
+  let startIndex = 0
+  if (
+    tokens[0]?.toLowerCase() === 'node' &&
+    tokens[1] &&
+    simplifyCodexCommandToken(tokens[1]) === 'bin.js'
+  ) {
+    startIndex = 2
+  } else if (simplifyCodexCommandToken(tokens[0]) === 'bin.js') {
+    startIndex = 1
+  }
+
+  const summaryTokens: string[] = []
+  for (const token of tokens.slice(startIndex)) {
+    const normalizedToken = simplifyCodexCommandToken(token)
+    if (!normalizedToken) {
+      continue
+    }
+
+    if (normalizedToken.startsWith('-') && summaryTokens.length > 0) {
+      break
+    }
+
+    summaryTokens.push(normalizedToken)
+    if (summaryTokens.length >= 5) {
+      break
+    }
+  }
+
+  return normalizeStatusText(summaryTokens.join(' ')) ?? normalized
+}
+
+function splitCodexCommandLabel(value: string): string[] {
+  return value.match(/"[^"]*"|'[^']*'|\S+/gu) ?? []
+}
+
+function simplifyCodexCommandToken(token: string): string | null {
+  const trimmed = token.trim()
+  if (trimmed.length === 0) {
+    return null
+  }
+
+  const unquoted =
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+      (trimmed.startsWith("'") && trimmed.endsWith("'"))
+      ? trimmed.slice(1, -1)
+      : trimmed
+  const compact = unquoted.trim()
+  if (compact.length === 0) {
+    return null
+  }
+
+  const slashParts = compact.split(/[\\/]/u)
+  const tail = slashParts[slashParts.length - 1] ?? compact
+  if (tail.length === 0) {
+    return null
+  }
+
+  return normalizeStatusText(tail) ?? normalizeStatusText(compact)
 }
 
 function collectFilePaths(item: Record<string, unknown> | null): string[] {

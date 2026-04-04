@@ -13,6 +13,7 @@ import {
 import {
   executeAssistantProviderTurnAttempt,
   resolveAssistantProviderCapabilities,
+  type AssistantProviderAttemptMetadata,
   type AssistantProviderTurnExecutionResult,
 } from '../assistant-provider.js'
 import { recordAssistantDiagnosticEvent } from './diagnostics.js'
@@ -369,7 +370,8 @@ async function executeAssistantProviderAttempt(input: {
   failoverState: AssistantProviderFailoverState
 }): Promise<AssistantProviderAttemptOutcome> {
   const { attemptPlan, executionPlan } = input
-  let attemptMetadata = {
+  let attemptMetadata: AssistantProviderAttemptMetadata = {
+    activityLabels: [] as readonly string[],
     executedToolCount: 0,
     rawToolEvents: [] as readonly unknown[],
   }
@@ -458,6 +460,7 @@ async function executeAssistantProviderAttempt(input: {
       at: new Date().toISOString(),
     })
     await recordProviderAttemptSucceeded({
+      activityLabels: attemptMetadata.activityLabels ?? [],
       attemptCount: attemptPlan.attemptCount,
       route: attemptPlan.route,
       turnId: executionPlan.turnId,
@@ -665,22 +668,29 @@ async function recordProviderAttemptStarted(input: {
 }
 
 async function recordProviderAttemptSucceeded(input: {
+  activityLabels: readonly string[]
   attemptCount: number
   route: ResolvedAssistantFailoverRoute
   turnId: string
   vault: string
 }): Promise<void> {
+  const metadata: Record<string, string> = {
+    attempt: String(input.attemptCount),
+    provider: input.route.provider,
+    model: input.route.providerOptions.model ?? 'default',
+    routeId: input.route.routeId,
+  }
+  if (input.activityLabels.length > 0) {
+    metadata.activityCount = String(input.activityLabels.length)
+    metadata.activities = input.activityLabels.join(', ')
+  }
+
   await appendAssistantTurnReceiptEvent({
     vault: input.vault,
     turnId: input.turnId,
     kind: 'provider.attempt.succeeded',
     detail: input.route.label,
-    metadata: {
-      attempt: String(input.attemptCount),
-      provider: input.route.provider,
-      model: input.route.providerOptions.model ?? 'default',
-      routeId: input.route.routeId,
-    },
+    metadata,
   })
 }
 

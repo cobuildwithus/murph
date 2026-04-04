@@ -192,6 +192,8 @@ test('executeCodexPrompt emits progress events and can fall back to the last age
   const progressEvents: Array<{
     id: string | null
     kind: string
+    safeLabel?: string | null
+    safeText?: string | null
     state: string
     text: string
   }> = []
@@ -203,6 +205,8 @@ test('executeCodexPrompt emits progress events and can fall back to the last age
       progressEvents.push({
         id: event.id,
         kind: event.kind,
+        safeLabel: event.safeLabel ?? null,
+        safeText: event.safeText ?? null,
         state: event.state,
         text: event.text,
       })
@@ -214,18 +218,24 @@ test('executeCodexPrompt emits progress events and can fall back to the last age
     {
       id: 'reason-1',
       kind: 'reasoning',
+      safeLabel: null,
+      safeText: null,
       state: 'running',
       text: 'Thinking…',
     },
     {
       id: 'cmd-1',
       kind: 'command',
+      safeLabel: 'ls',
+      safeText: 'running ls',
       state: 'running',
       text: '$ bash -lc ls',
     },
     {
       id: 'msg-1',
       kind: 'message',
+      safeLabel: null,
+      safeText: null,
       state: 'completed',
       text: 'agent message fallback',
     },
