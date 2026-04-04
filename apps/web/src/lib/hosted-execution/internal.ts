@@ -108,7 +108,7 @@ function readHostedExecutionAcceptedRouteTokens(kind: HostedExecutionAcceptedRou
     return {
       requiredCode: "HOSTED_EXECUTION_SCHEDULER_TOKEN_REQUIRED",
       requiredMessage: "HOSTED_EXECUTION_SCHEDULER_TOKENS or CRON_SECRET must be configured for scheduled hosted execution drains.",
-      tokens: readTokenListFromEnv("HOSTED_EXECUTION_SCHEDULER_TOKENS", "CRON_SECRET"),
+      tokens: readTokenListFromEnvWithFallback("HOSTED_EXECUTION_SCHEDULER_TOKENS", "CRON_SECRET"),
       unauthorizedCode: "HOSTED_EXECUTION_UNAUTHORIZED",
       unauthorizedMessage: "Unauthorized hosted execution request.",
     };
@@ -118,7 +118,7 @@ function readHostedExecutionAcceptedRouteTokens(kind: HostedExecutionAcceptedRou
     return {
       requiredCode: "HOSTED_SHARE_INTERNAL_TOKEN_REQUIRED",
       requiredMessage: "HOSTED_SHARE_INTERNAL_TOKENS must be configured for internal hosted share routes.",
-      tokens: readTokenListFromEnv("HOSTED_SHARE_INTERNAL_TOKENS", "HOSTED_SHARE_INTERNAL_TOKEN"),
+      tokens: readTokenListFromEnv("HOSTED_SHARE_INTERNAL_TOKENS"),
       unauthorizedCode: "HOSTED_SHARE_UNAUTHORIZED",
       unauthorizedMessage: "Unauthorized hosted share request.",
     };
@@ -127,20 +127,30 @@ function readHostedExecutionAcceptedRouteTokens(kind: HostedExecutionAcceptedRou
   return {
     requiredCode: "HOSTED_EXECUTION_INTERNAL_TOKEN_REQUIRED",
     requiredMessage: "HOSTED_EXECUTION_INTERNAL_TOKENS must be configured for internal hosted execution control routes.",
-    tokens: readTokenListFromEnv("HOSTED_EXECUTION_INTERNAL_TOKENS", "HOSTED_EXECUTION_INTERNAL_TOKEN"),
+    tokens: readTokenListFromEnv("HOSTED_EXECUTION_INTERNAL_TOKENS"),
     unauthorizedCode: "HOSTED_EXECUTION_UNAUTHORIZED",
     unauthorizedMessage: "Unauthorized hosted execution request.",
   };
 }
 
-function readTokenListFromEnv(primaryKey: string, fallbackKey: string): string[] {
+function readTokenListFromEnv(primaryKey: string): string[] {
   const explicit = normalizeOptionalString(process.env[primaryKey]);
 
-  if (explicit) {
-    return explicit
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter(Boolean);
+  if (!explicit) {
+    return [];
+  }
+
+  return explicit
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function readTokenListFromEnvWithFallback(primaryKey: string, fallbackKey: string): string[] {
+  const explicit = readTokenListFromEnv(primaryKey);
+
+  if (explicit.length > 0) {
+    return explicit;
   }
 
   const fallback = normalizeOptionalString(process.env[fallbackKey]);

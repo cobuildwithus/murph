@@ -2621,11 +2621,11 @@ async function issueHostedShareLink(input: {
       ?? process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL
       ?? null,
   )
-  const token = normalizeHostedShareApiToken(process.env.HOSTED_SHARE_INTERNAL_TOKEN ?? null)
+  const token = readHostedShareApiToken(process.env.HOSTED_SHARE_INTERNAL_TOKENS ?? null)
 
   if (!baseUrl || !token) {
     throw new Error(
-      'Hosted share link creation requires HOSTED_SHARE_API_BASE_URL or HOSTED_ONBOARDING_PUBLIC_BASE_URL plus HOSTED_SHARE_INTERNAL_TOKEN in the assistant environment.',
+      'Hosted share link creation requires HOSTED_SHARE_API_BASE_URL or HOSTED_ONBOARDING_PUBLIC_BASE_URL plus HOSTED_SHARE_INTERNAL_TOKENS in the assistant environment.',
     )
   }
 
@@ -2678,13 +2678,15 @@ function normalizeHostedShareApiBaseUrl(value: string | null): string | null {
   return url.toString().replace(/\/$/u, '')
 }
 
-function normalizeHostedShareApiToken(value: string | null): string | null {
+function readHostedShareApiToken(value: string | null): string | null {
   if (typeof value !== 'string') {
     return null
   }
 
-  const normalized = value.trim()
-  return normalized.length > 0 ? normalized : null
+  return value
+    .split(',')
+    .map((entry) => entry.trim())
+    .find((entry) => entry.length > 0) ?? null
 }
 
 async function writeAssistantPayloadFile(

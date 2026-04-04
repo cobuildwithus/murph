@@ -1892,7 +1892,7 @@ test('createDefaultAssistantToolCatalog food upsert writes payload files and cal
 test('createDefaultAssistantToolCatalog share-link tool exports attached protocols and posts the hosted request', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-share-tools-'))
   const originalBaseUrl = process.env.HOSTED_SHARE_API_BASE_URL
-  const originalToken = process.env.HOSTED_SHARE_INTERNAL_TOKEN
+  const originalToken = process.env.HOSTED_SHARE_INTERNAL_TOKENS
   const originalFetch = global.fetch
   let recordedRequest:
     | {
@@ -1903,7 +1903,7 @@ test('createDefaultAssistantToolCatalog share-link tool exports attached protoco
     | undefined
 
   process.env.HOSTED_SHARE_API_BASE_URL = 'https://share.example.test'
-  process.env.HOSTED_SHARE_INTERNAL_TOKEN = 'share-token'
+  process.env.HOSTED_SHARE_INTERNAL_TOKENS = 'share-token'
   global.fetch = vi.fn(async (input, init) => {
     recordedRequest = {
       body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>,
@@ -2004,9 +2004,9 @@ test('createDefaultAssistantToolCatalog share-link tool exports attached protoco
     }
 
     if (originalToken === undefined) {
-      delete process.env.HOSTED_SHARE_INTERNAL_TOKEN
+      delete process.env.HOSTED_SHARE_INTERNAL_TOKENS
     } else {
-      process.env.HOSTED_SHARE_INTERNAL_TOKEN = originalToken
+      process.env.HOSTED_SHARE_INTERNAL_TOKENS = originalToken
     }
 
     global.fetch = originalFetch
@@ -2017,7 +2017,7 @@ test('createDefaultAssistantToolCatalog share-link tool exports attached protoco
 test('createDefaultAssistantToolCatalog share-link tool uses hosted sender identity from execution context', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-share-tools-hosted-'))
   const originalBaseUrl = process.env.HOSTED_SHARE_API_BASE_URL
-  const originalToken = process.env.HOSTED_SHARE_INTERNAL_TOKEN
+  const originalToken = process.env.HOSTED_SHARE_INTERNAL_TOKENS
   const originalFetch = global.fetch
   let recordedRequest:
     | {
@@ -2028,7 +2028,7 @@ test('createDefaultAssistantToolCatalog share-link tool uses hosted sender ident
     | undefined
 
   process.env.HOSTED_SHARE_API_BASE_URL = 'https://share.example.test'
-  process.env.HOSTED_SHARE_INTERNAL_TOKEN = 'share-token'
+  process.env.HOSTED_SHARE_INTERNAL_TOKENS = 'share-token'
   global.fetch = vi.fn(async (input, init) => {
     recordedRequest = {
       body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>,
@@ -2096,9 +2096,9 @@ test('createDefaultAssistantToolCatalog share-link tool uses hosted sender ident
     }
 
     if (originalToken === undefined) {
-      delete process.env.HOSTED_SHARE_INTERNAL_TOKEN
+      delete process.env.HOSTED_SHARE_INTERNAL_TOKENS
     } else {
-      process.env.HOSTED_SHARE_INTERNAL_TOKEN = originalToken
+      process.env.HOSTED_SHARE_INTERNAL_TOKENS = originalToken
     }
 
     global.fetch = originalFetch
@@ -2109,11 +2109,11 @@ test('createDefaultAssistantToolCatalog share-link tool uses hosted sender ident
 test('createDefaultAssistantToolCatalog share-link tool surfaces hosted API errors', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-share-tools-error-'))
   const originalBaseUrl = process.env.HOSTED_SHARE_API_BASE_URL
-  const originalToken = process.env.HOSTED_SHARE_INTERNAL_TOKEN
+  const originalToken = process.env.HOSTED_SHARE_INTERNAL_TOKENS
   const originalFetch = global.fetch
 
   process.env.HOSTED_SHARE_API_BASE_URL = 'https://share.example.test'
-  process.env.HOSTED_SHARE_INTERNAL_TOKEN = 'share-token'
+  process.env.HOSTED_SHARE_INTERNAL_TOKENS = 'share-token'
   global.fetch = vi.fn(async () =>
     new Response(
       JSON.stringify({
@@ -2170,9 +2170,9 @@ test('createDefaultAssistantToolCatalog share-link tool surfaces hosted API erro
     }
 
     if (originalToken === undefined) {
-      delete process.env.HOSTED_SHARE_INTERNAL_TOKEN
+      delete process.env.HOSTED_SHARE_INTERNAL_TOKENS
     } else {
-      process.env.HOSTED_SHARE_INTERNAL_TOKEN = originalToken
+      process.env.HOSTED_SHARE_INTERNAL_TOKENS = originalToken
     }
 
     global.fetch = originalFetch

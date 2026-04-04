@@ -5,23 +5,15 @@ import type {
   AssistantStatePermissionAudit,
 } from '@murphai/runtime-state/node'
 import {
-  assistantSessionSchema,
   assistantSessionSecretsSchema,
   parseAssistantSessionRecord,
-  type AssistantSession,
-  type AssistantSessionSecrets,
 } from '@murphai/assistant-core/assistant-cli-contracts'
-import { normalizeAssistantSessionSnapshot } from '@murphai/assistant-core/assistant-provider'
-import { mergeAssistantHeaders } from '@murphai/assistant-core/assistant-runtime'
 import {
   auditAssistantStatePermissions,
   isMissingFileError,
-  writeJsonFileAtomic,
 } from '@murphai/assistant-core/assistant-runtime'
 import {
   extractAssistantSessionSecretsForPersistence,
-  persistAssistantSessionSecrets,
-  readAssistantSessionSecrets,
 } from '@murphai/assistant-core/assistant-state'
 import { resolveAssistantSessionPath } from '@murphai/assistant-core/assistant-state'
 
@@ -29,7 +21,6 @@ export interface AssistantStateSecrecyAudit {
   malformedSessionSecretSidecars: number
   orphanSessionSecretSidecars: number
   permissionAudit: AssistantStatePermissionAudit
-  repairedSessionFiles: number
   sessionFilesScanned: number
   sessionInlineSecretFiles: number
   sessionInlineSecretHeaders: number
@@ -43,11 +34,6 @@ export async function inspectAndRepairAssistantStateSecrecy(
   } = {},
 ): Promise<AssistantStateSecrecyAudit> {
   const repair = input.repair === true
-  let repairedSessionFiles = 0
-
-  if (repair) {
-    repairedSessionFiles = await repairLegacyAssistantSessionSecrets(paths)
-  }
 
   const [
     permissionAudit,
@@ -66,62 +52,11 @@ export async function inspectAndRepairAssistantStateSecrecy(
     malformedSessionSecretSidecars: sessionSecretSidecars.malformedSidecars,
     orphanSessionSecretSidecars: sessionSecretSidecars.orphanSidecars,
     permissionAudit,
-    repairedSessionFiles,
     sessionFilesScanned: sessionInlineSecrets.filesScanned,
     sessionInlineSecretFiles: sessionInlineSecrets.inlineSecretFiles,
     sessionInlineSecretHeaders: sessionInlineSecrets.inlineSecretHeaders,
     sessionSecretSidecarFiles: sessionSecretSidecars.filesScanned,
   }
-}
-
-async function repairLegacyAssistantSessionSecrets(
-  paths: AssistantStatePaths,
-): Promise<number> {
-  let repairedFiles = 0
-
-  for (const fileName of await readDirectoryFiles(paths.sessionsDirectory)) {
-    if (!fileName.endsWith('.json')) {
-      continue
-    }
-
-    const sessionPath = path.join(paths.sessionsDirectory, fileName)
-    try {
-      const raw = await readFile(sessionPath, 'utf8')
-      const session = normalizeAssistantSessionSnapshot(
-        parseAssistantSessionRecord(JSON.parse(raw) as unknown),
-      )
-      const extracted = extractAssistantSessionSecretsForPersistence(session)
-
-      if (extracted.migratedHeaderNames.length === 0) {
-        continue
-      }
-
-      const existingSecrets = await readAssistantSessionSecrets({
-        paths,
-        sessionId: session.sessionId,
-      })
-      const mergedSecrets = mergeAssistantSessionSecretsForRepair({
-        existingSecrets,
-        extractedSecrets: extracted.secrets,
-        session,
-      })
-      const persistedSession = assistantSessionSchema.parse(
-        normalizeAssistantSessionSnapshot(extracted.persisted),
-      )
-
-      await persistAssistantSessionSecrets({
-        paths,
-        secrets: mergedSecrets,
-        sessionId: session.sessionId,
-      })
-      await writeJsonFileAtomic(sessionPath, persistedSession)
-      repairedFiles += 1
-    } catch {
-      // Let the main doctor parse checks surface malformed primary records.
-    }
-  }
-
-  return repairedFiles
 }
 
 async function scanAssistantSessionInlineSecrets(
@@ -201,33 +136,6 @@ async function auditAssistantSessionSecretSidecars(
     malformedSidecars,
     orphanSidecars,
   }
-}
-
-function mergeAssistantSessionSecretsForRepair(input: {
-  existingSecrets: AssistantSessionSecrets | null
-  extractedSecrets: AssistantSessionSecrets | null
-  session: AssistantSession
-}): AssistantSessionSecrets | null {
-  const providerHeaders = mergeAssistantHeaders(
-    input.existingSecrets?.providerHeaders,
-    input.extractedSecrets?.providerHeaders,
-  )
-  const providerBindingHeaders = mergeAssistantHeaders(
-    input.existingSecrets?.providerBindingHeaders,
-    input.extractedSecrets?.providerBindingHeaders,
-  )
-
-  if (!providerHeaders && !providerBindingHeaders) {
-    return null
-  }
-
-  return assistantSessionSecretsSchema.parse({
-    schema: 'murph.assistant-session-secrets.v1',
-    sessionId: input.session.sessionId,
-    updatedAt: input.session.updatedAt,
-    providerHeaders,
-    providerBindingHeaders,
-  })
 }
 
 async function pathExists(filePath: string): Promise<boolean> {

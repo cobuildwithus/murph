@@ -473,13 +473,13 @@ function createAssistantDoctorCommandDefinition(input?: {
       'Run lightweight assistant-state diagnostics for session files, receipts, transcripts, automation state, and the outbound outbox.',
     hint:
       input?.hint ??
-      'Use --repair to migrate legacy inline secret headers into private sidecars and to tighten assistant-state permissions in place.',
+      'Use --repair to tighten assistant-state permissions in place.',
     options: withBaseOptions({
       repair: z
         .boolean()
         .default(false)
         .describe(
-          'Repair assistant-state secrecy issues in place by moving legacy inline secret headers into private sidecars and fixing private file permissions.',
+          'Repair assistant-state file and directory permissions in place.',
         ),
     }),
     output: assistantDoctorResultSchema,

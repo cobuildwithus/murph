@@ -1378,7 +1378,7 @@ describe("runHostedExecutionJob", () => {
         },
         forwardedEnv: {
           HOSTED_SHARE_API_BASE_URL: `http://127.0.0.1:${address.port}`,
-          HOSTED_SHARE_INTERNAL_TOKEN: "share-pack-token",
+          HOSTED_SHARE_INTERNAL_TOKENS: "share-pack-token",
         },
       });
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-share-direct-"));
@@ -1402,13 +1402,13 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("imports a hosted share from the inline dispatch pack without fetching through the worker proxy", async () => {
-    const previousHostedExecutionInternalToken = process.env.HOSTED_EXECUTION_INTERNAL_TOKEN;
+    const previousHostedExecutionInternalTokens = process.env.HOSTED_EXECUTION_INTERNAL_TOKENS;
     const previousHostedShareApiBaseUrl = process.env.HOSTED_SHARE_API_BASE_URL;
-    const previousHostedShareInternalToken = process.env.HOSTED_SHARE_INTERNAL_TOKEN;
+    const previousHostedShareInternalTokens = process.env.HOSTED_SHARE_INTERNAL_TOKENS;
     const previousHostedWebBaseUrl = process.env.HOSTED_WEB_BASE_URL;
-    process.env.HOSTED_EXECUTION_INTERNAL_TOKEN = "worker-control-token";
+    process.env.HOSTED_EXECUTION_INTERNAL_TOKENS = "worker-control-token";
     delete process.env.HOSTED_SHARE_API_BASE_URL;
-    delete process.env.HOSTED_SHARE_INTERNAL_TOKEN;
+    delete process.env.HOSTED_SHARE_INTERNAL_TOKENS;
     delete process.env.HOSTED_WEB_BASE_URL;
 
     const sourceVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-share-proxy-source-"));
@@ -1488,7 +1488,7 @@ describe("runHostedExecutionJob", () => {
           occurredAt: "2026-03-26T12:30:00.000Z",
         },
         forwardedEnv: {
-          HOSTED_SHARE_INTERNAL_TOKEN: "bad-forwarded-share-token",
+          HOSTED_SHARE_INTERNAL_TOKENS: "bad-forwarded-share-token",
         },
       });
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-share-proxy-"));
@@ -1505,9 +1505,9 @@ describe("runHostedExecutionJob", () => {
       expect(importedFood?.attachedProtocolIds?.length).toBe(1);
       expect(result.result.summary).toContain(`Imported share pack "${pack.title}"`);
     } finally {
-      restoreEnvVar("HOSTED_EXECUTION_INTERNAL_TOKEN", previousHostedExecutionInternalToken);
+      restoreEnvVar("HOSTED_EXECUTION_INTERNAL_TOKENS", previousHostedExecutionInternalTokens);
       restoreEnvVar("HOSTED_SHARE_API_BASE_URL", previousHostedShareApiBaseUrl);
-      restoreEnvVar("HOSTED_SHARE_INTERNAL_TOKEN", previousHostedShareInternalToken);
+      restoreEnvVar("HOSTED_SHARE_INTERNAL_TOKENS", previousHostedShareInternalTokens);
       restoreEnvVar("HOSTED_WEB_BASE_URL", previousHostedWebBaseUrl);
     }
   });
@@ -1570,10 +1570,10 @@ describe("runHostedExecutionJob", () => {
 
   it("exports pending hosted AI usage through the worker proxy without exposing the internal web token", async () => {
     const previousHostedAiUsageBaseUrl = process.env.HOSTED_AI_USAGE_BASE_URL;
-    const previousHostedExecutionInternalToken = process.env.HOSTED_EXECUTION_INTERNAL_TOKEN;
+    const previousHostedExecutionInternalTokens = process.env.HOSTED_EXECUTION_INTERNAL_TOKENS;
     const previousHostedWebBaseUrl = process.env.HOSTED_WEB_BASE_URL;
     delete process.env.HOSTED_AI_USAGE_BASE_URL;
-    process.env.HOSTED_EXECUTION_INTERNAL_TOKEN = "worker-control-token";
+    process.env.HOSTED_EXECUTION_INTERNAL_TOKENS = "worker-control-token";
     delete process.env.HOSTED_WEB_BASE_URL;
 
     const activation = await runHostedExecutionJob({
@@ -1689,7 +1689,7 @@ describe("runHostedExecutionJob", () => {
       })).resolves.toEqual([]);
     } finally {
       restoreEnvVar("HOSTED_AI_USAGE_BASE_URL", previousHostedAiUsageBaseUrl);
-      restoreEnvVar("HOSTED_EXECUTION_INTERNAL_TOKEN", previousHostedExecutionInternalToken);
+      restoreEnvVar("HOSTED_EXECUTION_INTERNAL_TOKENS", previousHostedExecutionInternalTokens);
       restoreEnvVar("HOSTED_WEB_BASE_URL", previousHostedWebBaseUrl);
     }
   });

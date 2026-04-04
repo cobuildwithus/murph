@@ -32,7 +32,7 @@ export function resolveMurphVitestFileParallelism(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   const override = parseMurphBooleanEnv(
-    env.MURPH_VITEST_FILE_PARALLELISM ?? env.MURPH_TEST_FILE_PARALLELISM,
+    env.MURPH_VITEST_FILE_PARALLELISM,
   );
 
   if (override !== undefined) {
@@ -46,7 +46,7 @@ export function resolveMurphVitestSuiteConcurrency(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   const override = parseMurphBooleanEnv(
-    env.MURPH_VITEST_SUITE_CONCURRENCY ?? env.MURPH_TEST_SUITE_CONCURRENCY,
+    env.MURPH_VITEST_SUITE_CONCURRENCY,
   );
 
   if (override !== undefined) {
@@ -71,7 +71,6 @@ export function resolveMurphVitestMaxConcurrency(
   return (
     parseMurphPositiveIntegerEnv(
       env.MURPH_VITEST_MAX_CONCURRENCY ??
-        env.MURPH_TEST_MAX_CONCURRENCY ??
         env.MURPH_CLI_VITEST_MAX_CONCURRENCY,
     ) ?? (env.CI ? 1 : 2)
   );
