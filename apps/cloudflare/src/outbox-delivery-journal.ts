@@ -8,9 +8,11 @@ import {
 import type { R2BucketLike } from "./bundle-store.ts";
 import {
   buildHostedStorageAad,
-  deriveHostedStorageOpaqueId,
 } from "./crypto-context.js";
-import { listHostedStorageObjectKeys } from "./storage-paths.js";
+import {
+  hostedSideEffectRecordKey,
+  hostedSideEffectRecordKeys,
+} from "./storage-paths.js";
 import {
   readEncryptedR2Json,
   writeEncryptedR2Json,
@@ -50,7 +52,7 @@ export function createHostedExecutionSideEffectJournalStore(input: {
 }): HostedExecutionSideEffectJournalStore {
   return {
     async deletePrepared(query) {
-      const keys = await sideEffectRecordKeys(
+      const keys = await hostedSideEffectRecordKeys(
         input.key,
         input.keysById,
         query.userId,
@@ -80,7 +82,7 @@ export function createHostedExecutionSideEffectJournalStore(input: {
     async read(query) {
       const existing = await readRecordAtKeys(
         input,
-        await sideEffectRecordKeys(input.key, input.keysById, query.userId, query.effectId),
+        await hostedSideEffectRecordKeys(input.key, input.keysById, query.userId, query.effectId),
         query.userId,
         query.effectId,
       );
@@ -96,10 +98,15 @@ export function createHostedExecutionSideEffectJournalStore(input: {
     async write(writeInput) {
       const record = parseHostedExecutionSideEffectRecord(writeInput.record);
       assertSideEffectRecordIsSelfConsistent(record);
-      const key = await sideEffectRecordKey(input.key, writeInput.userId, record.effectId);
+      const key = await hostedSideEffectRecordKey(input.key, writeInput.userId, record.effectId);
       const existing = await readRecordAtKeys(
         input,
-        await sideEffectRecordKeys(input.key, input.keysById, writeInput.userId, record.effectId),
+        await hostedSideEffectRecordKeys(
+          input.key,
+          input.keysById,
+          writeInput.userId,
+          record.effectId,
+        ),
         writeInput.userId,
         record.effectId,
       );
@@ -199,34 +206,6 @@ async function writeRecordAtKey(
     scope: "side-effect-journal",
     value,
   });
-}
-
-async function sideEffectRecordKey(rootKey: Uint8Array, userId: string, effectId: string): Promise<string> {
-  const userSegment = await deriveHostedStorageOpaqueId({
-    length: 24,
-    rootKey,
-    scope: "side-effect-path",
-    value: `user:${userId}`,
-  });
-  const effectSegment = await deriveHostedStorageOpaqueId({
-    length: 40,
-    rootKey,
-    scope: "side-effect-path",
-    value: `effect:${userId}:${effectId}`,
-  });
-
-  return `transient/side-effects/${userSegment}/${effectSegment}.json`;
-}
-
-async function sideEffectRecordKeys(
-  rootKey: Uint8Array,
-  keysById: Readonly<Record<string, Uint8Array>> | undefined,
-  userId: string,
-  effectId: string,
-): Promise<string[]> {
-  return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
-    sideEffectRecordKey(candidateRootKey, userId, effectId)
-  );
 }
 
 function assertSideEffectRecordIsSelfConsistent(
