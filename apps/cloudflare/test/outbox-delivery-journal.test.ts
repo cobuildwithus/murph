@@ -95,6 +95,61 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
     })).resolves.toEqual(record);
   });
 
+  it("reads and deletes legacy side-effect journal records after the opaque-path cutover", async () => {
+    const bucket = createMemoryBucket();
+    const previousKey = Buffer.alloc(32, 7);
+    const currentKey = Buffer.alloc(32, 9);
+    const record = createPreparedRecord({
+      effectId: "outbox_legacy",
+      fingerprint: "dedupe_legacy",
+    });
+    const objectKey = legacySideEffectRecordKey("member_legacy", record.effectId);
+
+    await writeEncryptedR2Json({
+      aad: buildHostedStorageAad({
+        effectId: record.effectId,
+        key: objectKey,
+        purpose: "side-effect-journal",
+        userId: "member_legacy",
+      }),
+      bucket: bucket.api,
+      cryptoKey: previousKey,
+      key: objectKey,
+      keyId: "v1",
+      scope: "side-effect-journal",
+      value: record,
+    });
+
+    const store = createHostedExecutionSideEffectJournalStore({
+      bucket: bucket.api,
+      key: currentKey,
+      keyId: "v2",
+      keysById: {
+        v1: previousKey,
+        v2: currentKey,
+      },
+    });
+
+    await expect(store.read({
+      effectId: record.effectId,
+      fingerprint: record.fingerprint,
+      kind: record.kind,
+      userId: "member_legacy",
+    })).resolves.toEqual(record);
+    await expect(store.deletePrepared({
+      effectId: record.effectId,
+      fingerprint: record.fingerprint,
+      kind: record.kind,
+      userId: "member_legacy",
+    })).resolves.toBe(true);
+    await expect(store.read({
+      effectId: record.effectId,
+      fingerprint: record.fingerprint,
+      kind: record.kind,
+      userId: "member_legacy",
+    })).resolves.toBeNull();
+  });
+
   it("promotes prepared records to sent and keeps sent delivery stable on duplicate writes", async () => {
     const bucket = createMemoryBucket();
     const key = Buffer.alloc(32, 9);
@@ -253,6 +308,10 @@ async function sideEffectRecordKey(rootKey: Uint8Array, userId: string, effectId
   });
 
   return `transient/side-effects/${userSegment}/${effectSegment}.json`;
+}
+
+function legacySideEffectRecordKey(userId: string, effectId: string): string {
+  return `transient/side-effects/${encodeURIComponent(userId)}/${encodeURIComponent(effectId)}.json`;
 }
 
 function createMemoryBucket() {

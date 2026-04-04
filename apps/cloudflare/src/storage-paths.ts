@@ -22,14 +22,21 @@ export async function hostedArtifactObjectKey(
   return `users/artifacts/${userSegment}/${artifactSegment}.artifact.bin`;
 }
 
+export function legacyHostedArtifactObjectKey(userId: string, sha256: string): string {
+  return `users/${encodeURIComponent(userId)}/artifacts/${sha256}.artifact.bin`;
+}
+
 export async function hostedArtifactObjectKeys(
   rootKey: Uint8Array,
   keysById: Readonly<Record<string, Uint8Array>> | undefined,
   userId: string,
   sha256: string,
 ): Promise<string[]> {
-  return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
-    hostedArtifactObjectKey(candidateRootKey, userId, sha256)
+  return listHostedStorageObjectKeys(
+    rootKey,
+    keysById,
+    (candidateRootKey) => hostedArtifactObjectKey(candidateRootKey, userId, sha256),
+    legacyHostedArtifactObjectKey(userId, sha256),
   );
 }
 
@@ -47,13 +54,20 @@ export async function hostedUserEnvObjectKey(
   return `users/env/${userSegment}.json`;
 }
 
+export function legacyHostedUserEnvObjectKey(userId: string): string {
+  return `users/${encodeURIComponent(userId)}/user-env.json`;
+}
+
 export async function hostedUserEnvObjectKeys(
   rootKey: Uint8Array,
   keysById: Readonly<Record<string, Uint8Array>> | undefined,
   userId: string,
 ): Promise<string[]> {
-  return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
-    hostedUserEnvObjectKey(candidateRootKey, userId)
+  return listHostedStorageObjectKeys(
+    rootKey,
+    keysById,
+    (candidateRootKey) => hostedUserEnvObjectKey(candidateRootKey, userId),
+    legacyHostedUserEnvObjectKey(userId),
   );
 }
 
@@ -78,14 +92,21 @@ export async function hostedExecutionJournalObjectKey(
   return `transient/execution-journal/${userSegment}/${eventSegment}.json`;
 }
 
+export function legacyHostedExecutionJournalObjectKey(userId: string, eventId: string): string {
+  return `transient/execution-journal/${encodeURIComponent(userId)}/${encodeURIComponent(eventId)}.json`;
+}
+
 export async function hostedExecutionJournalObjectKeys(
   rootKey: Uint8Array,
   keysById: Readonly<Record<string, Uint8Array>> | undefined,
   userId: string,
   eventId: string,
 ): Promise<string[]> {
-  return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
-    hostedExecutionJournalObjectKey(candidateRootKey, userId, eventId)
+  return listHostedStorageObjectKeys(
+    rootKey,
+    keysById,
+    (candidateRootKey) => hostedExecutionJournalObjectKey(candidateRootKey, userId, eventId),
+    legacyHostedExecutionJournalObjectKey(userId, eventId),
   );
 }
 
@@ -110,14 +131,21 @@ export async function hostedSideEffectRecordKey(
   return `transient/side-effects/${userSegment}/${effectSegment}.json`;
 }
 
+export function legacyHostedSideEffectRecordKey(userId: string, effectId: string): string {
+  return `transient/side-effects/${encodeURIComponent(userId)}/${encodeURIComponent(effectId)}.json`;
+}
+
 export async function hostedSideEffectRecordKeys(
   rootKey: Uint8Array,
   keysById: Readonly<Record<string, Uint8Array>> | undefined,
   userId: string,
   effectId: string,
 ): Promise<string[]> {
-  return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
-    hostedSideEffectRecordKey(candidateRootKey, userId, effectId)
+  return listHostedStorageObjectKeys(
+    rootKey,
+    keysById,
+    (candidateRootKey) => hostedSideEffectRecordKey(candidateRootKey, userId, effectId),
+    legacyHostedSideEffectRecordKey(userId, effectId),
   );
 }
 
@@ -125,12 +153,13 @@ export async function listHostedStorageObjectKeys(
   rootKey: Uint8Array,
   keysById: Readonly<Record<string, Uint8Array>> | undefined,
   mapKey: (candidateRootKey: Uint8Array) => Promise<string> | string,
+  legacyKey?: string,
 ): Promise<string[]> {
   const keys = await Promise.all(
     listHostedStorageRootKeys(rootKey, keysById).map((candidateRootKey) => mapKey(candidateRootKey)),
   );
 
-  return [...new Set(keys)];
+  return [...new Set(legacyKey ? [...keys, legacyKey] : keys)];
 }
 
 function listHostedStorageRootKeys(
