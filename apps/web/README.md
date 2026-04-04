@@ -89,8 +89,7 @@ Hosted onboarding extras:
 - `HOSTED_EXECUTION_SIGNING_SECRET`
 - `HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS`
 - `HOSTED_EXECUTION_CONTROL_TOKENS` so `/settings` can sync a verified email into hosted user env and trigger a hosted run
-- `HOSTED_EXECUTION_SCHEDULER_TOKENS` so the deployed Vercel cron can authenticate `/api/internal/hosted-execution/outbox/cron`
-- `CRON_SECRET` is still accepted as a scheduler-token fallback when Vercel injects it automatically
+- `HOSTED_EXECUTION_SCHEDULER_TOKENS` for authenticated scheduler callers that trigger `/api/internal/hosted-execution/outbox/cron` and `/api/internal/hosted-execution/usage/cron`
 
 Optional hosted AI usage metering:
 
@@ -106,7 +105,7 @@ Set these under `Settings -> Environment Variables` in the Vercel project that d
 - `HOSTED_EXECUTION_SIGNING_SECRET`: generate a strong random secret and use the exact same value in Vercel and the Cloudflare hosted-execution worker. `apps/web` signs dispatch payloads with it and Cloudflare verifies them.
 - `HOSTED_EXECUTION_CONTROL_TOKENS`: generate a distinct comma-separated bearer-token set and use the same value in Vercel and the Cloudflare hosted-execution worker. `apps/web` uses the first token for outbound worker control calls and accepts any configured token inbound.
 - `HOSTED_EXECUTION_INTERNAL_TOKENS`: generate a distinct comma-separated bearer-token set for trusted hosted execution maintenance routes that still use bearer auth. Hosted web accepts any configured token inbound.
-- `HOSTED_EXECUTION_SCHEDULER_TOKENS`: generate a distinct comma-separated bearer-token set for hosted cron routes. `CRON_SECRET` is still accepted as a fallback because Vercel cron sends `Authorization: Bearer <CRON_SECRET>` automatically.
+- `HOSTED_EXECUTION_SCHEDULER_TOKENS`: generate a distinct comma-separated bearer-token set for the authenticated scheduler that calls the hosted cron routes.
 - `HOSTED_SHARE_INTERNAL_TOKENS`: generate a distinct comma-separated bearer-token set for trusted server-to-server hosted share routes.
 - `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET`: generate a distinct strong random secret and use the same value in Vercel plus whichever trusted auth proxy or middleware signs the hosted user assertion headers. `apps/web` verifies that signature before trusting the lower-level assertion-backed device-sync bridge routes.
 
@@ -159,10 +158,8 @@ pnpm --dir apps/web prisma:migrate:deploy
 - `pnpm --dir apps/web build` and `pnpm --dir apps/web start` keep using `apps/web/.next`.
 - `pnpm --dir apps/web test` is the fast hosted-web Vitest lane. `pnpm --dir apps/web verify` adds the app-local typecheck, lint, a cold-boot `next dev` smoke under `apps/web/.next-smoke`, and the production build so the heavier preflight checks stay out of the default unit-test loop.
 - Treat `apps/web/.next`, `apps/web/.next-dev`, and `apps/web/.next-smoke` as generated local artifacts that must stay out of commits and raw source bundles.
-- Hosted execution outbox draining is wired through `apps/web/vercel.json` as a 1-minute Vercel cron targeting `/api/internal/hosted-execution/outbox/cron`.
-- Hosted AI usage metering is wired through `apps/web/vercel.json` as a 5-minute Vercel cron targeting `/api/internal/hosted-execution/usage/cron`.
-- Hosted Stripe reconciliation is wired through the same `apps/web/vercel.json` file as a 1-minute Vercel cron targeting `/api/internal/hosted-onboarding/stripe/cron`.
-- Production deployments need `CRON_SECRET` set so Vercel's cron `Authorization: Bearer ...` header can authenticate both internal cron routes.
+- Hosted execution outbox draining and hosted AI usage metering now require an authenticated external scheduler that sends `Authorization: Bearer <HOSTED_EXECUTION_SCHEDULER_TOKENS entry>` to the internal cron routes.
+- Hosted Stripe reconciliation still runs on its own deployment scheduler; do not assume `apps/web` ships a checked-in native Vercel cron config for it.
 
 ## Main routes
 
