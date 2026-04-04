@@ -10,6 +10,7 @@ import { createHostedOpaqueIdentifier } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
 import { getHostedOnboardingSecretCodec } from "./runtime";
 import type {
+  HostedWebhookDispatchSideEffect,
   HostedWebhookEventPayload,
   HostedWebhookLinqMessageSideEffect,
   HostedWebhookReceiptClaim,
@@ -335,6 +336,7 @@ function readHostedWebhookSideEffect(
         payload: {
           botUserId: readHostedWebhookReceiptString(payload.botUserId),
           phoneLookupKey: readHostedWebhookReceiptString(payload.phoneLookupKey),
+          firstContact: readHostedWebhookDispatchFirstContact(payload.firstContact),
           schemaVersion: payload.schemaVersion as string,
           dispatchRef,
           storage: "reference",
@@ -413,6 +415,30 @@ function buildHostedWebhookSideEffectPayloadError(effectId: string): Error {
     message: `Hosted webhook side effect ${effectId} stores an invalid or legacy payload shape.`,
     httpStatus: 500,
   });
+}
+
+function readHostedWebhookDispatchFirstContact(
+  value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
+): HostedWebhookDispatchSideEffect["payload"]["firstContact"] {
+  const record = toHostedWebhookReceiptObject(value);
+  const channel = readHostedWebhookReceiptString(record.channel);
+  const identityId = readHostedWebhookReceiptString(record.identityId);
+  const threadId = readHostedWebhookReceiptString(record.threadId);
+
+  if (!channel || !identityId || !threadId || typeof record.threadIsDirect !== "boolean") {
+    return null;
+  }
+
+  if (channel !== "email" && channel !== "linq" && channel !== "telegram") {
+    return null;
+  }
+
+  return {
+    channel,
+    identityId,
+    threadId,
+    threadIsDirect: record.threadIsDirect,
+  };
 }
 
 export function generateHostedWebhookReceiptAttemptId(): string {

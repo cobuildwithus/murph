@@ -73,6 +73,12 @@ describe("hosted execution contract parity", () => {
       }),
       "member.activated": () => buildHostedExecutionMemberActivatedDispatch({
         eventId: "evt_member",
+        firstContact: {
+          channel: "linq",
+          identityId: "hbidx:phone:v1:test",
+          threadId: "chat_123",
+          threadIsDirect: true,
+        },
         memberId: "member_123",
         occurredAt: "2026-03-26T12:04:00.000Z",
       }),
@@ -128,7 +134,8 @@ describe("hosted execution contract parity", () => {
       expect(parseHostedExecutionEvent(dispatch.event)).toEqual(dispatch.event);
       expect(payload.schemaVersion).toBe(HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION);
       expect(payload.storage).toBe(
-        kind === "device-sync.wake"
+        kind === "member.activated"
+          || kind === "device-sync.wake"
           || kind === "linq.message.received"
           || kind === "telegram.message.received"
           || kind === "email.message.received"

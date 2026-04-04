@@ -97,9 +97,9 @@ export function resolveHostedExecutionOutboxPayloadStorage(
     case "telegram.message.received":
     case "email.message.received":
     case "device-sync.wake":
+    case "member.activated":
     case "vault.share.accepted":
       return "reference";
-    case "member.activated":
     case "assistant.cron.tick":
     case "gateway.message.send":
       return "inline";

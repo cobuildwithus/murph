@@ -525,7 +525,6 @@ describe("hosted Stripe event queue", () => {
 
     expect(harness.members[0]).toMatchObject({
       billingStatus: HostedBillingStatus.active,
-      onboardingWelcomeQueuedAt: expect.any(Date),
       status: HostedMemberStatus.active,
       stripeLatestBillingEventId: "evt_invoice_paid_123",
     });
@@ -535,6 +534,16 @@ describe("hosted Stripe event queue", () => {
     });
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
+        dispatch: expect.objectContaining({
+          event: expect.objectContaining({
+            firstContact: {
+              channel: "linq",
+              identityId: harness.members[0]?.normalizedPhoneNumber,
+              threadId: "chat_signup_123",
+              threadIsDirect: true,
+            },
+          }),
+        }),
         sourceId: "stripe:evt_invoice_paid_123",
         sourceType: "hosted_stripe_event",
       }),
@@ -592,13 +601,26 @@ describe("hosted Stripe event queue", () => {
 
     expect(harness.members[0]).toMatchObject({
       billingStatus: HostedBillingStatus.active,
-      onboardingWelcomeQueuedAt: expect.any(Date),
       status: HostedMemberStatus.active,
       stripeLatestBillingEventId: "evt_invoice_paid_inline_123",
     });
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dispatch: expect.objectContaining({
+          event: expect.objectContaining({
+            firstContact: {
+              channel: "linq",
+              identityId: harness.members[0]?.normalizedPhoneNumber,
+              threadId: "chat_signup_123",
+              threadIsDirect: true,
+            },
+          }),
+        }),
+      }),
+    );
   });
 
-  it("activates from invoice.paid without queueing the canned welcome when no Linq signup chat is bound", async () => {
+  it("activates from invoice.paid without a first-contact target when no Linq signup chat is bound", async () => {
     const harness = createStripeQueueHarness({
       invites: [
         makeInvite(),
@@ -636,7 +658,6 @@ describe("hosted Stripe event queue", () => {
 
     expect(harness.members[0]).toMatchObject({
       billingStatus: HostedBillingStatus.active,
-      onboardingWelcomeQueuedAt: null,
       status: HostedMemberStatus.active,
       stripeLatestBillingEventId: "evt_invoice_paid_no_linq_chat",
     });
@@ -1687,6 +1708,7 @@ describe("hosted Stripe event queue", () => {
       expect.objectContaining({
         dispatch: expect.objectContaining({
           event: expect.objectContaining({
+            firstContact: null,
             kind: "member.activated",
             userId: "member_123",
           }),
@@ -1768,6 +1790,7 @@ describe("hosted Stripe event queue", () => {
       expect.objectContaining({
         dispatch: expect.objectContaining({
           event: expect.objectContaining({
+            firstContact: null,
             kind: "member.activated",
             userId: "member_123",
           }),

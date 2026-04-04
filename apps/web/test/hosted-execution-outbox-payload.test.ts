@@ -41,4 +41,25 @@ describe("hosted execution outbox payload storage", () => {
     expect(JSON.stringify(payload)).not.toContain("sleep.updated");
     expect(JSON.stringify(payload)).not.toContain("trace_123");
   });
+
+  it("stores member activation first-contact targets by reference", () => {
+    const payload = serializeHostedExecutionOutboxPayload({
+      event: {
+        firstContact: {
+          channel: "linq",
+          identityId: "hbidx:phone:v1:test",
+          threadId: "chat_123",
+          threadIsDirect: true,
+        },
+        kind: "member.activated",
+        userId: "member_123",
+      },
+      eventId: "evt_activation_123",
+      occurredAt: "2026-04-04T00:00:00.000Z",
+    });
+
+    expect((payload as { storage?: unknown }).storage).toBe("reference");
+    expect(JSON.stringify(payload)).not.toContain("chat_123");
+    expect(JSON.stringify(payload)).not.toContain("hbidx:phone:v1:test");
+  });
 });

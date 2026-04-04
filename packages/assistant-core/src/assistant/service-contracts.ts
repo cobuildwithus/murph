@@ -91,7 +91,7 @@ export interface AssistantTurnSharedPlan {
   cliAccess: AssistantCliAccessContext
   conversationPolicy: import('./conversation-policy.js').AssistantConversationPolicy
   firstTurnCheckInEligible: boolean
-  firstTurnCheckInStateDocId: string | null
+  firstTurnCheckInStateDocIds: string[]
   operatorAuthority: AssistantOperatorAuthority
   persistUserPromptOnFailure: boolean
   requestedWorkingDirectory: string

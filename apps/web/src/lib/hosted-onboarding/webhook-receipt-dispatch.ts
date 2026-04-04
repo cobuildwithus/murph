@@ -47,6 +47,7 @@ export function buildHostedWebhookDispatchFromPayload(
   if (dispatchRef.eventKind === "member.activated") {
     return {
       event: {
+        ...(payload.firstContact ? { firstContact: payload.firstContact } : {}),
         kind: "member.activated",
         userId: dispatchRef.userId,
       },

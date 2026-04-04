@@ -66,6 +66,7 @@ import type {
 import { withAssistantTurnLock } from './turn-lock.js'
 
 export { buildResolveAssistantSessionInput } from './session-resolution.js'
+export { sendAssistantFirstContactWelcomeLocal } from './first-contact-welcome-delivery.js'
 
 async function persistUserTurn(
   input: AssistantMessageInput,
@@ -199,7 +200,7 @@ export async function sendAssistantMessageLocal(
 
         await finalizeDeliveredAssistantTurn({
           firstTurnCheckInInjected: providerResult.firstTurnCheckInInjected,
-          firstTurnCheckInStateDocId: sharedPlan.firstTurnCheckInStateDocId,
+          firstTurnCheckInStateDocIds: sharedPlan.firstTurnCheckInStateDocIds,
           outcome: deliveryOutcome,
           response: providerResult.response,
           turnId: userTurn.turnId,

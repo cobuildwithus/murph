@@ -14,7 +14,10 @@ import {
   coerceStripeObjectId,
   mapStripeSubscriptionStatusToHostedBillingStatus,
 } from "./billing";
-import { buildHostedMemberActivationDispatch } from "./member-activation";
+import {
+  buildHostedMemberActivationDispatch,
+  buildHostedMemberActivationFirstContact,
+} from "./member-activation";
 import {
   deriveHostedEntitlement,
   isHostedAccessBlockedBillingStatus,
@@ -62,6 +65,10 @@ export async function activateHostedMemberFromConfirmedRevnetIssuance(input: {
   }
 
   const dispatch = buildHostedMemberActivationDispatch({
+    firstContact: buildHostedMemberActivationFirstContact({
+      linqChatId: input.member.linqChatId,
+      phoneLookupKey: input.member.normalizedPhoneNumber,
+    }),
     memberId: input.member.id,
     occurredAt: input.occurredAt,
     sourceEventId: input.sourceEventId,
@@ -116,6 +123,10 @@ export async function activateHostedMemberForPositiveSource(input: {
   }
 
   const dispatch = buildHostedMemberActivationDispatch({
+    firstContact: buildHostedMemberActivationFirstContact({
+      linqChatId: input.member.linqChatId,
+      phoneLookupKey: input.member.normalizedPhoneNumber,
+    }),
     memberId: input.member.id,
     occurredAt: input.dispatchContext.occurredAt,
     sourceEventId: input.dispatchContext.sourceEventId,
@@ -180,9 +191,6 @@ async function tryActivateHostedMemberIfStillAllowed(input: {
       data: {
         billingMode: input.billingMode ?? currentMember.billingMode,
         billingStatus: HostedBillingStatus.active,
-        onboardingWelcomeQueuedAt:
-          currentMember.onboardingWelcomeQueuedAt ??
-          (currentMember.linqChatId ? new Date() : null),
         status: HostedMemberStatus.active,
       },
     });

@@ -17,6 +17,7 @@ import type {
   HostedExecutionEmailMessageReceivedEvent,
   HostedExecutionEvent,
   HostedExecutionGatewayMessageSendEvent,
+  HostedExecutionMemberActivatedEvent,
   HostedExecutionTelegramMessageReceivedEvent,
   HostedExecutionEventDispatchState,
   HostedExecutionRunnerRequest,
@@ -466,6 +467,13 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
   switch (kind) {
     case "member.activated":
       return {
+        ...(record.firstContact === undefined
+          ? {}
+          : {
+              firstContact: record.firstContact === null
+                ? null
+                : parseHostedExecutionFirstContactTarget(record.firstContact),
+            }),
         kind,
         userId,
       };
@@ -580,6 +588,36 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
     default:
       throw new TypeError(`Unsupported hosted execution event kind: ${kind}`);
   }
+}
+
+function parseHostedExecutionFirstContactTarget(
+  value: unknown,
+): HostedExecutionMemberActivatedEvent["firstContact"] {
+  const record = requireObject(value, "Hosted execution member.activated firstContact");
+  const channel = requireString(
+    record.channel,
+    "Hosted execution member.activated firstContact channel",
+  );
+
+  if (channel !== "email" && channel !== "linq" && channel !== "telegram") {
+    throw new TypeError("Hosted execution member.activated firstContact channel is invalid.");
+  }
+
+  return {
+    channel,
+    identityId: requireString(
+      record.identityId,
+      "Hosted execution member.activated firstContact identityId",
+    ),
+    threadId: requireString(
+      record.threadId,
+      "Hosted execution member.activated firstContact threadId",
+    ),
+    threadIsDirect: requireBoolean(
+      record.threadIsDirect,
+      "Hosted execution member.activated firstContact threadIsDirect",
+    ),
+  };
 }
 
 export function parseHostedExecutionShareReference(value: unknown): HostedExecutionShareReference {

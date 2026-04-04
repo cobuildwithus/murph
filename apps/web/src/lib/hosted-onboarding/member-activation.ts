@@ -1,9 +1,11 @@
 import {
   buildHostedExecutionMemberActivatedDispatch,
   type HostedExecutionDispatchRequest,
+  type HostedExecutionMemberActivatedEvent,
 } from "@murphai/hosted-execution";
 
 export function buildHostedMemberActivationDispatch(input: {
+  firstContact?: HostedExecutionMemberActivatedEvent["firstContact"];
   memberId: string;
   occurredAt: string;
   sourceEventId: string;
@@ -11,9 +13,24 @@ export function buildHostedMemberActivationDispatch(input: {
 }): HostedExecutionDispatchRequest {
   return buildHostedExecutionMemberActivatedDispatch({
     eventId: buildHostedMemberActivationEventId(input),
+    ...(input.firstContact === undefined ? {} : { firstContact: input.firstContact }),
     memberId: input.memberId,
     occurredAt: input.occurredAt,
   });
+}
+
+export function buildHostedMemberActivationFirstContact(input: {
+  linqChatId: string | null;
+  phoneLookupKey: string | null;
+}): HostedExecutionMemberActivatedEvent["firstContact"] {
+  return input.linqChatId && input.phoneLookupKey
+    ? {
+        channel: "linq",
+        identityId: input.phoneLookupKey,
+        threadId: input.linqChatId,
+        threadIsDirect: true,
+      }
+    : null;
 }
 
 function buildHostedMemberActivationEventId(input: {

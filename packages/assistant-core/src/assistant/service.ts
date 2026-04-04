@@ -6,6 +6,7 @@ import type {
 } from './service-contracts.js'
 import {
   openAssistantConversationLocal,
+  sendAssistantFirstContactWelcomeLocal,
   sendAssistantMessageLocal,
   updateAssistantSessionOptionsLocal,
 } from './local-service.js'
@@ -13,6 +14,7 @@ import {
 export { buildResolveAssistantSessionInput } from './session-resolution.js'
 export {
   openAssistantConversationLocal,
+  sendAssistantFirstContactWelcomeLocal,
   sendAssistantMessageLocal,
   updateAssistantSessionOptionsLocal,
 } from './local-service.js'
@@ -34,6 +36,12 @@ export async function sendAssistantMessage(
   input: AssistantMessageInput,
 ) {
   return sendAssistantMessageLocal(input)
+}
+
+export async function sendAssistantFirstContactWelcome(
+  input: import('./first-contact-welcome-delivery.js').AssistantFirstContactWelcomeInput,
+) {
+  return sendAssistantFirstContactWelcomeLocal(input)
 }
 
 export async function updateAssistantSessionOptions(input: {

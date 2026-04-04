@@ -2692,12 +2692,14 @@ test('sendAssistantMessage injects the first-chat check-in only for the first ev
     prefix: 'onboarding/first-contact',
     vault: vaultRoot,
   })
-  assert.equal(firstContactDocs.length, 1)
-  const firstContactState = await getAssistantStateDocument({
-    docId: firstContactDocs[0]!.docId,
-    vault: vaultRoot,
-  })
-  assert.equal(firstContactState.exists, true)
+  assert.equal(firstContactDocs.length, 2)
+  for (const firstContactDoc of firstContactDocs) {
+    const firstContactState = await getAssistantStateDocument({
+      docId: firstContactDoc.docId,
+      vault: vaultRoot,
+    })
+    assert.equal(firstContactState.exists, true)
+  }
 })
 
 test('sendAssistantMessage does not burn first-contact onboarding for queue-only deliveries', async () => {

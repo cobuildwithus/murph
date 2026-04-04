@@ -16,7 +16,6 @@ const mocks = vi.hoisted(() => {
   return {
     claimHostedLinqOnboardingLinkNotice: vi.fn(),
     claimHostedLinqQuotaReplyNotice: vi.fn(),
-    drainHostedActivationWelcomeMessages: vi.fn(),
     drainHostedExecutionOutboxBestEffort: vi.fn(),
     drainHostedRevnetIssuanceSubmissionQueue: vi.fn(),
     enqueueHostedExecutionOutbox: vi.fn(),
@@ -39,10 +38,6 @@ const mocks = vi.hoisted(() => {
 vi.mock("@/src/lib/hosted-execution/outbox", () => ({
   drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
   enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/activation-welcome", () => ({
-  drainHostedActivationWelcomeMessages: mocks.drainHostedActivationWelcomeMessages,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
@@ -148,7 +143,6 @@ describe("hosted onboarding webhook retry safety", () => {
   beforeEach(() => {
     mocks.claimHostedLinqOnboardingLinkNotice.mockReset();
     mocks.claimHostedLinqQuotaReplyNotice.mockReset();
-    mocks.drainHostedActivationWelcomeMessages.mockReset();
     mocks.drainHostedExecutionOutboxBestEffort.mockReset();
     mocks.drainHostedRevnetIssuanceSubmissionQueue.mockReset();
     mocks.enqueueHostedExecutionOutbox.mockReset();
@@ -165,7 +159,6 @@ describe("hosted onboarding webhook retry safety", () => {
     mocks.stripeChargesRetrieve.mockReset();
     mocks.stripeConstructEvent.mockReset();
     mocks.stripePaymentIntentsRetrieve.mockReset();
-    mocks.drainHostedActivationWelcomeMessages.mockResolvedValue([]);
     mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
     mocks.drainHostedRevnetIssuanceSubmissionQueue.mockResolvedValue([]);
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
@@ -918,12 +911,6 @@ describe("hosted onboarding webhook retry safety", () => {
       limit: 1,
       prisma,
     });
-    expect(mocks.drainHostedActivationWelcomeMessages).toHaveBeenCalledWith({
-      memberIds: [
-        "member_123",
-      ],
-      prisma,
-    });
     expect(mocks.drainHostedRevnetIssuanceSubmissionQueue).not.toHaveBeenCalled();
   });
 
@@ -975,7 +962,6 @@ describe("hosted onboarding webhook retry safety", () => {
       prisma,
     });
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
-    expect(mocks.drainHostedActivationWelcomeMessages).not.toHaveBeenCalled();
   });
 
   it("treats duplicate Stripe events as ingress duplicates without replaying durable work", async () => {
@@ -1012,7 +998,6 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(mocks.reconcileHostedStripeEventById).not.toHaveBeenCalled();
     expect(mocks.drainHostedRevnetIssuanceSubmissionQueue).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
-    expect(mocks.drainHostedActivationWelcomeMessages).not.toHaveBeenCalled();
   });
 
   it("does not redispatch an already-sent Linq side effect when reclaiming a failed receipt", async () => {

@@ -15,6 +15,7 @@ import {
   buildHostedExecutionAssistantCronTickDispatch,
   buildHostedExecutionEmailMessageReceivedDispatch,
   buildHostedExecutionGatewayMessageSendDispatch,
+  buildHostedExecutionMemberActivatedDispatch,
   buildHostedExecutionTelegramMessageReceivedDispatch,
   buildHostedExecutionVaultShareAcceptedDispatch,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
@@ -822,6 +823,17 @@ describe("@murphai/hosted-execution", () => {
       rawMessageKey: "raw_email_456",
       userId: "member_123",
     });
+    const activationDispatch = buildHostedExecutionMemberActivatedDispatch({
+      eventId: "evt_activation",
+      firstContact: {
+        channel: "linq",
+        identityId: "hbidx:phone:v1:test",
+        threadId: "chat_123",
+        threadIsDirect: true,
+      },
+      memberId: "member_123",
+      occurredAt: "2026-03-28T09:12:00.000Z",
+    });
     const shareDispatch = buildHostedExecutionVaultShareAcceptedDispatch({
       eventId: "share_456",
       memberId: "member_123",
@@ -833,6 +845,7 @@ describe("@murphai/hosted-execution", () => {
 
     const inlinePayload = buildHostedExecutionOutboxPayload(inlineDispatch);
     const referencePayload = buildHostedExecutionOutboxPayload(referenceDispatch);
+    const activationPayload = buildHostedExecutionOutboxPayload(activationDispatch);
     const sharePayload = buildHostedExecutionOutboxPayload(shareDispatch);
 
     expect(inlinePayload).toEqual({
@@ -842,6 +855,11 @@ describe("@murphai/hosted-execution", () => {
     });
     expect(referencePayload).toEqual({
       dispatchRef: buildHostedExecutionDispatchRef(referenceDispatch),
+      schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+      storage: "reference",
+    });
+    expect(activationPayload).toEqual({
+      dispatchRef: buildHostedExecutionDispatchRef(activationDispatch),
       schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
       storage: "reference",
     });
@@ -856,6 +874,9 @@ describe("@murphai/hosted-execution", () => {
     expect(
       readHostedExecutionOutboxPayload(referencePayload),
     ).toEqual(referencePayload);
+    expect(
+      readHostedExecutionOutboxPayload(activationPayload),
+    ).toEqual(activationPayload);
     expect(
       readHostedExecutionOutboxPayload(sharePayload),
     ).toEqual(sharePayload);

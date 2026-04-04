@@ -3,7 +3,7 @@ import { resolveAssistantOperatorAuthority } from './operator-authority.js'
 import { resolveAssistantConversationPolicy } from './conversation-policy.js'
 import {
   hasAssistantSeenFirstContact,
-  resolveAssistantFirstContactStateDocId,
+  resolveAssistantFirstContactStateDocIds,
 } from './first-contact.js'
 import type {
   AssistantMessageInput,
@@ -29,17 +29,21 @@ export async function resolveAssistantTurnSharedPlan(
     },
     session: resolved.session,
   })
-  const firstTurnCheckInStateDocId =
+  const firstTurnCheckInStateDocIds =
     input.includeFirstTurnCheckIn === true
-      ? resolveAssistantFirstContactStateDocId({
-          audience: conversationPolicy.audience,
-          binding: resolved.session.binding,
+      ? resolveAssistantFirstContactStateDocIds({
+          actorId: conversationPolicy.audience.actorId ?? resolved.session.binding.actorId,
+          channel: conversationPolicy.audience.channel ?? resolved.session.binding.channel,
+          identityId: conversationPolicy.audience.identityId ?? resolved.session.binding.identityId,
+          threadId: conversationPolicy.audience.threadId ?? resolved.session.binding.threadId,
+          threadIsDirect:
+            conversationPolicy.audience.threadIsDirect ?? resolved.session.binding.threadIsDirect,
         })
-      : null
+      : []
   const firstTurnCheckInEligible =
     input.includeFirstTurnCheckIn === true &&
     !(await hasAssistantSeenFirstContact({
-      docId: firstTurnCheckInStateDocId,
+      docIds: firstTurnCheckInStateDocIds,
       vault: input.vault,
     }))
   return {
@@ -47,7 +51,7 @@ export async function resolveAssistantTurnSharedPlan(
     cliAccess,
     conversationPolicy,
     firstTurnCheckInEligible,
-    firstTurnCheckInStateDocId,
+    firstTurnCheckInStateDocIds,
     operatorAuthority: resolveAssistantOperatorAuthority(input.operatorAuthority),
     persistUserPromptOnFailure: input.persistUserPromptOnFailure ?? true,
     requestedWorkingDirectory,
