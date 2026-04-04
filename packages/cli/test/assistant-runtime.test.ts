@@ -3375,7 +3375,7 @@ test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound 
   assert.match(providerCall?.systemPrompt ?? '', /Hey, I'm Murph\. I'm your personal health assistant\./u)
   assert.match(providerCall?.systemPrompt ?? '', /what are some of their health goals right now/u)
   assert.match(providerCall?.systemPrompt ?? '', /what you should call them/u)
-  assert.match(providerCall?.systemPrompt ?? '', /at most one more short sentence/u)
+  assert.match(providerCall?.systemPrompt ?? '', /with this exact follow-up copy/u)
   assert.match(
     providerCall?.systemPrompt ?? '',
     /treat that as onboarding context, not as a request to choose priorities or start coaching/u,
@@ -3402,15 +3402,19 @@ test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound 
   )
   assert.match(
     providerCall?.systemPrompt ?? '',
-    /default to brief usage guidance: explain that they can send things as they happen and Murph can help with logs, patterns, and health questions over time/u,
+    /You may follow that intro with this exact follow-up copy/u,
   )
   assert.match(
     providerCall?.systemPrompt ?? '',
-    /Once the conversation is underway, it is good to mention this naturally in a sentence or two when it fits/u,
+    /You can send things as they happen — symptoms, sleep, meals, meds, workouts, labs, questions — and I keep compiling the picture over time so I can help you notice patterns, make better decisions, and work toward your goals\. It’s like having a private health team in your pocket\./u,
   )
   assert.match(
     providerCall?.systemPrompt ?? '',
-    /health history, supplements or meds, and recent blood tests, and if they have a Garmin, WHOOP, or Oura Ring, Murph can help get those connected too/u,
+    /If the early onboarding exchange is still going and the user has no concrete ask yet, a good light-touch follow-up can be: `Do you have any other questions or do you want to learn more about the things I can do for you\?`/u,
+  )
+  assert.match(
+    providerCall?.systemPrompt ?? '',
+    /Another good light-touch note later in the onboarding exchange can be: `If you want a useful head start later, health history, supplements or meds, recent blood tests, and Garmin\/WHOOP\/Oura data can all help too\.`/u,
   )
   assert.deepEqual(listCalls, [
     {
