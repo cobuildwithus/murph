@@ -94,6 +94,9 @@ export const assistantMemoryVisibleSectionValues = [
   ...assistantMemoryLongTermSectionValues,
   'Notes',
 ] as const
+const assistantMemoryMarkdownFilePathSchema = z
+  .string()
+  .regex(/^(MEMORY\.md|memory\/\d{4}-\d{2}-\d{2}\.md)$/u)
 export const assistantCronScheduleKindValues = [
   'at',
   'every',
@@ -876,7 +879,7 @@ export const assistantMemoryGetResultSchema = z.object({
 export const assistantMemoryFileReadResultSchema = z.object({
   vault: pathSchema,
   stateRoot: pathSchema,
-  path: pathSchema,
+  path: assistantMemoryMarkdownFilePathSchema,
   present: z.boolean(),
   text: z.string(),
   totalChars: z.number().int().nonnegative(),
@@ -886,14 +889,14 @@ export const assistantMemoryFileReadResultSchema = z.object({
 export const assistantMemoryFileWriteResultSchema = z.object({
   vault: pathSchema,
   stateRoot: pathSchema,
-  path: pathSchema,
+  path: assistantMemoryMarkdownFilePathSchema,
   totalChars: z.number().int().nonnegative(),
 })
 
 export const assistantMemoryFileAppendResultSchema = z.object({
   vault: pathSchema,
   stateRoot: pathSchema,
-  path: pathSchema,
+  path: assistantMemoryMarkdownFilePathSchema,
   appended: z.boolean(),
   section: z.enum(assistantMemoryVisibleSectionValues),
   totalBullets: z.number().int().nonnegative(),
