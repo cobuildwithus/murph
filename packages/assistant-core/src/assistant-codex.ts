@@ -10,8 +10,9 @@ import type {
   AssistantProviderTraceEvent,
   AssistantProviderTraceUpdate,
 } from './assistant/provider-traces.js'
-import type {
-  AssistantProviderProgressEvent,
+import {
+  createAssistantProviderToolProgressEvent,
+  type AssistantProviderProgressEvent,
 } from './assistant/provider-progress.js'
 import { sanitizeChildProcessEnv } from './child-process-env.js'
 import { normalizeNullableString } from './text/shared.js'
@@ -828,17 +829,13 @@ function extractCodexProgressEventFromNormalized(
   }
 
   if (normalized.kind === 'tool_call') {
-    const safeLabel = toolCallSafeLabel(normalized)
-    return {
+    return createAssistantProviderToolProgressEvent({
       id: normalized.itemId,
-      kind: 'tool',
       label: toolCallLabel(normalized),
       rawEvent: normalized.rawEvent,
-      safeLabel,
-      safeText: toolCallSafeText(normalized.itemState, safeLabel),
       state: normalized.itemState,
       text: toolCallText(normalized),
-    }
+    })
   }
 
   if (normalized.kind === 'web_search') {
@@ -1146,25 +1143,6 @@ function toolCallLabel(
   return event.toolServer && event.toolName
     ? `${event.toolServer}/${event.toolName}`
     : event.toolName ?? event.toolServer ?? null
-}
-
-function toolCallSafeLabel(
-  event: Extract<CodexNormalizedEvent, { kind: 'tool_call' }>,
-): string | null {
-  return normalizeStatusText(toolCallLabel(event))
-}
-
-function toolCallSafeText(
-  state: 'completed' | 'running',
-  safeLabel: string | null,
-): string | null {
-  if (!safeLabel) {
-    return null
-  }
-
-  return state === 'running'
-    ? `using ${safeLabel}`
-    : `finished ${safeLabel}`
 }
 
 function toolCallTraceText(

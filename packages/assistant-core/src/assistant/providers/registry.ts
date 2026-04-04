@@ -4,6 +4,10 @@ import {
   supportsAssistantReasoningEffort,
   type AssistantProviderConfigInput,
 } from '../provider-config.js'
+import {
+  mergeAssistantProviderActivityLabels,
+  type AssistantProviderProgressEvent,
+} from '../provider-progress.js'
 import { codexCliProviderDefinition } from './codex-cli.js'
 import { createCatalogModel } from './catalog.js'
 import { openAiCompatibleProviderDefinition } from './openai-compatible.js'
@@ -112,14 +116,27 @@ export async function executeAssistantProviderTurnWithDefinition(
 export async function executeAssistantProviderTurnAttemptWithDefinition(
   input: AssistantProviderTurnExecutionInput,
 ): Promise<AssistantProviderTurnAttemptResult> {
+  const progressEvents: AssistantProviderProgressEvent[] = []
+  const executionInput: AssistantProviderTurnExecutionInput = {
+    ...input,
+    onEvent: (event) => {
+      progressEvents.push(event)
+      input.onEvent?.(event)
+    },
+  }
+
   try {
-    return await resolveAssistantProviderDefinition(input.providerConfig.provider).executeTurn(
-      input,
-    )
+    const result = await resolveAssistantProviderDefinition(
+      input.providerConfig.provider,
+    ).executeTurn(executionInput)
+    return finalizeAssistantProviderAttemptResult(result, progressEvents)
   } catch (error) {
     return {
       error,
-      metadata: createEmptyAssistantProviderAttemptMetadata(),
+      metadata: finalizeAssistantProviderAttemptMetadata(
+        createEmptyAssistantProviderAttemptMetadata(),
+        progressEvents,
+      ),
       ok: false,
     }
   }
@@ -195,5 +212,28 @@ function createEmptyAssistantProviderAttemptMetadata(): AssistantProviderAttempt
     activityLabels: [],
     executedToolCount: 0,
     rawToolEvents: [],
+  }
+}
+
+function finalizeAssistantProviderAttemptResult(
+  result: AssistantProviderTurnAttemptResult,
+  progressEvents: readonly AssistantProviderProgressEvent[],
+): AssistantProviderTurnAttemptResult {
+  return {
+    ...result,
+    metadata: finalizeAssistantProviderAttemptMetadata(result.metadata, progressEvents),
+  }
+}
+
+function finalizeAssistantProviderAttemptMetadata(
+  metadata: AssistantProviderAttemptMetadata,
+  progressEvents: readonly AssistantProviderProgressEvent[],
+): AssistantProviderAttemptMetadata {
+  return {
+    ...metadata,
+    activityLabels: mergeAssistantProviderActivityLabels({
+      events: progressEvents,
+      labels: metadata.activityLabels,
+    }),
   }
 }

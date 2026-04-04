@@ -460,7 +460,7 @@ async function executeAssistantProviderAttempt(input: {
       at: new Date().toISOString(),
     })
     await recordProviderAttemptSucceeded({
-      activityLabels: attemptMetadata.activityLabels ?? [],
+      activityLabels: attemptMetadata.activityLabels,
       attemptCount: attemptPlan.attemptCount,
       route: attemptPlan.route,
       turnId: executionPlan.turnId,
@@ -514,6 +514,7 @@ async function executeAssistantProviderAttempt(input: {
       : null
 
     await recordProviderAttemptFailed({
+      activityLabels: attemptMetadata.activityLabels,
       attemptCount: attemptPlan.attemptCount,
       cooldownUntil,
       detail: errorMessage(error),
@@ -695,6 +696,7 @@ async function recordProviderAttemptSucceeded(input: {
 }
 
 async function recordProviderAttemptFailed(input: {
+  activityLabels: readonly string[]
   attemptCount: number
   cooldownUntil: string | null
   detail: string
@@ -704,18 +706,24 @@ async function recordProviderAttemptFailed(input: {
   turnId: string
   vault: string
 }): Promise<void> {
+  const metadata: Record<string, string> = {
+    attempt: String(input.attemptCount),
+    provider: input.route.provider,
+    model: input.route.providerOptions.model ?? 'default',
+    routeId: input.route.routeId,
+    code: input.errorCode ?? 'unknown',
+  }
+  if (input.activityLabels.length > 0) {
+    metadata.activityCount = String(input.activityLabels.length)
+    metadata.activities = input.activityLabels.join(', ')
+  }
+
   await appendAssistantTurnReceiptEvent({
     vault: input.vault,
     turnId: input.turnId,
     kind: 'provider.attempt.failed',
     detail: input.detail,
-    metadata: {
-      attempt: String(input.attemptCount),
-      provider: input.route.provider,
-      model: input.route.providerOptions.model ?? 'default',
-      routeId: input.route.routeId,
-      code: input.errorCode ?? 'unknown',
-    },
+    metadata,
   })
   if (input.cooldownUntil) {
     await appendAssistantTurnReceiptEvent({
