@@ -502,6 +502,38 @@ test('knowledge upsert persists assistant-authored pages through the built CLI b
   }
 })
 
+test('knowledge upsert allows a heading-only body through the built CLI boundary', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-knowledge-cli-empty-body-'))
+
+  try {
+    requireData(await runCli(['init', '--vault', vaultRoot]))
+
+    const upserted = requireData(
+      await runCli<{
+        bodyLength: number
+        page: {
+          slug: string
+          title: string
+        }
+      }>([
+        'knowledge',
+        'upsert',
+        '--vault',
+        vaultRoot,
+        '--title',
+        'Sleep quality',
+        '--body',
+        '# Sleep quality\n',
+      ]),
+    )
+
+    assert.equal(upserted.bodyLength, 0)
+    assert.equal(upserted.page.slug, 'sleep-quality')
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
 test('root chat alias keeps the same command schema as assistant chat', async () => {
   const rootSchema = JSON.parse(
     await runRawCli(['chat', '--schema', '--format', 'json']),

@@ -250,7 +250,7 @@ describe('readDerivedKnowledgeGraph', () => {
     })
   })
 
-  it('falls back to legacy frontmatter metadata when the body omits it', async () => {
+  it('ignores legacy frontmatter metadata aliases now that the page schema is canonical', async () => {
     const vaultRoot = await createVaultRoot()
     await writeKnowledgePage(
       vaultRoot,
@@ -275,8 +275,8 @@ describe('readDerivedKnowledgeGraph', () => {
     const graph = await readDerivedKnowledgeGraph(vaultRoot)
 
     expect(graph.bySlug.get('sleep-quality')).toMatchObject({
-      relatedSlugs: ['magnesium'],
-      sourcePaths: ['research/2026/04/legacy-note.md'],
+      relatedSlugs: [],
+      sourcePaths: [],
       title: 'Sleep quality',
     })
   })

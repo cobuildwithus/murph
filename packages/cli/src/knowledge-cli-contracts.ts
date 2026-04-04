@@ -29,7 +29,7 @@ export const knowledgeUpsertResultSchema = z.object({
   vault: pathSchema,
   indexPath: pathSchema,
   page: knowledgePageMetadataSchema,
-  bodyLength: z.number().int().positive(),
+  bodyLength: z.number().int().nonnegative(),
   savedAt: isoTimestampSchema,
 })
 
