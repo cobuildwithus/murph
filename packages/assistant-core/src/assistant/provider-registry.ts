@@ -5,13 +5,15 @@ export type {
   AssistantProviderAttemptMetadata,
   AssistantProviderCapabilities,
   AssistantProviderDefinition,
-  AssistantProviderProgressEvent,
   AssistantProviderTurnAttemptResult,
   AssistantProviderTurnExecutionInput,
   AssistantProviderTurnExecutionResult,
   AssistantProviderTurnInput,
   AssistantProviderUsage,
 } from './providers/types.js'
+export type {
+  AssistantProviderProgressEvent,
+} from './provider-progress.js'
 export {
   ASSISTANT_PROVIDER_DEFINITIONS,
   createCatalogModel,

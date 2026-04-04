@@ -572,7 +572,7 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
   assert.equal(call?.model, 'gpt-oss:20b')
   assert.equal(call?.sandbox, 'read-only')
   assert.equal(call?.approvalPolicy, 'never')
-  assert.equal(call?.onProgress, onEvent)
+  assert.equal(typeof call?.onProgress, 'function')
   assert.equal(call?.profile, 'primary')
   assert.equal(call?.oss, true)
   assert.match(call?.prompt ?? '', /system prompt/u)
@@ -604,6 +604,67 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
       totalTokens: null,
     },
   })
+})
+
+test('executeAssistantProviderTurnAttempt collects provider-agnostic activity labels from Codex progress events', async () => {
+  const onEvent = vi.fn()
+  providerMocks.executeCodexPrompt.mockImplementation(async (input: { onProgress?: Function }) => {
+    input.onProgress?.({
+      id: 'cmd-1',
+      kind: 'command',
+      label: '$ node /tmp/bin.js assistant memory get --vault /tmp/vault',
+      rawEvent: { type: 'item.started' },
+      safeLabel: 'assistant memory get',
+      safeText: 'running assistant memory get',
+      state: 'running',
+      text: '$ node /tmp/bin.js assistant memory get --vault /tmp/vault',
+    })
+    input.onProgress?.({
+      id: 'tool-1',
+      kind: 'tool',
+      label: 'murph.cli.run',
+      rawEvent: { type: 'tool.call' },
+      safeLabel: 'murph.cli.run',
+      safeText: 'finished murph.cli.run',
+      state: 'completed',
+      text: 'Tool murph.cli.run',
+    })
+    input.onProgress?.({
+      id: 'tool-2',
+      kind: 'tool',
+      label: 'murph.cli.run',
+      rawEvent: { type: 'tool.call' },
+      safeLabel: 'murph.cli.run',
+      safeText: 'using murph.cli.run',
+      state: 'running',
+      text: 'Tool murph.cli.run',
+    })
+
+    return {
+      finalMessage: 'assistant reply',
+      jsonEvents: [],
+      sessionId: 'thread-123',
+      stderr: '',
+      stdout: '',
+    }
+  })
+
+  const result = await executeAssistantProviderTurnAttempt({
+    provider: 'codex-cli',
+    workingDirectory: '/tmp/vault',
+    userPrompt: 'hello',
+    onEvent,
+  })
+
+  assert.equal(result.ok, true)
+  if (!result.ok) {
+    assert.fail('expected the provider attempt to succeed')
+  }
+  assert.deepEqual(result.metadata.activityLabels, [
+    'assistant memory get',
+    'murph.cli.run',
+  ])
+  assert.equal(onEvent.mock.calls.length, 3)
 })
 
 test('executeAssistantProviderTurn dispatches to the OpenAI-compatible adapter with transcript context', async () => {
@@ -987,6 +1048,7 @@ test('executeAssistantProviderTurn records tool raw-events and trace updates for
 
 test('executeAssistantProviderTurnAttempt reports provider-agnostic tool execution metadata on OpenAI-compatible failures', async () => {
   const languageModel = { provider: 'mock-model' }
+  const onEvent = vi.fn()
   const createAiSdkTools = vi.fn((mode?: string, options?: { onToolEvent?: Function }) => {
     assert.equal(mode, 'apply')
     options?.onToolEvent?.({
@@ -1012,6 +1074,7 @@ test('executeAssistantProviderTurnAttempt reports provider-agnostic tool executi
     baseUrl: 'http://127.0.0.1:11434/v1',
     model: 'gpt-oss:20b',
     userPrompt: 'hello',
+    onEvent,
     toolRuntime: {
       requestId: 'turn_789',
       vault: '/tmp/vault',
@@ -1029,6 +1092,7 @@ test('executeAssistantProviderTurnAttempt reports provider-agnostic tool executi
     assert.fail('expected the provider attempt to fail')
   }
   assert.equal(result.metadata.executedToolCount, 1)
+  assert.deepEqual(result.metadata.activityLabels, ['assistant.memory.search'])
   assert.deepEqual(result.metadata.rawToolEvents, [
     {
       type: 'assistant.tool.started',
@@ -1036,6 +1100,24 @@ test('executeAssistantProviderTurnAttempt reports provider-agnostic tool executi
       mode: 'apply',
       tool: 'assistant.memory.search',
       input: { text: 'tone' },
+    },
+  ])
+  assert.deepEqual(onEvent.mock.calls.map((call) => call[0]), [
+    {
+      id: 'tool-1',
+      kind: 'tool',
+      label: 'assistant.memory.search',
+      rawEvent: {
+        type: 'assistant.tool.started',
+        sequence: 1,
+        mode: 'apply',
+        tool: 'assistant.memory.search',
+        input: { text: 'tone' },
+      },
+      safeLabel: 'assistant.memory.search',
+      safeText: 'using assistant.memory.search',
+      state: 'running',
+      text: 'Running assistant.memory.search.',
     },
   ])
 })

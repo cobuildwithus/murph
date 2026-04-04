@@ -141,6 +141,37 @@ test('formatAssistantRunEventForTerminal shows raw auto-reply provider progress 
   assert.equal(message, 'reply-progress cap_safe_123: Web: treehouse menu')
 })
 
+test('formatAssistantRunEventForTerminal shows safe command labels by default', () => {
+  const event: AssistantRunEvent = {
+    captureId: 'cap_safe_123',
+    details: '$ node /tmp/bin.js assistant memory get --vault /tmp/vault',
+    providerKind: 'command',
+    providerState: 'running',
+    safeDetails: 'running assistant memory get',
+    type: 'capture.reply-progress',
+  }
+
+  const message = formatAssistantRunEventForTerminal(event)
+
+  assert.equal(message, 'reply-progress cap_safe_123: running assistant memory get')
+  assert.doesNotMatch(message ?? '', /\/tmp\/vault/u)
+})
+
+test('formatAssistantRunEventForTerminal shows safe tool labels by default', () => {
+  const event: AssistantRunEvent = {
+    captureId: 'cap_safe_123',
+    details: 'Tool murph.cli.run',
+    providerKind: 'tool',
+    providerState: 'completed',
+    safeDetails: 'finished murph.cli.run',
+    type: 'capture.reply-progress',
+  }
+
+  const message = formatAssistantRunEventForTerminal(event)
+
+  assert.equal(message, 'reply-progress cap_safe_123: finished murph.cli.run')
+})
+
 test('formatAssistantRunEventForTerminal keeps safe auto-reply heartbeat details visible by default', () => {
   const event: AssistantRunEvent = {
     captureId: 'cap_safe_123',

@@ -22,6 +22,12 @@ import {
   normalizeAssistantProviderOptionKey,
   normalizeNullableString,
 } from '../shared.js'
+import type {
+  AssistantProviderProgressEvent,
+} from '../provider-progress.js'
+import {
+  summarizeAssistantProviderActivityLabels,
+} from '../provider-progress.js'
 import {
   resolveAssistantModelSpecFromProviderConfig,
   supportsAssistantReasoningEffort,
@@ -154,6 +160,7 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
     const usesOpenAIResponsesApi =
       shouldUseAssistantOpenAIResponsesApi(providerConfig)
     const toolEvents: unknown[] = []
+    const progressEvents: AssistantProviderProgressEvent[] = []
     let executedToolCount = 0
     const tools = input.toolRuntime?.toolCatalog?.createAiSdkTools('apply', {
       onToolEvent: (event) => {
@@ -166,6 +173,16 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
           sequence: toolEvents.length + 1,
         })
         toolEvents.push(rawEvent)
+
+        const progressEvent = createOpenAiCompatibleToolProgressEvent({
+          event,
+          rawEvent,
+          sequence: toolEvents.length,
+        })
+        if (progressEvent) {
+          progressEvents.push(progressEvent)
+          input.onEvent?.(progressEvent)
+        }
 
         const updates = buildOpenAiCompatibleToolTraceUpdates(event)
         if (updates.length > 0) {
@@ -224,6 +241,7 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
 
       return {
         metadata: {
+          activityLabels: summarizeAssistantProviderActivityLabels(progressEvents),
           executedToolCount,
           rawToolEvents: toolEvents,
         },
@@ -251,6 +269,7 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
       return {
         error,
         metadata: {
+          activityLabels: summarizeAssistantProviderActivityLabels(progressEvents),
           executedToolCount,
           rawToolEvents: toolEvents,
         },
@@ -321,5 +340,63 @@ function buildOpenAiCompatibleToolTraceUpdates(
           text: `${event.tool} failed: ${event.errorMessage ?? 'Tool execution failed.'}`,
         },
       ]
+  }
+}
+
+function createOpenAiCompatibleToolProgressEvent(input: {
+  event: AssistantAiSdkToolEvent
+  rawEvent: Record<string, unknown>
+  sequence: number
+}): AssistantProviderProgressEvent | null {
+  const safeLabel = normalizeNullableString(input.event.tool)
+  if (!safeLabel) {
+    return null
+  }
+
+  switch (input.event.kind) {
+    case 'started':
+      return {
+        id: `tool-${input.sequence}`,
+        kind: 'tool',
+        label: safeLabel,
+        rawEvent: input.rawEvent,
+        safeLabel,
+        safeText: `using ${safeLabel}`,
+        state: 'running',
+        text: `Running ${safeLabel}.`,
+      }
+    case 'previewed':
+      return {
+        id: `tool-${input.sequence}`,
+        kind: 'tool',
+        label: safeLabel,
+        rawEvent: input.rawEvent,
+        safeLabel,
+        safeText: `planned ${safeLabel}`,
+        state: 'completed',
+        text: `Planned ${safeLabel}.`,
+      }
+    case 'succeeded':
+      return {
+        id: `tool-${input.sequence}`,
+        kind: 'tool',
+        label: safeLabel,
+        rawEvent: input.rawEvent,
+        safeLabel,
+        safeText: `finished ${safeLabel}`,
+        state: 'completed',
+        text: `Finished ${safeLabel}.`,
+      }
+    case 'failed':
+      return {
+        id: `tool-${input.sequence}`,
+        kind: 'tool',
+        label: safeLabel,
+        rawEvent: input.rawEvent,
+        safeLabel,
+        safeText: `${safeLabel} failed`,
+        state: 'completed',
+        text: `${safeLabel} failed: ${input.event.errorMessage ?? 'Tool execution failed.'}`,
+      }
   }
 }

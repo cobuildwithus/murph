@@ -301,12 +301,16 @@ function formatAssistantReplyProgressDetails(
   options: ForegroundTerminalLogOptions,
 ): string | null {
   const details = normalizeLabel(event.details)
+  const safeDetails = normalizeLabel(event.safeDetails)
   if (options.unsafeDetails && details) {
     return details
   }
 
   switch (event.providerKind) {
     case 'command':
+      if (safeDetails) {
+        return safeDetails
+      }
       return event.providerState === 'completed'
         ? 'assistant command finished'
         : 'running assistant command'
@@ -334,6 +338,9 @@ function formatAssistantReplyProgressDetails(
         ? 'assistant status updated'
         : 'waiting on assistant provider'
     case 'tool':
+      if (safeDetails) {
+        return safeDetails
+      }
       return event.providerState === 'completed'
         ? 'assistant tool finished'
         : 'using assistant tool'

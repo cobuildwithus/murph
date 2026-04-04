@@ -172,6 +172,7 @@ function createAssistantAutoReplyProgressEvent(
     details: event.text,
     providerKind: event.kind,
     providerState: event.state,
+    safeDetails: event.safeText ?? undefined,
   }
 }
 

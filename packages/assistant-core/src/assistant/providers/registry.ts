@@ -192,6 +192,7 @@ export type {
 
 function createEmptyAssistantProviderAttemptMetadata(): AssistantProviderAttemptMetadata {
   return {
+    activityLabels: [],
     executedToolCount: 0,
     rawToolEvents: [],
   }
