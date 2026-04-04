@@ -7,6 +7,10 @@ import { beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 import { createGatewayConversationSessionKey } from "@murphai/gateway-core";
 import {
+  createHostedUserRootKeyEnvelope,
+  generateHostedUserRecipientKeyPair,
+} from "@murphai/runtime-state";
+import {
   encodeHostedBundleBase64,
   listHostedBundleArtifacts,
   snapshotHostedBundleRoots,
@@ -2775,6 +2779,115 @@ describe("HostedUserRunner", () => {
       configuredUserEnvKeys: ["OPENAI_API_KEY", "XAI_API_KEY"],
       userId: "member_123",
     });
+  });
+
+  it("serializes concurrent hosted root-key recipient updates through the per-user runner", async () => {
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    const browser = await generateHostedUserRecipientKeyPair();
+    const recovery = await generateHostedUserRecipientKeyPair();
+
+    await runner.bootstrapUser("member_123");
+
+    const envelopeObjectKey = await userKeyEnvelopeObjectKeyForTest(
+      environment.bundleEncryptionKey,
+      "member_123",
+    );
+    const originalPut = bucket.api.put.bind(bucket.api);
+    const firstEnvelopeWriteEntered = createDeferred<void>();
+    const releaseFirstEnvelopeWrite = createDeferred<void>();
+    let blockNextEnvelopeWrite = true;
+
+    vi.spyOn(bucket.api, "put").mockImplementation(async (key: string, value: string) => {
+      if (blockNextEnvelopeWrite && key === envelopeObjectKey) {
+        blockNextEnvelopeWrite = false;
+        firstEnvelopeWriteEntered.resolve();
+        await releaseFirstEnvelopeWrite.promise;
+      }
+
+      await originalPut(key, value);
+    });
+
+    const browserWrite = runner.upsertUserKeyRecipient({
+      kind: "user-unlock",
+      recipientKeyId: "browser:v1",
+      recipientPublicKeyJwk: browser.publicKeyJwk,
+    });
+    await firstEnvelopeWriteEntered.promise;
+
+    const recoveryWrite = runner.upsertUserKeyRecipient({
+      kind: "recovery",
+      recipientKeyId: "recovery:v1",
+      recipientPublicKeyJwk: recovery.publicKeyJwk,
+    });
+
+    releaseFirstEnvelopeWrite.resolve();
+    await Promise.all([browserWrite, recoveryWrite]);
+
+    await expect(runner.getUserKeyEnvelope()).resolves.toMatchObject({
+      recipients: expect.arrayContaining([
+        expect.objectContaining({
+          keyId: "browser:v1",
+          kind: "user-unlock",
+        }),
+        expect.objectContaining({
+          keyId: "recovery:v1",
+          kind: "recovery",
+        }),
+      ]),
+    });
+  });
+
+  it("waits for full envelope replacement before serving other crypto-backed writes", async () => {
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+
+    await runner.bootstrapUser("member_123");
+
+    const replacement = await createHostedUserRootKeyEnvelope({
+      recipients: [{
+        keyId: TEST_AUTOMATION_RECIPIENT_KEY_ID,
+        kind: "automation",
+        publicKeyJwk: TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK,
+      }],
+      userId: "member_123",
+    });
+    const envelopeObjectKey = await userKeyEnvelopeObjectKeyForTest(
+      environment.bundleEncryptionKey,
+      "member_123",
+    );
+    const originalPut = bucket.api.put.bind(bucket.api);
+    const envelopeWriteEntered = createDeferred<void>();
+    const releaseEnvelopeWrite = createDeferred<void>();
+    let blockNextEnvelopeWrite = true;
+
+    vi.spyOn(bucket.api, "put").mockImplementation(async (key: string, value: string) => {
+      if (blockNextEnvelopeWrite && key === envelopeObjectKey) {
+        blockNextEnvelopeWrite = false;
+        envelopeWriteEntered.resolve();
+        await releaseEnvelopeWrite.promise;
+      }
+
+      await originalPut(key, value);
+    });
+
+    const replaceEnvelope = runner.putUserKeyEnvelope({
+      envelope: replacement.envelope,
+    });
+    await envelopeWriteEntered.promise;
+
+    const appendUsage = runner.putPendingUsage({
+      usage: [{
+        usageId: "usage_after_rotation",
+      }],
+    });
+
+    releaseEnvelopeWrite.resolve();
+    await Promise.all([replaceEnvelope, appendUsage]);
+
+    await expect(runner.readPendingUsage()).resolves.toMatchObject([
+      expect.objectContaining({
+        usageId: "usage_after_rotation",
+      }),
+    ]);
   });
 
   it("reads per-user env encrypted with a previous key id after rotation", async () => {

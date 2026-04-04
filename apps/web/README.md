@@ -88,7 +88,7 @@ Hosted onboarding extras:
 - `HOSTED_EXECUTION_DISPATCH_URL`
 - `HOSTED_EXECUTION_SIGNING_SECRET`
 - `HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS`
-- `HOSTED_EXECUTION_INTERNAL_TOKENS` for the remaining web-owned internal routes such as `/api/internal/hosted-execution/outbox/drain`
+- `HOSTED_EXECUTION_INTERNAL_TOKENS` for the remaining web-owned internal routes such as `/api/internal/device-sync/providers/[provider]/connect-link`
 - `HOSTED_EXECUTION_SCHEDULER_TOKENS` for authenticated scheduler callers that trigger `/api/internal/hosted-execution/outbox/cron` and `/api/internal/hosted-execution/usage/cron`
 
 Optional hosted AI usage metering:
@@ -103,7 +103,7 @@ When you set `DEVICE_SYNC_PUBLIC_BASE_URL`, point it at the stable production pr
 Set these under `Settings -> Environment Variables` in the Vercel project that deploys `apps/web`. Production is the minimum. Only set Preview if you also have matching preview peers and secrets instead of pointing preview deploys at production control planes.
 
 - `HOSTED_EXECUTION_SIGNING_SECRET`: generate a strong random secret and use the exact same value in Vercel and the Cloudflare hosted-execution worker. `apps/web` signs dispatch payloads with it and Cloudflare verifies them.
-- `HOSTED_EXECUTION_INTERNAL_TOKENS`: generate a distinct comma-separated bearer-token set for the remaining web-owned internal routes such as `/api/internal/hosted-execution/outbox/drain`.
+- `HOSTED_EXECUTION_INTERNAL_TOKENS`: generate a distinct comma-separated bearer-token set for the remaining web-owned internal routes such as `/api/internal/device-sync/providers/[provider]/connect-link`.
 - `HOSTED_EXECUTION_SCHEDULER_TOKENS`: generate a distinct comma-separated bearer-token set for external schedulers that call the hosted cron routes directly.
 - `HOSTED_SHARE_INTERNAL_TOKENS`: generate a distinct comma-separated bearer-token set for trusted server-to-server hosted share routes.
 - `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET`: generate a distinct strong random secret and use the same value in Vercel plus whichever trusted auth proxy or middleware signs the hosted user assertion headers. `apps/web` verifies that signature before trusting the lower-level assertion-backed device-sync bridge routes.
@@ -203,9 +203,10 @@ Hosted device-sync agent signals stay sparse by design:
 
 Hosted execution maintenance routes:
 
+- `GET /api/internal/hosted-execution/outbox/cron`
 - `GET /api/internal/hosted-execution/usage/cron`
 
-Cloudflare no longer round-trips through hosted-web runtime snapshot/apply routes in the hot path. Device-sync hydration and usage buffering now stay on the Cloudflare side during execution, the worker later imports buffered usage through the internal hosted-web usage route after commit/finalize, and the optional usage cron sends total-token meter events to Stripe while skipping member-supplied API-key runs.
+The old `POST /api/internal/hosted-execution/outbox/drain` route has been removed. Cloudflare no longer round-trips through hosted-web runtime snapshot/apply routes or direct usage-record writes in the hot path. Device-sync hydration and usage buffering now stay on the Cloudflare side during execution, `apps/web` later imports buffered usage from Cloudflare-owned storage, and the optional usage cron sends total-token meter events to Stripe while skipping member-supplied API-key runs.
 
 ## Hosted onboarding routes
 

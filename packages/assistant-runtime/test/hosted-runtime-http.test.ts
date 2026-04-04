@@ -24,7 +24,7 @@ vi.mock("../src/hosted-runtime/events/inbox-pipeline.ts", () => ({
 }));
 
 import {
-  createHostedExecutionServerDeviceSyncRuntimeClient,
+  createHostedExecutionProxyDeviceSyncRuntimeClient,
 } from "@murphai/hosted-execution";
 import { parseHostedEmailThreadTarget } from "@murphai/runtime-state";
 import { syncHostedDeviceSyncControlPlaneState } from "../src/hosted-device-sync-runtime.ts";
@@ -172,10 +172,9 @@ test("hosted device-sync snapshot tolerates non-JSON error bodies and applies th
       },
     }));
   global.fetch = fetchMock;
-  const client = createHostedExecutionServerDeviceSyncRuntimeClient({
-    baseUrl: "https://hosted.example.test",
+  const client = createHostedExecutionProxyDeviceSyncRuntimeClient({
+    baseUrl: "http://device-sync.worker",
     boundUserId: "member_123",
-    internalToken: "internal-token",
     timeoutMs: 9_000,
   });
 
@@ -187,7 +186,7 @@ test("hosted device-sync snapshot tolerates non-JSON error bodies and applies th
   assert.equal(timeoutSpy.mock.calls[0]?.[0], 9_000);
   assert.equal(
     new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("authorization"),
-    "Bearer internal-token",
+    null,
   );
 });
 

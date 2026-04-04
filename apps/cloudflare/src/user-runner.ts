@@ -45,7 +45,10 @@ import {
   type HostedExecutionCommitPayload,
   type HostedExecutionFinalizePayload,
 } from "./execution-journal.js";
-import { deleteHostedEmailRawMessage } from "./hosted-email.js";
+import {
+  deleteHostedEmailRawMessage,
+  readHostedEmailConfig,
+} from "./hosted-email.js";
 import {
   createHostedUserKeyStore,
   type HostedUserCryptoContext,
@@ -66,6 +69,7 @@ import {
   isCommittedResultFresh,
 } from "./user-runner/runner-commit-recovery.js";
 import { RunnerBundleSync } from "./user-runner/runner-bundle-sync.js";
+import { RunnerUserEnvService } from "./user-runner/runner-user-env.js";
 import { RunnerQueueStore } from "./user-runner/runner-queue-store.js";
 import { RunnerScheduler } from "./user-runner/runner-scheduler.js";
 import {
@@ -90,6 +94,7 @@ interface RunnerUserStores {
   commitRecovery: ReturnType<typeof createRunnerCommitRecovery>;
   crypto: HostedUserCryptoContext;
   gatewayStore: HostedGatewayProjectionStore;
+  userEnv: RunnerUserEnvService;
   userId: string;
 }
 
@@ -101,6 +106,7 @@ export class HostedUserRunner {
   private readonly userKeyStore: ReturnType<typeof createHostedUserKeyStore>;
   private runnerStores: RunnerUserStores | null = null;
   private userEnvLock: Promise<void> | null = null;
+  private userKeyEnvelopeLock: Promise<void> | null = null;
 
   constructor(
     private readonly state: DurableObjectStateLike,
@@ -131,17 +137,37 @@ export class HostedUserRunner {
   private async ensureRunnerStores(userId?: string): Promise<RunnerUserStores> {
     const resolvedUserId = userId ?? await this.requireBoundUserId();
 
-    if (this.runnerStores?.userId === resolvedUserId) {
+    if (this.runnerStores?.userId === resolvedUserId && !this.userKeyEnvelopeLock) {
       return this.runnerStores;
     }
 
-    const crypto = await this.userKeyStore.ensureUserCryptoContext(resolvedUserId);
+    return this.withUserKeyEnvelopeLock(async () => {
+      if (this.runnerStores?.userId === resolvedUserId) {
+        return this.runnerStores;
+      }
+
+      return this.refreshRunnerStores(resolvedUserId);
+    });
+  }
+
+  private async ensureRunnerStoresWhileHoldingKeyLock(userId: string): Promise<RunnerUserStores> {
+    if (this.runnerStores?.userId === userId) {
+      return this.runnerStores;
+    }
+
+    return this.refreshRunnerStores(userId);
+  }
+
+  private async refreshRunnerStores(userId: string): Promise<RunnerUserStores> {
+    const crypto = await this.userKeyStore.ensureUserCryptoContext(userId);
     this.queueStore.setDispatchPayloadStore(createHostedDispatchPayloadStore({
       bucket: this.bucket,
       key: crypto.rootKey,
       keyId: crypto.rootKeyId,
       keysById: crypto.keysById,
     }));
+    const allowedUserEnvSource = this.readAllowedUserEnvSource();
+    const hostedEmailConfig = readHostedEmailConfig(this.readWorkerStringEnvSource());
 
     const stores: RunnerUserStores = {
       bundleSync: new RunnerBundleSync(
@@ -150,7 +176,6 @@ export class HostedUserRunner {
         crypto.rootKeyId,
         crypto.keysById,
         this.queueStore,
-        this.readUserEnvSource(),
       ),
       commitRecovery: createRunnerCommitRecovery({
         bucket: this.bucket,
@@ -166,7 +191,15 @@ export class HostedUserRunner {
         keyId: crypto.rootKeyId,
         keysById: crypto.keysById,
       }),
-      userId: resolvedUserId,
+      userEnv: new RunnerUserEnvService(
+        this.bucket,
+        crypto.rootKey,
+        crypto.rootKeyId,
+        crypto.keysById,
+        allowedUserEnvSource,
+        hostedEmailConfig,
+      ),
+      userId,
     };
 
     this.runnerStores = stores;
@@ -180,13 +213,16 @@ export class HostedUserRunner {
       return;
     }
 
-    const { crypto } = await this.ensureRunnerStores(dispatch.event.userId);
-    await createHostedDeviceSyncRuntimeStore({
-      bucket: this.bucket,
-      key: crypto.rootKey,
-      keyId: crypto.rootKeyId,
-      keysById: crypto.keysById,
-    }).mergeSnapshot(dispatch.event.runtimeSnapshot);
+    const runtimeSnapshot = dispatch.event.runtimeSnapshot;
+    await this.withUserKeyEnvelopeLock(async () => {
+      const { crypto } = await this.ensureRunnerStoresWhileHoldingKeyLock(dispatch.event.userId);
+      await createHostedDeviceSyncRuntimeStore({
+        bucket: this.bucket,
+        key: crypto.rootKey,
+        keyId: crypto.rootKeyId,
+        keysById: crypto.keysById,
+      }).mergeSnapshot(runtimeSnapshot);
+    });
   }
 
   async gatewayListConversations(
@@ -240,16 +276,18 @@ export class HostedUserRunner {
   async putPendingUsage(input: {
     usage: readonly Record<string, unknown>[];
   }): Promise<{ recorded: number; usageIds: string[] }> {
-    const userId = await this.requireBoundUserId();
-    const { crypto } = await this.ensureRunnerStores(userId);
-    return createHostedPendingUsageStore({
-      bucket: this.bucket,
-      key: crypto.rootKey,
-      keyId: crypto.rootKeyId,
-      keysById: crypto.keysById,
-    }).appendUsage({
-      usage: input.usage,
-      userId,
+    return this.withUserKeyEnvelopeLock(async () => {
+      const userId = await this.requireBoundUserId();
+      const { crypto } = await this.ensureRunnerStoresWhileHoldingKeyLock(userId);
+      return createHostedPendingUsageStore({
+        bucket: this.bucket,
+        key: crypto.rootKey,
+        keyId: crypto.rootKeyId,
+        keysById: crypto.keysById,
+      }).appendUsage({
+        usage: input.usage,
+        userId,
+      });
     });
   }
 
@@ -268,30 +306,34 @@ export class HostedUserRunner {
   }
 
   async deletePendingUsage(input: { usageIds: readonly string[] }): Promise<void> {
-    const userId = await this.requireBoundUserId();
-    const { crypto } = await this.ensureRunnerStores(userId);
-    await createHostedPendingUsageStore({
-      bucket: this.bucket,
-      key: crypto.rootKey,
-      keyId: crypto.rootKeyId,
-      keysById: crypto.keysById,
-    }).deleteUsage({
-      usageIds: input.usageIds,
-      userId,
+    await this.withUserKeyEnvelopeLock(async () => {
+      const userId = await this.requireBoundUserId();
+      const { crypto } = await this.ensureRunnerStoresWhileHoldingKeyLock(userId);
+      await createHostedPendingUsageStore({
+        bucket: this.bucket,
+        key: crypto.rootKey,
+        keyId: crypto.rootKeyId,
+        keysById: crypto.keysById,
+      }).deleteUsage({
+        usageIds: input.usageIds,
+        userId,
+      });
     });
   }
 
   async putUserKeyEnvelope(input: {
     envelope: HostedUserRootKeyEnvelope;
   }): Promise<HostedUserCryptoContext["envelope"]> {
-    const userId = await this.requireBoundUserId();
-    const envelope = await this.userKeyStore.putUserRootKeyEnvelope({
-      envelope: input.envelope,
-      userId,
+    return this.withUserKeyEnvelopeLock(async () => {
+      const userId = await this.requireBoundUserId();
+      const envelope = await this.userKeyStore.putUserRootKeyEnvelope({
+        envelope: input.envelope,
+        userId,
+      });
+      this.runnerStores = null;
+      await this.ensureRunnerStoresWhileHoldingKeyLock(userId);
+      return envelope;
     });
-    this.runnerStores = null;
-    await this.ensureRunnerStores(userId);
-    return envelope;
   }
 
   async upsertUserKeyRecipient(input: {
@@ -300,14 +342,16 @@ export class HostedUserRunner {
     recipientKeyId: string;
     recipientPublicKeyJwk: HostedUserRecipientPublicKeyJwk;
   }): Promise<HostedUserCryptoContext["envelope"]> {
-    const userId = await this.requireBoundUserId();
-    const envelope = await this.userKeyStore.upsertRecipient({
-      ...input,
-      userId,
+    return this.withUserKeyEnvelopeLock(async () => {
+      const userId = await this.requireBoundUserId();
+      const envelope = await this.userKeyStore.upsertRecipient({
+        ...input,
+        userId,
+      });
+      this.runnerStores = null;
+      await this.ensureRunnerStoresWhileHoldingKeyLock(userId);
+      return envelope;
     });
-    this.runnerStores = null;
-    await this.ensureRunnerStores(userId);
-    return envelope;
   }
 
   async dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {
@@ -443,9 +487,9 @@ export class HostedUserRunner {
 
   async getUserEnvStatus(): Promise<HostedExecutionUserEnvStatus> {
     const userId = await this.requireBoundUserId();
-    const { bundleSync } = await this.ensureRunnerStores(userId);
+    const { userEnv } = await this.ensureRunnerStores(userId);
     return {
-      configuredUserEnvKeys: listHostedUserEnvKeys(await bundleSync.readUserEnv(userId)),
+      configuredUserEnvKeys: listHostedUserEnvKeys(await userEnv.readUserEnv(userId)),
       userId,
     };
   }
@@ -453,9 +497,11 @@ export class HostedUserRunner {
   async updateUserEnv(
     update: HostedUserEnvUpdate,
   ): Promise<HostedExecutionUserEnvStatus> {
-    const userId = await this.requireBoundUserId();
-    const { bundleSync } = await this.ensureRunnerStores(userId);
-    return this.withUserEnvLock(() => bundleSync.updateUserEnv(userId, update));
+    return this.withUserKeyEnvelopeLock(async () => {
+      const userId = await this.requireBoundUserId();
+      const { userEnv } = await this.ensureRunnerStoresWhileHoldingKeyLock(userId);
+      return this.withUserEnvLock(() => userEnv.updateUserEnv(userId, update));
+    });
   }
 
   async clearUserEnv(): Promise<HostedExecutionUserEnvStatus> {
@@ -474,15 +520,14 @@ export class HostedUserRunner {
     return this.applyHostedTransition({
       eventId: input.eventId,
       gatewayProjectionSnapshot: input.payload.gatewayProjectionSnapshot ?? null,
-      run: async (userId) => {
-        const { crypto } = await this.ensureRunnerStores(userId);
+      run: async (userId, stores) => {
         return persistHostedExecutionCommit({
           bucket: this.bucket,
           currentBundleRefs: input.payload.currentBundleRefs,
           eventId: input.eventId,
-          key: crypto.rootKey,
-          keyId: crypto.rootKeyId,
-          keysById: crypto.keysById,
+          key: stores.crypto.rootKey,
+          keyId: stores.crypto.rootKeyId,
+          keysById: stores.crypto.keysById,
           payload: input.payload,
           userId,
         });
@@ -497,14 +542,13 @@ export class HostedUserRunner {
     return this.applyHostedTransition({
       eventId: input.eventId,
       gatewayProjectionSnapshot: input.payload.gatewayProjectionSnapshot ?? null,
-      run: async (userId) => {
-        const { crypto } = await this.ensureRunnerStores(userId);
+      run: async (userId, stores) => {
         return persistHostedExecutionFinalBundles({
           bucket: this.bucket,
           eventId: input.eventId,
-          key: crypto.rootKey,
-          keyId: crypto.rootKeyId,
-          keysById: crypto.keysById,
+          key: stores.crypto.rootKey,
+          keyId: stores.crypto.rootKeyId,
+          keysById: stores.crypto.keysById,
           payload: input.payload,
           userId,
         });
@@ -698,10 +742,10 @@ export class HostedUserRunner {
       throw new Error("Native hosted execution requires a RunnerContainer binding.");
     }
 
-    const { bundleSync } = await this.ensureRunnerStores(userId);
+    const { bundleSync, userEnv: userEnvService } = await this.ensureRunnerStores(userId);
     const [bundleState, userEnv] = await Promise.all([
       this.queueStore.readBundleMetaState(),
-      bundleSync.readUserEnv(userId),
+      userEnvService.readUserEnv(userId),
     ]);
     const forwardedEnv = buildHostedRunnerContainerEnv(this.runnerRuntimeEnvSource);
     const job: HostedAssistantRuntimeJobInput = {
@@ -906,20 +950,33 @@ export class HostedUserRunner {
   private async applyHostedTransition<T>(input: {
     eventId: string;
     gatewayProjectionSnapshot?: HostedExecutionCommitPayload["gatewayProjectionSnapshot"];
-    run: (userId: string) => Promise<T>;
+    run: (userId: string, stores: RunnerUserStores) => Promise<T>;
   }): Promise<T> {
     return this.withEventTransitionLock(input.eventId, async () => {
-      const userId = await this.requireBoundUserId();
-      const result = await input.run(userId);
-      await (await this.ensureRunnerStores(userId)).gatewayStore.applySnapshot(input.gatewayProjectionSnapshot ?? null);
-      return result;
+      return this.withUserKeyEnvelopeLock(async () => {
+        const userId = await this.requireBoundUserId();
+        const stores = await this.ensureRunnerStoresWhileHoldingKeyLock(userId);
+        const result = await input.run(userId, stores);
+        await stores.gatewayStore.applySnapshot(input.gatewayProjectionSnapshot ?? null);
+        return result;
+      });
     });
   }
 
-  private readUserEnvSource(): Readonly<Record<string, string | undefined>> {
+  private readAllowedUserEnvSource(): Readonly<Record<string, string | undefined>> {
     return {
       HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: this.env.allowedUserEnvKeys ?? undefined,
     };
+  }
+
+  private readWorkerStringEnvSource(): Readonly<Record<string, string | undefined>> {
+    const values: Record<string, string | undefined> = {};
+
+    for (const [key, value] of Object.entries(this.runnerRuntimeEnvSource)) {
+      values[key] = typeof value === "string" ? value : undefined;
+    }
+
+    return values;
   }
 
   private async requireBoundUserId(): Promise<string> {
@@ -962,6 +1019,26 @@ export class HostedUserRunner {
       release();
       if (this.userEnvLock === chain) {
         this.userEnvLock = null;
+      }
+    }
+  }
+
+  private async withUserKeyEnvelopeLock<T>(run: () => Promise<T>): Promise<T> {
+    const previous = this.userKeyEnvelopeLock ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const chain = previous.catch(() => {}).then(() => current);
+    this.userKeyEnvelopeLock = chain;
+    await previous.catch(() => {});
+
+    try {
+      return await run();
+    } finally {
+      release();
+      if (this.userKeyEnvelopeLock === chain) {
+        this.userKeyEnvelopeLock = null;
       }
     }
   }
