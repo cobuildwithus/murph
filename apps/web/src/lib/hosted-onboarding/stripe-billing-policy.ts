@@ -16,7 +16,6 @@ import {
 } from "./billing";
 import {
   buildHostedMemberActivationDispatch,
-  buildHostedMemberActivationFirstContact,
 } from "./member-activation";
 import {
   deriveHostedEntitlement,
@@ -65,10 +64,6 @@ export async function activateHostedMemberFromConfirmedRevnetIssuance(input: {
   }
 
   const dispatch = buildHostedMemberActivationDispatch({
-    firstContact: buildHostedMemberActivationFirstContact({
-      linqChatId: input.member.linqChatId,
-      phoneLookupKey: input.member.normalizedPhoneNumber,
-    }),
     memberId: input.member.id,
     occurredAt: input.occurredAt,
     sourceEventId: input.sourceEventId,
@@ -123,10 +118,6 @@ export async function activateHostedMemberForPositiveSource(input: {
   }
 
   const dispatch = buildHostedMemberActivationDispatch({
-    firstContact: buildHostedMemberActivationFirstContact({
-      linqChatId: input.member.linqChatId,
-      phoneLookupKey: input.member.normalizedPhoneNumber,
-    }),
     memberId: input.member.id,
     occurredAt: input.dispatchContext.occurredAt,
     sourceEventId: input.dispatchContext.sourceEventId,

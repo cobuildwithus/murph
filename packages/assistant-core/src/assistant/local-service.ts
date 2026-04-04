@@ -66,7 +66,10 @@ import type {
 import { withAssistantTurnLock } from './turn-lock.js'
 
 export { buildResolveAssistantSessionInput } from './session-resolution.js'
-export { sendAssistantFirstContactWelcomeLocal } from './first-contact-welcome-delivery.js'
+export {
+  queueAssistantFirstContactWelcomeLocal,
+  sendAssistantFirstContactWelcomeLocal,
+} from './first-contact-welcome-delivery.js'
 
 async function persistUserTurn(
   input: AssistantMessageInput,
@@ -207,12 +210,12 @@ export async function sendAssistantMessageLocal(
           vault: input.vault,
         })
 
-        return normalizeAssistantAskResultForReturn(assistantAskResultSchema.parse({
+        return normalizeAssistantAskResultForReturn({
           vault: redactAssistantDisplayPath(input.vault),
           status: 'completed',
           prompt: input.prompt,
           response: providerResult.response,
-          session: serializeAssistantSessionForResult(deliveryOutcome.session),
+          session: deliveryOutcome.session,
           delivery: deliveryOutcome.kind === 'sent' ? deliveryOutcome.delivery : null,
           deliveryDeferred: deliveryOutcome.kind === 'queued',
           deliveryIntentId:
@@ -225,7 +228,7 @@ export async function sendAssistantMessageLocal(
             deliveryOutcome.kind === 'queued' || deliveryOutcome.kind === 'failed'
               ? deliveryOutcome.error
               : null,
-        }))
+        })
       } catch (error) {
         const normalizedError = normalizeAssistantDeliveryError(error)
         const failedAt = new Date().toISOString()

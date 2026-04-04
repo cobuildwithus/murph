@@ -180,8 +180,6 @@ function createHostedMember(
     linqChatId: null,
     maskedPhoneNumberHint: "***2671",
     normalizedPhoneNumber: "+14155552671",
-    onboardingWelcomeQueuedAt: null,
-    onboardingWelcomeSentAt: null,
     phoneNumberVerifiedAt: new Date("2025-03-27T08:30:00.000Z"),
     privyUserId: "did:privy:user_123",
     status: HostedMemberStatus.active,

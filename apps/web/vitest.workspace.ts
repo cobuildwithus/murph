@@ -54,7 +54,7 @@ export const hostedWebVitestProjects = [
     "hosted-onboarding-routes.test.ts",
     "hosted-onboarding-session.test.ts",
     "hosted-onboarding-shared.test.ts",
-    "hosted-onboarding-stripe-event-queue.test.ts",
+    "hosted-onboarding-stripe-event-reconciliation.test.ts",
     "hosted-onboarding-webhook-idempotency.test.ts",
     "hosted-onboarding-webhook-receipt-transitions.test.ts",
   ]),

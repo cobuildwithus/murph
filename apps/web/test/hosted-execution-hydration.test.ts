@@ -589,54 +589,12 @@ describe("hydrateHostedExecutionDispatch", () => {
     expect(capture.text).toBe("hello");
   });
 
-  it("rehydrates minimized sent member activation receipt payloads", async () => {
+  it("rehydrates minimized member activation payloads from hosted member state", async () => {
     const prisma = {
-      hostedWebhookReceipt: {
+      hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
-          payloadJson: {
-            eventPayload: {
-              type: "invoice.paid",
-            },
-            receiptState: {
-              attemptCount: 1,
-              attemptId: "attempt_1",
-              completedAt: "2026-03-26T12:30:01.000Z",
-              lastError: null,
-              lastReceivedAt: "2026-03-26T12:30:00.000Z",
-              sideEffects: [
-                {
-                  attemptCount: 1,
-                  effectId: "dispatch:member.activated:stripe.invoice.paid:member_123:evt_stripe_123",
-                  kind: "hosted_execution_dispatch",
-                  lastAttemptAt: "2026-03-26T12:30:00.500Z",
-                  lastError: null,
-                  payload: {
-                    botUserId: "999",
-                    firstContact: {
-                      channel: "linq",
-                      identityId: "hbidx:phone:v1:test",
-                      threadId: "chat_123",
-                      threadIsDirect: true,
-                    },
-                    storage: "reference",
-                    schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
-                    dispatchRef: {
-                      eventId: "member.activated:stripe.invoice.paid:member_123:evt_stripe_123",
-                      eventKind: "member.activated",
-                      occurredAt: "2026-03-26T12:30:00.000Z",
-                      userId: "member_123",
-                    },
-                  },
-                  result: {
-                    dispatched: true,
-                  },
-                  sentAt: "2026-03-26T12:30:00.750Z",
-                  status: "sent",
-                },
-              ],
-              status: "completed",
-            },
-          },
+          linqChatId: "chat_123",
+          normalizedPhoneNumber: createHostedPhoneLookupKey("+15551234567"),
         }),
       },
     };
@@ -667,7 +625,7 @@ describe("hydrateHostedExecutionDispatch", () => {
       event: {
         firstContact: {
           channel: "linq",
-          identityId: "hbidx:phone:v1:test",
+          identityId: createHostedPhoneLookupKey("+15551234567"),
           threadId: "chat_123",
           threadIsDirect: true,
         },

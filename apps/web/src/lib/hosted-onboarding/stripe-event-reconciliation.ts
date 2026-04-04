@@ -89,11 +89,11 @@ export async function recordHostedStripeEvent(input: {
   }
 }
 
-export async function drainHostedStripeEventQueue(input: {
+export async function reconcileDueHostedStripeEvents(input: {
   limit?: number;
   prisma: PrismaClient;
 }): Promise<string[]> {
-  const drainedEventIds: string[] = [];
+  const reconciledEventIds: string[] = [];
   let shouldDrainRevnetIssuances = false;
   const now = new Date();
   const candidates = await input.prisma.hostedStripeEvent.findMany({
@@ -124,7 +124,7 @@ export async function drainHostedStripeEventQueue(input: {
     const result = await processClaimedHostedStripeEvent(claimed, input.prisma);
     shouldDrainRevnetIssuances ||= result.createdOrUpdatedRevnetIssuance;
     if (result.status === "completed") {
-      drainedEventIds.push(result.eventId);
+      reconciledEventIds.push(result.eventId);
     }
   }
 
@@ -135,7 +135,7 @@ export async function drainHostedStripeEventQueue(input: {
     });
   }
 
-  return drainedEventIds;
+  return reconciledEventIds;
 }
 
 export async function reconcileHostedStripeEventById(input: {

@@ -14,7 +14,7 @@ import { drainHostedExecutionOutboxBestEffort } from "../hosted-execution/outbox
 import {
   reconcileHostedStripeEventById,
   recordHostedStripeEvent,
-} from "./stripe-event-queue";
+} from "./stripe-event-reconciliation";
 import { drainHostedRevnetIssuanceSubmissionQueue } from "./stripe-revnet-issuance";
 import { assertHostedTelegramWebhookSecret, buildHostedTelegramWebhookEventId, parseHostedTelegramWebhookUpdate } from "./telegram";
 import { runHostedWebhookWithReceipt } from "./webhook-receipts";

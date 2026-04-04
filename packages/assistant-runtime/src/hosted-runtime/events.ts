@@ -1,5 +1,5 @@
 import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
-import { sendAssistantFirstContactWelcome } from "@murphai/assistant-core";
+import { queueAssistantFirstContactWelcome } from "@murphai/assistant-core";
 import {
   assistantGatewayLocalMessageSender,
   assistantGatewayLocalProjectionSourceReader,
@@ -64,7 +64,7 @@ async function handleHostedDispatchEvent(input: {
   switch (dispatch.event.kind) {
     case "member.activated":
       if (dispatch.event.firstContact) {
-        await sendAssistantFirstContactWelcome({
+        await queueAssistantFirstContactWelcome({
           channel: dispatch.event.firstContact.channel,
           identityId: dispatch.event.firstContact.identityId,
           threadId: dispatch.event.firstContact.threadId,

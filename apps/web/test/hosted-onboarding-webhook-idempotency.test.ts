@@ -48,7 +48,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
   resolveHostedLinqDayUtc: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/stripe-event-queue", () => ({
+vi.mock("@/src/lib/hosted-onboarding/stripe-event-reconciliation", () => ({
   reconcileHostedStripeEventById: mocks.reconcileHostedStripeEventById,
   recordHostedStripeEvent: mocks.recordHostedStripeEvent,
 }));
@@ -643,9 +643,6 @@ describe("hosted onboarding webhook retry safety", () => {
       },
       data: {
         channel: "linq",
-        linqChatId: null,
-        linqEventId: null,
-        triggerText: null,
       },
     });
     expect(prisma.hostedInvite.update).toHaveBeenNthCalledWith(2, {
@@ -732,9 +729,6 @@ describe("hosted onboarding webhook retry safety", () => {
       },
       data: {
         channel: "linq",
-        linqChatId: null,
-        linqEventId: null,
-        triggerText: null,
       },
     });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
@@ -1283,12 +1277,9 @@ describe("hosted onboarding webhook retry safety", () => {
       expiresAt: new Date("2026-03-27T12:00:00.000Z"),
       id: "invite_123",
       inviteCode: "join_123",
-      linqChatId: "chat_123",
-      linqEventId: "evt_123",
       memberId: "member_123",
       sentAt: null,
       status: "pending",
-      triggerText: "start murph",
       updatedAt: new Date("2026-03-26T12:00:00.000Z"),
     };
     const prisma = withPrismaTransaction({
@@ -1501,12 +1492,9 @@ describe("hosted onboarding webhook retry safety", () => {
       expiresAt: new Date("2026-03-27T12:00:00.000Z"),
       id: "invite_123",
       inviteCode: "join_123",
-      linqChatId: "chat_123",
-      linqEventId: "evt_123",
       memberId: "member_123",
       sentAt: new Date("2026-03-26T12:00:00.400Z"),
       status: "pending",
-      triggerText: "I want to get healthy",
       updatedAt: new Date("2026-03-26T12:00:00.000Z"),
     };
     const failedReceiptPayload = buildWebhookReceiptPayload({
@@ -1672,12 +1660,9 @@ describe("hosted onboarding webhook retry safety", () => {
       expiresAt: new Date("2026-03-27T12:00:00.000Z"),
       id: "invite_123",
       inviteCode: "join_123",
-      linqChatId: "chat_123",
-      linqEventId: "evt_123",
       memberId: "member_123",
       sentAt: null,
       status: "pending",
-      triggerText: "I want to get healthy",
       updatedAt: new Date("2026-03-26T12:00:00.000Z"),
     };
     let storedReceiptPayload: Record<string, unknown> | null = null;
@@ -1856,12 +1841,9 @@ describe("hosted onboarding webhook retry safety", () => {
       expiresAt: new Date("2026-03-27T12:00:00.000Z"),
       id: "invite_123",
       inviteCode: "join_123",
-      linqChatId: "chat_123",
-      linqEventId: "evt_123",
       memberId: "member_123",
       sentAt: null,
       status: "pending",
-      triggerText: "I want to get healthy",
       updatedAt: new Date("2026-03-26T12:00:00.000Z"),
     };
     let storedReceiptPayload: Record<string, unknown> | null = null;

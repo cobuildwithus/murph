@@ -11,6 +11,7 @@ import { readHostedDeviceSyncEnvironment } from "../device-sync/env";
 import { buildHostedDeviceSyncRuntimeSnapshot } from "../device-sync/internal-runtime";
 import { PrismaDeviceSyncControlPlaneStore } from "../device-sync/prisma-store";
 import { toJsonRecord } from "../device-sync/shared";
+import { buildHostedMemberActivationFirstContact } from "../hosted-onboarding/member-activation";
 import { readHostedWebhookReceiptDispatchByEventId } from "../hosted-onboarding/webhook-receipt-dispatch";
 import { findHostedShareLinkById, readHostedSharePack } from "../hosted-share/shared";
 import { requireHostedExecutionControlClient } from "./control";
@@ -40,6 +41,14 @@ export async function hydrateHostedExecutionDispatch(
     return validateHydratedHostedExecutionDispatch(payload.dispatch, record);
   }
 
+  if (record.eventKind === "member.activated") {
+    return hydrateHostedExecutionDispatchFromMemberActivation(
+      record,
+      prisma,
+      payload.dispatchRef,
+    );
+  }
+
   switch (record.sourceType) {
     case "device_sync_signal":
       return hydrateHostedExecutionDispatchFromDeviceSyncSignal(record, prisma);
@@ -52,26 +61,50 @@ export async function hydrateHostedExecutionDispatch(
     case "hosted_webhook_receipt":
       return hydrateHostedExecutionDispatchFromWebhookReceipt(record, prisma, payload.dispatchRef.occurredAt);
     default:
-      if (record.eventKind === "member.activated") {
-        return validateHydratedHostedExecutionDispatch(
-          {
-            event: {
-              firstContact: null,
-              kind: "member.activated",
-              userId: payload.dispatchRef.userId,
-            },
-            eventId: payload.dispatchRef.eventId,
-            occurredAt: payload.dispatchRef.occurredAt,
-          },
-          record,
-        );
-      }
-
       throw createHostedExecutionHydrationError(
         "HOSTED_EXECUTION_HYDRATION_SOURCE_UNSUPPORTED",
         `Unsupported hosted execution outbox reference source ${record.sourceType} for event ${record.eventId}.`,
       );
   }
+}
+
+async function hydrateHostedExecutionDispatchFromMemberActivation(
+  record: ExecutionOutbox,
+  prisma: HostedExecutionHydrationClient,
+  dispatchRef: HostedExecutionDispatchRef,
+): Promise<HostedExecutionDispatchRequest> {
+  const member = await prisma.hostedMember.findUnique({
+    where: {
+      id: dispatchRef.userId,
+    },
+    select: {
+      linqChatId: true,
+      normalizedPhoneNumber: true,
+    },
+  });
+
+  if (!member) {
+    throw createHostedExecutionHydrationError(
+      "HOSTED_EXECUTION_HYDRATION_SOURCE_MISSING",
+      `Hosted member ${dispatchRef.userId} was not found for activation event ${record.eventId}.`,
+    );
+  }
+
+  return validateHydratedHostedExecutionDispatch(
+    {
+      event: {
+        firstContact: buildHostedMemberActivationFirstContact({
+          linqChatId: member.linqChatId,
+          phoneLookupKey: member.normalizedPhoneNumber,
+        }),
+        kind: "member.activated",
+        userId: dispatchRef.userId,
+      },
+      eventId: dispatchRef.eventId,
+      occurredAt: dispatchRef.occurredAt,
+    },
+    record,
+  );
 }
 
 async function hydrateHostedExecutionDispatchFromWebhookReceipt(
