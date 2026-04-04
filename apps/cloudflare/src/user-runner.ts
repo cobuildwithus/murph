@@ -1,12 +1,10 @@
 import type {
   HostedExecutionBundleRefs,
-  HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   HostedExecutionDispatchResult,
   HostedExecutionDispatchRequest,
   HostedExecutionRunLevel,
   HostedExecutionRunContext,
   HostedExecutionRunPhase,
-  HostedExecutionSharePackResponse,
   HostedExecutionUserEnvStatus,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
@@ -239,19 +237,6 @@ export class HostedUserRunner {
     return (await this.ensureRunnerStores()).crypto.envelope;
   }
 
-  async putDeviceSyncRuntimeSnapshot(input: {
-    snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse;
-  }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse> {
-    const userId = await this.requireBoundUserId();
-    const { crypto } = await this.ensureRunnerStores(userId);
-    return createHostedDeviceSyncRuntimeStore({
-      bucket: this.bucket,
-      key: crypto.rootKey,
-      keyId: crypto.rootKeyId,
-      keysById: crypto.keysById,
-    }).mergeSnapshot(input.snapshot);
-  }
-
   async putPendingUsage(input: {
     usage: readonly Record<string, unknown>[];
   }): Promise<{ recorded: number; usageIds: string[] }> {
@@ -292,23 +277,6 @@ export class HostedUserRunner {
       keysById: crypto.keysById,
     }).deleteUsage({
       usageIds: input.usageIds,
-      userId,
-    });
-  }
-
-  async putSharePack(input: {
-    pack: HostedExecutionSharePackResponse;
-  }): Promise<HostedExecutionSharePackResponse> {
-    const userId = await this.requireBoundUserId();
-    const { crypto } = await this.ensureRunnerStores(userId);
-    const { createHostedSharePackStore } = await import("./share-pack-store.ts");
-    return createHostedSharePackStore({
-      bucket: this.bucket,
-      key: crypto.rootKey,
-      keyId: crypto.rootKeyId,
-      keysById: crypto.keysById,
-    }).writeSharePack({
-      ...input.pack,
       userId,
     });
   }

@@ -6,16 +6,12 @@ import {
   buildHostedExecutionEmailMessageReceivedDispatch,
   buildHostedExecutionGatewayMessageSendDispatch,
   emitHostedExecutionStructuredLog,
-  parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
   parseHostedExecutionDispatchRequest,
   readHostedExecutionSignatureHeaders,
-  parseHostedExecutionSharePackResponse,
   readHostedEmailCapabilities,
   verifyHostedExecutionSignature,
-  type HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   type HostedExecutionDispatchRequest,
   type HostedExecutionDispatchResult,
-  type HostedExecutionSharePackResponse,
   type HostedExecutionUserEnvStatus,
   type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
@@ -110,15 +106,9 @@ interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLike {
   dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus>;
   dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult>;
   getUserEnvStatus(): Promise<HostedExecutionUserEnvStatus>;
-  putDeviceSyncRuntimeSnapshot(input: {
-    snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse;
-  }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
   putPendingUsage(input: {
     usage: readonly Record<string, unknown>[];
   }): Promise<{ recorded: number; usageIds: string[] }>;
-  putSharePack(input: {
-    pack: HostedExecutionSharePackResponse;
-  }): Promise<HostedExecutionSharePackResponse>;
   putUserKeyEnvelope(input: {
     envelope: HostedUserRootKeyEnvelope;
   }): Promise<HostedUserRootKeyEnvelope>;
@@ -240,26 +230,6 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     authorizeBeforeMethod: true,
     authorization: "signed",
     async handle(context, params) {
-      return handleDeviceSyncRuntimeSnapshotRoute(context, params.userId);
-    },
-    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/device-sync\/runtime-snapshot$/u),
-    methods: ["PUT"],
-    wrongMethodResponse: "method-not-allowed",
-  },
-  {
-    authorizeBeforeMethod: true,
-    authorization: "signed",
-    async handle(context, params) {
-      return handleSharePackRoute(context, params.userId, params.shareId);
-    },
-    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/shares\/(?<shareId>[^/]+)\/pack$/u),
-    methods: ["PUT"],
-    wrongMethodResponse: "method-not-allowed",
-  },
-  {
-    authorizeBeforeMethod: true,
-    authorization: "signed",
-    async handle(context, params) {
       return handlePendingUsageRoute(context, params.userId);
     },
     match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/usage\/pending$/u),
@@ -346,12 +316,6 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.upsertUserKeyRecipient(input);
   }
 
-  async putDeviceSyncRuntimeSnapshot(input: {
-    snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse;
-  }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse> {
-    return this.runner.putDeviceSyncRuntimeSnapshot(input);
-  }
-
   async putPendingUsage(input: {
     usage: readonly Record<string, unknown>[];
   }): Promise<{ recorded: number; usageIds: string[] }> {
@@ -364,12 +328,6 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
 
   async deletePendingUsage(input: { usageIds: readonly string[] }): Promise<void> {
     return this.runner.deletePendingUsage(input);
-  }
-
-  async putSharePack(input: {
-    pack: HostedExecutionSharePackResponse;
-  }): Promise<HostedExecutionSharePackResponse> {
-    return this.runner.putSharePack(input);
   }
 
   async dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {
@@ -619,34 +577,6 @@ async function handleUserKeyRecipientRoute(
   });
 
   return json(envelope);
-}
-
-async function handleDeviceSyncRuntimeSnapshotRoute(
-  context: WorkerRouteContext,
-  encodedUserId: string,
-): Promise<Response> {
-  const stub = await resolveUserRunnerStub(context.env, decodeRouteParam(encodedUserId));
-  const snapshot = parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
-    await readCachedJsonObject(context),
-  );
-  return json(await requireGatewayStubMethod(stub, "putDeviceSyncRuntimeSnapshot")({ snapshot }));
-}
-
-async function handleSharePackRoute(
-  context: WorkerRouteContext,
-  encodedUserId: string,
-  encodedShareId: string,
-): Promise<Response> {
-  const userId = decodeRouteParam(encodedUserId);
-  const shareId = decodeRouteParam(encodedShareId);
-  const stub = await resolveUserRunnerStub(context.env, userId);
-  const pack = parseHostedExecutionSharePackResponse(await readCachedJsonObject(context));
-
-  if (pack.shareId !== shareId) {
-    throw new TypeError("shareId path parameter must match the provided share pack payload.");
-  }
-
-  return json(await requireGatewayStubMethod(stub, "putSharePack")({ pack }));
 }
 
 async function handlePendingUsageRoute(

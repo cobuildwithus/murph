@@ -35,6 +35,7 @@ export function buildHostedDeviceSyncWakeDispatchFromSignal(input: {
   eventId: string;
   occurredAt: string;
   provider: string | null;
+  runtimeSnapshot?: HostedExecutionDeviceSyncWakeEvent["runtimeSnapshot"];
   signalKind: string;
   signalPayload?: Record<string, unknown> | null;
   userId: string;
@@ -48,6 +49,7 @@ export function buildHostedDeviceSyncWakeDispatchFromSignal(input: {
     occurredAt: input.occurredAt,
     provider: input.provider,
     reason: mapHostedDeviceSyncWakeReasonFromSignalKind(input.signalKind),
+    ...(input.runtimeSnapshot === undefined ? {} : { runtimeSnapshot: input.runtimeSnapshot }),
     userId: input.userId,
   });
 }

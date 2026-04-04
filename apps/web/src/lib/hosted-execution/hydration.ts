@@ -14,7 +14,6 @@ import { toJsonRecord } from "../device-sync/shared";
 import { buildHostedMemberActivationFirstContact } from "../hosted-onboarding/member-activation";
 import { readHostedWebhookReceiptDispatchByEventId } from "../hosted-onboarding/webhook-receipt-dispatch";
 import { findHostedShareLinkById, readHostedSharePack } from "../hosted-share/shared";
-import { requireHostedExecutionControlClient } from "./control";
 
 type HostedExecutionHydrationClient = PrismaClient;
 
@@ -172,16 +171,13 @@ async function hydrateHostedExecutionDispatchFromHostedShareLink(
   }
 
   const sharePack = readHostedSharePack(shareRecord);
-  await requireHostedExecutionControlClient().putSharePack(record.userId, record.sourceId, {
-    ...sharePack,
-    shareId: record.sourceId,
-  });
 
   return validateHydratedHostedExecutionDispatch(
     {
       event: {
         kind: "vault.share.accepted",
         share: {
+          pack: sharePack.pack,
           shareId: record.sourceId,
         },
         userId: record.userId,
@@ -219,28 +215,22 @@ async function hydrateHostedExecutionDispatchFromDeviceSyncSignal(
     );
   }
 
+  const runtimeSnapshot = await hydrateHostedDeviceSyncRuntimeSnapshot({
+    connectionId: signal.connectionId,
+    prisma,
+    provider: signal.provider,
+    userId: signal.userId,
+  });
   const dispatch = buildHostedDeviceSyncWakeDispatchFromSignal({
     connectionId: signal.connectionId,
     eventId: record.eventId,
     occurredAt: signal.createdAt.toISOString(),
     provider: signal.provider,
+    runtimeSnapshot,
     signalKind: signal.kind,
     signalPayload: toJsonRecord(signal.payloadJson),
     userId: signal.userId,
   });
-
-  if (dispatch.event.kind === "device-sync.wake") {
-    const runtimeSnapshot = await hydrateHostedDeviceSyncRuntimeSnapshot({
-      connectionId: signal.connectionId,
-      prisma,
-      provider: signal.provider,
-      userId: signal.userId,
-    });
-    await requireHostedExecutionControlClient().putDeviceSyncRuntimeSnapshot(
-      signal.userId,
-      runtimeSnapshot,
-    );
-  }
 
   return validateHydratedHostedExecutionDispatch(dispatch, record);
 }
