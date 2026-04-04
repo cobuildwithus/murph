@@ -20,6 +20,9 @@ import {
   saveDefaultVaultConfig,
 } from '@murphai/assistant-core/operator-config'
 import {
+  createProviderTurnAssistantToolCatalog,
+} from '@murphai/assistant-core/assistant-cli-tools'
+import {
   assistantMemoryTurnEnvKeys,
   createAssistantMemoryTurnContextEnv,
   resolveAssistantMemoryStoragePaths,
@@ -1690,6 +1693,49 @@ test.sequential(
   ASSISTANT_CLI_TIMEOUT_MS,
 )
 
+test.sequential(
+  'provider-turn murph.cli.run falls back to the workspace CLI when vault-cli is unavailable on PATH',
+  async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), 'murph-provider-turn-cli-fallback-'))
+    const vaultRoot = path.join(parent, 'vault')
+    cleanupPaths.push(parent)
+
+    await mkdir(vaultRoot, { recursive: true })
+
+    const catalog = createProviderTurnAssistantToolCatalog({
+      cliEnv: {
+        HOME: parent,
+        PATH: '',
+      },
+      vault: vaultRoot,
+      workingDirectory: vaultRoot,
+    })
+
+    const [result] = await catalog.executeCalls({
+      mode: 'apply',
+      calls: [
+        {
+          tool: 'murph.cli.run',
+          input: {
+            args: ['--version'],
+          },
+        },
+      ],
+    })
+
+    assert.equal(result?.status, 'succeeded')
+    const payload = result?.result as {
+      argv?: string[]
+      exitCode?: number
+      stdout?: string
+    }
+    assert.deepEqual(payload?.argv?.slice(0, 1), ['vault-cli'])
+    assert.equal(payload?.exitCode, 0)
+    assert.ok(String(payload?.stdout ?? '').trim().length > 0)
+  },
+  ASSISTANT_CLI_TIMEOUT_MS,
+)
+
 test('root chat alias participates in default-vault injection', () => {
   assert.deepEqual(applyDefaultVaultToArgs(['chat'], '/tmp/default-vault'), [
     'chat',
@@ -1773,6 +1819,10 @@ test('default-vault injection skips incomplete command groups', () => {
     applyDefaultVaultToArgs(['assistant', 'session'], '/tmp/default-vault'),
     ['assistant', 'session'],
   )
+  assert.deepEqual(
+    applyDefaultVaultToArgs(['assistant', 'memory', 'file'], '/tmp/default-vault'),
+    ['assistant', 'memory', 'file'],
+  )
   assert.deepEqual(applyDefaultVaultToArgs(['device'], '/tmp/default-vault'), ['device'])
   assert.deepEqual(applyDefaultVaultToArgs(['wearables'], '/tmp/default-vault'), ['wearables'])
   assert.deepEqual(applyDefaultVaultToArgs(['workout'], '/tmp/default-vault'), ['workout'])
@@ -1788,6 +1838,10 @@ test('default-vault injection skips incomplete command groups', () => {
   assert.deepEqual(
     applyDefaultVaultToArgs(['assistant', 'session', 'list'], '/tmp/default-vault'),
     ['assistant', 'session', 'list', '--vault', '/tmp/default-vault'],
+  )
+  assert.deepEqual(
+    applyDefaultVaultToArgs(['assistant', 'memory', 'file', 'read', 'MEMORY.md'], '/tmp/default-vault'),
+    ['assistant', 'memory', 'file', 'read', 'MEMORY.md', '--vault', '/tmp/default-vault'],
   )
   assert.deepEqual(
     applyDefaultVaultToArgs(['workout', 'format', 'list'], '/tmp/default-vault'),

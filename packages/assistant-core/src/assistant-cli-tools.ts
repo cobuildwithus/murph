@@ -1,9 +1,12 @@
 import { spawn } from 'node:child_process'
-import { mkdir, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import { access, mkdir, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { FOOD_STATUSES, RECIPE_STATUSES } from '@murphai/contracts'
 import { buildSharePackFromVault } from '@murphai/core'
+import { createRequire } from 'node:module'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
 import { prepareAssistantDirectCliEnv } from './assistant-cli-access.js'
 import {
@@ -124,6 +127,16 @@ const assistantToolTextReadChunkBytes = 4_096
 const assistantCliExecutorToolName = 'murph.cli.run'
 const assistantCliDefaultTimeoutMs = 10 * 60 * 1000
 const assistantCliMaxTimeoutMs = 60 * 60 * 1000
+const assistantCliRequire = createRequire(import.meta.url)
+const workspaceCliBinPath = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../cli/src/bin.ts',
+)
+const workspaceTsxBinPath = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../../node_modules/.bin',
+  process.platform === 'win32' ? 'tsx.cmd' : 'tsx',
+)
 const assistantCliBlockedCommandPaths = new Set([
   'assistant ask',
   'assistant chat',
@@ -160,6 +173,11 @@ interface AssistantToolConcernDefinitions {
   canonicalVaultWriteTools: AssistantToolDefinition[]
   outwardSideEffectTools: AssistantToolDefinition[]
   queryAndReadTools: AssistantToolDefinition[]
+}
+
+interface AssistantCliLauncher {
+  argvPrefix: string[]
+  command: string
 }
 
 export function createDefaultAssistantToolCatalog(
@@ -326,8 +344,9 @@ async function executeAssistantCliCommand(input: {
   const timeoutMs = input.timeoutMs ?? assistantCliDefaultTimeoutMs
 
   try {
+    const launcher = await resolveAssistantCliLauncher(env)
     return await new Promise((resolve, reject) => {
-      const child = spawn('vault-cli', cliPayload.args, {
+      const child = spawn(launcher.command, [...launcher.argvPrefix, ...cliPayload.args], {
         cwd: normalizeNullableString(input.input.workingDirectory) ?? process.cwd(),
         env,
         stdio: 'pipe',
@@ -336,8 +355,12 @@ async function executeAssistantCliCommand(input: {
       let stdout = ''
       let stderr = ''
       let settled = false
+      let forceKillTimer: NodeJS.Timeout | null = null
       const timeout = setTimeout(() => {
         child.kill('SIGTERM')
+        forceKillTimer = setTimeout(() => {
+          child.kill('SIGKILL')
+        }, 2_000)
         settle(() => {
           reject(
             new VaultCliError(
@@ -363,6 +386,9 @@ async function executeAssistantCliCommand(input: {
       }
 
       child.on('error', (error) => {
+        if (forceKillTimer !== null) {
+          clearTimeout(forceKillTimer)
+        }
         settle(() => {
           reject(
             new VaultCliError(
@@ -390,6 +416,9 @@ async function executeAssistantCliCommand(input: {
       child.stdin.end(cliPayload.stdinText)
 
       child.on('close', (code, signal) => {
+        if (forceKillTimer !== null) {
+          clearTimeout(forceKillTimer)
+        }
         settle(() => {
           const redactedStdout = redactSensitivePathSegments(stdout.trim())
           const redactedStderr = redactSensitivePathSegments(stderr.trim())
@@ -431,6 +460,110 @@ async function executeAssistantCliCommand(input: {
     if (cliPayload.cleanupPath !== null) {
       await rm(cliPayload.cleanupPath, { force: true, recursive: true })
     }
+  }
+}
+
+async function resolveAssistantCliLauncher(
+  env: NodeJS.ProcessEnv,
+): Promise<AssistantCliLauncher> {
+  const preparedEnv = prepareAssistantDirectCliEnv(env)
+  const vaultCliBinary = await resolveExecutableOnPath(
+    'vault-cli',
+    preparedEnv,
+  )
+  if (vaultCliBinary) {
+    return {
+      argvPrefix: [],
+      command: vaultCliBinary,
+    }
+  }
+
+  const workspaceTsxCliPath = resolveWorkspaceTsxCliPath()
+  if (workspaceTsxCliPath !== null) {
+    return {
+      argvPrefix: [workspaceTsxCliPath, workspaceCliBinPath],
+      command: process.execPath,
+    }
+  }
+
+  if (await isExecutable(workspaceTsxBinPath)) {
+    return {
+      argvPrefix: [workspaceCliBinPath],
+      command: workspaceTsxBinPath,
+    }
+  }
+
+  const pnpmBinary = await resolveExecutableOnPath(
+    'pnpm',
+    preparedEnv,
+  )
+  if (pnpmBinary) {
+    return {
+      argvPrefix: ['exec', 'tsx', workspaceCliBinPath],
+      command: pnpmBinary,
+    }
+  }
+
+  const npxBinary = await resolveExecutableOnPath(
+    'npx',
+    preparedEnv,
+  )
+  if (npxBinary) {
+    return {
+      argvPrefix: ['--yes', 'tsx', workspaceCliBinPath],
+      command: npxBinary,
+    }
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_CLI_COMMAND_FAILED',
+    'Could not resolve `vault-cli` on PATH and no workspace tsx fallback was available.',
+  )
+}
+
+async function resolveExecutableOnPath(
+  command: string,
+  env: NodeJS.ProcessEnv,
+): Promise<string | null> {
+  if (path.isAbsolute(command)) {
+    return (await isExecutable(command)) ? command : null
+  }
+
+  const pathValue = env.PATH ?? process.env.PATH ?? ''
+  const entries = pathValue
+    .split(path.delimiter)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0)
+  const candidates = process.platform === 'win32'
+    ? [command, `${command}.cmd`, `${command}.exe`, `${command}.bat`]
+    : [command]
+
+  for (const entry of entries) {
+    for (const candidate of candidates) {
+      const candidatePath = path.join(entry, candidate)
+      if (await isExecutable(candidatePath)) {
+        return candidatePath
+      }
+    }
+  }
+
+  return null
+}
+
+async function isExecutable(candidatePath: string): Promise<boolean> {
+  try {
+    await access(candidatePath, constants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function resolveWorkspaceTsxCliPath(): string | null {
+  try {
+    return assistantCliRequire.resolve('tsx/cli')
+  } catch {
+    return null
   }
 }
 

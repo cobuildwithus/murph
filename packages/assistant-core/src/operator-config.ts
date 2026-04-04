@@ -177,6 +177,7 @@ const COMMAND_GROUP_PATHS_REQUIRING_SUBCOMMAND = new Set([
   'assistant',
   'assistant cron',
   'assistant memory',
+  'assistant memory file',
   'assistant session',
   'assistant self-target',
   'audit',
