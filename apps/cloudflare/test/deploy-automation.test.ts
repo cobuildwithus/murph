@@ -27,6 +27,7 @@ describe("hosted deploy automation helpers", () => {
       CF_CONTAINER_MAX_INSTANCES: "250",
       CF_RUNNER_COMMIT_TIMEOUT_MS: "45000",
       CF_WORKER_NAME: "hosted-worker",
+      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID: "automation:v2",
       HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
       HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL: "https://api.cloudflare.com/client/v4",
       HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph note",
@@ -115,6 +116,7 @@ describe("hosted deploy automation helpers", () => {
       },
     });
     expect(config.vars.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS).toBe("45000");
+    expect(config.vars.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID).toBe("automation:v2");
     expect(config.vars.MURPH_WEB_FETCH_ENABLED).toBe("true");
     expect(config.vars.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID).toBe("acct_123");
     expect(config.vars.HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL).toBe("https://api.cloudflare.com/client/v4");
@@ -195,8 +197,11 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "email-cf-token",
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
+      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON: "{\"automation:v1\":{}}",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "automation-public-jwk",
       HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: "bundle-key",
+      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON: "{\"v0\":\"old-key\"}",
+      HOSTED_EXECUTION_INTERNAL_TOKENS: "internal-token-a,internal-token-b",
       HOSTED_EXECUTION_SIGNING_SECRET: "signing-secret",
       OPENAI_API_KEY: "sk-user",
       TELEGRAM_BOT_TOKEN: "bot-token",
@@ -205,8 +210,11 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "email-cf-token",
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
+      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON: "{\"automation:v1\":{}}",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "automation-public-jwk",
       HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: "bundle-key",
+      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON: "{\"v0\":\"old-key\"}",
+      HOSTED_EXECUTION_INTERNAL_TOKENS: "internal-token-a,internal-token-b",
       HOSTED_EXECUTION_SIGNING_SECRET: "signing-secret",
       OPENAI_API_KEY: "sk-user",
       TELEGRAM_BOT_TOKEN: "bot-token",
