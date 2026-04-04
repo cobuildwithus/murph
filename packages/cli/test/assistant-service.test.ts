@@ -21,6 +21,7 @@ const serviceMocks = vi.hoisted(() => ({
   deliverAssistantMessageOverBinding: vi.fn(),
   executeAssistantProviderTurnAttempt: vi.fn(),
   executeAssistantProviderTurn: vi.fn(),
+  getAssistantChannelAdapter: vi.fn(),
 }))
 
 vi.mock('@murphai/assistant-core/outbound-channel', async () => {
@@ -45,6 +46,27 @@ vi.mock('@murphai/assistant-core/assistant-provider', async () => {
     executeAssistantProviderTurnAttempt:
       serviceMocks.executeAssistantProviderTurnAttempt,
     executeAssistantProviderTurn: serviceMocks.executeAssistantProviderTurn,
+  }
+})
+
+vi.mock('@murphai/assistant-core/assistant/channel-adapters', async () => {
+  const actual = await vi.importActual<typeof import('@murphai/assistant-core/assistant/channel-adapters')>(
+    '@murphai/assistant-core/assistant/channel-adapters',
+  )
+
+  return {
+    ...actual,
+    getAssistantChannelAdapter: (
+      ...args: Parameters<typeof actual.getAssistantChannelAdapter>
+    ) => {
+      const implementation =
+        serviceMocks.getAssistantChannelAdapter.getMockImplementation()
+      if (implementation) {
+        return serviceMocks.getAssistantChannelAdapter(...args)
+      }
+
+      return actual.getAssistantChannelAdapter(...args)
+    },
   }
 })
 
@@ -103,6 +125,7 @@ beforeEach(() => {
   serviceMocks.deliverAssistantMessageOverBinding.mockReset()
   serviceMocks.executeAssistantProviderTurnAttempt.mockReset()
   serviceMocks.executeAssistantProviderTurn.mockReset()
+  serviceMocks.getAssistantChannelAdapter.mockReset()
   serviceMocks.executeAssistantProviderTurnAttempt.mockImplementation(
     async (...args: Parameters<typeof serviceMocks.executeAssistantProviderTurn>) => {
       try {
@@ -185,10 +208,14 @@ function assertPromptHasFirstTurnCheckInGuidance(
     text,
     /first user message already asks for something concrete/u,
   )
-  assert.match(text, /gradually build the health vault/u)
+  assert.match(text, /Frame onboarding as gradual/u)
   assert.match(
     text,
     /treat that as onboarding context, not as a request to choose priorities or start coaching/u,
+  )
+  assert.match(
+    text,
+    /Broad symptom statements during onboarding also count as context/u,
   )
   assert.match(
     text,
@@ -196,11 +223,19 @@ function assertPromptHasFirstTurnCheckInGuidance(
   )
   assert.match(
     text,
+    /Do not pivot into symptom triage, differential-style questioning, or how to fix the goal unless the user clearly asks for concrete help with that issue/u,
+  )
+  assert.match(
+    text,
     /Keep onboarding brief and orienting\. Do not try to draw the user into a long, drawn-out conversation/u,
   )
   assert.match(
     text,
-    /The purpose of onboarding is just to introduce Murph, explain briefly how it works, and set up a gradual path where the user can share more information over time/u,
+    /The purpose of onboarding is just to introduce Murph, explain how to use it well, and set up a gradual path where the user can share more information over time/u,
+  )
+  assert.match(
+    text,
+    /default to brief usage guidance: explain that they can send things as they happen and Murph can help with logs, patterns, and health questions over time/u,
   )
   assert.match(
     text,
@@ -1670,6 +1705,105 @@ test('sendAssistantMessage writes a system receipt for provider and delivery mil
     receipt.timeline.some((event) => event.kind === 'turn.completed'),
     true,
   )
+})
+
+test('sendAssistantMessage starts and stops typing around provider execution for immediate messaging replies', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-typing-indicator-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  const lifecycle: string[] = []
+  serviceMocks.getAssistantChannelAdapter.mockImplementation(() => ({
+    startTypingIndicator: async (input: {
+      bindingDelivery: { target: string } | null
+      explicitTarget: string | null
+      identityId: string | null
+    }) => {
+      lifecycle.push(
+        `start:${input.bindingDelivery?.target ?? 'null'}:${input.explicitTarget ?? 'null'}:${input.identityId ?? 'null'}`,
+      )
+      return {
+        stop: async () => {
+          lifecycle.push('stop')
+        },
+      }
+    },
+  }))
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async () => {
+    lifecycle.push('provider')
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-typing-1',
+      response: 'Typing reply.',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+  serviceMocks.deliverAssistantMessageOverBinding.mockResolvedValue({
+    delivery: {
+      channel: 'telegram',
+      target: 'telegram-thread-typing',
+      targetKind: 'thread',
+      sentAt: '2026-04-04T04:00:00.000Z',
+      messageLength: 'Typing reply.'.length,
+    },
+    deliveryDeduplicated: false,
+    outboxIntentId: 'outbox_telegram_typing',
+  })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    channel: 'telegram',
+    participantId: 'telegram-user-typing',
+    sourceThreadId: 'telegram-thread-typing',
+    threadIsDirect: true,
+    prompt: 'say hello',
+    deliverResponse: true,
+  })
+
+  assert.deepEqual(lifecycle, [
+    'start:telegram-thread-typing:null:null',
+    'provider',
+    'stop',
+  ])
+})
+
+test('sendAssistantMessage skips typing indicators for queue-only deliveries', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-typing-queue-only-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  serviceMocks.getAssistantChannelAdapter.mockImplementation(() => ({
+    startTypingIndicator: async () => {
+      assert.fail('queue-only delivery should not start a typing indicator')
+    },
+  }))
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-typing-queued',
+    response: 'Queued reply.',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    channel: 'telegram',
+    participantId: 'telegram-user-queued',
+    sourceThreadId: 'telegram-thread-queued',
+    threadIsDirect: true,
+    prompt: 'queue this',
+    deliverResponse: true,
+    deliveryDispatchMode: 'queue-only',
+  })
+
+  assert.equal(serviceMocks.getAssistantChannelAdapter.mock.calls.length, 0)
 })
 
 test('sendAssistantMessage replays the local transcript for OpenAI-compatible sessions and keeps provider session ids local-only', async () => {
