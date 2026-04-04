@@ -23,7 +23,6 @@ import {
   resolveOpenAICompatibleProviderPresetFromId,
   resolveOpenAICompatibleProviderPresetFromProviderName,
 } from './assistant/openai-compatible-provider-presets.js'
-import { isAssistantOpenAIBaseUrl } from './assistant/shared.js'
 import type { AssistantProviderConfigInput } from './assistant/provider-config.js'
 import {
   readOperatorConfig,
@@ -450,13 +449,6 @@ function resolveHostedAssistantSeedPlan(
             `${HOSTED_ASSISTANT_BASE_URL_ENV} must be configured for hosted assistant provider ${providerSelection.label}.`,
             `Named providers like ${HOSTED_ASSISTANT_PROVIDER_ENV}=openai or openrouter set this automatically.`,
           ].join(' '),
-        )
-      }
-
-      if (raw.reasoningEffort && !isAssistantOpenAIBaseUrl(baseUrl)) {
-        throw new HostedAssistantConfigurationError(
-          'HOSTED_ASSISTANT_CONFIG_INVALID',
-          `${HOSTED_ASSISTANT_REASONING_EFFORT_ENV} is supported only for hosted assistants that use the official OpenAI endpoint.`,
         )
       }
 

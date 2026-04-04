@@ -269,7 +269,7 @@ export function supportsAssistantReasoningEffort(
   const normalized = normalizeAssistantProviderConfig(input)
   return (
     normalized.provider === 'codex-cli' ||
-    shouldUseAssistantOpenAIResponsesApi(normalized)
+    normalized.provider === 'openai-compatible'
   )
 }
 
