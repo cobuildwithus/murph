@@ -44,18 +44,6 @@ export function buildHostedWebhookDispatchFromPayload(
     return null;
   }
 
-  if (dispatchRef.eventKind === "member.activated") {
-    return {
-      event: {
-        firstContact: payload.firstContact ?? null,
-        kind: "member.activated",
-        userId: dispatchRef.userId,
-      },
-      eventId: dispatchRef.eventId,
-      occurredAt: dispatchRef.occurredAt,
-    };
-  }
-
   if (dispatchRef.eventKind === "linq.message.received") {
     const linqEvent = toHostedWebhookReceiptRecord(
       payload.linqEvent as Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
