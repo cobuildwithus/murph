@@ -78,6 +78,9 @@ function listZipEntries(zipPath: string) {
 describe('monorepo release flow coverage audit', () => {
   it('exposes root-owned release scripts', () => {
     expect(rootPackageJson.name).toBe('murph-workspace')
+    expect(rootPackageJson.scripts?.build).toContain('pnpm -r --sort')
+    expect(rootPackageJson.scripts?.build).toContain('--workspace-concurrency=${MURPH_BUILD_WORKSPACE_CONCURRENCY:-4}')
+    expect(rootPackageJson.scripts?.build).toContain("--filter './packages/**' build")
     expect(rootPackageJson.scripts?.['changelog:update']).toBe('bash scripts/update-changelog.sh')
     expect(rootPackageJson.scripts?.['release:notes']).toBe('bash scripts/generate-release-notes.sh')
     expect(rootPackageJson.scripts?.['release:check']).toBe('bash scripts/release-check.sh')
@@ -193,27 +196,27 @@ describe('monorepo release flow coverage audit', () => {
     }
   })
 
-  it('keeps release:check ordered around install, build, repo verification, target validation, and pnpm pack', () => {
+  it('keeps release:check focused on release guards plus typecheck and coverage verification', () => {
     const releaseCheck = readFileSync(
       path.join(repoRoot, 'scripts', 'release-check.sh'),
       'utf8',
     )
 
-    const expectedOrder = [
-      'pnpm install --frozen-lockfile',
-      'pnpm build',
-      'pnpm verify:repo',
-      'node scripts/verify-release-target.mjs',
-      'node scripts/pack-publishables.mjs',
-    ]
+    expect(releaseCheck).toContain('bash -n scripts/release-check.sh scripts/release.sh scripts/update-changelog.sh scripts/generate-release-notes.sh')
+    expect(releaseCheck).toContain('node scripts/verify-release-target.mjs')
+    expect(releaseCheck).toContain('corepack pnpm typecheck')
+    expect(releaseCheck).toContain('corepack pnpm test:coverage')
+    expect(releaseCheck).not.toContain('pnpm install --frozen-lockfile')
+    expect(releaseCheck).not.toContain('pnpm build')
+    expect(releaseCheck).not.toContain('pnpm verify:repo')
+    expect(releaseCheck).not.toContain('--out-dir "$temp_dir/tarballs"')
 
-    let previousIndex = -1
-    for (const token of expectedOrder) {
-      const nextIndex = releaseCheck.indexOf(token)
-      expect(nextIndex, `missing ${token}`).toBeGreaterThan(-1)
-      expect(nextIndex, `${token} out of order`).toBeGreaterThan(previousIndex)
-      previousIndex = nextIndex
-    }
+    expect(releaseCheck.indexOf('node scripts/verify-release-target.mjs')).toBeLessThan(
+      releaseCheck.indexOf('corepack pnpm typecheck'),
+    )
+    expect(releaseCheck.indexOf('corepack pnpm typecheck')).toBeLessThan(
+      releaseCheck.indexOf('corepack pnpm test:coverage'),
+    )
   })
 
   it('verifies the live release manifest and publish set', () => {
