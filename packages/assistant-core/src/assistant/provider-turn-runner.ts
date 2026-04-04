@@ -8,7 +8,7 @@ import {
   resolveAssistantCliAccessContext,
 } from '../assistant-cli-access.js'
 import {
-  createDefaultAssistantToolCatalog,
+  createProviderTurnAssistantToolCatalog,
 } from '../assistant-cli-tools.js'
 import {
   executeAssistantProviderTurnAttempt,
@@ -79,15 +79,6 @@ interface AssistantRouteTurnPlan {
   workingDirectory: string
 }
 
-const requiredAssistantKnowledgeTools = [
-  'assistant.knowledge.search',
-  'assistant.knowledge.get',
-  'assistant.knowledge.list',
-  'assistant.knowledge.upsert',
-  'assistant.knowledge.lint',
-  'assistant.knowledge.rebuildIndex',
-] as const
-
 export interface ExecutedAssistantProviderTurnResult
   extends AssistantProviderTurnExecutionResult {
   attemptCount: number
@@ -108,7 +99,7 @@ interface AssistantProviderTurnExecutionPlan {
   primaryRoute: ResolvedAssistantFailoverRoute | null
   routes: readonly ResolvedAssistantFailoverRoute[]
   sharedPlan: AssistantTurnSharedPlan
-  toolCatalog: ReturnType<typeof createDefaultAssistantToolCatalog>
+  toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
   turnId: string
 }
 
@@ -230,13 +221,14 @@ function buildAssistantProviderTurnExecutionPlan(input: {
   turnId: string
 }): AssistantProviderTurnExecutionPlan {
   const executionContext = normalizeAssistantExecutionContext(input.input.executionContext)
-  const toolCatalog = createDefaultAssistantToolCatalog({
+  const toolCatalog = createProviderTurnAssistantToolCatalog({
     allowSensitiveHealthContext: input.plan.allowSensitiveHealthContext,
     executionContext,
     requestId: input.turnId,
     sessionId: input.resolvedSession.sessionId,
     vault: input.input.vault,
     vaultServices: createIntegratedVaultServices(),
+    workingDirectory: input.plan.requestedWorkingDirectory,
   })
 
   return {
@@ -298,9 +290,8 @@ async function resolveAssistantRouteTurnPlan(input: {
   route: ResolvedAssistantFailoverRoute
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
-  toolCatalog: ReturnType<typeof createDefaultAssistantToolCatalog>
+  toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
 }): Promise<AssistantRouteTurnPlan> {
-  assertRequiredAssistantKnowledgeTools(input.toolCatalog)
   const workingDirectory = input.sharedPlan.requestedWorkingDirectory
   const activeProviderBinding = readAssistantProviderBinding(input.session)
   const resumeProviderBinding = resolveAssistantResumeBinding({
@@ -329,24 +320,24 @@ async function resolveAssistantRouteTurnPlan(input: {
     }),
     input.input.prompt,
   )
-  const assistantMemoryPrompt =
-    true
-    ? await loadAssistantMemoryPromptBlock({
-        includeSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
-        vault: input.input.vault,
-      })
-    : null
   const assistantMemoryPaths = resolveAssistantMemoryStoragePaths(input.input.vault)
-  const assistantStateToolsAvailable = input.toolCatalog.hasTool('assistant.state.show')
-  const assistantMemoryRecallToolsAvailable =
-    input.toolCatalog.hasTool('assistant.memory.search') &&
-    input.toolCatalog.hasTool('assistant.memory.get')
+  const assistantCliExecutorAvailable =
+    input.route.provider === 'openai-compatible' && input.toolCatalog.hasTool('murph.cli.run')
+  const assistantStateToolsAvailable = assistantCliExecutorAvailable
+  const assistantMemoryRecallToolsAvailable = assistantCliExecutorAvailable
+  const assistantMemoryPrompt =
+    !assistantMemoryRecallToolsAvailable || input.session.turnCount === 0
+      ? await loadAssistantMemoryPromptBlock({
+          includeSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
+          vault: input.input.vault,
+        })
+      : null
   const assistantMemoryAppendToolAvailable =
     input.toolCatalog.hasTool('assistant.memory.file.append')
   const assistantMemoryFileEditToolsAvailable =
     input.toolCatalog.hasTool('assistant.memory.file.read') &&
     input.toolCatalog.hasTool('assistant.memory.file.write')
-  const assistantCronToolsAvailable = input.toolCatalog.hasTool('assistant.cron.status')
+  const assistantCronToolsAvailable = assistantCliExecutorAvailable
 
   return {
     cliEnv: input.sharedPlan.cliAccess.env,
@@ -362,6 +353,7 @@ async function resolveAssistantRouteTurnPlan(input: {
     workingDirectory,
     systemPrompt: buildAssistantSystemPrompt({
       allowSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
+      assistantCliExecutorAvailable,
       assistantMemoryAppendToolAvailable,
       assistantStateToolsAvailable,
       assistantCronToolsAvailable,
@@ -375,21 +367,6 @@ async function resolveAssistantRouteTurnPlan(input: {
       firstTurnCheckIn: shouldInjectFirstTurnCheckIn,
     }),
   }
-}
-
-function assertRequiredAssistantKnowledgeTools(
-  toolCatalog: ReturnType<typeof createDefaultAssistantToolCatalog>,
-): void {
-  const missingTools = requiredAssistantKnowledgeTools.filter(
-    (toolName) => !toolCatalog.hasTool(toolName),
-  )
-  if (missingTools.length === 0) {
-    return
-  }
-
-  throw new Error(
-    `Assistant provider turns require the full knowledge tool surface. Missing: ${missingTools.join(', ')}`,
-  )
 }
 
 async function executeAssistantProviderAttempt(input: {

@@ -173,9 +173,9 @@ function assertPromptHasSelectiveMemoryGuidance(
   systemPrompt: string | null | undefined,
 ): void {
   const text = systemPrompt ?? ''
-  assert.match(
-    text,
-    /Search assistant memory only when .*prior preferences.*ongoing goals.*earlier plans/u,
+  assert.ok(
+    /Search assistant memory only when .*prior preferences.*ongoing goals.*earlier plans/u.test(text) ||
+      /When prior continuity would matter and you cannot search memory in this session/u.test(text),
   )
   assert.match(text, /Use assistant memory lightly and selectively/u)
   assert.match(
@@ -186,9 +186,11 @@ function assertPromptHasSelectiveMemoryGuidance(
     text,
     /Do not search or write assistant memory solely because this is the first chat turn/u,
   )
-  assert.match(
-    text,
-    /durable fact .* likely to help later conversations/u,
+  assert.ok(
+    /durable fact .* likely to help later conversations/u.test(text) ||
+      /Do not claim you updated assistant memory in this session unless a real memory-file edit happened/u.test(
+        text,
+      ),
   )
 }
 
@@ -682,14 +684,17 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, sh
     /This assistant runtime is for Murph vault and assistant operations, not repo coding work/u,
   )
   assert.match(firstCall?.systemPrompt ?? '', /This assistant runtime is for Murph vault and assistant operations, not repo coding work/u)
-  assert.match(firstCall?.systemPrompt ?? '', /bound Murph tools that are actually exposed in this session/u)
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /Inspect or change Murph vault\/runtime state through `vault-cli` semantics when the direct CLI executor is unavailable/u,
+  )
   assert.match(firstCall?.systemPrompt ?? '', /Start with the user's concrete ask and the smallest relevant context/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
     /Treat capture-style requests such as meal logging, journal updates, or an explicit "add this" request as permission/u,
   )
-  assert.match(firstCall?.systemPrompt ?? '', /vault\.show/u)
-  assert.match(firstCall?.systemPrompt ?? '', /vault\.list/u)
+  assert.match(firstCall?.systemPrompt ?? '', /vault-cli show/u)
+  assert.match(firstCall?.systemPrompt ?? '', /vault-cli list/u)
   assert.match(firstCall?.systemPrompt ?? '', /vault\.fs\.readText/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
@@ -737,22 +742,13 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, sh
   assert.match(firstCall?.systemPrompt ?? '', /vault-cli deepthink <prompt>/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
-    /assistant\.state\.(show|list)/u,
+    /vault-cli assistant state list\|show\|put\|patch\|delete/u,
   )
   assert.match(firstCall?.systemPrompt ?? '', /non-canonical runtime scratchpads/u)
   assertPromptHasSelectiveMemoryGuidance(firstCall?.systemPrompt)
   assert.match(
     firstCall?.systemPrompt ?? '',
     /Before asking again for a stable preference, standing instruction, or recurring context, search assistant memory first/u,
-  )
-  assert.match(
-    firstCall?.systemPrompt ?? '',
-    /direct Markdown memory-file edit tools are exposed in this session/u,
-  )
-  assert.match(firstCall?.systemPrompt ?? '', /assistant\.memory\.file\.append/u)
-  assert.match(
-    firstCall?.systemPrompt ?? '',
-    /Treat `assistant\.memory\.file\.write` as dangerous/u,
   )
   assert.match(
     firstCall?.systemPrompt ?? '',
@@ -766,7 +762,7 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, sh
     firstCall?.systemPrompt ?? '',
     /edit or remove the stale bullet directly instead of appending a contradiction/u,
   )
-  assert.match(firstCall?.systemPrompt ?? '', /assistant cron add/u)
+  assert.match(firstCall?.systemPrompt ?? '', /vault-cli assistant cron \.\.\./u)
   assert.match(firstCall?.systemPrompt ?? '', /assistant cron preset install/u)
   assert.match(firstCall?.systemPrompt ?? '', /Prefer digest-style or summary-style automation over nagging coaching/u)
   assert.match(firstCall?.systemPrompt ?? '', /assistant run/u)
@@ -782,12 +778,18 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, sh
   assert.equal(turnContext?.vault, path.resolve(vaultRoot))
   assert.equal(turnContext?.sourcePrompt, 'Inspect the vault with the CLI.')
   assert.equal(turnContext?.provenance.sessionId?.startsWith('asst_'), true)
-  assert.match(firstCall?.systemPrompt ?? '', /Assistant state tools are exposed in this session/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
-    /Assistant memory recall tools and direct Markdown memory-file edit tools are exposed in this session/u,
+    /Assistant state commands are not exposed in this session/u,
   )
-  assert.match(firstCall?.systemPrompt ?? '', /Scheduled assistant automation tools are exposed in this session/u)
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /Assistant memory recall commands are not exposed in this session/u,
+  )
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /Scheduled assistant automation commands are not exposed in this session/u,
+  )
   assert.equal(firstCall?.toolRuntime?.vault, vaultRoot)
   assert.equal(
     String(firstCall?.env?.PATH ?? '').split(path.delimiter)[0],
@@ -1995,14 +1997,17 @@ test('sendAssistantMessage replays the local transcript for OpenAI-compatible se
     assert.equal(secondCall?.provider, 'openai-compatible')
     assert.match(firstCall?.systemPrompt ?? '', /You are Murph/u)
     assert.match(secondCall?.systemPrompt ?? '', /You are Murph/u)
-    assert.match(firstCall?.systemPrompt ?? '', /Assistant state tools are exposed in this session/u)
     assert.match(
       firstCall?.systemPrompt ?? '',
-      /Assistant memory recall tools and direct Markdown memory-file edit tools are exposed in this session/u,
+      /Assistant state commands are exposed in this session through `murph\.cli\.run`/u,
     )
     assert.match(
       firstCall?.systemPrompt ?? '',
-      /Scheduled assistant automation tools are exposed in this session/u,
+      /Assistant memory recall commands and direct Markdown memory-file edit tools are exposed in this session/u,
+    )
+    assert.match(
+      firstCall?.systemPrompt ?? '',
+      /Scheduled assistant automation commands are exposed in this session through `murph\.cli\.run`/u,
     )
     assert.match(
       firstCall?.systemPrompt ?? '',
@@ -2072,7 +2077,7 @@ test('sendAssistantMessage replays the local transcript for OpenAI-compatible se
   }
 })
 
-test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the full Murph tool catalog', async () => {
+test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the CLI-first Murph tool catalog', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-openai-auto-reply-tools-'))
   const homeRoot = path.join(parent, 'home')
   const vaultRoot = path.join(parent, 'vault')
@@ -2111,25 +2116,27 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the full Mur
       | undefined
 
     assert.equal(providerCall?.provider, 'openai-compatible')
+    assert.equal(toolCatalog?.hasTool('murph.cli.run'), true)
     assert.equal(toolCatalog?.hasTool('vault.fs.readText'), true)
-    assert.equal(toolCatalog?.hasTool('assistant.state.show'), true)
-    assert.equal(toolCatalog?.hasTool('assistant.memory.search'), true)
-    assert.equal(toolCatalog?.hasTool('assistant.memory.get'), true)
+    assert.equal(toolCatalog?.hasTool('assistant.state.show'), false)
+    assert.equal(toolCatalog?.hasTool('assistant.memory.search'), false)
+    assert.equal(toolCatalog?.hasTool('assistant.memory.get'), false)
     assert.equal(toolCatalog?.hasTool('assistant.memory.file.read'), true)
     assert.equal(toolCatalog?.hasTool('assistant.memory.file.append'), true)
     assert.equal(toolCatalog?.hasTool('assistant.memory.file.write'), true)
     assert.equal(toolCatalog?.hasTool('assistant.memory.upsert'), false)
     assert.equal(toolCatalog?.hasTool('assistant.memory.forget'), false)
-    assert.equal(toolCatalog?.hasTool('assistant.knowledge.search'), true)
-    assert.equal(toolCatalog?.hasTool('assistant.knowledge.get'), true)
-    assert.equal(toolCatalog?.hasTool('assistant.knowledge.list'), true)
-    assert.equal(toolCatalog?.hasTool('assistant.knowledge.upsert'), true)
-    assert.equal(toolCatalog?.hasTool('assistant.knowledge.lint'), true)
-    assert.equal(toolCatalog?.hasTool('assistant.knowledge.rebuildIndex'), true)
-    assert.equal(toolCatalog?.hasTool('assistant.cron.status'), true)
-    assert.equal(toolCatalog?.hasTool('assistant.selfTarget.list'), true)
-    assert.equal(toolCatalog?.hasTool('vault.show'), true)
-    assert.equal(toolCatalog?.hasTool('vault.journal.append'), true)
+    assert.equal(toolCatalog?.hasTool('assistant.knowledge.search'), false)
+    assert.equal(toolCatalog?.hasTool('assistant.knowledge.get'), false)
+    assert.equal(toolCatalog?.hasTool('assistant.knowledge.list'), false)
+    assert.equal(toolCatalog?.hasTool('assistant.knowledge.upsert'), false)
+    assert.equal(toolCatalog?.hasTool('assistant.knowledge.lint'), false)
+    assert.equal(toolCatalog?.hasTool('assistant.knowledge.rebuildIndex'), false)
+    assert.equal(toolCatalog?.hasTool('assistant.cron.status'), false)
+    assert.equal(toolCatalog?.hasTool('assistant.selfTarget.list'), false)
+    assert.equal(toolCatalog?.hasTool('vault.show'), false)
+    assert.equal(toolCatalog?.hasTool('vault.journal.append'), false)
+    assert.match(providerCall?.systemPrompt ?? '', /murph\.cli\.run/u)
     assert.match(
       providerCall?.systemPrompt ?? '',
       /assistant\.memory\.file\.append/u,
@@ -2144,19 +2151,19 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the full Mur
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
-      /Assistant memory recall tools and direct Markdown memory-file edit tools are exposed in this session/u,
+      /Assistant memory recall commands and direct Markdown memory-file edit tools are exposed in this session/u,
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
-      /Scheduled assistant automation tools are exposed in this session/u,
+      /Scheduled assistant automation commands are exposed in this session through `murph\.cli\.run`/u,
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
-      /assistant\.knowledge\.search/u,
+      /vault-cli knowledge search\|show\|list\|upsert\|lint\|index rebuild/u,
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
-      /assistant\.knowledge\.upsert/u,
+      /vault-cli knowledge upsert/u,
     )
     assert.doesNotMatch(
       providerCall?.systemPrompt ?? '',
@@ -2181,20 +2188,19 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the full Mur
           },
         },
         {
-          tool: 'assistant.state.put',
+          tool: 'murph.cli.run',
           input: {
-            docId: 'automation/reply-check',
-            value: {
+            args: ['assistant', 'state', 'put', 'automation/reply-check', '--input', '-'],
+            stdin: JSON.stringify({
               lastReply: 'auto-reply',
               source: 'auto-reply',
-            },
+            }),
           },
         },
         {
-          tool: 'vault.journal.append',
+          tool: 'murph.cli.run',
           input: {
-            date: '2026-03-31',
-            text: 'Auto-reply mutation proof.',
+            args: ['journal', 'append', '2026-03-31', '--text', 'Auto-reply mutation proof.'],
           },
         },
         {
@@ -2240,46 +2246,46 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the full Mur
       mode: 'apply',
       calls: [
         {
-          tool: 'assistant.memory.search',
+          tool: 'murph.cli.run',
           input: {
-            text: 'Alex',
-            limit: 5,
+            args: ['assistant', 'memory', 'search', '--text', 'Alex', '--limit', '5'],
           },
         },
         {
-          tool: 'assistant.memory.search',
+          tool: 'murph.cli.run',
           input: {
-            text: 'Auto-reply context note',
-            limit: 5,
+            args: ['assistant', 'memory', 'search', '--text', 'Auto-reply context note', '--limit', '5'],
           },
         },
       ],
     })
     const longTermHit = (
-      (searchResults[0]?.result as { results?: Array<{ id?: string; sourcePath?: string }> } | undefined)
-        ?.results ?? []
+      (((searchResults[0]?.result as { json?: { results?: Array<{ id?: string; sourcePath?: string }> } } | undefined)
+        ?.json?.results) ?? [])
     )[0]
     const dailyHit = (
-      (searchResults[1]?.result as { results?: Array<{ sourcePath?: string }> } | undefined)
-        ?.results ?? []
+      (((searchResults[1]?.result as { json?: { results?: Array<{ sourcePath?: string }> } } | undefined)
+        ?.json?.results) ?? [])
     )[0]
-    assert.equal(longTermHit?.sourcePath, 'MEMORY.md')
-    assert.equal(dailyHit?.sourcePath, 'memory/2026-03-31.md')
+    assert.match(longTermHit?.sourcePath ?? '', /(?:^|\/)MEMORY\.md$/u)
+    assert.match(dailyHit?.sourcePath ?? '', /(?:^|\/)memory\/2026-03-31\.md$/u)
     const memoryGetResults = await toolCatalog!.executeCalls({
       mode: 'apply',
       calls: longTermHit && 'id' in longTermHit
         ? [
             {
-              tool: 'assistant.memory.get',
+              tool: 'murph.cli.run',
               input: {
-                id: longTermHit.id,
+                args: ['assistant', 'memory', 'get', longTermHit.id],
               },
             },
           ]
         : [],
     })
-    const fetchedMemory = memoryGetResults[0]?.result as { sourcePath?: string } | undefined
-    assert.equal(fetchedMemory?.sourcePath, 'MEMORY.md')
+    const fetchedMemory = (memoryGetResults[0]?.result as {
+      json?: { memory?: { sourcePath?: string } }
+    } | undefined)?.json?.memory
+    assert.match(fetchedMemory?.sourcePath ?? '', /(?:^|\/)MEMORY\.md$/u)
 
     const stateSnapshot = await getAssistantStateDocument({
       vault: vaultRoot,
@@ -2291,10 +2297,14 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the full Mur
       source: 'auto-reply',
     })
 
-    const journalRelativePath = toolResults[3]?.result?.journalPath
+    const journalRelativePath = (toolResults[3]?.result as {
+      json?: { journalPath?: string }
+    } | undefined)?.json?.journalPath
     assert.equal(typeof journalRelativePath, 'string')
     const journalMarkdown = await readFile(
-      path.join(vaultRoot, journalRelativePath as string),
+      path.isAbsolute(journalRelativePath as string)
+        ? (journalRelativePath as string)
+        : path.join(vaultRoot, journalRelativePath as string),
       'utf8',
     )
     assert.match(journalMarkdown, /Auto-reply mutation proof\./u)
@@ -2340,15 +2350,15 @@ test('sendAssistantMessage lets Codex auto-reply turns use the full Murph runtim
     assert.equal(providerCall?.toolRuntime?.vault, vaultRoot)
     assert.match(
       providerCall?.systemPrompt ?? '',
-      /Assistant state tools are exposed in this session/u,
+      /Assistant state commands are not exposed in this session/u,
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
-      /Assistant memory recall tools and direct Markdown memory-file edit tools are exposed in this session/u,
+      /Assistant memory recall commands are not exposed in this session/u,
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
-      /Scheduled assistant automation tools are exposed in this session/u,
+      /Scheduled assistant automation commands are not exposed in this session/u,
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
