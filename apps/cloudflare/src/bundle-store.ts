@@ -11,7 +11,12 @@ import {
   buildHostedStorageAad,
   deriveHostedStorageOpaqueId,
 } from "./crypto-context.js";
-import { listHostedStorageObjectKeys } from "./storage-paths.js";
+import {
+  hostedArtifactObjectKey,
+  hostedArtifactObjectKeys,
+  hostedUserEnvObjectKey,
+  hostedUserEnvObjectKeys,
+} from "./storage-paths.js";
 import {
   readEncryptedR2Payload,
   writeEncryptedR2Payload,
@@ -193,13 +198,23 @@ export function createHostedArtifactStore(input: {
         return;
       }
 
-      for (const key of await artifactObjectKeys(input.key, input.keysById, input.userId, sha256)) {
+      for (const key of await hostedArtifactObjectKeys(
+        input.key,
+        input.keysById,
+        input.userId,
+        sha256,
+      )) {
         await input.bucket.delete(key);
       }
     },
 
     async readArtifact(sha256) {
-      for (const key of await artifactObjectKeys(input.key, input.keysById, input.userId, sha256)) {
+      for (const key of await hostedArtifactObjectKeys(
+        input.key,
+        input.keysById,
+        input.userId,
+        sha256,
+      )) {
         const payload = await readEncryptedR2Payload({
           aad: buildHostedStorageAad({
             key,
@@ -224,7 +239,7 @@ export function createHostedArtifactStore(input: {
     },
 
     async writeArtifact(sha256, plaintext) {
-      const key = await artifactObjectKey(input.key, input.userId, sha256);
+      const key = await hostedArtifactObjectKey(input.key, input.userId, sha256);
       await assertHostedArtifactHash(plaintext, sha256);
       await writeEncryptedR2Payload({
         aad: buildHostedStorageAad({
@@ -256,13 +271,13 @@ export function createHostedUserEnvStore(input: {
         return;
       }
 
-      for (const key of await userEnvObjectKeys(input.key, input.keysById, userId)) {
+      for (const key of await hostedUserEnvObjectKeys(input.key, input.keysById, userId)) {
         await input.bucket.delete(key);
       }
     },
 
     async readUserEnv(userId) {
-      for (const key of await userEnvObjectKeys(input.key, input.keysById, userId)) {
+      for (const key of await hostedUserEnvObjectKeys(input.key, input.keysById, userId)) {
         const payload = await readEncryptedR2Payload({
           aad: buildHostedStorageAad({
             key,
@@ -286,7 +301,7 @@ export function createHostedUserEnvStore(input: {
     },
 
     async writeUserEnv(userId, plaintext) {
-      const key = await userEnvObjectKey(input.key, userId);
+      const key = await hostedUserEnvObjectKey(input.key, userId);
       await writeEncryptedR2Payload({
         aad: buildHostedStorageAad({
           key,
@@ -323,37 +338,7 @@ function pendingBundleRefKey(kind: HostedExecutionBundleKind): string {
   return `pending/${kind}/candidate`;
 }
 
-export async function artifactObjectKey(
-  rootKey: Uint8Array,
-  userId: string,
-  sha256: string,
-): Promise<string> {
-  const userSegment = await deriveHostedStorageOpaqueId({
-    length: 24,
-    rootKey,
-    scope: "artifact-path",
-    value: `user:${userId}`,
-  });
-  const artifactSegment = await deriveHostedStorageOpaqueId({
-    length: 48,
-    rootKey,
-    scope: "artifact-path",
-    value: `artifact:${userId}:${sha256}`,
-  });
-
-  return `users/artifacts/${userSegment}/${artifactSegment}.artifact.bin`;
-}
-
-async function artifactObjectKeys(
-  rootKey: Uint8Array,
-  keysById: Readonly<Record<string, Uint8Array>> | undefined,
-  userId: string,
-  sha256: string,
-): Promise<string[]> {
-  return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
-    artifactObjectKey(candidateRootKey, userId, sha256)
-  );
-}
+export { hostedArtifactObjectKey as artifactObjectKey } from "./storage-paths.js";
 
 function inferBundleKindFromKey(key: string): HostedExecutionBundleKind {
   if (key.startsWith("bundles/vault/")) {
@@ -383,27 +368,6 @@ function assertHostedBundleMatchesRef(
       `Hosted bundle ${ref.key} hash mismatch: expected ${ref.hash}, got ${actualHash}.`,
     );
   }
-}
-
-async function userEnvObjectKey(rootKey: Uint8Array, userId: string): Promise<string> {
-  const userSegment = await deriveHostedStorageOpaqueId({
-    length: 24,
-    rootKey,
-    scope: "user-env-path",
-    value: `user:${userId}`,
-  });
-
-  return `users/env/${userSegment}.json`;
-}
-
-async function userEnvObjectKeys(
-  rootKey: Uint8Array,
-  keysById: Readonly<Record<string, Uint8Array>> | undefined,
-  userId: string,
-): Promise<string[]> {
-  return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
-    userEnvObjectKey(candidateRootKey, userId)
-  );
 }
 
 async function assertHostedArtifactHash(plaintext: Uint8Array, expectedSha256: string): Promise<void> {

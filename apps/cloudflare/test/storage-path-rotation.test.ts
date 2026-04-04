@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { createHostedUserEnvStore } from "../src/bundle-store.js";
+import { mapHostedExecutionBundleSlots } from "@murphai/hosted-execution";
+
+import {
+  createHostedArtifactStore,
+  createHostedUserEnvStore,
+} from "../src/bundle-store.js";
 import { createHostedDispatchPayloadStore } from "../src/dispatch-payload-store.js";
+import { createHostedExecutionJournalStore } from "../src/execution-journal.js";
 import { readHostedEmailRawMessage, writeHostedEmailRawMessage } from "../src/hosted-email.js";
 
 import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers";
@@ -32,6 +38,93 @@ describe("opaque storage path rotation", () => {
 
     await rotatedStore.clearUserEnv(userId);
     expect(await rotatedStore.readUserEnv(userId)).toBeNull();
+    expect(bucket.deleted.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("keeps per-user artifacts readable and deletable across bundle-key rotation", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const oldKey = createTestRootKey(11);
+    const nextKey = createTestRootKey(12);
+    const userId = "user_live_artifact";
+    const plaintext = new TextEncoder().encode("artifact payload");
+    const digest = new Uint8Array(
+      await crypto.subtle.digest(
+        "SHA-256",
+        plaintext.buffer.slice(
+          plaintext.byteOffset,
+          plaintext.byteOffset + plaintext.byteLength,
+        ) as ArrayBuffer,
+      ),
+    );
+    const sha256 = [...digest]
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+
+    await createHostedArtifactStore({
+      bucket,
+      key: oldKey,
+      keyId: "old",
+      keysById: { old: oldKey },
+      userId,
+    }).writeArtifact(sha256, plaintext);
+
+    const rotatedStore = createHostedArtifactStore({
+      bucket,
+      key: nextKey,
+      keyId: "next",
+      keysById: { next: nextKey, old: oldKey },
+      userId,
+    });
+
+    expect(await rotatedStore.readArtifact(sha256)).toEqual(plaintext);
+    await rotatedStore.deleteArtifact(sha256);
+    expect(await rotatedStore.readArtifact(sha256)).toBeNull();
+    expect(bucket.deleted.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("keeps execution journals readable and deletable across bundle-key rotation", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const oldKey = createTestRootKey(13);
+    const nextKey = createTestRootKey(14);
+    const userId = "user_live_journal";
+    const eventId = "evt_rotate_123";
+
+    await createHostedExecutionJournalStore({
+      bucket,
+      key: oldKey,
+      keyId: "old",
+      keysById: { old: oldKey },
+    }).writeCommittedResult(userId, eventId, {
+      bundleRefs: mapHostedExecutionBundleSlots(() => null),
+      committedAt: "2026-04-04T00:00:00.000Z",
+      eventId,
+      finalizedAt: null,
+      gatewayProjectionSnapshot: null,
+      result: {
+        eventsHandled: 1,
+        summary: "ok",
+      },
+      sideEffects: [],
+      userId,
+    });
+
+    const rotatedStore = createHostedExecutionJournalStore({
+      bucket,
+      key: nextKey,
+      keyId: "next",
+      keysById: { next: nextKey, old: oldKey },
+    });
+
+    expect(await rotatedStore.readCommittedResult(userId, eventId)).toMatchObject({
+      eventId,
+      result: {
+        eventsHandled: 1,
+        summary: "ok",
+      },
+      userId,
+    });
+    await rotatedStore.deleteCommittedResult(userId, eventId);
+    expect(await rotatedStore.readCommittedResult(userId, eventId)).toBeNull();
     expect(bucket.deleted.length).toBeGreaterThanOrEqual(1);
   });
 

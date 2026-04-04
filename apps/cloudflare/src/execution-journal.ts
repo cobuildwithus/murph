@@ -26,9 +26,11 @@ import {
 } from "./bundle-store.js";
 import {
   buildHostedStorageAad,
-  deriveHostedStorageOpaqueId,
 } from "./crypto-context.js";
-import { listHostedStorageObjectKeys } from "./storage-paths.js";
+import {
+  hostedExecutionJournalObjectKey,
+  hostedExecutionJournalObjectKeys,
+} from "./storage-paths.js";
 import { readEncryptedR2Json, writeEncryptedR2Json } from "./crypto.js";
 
 export interface HostedExecutionRunnerCommitRequest {
@@ -76,13 +78,23 @@ export function createHostedExecutionJournalStore(input: {
         return;
       }
 
-      for (const key of await committedResultObjectKeys(input.key, input.keysById, userId, eventId)) {
+      for (const key of await hostedExecutionJournalObjectKeys(
+        input.key,
+        input.keysById,
+        userId,
+        eventId,
+      )) {
         await input.bucket.delete(key);
       }
     },
 
     async readCommittedResult(userId, eventId) {
-      for (const key of await committedResultObjectKeys(input.key, input.keysById, userId, eventId)) {
+      for (const key of await hostedExecutionJournalObjectKeys(
+        input.key,
+        input.keysById,
+        userId,
+        eventId,
+      )) {
         const value = await readEncryptedR2Json({
           aad: buildHostedStorageAad({
             eventId,
@@ -110,7 +122,7 @@ export function createHostedExecutionJournalStore(input: {
     },
 
     async writeCommittedResult(userId, eventId, value) {
-      const key = await committedResultObjectKey(input.key, userId, eventId);
+      const key = await hostedExecutionJournalObjectKey(input.key, userId, eventId);
       await writeEncryptedR2Json({
         aad: buildHostedStorageAad({
           eventId,
@@ -242,34 +254,6 @@ export async function persistHostedExecutionFinalBundles(input: {
   };
   await journalStore.writeCommittedResult(input.userId, input.eventId, finalizedResult);
   return finalizedResult;
-}
-
-async function committedResultObjectKey(rootKey: Uint8Array, userId: string, eventId: string): Promise<string> {
-  const userSegment = await deriveHostedStorageOpaqueId({
-    length: 24,
-    rootKey,
-    scope: "execution-journal-path",
-    value: `user:${userId}`,
-  });
-  const eventSegment = await deriveHostedStorageOpaqueId({
-    length: 40,
-    rootKey,
-    scope: "execution-journal-path",
-    value: `event:${userId}:${eventId}`,
-  });
-
-  return `transient/execution-journal/${userSegment}/${eventSegment}.json`;
-}
-
-async function committedResultObjectKeys(
-  rootKey: Uint8Array,
-  keysById: Readonly<Record<string, Uint8Array>> | undefined,
-  userId: string,
-  eventId: string,
-): Promise<string[]> {
-  return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
-    committedResultObjectKey(candidateRootKey, userId, eventId)
-  );
 }
 
 function normalizeHostedExecutionCommittedResult(
