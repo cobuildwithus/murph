@@ -179,11 +179,7 @@ export function isHostedAssistantProfileReady(
     return false
   }
 
-  if (profile.provider === 'openai-compatible') {
-    return normalizeHostedAssistantString(providerConfig.baseUrl) !== null
-  }
-
-  return true
+  return normalizeHostedAssistantString(providerConfig.baseUrl) !== null
 }
 
 export function resolveReadyHostedAssistantProfile(
@@ -290,7 +286,7 @@ export async function ensureHostedAssistantOperatorDefaults(input: {
   if (input.allowMissing) {
     return {
       configured: false,
-      provider: existingActiveProfile?.provider ?? null,
+      provider: existingActiveProfile?.target.adapter ?? null,
       seeded: false,
       source: 'missing',
     }
@@ -323,7 +319,7 @@ export function resolveHostedAssistantOperatorDefaultsState(
 
     return {
       configured: readyProfile !== null,
-      provider: readyProfile?.provider ?? activeProfile?.provider ?? null,
+      provider: readyProfile?.target.adapter ?? activeProfile?.target.adapter ?? null,
     }
   }
 

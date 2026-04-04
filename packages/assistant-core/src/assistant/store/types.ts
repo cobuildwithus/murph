@@ -3,6 +3,7 @@ import type {
   AssistantApprovalPolicy,
   AssistantBindingDeliveryKind,
   AssistantChatProvider,
+  AssistantModelTarget,
   AssistantSandbox,
   AssistantSession,
   AssistantTranscriptEntryKind,
@@ -36,6 +37,7 @@ export interface CreateAssistantSessionInput extends AssistantSessionLocator {
   providerName?: string | null
   reasoningEffort?: string | null
   sandbox?: AssistantSandbox | null
+  target?: AssistantModelTarget | null
   vault: string
 }
 

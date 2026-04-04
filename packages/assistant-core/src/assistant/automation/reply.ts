@@ -1,4 +1,5 @@
 import type { AssistantAutomationCursor } from '../../assistant-cli-contracts.js'
+import { createDefaultLocalAssistantModelTarget } from '../../assistant-backend.js'
 import type { InboxShowResult } from '../../inbox-cli-contracts.js'
 import type { InboxServices } from '../../inbox-services.js'
 import type { AssistantUserMessageContentPart } from '../../model-harness.js'
@@ -1160,7 +1161,11 @@ async function resolveAutoReplyRichContentRoute(input: {
     userMessageContent: input.userMessageContent,
     vault: input.vault,
   } satisfies AssistantMessageInput
-  const routes = await resolveAssistantTurnRoutesForMessage(messageInput, defaults)
+  const routes = await resolveAssistantTurnRoutesForMessage(
+    messageInput,
+    defaults,
+    createDefaultLocalAssistantModelTarget(),
+  )
   return selectAutoReplyRichContentRouteOverride(routes)
 }
 

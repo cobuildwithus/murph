@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 
 import type { AssistantSession } from '../assistant-cli-contracts.js'
 import { resolveAssistantOperatorDefaults } from '../operator-config.js'
+import { createDefaultLocalAssistantModelTarget } from '../assistant-backend.js'
 import { VaultCliError } from '../vault-cli-errors.js'
 import { finalizeAssistantTurnFromDeliveryOutcome } from './delivery-service.js'
 import {
@@ -60,7 +61,7 @@ async function runAssistantFirstContactWelcomeLocal(
         threadId: input.threadId,
         threadIsDirect: input.threadIsDirect,
         vault: input.vault,
-      }, defaults)
+      }, defaults, createDefaultLocalAssistantModelTarget())
       const resolveInput = (({ vault: _vault, ...rest }) => rest)(sessionInput)
       const resolved = await state.sessions.resolve(resolveInput)
       const firstContactStateDocIds = resolveAssistantFirstContactStateDocIds({

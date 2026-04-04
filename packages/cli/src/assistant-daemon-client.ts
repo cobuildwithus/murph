@@ -9,7 +9,8 @@ import {
   assistantCronTargetSnapshotSchema,
   assistantOutboxIntentSchema,
   assistantRunResultSchema,
-  assistantSessionSchema,
+  assistantSessionListResultSchema,
+  assistantSessionShowResultSchema,
   assistantStatusResultSchema,
   type AssistantAskResult,
   type AssistantCronJob,
@@ -114,7 +115,7 @@ export async function maybeUpdateAssistantSessionOptionsViaDaemon(
     method: 'POST',
     body: input,
   })
-  return assistantSessionSchema.parse(payload)
+  return parseAssistantSessionOutputPayload(payload)
 }
 
 export async function maybeListAssistantOutboxIntentsViaDaemon(
@@ -235,7 +236,7 @@ export async function maybeGetAssistantSessionViaDaemon(
       method: 'GET',
     },
   )
-  return assistantSessionSchema.parse(payload)
+  return parseAssistantSessionOutputPayload(payload)
 }
 
 export async function maybeGetAssistantCronStatusViaDaemon(
@@ -601,7 +602,7 @@ function parseAssistantDaemonOpenConversationPayload(
 
   return {
     created: record.created,
-    session: assistantSessionSchema.parse(record.session),
+    session: parseAssistantSessionOutputPayload(record.session),
   }
 }
 
@@ -609,7 +610,11 @@ function parseAssistantSessionListPayload(payload: unknown): AssistantSession[] 
   if (!Array.isArray(payload)) {
     throw new Error('Assistant daemon returned an invalid session list payload.')
   }
-  return payload.map((entry) => assistantSessionSchema.parse(entry))
+  return assistantSessionListResultSchema.shape.sessions.parse(payload)
+}
+
+function parseAssistantSessionOutputPayload(payload: unknown): AssistantSession {
+  return assistantSessionShowResultSchema.shape.session.parse(payload)
 }
 
 function parseAssistantOutboxIntentListPayload(

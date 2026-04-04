@@ -207,8 +207,45 @@ export const assistantHeadersSchema = z.record(
   z.string(),
 )
 
+export const assistantCodexModelTargetSchema = z
+  .object({
+    adapter: z.literal('codex-cli'),
+    approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable().default(null),
+    codexCommand: z.string().min(1).nullable().default(null),
+    model: z.string().min(1).nullable().default(null),
+    oss: z.boolean().default(false),
+    profile: z.string().min(1).nullable().default(null),
+    reasoningEffort: z.enum(assistantReasoningEffortValues).nullable().default(null),
+    sandbox: z.enum(assistantSandboxValues).nullable().default(null),
+  })
+  .strict()
+
+export const assistantOpenAiCompatibleModelTargetSchema = z
+  .object({
+    adapter: z.literal('openai-compatible'),
+    apiKeyEnv: z.string().min(1).nullable().default(null),
+    endpoint: z.string().min(1).nullable().default(null),
+    headers: assistantHeadersSchema.nullable().default(null),
+    model: z.string().min(1).nullable().default(null),
+    providerName: z.string().min(1).nullable().default(null),
+    reasoningEffort: z.enum(assistantReasoningEffortValues).nullable().default(null),
+  })
+  .strict()
+
+export const assistantModelTargetSchema = z.discriminatedUnion('adapter', [
+  assistantCodexModelTargetSchema,
+  assistantOpenAiCompatibleModelTargetSchema,
+])
+
 export const assistantSessionProviderStateSchema = z
   .object({
+    resumeRouteId: z.string().min(1).nullable().default(null),
+  })
+  .strict()
+
+export const assistantSessionResumeStateSchema = z
+  .object({
+    providerSessionId: z.string().min(1).nullable().default(null),
     resumeRouteId: z.string().min(1).nullable().default(null),
   })
   .strict()
@@ -292,7 +329,7 @@ export const assistantProviderBindingSchema = z
   })
   .strict()
 
-export const assistantSessionSchema = z
+const assistantSessionV3Schema = z
   .object({
     schema: z.literal('murph.assistant-session.v3'),
     sessionId: assistantSessionIdSchema,
@@ -308,11 +345,174 @@ export const assistantSessionSchema = z
   })
   .strict()
 
+export const assistantPersistedSessionSchema = z
+  .object({
+    schema: z.literal('murph.assistant-session.v4'),
+    sessionId: assistantSessionIdSchema,
+    target: assistantModelTargetSchema,
+    resumeState: assistantSessionResumeStateSchema.nullable().default(null),
+    alias: z.string().min(1).nullable(),
+    binding: assistantSessionBindingSchema,
+    createdAt: isoTimestampSchema,
+    updatedAt: isoTimestampSchema,
+    lastTurnAt: isoTimestampSchema.nullable(),
+    turnCount: z.number().int().nonnegative(),
+  })
+  .strict()
+
+export const assistantSessionSchema = z
+  .union([assistantPersistedSessionSchema, assistantSessionV3Schema])
+  .transform((value) => normalizeAssistantSessionRecord(value))
+
 export function parseAssistantSessionRecord(value: unknown): AssistantSession {
   return assistantSessionSchema.parse(value)
 }
 
-const assistantSessionOutputSchema = assistantSessionSchema
+const assistantSessionOutputSchema = assistantPersistedSessionSchema
+  .extend({
+    provider: z.enum(assistantChatProviderValues),
+    providerOptions: assistantProviderSessionOptionsSchema,
+    providerBinding: assistantProviderBindingSchema.nullable().default(null),
+  })
+  .strict()
+
+function normalizeAssistantSessionRecord(
+  value: z.infer<typeof assistantPersistedSessionSchema> | z.infer<typeof assistantSessionV3Schema>,
+): AssistantSession {
+  if (value.schema === 'murph.assistant-session.v4') {
+    return buildAssistantRuntimeSession({
+      alias: value.alias,
+      binding: value.binding,
+      createdAt: value.createdAt,
+      lastTurnAt: value.lastTurnAt,
+      resumeState: normalizeAssistantSessionResumeState(value.resumeState),
+      schema: value.schema,
+      sessionId: value.sessionId,
+      target: value.target,
+      turnCount: value.turnCount,
+      updatedAt: value.updatedAt,
+    })
+  }
+
+  const target =
+    value.provider === 'openai-compatible'
+      ? assistantModelTargetSchema.parse({
+          adapter: 'openai-compatible',
+          apiKeyEnv: value.providerOptions.apiKeyEnv ?? null,
+          endpoint: value.providerOptions.baseUrl ?? null,
+          headers: value.providerOptions.headers ?? null,
+          model: value.providerOptions.model,
+          providerName: value.providerOptions.providerName ?? null,
+          reasoningEffort: value.providerOptions.reasoningEffort ?? null,
+        })
+      : assistantModelTargetSchema.parse({
+          adapter: 'codex-cli',
+          approvalPolicy: value.providerOptions.approvalPolicy ?? null,
+          codexCommand: null,
+          model: value.providerOptions.model,
+          oss: value.providerOptions.oss,
+          profile: value.providerOptions.profile ?? null,
+          reasoningEffort: value.providerOptions.reasoningEffort ?? null,
+          sandbox: value.providerOptions.sandbox ?? null,
+        })
+
+  return buildAssistantRuntimeSession({
+    alias: value.alias,
+    binding: value.binding,
+    createdAt: value.createdAt,
+    lastTurnAt: value.lastTurnAt,
+    resumeState: normalizeAssistantSessionResumeState(
+      value.providerBinding
+        ? {
+            providerSessionId: value.providerBinding.providerSessionId,
+            resumeRouteId: value.providerBinding.providerState?.resumeRouteId ?? null,
+          }
+        : null,
+    ),
+    schema: 'murph.assistant-session.v4',
+    sessionId: value.sessionId,
+    target,
+    turnCount: value.turnCount,
+    updatedAt: value.updatedAt,
+  })
+}
+
+function buildAssistantRuntimeSession(
+  value: AssistantPersistedSessionRecord,
+): AssistantSession {
+  const provider = value.target.adapter
+  const providerOptions =
+    value.target.adapter === 'openai-compatible'
+      ? assistantProviderSessionOptionsSchema.parse({
+          model: value.target.model,
+          reasoningEffort: value.target.reasoningEffort,
+          sandbox: null,
+          approvalPolicy: null,
+          profile: null,
+          oss: false,
+          ...(value.target.endpoint ? { baseUrl: value.target.endpoint } : {}),
+          ...(value.target.apiKeyEnv ? { apiKeyEnv: value.target.apiKeyEnv } : {}),
+          ...(value.target.providerName
+            ? { providerName: value.target.providerName }
+            : {}),
+          ...(value.target.headers ? { headers: value.target.headers } : {}),
+        })
+      : assistantProviderSessionOptionsSchema.parse({
+          model: value.target.model,
+          reasoningEffort: value.target.reasoningEffort,
+          sandbox: value.target.sandbox,
+          approvalPolicy: value.target.approvalPolicy,
+          profile: value.target.profile,
+          oss: value.target.oss,
+        })
+  const providerBinding =
+    value.resumeState &&
+    (value.resumeState.providerSessionId !== null ||
+      value.resumeState.resumeRouteId !== null)
+      ? assistantProviderBindingSchema.parse({
+          provider,
+          providerOptions,
+          providerSessionId: value.resumeState.providerSessionId,
+          providerState:
+            value.resumeState.resumeRouteId !== null
+              ? {
+                  resumeRouteId: value.resumeState.resumeRouteId,
+                }
+              : null,
+        })
+      : null
+
+  return {
+    ...value,
+    provider,
+    providerBinding,
+    providerOptions,
+  }
+}
+
+function normalizeAssistantSessionResumeState(
+  value: AssistantSessionResumeState | null | undefined,
+): AssistantSessionResumeState | null {
+  if (!value) {
+    return null
+  }
+
+  const providerSessionId =
+    typeof value.providerSessionId === 'string' && value.providerSessionId.trim().length > 0
+      ? value.providerSessionId.trim()
+      : null
+  const resumeRouteId =
+    typeof value.resumeRouteId === 'string' && value.resumeRouteId.trim().length > 0
+      ? value.resumeRouteId.trim()
+      : null
+
+  return providerSessionId || resumeRouteId
+    ? assistantSessionResumeStateSchema.parse({
+        providerSessionId,
+        resumeRouteId,
+      })
+    : null
+}
 
 export const assistantTranscriptEntrySchema = z.object({
   schema: z.literal('murph.assistant-transcript-entry.v1'),
@@ -1133,11 +1333,17 @@ export type AssistantBindingDelivery = z.infer<
 export type AssistantSessionBinding = z.infer<
   typeof assistantSessionBindingSchema
 >
+export type AssistantModelTarget = z.infer<typeof assistantModelTargetSchema>
+export type AssistantSessionResumeState = z.infer<
+  typeof assistantSessionResumeStateSchema
+>
 export type AssistantProviderBinding = z.infer<
   typeof assistantProviderBindingSchema
 >
-type AssistantSessionRecord = z.infer<typeof assistantSessionSchema>
-export type AssistantSession = Omit<AssistantSessionRecord, 'providerBinding'> & {
+type AssistantPersistedSessionRecord = z.infer<typeof assistantPersistedSessionSchema>
+export type AssistantSession = AssistantPersistedSessionRecord & {
+  provider: AssistantChatProvider
+  providerOptions: z.infer<typeof assistantProviderSessionOptionsSchema>
   providerBinding?: AssistantProviderBinding | null
 }
 export type AssistantTranscriptEntry = z.infer<

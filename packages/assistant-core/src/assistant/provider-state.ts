@@ -1,30 +1,42 @@
+import { z } from 'zod'
 import {
+  assistantPersistedSessionSchema,
   assistantProviderBindingSchema,
-  assistantSessionProviderStateSchema,
+  assistantProviderSessionOptionsSchema,
+  assistantSessionResumeStateSchema,
+  parseAssistantSessionRecord,
   type AssistantSession,
   type AssistantProviderBinding,
-  type AssistantSessionProviderState,
+  type AssistantSessionResumeState,
 } from '../assistant-cli-contracts.js'
+import {
+  assistantModelTargetsEqual,
+  createAssistantModelTarget,
+} from '../assistant-backend.js'
 import { normalizeNullableString } from './shared.js'
 
 export function readAssistantProviderResumeRouteId(input: {
   providerBinding?: AssistantProviderBinding | null
+  resumeState?: AssistantSessionResumeState | null
 } | AssistantSession): string | null {
-  const providerBinding = readAssistantProviderBinding(input)
-  return normalizeNullableString(providerBinding?.providerState?.resumeRouteId) ?? null
+  const resumeState = readAssistantSessionResumeState(input)
+  return normalizeNullableString(resumeState?.resumeRouteId) ?? null
 }
 
 export function readAssistantProviderSessionId(input: {
   providerBinding?: AssistantProviderBinding | null
+  resumeState?: AssistantSessionResumeState | null
 } | AssistantSession): string | null {
-  const providerBinding = readAssistantProviderBinding(input)
-  return normalizeNullableString(providerBinding?.providerSessionId) ?? null
+  const resumeState = readAssistantSessionResumeState(input)
+  return normalizeNullableString(resumeState?.providerSessionId) ?? null
 }
 
 export function readAssistantProviderBinding(
   input:
     | {
         providerBinding?: AssistantProviderBinding | null
+        resumeState?: AssistantSessionResumeState | null
+        target?: AssistantSession['target'] | null
       }
     | AssistantSession
     | null
@@ -34,57 +46,116 @@ export function readAssistantProviderBinding(
     return null
   }
 
-  return normalizeAssistantProviderBinding(
-    'providerBinding' in input ? input.providerBinding : null,
+  if ('providerBinding' in input && input.providerBinding) {
+    return normalizeAssistantProviderBinding(input.providerBinding)
+  }
+
+  const target = 'target' in input ? input.target : null
+  const resumeState =
+    'resumeState' in input ? input.resumeState : 'resumeState' in (input as AssistantSession)
+      ? (input as AssistantSession).resumeState
+      : null
+  if (!target) {
+    return null
+  }
+
+  const normalizedResumeState = normalizeAssistantSessionResumeState(resumeState)
+  if (!normalizedResumeState) {
+    return null
+  }
+  const providerOptions =
+    target.adapter === 'openai-compatible'
+      ? assistantProviderSessionOptionsSchema.parse({
+          model: target.model,
+          reasoningEffort: target.reasoningEffort,
+          sandbox: null,
+          approvalPolicy: null,
+          profile: null,
+          oss: false,
+          ...(target.endpoint ? { baseUrl: target.endpoint } : {}),
+          ...(target.apiKeyEnv ? { apiKeyEnv: target.apiKeyEnv } : {}),
+          ...(target.providerName ? { providerName: target.providerName } : {}),
+          ...(target.headers ? { headers: target.headers } : {}),
+        })
+      : assistantProviderSessionOptionsSchema.parse({
+          model: target.model,
+          reasoningEffort: target.reasoningEffort,
+          sandbox: target.sandbox,
+          approvalPolicy: target.approvalPolicy,
+          profile: target.profile,
+          oss: target.oss,
+        })
+
+  return assistantProviderBindingSchema.parse({
+    provider: target.adapter,
+    providerOptions,
+    providerSessionId: normalizedResumeState.providerSessionId,
+    providerState:
+      normalizedResumeState.resumeRouteId !== null
+        ? {
+            resumeRouteId: normalizedResumeState.resumeRouteId,
+          }
+        : null,
+  })
+}
+
+export function readAssistantSessionResumeState(
+  input:
+    | {
+        providerBinding?: AssistantProviderBinding | null
+        resumeState?: AssistantSessionResumeState | null
+      }
+    | AssistantSession
+    | null
+    | undefined,
+): AssistantSessionResumeState | null {
+  if (!input || typeof input !== 'object') {
+    return null
+  }
+
+  if ('resumeState' in input) {
+    return normalizeAssistantSessionResumeState(input.resumeState)
+  }
+
+  return normalizeAssistantSessionResumeState(
+    'providerBinding' in input && input.providerBinding
+      ? {
+          providerSessionId: input.providerBinding.providerSessionId,
+          resumeRouteId: input.providerBinding.providerState?.resumeRouteId ?? null,
+        }
+      : null,
   )
 }
 
 export function writeAssistantProviderResumeRouteId(
-  providerBinding: AssistantProviderBinding | null | undefined,
+  resumeState: AssistantSessionResumeState | null | undefined,
   routeId: string | null | undefined,
-): AssistantProviderBinding | null {
-  const current = normalizeAssistantProviderBinding(providerBinding)
-  if (!current) {
-    return current
-  }
-
-  return assistantProviderBindingSchema.parse({
-    ...current,
-    providerState: writeAssistantSessionProviderStateResumeRouteId(
-      current.providerState,
-      routeId,
-    ),
-  })
+): AssistantSessionResumeState | null {
+  return writeAssistantSessionResumeRouteId(resumeState, routeId)
 }
 
 export function writeAssistantProviderStateResumeRouteId(
-  providerState: AssistantSessionProviderState | null | undefined,
+  resumeState: AssistantSessionResumeState | null | undefined,
   routeId: string | null | undefined,
-): AssistantSessionProviderState | null {
-  return writeAssistantSessionProviderStateResumeRouteId(providerState, routeId)
+): AssistantSessionResumeState | null {
+  return writeAssistantSessionResumeRouteId(resumeState, routeId)
 }
 
-function writeAssistantSessionProviderStateResumeRouteId(
-  providerState: AssistantSessionProviderState | null | undefined,
-  routeId: string | null | undefined,
-): AssistantSessionProviderState | null {
-  const normalizedRouteId = normalizeNullableString(routeId)
-  const current = normalizeAssistantSessionProviderState(providerState)
+export function writeAssistantSessionProviderSessionId(
+  resumeState: AssistantSessionResumeState | null | undefined,
+  providerSessionId: string | null | undefined,
+): AssistantSessionResumeState | null {
+  const current = normalizeAssistantSessionResumeState(resumeState)
+  const normalizedProviderSessionId = normalizeNullableString(providerSessionId)
+  const normalizedResumeRouteId = current?.resumeRouteId ?? null
 
-  if (!normalizedRouteId) {
-    if (!current?.resumeRouteId) {
-      return current
-    }
-
-    return assistantSessionProviderStateSchema.parse({
-      ...current,
-      resumeRouteId: null,
-    })
+  if (!normalizedProviderSessionId && !normalizedResumeRouteId) {
+    return null
   }
 
-  return assistantSessionProviderStateSchema.parse({
-    ...(current ?? {}),
-    resumeRouteId: normalizedRouteId,
+  return assistantSessionResumeStateSchema.parse({
+    providerSessionId: normalizedProviderSessionId,
+    resumeRouteId: normalizedResumeRouteId,
   })
 }
 
@@ -97,20 +168,29 @@ export function normalizeAssistantProviderBinding(
 
   return assistantProviderBindingSchema.parse({
     ...value,
-    providerState: normalizeAssistantSessionProviderState(value.providerState),
+    providerSessionId: normalizeNullableString(value.providerSessionId) ?? null,
+    providerState:
+      value.providerState && normalizeNullableString(value.providerState.resumeRouteId)
+        ? {
+            resumeRouteId: normalizeNullableString(value.providerState.resumeRouteId),
+          }
+        : null,
   })
 }
 
-export function normalizeAssistantSessionProviderState(
-  value: AssistantSessionProviderState | null | undefined,
-): AssistantSessionProviderState | null {
+export function normalizeAssistantSessionResumeState(
+  value: AssistantSessionResumeState | null | undefined,
+): AssistantSessionResumeState | null {
   if (!value) {
     return null
   }
 
+  const providerSessionId = normalizeNullableString(value.providerSessionId)
   const resumeRouteId = normalizeNullableString(value.resumeRouteId)
-  return resumeRouteId
-    ? assistantSessionProviderStateSchema.parse({
+
+  return providerSessionId || resumeRouteId
+    ? assistantSessionResumeStateSchema.parse({
+        providerSessionId,
         resumeRouteId,
       })
     : null
@@ -119,30 +199,74 @@ export function normalizeAssistantSessionProviderState(
 export function normalizeAssistantSessionSnapshot(
   session: AssistantSession,
 ): AssistantSession {
-  const providerBinding = normalizeAssistantProviderBinding(
-    session.providerBinding
+  return parseAssistantSessionRecord(serializeAssistantSessionForPersistence(session))
+}
+
+export function serializeAssistantSessionForPersistence(
+  session: AssistantSession,
+): z.infer<typeof assistantPersistedSessionSchema> {
+  const compatibilityTarget = createAssistantModelTarget({
+    provider: session.provider,
+    ...session.providerOptions,
+    ...(session.provider === 'codex-cli' && session.target?.adapter === 'codex-cli'
+      ? { codexCommand: session.target.codexCommand }
+      : {}),
+  })
+  const target =
+    compatibilityTarget &&
+    (!session.target ||
+      !assistantModelTargetsEqual(session.target, compatibilityTarget))
+      ? compatibilityTarget
+      : session.target ?? compatibilityTarget
+  if (!target) {
+    throw new TypeError('Assistant session target is required.')
+  }
+
+  const bindingResumeState =
+    session.providerBinding?.provider === target.adapter
       ? {
-          ...session.providerBinding,
-          providerSessionId:
-            normalizeNullableString(session.providerBinding.providerSessionId) ?? null,
-          providerState: normalizeAssistantSessionProviderState(
-            session.providerBinding.providerState,
-          ),
+          providerSessionId: session.providerBinding.providerSessionId,
+          resumeRouteId: session.providerBinding.providerState?.resumeRouteId ?? null,
         }
-      : null,
+      : null
+  const compatibilityTargetChanged =
+    compatibilityTarget !== null &&
+    session.target !== null &&
+    !assistantModelTargetsEqual(session.target, compatibilityTarget)
+  const resumeState = normalizeAssistantSessionResumeState(
+    compatibilityTargetChanged
+      ? bindingResumeState
+      : session.resumeState ?? bindingResumeState,
   )
 
-  return {
-    schema: 'murph.assistant-session.v3',
+  return assistantPersistedSessionSchema.parse({
+    schema: 'murph.assistant-session.v4',
     sessionId: session.sessionId,
-    provider: session.provider,
-    providerOptions: session.providerOptions,
-    providerBinding,
+    target,
+    resumeState,
     alias: session.alias,
     binding: session.binding,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     lastTurnAt: session.lastTurnAt,
     turnCount: session.turnCount,
+  })
+}
+
+function writeAssistantSessionResumeRouteId(
+  resumeState: AssistantSessionResumeState | null | undefined,
+  routeId: string | null | undefined,
+): AssistantSessionResumeState | null {
+  const current = normalizeAssistantSessionResumeState(resumeState)
+  const normalizedRouteId = normalizeNullableString(routeId)
+  const providerSessionId = current?.providerSessionId ?? null
+
+  if (!providerSessionId && !normalizedRouteId) {
+    return null
   }
+
+  return assistantSessionResumeStateSchema.parse({
+    providerSessionId,
+    resumeRouteId: normalizedRouteId,
+  })
 }

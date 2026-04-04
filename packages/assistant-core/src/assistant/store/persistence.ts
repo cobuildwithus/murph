@@ -1,8 +1,9 @@
 import { access, readdir, readFile } from 'node:fs/promises'
+import { z } from 'zod'
 import {
   assistantAliasStoreSchema,
   assistantAutomationStateSchema,
-  assistantSessionSchema,
+  assistantPersistedSessionSchema,
   assistantTranscriptEntrySchema,
   type AssistantAliasStore,
   type AssistantAutomationState,
@@ -31,7 +32,10 @@ import {
   writeJsonFileAtomic,
 } from '../shared.js'
 import { serializeAssistantProviderSessionOptions } from '../provider-config.js'
-import { normalizeAssistantSessionSnapshot } from '../provider-state.js'
+import {
+  normalizeAssistantSessionSnapshot,
+  serializeAssistantSessionForPersistence,
+} from '../provider-state.js'
 import {
   extractAssistantSessionSecretsForPersistence,
   mergeAssistantSessionSecrets,
@@ -157,7 +161,7 @@ export async function writeAssistantSession(
     persisted: redactedSession,
     secrets,
   } = extractAssistantSessionSecretsForPersistence(normalized)
-  const persisted = assistantSessionSchema.parse(
+  const persisted = assistantPersistedSessionSchema.parse(
     normalizeAssistantSessionForWrite(redactedSession),
   )
   await persistAssistantSessionSecrets({
@@ -296,24 +300,20 @@ async function pathExists(filePath: string): Promise<boolean> {
 }
 
 function normalizeAssistantSessionForWrite(
-  session: AssistantSession,
-): AssistantSession {
-  return normalizeAssistantSessionSnapshot({
-    ...session,
-    providerOptions: serializeAssistantProviderSessionOptions({
-      provider: session.provider,
-      ...session.providerOptions,
-    }),
-    providerBinding: session.providerBinding
+  session: AssistantSession | z.infer<typeof assistantPersistedSessionSchema>,
+) {
+  const normalized = normalizeAssistantSessionSnapshot(
+    'provider' in session
       ? {
-          ...session.providerBinding,
+          ...session,
           providerOptions: serializeAssistantProviderSessionOptions({
-            provider: session.providerBinding.provider,
-            ...session.providerBinding.providerOptions,
+            provider: session.provider,
+            ...session.providerOptions,
           }),
         }
-      : null,
-  })
+      : parseAssistantSessionRecord(session),
+  )
+  return serializeAssistantSessionForPersistence(normalized)
 }
 
 export async function persistResolvedSession(

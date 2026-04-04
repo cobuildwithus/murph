@@ -1606,7 +1606,7 @@ test('assistant operator config keeps nested provider defaults across unrelated 
       Authorization: 'Bearer override-token',
       'X-Foo': 'bar',
     },
-    options: null,
+    reasoningEffort: null,
   })
 })
 
@@ -1666,7 +1666,7 @@ test('updating the saved backend target replaces the previous backend cleanly', 
     headers: {
       Authorization: 'Bearer override-token',
     },
-    options: null,
+    reasoningEffort: null,
   })
 })
 
@@ -7271,10 +7271,23 @@ test('runAssistantChat surfaces Ink chat errors to the caller', async () => {
 
 test('assistant Ink resyncs the next turn selection after a failover-updated session', () => {
   const previousSession = {
-    schema: 'murph.assistant-session.v3',
+    schema: 'murph.assistant-session.v4',
     sessionId: 'asst_failover_prev',
+    target: {
+      adapter: 'codex-cli',
+      approvalPolicy: 'on-request',
+      codexCommand: null,
+      model: 'gpt-5.4',
+      oss: false,
+      profile: null,
+      reasoningEffort: 'high',
+      sandbox: 'workspace-write',
+    },
+    resumeState: {
+      providerSessionId: 'thread-primary',
+      resumeRouteId: null,
+    },
     provider: 'codex-cli',
-    providerSessionId: 'thread-primary',
     providerOptions: {
       model: 'gpt-5.4',
       reasoningEffort: 'high',
@@ -7300,8 +7313,20 @@ test('assistant Ink resyncs the next turn selection after a failover-updated ses
   } as const
   const nextSession = {
     ...previousSession,
+    target: {
+      adapter: 'openai-compatible',
+      apiKeyEnv: 'OLLAMA_API_KEY',
+      endpoint: 'http://127.0.0.1:11434/v1',
+      headers: null,
+      model: 'backup-model',
+      providerName: 'ollama',
+      reasoningEffort: null,
+    },
+    resumeState: {
+      providerSessionId: 'thread-backup',
+      resumeRouteId: null,
+    },
     provider: 'openai-compatible',
-    providerSessionId: 'thread-backup',
     updatedAt: '2026-03-17T00:00:02.000Z',
     providerOptions: {
       ...previousSession.providerOptions,
@@ -7331,10 +7356,19 @@ test('assistant Ink resyncs the next turn selection after a failover-updated ses
 
 test('assistant Ink preserves explicit selections when unrelated same-provider session options change', () => {
   const previousSession = {
-    schema: 'murph.assistant-session.v3',
+    schema: 'murph.assistant-session.v4',
     sessionId: 'asst_same_provider_route_change',
+    target: {
+      adapter: 'openai-compatible',
+      apiKeyEnv: 'OLLAMA_API_KEY',
+      endpoint: 'http://127.0.0.1:11434/v1',
+      headers: null,
+      model: null,
+      providerName: 'ollama-a',
+      reasoningEffort: null,
+    },
+    resumeState: null,
     provider: 'openai-compatible',
-    providerSessionId: null,
     providerOptions: {
       model: null,
       reasoningEffort: null,
@@ -7364,6 +7398,12 @@ test('assistant Ink preserves explicit selections when unrelated same-provider s
   } as const
   const nextSession = {
     ...previousSession,
+    target: {
+      ...previousSession.target,
+      apiKeyEnv: 'BACKUP_OLLAMA_API_KEY',
+      endpoint: 'http://127.0.0.1:22434/v1',
+      providerName: 'ollama-b',
+    },
     updatedAt: '2026-03-17T00:00:02.000Z',
     providerOptions: {
       ...previousSession.providerOptions,
@@ -7603,10 +7643,20 @@ test('assistant Ink view-model preserves prior progress rows when later turns us
 
 test('assistant Ink view-model exposes codex-style footer metadata and busy copy', () => {
   const session = {
-    schema: 'murph.assistant-session.v3',
+    schema: 'murph.assistant-session.v4',
     sessionId: 'asst_demo',
+    target: {
+      adapter: 'codex-cli',
+      approvalPolicy: 'never',
+      codexCommand: null,
+      model: 'gpt-5.4',
+      oss: false,
+      profile: null,
+      reasoningEffort: null,
+      sandbox: 'read-only',
+    },
+    resumeState: null,
     provider: 'codex-cli',
-    providerSessionId: null,
     providerOptions: {
       model: 'gpt-5.4',
       reasoningEffort: null,
@@ -8130,10 +8180,20 @@ test('assistant Ink queued prompt disposition replays completed follow-ups and r
 
 test('assistant Ink view-model falls back to default model labels when needed', () => {
   const ossSession = {
-    schema: 'murph.assistant-session.v3',
+    schema: 'murph.assistant-session.v4',
     sessionId: 'asst_demo',
+    target: {
+      adapter: 'codex-cli',
+      approvalPolicy: 'never',
+      codexCommand: null,
+      model: null,
+      oss: true,
+      profile: null,
+      reasoningEffort: null,
+      sandbox: 'read-only',
+    },
+    resumeState: null,
     provider: 'codex-cli',
-    providerSessionId: null,
     providerOptions: {
       model: null,
       reasoningEffort: null,
@@ -8160,6 +8220,10 @@ test('assistant Ink view-model falls back to default model labels when needed', 
 
   const defaultSession = {
     ...ossSession,
+    target: {
+      ...ossSession.target,
+      oss: false,
+    },
     providerOptions: {
       ...ossSession.providerOptions,
       oss: false,

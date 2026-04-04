@@ -246,24 +246,18 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
     backend: {
       adapter: 'codex-cli' as const,
       model: 'gpt-5.4-mini',
-      endpoint: null,
-      apiKeyEnv: null,
-      providerName: null,
-      headers: null,
-      options: {
-        approvalPolicy: 'on-request',
-        codexCommand: '/opt/bin/codex',
-        oss: true,
-        profile: 'ops',
-        reasoningEffort: 'high',
-        sandbox: 'workspace-write',
-      },
+      approvalPolicy: 'on-request',
+      codexCommand: '/opt/bin/codex',
+      oss: true,
+      profile: 'ops',
+      reasoningEffort: 'high',
+      sandbox: 'workspace-write',
     },
     identityId: 'assistant:primary',
     failoverRoutes: null,
     account: null,
     selfDeliveryTargets: null,
-  }
+  } as const
 
   assert.deepEqual(
     buildResolveAssistantSessionInput(
@@ -295,6 +289,16 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
       providerName: null,
       headers: null,
       reasoningEffort: 'high',
+      target: {
+        adapter: 'codex-cli',
+        approvalPolicy: 'on-request',
+        codexCommand: '/opt/bin/codex',
+        model: 'gpt-5.4-mini',
+        oss: true,
+        profile: 'ops',
+        reasoningEffort: 'high',
+        sandbox: 'workspace-write',
+      },
     },
   )
 
@@ -334,6 +338,16 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
       providerName: null,
       headers: null,
       reasoningEffort: 'low',
+      target: {
+        adapter: 'codex-cli',
+        approvalPolicy: 'never',
+        codexCommand: '/opt/bin/codex',
+        model: 'gpt-oss:20b',
+        oss: false,
+        profile: 'private',
+        reasoningEffort: 'low',
+        sandbox: 'read-only',
+      },
     },
   )
 
@@ -361,6 +375,16 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
       providerName: null,
       headers: null,
       reasoningEffort: 'high',
+      target: {
+        adapter: 'codex-cli',
+        approvalPolicy: 'on-request',
+        codexCommand: '/opt/bin/codex',
+        model: 'gpt-5.4-mini',
+        oss: true,
+        profile: 'ops',
+        reasoningEffort: 'high',
+        sandbox: 'workspace-write',
+      },
     },
   )
 
@@ -398,6 +422,16 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
       providerName: null,
       headers: null,
       reasoningEffort: 'high',
+      target: {
+        adapter: 'codex-cli',
+        approvalPolicy: 'on-request',
+        codexCommand: '/opt/bin/codex',
+        model: 'gpt-5.4-mini',
+        oss: true,
+        profile: 'ops',
+        reasoningEffort: 'high',
+        sandbox: 'workspace-write',
+      },
     },
   )
 
@@ -427,7 +461,16 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
       apiKeyEnv: null,
       providerName: null,
       headers: null,
-      reasoningEffort: null,
+      reasoningEffort: 'high',
+      target: {
+        adapter: 'openai-compatible',
+        apiKeyEnv: null,
+        endpoint: 'http://127.0.0.1:11434/v1',
+        headers: null,
+        model: 'gpt-oss:20b',
+        providerName: null,
+        reasoningEffort: 'high',
+      },
     },
   )
 
@@ -439,6 +482,16 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
         provider: 'codex-cli',
       },
       null,
+      {
+        adapter: 'codex-cli',
+        approvalPolicy: 'never',
+        codexCommand: null,
+        model: null,
+        oss: false,
+        profile: null,
+        reasoningEffort: DEFAULT_CODEX_REASONING_EFFORT,
+        sandbox: 'danger-full-access',
+      },
     ),
     {
       vault: '/tmp/vault',
@@ -455,6 +508,16 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
       providerName: null,
       headers: null,
       reasoningEffort: DEFAULT_CODEX_REASONING_EFFORT,
+      target: {
+        adapter: 'codex-cli',
+        approvalPolicy: 'never',
+        codexCommand: null,
+        model: null,
+        oss: false,
+        profile: null,
+        reasoningEffort: DEFAULT_CODEX_REASONING_EFFORT,
+        sandbox: 'danger-full-access',
+      },
     },
   )
 })

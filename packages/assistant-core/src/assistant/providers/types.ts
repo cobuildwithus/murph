@@ -49,6 +49,12 @@ export interface AssistantProviderCapabilities {
   supportsRichUserMessageContent: boolean
 }
 
+export interface AssistantProviderExecutionCapabilities
+  extends AssistantProviderCapabilities {
+  requestFormat: 'flat-prompt' | 'messages'
+  supportsToolRuntime: boolean
+}
+
 export interface AssistantProviderToolRuntime {
   allowSensitiveHealthContext?: boolean
   requestId?: string | null
@@ -162,7 +168,7 @@ export type AssistantProviderTurnAttemptResult =
     }
 
 export interface AssistantProviderDefinition {
-  capabilities: AssistantProviderCapabilities
+  capabilities: AssistantProviderExecutionCapabilities
   discoverModels(input: {
     config: AssistantProviderConfig
     env?: NodeJS.ProcessEnv

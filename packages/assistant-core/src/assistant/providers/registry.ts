@@ -17,6 +17,7 @@ import type {
   AssistantModelDiscoveryResult,
   AssistantProviderAttemptMetadata,
   AssistantProviderCapabilities,
+  AssistantProviderExecutionCapabilities,
   AssistantProviderDefinition,
   AssistantProviderTurnAttemptResult,
   AssistantProviderTurnExecutionInput,
@@ -55,6 +56,14 @@ function resolveAssistantProviderDefinition(
 export function resolveAssistantProviderCapabilities(
   provider: AssistantChatProvider,
 ): AssistantProviderCapabilities {
+  return stripAssistantProviderExecutionCapabilities(
+    resolveAssistantProviderDefinition(provider).capabilities,
+  )
+}
+
+export function resolveAssistantProviderExecutionCapabilities(
+  provider: AssistantChatProvider,
+): AssistantProviderExecutionCapabilities {
   return {
     ...resolveAssistantProviderDefinition(provider).capabilities,
   }
@@ -63,6 +72,16 @@ export function resolveAssistantProviderCapabilities(
 export function resolveAssistantProviderTargetCapabilities(
   input: AssistantProviderConfigInput | null | undefined,
 ): AssistantProviderCapabilities {
+  const normalized = normalizeAssistantProviderConfig(input)
+  return stripAssistantProviderExecutionCapabilities({
+    ...resolveAssistantProviderDefinition(normalized.provider).capabilities,
+    supportsReasoningEffort: supportsAssistantReasoningEffort(normalized),
+  })
+}
+
+export function resolveAssistantProviderTargetExecutionCapabilities(
+  input: AssistantProviderConfigInput | null | undefined,
+): AssistantProviderExecutionCapabilities {
   const normalized = normalizeAssistantProviderConfig(input)
   return {
     ...resolveAssistantProviderDefinition(normalized.provider).capabilities,
@@ -221,7 +240,10 @@ function finalizeAssistantProviderAttemptResult(
 ): AssistantProviderTurnAttemptResult {
   return {
     ...result,
-    metadata: finalizeAssistantProviderAttemptMetadata(result.metadata, progressEvents),
+    metadata: finalizeAssistantProviderAttemptMetadata(
+      result.metadata ?? createEmptyAssistantProviderAttemptMetadata(),
+      progressEvents,
+    ),
   }
 }
 
@@ -235,5 +257,16 @@ function finalizeAssistantProviderAttemptMetadata(
       events: progressEvents,
       labels: metadata.activityLabels,
     }),
+  }
+}
+
+function stripAssistantProviderExecutionCapabilities(
+  capabilities: AssistantProviderExecutionCapabilities,
+): AssistantProviderCapabilities {
+  return {
+    supportsModelDiscovery: capabilities.supportsModelDiscovery,
+    supportsNativeResume: capabilities.supportsNativeResume,
+    supportsReasoningEffort: capabilities.supportsReasoningEffort,
+    supportsRichUserMessageContent: capabilities.supportsRichUserMessageContent,
   }
 }

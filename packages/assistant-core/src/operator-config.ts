@@ -825,8 +825,7 @@ function hasAssistantOperatorDefaultsValues(
 function normalizeUnknownAssistantBackendTarget(
   value: unknown,
 ): AssistantBackendTarget | null {
-  const parsed = assistantBackendTargetSchema.safeParse(value)
-  return parsed.success ? normalizeAssistantBackendTarget(parsed.data) : null
+  return normalizeAssistantBackendTarget(value)
 }
 
 function normalizeUnknownAssistantIdentityId(value: unknown): string | null {

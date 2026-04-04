@@ -3,6 +3,7 @@ import {
   type AssistantAskResult,
   type AssistantSession,
 } from '../assistant-cli-contracts.js'
+import { createDefaultLocalAssistantModelTarget } from '../assistant-backend.js'
 import {
   type ResolvedAssistantSession,
   appendAssistantTranscriptEntries,
@@ -114,7 +115,13 @@ export async function openAssistantConversationLocal(
   input: AssistantSessionResolutionFields,
 ) {
   const defaults = await resolveAssistantOperatorDefaults()
-  return resolveAssistantSession(buildResolveAssistantSessionInput(input, defaults))
+  return resolveAssistantSession(
+    buildResolveAssistantSessionInput(
+      input,
+      defaults,
+      createDefaultLocalAssistantModelTarget(),
+    ),
+  )
 }
 
 export async function sendAssistantMessageLocal(
@@ -127,6 +134,7 @@ export async function sendAssistantMessageLocal(
     vault: input.vault,
     run: async () => {
       const resolved = await resolveAssistantMessageSession({
+        boundaryDefaultTarget: createDefaultLocalAssistantModelTarget(),
         defaults,
         message: input,
       })

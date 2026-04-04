@@ -13,6 +13,7 @@ import {
   applyDefaultVaultToArgs,
   buildAssistantProviderDefaultsPatch,
   readOperatorConfig,
+  resolveAssistantOperatorDefaults,
   resolveDefaultVault,
   resolveOperatorConfigPath,
   saveAssistantSelfDeliveryTarget,
@@ -2075,13 +2076,18 @@ test.sequential(
     )
 
     const config = await readOperatorConfig(homeRoot)
+    const defaults = await resolveAssistantOperatorDefaults(homeRoot)
     assert.ok(config)
     assert.equal(config.defaultVault, path.join('~', 'default-vault'))
     assert.equal(config.assistant?.backend?.adapter, 'codex-cli')
     assert.equal(config.assistant?.backend?.model, 'gpt-5.4-mini')
-    assert.deepEqual(config.assistant?.backend?.options, {
-      reasoningEffort: 'xhigh',
-    })
+    assert.equal(defaults?.backend?.adapter, 'codex-cli')
+    assert.equal(
+      defaults?.backend?.adapter === 'codex-cli'
+        ? defaults.backend.reasoningEffort
+        : null,
+      'xhigh',
+    )
   },
   ASSISTANT_CLI_TIMEOUT_MS,
 )

@@ -1,7 +1,8 @@
+import { z } from 'zod'
 import { readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
 import {
-  assistantSessionSchema,
+  assistantPersistedSessionSchema,
   assistantSessionSecretsSchema,
   type AssistantSession,
   type AssistantSessionSecrets,
@@ -12,6 +13,7 @@ import {
   mergeAssistantHeaders,
   splitAssistantHeadersForPersistence,
 } from './redaction.js'
+import { serializeAssistantSessionForPersistence } from './provider-state.js'
 import {
   ensureAssistantStateDirectory,
   isMissingFileError,
@@ -27,48 +29,36 @@ export interface AssistantSecretPersistenceResult<TPersisted> {
 
 export function extractAssistantSessionSecretsForPersistence(
   session: AssistantSession,
-): AssistantSecretPersistenceResult<AssistantSession> & {
+): AssistantSecretPersistenceResult<z.infer<typeof assistantPersistedSessionSchema>> & {
   secrets: AssistantSessionSecrets | null
 } {
   const providerHeaders = splitAssistantHeadersForPersistence(
     session.providerOptions.headers,
   )
-  const bindingHeaders = splitAssistantHeadersForPersistence(
-    session.providerBinding?.providerOptions.headers,
-  )
 
-  const persisted = assistantSessionSchema.parse({
-    ...session,
-    providerOptions: {
-      ...session.providerOptions,
-      headers: providerHeaders.persistedHeaders,
-    },
-    providerBinding: session.providerBinding
-      ? {
-          ...session.providerBinding,
-          providerOptions: {
-            ...session.providerBinding.providerOptions,
-            headers: bindingHeaders.persistedHeaders,
-          },
-        }
-      : null,
+  const persisted = assistantPersistedSessionSchema.parse({
+    ...serializeAssistantSessionForPersistence(session),
+    target:
+      session.target.adapter === 'openai-compatible'
+        ? {
+            ...session.target,
+            headers: providerHeaders.persistedHeaders,
+          }
+        : session.target,
   })
 
-  const migratedHeaderNames = [
-    ...Object.keys(providerHeaders.secretHeaders ?? {}),
-    ...Object.keys(bindingHeaders.secretHeaders ?? {}),
-  ].sort((left, right) => left.localeCompare(right))
+  const migratedHeaderNames = [...Object.keys(providerHeaders.secretHeaders ?? {})].sort(
+    (left, right) => left.localeCompare(right),
+  )
 
-  const secrets =
-    providerHeaders.secretHeaders || bindingHeaders.secretHeaders
-      ? assistantSessionSecretsSchema.parse({
+  const secrets = providerHeaders.secretHeaders
+    ? assistantSessionSecretsSchema.parse({
           schema: 'murph.assistant-session-secrets.v1',
           sessionId: session.sessionId,
           updatedAt: session.updatedAt,
           providerHeaders: providerHeaders.secretHeaders,
-          providerBindingHeaders: bindingHeaders.secretHeaders,
         })
-      : null
+    : null
 
   return {
     migratedHeaderNames,
@@ -87,25 +77,20 @@ export function mergeAssistantSessionSecrets(
 
   return {
     ...session,
+    target:
+      session.target.adapter === 'openai-compatible'
+        ? {
+            ...session.target,
+            headers: mergeAssistantHeaders(
+              session.target.headers,
+              secrets.providerHeaders,
+            ),
+          }
+        : session.target,
     providerOptions: {
       ...session.providerOptions,
-      headers: mergeAssistantHeaders(
-        session.providerOptions.headers,
-        secrets.providerHeaders,
-      ),
+      headers: mergeAssistantHeaders(session.providerOptions.headers, secrets.providerHeaders),
     },
-    providerBinding: session.providerBinding
-      ? {
-          ...session.providerBinding,
-          providerOptions: {
-            ...session.providerBinding.providerOptions,
-            headers: mergeAssistantHeaders(
-              session.providerBinding.providerOptions.headers,
-              secrets.providerBindingHeaders,
-            ),
-          },
-        }
-      : null,
   }
 }
 

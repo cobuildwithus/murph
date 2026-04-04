@@ -2177,13 +2177,11 @@ test('assistant session secrets persist in private sidecars with private permiss
 
   const persistedRaw = await readFile(sessionPath, 'utf8')
   const persisted = JSON.parse(persistedRaw) as {
-    providerBinding?: {
-      providerOptions?: {
-        headers?: Record<string, string> | null
-      } | null
-    } | null
-    providerOptions?: {
+    target?: {
       headers?: Record<string, string> | null
+    } | null
+    resumeState?: {
+      providerSessionId?: string | null
     } | null
   }
   const secretSidecar = JSON.parse(
@@ -2193,19 +2191,15 @@ test('assistant session secrets persist in private sidecars with private permiss
     providerHeaders?: Record<string, string> | null
   }
 
-  assert.deepEqual(persisted.providerOptions?.headers, {
+  assert.deepEqual(persisted.target?.headers, {
     'X-Visible': 'public-header',
   })
-  assert.deepEqual(persisted.providerBinding?.providerOptions?.headers, {
-    'X-Binding-Visible': 'binding-public',
-  })
+  assert.equal(persisted.resumeState?.providerSessionId, 'provider-session-1')
   assert.equal(/session-secret-token|binding-secret-token/u.test(persistedRaw), false)
   assert.deepEqual(secretSidecar.providerHeaders, {
     Authorization: 'Bearer session-secret-token',
   })
-  assert.deepEqual(secretSidecar.providerBindingHeaders, {
-    Authorization: 'Bearer binding-secret-token',
-  })
+  assert.equal(secretSidecar.providerBindingHeaders ?? null, null)
 
   const reloaded = await readAssistantSession({
     paths: statePaths,
@@ -2215,22 +2209,10 @@ test('assistant session secrets persist in private sidecars with private permiss
     reloaded?.providerOptions.headers?.Authorization,
     'Bearer session-secret-token',
   )
-  assert.equal(
-    reloaded?.providerBinding?.providerOptions.headers?.Authorization,
-    'Bearer binding-secret-token',
-  )
 
   const redacted = redactAssistantSessionForDisplay(reloaded!)
   assert.equal(redacted.providerOptions.headers?.Authorization, '[REDACTED]')
   assert.equal(redacted.providerOptions.headers?.['X-Visible'], 'public-header')
-  assert.equal(
-    redacted.providerBinding?.providerOptions.headers?.Authorization,
-    '[REDACTED]',
-  )
-  assert.equal(
-    redacted.providerBinding?.providerOptions.headers?.['X-Binding-Visible'],
-    'binding-public',
-  )
 
   assert.equal((await stat(statePaths.assistantStateRoot)).mode & 0o777, 0o700)
   assert.equal((await stat(statePaths.sessionsDirectory)).mode & 0o777, 0o700)

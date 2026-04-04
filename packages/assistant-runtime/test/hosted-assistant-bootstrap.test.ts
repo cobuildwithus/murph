@@ -49,13 +49,15 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
       activeProfileId: "platform-default",
       profiles: [
         {
-          apiKeyEnv: "OPENAI_API_KEY",
-          baseUrl: "https://api.openai.com/v1",
           id: "platform-default",
           managedBy: "platform",
-          model: "gpt-4.1-mini",
-          provider: "openai-compatible",
-          providerName: "openai",
+          target: {
+            adapter: "openai-compatible",
+            apiKeyEnv: "OPENAI_API_KEY",
+            endpoint: "https://api.openai.com/v1",
+            model: "gpt-4.1-mini",
+            providerName: "openai",
+          },
         },
       ],
       schema: "murph.hosted-assistant-config.v1",
@@ -89,10 +91,12 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
       profiles: [
         {
           id: "platform-default",
-          model: "gpt-5.4",
-          provider: "openai-compatible",
-          providerName: "openai",
-          reasoningEffort: "medium",
+          target: {
+            adapter: "openai-compatible",
+            model: "gpt-5.4",
+            providerName: "openai",
+            reasoningEffort: "medium",
+          },
         },
       ],
     });
@@ -124,14 +128,16 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
       activeProfileId: "platform-default",
       profiles: [
         {
-          apiKeyEnv: "VENICE_API_KEY",
-          baseUrl: "https://api.venice.ai/api/v1",
           id: "platform-default",
           managedBy: "platform",
-          model: "openai-gpt-54",
-          provider: "openai-compatible",
-          providerName: "venice",
-          reasoningEffort: "medium",
+          target: {
+            adapter: "openai-compatible",
+            apiKeyEnv: "VENICE_API_KEY",
+            endpoint: "https://api.venice.ai/api/v1",
+            model: "openai-gpt-54",
+            providerName: "venice",
+            reasoningEffort: "medium",
+          },
         },
       ],
     });
@@ -229,13 +235,15 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
       activeProfileId: "platform-default",
       profiles: [
         {
-          apiKeyEnv: "OPENAI_API_KEY",
-          baseUrl: "https://api.openai.com/v1",
           id: "platform-default",
           managedBy: "platform",
-          model: "gpt-4.1-mini",
-          provider: "openai-compatible",
-          providerName: "openai",
+          target: {
+            adapter: "openai-compatible",
+            apiKeyEnv: "OPENAI_API_KEY",
+            endpoint: "https://api.openai.com/v1",
+            model: "gpt-4.1-mini",
+            providerName: "openai",
+          },
         },
       ],
     });
@@ -254,17 +262,14 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
             id: "saved-default",
             label: "OpenAI",
             managedBy: "member",
-            provider: "openai-compatible",
-            apiKeyEnv: "OPENAI_API_KEY",
-            baseUrl: "https://api.openai.com/v1",
-            model: "gpt-4.1-mini",
-            providerName: "openai",
-            approvalPolicy: null,
-            codexCommand: null,
-            oss: false,
-            profile: null,
-            reasoningEffort: null,
-            sandbox: null,
+            target: {
+              adapter: "openai-compatible",
+              apiKeyEnv: "OPENAI_API_KEY",
+              endpoint: "https://api.openai.com/v1",
+              model: "gpt-4.1-mini",
+              providerName: "openai",
+              reasoningEffort: null,
+            },
           },
         ],
         schema: "murph.hosted-assistant-config.v1",
@@ -306,13 +311,15 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
       activeProfileId: "saved-default",
       profiles: [
         {
-          apiKeyEnv: "OPENAI_API_KEY",
-          baseUrl: "https://api.openai.com/v1",
           id: "saved-default",
           managedBy: "member",
-          model: "gpt-4.1-mini",
-          provider: "openai-compatible",
-          providerName: "openai",
+          target: {
+            adapter: "openai-compatible",
+            apiKeyEnv: "OPENAI_API_KEY",
+            endpoint: "https://api.openai.com/v1",
+            model: "gpt-4.1-mini",
+            providerName: "openai",
+          },
         },
       ],
     });
