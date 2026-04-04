@@ -22,6 +22,24 @@ describe("hosted assistant runner env policy", () => {
     });
   });
 
+  it("forwards Venice hosted assistant seed vars and the referenced api key", () => {
+    const env = buildHostedRunnerContainerEnv({
+      HOSTED_ASSISTANT_API_KEY_ENV: "VENICE_API_KEY",
+      HOSTED_ASSISTANT_MODEL: "openai-gpt-54",
+      HOSTED_ASSISTANT_PROVIDER: "venice",
+      HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
+      VENICE_API_KEY: "secret-value",
+    });
+
+    expect(env).toMatchObject({
+      HOSTED_ASSISTANT_API_KEY_ENV: "VENICE_API_KEY",
+      HOSTED_ASSISTANT_MODEL: "openai-gpt-54",
+      HOSTED_ASSISTANT_PROVIDER: "venice",
+      HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
+      VENICE_API_KEY: "secret-value",
+    });
+  });
+
   it("does not forward referenced reserved worker secrets into the runner", () => {
     const env = buildHostedRunnerContainerEnv({
       HOSTED_ASSISTANT_API_KEY_ENV: "HOSTED_EXECUTION_CONTROL_TOKEN",

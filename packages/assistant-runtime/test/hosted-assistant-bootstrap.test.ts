@@ -100,22 +100,62 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
     await expect(resolveAssistantOperatorDefaults(homeDirectory)).resolves.toBeNull();
   });
 
-  it("rejects hosted reasoning effort for non-OpenAI-compatible endpoints", async () => {
+  it("preserves hosted reasoning effort for named Venice profiles", async () => {
     const homeDirectory = await createTemporaryHomeDirectory();
 
-    await expect(
-      ensureHostedAssistantOperatorDefaults({
-        allowMissing: false,
-        env: {
-          HOSTED_ASSISTANT_MODEL: "openrouter/openai/gpt-5.4",
-          HOSTED_ASSISTANT_PROVIDER: "openrouter",
-          HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
+    const result = await ensureHostedAssistantOperatorDefaults({
+      allowMissing: false,
+      env: {
+        HOSTED_ASSISTANT_MODEL: "openai-gpt-54",
+        HOSTED_ASSISTANT_PROVIDER: "venice",
+        HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
+      },
+      homeDirectory,
+    });
+
+    expect(result).toMatchObject({
+      configured: true,
+      provider: "openai-compatible",
+      seeded: true,
+      source: "hosted-env",
+    });
+
+    await expect(resolveHostedAssistantConfig(homeDirectory)).resolves.toMatchObject({
+      activeProfileId: "platform-default",
+      profiles: [
+        {
+          apiKeyEnv: "VENICE_API_KEY",
+          baseUrl: "https://api.venice.ai/api/v1",
+          id: "platform-default",
+          managedBy: "platform",
+          model: "openai-gpt-54",
+          provider: "openai-compatible",
+          providerName: "venice",
+          reasoningEffort: "medium",
         },
-        homeDirectory,
-      }),
-    ).rejects.toMatchObject({
-      code: "HOSTED_ASSISTANT_CONFIG_INVALID",
-      name: "HostedAssistantConfigurationError",
+      ],
+    });
+  });
+
+  it("preserves hosted reasoning effort for custom OpenAI-compatible endpoints", async () => {
+    const homeDirectory = await createTemporaryHomeDirectory();
+
+    const result = await ensureHostedAssistantOperatorDefaults({
+      allowMissing: false,
+      env: {
+        HOSTED_ASSISTANT_BASE_URL: "https://router.example.test/v1",
+        HOSTED_ASSISTANT_MODEL: "gpt-5-compatible",
+        HOSTED_ASSISTANT_PROVIDER: "custom",
+        HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
+      },
+      homeDirectory,
+    });
+
+    expect(result).toMatchObject({
+      configured: true,
+      provider: "openai-compatible",
+      seeded: true,
+      source: "hosted-env",
     });
   });
 

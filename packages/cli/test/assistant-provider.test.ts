@@ -226,7 +226,7 @@ test('resolveAssistantProviderCapabilities reports shared backend-facing capabil
   })
 })
 
-test('resolveAssistantTargetCapabilities enables reasoning effort for the official OpenAI target', () => {
+test('resolveAssistantTargetCapabilities enables reasoning effort for OpenAI-compatible targets', () => {
   assert.deepEqual(
     resolveAssistantTargetCapabilities({
       provider: 'openai-compatible',
@@ -251,7 +251,7 @@ test('resolveAssistantTargetCapabilities enables reasoning effort for the offici
     {
       supportsModelDiscovery: true,
       supportsNativeResume: true,
-      supportsReasoningEffort: false,
+      supportsReasoningEffort: true,
       supportsRichUserMessageContent: true,
     },
   )
@@ -273,7 +273,7 @@ test('resolveAssistantModelCatalog keeps custom Codex models first-class in the 
   assert.equal(catalog.reasoningOptions.length, 4)
 })
 
-test('resolveAssistantModelCatalog uses discovered OpenAI-compatible models and hides reasoning options', () => {
+test('resolveAssistantModelCatalog uses discovered OpenAI-compatible models and exposes reasoning options', () => {
   const catalog = resolveAssistantModelCatalog({
     provider: 'openai-compatible',
     baseUrl: 'http://127.0.0.1:11434/v1',
@@ -288,7 +288,7 @@ test('resolveAssistantModelCatalog uses discovered OpenAI-compatible models and 
     ['gpt-oss:20b', 'llama3.3:70b'],
   )
   assert.equal(catalog.providerLabel, 'Ollama')
-  assert.deepEqual(catalog.reasoningOptions, [])
+  assert.equal(catalog.reasoningOptions.length, 4)
 })
 
 test('resolveAssistantModelCatalog exposes reasoning options for official OpenAI-compatible targets', () => {
@@ -361,7 +361,7 @@ test('resolveAssistantModelCatalog keeps the current OpenAI-compatible model sel
   })
 
   assert.equal(catalog.modelOptions[0]?.value, 'llama3.3:70b')
-  assert.deepEqual(catalog.reasoningOptions, [])
+  assert.equal(catalog.reasoningOptions.length, 4)
 })
 
 test('defaultDiscoverOpenAICompatibleModels normalizes and dedupes model ids from the models endpoint', async () => {
@@ -834,6 +834,32 @@ test('executeAssistantProviderTurn forwards reasoning effort to official OpenAI 
     openai: {
       reasoningEffort: 'medium',
       store: false,
+    },
+  })
+})
+
+test('executeAssistantProviderTurn forwards reasoning effort to Venice chat completions', async () => {
+  const languageModel = { provider: 'mock-model' }
+  providerMocks.resolveAssistantLanguageModel.mockReturnValue(languageModel)
+  providerMocks.generateText.mockResolvedValue({
+    text: 'assistant reply',
+  })
+
+  await executeAssistantProviderTurn({
+    provider: 'openai-compatible',
+    workingDirectory: '/tmp/vault',
+    baseUrl: 'https://api.venice.ai/api/v1',
+    apiKeyEnv: 'VENICE_API_KEY',
+    providerName: 'venice',
+    model: 'openai-gpt-54',
+    reasoningEffort: 'medium',
+    userPrompt: 'hello',
+  })
+
+  const generateCall = providerMocks.generateText.mock.calls[0]?.[0]
+  assert.deepEqual(generateCall?.providerOptions, {
+    venice: {
+      reasoningEffort: 'medium',
     },
   })
 })
@@ -1437,7 +1463,7 @@ test('createSetupAssistantResolver defaults Codex reasoning effort when it is no
   )
 })
 
-test('createSetupAssistantResolver accepts reasoning effort for the official OpenAI-compatible target', async () => {
+test('createSetupAssistantResolver accepts reasoning effort for OpenAI-compatible targets', async () => {
   const resolver = createSetupAssistantResolver({
     assistantAccount: {
       resolve: async () => null,
@@ -1462,7 +1488,7 @@ test('createSetupAssistantResolver accepts reasoning effort for the official Ope
   assert.equal(resolved.reasoningEffort, 'medium')
 })
 
-test('createSetupAssistantResolver rejects reasoning effort for non-OpenAI-compatible targets', async () => {
+test('createSetupAssistantResolver accepts reasoning effort for Venice', async () => {
   const resolver = createSetupAssistantResolver({
     assistantAccount: {
       resolve: async () => null,
@@ -1471,20 +1497,20 @@ test('createSetupAssistantResolver rejects reasoning effort for non-OpenAI-compa
     output: new PassThrough(),
   })
 
-  await assert.rejects(
-    () =>
-      resolver.resolve({
-        allowPrompt: false,
-        commandName: 'setup',
-        preset: 'openai-compatible',
-        options: {
-          assistantProviderPreset: 'ollama',
-          assistantModel: 'gpt-oss:20b',
-          assistantReasoningEffort: 'high',
-        } as any,
-      }),
-    /does not support assistantReasoningEffort/u,
-  )
+  const resolved = await resolver.resolve({
+    allowPrompt: false,
+    commandName: 'setup',
+    preset: 'openai-compatible',
+    options: {
+      assistantProviderPreset: 'venice',
+      assistantModel: 'openai-gpt-54',
+      assistantReasoningEffort: 'medium',
+    } as any,
+  })
+
+  assert.equal(resolved.baseUrl, 'https://api.venice.ai/api/v1')
+  assert.equal(resolved.providerName, 'venice')
+  assert.equal(resolved.reasoningEffort, 'medium')
 })
 
 test('executeAssistantProviderTurn enables reasoning summary traces when requested', async () => {

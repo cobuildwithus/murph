@@ -18,9 +18,13 @@ import {
   extractOpenAICompatibleProviderSessionId,
 } from './helpers.js'
 import type { AssistantProviderTraceUpdate } from '../provider-traces.js'
-import { normalizeNullableString } from '../shared.js'
+import {
+  normalizeAssistantProviderOptionKey,
+  normalizeNullableString,
+} from '../shared.js'
 import {
   resolveAssistantModelSpecFromProviderConfig,
+  supportsAssistantReasoningEffort,
   shouldUseAssistantOpenAIResponsesApi,
 } from '../provider-config.js'
 import type { AssistantProviderDefinition } from './types.js'
@@ -177,6 +181,25 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
     try {
       const messages = buildAssistantProviderMessages(input)
       const reasoningEffort = normalizeNullableString(providerConfig.reasoningEffort)
+      const providerOptionKey = usesOpenAIResponsesApi
+        ? 'openai'
+        : normalizeAssistantProviderOptionKey(providerConfig.providerName)
+      const providerOptionValues: Record<string, boolean | string> = {}
+
+      if (supportsAssistantReasoningEffort(providerConfig) && reasoningEffort) {
+        providerOptionValues.reasoningEffort = reasoningEffort
+      }
+
+      if (usesOpenAIResponsesApi) {
+        providerOptionValues.store = false
+
+        if (normalizeNullableString(input.resumeProviderSessionId)) {
+          providerOptionValues.previousResponseId = normalizeNullableString(
+            input.resumeProviderSessionId,
+          )!
+        }
+      }
+
       const result = await generateText({
         abortSignal: input.abortSignal,
         maxRetries: tools ? 0 : OPENAI_COMPATIBLE_PROVIDER_MAX_RETRIES,
@@ -188,24 +211,10 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
               tools,
             }
           : {}),
-        ...(usesOpenAIResponsesApi
+        ...(Object.keys(providerOptionValues).length > 0
           ? {
               providerOptions: {
-                openai: {
-                  store: false,
-                  ...(reasoningEffort
-                    ? {
-                        reasoningEffort,
-                      }
-                    : {}),
-                  ...(normalizeNullableString(input.resumeProviderSessionId)
-                    ? {
-                        previousResponseId: normalizeNullableString(
-                          input.resumeProviderSessionId,
-                        )!,
-                      }
-                    : {}),
-                },
+                [providerOptionKey]: providerOptionValues,
               },
             }
           : {}),

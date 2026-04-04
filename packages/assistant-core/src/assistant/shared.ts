@@ -52,6 +52,29 @@ export function isAssistantOpenAIBaseUrl(
   }
 }
 
+export function normalizeAssistantProviderOptionKey(
+  value: string | null | undefined,
+): string {
+  const normalized = normalizeNullableString(value)
+  const source = normalized ?? 'murph-assistant'
+  const segments = source
+    .split(/[^a-zA-Z0-9]+/u)
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+
+  if (segments.length === 0) {
+    return 'murphAssistant'
+  }
+
+  const [first, ...rest] = segments
+  return [
+    first!.charAt(0).toLowerCase() + first!.slice(1),
+    ...rest.map((segment) =>
+      segment.charAt(0).toUpperCase() + segment.slice(1),
+    ),
+  ].join('')
+}
+
 export function normalizeRequiredText(value: string, fieldName: string): string {
   const normalized = normalizeNullableString(value)
   if (normalized) {

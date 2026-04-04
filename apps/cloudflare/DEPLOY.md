@@ -120,6 +120,14 @@ Optional non-secret provider/toolchain variables to expose through the worker an
 - `WHISPER_MODEL_PATH`
 - `WHISPER_COMMAND`
 
+For Venice as the platform default hosted assistant, set these GitHub environment variables:
+
+- `HOSTED_ASSISTANT_PROVIDER=venice`
+- `HOSTED_ASSISTANT_MODEL=openai-gpt-54`
+- `HOSTED_ASSISTANT_REASONING_EFFORT=medium`
+
+You do not need to set `HOSTED_ASSISTANT_API_KEY_ENV` for that path because the Venice preset resolves it to `VENICE_API_KEY`.
+
 The default container image already installs `ffmpeg`, `pdftotext`, a pinned `whisper.cpp` `whisper-cli`, and the default `base.en` model, and it sets `FFMPEG_COMMAND`, `PDFTOTEXT_COMMAND`, `WHISPER_COMMAND`, and `WHISPER_MODEL_PATH` inside the image. Only set those vars in Worker config when you want to override the baked defaults.
 
 ### Required environment secrets
@@ -175,6 +183,7 @@ Add whichever hosted features you actually want the containerized runner to supp
 - `GOOGLE_API_KEY`
 - `GOOGLE_GENERATIVE_AI_API_KEY`
 - `OPENROUTER_API_KEY`
+- `VENICE_API_KEY`
 - `TOGETHER_API_KEY`
 - `GROQ_API_KEY`
 - `XAI_API_KEY`
