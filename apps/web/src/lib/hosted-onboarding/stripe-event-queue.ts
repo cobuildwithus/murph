@@ -39,11 +39,11 @@ const STRIPE_EVENT_RETRY_DELAYS_MS = [
   60 * 60 * 1000,
 ] as const;
 
-export type HostedStripeEventDrainResult = {
-  activatedMemberIds: string[];
+export type HostedStripeEventReconcileResult = {
+  activatedMemberId: string | null;
   createdOrUpdatedRevnetIssuance: boolean;
   eventId: string;
-  hostedExecutionEventIds: string[];
+  hostedExecutionEventId: string | null;
   status: "completed" | "failed";
 };
 
@@ -90,29 +90,14 @@ export async function recordHostedStripeEvent(input: {
 }
 
 export async function drainHostedStripeEventQueue(input: {
-  eventIds?: readonly string[];
   limit?: number;
   prisma: PrismaClient;
 }): Promise<string[]> {
-  const results = await drainHostedStripeEventQueueDetailed(input);
-
-  return results
-    .filter((result) => result.status === "completed")
-    .map((result) => result.eventId);
-}
-
-export async function drainHostedStripeEventQueueDetailed(input: {
-  eventIds?: readonly string[];
-  limit?: number;
-  prisma: PrismaClient;
-}): Promise<HostedStripeEventDrainResult[]> {
-  const results: HostedStripeEventDrainResult[] = [];
+  const drainedEventIds: string[] = [];
   let shouldDrainRevnetIssuances = false;
+  const now = new Date();
   const candidates = await input.prisma.hostedStripeEvent.findMany({
-    where: buildDueHostedStripeEventWhere({
-      eventIds: input.eventIds ?? null,
-      now: new Date(),
-    }),
+    where: buildDueHostedStripeEventWhere(now),
     orderBy: [
       {
         stripeCreatedAt: "asc",
@@ -127,6 +112,7 @@ export async function drainHostedStripeEventQueueDetailed(input: {
   for (const candidate of candidates) {
     const claimed = await claimHostedStripeEvent({
       eventId: candidate.eventId,
+      now,
       prisma: input.prisma,
       updatedAt: candidate.updatedAt,
     });
@@ -137,7 +123,9 @@ export async function drainHostedStripeEventQueueDetailed(input: {
 
     const result = await processClaimedHostedStripeEvent(claimed, input.prisma);
     shouldDrainRevnetIssuances ||= result.createdOrUpdatedRevnetIssuance;
-    results.push(result);
+    if (result.status === "completed") {
+      drainedEventIds.push(result.eventId);
+    }
   }
 
   if (shouldDrainRevnetIssuances) {
@@ -147,7 +135,36 @@ export async function drainHostedStripeEventQueueDetailed(input: {
     });
   }
 
-  return results;
+  return drainedEventIds;
+}
+
+export async function reconcileHostedStripeEventById(input: {
+  eventId: string;
+  prisma: PrismaClient;
+}): Promise<HostedStripeEventReconcileResult | null> {
+  const now = new Date();
+  const candidate = await input.prisma.hostedStripeEvent.findUnique({
+    where: {
+      eventId: input.eventId,
+    },
+  });
+
+  if (!candidate) {
+    return null;
+  }
+
+  const claimed = await claimHostedStripeEvent({
+    eventId: candidate.eventId,
+    now,
+    prisma: input.prisma,
+    updatedAt: candidate.updatedAt,
+  });
+
+  if (!claimed) {
+    return null;
+  }
+
+  return processClaimedHostedStripeEvent(claimed, input.prisma);
 }
 
 export async function reconcileSubmittedHostedRevnetIssuances(input: {
@@ -354,14 +371,12 @@ function compactHostedStripeRecord(fields: Record<string, unknown>): Prisma.Inpu
 
 async function claimHostedStripeEvent(input: {
   eventId: string;
+  now: Date;
   prisma: PrismaClient;
   updatedAt: Date;
 }) {
   const result = await input.prisma.hostedStripeEvent.updateMany({
-    where: {
-      eventId: input.eventId,
-      updatedAt: input.updatedAt,
-    },
+    where: buildClaimableHostedStripeEventWhere(input),
     data: {
       attemptCount: {
         increment: 1,
@@ -390,9 +405,9 @@ async function processHostedStripeEventRecord(
   processingContext: HostedStripeEventProcessingContext,
   prisma: Prisma.TransactionClient,
 ): Promise<{
-  activatedMemberIds: string[];
+  activatedMemberId: string | null;
   createdOrUpdatedRevnetIssuance: boolean;
-  hostedExecutionEventIds: string[];
+  hostedExecutionEventId: string | null;
 }> {
   const payload = requireHostedStripeEventPayload(event.payloadJson);
   const dispatchContext: HostedStripeDispatchContext = {
@@ -413,20 +428,12 @@ async function processHostedStripeEventRecord(
       );
     case "checkout.session.expired":
       await applyStripeCheckoutExpired(payload.object as unknown as Stripe.Checkout.Session, dispatchContext, prisma);
-      return {
-        activatedMemberIds: [],
-        createdOrUpdatedRevnetIssuance: false,
-        hostedExecutionEventIds: [],
-      };
+      return buildEmptyHostedStripeEventProcessingResult();
     case "customer.subscription.created":
     case "customer.subscription.updated":
     case "customer.subscription.deleted":
       await applyStripeSubscriptionUpdated(payload.object as unknown as Stripe.Subscription, dispatchContext, prisma);
-      return {
-        activatedMemberIds: [],
-        createdOrUpdatedRevnetIssuance: false,
-        hostedExecutionEventIds: [],
-      };
+      return buildEmptyHostedStripeEventProcessingResult();
     case "invoice.paid":
       return mapHostedStripeActivationOutcome(
         await applyStripeInvoicePaid(
@@ -437,11 +444,7 @@ async function processHostedStripeEventRecord(
       );
     case "invoice.payment_failed":
       await applyStripeInvoicePaymentFailed(payload.object as unknown as Stripe.Invoice, dispatchContext, prisma);
-      return {
-        activatedMemberIds: [],
-        createdOrUpdatedRevnetIssuance: false,
-        hostedExecutionEventIds: [],
-      };
+      return buildEmptyHostedStripeEventProcessingResult();
     case "refund.created":
       await applyStripeRefundCreated(
         payload.object as unknown as Stripe.Refund,
@@ -449,11 +452,7 @@ async function processHostedStripeEventRecord(
         prisma,
         processingContext.customerId,
       );
-      return {
-        activatedMemberIds: [],
-        createdOrUpdatedRevnetIssuance: false,
-        hostedExecutionEventIds: [],
-      };
+      return buildEmptyHostedStripeEventProcessingResult();
     case "charge.dispute.created":
     case "charge.dispute.closed":
     case "charge.dispute.funds_reinstated":
@@ -464,17 +463,9 @@ async function processHostedStripeEventRecord(
         prisma,
         processingContext.customerId,
       );
-      return {
-        activatedMemberIds: [],
-        createdOrUpdatedRevnetIssuance: false,
-        hostedExecutionEventIds: [],
-      };
+      return buildEmptyHostedStripeEventProcessingResult();
     default:
-      return {
-        activatedMemberIds: [],
-        createdOrUpdatedRevnetIssuance: false,
-        hostedExecutionEventIds: [],
-      };
+      return buildEmptyHostedStripeEventProcessingResult();
   }
 }
 
@@ -597,7 +588,7 @@ function computeHostedStripeEventNextAttemptAt(attemptCount: number, now = new D
 async function processClaimedHostedStripeEvent(
   claimed: NonNullable<Awaited<ReturnType<typeof claimHostedStripeEvent>>>,
   prisma: PrismaClient,
-): Promise<HostedStripeEventDrainResult> {
+): Promise<HostedStripeEventReconcileResult> {
   try {
     const processingContext = await prepareHostedStripeEventProcessingContext(claimed);
     let result!: Awaited<ReturnType<typeof processHostedStripeEventRecord>>;
@@ -623,10 +614,10 @@ async function processClaimedHostedStripeEvent(
     });
 
     return {
-      activatedMemberIds: result.activatedMemberIds,
+      activatedMemberId: result.activatedMemberId,
       createdOrUpdatedRevnetIssuance: result.createdOrUpdatedRevnetIssuance,
       eventId: claimed.eventId,
-      hostedExecutionEventIds: result.hostedExecutionEventIds,
+      hostedExecutionEventId: result.hostedExecutionEventId,
       status: "completed",
     };
   } catch (error) {
@@ -647,44 +638,34 @@ async function processClaimedHostedStripeEvent(
     });
 
     return {
-      activatedMemberIds: [],
+      activatedMemberId: null,
       createdOrUpdatedRevnetIssuance: false,
       eventId: claimed.eventId,
-      hostedExecutionEventIds: [],
+      hostedExecutionEventId: null,
       status: "failed",
     };
   }
 }
 
-function buildDueHostedStripeEventWhere(input: {
-  eventIds: readonly string[] | null;
-  now: Date;
-}): Prisma.HostedStripeEventWhereInput {
+function buildDueHostedStripeEventWhere(now: Date): Prisma.HostedStripeEventWhereInput {
   return {
-    ...(input.eventIds && input.eventIds.length > 0
-      ? {
-          eventId: {
-            in: [...input.eventIds],
-          },
-        }
-      : {}),
     OR: [
       {
         nextAttemptAt: {
-          lte: input.now,
+          lte: now,
         },
         status: HostedStripeEventStatus.pending,
       },
       {
         nextAttemptAt: {
-          lte: input.now,
+          lte: now,
         },
         status: HostedStripeEventStatus.failed,
       },
       {
         status: HostedStripeEventStatus.processing,
         claimExpiresAt: {
-          lte: input.now,
+          lte: now,
         },
       },
     ],
@@ -698,13 +679,37 @@ function mapHostedStripeActivationOutcome(
     hostedExecutionEventId: string | null;
   },
 ): {
-  activatedMemberIds: string[];
+  activatedMemberId: string | null;
   createdOrUpdatedRevnetIssuance: boolean;
-  hostedExecutionEventIds: string[];
+  hostedExecutionEventId: string | null;
 } {
   return {
-    activatedMemberIds: outcome.activatedMemberId ? [outcome.activatedMemberId] : [],
+    activatedMemberId: outcome.activatedMemberId,
     createdOrUpdatedRevnetIssuance: outcome.createdOrUpdatedRevnetIssuance ?? false,
-    hostedExecutionEventIds: outcome.hostedExecutionEventId ? [outcome.hostedExecutionEventId] : [],
+    hostedExecutionEventId: outcome.hostedExecutionEventId,
+  };
+}
+
+function buildEmptyHostedStripeEventProcessingResult(): {
+  activatedMemberId: string | null;
+  createdOrUpdatedRevnetIssuance: boolean;
+  hostedExecutionEventId: string | null;
+} {
+  return {
+    activatedMemberId: null,
+    createdOrUpdatedRevnetIssuance: false,
+    hostedExecutionEventId: null,
+  };
+}
+
+function buildClaimableHostedStripeEventWhere(input: {
+  eventId: string;
+  now: Date;
+  updatedAt: Date;
+}): Prisma.HostedStripeEventWhereInput {
+  return {
+    eventId: input.eventId,
+    updatedAt: input.updatedAt,
+    ...buildDueHostedStripeEventWhere(input.now),
   };
 }

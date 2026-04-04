@@ -13,9 +13,10 @@ import {
 import { drainHostedExecutionOutboxBestEffort } from "../hosted-execution/outbox";
 import { drainHostedActivationWelcomeMessages } from "./activation-welcome";
 import {
-  drainHostedStripeEventQueueDetailed,
+  reconcileHostedStripeEventById,
   recordHostedStripeEvent,
 } from "./stripe-event-queue";
+import { drainHostedRevnetIssuanceSubmissionQueue } from "./stripe-revnet-issuance";
 import { assertHostedTelegramWebhookSecret, buildHostedTelegramWebhookEventId, parseHostedTelegramWebhookUpdate } from "./telegram";
 import { runHostedWebhookWithReceipt } from "./webhook-receipts";
 import {
@@ -140,32 +141,30 @@ export async function handleHostedStripeWebhook(input: {
   });
 
   if (!recorded.duplicate) {
-    const drainedResults = await drainHostedStripeEventQueueDetailed({
-      eventIds: [
-        event.id,
-      ],
-      limit: 1,
+    const reconciled = await reconcileHostedStripeEventById({
+      eventId: event.id,
       prisma,
     });
-    const hostedExecutionEventIds = [
-      ...new Set(drainedResults.flatMap((result) => result.hostedExecutionEventIds)),
-    ];
 
-    if (hostedExecutionEventIds.length > 0) {
+    if (reconciled?.createdOrUpdatedRevnetIssuance) {
+      await drainHostedRevnetIssuanceSubmissionQueueBestEffort(prisma);
+    }
+
+    if (reconciled?.hostedExecutionEventId) {
       await drainHostedExecutionOutboxBestEffort({
-        eventIds: hostedExecutionEventIds,
-        limit: hostedExecutionEventIds.length,
+        eventIds: [
+          reconciled.hostedExecutionEventId,
+        ],
+        limit: 1,
         prisma,
       });
     }
 
-    const activatedMemberIds = [
-      ...new Set(drainedResults.flatMap((result) => result.activatedMemberIds)),
-    ];
-
-    if (activatedMemberIds.length > 0) {
+    if (reconciled?.activatedMemberId) {
       await drainHostedActivationWelcomeMessages({
-        memberIds: activatedMemberIds,
+        memberIds: [
+          reconciled.activatedMemberId,
+        ],
         prisma,
       });
     }
@@ -192,5 +191,21 @@ function constructStripeWebhookEvent(input: {
       message: error instanceof Error ? error.message : "Invalid Stripe webhook signature.",
       httpStatus: 401,
     });
+  }
+}
+
+async function drainHostedRevnetIssuanceSubmissionQueueBestEffort(
+  prisma: PrismaClient,
+): Promise<void> {
+  try {
+    await drainHostedRevnetIssuanceSubmissionQueue({
+      limit: 1,
+      prisma,
+    });
+  } catch (error) {
+    console.error(
+      "Hosted RevNet issuance best-effort drain failed.",
+      error instanceof Error ? error.message : String(error),
+    );
   }
 }

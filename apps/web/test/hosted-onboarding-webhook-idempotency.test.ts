@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => {
     claimHostedLinqQuotaReplyNotice: vi.fn(),
     drainHostedActivationWelcomeMessages: vi.fn(),
     drainHostedExecutionOutboxBestEffort: vi.fn(),
-    drainHostedStripeEventQueueDetailed: vi.fn(),
+    drainHostedRevnetIssuanceSubmissionQueue: vi.fn(),
     enqueueHostedExecutionOutbox: vi.fn(),
     incrementHostedLinqInboundDailyState: vi.fn(),
     incrementHostedLinqOutboundDailyState: vi.fn(),
@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => {
     isHostedOnboardingRevnetEnabled: vi.fn(),
     normalizeHostedWalletAddress: vi.fn((value: string | null | undefined) => value ?? null),
     requireHostedRevnetConfig: vi.fn(),
+    reconcileHostedStripeEventById: vi.fn(),
     recordHostedStripeEvent: vi.fn(),
     sendHostedLinqChatMessage: vi.fn(),
     submitHostedRevnetPayment: vi.fn(),
@@ -53,8 +54,12 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/stripe-event-queue", () => ({
-  drainHostedStripeEventQueueDetailed: mocks.drainHostedStripeEventQueueDetailed,
+  reconcileHostedStripeEventById: mocks.reconcileHostedStripeEventById,
   recordHostedStripeEvent: mocks.recordHostedStripeEvent,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/stripe-revnet-issuance", () => ({
+  drainHostedRevnetIssuanceSubmissionQueue: mocks.drainHostedRevnetIssuanceSubmissionQueue,
 }));
 
 vi.mock("../src/lib/hosted-onboarding/linq", async () => {
@@ -145,7 +150,7 @@ describe("hosted onboarding webhook retry safety", () => {
     mocks.claimHostedLinqQuotaReplyNotice.mockReset();
     mocks.drainHostedActivationWelcomeMessages.mockReset();
     mocks.drainHostedExecutionOutboxBestEffort.mockReset();
-    mocks.drainHostedStripeEventQueueDetailed.mockReset();
+    mocks.drainHostedRevnetIssuanceSubmissionQueue.mockReset();
     mocks.enqueueHostedExecutionOutbox.mockReset();
     mocks.incrementHostedLinqInboundDailyState.mockReset();
     mocks.incrementHostedLinqOutboundDailyState.mockReset();
@@ -154,6 +159,7 @@ describe("hosted onboarding webhook retry safety", () => {
     mocks.normalizeHostedWalletAddress.mockReset();
     mocks.recordHostedStripeEvent.mockReset();
     mocks.requireHostedRevnetConfig.mockReset();
+    mocks.reconcileHostedStripeEventById.mockReset();
     mocks.sendHostedLinqChatMessage.mockReset();
     mocks.submitHostedRevnetPayment.mockReset();
     mocks.stripeChargesRetrieve.mockReset();
@@ -161,7 +167,7 @@ describe("hosted onboarding webhook retry safety", () => {
     mocks.stripePaymentIntentsRetrieve.mockReset();
     mocks.drainHostedActivationWelcomeMessages.mockResolvedValue([]);
     mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
-    mocks.drainHostedStripeEventQueueDetailed.mockResolvedValue([]);
+    mocks.drainHostedRevnetIssuanceSubmissionQueue.mockResolvedValue([]);
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
@@ -178,6 +184,7 @@ describe("hosted onboarding webhook retry safety", () => {
       duplicate: false,
       type: input.event.type,
     }));
+    mocks.reconcileHostedStripeEventById.mockResolvedValue(null);
     mocks.requireHostedRevnetConfig.mockReturnValue({
       chainId: 8453,
       projectId: 1n,
@@ -872,19 +879,13 @@ describe("hosted onboarding webhook retry safety", () => {
       duplicate: false,
       type: "invoice.paid",
     });
-    mocks.drainHostedStripeEventQueueDetailed.mockResolvedValue([
-      {
-        activatedMemberIds: [
-          "member_123",
-        ],
-        createdOrUpdatedRevnetIssuance: false,
-        eventId: "evt_stripe_123",
-        hostedExecutionEventIds: [
-          "member.activated:stripe.invoice.paid:member_123:evt_stripe_123",
-        ],
-        status: "completed",
-      },
-    ]);
+    mocks.reconcileHostedStripeEventById.mockResolvedValue({
+      activatedMemberId: "member_123",
+      createdOrUpdatedRevnetIssuance: false,
+      eventId: "evt_stripe_123",
+      hostedExecutionEventId: "member.activated:stripe.invoice.paid:member_123:evt_stripe_123",
+      status: "completed",
+    });
 
     const prisma = withPrismaTransaction({});
 
@@ -906,11 +907,8 @@ describe("hosted onboarding webhook retry safety", () => {
       }),
       prisma,
     });
-    expect(mocks.drainHostedStripeEventQueueDetailed).toHaveBeenCalledWith({
-      eventIds: [
-        "evt_stripe_123",
-      ],
-      limit: 1,
+    expect(mocks.reconcileHostedStripeEventById).toHaveBeenCalledWith({
+      eventId: "evt_stripe_123",
       prisma,
     });
     expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
@@ -926,6 +924,58 @@ describe("hosted onboarding webhook retry safety", () => {
       ],
       prisma,
     });
+    expect(mocks.drainHostedRevnetIssuanceSubmissionQueue).not.toHaveBeenCalled();
+  });
+
+  it("best-effort drains RevNet submissions when inline reconciliation queues one", async () => {
+    mocks.stripeConstructEvent.mockReturnValue({
+      created: Math.floor(new Date("2026-03-28T10:00:00.000Z").getTime() / 1000),
+      data: {
+        object: {
+          customer: "cus_123",
+          id: "in_123",
+          payment_intent: "pi_123",
+          parent: {
+            subscription_details: {
+              subscription: "sub_123",
+            },
+          },
+        },
+      },
+      id: "evt_stripe_revnet_123",
+      type: "invoice.paid",
+    });
+    mocks.recordHostedStripeEvent.mockResolvedValue({
+      duplicate: false,
+      type: "invoice.paid",
+    });
+    mocks.reconcileHostedStripeEventById.mockResolvedValue({
+      activatedMemberId: null,
+      createdOrUpdatedRevnetIssuance: true,
+      eventId: "evt_stripe_revnet_123",
+      hostedExecutionEventId: null,
+      status: "completed",
+    });
+
+    const prisma = withPrismaTransaction({});
+
+    await expect(
+      handleHostedStripeWebhook({
+        prisma,
+        rawBody: JSON.stringify({ id: "evt_stripe_revnet_123" }),
+        signature: "sig_123",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      type: "invoice.paid",
+    });
+
+    expect(mocks.drainHostedRevnetIssuanceSubmissionQueue).toHaveBeenCalledWith({
+      limit: 1,
+      prisma,
+    });
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+    expect(mocks.drainHostedActivationWelcomeMessages).not.toHaveBeenCalled();
   });
 
   it("treats duplicate Stripe events as ingress duplicates without replaying durable work", async () => {
@@ -959,7 +1009,8 @@ describe("hosted onboarding webhook retry safety", () => {
       type: "invoice.paid",
     });
 
-    expect(mocks.drainHostedStripeEventQueueDetailed).not.toHaveBeenCalled();
+    expect(mocks.reconcileHostedStripeEventById).not.toHaveBeenCalled();
+    expect(mocks.drainHostedRevnetIssuanceSubmissionQueue).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
     expect(mocks.drainHostedActivationWelcomeMessages).not.toHaveBeenCalled();
   });
