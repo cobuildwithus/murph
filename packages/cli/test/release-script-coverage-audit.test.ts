@@ -84,6 +84,9 @@ describe('monorepo release flow coverage audit', () => {
     expect(rootPackageJson.scripts?.['changelog:update']).toBe('bash scripts/update-changelog.sh')
     expect(rootPackageJson.scripts?.['release:notes']).toBe('bash scripts/generate-release-notes.sh')
     expect(rootPackageJson.scripts?.['release:check']).toBe('bash scripts/release-check.sh')
+    expect(rootPackageJson.scripts?.['release:trust:github']).toBe(
+      'node scripts/configure-trusted-publishing.mjs',
+    )
     expect(rootPackageJson.scripts?.['release:patch']).toBe('bash scripts/release.sh patch')
     expect(rootPackageJson.scripts?.['release:minor']).toBe('bash scripts/release.sh minor')
     expect(rootPackageJson.scripts?.['release:major']).toBe('bash scripts/release.sh major')

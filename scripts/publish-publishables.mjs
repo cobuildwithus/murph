@@ -112,7 +112,10 @@ for (const entry of summary.packages) {
       throw new Error(
         `npm publish failed for ${entry.name}@${entry.version}. `
           + 'The package exists on npm but this workflow could not publish to the scoped package. '
-          + 'Configure npm trusted publishing for this repository/package.',
+          + 'npm trusted publishing is configured per package on npm, so every publishable '
+          + `package in this monorepo must trust cobuildwithus/murph via release.yml. Run `
+          + '`node scripts/configure-trusted-publishing.mjs` from an npm-authenticated shell '
+          + 'to attach the missing package-level trust relationship(s).',
       );
     }
 

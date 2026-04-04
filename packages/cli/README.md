@@ -127,3 +127,14 @@ bash scripts/release.sh 0.1.0-rc.1 --dry-run
 ```
 
 The release flow bumps every publishable package in the manifest to one shared version, updates `packages/cli/CHANGELOG.md`, writes `packages/cli/release-notes/v<version>.md`, and then creates a repository tag so `.github/workflows/release.yml` can pack and publish all tarballs in dependency order.
+
+npm trusted publishing is configured per package on npm, not once per repository. Because this monorepo publishes multiple `@murphai/*` packages, maintainers should bootstrap those package-level trust bindings before relying on tag-driven release publication:
+
+```bash
+pnpm release:trust:github -- --dry-run
+pnpm release:trust:github -- --yes
+```
+
+Those commands target the current publishable package set in `scripts/release-manifest.json` and bind each package to `cobuildwithus/murph` via `.github/workflows/release.yml`.
+
+If a package is already bound to the wrong workflow or repository in npm, revoke that package's existing trust entry with `npm trust list` and `npm trust revoke`, then rerun `pnpm release:trust:github -- --yes`.

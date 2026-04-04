@@ -54,6 +54,7 @@ describe('release workflow guards', () => {
     expect(workflow).toContain('node "${publish_args[@]}"')
     expect(publishHelper).toContain('version already exists')
     expect(publishHelper).toContain('Skipping ${entry.name}@${entry.version}; version already published.')
-    expect(publishHelper).toContain('Configure npm trusted publishing for this repository/package.')
+    expect(publishHelper).toContain('npm trusted publishing is configured per package on npm')
+    expect(publishHelper).toContain('node scripts/configure-trusted-publishing.mjs')
   })
 })

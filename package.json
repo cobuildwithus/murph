@@ -35,6 +35,7 @@
     "changelog:update": "bash scripts/update-changelog.sh",
     "release:notes": "bash scripts/generate-release-notes.sh",
     "release:check": "bash scripts/release-check.sh",
+    "release:trust:github": "node scripts/configure-trusted-publishing.mjs",
     "release:dry-run": "bash scripts/release.sh patch --dry-run",
     "release:patch": "bash scripts/release.sh patch",
     "release:patch:rc": "bash scripts/release.sh prepatch --preid rc",
