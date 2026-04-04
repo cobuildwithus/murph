@@ -514,7 +514,7 @@ async function handleUserKeyEnvelopeRoute(
   encodedUserId: string,
 ): Promise<Response> {
   const userId = decodeRouteParam(encodedUserId);
-  return json((await createHostedControlUserKeyStore(context).ensureUserCryptoContext(userId)).envelope);
+  return json(await createHostedControlUserKeyStore(context).readUserRootKeyEnvelope(userId));
 }
 
 async function handleUserKeyRecipientRoute(
