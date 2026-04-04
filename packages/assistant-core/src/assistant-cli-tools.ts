@@ -127,6 +127,7 @@ const assistantToolTextReadChunkBytes = 4_096
 const assistantCliExecutorToolName = 'murph.cli.run'
 const assistantCliDefaultTimeoutMs = 10 * 60 * 1000
 const assistantCliMaxTimeoutMs = 60 * 60 * 1000
+const assistantCliMaxOutputChars = 80_000
 const assistantCliRequire = createRequire(import.meta.url)
 const workspaceCliBinPath = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -337,6 +338,7 @@ async function executeAssistantCliCommand(input: {
   const redactedArgv = redactAssistantCliArgv(cliPayload.args)
   const env = sanitizeChildProcessEnv(
     prepareAssistantDirectCliEnv({
+      NO_COLOR: '1',
       ...process.env,
       ...input.input.cliEnv,
     }),
@@ -403,11 +405,11 @@ async function executeAssistantCliCommand(input: {
       })
 
       child.stdout.on('data', (chunk) => {
-        stdout += String(chunk)
+        stdout = appendAssistantCliOutputChunk(stdout, String(chunk))
       })
 
       child.stderr.on('data', (chunk) => {
-        stderr += String(chunk)
+        stderr = appendAssistantCliOutputChunk(stderr, String(chunk))
       })
 
       child.stdin.on('error', () => {
@@ -710,6 +712,19 @@ function tryParseAssistantCliJsonOutput(value: string): unknown | null {
   } catch {
     return null
   }
+}
+
+function appendAssistantCliOutputChunk(existing: string, chunk: string): string {
+  if (existing.length >= assistantCliMaxOutputChars) {
+    return existing
+  }
+
+  const remainingChars = assistantCliMaxOutputChars - existing.length
+  if (chunk.length <= remainingChars) {
+    return existing + chunk
+  }
+
+  return existing + chunk.slice(0, remainingChars)
 }
 
 function createWebSearchToolDefinitions() {
