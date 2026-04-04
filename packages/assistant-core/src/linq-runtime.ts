@@ -128,6 +128,48 @@ export async function sendLinqChatMessage(
   })
 }
 
+export async function startLinqChatTypingIndicator(
+  input: {
+    chatId: string
+  },
+  dependencies: {
+    env?: NodeJS.ProcessEnv
+    fetchImplementation?: LinqFetch
+    signal?: AbortSignal
+  } = {},
+): Promise<void> {
+  const chatId = normalizeRequiredString(input.chatId, 'chat id')
+
+  await requestLinqNoContent({
+    env: dependencies.env ?? process.env,
+    fetchImplementation: dependencies.fetchImplementation,
+    method: 'POST',
+    path: `/chats/${encodeURIComponent(chatId)}/typing`,
+    signal: dependencies.signal,
+  })
+}
+
+export async function stopLinqChatTypingIndicator(
+  input: {
+    chatId: string
+  },
+  dependencies: {
+    env?: NodeJS.ProcessEnv
+    fetchImplementation?: LinqFetch
+    signal?: AbortSignal
+  } = {},
+): Promise<void> {
+  const chatId = normalizeRequiredString(input.chatId, 'chat id')
+
+  await requestLinqNoContent({
+    env: dependencies.env ?? process.env,
+    fetchImplementation: dependencies.fetchImplementation,
+    method: 'DELETE',
+    path: `/chats/${encodeURIComponent(chatId)}/typing`,
+    signal: dependencies.signal,
+  })
+}
+
 export async function createLinqChat(
   input: {
     from: string
@@ -207,7 +249,7 @@ export async function createLinqWebhookSubscription(
 async function requestLinqJson<T>(input: {
   env: NodeJS.ProcessEnv
   fetchImplementation?: LinqFetch
-  method: 'GET' | 'POST'
+  method: LinqHttpMethod
   path: string
   body?: Record<string, unknown>
   signal?: AbortSignal
@@ -257,10 +299,62 @@ async function requestLinqJson<T>(input: {
   })
 }
 
+async function requestLinqNoContent(input: {
+  env: NodeJS.ProcessEnv
+  fetchImplementation?: LinqFetch
+  method: LinqHttpMethod
+  path: string
+  signal?: AbortSignal
+}): Promise<void> {
+  const token = resolveLinqApiToken(input.env)
+  if (!token) {
+    throw new VaultCliError(
+      'LINQ_API_TOKEN_REQUIRED',
+      'Linq access requires LINQ_API_TOKEN.',
+    )
+  }
+
+  const fetchImplementation = input.fetchImplementation ?? globalThis.fetch?.bind(globalThis)
+  if (typeof fetchImplementation !== 'function') {
+    throw new VaultCliError(
+      'LINQ_UNAVAILABLE',
+      'Linq access requires fetch support in the current Node.js runtime.',
+    )
+  }
+
+  const baseUrl = normalizeLinqBaseUrl(
+    resolveLinqApiBaseUrl(input.env) ?? DEFAULT_LINQ_API_BASE_URL,
+  )
+  const url = new URL(input.path.replace(/^\//u, ''), `${baseUrl}/`)
+
+  await requestJsonWithRetry<void, LinqFetchResponse>({
+    createHttpError: (response) =>
+      createLinqHttpError(response, input.method, input.path),
+    fetchResponse: () =>
+      fetchLinqResponse({
+        fetchImplementation,
+        url: url.toString(),
+        method: input.method,
+        headers: {
+          authorization: `Bearer ${token}`,
+        },
+        signal: input.signal,
+        path: input.path,
+      }),
+    isRetryableError: isRetryableLinqRequestError,
+    maxAttempts: LINQ_HTTP_MAX_ATTEMPTS,
+    parseResponse: async () => undefined,
+    signal: input.signal,
+    waitForRetryDelay: waitForLinqRetryDelay,
+  })
+}
+
+type LinqHttpMethod = 'DELETE' | 'GET' | 'POST'
+
 async function fetchLinqResponse(input: {
   fetchImplementation: LinqFetch
   url: string
-  method: 'GET' | 'POST'
+  method: LinqHttpMethod
   path: string
   headers: Record<string, string>
   body?: string
@@ -287,7 +381,7 @@ async function fetchLinqResponse(input: {
 
 async function createLinqHttpError(
   response: LinqFetchResponse,
-  method: 'GET' | 'POST',
+  method: LinqHttpMethod,
   path: string,
 ): Promise<VaultCliError> {
   const { payload, rawText } = await readJsonErrorResponse(response)
@@ -306,7 +400,7 @@ async function createLinqHttpError(
 }
 
 function createLinqRequestError(input: {
-  method: 'GET' | 'POST'
+  method: LinqHttpMethod
   path: string
   error: unknown
   timedOut: boolean
@@ -338,7 +432,7 @@ function isRetryableLinqRequestError(error: unknown): error is VaultCliError {
   )
 }
 
-function shouldRetryLinqHttpStatus(method: 'GET' | 'POST', status: number): boolean {
+function shouldRetryLinqHttpStatus(method: LinqHttpMethod, status: number): boolean {
   if (status === 429) {
     return true
   }
@@ -346,7 +440,7 @@ function shouldRetryLinqHttpStatus(method: 'GET' | 'POST', status: number): bool
   return method === 'GET' && (status === 408 || status >= 500)
 }
 
-function shouldRetryLinqTransportFailure(method: 'GET' | 'POST'): boolean {
+function shouldRetryLinqTransportFailure(method: LinqHttpMethod): boolean {
   return method === 'GET'
 }
 

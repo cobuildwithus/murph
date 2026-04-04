@@ -1806,6 +1806,110 @@ test('sendAssistantMessage skips typing indicators for queue-only deliveries', a
   assert.equal(serviceMocks.getAssistantChannelAdapter.mock.calls.length, 0)
 })
 
+test('sendAssistantMessage ignores typing indicator start failures', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-typing-start-failure-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  serviceMocks.getAssistantChannelAdapter.mockImplementation(() => ({
+    startTypingIndicator: async () => {
+      throw new Error('typing start failed')
+    },
+  }))
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-typing-start-failure',
+    response: 'Start failure reply.',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+  serviceMocks.deliverAssistantMessageOverBinding.mockResolvedValue({
+    delivery: {
+      channel: 'telegram',
+      target: 'telegram-thread-start-failure',
+      targetKind: 'thread',
+      sentAt: '2026-04-04T04:00:00.000Z',
+      messageLength: 'Start failure reply.'.length,
+    },
+    deliveryDeduplicated: false,
+    outboxIntentId: 'outbox_telegram_typing_start_failure',
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    channel: 'telegram',
+    participantId: 'telegram-user-start-failure',
+    sourceThreadId: 'telegram-thread-start-failure',
+    threadIsDirect: true,
+    prompt: 'say hello despite typing failure',
+    deliverResponse: true,
+  })
+
+  assert.equal(result.status, 'completed')
+  assert.equal(result.response, 'Start failure reply.')
+  assert.equal(serviceMocks.executeAssistantProviderTurn.mock.calls.length, 1)
+})
+
+test('sendAssistantMessage ignores typing indicator stop failures', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-typing-stop-failure-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  const lifecycle: string[] = []
+  serviceMocks.getAssistantChannelAdapter.mockImplementation(() => ({
+    startTypingIndicator: async () => {
+      lifecycle.push('start')
+      return {
+        stop: async () => {
+          lifecycle.push('stop')
+          throw new Error('typing stop failed')
+        },
+      }
+    },
+  }))
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async () => {
+    lifecycle.push('provider')
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-typing-stop-failure',
+      response: 'Stop failure reply.',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+  serviceMocks.deliverAssistantMessageOverBinding.mockResolvedValue({
+    delivery: {
+      channel: 'telegram',
+      target: 'telegram-thread-stop-failure',
+      targetKind: 'thread',
+      sentAt: '2026-04-04T04:00:00.000Z',
+      messageLength: 'Stop failure reply.'.length,
+    },
+    deliveryDeduplicated: false,
+    outboxIntentId: 'outbox_telegram_typing_stop_failure',
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    channel: 'telegram',
+    participantId: 'telegram-user-stop-failure',
+    sourceThreadId: 'telegram-thread-stop-failure',
+    threadIsDirect: true,
+    prompt: 'say hello and ignore stop failure',
+    deliverResponse: true,
+  })
+
+  assert.equal(result.status, 'completed')
+  assert.equal(result.response, 'Stop failure reply.')
+  assert.deepEqual(lifecycle, ['start', 'provider', 'stop'])
+})
+
 test('sendAssistantMessage replays the local transcript for OpenAI-compatible sessions and keeps provider session ids local-only', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-openai-compatible-'))
   const homeRoot = path.join(parent, 'home')

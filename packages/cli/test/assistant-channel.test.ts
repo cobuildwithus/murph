@@ -12,6 +12,8 @@ import {
   sendImessageMessage,
   sendLinqMessage,
   sendTelegramMessage,
+  startLinqTypingIndicator,
+  startTelegramTypingIndicator,
 } from '@murphai/assistant-core/assistant/channel-adapters'
 import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 
@@ -782,45 +784,54 @@ test('sendEmailMessage retries AgentMail send requests after a 429 response', as
   }> = []
   let attempt = 0
 
-  await sendEmailMessage(
-    {
-      identityId: 'inbox_123',
-      message: 'Daily summary',
-      target: 'user@example.com',
-      targetKind: 'participant',
-    },
-    {
-      env: {
-        AGENTMAIL_API_KEY: 'agentmail-key',
-        AGENTMAIL_BASE_URL: 'https://mail.example.test/v0',
-      },
-      fetchImplementation: async (url, init) => {
-        attempt += 1
-        requests.push({
-          method: init.method,
-          url,
-        })
+  vi.useFakeTimers()
 
-        if (attempt === 1) {
+  try {
+    const sendPromise = sendEmailMessage(
+      {
+        identityId: 'inbox_123',
+        message: 'Daily summary',
+        target: 'user@example.com',
+        targetKind: 'participant',
+      },
+      {
+        env: {
+          AGENTMAIL_API_KEY: 'agentmail-key',
+          AGENTMAIL_BASE_URL: 'https://mail.example.test/v0',
+        },
+        fetchImplementation: async (url, init) => {
+          attempt += 1
+          requests.push({
+            method: init.method,
+            url,
+          })
+
+          if (attempt === 1) {
+            return {
+              ok: false,
+              status: 429,
+              json: async () => ({ message: 'Rate limited' }),
+              text: async () => '',
+              arrayBuffer: async () => new ArrayBuffer(0),
+            }
+          }
+
           return {
-            ok: false,
-            status: 429,
-            json: async () => ({ message: 'Rate limited' }),
+            ok: true,
+            status: 200,
+            json: async () => ({ message_id: 'msg_1', thread_id: 'thr_1' }),
             text: async () => '',
             arrayBuffer: async () => new ArrayBuffer(0),
           }
-        }
-
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ message_id: 'msg_1', thread_id: 'thr_1' }),
-          text: async () => '',
-          arrayBuffer: async () => new ArrayBuffer(0),
-        }
+        },
       },
-    },
-  )
+    )
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await sendPromise
+  } finally {
+    vi.useRealTimers()
+  }
 
   assert.equal(requests.length, 2)
   assert.equal(requests[0]?.method, 'POST')
@@ -1163,48 +1174,57 @@ test('sendLinqMessage retries Linq sends after a 429 response', async () => {
   }> = []
   let attempt = 0
 
-  await sendLinqMessage(
-    {
-      message: 'Queued the Linq reply.',
-      target: 'chat_123',
-    },
-    {
-      env: {
-        LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
-        LINQ_API_TOKEN: 'linq-token',
-      },
-      fetchImplementation: async (url, init) => {
-        attempt += 1
-        requests.push({
-          method: init.method,
-          url,
-        })
+  vi.useFakeTimers()
 
-        if (attempt === 1) {
+  try {
+    const sendPromise = sendLinqMessage(
+      {
+        message: 'Queued the Linq reply.',
+        target: 'chat_123',
+      },
+      {
+        env: {
+          LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
+          LINQ_API_TOKEN: 'linq-token',
+        },
+        fetchImplementation: async (url, init) => {
+          attempt += 1
+          requests.push({
+            method: init.method,
+            url,
+          })
+
+          if (attempt === 1) {
+            return {
+              ok: false,
+              status: 429,
+              json: async () => ({ message: 'Rate limited' }),
+              text: async () => '',
+              arrayBuffer: async () => new ArrayBuffer(0),
+            }
+          }
+
           return {
-            ok: false,
-            status: 429,
-            json: async () => ({ message: 'Rate limited' }),
+            ok: true,
+            status: 200,
+            json: async () => ({
+              chat_id: 'chat_123',
+              message: {
+                id: 'msg_1',
+              },
+            }),
             text: async () => '',
             arrayBuffer: async () => new ArrayBuffer(0),
           }
-        }
-
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
-            chat_id: 'chat_123',
-            message: {
-              id: 'msg_1',
-            },
-          }),
-          text: async () => '',
-          arrayBuffer: async () => new ArrayBuffer(0),
-        }
+        },
       },
-    },
-  )
+    )
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await sendPromise
+  } finally {
+    vi.useRealTimers()
+  }
 
   assert.equal(requests.length, 2)
   assert.equal(requests[0]?.method, 'POST')
@@ -1474,6 +1494,62 @@ test('sendLinqMessage requires an API token before attempting delivery', async (
   )
 })
 
+test('startLinqTypingIndicator starts and stops via the Linq typing endpoint', async () => {
+  const requests: Array<{
+    headers: Record<string, string> | undefined
+    method: string
+    url: string
+  }> = []
+
+  const handle = await startLinqTypingIndicator(
+    {
+      target: 'chat_123',
+    },
+    {
+      env: {
+        LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
+        LINQ_API_TOKEN: 'linq-token',
+      },
+      fetchImplementation: async (url, init) => {
+        requests.push({
+          headers: init.headers,
+          method: init.method,
+          url,
+        })
+
+        return {
+          ok: true,
+          status: 204,
+          json: async () => null,
+          text: async () => '',
+          arrayBuffer: async () => new ArrayBuffer(0),
+        }
+      },
+    },
+  )
+
+  await handle.stop()
+
+  assert.deepEqual(
+    requests.map((request) => ({
+      method: request.method,
+      url: request.url,
+    })),
+    [
+      {
+        method: 'POST',
+        url: 'https://linq.example.test/api/partner/v3/chats/chat_123/typing',
+      },
+      {
+        method: 'DELETE',
+        url: 'https://linq.example.test/api/partner/v3/chats/chat_123/typing',
+      },
+    ],
+  )
+  assert.equal(requests[0]?.headers?.authorization, 'Bearer linq-token')
+  assert.equal(requests[1]?.headers?.authorization, 'Bearer linq-token')
+})
+
 test('sendTelegramMessage retries migrated chat ids and preserves topic routing across chunks', async () => {
   const longMessage = `${'A'.repeat(4096)}B`
   const requests: Array<Record<string, unknown>> = []
@@ -1537,59 +1613,126 @@ test('sendTelegramMessage retries migrated chat ids and preserves topic routing 
   ])
 })
 
+test('startTelegramTypingIndicator posts sendChatAction payloads and refreshes until stopped', async () => {
+  const requests: Array<{
+    body: Record<string, unknown>
+    headers: Record<string, string> | undefined
+    method: string
+    url: string
+  }> = []
+
+  vi.useFakeTimers()
+  try {
+    const handle = await startTelegramTypingIndicator(
+      {
+        target: '-1001234567890:topic:42',
+      },
+      {
+        env: {
+          TELEGRAM_API_BASE_URL: 'https://bot.example.test/',
+          TELEGRAM_BOT_TOKEN: 'token-123',
+        },
+        fetchImplementation: async (url, init) => {
+          requests.push({
+            body: JSON.parse(init.body ?? '{}') as Record<string, unknown>,
+            headers: init.headers,
+            method: init.method,
+            url,
+          })
+
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ ok: true, result: true }),
+          }
+        },
+      },
+    )
+
+    assert.equal(
+      requests[0]?.url,
+      'https://bot.example.test/bottoken-123/sendChatAction',
+    )
+    assert.equal(requests[0]?.method, 'POST')
+    assert.equal(requests[0]?.headers?.['content-type'], 'application/json')
+    assert.deepEqual(requests[0]?.body, {
+      action: 'typing',
+      chat_id: '-1001234567890',
+      message_thread_id: 42,
+    })
+
+    await vi.advanceTimersByTimeAsync(4_000)
+    assert.equal(requests.length, 2)
+    assert.deepEqual(requests[1]?.body, requests[0]?.body)
+
+    await handle.stop()
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
 test('sendTelegramMessage keeps retry budget available after Telegram reports a migrated chat id', async () => {
   const requests: Array<Record<string, unknown>> = []
   let callCount = 0
 
-  await sendTelegramMessage(
-    {
-      message: 'Retry after migration.',
-      target: '-1001234567890:topic:42',
-    },
-    {
-      env: {
-        TELEGRAM_BOT_TOKEN: 'token-123',
+  vi.useFakeTimers()
+
+  try {
+    const sendPromise = sendTelegramMessage(
+      {
+        message: 'Retry after migration.',
+        target: '-1001234567890:topic:42',
       },
-      fetchImplementation: async (_url, init) => {
-        callCount += 1
-        const body = JSON.parse(init.body ?? '{}') as Record<string, unknown>
-        requests.push(body)
+      {
+        env: {
+          TELEGRAM_BOT_TOKEN: 'token-123',
+        },
+        fetchImplementation: async (_url, init) => {
+          callCount += 1
+          const body = JSON.parse(init.body ?? '{}') as Record<string, unknown>
+          requests.push(body)
 
-        if (callCount <= 2) {
-          return {
-            ok: false,
-            status: 500,
-            json: async () => ({
+          if (callCount <= 2) {
+            return {
               ok: false,
-              error_code: 500,
-              description: 'Internal Server Error',
-            }),
+              status: 500,
+              json: async () => ({
+                ok: false,
+                error_code: 500,
+                description: 'Internal Server Error',
+              }),
+            }
           }
-        }
 
-        if (callCount === 3) {
-          return {
-            ok: false,
-            status: 400,
-            json: async () => ({
+          if (callCount === 3) {
+            return {
               ok: false,
-              error_code: 400,
-              description: 'Bad Request: group chat was upgraded to a supergroup chat',
-              parameters: {
-                migrate_to_chat_id: -1009876543210,
-              },
-            }),
+              status: 400,
+              json: async () => ({
+                ok: false,
+                error_code: 400,
+                description: 'Bad Request: group chat was upgraded to a supergroup chat',
+                parameters: {
+                  migrate_to_chat_id: -1009876543210,
+                },
+              }),
+            }
           }
-        }
 
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ ok: true, result: { message_id: callCount } }),
-        }
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ ok: true, result: { message_id: callCount } }),
+          }
+        },
       },
-    },
-  )
+    )
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await sendPromise
+  } finally {
+    vi.useRealTimers()
+  }
 
   assert.equal(requests.length, 4)
   assert.deepEqual(requests.map((request) => request.chat_id), [
@@ -1604,70 +1747,79 @@ test('sendTelegramMessage retries transient failures after a migrated chat id wi
   const requests: Array<Record<string, unknown>> = []
   let callCount = 0
 
-  await sendTelegramMessage(
-    {
-      message: 'Retry after migration and keep the topic.',
-      target: '-1001234567890:topic:42',
-    },
-    {
-      env: {
-        TELEGRAM_BOT_TOKEN: 'token-123',
+  vi.useFakeTimers()
+
+  try {
+    const sendPromise = sendTelegramMessage(
+      {
+        message: 'Retry after migration and keep the topic.',
+        target: '-1001234567890:topic:42',
       },
-      fetchImplementation: async (_url, init) => {
-        callCount += 1
-        const body = JSON.parse(init.body ?? '{}') as Record<string, unknown>
-        requests.push(body)
+      {
+        env: {
+          TELEGRAM_BOT_TOKEN: 'token-123',
+        },
+        fetchImplementation: async (_url, init) => {
+          callCount += 1
+          const body = JSON.parse(init.body ?? '{}') as Record<string, unknown>
+          requests.push(body)
 
-        if (callCount === 1) {
-          return {
-            ok: false,
-            status: 500,
-            json: async () => ({
+          if (callCount === 1) {
+            return {
               ok: false,
-              error_code: 500,
-              description: 'Internal Server Error',
-            }),
+              status: 500,
+              json: async () => ({
+                ok: false,
+                error_code: 500,
+                description: 'Internal Server Error',
+              }),
+            }
           }
-        }
 
-        if (callCount === 2) {
-          return {
-            ok: false,
-            status: 400,
-            json: async () => ({
+          if (callCount === 2) {
+            return {
               ok: false,
-              error_code: 400,
-              description: 'Bad Request: group chat was upgraded to a supergroup chat',
-              parameters: {
-                migrate_to_chat_id: -1009876543210,
-              },
-            }),
+              status: 400,
+              json: async () => ({
+                ok: false,
+                error_code: 400,
+                description: 'Bad Request: group chat was upgraded to a supergroup chat',
+                parameters: {
+                  migrate_to_chat_id: -1009876543210,
+                },
+              }),
+            }
           }
-        }
 
-        if (callCount === 3) {
-          return {
-            ok: false,
-            status: 429,
-            json: async () => ({
+          if (callCount === 3) {
+            return {
               ok: false,
-              error_code: 429,
-              description: 'Too Many Requests: retry later',
-              parameters: {
-                retry_after: 0.001,
-              },
-            }),
+              status: 429,
+              json: async () => ({
+                ok: false,
+                error_code: 429,
+                description: 'Too Many Requests: retry later',
+                parameters: {
+                  retry_after: 0.001,
+                },
+              }),
+            }
           }
-        }
 
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ ok: true, result: { message_id: callCount } }),
-        }
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ ok: true, result: { message_id: callCount } }),
+          }
+        },
       },
-    },
-  )
+    )
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await sendPromise
+  } finally {
+    vi.useRealTimers()
+  }
 
   assert.equal(requests.length, 4)
   assert.deepEqual(requests, [
