@@ -193,9 +193,6 @@ export async function issueHostedInvite(input: {
         },
         data: {
           channel: input.channel,
-          linqChatId: null,
-          linqEventId: null,
-          triggerText: null,
         },
       });
     }
@@ -207,9 +204,6 @@ export async function issueHostedInvite(input: {
         inviteCode: generateHostedInviteCode(),
         status: HostedInviteStatus.pending,
         channel: input.channel,
-        triggerText: null,
-        linqChatId: null,
-        linqEventId: null,
         expiresAt: inviteExpiresAt(now, getHostedOnboardingEnvironment().inviteTtlHours),
       },
     });

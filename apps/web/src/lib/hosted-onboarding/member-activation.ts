@@ -5,7 +5,6 @@ import {
 } from "@murphai/hosted-execution";
 
 export function buildHostedMemberActivationDispatch(input: {
-  firstContact: HostedExecutionMemberActivatedEvent["firstContact"];
   memberId: string;
   occurredAt: string;
   sourceEventId: string;
@@ -13,7 +12,6 @@ export function buildHostedMemberActivationDispatch(input: {
 }): HostedExecutionDispatchRequest {
   return buildHostedExecutionMemberActivatedDispatch({
     eventId: buildHostedMemberActivationEventId(input),
-    firstContact: input.firstContact,
     memberId: input.memberId,
     occurredAt: input.occurredAt,
   });

@@ -54,16 +54,16 @@ vi.mock("@/src/lib/hosted-onboarding/revnet", () => ({
 }));
 
 import {
-  drainHostedStripeEventQueue,
+  reconcileDueHostedStripeEvents,
   recordHostedStripeEvent,
   reconcileHostedStripeEventById,
   reconcileSubmittedHostedRevnetIssuances,
-} from "@/src/lib/hosted-onboarding/stripe-event-queue";
+} from "@/src/lib/hosted-onboarding/stripe-event-reconciliation";
 import { drainHostedRevnetIssuanceSubmissionQueue } from "@/src/lib/hosted-onboarding/stripe-revnet-issuance";
 
-type HostedStripeEventQueuePrisma = Parameters<typeof drainHostedStripeEventQueue>[0]["prisma"];
+type HostedStripeEventQueuePrisma = Parameters<typeof reconcileDueHostedStripeEvents>[0]["prisma"];
 
-describe("hosted Stripe event queue", () => {
+describe("hosted Stripe event reconciliation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
@@ -235,7 +235,7 @@ describe("hosted Stripe event queue", () => {
       type: "checkout.session.completed",
     });
 
-    await drainHostedStripeEventQueue({
+    await reconcileDueHostedStripeEvents({
       prisma: harness.prisma,
     });
 
@@ -536,12 +536,8 @@ describe("hosted Stripe event queue", () => {
       expect.objectContaining({
         dispatch: expect.objectContaining({
           event: expect.objectContaining({
-            firstContact: {
-              channel: "linq",
-              identityId: harness.members[0]?.normalizedPhoneNumber,
-              threadId: "chat_signup_123",
-              threadIsDirect: true,
-            },
+            kind: "member.activated",
+            userId: "member_123",
           }),
         }),
         sourceId: "stripe:evt_invoice_paid_123",
@@ -608,12 +604,8 @@ describe("hosted Stripe event queue", () => {
       expect.objectContaining({
         dispatch: expect.objectContaining({
           event: expect.objectContaining({
-            firstContact: {
-              channel: "linq",
-              identityId: harness.members[0]?.normalizedPhoneNumber,
-              threadId: "chat_signup_123",
-              threadIsDirect: true,
-            },
+            kind: "member.activated",
+            userId: "member_123",
           }),
         }),
       }),
@@ -1481,7 +1473,7 @@ describe("hosted Stripe event queue", () => {
       prisma: harness.prisma,
     });
 
-    await drainHostedStripeEventQueue({
+    await reconcileDueHostedStripeEvents({
       prisma: harness.prisma,
     });
 
@@ -1496,7 +1488,7 @@ describe("hosted Stripe event queue", () => {
       status: HostedStripeEventStatus.completed,
     });
 
-    await drainHostedStripeEventQueue({
+    await reconcileDueHostedStripeEvents({
       prisma: harness.prisma,
     });
 
@@ -1539,7 +1531,7 @@ describe("hosted Stripe event queue", () => {
       prisma: harness.prisma,
     });
 
-    await drainHostedStripeEventQueue({
+    await reconcileDueHostedStripeEvents({
       prisma: harness.prisma,
     });
 
@@ -1550,7 +1542,7 @@ describe("hosted Stripe event queue", () => {
     });
     expect(harness.stripeEvents[0].nextAttemptAt.getTime()).toBeGreaterThan(Date.now());
 
-    await drainHostedStripeEventQueue({
+    await reconcileDueHostedStripeEvents({
       prisma: harness.prisma,
     });
 
@@ -1562,7 +1554,7 @@ describe("hosted Stripe event queue", () => {
     harness.stripeEvents[0].attemptCount = 5;
     harness.stripeEvents[0].nextAttemptAt = new Date(Date.now() - 1);
 
-    await drainHostedStripeEventQueue({
+    await reconcileDueHostedStripeEvents({
       prisma: harness.prisma,
     });
 
@@ -1708,7 +1700,6 @@ describe("hosted Stripe event queue", () => {
       expect.objectContaining({
         dispatch: expect.objectContaining({
           event: expect.objectContaining({
-            firstContact: null,
             kind: "member.activated",
             userId: "member_123",
           }),
@@ -1790,7 +1781,6 @@ describe("hosted Stripe event queue", () => {
       expect.objectContaining({
         dispatch: expect.objectContaining({
           event: expect.objectContaining({
-            firstContact: null,
             kind: "member.activated",
             userId: "member_123",
           }),
@@ -1887,7 +1877,7 @@ describe("hosted Stripe event queue", () => {
     harness.stripeEvents[0].processedAt = null;
     harness.stripeEvents[0].status = HostedStripeEventStatus.processing;
 
-    await drainHostedStripeEventQueue({
+    await reconcileDueHostedStripeEvents({
       prisma: harness.prisma,
     });
 
@@ -2084,7 +2074,7 @@ async function recordAndDrainStripeEvent(input: {
   prisma: Parameters<typeof recordHostedStripeEvent>[0]["prisma"];
 }) {
   await recordHostedStripeEvent(input);
-  await drainHostedStripeEventQueue({
+  await reconcileDueHostedStripeEvents({
     prisma: input.prisma,
   });
   await drainHostedRevnetIssuanceSubmissionQueue({
@@ -2132,8 +2122,6 @@ function makeMember(overrides: Partial<MutableMember> = {}): MutableMember {
     billingStatus: HostedBillingStatus.not_started,
     id: "member_123",
     linqChatId: null,
-    onboardingWelcomeQueuedAt: null,
-    onboardingWelcomeSentAt: null,
     normalizedPhoneNumber: "+15551234567",
     status: HostedMemberStatus.registered,
     stripeCustomerId: "cus_123",
@@ -2703,8 +2691,6 @@ type MutableMember = {
   id: string;
   linqChatId: string | null;
   normalizedPhoneNumber: string;
-  onboardingWelcomeQueuedAt: Date | null;
-  onboardingWelcomeSentAt: Date | null;
   status: HostedMemberStatus;
   stripeCustomerId: string | null;
   stripeLatestBillingEventCreatedAt: Date | null;

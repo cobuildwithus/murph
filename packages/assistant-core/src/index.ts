@@ -104,6 +104,7 @@ export {
 
 export {
   openAssistantConversation,
+  queueAssistantFirstContactWelcome,
   sendAssistantFirstContactWelcome,
   sendAssistantMessage,
   updateAssistantSessionOptions,

@@ -103,15 +103,12 @@ function makeInvite(member: ReturnType<typeof makeMember>, overrides: Record<str
     expiresAt: new Date("2026-03-27T12:00:00.000Z"),
     id: "invite_123",
     inviteCode: "invite-code",
-    linqChatId: null,
-    linqEventId: null,
     member,
     memberId: member.id,
     openedAt: NOW,
     paidAt: null,
     sentAt: NOW,
     status: HostedInviteStatus.opened,
-    triggerText: null,
     updatedAt: NOW,
     ...overrides,
   };
@@ -231,11 +228,8 @@ describe("completeHostedPrivyVerification", () => {
     expect(prisma.hostedInvite.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         channel: "web",
-        linqChatId: null,
-        linqEventId: null,
         memberId: "member_new",
         status: HostedInviteStatus.pending,
-        triggerText: null,
       }),
     });
     expect(prisma.hostedInvite.update).toHaveBeenCalledWith({

@@ -4,8 +4,8 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   prepareHostedDispatchContext: vi.fn(async () => null),
-  sendAssistantFirstContactWelcome: vi.fn(async () => ({
-    reason: "sent",
+  queueAssistantFirstContactWelcome: vi.fn(async () => ({
+    reason: "queued",
     session: {
       alias: null,
       binding: {
@@ -48,7 +48,7 @@ vi.mock("@murphai/gateway-local", () => ({
 }));
 
 vi.mock("@murphai/assistant-core", () => ({
-  sendAssistantFirstContactWelcome: mocks.sendAssistantFirstContactWelcome,
+  queueAssistantFirstContactWelcome: mocks.queueAssistantFirstContactWelcome,
 }));
 
 vi.mock("../src/hosted-runtime/context.ts", () => ({
@@ -121,7 +121,7 @@ test("hosted gateway dispatch forwards clientRequestId to the local gateway send
   });
 });
 
-test("hosted member activation dispatch sends the first-contact welcome through assistant-core", async () => {
+test("hosted member activation dispatch queues the first-contact welcome through assistant-core", async () => {
   const { executeHostedDispatchEvent } = await import("../src/hosted-runtime/events.ts");
 
   const metrics = await executeHostedDispatchEvent({
@@ -160,7 +160,7 @@ test("hosted member activation dispatch sends the first-contact welcome through 
     shareImportResult: null,
     shareImportTitle: null,
   });
-  expect(mocks.sendAssistantFirstContactWelcome).toHaveBeenCalledWith({
+  expect(mocks.queueAssistantFirstContactWelcome).toHaveBeenCalledWith({
     channel: "linq",
     identityId: "hbidx:phone:v1:test",
     threadId: "chat_123",

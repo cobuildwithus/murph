@@ -24,13 +24,28 @@ export interface AssistantFirstContactWelcomeInput extends Pick<
 }
 
 export interface AssistantFirstContactWelcomeResult {
-  reason: 'already-seen' | 'existing-session' | 'sent'
+  reason: 'already-seen' | 'existing-session' | 'queued' | 'sent'
   session: AssistantSession
   turnId: string | null
 }
 
+type AssistantFirstContactWelcomeMode = 'queue' | 'send'
+
 export async function sendAssistantFirstContactWelcomeLocal(
   input: AssistantFirstContactWelcomeInput,
+): Promise<AssistantFirstContactWelcomeResult> {
+  return runAssistantFirstContactWelcomeLocal(input, 'send')
+}
+
+export async function queueAssistantFirstContactWelcomeLocal(
+  input: AssistantFirstContactWelcomeInput,
+): Promise<AssistantFirstContactWelcomeResult> {
+  return runAssistantFirstContactWelcomeLocal(input, 'queue')
+}
+
+async function runAssistantFirstContactWelcomeLocal(
+  input: AssistantFirstContactWelcomeInput,
+  mode: AssistantFirstContactWelcomeMode,
 ): Promise<AssistantFirstContactWelcomeResult> {
   const defaults = await resolveAssistantOperatorDefaults()
 
@@ -123,7 +138,7 @@ export async function sendAssistantFirstContactWelcomeLocal(
           sessionId: resolved.session.sessionId,
           turnId,
         })
-      const outcome = await state.outbox.deliverMessage({
+      const outboxInput = {
         bindingDelivery: resolved.session.binding.delivery,
         channel: resolved.session.binding.channel,
         dedupeToken: 'assistant-first-contact-welcome',
@@ -136,7 +151,53 @@ export async function sendAssistantFirstContactWelcomeLocal(
         threadId: resolved.session.binding.threadId,
         threadIsDirect: resolved.session.binding.threadIsDirect,
         turnId: receipt.turnId,
-      })
+      }
+
+      if (mode === 'queue') {
+        const intent = await state.outbox.createIntent(outboxInput)
+        await state.transcripts.append(
+          resolved.session.sessionId,
+          [
+            {
+              kind: 'assistant',
+              text: ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
+              createdAt: intent.createdAt,
+            },
+          ],
+        )
+        const session = await state.sessions.save({
+          ...resolved.session,
+          updatedAt: intent.createdAt,
+          lastTurnAt: intent.createdAt,
+          turnCount: resolved.session.turnCount + 1,
+        })
+
+        await finalizeAssistantTurnFromDeliveryOutcome({
+          outcome: {
+            kind: 'queued',
+            error: null,
+            intentId: intent.intentId,
+            session,
+          },
+          response: ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
+          turnId: receipt.turnId,
+          vault: input.vault,
+        })
+        await markAssistantFirstContactSeen({
+          docIds: firstContactStateDocIds,
+          seenAt: session.lastTurnAt ?? session.updatedAt,
+          vault: input.vault,
+        })
+        await state.status.refreshSnapshot()
+
+        return {
+          reason: 'queued',
+          session,
+          turnId: receipt.turnId,
+        }
+      }
+
+      const outcome = await state.outbox.deliverMessage(outboxInput)
 
       if (outcome.kind !== 'sent') {
         throw outcome.deliveryError ?? new VaultCliError(
