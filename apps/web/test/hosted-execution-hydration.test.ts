@@ -54,7 +54,6 @@ import {
 
 function buildShareReference() {
   return {
-    shareCode: "share_code_123",
     shareId: "share_123",
   };
 }

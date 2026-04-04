@@ -91,6 +91,63 @@ describe("hosted dispatch payload store confidentiality", () => {
     expect(await store.readStoredDispatch(telegramPayloadJson)).toEqual(telegramDispatch);
   });
 
+  it("externalizes hosted share acceptance without persisting the share id inline", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const store = createHostedDispatchPayloadStore({
+      bucket,
+      key: createTestRootKey(17),
+      keyId: "k-current",
+    });
+    const dispatch = {
+      event: {
+        kind: "vault.share.accepted",
+        share: {
+          shareId: "hshare_123",
+        },
+        userId: "user_live_share",
+      },
+      eventId: "evt_share_1",
+      occurredAt: "2026-04-03T00:04:00.000Z",
+    } as const;
+
+    const payloadJson = await store.writeStoredDispatch(dispatch);
+
+    expect(resolveHostedRunnerDispatchPayloadStorage(dispatch)).toBe("reference");
+    expect(payloadJson).not.toContain("hshare_123");
+    expect(await store.readStoredDispatch(payloadJson)).toEqual(dispatch);
+  });
+
+  it("externalizes device-sync wake hints instead of persisting them inline", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const store = createHostedDispatchPayloadStore({
+      bucket,
+      key: createTestRootKey(21),
+      keyId: "k-current",
+    });
+    const dispatch = {
+      event: {
+        kind: "device-sync.wake",
+        connectionId: "conn_123",
+        hint: {
+          eventType: "sleep.updated",
+          traceId: "trace_123",
+        },
+        provider: "oura",
+        reason: "webhook_hint",
+        userId: "user_live_sync",
+      },
+      eventId: "evt_wake_1",
+      occurredAt: "2026-04-03T00:05:00.000Z",
+    } as const;
+
+    const payloadJson = await store.writeStoredDispatch(dispatch);
+
+    expect(resolveHostedRunnerDispatchPayloadStorage(dispatch)).toBe("reference");
+    expect(payloadJson).not.toContain("sleep.updated");
+    expect(payloadJson).not.toContain("trace_123");
+    expect(await store.readStoredDispatch(payloadJson)).toEqual(dispatch);
+  });
+
   it("reads and deletes referenced payload blobs across key rotation", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const previousKey = createTestRootKey(29);

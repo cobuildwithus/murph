@@ -148,7 +148,7 @@ describe("hosted share service", () => {
       eventId: prisma.rows[0]?.lastEventId ?? "",
       memberId: "member_123",
       prisma: prisma as never,
-      shareCode: created.shareCode,
+      shareId: prisma.rows[0]?.id ?? "",
     });
     const finalizedPageData = await buildHostedSharePageData({
       authenticatedMember: {
@@ -210,7 +210,7 @@ describe("hosted share service", () => {
       eventId: dispatchEventIds[1] ?? "",
       memberId: "member_123",
       prisma: prisma as never,
-      shareCode: created.shareCode,
+      shareId: prisma.rows[0]?.id ?? "",
     });
 
     const finalized = await acceptHostedShareLink({
@@ -276,8 +276,24 @@ function createHostedSharePrisma() {
           (where.codeHash !== undefined && row.codeHash === where.codeHash)
           || (where.id !== undefined && row.id === where.id)
         ) ?? null,
-      updateMany: async ({ data, where }: { data: Partial<HostedShareRow>; where: { codeHash: string; consumedAt?: null; acceptedByMemberId?: string; OR?: Array<{ acceptedAt?: null; acceptedByMemberId?: string }> } }) => {
-        const row = rows.find((entry) => entry.codeHash === where.codeHash);
+      updateMany: async ({
+        data,
+        where,
+      }: {
+        data: Partial<HostedShareRow>;
+        where: {
+          acceptedByMemberId?: string;
+          codeHash?: string;
+          consumedAt?: null;
+          id?: string;
+          lastEventId?: string;
+          OR?: Array<{ acceptedAt?: null; acceptedByMemberId?: string }>;
+        };
+      }) => {
+        const row = rows.find((entry) =>
+          (where.codeHash !== undefined && entry.codeHash === where.codeHash)
+          || (where.id !== undefined && entry.id === where.id)
+        );
 
         if (!row) {
           return { count: 0 };
@@ -288,6 +304,10 @@ function createHostedSharePrisma() {
         }
 
         if (where.acceptedByMemberId && row.acceptedByMemberId !== where.acceptedByMemberId) {
+          return { count: 0 };
+        }
+
+        if (where.lastEventId !== undefined && row.lastEventId !== where.lastEventId) {
           return { count: 0 };
         }
 

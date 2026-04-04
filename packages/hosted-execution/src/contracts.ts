@@ -97,7 +97,6 @@ export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseE
 
 export interface HostedExecutionShareReference {
   pack?: SharePack;
-  shareCode: string;
   shareId: string;
 }
 

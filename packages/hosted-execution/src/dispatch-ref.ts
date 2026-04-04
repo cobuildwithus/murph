@@ -1,7 +1,6 @@
 import type {
   HostedExecutionDispatchRequest,
   HostedExecutionEventKind,
-  HostedExecutionShareReference,
 } from "./contracts.ts";
 import { HOSTED_EXECUTION_EVENT_KINDS } from "./contracts.ts";
 
@@ -12,7 +11,6 @@ export interface HostedExecutionDispatchRef {
   eventId: string;
   eventKind: HostedExecutionEventKind;
   occurredAt: string;
-  share?: HostedExecutionShareReference;
   userId: string;
 }
 
@@ -23,14 +21,6 @@ export function buildHostedExecutionDispatchRef(
     eventId: dispatch.eventId,
     eventKind: dispatch.event.kind,
     occurredAt: dispatch.occurredAt,
-    ...(dispatch.event.kind === "vault.share.accepted"
-      ? {
-          share: {
-            shareCode: dispatch.event.share.shareCode,
-            shareId: dispatch.event.share.shareId,
-          } satisfies HostedExecutionShareReference,
-        }
-      : {}),
     userId: dispatch.event.userId,
   };
 }
@@ -50,7 +40,6 @@ export function readHostedExecutionDispatchRef(
   const eventId = readHostedExecutionText(nestedRef.eventId);
   const eventKind = readHostedExecutionEventKind(nestedRef.eventKind);
   const occurredAt = readHostedExecutionText(nestedRef.occurredAt);
-  const share = readHostedExecutionShareReference(nestedRef.share);
   const userId = readHostedExecutionText(nestedRef.userId);
 
   if (!eventId || !eventKind || !occurredAt || !userId) {
@@ -61,7 +50,6 @@ export function readHostedExecutionDispatchRef(
     eventId,
     eventKind,
     occurredAt,
-    ...(share ? { share } : {}),
     userId,
   };
 }
@@ -70,25 +58,6 @@ function readHostedExecutionEventKind(value: unknown): HostedExecutionEventKind 
   return typeof value === "string" && HOSTED_EXECUTION_EVENT_KIND_SET.has(value as HostedExecutionEventKind)
     ? value as HostedExecutionEventKind
     : null;
-}
-
-function readHostedExecutionShareReference(value: unknown): HostedExecutionShareReference | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return undefined;
-  }
-
-  const record = value as Record<string, unknown>;
-  const shareId = readHostedExecutionText(record.shareId);
-  const shareCode = readHostedExecutionText(record.shareCode);
-
-  if (!shareId || !shareCode) {
-    return undefined;
-  }
-
-  return {
-    shareCode,
-    shareId,
-  } satisfies HostedExecutionShareReference;
 }
 
 function readHostedExecutionText(value: unknown): string | null {

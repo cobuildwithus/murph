@@ -4,6 +4,7 @@ import {
   buildHostedConnectionTokenCipherOptions,
   buildHostedSecretAad,
   createHostedSecretCodec,
+  decodeHostedEncryptionKey,
 } from "@/src/lib/device-sync/crypto";
 
 describe("hosted device-sync secret scoping", () => {
@@ -53,5 +54,15 @@ describe("hosted device-sync secret scoping", () => {
       provider: "whoop",
       purpose: "device-sync-refresh-token",
     }))).toBe("legacy-refresh-token");
+  });
+
+  it("accepts 32-byte hex keys", () => {
+    expect(decodeHostedEncryptionKey("00".repeat(32))).toHaveLength(32);
+  });
+
+  it("rejects ambiguous raw 32-byte text keys", () => {
+    expect(() => decodeHostedEncryptionKey("12345678901234567890123456789012")).toThrow(
+      "Hosted encryption key must decode to exactly 32 bytes (hex or base64/base64url).",
+    );
   });
 });

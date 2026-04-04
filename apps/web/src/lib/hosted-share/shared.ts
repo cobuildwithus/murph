@@ -121,7 +121,7 @@ export async function finalizeHostedShareAcceptance(input: {
   eventId: string;
   memberId: string | null;
   prisma: HostedSharePrismaClient;
-  shareCode: string;
+  shareId: string;
 }): Promise<void> {
   if (!input.memberId) {
     return;
@@ -130,8 +130,8 @@ export async function finalizeHostedShareAcceptance(input: {
   await input.prisma.hostedShareLink.updateMany({
     where: {
       acceptedByMemberId: input.memberId,
-      codeHash: hashHostedShareCode(input.shareCode),
       consumedAt: null,
+      id: input.shareId,
       lastEventId: input.eventId,
     },
     data: {
@@ -179,7 +179,6 @@ export function buildHostedShareAcceptanceDispatch(input: {
   eventId: string;
   memberId: string;
   pack?: SharePack;
-  shareCode: string;
   shareId: string;
 }): HostedExecutionDispatchRequest {
   return buildHostedExecutionVaultShareAcceptedDispatch({
@@ -188,7 +187,6 @@ export function buildHostedShareAcceptanceDispatch(input: {
     occurredAt: input.acceptedAt,
     share: {
       ...(input.pack ? { pack: input.pack } : {}),
-      shareCode: input.shareCode,
       shareId: input.shareId,
     },
   });
@@ -217,22 +215,4 @@ export function normalizeOptionalString(value: string | null | undefined): strin
 
 export function requireHostedSharePublicBaseUrl(): string {
   return requireHostedOnboardingPublicBaseUrl();
-}
-
-function isHostedShareReadableByMember(
-  record: {
-    acceptedAt: Date | null;
-    acceptedByMemberId: string | null;
-    consumedAt: Date | null;
-    consumedByMemberId: string | null;
-  },
-  memberId: string,
-): boolean {
-  if (record.consumedByMemberId === memberId) {
-    return true;
-  }
-
-  return record.consumedAt === null
-    && record.acceptedAt !== null
-    && record.acceptedByMemberId === memberId;
 }

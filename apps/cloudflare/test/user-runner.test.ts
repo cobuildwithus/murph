@@ -831,8 +831,8 @@ describe("HostedUserRunner", () => {
       environment,
       bucket.api,
       {
-        HOSTED_AI_USAGE_BASE_URL: "https://web.example.test",
         HOSTED_EXECUTION_INTERNAL_TOKENS: "internal-token",
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
       },
     );
     await runner.bootstrapUser("member_123");

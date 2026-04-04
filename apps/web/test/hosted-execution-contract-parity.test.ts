@@ -103,7 +103,6 @@ describe("hosted execution contract parity", () => {
         memberId: "member_123",
         occurredAt: "2026-03-26T12:05:00.000Z",
         share: {
-          shareCode: "share_code_123",
           shareId: "share_123",
         },
       }),
@@ -133,6 +132,7 @@ describe("hosted execution contract parity", () => {
           || kind === "linq.message.received"
           || kind === "telegram.message.received"
           || kind === "email.message.received"
+          || kind === "vault.share.accepted"
           ? "reference"
           : "inline",
       );

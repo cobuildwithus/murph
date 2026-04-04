@@ -116,7 +116,7 @@ async function hydrateHostedExecutionDispatchFromHostedShareLink(
     );
   }
 
-  if (dispatchRef?.eventKind !== "vault.share.accepted" || !dispatchRef.share) {
+  if (dispatchRef?.eventKind !== "vault.share.accepted") {
     throw createHostedExecutionHydrationError(
       "HOSTED_EXECUTION_HYDRATION_REFERENCE_INVALID",
       `Hosted share outbox record ${record.eventId} is missing a share reference.`,
@@ -139,8 +139,8 @@ async function hydrateHostedExecutionDispatchFromHostedShareLink(
       event: {
         kind: "vault.share.accepted",
         share: {
-          ...dispatchRef.share,
           pack,
+          shareId: record.sourceId,
         },
         userId: record.userId,
       },

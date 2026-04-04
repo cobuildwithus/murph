@@ -972,10 +972,7 @@ function resolveHostedExecutionUsageImportControlPlane(
 
   return {
     baseUrl:
-      normalizeHostedExecutionBaseUrl(stringSource.HOSTED_AI_USAGE_BASE_URL, {
-        allowHttpLocalhost: true,
-      })
-      ?? normalizeHostedExecutionBaseUrl(stringSource.HOSTED_WEB_BASE_URL, {
+      normalizeHostedExecutionBaseUrl(stringSource.HOSTED_WEB_BASE_URL, {
         allowHttpLocalhost: true,
       })
       ?? readHostedExecutionVercelProductionBaseUrl(stringSource, {
