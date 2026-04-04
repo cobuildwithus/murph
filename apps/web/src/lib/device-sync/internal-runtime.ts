@@ -17,7 +17,7 @@ import {
   PrismaDeviceSyncControlPlaneStore,
   requireHostedConnectionBundleRecord,
 } from "./prisma-store";
-import { buildHostedSecretAad } from "./crypto";
+import { buildHostedConnectionTokenCipherOptions } from "./crypto";
 import { toIsoTimestamp } from "./shared";
 
 export {
@@ -29,6 +29,7 @@ export async function buildHostedDeviceSyncRuntimeSnapshot(
   store: PrismaDeviceSyncControlPlaneStore,
   request: HostedDeviceSyncRuntimeSnapshotRequest,
 ): Promise<HostedDeviceSyncRuntimeSnapshotResponse> {
+  const generatedAt = toIsoTimestamp(new Date());
   const records = await store.prisma.deviceConnection.findMany({
     where: {
       userId: request.userId,
@@ -38,29 +39,56 @@ export async function buildHostedDeviceSyncRuntimeSnapshot(
     orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
     ...hostedConnectionWithSecretArgs,
   });
+  const connections: HostedDeviceSyncRuntimeConnectionSnapshot[] = [];
+
+  for (const record of records) {
+    const connection = normalizeHostedDeviceSyncRuntimeConnection(
+      mapHostedInternalAccountRecord(record),
+    );
+    const localState = normalizeHostedDeviceSyncRuntimeLocalState(
+      mapHostedInternalAccountRecord(record),
+    );
+    const tokenBundle = record.secret
+      ? (() => {
+          const bundle = requireHostedConnectionBundleRecord(record, store.codec);
+          return {
+            accessToken: bundle.account.accessToken,
+            accessTokenExpiresAt: bundle.account.accessTokenExpiresAt ?? null,
+            keyVersion: bundle.keyVersion,
+            refreshToken: bundle.account.refreshToken ?? null,
+            tokenVersion: bundle.tokenVersion,
+          } satisfies HostedDeviceSyncRuntimeTokenBundle;
+        })()
+      : null;
+
+    if (tokenBundle) {
+      await store.createTokenAudit({
+        userId: request.userId,
+        connectionId: record.id,
+        provider: record.provider,
+        action: "token_exported",
+        channel: "internal_runtime_snapshot",
+        tokenVersion: tokenBundle.tokenVersion,
+        keyVersion: tokenBundle.keyVersion,
+        createdAt: generatedAt,
+        metadata: {
+          exportedAt: generatedAt,
+          ...(request.connectionId ? { requestedConnectionId: request.connectionId } : {}),
+          ...(request.provider ? { requestedProvider: request.provider } : {}),
+        },
+      });
+    }
+
+    connections.push({
+      connection,
+      localState,
+      tokenBundle,
+    } satisfies HostedDeviceSyncRuntimeConnectionSnapshot);
+  }
 
   return {
-    connections: records.map((record) => ({
-      connection: normalizeHostedDeviceSyncRuntimeConnection(
-        mapHostedInternalAccountRecord(record),
-      ),
-      localState: normalizeHostedDeviceSyncRuntimeLocalState(
-        mapHostedInternalAccountRecord(record),
-      ),
-      tokenBundle: record.secret
-        ? (() => {
-            const bundle = requireHostedConnectionBundleRecord(record, store.codec);
-            return {
-              accessToken: bundle.account.accessToken,
-              accessTokenExpiresAt: bundle.account.accessTokenExpiresAt ?? null,
-              keyVersion: bundle.keyVersion,
-              refreshToken: bundle.account.refreshToken ?? null,
-              tokenVersion: bundle.tokenVersion,
-            } satisfies HostedDeviceSyncRuntimeTokenBundle;
-          })()
-        : null,
-    } satisfies HostedDeviceSyncRuntimeConnectionSnapshot)),
-    generatedAt: toIsoTimestamp(new Date()),
+    connections,
+    generatedAt,
     userId: request.userId,
   };
 }
@@ -214,24 +242,20 @@ export async function applyHostedDeviceSyncRuntimeUpdates(
         } else {
           const nextAccessTokenEncrypted = store.codec.encrypt(
             update.tokenBundle.accessToken,
-            {
-              aad: buildHostedSecretAad({
-                connectionId: update.connectionId,
-                provider: existing.provider,
-                purpose: "device-sync-access-token",
-              }),
-            },
+            buildHostedConnectionTokenCipherOptions({
+              connectionId: update.connectionId,
+              provider: existing.provider,
+              purpose: "device-sync-access-token",
+            }),
           );
           const nextRefreshTokenEncrypted = update.tokenBundle.refreshToken
             ? store.codec.encrypt(
                 update.tokenBundle.refreshToken,
-                {
-                  aad: buildHostedSecretAad({
-                    connectionId: update.connectionId,
-                    provider: existing.provider,
-                    purpose: "device-sync-refresh-token",
-                  }),
-                },
+                buildHostedConnectionTokenCipherOptions({
+                  connectionId: update.connectionId,
+                  provider: existing.provider,
+                  purpose: "device-sync-refresh-token",
+                }),
               )
             : null;
           const tokenChanged = !existing.secret

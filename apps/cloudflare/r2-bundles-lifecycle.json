@@ -27,6 +27,19 @@
       }
     },
     {
+      "id": "delete-transient-dispatch-payloads-after-7d",
+      "enabled": true,
+      "conditions": {
+        "prefix": "transient/dispatch-payloads/"
+      },
+      "deleteObjectsTransition": {
+        "condition": {
+          "type": "Age",
+          "maxAge": 604800
+        }
+      }
+    },
+    {
       "id": "delete-transient-hosted-email-thread-routes-after-7d",
       "enabled": true,
       "conditions": {

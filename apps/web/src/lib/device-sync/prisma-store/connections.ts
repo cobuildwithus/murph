@@ -11,7 +11,10 @@ import type {
   PublicDeviceSyncAccount,
   UpsertPublicDeviceSyncConnectionInput,
 } from "@murphai/device-syncd/public-ingress";
-import { buildHostedSecretAad, type HostedSecretCodec } from "../crypto";
+import {
+  buildHostedConnectionTokenCipherOptions,
+  type HostedSecretCodec,
+} from "../crypto";
 import { generateHostedRandomPrefixedId, maybeIsoTimestamp, toJsonRecord } from "../shared";
 import { toPrismaJsonObject } from "./prisma-json";
 import type { HostedConnectionSecretBundle, HostedPrismaTransactionClient } from "./types";
@@ -53,24 +56,20 @@ export class PrismaHostedConnectionStore {
       if (existing) {
         const accessTokenEncrypted = this.codec.encrypt(
           input.tokens.accessToken,
-          {
-            aad: buildHostedConnectionTokenAad({
-              connectionId: existing.id,
-              provider: existing.provider,
-              purpose: "device-sync-access-token",
-            }),
-          },
+          buildHostedConnectionTokenCipherOptions({
+            connectionId: existing.id,
+            provider: existing.provider,
+            purpose: "device-sync-access-token",
+          }),
         );
         const refreshTokenEncrypted = input.tokens.refreshToken
           ? this.codec.encrypt(
               input.tokens.refreshToken,
-              {
-                aad: buildHostedConnectionTokenAad({
-                  connectionId: existing.id,
-                  provider: existing.provider,
-                  purpose: "device-sync-refresh-token",
-                }),
-              },
+              buildHostedConnectionTokenCipherOptions({
+                connectionId: existing.id,
+                provider: existing.provider,
+                purpose: "device-sync-refresh-token",
+              }),
             )
           : null;
 
@@ -143,24 +142,20 @@ export class PrismaHostedConnectionStore {
       const connectionId = generateHostedRandomPrefixedId("dsc");
       const accessTokenEncrypted = this.codec.encrypt(
         input.tokens.accessToken,
-        {
-          aad: buildHostedConnectionTokenAad({
-            connectionId,
-            provider: input.provider,
-            purpose: "device-sync-access-token",
-          }),
-        },
+        buildHostedConnectionTokenCipherOptions({
+          connectionId,
+          provider: input.provider,
+          purpose: "device-sync-access-token",
+        }),
       );
       const refreshTokenEncrypted = input.tokens.refreshToken
         ? this.codec.encrypt(
             input.tokens.refreshToken,
-            {
-              aad: buildHostedConnectionTokenAad({
-                connectionId,
-                provider: input.provider,
-                purpose: "device-sync-refresh-token",
-              }),
-            },
+            buildHostedConnectionTokenCipherOptions({
+              connectionId,
+              provider: input.provider,
+              purpose: "device-sync-refresh-token",
+            }),
           )
         : null;
 
@@ -406,36 +401,26 @@ export function requireHostedConnectionBundleRecord(
     account: {
       ...mapHostedInternalAccountRecord(record),
       disconnectGeneration: 0,
-      accessToken: codec.decrypt(record.secret.accessTokenEncrypted, {
-        aad: buildHostedConnectionTokenAad({
+      accessToken: codec.decrypt(
+        record.secret.accessTokenEncrypted,
+        buildHostedConnectionTokenCipherOptions({
           connectionId: record.id,
           provider: record.provider,
           purpose: "device-sync-access-token",
         }),
-      }),
+      ),
       refreshToken: record.secret.refreshTokenEncrypted
-        ? codec.decrypt(record.secret.refreshTokenEncrypted, {
-            aad: buildHostedConnectionTokenAad({
+        ? codec.decrypt(
+            record.secret.refreshTokenEncrypted,
+            buildHostedConnectionTokenCipherOptions({
               connectionId: record.id,
               provider: record.provider,
               purpose: "device-sync-refresh-token",
             }),
-          })
+          )
         : null,
     },
     tokenVersion: record.secret.tokenVersion,
     keyVersion: record.secret.keyVersion,
   } satisfies HostedConnectionSecretBundle;
-}
-
-function buildHostedConnectionTokenAad(input: {
-  connectionId: string;
-  provider: string;
-  purpose: "device-sync-access-token" | "device-sync-refresh-token";
-}) {
-  return buildHostedSecretAad({
-    connectionId: input.connectionId,
-    provider: input.provider,
-    purpose: input.purpose,
-  });
 }

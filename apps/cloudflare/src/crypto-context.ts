@@ -4,6 +4,7 @@ const utf8Encoder = new TextEncoder();
 export type HostedStorageScope =
   | "artifact"
   | "bundle"
+  | "dispatch-payload"
   | "email-raw"
   | "email-route"
   | "execution-journal"

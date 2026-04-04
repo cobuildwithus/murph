@@ -34,6 +34,40 @@ export interface HostedSignalRecord {
   createdAt: string;
 }
 
+
+
+export type HostedTokenAuditAction = "token_exported" | "token_refreshed";
+
+export type HostedTokenAuditChannel = "agent_export" | "agent_refresh" | "internal_runtime_snapshot";
+
+export interface HostedTokenAuditRecord {
+  id: number;
+  userId: string;
+  connectionId: string;
+  provider: string;
+  action: HostedTokenAuditAction;
+  channel: HostedTokenAuditChannel;
+  sessionId: string | null;
+  tokenVersion: number;
+  keyVersion: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface CreateHostedTokenAuditInput {
+  userId: string;
+  connectionId: string;
+  provider: string;
+  action: HostedTokenAuditAction;
+  channel: HostedTokenAuditChannel;
+  sessionId?: string | null;
+  tokenVersion: number;
+  keyVersion: string;
+  metadata?: Record<string, unknown> | null;
+  createdAt?: string;
+  tx?: HostedPrismaTransactionClient;
+}
+
 export interface HostedConnectionSecretBundle {
   userId: string;
   account: DeviceSyncAccount;

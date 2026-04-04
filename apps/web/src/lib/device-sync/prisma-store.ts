@@ -21,11 +21,14 @@ import type {
   HostedAgentSessionAuthResult,
   HostedAgentSessionRecord,
   HostedConnectionSecretBundle,
+  CreateHostedTokenAuditInput,
   HostedPrismaTransactionClient,
   HostedSignalRecord,
+  HostedTokenAuditRecord,
   UpdateLocalHeartbeatInput,
 } from "./prisma-store/types";
 import { PrismaHostedSignalStore } from "./prisma-store/signals";
+import { PrismaHostedTokenAuditStore } from "./prisma-store/token-audits";
 import { PrismaHostedWebhookTraceStore } from "./prisma-store/webhook-traces";
 
 export {
@@ -36,6 +39,7 @@ export {
   requireHostedPublicAccountRecord,
   type HostedConnectionWithSecretRecord,
 } from "./prisma-store/connections";
+export { buildHostedConnectionTokenCipherOptions } from "./crypto";
 export { generateHostedAgentBearerToken } from "./prisma-store/agent-sessions";
 export type {
   CreateHostedSignalInput,
@@ -43,8 +47,10 @@ export type {
   HostedAgentSessionAuthStatus,
   HostedAgentSessionRecord,
   HostedConnectionSecretBundle,
+  CreateHostedTokenAuditInput,
   HostedPrismaTransactionClient,
   HostedSignalRecord,
+  HostedTokenAuditRecord,
   UpdateLocalHeartbeatInput,
 } from "./prisma-store/types";
 
@@ -60,6 +66,7 @@ export class PrismaDeviceSyncControlPlaneStore
   private readonly browserAssertionNonces: PrismaHostedBrowserAssertionNonceStore;
   private readonly agentSessions: PrismaHostedAgentSessionStore;
   private readonly localHeartbeats: PrismaHostedLocalHeartbeatStore;
+  private readonly tokenAudits: PrismaHostedTokenAuditStore;
 
   constructor(input: { prisma: PrismaClient; codec: HostedSecretCodec }) {
     this.prisma = input.prisma;
@@ -77,6 +84,7 @@ export class PrismaDeviceSyncControlPlaneStore
       prisma: this.prisma,
       connections: this.connections,
     });
+    this.tokenAudits = new PrismaHostedTokenAuditStore(this.prisma);
   }
 
   async deleteExpiredOAuthStates(now: string): Promise<number> {
@@ -140,6 +148,10 @@ export class PrismaDeviceSyncControlPlaneStore
 
   async createSignal(input: CreateHostedSignalInput): Promise<HostedSignalRecord> {
     return this.signals.createSignal(input);
+  }
+
+  async createTokenAudit(input: CreateHostedTokenAuditInput): Promise<HostedTokenAuditRecord> {
+    return this.tokenAudits.createTokenAudit(input);
   }
 
   async listSignalsForUser(userId: string, options: { afterId?: number; limit?: number } = {}): Promise<HostedSignalRecord[]> {

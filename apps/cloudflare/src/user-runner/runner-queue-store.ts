@@ -11,6 +11,7 @@ import {
   type HostedExecutionRunStatus,
 } from "@murphai/hosted-execution";
 
+import type { HostedDispatchPayloadStore } from "../dispatch-payload-store.js";
 import type { HostedExecutionCommittedResult } from "../execution-journal.js";
 import { ensureRunnerQueueSchema } from "./runner-queue-schema.js";
 import {
@@ -72,7 +73,10 @@ interface BundleRefSwapInput {
 export class RunnerQueueStore {
   private userId: string | null = null;
 
-  constructor(private readonly state: DurableObjectStateLike) {
+  constructor(
+    private readonly state: DurableObjectStateLike,
+    private readonly dispatchPayloadStore: HostedDispatchPayloadStore | null = null,
+  ) {
     ensureRunnerQueueSchema(this.sql);
     this.ensureCanonicalBundleSlotRowsSync();
     this.repairStoredMetaStateSync();
@@ -121,13 +125,13 @@ export class RunnerQueueStore {
     this.pruneExpiredConsumedEventsSync();
 
     const meta = this.requireMetaRowSync();
-    const pending = this.readPendingDispatchByEventIdSync(eventId);
+    const pending = this.readPendingEventRowByEventIdSync(eventId);
     const poisoned = this.readPoisonedEventByIdSync(eventId);
 
     return {
       backpressured: parseRunnerStringArray(meta.backpressured_event_ids_json).includes(eventId),
       consumed: this.hasConsumedEventSync(eventId),
-      lastError: pending?.lastError ?? poisoned?.last_error ?? null,
+      lastError: pending?.last_error ?? poisoned?.last_error ?? null,
       pending: pending !== null,
       poisoned: poisoned !== null,
     };
@@ -135,11 +139,11 @@ export class RunnerQueueStore {
 
   async listPendingDispatches(): Promise<PendingDispatchRecord[]> {
     this.pruneExpiredConsumedEventsSync();
-    return this.readPendingDispatchesSync();
+    return this.readPendingDispatches();
   }
 
   async hasDuePendingDispatch(nowMs: number): Promise<boolean> {
-    return this.readNextDuePendingDispatchSync(nowMs) !== null;
+    return (await this.readNextDuePendingDispatch(nowMs)) !== null;
   }
 
   async clearNextWakeIfDue(nowMs: number): Promise<RunnerStateRecord> {
@@ -188,6 +192,7 @@ export class RunnerQueueStore {
     }
 
     const nowIso = new Date().toISOString();
+    const storedDispatch = await this.writePendingDispatchPayload(dispatch);
     this.sql.exec(
       `INSERT INTO pending_events (
         event_id,
@@ -198,7 +203,7 @@ export class RunnerQueueStore {
         last_error
       ) VALUES (?, ?, ?, ?, ?, ?)`,
       dispatch.eventId,
-      JSON.stringify(dispatch),
+      storedDispatch,
       0,
       nowIso,
       nowIso,
@@ -235,7 +240,7 @@ export class RunnerQueueStore {
       };
     }
 
-    const nextPending = this.readNextDuePendingDispatchSync(nowMs);
+    const nextPending = await this.readNextDuePendingDispatch(nowMs);
     if (!nextPending) {
       const refreshedMeta = this.requireMetaRowSync();
       refreshedMeta.retrying_event_id = this.readRetryingEventIdSync();
@@ -264,7 +269,9 @@ export class RunnerQueueStore {
 
     const meta = this.requireMetaRowSync();
     const bundleSlots = this.selectBundleSlotStateSync();
+    const pending = this.readPendingEventRowByEventIdSync(committed.eventId);
     this.removePendingDispatchSync(committed.eventId);
+    await this.deletePendingDispatchPayloadBestEffort(pending?.dispatch_json ?? null);
     this.deletePoisonedEventSync(committed.eventId);
     this.writeConsumedEventSync(committed.eventId, nextConsumedEventExactExpiryIso());
     assignRunnerBundleRefs(bundleSlots, committed.bundleRefs);
@@ -313,7 +320,7 @@ export class RunnerQueueStore {
   }): Promise<{ poisoned: boolean; record: RunnerStateRecord }> {
     this.pruneExpiredConsumedEventsSync();
 
-    const pending = this.readPendingDispatchByEventIdSync(input.eventId);
+    const pending = this.readPendingEventRowByEventIdSync(input.eventId);
     const meta = this.requireMetaRowSync();
     const errorAt = new Date().toISOString();
     const errorCode = deriveHostedExecutionErrorCode(input.error);
@@ -341,6 +348,7 @@ export class RunnerQueueStore {
 
     if (nextAttempts >= input.maxEventAttempts) {
       this.removePendingDispatchSync(input.eventId);
+      await this.deletePendingDispatchPayloadBestEffort(pending.dispatch_json);
       this.writeConsumedEventSync(input.eventId, nextConsumedEventExactExpiryIso());
       this.writePoisonedEventSync(input.eventId, errorMessage, errorAt);
       meta.retrying_event_id = this.readRetryingEventIdSync();
@@ -377,7 +385,7 @@ export class RunnerQueueStore {
   }): Promise<RunnerStateRecord> {
     this.pruneExpiredConsumedEventsSync();
 
-    const pending = this.readPendingDispatchByEventIdSync(input.eventId);
+    const pending = this.readPendingEventRowByEventIdSync(input.eventId);
     const meta = this.requireMetaRowSync();
     const errorAt = new Date().toISOString();
     const errorMessage = summarizeHostedExecutionError(input.error);
@@ -579,9 +587,9 @@ export class RunnerQueueStore {
       return;
     }
 
-    const pendingDispatch = this.readPendingDispatchByEventIdSync(committed.eventId);
-    if (pendingDispatch) {
-      await this.bootstrapUser(pendingDispatch.dispatch.event.userId);
+    const pendingUserId = this.readPendingDispatchUserIdByEventIdSync(committed.eventId);
+    if (pendingUserId) {
+      await this.bootstrapUser(pendingUserId);
       return;
     }
 
@@ -608,8 +616,8 @@ export class RunnerQueueStore {
     const projected = projectRunnerStateRecord({
       bundleSlots: this.selectBundleSlotStateSync(),
       meta,
-      nextPendingAvailableAtOverride,
-      pendingDispatches: this.readPendingDispatchesSync(),
+      nextPendingAvailableAt: nextPendingAvailableAtOverride ?? this.readNextPendingAvailableAtSync(),
+      pendingEventCount: this.countPendingEventsSync(),
       poisonedEventIds: this.readPoisonedEventIdsSync(),
     });
 
@@ -631,7 +639,8 @@ export class RunnerQueueStore {
     const projected = projectRunnerStateRecord({
       bundleSlots: this.selectBundleSlotStateSync(),
       meta,
-      pendingDispatches: [],
+      nextPendingAvailableAt: null,
+      pendingEventCount: 0,
       poisonedEventIds: [],
     });
     if (!projected.changed) {
@@ -792,10 +801,21 @@ export class RunnerQueueStore {
     }
   }
 
-  private readPendingDispatchesSync(): PendingDispatchRecord[] {
+  private async readPendingDispatches(): Promise<PendingDispatchRecord[]> {
     const records: PendingDispatchRecord[] = [];
 
-    for (const row of this.sql.exec<PendingEventRow>(
+    for (const row of this.readPendingEventRowsSync()) {
+      const parsed = await this.parsePendingDispatchRow(row);
+      if (parsed) {
+        records.push(parsed);
+      }
+    }
+
+    return records;
+  }
+
+  private readPendingEventRowsSync(): PendingEventRow[] {
+    return this.sql.exec<PendingEventRow>(
       `SELECT
         event_id,
         dispatch_json,
@@ -805,18 +825,11 @@ export class RunnerQueueStore {
         last_error
       FROM pending_events
       ORDER BY available_at ASC, enqueued_at ASC, event_id ASC`,
-    ).toArray()) {
-      const parsed = this.parsePendingDispatchRowSync(row);
-      if (parsed) {
-        records.push(parsed);
-      }
-    }
-
-    return records;
+    ).toArray();
   }
 
-  private readPendingDispatchByEventIdSync(eventId: string): PendingDispatchRecord | null {
-    const row = this.sql.exec<PendingEventRow>(
+  private readPendingEventRowByEventIdSync(eventId: string): PendingEventRow | null {
+    return this.sql.exec<PendingEventRow>(
       `SELECT
         event_id,
         dispatch_json,
@@ -828,13 +841,10 @@ export class RunnerQueueStore {
       WHERE event_id = ?`,
       eventId,
     ).toArray()[0] ?? null;
-
-    return row ? this.parsePendingDispatchRowSync(row) : null;
   }
 
-  private readNextDuePendingDispatchSync(nowMs: number): PendingDispatchRecord | null {
-    const nowIso = new Date(nowMs).toISOString();
-    for (const row of this.sql.exec<PendingEventRow>(
+  private readPendingDueEventRowsSync(nowIso: string): PendingEventRow[] {
+    return this.sql.exec<PendingEventRow>(
       `SELECT
         event_id,
         dispatch_json,
@@ -844,11 +854,16 @@ export class RunnerQueueStore {
         last_error
       FROM pending_events
       WHERE available_at <= ?
-      ORDER BY available_at ASC, enqueued_at ASC, event_id ASC
-      `,
+      ORDER BY available_at ASC, enqueued_at ASC, event_id ASC`,
       nowIso,
-    ).toArray()) {
-      const parsed = this.parsePendingDispatchRowSync(row);
+    ).toArray();
+  }
+
+  private async readNextDuePendingDispatch(nowMs: number): Promise<PendingDispatchRecord | null> {
+    const nowIso = new Date(nowMs).toISOString();
+
+    for (const row of this.readPendingDueEventRowsSync(nowIso)) {
+      const parsed = await this.parsePendingDispatchRow(row);
       if (parsed) {
         return parsed;
       }
@@ -858,19 +873,38 @@ export class RunnerQueueStore {
   }
 
   private readNextPendingAvailableAtSync(): string | null {
-    return this.readPendingDispatchesSync()[0]?.availableAt ?? null;
+    const value = this.sql.exec<{ available_at: DurableObjectSqlValue }>(
+      `SELECT available_at
+      FROM pending_events
+      ORDER BY available_at ASC, enqueued_at ASC, event_id ASC
+      LIMIT 1`,
+    ).toArray()[0]?.available_at;
+
+    return typeof value === "string" ? value : null;
   }
 
   private readRetryingEventIdSync(): string | null {
-    return this.readPendingDispatchesSync().find((pending) => pending.attempts > 0)?.eventId ?? null;
+    const value = this.sql.exec<{ event_id: DurableObjectSqlValue }>(
+      `SELECT event_id
+      FROM pending_events
+      WHERE attempts > 0
+      ORDER BY available_at ASC, enqueued_at ASC, event_id ASC
+      LIMIT 1`,
+    ).toArray()[0]?.event_id;
+
+    return typeof value === "string" ? value : null;
   }
 
   private countPendingEventsSync(): number {
-    return this.readPendingDispatchesSync().length;
+    const value = this.sql.exec<{ count: DurableObjectSqlValue }>(
+      "SELECT COUNT(*) AS count FROM pending_events",
+    ).toArray()[0]?.count;
+
+    return typeof value === "number" ? value : 0;
   }
 
   private hasPendingDispatchSync(eventId: string): boolean {
-    return this.readPendingDispatchByEventIdSync(eventId) !== null;
+    return this.readPendingEventRowByEventIdSync(eventId) !== null;
   }
 
   private hasConsumedEventSync(eventId: string): boolean {
@@ -907,12 +941,50 @@ export class RunnerQueueStore {
     this.sql.exec("DELETE FROM pending_events WHERE event_id = ?", eventId);
   }
 
-  private parsePendingDispatchRowSync(row: PendingEventRow): PendingDispatchRecord | null {
+  private readPendingDispatchUserIdByEventIdSync(eventId: string): string | null {
+    const row = this.readPendingEventRowByEventIdSync(eventId);
+
+    if (!row) {
+      return null;
+    }
+
+    const userId = this.readPendingDispatchUserIdSync(row.dispatch_json);
+
+    if (userId) {
+      return userId;
+    }
+
+    this.poisonMalformedPendingDispatchRowSync(
+      row,
+      new TypeError(`Hosted runner pending dispatch ${eventId} does not encode a valid userId.`),
+    );
+    return null;
+  }
+
+  private readPendingDispatchUserIdSync(payloadJson: string): string | null {
     try {
+      const storedRef = this.dispatchPayloadStore?.readStoredDispatchRef(payloadJson);
+
+      if (storedRef) {
+        return storedRef.userId;
+      }
+
+      return parseHostedExecutionDispatchRequest(JSON.parse(payloadJson) as unknown).event.userId;
+    } catch {
+      return null;
+    }
+  }
+
+  private async parsePendingDispatchRow(row: PendingEventRow): Promise<PendingDispatchRecord | null> {
+    try {
+      const dispatch = this.dispatchPayloadStore
+        ? await this.dispatchPayloadStore.readStoredDispatch(row.dispatch_json)
+        : parseHostedExecutionDispatchRequest(JSON.parse(row.dispatch_json) as unknown);
+
       return {
         attempts: row.attempts,
         availableAt: row.available_at,
-        dispatch: parseHostedExecutionDispatchRequest(JSON.parse(row.dispatch_json) as unknown),
+        dispatch,
         enqueuedAt: row.enqueued_at,
         eventId: row.event_id,
         lastError: row.last_error,
@@ -920,6 +992,26 @@ export class RunnerQueueStore {
     } catch (error) {
       this.poisonMalformedPendingDispatchRowSync(row, error);
       return null;
+    }
+  }
+
+  private async writePendingDispatchPayload(dispatch: HostedExecutionDispatchRequest): Promise<string> {
+    if (!this.dispatchPayloadStore) {
+      return JSON.stringify(dispatch);
+    }
+
+    return this.dispatchPayloadStore.writeStoredDispatch(dispatch);
+  }
+
+  private async deletePendingDispatchPayloadBestEffort(payloadJson: string | null): Promise<void> {
+    if (!payloadJson || !this.dispatchPayloadStore) {
+      return;
+    }
+
+    try {
+      await this.dispatchPayloadStore.deleteStoredDispatchPayload(payloadJson);
+    } catch {
+      // Best-effort cleanup only; TTL backstops any failed transient blob deletion.
     }
   }
 
