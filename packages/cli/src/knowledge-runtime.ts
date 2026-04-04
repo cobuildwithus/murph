@@ -140,18 +140,17 @@ export async function compileKnowledgePage(
   )
   const existingSourcePaths = existingPage?.sourcePaths ?? []
   const explicitSourcePaths = normalizeSourcePathInputs(input.sourcePaths)
-  const compileSourcePaths =
-    explicitSourcePaths.length > 0 ? explicitSourcePaths : existingSourcePaths
+  const compileSourcePaths = orderedUniqueStrings([
+    ...existingSourcePaths,
+    ...explicitSourcePaths,
+  ])
 
   const sourceBundle = await collectKnowledgeSourceEntries(
     input.vault,
     compileSourcePaths,
     dependencies.readTextFile ?? defaultReadTextFile,
   )
-  const sourcePaths = orderedUniqueStrings([
-    ...existingSourcePaths,
-    ...sourceBundle.entries.map((entry) => entry.relativePath),
-  ])
+  const sourcePaths = sourceBundle.entries.map((entry) => entry.relativePath)
   const knowledgePrompt = buildKnowledgeCompilePrompt({
     existingPage,
     pageType,
