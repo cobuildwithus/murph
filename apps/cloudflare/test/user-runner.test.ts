@@ -17,7 +17,6 @@ import {
   artifactObjectKey,
   createHostedArtifactStore,
   createHostedBundleStore,
-  createHostedUserEnvStore,
 } from "../src/bundle-store.js";
 import { HostedBundleGarbageCollector } from "../src/bundle-gc.js";
 import { deriveHostedStorageOpaqueId } from "../src/crypto-context.js";
@@ -1837,19 +1836,19 @@ describe("HostedUserRunner", () => {
     const firstWriteStarted = createDeferred<void>();
     const releaseFirstWrite = createDeferred<void>();
     let blocked = false;
-    bucket.api.put = vi.fn(async (key: string, value: string) => {
-      if (!blocked) {
-        blocked = true;
-        firstWriteStarted.resolve();
-        await releaseFirstWrite.promise;
-      }
-
-      await originalPut.call(bucket.api, key, value);
-    });
 
     try {
       const runner = new HostedUserRunner(storage.state, environment, bucket.api);
       await runner.bootstrapUser("member_123");
+      bucket.api.put = vi.fn(async (key: string, value: string) => {
+        if (!blocked) {
+          blocked = true;
+          firstWriteStarted.resolve();
+          await releaseFirstWrite.promise;
+        }
+
+        await originalPut.call(bucket.api, key, value);
+      });
 
       const commitPromise = runner.commit({
         eventId: "evt_transition_lock",
@@ -2394,6 +2393,11 @@ describe("HostedUserRunner", () => {
     expect(first.lastError).toBe("Hosted execution failed before recording a durable commit.");
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
+    const crypto = await resolveHostedUserCryptoContextForTest({
+      bucket,
+      environment,
+      userId: dispatch.event.userId,
+    });
     await persistHostedExecutionCommit({
       bucket: bucket.api,
       currentBundleRefs: {
@@ -2401,8 +2405,9 @@ describe("HostedUserRunner", () => {
         vault: null,
       },
       eventId: dispatch.eventId,
-      key: environment.bundleEncryptionKey,
-      keyId: environment.bundleEncryptionKeyId,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
       payload: {
         bundles: {
           agentState: Buffer.from("agent-state").toString("base64"),
@@ -2418,8 +2423,9 @@ describe("HostedUserRunner", () => {
     await persistHostedExecutionFinalBundles({
       bucket: bucket.api,
       eventId: dispatch.eventId,
-      key: environment.bundleEncryptionKey,
-      keyId: environment.bundleEncryptionKeyId,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
       payload: {
         bundles: {
           agentState: Buffer.from("agent-state").toString("base64"),
@@ -2464,6 +2470,11 @@ describe("HostedUserRunner", () => {
       retryingEventId: dispatch.eventId,
       userId: dispatch.event.userId,
     });
+    const crypto = await resolveHostedUserCryptoContextForTest({
+      bucket,
+      environment,
+      userId: dispatch.event.userId,
+    });
     await persistHostedExecutionCommit({
       bucket: bucket.api,
       currentBundleRefs: {
@@ -2471,8 +2482,9 @@ describe("HostedUserRunner", () => {
         vault: null,
       },
       eventId: dispatch.eventId,
-      key: environment.bundleEncryptionKey,
-      keyId: environment.bundleEncryptionKeyId,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
       payload: {
         bundles: {
           agentState: Buffer.from("agent-state").toString("base64"),
@@ -2488,8 +2500,9 @@ describe("HostedUserRunner", () => {
     await persistHostedExecutionFinalBundles({
       bucket: bucket.api,
       eventId: dispatch.eventId,
-      key: environment.bundleEncryptionKey,
-      keyId: environment.bundleEncryptionKeyId,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
       payload: {
         bundles: {
           agentState: Buffer.from("agent-state").toString("base64"),
@@ -2516,51 +2529,38 @@ describe("HostedUserRunner", () => {
     ).resolves.toBeNull();
   });
 
-  it("keeps pending work retryable when the runner control token is missing", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
-    const misconfiguredRunner = new HostedUserRunner(storage.state, {
+  it("does not require an ambient runner control token because each invoke uses a per-run token", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (_url, init) => createCommittedRunnerSuccessResponse({
+      bucket,
+      environment,
+      init,
+    })));
+    const runner = new HostedUserRunner(storage.state, {
       ...environment,
-      maxEventAttempts: 1,
       runnerControlToken: null,
     }, bucket.api);
 
-    const firstStatus = await misconfiguredRunner.dispatch({
+    const status = await runner.dispatch({
       event: {
         kind: "assistant.cron.tick",
         reason: "manual",
         userId: "member_123",
       },
-      eventId: "evt_missing_runner_token",
+      eventId: "evt_per_run_runner_token",
       occurredAt: "2026-03-26T12:00:00.000Z",
     });
 
-    expect(firstStatus.pendingEventCount).toBe(1);
-    expect(firstStatus.poisonedEventIds).toEqual([]);
-    expect(firstStatus.retryingEventId).toBeNull();
-    expect(firstStatus.lastError).toBe("Hosted execution configuration is invalid.");
-    expect(firstStatus.lastErrorCode).toBe("configuration_error");
-    expect(firstStatus.run).toMatchObject({
+    expect(status.pendingEventCount).toBe(0);
+    expect(status.poisonedEventIds).toEqual([]);
+    expect(status.retryingEventId).toBeNull();
+    expect(status.lastError).toBeNull();
+    expect(status.lastErrorCode).toBeUndefined();
+    expect(status.run).toMatchObject({
       attempt: 1,
-      eventId: "evt_missing_runner_token",
-      phase: "retry.scheduled",
+      eventId: "evt_per_run_runner_token",
+      phase: "completed",
     });
-    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(0);
-
-    vi.setSystemTime(new Date("2026-03-26T12:00:11.000Z"));
-    await misconfiguredRunner.alarm();
-
-    const retryStatus = await misconfiguredRunner.status("member_123");
-    expect(retryStatus.pendingEventCount).toBe(1);
-    expect(retryStatus.poisonedEventIds).toEqual([]);
-    expect(retryStatus.retryingEventId).toBeNull();
-    expect(retryStatus.lastError).toBe("Hosted execution configuration is invalid.");
-    expect(retryStatus.lastErrorCode).toBe("configuration_error");
-    expect(retryStatus.run).toMatchObject({
-      attempt: 2,
-      eventId: "evt_missing_runner_token",
-      phase: "retry.scheduled",
-    });
+    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(1);
   });
 
   it("keeps replay suppression after a durable-object restart", async () => {
@@ -2704,9 +2704,15 @@ describe("HostedUserRunner", () => {
       "OPENAI_API_KEY",
       "XAI_API_KEY",
     ]);
-    expect(bucket.keys()).toEqual([
-      await userEnvObjectKeyForTest(environment.bundleEncryptionKey, "member_123"),
-    ]);
+    const crypto = await resolveHostedUserCryptoContextForTest({
+      bucket,
+      environment,
+      userId: "member_123",
+    });
+    expect(bucket.keys()).toEqual(expect.arrayContaining([
+      await userEnvObjectKeyForTest(crypto.rootKey, "member_123"),
+      expect.stringMatching(/^users\/keys\/[0-9a-f]+\.json$/u),
+    ]));
     await expect(runner.getUserEnvStatus("member_123")).resolves.toEqual({
       configuredUserEnvKeys: ["OPENAI_API_KEY", "XAI_API_KEY"],
       userId: "member_123",
@@ -2715,6 +2721,15 @@ describe("HostedUserRunner", () => {
 
   it("reads per-user env encrypted with a previous key id after rotation", async () => {
     const previousKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+    const previousEnvironment = {
+      ...environment,
+      allowedUserEnvKeys: "OPENAI_API_KEY",
+      bundleEncryptionKey: previousKey,
+      bundleEncryptionKeyId: "v1",
+      bundleEncryptionKeysById: {
+        v1: previousKey,
+      },
+    };
     const rotatedEnvironment = {
       ...environment,
       allowedUserEnvKeys: "OPENAI_API_KEY",
@@ -2725,25 +2740,17 @@ describe("HostedUserRunner", () => {
         v2: Uint8Array.from({ length: 32 }, () => 7),
       },
     };
-    const runner = new HostedUserRunner(storage.state, rotatedEnvironment, bucket.api);
+    const previousRunner = new HostedUserRunner(storage.state, previousEnvironment, bucket.api);
 
-    await runner.bootstrapUser("member_123");
-    await createHostedUserEnvStore({
-      bucket: bucket.api,
-      key: previousKey,
-      keyId: "v1",
-    }).writeUserEnv(
-      "member_123",
-      new TextEncoder().encode(
-        JSON.stringify({
-          env: {
-            OPENAI_API_KEY: "sk-legacy",
-          },
-          schema: "murph.hosted-user-env.v1",
-          updatedAt: "2026-03-26T12:00:00.000Z",
-        }),
-      ),
-    );
+    await previousRunner.bootstrapUser("member_123");
+    await previousRunner.updateUserEnv({
+      env: {
+        OPENAI_API_KEY: "sk-legacy",
+      },
+      mode: "replace",
+    });
+
+    const runner = new HostedUserRunner(storage.state, rotatedEnvironment, bucket.api);
 
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async (_url, init) => createCommittedRunnerSuccessResponse({
       bucket,
@@ -2848,14 +2855,22 @@ describe("HostedUserRunner", () => {
     });
     expect(bucket.putCount()).toBe(writesAfterBootstrap + 1);
     expectHostedBundleKeys(bucket.keys(), ["agent-state", "vault"]);
+    const crypto = await resolveHostedUserCryptoContextForTest({
+      bucket,
+      environment,
+      userId: "member_123",
+    });
     expect(bucket.keys()).toContain(
-      await userEnvObjectKeyForTest(environment.bundleEncryptionKey, "member_123"),
+      await userEnvObjectKeyForTest(crypto.rootKey, "member_123"),
     );
 
     const cleared = await runner.clearUserEnv();
 
     expect(cleared.configuredUserEnvKeys).toEqual([]);
     expectHostedBundleKeys(bucket.keys(), ["agent-state", "vault"]);
+    expect(bucket.keys()).not.toContain(
+      await userEnvObjectKeyForTest(crypto.rootKey, "member_123"),
+    );
   });
 
   it("supports extension-only keys across update and status reads", async () => {
