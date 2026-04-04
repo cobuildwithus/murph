@@ -219,6 +219,14 @@ async function clearStaleHostedWebSmokeLocks(nextLockPath: string): Promise<void
       return;
     }
 
+    await shutdownHostedWebLockProcess(lockDescriptor.pid, nextLockPath);
+    const nextLockDescriptor = await readHostedWebSmokeLockDescriptor(nextLockPath);
+
+    if (nextLockDescriptor === null || !isProcessRunning(nextLockDescriptor.pid)) {
+      await rm(nextLockPath, { force: true });
+      return;
+    }
+
     if (Date.now() >= deadline) {
       throw new Error(
         `apps/web smoke dist dir still has an active Next dev process after waiting ${staleLockWaitTimeoutMs}ms (pid ${lockDescriptor.pid}, port ${lockDescriptor.port}).`,
