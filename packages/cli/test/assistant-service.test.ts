@@ -208,7 +208,7 @@ function assertPromptHasFirstTurnCheckInGuidance(
     text,
     /first user message already asks for something concrete/u,
   )
-  assert.match(text, /Frame onboarding as gradual/u)
+  assert.match(text, /Later in onboarding, if it still fits, frame things as gradual/u)
   assert.match(
     text,
     /treat that as onboarding context, not as a request to choose priorities or start coaching/u,
@@ -235,15 +235,19 @@ function assertPromptHasFirstTurnCheckInGuidance(
   )
   assert.match(
     text,
-    /default to brief usage guidance: explain that they can send things as they happen and Murph can help with logs, patterns, and health questions over time/u,
+    /You may follow that intro with this exact follow-up copy/u,
   )
   assert.match(
     text,
-    /Once the conversation is underway, it is good to mention this naturally in a sentence or two when it fits/u,
+    /You can send things as they happen — symptoms, sleep, meals, meds, workouts, labs, questions — and I keep compiling the picture over time so I can help you notice patterns, make better decisions, and work toward your goals\. It’s like having a private health team in your pocket\./u,
   )
   assert.match(
     text,
-    /health history, supplements or meds, and recent blood tests, and if they have a Garmin, WHOOP, or Oura Ring, Murph can help get those connected too/u,
+    /If the early onboarding exchange is still going and the user has no concrete ask yet, a good light-touch follow-up can be: `Do you have any other questions or do you want to learn more about the things I can do for you\?`/u,
+  )
+  assert.match(
+    text,
+    /Another good light-touch note later in the onboarding exchange can be: `If you want a useful head start later, health history, supplements or meds, recent blood tests, and Garmin\/WHOOP\/Oura data can all help too\.`/u,
   )
   assert.match(
     text,
@@ -259,6 +263,19 @@ function assertPromptDoesNotHaveFirstTurnCheckInGuidance(
   assert.doesNotMatch(text, /Hey, I'm Murph\. I'm your personal health assistant\./u)
   assert.doesNotMatch(text, /what are some of their health goals right now/u)
   assert.doesNotMatch(text, /what you should call them/u)
+  assert.doesNotMatch(text, /You may follow that intro with this exact follow-up copy/u)
+  assert.doesNotMatch(
+    text,
+    /You can send things as they happen — symptoms, sleep, meals, meds, workouts, labs, questions — and I keep compiling the picture over time so I can help you notice patterns, make better decisions, and work toward your goals\. It’s like having a private health team in your pocket\./u,
+  )
+  assert.doesNotMatch(
+    text,
+    /Do you have any other questions or do you want to learn more about the things I can do for you\?/u,
+  )
+  assert.doesNotMatch(
+    text,
+    /If you want a useful head start later, health history, supplements or meds, recent blood tests, and Garmin\/WHOOP\/Oura data can all help too\./u,
+  )
 }
 
 async function writeGuardReceipt(input: {
@@ -2627,14 +2644,18 @@ test('sendAssistantMessage injects the first-chat check-in only for an opted-in 
     firstCall?.systemPrompt ?? '',
     /Do not search or write assistant memory just because this is the first chat turn or because you are doing the optional check-in/u,
   )
-  assert.match(firstCall?.systemPrompt ?? '', /at most one more short sentence/u)
+  assert.match(firstCall?.systemPrompt ?? '', /with this exact follow-up copy/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
     /text, photos, voice memos, Telegram messages, or email/u,
   )
   assert.match(
     firstCall?.systemPrompt ?? '',
-    /health history, supplements or meds, and recent blood tests, and if they have a Garmin, WHOOP, or Oura Ring, Murph can help get those connected too/u,
+    /You can send things as they happen — symptoms, sleep, meals, meds, workouts, labs, questions — and I keep compiling the picture over time so I can help you notice patterns, make better decisions, and work toward your goals\. It’s like having a private health team in your pocket\./u,
+  )
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /If you want a useful head start later, health history, supplements or meds, recent blood tests, and Garmin\/WHOOP\/Oura data can all help too\./u,
   )
   assertPromptDoesNotHaveFirstTurnCheckInGuidance(secondCall?.systemPrompt)
 })
@@ -2725,14 +2746,14 @@ test('sendAssistantMessage injects the first-chat check-in for first-turn messag
 
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
   assertPromptHasFirstTurnCheckInGuidance(firstCall?.systemPrompt)
-  assert.match(firstCall?.systemPrompt ?? '', /at most one more short sentence/u)
+  assert.match(firstCall?.systemPrompt ?? '', /with this exact follow-up copy/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
     /text, photos, voice memos, Telegram messages, or email/u,
   )
   assert.match(
     firstCall?.systemPrompt ?? '',
-    /Garmin, Oura, or WHOOP connections/u,
+    /If you want a useful head start later, health history, supplements or meds, recent blood tests, and Garmin\/WHOOP\/Oura data can all help too\./u,
   )
 })
 
