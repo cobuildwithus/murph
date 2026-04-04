@@ -12,8 +12,8 @@ importers:
         specifier: ^0.1.15
         version: 0.1.15
       '@cobuild/review-gpt':
-        specifier: ^0.5.33
-        version: 0.5.33
+        specifier: ^0.5.34
+        version: 0.5.34
       '@types/node':
         specifier: ^25.5.0
         version: 25.5.0
@@ -765,8 +765,8 @@ packages:
     resolution: {integrity: sha512-CjzP5OHu6RhOOjmPl/1djZNVEbjttt62rBSzvuPK7u9NrZ37F2lkHT+QmZ4Lb+ZDmMhPTqlwdyqnzwD0Gkhm1Q==}
     hasBin: true
 
-  '@cobuild/review-gpt@0.5.33':
-    resolution: {integrity: sha512-Xbg9/hr/NVyZ6QUIXTLQ7hSx/7k5a0RY6qgsxowviqf1e7XFm8wnDLZsdaeeFBMUbioW1FCVnR12RxLAtci/bg==}
+  '@cobuild/review-gpt@0.5.34':
+    resolution: {integrity: sha512-uA/75Yz4Lf/kUnn09XeCP07v/DDjh2Q/DKm3nXJ+Lmk8NRosZVPV+v36YbHDI/sY5BkOdoUpXyMGl4ydRk7ZrQ==}
     hasBin: true
 
   '@cobuild/wire@0.3.6':
@@ -8157,7 +8157,7 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.15': {}
 
-  '@cobuild/review-gpt@0.5.33':
+  '@cobuild/review-gpt@0.5.34':
     dependencies:
       '@cobuild/repo-tools': 0.1.15
       incur: 0.3.13(openapi-types@12.1.3)
@@ -13566,7 +13566,7 @@ snapshots:
 
   extension-port-stream@3.0.0:
     dependencies:
-      readable-stream: 4.7.0
+      readable-stream: 3.6.2
       webextension-polyfill: 0.10.0
 
   eyes@0.1.8: {}
