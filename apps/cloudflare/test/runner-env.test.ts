@@ -87,7 +87,7 @@ describe("buildHostedRunnerContainerEnv", () => {
 
   it("does not forward hosted web control tokens into the runner", () => {
     expect(buildHostedRunnerContainerEnv({
-      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+      HOSTED_EXECUTION_SIGNING_SECRET: "signing-secret",
       HOSTED_EXECUTION_INTERNAL_TOKEN: "internal-token",
     })).toEqual({
       HOSTED_EMAIL_INGRESS_READY: "false",

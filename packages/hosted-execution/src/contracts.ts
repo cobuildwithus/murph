@@ -92,9 +92,11 @@ export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseE
   kind: "device-sync.wake";
   provider?: string | null;
   reason: "connected" | "webhook_hint" | "disconnected" | "reauthorization_required";
+  runtimeSnapshot?: HostedExecutionDeviceSyncRuntimeSnapshotResponse | null;
 }
 
 export interface HostedExecutionShareReference {
+  pack?: SharePack;
   shareCode: string;
   shareId: string;
 }

@@ -50,6 +50,7 @@ export const cloudflareNodeVitestProjects = [
     "outbox-delivery-journal.test.ts",
     "runner-*.test.ts",
     "user-env.test.ts",
+    "user-key-store.test.ts",
     "user-runner.test.ts",
     "gateway-store.test.ts",
   ]),

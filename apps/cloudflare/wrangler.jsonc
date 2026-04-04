@@ -52,9 +52,7 @@
   "secrets": {
     "required": [
       "HOSTED_EXECUTION_SIGNING_SECRET",
-      "HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY",
-      "HOSTED_EXECUTION_CONTROL_TOKENS",
-      "HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS"
+      "HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY"
     ]
   },
   "vars": {
@@ -70,8 +68,6 @@
   // - HOSTED_EXECUTION_SIGNING_SECRET
   // - HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY
   // - HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON (optional JSON keyring for decrypting older bundle keyIds)
-  // - HOSTED_EXECUTION_CONTROL_TOKENS
-  // - HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS
   // Wrangler's `secrets.required` support is experimental; keep the required list tight.
   // Optional provider/toolchain vars and secrets must be configured on the Worker so the
   // Durable Object can forward them into the native container at runtime.

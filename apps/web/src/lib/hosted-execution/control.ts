@@ -19,7 +19,7 @@ export async function syncHostedVerifiedEmailToHostedExecution(input: {
 }): Promise<HostedVerifiedEmailSyncResult> {
   const environment = readHostedExecutionControlEnvironment();
 
-  if (!environment.baseUrl || !environment.controlToken) {
+  if (!environment.baseUrl || !environment.signingSecret) {
     throw hostedOnboardingError({
       code: "HOSTED_EXECUTION_CONTROL_NOT_CONFIGURED",
       message: "Hosted email sync is not configured yet. Contact support to finish setup.",
@@ -29,7 +29,7 @@ export async function syncHostedVerifiedEmailToHostedExecution(input: {
 
   const client = createHostedExecutionControlClient({
     baseUrl: environment.baseUrl,
-    controlToken: environment.controlToken,
+    signingSecret: environment.signingSecret,
   });
 
   await client.updateUserEnv(input.userId, {

@@ -213,27 +213,22 @@ describe("drainHostedExecutionOutbox", () => {
 
   it("accepts idempotent re-enqueue when stored payload JSON key order differs", async () => {
     const dispatch = createShareDispatch();
-    const share = (
-      dispatch.event as Extract<HostedExecutionDispatchRequest["event"], { kind: "vault.share.accepted" }>
-    ).share;
     const prisma = createEnqueueOutboxPrisma(createOutboxRecord({
       eventId: dispatch.eventId,
       eventKind: dispatch.event.kind,
       payloadJson: {
-        storage: "inline",
-        schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
-        dispatch: {
-          occurredAt: dispatch.occurredAt,
+        dispatchRef: {
           eventId: dispatch.eventId,
-          event: {
-            userId: dispatch.event.userId,
-            share: {
-              shareId: share.shareId,
-              shareCode: share.shareCode,
-            },
-            kind: dispatch.event.kind,
+          eventKind: dispatch.event.kind,
+          occurredAt: dispatch.occurredAt,
+          share: {
+            shareCode: "share-code",
+            shareId: "share_123",
           },
+          userId: dispatch.event.userId,
         },
+        schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+        storage: "reference",
       },
       sourceId: "share_123",
       sourceType: "hosted_share_link",

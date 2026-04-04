@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 import {
+  HOSTED_EXECUTION_DISPATCH_PATH,
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
   verifyHostedExecutionSignature,
@@ -218,6 +219,8 @@ describe("dispatchHostedExecutionBestEffort", () => {
     expect(timestamp).not.toBe("2026-03-20T12:00:00.000Z");
     await expect(
       verifyHostedExecutionSignature({
+        method: "POST",
+        path: HOSTED_EXECUTION_DISPATCH_PATH,
         payload,
         secret: "secret",
         signature: headers.get(HOSTED_EXECUTION_SIGNATURE_HEADER),

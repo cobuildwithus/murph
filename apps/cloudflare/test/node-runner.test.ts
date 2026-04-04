@@ -1275,7 +1275,7 @@ describe("runHostedExecutionJob", () => {
     }
   });
 
-  it("imports a hosted share through a direct control-plane client when the share token is configured", async () => {
+  it("imports a hosted share from the inline dispatch pack even when share control env is configured", async () => {
     const sourceVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-source-"));
     cleanupPaths.push(sourceVaultRoot);
     await initializeVault({ vaultRoot: sourceVaultRoot });
@@ -1367,6 +1367,7 @@ describe("runHostedExecutionJob", () => {
           event: {
             kind: "vault.share.accepted",
             share: {
+              pack,
               shareCode: "share_code_123",
               shareId: "share_123",
             },
@@ -1389,11 +1390,9 @@ describe("runHostedExecutionJob", () => {
       });
       const importedFood = (await listFoods(restored.vaultRoot)).find((entry) => entry.title === "Morning Smoothie");
 
-      expect(sharePayloadRequests).toBe(1);
-      expect(lastBoundUserIdHeader).toBe("member_456");
-      expect(lastRequestBody).toBe(JSON.stringify({
-        shareCode: "share_code_123",
-      }));
+      expect(sharePayloadRequests).toBe(0);
+      expect(lastBoundUserIdHeader).toBeNull();
+      expect(lastRequestBody).toBe("");
       expect(importedFood).toBeDefined();
       expect(result.result.summary).toContain(`Imported share pack "${pack.title}"`);
     } finally {
@@ -1402,7 +1401,7 @@ describe("runHostedExecutionJob", () => {
     }
   });
 
-  it("imports a hosted share through the worker proxy without exposing a runner share token", async () => {
+  it("imports a hosted share from the inline dispatch pack without fetching through the worker proxy", async () => {
     const previousHostedExecutionInternalToken = process.env.HOSTED_EXECUTION_INTERNAL_TOKEN;
     const previousHostedShareApiBaseUrl = process.env.HOSTED_SHARE_API_BASE_URL;
     const previousHostedShareInternalToken = process.env.HOSTED_SHARE_INTERNAL_TOKEN;
@@ -1479,6 +1478,7 @@ describe("runHostedExecutionJob", () => {
           event: {
             kind: "vault.share.accepted",
             share: {
+              pack,
               shareCode: "share_code_proxy",
               shareId: "share_proxy_123",
             },
@@ -1500,16 +1500,7 @@ describe("runHostedExecutionJob", () => {
       });
       const importedFood = (await listFoods(restored.vaultRoot)).find((entry) => entry.title === "Proxy Smoothie");
 
-      expect(fetchSpy).toHaveBeenCalledWith(
-        "http://share-pack.worker/api/hosted-share/internal/share_proxy_123/payload",
-        expect.objectContaining({
-          body: JSON.stringify({
-            shareCode: "share_code_proxy",
-          }),
-          method: "POST",
-        }),
-      );
-      expect(new Headers(fetchSpy.mock.calls[0]?.[1]?.headers).get("authorization")).toBeNull();
+      expect(fetchSpy).not.toHaveBeenCalled();
       expect(importedFood).toBeDefined();
       expect(importedFood?.attachedProtocolIds?.length).toBe(1);
       expect(result.result.summary).toContain(`Imported share pack "${pack.title}"`);

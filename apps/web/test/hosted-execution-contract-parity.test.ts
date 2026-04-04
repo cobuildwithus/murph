@@ -132,6 +132,7 @@ describe("hosted execution contract parity", () => {
         kind === "linq.message.received"
           || kind === "telegram.message.received"
           || kind === "email.message.received"
+          || kind === "vault.share.accepted"
           ? "reference"
           : "inline",
       );

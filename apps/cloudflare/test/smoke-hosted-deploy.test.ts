@@ -125,7 +125,7 @@ describe("runSmokeHostedDeploy", () => {
       log() {},
       source: {
         CF_WORKER_NAME: "hosted-worker",
-        HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+        HOSTED_EXECUTION_SIGNING_SECRET: "signing-secret",
         HOSTED_EXECUTION_SMOKE_STATUS_POLL_INTERVAL_MS: "1",
         HOSTED_EXECUTION_SMOKE_STATUS_TIMEOUT_MS: "100",
         HOSTED_EXECUTION_SMOKE_USER_ID: "member_123",
@@ -147,7 +147,8 @@ describe("runSmokeHostedDeploy", () => {
         body: undefined,
         headers: {
           "Cloudflare-Workers-Version-Overrides": "hosted-worker=\"version-123\"",
-          authorization: "Bearer control-token",
+          "x-hosted-execution-signature": expect.any(String),
+          "x-hosted-execution-timestamp": expect.any(String),
         },
         method: "GET",
         url: "https://worker.example.test/internal/users/member_123/status",
@@ -156,8 +157,9 @@ describe("runSmokeHostedDeploy", () => {
         body: "{}",
         headers: {
           "Cloudflare-Workers-Version-Overrides": "hosted-worker=\"version-123\"",
-          authorization: "Bearer control-token",
           "content-type": "application/json; charset=utf-8",
+          "x-hosted-execution-signature": expect.any(String),
+          "x-hosted-execution-timestamp": expect.any(String),
         },
         method: "POST",
         url: "https://worker.example.test/internal/users/member_123/run",
@@ -166,7 +168,8 @@ describe("runSmokeHostedDeploy", () => {
         body: undefined,
         headers: {
           "Cloudflare-Workers-Version-Overrides": "hosted-worker=\"version-123\"",
-          authorization: "Bearer control-token",
+          "x-hosted-execution-signature": expect.any(String),
+          "x-hosted-execution-timestamp": expect.any(String),
         },
         method: "GET",
         url: "https://worker.example.test/internal/users/member_123/status",
@@ -230,7 +233,7 @@ describe("runSmokeHostedDeploy", () => {
       fetchImpl,
       log() {},
       source: {
-        HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+        HOSTED_EXECUTION_SIGNING_SECRET: "signing-secret",
         HOSTED_EXECUTION_SMOKE_STATUS_POLL_INTERVAL_MS: "1",
         HOSTED_EXECUTION_SMOKE_STATUS_TIMEOUT_MS: "5",
         HOSTED_EXECUTION_SMOKE_USER_ID: "member_123",

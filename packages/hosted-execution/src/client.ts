@@ -1,3 +1,9 @@
+import {
+  parseHostedUserRootKeyEnvelope,
+  type HostedUserRootKeyEnvelope,
+  type HostedUserRootKeyRecipientKind,
+} from "@murphai/runtime-state";
+
 import { createHostedExecutionSignatureHeaders } from "./auth.ts";
 import type {
   HostedExecutionDispatchResult,
@@ -16,6 +22,8 @@ import {
 } from "./parsers.ts";
 import {
   buildHostedExecutionUserEnvPath,
+  buildHostedExecutionUserKeyEnvelopePath,
+  buildHostedExecutionUserKeyRecipientPath,
   buildHostedExecutionUserRunPath,
   buildHostedExecutionUserStatusPath,
   HOSTED_EXECUTION_DISPATCH_PATH,
@@ -33,21 +41,35 @@ export interface HostedExecutionDispatchClientOptions {
   timeoutMs?: number;
 }
 
+export interface HostedExecutionUserRootKeyRecipientUpsert {
+  metadata?: Record<string, string | number | boolean | null>;
+  recipientKeyBase64: string;
+  recipientKeyId: string;
+}
+
 export interface HostedExecutionControlClient {
   clearUserEnv(userId: string): Promise<HostedExecutionUserEnvStatus>;
   getStatus(userId: string): Promise<HostedExecutionUserStatus>;
   getUserEnvStatus(userId: string): Promise<HostedExecutionUserEnvStatus>;
+  getUserKeyEnvelope(userId: string): Promise<HostedUserRootKeyEnvelope>;
   run(userId: string): Promise<HostedExecutionUserStatus>;
   updateUserEnv(
     userId: string,
     update: HostedExecutionUserEnvUpdate,
   ): Promise<HostedExecutionUserEnvStatus>;
+  upsertUserKeyRecipient(
+    userId: string,
+    kind: HostedUserRootKeyRecipientKind,
+    input: HostedExecutionUserRootKeyRecipientUpsert,
+  ): Promise<HostedUserRootKeyEnvelope>;
 }
 
 export interface HostedExecutionControlClientOptions {
   baseUrl: string;
-  controlToken: string;
   fetchImpl?: typeof fetch;
+  now?: () => string;
+  signingSecret: string;
+  timeoutMs?: number;
 }
 
 export function createHostedExecutionDispatchClient(
@@ -60,9 +82,12 @@ export function createHostedExecutionDispatchClient(
     async dispatch(input) {
       const requestPayload = parseHostedExecutionDispatchRequest(input);
       const payload = JSON.stringify(requestPayload);
+      const path = HOSTED_EXECUTION_DISPATCH_PATH;
       const timestamp = options.now?.() ?? new Date().toISOString();
       const signatureHeaders = await createHostedExecutionSignatureHeaders({
+        method: "POST",
         payload,
+        path,
         secret: options.signingSecret,
         timestamp,
       });
@@ -72,7 +97,7 @@ export function createHostedExecutionDispatchClient(
         fetchImpl,
         label: "dispatch",
         parse: parseHostedExecutionDispatchResult,
-        path: HOSTED_EXECUTION_DISPATCH_PATH,
+        path,
         request: {
           body: payload,
           headers: {
@@ -91,84 +116,127 @@ export function createHostedExecutionControlClient(
   options: HostedExecutionControlClientOptions,
 ): HostedExecutionControlClient {
   const baseUrl = requireHostedExecutionBaseUrl(options.baseUrl);
-  const controlToken = requireHostedExecutionControlToken(options.controlToken);
   const fetchImpl = options.fetchImpl ?? fetch;
-  const authenticatedHeaders = withHostedExecutionControlToken(undefined, controlToken);
-  const authenticatedJsonHeaders = withHostedExecutionControlToken(
-    {
-      "content-type": "application/json; charset=utf-8",
-    },
-    controlToken,
-  );
+  const signingSecret = requireHostedExecutionSigningSecret(options.signingSecret);
 
   return {
     clearUserEnv(userId) {
-      return requestHostedExecutionJson({
+      return requestHostedExecutionSignedJson({
         baseUrl,
         fetchImpl,
         label: "user env clear",
+        now: options.now,
         parse: parseHostedExecutionUserEnvStatus,
         path: buildHostedExecutionUserEnvPath(userId),
         request: {
-          headers: authenticatedHeaders,
           method: "DELETE",
         },
+        signingSecret,
+        timeoutMs: options.timeoutMs,
       });
     },
     getStatus(userId) {
-      return requestHostedExecutionJson({
+      return requestHostedExecutionSignedJson({
         baseUrl,
         fetchImpl,
         label: "status",
+        now: options.now,
         parse: parseHostedExecutionUserStatus,
         path: buildHostedExecutionUserStatusPath(userId),
         request: {
-          headers: authenticatedHeaders,
           method: "GET",
         },
+        signingSecret,
+        timeoutMs: options.timeoutMs,
       });
     },
     getUserEnvStatus(userId) {
-      return requestHostedExecutionJson({
+      return requestHostedExecutionSignedJson({
         baseUrl,
         fetchImpl,
         label: "user env status",
+        now: options.now,
         parse: parseHostedExecutionUserEnvStatus,
         path: buildHostedExecutionUserEnvPath(userId),
         request: {
-          headers: authenticatedHeaders,
           method: "GET",
         },
+        signingSecret,
+        timeoutMs: options.timeoutMs,
+      });
+    },
+    getUserKeyEnvelope(userId) {
+      return requestHostedExecutionSignedJson({
+        baseUrl,
+        fetchImpl,
+        label: "user key envelope",
+        now: options.now,
+        parse: (value) => parseHostedUserRootKeyEnvelope(value),
+        path: buildHostedExecutionUserKeyEnvelopePath(userId),
+        request: {
+          method: "GET",
+        },
+        signingSecret,
+        timeoutMs: options.timeoutMs,
       });
     },
     run(userId) {
-      return requestHostedExecutionJson({
+      return requestHostedExecutionSignedJson({
         baseUrl,
         fetchImpl,
         label: "manual run",
+        now: options.now,
         parse: parseHostedExecutionUserStatus,
         path: buildHostedExecutionUserRunPath(userId),
         request: {
           body: JSON.stringify({}),
-          headers: authenticatedJsonHeaders,
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
           method: "POST",
         },
+        signingSecret,
+        timeoutMs: options.timeoutMs,
       });
     },
     updateUserEnv(userId, update) {
       const requestPayload = parseHostedExecutionUserEnvUpdate(update);
 
-      return requestHostedExecutionJson({
+      return requestHostedExecutionSignedJson({
         baseUrl,
         fetchImpl,
         label: "user env update",
+        now: options.now,
         parse: parseHostedExecutionUserEnvStatus,
         path: buildHostedExecutionUserEnvPath(userId),
         request: {
           body: JSON.stringify(requestPayload),
-          headers: authenticatedJsonHeaders,
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
           method: "PUT",
         },
+        signingSecret,
+        timeoutMs: options.timeoutMs,
+      });
+    },
+    upsertUserKeyRecipient(userId, kind, input) {
+      return requestHostedExecutionSignedJson({
+        baseUrl,
+        fetchImpl,
+        label: `user key recipient ${kind}`,
+        now: options.now,
+        parse: (value) => parseHostedUserRootKeyEnvelope(value),
+        path: buildHostedExecutionUserKeyRecipientPath(userId, kind),
+        request: {
+          body: JSON.stringify(input),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "PUT",
+        },
+        signingSecret,
+        timeoutMs: options.timeoutMs,
       });
     },
   };
@@ -184,11 +252,11 @@ function requireHostedExecutionBaseUrl(value: string): string {
   return normalized;
 }
 
-function requireHostedExecutionControlToken(value: string): string {
+function requireHostedExecutionSigningSecret(value: string): string {
   const normalized = normalizeHostedExecutionControlToken(value);
 
   if (!normalized) {
-    throw new TypeError("Hosted execution controlToken must be configured.");
+    throw new TypeError("Hosted execution signingSecret must be configured.");
   }
 
   return normalized;
@@ -233,13 +301,54 @@ async function requestHostedExecutionJson<TResponse>(input: {
   return input.parse(payload);
 }
 
-function withHostedExecutionControlToken(
-  headers: HeadersInit | undefined,
-  controlToken: string,
-): HeadersInit {
-  const nextHeaders = new Headers(headers);
-  nextHeaders.set("authorization", `Bearer ${controlToken}`);
-  return nextHeaders;
+async function requestHostedExecutionSignedJson<TResponse>(input: {
+  baseUrl: string;
+  fetchImpl: typeof fetch;
+  label: string;
+  now?: () => string;
+  parse: (value: unknown) => TResponse;
+  path: string;
+  request: RequestInit;
+  signingSecret: string;
+  timeoutMs?: number;
+}): Promise<TResponse> {
+  const payload = readHostedExecutionRequestBody(input.request.body);
+  const timestamp = input.now?.() ?? new Date().toISOString();
+  const signatureHeaders = await createHostedExecutionSignatureHeaders({
+    method: input.request.method,
+    path: input.path,
+    payload,
+    secret: input.signingSecret,
+    timestamp,
+  });
+
+  return requestHostedExecutionJson({
+    baseUrl: input.baseUrl,
+    fetchImpl: input.fetchImpl,
+    label: input.label,
+    parse: input.parse,
+    path: input.path,
+    request: {
+      ...input.request,
+      headers: {
+        ...(input.request.headers ?? {}),
+        ...signatureHeaders,
+      },
+      signal: resolveHostedExecutionTimeoutSignal(input.timeoutMs),
+    },
+  });
+}
+
+function readHostedExecutionRequestBody(body: BodyInit | null | undefined): string {
+  if (typeof body === "string") {
+    return body;
+  }
+
+  if (body === undefined || body === null) {
+    return "";
+  }
+
+  throw new TypeError("Hosted execution signed requests require string request bodies.");
 }
 
 function parseHostedExecutionJsonPayload(text: string): unknown {

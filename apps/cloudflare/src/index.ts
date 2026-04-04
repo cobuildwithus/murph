@@ -47,6 +47,7 @@ import {
 } from "@murphai/gateway-core";
 
 import { readHostedExecutionSignatureHeaders, verifyHostedExecutionSignature } from "./auth.ts";
+import { decodeBase64 } from "./base64.ts";
 import { createHostedUserEnvStore } from "./bundle-store.ts";
 import { readHostedExecutionEnvironment } from "./env.ts";
 import type {
@@ -58,6 +59,7 @@ import {
   notFound,
   readJsonObject,
   readOptionalJsonObject,
+  requireJsonObject,
   unauthorized,
 } from "./json.ts";
 export { RunnerContainer } from "./runner-container.ts";
@@ -72,14 +74,17 @@ import {
   type HostedEmailWorkerRequest,
 } from "./hosted-email.ts";
 import {
+  HOSTED_USER_ROOT_KEY_RECIPIENT_KINDS,
   isHostedEmailInboundSenderAuthorized,
   readHostedVerifiedEmailFromEnv,
+  type HostedUserRootKeyRecipientKind,
 } from "@murphai/runtime-state";
 import {
   decodeHostedUserEnvPayload,
   parseHostedUserEnvUpdate,
   type HostedUserEnvUpdate,
 } from "./user-env.ts";
+import { createHostedUserKeyStore } from "./user-key-store.ts";
 import {
   HostedUserRunner,
   type DurableObjectStateLike,
@@ -102,14 +107,13 @@ interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLike {
     update: HostedUserEnvUpdate,
   ): Promise<HostedExecutionUserEnvStatus>;
 }
-
 interface WorkerEnvironmentSource extends WorkerEnvironmentContract<UserRunnerDurableObjectStubLike> {
   RUNNER_CONTAINER: import("./runner-container.ts").HostedExecutionContainerNamespaceLike;
 }
 
 type RouteParams = Readonly<Record<string, string>>;
 type RouteMatcher = (pathname: string) => RouteParams | null;
-type WorkerRouteAuthorization = "control" | "signed-dispatch" | null;
+type WorkerRouteAuthorization = "signed" | null;
 type WrongMethodResponse = "method-not-allowed" | "not-found";
 
 interface DeclarativeRoute<Context> {
@@ -145,7 +149,7 @@ const workerPublicRoutes: readonly DeclarativeRoute<{
 
 const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
-    authorization: "signed-dispatch",
+    authorization: "signed",
     async handle(context) {
       return handleSignedDispatchRoute(context);
     },
@@ -154,7 +158,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   },
   {
     authorizeBeforeMethod: true,
-    authorization: "control",
+    authorization: "signed",
     async handle(context, params) {
       return handleManualRunRoute(context, params.userId);
     },
@@ -164,7 +168,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   },
   {
     authorizeBeforeMethod: true,
-    authorization: "control",
+    authorization: "signed",
     async handle(context, params) {
       return handleStatusRoute(context, params.userId);
     },
@@ -174,7 +178,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   },
   {
     authorizeBeforeMethod: true,
-    authorization: "control",
+    authorization: "signed",
     async handle(context, params) {
       return handleUserEnvRoute(context, params.userId);
     },
@@ -184,7 +188,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   },
   {
     authorizeBeforeMethod: true,
-    authorization: "control",
+    authorization: "signed",
     async handle(context, params) {
       return handleUserEmailAddressRoute(context, params.userId);
     },
@@ -194,7 +198,27 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   },
   {
     authorizeBeforeMethod: true,
-    authorization: "control",
+    authorization: "signed",
+    async handle(context, params) {
+      return handleUserKeyEnvelopeRoute(context, params.userId);
+    },
+    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/keys\/envelope$/u),
+    methods: ["GET"],
+    wrongMethodResponse: "method-not-allowed",
+  },
+  {
+    authorizeBeforeMethod: true,
+    authorization: "signed",
+    async handle(context, params) {
+      return handleUserKeyRecipientRoute(context, params.userId, params.kind);
+    },
+    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/keys\/recipients\/(?<kind>[^/]+)$/u),
+    methods: ["PUT"],
+    wrongMethodResponse: "method-not-allowed",
+  },
+  {
+    authorizeBeforeMethod: true,
+    authorization: "signed",
     async handle(context, params) {
       return handleGatewayRoute(context, params.userId, params.resource);
     },
@@ -376,9 +400,7 @@ async function authorizeRoute(
   context: { request: Request } & Partial<WorkerRouteContext>,
 ): Promise<Response | null> {
   switch (authorization) {
-    case "control":
-      return requireBearerAuthorization(context.request, context.environment?.controlTokens ?? []);
-    case "signed-dispatch": {
+    case "signed": {
       const secret = context.environment?.dispatchSigningSecret;
       if (!secret) {
         return unauthorized();
@@ -386,7 +408,9 @@ async function authorizeRoute(
       const payload = await readCachedRequestText(context);
       const { signature, timestamp } = readHostedExecutionSignatureHeaders(context.request.headers);
       const verified = await verifyHostedExecutionSignature({
+        method: context.request.method,
         payload,
+        path: new URL(context.request.url).pathname,
         secret,
         signature,
         timestamp,
@@ -403,7 +427,7 @@ async function handleManualRunRoute(
   context: WorkerRouteContext,
   encodedUserId: string,
 ): Promise<Response> {
-  await readOptionalJsonObject(context.request);
+  await readCachedOptionalJsonObject(context);
   const userId = decodeRouteParam(encodedUserId);
   const dispatch = createManualRunDispatch(userId);
   const status = await (await resolveUserRunnerStub(context.env, userId)).dispatch(dispatch);
@@ -435,7 +459,7 @@ async function handleUserEnvRoute(
 
   if (context.request.method === "PUT") {
     return json(
-      await stub.updateUserEnv(parseHostedUserEnvUpdate(await readJsonObject(context.request))),
+      await stub.updateUserEnv(parseHostedUserEnvUpdate(await readCachedJsonObject(context))),
     );
   }
 
@@ -475,6 +499,43 @@ async function handleUserEmailAddressRoute(
   });
 }
 
+function createHostedControlUserKeyStore(context: WorkerRouteContext) {
+  return createHostedUserKeyStore({
+    automationKey: context.environment.bundleEncryptionKey,
+    automationKeyId: context.environment.bundleEncryptionKeyId,
+    bucket: context.env.BUNDLES,
+    envelopeKeyId: context.environment.bundleEncryptionKeyId,
+    envelopeKeysById: context.environment.bundleEncryptionKeysById,
+  });
+}
+
+async function handleUserKeyEnvelopeRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  const userId = decodeRouteParam(encodedUserId);
+  return json((await createHostedControlUserKeyStore(context).ensureUserCryptoContext(userId)).envelope);
+}
+
+async function handleUserKeyRecipientRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+  encodedKind: string,
+): Promise<Response> {
+  const userId = decodeRouteParam(encodedUserId);
+  const kind = parseHostedUserRootKeyRecipientKind(decodeRouteParam(encodedKind));
+  const payload = parseHostedUserKeyRecipientUpsertRequest(await readCachedJsonObject(context));
+  const envelope = await createHostedControlUserKeyStore(context).upsertRecipient({
+    kind,
+    metadata: payload.metadata,
+    recipientKey: decodeBase64(payload.recipientKeyBase64),
+    recipientKeyId: payload.recipientKeyId,
+    userId,
+  });
+
+  return json(envelope);
+}
+
 async function handleGatewayRoute(
   context: WorkerRouteContext,
   encodedUserId: string,
@@ -482,7 +543,7 @@ async function handleGatewayRoute(
 ): Promise<Response> {
   const userId = decodeRouteParam(encodedUserId);
   const stub = await resolveUserRunnerStub(context.env, userId);
-  const payload = await readOptionalJsonObject(context.request);
+  const payload = await readCachedOptionalJsonObject(context);
 
   switch (resource) {
     case "conversations/list":
@@ -649,6 +710,67 @@ function requireGatewayStubMethod<TKey extends keyof UserRunnerDurableObjectStub
 
 function createGatewayDispatchEventId(): string {
   return `gateway-send:${crypto.randomUUID()}`;
+}
+
+function parseHostedUserRootKeyRecipientKind(value: string): HostedUserRootKeyRecipientKind {
+  if ((HOSTED_USER_ROOT_KEY_RECIPIENT_KINDS as readonly string[]).includes(value)) {
+    return value as HostedUserRootKeyRecipientKind;
+  }
+
+  throw new TypeError("Hosted user root key recipient kind is invalid.");
+}
+
+function parseHostedUserKeyRecipientUpsertRequest(value: Record<string, unknown>): {
+  metadata?: Record<string, string | number | boolean | null>;
+  recipientKeyBase64: string;
+  recipientKeyId: string;
+} {
+  return {
+    ...(value.metadata === undefined
+      ? {}
+      : { metadata: parseHostedUserRecipientMetadata(value.metadata) }),
+    recipientKeyBase64: requireString(value.recipientKeyBase64, "recipientKeyBase64"),
+    recipientKeyId: requireString(value.recipientKeyId, "recipientKeyId"),
+  };
+}
+
+function parseHostedUserRecipientMetadata(
+  value: unknown,
+): Record<string, string | number | boolean | null> {
+  const record = requireRecord(value, "metadata");
+  const result: Record<string, string | number | boolean | null> = {};
+
+  for (const [key, entry] of Object.entries(record)) {
+    if (
+      entry === null
+      || typeof entry === "string"
+      || typeof entry === "number"
+      || typeof entry === "boolean"
+    ) {
+      result[key] = entry as string | number | boolean | null;
+      continue;
+    }
+
+    throw new TypeError(`metadata.${key} must be a scalar JSON value.`);
+  }
+
+  return result;
+}
+
+function requireRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function requireString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new TypeError(`${label} must be a non-empty string.`);
+  }
+
+  return value.trim();
 }
 
 async function handleHostedEmailIngress(
@@ -863,27 +985,27 @@ async function readCachedRequestText(
   return context.requestText;
 }
 
+async function readCachedJsonObject(
+  context: Pick<WorkerRouteContext, "request" | "requestText">,
+): Promise<Record<string, unknown>> {
+  return requireJsonObject(JSON.parse(await readCachedRequestText(context)) as unknown);
+}
+
+async function readCachedOptionalJsonObject(
+  context: Pick<WorkerRouteContext, "request" | "requestText">,
+): Promise<Record<string, unknown>> {
+  const payload = await readCachedRequestText(context);
+
+  if (!payload.trim()) {
+    return {};
+  }
+
+  return requireJsonObject(JSON.parse(payload) as unknown);
+}
+
 function isBackpressuredStatus(
   status: { backpressuredEventIds?: string[] },
   eventId: string,
 ): boolean {
   return status.backpressuredEventIds?.includes(eventId) ?? false;
-}
-
-function requireBearerAuthorization(
-  request: Request,
-  tokens: readonly string[] | string | null | undefined,
-): Response | null {
-  const acceptedTokens = Array.isArray(tokens)
-    ? tokens.filter((token) => typeof token === "string" && token.length > 0)
-    : (typeof tokens === "string" && tokens.length > 0 ? [tokens] : []);
-
-  if (acceptedTokens.length === 0) {
-    return json({ error: "Hosted execution control token is not configured." }, 503);
-  }
-
-  const authorization = request.headers.get("authorization");
-  return authorization && acceptedTokens.some((token) => authorization === `Bearer ${token}`)
-    ? null
-    : json({ error: "Unauthorized" }, 401);
 }
