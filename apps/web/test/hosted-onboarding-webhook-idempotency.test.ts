@@ -14,12 +14,19 @@ const mocks = vi.hoisted(() => {
   const stripePaymentIntentsRetrieve = vi.fn();
 
   return {
+    claimHostedLinqOnboardingLinkNotice: vi.fn(),
+    claimHostedLinqQuotaReplyNotice: vi.fn(),
+    drainHostedActivationWelcomeMessages: vi.fn(),
     drainHostedExecutionOutboxBestEffort: vi.fn(),
+    drainHostedStripeEventQueueDetailed: vi.fn(),
     enqueueHostedExecutionOutbox: vi.fn(),
+    incrementHostedLinqInboundDailyState: vi.fn(),
+    incrementHostedLinqOutboundDailyState: vi.fn(),
     isHostedRevnetBroadcastStatusUnknownError: vi.fn(),
     isHostedOnboardingRevnetEnabled: vi.fn(),
     normalizeHostedWalletAddress: vi.fn((value: string | null | undefined) => value ?? null),
     requireHostedRevnetConfig: vi.fn(),
+    recordHostedStripeEvent: vi.fn(),
     sendHostedLinqChatMessage: vi.fn(),
     submitHostedRevnetPayment: vi.fn(),
     stripeChargesRetrieve,
@@ -31,6 +38,23 @@ const mocks = vi.hoisted(() => {
 vi.mock("@/src/lib/hosted-execution/outbox", () => ({
   drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
   enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/activation-welcome", () => ({
+  drainHostedActivationWelcomeMessages: mocks.drainHostedActivationWelcomeMessages,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
+  claimHostedLinqOnboardingLinkNotice: mocks.claimHostedLinqOnboardingLinkNotice,
+  claimHostedLinqQuotaReplyNotice: mocks.claimHostedLinqQuotaReplyNotice,
+  incrementHostedLinqInboundDailyState: mocks.incrementHostedLinqInboundDailyState,
+  incrementHostedLinqOutboundDailyState: mocks.incrementHostedLinqOutboundDailyState,
+  resolveHostedLinqDayUtc: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/stripe-event-queue", () => ({
+  drainHostedStripeEventQueueDetailed: mocks.drainHostedStripeEventQueueDetailed,
+  recordHostedStripeEvent: mocks.recordHostedStripeEvent,
 }));
 
 vi.mock("../src/lib/hosted-onboarding/linq", async () => {
@@ -117,24 +141,43 @@ type HostedWebhookPrisma = Parameters<typeof handleHostedOnboardingLinqWebhook>[
 
 describe("hosted onboarding webhook retry safety", () => {
   beforeEach(() => {
+    mocks.claimHostedLinqOnboardingLinkNotice.mockReset();
+    mocks.claimHostedLinqQuotaReplyNotice.mockReset();
+    mocks.drainHostedActivationWelcomeMessages.mockReset();
     mocks.drainHostedExecutionOutboxBestEffort.mockReset();
+    mocks.drainHostedStripeEventQueueDetailed.mockReset();
     mocks.enqueueHostedExecutionOutbox.mockReset();
+    mocks.incrementHostedLinqInboundDailyState.mockReset();
+    mocks.incrementHostedLinqOutboundDailyState.mockReset();
     mocks.isHostedRevnetBroadcastStatusUnknownError.mockReset();
     mocks.isHostedOnboardingRevnetEnabled.mockReset();
     mocks.normalizeHostedWalletAddress.mockReset();
+    mocks.recordHostedStripeEvent.mockReset();
     mocks.requireHostedRevnetConfig.mockReset();
     mocks.sendHostedLinqChatMessage.mockReset();
     mocks.submitHostedRevnetPayment.mockReset();
     mocks.stripeChargesRetrieve.mockReset();
     mocks.stripeConstructEvent.mockReset();
     mocks.stripePaymentIntentsRetrieve.mockReset();
+    mocks.drainHostedActivationWelcomeMessages.mockResolvedValue([]);
     mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
+    mocks.drainHostedStripeEventQueueDetailed.mockResolvedValue([]);
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
+    mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
+    mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
+    mocks.incrementHostedLinqInboundDailyState.mockResolvedValue(makeHostedLinqDailyState());
+    mocks.incrementHostedLinqOutboundDailyState.mockResolvedValue(makeHostedLinqDailyState({
+      outboundCount: 1,
+    }));
     mocks.isHostedRevnetBroadcastStatusUnknownError.mockImplementation((error: unknown) =>
       String(error instanceof Error ? error.message : error).toLowerCase().includes("already known"),
     );
     mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(false);
     mocks.normalizeHostedWalletAddress.mockImplementation((value: string | null | undefined) => value ?? null);
+    mocks.recordHostedStripeEvent.mockImplementation(async (input: { event: { type: string } }) => ({
+      duplicate: false,
+      type: input.event.type,
+    }));
     mocks.requireHostedRevnetConfig.mockReturnValue({
       chainId: 8453,
       projectId: 1n,
@@ -211,7 +254,12 @@ describe("hosted onboarding webhook retry safety", () => {
       reason,
     });
 
-    expect(prisma.hostedMember.findUnique).not.toHaveBeenCalled();
+    if (reason === "own-message") {
+      expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(1);
+      expect(mocks.incrementHostedLinqOutboundDailyState).not.toHaveBeenCalled();
+    } else {
+      expect(prisma.hostedMember.findUnique).not.toHaveBeenCalled();
+    }
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
@@ -309,10 +357,10 @@ describe("hosted onboarding webhook retry safety", () => {
         }),
       }),
     );
-    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(2);
-    expect(prisma.hostedInvite.findFirst).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedInvite.findFirst).toHaveBeenCalledTimes(1);
     expect(prisma.hostedMember.create).not.toHaveBeenCalled();
-    expect(prisma.hostedMember.update).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedMember.update).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.create).toHaveBeenCalledTimes(1);
     expect(prisma.hostedInvite.update).toHaveBeenCalledWith({
       where: {
@@ -444,22 +492,19 @@ describe("hosted onboarding webhook retry safety", () => {
     );
   });
 
-  it("sends the signup link on any follow-up reply after the intro question", async () => {
-    const pendingInvite = makePendingInvite({
-      inviteCode: "code_follow_up",
-      sentAt: null,
-    });
+  it("suppresses same-day follow-up replies after the signup link was already sent", async () => {
+    mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
+      inboundCount: 2,
+      onboardingLinkSentAt: new Date("2026-03-26T12:00:01.000Z"),
+    }));
     const prisma = withPrismaTransaction({
       hostedBillingCheckout: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedInvite: {
         create: vi.fn(),
-        findFirst: vi.fn().mockResolvedValue(pendingInvite),
-        update: vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
-          ...pendingInvite,
-          ...data,
-        })),
+        findFirst: vi.fn(),
+        update: vi.fn(),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedWebhookReceipt: {
@@ -489,10 +534,9 @@ describe("hosted onboarding webhook retry safety", () => {
         timestamp: null,
       }),
     ).resolves.toMatchObject({
-      inviteCode: "code_follow_up",
-      joinUrl: "https://join.example.test/join/code_follow_up",
+      ignored: true,
       ok: true,
-      reason: "sent-signup-link",
+      reason: "signup-link-already-sent",
     });
 
     const receiptCalls = readMockCallPayloads(prisma.hostedWebhookReceipt.updateMany.mock.calls);
@@ -509,55 +553,31 @@ describe("hosted onboarding webhook retry safety", () => {
             lastReceivedAt: expect.any(String),
             plannedAt: expect.any(String),
             response: expect.objectContaining({
-              inviteCode: "code_follow_up",
-              joinUrl: "https://join.example.test/join/code_follow_up",
+              ignored: true,
               ok: true,
-              reason: "sent-signup-link",
+              reason: "signup-link-already-sent",
             }),
-            sideEffects: [
-              buildLinqMessageSideEffect({
-                attemptCount: 1,
-                inviteId: "invite_123",
-                lastAttemptAt: expect.any(String),
-                message: buildHostedInviteReply({
-                  activeSubscription: false,
-                  joinUrl: "https://join.example.test/join/code_follow_up",
-                }),
-                sentAt: expect.any(String),
-                status: "sent",
-              }),
-            ],
+            sideEffects: [],
             status: "completed",
           }),
         }),
       }),
     );
     expect(prisma.hostedInvite.create).not.toHaveBeenCalled();
-    expect(prisma.hostedInvite.update).toHaveBeenCalledWith({
-      where: {
-        id: "invite_123",
-      },
-      data: {
-        sentAt: expect.any(Date),
-      },
-    });
-    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        chatId: "chat_123",
-        message: buildHostedInviteReply({
-          activeSubscription: false,
-          joinUrl: "https://join.example.test/join/code_follow_up",
-        }),
-        replyToMessageId: "msg_123",
-      }),
-    );
+    expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("resends the signup link on later replies while the member is still inactive", async () => {
+  it("resends the signup link on a later UTC day while the member is still inactive", async () => {
     const sentInvite = makePendingInvite({
       inviteCode: "code_repeat_link",
       sentAt: new Date("2026-03-26T12:05:00.000Z"),
     });
+    mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
+      dayUtc: new Date("2026-03-27T00:00:00.000Z"),
+      inboundCount: 1,
+      onboardingLinkSentAt: null,
+    }));
     const prisma = withPrismaTransaction({
       hostedBillingCheckout: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
@@ -609,7 +629,7 @@ describe("hosted onboarding webhook retry safety", () => {
       reason: "sent-signup-link",
     });
 
-    expect(prisma.hostedInvite.findFirst).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedInvite.findFirst).toHaveBeenCalledTimes(1);
     expect(prisma.hostedInvite.update).toHaveBeenNthCalledWith(1, {
       where: {
         id: "invite_123",
@@ -653,9 +673,7 @@ describe("hosted onboarding webhook retry safety", () => {
       },
       hostedInvite: {
         create: vi.fn(),
-        findFirst: vi.fn()
-          .mockResolvedValueOnce(null)
-          .mockResolvedValueOnce(pendingWebInvite),
+        findFirst: vi.fn().mockResolvedValue(pendingWebInvite),
         update: vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
           ...pendingWebInvite,
           ...data,
@@ -700,7 +718,7 @@ describe("hosted onboarding webhook retry safety", () => {
       reason: "sent-signup-link",
     });
 
-    expect(prisma.hostedInvite.findFirst).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedInvite.findFirst).toHaveBeenCalledTimes(1);
     expect(prisma.hostedInvite.update).toHaveBeenCalledWith({
       where: {
         id: "invite_123",
@@ -825,7 +843,7 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
   });
 
-  it("queues Stripe events for async reconciliation instead of mutating billing state inline", async () => {
+  it("processes Stripe events inline and immediately drains activation side effects", async () => {
     mocks.stripeConstructEvent.mockReturnValue({
       created: Math.floor(new Date("2026-03-28T10:00:00.000Z").getTime() / 1000),
       data: {
@@ -843,16 +861,25 @@ describe("hosted onboarding webhook retry safety", () => {
       id: "evt_stripe_123",
       type: "invoice.paid",
     });
-
-    const prisma = withPrismaTransaction({
-      hostedMember: {
-        findUnique: vi.fn(),
-        update: vi.fn(),
-      },
-      hostedStripeEvent: {
-        create: vi.fn().mockResolvedValue({}),
-      },
+    mocks.recordHostedStripeEvent.mockResolvedValue({
+      duplicate: false,
+      type: "invoice.paid",
     });
+    mocks.drainHostedStripeEventQueueDetailed.mockResolvedValue([
+      {
+        activatedMemberIds: [
+          "member_123",
+        ],
+        createdOrUpdatedRevnetIssuance: false,
+        eventId: "evt_stripe_123",
+        hostedExecutionEventIds: [
+          "member.activated:stripe.invoice.paid:member_123:evt_stripe_123",
+        ],
+        status: "completed",
+      },
+    ]);
+
+    const prisma = withPrismaTransaction({});
 
     await expect(
       handleHostedStripeWebhook({
@@ -865,21 +892,33 @@ describe("hosted onboarding webhook retry safety", () => {
       type: "invoice.paid",
     });
 
-    expect(prisma.hostedStripeEvent.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        attemptCount: 0,
-        customerId: "cus_123",
-        eventId: "evt_stripe_123",
-        invoiceId: "in_123",
-        paymentIntentId: "pi_123",
-        status: "pending",
-        subscriptionId: "sub_123",
+    expect(mocks.recordHostedStripeEvent).toHaveBeenCalledWith({
+      event: expect.objectContaining({
+        id: "evt_stripe_123",
         type: "invoice.paid",
       }),
+      prisma,
     });
-    expect(prisma.hostedMember.findUnique).not.toHaveBeenCalled();
-    expect(prisma.hostedMember.update).not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.drainHostedStripeEventQueueDetailed).toHaveBeenCalledWith({
+      eventIds: [
+        "evt_stripe_123",
+      ],
+      limit: 1,
+      prisma,
+    });
+    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
+      eventIds: [
+        "member.activated:stripe.invoice.paid:member_123:evt_stripe_123",
+      ],
+      limit: 1,
+      prisma,
+    });
+    expect(mocks.drainHostedActivationWelcomeMessages).toHaveBeenCalledWith({
+      memberIds: [
+        "member_123",
+      ],
+      prisma,
+    });
   });
 
   it("treats duplicate Stripe events as ingress duplicates without replaying durable work", async () => {
@@ -895,15 +934,11 @@ describe("hosted onboarding webhook retry safety", () => {
       type: "invoice.paid",
     });
 
-    const prisma = withPrismaTransaction({
-      hostedMember: {
-        findUnique: vi.fn(),
-        update: vi.fn(),
-      },
-      hostedStripeEvent: {
-        create: vi.fn().mockRejectedValue(createUniqueConstraintError()),
-      },
+    mocks.recordHostedStripeEvent.mockResolvedValue({
+      duplicate: true,
+      type: "invoice.paid",
     });
+    const prisma = withPrismaTransaction({});
 
     await expect(
       handleHostedStripeWebhook({
@@ -917,9 +952,9 @@ describe("hosted onboarding webhook retry safety", () => {
       type: "invoice.paid",
     });
 
-    expect(prisma.hostedMember.findUnique).not.toHaveBeenCalled();
-    expect(prisma.hostedMember.update).not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.drainHostedStripeEventQueueDetailed).not.toHaveBeenCalled();
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+    expect(mocks.drainHostedActivationWelcomeMessages).not.toHaveBeenCalled();
   });
 
   it("does not redispatch an already-sent Linq side effect when reclaiming a failed receipt", async () => {
@@ -2426,6 +2461,27 @@ function buildLinqMessageSideEffect(input: {
       input.sentAt ??
       (input.status === "pending" ? null : "2026-03-26T12:00:01.000Z"),
     status: input.status,
+  };
+}
+
+function makeHostedLinqDailyState(input: {
+  dayUtc?: Date;
+  inboundCount?: number;
+  onboardingLinkSentAt?: Date | null;
+  outboundCount?: number;
+  quotaReplySentAt?: Date | null;
+} = {}) {
+  return {
+    createdAt: new Date("2026-03-26T12:00:00.000Z"),
+    dayUtc: input.dayUtc ?? new Date("2026-03-26T00:00:00.000Z"),
+    firstSeenAt: new Date("2026-03-26T12:00:00.000Z"),
+    inboundCount: input.inboundCount ?? 1,
+    lastSeenAt: new Date("2026-03-26T12:00:00.000Z"),
+    memberId: "member_123",
+    onboardingLinkSentAt: input.onboardingLinkSentAt ?? null,
+    outboundCount: input.outboundCount ?? 0,
+    quotaReplySentAt: input.quotaReplySentAt ?? null,
+    updatedAt: new Date("2026-03-26T12:00:00.000Z"),
   };
 }
 

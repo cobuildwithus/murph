@@ -1,10 +1,12 @@
-import { HostedBillingStatus, HostedInviteStatus, HostedMemberStatus } from "@prisma/client";
+import { HostedBillingStatus, HostedMemberStatus } from "@prisma/client";
 
 import {
+  buildHostedDailyQuotaReply,
   buildHostedInviteReply,
   type HostedLinqWebhookEvent,
   requireHostedLinqMessageReceivedEvent,
   resolveHostedLinqOccurredAt,
+  resolveHostedLinqParticipantPhoneNumber,
   summarizeHostedLinqMessage,
 } from "./linq";
 import {
@@ -13,7 +15,14 @@ import {
 } from "./invite-service";
 import {
   ensureHostedMemberForPhone,
+  persistHostedMemberLinqChatBinding,
 } from "./member-identity-service";
+import {
+  claimHostedLinqOnboardingLinkNotice,
+  claimHostedLinqQuotaReplyNotice,
+  incrementHostedLinqInboundDailyState,
+  incrementHostedLinqOutboundDailyState,
+} from "./linq-daily-state";
 import { minimizeHostedLinqMessageReceivedEvent } from "./webhook-event-snapshots";
 import {
   createHostedPhoneLookupKey,
@@ -46,12 +55,12 @@ export async function planHostedOnboardingLinqWebhook(input: {
 
   const messageEvent = requireHostedLinqMessageReceivedEvent(input.event);
   const summary = summarizeHostedLinqMessage(messageEvent);
-
-  if (summary.isFromMe) {
-    return buildIgnoredLinqWebhookPlan("own-message");
+  const occurredAt = resolveHostedLinqOccurredAt(messageEvent);
+  const participantPhoneNumber = resolveHostedLinqParticipantPhoneNumber(messageEvent);
+  if (!participantPhoneNumber) {
+    return buildIgnoredLinqWebhookPlan(summary.isFromMe ? "own-message" : "invalid-phone");
   }
-
-  const phoneLookupKey = createHostedPhoneLookupKey(summary.phoneNumber);
+  const phoneLookupKey = createHostedPhoneLookupKey(participantPhoneNumber);
   if (!phoneLookupKey) {
     return buildIgnoredLinqWebhookPlan("invalid-phone");
   }
@@ -62,11 +71,52 @@ export async function planHostedOnboardingLinqWebhook(input: {
     },
   });
 
+  if (summary.isFromMe) {
+    if (existingMember) {
+      await incrementHostedLinqOutboundDailyState({
+        memberId: existingMember.id,
+        occurredAt,
+        prisma: input.prisma,
+      });
+    }
+
+    return buildIgnoredLinqWebhookPlan("own-message");
+  }
+
   if (existingMember?.status === HostedMemberStatus.suspended) {
     return buildIgnoredLinqWebhookPlan("suspended-member");
   }
 
   if (existingMember?.billingStatus === HostedBillingStatus.active) {
+    await persistHostedMemberLinqChatBinding({
+      linqChatId: summary.chatId,
+      memberId: existingMember.id,
+      prisma: input.prisma,
+    });
+    const dailyState = await incrementHostedLinqInboundDailyState({
+      memberId: existingMember.id,
+      occurredAt,
+      prisma: input.prisma,
+    });
+
+    if (dailyState.inboundCount > 100) {
+      const shouldReply = await claimHostedLinqQuotaReplyNotice({
+        memberId: existingMember.id,
+        occurredAt,
+        prisma: input.prisma,
+      });
+
+      if (!shouldReply) {
+        return buildIgnoredLinqWebhookPlan("daily-quota-reached");
+      }
+
+      return buildQuotaReplyResponse({
+        chatId: summary.chatId,
+        messageId: summary.messageId,
+        sourceEventId: input.event.event_id,
+      });
+    }
+
     return {
       desiredSideEffects: [
         createHostedWebhookDispatchSideEffect({
@@ -78,7 +128,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
                 omitRecipientPhone: true,
               },
             ),
-            occurredAt: resolveHostedLinqOccurredAt(messageEvent),
+            occurredAt,
             phoneLookupKey,
             userId: existingMember.id,
           }),
@@ -92,32 +142,35 @@ export async function planHostedOnboardingLinqWebhook(input: {
     };
   }
 
-  if (!summary.text) {
-    return buildIgnoredLinqWebhookPlan("non-text-message");
-  }
-
-  const reusableInvite = existingMember
-    ? await findReusableHostedInvite({
-        memberId: existingMember.id,
-        prisma: input.prisma,
-      })
-    : null;
-
-  if (reusableInvite && !reusableInvite.sentAt) {
-    return buildSignupLinkResponse({
-      activeSubscription: false,
-      inviteCode: reusableInvite.inviteCode,
-      inviteId: reusableInvite.id,
-      messageId: summary.messageId,
-      chatId: summary.chatId,
-      sourceEventId: input.event.event_id,
-    });
-  }
-
-  const member = await ensureHostedMemberForPhone({
-    phoneNumber: summary.phoneNumber,
+  const member = existingMember ?? await ensureHostedMemberForPhone({
+    phoneNumber: participantPhoneNumber,
     prisma: input.prisma,
   });
+  await persistHostedMemberLinqChatBinding({
+    linqChatId: summary.chatId,
+    memberId: member.id,
+    prisma: input.prisma,
+  });
+  const dailyState = await incrementHostedLinqInboundDailyState({
+    memberId: member.id,
+    occurredAt,
+    prisma: input.prisma,
+  });
+
+  if (dailyState.onboardingLinkSentAt) {
+    return buildIgnoredLinqWebhookPlan("signup-link-already-sent");
+  }
+
+  const shouldSendInvite = await claimHostedLinqOnboardingLinkNotice({
+    memberId: member.id,
+    occurredAt,
+    prisma: input.prisma,
+  });
+
+  if (!shouldSendInvite) {
+    return buildIgnoredLinqWebhookPlan("signup-link-already-sent");
+  }
+
   const invite = await issueHostedInvite({
     channel: "linq",
     memberId: member.id,
@@ -145,32 +198,6 @@ function buildIgnoredLinqWebhookPlan(
       reason,
     },
   };
-}
-
-async function findReusableHostedInvite(input: {
-  memberId: string;
-  prisma: HostedWebhookReceiptPersistenceClient;
-}) {
-  return input.prisma.hostedInvite.findFirst({
-    where: {
-      memberId: input.memberId,
-      channel: "linq",
-      expiresAt: {
-        gt: new Date(),
-      },
-      status: {
-        in: [
-          HostedInviteStatus.pending,
-          HostedInviteStatus.opened,
-          HostedInviteStatus.authenticated,
-          HostedInviteStatus.paid,
-        ],
-      },
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
-  });
 }
 
 function buildSignupLinkResponse(input: {
@@ -201,6 +228,28 @@ function buildSignupLinkResponse(input: {
       inviteCode: input.inviteCode,
       joinUrl,
       reason: "sent-signup-link",
+    },
+  };
+}
+
+function buildQuotaReplyResponse(input: {
+  chatId: string;
+  messageId: string;
+  sourceEventId: string;
+}): HostedWebhookPlan<HostedOnboardingLinqWebhookResponse> {
+  return {
+    desiredSideEffects: [
+      createHostedWebhookLinqMessageSideEffect({
+        chatId: input.chatId,
+        inviteId: null,
+        message: buildHostedDailyQuotaReply(),
+        replyToMessageId: input.messageId,
+        sourceEventId: input.sourceEventId,
+      }),
+    ],
+    response: {
+      ok: true,
+      reason: "sent-daily-quota-reply",
     },
   };
 }

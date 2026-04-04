@@ -1,5 +1,6 @@
 import { hostedOnboardingError } from "./errors";
 import { getHostedOnboardingEnvironment, requireHostedOnboardingLinqConfig } from "./runtime";
+import { normalizePhoneNumber } from "./phone";
 import { normalizeNullableString } from "./shared";
 import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
 import {
@@ -292,6 +293,25 @@ export function summarizeHostedLinqMessage(event: HostedLinqMessageReceivedEvent
   };
 }
 
+export function resolveHostedLinqParticipantPhoneNumber(
+  event: HostedLinqMessageReceivedEvent,
+): string | null {
+  if (!event.data.is_from_me) {
+    return (
+      normalizePhoneNumber(event.data.from)
+      ?? normalizePhoneNumber(event.data.sender_handle?.handle)
+    );
+  }
+
+  return (
+    // Outbound echoes should attribute usage to the hosted member-side number.
+    // Linq may populate recipient_phone with the external recipient, so treat it
+    // as the weakest fallback.
+    resolveHostedLinqOutboundFallbackPhoneNumber(event)
+    ?? normalizePhoneNumber(event.data.recipient_phone)
+  );
+}
+
 export function resolveHostedLinqOccurredAt(event: HostedLinqMessageReceivedEvent): string {
   return resolveLinqWebhookOccurredAt(event);
 }
@@ -309,6 +329,40 @@ ${input.joinUrl}`
 
 Verify your phone and finish signup here:
 ${input.joinUrl}`;
+}
+
+export function buildHostedDailyQuotaReply(): string {
+  return "You have reached Murph's daily text limit of 100 messages. Try again tomorrow.";
+}
+
+export function buildHostedActivationWelcomeReply(): string {
+  return `Hey, I'm Murph. I'm your personal health assistant.
+
+You can send things as they happen - symptoms, sleep, meals, meds, workouts, labs, questions - and I keep compiling the picture over time so I can help you notice patterns, make better decisions, and work toward your goals. It's like having a private health team in your pocket.
+
+What are some of your health goals right now, and what should I call you?`;
+}
+
+function resolveHostedLinqOutboundFallbackPhoneNumber(
+  event: HostedLinqMessageReceivedEvent,
+): string | null {
+  const ownerPhone = normalizePhoneNumber(event.data.chat?.owner_handle?.handle);
+  const senderHandlePhone = normalizePhoneNumber(event.data.sender_handle?.handle);
+  if (senderHandlePhone && senderHandlePhone !== ownerPhone) {
+    return senderHandlePhone;
+  }
+
+  const fromHandlePhone = normalizePhoneNumber(event.data.from_handle?.handle);
+  if (fromHandlePhone && fromHandlePhone !== ownerPhone) {
+    return fromHandlePhone;
+  }
+
+  const fromPhone = normalizePhoneNumber(event.data.from);
+  if (fromPhone && fromPhone !== ownerPhone) {
+    return fromPhone;
+  }
+
+  return null;
 }
 
 function normalizeRequiredString(value: unknown, label: string): string {
