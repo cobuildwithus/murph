@@ -36,7 +36,15 @@ export interface HostedExecutionBaseEvent {
 }
 
 export interface HostedExecutionMemberActivatedEvent extends HostedExecutionBaseEvent {
+  firstContact?: HostedExecutionFirstContactTarget | null;
   kind: "member.activated";
+}
+
+export interface HostedExecutionFirstContactTarget {
+  channel: "email" | "linq" | "telegram";
+  identityId: string;
+  threadId: string;
+  threadIsDirect: boolean;
 }
 
 export interface HostedExecutionLinqMessageReceivedEvent extends HostedExecutionBaseEvent {

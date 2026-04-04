@@ -1,5 +1,4 @@
 import { requireHostedExecutionSchedulerToken } from "@/src/lib/hosted-execution/internal";
-import { drainHostedActivationWelcomeMessages } from "@/src/lib/hosted-onboarding/activation-welcome";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
   drainHostedStripeEventQueue,
@@ -20,14 +19,10 @@ export const GET = withJsonError(async (request: Request) => {
     const confirmedIssuanceIds = await reconcileSubmittedHostedRevnetIssuances({
       prisma,
     });
-    const welcomedMemberIds = await drainHostedActivationWelcomeMessages({
-      prisma,
-    });
 
     return jsonOk({
       confirmedIssuanceIds,
       drainedEventIds,
       submittedIssuanceIds,
-      welcomedMemberIds,
     });
 });

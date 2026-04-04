@@ -391,6 +391,12 @@ describe("hydrateHostedExecutionDispatch", () => {
                   lastAttemptAt: "2026-03-26T12:30:00.500Z",
                   lastError: null,
                   payload: {
+                    firstContact: {
+                      channel: "linq",
+                      identityId: "hbidx:phone:v1:test",
+                      threadId: "chat_123",
+                      threadIsDirect: true,
+                    },
                     botUserId: "999",
                     storage: "reference",
                     schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
@@ -588,6 +594,12 @@ describe("hydrateHostedExecutionDispatch", () => {
                   lastError: null,
                   payload: {
                     botUserId: "999",
+                    firstContact: {
+                      channel: "linq",
+                      identityId: "hbidx:phone:v1:test",
+                      threadId: "chat_123",
+                      threadIsDirect: true,
+                    },
                     storage: "reference",
                     schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
                     dispatchRef: {
@@ -635,6 +647,12 @@ describe("hydrateHostedExecutionDispatch", () => {
 
     expect(dispatch).toEqual({
       event: {
+        firstContact: {
+          channel: "linq",
+          identityId: "hbidx:phone:v1:test",
+          threadId: "chat_123",
+          threadIsDirect: true,
+        },
         kind: "member.activated",
         userId: "member_123",
       },

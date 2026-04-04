@@ -156,12 +156,12 @@ export function resolveHostedRunnerDispatchPayloadStorage(
   dispatch: HostedExecutionDispatchRequest,
 ): HostedExecutionOutboxPayloadStorage {
   switch (dispatch.event.kind) {
+    case "member.activated":
     case "linq.message.received":
     case "telegram.message.received":
     case "device-sync.wake":
     case "gateway.message.send":
       return "reference";
-    case "member.activated":
     case "assistant.cron.tick":
     case "email.message.received":
       return "inline";

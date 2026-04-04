@@ -40,6 +40,10 @@ export type HostedWebhookDispatchSideEffectPayload = {
   schemaVersion: string;
   botUserId?: string | null;
   dispatchRef: HostedExecutionDispatchRef;
+  firstContact?: Extract<
+    HostedExecutionDispatchRequest["event"],
+    { kind: "member.activated" }
+  >["firstContact"];
   phoneLookupKey?: string | null;
   storage: "reference";
   linqEvent?: Record<string, unknown> | null;
@@ -201,6 +205,11 @@ function buildHostedWebhookDispatchSideEffectPayload(
   } satisfies HostedWebhookDispatchSideEffectPayload;
 
   switch (dispatch.event.kind) {
+    case "member.activated":
+      return {
+        ...basePayload,
+        firstContact: dispatch.event.firstContact ?? null,
+      };
     case "linq.message.received":
       return {
         ...basePayload,

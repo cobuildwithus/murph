@@ -1,4 +1,5 @@
 import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
+import { sendAssistantFirstContactWelcome } from "@murphai/assistant-core";
 import {
   assistantGatewayLocalMessageSender,
   assistantGatewayLocalProjectionSourceReader,
@@ -62,6 +63,15 @@ async function handleHostedDispatchEvent(input: {
 
   switch (dispatch.event.kind) {
     case "member.activated":
+      if (dispatch.event.firstContact) {
+        await sendAssistantFirstContactWelcome({
+          channel: dispatch.event.firstContact.channel,
+          identityId: dispatch.event.firstContact.identityId,
+          threadId: dispatch.event.firstContact.threadId,
+          threadIsDirect: dispatch.event.firstContact.threadIsDirect,
+          vault: input.vaultRoot,
+        });
+      }
       return createNoopDispatchEffect();
     case "linq.message.received":
       await ingestHostedLinqMessage(input.vaultRoot, {

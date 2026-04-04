@@ -25,6 +25,12 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
         },
         dispatch: {
           event: {
+            firstContact: {
+              channel: "linq",
+              identityId: "hbidx:phone:v1:test",
+              threadId: "chat_123",
+              threadIsDirect: true,
+            },
             kind: "member.activated",
             userId: "member_123",
           },
@@ -56,6 +62,16 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
     });
 
     expect(parsed.request.dispatch.eventId).toBe("evt_123");
+    expect(parsed.request.dispatch.event).toEqual({
+      firstContact: {
+        channel: "linq",
+        identityId: "hbidx:phone:v1:test",
+        threadId: "chat_123",
+        threadIsDirect: true,
+      },
+      kind: "member.activated",
+      userId: "member_123",
+    });
     expect(parsed.request.commit?.bundleRefs.agentState?.key).toBe("bundles/user/agent-state.json");
     expect(parsed.runtime?.internalWorkerProxyToken).toBe("proxy_123");
     expect(parsed.runtime?.userEnv).toEqual({ OPENAI_API_KEY: "secret" });

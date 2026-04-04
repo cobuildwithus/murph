@@ -85,7 +85,7 @@ export async function deliverAssistantReply(input: {
 
 export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
   firstTurnCheckInInjected?: boolean
-  firstTurnCheckInStateDocId?: string | null
+  firstTurnCheckInStateDocIds?: readonly string[]
   outcome: AssistantDeliveryOutcome
   response: string
   turnId: string
@@ -103,7 +103,7 @@ export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
   await state.diagnostics.recordEvent(plan.diagnostic)
   if (input.firstTurnCheckInInjected === true && input.outcome.kind === 'sent') {
     await markAssistantFirstContactSeen({
-      docId: input.firstTurnCheckInStateDocId ?? null,
+      docIds: input.firstTurnCheckInStateDocIds ?? [],
       seenAt: completedAt,
       vault: input.vault,
     })

@@ -1,9 +1,40 @@
 import assert from "node:assert/strict";
 
-import { afterEach, beforeEach, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   prepareHostedDispatchContext: vi.fn(async () => null),
+  sendAssistantFirstContactWelcome: vi.fn(async () => ({
+    reason: "sent",
+    session: {
+      alias: null,
+      binding: {
+        actorId: null,
+        channel: "linq",
+        conversationKey: "channel:linq|identity:hbidx%3Aphone%3Av1%3Atest|thread:chat_123",
+        delivery: {
+          kind: "thread",
+          target: "chat_123",
+        },
+        identityId: "hbidx:phone:v1:test",
+        threadId: "chat_123",
+        threadIsDirect: true,
+      },
+      createdAt: "2026-04-04T00:00:00.000Z",
+      lastTurnAt: "2026-04-04T00:00:01.000Z",
+      provider: "codex-cli",
+      providerBinding: null,
+      providerOptions: {
+        approvalPolicy: "never",
+        sandbox: "danger-full-access",
+      },
+      schema: "murph.assistant-session.v3",
+      sessionId: "sess_123",
+      turnCount: 1,
+      updatedAt: "2026-04-04T00:00:01.000Z",
+    },
+    turnId: "turn_123",
+  })),
   sendGatewayMessageLocal: vi.fn(async () => ({
     delivery: null,
     messageId: null,
@@ -14,6 +45,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@murphai/gateway-local", () => ({
   sendGatewayMessageLocal: mocks.sendGatewayMessageLocal,
+}));
+
+vi.mock("@murphai/assistant-core", () => ({
+  sendAssistantFirstContactWelcome: mocks.sendAssistantFirstContactWelcome,
 }));
 
 vi.mock("../src/hosted-runtime/context.ts", () => ({
@@ -83,6 +118,54 @@ test("hosted gateway dispatch forwards clientRequestId to the local gateway send
     sourceReader: assistantGatewayLocalProjectionSourceReader,
     text: "Please follow up.",
     vault: "/tmp/hosted-gateway-test",
+  });
+});
+
+test("hosted member activation dispatch sends the first-contact welcome through assistant-core", async () => {
+  const { executeHostedDispatchEvent } = await import("../src/hosted-runtime/events.ts");
+
+  const metrics = await executeHostedDispatchEvent({
+    dispatch: {
+      event: {
+        firstContact: {
+          channel: "linq",
+          identityId: "hbidx:phone:v1:test",
+          threadId: "chat_123",
+          threadIsDirect: true,
+        },
+        kind: "member.activated",
+        userId: "member_123",
+      },
+      eventId: "evt_activation",
+      occurredAt: "2026-04-04T00:00:00.000Z",
+    },
+    emailBaseUrl: "https://email.example.test",
+    runtime: {
+      commitTimeoutMs: null,
+      userEnv: {},
+      webControlPlane: {
+        deviceSyncRuntimeBaseUrl: null,
+        internalToken: null,
+        schedulerToken: null,
+        shareBaseUrl: null,
+        shareToken: null,
+      },
+    },
+    runtimeEnv: {},
+    vaultRoot: "/tmp/hosted-first-contact-test",
+  });
+
+  assert.deepEqual(metrics, {
+    bootstrapResult: null,
+    shareImportResult: null,
+    shareImportTitle: null,
+  });
+  expect(mocks.sendAssistantFirstContactWelcome).toHaveBeenCalledWith({
+    channel: "linq",
+    identityId: "hbidx:phone:v1:test",
+    threadId: "chat_123",
+    threadIsDirect: true,
+    vault: "/tmp/hosted-first-contact-test",
   });
 });
 

@@ -104,6 +104,7 @@ export {
 
 export {
   openAssistantConversation,
+  sendAssistantFirstContactWelcome,
   sendAssistantMessage,
   updateAssistantSessionOptions,
   type AssistantExecutionContext,

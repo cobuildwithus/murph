@@ -11,7 +11,6 @@ import {
   requireHostedStripeWebhookVerificationConfig,
 } from "./runtime";
 import { drainHostedExecutionOutboxBestEffort } from "../hosted-execution/outbox";
-import { drainHostedActivationWelcomeMessages } from "./activation-welcome";
 import {
   reconcileHostedStripeEventById,
   recordHostedStripeEvent,
@@ -156,15 +155,6 @@ export async function handleHostedStripeWebhook(input: {
           reconciled.hostedExecutionEventId,
         ],
         limit: 1,
-        prisma,
-      });
-    }
-
-    if (reconciled?.activatedMemberId) {
-      await drainHostedActivationWelcomeMessages({
-        memberIds: [
-          reconciled.activatedMemberId,
-        ],
         prisma,
       });
     }
