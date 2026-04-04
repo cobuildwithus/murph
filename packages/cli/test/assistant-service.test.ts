@@ -1878,6 +1878,10 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the full Mur
       providerCall?.systemPrompt ?? '',
       /assistant\.knowledge\.upsert/u,
     )
+    assert.doesNotMatch(
+      providerCall?.systemPrompt ?? '',
+      /Derived knowledge tools are not fully exposed in this session/u,
+    )
 
     const toolResults = await toolCatalog!.executeCalls({
       mode: 'apply',

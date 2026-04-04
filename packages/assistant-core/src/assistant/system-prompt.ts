@@ -7,9 +7,6 @@ import { isAssistantUserFacingChannel } from './channel-presentation.js'
 export interface AssistantSystemPromptInput {
   allowSensitiveHealthContext: boolean
   assistantCronToolsAvailable: boolean
-  assistantKnowledgeMaintenanceToolsAvailable: boolean
-  assistantKnowledgeReadToolsAvailable: boolean
-  assistantKnowledgeUpsertToolAvailable: boolean
   assistantMemoryAppendToolAvailable: boolean
   assistantMemoryDailyPath: string
   assistantMemoryFileEditToolsAvailable: boolean
@@ -50,10 +47,6 @@ export function buildAssistantSystemPrompt(
     }),
     buildAssistantKnowledgeGuidanceText({
       rawCommand: input.cliAccess.rawCommand,
-      assistantKnowledgeMaintenanceToolsAvailable:
-        input.assistantKnowledgeMaintenanceToolsAvailable,
-      assistantKnowledgeReadToolsAvailable: input.assistantKnowledgeReadToolsAvailable,
-      assistantKnowledgeUpsertToolAvailable: input.assistantKnowledgeUpsertToolAvailable,
     }),
     buildAssistantCronGuidanceText({
       rawCommand: input.cliAccess.rawCommand,
@@ -307,39 +300,19 @@ function buildAssistantCronGuidanceText(
 
 function buildAssistantKnowledgeGuidanceText(
   input: {
-    assistantKnowledgeMaintenanceToolsAvailable: boolean
-    assistantKnowledgeReadToolsAvailable: boolean
-    assistantKnowledgeUpsertToolAvailable: boolean
     rawCommand: 'vault-cli'
   },
 ): string {
-  const sharedLines = [
+  return [
+    'Derived knowledge tools are exposed in this session. Prefer `assistant.knowledge.search`, `assistant.knowledge.get`, `assistant.knowledge.list`, `assistant.knowledge.upsert`, `assistant.knowledge.lint`, and `assistant.knowledge.rebuildIndex` over shelling out.',
+    'Use `assistant.knowledge.upsert` only after you have synthesized the page body yourself in the current turn. It persists one page and rebuilds the index; it does not launch a second model run.',
+    `Use \`${input.rawCommand} knowledge ...\` only as a debugging fallback outside the bound assistant tool surface, not as the default path for this runtime.`,
     'Murph\'s derived knowledge wiki is non-canonical and rebuildable. It is useful for durable syntheses, dossiers, and continuity pages, but it is not the source of truth for health records.',
     'When the user asks what Murph already knows about a topic, start with knowledge search plus one or two targeted page reads before synthesizing anything new.',
     'If an existing page already matches the topic closely, prefer refreshing that slug instead of creating a near-duplicate page.',
     'When persisting a page, synthesize the page in the current assistant turn and then save it through the knowledge write surface instead of editing `derived/knowledge/**` files directly.',
     'Frontmatter is the canonical metadata source for derived knowledge pages. Generated `## Related` and `## Sources` sections are rendered output, not the metadata authority.',
     'Use vault-relative source files, or absolute source files that still resolve inside the selected vault, and never use `derived/**`, `.runtime/**`, or assistant-state runtime files as knowledge sources.',
-  ]
-
-  if (
-    input.assistantKnowledgeReadToolsAvailable &&
-    input.assistantKnowledgeUpsertToolAvailable &&
-    input.assistantKnowledgeMaintenanceToolsAvailable
-  ) {
-    return [
-      'Derived knowledge tools are exposed in this session. Prefer `assistant.knowledge.search`, `assistant.knowledge.get`, `assistant.knowledge.list`, `assistant.knowledge.upsert`, `assistant.knowledge.lint`, and `assistant.knowledge.rebuildIndex` over shelling out.',
-      'Use `assistant.knowledge.upsert` only after you have synthesized the page body yourself in the current turn. It persists one page and rebuilds the index; it does not launch a second model run.',
-      `Use \`${input.rawCommand} knowledge ...\` only as a fallback when the bound derived-knowledge tools are unavailable in this session.`,
-      ...sharedLines,
-    ].join('\n\n')
-  }
-
-  return [
-    'Derived knowledge tools are not fully exposed in this session.',
-    `Use \`${input.rawCommand} knowledge search <query>\`, \`${input.rawCommand} knowledge show <slug>\`, \`${input.rawCommand} knowledge list\`, \`${input.rawCommand} knowledge upsert --title "<title>" --body "<markdown>" --source-path <path> ...\`, \`${input.rawCommand} knowledge lint\`, and \`${input.rawCommand} knowledge index rebuild\` when you need the derived wiki through the CLI fallback path.`,
-    'Do not claim you searched, read, or updated the derived knowledge wiki in this session unless a real tool or CLI call happened.',
-    ...sharedLines,
   ].join('\n\n')
 }
 
