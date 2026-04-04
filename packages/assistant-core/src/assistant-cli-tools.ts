@@ -1,8 +1,11 @@
-import { mkdir, open, readFile, writeFile } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
+import { mkdir, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { FOOD_STATUSES, RECIPE_STATUSES } from '@murphai/contracts'
 import { buildSharePackFromVault } from '@murphai/core'
 import path from 'node:path'
 import { z } from 'zod'
+import { prepareAssistantDirectCliEnv } from './assistant-cli-access.js'
 import {
   assistantCronScheduleInputSchema,
   assistantMemoryLongTermSectionValues,
@@ -86,9 +89,14 @@ import {
   defineAssistantTool,
 } from './model-harness.js'
 import {
+  applyDefaultVaultToArgs,
+  hasExplicitVaultOption,
   listAssistantSelfDeliveryTargets,
+  ROOT_OPTIONS_WITH_VALUES,
   resolveAssistantSelfDeliveryTarget,
 } from './operator-config.js'
+import { sanitizeChildProcessEnv } from './child-process-env.js'
+import { redactSensitivePathSegments } from './text/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
 import type { VaultServices } from './vault-services.js'
 import type { AssistantExecutionContext } from './assistant/execution-context.js'
@@ -138,6 +146,16 @@ const knowledgeSlugSchema = z.string().min(1)
 const assistantToolTextReadDefaultMaxChars = 8_000
 const assistantToolTextReadMaxChars = 20_000
 const assistantToolTextReadChunkBytes = 4_096
+const assistantCliExecutorToolName = 'murph.cli.run'
+const assistantCliDefaultTimeoutMs = 10 * 60 * 1000
+const assistantCliMaxTimeoutMs = 60 * 60 * 1000
+const assistantCliBlockedCommandPaths = new Set([
+  'assistant ask',
+  'assistant chat',
+  'assistant run',
+  'chat',
+  'run',
+])
 
 
 interface AssistantToolContext {
@@ -149,6 +167,7 @@ interface AssistantToolContext {
   sessionId?: string | null
   vault: string
   vaultServices?: VaultServices
+  workingDirectory?: string | null
 }
 
 export interface AssistantToolCatalogOptions {
@@ -193,6 +212,27 @@ export function createInboxRoutingAssistantToolCatalog(
   })
 }
 
+export function createProviderTurnAssistantToolCatalog(
+  input: AssistantToolContext,
+): AssistantToolCatalog {
+  const assistantRuntimeMemoryFileTools = createAssistantRuntimeToolDefinitions(input).filter(
+    (definition) =>
+      definition.name === 'assistant.memory.file.read' ||
+      definition.name === 'assistant.memory.file.append' ||
+      definition.name === 'assistant.memory.file.write',
+  )
+
+  return createAssistantToolCatalog([
+    ...createAssistantCliExecutorToolDefinitions(input),
+    ...createVaultTextReadToolDefinitions(input),
+    ...assistantRuntimeMemoryFileTools,
+    ...createOutwardSideEffectToolDefinitions(input),
+    ...createWebSearchToolDefinitions(),
+    ...createWebFetchToolDefinitions(),
+    ...createWebPdfReadToolDefinitions(),
+  ])
+}
+
 function resolveAssistantToolConcernDefinitions(
   input: AssistantToolContext,
   options: AssistantToolCatalogOptions,
@@ -225,6 +265,33 @@ function allowSensitiveHealthContextForAssistantTools(input: AssistantToolContex
   return input.allowSensitiveHealthContext === true
 }
 
+function createAssistantCliExecutorToolDefinitions(
+  input: AssistantToolContext,
+) {
+  return [
+    defineAssistantTool({
+      name: assistantCliExecutorToolName,
+      description:
+        'Run the local `vault-cli` directly inside the active Murph workspace. This is the primary Murph runtime surface for provider turns. Pass only the tokens that come after `vault-cli`. The active vault is injected automatically when the command path normally needs `--vault`. Use `--help`, `--schema --format json`, `--llms`, and `--llms-full` for discovery.',
+      inputSchema: z.object({
+        args: z.array(z.string().min(1)).min(1),
+        stdin: z.string().optional(),
+        timeoutMs: z.number().int().positive().max(assistantCliMaxTimeoutMs).optional(),
+      }),
+      inputExample: {
+        args: ['device', 'provider', 'list'],
+      },
+      execute: async ({ args, stdin, timeoutMs }) =>
+        await executeAssistantCliCommand({
+          args,
+          stdin,
+          timeoutMs,
+          input,
+        }),
+    }),
+  ]
+}
+
 function createVaultTextReadToolDefinitions(
   input: AssistantToolContext,
 ) {
@@ -244,6 +311,299 @@ function createVaultTextReadToolDefinitions(
         readAssistantTextFile(input.vault, candidatePath, maxChars),
     }),
   ]
+}
+
+async function executeAssistantCliCommand(input: {
+  args: readonly string[]
+  input: AssistantToolContext
+  stdin?: string
+  timeoutMs?: number
+}): Promise<{
+  argv: string[]
+  exitCode: number
+  json: unknown | null
+  stderr: string
+  stdout: string
+}> {
+  if (hasExplicitVaultOption(input.args)) {
+    throw new VaultCliError(
+      'ASSISTANT_CLI_COMMAND_BLOCKED',
+      'The provider-turn CLI executor does not allow an explicit `--vault` override.',
+    )
+  }
+
+  const commandPath = readAssistantCliCommandPath(input.args)
+  if (commandPath && assistantCliBlockedCommandPaths.has(commandPath)) {
+    throw new VaultCliError(
+      'ASSISTANT_CLI_COMMAND_BLOCKED',
+      `Command path \`${commandPath}\` is blocked from the provider-turn CLI executor.`,
+      {
+        commandPath,
+      },
+    )
+  }
+
+  const argvWithDefaults = applyDefaultVaultToArgs(
+    normalizeAssistantCliRunArgs(input.args),
+    input.input.vault,
+  )
+  const cliPayload = await materializeAssistantCliInputPayload(argvWithDefaults, input.stdin)
+  const redactedArgv = redactAssistantCliArgv(cliPayload.args)
+  const env = sanitizeChildProcessEnv(prepareAssistantDirectCliEnv(process.env))
+  const timeoutMs = input.timeoutMs ?? assistantCliDefaultTimeoutMs
+
+  try {
+    return await new Promise((resolve, reject) => {
+      const child = spawn('vault-cli', cliPayload.args, {
+        cwd: normalizeNullableString(input.input.workingDirectory) ?? process.cwd(),
+        env,
+        stdio: 'pipe',
+      })
+
+      let stdout = ''
+      let stderr = ''
+      let settled = false
+      const timeout = setTimeout(() => {
+        child.kill('SIGTERM')
+        settle(() => {
+          reject(
+            new VaultCliError(
+              'ASSISTANT_CLI_COMMAND_TIMEOUT',
+              `vault-cli ${redactedArgv.join(' ')} timed out after ${timeoutMs}ms.`,
+              {
+                timeoutMs,
+                argv: redactedArgv,
+              },
+            ),
+          )
+        })
+      }, timeoutMs)
+
+      const settle = (handler: () => void) => {
+        if (settled) {
+          return
+        }
+
+        settled = true
+        clearTimeout(timeout)
+        handler()
+      }
+
+      child.on('error', (error) => {
+        settle(() => {
+          reject(
+            new VaultCliError(
+              'ASSISTANT_CLI_COMMAND_FAILED',
+              `Could not start vault-cli: ${error instanceof Error ? error.message : String(error)}`,
+              {
+                argv: redactedArgv,
+              },
+            ),
+          )
+        })
+      })
+
+      child.stdout.on('data', (chunk) => {
+        stdout += String(chunk)
+      })
+
+      child.stderr.on('data', (chunk) => {
+        stderr += String(chunk)
+      })
+
+      child.stdin.on('error', () => {
+        // Ignore stdin teardown races after process exit.
+      })
+      child.stdin.end(cliPayload.stdinText)
+
+      child.on('close', (code, signal) => {
+        settle(() => {
+          const redactedStdout = redactSensitivePathSegments(stdout.trim())
+          const redactedStderr = redactSensitivePathSegments(stderr.trim())
+          const exitCode = typeof code === 'number' ? code : signal ? 1 : 0
+
+          if (signal || exitCode !== 0) {
+            reject(
+              new VaultCliError(
+                'ASSISTANT_CLI_COMMAND_FAILED',
+                [
+                  `vault-cli ${redactedArgv.join(' ')} failed.`,
+                  redactedStderr.length > 0 ? redactedStderr : redactedStdout,
+                ]
+                  .filter((value) => value.length > 0)
+                  .join(' '),
+                {
+                  argv: redactedArgv,
+                  exitCode,
+                  signal,
+                  stderr: redactedStderr,
+                  stdout: redactedStdout,
+                },
+              ),
+            )
+            return
+          }
+
+          resolve({
+            argv: ['vault-cli', ...redactedArgv],
+            exitCode,
+            json: tryParseAssistantCliJsonOutput(redactedStdout),
+            stderr: redactedStderr,
+            stdout: redactedStdout,
+          })
+        })
+      })
+    })
+  } finally {
+    if (cliPayload.cleanupPath !== null) {
+      await rm(cliPayload.cleanupPath, { force: true, recursive: true })
+    }
+  }
+}
+
+async function materializeAssistantCliInputPayload(
+  args: readonly string[],
+  stdin: string | undefined,
+): Promise<{
+  args: string[]
+  cleanupPath: string | null
+  stdinText: string
+}> {
+  if (typeof stdin !== 'string') {
+    return {
+      args: [...args],
+      cleanupPath: null,
+      stdinText: '',
+    }
+  }
+
+  const inputArgIndex = args.findIndex((token) => token === '--input')
+  const inlineInputArgIndex = args.findIndex((token) => token === '--input=-')
+
+  if (inputArgIndex === -1 && inlineInputArgIndex === -1) {
+    return {
+      args: [...args],
+      cleanupPath: null,
+      stdinText: stdin,
+    }
+  }
+
+  const nextValue = inputArgIndex >= 0 ? args[inputArgIndex + 1] : null
+  const usesStdinInput = nextValue === '-' || inlineInputArgIndex >= 0
+
+  if (!usesStdinInput) {
+    return {
+      args: [...args],
+      cleanupPath: null,
+      stdinText: stdin,
+    }
+  }
+
+  const tempDirectory = await mkdtemp(
+    path.join(tmpdir(), 'murph-assistant-cli-input-'),
+  )
+  const tempPath = path.join(tempDirectory, 'payload.json')
+  await writeFile(tempPath, stdin, {
+    encoding: 'utf8',
+    mode: 0o600,
+  })
+
+  const rewrittenArgs = [...args]
+  if (inlineInputArgIndex >= 0) {
+    rewrittenArgs[inlineInputArgIndex] = `--input=@${tempPath}`
+  } else if (inputArgIndex >= 0) {
+    rewrittenArgs[inputArgIndex + 1] = `@${tempPath}`
+  }
+
+  return {
+    args: rewrittenArgs,
+    cleanupPath: tempDirectory,
+    stdinText: '',
+  }
+}
+
+function normalizeAssistantCliRunArgs(args: readonly string[]): string[] {
+  const normalized = [...args]
+
+  if (hasAssistantCliBuiltinTextSurface(normalized) || hasExplicitFormatOption(normalized)) {
+    return normalized
+  }
+
+  return [...normalized, '--format', 'json']
+}
+
+function redactAssistantCliArgv(args: readonly string[]): string[] {
+  return args.map((token) => redactAssistantCliArg(token))
+}
+
+function redactAssistantCliArg(token: string): string {
+  const redacted = redactSensitivePathSegments(token)
+
+  if (redacted.startsWith('@/')) {
+    return '@<REDACTED_PATH>'
+  }
+
+  if (redacted.startsWith('/')) {
+    return '<REDACTED_PATH>'
+  }
+
+  return redacted.replace(/=(@)?\/[^\s]*/gu, (_match, atSign: string | undefined) =>
+    atSign ? '=@<REDACTED_PATH>' : '=<REDACTED_PATH>',
+  )
+}
+
+function hasExplicitFormatOption(args: readonly string[]): boolean {
+  return args.some((token) => token === '--format' || token.startsWith('--format='))
+}
+
+function hasAssistantCliBuiltinTextSurface(args: readonly string[]): boolean {
+  return args.some((token) =>
+    token === '--help' ||
+    token === '-h' ||
+    token === '--llms' ||
+    token === '--llms-full' ||
+    token === '--version',
+  )
+}
+
+function readAssistantCliCommandPath(args: readonly string[]): string | null {
+  const tokens: string[] = []
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index]
+    if (!token || token === '--') {
+      break
+    }
+
+    if (token.startsWith('-')) {
+      const rootOptionToken = token.split('=', 1)[0] ?? token
+      if (tokens.length === 0 && ROOT_OPTIONS_WITH_VALUES.has(rootOptionToken)) {
+        if (!token.includes('=')) {
+          index += 1
+        }
+        continue
+      }
+
+      break
+    }
+
+    tokens.push(token)
+  }
+
+  return tokens.length > 0 ? tokens.slice(0, 2).join(' ') : null
+}
+
+function tryParseAssistantCliJsonOutput(value: string): unknown | null {
+  const normalized = normalizeNullableString(value)
+  if (!normalized) {
+    return null
+  }
+
+  try {
+    return JSON.parse(normalized)
+  } catch {
+    return null
+  }
 }
 
 function createWebSearchToolDefinitions() {

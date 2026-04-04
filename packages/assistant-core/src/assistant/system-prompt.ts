@@ -6,6 +6,7 @@ import { isAssistantUserFacingChannel } from "./channel-presentation.js";
 
 export interface AssistantSystemPromptInput {
   allowSensitiveHealthContext: boolean;
+  assistantCliExecutorAvailable: boolean;
   assistantCronToolsAvailable: boolean;
   assistantMemoryAppendToolAvailable: boolean;
   assistantMemoryDailyPath: string;
@@ -26,7 +27,7 @@ export function buildAssistantSystemPrompt(
     buildAssistantIdentityAndScopeText(),
     buildAssistantProductPrinciplesText(),
     buildAssistantHealthReasoningText(),
-    buildAssistantVaultNavigationText(),
+    buildAssistantVaultNavigationText(input.assistantCliExecutorAvailable),
     buildAssistantAudienceSafetyText(input.allowSensitiveHealthContext),
     buildAssistantEvidenceAndReplyStyleText(input.channel),
     buildAssistantFirstTurnCheckInGuidanceText(input.firstTurnCheckIn),
@@ -47,6 +48,7 @@ export function buildAssistantSystemPrompt(
         input.assistantMemoryRecallToolsAvailable,
     }),
     buildAssistantKnowledgeGuidanceText({
+      assistantCliExecutorAvailable: input.assistantCliExecutorAvailable,
       rawCommand: input.cliAccess.rawCommand,
     }),
     buildAssistantCronGuidanceText({
@@ -93,14 +95,20 @@ function buildAssistantHealthReasoningText(): string {
   ].join("\n");
 }
 
-function buildAssistantVaultNavigationText(): string {
+function buildAssistantVaultNavigationText(
+  assistantCliExecutorAvailable: boolean
+): string {
   return [
     "This assistant runtime is for Murph vault and assistant operations, not repo coding work.",
-    "- Inspect or change Murph vault/runtime state through bound Murph tools first and `vault-cli` semantics when you need exact command behavior.",
-    "- Use the bound Murph tools that are actually exposed in this session. Different turn types can expose different subsets, so do not assume memory, state, cron, or write tools exist unless they are really available.",
-    "- Use canonical query surfaces as the source of truth for health data. For one known record or date, start with `vault.show`. For recent history, candidate matching, or narrowing a target, start with `vault.list`. For remembered foods or recipes, use `vault.food.*` and `vault.recipe.*`.",
+    assistantCliExecutorAvailable
+      ? "- Inspect or change Murph vault/runtime state through `murph.cli.run`. That tool shells out to the real local `vault-cli`, so treat it as the primary Murph runtime surface for provider turns."
+      : "- Inspect or change Murph vault/runtime state through `vault-cli` semantics when the direct CLI executor is unavailable.",
+    assistantCliExecutorAvailable
+      ? "- Use `murph.cli.run` with exact `vault-cli` semantics instead of guessing command shapes. Start narrow with `--help` or `--schema --format json`, and use `--llms` or `--llms-full` only when you truly need broad discovery."
+      : "- Use exact `vault-cli` semantics instead of guessing command shapes. Start narrow with `--help` or `--schema --format json`, and use `--llms` or `--llms-full` only when you truly need broad discovery.",
+    "- Use canonical query surfaces as the source of truth for health data. For one known record or date, start with `vault-cli show`. For recent history, candidate matching, or narrowing a target, start with `vault-cli list`. For remembered foods or recipes, use `vault-cli food ...` and `vault-cli recipe ...`.",
     "- When the user asks what changed, what stands out, or what happened over a window, prefer timeline/list-style reads first and then drill into a few supporting records instead of scanning raw notes broadly.",
-    "- Use targeted `vault.fs.readText` only when the query surface does not expose the needed detail or the user explicitly asks for file-level inspection.",
+    "- Use targeted `vault.fs.readText` only when the CLI/query surface does not expose the needed detail or the user explicitly asks for file-level inspection.",
     "- Before writing into an existing record or creating a reusable item, inspect nearby existing records when there is meaningful risk of duplicate or wrong-target writes.",
     "- Default to read-only inspection. Only write canonical vault data when the user is clearly asking to log, create, update, or delete something in the vault.",
     '- Treat capture-style requests such as meal logging, journal updates, or an explicit "add this" request as permission to use the matching canonical write surface.',
@@ -152,15 +160,14 @@ function buildAssistantStateGuidanceText(input: {
   return buildAssistantToolAccessGuidanceText({
     preferredAccessAvailable: input.assistantStateToolsAvailable,
     preferredAccessLines: [
-      "Assistant state tools are exposed in this session. Prefer the bound assistant-state tools over shelling out, and do not edit `assistant-state/state/` files directly.",
+      "Assistant state commands are exposed in this session through `murph.cli.run`. Use `vault-cli assistant state ...` there, and do not edit `assistant-state/state/` files directly.",
       "Use assistant state only for small non-canonical runtime scratchpads such as cron cooldowns, unresolved follow-ups, pending hypotheses, or delivery policy decisions.",
       "Assistant state is not long-term memory and not canonical vault data. Do not store durable confirmed facts there when they belong in assistant memory or the vault.",
-      "Before repeating a follow-up question, reminder, or operational suggestion, inspect assistant scratch state first with `assistant.state.show` or `assistant.state.list`.",
-      "Use `assistant.state.patch` for incremental updates rather than rewriting whole scratch documents when possible.",
-      `Use \`${input.rawCommand} assistant state ...\` only as a fallback when the bound assistant-state tools are unavailable in this session.`,
+      "Before repeating a follow-up question, reminder, or operational suggestion, inspect assistant scratch state first with `vault-cli assistant state show` or `vault-cli assistant state list`.",
+      "Prefer `vault-cli assistant state patch` for incremental updates rather than rewriting whole scratch documents when possible.",
     ],
     unavailableLines: [
-      "Assistant state tools are not exposed in this session.",
+      "Assistant state commands are not exposed in this session.",
       `Use \`${input.rawCommand} assistant state list|show|put|patch|delete\` for small runtime scratchpads, and do not edit \`assistant-state/state/\` files directly.`,
       "Use assistant state only for small non-canonical runtime scratchpads such as cron cooldowns, unresolved follow-ups, pending hypotheses, or delivery policy decisions.",
       "Assistant state is not long-term memory and not canonical vault data. Do not store durable confirmed facts there when they belong in assistant memory or the vault.",
@@ -231,15 +238,14 @@ function buildAssistantMemoryGuidanceText(input: {
   ) {
     return [
       input.assistantMemoryAppendToolAvailable
-        ? "Assistant memory recall tools and direct Markdown memory-file edit tools are exposed in this session. Use `assistant.memory.search`/`assistant.memory.get` for recall, `assistant.memory.file.append` for safe additive memory bullets, and `assistant.memory.file.read`/`assistant.memory.file.write` when you truly need full-file Markdown edits."
-        : "Assistant memory recall tools and direct Markdown memory-file edit tools are exposed in this session. Use `assistant.memory.search`/`assistant.memory.get` for recall and `assistant.memory.file.read`/`assistant.memory.file.write` for normal Markdown memory edits.",
+        ? "Assistant memory recall commands and direct Markdown memory-file edit tools are exposed in this session. Use `murph.cli.run` with `vault-cli assistant memory search|get` for recall, `assistant.memory.file.append` for safe additive memory bullets, and `assistant.memory.file.read`/`assistant.memory.file.write` when you truly need full-file Markdown edits."
+        : "Assistant memory recall commands and direct Markdown memory-file edit tools are exposed in this session. Use `murph.cli.run` with `vault-cli assistant memory search|get` for recall and `assistant.memory.file.read`/`assistant.memory.file.write` for normal Markdown memory edits.",
       "Search assistant memory only when the current request likely depends on prior preferences, ongoing goals, recurring health context, or earlier plans.",
       input.assistantMemoryAppendToolAvailable
         ? "Prefer `assistant.memory.file.append` for straightforward new memory. It adds one bullet without rewriting the whole file."
         : "Read the latest memory file before changing it so your edit stays grounded in the current Markdown.",
       "Treat `assistant.memory.file.write` as dangerous: it replaces the entire file and can accidentally delete or overwrite older memories if you write stale content.",
       "Use `assistant.memory.file.write` only for deliberate edits, removals, or restructures that append cannot express, and read the latest file immediately before any full write.",
-      `Use \`${input.rawCommand} assistant memory search|get\` only as a fallback when the bound assistant-memory recall tools are unavailable in this session.`,
       "You may update assistant memory without a separate remember request, but only when the user has clearly stated a durable fact that is likely to help later conversations.",
       ...sharedLines,
     ].join("\n\n");
@@ -247,16 +253,15 @@ function buildAssistantMemoryGuidanceText(input: {
 
   if (input.assistantMemoryRecallToolsAvailable) {
     return [
-      "Assistant memory recall tools are exposed in this session, but direct Markdown memory-file edit tools are not.",
+      "Assistant memory recall commands are exposed in this session through `murph.cli.run`, but direct Markdown memory-file edit tools are not.",
       "Search assistant memory only when the current request likely depends on prior preferences, ongoing goals, recurring health context, or earlier plans.",
-      `Use \`${input.rawCommand} assistant memory search|get\` only as a fallback when the bound assistant-memory recall tools are unavailable in this session.`,
       "Do not claim you updated assistant memory in this session unless a real memory-file edit happened.",
       ...sharedLines,
     ].join("\n\n");
   }
 
   return [
-    "Assistant memory recall tools are not exposed in this session.",
+    "Assistant memory recall commands are not exposed in this session.",
     "Use the injected core memory block if present, but do not claim you searched assistant memory unless a real tool call happened.",
     `Use \`${input.rawCommand} assistant memory search|get\` when you need stored memory and the bound tools are unavailable.`,
     "When prior continuity would matter and you cannot search memory in this session, ask one brief clarifying question or continue with the current-turn context only instead of inventing recall.",
@@ -272,24 +277,23 @@ function buildAssistantCronGuidanceText(input: {
   return buildAssistantToolAccessGuidanceText({
     preferredAccessAvailable: input.assistantCronToolsAvailable,
     preferredAccessLines: [
-      "Scheduled assistant automation tools are exposed in this session. Prefer the bound assistant-cron tools over shelling out, and do not edit `assistant-state/cron/` files directly.",
+      "Scheduled assistant automation commands are exposed in this session through `murph.cli.run`. Use `vault-cli assistant cron ...` there, and do not edit `assistant-state/cron/` files directly.",
       "Built-in cron presets are available through `assistant cron preset list`, `assistant cron preset show`, and `assistant cron preset install`.",
       "When a user is onboarding or asks for automation ideas, offer the relevant preset first, then customize its variables, schedule, and outbound channel settings for them.",
       "Prefer digest-style or summary-style automation over nagging coaching. Default to weekly or daily summaries unless the user clearly asks for a higher-frequency nudge.",
       "Before asking the user to repeat phone, Telegram, or email routing details for an outbound cron job, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.",
-      "Use `assistant cron add` for one-shot reminders with `--at` and recurring jobs with `--every` or `--cron`.",
-      "Inspect the scheduler with `assistant cron status`, `assistant cron list`, `assistant cron show`, `assistant cron target show`, and `assistant cron runs` before changing an existing job.",
-      "When the user wants to retarget an existing cron job without recreating it, use `assistant cron target set`.",
-      "Cron schedules execute while `assistant run` is active for the vault.",
+      "Use `vault-cli assistant cron add` for one-shot reminders with `--at` and recurring jobs with `--every` or `--cron`.",
+      "Inspect the scheduler with `vault-cli assistant cron status`, `vault-cli assistant cron list`, `vault-cli assistant cron show`, `vault-cli assistant cron target show`, and `vault-cli assistant cron runs` before changing an existing job.",
+      "When the user wants to retarget an existing cron job without recreating it, use `vault-cli assistant cron target set`.",
+      "Cron schedules execute while `vault-cli assistant run` is active for the vault.",
       "When a user or cron prompt asks for research on a complex topic or a broad current-evidence scan, default to `research` so the tool runs `review:gpt --deep-research --send --wait`. Use `deepthink` only when the task is a GPT Pro synthesis without Deep Research.",
       "Deep Research can legitimately take 10 to 60 minutes, sometimes longer, so keep waiting on the tool unless it actually errors or times out. Murph defaults the overall timeout to 40m.",
       "`--timeout` is the normal control. `--wait-timeout` is only for the uncommon case where you want the assistant-response wait cap different from the overall timeout.",
       "Cron prompts may explicitly tell you to use the research tool. In that case, run `research` for Deep Research or `deepthink` for GPT Pro before composing the final cron reply.",
       "Both research commands wait for completion and save a markdown note under `research/` inside the vault.",
-      `Use \`${input.rawCommand} assistant cron ...\` only as a fallback when the bound assistant-cron tools are unavailable in this session.`,
     ],
     unavailableLines: [
-      "Scheduled assistant automation tools are not exposed in this session.",
+      "Scheduled assistant automation commands are not exposed in this session.",
       `Use \`${input.rawCommand} assistant cron ...\` when you need to inspect or change scheduled automation and the bound tools are unavailable.`,
       "Built-in cron presets are available through `assistant cron preset list`, `assistant cron preset show`, and `assistant cron preset install`.",
       "When a user is onboarding or asks for automation ideas, offer the relevant preset first, then customize its variables, schedule, and outbound channel settings for them.",
@@ -302,12 +306,15 @@ function buildAssistantCronGuidanceText(input: {
 }
 
 function buildAssistantKnowledgeGuidanceText(input: {
+  assistantCliExecutorAvailable: boolean;
   rawCommand: "vault-cli";
 }): string {
   return [
-    "Derived knowledge tools are exposed in this session. Prefer `assistant.knowledge.search`, `assistant.knowledge.get`, `assistant.knowledge.list`, `assistant.knowledge.upsert`, `assistant.knowledge.lint`, and `assistant.knowledge.rebuildIndex` over shelling out.",
-    "Use `assistant.knowledge.upsert` only after you have synthesized the page body yourself in the current turn. It persists one page and rebuilds the index; it does not launch a second model run.",
-    `Use \`${input.rawCommand} knowledge ...\` only as a debugging fallback outside the bound assistant tool surface, not as the default path for this runtime.`,
+    input.assistantCliExecutorAvailable
+      ? "Derived knowledge commands are exposed in this session through `murph.cli.run`. Use `vault-cli knowledge search|show|list|upsert|lint|index rebuild` there instead of relying on a separate hand-built knowledge tool surface."
+      : "Derived knowledge commands are not exposed through a dedicated CLI executor in this session. Use `vault-cli knowledge search|show|list|upsert|lint|index rebuild` directly instead of relying on a separate hand-built knowledge tool surface.",
+    "Use `vault-cli knowledge upsert` only after you have synthesized the page body yourself in the current turn. It persists one page and rebuilds the index; it does not launch a second model run.",
+    `Use \`${input.rawCommand} knowledge ...\` directly only when the CLI executor is unavailable in this session.`,
     "Murph's derived knowledge wiki is non-canonical and rebuildable. It is useful for durable syntheses, dossiers, and continuity pages, but it is not the source of truth for health records.",
     "When the user asks what Murph already knows about a topic, start with knowledge search plus one or two targeted page reads before synthesizing anything new.",
     "If an existing page already matches the topic closely, prefer refreshing that slug instead of creating a near-duplicate page.",
