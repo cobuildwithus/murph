@@ -1,4 +1,6 @@
 import type {
+  LinqCreateChatResponse,
+  LinqCreateWebhookSubscriptionResponse,
   LinqListPhoneNumbersResponse,
   LinqSendMessageResponse,
 } from '@murphai/inboxd'
@@ -43,6 +45,22 @@ export interface ProbeLinqApiResult {
   phoneNumbers: string[]
 }
 
+export interface CreateLinqChatResult {
+  chatId: string | null
+  messageId: string | null
+}
+
+export interface CreateLinqWebhookSubscriptionResult {
+  createdAt: string | null
+  id: string | null
+  isActive: boolean | null
+  phoneNumbers: string[]
+  signingSecret: string | null
+  subscribedEvents: string[]
+  targetUrl: string | null
+  updatedAt: string | null
+}
+
 export function resolveLinqApiToken(env: NodeJS.ProcessEnv): string | null {
   return normalizeNullableString(env.LINQ_API_TOKEN)
 }
@@ -67,7 +85,7 @@ export async function probeLinqApi(
     env,
     fetchImplementation: dependencies.fetchImplementation,
     method: 'GET',
-    path: '/phonenumbers',
+    path: '/phone_numbers',
     signal: dependencies.signal,
   })
 
@@ -82,6 +100,7 @@ export async function probeLinqApi(
 export async function sendLinqChatMessage(
   input: {
     chatId: string
+    idempotencyKey?: string | null
     message: string
     replyToMessageId?: string | null
   },
@@ -100,25 +119,89 @@ export async function sendLinqChatMessage(
     fetchImplementation: dependencies.fetchImplementation,
     method: 'POST',
     path: `/chats/${encodeURIComponent(chatId)}/messages`,
+    body: buildLinqTextMessageBody({
+      idempotencyKey: input.idempotencyKey,
+      message,
+      replyToMessageId,
+    }),
+    signal: dependencies.signal,
+  })
+}
+
+export async function createLinqChat(
+  input: {
+    from: string
+    idempotencyKey?: string | null
+    message: string
+    to: readonly string[]
+  },
+  dependencies: {
+    env?: NodeJS.ProcessEnv
+    fetchImplementation?: LinqFetch
+    signal?: AbortSignal
+  } = {},
+): Promise<CreateLinqChatResult> {
+  const response = await requestLinqJson<LinqCreateChatResponse>({
+    env: dependencies.env ?? process.env,
+    fetchImplementation: dependencies.fetchImplementation,
+    method: 'POST',
+    path: '/chats',
     body: {
-      message: {
-        parts: [
-          {
-            type: 'text',
-            value: message,
-          },
-        ],
-        ...(replyToMessageId
-          ? {
-              reply_to: {
-                message_id: replyToMessageId,
-              },
-            }
-          : {}),
-      },
+      from: normalizeRequiredString(input.from, 'from'),
+      message: buildLinqTextMessageBody({
+        idempotencyKey: input.idempotencyKey,
+        message: input.message,
+      }).message,
+      to: normalizeLinqStringList(input.to, 'recipient'),
     },
     signal: dependencies.signal,
   })
+
+  return {
+    chatId: normalizeNullableString(response.chat?.id ?? null),
+    messageId: normalizeNullableString(response.chat?.message?.id ?? null),
+  }
+}
+
+export async function createLinqWebhookSubscription(
+  input: {
+    phoneNumbers?: readonly string[] | null
+    subscribedEvents: readonly string[]
+    targetUrl: string
+  },
+  dependencies: {
+    env?: NodeJS.ProcessEnv
+    fetchImplementation?: LinqFetch
+    signal?: AbortSignal
+  } = {},
+): Promise<CreateLinqWebhookSubscriptionResult> {
+  const response = await requestLinqJson<LinqCreateWebhookSubscriptionResponse>({
+    env: dependencies.env ?? process.env,
+    fetchImplementation: dependencies.fetchImplementation,
+    method: 'POST',
+    path: '/webhook-subscriptions',
+    body: {
+      ...(input.phoneNumbers && input.phoneNumbers.length > 0
+        ? {
+            phone_numbers: normalizeLinqStringList(input.phoneNumbers, 'phone number'),
+          }
+        : {}),
+      subscribed_events: normalizeLinqStringList(input.subscribedEvents, 'subscribed event'),
+      target_url: normalizeRequiredString(input.targetUrl, 'target url'),
+    },
+    signal: dependencies.signal,
+  })
+
+  return {
+    createdAt: normalizeNullableString(response.created_at ?? null),
+    id: normalizeNullableString(response.id ?? null),
+    isActive: typeof response.is_active === 'boolean' ? response.is_active : null,
+    phoneNumbers: normalizeLinqOptionalStringList(response.phone_numbers),
+    signingSecret: normalizeNullableString(response.signing_secret ?? null),
+    subscribedEvents: normalizeLinqOptionalStringList(response.subscribed_events),
+    targetUrl: normalizeNullableString(response.target_url ?? null),
+    updatedAt: normalizeNullableString(response.updated_at ?? null),
+  }
 }
 
 async function requestLinqJson<T>(input: {
@@ -304,4 +387,71 @@ function normalizeRequiredString(value: string | null | undefined, label: string
   }
 
   return normalized
+}
+
+function buildLinqTextMessageBody(input: {
+  idempotencyKey?: string | null
+  message: string
+  replyToMessageId?: string | null
+}): {
+  message: {
+    idempotency_key?: string
+    parts: Array<{
+      type: 'text'
+      value: string
+    }>
+    reply_to?: {
+      message_id: string
+    }
+  }
+} {
+  const idempotencyKey = normalizeNullableString(input.idempotencyKey)
+  const replyToMessageId = normalizeNullableString(input.replyToMessageId)
+
+  return {
+    message: {
+      parts: [
+        {
+          type: 'text',
+          value: normalizeRequiredString(input.message, 'message'),
+        },
+      ],
+      ...(idempotencyKey
+        ? {
+            idempotency_key: idempotencyKey,
+          }
+        : {}),
+      ...(replyToMessageId
+        ? {
+            reply_to: {
+              message_id: replyToMessageId,
+            },
+          }
+        : {}),
+    },
+  }
+}
+
+function normalizeLinqStringList(
+  values: readonly string[],
+  label: string,
+): string[] {
+  const normalizedValues = values
+    .map((value) => normalizeRequiredString(value, label))
+    .filter((value, index, array) => array.indexOf(value) === index)
+
+  if (normalizedValues.length === 0) {
+    throw new VaultCliError(
+      'LINQ_INVALID_INPUT',
+      `Linq ${label} list must contain at least one non-empty value.`,
+    )
+  }
+
+  return normalizedValues
+}
+
+function normalizeLinqOptionalStringList(values: readonly unknown[] | null | undefined): string[] {
+  return (values ?? [])
+    .map((value) => normalizeNullableString(typeof value === 'string' ? value : null))
+    .filter((value): value is string => value !== null)
 }

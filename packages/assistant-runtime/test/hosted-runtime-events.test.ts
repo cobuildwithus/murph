@@ -106,33 +106,44 @@ test("hosted Linq attachment downloads only fetch allowlisted CDN URLs", async (
     event: parseLinqWebhookEvent(JSON.stringify({
       api_version: "2026-04-02",
       created_at: "2026-04-02T04:00:00.000Z",
+      webhook_version: "2026-02-03",
       data: {
-        chat_id: "chat_123",
-        from: "hbid:linq.from:v1:test",
-        is_from_me: false,
-        message: {
-          id: "hbid:linq.message:v1:test",
-          parts: [
-            {
-              filename: "photo.jpg",
-              mime_type: "image/jpeg",
-              type: "media",
-              url: "https://cdn.linqapp.com/media/photo.jpg",
-            },
-            {
-              mime_type: "audio/m4a",
-              type: "voice_memo",
-              url: "https://cdn.linqapp.com/media/voice.m4a",
-            },
-            {
-              filename: "ignored.jpg",
-              mime_type: "image/jpeg",
-              type: "media",
-              url: "https://example.com/ignored.jpg",
-            },
-          ],
+        chat: {
+          id: "chat_123",
+          owner_handle: {
+            handle: "hbid:linq.recipient:v1:test",
+            id: "handle_owner_123",
+            is_me: true,
+            service: "iMessage",
+          },
         },
-        received_at: "2026-04-02T04:00:01.000Z",
+        direction: "inbound",
+        id: "hbid:linq.message:v1:test",
+        parts: [
+          {
+            filename: "photo.jpg",
+            mime_type: "image/jpeg",
+            type: "media",
+            url: "https://cdn.linqapp.com/media/photo.jpg",
+          },
+          {
+            mime_type: "audio/m4a",
+            type: "voice_memo",
+            url: "https://cdn.linqapp.com/media/voice.m4a",
+          },
+          {
+            filename: "ignored.jpg",
+            mime_type: "image/jpeg",
+            type: "media",
+            url: "https://example.com/ignored.jpg",
+          },
+        ],
+        sender_handle: {
+          handle: "hbid:linq.from:v1:test",
+          id: "handle_sender_123",
+          service: "iMessage",
+        },
+        sent_at: "2026-04-02T04:00:01.000Z",
         service: "iMessage",
       },
       event_id: "evt_123",

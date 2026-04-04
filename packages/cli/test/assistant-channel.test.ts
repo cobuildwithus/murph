@@ -1109,6 +1109,53 @@ test('sendLinqMessage includes reply_to when a parent Linq message id is provide
   ])
 })
 
+test('sendLinqMessage forwards Linq idempotency keys when provided', async () => {
+  const requests: Array<Record<string, unknown>> = []
+
+  await sendLinqMessage(
+    {
+      idempotencyKey: 'linq-send:evt_123',
+      message: 'Queued the Linq reply.',
+      target: 'chat_123',
+    },
+    {
+      env: {
+        LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
+        LINQ_API_TOKEN: 'linq-token',
+      },
+      fetchImplementation: async (_url, init) => {
+        requests.push(JSON.parse(init.body ?? '{}') as Record<string, unknown>)
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            chat_id: 'chat_123',
+            message: {
+              id: 'msg_1',
+            },
+          }),
+          text: async () => '',
+          arrayBuffer: async () => new ArrayBuffer(0),
+        }
+      },
+    },
+  )
+
+  assert.deepEqual(requests, [
+    {
+      message: {
+        idempotency_key: 'linq-send:evt_123',
+        parts: [
+          {
+            type: 'text',
+            value: 'Queued the Linq reply.',
+          },
+        ],
+      },
+    },
+  ])
+})
+
 test('sendLinqMessage retries Linq sends after a 429 response', async () => {
   const requests: Array<{
     method: string

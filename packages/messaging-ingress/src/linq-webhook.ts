@@ -12,6 +12,7 @@ export interface LinqWebhookEvent {
   api_version: string;
   event_id: string;
   created_at: string;
+  webhook_version?: string | null;
   trace_id?: string | null;
   partner_id?: string | null;
   event_type: string;
@@ -25,12 +26,35 @@ export interface LinqMessageReceivedEvent extends LinqWebhookEvent {
 
 export interface LinqMessageReceivedData {
   chat_id: string;
+  chat?: LinqChatInfo | null;
+  direction?: "inbound" | "outbound" | string | null;
   from: string;
+  from_handle?: LinqChatHandle | null;
+  preferred_service?: "iMessage" | "SMS" | "RCS" | string | null;
+  recipient_handle?: LinqChatHandle | null;
   recipient_phone?: string | null;
   received_at?: string | null;
   is_from_me: boolean;
   service?: "iMessage" | "SMS" | "RCS" | string | null;
+  sent_at?: string | null;
+  sender_handle?: LinqChatHandle | null;
   message: LinqIncomingMessage;
+}
+
+export interface LinqChatInfo {
+  id: string;
+  is_group?: boolean | null;
+  owner_handle?: LinqChatHandle | null;
+}
+
+export interface LinqChatHandle {
+  id?: string | null;
+  handle: string;
+  is_me?: boolean | null;
+  joined_at?: string | null;
+  left_at?: string | null;
+  service?: "iMessage" | "SMS" | "RCS" | string | null;
+  status?: "active" | "left" | "removed" | string | null;
 }
 
 export interface LinqIncomingMessage {
@@ -51,6 +75,11 @@ export interface LinqTextPart {
   value: string;
 }
 
+export interface LinqLinkPart {
+  type: "link";
+  value: string;
+}
+
 export interface LinqMediaPart {
   type: "media" | "voice_memo";
   url?: string | null;
@@ -60,13 +89,33 @@ export interface LinqMediaPart {
   size?: number | null;
 }
 
-export type LinqMessagePart = LinqTextPart | LinqMediaPart;
+export type LinqMessagePart = LinqTextPart | LinqLinkPart | LinqMediaPart;
 
 export interface LinqSendMessageResponse {
   chat_id?: string | null;
   message?: {
     id?: string | null;
   } | null;
+}
+
+export interface LinqCreateChatResponse {
+  chat?: {
+    id?: string | null;
+    message?: {
+      id?: string | null;
+    } | null;
+  } | null;
+}
+
+export interface LinqCreateWebhookSubscriptionResponse {
+  id?: string | null;
+  target_url?: string | null;
+  signing_secret?: string | null;
+  subscribed_events?: string[] | null;
+  phone_numbers?: string[] | null;
+  is_active?: boolean | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 }
 
 export interface LinqListPhoneNumbersResponse {
@@ -169,6 +218,7 @@ export function parseLinqWebhookEvent(rawBody: Buffer | Uint8Array | ArrayBuffer
     event_id: eventId,
     created_at: createdAt,
     event_type: eventType,
+    webhook_version: normalizeNullableString(record.webhook_version) ?? undefined,
     trace_id: normalizeNullableString(record.trace_id),
     partner_id: normalizeNullableString(record.partner_id),
     data: record.data,
@@ -250,31 +300,57 @@ export function requireLinqMessageReceivedEvent(
   }
 
   const data = toLinqObjectRecord(event.data, "Linq message.received data");
-  const message = toLinqObjectRecord(data.message, "Linq message.received message");
-  const parts = message.parts;
+  const chat = parseRequiredChatInfo(data.chat);
+  const senderHandle = parseRequiredChatHandle(data.sender_handle, "Linq message.received sender_handle");
+  const recipientHandle = chat.owner_handle ?? undefined;
+  const parts = data.parts;
 
   if (!Array.isArray(parts)) {
     throw new TypeError("Linq message.received message.parts must be an array.");
   }
 
+  const createdAt = normalizeRequiredTimestamp(event.created_at, "Linq webhook created_at");
+  const chatId = chat.id;
+  const senderAddress = senderHandle.handle;
+  const recipientPhone = normalizeNullableString(recipientHandle?.handle);
+  const direction = normalizeRequiredDirection(data.direction, "Linq message.received direction");
+  const isFromMe = direction === "outbound";
+  const service =
+    normalizeNullableString(data.service)
+    ?? normalizeNullableString(senderHandle.service)
+    ?? normalizeNullableString(recipientHandle?.service)
+    ?? normalizeRequiredString(data.service, "Linq message.received service");
+  const preferredService = normalizeNullableString(data.preferred_service) ?? undefined;
+  const occurredAt =
+    normalizeOptionalTimestamp(data.sent_at, "Linq message.received sent_at")
+    ?? createdAt;
+
   return {
     ...event,
     event_type: "message.received",
-    created_at: normalizeRequiredTimestamp(event.created_at, "Linq webhook created_at"),
+    created_at: createdAt,
+    webhook_version: normalizeNullableString(event.webhook_version ?? null) ?? undefined,
     trace_id: normalizeNullableString(event.trace_id ?? null),
     partner_id: normalizeNullableString(event.partner_id ?? null),
     data: {
-      chat_id: normalizeRequiredString(data.chat_id, "Linq message.received chat_id"),
-      from: normalizeRequiredString(data.from, "Linq message.received from"),
-      recipient_phone: normalizeNullableString(data.recipient_phone),
-      received_at: normalizeOptionalTimestamp(data.received_at, "Linq message.received received_at"),
-      is_from_me: normalizeRequiredBoolean(data.is_from_me, "Linq message.received is_from_me"),
-      service: normalizeNullableString(data.service),
+      chat_id: chatId,
+      chat,
+      direction,
+      from: senderAddress,
+      from_handle: senderHandle,
+      preferred_service: preferredService,
+      recipient_handle: recipientHandle,
+      recipient_phone: recipientPhone,
+      received_at: occurredAt,
+      is_from_me: isFromMe,
+      sent_at: normalizeOptionalTimestamp(data.sent_at, "Linq message.received sent_at") ?? undefined,
+      sender_handle: senderHandle,
+      service,
       message: {
-        id: normalizeRequiredString(message.id, "Linq message.received message.id"),
+        id: normalizeRequiredString(data.id, "Linq message.received message.id"),
         parts: parts.map((part, index) => parseLinqMessagePart(part, index)),
-        effect: parseOptionalMessageEffect(message.effect),
-        reply_to: parseOptionalReplyTo(message.reply_to),
+        effect: parseOptionalMessageEffect(data.effect),
+        reply_to: parseOptionalReplyTo(data.reply_to),
       },
     },
   };
@@ -321,8 +397,10 @@ export function resolveLinqWebhookOccurredAt(event: LinqMessageReceivedEvent): s
 
 export function minimizeLinqWebhookEvent(event: LinqWebhookEvent): Record<string, unknown> {
   const messageEvent =
-    event.event_type === "message.received" && event.data && typeof event.data === "object"
-      ? (event as LinqMessageReceivedEvent)
+    event.event_type === "message.received"
+      ? isCanonicalLinqMessageReceivedData(event.data)
+        ? (event as LinqMessageReceivedEvent)
+        : parseCanonicalLinqMessageReceivedEvent(event)
       : null;
 
   return sanitizeRawMetadata(
@@ -331,6 +409,7 @@ export function minimizeLinqWebhookEvent(event: LinqWebhookEvent): Record<string
       event_id: event.event_id,
       event_type: event.event_type,
       created_at: event.created_at,
+      webhook_version: event.webhook_version,
       trace_id: event.trace_id,
       partner_id: event.partner_id,
       data: messageEvent ? pickLinqMessageReceivedData(messageEvent.data) : event.data,
@@ -344,9 +423,13 @@ export function minimizeLinqMessageReceivedEvent(
   return compactRecord({
     api_version: event.api_version,
     created_at: event.created_at,
+    webhook_version: event.webhook_version,
     data: compactRecord({
+      chat: pickLinqChatInfo(event.data.chat),
       chat_id: event.data.chat_id,
+      direction: event.data.direction,
       from: event.data.from,
+      from_handle: pickLinqChatHandle(event.data.from_handle),
       is_from_me: event.data.is_from_me,
       message: compactRecord({
         effect: pickLinqMessageEffect(event.data.message.effect),
@@ -354,9 +437,13 @@ export function minimizeLinqMessageReceivedEvent(
         parts: event.data.message.parts.map((part) => pickHostedLinqMessagePart(part)),
         reply_to: pickLinqReplyTo(event.data.message.reply_to),
       }),
+      preferred_service: event.data.preferred_service,
       received_at: event.data.received_at,
+      recipient_handle: pickLinqChatHandle(event.data.recipient_handle),
       recipient_phone: event.data.recipient_phone,
       service: event.data.service,
+      sent_at: event.data.sent_at,
+      sender_handle: pickLinqChatHandle(event.data.sender_handle),
     }),
     event_id: event.event_id,
     event_type: event.event_type,
@@ -460,6 +547,19 @@ function normalizeRequiredBoolean(value: unknown, label: string): boolean {
   return value;
 }
 
+function normalizeRequiredDirection(
+  value: unknown,
+  label: string,
+): "inbound" | "outbound" {
+  const normalized = normalizeRequiredString(value, label);
+
+  if (normalized !== "inbound" && normalized !== "outbound") {
+    throw new TypeError(`${label} must be "inbound" or "outbound".`);
+  }
+
+  return normalized;
+}
+
 function normalizeNullableNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
@@ -469,6 +569,16 @@ function parseLinqMessagePart(part: unknown, index: number): LinqMessagePart {
   const type = normalizeRequiredString(record.type, `Linq message.received message.parts[${index}] type`);
 
   if (type === "text") {
+    return {
+      type,
+      value: normalizeRequiredString(
+        record.value,
+        `Linq message.received message.parts[${index}] value`,
+      ),
+    };
+  }
+
+  if (type === "link") {
     return {
       type,
       value: normalizeRequiredString(
@@ -490,7 +600,7 @@ function parseLinqMessagePart(part: unknown, index: number): LinqMessagePart {
   }
 
   throw new TypeError(
-    `Linq message.received message.parts[${index}] type must be "text", "media", or "voice_memo".`,
+    `Linq message.received message.parts[${index}] type must be "text", "media", "link", or "voice_memo".`,
   );
 }
 
@@ -522,14 +632,85 @@ function normalizeNullableInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) ? value : null;
 }
 
+function parseOptionalChatInfo(value: unknown): LinqChatInfo | null {
+  if (value == null) {
+    return null;
+  }
+
+  const record = toLinqObjectRecord(value, "Linq message.received chat");
+  return {
+    id: normalizeRequiredString(record.id, "Linq message.received chat.id"),
+    is_group: typeof record.is_group === "boolean" ? record.is_group : undefined,
+    owner_handle: parseOptionalChatHandle(record.owner_handle) ?? undefined,
+  };
+}
+
+function isCanonicalLinqMessageReceivedData(value: unknown): value is LinqMessageReceivedData {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  return Boolean(
+    record.message
+      && typeof record.message === "object"
+      && !Array.isArray(record.message)
+      && "parts" in (record.message as Record<string, unknown>),
+  );
+}
+
+function parseRequiredChatInfo(value: unknown): LinqChatInfo {
+  const chat = parseOptionalChatInfo(value);
+
+  if (!chat) {
+    throw new TypeError("Linq message.received chat is required.");
+  }
+
+  return chat;
+}
+
+function parseOptionalChatHandle(value: unknown): LinqChatHandle | null {
+  if (value == null) {
+    return null;
+  }
+
+  const record = toLinqObjectRecord(value, "Linq chat handle");
+  return {
+    id: normalizeNullableString(record.id) ?? undefined,
+    handle: normalizeRequiredString(record.handle, "Linq chat handle.handle"),
+    is_me: typeof record.is_me === "boolean" ? record.is_me : undefined,
+    joined_at: normalizeOptionalTimestamp(record.joined_at, "Linq chat handle.joined_at") ?? undefined,
+    left_at: normalizeOptionalTimestamp(record.left_at, "Linq chat handle.left_at") ?? undefined,
+    service: normalizeNullableString(record.service) ?? undefined,
+    status: normalizeNullableString(record.status) ?? undefined,
+  };
+}
+
+function parseRequiredChatHandle(value: unknown, label: string): LinqChatHandle {
+  const handle = parseOptionalChatHandle(value);
+
+  if (!handle) {
+    throw new TypeError(`${label} is required.`);
+  }
+
+  return handle;
+}
+
 function pickLinqMessageReceivedData(data: LinqMessageReceivedData): Record<string, unknown> {
   return compactRecord({
+    chat: pickLinqChatInfo(data.chat),
     chat_id: data.chat_id,
+    direction: data.direction,
     from: data.from,
+    from_handle: pickLinqChatHandle(data.from_handle),
+    preferred_service: data.preferred_service,
+    recipient_handle: pickLinqChatHandle(data.recipient_handle),
     recipient_phone: data.recipient_phone,
     received_at: data.received_at,
     is_from_me: data.is_from_me,
     service: data.service,
+    sent_at: data.sent_at,
+    sender_handle: pickLinqChatHandle(data.sender_handle),
     message: compactRecord({
       id: data.message.id,
       parts: data.message.parts.map((part) => pickLinqMessagePart(part)),
@@ -541,6 +722,13 @@ function pickLinqMessageReceivedData(data: LinqMessageReceivedData): Record<stri
 
 function pickLinqMessagePart(part: LinqMessagePart): Record<string, unknown> {
   if (part.type === "text") {
+    return compactRecord({
+      type: part.type,
+      value: part.value,
+    });
+  }
+
+  if (part.type === "link") {
     return compactRecord({
       type: part.type,
       value: part.value,
@@ -565,6 +753,13 @@ function pickHostedLinqMessagePart(part: LinqMessagePart): Record<string, unknow
     });
   }
 
+  if (part.type === "link") {
+    return compactRecord({
+      type: part.type,
+      value: part.value,
+    });
+  }
+
   return compactRecord({
     attachment_id: part.attachment_id,
     filename: part.filename,
@@ -572,6 +767,34 @@ function pickHostedLinqMessagePart(part: LinqMessagePart): Record<string, unknow
     size: part.size,
     type: part.type,
     url: part.url,
+  });
+}
+
+function pickLinqChatInfo(value: LinqChatInfo | null | undefined): Record<string, unknown> | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  return compactRecord({
+    id: value.id,
+    is_group: value.is_group,
+    owner_handle: pickLinqChatHandle(value.owner_handle),
+  });
+}
+
+function pickLinqChatHandle(value: LinqChatHandle | null | undefined): Record<string, unknown> | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  return compactRecord({
+    handle: value.handle,
+    id: value.id,
+    is_me: value.is_me,
+    joined_at: value.joined_at,
+    left_at: value.left_at,
+    service: value.service,
+    status: value.status,
   });
 }
 

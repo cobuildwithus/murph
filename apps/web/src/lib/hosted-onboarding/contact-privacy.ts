@@ -77,12 +77,21 @@ export function sanitizeHostedLinqEventForStorage(
     data.from = createHostedOpaqueIdentifier("linq.from", normalizePhoneNumber(from) ?? from);
   }
 
+  sanitizeHostedLinqHandleRecord(toHostedRecord(data.from_handle), "linq.from");
+  sanitizeHostedLinqHandleRecord(toHostedRecord(data.sender_handle), "linq.from");
+  sanitizeHostedLinqHandleRecord(toHostedRecord(data.recipient_handle), "linq.recipient");
+
   const recipientPhone = normalizeHostedOpaqueInput(data.recipient_phone);
   if (recipientPhone) {
     data.recipient_phone = createHostedOpaqueIdentifier(
       "linq.recipient",
       normalizePhoneNumber(recipientPhone) ?? recipientPhone,
     );
+  }
+
+  const chat = toHostedRecord(data.chat);
+  if (chat) {
+    sanitizeHostedLinqHandleRecord(toHostedRecord(chat.owner_handle), "linq.recipient");
   }
 
   if (options.omitRecipientPhone) {
@@ -264,6 +273,22 @@ function sanitizeHostedLinqMessagePart(value: unknown): unknown {
   }
 
   return record;
+}
+
+function sanitizeHostedLinqHandleRecord(
+  value: Record<string, unknown> | null,
+  kind: "linq.from" | "linq.recipient",
+): void {
+  if (!value) {
+    return;
+  }
+
+  const handle = normalizeHostedOpaqueInput(value.handle);
+  if (!handle) {
+    return;
+  }
+
+  value.handle = createHostedOpaqueIdentifier(kind, normalizePhoneNumber(handle) ?? handle);
 }
 
 function normalizeHostedLinqAttachmentUrl(value: unknown): string | null {

@@ -96,16 +96,29 @@ describe("handleHostedOnboardingLinqWebhook auth", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2024-03-25T10:10:00.000Z"));
     const rawBody = JSON.stringify({
-      api_version: "v1",
+      api_version: "v3",
       created_at: "2026-03-28T12:00:00.000Z",
+      webhook_version: "2026-02-03",
       data: {
-        chat_id: "chat_123",
-        from: "+15551234567",
-        is_from_me: false,
-        message: {
-          id: "msg_123",
-          parts: [],
+        chat: {
+          id: "chat_123",
+          owner_handle: {
+            handle: "+15550000000",
+            id: "handle_owner_123",
+            is_me: true,
+            service: "sms",
+          },
         },
+        direction: "inbound",
+        id: "msg_123",
+        parts: [],
+        sender_handle: {
+          handle: "+15551234567",
+          id: "handle_sender_123",
+          service: "sms",
+        },
+        sent_at: "2026-03-28T12:00:00.000Z",
+        service: "sms",
       },
       event_id: "evt_stale",
       event_type: "message.received",

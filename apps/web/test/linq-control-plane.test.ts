@@ -262,7 +262,7 @@ describe("HostedLinqControlPlane", () => {
     });
 
     expect(mocks.fetch).toHaveBeenCalledWith(
-      new URL("phonenumbers", "https://linq.example.test/api/partner/v3/"),
+      new URL("phone_numbers", "https://linq.example.test/api/partner/v3/"),
       expect.objectContaining({
         headers: {
           authorization: "Bearer linq-token",
@@ -531,20 +531,12 @@ describe("HostedLinqControlPlane", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2024-03-25T10:00:00.000Z"));
     const payload = JSON.stringify({
-      api_version: "v3",
-      event_id: "evt_invalid_payload",
-      created_at: "2026-03-25T10:00:00.000Z",
-      event_type: "message.received",
-      data: {
-        chat_id: "chat_123",
-        from: "+15550001111",
-        recipient_phone: "+15557654321",
-        is_from_me: "false",
-        message: {
-          id: "msg_123",
-          parts: [],
+      ...buildLinqControlPlaneWebhookPayload({
+        data: {
+          direction: "sideways",
         },
-      },
+        eventId: "evt_invalid_payload",
+      }),
     });
     const timestamp = "1711360800";
     mocks.verifyAndParseLinqWebhookRequest.mockImplementation(
@@ -568,7 +560,7 @@ describe("HostedLinqControlPlane", () => {
     await expect(controlPlane.handleWebhook()).rejects.toMatchObject({
       code: "LINQ_PAYLOAD_INVALID",
       httpStatus: 400,
-      message: "Linq message.received is_from_me must be a boolean.",
+      message: "Linq message.received direction must be \"inbound\" or \"outbound\".",
     });
     expect(mocks.store.getBindingByRecipientPhone).not.toHaveBeenCalled();
     expect(mocks.store.queueWebhookEventIfNew).not.toHaveBeenCalled();
@@ -580,20 +572,9 @@ describe("HostedLinqControlPlane", () => {
     process.env.LINQ_WEBHOOK_TIMESTAMP_TOLERANCE_MS = "60000";
     vi.useFakeTimers();
     const payload = JSON.stringify({
-      api_version: "v3",
-      event_id: "evt_stale",
-      created_at: "2026-03-25T10:00:00.000Z",
-      event_type: "message.received",
-      data: {
-        chat_id: "chat_123",
-        from: "+15550001111",
-        recipient_phone: "+15557654321",
-        is_from_me: false,
-        message: {
-          id: "msg_123",
-          parts: [],
-        },
-      },
+      ...buildLinqControlPlaneWebhookPayload({
+        eventId: "evt_stale",
+      }),
     });
     const timestamp = "1711360800";
     mocks.verifyAndParseLinqWebhookRequest.mockImplementation(
@@ -661,4 +642,38 @@ function signLinqWebhook(secret: string, payload: string, timestamp: string): st
     .digest("hex");
 
   return `sha256=${signature}`;
+}
+
+function buildLinqControlPlaneWebhookPayload(input: {
+  data?: Record<string, unknown>;
+  eventId?: string;
+} = {}): Record<string, unknown> {
+  return {
+    api_version: "v3",
+    created_at: "2026-03-25T10:00:00.000Z",
+    webhook_version: "2026-02-03",
+    data: {
+      chat: {
+        id: "chat_123",
+        owner_handle: {
+          handle: "+15557654321",
+          id: "handle_owner_123",
+          is_me: true,
+          service: "SMS",
+        },
+      },
+      direction: "inbound",
+      id: "msg_123",
+      parts: [],
+      sender_handle: {
+        handle: "+15550001111",
+        id: "handle_sender_123",
+        service: "SMS",
+      },
+      service: "SMS",
+      ...(input.data ?? {}),
+    },
+    event_id: input.eventId ?? "evt_123",
+    event_type: "message.received",
+  };
 }
