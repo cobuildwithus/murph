@@ -18,12 +18,14 @@ import {
 import { hasHostedPrivyPhoneAuthConfig } from "@/src/lib/hosted-onboarding/privy";
 
 export const metadata: Metadata = {
-  title: "Murph — Health guidance that fits your real life",
-  description: "Track meals, sync wearables, spot patterns, and get answers about your health in plain English. Murph is open source under GPL 3.0.",
+  title: "Murph — Health assistant that fits your real life",
+  description:
+    "Track meals, sync wearables, spot patterns, and get answers about your health via iMessage, Telegram, or email.",
 };
 
 export default function HomePage() {
-  const installCommandUrl = resolveHostedInstallScriptUrl() ?? "https://YOUR_DOMAIN/install.sh";
+  const installCommandUrl =
+    resolveHostedInstallScriptUrl() ?? "https://YOUR_DOMAIN/install.sh";
   const privyAppId = resolveHostedPrivyClientAppId();
   const privyClientId = resolveHostedPrivyClientId();
   const phoneAuthReady = hasHostedPrivyPhoneAuthConfig() && Boolean(privyAppId);
@@ -31,7 +33,11 @@ export default function HomePage() {
   return (
     <main className="min-h-screen">
       <NavHeader />
-      <HeroSection phoneAuthReady={phoneAuthReady} privyAppId={privyAppId} privyClientId={privyClientId} />
+      <HeroSection
+        phoneAuthReady={phoneAuthReady}
+        privyAppId={privyAppId}
+        privyClientId={privyClientId}
+      />
       <IntegrationsBar />
       <QuickStartSection installCommandUrl={installCommandUrl} />
       <CapabilitiesGrid />
