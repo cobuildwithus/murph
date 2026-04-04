@@ -6,9 +6,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   DERIVED_KNOWLEDGE_INDEX_PATH,
   DERIVED_KNOWLEDGE_PAGES_ROOT,
-  extractDerivedKnowledgeRelatedSlugs,
-  normalizeDerivedKnowledgeSlug,
-  normalizeDerivedKnowledgeTag,
+  extractKnowledgeRelatedSlugs,
+  normalizeKnowledgeSlug,
+  normalizeKnowledgeTag,
   readDerivedKnowledgeGraph,
   readDerivedKnowledgeGraphWithIssues,
   renderDerivedKnowledgeIndex,
@@ -29,7 +29,7 @@ afterEach(async () => {
 })
 
 describe('readDerivedKnowledgeGraph', () => {
-  it('loads derived knowledge pages from canonical frontmatter metadata', async () => {
+  it('loads derived knowledge pages from canonical body metadata', async () => {
     const vaultRoot = await createVaultRoot()
     await writeKnowledgePage(
       vaultRoot,
@@ -41,15 +41,15 @@ describe('readDerivedKnowledgeGraph', () => {
         'pageType: concept',
         'status: active',
         'summary: What seems to improve or disrupt sleep quality.',
-        'relatedSlugs:',
-        '  - magnesium',
-        'sourcePaths:',
-        '  - research/2026/04/sleep-note.md',
         '---',
         '',
         '# Sleep quality',
         '',
         'Murph noticed a recurring link to [[magnesium]].',
+        '',
+        '## Sources',
+        '',
+        '- `research/2026/04/sleep-note.md`',
         '',
       ].join('\n'),
     )
@@ -82,13 +82,15 @@ describe('readDerivedKnowledgeGraph', () => {
         'pageType: concept',
         'status: active',
         'summary: Magnesium seemed to help sleep continuity.',
-        'sourcePaths:',
-        '  - research/2026/04/sleep-note.md',
         '---',
         '',
         '# Sleep quality',
         '',
         'Murph noticed fewer wakeups when [[magnesium]] showed up in recent notes.',
+        '',
+        '## Sources',
+        '',
+        '- `research/2026/04/sleep-note.md`',
         '',
       ].join('\n'),
     )
@@ -143,25 +145,25 @@ describe('readDerivedKnowledgeGraph', () => {
         'pageType: sleep-pattern',
         'status: active',
         'summary: What seems to improve or disrupt sleep quality.',
-        'relatedSlugs:',
-        '  - magnesium',
-        'sourcePaths:',
-        '  - research/2026/04/sleep-note.md',
         '---',
         '',
         '# Sleep quality',
         '',
         'Murph noticed a recurring link to [[magnesium]].',
         '',
+        '## Sources',
+        '',
+        '- `research/2026/04/sleep-note.md`',
+        '',
       ].join('\n'),
     )
 
     const graph = await readDerivedKnowledgeGraph(vaultRoot)
 
-    expect(normalizeDerivedKnowledgeSlug('  Sleep quality  ')).toBe('sleep-quality')
-    expect(normalizeDerivedKnowledgeTag(' Sleep Pattern ')).toBe('sleep-pattern')
+    expect(normalizeKnowledgeSlug('  Sleep quality  ')).toBe('sleep-quality')
+    expect(normalizeKnowledgeTag(' Sleep Pattern ')).toBe('sleep-pattern')
     expect(
-      extractDerivedKnowledgeRelatedSlugs(
+      extractKnowledgeRelatedSlugs(
         '# Sleep quality\n\nSee [[magnesium]] and [[magnesium]].',
         'sleep-quality',
       ),
@@ -214,7 +216,7 @@ describe('readDerivedKnowledgeGraph', () => {
     })
   })
 
-  it('keeps canonical frontmatter metadata when body sections drift', async () => {
+  it('keeps canonical body metadata when frontmatter sections drift', async () => {
     const vaultRoot = await createVaultRoot()
     await writeKnowledgePage(
       vaultRoot,
@@ -243,12 +245,12 @@ describe('readDerivedKnowledgeGraph', () => {
     const graph = await readDerivedKnowledgeGraph(vaultRoot)
 
     expect(graph.bySlug.get('sleep-quality')).toMatchObject({
-      relatedSlugs: ['magnesium'],
-      sourcePaths: ['research/2026/04/current-note.md'],
+      relatedSlugs: ['stale-link'],
+      sourcePaths: ['research/2026/04/stale-note.md'],
     })
   })
 
-  it('ignores legacy frontmatter aliases for derived knowledge metadata', async () => {
+  it('ignores duplicated frontmatter metadata when the body omits it', async () => {
     const vaultRoot = await createVaultRoot()
     await writeKnowledgePage(
       vaultRoot,
@@ -257,17 +259,15 @@ describe('readDerivedKnowledgeGraph', () => {
         '---',
         'title: Sleep quality',
         'slug: sleep-quality',
-        'source_paths:',
+        'sourcePaths:',
         '  - research/2026/04/legacy-note.md',
-        'related:',
+        'relatedSlugs:',
         '  - magnesium',
-        'compiled_at: 2026-04-03T11:00:00.000Z',
-        'entityType: concept',
         '---',
         '',
         '# Sleep quality',
         '',
-        'Canonical metadata should come only from the current frontmatter fields.',
+        'Canonical metadata comes only from current frontmatter fields.',
         '',
       ].join('\n'),
     )
@@ -275,8 +275,6 @@ describe('readDerivedKnowledgeGraph', () => {
     const graph = await readDerivedKnowledgeGraph(vaultRoot)
 
     expect(graph.bySlug.get('sleep-quality')).toMatchObject({
-      compiledAt: null,
-      pageType: null,
       relatedSlugs: [],
       sourcePaths: [],
       title: 'Sleep quality',

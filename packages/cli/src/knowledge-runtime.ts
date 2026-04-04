@@ -4,15 +4,15 @@ import { resolveAssistantVaultPath } from '@murphai/assistant-core'
 import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 import {
   DERIVED_KNOWLEDGE_INDEX_PATH,
-  extractDerivedKnowledgeRelatedSlugs,
-  normalizeDerivedKnowledgeSlug,
-  normalizeDerivedKnowledgeTag,
+  normalizeKnowledgeSlug,
+  normalizeKnowledgeTag,
+  orderedUniqueStrings,
   readDerivedKnowledgeGraph,
   readDerivedKnowledgeGraphWithIssues,
   renderDerivedKnowledgeIndex,
   searchDerivedKnowledgeVault,
-  summarizeDerivedKnowledgeBody,
-  uniqueKnowledgeStrings,
+  summarizeKnowledgeBody,
+  type DerivedKnowledgeNode,
 } from '@murphai/query'
 import {
   runReviewGptPrompt,
@@ -120,7 +120,7 @@ export async function compileKnowledgePage(
     prompt: input.prompt,
     title: input.title,
   })
-  const slug = normalizeDerivedKnowledgeSlug(input.slug ?? initialTitle)
+  const slug = normalizeKnowledgeSlug(input.slug ?? initialTitle)
   const existingPage = requireUniqueKnowledgePageBySlug(graph, slug, 'compile')
   const title = deriveKnowledgeTitle({
     existingPage,
@@ -148,7 +148,7 @@ export async function compileKnowledgePage(
     compileSourcePaths,
     dependencies.readTextFile ?? defaultReadTextFile,
   )
-  const sourcePaths = uniqueKnowledgeStrings([
+  const sourcePaths = orderedUniqueStrings([
     ...existingSourcePaths,
     ...sourceBundle.entries.map((entry) => entry.relativePath),
   ])
@@ -178,17 +178,15 @@ export async function compileKnowledgePage(
   )
 
   const normalizedBody = normalizeKnowledgeBody(review.response, title)
-  const relatedSlugs = extractDerivedKnowledgeRelatedSlugs(normalizedBody, slug)
   const markdown = buildKnowledgeMarkdown({
     body: normalizedBody,
     compiledAt: savedAt,
     mode: review.mode,
     pageType,
-    relatedSlugs,
     slug,
     sourcePaths,
     status,
-    summary: summarizeDerivedKnowledgeBody(normalizedBody),
+    summary: summarizeKnowledgeBody(normalizedBody),
     title,
   })
   const pageRelativePath = buildKnowledgePageRelativePath(slug)
@@ -263,8 +261,8 @@ export async function listKnowledgePages(
   const graph = await readDerivedKnowledgeGraph(input.vault)
   const filters = normalizeKnowledgeFilters(input)
   const pages = graph.nodes
-    .filter((node) => matchesKnowledgeFilter(node.pageType, filters.pageType))
-    .filter((node) => matchesKnowledgeFilter(node.status, filters.status))
+    .filter((node: DerivedKnowledgeNode) => matchesKnowledgeFilter(node.pageType, filters.pageType))
+    .filter((node: DerivedKnowledgeNode) => matchesKnowledgeFilter(node.status, filters.status))
     .map(toKnowledgeMetadata)
 
   return {
@@ -283,7 +281,7 @@ export async function showKnowledgePage(
   const graph = await readDerivedKnowledgeGraph(input.vault)
   const page = requireUniqueKnowledgePageBySlug(
     graph,
-    normalizeDerivedKnowledgeSlug(input.slug),
+    normalizeKnowledgeSlug(input.slug),
     'show',
   )
 
@@ -324,8 +322,8 @@ export async function rebuildKnowledgeIndex(
   return {
     indexPath: DERIVED_KNOWLEDGE_INDEX_PATH,
     pageCount: graph.nodes.length,
-    pageTypes: uniqueKnowledgeStrings(
-      graph.nodes.flatMap((node) => (node.pageType ? [node.pageType] : [])),
+    pageTypes: orderedUniqueStrings(
+      graph.nodes.flatMap((node: DerivedKnowledgeNode) => (node.pageType ? [node.pageType] : [])),
     ),
     rebuilt: true,
     vault: input.vault,
@@ -417,8 +415,8 @@ function normalizeKnowledgeFilters(input: {
   status?: string | null
 }): NormalizedKnowledgeFilters {
   return {
-    pageType: normalizeDerivedKnowledgeTag(input.pageType),
-    status: normalizeDerivedKnowledgeTag(input.status),
+    pageType: normalizeKnowledgeTag(input.pageType),
+    status: normalizeKnowledgeTag(input.status),
   }
 }
 
@@ -428,8 +426,8 @@ function resolveKnowledgeMetadataTag(
   defaultValue: string,
 ): string {
   return (
-    normalizeDerivedKnowledgeTag(preferredValue) ??
-    normalizeDerivedKnowledgeTag(fallbackValue) ??
+    normalizeKnowledgeTag(preferredValue) ??
+    normalizeKnowledgeTag(fallbackValue) ??
     defaultValue
   )
 }
@@ -439,7 +437,7 @@ function normalizeSourcePathInputs(value: readonly string[] | null | undefined):
     return []
   }
 
-  return uniqueKnowledgeStrings(
+  return orderedUniqueStrings(
     value
       .map((entry) => String(entry ?? '').trim())
       .filter((entry) => entry.length > 0),
@@ -451,7 +449,7 @@ function matchesKnowledgeFilter(value: string | null | undefined, filter: string
     return true
   }
 
-  return normalizeDerivedKnowledgeTag(value) === filter
+  return normalizeKnowledgeTag(value) === filter
 }
 
 async function knowledgePathExists(vaultRoot: string, candidatePath: string): Promise<boolean> {

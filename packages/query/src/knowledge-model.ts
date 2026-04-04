@@ -2,7 +2,7 @@ const KNOWLEDGE_SUMMARY_MAX_CHARS = 220
 
 export const DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT = 'murph.knowledge-search.v1' as const
 
-export function uniqueKnowledgeStrings(values: readonly string[]): string[] {
+export function orderedUniqueStrings(values: readonly string[]): string[] {
   const seen = new Set<string>()
   const uniqueValues: string[] = []
 
@@ -16,7 +16,7 @@ export function uniqueKnowledgeStrings(values: readonly string[]): string[] {
   return uniqueValues
 }
 
-export function normalizeDerivedKnowledgeSlug(value: string): string {
+export function normalizeKnowledgeSlug(value: string): string {
   const slug =
     String(value ?? '')
       .trim()
@@ -27,7 +27,7 @@ export function normalizeDerivedKnowledgeSlug(value: string): string {
   return slug
 }
 
-export function normalizeDerivedKnowledgeTag(
+export function normalizeKnowledgeTag(
   value: string | null | undefined,
 ): string | null {
   const normalized = String(value ?? '').trim()
@@ -43,7 +43,7 @@ export function normalizeDerivedKnowledgeTag(
   return token || null
 }
 
-export function extractDerivedKnowledgeRelatedSlugs(
+export function extractKnowledgeRelatedSlugs(
   body: string,
   currentSlug: string,
 ): string[] {
@@ -59,10 +59,10 @@ export function extractDerivedKnowledgeRelatedSlugs(
     relatedSlugs.push(slug)
   }
 
-  return uniqueKnowledgeStrings(relatedSlugs)
+  return orderedUniqueStrings(relatedSlugs)
 }
 
-export function extractDerivedKnowledgeSourcePaths(body: string): string[] {
+export function extractKnowledgeSourcePaths(body: string): string[] {
   const sectionMatch = /(?:^|\n)##\s+Sources\s*\n([\s\S]*?)(?=\n##\s+|$)/iu.exec(
     String(body ?? ''),
   )
@@ -80,10 +80,21 @@ export function extractDerivedKnowledgeSourcePaths(body: string): string[] {
     sourcePaths.push(match[1].trim())
   }
 
-  return uniqueKnowledgeStrings(sourcePaths)
+  return orderedUniqueStrings(sourcePaths)
 }
 
-export function summarizeDerivedKnowledgeBody(body: string): string | null {
+export function extractKnowledgeFirstHeading(body: string): string | null {
+  for (const line of body.split('\n')) {
+    const match = /^#\s+(.+?)\s*$/u.exec(line.trim())
+    if (match?.[1]) {
+      return match[1].trim()
+    }
+  }
+
+  return null
+}
+
+export function summarizeKnowledgeBody(body: string): string | null {
   const normalized = String(body ?? '')
     .split('\n')
     .map((line) => line.replace(/^#+\s+/u, '').trim())
@@ -97,7 +108,7 @@ export function summarizeDerivedKnowledgeBody(body: string): string | null {
   return truncateSummaryText(normalized, KNOWLEDGE_SUMMARY_MAX_CHARS)
 }
 
-export function sameDerivedKnowledgeStringSet(
+export function sameKnowledgeStringSet(
   left: readonly string[],
   right: readonly string[],
 ): boolean {
@@ -109,7 +120,7 @@ export function sameDerivedKnowledgeStringSet(
   return left.every((value) => rightValues.has(value))
 }
 
-export function humanizeDerivedKnowledgeValue(value: string): string {
+export function humanizeKnowledgeTag(value: string): string {
   return value
     .split('-')
     .filter(Boolean)

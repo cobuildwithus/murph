@@ -1,9 +1,9 @@
 import path from 'node:path'
 import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 import {
-  extractDerivedKnowledgeRelatedSlugs,
-  extractDerivedKnowledgeSourcePaths,
-  sameDerivedKnowledgeStringSet,
+  extractKnowledgeRelatedSlugs,
+  extractKnowledgeSourcePaths,
+  sameKnowledgeStringSet,
   type DerivedKnowledgeGraph,
   type DerivedKnowledgeGraphIssue,
   type DerivedKnowledgeNode,
@@ -65,7 +65,7 @@ export function requireUniqueKnowledgePageBySlug(
   slug: string,
   action: 'compile' | 'reload' | 'show',
 ): DerivedKnowledgeNode | null {
-  const matchingPages = graph.nodes.filter((node) => node.slug === slug)
+  const matchingPages = graph.nodes.filter((node: DerivedKnowledgeNode) => node.slug === slug)
   if (matchingPages.length <= 1) {
     return matchingPages[0] ?? null
   }
@@ -74,7 +74,7 @@ export function requireUniqueKnowledgePageBySlug(
     'knowledge_duplicate_slug',
     `Knowledge slug "${slug}" appears in multiple files and cannot be ${describeKnowledgeDuplicateSlugAction(action)} safely until the duplicate is resolved.`,
     {
-      pagePaths: matchingPages.map((node) => node.relativePath),
+      pagePaths: matchingPages.map((node: DerivedKnowledgeNode) => node.relativePath),
       slug,
     },
   )
@@ -190,14 +190,22 @@ async function collectKnowledgePageProblems(
     })
   }
 
+  const frontmatterSourcePaths = readKnowledgeStringArrayAttribute(
+    page.attributes,
+    'sourcePaths',
+  )
+  const frontmatterRelatedSlugs = readKnowledgeStringArrayAttribute(
+    page.attributes,
+    'relatedSlugs',
+  )
   const normalizedFrontmatterSourcePaths = collectNormalizedSourcePaths(
-    page.sourcePaths,
+    frontmatterSourcePaths,
     pagePath,
     page.slug,
     problems,
   )
   const normalizedBodySourcePaths = collectNormalizedSourcePaths(
-    extractDerivedKnowledgeSourcePaths(page.body),
+    extractKnowledgeSourcePaths(page.body),
     pagePath,
     page.slug,
     problems,
@@ -205,28 +213,28 @@ async function collectKnowledgePageProblems(
 
   if (
     (normalizedFrontmatterSourcePaths.length > 0 || normalizedBodySourcePaths.length > 0) &&
-    !sameDerivedKnowledgeStringSet(
+    !sameKnowledgeStringSet(
       normalizedFrontmatterSourcePaths,
       normalizedBodySourcePaths,
     )
   ) {
     problems.push({
-      code: 'sources_section_drift',
-      message: 'Knowledge page frontmatter `sourcePaths` does not match the rendered `## Sources` section. Frontmatter stays authoritative.',
+      code: 'source_paths_drift',
+      message: 'Knowledge page frontmatter `sourcePaths` does not match the canonical `## Sources` section.',
       pagePath,
       slug: page.slug,
       severity: 'warning',
     })
   }
 
-  const bodyRelatedSlugs = extractDerivedKnowledgeRelatedSlugs(page.body, page.slug)
+  const bodyRelatedSlugs = extractKnowledgeRelatedSlugs(page.body, page.slug)
   if (
-    (page.relatedSlugs.length > 0 || bodyRelatedSlugs.length > 0) &&
-    !sameDerivedKnowledgeStringSet(page.relatedSlugs, bodyRelatedSlugs)
+    (frontmatterRelatedSlugs.length > 0 || bodyRelatedSlugs.length > 0) &&
+    !sameKnowledgeStringSet(frontmatterRelatedSlugs, bodyRelatedSlugs)
   ) {
     problems.push({
       code: 'related_slugs_drift',
-      message: 'Knowledge page frontmatter `relatedSlugs` does not match the body wikilinks. Frontmatter stays authoritative.',
+      message: 'Knowledge page frontmatter `relatedSlugs` does not match the canonical body wikilinks.',
       pagePath,
       slug: page.slug,
       severity: 'warning',
@@ -245,7 +253,7 @@ async function collectKnowledgePageProblems(
     }
   }
 
-  for (const sourcePath of normalizedFrontmatterSourcePaths) {
+  for (const sourcePath of normalizedBodySourcePaths) {
     const sourceExists = await pathExists(sourcePath)
     if (!sourceExists) {
       problems.push({
@@ -259,6 +267,25 @@ async function collectKnowledgePageProblems(
   }
 
   return problems
+}
+
+function readKnowledgeStringArrayAttribute(
+  attributes: Record<string, unknown>,
+  key: string,
+): string[] {
+  const value = attributes[key]
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    return trimmed ? [trimmed] : []
+  }
+
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value
+    .flatMap((entry) => (typeof entry === 'string' ? [entry.trim()] : []))
+    .filter((entry) => entry.length > 0)
 }
 
 function collectNormalizedSourcePaths(

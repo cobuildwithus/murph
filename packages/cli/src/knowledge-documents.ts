@@ -4,7 +4,7 @@ import { stringifyFrontmatterDocument } from '@murphai/core'
 import {
   DERIVED_KNOWLEDGE_PAGES_ROOT,
   type DerivedKnowledgeNode,
-  humanizeDerivedKnowledgeValue,
+  humanizeKnowledgeTag,
 } from '@murphai/query'
 import {
   type KnowledgePage,
@@ -43,7 +43,7 @@ export function deriveKnowledgeTitle(input: {
   }
 
   const slug = normalizeOptionalText(input.slug)
-  return slug ? humanizeDerivedKnowledgeValue(slug) : 'Derived knowledge page'
+  return slug ? humanizeKnowledgeTag(slug) : 'Derived knowledge page'
 }
 
 export function buildKnowledgeCompilePrompt(input: {
@@ -134,7 +134,6 @@ export function buildKnowledgeMarkdown(input: {
   compiledAt: string
   mode: ResearchExecutionMode
   pageType: string
-  relatedSlugs: string[]
   slug: string
   sourcePaths: string[]
   status: string
@@ -146,9 +145,7 @@ export function buildKnowledgeMarkdown(input: {
     compiler: 'review:gpt',
     mode: input.mode,
     pageType: input.pageType,
-    relatedSlugs: input.relatedSlugs,
     slug: input.slug,
-    sourcePaths: input.sourcePaths,
     status: input.status,
     summary: input.summary,
     title: input.title,

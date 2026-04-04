@@ -1,7 +1,7 @@
 import {
   DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT,
-  normalizeDerivedKnowledgeTag,
-} from './knowledge-page-model.ts'
+  normalizeKnowledgeTag,
+} from './knowledge-model.ts'
 import type {
   DerivedKnowledgeGraph,
   DerivedKnowledgeNode,
@@ -54,8 +54,8 @@ export function searchDerivedKnowledgeGraph(
     }
   }
 
-  const pageType = normalizeDerivedKnowledgeTag(filters.pageType)
-  const status = normalizeDerivedKnowledgeTag(filters.status)
+  const pageType = normalizeKnowledgeTag(filters.pageType)
+  const status = normalizeKnowledgeTag(filters.status)
   const hits = graph.nodes
     .filter((node) => matchesKnowledgeSearchFilter(node.pageType, pageType))
     .filter((node) => matchesKnowledgeSearchFilter(node.status, status))
@@ -235,7 +235,7 @@ function matchesKnowledgeSearchFilter(
     return true
   }
 
-  return normalizeDerivedKnowledgeTag(value) === filter
+  return normalizeKnowledgeTag(value) === filter
 }
 
 function normalizeKnowledgeSearchLimit(limit: number | undefined): number {

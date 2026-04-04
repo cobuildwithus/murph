@@ -142,13 +142,14 @@ export {
 } from "./knowledge-graph.ts";
 export {
   DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT,
-  extractDerivedKnowledgeRelatedSlugs,
-  extractDerivedKnowledgeSourcePaths,
-  humanizeDerivedKnowledgeValue,
-  normalizeDerivedKnowledgeSlug,
-  normalizeDerivedKnowledgeTag,
-  sameDerivedKnowledgeStringSet,
-  summarizeDerivedKnowledgeBody,
-  uniqueKnowledgeStrings,
-} from "./knowledge-page-model.ts";
+  extractKnowledgeFirstHeading,
+  extractKnowledgeRelatedSlugs,
+  extractKnowledgeSourcePaths,
+  humanizeKnowledgeTag,
+  normalizeKnowledgeSlug,
+  normalizeKnowledgeTag,
+  orderedUniqueStrings,
+  sameKnowledgeStringSet,
+  summarizeKnowledgeBody,
+} from "./knowledge-model.ts";
 export * from "./health/index.ts";
