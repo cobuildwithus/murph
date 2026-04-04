@@ -1,3 +1,4 @@
+import type { R2BucketLike } from "../bundle-store.js";
 import type { HostedExecutionCommittedResult } from "../execution-journal.js";
 import { createHostedExecutionJournalStore, type HostedExecutionJournalStore } from "../execution-journal.js";
 import { HostedBundleGarbageCollector } from "../bundle-gc.js";
@@ -135,7 +136,7 @@ export class RunnerCommitRecovery {
 }
 
 export function createRunnerCommitRecovery(input: {
-  bucket: import("../bundle-store.js").R2BucketLike;
+  bucket: R2BucketLike;
   bundleEncryptionKey: Uint8Array;
   bundleEncryptionKeyId: string;
   bundleEncryptionKeysById: Readonly<Record<string, Uint8Array>>;
