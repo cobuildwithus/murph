@@ -82,21 +82,21 @@ export function normalizeHostedUserEnv(
   env: Record<string, string>,
   source: Readonly<Record<string, string | undefined>> = process.env,
 ): Record<string, string> {
-  const normalized: Record<string, string | null> = {};
+  const validatedEnv: Record<string, string> = {};
 
   for (const [key, value] of Object.entries(env)) {
     if (typeof value !== "string") {
       throw new TypeError(`Hosted user env value for ${key} must be a string.`);
     }
 
-    normalized[key] = value;
+    validatedEnv[key] = value;
   }
 
   return applyHostedUserEnvUpdate({
     current: {},
     source,
     update: {
-      env: normalized,
+      env: validatedEnv,
       mode: "replace",
     },
   });
@@ -138,7 +138,7 @@ function parseHostedUserEnvConfig(
     throw new Error("Hosted user env config is invalid.");
   }
 
-  const env = normalizeHostedUserEnv(readHostedUserEnvStringRecord(parsed.env), source);
+  const env = normalizeHostedUserEnv(requireHostedUserEnvStringRecord(parsed.env), source);
 
   return {
     env,
@@ -187,7 +187,7 @@ function requireHostedUserEnvString(value: unknown, label: string): string {
   return value;
 }
 
-function readHostedUserEnvStringRecord(value: Record<string, unknown>): Record<string, string> {
+function requireHostedUserEnvStringRecord(value: Record<string, unknown>): Record<string, string> {
   return Object.fromEntries(Object.entries(value).map(([key, rawValue]) => {
     if (typeof rawValue !== "string") {
       throw new TypeError(`Hosted user env value for ${key} must be a string.`);
