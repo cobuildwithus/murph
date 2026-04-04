@@ -7,12 +7,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   buildAssistantProviderDefaultsPatch,
   ensureHostedAssistantOperatorDefaults,
+  parseHostedAssistantConfig,
   resolveAssistantBackendTarget,
   resolveAssistantOperatorDefaults,
   resolveHostedAssistantConfig,
   resolveOperatorConfigPath,
   saveAssistantOperatorDefaultsPatch,
   saveHostedAssistantConfig,
+  tryParseHostedAssistantConfig,
 } from "@murphai/assistant-core";
 
 const temporaryPaths: string[] = [];
@@ -26,6 +28,81 @@ afterEach(async () => {
 });
 
 describe("ensureHostedAssistantOperatorDefaults", () => {
+  it("accepts only the canonical target-based hosted profile shape", () => {
+    expect(parseHostedAssistantConfig({
+      activeProfileId: "platform-default",
+      profiles: [
+        {
+          id: "platform-default",
+          label: "OpenAI",
+          managedBy: "platform",
+          target: {
+            adapter: "openai-compatible",
+            apiKeyEnv: "OPENAI_API_KEY",
+            endpoint: "https://api.openai.com/v1",
+            headers: null,
+            model: "gpt-5.4",
+            providerName: "openai",
+            reasoningEffort: "medium",
+          },
+        },
+      ],
+      schema: "murph.hosted-assistant-config.v1",
+      updatedAt: "2026-04-05T00:00:00.000Z",
+    })).toEqual({
+      activeProfileId: "platform-default",
+      profiles: [
+        {
+          id: "platform-default",
+          label: "OpenAI",
+          managedBy: "platform",
+          target: {
+            adapter: "openai-compatible",
+            apiKeyEnv: "OPENAI_API_KEY",
+            endpoint: "https://api.openai.com/v1",
+            headers: null,
+            model: "gpt-5.4",
+            providerName: "openai",
+            reasoningEffort: "medium",
+          },
+        },
+      ],
+      schema: "murph.hosted-assistant-config.v1",
+      updatedAt: "2026-04-05T00:00:00.000Z",
+    });
+  });
+
+  it("rejects the removed legacy provider-shaped hosted profile", () => {
+    const legacyConfig = {
+      activeProfileId: "platform-default",
+      profiles: [
+        {
+          apiKeyEnv: "OPENAI_API_KEY",
+          approvalPolicy: null,
+          baseUrl: "https://api.openai.com/v1",
+          codexCommand: null,
+          id: "platform-default",
+          label: "OpenAI",
+          managedBy: "platform",
+          model: "gpt-5.4",
+          oss: false,
+          profile: null,
+          provider: "openai-compatible",
+          providerName: "openai",
+          reasoningEffort: "medium",
+          sandbox: null,
+        },
+      ],
+      schema: "murph.hosted-assistant-config.v1",
+      updatedAt: "2026-04-05T00:00:00.000Z",
+    };
+
+    expect(() => parseHostedAssistantConfig(legacyConfig)).toThrow(
+      "Hosted assistant config is required.",
+    );
+    expect(tryParseHostedAssistantConfig(legacyConfig)).toBeNull();
+  });
+
   it("seeds explicit OpenAI-compatible defaults from a named hosted provider", async () => {
     const homeDirectory = await createTemporaryHomeDirectory();
 
@@ -377,6 +454,7 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
           schema: "murph.hosted-assistant-config.v1",
           activeProfileId: "broken",
           profiles: "invalid",
+          updatedAt: "2026-04-05T00:00:00.000Z",
         },
       }, null, 2)}\n`,
       "utf8",
@@ -414,6 +492,72 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
       endpoint: "https://api.openai.com/v1",
       model: "gpt-4.1-mini",
       providerName: "openai",
+    });
+  });
+
+  it("fails closed when durable hosted config still uses the removed provider-shaped profile", async () => {
+    const homeDirectory = await createTemporaryHomeDirectory();
+    const operatorConfigPath = resolveOperatorConfigPath(homeDirectory);
+
+    await mkdir(path.dirname(operatorConfigPath), { recursive: true });
+    await writeFile(
+      operatorConfigPath,
+      `${JSON.stringify({
+        schema: "murph.operator-config.v1",
+        defaultVault: null,
+        assistant: null,
+        hostedAssistant: {
+          activeProfileId: "platform-default",
+          profiles: [
+            {
+              apiKeyEnv: "OPENAI_API_KEY",
+              approvalPolicy: null,
+              baseUrl: "https://api.openai.com/v1",
+              codexCommand: null,
+              id: "platform-default",
+              label: "OpenAI",
+              managedBy: "platform",
+              model: "gpt-5.4",
+              oss: false,
+              profile: null,
+              provider: "openai-compatible",
+              providerName: "openai",
+              reasoningEffort: "medium",
+              sandbox: null,
+            },
+          ],
+          schema: "murph.hosted-assistant-config.v1",
+          updatedAt: "2026-04-05T00:00:00.000Z",
+        },
+        updatedAt: "2026-04-05T00:00:00.000Z",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+
+    await expect(resolveHostedAssistantConfig(homeDirectory)).resolves.toBeNull();
+
+    await expect(
+      ensureHostedAssistantOperatorDefaults({
+        allowMissing: true,
+        env: {},
+        homeDirectory,
+      }),
+    ).resolves.toMatchObject({
+      configured: false,
+      provider: null,
+      seeded: false,
+      source: "invalid",
+    });
+
+    await expect(
+      ensureHostedAssistantOperatorDefaults({
+        allowMissing: false,
+        env: {},
+        homeDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_ASSISTANT_CONFIG_INVALID",
+      name: "HostedAssistantConfigurationError",
     });
   });
 });
