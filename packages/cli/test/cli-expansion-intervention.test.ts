@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Cli } from 'incur'
 import { test } from 'vitest'
+import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import { registerInterventionCommands } from '../src/commands/intervention.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { createIntegratedVaultServices } from '@murphai/assistant-core/vault-services'
@@ -59,6 +60,7 @@ function createSliceCli() {
     description: 'intervention slice test cli',
     version: '0.0.0-test',
   })
+  cli.use(incurErrorBridge)
   const services = createIntegratedVaultServices()
 
   registerVaultCommands(cli, services)

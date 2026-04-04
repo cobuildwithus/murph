@@ -5,6 +5,7 @@ import path from 'node:path'
 import { initializeVault } from '@murphai/core'
 import { Cli } from 'incur'
 import { test } from 'vitest'
+import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import { registerAuditCommands } from '../src/commands/audit.js'
 import { registerSamplesCommands } from '../src/commands/samples.js'
 import { createUnwiredVaultServices } from '@murphai/assistant-core/vault-services'
@@ -16,6 +17,7 @@ function createSliceCli() {
     description: 'samples/audit slice test cli',
     version: '0.0.0-test',
   })
+  cli.use(incurErrorBridge)
   const services = createUnwiredVaultServices()
 
   registerSamplesCommands(cli, services)
@@ -390,6 +392,10 @@ test.sequential('audit commands show, filter, and tail canonical audit records',
       'list',
       '--vault',
       vaultRoot,
+      '--from',
+      '2026-03-12',
+      '--to',
+      '2026-03-12',
       '--sort',
       'asc',
       '--limit',
@@ -416,6 +422,10 @@ test.sequential('audit commands show, filter, and tail canonical audit records',
       'list',
       '--vault',
       vaultRoot,
+      '--from',
+      '2026-03-12',
+      '--to',
+      '2026-03-12',
       '--sort',
       'desc',
       '--limit',
@@ -440,14 +450,20 @@ test.sequential('audit commands show, filter, and tail canonical audit records',
       }>
     }>([
       'audit',
-      'tail',
+      'list',
       '--vault',
       vaultRoot,
+      '--from',
+      '2026-03-12',
+      '--to',
+      '2026-03-12',
+      '--sort',
+      'desc',
       '--limit',
       '2',
     ])
     assert.equal(tailResult.ok, true)
-    assert.equal(tailResult.meta?.command, 'audit tail')
+    assert.equal(tailResult.meta?.command, 'audit list')
     assert.equal(requireData(tailResult).count, 2)
     assert.equal(requireData(tailResult).filters.sort, 'desc')
     assert.equal(requireData(tailResult).filters.limit, 2)
@@ -477,15 +493,15 @@ test.sequential('audit commands are reachable through the top-level CLI registra
 
   try {
     await initializeVault({ vaultRoot })
-    await mkdir(path.join(vaultRoot, 'audit/2026'), { recursive: true })
+    await mkdir(path.join(vaultRoot, 'audit/2099'), { recursive: true })
     await writeFile(
-      path.join(vaultRoot, 'audit/2026/2026-03.jsonl'),
+      path.join(vaultRoot, 'audit/2099/2099-12.jsonl'),
       JSON.stringify({
         schemaVersion: 'murph.audit.v1',
         id: 'aud_01JNW00000000000000000010',
         action: 'validate',
         status: 'success',
-        occurredAt: '2026-03-12T10:45:00Z',
+        occurredAt: '2099-12-31T23:59:59Z',
         actor: 'cli',
         commandName: 'vault-cli validate',
         summary: 'Validated vault.',
