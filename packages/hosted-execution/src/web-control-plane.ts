@@ -58,9 +58,6 @@ export interface HostedExecutionProxyDeviceSyncRuntimeClient {
   }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
 }
 
-export interface HostedExecutionServerDeviceSyncRuntimeClient
-  extends HostedExecutionProxyDeviceSyncRuntimeClient {}
-
 export interface HostedExecutionProxyDeviceSyncConnectLinkClient {
   createConnectLink(input: {
     provider: string;
@@ -75,9 +72,6 @@ export interface HostedExecutionProxyAiUsageClient {
     usage: HostedExecutionAiUsageRecordRequest["usage"],
   ): Promise<HostedExecutionAiUsageRecordResponse>;
 }
-
-export interface HostedExecutionServerAiUsageClient
-  extends HostedExecutionProxyAiUsageClient {}
 
 interface HostedExecutionUserBoundRequesterResolutionInput {
   authorizationToken?: string | null;
@@ -124,25 +118,6 @@ export function createHostedExecutionProxyDeviceSyncConnectLinkClient(input: {
   );
 }
 
-export function createHostedExecutionServerDeviceSyncRuntimeClient(input: {
-  baseUrl: string;
-  boundUserId: string;
-  fetchImpl?: typeof fetch;
-  internalToken: string;
-  timeoutMs?: number | null;
-}): HostedExecutionServerDeviceSyncRuntimeClient {
-  return buildHostedExecutionDeviceSyncRuntimeClient(
-    createHostedExecutionServerRequester({
-      authorizationToken: input.internalToken,
-      baseUrl: input.baseUrl,
-      boundUserId: input.boundUserId,
-      fetchImpl: input.fetchImpl,
-      timeoutMs: input.timeoutMs ?? null,
-    }),
-    input.boundUserId,
-  );
-}
-
 export function createHostedExecutionServerDeviceSyncConnectLinkClient(input: {
   baseUrl: string;
   boundUserId: string;
@@ -165,20 +140,24 @@ export function resolveHostedExecutionDeviceSyncRuntimeClient(input: {
   baseUrl: string | null | undefined;
   boundUserId: string;
   fetchImpl?: typeof fetch;
-  internalToken?: string | null;
   timeoutMs?: number | null;
-}): HostedExecutionProxyDeviceSyncRuntimeClient | HostedExecutionServerDeviceSyncRuntimeClient | null {
-  const requester = resolveHostedExecutionUserBoundRequester({
-    authorizationToken: input.internalToken,
-    baseUrl: input.baseUrl,
-    boundUserId: input.boundUserId,
-    fetchImpl: input.fetchImpl,
-    isProxyBaseUrl: isHostedExecutionDeviceSyncProxyBaseUrl,
-    proxyHost: HOSTED_EXECUTION_PROXY_HOSTS.deviceSync,
-    timeoutMs: input.timeoutMs,
-  });
+}): HostedExecutionProxyDeviceSyncRuntimeClient | null {
+  const normalizedBaseUrl = input.baseUrl ? requireHostedExecutionWebControlBaseUrl(input.baseUrl) : null;
 
-  return requester ? buildHostedExecutionDeviceSyncRuntimeClient(requester, input.boundUserId) : null;
+  if (!normalizedBaseUrl || !isHostedExecutionDeviceSyncProxyBaseUrl(normalizedBaseUrl)) {
+    return null;
+  }
+
+  return buildHostedExecutionDeviceSyncRuntimeClient(
+    createHostedExecutionProxyRequester({
+      baseUrl: normalizedBaseUrl,
+      boundUserId: input.boundUserId,
+      fetchImpl: input.fetchImpl,
+      proxyHost: HOSTED_EXECUTION_PROXY_HOSTS.deviceSync,
+      timeoutMs: input.timeoutMs ?? null,
+    }),
+    input.boundUserId,
+  );
 }
 
 export function resolveHostedExecutionDeviceSyncConnectLinkClient(input: {
@@ -221,42 +200,27 @@ export function createHostedExecutionProxyAiUsageClient(input: {
   );
 }
 
-export function createHostedExecutionServerAiUsageClient(input: {
-  baseUrl: string;
-  boundUserId: string;
-  fetchImpl?: typeof fetch;
-  internalToken: string;
-  timeoutMs?: number | null;
-}): HostedExecutionServerAiUsageClient {
-  return buildHostedExecutionAiUsageClient(
-    createHostedExecutionServerRequester({
-      authorizationToken: input.internalToken,
-      baseUrl: input.baseUrl,
-      boundUserId: input.boundUserId,
-      fetchImpl: input.fetchImpl,
-      timeoutMs: input.timeoutMs ?? null,
-    }),
-  );
-}
-
 export function resolveHostedExecutionAiUsageClient(input: {
   baseUrl: string | null | undefined;
   boundUserId: string;
   fetchImpl?: typeof fetch;
-  internalToken?: string | null;
   timeoutMs?: number | null;
-}): HostedExecutionProxyAiUsageClient | HostedExecutionServerAiUsageClient | null {
-  const requester = resolveHostedExecutionUserBoundRequester({
-    authorizationToken: input.internalToken,
-    baseUrl: input.baseUrl,
-    boundUserId: input.boundUserId,
-    fetchImpl: input.fetchImpl,
-    isProxyBaseUrl: isHostedExecutionAiUsageProxyBaseUrl,
-    proxyHost: HOSTED_EXECUTION_PROXY_HOSTS.usage,
-    timeoutMs: input.timeoutMs,
-  });
+}): HostedExecutionProxyAiUsageClient | null {
+  const normalizedBaseUrl = input.baseUrl ? requireHostedExecutionWebControlBaseUrl(input.baseUrl) : null;
 
-  return requester ? buildHostedExecutionAiUsageClient(requester) : null;
+  if (!normalizedBaseUrl || !isHostedExecutionAiUsageProxyBaseUrl(normalizedBaseUrl)) {
+    return null;
+  }
+
+  return buildHostedExecutionAiUsageClient(
+    createHostedExecutionProxyRequester({
+      baseUrl: normalizedBaseUrl,
+      boundUserId: input.boundUserId,
+      fetchImpl: input.fetchImpl,
+      proxyHost: HOSTED_EXECUTION_PROXY_HOSTS.usage,
+      timeoutMs: input.timeoutMs ?? null,
+    }),
+  );
 }
 
 export function isHostedExecutionDeviceSyncProxyBaseUrl(baseUrl: string): boolean {

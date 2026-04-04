@@ -28,8 +28,9 @@ import {
   buildHostedExecutionUserStatusPath,
   createHostedExecutionControlClient,
   createHostedExecutionDispatchClient,
+  createHostedExecutionProxyAiUsageClient,
+  createHostedExecutionProxyDeviceSyncRuntimeClient,
   createHostedExecutionServerDeviceSyncConnectLinkClient,
-  createHostedExecutionServerAiUsageClient,
   createHostedExecutionSignature,
   createHostedExecutionSignatureHeaders,
   buildHostedExecutionStructuredLogRecord,
@@ -508,10 +509,9 @@ describe("@murphai/hosted-execution", () => {
         status: 200,
       }));
     global.fetch = fetchMock;
-    const client = createHostedExecutionServerAiUsageClient({
-      baseUrl: "https://join.example.test",
+    const client = createHostedExecutionProxyAiUsageClient({
+      baseUrl: "http://usage.worker",
       boundUserId: "member_123",
-      internalToken: "  internal-token  ",
       timeoutMs: 10_000,
     });
 
@@ -527,7 +527,7 @@ describe("@murphai/hosted-execution", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://join.example.test/api/internal/hosted-execution/usage/record",
+      "http://usage.worker/api/internal/hosted-execution/usage/record",
       expect.objectContaining({
         headers: expect.any(Headers),
         method: "POST",
@@ -535,8 +535,48 @@ describe("@murphai/hosted-execution", () => {
     );
     const requestHeaders = fetchMock.mock.calls[0]?.[1]?.headers;
     expect(requestHeaders).toBeInstanceOf(Headers);
-    expect((requestHeaders as Headers).get("authorization")).toBe("Bearer internal-token");
+    expect((requestHeaders as Headers).get("authorization")).toBeNull();
     expect((requestHeaders as Headers).get("content-type")).toBe("application/json");
+    expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
+  });
+
+  it("resolves proxy hosted AI usage clients from worker proxy urls without requiring server auth", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        recorded: 1,
+        usageIds: ["usage_123"],
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      }));
+    global.fetch = fetchMock;
+    const client = resolveHostedExecutionAiUsageClient({
+      baseUrl: "http://usage.worker",
+      boundUserId: "member_123",
+      timeoutMs: 10_000,
+    });
+
+    expect(client).not.toBeNull();
+    if (!client) {
+      throw new Error("Expected a hosted AI usage client.");
+    }
+
+    await expect(
+      client.recordUsage([
+        {
+          usageId: "usage_123",
+        },
+      ]),
+    ).resolves.toEqual({
+      recorded: 1,
+      usageIds: ["usage_123"],
+    });
+
+    const requestHeaders = fetchMock.mock.calls[0]?.[1]?.headers;
+    expect(requestHeaders).toBeInstanceOf(Headers);
+    expect((requestHeaders as Headers).get("authorization")).toBeNull();
     expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
   });
 
@@ -616,6 +656,37 @@ describe("@murphai/hosted-execution", () => {
     expect(requestHeaders).toBeInstanceOf(Headers);
     expect((requestHeaders as Headers).get("authorization")).toBeNull();
     expect((requestHeaders as Headers).get("content-type")).toBe("application/json");
+    expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
+  });
+
+  it("creates proxy device-sync runtime clients directly for worker proxy urls", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        connections: [],
+        generatedAt: "2026-03-29T10:00:00.000Z",
+        userId: "member_123",
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      }));
+    global.fetch = fetchMock;
+    const client = createHostedExecutionProxyDeviceSyncRuntimeClient({
+      baseUrl: "http://device-sync.worker",
+      boundUserId: "member_123",
+      timeoutMs: 10_000,
+    });
+
+    await expect(client.fetchSnapshot()).resolves.toEqual({
+      connections: [],
+      generatedAt: "2026-03-29T10:00:00.000Z",
+      userId: "member_123",
+    });
+
+    const requestHeaders = fetchMock.mock.calls[0]?.[1]?.headers;
+    expect(requestHeaders).toBeInstanceOf(Headers);
+    expect((requestHeaders as Headers).get("authorization")).toBeNull();
     expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
   });
 
@@ -711,14 +782,15 @@ describe("@murphai/hosted-execution", () => {
     expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
   });
 
-  it("keeps direct hosted web-control client resolution strict about authorization tokens", () => {
-    expect(() =>
-      resolveHostedExecutionAiUsageClient({
-        baseUrl: "https://join.example.test",
-        boundUserId: "member_123",
-        internalToken: "   ",
-      }),
-    ).toThrow(/authorization token must be configured/u);
+  it("does not resolve removed direct hosted-web runtime or usage clients", () => {
+    expect(resolveHostedExecutionDeviceSyncRuntimeClient({
+      baseUrl: "https://join.example.test",
+      boundUserId: "member_123",
+    })).toBeNull();
+    expect(resolveHostedExecutionAiUsageClient({
+      baseUrl: "https://join.example.test",
+      boundUserId: "member_123",
+    })).toBeNull();
   });
 
   it("builds the shared hosted device connect-link route path", () => {
