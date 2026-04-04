@@ -4,6 +4,7 @@ import { parseHostedExecutionBundleRef as parseRuntimeHostedExecutionBundleRef }
 import type {
   HostedExecutionAssistantCronTickEvent,
   HostedExecutionBundleRef,
+  HostedExecutionDeviceSyncConnectLinkResponse,
   HostedExecutionDeviceSyncJobHint,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
   HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot,
@@ -279,6 +280,28 @@ export function parseHostedExecutionSharePackResponse(value: unknown): HostedExe
   return {
     pack: assertContract(sharePackSchema, record.pack, "share pack"),
     shareId: requireString(record.shareId, "Hosted execution share pack response shareId"),
+  };
+}
+
+export function parseHostedExecutionDeviceSyncConnectLinkResponse(
+  value: unknown,
+): HostedExecutionDeviceSyncConnectLinkResponse {
+  const record = requireObject(value, "Hosted device-sync connect link response");
+
+  return {
+    authorizationUrl: requireString(
+      record.authorizationUrl,
+      "Hosted device-sync connect link response authorizationUrl",
+    ),
+    expiresAt: requireString(
+      record.expiresAt,
+      "Hosted device-sync connect link response expiresAt",
+    ),
+    provider: requireString(record.provider, "Hosted device-sync connect link response provider"),
+    providerLabel: requireString(
+      record.providerLabel,
+      "Hosted device-sync connect link response providerLabel",
+    ),
   };
 }
 

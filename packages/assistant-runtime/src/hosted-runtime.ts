@@ -13,6 +13,7 @@ import type {
 } from "@murphai/hosted-execution";
 import {
   emitHostedExecutionStructuredLog,
+  resolveHostedExecutionDeviceSyncConnectLinkClient,
 } from "@murphai/hosted-execution";
 import {
   HostedAssistantConfigurationError,
@@ -104,6 +105,12 @@ export async function runHostedAssistantRuntimeJobInProcess(
     };
     const executionContext: AssistantExecutionContext = {
       hosted: {
+        issueDeviceConnectLink: createHostedDeviceConnectLinkIssuer({
+          boundUserId: input.request.dispatch.event.userId,
+          fetchImpl: internalWorkerFetch,
+          timeoutMs: runtime.commitTimeoutMs,
+          webControlPlane: runtime.webControlPlane,
+        }),
         memberId: input.request.dispatch.event.userId,
         userEnvKeys: Object.keys(runtime.userEnv),
       },
@@ -203,6 +210,33 @@ export async function runHostedAssistantRuntimeJobInProcess(
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
   }
+}
+
+function createHostedDeviceConnectLinkIssuer(input: {
+  boundUserId: string;
+  fetchImpl: typeof fetch;
+  timeoutMs: number | null;
+  webControlPlane: NonNullable<ReturnType<typeof normalizeHostedAssistantRuntimeConfig>["webControlPlane"]>;
+}) {
+  return async ({ provider }: { provider: string }) => {
+    const client = resolveHostedExecutionDeviceSyncConnectLinkClient({
+      baseUrl: input.webControlPlane.deviceSyncRuntimeBaseUrl,
+      boundUserId: input.boundUserId,
+      fetchImpl: input.fetchImpl,
+      timeoutMs: input.timeoutMs,
+    });
+
+    if (!client) {
+      throw new HostedAssistantConfigurationError(
+        "HOSTED_ASSISTANT_CONFIG_INVALID",
+        "Hosted device connect links are unavailable because the device-sync control plane is not configured.",
+      );
+    }
+
+    return client.createConnectLink({
+      provider,
+    });
+  };
 }
 
 export async function runHostedAssistantRuntimeJobIsolated(

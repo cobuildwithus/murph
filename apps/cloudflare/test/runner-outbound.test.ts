@@ -130,6 +130,52 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("proxies hosted device connect-link requests through hosted web with the bound user header", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      authorizationUrl: "https://provider.example.test/oauth/start",
+      expiresAt: "2026-04-04T12:00:00.000Z",
+      provider: "whoop",
+      providerLabel: "WHOOP",
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://device-sync.worker/api/internal/device-sync/providers/whoop/connect-link", {
+        headers: createRunnerProxyHeaders(),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_EXECUTION_INTERNAL_TOKENS: "worker-control-token",
+        HOSTED_WEB_BASE_URL: "https://web.example.test/app",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      authorizationUrl: "https://provider.example.test/oauth/start",
+      expiresAt: "2026-04-04T12:00:00.000Z",
+      provider: "whoop",
+      providerLabel: "WHOOP",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://web.example.test/app/api/internal/device-sync/providers/whoop/connect-link",
+      expect.objectContaining({
+        headers: expect.any(Headers),
+        method: "POST",
+      }),
+    );
+    const requestHeaders = fetchMock.mock.calls[0]?.[1]?.headers;
+    expect((requestHeaders as Headers).get("authorization")).toBe("Bearer worker-control-token");
+    expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
+  });
+
   it("returns 404 when a share pack has not been published for the bound user", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
       headers: {

@@ -11,6 +11,7 @@ import {
   DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
   HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
   HOSTED_EXECUTION_CALLBACK_HOSTS,
+  buildHostedExecutionDeviceSyncConnectLinkPath,
   buildHostedExecutionDispatchRef,
   buildHostedExecutionOutboxPayload,
   buildHostedExecutionAssistantCronTickDispatch,
@@ -28,6 +29,7 @@ import {
   buildHostedExecutionUserStatusPath,
   createHostedExecutionControlClient,
   createHostedExecutionDispatchClient,
+  createHostedExecutionServerDeviceSyncConnectLinkClient,
   createHostedExecutionServerAiUsageClient,
   createHostedExecutionSignature,
   createHostedExecutionSignatureHeaders,
@@ -54,6 +56,7 @@ import {
   parseHostedExecutionUserStatus,
   resolveHostedDeviceSyncWakeContext,
   resolveHostedExecutionAiUsageClient,
+  resolveHostedExecutionDeviceSyncConnectLinkClient,
   resolveHostedExecutionDeviceSyncRuntimeClient,
   resolveHostedExecutionDispatchLifecycle,
   resolveHostedExecutionDispatchOutcomeState,
@@ -621,6 +624,98 @@ describe("@murphai/hosted-execution", () => {
     expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
   });
 
+  it("creates hosted device connect links through the shared hosted web-control client", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        authorizationUrl: "https://provider.example.test/oauth/start",
+        expiresAt: "2026-04-04T12:00:00.000Z",
+        provider: "whoop",
+        providerLabel: "WHOOP",
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      }));
+    global.fetch = fetchMock;
+    const client = createHostedExecutionServerDeviceSyncConnectLinkClient({
+      baseUrl: "https://join.example.test",
+      boundUserId: "member_123",
+      internalToken: "internal-token",
+      timeoutMs: 10_000,
+    });
+
+    await expect(
+      client.createConnectLink({
+        provider: "whoop",
+      }),
+    ).resolves.toEqual({
+      authorizationUrl: "https://provider.example.test/oauth/start",
+      expiresAt: "2026-04-04T12:00:00.000Z",
+      provider: "whoop",
+      providerLabel: "WHOOP",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://join.example.test/api/internal/device-sync/providers/whoop/connect-link",
+      expect.objectContaining({
+        headers: expect.any(Headers),
+        method: "POST",
+      }),
+    );
+    const requestHeaders = fetchMock.mock.calls[0]?.[1]?.headers;
+    expect((requestHeaders as Headers).get("authorization")).toBe("Bearer internal-token");
+    expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
+  });
+
+  it("resolves proxy device connect-link clients from worker proxy urls without requiring server auth", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        authorizationUrl: "https://provider.example.test/oauth/start",
+        expiresAt: "2026-04-04T12:00:00.000Z",
+        provider: "whoop",
+        providerLabel: "WHOOP",
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      }));
+    global.fetch = fetchMock;
+    const client = resolveHostedExecutionDeviceSyncConnectLinkClient({
+      baseUrl: "http://device-sync.worker",
+      boundUserId: "member_123",
+      timeoutMs: 10_000,
+    });
+
+    expect(client).not.toBeNull();
+    if (!client) {
+      throw new Error("Expected a device-sync connect-link client.");
+    }
+
+    await expect(
+      client.createConnectLink({
+        provider: "whoop",
+      }),
+    ).resolves.toEqual({
+      authorizationUrl: "https://provider.example.test/oauth/start",
+      expiresAt: "2026-04-04T12:00:00.000Z",
+      provider: "whoop",
+      providerLabel: "WHOOP",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://device-sync.worker/api/internal/device-sync/providers/whoop/connect-link",
+      expect.objectContaining({
+        headers: expect.any(Headers),
+        method: "POST",
+      }),
+    );
+    const requestHeaders = fetchMock.mock.calls[0]?.[1]?.headers;
+    expect((requestHeaders as Headers).get("authorization")).toBeNull();
+    expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
+  });
+
   it("keeps direct hosted web-control client resolution strict about authorization tokens", () => {
     expect(() =>
       resolveHostedExecutionAiUsageClient({
@@ -629,6 +724,12 @@ describe("@murphai/hosted-execution", () => {
         internalToken: "   ",
       }),
     ).toThrow(/authorization token must be configured/u);
+  });
+
+  it("builds the shared hosted device connect-link route path", () => {
+    expect(buildHostedExecutionDeviceSyncConnectLinkPath("whoop")).toBe(
+      "/api/internal/device-sync/providers/whoop/connect-link",
+    );
   });
 
   it("exports the shared hosted callback hosts and default callback base urls", () => {

@@ -1,4 +1,5 @@
 import type {
+  HostedExecutionDeviceSyncConnectLinkResponse,
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
   HostedExecutionDeviceSyncRuntimeSnapshotRequest,
@@ -10,6 +11,7 @@ import { HOSTED_EXECUTION_USER_ID_HEADER } from "./contracts.ts";
 import { HOSTED_EXECUTION_PROXY_HOSTS } from "./callback-hosts.ts";
 import { normalizeHostedExecutionBaseUrl } from "./env.ts";
 import {
+  parseHostedExecutionDeviceSyncConnectLinkResponse,
   parseHostedExecutionDeviceSyncRuntimeApplyResponse,
   parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
   parseHostedExecutionSharePackResponse,
@@ -18,6 +20,7 @@ import {
   HOSTED_EXECUTION_AI_USAGE_RECORD_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
+  buildHostedExecutionDeviceSyncConnectLinkPath,
   buildHostedExecutionSharePayloadPath,
 } from "./routes.ts";
 
@@ -61,6 +64,15 @@ export interface HostedExecutionProxyDeviceSyncRuntimeClient {
 
 export interface HostedExecutionServerDeviceSyncRuntimeClient
   extends HostedExecutionProxyDeviceSyncRuntimeClient {}
+
+export interface HostedExecutionProxyDeviceSyncConnectLinkClient {
+  createConnectLink(input: {
+    provider: string;
+  }): Promise<HostedExecutionDeviceSyncConnectLinkResponse>;
+}
+
+export interface HostedExecutionServerDeviceSyncConnectLinkClient
+  extends HostedExecutionProxyDeviceSyncConnectLinkClient {}
 
 export interface HostedExecutionProxySharePackClient {
   fetchSharePack(share: HostedExecutionShareReference): Promise<HostedExecutionSharePackResponse>;
@@ -107,6 +119,23 @@ export function createHostedExecutionProxyDeviceSyncRuntimeClient(input: {
   );
 }
 
+export function createHostedExecutionProxyDeviceSyncConnectLinkClient(input: {
+  baseUrl: string;
+  boundUserId: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number | null;
+}): HostedExecutionProxyDeviceSyncConnectLinkClient {
+  return buildHostedExecutionDeviceSyncConnectLinkClient(
+    createHostedExecutionProxyRequester({
+      baseUrl: input.baseUrl,
+      boundUserId: input.boundUserId,
+      fetchImpl: input.fetchImpl,
+      proxyHost: HOSTED_EXECUTION_PROXY_HOSTS.deviceSync,
+      timeoutMs: input.timeoutMs ?? null,
+    }),
+  );
+}
+
 export function createHostedExecutionServerDeviceSyncRuntimeClient(input: {
   baseUrl: string;
   boundUserId: string;
@@ -123,6 +152,24 @@ export function createHostedExecutionServerDeviceSyncRuntimeClient(input: {
       timeoutMs: input.timeoutMs ?? null,
     }),
     input.boundUserId,
+  );
+}
+
+export function createHostedExecutionServerDeviceSyncConnectLinkClient(input: {
+  baseUrl: string;
+  boundUserId: string;
+  fetchImpl?: typeof fetch;
+  internalToken: string;
+  timeoutMs?: number | null;
+}): HostedExecutionServerDeviceSyncConnectLinkClient {
+  return buildHostedExecutionDeviceSyncConnectLinkClient(
+    createHostedExecutionServerRequester({
+      authorizationToken: input.internalToken,
+      baseUrl: input.baseUrl,
+      boundUserId: input.boundUserId,
+      fetchImpl: input.fetchImpl,
+      timeoutMs: input.timeoutMs ?? null,
+    }),
   );
 }
 
@@ -144,6 +191,29 @@ export function resolveHostedExecutionDeviceSyncRuntimeClient(input: {
   });
 
   return requester ? buildHostedExecutionDeviceSyncRuntimeClient(requester, input.boundUserId) : null;
+}
+
+export function resolveHostedExecutionDeviceSyncConnectLinkClient(input: {
+  baseUrl: string | null | undefined;
+  boundUserId: string;
+  fetchImpl?: typeof fetch;
+  internalToken?: string | null;
+  timeoutMs?: number | null;
+}):
+  | HostedExecutionProxyDeviceSyncConnectLinkClient
+  | HostedExecutionServerDeviceSyncConnectLinkClient
+  | null {
+  const requester = resolveHostedExecutionUserBoundRequester({
+    authorizationToken: input.internalToken,
+    baseUrl: input.baseUrl,
+    boundUserId: input.boundUserId,
+    fetchImpl: input.fetchImpl,
+    isProxyBaseUrl: isHostedExecutionDeviceSyncProxyBaseUrl,
+    proxyHost: HOSTED_EXECUTION_PROXY_HOSTS.deviceSync,
+    timeoutMs: input.timeoutMs,
+  });
+
+  return requester ? buildHostedExecutionDeviceSyncConnectLinkClient(requester) : null;
 }
 
 export function createHostedExecutionProxySharePackClient(input: {
@@ -298,6 +368,21 @@ function buildHostedExecutionDeviceSyncRuntimeClient(
         method: "POST",
         parse: parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
         path: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
+      });
+    },
+  };
+}
+
+function buildHostedExecutionDeviceSyncConnectLinkClient(
+  requester: HostedExecutionUserBoundWebControlPlaneRequester,
+): HostedExecutionProxyDeviceSyncConnectLinkClient {
+  return {
+    createConnectLink(input) {
+      return requester.requestJson({
+        label: "Hosted device-sync connect link",
+        method: "POST",
+        parse: parseHostedExecutionDeviceSyncConnectLinkResponse,
+        path: buildHostedExecutionDeviceSyncConnectLinkPath(input.provider),
       });
     },
   };
