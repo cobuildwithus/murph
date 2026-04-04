@@ -234,6 +234,10 @@
       "types": "./dist/health-registry-command-metadata.d.ts",
       "default": "./dist/health-registry-command-metadata.js"
     },
+    "./knowledge": {
+      "types": "./dist/knowledge.d.ts",
+      "default": "./dist/knowledge.js"
+    },
     "./http-json-retry": {
       "types": "./dist/http-json-retry.d.ts",
       "default": "./dist/http-json-retry.js"

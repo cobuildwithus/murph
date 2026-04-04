@@ -10,6 +10,14 @@ import {
   assistantMemoryVisibleSectionValues,
 } from './assistant-cli-contracts.js'
 import {
+  getKnowledgePage,
+  lintKnowledgePages,
+  listKnowledgePages,
+  rebuildKnowledgeIndex,
+  searchKnowledgePages,
+  upsertKnowledgePage,
+} from './knowledge.js'
+import {
   getAssistantMemory,
   redactAssistantMemoryRecord,
   redactAssistantMemorySearchHit,
@@ -124,6 +132,9 @@ const assistantCronTargetMutationSchema = assistantCronDeliveryTargetSchema.exte
   job: z.string().min(1),
   resetContinuity: z.boolean().optional(),
 })
+const knowledgeMetadataTagSchema = z.string().min(1)
+const knowledgeSourcePathSchema = z.string().min(1)
+const knowledgeSlugSchema = z.string().min(1)
 const assistantToolTextReadDefaultMaxChars = 8_000
 const assistantToolTextReadMaxChars = 20_000
 const assistantToolTextReadChunkBytes = 4_096
@@ -353,6 +364,7 @@ function createAssistantRuntimeToolDefinitions(
   options: AssistantToolCatalogOptions = {},
 ) {
   const readOnlyTools = [
+    ...createAssistantKnowledgeReadToolDefinitions(input),
     defineAssistantTool({
       name: 'assistant.state.list',
       description:
@@ -584,6 +596,7 @@ function createAssistantRuntimeToolDefinitions(
 
   return [
     ...readOnlyTools,
+    ...createAssistantKnowledgeWriteToolDefinitions(input),
     defineAssistantTool({
       name: 'assistant.memory.file.append',
       description:
@@ -834,6 +847,137 @@ function createAssistantRuntimeToolDefinitions(
         (await loadAssistantCronTools()).runAssistantCronJobNow({
           vault: input.vault,
           job,
+        }),
+    }),
+  ]
+}
+
+function createAssistantKnowledgeReadToolDefinitions(
+  input: AssistantToolContext,
+) {
+  return [
+    defineAssistantTool({
+      name: 'assistant.knowledge.list',
+      description:
+        'List derived knowledge pages from Murph\'s non-canonical local wiki, optionally filtered by page type or status.',
+      inputSchema: z.object({
+        pageType: knowledgeMetadataTagSchema.optional(),
+        status: knowledgeMetadataTagSchema.optional(),
+      }),
+      inputExample: {
+        pageType: 'concept',
+      },
+      execute: async ({ pageType, status }) =>
+        await listKnowledgePages({
+          vault: input.vault,
+          pageType,
+          status,
+        }),
+    }),
+    defineAssistantTool({
+      name: 'assistant.knowledge.search',
+      description:
+        'Search the derived knowledge wiki by lexical match across titles, summaries, narrative body text, related slugs, and source paths.',
+      inputSchema: z.object({
+        query: z.string().min(1),
+        limit: z.number().int().positive().max(200).optional(),
+        pageType: knowledgeMetadataTagSchema.optional(),
+        status: knowledgeMetadataTagSchema.optional(),
+      }),
+      inputExample: {
+        query: 'sleep magnesium',
+        limit: 5,
+      },
+      execute: async ({ limit, pageType, query, status }) =>
+        await searchKnowledgePages({
+          vault: input.vault,
+          query,
+          limit,
+          pageType,
+          status,
+        }),
+    }),
+    defineAssistantTool({
+      name: 'assistant.knowledge.get',
+      description:
+        'Show one derived knowledge page by slug, including the normalized markdown and canonical metadata.',
+      inputSchema: z.object({
+        slug: knowledgeSlugSchema,
+      }),
+      inputExample: {
+        slug: 'sleep-quality',
+      },
+      execute: async ({ slug }) =>
+        await getKnowledgePage({
+          vault: input.vault,
+          slug,
+        }),
+    }),
+    defineAssistantTool({
+      name: 'assistant.knowledge.lint',
+      description:
+        'Run deterministic structural checks over derived knowledge pages, including parse failures, duplicate slugs, missing sources, and broken related links.',
+      inputSchema: z.object({}),
+      inputExample: {},
+      execute: async () =>
+        await lintKnowledgePages({
+          vault: input.vault,
+        }),
+    }),
+  ]
+}
+
+function createAssistantKnowledgeWriteToolDefinitions(
+  input: AssistantToolContext,
+) {
+  return [
+    defineAssistantTool({
+      name: 'assistant.knowledge.upsert',
+      description:
+        'Persist one assistant-authored derived knowledge page, normalize its frontmatter and generated sections, and rebuild the derived knowledge index.',
+      inputSchema: z.object({
+        body: z.string().min(1),
+        title: z.string().min(1).optional(),
+        slug: knowledgeSlugSchema.optional(),
+        pageType: knowledgeMetadataTagSchema.optional(),
+        status: knowledgeMetadataTagSchema.optional(),
+        sourcePaths: z.array(knowledgeSourcePathSchema).optional(),
+        relatedSlugs: z.array(knowledgeSlugSchema).optional(),
+      }),
+      inputExample: {
+        title: 'Sleep quality',
+        body: '# Sleep quality\n\nMagnesium may help sleep continuity.\n',
+        sourcePaths: ['research/2026/04/sleep-note.md'],
+      },
+      execute: async ({
+        body,
+        pageType,
+        relatedSlugs,
+        slug,
+        sourcePaths,
+        status,
+        title,
+      }) =>
+        await upsertKnowledgePage({
+          vault: input.vault,
+          body,
+          title,
+          slug,
+          pageType,
+          relatedSlugs,
+          sourcePaths,
+          status,
+        }),
+    }),
+    defineAssistantTool({
+      name: 'assistant.knowledge.rebuildIndex',
+      description:
+        'Rebuild the derived knowledge index markdown from the current saved pages.',
+      inputSchema: z.object({}),
+      inputExample: {},
+      execute: async () =>
+        await rebuildKnowledgeIndex({
+          vault: input.vault,
         }),
     }),
   ]

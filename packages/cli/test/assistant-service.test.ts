@@ -500,6 +500,12 @@ test('sendAssistantMessage treats null provider-option inputs as fallbacks to sa
   await mkdir(homeRoot, { recursive: true })
   await mkdir(vaultRoot, { recursive: true })
   await initializeVault({ vaultRoot })
+  await mkdir(path.join(vaultRoot, 'research', '2026', '03'), { recursive: true })
+  await writeFile(
+    path.join(vaultRoot, 'research', '2026', '03', 'sleep-note.md'),
+    '# Sleep note\n\nMagnesium seemed helpful.\n',
+    'utf8',
+  )
 
   const originalHome = process.env.HOME
   process.env.HOME = homeRoot
@@ -1834,6 +1840,12 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the full Mur
     assert.equal(toolCatalog?.hasTool('assistant.memory.file.write'), true)
     assert.equal(toolCatalog?.hasTool('assistant.memory.upsert'), false)
     assert.equal(toolCatalog?.hasTool('assistant.memory.forget'), false)
+    assert.equal(toolCatalog?.hasTool('assistant.knowledge.search'), true)
+    assert.equal(toolCatalog?.hasTool('assistant.knowledge.get'), true)
+    assert.equal(toolCatalog?.hasTool('assistant.knowledge.list'), true)
+    assert.equal(toolCatalog?.hasTool('assistant.knowledge.upsert'), true)
+    assert.equal(toolCatalog?.hasTool('assistant.knowledge.lint'), true)
+    assert.equal(toolCatalog?.hasTool('assistant.knowledge.rebuildIndex'), true)
     assert.equal(toolCatalog?.hasTool('assistant.cron.status'), true)
     assert.equal(toolCatalog?.hasTool('assistant.selfTarget.list'), true)
     assert.equal(toolCatalog?.hasTool('vault.show'), true)
@@ -1857,6 +1869,14 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the full Mur
     assert.match(
       providerCall?.systemPrompt ?? '',
       /Scheduled assistant automation tools are exposed in this session/u,
+    )
+    assert.match(
+      providerCall?.systemPrompt ?? '',
+      /assistant\.knowledge\.search/u,
+    )
+    assert.match(
+      providerCall?.systemPrompt ?? '',
+      /assistant\.knowledge\.upsert/u,
     )
 
     const toolResults = await toolCatalog!.executeCalls({

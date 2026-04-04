@@ -4,25 +4,25 @@ import {
   withBaseOptions,
 } from '@murphai/assistant-core/command-helpers'
 import {
+  getKnowledgePage,
+  lintKnowledgePages,
+  listKnowledgePages,
+  rebuildKnowledgeIndex,
+  searchKnowledgePages,
+  upsertKnowledgePage,
+} from '@murphai/assistant-core/knowledge'
+import {
   pathSchema,
   slugSchema,
 } from '@murphai/assistant-core/vault-cli-contracts'
 import {
-  knowledgeCompileResultSchema,
   knowledgeIndexRebuildResultSchema,
   knowledgeLintResultSchema,
   knowledgeListResultSchema,
   knowledgeSearchResultSchema,
   knowledgeShowResultSchema,
+  knowledgeUpsertResultSchema,
 } from '../knowledge-cli-contracts.js'
-import {
-  compileKnowledgePage,
-  lintKnowledgePages,
-  listKnowledgePages,
-  rebuildKnowledgeIndex,
-  searchKnowledgePages,
-  showKnowledgePage,
-} from '../knowledge-runtime.js'
 
 export function registerKnowledgeCommands(cli: Cli.Cli) {
   const knowledge = Cli.create('knowledge', {
@@ -30,20 +30,15 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
       'Compile and inspect Murph\'s non-canonical derived knowledge wiki under derived/knowledge/**.',
   })
 
-  knowledge.command('compile', {
+  knowledge.command('upsert', {
     description:
       'Persist one assistant-authored derived knowledge page from local vault context and rebuild the knowledge index.',
-    args: z.object({
-      prompt: z
-        .string()
-        .min(1)
-        .describe('What the knowledge page should explain, synthesize, or update.'),
-    }),
+    args: emptyArgsSchema,
     options: withBaseOptions({
       body: z
         .string()
         .min(1)
-        .describe('Assistant-authored markdown body for the page. Do not include YAML frontmatter; Murph normalizes the title heading and sources section.'),
+        .describe('Assistant-authored markdown body for the page. Do not include YAML frontmatter; Murph normalizes the heading plus generated related and sources sections.'),
       title: z
         .string()
         .min(1)
@@ -51,7 +46,7 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
         .describe('Optional page title override.'),
       slug: slugSchema
         .optional()
-        .describe('Optional stable page slug. Defaults to a slugified title/prompt.'),
+        .describe('Optional stable page slug. Defaults to a slugified title or H1 heading.'),
       pageType: z
         .string()
         .min(1)
@@ -62,20 +57,24 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
         .min(1)
         .optional()
         .describe('Optional page status such as active, draft, or archived.'),
+      relatedSlug: z
+        .array(slugSchema)
+        .optional()
+        .describe('Optional explicit related page slugs. Repeat --related-slug to add more; Murph also derives related slugs from body wikilinks.'),
       sourcePath: z
         .array(pathSchema)
         .optional()
-        .describe('Optional vault-relative paths, or absolute paths that still resolve inside the selected vault. Repeat --source-path to include multiple files. Derived/runtime paths such as derived/** and .runtime/** are rejected.'),
+        .describe('Optional vault-relative source file paths, or absolute source file paths that still resolve inside the selected vault. Repeat --source-path to include multiple files. Derived/runtime paths such as derived/** and .runtime/** are rejected.'),
     }),
-    output: knowledgeCompileResultSchema,
-    run({ args, options }) {
-      return compileKnowledgePage({
+    output: knowledgeUpsertResultSchema,
+    run({ options }) {
+      return upsertKnowledgePage({
         vault: options.vault,
         body: options.body,
-        prompt: args.prompt,
         title: options.title,
         slug: options.slug,
         pageType: options.pageType,
+        relatedSlugs: options.relatedSlug,
         status: options.status,
         sourcePaths: options.sourcePath,
       })
@@ -155,7 +154,7 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
     options: withBaseOptions(),
     output: knowledgeShowResultSchema,
     run({ args, options }) {
-      return showKnowledgePage({
+      return getKnowledgePage({
         vault: options.vault,
         slug: args.slug,
       })

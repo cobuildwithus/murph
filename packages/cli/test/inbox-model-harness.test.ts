@@ -740,6 +740,8 @@ test('createInboxRoutingAssistantToolCatalog excludes assistant runtime tools an
 
     assert.equal(catalog.hasTool('assistant.state.show'), false)
     assert.equal(catalog.hasTool('assistant.memory.search'), false)
+    assert.equal(catalog.hasTool('assistant.knowledge.search'), false)
+    assert.equal(catalog.hasTool('assistant.knowledge.upsert'), false)
     assert.equal(catalog.hasTool('assistant.cron.list'), false)
     assert.equal(catalog.hasTool('assistant.selfTarget.list'), false)
     assert.equal(catalog.hasTool('vault.fs.readText'), false)
@@ -1079,6 +1081,12 @@ test('createDefaultAssistantToolCatalog exposes assistant runtime, recipe, and f
 
   assert.equal(catalog.hasTool('assistant.state.show'), true)
   assert.equal(catalog.hasTool('assistant.memory.search'), true)
+  assert.equal(catalog.hasTool('assistant.knowledge.search'), true)
+  assert.equal(catalog.hasTool('assistant.knowledge.get'), true)
+  assert.equal(catalog.hasTool('assistant.knowledge.list'), true)
+  assert.equal(catalog.hasTool('assistant.knowledge.upsert'), true)
+  assert.equal(catalog.hasTool('assistant.knowledge.lint'), true)
+  assert.equal(catalog.hasTool('assistant.knowledge.rebuildIndex'), true)
   assert.equal(catalog.hasTool('assistant.cron.list'), true)
   assert.equal(catalog.hasTool('assistant.selfTarget.list'), true)
   assert.equal(catalog.hasTool('vault.fs.readText'), true)
@@ -1091,6 +1099,67 @@ test('createDefaultAssistantToolCatalog exposes assistant runtime, recipe, and f
   assert.equal(catalog.hasTool('vault.food.list'), true)
   assert.equal(catalog.hasTool('vault.food.upsert'), true)
   assert.equal(catalog.hasTool('vault.share.createLink'), true)
+})
+
+test('createDefaultAssistantToolCatalog can upsert and read derived knowledge pages directly', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-knowledge-tool-catalog-'))
+
+  try {
+    await initializeVault({ vaultRoot })
+    await mkdir(path.join(vaultRoot, 'research', '2026', '04'), { recursive: true })
+    await writeFile(
+      path.join(vaultRoot, 'research', '2026', '04', 'sleep-note.md'),
+      '# Sleep note\n\nMagnesium seemed helpful.\n',
+      'utf8',
+    )
+
+    const catalog = createDefaultAssistantToolCatalog({
+      vault: vaultRoot,
+      vaultServices: createStubVaultServices(),
+    })
+
+    const results = await catalog.executeCalls({
+      mode: 'apply',
+      calls: [
+        {
+          tool: 'assistant.knowledge.upsert',
+          input: {
+            title: 'Sleep quality',
+            body: '# Sleep quality\n\nMagnesium may help sleep continuity.\n\n## Related\n\n- [[magnesium]]\n',
+            sourcePaths: ['research/2026/04/sleep-note.md'],
+          },
+        },
+        {
+          tool: 'assistant.knowledge.get',
+          input: {
+            slug: 'sleep-quality',
+          },
+        },
+      ],
+    })
+
+    assert.deepEqual(
+      results.map((result) => result.status),
+      ['succeeded', 'succeeded'],
+    )
+    assert.match(
+      String((results[1]?.result as { page?: { markdown?: string } } | undefined)?.page?.markdown ?? ''),
+      /sourcePaths:/u,
+    )
+    assert.match(
+      String((results[1]?.result as { page?: { body?: string } } | undefined)?.page?.body ?? ''),
+      /## Sources/u,
+    )
+    assert.match(
+      await readFile(
+        path.join(vaultRoot, 'derived', 'knowledge', 'pages', 'sleep-quality.md'),
+        'utf8',
+      ),
+      /relatedSlugs:/u,
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
 })
 
 test('createDefaultAssistantToolCatalog exposes web.fetch only when explicitly enabled', () => {

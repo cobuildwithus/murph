@@ -62,27 +62,6 @@ export function extractKnowledgeRelatedSlugs(
   return orderedUniqueStrings(relatedSlugs)
 }
 
-export function extractKnowledgeSourcePaths(body: string): string[] {
-  const sectionMatch = /(?:^|\n)##\s+Sources\s*\n([\s\S]*?)(?=\n##\s+|$)/iu.exec(
-    String(body ?? ''),
-  )
-  if (!sectionMatch?.[1]) {
-    return []
-  }
-
-  const sourcePaths: string[] = []
-  for (const line of sectionMatch[1].split('\n')) {
-    const match = /^[-*]\s+`([^`]+)`\s*$/u.exec(line.trim())
-    if (!match?.[1]) {
-      continue
-    }
-
-    sourcePaths.push(match[1].trim())
-  }
-
-  return orderedUniqueStrings(sourcePaths)
-}
-
 export function extractKnowledgeFirstHeading(body: string): string | null {
   for (const line of body.split('\n')) {
     const match = /^#\s+(.+?)\s*$/u.exec(line.trim())

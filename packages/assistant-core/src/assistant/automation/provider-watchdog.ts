@@ -316,7 +316,7 @@ function matchAssistantAutoReplyLongRunningCommand(
     return null
   }
 
-  const cliCommandMatch = /(?:^|\s)(?:[^\s]+\/)?(?:vault-cli|murph)\s+(research|deepthink|knowledge\s+compile)(?:\s|$)/iu.exec(
+  const cliCommandMatch = /(?:^|\s)(?:[^\s]+\/)?(?:vault-cli|murph)\s+(research|deepthink|knowledge\s+upsert)(?:\s|$)/iu.exec(
     commandText,
   )
   if (cliCommandMatch) {
@@ -357,10 +357,10 @@ function matchAssistantAutoReplyLongRunningTool(
     }
   }
 
-  if (/\bknowledge\b/iu.test(toolText) && /\bcompile\b/iu.test(toolText)) {
+  if (/\bknowledge\b/iu.test(toolText) && /\bupsert\b/iu.test(toolText)) {
     return {
-      key: event.id ?? 'tool:knowledge-compile',
-      label: 'knowledge compile tool',
+      key: event.id ?? 'tool:knowledge-upsert',
+      label: 'knowledge upsert tool',
     }
   }
 

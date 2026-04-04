@@ -30,6 +30,7 @@ const preservedAssistantCoreLeafExports = [
   './device-daemon',
   './device-sync-client',
   './health-registry-command-metadata',
+  './knowledge',
   './http-json-retry',
   './inbox-app/types',
   './inbox-services/connectors',

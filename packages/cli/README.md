@@ -44,7 +44,7 @@ vault-cli inbox doctor
 For durable local synthesis that should keep adding up inside the vault, use the derived knowledge wiki commands:
 
 ```bash
-vault-cli knowledge compile "Summarize my current sleep notes" --body "# Sleep notes\n\nMagnesium looked helpful for sleep continuity.\n" --source-path research/2026/04/sleep-note.md
+vault-cli knowledge upsert --title "Sleep notes" --body "# Sleep notes\n\nMagnesium looked helpful for sleep continuity.\n" --source-path research/2026/04/sleep-note.md
 vault-cli knowledge search "sleep magnesium"
 vault-cli knowledge list
 vault-cli knowledge lint
@@ -54,7 +54,7 @@ vault-cli knowledge lint
 
 - a file-native health vault with canonical writes owned by `@murphai/core`
 - local assistant chat, automation, status, cron, and outbox commands
-- a non-canonical derived knowledge wiki you can compile and inspect under `derived/knowledge/**`
+- a non-canonical derived knowledge wiki you can upsert and inspect under `derived/knowledge/**`
 - inbox capture, review, backfill, and parser-driven attachment extraction
 - optional local device sync through `@murphai/device-syncd`
 - optional local assistant daemon support through `@murphai/assistantd`
