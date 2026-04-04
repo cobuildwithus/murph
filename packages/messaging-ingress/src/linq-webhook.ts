@@ -707,7 +707,7 @@ function parseCanonicalLinqMessageReceivedEventFromCanonicalData(
       from_handle: fromHandle,
       preferred_service: normalizeNullableString(data.preferred_service) ?? undefined,
       recipient_handle: recipientHandle,
-      recipient_phone: normalizeNullableString(data.recipient_phone) ?? normalizeNullableString(recipientHandle?.handle),
+      recipient_phone: normalizeNullableString(data.recipient_phone),
       received_at: receivedAt,
       is_from_me: isFromMe,
       sent_at: sentAt,
