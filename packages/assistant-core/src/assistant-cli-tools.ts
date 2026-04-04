@@ -2096,7 +2096,29 @@ function createCanonicalVaultWriteToolDefinitions(
 function createOutwardSideEffectToolDefinitions(
   input: AssistantToolContext,
 ) {
-  return [
+  const tools: AssistantToolDefinition[] = []
+
+  if (input.executionContext?.hosted?.issueDeviceConnectLink) {
+    tools.push(
+      defineAssistantTool({
+        name: 'murph.device.connect',
+        description:
+          'Create a hosted wearable connection link for the requested provider and return a clickable authorization URL for the user. Use this when the user wants help connecting WHOOP, Oura, Garmin, or another hosted wearable integration.',
+        inputSchema: z.object({
+          provider: z.string().min(1),
+        }),
+        inputExample: {
+          provider: 'whoop',
+        },
+        execute: ({ provider }) =>
+          input.executionContext!.hosted!.issueDeviceConnectLink!({
+            provider,
+          }),
+      }),
+    )
+  }
+
+  tools.push(
     defineAssistantTool({
       name: 'vault.share.createLink',
       description:
@@ -2149,7 +2171,9 @@ function createOutwardSideEffectToolDefinitions(
         })
       },
     }),
-  ]
+  )
+
+  return tools
 }
 
 function createHealthUpsertToolDefinitions(

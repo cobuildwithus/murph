@@ -1,3 +1,5 @@
+import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution";
+
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
 type HostedExecutionAcceptedRouteToken = "internal" | "scheduler" | "share";
@@ -55,6 +57,20 @@ export function requireHostedShareInternalToken(request: Request): void {
     acceptedToken: "share",
     request,
   });
+}
+
+export function requireHostedExecutionUserId(request: Request): string {
+  const userId = normalizeOptionalString(request.headers.get(HOSTED_EXECUTION_USER_ID_HEADER));
+
+  if (!userId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_EXECUTION_USER_ID_REQUIRED",
+      message: `${HOSTED_EXECUTION_USER_ID_HEADER} header is required for hosted execution user-bound routes.`,
+      httpStatus: 400,
+    });
+  }
+
+  return userId;
 }
 
 function readHostedExecutionAcceptedRouteTokens(kind: HostedExecutionAcceptedRouteToken): {

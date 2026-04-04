@@ -1,6 +1,20 @@
 import { normalizeNullableString } from './shared.js'
 
+export interface AssistantHostedDeviceConnectLink {
+  authorizationUrl: string
+  expiresAt: string
+  provider: string
+  providerLabel: string
+}
+
+export interface AssistantHostedDeviceConnectRequest {
+  provider: string
+}
+
 export interface AssistantHostedExecutionContext {
+  issueDeviceConnectLink?(
+    input: AssistantHostedDeviceConnectRequest,
+  ): Promise<AssistantHostedDeviceConnectLink>
   memberId: string
   userEnvKeys: readonly string[]
 }
@@ -22,6 +36,11 @@ export function normalizeAssistantExecutionContext(
 
   return {
     hosted: {
+      ...(typeof hosted?.issueDeviceConnectLink === 'function'
+        ? {
+            issueDeviceConnectLink: hosted.issueDeviceConnectLink,
+          }
+        : {}),
       memberId,
       userEnvKeys:
         hosted?.userEnvKeys

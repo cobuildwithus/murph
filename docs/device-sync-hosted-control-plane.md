@@ -249,8 +249,9 @@ Authenticated by a server-to-server token that is never exposed to the browser.
 
 - `POST /api/internal/device-sync/runtime/snapshot`
 - `POST /api/internal/device-sync/runtime/apply`
+- `POST /api/internal/device-sync/providers/:provider/connect-link`
 
-These routes let the Cloudflare-hosted runtime hydrate escrowed device-sync connections before a one-shot reconcile pass and then push status/token updates back into Postgres after the pass completes.
+These routes let the Cloudflare-hosted runtime hydrate escrowed device-sync connections before a one-shot reconcile pass, push status/token updates back into Postgres after the pass completes, and mint short-lived hosted wearable OAuth links for assistant turns without exposing hosted-web bearer tokens inside the runner child.
 
 Current hosted agent-session behavior:
 - `POST /api/device-sync/agents/pair` creates a 24-hour bearer session.

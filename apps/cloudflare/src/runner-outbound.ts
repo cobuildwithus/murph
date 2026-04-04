@@ -5,6 +5,9 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
   HOSTED_EXECUTION_PROXY_HOSTS,
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
+  buildHostedExecutionDeviceSyncConnectLinkPath,
+  fetchHostedExecutionWebControlPlaneResponse,
+  normalizeHostedExecutionBaseUrl,
   parseHostedExecutionBundlePayloads,
   parseHostedExecutionBundleRefsRecord,
   parseHostedExecutionSideEffectRecord,
@@ -116,6 +119,7 @@ export async function handleRunnerOutboundRequest(
   if (url.hostname === HOSTED_EXECUTION_PROXY_HOSTS.deviceSync) {
     return handleRunnerDeviceSyncControlRequest({
       bucket: env.BUNDLES,
+      env,
       environment,
       request,
       url,
@@ -442,10 +446,27 @@ async function handleRunnerSideEffectRequest(input: {
 async function handleRunnerDeviceSyncControlRequest(input: {
   bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  env: RunnerOutboundEnvironmentSource;
   request: Request;
   url: URL;
   userId: string;
 }): Promise<Response> {
+  const connectLinkMatch = /^\/api\/internal\/device-sync\/providers\/(?<provider>[^/]+)\/connect-link$/u.exec(
+    input.url.pathname,
+  );
+
+  if (connectLinkMatch?.groups) {
+    if (input.request.method !== "POST") {
+      return methodNotAllowed();
+    }
+
+    return forwardRunnerDeviceSyncConnectLinkRequest({
+      env: input.env,
+      provider: decodeRouteParam(connectLinkMatch.groups.provider),
+      userId: input.userId,
+    });
+  }
+
   if (input.request.method !== "POST") {
     return methodNotAllowed();
   }
@@ -482,6 +503,30 @@ async function handleRunnerDeviceSyncControlRequest(input: {
       parseHostedDeviceSyncRuntimeApplyRequest(await readJsonObject(input.request), input.userId),
     ),
   );
+}
+
+async function forwardRunnerDeviceSyncConnectLinkRequest(input: {
+  env: RunnerOutboundEnvironmentSource;
+  provider: string;
+  userId: string;
+}): Promise<Response> {
+  const config = requireRunnerOutboundHostedWebControlConfig(input.env);
+  const response = await fetchHostedExecutionWebControlPlaneResponse({
+    authorizationToken: config.internalToken,
+    baseUrl: config.baseUrl,
+    boundUserId: input.userId,
+    method: "POST",
+    path: buildHostedExecutionDeviceSyncConnectLinkPath(input.provider),
+    timeoutMs: null,
+  });
+
+  return new Response(await response.text(), {
+    headers: {
+      "Cache-Control": response.headers.get("Cache-Control") ?? "no-store",
+      "content-type": response.headers.get("content-type") ?? "application/json; charset=utf-8",
+    },
+    status: response.status,
+  });
 }
 
 
@@ -587,6 +632,43 @@ async function resolveRunnerOutboundUserRunnerStub(
     }
   }
   return stub;
+}
+
+function requireRunnerOutboundHostedWebControlConfig(
+  env: RunnerOutboundEnvironmentSource,
+): { baseUrl: string; internalToken: string } {
+  const baseUrl = normalizeHostedExecutionBaseUrl(
+    typeof env.HOSTED_WEB_BASE_URL === "string" ? env.HOSTED_WEB_BASE_URL : null,
+  );
+  const internalToken = readFirstEnvToken(env.HOSTED_EXECUTION_INTERNAL_TOKENS);
+
+  if (!baseUrl) {
+    throw new TypeError("HOSTED_WEB_BASE_URL must be configured for hosted device connect-link proxying.");
+  }
+
+  if (!internalToken) {
+    throw new TypeError(
+      "HOSTED_EXECUTION_INTERNAL_TOKENS must be configured for hosted device connect-link proxying.",
+    );
+  }
+
+  return {
+    baseUrl,
+    internalToken,
+  };
+}
+
+function readFirstEnvToken(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const token = value
+    .split(",")
+    .map((entry) => entry.trim())
+    .find(Boolean);
+
+  return token ?? null;
 }
 
 function parseHostedExecutionCommitRequest(payload: Record<string, unknown>): HostedExecutionCommitPayload & {

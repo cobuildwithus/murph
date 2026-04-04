@@ -3,6 +3,9 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH =
   "/api/internal/device-sync/runtime/snapshot";
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH =
   "/api/internal/device-sync/runtime/apply";
+export function buildHostedExecutionDeviceSyncConnectLinkPath(provider: string): string {
+  return `/api/internal/device-sync/providers/${encodeURIComponent(provider)}/connect-link`;
+}
 export const HOSTED_EXECUTION_AI_USAGE_RECORD_PATH =
   "/api/internal/hosted-execution/usage/record";
 

@@ -217,6 +217,13 @@ export interface HostedExecutionSharePackResponse {
   shareId: string;
 }
 
+export interface HostedExecutionDeviceSyncConnectLinkResponse {
+  authorizationUrl: string;
+  expiresAt: string;
+  provider: string;
+  providerLabel: string;
+}
+
 export interface HostedExecutionDeviceSyncRuntimeTokenBundle {
   accessToken: string;
   accessTokenExpiresAt: string | null;
