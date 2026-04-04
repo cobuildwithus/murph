@@ -1,4 +1,8 @@
-import { assistantAskResultSchema, type AssistantAskResult, type AssistantSession } from '../assistant-cli-contracts.js'
+import {
+  assistantAskResultSchema,
+  type AssistantAskResult,
+  type AssistantSession,
+} from '../assistant-cli-contracts.js'
 import { normalizeAssistantSessionSnapshot } from './provider-state.js'
 import { redactAssistantSessionForDisplay } from './redaction.js'
 
@@ -8,11 +12,13 @@ export function serializeAssistantSessionForResult(
   return redactAssistantSessionForDisplay(normalizeAssistantSessionSnapshot(session))
 }
 
-export function normalizeAssistantAskResultForReturn<T extends AssistantAskResult>(
-  result: T,
-): T {
+export function normalizeAssistantAskResultForReturn(
+  result: Omit<AssistantAskResult, 'session'> & {
+    session: AssistantSession
+  },
+): AssistantAskResult {
   return assistantAskResultSchema.parse({
     ...result,
     session: serializeAssistantSessionForResult(result.session),
-  }) as T
+  })
 }

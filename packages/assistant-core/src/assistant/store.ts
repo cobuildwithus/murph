@@ -1,7 +1,7 @@
 import { readdir } from 'node:fs/promises'
 import {
   assistantAutomationStateSchema,
-  assistantSessionSchema,
+  parseAssistantSessionRecord,
   assistantTranscriptEntrySchema,
   type AssistantAutomationState,
   type AssistantSession,
@@ -45,6 +45,7 @@ import {
   resolveAssistantStatePaths,
   type AssistantStatePaths,
 } from './store/paths.js'
+import { createAssistantModelTarget } from '../assistant-backend.js'
 export {
   redactAssistantDisplayPath,
   resolveAssistantAliasKey,
@@ -65,7 +66,7 @@ import type {
   AssistantTranscriptEntryInput,
 } from './store/types.js'
 
-const ASSISTANT_STATE_SCHEMA = 'murph.assistant-session.v3'
+const ASSISTANT_STATE_SCHEMA = 'murph.assistant-session.v4'
 
 export function isAssistantSessionNotFoundError(error: unknown): boolean {
   return Boolean(
@@ -157,12 +158,23 @@ export async function resolveAssistantSession(
 
     const now = resolveTimestamp(input.now)
     const providerOptions = normalizeProviderOptions(input)
-    const session = assistantSessionSchema.parse({
+    const target =
+      input.target ??
+      createAssistantModelTarget({
+        provider: input.provider,
+        ...providerOptions,
+      })
+    if (!target) {
+      throw new VaultCliError(
+        'ASSISTANT_TARGET_REQUIRED',
+        'Assistant session creation requires an explicit assistant target.',
+      )
+    }
+    const session = parseAssistantSessionRecord({
       schema: ASSISTANT_STATE_SCHEMA,
       sessionId: createAssistantSessionId(),
-      provider: input.provider ?? 'codex-cli',
-      providerOptions,
-      providerBinding: null,
+      target,
+      resumeState: null,
       alias: manualAlias,
       binding: createAssistantBinding(bindingInputFromLocator(input)),
       createdAt: now,

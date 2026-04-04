@@ -12,7 +12,7 @@ import {
 } from '../assistant-cli-tools.js'
 import {
   executeAssistantProviderTurnAttempt,
-  resolveAssistantProviderCapabilities,
+  resolveAssistantProviderExecutionCapabilities,
   type AssistantProviderAttemptMetadata,
   type AssistantProviderTurnExecutionResult,
 } from '../assistant-provider.js'
@@ -37,16 +37,13 @@ import {
   resolveAssistantMemoryStoragePaths,
 } from './memory.js'
 import {
-  buildRecoveredAssistantProviderBindingSeed as buildRecoveredProviderBindingSeed,
-  resolveAssistantProviderResumeKey as readAssistantProviderResumeKey,
-  resolveAssistantRouteResumeBinding as resolveAssistantResumeBinding,
-} from './provider-binding.js'
-import {
   attachRecoveredAssistantSession,
   recoverAssistantSessionAfterProviderFailure,
 } from './provider-turn-recovery.js'
 import {
   readAssistantProviderBinding,
+  readAssistantProviderResumeRouteId,
+  readAssistantProviderSessionId,
 } from './provider-state.js'
 import {
   listAssistantTranscriptEntries,
@@ -296,18 +293,12 @@ async function resolveAssistantRouteTurnPlan(input: {
   toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
 }): Promise<AssistantRouteTurnPlan> {
   const workingDirectory = input.sharedPlan.requestedWorkingDirectory
-  const activeProviderBinding = readAssistantProviderBinding(input.session)
-  const resumeProviderBinding = resolveAssistantResumeBinding({
-    provider: input.route.provider,
-    routeId: input.route.routeId,
-    sessionBinding: activeProviderBinding,
-  })
+  const sessionResumeRouteId = readAssistantProviderResumeRouteId(input.session)
   const resumeProviderSessionId =
-    resolveAssistantProviderCapabilities(input.route.provider).supportsNativeResume
-      ? readAssistantProviderResumeKey({
-          binding: resumeProviderBinding,
-          provider: input.route.provider,
-        })
+    resolveAssistantProviderExecutionCapabilities(input.route.provider)
+      .supportsNativeResume &&
+    sessionResumeRouteId === input.route.routeId
+      ? readAssistantProviderSessionId(input.session)
       : null
   const shouldInjectBootstrapContext = resumeProviderSessionId === null
   const resolvedChannel = input.input.channel ?? input.session.binding.channel
@@ -315,6 +306,9 @@ async function resolveAssistantRouteTurnPlan(input: {
     input.sharedPlan.firstTurnCheckInEligible &&
     shouldInjectBootstrapContext &&
     input.session.turnCount === 0
+  const providerCapabilities = resolveAssistantProviderExecutionCapabilities(
+    input.route.provider,
+  )
   const conversationMessages = removeTrailingCurrentUserPrompt(
     await loadAssistantConversationMessages({
       limit: 20,
@@ -325,7 +319,8 @@ async function resolveAssistantRouteTurnPlan(input: {
   )
   const assistantMemoryPaths = resolveAssistantMemoryStoragePaths(input.input.vault)
   const assistantCliExecutorAvailable =
-    input.route.provider === 'openai-compatible' && input.toolCatalog.hasTool('murph.cli.run')
+    providerCapabilities.supportsToolRuntime &&
+    input.toolCatalog.hasTool('murph.cli.run')
   const assistantHostedDeviceConnectAvailable = input.toolCatalog.hasTool('murph.device.connect')
   const assistantStateToolsAvailable = assistantCliExecutorAvailable
   const assistantMemoryRecallToolsAvailable = assistantCliExecutorAvailable
@@ -483,15 +478,8 @@ async function executeAssistantProviderAttempt(input: {
     }
   } catch (error) {
     const errorCode = readAssistantErrorCode(error)
-    const previousBinding = readAssistantProviderBinding(attemptPlan.session)
     const recoveredSession = await recoverAssistantSessionAfterProviderFailure({
       error,
-      provider: attemptPlan.route.provider,
-      providerOptions: attemptPlan.route.providerOptions,
-      providerBinding: buildRecoveredProviderBindingSeed({
-        provider: attemptPlan.route.provider,
-        providerOptions: attemptPlan.route.providerOptions,
-      }),
       routeId: attemptPlan.route.routeId,
       session: attemptPlan.session,
       vault: executionPlan.input.vault,
@@ -671,21 +659,22 @@ async function recordProviderAttemptStarted(input: {
 }
 
 async function recordProviderAttemptSucceeded(input: {
-  activityLabels: readonly string[]
+  activityLabels?: readonly string[]
   attemptCount: number
   route: ResolvedAssistantFailoverRoute
   turnId: string
   vault: string
 }): Promise<void> {
+  const activityLabels = input.activityLabels ?? []
   const metadata: Record<string, string> = {
     attempt: String(input.attemptCount),
     provider: input.route.provider,
     model: input.route.providerOptions.model ?? 'default',
     routeId: input.route.routeId,
   }
-  if (input.activityLabels.length > 0) {
-    metadata.activityCount = String(input.activityLabels.length)
-    metadata.activities = input.activityLabels.join(', ')
+  if (activityLabels.length > 0) {
+    metadata.activityCount = String(activityLabels.length)
+    metadata.activities = activityLabels.join(', ')
   }
 
   await appendAssistantTurnReceiptEvent({
@@ -698,7 +687,7 @@ async function recordProviderAttemptSucceeded(input: {
 }
 
 async function recordProviderAttemptFailed(input: {
-  activityLabels: readonly string[]
+  activityLabels?: readonly string[]
   attemptCount: number
   cooldownUntil: string | null
   detail: string
@@ -708,6 +697,7 @@ async function recordProviderAttemptFailed(input: {
   turnId: string
   vault: string
 }): Promise<void> {
+  const activityLabels = input.activityLabels ?? []
   const metadata: Record<string, string> = {
     attempt: String(input.attemptCount),
     provider: input.route.provider,
@@ -715,9 +705,9 @@ async function recordProviderAttemptFailed(input: {
     routeId: input.route.routeId,
     code: input.errorCode ?? 'unknown',
   }
-  if (input.activityLabels.length > 0) {
-    metadata.activityCount = String(input.activityLabels.length)
-    metadata.activities = input.activityLabels.join(', ')
+  if (activityLabels.length > 0) {
+    metadata.activityCount = String(activityLabels.length)
+    metadata.activities = activityLabels.join(', ')
   }
 
   await appendAssistantTurnReceiptEvent({

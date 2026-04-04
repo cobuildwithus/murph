@@ -1,13 +1,14 @@
-import { assistantBackendTargetToProviderConfigInput } from '../assistant-backend.js'
-import type { AssistantOperatorDefaults } from '../operator-config.js'
 import {
-  resolveAssistantBackendTarget,
-  resolveAssistantProviderDefaults,
-} from '../operator-config.js'
+  assistantBackendTargetToProviderConfigInput,
+  createAssistantModelTarget,
+  type AssistantModelTarget,
+} from '../assistant-backend.js'
+import type { AssistantOperatorDefaults } from '../operator-config.js'
+import { resolveAssistantBackendTarget } from '../operator-config.js'
+import { VaultCliError } from '../vault-cli-errors.js'
 import {
   compactAssistantProviderConfigInput,
   mergeAssistantProviderConfigs,
-  mergeAssistantProviderConfigsForProvider,
 } from './provider-config.js'
 import { resolveAssistantSession, type ResolveAssistantSessionInput } from './store.js'
 import type {
@@ -18,20 +19,17 @@ import type {
 export function buildResolveAssistantSessionInput(
   input: AssistantSessionResolutionFields,
   defaults: AssistantOperatorDefaults | null,
+  boundaryDefaultTarget: AssistantModelTarget | null = null,
 ): ResolveAssistantSessionInput {
-  const defaultProviderConfig = resolveAssistantBackendTarget(defaults)
-  const inferredProvider = mergeAssistantProviderConfigs(
-    defaultProviderConfig
-      ? assistantBackendTargetToProviderConfigInput(defaultProviderConfig)
-      : null,
+  const target = resolveAssistantSessionTarget({
+    boundaryDefaultTarget,
+    defaults,
     input,
-  ).provider
-  const providerDefaults = resolveAssistantProviderDefaults(defaults, inferredProvider)
-  const providerConfig = mergeAssistantProviderConfigsForProvider(
-    inferredProvider,
-    providerDefaults ? { provider: inferredProvider, ...providerDefaults } : null,
+  })
+  const providerConfig = mergeAssistantProviderConfigs(
+    assistantBackendTargetToProviderConfigInput(target),
     compactAssistantProviderConfigInput({
-      provider: inferredProvider,
+      provider: target.adapter,
       ...input,
     }),
   )
@@ -93,6 +91,7 @@ export function buildResolveAssistantSessionInput(
     ...(participantId !== undefined ? { actorId: participantId } : {}),
     ...(threadId !== undefined ? { threadId } : {}),
     ...(threadIsDirect !== undefined ? { threadIsDirect } : {}),
+    target,
     provider: providerConfig.provider,
     model: providerConfig.model,
     sandbox: defaultSandbox,
@@ -171,11 +170,53 @@ function readAssistantSessionResolutionDirectness(
 }
 
 export async function resolveAssistantSessionForMessage(input: {
+  boundaryDefaultTarget?: AssistantModelTarget | null
   defaults: AssistantOperatorDefaults | null
   message: AssistantMessageInput
 }) {
   return resolveAssistantSession(buildResolveAssistantSessionInput(
     input.message,
     input.defaults,
+    input.boundaryDefaultTarget ?? null,
   ))
+}
+
+export function resolveAssistantSessionTarget(input: {
+  boundaryDefaultTarget?: AssistantModelTarget | null
+  defaults: AssistantOperatorDefaults | null
+  input: AssistantSessionResolutionFields
+}): AssistantModelTarget {
+  const boundaryDefaultTarget = resolveAssistantBoundaryDefaultTarget(
+    input.boundaryDefaultTarget ?? null,
+    input.defaults,
+  )
+  const target = createAssistantModelTarget(
+    mergeAssistantProviderConfigs(
+      boundaryDefaultTarget
+        ? assistantBackendTargetToProviderConfigInput(boundaryDefaultTarget)
+        : null,
+      compactAssistantProviderConfigInput(input.input),
+    ),
+  )
+
+  if (!target) {
+    throw new VaultCliError(
+      'ASSISTANT_TARGET_REQUIRED',
+      'Assistant execution requires an explicit target or a boundary default.',
+    )
+  }
+
+  return target
+}
+
+function resolveAssistantBoundaryDefaultTarget(
+  boundaryDefaultTarget: AssistantModelTarget | null,
+  defaults: AssistantOperatorDefaults | null,
+): AssistantModelTarget | null {
+  const configuredTarget = resolveAssistantBackendTarget(defaults)
+  if (configuredTarget) {
+    return configuredTarget
+  }
+
+  return boundaryDefaultTarget
 }

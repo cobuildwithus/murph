@@ -141,8 +141,19 @@ function createStubAssistantResult(vault: string): AssistantAskResult {
     prompt: 'Reply to the capture.',
     response: 'Acknowledged.',
     session: {
-      schema: 'murph.assistant-session.v3',
+      schema: 'murph.assistant-session.v4',
       sessionId: 'asst_session_1',
+      target: {
+        adapter: 'codex-cli',
+        approvalPolicy: null,
+        codexCommand: null,
+        model: 'gpt-5.4',
+        oss: false,
+        profile: null,
+        reasoningEffort: null,
+        sandbox: null,
+      },
+      resumeState: null,
       provider: 'codex-cli',
       providerOptions: {
         model: 'gpt-5.4',

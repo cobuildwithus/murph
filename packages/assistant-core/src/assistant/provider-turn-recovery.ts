@@ -1,20 +1,16 @@
 import {
-  assistantProviderBindingSchema,
-  type AssistantChatProvider,
-  type AssistantProviderBinding,
   type AssistantSession,
 } from '../assistant-cli-contracts.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import {
   normalizeAssistantSessionSnapshot,
+  readAssistantProviderSessionId,
   writeAssistantProviderResumeRouteId,
+  writeAssistantSessionProviderSessionId,
 } from './provider-state.js'
 
 export async function recoverAssistantSessionAfterProviderFailure(input: {
   error: unknown
-  provider: AssistantChatProvider
-  providerOptions: AssistantSession['providerOptions']
-  providerBinding: NonNullable<AssistantSession['providerBinding']>
   routeId: string
   session: AssistantSession
   vault: string
@@ -24,29 +20,22 @@ export async function recoverAssistantSessionAfterProviderFailure(input: {
   }
 
   const providerSessionId = extractRecoveredProviderSessionId(input.error)
-  const currentProviderBinding = input.session.providerBinding
   if (
     !providerSessionId ||
-    (currentProviderBinding?.provider === input.provider &&
-      currentProviderBinding.providerSessionId === providerSessionId)
+    readAssistantProviderSessionId(input.session) === providerSessionId
   ) {
     return null
   }
 
   try {
     const recoveredAt = new Date().toISOString()
-    const recoveredProviderBinding = assistantProviderBindingSchema.parse(
-      buildRecoveredProviderBinding({
-        provider: input.provider,
-        providerBinding: input.providerBinding,
-        providerOptions: input.providerOptions,
-        providerSessionId,
-        routeId: input.routeId,
-      }),
-    )
     const recoveredSession = normalizeAssistantSessionSnapshot({
       ...input.session,
-      providerBinding: recoveredProviderBinding,
+      resumeState: buildRecoveredProviderResumeState({
+        providerSessionId,
+        resumeState: input.session.resumeState,
+        routeId: input.routeId,
+      }),
       updatedAt: recoveredAt,
     })
     return await createAssistantRuntimeStateService(input.vault).sessions.save(
@@ -132,24 +121,16 @@ function shouldRecoverAssistantSessionAfterProviderFailure(
   )
 }
 
-function buildRecoveredProviderBinding(input: {
-  provider: AssistantChatProvider
-  providerBinding: NonNullable<AssistantSession['providerBinding']>
-  providerOptions: AssistantSession['providerOptions']
+function buildRecoveredProviderResumeState(input: {
   providerSessionId: string
+  resumeState: AssistantSession['resumeState']
   routeId: string
-}): AssistantProviderBinding {
-  const seededBinding = assistantProviderBindingSchema.parse({
-    ...input.providerBinding,
-    provider: input.provider,
-    providerSessionId: input.providerSessionId,
-    providerOptions: input.providerOptions,
-    providerState: null,
-  })
-
-  return (
-    writeAssistantProviderResumeRouteId(seededBinding, input.routeId) ?? seededBinding
+}) {
+  const seededState = writeAssistantSessionProviderSessionId(
+    input.resumeState,
+    input.providerSessionId,
   )
+  return writeAssistantProviderResumeRouteId(seededState, input.routeId) ?? seededState
 }
 
 function readAssistantProviderErrorContext(

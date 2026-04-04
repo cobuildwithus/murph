@@ -17,10 +17,12 @@ import type { AssistantProviderDefinition } from './types.js'
 
 export const codexCliProviderDefinition: AssistantProviderDefinition = {
   capabilities: {
+    requestFormat: 'flat-prompt',
     supportsModelDiscovery: false,
     supportsNativeResume: true,
     supportsReasoningEffort: true,
     supportsRichUserMessageContent: false,
+    supportsToolRuntime: false,
   },
   async discoverModels() {
     return {

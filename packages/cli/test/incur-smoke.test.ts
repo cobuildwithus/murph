@@ -841,6 +841,7 @@ test('assistant session list schema emits the normalized session output shape', 
   assert.notEqual(sessionVariant, undefined)
   assert.equal('providerSessionId' in (sessionVariant?.properties ?? {}), false)
   assert.equal('providerBinding' in (sessionVariant?.properties ?? {}), true)
+  assert.equal('target' in (sessionVariant?.properties ?? {}), true)
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
 test('assistant session show schema emits the normalized session output shape', async () => {
@@ -872,6 +873,7 @@ test('assistant session show schema emits the normalized session output shape', 
   assert.notEqual(sessionVariant, undefined)
   assert.equal('providerSessionId' in (sessionVariant?.properties ?? {}), false)
   assert.equal('providerBinding' in (sessionVariant?.properties ?? {}), true)
+  assert.equal('target' in (sessionVariant?.properties ?? {}), true)
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
 test('assistant cron help explains when to opt into assistant state', async () => {

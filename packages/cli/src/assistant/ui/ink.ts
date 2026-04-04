@@ -3067,14 +3067,14 @@ export async function runAssistantPromptTurn(
       showThinkingTraces: true,
     })
 
-    return {
-      delivery: result.delivery,
-      deliveryError: result.deliveryError,
-      kind: 'completed',
-      response: result.response,
-      session: result.session,
-      streamedAssistantEntryKey,
-    }
+      return {
+        delivery: result.delivery,
+        deliveryError: result.deliveryError,
+        kind: 'completed',
+        response: result.response,
+        session: result.session,
+        streamedAssistantEntryKey,
+      }
   } catch (error) {
     const recoveredSession = extractRecoveredAssistantSession(error)
 

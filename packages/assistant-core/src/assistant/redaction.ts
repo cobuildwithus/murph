@@ -127,6 +127,13 @@ export function redactAssistantSessionForDisplay(
 ): AssistantSession {
   return {
     ...session,
+    target:
+      session.target.adapter === 'openai-compatible'
+        ? {
+            ...session.target,
+            headers: redactAssistantHeadersForDisplay(session.target.headers),
+          }
+        : session.target,
     providerOptions: redactAssistantProviderOptionsForDisplay(session.providerOptions),
     providerBinding: session.providerBinding
       ? {

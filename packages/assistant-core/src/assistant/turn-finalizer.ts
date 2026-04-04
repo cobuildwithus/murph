@@ -1,11 +1,20 @@
-import type {
-  AssistantSession,
-} from '../assistant-cli-contracts.js'
-import { normalizeAssistantProviderBinding } from './provider-state.js'
-import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import {
-  resolveNextAssistantProviderBinding,
-} from './provider-binding.js'
+  assistantBackendTargetToProviderConfigInput,
+  createAssistantModelTarget,
+} from '../assistant-backend.js'
+import {
+  assistantProviderBindingSchema,
+  type AssistantSession,
+} from '../assistant-cli-contracts.js'
+import {
+  compactAssistantProviderConfigInput,
+  serializeAssistantProviderSessionOptions,
+} from './provider-config.js'
+import {
+  writeAssistantProviderResumeRouteId,
+  writeAssistantSessionProviderSessionId,
+} from './provider-state.js'
+import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
@@ -52,22 +61,43 @@ export async function persistAssistantTurnAndSession(input: {
   )
 
   const updatedAt = new Date().toISOString()
-  const nextBinding = resolveNextAssistantProviderBinding({
-    provider: input.providerResult.provider,
-    providerSessionId: input.providerResult.providerSessionId,
-    previousBinding: normalizeAssistantProviderBinding(
-      input.session.providerBinding,
+  const nextTarget =
+    createAssistantModelTarget({
+      ...assistantBackendTargetToProviderConfigInput(input.session.target),
+      ...(compactAssistantProviderConfigInput(input.input) ?? {}),
+    }) ?? input.session.target
+  const nextProviderConfig = assistantBackendTargetToProviderConfigInput(nextTarget)
+  const nextProviderOptions = serializeAssistantProviderSessionOptions(nextProviderConfig)
+  const nextResumeState = writeAssistantProviderResumeRouteId(
+    writeAssistantSessionProviderSessionId(
+      input.session.resumeState,
+      input.providerResult.providerSessionId,
     ),
-    providerOptions: input.providerResult.providerOptions,
-    routeId: input.providerResult.route.routeId,
-    providerState: null,
-  })
+    input.providerResult.route.routeId,
+  )
+  const nextProviderBinding =
+    nextResumeState &&
+    (nextResumeState.providerSessionId !== null || nextResumeState.resumeRouteId !== null)
+      ? assistantProviderBindingSchema.parse({
+          provider: nextTarget.adapter,
+          providerSessionId: nextResumeState.providerSessionId,
+          providerState:
+            nextResumeState.resumeRouteId !== null
+              ? {
+                  resumeRouteId: nextResumeState.resumeRouteId,
+                }
+              : null,
+          providerOptions: nextProviderOptions,
+        })
+      : null
 
   const savedSession = await state.sessions.save({
     ...input.session,
-    provider: input.providerResult.provider,
-    providerBinding: nextBinding,
-    providerOptions: input.providerResult.providerOptions,
+    provider: nextTarget.adapter,
+    providerOptions: nextProviderOptions,
+    providerBinding: nextProviderBinding,
+    target: nextTarget,
+    resumeState: nextResumeState,
     updatedAt,
     lastTurnAt: updatedAt,
     turnCount: input.session.turnCount + 1,

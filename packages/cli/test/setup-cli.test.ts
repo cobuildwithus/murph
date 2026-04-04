@@ -2883,6 +2883,8 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
         backend?: {
           adapter?: string | null
           model?: string | null
+          approvalPolicy?: string | null
+          sandbox?: string | null
           options?: {
             approvalPolicy?: string | null
             sandbox?: string | null
@@ -2899,11 +2901,15 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
     assert.equal(operatorConfig.assistant?.backend?.adapter, 'codex-cli')
     assert.equal(operatorConfig.assistant?.backend?.model, 'gpt-5.4')
     assert.equal(
-      operatorConfig.assistant?.backend?.options?.approvalPolicy,
+      operatorConfig.assistant?.backend?.adapter === 'codex-cli'
+        ? operatorConfig.assistant.backend.approvalPolicy
+        : null,
       'never',
     )
     assert.equal(
-      operatorConfig.assistant?.backend?.options?.sandbox,
+      operatorConfig.assistant?.backend?.adapter === 'codex-cli'
+        ? operatorConfig.assistant.backend.sandbox
+        : null,
       'danger-full-access',
     )
     assert.equal(operatorConfig.assistant?.account?.kind, 'account')
@@ -3173,7 +3179,9 @@ test.sequential('setup updates codexCommand when provided and preserves a saved 
     const operatorConfig = await readOperatorConfig(homeRoot)
     assert.equal(operatorConfig?.assistant?.backend?.adapter, 'codex-cli')
     assert.equal(
-      operatorConfig?.assistant?.backend?.options?.codexCommand,
+      operatorConfig?.assistant?.backend?.adapter === 'codex-cli'
+        ? operatorConfig.assistant.backend.codexCommand
+        : null,
       '/opt/bin/codex-new',
     )
 
@@ -3201,7 +3209,9 @@ test.sequential('setup updates codexCommand when provided and preserves a saved 
 
     const preservedOperatorConfig = await readOperatorConfig(homeRoot)
     assert.equal(
-      preservedOperatorConfig?.assistant?.backend?.options?.codexCommand,
+      preservedOperatorConfig?.assistant?.backend?.adapter === 'codex-cli'
+        ? preservedOperatorConfig.assistant.backend.codexCommand
+        : null,
       '/opt/bin/codex-new',
     )
   } finally {

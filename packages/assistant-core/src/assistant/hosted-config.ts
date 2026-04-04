@@ -2,9 +2,14 @@ import { z } from 'zod'
 import {
   assistantApprovalPolicyValues,
   assistantChatProviderValues,
+  assistantModelTargetSchema,
   assistantSandboxValues,
   type AssistantChatProvider,
 } from '../assistant-cli-contracts.js'
+import {
+  assistantBackendTargetToProviderConfigInput,
+  createAssistantModelTarget,
+} from '../assistant-backend.js'
 import {
   normalizeAssistantProviderConfig,
   type AssistantProviderConfigInput,
@@ -20,7 +25,7 @@ export const hostedAssistantProfileManagedByValues = [
   'platform',
 ] as const
 
-export const hostedAssistantProfileSchema = z
+const legacyHostedAssistantProfileSchema = z
   .object({
     id: z.string().min(1),
     label: z.string().min(1),
@@ -39,14 +44,29 @@ export const hostedAssistantProfileSchema = z
   })
   .strict()
 
-export const hostedAssistantConfigSchema = z
+export const hostedAssistantProfileSchema = z
+  .object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+    managedBy: z.enum(hostedAssistantProfileManagedByValues).default('member'),
+    target: assistantModelTargetSchema.refine(
+      (target) => target.adapter === 'openai-compatible',
+      'Hosted assistant profiles must use the OpenAI-compatible adapter.',
+    ),
+  })
+  .strict()
+
+const hostedAssistantConfigBaseSchema = z
   .object({
     schema: z.literal(HOSTED_ASSISTANT_CONFIG_SCHEMA),
     activeProfileId: z.string().min(1).nullable().default(null),
-    profiles: z.array(hostedAssistantProfileSchema).default([]),
     updatedAt: z.string().datetime({ offset: true }),
   })
   .strict()
+
+export const hostedAssistantConfigSchema = hostedAssistantConfigBaseSchema.extend({
+  profiles: z.array(hostedAssistantProfileSchema).default([]),
+})
 
 export type HostedAssistantProfileManagedBy =
   (typeof hostedAssistantProfileManagedByValues)[number]
@@ -86,29 +106,26 @@ export function createHostedAssistantProfile(input: {
   providerConfig: AssistantProviderConfigInput | null | undefined
 }): HostedAssistantProfile {
   const normalizedConfig = normalizeAssistantProviderConfig(input.providerConfig)
+  const target = createAssistantModelTarget(normalizedConfig)
+
+  if (!target || target.adapter !== 'openai-compatible') {
+    throw new TypeError(
+      'Hosted assistant profiles require an explicit OpenAI-compatible target.',
+    )
+  }
 
   return hostedAssistantProfileSchema.parse({
     id: normalizeRequiredHostedAssistantString(input.id, 'hosted assistant profile id'),
     label:
       normalizeHostedAssistantString(input.label) ??
       resolveHostedAssistantProfileLabel({
-        apiKeyEnv: normalizedConfig.apiKeyEnv,
-        baseUrl: normalizedConfig.baseUrl,
-        provider: normalizedConfig.provider,
-        providerName: normalizedConfig.providerName,
+        apiKeyEnv: target.apiKeyEnv,
+        baseUrl: target.endpoint,
+        provider: target.adapter,
+        providerName: target.providerName,
       }),
     managedBy: input.managedBy ?? 'member',
-    provider: normalizedConfig.provider,
-    codexCommand: normalizedConfig.codexCommand,
-    model: normalizedConfig.model,
-    reasoningEffort: normalizedConfig.reasoningEffort,
-    sandbox: normalizedConfig.sandbox,
-    approvalPolicy: normalizedConfig.approvalPolicy,
-    profile: normalizedConfig.profile,
-    oss: normalizedConfig.oss,
-    baseUrl: normalizedConfig.baseUrl,
-    apiKeyEnv: normalizedConfig.apiKeyEnv,
-    providerName: normalizedConfig.providerName,
+    target,
   })
 }
 
@@ -119,12 +136,38 @@ export function normalizeHostedAssistantConfig(
     return null
   }
 
-  const parsed = hostedAssistantConfigSchema.parse(config)
+  const currentParsed = hostedAssistantConfigSchema.safeParse(config)
+  if (currentParsed.success) {
+    return createHostedAssistantConfig({
+      activeProfileId: currentParsed.data.activeProfileId,
+      profiles: currentParsed.data.profiles,
+      updatedAt: currentParsed.data.updatedAt,
+    })
+  }
+
+  if (typeof config !== 'object' || config === null) {
+    return null
+  }
+
+  const record = config as Record<string, unknown>
+  const base = hostedAssistantConfigBaseSchema.safeParse({
+    schema: record.schema,
+    activeProfileId: record.activeProfileId ?? null,
+    updatedAt: record.updatedAt,
+  })
+  if (!base.success) {
+    return null
+  }
+
+  const rawProfiles = Array.isArray(record.profiles) ? record.profiles : []
+  const profiles = rawProfiles
+    .map((profile) => normalizeUnknownHostedAssistantProfile(profile))
+    .filter((profile): profile is HostedAssistantProfile => profile !== null)
 
   return createHostedAssistantConfig({
-    activeProfileId: parsed.activeProfileId,
-    profiles: parsed.profiles,
-    updatedAt: parsed.updatedAt,
+    activeProfileId: base.data.activeProfileId,
+    profiles,
+    updatedAt: base.data.updatedAt,
   })
 }
 
@@ -156,19 +199,7 @@ export function resolveHostedAssistantActiveProfile(
 export function hostedAssistantProfileToProviderConfigInput(
   profile: HostedAssistantProfile,
 ): AssistantProviderConfigInput {
-  return {
-    provider: profile.provider,
-    approvalPolicy: profile.approvalPolicy,
-    apiKeyEnv: profile.apiKeyEnv,
-    baseUrl: profile.baseUrl,
-    codexCommand: profile.codexCommand,
-    model: profile.model,
-    oss: profile.oss,
-    profile: profile.profile,
-    providerName: profile.providerName,
-    reasoningEffort: profile.reasoningEffort,
-    sandbox: profile.sandbox,
-  }
+  return assistantBackendTargetToProviderConfigInput(profile.target)
 }
 
 export function hostedAssistantConfigsEqual(
@@ -214,10 +245,6 @@ export function resolveHostedAssistantProfileLabel(input: {
   provider?: AssistantChatProvider | null
   providerName?: string | null
 }): string {
-  if (input.provider === 'codex-cli') {
-    return 'Codex CLI'
-  }
-
   const preset =
     resolveOpenAICompatibleProviderPresetFromId(input.presetId) ??
     resolveOpenAICompatibleProviderPreset({
@@ -258,6 +285,7 @@ function resolveHostedAssistantActiveProfileId(
 
   return profiles[0]?.id ?? null
 }
+
 function stripHostedAssistantConfigTimestamps(
   config: HostedAssistantConfig | null,
 ): Omit<HostedAssistantConfig, 'updatedAt'> | null {
@@ -272,6 +300,44 @@ function stripHostedAssistantConfigTimestamps(
   }
 }
 
+function normalizeUnknownHostedAssistantProfile(
+  value: unknown,
+): HostedAssistantProfile | null {
+  const current = hostedAssistantProfileSchema.safeParse(value)
+  if (current.success) {
+    return createHostedAssistantProfile({
+      id: current.data.id,
+      label: current.data.label,
+      managedBy: current.data.managedBy,
+      providerConfig: hostedAssistantProfileToProviderConfigInput(current.data),
+    })
+  }
+
+  const legacy = legacyHostedAssistantProfileSchema.safeParse(value)
+  if (!legacy.success) {
+    return null
+  }
+
+  return createHostedAssistantProfile({
+    id: legacy.data.id,
+    label: legacy.data.label,
+    managedBy: legacy.data.managedBy,
+    providerConfig: {
+      provider: legacy.data.provider,
+      approvalPolicy: legacy.data.approvalPolicy,
+      apiKeyEnv: legacy.data.apiKeyEnv,
+      baseUrl: legacy.data.baseUrl,
+      codexCommand: legacy.data.codexCommand,
+      model: legacy.data.model,
+      oss: legacy.data.oss,
+      profile: legacy.data.profile,
+      providerName: legacy.data.providerName,
+      reasoningEffort: legacy.data.reasoningEffort,
+      sandbox: legacy.data.sandbox,
+    },
+  })
+}
+
 function normalizeHostedAssistantString(value: string | null | undefined): string | null {
   if (typeof value !== 'string') {
     return null
@@ -281,13 +347,10 @@ function normalizeHostedAssistantString(value: string | null | undefined): strin
   return normalized.length > 0 ? normalized : null
 }
 
-function normalizeRequiredHostedAssistantString(
-  value: string | null | undefined,
-  label: string,
-): string {
+function normalizeRequiredHostedAssistantString(value: string | null | undefined, label: string) {
   const normalized = normalizeHostedAssistantString(value)
   if (!normalized) {
-    throw new TypeError(`${label} must be a non-empty string.`)
+    throw new TypeError(`${label} is required.`)
   }
 
   return normalized

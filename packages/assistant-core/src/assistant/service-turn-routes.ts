@@ -1,20 +1,21 @@
-import { assistantBackendTargetToProviderConfigInput } from '../assistant-backend.js'
-import type { AssistantOperatorDefaults } from '../operator-config.js'
 import {
-  resolveAssistantBackendTarget,
-  resolveAssistantProviderDefaults,
-} from '../operator-config.js'
+  assistantBackendTargetToProviderConfigInput,
+  createAssistantModelTarget,
+  type AssistantModelTarget,
+} from '../assistant-backend.js'
+import type { AssistantOperatorDefaults } from '../operator-config.js'
 import {
   buildAssistantFailoverRoutes,
   type ResolvedAssistantFailoverRoute,
 } from './failover.js'
 import {
   compactAssistantProviderConfigInput,
-  mergeAssistantProviderConfigs,
-  mergeAssistantProviderConfigsForProvider,
   serializeAssistantProviderSessionOptions,
 } from './provider-config.js'
-import { buildResolveAssistantSessionInput } from './session-resolution.js'
+import {
+  buildResolveAssistantSessionInput,
+  resolveAssistantSessionTarget,
+} from './session-resolution.js'
 import type {
   AssistantMessageInput,
   ResolvedAssistantSession,
@@ -45,36 +46,17 @@ export function resolveAssistantTurnRoutes(
   defaults: AssistantOperatorDefaults | null,
   resolved: ResolvedAssistantSession,
 ): ResolvedAssistantFailoverRoute[] {
-  const defaultProviderConfig = resolveAssistantBackendTarget(defaults)
-  const provider = mergeAssistantProviderConfigs(
-    defaultProviderConfig
-      ? assistantBackendTargetToProviderConfigInput(defaultProviderConfig)
-      : null,
-    { provider: resolved.session.provider, ...resolved.session.providerOptions },
+  const target = resolvePrimaryAssistantTurnTarget({
     input,
-  ).provider
-  const providerDefaults = resolveAssistantProviderDefaults(defaults, provider)
-  const providerOptions = serializeAssistantProviderSessionOptions(
-    mergeAssistantProviderConfigsForProvider(
-      provider,
-      providerDefaults ? { provider, ...providerDefaults } : null,
-      { provider, ...resolved.session.providerOptions },
-      compactAssistantProviderConfigInput({
-        provider,
-        ...input,
-      }),
-    ),
-  )
-  const executionConfig = mergeAssistantProviderConfigsForProvider(
-    provider,
-    providerDefaults ? { provider, ...providerDefaults } : null,
-    compactAssistantProviderConfigInput({ provider, ...input }),
-  )
+    sessionTarget: resolved.session.target,
+  })
+  const executionConfig = assistantBackendTargetToProviderConfigInput(target)
+  const providerOptions = serializeAssistantProviderSessionOptions(executionConfig)
   return normalizeAssistantTurnRoutes(buildAssistantFailoverRoutes({
     backups: input.failoverRoutes ?? defaults?.failoverRoutes ?? null,
     codexCommand: executionConfig.codexCommand,
     defaults,
-    provider,
+    provider: target.adapter,
     providerOptions,
   }))
 }
@@ -82,8 +64,13 @@ export function resolveAssistantTurnRoutes(
 export async function resolveAssistantTurnRoutesForMessage(
   input: AssistantMessageInput,
   defaults: AssistantOperatorDefaults | null,
+  boundaryDefaultTarget: AssistantModelTarget | null = null,
 ): Promise<ResolvedAssistantFailoverRoute[]> {
-  const sessionInput = buildResolveAssistantSessionInput(input, defaults)
+  const sessionInput = buildResolveAssistantSessionInput(
+    input,
+    defaults,
+    boundaryDefaultTarget,
+  )
 
   try {
     const resolved = await resolveAssistantSession({
@@ -96,24 +83,21 @@ export async function resolveAssistantTurnRoutesForMessage(
       throw error
     }
 
-    const provider = sessionInput.provider ?? 'codex-cli'
-    const providerDefaults = resolveAssistantProviderDefaults(defaults, provider)
+    const target = resolveAssistantSessionTarget({
+      boundaryDefaultTarget,
+      defaults,
+      input,
+    })
     const providerOptions = serializeAssistantProviderSessionOptions(
-      mergeAssistantProviderConfigsForProvider(
-        provider,
-        providerDefaults ? { provider, ...providerDefaults } : null,
-        compactAssistantProviderConfigInput({
-          provider,
-          ...input,
-        }),
-      ),
+      assistantBackendTargetToProviderConfigInput(target),
     )
 
     return buildAssistantFailoverRoutes({
       backups: defaults?.failoverRoutes ?? null,
-      codexCommand: null,
+      codexCommand:
+        target.adapter === 'codex-cli' ? target.codexCommand ?? null : null,
       defaults,
-      provider,
+      provider: target.adapter,
       providerOptions,
     })
   }
@@ -168,4 +152,17 @@ function normalizeAssistantTurnRoutes(
     ...route,
     providerOptions: serializeAssistantProviderSessionOptions(route.providerOptions),
   }))
+}
+
+function resolvePrimaryAssistantTurnTarget(input: {
+  input: AssistantMessageInput
+  sessionTarget: AssistantModelTarget
+}): AssistantModelTarget {
+  const overrideConfig = compactAssistantProviderConfigInput(input.input)
+  return (
+    createAssistantModelTarget({
+      ...assistantBackendTargetToProviderConfigInput(input.sessionTarget),
+      ...(overrideConfig ?? {}),
+    }) ?? input.sessionTarget
+  )
 }
