@@ -29,6 +29,12 @@ export type HostedStripeDispatchContext = {
   sourceType: string;
 };
 
+export type HostedMemberActivationResult = {
+  activated: boolean;
+  hostedExecutionEventId: string | null;
+  memberId: string;
+};
+
 type HostedOnboardingPrismaClient = Prisma.TransactionClient;
 const HOSTED_MEMBER_MUTATION_MAX_RETRIES = 4;
 
@@ -38,7 +44,7 @@ export async function activateHostedMemberFromConfirmedRevnetIssuance(input: {
   prisma: HostedOnboardingPrismaClient;
   sourceEventId: string;
   sourceType: string;
-}): Promise<void> {
+}): Promise<HostedMemberActivationResult> {
   const activated = await tryActivateHostedMemberIfStillAllowed({
     billingMode: input.member.billingMode,
     member: input.member,
@@ -48,20 +54,31 @@ export async function activateHostedMemberFromConfirmedRevnetIssuance(input: {
   });
 
   if (!activated) {
-    return;
+    return {
+      activated: false,
+      hostedExecutionEventId: null,
+      memberId: input.member.id,
+    };
   }
 
+  const dispatch = buildHostedMemberActivationDispatch({
+    memberId: input.member.id,
+    occurredAt: input.occurredAt,
+    sourceEventId: input.sourceEventId,
+    sourceType: input.sourceType,
+  });
   await enqueueHostedExecutionOutbox({
-    dispatch: buildHostedMemberActivationDispatch({
-      memberId: input.member.id,
-      occurredAt: input.occurredAt,
-      sourceEventId: input.sourceEventId,
-      sourceType: input.sourceType,
-    }),
+    dispatch,
     sourceId: input.sourceEventId,
     sourceType: "hosted_revnet_issuance",
     tx: input.prisma,
   });
+
+  return {
+    activated: true,
+    hostedExecutionEventId: dispatch.eventId,
+    memberId: input.member.id,
+  };
 }
 
 export function resolveHostedSubscriptionBillingStatus(input: {
@@ -83,7 +100,7 @@ export async function activateHostedMemberForPositiveSource(input: {
   member: HostedMember;
   prisma: HostedOnboardingPrismaClient;
   sourceType: string;
-}): Promise<void> {
+}): Promise<HostedMemberActivationResult> {
   const activated = await tryActivateHostedMemberIfStillAllowed({
     billingMode: input.billingMode,
     member: input.member,
@@ -91,20 +108,31 @@ export async function activateHostedMemberForPositiveSource(input: {
   });
 
   if (!activated) {
-    return;
+    return {
+      activated: false,
+      hostedExecutionEventId: null,
+      memberId: input.member.id,
+    };
   }
 
+  const dispatch = buildHostedMemberActivationDispatch({
+    memberId: input.member.id,
+    occurredAt: input.dispatchContext.occurredAt,
+    sourceEventId: input.dispatchContext.sourceEventId,
+    sourceType: input.sourceType,
+  });
   await enqueueHostedExecutionOutbox({
-    dispatch: buildHostedMemberActivationDispatch({
-      memberId: input.member.id,
-      occurredAt: input.dispatchContext.occurredAt,
-      sourceEventId: input.dispatchContext.sourceEventId,
-      sourceType: input.sourceType,
-    }),
+    dispatch,
     sourceId: `stripe:${input.dispatchContext.sourceEventId}`,
     sourceType: "hosted_stripe_event",
     tx: input.prisma,
   });
+
+  return {
+    activated: true,
+    hostedExecutionEventId: dispatch.eventId,
+    memberId: input.member.id,
+  };
 }
 
 async function tryActivateHostedMemberIfStillAllowed(input: {
@@ -152,6 +180,9 @@ async function tryActivateHostedMemberIfStillAllowed(input: {
       data: {
         billingMode: input.billingMode ?? currentMember.billingMode,
         billingStatus: HostedBillingStatus.active,
+        onboardingWelcomeQueuedAt:
+          currentMember.onboardingWelcomeQueuedAt ??
+          (currentMember.linqChatId ? new Date() : null),
         status: HostedMemberStatus.active,
       },
     });

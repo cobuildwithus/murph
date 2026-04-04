@@ -48,6 +48,7 @@ import {
 } from "@/src/lib/hosted-onboarding/member-activation";
 import {
   ensureHostedMemberForPhone,
+  persistHostedMemberLinqChatBinding,
 } from "@/src/lib/hosted-onboarding/member-identity-service";
 
 describe("ensureHostedMemberForPhone", () => {
@@ -55,10 +56,10 @@ describe("ensureHostedMemberForPhone", () => {
     vi.clearAllMocks();
   });
 
-  it("rewrites phone storage to blind-indexed lookup data and clears stored chat bindings", async () => {
+  it("rewrites phone storage to blind-indexed lookup data without dropping the stored signup chat binding", async () => {
     const update = vi.fn().mockResolvedValue({
       id: "member_123",
-      linqChatId: null,
+      linqChatId: "chat_existing",
       maskedPhoneNumberHint: "*** 4567",
       phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
     });
@@ -86,7 +87,6 @@ describe("ensureHostedMemberForPhone", () => {
         id: "member_123",
       },
       data: expect.objectContaining({
-        linqChatId: null,
         maskedPhoneNumberHint: "*** 4567",
         normalizedPhoneNumber: expect.stringMatching(/^hbidx:phone:v1:/),
       }),
@@ -120,7 +120,6 @@ describe("ensureHostedMemberForPhone", () => {
 
     expect(create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        linqChatId: null,
         maskedPhoneNumberHint: "*** 4567",
         normalizedPhoneNumber: expect.stringMatching(/^hbidx:phone:v1:/),
       }),
@@ -166,7 +165,6 @@ describe("ensureHostedMemberForPhone", () => {
         id: "member_123",
       },
       data: expect.objectContaining({
-        linqChatId: null,
         maskedPhoneNumberHint: "*** 4567",
         normalizedPhoneNumber: expect.stringMatching(/^hbidx:phone:v1:/),
       }),
@@ -205,38 +203,55 @@ describe("hosted-onboarding member-service barrel", () => {
   });
 });
 
-describe("ensureHostedMemberForPhone legacy expectations", () => {
-  it("stops preserving raw Linq chat bindings from new input", async () => {
-    const update = vi.fn().mockResolvedValue({
-      id: "member_123",
-      linqChatId: null,
-      maskedPhoneNumberHint: "*** 4567",
-    });
+describe("persistHostedMemberLinqChatBinding", () => {
+  it("stores the latest Linq chat id for future activation welcomes", async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const prisma = {
       hostedMember: {
-        findUnique: vi.fn().mockResolvedValue({
-          encryptedBootstrapSecret: "encrypted-secret",
-          encryptionKeyVersion: "v1",
-          id: "member_123",
-          linqChatId: "chat_existing",
-          maskedPhoneNumberHint: "*** 4567",
-        }),
-        update,
+        updateMany,
       },
     } as never;
 
-    await ensureHostedMemberForPhone({
-      phoneNumber: "+15551234567",
+    await persistHostedMemberLinqChatBinding({
+      linqChatId: "chat_new",
+      memberId: "member_123",
       prisma,
     });
 
-    expect(update).toHaveBeenCalledWith({
+    expect(updateMany).toHaveBeenCalledWith({
+      data: {
+        linqChatId: "chat_new",
+      },
       where: {
+        OR: [
+          {
+            linqChatId: null,
+          },
+          {
+            linqChatId: {
+              not: "chat_new",
+            },
+          },
+        ],
         id: "member_123",
       },
-      data: expect.objectContaining({
-        linqChatId: null,
-      }),
     });
+  });
+
+  it("ignores empty chat ids", async () => {
+    const updateMany = vi.fn();
+    const prisma = {
+      hostedMember: {
+        updateMany,
+      },
+    } as never;
+
+    await persistHostedMemberLinqChatBinding({
+      linqChatId: null,
+      memberId: "member_123",
+      prisma,
+    });
+
+    expect(updateMany).not.toHaveBeenCalled();
   });
 });

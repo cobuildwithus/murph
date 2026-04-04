@@ -107,8 +107,8 @@ function readHostedExecutionAcceptedRouteTokens(kind: HostedExecutionAcceptedRou
   if (kind === "scheduler") {
     return {
       requiredCode: "HOSTED_EXECUTION_SCHEDULER_TOKEN_REQUIRED",
-      requiredMessage: "HOSTED_EXECUTION_SCHEDULER_TOKENS must be configured for scheduled hosted execution drains.",
-      tokens: readTokenListFromEnv("HOSTED_EXECUTION_SCHEDULER_TOKENS"),
+      requiredMessage: "HOSTED_EXECUTION_SCHEDULER_TOKENS or CRON_SECRET must be configured for scheduled hosted execution drains.",
+      tokens: readTokenListFromEnv("HOSTED_EXECUTION_SCHEDULER_TOKENS", "CRON_SECRET"),
       unauthorizedCode: "HOSTED_EXECUTION_UNAUTHORIZED",
       unauthorizedMessage: "Unauthorized hosted execution request.",
     };
@@ -133,15 +133,17 @@ function readHostedExecutionAcceptedRouteTokens(kind: HostedExecutionAcceptedRou
   };
 }
 
-function readTokenListFromEnv(primaryKey: string): string[] {
-  const explicit = normalizeOptionalString(process.env[primaryKey]);
+function readTokenListFromEnv(...keys: string[]): string[] {
+  return Array.from(new Set(keys.flatMap((key) => {
+    const explicit = normalizeOptionalString(process.env[key]);
 
-  if (!explicit) {
-    return [];
-  }
+    if (!explicit) {
+      return [];
+    }
 
-  return explicit
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
+    return explicit
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  })));
 }

@@ -495,6 +495,7 @@ describe("hosted Stripe event queue", () => {
         makeMember({
           billingMode: HostedBillingMode.subscription,
           billingStatus: HostedBillingStatus.past_due,
+          linqChatId: "chat_signup_123",
           status: HostedMemberStatus.registered,
         }),
       ],
@@ -523,6 +524,7 @@ describe("hosted Stripe event queue", () => {
 
     expect(harness.members[0]).toMatchObject({
       billingStatus: HostedBillingStatus.active,
+      onboardingWelcomeQueuedAt: expect.any(Date),
       status: HostedMemberStatus.active,
       stripeLatestBillingEventId: "evt_invoice_paid_123",
     });
@@ -536,6 +538,50 @@ describe("hosted Stripe event queue", () => {
         sourceType: "hosted_stripe_event",
       }),
     );
+  });
+
+  it("activates from invoice.paid without queueing the canned welcome when no Linq signup chat is bound", async () => {
+    const harness = createStripeQueueHarness({
+      invites: [
+        makeInvite(),
+      ],
+      members: [
+        makeMember({
+          billingMode: HostedBillingMode.subscription,
+          billingStatus: HostedBillingStatus.past_due,
+          linqChatId: null,
+          status: HostedMemberStatus.registered,
+        }),
+      ],
+    });
+
+    await recordAndDrainStripeEvent({
+      event: buildStripeEvent({
+        createdAt: "2026-03-28T10:10:00.000Z",
+        id: "evt_invoice_paid_no_linq_chat",
+        object: {
+          amount_paid: 500,
+          currency: "usd",
+          customer: "cus_123",
+          id: "in_123",
+          parent: {
+            subscription_details: {
+              subscription: "sub_123",
+            },
+          },
+          payment_intent: "pi_123",
+        },
+        type: "invoice.paid",
+      }),
+      prisma: harness.prisma,
+    });
+
+    expect(harness.members[0]).toMatchObject({
+      billingStatus: HostedBillingStatus.active,
+      onboardingWelcomeQueuedAt: null,
+      status: HostedMemberStatus.active,
+      stripeLatestBillingEventId: "evt_invoice_paid_no_linq_chat",
+    });
   });
 
   it.each([
@@ -2004,6 +2050,9 @@ function makeMember(overrides: Partial<MutableMember> = {}): MutableMember {
     billingMode: HostedBillingMode.subscription,
     billingStatus: HostedBillingStatus.not_started,
     id: "member_123",
+    linqChatId: null,
+    onboardingWelcomeQueuedAt: null,
+    onboardingWelcomeSentAt: null,
     normalizedPhoneNumber: "+15551234567",
     status: HostedMemberStatus.registered,
     stripeCustomerId: "cus_123",
@@ -2571,7 +2620,10 @@ type MutableMember = {
   billingMode: HostedBillingMode | null;
   billingStatus: HostedBillingStatus;
   id: string;
+  linqChatId: string | null;
   normalizedPhoneNumber: string;
+  onboardingWelcomeQueuedAt: Date | null;
+  onboardingWelcomeSentAt: Date | null;
   status: HostedMemberStatus;
   stripeCustomerId: string | null;
   stripeLatestBillingEventCreatedAt: Date | null;

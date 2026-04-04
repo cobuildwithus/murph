@@ -30,6 +30,8 @@ import {
 } from "@/src/lib/hosted-onboarding/request-auth";
 
 describe("hosted Privy request auth", () => {
+  const prisma = {} as never;
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.verifyHostedPrivyAccessToken.mockResolvedValue({
@@ -74,6 +76,7 @@ describe("hosted Privy request auth", () => {
     await expect(
       resolveHostedPrivyRequestAuthContext(
         new Request("https://join.example.test/api/settings/email/sync"),
+        prisma,
       ),
     ).resolves.toBeNull();
     expect(mocks.verifyHostedPrivyAccessToken).not.toHaveBeenCalled();
@@ -88,6 +91,7 @@ describe("hosted Privy request auth", () => {
             "x-privy-identity-token": "identity-token",
           },
         }),
+        prisma,
       ),
     ).rejects.toMatchObject({
       code: "AUTH_REQUIRED",
@@ -107,7 +111,7 @@ describe("hosted Privy request auth", () => {
       userId: "did:privy:user_other",
     });
 
-    await expect(requireHostedPrivyRequestAuthContext(createAuthenticatedRequest())).rejects.toMatchObject({
+    await expect(requireHostedPrivyRequestAuthContext(createAuthenticatedRequest(), prisma)).rejects.toMatchObject({
       code: "PRIVY_SESSION_MISMATCH",
       httpStatus: 403,
     });
@@ -115,7 +119,7 @@ describe("hosted Privy request auth", () => {
   });
 
   it("returns the authenticated hosted member when both Privy tokens verify for the same user", async () => {
-    await expect(requireHostedPrivyRequestAuthContext(createAuthenticatedRequest())).resolves.toMatchObject({
+    await expect(requireHostedPrivyRequestAuthContext(createAuthenticatedRequest(), prisma)).resolves.toMatchObject({
       member: {
         id: "member_123",
       },
@@ -134,7 +138,7 @@ describe("hosted Privy request auth", () => {
       }),
     );
 
-    await expect(requireHostedPrivyActiveRequestAuthContext(createAuthenticatedRequest())).rejects.toMatchObject({
+    await expect(requireHostedPrivyActiveRequestAuthContext(createAuthenticatedRequest(), prisma)).rejects.toMatchObject({
       code: "HOSTED_MEMBER_SUSPENDED",
       httpStatus: 403,
     });
@@ -147,7 +151,7 @@ describe("hosted Privy request auth", () => {
       }),
     );
 
-    await expect(requireHostedPrivyActiveRequestAuthContext(createAuthenticatedRequest())).rejects.toMatchObject({
+    await expect(requireHostedPrivyActiveRequestAuthContext(createAuthenticatedRequest(), prisma)).rejects.toMatchObject({
       code: "HOSTED_ACCESS_REQUIRED",
       httpStatus: 403,
     });
@@ -176,6 +180,8 @@ function createHostedMember(
     linqChatId: null,
     maskedPhoneNumberHint: "***2671",
     normalizedPhoneNumber: "+14155552671",
+    onboardingWelcomeQueuedAt: null,
+    onboardingWelcomeSentAt: null,
     phoneNumberVerifiedAt: new Date("2025-03-27T08:30:00.000Z"),
     privyUserId: "did:privy:user_123",
     status: HostedMemberStatus.active,

@@ -30,11 +30,16 @@ import { ensureHostedRevnetIssuanceForStripeInvoice } from "./stripe-revnet-issu
 
 type HostedOnboardingPrismaClient = Prisma.TransactionClient;
 
+type HostedStripeActivationOutcome = {
+  activatedMemberId: string | null;
+  hostedExecutionEventId: string | null;
+};
+
 export async function applyStripeCheckoutCompleted(
   session: Stripe.Checkout.Session,
   dispatchContext: HostedStripeDispatchContext,
   prisma: HostedOnboardingPrismaClient,
-): Promise<void> {
+): Promise<HostedStripeActivationOutcome> {
   const member = await findMemberForStripeObject({
     clientReferenceId: normalizeNullableString(session.client_reference_id),
     customerId: coerceStripeObjectId(session.customer),
@@ -61,7 +66,10 @@ export async function applyStripeCheckoutCompleted(
   });
 
   if (!member) {
-    return;
+    return {
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+    };
   }
 
   const updatedMember = await updateHostedMemberStripeBillingIfFresh({
@@ -76,18 +84,31 @@ export async function applyStripeCheckoutCompleted(
   });
 
   if (!updatedMember) {
-    return;
+    return {
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+    };
   }
 
   if (mode === HostedBillingMode.payment && paymentSettled) {
-    await activateHostedMemberForPositiveSource({
+    const activation = await activateHostedMemberForPositiveSource({
       billingMode: mode,
       dispatchContext,
       member: updatedMember,
       prisma,
       sourceType: "stripe.checkout.session.completed",
     });
+
+    return {
+      activatedMemberId: activation.activated ? updatedMember.id : null,
+      hostedExecutionEventId: activation.hostedExecutionEventId,
+    };
   }
+
+  return {
+    activatedMemberId: null,
+    hostedExecutionEventId: null,
+  };
 }
 
 export async function applyStripeCheckoutExpired(
@@ -164,7 +185,7 @@ export async function applyStripeInvoicePaid(
   invoice: Stripe.Invoice,
   dispatchContext: HostedStripeDispatchContext,
   prisma: HostedOnboardingPrismaClient,
-): Promise<boolean> {
+): Promise<HostedStripeActivationOutcome & { createdOrUpdatedRevnetIssuance: boolean }> {
   const subscriptionId = coerceStripeInvoiceSubscriptionId(invoice);
   const member = await findMemberForStripeObject({
     clientReferenceId: null,
@@ -175,7 +196,11 @@ export async function applyStripeInvoicePaid(
   });
 
   if (!member) {
-    return false;
+    return {
+      activatedMemberId: null,
+      createdOrUpdatedRevnetIssuance: false,
+      hostedExecutionEventId: null,
+    };
   }
 
   const billingMode = subscriptionId ? HostedBillingMode.subscription : (member.billingMode ?? HostedBillingMode.payment);
@@ -196,7 +221,11 @@ export async function applyStripeInvoicePaid(
   });
 
   if (!updatedMember) {
-    return false;
+    return {
+      activatedMemberId: null,
+      createdOrUpdatedRevnetIssuance: false,
+      hostedExecutionEventId: null,
+    };
   }
 
   if (billingMode === HostedBillingMode.subscription && isHostedOnboardingRevnetEnabled()) {
@@ -206,10 +235,14 @@ export async function applyStripeInvoicePaid(
       prisma,
     });
 
-    return issuance !== null;
+    return {
+      activatedMemberId: null,
+      createdOrUpdatedRevnetIssuance: issuance !== null,
+      hostedExecutionEventId: null,
+    };
   }
 
-  await activateHostedMemberForPositiveSource({
+  const activation = await activateHostedMemberForPositiveSource({
     billingMode,
     dispatchContext,
     member: updatedMember,
@@ -217,7 +250,11 @@ export async function applyStripeInvoicePaid(
     sourceType: "stripe.invoice.paid",
   });
 
-  return false;
+  return {
+    activatedMemberId: activation.activated ? updatedMember.id : null,
+    createdOrUpdatedRevnetIssuance: false,
+    hostedExecutionEventId: activation.hostedExecutionEventId,
+  };
 }
 
 export async function applyStripeInvoicePaymentFailed(
