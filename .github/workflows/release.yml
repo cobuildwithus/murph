@@ -78,6 +78,7 @@ jobs:
         with:
           node-version: latest
           registry-url: "https://registry.npmjs.org"
+          scope: "@murphai"
           cache: pnpm
 
       - name: Update npm
@@ -156,6 +157,7 @@ jobs:
         with:
           node-version: latest
           registry-url: "https://registry.npmjs.org"
+          scope: "@murphai"
 
       - name: Update npm
         run: npm install -g npm@latest
