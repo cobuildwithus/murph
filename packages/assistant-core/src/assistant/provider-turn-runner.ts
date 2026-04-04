@@ -77,6 +77,15 @@ interface AssistantRouteTurnPlan {
   workingDirectory: string
 }
 
+const requiredAssistantKnowledgeTools = [
+  'assistant.knowledge.search',
+  'assistant.knowledge.get',
+  'assistant.knowledge.list',
+  'assistant.knowledge.upsert',
+  'assistant.knowledge.lint',
+  'assistant.knowledge.rebuildIndex',
+] as const
+
 export interface ExecutedAssistantProviderTurnResult
   extends AssistantProviderTurnExecutionResult {
   attemptCount: number
@@ -288,6 +297,7 @@ async function resolveAssistantRouteTurnPlan(input: {
   sharedPlan: AssistantTurnSharedPlan
   toolCatalog: ReturnType<typeof createDefaultAssistantToolCatalog>
 }): Promise<AssistantRouteTurnPlan> {
+  assertRequiredAssistantKnowledgeTools(input.toolCatalog)
   const workingDirectory = input.sharedPlan.requestedWorkingDirectory
   const activeProviderBinding = readAssistantProviderBinding(input.session)
   const resumeProviderBinding = resolveAssistantResumeBinding({
@@ -334,15 +344,6 @@ async function resolveAssistantRouteTurnPlan(input: {
     input.toolCatalog.hasTool('assistant.memory.file.read') &&
     input.toolCatalog.hasTool('assistant.memory.file.write')
   const assistantCronToolsAvailable = input.toolCatalog.hasTool('assistant.cron.status')
-  const assistantKnowledgeReadToolsAvailable =
-    input.toolCatalog.hasTool('assistant.knowledge.search') &&
-    input.toolCatalog.hasTool('assistant.knowledge.get') &&
-    input.toolCatalog.hasTool('assistant.knowledge.list')
-  const assistantKnowledgeUpsertToolAvailable =
-    input.toolCatalog.hasTool('assistant.knowledge.upsert')
-  const assistantKnowledgeMaintenanceToolsAvailable =
-    input.toolCatalog.hasTool('assistant.knowledge.lint') &&
-    input.toolCatalog.hasTool('assistant.knowledge.rebuildIndex')
 
   return {
     cliEnv: input.sharedPlan.cliAccess.env,
@@ -357,9 +358,6 @@ async function resolveAssistantRouteTurnPlan(input: {
     workingDirectory,
     systemPrompt: buildAssistantSystemPrompt({
       allowSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
-      assistantKnowledgeMaintenanceToolsAvailable,
-      assistantKnowledgeReadToolsAvailable,
-      assistantKnowledgeUpsertToolAvailable,
       assistantMemoryAppendToolAvailable,
       assistantStateToolsAvailable,
       assistantCronToolsAvailable,
@@ -373,6 +371,21 @@ async function resolveAssistantRouteTurnPlan(input: {
       firstTurnCheckIn: shouldInjectFirstTurnCheckIn,
     }),
   }
+}
+
+function assertRequiredAssistantKnowledgeTools(
+  toolCatalog: ReturnType<typeof createDefaultAssistantToolCatalog>,
+): void {
+  const missingTools = requiredAssistantKnowledgeTools.filter(
+    (toolName) => !toolCatalog.hasTool(toolName),
+  )
+  if (missingTools.length === 0) {
+    return
+  }
+
+  throw new Error(
+    `Assistant provider turns require the full knowledge tool surface. Missing: ${missingTools.join(', ')}`,
+  )
 }
 
 async function executeAssistantProviderAttempt(input: {
