@@ -373,11 +373,14 @@ async function resolveHostedUserCryptoContext(userId: string) {
   );
 
   return createHostedUserKeyStore({
+    automationRecipientKeyId: environment.automationRecipientKeyId,
+    automationRecipientPrivateKey: environment.automationRecipientPrivateKey,
+    automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
+    automationRecipientPublicKey: environment.automationRecipientPublicKey,
     bucket: (env as { BUNDLES: never }).BUNDLES,
-    automationKey: environment.bundleEncryptionKey,
-    automationKeyId: environment.bundleEncryptionKeyId,
-    envelopeKeyId: environment.bundleEncryptionKeyId,
-    envelopeKeysById: environment.bundleEncryptionKeysById,
+    envelopeEncryptionKey: environment.bundleEncryptionKey,
+    envelopeEncryptionKeyId: environment.bundleEncryptionKeyId,
+    envelopeEncryptionKeysById: environment.bundleEncryptionKeysById,
   }).ensureUserCryptoContext(userId);
 }
 
