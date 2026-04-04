@@ -18,12 +18,26 @@ export function buildHostedExecutionUserEnvPath(userId: string): string {
   return `/internal/users/${encodeURIComponent(userId)}/env`;
 }
 
-
-
 export function buildHostedExecutionUserKeyEnvelopePath(userId: string): string {
   return `/internal/users/${encodeURIComponent(userId)}/keys/envelope`;
 }
 
 export function buildHostedExecutionUserKeyRecipientPath(userId: string, kind: string): string {
   return `/internal/users/${encodeURIComponent(userId)}/keys/recipients/${encodeURIComponent(kind)}`;
+}
+
+export function buildHostedExecutionUserDeviceSyncRuntimeSnapshotPath(userId: string): string {
+  return `/internal/users/${encodeURIComponent(userId)}/device-sync/runtime-snapshot`;
+}
+
+export function buildHostedExecutionUserSharePackPath(userId: string, shareId: string): string {
+  return `/internal/users/${encodeURIComponent(userId)}/shares/${encodeURIComponent(shareId)}/pack`;
+}
+
+export function buildHostedExecutionSharePayloadPath(shareId: string): string {
+  return `/internal/shares/${encodeURIComponent(shareId)}/payload`;
+}
+
+export function buildHostedExecutionUserPendingUsagePath(userId: string): string {
+  return `/internal/users/${encodeURIComponent(userId)}/usage/pending`;
 }

@@ -6,6 +6,7 @@ import {
   DEFAULT_HOSTED_EXECUTION_COMMIT_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_EMAIL_BASE_URL,
+  DEFAULT_HOSTED_EXECUTION_SHARE_PACK_PROXY_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_SIDE_EFFECTS_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
   HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
@@ -60,6 +61,22 @@ import {
 } from "@murphai/hosted-execution";
 
 const describe = baseDescribe.sequential;
+const TEST_HOSTED_RECIPIENT_PUBLIC_JWK = {
+  crv: "P-256",
+  ext: true,
+  key_ops: [] as string[],
+  kty: "EC",
+  x: "xSelVJv6r6LPUS8GCNgj1T_7z5GXOrhgY1cCdzGb5ao",
+  y: "8HhciS1cAPKs_fPfgZnb1USdRtBX-4Nvp8XiBHuMcmY",
+} as const;
+const TEST_HOSTED_RECIPIENT_PRIVATE_JWK = {
+  ...TEST_HOSTED_RECIPIENT_PUBLIC_JWK,
+  d: "HAPljluiFVW3g-UEmrJ9NVYTlclAhaC8N5LT0h7vitQ",
+  key_ops: ["deriveBits"] as string[],
+} as const;
+const TEST_HOSTED_EPHEMERAL_PUBLIC_JWK = {
+  ...TEST_HOSTED_RECIPIENT_PUBLIC_JWK,
+} as const;
 
 describe("@murphai/hosted-execution", () => {
   afterEach(() => {
@@ -187,6 +204,7 @@ describe("@murphai/hosted-execution", () => {
       }),
     ).toEqual({
       deviceSyncRuntimeBaseUrl: DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
+      shareBaseUrl: DEFAULT_HOSTED_EXECUTION_SHARE_PACK_PROXY_BASE_URL,
       usageBaseUrl: DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
     });
 
@@ -196,6 +214,7 @@ describe("@murphai/hosted-execution", () => {
       }),
     ).toEqual({
       deviceSyncRuntimeBaseUrl: DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
+      shareBaseUrl: DEFAULT_HOSTED_EXECUTION_SHARE_PACK_PROXY_BASE_URL,
       usageBaseUrl: DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
     });
   });
@@ -208,6 +227,7 @@ describe("@murphai/hosted-execution", () => {
       }),
     ).toEqual({
       deviceSyncRuntimeBaseUrl: DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
+      shareBaseUrl: DEFAULT_HOSTED_EXECUTION_SHARE_PACK_PROXY_BASE_URL,
       usageBaseUrl: DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
     });
   });
@@ -219,6 +239,7 @@ describe("@murphai/hosted-execution", () => {
       }),
     ).toEqual({
       deviceSyncRuntimeBaseUrl: DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
+      shareBaseUrl: DEFAULT_HOSTED_EXECUTION_SHARE_PACK_PROXY_BASE_URL,
       usageBaseUrl: DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
     });
   });
@@ -227,11 +248,21 @@ describe("@murphai/hosted-execution", () => {
     expect(
       readHostedExecutionWorkerEnvironment({
         HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "OPENAI_API_KEY",
+        HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: JSON.stringify(
+          TEST_HOSTED_RECIPIENT_PRIVATE_JWK,
+        ),
+        HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: JSON.stringify(
+          TEST_HOSTED_RECIPIENT_PUBLIC_JWK,
+        ),
         HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: "Zm9v",
         HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
       }),
     ).toEqual({
       allowedUserEnvKeys: "OPENAI_API_KEY",
+      automationRecipientKeyId: "automation:v1",
+      automationRecipientPrivateJwkJson: JSON.stringify(TEST_HOSTED_RECIPIENT_PRIVATE_JWK),
+      automationRecipientPrivateKeyringJson: null,
+      automationRecipientPublicJwkJson: JSON.stringify(TEST_HOSTED_RECIPIENT_PUBLIC_JWK),
       bundleEncryptionKeyBase64: "Zm9v",
       bundleEncryptionKeyId: "v1",
       bundleEncryptionKeyringJson: null,
@@ -1190,6 +1221,12 @@ describe("@murphai/hosted-execution", () => {
   it("does not accept the removed Cloudflare signing-secret alias", () => {
     expect(() =>
       readHostedExecutionWorkerEnvironment({
+        HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: JSON.stringify(
+          TEST_HOSTED_RECIPIENT_PRIVATE_JWK,
+        ),
+        HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: JSON.stringify(
+          TEST_HOSTED_RECIPIENT_PUBLIC_JWK,
+        ),
         HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: "Zm9v",
         HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET: "dispatch-secret",
       } as Record<string, string>),
@@ -1655,12 +1692,14 @@ describe("@murphai/hosted-execution", () => {
               recipients: [
                 {
                   ciphertext: "ciphertext-automation",
+                  ephemeralPublicKeyJwk: TEST_HOSTED_EPHEMERAL_PUBLIC_JWK,
                   iv: "iv-automation",
                   keyId: "recipient-automation-v1",
                   kind: "automation",
                 },
                 {
                   ciphertext: "ciphertext-user-unlock",
+                  ephemeralPublicKeyJwk: TEST_HOSTED_EPHEMERAL_PUBLIC_JWK,
                   iv: "iv-user-unlock",
                   keyId: "recipient-user-unlock-v1",
                   kind: "user-unlock",
@@ -1691,7 +1730,7 @@ describe("@murphai/hosted-execution", () => {
           activated: true,
           device: "browser",
         },
-        recipientKeyBase64: "dXNlci11bmxvY2sta2V5",
+        recipientPublicKeyJwk: TEST_HOSTED_RECIPIENT_PUBLIC_JWK,
         recipientKeyId: "recipient-user-unlock-v1",
       }),
     ).resolves.toEqual(
@@ -1699,12 +1738,14 @@ describe("@murphai/hosted-execution", () => {
         recipients: [
           {
             ciphertext: "ciphertext-automation",
+            ephemeralPublicKeyJwk: TEST_HOSTED_EPHEMERAL_PUBLIC_JWK,
             iv: "iv-automation",
             keyId: "recipient-automation-v1",
             kind: "automation",
           },
           {
             ciphertext: "ciphertext-user-unlock",
+            ephemeralPublicKeyJwk: TEST_HOSTED_EPHEMERAL_PUBLIC_JWK,
             iv: "iv-user-unlock",
             keyId: "recipient-user-unlock-v1",
             kind: "user-unlock",
@@ -1740,17 +1781,17 @@ describe("@murphai/hosted-execution", () => {
       2,
       "https://worker.example.test/internal/users/member%2F123/keys/recipients/user-unlock",
       expect.objectContaining({
-        body: JSON.stringify({
-          metadata: {
-            activated: true,
-            device: "browser",
-          },
-          recipientKeyBase64: "dXNlci11bmxvY2sta2V5",
-          recipientKeyId: "recipient-user-unlock-v1",
-        }),
         method: "PUT",
       }),
     );
+    expect(JSON.parse(String(fetchImpl.mock.calls[1]?.[1]?.body ?? ""))).toEqual({
+      metadata: {
+        activated: true,
+        device: "browser",
+      },
+      recipientKeyId: "recipient-user-unlock-v1",
+      recipientPublicKeyJwk: TEST_HOSTED_RECIPIENT_PUBLIC_JWK,
+    });
     const upsertHeaders = new Headers(fetchImpl.mock.calls[1]?.[1]?.headers);
     expect(upsertHeaders.get("content-type")).toBe("application/json; charset=utf-8");
     await expect(
@@ -1864,6 +1905,7 @@ function buildHostedUserRootKeyEnvelopeFixture(
   overrides?: {
     recipients?: Array<{
       ciphertext: string;
+      ephemeralPublicKeyJwk: typeof TEST_HOSTED_EPHEMERAL_PUBLIC_JWK;
       iv: string;
       keyId: string;
       kind: "automation" | "user-unlock" | "recovery" | "tee-automation";
@@ -1876,6 +1918,7 @@ function buildHostedUserRootKeyEnvelopeFixture(
     recipients: overrides?.recipients ?? [
       {
         ciphertext: "ciphertext-automation",
+        ephemeralPublicKeyJwk: TEST_HOSTED_EPHEMERAL_PUBLIC_JWK,
         iv: "iv-automation",
         keyId: "recipient-automation-v1",
         kind: "automation",

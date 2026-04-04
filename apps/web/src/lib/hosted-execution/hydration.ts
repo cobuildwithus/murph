@@ -1,18 +1,19 @@
 import type { ExecutionOutbox, PrismaClient } from "@prisma/client";
 import {
-  type HostedExecutionDispatchRequest,
-  type HostedExecutionDispatchRef,
   readHostedExecutionOutboxPayload,
+  type HostedExecutionDispatchRef,
+  type HostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution";
 
+import { buildHostedDeviceSyncWakeDispatchFromSignal } from "../device-sync/hosted-dispatch";
 import { createHostedSecretCodec } from "../device-sync/crypto";
 import { readHostedDeviceSyncEnvironment } from "../device-sync/env";
-import { buildHostedDeviceSyncWakeDispatchFromSignal } from "../device-sync/hosted-dispatch";
 import { buildHostedDeviceSyncRuntimeSnapshot } from "../device-sync/internal-runtime";
 import { PrismaDeviceSyncControlPlaneStore } from "../device-sync/prisma-store";
 import { toJsonRecord } from "../device-sync/shared";
 import { readHostedWebhookReceiptDispatchByEventId } from "../hosted-onboarding/webhook-receipt-dispatch";
 import { findHostedShareLinkById, readHostedSharePack } from "../hosted-share/shared";
+import { requireHostedExecutionControlClient } from "./control";
 
 type HostedExecutionHydrationClient = PrismaClient;
 
@@ -43,7 +44,11 @@ export async function hydrateHostedExecutionDispatch(
     case "device_sync_signal":
       return hydrateHostedExecutionDispatchFromDeviceSyncSignal(record, prisma);
     case "hosted_share_link":
-      return hydrateHostedExecutionDispatchFromHostedShareLink(record, prisma, payload.dispatchRef);
+      return hydrateHostedExecutionDispatchFromHostedShareLink(
+        record,
+        prisma,
+        payload.dispatchRef,
+      );
     case "hosted_webhook_receipt":
       return hydrateHostedExecutionDispatchFromWebhookReceipt(record, prisma, payload.dispatchRef.occurredAt);
     default:
@@ -133,14 +138,17 @@ async function hydrateHostedExecutionDispatchFromHostedShareLink(
     );
   }
 
-  const { pack } = readHostedSharePack(shareRecord);
+  const sharePack = readHostedSharePack(shareRecord);
+  await requireHostedExecutionControlClient().putSharePack(record.userId, record.sourceId, {
+    ...sharePack,
+    shareId: record.sourceId,
+  });
 
   return validateHydratedHostedExecutionDispatch(
     {
       event: {
         kind: "vault.share.accepted",
         share: {
-          pack,
           shareId: record.sourceId,
         },
         userId: record.userId,
@@ -188,25 +196,20 @@ async function hydrateHostedExecutionDispatchFromDeviceSyncSignal(
     userId: signal.userId,
   });
 
-  if (dispatch.event.kind !== "device-sync.wake") {
-    return validateHydratedHostedExecutionDispatch(dispatch, record);
+  if (dispatch.event.kind === "device-sync.wake") {
+    const runtimeSnapshot = await hydrateHostedDeviceSyncRuntimeSnapshot({
+      connectionId: signal.connectionId,
+      prisma,
+      provider: signal.provider,
+      userId: signal.userId,
+    });
+    await requireHostedExecutionControlClient().putDeviceSyncRuntimeSnapshot(
+      signal.userId,
+      runtimeSnapshot,
+    );
   }
 
-  return validateHydratedHostedExecutionDispatch(
-    {
-      ...dispatch,
-      event: {
-        ...dispatch.event,
-        runtimeSnapshot: await hydrateHostedDeviceSyncRuntimeSnapshot({
-          connectionId: signal.connectionId,
-          prisma,
-          provider: signal.provider,
-          userId: signal.userId,
-        }),
-      },
-    },
-    record,
-  );
+  return validateHydratedHostedExecutionDispatch(dispatch, record);
 }
 
 async function hydrateHostedDeviceSyncRuntimeSnapshot(input: {
@@ -243,7 +246,6 @@ function parseHostedWebhookReceiptSourceId(
   }
 
   const separatorIndex = sourceId.indexOf(":");
-
   if (separatorIndex <= 0 || separatorIndex >= sourceId.length - 1) {
     throw createHostedExecutionHydrationError(
       "HOSTED_EXECUTION_HYDRATION_SOURCE_ID_INVALID",
@@ -266,7 +268,6 @@ function parseDeviceSyncSignalSourceId(sourceId: string | null, eventId: string)
   }
 
   const parsed = Number.parseInt(sourceId, 10);
-
   if (!Number.isSafeInteger(parsed) || parsed <= 0) {
     throw createHostedExecutionHydrationError(
       "HOSTED_EXECUTION_HYDRATION_SOURCE_ID_INVALID",
@@ -312,15 +313,15 @@ export function isPermanentHostedExecutionHydrationError(
     error && typeof error === "object" ? (error as { code?: unknown }).code : undefined;
 
   return Boolean(
-    error &&
-      typeof error === "object" &&
-      "code" in error &&
-      "permanent" in error &&
-      "retryable" in error &&
-      typeof code === "string" &&
-      code.length > 0 &&
-      (error as { permanent?: unknown }).permanent === true &&
-      (error as { retryable?: unknown }).retryable === false,
+    error
+      && typeof error === "object"
+      && "code" in error
+      && "permanent" in error
+      && "retryable" in error
+      && typeof code === "string"
+      && code.length > 0
+      && (error as { permanent?: unknown }).permanent === true
+      && (error as { retryable?: unknown }).retryable === false,
   );
 }
 

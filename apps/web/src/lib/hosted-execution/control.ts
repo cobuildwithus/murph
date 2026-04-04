@@ -1,6 +1,7 @@
 import {
   createHostedExecutionControlClient,
   readHostedExecutionControlEnvironment,
+  type HostedExecutionControlClient,
 } from "@murphai/hosted-execution";
 import { createHostedVerifiedEmailUserEnv } from "@murphai/runtime-state";
 
@@ -12,25 +13,29 @@ export interface HostedVerifiedEmailSyncResult {
   verifiedAt: string;
 }
 
-export async function syncHostedVerifiedEmailToHostedExecution(input: {
-  userId: string;
-  emailAddress: string;
-  verifiedAt: string;
-}): Promise<HostedVerifiedEmailSyncResult> {
+export function requireHostedExecutionControlClient(): HostedExecutionControlClient {
   const environment = readHostedExecutionControlEnvironment();
 
   if (!environment.baseUrl || !environment.signingSecret) {
     throw hostedOnboardingError({
       code: "HOSTED_EXECUTION_CONTROL_NOT_CONFIGURED",
-      message: "Hosted email sync is not configured yet. Contact support to finish setup.",
+      message: "Hosted execution control is not configured yet. Contact support to finish setup.",
       httpStatus: 500,
     });
   }
 
-  const client = createHostedExecutionControlClient({
+  return createHostedExecutionControlClient({
     baseUrl: environment.baseUrl,
     signingSecret: environment.signingSecret,
   });
+}
+
+export async function syncHostedVerifiedEmailToHostedExecution(input: {
+  userId: string;
+  emailAddress: string;
+  verifiedAt: string;
+}): Promise<HostedVerifiedEmailSyncResult> {
+  const client = requireHostedExecutionControlClient();
 
   await client.updateUserEnv(input.userId, {
     env: createHostedVerifiedEmailUserEnv({

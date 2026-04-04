@@ -1,4 +1,5 @@
 import {
+  HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
   readHostedAssistantApiKeyEnvName,
 } from "@murphai/assistant-core";
 import {
@@ -38,6 +39,10 @@ const DEFAULT_ALLOWED_USER_ENV_KEYS = [
 
 const DISALLOWED_USER_ENV_KEYS = new Set([
   "HOME",
+  "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID",
+  "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK",
+  "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON",
+  "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK",
   "HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY",
   "HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON",
   "HOSTED_EXECUTION_CONTROL_TOKEN",
@@ -62,13 +67,17 @@ const DISALLOWED_USER_ENV_PREFIXES = [
 ];
 
 const RUNNER_EXACT_ALLOWED_ENV_KEYS = new Set<string>([
+  "ANTHROPIC_API_KEY",
+  "BRAVE_API_KEY",
   "CEREBRAS_API_KEY",
   "DEEPSEEK_API_KEY",
   "DEVICE_SYNC_PUBLIC_BASE_URL",
   "DEVICE_SYNC_SECRET",
   "FFMPEG_COMMAND",
   "FIREWORKS_API_KEY",
+  "GOOGLE_API_KEY",
   "GOOGLE_GENERATIVE_AI_API_KEY",
+  "GROQ_API_KEY",
   "HF_TOKEN",
   "HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS",
   "HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER",
@@ -79,7 +88,12 @@ const RUNNER_EXACT_ALLOWED_ENV_KEYS = new Set<string>([
   "HUGGINGFACEHUB_API_TOKEN",
   "HUGGINGFACE_API_KEY",
   "HUGGING_FACE_HUB_TOKEN",
+  "LINQ_API_BASE_URL",
+  "LINQ_API_TOKEN",
+  "LINQ_WEBHOOK_SECRET",
   "LITELLM_PROXY_API_KEY",
+  "LM_STUDIO_API_KEY",
+  "MISTRAL_API_KEY",
   "MURPH_WEB_FETCH_ENABLED",
   "MURPH_WEB_SEARCH_MAX_RESULTS",
   "MURPH_WEB_SEARCH_PROVIDER",
@@ -87,54 +101,27 @@ const RUNNER_EXACT_ALLOWED_ENV_KEYS = new Set<string>([
   "NODE_ENV",
   "NVIDIA_API_KEY",
   "NGC_API_KEY",
+  "OLLAMA_API_KEY",
   "OPENAI_API_KEY",
   "OPENROUTER_API_KEY",
   "OURA_CLIENT_ID",
   "OURA_CLIENT_SECRET",
   "PDFTOTEXT_COMMAND",
+  "PERPLEXITY_API_KEY",
   "TELEGRAM_API_BASE_URL",
   "TELEGRAM_BOT_TOKEN",
   "TELEGRAM_BOT_USERNAME",
   "TELEGRAM_FILE_BASE_URL",
+  "TOGETHER_API_KEY",
+  "VENICE_API_KEY",
+  "VLLM_API_KEY",
   "WHISPER_COMMAND",
   "WHISPER_MODEL_PATH",
   "WHOOP_CLIENT_ID",
   "WHOOP_CLIENT_SECRET",
+  "XAI_API_KEY",
+  ...HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
 ]);
-
-const RUNNER_ALLOWED_ENV_PREFIXES = [
-  "ANTHROPIC_",
-  "BRAVE_",
-  "CEREBRAS_",
-  "DEEPSEEK_",
-  "DEVICE_SYNC_",
-  "FIREWORKS_",
-  "GOOGLE_",
-  "GROQ_",
-  "HF_",
-  "HOSTED_ASSISTANT_",
-  "HUGGINGFACE_",
-  "HUGGING_FACE_",
-  "LINQ_",
-  "LITELLM_",
-  "LM_STUDIO_",
-  "MISTRAL_",
-  "NGC_",
-  "NVIDIA_",
-  "OLLAMA_",
-  "OPENAI_",
-  "OPENROUTER_",
-  "OURA_",
-  "PDFTOTEXT_",
-  "PERPLEXITY_",
-  "TELEGRAM_",
-  "TOGETHER_",
-  "VENICE_",
-  "VLLM_",
-  "WHISPER_",
-  "WHOOP_",
-  "XAI_",
-] as const;
 
 type StringEnvSource = Readonly<Record<string, string | undefined>>;
 type UnknownEnvSource = Readonly<Record<string, unknown>>;
@@ -215,12 +202,12 @@ export function filterHostedRunnerUserEnv(
 }
 
 export function isAllowedHostedAssistantReferencedRunnerEnvKey(key: string): boolean {
-  return isAllowedRunnerEnvKey(key);
+  return !DISALLOWED_USER_ENV_KEYS.has(key)
+    && !DISALLOWED_USER_ENV_PREFIXES.some((prefix) => key.startsWith(prefix));
 }
 
 function isAllowedRunnerEnvKey(key: string): boolean {
-  return RUNNER_EXACT_ALLOWED_ENV_KEYS.has(key)
-    || RUNNER_ALLOWED_ENV_PREFIXES.some((prefix) => key.startsWith(prefix));
+  return RUNNER_EXACT_ALLOWED_ENV_KEYS.has(key);
 }
 
 function parseHostedEnvCsvList(value: string | undefined): string[] {

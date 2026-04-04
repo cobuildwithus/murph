@@ -404,7 +404,6 @@ model HostedShareLink {
   codeHash           String   @unique @map("code_hash")
   senderMemberId     String?  @map("sender_member_id")
   previewTitle       String   @map("preview_title")
-  previewJson        Json?    @map("preview_json")
   encryptedPayload   String   @map("encrypted_payload")
   encryptionKeyVersion String @map("encryption_key_version")
   expiresAt          DateTime @map("expires_at")

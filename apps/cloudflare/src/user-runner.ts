@@ -24,10 +24,6 @@ import type {
 } from "@murphai/gateway-core";
 import {
   emitHostedExecutionStructuredLog,
-  normalizeHostedExecutionBaseUrl,
-  normalizeHostedExecutionString,
-  readHostedExecutionVercelProductionBaseUrl,
-  resolveHostedExecutionAiUsageClient,
   resolveHostedExecutionDispatchOutcomeState,
 } from "@murphai/hosted-execution";
 
@@ -116,11 +112,14 @@ export class HostedUserRunner {
     this.queueStore = new RunnerQueueStore(state, null);
     this.scheduler = new RunnerScheduler(this.queueStore, state, env.defaultAlarmDelayMs);
     this.userKeyStore = createHostedUserKeyStore({
-      automationKey: env.bundleEncryptionKey,
-      automationKeyId: env.bundleEncryptionKeyId,
+      automationRecipientKeyId: env.automationRecipientKeyId,
+      automationRecipientPrivateKey: env.automationRecipientPrivateKey,
+      automationRecipientPrivateKeysById: env.automationRecipientPrivateKeysById,
+      automationRecipientPublicKey: env.automationRecipientPublicKey,
       bucket,
-      envelopeKeyId: env.bundleEncryptionKeyId,
-      envelopeKeysById: env.bundleEncryptionKeysById,
+      envelopeEncryptionKey: env.bundleEncryptionKey,
+      envelopeEncryptionKeyId: env.bundleEncryptionKeyId,
+      envelopeEncryptionKeysById: env.bundleEncryptionKeysById,
     });
   }
 
@@ -233,11 +232,98 @@ export class HostedUserRunner {
     return (await this.ensureRunnerStores()).crypto.envelope;
   }
 
+  async putDeviceSyncRuntimeSnapshot(input: {
+    snapshot: import("@murphai/hosted-execution").HostedExecutionDeviceSyncRuntimeSnapshotResponse;
+  }): Promise<import("@murphai/hosted-execution").HostedExecutionDeviceSyncRuntimeSnapshotResponse> {
+    const userId = await this.requireBoundUserId();
+    const { crypto } = await this.ensureRunnerStores(userId);
+    return createHostedDeviceSyncRuntimeStore({
+      bucket: this.bucket,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
+    }).mergeSnapshot(input.snapshot);
+  }
+
+  async putPendingUsage(input: {
+    usage: readonly Record<string, unknown>[];
+  }): Promise<{ recorded: number; usageIds: string[] }> {
+    const userId = await this.requireBoundUserId();
+    const { crypto } = await this.ensureRunnerStores(userId);
+    return createHostedPendingUsageStore({
+      bucket: this.bucket,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
+    }).appendUsage({
+      usage: input.usage,
+      userId,
+    });
+  }
+
+  async readPendingUsage(input?: { limit?: number | null }): Promise<Record<string, unknown>[]> {
+    const userId = await this.requireBoundUserId();
+    const { crypto } = await this.ensureRunnerStores(userId);
+    return createHostedPendingUsageStore({
+      bucket: this.bucket,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
+    }).readUsage({
+      limit: input?.limit ?? undefined,
+      userId,
+    });
+  }
+
+  async deletePendingUsage(input: { usageIds: readonly string[] }): Promise<void> {
+    const userId = await this.requireBoundUserId();
+    const { crypto } = await this.ensureRunnerStores(userId);
+    await createHostedPendingUsageStore({
+      bucket: this.bucket,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
+    }).deleteUsage({
+      usageIds: input.usageIds,
+      userId,
+    });
+  }
+
+  async putSharePack(input: {
+    pack: import("@murphai/hosted-execution").HostedExecutionSharePackResponse;
+  }): Promise<import("@murphai/hosted-execution").HostedExecutionSharePackResponse> {
+    const userId = await this.requireBoundUserId();
+    const { crypto } = await this.ensureRunnerStores(userId);
+    const { createHostedSharePackStore } = await import("./share-pack-store.ts");
+    return createHostedSharePackStore({
+      bucket: this.bucket,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
+    }).writeSharePack({
+      ...input.pack,
+      userId,
+    });
+  }
+
+  async putUserKeyEnvelope(input: {
+    envelope: import("@murphai/runtime-state").HostedUserRootKeyEnvelope;
+  }): Promise<HostedUserCryptoContext["envelope"]> {
+    const userId = await this.requireBoundUserId();
+    const envelope = await this.userKeyStore.putUserRootKeyEnvelope({
+      envelope: input.envelope,
+      userId,
+    });
+    this.runnerStores = null;
+    await this.ensureRunnerStores(userId);
+    return envelope;
+  }
+
   async upsertUserKeyRecipient(input: {
     kind: import("@murphai/runtime-state").HostedUserManagedRootKeyRecipientKind;
     metadata?: Record<string, string | number | boolean | null>;
-    recipientKey: Uint8Array;
     recipientKeyId: string;
+    recipientPublicKeyJwk: import("@murphai/runtime-state").HostedUserRecipientPublicKeyJwk;
   }): Promise<HostedUserCryptoContext["envelope"]> {
     const userId = await this.requireBoundUserId();
     const envelope = await this.userKeyStore.upsertRecipient({
@@ -694,8 +780,7 @@ export class HostedUserRunner {
           startedAt: recovered.record.lastRunAt ?? new Date().toISOString(),
         }),
       });
-      await this.deleteCommittedDispatchBestEffort(record.userId, recovered.committedEventId);
-      await this.flushPendingUsageBestEffort(record.userId);
+        await this.deleteCommittedDispatchBestEffort(record.userId, recovered.committedEventId);
       return completedRecord;
     }
 
@@ -723,65 +808,10 @@ export class HostedUserRunner {
       }),
     });
     await this.deleteCommittedDispatchBestEffort(userId, committed.eventId);
-    await this.flushPendingUsageBestEffort(userId);
     if (cleanupDispatch) {
       await this.deleteTransientDispatchDataBestEffort(cleanupDispatch);
     }
     return record;
-  }
-
-  private async flushPendingUsageBestEffort(userId: string): Promise<void> {
-    try {
-      const { crypto } = await this.ensureRunnerStores(userId);
-      const store = createHostedPendingUsageStore({
-        bucket: this.bucket,
-        key: crypto.rootKey,
-        keyId: crypto.rootKeyId,
-        keysById: crypto.keysById,
-      });
-      const usageImportControlPlane = resolveHostedExecutionUsageImportControlPlane(
-        this.runnerRuntimeEnvSource,
-      );
-      const client = resolveHostedExecutionAiUsageClient({
-        baseUrl: usageImportControlPlane.baseUrl,
-        boundUserId: userId,
-        internalToken: usageImportControlPlane.internalToken,
-        timeoutMs: this.env.runnerTimeoutMs,
-      });
-
-      if (!client) {
-        return;
-      }
-
-      while (true) {
-        const batch = await store.readUsage({
-          limit: 50,
-          userId,
-        });
-        if (batch.length === 0) {
-          return;
-        }
-
-        const result = await client.recordUsage(batch);
-        const acknowledgedUsageIds = result.usageIds.filter((usageId) => typeof usageId === "string" && usageId.length > 0);
-        if (acknowledgedUsageIds.length === 0) {
-          return;
-        }
-
-        await store.deleteUsage({
-          usageIds: acknowledgedUsageIds,
-          userId,
-        });
-
-        if (acknowledgedUsageIds.length < batch.length) {
-          return;
-        }
-      }
-    } catch (error) {
-      console.warn(
-        `Failed to flush hosted AI usage records for ${userId}: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
   }
 
   private createRunContext(
@@ -960,47 +990,4 @@ export class HostedUserRunner {
       }
     }
   }
-}
-
-function resolveHostedExecutionUsageImportControlPlane(
-  source: Readonly<Record<string, unknown>>,
-): {
-  baseUrl: string | null;
-  internalToken: string | null;
-} {
-  const stringSource = toStringEnvSource(source);
-
-  return {
-    baseUrl:
-      normalizeHostedExecutionBaseUrl(stringSource.HOSTED_WEB_BASE_URL, {
-        allowHttpLocalhost: true,
-      })
-      ?? readHostedExecutionVercelProductionBaseUrl(stringSource, {
-        allowHttpLocalhost: true,
-      }),
-    internalToken: readHostedExecutionInternalTokens(stringSource)[0] ?? null,
-  };
-}
-
-function readHostedExecutionInternalTokens(
-  source: Readonly<Record<string, string | undefined>>,
-): string[] {
-  const configured = normalizeHostedExecutionString(source.HOSTED_EXECUTION_INTERNAL_TOKENS);
-
-  if (!configured) {
-    return [];
-  }
-
-  return configured
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-}
-
-function toStringEnvSource(
-  source: Readonly<Record<string, unknown>>,
-): Readonly<Record<string, string | undefined>> {
-  return Object.fromEntries(
-    Object.entries(source).map(([key, value]) => [key, typeof value === "string" ? value : undefined]),
-  );
 }

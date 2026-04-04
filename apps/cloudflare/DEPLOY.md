@@ -101,7 +101,6 @@ Optional non-secret worker variables:
 - `HOSTED_EMAIL_DOMAIN`
 - `HOSTED_EMAIL_FROM_ADDRESS`
 - `HOSTED_EMAIL_LOCAL_PART`
-- `HOSTED_WEB_BASE_URL` as the shared hosted-web base URL for worker-side proxy calls and post-commit usage imports
 
 
 Optional non-secret provider/toolchain variables to expose through the worker and forward into the container:
@@ -134,30 +133,28 @@ Set these in the selected GitHub environment as secrets:
 - `CLOUDFLARE_ACCOUNT_ID`
 - `HOSTED_EXECUTION_SIGNING_SECRET`
 - `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY`
-- `HOSTED_EXECUTION_CONTROL_TOKENS`
-- `HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS`
+- `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK`
+- `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK`
 
-Optional secret for staged bundle-key rotation:
+Optional secrets for staged rotation:
 
 - `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON`
-
-Additional hosted-web control-plane secrets:
-
-- `HOSTED_EXECUTION_INTERNAL_TOKENS` when the worker should import buffered hosted AI usage into `apps/web` after commit/finalize without exposing that bearer token to the runner container
-
+- `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON`
 
 Optional hosted email bridge secrets:
 
 - `HOSTED_EMAIL_CLOUDFLARE_API_TOKEN`
 - `HOSTED_EMAIL_SIGNING_SECRET`
 
-The checked-in scaffold and rendered deploy config both declare those four names in Wrangler's experimental `secrets.required` field, so `wrangler deploy` and `wrangler versions upload` fail early when any of them are missing from the Worker.
+The checked-in scaffold and rendered deploy config declare the signing secret, bundle key, and automation recipient keypair in Wrangler's experimental `secrets.required` field, so `wrangler deploy` and `wrangler versions upload` fail early when any of them are missing from the Worker.
 
-Both control tokens are treated as required runtime inputs now, not just deploy-time placeholders:
+The worker now authenticates operator/control requests with HMAC signatures derived from `HOSTED_EXECUTION_SIGNING_SECRET`, and each native container invocation gets its own one-shot runner control token injected at start time.
 
-- missing `HOSTED_EXECUTION_CONTROL_TOKENS` makes `/internal/users/:userId/{status,run,env}` fail closed
-- missing `HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS` makes native container invoke requests fail closed before the runner job starts
+- missing `HOSTED_EXECUTION_SIGNING_SECRET` makes signed dispatch and control requests fail closed
+- missing `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY` prevents encrypted hosted storage from decrypting
+- missing automation recipient JWKs prevents the worker from unwrapping per-user root keys
 - changing `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY` or `CF_BUNDLE_KEY_ID` in place still requires staging older keys in `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON`; missing keyring entries fail closed on `keyId` mismatch
+- rotating the automation unwrap key in place requires staging older private JWKs in `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON` until existing envelopes are migrated
 
 ### Optional provider/runtime secrets
 
@@ -211,8 +208,8 @@ export CF_CONTAINER_INSTANCE_TYPE=standard-1
 export HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER=1m
 export HOSTED_EXECUTION_SIGNING_SECRET=...
 export HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY=...
-export HOSTED_EXECUTION_CONTROL_TOKENS=current-operator-token,previous-operator-token
-export HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS=current-runner-token,previous-runner-token
+export HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK=...
+export HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK=...
 export HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID=...
 export HOSTED_EMAIL_CLOUDFLARE_API_TOKEN=...
 export HOSTED_EMAIL_DOMAIN=mail.example.test
@@ -341,8 +338,6 @@ Before the first real production deploy, confirm all of these are true:
 
 - Docker is running wherever `wrangler deploy` will execute
 - the Worker answers `GET /health`
-- `HOSTED_EXECUTION_CONTROL_TOKENS` is set
-- `HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS` is set and stable
 - local `wrangler dev` also has those two tokens set before you test protected control flows
 - `HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL` is set when you plan to run smoke checks against a non-default public Worker URL
 - `CF_CONTAINER_INSTANCE_TYPE` is set explicitly to at least `standard-1`, or to a custom JSON object if you have an enterprise plan and need higher fixed limits

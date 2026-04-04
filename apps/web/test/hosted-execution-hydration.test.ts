@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ExecutionOutboxStatus } from "@prisma/client";
 import { HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION } from "@murphai/hosted-execution";
@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
     generatedAt: "2026-03-26T12:30:00.000Z",
     userId: "member_123",
   })),
+  putDeviceSyncRuntimeSnapshot: vi.fn(),
+  putSharePack: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -45,6 +47,13 @@ vi.mock("@/src/lib/device-sync/env", () => ({
 
 vi.mock("@/src/lib/device-sync/internal-runtime", () => ({
   buildHostedDeviceSyncRuntimeSnapshot: mocks.buildHostedDeviceSyncRuntimeSnapshot,
+}));
+
+vi.mock("@/src/lib/hosted-execution/control", () => ({
+  requireHostedExecutionControlClient: () => ({
+    putDeviceSyncRuntimeSnapshot: mocks.putDeviceSyncRuntimeSnapshot,
+    putSharePack: mocks.putSharePack,
+  }),
 }));
 
 import {
@@ -181,6 +190,12 @@ function buildDeviceSyncSignalOutboxRecord(overrides: Partial<{
 }
 
 describe("hydrateHostedExecutionDispatch", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.putDeviceSyncRuntimeSnapshot.mockResolvedValue(undefined);
+    mocks.putSharePack.mockResolvedValue(undefined);
+  });
+
   it("hydrates device-sync wake dispatches from stored signal payloads", async () => {
     const prisma = {
       deviceSyncSignal: {
@@ -235,15 +250,15 @@ describe("hydrateHostedExecutionDispatch", () => {
         kind: "device-sync.wake",
         provider: "oura",
         reason: "webhook_hint",
-        runtimeSnapshot: {
-          connections: [],
-          generatedAt: "2026-03-26T12:30:00.000Z",
-          userId: "member_123",
-        },
         userId: "member_123",
       },
       eventId: "evt_device_sync_123",
       occurredAt: "2026-03-26T12:30:00.000Z",
+    });
+    expect(mocks.putDeviceSyncRuntimeSnapshot).toHaveBeenCalledWith("member_123", {
+      connections: [],
+      generatedAt: "2026-03-26T12:30:00.000Z",
+      userId: "member_123",
     });
   });
 
@@ -278,13 +293,16 @@ describe("hydrateHostedExecutionDispatch", () => {
       event: {
         kind: "vault.share.accepted",
         share: {
-          ...share,
-          pack,
+          shareId: "share_123",
         },
         userId: "member_123",
       },
       eventId: "evt_share_123",
       occurredAt: "2026-03-26T12:30:00.000Z",
+    });
+    expect(mocks.putSharePack).toHaveBeenCalledWith("member_123", "share_123", {
+      shareId: "share_123",
+      pack,
     });
   });
 

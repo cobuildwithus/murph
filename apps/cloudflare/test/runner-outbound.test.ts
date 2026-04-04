@@ -23,9 +23,7 @@ describe("handleRunnerOutboundRequest", () => {
         },
         method: "POST",
       }),
-      createRunnerOutboundEnv({
-        HOSTED_WEB_BASE_URL: "https://web.example.test",
-      }),
+      createRunnerOutboundEnv(),
       "member_123",
       RUNNER_PROXY_TOKEN,
     );
@@ -55,9 +53,7 @@ describe("handleRunnerOutboundRequest", () => {
         }),
         method: "POST",
       }),
-      createRunnerOutboundEnv({
-        HOSTED_WEB_BASE_URL: "https://web.example.test",
-      }),
+      createRunnerOutboundEnv(),
       "member_123",
       RUNNER_PROXY_TOKEN,
     );
@@ -85,9 +81,7 @@ describe("handleRunnerOutboundRequest", () => {
         }),
         method: "POST",
       }),
-      createRunnerOutboundEnv({
-        HOSTED_WEB_BASE_URL: "https://web.example.test",
-      }),
+      createRunnerOutboundEnv(),
       "member_123",
       RUNNER_PROXY_TOKEN,
     );
@@ -101,7 +95,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("keeps device-sync runtime routes local even when hosted-web base URLs are configured", async () => {
+  it("keeps device-sync runtime routes local even when deprecated hosted-web vars are present", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
       headers: {
         "content-type": "application/json; charset=utf-8",
@@ -136,7 +130,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("returns 410 for removed hosted share payload fetches in the runtime hot path", async () => {
+  it("returns 404 when a share pack has not been published for the bound user", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
       headers: {
         "content-type": "application/json; charset=utf-8",
@@ -146,16 +140,11 @@ describe("handleRunnerOutboundRequest", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await handleRunnerOutboundRequest(
-      new Request("http://share-pack.worker/api/hosted-share/internal/share_123/payload", {
-        body: JSON.stringify({
-          shareCode: "code_123",
-        }),
+      new Request("http://share.worker/internal/shares/share_123/payload", {
         headers: createRunnerProxyHeaders(),
         method: "POST",
       }),
-      createRunnerOutboundEnv({
-        HOSTED_WEB_BASE_URL: "https://web.example.test",
-      }),
+      createRunnerOutboundEnv(),
       "member_123",
       RUNNER_PROXY_TOKEN,
     );
@@ -167,7 +156,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("keeps removed hosted share payload fetches disabled even when the dedicated share token is missing", async () => {
+  it("keeps the removed legacy hosted share payload route disabled", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
       headers: {
         "content-type": "application/json; charset=utf-8",
@@ -178,16 +167,10 @@ describe("handleRunnerOutboundRequest", () => {
 
     const response = await handleRunnerOutboundRequest(
       new Request("http://share-pack.worker/api/hosted-share/internal/share_123/payload", {
-        body: JSON.stringify({
-          shareCode: "code_123",
-        }),
         headers: createRunnerProxyHeaders(),
         method: "POST",
       }),
-      createRunnerOutboundEnv({
-        HOSTED_WEB_BASE_URL: "https://web.example.test",
-        HOSTED_SHARE_INTERNAL_TOKENS: undefined,
-      }),
+      createRunnerOutboundEnv(),
       "member_123",
       RUNNER_PROXY_TOKEN,
     );
@@ -199,7 +182,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("keeps removed hosted share payload fetches disabled even if legacy query params are present", async () => {
+  it("keeps legacy hosted share payload query params disabled on the new share proxy host", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
       headers: {
         "content-type": "application/json; charset=utf-8",
@@ -209,16 +192,11 @@ describe("handleRunnerOutboundRequest", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await handleRunnerOutboundRequest(
-      new Request("http://share-pack.worker/api/hosted-share/internal/share_123/payload?shareCode=code_123", {
-        body: JSON.stringify({
-          shareCode: "code_123",
-        }),
+      new Request("http://share.worker/api/hosted-share/internal/share_123/payload?shareCode=code_123", {
         headers: createRunnerProxyHeaders(),
         method: "POST",
       }),
-      createRunnerOutboundEnv({
-        HOSTED_WEB_BASE_URL: "https://web.example.test",
-      }),
+      createRunnerOutboundEnv(),
       "member_123",
       RUNNER_PROXY_TOKEN,
     );
@@ -256,9 +234,7 @@ describe("handleRunnerOutboundRequest", () => {
         }),
         method: "POST",
       }),
-      createRunnerOutboundEnv({
-        HOSTED_WEB_BASE_URL: "https://web.example.test",
-      }),
+      createRunnerOutboundEnv(),
       "member_123",
       RUNNER_PROXY_TOKEN,
     );
@@ -307,18 +283,36 @@ function createRunnerProxyHeaders(headers: Record<string, string> = {}) {
 }
 
 function createRunnerOutboundEnv(overrides: Partial<Record<string, unknown>> = {}) {
+  const values = new Map<string, string>();
+
   return {
     BUNDLES: {
-      async delete() {},
-      async get() {
-        return null;
+      async delete(key: string) {
+        values.delete(key);
       },
-      async put() {},
+      async get(key: string) {
+        const value = values.get(key);
+
+        if (!value) {
+          return null;
+        }
+
+        return {
+          async arrayBuffer() {
+            return Buffer.from(value, "utf8");
+          },
+        };
+      },
+      async put(key: string, value: string) {
+        values.set(key, value);
+      },
     },
+    HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID: "automation:v1",
+    HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK:
+      "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"xSelVJv6r6LPUS8GCNgj1T_7z5GXOrhgY1cCdzGb5ao\",\"y\":\"8HhciS1cAPKs_fPfgZnb1USdRtBX-4Nvp8XiBHuMcmY\",\"d\":\"HAPljluiFVW3g-UEmrJ9NVYTlclAhaC8N5LT0h7vitQ\",\"ext\":true,\"key_ops\":[\"deriveBits\"]}",
+    HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK:
+      "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"xSelVJv6r6LPUS8GCNgj1T_7z5GXOrhgY1cCdzGb5ao\",\"y\":\"8HhciS1cAPKs_fPfgZnb1USdRtBX-4Nvp8XiBHuMcmY\",\"ext\":true,\"key_ops\":[]}",
     HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
-    HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
-    HOSTED_EXECUTION_INTERNAL_TOKENS: "internal-token",
-    HOSTED_SHARE_INTERNAL_TOKENS: "share-token",
     HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
     USER_RUNNER: {
       getByName() {

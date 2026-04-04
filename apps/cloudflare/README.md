@@ -37,8 +37,9 @@ Current worker env/config names read directly by `src/env.ts`:
 
 - required secret: `HOSTED_EXECUTION_SIGNING_SECRET`
 - required secret: `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY`
-- required secret: `HOSTED_EXECUTION_CONTROL_TOKENS` gates the operator control routes; the first token is used for new outbound requests and any configured token is accepted inbound so rotation can overlap old/new values
-- required secret: `HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS` gates the private container HTTP server and native container invoke path with the same overlapping-rotation model
+- required secret: `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK`
+- required secret: `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK`
+- optional secret: `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON` allows staged rotation of the automation unwrap key
 - optional secret: `HOSTED_EMAIL_CLOUDFLARE_API_TOKEN` enables hosted email delivery through Cloudflare Email Routing
 - optional secret: `HOSTED_EMAIL_SIGNING_SECRET` enables trusted hosted email ingress token generation and verification
 - optional non-secret: `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` extends the exact per-user encrypted env key allowlist in both the worker and container
@@ -54,7 +55,7 @@ Current worker env/config names read directly by `src/env.ts`:
 - optional non-secret: `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS` defaults to `120000`
 - optional non-secret: `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS` defaults to `30000` and is forwarded into the container runtime
 - optional non-secret: `HOSTED_ASSISTANT_*` vars choose the explicit platform-managed hosted assistant profile that hosted bootstrap persists into `~/.murph/config.json`. `HOSTED_ASSISTANT_API_KEY_ENV` names the env var to read at runtime; it is never the raw API key itself
-- optional provider/toolchain vars and secrets configured on the Worker are forwarded into the container only when `src/runner-env.ts` explicitly allowlists them; the worker-side hosted web proxy inputs above stay on the Worker side unless that file names them
+- optional provider/toolchain vars and secrets configured on the Worker are forwarded into the container only when `src/runner-env.ts` explicitly names the exact keys; broad prefix forwarding is intentionally not part of the hosted runner contract
 
 Hosted email on this worker keeps the public `From` identity fixed while new outbound sends reuse one stable per-user reply alias. Registered members can also start a thread by emailing that fixed public sender address once their verified email has been synced into hosted execution; the worker resolves that direct inbox only through an encrypted verified-owner index and still re-authorizes the sender before raw-message persistence or hosted dispatch. Learning another member's alias is not enough to reach that member's vault, and neither is addressing the public mailbox from an unregistered or mismatched sender. Legacy per-thread reply aliases still resolve during the cutover, but the worker no longer mints new per-thread route records.
 
@@ -63,8 +64,8 @@ Current worker routes:
 - `GET /health` returns a lightweight health payload and does not require the runtime secrets to be present
 - `GET /` returns the service banner payload
 - `POST /internal/dispatch` accepts only signed internal dispatch from `apps/web`
-- `GET /internal/users/:userId/status` is an operator/internal status route guarded by `HOSTED_EXECUTION_CONTROL_TOKENS`
-- `POST /internal/users/:userId/run` is an operator/internal manual-run route guarded by `HOSTED_EXECUTION_CONTROL_TOKENS`
+- `GET /internal/users/:userId/status` is an operator/internal status route guarded by HMAC request signatures
+- `POST /internal/users/:userId/run` is an operator/internal manual-run route guarded by HMAC request signatures
 - `GET /internal/users/:userId/env` returns the configured per-user encrypted runner env key names (never the secret values)
 - `PUT /internal/users/:userId/env` merges or replaces the user's separately encrypted hosted env object
 - `DELETE /internal/users/:userId/env` clears the user's separately encrypted hosted env object without rewriting `agent-state`

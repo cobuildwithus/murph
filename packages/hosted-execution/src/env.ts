@@ -1,4 +1,13 @@
-import { DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL, DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL } from "./callback-hosts.ts";
+import {
+  parseHostedUserRecipientPublicKeyJwk,
+  type HostedUserRecipientPublicKeyJwk,
+} from "@murphai/runtime-state";
+
+import {
+  DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
+  DEFAULT_HOSTED_EXECUTION_SHARE_PACK_PROXY_BASE_URL,
+  DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
+} from "./callback-hosts.ts";
 export interface HostedExecutionDispatchEnvironment {
   dispatchTimeoutMs: number;
   dispatchUrl: string | null;
@@ -12,11 +21,16 @@ export interface HostedExecutionControlEnvironment {
 
 export interface HostedExecutionWebControlPlaneEnvironment {
   deviceSyncRuntimeBaseUrl: string;
+  shareBaseUrl: string;
   usageBaseUrl: string;
 }
 
 export interface HostedExecutionWorkerEnvironment {
   allowedUserEnvKeys: string | null;
+  automationRecipientKeyId: string;
+  automationRecipientPrivateJwkJson: string;
+  automationRecipientPrivateKeyringJson: string | null;
+  automationRecipientPublicJwkJson: string;
   bundleEncryptionKeyBase64: string;
   bundleEncryptionKeyId: string;
   bundleEncryptionKeyringJson: string | null;
@@ -69,6 +83,7 @@ export function readHostedExecutionWebControlPlaneEnvironment(
 ): HostedExecutionWebControlPlaneEnvironment {
   return {
     deviceSyncRuntimeBaseUrl: DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
+    shareBaseUrl: DEFAULT_HOSTED_EXECUTION_SHARE_PACK_PROXY_BASE_URL,
     usageBaseUrl: DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
   };
 }
@@ -95,6 +110,20 @@ export function readHostedExecutionWorkerEnvironment(
 ): HostedExecutionWorkerEnvironment {
   return {
     allowedUserEnvKeys: normalizeHostedExecutionString(source.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS),
+    automationRecipientKeyId: normalizeHostedExecutionString(
+      source.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID,
+    ) ?? "automation:v1",
+    automationRecipientPrivateJwkJson: requireHostedExecutionString(
+      normalizeHostedExecutionString(source.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK),
+      "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK",
+    ),
+    automationRecipientPrivateKeyringJson: normalizeHostedExecutionString(
+      source.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON,
+    ),
+    automationRecipientPublicJwkJson: requireHostedExecutionString(
+      normalizeHostedExecutionString(source.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK),
+      "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK",
+    ),
     bundleEncryptionKeyBase64: requireHostedExecutionString(
       source.HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY,
       "HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY",
@@ -130,6 +159,21 @@ export function readHostedExecutionWorkerEnvironment(
       "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS",
     ),
   };
+}
+
+export function readHostedExecutionAutomationRecipientPublicKeyJwk(
+  source: EnvSource = process.env,
+): HostedUserRecipientPublicKeyJwk | null {
+  const raw = normalizeHostedExecutionString(source.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK);
+
+  if (!raw) {
+    return null;
+  }
+
+  return parseHostedUserRecipientPublicKeyJwk(
+    JSON.parse(raw) as unknown,
+    "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK",
+  );
 }
 
 export function normalizeHostedExecutionBaseUrl(

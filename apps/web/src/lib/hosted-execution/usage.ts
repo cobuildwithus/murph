@@ -9,6 +9,7 @@ import {
 } from "@murphai/runtime-state/node";
 
 import { getPrisma } from "../prisma";
+import { requireHostedExecutionControlClient } from "./control";
 
 export interface ImportHostedAiUsageResult {
   recordedIds: string[];
@@ -239,6 +240,70 @@ export async function importHostedAiUsageRecords(input: {
   return {
     recordedIds,
     records,
+  };
+}
+
+export interface HostedPendingAiUsageImportDrainResult {
+  imported: number;
+  failedUsers: number;
+  scannedUsers: number;
+}
+
+export async function drainHostedPendingAiUsageImports(input: {
+  limitPerUser?: number;
+  prisma?: PrismaClient;
+} = {}): Promise<HostedPendingAiUsageImportDrainResult> {
+  const prisma = input.prisma ?? getPrisma();
+  const client = requireHostedExecutionControlClient();
+  const members = await prisma.hostedMember.findMany({
+    where: {
+      status: {
+        in: ["registered", "active", "suspended"],
+      },
+    },
+    select: {
+      id: true,
+    },
+    orderBy: {
+      createdAt: "asc",
+    },
+  });
+
+  let imported = 0;
+  let failedUsers = 0;
+
+  for (const member of members) {
+    try {
+      const usage = await client.getPendingUsage(member.id, input.limitPerUser ?? 200);
+
+      if (usage.length === 0) {
+        continue;
+      }
+
+      const result = await importHostedAiUsageRecords({
+        prisma,
+        trustedUserId: member.id,
+        usage,
+      });
+
+      if (result.recordedIds.length > 0) {
+        await client.deletePendingUsage(member.id, result.recordedIds);
+      }
+
+      imported += result.recordedIds.length;
+    } catch (error) {
+      failedUsers += 1;
+      console.error(
+        `Failed to import hosted pending AI usage for ${member.id}.`,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  return {
+    failedUsers,
+    imported,
+    scannedUsers: members.length,
   };
 }
 

@@ -40,6 +40,22 @@ describe("hosted assistant runner env policy", () => {
     });
   });
 
+  it("forwards a custom hosted assistant api key alias when explicitly referenced", () => {
+    const env = buildHostedRunnerContainerEnv({
+      HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_ENTERPRISE_API_KEY",
+      HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      OPENAI_ENTERPRISE_API_KEY: "secret-value",
+    });
+
+    expect(env).toMatchObject({
+      HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_ENTERPRISE_API_KEY",
+      HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      OPENAI_ENTERPRISE_API_KEY: "secret-value",
+    });
+  });
+
   it("does not forward referenced reserved worker secrets into the runner", () => {
     const env = buildHostedRunnerContainerEnv({
       HOSTED_ASSISTANT_API_KEY_ENV: "HOSTED_EXECUTION_SIGNING_SECRET",

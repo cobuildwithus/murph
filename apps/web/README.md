@@ -88,7 +88,7 @@ Hosted onboarding extras:
 - `HOSTED_EXECUTION_DISPATCH_URL`
 - `HOSTED_EXECUTION_SIGNING_SECRET`
 - `HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS`
-- `HOSTED_EXECUTION_CONTROL_TOKENS` so `/settings` can sync a verified email into hosted user env and trigger a hosted run
+- `HOSTED_EXECUTION_INTERNAL_TOKENS` for the remaining web-owned internal routes such as `/api/internal/hosted-execution/outbox/drain`
 - `HOSTED_EXECUTION_SCHEDULER_TOKENS` for authenticated scheduler callers that trigger `/api/internal/hosted-execution/outbox/cron` and `/api/internal/hosted-execution/usage/cron`
 
 Optional hosted AI usage metering:
@@ -103,8 +103,7 @@ When you set `DEVICE_SYNC_PUBLIC_BASE_URL`, point it at the stable production pr
 Set these under `Settings -> Environment Variables` in the Vercel project that deploys `apps/web`. Production is the minimum. Only set Preview if you also have matching preview peers and secrets instead of pointing preview deploys at production control planes.
 
 - `HOSTED_EXECUTION_SIGNING_SECRET`: generate a strong random secret and use the exact same value in Vercel and the Cloudflare hosted-execution worker. `apps/web` signs dispatch payloads with it and Cloudflare verifies them.
-- `HOSTED_EXECUTION_CONTROL_TOKENS`: generate a distinct comma-separated bearer-token set and use the same value in Vercel and the Cloudflare hosted-execution worker. `apps/web` uses the first token for outbound worker control calls and accepts any configured token inbound.
-- `HOSTED_EXECUTION_INTERNAL_TOKENS`: generate a distinct comma-separated bearer-token set for trusted hosted execution maintenance routes that still use bearer auth. Hosted web accepts any configured token inbound.
+- `HOSTED_EXECUTION_INTERNAL_TOKENS`: generate a distinct comma-separated bearer-token set for the remaining web-owned internal routes such as `/api/internal/hosted-execution/outbox/drain`.
 - `HOSTED_EXECUTION_SCHEDULER_TOKENS`: generate a distinct comma-separated bearer-token set for external schedulers that call the hosted cron routes directly.
 - `CRON_SECRET`: set this in Vercel when using `vercel.json` cron jobs. Vercel sends it as `Authorization: Bearer <CRON_SECRET>`, and the hosted cron routes accept it as the scheduler credential.
 - `HOSTED_SHARE_INTERNAL_TOKENS`: generate a distinct comma-separated bearer-token set for trusted server-to-server hosted share routes.

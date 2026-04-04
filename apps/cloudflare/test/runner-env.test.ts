@@ -40,6 +40,18 @@ describe("buildHostedRunnerContainerEnv", () => {
     });
   });
 
+  it("does not forward prefix-only provider or channel extras", () => {
+    expect(buildHostedRunnerContainerEnv({
+      OPENAI_BASE_URL: "https://proxy.example.test/v1",
+      TELEGRAM_WEBHOOK_SECRET: "telegram-webhook-secret",
+      WHOOP_REDIRECT_URI: "https://worker.example.test/callback",
+    })).toEqual({
+      HOSTED_EMAIL_INGRESS_READY: "false",
+      HOSTED_EMAIL_SEND_READY: "false",
+      NODE_ENV: "production",
+    });
+  });
+
   it("forwards hosted web-read enablement into the runner", () => {
     expect(buildHostedRunnerContainerEnv({
       MURPH_WEB_FETCH_ENABLED: "true",

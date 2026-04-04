@@ -91,6 +91,13 @@ describe("RunnerContainer", () => {
           userId: "member_123",
         },
       },
+      "share.worker": {
+        method: "shareWorker",
+        params: {
+          internalWorkerProxyToken: expect.any(String),
+          userId: "member_123",
+        },
+      },
       "usage.worker": {
         method: "usageWorker",
         params: {
@@ -392,7 +399,7 @@ describe("RunnerContainer", () => {
         userId: "member_123",
       }),
     ).rejects.toThrow(
-      "HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS must include at least one token for native hosted execution.",
+      "Hosted execution native runner control token is required.",
     );
 
     expect(getByName).not.toHaveBeenCalled();
