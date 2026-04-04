@@ -306,8 +306,8 @@ export async function lintKnowledgePages(
   const problems = await collectKnowledgeLintProblems({
     graph,
     issues,
-    pathExists: async (candidatePath) =>
-      await knowledgePathExists(input.vault, candidatePath),
+    readableFileExists: async (candidatePath) =>
+      await knowledgeReadableFileExists(input.vault, candidatePath),
   })
 
   return {
@@ -363,7 +363,7 @@ export function requireUniqueKnowledgePageBySlug(
 async function collectKnowledgeLintProblems(input: {
   graph: DerivedKnowledgeGraph
   issues: readonly DerivedKnowledgeGraphIssue[]
-  pathExists: (candidatePath: string) => Promise<boolean>
+  readableFileExists: (candidatePath: string) => Promise<boolean>
 }): Promise<KnowledgeLintProblem[]> {
   const problems: KnowledgeLintProblem[] = input.issues.map((issue) => ({
     code: `parse_${issue.parser}`,
@@ -382,7 +382,13 @@ async function collectKnowledgeLintProblems(input: {
     duplicatePaths.push(page.relativePath)
     slugCounts.set(page.slug, duplicatePaths)
 
-    problems.push(...(await collectKnowledgePageProblems(page, input.graph, input.pathExists)))
+    problems.push(
+      ...(await collectKnowledgePageProblems(
+        page,
+        input.graph,
+        input.readableFileExists,
+      )),
+    )
   }
 
   for (const [slug, pagePaths] of slugCounts) {
@@ -407,7 +413,7 @@ async function collectKnowledgeLintProblems(input: {
 async function collectKnowledgePageProblems(
   page: DerivedKnowledgeNode,
   graph: DerivedKnowledgeGraph,
-  pathExists: (candidatePath: string) => Promise<boolean>,
+  readableFileExists: (candidatePath: string) => Promise<boolean>,
 ): Promise<KnowledgeLintProblem[]> {
   const problems: KnowledgeLintProblem[] = []
   const pagePath = page.relativePath
@@ -493,11 +499,11 @@ async function collectKnowledgePageProblems(
   }
 
   for (const sourcePath of normalizedSourcePaths) {
-    const sourceExists = await pathExists(sourcePath)
+    const sourceExists = await readableFileExists(sourcePath)
     if (!sourceExists) {
       problems.push({
         code: 'missing_source_path',
-        message: `Source path "${sourcePath}" does not exist inside the vault.`,
+        message: `Source path "${sourcePath}" does not resolve to a readable file inside the vault.`,
         pagePath,
         slug: page.slug,
         severity: 'error',
@@ -531,11 +537,15 @@ function resolveKnowledgeMetadataTag(
   )
 }
 
-async function knowledgePathExists(vaultRoot: string, candidatePath: string): Promise<boolean> {
+async function knowledgeReadableFileExists(
+  vaultRoot: string,
+  candidatePath: string,
+): Promise<boolean> {
   try {
     const absolutePath = await resolveAssistantVaultPath(vaultRoot, candidatePath, 'file path')
     await access(absolutePath)
-    return true
+    const stats = await stat(absolutePath)
+    return stats.isFile()
   } catch {
     return false
   }

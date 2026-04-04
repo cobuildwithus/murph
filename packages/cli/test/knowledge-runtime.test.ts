@@ -257,6 +257,46 @@ describe('upsertKnowledgePage', () => {
     })
   })
 
+  it('flags directory-valued source paths during lint', async () => {
+    const vaultRoot = await createVaultRoot()
+    await mkdir(path.join(vaultRoot, 'research/2026/04/folder-source'), {
+      recursive: true,
+    })
+    await writeVaultFile(
+      vaultRoot,
+      'derived/knowledge/pages/sleep-quality.md',
+      [
+        '---',
+        'title: Sleep quality',
+        'slug: sleep-quality',
+        'pageType: concept',
+        'status: active',
+        'sourcePaths:',
+        '  - research/2026/04/folder-source',
+        '---',
+        '',
+        '# Sleep quality',
+        '',
+        'Body text.',
+        '',
+      ].join('\n'),
+    )
+
+    const lint = await lintKnowledgePages({
+      vault: vaultRoot,
+    })
+
+    expect(lint.problems).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'missing_source_path',
+          slug: 'sleep-quality',
+          severity: 'error',
+        }),
+      ]),
+    )
+  })
+
   it('searches the derived knowledge wiki without recompiling pages', async () => {
     const vaultRoot = await createVaultRoot()
     await writeVaultFile(

@@ -196,7 +196,7 @@ export function renderDerivedKnowledgeIndex(
   ]
 
   if (graph.nodes.length === 0) {
-    lines.push('No derived knowledge pages have been compiled yet.', '')
+    lines.push('No derived knowledge pages have been saved yet.', '')
     return lines.join('\n')
   }
 
@@ -268,10 +268,10 @@ function toDerivedKnowledgeNode(
     stripGeneratedKnowledgeSections(body),
   )
   const sourcePaths = orderedUniqueStrings(
-    firstStringArray(source, ['sourcePaths', 'source_paths', 'sources']),
+    firstStringArray(source, ['sourcePaths']),
   )
   const relatedSlugs = orderedUniqueStrings(
-    firstStringArray(source, ['relatedSlugs', 'related_slugs', 'related']),
+    firstStringArray(source, ['relatedSlugs']),
   )
 
   return {

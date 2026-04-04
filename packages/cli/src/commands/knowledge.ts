@@ -27,7 +27,7 @@ import {
 export function registerKnowledgeCommands(cli: Cli.Cli) {
   const knowledge = Cli.create('knowledge', {
     description:
-      'Compile and inspect Murph\'s non-canonical derived knowledge wiki under derived/knowledge/**.',
+      'Manage and inspect Murph\'s non-canonical derived knowledge wiki under derived/knowledge/**.',
   })
 
   knowledge.command('upsert', {
@@ -82,7 +82,7 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
   })
 
   knowledge.command('list', {
-    description: 'List derived knowledge pages currently compiled under derived/knowledge/pages/**.',
+    description: 'List derived knowledge pages currently saved under derived/knowledge/pages/**.',
     args: emptyArgsSchema,
     options: withBaseOptions({
       pageType: z
@@ -113,7 +113,7 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
       query: z
         .string()
         .min(1)
-        .describe('Search query for the compiled knowledge wiki.'),
+        .describe('Search query for the saved knowledge wiki.'),
     }),
     options: withBaseOptions({
       pageType: z
