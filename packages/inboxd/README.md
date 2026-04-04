@@ -11,6 +11,16 @@ now live in `@murphai/messaging-ingress`. `@murphai/inboxd` consumes that packag
 for provider webhook parsing/minimization and keeps ownership of polling
 drivers, runtime state, and capture persistence.
 
+Consumers that only need shared Linq or Telegram webhook parsing, verification,
+targets, summaries, or sparse minimization should depend on
+`@murphai/messaging-ingress` directly instead of `@murphai/inboxd` convenience
+subpaths.
+
+Consumers that need inbox-owned normalization without the full inboxd barrel
+should use the focused connector exports such as
+`@murphai/inboxd/connectors/linq/normalize` and
+`@murphai/inboxd/connectors/telegram/normalize`.
+
 ## Runtime expectations
 
 - Run on Node.js `>=22.16.0`.
