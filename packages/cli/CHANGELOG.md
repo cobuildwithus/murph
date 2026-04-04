@@ -2,6 +2,20 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.1.11] - 2026-04-04
+
+### Fixed
+- harden hosted storage confidentiality
+- restore knowledge metadata fallback
+- align refresh semantics and guidance
+
+### Changed
+- set npm scope for publish
+- use latest node and npm
+- make knowledge compile assistant-authored
+- bootstrap package trust bindings
+- finish knowledge helper extraction
+
 ## [0.1.10] - 2026-04-04
 
 ### Changed
