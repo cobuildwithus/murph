@@ -3382,7 +3382,15 @@ test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound 
   )
   assert.match(
     providerCall?.systemPrompt ?? '',
+    /Broad symptom statements during onboarding also count as context/u,
+  )
+  assert.match(
+    providerCall?.systemPrompt ?? '',
     /Do not ask which goal to tackle first unless the user explicitly asks for help deciding where to start/u,
+  )
+  assert.match(
+    providerCall?.systemPrompt ?? '',
+    /Do not pivot into symptom triage, differential-style questioning, or how to fix the goal unless the user clearly asks for concrete help with that issue/u,
   )
   assert.match(
     providerCall?.systemPrompt ?? '',
@@ -3390,7 +3398,11 @@ test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound 
   )
   assert.match(
     providerCall?.systemPrompt ?? '',
-    /The purpose of onboarding is just to introduce Murph, explain briefly how it works, and set up a gradual path where the user can share more information over time/u,
+    /The purpose of onboarding is just to introduce Murph, explain how to use it well, and set up a gradual path where the user can share more information over time/u,
+  )
+  assert.match(
+    providerCall?.systemPrompt ?? '',
+    /default to brief usage guidance: explain that they can send things as they happen and Murph can help with logs, patterns, and health questions over time/u,
   )
   assert.deepEqual(listCalls, [
     {
