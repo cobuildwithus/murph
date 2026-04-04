@@ -95,7 +95,7 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
     })).resolves.toEqual(record);
   });
 
-  it("reads and deletes legacy side-effect journal records after the opaque-path cutover", async () => {
+  it("ignores removed raw-path side-effect journal records", async () => {
     const bucket = createMemoryBucket();
     const previousKey = Buffer.alloc(32, 7);
     const currentKey = Buffer.alloc(32, 9);
@@ -135,19 +135,13 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
       fingerprint: record.fingerprint,
       kind: record.kind,
       userId: "member_legacy",
-    })).resolves.toEqual(record);
+    })).resolves.toBeNull();
     await expect(store.deletePrepared({
       effectId: record.effectId,
       fingerprint: record.fingerprint,
       kind: record.kind,
       userId: "member_legacy",
-    })).resolves.toBe(true);
-    await expect(store.read({
-      effectId: record.effectId,
-      fingerprint: record.fingerprint,
-      kind: record.kind,
-      userId: "member_legacy",
-    })).resolves.toBeNull();
+    })).resolves.toBe(false);
   });
 
   it("promotes prepared records to sent and keeps sent delivery stable on duplicate writes", async () => {
