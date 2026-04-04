@@ -3376,6 +3376,22 @@ test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound 
   assert.match(providerCall?.systemPrompt ?? '', /what are some of their health goals right now/u)
   assert.match(providerCall?.systemPrompt ?? '', /what you should call them/u)
   assert.match(providerCall?.systemPrompt ?? '', /at most one more short sentence/u)
+  assert.match(
+    providerCall?.systemPrompt ?? '',
+    /treat that as onboarding context, not as a request to choose priorities or start coaching/u,
+  )
+  assert.match(
+    providerCall?.systemPrompt ?? '',
+    /Do not ask which goal to tackle first unless the user explicitly asks for help deciding where to start/u,
+  )
+  assert.match(
+    providerCall?.systemPrompt ?? '',
+    /Keep onboarding brief and orienting\. Do not try to draw the user into a long, drawn-out conversation/u,
+  )
+  assert.match(
+    providerCall?.systemPrompt ?? '',
+    /The purpose of onboarding is just to introduce Murph, explain briefly how it works, and set up a gradual path where the user can share more information over time/u,
+  )
   assert.deepEqual(listCalls, [
     {
       vault: vaultRoot,
