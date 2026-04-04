@@ -73,7 +73,7 @@ test('local parallel CLI test helper keeps suite concurrency opt-in by default',
   assert.equal(resolveLocalCliSuiteConcurrency({}), false)
 })
 
-test('local parallel CLI test helper honors explicit suite-concurrency overrides from either env key', () => {
+test('local parallel CLI test helper honors explicit suite-concurrency overrides', () => {
   assert.equal(
     resolveLocalCliSuiteConcurrency({
       MURPH_VITEST_SUITE_CONCURRENCY: 'true',
@@ -83,18 +83,6 @@ test('local parallel CLI test helper honors explicit suite-concurrency overrides
   assert.equal(
     resolveLocalCliSuiteConcurrency({
       MURPH_VITEST_SUITE_CONCURRENCY: 'false',
-    }),
-    false,
-  )
-  assert.equal(
-    resolveLocalCliSuiteConcurrency({
-      MURPH_TEST_SUITE_CONCURRENCY: 'true',
-    }),
-    true,
-  )
-  assert.equal(
-    resolveLocalCliSuiteConcurrency({
-      MURPH_TEST_SUITE_CONCURRENCY: 'false',
     }),
     false,
   )

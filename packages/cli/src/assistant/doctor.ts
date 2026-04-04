@@ -145,7 +145,7 @@ async function runAssistantDoctorAtPaths(
               : 'pass',
     }),
     buildAssistantStatePermissionCheck(secrecyAudit),
-    buildAssistantStateSessionSecretCheck(secrecyAudit, input.repair),
+    buildAssistantStateSessionSecretCheck(secrecyAudit),
     createDoctorCheck({
       details: {
         present: automationScan.present,
@@ -380,7 +380,6 @@ function buildAssistantStatePermissionCheck(
 
 function buildAssistantStateSessionSecretCheck(
   secrecyAudit: AssistantStateSecrecyAudit,
-  repair: boolean,
 ): AssistantDoctorCheck {
   const blockingIssues =
     secrecyAudit.sessionInlineSecretFiles +
@@ -388,7 +387,7 @@ function buildAssistantStateSessionSecretCheck(
   const status: AssistantDoctorCheckStatus =
     blockingIssues > 0
       ? 'fail'
-      : secrecyAudit.orphanSessionSecretSidecars > 0 || secrecyAudit.repairedSessionFiles > 0
+      : secrecyAudit.orphanSessionSecretSidecars > 0
         ? 'warn'
         : 'pass'
 
@@ -399,19 +398,16 @@ function buildAssistantStateSessionSecretCheck(
       inlineSecretHeaders: secrecyAudit.sessionInlineSecretHeaders,
       malformedSecretSidecars: secrecyAudit.malformedSessionSecretSidecars,
       orphanSecretSidecars: secrecyAudit.orphanSessionSecretSidecars,
-      repairedFiles: secrecyAudit.repairedSessionFiles,
       sidecarFiles: secrecyAudit.sessionSecretSidecarFiles,
     },
     message:
       secrecyAudit.sessionInlineSecretFiles > 0
-        ? `${secrecyAudit.sessionInlineSecretFiles} assistant session file(s) still embed secret headers inline.`
+        ? `${secrecyAudit.sessionInlineSecretFiles} assistant session file(s) still embed secret headers inline. Recreate or manually repair those stale local session files.`
         : secrecyAudit.malformedSessionSecretSidecars > 0
           ? `${secrecyAudit.malformedSessionSecretSidecars} assistant session secret sidecar(s) are malformed.`
           : secrecyAudit.orphanSessionSecretSidecars > 0
             ? `${secrecyAudit.orphanSessionSecretSidecars} assistant session secret sidecar(s) are orphaned.`
-            : secrecyAudit.repairedSessionFiles > 0
-              ? `${secrecyAudit.repairedSessionFiles} assistant session file(s) were repaired and secrets were moved into private sidecars${repair ? '' : ' during this run'}.`
-              : 'assistant session secrets are stored only in private sidecars.',
+            : 'assistant session secrets are stored only in private sidecars.',
     name: 'assistant-session-secrets',
     status,
   })

@@ -180,9 +180,9 @@ describe("@murphai/hosted-execution", () => {
       readHostedExecutionWebControlPlaneEnvironment({
         CRON_SECRET: "cron-token",
         HOSTED_DEVICE_SYNC_CONTROL_BASE_URL: "https://device-sync.example.test/",
-        HOSTED_EXECUTION_INTERNAL_TOKEN: "internal-token",
+        HOSTED_EXECUTION_INTERNAL_TOKENS: "internal-token",
         HOSTED_WEB_BASE_URL: "https://web.example.test/",
-        HOSTED_SHARE_INTERNAL_TOKEN: "share-token",
+        HOSTED_SHARE_INTERNAL_TOKENS: "share-token",
       }),
     ).toEqual({
       deviceSyncRuntimeBaseUrl: DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
@@ -203,7 +203,7 @@ describe("@murphai/hosted-execution", () => {
   it("keeps hosted web control-plane callbacks bound to the worker proxy defaults", () => {
     expect(
       readHostedExecutionWebControlPlaneEnvironment({
-        HOSTED_EXECUTION_INTERNAL_TOKEN: "internal-token",
+        HOSTED_EXECUTION_INTERNAL_TOKENS: "internal-token",
         VERCEL_PROJECT_PRODUCTION_URL: "www.withmurph.ai",
       }),
     ).toEqual({

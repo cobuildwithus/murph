@@ -990,15 +990,14 @@ function readHostedExecutionInternalTokens(
 ): string[] {
   const configured = normalizeHostedExecutionString(source.HOSTED_EXECUTION_INTERNAL_TOKENS);
 
-  if (configured) {
-    return configured
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter(Boolean);
+  if (!configured) {
+    return [];
   }
 
-  const fallback = normalizeHostedExecutionString(source.HOSTED_EXECUTION_INTERNAL_TOKEN);
-  return fallback ? [fallback] : [];
+  return configured
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }
 
 function toStringEnvSource(

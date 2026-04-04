@@ -25,7 +25,7 @@ export function resolveLocalCliSuiteConcurrency(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   const override = parseBooleanEnv(
-    env.MURPH_VITEST_SUITE_CONCURRENCY ?? env.MURPH_TEST_SUITE_CONCURRENCY,
+    env.MURPH_VITEST_SUITE_CONCURRENCY,
   )
 
   if (override !== undefined) {

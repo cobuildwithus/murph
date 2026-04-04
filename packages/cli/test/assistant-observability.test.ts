@@ -494,7 +494,7 @@ test('assistant status ignores expired cooldown warnings and can find an older r
 })
 
 
-test('assistant doctor can repair legacy inline secret headers and assistant-state permissions', async () => {
+test('assistant doctor repairs assistant-state permissions but leaves inline legacy session secrets for manual repair', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-observability-repair-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
@@ -590,14 +590,14 @@ test('assistant doctor can repair legacy inline secret headers and assistant-sta
   )
 
   const repaired = await runAssistantDoctor(vaultRoot, { repair: true })
-  assert.equal(repaired.ok, true)
+  assert.equal(repaired.ok, false)
   assert.equal(
     repaired.checks.find((check) => check.name === 'assistant-state-permissions')?.status,
     'warn',
   )
   assert.equal(
     repaired.checks.find((check) => check.name === 'assistant-session-secrets')?.status,
-    'warn',
+    'fail',
   )
 
   const repairedSessionRaw = await readFile(sessionPath, 'utf8')
@@ -605,33 +605,23 @@ test('assistant doctor can repair legacy inline secret headers and assistant-sta
     statePaths.sessionSecretsDirectory,
     'asst_legacyrepair.json',
   )
-  const sessionSecrets = JSON.parse(await readFile(sessionSecretsPath, 'utf8')) as {
-    providerBindingHeaders?: Record<string, string> | null
-    providerHeaders?: Record<string, string> | null
-  }
 
-  assert.equal(/legacy-session-secret|legacy-binding-secret/u.test(repairedSessionRaw), false)
-  assert.deepEqual(sessionSecrets.providerHeaders, {
-    Authorization: 'Bearer legacy-session-secret',
-  })
-  assert.deepEqual(sessionSecrets.providerBindingHeaders, {
-    Authorization: 'Bearer legacy-binding-secret',
-  })
+  assert.equal(/legacy-session-secret|legacy-binding-secret/u.test(repairedSessionRaw), true)
 
   assert.equal((await stat(statePaths.assistantStateRoot)).mode & 0o777, 0o700)
   assert.equal((await stat(statePaths.sessionsDirectory)).mode & 0o777, 0o700)
   assert.equal((await stat(sessionPath)).mode & 0o777, 0o600)
-  assert.equal((await stat(sessionSecretsPath)).mode & 0o777, 0o600)
+  await assert.rejects(readFile(sessionSecretsPath, 'utf8'))
 
   const doctorAfter = await runAssistantDoctor(vaultRoot)
-  assert.equal(doctorAfter.ok, true)
+  assert.equal(doctorAfter.ok, false)
   assert.equal(
     doctorAfter.checks.find((check) => check.name === 'assistant-state-permissions')?.status,
     'pass',
   )
   assert.equal(
     doctorAfter.checks.find((check) => check.name === 'assistant-session-secrets')?.status,
-    'pass',
+    'fail',
   )
 })
 

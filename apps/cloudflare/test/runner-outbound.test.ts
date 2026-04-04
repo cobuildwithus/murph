@@ -189,7 +189,7 @@ describe("handleRunnerOutboundRequest", () => {
       }),
       createRunnerOutboundEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
-        HOSTED_SHARE_INTERNAL_TOKEN: undefined,
+        HOSTED_SHARE_INTERNAL_TOKENS: undefined,
       }),
       "member_123",
       RUNNER_PROXY_TOKEN,
@@ -320,8 +320,8 @@ function createRunnerOutboundEnv(overrides: Partial<Record<string, unknown>> = {
     },
     HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
     HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
-    HOSTED_EXECUTION_INTERNAL_TOKEN: "internal-token",
-    HOSTED_SHARE_INTERNAL_TOKEN: "share-token",
+    HOSTED_EXECUTION_INTERNAL_TOKENS: "internal-token",
+    HOSTED_SHARE_INTERNAL_TOKENS: "share-token",
     HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
     USER_RUNNER: {
       getByName() {
