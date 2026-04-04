@@ -37,7 +37,7 @@ describe("handleRunnerOutboundRequest", () => {
     });
   });
 
-  it("proxies device-sync runtime requests through the worker with the bound user id", async () => {
+  it("handles device-sync runtime requests locally and binds them to the authenticated user", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
       headers: {
         "content-type": "application/json; charset=utf-8",
@@ -50,7 +50,6 @@ describe("handleRunnerOutboundRequest", () => {
       new Request("http://device-sync.worker/api/internal/device-sync/runtime/snapshot", {
         body: JSON.stringify({
           provider: "oura",
-          userId: "member_other",
         }),
         headers: createRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",
@@ -66,28 +65,19 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://web.example.test/api/internal/device-sync/runtime/snapshot",
-      expect.objectContaining({
-        body: JSON.stringify({
-          provider: "oura",
-          userId: "member_123",
-        }),
-        headers: expect.any(Headers),
-        method: "POST",
-        redirect: "error",
-        signal: expect.any(AbortSignal),
-      }),
-    );
-    const requestHeaders = (fetchMock.mock.calls[0] as [string, RequestInit | undefined] | undefined)?.[1]?.headers;
-    expect(requestHeaders).toBeInstanceOf(Headers);
-    expect((requestHeaders as Headers).get("authorization")).toBe("Bearer internal-token");
-    expect((requestHeaders as Headers).get("content-type")).toBe("application/json");
-    expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
+    await expect(response.json()).resolves.toEqual({
+      connections: [],
+      generatedAt: expect.any(String),
+      userId: "member_123",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("fails closed when a runner web-control base URL host is not allowlisted", async () => {
-    await expect(handleRunnerOutboundRequest(
+  it("does not depend on hosted-web allowlists for local device-sync runtime paths", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
       new Request("http://device-sync.worker/api/internal/device-sync/runtime/snapshot", {
         body: JSON.stringify({
           provider: "oura",
@@ -102,10 +92,18 @@ describe("handleRunnerOutboundRequest", () => {
       }),
       "member_123",
       RUNNER_PROXY_TOKEN,
-    )).rejects.toThrow(/HOSTED_DEVICE_SYNC_CONTROL_BASE_URL host is not allowlisted/u);
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      connections: [],
+      generatedAt: expect.any(String),
+      userId: "member_123",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("accepts runner web-control overrides that stay on the shared hosted-web host", async () => {
+  it("keeps device-sync runtime routes local even when hosted-web base URLs are configured", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
       headers: {
         "content-type": "application/json; charset=utf-8",
@@ -133,13 +131,15 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://web.example.test/api/internal/device-sync/runtime/snapshot",
-      expect.any(Object),
-    );
+    await expect(response.json()).resolves.toEqual({
+      connections: [],
+      generatedAt: expect.any(String),
+      userId: "member_123",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("proxies hosted share payload requests through the worker control token", async () => {
+  it("returns 410 for removed hosted share payload fetches in the runtime hot path", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
       headers: {
         "content-type": "application/json; charset=utf-8",
@@ -163,25 +163,14 @@ describe("handleRunnerOutboundRequest", () => {
       RUNNER_PROXY_TOKEN,
     );
 
-    expect(response.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://web.example.test/api/hosted-share/internal/share_123/payload",
-      expect.objectContaining({
-        body: JSON.stringify({
-          shareCode: "code_123",
-        }),
-        headers: expect.any(Headers),
-        method: "POST",
-      }),
-    );
-    const requestHeaders = (fetchMock.mock.calls[0] as [string, RequestInit | undefined] | undefined)?.[1]?.headers;
-    expect(requestHeaders).toBeInstanceOf(Headers);
-    expect((requestHeaders as Headers).get("authorization")).toBe("Bearer share-token");
-    expect((requestHeaders as Headers).get("content-type")).toBe("application/json");
-    expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
+    expect(response.status).toBe(410);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted share payload fetches are no longer available in the runtime hot path. Dispatches must include an encrypted share pack reference payload.",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("fails closed when the dedicated hosted share token is missing", async () => {
+  it("keeps removed hosted share payload fetches disabled even when the dedicated share token is missing", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
       headers: {
         "content-type": "application/json; charset=utf-8",
@@ -206,14 +195,14 @@ describe("handleRunnerOutboundRequest", () => {
       RUNNER_PROXY_TOKEN,
     );
 
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(410);
     await expect(response.json()).resolves.toEqual({
-      error: "Hosted web control token is not configured.",
+      error: "Hosted share payload fetches are no longer available in the runtime hot path. Dispatches must include an encrypted share pack reference payload.",
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("rejects hosted share payload proxy requests that still include query params", async () => {
+  it("keeps removed hosted share payload fetches disabled even if legacy query params are present", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
       headers: {
         "content-type": "application/json; charset=utf-8",
@@ -237,14 +226,14 @@ describe("handleRunnerOutboundRequest", () => {
       RUNNER_PROXY_TOKEN,
     );
 
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(410);
     await expect(response.json()).resolves.toEqual({
-      error: "Not found",
+      error: "Hosted share payload fetches are no longer available in the runtime hot path. Dispatches must include an encrypted share pack reference payload.",
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("proxies hosted AI usage writes through the worker control token", async () => {
+  it("records hosted AI usage locally instead of proxying through hosted web", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       recorded: 1,
       usageIds: ["usage_123"],
@@ -278,25 +267,11 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://web.example.test/api/internal/hosted-execution/usage/record",
-      expect.objectContaining({
-        body: JSON.stringify({
-          usage: [
-            {
-              usageId: "usage_123",
-            },
-          ],
-        }),
-        headers: expect.any(Headers),
-        method: "POST",
-      }),
-    );
-    const requestHeaders = (fetchMock.mock.calls[0] as [string, RequestInit | undefined] | undefined)?.[1]?.headers;
-    expect(requestHeaders).toBeInstanceOf(Headers);
-    expect((requestHeaders as Headers).get("authorization")).toBe("Bearer internal-token");
-    expect((requestHeaders as Headers).get("content-type")).toBe("application/json");
-    expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
+    await expect(response.json()).resolves.toEqual({
+      recorded: 1,
+      usageIds: ["usage_123"],
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects side-effect writes when the route effect id and payload effect id differ", async () => {

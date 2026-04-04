@@ -42,14 +42,14 @@ describe("hosted assistant runner env policy", () => {
 
   it("does not forward referenced reserved worker secrets into the runner", () => {
     const env = buildHostedRunnerContainerEnv({
-      HOSTED_ASSISTANT_API_KEY_ENV: "HOSTED_EXECUTION_CONTROL_TOKEN",
+      HOSTED_ASSISTANT_API_KEY_ENV: "HOSTED_EXECUTION_SIGNING_SECRET",
       HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+      HOSTED_EXECUTION_SIGNING_SECRET: "signing-secret",
     });
 
-    expect(env.HOSTED_ASSISTANT_API_KEY_ENV).toBe("HOSTED_EXECUTION_CONTROL_TOKEN");
-    expect(env.HOSTED_EXECUTION_CONTROL_TOKEN).toBeUndefined();
+    expect(env.HOSTED_ASSISTANT_API_KEY_ENV).toBe("HOSTED_EXECUTION_SIGNING_SECRET");
+    expect(env.HOSTED_EXECUTION_SIGNING_SECRET).toBeUndefined();
   });
 
   it("never allows per-user env overrides to shadow hosted assistant bootstrap vars", () => {

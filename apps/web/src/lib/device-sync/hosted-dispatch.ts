@@ -13,6 +13,7 @@ export function buildHostedDeviceSyncWakeDispatch(input: {
   hint?: HostedExecutionDeviceSyncWakeEvent["hint"] | null;
   occurredAt: string;
   provider: string;
+  runtimeSnapshot?: HostedExecutionDeviceSyncWakeEvent["runtimeSnapshot"];
   source: HostedDeviceSyncWakeSource;
   traceId?: string | null;
   userId: string;
@@ -24,6 +25,7 @@ export function buildHostedDeviceSyncWakeDispatch(input: {
     occurredAt: input.occurredAt,
     provider: input.provider,
     reason: mapHostedDeviceSyncWakeReason(input.source),
+    runtimeSnapshot: input.runtimeSnapshot,
     userId: input.userId,
   });
 }

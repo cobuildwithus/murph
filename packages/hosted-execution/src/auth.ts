@@ -10,7 +10,9 @@ const ISO_UTC_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$
 export const DEFAULT_HOSTED_EXECUTION_MAX_TIMESTAMP_SKEW_MS = 5 * 60_000;
 
 export async function createHostedExecutionSignature(input: {
+  method?: string;
   payload: string;
+  path?: string;
   secret: string;
   timestamp: string;
 }): Promise<string> {
@@ -18,14 +20,21 @@ export async function createHostedExecutionSignature(input: {
   const signature = await crypto.subtle.sign(
     HMAC_ALGORITHM,
     cryptoKey,
-    encodeSignaturePayload(input.payload, input.timestamp),
+    encodeSignaturePayload({
+      method: input.method,
+      path: input.path,
+      payload: input.payload,
+      timestamp: input.timestamp,
+    }),
   );
 
   return bytesToHex(signature);
 }
 
 export async function createHostedExecutionSignatureHeaders(input: {
+  method?: string;
   payload: string;
+  path?: string;
   secret: string;
   timestamp: string;
 }): Promise<Record<string, string>> {
@@ -36,7 +45,9 @@ export async function createHostedExecutionSignatureHeaders(input: {
 }
 
 export async function verifyHostedExecutionSignature(input: {
+  method?: string;
   payload: string;
+  path?: string;
   secret: string;
   signature: string | null;
   timestamp: string | null;
@@ -73,7 +84,12 @@ export async function verifyHostedExecutionSignature(input: {
     HMAC_ALGORITHM,
     cryptoKey,
     signatureBytes,
-    encodeSignaturePayload(input.payload, input.timestamp),
+    encodeSignaturePayload({
+      method: input.method,
+      path: input.path,
+      payload: input.payload,
+      timestamp: input.timestamp,
+    }),
   );
 }
 
@@ -103,8 +119,31 @@ async function importHmacKey(
   );
 }
 
-function encodeSignaturePayload(payload: string, timestamp: string): ArrayBuffer {
-  return encodeUtf8(`${timestamp}.${payload}`);
+function encodeSignaturePayload(input: {
+  method?: string;
+  path?: string;
+  payload: string;
+  timestamp: string;
+}): ArrayBuffer {
+  const method = normalizeRequestMethod(input.method);
+  const path = normalizeRequestPath(input.path);
+
+  return encodeUtf8(`${input.timestamp}.${method}.${path}.${input.payload}`);
+}
+
+function normalizeRequestMethod(value: string | undefined): string {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim().toUpperCase()
+    : "POST";
+}
+
+function normalizeRequestPath(value: string | undefined): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return "/";
+  }
+
+  const trimmed = value.trim();
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
 }
 
 function normalizeHex(value: string): string {

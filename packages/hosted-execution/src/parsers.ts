@@ -544,6 +544,13 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
               ),
             }),
         reason: parseDeviceSyncReason(record.reason),
+        ...(record.runtimeSnapshot === undefined
+          ? {}
+          : {
+              runtimeSnapshot: record.runtimeSnapshot === null
+                ? null
+                : parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(record.runtimeSnapshot),
+            }),
         userId,
       } satisfies HostedExecutionDeviceSyncWakeEvent;
     case "vault.share.accepted":
@@ -579,6 +586,7 @@ export function parseHostedExecutionShareReference(value: unknown): HostedExecut
   const record = requireObject(value, "Hosted execution share reference");
 
   return {
+    ...(record.pack === undefined ? {} : { pack: assertContract(sharePackSchema, record.pack, "share pack") }),
     shareCode: requireString(record.shareCode, "Hosted execution share reference shareCode"),
     shareId: requireString(record.shareId, "Hosted execution share reference shareId"),
   };

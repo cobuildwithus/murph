@@ -40,17 +40,22 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
   timeoutMs: number | null;
   webControlPlane: HostedExecutionWebControlPlaneEnvironment;
 }): Promise<HostedDeviceSyncRuntimeSyncState> {
-  const client = resolveHostedDeviceSyncRuntimeClientForUser({
-    boundUserId: input.dispatch.event.userId,
-    fetchImpl: input.fetchImpl,
-    timeoutMs: input.timeoutMs,
-    webControlPlane: input.webControlPlane,
-  });
-  if (!client) {
+  const inlineSnapshot = input.dispatch.event.kind === "device-sync.wake"
+    ? input.dispatch.event.runtimeSnapshot ?? null
+    : null;
+  const client = inlineSnapshot
+    ? null
+    : resolveHostedDeviceSyncRuntimeClientForUser({
+        boundUserId: input.dispatch.event.userId,
+        fetchImpl: input.fetchImpl,
+        timeoutMs: input.timeoutMs,
+        webControlPlane: input.webControlPlane,
+      });
+  if (!client && !inlineSnapshot) {
     return createEmptyHostedDeviceSyncRuntimeSyncState();
   }
 
-  const snapshot = await client.fetchSnapshot();
+  const snapshot = inlineSnapshot ?? await client!.fetchSnapshot();
   const state = createEmptyHostedDeviceSyncRuntimeSyncState(snapshot);
   if (!snapshot) {
     return state;

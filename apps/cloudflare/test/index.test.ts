@@ -6,7 +6,7 @@ import { afterEach, describe as baseDescribe, expect, it, vi } from "vitest";
 import { ContainerProxy as PackageContainerProxy } from "@cloudflare/containers";
 import { createHostedExecutionSignature } from "../src/auth.ts";
 import { artifactObjectKey } from "../src/bundle-store.ts";
-import { deriveHostedStorageOpaqueId } from "../src/crypto-context.ts";
+import { buildHostedStorageAad, deriveHostedStorageOpaqueId } from "../src/crypto-context.ts";
 import {
   createHostedVerifiedEmailUserEnv,
   parseHostedEmailThreadTarget,
@@ -14,8 +14,10 @@ import {
 } from "@murphai/runtime-state";
 import { createHostedUserEnvStore } from "../src/bundle-store.ts";
 import { writeEncryptedR2Json } from "../src/crypto.ts";
+import { readHostedExecutionEnvironment } from "../src/env.ts";
 import { createHostedExecutionJournalStore, persistHostedExecutionCommit } from "../src/execution-journal.ts";
 import worker, { ContainerProxy as ExportedContainerProxy, UserRunnerDurableObject } from "../src/index.ts";
+import { createHostedUserKeyStore } from "../src/user-key-store.ts";
 import { encodeHostedUserEnvPayload } from "../src/user-env.ts";
 import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
 import { createTestSqlStorage } from "./sql-storage.ts";
@@ -93,14 +95,14 @@ describe("cloudflare worker routes", () => {
     const stub = createUserRunnerStub();
 
     const response = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/run", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/run", {
         body: JSON.stringify({ note: "manual" }),
         headers: {
           authorization: "Bearer control-token",
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
-      }),
+      })),
       createWorkerEnv(stub, {
         HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
       }),
@@ -122,14 +124,14 @@ describe("cloudflare worker routes", () => {
     const stub = createUserRunnerStub();
 
     const response = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/run", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/run", {
         body: "",
         headers: {
           authorization: "Bearer control-token",
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
-      }),
+      })),
       createWorkerEnv(stub, {
         HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
       }),
@@ -255,12 +257,11 @@ describe("cloudflare worker routes", () => {
     expect(harness.bucket.keys()).toContainEqual(expect.stringMatching(
       /^transient\/execution-journal\/[0-9a-f]+\/[0-9a-f]+\.json$/u,
     ));
-    expect(harness.bucket.keys()).toHaveLength(3);
-    const journalStore = createHostedExecutionJournalStore({
-      bucket: harness.bucket.api,
-      key: Buffer.alloc(32, 9),
-      keyId: "v1",
-    });
+    expect(harness.bucket.keys()).toContainEqual(expect.stringMatching(
+      /^users\/keys\/[0-9a-f]+\.json$/u,
+    ));
+    expect(harness.bucket.keys()).toHaveLength(4);
+    const journalStore = await createHostedExecutionJournalStoreForTest(harness.env, "member_123");
     await expect(journalStore.readCommittedResult("member_123", "evt_commit")).resolves.toMatchObject({
       sideEffects,
     });
@@ -297,11 +298,11 @@ describe("cloudflare worker routes", () => {
 
     expect(readResponse.status).toBe(200);
     expect(Buffer.from(await readResponse.arrayBuffer())).toEqual(artifactBytes);
-    await expect(artifactObjectKey(
-      Buffer.alloc(32, 9),
+    await expect(hostedArtifactObjectKeyForTest(
+      harness.env,
       "member_123",
       "fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b",
-    )).resolves.toEqual(harness.bucket.keys()[0]);
+    )).resolves.toSatisfy((expectedKey) => harness.bucket.keys().includes(expectedKey));
   });
 
   it("rejects artifact writes when the request hash does not match the payload", async () => {
@@ -319,7 +320,8 @@ describe("cloudflare worker routes", () => {
     )).rejects.toThrow(
       "Hosted artifact hash mismatch: expected fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b",
     );
-    expect(harness.bucket.keys()).toEqual([]);
+    expect(harness.bucket.keys()).toHaveLength(1);
+    expect(harness.bucket.keys()[0]).toMatch(/^users\/keys\/[0-9a-f]+\.json$/u);
   });
 
   it("keeps hosted artifact objects isolated per user", async () => {
@@ -350,8 +352,8 @@ describe("cloudflare worker routes", () => {
     );
 
     expect(readResponse.status).toBe(404);
-    await expect(artifactObjectKey(Buffer.alloc(32, 9), "member_alpha", artifactSha256)).resolves.toEqual(
-      harness.bucket.keys()[0],
+    await expect(hostedArtifactObjectKeyForTest(harness.env, "member_alpha", artifactSha256)).resolves.toSatisfy(
+      (expectedKey) => harness.bucket.keys().includes(expectedKey),
     );
   });
 
@@ -397,11 +399,7 @@ describe("cloudflare worker routes", () => {
       }),
       harness.env,
     );
-    const journalStore = createHostedExecutionJournalStore({
-      bucket: harness.bucket.api,
-      key: Buffer.alloc(32, 9),
-      keyId: "v1",
-    });
+    const journalStore = await createHostedExecutionJournalStoreForTest(harness.env, "member_123");
 
     expect(finalizeResponse.status).toBe(200);
     await expect(finalizeResponse.json()).resolves.toMatchObject({
@@ -432,11 +430,7 @@ describe("cloudflare worker routes", () => {
 
   it("keeps malformed outbound callbacks from mutating journal state even when runner auth is unset", async () => {
     const harness = createUserRunnerDurableObject();
-    const journalStore = createHostedExecutionJournalStore({
-      bucket: harness.bucket.api,
-      key: Buffer.alloc(32, 9),
-      keyId: "v1",
-    });
+    const journalStore = await createHostedExecutionJournalStoreForTest(harness.env, "member_123");
 
     await callRunnerOutbound(
       new Request("http://commit.worker/events/evt_finalize_auth/commit", {
@@ -679,24 +673,27 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("reads side-effect journal records encrypted with a previous key id after rotation", async () => {
-    const previousKey = Buffer.alloc(32, 8);
-    const env = createWorkerEnv(createUserRunnerStub(), {
-      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID: "v2",
-      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON: JSON.stringify({
-        v1: previousKey.toString("base64"),
-      }),
-    });
+  it("reads pre-existing side-effect journal records through the outbound route using the user's root key", async () => {
+    const env = createWorkerEnv();
     const record = createSentSideEffectRecord({
       effectId: "outbox_rotated",
       fingerprint: "dedupe_rotated",
     });
+    const crypto = await resolveHostedUserCryptoContextForTest(env, "member_123");
+    const key = await sideEffectRecordObjectKey(crypto.rootKey, "member_123", record.effectId);
 
     await writeEncryptedR2Json({
+      aad: buildHostedStorageAad({
+        effectId: record.effectId,
+        key,
+        purpose: "side-effect-journal",
+        userId: "member_123",
+      }),
       bucket: env.BUNDLES,
-      cryptoKey: previousKey,
-      key: await sideEffectRecordKey("member_123", record.effectId),
-      keyId: "v1",
+      cryptoKey: crypto.rootKey,
+      key,
+      keyId: crypto.rootKeyId,
+      scope: "side-effect-journal",
       value: record,
     });
 
@@ -730,7 +727,7 @@ describe("cloudflare worker routes", () => {
     });
 
     const updateResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/env", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/env", {
         body: JSON.stringify({
           env: {
             OPENAI_API_KEY: "sk-test",
@@ -742,7 +739,7 @@ describe("cloudflare worker routes", () => {
           "content-type": "application/json; charset=utf-8",
         },
         method: "PUT",
-      }),
+      })),
       env,
     );
     expect(updateResponse.status).toBe(200);
@@ -754,36 +751,36 @@ describe("cloudflare worker routes", () => {
     });
 
     const envStatusResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/env", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/env", {
         headers: {
           authorization: "Bearer control-token",
         },
         method: "GET",
-      }),
+      })),
       env,
     );
     expect(envStatusResponse.status).toBe(200);
     expect(stub.getUserEnvStatus).toHaveBeenCalledWith();
 
     const clearResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/env", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/env", {
         headers: {
           authorization: "Bearer control-token",
         },
         method: "DELETE",
-      }),
+      })),
       env,
     );
     expect(clearResponse.status).toBe(200);
     expect(stub.clearUserEnv).toHaveBeenCalledWith();
 
     const statusResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/status", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/status", {
         headers: {
           authorization: "Bearer control-token",
         },
         method: "GET",
-      }),
+      })),
       env,
     );
     expect(statusResponse.status).toBe(200);
@@ -797,14 +794,14 @@ describe("cloudflare worker routes", () => {
     });
 
     const listResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/gateway/conversations/list", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/gateway/conversations/list", {
         body: JSON.stringify({ limit: 5 }),
         headers: {
           authorization: "Bearer control-token",
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
-      }),
+      })),
       env,
     );
     expect(listResponse.status).toBe(200);
@@ -817,14 +814,14 @@ describe("cloudflare worker routes", () => {
     });
 
     const readResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/gateway/messages/read", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/gateway/messages/read", {
         body: JSON.stringify({ sessionKey: "gwcs_worker_test" }),
         headers: {
           authorization: "Bearer control-token",
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
-      }),
+      })),
       env,
     );
     expect(readResponse.status).toBe(200);
@@ -836,21 +833,21 @@ describe("cloudflare worker routes", () => {
     });
 
     const waitResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/gateway/events/wait", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/gateway/events/wait", {
         body: JSON.stringify({ cursor: 7, timeoutMs: 1 }),
         headers: {
           authorization: "Bearer control-token",
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
-      }),
+      })),
       env,
     );
     expect(waitResponse.status).toBe(200);
     expect(stub.gatewayPollEvents).toHaveBeenCalled();
 
     const sendResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/gateway/messages/send", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/gateway/messages/send", {
         body: JSON.stringify({
           sessionKey: "gwcs_worker_test",
           text: "Please follow up.",
@@ -860,7 +857,7 @@ describe("cloudflare worker routes", () => {
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
-      }),
+      })),
       env,
     );
     expect(sendResponse.status).toBe(200);
@@ -893,7 +890,7 @@ describe("cloudflare worker routes", () => {
     });
 
     const response = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/gateway/messages/send", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/gateway/messages/send", {
         body: JSON.stringify({
           clientRequestId: "req-456",
           sessionKey: "gwcs_worker_test",
@@ -904,7 +901,7 @@ describe("cloudflare worker routes", () => {
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
-      }),
+      })),
       env,
     );
 
@@ -928,7 +925,7 @@ describe("cloudflare worker routes", () => {
     });
 
     const response = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/gateway/messages/send", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/gateway/messages/send", {
         body: JSON.stringify({
           replyToMessageId: "gwcm_worker_test",
           sessionKey: "gwcs_worker_test",
@@ -939,7 +936,7 @@ describe("cloudflare worker routes", () => {
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
-      }),
+      })),
       env,
     );
 
@@ -978,7 +975,7 @@ describe("cloudflare worker routes", () => {
     });
 
     const response = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/gateway/messages/send", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/gateway/messages/send", {
         body: JSON.stringify({
           replyToMessageId: createGatewayOutboxMessageIdForTests(routeToken, "outbox_test"),
           sessionKey: createGatewayConversationSessionKeyForTests(routeToken),
@@ -989,7 +986,7 @@ describe("cloudflare worker routes", () => {
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
-      }),
+      })),
       env,
     );
 
@@ -1041,7 +1038,7 @@ describe("cloudflare worker routes", () => {
     });
 
     const response = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/gateway/messages/send", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/gateway/messages/send", {
         body: JSON.stringify({
           replyToMessageId: createGatewayOutboxMessageIdForTests(otherRouteToken, "outbox_other"),
           sessionKey: createGatewayConversationSessionKeyForTests(routeToken),
@@ -1052,7 +1049,7 @@ describe("cloudflare worker routes", () => {
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
-      }),
+      })),
       env,
     );
 
@@ -1091,7 +1088,7 @@ describe("cloudflare worker routes", () => {
     });
 
     const response = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/gateway/messages/send", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/gateway/messages/send", {
         body: JSON.stringify({
           replyToMessageId: createGatewayAttachmentIdForTests(routeToken, "attachment_test"),
           sessionKey: createGatewayConversationSessionKeyForTests(routeToken),
@@ -1102,7 +1099,7 @@ describe("cloudflare worker routes", () => {
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
-      }),
+      })),
       env,
     );
 
@@ -1119,14 +1116,14 @@ describe("cloudflare worker routes", () => {
     });
 
     const response = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/env", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/env", {
         body: "{]",
         headers: {
           authorization: "Bearer control-token",
           "content-type": "application/json; charset=utf-8",
         },
         method: "PUT",
-      }),
+      })),
       env,
     );
 
@@ -1142,14 +1139,14 @@ describe("cloudflare worker routes", () => {
     });
 
     const response = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/env", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/env", {
         body: JSON.stringify([]),
         headers: {
           authorization: "Bearer control-token",
           "content-type": "application/json; charset=utf-8",
         },
         method: "PUT",
-      }),
+      })),
       env,
     );
 
@@ -1159,19 +1156,21 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("fails closed on control routes when the worker control token is missing", async () => {
+  it("fails closed on control routes when the worker signing secret is missing", async () => {
     const stub = createUserRunnerStub();
 
     const response = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/status", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/status", {
         method: "GET",
+      })),
+      createWorkerEnv(stub, {
+        HOSTED_EXECUTION_SIGNING_SECRET: undefined,
       }),
-      createWorkerEnv(stub),
     );
 
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
-      error: "Hosted execution control token is not configured.",
+      error: "Invalid request.",
     });
     expect(stub.status).not.toHaveBeenCalled();
   });
@@ -1187,21 +1186,21 @@ describe("cloudflare worker routes", () => {
     });
 
     const firstResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/email-address", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/email-address", {
         headers: {
           authorization: "Bearer control-token",
         },
         method: "GET",
-      }),
+      })),
       env,
     );
     const secondResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/email-address", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/email-address", {
         headers: {
           authorization: "Bearer control-token",
         },
         method: "GET",
-      }),
+      })),
       env,
     );
 
@@ -1222,12 +1221,12 @@ describe("cloudflare worker routes", () => {
 
   it("returns 503 from the hosted email address route when ingress is not configured", async () => {
     const response = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/email-address", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/email-address", {
         headers: {
           authorization: "Bearer control-token",
         },
         method: "GET",
-      }),
+      })),
       createWorkerEnv(createUserRunnerStub(), {
         HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
       }),
@@ -1241,12 +1240,12 @@ describe("cloudflare worker routes", () => {
 
   it("returns 503 from the hosted email address route when a sender address is configured without a hosted email domain", async () => {
     const response = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/email-address", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/email-address", {
         headers: {
           authorization: "Bearer control-token",
         },
         method: "GET",
-      }),
+      })),
       createWorkerEnv(createUserRunnerStub(), {
         HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
         HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
@@ -1272,12 +1271,12 @@ describe("cloudflare worker routes", () => {
     });
 
     const addressResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/email-address", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/email-address", {
         headers: {
           authorization: "Bearer control-token",
         },
         method: "GET",
-      }),
+      })),
       env,
     );
     const { address } = await addressResponse.json() as { address: string };
@@ -1337,12 +1336,12 @@ describe("cloudflare worker routes", () => {
     });
 
     const addressResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/email-address", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/email-address", {
         headers: {
           authorization: "Bearer control-token",
         },
         method: "GET",
-      }),
+      })),
       env,
     );
     const { address } = await addressResponse.json() as { address: string };
@@ -1386,12 +1385,12 @@ describe("cloudflare worker routes", () => {
     });
 
     const addressResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/email-address", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/email-address", {
         headers: {
           authorization: "Bearer control-token",
         },
         method: "GET",
-      }),
+      })),
       env,
     );
     const { address } = await addressResponse.json() as { address: string };
@@ -1933,12 +1932,14 @@ describe("cloudflare worker routes", () => {
       await firstRun.promise;
       return createRunnerContainerInvokeSuccessResponse({
         bucket: harness.bucket,
+        environment: harness.env,
         payload: createRunnerSuccessPayload(),
         request: input instanceof Request ? input : new Request(input, init),
       });
     }).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => (
       createRunnerContainerInvokeSuccessResponse({
         bucket: harness.bucket,
+        environment: harness.env,
         payload: createRunnerSuccessPayload(),
         request: input instanceof Request ? input : new Request(input, init),
       })
@@ -1988,12 +1989,14 @@ describe("cloudflare worker routes", () => {
       await firstRun.promise;
       return createRunnerContainerInvokeSuccessResponse({
         bucket: harness.bucket,
+        environment: harness.env,
         payload: createRunnerSuccessPayload(),
         request: input instanceof Request ? input : new Request(input, init),
       });
     }).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => (
       createRunnerContainerInvokeSuccessResponse({
         bucket: harness.bucket,
+        environment: harness.env,
         payload: createRunnerSuccessPayload(),
         request: input instanceof Request ? input : new Request(input, init),
       })
@@ -2009,12 +2012,12 @@ describe("cloudflare worker routes", () => {
     }
 
     const runResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/run", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/run", {
         headers: {
           authorization: "Bearer control-token",
         },
         method: "POST",
-      }),
+      })),
       harness.env as never,
     );
 
@@ -2289,8 +2292,11 @@ function createSentSideEffectRecord(input: {
   };
 }
 
-async function sideEffectRecordKey(userId: string, effectId: string): Promise<string> {
-  const rootKey = Buffer.alloc(32, 9);
+async function sideEffectRecordObjectKey(
+  rootKey: Uint8Array,
+  userId: string,
+  effectId: string,
+): Promise<string> {
   const userSegment = await deriveHostedStorageOpaqueId({
     length: 24,
     rootKey,
@@ -2320,6 +2326,7 @@ function expectHostedBundleKeys(
 
 async function createCommittedRunnerSuccessResponse(input: {
   bucket: ReturnType<typeof createBucketStore>;
+  environment?: ReturnType<typeof createWorkerEnv>;
   payload: ReturnType<typeof createRunnerSuccessPayload>;
   requestBody: {
     commit: {
@@ -2336,12 +2343,19 @@ async function createCommittedRunnerSuccessResponse(input: {
     };
   };
 }): Promise<Response> {
+  const environment = input.environment ?? createWorkerEnv();
+  const crypto = await resolveHostedUserCryptoContextForTest(
+    environment,
+    input.requestBody.dispatch.event.userId,
+  );
+
   await persistHostedExecutionCommit({
     bucket: input.bucket.api,
     currentBundleRefs: input.requestBody.commit.bundleRefs,
     eventId: input.requestBody.dispatch.eventId,
-    key: Buffer.alloc(32, 9),
-    keyId: "v1",
+    key: crypto.rootKey,
+    keyId: crypto.rootKeyId,
+    keysById: crypto.keysById,
     payload: input.payload,
     userId: input.requestBody.dispatch.event.userId,
   });
@@ -2353,6 +2367,7 @@ async function createCommittedRunnerSuccessResponse(input: {
 
 async function createRunnerContainerInvokeSuccessResponse(input: {
   bucket: ReturnType<typeof createBucketStore>;
+  environment?: ReturnType<typeof createWorkerEnv>;
   payload: ReturnType<typeof createRunnerSuccessPayload>;
   request: Request;
 }): Promise<Response> {
@@ -2387,9 +2402,49 @@ async function createRunnerContainerInvokeSuccessResponse(input: {
 
   return createCommittedRunnerSuccessResponse({
     bucket: input.bucket,
+    environment: input.environment,
     payload: input.payload,
     requestBody: requestBody.job.request,
   });
+}
+
+async function createHostedExecutionJournalStoreForTest(
+  env: ReturnType<typeof createWorkerEnv> | ReturnType<typeof createUserRunnerDurableObject>["env"],
+  userId: string,
+) {
+  const crypto = await resolveHostedUserCryptoContextForTest(env, userId);
+  return createHostedExecutionJournalStore({
+    bucket: env.BUNDLES,
+    key: crypto.rootKey,
+    keyId: crypto.rootKeyId,
+    keysById: crypto.keysById,
+  });
+}
+
+async function hostedArtifactObjectKeyForTest(
+  env: ReturnType<typeof createWorkerEnv> | ReturnType<typeof createUserRunnerDurableObject>["env"],
+  userId: string,
+  sha256: string,
+): Promise<string> {
+  const crypto = await resolveHostedUserCryptoContextForTest(env, userId);
+  return artifactObjectKey(crypto.rootKey, userId, sha256);
+}
+
+async function resolveHostedUserCryptoContextForTest(
+  env: ReturnType<typeof createWorkerEnv> | ReturnType<typeof createUserRunnerDurableObject>["env"],
+  userId: string,
+) {
+  const environment = readHostedExecutionEnvironment(
+    env as unknown as Readonly<Record<string, string | undefined>>,
+  );
+
+  return createHostedUserKeyStore({
+    automationKey: environment.bundleEncryptionKey,
+    automationKeyId: environment.bundleEncryptionKeyId,
+    bucket: env.BUNDLES,
+    envelopeKeyId: environment.bundleEncryptionKeyId,
+    envelopeKeysById: environment.bundleEncryptionKeysById,
+  }).ensureUserCryptoContext(userId);
 }
 
 function createUserRunnerDurableObject(
@@ -2646,6 +2701,8 @@ async function createSignedDispatchRequest(
   const payload = JSON.stringify(dispatch);
   const timestamp = input.timestamp ?? "2026-03-26T12:00:00.000Z";
   const signature = await createHostedExecutionSignature({
+    method: "POST",
+    path,
     payload,
     secret: "dispatch-secret",
     timestamp,
@@ -2660,4 +2717,28 @@ async function createSignedDispatchRequest(
     },
     method: "POST",
   });
+}
+
+async function signControlRequest(
+  request: Request,
+  input: {
+    timestamp?: string;
+  } = {},
+): Promise<Request> {
+  const path = new URL(request.url).pathname;
+  const payload = await request.clone().text();
+  const timestamp = input.timestamp ?? new Date().toISOString();
+  const signature = await createHostedExecutionSignature({
+    method: request.method,
+    path,
+    payload,
+    secret: "dispatch-secret",
+    timestamp,
+  });
+  const headers = new Headers(request.headers);
+  headers.delete("authorization");
+  headers.set("x-hosted-execution-signature", signature);
+  headers.set("x-hosted-execution-timestamp", timestamp);
+
+  return new Request(request, { headers });
 }

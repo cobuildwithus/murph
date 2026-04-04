@@ -6,8 +6,7 @@ export interface HostedExecutionDispatchEnvironment {
 
 export interface HostedExecutionControlEnvironment {
   baseUrl: string | null;
-  controlToken: string | null;
-  controlTokens: string[];
+  signingSecret: string | null;
 }
 
 export interface HostedExecutionWebControlPlaneEnvironment {
@@ -27,14 +26,10 @@ export interface HostedExecutionWorkerEnvironment {
   bundleEncryptionKeyBase64: string;
   bundleEncryptionKeyId: string;
   bundleEncryptionKeyringJson: string | null;
-  controlToken: string | null;
-  controlTokens: string[];
   defaultAlarmDelayMs: number;
   dispatchSigningSecret: string;
   maxEventAttempts: number;
   retryDelayMs: number;
-  runnerControlToken: string | null;
-  runnerControlTokens: string[];
   runnerTimeoutMs: number;
 }
 
@@ -67,16 +62,10 @@ export function readHostedExecutionControlEnvironment(
   source: EnvSource = process.env,
 ): HostedExecutionControlEnvironment {
   const dispatchUrl = normalizeHostedExecutionBaseUrl(source.HOSTED_EXECUTION_DISPATCH_URL);
-  const controlTokens = readHostedExecutionTokenList(
-    source,
-    "HOSTED_EXECUTION_CONTROL_TOKENS",
-    "HOSTED_EXECUTION_CONTROL_TOKEN",
-  );
 
   return {
     baseUrl: dispatchUrl,
-    controlToken: controlTokens[0] ?? null,
-    controlTokens,
+    signingSecret: normalizeHostedExecutionString(source.HOSTED_EXECUTION_SIGNING_SECRET),
   };
 }
 
@@ -142,17 +131,6 @@ export function readHostedExecutionVercelProductionBaseUrl(
 export function readHostedExecutionWorkerEnvironment(
   source: EnvSource = process.env,
 ): HostedExecutionWorkerEnvironment {
-  const controlTokens = readHostedExecutionTokenList(
-    source,
-    "HOSTED_EXECUTION_CONTROL_TOKENS",
-    "HOSTED_EXECUTION_CONTROL_TOKEN",
-  );
-  const runnerControlTokens = readHostedExecutionTokenList(
-    source,
-    "HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS",
-    "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN",
-  );
-
   return {
     allowedUserEnvKeys: normalizeHostedExecutionString(source.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS),
     bundleEncryptionKeyBase64: requireHostedExecutionString(
@@ -165,8 +143,6 @@ export function readHostedExecutionWorkerEnvironment(
     bundleEncryptionKeyringJson: normalizeHostedExecutionString(
       source.HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON,
     ),
-    controlToken: controlTokens[0] ?? null,
-    controlTokens,
     defaultAlarmDelayMs: parsePositiveInteger(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS),
       15 * 60 * 1000,
@@ -186,8 +162,6 @@ export function readHostedExecutionWorkerEnvironment(
       30_000,
       "HOSTED_EXECUTION_RETRY_DELAY_MS",
     ),
-    runnerControlToken: runnerControlTokens[0] ?? null,
-    runnerControlTokens,
     runnerTimeoutMs: parsePositiveInteger(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS),
       60_000,

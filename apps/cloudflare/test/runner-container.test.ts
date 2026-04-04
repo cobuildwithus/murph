@@ -30,23 +30,16 @@ describe("RunnerContainer", () => {
       })),
     });
 
-    const response = await container.fetch(new Request("https://runner.internal/internal/invoke", {
-      body: JSON.stringify({
-        job: {
-          request: createRunnerRequest(),
-        },
-        timeoutMs: 12_345,
-        userId: "member_123",
-      }),
-      headers: {
-        authorization: "Bearer runner-token",
-        "content-type": "application/json; charset=utf-8",
+    const response = await container.invoke({
+      job: {
+        request: createRunnerRequest(),
       },
-      method: "POST",
-    }));
+      runnerControlToken: "runner-token",
+      timeoutMs: 12_345,
+      userId: "member_123",
+    });
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual(resultPayload);
+    expect(response).toEqual(resultPayload);
     expect(startAndWaitForPorts).toHaveBeenCalledWith(expect.objectContaining({
       cancellationOptions: expect.objectContaining({
         instanceGetTimeoutMS: 12_345,
@@ -58,7 +51,6 @@ describe("RunnerContainer", () => {
         enableInternet: true,
         envVars: {
           HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
-          HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS: "runner-token",
           PORT: "8080",
         },
       },
@@ -148,22 +140,16 @@ describe("RunnerContainer", () => {
       startedAt: "2026-03-27T00:00:00.000Z",
     };
 
-    const response = await container.fetch(new Request("https://runner.internal/internal/invoke", {
-      body: JSON.stringify({
-        job: {
-          request: createRunnerRequest("evt_with_run", { run }),
-        },
-        timeoutMs: 12_345,
-        userId: "member_123",
-      }),
-      headers: {
-        authorization: "Bearer runner-token",
-        "content-type": "application/json; charset=utf-8",
+    const response = await container.invoke({
+      job: {
+        request: createRunnerRequest("evt_with_run", { run }),
       },
-      method: "POST",
-    }));
+      runnerControlToken: "runner-token",
+      timeoutMs: 12_345,
+      userId: "member_123",
+    });
 
-    expect(response.status).toBe(200);
+    expect(response).toEqual(createRunnerResult());
     const forwardedBody = JSON.parse(containerFetch.mock.calls[0]?.[1]?.body as string) as {
       request?: {
         run?: typeof run;
@@ -175,22 +161,16 @@ describe("RunnerContainer", () => {
   it("caps readiness waits to the caller timeout budget when the budget is small", async () => {
     const { container, startAndWaitForPorts } = createContainerDouble();
 
-    const response = await container.fetch(new Request("https://runner.internal/internal/invoke", {
-      body: JSON.stringify({
-        job: {
-          request: createRunnerRequest("evt_short_budget"),
-        },
-        timeoutMs: 1_000,
-        userId: "member_123",
-      }),
-      headers: {
-        authorization: "Bearer runner-token",
-        "content-type": "application/json; charset=utf-8",
+    const response = await container.invoke({
+      job: {
+        request: createRunnerRequest("evt_short_budget"),
       },
-      method: "POST",
-    }));
+      runnerControlToken: "runner-token",
+      timeoutMs: 1_000,
+      userId: "member_123",
+    });
 
-    expect(response.status).toBe(200);
+    expect(response).toEqual(createRunnerResult());
     expect(startAndWaitForPorts).toHaveBeenCalledWith(expect.objectContaining({
       cancellationOptions: expect.objectContaining({
         instanceGetTimeoutMS: 1_000,
@@ -199,7 +179,7 @@ describe("RunnerContainer", () => {
     }));
   });
 
-  it("rejects invoke requests when wrapper auth is missing", async () => {
+  it("keeps legacy internal HTTP invoke routes disabled", async () => {
     const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
 
     const response = await container.fetch(new Request("https://runner.internal/internal/invoke", {
@@ -216,42 +196,33 @@ describe("RunnerContainer", () => {
       method: "POST",
     }));
 
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(405);
     await expect(response.json()).resolves.toEqual({
-      error: "Unauthorized",
+      error: "Method not allowed.",
     });
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
     expect(containerFetch).not.toHaveBeenCalled();
   });
 
-  it("fails invoke requests closed when the wrapper token is not configured", async () => {
+  it("uses the per-run runner control token instead of requiring an env-configured wrapper token", async () => {
     const { container, containerFetch, startAndWaitForPorts } = createContainerDouble({
       env: {
         HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "",
       },
     });
 
-    const response = await container.fetch(new Request("https://runner.internal/internal/invoke", {
-      body: JSON.stringify({
-        job: {
-          request: createRunnerRequest("evt_no_wrapper_token"),
-        },
-        timeoutMs: 30_000,
-        userId: "member_123",
-      }),
-      headers: {
-        authorization: "Bearer runner-token",
-        "content-type": "application/json; charset=utf-8",
+    const response = await container.invoke({
+      job: {
+        request: createRunnerRequest("evt_per_run_token"),
       },
-      method: "POST",
-    }));
-
-    expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toEqual({
-      error: "Hosted runner control token is not configured.",
+      runnerControlToken: "runner-token",
+      timeoutMs: 30_000,
+      userId: "member_123",
     });
-    expect(startAndWaitForPorts).not.toHaveBeenCalled();
-    expect(containerFetch).not.toHaveBeenCalled();
+
+    expect(response).toEqual(createRunnerResult());
+    expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+    expect(containerFetch).toHaveBeenCalledOnce();
   });
 
   it("returns 405 for unsupported internal methods", async () => {
@@ -278,22 +249,12 @@ describe("RunnerContainer", () => {
   it("returns 400 for malformed invoke payloads", async () => {
     const { container, startAndWaitForPorts } = createContainerDouble();
 
-    const response = await container.fetch(new Request("https://runner.internal/internal/invoke", {
-      body: JSON.stringify({
-        job: "not-an-object",
-        timeoutMs: 0,
-      }),
-      headers: {
-        authorization: "Bearer runner-token",
-        "content-type": "application/json; charset=utf-8",
-      },
-      method: "POST",
-    }));
-
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({
-      error: "Hosted assistant runtime job input must be an object.",
-    });
+    await expect(container.invoke({
+      job: "not-an-object" as never,
+      runnerControlToken: "runner-token",
+      timeoutMs: 0 as never,
+      userId: "member_123",
+    })).rejects.toThrow("Hosted assistant runtime job input must be an object.");
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
   });
 
@@ -311,25 +272,9 @@ describe("RunnerContainer", () => {
       })),
     });
 
-    const runningResponse = await running.container.fetch(
-      new Request("https://runner.internal/internal/destroy", {
-        headers: {
-          authorization: "Bearer runner-token",
-        },
-        method: "POST",
-      }),
-    );
-    const stoppedResponse = await stopped.container.fetch(
-      new Request("https://runner.internal/internal/destroy", {
-        headers: {
-          authorization: "Bearer runner-token",
-        },
-        method: "POST",
-      }),
-    );
+    await running.container.destroyInstance();
+    await stopped.container.destroyInstance();
 
-    expect(runningResponse.status).toBe(204);
-    expect(stoppedResponse.status).toBe(204);
     expect(running.destroy).toHaveBeenCalledTimes(1);
     expect(stopped.destroy).not.toHaveBeenCalled();
   });
@@ -397,6 +342,7 @@ describe("RunnerContainer", () => {
           },
         },
       },
+      runnerControlToken: "runner-token",
       timeoutMs: 30_000,
       userId: "member_123",
     });

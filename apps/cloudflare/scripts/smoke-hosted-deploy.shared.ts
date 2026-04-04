@@ -1,4 +1,5 @@
 import {
+  createHostedExecutionSignatureHeaders,
   buildHostedExecutionUserRunPath,
   buildHostedExecutionUserStatusPath,
   parseHostedExecutionUserStatus,
@@ -10,9 +11,10 @@ type EnvSource = Readonly<Record<string, string | undefined>>;
 type FetchLike = typeof fetch;
 
 interface SmokeControlRequest {
-  controlToken: string;
   fetchImpl: FetchLike;
   headers: Record<string, string> | undefined;
+  now?: () => string;
+  signingSecret: string;
   url: string;
 }
 
@@ -68,25 +70,22 @@ export async function runSmokeHostedDeploy(input: {
   const log = input.log ?? console.log;
   const workerBaseUrl = resolveSmokeWorkerBaseUrl(source);
   const smokeUserId = normalizeConfiguredString(source.HOSTED_EXECUTION_SMOKE_USER_ID);
-  const controlToken = readFirstConfiguredToken(
-    source.HOSTED_EXECUTION_CONTROL_TOKENS,
-    source.HOSTED_EXECUTION_CONTROL_TOKEN,
-  );
+  const signingSecret = normalizeConfiguredString(source.HOSTED_EXECUTION_SIGNING_SECRET);
   const versionOverrideHeaders = buildVersionOverrideHeaders(source);
 
   await assertHealth(fetchImpl, new URL("/health", `${workerBaseUrl}/`).toString(), versionOverrideHeaders);
 
   if (smokeUserId) {
-    if (!controlToken) {
+    if (!signingSecret) {
       throw new Error(
-        "HOSTED_EXECUTION_CONTROL_TOKENS is required when HOSTED_EXECUTION_SMOKE_USER_ID is set.",
+        "HOSTED_EXECUTION_SIGNING_SECRET is required when HOSTED_EXECUTION_SMOKE_USER_ID is set.",
       );
     }
 
     const statusRequest: SmokeControlRequest = {
-      controlToken,
       fetchImpl,
       headers: versionOverrideHeaders,
+      signingSecret,
       url: new URL(buildHostedExecutionUserStatusPath(smokeUserId), `${workerBaseUrl}/`).toString(),
     };
     const initialStatus = await readSmokeUserStatus(statusRequest);
@@ -119,27 +118,6 @@ export async function runSmokeHostedDeploy(input: {
   }
 
   log("Cloudflare hosted execution smoke checks passed.");
-}
-
-function readFirstConfiguredToken(...values: Array<string | undefined>): string | null {
-  for (const value of values) {
-    const normalized = normalizeConfiguredString(value);
-
-    if (!normalized) {
-      continue;
-    }
-
-    const [firstToken] = normalized
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter(Boolean);
-
-    if (firstToken) {
-      return firstToken;
-    }
-  }
-
-  return null;
 }
 
 async function assertHealth(
@@ -217,12 +195,21 @@ async function sendSmokeControlRequest(input: SmokeControlRequest & {
   body?: string;
   method?: "GET" | "POST";
 }): Promise<Response> {
+  const path = new URL(input.url).pathname;
+  const payload = input.body ?? "";
+  const signatureHeaders = await createHostedExecutionSignatureHeaders({
+    method: input.method ?? "GET",
+    path,
+    payload,
+    secret: input.signingSecret,
+    timestamp: input.now?.() ?? new Date().toISOString(),
+  });
   const response = await input.fetchImpl(input.url, {
     body: input.body,
     headers: {
-      authorization: `Bearer ${input.controlToken}`,
       ...(input.body ? { "content-type": "application/json; charset=utf-8" } : {}),
       ...input.headers,
+      ...signatureHeaders,
     },
     method: input.method ?? "GET",
   });

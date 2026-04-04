@@ -24,11 +24,15 @@ import type {
 } from "@murphai/gateway-core";
 import {
   emitHostedExecutionStructuredLog,
+  readHostedExecutionWebControlPlaneEnvironment,
+  resolveHostedExecutionAiUsageClient,
   resolveHostedExecutionDispatchOutcomeState,
 } from "@murphai/hosted-execution";
 
 import type { R2BucketLike } from "./bundle-store.js";
 import { createHostedDispatchPayloadStore } from "./dispatch-payload-store.js";
+import { createHostedDeviceSyncRuntimeStore } from "./device-sync-runtime-store.ts";
+import { createHostedPendingUsageStore } from "./usage-store.ts";
 import { HostedGatewayProjectionStore } from "./gateway-store.js";
 import type { HostedExecutionEnvironment } from "./env.js";
 import {
@@ -39,6 +43,10 @@ import {
   type HostedExecutionFinalizePayload,
 } from "./execution-journal.js";
 import { deleteHostedEmailRawMessage } from "./hosted-email.js";
+import {
+  createHostedUserKeyStore,
+  type HostedUserCryptoContext,
+} from "./user-key-store.js";
 import {
   HostedExecutionConfigurationError,
   type HostedExecutionContainerNamespaceLike,
@@ -74,14 +82,21 @@ type HostedExecutionDispatchProgressRecord =
     event: Pick<HostedExecutionDispatchRequest["event"], "userId">;
   };
 
+interface RunnerUserStores {
+  bundleSync: RunnerBundleSync;
+  commitRecovery: ReturnType<typeof createRunnerCommitRecovery>;
+  crypto: HostedUserCryptoContext;
+  gatewayStore: HostedGatewayProjectionStore;
+  userId: string;
+}
+
 export class HostedUserRunner {
-  private readonly bundleSync: RunnerBundleSync;
-  private readonly commitRecovery: ReturnType<typeof createRunnerCommitRecovery>;
   private readonly eventTransitionLocks = new Map<string, Promise<void>>();
   private readonly queueStore: RunnerQueueStore;
   private readonly runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
   private readonly scheduler: RunnerScheduler;
-  private readonly gatewayStore: HostedGatewayProjectionStore;
+  private readonly userKeyStore: ReturnType<typeof createHostedUserKeyStore>;
+  private runnerStores: RunnerUserStores | null = null;
   private userEnvLock: Promise<void> | null = null;
 
   constructor(
@@ -96,85 +111,126 @@ export class HostedUserRunner {
     ).runnerContainerNamespace ?? null,
   ) {
     this.runnerContainerNamespace = runnerContainerNamespace;
-    this.queueStore = new RunnerQueueStore(
-      state,
-      createHostedDispatchPayloadStore({
-        bucket,
-        key: env.bundleEncryptionKey,
-        keyId: env.bundleEncryptionKeyId,
-        keysById: env.bundleEncryptionKeysById,
-      }),
-    );
+    this.queueStore = new RunnerQueueStore(state, null);
     this.scheduler = new RunnerScheduler(this.queueStore, state, env.defaultAlarmDelayMs);
-    this.gatewayStore = new HostedGatewayProjectionStore(state, {
-      key: env.bundleEncryptionKey,
-      keyId: env.bundleEncryptionKeyId,
-      keysById: env.bundleEncryptionKeysById,
-    });
-    this.bundleSync = new RunnerBundleSync(
+    this.userKeyStore = createHostedUserKeyStore({
+      automationKey: env.bundleEncryptionKey,
+      automationKeyId: env.bundleEncryptionKeyId,
       bucket,
-      env.bundleEncryptionKey,
-      env.bundleEncryptionKeyId,
-      env.bundleEncryptionKeysById,
-      this.queueStore,
-      this.readUserEnvSource(),
-    );
-    this.commitRecovery = createRunnerCommitRecovery({
-      bucket,
-      bundleEncryptionKey: env.bundleEncryptionKey,
-      bundleEncryptionKeyId: env.bundleEncryptionKeyId,
-      bundleEncryptionKeysById: env.bundleEncryptionKeysById,
-      queueStore: this.queueStore,
-      scheduler: this.scheduler,
+      envelopeKeyId: env.bundleEncryptionKeyId,
+      envelopeKeysById: env.bundleEncryptionKeysById,
     });
+  }
+
+  private async ensureRunnerStores(userId?: string): Promise<RunnerUserStores> {
+    const resolvedUserId = userId ?? await this.requireBoundUserId();
+
+    if (this.runnerStores?.userId === resolvedUserId) {
+      return this.runnerStores;
+    }
+
+    const crypto = await this.userKeyStore.ensureUserCryptoContext(resolvedUserId);
+    this.queueStore.setDispatchPayloadStore(createHostedDispatchPayloadStore({
+      bucket: this.bucket,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
+    }));
+
+    const stores: RunnerUserStores = {
+      bundleSync: new RunnerBundleSync(
+        this.bucket,
+        crypto.rootKey,
+        crypto.rootKeyId,
+        crypto.keysById,
+        this.queueStore,
+        this.readUserEnvSource(),
+      ),
+      commitRecovery: createRunnerCommitRecovery({
+        bucket: this.bucket,
+        bundleEncryptionKey: crypto.rootKey,
+        bundleEncryptionKeyId: crypto.rootKeyId,
+        bundleEncryptionKeysById: crypto.keysById,
+        queueStore: this.queueStore,
+        scheduler: this.scheduler,
+      }),
+      crypto,
+      gatewayStore: new HostedGatewayProjectionStore(this.state, {
+        key: crypto.rootKey,
+        keyId: crypto.rootKeyId,
+        keysById: crypto.keysById,
+      }),
+      userId: resolvedUserId,
+    };
+
+    this.runnerStores = stores;
+    return stores;
+  }
+
+  private async syncDeviceSyncRuntimeSnapshotFromDispatch(
+    dispatch: HostedExecutionDispatchRequest,
+  ): Promise<void> {
+    if (dispatch.event.kind !== "device-sync.wake" || !dispatch.event.runtimeSnapshot) {
+      return;
+    }
+
+    const { crypto } = await this.ensureRunnerStores(dispatch.event.userId);
+    await createHostedDeviceSyncRuntimeStore({
+      bucket: this.bucket,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
+    }).mergeSnapshot(dispatch.event.runtimeSnapshot);
   }
 
   async gatewayListConversations(
     input?: GatewayListConversationsInput,
   ): Promise<GatewayListConversationsResult> {
-    return this.gatewayStore.listConversations(input);
+    return (await this.ensureRunnerStores()).gatewayStore.listConversations(input);
   }
 
   async gatewayGetConversation(input: GatewayGetConversationInput) {
-    return this.gatewayStore.getConversation(input);
+    return (await this.ensureRunnerStores()).gatewayStore.getConversation(input);
   }
 
   async gatewayReadMessages(
     input: GatewayReadMessagesInput,
   ): Promise<GatewayReadMessagesResult> {
-    return this.gatewayStore.readMessages(input);
+    return (await this.ensureRunnerStores()).gatewayStore.readMessages(input);
   }
 
   async gatewayFetchAttachments(input: GatewayFetchAttachmentsInput) {
-    return this.gatewayStore.fetchAttachments(input);
+    return (await this.ensureRunnerStores()).gatewayStore.fetchAttachments(input);
   }
 
   async gatewayPollEvents(
     input?: GatewayPollEventsInput,
   ): Promise<GatewayPollEventsResult> {
-    return this.gatewayStore.pollEvents(input);
+    return (await this.ensureRunnerStores()).gatewayStore.pollEvents(input);
   }
 
   async gatewayListOpenPermissions(
     input?: GatewayListOpenPermissionsInput,
   ): Promise<GatewayPermissionRequest[]> {
-    return this.gatewayStore.listOpenPermissions(input);
+    return (await this.ensureRunnerStores()).gatewayStore.listOpenPermissions(input);
   }
 
   async gatewayRespondToPermission(
     input: GatewayRespondToPermissionInput,
   ): Promise<GatewayPermissionRequest | null> {
-    return this.gatewayStore.respondToPermission(input);
+    return (await this.ensureRunnerStores()).gatewayStore.respondToPermission(input);
   }
 
   async bootstrapUser(userId: string): Promise<{ userId: string }> {
-    return {
-      userId: await this.queueStore.bootstrapUser(userId),
-    };
+    await this.queueStore.bootstrapUser(userId);
+    await this.ensureRunnerStores(userId);
+    return { userId };
   }
 
   async dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {
     await this.queueStore.bootstrapUser(input.event.userId);
+    await this.ensureRunnerStores(input.event.userId);
+    await this.syncDeviceSyncRuntimeSnapshotFromDispatch(input);
     return this.dispatchBootstrapped(input);
   }
 
@@ -182,6 +238,8 @@ export class HostedUserRunner {
     input: HostedExecutionDispatchRequest,
   ): Promise<HostedExecutionDispatchResult> {
     await this.queueStore.bootstrapUser(input.event.userId);
+    await this.ensureRunnerStores(input.event.userId);
+    await this.syncDeviceSyncRuntimeSnapshotFromDispatch(input);
     const initialState = await this.queueStore.readEventState(input.eventId);
     const status = await this.dispatchBootstrapped(input);
     const nextState = await this.queueStore.readEventState(input.eventId);
@@ -203,7 +261,8 @@ export class HostedUserRunner {
   private async dispatchBootstrapped(
     input: HostedExecutionDispatchRequest,
   ): Promise<HostedExecutionUserStatus> {
-    const committed = await this.commitRecovery.readCommittedDispatch(input.event.userId, input.eventId);
+    const { commitRecovery, gatewayStore } = await this.ensureRunnerStores(input.event.userId);
+    const committed = await commitRecovery.readCommittedDispatch(input.event.userId, input.eventId);
     if (committed) {
       const presence = await this.queueStore.readEventPresence(input.eventId);
       if (
@@ -212,11 +271,11 @@ export class HostedUserRunner {
         || isCommittedResultFresh(committed, COMMITTED_RESULT_FRESH_WINDOW_MS)
       ) {
         if (!isCommittedResultFinalized(committed)) {
-          const synced = await this.commitRecovery.syncCommittedBundlesWithoutConsuming(
+          const synced = await commitRecovery.syncCommittedBundlesWithoutConsuming(
             input.event.userId,
             committed,
           );
-          await this.gatewayStore.applySnapshot(committed.gatewayProjectionSnapshot ?? null);
+          await gatewayStore.applySnapshot(committed.gatewayProjectionSnapshot ?? null);
 
           return toUserStatus(
             await this.advanceRunPhase({
@@ -232,7 +291,7 @@ export class HostedUserRunner {
           );
         }
 
-        await this.gatewayStore.applySnapshot(committed.gatewayProjectionSnapshot ?? null);
+        await gatewayStore.applySnapshot(committed.gatewayProjectionSnapshot ?? null);
         return toUserStatus(
           presence.pending
             ? await this.applyCommittedDispatchAndCleanup(input.event.userId, committed, input)
@@ -240,7 +299,7 @@ export class HostedUserRunner {
         );
       }
 
-      await this.commitRecovery.deleteCommittedDispatch(input.event.userId, input.eventId);
+      await commitRecovery.deleteCommittedDispatch(input.event.userId, input.eventId);
     }
 
     const enqueueResult = await this.queueStore.enqueueDispatch(input);
@@ -301,8 +360,9 @@ export class HostedUserRunner {
 
   async getUserEnvStatus(): Promise<HostedExecutionUserEnvStatus> {
     const userId = await this.requireBoundUserId();
+    const { bundleSync } = await this.ensureRunnerStores(userId);
     return {
-      configuredUserEnvKeys: listHostedUserEnvKeys(await this.bundleSync.readUserEnv(userId)),
+      configuredUserEnvKeys: listHostedUserEnvKeys(await bundleSync.readUserEnv(userId)),
       userId,
     };
   }
@@ -311,7 +371,8 @@ export class HostedUserRunner {
     update: HostedUserEnvUpdate,
   ): Promise<HostedExecutionUserEnvStatus> {
     const userId = await this.requireBoundUserId();
-    return this.withUserEnvLock(() => this.bundleSync.updateUserEnv(userId, update));
+    const { bundleSync } = await this.ensureRunnerStores(userId);
+    return this.withUserEnvLock(() => bundleSync.updateUserEnv(userId, update));
   }
 
   async clearUserEnv(): Promise<HostedExecutionUserEnvStatus> {
@@ -330,16 +391,19 @@ export class HostedUserRunner {
     return this.applyHostedTransition({
       eventId: input.eventId,
       gatewayProjectionSnapshot: input.payload.gatewayProjectionSnapshot ?? null,
-      run: async (userId) => persistHostedExecutionCommit({
-        bucket: this.bucket,
-        currentBundleRefs: input.payload.currentBundleRefs,
-        eventId: input.eventId,
-        key: this.env.bundleEncryptionKey,
-        keyId: this.env.bundleEncryptionKeyId,
-        keysById: this.env.bundleEncryptionKeysById,
-        payload: input.payload,
-        userId,
-      }),
+      run: async (userId) => {
+        const { crypto } = await this.ensureRunnerStores(userId);
+        return persistHostedExecutionCommit({
+          bucket: this.bucket,
+          currentBundleRefs: input.payload.currentBundleRefs,
+          eventId: input.eventId,
+          key: crypto.rootKey,
+          keyId: crypto.rootKeyId,
+          keysById: crypto.keysById,
+          payload: input.payload,
+          userId,
+        });
+      },
     });
   }
 
@@ -350,19 +414,23 @@ export class HostedUserRunner {
     return this.applyHostedTransition({
       eventId: input.eventId,
       gatewayProjectionSnapshot: input.payload.gatewayProjectionSnapshot ?? null,
-      run: async (userId) => persistHostedExecutionFinalBundles({
-        bucket: this.bucket,
-        eventId: input.eventId,
-        key: this.env.bundleEncryptionKey,
-        keyId: this.env.bundleEncryptionKeyId,
-        keysById: this.env.bundleEncryptionKeysById,
-        payload: input.payload,
-        userId,
-      }),
+      run: async (userId) => {
+        const { crypto } = await this.ensureRunnerStores(userId);
+        return persistHostedExecutionFinalBundles({
+          bucket: this.bucket,
+          eventId: input.eventId,
+          key: crypto.rootKey,
+          keyId: crypto.rootKeyId,
+          keysById: crypto.keysById,
+          payload: input.payload,
+          userId,
+        });
+      },
     });
   }
 
   private async runQueuedEvents(userId: string): Promise<HostedExecutionUserStatus> {
+    await this.ensureRunnerStores(userId);
     let record = await this.queueStore.readState();
     let processedDispatch = false;
     const recovered = await this.recoverCommittedPendingDispatchAndCleanup(record);
@@ -396,12 +464,12 @@ export class HostedUserRunner {
       });
 
       try {
-        const committed = await this.commitRecovery.readCommittedDispatch(
+        const committed = await (await this.ensureRunnerStores(record.userId)).commitRecovery.readCommittedDispatch(
           record.userId,
           nextPending.dispatch.eventId,
         );
         if (committed && !isCommittedResultFinalized(committed)) {
-          await this.gatewayStore.applySnapshot(committed.gatewayProjectionSnapshot ?? null);
+          await (await this.ensureRunnerStores(record.userId)).gatewayStore.applySnapshot(committed.gatewayProjectionSnapshot ?? null);
         }
         record = await this.advanceRunPhase({
           clearError: true,
@@ -425,7 +493,7 @@ export class HostedUserRunner {
               }
             : null,
         );
-        record = await this.commitRecovery.requireCommittedDispatch(
+        record = await (await this.ensureRunnerStores(record.userId)).commitRecovery.requireCommittedDispatch(
           record.userId,
           nextPending.dispatch.eventId,
         );
@@ -436,7 +504,7 @@ export class HostedUserRunner {
           phase: "commit.recorded",
           run,
         });
-        record = await this.bundleSync.applyRunnerResultBundles(
+        record = await (await this.ensureRunnerStores(record.userId)).bundleSync.applyRunnerResultBundles(
           record.userId,
           record.bundleVersions,
           runnerResult.bundles,
@@ -454,7 +522,7 @@ export class HostedUserRunner {
         await this.deleteCommittedDispatchBestEffort(record.userId, nextPending.dispatch.eventId);
         processedDispatch = true;
       } catch (error) {
-        const committed = await this.commitRecovery.readCommittedDispatch(
+        const committed = await (await this.ensureRunnerStores(record.userId)).commitRecovery.readCommittedDispatch(
           record.userId,
           nextPending.dispatch.eventId,
         );
@@ -471,7 +539,7 @@ export class HostedUserRunner {
             continue;
           }
 
-          record = await this.commitRecovery.rescheduleCommittedFinalizeRetry({
+          record = await (await this.ensureRunnerStores(record.userId)).commitRecovery.rescheduleCommittedFinalizeRetry({
             attempts: nextPending.attempts + 1,
             committed,
             error,
@@ -547,14 +615,15 @@ export class HostedUserRunner {
       throw new Error("Native hosted execution requires a RunnerContainer binding.");
     }
 
+    const { bundleSync } = await this.ensureRunnerStores(userId);
     const [bundleState, userEnv] = await Promise.all([
       this.queueStore.readBundleMetaState(),
-      this.bundleSync.readUserEnv(userId),
+      bundleSync.readUserEnv(userId),
     ]);
     const forwardedEnv = buildHostedRunnerContainerEnv(this.runnerRuntimeEnvSource);
     const job: HostedAssistantRuntimeJobInput = {
       request: {
-        bundles: await this.bundleSync.readBundlesForRunner(),
+        bundles: await bundleSync.readBundlesForRunner(),
         commit: {
           bundleRefs: bundleState.bundleRefs,
         },
@@ -571,7 +640,7 @@ export class HostedUserRunner {
     return invokeHostedExecutionContainerRunner({
       job,
       runnerContainerNamespace: this.runnerContainerNamespace,
-      runnerControlToken: this.env.runnerControlToken,
+      runnerControlToken: crypto.randomUUID(),
       timeoutMs: this.env.runnerTimeoutMs,
       userId,
     });
@@ -580,13 +649,14 @@ export class HostedUserRunner {
   private async recoverCommittedPendingDispatchAndCleanup(
     record: RunnerStateRecord,
   ): Promise<RunnerStateRecord | null> {
-    const recovered = await this.commitRecovery.recoverCommittedPendingDispatch(record);
+    const { commitRecovery, gatewayStore } = await this.ensureRunnerStores(record.userId);
+    const recovered = await commitRecovery.recoverCommittedPendingDispatch(record);
     if (!recovered) {
       return null;
     }
 
     if (recovered.committedEventId) {
-      await this.gatewayStore.applySnapshot(recovered.committed.gatewayProjectionSnapshot ?? null);
+      await gatewayStore.applySnapshot(recovered.committed.gatewayProjectionSnapshot ?? null);
       const completedRecord = await this.advanceRunPhase({
         clearError: true,
         dispatch: {
@@ -603,6 +673,7 @@ export class HostedUserRunner {
         }),
       });
       await this.deleteCommittedDispatchBestEffort(record.userId, recovered.committedEventId);
+      await this.flushPendingUsageBestEffort(record.userId);
       return completedRecord;
     }
 
@@ -616,8 +687,9 @@ export class HostedUserRunner {
     cleanupDispatch: HostedExecutionDispatchRequest | null = null,
     run: HostedExecutionRunContext | null = null,
   ): Promise<RunnerStateRecord> {
-    await this.gatewayStore.applySnapshot(committed.gatewayProjectionSnapshot ?? null);
-    let record = await this.commitRecovery.applyCommittedDispatch(userId, committed);
+    const { commitRecovery, gatewayStore } = await this.ensureRunnerStores(userId);
+    await gatewayStore.applySnapshot(committed.gatewayProjectionSnapshot ?? null);
+    let record = await commitRecovery.applyCommittedDispatch(userId, committed);
     record = await this.advanceRunPhase({
       clearError: true,
       dispatch,
@@ -629,10 +701,68 @@ export class HostedUserRunner {
       }),
     });
     await this.deleteCommittedDispatchBestEffort(userId, committed.eventId);
+    await this.flushPendingUsageBestEffort(userId);
     if (cleanupDispatch) {
       await this.deleteTransientDispatchDataBestEffort(cleanupDispatch);
     }
     return record;
+  }
+
+  private async flushPendingUsageBestEffort(userId: string): Promise<void> {
+    try {
+      const { crypto } = await this.ensureRunnerStores(userId);
+      const store = createHostedPendingUsageStore({
+        bucket: this.bucket,
+        key: crypto.rootKey,
+        keyId: crypto.rootKeyId,
+        keysById: crypto.keysById,
+      });
+      const webControlPlane = readHostedExecutionWebControlPlaneEnvironment(
+        this.runnerRuntimeEnvSource as Readonly<Record<string, string | undefined>>,
+        {
+          allowHttpLocalhost: true,
+        },
+      );
+      const client = resolveHostedExecutionAiUsageClient({
+        baseUrl: webControlPlane.usageBaseUrl ?? null,
+        boundUserId: userId,
+        internalToken: webControlPlane.internalToken,
+        timeoutMs: this.env.runnerTimeoutMs,
+      });
+
+      if (!client) {
+        return;
+      }
+
+      while (true) {
+        const batch = await store.readUsage({
+          limit: 50,
+          userId,
+        });
+        if (batch.length === 0) {
+          return;
+        }
+
+        const result = await client.recordUsage(batch);
+        const acknowledgedUsageIds = result.usageIds.filter((usageId) => typeof usageId === "string" && usageId.length > 0);
+        if (acknowledgedUsageIds.length === 0) {
+          return;
+        }
+
+        await store.deleteUsage({
+          usageIds: acknowledgedUsageIds,
+          userId,
+        });
+
+        if (acknowledgedUsageIds.length < batch.length) {
+          return;
+        }
+      }
+    } catch (error) {
+      console.warn(
+        `Failed to flush hosted AI usage records for ${userId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   private createRunContext(
@@ -723,7 +853,7 @@ export class HostedUserRunner {
 
   private async deleteCommittedDispatchBestEffort(userId: string, eventId: string): Promise<void> {
     try {
-      await this.commitRecovery.deleteCommittedDispatch(userId, eventId);
+      await (await this.ensureRunnerStores(userId)).commitRecovery.deleteCommittedDispatch(userId, eventId);
     } catch {
       // Leaving the transient journal behind is preferable to failing a successful hosted run.
     }
@@ -757,7 +887,7 @@ export class HostedUserRunner {
     return this.withEventTransitionLock(input.eventId, async () => {
       const userId = await this.requireBoundUserId();
       const result = await input.run(userId);
-      await this.gatewayStore.applySnapshot(input.gatewayProjectionSnapshot ?? null);
+      await (await this.ensureRunnerStores(userId)).gatewayStore.applySnapshot(input.gatewayProjectionSnapshot ?? null);
       return result;
     });
   }

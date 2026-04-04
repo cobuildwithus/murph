@@ -97,8 +97,6 @@ async function handleHostedDispatchEvent(input: {
           ...dispatch,
           event: dispatch.event,
         },
-        internalWorkerFetch: input.internalWorkerFetch,
-        runtime: input.runtime,
         vaultRoot: input.vaultRoot,
       });
     case "gateway.message.send":

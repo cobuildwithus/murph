@@ -13,6 +13,7 @@ import { createHostedBundleStore } from "../../src/bundle-store.js";
 import { createHostedExecutionJournalStore } from "../../src/execution-journal.js";
 import { readHostedExecutionEnvironment } from "../../src/env.js";
 import { handleRunnerOutboundRequest } from "../../src/runner-outbound.js";
+import { createHostedUserKeyStore } from "../../src/user-key-store.js";
 
 const RUNNER_PROXY_TOKEN = "runner-proxy-token";
 const RUNNER_PROXY_TOKEN_HEADER = "x-hosted-execution-runner-proxy-token";
@@ -99,10 +100,10 @@ describe("cloudflare worker runtime suite", () => {
         userId: dispatch.event.userId,
       },
     });
-    await expect(readBundleText(payload.status.bundleRefs.agentState)).resolves.toBe(
+    await expect(readBundleText(dispatch.event.userId, payload.status.bundleRefs.agentState)).resolves.toBe(
       `agent-state:${dispatch.eventId}`,
     );
-    await expect(readBundleText(payload.status.bundleRefs.vault)).resolves.toBe(
+    await expect(readBundleText(dispatch.event.userId, payload.status.bundleRefs.vault)).resolves.toBe(
       `vault:${dispatch.eventId}`,
     );
   });
@@ -151,17 +152,13 @@ describe("cloudflare worker runtime suite", () => {
     const userId = "member_control";
 
     const envUpdateResponse = await exports.default.fetch(
-      new Request(`https://runner.example.test/internal/users/${userId}/env`, {
+      await createSignedControlRequest(`/internal/users/${userId}/env`, {
         body: JSON.stringify({
           env: {
             OPENAI_API_KEY: "test-key",
           },
           mode: "merge",
         }),
-        headers: {
-          authorization: "Bearer control-token",
-          "content-type": "application/json; charset=utf-8",
-        },
         method: "PUT",
       }),
     );
@@ -173,12 +170,8 @@ describe("cloudflare worker runtime suite", () => {
     });
 
     const statusResponse = await exports.default.fetch(
-      new Request(`https://runner.example.test/internal/users/${userId}/run`, {
+      await createSignedControlRequest(`/internal/users/${userId}/run`, {
         body: JSON.stringify({ note: "manual" }),
-        headers: {
-          authorization: "Bearer control-token",
-          "content-type": "application/json; charset=utf-8",
-        },
         method: "POST",
       }),
     );
@@ -203,7 +196,7 @@ describe("cloudflare worker runtime suite", () => {
     const userId = "member_control_env_reject";
 
     const rejectedResponse = await exports.default.fetch(
-      new Request(`https://runner.example.test/internal/users/${userId}/env`, {
+      await createSignedControlRequest(`/internal/users/${userId}/env`, {
         body: JSON.stringify({
           env: {
             AGENTMAIL_API_BASE_URL: "https://legacy-mail.example.test/v0",
@@ -213,10 +206,6 @@ describe("cloudflare worker runtime suite", () => {
           },
           mode: "merge",
         }),
-        headers: {
-          authorization: "Bearer control-token",
-          "content-type": "application/json; charset=utf-8",
-        },
         method: "PUT",
       }),
     );
@@ -231,7 +220,7 @@ describe("cloudflare worker runtime suite", () => {
     });
 
     const acceptedResponse = await exports.default.fetch(
-      new Request(`https://runner.example.test/internal/users/${userId}/env`, {
+      await createSignedControlRequest(`/internal/users/${userId}/env`, {
         body: JSON.stringify({
           env: {
             FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
@@ -239,10 +228,6 @@ describe("cloudflare worker runtime suite", () => {
           },
           mode: "merge",
         }),
-        headers: {
-          authorization: "Bearer control-token",
-          "content-type": "application/json; charset=utf-8",
-        },
         method: "PUT",
       }),
     );
@@ -301,7 +286,7 @@ describe("cloudflare worker runtime suite", () => {
     );
 
     expect(finalizeResponse.status).toBe(200);
-    await expect(createJournalStore().readCommittedResult(userId, eventId)).resolves.toMatchObject({
+    await expect((await createJournalStore(userId)).readCommittedResult(userId, eventId)).resolves.toMatchObject({
       eventId,
       finalizedAt: expect.any(String),
       result: {
@@ -335,6 +320,8 @@ async function createSignedDispatchRequest(
   const payload = JSON.stringify(dispatch);
   const timestamp = input.timestamp ?? "2026-03-26T12:00:00.000Z";
   const signature = await createHostedExecutionSignature({
+    method: "POST",
+    path,
     payload,
     secret: "dispatch-secret",
     timestamp,
@@ -351,30 +338,74 @@ async function createSignedDispatchRequest(
   });
 }
 
-function createJournalStore() {
+async function createSignedControlRequest(
+  path: string,
+  input: {
+    body?: string;
+    method: "DELETE" | "GET" | "POST" | "PUT";
+    timestamp?: string;
+  },
+): Promise<Request> {
+  const body = input.body ?? "";
+  const timestamp = input.timestamp ?? new Date().toISOString();
+  const signature = await createHostedExecutionSignature({
+    method: input.method,
+    path,
+    payload: body,
+    secret: "dispatch-secret",
+    timestamp,
+  });
+
+  return new Request(`https://runner.example.test${path}`, {
+    ...(body ? { body } : {}),
+    headers: {
+      ...(body ? { "content-type": "application/json; charset=utf-8" } : {}),
+      "x-hosted-execution-signature": signature,
+      "x-hosted-execution-timestamp": timestamp,
+    },
+    method: input.method,
+  });
+}
+
+async function resolveHostedUserCryptoContext(userId: string) {
   const environment = readHostedExecutionEnvironment(
     env as unknown as Readonly<Record<string, string | undefined>>,
   );
+
+  return createHostedUserKeyStore({
+    bucket: (env as { BUNDLES: never }).BUNDLES,
+    automationKey: environment.bundleEncryptionKey,
+    automationKeyId: environment.bundleEncryptionKeyId,
+    envelopeKeyId: environment.bundleEncryptionKeyId,
+    envelopeKeysById: environment.bundleEncryptionKeysById,
+  }).ensureUserCryptoContext(userId);
+}
+
+async function createJournalStore(userId: string) {
+  const crypto = await resolveHostedUserCryptoContext(userId);
   return createHostedExecutionJournalStore({
     bucket: (env as { BUNDLES: never }).BUNDLES,
-    key: environment.bundleEncryptionKey,
-    keyId: environment.bundleEncryptionKeyId,
+    key: crypto.rootKey,
+    keyId: crypto.rootKeyId,
+    keysById: crypto.keysById,
   });
 }
 
-function createBundleStore() {
-  const environment = readHostedExecutionEnvironment(
-    env as unknown as Readonly<Record<string, string | undefined>>,
-  );
+async function createBundleStore(userId: string) {
+  const crypto = await resolveHostedUserCryptoContext(userId);
   return createHostedBundleStore({
     bucket: (env as { BUNDLES: never }).BUNDLES,
-    key: environment.bundleEncryptionKey,
-    keyId: environment.bundleEncryptionKeyId,
+    key: crypto.rootKey,
+    keyId: crypto.rootKeyId,
+    keysById: crypto.keysById,
   });
 }
 
-async function readBundleText(bundleRef: HostedExecutionBundleRef | null): Promise<string | null> {
-  const bundle = await createBundleStore().readBundle(bundleRef);
+async function readBundleText(
+  userId: string,
+  bundleRef: HostedExecutionBundleRef | null,
+): Promise<string | null> {
+  const bundle = await (await createBundleStore(userId)).readBundle(bundleRef);
 
   if (!bundle) {
     return null;

@@ -163,8 +163,9 @@ export function resolveHostedRunnerDispatchPayloadStorage(
     case "member.activated":
     case "assistant.cron.tick":
     case "email.message.received":
-    case "vault.share.accepted":
       return "inline";
+    case "vault.share.accepted":
+      return "reference";
     default:
       throw new TypeError("Unsupported hosted dispatch payload storage event kind.");
   }

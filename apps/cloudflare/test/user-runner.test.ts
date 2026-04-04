@@ -27,6 +27,7 @@ import {
   persistHostedExecutionCommit,
   persistHostedExecutionFinalBundles,
 } from "../src/execution-journal.js";
+import { createHostedUserKeyStore } from "../src/user-key-store.js";
 import { HostedUserRunner } from "../src/user-runner.js";
 import { createTestSqlStorage } from "./sql-storage.js";
 
@@ -322,6 +323,11 @@ describe("HostedUserRunner", () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-recovered-bundle-gc-"));
 
     try {
+      const crypto = await resolveHostedUserCryptoContextForTest({
+        bucket,
+        environment,
+        userId: "member_recovered_gc",
+      });
       const previousVaultRoot = path.join(workspaceRoot, "previous-vault");
       const nextVaultRoot = path.join(workspaceRoot, "next-vault");
       const previousRawAttachmentPath = path.join(
@@ -339,8 +345,9 @@ describe("HostedUserRunner", () => {
 
       const artifactStore = createHostedArtifactStore({
         bucket: bucket.api,
-        key: environment.bundleEncryptionKey,
-        keyId: environment.bundleEncryptionKeyId,
+        key: crypto.rootKey,
+        keyId: crypto.rootKeyId,
+        keysById: crypto.keysById,
         userId: "member_recovered_gc",
       });
       const previousVaultBundle = await snapshotHostedBundleRoots({
@@ -371,8 +378,9 @@ describe("HostedUserRunner", () => {
       });
       const bundleStore = createHostedBundleStore({
         bucket: bucket.api,
-        key: environment.bundleEncryptionKey,
-        keyId: environment.bundleEncryptionKeyId,
+        key: crypto.rootKey,
+        keyId: crypto.rootKeyId,
+        keysById: crypto.keysById,
       });
       const [previousArtifact] = listHostedBundleArtifacts({
         bytes: previousVaultBundle!,
@@ -434,8 +442,9 @@ describe("HostedUserRunner", () => {
           vault: previousVaultRef,
         },
         eventId: "evt_recovered_gc",
-        key: environment.bundleEncryptionKey,
-        keyId: environment.bundleEncryptionKeyId,
+        key: crypto.rootKey,
+        keyId: crypto.rootKeyId,
+        keysById: crypto.keysById,
         payload: {
           bundles: {
             agentState: Buffer.from(nextAgentBytes).toString("base64"),
@@ -451,8 +460,9 @@ describe("HostedUserRunner", () => {
       await persistHostedExecutionFinalBundles({
         bucket: bucket.api,
         eventId: "evt_recovered_gc",
-        key: environment.bundleEncryptionKey,
-        keyId: environment.bundleEncryptionKeyId,
+        key: crypto.rootKey,
+        keyId: crypto.rootKeyId,
+        keysById: crypto.keysById,
         payload: {
           bundles: {
             agentState: Buffer.from(nextAgentBytes).toString("base64"),
@@ -481,11 +491,7 @@ describe("HostedUserRunner", () => {
       expect(status.retryingEventId).toBeNull();
       expect(status.lastError).toBeNull();
       expect(bucket.keys()).not.toContain(
-        await artifactObjectKey(
-          environment.bundleEncryptionKey,
-          "member_recovered_gc",
-          previousArtifact!.ref.sha256,
-        ),
+        await artifactObjectKey(crypto.rootKey, "member_recovered_gc", previousArtifact!.ref.sha256),
       );
       expect(bucket.keys()).toContain(previousVaultRef.key);
       expect(bucket.keys()).toContain(previousAgentRef.key);
@@ -820,6 +826,11 @@ describe("HostedUserRunner", () => {
   });
 
   it("reapplies committed gateway snapshots from the durable journal before finalize completes", async () => {
+    const crypto = await resolveHostedUserCryptoContextForTest({
+      bucket,
+      environment,
+      userId: "member_123",
+    });
     seedRunnerQueueState(storage, {
       activated: true,
       pendingEvents: [{
@@ -835,8 +846,9 @@ describe("HostedUserRunner", () => {
 
     await createHostedExecutionJournalStore({
       bucket: bucket.api,
-      key: environment.bundleEncryptionKey,
-      keyId: environment.bundleEncryptionKeyId,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
     }).writeCommittedResult("member_123", "evt_gateway_recovery", {
       bundleRefs: {
         agentState: null,
@@ -956,19 +968,23 @@ describe("HostedUserRunner", () => {
     expect(messages.messages[1]?.messageId).toBe("gwcm_projection_newer");
   });
 
-  it("recovers finalized committed results encrypted with a previous key id after rotation", async () => {
-    const previousKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+  it("recovers finalized committed results after automation-key rotation via the user root key envelope", async () => {
     const rotatedEnvironment = {
       ...environment,
-      bundleEncryptionKey: Uint8Array.from({ length: 32 }, () => 7),
+      bundleEncryptionKey: Uint8Array.from({ length: 32 }, () => 9),
       bundleEncryptionKeyId: "v2",
       bundleEncryptionKeysById: {
-        v1: previousKey,
-        v2: Uint8Array.from({ length: 32 }, () => 7),
+        v1: environment.bundleEncryptionKey,
+        v2: Uint8Array.from({ length: 32 }, () => 9),
       },
     };
     const runner = new HostedUserRunner(storage.state, rotatedEnvironment, bucket.api);
     const dispatch = createDispatch("evt_rotated_commit_recovery");
+    const crypto = await resolveHostedUserCryptoContextForTest({
+      bucket,
+      environment: rotatedEnvironment,
+      userId: dispatch.event.userId,
+    });
 
     seedRunnerQueueState(storage, {
       activated: true,
@@ -987,8 +1003,9 @@ describe("HostedUserRunner", () => {
 
     await createHostedExecutionJournalStore({
       bucket: bucket.api,
-      key: previousKey,
-      keyId: "v1",
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
     }).writeCommittedResult(dispatch.event.userId, dispatch.eventId, {
       bundleRefs: {
         agentState: null,
@@ -1019,9 +1036,9 @@ describe("HostedUserRunner", () => {
     await expect(
       createHostedExecutionJournalStore({
         bucket: bucket.api,
-        key: rotatedEnvironment.bundleEncryptionKey,
-        keyId: rotatedEnvironment.bundleEncryptionKeyId,
-        keysById: rotatedEnvironment.bundleEncryptionKeysById,
+        key: crypto.rootKey,
+        keyId: crypto.rootKeyId,
+        keysById: crypto.keysById,
       }).readCommittedResult(dispatch.event.userId, dispatch.eventId),
     ).resolves.toBeNull();
   });
@@ -1087,8 +1104,21 @@ describe("HostedUserRunner", () => {
     expectHostedBundleKeys(bucket.keys(), ["agent-state", "vault"]);
     await expect(createHostedExecutionJournalStore({
       bucket: bucket.api,
-      key: environment.bundleEncryptionKey,
-      keyId: environment.bundleEncryptionKeyId,
+      key: (await resolveHostedUserCryptoContextForTest({
+        bucket,
+        environment,
+        userId: "member_123",
+      })).rootKey,
+      keyId: (await resolveHostedUserCryptoContextForTest({
+        bucket,
+        environment,
+        userId: "member_123",
+      })).rootKeyId,
+      keysById: (await resolveHostedUserCryptoContextForTest({
+        bucket,
+        environment,
+        userId: "member_123",
+      })).keysById,
     }).readCommittedResult("member_123", "evt_123")).resolves.toBeNull();
   });
 
@@ -1451,15 +1481,22 @@ describe("HostedUserRunner", () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-cleanup-failure-"));
 
     try {
+      const crypto = await resolveHostedUserCryptoContextForTest({
+        bucket,
+        environment,
+        userId: "member_cleanup_failure",
+      });
       const bundleStore = createHostedBundleStore({
         bucket: bucket.api,
-        key: environment.bundleEncryptionKey,
-        keyId: environment.bundleEncryptionKeyId,
+        key: crypto.rootKey,
+        keyId: crypto.rootKeyId,
+        keysById: crypto.keysById,
       });
       const artifactStore = createHostedArtifactStore({
         bucket: bucket.api,
-        key: environment.bundleEncryptionKey,
-        keyId: environment.bundleEncryptionKeyId,
+        key: crypto.rootKey,
+        keyId: crypto.rootKeyId,
+        keysById: crypto.keysById,
         userId: "member_cleanup_failure",
       });
       const previousVaultRoot = path.join(workspaceRoot, "previous-vault");
@@ -1595,34 +1632,18 @@ describe("HostedUserRunner", () => {
       expect(status.bundleRefs.agentState?.size).toBe("agent-state-final".length);
       expect(status.bundleRefs.vault?.size).toBe(finalVaultBundle!.byteLength);
       expect(bucket.keys()).toContain(
-        await artifactObjectKey(
-          environment.bundleEncryptionKey,
-          "member_cleanup_failure",
-          previousArtifact!.ref.sha256,
-        ),
+        await artifactObjectKey(crypto.rootKey, "member_cleanup_failure", previousArtifact!.ref.sha256),
       );
       expect(bucket.keys()).toContain(
-        await artifactObjectKey(
-          environment.bundleEncryptionKey,
-          "member_cleanup_failure",
-          committedArtifact!.ref.sha256,
-        ),
+        await artifactObjectKey(crypto.rootKey, "member_cleanup_failure", committedArtifact!.ref.sha256),
       );
       expect(
         deleteArtifactSpy.mock.calls
           .map(([key]) => String(key))
           .filter((key) => key.includes("users/artifacts/")),
       ).toEqual(expect.arrayContaining([
-        await artifactObjectKey(
-          environment.bundleEncryptionKey,
-          "member_cleanup_failure",
-          previousArtifact!.ref.sha256,
-        ),
-        await artifactObjectKey(
-          environment.bundleEncryptionKey,
-          "member_cleanup_failure",
-          committedArtifact!.ref.sha256,
-        ),
+        await artifactObjectKey(crypto.rootKey, "member_cleanup_failure", previousArtifact!.ref.sha256),
+        await artifactObjectKey(crypto.rootKey, "member_cleanup_failure", committedArtifact!.ref.sha256),
       ]));
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
@@ -3357,6 +3378,7 @@ async function commitResultForRunnerRequest(input: {
   environment: {
     bundleEncryptionKey: Uint8Array;
     bundleEncryptionKeyId: string;
+    bundleEncryptionKeysById?: Readonly<Record<string, Uint8Array>>;
   };
   payload: {
     bundles: {
@@ -3389,12 +3411,18 @@ async function commitResultForRunnerRequest(input: {
     };
   };
 }): Promise<void> {
+  const crypto = await resolveHostedUserCryptoContextForTest({
+    bucket: input.bucket,
+    environment: input.environment,
+    userId: input.requestBody.dispatch.event.userId,
+  });
   await persistHostedExecutionCommit({
     bucket: input.bucket.api,
     currentBundleRefs: input.requestBody.commit.bundleRefs,
     eventId: input.requestBody.dispatch.eventId,
-    key: input.environment.bundleEncryptionKey,
-    keyId: input.environment.bundleEncryptionKeyId,
+    key: crypto.rootKey,
+    keyId: crypto.rootKeyId,
+    keysById: crypto.keysById,
     payload: input.payload,
     userId: input.requestBody.dispatch.event.userId,
   });
@@ -3405,6 +3433,7 @@ async function finalizeResultForRunnerRequest(input: {
   environment: {
     bundleEncryptionKey: Uint8Array;
     bundleEncryptionKeyId: string;
+    bundleEncryptionKeysById?: Readonly<Record<string, Uint8Array>>;
   };
   payload: {
     bundles: {
@@ -3427,14 +3456,38 @@ async function finalizeResultForRunnerRequest(input: {
     };
   };
 }): Promise<void> {
+  const crypto = await resolveHostedUserCryptoContextForTest({
+    bucket: input.bucket,
+    environment: input.environment,
+    userId: input.requestBody.dispatch.event.userId,
+  });
   await persistHostedExecutionFinalBundles({
     bucket: input.bucket.api,
     eventId: input.requestBody.dispatch.eventId,
-    key: input.environment.bundleEncryptionKey,
-    keyId: input.environment.bundleEncryptionKeyId,
+    key: crypto.rootKey,
+    keyId: crypto.rootKeyId,
+    keysById: crypto.keysById,
     payload: {
       bundles: input.payload.bundles,
     },
     userId: input.requestBody.dispatch.event.userId,
   });
+}
+
+async function resolveHostedUserCryptoContextForTest(input: {
+  bucket: ReturnType<typeof createBucket>;
+  environment: {
+    bundleEncryptionKey: Uint8Array;
+    bundleEncryptionKeyId: string;
+    bundleEncryptionKeysById?: Readonly<Record<string, Uint8Array>>;
+  };
+  userId: string;
+}) {
+  return createHostedUserKeyStore({
+    automationKey: input.environment.bundleEncryptionKey,
+    automationKeyId: input.environment.bundleEncryptionKeyId,
+    bucket: input.bucket.api,
+    envelopeKeyId: input.environment.bundleEncryptionKeyId,
+    envelopeKeysById: input.environment.bundleEncryptionKeysById,
+  }).ensureUserCryptoContext(input.userId);
 }

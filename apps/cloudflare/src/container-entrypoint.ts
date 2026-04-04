@@ -15,7 +15,7 @@ import {
 import { runHostedExecutionJob } from "./node-runner.js";
 
 export async function startHostedContainerEntrypoint(input: {
-  controlTokens: string[];
+  controlToken: string | null;
   port?: number;
 }): Promise<ReturnType<typeof createServer>> {
   const server = createServer(async (request, response) => {
@@ -36,7 +36,7 @@ export async function startHostedContainerEntrypoint(input: {
         return;
       }
 
-      if (input.controlTokens.length === 0) {
+      if (!input.controlToken) {
         emitHostedExecutionStructuredLog({
           component: "container",
           level: "error",
@@ -44,14 +44,14 @@ export async function startHostedContainerEntrypoint(input: {
           phase: "failed",
         });
         writeJsonResponse(response, 503, {
-          error: "Hosted runner control tokens are not configured.",
+          error: "Hosted runner control token is not configured.",
         });
         return;
       }
 
       const authorization = request.headers.authorization ?? "";
 
-      if (!input.controlTokens.some((token) => authorization === `Bearer ${token}`)) {
+      if (authorization !== `Bearer ${input.controlToken}`) {
         emitHostedExecutionStructuredLog({
           component: "container",
           level: "warn",
@@ -132,25 +132,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const port = Number.parseInt(process.env.PORT ?? "8080", 10) || 8080;
 
   await startHostedContainerEntrypoint({
-    controlTokens: readControlTokensFromEnv(process.env),
+    controlToken: readControlTokenFromEnv(process.env),
     port,
   });
 
   await new Promise(() => {});
 }
 
-function readControlTokensFromEnv(source: NodeJS.ProcessEnv): string[] {
-  const explicit = normalizeOptionalString(source.HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS);
-
-  if (explicit) {
-    return explicit
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter(Boolean);
-  }
-
-  const fallback = normalizeOptionalString(source.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN);
-  return fallback ? [fallback] : [];
+function readControlTokenFromEnv(source: NodeJS.ProcessEnv): string | null {
+  return normalizeOptionalString(source.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN);
 }
 
 function normalizeOptionalString(value: string | null | undefined): string | null {

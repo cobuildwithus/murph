@@ -72,14 +72,20 @@ interface BundleRefSwapInput {
 
 export class RunnerQueueStore {
   private userId: string | null = null;
+  private dispatchPayloadStore: HostedDispatchPayloadStore | null;
 
   constructor(
     private readonly state: DurableObjectStateLike,
-    private readonly dispatchPayloadStore: HostedDispatchPayloadStore | null = null,
+    dispatchPayloadStore: HostedDispatchPayloadStore | null = null,
   ) {
+    this.dispatchPayloadStore = dispatchPayloadStore;
     ensureRunnerQueueSchema(this.sql);
     this.ensureCanonicalBundleSlotRowsSync();
     this.repairStoredMetaStateSync();
+  }
+
+  setDispatchPayloadStore(dispatchPayloadStore: HostedDispatchPayloadStore | null): void {
+    this.dispatchPayloadStore = dispatchPayloadStore;
   }
 
   async bootstrapUser(userId: string): Promise<string> {

@@ -18,7 +18,7 @@ describe("hosted verified email sync helper", () => {
     vi.clearAllMocks();
     mocks.readHostedExecutionControlEnvironment.mockReturnValue({
       baseUrl: "https://dispatch.example.test",
-      controlToken: "control-token",
+      signingSecret: "signing-secret",
     });
     mocks.createHostedExecutionControlClient.mockReturnValue({
       run,
@@ -46,7 +46,7 @@ describe("hosted verified email sync helper", () => {
     });
     expect(mocks.createHostedExecutionControlClient).toHaveBeenCalledWith({
       baseUrl: "https://dispatch.example.test",
-      controlToken: "control-token",
+      signingSecret: "signing-secret",
     });
     expect(updateUserEnv).toHaveBeenCalledWith("member_123", {
       env: {
@@ -88,7 +88,7 @@ describe("hosted verified email sync helper", () => {
   it("fails fast when hosted execution control is not configured", async () => {
     mocks.readHostedExecutionControlEnvironment.mockReturnValue({
       baseUrl: null,
-      controlToken: null,
+      signingSecret: null,
     });
 
     const { syncHostedVerifiedEmailToHostedExecution } = await import(

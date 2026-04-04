@@ -10,7 +10,7 @@ import {
   type HostedExecutionRunnerResult,
 } from "@murphai/hosted-execution";
 
-import { json, methodNotAllowed, readJsonObject } from "./json.ts";
+import { methodNotAllowed } from "./json.ts";
 import { handleRunnerOutboundRequest, type RunnerOutboundEnvironmentSource } from "./runner-outbound.ts";
 
 const RUNNER_PORT = 8080;
@@ -19,8 +19,6 @@ const RUNNER_EXECUTE_URL = "http://container/__internal/run";
 const RUNNER_WAIT_INTERVAL_MS = 250;
 const RUNNER_READY_TIMEOUT_MS = 20_000;
 const DEFAULT_CONTAINER_SLEEP_AFTER = "1m";
-const RUNNER_CONTROL_AUTH_SCHEME = "Bearer";
-
 export class HostedExecutionConfigurationError extends Error {
   readonly code: string | null;
 
@@ -33,19 +31,17 @@ export class HostedExecutionConfigurationError extends Error {
 
 interface HostedExecutionContainerInvokeRequest {
   job: HostedAssistantRuntimeJobInput;
+  runnerControlToken: string;
   timeoutMs: number;
   userId: string;
 }
 
-interface HostedExecutionContainerInvokeInput extends HostedExecutionContainerInvokeRequest {
-  runnerControlToken: string;
-  runnerControlTokens: string[];
-}
+type HostedExecutionContainerInvokeInput = HostedExecutionContainerInvokeRequest;
 
 interface HostedExecutionContainerRunnerInput {
   job: HostedAssistantRuntimeJobInput;
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike;
-  runnerControlToken: string | null;
+  runnerControlToken: string;
   timeoutMs: number;
   userId: string;
 }
@@ -66,8 +62,6 @@ type RunnerOutboundHandlerContext = OutboundHandlerContext<{
 
 interface RunnerContainerEnvironmentSource extends Readonly<Record<string, unknown>> {
   HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER?: string;
-  HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN?: string;
-  HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS?: string;
 }
 
 type RunnerOutboundHandlerName =
@@ -104,21 +98,14 @@ export class RunnerContainer extends Container {
   requiredPorts = [RUNNER_PORT];
   pingEndpoint = RUNNER_PING_ENDPOINT;
   sleepAfter = DEFAULT_CONTAINER_SLEEP_AFTER;
-  private readonly runnerControlTokens: string[];
 
   constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
     super(state as never, env as never);
     this.sleepAfter = readContainerSleepAfter(env);
-    this.runnerControlTokens = readTokenList(
-      env.HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS,
-      env.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN,
-    );
   }
 
   async invoke(payload: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerResult> {
-    return this.invokeHostedExecution(
-      parseHostedExecutionContainerInvokeInput(payload, this.runnerControlTokens),
-    );
+    return this.invokeHostedExecution(parseHostedExecutionContainerInvokeInput(payload));
   }
 
   async destroyInstance(): Promise<void> {
@@ -128,56 +115,11 @@ export class RunnerContainer extends Container {
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
-    if (url.pathname === "/internal/invoke") {
-      if (request.method !== "POST") {
-        return methodNotAllowed();
-      }
-
-      const authorizationError = requireRunnerContainerAuthorization(
-        request,
-        this.runnerControlTokens,
-      );
-      if (authorizationError) {
-        return authorizationError;
-      }
-
-      try {
-        return await this.handleInvokeRequest(await readJsonObject(request));
-      } catch (error) {
-        if (error instanceof SyntaxError || error instanceof TypeError) {
-          return json({ error: error.message }, 400);
-        }
-
-        throw error;
-      }
-    }
-
-    if (url.pathname === "/internal/destroy") {
-      if (request.method !== "POST") {
-        return methodNotAllowed();
-      }
-
-      const authorizationError = requireRunnerContainerAuthorization(
-        request,
-        this.runnerControlTokens,
-      );
-      if (authorizationError) {
-        return authorizationError;
-      }
-
-      await this.destroyIfRunning();
-      return new Response(null, { status: 204 });
+    if (url.pathname === "/internal/invoke" || url.pathname === "/internal/destroy") {
+      return methodNotAllowed();
     }
 
     return super.fetch(request);
-  }
-
-  private async handleInvokeRequest(payload: Record<string, unknown>): Promise<Response> {
-    const result = await this.invokeHostedExecution(
-      parseHostedExecutionContainerInvokeInput(payload, this.runnerControlTokens),
-    );
-
-    return json(result);
   }
 
   private async invokeHostedExecution(
@@ -210,7 +152,6 @@ export class RunnerContainer extends Container {
           enableInternet: true,
           envVars: {
             HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: input.runnerControlToken,
-            HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS: input.runnerControlTokens.join(","),
             PORT: String(RUNNER_PORT),
           },
         },
@@ -294,10 +235,16 @@ export class RunnerContainer extends Container {
 export async function invokeHostedExecutionContainerRunner(
   input: HostedExecutionContainerRunnerInput,
 ): Promise<HostedExecutionRunnerResult> {
-  requireHostedExecutionRunnerControlToken(input.runnerControlToken);
+  if (typeof input.runnerControlToken !== "string" || input.runnerControlToken.trim().length === 0) {
+    throw new HostedExecutionConfigurationError(
+      "HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS must include at least one token for native hosted execution.",
+      "missing_runner_control_token",
+    );
+  }
 
   return input.runnerContainerNamespace.getByName(input.userId).invoke({
     job: input.job,
+    runnerControlToken: input.runnerControlToken,
     timeoutMs: input.timeoutMs,
     userId: input.userId,
   });
@@ -354,7 +301,6 @@ function createRunnerOutboundHandler() {
 
 export async function destroyHostedExecutionContainer(input: {
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
-  runnerControlToken: string | null;
   userId: string;
 }): Promise<void> {
   if (!input.runnerContainerNamespace) {
@@ -376,17 +322,14 @@ function readContainerSleepAfter(source: RunnerContainerEnvironmentSource): stri
 function parseHostedExecutionContainerInvokeInput(
   payload: {
     job?: unknown;
+    runnerControlToken?: unknown;
     timeoutMs?: unknown;
     userId?: unknown;
   },
-  runnerControlTokens: readonly string[] | string | null,
 ): HostedExecutionContainerInvokeInput {
-  const acceptedRunnerControlTokens = requireHostedExecutionRunnerControlTokens(runnerControlTokens);
-
   return {
     job: parseHostedAssistantRuntimeJobInput(payload.job),
-    runnerControlToken: acceptedRunnerControlTokens[0]!,
-    runnerControlTokens: [...acceptedRunnerControlTokens],
+    runnerControlToken: requireString(payload.runnerControlToken, "payload.runnerControlToken"),
     timeoutMs: readTimeoutMs(payload.timeoutMs, RUNNER_READY_TIMEOUT_MS),
     userId: requireString(payload.userId, "payload.userId"),
   };
@@ -413,48 +356,6 @@ function requireString(value: unknown, label: string): string {
   return value;
 }
 
-function requireHostedExecutionRunnerControlToken(value: readonly string[] | string | null): string {
-  return requireHostedExecutionRunnerControlTokens(value)[0]!;
-}
-
-function requireHostedExecutionRunnerControlTokens(value: readonly string[] | string | null): string[] {
-  const tokens = Array.isArray(value)
-    ? value.filter((token) => typeof token === "string" && token.trim().length > 0)
-    : (typeof value === "string" && value.trim().length > 0 ? [value.trim()] : []);
-
-  if (tokens.length === 0) {
-    throw new HostedExecutionConfigurationError(
-      "HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS must include at least one token for native hosted execution.",
-    );
-  }
-
-  return tokens;
-}
-
-function requireRunnerContainerAuthorization(
-  request: Request,
-  expectedTokens: readonly string[] | string | null,
-): Response | null {
-  const tokens = Array.isArray(expectedTokens)
-    ? expectedTokens.filter((token) => typeof token === "string" && token.length > 0)
-    : (typeof expectedTokens === "string" && expectedTokens.length > 0 ? [expectedTokens] : []);
-
-  if (tokens.length === 0) {
-    return json({
-      error: "Hosted runner control token is not configured.",
-    }, 503);
-  }
-
-  const authorization = request.headers.get("authorization");
-  if (!authorization || !tokens.some((token) => authorization === `${RUNNER_CONTROL_AUTH_SCHEME} ${token}`)) {
-    return json({
-      error: "Unauthorized",
-    }, 401);
-  }
-
-  return null;
-}
-
 function readTimeoutMs(value: unknown, fallback: number): number {
   if (value === undefined) {
     return fallback;
@@ -465,20 +366,6 @@ function readTimeoutMs(value: unknown, fallback: number): number {
   }
 
   return Math.trunc(value);
-}
-
-function readTokenList(primary: unknown, fallback: unknown): string[] {
-  const primaryValue = readOptionalString(primary);
-
-  if (primaryValue) {
-    return primaryValue
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter(Boolean);
-  }
-
-  const fallbackValue = readOptionalString(fallback);
-  return fallbackValue ? [fallbackValue] : [];
 }
 
 function readOptionalString(value: unknown): string | null {

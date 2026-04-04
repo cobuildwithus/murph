@@ -113,6 +113,7 @@ export async function acceptHostedShareLink(input: {
         acceptedAt: acceptedAt.toISOString(),
         eventId,
         memberId,
+        pack: readHostedSharePack(record).pack,
         shareCode,
         shareId: record.id,
       }),
@@ -126,9 +127,10 @@ export async function acceptHostedShareLink(input: {
       record,
     };
   });
+  const sharePack = readHostedSharePack(claim.record).pack;
   const preview = readHostedSharePreview(
     claim.record.previewJson,
-    () => readHostedSharePack(claim.record).pack,
+    () => sharePack,
   );
 
   if (claim.outcome === "alreadyImported") {

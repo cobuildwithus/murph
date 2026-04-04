@@ -1,4 +1,5 @@
 import { afterEach, describe as baseDescribe, expect, it, vi } from "vitest";
+import { HOSTED_USER_ROOT_KEY_ENVELOPE_SCHEMA } from "@murphai/runtime-state";
 
 import {
   DEFAULT_HOSTED_EXECUTION_ARTIFACTS_BASE_URL,
@@ -17,6 +18,8 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
   buildHostedExecutionUserEnvPath,
+  buildHostedExecutionUserKeyEnvelopePath,
+  buildHostedExecutionUserKeyRecipientPath,
   buildHostedExecutionUserRunPath,
   buildHostedExecutionUserStatusPath,
   createHostedExecutionControlClient,
@@ -151,27 +154,25 @@ describe("@murphai/hosted-execution", () => {
     });
   });
 
-  it("reads hosted control env from the shared dispatch base and control token", () => {
+  it("reads hosted control env from the shared dispatch base and signing secret", () => {
     expect(
       readHostedExecutionControlEnvironment({
         HOSTED_EXECUTION_DISPATCH_URL: "https://dispatch.example.test/",
-        HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+        HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
       }),
     ).toEqual({
       baseUrl: "https://dispatch.example.test",
-      controlToken: "control-token",
-      controlTokens: ["control-token"],
+      signingSecret: "dispatch-secret",
     });
 
     expect(
       readHostedExecutionControlEnvironment({
         HOSTED_EXECUTION_DISPATCH_URL: "   ",
-        HOSTED_EXECUTION_CONTROL_TOKEN: "   ",
+        HOSTED_EXECUTION_SIGNING_SECRET: "   ",
       }),
     ).toEqual({
       baseUrl: null,
-      controlToken: null,
-      controlTokens: [],
+      signingSecret: null,
     });
   });
 
@@ -253,14 +254,10 @@ describe("@murphai/hosted-execution", () => {
       bundleEncryptionKeyBase64: "Zm9v",
       bundleEncryptionKeyId: "v1",
       bundleEncryptionKeyringJson: null,
-      controlToken: null,
-      controlTokens: [],
       defaultAlarmDelayMs: 15 * 60 * 1000,
       dispatchSigningSecret: "dispatch-secret",
       maxEventAttempts: 3,
       retryDelayMs: 30_000,
-      runnerControlToken: null,
-      runnerControlTokens: [],
       runnerTimeoutMs: 60_000,
     });
   });
@@ -1278,6 +1275,16 @@ describe("@murphai/hosted-execution", () => {
     ).toBe(
       "/api/hosted-share/internal/share%2Fid/payload",
     );
+    expect(
+      buildHostedExecutionUserKeyEnvelopePath("member/123"),
+    ).toBe(
+      "/internal/users/member%2F123/keys/envelope",
+    );
+    expect(
+      buildHostedExecutionUserKeyRecipientPath("member/123", "user/unlock"),
+    ).toBe(
+      "/internal/users/member%2F123/keys/recipients/user%2Funlock",
+    );
   });
 
   it("rejects unsafe hosted base urls and only allows explicit internal HTTP exceptions", () => {
@@ -1440,6 +1447,8 @@ describe("@murphai/hosted-execution", () => {
     expect(headers.get(HOSTED_EXECUTION_TIMESTAMP_HEADER)).toBe("2026-03-27T09:15:00.000Z");
     await expect(
       verifyHostedExecutionSignature({
+        method: "POST",
+        path: HOSTED_EXECUTION_DISPATCH_PATH,
         payload,
         secret: "secret",
         signature: headers.get(HOSTED_EXECUTION_SIGNATURE_HEADER),
@@ -1531,8 +1540,9 @@ describe("@murphai/hosted-execution", () => {
     );
     const client = createHostedExecutionControlClient({
       baseUrl: "https://worker.example.test/",
-      controlToken: "  control-token  ",
+      now: () => "2026-03-27T10:30:00.000Z",
       fetchImpl,
+      signingSecret: "  signing-secret  ",
     });
 
     await expect(
@@ -1550,7 +1560,20 @@ describe("@murphai/hosted-execution", () => {
     const [url, init] = fetchImpl.mock.calls[0] ?? [];
     expect(url).toBe("https://worker.example.test/internal/users/member%2F123/env");
     expect(init?.method).toBe("PUT");
-    expect(new Headers(init?.headers).get("authorization")).toBe("Bearer control-token");
+    const headers = new Headers(init?.headers);
+    expect(headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect(headers.get(HOSTED_EXECUTION_TIMESTAMP_HEADER)).toBe("2026-03-27T10:30:00.000Z");
+    await expect(
+      verifyHostedExecutionSignature({
+        method: "PUT",
+        path: buildHostedExecutionUserEnvPath("member/123"),
+        payload: typeof init?.body === "string" ? init.body : "",
+        secret: "signing-secret",
+        signature: headers.get(HOSTED_EXECUTION_SIGNATURE_HEADER),
+        timestamp: headers.get(HOSTED_EXECUTION_TIMESTAMP_HEADER),
+        nowMs: Date.parse("2026-03-27T10:30:00.000Z"),
+      }),
+    ).resolves.toBe(true);
     expect(init?.body).toBe(JSON.stringify({
       env: {
         OPENAI_API_KEY: "secret",
@@ -1559,13 +1582,13 @@ describe("@murphai/hosted-execution", () => {
     }));
   });
 
-  it("control client requires a configured bearer token", () => {
+  it("control client requires a configured signing secret", () => {
     expect(() =>
       createHostedExecutionControlClient({
         baseUrl: "https://worker.example.test/",
-        controlToken: "",
+        signingSecret: "",
       }),
-    ).toThrow("Hosted execution controlToken must be configured.");
+    ).toThrow("Hosted execution signingSecret must be configured.");
   });
 
   it("control client uses the remaining shared control routes", async () => {
@@ -1610,8 +1633,9 @@ describe("@murphai/hosted-execution", () => {
       );
     const client = createHostedExecutionControlClient({
       baseUrl: "https://worker.example.test/",
-      controlToken: "control-token",
+      now: () => "2026-03-27T10:45:00.000Z",
       fetchImpl,
+      signingSecret: "signing-secret",
     });
 
     await expect(client.run("member/123")).resolves.toMatchObject({
@@ -1635,12 +1659,19 @@ describe("@murphai/hosted-execution", () => {
         method: "POST",
       }),
     );
-    expect(new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get("authorization")).toBe(
-      "Bearer control-token",
-    );
-    expect(new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get("content-type")).toBe(
-      "application/json; charset=utf-8",
-    );
+    const runHeaders = new Headers(fetchImpl.mock.calls[0]?.[1]?.headers);
+    expect(runHeaders.get("content-type")).toBe("application/json; charset=utf-8");
+    await expect(
+      verifyHostedExecutionSignature({
+        method: "POST",
+        path: buildHostedExecutionUserRunPath("member/123"),
+        payload: String(fetchImpl.mock.calls[0]?.[1]?.body ?? ""),
+        secret: "signing-secret",
+        signature: runHeaders.get(HOSTED_EXECUTION_SIGNATURE_HEADER),
+        timestamp: runHeaders.get(HOSTED_EXECUTION_TIMESTAMP_HEADER),
+        nowMs: Date.parse("2026-03-27T10:45:00.000Z"),
+      }),
+    ).resolves.toBe(true);
     expect(fetchImpl).toHaveBeenNthCalledWith(
       2,
       "https://worker.example.test/internal/users/member%2F123/env",
@@ -1655,14 +1686,161 @@ describe("@murphai/hosted-execution", () => {
         method: "DELETE",
       }),
     );
+    await expect(
+      verifyHostedExecutionSignature({
+        method: "GET",
+        path: buildHostedExecutionUserEnvPath("member/123"),
+        payload: "",
+        secret: "signing-secret",
+        signature: new Headers(fetchImpl.mock.calls[1]?.[1]?.headers).get(HOSTED_EXECUTION_SIGNATURE_HEADER),
+        timestamp: new Headers(fetchImpl.mock.calls[1]?.[1]?.headers).get(HOSTED_EXECUTION_TIMESTAMP_HEADER),
+        nowMs: Date.parse("2026-03-27T10:45:00.000Z"),
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      verifyHostedExecutionSignature({
+        method: "DELETE",
+        path: buildHostedExecutionUserEnvPath("member/123"),
+        payload: "",
+        secret: "signing-secret",
+        signature: new Headers(fetchImpl.mock.calls[2]?.[1]?.headers).get(HOSTED_EXECUTION_SIGNATURE_HEADER),
+        timestamp: new Headers(fetchImpl.mock.calls[2]?.[1]?.headers).get(HOSTED_EXECUTION_TIMESTAMP_HEADER),
+        nowMs: Date.parse("2026-03-27T10:45:00.000Z"),
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it("control client reads and upserts hosted user key envelope routes", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(buildHostedUserRootKeyEnvelopeFixture("member/123")), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify(
+            buildHostedUserRootKeyEnvelopeFixture("member/123", {
+              recipients: [
+                {
+                  ciphertext: "ciphertext-automation",
+                  iv: "iv-automation",
+                  keyId: "recipient-automation-v1",
+                  kind: "automation",
+                },
+                {
+                  ciphertext: "ciphertext-user-unlock",
+                  iv: "iv-user-unlock",
+                  keyId: "recipient-user-unlock-v1",
+                  kind: "user-unlock",
+                  metadata: {
+                    activated: true,
+                    device: "browser",
+                  },
+                },
+              ],
+            }),
+          ),
+          { status: 200 },
+        ),
+      );
+    const client = createHostedExecutionControlClient({
+      baseUrl: "https://worker.example.test/",
+      now: () => "2026-03-27T11:00:00.000Z",
+      fetchImpl,
+      signingSecret: "signing-secret",
+    });
+
+    await expect(client.getUserKeyEnvelope("member/123")).resolves.toEqual(
+      buildHostedUserRootKeyEnvelopeFixture("member/123"),
+    );
+    await expect(
+      client.upsertUserKeyRecipient("member/123", "user-unlock", {
+        metadata: {
+          activated: true,
+          device: "browser",
+        },
+        recipientKeyBase64: "dXNlci11bmxvY2sta2V5",
+        recipientKeyId: "recipient-user-unlock-v1",
+      }),
+    ).resolves.toEqual(
+      buildHostedUserRootKeyEnvelopeFixture("member/123", {
+        recipients: [
+          {
+            ciphertext: "ciphertext-automation",
+            iv: "iv-automation",
+            keyId: "recipient-automation-v1",
+            kind: "automation",
+          },
+          {
+            ciphertext: "ciphertext-user-unlock",
+            iv: "iv-user-unlock",
+            keyId: "recipient-user-unlock-v1",
+            kind: "user-unlock",
+            metadata: {
+              activated: true,
+              device: "browser",
+            },
+          },
+        ],
+      }),
+    );
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      "https://worker.example.test/internal/users/member%2F123/keys/envelope",
+      expect.objectContaining({
+        method: "GET",
+      }),
+    );
+    await expect(
+      verifyHostedExecutionSignature({
+        method: "GET",
+        path: buildHostedExecutionUserKeyEnvelopePath("member/123"),
+        payload: "",
+        secret: "signing-secret",
+        signature: new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get(HOSTED_EXECUTION_SIGNATURE_HEADER),
+        timestamp: new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get(HOSTED_EXECUTION_TIMESTAMP_HEADER),
+        nowMs: Date.parse("2026-03-27T11:00:00.000Z"),
+      }),
+    ).resolves.toBe(true);
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      "https://worker.example.test/internal/users/member%2F123/keys/recipients/user-unlock",
+      expect.objectContaining({
+        body: JSON.stringify({
+          metadata: {
+            activated: true,
+            device: "browser",
+          },
+          recipientKeyBase64: "dXNlci11bmxvY2sta2V5",
+          recipientKeyId: "recipient-user-unlock-v1",
+        }),
+        method: "PUT",
+      }),
+    );
+    const upsertHeaders = new Headers(fetchImpl.mock.calls[1]?.[1]?.headers);
+    expect(upsertHeaders.get("content-type")).toBe("application/json; charset=utf-8");
+    await expect(
+      verifyHostedExecutionSignature({
+        method: "PUT",
+        path: buildHostedExecutionUserKeyRecipientPath("member/123", "user-unlock"),
+        payload: String(fetchImpl.mock.calls[1]?.[1]?.body ?? ""),
+        secret: "signing-secret",
+        signature: upsertHeaders.get(HOSTED_EXECUTION_SIGNATURE_HEADER),
+        timestamp: upsertHeaders.get(HOSTED_EXECUTION_TIMESTAMP_HEADER),
+        nowMs: Date.parse("2026-03-27T11:00:00.000Z"),
+      }),
+    ).resolves.toBe(true);
   });
 
   it("includes HTTP error text for non-ok shared control responses", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response("runner unavailable", { status: 503 }));
     const client = createHostedExecutionControlClient({
       baseUrl: "https://worker.example.test/",
-      controlToken: "control-token",
       fetchImpl,
+      signingSecret: "signing-secret",
     });
 
     await expect(client.getStatus("user-123")).rejects.toThrow(
@@ -1675,7 +1853,7 @@ describe("@murphai/hosted-execution", () => {
     vi.stubGlobal("fetch", fetchImpl);
     const client = createHostedExecutionControlClient({
       baseUrl: "https://worker.example.test/",
-      controlToken: "control-token",
+      signingSecret: "signing-secret",
     });
 
     await expect(client.getStatus("user-123")).rejects.toThrow(
@@ -1688,8 +1866,8 @@ describe("@murphai/hosted-execution", () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(body, { status: 200 }));
     const client = createHostedExecutionControlClient({
       baseUrl: "https://worker.example.test/",
-      controlToken: "control-token",
       fetchImpl,
+      signingSecret: "signing-secret",
     });
 
     await expect(client.getStatus("user-123")).rejects.toThrow(
@@ -1701,8 +1879,8 @@ describe("@murphai/hosted-execution", () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response("{", { status: 200 }));
     const client = createHostedExecutionControlClient({
       baseUrl: "https://worker.example.test/",
-      controlToken: "control-token",
       fetchImpl,
+      signingSecret: "signing-secret",
     });
 
     await expect(client.getStatus("user-123")).rejects.toThrow(
@@ -1714,8 +1892,8 @@ describe("@murphai/hosted-execution", () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response("[]", { status: 200 }));
     const client = createHostedExecutionControlClient({
       baseUrl: "https://worker.example.test/",
-      controlToken: "control-token",
       fetchImpl,
+      signingSecret: "signing-secret",
     });
 
     await expect(client.getStatus("user-123")).rejects.toThrow(
@@ -1747,5 +1925,34 @@ function buildDispatchResultFixture(eventId: string) {
       retryingEventId: null,
       userId: "user-123",
     },
+  };
+}
+
+function buildHostedUserRootKeyEnvelopeFixture(
+  userId: string,
+  overrides?: {
+    recipients?: Array<{
+      ciphertext: string;
+      iv: string;
+      keyId: string;
+      kind: "automation" | "user-unlock" | "recovery" | "tee-automation";
+      metadata?: Record<string, string | number | boolean | null>;
+    }>;
+  },
+) {
+  return {
+    createdAt: "2026-03-27T09:00:00.000Z",
+    recipients: overrides?.recipients ?? [
+      {
+        ciphertext: "ciphertext-automation",
+        iv: "iv-automation",
+        keyId: "recipient-automation-v1",
+        kind: "automation",
+      },
+    ],
+    rootKeyId: "root-key-v1",
+    schema: HOSTED_USER_ROOT_KEY_ENVELOPE_SCHEMA,
+    updatedAt: "2026-03-27T09:05:00.000Z",
+    userId,
   };
 }
