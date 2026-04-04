@@ -44,7 +44,7 @@ vault-cli inbox doctor
 For durable local synthesis that should keep adding up inside the vault, use the derived knowledge wiki commands:
 
 ```bash
-vault-cli knowledge compile "Summarize my current sleep notes" --source-path research/2026/04/sleep-note.md
+vault-cli knowledge compile "Summarize my current sleep notes" --body "# Sleep notes\n\nMagnesium looked helpful for sleep continuity.\n" --source-path research/2026/04/sleep-note.md
 vault-cli knowledge search "sleep magnesium"
 vault-cli knowledge list
 vault-cli knowledge lint

@@ -412,9 +412,10 @@ test('knowledge commands expose the expected schema at the built CLI boundary', 
   }
 
   assert.deepEqual(compileSchema.args.required, ['prompt'])
+  assert.equal('body' in compileSchema.options.properties, true)
   assert.equal('sourcePath' in compileSchema.options.properties, true)
-  assert.equal('mode' in compileSchema.options.properties, true)
-  assert.deepEqual(compileSchema.options.required, ['vault'])
+  assert.equal('mode' in compileSchema.options.properties, false)
+  assert.deepEqual(compileSchema.options.required, ['vault', 'body'])
   assert.match(
     String((compileSchema.options.properties.sourcePath as { description?: unknown }).description),
     /vault-relative paths, or absolute paths that still resolve inside the selected vault/u,
@@ -428,6 +429,73 @@ test('knowledge commands expose the expected schema at the built CLI boundary', 
   assert.equal('slug' in showSchema.args.properties, true)
   assert.deepEqual(showSchema.args.required, ['slug'])
   assert.deepEqual(showSchema.options.required, ['vault'])
+})
+
+test('knowledge compile persists assistant-authored pages through the built CLI boundary', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-knowledge-cli-'))
+
+  try {
+    requireData(await runCli(['init', '--vault', vaultRoot]))
+    await mkdir(path.join(vaultRoot, 'research', '2026', '04'), {
+      recursive: true,
+    })
+    await writeFile(
+      path.join(vaultRoot, 'research', '2026', '04', 'sleep-note.md'),
+      '# Sleep note\n\nMagnesium improved continuity.\n',
+    )
+
+    const compiled = requireData(
+      await runCli<{
+        bodyLength: number
+        page: {
+          compiler: string | null
+          mode: string | null
+          slug: string
+          sourcePaths: string[]
+          title: string
+        }
+      }>([
+        'knowledge',
+        'compile',
+        'Summarize sleep note',
+        '--vault',
+        vaultRoot,
+        '--title',
+        'Sleep quality',
+        '--body',
+        '# Sleep quality\n\nMagnesium may help sleep continuity.\n\n## Related\n\n- [[magnesium]]\n',
+        '--source-path',
+        'research/2026/04/sleep-note.md',
+      ]),
+    )
+
+    assert.equal(compiled.bodyLength > 0, true)
+    assert.equal(compiled.page.compiler, 'assistant')
+    assert.equal(compiled.page.mode, null)
+    assert.equal(compiled.page.slug, 'sleep-quality')
+    assert.deepEqual(compiled.page.sourcePaths, ['research/2026/04/sleep-note.md'])
+
+    const shown = requireData(
+      await runCli<{
+        page: {
+          body: string
+          title: string
+        }
+      }>([
+        'knowledge',
+        'show',
+        'sleep-quality',
+        '--vault',
+        vaultRoot,
+      ]),
+    )
+
+    assert.equal(shown.page.title, 'Sleep quality')
+    assert.match(shown.page.body, /## Sources/u)
+    assert.match(shown.page.body, /research\/2026\/04\/sleep-note\.md/u)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
 })
 
 test('root chat alias keeps the same command schema as assistant chat', async () => {
