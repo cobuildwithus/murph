@@ -12,8 +12,8 @@ importers:
         specifier: ^0.1.15
         version: 0.1.15
       '@cobuild/review-gpt':
-        specifier: ^0.5.34
-        version: 0.5.34
+        specifier: ^0.5.35
+        version: 0.5.35
       '@types/node':
         specifier: ^25.5.0
         version: 25.5.0
@@ -220,6 +220,9 @@ importers:
       '@murphai/inboxd':
         specifier: workspace:*
         version: link:../inboxd
+      '@murphai/messaging-ingress':
+        specifier: workspace:*
+        version: link:../messaging-ingress
       '@murphai/parsers':
         specifier: workspace:*
         version: link:../parsers
@@ -765,8 +768,8 @@ packages:
     resolution: {integrity: sha512-CjzP5OHu6RhOOjmPl/1djZNVEbjttt62rBSzvuPK7u9NrZ37F2lkHT+QmZ4Lb+ZDmMhPTqlwdyqnzwD0Gkhm1Q==}
     hasBin: true
 
-  '@cobuild/review-gpt@0.5.34':
-    resolution: {integrity: sha512-uA/75Yz4Lf/kUnn09XeCP07v/DDjh2Q/DKm3nXJ+Lmk8NRosZVPV+v36YbHDI/sY5BkOdoUpXyMGl4ydRk7ZrQ==}
+  '@cobuild/review-gpt@0.5.35':
+    resolution: {integrity: sha512-FgGuIQGtQCAIeb/RlqE7CRDrindbxeZlnBtvWYEq2M4QnrBK04kDF15atgIWOlaZ370bxdrbbIOzBBYzniuQKA==}
     hasBin: true
 
   '@cobuild/wire@0.3.6':
@@ -8157,7 +8160,7 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.15': {}
 
-  '@cobuild/review-gpt@0.5.34':
+  '@cobuild/review-gpt@0.5.35':
     dependencies:
       '@cobuild/repo-tools': 0.1.15
       incur: 0.3.13(openapi-types@12.1.3)
