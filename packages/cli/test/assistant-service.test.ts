@@ -187,6 +187,22 @@ function assertPromptHasFirstTurnCheckInGuidance(
   assert.match(text, /gradually build the health vault/u)
   assert.match(
     text,
+    /treat that as onboarding context, not as a request to choose priorities or start coaching/u,
+  )
+  assert.match(
+    text,
+    /Do not ask which goal to tackle first unless the user explicitly asks for help deciding where to start/u,
+  )
+  assert.match(
+    text,
+    /Keep onboarding brief and orienting\. Do not try to draw the user into a long, drawn-out conversation/u,
+  )
+  assert.match(
+    text,
+    /The purpose of onboarding is just to introduce Murph, explain briefly how it works, and set up a gradual path where the user can share more information over time/u,
+  )
+  assert.match(
+    text,
     /sharing meals, workouts, sleep or energy notes, symptoms, and questions through text, photos, voice memos, Telegram messages, or email/u,
   )
   assert.match(text, /Do not ask for a full weekly recap/u)
