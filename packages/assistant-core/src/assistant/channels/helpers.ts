@@ -8,6 +8,7 @@ import type { ConversationRef } from '../conversation-ref.js'
 import type {
   AssistantChannelAdapter,
   AssistantChannelAdapterSpec,
+  AssistantChannelActivityHandle,
   AssistantDeliveryCandidate,
 } from './types.js'
 
@@ -19,6 +20,31 @@ export function createAssistantChannelAdapter(
     canAutoReply: spec.canAutoReply,
     inferBindingDelivery: spec.inferBindingDelivery,
     isReadyForSetup: spec.isReadyForSetup,
+    ...(spec.startTypingIndicator
+      ? {
+          async startTypingIndicator(input, dependencies) {
+            const candidate = resolveDeliveryCandidates({
+              bindingDelivery: input.bindingDelivery,
+              explicitTarget: input.explicitTarget,
+            })[0] ?? null
+            if (!candidate) {
+              return null
+            }
+
+            const startTypingIndicator = spec.startTypingIndicator
+            if (!startTypingIndicator) {
+              return null
+            }
+
+            const handle = await startTypingIndicator({
+              candidate,
+              dependencies,
+              identityId: normalizeOptionalText(input.identityId),
+            })
+            return isAssistantChannelActivityHandle(handle) ? handle : null
+          },
+        }
+      : {}),
     supportsIdempotencyKey: spec.supportsIdempotencyKey,
     async send(input, dependencies) {
       const candidate = resolveRequiredDeliveryCandidate(
@@ -47,6 +73,17 @@ export function createAssistantChannelAdapter(
       })
     },
   }
+}
+
+function isAssistantChannelActivityHandle(
+  value: unknown,
+): value is AssistantChannelActivityHandle {
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      'stop' in value &&
+      typeof (value as { stop?: unknown }).stop === 'function',
+  )
 }
 
 export function resolveRequiredDeliveryCandidate(

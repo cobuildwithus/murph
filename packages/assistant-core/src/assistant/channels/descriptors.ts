@@ -22,6 +22,8 @@ import {
   sendImessageMessage,
   sendLinqMessage,
   sendTelegramMessage,
+  startLinqTypingIndicator,
+  startTelegramTypingIndicator,
 } from './runtime.js'
 import type {
   AssistantChannelAdapter,
@@ -70,6 +72,13 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   supportsIdempotencyKey: false,
   targetRequiredMessage:
     'Telegram delivery requires an explicit target or a stored delivery binding.',
+  async startTypingIndicator({ candidate, dependencies }) {
+    const startTyping =
+      dependencies.startTelegramTyping ?? startTelegramTypingIndicator
+    return (await startTyping({
+      target: candidate.target,
+    })) ?? null
+  },
   async sendMessage({ candidate, dependencies, idempotencyKey, message, replyToMessageId }) {
     const send = dependencies.sendTelegram ?? sendTelegramMessage
     const delivered = await send({
@@ -103,6 +112,12 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   supportsIdempotencyKey: false,
   targetRequiredMessage:
     'Linq delivery requires an explicit chat id or a stored thread binding.',
+  async startTypingIndicator({ candidate, dependencies }) {
+    const startTyping = dependencies.startLinqTyping ?? startLinqTypingIndicator
+    return (await startTyping({
+      target: candidate.target,
+    })) ?? null
+  },
   async sendMessage({ candidate, dependencies, idempotencyKey, message, replyToMessageId }) {
     const send = dependencies.sendLinq ?? sendLinqMessage
     const delivered = await send({

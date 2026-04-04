@@ -29,6 +29,10 @@ export interface FetchLikeResponse {
   status: number
 }
 
+export interface AssistantChannelActivityHandle {
+  stop: () => Promise<void>
+}
+
 export type FetchLike = (
   input: string,
   init: {
@@ -60,6 +64,12 @@ export interface AssistantChannelDependencies {
     message: string
     target: string
   }) => Promise<void>
+  startLinqTyping?: (input: {
+    target: string
+  }) => Promise<AssistantChannelActivityHandle | void>
+  startTelegramTyping?: (input: {
+    target: string
+  }) => Promise<AssistantChannelActivityHandle | void>
   sendTelegram?: (input: {
     idempotencyKey?: string | null
     message: string
@@ -115,6 +125,14 @@ export interface AssistantChannelAdapter {
     deliveryTarget?: string | null
   }) => AssistantBindingDelivery | null
   isReadyForSetup: (env: NodeJS.ProcessEnv) => boolean
+  startTypingIndicator?: (
+    input: {
+      bindingDelivery: AssistantBindingDelivery | null
+      explicitTarget: string | null
+      identityId: string | null
+    },
+    dependencies: AssistantChannelDependencies,
+  ) => Promise<AssistantChannelActivityHandle | null>
   supportsIdempotencyKey: boolean
   send: (
     input: {
@@ -136,6 +154,11 @@ export interface AssistantChannelAdapterSpec {
   channel: AssistantChannelName
   inferBindingDelivery: AssistantChannelAdapter['inferBindingDelivery']
   isReadyForSetup: AssistantChannelAdapter['isReadyForSetup']
+  startTypingIndicator?: (input: {
+    candidate: AssistantDeliveryCandidate
+    dependencies: AssistantChannelDependencies
+    identityId: string | null
+  }) => Promise<AssistantChannelActivityHandle | null | void>
   supportsIdempotencyKey: boolean
   sendMessage: (input: {
     candidate: AssistantDeliveryCandidate

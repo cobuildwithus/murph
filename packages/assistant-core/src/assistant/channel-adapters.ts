@@ -1,4 +1,5 @@
 export type {
+  AssistantChannelActivityHandle,
   AssistantChannelAdapter,
   AssistantChannelDependencies,
   AssistantDeliveryCandidate,
@@ -16,4 +17,6 @@ export {
   sendImessageMessage,
   sendLinqMessage,
   sendTelegramMessage,
+  startLinqTypingIndicator,
+  startTelegramTypingIndicator,
 } from './channels/runtime.js'
