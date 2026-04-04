@@ -2,6 +2,11 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.1.13] - 2026-04-04
+
+### Changed
+- No user-facing changes recorded.
+
 ## [0.1.12] - 2026-04-04
 
 ### Changed
