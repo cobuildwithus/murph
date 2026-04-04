@@ -107,8 +107,8 @@ function readHostedExecutionAcceptedRouteTokens(kind: HostedExecutionAcceptedRou
   if (kind === "scheduler") {
     return {
       requiredCode: "HOSTED_EXECUTION_SCHEDULER_TOKEN_REQUIRED",
-      requiredMessage: "HOSTED_EXECUTION_SCHEDULER_TOKENS or CRON_SECRET must be configured for scheduled hosted execution drains.",
-      tokens: readTokenListFromEnvWithFallback("HOSTED_EXECUTION_SCHEDULER_TOKENS", "CRON_SECRET"),
+      requiredMessage: "HOSTED_EXECUTION_SCHEDULER_TOKENS must be configured for scheduled hosted execution drains.",
+      tokens: readTokenListFromEnv("HOSTED_EXECUTION_SCHEDULER_TOKENS"),
       unauthorizedCode: "HOSTED_EXECUTION_UNAUTHORIZED",
       unauthorizedMessage: "Unauthorized hosted execution request.",
     };
@@ -144,15 +144,4 @@ function readTokenListFromEnv(primaryKey: string): string[] {
     .split(",")
     .map((entry) => entry.trim())
     .filter(Boolean);
-}
-
-function readTokenListFromEnvWithFallback(primaryKey: string, fallbackKey: string): string[] {
-  const explicit = readTokenListFromEnv(primaryKey);
-
-  if (explicit.length > 0) {
-    return explicit;
-  }
-
-  const fallback = normalizeOptionalString(process.env[fallbackKey]);
-  return fallback ? [fallback] : [];
 }

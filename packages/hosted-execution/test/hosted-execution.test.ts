@@ -178,7 +178,7 @@ describe("@murphai/hosted-execution", () => {
   it("reads hosted web control plane env from split internal, scheduler, and share settings", () => {
     expect(
       readHostedExecutionWebControlPlaneEnvironment({
-        CRON_SECRET: "cron-token",
+        HOSTED_EXECUTION_SCHEDULER_TOKENS: "cron-token",
         HOSTED_DEVICE_SYNC_CONTROL_BASE_URL: "https://device-sync.example.test/",
         HOSTED_EXECUTION_INTERNAL_TOKENS: "internal-token",
         HOSTED_WEB_BASE_URL: "https://web.example.test/",
