@@ -1,6 +1,6 @@
 {
   "name": "@murphai/assistant-runtime",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "private": false,
   "type": "module",
   "license": "GPL-3.0-only",
