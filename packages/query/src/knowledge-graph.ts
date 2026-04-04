@@ -8,6 +8,7 @@ import {
   asObject,
   compareNullableStrings,
   firstString,
+  firstStringArray,
   type FrontmatterObject,
 } from './health/shared.ts'
 import {
@@ -16,6 +17,7 @@ import {
   extractKnowledgeRelatedSlugs,
   extractKnowledgeSourcePaths,
   humanizeKnowledgeTag,
+  orderedUniqueStrings,
   summarizeKnowledgeBody,
 } from './knowledge-model.ts'
 import { searchDerivedKnowledgeGraph } from './knowledge-search.ts'
@@ -262,8 +264,14 @@ function toDerivedKnowledgeNode(
     firstString(source, ['title']) ??
     extractKnowledgeFirstHeading(body) ??
     humanizeKnowledgeTag(slug)
-  const sourcePaths = extractKnowledgeSourcePaths(body)
-  const relatedSlugs = extractKnowledgeRelatedSlugs(body, slug)
+  const sourcePaths = preferNonEmptyStrings(
+    extractKnowledgeSourcePaths(body),
+    orderedUniqueStrings(firstStringArray(source, ['sourcePaths', 'source_paths', 'sources'])),
+  )
+  const relatedSlugs = preferNonEmptyStrings(
+    extractKnowledgeRelatedSlugs(body, slug),
+    orderedUniqueStrings(firstStringArray(source, ['relatedSlugs', 'related_slugs', 'related'])),
+  )
 
   return {
     node: {
@@ -307,4 +315,11 @@ function renderDerivedKnowledgePageLink(
 
 function isKnowledgeSlug(value: string): boolean {
   return /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(value)
+}
+
+function preferNonEmptyStrings(
+  preferredValues: string[],
+  fallbackValues: string[],
+): string[] {
+  return preferredValues.length > 0 ? preferredValues : fallbackValues
 }

@@ -250,7 +250,7 @@ describe('readDerivedKnowledgeGraph', () => {
     })
   })
 
-  it('ignores duplicated frontmatter metadata when the body omits it', async () => {
+  it('falls back to legacy frontmatter metadata when the body omits it', async () => {
     const vaultRoot = await createVaultRoot()
     await writeKnowledgePage(
       vaultRoot,
@@ -259,15 +259,15 @@ describe('readDerivedKnowledgeGraph', () => {
         '---',
         'title: Sleep quality',
         'slug: sleep-quality',
-        'sourcePaths:',
+        'sources:',
         '  - research/2026/04/legacy-note.md',
-        'relatedSlugs:',
+        'related:',
         '  - magnesium',
         '---',
         '',
         '# Sleep quality',
         '',
-        'Canonical metadata comes only from current frontmatter fields.',
+        'This page predates the body-owned metadata sections.',
         '',
       ].join('\n'),
     )
@@ -275,8 +275,8 @@ describe('readDerivedKnowledgeGraph', () => {
     const graph = await readDerivedKnowledgeGraph(vaultRoot)
 
     expect(graph.bySlug.get('sleep-quality')).toMatchObject({
-      relatedSlugs: [],
-      sourcePaths: [],
+      relatedSlugs: ['magnesium'],
+      sourcePaths: ['research/2026/04/legacy-note.md'],
       title: 'Sleep quality',
     })
   })
