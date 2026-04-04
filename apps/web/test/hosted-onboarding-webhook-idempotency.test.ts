@@ -360,7 +360,14 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(1);
     expect(prisma.hostedInvite.findFirst).toHaveBeenCalledTimes(1);
     expect(prisma.hostedMember.create).not.toHaveBeenCalled();
-    expect(prisma.hostedMember.update).not.toHaveBeenCalled();
+    expect(prisma.hostedMember.update).toHaveBeenCalledWith({
+      data: {
+        linqChatId: "chat_123",
+      },
+      where: expect.objectContaining({
+        id: "member_123",
+      }),
+    });
     expect(prisma.hostedInvite.create).toHaveBeenCalledTimes(1);
     expect(prisma.hostedInvite.update).toHaveBeenCalledWith({
       where: {
@@ -2486,26 +2493,18 @@ function makeHostedLinqDailyState(input: {
 }
 
 function asHostedWebhookPrisma<T extends Record<string, unknown>>(prisma: T): T & HostedWebhookPrisma {
-  return prisma as T & HostedWebhookPrisma;
-}
-
-function withPrismaTransaction<T extends Record<string, unknown>>(prisma: T): T & HostedWebhookPrisma {
-  const prismaWithTransaction = asHostedWebhookPrisma(prisma) as T & HostedWebhookPrisma & {
-    $transaction?: unknown;
+  const prismaWithHostedMember = prisma as T & HostedWebhookPrisma & {
     hostedMember?: {
       update?: ReturnType<typeof vi.fn>;
       updateMany?: unknown;
     };
   };
-  const hostedMember = prismaWithTransaction.hostedMember as {
+  const hostedMember = prismaWithHostedMember.hostedMember as {
     update?: ((input: { data: Record<string, unknown> }) => Promise<unknown>) | undefined;
     updateMany?: unknown;
   } | undefined;
-  if (
-    hostedMember &&
-    !hostedMember.updateMany &&
-    hostedMember.update
-  ) {
+
+  if (hostedMember && !hostedMember.updateMany) {
     hostedMember.updateMany = vi.fn(async (input: { data: Record<string, unknown> }) => {
       if (hostedMember.update) {
         await hostedMember.update(input);
@@ -2514,6 +2513,14 @@ function withPrismaTransaction<T extends Record<string, unknown>>(prisma: T): T 
       return { count: 1 };
     });
   }
+
+  return prismaWithHostedMember;
+}
+
+function withPrismaTransaction<T extends Record<string, unknown>>(prisma: T): T & HostedWebhookPrisma {
+  const prismaWithTransaction = asHostedWebhookPrisma(prisma) as T & HostedWebhookPrisma & {
+    $transaction?: unknown;
+  };
   if (!("$queryRaw" in prismaWithTransaction)) {
     Object.defineProperty(prismaWithTransaction, "$queryRaw", {
       configurable: true,

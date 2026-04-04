@@ -877,7 +877,18 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 });
 
 function asPrismaTransactionClient<T extends Record<string, unknown>>(prisma: T) {
-  return prisma as unknown as Parameters<typeof handleHostedOnboardingLinqWebhook>[0]["prisma"];
+  const prismaWithHostedMember = prisma as unknown as T & {
+    hostedMember?: {
+      updateMany?: ReturnType<typeof vi.fn>;
+    };
+  };
+  const hostedMember = prismaWithHostedMember.hostedMember;
+
+  if (hostedMember && !hostedMember.updateMany) {
+    hostedMember.updateMany = vi.fn().mockResolvedValue({ count: 1 });
+  }
+
+  return prismaWithHostedMember as unknown as Parameters<typeof handleHostedOnboardingLinqWebhook>[0]["prisma"];
 }
 
 function withPrismaTransaction<
@@ -887,11 +898,11 @@ function withPrismaTransaction<
   $queryRaw: ReturnType<typeof vi.fn>;
   $transaction: ReturnType<typeof vi.fn>;
 } {
-  const prismaWithTransaction = prisma as T & {
+  const prismaWithTransaction = asPrismaTransactionClient(prisma) as unknown as T & {
     $queryRaw: ReturnType<typeof vi.fn>;
     $transaction: ReturnType<typeof vi.fn>;
   };
-  const transactionClient = tx as TTx & {
+  const transactionClient = asPrismaTransactionClient(tx) as unknown as TTx & {
     $queryRaw?: ReturnType<typeof vi.fn>;
   };
   const transaction = vi.fn(async (callback: (tx: TTx) => Promise<unknown>) => callback(tx));

@@ -10,7 +10,12 @@ import {
 import {
   requireHostedStripeWebhookVerificationConfig,
 } from "./runtime";
-import { recordHostedStripeEvent } from "./stripe-event-queue";
+import { drainHostedExecutionOutboxBestEffort } from "../hosted-execution/outbox";
+import { drainHostedActivationWelcomeMessages } from "./activation-welcome";
+import {
+  drainHostedStripeEventQueueDetailed,
+  recordHostedStripeEvent,
+} from "./stripe-event-queue";
 import { assertHostedTelegramWebhookSecret, buildHostedTelegramWebhookEventId, parseHostedTelegramWebhookUpdate } from "./telegram";
 import { runHostedWebhookWithReceipt } from "./webhook-receipts";
 import {
@@ -133,6 +138,38 @@ export async function handleHostedStripeWebhook(input: {
     event,
     prisma,
   });
+
+  if (!recorded.duplicate) {
+    const drainedResults = await drainHostedStripeEventQueueDetailed({
+      eventIds: [
+        event.id,
+      ],
+      limit: 1,
+      prisma,
+    });
+    const hostedExecutionEventIds = [
+      ...new Set(drainedResults.flatMap((result) => result.hostedExecutionEventIds)),
+    ];
+
+    if (hostedExecutionEventIds.length > 0) {
+      await drainHostedExecutionOutboxBestEffort({
+        eventIds: hostedExecutionEventIds,
+        limit: hostedExecutionEventIds.length,
+        prisma,
+      });
+    }
+
+    const activatedMemberIds = [
+      ...new Set(drainedResults.flatMap((result) => result.activatedMemberIds)),
+    ];
+
+    if (activatedMemberIds.length > 0) {
+      await drainHostedActivationWelcomeMessages({
+        memberIds: activatedMemberIds,
+        prisma,
+      });
+    }
+  }
 
   return {
     duplicate: recorded.duplicate || undefined,

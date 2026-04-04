@@ -86,12 +86,11 @@ async function refreshHostedMemberForPhone(input: {
   phoneNumber: string;
   prisma: PrismaClient | Prisma.TransactionClient;
 }): Promise<HostedMember> {
-  return input.prisma.hostedMember.update({
+    return input.prisma.hostedMember.update({
     where: {
       id: input.member.id,
     },
     data: {
-      linqChatId: null,
       ...buildHostedMemberPhoneStorage(input.phoneNumber),
       encryptedBootstrapSecret:
         input.member.encryptedBootstrapSecret
@@ -119,6 +118,35 @@ function buildHostedMemberPhoneStorage(phoneNumber: string) {
     maskedPhoneNumberHint: readHostedPhoneHint(phoneNumber),
     normalizedPhoneNumber: phoneLookupKey,
   };
+}
+
+export async function persistHostedMemberLinqChatBinding(input: {
+  linqChatId: string | null;
+  memberId: string;
+  prisma: PrismaClient | Prisma.TransactionClient;
+}): Promise<void> {
+  if (!input.linqChatId) {
+    return;
+  }
+
+  await input.prisma.hostedMember.updateMany({
+    where: {
+      id: input.memberId,
+      OR: [
+        {
+          linqChatId: null,
+        },
+        {
+          linqChatId: {
+            not: input.linqChatId,
+          },
+        },
+      ],
+    },
+    data: {
+      linqChatId: input.linqChatId,
+    },
+  });
 }
 
 export async function ensureHostedMemberForPrivyIdentity(input: {

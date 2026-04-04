@@ -1,0 +1,17 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    {
+      "path": "/api/internal/hosted-execution/outbox/cron",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/internal/hosted-onboarding/stripe/cron",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/internal/hosted-execution/usage/cron",
+      "schedule": "*/10 * * * *"
+    }
+  ]
+}

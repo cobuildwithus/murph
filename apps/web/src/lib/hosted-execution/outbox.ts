@@ -118,6 +118,22 @@ export async function drainHostedExecutionOutbox(input: {
   return drained;
 }
 
+export async function drainHostedExecutionOutboxBestEffort(input: {
+  eventIds?: readonly string[];
+  limit?: number;
+  now?: string;
+  prisma?: PrismaClient;
+} = {}): Promise<void> {
+  try {
+    await drainHostedExecutionOutbox(input);
+  } catch (error) {
+    console.error(
+      "Hosted execution outbox best-effort drain failed.",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+}
+
 function buildDueOutboxWhere(
   now: Date,
   eventIds: readonly string[] | null,
