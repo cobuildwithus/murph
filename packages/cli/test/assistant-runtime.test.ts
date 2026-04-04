@@ -3414,7 +3414,7 @@ test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound 
   )
   assert.match(
     providerCall?.systemPrompt ?? '',
-    /Another good light-touch note later in the onboarding exchange can be: `If you want a useful head start later, health history, supplements or meds, recent blood tests, and Garmin\/WHOOP\/Oura data can all help too\.`/u,
+    /Another good light-touch note later in the onboarding exchange can be: `If you want a useful head start later, health history, supplements or meds, and recent blood tests can all help too, and if you have Oura or WHOOP, I can help you connect those too\.`/u,
   )
   assert.deepEqual(listCalls, [
     {

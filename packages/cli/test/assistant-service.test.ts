@@ -247,7 +247,7 @@ function assertPromptHasFirstTurnCheckInGuidance(
   )
   assert.match(
     text,
-    /Another good light-touch note later in the onboarding exchange can be: `If you want a useful head start later, health history, supplements or meds, recent blood tests, and Garmin\/WHOOP\/Oura data can all help too\.`/u,
+    /Another good light-touch note later in the onboarding exchange can be: `If you want a useful head start later, health history, supplements or meds, and recent blood tests can all help too, and if you have Oura or WHOOP, I can help you connect those too\.`/u,
   )
   assert.match(
     text,
@@ -274,7 +274,7 @@ function assertPromptDoesNotHaveFirstTurnCheckInGuidance(
   )
   assert.doesNotMatch(
     text,
-    /If you want a useful head start later, health history, supplements or meds, recent blood tests, and Garmin\/WHOOP\/Oura data can all help too\./u,
+    /If you want a useful head start later, health history, supplements or meds, and recent blood tests can all help too, and if you have Oura or WHOOP, I can help you connect those too\./u,
   )
 }
 
@@ -2655,7 +2655,7 @@ test('sendAssistantMessage injects the first-chat check-in only for an opted-in 
   )
   assert.match(
     firstCall?.systemPrompt ?? '',
-    /If you want a useful head start later, health history, supplements or meds, recent blood tests, and Garmin\/WHOOP\/Oura data can all help too\./u,
+    /If you want a useful head start later, health history, supplements or meds, and recent blood tests can all help too, and if you have Oura or WHOOP, I can help you connect those too\./u,
   )
   assertPromptDoesNotHaveFirstTurnCheckInGuidance(secondCall?.systemPrompt)
 })
@@ -2753,7 +2753,7 @@ test('sendAssistantMessage injects the first-chat check-in for first-turn messag
   )
   assert.match(
     firstCall?.systemPrompt ?? '',
-    /If you want a useful head start later, health history, supplements or meds, recent blood tests, and Garmin\/WHOOP\/Oura data can all help too\./u,
+    /If you want a useful head start later, health history, supplements or meds, and recent blood tests can all help too, and if you have Oura or WHOOP, I can help you connect those too\./u,
   )
 })
 
