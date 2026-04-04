@@ -11,21 +11,16 @@ import { writeEncryptedR2Json, writeEncryptedR2Payload } from "../src/crypto.js"
 import { createHostedDispatchPayloadStore } from "../src/dispatch-payload-store.js";
 import { createHostedExecutionJournalStore } from "../src/execution-journal.js";
 import { readHostedEmailRawMessage, writeHostedEmailRawMessage } from "../src/hosted-email.js";
-import {
-  legacyHostedArtifactObjectKey,
-  legacyHostedExecutionJournalObjectKey,
-  legacyHostedUserEnvObjectKey,
-} from "../src/storage-paths.js";
 
 import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers";
 
 describe("opaque storage path rotation", () => {
-  it("keeps legacy per-user env objects readable and clearable after the opaque-path cutover", async () => {
+  it("ignores removed raw-path per-user env objects", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const oldKey = createTestRootKey(3);
     const nextKey = createTestRootKey(4);
     const userId = "user_legacy_env";
-    const objectKey = legacyHostedUserEnvObjectKey(userId);
+    const objectKey = `users/${encodeURIComponent(userId)}/user-env.json`;
     const plaintext = new TextEncoder().encode(JSON.stringify({ OPENAI_API_KEY: "secret" }));
 
     await writeEncryptedR2Payload({
@@ -49,10 +44,9 @@ describe("opaque storage path rotation", () => {
       keysById: { next: nextKey, old: oldKey },
     });
 
-    expect(await store.readUserEnv(userId)).toEqual(plaintext);
-    await store.clearUserEnv(userId);
     expect(await store.readUserEnv(userId)).toBeNull();
-    expect(bucket.deleted).toContain(objectKey);
+    await store.clearUserEnv(userId);
+    expect(bucket.deleted).not.toContain(objectKey);
   });
 
   it("keeps per-user env readable and clearable across bundle-key rotation", async () => {
@@ -83,7 +77,7 @@ describe("opaque storage path rotation", () => {
     expect(bucket.deleted.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("keeps legacy per-user artifacts readable and deletable after the opaque-path cutover", async () => {
+  it("ignores removed raw-path per-user artifacts", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const oldKey = createTestRootKey(9);
     const nextKey = createTestRootKey(10);
@@ -101,7 +95,7 @@ describe("opaque storage path rotation", () => {
     const sha256 = [...digest]
       .map((byte) => byte.toString(16).padStart(2, "0"))
       .join("");
-    const objectKey = legacyHostedArtifactObjectKey(userId, sha256);
+    const objectKey = `users/${encodeURIComponent(userId)}/artifacts/${sha256}.artifact.bin`;
 
     await writeEncryptedR2Payload({
       aad: buildHostedStorageAad({
@@ -126,10 +120,9 @@ describe("opaque storage path rotation", () => {
       userId,
     });
 
-    expect(await store.readArtifact(sha256)).toEqual(plaintext);
-    await store.deleteArtifact(sha256);
     expect(await store.readArtifact(sha256)).toBeNull();
-    expect(bucket.deleted).toContain(objectKey);
+    await store.deleteArtifact(sha256);
+    expect(bucket.deleted).not.toContain(objectKey);
   });
 
   it("keeps per-user artifacts readable and deletable across bundle-key rotation", async () => {
@@ -173,13 +166,13 @@ describe("opaque storage path rotation", () => {
     expect(bucket.deleted.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("keeps legacy execution journals readable and deletable after the opaque-path cutover", async () => {
+  it("ignores removed raw-path execution journals", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const oldKey = createTestRootKey(15);
     const nextKey = createTestRootKey(16);
     const userId = "user_legacy_journal";
     const eventId = "evt_legacy_123";
-    const objectKey = legacyHostedExecutionJournalObjectKey(userId, eventId);
+    const objectKey = `transient/execution-journal/${encodeURIComponent(userId)}/${encodeURIComponent(eventId)}.json`;
 
     await writeEncryptedR2Json({
       aad: buildHostedStorageAad({
@@ -215,17 +208,9 @@ describe("opaque storage path rotation", () => {
       keysById: { next: nextKey, old: oldKey },
     });
 
-    expect(await store.readCommittedResult(userId, eventId)).toMatchObject({
-      eventId,
-      result: {
-        eventsHandled: 1,
-        summary: "ok",
-      },
-      userId,
-    });
-    await store.deleteCommittedResult(userId, eventId);
     expect(await store.readCommittedResult(userId, eventId)).toBeNull();
-    expect(bucket.deleted).toContain(objectKey);
+    await store.deleteCommittedResult(userId, eventId);
+    expect(bucket.deleted).not.toContain(objectKey);
   });
 
   it("keeps execution journals readable and deletable across bundle-key rotation", async () => {

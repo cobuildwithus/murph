@@ -5,8 +5,7 @@ import {
   generateHostedUserRecipientKeyPair,
 } from "@murphai/runtime-state";
 
-import { encryptHostedBundle, writeEncryptedR2Json } from "../src/crypto.js";
-import { buildHostedStorageAad, deriveHostedStorageOpaqueId } from "../src/crypto-context.js";
+import { deriveHostedStorageOpaqueId } from "../src/crypto-context.js";
 import { createHostedUserKeyStore } from "../src/user-key-store.js";
 
 import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers";
@@ -28,8 +27,14 @@ describe("hosted user key store", () => {
     });
     const original = await oldStore.ensureUserCryptoContext("user_live_123");
     const oldEnvelopeObjectKey = [...bucket.objects.keys()][0] ?? null;
+    const currentObjectKey = await hostedUserKeyEnvelopeObjectKeyForTest(
+      envelopeEncryptionKey,
+      "user_live_123",
+    );
 
     expect(oldEnvelopeObjectKey).toBeTruthy();
+    expect(oldEnvelopeObjectKey).toBe(currentObjectKey);
+    expect(oldEnvelopeObjectKey).not.toContain("user_live_123");
     expect(bucket.objects.size).toBe(1);
 
     const rotatedStore = createHostedUserKeyStore({
@@ -136,23 +141,13 @@ describe("hosted user key store", () => {
     ).toBe("browser:v1");
   });
 
-  it("migrates legacy v1 envelopes from the old static object path", async () => {
+  it("ignores removed legacy v1 envelopes at the old static object path", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const envelopeEncryptionKey = createTestRootKey(23);
     const automation = await generateHostedUserRecipientKeyPair();
     const legacyUserId = "user_live_legacy";
     const legacyObjectKey = `users/keys/${encodeURIComponent(legacyUserId)}.json`;
-    const legacyRootKey = createTestRootKey(29);
-
-    await writeLegacyV1Envelope({
-      automationKey: envelopeEncryptionKey,
-      bucket,
-      envelopeEncryptionKey,
-      envelopeEncryptionKeyId: "v1",
-      objectKey: legacyObjectKey,
-      rootKey: legacyRootKey,
-      userId: legacyUserId,
-    });
+    await bucket.put(legacyObjectKey, "stale legacy envelope");
 
     const store = createHostedUserKeyStore({
       automationRecipientKeyId: "automation:v2",
@@ -163,68 +158,21 @@ describe("hosted user key store", () => {
       envelopeEncryptionKeyId: "v1",
     });
 
+    expect(await store.readUserRootKeyEnvelope(legacyUserId)).toBeNull();
     const context = await store.ensureUserCryptoContext(legacyUserId);
     const storedEnvelope = await store.readUserRootKeyEnvelope(legacyUserId);
     const currentObjectKey = await hostedUserKeyEnvelopeObjectKeyForTest(envelopeEncryptionKey, legacyUserId);
 
-    expect([...context.rootKey]).toEqual([...legacyRootKey]);
     expect(storedEnvelope?.schema).toBe("murph.hosted-user-root-key-envelope.v2");
     expect(
       storedEnvelope?.recipients.find((recipient) => recipient.kind === "automation")?.keyId,
     ).toBe("automation:v2");
+    expect(storedEnvelope?.rootKeyId).toBe(context.rootKeyId);
     expect(bucket.objects.has(currentObjectKey)).toBe(true);
-    expect(bucket.deleted).toContain(legacyObjectKey);
+    expect(bucket.objects.has(legacyObjectKey)).toBe(true);
+    expect(bucket.deleted).not.toContain(legacyObjectKey);
   });
 });
-
-async function writeLegacyV1Envelope(input: {
-  automationKey: Uint8Array;
-  bucket: MemoryEncryptedR2Bucket;
-  envelopeEncryptionKey: Uint8Array;
-  envelopeEncryptionKeyId: string;
-  objectKey: string;
-  rootKey: Uint8Array;
-  userId: string;
-}): Promise<void> {
-  const recipient = await encryptHostedBundle({
-    aad: buildHostedStorageAad({
-      keyId: "automation:v1",
-      recipientKind: "automation",
-      rootKeyId: "legacy-root-key-v1",
-      userId: input.userId,
-    }),
-    key: input.automationKey,
-    keyId: "automation:v1",
-    plaintext: input.rootKey,
-    scope: "root-key-recipient",
-  });
-
-  await writeEncryptedR2Json({
-    aad: buildHostedStorageAad({
-      key: input.objectKey,
-      purpose: "root-key-envelope",
-      userId: input.userId,
-    }),
-    bucket: input.bucket,
-    cryptoKey: input.envelopeEncryptionKey,
-    key: input.objectKey,
-    keyId: input.envelopeEncryptionKeyId,
-    scope: "root-key-envelope",
-    value: {
-      createdAt: "2026-03-20T10:00:00.000Z",
-      recipients: [{
-        ciphertext: recipient.ciphertext,
-        iv: recipient.iv,
-        keyId: recipient.keyId,
-        kind: "automation",
-      }],
-      rootKeyId: "legacy-root-key-v1",
-      schema: "murph.hosted-user-root-key-envelope.v1",
-      updatedAt: "2026-03-20T10:05:00.000Z",
-      userId: input.userId,
-    },
-  });
-}
 
 async function hostedUserKeyEnvelopeObjectKeyForTest(
   envelopeEncryptionKey: Uint8Array,
