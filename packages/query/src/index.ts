@@ -144,7 +144,6 @@ export {
   DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT,
   extractKnowledgeFirstHeading,
   extractKnowledgeRelatedSlugs,
-  extractKnowledgeSourcePaths,
   humanizeKnowledgeTag,
   normalizeKnowledgeSlug,
   normalizeKnowledgeTag,
@@ -152,4 +151,9 @@ export {
   sameKnowledgeStringSet,
   summarizeKnowledgeBody,
 } from "./knowledge-model.ts";
+export {
+  renderKnowledgePageBody,
+  stripGeneratedKnowledgeSections,
+  stripKnowledgeLeadingHeading,
+} from "./knowledge-format.ts";
 export * from "./health/index.ts";

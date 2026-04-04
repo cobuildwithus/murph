@@ -41,15 +41,15 @@ describe('readDerivedKnowledgeGraph', () => {
         'pageType: concept',
         'status: active',
         'summary: What seems to improve or disrupt sleep quality.',
+        'relatedSlugs:',
+        '  - magnesium',
+        'sourcePaths:',
+        '  - research/2026/04/sleep-note.md',
         '---',
         '',
         '# Sleep quality',
         '',
         'Murph noticed a recurring link to [[magnesium]].',
-        '',
-        '## Sources',
-        '',
-        '- `research/2026/04/sleep-note.md`',
         '',
       ].join('\n'),
     )
@@ -82,15 +82,15 @@ describe('readDerivedKnowledgeGraph', () => {
         'pageType: concept',
         'status: active',
         'summary: Magnesium seemed to help sleep continuity.',
+        'relatedSlugs:',
+        '  - magnesium',
+        'sourcePaths:',
+        '  - research/2026/04/sleep-note.md',
         '---',
         '',
         '# Sleep quality',
         '',
         'Murph noticed fewer wakeups when [[magnesium]] showed up in recent notes.',
-        '',
-        '## Sources',
-        '',
-        '- `research/2026/04/sleep-note.md`',
         '',
       ].join('\n'),
     )
@@ -145,15 +145,15 @@ describe('readDerivedKnowledgeGraph', () => {
         'pageType: sleep-pattern',
         'status: active',
         'summary: What seems to improve or disrupt sleep quality.',
+        'relatedSlugs:',
+        '  - magnesium',
+        'sourcePaths:',
+        '  - research/2026/04/sleep-note.md',
         '---',
         '',
         '# Sleep quality',
         '',
         'Murph noticed a recurring link to [[magnesium]].',
-        '',
-        '## Sources',
-        '',
-        '- `research/2026/04/sleep-note.md`',
         '',
       ].join('\n'),
     )
@@ -216,7 +216,7 @@ describe('readDerivedKnowledgeGraph', () => {
     })
   })
 
-  it('keeps canonical body metadata when frontmatter sections drift', async () => {
+  it('keeps canonical frontmatter metadata when generated sections drift', async () => {
     const vaultRoot = await createVaultRoot()
     await writeKnowledgePage(
       vaultRoot,
@@ -245,8 +245,8 @@ describe('readDerivedKnowledgeGraph', () => {
     const graph = await readDerivedKnowledgeGraph(vaultRoot)
 
     expect(graph.bySlug.get('sleep-quality')).toMatchObject({
-      relatedSlugs: ['stale-link'],
-      sourcePaths: ['research/2026/04/stale-note.md'],
+      relatedSlugs: ['magnesium'],
+      sourcePaths: ['research/2026/04/current-note.md'],
     })
   })
 

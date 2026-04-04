@@ -33,12 +33,12 @@ import { registerResearchCommands } from './commands/research.js'
 import { registerKnowledgeCommands } from './commands/knowledge.js'
 import { researchRunResultSchema } from './research-cli-contracts.js'
 import {
-  knowledgeCompileResultSchema,
   knowledgeIndexRebuildResultSchema,
   knowledgeLintResultSchema,
   knowledgeListResultSchema,
   knowledgeSearchResultSchema,
   knowledgeShowResultSchema,
+  knowledgeUpsertResultSchema,
 } from './knowledge-cli-contracts.js'
 import { registerReadCommands } from './commands/read.js'
 import { registerProtocolCommands } from './commands/protocol.js'
@@ -760,10 +760,10 @@ export const vaultCliCommandDescriptors = [
     rootCommandNames: ['knowledge'],
     leafCommands: [
       {
-        path: ['knowledge', 'compile'],
+        path: ['knowledge', 'upsert'],
         description:
           'Persist one assistant-authored derived knowledge page from local vault context. Writes under derived/knowledge/pages/**, rebuilds the derived knowledge index, and rejects derived/runtime source inputs such as derived/** and .runtime/**.',
-        output: knowledgeCompileResultSchema,
+        output: knowledgeUpsertResultSchema,
       },
       {
         path: ['knowledge', 'list'],
@@ -784,7 +784,7 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['knowledge', 'lint'],
         description:
-          'Run deterministic health checks over derived knowledge pages, including parse failures, duplicate slugs, missing sources, metadata drift, and missing related pages.',
+          'Run deterministic health checks over derived knowledge pages, including parse failures, duplicate slugs, missing sources, invalid sources, and missing related pages.',
         output: knowledgeLintResultSchema,
       },
       {

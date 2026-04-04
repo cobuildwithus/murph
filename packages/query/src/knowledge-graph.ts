@@ -14,12 +14,14 @@ import {
 import {
   DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT,
   extractKnowledgeFirstHeading,
-  extractKnowledgeRelatedSlugs,
-  extractKnowledgeSourcePaths,
   humanizeKnowledgeTag,
   orderedUniqueStrings,
   summarizeKnowledgeBody,
 } from './knowledge-model.ts'
+import {
+  stripGeneratedKnowledgeSections,
+  stripKnowledgeLeadingHeading,
+} from './knowledge-format.ts'
 import { searchDerivedKnowledgeGraph } from './knowledge-search.ts'
 export { searchDerivedKnowledgeGraph } from './knowledge-search.ts'
 
@@ -31,8 +33,6 @@ export interface DerivedKnowledgeNode {
   attributes: FrontmatterObject
   body: string
   compiledAt: string | null
-  compiler: string | null
-  mode: string | null
   pageType: string | null
   relativePath: string
   relatedSlugs: string[]
@@ -264,29 +264,28 @@ function toDerivedKnowledgeNode(
     firstString(source, ['title']) ??
     extractKnowledgeFirstHeading(body) ??
     humanizeKnowledgeTag(slug)
-  const sourcePaths = preferNonEmptyStrings(
-    extractKnowledgeSourcePaths(body),
-    orderedUniqueStrings(firstStringArray(source, ['sourcePaths', 'source_paths', 'sources'])),
+  const narrativeBody = stripKnowledgeLeadingHeading(
+    stripGeneratedKnowledgeSections(body),
   )
-  const relatedSlugs = preferNonEmptyStrings(
-    extractKnowledgeRelatedSlugs(body, slug),
-    orderedUniqueStrings(firstStringArray(source, ['relatedSlugs', 'related_slugs', 'related'])),
+  const sourcePaths = orderedUniqueStrings(
+    firstStringArray(source, ['sourcePaths', 'source_paths', 'sources']),
+  )
+  const relatedSlugs = orderedUniqueStrings(
+    firstStringArray(source, ['relatedSlugs', 'related_slugs', 'related']),
   )
 
   return {
     node: {
       attributes,
-      body,
+      body: narrativeBody,
       compiledAt: firstString(source, ['compiledAt']),
-      compiler: firstString(source, ['compiler']),
-      mode: firstString(source, ['mode']),
       pageType: firstString(source, ['pageType']),
       relativePath,
       relatedSlugs,
       slug,
       sourcePaths,
       status: firstString(source, ['status']),
-      summary: firstString(source, ['summary']) ?? summarizeKnowledgeBody(body),
+      summary: firstString(source, ['summary']) ?? summarizeKnowledgeBody(narrativeBody),
       title,
     },
   }
@@ -315,11 +314,4 @@ function renderDerivedKnowledgePageLink(
 
 function isKnowledgeSlug(value: string): boolean {
   return /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(value)
-}
-
-function preferNonEmptyStrings(
-  preferredValues: string[],
-  fallbackValues: string[],
-): string[] {
-  return preferredValues.length > 0 ? preferredValues : fallbackValues
 }

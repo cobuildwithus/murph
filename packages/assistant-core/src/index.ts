@@ -112,6 +112,35 @@ export {
 } from './assistant/service.js'
 
 export {
+  assertKnowledgeSourcePathAllowed,
+  getKnowledgePage,
+  lintKnowledgePages,
+  listKnowledgePages,
+  matchesKnowledgeFilter,
+  normalizeRelatedSlugInputs,
+  normalizeSourcePathInputs,
+  rebuildKnowledgeIndex,
+  searchKnowledgePages,
+  upsertKnowledgePage,
+  type KnowledgeGetInput,
+  type KnowledgeGetResult,
+  type KnowledgeIndexRebuildResult,
+  type KnowledgeLintProblem,
+  type KnowledgeLintResult,
+  type KnowledgeListInput,
+  type KnowledgeListResult,
+  type KnowledgePage,
+  type KnowledgePageMetadata,
+  type KnowledgePageReference,
+  type KnowledgeSearchHit,
+  type KnowledgeSearchInput,
+  type KnowledgeSearchResult,
+  type KnowledgeServiceDependencies,
+  type KnowledgeUpsertInput,
+  type KnowledgeUpsertResult,
+} from './knowledge.js'
+
+export {
   HOSTED_ASSISTANT_API_KEY_ENV,
   HOSTED_ASSISTANT_APPROVAL_POLICY_ENV,
   HOSTED_ASSISTANT_BASE_URL_ENV,

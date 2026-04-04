@@ -18,24 +18,19 @@ export const knowledgePageReferenceSchema = z.object({
   title: z.string().min(1),
 })
 
-export const knowledgePageMetadataSchema = knowledgePageReferenceSchema.extend({
-  compiler: z.string().min(1).nullable(),
-  mode: z.string().min(1).nullable(),
-})
+export const knowledgePageMetadataSchema = knowledgePageReferenceSchema
 
 export const knowledgePageSchema = knowledgePageMetadataSchema.extend({
   body: z.string(),
   markdown: z.string().min(1),
 })
 
-export const knowledgeCompileResultSchema = z.object({
+export const knowledgeUpsertResultSchema = z.object({
   vault: pathSchema,
   indexPath: pathSchema,
   page: knowledgePageMetadataSchema,
-  prompt: z.string().min(1),
   bodyLength: z.number().int().positive(),
   savedAt: isoTimestampSchema,
-  warnings: z.array(z.string().min(1)),
 })
 
 export const knowledgeListResultSchema = z.object({
@@ -91,7 +86,7 @@ export const knowledgeLintResultSchema = z.object({
   vault: pathSchema,
 })
 
-export type KnowledgeCompileResult = z.infer<typeof knowledgeCompileResultSchema>
+export type KnowledgeUpsertResult = z.infer<typeof knowledgeUpsertResultSchema>
 export type KnowledgeIndexRebuildResult = z.infer<typeof knowledgeIndexRebuildResultSchema>
 export type KnowledgeLintResult = z.infer<typeof knowledgeLintResultSchema>
 export type KnowledgeLintProblem = z.infer<typeof knowledgeLintProblemSchema>

@@ -2,7 +2,11 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "paths": {},
+    "paths": {
+      "@murphai/assistant-core/knowledge": [
+        "packages/assistant-core/src/knowledge.ts"
+      ]
+    },
     "rootDir": ".",
     "composite": false,
     "incremental": false

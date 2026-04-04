@@ -375,10 +375,11 @@ test('search index status schema stays scoped to index-management options', asyn
 })
 
 test('knowledge commands expose the expected schema at the built CLI boundary', async () => {
-  const compileSchema = JSON.parse(
-    await runRawCli(['knowledge', 'compile', '--schema', '--format', 'json']),
+  const upsertSchema = JSON.parse(
+    await runRawCli(['knowledge', 'upsert', '--schema', '--format', 'json']),
   ) as {
     args: {
+      properties?: Record<string, unknown>
       required?: string[]
     }
     options: {
@@ -411,14 +412,19 @@ test('knowledge commands expose the expected schema at the built CLI boundary', 
     }
   }
 
-  assert.deepEqual(compileSchema.args.required, ['prompt'])
-  assert.equal('body' in compileSchema.options.properties, true)
-  assert.equal('sourcePath' in compileSchema.options.properties, true)
-  assert.equal('mode' in compileSchema.options.properties, false)
-  assert.deepEqual(compileSchema.options.required, ['vault', 'body'])
+  assert.deepEqual(upsertSchema.args.required ?? [], [])
+  assert.equal(
+    Object.keys(upsertSchema.args.properties ?? {}).length,
+    0,
+  )
+  assert.equal('body' in upsertSchema.options.properties, true)
+  assert.equal('sourcePath' in upsertSchema.options.properties, true)
+  assert.equal('relatedSlug' in upsertSchema.options.properties, true)
+  assert.equal('mode' in upsertSchema.options.properties, false)
+  assert.deepEqual(upsertSchema.options.required, ['vault', 'body'])
   assert.match(
-    String((compileSchema.options.properties.sourcePath as { description?: unknown }).description),
-    /vault-relative paths, or absolute paths that still resolve inside the selected vault/u,
+    String((upsertSchema.options.properties.sourcePath as { description?: unknown }).description),
+    /vault-relative source file paths, or absolute source file paths that still resolve inside the selected vault/u,
   )
 
   assert.equal('query' in searchSchema.args.properties, true)
@@ -431,7 +437,7 @@ test('knowledge commands expose the expected schema at the built CLI boundary', 
   assert.deepEqual(showSchema.options.required, ['vault'])
 })
 
-test('knowledge compile persists assistant-authored pages through the built CLI boundary', async () => {
+test('knowledge upsert persists assistant-authored pages through the built CLI boundary', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-knowledge-cli-'))
 
   try {
@@ -444,20 +450,17 @@ test('knowledge compile persists assistant-authored pages through the built CLI 
       '# Sleep note\n\nMagnesium improved continuity.\n',
     )
 
-    const compiled = requireData(
+    const upserted = requireData(
       await runCli<{
         bodyLength: number
         page: {
-          compiler: string | null
-          mode: string | null
           slug: string
           sourcePaths: string[]
           title: string
         }
       }>([
         'knowledge',
-        'compile',
-        'Summarize sleep note',
+        'upsert',
         '--vault',
         vaultRoot,
         '--title',
@@ -469,16 +472,15 @@ test('knowledge compile persists assistant-authored pages through the built CLI 
       ]),
     )
 
-    assert.equal(compiled.bodyLength > 0, true)
-    assert.equal(compiled.page.compiler, 'assistant')
-    assert.equal(compiled.page.mode, null)
-    assert.equal(compiled.page.slug, 'sleep-quality')
-    assert.deepEqual(compiled.page.sourcePaths, ['research/2026/04/sleep-note.md'])
+    assert.equal(upserted.bodyLength > 0, true)
+    assert.equal(upserted.page.slug, 'sleep-quality')
+    assert.deepEqual(upserted.page.sourcePaths, ['research/2026/04/sleep-note.md'])
 
     const shown = requireData(
       await runCli<{
         page: {
           body: string
+          markdown: string
           title: string
         }
       }>([
@@ -493,6 +495,8 @@ test('knowledge compile persists assistant-authored pages through the built CLI 
     assert.equal(shown.page.title, 'Sleep quality')
     assert.match(shown.page.body, /## Sources/u)
     assert.match(shown.page.body, /research\/2026\/04\/sleep-note\.md/u)
+    assert.match(shown.page.markdown, /sourcePaths:/u)
+    assert.match(shown.page.markdown, /relatedSlugs:/u)
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }

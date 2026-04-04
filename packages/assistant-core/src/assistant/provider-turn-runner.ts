@@ -334,6 +334,15 @@ async function resolveAssistantRouteTurnPlan(input: {
     input.toolCatalog.hasTool('assistant.memory.file.read') &&
     input.toolCatalog.hasTool('assistant.memory.file.write')
   const assistantCronToolsAvailable = input.toolCatalog.hasTool('assistant.cron.status')
+  const assistantKnowledgeReadToolsAvailable =
+    input.toolCatalog.hasTool('assistant.knowledge.search') &&
+    input.toolCatalog.hasTool('assistant.knowledge.get') &&
+    input.toolCatalog.hasTool('assistant.knowledge.list')
+  const assistantKnowledgeUpsertToolAvailable =
+    input.toolCatalog.hasTool('assistant.knowledge.upsert')
+  const assistantKnowledgeMaintenanceToolsAvailable =
+    input.toolCatalog.hasTool('assistant.knowledge.lint') &&
+    input.toolCatalog.hasTool('assistant.knowledge.rebuildIndex')
 
   return {
     cliEnv: input.sharedPlan.cliAccess.env,
@@ -348,6 +357,9 @@ async function resolveAssistantRouteTurnPlan(input: {
     workingDirectory,
     systemPrompt: buildAssistantSystemPrompt({
       allowSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
+      assistantKnowledgeMaintenanceToolsAvailable,
+      assistantKnowledgeReadToolsAvailable,
+      assistantKnowledgeUpsertToolAvailable,
       assistantMemoryAppendToolAvailable,
       assistantStateToolsAvailable,
       assistantCronToolsAvailable,

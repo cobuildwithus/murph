@@ -4,11 +4,11 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
-  compileKnowledgePage,
+  getKnowledgePage,
   lintKnowledgePages,
   searchKnowledgePages,
-  showKnowledgePage,
-} from '../src/knowledge-runtime.js'
+  upsertKnowledgePage,
+} from '@murphai/assistant-core/knowledge'
 
 const createdVaultRoots: string[] = []
 
@@ -23,7 +23,7 @@ afterEach(async () => {
   )
 })
 
-describe('compileKnowledgePage', () => {
+describe('upsertKnowledgePage', () => {
   it('writes a derived knowledge page and rebuilds the markdown index', async () => {
     const vaultRoot = await createVaultRoot()
     const sourcePath = 'research/2026/04/sleep-note.md'
@@ -33,7 +33,7 @@ describe('compileKnowledgePage', () => {
       '# Sleep note\n\nMagnesium seemed helpful on several recent nights.\n',
     )
 
-    const result = await compileKnowledgePage(
+    const result = await upsertKnowledgePage(
       {
         body: [
           '# Temporary heading',
@@ -50,12 +50,11 @@ describe('compileKnowledgePage', () => {
           '',
         ].join('\n'),
         vault: vaultRoot,
-        prompt: 'Summarize the current sleep-quality notes.',
         title: 'Sleep quality',
         sourcePaths: [sourcePath],
       },
       {
-        async saveText(input) {
+        async saveText(input: { relativePath: string; content: string }) {
           await writeVaultFile(vaultRoot, input.relativePath, input.content)
         },
       },
@@ -77,14 +76,13 @@ describe('compileKnowledgePage', () => {
       'utf8',
     )
     expect(savedPage).toContain('slug: sleep-quality')
-    expect(savedPage).toContain('compiler: assistant')
+    expect(savedPage).toContain('sourcePaths:')
+    expect(savedPage).toContain('relatedSlugs:')
     expect(savedPage).toContain('# Sleep quality')
     expect(savedPage).not.toContain('stale-note.md')
     expect(savedPage).toContain('## Sources')
     expect(savedPage).toContain('## Related')
     expect(savedPage).toContain('`research/2026/04/sleep-note.md`')
-    expect(savedPage).not.toContain('sourcePaths:')
-    expect(savedPage).not.toContain('relatedSlugs:')
 
     const savedIndex = await readFile(
       path.join(vaultRoot, 'derived/knowledge/index.md'),
@@ -93,7 +91,7 @@ describe('compileKnowledgePage', () => {
     expect(savedIndex).toContain('# Derived knowledge index')
     expect(savedIndex).toContain('Sleep quality')
 
-    const shown = await showKnowledgePage({
+    const shown = await getKnowledgePage({
       vault: vaultRoot,
       slug: 'sleep-quality',
     })
@@ -110,11 +108,10 @@ describe('compileKnowledgePage', () => {
       '# Sleep note\n\nEarlier notes linked better sleep to magnesium.\n',
     )
 
-    await compileKnowledgePage(
+    await upsertKnowledgePage(
       {
         body: '# Sleep quality\n\nThe first pass mostly referenced the older sleep note.\n',
         vault: vaultRoot,
-        prompt: 'Summarize my current sleep-quality notes.',
         title: 'Sleep quality',
         sourcePaths: [firstSourcePath],
       },
@@ -125,11 +122,10 @@ describe('compileKnowledgePage', () => {
       },
     )
 
-    const refreshed = await compileKnowledgePage(
+    const refreshed = await upsertKnowledgePage(
       {
         body: '# Sleep quality\n\nThe refreshed page keeps the same source set.\n',
         vault: vaultRoot,
-        prompt: 'Refresh the sleep-quality page with the latest framing.',
         slug: 'sleep-quality',
       },
       {
@@ -159,22 +155,20 @@ describe('compileKnowledgePage', () => {
       await writeVaultFile(vaultRoot, input.relativePath, input.content)
     }
 
-    await compileKnowledgePage(
+    await upsertKnowledgePage(
       {
         body: '# Sleep quality\n\nInitial page body.\n',
         vault: vaultRoot,
-        prompt: 'Create the sleep-quality page.',
         title: 'Sleep quality',
         sourcePaths: [firstSourcePath],
       },
       { saveText },
     )
 
-    const refreshed = await compileKnowledgePage(
+    const refreshed = await upsertKnowledgePage(
       {
         body: '# Sleep quality\n\nRefreshed with the new source only.\n',
         vault: vaultRoot,
-        prompt: 'Refresh from the magnesium note only.',
         slug: 'sleep-quality',
         sourcePaths: [secondSourcePath],
       },
@@ -192,10 +186,9 @@ describe('compileKnowledgePage', () => {
     })
 
     await expect(
-      compileKnowledgePage({
+      upsertKnowledgePage({
         body: '# Sleep quality\n\nBody.\n',
         vault: vaultRoot,
-        prompt: 'Compile from a directory source path.',
         sourcePaths: ['research/2026/04/folder-source'],
       }),
     ).rejects.toMatchObject({
@@ -216,16 +209,15 @@ describe('compileKnowledgePage', () => {
       '# Long note\n\nA longer note backs the generated summary.\n',
     )
 
-    const result = await compileKnowledgePage(
+    const result = await upsertKnowledgePage(
       {
         body: ['# Long note', '', longParagraph, ''].join('\n'),
         vault: vaultRoot,
-        prompt: 'Summarize the long note.',
         title: 'Long note',
         sourcePaths: [sourcePath],
       },
       {
-        async saveText(input) {
+        async saveText(input: { relativePath: string; content: string }) {
           await writeVaultFile(vaultRoot, input.relativePath, input.content)
         },
       },
@@ -244,7 +236,7 @@ describe('compileKnowledgePage', () => {
     expect(savedPage).not.toContain('[truncated locally]')
   })
 
-  it('rejects derived or runtime paths as knowledge compile sources', async () => {
+  it('rejects derived or runtime paths as knowledge upsert sources', async () => {
     const vaultRoot = await createVaultRoot()
     await writeVaultFile(
       vaultRoot,
@@ -253,11 +245,10 @@ describe('compileKnowledgePage', () => {
     )
 
     await expect(
-      compileKnowledgePage(
+      upsertKnowledgePage(
         {
           body: '# Existing\n\nBody.\n',
           vault: vaultRoot,
-          prompt: 'Compile from a forbidden source path.',
           sourcePaths: ['derived/knowledge/pages/existing.md'],
         },
       ),
@@ -331,7 +322,7 @@ describe('compileKnowledgePage', () => {
     await writeVaultFile(vaultRoot, 'derived/knowledge/pages/sleep-quality-copy.md', pageBody)
 
     await expect(
-      showKnowledgePage({
+      getKnowledgePage({
         vault: vaultRoot,
         slug: 'sleep-quality',
       }),
@@ -388,7 +379,7 @@ describe('compileKnowledgePage', () => {
     )
   })
 
-  it('reports metadata drift and forbidden body source sections during lint', async () => {
+  it('ignores stale generated sections and lints only canonical frontmatter metadata', async () => {
     const vaultRoot = await createVaultRoot()
     await writeVaultFile(
       vaultRoot,
@@ -446,22 +437,27 @@ describe('compileKnowledgePage', () => {
     expect(lint.problems).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          code: 'forbidden_source_path',
-          slug: 'sleep-quality',
-          severity: 'error',
-        }),
-        expect.objectContaining({
-          code: 'source_paths_drift',
-          slug: 'sleep-quality',
-          severity: 'warning',
-        }),
-        expect.objectContaining({
-          code: 'related_slugs_drift',
-          slug: 'sleep-quality',
+          code: 'missing_sources',
+          slug: 'magnesium',
           severity: 'warning',
         }),
       ]),
     )
+    expect(
+      lint.problems.some(
+        (problem: { code: string }) => problem.code === 'forbidden_source_path',
+      ),
+    ).toBe(false)
+    expect(
+      lint.problems.some(
+        (problem: { code: string }) => problem.code === 'source_paths_drift',
+      ),
+    ).toBe(false)
+    expect(
+      lint.problems.some(
+        (problem: { code: string }) => problem.code === 'related_slugs_drift',
+      ),
+    ).toBe(false)
   })
 })
 

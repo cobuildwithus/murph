@@ -97,7 +97,8 @@ test('buildAssistantCliGuidanceText tells the assistant to escalate from help to
   assert.match(guidance, /`--wait-timeout` is the advanced override/u)
   assert.match(guidance, /vault-cli deepthink <prompt>/u)
   assert.match(guidance, /prefer refreshing that slug instead of creating a near-duplicate page/u)
-  assert.match(guidance, /absolute paths that still resolve inside the selected vault/u)
+  assert.match(guidance, /vault-cli knowledge upsert --title "<title>" --body "<markdown>"/u)
+  assert.match(guidance, /absolute source files that still resolve inside the selected vault/u)
   assert.match(guidance, /murph/u)
 })
 
