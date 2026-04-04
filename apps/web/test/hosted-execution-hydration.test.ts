@@ -381,8 +381,23 @@ describe("hydrateHostedExecutionDispatch", () => {
       api_version: "v1",
       created_at: "2026-03-26T12:30:00.000Z",
       data: {
+        chat: {
+          id: "chat_123",
+          owner_handle: {
+            handle: "hbid:linq.recipient:v1:test",
+            id: "handle_owner_123",
+            is_me: true,
+            service: "SMS",
+          },
+        },
         chat_id: "chat_123",
+        direction: "inbound",
         from: "+15551234567",
+        from_handle: {
+          handle: "hbid:linq.from:v1:test",
+          id: "handle_sender_123",
+          service: "SMS",
+        },
         is_from_me: false,
         message: {
           id: "msg_123",
@@ -394,6 +409,12 @@ describe("hydrateHostedExecutionDispatch", () => {
           ],
         },
         received_at: "2026-03-26T12:30:00.000Z",
+        sender_handle: {
+          handle: "hbid:linq.from:v1:test",
+          id: "handle_sender_123",
+          service: "SMS",
+        },
+        service: "SMS",
       },
       event_id: "evt_linq_sparse_123",
       event_type: "message.received",
