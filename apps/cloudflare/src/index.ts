@@ -8,8 +8,10 @@ import {
   emitHostedExecutionStructuredLog,
   parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
   parseHostedExecutionDispatchRequest,
+  readHostedExecutionSignatureHeaders,
   parseHostedExecutionSharePackResponse,
   readHostedEmailCapabilities,
+  verifyHostedExecutionSignature,
   type HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   type HostedExecutionDispatchRequest,
   type HostedExecutionDispatchResult,
@@ -62,7 +64,6 @@ import {
   type GatewayWaitForEventsInput,
 } from "@murphai/gateway-core";
 
-import { readHostedExecutionSignatureHeaders, verifyHostedExecutionSignature } from "./auth.ts";
 import { createHostedUserEnvStore } from "./bundle-store.ts";
 import { readHostedExecutionEnvironment } from "./env.ts";
 import type {

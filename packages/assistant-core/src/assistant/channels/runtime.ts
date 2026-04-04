@@ -2,7 +2,7 @@ import {
   parseTelegramThreadTarget,
   serializeTelegramThreadTarget,
   type TelegramThreadTarget,
-} from '@murphai/inboxd/telegram'
+} from '@murphai/messaging-ingress/telegram-webhook'
 import {
   createAgentmailApiClient,
   resolveAgentmailApiKey,

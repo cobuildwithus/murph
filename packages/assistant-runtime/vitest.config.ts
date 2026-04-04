@@ -26,7 +26,6 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/messaging-ingress": "../messaging-ingress/src/index.ts",
   "@murphai/parsers": "../parsers/src/index.ts",
   "@murphai/runtime-state": "../runtime-state/src/index.ts",
-  murph: "../cli/src/index.ts",
 } as const;
 
 export default defineProject({

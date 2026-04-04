@@ -424,6 +424,7 @@
     "@murphai/gateway-core": "workspace:*",
     "@murphai/importers": "workspace:*",
     "@murphai/inboxd": "workspace:*",
+    "@murphai/messaging-ingress": "workspace:*",
     "@murphai/parsers": "workspace:*",
     "@murphai/query": "workspace:*",
     "@murphai/runtime-state": "workspace:*",

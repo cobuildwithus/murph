@@ -5,7 +5,7 @@ import {
   isLinqWebhookPayloadError,
   isLinqWebhookVerificationError,
   verifyAndParseLinqWebhookRequest,
-} from './webhook.ts'
+} from '@murphai/messaging-ingress/linq-webhook'
 
 const DEFAULT_LINQ_WEBHOOK_HOST = '0.0.0.0'
 const DEFAULT_LINQ_WEBHOOK_PATH = '/linq-webhook'

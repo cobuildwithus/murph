@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 import { ContainerProxy as PackageContainerProxy } from "@cloudflare/containers";
-import { createHostedExecutionSignature } from "../src/auth.ts";
+import { createHostedExecutionSignature } from "@murphai/hosted-execution";
 import { artifactObjectKey } from "../src/bundle-store.ts";
 import { buildHostedStorageAad, deriveHostedStorageOpaqueId } from "../src/crypto-context.ts";
 import {

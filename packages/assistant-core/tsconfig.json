@@ -26,6 +26,9 @@
       "path": "../importers"
     },
     {
+      "path": "../messaging-ingress"
+    },
+    {
       "path": "../inboxd"
     },
     {
