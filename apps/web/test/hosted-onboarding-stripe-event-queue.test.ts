@@ -56,6 +56,7 @@ vi.mock("@/src/lib/hosted-onboarding/revnet", () => ({
 import {
   drainHostedStripeEventQueue,
   recordHostedStripeEvent,
+  reconcileHostedStripeEventById,
   reconcileSubmittedHostedRevnetIssuances,
 } from "@/src/lib/hosted-onboarding/stripe-event-queue";
 import { drainHostedRevnetIssuanceSubmissionQueue } from "@/src/lib/hosted-onboarding/stripe-revnet-issuance";
@@ -538,6 +539,63 @@ describe("hosted Stripe event queue", () => {
         sourceType: "hosted_stripe_event",
       }),
     );
+  });
+
+  it("reconciles one recorded Stripe event by id for the webhook inline path", async () => {
+    const harness = createStripeQueueHarness({
+      invites: [
+        makeInvite(),
+      ],
+      members: [
+        makeMember({
+          billingMode: HostedBillingMode.subscription,
+          billingStatus: HostedBillingStatus.past_due,
+          linqChatId: "chat_signup_123",
+          status: HostedMemberStatus.registered,
+        }),
+      ],
+    });
+
+    await recordHostedStripeEvent({
+      event: buildStripeEvent({
+        createdAt: "2026-03-28T10:10:00.000Z",
+        id: "evt_invoice_paid_inline_123",
+        object: {
+          amount_paid: 500,
+          currency: "usd",
+          customer: "cus_123",
+          id: "in_123",
+          parent: {
+            subscription_details: {
+              subscription: "sub_123",
+            },
+          },
+          payment_intent: "pi_123",
+        },
+        type: "invoice.paid",
+      }),
+      prisma: harness.prisma,
+    });
+
+    await expect(
+      reconcileHostedStripeEventById({
+        eventId: "evt_invoice_paid_inline_123",
+        prisma: harness.prisma,
+      }),
+    ).resolves.toMatchObject({
+      activatedMemberId: "member_123",
+      createdOrUpdatedRevnetIssuance: false,
+      eventId: "evt_invoice_paid_inline_123",
+      hostedExecutionEventId: "member.activated:stripe.invoice.paid:member_123:evt_invoice_paid_inline_123",
+      status: "completed",
+    });
+
+    expect(harness.members[0]).toMatchObject({
+      billingStatus: HostedBillingStatus.active,
+      onboardingWelcomeQueuedAt: expect.any(Date),
+      status: HostedMemberStatus.active,
+      stripeLatestBillingEventId: "evt_invoice_paid_inline_123",
+    });
   });
 
   it("activates from invoice.paid without queueing the canned welcome when no Linq signup chat is bound", async () => {
