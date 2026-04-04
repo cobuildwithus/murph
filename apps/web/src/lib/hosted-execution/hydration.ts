@@ -5,9 +5,14 @@ import {
   readHostedExecutionOutboxPayload,
 } from "@murphai/hosted-execution";
 
+import { createHostedSecretCodec } from "../device-sync/crypto";
+import { readHostedDeviceSyncEnvironment } from "../device-sync/env";
 import { buildHostedDeviceSyncWakeDispatchFromSignal } from "../device-sync/hosted-dispatch";
+import { buildHostedDeviceSyncRuntimeSnapshot } from "../device-sync/internal-runtime";
+import { PrismaDeviceSyncControlPlaneStore } from "../device-sync/prisma-store";
 import { toJsonRecord } from "../device-sync/shared";
 import { readHostedWebhookReceiptDispatchByEventId } from "../hosted-onboarding/webhook-receipt-dispatch";
+import { findHostedShareLinkById, readHostedSharePack } from "../hosted-share/shared";
 
 type HostedExecutionHydrationClient = PrismaClient;
 
@@ -38,7 +43,7 @@ export async function hydrateHostedExecutionDispatch(
     case "device_sync_signal":
       return hydrateHostedExecutionDispatchFromDeviceSyncSignal(record, prisma);
     case "hosted_share_link":
-      return hydrateHostedExecutionDispatchFromHostedShareLink(record, payload.dispatchRef);
+      return hydrateHostedExecutionDispatchFromHostedShareLink(record, prisma, payload.dispatchRef);
     case "hosted_webhook_receipt":
       return hydrateHostedExecutionDispatchFromWebhookReceipt(record, prisma, payload.dispatchRef.occurredAt);
     default:
@@ -101,6 +106,7 @@ async function hydrateHostedExecutionDispatchFromWebhookReceipt(
 
 async function hydrateHostedExecutionDispatchFromHostedShareLink(
   record: ExecutionOutbox,
+  prisma: HostedExecutionHydrationClient,
   dispatchRef: HostedExecutionDispatchRef,
 ): Promise<HostedExecutionDispatchRequest> {
   if (!record.sourceId) {
@@ -117,11 +123,25 @@ async function hydrateHostedExecutionDispatchFromHostedShareLink(
     );
   }
 
+  const shareRecord = await findHostedShareLinkById(record.sourceId, prisma);
+
+  if (!shareRecord) {
+    throw createHostedExecutionHydrationError(
+      "HOSTED_EXECUTION_HYDRATION_SOURCE_MISSING",
+      `Hosted share link ${record.sourceId} was not found for hosted execution ${record.eventId}.`,
+    );
+  }
+
+  const { pack } = readHostedSharePack(shareRecord);
+
   return validateHydratedHostedExecutionDispatch(
     {
       event: {
         kind: "vault.share.accepted",
-        share: dispatchRef.share,
+        share: {
+          ...dispatchRef.share,
+          pack,
+        },
         userId: record.userId,
       },
       eventId: record.eventId,
@@ -157,18 +177,58 @@ async function hydrateHostedExecutionDispatchFromDeviceSyncSignal(
     );
   }
 
+  const dispatch = buildHostedDeviceSyncWakeDispatchFromSignal({
+    connectionId: signal.connectionId,
+    eventId: record.eventId,
+    occurredAt: signal.createdAt.toISOString(),
+    provider: signal.provider,
+    signalKind: signal.kind,
+    signalPayload: toJsonRecord(signal.payloadJson),
+    userId: signal.userId,
+  });
+
+  if (dispatch.event.kind !== "device-sync.wake") {
+    return validateHydratedHostedExecutionDispatch(dispatch, record);
+  }
+
   return validateHydratedHostedExecutionDispatch(
-    buildHostedDeviceSyncWakeDispatchFromSignal({
-      connectionId: signal.connectionId,
-      eventId: record.eventId,
-      occurredAt: signal.createdAt.toISOString(),
-      provider: signal.provider,
-      signalKind: signal.kind,
-      signalPayload: toJsonRecord(signal.payloadJson),
-      userId: signal.userId,
-    }),
+    {
+      ...dispatch,
+      event: {
+        ...dispatch.event,
+        runtimeSnapshot: await hydrateHostedDeviceSyncRuntimeSnapshot({
+          connectionId: signal.connectionId,
+          prisma,
+          provider: signal.provider,
+          userId: signal.userId,
+        }),
+      },
+    },
     record,
   );
+}
+
+async function hydrateHostedDeviceSyncRuntimeSnapshot(input: {
+  connectionId: string | null;
+  prisma: HostedExecutionHydrationClient;
+  provider: string | null;
+  userId: string;
+}) {
+  const environment = readHostedDeviceSyncEnvironment();
+  const store = new PrismaDeviceSyncControlPlaneStore({
+    prisma: input.prisma,
+    codec: createHostedSecretCodec({
+      key: environment.encryptionKey,
+      keyVersion: environment.encryptionKeyVersion,
+      keysByVersion: environment.encryptionKeysByVersion,
+    }),
+  });
+
+  return buildHostedDeviceSyncRuntimeSnapshot(store, {
+    ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+    ...(input.provider ? { provider: input.provider } : {}),
+    userId: input.userId,
+  });
 }
 
 function parseHostedWebhookReceiptSourceId(

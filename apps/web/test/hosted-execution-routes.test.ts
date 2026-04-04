@@ -97,15 +97,15 @@ describe("hosted execution async routes", () => {
         status: "accepted",
       },
     ]);
-    mocks.importHostedAiUsageRecords.mockResolvedValue({
-      recordedIds: ["usage_1", "usage_2"],
-      records: [],
-    });
     mocks.drainHostedAiUsageStripeMetering.mockResolvedValue({
       configured: true,
       failed: 0,
       metered: 1,
       skipped: 1,
+    });
+    mocks.importHostedAiUsageRecords.mockResolvedValue({
+      recordedIds: ["usage_1", "usage_2"],
+      records: [],
     });
   });
 
@@ -188,6 +188,27 @@ describe("hosted execution async routes", () => {
     });
   });
 
+  it("returns the Stripe usage cron drain summary", async () => {
+    const response = await hostedExecutionUsageCronRoute.GET(
+      new Request("https://join.example.test/api/internal/hosted-execution/usage/cron", {
+        headers: {
+          authorization: "Bearer cron-token",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(mocks.requireHostedExecutionSchedulerToken).toHaveBeenCalledTimes(1);
+    expect(mocks.drainHostedAiUsageStripeMetering).toHaveBeenCalledTimes(1);
+    await expect(response.json()).resolves.toEqual({
+      configured: true,
+      failed: 0,
+      metered: 1,
+      skipped: 1,
+    });
+  });
+
   it("records posted hosted AI usage rows through the internal route", async () => {
     const response = await hostedExecutionUsageRecordRoute.POST(
       new Request("https://join.example.test/api/internal/hosted-execution/usage/record", {
@@ -237,60 +258,6 @@ describe("hosted execution async routes", () => {
     await expect(response.json()).resolves.toEqual({
       recorded: 2,
       usageIds: ["usage_1", "usage_2"],
-    });
-  });
-
-  it("rejects hosted AI usage writes without the trusted hosted execution user binding", async () => {
-    mocks.authorizeHostedExecutionInternalRequest.mockImplementation(() => {
-      throw hostedOnboardingError({
-        code: "HOSTED_EXECUTION_USER_REQUIRED",
-        httpStatus: 400,
-        message: "Hosted execution user binding is required.",
-      });
-    });
-
-    const response = await hostedExecutionUsageRecordRoute.POST(
-      new Request("https://join.example.test/api/internal/hosted-execution/usage/record", {
-        method: "POST",
-        headers: {
-          authorization: "Bearer internal-token",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          usage: [],
-        }),
-      }),
-    );
-
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "HOSTED_EXECUTION_USER_REQUIRED",
-        message: "Hosted execution user binding is required.",
-        retryable: false,
-      },
-    });
-    expect(mocks.importHostedAiUsageRecords).not.toHaveBeenCalled();
-  });
-
-  it("returns the Stripe usage cron drain summary", async () => {
-    const response = await hostedExecutionUsageCronRoute.GET(
-      new Request("https://join.example.test/api/internal/hosted-execution/usage/cron", {
-        headers: {
-          authorization: "Bearer cron-token",
-        },
-      }),
-    );
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireHostedExecutionSchedulerToken).toHaveBeenCalledTimes(1);
-    expect(mocks.drainHostedAiUsageStripeMetering).toHaveBeenCalledTimes(1);
-    await expect(response.json()).resolves.toEqual({
-      configured: true,
-      failed: 0,
-      metered: 1,
-      skipped: 1,
     });
   });
 

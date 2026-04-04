@@ -11,4 +11,3 @@ export {
   createHostedShareLink,
 } from "./link-service";
 export { requireHostedShareInternalToken } from "../hosted-execution/internal";
-export { readHostedSharePackByReference } from "./shared";

@@ -4,8 +4,10 @@ import { HOSTED_USER_ROOT_KEY_ENVELOPE_SCHEMA } from "@murphai/runtime-state";
 import {
   DEFAULT_HOSTED_EXECUTION_ARTIFACTS_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_COMMIT_BASE_URL,
+  DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_EMAIL_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_SIDE_EFFECTS_BASE_URL,
+  DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
   HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
   HOSTED_EXECUTION_CALLBACK_HOSTS,
   buildHostedExecutionDispatchRef,
@@ -14,7 +16,6 @@ import {
   buildHostedExecutionEmailMessageReceivedDispatch,
   buildHostedExecutionGatewayMessageSendDispatch,
   buildHostedExecutionTelegramMessageReceivedDispatch,
-  buildHostedExecutionSharePayloadPath,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
   buildHostedExecutionUserEnvPath,
@@ -25,7 +26,6 @@ import {
   createHostedExecutionControlClient,
   createHostedExecutionDispatchClient,
   createHostedExecutionServerAiUsageClient,
-  createHostedExecutionServerSharePackClient,
   createHostedExecutionSignature,
   createHostedExecutionSignatureHeaders,
   buildHostedExecutionStructuredLogRecord,
@@ -54,7 +54,6 @@ import {
   resolveHostedExecutionDeviceSyncRuntimeClient,
   resolveHostedExecutionDispatchLifecycle,
   resolveHostedExecutionDispatchOutcomeState,
-  resolveHostedExecutionSharePackClient,
   verifyHostedExecutionSignature,
 } from "@murphai/hosted-execution";
 
@@ -186,15 +185,8 @@ describe("@murphai/hosted-execution", () => {
         HOSTED_SHARE_INTERNAL_TOKEN: "share-token",
       }),
     ).toEqual({
-      deviceSyncRuntimeBaseUrl: "https://device-sync.example.test",
-      internalToken: "internal-token",
-      internalTokens: ["internal-token"],
-      schedulerToken: "cron-token",
-      schedulerTokens: ["cron-token"],
-      shareBaseUrl: "https://web.example.test",
-      shareToken: "share-token",
-      shareTokens: ["share-token"],
-      usageBaseUrl: "https://web.example.test",
+      deviceSyncRuntimeBaseUrl: DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
+      usageBaseUrl: DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
     });
 
     expect(
@@ -203,43 +195,32 @@ describe("@murphai/hosted-execution", () => {
         HOSTED_SHARE_API_BASE_URL: "https://share.example.test/internal/",
       }),
     ).toEqual({
-      deviceSyncRuntimeBaseUrl: "https://web.example.test",
-      internalToken: null,
-      internalTokens: [],
-      schedulerToken: null,
-      schedulerTokens: [],
-      shareBaseUrl: "https://share.example.test/internal",
-      shareToken: null,
-      shareTokens: [],
-      usageBaseUrl: "https://web.example.test",
+      deviceSyncRuntimeBaseUrl: DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
+      usageBaseUrl: DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
     });
   });
 
-  it("falls back to the Vercel production domain for hosted web control-plane defaults", () => {
+  it("keeps hosted web control-plane callbacks bound to the worker proxy defaults", () => {
     expect(
       readHostedExecutionWebControlPlaneEnvironment({
         HOSTED_EXECUTION_INTERNAL_TOKEN: "internal-token",
         VERCEL_PROJECT_PRODUCTION_URL: "www.withmurph.ai",
       }),
     ).toEqual({
-      deviceSyncRuntimeBaseUrl: "https://www.withmurph.ai",
-      internalToken: "internal-token",
-      internalTokens: ["internal-token"],
-      schedulerToken: null,
-      schedulerTokens: [],
-      shareBaseUrl: "https://www.withmurph.ai",
-      shareToken: null,
-      shareTokens: [],
-      usageBaseUrl: "https://www.withmurph.ai",
+      deviceSyncRuntimeBaseUrl: DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
+      usageBaseUrl: DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
     });
   });
 
-  it("rejects an invalid Vercel production-domain fallback for hosted web control-plane URLs", () => {
-    expect(() =>
+  it("ignores invalid hosted web fallback env when proxy defaults are in use", () => {
+    expect(
       readHostedExecutionWebControlPlaneEnvironment({
         VERCEL_PROJECT_PRODUCTION_URL: "http://www.withmurph.ai",
       }),
-    ).toThrow(/Hosted execution base URLs must use HTTPS/u);
+    ).toEqual({
+      deviceSyncRuntimeBaseUrl: DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
+      usageBaseUrl: DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
+    });
   });
 
   it("reads hosted worker env defaults from the canonical signing-secret name", () => {
@@ -609,89 +590,7 @@ describe("@murphai/hosted-execution", () => {
     expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
   });
 
-  it("sends the share token and bound hosted execution user header for direct share payload reads", async () => {
-    const fetchMock = vi.fn(async () =>
-      new Response(JSON.stringify({
-        pack: {
-          createdAt: "2026-03-29T10:00:00.000Z",
-          entities: [
-            {
-              kind: "food",
-              payload: {
-                kind: "smoothie",
-                status: "active",
-                title: "Share Smoothie",
-              },
-              ref: "food:share-smoothie",
-            },
-          ],
-          schemaVersion: "murph.share-pack.v1",
-          title: "Share pack",
-        },
-        shareId: "share_123",
-      }), {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      }));
-    global.fetch = fetchMock;
-    const client = createHostedExecutionServerSharePackClient({
-      baseUrl: "https://share.example.test",
-      boundUserId: "member_123",
-      shareToken: "share-token",
-      timeoutMs: 10_000,
-    });
-
-    await expect(
-      client.fetchSharePack({
-        shareCode: "share-code",
-        shareId: "share_123",
-      }),
-    ).resolves.toEqual({
-      pack: {
-        createdAt: "2026-03-29T10:00:00.000Z",
-        entities: [
-          {
-            kind: "food",
-            payload: {
-              kind: "smoothie",
-              status: "active",
-              title: "Share Smoothie",
-            },
-            ref: "food:share-smoothie",
-          },
-        ],
-        schemaVersion: "murph.share-pack.v1",
-        title: "Share pack",
-      },
-      shareId: "share_123",
-    });
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://share.example.test/api/hosted-share/internal/share_123/payload",
-      expect.objectContaining({
-        body: JSON.stringify({
-          shareCode: "share-code",
-        }),
-        headers: expect.any(Headers),
-        method: "POST",
-      }),
-    );
-    const requestHeaders = fetchMock.mock.calls[0]?.[1]?.headers;
-    expect(requestHeaders).toBeInstanceOf(Headers);
-    expect((requestHeaders as Headers).get("authorization")).toBe("Bearer share-token");
-    expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
-  });
-
   it("keeps direct hosted web-control client resolution strict about authorization tokens", () => {
-    expect(
-      resolveHostedExecutionSharePackClient({
-        baseUrl: "https://share.example.test",
-        boundUserId: "member_123",
-      }),
-    ).toBeNull();
-
     expect(() =>
       resolveHostedExecutionAiUsageClient({
         baseUrl: "https://join.example.test",
@@ -1270,11 +1169,6 @@ describe("@murphai/hosted-execution", () => {
     expect(buildHostedExecutionUserStatusPath("member/123")).toBe("/internal/users/member%2F123/status");
     expect(buildHostedExecutionUserRunPath("member/123")).toBe("/internal/users/member%2F123/run");
     expect(buildHostedExecutionUserEnvPath("member/123")).toBe("/internal/users/member%2F123/env");
-    expect(
-      buildHostedExecutionSharePayloadPath("share/id"),
-    ).toBe(
-      "/api/hosted-share/internal/share%2Fid/payload",
-    );
     expect(
       buildHostedExecutionUserKeyEnvelopePath("member/123"),
     ).toBe(

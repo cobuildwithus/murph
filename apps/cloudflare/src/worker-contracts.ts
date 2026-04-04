@@ -1,3 +1,4 @@
+import type { HostedUserRootKeyEnvelope, HostedUserRootKeyRecipientKind } from "@murphai/runtime-state";
 import type {
   GatewayFetchAttachmentsInput,
   GatewayGetConversationInput,
@@ -38,6 +39,7 @@ export interface WorkerUserRunnerStubLike {
   bootstrapUser?(userId: string): Promise<{ userId: string }>;
   commit(input: WorkerUserRunnerCommitInput): Promise<HostedExecutionCommittedResult>;
   finalizeCommit(input: WorkerUserRunnerFinalizeInput): Promise<HostedExecutionCommittedResult>;
+  getUserKeyEnvelope?(): Promise<HostedUserRootKeyEnvelope>;
   gatewayFetchAttachments?(input: GatewayFetchAttachmentsInput): Promise<GatewayAttachment[]>;
   gatewayGetConversation?(input: GatewayGetConversationInput): Promise<GatewayConversation | null>;
   gatewayListConversations?(input?: GatewayListConversationsInput): Promise<GatewayListConversationsResult>;
@@ -45,6 +47,12 @@ export interface WorkerUserRunnerStubLike {
   gatewayPollEvents?(input?: GatewayPollEventsInput): Promise<GatewayPollEventsResult>;
   gatewayReadMessages?(input: GatewayReadMessagesInput): Promise<GatewayReadMessagesResult>;
   gatewayRespondToPermission?(input: GatewayRespondToPermissionInput): Promise<GatewayPermissionRequest | null>;
+  upsertUserKeyRecipient?(input: {
+    kind: HostedUserRootKeyRecipientKind;
+    metadata?: Record<string, string | number | boolean | null>;
+    recipientKey: Uint8Array;
+    recipientKeyId: string;
+  }): Promise<HostedUserRootKeyEnvelope>;
 }
 
 export interface WorkerUserRunnerNamespaceLike<
@@ -69,13 +77,12 @@ export interface WorkerEnvironmentContract<
   HOSTED_ASSISTANT_PROVIDER_NAME?: string;
   HOSTED_ASSISTANT_REASONING_EFFORT?: string;
   HOSTED_ASSISTANT_SANDBOX?: string;
+  HOSTED_AI_USAGE_BASE_URL?: string;
   HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY?: string;
   HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID?: string;
   HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON?: string;
   HOSTED_EXECUTION_INTERNAL_TOKEN?: string;
   HOSTED_EXECUTION_INTERNAL_TOKENS?: string;
-  HOSTED_DEVICE_SYNC_CONTROL_BASE_URL?: string;
-  HOSTED_AI_USAGE_BASE_URL?: string;
   HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS?: string;
   HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS?: string;
   HOSTED_EXECUTION_RETRY_DELAY_MS?: string;
@@ -91,8 +98,5 @@ export interface WorkerEnvironmentContract<
   HOSTED_EMAIL_LOCAL_PART?: string;
   HOSTED_EMAIL_SIGNING_SECRET?: string;
   HOSTED_WEB_BASE_URL?: string;
-  HOSTED_SHARE_API_BASE_URL?: string;
-  HOSTED_SHARE_INTERNAL_TOKEN?: string;
-  HOSTED_SHARE_INTERNAL_TOKENS?: string;
   USER_RUNNER: WorkerUserRunnerNamespaceLike<TStub>;
 }

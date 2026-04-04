@@ -37,7 +37,6 @@ import {
   acceptHostedShareLink,
   buildHostedSharePageData,
   createHostedShareLink,
-  readHostedSharePackByReference,
 } from "@/src/lib/hosted-share/service";
 import { finalizeHostedShareAcceptance } from "@/src/lib/hosted-share/shared";
 
@@ -228,50 +227,6 @@ describe("hosted share service", () => {
     expect(prisma.rows[0]?.consumedByMemberId).toBe("member_123");
   });
 
-  it("requires the bound hosted member to match the accepted or consumed share owner", async () => {
-    const prisma = createHostedSharePrisma();
-    const created = await createHostedShareLink({
-      prisma: prisma as never,
-      pack: buildPack(),
-      senderMemberId: "member_sender",
-    });
-
-    await expect(readHostedSharePackByReference({
-      boundMemberId: "member_123",
-      prisma: prisma as never,
-      shareCode: created.shareCode,
-      shareId: prisma.rows[0]!.id,
-    })).rejects.toMatchObject({
-      code: "HOSTED_SHARE_NOT_FOUND",
-    });
-
-    await acceptHostedShareLink({
-      member: {
-        billingStatus: HostedBillingStatus.active,
-        id: "member_123",
-      } as never,
-      prisma: prisma as never,
-      shareCode: created.shareCode,
-    });
-
-    await expect(readHostedSharePackByReference({
-      boundMemberId: "member_456",
-      prisma: prisma as never,
-      shareCode: created.shareCode,
-      shareId: prisma.rows[0]!.id,
-    })).rejects.toMatchObject({
-      code: "HOSTED_SHARE_NOT_FOUND",
-    });
-
-    await expect(readHostedSharePackByReference({
-      boundMemberId: "member_123",
-      prisma: prisma as never,
-      shareCode: created.shareCode,
-      shareId: prisma.rows[0]!.id,
-    })).resolves.toMatchObject({
-      shareId: prisma.rows[0]!.id,
-    });
-  });
 });
 
 type HostedShareRow = {

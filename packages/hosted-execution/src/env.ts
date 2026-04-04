@@ -1,3 +1,4 @@
+import { DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL, DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL } from "./callback-hosts.ts";
 export interface HostedExecutionDispatchEnvironment {
   dispatchTimeoutMs: number;
   dispatchUrl: string | null;
@@ -10,15 +11,8 @@ export interface HostedExecutionControlEnvironment {
 }
 
 export interface HostedExecutionWebControlPlaneEnvironment {
-  deviceSyncRuntimeBaseUrl: string | null;
-  internalToken: string | null;
-  internalTokens: string[];
-  schedulerToken: string | null;
-  schedulerTokens: string[];
-  shareBaseUrl: string | null;
-  shareToken: string | null;
-  shareTokens: string[];
-  usageBaseUrl?: string | null;
+  deviceSyncRuntimeBaseUrl: string;
+  usageBaseUrl: string;
 }
 
 export interface HostedExecutionWorkerEnvironment {
@@ -70,44 +64,12 @@ export function readHostedExecutionControlEnvironment(
 }
 
 export function readHostedExecutionWebControlPlaneEnvironment(
-  source: EnvSource = process.env,
-  options?: HostedExecutionBaseUrlNormalizationOptions,
+  _source: EnvSource = process.env,
+  _options?: HostedExecutionBaseUrlNormalizationOptions,
 ): HostedExecutionWebControlPlaneEnvironment {
-  const sharedBaseUrl =
-    normalizeHostedExecutionBaseUrl(source.HOSTED_WEB_BASE_URL, options)
-    ?? readHostedExecutionVercelProductionBaseUrl(source, options);
-  const internalTokens = readHostedExecutionTokenList(
-    source,
-    "HOSTED_EXECUTION_INTERNAL_TOKENS",
-    "HOSTED_EXECUTION_INTERNAL_TOKEN",
-  );
-  const schedulerTokens = readHostedExecutionTokenList(
-    source,
-    "HOSTED_EXECUTION_SCHEDULER_TOKENS",
-    "CRON_SECRET",
-  );
-  const shareTokens = readHostedExecutionTokenList(
-    source,
-    "HOSTED_SHARE_INTERNAL_TOKENS",
-    "HOSTED_SHARE_INTERNAL_TOKEN",
-  );
-
   return {
-    deviceSyncRuntimeBaseUrl: normalizeHostedExecutionBaseUrl(
-      source.HOSTED_DEVICE_SYNC_CONTROL_BASE_URL,
-      options,
-    ) ?? sharedBaseUrl,
-    internalToken: internalTokens[0] ?? null,
-    internalTokens,
-    schedulerToken: schedulerTokens[0] ?? null,
-    schedulerTokens,
-    shareBaseUrl: normalizeHostedExecutionBaseUrl(
-      source.HOSTED_SHARE_API_BASE_URL,
-      options,
-    ) ?? sharedBaseUrl,
-    shareToken: shareTokens[0] ?? null,
-    shareTokens,
-    usageBaseUrl: normalizeHostedExecutionBaseUrl(source.HOSTED_AI_USAGE_BASE_URL, options) ?? sharedBaseUrl,
+    deviceSyncRuntimeBaseUrl: DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
+    usageBaseUrl: DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
   };
 }
 
@@ -244,22 +206,4 @@ function parsePositiveInteger(value: string | null, fallback: number, label: str
 
 function isHostedExecutionLoopbackHost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
-}
-
-function readHostedExecutionTokenList(
-  source: EnvSource,
-  listKey: string,
-  fallbackKey: string,
-): string[] {
-  const explicit = normalizeHostedExecutionString(source[listKey]);
-
-  if (explicit) {
-    return explicit
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter(Boolean);
-  }
-
-  const fallback = normalizeHostedExecutionString(source[fallbackKey]);
-  return fallback ? [fallback] : [];
 }

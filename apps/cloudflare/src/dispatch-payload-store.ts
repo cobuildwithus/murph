@@ -14,6 +14,7 @@ import {
   buildHostedStorageAad,
   deriveHostedStorageOpaqueId,
 } from "./crypto-context.js";
+import { listHostedStorageObjectKeys } from "./storage-paths.js";
 import {
   readEncryptedR2Json,
   writeEncryptedR2Json,
@@ -206,32 +207,9 @@ async function hostedDispatchPayloadObjectKeys(
   keysById: Readonly<Record<string, Uint8Array>> | undefined,
   dispatchRef: HostedExecutionDispatchRef,
 ): Promise<string[]> {
-  return Promise.all(
-    listHostedStorageRootKeys(rootKey, keysById).map((candidateRootKey) =>
-      hostedDispatchPayloadObjectKey(candidateRootKey, dispatchRef)
-    ),
-  ).then((keys) => [...new Set(keys)]);
-}
-
-function listHostedStorageRootKeys(
-  rootKey: Uint8Array,
-  keysById: Readonly<Record<string, Uint8Array>> | undefined,
-): Uint8Array[] {
-  const seen = new Set<string>();
-  const unique: Uint8Array[] = [];
-
-  for (const key of [rootKey, ...Object.values(keysById ?? {})]) {
-    const signature = [...key].join(",");
-
-    if (seen.has(signature)) {
-      continue;
-    }
-
-    seen.add(signature);
-    unique.push(key);
-  }
-
-  return unique;
+  return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
+    hostedDispatchPayloadObjectKey(candidateRootKey, dispatchRef)
+  );
 }
 
 function assertHostedDispatchMatchesRef(

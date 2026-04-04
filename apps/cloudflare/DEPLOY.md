@@ -95,18 +95,15 @@ Optional tuning variables:
 Optional non-secret worker variables:
 
 - `DEVICE_SYNC_PUBLIC_BASE_URL`
+- `HOSTED_AI_USAGE_BASE_URL` when post-commit usage flushes should import into a dedicated hosted-web endpoint instead of falling back to `HOSTED_WEB_BASE_URL`
 - `HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID`
 - `HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL`
 - `HOSTED_EMAIL_DEFAULT_SUBJECT`
 - `HOSTED_EMAIL_DOMAIN`
 - `HOSTED_EMAIL_FROM_ADDRESS`
 - `HOSTED_EMAIL_LOCAL_PART`
-- `HOSTED_WEB_BASE_URL`
-- `HOSTED_DEVICE_SYNC_CONTROL_BASE_URL`
-- `HOSTED_AI_USAGE_BASE_URL`
-- `HOSTED_SHARE_API_BASE_URL`
+- `HOSTED_WEB_BASE_URL` as the shared hosted-web fallback for post-commit usage imports
 
-The hosted-web control-plane URLs above are consumed by the worker-side runner proxy layer. They must stay on the same host as `HOSTED_WEB_BASE_URL`. Only the subset allowlisted in `apps/cloudflare/src/runner-env.ts` is forwarded into the native container runtime.
 
 Optional non-secret provider/toolchain variables to expose through the worker and forward into the container:
 
@@ -147,8 +144,8 @@ Optional secret for staged bundle-key rotation:
 
 Additional hosted-web control-plane secrets:
 
-- `HOSTED_EXECUTION_INTERNAL_TOKENS`
-- `HOSTED_SHARE_INTERNAL_TOKENS`
+- `HOSTED_EXECUTION_INTERNAL_TOKENS` when the worker should import buffered hosted AI usage into `apps/web` after commit/finalize without exposing that bearer token to the runner container
+
 
 Optional hosted email bridge secrets:
 
@@ -161,8 +158,6 @@ Both control tokens are treated as required runtime inputs now, not just deploy-
 
 - missing `HOSTED_EXECUTION_CONTROL_TOKENS` makes `/internal/users/:userId/{status,run,env}` fail closed
 - missing `HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS` makes native container invoke requests fail closed before the runner job starts
-- missing `HOSTED_EXECUTION_INTERNAL_TOKENS` makes runner proxy calls to hosted web internal device-sync and usage routes fail closed
-- missing `HOSTED_SHARE_INTERNAL_TOKENS` makes hosted share payload fetches fail closed
 - changing `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY` or `CF_BUNDLE_KEY_ID` in place still requires staging older keys in `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON`; missing keyring entries fail closed on `keyId` mismatch
 
 ### Optional provider/runtime secrets
@@ -218,15 +213,12 @@ export HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER=1m
 export HOSTED_EXECUTION_SIGNING_SECRET=...
 export HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY=...
 export HOSTED_EXECUTION_CONTROL_TOKENS=current-operator-token,previous-operator-token
-export HOSTED_EXECUTION_INTERNAL_TOKENS=current-web-internal-token,previous-web-internal-token
 export HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS=current-runner-token,previous-runner-token
 export HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID=...
 export HOSTED_EMAIL_CLOUDFLARE_API_TOKEN=...
 export HOSTED_EMAIL_DOMAIN=mail.example.test
 export HOSTED_EMAIL_LOCAL_PART=assistant
 export HOSTED_EMAIL_SIGNING_SECRET=...
-export HOSTED_WEB_BASE_URL=https://your-hosted-web.example.com
-export HOSTED_SHARE_INTERNAL_TOKENS=current-share-token,previous-share-token
 export CF_RUNNER_TIMEOUT_MS=120000
 export CF_LOG_HEAD_SAMPLING_RATE=1
 export CF_TRACE_HEAD_SAMPLING_RATE=0.1

@@ -20,7 +20,6 @@ import {
   writeEncryptedR2Json,
 } from "./crypto.js";
 
-const DEFAULT_HOSTED_USER_ROOT_KEY_ID = "urk:v1";
 const DEFAULT_AUTOMATION_RECIPIENT_KEY_ID = "automation:v1";
 const HOSTED_USER_RECIPIENT_KEY_BYTES = 32;
 
@@ -145,7 +144,7 @@ async function ensureHostedUserRootKeyEnvelope(input: {
   envelopeKeysById: Readonly<Record<string, Uint8Array>>;
   userId: string;
 }): Promise<HostedUserRootKeyEnvelope> {
-  const currentKey = await hostedUserRootKeyEnvelopeObjectKey(input.automationKey, input.userId);
+  const currentKey = hostedUserRootKeyEnvelopeObjectKey(input.userId);
   const existing = await readStoredHostedUserRootKeyEnvelope({
     automationKey: input.automationKey,
     bucket: input.bucket,
@@ -205,7 +204,7 @@ async function ensureHostedUserRootKeyEnvelope(input: {
         rootKey,
       }),
     ],
-    rootKeyId: DEFAULT_HOSTED_USER_ROOT_KEY_ID,
+    rootKeyId: createHostedUserRootKeyId(),
     schema: HOSTED_USER_ROOT_KEY_ENVELOPE_SCHEMA,
     updatedAt: createdAt,
     userId: input.userId,
@@ -316,7 +315,7 @@ async function writeHostedUserRootKeyEnvelope(input: {
   envelope: HostedUserRootKeyEnvelope;
   envelopeKeyId: string;
 }): Promise<void> {
-  const key = await hostedUserRootKeyEnvelopeObjectKey(input.automationKey, input.envelope.userId);
+  const key = hostedUserRootKeyEnvelopeObjectKey(input.envelope.userId);
 
   await writeEncryptedR2Json({
     aad: buildHostedStorageAad({
@@ -357,7 +356,7 @@ async function deleteLegacyHostedUserRootKeyEnvelopeCopies(input: {
   }
 }
 
-async function hostedUserRootKeyEnvelopeObjectKey(
+async function hostedUserRootKeyEnvelopeLegacyObjectKey(
   automationKey: Uint8Array,
   userId: string,
 ): Promise<string> {
@@ -371,16 +370,23 @@ async function hostedUserRootKeyEnvelopeObjectKey(
   return `users/keys/${userSegment}.json`;
 }
 
+function hostedUserRootKeyEnvelopeObjectKey(userId: string): string {
+  return `users/keys/${encodeURIComponent(userId)}.json`;
+}
+
 async function hostedUserRootKeyEnvelopeObjectKeys(
   automationKey: Uint8Array,
   envelopeKeysById: Readonly<Record<string, Uint8Array>>,
   userId: string,
 ): Promise<string[]> {
-  return Promise.all(
-    listHostedUserEnvelopeRootKeys(automationKey, envelopeKeysById).map((candidateRootKey) =>
-      hostedUserRootKeyEnvelopeObjectKey(candidateRootKey, userId)
+  const keys = await Promise.all([
+    Promise.resolve(hostedUserRootKeyEnvelopeObjectKey(userId)),
+    ...listHostedUserEnvelopeRootKeys(automationKey, envelopeKeysById).map((candidateRootKey) =>
+      hostedUserRootKeyEnvelopeLegacyObjectKey(candidateRootKey, userId)
     ),
-  ).then((keys) => [...new Set(keys)]);
+  ]);
+
+  return [...new Set(keys)];
 }
 
 async function wrapHostedUserRootKey(input: {
@@ -457,6 +463,13 @@ export function decodeHostedUserRecipientKey(input: HostedWrappedRootKeyRecipien
   );
 }
 
+export function decodeHostedUserRecipientKeyBase64(
+  value: string,
+  label = "recipient key",
+): Uint8Array {
+  return requireHostedUserRecipientKeyBytes(decodeBase64(value), label);
+}
+
 function resolveHostedUserRecipientKeyBytes(input: {
   currentKey: Uint8Array;
   currentKeyId: string;
@@ -502,4 +515,8 @@ function requireHostedUserRecipientKeyBytes(value: Uint8Array, label: string): U
   }
 
   return value;
+}
+
+function createHostedUserRootKeyId(): string {
+  return `urk:${crypto.randomUUID()}`;
 }

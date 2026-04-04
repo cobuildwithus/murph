@@ -11,6 +11,7 @@ import {
   buildHostedStorageAad,
   deriveHostedStorageOpaqueId,
 } from "./crypto-context.js";
+import { listHostedStorageObjectKeys } from "./storage-paths.js";
 import {
   readEncryptedR2Payload,
   writeEncryptedR2Payload,
@@ -349,11 +350,9 @@ async function artifactObjectKeys(
   userId: string,
   sha256: string,
 ): Promise<string[]> {
-  return Promise.all(
-    listHostedStorageRootKeys(rootKey, keysById).map((candidateRootKey) =>
-      artifactObjectKey(candidateRootKey, userId, sha256)
-    ),
-  ).then((keys) => uniqueStrings(keys));
+  return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
+    artifactObjectKey(candidateRootKey, userId, sha256)
+  );
 }
 
 function inferBundleKindFromKey(key: string): HostedExecutionBundleKind {
@@ -402,40 +401,9 @@ async function userEnvObjectKeys(
   keysById: Readonly<Record<string, Uint8Array>> | undefined,
   userId: string,
 ): Promise<string[]> {
-  return Promise.all(
-    listHostedStorageRootKeys(rootKey, keysById).map((candidateRootKey) =>
-      userEnvObjectKey(candidateRootKey, userId)
-    ),
-  ).then((keys) => uniqueStrings(keys));
-}
-
-function listHostedStorageRootKeys(
-  rootKey: Uint8Array,
-  keysById: Readonly<Record<string, Uint8Array>> | undefined,
-): Uint8Array[] {
-  return uniqueRootKeys([rootKey, ...Object.values(keysById ?? {})]);
-}
-
-function uniqueRootKeys(keys: Uint8Array[]): Uint8Array[] {
-  const seen = new Set<string>();
-  const unique: Uint8Array[] = [];
-
-  for (const key of keys) {
-    const signature = [...key].join(",");
-
-    if (seen.has(signature)) {
-      continue;
-    }
-
-    seen.add(signature);
-    unique.push(key);
-  }
-
-  return unique;
-}
-
-function uniqueStrings(values: string[]): string[] {
-  return [...new Set(values)];
+  return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
+    userEnvObjectKey(candidateRootKey, userId)
+  );
 }
 
 async function assertHostedArtifactHash(plaintext: Uint8Array, expectedSha256: string): Promise<void> {

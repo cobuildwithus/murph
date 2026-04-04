@@ -24,7 +24,9 @@ import type {
 } from "@murphai/gateway-core";
 import {
   emitHostedExecutionStructuredLog,
-  readHostedExecutionWebControlPlaneEnvironment,
+  normalizeHostedExecutionBaseUrl,
+  normalizeHostedExecutionString,
+  readHostedExecutionVercelProductionBaseUrl,
   resolveHostedExecutionAiUsageClient,
   resolveHostedExecutionDispatchOutcomeState,
 } from "@murphai/hosted-execution";
@@ -225,6 +227,26 @@ export class HostedUserRunner {
     await this.queueStore.bootstrapUser(userId);
     await this.ensureRunnerStores(userId);
     return { userId };
+  }
+
+  async getUserKeyEnvelope(): Promise<HostedUserCryptoContext["envelope"]> {
+    return (await this.ensureRunnerStores()).crypto.envelope;
+  }
+
+  async upsertUserKeyRecipient(input: {
+    kind: import("@murphai/runtime-state").HostedUserRootKeyRecipientKind;
+    metadata?: Record<string, string | number | boolean | null>;
+    recipientKey: Uint8Array;
+    recipientKeyId: string;
+  }): Promise<HostedUserCryptoContext["envelope"]> {
+    const userId = await this.requireBoundUserId();
+    const envelope = await this.userKeyStore.upsertRecipient({
+      ...input,
+      userId,
+    });
+    this.runnerStores = null;
+    await this.ensureRunnerStores(userId);
+    return envelope;
   }
 
   async dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {
@@ -717,16 +739,13 @@ export class HostedUserRunner {
         keyId: crypto.rootKeyId,
         keysById: crypto.keysById,
       });
-      const webControlPlane = readHostedExecutionWebControlPlaneEnvironment(
-        this.runnerRuntimeEnvSource as Readonly<Record<string, string | undefined>>,
-        {
-          allowHttpLocalhost: true,
-        },
+      const usageImportControlPlane = resolveHostedExecutionUsageImportControlPlane(
+        this.runnerRuntimeEnvSource,
       );
       const client = resolveHostedExecutionAiUsageClient({
-        baseUrl: webControlPlane.usageBaseUrl ?? null,
+        baseUrl: usageImportControlPlane.baseUrl,
         boundUserId: userId,
-        internalToken: webControlPlane.internalToken,
+        internalToken: usageImportControlPlane.internalToken,
         timeoutMs: this.env.runnerTimeoutMs,
       });
 
@@ -941,4 +960,51 @@ export class HostedUserRunner {
       }
     }
   }
+}
+
+function resolveHostedExecutionUsageImportControlPlane(
+  source: Readonly<Record<string, unknown>>,
+): {
+  baseUrl: string | null;
+  internalToken: string | null;
+} {
+  const stringSource = toStringEnvSource(source);
+
+  return {
+    baseUrl:
+      normalizeHostedExecutionBaseUrl(stringSource.HOSTED_AI_USAGE_BASE_URL, {
+        allowHttpLocalhost: true,
+      })
+      ?? normalizeHostedExecutionBaseUrl(stringSource.HOSTED_WEB_BASE_URL, {
+        allowHttpLocalhost: true,
+      })
+      ?? readHostedExecutionVercelProductionBaseUrl(stringSource, {
+        allowHttpLocalhost: true,
+      }),
+    internalToken: readHostedExecutionInternalTokens(stringSource)[0] ?? null,
+  };
+}
+
+function readHostedExecutionInternalTokens(
+  source: Readonly<Record<string, string | undefined>>,
+): string[] {
+  const configured = normalizeHostedExecutionString(source.HOSTED_EXECUTION_INTERNAL_TOKENS);
+
+  if (configured) {
+    return configured
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  }
+
+  const fallback = normalizeHostedExecutionString(source.HOSTED_EXECUTION_INTERNAL_TOKEN);
+  return fallback ? [fallback] : [];
+}
+
+function toStringEnvSource(
+  source: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, string | undefined>> {
+  return Object.fromEntries(
+    Object.entries(source).map(([key, value]) => [key, typeof value === "string" ? value : undefined]),
+  );
 }

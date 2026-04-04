@@ -52,7 +52,6 @@ const RUNNER_INTERNAL_PROXY_HOSTNAMES = new Set<string>([
   HOSTED_EXECUTION_CALLBACK_HOSTS.commit,
   HOSTED_EXECUTION_PROXY_HOSTS.deviceSync,
   HOSTED_EXECUTION_CALLBACK_HOSTS.email,
-  HOSTED_EXECUTION_PROXY_HOSTS.sharePack,
   HOSTED_EXECUTION_CALLBACK_HOSTS.sideEffects,
   HOSTED_EXECUTION_PROXY_HOSTS.usage,
 ]);
@@ -121,12 +120,6 @@ export async function handleRunnerOutboundRequest(
     });
   }
 
-  if (url.hostname === HOSTED_EXECUTION_PROXY_HOSTS.sharePack) {
-    return handleRunnerSharePackRequest({
-      request,
-      url,
-    });
-  }
 
   if (url.hostname === HOSTED_EXECUTION_PROXY_HOSTS.usage) {
     return handleRunnerUsageRecordRequest({
@@ -479,22 +472,6 @@ async function handleRunnerDeviceSyncControlRequest(input: {
   );
 }
 
-async function handleRunnerSharePackRequest(input: {
-  request: Request;
-  url: URL;
-}): Promise<Response> {
-  if (input.request.method !== "POST") {
-    return methodNotAllowed();
-  }
-
-  if (/^\/api\/hosted-share\/internal\/(?<shareId>[^/]+)\/payload$/u.test(input.url.pathname)) {
-    return json({
-      error: "Hosted share payload fetches are no longer available in the runtime hot path. Dispatches must include an encrypted share pack reference payload.",
-    }, 410);
-  }
-
-  return notFound();
-}
 
 async function handleRunnerUsageRecordRequest(input: {
   bucket: RunnerOutboundEnvironmentSource["BUNDLES"];

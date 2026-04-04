@@ -70,7 +70,6 @@ type RunnerOutboundHandlerName =
   | "deviceSyncWorker"
   | "emailWorker"
   | "sideEffectsWorker"
-  | "sharePackWorker"
   | "usageWorker";
 
 const RUNNER_OUTBOUND_HOSTS = {
@@ -78,7 +77,6 @@ const RUNNER_OUTBOUND_HOSTS = {
   [HOSTED_EXECUTION_CALLBACK_HOSTS.commit]: "commitWorker",
   [HOSTED_EXECUTION_PROXY_HOSTS.deviceSync]: "deviceSyncWorker",
   [HOSTED_EXECUTION_CALLBACK_HOSTS.email]: "emailWorker",
-  [HOSTED_EXECUTION_PROXY_HOSTS.sharePack]: "sharePackWorker",
   [HOSTED_EXECUTION_CALLBACK_HOSTS.sideEffects]: "sideEffectsWorker",
   [HOSTED_EXECUTION_PROXY_HOSTS.usage]: "usageWorker",
 } as const satisfies Record<string, RunnerOutboundHandlerName>;
@@ -90,7 +88,6 @@ export class RunnerContainer extends Container {
     deviceSyncWorker: createRunnerOutboundHandler(),
     emailWorker: createRunnerOutboundHandler(),
     sideEffectsWorker: createRunnerOutboundHandler(),
-    sharePackWorker: createRunnerOutboundHandler(),
     usageWorker: createRunnerOutboundHandler(),
   };
 

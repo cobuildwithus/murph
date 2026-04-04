@@ -45,9 +45,9 @@ describe("hosted user key store", () => {
       migrated.envelope.recipients.find((recipient) => recipient.kind === "automation")?.keyId,
     ).toBe("automation:v2");
     expect(migratedEnvelopeObjectKey).toBeTruthy();
-    expect(migratedEnvelopeObjectKey).not.toBe(oldEnvelopeObjectKey);
+    expect(migratedEnvelopeObjectKey).toBe(oldEnvelopeObjectKey);
     expect(bucket.objects.size).toBe(1);
-    expect(bucket.deleted).toContain(oldEnvelopeObjectKey);
+    expect(bucket.deleted).not.toContain(oldEnvelopeObjectKey);
   });
 
   it("rejects wrapped recipient keys that are not 32 bytes", async () => {

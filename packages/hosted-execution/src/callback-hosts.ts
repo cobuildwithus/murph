@@ -7,7 +7,6 @@ export const HOSTED_EXECUTION_CALLBACK_HOSTS = {
 
 export const HOSTED_EXECUTION_PROXY_HOSTS = {
   deviceSync: "device-sync.worker",
-  sharePack: "share-pack.worker",
   usage: "usage.worker",
 } as const;
 
@@ -21,7 +20,5 @@ export const DEFAULT_HOSTED_EXECUTION_EMAIL_BASE_URL =
   `http://${HOSTED_EXECUTION_CALLBACK_HOSTS.email}`;
 export const DEFAULT_HOSTED_EXECUTION_SIDE_EFFECTS_BASE_URL =
   `http://${HOSTED_EXECUTION_CALLBACK_HOSTS.sideEffects}`;
-export const DEFAULT_HOSTED_EXECUTION_SHARE_PACK_PROXY_BASE_URL =
-  `http://${HOSTED_EXECUTION_PROXY_HOSTS.sharePack}`;
 export const DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL =
   `http://${HOSTED_EXECUTION_PROXY_HOSTS.usage}`;

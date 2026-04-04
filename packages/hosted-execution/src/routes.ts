@@ -18,9 +18,6 @@ export function buildHostedExecutionUserEnvPath(userId: string): string {
   return `/internal/users/${encodeURIComponent(userId)}/env`;
 }
 
-export function buildHostedExecutionSharePayloadPath(shareId: string): string {
-  return `/api/hosted-share/internal/${encodeURIComponent(shareId)}/payload`;
-}
 
 
 export function buildHostedExecutionUserKeyEnvelopePath(userId: string): string {

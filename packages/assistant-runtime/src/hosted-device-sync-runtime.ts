@@ -182,7 +182,6 @@ function resolveHostedDeviceSyncRuntimeClientForUser(input: {
     baseUrl: input.webControlPlane.deviceSyncRuntimeBaseUrl,
     boundUserId: input.boundUserId,
     fetchImpl: input.fetchImpl,
-    internalToken: input.webControlPlane.internalToken,
     timeoutMs: input.timeoutMs,
   });
 }

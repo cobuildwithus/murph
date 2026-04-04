@@ -26,6 +26,7 @@ import {
   persistHostedExecutionCommit,
   persistHostedExecutionFinalBundles,
 } from "../src/execution-journal.js";
+import { createHostedPendingUsageStore } from "../src/usage-store.js";
 import { createHostedUserKeyStore } from "../src/user-key-store.js";
 import { HostedUserRunner } from "../src/user-runner.js";
 import { createTestSqlStorage } from "./sql-storage.js";
@@ -822,6 +823,98 @@ describe("HostedUserRunner", () => {
     const updatedEvents = await runner.gatewayPollEvents({ cursor: 0, limit: 10 });
     expect(updatedEvents.events.map((event) => event.kind)).toContain("message.created");
     expect(updatedEvents.events.map((event) => event.kind)).toContain("conversation.updated");
+  });
+
+  it("flushes pending hosted AI usage into hosted web when worker-side cleanup runs", async () => {
+    const runner = new HostedUserRunner(
+      storage.state,
+      environment,
+      bucket.api,
+      {
+        HOSTED_AI_USAGE_BASE_URL: "https://web.example.test",
+        HOSTED_EXECUTION_INTERNAL_TOKENS: "internal-token",
+      },
+    );
+    await runner.bootstrapUser("member_123");
+
+    const crypto = await createHostedUserKeyStore({
+      automationKey: environment.bundleEncryptionKey,
+      automationKeyId: environment.bundleEncryptionKeyId,
+      bucket: bucket.api,
+      envelopeKeyId: environment.bundleEncryptionKeyId,
+      envelopeKeysById: environment.bundleEncryptionKeysById,
+    }).ensureUserCryptoContext("member_123");
+    const usageStore = createHostedPendingUsageStore({
+      bucket: bucket.api,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
+    });
+    await usageStore.appendUsage({
+      usage: [{
+        apiKeyEnv: null,
+        attemptCount: 1,
+        baseUrl: null,
+        cacheWriteTokens: null,
+        cachedInputTokens: null,
+        credentialSource: "platform",
+        inputTokens: 10,
+        memberId: "member_123",
+        occurredAt: "2026-03-29T10:05:00.000Z",
+        outputTokens: 4,
+        provider: "codex-cli",
+        providerMetadataJson: null,
+        providerName: null,
+        providerRequestId: null,
+        providerSessionId: "sess_usage_flush",
+        rawUsageJson: null,
+        reasoningTokens: null,
+        requestedModel: "gpt-5.4",
+        routeId: "primary",
+        schema: "murph.assistant-usage.v1",
+        servedModel: "gpt-5.4",
+        sessionId: "asst_usage_flush",
+        totalTokens: 14,
+        turnId: "turn_usage_flush",
+        usageId: "turn_usage_flush.attempt-1",
+      }],
+      userId: "member_123",
+    });
+
+    const previousFetch = globalThis.fetch;
+    const fetchSpy = vi.fn(async () =>
+      new Response(JSON.stringify({
+        recorded: 1,
+        usageIds: ["turn_usage_flush.attempt-1"],
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    try {
+      await (runner as unknown as {
+        flushPendingUsageBestEffort(userId: string): Promise<void>;
+      }).flushPendingUsageBestEffort("member_123");
+    } finally {
+      vi.stubGlobal("fetch", previousFetch);
+    }
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://web.example.test/api/internal/hosted-execution/usage/record",
+      expect.objectContaining({
+        method: "POST",
+      }),
+    );
+    expect(new Headers(fetchSpy.mock.calls[0]?.[1]?.headers).get("authorization")).toBe("Bearer internal-token");
+    expect(new Headers(fetchSpy.mock.calls[0]?.[1]?.headers).get("x-hosted-execution-user-id")).toBe("member_123");
+    expect(String(fetchSpy.mock.calls[0]?.[1]?.body)).toContain("\"usageId\":\"turn_usage_flush.attempt-1\"");
+    await expect(usageStore.readUsage({
+      limit: 50,
+      userId: "member_123",
+    })).resolves.toEqual([]);
   });
 
   it("reapplies committed gateway snapshots from the durable journal before finalize completes", async () => {
@@ -2711,7 +2804,7 @@ describe("HostedUserRunner", () => {
     });
     expect(bucket.keys()).toEqual(expect.arrayContaining([
       await userEnvObjectKeyForTest(crypto.rootKey, "member_123"),
-      expect.stringMatching(/^users\/keys\/[0-9a-f]+\.json$/u),
+      "users/keys/member_123.json",
     ]));
     await expect(runner.getUserEnvStatus("member_123")).resolves.toEqual({
       configuredUserEnvKeys: ["OPENAI_API_KEY", "XAI_API_KEY"],

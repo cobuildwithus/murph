@@ -3,8 +3,6 @@ import type {
   HostedExecutionDeviceSyncRuntimeApplyResponse,
   HostedExecutionDeviceSyncRuntimeSnapshotRequest,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
-  HostedExecutionSharePackResponse,
-  HostedExecutionShareReference,
 } from "./contracts.ts";
 import { HOSTED_EXECUTION_USER_ID_HEADER } from "./contracts.ts";
 import { HOSTED_EXECUTION_PROXY_HOSTS } from "./callback-hosts.ts";
@@ -12,10 +10,8 @@ import { normalizeHostedExecutionBaseUrl } from "./env.ts";
 import {
   parseHostedExecutionDeviceSyncRuntimeApplyResponse,
   parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
-  parseHostedExecutionSharePackResponse,
 } from "./parsers.ts";
 import {
-  buildHostedExecutionSharePayloadPath,
   HOSTED_EXECUTION_AI_USAGE_RECORD_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
@@ -61,12 +57,6 @@ export interface HostedExecutionProxyDeviceSyncRuntimeClient {
 export interface HostedExecutionServerDeviceSyncRuntimeClient
   extends HostedExecutionProxyDeviceSyncRuntimeClient {}
 
-export interface HostedExecutionProxySharePackClient {
-  fetchSharePack(share: HostedExecutionShareReference): Promise<HostedExecutionSharePackResponse>;
-}
-
-export interface HostedExecutionServerSharePackClient
-  extends HostedExecutionProxySharePackClient {}
 
 export interface HostedExecutionProxyAiUsageClient {
   recordUsage(
@@ -148,64 +138,8 @@ export function resolveHostedExecutionDeviceSyncRuntimeClient(input: {
   return buildHostedExecutionDeviceSyncRuntimeClient(requester, input.boundUserId);
 }
 
-export function createHostedExecutionProxySharePackClient(input: {
-  baseUrl: string;
-  boundUserId: string;
-  fetchImpl?: typeof fetch;
-  timeoutMs?: number | null;
-}): HostedExecutionProxySharePackClient {
-  return buildHostedExecutionSharePackClient(
-    createHostedExecutionProxyRequester({
-      baseUrl: input.baseUrl,
-      boundUserId: input.boundUserId,
-      fetchImpl: input.fetchImpl,
-      proxyHost: HOSTED_EXECUTION_PROXY_HOSTS.sharePack,
-      timeoutMs: input.timeoutMs ?? null,
-    }),
-  );
-}
 
-export function createHostedExecutionServerSharePackClient(input: {
-  baseUrl: string;
-  boundUserId: string;
-  fetchImpl?: typeof fetch;
-  shareToken: string;
-  timeoutMs?: number | null;
-}): HostedExecutionServerSharePackClient {
-  return buildHostedExecutionSharePackClient(
-    createHostedExecutionServerRequester({
-      authorizationToken: input.shareToken,
-      baseUrl: input.baseUrl,
-      boundUserId: input.boundUserId,
-      fetchImpl: input.fetchImpl,
-      timeoutMs: input.timeoutMs ?? null,
-    }),
-  );
-}
 
-export function resolveHostedExecutionSharePackClient(input: {
-  baseUrl: string | null | undefined;
-  boundUserId: string;
-  fetchImpl?: typeof fetch;
-  shareToken?: string | null;
-  timeoutMs?: number | null;
-}): HostedExecutionProxySharePackClient | HostedExecutionServerSharePackClient | null {
-  const requester = resolveHostedExecutionUserBoundRequester({
-    authorizationToken: input.shareToken,
-    baseUrl: input.baseUrl,
-    boundUserId: input.boundUserId,
-    fetchImpl: input.fetchImpl,
-    isProxyBaseUrl: isHostedExecutionSharePackProxyBaseUrl,
-    proxyHost: HOSTED_EXECUTION_PROXY_HOSTS.sharePack,
-    timeoutMs: input.timeoutMs,
-  });
-
-  if (!requester) {
-    return null;
-  }
-
-  return buildHostedExecutionSharePackClient(requester);
-}
 
 export function createHostedExecutionProxyAiUsageClient(input: {
   baseUrl: string;
@@ -270,9 +204,6 @@ export function isHostedExecutionDeviceSyncProxyBaseUrl(baseUrl: string): boolea
   return isHostedWorkerProxyBaseUrl(baseUrl, HOSTED_EXECUTION_PROXY_HOSTS.deviceSync);
 }
 
-export function isHostedExecutionSharePackProxyBaseUrl(baseUrl: string): boolean {
-  return isHostedWorkerProxyBaseUrl(baseUrl, HOSTED_EXECUTION_PROXY_HOSTS.sharePack);
-}
 
 export function isHostedExecutionAiUsageProxyBaseUrl(baseUrl: string): boolean {
   return isHostedWorkerProxyBaseUrl(baseUrl, HOSTED_EXECUTION_PROXY_HOSTS.usage);
@@ -312,23 +243,6 @@ function buildHostedExecutionDeviceSyncRuntimeClient(
   };
 }
 
-function buildHostedExecutionSharePackClient(
-  requester: HostedExecutionUserBoundWebControlPlaneRequester,
-): HostedExecutionProxySharePackClient {
-  return {
-    fetchSharePack(share) {
-      return requester.requestJson({
-        body: {
-          shareCode: share.shareCode,
-        },
-        label: "Hosted share payload fetch",
-        method: "POST",
-        parse: parseHostedExecutionSharePackResponse,
-        path: buildHostedExecutionSharePayloadPath(share.shareId),
-      });
-    },
-  };
-}
 
 function buildHostedExecutionAiUsageClient(
   requester: HostedExecutionUserBoundWebControlPlaneRequester,

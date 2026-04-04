@@ -47,7 +47,6 @@ import {
 } from "@murphai/gateway-core";
 
 import { readHostedExecutionSignatureHeaders, verifyHostedExecutionSignature } from "./auth.ts";
-import { decodeBase64 } from "./base64.ts";
 import { createHostedUserEnvStore } from "./bundle-store.ts";
 import { readHostedExecutionEnvironment } from "./env.ts";
 import type {
@@ -57,8 +56,6 @@ import {
   json,
   methodNotAllowed,
   notFound,
-  readJsonObject,
-  readOptionalJsonObject,
   requireJsonObject,
   unauthorized,
 } from "./json.ts";
@@ -84,7 +81,7 @@ import {
   parseHostedUserEnvUpdate,
   type HostedUserEnvUpdate,
 } from "./user-env.ts";
-import { createHostedUserKeyStore } from "./user-key-store.ts";
+import { decodeHostedUserRecipientKeyBase64 } from "./user-key-store.ts";
 import {
   HostedUserRunner,
   type DurableObjectStateLike,
@@ -278,6 +275,19 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
 
   async bootstrapUser(userId: string): Promise<{ userId: string }> {
     return this.runner.bootstrapUser(userId);
+  }
+
+  async getUserKeyEnvelope(): Promise<import("@murphai/runtime-state").HostedUserRootKeyEnvelope> {
+    return this.runner.getUserKeyEnvelope();
+  }
+
+  async upsertUserKeyRecipient(input: {
+    kind: import("@murphai/runtime-state").HostedUserRootKeyRecipientKind;
+    metadata?: Record<string, string | number | boolean | null>;
+    recipientKey: Uint8Array;
+    recipientKeyId: string;
+  }): Promise<import("@murphai/runtime-state").HostedUserRootKeyEnvelope> {
+    return this.runner.upsertUserKeyRecipient(input);
   }
 
   async dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {
@@ -499,22 +509,13 @@ async function handleUserEmailAddressRoute(
   });
 }
 
-function createHostedControlUserKeyStore(context: WorkerRouteContext) {
-  return createHostedUserKeyStore({
-    automationKey: context.environment.bundleEncryptionKey,
-    automationKeyId: context.environment.bundleEncryptionKeyId,
-    bucket: context.env.BUNDLES,
-    envelopeKeyId: context.environment.bundleEncryptionKeyId,
-    envelopeKeysById: context.environment.bundleEncryptionKeysById,
-  });
-}
-
 async function handleUserKeyEnvelopeRoute(
   context: WorkerRouteContext,
   encodedUserId: string,
 ): Promise<Response> {
   const userId = decodeRouteParam(encodedUserId);
-  return json(await createHostedControlUserKeyStore(context).readUserRootKeyEnvelope(userId));
+  const stub = await resolveUserRunnerStub(context.env, userId);
+  return json(await requireGatewayStubMethod(stub, "getUserKeyEnvelope")());
 }
 
 async function handleUserKeyRecipientRoute(
@@ -525,12 +526,15 @@ async function handleUserKeyRecipientRoute(
   const userId = decodeRouteParam(encodedUserId);
   const kind = parseHostedUserRootKeyRecipientKind(decodeRouteParam(encodedKind));
   const payload = parseHostedUserKeyRecipientUpsertRequest(await readCachedJsonObject(context));
-  const envelope = await createHostedControlUserKeyStore(context).upsertRecipient({
+  const stub = await resolveUserRunnerStub(context.env, userId);
+  const envelope = await requireGatewayStubMethod(stub, "upsertUserKeyRecipient")({
     kind,
-    metadata: payload.metadata,
-    recipientKey: decodeBase64(payload.recipientKeyBase64),
+    ...(payload.metadata ? { metadata: payload.metadata } : {}),
+    recipientKey: decodeHostedUserRecipientKeyBase64(
+      payload.recipientKeyBase64,
+      `${kind} recipient key`,
+    ),
     recipientKeyId: payload.recipientKeyId,
-    userId,
   });
 
   return json(envelope);
