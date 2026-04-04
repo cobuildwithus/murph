@@ -3,8 +3,7 @@
  * focused on queue transitions rather than Durable Object DDL details.
  */
 
-import { type DurableObjectSqlStorageLike } from "./types.js";
-import { type DurableObjectSqlValue } from "./types.js";
+import { type DurableObjectSqlStorageLike, type DurableObjectSqlValue } from "./types.js";
 
 export function ensureRunnerQueueSchema(sql: DurableObjectSqlStorageLike): void {
   sql.exec(`
@@ -67,10 +66,14 @@ export function ensureRunnerQueueSchema(sql: DurableObjectSqlStorageLike): void 
     CREATE INDEX IF NOT EXISTS poisoned_events_poisoned_at_idx
     ON poisoned_events (poisoned_at, event_id)
   `);
-  ensureRunnerMetaColumn(sql, "last_error_at", "TEXT");
-  ensureRunnerMetaColumn(sql, "last_error_code", "TEXT");
-  ensureRunnerMetaColumn(sql, "run_json", "TEXT");
-  ensureRunnerMetaColumn(sql, "timeline_json", "TEXT NOT NULL DEFAULT '[]'");
+  for (const [columnName, columnDefinition] of [
+    ["last_error_at", "TEXT"],
+    ["last_error_code", "TEXT"],
+    ["run_json", "TEXT"],
+    ["timeline_json", "TEXT NOT NULL DEFAULT '[]'"],
+  ] as const) {
+    ensureRunnerMetaColumn(sql, columnName, columnDefinition);
+  }
   sql.exec("DROP TABLE IF EXISTS consumed_event_replay_filter");
 }
 

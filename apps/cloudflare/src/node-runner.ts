@@ -1,5 +1,4 @@
 import {
-  readHostedRunnerCommitTimeoutMs,
   runHostedAssistantRuntimeJobInProcess,
   runHostedAssistantRuntimeJobIsolated,
   type HostedAssistantRuntimeConfig,
@@ -12,7 +11,7 @@ import {
 
 import {
   buildHostedRunnerContainerEnv,
-  filterHostedRunnerUserEnv,
+  buildHostedRunnerJobRuntimeConfig,
 } from "./runner-env.ts";
 import { normalizeHostedUserEnv } from "./user-env.ts";
 
@@ -66,14 +65,10 @@ function buildHostedExecutionJobRuntime(
   };
 
   return {
-    commitTimeoutMs: readHostedRunnerCommitTimeoutMs(
-      Number.parseInt(
-        resolvedForwardedEnv.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS ?? "",
-        10,
-      ),
-    ),
-    forwardedEnv: resolvedForwardedEnv,
+    ...buildHostedRunnerJobRuntimeConfig({
+      forwardedEnv: resolvedForwardedEnv,
+      userEnv: normalizeHostedUserEnv(requestedRuntime.userEnv ?? {}, resolvedForwardedEnv),
+    }),
     internalWorkerProxyToken: requestedRuntime.internalWorkerProxyToken ?? null,
-    userEnv: filterHostedRunnerUserEnv(normalizeHostedUserEnv(requestedRuntime.userEnv ?? {}, resolvedForwardedEnv)),
   };
 }

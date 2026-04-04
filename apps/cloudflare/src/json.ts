@@ -24,7 +24,7 @@ export function unauthorized(): Response {
 }
 
 export async function readJsonObject(request: Request): Promise<Record<string, unknown>> {
-  return requireJsonObject((await request.json()) as unknown);
+  return requireJsonObject(await request.json());
 }
 
 export async function readOptionalJsonObject(request: Request): Promise<Record<string, unknown>> {
@@ -34,13 +34,17 @@ export async function readOptionalJsonObject(request: Request): Promise<Record<s
     return {};
   }
 
-  return requireJsonObject(JSON.parse(payload) as unknown);
+  return requireJsonObject(JSON.parse(payload));
 }
 
 export function requireJsonObject(parsed: unknown): Record<string, unknown> {
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+  if (!isJsonObject(parsed)) {
     throw new TypeError("Request body must be a JSON object.");
   }
 
-  return parsed as Record<string, unknown>;
+  return parsed;
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

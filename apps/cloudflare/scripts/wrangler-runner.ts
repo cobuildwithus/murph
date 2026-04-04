@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type SpawnOptions } from "node:child_process";
 
 export function resolvePnpmCommand(): string {
   return process.platform === "win32" ? "pnpm.cmd" : "pnpm";
@@ -12,8 +12,8 @@ export async function runWranglerLogged(
   } = {},
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(resolvePnpmCommand(), ["exec", "wrangler", ...wranglerArgs], {
-      cwd: options.cwd ?? process.cwd(),
+    const child = spawnWranglerProcess(wranglerArgs, {
+      cwd: options.cwd,
       env: resolveWranglerEnv(options.envOverrides),
       stdio: "inherit",
     });
@@ -37,8 +37,8 @@ export async function runWranglerJson(
   } = {},
 ): Promise<string> {
   return await new Promise<string>((resolve, reject) => {
-    const child = spawn(resolvePnpmCommand(), ["exec", "wrangler", ...wranglerArgs], {
-      cwd: options.cwd ?? process.cwd(),
+    const child = spawnWranglerProcess(wranglerArgs, {
+      cwd: options.cwd,
       env: process.env,
       stdio: ["inherit", "pipe", "pipe"],
     });
@@ -72,6 +72,21 @@ export async function runWranglerJson(
 
       reject(createWranglerExitError(wranglerArgs, code, stderr));
     });
+  });
+}
+
+function spawnWranglerProcess(
+  wranglerArgs: string[],
+  options: {
+    cwd?: string;
+    env: NodeJS.ProcessEnv;
+    stdio: SpawnOptions["stdio"];
+  },
+) {
+  return spawn(resolvePnpmCommand(), ["exec", "wrangler", ...wranglerArgs], {
+    cwd: options.cwd ?? process.cwd(),
+    env: options.env,
+    stdio: options.stdio,
   });
 }
 
