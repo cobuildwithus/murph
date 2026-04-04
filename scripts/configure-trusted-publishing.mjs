@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 import { loadReleaseContext, parseReleaseArgs } from './release-helpers.mjs';
 
 const execFileAsync = promisify(execFile);
-const MINIMUM_NPM_VERSION = [11, 10, 0];
+const MINIMUM_NPM_VERSION = [11, 5, 1];
 
 function parseVersion(value) {
   const match = value.trim().match(/^(\d+)\.(\d+)\.(\d+)/u);
@@ -106,6 +106,9 @@ console.log(
 console.log(
   'This helper bootstraps missing trust relationships. If a package is already bound to the wrong workflow or repo, use `npm trust list` and `npm trust revoke` for that package before rerunning this command.',
 );
+if (!options.yes && !options.dryRun) {
+  console.log('Pass `--yes` to skip the per-package confirmation prompts.');
+}
 
 for (const [index, entry] of context.orderedPackages.entries()) {
   const command = [

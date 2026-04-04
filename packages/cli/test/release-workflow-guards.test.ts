@@ -10,6 +10,7 @@ describe('release workflow guards', () => {
   it('validates the git tag against the manifest-defined publish set', () => {
     const workflow = readFileSync(releaseWorkflowPath, 'utf8')
 
+    expect(workflow).toContain('node-version: latest')
     expect(workflow).toContain('node scripts/verify-release-target.mjs --expect-version "${tag_version}"')
     expect(workflow).toContain("Tag '${GITHUB_REF_NAME}' is not a supported release tag.")
     expect(workflow).not.toContain('EXPECTED_PACKAGE_NAME')
@@ -27,6 +28,8 @@ describe('release workflow guards', () => {
     expect(workflow).toContain('run: pnpm release:check')
     expect(workflow).toContain('node scripts/pack-publishables.mjs --expect-version "${{ needs.tag-check.outputs.version }}" --clean --out-dir dist/npm --pack-output dist/npm/pack-output.json')
     expect(workflow).toContain('name: npm-tarballs')
+    expect(workflow).toContain('cache: pnpm')
+    expect(workflow).toContain('name: Update npm')
     expect(workflow).not.toContain('npm pack --json')
   })
 
@@ -48,7 +51,9 @@ describe('release workflow guards', () => {
     expect(workflow).not.toContain('Using NPM_TOKEN authentication for npm publish.')
     expect(workflow).not.toContain('falling back to trusted publishing')
     expect(workflow).not.toContain('unset NODE_AUTH_TOKEN')
-    expect(workflow).not.toContain('npm install -g npm@latest')
+    expect(workflow.match(/node-version: latest/g)).toHaveLength(3)
+    expect(workflow.match(/name: Update npm/g)).toHaveLength(2)
+    expect(workflow).toContain('run: npm install -g npm@latest')
     expect(workflow).toContain('if [[ -n "${{ needs.tag-check.outputs.npm_tag }}" ]]; then')
     expect(workflow).toContain('publish_args+=(--npm-tag "${{ needs.tag-check.outputs.npm_tag }}")')
     expect(workflow).toContain('node "${publish_args[@]}"')
