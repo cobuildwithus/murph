@@ -161,8 +161,6 @@ jobs:
 
       - name: Publish tarballs in dependency order
         shell: bash
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           publish_args=(
@@ -171,13 +169,6 @@ jobs:
             dist/npm/pack-output.json
             --provenance
           )
-
-          if [[ -n "${NODE_AUTH_TOKEN:-}" ]]; then
-            echo "Using NPM_TOKEN authentication for npm publish."
-          else
-            echo "NPM_TOKEN is not set; falling back to trusted publishing."
-            unset NODE_AUTH_TOKEN
-          fi
 
           if [[ -n "${{ needs.tag-check.outputs.npm_tag }}" ]]; then
             publish_args+=(--npm-tag "${{ needs.tag-check.outputs.npm_tag }}")
