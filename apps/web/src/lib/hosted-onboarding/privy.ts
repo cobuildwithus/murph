@@ -246,7 +246,7 @@ function normalizeHostedPrivyAccessToken(value: string | null | undefined): stri
   return normalizeEnvValue(match?.[1]);
 }
 
-function remapHostedPrivyCompletionLagError(error: unknown): unknown {
+export function remapHostedPrivyCompletionLagError(error: unknown): unknown {
   if (!isHostedOnboardingError(error)) {
     return error;
   }

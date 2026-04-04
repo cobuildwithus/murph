@@ -2,7 +2,7 @@
 
 import { usePrivy } from "@privy-io/react-auth";
 import Link from "next/link";
-import { startTransition, useEffect, useState } from "react";
+import { startTransition, useEffect, useEffectEvent, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +14,7 @@ import type {
   HostedSharePreview,
 } from "@/src/lib/hosted-share/service";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
+import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
 import { requestHostedOnboardingJson } from "./client-api";
 import { HostedPhoneAuth } from "./hosted-phone-auth";
@@ -46,13 +47,19 @@ export function JoinInviteClient({
 
   const title = resolveTitle(status);
   const subtitle = resolveSubtitle(status);
+  const acceptShareEffect = useEffectEvent(() => {
+    void handleAcceptShare();
+  });
+  const refreshStatusEffect = useEffectEvent(() => {
+    void refreshStatus().catch(() => null);
+  });
 
   useEffect(() => {
     if (!shareCode || shareImportState !== "idle" || status.stage !== "active") {
       return;
     }
 
-    void handleAcceptShare();
+    acceptShareEffect();
   }, [shareCode, shareImportState, status.stage]);
 
   useEffect(() => {
@@ -65,6 +72,7 @@ export function JoinInviteClient({
     const poll = async () => {
       try {
         const payload = await requestHostedOnboardingJson<HostedSharePageData>({
+          auth: "optional",
           url: buildHostedShareStatusUrl({
             inviteCode,
             shareCode,
@@ -95,15 +103,16 @@ export function JoinInviteClient({
   }, [inviteCode, shareCode, shareImportState]);
 
   useEffect(() => {
-    if (!ready || !authenticated) {
+    if (!ready || !authenticated || status.session.authenticated) {
       return;
     }
 
-    void refreshStatus().catch(() => null);
-  }, [authenticated, ready]);
+    refreshStatusEffect();
+  }, [authenticated, ready, status.session.authenticated]);
 
   async function refreshStatus(): Promise<HostedInviteStatusPayload> {
     const payload = await requestHostedOnboardingJson<HostedInviteStatusPayload>({
+      auth: "optional",
       url: `/api/hosted-onboarding/invites/${encodeURIComponent(inviteCode)}/status`,
     });
 
@@ -183,10 +192,11 @@ export function JoinInviteClient({
     }
   }
 
-  async function handlePhoneVerified() {
-    const nextStatus = await refreshStatus();
+  async function handlePhoneVerified(payload: HostedPrivyCompletionPayload) {
+    const nextStatus = resolveInviteStatusAfterPrivyCompletion(status, payload);
+    setStatus(nextStatus);
 
-    if (nextStatus.stage === "checkout" && nextStatus.capabilities.billingReady) {
+    if (payload.stage === "checkout" && nextStatus.capabilities.billingReady) {
       await handleCheckout();
     }
   }
@@ -346,6 +356,21 @@ export function JoinInviteClient({
       </Card>
     </div>
   );
+}
+
+export function resolveInviteStatusAfterPrivyCompletion(
+  status: HostedInviteStatusPayload,
+  payload: HostedPrivyCompletionPayload,
+): HostedInviteStatusPayload {
+  return {
+    ...status,
+    session: {
+      ...status.session,
+      authenticated: true,
+      matchesInvite: true,
+    },
+    stage: payload.stage,
+  };
 }
 
 function resolveTitle(status: HostedInviteStatusPayload): string {

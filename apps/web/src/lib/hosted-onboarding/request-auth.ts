@@ -8,6 +8,7 @@ import {
   readHostedPrivyAccessTokenFromRequest,
   type HostedPrivyIdentity,
   type HostedPrivyUser,
+  remapHostedPrivyCompletionLagError,
   verifyHostedPrivyAccessToken,
   readHostedPrivyIdentityTokenFromRequest,
   resolveHostedPrivyIdentityFromVerifiedUser,
@@ -76,16 +77,7 @@ export async function requireHostedPrivyRequestAuthContext(
   request: Request,
   prisma: PrismaClient = getPrisma(),
 ): Promise<HostedPrivyAuthenticatedRequestContext> {
-  const context = await resolveHostedPrivyRequestAuthContext(request, prisma);
-
-  if (!context) {
-    throw hostedOnboardingError({
-      code: "AUTH_REQUIRED",
-      message: "Verify your phone to continue.",
-      httpStatus: 401,
-    });
-  }
-
+  const context = await requireHostedPrivyVerifiedRequestAuthContext(request, prisma);
   if (!context.member) {
     throw hostedOnboardingError({
       code: "HOSTED_MEMBER_NOT_FOUND",
@@ -98,6 +90,34 @@ export async function requireHostedPrivyRequestAuthContext(
     ...context,
     member: context.member,
   };
+}
+
+export async function requireHostedPrivyVerifiedRequestAuthContext(
+  request: Request,
+  prisma: PrismaClient = getPrisma(),
+): Promise<HostedPrivyRequestAuthContext> {
+  const context = await resolveHostedPrivyRequestAuthContext(request, prisma);
+
+  if (!context) {
+    throw hostedOnboardingError({
+      code: "AUTH_REQUIRED",
+      message: "Verify your phone to continue.",
+      httpStatus: 401,
+    });
+  }
+
+  return context;
+}
+
+export async function requireHostedPrivyCompletionRequestAuthContext(
+  request: Request,
+  prisma: PrismaClient = getPrisma(),
+): Promise<HostedPrivyRequestAuthContext> {
+  try {
+    return await requireHostedPrivyVerifiedRequestAuthContext(request, prisma);
+  } catch (error) {
+    throw remapHostedPrivyCompletionLagError(error);
+  }
 }
 
 export async function requireHostedPrivyActiveRequestAuthContext(

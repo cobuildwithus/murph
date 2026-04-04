@@ -9,6 +9,8 @@ interface ApiErrorPayload {
 }
 
 const HOSTED_PRIVY_IDENTITY_TOKEN_HEADER_NAME = "x-privy-identity-token";
+const HOSTED_PRIVY_AUTH_RETRY_DELAYS_MS = [0, 250] as const;
+type HostedOnboardingAuthMode = "none" | "optional" | "required";
 
 export class HostedOnboardingApiError extends Error {
   readonly code: string | null;
@@ -23,11 +25,12 @@ export class HostedOnboardingApiError extends Error {
 }
 
 export async function requestHostedOnboardingJson<T>(input: {
+  auth?: HostedOnboardingAuthMode;
   method?: "GET" | "POST";
   payload?: Record<string, unknown>;
   url: string;
 }): Promise<T> {
-  const authHeaders = await buildHostedOnboardingAuthHeaders();
+  const authHeaders = await resolveHostedOnboardingAuthHeaders(input.auth ?? "required");
   const response = await fetch(input.url, {
     method: input.method ?? (input.payload ? "POST" : "GET"),
     headers: {
@@ -63,26 +66,67 @@ export async function requestHostedOnboardingJson<T>(input: {
   return data as T;
 }
 
-async function buildHostedOnboardingAuthHeaders(): Promise<Record<string, string>> {
-  try {
-    const accessToken = await getAccessToken();
-    const identityToken = await getIdentityToken();
-
-    return {
-      ...(accessToken
-        ? {
-            Authorization: `Bearer ${accessToken}`,
-          }
-        : {}),
-      ...(identityToken
-        ? {
-            [HOSTED_PRIVY_IDENTITY_TOKEN_HEADER_NAME]: identityToken,
-          }
-        : {}),
-    };
-  } catch {
+async function resolveHostedOnboardingAuthHeaders(
+  mode: HostedOnboardingAuthMode,
+): Promise<Record<string, string>> {
+  if (mode === "none") {
     return {};
   }
+
+  if (mode === "optional") {
+    try {
+      return await buildHostedOnboardingAuthHeaders();
+    } catch {
+      return {};
+    }
+  }
+
+  return buildHostedOnboardingAuthHeaders();
+}
+
+async function buildHostedOnboardingAuthHeaders(): Promise<Record<string, string>> {
+  let lastError: unknown = null;
+
+  for (const delayMs of HOSTED_PRIVY_AUTH_RETRY_DELAYS_MS) {
+    if (delayMs > 0) {
+      await sleep(delayMs);
+    }
+
+    try {
+      const [accessToken, identityToken] = await Promise.all([getAccessToken(), getIdentityToken()]);
+
+      if (!accessToken || !identityToken) {
+        lastError = new HostedOnboardingApiError({
+          code: "AUTH_REQUIRED",
+          message: "Verify your phone to continue.",
+        });
+        continue;
+      }
+
+      return {
+        Authorization: `Bearer ${accessToken}`,
+        [HOSTED_PRIVY_IDENTITY_TOKEN_HEADER_NAME]: identityToken,
+      };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError instanceof HostedOnboardingApiError) {
+    throw lastError;
+  }
+
+  throw new HostedOnboardingApiError({
+    code: "PRIVY_AUTH_UNAVAILABLE",
+    message: "We could not refresh your Privy session. Wait a moment and try again.",
+    retryable: true,
+  });
+}
+
+function sleep(delayMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    globalThis.setTimeout(resolve, delayMs);
+  });
 }
 
 async function readOptionalJsonValue(response: Response): Promise<unknown> {

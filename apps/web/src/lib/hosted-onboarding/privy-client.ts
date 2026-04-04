@@ -12,8 +12,7 @@ export type HostedPrivyClientPendingAction =
   | null;
 export type HostedPrivyFinalizationState = "idle" | "running" | "completed";
 
-export const HOSTED_PRIVY_CLIENT_SESSION_RETRY_DELAYS_MS = [0, 250, 500, 1_000] as const;
-export const HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS = [0, 250, 500, 1_000, 2_000, 4_000] as const;
+export const HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS = [0, 500] as const;
 
 interface HostedPrivyClientSessionStateInput {
   refreshUser: () => Promise<{ linkedAccounts?: unknown } | null>;
@@ -27,10 +26,7 @@ interface HostedPrivyWalletProvisioningInput extends HostedPrivyClientSessionSta
 export async function ensureHostedPrivyPhoneAndWalletReady(
   input: HostedPrivyWalletProvisioningInput,
 ): Promise<void> {
-  let sessionState = await readHostedPrivyClientSessionStateWithRetry(
-    input,
-    (candidate) => Boolean(candidate.phone),
-  );
+  let sessionState = await readHostedPrivyClientSessionState(input);
 
   if (!sessionState.phone) {
     throw new Error("This Privy session is missing a verified phone number.");
@@ -43,10 +39,7 @@ export async function ensureHostedPrivyPhoneAndWalletReady(
   try {
     await input.createWallet();
   } catch (error) {
-    sessionState = await readHostedPrivyClientSessionStateWithRetry(
-      input,
-      (candidate) => Boolean(candidate.wallet),
-    );
+    sessionState = await readHostedPrivyClientSessionState(input);
 
     if (sessionState.wallet) {
       return;
@@ -55,10 +48,7 @@ export async function ensureHostedPrivyPhoneAndWalletReady(
     throw error;
   }
 
-  sessionState = await readHostedPrivyClientSessionStateWithRetry(
-    input,
-    (candidate) => Boolean(candidate.wallet),
-  );
+  sessionState = await readHostedPrivyClientSessionState(input);
 
   if (!sessionState.wallet) {
     throw new Error("We could not finish preparing your account. Wait a moment and try again.");
@@ -113,61 +103,6 @@ export function canContinueHostedPrivyClientSession(issue: HostedPrivyClientSess
   return issue !== "missing-phone";
 }
 
-export function shouldAutoContinueHostedPrivyClientSession(input: {
-  authenticated: boolean;
-  autoContinueSuppressed: boolean;
-  autoContinueTriggered: boolean;
-  checkingAuthenticatedSession: boolean;
-  finalizationState: HostedPrivyFinalizationState;
-  issue: HostedPrivyClientSessionIssue | null;
-  pendingAction: HostedPrivyClientPendingAction;
-}): boolean {
-  if (!input.authenticated) {
-    return false;
-  }
-
-  if (!canContinueHostedPrivyClientSession(input.issue)) {
-    return false;
-  }
-
-  if (
-    input.autoContinueSuppressed
-    || input.checkingAuthenticatedSession
-    || input.finalizationState !== "idle"
-    || input.pendingAction !== null
-    || input.autoContinueTriggered
-  ) {
-    return false;
-  }
-
-  return true;
-}
-
-export function shouldSuppressHostedPrivyAutoContinueAfterError(error: unknown): boolean {
-  return Boolean(
-    error instanceof Error
-    && error.name === "HostedOnboardingApiError"
-    && "retryable" in error
-    && (error as { retryable?: unknown }).retryable === false,
-  );
-}
-
-export function shouldResetHostedPrivyAutoContinueTrigger(input: {
-  authenticated: boolean;
-  autoContinueSuppressed: boolean;
-  issue: HostedPrivyClientSessionIssue | null;
-}): boolean {
-  return !input.authenticated || input.autoContinueSuppressed || !canContinueHostedPrivyClientSession(input.issue);
-}
-
-export function shouldShowHostedPrivyAuthenticatedLoadingState(input: {
-  authenticated: boolean;
-  autoContinueSuppressed: boolean;
-  issue: HostedPrivyClientSessionIssue | null;
-}): boolean {
-  return input.authenticated && !input.autoContinueSuppressed && canContinueHostedPrivyClientSession(input.issue);
-}
-
 export function shouldShowHostedPrivyManualResumeState(input: {
   authenticated: boolean;
   issue: HostedPrivyClientSessionIssue | null;
@@ -190,50 +125,4 @@ export function shouldShowHostedPrivyRestartState(input: {
     && !input.showAuthenticatedLoadingState
     && !canContinueHostedPrivyClientSession(input.issue)
   );
-}
-
-export function shouldResetHostedPrivyClientSessionToSms(input: {
-  authenticated: boolean;
-  autoResetTriggered: boolean;
-  checkingAuthenticatedSession: boolean;
-  issue: HostedPrivyClientSessionIssue | null;
-  pendingAction: HostedPrivyClientPendingAction;
-}): boolean {
-  if (!input.authenticated || input.issue !== "missing-phone") {
-    return false;
-  }
-
-  if (input.checkingAuthenticatedSession || input.pendingAction !== null || input.autoResetTriggered) {
-    return false;
-  }
-
-  return true;
-}
-
-async function readHostedPrivyClientSessionStateWithRetry(
-  input: HostedPrivyClientSessionStateInput,
-  accept: (sessionState: HostedPrivyLinkedAccountState) => boolean,
-): Promise<HostedPrivyLinkedAccountState> {
-  let latestSessionState = await readHostedPrivyClientSessionState(input);
-
-  if (accept(latestSessionState)) {
-    return latestSessionState;
-  }
-
-  for (const delayMs of HOSTED_PRIVY_CLIENT_SESSION_RETRY_DELAYS_MS.slice(1)) {
-    await sleep(delayMs);
-    latestSessionState = await readHostedPrivyClientSessionState(input);
-
-    if (accept(latestSessionState)) {
-      return latestSessionState;
-    }
-  }
-
-  return latestSessionState;
-}
-
-function sleep(delayMs: number): Promise<void> {
-  return new Promise((resolve) => {
-    globalThis.setTimeout(resolve, delayMs);
-  });
 }

@@ -3,27 +3,30 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
+  assertHostedOnboardingMutationOrigin: vi.fn(),
   completeHostedPrivyVerification: vi.fn(),
   createHostedBillingCheckout: vi.fn(),
+  requireHostedPrivyCompletionRequestAuthContext: vi.fn(),
   requireHostedInviteCodeFromRequest: vi.fn(),
-  requireHostedPrivyCompletionIdentityFromRequest: vi.fn(),
   requireHostedPrivyRequestAuthContext: vi.fn(),
   runtimeEnv: {
-    privyAppId: "cm_app_123" as string | null,
-    privyVerificationKey: "line-1\\nline-2" as string | null,
-    telegramBotUsername: null as string | null,
-    telegramWebhookSecret: null as string | null,
+    hostedOnboardingPublicBaseUrl: "https://join.example.test" as string | null,
   },
-  verifyIdentityToken: vi.fn(),
 }));
 
-vi.mock("@privy-io/node", () => ({
-  verifyIdentityToken: mocks.verifyIdentityToken,
-}));
+vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/runtime")>(
+    "@/src/lib/hosted-onboarding/runtime",
+  );
 
-vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
-  getHostedOnboardingEnvironment: () => mocks.runtimeEnv,
-}));
+  return {
+    ...actual,
+    getHostedOnboardingEnvironment: () => ({
+      ...actual.getHostedOnboardingEnvironment(),
+      hostedOnboardingPublicBaseUrl: mocks.runtimeEnv.hostedOnboardingPublicBaseUrl,
+    }),
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/member-service", () => ({
   completeHostedPrivyVerification: mocks.completeHostedPrivyVerification,
@@ -33,12 +36,13 @@ vi.mock("@/src/lib/hosted-onboarding/billing-service", () => ({
   createHostedBillingCheckout: mocks.createHostedBillingCheckout,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requireHostedPrivyRequestAuthContext: mocks.requireHostedPrivyRequestAuthContext,
+vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
+  assertHostedOnboardingMutationOrigin: mocks.assertHostedOnboardingMutationOrigin,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
-  requireHostedPrivyCompletionIdentityFromRequest: mocks.requireHostedPrivyCompletionIdentityFromRequest,
+vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
+  requireHostedPrivyCompletionRequestAuthContext: mocks.requireHostedPrivyCompletionRequestAuthContext,
+  requireHostedPrivyRequestAuthContext: mocks.requireHostedPrivyRequestAuthContext,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/route-helpers", () => ({
@@ -66,19 +70,24 @@ describe("hosted onboarding routes", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.runtimeEnv.privyAppId = "cm_app_123";
-    mocks.runtimeEnv.privyVerificationKey = "line-1\\nline-2";
-    mocks.requireHostedPrivyCompletionIdentityFromRequest.mockResolvedValue({
-      phone: {
-        number: "+15551234567",
-        verifiedAt: 1742990400,
+    mocks.requireHostedPrivyCompletionRequestAuthContext.mockResolvedValue({
+      identity: {
+        phone: {
+          number: "+15551234567",
+          verifiedAt: 1742990400,
+        },
+        userId: "did:privy:user_123",
+        wallet: {
+          address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+          chainType: "ethereum",
+          id: "wallet_123",
+          type: "wallet",
+        },
       },
-      userId: "did:privy:user_123",
-      wallet: {
-        address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-        chainType: "ethereum",
-        id: "wallet_123",
-        type: "wallet",
+      linkedAccounts: [],
+      member: null,
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
       },
     });
     mocks.completeHostedPrivyVerification.mockResolvedValue({
@@ -148,7 +157,7 @@ describe("hosted onboarding routes", () => {
     });
   });
 
-  it("accepts a valid Privy identity cookie even when the request body is empty", async () => {
+  it("accepts a valid Privy auth header set even when the request body is empty", async () => {
     const response = await privyCompleteRoute.POST(
       new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
         headers: {
@@ -180,7 +189,7 @@ describe("hosted onboarding routes", () => {
     });
   });
 
-  it("ignores any body identity token and keeps the cookie authoritative", async () => {
+  it("ignores any body identity token and keeps the request headers authoritative", async () => {
     const response = await privyCompleteRoute.POST(
       new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
         body: JSON.stringify({
@@ -215,12 +224,12 @@ describe("hosted onboarding routes", () => {
     });
   });
 
-  it("rejects hosted Privy completion requests that are missing the Privy identity cookie", async () => {
-    mocks.requireHostedPrivyCompletionIdentityFromRequest.mockRejectedValue(
+  it("rejects hosted Privy completion requests that are missing the strict Privy auth header set", async () => {
+    mocks.requireHostedPrivyCompletionRequestAuthContext.mockRejectedValue(
       hostedOnboardingError({
-        code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
+        code: "AUTH_REQUIRED",
         httpStatus: 401,
-        message: "A Privy identity token is required to continue. Refresh and verify your phone again.",
+        message: "Verify your phone to continue.",
       }),
     );
 
@@ -242,19 +251,19 @@ describe("hosted onboarding routes", () => {
     expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
-        message: "A Privy identity token is required to continue. Refresh and verify your phone again.",
+        code: "AUTH_REQUIRED",
+        message: "Verify your phone to continue.",
         retryable: false,
       },
     });
   });
 
-  it("checks the Privy identity cookie before parsing malformed request JSON", async () => {
-    mocks.requireHostedPrivyCompletionIdentityFromRequest.mockRejectedValue(
+  it("checks the hosted Privy auth headers before parsing malformed request JSON", async () => {
+    mocks.requireHostedPrivyCompletionRequestAuthContext.mockRejectedValue(
       hostedOnboardingError({
-        code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
+        code: "AUTH_REQUIRED",
         httpStatus: 401,
-        message: "A Privy identity token is required to continue. Refresh and verify your phone again.",
+        message: "Verify your phone to continue.",
       }),
     );
 
@@ -271,23 +280,23 @@ describe("hosted onboarding routes", () => {
 
     expect(response.status).toBe(401);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireHostedPrivyCompletionIdentityFromRequest).toHaveBeenCalledTimes(1);
+    expect(mocks.requireHostedPrivyCompletionRequestAuthContext).toHaveBeenCalledTimes(1);
     expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
-        message: "A Privy identity token is required to continue. Refresh and verify your phone again.",
+        code: "AUTH_REQUIRED",
+        message: "Verify your phone to continue.",
         retryable: false,
       },
     });
   });
 
-  it("does not accept a body identity token when the Privy identity cookie is missing", async () => {
-    mocks.requireHostedPrivyCompletionIdentityFromRequest.mockRejectedValue(
+  it("does not accept a body identity token when the strict hosted Privy auth headers are missing", async () => {
+    mocks.requireHostedPrivyCompletionRequestAuthContext.mockRejectedValue(
       hostedOnboardingError({
-        code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
+        code: "AUTH_REQUIRED",
         httpStatus: 401,
-        message: "A Privy identity token is required to continue. Refresh and verify your phone again.",
+        message: "Verify your phone to continue.",
       }),
     );
 
@@ -309,15 +318,15 @@ describe("hosted onboarding routes", () => {
     expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
-        message: "A Privy identity token is required to continue. Refresh and verify your phone again.",
+        code: "AUTH_REQUIRED",
+        message: "Verify your phone to continue.",
         retryable: false,
       },
     });
   });
 
   it("serializes retryable server-side Privy lag errors during completion", async () => {
-    mocks.requireHostedPrivyCompletionIdentityFromRequest.mockRejectedValue(
+    mocks.requireHostedPrivyCompletionRequestAuthContext.mockRejectedValue(
       hostedOnboardingError({
         code: "PRIVY_WALLET_NOT_READY",
         httpStatus: 409,
@@ -486,76 +495,4 @@ describe("hosted onboarding routes", () => {
     });
   });
 
-  it("uses the real Privy header verifier at the route boundary and ignores any body token", async () => {
-    mocks.verifyIdentityToken.mockResolvedValue({
-      id: "did:privy:user_123",
-      linked_accounts: [
-        {
-          latest_verified_at: 1741194420,
-          phone_number: "+1 415 555 2671",
-          type: "phone",
-        },
-        {
-          address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-          chain_type: "ethereum",
-          connector_type: "embedded",
-          delegated: false,
-          id: "wallet_123",
-          imported: false,
-          type: "wallet",
-          wallet_client: "privy",
-          wallet_client_type: "privy",
-          wallet_index: 0,
-        },
-      ],
-    });
-    vi.resetModules();
-    vi.doUnmock("@/src/lib/hosted-onboarding/privy");
-
-    try {
-      const { POST } = await import("../app/api/hosted-onboarding/privy/complete/route");
-      const response = await POST(
-        new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
-          body: JSON.stringify({
-            identityToken: "body-token",
-            inviteCode: "invite-code",
-          }),
-          headers: {
-            "x-privy-identity-token": "header-token",
-            origin: SAME_ORIGIN_HEADERS.origin,
-            "user-agent": "test-agent",
-          },
-          method: "POST",
-        }),
-      );
-
-      expect(response.status).toBe(200);
-      expect(mocks.verifyIdentityToken).toHaveBeenCalledWith({
-        app_id: "cm_app_123",
-        identity_token: "header-token",
-        verification_key: "line-1\nline-2",
-      });
-      expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
-        identity: expect.objectContaining({
-          phone: {
-            number: "+14155552671",
-            verifiedAt: 1741194420,
-          },
-          userId: "did:privy:user_123",
-          wallet: {
-            address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-            chainType: "ethereum",
-            id: "wallet_123",
-            type: "wallet",
-          },
-        }),
-        inviteCode: "invite-code",
-      });
-    } finally {
-      vi.doMock("@/src/lib/hosted-onboarding/privy", () => ({
-        requireHostedPrivyCompletionIdentityFromRequest: mocks.requireHostedPrivyCompletionIdentityFromRequest,
-      }));
-      vi.resetModules();
-    }
-  });
 });

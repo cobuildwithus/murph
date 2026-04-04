@@ -68,6 +68,7 @@ export function ShareLinkClient({ initialData, shareCode }: ShareLinkClientProps
     }
 
     void requestHostedOnboardingJson<HostedSharePageData>({
+      auth: "optional",
       url: statusUrl,
     })
       .then((payload) => {
@@ -87,6 +88,7 @@ export function ShareLinkClient({ initialData, shareCode }: ShareLinkClientProps
     const poll = async () => {
       try {
         const payload = await requestHostedOnboardingJson<HostedSharePageData>({
+          auth: "optional",
           url: statusUrl,
         });
         if (cancelled) {

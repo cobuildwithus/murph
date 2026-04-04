@@ -5,15 +5,9 @@ import {
   describeHostedPrivyClientSessionIssue,
   ensureHostedPrivyPhoneAndWalletReady,
   resolveHostedPrivyClientSessionIssue,
-  shouldSuppressHostedPrivyAutoContinueAfterError,
-  shouldAutoContinueHostedPrivyClientSession,
-  shouldResetHostedPrivyAutoContinueTrigger,
-  shouldResetHostedPrivyClientSessionToSms,
-  shouldShowHostedPrivyAuthenticatedLoadingState,
   shouldShowHostedPrivyManualResumeState,
   shouldShowHostedPrivyRestartState,
 } from "@/src/lib/hosted-onboarding/privy-client";
-import { HostedOnboardingApiError } from "@/src/components/hosted-onboarding/client-api";
 
 describe("hosted Privy client wallet readiness", () => {
   it("treats a missing wallet as continuable but a missing phone as blocking", () => {
@@ -39,150 +33,6 @@ describe("hosted Privy client wallet readiness", () => {
     expect(
       describeHostedPrivyClientSessionIssue("missing-wallet"),
     ).toContain("almost ready");
-  });
-
-  it("auto-continues authenticated sessions only when setup can proceed without another click", () => {
-    expect(
-      shouldAutoContinueHostedPrivyClientSession({
-        authenticated: true,
-        autoContinueSuppressed: false,
-        autoContinueTriggered: false,
-        checkingAuthenticatedSession: false,
-        finalizationState: "idle",
-        issue: null,
-        pendingAction: null,
-      }),
-    ).toBe(true);
-
-    expect(
-      shouldAutoContinueHostedPrivyClientSession({
-        authenticated: true,
-        autoContinueSuppressed: false,
-        autoContinueTriggered: false,
-        checkingAuthenticatedSession: false,
-        finalizationState: "idle",
-        issue: "missing-wallet",
-        pendingAction: null,
-      }),
-    ).toBe(true);
-
-    expect(
-      shouldAutoContinueHostedPrivyClientSession({
-        authenticated: true,
-        autoContinueSuppressed: false,
-        autoContinueTriggered: false,
-        checkingAuthenticatedSession: false,
-        finalizationState: "idle",
-        issue: "missing-phone",
-        pendingAction: null,
-      }),
-    ).toBe(false);
-
-    expect(
-      shouldAutoContinueHostedPrivyClientSession({
-        authenticated: true,
-        autoContinueSuppressed: false,
-        autoContinueTriggered: false,
-        checkingAuthenticatedSession: true,
-        finalizationState: "idle",
-        issue: null,
-        pendingAction: null,
-      }),
-    ).toBe(false);
-
-    expect(
-      shouldAutoContinueHostedPrivyClientSession({
-        authenticated: true,
-        autoContinueSuppressed: false,
-        autoContinueTriggered: false,
-        checkingAuthenticatedSession: false,
-        finalizationState: "running",
-        issue: null,
-        pendingAction: null,
-      }),
-    ).toBe(false);
-
-    expect(
-      shouldAutoContinueHostedPrivyClientSession({
-        authenticated: true,
-        autoContinueSuppressed: false,
-        autoContinueTriggered: false,
-        checkingAuthenticatedSession: false,
-        finalizationState: "completed",
-        issue: null,
-        pendingAction: null,
-      }),
-    ).toBe(false);
-
-    expect(
-      shouldAutoContinueHostedPrivyClientSession({
-        authenticated: true,
-        autoContinueSuppressed: false,
-        autoContinueTriggered: false,
-        checkingAuthenticatedSession: false,
-        finalizationState: "idle",
-        issue: null,
-        pendingAction: "logout",
-      }),
-    ).toBe(false);
-
-    expect(
-      shouldAutoContinueHostedPrivyClientSession({
-        authenticated: true,
-        autoContinueSuppressed: false,
-        autoContinueTriggered: true,
-        checkingAuthenticatedSession: false,
-        finalizationState: "idle",
-        issue: null,
-        pendingAction: null,
-      }),
-    ).toBe(false);
-
-    expect(
-      shouldAutoContinueHostedPrivyClientSession({
-        authenticated: true,
-        autoContinueSuppressed: true,
-        autoContinueTriggered: false,
-        checkingAuthenticatedSession: false,
-        finalizationState: "idle",
-        issue: null,
-        pendingAction: null,
-      }),
-    ).toBe(false);
-  });
-
-  it("keeps authenticated users in the loading state unless they need to restart with SMS", () => {
-    expect(
-      shouldShowHostedPrivyAuthenticatedLoadingState({
-        authenticated: true,
-        autoContinueSuppressed: false,
-        issue: null,
-      }),
-    ).toBe(true);
-
-    expect(
-      shouldShowHostedPrivyAuthenticatedLoadingState({
-        authenticated: true,
-        autoContinueSuppressed: false,
-        issue: "missing-wallet",
-      }),
-    ).toBe(true);
-
-    expect(
-      shouldShowHostedPrivyAuthenticatedLoadingState({
-        authenticated: true,
-        autoContinueSuppressed: false,
-        issue: "missing-phone",
-      }),
-    ).toBe(false);
-
-    expect(
-      shouldShowHostedPrivyAuthenticatedLoadingState({
-        authenticated: true,
-        autoContinueSuppressed: true,
-        issue: null,
-      }),
-    ).toBe(false);
   });
 
   it("switches from manual resume to restart mode when the authenticated session is missing a phone", () => {
@@ -223,114 +73,6 @@ describe("hosted Privy client wallet readiness", () => {
         authenticated: true,
         issue: null,
         showAuthenticatedLoadingState: false,
-      }),
-    ).toBe(false);
-  });
-
-  it("does not reset the auto-continue trigger during temporary in-flight states", () => {
-    expect(
-      shouldResetHostedPrivyAutoContinueTrigger({
-        authenticated: true,
-        autoContinueSuppressed: false,
-        issue: null,
-      }),
-    ).toBe(false);
-
-    expect(
-      shouldResetHostedPrivyAutoContinueTrigger({
-        authenticated: true,
-        autoContinueSuppressed: false,
-        issue: "missing-wallet",
-      }),
-    ).toBe(false);
-
-    expect(
-      shouldResetHostedPrivyAutoContinueTrigger({
-        authenticated: false,
-        autoContinueSuppressed: false,
-        issue: null,
-      }),
-    ).toBe(true);
-
-    expect(
-      shouldResetHostedPrivyAutoContinueTrigger({
-        authenticated: true,
-        autoContinueSuppressed: true,
-        issue: null,
-      }),
-    ).toBe(true);
-
-    expect(
-      shouldResetHostedPrivyAutoContinueTrigger({
-        authenticated: true,
-        autoContinueSuppressed: false,
-        issue: "missing-phone",
-      }),
-    ).toBe(true);
-  });
-
-  it("suppresses further auto-continue attempts after a terminal completion API error", () => {
-    expect(
-      shouldSuppressHostedPrivyAutoContinueAfterError(
-        new HostedOnboardingApiError({
-          code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
-          message: "A Privy identity cookie is required to continue.",
-          retryable: false,
-        }),
-      ),
-    ).toBe(true);
-
-    expect(
-      shouldSuppressHostedPrivyAutoContinueAfterError(
-        new HostedOnboardingApiError({
-          code: "PRIVY_WALLET_NOT_READY",
-          message: "Wait a moment and try again.",
-          retryable: true,
-        }),
-      ),
-    ).toBe(false);
-
-    expect(shouldSuppressHostedPrivyAutoContinueAfterError(new Error("network"))).toBe(false);
-  });
-
-  it("silently restarts authenticated sessions that are missing a verified phone number", () => {
-    expect(
-      shouldResetHostedPrivyClientSessionToSms({
-        authenticated: true,
-        autoResetTriggered: false,
-        checkingAuthenticatedSession: false,
-        issue: "missing-phone",
-        pendingAction: null,
-      }),
-    ).toBe(true);
-
-    expect(
-      shouldResetHostedPrivyClientSessionToSms({
-        authenticated: true,
-        autoResetTriggered: false,
-        checkingAuthenticatedSession: false,
-        issue: "missing-wallet",
-        pendingAction: null,
-      }),
-    ).toBe(false);
-
-    expect(
-      shouldResetHostedPrivyClientSessionToSms({
-        authenticated: true,
-        autoResetTriggered: true,
-        checkingAuthenticatedSession: false,
-        issue: "missing-phone",
-        pendingAction: null,
-      }),
-    ).toBe(false);
-
-    expect(
-      shouldResetHostedPrivyClientSessionToSms({
-        authenticated: true,
-        autoResetTriggered: false,
-        checkingAuthenticatedSession: false,
-        issue: "missing-phone",
-        pendingAction: "logout",
       }),
     ).toBe(false);
   });
@@ -415,13 +157,10 @@ describe("hosted Privy client wallet readiness", () => {
     ).rejects.toThrow("We could not finish preparing your account. Wait a moment and try again.");
   });
 
-  it("retries client session refresh long enough for the verified phone to appear", async () => {
+  it("refreshes the client session once when the initial user state is incomplete", async () => {
     const createWallet = vi.fn();
     const refreshUser = vi
       .fn<() => Promise<{ linkedAccounts?: unknown } | null>>()
-      .mockResolvedValueOnce({
-        linkedAccounts: [],
-      })
       .mockResolvedValueOnce({
         linkedAccounts: [
           {
@@ -450,6 +189,6 @@ describe("hosted Privy client wallet readiness", () => {
     ).resolves.toBeUndefined();
 
     expect(createWallet).not.toHaveBeenCalled();
-    expect(refreshUser).toHaveBeenCalledTimes(2);
+    expect(refreshUser).toHaveBeenCalledTimes(1);
   });
 });
