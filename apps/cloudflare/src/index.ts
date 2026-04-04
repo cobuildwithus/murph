@@ -72,8 +72,10 @@ import {
 } from "./hosted-email.ts";
 import {
   HOSTED_USER_ROOT_KEY_RECIPIENT_KINDS,
+  isHostedUserManagedRootKeyRecipientKind,
   isHostedEmailInboundSenderAuthorized,
   readHostedVerifiedEmailFromEnv,
+  type HostedUserManagedRootKeyRecipientKind,
   type HostedUserRootKeyRecipientKind,
 } from "@murphai/runtime-state";
 import {
@@ -282,7 +284,7 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
   }
 
   async upsertUserKeyRecipient(input: {
-    kind: import("@murphai/runtime-state").HostedUserRootKeyRecipientKind;
+    kind: import("@murphai/runtime-state").HostedUserManagedRootKeyRecipientKind;
     metadata?: Record<string, string | number | boolean | null>;
     recipientKey: Uint8Array;
     recipientKeyId: string;
@@ -524,7 +526,7 @@ async function handleUserKeyRecipientRoute(
   encodedKind: string,
 ): Promise<Response> {
   const userId = decodeRouteParam(encodedUserId);
-  const kind = parseHostedUserRootKeyRecipientKind(decodeRouteParam(encodedKind));
+  const kind = parseHostedUserManagedRootKeyRecipientKind(decodeRouteParam(encodedKind));
   const payload = parseHostedUserKeyRecipientUpsertRequest(await readCachedJsonObject(context));
   const stub = await resolveUserRunnerStub(context.env, userId);
   const envelope = await requireGatewayStubMethod(stub, "upsertUserKeyRecipient")({
@@ -722,6 +724,18 @@ function parseHostedUserRootKeyRecipientKind(value: string): HostedUserRootKeyRe
   }
 
   throw new TypeError("Hosted user root key recipient kind is invalid.");
+}
+
+function parseHostedUserManagedRootKeyRecipientKind(
+  value: string,
+): HostedUserManagedRootKeyRecipientKind {
+  const kind = parseHostedUserRootKeyRecipientKind(value);
+
+  if (!isHostedUserManagedRootKeyRecipientKind(kind)) {
+    throw new TypeError("Only user-managed hosted root key recipients can be updated via this route.");
+  }
+
+  return kind;
 }
 
 function parseHostedUserKeyRecipientUpsertRequest(value: Record<string, unknown>): {

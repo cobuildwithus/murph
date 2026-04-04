@@ -5,10 +5,16 @@ export const HOSTED_USER_ROOT_KEY_RECIPIENT_KINDS = [
   "recovery",
   "tee-automation",
 ] as const;
+export const HOSTED_USER_MANAGED_ROOT_KEY_RECIPIENT_KINDS = [
+  "user-unlock",
+  "recovery",
+] as const;
 
 export type HostedUserRootKeyEnvelopeSchema = typeof HOSTED_USER_ROOT_KEY_ENVELOPE_SCHEMA;
 export type HostedUserRootKeyRecipientKind =
   (typeof HOSTED_USER_ROOT_KEY_RECIPIENT_KINDS)[number];
+export type HostedUserManagedRootKeyRecipientKind =
+  (typeof HOSTED_USER_MANAGED_ROOT_KEY_RECIPIENT_KINDS)[number];
 
 export interface HostedWrappedRootKeyRecipient {
   ciphertext: string;
@@ -66,6 +72,12 @@ export function findHostedWrappedRootKeyRecipient(
   kind: HostedUserRootKeyRecipientKind,
 ): HostedWrappedRootKeyRecipient | null {
   return envelope.recipients.find((recipient) => recipient.kind === kind) ?? null;
+}
+
+export function isHostedUserManagedRootKeyRecipientKind(
+  value: string,
+): value is HostedUserManagedRootKeyRecipientKind {
+  return value === "user-unlock" || value === "recovery";
 }
 
 function requireEnvelopeSchema(value: unknown, label: string): HostedUserRootKeyEnvelopeSchema {

@@ -1,4 +1,7 @@
-import type { HostedUserRootKeyEnvelope, HostedUserRootKeyRecipientKind } from "@murphai/runtime-state";
+import type {
+  HostedUserManagedRootKeyRecipientKind,
+  HostedUserRootKeyEnvelope,
+} from "@murphai/runtime-state";
 import type {
   GatewayFetchAttachmentsInput,
   GatewayGetConversationInput,
@@ -48,7 +51,7 @@ export interface WorkerUserRunnerStubLike {
   gatewayReadMessages?(input: GatewayReadMessagesInput): Promise<GatewayReadMessagesResult>;
   gatewayRespondToPermission?(input: GatewayRespondToPermissionInput): Promise<GatewayPermissionRequest | null>;
   upsertUserKeyRecipient?(input: {
-    kind: HostedUserRootKeyRecipientKind;
+    kind: HostedUserManagedRootKeyRecipientKind;
     metadata?: Record<string, string | number | boolean | null>;
     recipientKey: Uint8Array;
     recipientKeyId: string;

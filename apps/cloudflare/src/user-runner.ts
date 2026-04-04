@@ -234,7 +234,7 @@ export class HostedUserRunner {
   }
 
   async upsertUserKeyRecipient(input: {
-    kind: import("@murphai/runtime-state").HostedUserRootKeyRecipientKind;
+    kind: import("@murphai/runtime-state").HostedUserManagedRootKeyRecipientKind;
     metadata?: Record<string, string | number | boolean | null>;
     recipientKey: Uint8Array;
     recipientKeyId: string;

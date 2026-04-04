@@ -1190,6 +1190,34 @@ describe("cloudflare worker routes", () => {
     expect(env.__bucketStore.keys()).toEqual([]);
   });
 
+  it("rejects automation recipient upserts through the control route", async () => {
+    const stub = createUserRunnerStub();
+    stub.upsertUserKeyRecipient = vi.fn();
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/keys/recipients/automation", {
+        body: JSON.stringify({
+          recipientKeyBase64: Buffer.from(new Uint8Array(32)).toString("base64"),
+          recipientKeyId: "automation:v2",
+        }),
+        headers: {
+          authorization: "Bearer control-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "PUT",
+      })),
+      createWorkerEnv(stub, {
+        HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid request.",
+    });
+    expect(stub.upsertUserKeyRecipient).not.toHaveBeenCalled();
+  });
+
 
   it("returns a stable hosted email address for a user through the control route", async () => {
     const stub = createUserRunnerStub();
