@@ -5,10 +5,10 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 const mocks = vi.hoisted(() => ({
   authorizeHostedExecutionInternalRequest: vi.fn(),
   buildHostedSharePageData: vi.fn(),
+  drainHostedPendingAiUsageImports: vi.fn(),
   drainHostedExecutionOutbox: vi.fn(),
   drainHostedAiUsageStripeMetering: vi.fn(),
   getPrisma: vi.fn(),
-  importHostedAiUsageRecords: vi.fn(),
   requireHostedExecutionInternalToken: vi.fn(),
   requireHostedExecutionSchedulerToken: vi.fn(),
   requireHostedExecutionUserId: vi.fn(),
@@ -27,7 +27,7 @@ vi.mock("@/src/lib/hosted-execution/outbox", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage", () => ({
-  importHostedAiUsageRecords: mocks.importHostedAiUsageRecords,
+  drainHostedPendingAiUsageImports: mocks.drainHostedPendingAiUsageImports,
 }));
 
 vi.mock("@/src/lib/hosted-execution/stripe-metering", () => ({
@@ -48,19 +48,16 @@ vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
 
 type HostedExecutionCronRouteModule = typeof import("../app/api/internal/hosted-execution/outbox/cron/route");
 type HostedExecutionUsageCronRouteModule = typeof import("../app/api/internal/hosted-execution/usage/cron/route");
-type HostedExecutionUsageRecordRouteModule = typeof import("../app/api/internal/hosted-execution/usage/record/route");
 type HostedShareStatusRouteModule = typeof import("../app/api/hosted-share/[shareCode]/status/route");
 
 let hostedExecutionCronRoute: HostedExecutionCronRouteModule;
 let hostedExecutionUsageCronRoute: HostedExecutionUsageCronRouteModule;
-let hostedExecutionUsageRecordRoute: HostedExecutionUsageRecordRouteModule;
 let hostedShareStatusRoute: HostedShareStatusRouteModule;
 
 describe("hosted execution async routes", () => {
   beforeAll(async () => {
     hostedExecutionCronRoute = await import("../app/api/internal/hosted-execution/outbox/cron/route");
     hostedExecutionUsageCronRoute = await import("../app/api/internal/hosted-execution/usage/cron/route");
-    hostedExecutionUsageRecordRoute = await import("../app/api/internal/hosted-execution/usage/record/route");
     hostedShareStatusRoute = await import("../app/api/hosted-share/[shareCode]/status/route");
   });
 
@@ -103,9 +100,10 @@ describe("hosted execution async routes", () => {
       metered: 1,
       skipped: 1,
     });
-    mocks.importHostedAiUsageRecords.mockResolvedValue({
-      recordedIds: ["usage_1", "usage_2"],
-      records: [],
+    mocks.drainHostedPendingAiUsageImports.mockResolvedValue({
+      failedUsers: 0,
+      imported: 2,
+      scannedUsers: 3,
     });
   });
 
@@ -143,7 +141,7 @@ describe("hosted execution async routes", () => {
       throw hostedOnboardingError({
         code: "HOSTED_EXECUTION_SCHEDULER_TOKEN_REQUIRED",
         httpStatus: 500,
-        message: "HOSTED_EXECUTION_SCHEDULER_TOKENS must be configured for scheduled hosted execution drains.",
+        message: "HOSTED_EXECUTION_SCHEDULER_TOKENS or CRON_SECRET must be configured for scheduled hosted execution drains.",
       });
     });
 
@@ -155,7 +153,7 @@ describe("hosted execution async routes", () => {
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "HOSTED_EXECUTION_SCHEDULER_TOKEN_REQUIRED",
-        message: "HOSTED_EXECUTION_SCHEDULER_TOKENS must be configured for scheduled hosted execution drains.",
+        message: "HOSTED_EXECUTION_SCHEDULER_TOKENS or CRON_SECRET must be configured for scheduled hosted execution drains.",
         retryable: false,
       },
     });
@@ -188,7 +186,7 @@ describe("hosted execution async routes", () => {
     });
   });
 
-  it("returns the Stripe usage cron drain summary", async () => {
+  it("returns the hosted pending-usage import and Stripe metering cron summaries", async () => {
     const response = await hostedExecutionUsageCronRoute.GET(
       new Request("https://join.example.test/api/internal/hosted-execution/usage/cron", {
         headers: {
@@ -200,64 +198,51 @@ describe("hosted execution async routes", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(mocks.requireHostedExecutionSchedulerToken).toHaveBeenCalledTimes(1);
+    expect(mocks.drainHostedPendingAiUsageImports).toHaveBeenCalledTimes(1);
     expect(mocks.drainHostedAiUsageStripeMetering).toHaveBeenCalledTimes(1);
     await expect(response.json()).resolves.toEqual({
-      configured: true,
-      failed: 0,
-      metered: 1,
-      skipped: 1,
+      imported: {
+        failedUsers: 0,
+        imported: 2,
+        scannedUsers: 3,
+      },
+      metered: {
+        configured: true,
+        failed: 0,
+        metered: 1,
+        skipped: 1,
+      },
     });
   });
 
-  it("records posted hosted AI usage rows through the internal route", async () => {
-    const response = await hostedExecutionUsageRecordRoute.POST(
-      new Request("https://join.example.test/api/internal/hosted-execution/usage/record", {
-        method: "POST",
+  it("continues Stripe metering even when pending-usage import throws", async () => {
+    mocks.drainHostedPendingAiUsageImports.mockRejectedValue(new Error("worker unavailable"));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await hostedExecutionUsageCronRoute.GET(
+      new Request("https://join.example.test/api/internal/hosted-execution/usage/cron", {
         headers: {
-          authorization: "Bearer internal-token",
-          "content-type": "application/json",
-          "x-hosted-execution-user-id": "member_123",
+          authorization: "Bearer cron-token",
         },
-        body: JSON.stringify({
-          usage: [
-            {
-              memberId: "member_123",
-              usageId: "usage_1",
-            },
-            {
-              memberId: "member_123",
-              usageId: "usage_2",
-            },
-          ],
-        }),
       }),
     );
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.authorizeHostedExecutionInternalRequest).toHaveBeenCalledWith({
-      acceptedToken: "internal",
-      bodyUserIdLabel: "memberId",
-      bodyUserIds: ["member_123", "member_123"],
-      request: expect.any(Request),
-      requireBoundUserId: true,
-    });
-    expect(mocks.importHostedAiUsageRecords).toHaveBeenCalledWith({
-      trustedUserId: "member_123",
-      usage: [
-        {
-          memberId: "member_123",
-          usageId: "usage_1",
-        },
-        {
-          memberId: "member_123",
-          usageId: "usage_2",
-        },
-      ],
-    });
+    expect(mocks.drainHostedPendingAiUsageImports).toHaveBeenCalledTimes(1);
+    expect(mocks.drainHostedAiUsageStripeMetering).toHaveBeenCalledTimes(1);
+    expect(consoleError).toHaveBeenCalledWith(
+      "Hosted pending AI usage import failed.",
+      "worker unavailable",
+    );
     await expect(response.json()).resolves.toEqual({
-      recorded: 2,
-      usageIds: ["usage_1", "usage_2"],
+      importError: "worker unavailable",
+      imported: null,
+      metered: {
+        configured: true,
+        failed: 0,
+        metered: 1,
+        skipped: 1,
+      },
     });
   });
 

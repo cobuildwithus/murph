@@ -50,12 +50,26 @@ export interface WorkerUserRunnerStubLike {
   gatewayPollEvents?(input?: GatewayPollEventsInput): Promise<GatewayPollEventsResult>;
   gatewayReadMessages?(input: GatewayReadMessagesInput): Promise<GatewayReadMessagesResult>;
   gatewayRespondToPermission?(input: GatewayRespondToPermissionInput): Promise<GatewayPermissionRequest | null>;
+  putDeviceSyncRuntimeSnapshot?(input: {
+    snapshot: import("@murphai/hosted-execution").HostedExecutionDeviceSyncRuntimeSnapshotResponse;
+  }): Promise<import("@murphai/hosted-execution").HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
+  putPendingUsage?(input: {
+    usage: readonly Record<string, unknown>[];
+  }): Promise<{ recorded: number; usageIds: string[] }>;
+  putSharePack?(input: {
+    pack: import("@murphai/hosted-execution").HostedExecutionSharePackResponse;
+  }): Promise<import("@murphai/hosted-execution").HostedExecutionSharePackResponse>;
+  putUserKeyEnvelope?(input: {
+    envelope: HostedUserRootKeyEnvelope;
+  }): Promise<HostedUserRootKeyEnvelope>;
+  readPendingUsage?(input?: { limit?: number | null }): Promise<Record<string, unknown>[]>;
   upsertUserKeyRecipient?(input: {
     kind: HostedUserManagedRootKeyRecipientKind;
     metadata?: Record<string, string | number | boolean | null>;
-    recipientKey: Uint8Array;
     recipientKeyId: string;
+    recipientPublicKeyJwk: import("@murphai/runtime-state").HostedUserRecipientPublicKeyJwk;
   }): Promise<HostedUserRootKeyEnvelope>;
+  deletePendingUsage?(input: { usageIds: readonly string[] }): Promise<void>;
 }
 
 export interface WorkerUserRunnerNamespaceLike<
@@ -80,16 +94,18 @@ export interface WorkerEnvironmentContract<
   HOSTED_ASSISTANT_PROVIDER_NAME?: string;
   HOSTED_ASSISTANT_REASONING_EFFORT?: string;
   HOSTED_ASSISTANT_SANDBOX?: string;
+  HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID?: string;
+  HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK?: string;
+  HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON?: string;
+  HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK?: string;
   HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY?: string;
   HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID?: string;
   HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON?: string;
-  HOSTED_EXECUTION_INTERNAL_TOKENS?: string;
   HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS?: string;
   HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS?: string;
   HOSTED_EXECUTION_RETRY_DELAY_MS?: string;
   HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?: string;
   HOSTED_EXECUTION_SIGNING_SECRET?: string;
-  HOSTED_EXECUTION_SCHEDULER_TOKENS?: string;
   HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID?: string;
   HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL?: string;
   HOSTED_EMAIL_CLOUDFLARE_API_TOKEN?: string;
@@ -98,6 +114,5 @@ export interface WorkerEnvironmentContract<
   HOSTED_EMAIL_FROM_ADDRESS?: string;
   HOSTED_EMAIL_LOCAL_PART?: string;
   HOSTED_EMAIL_SIGNING_SECRET?: string;
-  HOSTED_WEB_BASE_URL?: string;
   USER_RUNNER: WorkerUserRunnerNamespaceLike<TStub>;
 }

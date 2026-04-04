@@ -29,6 +29,11 @@ import {
 import { createHostedPendingUsageStore } from "../src/usage-store.js";
 import { createHostedUserKeyStore } from "../src/user-key-store.js";
 import { HostedUserRunner } from "../src/user-runner.js";
+import {
+  TEST_AUTOMATION_RECIPIENT_KEY_ID,
+  TEST_AUTOMATION_RECIPIENT_PRIVATE_JWK,
+  TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK,
+} from "./hosted-execution-fixtures";
 import { createTestSqlStorage } from "./sql-storage.js";
 
 const describe = baseDescribe.sequential;
@@ -39,6 +44,12 @@ describe("HostedUserRunner", () => {
   const environment = {
     allowedUserEnvKeys: null,
     allowedUserEnvPrefixes: null,
+    automationRecipientKeyId: TEST_AUTOMATION_RECIPIENT_KEY_ID,
+    automationRecipientPrivateKey: TEST_AUTOMATION_RECIPIENT_PRIVATE_JWK,
+    automationRecipientPrivateKeysById: {
+      [TEST_AUTOMATION_RECIPIENT_KEY_ID]: TEST_AUTOMATION_RECIPIENT_PRIVATE_JWK,
+    },
+    automationRecipientPublicKey: TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK,
     bundleEncryptionKey: Uint8Array.from({ length: 32 }, () => 7),
     bundleEncryptionKeyId: "v1",
     bundleEncryptionKeysById: {
@@ -825,32 +836,10 @@ describe("HostedUserRunner", () => {
     expect(updatedEvents.events.map((event) => event.kind)).toContain("conversation.updated");
   });
 
-  it("flushes pending hosted AI usage into hosted web when worker-side cleanup runs", async () => {
-    const runner = new HostedUserRunner(
-      storage.state,
-      environment,
-      bucket.api,
-      {
-        HOSTED_EXECUTION_INTERNAL_TOKENS: "internal-token",
-        HOSTED_WEB_BASE_URL: "https://web.example.test",
-      },
-    );
+  it("stores pending hosted AI usage in worker-owned storage and supports read/delete", async () => {
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     await runner.bootstrapUser("member_123");
-
-    const crypto = await createHostedUserKeyStore({
-      automationKey: environment.bundleEncryptionKey,
-      automationKeyId: environment.bundleEncryptionKeyId,
-      bucket: bucket.api,
-      envelopeKeyId: environment.bundleEncryptionKeyId,
-      envelopeKeysById: environment.bundleEncryptionKeysById,
-    }).ensureUserCryptoContext("member_123");
-    const usageStore = createHostedPendingUsageStore({
-      bucket: bucket.api,
-      key: crypto.rootKey,
-      keyId: crypto.rootKeyId,
-      keysById: crypto.keysById,
-    });
-    await usageStore.appendUsage({
+    await expect(runner.putPendingUsage({
       usage: [{
         apiKeyEnv: null,
         attemptCount: 1,
@@ -878,43 +867,19 @@ describe("HostedUserRunner", () => {
         turnId: "turn_usage_flush",
         usageId: "turn_usage_flush.attempt-1",
       }],
-      userId: "member_123",
+    })).resolves.toEqual({
+      recorded: 1,
+      usageIds: ["turn_usage_flush.attempt-1"],
     });
 
-    const previousFetch = globalThis.fetch;
-    const fetchSpy = vi.fn(async () =>
-      new Response(JSON.stringify({
-        recorded: 1,
-        usageIds: ["turn_usage_flush.attempt-1"],
-      }), {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      }));
-    vi.stubGlobal("fetch", fetchSpy);
-
-    try {
-      await (runner as unknown as {
-        flushPendingUsageBestEffort(userId: string): Promise<void>;
-      }).flushPendingUsageBestEffort("member_123");
-    } finally {
-      vi.stubGlobal("fetch", previousFetch);
-    }
-
-    expect(fetchSpy).toHaveBeenCalledWith(
-      "https://web.example.test/api/internal/hosted-execution/usage/record",
-      expect.objectContaining({
-        method: "POST",
-      }),
-    );
-    expect(new Headers(fetchSpy.mock.calls[0]?.[1]?.headers).get("authorization")).toBe("Bearer internal-token");
-    expect(new Headers(fetchSpy.mock.calls[0]?.[1]?.headers).get("x-hosted-execution-user-id")).toBe("member_123");
-    expect(String(fetchSpy.mock.calls[0]?.[1]?.body)).toContain("\"usageId\":\"turn_usage_flush.attempt-1\"");
-    await expect(usageStore.readUsage({
-      limit: 50,
-      userId: "member_123",
-    })).resolves.toEqual([]);
+    await expect(runner.readPendingUsage({ limit: 50 })).resolves.toEqual([expect.objectContaining({
+      memberId: "member_123",
+      usageId: "turn_usage_flush.attempt-1",
+    })]);
+    await expect(runner.deletePendingUsage({
+      usageIds: ["turn_usage_flush.attempt-1"],
+    })).resolves.toBeUndefined();
+    await expect(runner.readPendingUsage({ limit: 50 })).resolves.toEqual([]);
   });
 
   it("reapplies committed gateway snapshots from the durable journal before finalize completes", async () => {
@@ -2804,7 +2769,7 @@ describe("HostedUserRunner", () => {
     });
     expect(bucket.keys()).toEqual(expect.arrayContaining([
       await userEnvObjectKeyForTest(crypto.rootKey, "member_123"),
-      "users/keys/member_123.json",
+      await userKeyEnvelopeObjectKeyForTest(environment.bundleEncryptionKey, "member_123"),
     ]));
     await expect(runner.getUserEnvStatus("member_123")).resolves.toEqual({
       configuredUserEnvKeys: ["OPENAI_API_KEY", "XAI_API_KEY"],
@@ -3344,6 +3309,20 @@ async function userEnvObjectKeyForTest(rootKey: Uint8Array, userId: string): Pro
   return `users/env/${userSegment}.json`;
 }
 
+async function userKeyEnvelopeObjectKeyForTest(
+  envelopeEncryptionKey: Uint8Array,
+  userId: string,
+): Promise<string> {
+  const userSegment = await deriveHostedStorageOpaqueId({
+    length: 24,
+    rootKey: envelopeEncryptionKey,
+    scope: "user-key-envelope-path",
+    value: `user:${userId}`,
+  });
+
+  return `users/keys/${userSegment}.json`;
+}
+
 function createGatewayProjectionSnapshot(input: {
   generatedAt: string;
   lastActivityAt: string;
@@ -3592,10 +3571,13 @@ async function resolveHostedUserCryptoContextForTest(input: {
   userId: string;
 }) {
   return createHostedUserKeyStore({
-    automationKey: input.environment.bundleEncryptionKey,
-    automationKeyId: input.environment.bundleEncryptionKeyId,
+    automationRecipientKeyId: input.environment.automationRecipientKeyId,
+    automationRecipientPrivateKey: input.environment.automationRecipientPrivateKey,
+    automationRecipientPrivateKeysById: input.environment.automationRecipientPrivateKeysById,
+    automationRecipientPublicKey: input.environment.automationRecipientPublicKey,
     bucket: input.bucket.api,
-    envelopeKeyId: input.environment.bundleEncryptionKeyId,
-    envelopeKeysById: input.environment.bundleEncryptionKeysById,
+    envelopeEncryptionKey: input.environment.bundleEncryptionKey,
+    envelopeEncryptionKeyId: input.environment.bundleEncryptionKeyId,
+    envelopeEncryptionKeysById: input.environment.bundleEncryptionKeysById,
   }).ensureUserCryptoContext(input.userId);
 }

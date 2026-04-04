@@ -20,6 +20,7 @@ import worker, { ContainerProxy as ExportedContainerProxy, UserRunnerDurableObje
 import { createHostedUserKeyStore } from "../src/user-key-store.ts";
 import { encodeHostedUserEnvPayload } from "../src/user-env.ts";
 import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
+import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures";
 import { createTestSqlStorage } from "./sql-storage.ts";
 
 const describe = baseDescribe.sequential;
@@ -257,7 +258,9 @@ describe("cloudflare worker routes", () => {
     expect(harness.bucket.keys()).toContainEqual(expect.stringMatching(
       /^transient\/execution-journal\/[0-9a-f]+\/[0-9a-f]+\.json$/u,
     ));
-    expect(harness.bucket.keys()).toContain("users/keys/member_123.json");
+    await expect(hostedUserKeyEnvelopeObjectKeyForTest(harness.env, "member_123")).resolves.toSatisfy(
+      (expectedKey) => harness.bucket.keys().includes(expectedKey),
+    );
     expect(harness.bucket.keys()).toHaveLength(4);
     const journalStore = await createHostedExecutionJournalStoreForTest(harness.env, "member_123");
     await expect(journalStore.readCommittedResult("member_123", "evt_commit")).resolves.toMatchObject({
@@ -319,7 +322,9 @@ describe("cloudflare worker routes", () => {
       "Hosted artifact hash mismatch: expected fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b",
     );
     expect(harness.bucket.keys()).toHaveLength(1);
-    expect(harness.bucket.keys()[0]).toBe("users/keys/member_123.json");
+    await expect(hostedUserKeyEnvelopeObjectKeyForTest(harness.env, "member_123")).resolves.toBe(
+      harness.bucket.keys()[0],
+    );
   });
 
   it("keeps hosted artifact objects isolated per user", async () => {
@@ -2082,15 +2087,15 @@ function createWorkerEnv(
 
   return {
     __bucketStore: bucketStore,
-    BUNDLES: bucketStore.api,
-    HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
-    HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
-    RUNNER_CONTAINER: createStorage().runnerContainerNamespace,
-    USER_RUNNER: {
-      getByName() {
-        return userRunnerStub;
+    ...createHostedExecutionTestEnv({
+      BUNDLES: bucketStore.api,
+      RUNNER_CONTAINER: createStorage().runnerContainerNamespace,
+      USER_RUNNER: {
+        getByName() {
+          return userRunnerStub;
+        },
       },
-    },
+    }),
     ...overrides,
   };
 }
@@ -2473,6 +2478,23 @@ async function hostedArtifactObjectKeyForTest(
   return artifactObjectKey(crypto.rootKey, userId, sha256);
 }
 
+async function hostedUserKeyEnvelopeObjectKeyForTest(
+  env: ReturnType<typeof createWorkerEnv> | ReturnType<typeof createUserRunnerDurableObject>["env"],
+  userId: string,
+): Promise<string> {
+  const environment = readHostedExecutionEnvironment(
+    env as unknown as Readonly<Record<string, string | undefined>>,
+  );
+  const userSegment = await deriveHostedStorageOpaqueId({
+    length: 24,
+    rootKey: environment.bundleEncryptionKey,
+    scope: "user-key-envelope-path",
+    value: `user:${userId}`,
+  });
+
+  return `users/keys/${userSegment}.json`;
+}
+
 async function resolveHostedUserCryptoContextForTest(
   env: ReturnType<typeof createWorkerEnv> | ReturnType<typeof createUserRunnerDurableObject>["env"],
   userId: string,
@@ -2482,11 +2504,14 @@ async function resolveHostedUserCryptoContextForTest(
   );
 
   return createHostedUserKeyStore({
-    automationKey: environment.bundleEncryptionKey,
-    automationKeyId: environment.bundleEncryptionKeyId,
+    automationRecipientKeyId: environment.automationRecipientKeyId,
+    automationRecipientPrivateKey: environment.automationRecipientPrivateKey,
+    automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
+    automationRecipientPublicKey: environment.automationRecipientPublicKey,
     bucket: env.BUNDLES,
-    envelopeKeyId: environment.bundleEncryptionKeyId,
-    envelopeKeysById: environment.bundleEncryptionKeysById,
+    envelopeEncryptionKey: environment.bundleEncryptionKey,
+    envelopeEncryptionKeyId: environment.bundleEncryptionKeyId,
+    envelopeEncryptionKeysById: environment.bundleEncryptionKeysById,
   }).ensureUserCryptoContext(userId);
 }
 
@@ -2495,14 +2520,11 @@ function createUserRunnerDurableObject(
 ) {
   const bucket = createBucketStore();
   const storage = createStorage();
-  const env = {
+  const env = createHostedExecutionTestEnv({
     BUNDLES: bucket.api,
-    HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
-    HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
-    HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
     RUNNER_CONTAINER: storage.runnerContainerNamespace,
     ...overrides,
-  };
+  });
   const durableObject = new UserRunnerDurableObject(storage.state, env as never);
 
   return {

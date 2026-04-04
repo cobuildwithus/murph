@@ -1,36 +1,34 @@
+import type {
+  HostedUserManagedRootKeyRecipientKind,
+  HostedUserRecipientPublicKeyJwk,
+  HostedUserRootKeyEnvelope,
+} from "@murphai/runtime-state";
 import {
-  createHostedExecutionControlClient,
-  readHostedExecutionControlEnvironment,
+  readHostedExecutionAutomationRecipientPublicKeyJwk,
   type HostedExecutionUserRootKeyRecipientUpsert,
 } from "@murphai/hosted-execution";
-import type {
-  HostedUserRootKeyEnvelope,
-  HostedUserManagedRootKeyRecipientKind,
-} from "@murphai/runtime-state";
 
-import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import { requireHostedExecutionControlClient } from "./control";
 
-function requireHostedExecutionKeyControlClient() {
-  const environment = readHostedExecutionControlEnvironment();
-
-  if (!environment.baseUrl || !environment.signingSecret) {
-    throw hostedOnboardingError({
-      code: "HOSTED_EXECUTION_CONTROL_NOT_CONFIGURED",
-      message: "Hosted execution control is not configured yet. Contact support to finish setup.",
-      httpStatus: 500,
-    });
+export function requireHostedExecutionAutomationRecipientPublicKey(): HostedUserRecipientPublicKeyJwk {
+  const key = readHostedExecutionAutomationRecipientPublicKeyJwk();
+  if (!key) {
+    throw new Error("HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK is not configured.");
   }
-
-  return createHostedExecutionControlClient({
-    baseUrl: environment.baseUrl,
-    signingSecret: environment.signingSecret,
-  });
+  return key;
 }
 
 export async function readHostedUserRootKeyEnvelope(
   userId: string,
 ): Promise<HostedUserRootKeyEnvelope> {
-  return requireHostedExecutionKeyControlClient().getUserKeyEnvelope(userId);
+  return requireHostedExecutionControlClient().getUserKeyEnvelope(userId);
+}
+
+export async function putHostedUserRootKeyEnvelope(input: {
+  envelope: HostedUserRootKeyEnvelope;
+  userId: string;
+}): Promise<HostedUserRootKeyEnvelope> {
+  return requireHostedExecutionControlClient().putUserKeyEnvelope(input.userId, input.envelope);
 }
 
 export async function upsertHostedUserRootKeyRecipient(input: {
@@ -38,7 +36,7 @@ export async function upsertHostedUserRootKeyRecipient(input: {
   recipient: HostedExecutionUserRootKeyRecipientUpsert;
   userId: string;
 }): Promise<HostedUserRootKeyEnvelope> {
-  return requireHostedExecutionKeyControlClient().upsertUserKeyRecipient(
+  return requireHostedExecutionControlClient().upsertUserKeyRecipient(
     input.userId,
     input.kind,
     input.recipient,

@@ -80,24 +80,6 @@ export function readHostedSharePack(record: {
   };
 }
 
-export function readHostedSharePreview(
-  previewJson: unknown,
-  fallbackPack: SharePack | (() => SharePack),
-): HostedSharePreview {
-  if (previewJson && typeof previewJson === "object" && !Array.isArray(previewJson)) {
-    try {
-      return JSON.parse(JSON.stringify(previewJson)) as HostedSharePreview;
-    } catch {
-      return buildHostedSharePreview(
-        typeof fallbackPack === "function" ? fallbackPack() : fallbackPack,
-      );
-    }
-  }
-
-  return buildHostedSharePreview(typeof fallbackPack === "function" ? fallbackPack() : fallbackPack);
-}
-
-
 export async function releaseHostedShareAcceptance(input: {
   memberId: string;
   prisma: HostedSharePrismaClient;
@@ -132,7 +114,6 @@ export async function finalizeHostedShareAcceptance(input: {
       acceptedByMemberId: input.memberId,
       consumedAt: null,
       id: input.shareId,
-      lastEventId: input.eventId,
     },
     data: {
       acceptedAt: new Date(),
@@ -178,7 +159,6 @@ export function buildHostedShareAcceptanceDispatch(input: {
   acceptedAt: string;
   eventId: string;
   memberId: string;
-  pack?: SharePack;
   shareId: string;
 }): HostedExecutionDispatchRequest {
   return buildHostedExecutionVaultShareAcceptedDispatch({
@@ -186,7 +166,6 @@ export function buildHostedShareAcceptanceDispatch(input: {
     memberId: input.memberId,
     occurredAt: input.acceptedAt,
     share: {
-      ...(input.pack ? { pack: input.pack } : {}),
       shareId: input.shareId,
     },
   });

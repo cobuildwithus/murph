@@ -7,8 +7,8 @@ import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
   buildHostedShareAcceptanceDispatch,
   buildHostedShareAcceptanceEventId,
+  buildHostedSharePreview,
   readHostedSharePack,
-  readHostedSharePreview,
   requireHostedShareLink,
   hashHostedShareCode,
   normalizeOptionalString,
@@ -113,7 +113,6 @@ export async function acceptHostedShareLink(input: {
         acceptedAt: acceptedAt.toISOString(),
         eventId,
         memberId,
-        pack: readHostedSharePack(record).pack,
         shareId: record.id,
       }),
       sourceId: record.id,
@@ -127,10 +126,7 @@ export async function acceptHostedShareLink(input: {
     };
   });
   const sharePack = readHostedSharePack(claim.record).pack;
-  const preview = readHostedSharePreview(
-    claim.record.previewJson,
-    () => sharePack,
-  );
+  const preview = buildHostedSharePreview(sharePack);
 
   if (claim.outcome === "alreadyImported") {
     return {

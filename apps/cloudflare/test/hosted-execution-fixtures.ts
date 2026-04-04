@@ -1,0 +1,39 @@
+export const TEST_AUTOMATION_RECIPIENT_KEY_ID = "automation:v1";
+
+export const TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK = {
+  crv: "P-256",
+  ext: true,
+  key_ops: [] as string[],
+  kty: "EC",
+  x: "xSelVJv6r6LPUS8GCNgj1T_7z5GXOrhgY1cCdzGb5ao",
+  y: "8HhciS1cAPKs_fPfgZnb1USdRtBX-4Nvp8XiBHuMcmY",
+} as const;
+
+export const TEST_AUTOMATION_RECIPIENT_PRIVATE_JWK = {
+  ...TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK,
+  d: "HAPljluiFVW3g-UEmrJ9NVYTlclAhaC8N5LT0h7vitQ",
+  key_ops: ["deriveBits"] as string[],
+} as const;
+
+export const TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK_JSON = JSON.stringify(
+  TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK,
+);
+
+export const TEST_AUTOMATION_RECIPIENT_PRIVATE_JWK_JSON = JSON.stringify(
+  TEST_AUTOMATION_RECIPIENT_PRIVATE_JWK,
+);
+
+export function createHostedExecutionTestEnv(
+  overrides: Partial<Record<string, unknown>> = {},
+): Record<string, unknown> {
+  return {
+    HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID: TEST_AUTOMATION_RECIPIENT_KEY_ID,
+    HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK:
+      TEST_AUTOMATION_RECIPIENT_PRIVATE_JWK_JSON,
+    HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK:
+      TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK_JSON,
+    HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
+    HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
+    ...overrides,
+  };
+}

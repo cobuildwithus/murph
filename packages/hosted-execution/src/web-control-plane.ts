@@ -3,6 +3,8 @@ import type {
   HostedExecutionDeviceSyncRuntimeApplyResponse,
   HostedExecutionDeviceSyncRuntimeSnapshotRequest,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
+  HostedExecutionSharePackResponse,
+  HostedExecutionShareReference,
 } from "./contracts.ts";
 import { HOSTED_EXECUTION_USER_ID_HEADER } from "./contracts.ts";
 import { HOSTED_EXECUTION_PROXY_HOSTS } from "./callback-hosts.ts";
@@ -10,11 +12,13 @@ import { normalizeHostedExecutionBaseUrl } from "./env.ts";
 import {
   parseHostedExecutionDeviceSyncRuntimeApplyResponse,
   parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
+  parseHostedExecutionSharePackResponse,
 } from "./parsers.ts";
 import {
   HOSTED_EXECUTION_AI_USAGE_RECORD_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
+  buildHostedExecutionSharePayloadPath,
 } from "./routes.ts";
 
 export interface HostedExecutionAiUsageRecordRequest {
@@ -37,6 +41,7 @@ interface HostedExecutionUserBoundWebControlPlaneRequester {
 }
 
 interface HostedExecutionUserBoundWebControlPlaneRequesterOptions {
+  authorizationToken?: string | null;
   baseUrl: string;
   boundUserId: string;
   fetchImpl?: typeof fetch;
@@ -56,6 +61,13 @@ export interface HostedExecutionProxyDeviceSyncRuntimeClient {
 
 export interface HostedExecutionServerDeviceSyncRuntimeClient
   extends HostedExecutionProxyDeviceSyncRuntimeClient {}
+
+export interface HostedExecutionProxySharePackClient {
+  fetchSharePack(share: HostedExecutionShareReference): Promise<HostedExecutionSharePackResponse>;
+}
+
+export interface HostedExecutionServerSharePackClient
+  extends HostedExecutionProxySharePackClient {}
 
 
 export interface HostedExecutionProxyAiUsageClient {
@@ -131,15 +143,63 @@ export function resolveHostedExecutionDeviceSyncRuntimeClient(input: {
     timeoutMs: input.timeoutMs,
   });
 
-  if (!requester) {
-    return null;
-  }
-
-  return buildHostedExecutionDeviceSyncRuntimeClient(requester, input.boundUserId);
+  return requester ? buildHostedExecutionDeviceSyncRuntimeClient(requester, input.boundUserId) : null;
 }
 
+export function createHostedExecutionProxySharePackClient(input: {
+  baseUrl: string;
+  boundUserId: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number | null;
+}): HostedExecutionProxySharePackClient {
+  return buildHostedExecutionSharePackClient(
+    createHostedExecutionProxyRequester({
+      baseUrl: input.baseUrl,
+      boundUserId: input.boundUserId,
+      fetchImpl: input.fetchImpl,
+      proxyHost: HOSTED_EXECUTION_PROXY_HOSTS.sharePack,
+      timeoutMs: input.timeoutMs ?? null,
+    }),
+  );
+}
 
+export function createHostedExecutionServerSharePackClient(input: {
+  baseUrl: string;
+  boundUserId: string;
+  fetchImpl?: typeof fetch;
+  shareToken: string;
+  timeoutMs?: number | null;
+}): HostedExecutionServerSharePackClient {
+  return buildHostedExecutionSharePackClient(
+    createHostedExecutionServerRequester({
+      authorizationToken: input.shareToken,
+      baseUrl: input.baseUrl,
+      boundUserId: input.boundUserId,
+      fetchImpl: input.fetchImpl,
+      timeoutMs: input.timeoutMs ?? null,
+    }),
+  );
+}
 
+export function resolveHostedExecutionSharePackClient(input: {
+  baseUrl: string | null | undefined;
+  boundUserId: string;
+  fetchImpl?: typeof fetch;
+  shareToken?: string | null;
+  timeoutMs?: number | null;
+}): HostedExecutionProxySharePackClient | HostedExecutionServerSharePackClient | null {
+  const requester = resolveHostedExecutionUserBoundRequester({
+    authorizationToken: input.shareToken,
+    baseUrl: input.baseUrl,
+    boundUserId: input.boundUserId,
+    fetchImpl: input.fetchImpl,
+    isProxyBaseUrl: isHostedExecutionSharePackProxyBaseUrl,
+    proxyHost: HOSTED_EXECUTION_PROXY_HOSTS.sharePack,
+    timeoutMs: input.timeoutMs,
+  });
+
+  return requester ? buildHostedExecutionSharePackClient(requester) : null;
+}
 
 export function createHostedExecutionProxyAiUsageClient(input: {
   baseUrl: string;
@@ -193,15 +253,15 @@ export function resolveHostedExecutionAiUsageClient(input: {
     timeoutMs: input.timeoutMs,
   });
 
-  if (!requester) {
-    return null;
-  }
-
-  return buildHostedExecutionAiUsageClient(requester);
+  return requester ? buildHostedExecutionAiUsageClient(requester) : null;
 }
 
 export function isHostedExecutionDeviceSyncProxyBaseUrl(baseUrl: string): boolean {
   return isHostedWorkerProxyBaseUrl(baseUrl, HOSTED_EXECUTION_PROXY_HOSTS.deviceSync);
+}
+
+export function isHostedExecutionSharePackProxyBaseUrl(baseUrl: string): boolean {
+  return isHostedWorkerProxyBaseUrl(baseUrl, HOSTED_EXECUTION_PROXY_HOSTS.sharePack);
 }
 
 
@@ -243,6 +303,30 @@ function buildHostedExecutionDeviceSyncRuntimeClient(
   };
 }
 
+function buildHostedExecutionSharePackClient(
+  requester: HostedExecutionUserBoundWebControlPlaneRequester,
+): HostedExecutionProxySharePackClient {
+  return {
+    fetchSharePack(share) {
+      if (share.pack) {
+        return Promise.resolve(
+          parseHostedExecutionSharePackResponse({
+            pack: share.pack,
+            shareId: share.shareId,
+          }),
+        );
+      }
+
+      return requester.requestJson({
+        label: "Hosted share payload fetch",
+        method: "POST",
+        parse: parseHostedExecutionSharePackResponse,
+        path: buildHostedExecutionSharePayloadPath(share.shareId),
+      });
+    },
+  };
+}
+
 
 function buildHostedExecutionAiUsageClient(
   requester: HostedExecutionUserBoundWebControlPlaneRequester,
@@ -263,9 +347,7 @@ function buildHostedExecutionAiUsageClient(
 }
 
 function createHostedExecutionProxyRequester(
-  input: HostedExecutionUserBoundWebControlPlaneRequesterOptions & {
-    proxyHost: string;
-  },
+  input: HostedExecutionUserBoundWebControlPlaneRequesterOptions & { proxyHost: string },
 ): HostedExecutionUserBoundWebControlPlaneRequester {
   return createHostedExecutionUserBoundRequester({
     baseUrl: requireHostedExecutionWorkerProxyBaseUrl(input.baseUrl, input.proxyHost),
@@ -276,9 +358,7 @@ function createHostedExecutionProxyRequester(
 }
 
 function createHostedExecutionServerRequester(
-  input: HostedExecutionUserBoundWebControlPlaneRequesterOptions & {
-    authorizationToken: string;
-  },
+  input: HostedExecutionUserBoundWebControlPlaneRequesterOptions & { authorizationToken: string },
 ): HostedExecutionUserBoundWebControlPlaneRequester {
   return createHostedExecutionUserBoundRequester({
     authorizationToken: requireHostedExecutionAuthorizationToken(input.authorizationToken),
@@ -292,15 +372,15 @@ function createHostedExecutionServerRequester(
 function resolveHostedExecutionUserBoundRequester(
   input: HostedExecutionUserBoundRequesterResolutionInput,
 ): HostedExecutionUserBoundWebControlPlaneRequester | null {
-  const { baseUrl } = input;
+  const normalizedBaseUrl = input.baseUrl ? requireHostedExecutionWebControlBaseUrl(input.baseUrl) : null;
 
-  if (!baseUrl) {
+  if (!normalizedBaseUrl) {
     return null;
   }
 
-  if (input.isProxyBaseUrl(baseUrl)) {
+  if (input.isProxyBaseUrl(normalizedBaseUrl)) {
     return createHostedExecutionProxyRequester({
-      baseUrl,
+      baseUrl: normalizedBaseUrl,
       boundUserId: input.boundUserId,
       fetchImpl: input.fetchImpl,
       proxyHost: input.proxyHost,
@@ -314,20 +394,16 @@ function resolveHostedExecutionUserBoundRequester(
 
   return createHostedExecutionServerRequester({
     authorizationToken: input.authorizationToken,
-    baseUrl,
+    baseUrl: normalizedBaseUrl,
     boundUserId: input.boundUserId,
     fetchImpl: input.fetchImpl,
     timeoutMs: input.timeoutMs ?? null,
   });
 }
 
-function createHostedExecutionUserBoundRequester(input: {
-  authorizationToken?: string | null;
-  baseUrl: string;
-  boundUserId: string;
-  fetchImpl?: typeof fetch;
-  timeoutMs: number | null;
-}): HostedExecutionUserBoundWebControlPlaneRequester {
+function createHostedExecutionUserBoundRequester(
+  input: HostedExecutionUserBoundWebControlPlaneRequesterOptions,
+): HostedExecutionUserBoundWebControlPlaneRequester {
   return {
     requestJson<TResponse>(request: {
       body?: Record<string, unknown>;
@@ -337,6 +413,7 @@ function createHostedExecutionUserBoundRequester(input: {
       path: string;
     }) {
       return requestHostedExecutionWebControlPlaneJson({
+        authorizationToken: input.authorizationToken ?? null,
         body: request.body,
         boundUserId: input.boundUserId,
         fetchImpl: input.fetchImpl,
@@ -344,8 +421,7 @@ function createHostedExecutionUserBoundRequester(input: {
         method: request.method,
         parse: request.parse,
         path: request.path,
-        timeoutMs: input.timeoutMs,
-        authorizationToken: input.authorizationToken ?? null,
+        timeoutMs: input.timeoutMs ?? null,
         url: input.baseUrl,
       });
     },
@@ -431,7 +507,7 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
 }): Promise<Response> {
   const fetchImpl = input.fetchImpl ?? fetch;
   const targetUrl = new URL(
-    input.path.replace(/^\/+/u, ""),
+    input.path.replace(/^\/+/, ""),
     `${requireHostedExecutionWebControlBaseUrl(input.baseUrl)}/`,
   );
 
@@ -453,6 +529,7 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
 }
 
 async function requestHostedExecutionWebControlPlaneJson<TResponse>(input: {
+  authorizationToken?: string | null;
   body?: Record<string, unknown>;
   boundUserId: string;
   fetchImpl?: typeof fetch;
@@ -461,7 +538,6 @@ async function requestHostedExecutionWebControlPlaneJson<TResponse>(input: {
   parse: (value: unknown) => TResponse;
   path: string;
   timeoutMs: number | null;
-  authorizationToken?: string | null;
   url: string;
 }): Promise<TResponse> {
   const response = await fetchHostedExecutionWebControlPlaneResponse({

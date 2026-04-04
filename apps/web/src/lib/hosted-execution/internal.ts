@@ -1,5 +1,3 @@
-import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution";
-
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
 type HostedExecutionAcceptedRouteToken = "internal" | "scheduler" | "share";
@@ -15,11 +13,8 @@ function normalizeOptionalString(value: string | null | undefined): string | nul
 
 export function authorizeHostedExecutionInternalRequest(input: {
   acceptedToken: HostedExecutionAcceptedRouteToken;
-  bodyUserIds?: readonly (string | null | undefined)[];
-  bodyUserIdLabel?: string;
   request: Request;
-  requireBoundUserId?: boolean;
-}): { trustedUserId: string | null } {
+}): void {
   const { requiredCode, requiredMessage, tokens, unauthorizedCode, unauthorizedMessage } =
     readHostedExecutionAcceptedRouteTokens(input.acceptedToken);
 
@@ -39,27 +34,6 @@ export function authorizeHostedExecutionInternalRequest(input: {
       httpStatus: 401,
     });
   }
-
-  const trustedUserId = input.requireBoundUserId ? requireHostedExecutionUserId(input.request) : null;
-  const expectedUserId = trustedUserId ?? null;
-
-  if (expectedUserId && input.bodyUserIds) {
-    const mismatchedUserId = input.bodyUserIds
-      .map((value) => normalizeOptionalString(value))
-      .find((value) => value !== null && value !== expectedUserId);
-
-    if (mismatchedUserId) {
-      throw hostedOnboardingError({
-        code: "INVALID_REQUEST",
-        message: `${input.bodyUserIdLabel ?? "userId"} must match the authenticated hosted execution user.`,
-        httpStatus: 400,
-      });
-    }
-  }
-
-  return {
-    trustedUserId,
-  };
 }
 
 export function requireHostedExecutionInternalToken(request: Request): void {
@@ -81,20 +55,6 @@ export function requireHostedShareInternalToken(request: Request): void {
     acceptedToken: "share",
     request,
   });
-}
-
-export function requireHostedExecutionUserId(request: Request): string {
-  const userId = normalizeOptionalString(request.headers.get(HOSTED_EXECUTION_USER_ID_HEADER));
-
-  if (!userId) {
-    throw hostedOnboardingError({
-      code: "HOSTED_EXECUTION_USER_REQUIRED",
-      message: "Hosted execution user binding is required.",
-      httpStatus: 400,
-    });
-  }
-
-  return userId;
 }
 
 function readHostedExecutionAcceptedRouteTokens(kind: HostedExecutionAcceptedRouteToken): {
@@ -136,7 +96,6 @@ function readHostedExecutionAcceptedRouteTokens(kind: HostedExecutionAcceptedRou
 function readTokenListFromEnv(...keys: string[]): string[] {
   return Array.from(new Set(keys.flatMap((key) => {
     const explicit = normalizeOptionalString(process.env[key]);
-
     if (!explicit) {
       return [];
     }

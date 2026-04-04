@@ -109,7 +109,6 @@ describe("hosted share service", () => {
     expect(result.preview.counts.foods).toBe(1);
     expect(prisma.rows).toHaveLength(1);
     expect(prisma.rows[0]?.previewTitle).toBe("Shared Murph pack");
-    expect(prisma.rows[0]?.previewJson).toBeNull();
   });
 
   it("imports a hosted share link for an active hosted member", async () => {
@@ -241,7 +240,6 @@ type HostedShareRow = {
   expiresAt: Date;
   id: string;
   lastEventId: string | null;
-  previewJson: Record<string, unknown> | null;
   previewTitle: string;
   senderMemberId: string | null;
   updatedAt: Date;
@@ -255,8 +253,7 @@ function createHostedSharePrisma() {
       create: async ({
         data,
       }: {
-        data: Omit<HostedShareRow, "acceptedAt" | "acceptedByMemberId" | "consumedAt" | "consumedByMemberId" | "lastEventId" | "previewJson" | "updatedAt">
-          & { previewJson?: HostedShareRow["previewJson"] };
+        data: Omit<HostedShareRow, "acceptedAt" | "acceptedByMemberId" | "consumedAt" | "consumedByMemberId" | "lastEventId" | "updatedAt">;
       }) => {
         const row: HostedShareRow = {
           ...data,
@@ -265,7 +262,6 @@ function createHostedSharePrisma() {
           consumedAt: null,
           consumedByMemberId: null,
           lastEventId: null,
-          previewJson: data.previewJson ?? null,
           updatedAt: new Date(),
         };
         rows.push(row);

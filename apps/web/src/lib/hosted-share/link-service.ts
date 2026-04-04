@@ -19,7 +19,6 @@ import {
   hostedShareExpiresAt,
   normalizeOptionalString,
   readHostedSharePack,
-  readHostedSharePreview,
   requireHostedSharePublicBaseUrl,
   hashHostedShareCode,
 } from "./shared";
@@ -115,7 +114,7 @@ export async function buildHostedSharePageData(input: {
     };
   }
 
-  const preview = readHostedSharePreview(record.previewJson, () => readHostedSharePack(record).pack);
+  const preview = buildHostedSharePreview(readHostedSharePack(record).pack);
   const now = new Date();
   const consumed = Boolean(record.consumedAt);
   const acceptedByCurrentMember = record.consumedByMemberId === authenticatedMember?.id

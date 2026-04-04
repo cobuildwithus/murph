@@ -1,29 +1,52 @@
 import {
-  buildHostedWrappedRootKeyRecipientAadFields,
-  buildLegacyHostedWrappedRootKeyRecipientAadFields,
+  createHostedUserRootKeyEnvelope,
+  HOSTED_USER_ROOT_KEY_ENVELOPE_SCHEMA,
   findHostedWrappedRootKeyRecipient,
+  parseHostedUserRecipientPublicKeyJwk,
   parseHostedUserRootKeyEnvelope,
+  unwrapHostedUserRootKeyForKind,
+  wrapHostedUserRootKeyRecipient,
+  type HostedUserRecipientPrivateKeyJwk,
+  type HostedUserRecipientPublicKeyJwk,
   type HostedUserRootKeyEnvelope,
   type HostedUserRootKeyRecipientKind,
-  type HostedWrappedRootKeyRecipient,
-  HOSTED_USER_ROOT_KEY_ENVELOPE_SCHEMA,
 } from "@murphai/runtime-state";
 
 import type { R2BucketLike } from "./bundle-store.js";
-import { decodeBase64, encodeBase64 } from "./base64.js";
-import {
-  buildHostedStorageAad,
-  deriveHostedStorageOpaqueId,
-} from "./crypto-context.js";
-import {
-  decryptHostedBundle,
-  encryptHostedBundle,
-  readEncryptedR2Json,
-  writeEncryptedR2Json,
-} from "./crypto.js";
+import { buildHostedStorageAad, deriveHostedStorageOpaqueId } from "./crypto-context.js";
+import { decryptHostedBundle, readEncryptedR2Payload, writeEncryptedR2Json } from "./crypto.js";
+import { listHostedStorageObjectKeys } from "./storage-paths.js";
 
-const DEFAULT_AUTOMATION_RECIPIENT_KEY_ID = "automation:v1";
-const HOSTED_USER_RECIPIENT_KEY_BYTES = 32;
+const utf8Decoder = new TextDecoder();
+
+interface LegacyHostedWrappedRootKeyRecipient {
+  ciphertext: string;
+  iv: string;
+  keyId: string;
+  kind: HostedUserRootKeyRecipientKind;
+  metadata?: Record<string, string | number | boolean | null>;
+}
+
+interface LegacyHostedUserRootKeyEnvelope {
+  createdAt: string;
+  recipients: LegacyHostedWrappedRootKeyRecipient[];
+  rootKeyId: string;
+  schema: "murph.hosted-user-root-key-envelope.v1";
+  updatedAt: string;
+  userId: string;
+}
+
+type StoredHostedUserRootKeyEnvelopeRead =
+  | {
+    envelope: HostedUserRootKeyEnvelope;
+    format: "v2";
+    objectKey: string;
+  }
+  | {
+    envelope: LegacyHostedUserRootKeyEnvelope;
+    format: "v1";
+    objectKey: string;
+  };
 
 export interface HostedUserCryptoContext {
   envelope: HostedUserRootKeyEnvelope;
@@ -34,117 +57,148 @@ export interface HostedUserCryptoContext {
 
 export interface HostedUserKeyStore {
   ensureUserCryptoContext(userId: string): Promise<HostedUserCryptoContext>;
+  putUserRootKeyEnvelope(input: {
+    envelope: HostedUserRootKeyEnvelope;
+    userId: string;
+  }): Promise<HostedUserRootKeyEnvelope>;
   readUserRootKeyEnvelope(userId: string): Promise<HostedUserRootKeyEnvelope | null>;
   upsertRecipient(input: {
     kind: HostedUserRootKeyRecipientKind;
     metadata?: Record<string, string | number | boolean | null>;
-    recipientKey: Uint8Array;
     recipientKeyId: string;
+    recipientPublicKeyJwk: HostedUserRecipientPublicKeyJwk;
     userId: string;
   }): Promise<HostedUserRootKeyEnvelope>;
 }
 
 export function createHostedUserKeyStore(input: {
-  automationKey: Uint8Array;
-  automationKeyId?: string;
+  automationRecipientKeyId: string;
+  automationRecipientPrivateKey: HostedUserRecipientPrivateKeyJwk;
+  automationRecipientPrivateKeysById?: Readonly<Record<string, HostedUserRecipientPrivateKeyJwk>>;
+  automationRecipientPublicKey: HostedUserRecipientPublicKeyJwk;
   bucket: R2BucketLike;
-  envelopeKeyId?: string;
-  envelopeKeysById?: Readonly<Record<string, Uint8Array>>;
+  envelopeEncryptionKey: Uint8Array;
+  envelopeEncryptionKeyId: string;
+  envelopeEncryptionKeysById?: Readonly<Record<string, Uint8Array>>;
 }): HostedUserKeyStore {
-  const automationKeyId = input.automationKeyId ?? DEFAULT_AUTOMATION_RECIPIENT_KEY_ID;
-  const envelopeKeyId = input.envelopeKeyId ?? automationKeyId;
-  const envelopeKeysById = input.envelopeKeysById ?? {
-    [envelopeKeyId]: input.automationKey,
-  };
+  const automationPrivateKeysById = {
+    ...(input.automationRecipientPrivateKeysById ?? {}),
+    [input.automationRecipientKeyId]: input.automationRecipientPrivateKey,
+  } satisfies Record<string, HostedUserRecipientPrivateKeyJwk>;
+  const envelopeEncryptionKeysById = {
+    ...(input.envelopeEncryptionKeysById ?? {}),
+    [input.envelopeEncryptionKeyId]: input.envelopeEncryptionKey,
+  } satisfies Record<string, Uint8Array>;
 
   return {
     async ensureUserCryptoContext(userId) {
       const envelope = await ensureHostedUserRootKeyEnvelope({
-        automationKey: input.automationKey,
-        automationKeyId,
+        automationRecipientKeyId: input.automationRecipientKeyId,
+        automationRecipientPrivateKeysById: automationPrivateKeysById,
+        automationRecipientPublicKey: input.automationRecipientPublicKey,
         bucket: input.bucket,
-        envelopeKeyId,
-        envelopeKeysById,
+        envelopeEncryptionKey: input.envelopeEncryptionKey,
+        envelopeEncryptionKeyId: input.envelopeEncryptionKeyId,
+        envelopeEncryptionKeysById,
         userId,
       });
-      const automationRecipient = findHostedWrappedRootKeyRecipient(envelope, "automation");
-
-      if (!automationRecipient) {
-        throw new Error(`Hosted user root key envelope ${userId} is missing an automation recipient.`);
-      }
-
-      const unwrappedRootKey = await unwrapHostedUserRootKey({
-        rootKeyId: envelope.rootKeyId,
-        recipient: automationRecipient,
-        recipientKey: resolveHostedUserRecipientKeyBytes({
-          currentKey: input.automationKey,
-          currentKeyId: automationKeyId,
-          keysById: envelopeKeysById,
-          label: `Hosted user root key envelope ${userId} automation recipient`,
-          recipient: automationRecipient,
-        }),
-        userId: envelope.userId,
+      const rootKey = await unwrapHostedAutomationRootKey({
+        automationRecipientPrivateKeysById: automationPrivateKeysById,
+        envelope,
       });
-      const nextEnvelope = unwrappedRootKey.aadBinding === "legacy"
-        ? await rewriteHostedAutomationRecipient({
-            automationKey: input.automationKey,
-            automationKeyId,
-            bucket: input.bucket,
-            envelope,
-            envelopeKeyId,
-            rootKey: unwrappedRootKey.rootKey,
-          })
-        : envelope;
 
       return {
-        envelope: nextEnvelope,
-        rootKey: unwrappedRootKey.rootKey,
-        rootKeyId: nextEnvelope.rootKeyId,
+        envelope,
+        rootKey,
+        rootKeyId: envelope.rootKeyId,
         keysById: {
-          [nextEnvelope.rootKeyId]: unwrappedRootKey.rootKey,
+          [envelope.rootKeyId]: rootKey,
         },
       };
     },
 
-    async readUserRootKeyEnvelope(userId) {
-      return (await readStoredHostedUserRootKeyEnvelope({
-        automationKey: input.automationKey,
+    async putUserRootKeyEnvelope({ envelope, userId }) {
+      const parsedEnvelope = parseHostedUserRootKeyEnvelope(envelope);
+
+      if (parsedEnvelope.userId !== userId) {
+        throw new TypeError("Hosted user root key envelope userId does not match the requested user.");
+      }
+
+      await requireHostedUserRootKeyEnvelopeAutomationAccess({
+        automationRecipientPrivateKeysById: automationPrivateKeysById,
+        envelope: parsedEnvelope,
+      });
+      await writeHostedUserRootKeyEnvelope({
         bucket: input.bucket,
-        envelopeKeyId,
-        envelopeKeysById,
+        envelope: parsedEnvelope,
+        envelopeEncryptionKey: input.envelopeEncryptionKey,
+        envelopeEncryptionKeyId: input.envelopeEncryptionKeyId,
+      });
+
+      return parsedEnvelope;
+    },
+
+    async readUserRootKeyEnvelope(userId) {
+      const stored = await readStoredHostedUserRootKeyEnvelope({
+        automationRecipientKeyId: input.automationRecipientKeyId,
+        automationRecipientPublicKey: input.automationRecipientPublicKey,
+        bucket: input.bucket,
+        envelopeEncryptionKey: input.envelopeEncryptionKey,
+        envelopeEncryptionKeyId: input.envelopeEncryptionKeyId,
+        envelopeEncryptionKeysById,
         userId,
-      }))?.envelope ?? null;
+      });
+
+      if (!stored) {
+        return null;
+      }
+
+      if (stored.format === "v2") {
+        return stored.envelope;
+      }
+
+      return migrateLegacyStoredHostedUserRootKeyEnvelope({
+        automationRecipientKeyId: input.automationRecipientKeyId,
+        automationRecipientPublicKey: input.automationRecipientPublicKey,
+        bucket: input.bucket,
+        envelopeEncryptionKey: input.envelopeEncryptionKey,
+        envelopeEncryptionKeyId: input.envelopeEncryptionKeyId,
+        envelopeEncryptionKeysById,
+        legacyEnvelope: stored.envelope,
+      });
     },
 
     async upsertRecipient(recipientInput) {
       const context = await this.ensureUserCryptoContext(recipientInput.userId);
-      const nextRecipient = await wrapHostedUserRootKey({
-        kind: recipientInput.kind,
-        metadata: recipientInput.metadata,
-        recipientKey: requireHostedUserRecipientKeyBytes(
-          recipientInput.recipientKey,
-          `${recipientInput.kind} recipient key`,
-        ),
-        recipientKeyId: recipientInput.recipientKeyId,
+      const recipientPublicKeyJwk = parseHostedUserRecipientPublicKeyJwk(
+        recipientInput.recipientPublicKeyJwk,
+        `${recipientInput.kind} recipient public key`,
+      );
+      const nextRecipient = await wrapHostedUserRootKeyRecipient({
+        recipient: {
+          keyId: recipientInput.recipientKeyId,
+          kind: recipientInput.kind,
+          ...(recipientInput.metadata ? { metadata: recipientInput.metadata } : {}),
+          publicKeyJwk: recipientPublicKeyJwk,
+        },
         rootKey: context.rootKey,
-        rootKeyId: context.rootKeyId,
-        userId: recipientInput.userId,
+        rootKeyId: context.envelope.rootKeyId,
+        userId: context.envelope.userId,
       });
-      const nowIso = new Date().toISOString();
       const nextEnvelope: HostedUserRootKeyEnvelope = {
         ...context.envelope,
         recipients: [
           ...context.envelope.recipients.filter((recipient) => recipient.kind !== recipientInput.kind),
           nextRecipient,
         ],
-        updatedAt: nowIso,
+        updatedAt: new Date().toISOString(),
       };
 
       await writeHostedUserRootKeyEnvelope({
-        automationKey: input.automationKey,
         bucket: input.bucket,
         envelope: nextEnvelope,
-        envelopeKeyId,
+        envelopeEncryptionKey: input.envelopeEncryptionKey,
+        envelopeEncryptionKeyId: input.envelopeEncryptionKeyId,
       });
 
       return nextEnvelope;
@@ -153,212 +207,290 @@ export function createHostedUserKeyStore(input: {
 }
 
 async function ensureHostedUserRootKeyEnvelope(input: {
-  automationKey: Uint8Array;
-  automationKeyId: string;
+  automationRecipientKeyId: string;
+  automationRecipientPrivateKeysById: Readonly<Record<string, HostedUserRecipientPrivateKeyJwk>>;
+  automationRecipientPublicKey: HostedUserRecipientPublicKeyJwk;
   bucket: R2BucketLike;
-  envelopeKeyId: string;
-  envelopeKeysById: Readonly<Record<string, Uint8Array>>;
+  envelopeEncryptionKey: Uint8Array;
+  envelopeEncryptionKeyId: string;
+  envelopeEncryptionKeysById: Readonly<Record<string, Uint8Array>>;
   userId: string;
 }): Promise<HostedUserRootKeyEnvelope> {
-  const currentKey = hostedUserRootKeyEnvelopeObjectKey(input.userId);
-  const existing = await readStoredHostedUserRootKeyEnvelope({
-    automationKey: input.automationKey,
+  const existingEnvelope = await readStoredHostedUserRootKeyEnvelope({
+    automationRecipientKeyId: input.automationRecipientKeyId,
+    automationRecipientPublicKey: input.automationRecipientPublicKey,
     bucket: input.bucket,
-    envelopeKeyId: input.envelopeKeyId,
-    envelopeKeysById: input.envelopeKeysById,
+    envelopeEncryptionKey: input.envelopeEncryptionKey,
+    envelopeEncryptionKeyId: input.envelopeEncryptionKeyId,
+    envelopeEncryptionKeysById: input.envelopeEncryptionKeysById,
     userId: input.userId,
   });
 
-  if (existing) {
-    const automationRecipient = findHostedWrappedRootKeyRecipient(existing.envelope, "automation");
-    const requiresAutomationRecipientMigration = Boolean(
-      automationRecipient && automationRecipient.keyId !== input.automationKeyId,
-    );
-    const requiresEnvelopePathMigration = existing.objectKey !== currentKey;
-
-    if (!requiresAutomationRecipientMigration && !requiresEnvelopePathMigration) {
-      return existing.envelope;
-    }
-
-    const nextEnvelope = await migrateHostedUserRootKeyEnvelope({
-      automationKey: input.automationKey,
-      automationKeyId: input.automationKeyId,
-      currentKey,
-      existing,
-      keysById: input.envelopeKeysById,
-    });
-
-    await writeHostedUserRootKeyEnvelope({
-      automationKey: input.automationKey,
-      bucket: input.bucket,
-      envelope: nextEnvelope,
-      envelopeKeyId: input.envelopeKeyId,
-    });
-    await deleteLegacyHostedUserRootKeyEnvelopeCopies({
-      automationKey: input.automationKey,
-      bucket: input.bucket,
-      envelopeKeysById: input.envelopeKeysById,
-      keepKey: currentKey,
+  if (!existingEnvelope) {
+    const created = await createHostedUserRootKeyEnvelope({
+      recipients: [
+        {
+          keyId: input.automationRecipientKeyId,
+          kind: "automation",
+          publicKeyJwk: input.automationRecipientPublicKey,
+        },
+      ],
       userId: input.userId,
     });
-
-    return nextEnvelope;
+    await writeHostedUserRootKeyEnvelope({
+      bucket: input.bucket,
+      envelope: created.envelope,
+      envelopeEncryptionKey: input.envelopeEncryptionKey,
+      envelopeEncryptionKeyId: input.envelopeEncryptionKeyId,
+    });
+    return created.envelope;
   }
 
-  const rootKey = crypto.getRandomValues(new Uint8Array(HOSTED_USER_RECIPIENT_KEY_BYTES));
-  const createdAt = new Date().toISOString();
-  const rootKeyId = createHostedUserRootKeyId();
-  const envelope: HostedUserRootKeyEnvelope = {
-    createdAt,
-    recipients: [
-      await wrapHostedUserRootKey({
-        kind: "automation",
-        metadata: {
-          keyId: input.automationKeyId,
-        },
-        recipientKey: input.automationKey,
-        recipientKeyId: input.automationKeyId,
-        rootKey,
-        rootKeyId,
-        userId: input.userId,
-      }),
-    ],
-    rootKeyId,
-    schema: HOSTED_USER_ROOT_KEY_ENVELOPE_SCHEMA,
-    updatedAt: createdAt,
-    userId: input.userId,
-  };
+  if (existingEnvelope.format === "v1") {
+    return migrateLegacyStoredHostedUserRootKeyEnvelope({
+      automationRecipientKeyId: input.automationRecipientKeyId,
+      automationRecipientPublicKey: input.automationRecipientPublicKey,
+      bucket: input.bucket,
+      envelopeEncryptionKey: input.envelopeEncryptionKey,
+      envelopeEncryptionKeyId: input.envelopeEncryptionKeyId,
+      envelopeEncryptionKeysById: input.envelopeEncryptionKeysById,
+      legacyEnvelope: existingEnvelope.envelope,
+    });
+  }
 
+  const automationRecipient = findHostedWrappedRootKeyRecipient(existingEnvelope.envelope, "automation");
+  if (!automationRecipient) {
+    throw new Error(`Hosted user root key envelope ${input.userId} is missing an automation recipient.`);
+  }
+
+  if (automationRecipient.keyId === input.automationRecipientKeyId) {
+    return existingEnvelope.envelope;
+  }
+
+  const rootKey = await unwrapHostedAutomationRootKey({
+    automationRecipientPrivateKeysById: input.automationRecipientPrivateKeysById,
+    envelope: existingEnvelope.envelope,
+  });
+  const migratedAutomationRecipient = await wrapHostedUserRootKeyRecipient({
+    recipient: {
+      keyId: input.automationRecipientKeyId,
+      kind: "automation",
+      publicKeyJwk: input.automationRecipientPublicKey,
+    },
+    rootKey,
+    rootKeyId: existingEnvelope.envelope.rootKeyId,
+    userId: existingEnvelope.envelope.userId,
+  });
+  const migratedEnvelope: HostedUserRootKeyEnvelope = {
+    ...existingEnvelope.envelope,
+    recipients: [
+      ...existingEnvelope.envelope.recipients.filter((recipient) => recipient.kind !== "automation"),
+      migratedAutomationRecipient,
+    ],
+    updatedAt: new Date().toISOString(),
+  };
   await writeHostedUserRootKeyEnvelope({
-    automationKey: input.automationKey,
     bucket: input.bucket,
-    envelope,
-    envelopeKeyId: input.envelopeKeyId,
+    envelope: migratedEnvelope,
+    envelopeEncryptionKey: input.envelopeEncryptionKey,
+    envelopeEncryptionKeyId: input.envelopeEncryptionKeyId,
   });
 
-  return envelope;
+  return migratedEnvelope;
 }
 
 async function readStoredHostedUserRootKeyEnvelope(input: {
-  automationKey: Uint8Array;
+  automationRecipientKeyId: string;
+  automationRecipientPublicKey: HostedUserRecipientPublicKeyJwk;
   bucket: R2BucketLike;
-  envelopeKeyId: string;
-  envelopeKeysById: Readonly<Record<string, Uint8Array>>;
+  envelopeEncryptionKey: Uint8Array;
+  envelopeEncryptionKeyId: string;
+  envelopeEncryptionKeysById: Readonly<Record<string, Uint8Array>>;
   userId: string;
-}): Promise<{ envelope: HostedUserRootKeyEnvelope; objectKey: string } | null> {
-  for (const key of await hostedUserRootKeyEnvelopeObjectKeys(
-    input.automationKey,
-    input.envelopeKeysById,
+}): Promise<StoredHostedUserRootKeyEnvelopeRead | null> {
+  for (const objectKey of await hostedUserRootKeyEnvelopeObjectKeys(
+    input.envelopeEncryptionKey,
+    input.envelopeEncryptionKeysById,
     input.userId,
   )) {
-    const envelope = await readEncryptedR2Json({
+    const plaintext = await readEncryptedR2Payload({
       aad: buildHostedStorageAad({
-        key,
+        key: objectKey,
         purpose: "root-key-envelope",
         userId: input.userId,
       }),
       bucket: input.bucket,
-      cryptoKey: input.automationKey,
-      cryptoKeysById: input.envelopeKeysById,
-      expectedKeyId: input.envelopeKeyId,
-      key,
-      parse(value) {
-        return parseHostedUserRootKeyEnvelope(value);
-      },
+      cryptoKey: input.envelopeEncryptionKey,
+      cryptoKeysById: input.envelopeEncryptionKeysById,
+      expectedKeyId: input.envelopeEncryptionKeyId,
+      key: objectKey,
       scope: "root-key-envelope",
     });
 
-    if (envelope) {
-      return { envelope, objectKey: key };
+    if (!plaintext) {
+      continue;
+    }
+
+    const value = JSON.parse(utf8Decoder.decode(plaintext)) as unknown;
+
+    try {
+      return {
+        envelope: parseHostedUserRootKeyEnvelope(value),
+        format: "v2",
+        objectKey,
+      };
+    } catch {
+      return {
+        envelope: parseLegacyHostedUserRootKeyEnvelope(value),
+        format: "v1",
+        objectKey,
+      };
     }
   }
 
   return null;
 }
 
-async function migrateHostedUserRootKeyEnvelope(input: {
-  automationKey: Uint8Array;
-  automationKeyId: string;
-  currentKey: string;
-  existing: {
-    envelope: HostedUserRootKeyEnvelope;
-    objectKey: string;
-  };
-  keysById: Readonly<Record<string, Uint8Array>>;
+async function migrateLegacyStoredHostedUserRootKeyEnvelope(input: {
+  automationRecipientKeyId: string;
+  automationRecipientPublicKey: HostedUserRecipientPublicKeyJwk;
+  bucket: R2BucketLike;
+  envelopeEncryptionKey: Uint8Array;
+  envelopeEncryptionKeyId: string;
+  envelopeEncryptionKeysById: Readonly<Record<string, Uint8Array>>;
+  legacyEnvelope: LegacyHostedUserRootKeyEnvelope;
 }): Promise<HostedUserRootKeyEnvelope> {
-  const automationRecipient = findHostedWrappedRootKeyRecipient(input.existing.envelope, "automation");
-
-  if (!automationRecipient) {
-    throw new Error(
-      `Hosted user root key envelope ${input.existing.envelope.userId} is missing an automation recipient.`,
-    );
-  }
-
-  const rootKey = await unwrapHostedUserRootKey({
-    rootKeyId: input.existing.envelope.rootKeyId,
-    recipient: automationRecipient,
-    recipientKey: resolveHostedUserRecipientKeyBytes({
-      currentKey: input.automationKey,
-      currentKeyId: input.automationKeyId,
-      keysById: input.keysById,
-      label: `Hosted user root key envelope ${input.existing.envelope.userId} automation recipient`,
-      recipient: automationRecipient,
-    }),
-    userId: input.existing.envelope.userId,
+  const rootKey = await unwrapLegacyHostedAutomationRootKey({
+    envelope: input.legacyEnvelope,
+    envelopeEncryptionKey: input.envelopeEncryptionKey,
+    envelopeEncryptionKeyId: input.envelopeEncryptionKeyId,
+    envelopeEncryptionKeysById: input.envelopeEncryptionKeysById,
   });
-  const nowIso = new Date().toISOString();
-
-  return {
-    ...input.existing.envelope,
-    recipients: [
-      ...input.existing.envelope.recipients.filter((recipient) => recipient.kind !== "automation"),
-      await wrapHostedUserRootKey({
-        kind: "automation",
-        metadata: {
-          ...(automationRecipient.metadata ?? {}),
-          keyId: input.automationKeyId,
-        },
-        recipientKey: input.automationKey,
-        recipientKeyId: input.automationKeyId,
-        rootKey: rootKey.rootKey,
-        rootKeyId: input.existing.envelope.rootKeyId,
-        userId: input.existing.envelope.userId,
-      }),
-    ],
-    updatedAt:
-      input.existing.objectKey === input.currentKey && automationRecipient.keyId === input.automationKeyId
-        ? input.existing.envelope.updatedAt
-        : nowIso,
+  const created = await createHostedUserRootKeyEnvelope({
+    createdAt: input.legacyEnvelope.createdAt,
+    recipients: [{
+      keyId: input.automationRecipientKeyId,
+      kind: "automation",
+      publicKeyJwk: input.automationRecipientPublicKey,
+    }],
+    rootKey,
+    rootKeyId: input.legacyEnvelope.rootKeyId,
+    userId: input.legacyEnvelope.userId,
+  });
+  const envelope: HostedUserRootKeyEnvelope = {
+    ...created.envelope,
+    updatedAt: new Date().toISOString(),
   };
+
+  await writeHostedUserRootKeyEnvelope({
+    bucket: input.bucket,
+    envelope,
+    envelopeEncryptionKey: input.envelopeEncryptionKey,
+    envelopeEncryptionKeyId: input.envelopeEncryptionKeyId,
+  });
+  await deleteLegacyHostedUserRootKeyEnvelopeCopies({
+    bucket: input.bucket,
+    envelopeEncryptionKey: input.envelopeEncryptionKey,
+    envelopeEncryptionKeysById: input.envelopeEncryptionKeysById,
+    keepKey: await hostedUserRootKeyEnvelopeObjectKey(
+      input.envelopeEncryptionKey,
+      input.legacyEnvelope.userId,
+    ),
+    userId: input.legacyEnvelope.userId,
+  });
+
+  return envelope;
 }
 
 async function writeHostedUserRootKeyEnvelope(input: {
-  automationKey: Uint8Array;
   bucket: R2BucketLike;
   envelope: HostedUserRootKeyEnvelope;
-  envelopeKeyId: string;
+  envelopeEncryptionKey: Uint8Array;
+  envelopeEncryptionKeyId: string;
 }): Promise<void> {
-  const key = hostedUserRootKeyEnvelopeObjectKey(input.envelope.userId);
+  const objectKey = await hostedUserRootKeyEnvelopeObjectKey(
+    input.envelopeEncryptionKey,
+    input.envelope.userId,
+  );
 
   await writeEncryptedR2Json({
     aad: buildHostedStorageAad({
-      key,
+      key: objectKey,
       purpose: "root-key-envelope",
       userId: input.envelope.userId,
     }),
     bucket: input.bucket,
-    cryptoKey: input.automationKey,
-    key,
-    keyId: input.envelopeKeyId,
+    cryptoKey: input.envelopeEncryptionKey,
+    key: objectKey,
+    keyId: input.envelopeEncryptionKeyId,
     scope: "root-key-envelope",
     value: input.envelope,
   });
 }
 
+async function requireHostedUserRootKeyEnvelopeAutomationAccess(input: {
+  automationRecipientPrivateKeysById: Readonly<Record<string, HostedUserRecipientPrivateKeyJwk>>;
+  envelope: HostedUserRootKeyEnvelope;
+}): Promise<void> {
+  await unwrapHostedAutomationRootKey(input);
+}
+
+async function unwrapHostedAutomationRootKey(input: {
+  automationRecipientPrivateKeysById: Readonly<Record<string, HostedUserRecipientPrivateKeyJwk>>;
+  envelope: HostedUserRootKeyEnvelope;
+}): Promise<Uint8Array> {
+  const automationRecipient = findHostedWrappedRootKeyRecipient(input.envelope, "automation");
+
+  if (!automationRecipient) {
+    throw new Error(`Hosted user root key envelope ${input.envelope.userId} is missing an automation recipient.`);
+  }
+
+  const recipientPrivateKeyJwk = input.automationRecipientPrivateKeysById[automationRecipient.keyId];
+
+  if (!recipientPrivateKeyJwk) {
+    throw new Error(
+      `Hosted user root key envelope ${input.envelope.userId} references unknown automation key ${automationRecipient.keyId}.`,
+    );
+  }
+
+  return unwrapHostedUserRootKeyForKind({
+    envelope: input.envelope,
+    kind: "automation",
+    recipientPrivateKeyJwk,
+  });
+}
+
+async function hostedUserRootKeyEnvelopeObjectKey(
+  envelopeEncryptionKey: Uint8Array,
+  userId: string,
+): Promise<string> {
+  const userSegment = await deriveHostedStorageOpaqueId({
+    length: 24,
+    rootKey: envelopeEncryptionKey,
+    scope: "user-key-envelope-path",
+    value: `user:${userId}`,
+  });
+
+  return `users/keys/${userSegment}.json`;
+}
+
+async function hostedUserRootKeyEnvelopeObjectKeys(
+  envelopeEncryptionKey: Uint8Array,
+  envelopeEncryptionKeysById: Readonly<Record<string, Uint8Array>>,
+  userId: string,
+): Promise<string[]> {
+  return [
+    legacyHostedUserRootKeyEnvelopeObjectKey(userId),
+    ...await listHostedStorageObjectKeys(envelopeEncryptionKey, envelopeEncryptionKeysById, (candidateKey) =>
+      hostedUserRootKeyEnvelopeObjectKey(candidateKey, userId)
+    ),
+  ];
+}
+
 async function deleteLegacyHostedUserRootKeyEnvelopeCopies(input: {
-  automationKey: Uint8Array;
   bucket: R2BucketLike;
-  envelopeKeysById: Readonly<Record<string, Uint8Array>>;
+  envelopeEncryptionKey: Uint8Array;
+  envelopeEncryptionKeysById: Readonly<Record<string, Uint8Array>>;
   keepKey: string;
   userId: string;
 }): Promise<void> {
@@ -367,8 +499,8 @@ async function deleteLegacyHostedUserRootKeyEnvelopeCopies(input: {
   }
 
   for (const key of await hostedUserRootKeyEnvelopeObjectKeys(
-    input.automationKey,
-    input.envelopeKeysById,
+    input.envelopeEncryptionKey,
+    input.envelopeEncryptionKeysById,
     input.userId,
   )) {
     if (key === input.keepKey) {
@@ -379,240 +511,167 @@ async function deleteLegacyHostedUserRootKeyEnvelopeCopies(input: {
   }
 }
 
-async function hostedUserRootKeyEnvelopeLegacyObjectKey(
-  automationKey: Uint8Array,
-  userId: string,
-): Promise<string> {
-  const userSegment = await deriveHostedStorageOpaqueId({
-    length: 24,
-    rootKey: automationKey,
-    scope: "user-key-envelope-path",
-    value: `user:${userId}`,
-  });
-
-  return `users/keys/${userSegment}.json`;
-}
-
-function hostedUserRootKeyEnvelopeObjectKey(userId: string): string {
+function legacyHostedUserRootKeyEnvelopeObjectKey(userId: string): string {
   return `users/keys/${encodeURIComponent(userId)}.json`;
 }
 
-async function hostedUserRootKeyEnvelopeObjectKeys(
-  automationKey: Uint8Array,
-  envelopeKeysById: Readonly<Record<string, Uint8Array>>,
-  userId: string,
-): Promise<string[]> {
-  const keys = await Promise.all([
-    Promise.resolve(hostedUserRootKeyEnvelopeObjectKey(userId)),
-    ...listHostedUserEnvelopeRootKeys(automationKey, envelopeKeysById).map((candidateRootKey) =>
-      hostedUserRootKeyEnvelopeLegacyObjectKey(candidateRootKey, userId)
-    ),
-  ]);
+async function unwrapLegacyHostedAutomationRootKey(input: {
+  envelope: LegacyHostedUserRootKeyEnvelope;
+  envelopeEncryptionKey: Uint8Array;
+  envelopeEncryptionKeyId: string;
+  envelopeEncryptionKeysById: Readonly<Record<string, Uint8Array>>;
+}): Promise<Uint8Array> {
+  const recipient = input.envelope.recipients.find((entry) => entry.kind === "automation");
 
-  return [...new Set(keys)];
-}
+  if (!recipient) {
+    throw new Error(`Hosted user root key envelope ${input.envelope.userId} is missing an automation recipient.`);
+  }
 
-async function wrapHostedUserRootKey(input: {
-  kind: HostedUserRootKeyRecipientKind;
-  metadata?: Record<string, string | number | boolean | null>;
-  recipientKey: Uint8Array;
-  recipientKeyId: string;
-  rootKey: Uint8Array;
-  rootKeyId: string;
-  userId: string;
-}): Promise<HostedWrappedRootKeyRecipient> {
-  const envelope = await encryptHostedBundle({
-    aad: buildHostedStorageAad(buildHostedWrappedRootKeyRecipientAadFields({
-      keyId: input.recipientKeyId,
-      kind: input.kind,
-      rootKeyId: input.rootKeyId,
-      userId: input.userId,
-    })),
-    key: requireHostedUserRecipientKeyBytes(input.recipientKey, `${input.kind} recipient key`),
-    keyId: input.recipientKeyId,
-    plaintext: input.rootKey,
-    scope: "root-key-recipient",
-  });
-
-  return {
-    ciphertext: envelope.ciphertext,
-    iv: envelope.iv,
-    keyId: envelope.keyId,
-    kind: input.kind,
-    ...(input.metadata ? { metadata: input.metadata } : {}),
-  };
-}
-
-async function unwrapHostedUserRootKey(input: {
-  recipient: HostedWrappedRootKeyRecipient;
-  recipientKey: Uint8Array;
-  rootKeyId: string;
-  userId: string;
-}): Promise<{ aadBinding: "bound" | "legacy"; rootKey: Uint8Array }> {
-  const envelope = {
+  const recipientKey =
+    input.envelopeEncryptionKeysById[recipient.keyId]
+    ?? input.envelopeEncryptionKeysById[input.envelopeEncryptionKeyId]
+    ?? input.envelopeEncryptionKey;
+  const cipherEnvelope = {
     algorithm: "AES-GCM" as const,
-    ciphertext: input.recipient.ciphertext,
-    iv: input.recipient.iv,
-    keyId: input.recipient.keyId,
+    ciphertext: recipient.ciphertext,
+    iv: recipient.iv,
+    keyId: recipient.keyId,
     schema: "murph.hosted-cipher.v2" as const,
     scope: "root-key-recipient" as const,
   };
 
   try {
-    return {
-      aadBinding: "bound",
-      rootKey: await decryptHostedBundle({
-        aad: buildHostedStorageAad(buildHostedWrappedRootKeyRecipientAadFields({
-          keyId: input.recipient.keyId,
-          kind: input.recipient.kind,
-          rootKeyId: input.rootKeyId,
-          userId: input.userId,
-        })),
-        envelope,
-        expectedKeyId: input.recipient.keyId,
-        key: input.recipientKey,
-        scope: "root-key-recipient",
-      }),
-    };
-  } catch {
-    return {
-      aadBinding: "legacy",
-      rootKey: await decryptHostedBundle({
-        aad: buildHostedStorageAad(buildLegacyHostedWrappedRootKeyRecipientAadFields({
-          keyId: input.recipient.keyId,
-          kind: input.recipient.kind,
-        })),
-        envelope,
-        expectedKeyId: input.recipient.keyId,
-        key: input.recipientKey,
-        scope: "root-key-recipient",
-      }),
-    };
-  }
-}
-
-export function encodeHostedUserRootKeyRecipient(input: {
-  key: Uint8Array;
-  keyId: string;
-  kind: HostedUserRootKeyRecipientKind;
-  metadata?: Record<string, string | number | boolean | null>;
-}): HostedWrappedRootKeyRecipient {
-  return {
-    ciphertext: encodeBase64(
-      requireHostedUserRecipientKeyBytes(input.key, `${input.kind} recipient key`),
-    ),
-    iv: "",
-    keyId: input.keyId,
-    kind: input.kind,
-    ...(input.metadata ? { metadata: input.metadata } : {}),
-  };
-}
-
-export function decodeHostedUserRecipientKey(input: HostedWrappedRootKeyRecipient): Uint8Array {
-  return requireHostedUserRecipientKeyBytes(
-    decodeBase64(input.ciphertext),
-    `${input.kind} recipient key`,
-  );
-}
-
-export function decodeHostedUserRecipientKeyBase64(
-  value: string,
-  label = "recipient key",
-): Uint8Array {
-  return requireHostedUserRecipientKeyBytes(decodeBase64(value), label);
-}
-
-function resolveHostedUserRecipientKeyBytes(input: {
-  currentKey: Uint8Array;
-  currentKeyId: string;
-  keysById: Readonly<Record<string, Uint8Array>>;
-  label: string;
-  recipient: HostedWrappedRootKeyRecipient;
-}): Uint8Array {
-  const key = input.recipient.keyId === input.currentKeyId
-    ? input.currentKey
-    : input.keysById[input.recipient.keyId] ?? null;
-
-  if (!key) {
-    throw new Error(`${input.label} references unknown keyId ${input.recipient.keyId}.`);
-  }
-
-  return requireHostedUserRecipientKeyBytes(key, input.label);
-}
-
-function listHostedUserEnvelopeRootKeys(
-  automationKey: Uint8Array,
-  envelopeKeysById: Readonly<Record<string, Uint8Array>>,
-): Uint8Array[] {
-  const seen = new Set<string>();
-  const unique: Uint8Array[] = [];
-
-  for (const key of [automationKey, ...Object.values(envelopeKeysById)]) {
-    const signature = encodeBase64(key);
-
-    if (seen.has(signature)) {
-      continue;
-    }
-
-    seen.add(signature);
-    unique.push(key);
-  }
-
-  return unique;
-}
-
-async function rewriteHostedAutomationRecipient(input: {
-  automationKey: Uint8Array;
-  automationKeyId: string;
-  bucket: R2BucketLike;
-  envelope: HostedUserRootKeyEnvelope;
-  envelopeKeyId: string;
-  rootKey: Uint8Array;
-}): Promise<HostedUserRootKeyEnvelope> {
-  const automationRecipient = findHostedWrappedRootKeyRecipient(input.envelope, "automation");
-
-  if (!automationRecipient) {
-    throw new Error(`Hosted user root key envelope ${input.envelope.userId} is missing an automation recipient.`);
-  }
-
-  const nextEnvelope: HostedUserRootKeyEnvelope = {
-    ...input.envelope,
-    recipients: [
-      ...input.envelope.recipients.filter((recipient) => recipient.kind !== "automation"),
-      await wrapHostedUserRootKey({
-        kind: "automation",
-        metadata: {
-          ...(automationRecipient.metadata ?? {}),
-          keyId: input.automationKeyId,
-        },
-        recipientKey: input.automationKey,
-        recipientKeyId: input.automationKeyId,
-        rootKey: input.rootKey,
+    return await decryptHostedBundle({
+      aad: buildHostedStorageAad({
+        keyId: recipient.keyId,
+        recipientKind: recipient.kind,
         rootKeyId: input.envelope.rootKeyId,
         userId: input.envelope.userId,
       }),
-    ],
-    updatedAt: new Date().toISOString(),
-  };
-
-  await writeHostedUserRootKeyEnvelope({
-    automationKey: input.automationKey,
-    bucket: input.bucket,
-    envelope: nextEnvelope,
-    envelopeKeyId: input.envelopeKeyId,
-  });
-
-  return nextEnvelope;
+      envelope: cipherEnvelope,
+      expectedKeyId: recipient.keyId,
+      key: recipientKey,
+      scope: "root-key-recipient",
+    });
+  } catch {
+    return decryptHostedBundle({
+      aad: buildHostedStorageAad({
+        keyId: recipient.keyId,
+        recipientKind: recipient.kind,
+      }),
+      envelope: cipherEnvelope,
+      expectedKeyId: recipient.keyId,
+      key: recipientKey,
+      scope: "root-key-recipient",
+    });
+  }
 }
 
-function requireHostedUserRecipientKeyBytes(value: Uint8Array, label: string): Uint8Array {
-  if (value.byteLength !== HOSTED_USER_RECIPIENT_KEY_BYTES) {
-    throw new TypeError(`${label} must be ${HOSTED_USER_RECIPIENT_KEY_BYTES} bytes.`);
+function parseLegacyHostedUserRootKeyEnvelope(
+  value: unknown,
+  label = "Hosted legacy user root key envelope",
+): LegacyHostedUserRootKeyEnvelope {
+  const record = requireObject(value, label);
+
+  return {
+    createdAt: requireString(record.createdAt, `${label}.createdAt`),
+    recipients: requireArray(record.recipients, `${label}.recipients`).map((entry, index) =>
+      parseLegacyHostedWrappedRootKeyRecipient(entry, `${label}.recipients[${index}]`)
+    ),
+    rootKeyId: requireString(record.rootKeyId, `${label}.rootKeyId`),
+    schema: requireLegacyEnvelopeSchema(record.schema, `${label}.schema`),
+    updatedAt: requireString(record.updatedAt, `${label}.updatedAt`),
+    userId: requireString(record.userId, `${label}.userId`),
+  };
+}
+
+function parseLegacyHostedWrappedRootKeyRecipient(
+  value: unknown,
+  label: string,
+): LegacyHostedWrappedRootKeyRecipient {
+  const record = requireObject(value, label);
+
+  return {
+    ciphertext: requireString(record.ciphertext, `${label}.ciphertext`),
+    iv: requireString(record.iv, `${label}.iv`),
+    keyId: requireString(record.keyId, `${label}.keyId`),
+    kind: requireRecipientKind(record.kind, `${label}.kind`),
+    ...(record.metadata === undefined ? {} : { metadata: parseMetadataRecord(record.metadata, `${label}.metadata`) }),
+  };
+}
+
+function requireLegacyEnvelopeSchema(
+  value: unknown,
+  label: string,
+): LegacyHostedUserRootKeyEnvelope["schema"] {
+  const schema = requireString(value, label);
+
+  if (schema !== "murph.hosted-user-root-key-envelope.v1") {
+    throw new TypeError(`${label} must be murph.hosted-user-root-key-envelope.v1.`);
+  }
+
+  return schema;
+}
+
+function requireRecipientKind(value: unknown, label: string): HostedUserRootKeyRecipientKind {
+  const kind = requireString(value, label);
+
+  if (
+    kind === "automation"
+    || kind === "user-unlock"
+    || kind === "recovery"
+    || kind === "tee-automation"
+  ) {
+    return kind;
+  }
+
+  throw new TypeError(`${label} must be a supported root key recipient kind.`);
+}
+
+function parseMetadataRecord(
+  value: unknown,
+  label: string,
+): Record<string, string | number | boolean | null> {
+  const record = requireObject(value, label);
+  const result: Record<string, string | number | boolean | null> = {};
+
+  for (const [key, entry] of Object.entries(record)) {
+    if (
+      entry === null
+      || typeof entry === "string"
+      || typeof entry === "number"
+      || typeof entry === "boolean"
+    ) {
+      result[key] = entry;
+      continue;
+    }
+
+    throw new TypeError(`${label}.${key} must be a scalar JSON value.`);
+  }
+
+  return result;
+}
+
+function requireObject(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function requireArray(value: unknown, label: string): unknown[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array.`);
   }
 
   return value;
 }
 
-function createHostedUserRootKeyId(): string {
-  return `urk:${crypto.randomUUID()}`;
+function requireString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new TypeError(`${label} must be a non-empty string.`);
+  }
+
+  return value;
 }

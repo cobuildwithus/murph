@@ -34,9 +34,6 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
       HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER: "7m",
-      HOSTED_DEVICE_SYNC_CONTROL_BASE_URL: "https://web.example.test",
-      HOSTED_SHARE_API_BASE_URL: "https://web.example.test",
-      HOSTED_WEB_BASE_URL: "https://web.example.test",
       MURPH_WEB_SEARCH_MAX_RESULTS: "8",
       MURPH_WEB_SEARCH_PROVIDER: "brave",
       MURPH_WEB_SEARCH_TIMEOUT_MS: "10000",
@@ -129,7 +126,7 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_AI_USAGE_BASE_URL).toBeUndefined();
     expect(config.vars.HOSTED_DEVICE_SYNC_CONTROL_BASE_URL).toBeUndefined();
     expect(config.vars.HOSTED_SHARE_API_BASE_URL).toBeUndefined();
-    expect(config.vars.HOSTED_WEB_BASE_URL).toBe("https://web.example.test");
+    expect(config.vars.HOSTED_WEB_BASE_URL).toBeUndefined();
     expect(config.vars.AGENTMAIL_BASE_URL).toBeUndefined();
     expect(config.vars.MURPH_WEB_SEARCH_MAX_RESULTS).toBe("8");
     expect(config.vars.MURPH_WEB_SEARCH_PROVIDER).toBe("brave");
@@ -197,18 +194,19 @@ describe("hosted deploy automation helpers", () => {
       BRAVE_API_KEY: "brave-key",
       HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "email-cf-token",
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
+      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
+      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "automation-public-jwk",
       HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: "bundle-key",
-      HOSTED_EXECUTION_INTERNAL_TOKENS: "internal-token,previous-internal-token",
       HOSTED_EXECUTION_SIGNING_SECRET: "signing-secret",
-      HOSTED_SHARE_INTERNAL_TOKENS: "share-token,previous-share-token",
       OPENAI_API_KEY: "sk-user",
       TELEGRAM_BOT_TOKEN: "bot-token",
     })).toEqual({
       BRAVE_API_KEY: "brave-key",
       HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "email-cf-token",
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
+      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
+      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "automation-public-jwk",
       HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: "bundle-key",
-      HOSTED_EXECUTION_INTERNAL_TOKENS: "internal-token,previous-internal-token",
       HOSTED_EXECUTION_SIGNING_SECRET: "signing-secret",
       OPENAI_API_KEY: "sk-user",
       TELEGRAM_BOT_TOKEN: "bot-token",
@@ -220,11 +218,26 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_API_KEY",
       HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
       HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
+      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "automation-public-jwk",
       HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: "bundle-key",
       HOSTED_EXECUTION_SIGNING_SECRET: "signing-secret",
       OPENAI_API_KEY: "sk-user",
     })).toMatchObject({
       OPENAI_API_KEY: "sk-user",
+    });
+
+    expect(buildHostedWorkerSecretsPayload({
+      HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_ENTERPRISE_API_KEY",
+      HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
+      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "automation-public-jwk",
+      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: "bundle-key",
+      HOSTED_EXECUTION_SIGNING_SECRET: "signing-secret",
+      OPENAI_ENTERPRISE_API_KEY: "sk-enterprise",
+    })).toMatchObject({
+      OPENAI_ENTERPRISE_API_KEY: "sk-enterprise",
     });
 
     expect(readHostedDeployAutomationEnvironment({

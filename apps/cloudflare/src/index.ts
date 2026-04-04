@@ -6,38 +6,52 @@ import {
   buildHostedExecutionEmailMessageReceivedDispatch,
   buildHostedExecutionGatewayMessageSendDispatch,
   emitHostedExecutionStructuredLog,
+  parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
   parseHostedExecutionDispatchRequest,
+  parseHostedExecutionSharePackResponse,
   readHostedEmailCapabilities,
-  type HostedExecutionDispatchResult,
   type HostedExecutionDispatchRequest,
+  type HostedExecutionDispatchResult,
   type HostedExecutionUserEnvStatus,
   type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_USER_ROOT_KEY_RECIPIENT_KINDS,
+  isHostedEmailInboundSenderAuthorized,
+  isHostedUserManagedRootKeyRecipientKind,
+  parseHostedUserRecipientPublicKeyJwk,
+  parseHostedUserRootKeyEnvelope,
+  readHostedVerifiedEmailFromEnv,
+  type HostedUserManagedRootKeyRecipientKind,
+  type HostedUserRecipientPublicKeyJwk,
+  type HostedUserRootKeyEnvelope,
+  type HostedUserRootKeyRecipientKind,
+} from "@murphai/runtime-state";
+import {
   parseRawEmailMessage,
   readRawEmailHeaderValue,
 } from "@murphai/inboxd/connectors/email/parsed";
-
 import {
-  gatewayFetchAttachmentsInputSchema,
   gatewayChannelSupportsReplyToMessage,
+  gatewayFetchAttachmentsInputSchema,
   gatewayGetConversationInputSchema,
   gatewayListConversationsInputSchema,
   gatewayListOpenPermissionsInputSchema,
   gatewayPollEventsInputSchema,
   gatewayReadMessagesInputSchema,
+  gatewayRespondToPermissionInputSchema,
+  gatewaySendMessageInputSchema,
+  gatewaySendMessageResultSchema,
+  gatewayWaitForEventsInputSchema,
   readGatewayConversationSessionToken,
   readGatewayMessageKind,
   readGatewayMessageRouteToken,
-  gatewayRespondToPermissionInputSchema,
-  gatewaySendMessageResultSchema,
-  gatewaySendMessageInputSchema,
-  gatewayWaitForEventsInputSchema,
   waitForGatewayEventsByPolling,
   type GatewayFetchAttachmentsInput,
   type GatewayGetConversationInput,
   type GatewayListConversationsInput,
   type GatewayListOpenPermissionsInput,
+  type GatewayPermissionRequest,
   type GatewayPollEventsInput,
   type GatewayPollEventsResult,
   type GatewayReadMessagesInput,
@@ -71,19 +85,10 @@ import {
   type HostedEmailWorkerRequest,
 } from "./hosted-email.ts";
 import {
-  HOSTED_USER_ROOT_KEY_RECIPIENT_KINDS,
-  isHostedUserManagedRootKeyRecipientKind,
-  isHostedEmailInboundSenderAuthorized,
-  readHostedVerifiedEmailFromEnv,
-  type HostedUserManagedRootKeyRecipientKind,
-  type HostedUserRootKeyRecipientKind,
-} from "@murphai/runtime-state";
-import {
   decodeHostedUserEnvPayload,
   parseHostedUserEnvUpdate,
   type HostedUserEnvUpdate,
 } from "./user-env.ts";
-import { decodeHostedUserRecipientKeyBase64 } from "./user-key-store.ts";
 import {
   HostedUserRunner,
   type DurableObjectStateLike,
@@ -101,10 +106,22 @@ interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLike {
   dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus>;
   dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult>;
   getUserEnvStatus(): Promise<HostedExecutionUserEnvStatus>;
+  putDeviceSyncRuntimeSnapshot(input: {
+    snapshot: import("@murphai/hosted-execution").HostedExecutionDeviceSyncRuntimeSnapshotResponse;
+  }): Promise<import("@murphai/hosted-execution").HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
+  putPendingUsage(input: {
+    usage: readonly Record<string, unknown>[];
+  }): Promise<{ recorded: number; usageIds: string[] }>;
+  putSharePack(input: {
+    pack: import("@murphai/hosted-execution").HostedExecutionSharePackResponse;
+  }): Promise<import("@murphai/hosted-execution").HostedExecutionSharePackResponse>;
+  putUserKeyEnvelope(input: {
+    envelope: HostedUserRootKeyEnvelope;
+  }): Promise<HostedUserRootKeyEnvelope>;
+  readPendingUsage(input?: { limit?: number | null }): Promise<Record<string, unknown>[]>;
   status(): Promise<HostedExecutionUserStatus>;
-  updateUserEnv(
-    update: HostedUserEnvUpdate,
-  ): Promise<HostedExecutionUserEnvStatus>;
+  updateUserEnv(update: HostedUserEnvUpdate): Promise<HostedExecutionUserEnvStatus>;
+  deletePendingUsage(input: { usageIds: readonly string[] }): Promise<void>;
 }
 interface WorkerEnvironmentSource extends WorkerEnvironmentContract<UserRunnerDurableObjectStubLike> {
   RUNNER_CONTAINER: import("./runner-container.ts").HostedExecutionContainerNamespaceLike;
@@ -202,7 +219,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
       return handleUserKeyEnvelopeRoute(context, params.userId);
     },
     match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/keys\/envelope$/u),
-    methods: ["GET"],
+    methods: ["GET", "PUT"],
     wrongMethodResponse: "method-not-allowed",
   },
   {
@@ -213,6 +230,36 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     },
     match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/keys\/recipients\/(?<kind>[^/]+)$/u),
     methods: ["PUT"],
+    wrongMethodResponse: "method-not-allowed",
+  },
+  {
+    authorizeBeforeMethod: true,
+    authorization: "signed",
+    async handle(context, params) {
+      return handleDeviceSyncRuntimeSnapshotRoute(context, params.userId);
+    },
+    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/device-sync\/runtime-snapshot$/u),
+    methods: ["PUT"],
+    wrongMethodResponse: "method-not-allowed",
+  },
+  {
+    authorizeBeforeMethod: true,
+    authorization: "signed",
+    async handle(context, params) {
+      return handleSharePackRoute(context, params.userId, params.shareId);
+    },
+    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/shares\/(?<shareId>[^/]+)\/pack$/u),
+    methods: ["PUT"],
+    wrongMethodResponse: "method-not-allowed",
+  },
+  {
+    authorizeBeforeMethod: true,
+    authorization: "signed",
+    async handle(context, params) {
+      return handlePendingUsageRoute(context, params.userId);
+    },
+    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/usage\/pending$/u),
+    methods: ["GET", "DELETE"],
     wrongMethodResponse: "method-not-allowed",
   },
   {
@@ -231,10 +278,7 @@ export default {
   async fetch(request: Request, env: WorkerEnvironmentSource): Promise<Response> {
     try {
       const url = new URL(request.url);
-      const publicResponse = await dispatchDeclarativeRoute(workerPublicRoutes, {
-        request,
-        url,
-      });
+      const publicResponse = await dispatchDeclarativeRoute(workerPublicRoutes, { request, url });
       if (publicResponse) {
         return publicResponse;
       }
@@ -283,13 +327,45 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.getUserKeyEnvelope();
   }
 
+  async putUserKeyEnvelope(input: {
+    envelope: HostedUserRootKeyEnvelope;
+  }): Promise<HostedUserRootKeyEnvelope> {
+    return this.runner.putUserKeyEnvelope(input);
+  }
+
   async upsertUserKeyRecipient(input: {
-    kind: import("@murphai/runtime-state").HostedUserManagedRootKeyRecipientKind;
+    kind: HostedUserManagedRootKeyRecipientKind;
     metadata?: Record<string, string | number | boolean | null>;
-    recipientKey: Uint8Array;
     recipientKeyId: string;
-  }): Promise<import("@murphai/runtime-state").HostedUserRootKeyEnvelope> {
+    recipientPublicKeyJwk: HostedUserRecipientPublicKeyJwk;
+  }): Promise<HostedUserRootKeyEnvelope> {
     return this.runner.upsertUserKeyRecipient(input);
+  }
+
+  async putDeviceSyncRuntimeSnapshot(input: {
+    snapshot: import("@murphai/hosted-execution").HostedExecutionDeviceSyncRuntimeSnapshotResponse;
+  }): Promise<import("@murphai/hosted-execution").HostedExecutionDeviceSyncRuntimeSnapshotResponse> {
+    return this.runner.putDeviceSyncRuntimeSnapshot(input);
+  }
+
+  async putPendingUsage(input: {
+    usage: readonly Record<string, unknown>[];
+  }): Promise<{ recorded: number; usageIds: string[] }> {
+    return this.runner.putPendingUsage(input);
+  }
+
+  async readPendingUsage(input?: { limit?: number | null }): Promise<Record<string, unknown>[]> {
+    return this.runner.readPendingUsage(input);
+  }
+
+  async deletePendingUsage(input: { usageIds: readonly string[] }): Promise<void> {
+    return this.runner.deletePendingUsage(input);
+  }
+
+  async putSharePack(input: {
+    pack: import("@murphai/hosted-execution").HostedExecutionSharePackResponse;
+  }): Promise<import("@murphai/hosted-execution").HostedExecutionSharePackResponse> {
+    return this.runner.putSharePack(input);
   }
 
   async dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {
@@ -401,10 +477,7 @@ async function dispatchDeclarativeRoute<Context>(
 }
 
 function createServiceBannerResponse(): Response {
-  return json({
-    ok: true,
-    service: "cloudflare-hosted-runner",
-  });
+  return json({ ok: true, service: "cloudflare-hosted-runner" });
 }
 
 async function authorizeRoute(
@@ -515,9 +588,14 @@ async function handleUserKeyEnvelopeRoute(
   context: WorkerRouteContext,
   encodedUserId: string,
 ): Promise<Response> {
-  const userId = decodeRouteParam(encodedUserId);
-  const stub = await resolveUserRunnerStub(context.env, userId);
-  return json(await requireGatewayStubMethod(stub, "getUserKeyEnvelope")());
+  const stub = await resolveUserRunnerStub(context.env, decodeRouteParam(encodedUserId));
+
+  if (context.request.method === "GET") {
+    return json(await requireGatewayStubMethod(stub, "getUserKeyEnvelope")());
+  }
+
+  const envelope = parseHostedUserRootKeyEnvelope(await readCachedJsonObject(context));
+  return json(await requireGatewayStubMethod(stub, "putUserKeyEnvelope")({ envelope }));
 }
 
 async function handleUserKeyRecipientRoute(
@@ -532,14 +610,57 @@ async function handleUserKeyRecipientRoute(
   const envelope = await requireGatewayStubMethod(stub, "upsertUserKeyRecipient")({
     kind,
     ...(payload.metadata ? { metadata: payload.metadata } : {}),
-    recipientKey: decodeHostedUserRecipientKeyBase64(
-      payload.recipientKeyBase64,
-      `${kind} recipient key`,
-    ),
     recipientKeyId: payload.recipientKeyId,
+    recipientPublicKeyJwk: payload.recipientPublicKeyJwk,
   });
 
   return json(envelope);
+}
+
+async function handleDeviceSyncRuntimeSnapshotRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  const stub = await resolveUserRunnerStub(context.env, decodeRouteParam(encodedUserId));
+  const snapshot = parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
+    await readCachedJsonObject(context),
+  );
+  return json(await requireGatewayStubMethod(stub, "putDeviceSyncRuntimeSnapshot")({ snapshot }));
+}
+
+async function handleSharePackRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+  encodedShareId: string,
+): Promise<Response> {
+  const userId = decodeRouteParam(encodedUserId);
+  const shareId = decodeRouteParam(encodedShareId);
+  const stub = await resolveUserRunnerStub(context.env, userId);
+  const pack = parseHostedExecutionSharePackResponse(await readCachedJsonObject(context));
+
+  if (pack.shareId !== shareId) {
+    throw new TypeError("shareId path parameter must match the provided share pack payload.");
+  }
+
+  return json(await requireGatewayStubMethod(stub, "putSharePack")({ pack }));
+}
+
+async function handlePendingUsageRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  const stub = await resolveUserRunnerStub(context.env, decodeRouteParam(encodedUserId));
+
+  if (context.request.method === "GET") {
+    const limit = readPendingUsageLimit(context.url.searchParams.get("limit"));
+    return json(await requireGatewayStubMethod(stub, "readPendingUsage")(
+      limit === null ? undefined : { limit },
+    ));
+  }
+
+  const usageIds = parsePendingUsageDeleteRequest(await readCachedJsonObject(context));
+  await requireGatewayStubMethod(stub, "deletePendingUsage")({ usageIds });
+  return json({ ok: true, usageIds });
 }
 
 async function handleGatewayRoute(
@@ -590,11 +711,7 @@ async function handleGatewayRoute(
         ),
       );
     case "messages/send":
-      return handleGatewaySendRoute(
-        stub,
-        userId,
-        gatewaySendMessageInputSchema.parse(payload),
-      );
+      return handleGatewaySendRoute(stub, userId, gatewaySendMessageInputSchema.parse(payload));
     case "permissions/list-open":
       return json(
         await requireGatewayStubMethod(stub, "gatewayListOpenPermissions")(
@@ -650,7 +767,6 @@ async function handleGatewaySendRoute(
   if (result.event.state === "backpressured") {
     return json({ error: "Hosted runner is backpressured." }, 429);
   }
-
   if (result.event.state === "poisoned") {
     return json({ error: result.event.lastError ?? "Hosted runner failed." }, 500);
   }
@@ -687,10 +803,7 @@ function validateHostedGatewayReplyTo(input: {
       return json({ error: "Gateway reply-to must reference a channel message." }, 400);
     }
   } catch (error) {
-    return json(
-      { error: error instanceof Error ? error.message : "Gateway reply-to is invalid." },
-      400,
-    );
+    return json({ error: error instanceof Error ? error.message : "Gateway reply-to is invalid." }, 400);
   }
   return null;
 }
@@ -710,7 +823,6 @@ function requireGatewayStubMethod<TKey extends keyof UserRunnerDurableObjectStub
   if (typeof method !== "function") {
     throw new TypeError(`User runner stub does not implement ${String(key)}.`);
   }
-
   return method as Exclude<UserRunnerDurableObjectStubLike[TKey], undefined>;
 }
 
@@ -740,16 +852,42 @@ function parseHostedUserManagedRootKeyRecipientKind(
 
 function parseHostedUserKeyRecipientUpsertRequest(value: Record<string, unknown>): {
   metadata?: Record<string, string | number | boolean | null>;
-  recipientKeyBase64: string;
   recipientKeyId: string;
+  recipientPublicKeyJwk: HostedUserRecipientPublicKeyJwk;
 } {
   return {
     ...(value.metadata === undefined
       ? {}
       : { metadata: parseHostedUserRecipientMetadata(value.metadata) }),
-    recipientKeyBase64: requireString(value.recipientKeyBase64, "recipientKeyBase64"),
     recipientKeyId: requireString(value.recipientKeyId, "recipientKeyId"),
+    recipientPublicKeyJwk: parseHostedUserRecipientPublicKeyJwk(
+      value.recipientPublicKeyJwk,
+      "recipientPublicKeyJwk",
+    ),
   };
+}
+
+function parsePendingUsageDeleteRequest(value: Record<string, unknown>): string[] {
+  const usageIds = value.usageIds;
+
+  if (!Array.isArray(usageIds) || usageIds.some((entry) => typeof entry !== "string" || entry.trim().length === 0)) {
+    throw new TypeError("usageIds must be a non-empty string array.");
+  }
+
+  return usageIds.map((usageId) => usageId.trim());
+}
+
+function readPendingUsageLimit(value: string | null): number | null {
+  if (value === null) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new TypeError("limit must be a non-negative integer.");
+  }
+
+  return parsed;
 }
 
 function parseHostedUserRecipientMetadata(
@@ -828,10 +966,7 @@ async function handleHostedEmailIngress(
   });
 
   if (!route) {
-    if (shouldRejectHostedEmailIngressFailure({
-      config,
-      to: message.to,
-    })) {
+    if (shouldRejectHostedEmailIngressFailure({ config, to: message.to })) {
       message.setReject?.(rejectReason);
     }
     return;
@@ -845,10 +980,7 @@ async function handleHostedEmailIngress(
     headerFrom: headerFrom.value ?? parsedMessage.from,
     route,
   })) {
-    if (shouldRejectHostedEmailIngressFailure({
-      config,
-      to: message.to,
-    })) {
+    if (shouldRejectHostedEmailIngressFailure({ config, to: message.to })) {
       message.setReject?.(rejectReason);
     }
     return;
@@ -862,7 +994,6 @@ async function handleHostedEmailIngress(
     userId: route.userId,
   });
   const eventId = `email:${rawMessageKey}`;
-
   const stub = await resolveUserRunnerStub(env, route.userId);
   await stub.dispatch(buildHostedExecutionEmailMessageReceivedDispatch({
     eventId,
@@ -906,12 +1037,8 @@ async function authorizeHostedEmailIngress(input: {
 async function handleSignedDispatchRoute(context: WorkerRouteContext): Promise<Response> {
   const payload = await readCachedRequestText(context);
   const dispatch = parseHostedExecutionDispatchRequest(JSON.parse(payload) as unknown);
-  const result = await (await resolveUserRunnerStub(context.env, dispatch.event.userId))
-    .dispatchWithOutcome(dispatch);
-
-  return result.event.state === "backpressured"
-    ? json(result, 429)
-    : json(result);
+  const result = await (await resolveUserRunnerStub(context.env, dispatch.event.userId)).dispatchWithOutcome(dispatch);
+  return result.event.state === "backpressured" ? json(result, 429) : json(result);
 }
 
 function createManualRunDispatch(userId: string): HostedExecutionDispatchRequest {
@@ -943,7 +1070,6 @@ function matchNamedPath(pattern: RegExp): RouteMatcher {
     if (!match?.groups) {
       return null;
     }
-
     return match.groups;
   };
 }
@@ -965,35 +1091,17 @@ function mapWorkerRouteError(error: unknown): Response {
     phase: "failed",
   });
   const classified = classifyPublicRouteError(error);
-
-  return json(
-    { error: classified.error },
-    classified.status,
-  );
+  return json({ error: classified.error }, classified.status);
 }
 
-function classifyPublicRouteError(error: unknown): {
-  error: string;
-  status: number;
-} {
+function classifyPublicRouteError(error: unknown): { error: string; status: number } {
   if (error instanceof SyntaxError) {
-    return {
-      error: "Invalid JSON.",
-      status: 400,
-    };
+    return { error: "Invalid JSON.", status: 400 };
   }
-
   if (error instanceof TypeError || error instanceof RangeError || error instanceof URIError) {
-    return {
-      error: "Invalid request.",
-      status: 400,
-    };
+    return { error: "Invalid request.", status: 400 };
   }
-
-  return {
-    error: "Internal error.",
-    status: 500,
-  };
+  return { error: "Internal error.", status: 500 };
 }
 
 async function readCachedRequestText(
