@@ -2,6 +2,13 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.1.10] - 2026-04-04
+
+### Changed
+- restore trusted publishing flow
+- speed up release checks
+- share canonical knowledge model
+
 ## [0.1.9] - 2026-04-04
 
 ### Fixed
