@@ -1,14 +1,12 @@
 import { HostedBillingStatus, HostedInviteStatus, HostedMemberStatus } from "@prisma/client";
 
 import {
-  buildHostedGetStartedReply,
   buildHostedInviteReply,
   type HostedLinqWebhookEvent,
   requireHostedLinqMessageReceivedEvent,
   resolveHostedLinqOccurredAt,
   summarizeHostedLinqMessage,
 } from "./linq";
-import { shouldStartHostedOnboarding } from "./shared";
 import {
   buildHostedInviteUrl,
   issueHostedInvite,
@@ -94,11 +92,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
     };
   }
 
-  const requestedOnboarding = shouldStartHostedOnboarding(summary.text);
-  const canContinueExistingOnboarding = Boolean(existingMember);
-
-  if (!requestedOnboarding && !canContinueExistingOnboarding) {
-    return buildIgnoredLinqWebhookPlan("onboarding-not-requested");
+  if (!summary.text) {
+    return buildIgnoredLinqWebhookPlan("non-text-message");
   }
 
   const reusableInvite = existingMember
@@ -129,32 +124,14 @@ export async function planHostedOnboardingLinqWebhook(input: {
     prisma: input.prisma,
   });
 
-  if (invite.sentAt) {
-    return buildSignupLinkResponse({
-      activeSubscription: member.billingStatus === HostedBillingStatus.active,
-      inviteCode: invite.inviteCode,
-      inviteId: invite.id,
-      messageId: summary.messageId,
-      chatId: summary.chatId,
-      sourceEventId: input.event.event_id,
-    });
-  }
-
-  return {
-    desiredSideEffects: [
-      createHostedWebhookLinqMessageSideEffect({
-        chatId: summary.chatId,
-        inviteId: null,
-        message: buildHostedGetStartedReply(),
-        replyToMessageId: summary.messageId,
-        sourceEventId: input.event.event_id,
-      }),
-    ],
-    response: {
-      ok: true,
-      reason: "prompted-get-started",
-    },
-  };
+  return buildSignupLinkResponse({
+    activeSubscription: member.billingStatus === HostedBillingStatus.active,
+    inviteCode: invite.inviteCode,
+    inviteId: invite.id,
+    messageId: summary.messageId,
+    chatId: summary.chatId,
+    sourceEventId: input.event.event_id,
+  });
 }
 
 function buildIgnoredLinqWebhookPlan(

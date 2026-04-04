@@ -1,6 +1,8 @@
 import { HostedBillingStatus, HostedMemberStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { buildHostedInviteReply } from "@/src/lib/hosted-onboarding/linq";
+
 const mocks = vi.hoisted(() => ({
   enqueueHostedExecutionOutbox: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
@@ -33,6 +35,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   return {
     ...actual,
     getHostedOnboardingEnvironment: () => ({
+      encryptionKey: "test-hosted-contact-privacy-key",
       encryptionKeyVersion: "v1",
       inviteTtlHours: 24,
       isProduction: false,
@@ -48,6 +51,11 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
       telegramBotUsername: null,
       telegramWebhookSecret: null,
     }),
+    getHostedOnboardingSecretCodec: () => ({
+      encrypt: (value: string) => `enc:${value}`,
+      keyVersion: "v1",
+    }),
+    requireHostedOnboardingPublicBaseUrl: () => "https://join.example.test",
   };
 });
 
@@ -459,7 +467,97 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("ignores first-contact Linq messages that do not explicitly request onboarding", async () => {
+  it("sends the signup link on the first inbound Linq message", async () => {
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue({
+          channel: "linq",
+          id: "invite_123",
+          inviteCode: "code_first_text",
+          memberId: "member_123",
+          sentAt: null,
+          status: "pending",
+        }),
+        findFirst: vi.fn().mockResolvedValue(null),
+        update: vi.fn().mockResolvedValue({
+          id: "invite_123",
+          sentAt: new Date("2026-03-26T12:00:01.000Z"),
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        create: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_123",
+          normalizedPhoneNumber: "+15551234567",
+        }),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          parts: [
+            {
+              type: "text",
+              value: "hello there",
+            },
+          ],
+        },
+        eventId: "evt_non_trigger",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      inviteCode: "code_first_text",
+      joinUrl: "https://join.example.test/join/code_first_text",
+      ok: true,
+      reason: "sent-signup-link",
+    });
+    expect(prismaMocks.hostedMember.findUnique).toHaveBeenCalledTimes(2);
+    expect(prismaMocks.hostedInvite.findFirst).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedInvite.update).toHaveBeenCalledWith({
+      where: {
+        id: "invite_123",
+      },
+      data: {
+        sentAt: expect.any(Date),
+      },
+    });
+    expect(prismaMocks.hostedMember.create).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_123",
+        message: buildHostedInviteReply({
+          activeSubscription: false,
+          joinUrl: "https://join.example.test/join/code_first_text",
+        }),
+        replyToMessageId: "msg_123",
+      }),
+    );
+  });
+
+  it("ignores first-contact Linq messages that do not contain text", async () => {
     const prismaMocks = {
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -491,12 +589,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         data: {
           parts: [
             {
-              type: "text",
-              value: "hello there",
+              type: "media",
+              url: "https://example.test/signup.jpg",
             },
           ],
         },
-        eventId: "evt_non_trigger",
+        eventId: "evt_non_text",
       }),
       signature: null,
       timestamp: null,
@@ -505,7 +603,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(response).toMatchObject({
       ignored: true,
       ok: true,
-      reason: "onboarding-not-requested",
+      reason: "non-text-message",
     });
     expect(prismaMocks.hostedMember.findUnique).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedInvite.findFirst).not.toHaveBeenCalled();

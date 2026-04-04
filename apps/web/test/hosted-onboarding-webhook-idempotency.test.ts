@@ -110,7 +110,6 @@ import {
   handleHostedStripeWebhook,
 } from "@/src/lib/hosted-onboarding/webhook-service";
 import {
-  buildHostedGetStartedReply,
   buildHostedInviteReply,
 } from "@/src/lib/hosted-onboarding/linq";
 
@@ -217,7 +216,7 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("asks the Murph intro question for an existing inactive member even without an onboarding trigger", async () => {
+  it("sends the signup link immediately for an existing inactive member", async () => {
     const prisma = withPrismaTransaction({
       hostedBillingCheckout: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
@@ -228,6 +227,10 @@ describe("hosted onboarding webhook retry safety", () => {
           sentAt: null,
         })),
         findFirst: vi.fn().mockResolvedValue(null),
+        update: vi.fn().mockResolvedValue(makePendingInvite({
+          inviteCode: "code_returning_member",
+          sentAt: new Date("2026-03-26T12:00:01.000Z"),
+        })),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedWebhookReceipt: {
@@ -263,8 +266,10 @@ describe("hosted onboarding webhook retry safety", () => {
         timestamp: null,
       }),
     ).resolves.toMatchObject({
+      inviteCode: "code_returning_member",
+      joinUrl: "https://join.example.test/join/code_returning_member",
       ok: true,
-      reason: "prompted-get-started",
+      reason: "sent-signup-link",
     });
 
     const receiptCalls = readMockCallPayloads(prisma.hostedWebhookReceipt.updateMany.mock.calls);
@@ -281,15 +286,20 @@ describe("hosted onboarding webhook retry safety", () => {
             lastReceivedAt: expect.any(String),
             plannedAt: expect.any(String),
             response: expect.objectContaining({
+              inviteCode: "code_returning_member",
+              joinUrl: "https://join.example.test/join/code_returning_member",
               ok: true,
-              reason: "prompted-get-started",
+              reason: "sent-signup-link",
             }),
             sideEffects: [
               buildLinqMessageSideEffect({
                 attemptCount: 1,
-                inviteId: null,
+                inviteId: "invite_123",
                 lastAttemptAt: expect.any(String),
-                message: buildHostedGetStartedReply(),
+                message: buildHostedInviteReply({
+                  activeSubscription: false,
+                  joinUrl: "https://join.example.test/join/code_returning_member",
+                }),
                 sentAt: expect.any(String),
                 status: "sent",
               }),
@@ -304,17 +314,28 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(prisma.hostedMember.create).not.toHaveBeenCalled();
     expect(prisma.hostedMember.update).toHaveBeenCalledTimes(1);
     expect(prisma.hostedInvite.create).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedInvite.update).toHaveBeenCalledWith({
+      where: {
+        id: "invite_123",
+      },
+      data: {
+        sentAt: expect.any(Date),
+      },
+    });
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",
-        message: buildHostedGetStartedReply(),
+        message: buildHostedInviteReply({
+          activeSubscription: false,
+          joinUrl: "https://join.example.test/join/code_returning_member",
+        }),
         replyToMessageId: "msg_123",
       }),
     );
   });
 
-  it("asks the Murph intro question on first contact only after an onboarding trigger", async () => {
+  it("sends the signup link on the first inbound message for a new member", async () => {
     const prisma = withPrismaTransaction({
       hostedBillingCheckout: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
@@ -325,6 +346,10 @@ describe("hosted onboarding webhook retry safety", () => {
           sentAt: null,
         })),
         findFirst: vi.fn().mockResolvedValue(null),
+        update: vi.fn().mockResolvedValue(makePendingInvite({
+          inviteCode: "code_first_contact",
+          sentAt: new Date("2026-03-26T12:00:01.000Z"),
+        })),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedWebhookReceipt: {
@@ -348,14 +373,16 @@ describe("hosted onboarding webhook retry safety", () => {
       handleHostedOnboardingLinqWebhook({
         prisma,
         rawBody: buildLinqMessageWebhookBody({
-          text: "start murph",
+          text: "hello",
         }),
         signature: null,
         timestamp: null,
       }),
     ).resolves.toMatchObject({
+      inviteCode: "code_first_contact",
+      joinUrl: "https://join.example.test/join/code_first_contact",
       ok: true,
-      reason: "prompted-get-started",
+      reason: "sent-signup-link",
     });
 
     const receiptCalls = readMockCallPayloads(prisma.hostedWebhookReceipt.updateMany.mock.calls);
@@ -372,15 +399,20 @@ describe("hosted onboarding webhook retry safety", () => {
             lastReceivedAt: expect.any(String),
             plannedAt: expect.any(String),
             response: expect.objectContaining({
+              inviteCode: "code_first_contact",
+              joinUrl: "https://join.example.test/join/code_first_contact",
               ok: true,
-              reason: "prompted-get-started",
+              reason: "sent-signup-link",
             }),
             sideEffects: [
               buildLinqMessageSideEffect({
                 attemptCount: 1,
-                inviteId: null,
+                inviteId: "invite_123",
                 lastAttemptAt: expect.any(String),
-                message: buildHostedGetStartedReply(),
+                message: buildHostedInviteReply({
+                  activeSubscription: false,
+                  joinUrl: "https://join.example.test/join/code_first_contact",
+                }),
                 sentAt: expect.any(String),
                 status: "sent",
               }),
@@ -392,11 +424,21 @@ describe("hosted onboarding webhook retry safety", () => {
     );
     expect(prisma.hostedInvite.findFirst).toHaveBeenCalledTimes(1);
     expect(prisma.hostedInvite.create).toHaveBeenCalledTimes(1);
-    expect(prisma.hostedInvite.updateMany).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.update).toHaveBeenCalledWith({
+      where: {
+        id: "invite_123",
+      },
+      data: {
+        sentAt: expect.any(Date),
+      },
+    });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",
-        message: buildHostedGetStartedReply(),
+        message: buildHostedInviteReply({
+          activeSubscription: false,
+          joinUrl: "https://join.example.test/join/code_first_contact",
+        }),
         replyToMessageId: "msg_123",
       }),
     );
@@ -599,7 +641,7 @@ describe("hosted onboarding webhook retry safety", () => {
     );
   });
 
-  it("does not skip the intro question when the member only has an unsent non-Linq invite", async () => {
+  it("reuses an unsent non-Linq invite by switching it onto Linq and sending the signup link", async () => {
     const pendingWebInvite = makePendingInvite({
       channel: "web",
       inviteCode: "code_from_web",
@@ -652,8 +694,10 @@ describe("hosted onboarding webhook retry safety", () => {
         timestamp: null,
       }),
     ).resolves.toMatchObject({
+      inviteCode: "code_from_web",
+      joinUrl: "https://join.example.test/join/code_from_web",
       ok: true,
-      reason: "prompted-get-started",
+      reason: "sent-signup-link",
     });
 
     expect(prisma.hostedInvite.findFirst).toHaveBeenCalledTimes(2);
@@ -671,7 +715,10 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",
-        message: buildHostedGetStartedReply(),
+        message: buildHostedInviteReply({
+          activeSubscription: false,
+          joinUrl: "https://join.example.test/join/code_from_web",
+        }),
         replyToMessageId: "msg_123",
       }),
     );
@@ -1199,7 +1246,7 @@ describe("hosted onboarding webhook retry safety", () => {
       handleHostedOnboardingLinqWebhook({
         prisma,
         rawBody: buildLinqMessageWebhookBody({
-          text: "start murph",
+          text: "hello",
         }),
         signature: null,
         timestamp: null,
@@ -1225,13 +1272,18 @@ describe("hosted onboarding webhook retry safety", () => {
             lastReceivedAt: expect.any(String),
             plannedAt: expect.any(String),
             response: expect.objectContaining({
+              inviteCode: "join_123",
+              joinUrl: "https://join.example.test/join/join_123",
               ok: true,
-              reason: "prompted-get-started",
+              reason: "sent-signup-link",
             }),
             sideEffects: [
               buildLinqMessageSideEffect({
-                inviteId: null,
-                message: buildHostedGetStartedReply(),
+                inviteId: "invite_123",
+                message: buildHostedInviteReply({
+                  activeSubscription: false,
+                  joinUrl: "https://join.example.test/join/join_123",
+                }),
                 replyToMessageId: "msg_123",
                 status: "pending",
               }),
@@ -1259,13 +1311,15 @@ describe("hosted onboarding webhook retry safety", () => {
             lastReceivedAt: expect.any(String),
             plannedAt: expect.any(String),
             response: expect.objectContaining({
+              inviteCode: "join_123",
+              joinUrl: "https://join.example.test/join/join_123",
               ok: true,
-              reason: "prompted-get-started",
+              reason: "sent-signup-link",
             }),
             sideEffects: [
               buildLinqMessageSideEffect({
                 attemptCount: 1,
-                inviteId: null,
+                inviteId: "invite_123",
                 lastAttemptAt: expect.any(String),
                 lastError: {
                   code: null,
@@ -1273,7 +1327,10 @@ describe("hosted onboarding webhook retry safety", () => {
                   name: "HostedOnboardingError",
                   retryable: true,
                 },
-                message: buildHostedGetStartedReply(),
+                message: buildHostedInviteReply({
+                  activeSubscription: false,
+                  joinUrl: "https://join.example.test/join/join_123",
+                }),
                 replyToMessageId: "msg_123",
                 status: "pending",
               }),
@@ -1291,14 +1348,16 @@ describe("hosted onboarding webhook retry safety", () => {
       handleHostedOnboardingLinqWebhook({
         prisma,
         rawBody: buildLinqMessageWebhookBody({
-          text: "start murph",
+          text: "hello",
         }),
         signature: null,
         timestamp: null,
       }),
     ).resolves.toMatchObject({
+      inviteCode: "join_123",
+      joinUrl: "https://join.example.test/join/join_123",
       ok: true,
-      reason: "prompted-get-started",
+      reason: "sent-signup-link",
     });
 
     const secondAttemptCalls = prisma.hostedWebhookReceipt.updateMany.mock.calls
@@ -1312,8 +1371,10 @@ describe("hosted onboarding webhook retry safety", () => {
               attemptCount: 2,
               completedAt: expect.any(String),
               response: expect.objectContaining({
+                inviteCode: "join_123",
+                joinUrl: "https://join.example.test/join/join_123",
                 ok: true,
-                reason: "prompted-get-started",
+                reason: "sent-signup-link",
               }),
               status: "completed",
             }),
@@ -1325,12 +1386,22 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        message: buildHostedGetStartedReply(),
+        message: buildHostedInviteReply({
+          activeSubscription: false,
+          joinUrl: "https://join.example.test/join/join_123",
+        }),
         replyToMessageId: "msg_123",
       }),
     );
     expect(prisma.hostedInvite.create).toHaveBeenCalledTimes(1);
-    expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.update).toHaveBeenCalledWith({
+      where: {
+        id: "invite_123",
+      },
+      data: {
+        sentAt: expect.any(Date),
+      },
+    });
   });
 
   it("does not resend an already-sent Linq invite reply when reclaiming a failed receipt", async () => {
@@ -1376,7 +1447,10 @@ describe("hosted onboarding webhook retry safety", () => {
           attemptCount: 1,
           inviteId: "invite_123",
           lastAttemptAt: "2026-03-26T12:00:00.250Z",
-          message: "Use this invite link to join Murph: https://join.example.test/join/join_123",
+          message: buildHostedInviteReply({
+            activeSubscription: false,
+            joinUrl: "https://join.example.test/join/join_123",
+          }),
           sentAt: "2026-03-26T12:00:00.400Z",
           status: "sent",
         }),
