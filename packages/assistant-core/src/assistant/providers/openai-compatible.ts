@@ -22,11 +22,8 @@ import {
   normalizeAssistantProviderOptionKey,
   normalizeNullableString,
 } from '../shared.js'
-import type {
-  AssistantProviderProgressEvent,
-} from '../provider-progress.js'
 import {
-  summarizeAssistantProviderActivityLabels,
+  createAssistantProviderToolProgressEvent,
 } from '../provider-progress.js'
 import {
   resolveAssistantModelSpecFromProviderConfig,
@@ -160,7 +157,6 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
     const usesOpenAIResponsesApi =
       shouldUseAssistantOpenAIResponsesApi(providerConfig)
     const toolEvents: unknown[] = []
-    const progressEvents: AssistantProviderProgressEvent[] = []
     let executedToolCount = 0
     const tools = input.toolRuntime?.toolCatalog?.createAiSdkTools('apply', {
       onToolEvent: (event) => {
@@ -180,7 +176,6 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
           sequence: toolEvents.length,
         })
         if (progressEvent) {
-          progressEvents.push(progressEvent)
           input.onEvent?.(progressEvent)
         }
 
@@ -241,7 +236,7 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
 
       return {
         metadata: {
-          activityLabels: summarizeAssistantProviderActivityLabels(progressEvents),
+          activityLabels: [],
           executedToolCount,
           rawToolEvents: toolEvents,
         },
@@ -269,7 +264,7 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
       return {
         error,
         metadata: {
-          activityLabels: summarizeAssistantProviderActivityLabels(progressEvents),
+          activityLabels: [],
           executedToolCount,
           rawToolEvents: toolEvents,
         },
@@ -347,56 +342,43 @@ function createOpenAiCompatibleToolProgressEvent(input: {
   event: AssistantAiSdkToolEvent
   rawEvent: Record<string, unknown>
   sequence: number
-}): AssistantProviderProgressEvent | null {
-  const safeLabel = normalizeNullableString(input.event.tool)
-  if (!safeLabel) {
-    return null
-  }
-
+}) {
+  const label = normalizeNullableString(input.event.tool)
+  const textLabel = label ?? 'tool'
   switch (input.event.kind) {
     case 'started':
-      return {
+      return createAssistantProviderToolProgressEvent({
         id: `tool-${input.sequence}`,
-        kind: 'tool',
-        label: safeLabel,
+        label,
         rawEvent: input.rawEvent,
-        safeLabel,
-        safeText: `using ${safeLabel}`,
         state: 'running',
-        text: `Running ${safeLabel}.`,
-      }
+        text: `Running ${textLabel}.`,
+      })
     case 'previewed':
-      return {
+      return createAssistantProviderToolProgressEvent({
         id: `tool-${input.sequence}`,
-        kind: 'tool',
-        label: safeLabel,
+        label,
         rawEvent: input.rawEvent,
-        safeLabel,
-        safeText: `planned ${safeLabel}`,
+        safeText: label ? `planned ${label}` : null,
         state: 'completed',
-        text: `Planned ${safeLabel}.`,
-      }
+        text: `Planned ${textLabel}.`,
+      })
     case 'succeeded':
-      return {
+      return createAssistantProviderToolProgressEvent({
         id: `tool-${input.sequence}`,
-        kind: 'tool',
-        label: safeLabel,
+        label,
         rawEvent: input.rawEvent,
-        safeLabel,
-        safeText: `finished ${safeLabel}`,
         state: 'completed',
-        text: `Finished ${safeLabel}.`,
-      }
+        text: `Finished ${textLabel}.`,
+      })
     case 'failed':
-      return {
+      return createAssistantProviderToolProgressEvent({
         id: `tool-${input.sequence}`,
-        kind: 'tool',
-        label: safeLabel,
+        label,
         rawEvent: input.rawEvent,
-        safeLabel,
-        safeText: `${safeLabel} failed`,
+        safeText: label ? `${label} failed` : null,
         state: 'completed',
-        text: `${safeLabel} failed: ${input.event.errorMessage ?? 'Tool execution failed.'}`,
-      }
+        text: `${textLabel} failed: ${input.event.errorMessage ?? 'Tool execution failed.'}`,
+      })
   }
 }

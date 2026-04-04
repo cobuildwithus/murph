@@ -14,10 +14,6 @@ import {
   resolveAssistantProviderPrompt,
 } from './helpers.js'
 import type { AssistantProviderDefinition } from './types.js'
-import type { AssistantProviderProgressEvent } from '../provider-progress.js'
-import {
-  summarizeAssistantProviderActivityLabels,
-} from '../provider-progress.js'
 
 export const codexCliProviderDefinition: AssistantProviderDefinition = {
   capabilities: {
@@ -42,8 +38,6 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
       )
     }
 
-    const progressEvents: AssistantProviderProgressEvent[] = []
-
     const result = await executeCodexPrompt({
       abortSignal: input.abortSignal,
       approvalPolicy: providerConfig.approvalPolicy ?? undefined,
@@ -53,10 +47,7 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
       }),
       env: prepareAssistantDirectCliEnv(input.env),
       model: providerConfig.model ?? undefined,
-      onProgress: (event) => {
-        progressEvents.push(event)
-        input.onEvent?.(event)
-      },
+      onProgress: input.onEvent ?? undefined,
       onTraceEvent: input.onTraceEvent,
       oss: providerConfig.oss,
       profile: providerConfig.profile ?? undefined,
@@ -69,7 +60,7 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
 
     return {
       metadata: {
-        activityLabels: summarizeAssistantProviderActivityLabels(progressEvents),
+        activityLabels: [],
         executedToolCount: 0,
         rawToolEvents: [],
       },
