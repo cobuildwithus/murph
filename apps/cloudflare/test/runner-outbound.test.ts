@@ -228,32 +228,6 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("keeps legacy hosted share payload query params disabled on the new share proxy host", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const response = await handleRunnerOutboundRequest(
-      new Request("http://share.worker/api/hosted-share/internal/share_123/payload?shareCode=code_123", {
-        headers: createRunnerProxyHeaders(),
-        method: "POST",
-      }),
-      createRunnerOutboundEnv(),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
-    );
-
-    expect(response.status).toBe(404);
-    await expect(response.json()).resolves.toEqual({
-      error: "Not found",
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
   it("records hosted AI usage locally instead of proxying through hosted web", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       recorded: 1,

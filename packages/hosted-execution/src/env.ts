@@ -5,7 +5,6 @@ import {
 
 import {
   DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
-  DEFAULT_HOSTED_EXECUTION_SHARE_PACK_PROXY_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
 } from "./callback-hosts.ts";
 export interface HostedExecutionDispatchEnvironment {
@@ -21,7 +20,6 @@ export interface HostedExecutionControlEnvironment {
 
 export interface HostedExecutionWebControlPlaneEnvironment {
   deviceSyncRuntimeBaseUrl: string;
-  shareBaseUrl: string;
   usageBaseUrl: string;
 }
 
@@ -83,7 +81,6 @@ export function readHostedExecutionWebControlPlaneEnvironment(
 ): HostedExecutionWebControlPlaneEnvironment {
   return {
     deviceSyncRuntimeBaseUrl: DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
-    shareBaseUrl: DEFAULT_HOSTED_EXECUTION_SHARE_PACK_PROXY_BASE_URL,
     usageBaseUrl: DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
   };
 }

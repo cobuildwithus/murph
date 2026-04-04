@@ -17,7 +17,6 @@ import {
   type HostedExecutionDeviceSyncRuntimeApplyRequest,
   type HostedExecutionDeviceSyncRuntimeConnectionUpdate,
   type HostedExecutionDeviceSyncRuntimeSnapshotRequest,
-  type HostedExecutionSharePackResponse,
   type HostedExecutionSideEffectRecord,
 } from "@murphai/hosted-execution";
 import type { HostedEmailSendRequest } from "@murphai/assistant-runtime";
@@ -25,7 +24,6 @@ import { gatewayProjectionSnapshotSchema } from "@murphai/gateway-core";
 
 import { createHostedArtifactStore } from "./bundle-store.ts";
 import { createHostedDeviceSyncRuntimeStore } from "./device-sync-runtime-store.ts";
-import { createHostedSharePackStore } from "./share-pack-store.ts";
 import { createHostedPendingUsageStore } from "./usage-store.ts";
 import { createHostedUserKeyStore } from "./user-key-store.js";
 import { readHostedExecutionEnvironment } from "./env.ts";
@@ -57,7 +55,6 @@ const RUNNER_INTERNAL_PROXY_HOSTNAMES = new Set<string>([
   HOSTED_EXECUTION_CALLBACK_HOSTS.commit,
   HOSTED_EXECUTION_PROXY_HOSTS.deviceSync,
   HOSTED_EXECUTION_CALLBACK_HOSTS.email,
-  HOSTED_EXECUTION_PROXY_HOSTS.sharePack,
   HOSTED_EXECUTION_CALLBACK_HOSTS.sideEffects,
   HOSTED_EXECUTION_PROXY_HOSTS.usage,
 ]);
@@ -120,16 +117,6 @@ export async function handleRunnerOutboundRequest(
     return handleRunnerDeviceSyncControlRequest({
       bucket: env.BUNDLES,
       env,
-      environment,
-      request,
-      url,
-      userId,
-    });
-  }
-
-  if (url.hostname === HOSTED_EXECUTION_PROXY_HOSTS.sharePack) {
-    return handleRunnerSharePackRequest({
-      bucket: env.BUNDLES,
       environment,
       request,
       url,
@@ -560,43 +547,6 @@ async function handleRunnerUsageRecordRequest(input: {
   });
 
   return json(result);
-}
-
-async function handleRunnerSharePackRequest(input: {
-  bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
-  environment: ReturnType<typeof readHostedExecutionEnvironment>;
-  request: Request;
-  url: URL;
-  userId: string;
-}): Promise<Response> {
-  const match = /^\/internal\/shares\/(?<shareId>[^/]+)\/payload$/u.exec(input.url.pathname);
-
-  if (!match?.groups) {
-    return notFound();
-  }
-
-  if (input.request.method !== "POST") {
-    return methodNotAllowed();
-  }
-
-  const shareId = decodeRouteParam(match.groups.shareId);
-  const crypto = await resolveRunnerOutboundUserCryptoContext({
-    bucket: input.bucket,
-    environment: input.environment,
-    userId: input.userId,
-  });
-  const store = createHostedSharePackStore({
-    bucket: input.bucket,
-    key: crypto.rootKey,
-    keyId: crypto.rootKeyId,
-    keysById: crypto.keysById,
-  });
-  const pack = await store.readSharePack({
-    shareId,
-    userId: input.userId,
-  });
-
-  return pack ? json(pack) : notFound();
 }
 
 async function resolveRunnerOutboundUserCryptoContext(input: {

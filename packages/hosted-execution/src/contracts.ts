@@ -212,11 +212,6 @@ export const HOSTED_EXECUTION_USER_ID_HEADER = "x-hosted-execution-user-id";
 export const HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER =
   "x-hosted-execution-runner-proxy-token";
 
-export interface HostedExecutionSharePackResponse {
-  pack: SharePack;
-  shareId: string;
-}
-
 export interface HostedExecutionDeviceSyncConnectLinkResponse {
   authorizationUrl: string;
   expiresAt: string;

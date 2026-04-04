@@ -13,7 +13,6 @@ export type HostedStorageScope =
   | "gateway-store"
   | "root-key-envelope"
   | "root-key-recipient"
-  | "share-pack"
   | "side-effect-journal"
   | "user-env";
 

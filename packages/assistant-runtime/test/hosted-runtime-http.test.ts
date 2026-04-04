@@ -25,7 +25,6 @@ vi.mock("../src/hosted-runtime/events/inbox-pipeline.ts", () => ({
 
 import {
   createHostedExecutionServerDeviceSyncRuntimeClient,
-  createHostedExecutionServerSharePackClient,
 } from "@murphai/hosted-execution";
 import { parseHostedEmailThreadTarget } from "@murphai/runtime-state";
 import { syncHostedDeviceSyncControlPlaneState } from "../src/hosted-device-sync-runtime.ts";
@@ -81,14 +80,8 @@ test("hosted internal worker fetch adds the per-run header only for targeted int
   );
 });
 
-test("hosted share dispatch uses the explicit wrapped fetch for worker proxy share reads", async () => {
-  const fetchMock = vi.fn(async () =>
-    new Response("<html>service unavailable</html>", {
-      status: 503,
-      headers: {
-        "content-type": "text/html",
-      },
-    }));
+test("hosted share dispatch now requires an inline pack", async () => {
+  const fetchMock = vi.fn(async () => new Response("unused", { status: 200 }));
   const hostedFetch = createHostedInternalWorkerFetch("runner-proxy-token", fetchMock as typeof fetch);
 
   await assert.rejects(
@@ -98,44 +91,18 @@ test("hosted share dispatch uses the explicit wrapped fetch for worker proxy sha
           event: {
             kind: "vault.share.accepted",
             share: {
-              shareCode: "share-code",
               shareId: "share_123",
             },
             userId: "member_123",
           },
         },
-        internalWorkerFetch: hostedFetch,
-        runtime: {
-          commitTimeoutMs: 12_000,
-          webControlPlane: {
-            deviceSyncRuntimeBaseUrl: null,
-            internalToken: null,
-            schedulerToken: null,
-            shareBaseUrl: "http://share-pack.worker",
-            shareToken: null,
-          },
-        },
         vaultRoot: "/tmp/share-vault",
       }),
-    /Hosted share payload fetch failed with HTTP 503/u,
+    /missing an inline share pack/u,
   );
 
-  assert.equal(
-    new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("x-hosted-execution-runner-proxy-token"),
-    "runner-proxy-token",
-  );
-  assert.equal(
-    new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("authorization"),
-    null,
-  );
-  assert.equal(fetchMock.mock.calls[0]?.[0], "http://share-pack.worker/api/hosted-share/internal/share_123/payload");
-  assert.equal(fetchMock.mock.calls[0]?.[1]?.method, "POST");
-  assert.equal(
-    fetchMock.mock.calls[0]?.[1]?.body,
-    JSON.stringify({
-      shareCode: "share-code",
-    }),
-  );
+  await hostedFetch("https://external.example.test/health");
+  assert.equal(fetchMock.mock.calls.length, 1);
 });
 
 test("hosted device-sync sync uses the explicit wrapped fetch for worker proxy snapshot reads", async () => {
@@ -175,8 +142,7 @@ test("hosted device-sync sync uses the explicit wrapped fetch for worker proxy s
       deviceSyncRuntimeBaseUrl: "http://device-sync.worker",
       internalToken: null,
       schedulerToken: null,
-      shareBaseUrl: null,
-      shareToken: null,
+      usageBaseUrl: null,
     },
   });
 
@@ -222,122 +188,6 @@ test("hosted device-sync snapshot tolerates non-JSON error bodies and applies th
   assert.equal(
     new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("authorization"),
     "Bearer internal-token",
-  );
-});
-
-test("hosted share payload fetch supports direct web-control URLs when the share token is configured", async () => {
-  const fetchMock = vi.fn(async () =>
-    new Response("<html>service unavailable</html>", {
-      status: 503,
-      headers: {
-        "content-type": "text/html",
-      },
-    }));
-  global.fetch = fetchMock;
-
-  await assert.rejects(
-    () =>
-      handleHostedShareAcceptedDispatch({
-        dispatch: {
-          event: {
-            kind: "vault.share.accepted",
-            share: {
-              shareCode: "share-code",
-              shareId: "share_123",
-            },
-            userId: "member_123",
-          },
-        },
-        runtime: {
-          commitTimeoutMs: 12_000,
-          webControlPlane: {
-            deviceSyncRuntimeBaseUrl: null,
-            internalToken: null,
-            schedulerToken: null,
-            shareBaseUrl: "https://share.example.test",
-            shareToken: "share-token",
-          },
-        },
-        vaultRoot: "/tmp/share-vault",
-      }),
-    /Hosted share payload fetch failed with HTTP 503/u,
-  );
-
-  assert.equal(fetchMock.mock.calls.length, 1);
-  assert.equal(
-    new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("authorization"),
-    "Bearer share-token",
-  );
-  assert.equal(
-    new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("x-hosted-execution-user-id"),
-    "member_123",
-  );
-  assert.equal(fetchMock.mock.calls[0]?.[0], "https://share.example.test/api/hosted-share/internal/share_123/payload");
-  assert.equal(fetchMock.mock.calls[0]?.[1]?.method, "POST");
-  assert.equal(
-    fetchMock.mock.calls[0]?.[1]?.body,
-    JSON.stringify({
-      shareCode: "share-code",
-    }),
-  );
-});
-
-test("hosted share payload direct client sends both the share token and bound-user header", async () => {
-  const fetchMock = vi.fn(async () =>
-    new Response(JSON.stringify({
-      pack: {
-        createdAt: "2026-03-29T10:00:00.000Z",
-        entities: [
-          {
-            kind: "food",
-            payload: {
-              kind: "smoothie",
-              status: "active",
-              title: "Share Smoothie",
-            },
-            ref: "food:share-smoothie",
-          },
-        ],
-        schemaVersion: "murph.share-pack.v1",
-        title: "Share pack",
-      },
-      shareId: "share_123",
-    }), {
-      status: 200,
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-    }));
-  global.fetch = fetchMock;
-  const client = createHostedExecutionServerSharePackClient({
-    baseUrl: "https://share.example.test",
-    boundUserId: "member_123",
-    shareToken: "share-token",
-    timeoutMs: 9_000,
-  });
-
-  await assert.doesNotReject(() =>
-    client.fetchSharePack({
-      shareCode: "share-code",
-      shareId: "share_123",
-    })
-  );
-
-  assert.equal(
-    new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("authorization"),
-    "Bearer share-token",
-  );
-  assert.equal(
-    new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("x-hosted-execution-user-id"),
-    "member_123",
-  );
-  assert.equal(fetchMock.mock.calls[0]?.[0], "https://share.example.test/api/hosted-share/internal/share_123/payload");
-  assert.equal(fetchMock.mock.calls[0]?.[1]?.method, "POST");
-  assert.equal(
-    fetchMock.mock.calls[0]?.[1]?.body,
-    JSON.stringify({
-      shareCode: "share-code",
-    }),
   );
 });
 

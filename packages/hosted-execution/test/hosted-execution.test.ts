@@ -6,7 +6,6 @@ import {
   DEFAULT_HOSTED_EXECUTION_COMMIT_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_EMAIL_BASE_URL,
-  DEFAULT_HOSTED_EXECUTION_SHARE_PACK_PROXY_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_SIDE_EFFECTS_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
   HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
@@ -197,7 +196,7 @@ describe("@murphai/hosted-execution", () => {
     });
   });
 
-  it("reads hosted web control plane env from split internal, scheduler, and share settings", () => {
+  it("reads hosted web control plane env from the worker proxy defaults", () => {
     expect(
       readHostedExecutionWebControlPlaneEnvironment({
         HOSTED_EXECUTION_SCHEDULER_TOKENS: "cron-token",
@@ -207,7 +206,6 @@ describe("@murphai/hosted-execution", () => {
       }),
     ).toEqual({
       deviceSyncRuntimeBaseUrl: DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
-      shareBaseUrl: DEFAULT_HOSTED_EXECUTION_SHARE_PACK_PROXY_BASE_URL,
       usageBaseUrl: DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
     });
 
@@ -217,7 +215,6 @@ describe("@murphai/hosted-execution", () => {
       }),
     ).toEqual({
       deviceSyncRuntimeBaseUrl: DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
-      shareBaseUrl: DEFAULT_HOSTED_EXECUTION_SHARE_PACK_PROXY_BASE_URL,
       usageBaseUrl: DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
     });
   });
@@ -230,7 +227,6 @@ describe("@murphai/hosted-execution", () => {
       }),
     ).toEqual({
       deviceSyncRuntimeBaseUrl: DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
-      shareBaseUrl: DEFAULT_HOSTED_EXECUTION_SHARE_PACK_PROXY_BASE_URL,
       usageBaseUrl: DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
     });
   });
@@ -242,7 +238,6 @@ describe("@murphai/hosted-execution", () => {
       }),
     ).toEqual({
       deviceSyncRuntimeBaseUrl: DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
-      shareBaseUrl: DEFAULT_HOSTED_EXECUTION_SHARE_PACK_PROXY_BASE_URL,
       usageBaseUrl: DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
     });
   });

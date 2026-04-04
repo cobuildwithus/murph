@@ -91,13 +91,6 @@ describe("RunnerContainer", () => {
           userId: "member_123",
         },
       },
-      "share.worker": {
-        method: "shareWorker",
-        params: {
-          internalWorkerProxyToken: expect.any(String),
-          userId: "member_123",
-        },
-      },
       "usage.worker": {
         method: "usageWorker",
         params: {

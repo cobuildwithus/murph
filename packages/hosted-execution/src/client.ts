@@ -8,32 +8,26 @@ import {
 
 import { createHostedExecutionSignatureHeaders } from "./auth.ts";
 import type {
-  HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   HostedExecutionDispatchRequest,
   HostedExecutionDispatchResult,
-  HostedExecutionSharePackResponse,
   HostedExecutionUserEnvStatus,
   HostedExecutionUserEnvUpdate,
   HostedExecutionUserStatus,
 } from "./contracts.ts";
 import { normalizeHostedExecutionBaseUrl } from "./env.ts";
 import {
-  parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
   parseHostedExecutionDispatchRequest,
   parseHostedExecutionDispatchResult,
-  parseHostedExecutionSharePackResponse,
   parseHostedExecutionUserEnvStatus,
   parseHostedExecutionUserEnvUpdate,
   parseHostedExecutionUserStatus,
 } from "./parsers.ts";
 import {
-  buildHostedExecutionUserDeviceSyncRuntimeSnapshotPath,
   buildHostedExecutionUserEnvPath,
   buildHostedExecutionUserKeyEnvelopePath,
   buildHostedExecutionUserKeyRecipientPath,
   buildHostedExecutionUserPendingUsagePath,
   buildHostedExecutionUserRunPath,
-  buildHostedExecutionUserSharePackPath,
   buildHostedExecutionUserStatusPath,
   HOSTED_EXECUTION_DISPATCH_PATH,
 } from "./routes.ts";
@@ -63,15 +57,6 @@ export interface HostedExecutionControlClient {
   getStatus(userId: string): Promise<HostedExecutionUserStatus>;
   getUserEnvStatus(userId: string): Promise<HostedExecutionUserEnvStatus>;
   getUserKeyEnvelope(userId: string): Promise<HostedUserRootKeyEnvelope>;
-  putDeviceSyncRuntimeSnapshot(
-    userId: string,
-    snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse,
-  ): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
-  putSharePack(
-    userId: string,
-    shareId: string,
-    pack: HostedExecutionSharePackResponse,
-  ): Promise<HostedExecutionSharePackResponse>;
   putUserKeyEnvelope(userId: string, envelope: HostedUserRootKeyEnvelope): Promise<HostedUserRootKeyEnvelope>;
   run(userId: string): Promise<HostedExecutionUserStatus>;
   updateUserEnv(userId: string, update: HostedExecutionUserEnvUpdate): Promise<HostedExecutionUserEnvStatus>;
@@ -235,44 +220,6 @@ export function createHostedExecutionControlClient(
         parse: parseHostedUserRootKeyEnvelope,
         path: buildHostedExecutionUserKeyEnvelopePath(userId),
         request: { method: "GET" },
-        signingSecret,
-        timeoutMs: options.timeoutMs,
-      });
-    },
-    putDeviceSyncRuntimeSnapshot(userId, snapshot) {
-      const requestPayload = parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(snapshot);
-
-      return requestHostedExecutionSignedJson({
-        baseUrl,
-        fetchImpl,
-        label: "device-sync runtime snapshot publish",
-        now: options.now,
-        parse: parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
-        path: buildHostedExecutionUserDeviceSyncRuntimeSnapshotPath(userId),
-        request: {
-          body: JSON.stringify(requestPayload),
-          headers: { "content-type": "application/json; charset=utf-8" },
-          method: "PUT",
-        },
-        signingSecret,
-        timeoutMs: options.timeoutMs,
-      });
-    },
-    putSharePack(userId, shareId, pack) {
-      const requestPayload = parseHostedExecutionSharePackResponse(pack);
-
-      return requestHostedExecutionSignedJson({
-        baseUrl,
-        fetchImpl,
-        label: "share pack publish",
-        now: options.now,
-        parse: parseHostedExecutionSharePackResponse,
-        path: buildHostedExecutionUserSharePackPath(userId, shareId),
-        request: {
-          body: JSON.stringify(requestPayload),
-          headers: { "content-type": "application/json; charset=utf-8" },
-          method: "PUT",
-        },
         signingSecret,
         timeoutMs: options.timeoutMs,
       });

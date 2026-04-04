@@ -23,7 +23,6 @@ import type {
   HostedExecutionEventDispatchState,
   HostedExecutionRunnerRequest,
   HostedExecutionRunnerResult,
-  HostedExecutionSharePackResponse,
   HostedExecutionShareReference,
   HostedExecutionUserEnvStatus,
   HostedExecutionUserEnvUpdate,
@@ -271,15 +270,6 @@ export function parseHostedExecutionUserEnvUpdate(value: unknown): HostedExecuti
       ]),
     ),
     mode,
-  };
-}
-
-export function parseHostedExecutionSharePackResponse(value: unknown): HostedExecutionSharePackResponse {
-  const record = requireObject(value, "Hosted execution share pack response");
-
-  return {
-    pack: assertContract(sharePackSchema, record.pack, "share pack"),
-    shareId: requireString(record.shareId, "Hosted execution share pack response shareId"),
   };
 }
 
