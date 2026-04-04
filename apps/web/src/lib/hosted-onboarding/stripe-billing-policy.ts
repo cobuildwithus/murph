@@ -151,6 +151,10 @@ async function tryActivateHostedMemberIfStillAllowed(input: {
       return false;
     }
 
+    if (currentMember.status === HostedMemberStatus.active) {
+      return false;
+    }
+
     const entitlement = deriveHostedEntitlement({
       billingMode: input.billingMode ?? currentMember.billingMode,
       billingStatus: HostedBillingStatus.active,
