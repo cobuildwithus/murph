@@ -2,6 +2,8 @@
 set -euo pipefail
 
 # Murph installer for macOS and Linux.
+# Keep this script compatible with stock macOS /bin/bash 3.2 because the
+# public entrypoint is `curl ... | bash` and should not require a newer shell.
 # Recommended usage:
 #   curl -fsSL --proto '=https' --tlsv1.2 https://YOUR_DOMAIN/install.sh | bash
 # Examples:
@@ -25,7 +27,12 @@ MURPH_NPM_PACKAGE="${MURPH_NPM_PACKAGE:-@murphai/murph}"
 MURPH_INSTALL_METHOD="${MURPH_INSTALL_METHOD:-auto}"
 MURPH_VERSION="${MURPH_VERSION:-latest}"
 MURPH_BETA="${MURPH_BETA:-0}"
-MURPH_GIT_DIR="${MURPH_GIT_DIR:-${HOME}/.local/share/murph/repo}"
+MURPH_GIT_DIR_DEFAULT="${HOME}/.local/share/murph/repo"
+MURPH_GIT_DIR_IS_EXPLICIT=0
+if [[ -n "${MURPH_GIT_DIR+x}" ]]; then
+  MURPH_GIT_DIR_IS_EXPLICIT=1
+fi
+MURPH_GIT_DIR="${MURPH_GIT_DIR:-${MURPH_GIT_DIR_DEFAULT}}"
 MURPH_GIT_UPDATE="${MURPH_GIT_UPDATE:-1}"
 MURPH_NO_ONBOARD="${MURPH_NO_ONBOARD:-0}"
 MURPH_DRY_RUN="${MURPH_DRY_RUN:-0}"
@@ -42,6 +49,7 @@ ORIGINAL_PATH="${PATH:-}"
 BREW_BIN=""
 SELECTED_METHOD=""
 DETECTED_CHECKOUT=""
+PREPARED_SETUP_ARGS=()
 
 cleanup_tmpfiles() {
   local f
@@ -200,6 +208,7 @@ parse_args() {
         ;;
       --git-dir|--dir)
         MURPH_GIT_DIR="$2"
+        MURPH_GIT_DIR_IS_EXPLICIT=1
         shift 2
         ;;
       --repo)
@@ -770,6 +779,11 @@ select_install_method() {
 
   case "$MURPH_INSTALL_METHOD" in
     auto)
+      if [[ "$MURPH_GIT_DIR_IS_EXPLICIT" == "1" ]]; then
+        SELECTED_METHOD="git"
+        return 0
+      fi
+
       if [[ -n "$DETECTED_CHECKOUT" ]]; then
         SELECTED_METHOD="$(choose_install_method_for_checkout)"
         return 0
@@ -799,7 +813,9 @@ select_install_method_for_dry_run() {
 
   case "$MURPH_INSTALL_METHOD" in
     auto)
-      if [[ -n "$DETECTED_CHECKOUT" ]]; then
+      if [[ "$MURPH_GIT_DIR_IS_EXPLICIT" == "1" ]]; then
+        SELECTED_METHOD="git"
+      elif [[ -n "$DETECTED_CHECKOUT" ]]; then
         SELECTED_METHOD="git"
       else
         SELECTED_METHOD="auto (npm first, git fallback)"
@@ -817,6 +833,10 @@ select_install_method_for_dry_run() {
 }
 
 forward_args_contain_format() {
+  if [[ "${#FORWARD_ARGS[@]}" -eq 0 ]]; then
+    return 1
+  fi
+
   local arg
   for arg in "${FORWARD_ARGS[@]}"; do
     case "$arg" in
@@ -828,12 +848,28 @@ forward_args_contain_format() {
   return 1
 }
 
-build_setup_args() {
-  local -n out_ref=$1
-  out_ref=("${FORWARD_ARGS[@]}")
-  if [[ "$MURPH_NO_ONBOARD" == "1" ]] && ! forward_args_contain_format; then
-    out_ref+=("--format" "md")
+prepare_setup_args() {
+  PREPARED_SETUP_ARGS=()
+  if [[ "${#FORWARD_ARGS[@]}" -gt 0 ]]; then
+    PREPARED_SETUP_ARGS=("${FORWARD_ARGS[@]}")
   fi
+  if [[ "$MURPH_NO_ONBOARD" == "1" ]] && ! forward_args_contain_format; then
+    PREPARED_SETUP_ARGS+=("--format" "md")
+  fi
+}
+
+resolve_git_repo_dir() {
+  if [[ "$MURPH_GIT_DIR_IS_EXPLICIT" == "1" ]]; then
+    echo "$MURPH_GIT_DIR"
+    return 0
+  fi
+
+  if [[ -n "$DETECTED_CHECKOUT" ]]; then
+    echo "$DETECTED_CHECKOUT"
+    return 0
+  fi
+
+  echo "$MURPH_GIT_DIR"
 }
 
 can_attach_tty_for_onboarding() {
@@ -888,8 +924,8 @@ install_from_npm() {
   ui_success "Murph package installed"
   ui_info "Resolved murph executable at ${murph_bin}"
 
-  local setup_args=()
-  build_setup_args setup_args
+  prepare_setup_args
+  local setup_args=("${PREPARED_SETUP_ARGS[@]}")
 
   ui_section "Running Murph setup"
   ui_info "Murph will provision or reuse ffmpeg, poppler/pdftotext, whisper.cpp, a local Whisper model, optional OCR support, your vault bootstrap, and user-level murph/vault-cli shims."
@@ -952,15 +988,13 @@ prepare_git_checkout() {
 
 install_from_git() {
   ui_section "Installing Murph from git"
-  local repo_dir="$MURPH_GIT_DIR"
-  if [[ -n "$DETECTED_CHECKOUT" ]]; then
-    repo_dir="$DETECTED_CHECKOUT"
-  fi
+  local repo_dir
+  repo_dir="$(resolve_git_repo_dir)"
 
   prepare_git_checkout "$repo_dir"
 
-  local setup_args=()
-  build_setup_args setup_args
+  prepare_setup_args
+  local setup_args=("${PREPARED_SETUP_ARGS[@]}")
 
   ui_info "Delegating to ${repo_dir}/scripts/setup-host.sh"
   ui_info "That wrapper bootstraps Node/pnpm/build for source installs, then runs Murph onboarding from the checkout."
@@ -973,17 +1007,26 @@ install_from_git() {
 }
 
 print_plan() {
+  local planned_git_dir=""
+  if [[ "${SELECTED_METHOD:-$MURPH_INSTALL_METHOD}" == "git" || "$MURPH_INSTALL_METHOD" == "git" ]]; then
+    planned_git_dir="$(resolve_git_repo_dir)"
+  fi
   ui_section "Install plan"
   echo "OS:             ${OS}"
   echo "Install method: ${SELECTED_METHOD:-$MURPH_INSTALL_METHOD}"
   echo "Version:        ${MURPH_VERSION}"
   echo "Repo URL:       ${MURPH_REPO_URL}"
   if [[ "${SELECTED_METHOD:-$MURPH_INSTALL_METHOD}" == "git" || "$MURPH_INSTALL_METHOD" == "git" ]]; then
-    echo "Git dir:        ${MURPH_GIT_DIR}"
+    echo "Git dir:        ${planned_git_dir}"
     echo "Git update:     ${MURPH_GIT_UPDATE}"
   fi
   if [[ -n "$DETECTED_CHECKOUT" ]]; then
     echo "Checkout:       ${DETECTED_CHECKOUT}"
+  fi
+  if [[ "$MURPH_GIT_DIR_IS_EXPLICIT" == "1" ]]; then
+    echo "Git dir source: explicit"
+  elif [[ -n "$DETECTED_CHECKOUT" ]]; then
+    echo "Git dir source: detected checkout"
   fi
   echo "Onboarding:     $([[ "$MURPH_NO_ONBOARD" == "1" ]] && echo skipped || echo interactive)"
   if [[ ${#FORWARD_ARGS[@]} -gt 0 ]]; then
