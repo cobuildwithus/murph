@@ -5,7 +5,6 @@ import {
   maskPhoneNumber,
   normalizePhoneNumber,
   normalizePhoneNumberForCountry,
-  shouldStartHostedOnboarding,
 } from "@/src/lib/hosted-onboarding/shared";
 
 describe("hosted onboarding shared helpers", () => {
@@ -24,14 +23,6 @@ describe("hosted onboarding shared helpers", () => {
   it("masks phone numbers for invite copy", () => {
     expect(maskPhoneNumber("+61400111222")).toBe("*** 1222");
     expect(maskPhoneNumber(null)).toBe("your number");
-  });
-
-  it("detects onboarding trigger phrases", () => {
-    expect(shouldStartHostedOnboarding("I want to get healthy")).toBe(true);
-    expect(shouldStartHostedOnboarding("murph please")).toBe(true);
-    expect(shouldStartHostedOnboarding("start murph")).toBe(true);
-    expect(shouldStartHostedOnboarding("start")).toBe(false);
-    expect(shouldStartHostedOnboarding("hello there")).toBe(false);
   });
 
   it("extracts Linq text parts into a single message body", () => {

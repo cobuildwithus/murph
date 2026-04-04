@@ -301,18 +301,14 @@ export function buildHostedInviteReply(input: {
   joinUrl: string;
 }): string {
   return input.activeSubscription
-    ? `Murph hosted access is already active for this number.
+    ? `Murph access is already active for this number.
 
-Sign in with your verified phone here:
+Sign in here:
 ${input.joinUrl}`
-    : `Murph hosted invite
+    : `Murph signup link
 
-Verify your phone and finish Apple Pay here:
+Verify your phone and finish signup here:
 ${input.joinUrl}`;
-}
-
-export function buildHostedGetStartedReply(): string {
-  return "Hey, I'm Murph. I'm here to help you live long and prosper. Ready to get started?";
 }
 
 function normalizeRequiredString(value: unknown, label: string): string {

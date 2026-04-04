@@ -4,17 +4,6 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { normalizeNullableString as normalizeDeviceSyncNullableString } from "../device-sync/shared";
 
-const HOSTED_ONBOARDING_TRIGGER_PATTERNS = [
-  /\bi\s*want\s*to\s*get\s*healthy\b/iu,
-  /\bget\s*healthy\b/iu,
-  /\bmurph\b/iu,
-  /\bhealthy\s*bob\b/iu,
-  /\bjoin\s+murph\b/iu,
-  /\bjoin\s+(healthy\s*bob|get\s*healthy)\b/iu,
-  /\bstart\s+murph\b/iu,
-  /\bstart\s+(healthy\s*bob|get\s*healthy)\b/iu,
-] as const;
-
 export { maskPhoneNumber, normalizePhoneNumber, normalizePhoneNumberForCountry } from "./phone";
 
 export type HostedOnboardingPrismaClient = PrismaClient | Prisma.TransactionClient;
@@ -62,16 +51,6 @@ export function extractLinqTextMessage(input: unknown): string | null {
     });
 
   return values.length > 0 ? values.join("\n") : null;
-}
-
-export function shouldStartHostedOnboarding(text: string | null | undefined): boolean {
-  const normalized = normalizeDeviceSyncNullableString(text);
-
-  if (!normalized) {
-    return false;
-  }
-
-  return HOSTED_ONBOARDING_TRIGGER_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
 export function generateHostedMemberId(): string {
