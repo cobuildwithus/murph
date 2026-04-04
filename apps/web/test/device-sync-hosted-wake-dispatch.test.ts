@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   getConnectionOwnerId: vi.fn(),
   listConnectionsForUser: vi.fn(),
   markConnectionDisconnected: vi.fn(),
+  putDeviceSyncRuntimeSnapshot: vi.fn(),
   readHostedDeviceSyncEnvironment: vi.fn(),
   registryGet: vi.fn(),
   registryList: vi.fn(),
@@ -44,6 +45,12 @@ vi.mock("@/src/lib/prisma", () => ({
 vi.mock("@/src/lib/hosted-execution/outbox", () => ({
   drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
   enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
+}));
+
+vi.mock("@/src/lib/hosted-execution/control", () => ({
+  requireHostedExecutionControlClient: vi.fn(() => ({
+    putDeviceSyncRuntimeSnapshot: mocks.putDeviceSyncRuntimeSnapshot,
+  })),
 }));
 
 vi.mock("@/src/lib/device-sync/auth", () => ({
@@ -157,6 +164,11 @@ describe("dispatchHostedDeviceSyncWake", () => {
     vi.clearAllMocks();
     mocks.readHostedDeviceSyncEnvironment.mockImplementation(() => createHostedEnv());
     mocks.buildHostedDeviceSyncRuntimeSnapshot.mockResolvedValue({
+      connections: [],
+      generatedAt: "2026-03-26T12:00:00.000Z",
+      userId: "user-123",
+    });
+    mocks.putDeviceSyncRuntimeSnapshot.mockResolvedValue({
       connections: [],
       generatedAt: "2026-03-26T12:00:00.000Z",
       userId: "user-123",
@@ -318,6 +330,22 @@ describe("dispatchHostedDeviceSyncWake", () => {
         userId: "user-123",
       },
     });
+    expect(mocks.buildHostedDeviceSyncRuntimeSnapshot).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        connectionId: "dsc_123",
+        provider: "oura",
+        userId: "user-123",
+      },
+    );
+    expect(mocks.putDeviceSyncRuntimeSnapshot).toHaveBeenCalledWith(
+      "user-123",
+      {
+        connections: [],
+        generatedAt: "2026-03-26T12:00:00.000Z",
+        userId: "user-123",
+      },
+    );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
         dispatch: expect.objectContaining({
@@ -337,7 +365,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
         sourceId: "8",
         sourceType: "device_sync_signal",
         storage: "reference",
-        tx: mocks.prismaTx,
+        tx: mocks.prisma,
       }),
     );
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
@@ -494,6 +522,9 @@ describe("dispatchHostedDeviceSyncWake", () => {
       mocks.createSignal.mock.invocationCallOrder[0],
     );
     expect(mocks.createSignal.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.putDeviceSyncRuntimeSnapshot.mock.invocationCallOrder[0],
+    );
+    expect(mocks.putDeviceSyncRuntimeSnapshot.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.enqueueHostedExecutionOutbox.mock.invocationCallOrder[0],
     );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
@@ -503,7 +534,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
         }),
         sourceId: "8",
         sourceType: "device_sync_signal",
-        tx: mocks.prismaTx,
+        tx: mocks.prisma,
       }),
     );
   });
@@ -657,7 +688,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
         sourceId: "8",
         sourceType: "device_sync_signal",
         storage: "reference",
-        tx: mocks.prismaTx,
+        tx: mocks.prisma,
       }),
     );
     expect(mocks.ensureWebhookSubscriptions).toHaveBeenCalledWith({
@@ -737,8 +768,19 @@ describe("dispatchHostedDeviceSyncWake", () => {
     expect(JSON.stringify(signalInput?.payload ?? {})).not.toContain("provider-secret-token");
     expect(JSON.stringify(signalInput?.payload ?? {})).not.toContain("123-45-6789");
     expect(JSON.stringify(signalInput?.payload ?? {})).not.toContain("job-secret-refresh-token");
-    expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", mocks.prismaTx);
+    expect(mocks.putDeviceSyncRuntimeSnapshot).toHaveBeenCalledWith(
+      "user-123",
+      {
+        connections: [],
+        generatedAt: "2026-03-26T12:00:00.000Z",
+        userId: "user-123",
+      },
+    );
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123");
     expect(mocks.createSignal.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.putDeviceSyncRuntimeSnapshot.mock.invocationCallOrder[0],
+    );
+    expect(mocks.putDeviceSyncRuntimeSnapshot.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.enqueueHostedExecutionOutbox.mock.invocationCallOrder[0],
     );
     expect(mocks.enqueueHostedExecutionOutbox.mock.invocationCallOrder[0]).toBeLessThan(
@@ -775,7 +817,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
         sourceId: "8",
         sourceType: "device_sync_signal",
         storage: "reference",
-        tx: mocks.prismaTx,
+        tx: mocks.prisma,
       }),
     );
   });

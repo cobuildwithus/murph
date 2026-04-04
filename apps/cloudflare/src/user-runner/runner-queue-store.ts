@@ -2,7 +2,6 @@ import {
   HOSTED_EXECUTION_BUNDLE_SLOTS,
   deriveHostedExecutionErrorCode,
   normalizeHostedExecutionOperatorMessage,
-  parseHostedExecutionDispatchRequest,
   summarizeHostedExecutionError,
   type HostedExecutionBundleSlot,
   type HostedExecutionDispatchRequest,
@@ -11,9 +10,14 @@ import {
   type HostedExecutionRunStatus,
 } from "@murphai/hosted-execution";
 
-import type { HostedDispatchPayloadStore } from "../dispatch-payload-store.js";
+import type {
+  HostedDispatchPayloadStore,
+} from "../dispatch-payload-store.js";
 import type { HostedExecutionCommittedResult } from "../execution-journal.js";
-import { ensureRunnerQueueSchema } from "./runner-queue-schema.js";
+import {
+  ensureRunnerQueueSchema,
+  runnerPendingEventsNeedsPayloadMigration,
+} from "./runner-queue-schema.js";
 import {
   appendBoundedRunnerEventId,
   appendBoundedRunnerTimelineEntry,
@@ -38,6 +42,7 @@ import {
   MAX_RUN_TIMELINE_ENTRIES,
   type DurableObjectSqlValue,
   type DurableObjectStateLike,
+  type PendingDispatchMetaRecord,
   type PendingDispatchRecord,
   type RunnerBundleVersions,
   type RunnerStateRecord,
@@ -47,10 +52,24 @@ interface PendingEventRow {
   [key: string]: DurableObjectSqlValue;
   attempts: number;
   available_at: string;
+  enqueued_at: string;
+  event_id: string;
+  last_error: string | null;
+  payload_key: string;
+}
+
+interface LegacyPendingEventRow {
+  [key: string]: DurableObjectSqlValue;
+  attempts: number;
+  available_at: string;
   dispatch_json: string;
   enqueued_at: string;
   event_id: string;
   last_error: string | null;
+}
+
+interface PendingDispatchRowMeta extends PendingDispatchMetaRecord {
+  payloadKey: string;
 }
 
 interface EventPresenceState {
@@ -71,24 +90,24 @@ interface BundleRefSwapInput {
 }
 
 export class RunnerQueueStore {
+  private readonly ready: Promise<void>;
   private userId: string | null = null;
-  private dispatchPayloadStore: HostedDispatchPayloadStore | null;
 
   constructor(
     private readonly state: DurableObjectStateLike,
-    dispatchPayloadStore: HostedDispatchPayloadStore | null = null,
+    private readonly dispatchPayloadStore: HostedDispatchPayloadStore,
+    private readonly legacyStoredDispatchReader?: (
+      payloadJson: string,
+    ) => Promise<HostedExecutionDispatchRequest>,
   ) {
-    this.dispatchPayloadStore = dispatchPayloadStore;
     ensureRunnerQueueSchema(this.sql);
     this.ensureCanonicalBundleSlotRowsSync();
     this.repairStoredMetaStateSync();
-  }
-
-  setDispatchPayloadStore(dispatchPayloadStore: HostedDispatchPayloadStore | null): void {
-    this.dispatchPayloadStore = dispatchPayloadStore;
+    this.ready = this.migrateLegacyPendingEventsIfNeeded();
   }
 
   async bootstrapUser(userId: string): Promise<string> {
+    await this.ready;
     const meta = this.selectMetaRowSync();
 
     if (meta) {
@@ -108,11 +127,13 @@ export class RunnerQueueStore {
   }
 
   async readState(): Promise<RunnerStateRecord> {
+    await this.ready;
     this.pruneExpiredConsumedEventsSync();
     return this.readStateSync();
   }
 
   async readEventPresence(eventId: string): Promise<EventPresenceState> {
+    await this.ready;
     this.pruneExpiredConsumedEventsSync();
 
     return {
@@ -128,31 +149,35 @@ export class RunnerQueueStore {
     pending: boolean;
     poisoned: boolean;
   }> {
+    await this.ready;
     this.pruneExpiredConsumedEventsSync();
 
     const meta = this.requireMetaRowSync();
-    const pending = this.readPendingEventRowByEventIdSync(eventId);
+    const pending = this.readPendingDispatchMetaByEventIdSync(eventId);
     const poisoned = this.readPoisonedEventByIdSync(eventId);
 
     return {
       backpressured: parseRunnerStringArray(meta.backpressured_event_ids_json).includes(eventId),
       consumed: this.hasConsumedEventSync(eventId),
-      lastError: pending?.last_error ?? poisoned?.last_error ?? null,
+      lastError: pending?.lastError ?? poisoned?.last_error ?? null,
       pending: pending !== null,
       poisoned: poisoned !== null,
     };
   }
 
   async listPendingDispatches(): Promise<PendingDispatchRecord[]> {
+    await this.ready;
     this.pruneExpiredConsumedEventsSync();
-    return this.readPendingDispatches();
+    return this.hydratePendingDispatchRows(this.readPendingDispatchRowsSync());
   }
 
   async hasDuePendingDispatch(nowMs: number): Promise<boolean> {
-    return (await this.readNextDuePendingDispatch(nowMs)) !== null;
+    await this.ready;
+    return this.readNextDuePendingDispatchRowSync(nowMs) !== null;
   }
 
   async clearNextWakeIfDue(nowMs: number): Promise<RunnerStateRecord> {
+    await this.ready;
     this.pruneExpiredConsumedEventsSync();
 
     const meta = this.requireMetaRowSync();
@@ -169,6 +194,7 @@ export class RunnerQueueStore {
   async enqueueDispatch(
     dispatch: HostedExecutionDispatchRequest,
   ): Promise<{ accepted: boolean; alreadySeen: boolean; record: RunnerStateRecord }> {
+    await this.ready;
     await this.bootstrapUser(dispatch.event.userId);
     this.pruneExpiredConsumedEventsSync();
 
@@ -198,18 +224,18 @@ export class RunnerQueueStore {
     }
 
     const nowIso = new Date().toISOString();
-    const storedDispatch = await this.writePendingDispatchPayload(dispatch);
+    const payloadKey = await this.writePendingDispatchPayload(dispatch);
     this.sql.exec(
       `INSERT INTO pending_events (
         event_id,
-        dispatch_json,
+        payload_key,
         attempts,
         available_at,
         enqueued_at,
         last_error
       ) VALUES (?, ?, ?, ?, ?, ?)`,
       dispatch.eventId,
-      storedDispatch,
+      payloadKey,
       0,
       nowIso,
       nowIso,
@@ -236,6 +262,7 @@ export class RunnerQueueStore {
     pendingDispatch: PendingDispatchRecord | null;
     record: RunnerStateRecord;
   }> {
+    await this.ready;
     this.pruneExpiredConsumedEventsSync();
 
     const meta = this.requireMetaRowSync();
@@ -270,14 +297,17 @@ export class RunnerQueueStore {
   async applyCommittedDispatch(
     committed: HostedExecutionCommittedResult,
   ): Promise<RunnerStateRecord> {
+    await this.ready;
     await this.bootstrapUserFromCommittedResult(committed);
     this.pruneExpiredConsumedEventsSync();
 
     const meta = this.requireMetaRowSync();
     const bundleSlots = this.selectBundleSlotStateSync();
-    const pending = this.readPendingEventRowByEventIdSync(committed.eventId);
+    const pending = this.readPendingDispatchRowByEventIdSync(committed.eventId);
+    if (pending) {
+      await this.deletePendingDispatchPayloadBestEffort(pending.payload_key);
+    }
     this.removePendingDispatchSync(committed.eventId);
-    await this.deletePendingDispatchPayloadBestEffort(pending?.dispatch_json ?? null);
     this.deletePoisonedEventSync(committed.eventId);
     this.writeConsumedEventSync(committed.eventId, nextConsumedEventExactExpiryIso());
     assignRunnerBundleRefs(bundleSlots, committed.bundleRefs);
@@ -299,6 +329,7 @@ export class RunnerQueueStore {
   async syncCommittedBundles(
     committed: HostedExecutionCommittedResult,
   ): Promise<RunnerStateRecord> {
+    await this.ready;
     await this.bootstrapUserFromCommittedResult(committed);
     this.pruneExpiredConsumedEventsSync();
 
@@ -324,9 +355,10 @@ export class RunnerQueueStore {
     maxEventAttempts: number;
     retryDelayMs: number;
   }): Promise<{ poisoned: boolean; record: RunnerStateRecord }> {
+    await this.ready;
     this.pruneExpiredConsumedEventsSync();
 
-    const pending = this.readPendingEventRowByEventIdSync(input.eventId);
+    const pending = this.readPendingDispatchRowByEventIdSync(input.eventId);
     const meta = this.requireMetaRowSync();
     const errorAt = new Date().toISOString();
     const errorCode = deriveHostedExecutionErrorCode(input.error);
@@ -354,7 +386,7 @@ export class RunnerQueueStore {
 
     if (nextAttempts >= input.maxEventAttempts) {
       this.removePendingDispatchSync(input.eventId);
-      await this.deletePendingDispatchPayloadBestEffort(pending.dispatch_json);
+      await this.deletePendingDispatchPayloadBestEffort(pending.payload_key);
       this.writeConsumedEventSync(input.eventId, nextConsumedEventExactExpiryIso());
       this.writePoisonedEventSync(input.eventId, errorMessage, errorAt);
       meta.retrying_event_id = this.readRetryingEventIdSync();
@@ -389,9 +421,10 @@ export class RunnerQueueStore {
     eventId: string;
     retryDelayMs: number;
   }): Promise<RunnerStateRecord> {
+    await this.ready;
     this.pruneExpiredConsumedEventsSync();
 
-    const pending = this.readPendingEventRowByEventIdSync(input.eventId);
+    const pending = this.readPendingDispatchRowByEventIdSync(input.eventId);
     const meta = this.requireMetaRowSync();
     const errorAt = new Date().toISOString();
     const errorMessage = summarizeHostedExecutionError(input.error);
@@ -428,6 +461,7 @@ export class RunnerQueueStore {
     error: unknown;
     retryDelayMs: number;
   }): Promise<RunnerStateRecord> {
+    await this.ready;
     await this.bootstrapUserFromCommittedResult(input.committed);
     this.pruneExpiredConsumedEventsSync();
 
@@ -459,6 +493,7 @@ export class RunnerQueueStore {
   }
 
   async rememberCommittedEvent(eventId: string): Promise<RunnerStateRecord> {
+    await this.ready;
     this.pruneExpiredConsumedEventsSync();
 
     if (!this.hasConsumedEventSync(eventId)) {
@@ -480,6 +515,7 @@ export class RunnerQueueStore {
     runId: string;
     startedAt: string;
   }): Promise<RunnerStateRecord> {
+    await this.ready;
     this.pruneExpiredConsumedEventsSync();
 
     const meta = this.requireMetaRowSync();
@@ -529,6 +565,7 @@ export class RunnerQueueStore {
     RunnerStateRecord,
     "bundleRefs" | "bundleVersions" | "inFlight" | "userId"
   >> {
+    await this.ready;
     this.pruneExpiredConsumedEventsSync();
     const record = this.readStateSync();
     return {
@@ -542,6 +579,7 @@ export class RunnerQueueStore {
   async compareAndSwapBundleRefs(
     input: BundleRefSwapInput,
   ): Promise<{ applied: boolean; record: RunnerStateRecord }> {
+    await this.ready;
     this.pruneExpiredConsumedEventsSync();
 
     const meta = this.requireMetaRowSync();
@@ -567,6 +605,7 @@ export class RunnerQueueStore {
     defaultAlarmDelayMs: number;
     preferredWakeAt?: string | null;
   }): Promise<RunnerStateRecord> {
+    await this.ready;
     this.pruneExpiredConsumedEventsSync();
 
     const meta = this.requireMetaRowSync();
@@ -593,7 +632,7 @@ export class RunnerQueueStore {
       return;
     }
 
-    const pendingUserId = this.readPendingDispatchUserIdByEventIdSync(committed.eventId);
+    const pendingUserId = await this.readPendingDispatchUserIdByEventId(committed.eventId);
     if (pendingUserId) {
       await this.bootstrapUser(pendingUserId);
       return;
@@ -611,6 +650,120 @@ export class RunnerQueueStore {
     this.prunePoisonedEventsSync();
   }
 
+  private async migrateLegacyPendingEventsIfNeeded(): Promise<void> {
+    if (!runnerPendingEventsNeedsPayloadMigration(this.sql)) {
+      return;
+    }
+
+    const legacyRows = this.sql.exec<LegacyPendingEventRow>(
+      `SELECT
+        event_id,
+        dispatch_json,
+        attempts,
+        available_at,
+        enqueued_at,
+        last_error
+      FROM pending_events
+      ORDER BY available_at ASC, enqueued_at ASC, event_id ASC`,
+    ).toArray();
+    const migratedRows: Array<{
+      attempts: number;
+      availableAt: string;
+      enqueuedAt: string;
+      eventId: string;
+      lastError: string | null;
+      payloadKey: string;
+    }> = [];
+    const poisonedRows: Array<{
+      errorCode: string;
+      eventId: string;
+      message: string;
+      poisonedAt: string;
+    }> = [];
+
+    for (const row of legacyRows) {
+      try {
+        const dispatch = this.legacyStoredDispatchReader
+          ? await this.legacyStoredDispatchReader(row.dispatch_json)
+          : await this.dispatchPayloadStore.readStoredDispatch(row.dispatch_json);
+        const payloadKey = await this.writePendingDispatchPayload(dispatch);
+        migratedRows.push({
+          attempts: row.attempts,
+          availableAt: row.available_at,
+          enqueuedAt: row.enqueued_at,
+          eventId: row.event_id,
+          lastError: row.last_error,
+          payloadKey,
+        });
+      } catch (error) {
+        const malformedError = classifyMalformedPendingDispatchError(error);
+        poisonedRows.push({
+          errorCode: malformedError.errorCode,
+          eventId: row.event_id,
+          message: malformedError.message,
+          poisonedAt: new Date().toISOString(),
+        });
+      }
+    }
+
+    this.sql.exec("DROP TABLE IF EXISTS pending_events_migrated");
+    this.sql.exec(`
+      CREATE TABLE pending_events_migrated (
+        event_id TEXT PRIMARY KEY,
+        payload_key TEXT NOT NULL,
+        attempts INTEGER NOT NULL,
+        available_at TEXT NOT NULL,
+        enqueued_at TEXT NOT NULL,
+        last_error TEXT
+      )
+    `);
+
+    for (const row of migratedRows) {
+      this.sql.exec(
+        `INSERT INTO pending_events_migrated (
+          event_id,
+          payload_key,
+          attempts,
+          available_at,
+          enqueued_at,
+          last_error
+        ) VALUES (?, ?, ?, ?, ?, ?)`,
+        row.eventId,
+        row.payloadKey,
+        row.attempts,
+        row.availableAt,
+        row.enqueuedAt,
+        row.lastError,
+      );
+    }
+
+    this.sql.exec("DROP TABLE pending_events");
+    this.sql.exec("ALTER TABLE pending_events_migrated RENAME TO pending_events");
+    this.sql.exec(`
+      CREATE INDEX IF NOT EXISTS pending_events_available_at_idx
+      ON pending_events (available_at, enqueued_at, event_id)
+    `);
+
+    for (const poisoned of poisonedRows) {
+      this.writeConsumedEventSync(poisoned.eventId, nextConsumedEventExactExpiryIso());
+      this.writePoisonedEventSync(poisoned.eventId, poisoned.message, poisoned.poisonedAt);
+
+      const meta = this.selectMetaRowSync();
+      if (!meta) {
+        continue;
+      }
+
+      meta.last_error = mergeRunnerLastError(meta.last_error, poisoned.message);
+      meta.last_error_at = poisoned.poisonedAt;
+      meta.last_error_code = poisoned.errorCode;
+      meta.last_event_id = poisoned.eventId;
+      if (meta.retrying_event_id === poisoned.eventId) {
+        meta.retrying_event_id = null;
+      }
+      this.writeMetaRowSync(meta);
+    }
+  }
+
   private readStateSync(): RunnerStateRecord {
     return this.readStateFromMetaSync(this.requireMetaRowSync());
   }
@@ -623,7 +776,7 @@ export class RunnerQueueStore {
       bundleSlots: this.selectBundleSlotStateSync(),
       meta,
       nextPendingAvailableAt: nextPendingAvailableAtOverride ?? this.readNextPendingAvailableAtSync(),
-      pendingEventCount: this.countPendingEventsSync(),
+      pendingDispatches: this.readPendingDispatchMetasSync(),
       poisonedEventIds: this.readPoisonedEventIdsSync(),
     });
 
@@ -646,7 +799,7 @@ export class RunnerQueueStore {
       bundleSlots: this.selectBundleSlotStateSync(),
       meta,
       nextPendingAvailableAt: null,
-      pendingEventCount: 0,
+      pendingDispatches: [],
       poisonedEventIds: [],
     });
     if (!projected.changed) {
@@ -807,24 +960,11 @@ export class RunnerQueueStore {
     }
   }
 
-  private async readPendingDispatches(): Promise<PendingDispatchRecord[]> {
-    const records: PendingDispatchRecord[] = [];
-
-    for (const row of this.readPendingEventRowsSync()) {
-      const parsed = await this.parsePendingDispatchRow(row);
-      if (parsed) {
-        records.push(parsed);
-      }
-    }
-
-    return records;
-  }
-
-  private readPendingEventRowsSync(): PendingEventRow[] {
+  private readPendingDispatchRowsSync(): PendingEventRow[] {
     return this.sql.exec<PendingEventRow>(
       `SELECT
         event_id,
-        dispatch_json,
+        payload_key,
         attempts,
         available_at,
         enqueued_at,
@@ -834,11 +974,15 @@ export class RunnerQueueStore {
     ).toArray();
   }
 
-  private readPendingEventRowByEventIdSync(eventId: string): PendingEventRow | null {
+  private readPendingDispatchMetasSync(): PendingDispatchMetaRecord[] {
+    return this.readPendingDispatchRowsSync().map((row) => this.toPendingDispatchRowMeta(row));
+  }
+
+  private readPendingDispatchRowByEventIdSync(eventId: string): PendingEventRow | null {
     return this.sql.exec<PendingEventRow>(
       `SELECT
         event_id,
-        dispatch_json,
+        payload_key,
         attempts,
         available_at,
         enqueued_at,
@@ -849,11 +993,33 @@ export class RunnerQueueStore {
     ).toArray()[0] ?? null;
   }
 
-  private readPendingDueEventRowsSync(nowIso: string): PendingEventRow[] {
+  private readPendingDispatchMetaByEventIdSync(eventId: string): PendingDispatchMetaRecord | null {
+    const row = this.readPendingDispatchRowByEventIdSync(eventId);
+    return row ? this.toPendingDispatchRowMeta(row) : null;
+  }
+
+  private readNextDuePendingDispatchRowSync(nowMs: number): PendingEventRow | null {
     return this.sql.exec<PendingEventRow>(
       `SELECT
         event_id,
-        dispatch_json,
+        payload_key,
+        attempts,
+        available_at,
+        enqueued_at,
+        last_error
+      FROM pending_events
+      WHERE available_at <= ?
+      ORDER BY available_at ASC, enqueued_at ASC, event_id ASC
+      LIMIT 1`,
+      new Date(nowMs).toISOString(),
+    ).toArray()[0] ?? null;
+  }
+
+  private async readNextDuePendingDispatch(nowMs: number): Promise<PendingDispatchRecord | null> {
+    for (const row of this.sql.exec<PendingEventRow>(
+      `SELECT
+        event_id,
+        payload_key,
         attempts,
         available_at,
         enqueued_at,
@@ -861,15 +1027,9 @@ export class RunnerQueueStore {
       FROM pending_events
       WHERE available_at <= ?
       ORDER BY available_at ASC, enqueued_at ASC, event_id ASC`,
-      nowIso,
-    ).toArray();
-  }
-
-  private async readNextDuePendingDispatch(nowMs: number): Promise<PendingDispatchRecord | null> {
-    const nowIso = new Date(nowMs).toISOString();
-
-    for (const row of this.readPendingDueEventRowsSync(nowIso)) {
-      const parsed = await this.parsePendingDispatchRow(row);
+      new Date(nowMs).toISOString(),
+    ).toArray()) {
+      const parsed = await this.hydratePendingDispatchRow(row);
       if (parsed) {
         return parsed;
       }
@@ -890,27 +1050,15 @@ export class RunnerQueueStore {
   }
 
   private readRetryingEventIdSync(): string | null {
-    const value = this.sql.exec<{ event_id: DurableObjectSqlValue }>(
-      `SELECT event_id
-      FROM pending_events
-      WHERE attempts > 0
-      ORDER BY available_at ASC, enqueued_at ASC, event_id ASC
-      LIMIT 1`,
-    ).toArray()[0]?.event_id;
-
-    return typeof value === "string" ? value : null;
+    return this.readPendingDispatchMetasSync().find((pending) => pending.attempts > 0)?.eventId ?? null;
   }
 
   private countPendingEventsSync(): number {
-    const value = this.sql.exec<{ count: DurableObjectSqlValue }>(
-      "SELECT COUNT(*) AS count FROM pending_events",
-    ).toArray()[0]?.count;
-
-    return typeof value === "number" ? value : 0;
+    return this.readPendingDispatchMetasSync().length;
   }
 
   private hasPendingDispatchSync(eventId: string): boolean {
-    return this.readPendingEventRowByEventIdSync(eventId) !== null;
+    return this.readPendingDispatchMetaByEventIdSync(eventId) !== null;
   }
 
   private hasConsumedEventSync(eventId: string): boolean {
@@ -947,83 +1095,117 @@ export class RunnerQueueStore {
     this.sql.exec("DELETE FROM pending_events WHERE event_id = ?", eventId);
   }
 
-  private readPendingDispatchUserIdByEventIdSync(eventId: string): string | null {
-    const row = this.readPendingEventRowByEventIdSync(eventId);
+  private async readPendingDispatchUserIdByEventId(eventId: string): Promise<string | null> {
+    const row = this.readPendingDispatchRowByEventIdSync(eventId);
 
     if (!row) {
       return null;
     }
 
-    const userId = this.readPendingDispatchUserIdSync(row.dispatch_json);
+    const userId = await this.readPendingDispatchUserId(row);
 
     if (userId) {
       return userId;
     }
 
-    this.poisonMalformedPendingDispatchRowSync(
+    await this.poisonMalformedPendingDispatchRow(
       row,
       new TypeError(`Hosted runner pending dispatch ${eventId} does not encode a valid userId.`),
     );
     return null;
   }
 
-  private readPendingDispatchUserIdSync(payloadJson: string): string | null {
+  private async readPendingDispatchUserId(row: PendingEventRow): Promise<string | null> {
     try {
-      const storedRef = this.dispatchPayloadStore?.readStoredDispatchRef(payloadJson);
-
-      if (storedRef) {
-        return storedRef.userId;
-      }
-
-      return parseHostedExecutionDispatchRequest(JSON.parse(payloadJson) as unknown).event.userId;
+      return (await this.requirePendingDispatchPayload(row)).event.userId;
     } catch {
       return null;
     }
   }
 
-  private async parsePendingDispatchRow(row: PendingEventRow): Promise<PendingDispatchRecord | null> {
+  private async hydratePendingDispatchRows(rows: readonly PendingEventRow[]): Promise<PendingDispatchRecord[]> {
+    const records: PendingDispatchRecord[] = [];
+
+    for (const row of rows) {
+      const parsed = await this.hydratePendingDispatchRow(row);
+      if (parsed) {
+        records.push(parsed);
+      }
+    }
+
+    return records;
+  }
+
+  private async hydratePendingDispatchRow(row: PendingEventRow): Promise<PendingDispatchRecord | null> {
     try {
-      const dispatch = this.dispatchPayloadStore
-        ? await this.dispatchPayloadStore.readStoredDispatch(row.dispatch_json)
-        : parseHostedExecutionDispatchRequest(JSON.parse(row.dispatch_json) as unknown);
+      const dispatch = await this.requirePendingDispatchPayload(row);
+      const expectedUserId = this.tryResolveUserIdSync();
+
+      if (dispatch.eventId !== row.event_id) {
+        throw new Error(
+          `Hosted runner pending payload ${row.payload_key} belongs to ${dispatch.eventId}, not ${row.event_id}.`,
+        );
+      }
+
+      if (expectedUserId && dispatch.event.userId !== expectedUserId) {
+        throw new Error(
+          `Hosted runner pending payload ${row.payload_key} belongs to ${dispatch.event.userId}, not ${expectedUserId}.`,
+        );
+      }
 
       return {
-        attempts: row.attempts,
-        availableAt: row.available_at,
+        ...this.toPendingDispatchRowMeta(row),
         dispatch,
-        enqueuedAt: row.enqueued_at,
-        eventId: row.event_id,
-        lastError: row.last_error,
       };
     } catch (error) {
-      this.poisonMalformedPendingDispatchRowSync(row, error);
+      await this.poisonMalformedPendingDispatchRow(row, error);
       return null;
     }
   }
 
-  private async writePendingDispatchPayload(dispatch: HostedExecutionDispatchRequest): Promise<string> {
-    if (!this.dispatchPayloadStore) {
-      return JSON.stringify(dispatch);
-    }
-
-    return this.dispatchPayloadStore.writeStoredDispatch(dispatch);
+  private toPendingDispatchRowMeta(row: PendingEventRow): PendingDispatchRowMeta {
+    return {
+      attempts: row.attempts,
+      availableAt: row.available_at,
+      enqueuedAt: row.enqueued_at,
+      eventId: row.event_id,
+      lastError: row.last_error,
+      payloadKey: row.payload_key,
+    };
   }
 
-  private async deletePendingDispatchPayloadBestEffort(payloadJson: string | null): Promise<void> {
-    if (!payloadJson || !this.dispatchPayloadStore) {
+  private async requirePendingDispatchPayload(row: PendingEventRow): Promise<HostedExecutionDispatchRequest> {
+    const dispatch = await this.dispatchPayloadStore.readDispatchPayload({
+      key: row.payload_key,
+    });
+
+    if (!dispatch) {
+      throw new TypeError(`Hosted runner pending dispatch payload ${row.payload_key} is missing.`);
+    }
+
+    return dispatch;
+  }
+
+  private async writePendingDispatchPayload(dispatch: HostedExecutionDispatchRequest): Promise<string> {
+    return (await this.dispatchPayloadStore.writeDispatchPayload(dispatch)).key;
+  }
+
+  private async deletePendingDispatchPayloadBestEffort(payloadKey: string | null): Promise<void> {
+    if (!payloadKey) {
       return;
     }
 
     try {
-      await this.dispatchPayloadStore.deleteStoredDispatchPayload(payloadJson);
+      await this.dispatchPayloadStore.deleteDispatchPayload({ key: payloadKey });
     } catch {
       // Best-effort cleanup only; TTL backstops any failed transient blob deletion.
     }
   }
 
-  private poisonMalformedPendingDispatchRowSync(row: PendingEventRow, error: unknown): void {
+  private async poisonMalformedPendingDispatchRow(row: PendingEventRow, error: unknown): Promise<void> {
     const malformedError = classifyMalformedPendingDispatchError(error);
     const errorAt = new Date().toISOString();
+    await this.deletePendingDispatchPayloadBestEffort(row.payload_key);
     this.removePendingDispatchSync(row.event_id);
     this.writeConsumedEventSync(row.event_id, nextConsumedEventExactExpiryIso());
     this.writePoisonedEventSync(row.event_id, malformedError.message, errorAt);

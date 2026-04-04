@@ -7,12 +7,14 @@ import {
 } from "@murphai/runtime-state";
 import { describe, expect, it } from "vitest";
 
+import { createHostedDispatchPayloadStore } from "../src/dispatch-payload-store.js";
 import { RunnerQueueStore } from "../src/user-runner/runner-queue-store.js";
 import type {
   DurableObjectSqlCursorLike,
   DurableObjectSqlValue,
   DurableObjectStateLike,
 } from "../src/user-runner/types.js";
+import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers";
 
 class SqliteCursor<T extends Record<string, DurableObjectSqlValue>>
   implements DurableObjectSqlCursorLike<T> {
@@ -110,7 +112,14 @@ function createRunnerQueueStoreHarness(setup?: (db: DatabaseSync) => void): {
 
   return {
     db,
-    store: new RunnerQueueStore(state),
+    store: new RunnerQueueStore(
+      state,
+      createHostedDispatchPayloadStore({
+        bucket: new MemoryEncryptedR2Bucket(),
+        key: createTestRootKey(61),
+        keyId: "k-test",
+      }),
+    ),
   };
 }
 

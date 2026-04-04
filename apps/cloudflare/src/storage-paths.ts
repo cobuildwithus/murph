@@ -1,5 +1,22 @@
+import type { HostedExecutionBundleKind } from "@murphai/runtime-state/node";
+
 import { deriveHostedStorageOpaqueId } from "./crypto-context.js";
 import { encodeBase64 } from "./base64.js";
+
+export async function hostedBundleObjectKey(
+  rootKey: Uint8Array,
+  kind: HostedExecutionBundleKind,
+  hash: string,
+): Promise<string> {
+  const bundleSegment = await deriveHostedStorageOpaqueId({
+    length: 48,
+    rootKey,
+    scope: "bundle-path",
+    value: `bundle:${kind}:${hash}`,
+  });
+
+  return `bundles/${kind}/${bundleSegment}.bundle.json`;
+}
 
 export async function hostedArtifactObjectKey(
   rootKey: Uint8Array,
@@ -121,6 +138,38 @@ export async function hostedSideEffectRecordKeys(
   );
 }
 
+export async function hostedDispatchPayloadObjectKey(
+  rootKey: Uint8Array,
+  userId: string,
+  eventId: string,
+): Promise<string> {
+  const userSegment = await deriveHostedStorageOpaqueId({
+    length: 24,
+    rootKey,
+    scope: "dispatch-payload-path",
+    value: `user:${userId}`,
+  });
+  const eventSegment = await deriveHostedStorageOpaqueId({
+    length: 40,
+    rootKey,
+    scope: "dispatch-payload-path",
+    value: `event:${userId}:${eventId}`,
+  });
+
+  return `transient/dispatch-payloads/${userSegment}/${eventSegment}.json`;
+}
+
+export async function hostedDispatchPayloadObjectKeys(
+  rootKey: Uint8Array,
+  keysById: Readonly<Record<string, Uint8Array>> | undefined,
+  userId: string,
+  eventId: string,
+): Promise<string[]> {
+  return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
+    hostedDispatchPayloadObjectKey(candidateRootKey, userId, eventId)
+  );
+}
+
 export async function listHostedStorageObjectKeys(
   rootKey: Uint8Array,
   keysById: Readonly<Record<string, Uint8Array>> | undefined,
@@ -151,3 +200,8 @@ function listHostedStorageRootKeys(
 
   return unique;
 }
+
+export {
+  hostedSideEffectRecordKey as hostedSideEffectJournalObjectKey,
+  hostedSideEffectRecordKeys as hostedSideEffectJournalObjectKeys,
+};

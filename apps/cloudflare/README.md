@@ -88,7 +88,7 @@ That means:
 - worker-owned callback and web-control base URLs now normalize to HTTPS by default and only permit explicit loopback or internal worker-host HTTP exceptions
 - the runner process posts durable commit/finalize and assistant-delivery reconciliation requests to `http://commit.worker` and `http://side-effects.worker`; those outbound handlers run inside Workers, call Durable Objects and R2 directly, and never traverse the public Worker URL
 - the container-local bridge is intentionally thin; the execution core lives in `packages/assistant-runtime`
-- the queue Durable Object keeps the per-user container warm across drained batches and relies on the container's configurable `sleepAfter` idle timeout, defaulting to `1m`, instead of forcing immediate teardown after every run
+- the queue Durable Object invokes the per-user container on demand and explicitly tears it down after every run so each invocation gets a fresh per-run control token and a clean process boundary
 
 The native container image is declared in `apps/cloudflare/wrangler.jsonc` under the `containers` section, points at `../../Dockerfile.cloudflare-hosted-runner`, uses `instance_type: "standard-1"` in the checked-in scaffold, and now keeps the default `max_instances` at `50` until deploy automation raises it explicitly. Generated deploy config accepts `CF_CONTAINER_INSTANCE_TYPE` as either a named Wrangler preset such as `standard-1` or a JSON object with `vcpu`, `memory_mib`, and `disk_mb`.
 
@@ -143,7 +143,7 @@ The Cloudflare app now keeps two focused Vitest lanes:
 
 ## Operational notes
 
-- The worker never stores plaintext vault material in Durable Object storage. It stores only per-user coordination state plus encrypted bundle references. Sensitive hosted dispatch bodies now stay out of Durable Object SQLite rows: the queue stores only inline/reference envelopes while Linq, Telegram, gateway-send, and device-sync payloads live in separately encrypted transient blobs.
+- The worker never stores plaintext vault material in Durable Object storage. It stores only per-user coordination state plus encrypted bundle references. Sensitive hosted dispatch bodies now stay out of Durable Object SQLite rows: the queue stores only `payload_key` references while reconstructable or sensitive payload bodies live in separately encrypted transient blobs.
 - Hosted assistant provider selection now has one explicit durable seam: a top-level `hostedAssistant` config in the operator config artifact. That durable hosted profile is the only persisted hosted assistant source of truth, while raw credentials still stay in Worker secrets or the separately encrypted per-user env object.
 - Hosted bundle reads/writes and per-user env object updates happen outside the Durable Object's SQLite mutation step; only the final bundle-ref/version compare-and-swap is committed inside Durable Object storage.
 - Hosted execution now writes one encrypted workspace snapshot back through the existing `vault` bundle slot. That workspace snapshot includes canonical `vault/**`, durable `vault/.runtime/**`, sibling `assistant-state/**`, and the minimal operator-home config needed for explicit `member.activated` bootstrap. Large raw artifacts under `vault/raw/**` are externalized into separately encrypted content-addressed objects behind opaque object keys; the runner restores inline workspace files first, only materializes the externalized artifact paths the current run actually needs, and preserves untouched artifact refs across later snapshots so old media does not churn through download/upload cycles just to stay referenced. Per-user runner env overrides live in their own encrypted hosted object behind an opaque per-user locator.
@@ -171,5 +171,5 @@ The Cloudflare app now keeps two focused Vitest lanes:
 ## Known follow-ups
 
 - Only assistant delivery is implemented as a hosted side-effect kind today. Future provider mutations, callbacks, or outbound deliveries should extend the same committed side-effect journal rather than bypassing it.
-- Cloudflare container lifecycle is currently "start on demand, keep warm until `sleepAfter` expires." If you later want explicit pooling or lease management, that should be a separate follow-up rather than an implicit background contract.
+- Cloudflare container lifecycle is currently "start on demand, run once, then tear down." If you later want explicit pooling or lease management, that should be a separate follow-up rather than an implicit background contract.
 - The internal `commit.worker` / `side-effects.worker` / `email.worker` callback hosts remain the current durable boundary. The next simplification pass should have the container return a fuller final result to the Durable Object so the Worker can eventually collapse those callback hostnames without changing first-canary behavior now.

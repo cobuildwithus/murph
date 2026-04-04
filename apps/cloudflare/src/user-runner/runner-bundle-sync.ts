@@ -3,7 +3,6 @@ import {
   encodeHostedBundleBase64,
   sameHostedBundlePayloadRef,
 } from "@murphai/runtime-state/node";
-import { readHostedVerifiedEmailFromEnv } from "@murphai/runtime-state";
 import {
   HOSTED_EXECUTION_BUNDLE_SLOTS,
   mapHostedExecutionBundleSlotsAsync,
@@ -11,29 +10,15 @@ import {
   type HostedExecutionBundleRefs,
   type HostedExecutionBundleSlot,
   type HostedExecutionRunnerResult,
-  type HostedExecutionUserEnvStatus,
 } from "@murphai/hosted-execution";
 
 import {
-  ensureHostedEmailVerifiedSenderRouteAvailable,
-  readHostedEmailConfig,
-  reconcileHostedEmailVerifiedSenderRoute,
-} from "../hosted-email.js";
-import {
   createHostedBundleStore,
-  createHostedUserEnvStore,
   writeHostedBundleBytesIfChanged,
   type HostedBundleStore,
   type R2BucketLike,
 } from "../bundle-store.js";
 import { HostedBundleGarbageCollector } from "../bundle-gc.js";
-import {
-  applyHostedUserEnvUpdate,
-  decodeHostedUserEnvPayload,
-  encodeHostedUserEnvPayload,
-  listHostedUserEnvKeys,
-  type HostedUserEnvUpdate,
-} from "../user-env.js";
 import { RunnerQueueStore } from "./runner-queue-store.js";
 import {
   type RunnerBundleVersions,
@@ -51,7 +36,6 @@ export class RunnerBundleSync {
     private readonly bundleEncryptionKeyId: string,
     private readonly bundleEncryptionKeysById: Readonly<Record<string, Uint8Array>>,
     private readonly queueStore: RunnerQueueStore,
-    private readonly userEnvSource: Readonly<Record<string, string | undefined>>,
   ) {
     this.garbageCollector = new HostedBundleGarbageCollector(
       bucket,
@@ -71,78 +55,6 @@ export class RunnerBundleSync {
         slot,
       }))
     );
-  }
-
-  async readUserEnv(userId: string): Promise<Record<string, string>> {
-    return decodeHostedUserEnvPayload(
-      await this.createUserEnvStore().readUserEnv(userId),
-      this.userEnvSource,
-    );
-  }
-
-  async updateUserEnv(
-    userId: string,
-    update: HostedUserEnvUpdate,
-  ): Promise<HostedExecutionUserEnvStatus> {
-    const currentUserEnv = await this.readUserEnv(userId);
-    const nextUserEnv = applyHostedUserEnvUpdate({
-      current: currentUserEnv,
-      source: this.userEnvSource,
-      update,
-    });
-    const hostedEmailConfig = readHostedEmailConfig(this.userEnvSource);
-    const previousVerifiedEmailAddress = readHostedVerifiedEmailFromEnv(currentUserEnv)?.address ?? null;
-    const nextVerifiedEmailAddress = readHostedVerifiedEmailFromEnv(nextUserEnv)?.address ?? null;
-
-    await ensureHostedEmailVerifiedSenderRouteAvailable({
-      bucket: this.bucket,
-      config: hostedEmailConfig,
-      key: this.bundleEncryptionKey,
-      keyId: this.bundleEncryptionKeyId,
-      keysById: this.bundleEncryptionKeysById,
-      userId,
-      verifiedEmailAddress: nextVerifiedEmailAddress,
-    });
-
-    if (Object.keys(nextUserEnv).length === 0) {
-      await this.createUserEnvStore().clearUserEnv(userId);
-      await reconcileHostedEmailVerifiedSenderRoute({
-        bucket: this.bucket,
-        config: hostedEmailConfig,
-        key: this.bundleEncryptionKey,
-        keyId: this.bundleEncryptionKeyId,
-        keysById: this.bundleEncryptionKeysById,
-        nextVerifiedEmailAddress,
-        previousVerifiedEmailAddress,
-        userId,
-      });
-      return {
-        configuredUserEnvKeys: [],
-        userId,
-      };
-    }
-
-    await this.createUserEnvStore().writeUserEnv(
-      userId,
-      encodeHostedUserEnvPayload({
-        env: nextUserEnv,
-      }) as Uint8Array,
-    );
-    await reconcileHostedEmailVerifiedSenderRoute({
-      bucket: this.bucket,
-      config: hostedEmailConfig,
-      key: this.bundleEncryptionKey,
-      keyId: this.bundleEncryptionKeyId,
-      keysById: this.bundleEncryptionKeysById,
-      nextVerifiedEmailAddress,
-      previousVerifiedEmailAddress,
-      userId,
-    });
-
-    return {
-      configuredUserEnvKeys: listHostedUserEnvKeys(nextUserEnv),
-      userId,
-    };
   }
 
   async applyRunnerResultBundles(
@@ -199,15 +111,6 @@ export class RunnerBundleSync {
 
   private createBundleStore() {
     return createHostedBundleStore({
-      bucket: this.bucket,
-      key: this.bundleEncryptionKey,
-      keyId: this.bundleEncryptionKeyId,
-      keysById: this.bundleEncryptionKeysById,
-    });
-  }
-
-  private createUserEnvStore() {
-    return createHostedUserEnvStore({
       bucket: this.bucket,
       key: this.bundleEncryptionKey,
       keyId: this.bundleEncryptionKeyId,

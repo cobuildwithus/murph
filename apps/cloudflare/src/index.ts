@@ -6,10 +6,12 @@ import {
   buildHostedExecutionEmailMessageReceivedDispatch,
   buildHostedExecutionGatewayMessageSendDispatch,
   emitHostedExecutionStructuredLog,
+  parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
   parseHostedExecutionDispatchRequest,
   readHostedExecutionSignatureHeaders,
   readHostedEmailCapabilities,
   verifyHostedExecutionSignature,
+  type HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   type HostedExecutionDispatchRequest,
   type HostedExecutionDispatchResult,
   type HostedExecutionUserEnvStatus,
@@ -106,6 +108,9 @@ interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLike {
   dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus>;
   dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult>;
   getUserEnvStatus(): Promise<HostedExecutionUserEnvStatus>;
+  putDeviceSyncRuntimeSnapshot(input: {
+    snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse;
+  }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
   putPendingUsage(input: {
     usage: readonly Record<string, unknown>[];
   }): Promise<{ recorded: number; usageIds: string[] }>;
@@ -194,6 +199,16 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     },
     match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/env$/u),
     methods: ["GET", "PUT", "DELETE"],
+    wrongMethodResponse: "method-not-allowed",
+  },
+  {
+    authorizeBeforeMethod: true,
+    authorization: "signed",
+    async handle(context, params) {
+      return handleUserDeviceSyncRuntimeSnapshotRoute(context, params.userId);
+    },
+    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/device-sync\/runtime\/snapshot$/u),
+    methods: ["PUT"],
     wrongMethodResponse: "method-not-allowed",
   },
   {
@@ -314,6 +329,12 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     recipientPublicKeyJwk: HostedUserRecipientPublicKeyJwk;
   }): Promise<HostedUserRootKeyEnvelope> {
     return this.runner.upsertUserKeyRecipient(input);
+  }
+
+  async putDeviceSyncRuntimeSnapshot(input: {
+    snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse;
+  }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse> {
+    return this.runner.putDeviceSyncRuntimeSnapshot(input);
   }
 
   async putPendingUsage(input: {
@@ -511,6 +532,27 @@ async function handleUserEnvRoute(
   }
 
   return json(await stub.clearUserEnv());
+}
+
+async function handleUserDeviceSyncRuntimeSnapshotRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  const userId = decodeRouteParam(encodedUserId);
+  const snapshot = parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
+    await readCachedJsonObject(context),
+  );
+
+  if (snapshot.userId !== userId) {
+    return json({
+      error: "Device-sync runtime snapshot userId does not match the route user.",
+    }, 400);
+  }
+
+  const stub = await resolveUserRunnerStub(context.env, userId);
+  return json(
+    await requireGatewayStubMethod(stub, "putDeviceSyncRuntimeSnapshot")({ snapshot }),
+  );
 }
 
 async function handleUserEmailAddressRoute(

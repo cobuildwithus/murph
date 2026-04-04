@@ -8,6 +8,7 @@ import {
 
 import { createHostedExecutionSignatureHeaders } from "./auth.ts";
 import type {
+  HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   HostedExecutionDispatchRequest,
   HostedExecutionDispatchResult,
   HostedExecutionUserEnvStatus,
@@ -16,6 +17,7 @@ import type {
 } from "./contracts.ts";
 import { normalizeHostedExecutionBaseUrl } from "./env.ts";
 import {
+  parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
   parseHostedExecutionDispatchRequest,
   parseHostedExecutionDispatchResult,
   parseHostedExecutionUserEnvStatus,
@@ -23,6 +25,7 @@ import {
   parseHostedExecutionUserStatus,
 } from "./parsers.ts";
 import {
+  buildHostedExecutionUserDeviceSyncRuntimeSnapshotPath,
   buildHostedExecutionUserEnvPath,
   buildHostedExecutionUserKeyEnvelopePath,
   buildHostedExecutionUserKeyRecipientPath,
@@ -54,6 +57,10 @@ export interface HostedExecutionControlClient {
   clearUserEnv(userId: string): Promise<HostedExecutionUserEnvStatus>;
   deletePendingUsage(userId: string, usageIds: readonly string[]): Promise<void>;
   getPendingUsage(userId: string, limit?: number): Promise<Record<string, unknown>[]>;
+  putDeviceSyncRuntimeSnapshot(
+    userId: string,
+    snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse,
+  ): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
   getStatus(userId: string): Promise<HostedExecutionUserStatus>;
   getUserEnvStatus(userId: string): Promise<HostedExecutionUserEnvStatus>;
   getUserKeyEnvelope(userId: string): Promise<HostedUserRootKeyEnvelope>;
@@ -180,6 +187,25 @@ export function createHostedExecutionControlClient(
         request: {
           method: "GET",
           search,
+        },
+        signingSecret,
+        timeoutMs: options.timeoutMs,
+      });
+    },
+    putDeviceSyncRuntimeSnapshot(userId, snapshot) {
+      const requestPayload = parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(snapshot);
+
+      return requestHostedExecutionSignedJson({
+        baseUrl,
+        fetchImpl,
+        label: "device-sync runtime snapshot mirror",
+        now: options.now,
+        parse: parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
+        path: buildHostedExecutionUserDeviceSyncRuntimeSnapshotPath(userId),
+        request: {
+          body: JSON.stringify(requestPayload),
+          headers: { "content-type": "application/json; charset=utf-8" },
+          method: "PUT",
         },
         signingSecret,
         timeoutMs: options.timeoutMs,

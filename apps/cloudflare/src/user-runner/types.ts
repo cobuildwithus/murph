@@ -41,13 +41,16 @@ export interface DurableObjectStateLike {
   storage: DurableObjectStorageLike;
 }
 
-export interface PendingDispatchRecord {
+export interface PendingDispatchMetaRecord {
   attempts: number;
   availableAt: string;
-  dispatch: HostedExecutionDispatchRequest;
   enqueuedAt: string;
   eventId: string;
   lastError: string | null;
+}
+
+export interface PendingDispatchRecord extends PendingDispatchMetaRecord {
+  dispatch: HostedExecutionDispatchRequest;
 }
 
 export type RunnerBundleVersions = HostedExecutionBundleSlotMap<number>;

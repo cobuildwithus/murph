@@ -1,51 +1,69 @@
 import { describe, expect, it } from "vitest";
 
+import { createHostedDispatchPayloadStore } from "../src/dispatch-payload-store.js";
 import type { HostedExecutionCommittedResult } from "../src/execution-journal.js";
 import { RunnerQueueStore } from "../src/user-runner/runner-queue-store.js";
 import { createTestSqlStorage } from "./sql-storage.js";
+import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers";
+
+function createQueueHarness(state: { storage: { sql: ReturnType<typeof createTestSqlStorage> } }) {
+  const bucket = new MemoryEncryptedR2Bucket();
+  const dispatchPayloadStore = createHostedDispatchPayloadStore({
+    bucket,
+    key: createTestRootKey(41),
+    keyId: "k-test",
+  });
+
+  return {
+    bucket,
+    dispatchPayloadStore,
+    store: new RunnerQueueStore(state as never, dispatchPayloadStore),
+  };
+}
 
 describe("RunnerQueueStore", () => {
   it("poisons malformed pending rows and continues to the next valid dispatch", async () => {
     const state = createState();
-    const store = new RunnerQueueStore(state as never);
+    const { dispatchPayloadStore, store } = createQueueHarness(state);
     await store.bootstrapUser("member_123");
 
     const sql = state.storage.sql!;
     sql.exec(
       `INSERT INTO pending_events (
         event_id,
-        dispatch_json,
+        payload_key,
         attempts,
         available_at,
         enqueued_at,
         last_error
       ) VALUES (?, ?, ?, ?, ?, ?)`,
       "evt_bad",
-      "{not-json",
+      "transient/dispatch-payloads/bad.json",
       0,
       "2026-03-29T10:00:00.000Z",
       "2026-03-29T10:00:00.000Z",
       null,
     );
+    const payloadKey = await dispatchPayloadStore.writeDispatchPayload({
+      event: {
+        kind: "assistant.cron.tick",
+        reason: "manual",
+        userId: "member_123",
+      },
+      eventId: "evt_good",
+      occurredAt: "2026-03-29T10:00:00.000Z",
+    });
     sql.exec(
       `INSERT INTO pending_events (
         event_id,
-        dispatch_json,
+        payload_key,
         attempts,
         available_at,
         enqueued_at,
         last_error
       ) VALUES (?, ?, ?, ?, ?, ?)`,
       "evt_good",
-      JSON.stringify({
-        event: {
-          kind: "assistant.cron.tick",
-          reason: "manual",
-          userId: "member_123",
-        },
-        eventId: "evt_good",
-        occurredAt: "2026-03-29T10:00:00.000Z",
-      }),
+      payloadKey.key,
       0,
       "2026-03-29T10:00:00.000Z",
       "2026-03-29T10:00:00.000Z",
@@ -66,20 +84,20 @@ describe("RunnerQueueStore", () => {
 
   it("classifies malformed pending rows as invalid requests", async () => {
     const state = createState();
-    const store = new RunnerQueueStore(state as never);
+    const { store } = createQueueHarness(state);
     await store.bootstrapUser("member_123");
 
     state.storage.sql!.exec(
       `INSERT INTO pending_events (
         event_id,
-        dispatch_json,
+        payload_key,
         attempts,
         available_at,
         enqueued_at,
         last_error
       ) VALUES (?, ?, ?, ?, ?, ?)`,
       "evt_bad_only",
-      "{not-json",
+      "transient/dispatch-payloads/bad-only.json",
       0,
       "2026-03-29T10:00:00.000Z",
       "2026-03-29T10:00:00.000Z",
@@ -94,9 +112,241 @@ describe("RunnerQueueStore", () => {
     expect(claimed.record.lastError).toBe("Hosted runner poisoned a malformed pending dispatch.");
   });
 
+  it("migrates legacy pending dispatch rows without dropping queued work", async () => {
+    const state = createState();
+    const sql = state.storage.sql!;
+    sql.exec("DROP TABLE pending_events");
+    sql.exec(`
+      CREATE TABLE pending_events (
+        event_id TEXT PRIMARY KEY,
+        dispatch_json TEXT NOT NULL,
+        attempts INTEGER NOT NULL,
+        available_at TEXT NOT NULL,
+        enqueued_at TEXT NOT NULL,
+        last_error TEXT
+      )
+    `);
+
+    const bucket = new MemoryEncryptedR2Bucket();
+    const dispatchPayloadStore = createHostedDispatchPayloadStore({
+      bucket,
+      key: createTestRootKey(43),
+      keyId: "k-test",
+    });
+    const dispatch = {
+      event: {
+        kind: "assistant.cron.tick",
+        reason: "manual",
+        userId: "member_legacy_queue",
+      },
+      eventId: "evt_legacy_queue",
+      occurredAt: "2026-03-29T10:00:00.000Z",
+    } as const;
+    const payloadJson = await dispatchPayloadStore.writeStoredDispatch(dispatch);
+    sql.exec(
+      `INSERT INTO pending_events (
+        event_id,
+        dispatch_json,
+        attempts,
+        available_at,
+        enqueued_at,
+        last_error
+      ) VALUES (?, ?, ?, ?, ?, ?)`,
+      dispatch.eventId,
+      payloadJson,
+      1,
+      dispatch.occurredAt,
+      dispatch.occurredAt,
+      "lost ack",
+    );
+
+    const store = new RunnerQueueStore(state as never, dispatchPayloadStore);
+    await store.bootstrapUser(dispatch.event.userId);
+
+    const claimed = await store.claimNextDuePendingDispatch(
+      Date.parse("2026-03-29T10:05:00.000Z"),
+    );
+    expect(claimed.pendingDispatch).toMatchObject({
+      attempts: 1,
+      dispatch,
+      eventId: dispatch.eventId,
+      lastError: "lost ack",
+    });
+
+    const columns = sql.exec<{ name: string }>("PRAGMA table_info(pending_events)").toArray()
+      .map((row) => row.name)
+      .sort();
+    expect(columns).toContain("payload_key");
+    expect(columns).not.toContain("dispatch_json");
+  });
+
+  it("migrates legacy reference-backed pending rows through the caller-provided reader", async () => {
+    const state = createState();
+    const sql = state.storage.sql!;
+    sql.exec("DROP TABLE pending_events");
+    sql.exec(`
+      CREATE TABLE pending_events (
+        event_id TEXT PRIMARY KEY,
+        dispatch_json TEXT NOT NULL,
+        attempts INTEGER NOT NULL,
+        available_at TEXT NOT NULL,
+        enqueued_at TEXT NOT NULL,
+        last_error TEXT
+      )
+    `);
+
+    const bucket = new MemoryEncryptedR2Bucket();
+    const previousKey = createTestRootKey(47);
+    const currentKey = createTestRootKey(53);
+    const legacyDispatchPayloadStore = createHostedDispatchPayloadStore({
+      bucket,
+      key: previousKey,
+      keyId: "k-previous",
+    });
+    const currentDispatchPayloadStore = createHostedDispatchPayloadStore({
+      bucket,
+      key: currentKey,
+      keyId: "k-current",
+      keysById: {
+        "k-current": currentKey,
+        "k-previous": previousKey,
+      },
+    });
+    const dispatch = {
+      event: {
+        kind: "device-sync.wake",
+        connectionId: "conn_legacy_queue",
+        hint: {
+          traceId: "trace_legacy_queue",
+        },
+        provider: "oura",
+        reason: "webhook_hint",
+        userId: "member_legacy_queue_ref",
+      },
+      eventId: "evt_legacy_queue_ref",
+      occurredAt: "2026-03-29T10:00:00.000Z",
+    } as const;
+    const payloadJson = await legacyDispatchPayloadStore.writeStoredDispatch(dispatch);
+    sql.exec(
+      `INSERT INTO pending_events (
+        event_id,
+        dispatch_json,
+        attempts,
+        available_at,
+        enqueued_at,
+        last_error
+      ) VALUES (?, ?, ?, ?, ?, ?)`,
+      dispatch.eventId,
+      payloadJson,
+      1,
+      dispatch.occurredAt,
+      dispatch.occurredAt,
+      "lost ack",
+    );
+
+    const store = new RunnerQueueStore(
+      state as never,
+      currentDispatchPayloadStore,
+      async (legacyPayloadJson) => legacyDispatchPayloadStore.readStoredDispatch(legacyPayloadJson),
+    );
+    await store.bootstrapUser(dispatch.event.userId);
+
+    const claimed = await store.claimNextDuePendingDispatch(
+      Date.parse("2026-03-29T10:05:00.000Z"),
+    );
+    expect(claimed.pendingDispatch).toMatchObject({
+      attempts: 1,
+      dispatch,
+      eventId: dispatch.eventId,
+      lastError: "lost ack",
+    });
+  });
+
+  it("poisons malformed legacy pending rows and still migrates later valid work", async () => {
+    const state = createState();
+    const sql = state.storage.sql!;
+    sql.exec("DROP TABLE pending_events");
+    sql.exec(`
+      CREATE TABLE pending_events (
+        event_id TEXT PRIMARY KEY,
+        dispatch_json TEXT NOT NULL,
+        attempts INTEGER NOT NULL,
+        available_at TEXT NOT NULL,
+        enqueued_at TEXT NOT NULL,
+        last_error TEXT
+      )
+    `);
+
+    const bucket = new MemoryEncryptedR2Bucket();
+    const dispatchPayloadStore = createHostedDispatchPayloadStore({
+      bucket,
+      key: createTestRootKey(59),
+      keyId: "k-test",
+    });
+    const dispatch = {
+      event: {
+        kind: "assistant.cron.tick",
+        reason: "manual",
+        userId: "member_legacy_queue",
+      },
+      eventId: "evt_legacy_queue_good",
+      occurredAt: "2026-03-29T10:00:00.000Z",
+    } as const;
+    const payloadJson = await dispatchPayloadStore.writeStoredDispatch(dispatch);
+    sql.exec(
+      `INSERT INTO pending_events (
+        event_id,
+        dispatch_json,
+        attempts,
+        available_at,
+        enqueued_at,
+        last_error
+      ) VALUES (?, ?, ?, ?, ?, ?)`,
+      "evt_legacy_queue_bad",
+      "{bad-json",
+      0,
+      "2026-03-29T10:00:00.000Z",
+      "2026-03-29T10:00:00.000Z",
+      null,
+    );
+    sql.exec(
+      `INSERT INTO pending_events (
+        event_id,
+        dispatch_json,
+        attempts,
+        available_at,
+        enqueued_at,
+        last_error
+      ) VALUES (?, ?, ?, ?, ?, ?)`,
+      dispatch.eventId,
+      payloadJson,
+      1,
+      dispatch.occurredAt,
+      dispatch.occurredAt,
+      "lost ack",
+    );
+
+    const store = new RunnerQueueStore(state as never, dispatchPayloadStore);
+    await store.bootstrapUser(dispatch.event.userId);
+
+    const claimed = await store.claimNextDuePendingDispatch(
+      Date.parse("2026-03-29T10:05:00.000Z"),
+    );
+    expect(claimed.pendingDispatch).toMatchObject({
+      attempts: 1,
+      dispatch,
+      eventId: dispatch.eventId,
+    });
+
+    const badEvent = await store.readEventState("evt_legacy_queue_bad");
+    expect(badEvent.pending).toBe(false);
+    expect(badEvent.poisoned).toBe(true);
+    expect(badEvent.lastError).toBe("Hosted runner poisoned a malformed pending dispatch.");
+  });
+
   it("clears malformed bundle refs to null and surfaces a corruption warning", async () => {
     const state = createState();
-    const store = new RunnerQueueStore(state as never);
+    const { store } = createQueueHarness(state);
     await store.bootstrapUser("member_123");
 
     const sql = state.storage.sql!;
@@ -117,7 +367,7 @@ describe("RunnerQueueStore", () => {
       "vault",
     );
 
-    const repairedStore = new RunnerQueueStore(state as never);
+    const { store: repairedStore } = createQueueHarness(state);
     const record = await repairedStore.readState();
     expect(record.bundleRefs.agentState).toBeNull();
     expect(record.bundleRefs.vault).toBeNull();
@@ -145,7 +395,7 @@ describe("RunnerQueueStore", () => {
 
   it("sanitizes malformed bundle refs when callers only read bundle meta state", async () => {
     const state = createState();
-    const store = new RunnerQueueStore(state as never);
+    const { store } = createQueueHarness(state);
     await store.bootstrapUser("member_123");
 
     const sql = state.storage.sql!;
@@ -201,7 +451,7 @@ describe("RunnerQueueStore", () => {
 
   it("stores redacted operator-safe retry errors", async () => {
     const state = createState();
-    const store = new RunnerQueueStore(state as never);
+    const { store } = createQueueHarness(state);
     await store.bootstrapUser("member_123");
     await store.enqueueDispatch({
       event: {
@@ -233,7 +483,7 @@ describe("RunnerQueueStore", () => {
 
   it("keeps runtime exception summaries generic in persisted retry state", async () => {
     const state = createState();
-    const store = new RunnerQueueStore(state as never);
+    const { store } = createQueueHarness(state);
     await store.bootstrapUser("member_123");
     await store.enqueueDispatch({
       event: {
@@ -260,7 +510,7 @@ describe("RunnerQueueStore", () => {
 
   it("stores sanitized configuration summaries when deferring pending work", async () => {
     const state = createState();
-    const store = new RunnerQueueStore(state as never);
+    const { store } = createQueueHarness(state);
     await store.bootstrapUser("member_123");
     await store.enqueueDispatch({
       event: {
@@ -291,7 +541,7 @@ describe("RunnerQueueStore", () => {
 
   it("stores sanitized finalize-retry summaries for committed results", async () => {
     const state = createState();
-    const store = new RunnerQueueStore(state as never);
+    const { store } = createQueueHarness(state);
     await store.bootstrapUser("member_123");
     await store.enqueueDispatch({
       event: {
@@ -338,7 +588,7 @@ describe("RunnerQueueStore", () => {
 
   it("clears stale last-error text when committed bundles are synchronized after a finalize retry", async () => {
     const state = createState();
-    const store = new RunnerQueueStore(state as never);
+    const { store } = createQueueHarness(state);
     await store.bootstrapUser("member_123");
 
     state.storage.sql!.exec(
@@ -375,7 +625,7 @@ describe("RunnerQueueStore", () => {
 
   it("records a bounded run trace and derives stable error codes", async () => {
     const state = createState();
-    const store = new RunnerQueueStore(state as never);
+    const { store } = createQueueHarness(state);
     await store.bootstrapUser("member_123");
 
     for (let index = 0; index < 26; index += 1) {
@@ -421,7 +671,7 @@ describe("RunnerQueueStore", () => {
 
   it("clears the persisted last-error string when a later phase requests clearError", async () => {
     const state = createState();
-    const store = new RunnerQueueStore(state as never);
+    const { store } = createQueueHarness(state);
     await store.bootstrapUser("member_123");
 
     state.storage.sql!.exec(

@@ -189,8 +189,11 @@ export class RunnerContainer extends Container {
         phase: "failed",
         run,
       });
-      await this.destroyIfRunning();
       throw error;
+    } finally {
+      // Force one-shot runner containers so a stale per-run control token
+      // cannot leak across invocations through warm reuse.
+      await this.destroyIfRunning();
     }
   }
 

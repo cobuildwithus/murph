@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ExecutionOutboxStatus } from "@prisma/client";
 import { HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION } from "@murphai/hosted-execution";
@@ -7,14 +7,6 @@ import type { SharePack } from "@murphai/contracts";
 import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { createHostedWebhookDispatchSideEffect } from "@/src/lib/hosted-onboarding/webhook-receipts";
 
-const mocks = vi.hoisted(() => ({
-  buildHostedDeviceSyncRuntimeSnapshot: vi.fn(() => ({
-    connections: [],
-    generatedAt: "2026-03-26T12:30:00.000Z",
-    userId: "member_123",
-  })),
-}));
-
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingSecretCodec: () => ({
     keyVersion: "v1",
@@ -22,29 +14,6 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     decrypt: (value: string) => value,
   }),
   requireHostedOnboardingPublicBaseUrl: () => "https://join.example.test",
-}));
-
-vi.mock("@/src/lib/device-sync/crypto", () => ({
-  buildHostedSecretAad: (input: Record<string, unknown>) => JSON.stringify(input),
-  createHostedSecretCodec: () => ({
-    decrypt: vi.fn(),
-    encrypt: vi.fn(),
-    keyVersion: "v1",
-  }),
-}));
-
-vi.mock("@/src/lib/device-sync/env", () => ({
-  readHostedDeviceSyncEnvironment: () => ({
-    encryptionKey: "01234567890123456789012345678901",
-    encryptionKeyVersion: "v1",
-    encryptionKeysByVersion: {
-      v1: "01234567890123456789012345678901",
-    },
-  }),
-}));
-
-vi.mock("@/src/lib/device-sync/internal-runtime", () => ({
-  buildHostedDeviceSyncRuntimeSnapshot: mocks.buildHostedDeviceSyncRuntimeSnapshot,
 }));
 
 import {
@@ -181,10 +150,6 @@ function buildDeviceSyncSignalOutboxRecord(overrides: Partial<{
 }
 
 describe("hydrateHostedExecutionDispatch", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
   it("hydrates device-sync wake dispatches from stored signal payloads", async () => {
     const prisma = {
       deviceSyncSignal: {
@@ -239,11 +204,6 @@ describe("hydrateHostedExecutionDispatch", () => {
         kind: "device-sync.wake",
         provider: "oura",
         reason: "webhook_hint",
-        runtimeSnapshot: {
-          connections: [],
-          generatedAt: "2026-03-26T12:30:00.000Z",
-          userId: "member_123",
-        },
         userId: "member_123",
       },
       eventId: "evt_device_sync_123",
