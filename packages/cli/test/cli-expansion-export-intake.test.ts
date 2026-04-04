@@ -6,6 +6,7 @@ import { initializeVault } from '@murphai/core'
 import { buildExportPack, readVault } from '@murphai/query'
 import { Cli } from 'incur'
 import { test } from 'vitest'
+import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import { registerExportCommands } from '../src/commands/export.js'
 import {
   materializeStoredExportPack,
@@ -27,6 +28,7 @@ function createSliceCli() {
     description: 'export/intake slice test cli',
     version: '0.0.0-test',
   })
+  cli.use(incurErrorBridge)
   const services = createUnwiredVaultServices()
 
   registerExportCommands(cli, services)

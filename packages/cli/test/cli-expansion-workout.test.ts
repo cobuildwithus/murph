@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Cli } from 'incur'
 import { localParallelCliTest as test } from './local-parallel-test.js'
+import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import {
   listWriteOperationMetadataPaths,
   parseFrontmatterDocument,
@@ -97,6 +98,7 @@ function createSliceCli() {
     description: 'workout slice test cli',
     version: '0.0.0-test',
   })
+  cli.use(incurErrorBridge)
   const services = createIntegratedVaultServices()
 
   registerVaultCommands(cli, services)

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Cli } from 'incur'
 import { test } from 'vitest'
+import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import { registerExperimentCommands } from '../src/commands/experiment.js'
 import { registerJournalCommands } from '../src/commands/journal.js'
 import { registerReadCommands } from '../src/commands/read.js'
@@ -17,6 +18,7 @@ function createSliceCli() {
     description: 'experiment/journal/vault phase2 slice test cli',
     version: '0.0.0-test',
   })
+  cli.use(incurErrorBridge)
   const services = createIntegratedVaultServices()
 
   registerVaultCommands(cli, services)

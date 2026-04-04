@@ -65,7 +65,7 @@ test('gateway-core stays transport-neutral and gateway-local owns the vault-back
   assert.equal(gatewayCoreManifest.dependencies?.['@murphai/inboxd'], undefined)
   assert.equal(gatewayCoreManifest.dependencies?.['@murphai/runtime-state'], undefined)
   assert.equal(gatewayLocalManifest.dependencies?.['@murphai/gateway-core'], 'workspace:*')
-  assert.equal(gatewayLocalManifest.dependencies?.['@murphai/assistant-core'], 'workspace:*')
+  assert.equal(gatewayLocalManifest.dependencies?.['@murphai/assistant-core'], undefined)
   assert.doesNotMatch(packageLocal, /@murph\/gateway-core\/local/u)
   assert.match(packageLocal, /\.\/local-service\.js/u)
   assert.match(packageLocal, /\.\/store\.js/u)

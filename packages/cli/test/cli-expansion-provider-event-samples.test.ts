@@ -5,6 +5,7 @@ import path from 'node:path'
 import { listAssistantCronJobs } from '../src/assistant/cron.js'
 import { Cli } from 'incur'
 import { test } from 'vitest'
+import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import { registerEventCommands } from '../src/commands/event.js'
 import { registerFoodCommands } from '../src/commands/food.js'
 import { registerProviderCommands } from '../src/commands/provider.js'
@@ -28,6 +29,7 @@ function createSliceCli() {
     description: 'provider/food/recipe/event/samples slice test cli',
     version: '0.0.0-test',
   })
+  cli.use(incurErrorBridge)
   const services = createIntegratedVaultServices()
 
   registerVaultCommands(cli, services)
