@@ -5,7 +5,7 @@ import {
 } from "@murphai/hosted-execution";
 import type {
   HostedUserRootKeyEnvelope,
-  HostedUserRootKeyRecipientKind,
+  HostedUserManagedRootKeyRecipientKind,
 } from "@murphai/runtime-state";
 
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
@@ -34,7 +34,7 @@ export async function readHostedUserRootKeyEnvelope(
 }
 
 export async function upsertHostedUserRootKeyRecipient(input: {
-  kind: HostedUserRootKeyRecipientKind;
+  kind: HostedUserManagedRootKeyRecipientKind;
   recipient: HostedExecutionUserRootKeyRecipientUpsert;
   userId: string;
 }): Promise<HostedUserRootKeyEnvelope> {

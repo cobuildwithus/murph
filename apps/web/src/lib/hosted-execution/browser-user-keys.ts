@@ -1,11 +1,12 @@
 import {
   findHostedWrappedRootKeyRecipient,
   type HostedUserRootKeyEnvelope,
-  type HostedUserRootKeyRecipientKind,
+  type HostedUserManagedRootKeyRecipientKind,
 } from "@murphai/runtime-state";
 
 const HOSTED_BROWSER_CONTEXT_SALT = new TextEncoder().encode("murph.cloudflare.hosted.storage.v2");
 const HOSTED_BROWSER_CIPHER_SCHEMA = "murph.hosted-cipher.v2";
+const HOSTED_BROWSER_RECIPIENT_KEY_BYTES = 32;
 const utf8Encoder = new TextEncoder();
 
 export interface HostedBrowserCipherEnvelope {
@@ -24,7 +25,7 @@ export interface HostedUserRecipientUpsertPayload {
 }
 
 export function generateHostedUserRecipientKey(): Uint8Array {
-  return crypto.getRandomValues(new Uint8Array(32));
+  return crypto.getRandomValues(new Uint8Array(HOSTED_BROWSER_RECIPIENT_KEY_BYTES));
 }
 
 export function createHostedUserRecipientUpsertPayload(input: {
@@ -34,14 +35,16 @@ export function createHostedUserRecipientUpsertPayload(input: {
 }): HostedUserRecipientUpsertPayload {
   return {
     ...(input.metadata ? { metadata: input.metadata } : {}),
-    recipientKeyBase64: encodeHostedBrowserBase64(input.key),
+    recipientKeyBase64: encodeHostedBrowserBase64(
+      requireHostedBrowserRecipientKeyBytes(input.key, "Hosted browser recipient key"),
+    ),
     recipientKeyId: input.keyId,
   };
 }
 
 export async function unwrapHostedUserRootKeyForBrowser(input: {
   envelope: HostedUserRootKeyEnvelope;
-  kind: HostedUserRootKeyRecipientKind;
+  kind: HostedUserManagedRootKeyRecipientKind;
   recipientKey: Uint8Array;
 }): Promise<Uint8Array> {
   const recipient = findHostedWrappedRootKeyRecipient(input.envelope, input.kind);
@@ -63,7 +66,10 @@ export async function unwrapHostedUserRootKeyForBrowser(input: {
       schema: HOSTED_BROWSER_CIPHER_SCHEMA,
       scope: "root-key-recipient",
     },
-    rootKey: input.recipientKey,
+    rootKey: requireHostedBrowserRecipientKeyBytes(
+      input.recipientKey,
+      `${input.kind} recipient key`,
+    ),
     scope: "root-key-recipient",
   });
 }
@@ -145,6 +151,14 @@ async function deriveHostedBrowserStorageKey(rootKey: Uint8Array, scope: string)
   );
 
   return new Uint8Array(derived);
+}
+
+function requireHostedBrowserRecipientKeyBytes(value: Uint8Array, label: string): Uint8Array {
+  if (value.byteLength !== HOSTED_BROWSER_RECIPIENT_KEY_BYTES) {
+    throw new TypeError(`${label} must be ${HOSTED_BROWSER_RECIPIENT_KEY_BYTES} bytes.`);
+  }
+
+  return value;
 }
 
 function encodeHostedBrowserBase64(value: Uint8Array): string {

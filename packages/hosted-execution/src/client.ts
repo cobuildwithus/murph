@@ -1,7 +1,7 @@
 import {
   parseHostedUserRootKeyEnvelope,
   type HostedUserRootKeyEnvelope,
-  type HostedUserRootKeyRecipientKind,
+  type HostedUserManagedRootKeyRecipientKind,
 } from "@murphai/runtime-state";
 
 import { createHostedExecutionSignatureHeaders } from "./auth.ts";
@@ -59,7 +59,7 @@ export interface HostedExecutionControlClient {
   ): Promise<HostedExecutionUserEnvStatus>;
   upsertUserKeyRecipient(
     userId: string,
-    kind: HostedUserRootKeyRecipientKind,
+    kind: HostedUserManagedRootKeyRecipientKind,
     input: HostedExecutionUserRootKeyRecipientUpsert,
   ): Promise<HostedUserRootKeyEnvelope>;
 }
