@@ -35,10 +35,10 @@ test("normalizeLinqWebhookEvent builds direct chat captures and hydrates downloa
           {
             type: "media",
             url: "https://cdn.example.test/photo.jpg",
-            attachment_id: "att_1",
+            id: "att_1",
             filename: "photo.jpg",
             mime_type: "image/jpeg",
-            size: 4,
+            size_bytes: 4,
           },
         ],
         sent_at: "2026-03-24T10:00:00.000Z",
@@ -128,22 +128,22 @@ test("normalizeLinqWebhookEvent treats multiple media parts and voice memos as a
             {
               filename: "photo-1.heic",
               mime_type: "image/heic",
-              size: 1024,
+              size_bytes: 1024,
               type: "media",
               url: "https://cdn.linqapp.com/media/photo-1.heic",
             },
             {
               filename: "photo-2.jpg",
               mime_type: "image/jpeg",
-              size: 2048,
+              size_bytes: 2048,
               type: "media",
               url: "https://cdn.linqapp.com/media/photo-2.jpg",
             },
             {
-              attachment_id: "att_voice_1",
+              id: "att_voice_1",
               mime_type: "audio/m4a",
-              size: 4096,
-              type: "voice_memo",
+              size_bytes: 4096,
+              type: "media",
               url: "https://cdn.linqapp.com/media/voice-1.m4a",
             },
           ],
@@ -204,9 +204,10 @@ test("normalizeLinqWebhookEvent keeps metadata-only voice memo attachments when 
           id: "msg_voice",
           parts: [
             {
+              id: "att_voice_2",
               mime_type: "audio/amr",
-              size: 512,
-              type: "voice_memo",
+              size_bytes: 512,
+              type: "media",
               url: "https://cdn.linqapp.com/media/voice-2.amr",
             },
           ],
@@ -220,12 +221,69 @@ test("normalizeLinqWebhookEvent keeps metadata-only voice memo attachments when 
     {
       byteSize: 512,
       data: null,
-      externalId: "part:1",
+      externalId: "att_voice_2",
       fileName: "voice-2.amr",
       kind: "audio",
       mime: "audio/amr",
     },
   ]);
+});
+
+test("normalizeLinqWebhookEvent accepts minimized canonical Linq events from hosted storage", async () => {
+  const canonical = {
+    api_version: "v3",
+    created_at: "2026-04-02T04:00:00.000Z",
+    webhook_version: "2026-02-03",
+    data: {
+      chat: {
+        id: "chat_stored",
+        owner_handle: {
+          handle: "hbid:linq.recipient:v1:test",
+          id: "handle_owner_stored",
+          is_me: true,
+          service: "iMessage",
+        },
+      },
+      chat_id: "chat_stored",
+      direction: "inbound",
+      from: "hbid:linq.from:v1:test",
+      from_handle: {
+        handle: "hbid:linq.from:v1:test",
+        id: "handle_sender_stored",
+        service: "iMessage",
+      },
+      is_from_me: false,
+      message: {
+        id: "hbid:linq.message:v1:test",
+        parts: [
+          {
+            type: "text",
+            value: "Stored webhook snapshot",
+          },
+        ],
+      },
+      received_at: "2026-04-02T04:00:01.000Z",
+      sender_handle: {
+        handle: "hbid:linq.from:v1:test",
+        id: "handle_sender_stored",
+        service: "iMessage",
+      },
+      service: "iMessage",
+    },
+    event_id: "evt_stored",
+    event_type: "message.received",
+  } as const;
+
+  const capture = await normalizeLinqWebhookEvent({
+    defaultAccountId: "hbidx:phone:v1:test",
+    event: canonical,
+  });
+
+  assert.equal(capture.externalId, "linq:hbid:linq.message:v1:test");
+  assert.equal(capture.accountId, "hbidx:phone:v1:test");
+  assert.equal(capture.thread.id, "chat_stored");
+  assert.equal(capture.text, "Stored webhook snapshot");
+  assert.equal(capture.raw.event_type, "message.received");
 });
 
 test("createLinqWebhookConnector accepts signed webhook requests and emits captures", async () => {
@@ -289,7 +347,7 @@ test("createLinqWebhookConnector accepts signed webhook requests and emits captu
           {
             type: "media",
             url: "https://cdn.example.test/att_2.pdf",
-            attachment_id: "att_2",
+            id: "att_2",
             filename: "summary.pdf",
             mime_type: "application/pdf",
           },
@@ -403,7 +461,7 @@ test("createLinqWebhookConnector still accepts a webhook when attachment downloa
           {
             type: "media",
             url: "https://cdn.example.test/att_2.pdf",
-            attachment_id: "att_2",
+            id: "att_2",
             filename: "summary.pdf",
             mime_type: "application/pdf",
           },
@@ -496,7 +554,7 @@ test("createLinqWebhookConnector waits for successful attachment downloads that 
           {
             type: "media",
             url: "https://cdn.example.test/att_2.pdf",
-            attachment_id: "att_2",
+            id: "att_2",
             filename: "summary.pdf",
             mime_type: "application/pdf",
           },
@@ -601,7 +659,7 @@ test("createLinqWebhookConnector acknowledges webhooks promptly even when attach
           {
             type: "media",
             url: "https://cdn.example.test/att_2.pdf",
-            attachment_id: "att_2",
+            id: "att_2",
             filename: "summary.pdf",
             mime_type: "application/pdf",
           },

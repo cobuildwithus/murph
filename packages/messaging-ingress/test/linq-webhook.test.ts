@@ -201,10 +201,10 @@ test("parseCanonicalLinqMessageReceivedEvent exposes summaries and minimizers", 
             value: "Hello",
           },
           {
-            attachment_id: "att_123",
+            id: "att_123",
             filename: "photo.jpg",
             mime_type: "image/jpeg",
-            size: 1234,
+            size_bytes: 1234,
             type: "media",
             url: "https://files.example.test/photo.jpg",
           },
@@ -472,7 +472,34 @@ test("parseCanonicalLinqMessageReceivedEvent normalizes 2026-02-03 webhook paylo
   });
 });
 
-test("parseCanonicalLinqMessageReceivedEvent accepts voice memos and preserves URLs in hosted minimization", () => {
+test("parseCanonicalLinqMessageReceivedEvent accepts canonical hosted snapshots", () => {
+  const canonical = minimizeLinqMessageReceivedEvent(parseCanonicalLinqMessageReceivedEvent({
+    ...buildV2026MessageReceivedWebhook({
+      data: {
+        parts: [
+          {
+            type: "text",
+            value: "Hello from storage",
+          },
+        ],
+      },
+      eventId: "evt_canonical",
+      traceId: "trace_canonical",
+    }),
+  }));
+
+  const event = parseCanonicalLinqMessageReceivedEvent(canonical as never);
+
+  assert.deepEqual(summarizeLinqMessageReceivedEvent(event), {
+    chatId: "chat_123",
+    isFromMe: false,
+    messageId: "msg_123",
+    phoneNumber: "+15551234567",
+    text: "Hello from storage",
+  });
+});
+
+test("parseCanonicalLinqMessageReceivedEvent accepts audio media parts and preserves URLs in hosted minimization", () => {
   const event = parseCanonicalLinqMessageReceivedEvent({
     ...buildV2026MessageReceivedWebhook({
       createdAt: "2026-04-02T04:00:00.000Z",
@@ -488,11 +515,11 @@ test("parseCanonicalLinqMessageReceivedEvent accepts voice memos and preserves U
         },
         parts: [
           {
-            attachment_id: null,
-            filename: null,
+            id: "att_audio_123",
+            filename: "voice-123.m4a",
             mime_type: "audio/m4a",
-            size: 2048,
-            type: "voice_memo",
+            size_bytes: 2048,
+            type: "media",
             url: "https://cdn.linqapp.com/media/voice-123.m4a",
           },
         ],
@@ -510,11 +537,11 @@ test("parseCanonicalLinqMessageReceivedEvent accepts voice memos and preserves U
 
   assert.deepEqual(event.data.message.parts, [
     {
-      attachment_id: null,
-      filename: null,
+      attachment_id: "att_audio_123",
+      filename: "voice-123.m4a",
       mime_type: "audio/m4a",
       size: 2048,
-      type: "voice_memo",
+      type: "media",
       url: "https://cdn.linqapp.com/media/voice-123.m4a",
     },
   ]);
@@ -546,11 +573,11 @@ test("parseCanonicalLinqMessageReceivedEvent accepts voice memos and preserves U
         id: "msg_123",
         parts: [
           {
-            attachment_id: null,
-            filename: null,
+            attachment_id: "att_audio_123",
+            filename: "voice-123.m4a",
             mime_type: "audio/m4a",
             size: 2048,
-            type: "voice_memo",
+            type: "media",
             url: "https://cdn.linqapp.com/media/voice-123.m4a",
           },
         ],
