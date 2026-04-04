@@ -478,6 +478,53 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
     buildResolveAssistantSessionInput(
       {
         vault: '/tmp/vault',
+        alias: 'chat:openai-override',
+        approvalPolicy: 'never',
+        profile: 'ops',
+        sandbox: 'danger-full-access',
+      },
+      null,
+      {
+        adapter: 'openai-compatible',
+        apiKeyEnv: 'OPENAI_API_KEY',
+        endpoint: 'https://api.openai.com/v1',
+        headers: null,
+        model: 'gpt-5.4-mini',
+        providerName: 'openai',
+        reasoningEffort: 'medium',
+      },
+    ),
+    {
+      vault: '/tmp/vault',
+      alias: 'chat:openai-override',
+      provider: 'openai-compatible',
+      model: 'gpt-5.4-mini',
+      maxSessionAgeMs: null,
+      sandbox: null,
+      approvalPolicy: null,
+      oss: false,
+      profile: null,
+      baseUrl: 'https://api.openai.com/v1',
+      apiKeyEnv: 'OPENAI_API_KEY',
+      providerName: 'openai',
+      headers: null,
+      reasoningEffort: 'medium',
+      target: {
+        adapter: 'openai-compatible',
+        apiKeyEnv: 'OPENAI_API_KEY',
+        endpoint: 'https://api.openai.com/v1',
+        headers: null,
+        model: 'gpt-5.4-mini',
+        providerName: 'openai',
+        reasoningEffort: 'medium',
+      },
+    },
+  )
+
+  assert.deepEqual(
+    buildResolveAssistantSessionInput(
+      {
+        vault: '/tmp/vault',
         alias: 'chat:codex-defaults',
         provider: 'codex-cli',
       },
@@ -519,6 +566,24 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
         sandbox: 'danger-full-access',
       },
     },
+  )
+})
+
+test('buildResolveAssistantSessionInput requires an explicit provider family when no boundary target exists', () => {
+  assert.throws(
+    () =>
+      buildResolveAssistantSessionInput(
+        {
+          vault: '/tmp/vault',
+          model: 'gpt-5.4-mini',
+          reasoningEffort: 'high',
+        },
+        null,
+        null,
+      ),
+    (error: unknown) =>
+      error instanceof VaultCliError &&
+      error.code === 'ASSISTANT_TARGET_REQUIRED',
   )
 })
 

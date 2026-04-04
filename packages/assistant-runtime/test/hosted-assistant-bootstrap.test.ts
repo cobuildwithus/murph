@@ -203,6 +203,26 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
     });
   });
 
+  it("rejects hosted codex bootstrap configuration", async () => {
+    const homeDirectory = await createTemporaryHomeDirectory();
+
+    await expect(
+      ensureHostedAssistantOperatorDefaults({
+        allowMissing: false,
+        env: {
+          HOSTED_ASSISTANT_PROVIDER: "codex-cli",
+          HOSTED_ASSISTANT_MODEL: "gpt-5-codex",
+        },
+        homeDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_ASSISTANT_CONFIG_INVALID",
+      name: "HostedAssistantConfigurationError",
+    });
+
+    await expect(resolveHostedAssistantConfig(homeDirectory)).resolves.toBeNull();
+  });
+
   it("updates platform-managed hosted config when the worker env changes", async () => {
     const homeDirectory = await createTemporaryHomeDirectory();
 

@@ -1,20 +1,13 @@
 import {
-  assistantBackendTargetToProviderConfigInput,
-  createAssistantModelTarget,
   type AssistantModelTarget,
 } from '../assistant-backend.js'
 import type { AssistantOperatorDefaults } from '../operator-config.js'
-import {
-  buildAssistantFailoverRoutes,
-  type ResolvedAssistantFailoverRoute,
-} from './failover.js'
+import type { ResolvedAssistantFailoverRoute } from './failover.js'
 import {
   compactAssistantProviderConfigInput,
-  serializeAssistantProviderSessionOptions,
 } from './provider-config.js'
 import {
   buildResolveAssistantSessionInput,
-  resolveAssistantSessionTarget,
 } from './session-resolution.js'
 import type {
   AssistantMessageInput,
@@ -24,6 +17,7 @@ import {
   isAssistantSessionNotFoundError,
   resolveAssistantSession,
 } from './store.js'
+import { resolveAssistantExecutionPlan } from './execution-plan.js'
 
 export type AssistantTurnRouteOverride = Pick<
   AssistantMessageInput,
@@ -46,19 +40,13 @@ export function resolveAssistantTurnRoutes(
   defaults: AssistantOperatorDefaults | null,
   resolved: ResolvedAssistantSession,
 ): ResolvedAssistantFailoverRoute[] {
-  const target = resolvePrimaryAssistantTurnTarget({
-    input,
-    sessionTarget: resolved.session.target,
-  })
-  const executionConfig = assistantBackendTargetToProviderConfigInput(target)
-  const providerOptions = serializeAssistantProviderSessionOptions(executionConfig)
-  return normalizeAssistantTurnRoutes(buildAssistantFailoverRoutes({
-    backups: input.failoverRoutes ?? defaults?.failoverRoutes ?? null,
-    codexCommand: executionConfig.codexCommand,
+  return resolveAssistantExecutionPlan({
+    backups: input.failoverRoutes,
     defaults,
-    provider: target.adapter,
-    providerOptions,
-  }))
+    override: compactAssistantProviderConfigInput(input),
+    resumeState: resolved.session.resumeState,
+    sessionTarget: resolved.session.target,
+  }).routes
 }
 
 export async function resolveAssistantTurnRoutesForMessage(
@@ -83,23 +71,12 @@ export async function resolveAssistantTurnRoutesForMessage(
       throw error
     }
 
-    const target = resolveAssistantSessionTarget({
+    return resolveAssistantExecutionPlan({
+      backups: input.failoverRoutes,
       boundaryDefaultTarget,
       defaults,
-      input,
-    })
-    const providerOptions = serializeAssistantProviderSessionOptions(
-      assistantBackendTargetToProviderConfigInput(target),
-    )
-
-    return buildAssistantFailoverRoutes({
-      backups: defaults?.failoverRoutes ?? null,
-      codexCommand:
-        target.adapter === 'codex-cli' ? target.codexCommand ?? null : null,
-      defaults,
-      provider: target.adapter,
-      providerOptions,
-    })
+      override: compactAssistantProviderConfigInput(input),
+    }).routes
   }
 }
 
@@ -136,33 +113,11 @@ export function selectAssistantTurnRouteOverride(
       model: selectedRoute.providerOptions.model ?? null,
       oss: selectedRoute.providerOptions.oss,
       profile: selectedRoute.providerOptions.profile ?? null,
-      provider: selectedRoute.provider ?? 'codex-cli',
+      provider: selectedRoute.provider,
       providerName: selectedRoute.providerOptions.providerName ?? null,
       reasoningEffort: selectedRoute.providerOptions.reasoningEffort ?? null,
       sandbox: selectedRoute.providerOptions.sandbox ?? null,
     },
     route: selectedRoute,
   }
-}
-
-function normalizeAssistantTurnRoutes(
-  routes: readonly ResolvedAssistantFailoverRoute[],
-): ResolvedAssistantFailoverRoute[] {
-  return routes.map((route) => ({
-    ...route,
-    providerOptions: serializeAssistantProviderSessionOptions(route.providerOptions),
-  }))
-}
-
-function resolvePrimaryAssistantTurnTarget(input: {
-  input: AssistantMessageInput
-  sessionTarget: AssistantModelTarget
-}): AssistantModelTarget {
-  const overrideConfig = compactAssistantProviderConfigInput(input.input)
-  return (
-    createAssistantModelTarget({
-      ...assistantBackendTargetToProviderConfigInput(input.sessionTarget),
-      ...(overrideConfig ?? {}),
-    }) ?? input.sessionTarget
-  )
 }

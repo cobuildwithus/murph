@@ -79,6 +79,16 @@ export function inferAssistantProviderFromConfigInput(
     return 'openai-compatible'
   }
 
+  if (
+    normalizeNullableString(input?.codexCommand) ||
+    normalizeNullableString(input?.profile) ||
+    input?.approvalPolicy !== null && input?.approvalPolicy !== undefined ||
+    input?.sandbox !== null && input?.sandbox !== undefined ||
+    input?.oss === true
+  ) {
+    return 'codex-cli'
+  }
+
   return null
 }
 
