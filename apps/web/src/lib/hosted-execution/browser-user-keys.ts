@@ -1,4 +1,6 @@
 import {
+  buildHostedWrappedRootKeyRecipientAadFields,
+  buildLegacyHostedWrappedRootKeyRecipientAadFields,
   findHostedWrappedRootKeyRecipient,
   type HostedUserRootKeyEnvelope,
   type HostedUserManagedRootKeyRecipientKind,
@@ -53,25 +55,42 @@ export async function unwrapHostedUserRootKeyForBrowser(input: {
     throw new Error(`Hosted user root key envelope is missing a ${input.kind} recipient.`);
   }
 
-  return decryptHostedBrowserCipherEnvelope({
-    aad: buildHostedBrowserStorageAad({
-      keyId: recipient.keyId,
-      recipientKind: recipient.kind,
-    }),
-    envelope: {
-      algorithm: "AES-GCM",
-      ciphertext: recipient.ciphertext,
-      iv: recipient.iv,
-      keyId: recipient.keyId,
-      schema: HOSTED_BROWSER_CIPHER_SCHEMA,
+  const recipientKey = requireHostedBrowserRecipientKeyBytes(
+    input.recipientKey,
+    `${input.kind} recipient key`,
+  );
+  const cipherEnvelope: HostedBrowserCipherEnvelope = {
+    algorithm: "AES-GCM" as const,
+    ciphertext: recipient.ciphertext,
+    iv: recipient.iv,
+    keyId: recipient.keyId,
+    schema: HOSTED_BROWSER_CIPHER_SCHEMA,
+    scope: "root-key-recipient" as const,
+  };
+
+  try {
+    return await decryptHostedBrowserCipherEnvelope({
+      aad: buildHostedBrowserStorageAad(buildHostedWrappedRootKeyRecipientAadFields({
+        keyId: recipient.keyId,
+        kind: recipient.kind,
+        rootKeyId: input.envelope.rootKeyId,
+        userId: input.envelope.userId,
+      })),
+      envelope: cipherEnvelope,
+      rootKey: recipientKey,
       scope: "root-key-recipient",
-    },
-    rootKey: requireHostedBrowserRecipientKeyBytes(
-      input.recipientKey,
-      `${input.kind} recipient key`,
-    ),
-    scope: "root-key-recipient",
-  });
+    });
+  } catch {
+    return decryptHostedBrowserCipherEnvelope({
+      aad: buildHostedBrowserStorageAad(buildLegacyHostedWrappedRootKeyRecipientAadFields({
+        keyId: recipient.keyId,
+        kind: recipient.kind,
+      })),
+      envelope: cipherEnvelope,
+      rootKey: recipientKey,
+      scope: "root-key-recipient",
+    });
+  }
 }
 
 export async function deriveHostedUserDomainKeyForBrowser(
