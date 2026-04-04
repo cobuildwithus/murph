@@ -74,6 +74,30 @@ export function findHostedWrappedRootKeyRecipient(
   return envelope.recipients.find((recipient) => recipient.kind === kind) ?? null;
 }
 
+export function buildHostedWrappedRootKeyRecipientAadFields(input: {
+  keyId: string;
+  kind: HostedUserRootKeyRecipientKind;
+  rootKeyId: string;
+  userId: string;
+}): Readonly<Record<"keyId" | "recipientKind" | "rootKeyId" | "userId", string>> {
+  return {
+    keyId: input.keyId,
+    recipientKind: input.kind,
+    rootKeyId: input.rootKeyId,
+    userId: input.userId,
+  };
+}
+
+export function buildLegacyHostedWrappedRootKeyRecipientAadFields(input: {
+  keyId: string;
+  kind: HostedUserRootKeyRecipientKind;
+}): Readonly<Record<"keyId" | "recipientKind", string>> {
+  return {
+    keyId: input.keyId,
+    recipientKind: input.kind,
+  };
+}
+
 export function isHostedUserManagedRootKeyRecipientKind(
   value: string,
 ): value is HostedUserManagedRootKeyRecipientKind {
