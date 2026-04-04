@@ -44,21 +44,33 @@ export async function readHostedEmailRawMessage(input: {
   rawMessageKey: string;
   userId: string;
 }): Promise<Uint8Array | null> {
-  const key = await hostedEmailRawMessageObjectKey(input.key, input.userId, input.rawMessageKey);
-  return readEncryptedR2Payload({
-    aad: buildHostedStorageAad({
+  for (const key of await hostedEmailRawMessageObjectKeys(
+    input.key,
+    input.keysById,
+    input.userId,
+    input.rawMessageKey,
+  )) {
+    const payload = await readEncryptedR2Payload({
+      aad: buildHostedStorageAad({
+        key,
+        purpose: "email-raw",
+        rawMessageKey: input.rawMessageKey,
+        userId: input.userId,
+      }),
+      bucket: input.bucket,
+      cryptoKey: input.key,
+      cryptoKeysById: input.keysById,
+      expectedKeyId: input.keyId,
       key,
-      purpose: "email-raw",
-      rawMessageKey: input.rawMessageKey,
-      userId: input.userId,
-    }),
-    bucket: input.bucket,
-    cryptoKey: input.key,
-    cryptoKeysById: input.keysById,
-    expectedKeyId: input.keyId,
-    key,
-    scope: "email-raw",
-  });
+      scope: "email-raw",
+    });
+
+    if (payload) {
+      return payload;
+    }
+  }
+
+  return null;
 }
 
 export async function writeHostedEmailRawMessage(input: {
@@ -85,6 +97,27 @@ export async function writeHostedEmailRawMessage(input: {
     scope: "email-raw",
   });
   return rawMessageKey;
+}
+
+export async function deleteHostedEmailRawMessage(input: {
+  bucket: R2BucketLike;
+  key: Uint8Array;
+  keysById?: Readonly<Record<string, Uint8Array>>;
+  rawMessageKey: string;
+  userId: string;
+}): Promise<void> {
+  if (!input.bucket.delete) {
+    return;
+  }
+
+  for (const key of await hostedEmailRawMessageObjectKeys(
+    input.key,
+    input.keysById,
+    input.userId,
+    input.rawMessageKey,
+  )) {
+    await input.bucket.delete(key);
+  }
 }
 
 export async function readHostedEmailMessageBytes(
@@ -157,6 +190,40 @@ async function hostedEmailRawMessageObjectKey(
   });
 
   return `transient/hosted-email/messages/${userSegment}/${messageSegment}.eml`;
+}
+
+async function hostedEmailRawMessageObjectKeys(
+  rootKey: Uint8Array,
+  keysById: Readonly<Record<string, Uint8Array>> | undefined,
+  userId: string,
+  rawMessageKey: string,
+): Promise<string[]> {
+  return Promise.all(
+    listHostedStorageRootKeys(rootKey, keysById).map((candidateRootKey) =>
+      hostedEmailRawMessageObjectKey(candidateRootKey, userId, rawMessageKey)
+    ),
+  ).then((keys) => [...new Set(keys)]);
+}
+
+function listHostedStorageRootKeys(
+  rootKey: Uint8Array,
+  keysById: Readonly<Record<string, Uint8Array>> | undefined,
+): Uint8Array[] {
+  const seen = new Set<string>();
+  const unique: Uint8Array[] = [];
+
+  for (const key of [rootKey, ...Object.values(keysById ?? {})]) {
+    const signature = [...key].join(",");
+
+    if (seen.has(signature)) {
+      continue;
+    }
+
+    seen.add(signature);
+    unique.push(key);
+  }
+
+  return unique;
 }
 
 function randomOpaqueToken(bytes: number): string {

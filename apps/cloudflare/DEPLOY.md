@@ -43,8 +43,11 @@ Before your first deploy, you still need to do four one-time setup tasks in Clou
 1. Create a Workers Paid account.
 2. Create the R2 buckets that will hold the encrypted hosted bundles.
 3. Apply the repo's transient-object lifecycle rules to those buckets:
-   - `transient/execution-journal/` expires after 30 days
-   - `transient/side-effects/` expires after 30 days
+   - `transient/execution-journal/` expires after 7 days
+   - `transient/dispatch-payloads/` expires after 7 days
+   - `transient/side-effects/` expires after 7 days
+   - `transient/hosted-email/threads/` expires after 7 days
+   - `transient/hosted-email/messages/` expires after 7 days
 4. Decide the public Worker URL you want to use:
    - a `*.workers.dev` URL, or
    - a custom domain.

@@ -34,6 +34,7 @@ model DeviceConnection {
   updatedAt            DateTime               @updatedAt @map("updated_at")
   secret               DeviceConnectionSecret?
   signals              DeviceSyncSignal[]
+  tokenAudits          DeviceTokenAudit[]
 
   @@unique([provider, externalAccountId])
   @@index([userId, provider])
@@ -51,6 +52,27 @@ model DeviceConnectionSecret {
   connection            DeviceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
   @@map("device_connection_secret")
+}
+
+
+model DeviceTokenAudit {
+  id           Int              @id @default(autoincrement())
+  userId       String           @map("user_id")
+  connectionId String           @map("connection_id")
+  provider     String
+  action       String
+  channel      String
+  sessionId    String?          @map("session_id")
+  tokenVersion Int              @map("token_version")
+  keyVersion   String           @map("key_version")
+  metadataJson Json?            @map("metadata_json")
+  createdAt    DateTime         @default(now()) @map("created_at")
+  connection   DeviceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([userId, id])
+  @@index([connectionId, createdAt])
+  @@index([createdAt])
+  @@map("device_token_audit")
 }
 
 model DeviceOauthSession {

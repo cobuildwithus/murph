@@ -28,6 +28,7 @@ import {
 } from "@murphai/hosted-execution";
 
 import type { R2BucketLike } from "./bundle-store.js";
+import { createHostedDispatchPayloadStore } from "./dispatch-payload-store.js";
 import { HostedGatewayProjectionStore } from "./gateway-store.js";
 import type { HostedExecutionEnvironment } from "./env.js";
 import {
@@ -37,6 +38,7 @@ import {
   type HostedExecutionCommitPayload,
   type HostedExecutionFinalizePayload,
 } from "./execution-journal.js";
+import { deleteHostedEmailRawMessage } from "./hosted-email.js";
 import {
   HostedExecutionConfigurationError,
   type HostedExecutionContainerNamespaceLike,
@@ -66,6 +68,12 @@ import {
 
 export type { DurableObjectStateLike } from "./user-runner/types.js";
 
+type HostedExecutionDispatchProgressRecord =
+  Pick<HostedExecutionDispatchRequest, "eventId">
+  & {
+    event: Pick<HostedExecutionDispatchRequest["event"], "userId">;
+  };
+
 export class HostedUserRunner {
   private readonly bundleSync: RunnerBundleSync;
   private readonly commitRecovery: ReturnType<typeof createRunnerCommitRecovery>;
@@ -88,7 +96,15 @@ export class HostedUserRunner {
     ).runnerContainerNamespace ?? null,
   ) {
     this.runnerContainerNamespace = runnerContainerNamespace;
-    this.queueStore = new RunnerQueueStore(state);
+    this.queueStore = new RunnerQueueStore(
+      state,
+      createHostedDispatchPayloadStore({
+        bucket,
+        key: env.bundleEncryptionKey,
+        keyId: env.bundleEncryptionKeyId,
+        keysById: env.bundleEncryptionKeysById,
+      }),
+    );
     this.scheduler = new RunnerScheduler(this.queueStore, state, env.defaultAlarmDelayMs);
     this.gatewayStore = new HostedGatewayProjectionStore(state, {
       key: env.bundleEncryptionKey,
@@ -220,7 +236,7 @@ export class HostedUserRunner {
         return toUserStatus(
           presence.pending
             ? await this.applyCommittedDispatchAndCleanup(input.event.userId, committed, input)
-            : await this.rememberCommittedEventAndCleanup(input.event.userId, input.eventId),
+            : await this.rememberCommittedEventAndCleanup(input.event.userId, input.eventId, input),
         );
       }
 
@@ -449,6 +465,7 @@ export class HostedUserRunner {
               record.userId,
               committed,
               nextPending.dispatch,
+              nextPending.dispatch,
               run,
             );
             continue;
@@ -507,6 +524,9 @@ export class HostedUserRunner {
           phase: failure.poisoned ? "poisoned" : "retry.scheduled",
           run,
         });
+        if (failure.poisoned) {
+          await this.deleteTransientDispatchDataBestEffort(nextPending.dispatch);
+        }
         continue;
       }
     }
@@ -592,11 +612,8 @@ export class HostedUserRunner {
   private async applyCommittedDispatchAndCleanup(
     userId: string,
     committed: HostedExecutionCommittedResult,
-    dispatch: Pick<HostedExecutionDispatchRequest, "eventId"> & {
-      event: {
-        userId: string;
-      };
-    },
+    dispatch: HostedExecutionDispatchProgressRecord,
+    cleanupDispatch: HostedExecutionDispatchRequest | null = null,
     run: HostedExecutionRunContext | null = null,
   ): Promise<RunnerStateRecord> {
     await this.gatewayStore.applySnapshot(committed.gatewayProjectionSnapshot ?? null);
@@ -612,6 +629,9 @@ export class HostedUserRunner {
       }),
     });
     await this.deleteCommittedDispatchBestEffort(userId, committed.eventId);
+    if (cleanupDispatch) {
+      await this.deleteTransientDispatchDataBestEffort(cleanupDispatch);
+    }
     return record;
   }
 
@@ -655,11 +675,7 @@ export class HostedUserRunner {
 
   private async advanceRunPhase(input: {
     clearError?: boolean;
-    dispatch: Pick<HostedExecutionDispatchRequest, "eventId"> & {
-      event: {
-        userId: string;
-      };
-    };
+    dispatch: HostedExecutionDispatchProgressRecord;
     error?: unknown;
     level?: HostedExecutionRunLevel;
     message: string;
@@ -695,9 +711,13 @@ export class HostedUserRunner {
   private async rememberCommittedEventAndCleanup(
     userId: string,
     eventId: string,
+    dispatch: HostedExecutionDispatchRequest | null = null,
   ): Promise<RunnerStateRecord> {
     const record = await this.queueStore.rememberCommittedEvent(eventId);
     await this.deleteCommittedDispatchBestEffort(userId, eventId);
+    if (dispatch) {
+      await this.deleteTransientDispatchDataBestEffort(dispatch);
+    }
     return record;
   }
 
@@ -706,6 +726,26 @@ export class HostedUserRunner {
       await this.commitRecovery.deleteCommittedDispatch(userId, eventId);
     } catch {
       // Leaving the transient journal behind is preferable to failing a successful hosted run.
+    }
+  }
+
+  private async deleteTransientDispatchDataBestEffort(
+    dispatch: Pick<HostedExecutionDispatchRequest, "event">,
+  ): Promise<void> {
+    if (dispatch.event.kind !== "email.message.received") {
+      return;
+    }
+
+    try {
+      await deleteHostedEmailRawMessage({
+        bucket: this.bucket,
+        key: this.env.bundleEncryptionKey,
+        keysById: this.env.bundleEncryptionKeysById,
+        rawMessageKey: dispatch.event.rawMessageKey,
+        userId: dispatch.event.userId,
+      });
+    } catch {
+      // Best-effort cleanup only; lifecycle TTL still backstops raw message deletion.
     }
   }
 

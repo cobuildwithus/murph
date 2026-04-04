@@ -329,5 +329,5 @@ function createBucketStore() {
 }
 
 async function artifactObjectKeyForTest(_rootKey: Uint8Array, userId: string, sha256: string): Promise<string> {
-  return artifactObjectKey(userId, sha256);
+  return artifactObjectKey(_rootKey, userId, sha256);
 }

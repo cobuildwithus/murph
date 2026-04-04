@@ -57,6 +57,19 @@ describe("device-sync hosted runtime helpers", () => {
         encrypt: (value: string) => value,
         keyVersion: "v1",
       },
+      createTokenAudit: vi.fn().mockResolvedValue({
+        action: "token_exported",
+        channel: "internal_runtime_snapshot",
+        connectionId: "dsc_123",
+        createdAt: "2026-03-26T12:00:00.000Z",
+        id: 1,
+        keyVersion: "v1",
+        metadata: {},
+        provider: "oura",
+        sessionId: null,
+        tokenVersion: 3,
+        userId: "user-123",
+      }),
       prisma: {
         deviceConnection: {
           findMany: vi.fn().mockResolvedValue([
@@ -145,6 +158,15 @@ describe("device-sync hosted runtime helpers", () => {
         tokenBundle: null,
       },
     ]);
+    expect(store.createTokenAudit).toHaveBeenCalledTimes(1);
+    expect(store.createTokenAudit).toHaveBeenCalledWith(expect.objectContaining({
+      action: "token_exported",
+      channel: "internal_runtime_snapshot",
+      connectionId: "dsc_123",
+      provider: "oura",
+      tokenVersion: 3,
+      userId: "user-123",
+    }));
   });
 
   it("binds device-sync runtime requests to the trusted hosted execution user when present", async () => {

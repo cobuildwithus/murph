@@ -20,6 +20,7 @@ import {
   createHostedUserEnvStore,
 } from "../src/bundle-store.js";
 import { HostedBundleGarbageCollector } from "../src/bundle-gc.js";
+import { deriveHostedStorageOpaqueId } from "../src/crypto-context.js";
 import { encryptHostedBundle } from "../src/crypto.js";
 import {
   createHostedExecutionJournalStore,
@@ -221,7 +222,11 @@ describe("HostedUserRunner", () => {
       expect(bucket.keys()).toContain(previousAgentRef.key);
       expect(bucket.keys()).toContain(previousVaultRef.key);
       expect(bucket.keys()).not.toContain(
-        `users/member_gc/artifacts/${previousArtifact!.ref.sha256}.artifact.bin`,
+        await artifactObjectKey(
+          environment.bundleEncryptionKey,
+          "member_gc",
+          previousArtifact!.ref.sha256,
+        ),
       );
       expect(bucket.keys()).toContain(nextAgentRef.key);
       expect(bucket.keys()).toContain(nextVaultRef.key);
@@ -302,7 +307,11 @@ describe("HostedUserRunner", () => {
       });
 
       expect(bucket.keys()).toContain(
-        artifactObjectKey("member_gc_same_ref", artifact!.ref.sha256),
+        await artifactObjectKey(
+          environment.bundleEncryptionKey,
+          "member_gc_same_ref",
+          artifact!.ref.sha256,
+        ),
       );
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
@@ -472,7 +481,11 @@ describe("HostedUserRunner", () => {
       expect(status.retryingEventId).toBeNull();
       expect(status.lastError).toBeNull();
       expect(bucket.keys()).not.toContain(
-        artifactObjectKey("member_recovered_gc", previousArtifact!.ref.sha256),
+        await artifactObjectKey(
+          environment.bundleEncryptionKey,
+          "member_recovered_gc",
+          previousArtifact!.ref.sha256,
+        ),
       );
       expect(bucket.keys()).toContain(previousVaultRef.key);
       expect(bucket.keys()).toContain(previousAgentRef.key);
@@ -1582,18 +1595,34 @@ describe("HostedUserRunner", () => {
       expect(status.bundleRefs.agentState?.size).toBe("agent-state-final".length);
       expect(status.bundleRefs.vault?.size).toBe(finalVaultBundle!.byteLength);
       expect(bucket.keys()).toContain(
-        `users/member_cleanup_failure/artifacts/${previousArtifact!.ref.sha256}.artifact.bin`,
+        await artifactObjectKey(
+          environment.bundleEncryptionKey,
+          "member_cleanup_failure",
+          previousArtifact!.ref.sha256,
+        ),
       );
       expect(bucket.keys()).toContain(
-        `users/member_cleanup_failure/artifacts/${committedArtifact!.ref.sha256}.artifact.bin`,
+        await artifactObjectKey(
+          environment.bundleEncryptionKey,
+          "member_cleanup_failure",
+          committedArtifact!.ref.sha256,
+        ),
       );
       expect(
         deleteArtifactSpy.mock.calls
           .map(([key]) => String(key))
-          .filter((key) => key.includes("/artifacts/")),
+          .filter((key) => key.includes("users/artifacts/")),
       ).toEqual(expect.arrayContaining([
-        `users/member_cleanup_failure/artifacts/${previousArtifact!.ref.sha256}.artifact.bin`,
-        `users/member_cleanup_failure/artifacts/${committedArtifact!.ref.sha256}.artifact.bin`,
+        await artifactObjectKey(
+          environment.bundleEncryptionKey,
+          "member_cleanup_failure",
+          previousArtifact!.ref.sha256,
+        ),
+        await artifactObjectKey(
+          environment.bundleEncryptionKey,
+          "member_cleanup_failure",
+          committedArtifact!.ref.sha256,
+        ),
       ]));
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
@@ -2654,7 +2683,9 @@ describe("HostedUserRunner", () => {
       "OPENAI_API_KEY",
       "XAI_API_KEY",
     ]);
-    expect(bucket.keys()).toEqual(["users/member_123/user-env.json"]);
+    expect(bucket.keys()).toEqual([
+      await userEnvObjectKeyForTest(environment.bundleEncryptionKey, "member_123"),
+    ]);
     await expect(runner.getUserEnvStatus("member_123")).resolves.toEqual({
       configuredUserEnvKeys: ["OPENAI_API_KEY", "XAI_API_KEY"],
       userId: "member_123",
@@ -2796,7 +2827,9 @@ describe("HostedUserRunner", () => {
     });
     expect(bucket.putCount()).toBe(writesAfterBootstrap + 1);
     expectHostedBundleKeys(bucket.keys(), ["agent-state", "vault"]);
-    expect(bucket.keys()).toContain("users/member_123/user-env.json");
+    expect(bucket.keys()).toContain(
+      await userEnvObjectKeyForTest(environment.bundleEncryptionKey, "member_123"),
+    );
 
     const cleared = await runner.clearUserEnv();
 
@@ -3169,6 +3202,17 @@ function expectHostedBundleKeys(
       new RegExp(`^bundles/${kind}/[0-9a-f]+\\.bundle\\.json$`, "u"),
     ));
   }
+}
+
+async function userEnvObjectKeyForTest(rootKey: Uint8Array, userId: string): Promise<string> {
+  const userSegment = await deriveHostedStorageOpaqueId({
+    length: 24,
+    rootKey,
+    scope: "user-env-path",
+    value: `user:${userId}`,
+  });
+
+  return `users/env/${userSegment}.json`;
 }
 
 function createGatewayProjectionSnapshot(input: {

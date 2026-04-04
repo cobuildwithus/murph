@@ -26,6 +26,7 @@ import {
 } from "./bundle-store.js";
 import {
   buildHostedStorageAad,
+  deriveHostedStorageOpaqueId,
 } from "./crypto-context.js";
 import { readEncryptedR2Json, writeEncryptedR2Json } from "./crypto.js";
 
@@ -70,28 +71,41 @@ export function createHostedExecutionJournalStore(input: {
 }): HostedExecutionJournalStore {
   return {
     async deleteCommittedResult(userId, eventId) {
-      await input.bucket.delete?.(await committedResultObjectKey(input.key, userId, eventId));
+      if (!input.bucket.delete) {
+        return;
+      }
+
+      for (const key of await committedResultObjectKeys(input.key, input.keysById, userId, eventId)) {
+        await input.bucket.delete(key);
+      }
     },
 
     async readCommittedResult(userId, eventId) {
-      const key = await committedResultObjectKey(input.key, userId, eventId);
-      return readEncryptedR2Json({
-        aad: buildHostedStorageAad({
-          eventId,
+      for (const key of await committedResultObjectKeys(input.key, input.keysById, userId, eventId)) {
+        const value = await readEncryptedR2Json({
+          aad: buildHostedStorageAad({
+            eventId,
+            key,
+            purpose: "execution-journal",
+            userId,
+          }),
+          bucket: input.bucket,
+          cryptoKey: input.key,
+          cryptoKeysById: input.keysById,
+          expectedKeyId: input.keyId,
           key,
-          purpose: "execution-journal",
-          userId,
-        }),
-        bucket: input.bucket,
-        cryptoKey: input.key,
-        cryptoKeysById: input.keysById,
-        expectedKeyId: input.keyId,
-        key,
-        parse(value) {
-          return normalizeHostedExecutionCommittedResult(value as HostedExecutionCommittedResult);
-        },
-        scope: "execution-journal",
-      });
+          parse(value) {
+            return normalizeHostedExecutionCommittedResult(value as HostedExecutionCommittedResult);
+          },
+          scope: "execution-journal",
+        });
+
+        if (value) {
+          return value;
+        }
+      }
+
+      return null;
     },
 
     async writeCommittedResult(userId, eventId, value) {
@@ -229,8 +243,55 @@ export async function persistHostedExecutionFinalBundles(input: {
   return finalizedResult;
 }
 
-async function committedResultObjectKey(_rootKey: Uint8Array, userId: string, eventId: string): Promise<string> {
-  return `transient/execution-journal/${encodeURIComponent(userId)}/${encodeURIComponent(eventId)}.json`;
+async function committedResultObjectKey(rootKey: Uint8Array, userId: string, eventId: string): Promise<string> {
+  const userSegment = await deriveHostedStorageOpaqueId({
+    length: 24,
+    rootKey,
+    scope: "execution-journal-path",
+    value: `user:${userId}`,
+  });
+  const eventSegment = await deriveHostedStorageOpaqueId({
+    length: 40,
+    rootKey,
+    scope: "execution-journal-path",
+    value: `event:${userId}:${eventId}`,
+  });
+
+  return `transient/execution-journal/${userSegment}/${eventSegment}.json`;
+}
+
+async function committedResultObjectKeys(
+  rootKey: Uint8Array,
+  keysById: Readonly<Record<string, Uint8Array>> | undefined,
+  userId: string,
+  eventId: string,
+): Promise<string[]> {
+  return Promise.all(
+    listHostedStorageRootKeys(rootKey, keysById).map((candidateRootKey) =>
+      committedResultObjectKey(candidateRootKey, userId, eventId)
+    ),
+  ).then((keys) => [...new Set(keys)]);
+}
+
+function listHostedStorageRootKeys(
+  rootKey: Uint8Array,
+  keysById: Readonly<Record<string, Uint8Array>> | undefined,
+): Uint8Array[] {
+  const seen = new Set<string>();
+  const unique: Uint8Array[] = [];
+
+  for (const key of [rootKey, ...Object.values(keysById ?? {})]) {
+    const signature = [...key].join(",");
+
+    if (seen.has(signature)) {
+      continue;
+    }
+
+    seen.add(signature);
+    unique.push(key);
+  }
+
+  return unique;
 }
 
 function normalizeHostedExecutionCommittedResult(

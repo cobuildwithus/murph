@@ -8,6 +8,7 @@ import {
 import type { R2BucketLike } from "./bundle-store.ts";
 import {
   buildHostedStorageAad,
+  deriveHostedStorageOpaqueId,
 } from "./crypto-context.js";
 import {
   readEncryptedR2Json,
@@ -48,8 +49,13 @@ export function createHostedExecutionSideEffectJournalStore(input: {
 }): HostedExecutionSideEffectJournalStore {
   return {
     async deletePrepared(query) {
-      const key = await sideEffectRecordKey(input.key, query.userId, query.effectId);
-      const existing = await readRecordAtKey(input, key, query.userId, query.effectId);
+      const keys = await sideEffectRecordKeys(
+        input.key,
+        input.keysById,
+        query.userId,
+        query.effectId,
+      );
+      const existing = await readRecordAtKeys(input, keys, query.userId, query.effectId);
 
       if (!existing) {
         return false;
@@ -64,14 +70,16 @@ export function createHostedExecutionSideEffectJournalStore(input: {
         throw new Error("Hosted side-effect journal cleanup requires R2 delete support.");
       }
 
-      await input.bucket.delete(key);
+      for (const key of keys) {
+        await input.bucket.delete(key);
+      }
       return true;
     },
 
     async read(query) {
-      const existing = await readRecordAtKey(
+      const existing = await readRecordAtKeys(
         input,
-        await sideEffectRecordKey(input.key, query.userId, query.effectId),
+        await sideEffectRecordKeys(input.key, input.keysById, query.userId, query.effectId),
         query.userId,
         query.effectId,
       );
@@ -88,7 +96,12 @@ export function createHostedExecutionSideEffectJournalStore(input: {
       const record = parseHostedExecutionSideEffectRecord(writeInput.record);
       assertSideEffectRecordIsSelfConsistent(record);
       const key = await sideEffectRecordKey(input.key, writeInput.userId, record.effectId);
-      const existing = await readRecordAtKey(input, key, writeInput.userId, record.effectId);
+      const existing = await readRecordAtKeys(
+        input,
+        await sideEffectRecordKeys(input.key, input.keysById, writeInput.userId, record.effectId),
+        writeInput.userId,
+        record.effectId,
+      );
       const durableRecord = mergeHostedExecutionSideEffectRecord(existing, record);
 
       if (durableRecord === existing) {
@@ -137,6 +150,28 @@ async function readRecordAtKey(
   return parseHostedExecutionSideEffectRecord(value);
 }
 
+async function readRecordAtKeys(
+  input: {
+    bucket: R2BucketLike;
+    key: Uint8Array;
+    keyId: string;
+    keysById?: Readonly<Record<string, Uint8Array>>;
+  },
+  keys: string[],
+  userId: string,
+  effectId: string,
+): Promise<HostedExecutionSideEffectRecord | null> {
+  for (const key of keys) {
+    const value = await readRecordAtKey(input, key, userId, effectId);
+
+    if (value) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
 async function writeRecordAtKey(
   input: {
     bucket: R2BucketLike;
@@ -165,8 +200,55 @@ async function writeRecordAtKey(
   });
 }
 
-async function sideEffectRecordKey(_rootKey: Uint8Array, userId: string, effectId: string): Promise<string> {
-  return `transient/side-effects/${encodeURIComponent(userId)}/${encodeURIComponent(effectId)}.json`;
+async function sideEffectRecordKey(rootKey: Uint8Array, userId: string, effectId: string): Promise<string> {
+  const userSegment = await deriveHostedStorageOpaqueId({
+    length: 24,
+    rootKey,
+    scope: "side-effect-path",
+    value: `user:${userId}`,
+  });
+  const effectSegment = await deriveHostedStorageOpaqueId({
+    length: 40,
+    rootKey,
+    scope: "side-effect-path",
+    value: `effect:${userId}:${effectId}`,
+  });
+
+  return `transient/side-effects/${userSegment}/${effectSegment}.json`;
+}
+
+async function sideEffectRecordKeys(
+  rootKey: Uint8Array,
+  keysById: Readonly<Record<string, Uint8Array>> | undefined,
+  userId: string,
+  effectId: string,
+): Promise<string[]> {
+  return Promise.all(
+    listHostedStorageRootKeys(rootKey, keysById).map((candidateRootKey) =>
+      sideEffectRecordKey(candidateRootKey, userId, effectId)
+    ),
+  ).then((keys) => [...new Set(keys)]);
+}
+
+function listHostedStorageRootKeys(
+  rootKey: Uint8Array,
+  keysById: Readonly<Record<string, Uint8Array>> | undefined,
+): Uint8Array[] {
+  const seen = new Set<string>();
+  const unique: Uint8Array[] = [];
+
+  for (const key of [rootKey, ...Object.values(keysById ?? {})]) {
+    const signature = [...key].join(",");
+
+    if (seen.has(signature)) {
+      continue;
+    }
+
+    seen.add(signature);
+    unique.push(key);
+  }
+
+  return unique;
 }
 
 function assertSideEffectRecordIsSelfConsistent(

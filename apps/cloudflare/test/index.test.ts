@@ -5,6 +5,8 @@ import { afterEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 import { ContainerProxy as PackageContainerProxy } from "@cloudflare/containers";
 import { createHostedExecutionSignature } from "../src/auth.ts";
+import { artifactObjectKey } from "../src/bundle-store.ts";
+import { deriveHostedStorageOpaqueId } from "../src/crypto-context.ts";
 import {
   createHostedVerifiedEmailUserEnv,
   parseHostedEmailThreadTarget,
@@ -249,11 +251,11 @@ describe("cloudflare worker routes", () => {
       },
       ok: true,
     });
-    expect(harness.bucket.keys()).toEqual([
-      "bundles/agent-state/ad36dc9bda6b1f6ed90262c98b5884c0284212b608662e5d6d2398c4c7915feb.bundle.json",
-      "bundles/vault/e6f0a1fbb43c89196dcfcbef85908f19ab4c5f7cc4f4c452284697757683d7ef.bundle.json",
-      "transient/execution-journal/member_123/evt_commit.json",
-    ]);
+    expectHostedBundleKeys(harness.bucket.keys(), ["agent-state", "vault"]);
+    expect(harness.bucket.keys()).toContainEqual(expect.stringMatching(
+      /^transient\/execution-journal\/[0-9a-f]+\/[0-9a-f]+\.json$/u,
+    ));
+    expect(harness.bucket.keys()).toHaveLength(3);
     const journalStore = createHostedExecutionJournalStore({
       bucket: harness.bucket.api,
       key: Buffer.alloc(32, 9),
@@ -295,9 +297,11 @@ describe("cloudflare worker routes", () => {
 
     expect(readResponse.status).toBe(200);
     expect(Buffer.from(await readResponse.arrayBuffer())).toEqual(artifactBytes);
-    expect(harness.bucket.keys()).toEqual([
-      "users/member_123/artifacts/fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b.artifact.bin",
-    ]);
+    await expect(artifactObjectKey(
+      Buffer.alloc(32, 9),
+      "member_123",
+      "fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b",
+    )).resolves.toEqual(harness.bucket.keys()[0]);
   });
 
   it("rejects artifact writes when the request hash does not match the payload", async () => {
@@ -346,9 +350,9 @@ describe("cloudflare worker routes", () => {
     );
 
     expect(readResponse.status).toBe(404);
-    expect(harness.bucket.keys()).toEqual([
-      `users/member_alpha/artifacts/${artifactSha256}.artifact.bin`,
-    ]);
+    await expect(artifactObjectKey(Buffer.alloc(32, 9), "member_alpha", artifactSha256)).resolves.toEqual(
+      harness.bucket.keys()[0],
+    );
   });
 
   it("persists finalized runner bundles through the outbound commit.worker handler", async () => {
@@ -691,7 +695,7 @@ describe("cloudflare worker routes", () => {
     await writeEncryptedR2Json({
       bucket: env.BUNDLES,
       cryptoKey: previousKey,
-      key: sideEffectRecordKey("member_123", record.effectId),
+      key: await sideEffectRecordKey("member_123", record.effectId),
       keyId: "v1",
       value: record,
     });
@@ -2285,8 +2289,33 @@ function createSentSideEffectRecord(input: {
   };
 }
 
-function sideEffectRecordKey(userId: string, effectId: string): string {
-  return `transient/side-effects/${encodeURIComponent(userId)}/${encodeURIComponent(effectId)}.json`;
+async function sideEffectRecordKey(userId: string, effectId: string): Promise<string> {
+  const rootKey = Buffer.alloc(32, 9);
+  const userSegment = await deriveHostedStorageOpaqueId({
+    length: 24,
+    rootKey,
+    scope: "side-effect-path",
+    value: `user:${userId}`,
+  });
+  const effectSegment = await deriveHostedStorageOpaqueId({
+    length: 40,
+    rootKey,
+    scope: "side-effect-path",
+    value: `effect:${userId}:${effectId}`,
+  });
+
+  return `transient/side-effects/${userSegment}/${effectSegment}.json`;
+}
+
+function expectHostedBundleKeys(
+  keys: string[],
+  kinds: Array<"agent-state" | "vault">,
+): void {
+  for (const kind of kinds) {
+    expect(keys).toContainEqual(expect.stringMatching(
+      new RegExp(`^bundles/${kind}/[0-9a-f]+\\.bundle\\.json$`, "u"),
+    ));
+  }
 }
 
 async function createCommittedRunnerSuccessResponse(input: {

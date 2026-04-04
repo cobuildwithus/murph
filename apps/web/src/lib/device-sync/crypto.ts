@@ -1,13 +1,15 @@
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
 
 import { normalizeNullableString } from "./shared";
 
 const ENCRYPTED_SECRET_PREFIX = "hbds";
 const AES_256_GCM = "aes-256-gcm";
 const GCM_IV_BYTES = 12;
+const HOSTED_SECRET_SCOPE_SALT = Buffer.from("murph.hosted.device-sync.secret.v1", "utf8");
 
 export interface HostedSecretCipherOptions {
   aad?: Buffer | Uint8Array | string;
+  keyScope?: string;
 }
 
 export interface HostedSecretCodec {
@@ -110,6 +112,23 @@ export function buildHostedSecretAad(
   return Buffer.from(JSON.stringify(canonical), "utf8");
 }
 
+
+
+export function buildHostedConnectionTokenCipherOptions(input: {
+  connectionId: string;
+  provider: string;
+  purpose: "device-sync-access-token" | "device-sync-refresh-token";
+}): HostedSecretCipherOptions {
+  return {
+    aad: buildHostedSecretAad({
+      connectionId: input.connectionId,
+      provider: input.provider,
+      purpose: input.purpose,
+    }),
+    keyScope: input.purpose,
+  } satisfies HostedSecretCipherOptions;
+}
+
 export function createHostedSecretCodec(input: {
   key: Buffer;
   keyVersion: string;
@@ -141,7 +160,11 @@ export function createHostedSecretCodec(input: {
     encrypt(value: string, options?: HostedSecretCipherOptions): string {
       const plaintext = Buffer.from(value, "utf8");
       const iv = randomBytes(GCM_IV_BYTES);
-      const cipher = createCipheriv(AES_256_GCM, input.key, iv);
+      const cipher = createCipheriv(
+        AES_256_GCM,
+        deriveHostedSecretScopeKey(input.key, options?.keyScope),
+        iv,
+      );
       const aad = normalizeHostedSecretAad(options?.aad);
 
       if (aad) {
@@ -171,23 +194,36 @@ export function createHostedSecretCodec(input: {
         throw new TypeError(`Encrypted hosted secret payload references unknown key version ${payloadKeyVersion}.`);
       }
 
-      const decipher = createDecipheriv(
-        AES_256_GCM,
-        key,
-        Buffer.from(ivText, "base64url"),
-      );
       const aad = normalizeHostedSecretAad(options?.aad);
+      const keyScope = normalizeHostedSecretKeyScope(options?.keyScope);
 
-      if (aad) {
-        decipher.setAAD(aad);
+      if (!keyScope) {
+        return decryptHostedSecretPayload({
+          aad,
+          ciphertextText,
+          ivText,
+          key,
+          tagText,
+        });
       }
 
-      decipher.setAuthTag(Buffer.from(tagText, "base64url"));
-      const plaintext = Buffer.concat([
-        decipher.update(Buffer.from(ciphertextText, "base64url")),
-        decipher.final(),
-      ]);
-      return plaintext.toString("utf8");
+      try {
+        return decryptHostedSecretPayload({
+          aad,
+          ciphertextText,
+          ivText,
+          key: deriveHostedSecretScopeKey(key, keyScope),
+          tagText,
+        });
+      } catch {
+        return decryptHostedSecretPayload({
+          aad,
+          ciphertextText,
+          ivText,
+          key,
+          tagText,
+        });
+      }
     },
   };
 }
@@ -206,6 +242,53 @@ function normalizeHostedSecretAad(value: Buffer | Uint8Array | string | null | u
   }
 
   return null;
+}
+
+function normalizeHostedSecretKeyScope(value: string | null | undefined): string | null {
+  return normalizeNullableString(value);
+}
+
+function deriveHostedSecretScopeKey(rootKey: Buffer, keyScope: string | null | undefined): Buffer {
+  const normalizedScope = normalizeHostedSecretKeyScope(keyScope);
+
+  if (!normalizedScope) {
+    return rootKey;
+  }
+
+  return Buffer.from(
+    hkdfSync(
+      "sha256",
+      rootKey,
+      HOSTED_SECRET_SCOPE_SALT,
+      Buffer.from(normalizedScope, "utf8"),
+      32,
+    ),
+  );
+}
+
+function decryptHostedSecretPayload(input: {
+  aad: Buffer | null;
+  ciphertextText: string;
+  ivText: string;
+  key: Buffer;
+  tagText: string;
+}): string {
+  const decipher = createDecipheriv(
+    AES_256_GCM,
+    input.key,
+    Buffer.from(input.ivText, "base64url"),
+  );
+
+  if (input.aad) {
+    decipher.setAAD(input.aad);
+  }
+
+  decipher.setAuthTag(Buffer.from(input.tagText, "base64url"));
+  const plaintext = Buffer.concat([
+    decipher.update(Buffer.from(input.ciphertextText, "base64url")),
+    decipher.final(),
+  ]);
+  return plaintext.toString("utf8");
 }
 
 function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
