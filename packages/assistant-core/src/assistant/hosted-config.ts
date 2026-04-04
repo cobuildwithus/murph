@@ -1,9 +1,6 @@
 import { z } from 'zod'
 import {
-  assistantApprovalPolicyValues,
-  assistantChatProviderValues,
   assistantModelTargetSchema,
-  assistantSandboxValues,
   type AssistantChatProvider,
 } from '../assistant-cli-contracts.js'
 import {
@@ -24,25 +21,6 @@ export const hostedAssistantProfileManagedByValues = [
   'member',
   'platform',
 ] as const
-
-const legacyHostedAssistantProfileSchema = z
-  .object({
-    id: z.string().min(1),
-    label: z.string().min(1),
-    managedBy: z.enum(hostedAssistantProfileManagedByValues).default('member'),
-    provider: z.enum(assistantChatProviderValues),
-    codexCommand: z.string().min(1).nullable(),
-    model: z.string().min(1).nullable(),
-    reasoningEffort: z.string().min(1).nullable(),
-    sandbox: z.enum(assistantSandboxValues).nullable(),
-    approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable(),
-    profile: z.string().min(1).nullable(),
-    oss: z.boolean(),
-    baseUrl: z.string().min(1).nullable(),
-    apiKeyEnv: z.string().min(1).nullable(),
-    providerName: z.string().min(1).nullable(),
-  })
-  .strict()
 
 export const hostedAssistantProfileSchema = z
   .object({
@@ -159,10 +137,20 @@ export function normalizeHostedAssistantConfig(
     return null
   }
 
+  if (record.profiles !== undefined && !Array.isArray(record.profiles)) {
+    return null
+  }
+
   const rawProfiles = Array.isArray(record.profiles) ? record.profiles : []
-  const profiles = rawProfiles
-    .map((profile) => normalizeUnknownHostedAssistantProfile(profile))
-    .filter((profile): profile is HostedAssistantProfile => profile !== null)
+  const profiles: HostedAssistantProfile[] = []
+  for (const profile of rawProfiles) {
+    const normalizedProfile = normalizeUnknownHostedAssistantProfile(profile)
+    if (!normalizedProfile) {
+      return null
+    }
+
+    profiles.push(normalizedProfile)
+  }
 
   return createHostedAssistantConfig({
     activeProfileId: base.data.activeProfileId,
@@ -304,37 +292,15 @@ function normalizeUnknownHostedAssistantProfile(
   value: unknown,
 ): HostedAssistantProfile | null {
   const current = hostedAssistantProfileSchema.safeParse(value)
-  if (current.success) {
-    return createHostedAssistantProfile({
-      id: current.data.id,
-      label: current.data.label,
-      managedBy: current.data.managedBy,
-      providerConfig: hostedAssistantProfileToProviderConfigInput(current.data),
-    })
-  }
-
-  const legacy = legacyHostedAssistantProfileSchema.safeParse(value)
-  if (!legacy.success) {
+  if (!current.success) {
     return null
   }
 
   return createHostedAssistantProfile({
-    id: legacy.data.id,
-    label: legacy.data.label,
-    managedBy: legacy.data.managedBy,
-    providerConfig: {
-      provider: legacy.data.provider,
-      approvalPolicy: legacy.data.approvalPolicy,
-      apiKeyEnv: legacy.data.apiKeyEnv,
-      baseUrl: legacy.data.baseUrl,
-      codexCommand: legacy.data.codexCommand,
-      model: legacy.data.model,
-      oss: legacy.data.oss,
-      profile: legacy.data.profile,
-      providerName: legacy.data.providerName,
-      reasoningEffort: legacy.data.reasoningEffort,
-      sandbox: legacy.data.sandbox,
-    },
+    id: current.data.id,
+    label: current.data.label,
+    managedBy: current.data.managedBy,
+    providerConfig: hostedAssistantProfileToProviderConfigInput(current.data),
   })
 }
 
