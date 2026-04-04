@@ -27,7 +27,6 @@ import {
   deliverAssistantReply as dispatchAssistantReply,
   finalizeAssistantTurnFromDeliveryOutcome as finalizeDeliveredAssistantTurn,
 } from './delivery-service.js'
-import { markAssistantFirstContactSeen } from './first-contact.js'
 import {
   persistAssistantTurnAndSession as finalizeAssistantTurnArtifacts,
 } from './turn-finalizer.js'
@@ -189,21 +188,13 @@ export async function sendAssistantMessageLocal(
         })
 
         await finalizeDeliveredAssistantTurn({
+          firstTurnCheckInInjected: providerResult.firstTurnCheckInInjected,
+          firstTurnCheckInStateDocId: sharedPlan.firstTurnCheckInStateDocId,
           outcome: deliveryOutcome,
           response: providerResult.response,
           turnId: userTurn.turnId,
           vault: input.vault,
         })
-        await runAssistantTurnBestEffort(() =>
-          providerResult.firstTurnCheckInInjected === true &&
-          deliveryOutcome.kind === 'sent'
-            ? markAssistantFirstContactSeen({
-                docId: sharedPlan.firstTurnCheckInStateDocId,
-                seenAt: new Date().toISOString(),
-                vault: input.vault,
-              })
-            : Promise.resolve(),
-        )
 
         return normalizeAssistantAskResultForReturn(assistantAskResultSchema.parse({
           vault: redactAssistantDisplayPath(input.vault),
