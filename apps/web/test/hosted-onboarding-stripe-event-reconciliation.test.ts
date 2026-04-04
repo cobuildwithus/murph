@@ -612,6 +612,55 @@ describe("hosted Stripe event reconciliation", () => {
     );
   });
 
+  it("does not re-emit member activation for an already-active member", async () => {
+    const harness = createStripeQueueHarness({
+      invites: [
+        makeInvite(),
+      ],
+      members: [
+        makeMember({
+          billingMode: HostedBillingMode.subscription,
+          billingStatus: HostedBillingStatus.active,
+          status: HostedMemberStatus.active,
+          stripeLatestBillingEventCreatedAt: new Date("2026-03-28T10:00:00.000Z"),
+          stripeLatestBillingEventId: "evt_prior_positive",
+        }),
+      ],
+    });
+
+    await recordAndDrainStripeEvent({
+      event: buildStripeEvent({
+        createdAt: "2026-03-28T10:10:00.000Z",
+        id: "evt_invoice_paid_already_active",
+        object: {
+          amount_paid: 500,
+          currency: "usd",
+          customer: "cus_123",
+          id: "in_already_active_123",
+          parent: {
+            subscription_details: {
+              subscription: "sub_123",
+            },
+          },
+          payment_intent: "pi_already_active_123",
+        },
+        type: "invoice.paid",
+      }),
+      prisma: harness.prisma,
+    });
+
+    expect(harness.members[0]).toMatchObject({
+      billingStatus: HostedBillingStatus.active,
+      status: HostedMemberStatus.active,
+      stripeLatestBillingEventId: "evt_invoice_paid_already_active",
+    });
+    expect(harness.invites[0]).toMatchObject({
+      paidAt: null,
+      status: HostedInviteStatus.pending,
+    });
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+  });
+
   it("activates from invoice.paid without a first-contact target when no Linq signup chat is bound", async () => {
     const harness = createStripeQueueHarness({
       invites: [
@@ -659,7 +708,7 @@ describe("hosted Stripe event reconciliation", () => {
     HostedBillingStatus.unpaid,
     HostedBillingStatus.canceled,
     HostedBillingStatus.paused,
-  ])("reactivates a blocked subscription from invoice.paid after %s", async (startingStatus) => {
+  ])("refreshes blocked subscription billing from invoice.paid after %s without re-emitting activation", async (startingStatus) => {
     const harness = createStripeQueueHarness({
       invites: [
         makeInvite({
@@ -702,15 +751,10 @@ describe("hosted Stripe event reconciliation", () => {
       stripeLatestBillingEventId: `evt_invoice_paid_resume_${startingStatus}`,
     });
     expect(harness.invites[0]).toMatchObject({
-      paidAt: expect.any(Date),
-      status: HostedInviteStatus.paid,
+      paidAt: null,
+      status: HostedInviteStatus.pending,
     });
-    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sourceId: `stripe:evt_invoice_paid_resume_${startingStatus}`,
-        sourceType: "hosted_stripe_event",
-      }),
-    );
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
   it("matches subscription invoices via invoice.subscription and keeps them on the subscription path", async () => {
@@ -806,7 +850,7 @@ describe("hosted Stripe event reconciliation", () => {
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
-  it("uses current Stripe subscription state to resolve same-second billing collisions", async () => {
+  it("uses current Stripe subscription state to resolve same-second billing collisions without re-emitting activation", async () => {
     const harness = createStripeQueueHarness({
       invites: [
         makeInvite(),
@@ -874,10 +918,10 @@ describe("hosted Stripe event reconciliation", () => {
       stripeLatestBillingEventId: "evt_same_second_a_paid",
     });
     expect(harness.invites[0]).toMatchObject({
-      paidAt: expect.any(Date),
-      status: HostedInviteStatus.paid,
+      paidAt: null,
+      status: HostedInviteStatus.pending,
     });
-    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
   it("fails closed on same-second positive collisions when canonical subscription state is unavailable", async () => {
