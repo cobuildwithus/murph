@@ -146,7 +146,7 @@ export type {
   LinqSendMessageResponse,
   LinqTextPart,
   LinqWebhookEvent,
-} from "./connectors/linq/types.ts";
+} from "@murphai/messaging-ingress/linq-webhook";
 export {
   createImessageConnector,
   loadImessageKitDriver,

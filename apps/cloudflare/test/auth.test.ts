@@ -1,6 +1,9 @@
 import { afterEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
-import { createHostedExecutionSignature, verifyHostedExecutionSignature } from "../src/auth.js";
+import {
+  createHostedExecutionSignature,
+  verifyHostedExecutionSignature,
+} from "@murphai/hosted-execution";
 
 const describe = baseDescribe.sequential;
 

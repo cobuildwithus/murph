@@ -15,9 +15,6 @@
       "path": "../assistant-core"
     },
     {
-      "path": "../cli"
-    },
-    {
       "path": "../gateway-core"
     },
     {

@@ -1,9 +1,11 @@
 import {
   normalizeTelegramUpdate,
   type TelegramAttachmentDownloadDriver,
-  type TelegramFile,
-} from "@murphai/inboxd/telegram";
-import type { TelegramUpdateLike } from "@murphai/messaging-ingress/telegram-webhook";
+} from "@murphai/inboxd/connectors/telegram/normalize";
+import type {
+  TelegramFile,
+  TelegramUpdateLike,
+} from "@murphai/messaging-ingress/telegram-webhook";
 import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
 
 import { withHostedInboxPipeline } from "./inbox-pipeline.ts";

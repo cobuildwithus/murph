@@ -8,7 +8,7 @@ import {
   vi,
 } from "vitest";
 
-import { createHostedExecutionSignature } from "../../src/auth.js";
+import { createHostedExecutionSignature } from "@murphai/hosted-execution";
 import { createHostedBundleStore } from "../../src/bundle-store.js";
 import { createHostedExecutionJournalStore } from "../../src/execution-journal.js";
 import { readHostedExecutionEnvironment } from "../../src/env.js";
