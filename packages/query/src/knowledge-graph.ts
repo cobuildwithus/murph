@@ -8,15 +8,16 @@ import {
   asObject,
   compareNullableStrings,
   firstString,
-  firstStringArray,
   type FrontmatterObject,
 } from './health/shared.ts'
 import {
   DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT,
-  humanizeDerivedKnowledgeValue,
-  summarizeDerivedKnowledgeBody,
-  uniqueKnowledgeStrings,
-} from './knowledge-page-model.ts'
+  extractKnowledgeFirstHeading,
+  extractKnowledgeRelatedSlugs,
+  extractKnowledgeSourcePaths,
+  humanizeKnowledgeTag,
+  summarizeKnowledgeBody,
+} from './knowledge-model.ts'
 import { searchDerivedKnowledgeGraph } from './knowledge-search.ts'
 export { searchDerivedKnowledgeGraph } from './knowledge-search.ts'
 
@@ -198,7 +199,7 @@ export function renderDerivedKnowledgeIndex(
   }
 
   for (const pageType of orderedTypes) {
-    lines.push(`## ${humanizeDerivedKnowledgeValue(pageType)}`, '')
+    lines.push(`## ${humanizeKnowledgeTag(pageType)}`, '')
     const nodes = pagesByType.get(pageType) ?? []
 
     for (const node of nodes) {
@@ -259,10 +260,10 @@ function toDerivedKnowledgeNode(
 
   const title =
     firstString(source, ['title']) ??
-    extractFirstHeading(body) ??
-    humanizeDerivedKnowledgeValue(slug)
-  const sourcePaths = uniqueKnowledgeStrings(firstStringArray(source, ['sourcePaths']))
-  const relatedSlugs = uniqueKnowledgeStrings(firstStringArray(source, ['relatedSlugs']))
+    extractKnowledgeFirstHeading(body) ??
+    humanizeKnowledgeTag(slug)
+  const sourcePaths = extractKnowledgeSourcePaths(body)
+  const relatedSlugs = extractKnowledgeRelatedSlugs(body, slug)
 
   return {
     node: {
@@ -277,7 +278,7 @@ function toDerivedKnowledgeNode(
       slug,
       sourcePaths,
       status: firstString(source, ['status']),
-      summary: firstString(source, ['summary']) ?? summarizeDerivedKnowledgeBody(body),
+      summary: firstString(source, ['summary']) ?? summarizeKnowledgeBody(body),
       title,
     },
   }
@@ -290,17 +291,6 @@ function parseFailureToIssue(failure: ParseFailure): DerivedKnowledgeGraphIssue 
     reason: failure.reason,
     relativePath: failure.relativePath,
   }
-}
-
-function extractFirstHeading(body: string): string | null {
-  for (const line of body.split('\n')) {
-    const match = /^#\s+(.+?)\s*$/u.exec(line.trim())
-    if (match?.[1]) {
-      return match[1].trim()
-    }
-  }
-
-  return null
 }
 
 function renderDerivedKnowledgePageLink(

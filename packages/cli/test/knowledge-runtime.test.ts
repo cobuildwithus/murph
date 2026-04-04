@@ -100,6 +100,8 @@ describe('compileKnowledgePage', () => {
     expect(savedPage).toContain('## Sources')
     expect(savedPage).toContain('## Related')
     expect(savedPage).toContain('`research/2026/04/sleep-note.md`')
+    expect(savedPage).not.toContain('sourcePaths:')
+    expect(savedPage).not.toContain('relatedSlugs:')
 
     const savedIndex = await readFile(
       path.join(vaultRoot, 'derived/knowledge/index.md'),
@@ -288,13 +290,15 @@ describe('compileKnowledgePage', () => {
         'pageType: concept',
         'status: active',
         'summary: Magnesium seemed to help recent sleep continuity.',
-        'sourcePaths:',
-        '  - research/2026/04/sleep-note.md',
         '---',
         '',
         '# Sleep quality',
         '',
         'Magnesium looked helpful for fewer wakeups.',
+        '',
+        '## Sources',
+        '',
+        '- `research/2026/04/sleep-note.md`',
         '',
       ].join('\n'),
     )
@@ -323,13 +327,15 @@ describe('compileKnowledgePage', () => {
       'pageType: concept',
       'status: active',
       'summary: Duplicate page.',
-      'sourcePaths:',
-      '  - research/2026/04/sleep-note.md',
       '---',
       '',
       '# Sleep quality',
       '',
       'Duplicate content.',
+      '',
+      '## Sources',
+      '',
+      '- `research/2026/04/sleep-note.md`',
       '',
     ].join('\n')
     await writeVaultFile(vaultRoot, 'research/2026/04/sleep-note.md', '# Note\n')
@@ -357,15 +363,19 @@ describe('compileKnowledgePage', () => {
         'slug: sleep-quality',
         'pageType: concept',
         'status: active',
-        'sourcePaths:',
-        '  - research/2026/04/missing-note.md',
         'relatedSlugs:',
         '  - magnesium',
+        'sourcePaths:',
+        '  - research/2026/04/missing-note.md',
         '---',
         '',
         '# Sleep quality',
         '',
-        'Needs follow-up.',
+        'Needs follow-up on [[magnesium]].',
+        '',
+        '## Sources',
+        '',
+        '- `research/2026/04/missing-note.md`',
         '',
       ].join('\n'),
     )
@@ -396,6 +406,23 @@ describe('compileKnowledgePage', () => {
       vaultRoot,
       'research/2026/04/current-note.md',
       '# Current note\n',
+    )
+    await writeVaultFile(
+      vaultRoot,
+      'derived/knowledge/pages/magnesium.md',
+      [
+        '---',
+        'title: Magnesium',
+        'slug: magnesium',
+        'pageType: concept',
+        'status: active',
+        '---',
+        '',
+        '# Magnesium',
+        '',
+        'Support page.',
+        '',
+      ].join('\n'),
     )
     await writeVaultFile(
       vaultRoot,
@@ -436,7 +463,7 @@ describe('compileKnowledgePage', () => {
           severity: 'error',
         }),
         expect.objectContaining({
-          code: 'sources_section_drift',
+          code: 'source_paths_drift',
           slug: 'sleep-quality',
           severity: 'warning',
         }),
