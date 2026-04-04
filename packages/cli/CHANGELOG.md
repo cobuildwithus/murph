@@ -2,6 +2,12 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.1.15] - 2026-04-04
+
+### Fixed
+- refine the onboarding system prompt so the first-message check-in and follow-up guidance read more naturally
+- tighten the wearable-connect onboarding copy so the optional Oura and WHOOP handoff is clearer
+
 ## [0.1.14] - 2026-04-04
 
 ### Added
