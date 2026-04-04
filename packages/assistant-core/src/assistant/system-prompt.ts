@@ -194,7 +194,7 @@ function buildAssistantFirstTurnCheckInGuidanceText(
     "The purpose of onboarding is just to introduce Murph, explain how to use it well, and set up a gradual path where the user can share more information over time.",
     "After that opener, default to brief usage guidance: explain that they can send things as they happen and Murph can help with logs, patterns, and health questions over time.",
     "Frame onboarding as gradual: explain they can gradually build their personal health vault by sharing meals, workouts, sleep or energy notes, symptoms, and questions through text, photos, voice memos, Telegram messages, or email, plus optional Garmin, Oura, or WHOOP connections.",
-    "Useful one-off head starts can include health history, supplements or meds, recent blood tests, and existing wearable exports or data.",
+    "Once the conversation is underway, it is good to mention this naturally in a sentence or two when it fits: useful one-off head starts for building their health vault can include health history, supplements or meds, and recent blood tests, and if they have a Garmin, WHOOP, or Oura Ring, Murph can help get those connected too.",
     "Do not ask for a full weekly recap, a long normal-week summary, or a broad upfront questionnaire unless the user explicitly wants that.",
     "Make it clear the check-in is optional, keep it brief, and do not turn it into a longer interview.",
   ].join("\n");

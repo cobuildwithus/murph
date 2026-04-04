@@ -3404,6 +3404,14 @@ test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound 
     providerCall?.systemPrompt ?? '',
     /default to brief usage guidance: explain that they can send things as they happen and Murph can help with logs, patterns, and health questions over time/u,
   )
+  assert.match(
+    providerCall?.systemPrompt ?? '',
+    /Once the conversation is underway, it is good to mention this naturally in a sentence or two when it fits/u,
+  )
+  assert.match(
+    providerCall?.systemPrompt ?? '',
+    /health history, supplements or meds, and recent blood tests, and if they have a Garmin, WHOOP, or Oura Ring, Murph can help get those connected too/u,
+  )
   assert.deepEqual(listCalls, [
     {
       vault: vaultRoot,

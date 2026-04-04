@@ -239,6 +239,14 @@ function assertPromptHasFirstTurnCheckInGuidance(
   )
   assert.match(
     text,
+    /Once the conversation is underway, it is good to mention this naturally in a sentence or two when it fits/u,
+  )
+  assert.match(
+    text,
+    /health history, supplements or meds, and recent blood tests, and if they have a Garmin, WHOOP, or Oura Ring, Murph can help get those connected too/u,
+  )
+  assert.match(
+    text,
     /sharing meals, workouts, sleep or energy notes, symptoms, and questions through text, photos, voice memos, Telegram messages, or email/u,
   )
   assert.match(text, /Do not ask for a full weekly recap/u)
@@ -2626,7 +2634,7 @@ test('sendAssistantMessage injects the first-chat check-in only for an opted-in 
   )
   assert.match(
     firstCall?.systemPrompt ?? '',
-    /health history, supplements or meds, recent blood tests/u,
+    /health history, supplements or meds, and recent blood tests, and if they have a Garmin, WHOOP, or Oura Ring, Murph can help get those connected too/u,
   )
   assertPromptDoesNotHaveFirstTurnCheckInGuidance(secondCall?.systemPrompt)
 })
