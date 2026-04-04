@@ -1,6 +1,10 @@
 import { resolveAssistantCliAccessContext } from '../assistant-cli-access.js'
 import { resolveAssistantOperatorAuthority } from './operator-authority.js'
 import { resolveAssistantConversationPolicy } from './conversation-policy.js'
+import {
+  hasAssistantSeenFirstContact,
+  resolveAssistantFirstContactStateDocId,
+} from './first-contact.js'
 import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
@@ -25,10 +29,25 @@ export async function resolveAssistantTurnSharedPlan(
     },
     session: resolved.session,
   })
+  const firstTurnCheckInStateDocId =
+    input.includeFirstTurnCheckIn === true
+      ? resolveAssistantFirstContactStateDocId({
+          audience: conversationPolicy.audience,
+          binding: resolved.session.binding,
+        })
+      : null
+  const firstTurnCheckInEligible =
+    input.includeFirstTurnCheckIn === true &&
+    !(await hasAssistantSeenFirstContact({
+      docId: firstTurnCheckInStateDocId,
+      vault: input.vault,
+    }))
   return {
     allowSensitiveHealthContext: conversationPolicy.allowSensitiveHealthContext,
     cliAccess,
     conversationPolicy,
+    firstTurnCheckInEligible,
+    firstTurnCheckInStateDocId,
     operatorAuthority: resolveAssistantOperatorAuthority(input.operatorAuthority),
     persistUserPromptOnFailure: input.persistUserPromptOnFailure ?? true,
     requestedWorkingDirectory,
