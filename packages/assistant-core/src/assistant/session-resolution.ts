@@ -1,38 +1,29 @@
 import {
-  assistantBackendTargetToProviderConfigInput,
-  createAssistantModelTarget,
   type AssistantModelTarget,
 } from '../assistant-backend.js'
 import type { AssistantOperatorDefaults } from '../operator-config.js'
-import { resolveAssistantBackendTarget } from '../operator-config.js'
-import { VaultCliError } from '../vault-cli-errors.js'
 import {
   compactAssistantProviderConfigInput,
-  mergeAssistantProviderConfigs,
 } from './provider-config.js'
 import { resolveAssistantSession, type ResolveAssistantSessionInput } from './store.js'
 import type {
   AssistantMessageInput,
   AssistantSessionResolutionFields,
 } from './service-contracts.js'
+import { resolveAssistantExecutionPlan } from './execution-plan.js'
 
 export function buildResolveAssistantSessionInput(
   input: AssistantSessionResolutionFields,
   defaults: AssistantOperatorDefaults | null,
   boundaryDefaultTarget: AssistantModelTarget | null = null,
 ): ResolveAssistantSessionInput {
-  const target = resolveAssistantSessionTarget({
+  const executionPlan = resolveAssistantExecutionPlan({
     boundaryDefaultTarget,
     defaults,
-    input,
+    override: compactAssistantProviderConfigInput(input),
   })
-  const providerConfig = mergeAssistantProviderConfigs(
-    assistantBackendTargetToProviderConfigInput(target),
-    compactAssistantProviderConfigInput({
-      provider: target.adapter,
-      ...input,
-    }),
-  )
+  const target = executionPlan.primaryTarget
+  const providerConfig = executionPlan.primaryProviderConfig
   const conversation =
     typeof input.conversation === 'object' && input.conversation !== null
       ? input.conversation
@@ -186,37 +177,9 @@ export function resolveAssistantSessionTarget(input: {
   defaults: AssistantOperatorDefaults | null
   input: AssistantSessionResolutionFields
 }): AssistantModelTarget {
-  const boundaryDefaultTarget = resolveAssistantBoundaryDefaultTarget(
-    input.boundaryDefaultTarget ?? null,
-    input.defaults,
-  )
-  const target = createAssistantModelTarget(
-    mergeAssistantProviderConfigs(
-      boundaryDefaultTarget
-        ? assistantBackendTargetToProviderConfigInput(boundaryDefaultTarget)
-        : null,
-      compactAssistantProviderConfigInput(input.input),
-    ),
-  )
-
-  if (!target) {
-    throw new VaultCliError(
-      'ASSISTANT_TARGET_REQUIRED',
-      'Assistant execution requires an explicit target or a boundary default.',
-    )
-  }
-
-  return target
-}
-
-function resolveAssistantBoundaryDefaultTarget(
-  boundaryDefaultTarget: AssistantModelTarget | null,
-  defaults: AssistantOperatorDefaults | null,
-): AssistantModelTarget | null {
-  const configuredTarget = resolveAssistantBackendTarget(defaults)
-  if (configuredTarget) {
-    return configuredTarget
-  }
-
-  return boundaryDefaultTarget
+  return resolveAssistantExecutionPlan({
+    boundaryDefaultTarget: input.boundaryDefaultTarget ?? null,
+    defaults: input.defaults,
+    override: compactAssistantProviderConfigInput(input.input),
+  }).primaryTarget
 }

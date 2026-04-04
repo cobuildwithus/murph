@@ -41,7 +41,7 @@ const HOSTED_MAX_PARSER_JOBS = 50;
 interface HostedAssistantAutomationReadiness {
   configStatus: "hosted-env" | "invalid" | "missing" | "saved" | "unready";
   configured: boolean;
-  provider: "codex-cli" | "openai-compatible" | null;
+  provider: "openai-compatible" | null;
   shouldRun: boolean;
 }
 
@@ -61,7 +61,7 @@ async function resolveHostedAssistantAutomationReadiness(input: {
 function reportHostedAssistantAutomationSkipped(
   dispatch: HostedExecutionDispatchRequest,
   configStatus: HostedAssistantAutomationReadiness["configStatus"],
-  provider: "codex-cli" | "openai-compatible" | null,
+  provider: "openai-compatible" | null,
 ): void {
   emitHostedExecutionStructuredLog({
     component: "runtime",

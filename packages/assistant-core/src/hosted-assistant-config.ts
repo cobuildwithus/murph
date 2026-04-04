@@ -3,7 +3,6 @@ import {
   assistantReasoningEffortValues,
   assistantSandboxValues,
   type AssistantApprovalPolicy,
-  type AssistantChatProvider,
   type AssistantReasoningEffort,
   type AssistantSandbox,
 } from './assistant-cli-contracts.js'
@@ -76,7 +75,7 @@ export class HostedAssistantConfigurationError extends Error {
 
 export interface HostedAssistantOperatorConfigState {
   configured: boolean
-  provider: AssistantChatProvider | null
+  provider: 'openai-compatible' | null
 }
 
 export interface HostedAssistantBootstrapResult extends HostedAssistantOperatorConfigState {
@@ -394,7 +393,7 @@ function resolveHostedAssistantSeedPlan(
     )
   }
 
-  const providerSelection = resolveHostedAssistantProviderSelection(raw.providerToken)
+  const providerSelection = resolveHostedAssistantProviderPreset(raw.providerToken)
 
   if (!raw.model) {
     throw new HostedAssistantConfigurationError(
@@ -403,62 +402,37 @@ function resolveHostedAssistantSeedPlan(
     )
   }
 
-  switch (providerSelection.provider) {
-    case 'codex-cli':
-      requireAbsentHostedAssistantValues(
-        providerSelection.label,
-        [
-          [HOSTED_ASSISTANT_BASE_URL_ENV, raw.baseUrl],
-          [HOSTED_ASSISTANT_API_KEY_ENV, raw.apiKeyEnv],
-          [HOSTED_ASSISTANT_PROVIDER_NAME_ENV, raw.providerName],
-        ],
-      )
-      return {
-        providerConfig: {
-          provider: 'codex-cli',
-          approvalPolicy: raw.approvalPolicy,
-          codexCommand: raw.codexCommand,
-          model: raw.model,
-          oss: raw.oss ?? false,
-          profile: raw.profile,
-          reasoningEffort: raw.reasoningEffort,
-          sandbox: raw.sandbox,
-        },
-      }
-    case 'openai-compatible': {
-      requireAbsentHostedAssistantValues(
-        providerSelection.label,
-        [
-          [HOSTED_ASSISTANT_CODEX_COMMAND_ENV, raw.codexCommand],
-          [HOSTED_ASSISTANT_APPROVAL_POLICY_ENV, raw.approvalPolicy],
-          [HOSTED_ASSISTANT_SANDBOX_ENV, raw.sandbox],
-          [HOSTED_ASSISTANT_PROFILE_ENV, raw.profile],
-          [HOSTED_ASSISTANT_OSS_ENV, raw.oss],
-        ],
-      )
+  requireAbsentHostedAssistantValues(
+    providerSelection.label,
+    [
+      [HOSTED_ASSISTANT_CODEX_COMMAND_ENV, raw.codexCommand],
+      [HOSTED_ASSISTANT_APPROVAL_POLICY_ENV, raw.approvalPolicy],
+      [HOSTED_ASSISTANT_SANDBOX_ENV, raw.sandbox],
+      [HOSTED_ASSISTANT_PROFILE_ENV, raw.profile],
+      [HOSTED_ASSISTANT_OSS_ENV, raw.oss],
+    ],
+  )
 
-      const baseUrl = raw.baseUrl ?? providerSelection.presetBaseUrl
-      if (!baseUrl) {
-        throw new HostedAssistantConfigurationError(
-          'HOSTED_ASSISTANT_CONFIG_INVALID',
-          [
-            `${HOSTED_ASSISTANT_BASE_URL_ENV} must be configured for hosted assistant provider ${providerSelection.label}.`,
-            `Named providers like ${HOSTED_ASSISTANT_PROVIDER_ENV}=openai or openrouter set this automatically.`,
-          ].join(' '),
-        )
-      }
+  const baseUrl = raw.baseUrl ?? providerSelection.presetBaseUrl
+  if (!baseUrl) {
+    throw new HostedAssistantConfigurationError(
+      'HOSTED_ASSISTANT_CONFIG_INVALID',
+      [
+        `${HOSTED_ASSISTANT_BASE_URL_ENV} must be configured for hosted assistant provider ${providerSelection.label}.`,
+        `Named providers like ${HOSTED_ASSISTANT_PROVIDER_ENV}=openai or openrouter set this automatically.`,
+      ].join(' '),
+    )
+  }
 
-      return {
-        providerConfig: {
-          provider: 'openai-compatible',
-          apiKeyEnv: raw.apiKeyEnv ?? providerSelection.presetApiKeyEnv,
-          baseUrl,
-          model: raw.model,
-          providerName: raw.providerName ?? providerSelection.presetProviderName,
-          reasoningEffort: raw.reasoningEffort,
-        },
-      }
-    }
+  return {
+    providerConfig: {
+      provider: 'openai-compatible',
+      apiKeyEnv: raw.apiKeyEnv ?? providerSelection.presetApiKeyEnv,
+      baseUrl,
+      model: raw.model,
+      providerName: raw.providerName ?? providerSelection.presetProviderName,
+      reasoningEffort: raw.reasoningEffort,
+    },
   }
 }
 
@@ -511,21 +485,17 @@ function readHostedAssistantRawEnvConfig(
   }
 }
 
-function resolveHostedAssistantProviderSelection(providerToken: string): {
+function resolveHostedAssistantProviderPreset(providerToken: string): {
   label: string
   presetApiKeyEnv: string | null
   presetBaseUrl: string | null
   presetProviderName: string | null
-  provider: AssistantChatProvider
 } {
   if (providerToken === 'codex-cli') {
-    return {
-      label: 'codex-cli',
-      presetApiKeyEnv: null,
-      presetBaseUrl: null,
-      presetProviderName: null,
-      provider: 'codex-cli',
-    }
+    throw new HostedAssistantConfigurationError(
+      'HOSTED_ASSISTANT_CONFIG_INVALID',
+      `${HOSTED_ASSISTANT_PROVIDER_ENV}=codex-cli is not supported for hosted assistant execution. Hosted assistant bootstrap accepts only openai-compatible providers and named OpenAI-compatible aliases.`,
+    )
   }
 
   const preset =
@@ -535,7 +505,7 @@ function resolveHostedAssistantProviderSelection(providerToken: string): {
   if (!preset) {
     throw new HostedAssistantConfigurationError(
       'HOSTED_ASSISTANT_CONFIG_INVALID',
-      `${HOSTED_ASSISTANT_PROVIDER_ENV} must be codex-cli, openai-compatible, or a supported OpenAI-compatible provider alias. Received: ${providerToken}`,
+      `${HOSTED_ASSISTANT_PROVIDER_ENV} must be openai-compatible or a supported OpenAI-compatible provider alias. Received: ${providerToken}`,
     )
   }
 
@@ -544,7 +514,6 @@ function resolveHostedAssistantProviderSelection(providerToken: string): {
     presetApiKeyEnv: preset.apiKeyEnv,
     presetBaseUrl: preset.baseUrl,
     presetProviderName: preset.providerName,
-    provider: 'openai-compatible',
   }
 }
 
