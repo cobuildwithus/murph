@@ -1,10 +1,12 @@
 import type {
   HostedExecutionBundleRefs,
+  HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   HostedExecutionDispatchResult,
   HostedExecutionDispatchRequest,
   HostedExecutionRunLevel,
   HostedExecutionRunContext,
   HostedExecutionRunPhase,
+  HostedExecutionSharePackResponse,
   HostedExecutionUserEnvStatus,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
@@ -22,6 +24,11 @@ import type {
   GatewayReadMessagesResult,
   GatewayRespondToPermissionInput,
 } from "@murphai/gateway-core";
+import type {
+  HostedUserManagedRootKeyRecipientKind,
+  HostedUserRecipientPublicKeyJwk,
+  HostedUserRootKeyEnvelope,
+} from "@murphai/runtime-state";
 import {
   emitHostedExecutionStructuredLog,
   resolveHostedExecutionDispatchOutcomeState,
@@ -233,8 +240,8 @@ export class HostedUserRunner {
   }
 
   async putDeviceSyncRuntimeSnapshot(input: {
-    snapshot: import("@murphai/hosted-execution").HostedExecutionDeviceSyncRuntimeSnapshotResponse;
-  }): Promise<import("@murphai/hosted-execution").HostedExecutionDeviceSyncRuntimeSnapshotResponse> {
+    snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse;
+  }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse> {
     const userId = await this.requireBoundUserId();
     const { crypto } = await this.ensureRunnerStores(userId);
     return createHostedDeviceSyncRuntimeStore({
@@ -290,8 +297,8 @@ export class HostedUserRunner {
   }
 
   async putSharePack(input: {
-    pack: import("@murphai/hosted-execution").HostedExecutionSharePackResponse;
-  }): Promise<import("@murphai/hosted-execution").HostedExecutionSharePackResponse> {
+    pack: HostedExecutionSharePackResponse;
+  }): Promise<HostedExecutionSharePackResponse> {
     const userId = await this.requireBoundUserId();
     const { crypto } = await this.ensureRunnerStores(userId);
     const { createHostedSharePackStore } = await import("./share-pack-store.ts");
@@ -307,7 +314,7 @@ export class HostedUserRunner {
   }
 
   async putUserKeyEnvelope(input: {
-    envelope: import("@murphai/runtime-state").HostedUserRootKeyEnvelope;
+    envelope: HostedUserRootKeyEnvelope;
   }): Promise<HostedUserCryptoContext["envelope"]> {
     const userId = await this.requireBoundUserId();
     const envelope = await this.userKeyStore.putUserRootKeyEnvelope({
@@ -320,10 +327,10 @@ export class HostedUserRunner {
   }
 
   async upsertUserKeyRecipient(input: {
-    kind: import("@murphai/runtime-state").HostedUserManagedRootKeyRecipientKind;
+    kind: HostedUserManagedRootKeyRecipientKind;
     metadata?: Record<string, string | number | boolean | null>;
     recipientKeyId: string;
-    recipientPublicKeyJwk: import("@murphai/runtime-state").HostedUserRecipientPublicKeyJwk;
+    recipientPublicKeyJwk: HostedUserRecipientPublicKeyJwk;
   }): Promise<HostedUserCryptoContext["envelope"]> {
     const userId = await this.requireBoundUserId();
     const envelope = await this.userKeyStore.upsertRecipient({

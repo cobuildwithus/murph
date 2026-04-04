@@ -1,7 +1,9 @@
 import { DurableObject } from "cloudflare:workers";
 
 import worker from "../../src/index.ts";
+import type { R2BucketLike } from "../../src/bundle-store.js";
 import { readHostedExecutionEnvironment } from "../../src/env.ts";
+import type { HostedExecutionContainerNamespaceLike } from "../../src/runner-container.js";
 import { HostedUserRunner } from "../../src/user-runner.ts";
 import { parseHostedUserEnvUpdate } from "../../src/user-env.ts";
 
@@ -13,8 +15,8 @@ import type {
 } from "@murphai/runtime-state";
 
 interface TestWorkerEnvironment extends Readonly<Record<string, string | undefined>> {
-  BUNDLES: import("../../src/bundle-store.js").R2BucketLike;
-  RUNNER_CONTAINER: import("../../src/runner-container.js").HostedExecutionContainerNamespaceLike;
+  BUNDLES: R2BucketLike;
+  RUNNER_CONTAINER: HostedExecutionContainerNamespaceLike;
 }
 
 export class VitestUserRunnerDurableObject extends DurableObject {

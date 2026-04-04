@@ -10,8 +10,10 @@ import {
   parseHostedExecutionDispatchRequest,
   parseHostedExecutionSharePackResponse,
   readHostedEmailCapabilities,
+  type HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   type HostedExecutionDispatchRequest,
   type HostedExecutionDispatchResult,
+  type HostedExecutionSharePackResponse,
   type HostedExecutionUserEnvStatus,
   type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
@@ -74,6 +76,7 @@ import {
   unauthorized,
 } from "./json.ts";
 export { RunnerContainer } from "./runner-container.ts";
+import type { HostedExecutionContainerNamespaceLike } from "./runner-container.ts";
 import {
   createHostedEmailUserAddress,
   type HostedEmailInboundRoute,
@@ -107,14 +110,14 @@ interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLike {
   dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult>;
   getUserEnvStatus(): Promise<HostedExecutionUserEnvStatus>;
   putDeviceSyncRuntimeSnapshot(input: {
-    snapshot: import("@murphai/hosted-execution").HostedExecutionDeviceSyncRuntimeSnapshotResponse;
-  }): Promise<import("@murphai/hosted-execution").HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
+    snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse;
+  }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
   putPendingUsage(input: {
     usage: readonly Record<string, unknown>[];
   }): Promise<{ recorded: number; usageIds: string[] }>;
   putSharePack(input: {
-    pack: import("@murphai/hosted-execution").HostedExecutionSharePackResponse;
-  }): Promise<import("@murphai/hosted-execution").HostedExecutionSharePackResponse>;
+    pack: HostedExecutionSharePackResponse;
+  }): Promise<HostedExecutionSharePackResponse>;
   putUserKeyEnvelope(input: {
     envelope: HostedUserRootKeyEnvelope;
   }): Promise<HostedUserRootKeyEnvelope>;
@@ -124,7 +127,7 @@ interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLike {
   deletePendingUsage(input: { usageIds: readonly string[] }): Promise<void>;
 }
 interface WorkerEnvironmentSource extends WorkerEnvironmentContract<UserRunnerDurableObjectStubLike> {
-  RUNNER_CONTAINER: import("./runner-container.ts").HostedExecutionContainerNamespaceLike;
+  RUNNER_CONTAINER: HostedExecutionContainerNamespaceLike;
 }
 
 type RouteParams = Readonly<Record<string, string>>;
@@ -323,7 +326,7 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.bootstrapUser(userId);
   }
 
-  async getUserKeyEnvelope(): Promise<import("@murphai/runtime-state").HostedUserRootKeyEnvelope> {
+  async getUserKeyEnvelope(): Promise<HostedUserRootKeyEnvelope> {
     return this.runner.getUserKeyEnvelope();
   }
 
@@ -343,8 +346,8 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
   }
 
   async putDeviceSyncRuntimeSnapshot(input: {
-    snapshot: import("@murphai/hosted-execution").HostedExecutionDeviceSyncRuntimeSnapshotResponse;
-  }): Promise<import("@murphai/hosted-execution").HostedExecutionDeviceSyncRuntimeSnapshotResponse> {
+    snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse;
+  }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse> {
     return this.runner.putDeviceSyncRuntimeSnapshot(input);
   }
 
@@ -363,8 +366,8 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
   }
 
   async putSharePack(input: {
-    pack: import("@murphai/hosted-execution").HostedExecutionSharePackResponse;
-  }): Promise<import("@murphai/hosted-execution").HostedExecutionSharePackResponse> {
+    pack: HostedExecutionSharePackResponse;
+  }): Promise<HostedExecutionSharePackResponse> {
     return this.runner.putSharePack(input);
   }
 

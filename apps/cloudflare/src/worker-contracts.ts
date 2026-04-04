@@ -1,5 +1,6 @@
 import type {
   HostedUserManagedRootKeyRecipientKind,
+  HostedUserRecipientPublicKeyJwk,
   HostedUserRootKeyEnvelope,
 } from "@murphai/runtime-state";
 import type {
@@ -17,7 +18,11 @@ import type {
   GatewayReadMessagesResult,
   GatewayRespondToPermissionInput,
 } from "@murphai/gateway-core";
-import type { HostedExecutionBundleRefs } from "@murphai/hosted-execution";
+import type {
+  HostedExecutionBundleRefs,
+  HostedExecutionDeviceSyncRuntimeSnapshotResponse,
+  HostedExecutionSharePackResponse,
+} from "@murphai/hosted-execution";
 
 import type { R2BucketLike } from "./bundle-store.ts";
 import type {
@@ -51,14 +56,14 @@ export interface WorkerUserRunnerStubLike {
   gatewayReadMessages?(input: GatewayReadMessagesInput): Promise<GatewayReadMessagesResult>;
   gatewayRespondToPermission?(input: GatewayRespondToPermissionInput): Promise<GatewayPermissionRequest | null>;
   putDeviceSyncRuntimeSnapshot?(input: {
-    snapshot: import("@murphai/hosted-execution").HostedExecutionDeviceSyncRuntimeSnapshotResponse;
-  }): Promise<import("@murphai/hosted-execution").HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
+    snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse;
+  }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
   putPendingUsage?(input: {
     usage: readonly Record<string, unknown>[];
   }): Promise<{ recorded: number; usageIds: string[] }>;
   putSharePack?(input: {
-    pack: import("@murphai/hosted-execution").HostedExecutionSharePackResponse;
-  }): Promise<import("@murphai/hosted-execution").HostedExecutionSharePackResponse>;
+    pack: HostedExecutionSharePackResponse;
+  }): Promise<HostedExecutionSharePackResponse>;
   putUserKeyEnvelope?(input: {
     envelope: HostedUserRootKeyEnvelope;
   }): Promise<HostedUserRootKeyEnvelope>;
@@ -67,7 +72,7 @@ export interface WorkerUserRunnerStubLike {
     kind: HostedUserManagedRootKeyRecipientKind;
     metadata?: Record<string, string | number | boolean | null>;
     recipientKeyId: string;
-    recipientPublicKeyJwk: import("@murphai/runtime-state").HostedUserRecipientPublicKeyJwk;
+    recipientPublicKeyJwk: HostedUserRecipientPublicKeyJwk;
   }): Promise<HostedUserRootKeyEnvelope>;
   deletePendingUsage?(input: { usageIds: readonly string[] }): Promise<void>;
 }
@@ -102,6 +107,7 @@ export interface WorkerEnvironmentContract<
   HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID?: string;
   HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON?: string;
   HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS?: string;
+  HOSTED_EXECUTION_INTERNAL_TOKENS?: string;
   HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS?: string;
   HOSTED_EXECUTION_RETRY_DELAY_MS?: string;
   HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?: string;
@@ -114,5 +120,6 @@ export interface WorkerEnvironmentContract<
   HOSTED_EMAIL_FROM_ADDRESS?: string;
   HOSTED_EMAIL_LOCAL_PART?: string;
   HOSTED_EMAIL_SIGNING_SECRET?: string;
+  HOSTED_WEB_BASE_URL?: string;
   USER_RUNNER: WorkerUserRunnerNamespaceLike<TStub>;
 }
