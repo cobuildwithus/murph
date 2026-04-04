@@ -1577,130 +1577,19 @@ test('createDefaultAssistantToolCatalog vault.fs.readText enforces bounded UTF-8
   }
 })
 
-test('createDefaultAssistantToolCatalog memory file tools redact or block sensitive health access outside private contexts', async () => {
+test('createDefaultAssistantToolCatalog no longer exposes mirrored assistant memory file tools', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-file-tools-'))
 
   try {
-    const statePaths = resolveAssistantStatePaths(vaultRoot)
-    await mkdir(statePaths.assistantStateRoot, { recursive: true })
-    await writeFile(
-      statePaths.longTermMemoryPath,
-      [
-        '# Assistant memory',
-        '',
-        'This file lives outside the canonical vault.',
-        '',
-        '## Identity',
-        '- Call the user Alex.',
-        '',
-        '## Preferences',
-        '',
-        '## Standing instructions',
-        '',
-        '## Health context',
-        '- User has high cholesterol.',
-        '',
-      ].join('\n'),
-      'utf8',
-    )
-
     const sharedCatalog = createDefaultAssistantToolCatalog({
       allowSensitiveHealthContext: false,
       requestId: 'req_memory_files_shared',
       vault: vaultRoot,
       vaultServices: createStubVaultServices(),
     })
-
-    const sharedResults = await sharedCatalog.executeCalls({
-      calls: [
-        {
-          tool: 'assistant.memory.file.read',
-          input: {
-            path: 'MEMORY.md',
-          },
-        },
-        {
-          tool: 'assistant.memory.file.append',
-          input: {
-            path: 'MEMORY.md',
-            section: 'Preferences',
-            text: 'Keep responses concise.',
-          },
-        },
-        {
-          tool: 'assistant.memory.file.append',
-          input: {
-            path: 'MEMORY.md',
-            section: 'Identity',
-            text: 'Call the user Jordan.',
-          },
-        },
-        {
-          tool: 'assistant.memory.file.append',
-          input: {
-            path: 'MEMORY.md',
-            section: 'Health context',
-            text: 'User has high cholesterol.',
-          },
-        },
-        {
-          tool: 'assistant.memory.file.write',
-          input: {
-            path: 'MEMORY.md',
-            text: [
-              '# Assistant memory',
-              '',
-              'This file lives outside the canonical vault.',
-              '',
-              '## Identity',
-              '- Call the user Alex.',
-              '',
-              '## Preferences',
-              '',
-              '## Standing instructions',
-              '',
-              '## Health context',
-              '- User has high cholesterol.',
-            ].join('\n'),
-          },
-        },
-        {
-          tool: 'assistant.memory.file.append',
-          input: {
-            path: 'memory/2026-04-02.md',
-            text: 'Working on onboarding.',
-          },
-        },
-        {
-          tool: 'assistant.memory.file.read',
-          input: {
-            path: 'memory/2026-04-02.md',
-          },
-        },
-      ],
-      mode: 'apply',
-    })
-
-    assert.equal(sharedResults[0]?.status, 'succeeded')
-    assert.doesNotMatch(
-      String((sharedResults[0]?.result as { text?: string } | undefined)?.text ?? ''),
-      /high cholesterol/u,
-    )
-    assert.equal(sharedResults[1]?.status, 'succeeded')
-    assert.equal(sharedResults[2]?.status, 'failed')
-    assert.equal(sharedResults[2]?.errorCode, 'ASSISTANT_MEMORY_FILE_APPEND_REQUIRES_EDIT')
-    assert.equal(sharedResults[3]?.status, 'failed')
-    assert.equal(sharedResults[3]?.errorCode, 'ASSISTANT_MEMORY_FILE_ACCESS_DENIED')
-    assert.equal(sharedResults[4]?.status, 'failed')
-    assert.equal(sharedResults[4]?.errorCode, 'ASSISTANT_MEMORY_FILE_ACCESS_DENIED')
-    assert.equal(sharedResults[5]?.status, 'failed')
-    assert.equal(sharedResults[5]?.errorCode, 'ASSISTANT_MEMORY_FILE_ACCESS_DENIED')
-    assert.equal(sharedResults[6]?.status, 'failed')
-    assert.equal(sharedResults[6]?.errorCode, 'ASSISTANT_MEMORY_FILE_ACCESS_DENIED')
-
-    const sharedMemoryMarkdown = await readFile(statePaths.longTermMemoryPath, 'utf8')
-    assert.match(sharedMemoryMarkdown, /Keep responses concise\./u)
-    assert.match(sharedMemoryMarkdown, /high cholesterol/u)
+    assert.equal(sharedCatalog.hasTool('assistant.memory.file.read'), false)
+    assert.equal(sharedCatalog.hasTool('assistant.memory.file.append'), false)
+    assert.equal(sharedCatalog.hasTool('assistant.memory.file.write'), false)
 
     const privateCatalog = createDefaultAssistantToolCatalog({
       allowSensitiveHealthContext: true,
@@ -1708,32 +1597,9 @@ test('createDefaultAssistantToolCatalog memory file tools redact or block sensit
       vault: vaultRoot,
       vaultServices: createStubVaultServices(),
     })
-
-    const privateResults = await privateCatalog.executeCalls({
-      calls: [
-        {
-          tool: 'assistant.memory.file.read',
-          input: {
-            path: 'MEMORY.md',
-          },
-        },
-        {
-          tool: 'assistant.memory.file.append',
-          input: {
-            path: 'memory/2026-04-02.md',
-            text: 'Working on onboarding.',
-          },
-        },
-      ],
-      mode: 'apply',
-    })
-
-    assert.equal(privateResults[0]?.status, 'succeeded')
-    assert.match(
-      String((privateResults[0]?.result as { text?: string } | undefined)?.text ?? ''),
-      /high cholesterol/u,
-    )
-    assert.equal(privateResults[1]?.status, 'succeeded')
+    assert.equal(privateCatalog.hasTool('assistant.memory.file.read'), false)
+    assert.equal(privateCatalog.hasTool('assistant.memory.file.append'), false)
+    assert.equal(privateCatalog.hasTool('assistant.memory.file.write'), false)
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }

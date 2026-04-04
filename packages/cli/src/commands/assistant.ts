@@ -18,6 +18,9 @@ import {
   assistantCronTargetShowResultSchema,
   assistantDeliverResultSchema,
   assistantDoctorResultSchema,
+  assistantMemoryFileAppendResultSchema,
+  assistantMemoryFileReadResultSchema,
+  assistantMemoryFileWriteResultSchema,
   assistantMemoryGetResultSchema,
   assistantMemoryQueryScopeValues,
   assistantMemorySearchResultSchema,
@@ -73,12 +76,15 @@ import {
 } from '@murphai/assistant-core/assistant-runtime'
 import {
   assertAssistantMemoryTurnContextVault,
+  appendAssistantMemoryMarkdownFile,
   getAssistantMemory,
+  readAssistantMemoryMarkdownFile,
   redactAssistantMemoryRecord,
   redactAssistantMemorySearchHit,
   resolveAssistantMemoryStoragePaths,
   resolveAssistantMemoryTurnContext,
   searchAssistantMemory,
+  writeAssistantMemoryMarkdownFile,
 } from '@murphai/assistant-core/assistant-runtime'
 import {
   redactAssistantDisplayPath,
@@ -98,6 +104,8 @@ import type { InboxServices } from '@murphai/assistant-core/inbox-services'
 import {
   inputFileOptionSchema,
   loadJsonInputObject,
+  loadTextInput,
+  textInputOptionSchema,
 } from '@murphai/assistant-core/json-input'
 import { normalizeRepeatableFlagOption } from '@murphai/assistant-core/option-utils'
 import {
@@ -117,6 +125,10 @@ import {
 import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 import type { VaultServices } from '@murphai/assistant-core/vault-services'
 import { requestIdSchema } from '@murphai/assistant-core/vault-cli-contracts'
+
+const assistantMemoryMarkdownFilePathSchema = z
+  .string()
+  .regex(/^(MEMORY\.md|memory\/\d{4}-\d{2}-\d{2}\.md)$/u)
 
 const assistantSessionOptionFields = {
   session: z
@@ -1292,6 +1304,10 @@ export function registerAssistantCommands(
       description:
         'Inspect non-canonical assistant memory stored as Markdown outside the vault under assistant-state/.',
     })
+    const memoryFile = Cli.create('file', {
+      description:
+        'Read and edit assistant memory Markdown files (`MEMORY.md` or `memory/YYYY-MM-DD.md`) through the canonical CLI.',
+    })
 
     memory.command('search', {
       args: emptyArgsSchema,
@@ -1392,6 +1408,117 @@ export function registerAssistantCommands(
         }
       },
     })
+
+    memoryFile.command('read', {
+      args: z.object({
+        path: assistantMemoryMarkdownFilePathSchema.describe(
+          'Assistant memory Markdown file path (`MEMORY.md` or `memory/YYYY-MM-DD.md`).',
+        ),
+      }),
+      description: 'Read one assistant memory Markdown file.',
+      hint:
+        'Shared contexts may read `MEMORY.md`, but daily memory files require a private assistant turn context.',
+      options: withBaseOptions({
+        maxChars: z
+          .number()
+          .int()
+          .positive()
+          .max(20_000)
+          .optional()
+          .describe('Optional maximum number of characters to return before truncation.'),
+      }),
+      output: assistantMemoryFileReadResultSchema,
+      async run(context) {
+        const turnContext = resolveAssistantMemoryTurnContext()
+        if (turnContext) {
+          assertAssistantMemoryTurnContextVault(turnContext, context.options.vault)
+        }
+
+        return {
+          ...buildAssistantMemoryResultPaths(context.options.vault),
+          ...(await readAssistantMemoryMarkdownFile(
+            context.options.vault,
+            context.args.path,
+            context.options.maxChars,
+            turnContext?.allowSensitiveHealthContext ?? true,
+          )),
+        }
+      },
+    })
+
+    memoryFile.command('append', {
+      args: z.object({
+        path: assistantMemoryMarkdownFilePathSchema.describe(
+          'Assistant memory Markdown file path (`MEMORY.md` or `memory/YYYY-MM-DD.md`).',
+        ),
+      }),
+      description: 'Append one memory bullet to an assistant memory Markdown file.',
+      hint:
+        'Use this for straightforward new memory. It adds one bullet without rewriting the whole file.',
+      options: withBaseOptions({
+        section: z
+          .enum(assistantMemoryVisibleSectionValues)
+          .optional()
+          .describe('Required for `MEMORY.md`; daily memory appends only allow `Notes`.'),
+        text: z
+          .string()
+          .min(1)
+          .describe('One bullet line to append. Do not include multiple lines or headings.'),
+      }),
+      output: assistantMemoryFileAppendResultSchema,
+      async run(context) {
+        const turnContext = resolveAssistantMemoryTurnContext()
+        if (turnContext) {
+          assertAssistantMemoryTurnContextVault(turnContext, context.options.vault)
+        }
+
+        return {
+          ...buildAssistantMemoryResultPaths(context.options.vault),
+          ...(await appendAssistantMemoryMarkdownFile(
+            context.options.vault,
+            context.args.path,
+            context.options.text,
+            context.options.section,
+            turnContext?.allowSensitiveHealthContext ?? true,
+          )),
+        }
+      },
+    })
+
+    memoryFile.command('write', {
+      args: z.object({
+        path: assistantMemoryMarkdownFilePathSchema.describe(
+          'Assistant memory Markdown file path (`MEMORY.md` or `memory/YYYY-MM-DD.md`).',
+        ),
+      }),
+      description: 'Replace one assistant memory Markdown file with explicit text input.',
+      hint:
+        'Dangerous: read the latest file immediately before using this, because a stale write can delete older memories.',
+      options: withBaseOptions({
+        input: textInputOptionSchema.describe(
+          'Markdown text payload in @file form or - for stdin.',
+        ),
+      }),
+      output: assistantMemoryFileWriteResultSchema,
+      async run(context) {
+        const turnContext = resolveAssistantMemoryTurnContext()
+        if (turnContext) {
+          assertAssistantMemoryTurnContextVault(turnContext, context.options.vault)
+        }
+
+        return {
+          ...buildAssistantMemoryResultPaths(context.options.vault),
+          ...(await writeAssistantMemoryMarkdownFile(
+            context.options.vault,
+            context.args.path,
+            await loadTextInput(context.options.input, 'assistant memory file'),
+            turnContext?.allowSensitiveHealthContext ?? true,
+          )),
+        }
+      },
+    })
+
+    memory.command(memoryFile)
 
     assistant.command(memory)
   }

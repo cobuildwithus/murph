@@ -11,6 +11,14 @@ export const inputFileOptionSchema = z
   )
   .describe('Payload input in @file.json form or - for stdin.')
 
+export const textInputOptionSchema = z
+  .string()
+  .refine(
+    (value) => value === '-' || /^@.+/u.test(value),
+    'Expected an @file payload reference or - for stdin.',
+  )
+  .describe('Payload input in @file form or - for stdin.')
+
 export function normalizeInputFileOption(input: string) {
   if (input === '-' || !input.startsWith('@')) {
     return input
@@ -23,7 +31,9 @@ export async function loadJsonInputObject(
   input: string,
   label: string,
 ): Promise<JsonObject> {
-  const raw = await readTextInput(input, label)
+  const raw = await loadTextInput(input, label, {
+    stdinHint: 'Pass --input @file.json or pipe a JSON object to --input -.',
+  })
 
   let parsed: unknown
 
@@ -47,9 +57,15 @@ export async function loadJsonInputObject(
   return parsed as JsonObject
 }
 
-async function readTextInput(input: string, label: string) {
+export async function loadTextInput(
+  input: string,
+  label: string,
+  options?: {
+    stdinHint?: string
+  },
+) {
   if (input === '-') {
-    return readStdinText(label)
+    return readStdinText(label, options)
   }
 
   const filePath = normalizeInputFileOption(input)
@@ -65,9 +81,14 @@ async function readTextInput(input: string, label: string) {
   }
 }
 
-async function readStdinText(label: string) {
+async function readStdinText(
+  label: string,
+  options?: {
+    stdinHint?: string
+  },
+) {
   if (process.stdin.isTTY) {
-    throw missingStdinError(label)
+    throw missingStdinError(label, options)
   }
 
   const chunks: Buffer[] = []
@@ -89,18 +110,23 @@ async function readStdinText(label: string) {
   const raw = Buffer.concat(chunks).toString('utf8')
 
   if (raw.trim().length === 0) {
-    throw missingStdinError(label)
+    throw missingStdinError(label, options)
   }
 
   return raw
 }
 
-function missingStdinError(label: string) {
+function missingStdinError(
+  label: string,
+  options?: {
+    stdinHint?: string
+  },
+) {
   return new VaultCliError(
     'command_failed',
     `No ${label} was piped to stdin.`,
     {
-      hint: 'Pass --input @file.json or pipe a JSON object to --input -.',
+      hint: options?.stdinHint ?? 'Pass --input @file or pipe text to --input -.',
     },
   )
 }

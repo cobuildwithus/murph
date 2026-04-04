@@ -221,8 +221,16 @@ function buildAssistantProviderTurnExecutionPlan(input: {
   turnId: string
 }): AssistantProviderTurnExecutionPlan {
   const executionContext = normalizeAssistantExecutionContext(input.input.executionContext)
+  const memoryTurnEnv = createAssistantMemoryTurnContextEnv({
+    allowSensitiveHealthContext: input.plan.allowSensitiveHealthContext,
+    sessionId: input.resolvedSession.sessionId,
+    sourcePrompt: input.input.prompt,
+    turnId: `${input.resolvedSession.sessionId}:${input.turnCreatedAt}`,
+    vault: input.input.vault,
+  })
   const toolCatalog = createProviderTurnAssistantToolCatalog({
     allowSensitiveHealthContext: input.plan.allowSensitiveHealthContext,
+    cliEnv: memoryTurnEnv,
     executionContext,
     requestId: input.turnId,
     sessionId: input.resolvedSession.sessionId,
@@ -233,13 +241,7 @@ function buildAssistantProviderTurnExecutionPlan(input: {
 
   return {
     input: input.input,
-    memoryTurnEnv: createAssistantMemoryTurnContextEnv({
-      allowSensitiveHealthContext: input.plan.allowSensitiveHealthContext,
-      sessionId: input.resolvedSession.sessionId,
-      sourcePrompt: input.input.prompt,
-      turnId: `${input.resolvedSession.sessionId}:${input.turnCreatedAt}`,
-      vault: input.input.vault,
-    }),
+    memoryTurnEnv,
     primaryRoute: input.routes[0] ?? null,
     routes: input.routes,
     sharedPlan: input.plan,
@@ -332,11 +334,6 @@ async function resolveAssistantRouteTurnPlan(input: {
           vault: input.input.vault,
         })
       : null
-  const assistantMemoryAppendToolAvailable =
-    input.toolCatalog.hasTool('assistant.memory.file.append')
-  const assistantMemoryFileEditToolsAvailable =
-    input.toolCatalog.hasTool('assistant.memory.file.read') &&
-    input.toolCatalog.hasTool('assistant.memory.file.write')
   const assistantCronToolsAvailable = assistantCliExecutorAvailable
 
   return {
@@ -354,14 +351,11 @@ async function resolveAssistantRouteTurnPlan(input: {
     systemPrompt: buildAssistantSystemPrompt({
       allowSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
       assistantCliExecutorAvailable,
-      assistantMemoryAppendToolAvailable,
       assistantStateToolsAvailable,
       assistantCronToolsAvailable,
       cliAccess: input.sharedPlan.cliAccess,
       assistantMemoryDailyPath: resolveAssistantDailyMemoryPath(assistantMemoryPaths),
-      assistantMemoryFileEditToolsAvailable,
       assistantMemoryLongTermPath: assistantMemoryPaths.longTermMemoryPath,
-      assistantMemoryRecallToolsAvailable,
       assistantMemoryPrompt,
       channel: resolvedChannel,
       firstTurnCheckIn: shouldInjectFirstTurnCheckIn,

@@ -873,6 +873,32 @@ export const assistantMemoryGetResultSchema = z.object({
   memory: assistantMemoryRecordSchema,
 })
 
+export const assistantMemoryFileReadResultSchema = z.object({
+  vault: pathSchema,
+  stateRoot: pathSchema,
+  path: pathSchema,
+  present: z.boolean(),
+  text: z.string(),
+  totalChars: z.number().int().nonnegative(),
+  truncated: z.boolean(),
+})
+
+export const assistantMemoryFileWriteResultSchema = z.object({
+  vault: pathSchema,
+  stateRoot: pathSchema,
+  path: pathSchema,
+  totalChars: z.number().int().nonnegative(),
+})
+
+export const assistantMemoryFileAppendResultSchema = z.object({
+  vault: pathSchema,
+  stateRoot: pathSchema,
+  path: pathSchema,
+  appended: z.boolean(),
+  section: z.enum(assistantMemoryVisibleSectionValues),
+  totalBullets: z.number().int().nonnegative(),
+})
+
 export const assistantStateDocumentValueSchema = z.record(
   z.string(),
   z.unknown(),
@@ -1198,6 +1224,15 @@ export type AssistantMemorySearchResult = z.infer<
 >
 export type AssistantMemoryGetResult = z.infer<
   typeof assistantMemoryGetResultSchema
+>
+export type AssistantMemoryFileReadResult = z.infer<
+  typeof assistantMemoryFileReadResultSchema
+>
+export type AssistantMemoryFileWriteResult = z.infer<
+  typeof assistantMemoryFileWriteResultSchema
+>
+export type AssistantMemoryFileAppendResult = z.infer<
+  typeof assistantMemoryFileAppendResultSchema
 >
 export type AssistantStateDocumentValue = z.infer<
   typeof assistantStateDocumentValueSchema
