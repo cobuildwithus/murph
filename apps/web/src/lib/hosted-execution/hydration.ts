@@ -51,6 +51,7 @@ export async function hydrateHostedExecutionDispatch(
         return validateHydratedHostedExecutionDispatch(
           {
             event: {
+              firstContact: null,
               kind: "member.activated",
               userId: payload.dispatchRef.userId,
             },

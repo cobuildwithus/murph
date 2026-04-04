@@ -12,14 +12,14 @@ import type {
 
 export function buildHostedExecutionMemberActivatedDispatch(input: {
   eventId: string;
-  firstContact?: HostedExecutionMemberActivatedEvent["firstContact"];
+  firstContact: HostedExecutionMemberActivatedEvent["firstContact"];
   memberId: string;
   occurredAt: string;
 }): HostedExecutionDispatchRequest {
   return buildHostedExecutionDispatch({
     event: {
+      firstContact: input.firstContact,
       kind: "member.activated",
-      ...(input.firstContact === undefined ? {} : { firstContact: input.firstContact }),
       userId: input.memberId,
     } satisfies HostedExecutionMemberActivatedEvent,
     eventId: input.eventId,
