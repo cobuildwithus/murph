@@ -2,6 +2,26 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.1.14] - 2026-04-04
+
+### Added
+- add best-effort assistant typing indicators across supported messaging channels
+- add hosted per-user root-key envelopes and browser-compatible user-key helpers for future unlock flows
+
+### Fixed
+- harden hosted execution control with signed control routes, per-run runner tokens, and safer per-user key handling
+- keep hosted user-envelope reads greenfield-safe while preserving the new hosted key model
+- restore hosted verification stability by fixing Cloudflare control-path regressions and stale hosted-web smoke-process cleanup
+- align hosted Linq integrations with the current v3 API, canonical snapshots, and v3 media payloads
+- harden the hosted install script for stock macOS Bash
+- tighten assistant onboarding so first-contact guidance runs once, uses clearer copy, and keeps knowledge tools available on provider turns
+- support Venice defaults in hosted assistant configuration
+
+### Changed
+- move knowledge runtime ownership into `assistant-core` and tighten knowledge validation
+- centralize first-contact finalization in the assistant runtime
+- refactor the hosted homepage into composable sections and refresh the landing-page copy
+
 ## [0.1.13] - 2026-04-04
 
 ### Changed

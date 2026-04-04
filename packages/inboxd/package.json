@@ -1,6 +1,6 @@
 {
   "name": "@murphai/inboxd",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "private": false,
   "description": "Local inbox ingestion runtime for Murph.",
   "license": "GPL-3.0-only",
