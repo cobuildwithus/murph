@@ -33,7 +33,7 @@ export function extractAssistantSessionSecretsForPersistence(
   secrets: AssistantSessionSecrets | null
 } {
   const providerHeaders = splitAssistantHeadersForPersistence(
-    session.providerOptions.headers,
+    session.target.adapter === 'openai-compatible' ? session.target.headers : null,
   )
 
   const persisted = assistantPersistedSessionSchema.parse({
