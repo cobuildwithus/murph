@@ -359,7 +359,16 @@ export function requireLinqMessageReceivedEvent(
 export function parseCanonicalLinqMessageReceivedEvent(
   event: LinqWebhookEvent,
 ): LinqMessageReceivedEvent {
-  return requireLinqMessageReceivedEvent(event);
+  if (event.event_type !== "message.received") {
+    throw new TypeError("Linq webhook event does not contain a supported message.received payload.");
+  }
+
+  const data = toLinqObjectRecord(event.data, "Linq message.received data");
+  if (!isCanonicalLinqMessageReceivedData(data)) {
+    return requireLinqMessageReceivedEvent(event);
+  }
+
+  return parseCanonicalLinqMessageReceivedEventFromCanonicalData(event, data);
 }
 
 export function buildLinqMessageText(
@@ -592,10 +601,14 @@ function parseLinqMessagePart(part: unknown, index: number): LinqMessagePart {
     return {
       type,
       url: normalizeNullableString(record.url),
-      attachment_id: normalizeNullableString(record.attachment_id),
+      attachment_id:
+        normalizeNullableString(record.id)
+        ?? normalizeNullableString(record.attachment_id),
       filename: normalizeNullableString(record.filename),
       mime_type: normalizeNullableString(record.mime_type),
-      size: normalizeNullableNumber(record.size),
+      size:
+        normalizeNullableNumber(record.size_bytes)
+        ?? normalizeNullableNumber(record.size),
     };
   }
 
@@ -645,6 +658,71 @@ function parseOptionalChatInfo(value: unknown): LinqChatInfo | null {
   };
 }
 
+function parseCanonicalLinqMessageReceivedEventFromCanonicalData(
+  event: LinqWebhookEvent,
+  data: Record<string, unknown>,
+): LinqMessageReceivedEvent {
+  const chat = parseRequiredChatInfo(data.chat);
+  const message = toLinqObjectRecord(data.message, "Linq message.received message");
+  const parts = message.parts;
+  if (!Array.isArray(parts)) {
+    throw new TypeError("Linq message.received message.parts must be an array.");
+  }
+
+  const createdAt = normalizeRequiredTimestamp(event.created_at, "Linq webhook created_at");
+  const senderHandle = parseRequiredChatHandle(
+    data.sender_handle ?? data.from_handle,
+    "Linq message.received sender_handle",
+  );
+  const fromHandle = parseOptionalChatHandle(data.from_handle) ?? senderHandle;
+  const recipientHandle = parseOptionalChatHandle(data.recipient_handle) ?? chat.owner_handle ?? undefined;
+  const isFromMe = parseCanonicalLinqIsFromMe(data);
+  const direction = parseCanonicalLinqDirection(data, isFromMe);
+  const sentAt =
+    normalizeOptionalTimestamp(data.sent_at, "Linq message.received sent_at")
+    ?? undefined;
+  const receivedAt =
+    normalizeOptionalTimestamp(data.received_at, "Linq message.received received_at")
+    ?? sentAt
+    ?? createdAt;
+  const service =
+    normalizeNullableString(data.service)
+    ?? normalizeNullableString(senderHandle.service)
+    ?? normalizeNullableString(fromHandle.service)
+    ?? normalizeNullableString(recipientHandle?.service)
+    ?? normalizeRequiredString(data.service, "Linq message.received service");
+
+  return {
+    ...event,
+    event_type: "message.received",
+    created_at: createdAt,
+    webhook_version: normalizeNullableString(event.webhook_version ?? null) ?? undefined,
+    trace_id: normalizeNullableString(event.trace_id ?? null),
+    partner_id: normalizeNullableString(event.partner_id ?? null),
+    data: {
+      chat_id: normalizeRequiredString(data.chat_id, "Linq message.received chat_id"),
+      chat,
+      direction,
+      from: normalizeRequiredString(data.from, "Linq message.received from"),
+      from_handle: fromHandle,
+      preferred_service: normalizeNullableString(data.preferred_service) ?? undefined,
+      recipient_handle: recipientHandle,
+      recipient_phone: normalizeNullableString(data.recipient_phone) ?? normalizeNullableString(recipientHandle?.handle),
+      received_at: receivedAt,
+      is_from_me: isFromMe,
+      sent_at: sentAt,
+      sender_handle: senderHandle,
+      service,
+      message: {
+        id: normalizeRequiredString(message.id, "Linq message.received message.id"),
+        parts: parts.map((part, index) => parseLinqMessagePart(part, index)),
+        effect: parseOptionalMessageEffect(message.effect),
+        reply_to: parseOptionalReplyTo(message.reply_to),
+      },
+    },
+  };
+}
+
 function isCanonicalLinqMessageReceivedData(value: unknown): value is LinqMessageReceivedData {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
@@ -657,6 +735,41 @@ function isCanonicalLinqMessageReceivedData(value: unknown): value is LinqMessag
       && !Array.isArray(record.message)
       && "parts" in (record.message as Record<string, unknown>),
   );
+}
+
+function parseCanonicalLinqIsFromMe(data: Record<string, unknown>): boolean {
+  if (typeof data.is_from_me !== "boolean") {
+    const direction = normalizeNullableString(data.direction);
+    if (direction === "inbound") {
+      return false;
+    }
+    if (direction === "outbound") {
+      return true;
+    }
+    throw new TypeError('Linq message.received is_from_me must be a boolean.');
+  }
+
+  return data.is_from_me;
+}
+
+function parseCanonicalLinqDirection(
+  data: Record<string, unknown>,
+  isFromMe: boolean,
+): "inbound" | "outbound" {
+  const direction = normalizeNullableString(data.direction);
+  if (!direction) {
+    return isFromMe ? "outbound" : "inbound";
+  }
+
+  const normalizedDirection = normalizeRequiredDirection(
+    direction,
+    "Linq message.received direction",
+  );
+  if ((normalizedDirection === "outbound") !== isFromMe) {
+    throw new TypeError("Linq message.received is_from_me must match direction.");
+  }
+
+  return normalizedDirection;
 }
 
 function parseRequiredChatInfo(value: unknown): LinqChatInfo {

@@ -128,7 +128,7 @@ test("hosted Linq attachment downloads only fetch allowlisted CDN URLs", async (
           },
           {
             mime_type: "audio/m4a",
-            type: "voice_memo",
+            type: "media",
             url: "https://cdn.linqapp.com/media/voice.m4a",
           },
           {
