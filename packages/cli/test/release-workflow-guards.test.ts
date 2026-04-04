@@ -21,6 +21,9 @@ describe('release workflow guards', () => {
     const workflow = readFileSync(releaseWorkflowPath, 'utf8')
 
     expect(workflow).toContain('- name: Run release checks')
+    expect(workflow).toContain('MURPH_TEST_LANES_PARALLEL: "1"')
+    expect(workflow).toContain('MURPH_APP_VERIFY_PARALLEL: "1"')
+    expect(workflow).toContain('MURPH_VERIFY_STEP_PARALLEL: "1"')
     expect(workflow).toContain('run: pnpm release:check')
     expect(workflow).toContain('node scripts/pack-publishables.mjs --expect-version "${{ needs.tag-check.outputs.version }}" --clean --out-dir dist/npm --pack-output dist/npm/pack-output.json')
     expect(workflow).toContain('name: npm-tarballs')
@@ -44,6 +47,7 @@ describe('release workflow guards', () => {
     expect(workflow).toContain('NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}')
     expect(workflow).toContain('Using NPM_TOKEN authentication for npm publish.')
     expect(workflow).toContain('NPM_TOKEN is not set; falling back to trusted publishing.')
+    expect(workflow).toContain('unset NODE_AUTH_TOKEN')
     expect(workflow).not.toContain('npm install -g npm@latest')
     expect(workflow).toContain('if [[ -n "${{ needs.tag-check.outputs.npm_tag }}" ]]; then')
     expect(workflow).toContain('publish_args+=(--npm-tag "${{ needs.tag-check.outputs.npm_tag }}")')
