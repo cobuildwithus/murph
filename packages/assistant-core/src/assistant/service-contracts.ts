@@ -90,6 +90,8 @@ export interface AssistantTurnSharedPlan {
   allowSensitiveHealthContext: boolean
   cliAccess: AssistantCliAccessContext
   conversationPolicy: import('./conversation-policy.js').AssistantConversationPolicy
+  firstTurnCheckInEligible: boolean
+  firstTurnCheckInStateDocId: string | null
   operatorAuthority: AssistantOperatorAuthority
   persistUserPromptOnFailure: boolean
   requestedWorkingDirectory: string
@@ -120,6 +122,7 @@ export interface PersistedUserTurn {
 
 export interface ExecutedAssistantProviderTurnResult extends AssistantProviderTurnExecutionResult {
   attemptCount: number
+  firstTurnCheckInInjected?: boolean
   providerOptions: AssistantProviderSessionOptions
   route: ResolvedAssistantFailoverRoute
   session: AssistantSession

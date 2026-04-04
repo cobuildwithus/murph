@@ -74,6 +74,7 @@ import {
 } from '@murphai/assistant-core/assistant/failover'
 import {
   appendAssistantTranscriptEntries,
+  listAssistantStateDocuments,
   listAssistantTranscriptEntries,
   resolveAssistantSession,
   resolveAssistantStatePaths,
@@ -2592,6 +2593,145 @@ test('sendAssistantMessage injects the first-chat check-in only on the first mes
   const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
   assertPromptHasFirstTurnCheckInGuidance(firstCall?.systemPrompt)
   assertPromptDoesNotHaveFirstTurnCheckInGuidance(secondCall?.systemPrompt)
+})
+
+test('sendAssistantMessage injects the first-chat check-in only for the first ever identifiable messaging contact', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-message-first-ever-check-in-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  serviceMocks.executeAssistantProviderTurn
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-telegram-first-ever-1',
+      response: 'First reply.',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+      firstTurnCheckInInjected: true,
+    })
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-telegram-first-ever-2',
+      response: 'Second reply.',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+  serviceMocks.deliverAssistantMessageOverBinding.mockResolvedValue({
+    delivery: {
+      channel: 'telegram',
+      target: 'telegram-thread-first-ever',
+      targetKind: 'thread',
+      sentAt: '2026-04-04T03:15:45.000Z',
+      messageLength: 'First reply.'.length,
+    },
+    deliveryDeduplicated: false,
+    outboxIntentId: 'outbox_telegram_first_ever',
+  })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    channel: 'telegram',
+    participantId: 'telegram-user-first-ever',
+    sourceThreadId: 'telegram-thread-first-ever-1',
+    threadIsDirect: true,
+    prompt: 'first hello',
+    includeFirstTurnCheckIn: true,
+    deliverResponse: true,
+  })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    channel: 'telegram',
+    participantId: 'telegram-user-first-ever',
+    sourceThreadId: 'telegram-thread-first-ever-2',
+    threadIsDirect: true,
+    prompt: 'second hello',
+    includeFirstTurnCheckIn: true,
+    deliverResponse: true,
+  })
+
+  const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
+
+  assertPromptHasFirstTurnCheckInGuidance(firstCall?.systemPrompt)
+  assertPromptDoesNotHaveFirstTurnCheckInGuidance(secondCall?.systemPrompt)
+  const firstContactDocs = await listAssistantStateDocuments({
+    prefix: 'onboarding/first-contact',
+    vault: vaultRoot,
+  })
+  assert.equal(firstContactDocs.length, 1)
+  const firstContactState = await getAssistantStateDocument({
+    docId: firstContactDocs[0]!.docId,
+    vault: vaultRoot,
+  })
+  assert.equal(firstContactState.exists, true)
+})
+
+test('sendAssistantMessage does not burn first-contact onboarding for queue-only deliveries', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-message-queue-only-check-in-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  serviceMocks.executeAssistantProviderTurn
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-telegram-queue-only-1',
+      response: 'Queued first reply.',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+      firstTurnCheckInInjected: true,
+    })
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-telegram-queue-only-2',
+      response: 'Queued second reply.',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+      firstTurnCheckInInjected: true,
+    })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    channel: 'telegram',
+    participantId: 'telegram-user-queue-only',
+    sourceThreadId: 'telegram-thread-queue-only-1',
+    threadIsDirect: true,
+    prompt: 'first hello',
+    includeFirstTurnCheckIn: true,
+    deliverResponse: true,
+    deliveryDispatchMode: 'queue-only',
+  })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    channel: 'telegram',
+    participantId: 'telegram-user-queue-only',
+    sourceThreadId: 'telegram-thread-queue-only-2',
+    threadIsDirect: true,
+    prompt: 'second hello',
+    includeFirstTurnCheckIn: true,
+    deliverResponse: true,
+    deliveryDispatchMode: 'queue-only',
+  })
+
+  const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
+
+  assertPromptHasFirstTurnCheckInGuidance(firstCall?.systemPrompt)
+  assertPromptHasFirstTurnCheckInGuidance(secondCall?.systemPrompt)
+  const firstContactDocs = await listAssistantStateDocuments({
+    prefix: 'onboarding/first-contact',
+    vault: vaultRoot,
+  })
+  assert.equal(firstContactDocs.length, 0)
 })
 
 test('sendAssistantMessage does not inject the first-chat check-in when a messaging thread resumes a saved provider session', async () => {

@@ -59,6 +59,7 @@ import type { AssistantMessageInput } from './service-contracts.js'
 interface AssistantTurnSharedPlan {
   allowSensitiveHealthContext: boolean
   cliAccess: ReturnType<typeof resolveAssistantCliAccessContext>
+  firstTurnCheckInEligible: boolean
   requestedWorkingDirectory: string
 }
 
@@ -69,6 +70,7 @@ interface AssistantRouteTurnPlan {
     role: 'assistant' | 'user'
   }>
   continuityContext: string | null
+  firstTurnCheckInInjected: boolean
   resumeProviderSessionId: string | null
   sessionContext?: {
     binding: AssistantSession['binding']
@@ -89,6 +91,7 @@ const requiredAssistantKnowledgeTools = [
 export interface ExecutedAssistantProviderTurnResult
   extends AssistantProviderTurnExecutionResult {
   attemptCount: number
+  firstTurnCheckInInjected?: boolean
   providerOptions: AssistantProviderSessionOptions
   route: ResolvedAssistantFailoverRoute
   session: AssistantSession
@@ -315,7 +318,7 @@ async function resolveAssistantRouteTurnPlan(input: {
   const shouldInjectBootstrapContext = resumeProviderSessionId === null
   const resolvedChannel = input.input.channel ?? input.session.binding.channel
   const shouldInjectFirstTurnCheckIn =
-    input.input.includeFirstTurnCheckIn === true &&
+    input.sharedPlan.firstTurnCheckInEligible &&
     shouldInjectBootstrapContext &&
     input.session.turnCount === 0
   const conversationMessages = removeTrailingCurrentUserPrompt(
@@ -349,6 +352,7 @@ async function resolveAssistantRouteTurnPlan(input: {
     cliEnv: input.sharedPlan.cliAccess.env,
     conversationMessages,
     continuityContext: null,
+    firstTurnCheckInInjected: shouldInjectFirstTurnCheckIn,
     resumeProviderSessionId,
     sessionContext: shouldInjectBootstrapContext
       ? {
@@ -494,6 +498,7 @@ async function executeAssistantProviderAttempt(input: {
       result: {
         ...result,
         attemptCount: attemptPlan.attemptCount,
+        firstTurnCheckInInjected: attemptPlan.routePlan.firstTurnCheckInInjected,
         providerOptions: attemptPlan.route.providerOptions,
         route: attemptPlan.route,
         session: attemptPlan.session,
