@@ -491,6 +491,7 @@ test('sendAssistantMessage keeps older local history in raw transcript files wit
   const providerCalls = runtimeMocks.executeAssistantProviderTurn.mock.calls.map(
     (call) => call[0],
   )
+  assert.match(providerCalls[0]?.continuityContext ?? '', /^CLI surface summary:/u)
   const latestProviderCall = providerCalls.at(-1)
   assert.equal(latestProviderCall?.continuityContext, null)
   assert.equal((latestProviderCall?.conversationMessages?.length ?? 0) > 0, true)
