@@ -80,7 +80,7 @@ describe("hosted device-sync runtime", () => {
             }) => mocks.applyHostedDeviceSyncRuntimeUpdates({
               baseUrl: input.baseUrl,
               fetchImpl: input.fetchImpl,
-              internalToken: input.internalToken ?? null,
+              signingSecret: input.signingSecret ?? null,
               occurredAt: request.occurredAt ?? null,
               timeoutMs: input.timeoutMs ?? null,
               updates: request.updates,
@@ -93,7 +93,7 @@ describe("hosted device-sync runtime", () => {
               baseUrl: input.baseUrl,
               connectionId: request?.connectionId ?? null,
               fetchImpl: input.fetchImpl,
-              internalToken: input.internalToken ?? null,
+              signingSecret: input.signingSecret ?? null,
               provider: request?.provider ?? null,
               timeoutMs: input.timeoutMs ?? null,
               userId: input.boundUserId,
@@ -207,7 +207,7 @@ describe("hosted device-sync runtime", () => {
       timeoutMs: null,
       webControlPlane: {
         deviceSyncRuntimeBaseUrl: "https://control.example.test",
-        internalToken: "internal-token",
+        signingSecret: "internal-token",
       },
     });
 
@@ -274,7 +274,7 @@ describe("hosted device-sync runtime", () => {
       timeoutMs: 5_000,
       webControlPlane: {
         deviceSyncRuntimeBaseUrl: "http://device-sync.worker",
-        internalToken: null,
+        signingSecret: null,
       },
     });
 
@@ -282,7 +282,7 @@ describe("hosted device-sync runtime", () => {
       baseUrl: "http://device-sync.worker",
       connectionId: null,
       fetchImpl: undefined,
-      internalToken: null,
+      signingSecret: null,
       provider: null,
       timeoutMs: 5_000,
       userId: "user-123",
@@ -325,14 +325,14 @@ describe("hosted device-sync runtime", () => {
       timeoutMs: 5_000,
       webControlPlane: {
         deviceSyncRuntimeBaseUrl: "http://device-sync.worker",
-        internalToken: null,
+        signingSecret: null,
       },
     });
 
     expect(mocks.fetchHostedDeviceSyncRuntimeSnapshot).toHaveBeenCalledWith(expect.objectContaining({
       baseUrl: "http://device-sync.worker",
       fetchImpl,
-      internalToken: null,
+      signingSecret: null,
       timeoutMs: 5_000,
       userId: "user-123",
     }));
@@ -387,7 +387,7 @@ describe("hosted device-sync runtime", () => {
       timeoutMs: null,
       webControlPlane: {
         deviceSyncRuntimeBaseUrl: "https://control.example.test",
-        internalToken: "internal-token",
+        signingSecret: "internal-token",
       },
     });
 
@@ -486,7 +486,7 @@ describe("hosted device-sync runtime", () => {
       timeoutMs: null,
       webControlPlane: {
         deviceSyncRuntimeBaseUrl: "https://control.example.test",
-        internalToken: "internal-token",
+        signingSecret: "internal-token",
       },
     });
 
@@ -590,7 +590,7 @@ describe("hosted device-sync runtime", () => {
       timeoutMs: null,
       webControlPlane: {
         deviceSyncRuntimeBaseUrl: "https://control.example.test",
-        internalToken: "internal-token",
+        signingSecret: "internal-token",
       },
     });
 
@@ -707,7 +707,7 @@ describe("hosted device-sync runtime", () => {
       timeoutMs: null,
       webControlPlane: {
         deviceSyncRuntimeBaseUrl: "https://control.example.test",
-        internalToken: "internal-token",
+        signingSecret: "internal-token",
       },
     });
 
@@ -820,7 +820,7 @@ describe("hosted device-sync runtime", () => {
       timeoutMs: null,
       webControlPlane: {
         deviceSyncRuntimeBaseUrl: "https://control.example.test",
-        internalToken: "internal-token",
+        signingSecret: "internal-token",
       },
     });
 
@@ -930,7 +930,7 @@ describe("hosted device-sync runtime", () => {
       timeoutMs: null,
       webControlPlane: {
         deviceSyncRuntimeBaseUrl: "https://control.example.test",
-        internalToken: "internal-token",
+        signingSecret: "internal-token",
       },
     });
 
@@ -1040,7 +1040,7 @@ describe("hosted device-sync runtime", () => {
       timeoutMs: null,
       webControlPlane: {
         deviceSyncRuntimeBaseUrl: "https://control.example.test",
-        internalToken: "internal-token",
+        signingSecret: "internal-token",
       },
     });
 
@@ -1150,7 +1150,7 @@ describe("hosted device-sync runtime", () => {
       timeoutMs: null,
       webControlPlane: {
         deviceSyncRuntimeBaseUrl: "https://control.example.test",
-        internalToken: "internal-token",
+        signingSecret: "internal-token",
       },
     });
 
@@ -1264,7 +1264,7 @@ describe("hosted device-sync runtime", () => {
       timeoutMs: null,
       webControlPlane: {
         deviceSyncRuntimeBaseUrl: "https://control.example.test",
-        internalToken: "internal-token",
+        signingSecret: "internal-token",
       },
     });
 
@@ -1392,7 +1392,7 @@ describe("hosted device-sync runtime", () => {
       timeoutMs: null,
       webControlPlane: {
         deviceSyncRuntimeBaseUrl: "https://control.example.test",
-        internalToken: "internal-token",
+        signingSecret: "internal-token",
       },
     });
 
@@ -1500,7 +1500,7 @@ describe("hosted device-sync runtime", () => {
       timeoutMs: null,
       webControlPlane: {
         deviceSyncRuntimeBaseUrl: "https://control.example.test",
-        internalToken: "internal-token",
+        signingSecret: "internal-token",
       },
     });
 
@@ -1601,7 +1601,7 @@ describe("hosted device-sync runtime", () => {
       timeoutMs: null,
       webControlPlane: {
         deviceSyncRuntimeBaseUrl: "https://control.example.test",
-        internalToken: "internal-token",
+        signingSecret: "internal-token",
       },
     });
 
@@ -1696,13 +1696,13 @@ describe("hosted device-sync runtime", () => {
       timeoutMs: null,
       webControlPlane: {
         deviceSyncRuntimeBaseUrl: "https://control.example.test",
-        internalToken: "internal-token",
+        signingSecret: "internal-token",
       },
     });
 
     expect(mocks.applyHostedDeviceSyncRuntimeUpdates).toHaveBeenCalledWith(expect.objectContaining({
       baseUrl: "https://control.example.test",
-      internalToken: "internal-token",
+      signingSecret: "internal-token",
       occurredAt: "2026-03-27T08:35:00.000Z",
       timeoutMs: null,
       updates: [
@@ -1815,7 +1815,7 @@ describe("hosted device-sync runtime", () => {
       timeoutMs: null,
       webControlPlane: {
         deviceSyncRuntimeBaseUrl: "https://control.example.test",
-        internalToken: "internal-token",
+        signingSecret: "internal-token",
       },
     });
 
@@ -1923,14 +1923,14 @@ describe("hosted device-sync runtime", () => {
       timeoutMs: 7_000,
       webControlPlane: {
         deviceSyncRuntimeBaseUrl: "http://device-sync.worker",
-        internalToken: null,
+        signingSecret: null,
       },
     });
 
     expect(mocks.applyHostedDeviceSyncRuntimeUpdates).toHaveBeenCalledWith(expect.objectContaining({
       baseUrl: "http://device-sync.worker",
       fetchImpl,
-      internalToken: null,
+      signingSecret: null,
       occurredAt: "2026-03-27T08:35:00.000Z",
       timeoutMs: 7_000,
       userId: "user-123",
@@ -2021,7 +2021,7 @@ describe("hosted device-sync runtime", () => {
       timeoutMs: null,
       webControlPlane: {
         deviceSyncRuntimeBaseUrl: "https://control.example.test",
-        internalToken: "internal-token",
+        signingSecret: "internal-token",
       },
     });
 

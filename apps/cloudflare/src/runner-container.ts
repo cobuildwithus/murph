@@ -18,7 +18,6 @@ const RUNNER_PING_ENDPOINT = "container/health";
 const RUNNER_EXECUTE_URL = "http://container/__internal/run";
 const RUNNER_WAIT_INTERVAL_MS = 250;
 const RUNNER_READY_TIMEOUT_MS = 20_000;
-const DEFAULT_CONTAINER_SLEEP_AFTER = "10s";
 export class HostedExecutionConfigurationError extends Error {
   readonly code: string | null;
 
@@ -92,7 +91,6 @@ export class RunnerContainer extends Container {
   defaultPort = RUNNER_PORT;
   requiredPorts = [RUNNER_PORT];
   pingEndpoint = RUNNER_PING_ENDPOINT;
-  sleepAfter = DEFAULT_CONTAINER_SLEEP_AFTER;
 
   constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
     super(state as never, env as never);

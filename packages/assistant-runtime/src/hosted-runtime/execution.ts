@@ -158,6 +158,7 @@ export async function completeHostedExecutionAfterCommit(input: {
   await exportHostedPendingAssistantUsage({
     baseUrl: input.runtime.webControlPlane.usageBaseUrl,
     fetchImpl: input.internalWorkerFetch,
+    signingSecret: input.runtime.webControlPlane.signingSecret,
     timeoutMs: input.runtime.commitTimeoutMs,
     userId: input.dispatch.event.userId,
     vaultRoot: input.restored.vaultRoot,

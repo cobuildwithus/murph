@@ -18,6 +18,7 @@ const HOSTED_USAGE_EXPORT_BATCH_LIMIT = 50;
 export async function exportHostedPendingAssistantUsage(input: {
   baseUrl: string | null;
   fetchImpl?: typeof fetch;
+  signingSecret: string | null;
   timeoutMs: number | null;
   userId: string;
   vaultRoot: string;
@@ -40,6 +41,7 @@ export async function exportHostedPendingAssistantUsage(input: {
     baseUrl: input.baseUrl,
     boundUserId: input.userId,
     fetchImpl: input.fetchImpl,
+    signingSecret: input.signingSecret,
     timeoutMs: input.timeoutMs,
   });
 

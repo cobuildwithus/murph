@@ -226,12 +226,12 @@ describe("@murphai/hosted-execution", () => {
   it("reads hosted web control plane env from the worker proxy defaults", () => {
     expect(
       readHostedExecutionWebControlPlaneEnvironment({
-        HOSTED_EXECUTION_SCHEDULER_TOKENS: "cron-token",
+        HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
         HOSTED_WEB_BASE_URL: "https://web.example.test/",
-        HOSTED_SHARE_INTERNAL_TOKENS: "share-token",
       }),
     ).toEqual({
       deviceSyncRuntimeBaseUrl: DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
+      signingSecret: "dispatch-secret",
       usageBaseUrl: DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
     });
 
@@ -241,6 +241,7 @@ describe("@murphai/hosted-execution", () => {
       }),
     ).toEqual({
       deviceSyncRuntimeBaseUrl: DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
+      signingSecret: null,
       usageBaseUrl: DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
     });
   });
@@ -252,6 +253,7 @@ describe("@murphai/hosted-execution", () => {
       }),
     ).toEqual({
       deviceSyncRuntimeBaseUrl: DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
+      signingSecret: null,
       usageBaseUrl: DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
     });
   });
@@ -263,6 +265,7 @@ describe("@murphai/hosted-execution", () => {
       }),
     ).toEqual({
       deviceSyncRuntimeBaseUrl: DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
+      signingSecret: null,
       usageBaseUrl: DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
     });
   });
@@ -652,22 +655,6 @@ describe("@murphai/hosted-execution", () => {
     ).resolves.toBe(true);
   });
 
-  it("rejects mixed bearer and signed auth on hosted web-control requests", async () => {
-    await expect(
-      fetchHostedExecutionWebControlPlaneResponse({
-        authorizationToken: "bearer-token",
-        baseUrl: "https://join.example.test/",
-        boundUserId: "member_123",
-        method: "POST",
-        path: "/api/internal/device-sync/providers/whoop/connect-link",
-        signingSecret: "control-secret",
-        timeoutMs: null,
-      }),
-    ).rejects.toThrow(
-      "Hosted web control-plane requests must use either bearer-token auth or signed auth, not both.",
-    );
-  });
-
   it("resolves proxy device-sync clients from worker proxy urls without requiring server auth", async () => {
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({
@@ -760,7 +747,7 @@ describe("@murphai/hosted-execution", () => {
     const client = createHostedExecutionServerDeviceSyncConnectLinkClient({
       baseUrl: "https://join.example.test",
       boundUserId: "member_123",
-      signingSecret: "control-secret",
+      signingSecret: "dispatch-secret",
       timeoutMs: 10_000,
     });
 
@@ -791,7 +778,7 @@ describe("@murphai/hosted-execution", () => {
         method: "POST",
         path: "/api/internal/device-sync/providers/whoop/connect-link",
         payload: "",
-        secret: "control-secret",
+        secret: "dispatch-secret",
         signature: (requestHeaders as Headers).get(HOSTED_EXECUTION_SIGNATURE_HEADER),
         timestamp,
         nowMs: timestamp ? Date.parse(timestamp) : Date.now(),
@@ -1114,7 +1101,6 @@ describe("@murphai/hosted-execution", () => {
         shareId: "share_456",
       },
     });
-
     const inlinePayload = buildHostedExecutionOutboxPayload(inlineDispatch);
     const referencePayload = buildHostedExecutionOutboxPayload(referenceDispatch);
     const activationPayload = buildHostedExecutionOutboxPayload(activationDispatch);

@@ -158,7 +158,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("proxies hosted device connect-link requests through hosted web with the bound user header and HMAC signature", async () => {
+  it("proxies hosted device connect-link requests through hosted web with the dispatch signing secret", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       authorizationUrl: "https://provider.example.test/oauth/start",
       expiresAt: "2026-04-04T12:00:00.000Z",
@@ -208,7 +208,7 @@ describe("handleRunnerOutboundRequest", () => {
         method: "POST",
         path: "/app/api/internal/device-sync/providers/whoop/connect-link",
         payload: "",
-        secret: "control-secret",
+        secret: "dispatch-secret",
         signature: (requestHeaders as Headers).get(HOSTED_EXECUTION_SIGNATURE_HEADER),
         timestamp,
         nowMs: timestamp ? Date.parse(timestamp) : Date.now(),

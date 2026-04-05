@@ -91,8 +91,7 @@ test("hosted gateway dispatch forwards clientRequestId to the local gateway send
       userEnv: {},
       webControlPlane: {
         deviceSyncRuntimeBaseUrl: null,
-        internalToken: null,
-        schedulerToken: null,
+        signingSecret: null,
         usageBaseUrl: null,
       },
     },
@@ -144,8 +143,7 @@ test("hosted member activation dispatch queues the first-contact welcome through
       userEnv: {},
       webControlPlane: {
         deviceSyncRuntimeBaseUrl: null,
-        internalToken: null,
-        schedulerToken: null,
+        signingSecret: null,
         usageBaseUrl: null,
       },
     },

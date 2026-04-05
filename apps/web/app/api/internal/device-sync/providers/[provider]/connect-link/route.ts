@@ -2,7 +2,7 @@ import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/contro
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 import {
-  requireHostedExecutionSignedControlRequest,
+  requireHostedExecutionSignedRequest,
   requireHostedExecutionUserId,
 } from "@/src/lib/hosted-execution/internal";
 
@@ -28,7 +28,7 @@ export const POST = withJsonError(async (
   request: Request,
   context: { params: Promise<{ provider: string }> },
 ) => {
-  await requireHostedExecutionSignedControlRequest(request);
+  await requireHostedExecutionSignedRequest(request);
   const userId = requireHostedExecutionUserId(request);
   const provider = await resolveDecodedRouteParam(context.params, "provider");
   const controlPlane = createHostedDeviceSyncControlPlane(request);

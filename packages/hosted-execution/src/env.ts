@@ -20,6 +20,7 @@ export interface HostedExecutionControlEnvironment {
 
 export interface HostedExecutionWebControlPlaneEnvironment {
   deviceSyncRuntimeBaseUrl: string;
+  signingSecret: string | null;
   usageBaseUrl: string;
 }
 
@@ -84,11 +85,12 @@ export function readHostedExecutionControlSigningSecret(
 }
 
 export function readHostedExecutionWebControlPlaneEnvironment(
-  _source: EnvSource = process.env,
+  source: EnvSource = process.env,
   _options?: HostedExecutionBaseUrlNormalizationOptions,
 ): HostedExecutionWebControlPlaneEnvironment {
   return {
     deviceSyncRuntimeBaseUrl: DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
+    signingSecret: normalizeHostedExecutionString(source.HOSTED_EXECUTION_SIGNING_SECRET),
     usageBaseUrl: DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
   };
 }

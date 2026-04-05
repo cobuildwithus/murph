@@ -103,7 +103,7 @@ When you set `DEVICE_SYNC_PUBLIC_BASE_URL`, point it at the stable production pr
 Set these under `Settings -> Environment Variables` in the Vercel project that deploys `apps/web`. Production is the minimum. Only set Preview if you also have matching preview peers and secrets instead of pointing preview deploys at production control planes.
 
 - `HOSTED_EXECUTION_SIGNING_SECRET`: generate a strong random secret and use the exact same value in Vercel and the Cloudflare hosted-execution worker for signed dispatches.
-- `HOSTED_EXECUTION_CONTROL_SIGNING_SECRET`: optional but recommended separate HMAC secret for signed control-plane requests such as device connect-link issuance and `/internal/users/...` control routes. When unset, control requests fall back to `HOSTED_EXECUTION_SIGNING_SECRET`.
+- `HOSTED_EXECUTION_CONTROL_SIGNING_SECRET`: optional but recommended separate HMAC secret for privileged signed control-plane requests such as `/internal/users/...` control routes. When unset, those control requests fall back to `HOSTED_EXECUTION_SIGNING_SECRET`.
 - `HOSTED_EXECUTION_SCHEDULER_TOKENS`: generate a distinct comma-separated bearer-token set for external schedulers that call the hosted cron routes directly.
 - `HOSTED_SHARE_INTERNAL_TOKENS`: generate a distinct comma-separated bearer-token set for trusted server-to-server hosted share routes.
 - `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET`: generate a distinct strong random secret and use the same value in Vercel plus whichever trusted auth proxy or middleware signs the hosted user assertion headers. `apps/web` verifies that signature before trusting the lower-level assertion-backed device-sync bridge routes.
