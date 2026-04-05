@@ -37,7 +37,7 @@ Current worker env/config names read directly by `src/env.ts`:
 
 - required secret: `HOSTED_EXECUTION_SIGNING_SECRET`
 - optional secret: `HOSTED_EXECUTION_CONTROL_SIGNING_SECRET` splits privileged control signatures away from dispatch signatures; when unset, control requests fall back to `HOSTED_EXECUTION_SIGNING_SECRET`
-- required secret: `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY`
+- required secret: `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY`
 - required secret: `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK`
 - required secret: `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK`
 - optional secret: `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON` allows staged rotation of the automation unwrap key
@@ -48,8 +48,8 @@ Current worker env/config names read directly by `src/env.ts`:
 - optional non-secret: `HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL` overrides the Cloudflare API base URL for hosted email delivery
 - optional non-secret: `HOSTED_EMAIL_DEFAULT_SUBJECT` overrides the default hosted email subject
 - optional non-secret: `HOSTED_EMAIL_DOMAIN`, `HOSTED_EMAIL_FROM_ADDRESS`, and `HOSTED_EMAIL_LOCAL_PART` configure the fixed hosted email sender identity plus stable per-user reply aliases
-- optional non-secret: `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID` defaults to `v1`
-- optional secret: `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON` may provide a JSON object of `{ keyId: base64Key }` entries so older encrypted hosted objects remain readable during key rotation
+- optional non-secret: `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID` defaults to `v1`
+- optional secret: `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON` may provide a JSON object of `{ keyId: base64Key }` entries so older encrypted hosted objects remain readable during key rotation
 - optional non-secret: `HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS` defaults to `21600000` in the checked-in Wrangler scaffold
 - optional non-secret: `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS` defaults to `3`
 - optional non-secret: `HOSTED_EXECUTION_RETRY_DELAY_MS` defaults to `30000`
@@ -58,7 +58,7 @@ Current worker env/config names read directly by `src/env.ts`:
 - optional non-secret: `HOSTED_ASSISTANT_*` vars choose the explicit platform-managed hosted assistant profile that hosted bootstrap persists into `~/.murph/config.json`. `HOSTED_ASSISTANT_API_KEY_ENV` names the env var to read at runtime; it is never the raw API key itself
 - optional provider/toolchain vars and secrets configured on the Worker are forwarded into the container only when `src/runner-env.ts` explicitly names the exact keys; broad prefix forwarding is intentionally not part of the hosted runner contract
 
-Hosted email on this worker keeps the public `From` identity fixed while new outbound sends reuse one stable per-user reply alias. Registered members can also start a thread by emailing that fixed public sender address once their verified email has been synced into hosted execution; the worker resolves that direct inbox only through an encrypted verified-owner index and still re-authorizes the sender before raw-message persistence or hosted dispatch. Learning another member's alias is not enough to reach that member's vault, and neither is addressing the public mailbox from an unregistered or mismatched sender. Legacy per-thread reply aliases still resolve during the cutover, but the worker no longer mints new per-thread route records.
+Hosted email on this worker keeps the public `From` identity fixed while new outbound sends reuse one stable per-user reply alias. Registered members can also start a thread by emailing that fixed public sender address once their verified email has been synced into hosted execution; the worker resolves that direct inbox only through an encrypted verified-owner index and still re-authorizes the sender before raw-message persistence or hosted dispatch. Learning another member's alias is not enough to reach that member's vault, and neither is addressing the public mailbox from an unregistered or mismatched sender. Legacy per-thread reply aliases are no longer accepted.
 
 Current worker routes:
 
@@ -163,7 +163,7 @@ The Cloudflare app now keeps two focused Vitest lanes:
 - Manual deploy smoke no longer stops at `POST /run` acceptance. It now polls the operator status route until the queue drains, `lastRunAt` advances, and durable bundle refs exist, so a broken containerized run does not look healthy just because the enqueue succeeded.
 - The checked-in Wrangler scaffold and rendered deploy config now declare the four required hosted runtime secrets through Wrangler's experimental `secrets.required` support, so local `wrangler` validation and deploy/version uploads fail early when those names are unset. Keep that list tight and treat optional provider secrets as separately managed Worker configuration.
 - The repo now ships `apps/cloudflare/r2-bundles-lifecycle.json` plus `pnpm --dir apps/cloudflare r2:lifecycle:apply` so the configured bundles buckets can expire transient execution journals, transient dispatch payload blobs, committed side-effect journal objects, hosted email thread routes, and hosted raw email messages under their `transient/**` prefixes after 7 days. Successful runs also best-effort delete consumed queue payload blobs and raw email bodies earlier so the lifecycle rules stay a backstop instead of the primary cleanup path.
-- Stored ciphertext envelopes now decrypt by their embedded `keyId` through the configured keyring. The repo still writes with one active bundle key at a time, so rotations should stage the old keys in `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON` until older objects age out or are rewritten; missing keyring entries still fail closed.
+- Stored ciphertext envelopes now decrypt by their embedded `keyId` through the configured keyring. The repo still writes with one active platform envelope key at a time, so rotations should stage the old keys in `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON` until older objects age out or are rewritten; missing keyring entries still fail closed.
 
 ## Runtime boundary
 

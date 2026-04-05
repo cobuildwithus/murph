@@ -32,7 +32,7 @@ export function createHostedExecutionTestEnv(
       TEST_AUTOMATION_RECIPIENT_PRIVATE_JWK_JSON,
     HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK:
       TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK_JSON,
-    HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
+    HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: Buffer.alloc(32, 9).toString("base64"),
     HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
     ...overrides,
   };

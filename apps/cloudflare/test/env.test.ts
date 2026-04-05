@@ -8,14 +8,14 @@ const REMOVED_BUNDLE_KEY_ALIAS = ["HB", "HOSTED", "BUNDLE", "KEY"].join("_");
 describe("readHostedExecutionEnvironment", () => {
   it("reads required values and defaults", () => {
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64url"),
+      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: Buffer.alloc(32, 9).toString("base64url"),
     }));
 
-    expect(environment.bundleEncryptionKey).toHaveLength(32);
-    expect(environment.bundleEncryptionKeysById).toEqual({
-      v1: environment.bundleEncryptionKey,
+    expect(environment.platformEnvelopeKey).toHaveLength(32);
+    expect(environment.platformEnvelopeKeysById).toEqual({
+      v1: environment.platformEnvelopeKey,
     });
-    expect(environment.bundleEncryptionKeyId).toBe("v1");
+    expect(environment.platformEnvelopeKeyId).toBe("v1");
     expect(environment.controlSigningSecret).toBe("dispatch-secret");
     expect(environment.defaultAlarmDelayMs).toBe(15 * 60 * 1000);
     expect(environment.maxEventAttempts).toBe(3);
@@ -48,44 +48,44 @@ describe("readHostedExecutionEnvironment", () => {
     expect(environment.allowedUserEnvKeys).toBe("OPENAI_API_KEY,TELEGRAM_BOT_TOKEN");
   });
 
-  it("reads optional bundle decryption keyrings", () => {
+  it("reads optional platform-envelope keyrings", () => {
     const previousKey = Buffer.alloc(32, 8).toString("base64");
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON: JSON.stringify({
+      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON: JSON.stringify({
         legacy: previousKey,
       }),
     }));
 
-    expect(Object.keys(environment.bundleEncryptionKeysById).sort()).toEqual(["legacy", "v1"]);
-    expect(environment.bundleEncryptionKeysById.legacy).toEqual(Uint8Array.from(Buffer.alloc(32, 8)));
-    expect(environment.bundleEncryptionKeysById.v1).toEqual(Uint8Array.from(Buffer.alloc(32, 9)));
+    expect(Object.keys(environment.platformEnvelopeKeysById).sort()).toEqual(["legacy", "v1"]);
+    expect(environment.platformEnvelopeKeysById.legacy).toEqual(Uint8Array.from(Buffer.alloc(32, 8)));
+    expect(environment.platformEnvelopeKeysById.v1).toEqual(Uint8Array.from(Buffer.alloc(32, 9)));
   });
 
-  it("rejects malformed bundle keyrings", () => {
+  it("rejects malformed platform-envelope keyrings", () => {
     expect(() =>
       readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-        HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON: "[1,2,3]",
+        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON: "[1,2,3]",
       })),
     ).toThrow(/must be a JSON object/u);
   });
 
-  it("rejects bundle keyrings that conflict with the active key id", () => {
+  it("rejects platform-envelope keyrings that conflict with the active key id", () => {
     expect(() =>
       readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-        HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON: JSON.stringify({
+        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON: JSON.stringify({
           v1: Buffer.alloc(32, 7).toString("base64"),
         }),
       })),
-    ).toThrow(/must match the current bundle encryption key/u);
+    ).toThrow(/must match the current platform envelope key/u);
   });
 
   it("does not accept the removed bundle-key alias", () => {
     expect(() =>
       readHostedExecutionEnvironment(createHostedExecutionTestEnv({
         [REMOVED_BUNDLE_KEY_ALIAS]: Buffer.alloc(32, 9).toString("base64"),
-        HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: undefined,
+        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: undefined,
       } as Record<string, string | undefined>)),
-    ).toThrow(/HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY/u);
+    ).toThrow(/HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY/u);
   });
 
   it("does not accept the removed Cloudflare signing-secret alias", () => {

@@ -275,7 +275,7 @@ describe("@murphai/hosted-execution", () => {
         HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: JSON.stringify(
           TEST_HOSTED_RECIPIENT_PUBLIC_JWK,
         ),
-        HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: "Zm9v",
+        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "Zm9v",
         HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
       }),
     ).toEqual({
@@ -284,9 +284,9 @@ describe("@murphai/hosted-execution", () => {
       automationRecipientPrivateJwkJson: JSON.stringify(TEST_HOSTED_RECIPIENT_PRIVATE_JWK),
       automationRecipientPrivateKeyringJson: null,
       automationRecipientPublicJwkJson: JSON.stringify(TEST_HOSTED_RECIPIENT_PUBLIC_JWK),
-      bundleEncryptionKeyBase64: "Zm9v",
-      bundleEncryptionKeyId: "v1",
-      bundleEncryptionKeyringJson: null,
+      platformEnvelopeKeyBase64: "Zm9v",
+      platformEnvelopeKeyId: "v1",
+      platformEnvelopeKeyringJson: null,
       controlSigningSecret: "dispatch-secret",
       defaultAlarmDelayMs: 15 * 60 * 1000,
       dispatchSigningSecret: "dispatch-secret",
@@ -1449,7 +1449,7 @@ describe("@murphai/hosted-execution", () => {
         HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: JSON.stringify(
           TEST_HOSTED_RECIPIENT_PUBLIC_JWK,
         ),
-        HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: "Zm9v",
+        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "Zm9v",
         HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET: "dispatch-secret",
       } as Record<string, string>),
     ).toThrow(/HOSTED_EXECUTION_SIGNING_SECRET/u);

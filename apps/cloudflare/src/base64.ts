@@ -12,7 +12,7 @@ export function decodeBase64Key(input: string): Uint8Array {
   try {
     return decodeBase64(normalizeBase64Url(input));
   } catch {
-    throw new TypeError("Hosted execution bundle encryption keys must be valid base64 or base64url.");
+    throw new TypeError("Hosted execution platform envelope keys must be valid base64 or base64url.");
   }
 }
 

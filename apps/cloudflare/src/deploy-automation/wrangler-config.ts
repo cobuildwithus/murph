@@ -14,7 +14,7 @@ export function buildHostedWranglerDeployConfig(
   environment: HostedDeployAutomationEnvironment,
 ): Record<string, unknown> {
   const vars: Record<string, string> = {
-    HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID: environment.bundleEncryptionKeyId,
+    HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID: environment.platformEnvelopeKeyId,
     HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS: environment.defaultAlarmDelayMs,
     HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS: environment.maxEventAttempts,
     HOSTED_EXECUTION_RETRY_DELAY_MS: environment.retryDelayMs,

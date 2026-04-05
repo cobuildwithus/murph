@@ -77,7 +77,7 @@ Set these in the selected GitHub environment as variables:
 
 Optional tuning variables:
 
-- `CF_BUNDLE_KEY_ID` (default `v1`; metadata only today, because runtime reads still support one active key id at a time)
+- `CF_PLATFORM_ENVELOPE_KEY_ID` (default `v1`; metadata for the active platform envelope key id)
 - `CF_COMPATIBILITY_DATE` (default `2026-03-27`)
 - `CF_CONTAINER_INSTANCE_TYPE` (default `standard-1`; also accepts a custom JSON object with `vcpu`, `memory_mib`, and `disk_mb`)
 - `CF_CONTAINER_MAX_INSTANCES` (default `50`)
@@ -132,13 +132,13 @@ Set these in the selected GitHub environment as secrets:
 - `CLOUDFLARE_ACCOUNT_ID`
 - `HOSTED_EXECUTION_SIGNING_SECRET`
 - `HOSTED_EXECUTION_CONTROL_SIGNING_SECRET` (optional but recommended)
-- `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY`
+- `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY`
 - `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK`
 - `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK`
 
 Optional secrets for staged rotation:
 
-- `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON`
+- `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON`
 - `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON`
 
 Optional hosted email bridge secrets:
@@ -146,15 +146,15 @@ Optional hosted email bridge secrets:
 - `HOSTED_EMAIL_CLOUDFLARE_API_TOKEN`
 - `HOSTED_EMAIL_SIGNING_SECRET`
 
-The checked-in scaffold and rendered deploy config declare the signing secret, bundle key, and automation recipient keypair in Wrangler's experimental `secrets.required` field, so `wrangler deploy` and `wrangler versions upload` fail early when any of them are missing from the Worker.
+The checked-in scaffold and rendered deploy config declare the signing secret, platform envelope key, and automation recipient keypair in Wrangler's experimental `secrets.required` field, so `wrangler deploy` and `wrangler versions upload` fail early when any of them are missing from the Worker.
 
 The worker now authenticates dispatches with HMAC signatures derived from `HOSTED_EXECUTION_SIGNING_SECRET`. Privileged control requests can use a distinct `HOSTED_EXECUTION_CONTROL_SIGNING_SECRET` and fall back to the dispatch secret only when that separate control secret is unset. Each native container invocation gets its own one-shot runner control token injected at start time.
 
 - missing `HOSTED_EXECUTION_SIGNING_SECRET` makes signed dispatches fail closed
 - missing `HOSTED_EXECUTION_CONTROL_SIGNING_SECRET` only matters when you choose to split privileged control signatures away from dispatch signatures
-- missing `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY` prevents encrypted hosted storage from decrypting
+- missing `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY` prevents encrypted hosted storage from decrypting
 - missing automation recipient JWKs prevents the worker from unwrapping per-user root keys
-- changing `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY` or `CF_BUNDLE_KEY_ID` in place still requires staging older keys in `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON`; missing keyring entries fail closed on `keyId` mismatch
+- changing `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY` or `CF_PLATFORM_ENVELOPE_KEY_ID` in place still requires staging older keys in `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON`; missing keyring entries fail closed on `keyId` mismatch
 - rotating the automation unwrap key in place requires staging older private JWKs in `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON` until existing envelopes are migrated
 
 ### Optional provider/runtime secrets
@@ -208,7 +208,7 @@ export CF_BUNDLES_PREVIEW_BUCKET=hosted-execution-bundles-staging-preview
 export CF_CONTAINER_INSTANCE_TYPE=standard-1
 export HOSTED_EXECUTION_SIGNING_SECRET=...
 export HOSTED_EXECUTION_CONTROL_SIGNING_SECRET=... # optional but recommended distinct control-plane secret
-export HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY=...
+export HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY=...
 export HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK=...
 export HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK=...
 export HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID=...
@@ -344,7 +344,7 @@ Before the first real production deploy, confirm all of these are true:
 - `CF_CONTAINER_INSTANCE_TYPE` is set explicitly to at least `standard-1`, or to a custom JSON object if you have an enterprise plan and need higher fixed limits
 - Workers Logs and Workers Traces are enabled and visible in the Cloudflare dashboard for the target Worker
 - the R2 bucket names in the generated config are correct
-- the bundle encryption key is present and stable
+- the platform envelope key is present and stable
 - the intended canary percentage is decided ahead of time, and you know which signal will be used to promote to 100% or roll back
 - one seeded hosted user can complete:
   - manual `/run`

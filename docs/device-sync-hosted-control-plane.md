@@ -152,7 +152,7 @@ Keep public connection metadata and audit history in Postgres. Do not store decr
   - `OURA_WEBHOOK_VERIFICATION_TOKEN`
 - Treat a leaked raw clone/archive that contained the local hosted `.env` the same way as a direct secret exposure for rotation and re-authorization decisions.
 - Today the hosted app records `key_version` with each `device_token_audit` row, while the canonical decryptable token bundles live in Cloudflare's encrypted runtime store under the user root key.
-- That means encryption-key rotation needs one of two operational paths before the cutover:
+- That means encryption-key rotation now needs one of two operational paths:
   - re-encrypt every affected Cloudflare-escrowed token bundle while the old key is still available, then switch the deployment to the new key/version
   - revoke or delete the old escrowed token bundles and force each affected provider connection through a fresh authorization flow
 - If the old database credential and the old encryption key may both have been exposed together, treat the existing escrowed provider tokens as compromised and prefer revocation/re-authorization over silent carry-forward.

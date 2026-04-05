@@ -141,9 +141,9 @@ export class RunnerCommitRecovery {
 
 export function createRunnerCommitRecovery(input: {
   bucket: R2BucketLike;
-  bundleEncryptionKey: Uint8Array;
-  bundleEncryptionKeyId: string;
-  bundleEncryptionKeysById: Readonly<Record<string, Uint8Array>>;
+  platformEnvelopeKey: Uint8Array;
+  platformEnvelopeKeyId: string;
+  platformEnvelopeKeysById: Readonly<Record<string, Uint8Array>>;
   queueStore: RunnerQueueStore;
   scheduler: RunnerScheduler;
 }): RunnerCommitRecovery {
@@ -152,15 +152,15 @@ export function createRunnerCommitRecovery(input: {
     input.scheduler,
     createHostedExecutionJournalStore({
       bucket: input.bucket,
-      key: input.bundleEncryptionKey,
-      keyId: input.bundleEncryptionKeyId,
-      keysById: input.bundleEncryptionKeysById,
+      key: input.platformEnvelopeKey,
+      keyId: input.platformEnvelopeKeyId,
+      keysById: input.platformEnvelopeKeysById,
     }),
     new HostedBundleGarbageCollector(
       input.bucket,
-      input.bundleEncryptionKey,
-      input.bundleEncryptionKeyId,
-      input.bundleEncryptionKeysById,
+      input.platformEnvelopeKey,
+      input.platformEnvelopeKeyId,
+      input.platformEnvelopeKeysById,
     ),
   );
 }

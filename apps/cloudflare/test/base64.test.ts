@@ -15,7 +15,7 @@ describe("cloudflare base64 helpers", () => {
   it("accepts base64url keys but rejects malformed key material", () => {
     expect(Buffer.from(decodeBase64Key("AQIDBA"))).toEqual(Buffer.from([1, 2, 3, 4]));
     expect(() => decodeBase64Key("bad key===")).toThrow(
-      "Hosted execution bundle encryption keys must be valid base64 or base64url.",
+      "Hosted execution platform envelope keys must be valid base64 or base64url.",
     );
   });
 });

@@ -124,9 +124,9 @@ export class HostedUserRunner {
     this.runnerContainerNamespace = runnerContainerNamespace;
     const dispatchPayloadParserStore = createHostedExecutionDispatchPayloadStore({
       bucket,
-      key: env.bundleEncryptionKey,
-      keyId: env.bundleEncryptionKeyId,
-      keysById: env.bundleEncryptionKeysById,
+      key: env.platformEnvelopeKey,
+      keyId: env.platformEnvelopeKeyId,
+      keysById: env.platformEnvelopeKeysById,
     });
     const userKeyStore = createHostedUserKeyStore({
       automationRecipientKeyId: env.automationRecipientKeyId,
@@ -134,9 +134,9 @@ export class HostedUserRunner {
       automationRecipientPrivateKeysById: env.automationRecipientPrivateKeysById,
       automationRecipientPublicKey: env.automationRecipientPublicKey,
       bucket,
-      envelopeEncryptionKey: env.bundleEncryptionKey,
-      envelopeEncryptionKeyId: env.bundleEncryptionKeyId,
-      envelopeEncryptionKeysById: env.bundleEncryptionKeysById,
+      envelopeEncryptionKey: env.platformEnvelopeKey,
+      envelopeEncryptionKeyId: env.platformEnvelopeKeyId,
+      envelopeEncryptionKeysById: env.platformEnvelopeKeysById,
     });
     this.userKeyStore = userKeyStore;
     const runner = this;
@@ -239,9 +239,9 @@ export class HostedUserRunner {
       ),
       commitRecovery: createRunnerCommitRecovery({
         bucket: this.bucket,
-        bundleEncryptionKey: crypto.rootKey,
-        bundleEncryptionKeyId: crypto.rootKeyId,
-        bundleEncryptionKeysById: crypto.keysById,
+        platformEnvelopeKey: crypto.rootKey,
+        platformEnvelopeKeyId: crypto.rootKeyId,
+        platformEnvelopeKeysById: crypto.keysById,
         queueStore: this.queueStore,
         scheduler: this.scheduler,
       }),
@@ -256,9 +256,9 @@ export class HostedUserRunner {
         crypto.rootKey,
         crypto.rootKeyId,
         crypto.keysById,
-        this.env.bundleEncryptionKey,
-        this.env.bundleEncryptionKeyId,
-        this.env.bundleEncryptionKeysById,
+        this.env.platformEnvelopeKey,
+        this.env.platformEnvelopeKeyId,
+        this.env.platformEnvelopeKeysById,
         allowedUserEnvSource,
         hostedEmailConfig,
       ),
