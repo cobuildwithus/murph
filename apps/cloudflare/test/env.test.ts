@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import {
+  filterHostedRunnerUserEnv,
+  isHostedUserEnvKeyAllowed,
+} from "../src/hosted-env-policy.js";
 import { readHostedExecutionEnvironment } from "../src/env.js";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures";
 
@@ -104,5 +108,41 @@ describe("readHostedExecutionEnvironment", () => {
         HOSTED_WEB_INTERNAL_SIGNING_SECRET: undefined,
       } as Record<string, string | undefined>)),
     ).toThrow(/HOSTED_WEB_INTERNAL_SIGNING_SECRET/u);
+  });
+});
+
+describe("hosted runner user env policy", () => {
+  it("keeps parser executable selectors operator-only", () => {
+    expect(isHostedUserEnvKeyAllowed("OPENAI_API_KEY")).toBe(true);
+
+    expect(isHostedUserEnvKeyAllowed("FFMPEG_COMMAND")).toBe(false);
+    expect(isHostedUserEnvKeyAllowed("PDFTOTEXT_COMMAND")).toBe(false);
+    expect(isHostedUserEnvKeyAllowed("WHISPER_COMMAND")).toBe(false);
+    expect(isHostedUserEnvKeyAllowed("WHISPER_MODEL_PATH")).toBe(false);
+  });
+
+  it("does not let the custom allowlist re-enable operator-only or process-control keys", () => {
+    const source = {
+      HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: [
+        "FFMPEG_COMMAND",
+        "WHISPER_COMMAND",
+        "NODE_OPTIONS",
+      ].join(","),
+    };
+
+    expect(isHostedUserEnvKeyAllowed("FFMPEG_COMMAND", source)).toBe(false);
+    expect(isHostedUserEnvKeyAllowed("WHISPER_COMMAND", source)).toBe(false);
+    expect(isHostedUserEnvKeyAllowed("NODE_OPTIONS", source)).toBe(false);
+  });
+
+  it("filters operator-only keys out of runner user env before execution", () => {
+    expect(filterHostedRunnerUserEnv({
+      FFMPEG_COMMAND: "/tmp/evil-ffmpeg",
+      NODE_OPTIONS: "--require /tmp/evil-loader.js",
+      OPENAI_API_KEY: "sk-test",
+      WHISPER_COMMAND: "/tmp/evil-whisper",
+    })).toEqual({
+      OPENAI_API_KEY: "sk-test",
+    });
   });
 });

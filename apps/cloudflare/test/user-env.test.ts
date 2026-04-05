@@ -91,12 +91,11 @@ describe("hosted user env helpers", () => {
     })).toThrow(/not allowed/u);
   });
 
-  it("accepts canonical model and parser keys but rejects removed integration keys", () => {
+  it("accepts canonical model keys but rejects operator-only parser keys and removed integration keys", () => {
     expect(applyHostedUserEnvUpdate({
       current: {},
       update: {
         env: {
-          FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
           HF_TOKEN: "hf-user",
           OPENAI_API_KEY: "sk-user",
           VENICE_API_KEY: "venice-user",
@@ -105,12 +104,41 @@ describe("hosted user env helpers", () => {
         mode: "replace",
       },
     })).toEqual({
-      FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       HF_TOKEN: "hf-user",
       OPENAI_API_KEY: "sk-user",
       VENICE_API_KEY: "venice-user",
       XAI_API_KEY: "xai-user",
     });
+
+    expect(() => applyHostedUserEnvUpdate({
+      current: {},
+      update: {
+        env: {
+          FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
+        },
+        mode: "replace",
+      },
+    })).toThrow(/not allowed/u);
+
+    expect(() => applyHostedUserEnvUpdate({
+      current: {},
+      update: {
+        env: {
+          PDFTOTEXT_COMMAND: "/usr/local/bin/pdftotext",
+        },
+        mode: "replace",
+      },
+    })).toThrow(/not allowed/u);
+
+    expect(() => applyHostedUserEnvUpdate({
+      current: {},
+      update: {
+        env: {
+          WHISPER_COMMAND: "/usr/local/bin/whisper-cli",
+        },
+        mode: "replace",
+      },
+    })).toThrow(/not allowed/u);
 
     expect(() => applyHostedUserEnvUpdate({
       current: {},
@@ -197,6 +225,19 @@ describe("hosted user env helpers", () => {
       update: {
         env: {
           HOSTED_WEB_INTERNAL_SIGNING_SECRET: "nope",
+        },
+        mode: "replace",
+      },
+    })).toThrow(/not allowed/u);
+
+    expect(() => applyHostedUserEnvUpdate({
+      current: {},
+      source: {
+        HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "NODE_OPTIONS",
+      },
+      update: {
+        env: {
+          NODE_OPTIONS: "--require /tmp/evil-loader.js",
         },
         mode: "replace",
       },
