@@ -36,6 +36,7 @@ Current worker bindings read directly by `src/index.ts`:
 Current worker env/config names read directly by `src/env.ts`:
 
 - required secret: `HOSTED_EXECUTION_SIGNING_SECRET`
+- optional secret: `HOSTED_EXECUTION_CONTROL_SIGNING_SECRET` splits privileged control signatures away from dispatch signatures; when unset, control requests fall back to `HOSTED_EXECUTION_SIGNING_SECRET`
 - required secret: `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY`
 - required secret: `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK`
 - required secret: `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK`

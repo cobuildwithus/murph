@@ -128,7 +128,7 @@ interface WorkerEnvironmentSource extends WorkerEnvironmentContract<UserRunnerDu
 
 type RouteParams = Readonly<Record<string, string>>;
 type RouteMatcher = (pathname: string) => RouteParams | null;
-type WorkerRouteAuthorization = "signed" | null;
+type WorkerRouteAuthorization = "control-signed" | "dispatch-signed" | null;
 type WrongMethodResponse = "method-not-allowed" | "not-found";
 
 interface DeclarativeRoute<Context> {
@@ -164,7 +164,7 @@ const workerPublicRoutes: readonly DeclarativeRoute<{
 
 const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
-    authorization: "signed",
+    authorization: "dispatch-signed",
     async handle(context) {
       return handleSignedDispatchRoute(context);
     },
@@ -173,7 +173,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   },
   {
     authorizeBeforeMethod: true,
-    authorization: "signed",
+    authorization: "control-signed",
     async handle(context, params) {
       return handleManualRunRoute(context, params.userId);
     },
@@ -183,7 +183,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   },
   {
     authorizeBeforeMethod: true,
-    authorization: "signed",
+    authorization: "control-signed",
     async handle(context, params) {
       return handleStatusRoute(context, params.userId);
     },
@@ -193,7 +193,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   },
   {
     authorizeBeforeMethod: true,
-    authorization: "signed",
+    authorization: "control-signed",
     async handle(context, params) {
       return handleUserEnvRoute(context, params.userId);
     },
@@ -203,7 +203,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   },
   {
     authorizeBeforeMethod: true,
-    authorization: "signed",
+    authorization: "control-signed",
     async handle(context, params) {
       return handleUserDeviceSyncRuntimeSnapshotRoute(context, params.userId);
     },
@@ -213,7 +213,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   },
   {
     authorizeBeforeMethod: true,
-    authorization: "signed",
+    authorization: "control-signed",
     async handle(context, params) {
       return handleUserEmailAddressRoute(context, params.userId);
     },
@@ -223,7 +223,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   },
   {
     authorizeBeforeMethod: true,
-    authorization: "signed",
+    authorization: "control-signed",
     async handle(context, params) {
       return handleUserKeyEnvelopeRoute(context, params.userId);
     },
@@ -233,7 +233,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   },
   {
     authorizeBeforeMethod: true,
-    authorization: "signed",
+    authorization: "control-signed",
     async handle(context, params) {
       return handleUserKeyRecipientRoute(context, params.userId, params.kind);
     },
@@ -243,7 +243,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   },
   {
     authorizeBeforeMethod: true,
-    authorization: "signed",
+    authorization: "control-signed",
     async handle(context, params) {
       return handlePendingUsageRoute(context, params.userId);
     },
@@ -253,7 +253,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   },
   {
     authorizeBeforeMethod: true,
-    authorization: "signed",
+    authorization: "control-signed",
     async handle(context, params) {
       return handleGatewayRoute(context, params.userId, params.resource);
     },
@@ -468,8 +468,26 @@ async function authorizeRoute(
   context: { request: Request } & Partial<WorkerRouteContext>,
 ): Promise<Response | null> {
   switch (authorization) {
-    case "signed": {
+    case "dispatch-signed": {
       const secret = context.environment?.dispatchSigningSecret;
+      if (!secret) {
+        return unauthorized();
+      }
+      const payload = await readCachedRequestText(context);
+      const { signature, timestamp } = readHostedExecutionSignatureHeaders(context.request.headers);
+      const verified = await verifyHostedExecutionSignature({
+        method: context.request.method,
+        payload,
+        path: new URL(context.request.url).pathname,
+        secret,
+        signature,
+        timestamp,
+      });
+
+      return verified ? null : unauthorized();
+    }
+    case "control-signed": {
+      const secret = context.environment?.controlSigningSecret;
       if (!secret) {
         return unauthorized();
       }

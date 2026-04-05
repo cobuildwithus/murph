@@ -16,10 +16,20 @@ describe("readHostedExecutionEnvironment", () => {
       v1: environment.bundleEncryptionKey,
     });
     expect(environment.bundleEncryptionKeyId).toBe("v1");
+    expect(environment.controlSigningSecret).toBe("dispatch-secret");
     expect(environment.defaultAlarmDelayMs).toBe(15 * 60 * 1000);
     expect(environment.maxEventAttempts).toBe(3);
     expect(environment.retryDelayMs).toBe(30_000);
     expect(environment.runnerTimeoutMs).toBe(60_000);
+  });
+
+  it("prefers a dedicated control signing secret when configured", () => {
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_EXECUTION_CONTROL_SIGNING_SECRET: "control-secret",
+    }));
+
+    expect(environment.controlSigningSecret).toBe("control-secret");
+    expect(environment.dispatchSigningSecret).toBe("dispatch-secret");
   });
 
   it("reads the runner timeout when configured", () => {

@@ -32,6 +32,7 @@ export interface HostedExecutionWorkerEnvironment {
   bundleEncryptionKeyBase64: string;
   bundleEncryptionKeyId: string;
   bundleEncryptionKeyringJson: string | null;
+  controlSigningSecret: string;
   defaultAlarmDelayMs: number;
   dispatchSigningSecret: string;
   maxEventAttempts: number;
@@ -71,8 +72,15 @@ export function readHostedExecutionControlEnvironment(
 
   return {
     baseUrl: dispatchUrl,
-    signingSecret: normalizeHostedExecutionString(source.HOSTED_EXECUTION_SIGNING_SECRET),
+    signingSecret: readHostedExecutionControlSigningSecret(source),
   };
+}
+
+export function readHostedExecutionControlSigningSecret(
+  source: EnvSource = process.env,
+): string | null {
+  return normalizeHostedExecutionString(source.HOSTED_EXECUTION_CONTROL_SIGNING_SECRET)
+    ?? normalizeHostedExecutionString(source.HOSTED_EXECUTION_SIGNING_SECRET);
 }
 
 export function readHostedExecutionWebControlPlaneEnvironment(
@@ -130,6 +138,10 @@ export function readHostedExecutionWorkerEnvironment(
     ) ?? "v1",
     bundleEncryptionKeyringJson: normalizeHostedExecutionString(
       source.HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON,
+    ),
+    controlSigningSecret: requireHostedExecutionString(
+      readHostedExecutionControlSigningSecret(source),
+      "HOSTED_EXECUTION_CONTROL_SIGNING_SECRET or HOSTED_EXECUTION_SIGNING_SECRET",
     ),
     defaultAlarmDelayMs: parsePositiveInteger(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS),

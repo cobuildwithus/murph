@@ -17,6 +17,7 @@ type InternalDeviceSyncConnectLinkRouteModule = typeof import(
 let internalDeviceSyncConnectLinkRoute: InternalDeviceSyncConnectLinkRouteModule;
 
 describe("device sync internal connect-link route", () => {
+  const originalControlSigningSecret = process.env.HOSTED_EXECUTION_CONTROL_SIGNING_SECRET;
   const originalSigningSecret = process.env.HOSTED_EXECUTION_SIGNING_SECRET;
 
   beforeAll(async () => {
@@ -26,6 +27,12 @@ describe("device sync internal connect-link route", () => {
   });
 
   afterEach(() => {
+    if (originalControlSigningSecret === undefined) {
+      delete process.env.HOSTED_EXECUTION_CONTROL_SIGNING_SECRET;
+    } else {
+      process.env.HOSTED_EXECUTION_CONTROL_SIGNING_SECRET = originalControlSigningSecret;
+    }
+
     if (originalSigningSecret === undefined) {
       delete process.env.HOSTED_EXECUTION_SIGNING_SECRET;
       return;
@@ -48,8 +55,9 @@ describe("device sync internal connect-link route", () => {
   });
 
   it("creates a hosted device connect link for the bound execution user", async () => {
+    process.env.HOSTED_EXECUTION_CONTROL_SIGNING_SECRET = "control-secret";
     process.env.HOSTED_EXECUTION_SIGNING_SECRET = "dispatch-secret";
-    const headers = await createSignedRequestHeaders();
+    const headers = await createSignedRequestHeaders("control-secret");
     const response = await internalDeviceSyncConnectLinkRoute.POST(
       new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
         headers,
@@ -76,7 +84,35 @@ describe("device sync internal connect-link route", () => {
     });
   });
 
+  it("rejects requests signed only with the dispatch secret when a distinct control secret is configured", async () => {
+    process.env.HOSTED_EXECUTION_CONTROL_SIGNING_SECRET = "control-secret";
+    process.env.HOSTED_EXECUTION_SIGNING_SECRET = "dispatch-secret";
+
+    const response = await internalDeviceSyncConnectLinkRoute.POST(
+      new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
+        headers: await createSignedRequestHeaders("dispatch-secret"),
+        method: "POST",
+      }),
+      {
+        params: Promise.resolve({
+          provider: "whoop",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(401);
+    expect(mocks.startConnection).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_EXECUTION_UNAUTHORIZED",
+        message: "Unauthorized hosted execution request.",
+        retryable: false,
+      },
+    });
+  });
+
   it("rejects unsigned requests on the internal connect-link route", async () => {
+    process.env.HOSTED_EXECUTION_CONTROL_SIGNING_SECRET = "control-secret";
     process.env.HOSTED_EXECUTION_SIGNING_SECRET = "dispatch-secret";
 
     const response = await internalDeviceSyncConnectLinkRoute.POST(
@@ -119,12 +155,12 @@ describe("device sync internal connect-link route", () => {
   });
 });
 
-async function createSignedRequestHeaders(): Promise<HeadersInit> {
+async function createSignedRequestHeaders(secret: string): Promise<HeadersInit> {
   const headers = await createHostedExecutionSignatureHeaders({
     method: "POST",
     path: "/api/internal/device-sync/providers/whoop/connect-link",
     payload: "",
-    secret: "dispatch-secret",
+    secret,
     timestamp: new Date().toISOString(),
   });
 

@@ -3,6 +3,7 @@ import {
   buildHostedExecutionUserRunPath,
   buildHostedExecutionUserStatusPath,
   parseHostedExecutionUserStatus,
+  readHostedExecutionControlSigningSecret,
   type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
 
@@ -70,7 +71,7 @@ export async function runSmokeHostedDeploy(input: {
   const log = input.log ?? console.log;
   const workerBaseUrl = resolveSmokeWorkerBaseUrl(source);
   const smokeUserId = normalizeConfiguredString(source.HOSTED_EXECUTION_SMOKE_USER_ID);
-  const signingSecret = normalizeConfiguredString(source.HOSTED_EXECUTION_SIGNING_SECRET);
+  const signingSecret = readHostedExecutionControlSigningSecret(source);
   const versionOverrideHeaders = buildVersionOverrideHeaders(source);
 
   await assertHealth(fetchImpl, new URL("/health", `${workerBaseUrl}/`).toString(), versionOverrideHeaders);
@@ -78,7 +79,7 @@ export async function runSmokeHostedDeploy(input: {
   if (smokeUserId) {
     if (!signingSecret) {
       throw new Error(
-        "HOSTED_EXECUTION_SIGNING_SECRET is required when HOSTED_EXECUTION_SMOKE_USER_ID is set.",
+        "HOSTED_EXECUTION_CONTROL_SIGNING_SECRET or HOSTED_EXECUTION_SIGNING_SECRET is required when HOSTED_EXECUTION_SMOKE_USER_ID is set.",
       );
     }
 
