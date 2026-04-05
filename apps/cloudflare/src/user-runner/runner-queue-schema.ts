@@ -12,16 +12,10 @@ export function ensureRunnerQueueSchema(sql: DurableObjectSqlStorageLike): void 
       user_id TEXT NOT NULL,
       activated INTEGER NOT NULL DEFAULT 0,
       in_flight INTEGER NOT NULL DEFAULT 0,
-      last_error TEXT,
       last_error_at TEXT,
       last_error_code TEXT,
-      last_event_id TEXT,
       last_run_at TEXT,
-      next_wake_at TEXT,
-      retrying_event_id TEXT,
-      backpressured_event_ids_json TEXT NOT NULL DEFAULT '[]',
-      run_json TEXT,
-      timeline_json TEXT NOT NULL DEFAULT '[]'
+      next_wake_at TEXT
     )
   `);
   sql.exec(`
@@ -39,6 +33,7 @@ export function ensureRunnerQueueSchema(sql: DurableObjectSqlStorageLike): void 
   sql.exec(`
     CREATE TABLE IF NOT EXISTS consumed_events (
       event_id TEXT PRIMARY KEY,
+      recorded_at TEXT NOT NULL,
       expires_at TEXT NOT NULL
     )
   `);
@@ -47,10 +42,20 @@ export function ensureRunnerQueueSchema(sql: DurableObjectSqlStorageLike): void 
     ON consumed_events (expires_at)
   `);
   sql.exec(`
+    CREATE TABLE IF NOT EXISTS backpressured_events (
+      event_id TEXT PRIMARY KEY,
+      rejected_at TEXT NOT NULL
+    )
+  `);
+  sql.exec(`
+    CREATE INDEX IF NOT EXISTS backpressured_events_rejected_at_idx
+    ON backpressured_events (rejected_at, event_id)
+  `);
+  sql.exec(`
     CREATE TABLE IF NOT EXISTS poisoned_events (
       event_id TEXT PRIMARY KEY,
       poisoned_at TEXT NOT NULL,
-      last_error TEXT NOT NULL
+      last_error_code TEXT NOT NULL
     )
   `);
   sql.exec(`
@@ -60,11 +65,12 @@ export function ensureRunnerQueueSchema(sql: DurableObjectSqlStorageLike): void 
   for (const [columnName, columnDefinition] of [
     ["last_error_at", "TEXT"],
     ["last_error_code", "TEXT"],
-    ["run_json", "TEXT"],
-    ["timeline_json", "TEXT NOT NULL DEFAULT '[]'"],
   ] as const) {
     ensureRunnerMetaColumn(sql, columnName, columnDefinition);
   }
+  ensurePendingEventsColumn(sql, "last_error_code", "TEXT");
+  ensureConsumedEventsColumn(sql, "recorded_at", "TEXT");
+  ensurePoisonedEventsColumn(sql, "last_error_code", "TEXT");
   sql.exec("DROP TABLE IF EXISTS consumed_event_replay_filter");
 }
 
@@ -91,7 +97,7 @@ function ensurePendingEventsTable(sql: DurableObjectSqlStorageLike): void {
       attempts INTEGER NOT NULL,
       available_at TEXT NOT NULL,
       enqueued_at TEXT NOT NULL,
-      last_error TEXT
+      last_error_code TEXT
     )
   `);
 }
@@ -107,5 +113,47 @@ function ensureRunnerMetaColumn(
 
   if (!hasColumn) {
     sql.exec(`ALTER TABLE runner_meta ADD COLUMN ${columnName} ${columnDefinition}`);
+  }
+}
+
+function ensurePendingEventsColumn(
+  sql: DurableObjectSqlStorageLike,
+  columnName: string,
+  columnDefinition: string,
+): void {
+  const hasColumn = sql.exec<{ name: DurableObjectSqlValue }>(
+    "PRAGMA table_info(pending_events)",
+  ).toArray().some((row) => row.name === columnName);
+
+  if (!hasColumn) {
+    sql.exec(`ALTER TABLE pending_events ADD COLUMN ${columnName} ${columnDefinition}`);
+  }
+}
+
+function ensureConsumedEventsColumn(
+  sql: DurableObjectSqlStorageLike,
+  columnName: string,
+  columnDefinition: string,
+): void {
+  const hasColumn = sql.exec<{ name: DurableObjectSqlValue }>(
+    "PRAGMA table_info(consumed_events)",
+  ).toArray().some((row) => row.name === columnName);
+
+  if (!hasColumn) {
+    sql.exec(`ALTER TABLE consumed_events ADD COLUMN ${columnName} ${columnDefinition}`);
+  }
+}
+
+function ensurePoisonedEventsColumn(
+  sql: DurableObjectSqlStorageLike,
+  columnName: string,
+  columnDefinition: string,
+): void {
+  const hasColumn = sql.exec<{ name: DurableObjectSqlValue }>(
+    "PRAGMA table_info(poisoned_events)",
+  ).toArray().some((row) => row.name === columnName);
+
+  if (!hasColumn) {
+    sql.exec(`ALTER TABLE poisoned_events ADD COLUMN ${columnName} ${columnDefinition}`);
   }
 }

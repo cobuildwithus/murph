@@ -57,6 +57,7 @@ export function createTestSqlStorage(): TestSqlStorageLike {
         DROP TABLE IF EXISTS runner_bundle_slots;
         DROP TABLE IF EXISTS pending_events;
         DROP TABLE IF EXISTS consumed_events;
+        DROP TABLE IF EXISTS backpressured_events;
         DROP TABLE IF EXISTS poisoned_events;
       `);
       initializeSchema(database);
@@ -71,16 +72,10 @@ function initializeSchema(database: DatabaseSync): void {
       user_id TEXT NOT NULL,
       activated INTEGER NOT NULL DEFAULT 0,
       in_flight INTEGER NOT NULL DEFAULT 0,
-      last_error TEXT,
       last_error_at TEXT,
       last_error_code TEXT,
-      last_event_id TEXT,
       last_run_at TEXT,
-      next_wake_at TEXT,
-      retrying_event_id TEXT,
-      backpressured_event_ids_json TEXT NOT NULL DEFAULT '[]',
-      run_json TEXT,
-      timeline_json TEXT NOT NULL DEFAULT '[]'
+      next_wake_at TEXT
     );
     CREATE TABLE IF NOT EXISTS runner_bundle_slots (
       slot TEXT PRIMARY KEY,
@@ -93,16 +88,21 @@ function initializeSchema(database: DatabaseSync): void {
       attempts INTEGER NOT NULL,
       available_at TEXT NOT NULL,
       enqueued_at TEXT NOT NULL,
-      last_error TEXT
+      last_error_code TEXT
     );
     CREATE TABLE IF NOT EXISTS consumed_events (
       event_id TEXT PRIMARY KEY,
+      recorded_at TEXT NOT NULL,
       expires_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS backpressured_events (
+      event_id TEXT PRIMARY KEY,
+      rejected_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS poisoned_events (
       event_id TEXT PRIMARY KEY,
       poisoned_at TEXT NOT NULL,
-      last_error TEXT NOT NULL
+      last_error_code TEXT NOT NULL
     );
   `);
 }

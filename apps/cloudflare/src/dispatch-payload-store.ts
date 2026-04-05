@@ -21,7 +21,6 @@ import {
 } from "./crypto.js";
 
 export interface HostedExecutionDispatchPayloadRef {
-  legacyDispatchRef?: HostedExecutionDispatchRef;
   key: string;
 }
 
@@ -72,27 +71,8 @@ export function createHostedDispatchPayloadStore(input: {
     },
 
     async readDispatchPayload(ref) {
-      try {
-        return await readEncryptedR2Json({
-          aad: buildCurrentDispatchPayloadAad(ref.key),
-          bucket: input.bucket,
-          cryptoKey: input.key,
-          cryptoKeysById: input.keysById,
-          expectedKeyId: input.keyId,
-          key: ref.key,
-          parse(value) {
-            return parseHostedExecutionDispatchRequest(value);
-          },
-          scope: "dispatch-payload",
-        });
-      } catch (error) {
-        if (!ref.legacyDispatchRef) {
-          throw error;
-        }
-      }
-
       return readEncryptedR2Json({
-        aad: buildLegacyDispatchPayloadAad(ref.key, ref.legacyDispatchRef),
+        aad: buildCurrentDispatchPayloadAad(ref.key),
         bucket: input.bucket,
         cryptoKey: input.key,
         cryptoKeysById: input.keysById,
@@ -121,7 +101,6 @@ export function createHostedDispatchPayloadStore(input: {
         )) {
           const dispatch = await this.readDispatchPayload({
             key,
-            legacyDispatchRef: payload.dispatchRef,
           });
 
           if (!dispatch) {
@@ -206,20 +185,6 @@ function buildCurrentDispatchPayloadAad(key: string): Uint8Array {
   return buildHostedStorageAad({
     key,
     purpose: "dispatch-payload",
-  });
-}
-
-function buildLegacyDispatchPayloadAad(
-  key: string,
-  dispatchRef: HostedExecutionDispatchRef,
-): Uint8Array {
-  return buildHostedStorageAad({
-    eventId: dispatchRef.eventId,
-    eventKind: dispatchRef.eventKind,
-    key,
-    occurredAt: dispatchRef.occurredAt,
-    purpose: "dispatch-payload",
-    userId: dispatchRef.userId,
   });
 }
 
