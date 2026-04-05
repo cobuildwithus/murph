@@ -1,0 +1,5 @@
+export {
+  HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
+  HostedAssistantConfigurationError,
+  readHostedAssistantApiKeyEnvName,
+} from "@murphai/assistant-core";

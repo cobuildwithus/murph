@@ -1,4 +1,3 @@
-import type { SharePack } from "@murphai/contracts";
 import { parseHostedExecutionSharePack } from "@murphai/hosted-execution";
 
 import type { R2BucketLike } from "./bundle-store.js";
@@ -8,8 +7,10 @@ import { readEncryptedR2Json, writeEncryptedR2Json } from "./crypto.js";
 
 const HOSTED_SHARE_PACK_SCHEMA = "murph.hosted-share-pack.v1";
 
+type HostedExecutionSharePack = ReturnType<typeof parseHostedExecutionSharePack>;
+
 interface StoredHostedSharePack {
-  pack: SharePack;
+  pack: HostedExecutionSharePack;
   schema: typeof HOSTED_SHARE_PACK_SCHEMA;
   shareId: string;
   updatedAt: string;
@@ -17,8 +18,11 @@ interface StoredHostedSharePack {
 
 export interface HostedShareStore {
   deleteSharePack(shareId: string): Promise<void>;
-  readSharePack(shareId: string): Promise<SharePack | null>;
-  writeSharePack(shareId: string, pack: SharePack): Promise<SharePack>;
+  readSharePack(shareId: string): Promise<HostedExecutionSharePack | null>;
+  writeSharePack(
+    shareId: string,
+    pack: HostedExecutionSharePack,
+  ): Promise<HostedExecutionSharePack>;
 }
 
 export function createHostedShareStore(input: {

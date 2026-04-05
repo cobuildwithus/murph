@@ -193,12 +193,17 @@ function verifyWorkspaceImportPolicy({
   sourceMember,
   specifier,
 }) {
-  if (sourceMember === "apps/web" && specifier === "@murphai/device-syncd") {
-    return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} from the device-sync daemon root; hosted web must use @murphai/device-syncd/public-ingress or another explicit subpath so callback/webhook code does not depend on daemon/server exports.`;
+  if (specifier === "@murphai/device-syncd" && sourceMember !== "packages/device-syncd") {
+    return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} from the device-sync daemon root; internal workspace consumers must use @murphai/device-syncd/public-ingress, @murphai/device-syncd/client, or another explicit subpath so they do not depend on the daemon root convenience surface.`;
   }
 
-  if (sourceMember === "packages/assistant-runtime" && specifier === "@murphai/device-syncd") {
-    return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} from the device-sync daemon root; assistant-runtime must use explicit device-sync subpaths so hosted runtime code does not depend on the daemon root convenience surface.`;
+  if (
+    sourceMember === "apps/cloudflare"
+    && (specifier === "@murphai/assistant-core"
+      || specifier.startsWith("@murphai/assistant-core/"))
+    && filePath.includes(`${path.sep}apps${path.sep}cloudflare${path.sep}src${path.sep}`)
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} directly; apps/cloudflare must depend on @murphai/assistant-runtime or another hosted-runtime owner surface instead of the lower assistant-core boundary.`;
   }
 
   return null;

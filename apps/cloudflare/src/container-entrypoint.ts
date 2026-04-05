@@ -8,7 +8,7 @@ import {
 } from "@murphai/assistant-runtime";
 import {
   HostedAssistantConfigurationError,
-} from "@murphai/assistant-core";
+} from "@murphai/assistant-runtime/hosted-assistant-env";
 import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";

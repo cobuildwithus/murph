@@ -1,6 +1,7 @@
 import { assertContract, sharePackSchema } from "@murphai/contracts";
 
-import { createHostedShareLink, requireHostedShareInternalToken } from "@/src/lib/hosted-share/service";
+import { requireHostedShareInternalToken } from "@/src/lib/hosted-execution/internal";
+import { createHostedShareLink } from "@/src/lib/hosted-share/service";
 import { jsonOk, withJsonError, readJsonObject } from "@/src/lib/hosted-onboarding/http";
 
 export const POST = withJsonError(async (request: Request) => {
