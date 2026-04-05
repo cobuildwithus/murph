@@ -63,6 +63,7 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - Raw imports are copied under stable type-specific folders in `raw/` and remain immutable in place.
 - Each raw import directory also stores an immutable `manifest.json` sidecar with artifact checksums and import provenance.
 - `raw/inbox/**` is the exception: inbox captures store immutable `envelope.json` plus copied attachments as canonical evidence, and the structured canonical capture facts live in `ledger/inbox-captures/YYYY/YYYY-MM.jsonl` instead of the generic raw-import manifest contract.
+- Assistant inbox automation may additionally preserve accepted stored inbox document attachments into canonical document imports under `raw/documents/**`, but `raw/inbox/**` remains the source-capture layer for the original message envelope and copied attachment bytes.
 - Assessment source payloads are copied to `raw/assessments/YYYY/MM/<assessmentId>/source.json` and remain immutable in place.
 - `raw/samples/<stream>/YYYY/MM/<transformId>/` uses an import-batch identifier returned from `samples import-csv`; baseline does not write a standalone transform record.
 - `raw/integrations/<provider>/YYYY/MM/<transformId>/` uses an import-batch identifier returned from normalized device/provider imports and keeps provider API snapshots immutable alongside a manifest.
@@ -88,6 +89,7 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 ## Attachment Conventions
 
 - Document imports use `raw/documents/YYYY/MM/<documentId>/<filename>`.
+- Auto-preserved inbox document attachments reuse the same `raw/documents/YYYY/MM/<documentId>/<filename>` contract instead of introducing a second evidence folder family.
 - Assessment imports use `raw/assessments/YYYY/MM/<assessmentId>/source.json`.
 - Meal attachments use `raw/meals/YYYY/MM/<mealId>/<slot>-<filename>`.
 - Sample CSV imports use `raw/samples/<stream>/YYYY/MM/<transformId>/<filename>.csv`, where `transformId` is the returned import-batch id.

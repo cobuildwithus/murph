@@ -4,6 +4,7 @@ import type { AssistantModelSpec } from '../../model-harness.js'
 import type { VaultServices } from '../../vault-services.js'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
+import { errorMessage } from '../shared.js'
 import { collectAssistantAutoReplyGroup } from './grouping.js'
 import {
   applyAssistantAutoReplyProcessResult,
@@ -30,6 +31,9 @@ type AssistantInboxCaptureSummary = Awaited<
   ReturnType<InboxServices['list']>
 >['items'][number]
 type AssistantInboxListResult = Awaited<ReturnType<InboxServices['list']>>
+type AssistantPreserveDocumentAttachmentsResult = Awaited<
+  ReturnType<NonNullable<InboxServices['preserveDocumentAttachments']>>
+>
 
 interface AssistantAutomationCandidate {
   replyPending: boolean
@@ -158,7 +162,42 @@ export async function scanAssistantAutomationOnce(input: {
   const candidatesByCaptureId = new Map(
     candidates.map((candidate) => [candidate.summary.captureId, candidate] as const),
   )
+  const preservedCaptureResults = new Map<
+    string,
+    AssistantPreserveDocumentAttachmentsResult
+  >()
   let routingCursorBlocked = false
+  const preserveCandidateDocuments = async (
+    candidate: AssistantAutomationCandidate,
+  ): Promise<boolean> => {
+    if (candidate.summary.attachmentCount === 0) {
+      return true
+    }
+
+    const existing = preservedCaptureResults.get(candidate.summary.captureId)
+    if (existing) {
+      return true
+    }
+
+    try {
+      const preserved = await input.inboxServices.preserveDocumentAttachments?.({
+        vault: input.vault,
+        requestId: input.requestId ?? null,
+        captureId: candidate.summary.captureId,
+      })
+      if (preserved) {
+        preservedCaptureResults.set(candidate.summary.captureId, preserved)
+      }
+      return true
+    } catch (error) {
+      input.onEvent?.({
+        type: 'capture.failed',
+        captureId: candidate.summary.captureId,
+        details: `automatic document preservation failed: ${errorMessage(error)}`,
+      })
+      return false
+    }
+  }
   const routeCandidate = async (candidate: AssistantAutomationCandidate) => {
     if (!routingModelSpec) {
       return
@@ -189,7 +228,7 @@ export async function scanAssistantAutomationOnce(input: {
     }
   }
 
-  for (let index = 0; index < candidates.length; index += 1) {
+  scanLoop: for (let index = 0; index < candidates.length; index += 1) {
     if (input.signal?.aborted) {
       break
     }
@@ -214,7 +253,15 @@ export async function scanAssistantAutomationOnce(input: {
 
       for (const item of context.items) {
         const groupCandidate = candidatesByCaptureId.get(item.summary.captureId)
-        if (!groupCandidate?.routingPending || !routingModelSpec) {
+        if (!groupCandidate) {
+          continue
+        }
+
+        if (!(await preserveCandidateDocuments(groupCandidate))) {
+          break scanLoop
+        }
+
+        if (!groupCandidate.routingPending || !routingModelSpec) {
           continue
         }
 
@@ -258,7 +305,14 @@ export async function scanAssistantAutomationOnce(input: {
     }
 
     if (!candidate.routingPending || !routingModelSpec) {
+      if (!(await preserveCandidateDocuments(candidate))) {
+        break
+      }
       continue
+    }
+
+    if (!(await preserveCandidateDocuments(candidate))) {
+      break
     }
 
     await routeCandidate(candidate)

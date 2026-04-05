@@ -4540,6 +4540,87 @@ test.sequential('document promotion remains idempotent after local promotion sta
   }
 })
 
+test.sequential('document preservation imports every stored document attachment without writing capture promotion state', async () => {
+  const fixture = await makeVaultFixture('murph-inbox-document-preservation')
+  const documentPathA = path.join(fixture.vaultRoot, 'oxygen-a.csv')
+  const documentPathB = path.join(fixture.vaultRoot, 'oxygen-b.pdf')
+  const services = createIntegratedInboxServices({
+    getHomeDirectory: () => fixture.homeRoot,
+    getPlatform: () => 'darwin',
+    loadCoreModule: loadBuiltCoreRuntime,
+    loadImportersModule: loadBuiltImportersRuntime,
+    loadInboxModule: loadBuiltInboxRuntime,
+    loadImessageDriver: async () =>
+      createFakeImessageDriver({
+        photoPath: fixture.photoPath,
+        attachments: [
+          {
+            guid: 'att-doc-preserve-a',
+            fileName: 'oxygen-a.csv',
+            path: documentPathA,
+            mimeType: 'text/csv',
+          },
+          {
+            guid: 'att-doc-preserve-b',
+            fileName: 'oxygen-b.pdf',
+            path: documentPathB,
+            mimeType: 'application/pdf',
+          },
+        ],
+      }),
+  })
+
+  try {
+    await writeFile(documentPathA, 'ts,spo2\n2026-03-13T08:00:00Z,97\n', 'utf8')
+    await writeFile(documentPathB, 'document body', 'utf8')
+    await initializeImessageSource({
+      services,
+      vaultRoot: fixture.vaultRoot,
+    })
+    await services.backfill({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      sourceId: 'imessage:self',
+    })
+    const captureId = await captureSingleCaptureId({
+      services,
+      vaultRoot: fixture.vaultRoot,
+    })
+
+    const firstPreservation = await services.preserveDocumentAttachments?.({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      captureId,
+    })
+    assert.ok(firstPreservation)
+    assert.equal(firstPreservation.documents.length, 2)
+    assert.equal(firstPreservation.preservedCount, 2)
+    assert.equal(firstPreservation.createdCount, 2)
+    assert.equal((await listDocumentManifestPaths(fixture.vaultRoot)).length, 2)
+
+    const retriedPreservation = await services.preserveDocumentAttachments?.({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      captureId,
+    })
+    assert.ok(retriedPreservation)
+    assert.equal(retriedPreservation.documents.length, 2)
+    assert.equal(retriedPreservation.preservedCount, 2)
+    assert.equal(retriedPreservation.createdCount, 0)
+    assert.equal((await listDocumentManifestPaths(fixture.vaultRoot)).length, 2)
+
+    const shown = await services.show({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      captureId,
+    })
+    assert.deepEqual(shown.capture.promotions, [])
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+    await rm(fixture.homeRoot, { recursive: true, force: true })
+  }
+})
+
 test.sequential('meal promotion retries do not duplicate canonical meals after a local promotion-store write failure', async () => {
   const fixture = await makeVaultFixture('murph-inbox-promotion-write-failure')
   const paths = inboxPaths(fixture.vaultRoot)
