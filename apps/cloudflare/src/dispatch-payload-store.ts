@@ -13,9 +13,7 @@ import {
 import type { R2BucketLike } from "./bundle-store.js";
 import { buildHostedStorageAad } from "./crypto-context.js";
 import {
-  hostedDispatchPayloadObjectKey,
   hostedDispatchPayloadObjectKeyForSignature,
-  hostedDispatchPayloadObjectKeys,
 } from "./storage-paths.js";
 import {
   readEncryptedR2Json,
@@ -56,27 +54,11 @@ export function createHostedDispatchPayloadStore(input: {
     async deleteStoredDispatchPayload(payloadJson) {
       const payload = readStoredDispatchPayloadEnvelope(payloadJson);
 
-      if (!payload || payload.storage !== "reference") {
+      if (!payload || payload.storage !== "reference" || !payload.payloadRef) {
         return;
       }
 
-      if (payload.payloadRef) {
-        await this.deleteDispatchPayload(payload.payloadRef);
-        return;
-      }
-
-      if (!input.bucket.delete) {
-        return;
-      }
-
-      for (const key of await hostedDispatchPayloadObjectKeys(
-        input.key,
-        input.keysById,
-        payload.dispatchRef.userId,
-        payload.dispatchRef.eventId,
-      )) {
-        await input.bucket.delete(key);
-      }
+      await this.deleteDispatchPayload(payload.payloadRef);
     },
 
     async readDispatchPayload(ref) {
@@ -102,9 +84,11 @@ export function createHostedDispatchPayloadStore(input: {
       }
 
       if (payload?.storage === "reference") {
-        const dispatch = payload.payloadRef
-          ? await this.readDispatchPayload(payload.payloadRef)
-          : await readLegacyStoredDispatch(this, payload.dispatchRef, input.key, input.keysById);
+        if (!payload.payloadRef) {
+          throw new TypeError("Hosted dispatch reference payloads must include payloadRef.");
+        }
+
+        const dispatch = await this.readDispatchPayload(payload.payloadRef);
 
         if (!dispatch) {
           throw new Error(
@@ -123,7 +107,7 @@ export function createHostedDispatchPayloadStore(input: {
       try {
         const payload = readStoredDispatchPayloadEnvelope(payloadJson);
 
-        if (payload?.storage === "reference") {
+        if (payload?.storage === "reference" && payload.payloadRef) {
           return payload.dispatchRef;
         }
 
@@ -173,31 +157,6 @@ export function createHostedDispatchPayloadStore(input: {
       });
     },
   };
-}
-
-async function readLegacyStoredDispatch(
-  store: HostedDispatchPayloadStore,
-  dispatchRef: HostedExecutionDispatchRef,
-  rootKey: Uint8Array,
-  keysById: Readonly<Record<string, Uint8Array>> | undefined,
-): Promise<HostedExecutionDispatchRequest | null> {
-  for (const key of await hostedDispatchPayloadObjectKeys(
-    rootKey,
-    keysById,
-    dispatchRef.userId,
-    dispatchRef.eventId,
-  )) {
-    const dispatch = await store.readDispatchPayload({ key });
-
-    if (!dispatch) {
-      continue;
-    }
-
-    return dispatch;
-  }
-
-  const legacyKey = await hostedDispatchPayloadObjectKey(rootKey, dispatchRef.userId, dispatchRef.eventId);
-  return store.readDispatchPayload({ key: legacyKey });
 }
 
 function readStoredDispatchPayloadEnvelope(payloadJson: unknown): HostedExecutionOutboxPayload | null {

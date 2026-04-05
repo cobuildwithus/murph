@@ -4,8 +4,19 @@ import { startAssistantHttpServer } from '../src/http.js'
 import type { AssistantLocalService } from '../src/service.js'
 
 const TEST_SESSION = {
-  schema: 'murph.assistant-session.v3',
+  schema: 'murph.assistant-session.v4',
   sessionId: 'session_http_test',
+  target: {
+    adapter: 'codex-cli',
+    approvalPolicy: null,
+    codexCommand: null,
+    model: null,
+    oss: false,
+    profile: null,
+    reasoningEffort: null,
+    sandbox: null,
+  },
+  resumeState: null,
   provider: 'codex-cli',
   providerOptions: {
     model: null,

@@ -1366,18 +1366,19 @@ test('resolveAssistantSession ignores legacy aliases.json fallback state', async
     path.join(statePaths.sessionsDirectory, 'asst_existing.json'),
     `${JSON.stringify(
       {
-        schema: 'murph.assistant-session.v3',
+        schema: 'murph.assistant-session.v4',
         sessionId: 'asst_existing',
-        provider: 'codex-cli',
-        providerOptions: {
+        target: {
+          adapter: 'codex-cli',
+          approvalPolicy: 'on-request',
+          codexCommand: null,
           model: null,
+          oss: false,
+          profile: null,
           reasoningEffort: null,
           sandbox: 'workspace-write',
-          approvalPolicy: 'on-request',
-          profile: null,
-          oss: false,
         },
-        providerBinding: null,
+        resumeState: null,
         alias: 'chat:bob',
         binding: {
           conversationKey: null,
@@ -1930,22 +1931,19 @@ test('upsertAssistantMemory still blocks health context outside private assistan
 
 test('assistant session schema rejects path-like session identifiers before persistence', () => {
   const valid = {
-    schema: 'murph.assistant-session.v3',
+    schema: 'murph.assistant-session.v4',
     sessionId: 'session_safe_123',
-    provider: 'codex-cli',
-    providerOptions: {
+    target: {
+      adapter: 'codex-cli',
+      approvalPolicy: null,
+      codexCommand: null,
       model: null,
+      oss: false,
+      profile: null,
       reasoningEffort: null,
       sandbox: null,
-      approvalPolicy: null,
-      profile: null,
-      oss: false,
-      baseUrl: null,
-      apiKeyEnv: null,
-      providerName: null,
-      headers: null,
     },
-    providerBinding: null,
+    resumeState: null,
     alias: 'chat:test',
     binding: {
       conversationKey: 'chat:test',
@@ -1968,7 +1966,7 @@ test('assistant session schema rejects path-like session identifiers before pers
     () =>
       parseAssistantSessionRecord({
         ...valid,
-        providerBinding: undefined,
+        resumeState: undefined,
         providerSessionId: 'thread-legacy',
       }),
     /Unrecognized key/u,

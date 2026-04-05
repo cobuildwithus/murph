@@ -641,10 +641,20 @@ test('assistant cron manual runs record history and remove completed one-shot jo
     prompt: 'Remind me to drink water.',
     response: 'Drink water now.',
     session: {
-      schema: 'murph.assistant-session.v3',
+      schema: 'murph.assistant-session.v4',
       sessionId: 'asst_cron_manual',
+      target: {
+        adapter: 'codex-cli',
+        approvalPolicy: null,
+        codexCommand: null,
+        model: null,
+        oss: false,
+        profile: null,
+        reasoningEffort: null,
+        sandbox: null,
+      },
+      resumeState: null,
       provider: 'codex-cli',
-      providerSessionId: null,
       providerOptions: {
         model: null,
         reasoningEffort: null,

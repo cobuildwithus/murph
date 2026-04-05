@@ -10,9 +10,6 @@ import {
   createHostedExecutionDispatchPayloadStore,
 } from "../src/dispatch-payload-store.ts";
 import type { R2BucketLike } from "../src/bundle-store.ts";
-import { buildHostedStorageAad } from "../src/crypto-context.ts";
-import { writeEncryptedR2Json } from "../src/crypto.ts";
-import { hostedDispatchPayloadObjectKey } from "../src/storage-paths.ts";
 
 class MemoryR2Bucket implements R2BucketLike {
   readonly objects = new Map<string, string>();
@@ -95,34 +92,20 @@ describe("hosted dispatch payload store", () => {
     expect(changedRef.key).not.toBe(firstRef.key);
   });
 
-  it("still reads and deletes legacy event-addressed payload blobs", async () => {
+  it("rejects reference payload envelopes without payload refs", async () => {
     const bucket = new MemoryR2Bucket();
-    const rootKey = new Uint8Array(Array.from({ length: 32 }, (_, index) => index + 1));
     const store = createHostedExecutionDispatchPayloadStore({
       bucket,
-      key: rootKey,
+      key: new Uint8Array(Array.from({ length: 32 }, (_, index) => index + 1)),
       keyId: "test-key",
     });
     const dispatch = createTestDispatch({ eventId: "member.activated:test-user:event-legacy" });
-    const legacyKey = await hostedDispatchPayloadObjectKey(rootKey, dispatch.event.userId, dispatch.eventId);
-
-    await writeEncryptedR2Json({
-      aad: buildHostedStorageAad({
-        key: legacyKey,
-        purpose: "dispatch-payload",
-      }),
-      bucket,
-      cryptoKey: rootKey,
-      key: legacyKey,
-      keyId: "test-key",
-      scope: "dispatch-payload",
-      value: dispatch,
-    });
-
     const legacyPayload = buildHostedExecutionOutboxPayload(dispatch, { storage: "reference" });
 
-    await expect(store.readStoredDispatch(legacyPayload)).resolves.toEqual(dispatch);
-    await store.deleteStoredDispatchPayload(legacyPayload);
-    expect(bucket.objects.has(legacyKey)).toBe(false);
+    await expect(store.readStoredDispatch(legacyPayload)).rejects.toThrow(
+      "Hosted dispatch reference payloads must include payloadRef.",
+    );
+    expect(store.readStoredDispatchRef(legacyPayload)).toBeNull();
+    await expect(store.deleteStoredDispatchPayload(legacyPayload)).resolves.toBeUndefined();
   });
 });

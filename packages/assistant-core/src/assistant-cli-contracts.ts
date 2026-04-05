@@ -329,22 +329,6 @@ export const assistantProviderBindingSchema = z
   })
   .strict()
 
-const assistantSessionV3Schema = z
-  .object({
-    schema: z.literal('murph.assistant-session.v3'),
-    sessionId: assistantSessionIdSchema,
-    provider: z.enum(assistantChatProviderValues),
-    providerOptions: assistantProviderSessionOptionsSchema,
-    providerBinding: assistantProviderBindingSchema.nullable().default(null),
-    alias: z.string().min(1).nullable(),
-    binding: assistantSessionBindingSchema,
-    createdAt: isoTimestampSchema,
-    updatedAt: isoTimestampSchema,
-    lastTurnAt: isoTimestampSchema.nullable(),
-    turnCount: z.number().int().nonnegative(),
-  })
-  .strict()
-
 export const assistantPersistedSessionSchema = z
   .object({
     schema: z.literal('murph.assistant-session.v4'),
@@ -360,9 +344,9 @@ export const assistantPersistedSessionSchema = z
   })
   .strict()
 
-export const assistantSessionSchema = z
-  .union([assistantPersistedSessionSchema, assistantSessionV3Schema])
-  .transform((value) => normalizeAssistantSessionRecord(value))
+export const assistantSessionSchema = assistantPersistedSessionSchema.transform((value) =>
+  normalizeAssistantSessionRecord(value),
+)
 
 export function parseAssistantSessionRecord(value: unknown): AssistantSession {
   return assistantSessionSchema.parse(value)
@@ -377,63 +361,11 @@ const assistantSessionOutputSchema = assistantPersistedSessionSchema
   .strict()
 
 function normalizeAssistantSessionRecord(
-  value: z.infer<typeof assistantPersistedSessionSchema> | z.infer<typeof assistantSessionV3Schema>,
+  value: z.infer<typeof assistantPersistedSessionSchema>,
 ): AssistantSession {
-  if (value.schema === 'murph.assistant-session.v4') {
-    return buildAssistantRuntimeSession({
-      alias: value.alias,
-      binding: value.binding,
-      createdAt: value.createdAt,
-      lastTurnAt: value.lastTurnAt,
-      resumeState: normalizeAssistantSessionResumeState(value.resumeState),
-      schema: value.schema,
-      sessionId: value.sessionId,
-      target: value.target,
-      turnCount: value.turnCount,
-      updatedAt: value.updatedAt,
-    })
-  }
-
-  const target =
-    value.provider === 'openai-compatible'
-      ? assistantModelTargetSchema.parse({
-          adapter: 'openai-compatible',
-          apiKeyEnv: value.providerOptions.apiKeyEnv ?? null,
-          endpoint: value.providerOptions.baseUrl ?? null,
-          headers: value.providerOptions.headers ?? null,
-          model: value.providerOptions.model,
-          providerName: value.providerOptions.providerName ?? null,
-          reasoningEffort: value.providerOptions.reasoningEffort ?? null,
-        })
-      : assistantModelTargetSchema.parse({
-          adapter: 'codex-cli',
-          approvalPolicy: value.providerOptions.approvalPolicy ?? null,
-          codexCommand: null,
-          model: value.providerOptions.model,
-          oss: value.providerOptions.oss,
-          profile: value.providerOptions.profile ?? null,
-          reasoningEffort: value.providerOptions.reasoningEffort ?? null,
-          sandbox: value.providerOptions.sandbox ?? null,
-        })
-
   return buildAssistantRuntimeSession({
-    alias: value.alias,
-    binding: value.binding,
-    createdAt: value.createdAt,
-    lastTurnAt: value.lastTurnAt,
-    resumeState: normalizeAssistantSessionResumeState(
-      value.providerBinding
-        ? {
-            providerSessionId: value.providerBinding.providerSessionId,
-            resumeRouteId: value.providerBinding.providerState?.resumeRouteId ?? null,
-          }
-        : null,
-    ),
-    schema: 'murph.assistant-session.v4',
-    sessionId: value.sessionId,
-    target,
-    turnCount: value.turnCount,
-    updatedAt: value.updatedAt,
+    ...value,
+    resumeState: normalizeAssistantSessionResumeState(value.resumeState),
   })
 }
 
