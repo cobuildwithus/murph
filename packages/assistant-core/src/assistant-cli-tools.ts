@@ -181,6 +181,16 @@ interface AssistantCliLauncher {
   command: string
 }
 
+export interface AssistantCliLlmsManifestCommand {
+  description?: string
+  name: string
+}
+
+export interface AssistantCliLlmsManifest {
+  commands: AssistantCliLlmsManifestCommand[]
+  version?: string
+}
+
 export function createDefaultAssistantToolCatalog(
   input: AssistantToolContext,
   options: AssistantToolCatalogOptions = {},
@@ -220,6 +230,34 @@ export function createProviderTurnAssistantToolCatalog(
   ])
 }
 
+export async function readAssistantCliLlmsManifest(input: {
+  cliEnv?: NodeJS.ProcessEnv
+  vault: string
+  workingDirectory?: string | null
+}): Promise<AssistantCliLlmsManifest> {
+  const result = await executeAssistantCliCommand({
+    args: ['--llms', '--format', 'json'],
+    input: {
+      cliEnv: input.cliEnv,
+      vault: input.vault,
+      workingDirectory: input.workingDirectory ?? undefined,
+    },
+  })
+
+  if (!isAssistantCliLlmsManifest(result.json)) {
+    throw new VaultCliError(
+      'ASSISTANT_CLI_COMMAND_FAILED',
+      'vault-cli --llms --format json returned an unexpected manifest shape.',
+      {
+        argv: result.argv,
+        stdout: result.stdout,
+      },
+    )
+  }
+
+  return result.json
+}
+
 function resolveAssistantToolConcernDefinitions(
   input: AssistantToolContext,
   options: AssistantToolCatalogOptions,
@@ -242,6 +280,25 @@ function resolveAssistantToolConcernDefinitions(
       : [],
     queryAndReadTools: createQueryAndReadToolDefinitions(input, options),
   }
+}
+
+function isAssistantCliLlmsManifest(value: unknown): value is AssistantCliLlmsManifest {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+
+  const commands = (value as { commands?: unknown }).commands
+  return (
+    Array.isArray(commands) &&
+    commands.every(
+      (command) =>
+        command &&
+        typeof command === 'object' &&
+        typeof (command as { name?: unknown }).name === 'string' &&
+        ((command as { description?: unknown }).description === undefined ||
+          typeof (command as { description?: unknown }).description === 'string'),
+    )
+  )
 }
 
 async function loadAssistantCronTools() {

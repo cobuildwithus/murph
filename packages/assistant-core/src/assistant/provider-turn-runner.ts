@@ -20,6 +20,7 @@ import { recordAssistantDiagnosticEvent } from './diagnostics.js'
 import { normalizeAssistantExecutionContext } from './execution-context.js'
 import { buildAssistantSystemPrompt } from './system-prompt.js'
 import { errorMessage } from './shared.js'
+import { resolveAssistantCliSurfaceBootstrapContext } from './cli-surface-bootstrap.js'
 import {
   getAssistantFailoverCooldownUntil,
   isAssistantFailoverRouteCoolingDown,
@@ -324,19 +325,28 @@ async function resolveAssistantRouteTurnPlan(input: {
   const assistantHostedDeviceConnectAvailable = input.toolCatalog.hasTool('murph.device.connect')
   const assistantStateToolsAvailable = assistantCliExecutorAvailable
   const assistantMemoryRecallToolsAvailable = assistantCliExecutorAvailable
-  const assistantMemoryPrompt =
+  const [assistantMemoryPrompt, continuityContext] = await Promise.all([
     !assistantMemoryRecallToolsAvailable || input.session.turnCount === 0
-      ? await loadAssistantMemoryPromptBlock({
+      ? loadAssistantMemoryPromptBlock({
           includeSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
           vault: input.input.vault,
         })
-      : null
+      : Promise.resolve(null),
+    shouldInjectBootstrapContext
+      ? resolveAssistantCliSurfaceBootstrapContext({
+          cliEnv: input.sharedPlan.cliAccess.env,
+          sessionId: input.session.sessionId,
+          vault: input.input.vault,
+          workingDirectory,
+        })
+      : Promise.resolve(null),
+  ])
   const assistantCronToolsAvailable = assistantCliExecutorAvailable
 
   return {
     cliEnv: input.sharedPlan.cliAccess.env,
     conversationMessages,
-    continuityContext: null,
+    continuityContext,
     firstTurnCheckInInjected: shouldInjectFirstTurnCheckIn,
     resumeProviderSessionId,
     sessionContext: shouldInjectBootstrapContext

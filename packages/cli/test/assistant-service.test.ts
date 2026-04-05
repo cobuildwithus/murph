@@ -2356,6 +2356,39 @@ test('sendAssistantMessage resumes a saved Codex provider session by route', asy
   assert.equal(result.session.turnCount, 3)
 })
 
+test('sendAssistantMessage injects and persists a CLI surface bootstrap summary on cold start', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-cli-bootstrap-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-bootstrap-codex',
+    response: 'Fresh reply.',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:cli-bootstrap',
+    prompt: 'What can you do from the CLI here?',
+  })
+
+  const call = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  assert.match(call?.continuityContext ?? '', /^CLI surface summary:/u)
+
+  const snapshot = await getAssistantStateDocument({
+    docId: `sessions/${result.session.sessionId}/cli-surface-bootstrap`,
+    vault: vaultRoot,
+  })
+  assert.equal(snapshot.exists, true)
+  assert.equal(snapshot.value?.summary, call?.continuityContext)
+})
+
 test('sendAssistantMessage cold-starts when a saved provider binding is missing explicit resume route metadata', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-legacy-binding-'))
   const vaultRoot = path.join(parent, 'vault')
