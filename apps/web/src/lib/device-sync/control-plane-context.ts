@@ -1,7 +1,6 @@
 import { deviceSyncError, type DeviceSyncRegistry } from "@murphai/device-syncd/public-ingress";
 
 import { getPrisma } from "../prisma";
-import { createHostedSecretCodec } from "./crypto";
 import { readHostedDeviceSyncEnvironment, type HostedDeviceSyncEnvironment } from "./env";
 import { createHostedDeviceSyncRegistry } from "./providers";
 import { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
@@ -12,7 +11,6 @@ export interface HostedDeviceSyncControlPlaneContext {
   readonly request: Request;
   readonly env: HostedDeviceSyncEnvironment;
   readonly registry: DeviceSyncRegistry;
-  readonly codec: ReturnType<typeof createHostedSecretCodec>;
   readonly store: PrismaDeviceSyncControlPlaneStore;
   readonly publicIngressBaseUrl: string;
   readonly webhookAdminCallbackBaseUrl: string;
@@ -25,20 +23,13 @@ export function createHostedDeviceSyncControlPlaneContext(
 ): HostedDeviceSyncControlPlaneContext {
   const env = readHostedDeviceSyncEnvironment();
   const publicBaseUrl = resolveHostedPublicBaseUrl(request, env.publicBaseUrl, env.isProduction);
-  const codec = createHostedSecretCodec({
-    key: env.encryptionKey,
-    keyVersion: env.encryptionKeyVersion,
-    keysByVersion: env.encryptionKeysByVersion,
-  });
 
   return {
     request,
     env,
     registry: createHostedDeviceSyncRegistry(env),
-    codec,
     store: new PrismaDeviceSyncControlPlaneStore({
       prisma: getPrisma(),
-      codec,
     }),
     publicIngressBaseUrl: publicBaseUrl.baseUrl,
     webhookAdminCallbackBaseUrl: publicBaseUrl.baseUrl,

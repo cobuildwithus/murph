@@ -1,5 +1,9 @@
 import { createHostedExecutionSignatureHeaders } from "./auth.ts";
+import type { SharePack } from "@murphai/contracts";
 import type {
+  HostedExecutionDeviceSyncRuntimeApplyRequest,
+  HostedExecutionDeviceSyncRuntimeApplyResponse,
+  HostedExecutionDeviceSyncRuntimeSnapshotRequest,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   HostedExecutionDispatchRequest,
   HostedExecutionDispatchResult,
@@ -9,14 +13,18 @@ import type {
 } from "./contracts.ts";
 import { normalizeHostedExecutionBaseUrl } from "./env.ts";
 import {
+  parseHostedExecutionDeviceSyncRuntimeApplyResponse,
   parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
   parseHostedExecutionDispatchRequest,
   parseHostedExecutionDispatchResult,
+  parseHostedExecutionSharePack,
   parseHostedExecutionUserEnvStatus,
   parseHostedExecutionUserEnvUpdate,
   parseHostedExecutionUserStatus,
 } from "./parsers.ts";
 import {
+  buildHostedExecutionSharePackPath,
+  buildHostedExecutionUserDeviceSyncRuntimePath,
   buildHostedExecutionUserDeviceSyncRuntimeSnapshotPath,
   buildHostedExecutionUserEnvPath,
   buildHostedExecutionUserPendingUsagePath,
@@ -38,13 +46,24 @@ export interface HostedExecutionDispatchClientOptions {
 }
 
 export interface HostedExecutionControlClient {
+  applyDeviceSyncRuntimeUpdates(
+    userId: string,
+    input: Omit<HostedExecutionDeviceSyncRuntimeApplyRequest, "userId">,
+  ): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse>;
   clearUserEnv(userId: string): Promise<HostedExecutionUserEnvStatus>;
+  deleteSharePack(shareId: string): Promise<void>;
+  getDeviceSyncRuntimeSnapshot(
+    userId: string,
+    input?: Omit<HostedExecutionDeviceSyncRuntimeSnapshotRequest, "userId">,
+  ): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
   deletePendingUsage(userId: string, usageIds: readonly string[]): Promise<void>;
   getPendingUsage(userId: string, limit?: number): Promise<Record<string, unknown>[]>;
+  getSharePack(shareId: string): Promise<SharePack | null>;
   putDeviceSyncRuntimeSnapshot(
     userId: string,
     snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   ): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
+  putSharePack(shareId: string, pack: SharePack): Promise<SharePack>;
   getStatus(userId: string): Promise<HostedExecutionUserStatus>;
   getUserEnvStatus(userId: string): Promise<HostedExecutionUserEnvStatus>;
   run(userId: string): Promise<HostedExecutionUserStatus>;
@@ -107,6 +126,29 @@ export function createHostedExecutionControlClient(
   const signingSecret = requireHostedExecutionSigningSecret(options.signingSecret);
 
   return {
+    applyDeviceSyncRuntimeUpdates(userId, input) {
+      const requestPayload = {
+        ...(input.occurredAt ? { occurredAt: input.occurredAt } : {}),
+        updates: input.updates,
+        userId,
+      } satisfies HostedExecutionDeviceSyncRuntimeApplyRequest;
+
+      return requestHostedExecutionSignedJson({
+        baseUrl,
+        fetchImpl,
+        label: "device-sync runtime apply",
+        now: options.now,
+        parse: parseHostedExecutionDeviceSyncRuntimeApplyResponse,
+        path: buildHostedExecutionUserDeviceSyncRuntimePath(userId),
+        request: {
+          body: JSON.stringify(requestPayload),
+          headers: { "content-type": "application/json; charset=utf-8" },
+          method: "POST",
+        },
+        signingSecret,
+        timeoutMs: options.timeoutMs,
+      });
+    },
     clearUserEnv(userId) {
       return requestHostedExecutionSignedJson({
         baseUrl,
@@ -116,6 +158,45 @@ export function createHostedExecutionControlClient(
         parse: parseHostedExecutionUserEnvStatus,
         path: buildHostedExecutionUserEnvPath(userId),
         request: { method: "DELETE" },
+        signingSecret,
+        timeoutMs: options.timeoutMs,
+      });
+    },
+    deleteSharePack(shareId) {
+      return requestHostedExecutionSignedJson({
+        baseUrl,
+        fetchImpl,
+        label: "delete share pack",
+        now: options.now,
+        parse: () => undefined,
+        path: buildHostedExecutionSharePackPath(shareId),
+        request: {
+          method: "DELETE",
+        },
+        signingSecret,
+        timeoutMs: options.timeoutMs,
+      });
+    },
+    getDeviceSyncRuntimeSnapshot(userId, input = {}) {
+      const search = new URLSearchParams();
+      if (input.connectionId) {
+        search.set("connectionId", input.connectionId);
+      }
+      if (input.provider) {
+        search.set("provider", input.provider);
+      }
+
+      return requestHostedExecutionSignedJson({
+        baseUrl,
+        fetchImpl,
+        label: "device-sync runtime snapshot",
+        now: options.now,
+        parse: parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
+        path: buildHostedExecutionUserDeviceSyncRuntimePath(userId),
+        request: {
+          method: "GET",
+          search: search.size > 0 ? search.toString() : null,
+        },
         signingSecret,
         timeoutMs: options.timeoutMs,
       });
@@ -169,6 +250,30 @@ export function createHostedExecutionControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
+    getSharePack(shareId) {
+      return requestHostedExecutionSignedJson({
+        baseUrl,
+        fetchImpl,
+        label: "share pack",
+        now: options.now,
+        parse: parseHostedExecutionSharePack,
+        path: buildHostedExecutionSharePackPath(shareId),
+        request: {
+          method: "GET",
+        },
+        signingSecret,
+        timeoutMs: options.timeoutMs,
+      }).catch((error) => {
+        if (
+          error instanceof Error
+          && error.message.startsWith("Hosted execution share pack failed with HTTP 404")
+        ) {
+          return null;
+        }
+
+        throw error;
+      });
+    },
     putDeviceSyncRuntimeSnapshot(userId, snapshot) {
       const requestPayload = parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(snapshot);
 
@@ -179,6 +284,25 @@ export function createHostedExecutionControlClient(
         now: options.now,
         parse: parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
         path: buildHostedExecutionUserDeviceSyncRuntimeSnapshotPath(userId),
+        request: {
+          body: JSON.stringify(requestPayload),
+          headers: { "content-type": "application/json; charset=utf-8" },
+          method: "PUT",
+        },
+        signingSecret,
+        timeoutMs: options.timeoutMs,
+      });
+    },
+    putSharePack(shareId, pack) {
+      const requestPayload = parseHostedExecutionSharePack(pack);
+
+      return requestHostedExecutionSignedJson({
+        baseUrl,
+        fetchImpl,
+        label: "share pack write",
+        now: options.now,
+        parse: parseHostedExecutionSharePack,
+        path: buildHostedExecutionSharePackPath(shareId),
         request: {
           body: JSON.stringify(requestPayload),
           headers: { "content-type": "application/json; charset=utf-8" },

@@ -1,13 +1,10 @@
-import { decodeHostedEncryptionKey, decodeHostedEncryptionKeyring } from "../device-sync/crypto";
+import { decodeHostedEncryptionKey } from "../device-sync/crypto";
 import { normalizeNullableString, parseInteger } from "../device-sync/shared";
 import { readHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { readLinqEnvironment } from "../linq/env";
 
 export interface HostedOnboardingEnvironment {
   contactPrivacyKey: Buffer;
-  encryptionKey: Buffer;
-  encryptionKeysByVersion: Readonly<Record<string, Buffer>>;
-  encryptionKeyVersion: string;
   inviteTtlHours: number;
   isProduction: boolean;
   linqApiBaseUrl: string;
@@ -37,20 +34,12 @@ type HostedOnboardingEnvSource = Readonly<Record<string, string | undefined>>;
 export function readHostedOnboardingEnvironment(
   source: HostedOnboardingEnvSource = process.env,
 ): HostedOnboardingEnvironment {
-  const encryptionKeyValue = readEnv(source, ["HOSTED_ONBOARDING_ENCRYPTION_KEY"]);
-  const encryptionKeyVersion = readEnv(source, ["HOSTED_ONBOARDING_ENCRYPTION_KEY_VERSION"]) ?? "v1";
-  const encryptionKeyringJson = readEnv(source, ["HOSTED_ONBOARDING_ENCRYPTION_KEYRING_JSON"]);
   const contactPrivacyKeyValue = readEnv(source, ["HOSTED_CONTACT_PRIVACY_KEY"]);
-
-  if (!encryptionKeyValue) {
-    throw new TypeError("HOSTED_ONBOARDING_ENCRYPTION_KEY is required for hosted onboarding secrets.");
-  }
 
   if (!contactPrivacyKeyValue) {
     throw new TypeError("HOSTED_CONTACT_PRIVACY_KEY is required for hosted contact privacy.");
   }
 
-  const encryptionKey = decodeHostedEncryptionKey(encryptionKeyValue);
   const publicBaseUrl = readHostedPublicBaseUrl(source);
   const stripeBillingMode = readBillingMode(
     readEnv(source, ["HOSTED_ONBOARDING_STRIPE_BILLING_MODE"]),
@@ -66,14 +55,6 @@ export function readHostedOnboardingEnvironment(
 
   return {
     contactPrivacyKey: decodeHostedEncryptionKey(contactPrivacyKeyValue),
-    encryptionKey,
-    encryptionKeysByVersion: decodeHostedEncryptionKeyring({
-      currentKey: encryptionKey,
-      currentKeyVersion: encryptionKeyVersion,
-      keyringJson: encryptionKeyringJson,
-      label: "HOSTED_ONBOARDING_ENCRYPTION_KEYRING_JSON",
-    }),
-    encryptionKeyVersion,
     inviteTtlHours: readPositiveInteger(
       readEnv(source, ["HOSTED_ONBOARDING_INVITE_TTL_HOURS"]),
       24 * 7,

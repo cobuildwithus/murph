@@ -127,8 +127,15 @@ export function createHostedDeviceSyncRuntimeStore(input: {
           nextConnection.tokenBundle = null;
           tokenUpdate = currentConnection.tokenBundle ? "cleared" : "missing";
         } else {
+          const nextTokenVersion = currentConnection.tokenBundle
+            ? hasSameTokenBundle(currentConnection.tokenBundle, update.tokenBundle)
+              ? currentConnection.tokenBundle.tokenVersion
+              : currentConnection.tokenBundle.tokenVersion + 1
+            : 1;
+
           nextConnection.tokenBundle = {
             ...update.tokenBundle,
+            tokenVersion: nextTokenVersion,
           };
           nextConnection.connection.accessTokenExpiresAt = update.tokenBundle.accessTokenExpiresAt;
           tokenUpdate = "applied";
@@ -267,7 +274,19 @@ function selectPreferredConnectionSnapshot(
     }
   }
 
-  return cloneConnectionSnapshot(incoming);
+  const next = cloneConnectionSnapshot(incoming);
+
+  // Metadata-only mirrors from hosted web must not erase the canonical Cloudflare token escrow.
+  if (
+    next.tokenBundle === null
+    && existing.tokenBundle
+    && next.connection.status !== "disconnected"
+  ) {
+    next.tokenBundle = structuredClone(existing.tokenBundle);
+    next.connection.accessTokenExpiresAt = existing.tokenBundle.accessTokenExpiresAt;
+  }
+
+  return next;
 }
 
 function sortConnectionSnapshots(
@@ -278,6 +297,20 @@ function sortConnectionSnapshots(
     const rightUpdatedAt = right.connection.updatedAt ?? right.connection.createdAt;
     return rightUpdatedAt.localeCompare(leftUpdatedAt) || left.connection.id.localeCompare(right.connection.id);
   });
+}
+
+function hasSameTokenBundle(
+  left: HostedExecutionDeviceSyncRuntimeConnectionSnapshot["tokenBundle"],
+  right: HostedExecutionDeviceSyncRuntimeConnectionSnapshot["tokenBundle"],
+): boolean {
+  if (!left || !right) {
+    return left === right;
+  }
+
+  return left.accessToken === right.accessToken
+    && left.accessTokenExpiresAt === right.accessTokenExpiresAt
+    && left.keyVersion === right.keyVersion
+    && left.refreshToken === right.refreshToken;
 }
 
 async function readStoredDeviceSyncRuntimeMirror(input: {

@@ -32,26 +32,12 @@ model DeviceConnection {
   nextReconcileAt      DateTime?              @map("next_reconcile_at")
   createdAt            DateTime               @default(now()) @map("created_at")
   updatedAt            DateTime               @updatedAt @map("updated_at")
-  secret               DeviceConnectionSecret?
   signals              DeviceSyncSignal[]
   tokenAudits          DeviceTokenAudit[]
 
   @@unique([provider, externalAccountId])
   @@index([userId, provider])
   @@map("device_connection")
-}
-
-model DeviceConnectionSecret {
-  connectionId          String   @id @map("connection_id")
-  accessTokenEncrypted  String   @map("access_token_encrypted")
-  refreshTokenEncrypted String?  @map("refresh_token_encrypted")
-  tokenVersion          Int      @default(1) @map("token_version")
-  keyVersion            String   @map("key_version")
-  createdAt             DateTime @default(now()) @map("created_at")
-  updatedAt             DateTime @updatedAt @map("updated_at")
-  connection            DeviceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-
-  @@map("device_connection_secret")
 }
 
 
@@ -397,8 +383,6 @@ model HostedShareLink {
   codeHash           String   @unique @map("code_hash")
   senderMemberId     String?  @map("sender_member_id")
   previewTitle       String   @map("preview_title")
-  encryptedPayload   String   @map("encrypted_payload")
-  encryptionKeyVersion String @map("encryption_key_version")
   expiresAt          DateTime @map("expires_at")
   acceptedAt         DateTime? @map("accepted_at")
   acceptedByMemberId String?  @map("accepted_by_member_id")

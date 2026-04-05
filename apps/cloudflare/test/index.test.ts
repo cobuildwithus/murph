@@ -811,6 +811,148 @@ describe("cloudflare worker routes", () => {
     expect(stub.status).toHaveBeenCalledWith();
   });
 
+  it("forwards device-sync runtime reads and apply updates through the signed user route", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub, {
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+    });
+
+    const getResponse = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/internal/users/member_123/device-sync/runtime?connectionId=dsc_123&provider=oura",
+        {
+          headers: {
+            authorization: "Bearer control-token",
+          },
+          method: "GET",
+        },
+      )),
+      env,
+    );
+    expect(getResponse.status).toBe(200);
+    expect(stub.getDeviceSyncRuntimeSnapshot).toHaveBeenCalledWith({
+      request: {
+        connectionId: "dsc_123",
+        provider: "oura",
+        userId: "member_123",
+      },
+    });
+
+    const postResponse = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/device-sync/runtime", {
+        body: JSON.stringify({
+          occurredAt: "2026-04-05T10:46:00.000Z",
+          updates: [
+            {
+              connection: {
+                status: "disconnected",
+              },
+              connectionId: "dsc_123",
+              observedTokenVersion: 2,
+              observedUpdatedAt: "2026-04-05T10:00:00.000Z",
+              tokenBundle: null,
+            },
+          ],
+        }),
+        headers: {
+          authorization: "Bearer control-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      })),
+      env,
+    );
+    expect(postResponse.status).toBe(200);
+    expect(stub.applyDeviceSyncRuntimeUpdates).toHaveBeenCalledWith({
+      request: {
+        occurredAt: "2026-04-05T10:46:00.000Z",
+        updates: [
+          {
+            connection: {
+              status: "disconnected",
+            },
+            connectionId: "dsc_123",
+            observedTokenVersion: 2,
+            observedUpdatedAt: "2026-04-05T10:00:00.000Z",
+            tokenBundle: null,
+          },
+        ],
+        userId: "member_123",
+      },
+    });
+  });
+
+  it("stores hosted share packs on the signed direct worker route", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub, {
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+    });
+    const pack = {
+      createdAt: "2026-04-05T00:00:00.000Z",
+      entities: [
+        {
+          kind: "food",
+          payload: {
+            kind: "smoothie",
+            status: "active",
+            title: "Shared smoothie",
+          },
+          ref: "food:shared-smoothie",
+        },
+      ],
+      schemaVersion: "murph.share-pack.v1",
+      title: "Shared smoothie pack",
+    };
+
+    const putResponse = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/shares/share_123/pack", {
+        body: JSON.stringify(pack),
+        headers: {
+          authorization: "Bearer control-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "PUT",
+      })),
+      env,
+    );
+    expect(putResponse.status).toBe(200);
+    await expect(putResponse.json()).resolves.toEqual(pack);
+
+    const getResponse = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/shares/share_123/pack", {
+        headers: {
+          authorization: "Bearer control-token",
+        },
+        method: "GET",
+      })),
+      env,
+    );
+    expect(getResponse.status).toBe(200);
+    await expect(getResponse.json()).resolves.toEqual(pack);
+
+    const deleteResponse = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/shares/share_123/pack", {
+        headers: {
+          authorization: "Bearer control-token",
+        },
+        method: "DELETE",
+      })),
+      env,
+    );
+    expect(deleteResponse.status).toBe(200);
+
+    const missingResponse = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/shares/share_123/pack", {
+        headers: {
+          authorization: "Bearer control-token",
+        },
+        method: "GET",
+      })),
+      env,
+    );
+    expect(missingResponse.status).toBe(404);
+  });
+
   it("forwards hosted gateway read and send routes through the gateway seam", async () => {
     const stub = createUserRunnerStub();
     const env = createWorkerEnv(stub, {
@@ -2671,6 +2813,21 @@ type UserRunnerStub = ReturnType<typeof createUserRunnerStub>;
 
 function createUserRunnerStub() {
   return {
+    applyDeviceSyncRuntimeUpdates: vi.fn(async (input: {
+      request: {
+        updates: Array<{ connectionId: string }>;
+        userId: string;
+      };
+    }) => ({
+      appliedAt: "2026-04-05T10:46:00.000Z",
+      updates: input.request.updates.map((update) => ({
+        connection: null,
+        connectionId: update.connectionId,
+        status: "updated" as const,
+        tokenUpdate: "unchanged" as const,
+      })),
+      userId: input.request.userId,
+    })),
     bootstrapUser: vi.fn(async (userId: string) => ({
       userId,
     })),
@@ -2801,6 +2958,15 @@ function createUserRunnerStub() {
       nextCursor: null,
     })),
     gatewayRespondToPermission: vi.fn(async () => null),
+    getDeviceSyncRuntimeSnapshot: vi.fn(async (input: {
+      request: {
+        userId: string;
+      };
+    }) => ({
+      connections: [],
+      generatedAt: "2026-04-05T10:45:00.000Z",
+      userId: input.request.userId,
+    })),
     getUserEnvStatus: vi.fn(async () => ({
       configuredUserEnvKeys: [],
       userId: "member_123",
@@ -2821,6 +2987,11 @@ function createUserRunnerStub() {
       retryingEventId: null,
       userId: "member_123",
     })),
+    putDeviceSyncRuntimeSnapshot: vi.fn(async (input: {
+      snapshot: {
+        userId: string;
+      };
+    }) => input.snapshot),
     updateUserEnv: vi.fn(async (update: { env: Record<string, string | null> }) => ({
       configuredUserEnvKeys: Object.keys(update.env).sort(),
       userId: "member_123",

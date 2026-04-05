@@ -1,6 +1,6 @@
 # Device Sync Hosted Control Plane Proposal
 
-Last verified against repo layout: 2026-03-23
+Last verified against repo layout: 2026-04-05
 
 ## What exists today
 
@@ -36,7 +36,8 @@ Responsibilities:
 - OAuth start/callback routes
 - public webhook routes
 - provider account ownership mapping
-- encrypted token escrow
+- metadata-only Postgres connection state plus token-audit history
+- Cloudflare-owned encrypted token escrow under the user root key
 - webhook subscription management where needed
 - minimal durable control state such as OAuth sessions, webhook traces, pending sync signals, disconnect state, and local-agent pairing state
 - optional token refresh helper so provider app secrets stay server-side
@@ -70,8 +71,8 @@ Responsibilities:
 
 The hosted app becomes the internet-facing integration control plane. It may hold:
 - provider client credentials
-- encrypted user provider tokens
-- per-user connection metadata
+- per-user connection metadata and token-audit history in Postgres
+- encrypted user provider tokens in the Cloudflare runtime store
 - webhook traces and pending-sync markers
 
 It must **not** expose raw provider tokens to browsers, and it must **not** gain canonical vault write authority.
@@ -93,7 +94,7 @@ For a real hosted Vercel deployment, yes.
 A durable database is needed because Vercel functions do not provide a stable local filesystem for:
 - OAuth state round-trips
 - connection ownership mapping
-- encrypted token escrow
+- public connection metadata and token-audit history
 - webhook dedupe
 - pending-sync signals
 - local-agent pairing/session records
@@ -118,15 +119,26 @@ Recommended tables:
 - `metadata_json` for non-canonical provider identity details
 - `created_at`, `updated_at`
 
-#### `device_connection_secret`
+#### `device_token_audit`
+- `id`
+- `user_id`
 - `connection_id`
-- `access_token_encrypted`
-- `refresh_token_encrypted`
+- `provider`
+- `action`
+- `channel`
+- `session_id`
 - `token_version`
 - `key_version`
-- `updated_at`
+- `metadata_json`
+- `created_at`
 
-Keep secrets in a separate table from user-visible connection metadata.
+Keep public connection metadata and audit history in Postgres. Do not store decryptable provider tokens there.
+
+#### Cloudflare device-sync runtime store
+- per-user encrypted runtime snapshot under the user root key
+- connection snapshots plus local observation state
+- canonical encrypted token bundles and token-version fencing
+- signed worker control routes for read/apply plus metadata-only snapshot merges from `apps/web`
 
 ### Secret hygiene and rotation
 
@@ -139,10 +151,10 @@ Keep secrets in a separate table from user-visible connection metadata.
   - `OURA_CLIENT_SECRET`
   - `OURA_WEBHOOK_VERIFICATION_TOKEN`
 - Treat a leaked raw clone/archive that contained the local hosted `.env` the same way as a direct secret exposure for rotation and re-authorization decisions.
-- Today the hosted app records `key_version` with each `device_connection_secret` row, but runtime decryption still uses one active `DEVICE_SYNC_ENCRYPTION_KEY`. A version bump by itself does not preserve access to older escrowed token rows.
+- Today the hosted app records `key_version` with each `device_token_audit` row, while the canonical decryptable token bundles live in Cloudflare's encrypted runtime store under the user root key.
 - That means encryption-key rotation needs one of two operational paths before the cutover:
-  - re-encrypt every affected escrowed token bundle while the old key is still available, then switch the deployment to the new key/version
-  - revoke or delete the old escrowed token rows and force each affected provider connection through a fresh authorization flow
+  - re-encrypt every affected Cloudflare-escrowed token bundle while the old key is still available, then switch the deployment to the new key/version
+  - revoke or delete the old escrowed token bundles and force each affected provider connection through a fresh authorization flow
 - If the old database credential and the old encryption key may both have been exposed together, treat the existing escrowed provider tokens as compromised and prefer revocation/re-authorization over silent carry-forward.
 
 #### `device_oauth_session`
@@ -243,15 +255,15 @@ Authenticated by a local-agent credential, not by browser cookies.
 - `POST /api/device-sync/agent/signals/ack` (optional if you keep cursor-only semantics)
 - `POST /api/device-sync/agent/connections/:connectionId/local-heartbeat`
 
-### Hosted internal runner routes
+### Hosted internal runner/control routes
 
-Authenticated by a server-to-server token that is never exposed to the browser.
+Authenticated by signed server-to-server control traffic that is never exposed to the browser.
 
-- `POST /api/internal/device-sync/runtime/snapshot`
-- `POST /api/internal/device-sync/runtime/apply`
-- `POST /api/internal/device-sync/providers/:provider/connect-link`
+- `GET|POST /internal/users/:userId/device-sync/runtime` on the Cloudflare worker for canonical runtime reads and token/status apply operations
+- `PUT /internal/users/:userId/device-sync/runtime/snapshot` on the Cloudflare worker for metadata-only snapshot merges from `apps/web`
+- `POST /api/internal/device-sync/providers/:provider/connect-link` on `apps/web` for short-lived hosted wearable OAuth links
 
-These routes let the Cloudflare-hosted runtime hydrate escrowed device-sync connections before a one-shot reconcile pass, push status/token updates back into Postgres after the pass completes, and mint short-lived hosted wearable OAuth links for assistant turns without exposing hosted-web bearer tokens inside the runner child.
+These routes let Cloudflare remain the canonical owner of decryptable device-sync token escrow while `apps/web` seeds metadata, drives OAuth/export/refresh/disconnect flows, and mints short-lived connect links without exposing broad hosted-web credentials inside the runner child.
 
 Current hosted agent-session behavior:
 - `POST /api/device-sync/agents/pair` creates a 24-hour bearer session.
@@ -267,7 +279,7 @@ Move to the hosted control plane in hosted mode:
 - public webhook routes
 - OAuth session persistence
 - per-user provider connection ownership mapping
-- encrypted hosted token escrow
+- Cloudflare-owned encrypted token escrow plus signed runtime read/apply routes
 - webhook dedupe traces
 - pending-sync mailbox/signals for the local app
 - provider webhook subscription management
@@ -293,7 +305,7 @@ Recommended hosted responsibilities:
 - OAuth callback
 - webhook verification and dedupe
 - external-account mapping
-- token escrow
+- Cloudflare-owned token escrow
 - optional refresh helper
 
 Recommended local responsibilities:
@@ -306,7 +318,7 @@ WHOOP refresh-token rotation means only one side should be authoritative for ref
 
 Recommended hosted responsibilities:
 - OAuth callback
-- token escrow
+- Cloudflare-owned token escrow
 - webhook subscription management if you enable Oura webhooks
 - optional refresh helper
 
@@ -340,11 +352,11 @@ So the local app can remain the only **health-data** fetcher, but the hosted app
 If the hosted app owns the provider client secret, do **not** ship that client secret to local apps.
 
 Use this pattern instead:
-1. hosted app stores encrypted tokens durably
+1. Cloudflare runtime storage keeps encrypted token bundles durably under the user root key
 2. local app exports a token bundle once, caches it locally, and persists the replacement agent bearer returned by the response
 3. local app fetches provider data directly until access-token refresh or bearer renewal is needed
 4. when refresh or renewal is needed, local app calls the hosted refresh endpoint with its latest bearer
-5. hosted app refreshes tokens atomically when needed, updates escrow, and returns the new token bundle plus the next bearer session
+5. hosted web refreshes provider tokens atomically when needed, writes the updated token bundle into Cloudflare, and returns the new token bundle plus the next bearer session
 6. local app discards the prior bearer immediately and continues syncing locally without proxying provider payloads through hosted
 
 If the local agent lets its bearer expire, the hosted app rejects export/refresh/signals/heartbeat calls until the agent is paired again.

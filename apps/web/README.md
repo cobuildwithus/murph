@@ -2,7 +2,7 @@
 
 Hosted integration control plane for Vercel deployments.
 
-`apps/web` is the hosted integration control plane for OAuth callbacks, webhooks, token escrow, sparse Linq routing state, and sparse local-agent APIs.
+`apps/web` is the hosted integration control plane for OAuth callbacks, webhooks, sparse connection metadata, sparse Linq routing state, and sparse local-agent APIs. Canonical decryptable device-sync token escrow now lives in the Cloudflare runtime store.
 
 ## Core responsibilities
 
@@ -10,7 +10,7 @@ Hosted integration control plane for Vercel deployments.
 - WHOOP and Oura webhook intake
 - hosted Linq webhook ingress plus sparse chat routing state
 - per-user connection ownership mapping
-- encrypted provider-token escrow
+- public connection metadata plus token-audit history
 - durable `execution_outbox` records for Cloudflare-bound hosted execution intents
 - immutable hosted AI usage rows imported after successful hosted commits, with optional downstream Stripe token metering
 - local-agent pairing plus sparse signal/token routes for hosted integrations
@@ -65,9 +65,6 @@ On Vercel, the hosted web app now falls back to `VERCEL_PROJECT_PRODUCTION_URL` 
 Hosted onboarding extras:
 
 - `HOSTED_ONBOARDING_PUBLIC_BASE_URL`
-- `HOSTED_ONBOARDING_ENCRYPTION_KEY`
-- `HOSTED_ONBOARDING_ENCRYPTION_KEY_VERSION`
-- `HOSTED_ONBOARDING_ENCRYPTION_KEYRING_JSON`
 - `HOSTED_CONTACT_PRIVACY_KEY`
 - `HOSTED_ONBOARDING_SIGNUP_PHONE_NUMBER` to show a public `Text to start` CTA on `/`
 - `NEXT_PUBLIC_PRIVY_APP_ID`
@@ -137,8 +134,8 @@ The hosted control plane consumes each assertion nonce once, so replayed asserti
 - A raw filesystem archive of a repo clone is still an exposure when ignored local `apps/web/.env`, `.next`, `.next-dev`, or `.next-smoke` output exists, even when git has no tracked secret diff. Use the guarded `pnpm zip:src` / `scripts/package-audit-context.sh` flow for source sharing instead of archiving the clone directly; that path stages git-visible files, now includes the tracked `config/workspace-source-resolution.ts` helper, and filters blocked local residue from the bundle.
 - Treat `DATABASE_URL`, `DEVICE_SYNC_ENCRYPTION_KEY`, `GARMIN_CLIENT_SECRET`, `WHOOP_CLIENT_SECRET`, `OURA_CLIENT_SECRET`, and `OURA_WEBHOOK_VERIFICATION_TOKEN` as rotation-required if a real hosted `.env` or deploy secret was ever exposed.
 - Treat a leaked raw clone/archive that included the local hosted `.env` the same way as a direct secret exposure.
-- Rotate `DEVICE_SYNC_ENCRYPTION_KEY_VERSION` whenever you rotate `DEVICE_SYNC_ENCRYPTION_KEY`, but do not assume the version field alone gives backwards-compatible reads. The current hosted control plane loads one active key at runtime.
-- Existing `device_connection_secret` rows encrypted with the previous key will not decrypt after a cutover to a new key unless you re-encrypt them first while the old key is still available. If you cannot do that safely, invalidate the escrowed token rows and force the affected Garmin/WHOOP/Oura connections through re-authorization instead.
+- Rotate `DEVICE_SYNC_ENCRYPTION_KEY_VERSION` whenever you rotate `DEVICE_SYNC_ENCRYPTION_KEY`, but do not assume the version field alone gives backwards-compatible reads. The current hosted control plane still uses this key for device-sync control-plane secrecy such as opaque browser connection ids and key-versioned audit metadata.
+- Canonical decryptable provider tokens no longer live in Postgres. The Cloudflare runtime store now owns token escrow under the user root key, so escrow rotation or revocation must follow the hosted-execution/Cloudflare key path rather than the removed `device_connection_secret` table.
 
 ## Prisma
 

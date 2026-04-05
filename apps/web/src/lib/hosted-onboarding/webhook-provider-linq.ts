@@ -1,8 +1,6 @@
 import { HostedBillingStatus, HostedMemberStatus } from "@prisma/client";
 
 import {
-  buildHostedDailyQuotaReply,
-  buildHostedInviteReply,
   type HostedLinqWebhookEvent,
   requireHostedLinqMessageReceivedEvent,
   resolveHostedLinqOccurredAt,
@@ -215,12 +213,9 @@ function buildSignupLinkResponse(input: {
       createHostedWebhookLinqMessageSideEffect({
         chatId: input.chatId,
         inviteId: input.inviteId,
-        message: buildHostedInviteReply({
-          activeSubscription: input.activeSubscription,
-          joinUrl,
-        }),
         replyToMessageId: input.messageId,
         sourceEventId: input.sourceEventId,
+        template: input.activeSubscription ? "invite_signin" : "invite_signup",
       }),
     ],
     response: {
@@ -242,9 +237,9 @@ function buildQuotaReplyResponse(input: {
       createHostedWebhookLinqMessageSideEffect({
         chatId: input.chatId,
         inviteId: null,
-        message: buildHostedDailyQuotaReply(),
         replyToMessageId: input.messageId,
         sourceEventId: input.sourceEventId,
+        template: "daily_quota",
       }),
     ],
     response: {

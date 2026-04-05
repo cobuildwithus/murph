@@ -10,6 +10,8 @@ import {
 import { shapeHostedDeviceSyncJobHintPayload } from "@murphai/device-syncd/hosted-hints";
 import type {
   HostedExecutionDispatchRequest,
+  HostedExecutionDeviceSyncRuntimeApplyResponse,
+  HostedExecutionDeviceSyncRuntimeConnectionSnapshot,
   HostedExecutionDeviceSyncJobHint,
   HostedExecutionDeviceSyncWakeEvent,
 } from "@murphai/hosted-execution";
@@ -17,13 +19,15 @@ import type {
 import { getPrisma } from "../prisma";
 import { requireHostedExecutionControlClient } from "../hosted-execution/control";
 import { enqueueHostedExecutionOutbox } from "../hosted-execution/outbox";
-import { createHostedSecretCodec } from "./crypto";
-import { readHostedDeviceSyncEnvironment } from "./env";
 import {
   buildHostedDeviceSyncWakeDispatch,
   type HostedDeviceSyncWakeSource,
 } from "./hosted-dispatch";
-import { buildHostedDeviceSyncRuntimeSnapshot } from "./internal-runtime";
+import {
+  buildHostedDeviceSyncRuntimeSnapshot,
+  composeHostedRuntimeDeviceSyncAccount,
+  findHostedDeviceSyncRuntimeConnection,
+} from "./internal-runtime";
 import { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
 import { sha256Hex, toIsoTimestamp, toJsonRecord } from "./shared";
 
@@ -47,15 +51,42 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     });
   }
 
-  const bundle = await input.store.getConnectionBundleForUser(input.userId, input.connectionId);
   let warning: { code: string; message: string } | undefined;
+  const runtimeSnapshot = await requireHostedExecutionControlClient().getDeviceSyncRuntimeSnapshot(
+    input.userId,
+    {
+      connectionId: input.connectionId,
+      provider: existing.provider,
+    },
+  );
+  const runtimeConnection = findHostedDeviceSyncRuntimeConnection(runtimeSnapshot, input.connectionId);
 
-  if (bundle) {
-    const provider = input.registry.get(bundle.account.provider);
+  if (existing.status === "disconnected") {
+    if (runtimeConnection) {
+      await clearHostedDeviceSyncRuntimeConnection({
+        connectionId: input.connectionId,
+        controlClient: requireHostedExecutionControlClient(),
+        now: toIsoTimestamp(new Date()),
+        provider: existing.provider,
+        runtimeConnection,
+        userId: input.userId,
+      });
+    }
+
+    return {
+      connection: existing,
+    };
+  }
+
+  if (runtimeConnection?.tokenBundle) {
+    const provider = input.registry.get(existing.provider);
 
     if (provider?.revokeAccess) {
       try {
-        await provider.revokeAccess(bundle.account);
+        await provider.revokeAccess(composeHostedRuntimeDeviceSyncAccount({
+          connection: existing,
+          tokenBundle: runtimeConnection.tokenBundle,
+        }));
       } catch (error) {
         warning = {
           code: isDeviceSyncError(error) ? error.code : "PROVIDER_REVOKE_FAILED",
@@ -101,6 +132,18 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       signalId: signal.id,
     };
   });
+
+  if (runtimeConnection) {
+    await clearHostedDeviceSyncRuntimeConnection({
+      connectionId: input.connectionId,
+      controlClient: requireHostedExecutionControlClient(),
+      now,
+      provider: existing.provider,
+      runtimeConnection,
+      userId: input.userId,
+      warning,
+    });
+  }
 
   await publishHostedDeviceSyncWake({
     connectionId: input.connectionId,
@@ -262,14 +305,8 @@ export async function dispatchHostedDeviceSyncWake(input: {
 }): Promise<{ dispatched: boolean; reason?: string }> {
   const prisma = getPrisma();
   const hint = buildHostedDeviceSyncSignalPayload(input);
-  const environment = readHostedDeviceSyncEnvironment();
   const store = new PrismaDeviceSyncControlPlaneStore({
     prisma,
-    codec: createHostedSecretCodec({
-      key: environment.encryptionKey,
-      keyVersion: environment.encryptionKeyVersion,
-      keysByVersion: environment.encryptionKeysByVersion,
-    }),
   });
   const dispatch = buildHostedDeviceSyncWakeDispatch({
     ...input,
@@ -418,4 +455,80 @@ function normalizeHostedDeviceSyncJobHints(input: {
       ...(typeof job.priority === "number" ? { priority: job.priority } : {}),
     } satisfies HostedExecutionDeviceSyncJobHint;
   });
+}
+
+async function clearHostedDeviceSyncRuntimeConnection(input: {
+  connectionId: string;
+  controlClient: ReturnType<typeof requireHostedExecutionControlClient>;
+  now: string;
+  provider: string;
+  runtimeConnection: HostedExecutionDeviceSyncRuntimeConnectionSnapshot;
+  userId: string;
+  warning?: { code: string; message: string };
+}): Promise<void> {
+  let currentRuntimeConnection: HostedExecutionDeviceSyncRuntimeConnectionSnapshot | null =
+    input.runtimeConnection;
+
+  for (let attempt = 0; attempt < 2 && currentRuntimeConnection; attempt += 1) {
+    const response = await input.controlClient.applyDeviceSyncRuntimeUpdates(input.userId, {
+      occurredAt: input.now,
+      updates: [
+        {
+          connection: {
+            status: "disconnected",
+          },
+          connectionId: input.connectionId,
+          localState: {
+            clearError: true,
+            ...(input.warning?.code ? { lastErrorCode: input.warning.code } : {}),
+            ...(input.warning?.message ? { lastErrorMessage: input.warning.message } : {}),
+          },
+          observedTokenVersion: currentRuntimeConnection.tokenBundle?.tokenVersion ?? null,
+          observedUpdatedAt:
+            currentRuntimeConnection.connection.updatedAt ?? currentRuntimeConnection.connection.createdAt,
+          tokenBundle: null,
+        },
+      ],
+    });
+
+    if (isHostedDeviceSyncRuntimeDisconnectApplied(response, input.connectionId)) {
+      return;
+    }
+
+    currentRuntimeConnection = findHostedDeviceSyncRuntimeConnection(
+      await input.controlClient.getDeviceSyncRuntimeSnapshot(input.userId, {
+        connectionId: input.connectionId,
+        provider: input.provider,
+      }),
+      input.connectionId,
+    );
+
+    if (
+      !currentRuntimeConnection
+      || (
+        currentRuntimeConnection.connection.status === "disconnected"
+        && currentRuntimeConnection.tokenBundle === null
+      )
+    ) {
+      return;
+    }
+  }
+
+  throw deviceSyncError({
+    code: "RUNTIME_STATE_CONFLICT",
+    message: `Hosted device-sync runtime could not clear escrowed state for connection ${input.connectionId}.`,
+    retryable: true,
+    httpStatus: 409,
+  });
+}
+
+function isHostedDeviceSyncRuntimeDisconnectApplied(
+  response: HostedExecutionDeviceSyncRuntimeApplyResponse,
+  connectionId: string,
+): boolean {
+  const update = response.updates.find((entry) => entry.connectionId === connectionId);
+
+  return update?.status === "updated"
+    && update.connection?.status === "disconnected"
+    && (update.tokenUpdate === "cleared" || update.tokenUpdate === "missing");
 }

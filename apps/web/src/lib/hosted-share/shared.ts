@@ -4,14 +4,13 @@ import {
   buildHostedExecutionVaultShareAcceptedDispatch,
   type HostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution";
-import { assertContract, sharePackSchema, type SharePack } from "@murphai/contracts";
+import type { SharePack } from "@murphai/contracts";
 
 import {
-  getHostedOnboardingSecretCodec,
   requireHostedOnboardingPublicBaseUrl,
 } from "../hosted-onboarding/runtime";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
-import { buildHostedSecretAad } from "../device-sync/crypto";
+import { readHostedSharePackFromHostedExecution } from "../hosted-execution/control";
 
 import type { HostedSharePreview, HostedSharePrismaClient } from "./types";
 
@@ -63,20 +62,21 @@ export async function requireHostedShareLink(shareCode: string, prisma: HostedSh
   return record;
 }
 
-export function readHostedSharePack(record: {
+export async function readHostedSharePack(record: {
   id: string;
-  encryptedPayload: string;
-}): { pack: SharePack } {
-  const payload = getHostedOnboardingSecretCodec().decrypt(record.encryptedPayload, {
-    aad: buildHostedSecretAad({
-      purpose: "hosted-share-pack",
-      shareId: record.id,
-    }),
-  });
-  const parsed = JSON.parse(payload) as SharePack;
+}): Promise<{ pack: SharePack }> {
+  const pack = await readHostedSharePackFromHostedExecution(record.id);
+
+  if (!pack) {
+    throw hostedOnboardingError({
+      code: "HOSTED_SHARE_PACK_NOT_FOUND",
+      message: `Hosted share pack ${record.id} was not found.`,
+      httpStatus: 404,
+    });
+  }
 
   return {
-    pack: assertContract(sharePackSchema, parsed, "share pack"),
+    pack,
   };
 }
 

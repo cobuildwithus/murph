@@ -21,25 +21,11 @@ const mocks = vi.hoisted(() => ({
     status: record.status === "reauthorization_required" || record.status === "disconnected" ? record.status : "active",
     updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : "2026-03-26T12:00:00.000Z",
   })),
-  requireHostedConnectionBundleRecord: vi.fn((record: Record<string, unknown>) => ({
-    account: {
-      accessToken: "access-token",
-      accessTokenExpiresAt: "2026-03-30T00:00:00.000Z",
-      refreshToken: "refresh-token",
-    },
-    keyVersion: "v1",
-    tokenVersion: typeof (record.secret as { tokenVersion?: unknown } | undefined)?.tokenVersion === "number"
-      ? (record.secret as { tokenVersion: number }).tokenVersion
-      : 1,
-    userId: String(record.userId ?? "user-123"),
-  })),
 }));
 
 vi.mock("@/src/lib/device-sync/prisma-store", () => ({
-  hostedConnectionWithSecretArgs: {},
   mapHostedInternalAccountRecord: mocks.mapHostedInternalAccountRecord,
   PrismaDeviceSyncControlPlaneStore: class PrismaDeviceSyncControlPlaneStore {},
-  requireHostedConnectionBundleRecord: mocks.requireHostedConnectionBundleRecord,
 }));
 
 describe("device-sync hosted runtime helpers", () => {
@@ -47,29 +33,11 @@ describe("device-sync hosted runtime helpers", () => {
     vi.clearAllMocks();
   });
 
-  it("builds runtime snapshots from escrowed hosted device connections", async () => {
+  it("builds metadata-only runtime snapshots from hosted device connections", async () => {
     const { buildHostedDeviceSyncRuntimeSnapshot } = await import(
       "@/src/lib/device-sync/internal-runtime"
     );
     const store = {
-      codec: {
-        decrypt: (value: string) => value,
-        encrypt: (value: string) => value,
-        keyVersion: "v1",
-      },
-      createTokenAudit: vi.fn().mockResolvedValue({
-        action: "token_exported",
-        channel: "internal_runtime_snapshot",
-        connectionId: "dsc_123",
-        createdAt: "2026-03-26T12:00:00.000Z",
-        id: 1,
-        keyVersion: "v1",
-        metadata: {},
-        provider: "oura",
-        sessionId: null,
-        tokenVersion: 3,
-        userId: "user-123",
-      }),
       prisma: {
         deviceConnection: {
           findMany: vi.fn().mockResolvedValue([
@@ -82,25 +50,8 @@ describe("device-sync hosted runtime helpers", () => {
               metadataJson: { source: "oauth" },
               provider: "oura",
               scopes: ["heartrate"],
-              secret: {
-                tokenVersion: 3,
-              },
               status: "active",
               updatedAt: "2026-03-20T10:00:00.000Z",
-              userId: "user-123",
-            },
-            {
-              connectedAt: "2026-03-21T10:00:00.000Z",
-              createdAt: "2026-03-21T10:00:00.000Z",
-              displayName: "Bob Whoop",
-              externalAccountId: "whoop_bob",
-              id: "dsc_456",
-              metadataJson: {},
-              provider: "whoop",
-              scopes: ["offline"],
-              secret: null,
-              status: "disconnected",
-              updatedAt: "2026-03-21T10:00:00.000Z",
               userId: "user-123",
             },
           ]),
@@ -115,14 +66,61 @@ describe("device-sync hosted runtime helpers", () => {
       },
     );
 
-    expect(snapshot.userId).toBe("user-123");
-    expect(snapshot.connections).toEqual([
-      {
-        connection: expect.objectContaining({
+    expect(snapshot).toEqual({
+      connections: [
+        {
+          connection: expect.objectContaining({
+            id: "dsc_123",
+            metadata: { source: "oauth" },
+            provider: "oura",
+          }),
+          localState: {
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSyncCompletedAt: null,
+            lastSyncErrorAt: null,
+            lastSyncStartedAt: null,
+            lastWebhookAt: null,
+            nextReconcileAt: null,
+          },
+          tokenBundle: null,
+        },
+      ],
+      generatedAt: expect.any(String),
+      userId: "user-123",
+    });
+  });
+
+  it("requires a token bundle when composing a Cloudflare-backed runtime account", async () => {
+    const {
+      composeHostedRuntimeDeviceSyncAccount,
+      requireHostedDeviceSyncRuntimeTokenBundle,
+    } = await import(
+      "@/src/lib/device-sync/internal-runtime"
+    );
+
+    expect(() => requireHostedDeviceSyncRuntimeTokenBundle({
+      connectionId: "dsc_123",
+      runtimeConnection: null,
+      userId: "user-123",
+    })).toThrow("Hosted device-sync connection no longer has an escrowed token bundle.");
+
+    const tokenBundle = requireHostedDeviceSyncRuntimeTokenBundle({
+      connectionId: "dsc_123",
+      runtimeConnection: {
+        connection: {
+          accessTokenExpiresAt: null,
+          connectedAt: "2026-03-26T12:00:00.000Z",
+          createdAt: "2026-03-26T12:00:00.000Z",
+          displayName: "Oura",
+          externalAccountId: "oura_alice",
           id: "dsc_123",
+          metadata: { source: "oauth" },
           provider: "oura",
-          updatedAt: "2026-03-20T10:00:00.000Z",
-        }),
+          scopes: ["heartrate"],
+          status: "active",
+          updatedAt: "2026-03-26T12:00:00.000Z",
+        },
         localState: {
           lastErrorCode: null,
           lastErrorMessage: null,
@@ -140,36 +138,47 @@ describe("device-sync hosted runtime helpers", () => {
           tokenVersion: 3,
         },
       },
-      {
-        connection: expect.objectContaining({
-          id: "dsc_456",
-          provider: "whoop",
-          updatedAt: "2026-03-21T10:00:00.000Z",
-        }),
-        localState: {
-          lastErrorCode: null,
-          lastErrorMessage: null,
-          lastSyncCompletedAt: null,
-          lastSyncErrorAt: null,
-          lastSyncStartedAt: null,
-          lastWebhookAt: null,
-          nextReconcileAt: null,
-        },
-        tokenBundle: null,
-      },
-    ]);
-    expect(store.createTokenAudit).toHaveBeenCalledTimes(1);
-    expect(store.createTokenAudit).toHaveBeenCalledWith(expect.objectContaining({
-      action: "token_exported",
-      channel: "internal_runtime_snapshot",
-      connectionId: "dsc_123",
-      provider: "oura",
-      tokenVersion: 3,
       userId: "user-123",
+    });
+
+    expect(composeHostedRuntimeDeviceSyncAccount({
+      connection: {
+        id: "dsc_123",
+        provider: "oura",
+        externalAccountId: "oura_alice",
+        displayName: "Oura",
+        status: "active",
+        scopes: ["heartrate"],
+        accessTokenExpiresAt: null,
+        metadata: {
+          nested: {
+            drop: true,
+          },
+          source: "oauth",
+        },
+        connectedAt: "2026-03-26T12:00:00.000Z",
+        lastWebhookAt: null,
+        lastSyncStartedAt: null,
+        lastSyncCompletedAt: null,
+        lastSyncErrorAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        nextReconcileAt: null,
+        createdAt: "2026-03-26T12:00:00.000Z",
+        updatedAt: "2026-03-26T12:00:00.000Z",
+      },
+      tokenBundle,
+    })).toEqual(expect.objectContaining({
+      accessToken: "access-token",
+      disconnectGeneration: 0,
+      metadata: {
+        source: "oauth",
+      },
+      refreshToken: "refresh-token",
     }));
   });
 
-  it("binds device-sync runtime requests to the trusted hosted execution user when present", async () => {
+  it("binds device-sync runtime requests to the trusted hosted execution user and normalizes timestamps", async () => {
     const {
       parseHostedDeviceSyncRuntimeApplyRequest,
       parseHostedDeviceSyncRuntimeSnapshotRequest,
@@ -186,58 +195,37 @@ describe("device-sync hosted runtime helpers", () => {
     });
 
     expect(parseHostedDeviceSyncRuntimeApplyRequest({
-      updates: [],
-    }, "user-123")).toEqual({
-      updates: [],
-      userId: "user-123",
-    });
-
-    expect(() => parseHostedDeviceSyncRuntimeSnapshotRequest({
-      userId: "user-456",
-    }, "user-123")).toThrow(
-      "userId must match the authenticated hosted execution user.",
-    );
-  });
-
-  it("normalizes runtime timestamp fields and rejects malformed timestamp input", async () => {
-    const { parseHostedDeviceSyncRuntimeApplyRequest } = await import(
-      "@/src/lib/device-sync/internal-runtime"
-    );
-
-    expect(parseHostedDeviceSyncRuntimeApplyRequest({
       occurredAt: "2026-03-26T12:00:00Z",
       updates: [
         {
           connectionId: "dsc_123",
           localState: {
             lastSyncStartedAt: "2026-03-26T07:00:00-05:00",
-            nextReconcileAt: "2026-03-27T00:00:00-05:00",
           },
           observedUpdatedAt: "2026-03-26T12:00:00+00:00",
           tokenBundle: {
             accessToken: "new-access-token",
             accessTokenExpiresAt: "2026-03-30T01:30:00+01:30",
-            keyVersion: "local-runtime",
+            keyVersion: "cloudflare-runtime",
             refreshToken: "new-refresh-token",
             tokenVersion: 1,
           },
         },
       ],
       userId: "user-123",
-    })).toEqual({
+    }, "user-123")).toEqual({
       occurredAt: "2026-03-26T12:00:00.000Z",
       updates: [
         {
           connectionId: "dsc_123",
           localState: {
             lastSyncStartedAt: "2026-03-26T12:00:00.000Z",
-            nextReconcileAt: "2026-03-27T05:00:00.000Z",
           },
           observedUpdatedAt: "2026-03-26T12:00:00.000Z",
           tokenBundle: {
             accessToken: "new-access-token",
             accessTokenExpiresAt: "2026-03-30T00:00:00.000Z",
-            keyVersion: "local-runtime",
+            keyVersion: "cloudflare-runtime",
             refreshToken: "new-refresh-token",
             tokenVersion: 1,
           },
@@ -245,1010 +233,5 @@ describe("device-sync hosted runtime helpers", () => {
       ],
       userId: "user-123",
     });
-
-    expect(() => parseHostedDeviceSyncRuntimeApplyRequest({
-      occurredAt: "not-a-timestamp",
-      updates: [],
-      userId: "user-123",
-    })).toThrow("occurredAt must be an ISO-8601 timestamp.");
-
-    expect(() => parseHostedDeviceSyncRuntimeApplyRequest({
-      updates: [
-        {
-          connectionId: "dsc_123",
-          observedUpdatedAt: "soon",
-        },
-      ],
-      userId: "user-123",
-    })).toThrow("updates[0].observedUpdatedAt must be an ISO-8601 timestamp.");
-
-    expect(() => parseHostedDeviceSyncRuntimeApplyRequest({
-      updates: [
-        {
-          connectionId: "dsc_legacy",
-          lastErrorCode: "PROVIDER_AUTH",
-          status: "reauthorization_required",
-        },
-      ],
-      userId: "user-123",
-    })).toThrow();
-
-    expect(() => parseHostedDeviceSyncRuntimeApplyRequest({
-      updates: [
-        {
-          connection: {
-            status: "active",
-          },
-          connectionId: "dsc_mixed",
-          lastErrorCode: "PROVIDER_AUTH",
-          localState: {
-            lastSyncStartedAt: "2026-03-26T07:00:00-05:00",
-          },
-        },
-      ],
-      userId: "user-123",
-    })).toThrow("updates[0].localState must be used for local observation fields.");
-
-    expect(() => parseHostedDeviceSyncRuntimeApplyRequest({
-      updates: [
-        {
-          connectionId: "dsc_123",
-          tokenBundle: {
-            accessToken: "new-access-token",
-            keyVersion: "local-runtime",
-            refreshToken: "new-refresh-token",
-            tokenVersion: 0,
-          },
-        },
-      ],
-      userId: "user-123",
-    })).toThrow("updates[0].tokenBundle.tokenVersion must be a positive integer.");
-  });
-
-  it("skips stale token writes, fences expiry metadata, and emits a reauthorization signal when runtime state requires reconnect", async () => {
-    const { applyHostedDeviceSyncRuntimeUpdates } = await import(
-      "@/src/lib/device-sync/internal-runtime"
-    );
-    const existing = {
-      accessTokenExpiresAt: new Date("2026-03-28T00:00:00.000Z"),
-      connectedAt: "2026-03-20T10:00:00.000Z",
-      createdAt: "2026-03-20T10:00:00.000Z",
-      displayName: "Alice Oura",
-      externalAccountId: "oura_alice",
-      id: "dsc_123",
-      lastSyncErrorAt: new Date("2026-03-25T23:00:00.000Z"),
-      metadataJson: { source: "oauth" },
-      provider: "oura",
-      scopes: ["heartrate"],
-      secret: {
-        accessTokenEncrypted: "enc:old-access",
-        refreshTokenEncrypted: "enc:old-refresh",
-        tokenVersion: 2,
-      },
-      status: "active",
-      updatedAt: "2026-03-20T10:00:00.000Z",
-      userId: "user-123",
-    };
-    const updated = {
-      ...existing,
-      lastErrorCode: "PROVIDER_AUTH",
-      lastErrorMessage: "Reconnect required",
-      status: "reauthorization_required",
-      updatedAt: "2026-03-26T12:00:00.000Z",
-    };
-    const tx = {
-      deviceConnection: {
-        findFirst: vi.fn().mockResolvedValue(existing),
-        update: vi.fn().mockResolvedValue(updated),
-      },
-      deviceConnectionSecret: {
-        create: vi.fn(),
-        update: vi.fn(),
-      },
-    };
-    const store = {
-      codec: {
-        decrypt: (value: string) => value.replace(/^enc:/u, ""),
-        encrypt: (value: string) => `enc:${value}`,
-        keyVersion: "v1",
-      },
-      createSignal: vi.fn().mockResolvedValue({ id: 12 }),
-      markConnectionDisconnected: vi.fn(),
-      prisma: {},
-      withConnectionRefreshLock: vi.fn(async (_connectionId: string, callback: (input: typeof tx) => Promise<unknown>) =>
-        callback(tx),
-      ),
-    };
-
-    const result = await applyHostedDeviceSyncRuntimeUpdates(
-      store as never,
-      {
-        occurredAt: "2026-03-26T12:00:00.000Z",
-        updates: [
-          {
-            connection: {
-              status: "reauthorization_required",
-            },
-            connectionId: "dsc_123",
-            localState: {
-              lastErrorCode: "PROVIDER_AUTH",
-              lastErrorMessage: "Reconnect required",
-            },
-            observedUpdatedAt: "2026-03-20T10:00:00.000Z",
-            observedTokenVersion: 1,
-            tokenBundle: {
-              accessToken: "new-access-token",
-              accessTokenExpiresAt: "2026-03-30T00:00:00.000Z",
-              keyVersion: "local-runtime",
-              refreshToken: "new-refresh-token",
-              tokenVersion: 1,
-            },
-          },
-        ],
-        userId: "user-123",
-      },
-    );
-
-    expect(tx.deviceConnection.update).toHaveBeenCalledWith({
-      where: {
-        id: "dsc_123",
-      },
-      data: expect.objectContaining({
-        lastErrorCode: "PROVIDER_AUTH",
-        lastErrorMessage: "Reconnect required",
-        status: "reauthorization_required",
-      }),
-    });
-    expect(tx.deviceConnectionSecret.create).not.toHaveBeenCalled();
-    expect(tx.deviceConnectionSecret.update).not.toHaveBeenCalled();
-    expect(store.createSignal).toHaveBeenCalledWith({
-      connectionId: "dsc_123",
-      createdAt: "2026-03-26T12:00:00.000Z",
-      kind: "reauthorization_required",
-      payload: {
-        lastErrorCode: "PROVIDER_AUTH",
-        lastErrorMessage: "Reconnect required",
-        occurredAt: "2026-03-26T12:00:00.000Z",
-        reason: "hosted_runtime",
-      },
-      provider: "oura",
-      tx,
-      userId: "user-123",
-    });
-    expect(result).toEqual({
-      appliedAt: "2026-03-26T12:00:00.000Z",
-      updates: [
-        {
-          connection: expect.objectContaining({
-            id: "dsc_123",
-            provider: "oura",
-            status: "reauthorization_required",
-          }),
-          connectionId: "dsc_123",
-          status: "updated",
-          tokenUpdate: "skipped_version_mismatch",
-        },
-      ],
-      userId: "user-123",
-    });
-  });
-
-  it("skips stale connection-state and token writes while still applying local-state clears when the hosted row advanced mid-pass", async () => {
-    const { applyHostedDeviceSyncRuntimeUpdates } = await import(
-      "@/src/lib/device-sync/internal-runtime"
-    );
-    const existing = {
-      accessTokenExpiresAt: null,
-      connectedAt: "2026-03-20T10:00:00.000Z",
-      createdAt: "2026-03-20T10:00:00.000Z",
-      displayName: "Hosted Disconnect",
-      externalAccountId: "whoop_disconnect",
-      id: "dsc_midpass",
-      lastErrorCode: "PROVIDER_AUTH",
-      lastErrorMessage: "Reconnect in browser",
-      metadataJson: { source: "browser" },
-      provider: "whoop",
-      scopes: ["offline"],
-      secret: null,
-      status: "disconnected",
-      updatedAt: new Date("2026-03-26T12:05:00.000Z"),
-      userId: "user-123",
-    };
-    const updated = {
-      ...existing,
-      lastErrorCode: null,
-      lastErrorMessage: null,
-    };
-    const tx = {
-      deviceConnection: {
-        findFirst: vi.fn().mockResolvedValue(existing),
-        update: vi.fn().mockResolvedValue(updated),
-      },
-      deviceConnectionSecret: {
-        create: vi.fn(),
-        update: vi.fn(),
-      },
-    };
-    const store = {
-      codec: {
-        decrypt: (value: string) => value.replace(/^enc:/u, ""),
-        encrypt: (value: string) => `enc:${value}`,
-        keyVersion: "v1",
-      },
-      createSignal: vi.fn(),
-      markConnectionDisconnected: vi.fn(),
-      prisma: {},
-      withConnectionRefreshLock: vi.fn(async (_connectionId: string, callback: (input: typeof tx) => Promise<unknown>) =>
-        callback(tx),
-      ),
-    };
-
-    const result = await applyHostedDeviceSyncRuntimeUpdates(
-      store as never,
-      {
-        occurredAt: "2026-03-26T12:10:00.000Z",
-        updates: [
-          {
-            connection: {
-              status: "active",
-            },
-            connectionId: "dsc_midpass",
-            localState: {
-              lastErrorCode: null,
-              lastErrorMessage: null,
-            },
-            observedUpdatedAt: "2026-03-26T12:00:00.000Z",
-            observedTokenVersion: null,
-            tokenBundle: {
-              accessToken: "new-access-token",
-              accessTokenExpiresAt: "2026-03-30T00:00:00.000Z",
-              keyVersion: "local-runtime",
-              refreshToken: "new-refresh-token",
-              tokenVersion: 0,
-            },
-          },
-        ],
-        userId: "user-123",
-      },
-    );
-
-    expect(tx.deviceConnection.update).toHaveBeenCalledWith({
-      where: {
-        id: "dsc_midpass",
-      },
-      data: {
-        lastErrorCode: null,
-        lastErrorMessage: null,
-      },
-    });
-    expect(tx.deviceConnectionSecret.create).not.toHaveBeenCalled();
-    expect(tx.deviceConnectionSecret.update).not.toHaveBeenCalled();
-    expect(store.createSignal).not.toHaveBeenCalled();
-    expect(result).toEqual({
-      appliedAt: "2026-03-26T12:10:00.000Z",
-      updates: [
-        {
-          connection: expect.objectContaining({
-            id: "dsc_midpass",
-            status: "disconnected",
-          }),
-          connectionId: "dsc_midpass",
-          status: "updated",
-          tokenUpdate: "skipped_version_mismatch",
-        },
-      ],
-      userId: "user-123",
-    });
-  });
-
-  it("sanitizes hosted runtime metadata updates before persistence", async () => {
-    const { applyHostedDeviceSyncRuntimeUpdates } = await import(
-      "@/src/lib/device-sync/internal-runtime"
-    );
-    const existing = {
-      accessTokenExpiresAt: null,
-      connectedAt: "2026-03-20T10:00:00.000Z",
-      createdAt: "2026-03-20T10:00:00.000Z",
-      displayName: "Hosted Metadata",
-      externalAccountId: "oura_metadata",
-      id: "dsc_metadata",
-      metadataJson: { source: "browser" },
-      provider: "oura",
-      scopes: ["heartrate"],
-      secret: null,
-      status: "active",
-      updatedAt: "2026-03-26T12:05:00.000Z",
-      userId: "user-123",
-    };
-    const updated = {
-      ...existing,
-      metadataJson: {
-        flag: true,
-      },
-      updatedAt: "2026-03-26T12:10:00.000Z",
-    };
-    const tx = {
-      deviceConnection: {
-        findFirst: vi.fn().mockResolvedValue(existing),
-        update: vi.fn().mockResolvedValue(updated),
-      },
-      deviceConnectionSecret: {
-        create: vi.fn(),
-        update: vi.fn(),
-      },
-    };
-    const store = {
-      codec: {
-        decrypt: (value: string) => value.replace(/^enc:/u, ""),
-        encrypt: (value: string) => `enc:${value}`,
-        keyVersion: "v1",
-      },
-      createSignal: vi.fn(),
-      markConnectionDisconnected: vi.fn(),
-      prisma: {},
-      withConnectionRefreshLock: vi.fn(async (_connectionId: string, callback: (input: typeof tx) => Promise<unknown>) =>
-        callback(tx),
-      ),
-    };
-
-    await applyHostedDeviceSyncRuntimeUpdates(
-      store as never,
-      {
-        occurredAt: "2026-03-26T12:10:00.000Z",
-        updates: [
-          {
-            connection: {
-              metadata: {
-                flag: true,
-                longText: "x".repeat(300),
-                nested: {
-                  secret: "drop-me",
-                },
-                source: {
-                  nested: "drop-me-too",
-                },
-              },
-            },
-            connectionId: "dsc_metadata",
-            observedUpdatedAt: "2026-03-26T12:05:00.000Z",
-          },
-        ],
-        userId: "user-123",
-      },
-    );
-
-    expect(tx.deviceConnection.update).toHaveBeenCalledWith({
-      where: {
-        id: "dsc_metadata",
-      },
-      data: expect.objectContaining({
-        metadataJson: {
-          flag: true,
-        },
-      }),
-    });
-  });
-
-  it("does not let a stale baseline disconnect an already-advanced hosted row", async () => {
-    const { applyHostedDeviceSyncRuntimeUpdates } = await import(
-      "@/src/lib/device-sync/internal-runtime"
-    );
-    const existing = {
-      accessTokenExpiresAt: null,
-      connectedAt: "2026-03-20T10:00:00.000Z",
-      createdAt: "2026-03-20T10:00:00.000Z",
-      displayName: "Hosted Active",
-      externalAccountId: "whoop_disconnect",
-      id: "dsc_disconnect_midpass",
-      metadataJson: { source: "browser" },
-      provider: "whoop",
-      scopes: ["offline"],
-      secret: {
-        accessTokenEncrypted: "enc:old-access",
-        refreshTokenEncrypted: "enc:old-refresh",
-        tokenVersion: 3,
-      },
-      status: "active",
-      updatedAt: new Date("2026-03-26T12:05:00.000Z"),
-      userId: "user-123",
-    };
-    const tx = {
-      deviceConnection: {
-        findFirst: vi.fn().mockResolvedValue(existing),
-        update: vi.fn(),
-      },
-      deviceConnectionSecret: {
-        create: vi.fn(),
-        update: vi.fn(),
-      },
-    };
-    const store = {
-      codec: {
-        decrypt: (value: string) => value.replace(/^enc:/u, ""),
-        encrypt: (value: string) => `enc:${value}`,
-        keyVersion: "v1",
-      },
-      createSignal: vi.fn(),
-      markConnectionDisconnected: vi.fn(),
-      prisma: {},
-      withConnectionRefreshLock: vi.fn(async (_connectionId: string, callback: (input: typeof tx) => Promise<unknown>) =>
-        callback(tx),
-      ),
-    };
-
-    const result = await applyHostedDeviceSyncRuntimeUpdates(
-      store as never,
-      {
-        occurredAt: "2026-03-26T12:10:00.000Z",
-        updates: [
-          {
-            connection: {
-              status: "disconnected",
-            },
-            connectionId: "dsc_disconnect_midpass",
-            observedUpdatedAt: "2026-03-26T12:00:00.000Z",
-          },
-        ],
-        userId: "user-123",
-      },
-    );
-
-    expect(store.markConnectionDisconnected).not.toHaveBeenCalled();
-    expect(tx.deviceConnection.update).not.toHaveBeenCalled();
-    expect(tx.deviceConnectionSecret.create).not.toHaveBeenCalled();
-    expect(tx.deviceConnectionSecret.update).not.toHaveBeenCalled();
-    expect(store.createSignal).not.toHaveBeenCalled();
-    expect(result).toEqual({
-      appliedAt: "2026-03-26T12:10:00.000Z",
-      updates: [
-        {
-          connection: expect.objectContaining({
-            id: "dsc_disconnect_midpass",
-            status: "active",
-          }),
-          connectionId: "dsc_disconnect_midpass",
-          status: "updated",
-          tokenUpdate: "unchanged",
-        },
-      ],
-      userId: "user-123",
-    });
-  });
-
-  it("reports token writes as skipped when a stale hosted row fences the request before any local-state mutation", async () => {
-    const { applyHostedDeviceSyncRuntimeUpdates } = await import(
-      "@/src/lib/device-sync/internal-runtime"
-    );
-    const existing = {
-      accessTokenExpiresAt: null,
-      connectedAt: "2026-03-20T10:00:00.000Z",
-      createdAt: "2026-03-20T10:00:00.000Z",
-      displayName: "Hosted Active",
-      externalAccountId: "oura_refresh",
-      id: "dsc_token_midpass",
-      metadataJson: { source: "browser" },
-      provider: "oura",
-      scopes: ["heartrate"],
-      secret: {
-        accessTokenEncrypted: "enc:old-access",
-        refreshTokenEncrypted: "enc:old-refresh",
-        tokenVersion: 3,
-      },
-      status: "active",
-      updatedAt: new Date("2026-03-26T12:05:00.000Z"),
-      userId: "user-123",
-    };
-    const tx = {
-      deviceConnection: {
-        findFirst: vi.fn().mockResolvedValue(existing),
-        update: vi.fn(),
-      },
-      deviceConnectionSecret: {
-        create: vi.fn(),
-        update: vi.fn(),
-      },
-    };
-    const store = {
-      codec: {
-        decrypt: (value: string) => value.replace(/^enc:/u, ""),
-        encrypt: (value: string) => `enc:${value}`,
-        keyVersion: "v1",
-      },
-      createSignal: vi.fn(),
-      markConnectionDisconnected: vi.fn(),
-      prisma: {},
-      withConnectionRefreshLock: vi.fn(async (_connectionId: string, callback: (input: typeof tx) => Promise<unknown>) =>
-        callback(tx),
-      ),
-    };
-
-    const result = await applyHostedDeviceSyncRuntimeUpdates(
-      store as never,
-      {
-        occurredAt: "2026-03-26T12:10:00.000Z",
-        updates: [
-          {
-            connectionId: "dsc_token_midpass",
-            observedUpdatedAt: "2026-03-26T12:00:00.000Z",
-            tokenBundle: {
-              accessToken: "new-access-token",
-              accessTokenExpiresAt: "2026-03-30T00:00:00.000Z",
-              keyVersion: "local-runtime",
-              refreshToken: "new-refresh-token",
-              tokenVersion: 0,
-            },
-          },
-        ],
-        userId: "user-123",
-      },
-    );
-
-    expect(tx.deviceConnection.update).not.toHaveBeenCalled();
-    expect(tx.deviceConnectionSecret.create).not.toHaveBeenCalled();
-    expect(tx.deviceConnectionSecret.update).not.toHaveBeenCalled();
-    expect(result.updates[0]?.tokenUpdate).toBe("skipped_version_mismatch");
-  });
-
-  it("skips stale token escrow writes even when newer local-state timestamps still apply", async () => {
-    const { applyHostedDeviceSyncRuntimeUpdates } = await import(
-      "@/src/lib/device-sync/internal-runtime"
-    );
-    const existing = {
-      accessTokenExpiresAt: new Date("2026-04-01T12:00:00.000Z"),
-      connectedAt: new Date("2026-03-01T00:00:00.000Z"),
-      createdAt: new Date("2026-03-01T00:00:00.000Z"),
-      displayName: "Oura Ring",
-      externalAccountId: "oura_user_123",
-      id: "conn_123",
-      lastErrorCode: null,
-      lastErrorMessage: null,
-      lastSyncCompletedAt: null,
-      lastSyncErrorAt: null,
-      lastSyncStartedAt: null,
-      lastWebhookAt: new Date("2026-04-01T08:00:00.000Z"),
-      metadataJson: {},
-      nextReconcileAt: new Date("2026-04-01T18:00:00.000Z"),
-      provider: "oura",
-      scopes: ["personal"],
-      secret: {
-        accessTokenEncrypted: "enc:old-access",
-        connectionId: "conn_123",
-        createdAt: new Date("2026-03-01T00:00:00.000Z"),
-        keyVersion: "hosted-v1",
-        refreshTokenEncrypted: "enc:old-refresh",
-        tokenVersion: 7,
-        updatedAt: new Date("2026-04-01T00:00:00.000Z"),
-      },
-      status: "active",
-      updatedAt: new Date("2026-04-02T00:00:00.000Z"),
-      userId: "user_123",
-    };
-    const updated = {
-      ...existing,
-      lastWebhookAt: new Date("2026-04-02T12:00:00.000Z"),
-    };
-    const tx = {
-      deviceConnection: {
-        findFirst: vi.fn().mockResolvedValue(existing),
-        update: vi.fn().mockResolvedValue(updated),
-      },
-      deviceConnectionSecret: {
-        create: vi.fn(),
-        update: vi.fn(),
-      },
-    };
-    const store = {
-      codec: {
-        decrypt: (value: string) => value.replace(/^enc:/u, ""),
-        encrypt: (value: string) => `enc:${value}`,
-        keyVersion: "hosted-v2",
-      },
-      createSignal: vi.fn(),
-      markConnectionDisconnected: vi.fn(),
-      prisma: {},
-      withConnectionRefreshLock: vi.fn(async (_connectionId: string, callback: (input: typeof tx) => Promise<unknown>) =>
-        callback(tx),
-      ),
-    };
-
-    const result = await applyHostedDeviceSyncRuntimeUpdates(
-      store as never,
-      {
-        occurredAt: "2026-04-02T12:05:00.000Z",
-        updates: [
-          {
-            connectionId: "conn_123",
-            localState: {
-              lastWebhookAt: "2026-04-02T12:00:00.000Z",
-            },
-            observedTokenVersion: 7,
-            observedUpdatedAt: "2026-04-01T00:00:00.000Z",
-            tokenBundle: {
-              accessToken: "new-access-token",
-              accessTokenExpiresAt: "2026-04-03T00:00:00.000Z",
-              keyVersion: "local-runtime",
-              refreshToken: "new-refresh-token",
-              tokenVersion: 7,
-            },
-          },
-        ],
-        userId: "user_123",
-      },
-    );
-
-    expect(tx.deviceConnection.update).toHaveBeenCalledWith({
-      where: {
-        id: "conn_123",
-      },
-      data: expect.objectContaining({
-        lastWebhookAt: new Date("2026-04-02T12:00:00.000Z"),
-      }),
-    });
-    expect(tx.deviceConnectionSecret.create).not.toHaveBeenCalled();
-    expect(tx.deviceConnectionSecret.update).not.toHaveBeenCalled();
-    expect(result).toEqual({
-      appliedAt: "2026-04-02T12:05:00.000Z",
-      updates: [
-        {
-          connection: expect.objectContaining({
-            id: "conn_123",
-          }),
-          connectionId: "conn_123",
-          status: "updated",
-          tokenUpdate: "skipped_version_mismatch",
-        },
-      ],
-      userId: "user_123",
-    });
-  });
-
-  it("does not bump token versions when a null-expiry token bundle is unchanged", async () => {
-    const { applyHostedDeviceSyncRuntimeUpdates } = await import(
-      "@/src/lib/device-sync/internal-runtime"
-    );
-    const existing = {
-      accessTokenExpiresAt: null,
-      connectedAt: "2026-03-20T10:00:00.000Z",
-      createdAt: "2026-03-20T10:00:00.000Z",
-      displayName: "Alice Oura",
-      externalAccountId: "oura_alice",
-      id: "dsc_123",
-      metadataJson: { source: "oauth" },
-      provider: "oura",
-      scopes: ["heartrate"],
-      secret: {
-        accessTokenEncrypted: "enc:access-token",
-        refreshTokenEncrypted: "enc:refresh-token",
-        tokenVersion: 2,
-      },
-      status: "active",
-      updatedAt: "2026-03-20T10:00:00.000Z",
-      userId: "user-123",
-    };
-    const updated = {
-      ...existing,
-      lastErrorCode: null,
-      lastErrorMessage: null,
-      updatedAt: "2026-03-26T12:00:00.000Z",
-    };
-    const tx = {
-      deviceConnection: {
-        findFirst: vi.fn().mockResolvedValue(existing),
-        update: vi.fn().mockResolvedValue(updated),
-      },
-      deviceConnectionSecret: {
-        create: vi.fn(),
-        update: vi.fn(),
-      },
-    };
-    const store = {
-      codec: {
-        decrypt: (value: string) => value.replace(/^enc:/u, ""),
-        encrypt: (value: string) => `enc:${value}`,
-        keyVersion: "v1",
-      },
-      createSignal: vi.fn(),
-      markConnectionDisconnected: vi.fn(),
-      prisma: {},
-      withConnectionRefreshLock: vi.fn(async (_connectionId: string, callback: (input: typeof tx) => Promise<unknown>) =>
-        callback(tx),
-      ),
-    };
-
-    const result = await applyHostedDeviceSyncRuntimeUpdates(
-      store as never,
-      {
-        occurredAt: "2026-03-26T12:00:00.000Z",
-        updates: [
-          {
-            connectionId: "dsc_123",
-            observedUpdatedAt: "2026-03-20T10:00:00.000Z",
-            observedTokenVersion: 2,
-            tokenBundle: {
-              accessToken: "access-token",
-              accessTokenExpiresAt: null,
-              keyVersion: "local-runtime",
-              refreshToken: "refresh-token",
-              tokenVersion: 2,
-            },
-          },
-        ],
-        userId: "user-123",
-      },
-    );
-
-    expect(tx.deviceConnection.update).toHaveBeenCalledWith({
-      where: {
-        id: "dsc_123",
-      },
-      data: {
-        accessTokenExpiresAt: null,
-      },
-    });
-    expect(tx.deviceConnectionSecret.create).not.toHaveBeenCalled();
-    expect(tx.deviceConnectionSecret.update).not.toHaveBeenCalled();
-    expect(result).toEqual({
-      appliedAt: "2026-03-26T12:00:00.000Z",
-      updates: [
-        {
-          connection: expect.objectContaining({
-            id: "dsc_123",
-            provider: "oura",
-            status: "active",
-          }),
-          connectionId: "dsc_123",
-          status: "updated",
-          tokenUpdate: "unchanged",
-        },
-      ],
-      userId: "user-123",
-    });
-  });
-
-  it("ignores null local error timestamps unless clearError is explicitly set", async () => {
-    const { applyHostedDeviceSyncRuntimeUpdates } = await import(
-      "@/src/lib/device-sync/internal-runtime"
-    );
-    const existing = {
-      accessTokenExpiresAt: null,
-      connectedAt: "2026-03-20T10:00:00.000Z",
-      createdAt: "2026-03-20T10:00:00.000Z",
-      displayName: "Alice Oura",
-      externalAccountId: "oura_alice",
-      id: "dsc_error_timestamp",
-      lastErrorCode: "PROVIDER_AUTH",
-      lastErrorMessage: "Reconnect required",
-      lastSyncErrorAt: new Date("2026-03-26T11:00:00.000Z"),
-      metadataJson: { source: "oauth" },
-      provider: "oura",
-      scopes: ["heartrate"],
-      secret: null,
-      status: "reauthorization_required",
-      updatedAt: "2026-03-20T10:00:00.000Z",
-      userId: "user-123",
-    };
-    const updated = {
-      ...existing,
-      lastErrorCode: "PROVIDER_AUTH",
-      lastErrorMessage: "Still waiting for reconnect",
-    };
-    const tx = {
-      deviceConnection: {
-        findFirst: vi.fn().mockResolvedValue(existing),
-        update: vi.fn().mockResolvedValue(updated),
-      },
-      deviceConnectionSecret: {
-        create: vi.fn(),
-        update: vi.fn(),
-      },
-    };
-    const store = {
-      codec: {
-        decrypt: (value: string) => value.replace(/^enc:/u, ""),
-        encrypt: (value: string) => `enc:${value}`,
-        keyVersion: "v1",
-      },
-      createSignal: vi.fn(),
-      markConnectionDisconnected: vi.fn(),
-      prisma: {},
-      withConnectionRefreshLock: vi.fn(async (_connectionId: string, callback: (input: typeof tx) => Promise<unknown>) =>
-        callback(tx),
-      ),
-    };
-
-    await applyHostedDeviceSyncRuntimeUpdates(
-      store as never,
-      {
-        occurredAt: "2026-03-26T12:00:00.000Z",
-        updates: [
-          {
-            connectionId: "dsc_error_timestamp",
-            localState: {
-              lastErrorCode: "PROVIDER_AUTH",
-              lastErrorMessage: "Still waiting for reconnect",
-              lastSyncErrorAt: null,
-            },
-          },
-        ],
-        userId: "user-123",
-      },
-    );
-
-    expect(tx.deviceConnection.update).toHaveBeenCalledWith({
-      where: {
-        id: "dsc_error_timestamp",
-      },
-      data: {
-        lastErrorCode: "PROVIDER_AUTH",
-        lastErrorMessage: "Still waiting for reconnect",
-      },
-    });
-  });
-
-  it("does not recreate a hosted secret on an already disconnected row", async () => {
-    const { applyHostedDeviceSyncRuntimeUpdates } = await import(
-      "@/src/lib/device-sync/internal-runtime"
-    );
-    const existing = {
-      accessTokenExpiresAt: null,
-      connectedAt: "2026-03-20T10:00:00.000Z",
-      createdAt: "2026-03-20T10:00:00.000Z",
-      displayName: "Hosted Disconnect",
-      externalAccountId: "whoop_disconnect",
-      id: "dsc_disconnected",
-      metadataJson: { source: "browser" },
-      provider: "whoop",
-      scopes: ["offline"],
-      secret: null,
-      status: "disconnected",
-      updatedAt: new Date("2026-03-26T12:00:00.000Z"),
-      userId: "user-123",
-    };
-    const tx = {
-      deviceConnection: {
-        findFirst: vi.fn().mockResolvedValue(existing),
-        update: vi.fn().mockResolvedValue(existing),
-      },
-      deviceConnectionSecret: {
-        create: vi.fn(),
-        update: vi.fn(),
-      },
-    };
-    const store = {
-      codec: {
-        decrypt: (value: string) => value.replace(/^enc:/u, ""),
-        encrypt: (value: string) => `enc:${value}`,
-        keyVersion: "v1",
-      },
-      createSignal: vi.fn(),
-      markConnectionDisconnected: vi.fn(),
-      prisma: {},
-      withConnectionRefreshLock: vi.fn(async (_connectionId: string, callback: (input: typeof tx) => Promise<unknown>) =>
-        callback(tx),
-      ),
-    };
-
-    const result = await applyHostedDeviceSyncRuntimeUpdates(
-      store as never,
-      {
-        occurredAt: "2026-03-26T12:10:00.000Z",
-        updates: [
-          {
-            connectionId: "dsc_disconnected",
-            observedUpdatedAt: "2026-03-26T12:00:00.000Z",
-            observedTokenVersion: null,
-            tokenBundle: {
-              accessToken: "new-access-token",
-              accessTokenExpiresAt: "2026-03-30T00:00:00.000Z",
-              keyVersion: "local-runtime",
-              refreshToken: "new-refresh-token",
-              tokenVersion: 0,
-            },
-          },
-        ],
-        userId: "user-123",
-      },
-    );
-
-    expect(tx.deviceConnection.update).not.toHaveBeenCalled();
-    expect(tx.deviceConnectionSecret.create).not.toHaveBeenCalled();
-    expect(tx.deviceConnectionSecret.update).not.toHaveBeenCalled();
-    expect(result).toEqual({
-      appliedAt: "2026-03-26T12:10:00.000Z",
-      updates: [
-        {
-          connection: expect.objectContaining({
-            id: "dsc_disconnected",
-            status: "disconnected",
-          }),
-          connectionId: "dsc_disconnected",
-          status: "updated",
-          tokenUpdate: "missing",
-        },
-      ],
-      userId: "user-123",
-    });
-  });
-
-  it("fences expiry-only token mutations on token-version mismatch while still applying non-token fields", async () => {
-    const { applyHostedDeviceSyncRuntimeUpdates } = await import(
-      "@/src/lib/device-sync/internal-runtime"
-    );
-    const existing = {
-      accessTokenExpiresAt: new Date("2026-03-28T00:00:00.000Z"),
-      connectedAt: "2026-03-20T10:00:00.000Z",
-      createdAt: "2026-03-20T10:00:00.000Z",
-      displayName: "Alice Oura",
-      externalAccountId: "oura_alice",
-      id: "dsc_789",
-      metadataJson: { source: "oauth" },
-      provider: "oura",
-      scopes: ["heartrate"],
-      secret: {
-        accessTokenEncrypted: "enc:old-access",
-        refreshTokenEncrypted: "enc:old-refresh",
-        tokenVersion: 2,
-      },
-      status: "active",
-      updatedAt: "2026-03-20T10:00:00.000Z",
-      userId: "user-123",
-    };
-    const updated = {
-      ...existing,
-      displayName: "Hosted Rename",
-      updatedAt: "2026-03-26T12:00:00.000Z",
-    };
-    const tx = {
-      deviceConnection: {
-        findFirst: vi.fn().mockResolvedValue(existing),
-        update: vi.fn().mockResolvedValue(updated),
-      },
-      deviceConnectionSecret: {
-        create: vi.fn(),
-        update: vi.fn(),
-      },
-    };
-    const store = {
-      codec: {
-        decrypt: (value: string) => value.replace(/^enc:/u, ""),
-        encrypt: (value: string) => `enc:${value}`,
-        keyVersion: "v1",
-      },
-      createSignal: vi.fn(),
-      markConnectionDisconnected: vi.fn(),
-      prisma: {},
-      withConnectionRefreshLock: vi.fn(async (_connectionId: string, callback: (input: typeof tx) => Promise<unknown>) =>
-        callback(tx),
-      ),
-    };
-
-    await applyHostedDeviceSyncRuntimeUpdates(
-      store as never,
-      {
-        occurredAt: "2026-03-26T12:00:00.000Z",
-        updates: [
-          {
-            connection: {
-              displayName: "Hosted Rename",
-            },
-            connectionId: "dsc_789",
-            observedUpdatedAt: "2026-03-20T10:00:00.000Z",
-            observedTokenVersion: 1,
-          },
-        ],
-        userId: "user-123",
-      },
-    );
-
-    expect(tx.deviceConnection.update).toHaveBeenCalledWith({
-      where: {
-        id: "dsc_789",
-      },
-      data: {
-        displayName: "Hosted Rename",
-      },
-    });
-    expect(tx.deviceConnectionSecret.create).not.toHaveBeenCalled();
-    expect(tx.deviceConnectionSecret.update).not.toHaveBeenCalled();
   });
 });

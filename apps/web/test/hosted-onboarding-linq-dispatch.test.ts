@@ -47,8 +47,6 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   return {
     ...actual,
     getHostedOnboardingEnvironment: () => ({
-      encryptionKey: "test-hosted-contact-privacy-key",
-      encryptionKeyVersion: "v1",
       inviteTtlHours: 24,
       isProduction: false,
       linqApiBaseUrl: "https://linq.example.test",
@@ -62,10 +60,6 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
       stripeWebhookSecret: "whsec_123",
       telegramBotUsername: null,
       telegramWebhookSecret: null,
-    }),
-    getHostedOnboardingSecretCodec: () => ({
-      encrypt: (value: string) => `enc:${value}`,
-      keyVersion: "v1",
     }),
     requireHostedOnboardingPublicBaseUrl: () => "https://join.example.test",
   };
@@ -501,6 +495,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it("sends the signup link on the first inbound Linq message", async () => {
+    const invite = {
+      channel: "linq",
+      id: "invite_123",
+      inviteCode: "code_first_text",
+      memberId: "member_123",
+      sentAt: null,
+      status: "pending",
+    };
     const prismaMocks = {
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedWebhookReceipt: {
@@ -515,15 +517,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedInvite: {
-        create: vi.fn().mockResolvedValue({
-          channel: "linq",
-          id: "invite_123",
-          inviteCode: "code_first_text",
-          memberId: "member_123",
-          sentAt: null,
-          status: "pending",
-        }),
+        create: vi.fn().mockResolvedValue(invite),
         findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(invite),
         update: vi.fn().mockResolvedValue({
           id: "invite_123",
           sentAt: new Date("2026-03-26T12:00:01.000Z"),
@@ -601,6 +597,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it("sends the signup link even when the first-contact Linq message has no text", async () => {
+    const invite = {
+      channel: "linq",
+      id: "invite_123",
+      inviteCode: "code_non_text",
+      memberId: "member_123",
+      sentAt: null,
+      status: "pending",
+    };
     const prismaMocks = {
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedWebhookReceipt: {
@@ -615,15 +619,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedInvite: {
-        create: vi.fn().mockResolvedValue({
-          channel: "linq",
-          id: "invite_123",
-          inviteCode: "code_non_text",
-          memberId: "member_123",
-          sentAt: null,
-          status: "pending",
-        }),
+        create: vi.fn().mockResolvedValue(invite),
         findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(invite),
         update: vi.fn().mockResolvedValue({
           id: "invite_123",
           sentAt: new Date("2026-03-26T12:00:01.000Z"),
@@ -878,11 +876,25 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
 function asPrismaTransactionClient<T extends Record<string, unknown>>(prisma: T) {
   const prismaWithHostedMember = prisma as unknown as T & {
+    hostedInvite?: {
+      findFirst?: ((input: { where?: Record<string, unknown>; select?: Record<string, unknown> }) => Promise<unknown>) | undefined;
+      findUnique?: ReturnType<typeof vi.fn>;
+    };
     hostedMember?: {
       updateMany?: ReturnType<typeof vi.fn>;
     };
   };
+  const hostedInvite = prismaWithHostedMember.hostedInvite;
   const hostedMember = prismaWithHostedMember.hostedMember;
+
+  if (hostedInvite && !hostedInvite.findUnique && hostedInvite.findFirst) {
+    hostedInvite.findUnique = vi.fn(async (input: { where?: Record<string, unknown>; select?: Record<string, unknown> }) =>
+      hostedInvite.findFirst?.({
+        select: input.select,
+        where: input.where,
+      }),
+    );
+  }
 
   if (hostedMember && !hostedMember.updateMany) {
     hostedMember.updateMany = vi.fn().mockResolvedValue({ count: 1 });

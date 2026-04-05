@@ -28,6 +28,7 @@ import {
   persistHostedExecutionFinalBundles,
 } from "../src/execution-journal.js";
 import { createHostedDispatchPayloadStore } from "../src/dispatch-payload-store.js";
+import { writeHostedEmailRawMessage } from "../src/hosted-email.js";
 import { createHostedPendingUsageStore } from "../src/usage-store.js";
 import { createHostedUserKeyStore } from "../src/user-key-store.js";
 import { HostedUserRunner } from "../src/user-runner.js";
@@ -1282,6 +1283,133 @@ describe("HostedUserRunner", () => {
 
     firstRun.resolve(new Response("runner failed", { status: 503 }));
     await dispatchPromise;
+  });
+
+  it("deletes hosted raw email bodies from the per-user root-key path after a successful run", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init) => {
+        await commitResultForRunnerRequest({
+          bucket,
+          environment,
+          payload: createRunnerSuccessPayload({
+            summary: "processed email",
+          }),
+          requestBody: JSON.parse(String(init?.body)),
+        });
+
+        return new Response(JSON.stringify(createRunnerSuccessPayload({
+          summary: "processed email",
+        })), {
+          status: 200,
+        });
+      }),
+    );
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    const userId = "member_email_cleanup";
+    const crypto = await resolveHostedUserCryptoContextForTest({
+      bucket,
+      environment,
+      userId,
+    });
+    const rawMessageKey = await writeHostedEmailRawMessage({
+      bucket: bucket.api,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      plaintext: new TextEncoder().encode("From: alice@example.test\r\n\r\nhello"),
+      userId,
+    });
+
+    expect(bucket.keys().filter((key) => key.includes("/messages/"))).toHaveLength(1);
+
+    await runner.dispatch({
+      event: {
+        identityId: "assistant@mail.example.test",
+        kind: "email.message.received",
+        rawMessageKey,
+        userId,
+      },
+      eventId: `email:${rawMessageKey}`,
+      occurredAt: "2026-03-26T12:00:00.000Z",
+    });
+
+    expect(bucket.keys().filter((key) => key.includes("/messages/"))).toEqual([]);
+  });
+
+  it("deletes hosted raw email bodies after recovering a finalized committed email dispatch", async () => {
+    const userId = "member_email_recovery_cleanup";
+    const crypto = await resolveHostedUserCryptoContextForTest({
+      bucket,
+      environment,
+      userId,
+    });
+    const rawMessageKey = await writeHostedEmailRawMessage({
+      bucket: bucket.api,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      plaintext: new TextEncoder().encode("From: alice@example.test\r\n\r\nrecovered"),
+      userId,
+    });
+    const dispatch = {
+      event: {
+        identityId: "assistant@mail.example.test",
+        kind: "email.message.received" as const,
+        rawMessageKey,
+        userId,
+      },
+      eventId: `email:${rawMessageKey}`,
+      occurredAt: "2026-03-26T12:00:00.000Z",
+    };
+
+    await seedRunnerQueueState({
+      activated: true,
+      bucket,
+      environment,
+      pendingEvents: [
+        {
+          attempts: 1,
+          availableAt: "2026-03-26T12:00:00.000Z",
+          dispatch,
+          enqueuedAt: "2026-03-26T12:00:00.000Z",
+          lastError: "lost ack",
+        },
+      ],
+      retryingEventId: dispatch.eventId,
+      storage,
+      userId,
+    });
+
+    await createHostedExecutionJournalStore({
+      bucket: bucket.api,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
+    }).writeCommittedResult(userId, dispatch.eventId, {
+      bundleRefs: {
+        agentState: null,
+        vault: null,
+      },
+      committedAt: "2026-03-26T12:00:01.000Z",
+      eventId: dispatch.eventId,
+      finalizedAt: "2026-03-26T12:00:02.000Z",
+      gatewayProjectionSnapshot: null,
+      result: {
+        eventsHandled: 1,
+        summary: "recovered email",
+      },
+      sideEffects: [],
+      userId,
+    });
+
+    vi.stubGlobal("fetch", vi.fn());
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+
+    expect(bucket.keys().filter((key) => key.includes("/messages/"))).toHaveLength(1);
+
+    const status = await runner.dispatch(dispatch);
+
+    expect(status.pendingEventCount).toBe(0);
+    expect(bucket.keys().filter((key) => key.includes("/messages/"))).toEqual([]);
   });
 
   it("sends forwarded env through the per-job runtime payload instead of the container start envelope", async () => {

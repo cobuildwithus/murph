@@ -2,16 +2,22 @@ import { DurableObject } from "cloudflare:workers";
 export { ContainerProxy } from "@cloudflare/containers";
 
 import {
+  parseHostedExecutionDeviceSyncRuntimeApplyRequest,
+  parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
   buildHostedExecutionAssistantCronTickDispatch,
   buildHostedExecutionEmailMessageReceivedDispatch,
   buildHostedExecutionGatewayMessageSendDispatch,
   emitHostedExecutionStructuredLog,
   parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
   parseHostedExecutionDispatchRequest,
+  parseHostedExecutionSharePack,
   readHostedExecutionSignatureHeaders,
   readHostedEmailCapabilities,
   verifyHostedExecutionSignature,
+  type HostedExecutionDeviceSyncRuntimeApplyRequest,
+  type HostedExecutionDeviceSyncRuntimeSnapshotRequest,
   type HostedExecutionDeviceSyncRuntimeSnapshotResponse,
+  type HostedExecutionDeviceSyncRuntimeApplyResponse,
   type HostedExecutionDispatchRequest,
   type HostedExecutionDispatchResult,
   type HostedExecutionUserEnvStatus,
@@ -88,6 +94,7 @@ import {
   HostedUserRunner,
   type DurableObjectStateLike,
 } from "./user-runner.ts";
+import { createHostedShareStore } from "./share-store.ts";
 import type {
   WorkerEnvironmentContract,
   WorkerUserRunnerCommitInput,
@@ -101,6 +108,12 @@ interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLike {
   dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus>;
   dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult>;
   getUserEnvStatus(): Promise<HostedExecutionUserEnvStatus>;
+  getDeviceSyncRuntimeSnapshot(input: {
+    request: HostedExecutionDeviceSyncRuntimeSnapshotRequest;
+  }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
+  applyDeviceSyncRuntimeUpdates(input: {
+    request: HostedExecutionDeviceSyncRuntimeApplyRequest;
+  }): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse>;
   putDeviceSyncRuntimeSnapshot(input: {
     snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse;
   }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
@@ -195,10 +208,30 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     authorizeBeforeMethod: true,
     authorization: "control-signed",
     async handle(context, params) {
+      return handleUserDeviceSyncRuntimeRoute(context, params.userId);
+    },
+    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/device-sync\/runtime$/u),
+    methods: ["GET", "POST"],
+    wrongMethodResponse: "method-not-allowed",
+  },
+  {
+    authorizeBeforeMethod: true,
+    authorization: "control-signed",
+    async handle(context, params) {
       return handleUserDeviceSyncRuntimeSnapshotRoute(context, params.userId);
     },
     match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/device-sync\/runtime\/snapshot$/u),
     methods: ["PUT"],
+    wrongMethodResponse: "method-not-allowed",
+  },
+  {
+    authorizeBeforeMethod: true,
+    authorization: "control-signed",
+    async handle(context, params) {
+      return handleSharePackRoute(context, params.shareId);
+    },
+    match: matchNamedPath(/^\/internal\/shares\/(?<shareId>[^/]+)\/pack$/u),
+    methods: ["GET", "PUT", "DELETE"],
     wrongMethodResponse: "method-not-allowed",
   },
   {
@@ -280,6 +313,18 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
 
   async bootstrapUser(userId: string): Promise<{ userId: string }> {
     return this.runner.bootstrapUser(userId);
+  }
+
+  async getDeviceSyncRuntimeSnapshot(input: {
+    request: HostedExecutionDeviceSyncRuntimeSnapshotRequest;
+  }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse> {
+    return this.runner.getDeviceSyncRuntimeSnapshot(input);
+  }
+
+  async applyDeviceSyncRuntimeUpdates(input: {
+    request: HostedExecutionDeviceSyncRuntimeApplyRequest;
+  }): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
+    return this.runner.applyDeviceSyncRuntimeUpdates(input);
   }
 
   async putDeviceSyncRuntimeSnapshot(input: {
@@ -524,6 +569,35 @@ async function handleUserDeviceSyncRuntimeSnapshotRoute(
   );
 }
 
+async function handleUserDeviceSyncRuntimeRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  const userId = decodeRouteParam(encodedUserId);
+  const stub = await resolveUserRunnerStub(context.env, userId);
+
+  if (context.request.method === "GET") {
+    return json(
+      await requireGatewayStubMethod(stub, "getDeviceSyncRuntimeSnapshot")({
+        request: parseHostedExecutionDeviceSyncRuntimeSnapshotRequest({
+          connectionId: normalizeNullableSearchString(context.url.searchParams.get("connectionId")),
+          provider: normalizeNullableSearchString(context.url.searchParams.get("provider")),
+          userId,
+        }, userId),
+      }),
+    );
+  }
+
+  return json(
+    await requireGatewayStubMethod(stub, "applyDeviceSyncRuntimeUpdates")({
+      request: parseHostedExecutionDeviceSyncRuntimeApplyRequest(
+        await readCachedJsonObject(context),
+        userId,
+      ),
+    }),
+  );
+}
+
 async function handleUserEmailAddressRoute(
   context: WorkerRouteContext,
   encodedUserId: string,
@@ -573,6 +647,32 @@ async function handlePendingUsageRoute(
   const usageIds = parsePendingUsageDeleteRequest(await readCachedJsonObject(context));
   await requireGatewayStubMethod(stub, "deletePendingUsage")({ usageIds });
   return json({ ok: true, usageIds });
+}
+
+async function handleSharePackRoute(
+  context: WorkerRouteContext,
+  encodedShareId: string,
+): Promise<Response> {
+  const shareId = decodeRouteParam(encodedShareId);
+  const store = createHostedShareStore({
+    bucket: context.env.BUNDLES,
+    key: context.environment.bundleEncryptionKey,
+    keyId: context.environment.bundleEncryptionKeyId,
+    keysById: context.environment.bundleEncryptionKeysById,
+  });
+
+  if (context.request.method === "GET") {
+    const pack = await store.readSharePack(shareId);
+    return pack ? json(pack) : notFound();
+  }
+
+  if (context.request.method === "DELETE") {
+    await store.deleteSharePack(shareId);
+    return json({ ok: true, shareId });
+  }
+
+  const pack = parseHostedExecutionSharePack(await readCachedJsonObject(context));
+  return json(await store.writeSharePack(shareId, pack));
 }
 
 async function handleGatewayRoute(
@@ -937,6 +1037,15 @@ function respondToWrongMethod(response: WrongMethodResponse): Response {
 
 function decodeRouteParam(value: string): string {
   return decodeURIComponent(value);
+}
+
+function normalizeNullableSearchString(value: string | null): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 }
 
 function mapWorkerRouteError(error: unknown): Response {

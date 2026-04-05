@@ -40,6 +40,19 @@
       }
     },
     {
+      "id": "delete-transient-share-packs-after-30d",
+      "enabled": true,
+      "conditions": {
+        "prefix": "transient/share-packs/"
+      },
+      "deleteObjectsTransition": {
+        "condition": {
+          "type": "Age",
+          "maxAge": 2592000
+        }
+      }
+    },
+    {
       "id": "delete-transient-hosted-email-thread-routes-after-7d",
       "enabled": true,
       "conditions": {

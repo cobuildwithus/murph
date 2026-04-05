@@ -20,6 +20,7 @@ import {
   handleHostedDeviceSyncWebhookAccepted,
 } from "./wake-service";
 import { HostedDeviceSyncWebhookAdminService } from "./webhook-admin-service";
+import { requireHostedExecutionControlClient } from "../hosted-execution/control";
 
 export class HostedDeviceSyncPublicIngressService {
   private readonly ingress;
@@ -35,6 +36,54 @@ export class HostedDeviceSyncPublicIngressService {
       store: this.context.store,
       hooks: {
         onConnectionEstablished: async ({ account, connection, now, provider }) => {
+          const userId = await this.requireHostedConnectionOwnerId(account.id);
+          const controlClient = requireHostedExecutionControlClient();
+          const existingRuntime = await controlClient.getDeviceSyncRuntimeSnapshot(userId, {
+            connectionId: account.id,
+            provider: account.provider,
+          });
+          const existingTokenVersion =
+            existingRuntime.connections.find((entry) => entry.connection.id === account.id)?.tokenBundle?.tokenVersion
+            ?? 0;
+
+          await controlClient.putDeviceSyncRuntimeSnapshot(userId, {
+            connections: [
+              {
+                connection: {
+                  accessTokenExpiresAt: connection.tokens.accessTokenExpiresAt ?? null,
+                  connectedAt: account.connectedAt,
+                  createdAt: account.createdAt,
+                  displayName: account.displayName,
+                  externalAccountId: account.externalAccountId,
+                  id: account.id,
+                  metadata: account.metadata,
+                  provider: account.provider,
+                  scopes: account.scopes,
+                  status: account.status,
+                  updatedAt: account.updatedAt,
+                },
+                localState: {
+                  lastErrorCode: account.lastErrorCode,
+                  lastErrorMessage: account.lastErrorMessage,
+                  lastSyncCompletedAt: account.lastSyncCompletedAt,
+                  lastSyncErrorAt: account.lastSyncErrorAt,
+                  lastSyncStartedAt: account.lastSyncStartedAt,
+                  lastWebhookAt: account.lastWebhookAt,
+                  nextReconcileAt: account.nextReconcileAt,
+                },
+                tokenBundle: {
+                  accessToken: connection.tokens.accessToken,
+                  accessTokenExpiresAt: connection.tokens.accessTokenExpiresAt ?? null,
+                  keyVersion: this.context.env.encryptionKeyVersion,
+                  refreshToken: connection.tokens.refreshToken ?? null,
+                  tokenVersion: existingTokenVersion + 1,
+                },
+              },
+            ],
+            generatedAt: now,
+            userId,
+          });
+
           await handleHostedDeviceSyncConnectionEstablished({
             account,
             connection,
@@ -150,6 +199,21 @@ export class HostedDeviceSyncPublicIngressService {
 
     if (connection) {
       return connection;
+    }
+
+    throw deviceSyncError({
+      code: "CONNECTION_NOT_FOUND",
+      message: "Hosted device-sync connection was not found for the current user.",
+      retryable: false,
+      httpStatus: 404,
+    });
+  }
+
+  private async requireHostedConnectionOwnerId(connectionId: string): Promise<string> {
+    const ownerId = await this.context.store.getConnectionOwnerId(connectionId);
+
+    if (ownerId) {
+      return ownerId;
     }
 
     throw deviceSyncError({

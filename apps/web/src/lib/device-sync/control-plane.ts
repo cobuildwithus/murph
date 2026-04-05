@@ -32,7 +32,6 @@ export class HostedDeviceSyncControlPlane {
   readonly request: Request;
   readonly env: HostedDeviceSyncControlPlaneContext["env"];
   readonly registry: HostedDeviceSyncControlPlaneContext["registry"];
-  readonly codec: HostedDeviceSyncControlPlaneContext["codec"];
   readonly store: HostedDeviceSyncControlPlaneContext["store"];
   readonly publicIngressBaseUrl: string;
   readonly webhookAdminCallbackBaseUrl: string;
@@ -50,7 +49,6 @@ export class HostedDeviceSyncControlPlane {
     this.context = createHostedDeviceSyncControlPlaneContext(request);
     this.env = this.context.env;
     this.registry = this.context.registry;
-    this.codec = this.context.codec;
     this.store = this.context.store;
     this.publicIngressBaseUrl = this.context.publicIngressBaseUrl;
     this.webhookAdminCallbackBaseUrl = this.context.webhookAdminCallbackBaseUrl;
@@ -60,7 +58,6 @@ export class HostedDeviceSyncControlPlane {
       request,
       store: this.store,
       registry: this.registry,
-      codec: this.codec,
     });
     this.webhookAdmin = new HostedDeviceSyncWebhookAdminService(this.context);
     this.connections = new HostedDeviceSyncPublicIngressService(this.context, this.webhookAdmin);

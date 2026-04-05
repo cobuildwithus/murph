@@ -4,12 +4,16 @@ import { HostedBillingStatus } from "@prisma/client";
 import type { SharePack } from "@murphai/contracts";
 
 const mocks = vi.hoisted(() => ({
+  deleteHostedSharePackFromHostedExecution: vi.fn(),
   drainHostedExecutionOutbox: vi.fn(),
   drainHostedExecutionOutboxBestEffort: vi.fn(),
   enqueueHostedExecutionOutbox: vi.fn(),
   findHostedExecutionOutboxByEventId: vi.fn(),
   issueHostedInviteForPhone: vi.fn(),
+  readHostedSharePackFromHostedExecution: vi.fn(),
   readHostedExecutionOutboxOutcome: vi.fn(),
+  sharePacks: new Map<string, unknown>(),
+  writeHostedSharePackToHostedExecution: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/outbox", () => ({
@@ -21,12 +25,13 @@ vi.mock("@/src/lib/hosted-execution/outbox", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
-  getHostedOnboardingSecretCodec: () => ({
-    keyVersion: "v1",
-    encrypt: (value: string) => `enc:${value}`,
-    decrypt: (value: string) => value.replace(/^enc:/u, ""),
-  }),
   requireHostedOnboardingPublicBaseUrl: () => "https://join.example.test",
+}));
+
+vi.mock("@/src/lib/hosted-execution/control", () => ({
+  deleteHostedSharePackFromHostedExecution: mocks.deleteHostedSharePackFromHostedExecution,
+  readHostedSharePackFromHostedExecution: mocks.readHostedSharePackFromHostedExecution,
+  writeHostedSharePackToHostedExecution: mocks.writeHostedSharePackToHostedExecution,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
@@ -92,6 +97,17 @@ describe("hosted share service", () => {
       status: "completed",
     });
     mocks.readHostedExecutionOutboxOutcome.mockReturnValue("completed");
+    mocks.sharePacks.clear();
+    mocks.writeHostedSharePackToHostedExecution.mockImplementation(async ({ pack, shareId }) => {
+      mocks.sharePacks.set(shareId, pack);
+      return pack;
+    });
+    mocks.readHostedSharePackFromHostedExecution.mockImplementation(async (shareId: string) =>
+      (mocks.sharePacks.get(shareId) as SharePack | undefined) ?? null
+    );
+    mocks.deleteHostedSharePackFromHostedExecution.mockImplementation(async (shareId: string) => {
+      mocks.sharePacks.delete(shareId);
+    });
   });
 
   it("creates a hosted share link and threads a recipient invite into the final url", async () => {
@@ -109,6 +125,27 @@ describe("hosted share service", () => {
     expect(result.preview.counts.foods).toBe(1);
     expect(prisma.rows).toHaveLength(1);
     expect(prisma.rows[0]?.previewTitle).toBe("Shared Murph pack");
+    expect(mocks.writeHostedSharePackToHostedExecution).toHaveBeenCalledWith({
+      pack: buildPack(),
+      shareId: prisma.rows[0]?.id,
+    });
+  });
+
+  it("keeps explicitly extended hosted share links aligned with the 30 day retention window", async () => {
+    const prisma = createHostedSharePrisma();
+    const startedAt = Date.now();
+
+    await createHostedShareLink({
+      prisma: prisma as never,
+      pack: buildPack(),
+      expiresInHours: 24 * 30,
+      senderMemberId: "member_sender",
+    });
+
+    const expiresAt = prisma.rows[0]?.expiresAt?.getTime();
+    expect(expiresAt).toBeTypeOf("number");
+    expect((expiresAt ?? 0) - startedAt).toBeGreaterThan(29 * 24 * 60 * 60 * 1000);
+    expect((expiresAt ?? 0) - startedAt).toBeLessThanOrEqual(30 * 24 * 60 * 60 * 1000 + 5_000);
   });
 
   it("imports a hosted share link for an active hosted member", async () => {
@@ -161,6 +198,34 @@ describe("hosted share service", () => {
     expect(finalizedPageData.stage).toBe("consumed");
     expect(finalizedPageData.share?.acceptedByCurrentMember).toBe(true);
     expect(prisma.rows[0]?.consumedByMemberId).toBe("member_123");
+  });
+
+  it("fails before claiming a share when the Cloudflare-backed pack is missing", async () => {
+    const prisma = createHostedSharePrisma();
+    const created = await createHostedShareLink({
+      prisma: prisma as never,
+      pack: buildPack(),
+      senderMemberId: "member_sender",
+    });
+
+    mocks.sharePacks.delete(prisma.rows[0]?.id ?? "");
+
+    await expect(acceptHostedShareLink({
+      member: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+      } as never,
+      prisma: prisma as never,
+      shareCode: created.shareCode,
+    })).rejects.toMatchObject({
+      code: "HOSTED_SHARE_PACK_NOT_FOUND",
+      httpStatus: 404,
+    });
+
+    expect(prisma.rows[0]?.acceptedAt).toBeNull();
+    expect(prisma.rows[0]?.acceptedByMemberId).toBeNull();
+    expect(prisma.rows[0]?.lastEventId).toBeNull();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
   it("keeps the hosted share claim and reuses the same event id after a transport failure", async () => {
@@ -235,8 +300,6 @@ type HostedShareRow = {
   consumedAt: Date | null;
   consumedByMemberId: string | null;
   createdAt: Date;
-  encryptedPayload: string;
-  encryptionKeyVersion: string;
   expiresAt: Date;
   id: string;
   lastEventId: string | null;

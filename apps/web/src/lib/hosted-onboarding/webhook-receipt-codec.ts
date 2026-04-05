@@ -5,10 +5,8 @@ import {
 } from "@murphai/hosted-execution";
 import { Prisma } from "@prisma/client";
 
-import { buildHostedSecretAad } from "../device-sync/crypto";
 import { createHostedOpaqueIdentifier } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
-import { getHostedOnboardingSecretCodec } from "./runtime";
 import type {
   HostedWebhookEventPayload,
   HostedWebhookLinqMessageSideEffect,
@@ -209,19 +207,13 @@ function readHostedWebhookErrorState<TErrorState extends HostedWebhookReceiptErr
 }
 
 function serializeHostedLinqMessageSideEffectPayload(
-  effectId: string,
   payload: HostedWebhookLinqMessageSideEffect["payload"],
 ): Prisma.InputJsonObject {
-  const codec = getHostedOnboardingSecretCodec();
-
   return {
-    encryptedPayload: codec.encrypt(JSON.stringify(payload), {
-      aad: buildHostedSecretAad({
-        effectId,
-        purpose: "hosted-webhook-side-effect",
-      }),
-    }),
-    keyVersion: codec.keyVersion,
+    chatId: payload.chatId,
+    inviteId: payload.inviteId,
+    replyToMessageId: payload.replyToMessageId,
+    template: payload.template,
   } satisfies Prisma.InputJsonObject;
 }
 
@@ -239,42 +231,21 @@ function serializeHostedLinqMessageSideEffectResult(
 }
 
 function readHostedWebhookLinqMessageSideEffectPayload(
-  effectId: string,
   payload: Record<string, Prisma.InputJsonValue | Prisma.JsonValue | null>,
 ): HostedWebhookLinqMessageSideEffect["payload"] | null {
-  const encryptedPayload = readHostedWebhookReceiptString(payload.encryptedPayload);
+  const chatId = readHostedWebhookReceiptString(payload.chatId);
+  const template = readHostedWebhookReceiptString(payload.template);
 
-  if (encryptedPayload) {
-    try {
-      const decrypted = JSON.parse(
-        getHostedOnboardingSecretCodec().decrypt(encryptedPayload, {
-          aad: buildHostedSecretAad({
-            effectId,
-            purpose: "hosted-webhook-side-effect",
-          }),
-        }),
-      ) as Record<string, unknown>;
-      const chatId = readHostedWebhookReceiptString(decrypted.chatId as Prisma.InputJsonValue);
-      const message = readHostedWebhookReceiptString(decrypted.message as Prisma.InputJsonValue);
-
-      if (!chatId || !message) {
-        return null;
-      }
-
-      return {
-        chatId,
-        inviteId: readHostedWebhookReceiptString(decrypted.inviteId as Prisma.InputJsonValue),
-        message,
-        replyToMessageId: readHostedWebhookReceiptString(
-          decrypted.replyToMessageId as Prisma.InputJsonValue,
-        ),
-      } satisfies HostedWebhookLinqMessageSideEffect["payload"];
-    } catch {
-      return null;
-    }
+  if (!chatId || !isHostedWebhookLinqMessageTemplate(template)) {
+    return null;
   }
 
-  return null;
+  return {
+    chatId,
+    inviteId: readHostedWebhookReceiptString(payload.inviteId),
+    replyToMessageId: readHostedWebhookReceiptString(payload.replyToMessageId),
+    template,
+  } satisfies HostedWebhookLinqMessageSideEffect["payload"];
 }
 
 function serializeHostedWebhookSideEffect(
@@ -288,7 +259,7 @@ function serializeHostedWebhookSideEffect(
     lastError: effect.lastError,
     payload:
       effect.kind === "linq_message_send"
-        ? serializeHostedLinqMessageSideEffectPayload(effect.effectId, effect.payload)
+        ? serializeHostedLinqMessageSideEffectPayload(effect.payload)
         : effect.payload as unknown as Prisma.InputJsonValue,
     result:
       effect.kind === "linq_message_send"
@@ -347,7 +318,7 @@ function readHostedWebhookSideEffect(
       };
     }
     case "linq_message_send": {
-      const linqPayload = readHostedWebhookLinqMessageSideEffectPayload(effectId, payload);
+      const linqPayload = readHostedWebhookLinqMessageSideEffectPayload(payload);
 
       if (!linqPayload) {
         throw buildHostedWebhookSideEffectPayloadError(effectId);
@@ -413,6 +384,12 @@ function buildHostedWebhookSideEffectPayloadError(effectId: string): Error {
     message: `Hosted webhook side effect ${effectId} stores an invalid or legacy payload shape.`,
     httpStatus: 500,
   });
+}
+
+function isHostedWebhookLinqMessageTemplate(
+  value: string | null,
+): value is HostedWebhookLinqMessageSideEffect["payload"]["template"] {
+  return value === "daily_quota" || value === "invite_signin" || value === "invite_signup";
 }
 
 export function generateHostedWebhookReceiptAttemptId(): string {

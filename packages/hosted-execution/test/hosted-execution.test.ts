@@ -20,6 +20,8 @@ import {
   buildHostedExecutionVaultShareAcceptedDispatch,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
+  buildHostedExecutionSharePackPath,
+  buildHostedExecutionUserDeviceSyncRuntimePath,
   buildHostedExecutionUserEnvPath,
   buildHostedExecutionUserRunPath,
   buildHostedExecutionUserStatusPath,
@@ -1886,6 +1888,216 @@ describe("@murphai/hosted-execution", () => {
         nowMs: Date.parse("2026-03-27T10:45:00.000Z"),
       }),
     ).resolves.toBe(true);
+  });
+
+  it("control client reads and applies device-sync runtime state through the signed user route", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            connections: [],
+            generatedAt: "2026-04-05T10:45:00.000Z",
+            userId: "member/123",
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            appliedAt: "2026-04-05T10:46:00.000Z",
+            updates: [
+              {
+                connection: {
+                  accessTokenExpiresAt: null,
+                  connectedAt: "2026-04-05T10:00:00.000Z",
+                  createdAt: "2026-04-05T10:00:00.000Z",
+                  displayName: "Oura",
+                  externalAccountId: "acct_123",
+                  id: "dsc_123",
+                  metadata: {},
+                  provider: "oura",
+                  scopes: ["heartrate"],
+                  status: "active",
+                  updatedAt: "2026-04-05T10:46:00.000Z",
+                },
+                connectionId: "dsc_123",
+                status: "updated",
+                tokenUpdate: "applied",
+              },
+            ],
+            userId: "member/123",
+          }),
+          { status: 200 },
+        ),
+      );
+    const client = createHostedExecutionControlClient({
+      baseUrl: "https://worker.example.test/",
+      now: () => "2026-04-05T10:45:00.000Z",
+      fetchImpl,
+      signingSecret: "signing-secret",
+    });
+
+    await expect(
+      client.getDeviceSyncRuntimeSnapshot("member/123", {
+        connectionId: "dsc_123",
+        provider: "oura",
+      }),
+    ).resolves.toEqual({
+      connections: [],
+      generatedAt: "2026-04-05T10:45:00.000Z",
+      userId: "member/123",
+    });
+    await expect(
+      client.applyDeviceSyncRuntimeUpdates("member/123", {
+        updates: [
+          {
+            connection: {
+              status: "active",
+            },
+            connectionId: "dsc_123",
+            observedTokenVersion: 2,
+            observedUpdatedAt: "2026-04-05T10:00:00.000Z",
+            tokenBundle: {
+              accessToken: "access-token",
+              accessTokenExpiresAt: null,
+              keyVersion: "v1",
+              refreshToken: "refresh-token",
+              tokenVersion: 2,
+            },
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      appliedAt: "2026-04-05T10:46:00.000Z",
+      userId: "member/123",
+    });
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      "https://worker.example.test/internal/users/member%2F123/device-sync/runtime?connectionId=dsc_123&provider=oura",
+      expect.objectContaining({
+        method: "GET",
+      }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      "https://worker.example.test/internal/users/member%2F123/device-sync/runtime",
+      expect.objectContaining({
+        body: JSON.stringify({
+          updates: [
+            {
+              connection: {
+                status: "active",
+              },
+              connectionId: "dsc_123",
+              observedTokenVersion: 2,
+              observedUpdatedAt: "2026-04-05T10:00:00.000Z",
+              tokenBundle: {
+                accessToken: "access-token",
+                accessTokenExpiresAt: null,
+                keyVersion: "v1",
+                refreshToken: "refresh-token",
+                tokenVersion: 2,
+              },
+            },
+          ],
+          userId: "member/123",
+        }),
+        method: "POST",
+      }),
+    );
+    await expect(
+      verifyHostedExecutionSignature({
+        method: "GET",
+        path: buildHostedExecutionUserDeviceSyncRuntimePath("member/123"),
+        payload: "",
+        secret: "signing-secret",
+        signature: new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get(HOSTED_EXECUTION_SIGNATURE_HEADER),
+        timestamp: new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get(HOSTED_EXECUTION_TIMESTAMP_HEADER),
+        nowMs: Date.parse("2026-04-05T10:45:00.000Z"),
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      verifyHostedExecutionSignature({
+        method: "POST",
+        path: buildHostedExecutionUserDeviceSyncRuntimePath("member/123"),
+        payload: String(fetchImpl.mock.calls[1]?.[1]?.body ?? ""),
+        secret: "signing-secret",
+        signature: new Headers(fetchImpl.mock.calls[1]?.[1]?.headers).get(HOSTED_EXECUTION_SIGNATURE_HEADER),
+        timestamp: new Headers(fetchImpl.mock.calls[1]?.[1]?.headers).get(HOSTED_EXECUTION_TIMESTAMP_HEADER),
+        nowMs: Date.parse("2026-04-05T10:45:00.000Z"),
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it("control client reads and writes hosted share packs through the signed share route", async () => {
+    const sharePack = {
+      createdAt: "2026-04-05T00:00:00.000Z",
+      entities: [
+        {
+          kind: "food",
+          payload: {
+            kind: "smoothie",
+            status: "active",
+            title: "Shared smoothie",
+          },
+          ref: "food:shared-smoothie",
+        },
+      ],
+      schemaVersion: "murph.share-pack.v1",
+      title: "Shared smoothie pack",
+    } as const;
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(sharePack), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(sharePack), { status: 200 }))
+      .mockResolvedValueOnce(new Response("", { status: 200 }))
+      .mockResolvedValueOnce(new Response("Not found", { status: 404 }));
+    const client = createHostedExecutionControlClient({
+      baseUrl: "https://worker.example.test/",
+      now: () => "2026-04-05T10:45:00.000Z",
+      fetchImpl,
+      signingSecret: "signing-secret",
+    });
+
+    await expect(client.putSharePack("share/123", sharePack)).resolves.toEqual(sharePack);
+    await expect(client.getSharePack("share/123")).resolves.toEqual(sharePack);
+    await expect(client.deleteSharePack("share/123")).resolves.toBeUndefined();
+    await expect(client.getSharePack("missing")).resolves.toBeNull();
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      "https://worker.example.test/internal/shares/share%2F123/pack",
+      expect.objectContaining({
+        method: "PUT",
+      }),
+    );
+    expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body ?? ""))).toEqual(sharePack);
+    await expect(
+      verifyHostedExecutionSignature({
+        method: "PUT",
+        path: buildHostedExecutionSharePackPath("share/123"),
+        payload: String(fetchImpl.mock.calls[0]?.[1]?.body ?? ""),
+        secret: "signing-secret",
+        signature: new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get(HOSTED_EXECUTION_SIGNATURE_HEADER),
+        timestamp: new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get(HOSTED_EXECUTION_TIMESTAMP_HEADER),
+        nowMs: Date.parse("2026-04-05T10:45:00.000Z"),
+      }),
+    ).resolves.toBe(true);
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      "https://worker.example.test/internal/shares/share%2F123/pack",
+      expect.objectContaining({
+        method: "GET",
+      }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      3,
+      "https://worker.example.test/internal/shares/share%2F123/pack",
+      expect.objectContaining({
+        method: "DELETE",
+      }),
+    );
   });
 
   it("control client signs standard env and run routes", async () => {

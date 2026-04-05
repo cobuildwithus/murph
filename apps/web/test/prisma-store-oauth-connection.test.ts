@@ -24,14 +24,6 @@ type MutableOAuthSession = {
   expiresAt: Date;
 };
 
-type MutableConnectionSecret = {
-  connectionId: string;
-  accessTokenEncrypted: string;
-  refreshTokenEncrypted: string | null;
-  tokenVersion: number;
-  keyVersion: string;
-};
-
 type MutableConnectionRecord = {
   id: string;
   userId: string;
@@ -52,7 +44,6 @@ type MutableConnectionRecord = {
   nextReconcileAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
-  secret: MutableConnectionSecret | null;
 };
 
 describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
@@ -77,13 +68,6 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
 
     const store = new PrismaDeviceSyncControlPlaneStore({
       prisma: {
-        deviceOauthSession: {
-          findUnique: async ({ where }: { where: { state: string } }) => cloneOAuthSession(sessions.get(where.state) ?? null),
-          delete: async ({ where }: { where: { state: string } }) => {
-            sessions.delete(where.state);
-            return undefined;
-          },
-        },
         $transaction: async <TResult>(
           callback: (transaction: {
             deviceOauthSession: {
@@ -102,11 +86,6 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
             },
           }),
       } as never,
-      codec: {
-        keyVersion: "v1",
-        encrypt: (value: string) => value,
-        decrypt: (value: string) => value,
-      },
     });
 
     await expect(store.consumeOAuthState("state-123", "2026-03-25T00:30:00.000Z")).resolves.toEqual({
@@ -159,11 +138,6 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
             },
           }),
       } as never,
-      codec: {
-        keyVersion: "v1",
-        encrypt: (value: string) => value,
-        decrypt: (value: string) => value,
-      },
     });
 
     await expect(store.consumeOAuthState("state-expired", "2026-03-25T00:30:00.000Z")).resolves.toBeNull();
@@ -172,31 +146,34 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
 });
 
 describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
-  it("creates new hosted connections with the hosted random id shape", async () => {
+  it("creates new hosted connections without creating a Prisma secret row", async () => {
     const createdArtifacts: {
       connection: MutableConnectionRecord | null;
-      secret: MutableConnectionSecret | null;
+      secretCreateCalled: boolean;
     } = {
       connection: null,
-      secret: null,
+      secretCreateCalled: false,
     };
 
     const tx = {
       deviceConnection: {
-        findFirst: async () => null,
+        findUnique: async ({ where }: { where: { id?: string } | { provider_externalAccountId?: { provider: string; externalAccountId: string } } }) => {
+          if ("id" in where && where.id && createdArtifacts.connection?.id === where.id) {
+            return cloneConnection(createdArtifacts.connection);
+          }
+
+          return null;
+        },
         create: async ({ data }: { data: Record<string, unknown> }) => {
           createdArtifacts.connection = normalizeCreatedConnection(data);
           return cloneConnection(createdArtifacts.connection);
         },
-        findUnique: async ({ where }: { where: { id: string } }) =>
-          createdArtifacts.connection && createdArtifacts.connection.id === where.id
-            ? cloneConnection(createdArtifacts.connection)
-            : null,
+        findFirst: async () => null,
       },
       deviceConnectionSecret: {
-        create: async ({ data }: { data: Record<string, unknown> }) => {
-          createdArtifacts.secret = normalizeConnectionSecret(data);
-          return { ...createdArtifacts.secret };
+        create: async () => {
+          createdArtifacts.secretCreateCalled = true;
+          return {};
         },
       },
     };
@@ -205,14 +182,8 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       prisma: {
         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
       } as never,
-      codec: {
-        keyVersion: "v1",
-        encrypt: (value: string) => `enc:${value}`,
-        decrypt: (value: string) => value.replace(/^enc:/u, ""),
-      },
     });
 
-    const suffix = hostedRandomSuffix(12);
     const created = await store.upsertConnection({
       ownerId: "user-123",
       provider: "oura",
@@ -236,352 +207,184 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       nextReconcileAt: "2026-03-25T05:00:00.000Z",
     });
 
-    expect(created.id).toBe(`dsc_${suffix}`);
-    expect(created.id).not.toMatch(/^[a-z0-9-]+_[0-9A-HJKMNP-TV-Z]{26}$/u);
+    expect(created.id).toMatch(/^dsc_[A-Za-z0-9_-]+$/u);
     expect(createdArtifacts.connection).toMatchObject({
-      id: `dsc_${suffix}`,
+      id: created.id,
       userId: "user-123",
       externalAccountId: "acct_456",
+      metadataJson: {
+        allowed: true,
+        region: "us",
+      },
     });
-    expect(createdArtifacts.secret).toMatchObject({
-      connectionId: `dsc_${suffix}`,
-      accessTokenEncrypted: "enc:access-token",
-      refreshTokenEncrypted: "enc:refresh-token",
-      tokenVersion: 1,
-      keyVersion: "v1",
-    });
+    expect(createdArtifacts.secretCreateCalled).toBe(false);
     expect(created.metadata).toEqual({});
-    expect(createdArtifacts.connection?.metadataJson).toEqual({
-      allowed: true,
-      region: "us",
-    });
   });
 
-  it("redacts connection metadata from public reads while sanitizing internal bundle metadata", async () => {
-    const connection = createConnectionRecord();
-    connection.metadataJson = {
-      personalInfo: {
-        email: "sensitive@example.com",
-      },
-      providerHint: "local-browser",
-      retryCount: 2,
-    };
-    const store = new PrismaDeviceSyncControlPlaneStore({
-      prisma: {
-        deviceConnection: {
-          findFirst: async ({ where }: { where: { id: string; userId: string } }) =>
-            connection.id === where.id && connection.userId === where.userId ? cloneConnection(connection) : null,
-        },
-      } as never,
-      codec: {
-        keyVersion: "v1",
-        encrypt: (value: string) => `enc:${value}`,
-        decrypt: (value: string) => value.replace(/^enc:/u, ""),
-      },
-    });
-
-    await expect(store.getConnectionForUser("user-123", "dsc_123")).resolves.toMatchObject({
+  it("updates an existing connection without writing a Prisma secret row", async () => {
+    const existing = createConnection({
+      accessTokenExpiresAt: new Date("2026-03-25T04:00:00.000Z"),
       id: "dsc_123",
-      metadata: {},
-    });
-    await expect(store.getConnectionBundleForUser("user-123", "dsc_123")).resolves.toEqual({
+      metadataJson: { region: "us" },
+      provider: "oura",
       userId: "user-123",
-      account: expect.objectContaining({
-        id: "dsc_123",
-        metadata: {
-          providerHint: "local-browser",
-          retryCount: 2,
-        },
-        accessToken: "access-token",
-        refreshToken: "refresh-token",
-      }),
-      tokenVersion: 4,
-      keyVersion: "v1",
     });
-  });
-
-  it("returns the decrypted hosted token bundle for the owning user", async () => {
-    const connection = createConnectionRecord();
-    const store = new PrismaDeviceSyncControlPlaneStore({
-      prisma: {
-        deviceConnection: {
-          findFirst: async () => cloneConnection(connection),
-        },
-      } as never,
-      codec: {
-        keyVersion: "v1",
-        encrypt: (value: string) => `enc:${value}`,
-        decrypt: (value: string) => value.replace(/^enc:/u, ""),
-      },
-    });
-
-    await expect(store.getConnectionBundleForUser("user-123", "dsc_123")).resolves.toEqual({
+    const updated = createConnection({
+      accessTokenExpiresAt: new Date("2026-03-26T04:00:00.000Z"),
+      id: "dsc_123",
+      metadataJson: { region: "ca" },
+      provider: "oura",
       userId: "user-123",
-      account: expect.objectContaining({
-        id: "dsc_123",
-        provider: "oura",
-        accessToken: "access-token",
-        refreshToken: "refresh-token",
-      }),
-      tokenVersion: 4,
-      keyVersion: "v1",
     });
-  });
-
-  it("disconnects the connection inside the transaction and removes the hosted secret bundle", async () => {
-    const connection = createConnectionRecord();
 
     const tx = {
       deviceConnection: {
-        findFirst: async () => cloneConnection(connection),
-        update: async ({ data }: { data: Record<string, unknown> }) => {
-          applyConnectionUpdate(connection, data);
-          connection.secret = null;
-          return cloneConnection(connection);
-        },
+        findUnique: async () => cloneConnection(existing),
+        update: async () => cloneConnection(updated),
       },
       deviceConnectionSecret: {
-        deleteMany: async () => {
-          connection.secret = null;
-          return { count: 1 };
-        },
+        upsert: vi.fn(async () => {
+          throw new Error("secret upsert should not run");
+        }),
       },
     };
 
     const store = new PrismaDeviceSyncControlPlaneStore({
       prisma: {
-        $transaction: async <TResult>(
-          callback: (transaction: typeof tx) => Promise<TResult>,
-        ) => callback(tx),
+        $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
       } as never,
-      codec: {
-        keyVersion: "v1",
-        encrypt: (value: string) => `enc:${value}`,
-        decrypt: (value: string) => value.replace(/^enc:/u, ""),
+    });
+
+    await expect(store.upsertConnection({
+      ownerId: "user-123",
+      provider: "oura",
+      externalAccountId: "acct_456",
+      displayName: "Oura ring",
+      scopes: ["daily"],
+      tokens: {
+        accessToken: "new-access-token",
+        refreshToken: "new-refresh-token",
+        accessTokenExpiresAt: "2026-03-26T04:00:00.000Z",
       },
-    });
-
-    await expect(
-      store.markConnectionDisconnected({
-        connectionId: "dsc_123",
-        userId: "user-123",
-        now: "2026-03-25T02:00:00.000Z",
-        errorCode: "REMOTE_DISCONNECT",
-        errorMessage: "Provider revoked access",
-      }),
-    ).resolves.toMatchObject({
+      metadata: {
+        region: "ca",
+      },
+      connectedAt: "2026-03-25T00:00:00.000Z",
+      nextReconcileAt: "2026-03-25T05:00:00.000Z",
+    })).resolves.toEqual(expect.objectContaining({
       id: "dsc_123",
-      status: "disconnected",
-      accessTokenExpiresAt: null,
-      nextReconcileAt: null,
-      lastErrorCode: "REMOTE_DISCONNECT",
-      lastErrorMessage: "Provider revoked access",
-    });
-
-    expect(connection.secret).toBeNull();
-    expect(connection.status).toBe("disconnected");
-    expect(connection.accessTokenExpiresAt).toBeNull();
-    expect(connection.nextReconcileAt).toBeNull();
+      metadata: {},
+    }));
+    expect(tx.deviceConnectionSecret.upsert).not.toHaveBeenCalled();
   });
 
-  it("records webhook receipt time without bumping the hosted connection updatedAt column", async () => {
-    const executeRaw = vi.fn(async () => 1);
+  it("disconnects the connection inside the transaction without touching a Prisma secret row", async () => {
+    const connection = createConnection({
+      id: "dsc_123",
+      provider: "oura",
+      userId: "user-123",
+    });
+    const tx = {
+      deviceConnection: {
+        findFirst: async () => cloneConnection(connection),
+        update: async ({ data }: { data: Record<string, unknown> }) => cloneConnection({
+          ...connection,
+          accessTokenExpiresAt: null,
+          lastErrorCode: (data.lastErrorCode as string | null | undefined) ?? null,
+          lastErrorMessage: (data.lastErrorMessage as string | null | undefined) ?? null,
+          nextReconcileAt: null,
+          status: "disconnected",
+          updatedAt: data.updatedAt as Date,
+        }),
+      },
+      deviceConnectionSecret: {
+        deleteMany: vi.fn(async () => ({ count: 1 })),
+      },
+    };
+
     const store = new PrismaDeviceSyncControlPlaneStore({
       prisma: {
-        $executeRaw: executeRaw,
+        $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
       } as never,
-      codec: {
-        keyVersion: "v1",
-        encrypt: (value: string) => `enc:${value}`,
-        decrypt: (value: string) => value.replace(/^enc:/u, ""),
-      },
     });
 
-    await store.markWebhookReceived("dsc_123", "2026-03-25T02:00:00.000Z");
-
-    expect(executeRaw).toHaveBeenCalledTimes(1);
-    const [query, receivedAt, accountId] = executeRaw.mock.calls[0] as unknown as [
-      { strings?: string[] },
-      Date,
-      string,
-    ];
-    const queryText = Array.isArray(query?.strings) ? query.strings.join(" ") : String(query);
-    expect(queryText).toContain("update device_connection");
-    expect(queryText).toContain("set last_webhook_at =");
-    expect(queryText).not.toContain("updated_at");
-    expect(accountId).toBe("dsc_123");
-    expect(receivedAt).toEqual(new Date("2026-03-25T02:00:00.000Z"));
+    await expect(store.markConnectionDisconnected({
+      connectionId: "dsc_123",
+      userId: "user-123",
+      now: "2026-03-25T06:00:00.000Z",
+    })).resolves.toEqual(expect.objectContaining({
+      id: "dsc_123",
+      status: "disconnected",
+    }));
+    expect(tx.deviceConnectionSecret.deleteMany).not.toHaveBeenCalled();
   });
 });
 
-function createConnectionRecord(): MutableConnectionRecord {
+function cloneOAuthSession(session: MutableOAuthSession | null): MutableOAuthSession | null {
+  return session
+    ? {
+        ...session,
+        metadataJson: { ...session.metadataJson },
+        createdAt: new Date(session.createdAt),
+        expiresAt: new Date(session.expiresAt),
+      }
+    : null;
+}
+
+function cloneConnection(record: MutableConnectionRecord | null): MutableConnectionRecord | null {
+  return record
+    ? {
+        ...record,
+        scopes: [...record.scopes],
+        metadataJson: { ...record.metadataJson },
+        accessTokenExpiresAt: record.accessTokenExpiresAt ? new Date(record.accessTokenExpiresAt) : null,
+        connectedAt: new Date(record.connectedAt),
+        lastWebhookAt: record.lastWebhookAt ? new Date(record.lastWebhookAt) : null,
+        lastSyncStartedAt: record.lastSyncStartedAt ? new Date(record.lastSyncStartedAt) : null,
+        lastSyncCompletedAt: record.lastSyncCompletedAt ? new Date(record.lastSyncCompletedAt) : null,
+        lastSyncErrorAt: record.lastSyncErrorAt ? new Date(record.lastSyncErrorAt) : null,
+        nextReconcileAt: record.nextReconcileAt ? new Date(record.nextReconcileAt) : null,
+        createdAt: new Date(record.createdAt),
+        updatedAt: new Date(record.updatedAt),
+      }
+    : null;
+}
+
+function createConnection(overrides: Partial<MutableConnectionRecord>): MutableConnectionRecord {
   return {
-    id: "dsc_123",
-    userId: "user-123",
-    provider: "oura",
-    externalAccountId: "acct_123",
-    displayName: "Oura ring",
-    status: "active",
-    scopes: ["daily"],
-    accessTokenExpiresAt: new Date("2026-03-25T04:00:00.000Z"),
-    metadataJson: {
-      region: "us",
-    },
-    connectedAt: new Date("2026-03-25T00:00:00.000Z"),
-    lastWebhookAt: null,
-    lastSyncStartedAt: null,
-    lastSyncCompletedAt: null,
-    lastSyncErrorAt: null,
-    lastErrorCode: null,
-    lastErrorMessage: null,
-    nextReconcileAt: new Date("2026-03-25T05:00:00.000Z"),
-    createdAt: new Date("2026-03-25T00:00:00.000Z"),
-    updatedAt: new Date("2026-03-25T00:00:00.000Z"),
-    secret: {
-      connectionId: "dsc_123",
-      accessTokenEncrypted: "enc:access-token",
-      refreshTokenEncrypted: "enc:refresh-token",
-      tokenVersion: 4,
-      keyVersion: "v1",
-    },
+    id: overrides.id ?? "dsc_123",
+    userId: overrides.userId ?? "user-123",
+    provider: overrides.provider ?? "oura",
+    externalAccountId: overrides.externalAccountId ?? "acct_456",
+    displayName: overrides.displayName ?? "Oura ring",
+    status: overrides.status ?? "active",
+    scopes: overrides.scopes ?? ["daily"],
+    accessTokenExpiresAt: overrides.accessTokenExpiresAt ?? null,
+    metadataJson: overrides.metadataJson ?? {},
+    connectedAt: overrides.connectedAt ?? new Date("2026-03-25T00:00:00.000Z"),
+    lastWebhookAt: overrides.lastWebhookAt ?? null,
+    lastSyncStartedAt: overrides.lastSyncStartedAt ?? null,
+    lastSyncCompletedAt: overrides.lastSyncCompletedAt ?? null,
+    lastSyncErrorAt: overrides.lastSyncErrorAt ?? null,
+    lastErrorCode: overrides.lastErrorCode ?? null,
+    lastErrorMessage: overrides.lastErrorMessage ?? null,
+    nextReconcileAt: overrides.nextReconcileAt ?? null,
+    createdAt: overrides.createdAt ?? new Date("2026-03-25T00:00:00.000Z"),
+    updatedAt: overrides.updatedAt ?? new Date("2026-03-25T00:00:00.000Z"),
   };
 }
 
 function normalizeCreatedConnection(data: Record<string, unknown>): MutableConnectionRecord {
-  if (
-    typeof data.id !== "string" ||
-    typeof data.userId !== "string" ||
-    typeof data.provider !== "string" ||
-    typeof data.externalAccountId !== "string" ||
-    !(data.connectedAt instanceof Date)
-  ) {
-    throw new TypeError("Invalid hosted connection record.");
-  }
-
-  return {
-    id: data.id,
-    userId: data.userId,
-    provider: data.provider,
-    externalAccountId: data.externalAccountId,
+  return createConnection({
+    id: String(data.id),
+    userId: String(data.userId),
+    provider: String(data.provider),
+    externalAccountId: String(data.externalAccountId),
     displayName: typeof data.displayName === "string" ? data.displayName : null,
-    status: isConnectionStatus(data.status) ? data.status : "active",
-    scopes: Array.isArray(data.scopes) ? data.scopes.filter((value): value is string => typeof value === "string") : [],
-    accessTokenExpiresAt: data.accessTokenExpiresAt instanceof Date ? new Date(data.accessTokenExpiresAt) : null,
-    metadataJson: isRecord(data.metadataJson) ? { ...data.metadataJson } : {},
-    connectedAt: new Date(data.connectedAt),
-    lastWebhookAt: null,
-    lastSyncStartedAt: null,
-    lastSyncCompletedAt: null,
-    lastSyncErrorAt: null,
-    lastErrorCode: null,
-    lastErrorMessage: null,
-    nextReconcileAt: data.nextReconcileAt instanceof Date ? new Date(data.nextReconcileAt) : null,
-    createdAt: new Date("2026-03-25T00:00:00.000Z"),
-    updatedAt: new Date("2026-03-25T00:00:00.000Z"),
-    secret: null,
-  };
-}
-
-function normalizeConnectionSecret(data: Record<string, unknown>): MutableConnectionSecret {
-  if (
-    typeof data.connectionId !== "string" ||
-    typeof data.accessTokenEncrypted !== "string" ||
-    (data.refreshTokenEncrypted !== null && typeof data.refreshTokenEncrypted !== "string") ||
-    typeof data.tokenVersion !== "number" ||
-    typeof data.keyVersion !== "string"
-  ) {
-    throw new TypeError("Invalid hosted connection secret.");
-  }
-
-  return {
-    connectionId: data.connectionId,
-    accessTokenEncrypted: data.accessTokenEncrypted,
-    refreshTokenEncrypted: data.refreshTokenEncrypted,
-    tokenVersion: data.tokenVersion,
-    keyVersion: data.keyVersion,
-  };
-}
-
-function applyConnectionUpdate(connection: MutableConnectionRecord, data: Record<string, unknown>): void {
-  if ("status" in data && isConnectionStatus(data.status)) {
-    connection.status = data.status;
-  }
-
-  if ("accessTokenExpiresAt" in data) {
-    connection.accessTokenExpiresAt = data.accessTokenExpiresAt instanceof Date ? new Date(data.accessTokenExpiresAt) : null;
-  }
-
-  if ("nextReconcileAt" in data) {
-    connection.nextReconcileAt = data.nextReconcileAt instanceof Date ? new Date(data.nextReconcileAt) : null;
-  }
-
-  if ("lastSyncErrorAt" in data) {
-    connection.lastSyncErrorAt = data.lastSyncErrorAt instanceof Date ? new Date(data.lastSyncErrorAt) : null;
-  }
-
-  if ("lastErrorCode" in data) {
-    connection.lastErrorCode = data.lastErrorCode === null || typeof data.lastErrorCode === "string" ? data.lastErrorCode : connection.lastErrorCode;
-  }
-
-  if ("lastErrorMessage" in data) {
-    connection.lastErrorMessage =
-      data.lastErrorMessage === null || typeof data.lastErrorMessage === "string"
-        ? data.lastErrorMessage
-        : connection.lastErrorMessage;
-  }
-
-  if ("updatedAt" in data && data.updatedAt instanceof Date) {
-    connection.updatedAt = new Date(data.updatedAt);
-  }
-}
-
-function cloneOAuthSession(record: MutableOAuthSession | null): MutableOAuthSession | null {
-  if (!record) {
-    return null;
-  }
-
-  return {
-    ...record,
-    metadataJson: { ...record.metadataJson },
-    createdAt: new Date(record.createdAt),
-    expiresAt: new Date(record.expiresAt),
-  };
-}
-
-function cloneConnection(record: MutableConnectionRecord): MutableConnectionRecord {
-  return {
-    ...record,
-    scopes: [...record.scopes],
-    metadataJson: { ...record.metadataJson },
-    accessTokenExpiresAt: cloneDate(record.accessTokenExpiresAt),
-    connectedAt: new Date(record.connectedAt),
-    lastWebhookAt: cloneDate(record.lastWebhookAt),
-    lastSyncStartedAt: cloneDate(record.lastSyncStartedAt),
-    lastSyncCompletedAt: cloneDate(record.lastSyncCompletedAt),
-    lastSyncErrorAt: cloneDate(record.lastSyncErrorAt),
-    nextReconcileAt: cloneDate(record.nextReconcileAt),
-    createdAt: new Date(record.createdAt),
-    updatedAt: new Date(record.updatedAt),
-    secret: record.secret
-      ? {
-          ...record.secret,
-        }
-      : null,
-  };
-}
-
-function cloneDate(value: Date | null): Date | null {
-  return value ? new Date(value) : null;
-}
-
-function hostedRandomSuffix(length: number): string {
-  return Buffer.from(Array.from({ length }, (_, index) => index)).toString("base64url");
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function isConnectionStatus(value: unknown): value is MutableConnectionRecord["status"] {
-  return value === "active" || value === "reauthorization_required" || value === "disconnected";
+    scopes: Array.isArray(data.scopes) ? data.scopes.filter((entry): entry is string => typeof entry === "string") : [],
+    accessTokenExpiresAt: data.accessTokenExpiresAt instanceof Date ? data.accessTokenExpiresAt : null,
+    metadataJson: (data.metadataJson as Record<string, unknown>) ?? {},
+    connectedAt: data.connectedAt instanceof Date ? data.connectedAt : new Date("2026-03-25T00:00:00.000Z"),
+    nextReconcileAt: data.nextReconcileAt instanceof Date ? data.nextReconcileAt : null,
+  });
 }

@@ -15,8 +15,6 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   return {
     ...actual,
     getHostedOnboardingEnvironment: () => ({
-      encryptionKey: "test-hosted-contact-privacy-key",
-      encryptionKeyVersion: "v1",
       inviteTtlHours: 24,
       isProduction: false,
       linqApiBaseUrl: "https://linq.example.test",
@@ -82,9 +80,9 @@ describe("hosted webhook receipt transitions", () => {
       ...createHostedWebhookLinqMessageSideEffect({
         chatId: "chat_123",
         inviteId: "invite_123",
-        message: "Welcome aboard",
         replyToMessageId: "msg_123",
         sourceEventId: "evt_123",
+        template: "invite_signup",
       }),
       lastError: {
         code: null,
@@ -264,9 +262,9 @@ describe("hosted webhook receipt transitions", () => {
     const sideEffect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat_123",
       inviteId: "invite_123",
-      message: "Welcome aboard",
       replyToMessageId: "msg_123",
       sourceEventId: "evt_123",
+      template: "invite_signup",
     });
     const payloadJson = {
       eventPayload: {},
@@ -288,7 +286,7 @@ describe("hosted webhook receipt transitions", () => {
             payload: {
               chatId: "chat_123",
               inviteId: "invite_123",
-              message: "Welcome aboard",
+              message: "legacy plaintext invite body",
               replyToMessageId: "msg_123",
             },
             result: null,

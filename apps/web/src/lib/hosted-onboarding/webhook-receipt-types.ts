@@ -69,8 +69,8 @@ export type HostedWebhookLinqMessageSideEffect = {
   payload: {
     chatId: string;
     inviteId: string | null;
-    message: string;
     replyToMessageId: string | null;
+    template: "daily_quota" | "invite_signin" | "invite_signup";
   };
   result: {
     chatId: string | null;
@@ -228,9 +228,9 @@ function buildHostedWebhookDispatchSideEffectPayload(
 export function createHostedWebhookLinqMessageSideEffect(input: {
   chatId: string;
   inviteId: string | null;
-  message: string;
   replyToMessageId?: string | null;
   sourceEventId: string;
+  template: HostedWebhookLinqMessageSideEffect["payload"]["template"];
 }): HostedWebhookLinqMessageSideEffect {
   return {
     attemptCount: 0,
@@ -241,8 +241,8 @@ export function createHostedWebhookLinqMessageSideEffect(input: {
     payload: {
       chatId: input.chatId,
       inviteId: input.inviteId,
-      message: input.message,
       replyToMessageId: input.replyToMessageId ?? null,
+      template: input.template,
     },
     result: null,
     sentAt: null,

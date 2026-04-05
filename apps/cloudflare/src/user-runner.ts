@@ -1,5 +1,8 @@
 import type {
   HostedExecutionBundleRefs,
+  HostedExecutionDeviceSyncRuntimeApplyRequest,
+  HostedExecutionDeviceSyncRuntimeApplyResponse,
+  HostedExecutionDeviceSyncRuntimeSnapshotRequest,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   HostedExecutionDispatchResult,
   HostedExecutionDispatchRequest,
@@ -360,6 +363,44 @@ export class HostedUserRunner {
     }).mergeSnapshot(input.snapshot);
   }
 
+  async getDeviceSyncRuntimeSnapshot(input: {
+    request: HostedExecutionDeviceSyncRuntimeSnapshotRequest;
+  }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse> {
+    const userId = await this.requireBoundUserId();
+
+    if (input.request.userId !== userId) {
+      throw new TypeError("Hosted device-sync runtime snapshot userId does not match the bound user.");
+    }
+
+    const { crypto } = await this.ensureRunnerStores(userId);
+    return createHostedDeviceSyncRuntimeStore({
+      bucket: this.bucket,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
+    }).readSnapshot(input.request);
+  }
+
+  async applyDeviceSyncRuntimeUpdates(input: {
+    request: HostedExecutionDeviceSyncRuntimeApplyRequest;
+  }): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
+    const userId = await this.requireBoundUserId();
+
+    if (input.request.userId !== userId) {
+      throw new TypeError("Hosted device-sync runtime apply userId does not match the bound user.");
+    }
+
+    return this.withUserKeyEnvelopeLock(async () => {
+      const { crypto } = await this.ensureRunnerStoresWhileHoldingKeyLock(userId);
+      return createHostedDeviceSyncRuntimeStore({
+        bucket: this.bucket,
+        key: crypto.rootKey,
+        keyId: crypto.rootKeyId,
+        keysById: crypto.keysById,
+      }).applyUpdates(input.request);
+    });
+  }
+
   async putPendingUsage(input: {
     usage: readonly Record<string, unknown>[];
   }): Promise<{ recorded: number; usageIds: string[] }> {
@@ -475,7 +516,12 @@ export class HostedUserRunner {
         await gatewayStore.applySnapshot(committed.gatewayProjectionSnapshot ?? null);
         return toUserStatus(
           presence.pending
-            ? await this.applyCommittedDispatchAndCleanup(input.event.userId, committed, input)
+            ? await this.applyCommittedDispatchAndCleanup(
+              input.event.userId,
+              committed,
+              input,
+              input,
+            )
             : await this.rememberCommittedEventAndCleanup(input.event.userId, input.eventId, input),
         );
       }
@@ -701,6 +747,7 @@ export class HostedUserRunner {
           run,
         });
         await this.deleteCommittedDispatchBestEffort(record.userId, nextPending.dispatch.eventId);
+        await this.deleteTransientDispatchDataBestEffort(nextPending.dispatch);
         processedDispatch = true;
       } catch (error) {
         const committed = await (await this.ensureRunnerStores(record.userId)).commitRecovery.readCommittedDispatch(
@@ -853,7 +900,10 @@ export class HostedUserRunner {
           startedAt: recovered.record.lastRunAt ?? new Date().toISOString(),
         }),
       });
-        await this.deleteCommittedDispatchBestEffort(record.userId, recovered.committedEventId);
+      await this.deleteCommittedDispatchBestEffort(record.userId, recovered.committedEventId);
+      if (recovered.cleanupDispatch) {
+        await this.deleteTransientDispatchDataBestEffort(recovered.cleanupDispatch);
+      }
       return completedRecord;
     }
 
@@ -989,10 +1039,11 @@ export class HostedUserRunner {
     }
 
     try {
+      const { crypto } = await this.ensureRunnerStores(dispatch.event.userId);
       await deleteHostedEmailRawMessage({
         bucket: this.bucket,
-        key: this.env.bundleEncryptionKey,
-        keysById: this.env.bundleEncryptionKeysById,
+        key: crypto.rootKey,
+        keysById: crypto.keysById,
         rawMessageKey: dispatch.event.rawMessageKey,
         userId: dispatch.event.userId,
       });

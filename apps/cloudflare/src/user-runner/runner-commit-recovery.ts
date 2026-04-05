@@ -1,3 +1,5 @@
+import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
+
 import type { R2BucketLike } from "../bundle-store.js";
 import type { HostedExecutionCommittedResult } from "../execution-journal.js";
 import { createHostedExecutionJournalStore, type HostedExecutionJournalStore } from "../execution-journal.js";
@@ -7,6 +9,7 @@ import { RunnerScheduler } from "./runner-scheduler.js";
 import type { RunnerStateRecord } from "./types.js";
 
 export interface RecoveredCommittedPendingDispatch {
+  cleanupDispatch: HostedExecutionDispatchRequest | null;
   committed: HostedExecutionCommittedResult;
   committedEventId: string | null;
   record: RunnerStateRecord;
@@ -44,6 +47,7 @@ export class RunnerCommitRecovery {
 
       if (isCommittedResultFinalized(committed)) {
         return {
+          cleanupDispatch: pending.dispatch,
           committed,
           committedEventId: pending.eventId,
           record: await this.applyCommittedDispatch(record.userId, committed),
