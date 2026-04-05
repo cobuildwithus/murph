@@ -27,6 +27,14 @@
       "path": "packages/assistant-core"
     },
     {
+      "name": "@murphai/assistant-cli",
+      "path": "packages/assistant-cli"
+    },
+    {
+      "name": "@murphai/setup-cli",
+      "path": "packages/setup-cli"
+    },
+    {
       "name": "@murphai/gateway-core",
       "path": "packages/gateway-core"
     },
@@ -61,6 +69,10 @@
     {
       "name": "@murphai/murph",
       "path": "packages/cli"
+    },
+    {
+      "name": "@murphai/openclaw",
+      "path": "packages/openclaw"
     },
     {
       "name": "@murphai/assistant-runtime",

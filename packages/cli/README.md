@@ -41,6 +41,17 @@ vault-cli inbox doctor
 
 `vault-cli` is still available as a secondary alias for the operator surface, but `murph` is the primary command this package installs.
 
+## OpenClaw
+
+If you already run OpenClaw, install the first-party Murph bundle after `murph onboard`:
+
+```bash
+openclaw plugins install @murphai/openclaw
+openclaw gateway restart
+```
+
+That bundle teaches OpenClaw to call `vault-cli` directly against the same configured vault. It does not create a second Murph assistant runtime inside OpenClaw.
+
 When you need to read from the vault, use this chooser:
 
 - `vault-cli show <id>` for one exact query-layer record id
@@ -115,10 +126,10 @@ Machine-facing callers should rely on incur's native envelope via `--verbose --f
 
 Current repo-local package responsibilities include:
 
-- the command graph and onboarding flow
-- local assistant command orchestration and Ink chat UI
+- the thin published command graph and install surface
+- compatibility wrappers over `@murphai/assistant-cli`, `@murphai/setup-cli`, and `@murphai/assistant-core`
 - inbox and device command surfaces that delegate to headless owner packages
-- CLI-only wrappers around shared packages such as `@murphai/assistant-core`, `@murphai/query`, `@murphai/inboxd`, and `@murphai/runtime-state`
+- release ownership for the public `@murphai/murph` package and bins
 
 ## Release flow
 

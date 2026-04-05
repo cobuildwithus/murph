@@ -72,6 +72,8 @@
   },
   "dependencies": {
     "@murphai/assistant-core": "workspace:*",
+    "@murphai/assistant-cli": "workspace:*",
+    "@murphai/setup-cli": "workspace:*",
     "@murphai/assistantd": "workspace:*",
     "@murphai/contracts": "workspace:*",
     "@murphai/core": "workspace:*",

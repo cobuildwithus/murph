@@ -46,6 +46,9 @@ readonly typecheck_package_dirs=(
   "packages/contracts"
   "packages/hosted-execution"
   "packages/runtime-state"
+  "packages/assistant-core"
+  "packages/assistant-cli"
+  "packages/setup-cli"
   "packages/core"
   "packages/importers"
   "packages/device-syncd"
@@ -55,6 +58,7 @@ readonly typecheck_package_dirs=(
   "packages/gateway-core"
   "packages/gateway-local"
   "packages/cli"
+  "packages/openclaw"
   "packages/assistantd"
   "packages/assistant-runtime"
   "apps/web"
@@ -272,6 +276,10 @@ run_test_packages_common() {
     local contracts_test_pid="$!"
     pids+=("$contracts_test_pid")
     register_background_pid "$contracts_test_pid"
+    pnpm --dir "packages/openclaw" test &
+    local openclaw_test_pid="$!"
+    pids+=("$openclaw_test_pid")
+    register_background_pid "$openclaw_test_pid"
 
     if ! wait_for_background_jobs "${pids[@]}"; then
       return 1
@@ -282,6 +290,7 @@ run_test_packages_common() {
 
   pnpm no-js
   pnpm --dir "packages/contracts" test
+  pnpm --dir "packages/openclaw" test
 }
 
 run_test_apps() {
@@ -398,6 +407,8 @@ run_test_coverage() {
 }
 
 run_verify_cli() {
+  pnpm --dir "packages/assistant-cli" typecheck
+  pnpm --dir "packages/setup-cli" typecheck
   pnpm --dir "packages/cli" typecheck
   run_test_runtime_artifact_build_with_retry
   pnpm exec tsx "packages/cli/scripts/verify-package-shape.ts"

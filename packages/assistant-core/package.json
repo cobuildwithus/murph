@@ -142,6 +142,10 @@
       "types": "./dist/assistant/provider-config.d.ts",
       "default": "./dist/assistant/provider-config.js"
     },
+    "./assistant/provider-catalog": {
+      "types": "./dist/assistant/provider-catalog.d.ts",
+      "default": "./dist/assistant/provider-catalog.js"
+    },
     "./assistant/provider-registry": {
       "types": "./dist/assistant/provider-registry.d.ts",
       "default": "./dist/assistant/provider-registry.js"
@@ -385,6 +389,38 @@
     "./usecases/vault-usecase-helpers": {
       "types": "./dist/usecases/vault-usecase-helpers.d.ts",
       "default": "./dist/usecases/vault-usecase-helpers.js"
+    },
+    "./usecases/intervention": {
+      "types": "./dist/usecases/intervention.d.ts",
+      "default": "./dist/usecases/intervention.js"
+    },
+    "./usecases/text-duration": {
+      "types": "./dist/usecases/text-duration.d.ts",
+      "default": "./dist/usecases/text-duration.js"
+    },
+    "./usecases/workout": {
+      "types": "./dist/usecases/workout.d.ts",
+      "default": "./dist/usecases/workout.js"
+    },
+    "./usecases/workout-artifacts": {
+      "types": "./dist/usecases/workout-artifacts.d.ts",
+      "default": "./dist/usecases/workout-artifacts.js"
+    },
+    "./usecases/workout-format": {
+      "types": "./dist/usecases/workout-format.d.ts",
+      "default": "./dist/usecases/workout-format.js"
+    },
+    "./usecases/workout-import": {
+      "types": "./dist/usecases/workout-import.d.ts",
+      "default": "./dist/usecases/workout-import.js"
+    },
+    "./usecases/workout-measurement": {
+      "types": "./dist/usecases/workout-measurement.d.ts",
+      "default": "./dist/usecases/workout-measurement.js"
+    },
+    "./usecases/workout-model": {
+      "types": "./dist/usecases/workout-model.d.ts",
+      "default": "./dist/usecases/workout-model.js"
     },
     "./usecases/workout-read": {
       "types": "./dist/usecases/workout-read.d.ts",

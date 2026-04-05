@@ -1,0 +1,27 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "composite": false,
+    "incremental": false
+  },
+  "references": [
+    {
+      "path": "../runtime-state"
+    },
+    {
+      "path": "../assistant-core"
+    },
+    {
+      "path": "../assistantd"
+    }
+  ],
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts"
+  ],
+  "exclude": [
+    "dist"
+  ]
+}

@@ -75,6 +75,14 @@ assert(
   'package.json must depend on @murphai/assistant-core so the CLI can import the headless owner package directly.',
 )
 assert(
+  packageJson.dependencies?.['@murphai/assistant-cli'] === 'workspace:*',
+  'package.json must depend on @murphai/assistant-cli so the published @murphai/murph shell can delegate assistant UI and daemon-aware wrappers cleanly.',
+)
+assert(
+  packageJson.dependencies?.['@murphai/setup-cli'] === 'workspace:*',
+  'package.json must depend on @murphai/setup-cli so the published @murphai/murph shell can delegate onboarding and host setup cleanly.',
+)
+assert(
   packageJson.main === './dist/index.js',
   'package.json must expose ./dist/index.js as main.',
 )
@@ -236,8 +244,24 @@ assert(
   'tsconfig.json must reference ../assistant-core so build outputs include the headless owner package.',
 )
 assert(
+  tsconfig.references?.some((reference) => reference.path === '../assistant-cli') === true,
+  'tsconfig.json must reference ../assistant-cli so the published shell can build against the assistant transport package.',
+)
+assert(
+  tsconfig.references?.some((reference) => reference.path === '../setup-cli') === true,
+  'tsconfig.json must reference ../setup-cli so the published shell can build against the onboarding package.',
+)
+assert(
   tsconfigTypecheck.references?.some((reference) => reference.path === '../assistant-core') === true,
   'tsconfig.typecheck.json must reference ../assistant-core so package-local typecheck follows the headless facade dependency.',
+)
+assert(
+  tsconfigTypecheck.references?.some((reference) => reference.path === '../assistant-cli') === true,
+  'tsconfig.typecheck.json must reference ../assistant-cli so package-local typecheck follows the assistant transport split.',
+)
+assert(
+  tsconfigTypecheck.references?.some((reference) => reference.path === '../setup-cli') === true,
+  'tsconfig.typecheck.json must reference ../setup-cli so package-local typecheck follows the onboarding transport split.',
 )
 assert(
   tsconfigTypecheck.extends === '../../tsconfig.base.json',

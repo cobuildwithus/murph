@@ -66,7 +66,7 @@ const runtimeMocks = vi.hoisted(() => ({
   ),
 }))
 
-vi.mock('../src/assistant-chat-ink.js', () => ({
+vi.mock('@murphai/assistant-cli/assistant-chat-ink', () => ({
   runAssistantChatWithInk: runtimeMocks.runAssistantChatWithInk,
 }))
 

@@ -22,6 +22,8 @@ repo/
     contracts/
     runtime-state/
     core/
+    assistant-cli/
+    setup-cli/
     cli/
     importers/
     device-syncd/
@@ -50,7 +52,9 @@ repo/
 - `packages/inboxd` owns source-agnostic inbox capture, raw evidence persistence, the append-only `ledger/inbox-captures` canonical capture log, inbox-local runtime cursors/source-specific checkpoints/capture indexes, and attachment-level derived-job orchestration.
 - `packages/parsers` owns local-first multimedia parsing for inbox attachments and writes only derived artifacts under `derived/inbox/**`.
 - `packages/query` reads canonical vault state, builds derived export packs, owns the optional lexical search index under `.runtime/search.sqlite`, exposes the stable health reference graph under `bank/library/**`, and exposes read helpers for the non-canonical compiled knowledge wiki under `derived/knowledge/**`.
-- `packages/cli` exposes the `vault-cli` command surface, provider-backed assistant orchestration plus outbound channel delivery, and must not bypass core for canonical writes.
+- `packages/assistant-cli` owns CLI-only assistant wrappers, assistant commands, foreground terminal logging, and the Ink chat UI.
+- `packages/setup-cli` owns CLI-only onboarding, host setup, and setup-wizard flows.
+- `packages/cli` exposes the published `vault-cli` / `murph` shell, composes the command graph, and must not bypass core for canonical writes.
 
 ## Storage Model
 
