@@ -65,6 +65,7 @@
   },
   // Configure these outside source control for real deployments:
   // - HOSTED_EXECUTION_SIGNING_SECRET
+  // - HOSTED_EXECUTION_CONTROL_SIGNING_SECRET (optional but recommended distinct control-plane secret)
   // - HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY
   // - HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON (optional JSON keyring for decrypting older bundle keyIds)
   // Wrangler's `secrets.required` support is experimental; keep the required list tight.

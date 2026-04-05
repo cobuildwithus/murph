@@ -45,6 +45,7 @@ import {
   readHostedExecutionDispatchRef,
   readHostedEmailCapabilities,
   readHostedExecutionControlEnvironment,
+  readHostedExecutionControlSigningSecret,
   readHostedExecutionDispatchEnvironment,
   readHostedExecutionSignatureHeaders,
   readHostedExecutionOutboxPayload,
@@ -175,7 +176,31 @@ describe("@murphai/hosted-execution", () => {
     });
   });
 
-  it("reads hosted control env from the shared dispatch base and signing secret", () => {
+  it("prefers the dedicated control signing secret and otherwise falls back to the dispatch signing secret", () => {
+    expect(
+      readHostedExecutionControlSigningSecret({
+        HOSTED_EXECUTION_CONTROL_SIGNING_SECRET: "control-secret",
+        HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
+      }),
+    ).toBe("control-secret");
+
+    expect(
+      readHostedExecutionControlEnvironment({
+        HOSTED_EXECUTION_CONTROL_SIGNING_SECRET: "control-secret",
+        HOSTED_EXECUTION_DISPATCH_URL: "https://dispatch.example.test/",
+        HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
+      }),
+    ).toEqual({
+      baseUrl: "https://dispatch.example.test",
+      signingSecret: "control-secret",
+    });
+
+    expect(
+      readHostedExecutionControlSigningSecret({
+        HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
+      }),
+    ).toBe("dispatch-secret");
+
     expect(
       readHostedExecutionControlEnvironment({
         HOSTED_EXECUTION_DISPATCH_URL: "https://dispatch.example.test/",
@@ -188,6 +213,7 @@ describe("@murphai/hosted-execution", () => {
 
     expect(
       readHostedExecutionControlEnvironment({
+        HOSTED_EXECUTION_CONTROL_SIGNING_SECRET: "   ",
         HOSTED_EXECUTION_DISPATCH_URL: "   ",
         HOSTED_EXECUTION_SIGNING_SECRET: "   ",
       }),
@@ -263,6 +289,7 @@ describe("@murphai/hosted-execution", () => {
       bundleEncryptionKeyBase64: "Zm9v",
       bundleEncryptionKeyId: "v1",
       bundleEncryptionKeyringJson: null,
+      controlSigningSecret: "dispatch-secret",
       defaultAlarmDelayMs: 15 * 60 * 1000,
       dispatchSigningSecret: "dispatch-secret",
       maxEventAttempts: 3,
@@ -625,6 +652,22 @@ describe("@murphai/hosted-execution", () => {
     ).resolves.toBe(true);
   });
 
+  it("rejects mixed bearer and signed auth on hosted web-control requests", async () => {
+    await expect(
+      fetchHostedExecutionWebControlPlaneResponse({
+        authorizationToken: "bearer-token",
+        baseUrl: "https://join.example.test/",
+        boundUserId: "member_123",
+        method: "POST",
+        path: "/api/internal/device-sync/providers/whoop/connect-link",
+        signingSecret: "control-secret",
+        timeoutMs: null,
+      }),
+    ).rejects.toThrow(
+      "Hosted web control-plane requests must use either bearer-token auth or signed auth, not both.",
+    );
+  });
+
   it("resolves proxy device-sync clients from worker proxy urls without requiring server auth", async () => {
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({
@@ -717,7 +760,7 @@ describe("@murphai/hosted-execution", () => {
     const client = createHostedExecutionServerDeviceSyncConnectLinkClient({
       baseUrl: "https://join.example.test",
       boundUserId: "member_123",
-      signingSecret: "dispatch-secret",
+      signingSecret: "control-secret",
       timeoutMs: 10_000,
     });
 
@@ -748,7 +791,7 @@ describe("@murphai/hosted-execution", () => {
         method: "POST",
         path: "/api/internal/device-sync/providers/whoop/connect-link",
         payload: "",
-        secret: "dispatch-secret",
+        secret: "control-secret",
         signature: (requestHeaders as Headers).get(HOSTED_EXECUTION_SIGNATURE_HEADER),
         timestamp,
         nowMs: timestamp ? Date.parse(timestamp) : Date.now(),
@@ -802,6 +845,14 @@ describe("@murphai/hosted-execution", () => {
     const requestHeaders = fetchMock.mock.calls[0]?.[1]?.headers;
     expect((requestHeaders as Headers).get("authorization")).toBeNull();
     expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
+  });
+
+  it("does not resolve direct hosted-web connect-link clients without a signing secret", () => {
+    expect(resolveHostedExecutionDeviceSyncConnectLinkClient({
+      baseUrl: "https://join.example.test",
+      boundUserId: "member_123",
+      timeoutMs: 10_000,
+    })).toBeNull();
   });
 
   it("does not resolve removed direct hosted-web runtime or usage clients", () => {

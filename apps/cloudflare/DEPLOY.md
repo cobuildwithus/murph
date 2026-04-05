@@ -131,6 +131,7 @@ Set these in the selected GitHub environment as secrets:
 - `CLOUDFLARE_API_TOKEN`
 - `CLOUDFLARE_ACCOUNT_ID`
 - `HOSTED_EXECUTION_SIGNING_SECRET`
+- `HOSTED_EXECUTION_CONTROL_SIGNING_SECRET` (optional but recommended)
 - `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY`
 - `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK`
 - `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK`
@@ -147,9 +148,10 @@ Optional hosted email bridge secrets:
 
 The checked-in scaffold and rendered deploy config declare the signing secret, bundle key, and automation recipient keypair in Wrangler's experimental `secrets.required` field, so `wrangler deploy` and `wrangler versions upload` fail early when any of them are missing from the Worker.
 
-The worker now authenticates operator/control requests with HMAC signatures derived from `HOSTED_EXECUTION_SIGNING_SECRET`, and each native container invocation gets its own one-shot runner control token injected at start time.
+The worker now authenticates dispatches with HMAC signatures derived from `HOSTED_EXECUTION_SIGNING_SECRET`. Privileged control requests can use a distinct `HOSTED_EXECUTION_CONTROL_SIGNING_SECRET` and fall back to the dispatch secret only when that separate control secret is unset. Each native container invocation gets its own one-shot runner control token injected at start time.
 
-- missing `HOSTED_EXECUTION_SIGNING_SECRET` makes signed dispatch and control requests fail closed
+- missing `HOSTED_EXECUTION_SIGNING_SECRET` makes signed dispatches fail closed
+- missing `HOSTED_EXECUTION_CONTROL_SIGNING_SECRET` only matters when you choose to split privileged control signatures away from dispatch signatures
 - missing `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY` prevents encrypted hosted storage from decrypting
 - missing automation recipient JWKs prevents the worker from unwrapping per-user root keys
 - changing `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY` or `CF_BUNDLE_KEY_ID` in place still requires staging older keys in `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON`; missing keyring entries fail closed on `keyId` mismatch
@@ -205,6 +207,7 @@ export CF_BUNDLES_BUCKET=hosted-execution-bundles-staging
 export CF_BUNDLES_PREVIEW_BUCKET=hosted-execution-bundles-staging-preview
 export CF_CONTAINER_INSTANCE_TYPE=standard-1
 export HOSTED_EXECUTION_SIGNING_SECRET=...
+export HOSTED_EXECUTION_CONTROL_SIGNING_SECRET=... # optional but recommended distinct control-plane secret
 export HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY=...
 export HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK=...
 export HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK=...

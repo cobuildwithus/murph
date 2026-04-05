@@ -167,25 +167,43 @@ export function resolveHostedExecutionDeviceSyncConnectLinkClient(input: {
   baseUrl: string | null | undefined;
   boundUserId: string;
   fetchImpl?: typeof fetch;
-  internalToken?: string | null;
   signingSecret?: string | null;
   timeoutMs?: number | null;
 }):
   | HostedExecutionProxyDeviceSyncConnectLinkClient
   | HostedExecutionServerDeviceSyncConnectLinkClient
   | null {
-  const requester = resolveHostedExecutionUserBoundRequester({
-    authorizationToken: input.internalToken,
-    baseUrl: input.baseUrl,
+  const normalizedBaseUrl = input.baseUrl ? requireHostedExecutionWebControlBaseUrl(input.baseUrl) : null;
+
+  if (!normalizedBaseUrl) {
+    return null;
+  }
+
+  if (isHostedExecutionDeviceSyncProxyBaseUrl(normalizedBaseUrl)) {
+    return buildHostedExecutionDeviceSyncConnectLinkClient(
+      createHostedExecutionProxyRequester({
+        baseUrl: normalizedBaseUrl,
+        boundUserId: input.boundUserId,
+        fetchImpl: input.fetchImpl,
+        proxyHost: HOSTED_EXECUTION_PROXY_HOSTS.deviceSync,
+        timeoutMs: input.timeoutMs ?? null,
+      }),
+    );
+  }
+
+  const signingSecret = normalizeHostedExecutionAuthorizationToken(input.signingSecret);
+
+  if (!signingSecret) {
+    return null;
+  }
+
+  return createHostedExecutionServerDeviceSyncConnectLinkClient({
+    baseUrl: normalizedBaseUrl,
     boundUserId: input.boundUserId,
     fetchImpl: input.fetchImpl,
-    isProxyBaseUrl: isHostedExecutionDeviceSyncProxyBaseUrl,
-    proxyHost: HOSTED_EXECUTION_PROXY_HOSTS.deviceSync,
-    signingSecret: input.signingSecret,
-    timeoutMs: input.timeoutMs,
+    signingSecret,
+    timeoutMs: input.timeoutMs ?? null,
   });
-
-  return requester ? buildHostedExecutionDeviceSyncConnectLinkClient(requester) : null;
 }
 
 export function createHostedExecutionProxyAiUsageClient(input: {
@@ -473,12 +491,20 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
     targetUrl.search = input.search;
   }
 
+  const authorizationToken = normalizeHostedExecutionAuthorizationToken(input.authorizationToken);
+  const signingSecret = normalizeHostedExecutionAuthorizationToken(input.signingSecret);
+
+  if (authorizationToken && signingSecret) {
+    throw new TypeError(
+      "Hosted web control-plane requests must use either bearer-token auth or signed auth, not both.",
+    );
+  }
+
   const headers = buildHostedExecutionRequestHeaders({
-    authorizationToken: normalizeHostedExecutionAuthorizationToken(input.authorizationToken),
+    authorizationToken,
     boundUserId: input.boundUserId,
     withJsonContentType: input.body !== undefined,
   });
-  const signingSecret = normalizeHostedExecutionAuthorizationToken(input.signingSecret);
 
   if (signingSecret) {
     const signatureHeaders = await createHostedExecutionSignatureHeaders({

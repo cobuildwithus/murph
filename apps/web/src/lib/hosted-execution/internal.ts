@@ -1,5 +1,6 @@
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
+  readHostedExecutionControlSigningSecret,
   readHostedExecutionSignatureHeaders,
   verifyHostedExecutionSignature,
 } from "@murphai/hosted-execution";
@@ -42,25 +43,23 @@ export function authorizeHostedExecutionInternalRequest(input: {
   }
 }
 
-export async function requireHostedExecutionSignedRequest(input: {
-  payload?: string;
-  request: Request;
-}): Promise<void> {
-  const signingSecret = normalizeOptionalString(process.env.HOSTED_EXECUTION_SIGNING_SECRET);
+export async function requireHostedExecutionSignedControlRequest(request: Request): Promise<void> {
+  const signingSecret = readHostedExecutionControlSigningSecret();
 
   if (!signingSecret) {
     throw hostedOnboardingError({
-      code: "HOSTED_EXECUTION_SIGNING_SECRET_REQUIRED",
-      message: "HOSTED_EXECUTION_SIGNING_SECRET must be configured for signed hosted execution requests.",
+      code: "HOSTED_EXECUTION_CONTROL_SIGNING_SECRET_REQUIRED",
+      message:
+        "HOSTED_EXECUTION_CONTROL_SIGNING_SECRET or HOSTED_EXECUTION_SIGNING_SECRET must be configured for signed hosted control routes.",
       httpStatus: 500,
     });
   }
 
-  const payload = input.payload ?? await input.request.clone().text();
-  const { signature, timestamp } = readHostedExecutionSignatureHeaders(input.request.headers);
+  const payload = await request.clone().text();
+  const { signature, timestamp } = readHostedExecutionSignatureHeaders(request.headers);
   const verified = await verifyHostedExecutionSignature({
-    method: input.request.method,
-    path: new URL(input.request.url).pathname,
+    method: request.method,
+    path: new URL(request.url).pathname,
     payload,
     secret: signingSecret,
     signature,

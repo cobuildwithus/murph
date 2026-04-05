@@ -1,4 +1,8 @@
 import { describe, expect, it } from "vitest";
+import {
+  readHostedExecutionSignatureHeaders,
+  verifyHostedExecutionSignature,
+} from "@murphai/hosted-execution";
 
 import {
   buildVersionOverrideHeaders,
@@ -242,6 +246,94 @@ describe("runSmokeHostedDeploy", () => {
     })).rejects.toThrow(/Timed out waiting for manual smoke run completion/u);
   });
 
+  it("prefers the distinct control signing secret for manual smoke control requests", async () => {
+    const fetchCalls: Array<{
+      headers: HeadersInit | undefined;
+      method: string | undefined;
+      url: string;
+    }> = [];
+    let statusReadCount = 0;
+    const fetchImpl = async (url: RequestInfo | URL, init?: RequestInit) => {
+      fetchCalls.push({
+        headers: init?.headers,
+        method: init?.method,
+        url: String(url),
+      });
+
+      if (String(url).endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+
+      if (String(url).endsWith("/status")) {
+        statusReadCount += 1;
+
+        return new Response(JSON.stringify({
+          bundleRefs: {
+            agentState: statusReadCount >= 2 ? {
+              hash: "agent-hash",
+              key: "bundles/agent",
+              size: 11,
+              updatedAt: "2026-03-27T01:00:00.000Z",
+            } : null,
+            vault: statusReadCount >= 2 ? {
+              hash: "vault-hash",
+              key: "bundles/vault",
+              size: 7,
+              updatedAt: "2026-03-27T01:00:00.000Z",
+            } : null,
+          },
+          inFlight: statusReadCount < 2,
+          lastError: null,
+          lastRunAt: statusReadCount >= 2 ? "2026-03-27T01:00:00.000Z" : "2026-03-27T00:59:00.000Z",
+          pendingEventCount: statusReadCount < 2 ? 1 : 0,
+          poisonedEventIds: [],
+          retryingEventId: null,
+          userId: "member_123",
+        }), { status: 200 });
+      }
+
+      return new Response(null, { status: 204 });
+    };
+
+    await runSmokeHostedDeploy({
+      fetchImpl,
+      log() {},
+      source: {
+        HOSTED_EXECUTION_CONTROL_SIGNING_SECRET: "control-secret",
+        HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
+        HOSTED_EXECUTION_SMOKE_STATUS_POLL_INTERVAL_MS: "1",
+        HOSTED_EXECUTION_SMOKE_STATUS_TIMEOUT_MS: "100",
+        HOSTED_EXECUTION_SMOKE_USER_ID: "member_123",
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+      },
+    });
+
+    const statusCall = fetchCalls.find((entry) => entry.url.endsWith("/internal/users/member_123/status"));
+    expect(statusCall).toBeDefined();
+    const headers = new Headers(statusCall?.headers);
+    const signatureHeaders = readHostedExecutionSignatureHeaders(headers);
+
+    await expect(
+      verifyHostedExecutionSignature({
+        method: statusCall?.method ?? "GET",
+        path: "/internal/users/member_123/status",
+        payload: "",
+        secret: "control-secret",
+        ...signatureHeaders,
+      }),
+    ).resolves.toBe(true);
+
+    await expect(
+      verifyHostedExecutionSignature({
+        method: statusCall?.method ?? "GET",
+        path: "/internal/users/member_123/status",
+        payload: "",
+        secret: "dispatch-secret",
+        ...signatureHeaders,
+      }),
+    ).resolves.toBe(false);
+  });
+
   it("fails before issuing requests when a candidate version id is configured without a worker name", async () => {
     const fetchImpl = async () => new Response(JSON.stringify({ ok: true }), { status: 200 });
 
@@ -253,5 +345,18 @@ describe("runSmokeHostedDeploy", () => {
         HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
       },
     })).rejects.toThrow("HOSTED_EXECUTION_SMOKE_WORKER_NAME or CF_WORKER_NAME must be configured.");
+  });
+
+  it("fails with the combined control-signing error when manual smoke auth is unconfigured", async () => {
+    await expect(runSmokeHostedDeploy({
+      fetchImpl: async () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      log() {},
+      source: {
+        HOSTED_EXECUTION_SMOKE_USER_ID: "member_123",
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+      },
+    })).rejects.toThrow(
+      "HOSTED_EXECUTION_CONTROL_SIGNING_SECRET or HOSTED_EXECUTION_SIGNING_SECRET is required when HOSTED_EXECUTION_SMOKE_USER_ID is set.",
+    );
   });
 });

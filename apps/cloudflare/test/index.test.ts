@@ -164,6 +164,26 @@ describe("cloudflare worker routes", () => {
     expect(stub.dispatchWithOutcome).toHaveBeenCalledWith(dispatch);
   });
 
+  it("keeps dispatch signatures bound to the dispatch secret even when control routes use a different secret", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    const stub = createUserRunnerStub();
+    const dispatch = createDispatch("evt_control_split");
+    const request = await createSignedDispatchRequest("/internal/dispatch", dispatch, {
+      secret: "dispatch-secret",
+    });
+
+    const response = await worker.fetch(
+      request,
+      createWorkerEnv(stub, {
+        HOSTED_EXECUTION_CONTROL_SIGNING_SECRET: "control-secret",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(stub.dispatchWithOutcome).toHaveBeenCalledWith(dispatch);
+  });
+
   it("keeps the removed internal events alias hidden from signed dispatch callers", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
@@ -1174,6 +1194,51 @@ describe("cloudflare worker routes", () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
       error: "Invalid request.",
+    });
+    expect(stub.status).not.toHaveBeenCalled();
+  });
+
+  it("accepts control routes signed with the dedicated control signing secret", async () => {
+    const stub = createUserRunnerStub();
+
+    const response = await worker.fetch(
+      await signControlRequest(
+        new Request("https://runner.example.test/internal/users/member_123/status", {
+          method: "GET",
+        }),
+        {
+          secret: "control-secret",
+        },
+      ),
+      createWorkerEnv(stub, {
+        HOSTED_EXECUTION_CONTROL_SIGNING_SECRET: "control-secret",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(stub.status).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects control routes signed only with the dispatch secret when a distinct control secret is configured", async () => {
+    const stub = createUserRunnerStub();
+
+    const response = await worker.fetch(
+      await signControlRequest(
+        new Request("https://runner.example.test/internal/users/member_123/status", {
+          method: "GET",
+        }),
+        {
+          secret: "dispatch-secret",
+        },
+      ),
+      createWorkerEnv(stub, {
+        HOSTED_EXECUTION_CONTROL_SIGNING_SECRET: "control-secret",
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unauthorized",
     });
     expect(stub.status).not.toHaveBeenCalled();
   });
@@ -2760,6 +2825,7 @@ async function createSignedDispatchRequest(
   path: string,
   dispatch: HostedExecutionDispatchRequest,
   input: {
+    secret?: string;
     timestamp?: string;
   } = {},
 ): Promise<Request> {
@@ -2769,7 +2835,7 @@ async function createSignedDispatchRequest(
     method: "POST",
     path,
     payload,
-    secret: "dispatch-secret",
+    secret: input.secret ?? "dispatch-secret",
     timestamp,
   });
 
@@ -2787,6 +2853,7 @@ async function createSignedDispatchRequest(
 async function signControlRequest(
   request: Request,
   input: {
+    secret?: string;
     timestamp?: string;
   } = {},
 ): Promise<Request> {
@@ -2797,7 +2864,7 @@ async function signControlRequest(
     method: request.method,
     path,
     payload,
-    secret: "dispatch-secret",
+    secret: input.secret ?? "dispatch-secret",
     timestamp,
   });
   const headers = new Headers(request.headers);

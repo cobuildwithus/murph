@@ -155,6 +155,7 @@ describe("handleRunnerOutboundRequest", () => {
         method: "POST",
       }),
       createRunnerOutboundEnv({
+        HOSTED_EXECUTION_CONTROL_SIGNING_SECRET: "control-secret",
         HOSTED_WEB_BASE_URL: "https://web.example.test/app",
       }),
       "member_123",
@@ -184,7 +185,7 @@ describe("handleRunnerOutboundRequest", () => {
         method: "POST",
         path: "/app/api/internal/device-sync/providers/whoop/connect-link",
         payload: "",
-        secret: "dispatch-secret",
+        secret: "control-secret",
         signature: (requestHeaders as Headers).get(HOSTED_EXECUTION_SIGNATURE_HEADER),
         timestamp,
         nowMs: timestamp ? Date.parse(timestamp) : Date.now(),
