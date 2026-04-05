@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
@@ -43,6 +43,8 @@ describe("device sync settings routes", () => {
   });
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-03T12:00:00.000Z"));
     vi.clearAllMocks();
     mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
     mocks.requireHostedPrivyActiveRequestAuthContext.mockResolvedValue({
@@ -120,6 +122,10 @@ describe("device sync settings routes", () => {
         message: "Provider revocation timed out.",
       },
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("lists calm settings sources for the authenticated hosted member", async () => {

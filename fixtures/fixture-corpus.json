@@ -77,6 +77,10 @@
       "path": "fixtures/golden-outputs/assistant"
     },
     {
+      "id": "knowledge",
+      "path": "fixtures/golden-outputs/knowledge"
+    },
+    {
       "id": "device-sync",
       "path": "fixtures/golden-outputs/device-sync"
     },

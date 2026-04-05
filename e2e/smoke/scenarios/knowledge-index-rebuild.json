@@ -1,0 +1,11 @@
+{
+  "id": "knowledge-index-rebuild",
+  "command": "vault-cli knowledge index rebuild --vault <path> [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/knowledge",
+  "purpose": "Documents rebuilding the derived knowledge index from stored assistant-authored pages.",
+  "source": "docs/contracts/03-command-surface.md"
+}

@@ -1476,9 +1476,8 @@ describe("HostedUserRunner", () => {
 
     expect(invokePayload.runnerEnvironment).toBeUndefined();
     expect(invokePayload.job.runtime).toMatchObject({
-      commitTimeoutMs: 45_000,
+      commitTimeoutMs: 30_000,
       forwardedEnv: {
-        HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
         OPENAI_API_KEY: "sk-worker",
       },
     });
@@ -2168,7 +2167,7 @@ describe("HostedUserRunner", () => {
       occurredAt: "2026-03-26T12:00:00.000Z",
     });
 
-    expect(first.lastError).toContain("HTTP 503");
+    expect(first.lastError).toBe("Hosted runner container returned an HTTP error.");
     expect(first.lastErrorCode).toBe("runner_http_error");
     expect(first.pendingEventCount).toBe(1);
     expect(first.retryingEventId).toBe("evt_retry_1");
@@ -2192,7 +2191,7 @@ describe("HostedUserRunner", () => {
     expect(final.pendingEventCount).toBe(0);
     expect(final.poisonedEventIds).toEqual(["evt_retry_1"]);
     expect(final.retryingEventId).toBeNull();
-    expect(final.lastError).toContain("HTTP 503");
+    expect(final.lastError).toBe("Hosted runner container returned an HTTP error.");
     expect(final.lastErrorCode).toBe("runner_http_error");
     expect(final.run).toMatchObject({
       attempt: 3,

@@ -22,7 +22,9 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
   buildHostedExecutionSharePackPath,
   buildHostedExecutionUserDeviceSyncRuntimePath,
+  buildHostedExecutionUserDeviceSyncRuntimeSnapshotPath,
   buildHostedExecutionUserEnvPath,
+  buildHostedExecutionUserPendingUsagePath,
   buildHostedExecutionUserRunPath,
   buildHostedExecutionUserStatusPath,
   createHostedExecutionControlClient,
@@ -895,6 +897,30 @@ describe("@murphai/hosted-execution", () => {
   it("builds the shared hosted device connect-link route path", () => {
     expect(buildHostedExecutionDeviceSyncConnectLinkPath("whoop")).toBe(
       "/api/internal/device-sync/providers/whoop/connect-link",
+    );
+  });
+
+  it("builds the shared hosted control route paths", () => {
+    expect(buildHostedExecutionSharePackPath("share/123")).toBe(
+      "/internal/shares/share%2F123/pack",
+    );
+    expect(buildHostedExecutionUserStatusPath("member/123")).toBe(
+      "/internal/users/member%2F123/status",
+    );
+    expect(buildHostedExecutionUserRunPath("member/123")).toBe(
+      "/internal/users/member%2F123/run",
+    );
+    expect(buildHostedExecutionUserEnvPath("member/123")).toBe(
+      "/internal/users/member%2F123/env",
+    );
+    expect(buildHostedExecutionUserDeviceSyncRuntimeSnapshotPath("member/123")).toBe(
+      "/internal/users/member%2F123/device-sync/runtime/snapshot",
+    );
+    expect(buildHostedExecutionUserDeviceSyncRuntimePath("member/123")).toBe(
+      "/internal/users/member%2F123/device-sync/runtime",
+    );
+    expect(buildHostedExecutionUserPendingUsagePath("member/123")).toBe(
+      "/internal/users/member%2F123/usage/pending",
     );
   });
 
@@ -1794,6 +1820,34 @@ describe("@murphai/hosted-execution", () => {
     ).toThrow("Hosted execution getBearerToken must be configured.");
   });
 
+  it("clients reject blank bearer tokens", async () => {
+    const fetchImpl = vi.fn();
+    const dispatchClient = createHostedExecutionDispatchClient({
+      baseUrl: "https://runner.example.test/",
+      fetchImpl,
+      getBearerToken: async () => "   ",
+    });
+    const controlClient = createHostedExecutionControlClient({
+      baseUrl: "https://worker.example.test/",
+      fetchImpl,
+      getBearerToken: async () => "   ",
+    });
+
+    await expect(dispatchClient.dispatch({
+      event: {
+        kind: "assistant.cron.tick",
+        reason: "manual",
+        userId: "user-123",
+      },
+      eventId: "evt_blank_token",
+      occurredAt: "2026-03-20T12:00:00.000Z",
+    })).rejects.toThrow("Hosted execution bearer token must be configured.");
+    await expect(controlClient.getStatus("user-123")).rejects.toThrow(
+      "Hosted execution bearer token must be configured.",
+    );
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("control client uses the remaining shared control routes", async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(
@@ -2010,6 +2064,46 @@ describe("@murphai/hosted-execution", () => {
     );
   });
 
+  it("control client writes device-sync runtime snapshot mirrors through the dedicated snapshot route", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          connections: [],
+          generatedAt: "2026-04-05T10:45:00.000Z",
+          userId: "member/123",
+        }),
+        { status: 200 },
+      ),
+    );
+    const client = createHostedExecutionControlClient({
+      baseUrl: "https://worker.example.test/",
+      fetchImpl,
+      getBearerToken: async () => "vercel-oidc-token",
+    });
+
+    await expect(client.putDeviceSyncRuntimeSnapshot("member/123", {
+      connections: [],
+      generatedAt: "2026-04-05T10:45:00.000Z",
+      userId: "member/123",
+    })).resolves.toEqual({
+      connections: [],
+      generatedAt: "2026-04-05T10:45:00.000Z",
+      userId: "member/123",
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://worker.example.test/internal/users/member%2F123/device-sync/runtime/snapshot",
+      expect.objectContaining({
+        body: JSON.stringify({
+          connections: [],
+          generatedAt: "2026-04-05T10:45:00.000Z",
+          userId: "member/123",
+        }),
+        method: "PUT",
+      }),
+    );
+  });
+
   it("control client reads and writes hosted share packs through the authorized share route", async () => {
     const sharePack = {
       createdAt: "2026-04-05T00:00:00.000Z",
@@ -2135,6 +2229,60 @@ describe("@murphai/hosted-execution", () => {
     expect(upsertHeaders.get("authorization")).toBe("Bearer vercel-oidc-token");
   });
 
+  it("control client reads and deletes pending usage through the shared route", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify([
+        {
+          id: "usage_123",
+          metric: "tokens",
+        },
+      ]), { status: 200 }))
+      .mockResolvedValueOnce(new Response("", { status: 200 }));
+    const client = createHostedExecutionControlClient({
+      baseUrl: "https://worker.example.test/",
+      fetchImpl,
+      getBearerToken: async () => "vercel-oidc-token",
+    });
+
+    const usage = await client.getPendingUsage("member/123", 2.9);
+    await expect(client.deletePendingUsage("member/123", ["usage_123"])).resolves.toBeUndefined();
+
+    expect(usage).toEqual([{ id: "usage_123", metric: "tokens" }]);
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      "https://worker.example.test/internal/users/member%2F123/usage/pending?limit=2",
+      expect.objectContaining({
+        method: "GET",
+      }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      "https://worker.example.test/internal/users/member%2F123/usage/pending",
+      expect.objectContaining({
+        body: JSON.stringify({ usageIds: ["usage_123"] }),
+        method: "DELETE",
+      }),
+    );
+  });
+
+  it("control client rejects malformed pending usage responses", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify([null]), { status: 200 }));
+    const client = createHostedExecutionControlClient({
+      baseUrl: "https://worker.example.test/",
+      fetchImpl,
+      getBearerToken: async () => "vercel-oidc-token",
+    });
+
+    await expect(client.getPendingUsage("member/123")).rejects.toThrow(
+      "Pending usage response must be an array.",
+    );
+    await expect(client.getPendingUsage("member/123")).rejects.toThrow(
+      "Pending usage[0] must be an object.",
+    );
+  });
+
   it("includes HTTP error text for non-ok shared control responses", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response("runner unavailable", { status: 503 }));
     const client = createHostedExecutionControlClient({
@@ -2145,6 +2293,21 @@ describe("@murphai/hosted-execution", () => {
 
     await expect(client.getStatus("user-123")).rejects.toThrow(
       "Hosted execution status failed with HTTP 503: runner unavailable.",
+    );
+  });
+
+  it("includes JSON error messages for non-ok shared control responses", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      message: "structured failure",
+    }), { status: 503 }));
+    const client = createHostedExecutionControlClient({
+      baseUrl: "https://worker.example.test/",
+      fetchImpl,
+      getBearerToken: async () => "vercel-oidc-token",
+    });
+
+    await expect(client.getStatus("user-123")).rejects.toThrow(
+      "Hosted execution status failed with HTTP 503: structured failure.",
     );
   });
 

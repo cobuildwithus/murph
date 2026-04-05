@@ -1,3 +1,4 @@
+import { createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 import { env, exports } from "cloudflare:workers";
 import { runDurableObjectAlarm } from "cloudflare:test";
 import {
@@ -8,7 +9,6 @@ import {
   vi,
 } from "vitest";
 
-import { createHostedExecutionSignature } from "@murphai/hosted-execution";
 import { createHostedBundleStore } from "../../src/bundle-store.js";
 import { createHostedExecutionJournalStore } from "../../src/execution-journal.js";
 import { readHostedExecutionEnvironment } from "../../src/env.js";
@@ -17,6 +17,20 @@ import { createHostedUserKeyStore } from "../../src/user-key-store.js";
 
 const RUNNER_PROXY_TOKEN = "runner-proxy-token";
 const RUNNER_PROXY_TOKEN_HEADER = "x-hosted-execution-runner-proxy-token";
+const TEST_VERCEL_OIDC_TEAM_SLUG = "murph-team";
+const TEST_VERCEL_OIDC_PROJECT_NAME = "murph-web";
+const TEST_VERCEL_OIDC_ISSUER = `https://oidc.vercel.com/${TEST_VERCEL_OIDC_TEAM_SLUG}`;
+const TEST_VERCEL_OIDC_AUDIENCE = `https://vercel.com/${TEST_VERCEL_OIDC_TEAM_SLUG}`;
+const TEST_VERCEL_OIDC_SUBJECT =
+  `owner:${TEST_VERCEL_OIDC_TEAM_SLUG}:project:${TEST_VERCEL_OIDC_PROJECT_NAME}:environment:production`;
+const TEST_VERCEL_OIDC_JWKS_URL = `${TEST_VERCEL_OIDC_ISSUER}/.well-known/jwks`;
+const TEST_VERCEL_OIDC_PRIVATE_KEY = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey;
+const TEST_VERCEL_OIDC_PUBLIC_JWK = {
+  ...(createPublicKey(TEST_VERCEL_OIDC_PRIVATE_KEY).export({ format: "jwk" }) as JsonWebKey),
+  alg: "RS256",
+  kid: "test-kid",
+  use: "sig",
+};
 
 import type {
   HostedExecutionDispatchResult,
@@ -52,7 +66,7 @@ describe("cloudflare worker runtime suite", () => {
 
     const response = await exports.default.fetch(
       await createSignedDispatchRequest("/internal/dispatch", createDispatch("evt_invalid"), {
-        timestamp: "2026-03-26T11:50:00.000Z",
+        sub: `owner:${TEST_VERCEL_OIDC_TEAM_SLUG}:project:wrong-project:environment:production`,
       }),
     );
 
@@ -72,7 +86,7 @@ describe("cloudflare worker runtime suite", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
 
-    const dispatch = createDispatch("evt_signed_runtime");
+    const dispatch = createDispatch("evt_signed_runtime", "member_signed_runtime");
     const response = await exports.default.fetch(
       await createSignedDispatchRequest("/internal/dispatch", dispatch),
     );
@@ -148,92 +162,64 @@ describe("cloudflare worker runtime suite", () => {
     });
   });
 
-  it("supports operator control routes for manual runs and per-user env updates", async () => {
+  it("supports direct Durable Object user-env updates inside the Workers runtime", async () => {
     const userId = "member_control";
+    const stub = getUserRunnerStub(userId);
+    await expect(stub.bootstrapUser(userId)).resolves.toEqual({ userId });
 
-    const envUpdateResponse = await exports.default.fetch(
-      await createSignedControlRequest(`/internal/users/${userId}/env`, {
-        body: JSON.stringify({
-          env: {
-            OPENAI_API_KEY: "test-key",
-          },
-          mode: "merge",
-        }),
-        method: "PUT",
-      }),
-    );
-
-    expect(envUpdateResponse.status).toBe(200);
-    await expect(envUpdateResponse.json()).resolves.toEqual({
+    await expect(stub.updateUserEnv({
+      env: {
+        OPENAI_API_KEY: "test-key",
+      },
+      mode: "merge",
+    })).resolves.toEqual({
       configuredUserEnvKeys: ["OPENAI_API_KEY"],
       userId,
     });
 
-    const statusResponse = await exports.default.fetch(
-      await createSignedControlRequest(`/internal/users/${userId}/run`, {
-        body: JSON.stringify({ note: "manual" }),
-        method: "POST",
-      }),
-    );
-
-    expect(statusResponse.status).toBe(200);
-    await expect(statusResponse.json()).resolves.toMatchObject({
-      lastEventId: expect.stringMatching(/^manual:/u),
-      pendingEventCount: 0,
-      userId,
-    });
-    await expect(getUserRunnerStub(userId).getUserEnvStatus()).resolves.toEqual({
+    await expect(stub.getUserEnvStatus()).resolves.toEqual({
       configuredUserEnvKeys: ["OPENAI_API_KEY"],
       userId,
     });
-    await expect(getUserRunnerStub(userId).clearUserEnv()).resolves.toEqual({
+    await expect(stub.clearUserEnv()).resolves.toEqual({
       configuredUserEnvKeys: [],
       userId,
     });
   });
 
-  it("rejects removed and unknown hosted user env keys at the worker control boundary", async () => {
+  it("rejects removed and unknown hosted user env keys through direct Durable Object RPC", async () => {
     const userId = "member_control_env_reject";
+    const stub = getUserRunnerStub(userId);
+    await expect(stub.bootstrapUser(userId)).resolves.toEqual({ userId });
 
-    const rejectedResponse = await exports.default.fetch(
-      await createSignedControlRequest(`/internal/users/${userId}/env`, {
-        body: JSON.stringify({
-          env: {
-            AGENTMAIL_API_BASE_URL: "https://legacy-mail.example.test/v0",
-            AGENTMAIL_TIMEOUT_MS: "5000",
-            FFMPEG_THREADS: "2",
-            PARSER_FFMPEG_PATH: "/usr/local/bin/ffmpeg",
-          },
-          mode: "merge",
-        }),
-        method: "PUT",
-      }),
-    );
+    let rejectedError: unknown = null;
+    try {
+      await stub.updateUserEnv({
+        env: {
+          AGENTMAIL_API_BASE_URL: "https://legacy-mail.example.test/v0",
+          AGENTMAIL_TIMEOUT_MS: "5000",
+          FFMPEG_THREADS: "2",
+          PARSER_FFMPEG_PATH: "/usr/local/bin/ffmpeg",
+        },
+        mode: "merge",
+      });
+    } catch (error) {
+      rejectedError = error;
+    }
 
-    expect(rejectedResponse.status).toBe(400);
-    await expect(rejectedResponse.json()).resolves.toEqual({
-      error: "Invalid request.",
-    });
-    await expect(getUserRunnerStub(userId).getUserEnvStatus()).resolves.toEqual({
+    expect(String(rejectedError)).toMatch(/Hosted user env key is not allowed/u);
+    await expect(stub.getUserEnvStatus()).resolves.toEqual({
       configuredUserEnvKeys: [],
       userId,
     });
 
-    const acceptedResponse = await exports.default.fetch(
-      await createSignedControlRequest(`/internal/users/${userId}/env`, {
-        body: JSON.stringify({
-          env: {
-            FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
-            OPENAI_API_KEY: "sk-user",
-          },
-          mode: "merge",
-        }),
-        method: "PUT",
-      }),
-    );
-
-    expect(acceptedResponse.status).toBe(200);
-    await expect(acceptedResponse.json()).resolves.toEqual({
+    await expect(stub.updateUserEnv({
+      env: {
+        FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
+        OPENAI_API_KEY: "sk-user",
+      },
+      mode: "merge",
+    })).resolves.toEqual({
       configuredUserEnvKeys: ["FFMPEG_COMMAND", "OPENAI_API_KEY"],
       userId,
     });
@@ -314,57 +300,76 @@ async function createSignedDispatchRequest(
   path: string,
   dispatch: HostedExecutionDispatchRequest,
   input: {
-    timestamp?: string;
+    aud?: string;
+    iss?: string;
+    sub?: string;
   } = {},
 ): Promise<Request> {
+  installOidcJwksFetch();
   const payload = JSON.stringify(dispatch);
-  const timestamp = input.timestamp ?? "2026-03-26T12:00:00.000Z";
-  const signature = await createHostedExecutionSignature({
-    method: "POST",
-    path,
-    payload,
-    secret: "dispatch-secret",
-    timestamp,
-  });
-
-  return new Request(`https://runner.example.test${path}`, {
+  const request = new Request(`https://runner.example.test${path}`, {
     body: payload,
     headers: {
       "content-type": "application/json; charset=utf-8",
-      "x-hosted-execution-signature": signature,
-      "x-hosted-execution-timestamp": timestamp,
     },
     method: "POST",
   });
+  const headers = new Headers(request.headers);
+  headers.set("authorization", `Bearer ${createTestVercelOidcToken(input)}`);
+
+  return new Request(request, { headers });
 }
 
-async function createSignedControlRequest(
-  path: string,
-  input: {
-    body?: string;
-    method: "DELETE" | "GET" | "POST" | "PUT";
-    timestamp?: string;
-  },
-): Promise<Request> {
-  const body = input.body ?? "";
-  const timestamp = input.timestamp ?? new Date().toISOString();
-  const signature = await createHostedExecutionSignature({
-    method: input.method,
-    path,
-    payload: body,
-    secret: "dispatch-secret",
-    timestamp,
-  });
+function installOidcJwksFetch(delegate?: typeof fetch): void {
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input) === TEST_VERCEL_OIDC_JWKS_URL) {
+      return new Response(JSON.stringify({ keys: [TEST_VERCEL_OIDC_PUBLIC_JWK] }), {
+        headers: {
+          "content-type": "application/json",
+        },
+        status: 200,
+      });
+    }
 
-  return new Request(`https://runner.example.test${path}`, {
-    ...(body ? { body } : {}),
-    headers: {
-      ...(body ? { "content-type": "application/json; charset=utf-8" } : {}),
-      "x-hosted-execution-signature": signature,
-      "x-hosted-execution-timestamp": timestamp,
-    },
-    method: input.method,
-  });
+    if (delegate) {
+      return delegate(input, init);
+    }
+
+    throw new Error(`Unexpected fetch during Cloudflare OIDC test: ${String(input)}`);
+  }));
+}
+
+function createTestVercelOidcToken(
+  input: Partial<{
+    aud: string;
+    iss: string;
+    sub: string;
+  }> = {},
+): string {
+  const now = Math.floor(Date.now() / 1000);
+  const header = {
+    alg: "RS256",
+    kid: "test-kid",
+    typ: "JWT",
+  };
+  const payload = {
+    aud: TEST_VERCEL_OIDC_AUDIENCE,
+    exp: now + 300,
+    iat: now,
+    iss: TEST_VERCEL_OIDC_ISSUER,
+    sub: TEST_VERCEL_OIDC_SUBJECT,
+    ...input,
+  };
+  const encodedHeader = base64UrlEncode(JSON.stringify(header));
+  const encodedPayload = base64UrlEncode(JSON.stringify(payload));
+  const signingInput = `${encodedHeader}.${encodedPayload}`;
+  const signature = sign("RSA-SHA256", Buffer.from(signingInput), TEST_VERCEL_OIDC_PRIVATE_KEY);
+
+  return `${signingInput}.${base64UrlEncode(signature)}`;
+}
+
+function base64UrlEncode(value: string | Buffer): string {
+  return Buffer.from(value).toString("base64url");
 }
 
 async function resolveHostedUserCryptoContext(userId: string) {
