@@ -201,23 +201,13 @@ export function createHostedSecretCodec(input: {
         });
       }
 
-      try {
-        return decryptHostedSecretPayload({
-          aad,
-          ciphertextText,
-          ivText,
-          key: deriveHostedSecretScopeKey(key, keyScope),
-          tagText,
-        });
-      } catch {
-        return decryptHostedSecretPayload({
-          aad,
-          ciphertextText,
-          ivText,
-          key,
-          tagText,
-        });
-      }
+      return decryptHostedSecretPayload({
+        aad,
+        ciphertextText,
+        ivText,
+        key: deriveHostedSecretScopeKey(key, keyScope),
+        tagText,
+      });
     },
   };
 }

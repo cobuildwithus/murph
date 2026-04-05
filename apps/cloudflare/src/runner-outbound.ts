@@ -194,11 +194,16 @@ async function handleRunnerEmailMessageReadRequest(input: {
   rawMessageKey: string;
   userId: string;
 }): Promise<Response> {
+  const crypto = await resolveRunnerOutboundUserCryptoContext({
+    bucket: input.bucket,
+    environment: input.environment,
+    userId: input.userId,
+  });
   const payload = await readHostedEmailRawMessage({
     bucket: input.bucket,
-    key: input.environment.bundleEncryptionKey,
-    keyId: input.environment.bundleEncryptionKeyId,
-    keysById: input.environment.bundleEncryptionKeysById,
+    key: crypto.rootKey,
+    keyId: crypto.rootKeyId,
+    keysById: crypto.keysById,
     rawMessageKey: input.rawMessageKey,
     userId: input.userId,
   });

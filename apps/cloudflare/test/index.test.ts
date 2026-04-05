@@ -16,6 +16,7 @@ import { createHostedUserEnvStore } from "../src/bundle-store.ts";
 import { writeEncryptedR2Json } from "../src/crypto.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import { createHostedExecutionJournalStore, persistHostedExecutionCommit } from "../src/execution-journal.ts";
+import { reconcileHostedEmailVerifiedSenderRoute } from "../src/hosted-email.ts";
 import worker, { ContainerProxy as ExportedContainerProxy, UserRunnerDurableObject } from "../src/index.ts";
 import { createHostedUserKeyStore } from "../src/user-key-store.ts";
 import { encodeHostedUserEnvPayload } from "../src/user-env.ts";
@@ -1553,6 +1554,43 @@ describe("cloudflare worker routes", () => {
     expect(env.__bucketStore.keys().filter((key) => key.includes("/messages/"))).toEqual([]);
   });
 
+  it("routes authorized public-sender mail by resolving the worker-key route index and authorizing from root-key user env", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub, {
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
+    });
+    await seedHostedVerifiedEmailUserEnv(env, "member_123", "owner@example.test");
+    await seedHostedVerifiedSenderRoute(env, "member_123", "owner@example.test");
+
+    await worker.email?.({
+      from: "owner@example.test",
+      raw: [
+        "From: Owner <owner@example.test>",
+        "To: assistant@mail.example.test",
+        "Subject: Direct hello",
+        "Message-ID: <msg_direct_public@example.test>",
+        "",
+        "hello",
+        "",
+      ].join("\r\n"),
+      to: "assistant@mail.example.test",
+    } as never, env as never);
+
+    expect(stub.dispatch).toHaveBeenCalledTimes(1);
+    expect(stub.dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      event: expect.objectContaining({
+        identityId: "assistant@mail.example.test",
+        kind: "email.message.received",
+        rawMessageKey: expect.stringMatching(/^[0-9a-f]{32}$/u),
+        selfAddress: "assistant@mail.example.test",
+        userId: "member_123",
+      }),
+    }));
+  });
+
   it("sink-accepts unauthorized public-sender mail while keeping owner-only authorization in place", async () => {
     const stub = createUserRunnerStub();
     const env = createWorkerEnv(stub, {
@@ -1562,6 +1600,7 @@ describe("cloudflare worker routes", () => {
       HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
     });
     await seedHostedVerifiedEmailUserEnv(env, "member_123", "owner@example.test");
+    await seedHostedVerifiedSenderRoute(env, "member_123", "owner@example.test");
     const setReject = vi.fn();
 
     await worker.email?.({
@@ -2190,14 +2229,53 @@ async function seedHostedVerifiedEmailUserEnv(
     throw new Error("Expected the hosted user env payload to be written.");
   }
 
+  const crypto = await resolveHostedUserCryptoContextForTest(env, userId);
   await createHostedUserEnvStore({
     bucket: env.BUNDLES,
-    key:
-      typeof env.HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY === "string"
-        ? Buffer.from(env.HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY, "base64")
-        : Buffer.alloc(32, 9),
-    keyId: String(env.HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID ?? "v1"),
+    key: crypto.rootKey,
+    keyId: crypto.rootKeyId,
+    keysById: crypto.keysById,
   }).writeUserEnv(userId, payload);
+}
+
+async function seedHostedVerifiedSenderRoute(
+  env: ReturnType<typeof createWorkerEnv>,
+  userId: string,
+  emailAddress: string,
+): Promise<void> {
+  const environment = readHostedExecutionEnvironment(
+    env as unknown as Readonly<Record<string, string | undefined>>,
+  );
+
+  await reconcileHostedEmailVerifiedSenderRoute({
+    bucket: env.BUNDLES,
+    config: {
+      apiBaseUrl: typeof env.HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL === "string"
+        ? env.HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL
+        : "https://api.cloudflare.com/client/v4",
+      cloudflareAccountId: typeof env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID === "string"
+        ? env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID
+        : "acct_123",
+      cloudflareApiToken: typeof env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN === "string"
+        ? env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN
+        : "token_123",
+      defaultSubject: typeof env.HOSTED_EMAIL_DEFAULT_SUBJECT === "string"
+        ? env.HOSTED_EMAIL_DEFAULT_SUBJECT
+        : "Murph update",
+      domain: String(env.HOSTED_EMAIL_DOMAIN ?? ""),
+      fromAddress: typeof env.HOSTED_EMAIL_FROM_ADDRESS === "string"
+        ? env.HOSTED_EMAIL_FROM_ADDRESS
+        : "assistant@mail.example.test",
+      localPart: String(env.HOSTED_EMAIL_LOCAL_PART ?? ""),
+      signingSecret: String(env.HOSTED_EMAIL_SIGNING_SECRET ?? ""),
+    },
+    key: environment.bundleEncryptionKey,
+    keyId: environment.bundleEncryptionKeyId,
+    keysById: environment.bundleEncryptionKeysById,
+    nextVerifiedEmailAddress: emailAddress,
+    previousVerifiedEmailAddress: null,
+    userId,
+  });
 }
 
 function createBucketStore(input: {

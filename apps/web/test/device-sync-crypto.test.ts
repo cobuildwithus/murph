@@ -36,7 +36,7 @@ describe("hosted device-sync secret scoping", () => {
     })).toThrow();
   });
 
-  it("still decrypts legacy unscoped ciphertext when callers now provide a scope", () => {
+  it("rejects legacy unscoped ciphertext when callers now require a scoped decrypt", () => {
     const codec = createHostedSecretCodec({
       key: Buffer.alloc(32, 9),
       keyVersion: "v1",
@@ -49,11 +49,11 @@ describe("hosted device-sync secret scoping", () => {
       }),
     });
 
-    expect(codec.decrypt(legacyCiphertext, buildHostedConnectionTokenCipherOptions({
+    expect(() => codec.decrypt(legacyCiphertext, buildHostedConnectionTokenCipherOptions({
       connectionId: "conn_2",
       provider: "whoop",
       purpose: "device-sync-refresh-token",
-    }))).toBe("legacy-refresh-token");
+    }))).toThrow();
   });
 
   it("accepts 32-byte hex keys", () => {

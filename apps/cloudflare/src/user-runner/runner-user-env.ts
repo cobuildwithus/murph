@@ -21,9 +21,12 @@ import {
 export class RunnerUserEnvService {
   constructor(
     private readonly bucket: R2BucketLike,
-    private readonly bundleEncryptionKey: Uint8Array,
-    private readonly bundleEncryptionKeyId: string,
-    private readonly bundleEncryptionKeysById: Readonly<Record<string, Uint8Array>>,
+    private readonly userEnvEncryptionKey: Uint8Array,
+    private readonly userEnvEncryptionKeyId: string,
+    private readonly userEnvEncryptionKeysById: Readonly<Record<string, Uint8Array>>,
+    private readonly emailRouteEncryptionKey: Uint8Array,
+    private readonly emailRouteEncryptionKeyId: string,
+    private readonly emailRouteEncryptionKeysById: Readonly<Record<string, Uint8Array>>,
     private readonly allowedUserEnvSource: Readonly<Record<string, string | undefined>>,
     private readonly hostedEmailConfig: HostedEmailConfig,
   ) {}
@@ -51,9 +54,9 @@ export class RunnerUserEnvService {
     await ensureHostedEmailVerifiedSenderRouteAvailable({
       bucket: this.bucket,
       config: this.hostedEmailConfig,
-      key: this.bundleEncryptionKey,
-      keyId: this.bundleEncryptionKeyId,
-      keysById: this.bundleEncryptionKeysById,
+      key: this.emailRouteEncryptionKey,
+      keyId: this.emailRouteEncryptionKeyId,
+      keysById: this.emailRouteEncryptionKeysById,
       userId,
       verifiedEmailAddress: nextVerifiedEmailAddress,
     });
@@ -65,9 +68,9 @@ export class RunnerUserEnvService {
       await reconcileHostedEmailVerifiedSenderRoute({
         bucket: this.bucket,
         config: this.hostedEmailConfig,
-        key: this.bundleEncryptionKey,
-        keyId: this.bundleEncryptionKeyId,
-        keysById: this.bundleEncryptionKeysById,
+        key: this.emailRouteEncryptionKey,
+        keyId: this.emailRouteEncryptionKeyId,
+        keysById: this.emailRouteEncryptionKeysById,
         nextVerifiedEmailAddress,
         previousVerifiedEmailAddress,
         userId,
@@ -90,9 +93,9 @@ export class RunnerUserEnvService {
     await reconcileHostedEmailVerifiedSenderRoute({
       bucket: this.bucket,
       config: this.hostedEmailConfig,
-      key: this.bundleEncryptionKey,
-      keyId: this.bundleEncryptionKeyId,
-      keysById: this.bundleEncryptionKeysById,
+      key: this.emailRouteEncryptionKey,
+      keyId: this.emailRouteEncryptionKeyId,
+      keysById: this.emailRouteEncryptionKeysById,
       nextVerifiedEmailAddress,
       previousVerifiedEmailAddress,
       userId,
@@ -107,9 +110,9 @@ export class RunnerUserEnvService {
   private createUserEnvStore() {
     return createHostedUserEnvStore({
       bucket: this.bucket,
-      key: this.bundleEncryptionKey,
-      keyId: this.bundleEncryptionKeyId,
-      keysById: this.bundleEncryptionKeysById,
+      key: this.userEnvEncryptionKey,
+      keyId: this.userEnvEncryptionKeyId,
+      keysById: this.userEnvEncryptionKeysById,
     });
   }
 }

@@ -199,11 +199,21 @@ describe("RunnerBundleSync", () => {
       {
         v1: bundleKey,
       },
+      bundleKey,
+      "v1",
+      {
+        v1: bundleKey,
+      },
       {},
       hostedEmailConfig,
     );
     const secondUserEnv = new RunnerUserEnvService(
       bucket.api,
+      bundleKey,
+      "v1",
+      {
+        v1: bundleKey,
+      },
       bundleKey,
       "v1",
       {
