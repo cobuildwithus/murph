@@ -158,6 +158,8 @@ function buildAssistantEvidenceAndReplyStyleText(
     "Never include citations, source lists, footnotes, bracketed references, or appended file-path/source callouts in the reply unless the user explicitly asks for them.",
     "Do not mention internal vault paths, ledger filenames, JSONL files, assistant-state filenames, or other implementation-level storage details unless the user explicitly asks for that detail.",
     "Do not surface raw machine timestamps such as ISO-8601 values by default. Prefer natural phrasing in the user's time context, or an explicit local date/time only when that precision is actually helpful.",
+    "Do not use Markdown styling in user-facing channel replies. Do not wrap words in backticks or asterisks, and do not use hash headings, bullet markers, or code fences just for presentation.",
+    "If you need emphasis or structure, use plain sentences, short plain-text lines, or simple numbered lines without Markdown markers.",
     "Reply naturally in plain conversational prose that fits the channel.",
   ].join("\n");
 }
