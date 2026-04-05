@@ -1,17 +1,32 @@
 # Copy to apps/cloudflare/.dev.vars for wrangler dev or set these as real Cloudflare secrets/vars.
-# The control tokens are required for protected worker and container routes; local dev now fails closed
-# when either token set is missing. Use comma-separated token sets so you can overlap old/new values during rotation.
+# Local dev should mirror the current managed-hosted deployment shape: Vercel OIDC protects
+# web-to-worker control requests, the Worker keeps the platform envelope key, and the web tier
+# signs worker-to-web internal callbacks.
 
-HOSTED_EXECUTION_SIGNING_SECRET=replace-me-with-a-random-shared-secret
-HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY=replace-me-with-a-base64-32-byte-key
-HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID=v1
-HOSTED_EXECUTION_CONTROL_TOKENS=replace-me-with-the-current-operator-token,replace-me-with-the-previous-operator-token
+HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY=replace-me-with-a-base64-32-byte-key
+HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID=v1
+HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID=automation:v1
+HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK={"kty":"OKP","crv":"X25519","d":"replace-me","x":"replace-me"}
+HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK={"kty":"OKP","crv":"X25519","x":"replace-me"}
+# Optional overlapping private-key rotation set. Entries are keyed by recipient key id.
+# HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON={"automation:v0":{"kty":"OKP","crv":"X25519","d":"replace-me","x":"replace-me"}}
+# Optional overlapping platform-envelope rotation set. Entries are keyed by platform key id.
+# HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON={"v0":"replace-me-with-a-base64-32-byte-key"}
+
+HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG=replace-me-with-your-vercel-team-slug
+HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME=replace-me-with-your-vercel-project-name
+HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT=production
+HOSTED_WEB_INTERNAL_SIGNING_SECRET=replace-me-with-a-random-shared-secret
+
 HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS=21600000
 HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS=3
 HOSTED_EXECUTION_RETRY_DELAY_MS=30000
-HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS=replace-me-with-the-current-runner-token,replace-me-with-the-previous-runner-token
 HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS=30000
 HOSTED_EXECUTION_RUNNER_TIMEOUT_MS=60000
+
+# Required for web<->worker control in local dev.
+HOSTED_EXECUTION_DISPATCH_URL=http://127.0.0.1:8787
+VERCEL_PROJECT_PRODUCTION_URL=http://127.0.0.1:3000
 
 # Optional explicit native-container size for local/generated Wrangler config.
 # Supported values are the named Wrangler presets such as `basic` or a JSON object like:
@@ -53,7 +68,3 @@ HOSTED_EXECUTION_RUNNER_TIMEOUT_MS=60000
 # Optional allowlist extensions for encrypted per-user runner env overrides.
 # Keep these in sync with the native container runtime when you extend the exact-key allowlist.
 # HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS=OPENAI_API_KEY,AGENTMAIL_API_KEY,TELEGRAM_BOT_TOKEN
-
-# Optional worker-to-web bearer token sets for internal callbacks.
-# HOSTED_EXECUTION_INTERNAL_TOKENS=replace-me-with-the-current-web-internal-token,replace-me-with-the-previous-web-internal-token
-# HOSTED_SHARE_INTERNAL_TOKENS=replace-me-with-the-current-share-internal-token,replace-me-with-the-previous-share-internal-token

@@ -7,9 +7,14 @@ import type { HostedExecutionDispatchRequest, HostedExecutionDispatchResult } fr
 import { serializeHostedExecutionOutboxPayload } from "@/src/lib/hosted-execution/outbox-payload";
 
 const mocks = vi.hoisted(() => ({
+  deleteHostedSharePackFromHostedExecution: vi.fn(),
   dispatchHostedExecutionStatus: vi.fn(),
   finalizeHostedShareAcceptance: vi.fn(),
   hydrateHostedExecutionDispatch: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-execution/control", () => ({
+  deleteHostedSharePackFromHostedExecution: mocks.deleteHostedSharePackFromHostedExecution,
 }));
 
 vi.mock("@/src/lib/hosted-execution/dispatch", () => ({
@@ -44,6 +49,7 @@ import {
 describe("drainHostedExecutionOutbox", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.deleteHostedSharePackFromHostedExecution.mockResolvedValue(undefined);
   });
 
   it("marks completed outcomes as completed, stores the dispatch result, and finalizes hosted share imports", async () => {
@@ -71,6 +77,42 @@ describe("drainHostedExecutionOutbox", () => {
       prisma,
       shareId: "share_123",
     });
+    expect(mocks.deleteHostedSharePackFromHostedExecution).toHaveBeenCalledWith("share_123");
+  });
+
+  it("keeps completed share imports completed when share-pack cleanup fails", async () => {
+    const dispatch = createShareDispatch();
+    const dispatchResult = createDispatchResult("completed");
+    const prisma = createOutboxPrisma(createOutboxRecord({
+      eventId: dispatch.eventId,
+      eventKind: dispatch.event.kind,
+      sourceType: "hosted_share_link",
+      userId: dispatch.event.userId,
+    }));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.hydrateHostedExecutionDispatch.mockResolvedValue(dispatch);
+    mocks.dispatchHostedExecutionStatus.mockResolvedValue(dispatchResult);
+    mocks.deleteHostedSharePackFromHostedExecution.mockRejectedValue(new Error("delete failed"));
+
+    const [record] = await drainHostedExecutionOutbox({
+      now: "2026-03-28T11:00:00.000Z",
+      prisma,
+    });
+
+    expect(record?.status).toBe(ExecutionOutboxStatus.completed);
+    expect(mocks.finalizeHostedShareAcceptance).toHaveBeenCalledWith({
+      eventId: dispatch.eventId,
+      memberId: dispatch.event.userId,
+      prisma,
+      shareId: "share_123",
+    });
+    expect(mocks.deleteHostedSharePackFromHostedExecution).toHaveBeenCalledWith("share_123");
+    expect(consoleError).toHaveBeenCalledWith(
+      "Hosted share share_123 completed but its Cloudflare pack could not be deleted.",
+      "delete failed",
+    );
+
+    consoleError.mockRestore();
   });
 
   it("treats duplicate consumed outcomes as completed without requiring hosted-share finalization", async () => {

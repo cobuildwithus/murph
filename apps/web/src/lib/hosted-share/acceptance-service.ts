@@ -7,8 +7,7 @@ import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
   buildHostedShareAcceptanceDispatch,
   buildHostedShareAcceptanceEventId,
-  buildHostedSharePreview,
-  readHostedSharePack,
+  createHostedShareMinimalPreview,
   requireHostedShareLink,
   hashHostedShareCode,
   normalizeOptionalString,
@@ -55,7 +54,6 @@ export async function acceptHostedShareLink(input: {
     await lockHostedShareLinkRow(tx, codeHash);
 
     const latest = await requireHostedShareLink(shareCode, tx);
-    const preview = buildHostedSharePreview((await readHostedSharePack(latest)).pack);
 
     if (latest.expiresAt <= now) {
       throw hostedOnboardingError({
@@ -69,7 +67,7 @@ export async function acceptHostedShareLink(input: {
       if (latest.consumedByMemberId === memberId) {
         return {
           outcome: "alreadyImported" as const,
-          preview,
+          preview: createHostedShareMinimalPreview(latest.previewTitle),
           record: latest,
         };
       }
@@ -124,7 +122,7 @@ export async function acceptHostedShareLink(input: {
 
     return {
       outcome: "pending" as const,
-      preview,
+      preview: createHostedShareMinimalPreview(record.previewTitle),
       record,
     };
   });

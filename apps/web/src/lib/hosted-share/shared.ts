@@ -16,6 +16,22 @@ import type { HostedSharePreview, HostedSharePrismaClient } from "./types";
 
 const DEFAULT_HOSTED_SHARE_TTL_HOURS = 24 * 7;
 const HOSTED_SHARE_CODE_BYTES = 24;
+const DEFAULT_HOSTED_SHARE_PRIVATE_PREVIEW_TITLE = "Shared Murph pack";
+
+export function createHostedShareMinimalPreview(title: string | null | undefined): HostedSharePreview {
+  return {
+    counts: {
+      foods: 0,
+      protocols: 0,
+      recipes: 0,
+    },
+    foodTitles: [],
+    protocolTitles: [],
+    recipeTitles: [],
+    logMealAfterImport: false,
+    title: normalizeOptionalString(title) ?? DEFAULT_HOSTED_SHARE_PRIVATE_PREVIEW_TITLE,
+  };
+}
 
 export function buildHostedSharePreview(pack: SharePack): HostedSharePreview {
   return {
