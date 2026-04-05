@@ -70,10 +70,10 @@ test("query registry definitions combine canonical registry metadata with query-
 
     const queryMetadata = getHealthRegistryQueryMetadata(kind);
 
-    assert.equal(registryDefinition.directory, definition.registry.directory);
-    assert.deepEqual(registryDefinition.idKeys, definition.registry.idKeys);
-    assert.deepEqual(registryDefinition.titleKeys, definition.registry.titleKeys);
-    assert.deepEqual(registryDefinition.statusKeys, definition.registry.statusKeys);
+    assert.equal(registryDefinition.registry.directory, definition.registry.directory);
+    assert.deepEqual(registryDefinition.registry.idKeys, definition.registry.idKeys);
+    assert.deepEqual(registryDefinition.registry.titleKeys, definition.registry.titleKeys);
+    assert.deepEqual(registryDefinition.registry.statusKeys, definition.registry.statusKeys);
     assert.equal(typeof registryDefinition.transform, "function");
     assert.equal(
       typeof registryDefinition.compare,
@@ -742,10 +742,10 @@ test("bank registry definitions inherit canonical registry metadata from shared 
       continue;
     }
 
-    assert.equal(registryDefinition.directory, definition.registry.directory);
-    assert.deepEqual(registryDefinition.idKeys, definition.registry.idKeys);
-    assert.deepEqual(registryDefinition.titleKeys, definition.registry.titleKeys);
-    assert.deepEqual(registryDefinition.statusKeys, definition.registry.statusKeys);
+    assert.equal(registryDefinition.registry.directory, definition.registry.directory);
+    assert.deepEqual(registryDefinition.registry.idKeys, definition.registry.idKeys);
+    assert.deepEqual(registryDefinition.registry.titleKeys, definition.registry.titleKeys);
+    assert.deepEqual(registryDefinition.registry.statusKeys, definition.registry.statusKeys);
     assert.equal("transform" in definition.registry, false);
     assert.equal("sortBehavior" in definition.registry, false);
     assert.equal(typeof registryDefinition.transform, "function");

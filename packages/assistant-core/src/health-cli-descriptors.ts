@@ -58,10 +58,7 @@ export interface HealthCoreDescriptor {
 }
 
 export interface HealthQueryDescriptor {
-  genericListKinds?: readonly string[];
   genericListFilterCapabilities: readonly HealthListFilterCapability[];
-  genericLookupPrefixes?: readonly string[];
-  genericLookupValues?: readonly string[];
   listServiceMethod: HealthQueryListServiceMethodName;
   notFoundLabel: string;
   runtimeListMethod: HealthQueryRuntimeListMethodName;
@@ -93,9 +90,7 @@ export interface HealthEntityCommandDescriptor {
     upsert?: string;
   };
   listStatusDescription?: string;
-  noun: string;
   payloadFile: string;
-  pluralNoun: string;
   showId: {
     description: string;
     example: string;
@@ -118,10 +113,7 @@ interface HealthEntityDescriptorExtension {
   core?: Omit<HealthCoreDescriptor, "payloadTemplate" | "inputCapabilities"> & {
     inputCapabilities?: readonly HealthUpsertInputCapability[];
   };
-  query?: Omit<
-    HealthQueryDescriptor,
-    "genericListKinds" | "genericLookupPrefixes" | "genericLookupValues"
-  >;
+  query?: HealthQueryDescriptor;
 }
 
 export const healthPayloadSchema = z.object({}).catchall(z.unknown());
@@ -186,9 +178,7 @@ function buildStatusFilteredRegistryDescriptorExtension(
         upsert: `Upsert one ${input.noun} from a JSON payload file or stdin.`,
       },
       listStatusDescription: input.listStatusDescription,
-      noun: input.noun,
       payloadFile: input.payloadFile,
-      pluralNoun: input.pluralNoun,
       showId: input.showId,
     },
     core: {
@@ -322,9 +312,7 @@ const checkedHealthEntityDescriptorExtensions = {
       hints: {
         show: "Use `current` to read the derived profile or pass a snapshot id to inspect one saved payload.",
       },
-      noun: "profile snapshot",
       payloadFile: "profile-snapshot.json",
-      pluralNoun: "profile snapshots",
       showId: {
         description: "Snapshot id or `current`.",
         example: "current",
@@ -371,9 +359,7 @@ const checkedHealthEntityDescriptorExtensions = {
         upsert: "Append one timed history event from a JSON payload file or stdin.",
       },
       listStatusDescription: "Optional health-event status to filter by.",
-      noun: "history event",
       payloadFile: "history.json",
-      pluralNoun: "history events",
       showId: {
         description: "Timed history event id to show.",
         example: "<history-event-id>",
@@ -407,9 +393,7 @@ const checkedHealthEntityDescriptorExtensions = {
         upsert: "Append one blood test from a JSON payload file or stdin.",
       },
       listStatusDescription: "Optional blood-test result status to filter by.",
-      noun: "blood test",
       payloadFile: "blood-test.json",
-      pluralNoun: "blood tests",
       showId: {
         description: "Blood test id to show.",
         example: "<blood-test-id>",
@@ -472,14 +456,7 @@ function buildHealthEntityDescriptor(
           payloadTemplate: requireScaffoldTemplate(definition),
         }
       : undefined,
-    query: extension.query
-      ? {
-          ...extension.query,
-          genericListKinds: definition.listKinds,
-          genericLookupPrefixes: definition.prefixes,
-          genericLookupValues: definition.lookupAliases,
-        }
-      : undefined,
+    query: extension.query,
   };
 }
 
@@ -555,24 +532,17 @@ export function healthQueryHasListFilterCapability(
 
 const queryHealthDescriptors = healthEntityDescriptors.filter(hasHealthQueryDescriptor);
 
-const genericLookupDescriptors = queryHealthDescriptors.filter((descriptor) => {
-  const query = descriptor.query;
-  return Boolean(
-    (query.genericLookupPrefixes?.length ?? 0) > 0 ||
-      (query.genericLookupValues?.length ?? 0) > 0,
-  );
-});
+const genericLookupDescriptors = queryHealthDescriptors.filter((descriptor) =>
+  Boolean((descriptor.prefixes?.length ?? 0) > 0 || (descriptor.lookupAliases?.length ?? 0) > 0),
+);
 
 export function findHealthDescriptorForLookup(id: string): HealthQueryDescriptorEntry | null {
   return (
     genericLookupDescriptors.find((descriptor) => {
-      const genericLookupValues = descriptor.query.genericLookupValues ?? [];
-      const genericLookupPrefixes = descriptor.query.genericLookupPrefixes ?? [];
+      const lookupAliases = descriptor.lookupAliases ?? [];
+      const prefixes = descriptor.prefixes ?? [];
 
-      return (
-        genericLookupValues.includes(id) ||
-        genericLookupPrefixes.some((prefix) => id.startsWith(prefix))
-      );
+      return lookupAliases.includes(id) || prefixes.some((prefix) => id.startsWith(prefix));
     })
   ) ?? null;
 }

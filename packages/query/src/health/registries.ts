@@ -1,5 +1,6 @@
 import {
   requireBankEntityRegistryDefinition,
+  type BankEntityDefinitionWithRegistry,
   type BankEntityKind,
 } from "@murphai/contracts";
 import {
@@ -54,11 +55,8 @@ export interface RegistryListOptions {
 type ProjectedRegistryFamily = BankEntityKind;
 
 interface RegistryDefinition<TEntity extends RegistryQueryEntity> {
-  directory: string;
-  idKeys: readonly string[];
-  titleKeys: readonly string[];
-  statusKeys: readonly string[];
   compare?: (left: TEntity, right: TEntity) => number;
+  registry: BankEntityDefinitionWithRegistry["registry"];
   transform(
     base: RegistryQueryEntity,
     attributes: FrontmatterObject,
@@ -127,11 +125,8 @@ function createBankEntityRegistryDefinition<TEntity extends RegistryQueryEntity>
   const projection = getBankRegistryQueryMetadata(kind);
 
   return {
-    directory: registry.directory,
-    idKeys: registry.idKeys,
-    titleKeys: registry.titleKeys,
-    statusKeys: registry.statusKeys,
     compare: compareRegistryRecords(projection.sortBehavior),
+    registry,
     transform(base, attributes, relativePath) {
       return {
         ...base,
@@ -159,7 +154,7 @@ export function toRegistryRecord<TEntity extends RegistryQueryEntity>(
   definition: RegistryDefinition<TEntity>,
 ): RegistryStoredDocument<TEntity> | null {
   const slug = firstString(document.attributes, ["slug"]) ?? pathSlug(document.relativePath);
-  const id = firstString(document.attributes, definition.idKeys);
+  const id = firstString(document.attributes, definition.registry.idKeys);
   if (!id) {
     return null;
   }
@@ -168,8 +163,8 @@ export function toRegistryRecord<TEntity extends RegistryQueryEntity>(
     {
       id,
       slug,
-      title: firstString(document.attributes, definition.titleKeys),
-      status: firstString(document.attributes, definition.statusKeys),
+      title: firstString(document.attributes, definition.registry.titleKeys),
+      status: firstString(document.attributes, definition.registry.statusKeys),
     },
     document.attributes,
     document.relativePath,
@@ -231,7 +226,7 @@ async function loadRegistry<TEntity extends RegistryQueryEntity>(
   vaultRoot: string,
   definition: RegistryDefinition<TEntity>,
 ): Promise<RegistryStoredDocument<TEntity>[]> {
-  const relativePaths = await walkRelativeFiles(vaultRoot, definition.directory, ".md");
+  const relativePaths = await walkRelativeFiles(vaultRoot, definition.registry.directory, ".md");
   const records: RegistryStoredDocument<TEntity>[] = [];
 
   for (const relativePath of relativePaths) {
@@ -577,7 +572,7 @@ async function loadProjectedRegistryRecords<TEntity extends RegistryQueryEntity>
   family: ProjectedRegistryFamily,
   mapEntity: (entity: CanonicalEntity) => RegistryStoredDocument<TEntity> | null,
 ): Promise<RegistryStoredDocument<TEntity>[]> {
-  const relativePaths = await walkRelativeFiles(vaultRoot, definition.directory, ".md");
+  const relativePaths = await walkRelativeFiles(vaultRoot, definition.registry.directory, ".md");
   const records: RegistryStoredDocument<TEntity>[] = [];
 
   for (const relativePath of relativePaths) {

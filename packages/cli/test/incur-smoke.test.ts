@@ -1058,7 +1058,7 @@ test('health command help surfaces examples and hints through Incur metadata', a
   )
   assert.match(
     profileUpsertHelp,
-    /--input accepts @file\.json or - so the CLI can load the structured profile snapshot payload from disk or stdin\./u,
+    /--input accepts @file\.json or - so the CLI can load the structured profile payload from disk or stdin\./u,
   )
   assert.match(
     foodRenameHelp,
@@ -1267,7 +1267,7 @@ test('profile scaffold exposes a success CTA in the verbose json envelope', asyn
     assert.deepEqual(scaffoldResult.meta.cta?.commands, [
       {
         command: 'vault-cli profile upsert --input @profile-snapshot.json --vault <vault>',
-        description: 'Apply the edited profile snapshot payload.',
+        description: 'Apply the edited profile payload.',
       },
     ])
   } finally {
