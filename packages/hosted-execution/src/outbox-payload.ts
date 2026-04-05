@@ -98,10 +98,10 @@ export function resolveHostedExecutionDispatchPayloadStorage(
     case "email.message.received":
     case "device-sync.wake":
     case "member.activated":
+    case "gateway.message.send":
     case "vault.share.accepted":
       return "reference";
     case "assistant.cron.tick":
-    case "gateway.message.send":
       return "inline";
     default:
       throw new TypeError("Unsupported hosted execution event kind.");

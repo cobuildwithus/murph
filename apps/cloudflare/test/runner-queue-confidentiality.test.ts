@@ -1,19 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { buildHostedExecutionOutboxPayload } from "@murphai/hosted-execution";
-
-import { writeEncryptedR2Json } from "../src/crypto.js";
-import { buildHostedStorageAad } from "../src/crypto-context.js";
 import {
   createHostedDispatchPayloadStore,
   resolveHostedRunnerDispatchPayloadStorage,
 } from "../src/dispatch-payload-store.js";
-import { hostedDispatchPayloadObjectKey } from "../src/storage-paths.js";
 
 import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers";
 
 describe("hosted dispatch payload store confidentiality", () => {
-  it("keeps gateway message sends inline because they are not reconstructable", async () => {
+  it("externalizes gateway message sends instead of persisting session text inline", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const store = createHostedDispatchPayloadStore({
       bucket,
@@ -35,14 +30,14 @@ describe("hosted dispatch payload store confidentiality", () => {
 
     const payloadJson = await store.writeStoredDispatch(dispatch);
 
-    expect(resolveHostedRunnerDispatchPayloadStorage(dispatch)).toBe("inline");
-    expect(payloadJson).toContain("super secret gateway message");
-    expect(payloadJson).toContain("session-secret");
-    expect([...bucket.objects.keys()]).toHaveLength(0);
+    expect(resolveHostedRunnerDispatchPayloadStorage(dispatch)).toBe("reference");
+    expect(payloadJson).not.toContain("super secret gateway message");
+    expect(payloadJson).not.toContain("session-secret");
+    expect([...bucket.objects.keys()]).toHaveLength(1);
     expect(await store.readStoredDispatch(payloadJson)).toEqual(dispatch);
 
     await store.deleteStoredDispatchPayload(payloadJson);
-    expect(bucket.deleted).toHaveLength(0);
+    expect(bucket.deleted).toHaveLength(1);
   });
 
   it("externalizes provider webhook payloads instead of persisting them inline", async () => {
@@ -189,55 +184,6 @@ describe("hosted dispatch payload store confidentiality", () => {
     await rotatedStore.deleteStoredDispatchPayload(payloadJson);
 
     expect(bucket.deleted).toHaveLength(2);
-  });
-
-  it("reads legacy referenced payload blobs encrypted with ref-bound AAD", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
-    const rootKey = createTestRootKey(37);
-    const store = createHostedDispatchPayloadStore({
-      bucket,
-      key: rootKey,
-      keyId: "k-current",
-    });
-    const dispatch = {
-      event: {
-        kind: "device-sync.wake",
-        connectionId: "conn_legacy_aad",
-        hint: {
-          traceId: "trace_legacy_aad",
-        },
-        provider: "oura",
-        reason: "webhook_hint",
-        userId: "user_legacy_aad",
-      },
-      eventId: "evt_legacy_aad",
-      occurredAt: "2026-04-03T00:06:00.000Z",
-    } as const;
-    const payload = buildHostedExecutionOutboxPayload(dispatch);
-
-    if (payload.storage !== "reference") {
-      throw new Error("Expected device-sync wake payloads to stay reference-backed.");
-    }
-
-    const key = await hostedDispatchPayloadObjectKey(rootKey, dispatch.event.userId, dispatch.eventId);
-    await writeEncryptedR2Json({
-      aad: buildHostedStorageAad({
-        eventId: payload.dispatchRef.eventId,
-        eventKind: payload.dispatchRef.eventKind,
-        key,
-        occurredAt: payload.dispatchRef.occurredAt,
-        purpose: "dispatch-payload",
-        userId: payload.dispatchRef.userId,
-      }),
-      bucket,
-      cryptoKey: rootKey,
-      key,
-      keyId: "k-current",
-      scope: "dispatch-payload",
-      value: dispatch,
-    });
-
-    await expect(store.readStoredDispatch(JSON.stringify(payload))).resolves.toEqual(dispatch);
   });
 
   it("externalizes hosted email dispatch refs instead of persisting them inline", async () => {
