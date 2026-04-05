@@ -17,8 +17,7 @@ type InternalDeviceSyncConnectLinkRouteModule = typeof import(
 let internalDeviceSyncConnectLinkRoute: InternalDeviceSyncConnectLinkRouteModule;
 
 describe("device sync internal connect-link route", () => {
-  const originalControlSigningSecret = process.env.HOSTED_EXECUTION_CONTROL_SIGNING_SECRET;
-  const originalSigningSecret = process.env.HOSTED_EXECUTION_SIGNING_SECRET;
+  const originalWebInternalSigningSecret = process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET;
 
   beforeAll(async () => {
     internalDeviceSyncConnectLinkRoute = await import(
@@ -27,18 +26,11 @@ describe("device sync internal connect-link route", () => {
   });
 
   afterEach(() => {
-    if (originalControlSigningSecret === undefined) {
-      delete process.env.HOSTED_EXECUTION_CONTROL_SIGNING_SECRET;
+    if (originalWebInternalSigningSecret === undefined) {
+      delete process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET;
     } else {
-      process.env.HOSTED_EXECUTION_CONTROL_SIGNING_SECRET = originalControlSigningSecret;
+      process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = originalWebInternalSigningSecret;
     }
-
-    if (originalSigningSecret === undefined) {
-      delete process.env.HOSTED_EXECUTION_SIGNING_SECRET;
-      return;
-    }
-
-    process.env.HOSTED_EXECUTION_SIGNING_SECRET = originalSigningSecret;
   });
 
   beforeEach(() => {
@@ -54,10 +46,9 @@ describe("device sync internal connect-link route", () => {
     });
   });
 
-  it("creates a hosted device connect link for the bound execution user with the dispatch signing secret", async () => {
-    process.env.HOSTED_EXECUTION_CONTROL_SIGNING_SECRET = "control-secret";
-    process.env.HOSTED_EXECUTION_SIGNING_SECRET = "dispatch-secret";
-    const headers = await createSignedRequestHeaders("dispatch-secret");
+  it("creates a hosted device connect link for the bound execution user with the web internal signing secret", async () => {
+    process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = "web-internal-secret";
+    const headers = await createSignedRequestHeaders("web-internal-secret");
     const response = await internalDeviceSyncConnectLinkRoute.POST(
       new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
         headers,
@@ -84,13 +75,12 @@ describe("device sync internal connect-link route", () => {
     });
   });
 
-  it("rejects requests signed only with the distinct control secret", async () => {
-    process.env.HOSTED_EXECUTION_CONTROL_SIGNING_SECRET = "control-secret";
-    process.env.HOSTED_EXECUTION_SIGNING_SECRET = "dispatch-secret";
+  it("rejects requests signed with the wrong web internal secret", async () => {
+    process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = "web-internal-secret";
 
     const response = await internalDeviceSyncConnectLinkRoute.POST(
       new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
-        headers: await createSignedRequestHeaders("control-secret"),
+        headers: await createSignedRequestHeaders("wrong-secret"),
         method: "POST",
       }),
       {
@@ -104,16 +94,15 @@ describe("device sync internal connect-link route", () => {
     expect(mocks.startConnection).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "HOSTED_EXECUTION_UNAUTHORIZED",
-        message: "Unauthorized hosted execution request.",
+        code: "HOSTED_WEB_INTERNAL_UNAUTHORIZED",
+        message: "Unauthorized hosted web internal request.",
         retryable: false,
       },
     });
   });
 
   it("rejects unsigned requests on the internal connect-link route", async () => {
-    process.env.HOSTED_EXECUTION_CONTROL_SIGNING_SECRET = "control-secret";
-    process.env.HOSTED_EXECUTION_SIGNING_SECRET = "dispatch-secret";
+    process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = "web-internal-secret";
 
     const response = await internalDeviceSyncConnectLinkRoute.POST(
       new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
@@ -133,8 +122,8 @@ describe("device sync internal connect-link route", () => {
     expect(mocks.startConnection).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "HOSTED_EXECUTION_UNAUTHORIZED",
-        message: "Unauthorized hosted execution request.",
+        code: "HOSTED_WEB_INTERNAL_UNAUTHORIZED",
+        message: "Unauthorized hosted web internal request.",
         retryable: false,
       },
     });

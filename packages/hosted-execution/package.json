@@ -33,6 +33,7 @@
   },
   "dependencies": {
     "@murphai/contracts": "workspace:*",
-    "@murphai/runtime-state": "workspace:*"
+    "@murphai/runtime-state": "workspace:*",
+    "jose": "^6.2.2"
   }
 }

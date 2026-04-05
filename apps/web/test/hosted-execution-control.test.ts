@@ -2,12 +2,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createHostedExecutionControlClient: vi.fn(),
+  createHostedExecutionVercelOidcBearerTokenProvider: vi.fn(),
   readHostedExecutionControlEnvironment: vi.fn(),
+  tokenProvider: vi.fn(),
 }));
 
 vi.mock("@murphai/hosted-execution", () => ({
   createHostedExecutionControlClient: mocks.createHostedExecutionControlClient,
   readHostedExecutionControlEnvironment: mocks.readHostedExecutionControlEnvironment,
+}));
+
+vi.mock("@/src/lib/hosted-execution/vercel-oidc", () => ({
+  createHostedExecutionVercelOidcBearerTokenProvider:
+    mocks.createHostedExecutionVercelOidcBearerTokenProvider,
 }));
 
 describe("hosted verified email sync helper", () => {
@@ -18,8 +25,8 @@ describe("hosted verified email sync helper", () => {
     vi.clearAllMocks();
     mocks.readHostedExecutionControlEnvironment.mockReturnValue({
       baseUrl: "https://dispatch.example.test",
-      signingSecret: "signing-secret",
     });
+    mocks.createHostedExecutionVercelOidcBearerTokenProvider.mockReturnValue(mocks.tokenProvider);
     mocks.createHostedExecutionControlClient.mockReturnValue({
       run,
       updateUserEnv,
@@ -46,7 +53,7 @@ describe("hosted verified email sync helper", () => {
     });
     expect(mocks.createHostedExecutionControlClient).toHaveBeenCalledWith({
       baseUrl: "https://dispatch.example.test",
-      signingSecret: "signing-secret",
+      getBearerToken: mocks.tokenProvider,
     });
     expect(updateUserEnv).toHaveBeenCalledWith("member_123", {
       env: {
@@ -88,7 +95,6 @@ describe("hosted verified email sync helper", () => {
   it("fails fast when hosted execution control is not configured", async () => {
     mocks.readHostedExecutionControlEnvironment.mockReturnValue({
       baseUrl: null,
-      signingSecret: null,
     });
 
     const { syncHostedVerifiedEmailToHostedExecution } = await import(

@@ -6,6 +6,7 @@ import {
 import type { SharePack } from "@murphai/contracts";
 import { createHostedVerifiedEmailUserEnv } from "@murphai/runtime-state";
 
+import { createHostedExecutionVercelOidcBearerTokenProvider } from "./vercel-oidc";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
 export interface HostedVerifiedEmailSyncResult {
@@ -17,7 +18,7 @@ export interface HostedVerifiedEmailSyncResult {
 export function requireHostedExecutionControlClient(): HostedExecutionControlClient {
   const environment = readHostedExecutionControlEnvironment();
 
-  if (!environment.baseUrl || !environment.signingSecret) {
+  if (!environment.baseUrl) {
     throw hostedOnboardingError({
       code: "HOSTED_EXECUTION_CONTROL_NOT_CONFIGURED",
       message: "Hosted execution control is not configured yet. Contact support to finish setup.",
@@ -27,7 +28,7 @@ export function requireHostedExecutionControlClient(): HostedExecutionControlCli
 
   return createHostedExecutionControlClient({
     baseUrl: environment.baseUrl,
-    signingSecret: environment.signingSecret,
+    getBearerToken: createHostedExecutionVercelOidcBearerTokenProvider(),
   });
 }
 

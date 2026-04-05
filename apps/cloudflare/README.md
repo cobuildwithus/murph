@@ -35,11 +35,14 @@ Current worker bindings read directly by `src/index.ts`:
 
 Current worker env/config names read directly by `src/env.ts`:
 
-- required secret: `HOSTED_EXECUTION_SIGNING_SECRET`
-- optional secret: `HOSTED_EXECUTION_CONTROL_SIGNING_SECRET` splits privileged control signatures away from dispatch signatures; when unset, control requests fall back to `HOSTED_EXECUTION_SIGNING_SECRET`
 - required secret: `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY`
 - required secret: `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK`
 - required secret: `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK`
+- required secret: `HOSTED_WEB_INTERNAL_SIGNING_SECRET` signs the narrow Cloudflare-owned callbacks back into `apps/web`
+- required non-secret: `HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG`
+- required non-secret: `HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME`
+- optional non-secret: `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production`
+- required non-secret: `HOSTED_WEB_BASE_URL`
 - optional secret: `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON` allows staged rotation of the automation unwrap key
 - optional secret: `HOSTED_EMAIL_CLOUDFLARE_API_TOKEN` enables hosted email delivery through Cloudflare Email Routing
 - optional secret: `HOSTED_EMAIL_SIGNING_SECRET` enables trusted hosted email ingress token generation and verification

@@ -9,6 +9,8 @@ import {
   type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
 
+import { createHostedExecutionVercelOidcBearerTokenProvider } from "./vercel-oidc";
+
 export async function dispatchHostedExecutionStatus(
   input: HostedExecutionDispatchRequest,
 ): Promise<HostedExecutionDispatchResult> {
@@ -92,21 +94,19 @@ function isHostedExecutionConfigured(
   environment: HostedExecutionDispatchEnvironment,
 ): environment is HostedExecutionDispatchEnvironment & {
   dispatchUrl: string;
-  signingSecret: string;
 } {
-  return Boolean(environment.dispatchUrl && environment.signingSecret);
+  return Boolean(environment.dispatchUrl);
 }
 
 async function postHostedExecutionDispatch(
   input: HostedExecutionDispatchRequest,
   environment: HostedExecutionDispatchEnvironment & {
     dispatchUrl: string;
-    signingSecret: string;
   },
 ): Promise<HostedExecutionDispatchResult> {
   return createHostedExecutionDispatchClient({
     baseUrl: environment.dispatchUrl,
-    signingSecret: environment.signingSecret,
+    getBearerToken: createHostedExecutionVercelOidcBearerTokenProvider(),
     timeoutMs: environment.dispatchTimeoutMs,
   }).dispatch(input);
 }

@@ -1,10 +1,10 @@
+import { createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { afterEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 import { ContainerProxy as PackageContainerProxy } from "@cloudflare/containers";
-import { createHostedExecutionSignature } from "@murphai/hosted-execution";
 import { artifactObjectKey } from "../src/bundle-store.ts";
 import { buildHostedStorageAad, deriveHostedStorageOpaqueId } from "../src/crypto-context.ts";
 import {
@@ -28,6 +28,20 @@ const describe = baseDescribe.sequential;
 
 const RUNNER_PROXY_TOKEN = "runner-proxy-token";
 const RUNNER_PROXY_TOKEN_HEADER = "x-hosted-execution-runner-proxy-token";
+const TEST_VERCEL_OIDC_TEAM_SLUG = "murph-team";
+const TEST_VERCEL_OIDC_PROJECT_NAME = "murph-web";
+const TEST_VERCEL_OIDC_ISSUER = `https://oidc.vercel.com/${TEST_VERCEL_OIDC_TEAM_SLUG}`;
+const TEST_VERCEL_OIDC_AUDIENCE = `https://vercel.com/${TEST_VERCEL_OIDC_TEAM_SLUG}`;
+const TEST_VERCEL_OIDC_SUBJECT =
+  `owner:${TEST_VERCEL_OIDC_TEAM_SLUG}:project:${TEST_VERCEL_OIDC_PROJECT_NAME}:environment:production`;
+const TEST_VERCEL_OIDC_JWKS_URL = `${TEST_VERCEL_OIDC_ISSUER}/.well-known/jwks`;
+const TEST_VERCEL_OIDC_PRIVATE_KEY = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey;
+const TEST_VERCEL_OIDC_PUBLIC_JWK = {
+  ...(createPublicKey(TEST_VERCEL_OIDC_PRIVATE_KEY).export({ format: "jwk" }) as JsonWebKey),
+  alg: "RS256",
+  kid: "test-kid",
+  use: "sig",
+};
 
 describe("cloudflare worker routes", () => {
   afterEach(() => {
@@ -100,14 +114,11 @@ describe("cloudflare worker routes", () => {
       await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/run", {
         body: JSON.stringify({ note: "manual" }),
         headers: {
-          authorization: "Bearer control-token",
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
       })),
-      createWorkerEnv(stub, {
-        HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
-      }),
+      createWorkerEnv(stub),
     );
 
     expect(response.status).toBe(200);
@@ -129,14 +140,11 @@ describe("cloudflare worker routes", () => {
       await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/run", {
         body: "",
         headers: {
-          authorization: "Bearer control-token",
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
       })),
-      createWorkerEnv(stub, {
-        HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
-      }),
+      createWorkerEnv(stub),
     );
 
     expect(response.status).toBe(200);
@@ -148,9 +156,7 @@ describe("cloudflare worker routes", () => {
     }));
   });
 
-  it("accepts signed dispatch through the canonical internal dispatch route", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+  it("accepts OIDC bearer dispatches through the canonical internal dispatch route", async () => {
     const stub = createUserRunnerStub();
     const dispatch = createDispatch("evt_123");
     const request = await createSignedDispatchRequest("/internal/dispatch", dispatch);
@@ -165,29 +171,7 @@ describe("cloudflare worker routes", () => {
     expect(stub.dispatchWithOutcome).toHaveBeenCalledWith(dispatch);
   });
 
-  it("keeps dispatch signatures bound to the dispatch secret even when control routes use a different secret", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
-    const stub = createUserRunnerStub();
-    const dispatch = createDispatch("evt_control_split");
-    const request = await createSignedDispatchRequest("/internal/dispatch", dispatch, {
-      secret: "dispatch-secret",
-    });
-
-    const response = await worker.fetch(
-      request,
-      createWorkerEnv(stub, {
-        HOSTED_EXECUTION_CONTROL_SIGNING_SECRET: "control-secret",
-      }),
-    );
-
-    expect(response.status).toBe(200);
-    expect(stub.dispatchWithOutcome).toHaveBeenCalledWith(dispatch);
-  });
-
-  it("keeps the removed internal events alias hidden from signed dispatch callers", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+  it("keeps the removed internal events alias hidden from OIDC dispatch callers", async () => {
     const stub = createUserRunnerStub();
     const request = await createSignedDispatchRequest("/internal/events", createDispatch("evt_removed_alias"));
 
@@ -197,35 +181,42 @@ describe("cloudflare worker routes", () => {
     expect(stub.dispatchWithOutcome).not.toHaveBeenCalled();
   });
 
-  it("rejects stale, malformed, and future signed dispatch requests", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+  it("rejects missing, malformed, and mismatched OIDC bearer dispatch requests", async () => {
     const stub = createUserRunnerStub();
     const dispatch = createDispatch("evt_signed");
 
-    const staleResponse = await worker.fetch(
-      await createSignedDispatchRequest("/internal/dispatch", dispatch, {
-        timestamp: "2026-03-26T11:50:00.000Z",
+    const missingAuthorizationResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/dispatch", {
+        body: JSON.stringify(dispatch),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
       }),
       createWorkerEnv(stub),
     );
-    expect(staleResponse.status).toBe(401);
+    expect(missingAuthorizationResponse.status).toBe(401);
 
     const malformedResponse = await worker.fetch(
-      await createSignedDispatchRequest("/internal/dispatch", dispatch, {
-        timestamp: "2026-03-26T12:00:00Z",
+      new Request("https://runner.example.test/internal/dispatch", {
+        body: JSON.stringify(dispatch),
+        headers: {
+          authorization: "Bearer not-a-jwt",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
       }),
       createWorkerEnv(stub),
     );
     expect(malformedResponse.status).toBe(401);
 
-    const futureResponse = await worker.fetch(
+    const wrongSubjectResponse = await worker.fetch(
       await createSignedDispatchRequest("/internal/dispatch", dispatch, {
-        timestamp: "2026-03-26T12:06:00.000Z",
+        sub: `owner:${TEST_VERCEL_OIDC_TEAM_SLUG}:project:wrong-project:environment:production`,
       }),
       createWorkerEnv(stub),
     );
-    expect(futureResponse.status).toBe(401);
+    expect(wrongSubjectResponse.status).toBe(401);
     expect(stub.dispatch).not.toHaveBeenCalled();
   });
 
@@ -1322,7 +1313,7 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("fails closed on control routes when the worker signing secret is missing", async () => {
+  it("fails closed on control routes when the worker OIDC validation env is missing", async () => {
     const stub = createUserRunnerStub();
 
     const response = await worker.fetch(
@@ -1330,7 +1321,7 @@ describe("cloudflare worker routes", () => {
         method: "GET",
       })),
       createWorkerEnv(stub, {
-        HOSTED_EXECUTION_SIGNING_SECRET: undefined,
+        HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: undefined,
       }),
     );
 
@@ -1341,28 +1332,21 @@ describe("cloudflare worker routes", () => {
     expect(stub.status).not.toHaveBeenCalled();
   });
 
-  it("accepts control routes signed with the dedicated control signing secret", async () => {
+  it("accepts control routes with a valid Vercel OIDC bearer token", async () => {
     const stub = createUserRunnerStub();
 
     const response = await worker.fetch(
-      await signControlRequest(
-        new Request("https://runner.example.test/internal/users/member_123/status", {
-          method: "GET",
-        }),
-        {
-          secret: "control-secret",
-        },
-      ),
-      createWorkerEnv(stub, {
-        HOSTED_EXECUTION_CONTROL_SIGNING_SECRET: "control-secret",
-      }),
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/status", {
+        method: "GET",
+      })),
+      createWorkerEnv(stub),
     );
 
     expect(response.status).toBe(200);
     expect(stub.status).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects control routes signed only with the dispatch secret when a distinct control secret is configured", async () => {
+  it("rejects control routes with a bearer token for the wrong workload identity", async () => {
     const stub = createUserRunnerStub();
 
     const response = await worker.fetch(
@@ -1371,12 +1355,10 @@ describe("cloudflare worker routes", () => {
           method: "GET",
         }),
         {
-          secret: "dispatch-secret",
+          sub: `owner:${TEST_VERCEL_OIDC_TEAM_SLUG}:project:wrong-project:environment:production`,
         },
       ),
-      createWorkerEnv(stub, {
-        HOSTED_EXECUTION_CONTROL_SIGNING_SECRET: "control-secret",
-      }),
+      createWorkerEnv(stub),
     );
 
     expect(response.status).toBe(401);
@@ -3056,26 +3038,18 @@ async function createSignedDispatchRequest(
   path: string,
   dispatch: HostedExecutionDispatchRequest,
   input: {
-    secret?: string;
-    timestamp?: string;
+    aud?: string;
+    iss?: string;
+    sub?: string;
   } = {},
 ): Promise<Request> {
-  const payload = JSON.stringify(dispatch);
-  const timestamp = input.timestamp ?? "2026-03-26T12:00:00.000Z";
-  const signature = await createHostedExecutionSignature({
-    method: "POST",
-    path,
-    payload,
-    secret: input.secret ?? "dispatch-secret",
-    timestamp,
-  });
+  installOidcJwksFetch();
 
   return new Request(`https://runner.example.test${path}`, {
-    body: payload,
+    body: JSON.stringify(dispatch),
     headers: {
+      authorization: `Bearer ${createTestVercelOidcToken(input)}`,
       "content-type": "application/json; charset=utf-8",
-      "x-hosted-execution-signature": signature,
-      "x-hosted-execution-timestamp": timestamp,
     },
     method: "POST",
   });
@@ -3084,24 +3058,66 @@ async function createSignedDispatchRequest(
 async function signControlRequest(
   request: Request,
   input: {
-    secret?: string;
-    timestamp?: string;
+    aud?: string;
+    iss?: string;
+    sub?: string;
   } = {},
 ): Promise<Request> {
-  const path = new URL(request.url).pathname;
-  const payload = await request.clone().text();
-  const timestamp = input.timestamp ?? new Date().toISOString();
-  const signature = await createHostedExecutionSignature({
-    method: request.method,
-    path,
-    payload,
-    secret: input.secret ?? "dispatch-secret",
-    timestamp,
-  });
+  installOidcJwksFetch();
   const headers = new Headers(request.headers);
-  headers.delete("authorization");
-  headers.set("x-hosted-execution-signature", signature);
-  headers.set("x-hosted-execution-timestamp", timestamp);
+  headers.set("authorization", `Bearer ${createTestVercelOidcToken(input)}`);
 
   return new Request(request, { headers });
+}
+
+function installOidcJwksFetch(delegate?: typeof fetch): void {
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input) === TEST_VERCEL_OIDC_JWKS_URL) {
+      return new Response(JSON.stringify({ keys: [TEST_VERCEL_OIDC_PUBLIC_JWK] }), {
+        headers: {
+          "content-type": "application/json",
+        },
+        status: 200,
+      });
+    }
+
+    if (delegate) {
+      return delegate(input, init);
+    }
+
+    throw new Error(`Unexpected fetch during Cloudflare OIDC test: ${String(input)}`);
+  }));
+}
+
+function createTestVercelOidcToken(
+  input: Partial<{
+    aud: string;
+    iss: string;
+    sub: string;
+  }> = {},
+): string {
+  const now = Math.floor(Date.now() / 1000);
+  const header = {
+    alg: "RS256",
+    kid: "test-kid",
+    typ: "JWT",
+  };
+  const payload = {
+    aud: TEST_VERCEL_OIDC_AUDIENCE,
+    exp: now + 300,
+    iat: now,
+    iss: TEST_VERCEL_OIDC_ISSUER,
+    sub: TEST_VERCEL_OIDC_SUBJECT,
+    ...input,
+  };
+  const encodedHeader = base64UrlEncode(JSON.stringify(header));
+  const encodedPayload = base64UrlEncode(JSON.stringify(payload));
+  const signingInput = `${encodedHeader}.${encodedPayload}`;
+  const signature = sign("RSA-SHA256", Buffer.from(signingInput), TEST_VERCEL_OIDC_PRIVATE_KEY);
+
+  return `${signingInput}.${base64UrlEncode(signature)}`;
+}
+
+function base64UrlEncode(value: string | Buffer): string {
+  return Buffer.from(value).toString("base64url");
 }

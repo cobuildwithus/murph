@@ -1,9 +1,8 @@
 import {
-  createHostedExecutionSignatureHeaders,
   buildHostedExecutionUserRunPath,
   buildHostedExecutionUserStatusPath,
   parseHostedExecutionUserStatus,
-  readHostedExecutionControlSigningSecret,
+  readBearerAuthorizationToken,
   type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
 
@@ -12,10 +11,9 @@ type EnvSource = Readonly<Record<string, string | undefined>>;
 type FetchLike = typeof fetch;
 
 interface SmokeControlRequest {
+  authorizationHeader: string;
   fetchImpl: FetchLike;
   headers: Record<string, string> | undefined;
-  now?: () => string;
-  signingSecret: string;
   url: string;
 }
 
@@ -71,22 +69,22 @@ export async function runSmokeHostedDeploy(input: {
   const log = input.log ?? console.log;
   const workerBaseUrl = resolveSmokeWorkerBaseUrl(source);
   const smokeUserId = normalizeConfiguredString(source.HOSTED_EXECUTION_SMOKE_USER_ID);
-  const signingSecret = readHostedExecutionControlSigningSecret(source);
+  const authorizationHeader = readSmokeOidcAuthorizationHeader(source);
   const versionOverrideHeaders = buildVersionOverrideHeaders(source);
 
   await assertHealth(fetchImpl, new URL("/health", `${workerBaseUrl}/`).toString(), versionOverrideHeaders);
 
   if (smokeUserId) {
-    if (!signingSecret) {
+    if (!authorizationHeader) {
       throw new Error(
-        "HOSTED_EXECUTION_CONTROL_SIGNING_SECRET or HOSTED_EXECUTION_SIGNING_SECRET is required when HOSTED_EXECUTION_SMOKE_USER_ID is set.",
+        "HOSTED_EXECUTION_SMOKE_OIDC_TOKEN or VERCEL_OIDC_TOKEN is required when HOSTED_EXECUTION_SMOKE_USER_ID is set.",
       );
     }
 
     const statusRequest: SmokeControlRequest = {
+      authorizationHeader,
       fetchImpl,
       headers: versionOverrideHeaders,
-      signingSecret,
       url: new URL(buildHostedExecutionUserStatusPath(smokeUserId), `${workerBaseUrl}/`).toString(),
     };
     const initialStatus = await readSmokeUserStatus(statusRequest);
@@ -196,21 +194,12 @@ async function sendSmokeControlRequest(input: SmokeControlRequest & {
   body?: string;
   method?: "GET" | "POST";
 }): Promise<Response> {
-  const path = new URL(input.url).pathname;
-  const payload = input.body ?? "";
-  const signatureHeaders = await createHostedExecutionSignatureHeaders({
-    method: input.method ?? "GET",
-    path,
-    payload,
-    secret: input.signingSecret,
-    timestamp: input.now?.() ?? new Date().toISOString(),
-  });
   const response = await input.fetchImpl(input.url, {
     body: input.body,
     headers: {
       ...(input.body ? { "content-type": "application/json; charset=utf-8" } : {}),
-      ...input.headers,
-      ...signatureHeaders,
+      ...(input.headers ?? {}),
+      authorization: input.authorizationHeader,
     },
     method: input.method ?? "GET",
   });
@@ -273,12 +262,20 @@ function readPositiveInteger(value: string | undefined, fallback: number, label:
 }
 
 function normalizeConfiguredString(value: string | undefined): string | null {
-  if (typeof value !== "string") {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
+
+function readSmokeOidcAuthorizationHeader(source: EnvSource): string | null {
+  const token = normalizeConfiguredString(source.HOSTED_EXECUTION_SMOKE_OIDC_TOKEN)
+    ?? normalizeConfiguredString(source.VERCEL_OIDC_TOKEN);
+
+  if (!token) {
     return null;
   }
 
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
+  const normalized = readBearerAuthorizationToken(token.startsWith("Bearer ") ? token : `Bearer ${token}`);
+  return normalized ? `Bearer ${normalized}` : null;
 }
 
 function sleep(durationMs: number): Promise<void> {

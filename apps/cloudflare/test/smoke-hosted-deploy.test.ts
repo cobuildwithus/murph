@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  readHostedExecutionSignatureHeaders,
-  verifyHostedExecutionSignature,
+  readBearerAuthorizationToken,
 } from "@murphai/hosted-execution";
 
 import {
@@ -129,7 +128,7 @@ describe("runSmokeHostedDeploy", () => {
       log() {},
       source: {
         CF_WORKER_NAME: "hosted-worker",
-        HOSTED_EXECUTION_SIGNING_SECRET: "signing-secret",
+        HOSTED_EXECUTION_SMOKE_OIDC_TOKEN: "vercel-oidc-token",
         HOSTED_EXECUTION_SMOKE_STATUS_POLL_INTERVAL_MS: "1",
         HOSTED_EXECUTION_SMOKE_STATUS_TIMEOUT_MS: "100",
         HOSTED_EXECUTION_SMOKE_USER_ID: "member_123",
@@ -151,8 +150,7 @@ describe("runSmokeHostedDeploy", () => {
         body: undefined,
         headers: {
           "Cloudflare-Workers-Version-Overrides": "hosted-worker=\"version-123\"",
-          "x-hosted-execution-signature": expect.any(String),
-          "x-hosted-execution-timestamp": expect.any(String),
+          authorization: "Bearer vercel-oidc-token",
         },
         method: "GET",
         url: "https://worker.example.test/internal/users/member_123/status",
@@ -161,9 +159,8 @@ describe("runSmokeHostedDeploy", () => {
         body: "{}",
         headers: {
           "Cloudflare-Workers-Version-Overrides": "hosted-worker=\"version-123\"",
+          authorization: "Bearer vercel-oidc-token",
           "content-type": "application/json; charset=utf-8",
-          "x-hosted-execution-signature": expect.any(String),
-          "x-hosted-execution-timestamp": expect.any(String),
         },
         method: "POST",
         url: "https://worker.example.test/internal/users/member_123/run",
@@ -172,8 +169,7 @@ describe("runSmokeHostedDeploy", () => {
         body: undefined,
         headers: {
           "Cloudflare-Workers-Version-Overrides": "hosted-worker=\"version-123\"",
-          "x-hosted-execution-signature": expect.any(String),
-          "x-hosted-execution-timestamp": expect.any(String),
+          authorization: "Bearer vercel-oidc-token",
         },
         method: "GET",
         url: "https://worker.example.test/internal/users/member_123/status",
@@ -237,7 +233,7 @@ describe("runSmokeHostedDeploy", () => {
       fetchImpl,
       log() {},
       source: {
-        HOSTED_EXECUTION_SIGNING_SECRET: "signing-secret",
+        HOSTED_EXECUTION_SMOKE_OIDC_TOKEN: "vercel-oidc-token",
         HOSTED_EXECUTION_SMOKE_STATUS_POLL_INTERVAL_MS: "1",
         HOSTED_EXECUTION_SMOKE_STATUS_TIMEOUT_MS: "5",
         HOSTED_EXECUTION_SMOKE_USER_ID: "member_123",
@@ -246,7 +242,7 @@ describe("runSmokeHostedDeploy", () => {
     })).rejects.toThrow(/Timed out waiting for manual smoke run completion/u);
   });
 
-  it("prefers the distinct control signing secret for manual smoke control requests", async () => {
+  it("accepts either HOSTED_EXECUTION_SMOKE_OIDC_TOKEN or VERCEL_OIDC_TOKEN for manual smoke control requests", async () => {
     const fetchCalls: Array<{
       headers: HeadersInit | undefined;
       method: string | undefined;
@@ -299,39 +295,18 @@ describe("runSmokeHostedDeploy", () => {
       fetchImpl,
       log() {},
       source: {
-        HOSTED_EXECUTION_CONTROL_SIGNING_SECRET: "control-secret",
-        HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
         HOSTED_EXECUTION_SMOKE_STATUS_POLL_INTERVAL_MS: "1",
         HOSTED_EXECUTION_SMOKE_STATUS_TIMEOUT_MS: "100",
         HOSTED_EXECUTION_SMOKE_USER_ID: "member_123",
         HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+        VERCEL_OIDC_TOKEN: "vercel-oidc-token",
       },
     });
 
     const statusCall = fetchCalls.find((entry) => entry.url.endsWith("/internal/users/member_123/status"));
     expect(statusCall).toBeDefined();
     const headers = new Headers(statusCall?.headers);
-    const signatureHeaders = readHostedExecutionSignatureHeaders(headers);
-
-    await expect(
-      verifyHostedExecutionSignature({
-        method: statusCall?.method ?? "GET",
-        path: "/internal/users/member_123/status",
-        payload: "",
-        secret: "control-secret",
-        ...signatureHeaders,
-      }),
-    ).resolves.toBe(true);
-
-    await expect(
-      verifyHostedExecutionSignature({
-        method: statusCall?.method ?? "GET",
-        path: "/internal/users/member_123/status",
-        payload: "",
-        secret: "dispatch-secret",
-        ...signatureHeaders,
-      }),
-    ).resolves.toBe(false);
+    expect(readBearerAuthorizationToken(headers.get("authorization"))).toBe("vercel-oidc-token");
   });
 
   it("fails before issuing requests when a candidate version id is configured without a worker name", async () => {
@@ -347,7 +322,7 @@ describe("runSmokeHostedDeploy", () => {
     })).rejects.toThrow("HOSTED_EXECUTION_SMOKE_WORKER_NAME or CF_WORKER_NAME must be configured.");
   });
 
-  it("fails with the combined control-signing error when manual smoke auth is unconfigured", async () => {
+  it("fails with the OIDC-token error when manual smoke auth is unconfigured", async () => {
     await expect(runSmokeHostedDeploy({
       fetchImpl: async () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
       log() {},
@@ -356,7 +331,7 @@ describe("runSmokeHostedDeploy", () => {
         HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
       },
     })).rejects.toThrow(
-      "HOSTED_EXECUTION_CONTROL_SIGNING_SECRET or HOSTED_EXECUTION_SIGNING_SECRET is required when HOSTED_EXECUTION_SMOKE_USER_ID is set.",
+      "HOSTED_EXECUTION_SMOKE_OIDC_TOKEN or VERCEL_OIDC_TOKEN is required when HOSTED_EXECUTION_SMOKE_USER_ID is set.",
     );
   });
 });

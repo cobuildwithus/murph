@@ -196,7 +196,7 @@ describe("hosted user env helpers", () => {
       current: {},
       update: {
         env: {
-          HOSTED_EXECUTION_SIGNING_SECRET: "nope",
+          HOSTED_WEB_INTERNAL_SIGNING_SECRET: "nope",
         },
         mode: "replace",
       },
