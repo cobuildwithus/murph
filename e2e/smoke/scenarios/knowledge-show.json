@@ -1,0 +1,11 @@
+{
+  "id": "knowledge-show",
+  "command": "vault-cli knowledge show <slug> --vault <path> [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/knowledge",
+  "purpose": "Documents reading one assistant-authored knowledge page by slug.",
+  "source": "docs/contracts/03-command-surface.md"
+}

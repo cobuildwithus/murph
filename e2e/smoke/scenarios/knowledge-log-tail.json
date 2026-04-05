@@ -1,0 +1,11 @@
+{
+  "id": "knowledge-log-tail",
+  "command": "vault-cli knowledge log tail --vault <path> [--limit <n>] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/knowledge",
+  "purpose": "Documents reading the append-only knowledge change log for operator inspection.",
+  "source": "docs/contracts/03-command-surface.md"
+}

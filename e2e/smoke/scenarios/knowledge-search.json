@@ -1,0 +1,12 @@
+{
+  "id": "knowledge-search",
+  "command": "vault-cli knowledge search <query> --vault <path> [--page-type <type>] [--status <status>] [--limit <n>] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md",
+    "fixtures/minimal-vault/bank/experiments/baseline-observation.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/knowledge",
+  "purpose": "Documents lexical retrieval over the assistant-authored knowledge wiki.",
+  "source": "docs/contracts/03-command-surface.md"
+}

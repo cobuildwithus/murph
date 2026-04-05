@@ -1,0 +1,12 @@
+{
+  "id": "knowledge-upsert",
+  "command": "vault-cli knowledge upsert --vault <path> --body <markdown> [--title <title>] [--slug <slug>] [--page-type <type>] [--status <status>] [--clear-library-links] [--library-slug <slug> ...] [--related-slug <slug> ...] [--source-path <path> ...] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md",
+    "fixtures/minimal-vault/bank/experiments/baseline-observation.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/knowledge",
+  "purpose": "Documents assistant-authored knowledge writes that refresh the derived wiki index and log.",
+  "source": "docs/contracts/03-command-surface.md"
+}
