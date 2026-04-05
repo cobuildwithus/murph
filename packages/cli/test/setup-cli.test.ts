@@ -2740,7 +2740,7 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
   }
 })
 
-test.sequential('setup preserves saved OpenAI-compatible headers when re-saving assistant defaults', async () => {
+test.sequential('setup preserves saved public OpenAI-compatible headers when re-saving assistant defaults', async () => {
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-openai-compatible-headers-'))
   const homeRoot = path.join(tempRoot, 'home')
   const vaultRoot = path.join(homeRoot, 'vault')
@@ -2862,7 +2862,6 @@ test.sequential('setup preserves saved OpenAI-compatible headers when re-saving 
     assert.equal(operatorConfig?.assistant?.backend?.adapter, 'openai-compatible')
     assert.equal(operatorConfig?.assistant?.backend?.model, 'gpt-oss:20b')
     assert.deepEqual(operatorConfig?.assistant?.backend?.headers, {
-      Authorization: 'Bearer override-token',
       'X-Foo': 'bar',
     })
   } finally {

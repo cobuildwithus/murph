@@ -7,6 +7,7 @@ import {
 } from './assistant-cli-contracts.js'
 import {
   normalizeAssistantHeaders,
+  normalizeAssistantPersistedHeaders,
   normalizeAssistantProviderConfig,
   type AssistantProviderConfig,
   type AssistantProviderConfigInput,
@@ -108,6 +109,24 @@ export const normalizeAssistantBackendTarget = normalizeAssistantModelTarget
 export const assistantBackendTargetToProviderConfigInput =
   assistantModelTargetToProviderConfigInput
 export const assistantBackendTargetsEqual = assistantModelTargetsEqual
+
+export function sanitizeAssistantModelTargetForPersistence(
+  target: AssistantModelTarget | null | undefined,
+): AssistantModelTarget | null {
+  const normalized = normalizeAssistantModelTarget(target)
+
+  if (!normalized || normalized.adapter !== 'openai-compatible') {
+    return normalized
+  }
+
+  return assistantModelTargetSchema.parse({
+    ...normalized,
+    headers: normalizeAssistantPersistedHeaders(normalized.headers),
+  })
+}
+
+export const sanitizeAssistantBackendTargetForPersistence =
+  sanitizeAssistantModelTargetForPersistence
 
 function convertAssistantProviderConfigToModelTarget(
   config: AssistantProviderConfig,

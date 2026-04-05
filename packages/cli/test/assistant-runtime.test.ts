@@ -1519,7 +1519,7 @@ test('scanAssistantInboxOnce skips completed captures, waits for parsers, routes
   ])
 })
 
-test('assistant operator config keeps nested provider defaults across unrelated writes', async () => {
+test('assistant operator config keeps nested provider defaults across unrelated writes while scrubbing secret headers', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-config-'))
   const homeRoot = path.join(parent, 'home')
   cleanupPaths.push(parent)
@@ -1585,7 +1585,6 @@ test('assistant operator config keeps nested provider defaults across unrelated 
   assert.equal(providerDefaults?.apiKeyEnv, 'OLLAMA_API_KEY')
   assert.equal(providerDefaults?.providerName, 'ollama')
   assert.deepEqual(providerDefaults?.headers, {
-    Authorization: 'Bearer override-token',
     'X-Foo': 'bar',
   })
   assert.equal(defaults?.selfDeliveryTargets?.telegram?.deliveryTarget, 'chat-1')
@@ -1605,7 +1604,6 @@ test('assistant operator config keeps nested provider defaults across unrelated 
     apiKeyEnv: 'OLLAMA_API_KEY',
     providerName: 'ollama',
     headers: {
-      Authorization: 'Bearer override-token',
       'X-Foo': 'bar',
     },
     reasoningEffort: null,
@@ -1665,9 +1663,7 @@ test('updating the saved backend target replaces the previous backend cleanly', 
     endpoint: 'http://127.0.0.1:11434/v1',
     apiKeyEnv: 'OLLAMA_API_KEY',
     providerName: 'ollama',
-    headers: {
-      Authorization: 'Bearer override-token',
-    },
+    headers: null,
     reasoningEffort: null,
   })
 })
