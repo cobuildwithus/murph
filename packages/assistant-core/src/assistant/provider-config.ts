@@ -5,6 +5,7 @@ import type {
   AssistantSandbox,
 } from '../assistant-cli-contracts.js'
 import type { AssistantModelSpec } from '../model-harness.js'
+import { splitAssistantHeadersForPersistence } from './redaction.js'
 import {
   isAssistantOpenAIBaseUrl,
   normalizeNullableString,
@@ -245,8 +246,18 @@ export function serializeAssistantProviderOperatorDefaults(
     apiKeyEnv: normalized.apiKeyEnv,
     providerName: normalized.providerName,
     headers:
-      normalized.provider === 'openai-compatible' ? normalized.headers : null,
+      normalized.provider === 'openai-compatible'
+        ? normalizeAssistantPersistedHeaders(normalized.headers)
+        : null,
   }
+}
+
+export function normalizeAssistantPersistedHeaders(
+  headers: Record<string, string> | null | undefined,
+): Record<string, string> | null {
+  const normalizedHeaders = normalizeAssistantHeaders(headers)
+
+  return splitAssistantHeadersForPersistence(normalizedHeaders).persistedHeaders
 }
 
 export function assistantProviderConfigsEqual(

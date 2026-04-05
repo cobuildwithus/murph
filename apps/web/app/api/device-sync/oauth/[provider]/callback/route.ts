@@ -44,7 +44,7 @@ export async function GET(
     }
 
     console.error("Hosted device-sync OAuth callback failed unexpectedly.", {
-      error,
+      errorType: describeHostedDeviceSyncCallbackErrorType(error),
       provider: providerName,
     });
     return callbackHtml(
@@ -53,4 +53,20 @@ export async function GET(
       500,
     );
   }
+}
+
+function describeHostedDeviceSyncCallbackErrorType(error: unknown): string {
+  if (error instanceof Error) {
+    const constructorName = error.constructor?.name;
+
+    return typeof constructorName === "string" && constructorName.length > 0
+      ? constructorName
+      : (error.name || "Error");
+  }
+
+  if (Array.isArray(error)) {
+    return "array";
+  }
+
+  return error === null ? "null" : typeof error;
 }

@@ -1,4 +1,4 @@
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { z } from 'zod'
@@ -12,6 +12,7 @@ import {
   assistantBackendTargetToProviderConfigInput,
   createAssistantBackendTarget,
   normalizeAssistantBackendTarget,
+  sanitizeAssistantBackendTargetForPersistence,
   type AssistantBackendTarget,
 } from './assistant-backend.js'
 import {
@@ -36,6 +37,8 @@ export {
 const OPERATOR_CONFIG_SCHEMA = 'murph.operator-config.v1'
 const OPERATOR_CONFIG_DIRECTORY = '.murph'
 const OPERATOR_CONFIG_PATH = path.join(OPERATOR_CONFIG_DIRECTORY, 'config.json')
+const OPERATOR_CONFIG_DIRECTORY_MODE = 0o700
+const OPERATOR_CONFIG_FILE_MODE = 0o600
 export const VAULT_ENV = 'VAULT'
 export const VAULT_ENV_KEYS = [VAULT_ENV] as const
 
@@ -319,12 +322,7 @@ export async function saveDefaultVaultConfig(
   )
   const configPath = resolveOperatorConfigPath(homeDirectory)
 
-  await mkdir(path.dirname(configPath), { recursive: true })
-  await writeFile(
-    configPath,
-    `${JSON.stringify(serializeOperatorConfigForWrite(config), null, 2)}\n`,
-    'utf8',
-  )
+  await writeOperatorConfigFile(configPath, config)
 
   return config
 }
@@ -342,12 +340,7 @@ export async function saveAssistantOperatorDefaultsPatch(
   )
   const configPath = resolveOperatorConfigPath(homeDirectory)
 
-  await mkdir(path.dirname(configPath), { recursive: true })
-  await writeFile(
-    configPath,
-    `${JSON.stringify(serializeOperatorConfigForWrite(config), null, 2)}\n`,
-    'utf8',
-  )
+  await writeOperatorConfigFile(configPath, config)
 
   return config
 }
@@ -365,14 +358,50 @@ export async function saveHostedAssistantConfig(
   )
   const configPath = resolveOperatorConfigPath(homeDirectory)
 
-  await mkdir(path.dirname(configPath), { recursive: true })
+  await writeOperatorConfigFile(configPath, config)
+
+  return config
+}
+
+async function writeOperatorConfigFile(
+  configPath: string,
+  config: OperatorConfig,
+): Promise<void> {
+  const directoryPath = path.dirname(configPath)
+
+  await mkdir(directoryPath, {
+    recursive: true,
+    mode: OPERATOR_CONFIG_DIRECTORY_MODE,
+  })
+  await applyOperatorConfigMode(directoryPath, OPERATOR_CONFIG_DIRECTORY_MODE)
   await writeFile(
     configPath,
     `${JSON.stringify(serializeOperatorConfigForWrite(config), null, 2)}\n`,
-    'utf8',
+    {
+      encoding: 'utf8',
+      mode: OPERATOR_CONFIG_FILE_MODE,
+    },
   )
+  await applyOperatorConfigMode(configPath, OPERATOR_CONFIG_FILE_MODE)
+}
 
-  return config
+async function applyOperatorConfigMode(
+  targetPath: string,
+  mode: number,
+): Promise<void> {
+  if (process.platform === 'win32') {
+    return
+  }
+
+  await chmod(targetPath, mode)
+}
+
+function normalizeAssistantBackendTargetForPersistence(
+  value: unknown,
+): AssistantBackendTarget | null {
+  return sanitizeAssistantBackendTargetForPersistence(
+    normalizeAssistantBackendTarget(value),
+  )
 }
 
 function buildOperatorConfig(
@@ -523,7 +552,7 @@ export function resolveAssistantProviderDefaults(
 export function resolveAssistantBackendTarget(
   defaults: AssistantOperatorDefaults | null | undefined,
 ): AssistantBackendTarget | null {
-  return normalizeAssistantBackendTarget(defaults?.backend ?? null)
+  return normalizeAssistantBackendTargetForPersistence(defaults?.backend ?? null)
 }
 
 export function buildAssistantProviderDefaultsPatch(input: {
@@ -535,11 +564,13 @@ export function buildAssistantProviderDefaultsPatch(input: {
     input.defaults,
     input.provider,
   )
-  const nextBackend = createAssistantBackendTarget({
-    provider: input.provider,
-    ...(savedProviderDefaults ? savedProviderDefaults : {}),
-    ...input.providerConfig,
-  })
+  const nextBackend = normalizeAssistantBackendTargetForPersistence(
+    createAssistantBackendTarget({
+      provider: input.provider,
+      ...(savedProviderDefaults ? savedProviderDefaults : {}),
+      ...input.providerConfig,
+    }),
+  )
 
   return {
     backend: nextBackend,
@@ -678,8 +709,8 @@ function mergeAssistantOperatorDefaults(
   return assistantOperatorDefaultsSchema.parse({
     backend:
       'backend' in patch
-        ? normalizeAssistantBackendTarget(patch.backend ?? null)
-        : normalizeAssistantBackendTarget(existing?.backend ?? null),
+        ? normalizeAssistantBackendTargetForPersistence(patch.backend ?? null)
+        : normalizeAssistantBackendTargetForPersistence(existing?.backend ?? null),
     identityId:
       'identityId' in patch ? patch.identityId : existing?.identityId ?? null,
     failoverRoutes:
@@ -731,7 +762,7 @@ function serializeAssistantOperatorDefaultsForWrite(
   }
 
   return {
-    backend: normalizeAssistantBackendTarget(defaults.backend ?? null),
+    backend: normalizeAssistantBackendTargetForPersistence(defaults.backend ?? null),
     identityId: defaults.identityId,
     failoverRoutes: defaults.failoverRoutes ?? null,
     account: defaults.account ?? null,

@@ -94,7 +94,7 @@ describe("hosted device-sync callback route", () => {
     expect(errorSpy).toHaveBeenCalledWith(
       "Hosted device-sync OAuth callback failed unexpectedly.",
       expect.objectContaining({
-        error: expect.any(Error),
+        errorType: "Error",
         provider: "oura",
       }),
     );
@@ -117,7 +117,7 @@ describe("hosted device-sync callback route", () => {
     expect(errorSpy).toHaveBeenCalledWith(
       "Hosted device-sync OAuth callback failed unexpectedly.",
       expect.objectContaining({
-        error: expect.any(Error),
+        errorType: "URIError",
         provider: null,
       }),
     );

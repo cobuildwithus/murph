@@ -126,7 +126,7 @@ test('serializeAssistantProviderSessionOptions sanitizes settings for the select
   )
 })
 
-test('buildAssistantProviderDefaultsPatch keeps OpenAI-compatible endpoint auth and headers when only the model changes', () => {
+test('buildAssistantProviderDefaultsPatch keeps OpenAI-compatible public headers when only the model changes', () => {
   assert.deepEqual(
     buildAssistantProviderDefaultsPatch({
       defaults: {
@@ -172,7 +172,6 @@ test('buildAssistantProviderDefaultsPatch keeps OpenAI-compatible endpoint auth 
         apiKeyEnv: 'OLLAMA_API_KEY',
         providerName: 'ollama',
         headers: {
-          Authorization: 'Bearer override-token',
           'X-Foo': 'bar',
         },
         reasoningEffort: null,
