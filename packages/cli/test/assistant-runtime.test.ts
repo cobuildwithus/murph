@@ -179,6 +179,100 @@ const DEFAULT_CODEX_REASONING_EFFORT = 'medium'
 const PHOTO_ONLY_CAPTURE_ID = 'cap-photo'
 const PHOTO_ONLY_OCCURED_AT = '2026-03-18T09:00:00Z'
 const PHOTO_ONLY_ATTACHMENT_BUFFER = Buffer.from([0xff, 0xd8, 0xff])
+
+function createMockCodexRuntimeSession(input: {
+  alias?: string | null
+  binding: {
+    actorId: string | null
+    channel: string | null
+    conversationKey: string | null
+    delivery:
+      | {
+          kind: 'participant' | 'thread'
+          target: string
+        }
+      | null
+    identityId: string | null
+    threadId: string | null
+    threadIsDirect: boolean | null
+  }
+  createdAt: string
+  lastTurnAt: string | null
+  providerBinding?: {
+    provider: 'codex-cli'
+    providerSessionId: string | null
+    providerState: {
+      resumeRouteId: string
+    } | null
+    providerOptions: {
+      approvalPolicy: 'never' | 'on-request' | 'on-failure' | 'untrusted' | null
+      model: string | null
+      oss: boolean
+      profile: string | null
+      reasoningEffort: 'low' | 'medium' | 'high' | 'xhigh' | null
+      sandbox: 'read-only' | 'workspace-write' | 'danger-full-access' | null
+    }
+  } | null
+  providerOptions?: {
+    approvalPolicy?: 'never' | 'on-request' | 'on-failure' | 'untrusted' | null
+    model?: string | null
+    oss?: boolean
+    profile?: string | null
+    reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | null
+    sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access' | null
+  }
+  resumeState?: {
+    providerSessionId: string | null
+    resumeRouteId: string | null
+  } | null
+  sessionId: string
+  turnCount: number
+  updatedAt: string
+}) {
+  const providerOptions = {
+    model: null,
+    reasoningEffort: null,
+    sandbox: 'read-only' as const,
+    approvalPolicy: 'never' as const,
+    profile: null,
+    oss: false,
+    ...input.providerOptions,
+  }
+  const resumeState =
+    input.resumeState ??
+    (input.providerBinding
+      ? {
+          providerSessionId: input.providerBinding.providerSessionId,
+          resumeRouteId: input.providerBinding.providerState?.resumeRouteId ?? null,
+        }
+      : null)
+
+  return {
+    alias: input.alias ?? null,
+    binding: input.binding,
+    createdAt: input.createdAt,
+    lastTurnAt: input.lastTurnAt,
+    provider: 'codex-cli' as const,
+    providerBinding: input.providerBinding ?? null,
+    providerOptions,
+    resumeState,
+    schema: 'murph.assistant-session.v4' as const,
+    sessionId: input.sessionId,
+    target: {
+      adapter: 'codex-cli' as const,
+      approvalPolicy: providerOptions.approvalPolicy,
+      codexCommand: null,
+      model: providerOptions.model,
+      oss: providerOptions.oss,
+      profile: providerOptions.profile,
+      reasoningEffort: providerOptions.reasoningEffort,
+      sandbox: providerOptions.sandbox,
+    },
+    turnCount: input.turnCount,
+    updatedAt: input.updatedAt,
+  }
+}
+
 const OPENAI_COMPATIBLE_OPERATOR_DEFAULTS = buildAssistantProviderDefaultsPatch({
   defaults: null,
   provider: 'openai-compatible',
@@ -926,19 +1020,7 @@ test('sendAssistantMessage can optionally deliver the provider reply over the ma
   runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(
     async (input: { message: string; sessionId: string }) => ({
       message: input.message,
-      session: {
-        schema: 'murph.assistant-session.v3',
-        sessionId: input.sessionId,
-        provider: 'codex-cli',
-        providerSessionId: 'thread-123',
-        providerOptions: {
-          model: null,
-          reasoningEffort: null,
-          sandbox: 'read-only',
-          approvalPolicy: 'never',
-          profile: null,
-          oss: false,
-        },
+      session: createMockCodexRuntimeSession({
         alias: 'imessage:bob',
         binding: {
           conversationKey: 'channel:imessage|actor:%2B15551234567',
@@ -953,10 +1035,15 @@ test('sendAssistantMessage can optionally deliver the provider reply over the ma
           },
         },
         createdAt: '2026-03-16T00:00:00.000Z',
-        updatedAt: '2026-03-16T00:00:01.000Z',
         lastTurnAt: '2026-03-16T00:00:01.000Z',
+        resumeState: {
+          providerSessionId: 'thread-123',
+          resumeRouteId: null,
+        },
+        sessionId: input.sessionId,
         turnCount: 1,
-      },
+        updatedAt: '2026-03-16T00:00:01.000Z',
+      }),
       delivery: {
         channel: 'imessage',
         target: '+15551234567',
@@ -1275,18 +1362,13 @@ test('sendAssistantMessage applies assistant defaults from operator config when 
           assistant: {
             backend: {
               adapter: 'codex-cli',
+              approvalPolicy: 'never',
+              codexCommand: '/opt/bin/codex',
               model: 'gpt-oss:20b',
-              endpoint: null,
-              apiKeyEnv: null,
-              providerName: null,
-              headers: null,
-              options: {
-                codexCommand: '/opt/bin/codex',
-                sandbox: 'danger-full-access',
-                approvalPolicy: 'never',
-                profile: 'ops',
-                oss: true,
-              },
+              oss: true,
+              profile: 'ops',
+              reasoningEffort: null,
+              sandbox: 'danger-full-access',
             },
             identityId: 'assistant:primary',
             account: {
@@ -1544,7 +1626,6 @@ test('assistant operator config keeps nested provider defaults across unrelated 
               Authorization: 'Bearer override-token',
               'X-Foo': 'bar',
             },
-            options: null,
           },
           identityId: 'assistant:primary',
           failoverRoutes: null,
@@ -1975,20 +2056,7 @@ test('scanAssistantAutomationOnce preserves document attachments before auto-rep
   })
   runtimeMocks.deliverAssistantMessageOverBinding.mockResolvedValue({
     message: 'logged it',
-    session: {
-      schema: 'murph.assistant-session.v3',
-      sessionId: 'session-doc-auto',
-      provider: 'codex-cli',
-      providerSessionId: 'thread-doc-auto',
-      providerOptions: {
-        model: null,
-        reasoningEffort: null,
-        sandbox: 'read-only',
-        approvalPolicy: 'never',
-        profile: null,
-        oss: false,
-      },
-      alias: null,
+    session: createMockCodexRuntimeSession({
       binding: {
         conversationKey: 'channel:imessage|thread:chat-doc-auto',
         channel: 'imessage',
@@ -2002,10 +2070,15 @@ test('scanAssistantAutomationOnce preserves document attachments before auto-rep
         },
       },
       createdAt: '2026-03-18T00:00:00.000Z',
-      updatedAt: '2026-03-18T00:00:01.000Z',
       lastTurnAt: '2026-03-18T00:00:01.000Z',
+      resumeState: {
+        providerSessionId: 'thread-doc-auto',
+        resumeRouteId: null,
+      },
+      sessionId: 'session-doc-auto',
       turnCount: 1,
-    },
+      updatedAt: '2026-03-18T00:00:01.000Z',
+    }),
     delivery: {
       channel: 'imessage',
       target: '+15550001111',
@@ -2273,20 +2346,7 @@ test('scanAssistantAutomationOnce preserves other enabled channels while drainin
 
     return {
       message: input.message,
-      session: {
-        schema: 'murph.assistant-session.v3',
-        sessionId: input.sessionId,
-        provider: 'codex-cli',
-        providerSessionId: threadId,
-        providerOptions: {
-          model: null,
-          reasoningEffort: null,
-          sandbox: 'read-only',
-          approvalPolicy: 'never',
-          profile: null,
-          oss: false,
-        },
-        alias: null,
+      session: createMockCodexRuntimeSession({
         binding: {
           conversationKey: `channel:${channel}|thread:${threadId}`,
           channel,
@@ -2300,10 +2360,15 @@ test('scanAssistantAutomationOnce preserves other enabled channels while drainin
           },
         },
         createdAt: '2026-03-18T00:00:00.000Z',
-        updatedAt: '2026-03-18T00:00:01.000Z',
         lastTurnAt: '2026-03-18T00:00:01.000Z',
+        resumeState: {
+          providerSessionId: threadId,
+          resumeRouteId: null,
+        },
+        sessionId: input.sessionId,
         turnCount: 1,
-      },
+        updatedAt: '2026-03-18T00:00:01.000Z',
+      }),
       delivery: {
         channel,
         target: actorId,
@@ -2546,20 +2611,7 @@ test('scanAssistantAutomationOnce keeps the reply cursor authoritative after bac
     const threadId = input.threadId ?? input.session?.binding?.threadId
     return {
       message: input.message,
-      session: {
-        schema: 'murph.assistant-session.v3',
-        sessionId: input.sessionId,
-        provider: 'codex-cli',
-        providerSessionId: threadId,
-        providerOptions: {
-          model: null,
-          reasoningEffort: null,
-          sandbox: 'read-only',
-          approvalPolicy: 'never',
-          profile: null,
-          oss: false,
-        },
-        alias: null,
+      session: createMockCodexRuntimeSession({
         binding: {
           conversationKey: `channel:${channel}|thread:${threadId}`,
           channel,
@@ -2573,10 +2625,15 @@ test('scanAssistantAutomationOnce keeps the reply cursor authoritative after bac
           },
         },
         createdAt: '2026-03-18T00:00:00.000Z',
-        updatedAt: '2026-03-18T00:00:01.000Z',
         lastTurnAt: '2026-03-18T00:00:01.000Z',
+        resumeState: {
+          providerSessionId: threadId,
+          resumeRouteId: null,
+        },
+        sessionId: input.sessionId,
         turnCount: 1,
-      },
+        updatedAt: '2026-03-18T00:00:01.000Z',
+      }),
       delivery: {
         channel,
         target: actorId,
@@ -2812,20 +2869,7 @@ test('scanAssistantAutomationOnce does not clear backlog when the first limited 
     const threadId = input.threadId ?? input.session?.binding?.threadId
     return {
       message: input.message,
-      session: {
-        schema: 'murph.assistant-session.v3',
-        sessionId: input.sessionId,
-        provider: 'codex-cli',
-        providerSessionId: threadId,
-        providerOptions: {
-          model: null,
-          reasoningEffort: null,
-          sandbox: 'read-only',
-          approvalPolicy: 'never',
-          profile: null,
-          oss: false,
-        },
-        alias: null,
+      session: createMockCodexRuntimeSession({
         binding: {
           conversationKey: `channel:${channel}|thread:${threadId}`,
           channel,
@@ -2839,10 +2883,15 @@ test('scanAssistantAutomationOnce does not clear backlog when the first limited 
           },
         },
         createdAt: '2026-03-18T00:00:00.000Z',
-        updatedAt: '2026-03-18T00:00:01.000Z',
         lastTurnAt: '2026-03-18T00:00:01.000Z',
+        resumeState: {
+          providerSessionId: threadId,
+          resumeRouteId: null,
+        },
+        sessionId: input.sessionId,
         turnCount: 1,
-      },
+        updatedAt: '2026-03-18T00:00:01.000Z',
+      }),
       delivery: {
         channel,
         target: actorId,
@@ -3236,20 +3285,7 @@ test('scanAssistantAutomationOnce keeps the auto-reply cursor pinned on deferred
   })
   runtimeMocks.deliverAssistantMessageOverBinding.mockResolvedValueOnce({
     message: 'unified reply',
-    session: {
-      schema: 'murph.assistant-session.v3',
-      sessionId: 'session-unified',
-      provider: 'codex-cli',
-      providerSessionId: 'thread-unified',
-      providerOptions: {
-        model: null,
-        reasoningEffort: null,
-        sandbox: 'read-only',
-        approvalPolicy: 'never',
-        profile: null,
-        oss: false,
-      },
-      alias: null,
+    session: createMockCodexRuntimeSession({
       binding: {
         conversationKey: 'channel:email|thread:thread-unified',
         channel: 'email',
@@ -3263,10 +3299,15 @@ test('scanAssistantAutomationOnce keeps the auto-reply cursor pinned on deferred
         },
       },
       createdAt: '2026-03-18T09:05:30.000Z',
-      updatedAt: '2026-03-18T09:05:30.000Z',
       lastTurnAt: '2026-03-18T09:05:30.000Z',
+      resumeState: {
+        providerSessionId: 'thread-unified',
+        resumeRouteId: null,
+      },
+      sessionId: 'session-unified',
       turnCount: 1,
-    },
+      updatedAt: '2026-03-18T09:05:30.000Z',
+    }),
     delivery: {
       channel: 'email',
       target: 'deferred@example.com',
@@ -3429,20 +3470,7 @@ test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound 
   })
   runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
     message: input.message,
-    session: {
-      schema: 'murph.assistant-session.v3',
-      sessionId: input.sessionId,
-      provider: 'codex-cli',
-      providerSessionId: 'thread-auto',
-      providerOptions: {
-        model: null,
-        reasoningEffort: null,
-        sandbox: 'read-only',
-        approvalPolicy: 'never',
-        profile: null,
-        oss: false,
-      },
-      alias: null,
+    session: createMockCodexRuntimeSession({
       binding: {
         conversationKey: 'channel:imessage|thread:chat-2',
         channel: 'imessage',
@@ -3456,10 +3484,15 @@ test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound 
         },
       },
       createdAt: '2026-03-18T00:00:00.000Z',
-      updatedAt: '2026-03-18T00:00:01.000Z',
       lastTurnAt: '2026-03-18T00:00:01.000Z',
+      resumeState: {
+        providerSessionId: 'thread-auto',
+        resumeRouteId: null,
+      },
+      sessionId: input.sessionId,
       turnCount: 1,
-    },
+      updatedAt: '2026-03-18T00:00:01.000Z',
+    }),
     delivery: {
       channel: 'imessage',
       target: '+15551234567',
@@ -4057,20 +4090,7 @@ test('scanAssistantAutoReplyOnce coalesces same-thread email backlog into one re
   })
   runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
     message: input.message,
-    session: {
-      schema: 'murph.assistant-session.v3',
-      sessionId: input.sessionId,
-      provider: 'codex-cli',
-      providerSessionId: 'thread-email-backlog',
-      providerOptions: {
-        model: null,
-        reasoningEffort: null,
-        sandbox: 'read-only',
-        approvalPolicy: 'never',
-        profile: null,
-        oss: false,
-      },
-      alias: null,
+    session: createMockCodexRuntimeSession({
       binding: {
         conversationKey: 'channel:email|identity:murph%40agentmail.to|thread:thread-1',
         channel: 'email',
@@ -4084,10 +4104,15 @@ test('scanAssistantAutoReplyOnce coalesces same-thread email backlog into one re
         },
       },
       createdAt: '2026-03-18T09:00:00.000Z',
-      updatedAt: '2026-03-18T09:00:00.000Z',
       lastTurnAt: '2026-03-18T09:00:00.000Z',
+      resumeState: {
+        providerSessionId: 'thread-email-backlog',
+        resumeRouteId: null,
+      },
+      sessionId: input.sessionId,
       turnCount: 1,
-    },
+      updatedAt: '2026-03-18T09:00:00.000Z',
+    }),
     delivery: {
       channel: 'email',
       target: 'thread-1',
@@ -4266,20 +4291,7 @@ test('scanAssistantAutoReplyOnce can use self-authored attachment prompts and su
     })
     runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
       message: input.message,
-      session: {
-        schema: 'murph.assistant-session.v3',
-        sessionId: input.sessionId,
-        provider: 'codex-cli',
-        providerSessionId: 'thread-self',
-        providerOptions: {
-          model: null,
-          reasoningEffort: null,
-          sandbox: 'read-only',
-          approvalPolicy: 'never',
-          profile: null,
-          oss: false,
-        },
-        alias: null,
+      session: createMockCodexRuntimeSession({
         binding: {
           conversationKey: 'channel:imessage|thread:self-chat',
           channel: 'imessage',
@@ -4293,10 +4305,15 @@ test('scanAssistantAutoReplyOnce can use self-authored attachment prompts and su
           },
         },
         createdAt: '2026-03-18T00:00:00.000Z',
-        updatedAt: '2026-03-18T00:00:00.000Z',
         lastTurnAt: '2026-03-18T00:00:00.000Z',
+        resumeState: {
+          providerSessionId: 'thread-self',
+          resumeRouteId: null,
+        },
+        sessionId: input.sessionId,
         turnCount: 1,
-      },
+        updatedAt: '2026-03-18T00:00:00.000Z',
+      }),
       delivery: {
         channel: 'imessage',
         target: '+15550000000',
@@ -5123,20 +5140,7 @@ test('scanAssistantAutoReplyOnce keeps grouped partial reply artifacts queued fo
   })
   runtimeMocks.deliverAssistantMessageOverBinding.mockResolvedValueOnce({
     message: 'recovered reply',
-    session: {
-      schema: 'murph.assistant-session.v3',
-      sessionId: 'session-partial',
-      provider: 'codex-cli',
-      providerSessionId: 'thread-partial',
-      providerOptions: {
-        model: null,
-        reasoningEffort: null,
-        sandbox: 'read-only',
-        approvalPolicy: 'never',
-        profile: null,
-        oss: false,
-      },
-      alias: null,
+    session: createMockCodexRuntimeSession({
       binding: {
         conversationKey: 'channel:email|thread:chat-partial',
         channel: 'email',
@@ -5150,10 +5154,15 @@ test('scanAssistantAutoReplyOnce keeps grouped partial reply artifacts queued fo
         },
       },
       createdAt: '2026-03-18T09:03:00.000Z',
-      updatedAt: '2026-03-18T09:03:00.000Z',
       lastTurnAt: '2026-03-18T09:03:00.000Z',
+      resumeState: {
+        providerSessionId: 'thread-partial',
+        resumeRouteId: null,
+      },
+      sessionId: 'session-partial',
       turnCount: 1,
-    },
+      updatedAt: '2026-03-18T09:03:00.000Z',
+    }),
     delivery: {
       channel: 'email',
       target: 'partial@example.com',
@@ -5213,20 +5222,7 @@ test('scanAssistantAutoReplyOnce does not resend after successful delivery when 
   runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(
     async (input: { message: string; sessionId: string }) => ({
       message: input.message,
-      session: {
-        schema: 'murph.assistant-session.v3',
-        sessionId: input.sessionId,
-        provider: 'codex-cli',
-        providerSessionId: 'thread-zero-artifact',
-        providerOptions: {
-          model: null,
-          reasoningEffort: null,
-          sandbox: 'read-only',
-          approvalPolicy: 'never',
-          profile: null,
-          oss: false,
-        },
-        alias: null,
+      session: createMockCodexRuntimeSession({
         binding: {
           conversationKey: 'channel:email|thread:chat-zero-artifact',
           channel: 'email',
@@ -5240,10 +5236,15 @@ test('scanAssistantAutoReplyOnce does not resend after successful delivery when 
           },
         },
         createdAt: '2026-03-18T09:03:00.000Z',
-        updatedAt: '2026-03-18T09:03:00.000Z',
         lastTurnAt: '2026-03-18T09:03:00.000Z',
+        resumeState: {
+          providerSessionId: 'thread-zero-artifact',
+          resumeRouteId: null,
+        },
+        sessionId: input.sessionId,
         turnCount: 1,
-      },
+        updatedAt: '2026-03-18T09:03:00.000Z',
+      }),
       delivery: {
         channel: 'email',
         target: 'zero@example.com',
@@ -5426,32 +5427,7 @@ test('scanAssistantAutoReplyOnce only auto-replies to Telegram direct chats', as
   })
   runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
     message: input.message,
-    session: {
-      schema: 'murph.assistant-session.v3',
-      sessionId: input.sessionId,
-      provider: 'codex-cli',
-      providerOptions: {
-        model: null,
-        reasoningEffort: null,
-        sandbox: 'read-only',
-        approvalPolicy: 'never',
-        profile: null,
-        oss: false,
-      },
-      providerBinding: {
-        provider: 'codex-cli',
-        providerSessionId: 'thread-telegram-scope',
-        providerState: null,
-        providerOptions: {
-          model: null,
-          reasoningEffort: null,
-          sandbox: 'read-only',
-          approvalPolicy: 'never',
-          profile: null,
-          oss: false,
-        },
-      },
-      alias: null,
+    session: createMockCodexRuntimeSession({
       binding: {
         conversationKey: 'channel:telegram|thread:123',
         channel: 'telegram',
@@ -5465,10 +5441,24 @@ test('scanAssistantAutoReplyOnce only auto-replies to Telegram direct chats', as
         },
       },
       createdAt: '2026-03-18T00:00:00.000Z',
-      updatedAt: '2026-03-18T00:00:01.000Z',
       lastTurnAt: '2026-03-18T00:00:01.000Z',
+      providerBinding: {
+        provider: 'codex-cli',
+        providerSessionId: 'thread-telegram-scope',
+        providerState: null,
+        providerOptions: {
+          model: null,
+          reasoningEffort: null,
+          sandbox: 'read-only',
+          approvalPolicy: 'never',
+          profile: null,
+          oss: false,
+        },
+      },
+      sessionId: input.sessionId,
       turnCount: 1,
-    },
+      updatedAt: '2026-03-18T00:00:01.000Z',
+    }),
     delivery: {
       channel: 'telegram',
       target: input.threadId,
@@ -5666,32 +5656,7 @@ test('scanAssistantAutoReplyOnce aborts stalled provider turns and retries the s
     })
   runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
     message: input.message,
-    session: {
-      schema: 'murph.assistant-session.v3',
-      sessionId: input.sessionId,
-      provider: 'codex-cli',
-      providerOptions: {
-        model: null,
-        reasoningEffort: null,
-        sandbox: 'read-only',
-        approvalPolicy: 'never',
-        profile: null,
-        oss: false,
-      },
-      providerBinding: {
-        provider: 'codex-cli',
-        providerSessionId: 'thread-stall-1',
-        providerState: null,
-        providerOptions: {
-          model: null,
-          reasoningEffort: null,
-          sandbox: 'read-only',
-          approvalPolicy: 'never',
-          profile: null,
-          oss: false,
-        },
-      },
-      alias: null,
+    session: createMockCodexRuntimeSession({
       binding: {
         conversationKey: 'channel:telegram|thread:thread-stall',
         channel: 'telegram',
@@ -5705,10 +5670,24 @@ test('scanAssistantAutoReplyOnce aborts stalled provider turns and retries the s
         },
       },
       createdAt: '2026-03-18T00:00:00.000Z',
-      updatedAt: '2026-03-18T00:00:01.000Z',
       lastTurnAt: '2026-03-18T00:00:01.000Z',
+      providerBinding: {
+        provider: 'codex-cli',
+        providerSessionId: 'thread-stall-1',
+        providerState: null,
+        providerOptions: {
+          model: null,
+          reasoningEffort: null,
+          sandbox: 'read-only',
+          approvalPolicy: 'never',
+          profile: null,
+          oss: false,
+        },
+      },
+      sessionId: input.sessionId,
       turnCount: 1,
-    },
+      updatedAt: '2026-03-18T00:00:01.000Z',
+    }),
     delivery: {
       channel: 'telegram',
       target: 'thread-stall',
@@ -6252,32 +6231,7 @@ test('scanAssistantAutoReplyOnce keeps scanning after a failed Telegram delivery
     .mockRejectedValueOnce(deliveryFailure)
     .mockImplementationOnce(async (input: any) => ({
       message: input.message,
-      session: {
-        schema: 'murph.assistant-session.v3',
-        sessionId: input.sessionId,
-        provider: 'codex-cli',
-        providerOptions: {
-          model: null,
-          reasoningEffort: null,
-          sandbox: 'read-only',
-          approvalPolicy: 'never',
-          profile: null,
-          oss: false,
-        },
-        providerBinding: {
-          provider: 'codex-cli',
-          providerSessionId: 'thread-telegram-failure',
-          providerState: null,
-          providerOptions: {
-            model: null,
-            reasoningEffort: null,
-            sandbox: 'read-only',
-            approvalPolicy: 'never',
-            profile: null,
-            oss: false,
-          },
-        },
-        alias: null,
+      session: createMockCodexRuntimeSession({
         binding: {
           conversationKey: `channel:telegram|thread:${input.threadId}`,
           channel: 'telegram',
@@ -6291,10 +6245,24 @@ test('scanAssistantAutoReplyOnce keeps scanning after a failed Telegram delivery
           },
         },
         createdAt: '2026-03-18T00:00:00.000Z',
-        updatedAt: '2026-03-18T00:00:01.000Z',
         lastTurnAt: '2026-03-18T00:00:01.000Z',
+        providerBinding: {
+          provider: 'codex-cli',
+          providerSessionId: 'thread-telegram-failure',
+          providerState: null,
+          providerOptions: {
+            model: null,
+            reasoningEffort: null,
+            sandbox: 'read-only',
+            approvalPolicy: 'never',
+            profile: null,
+            oss: false,
+          },
+        },
+        sessionId: input.sessionId,
         turnCount: 1,
-      },
+        updatedAt: '2026-03-18T00:00:01.000Z',
+      }),
       delivery: {
         channel: 'telegram',
         target: input.threadId,
@@ -6655,32 +6623,7 @@ test('scanAssistantAutoReplyOnce groups Telegram media albums into one assistant
   })
   runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
     message: input.message,
-    session: {
-      schema: 'murph.assistant-session.v3',
-      sessionId: input.sessionId,
-      provider: 'codex-cli',
-      providerOptions: {
-        model: null,
-        reasoningEffort: null,
-        sandbox: 'read-only',
-        approvalPolicy: 'never',
-        profile: null,
-        oss: false,
-      },
-      providerBinding: {
-        provider: 'codex-cli',
-        providerSessionId: 'thread-telegram-album',
-        providerState: null,
-        providerOptions: {
-          model: null,
-          reasoningEffort: null,
-          sandbox: 'read-only',
-          approvalPolicy: 'never',
-          profile: null,
-          oss: false,
-        },
-      },
-      alias: null,
+    session: createMockCodexRuntimeSession({
       binding: {
         conversationKey: 'channel:telegram|thread:123',
         channel: 'telegram',
@@ -6694,10 +6637,24 @@ test('scanAssistantAutoReplyOnce groups Telegram media albums into one assistant
         },
       },
       createdAt: '2026-03-18T00:00:00.000Z',
-      updatedAt: '2026-03-18T00:00:01.000Z',
       lastTurnAt: '2026-03-18T00:00:01.000Z',
+      providerBinding: {
+        provider: 'codex-cli',
+        providerSessionId: 'thread-telegram-album',
+        providerState: null,
+        providerOptions: {
+          model: null,
+          reasoningEffort: null,
+          sandbox: 'read-only',
+          approvalPolicy: 'never',
+          profile: null,
+          oss: false,
+        },
+      },
+      sessionId: input.sessionId,
       turnCount: 1,
-    },
+      updatedAt: '2026-03-18T00:00:01.000Z',
+    }),
     delivery: {
       channel: 'telegram',
       target: '123',
@@ -6883,32 +6840,7 @@ test('scanAssistantAutoReplyOnce does not group Telegram media albums across acc
   })
   runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
     message: input.message,
-    session: {
-      schema: 'murph.assistant-session.v3',
-      sessionId: input.sessionId,
-      provider: 'codex-cli',
-      providerOptions: {
-        model: null,
-        reasoningEffort: null,
-        sandbox: 'read-only',
-        approvalPolicy: 'never',
-        profile: null,
-        oss: false,
-      },
-      providerBinding: {
-        provider: 'codex-cli',
-        providerSessionId: 'thread-telegram-album-accounts',
-        providerState: null,
-        providerOptions: {
-          model: null,
-          reasoningEffort: null,
-          sandbox: 'read-only',
-          approvalPolicy: 'never',
-          profile: null,
-          oss: false,
-        },
-      },
-      alias: null,
+    session: createMockCodexRuntimeSession({
       binding: {
         conversationKey: `channel:telegram|thread:${input.threadId}`,
         channel: 'telegram',
@@ -6922,10 +6854,24 @@ test('scanAssistantAutoReplyOnce does not group Telegram media albums across acc
         },
       },
       createdAt: '2026-03-18T00:00:00.000Z',
-      updatedAt: '2026-03-18T00:00:01.000Z',
       lastTurnAt: '2026-03-18T00:00:01.000Z',
+      providerBinding: {
+        provider: 'codex-cli',
+        providerSessionId: 'thread-telegram-album-accounts',
+        providerState: null,
+        providerOptions: {
+          model: null,
+          reasoningEffort: null,
+          sandbox: 'read-only',
+          approvalPolicy: 'never',
+          profile: null,
+          oss: false,
+        },
+      },
+      sessionId: input.sessionId,
       turnCount: 1,
-    },
+      updatedAt: '2026-03-18T00:00:01.000Z',
+    }),
     delivery: {
       channel: 'telegram',
       target: input.threadId,
@@ -7059,20 +7005,7 @@ test('runAssistantAutomation merges routing and reply into one inbox decision pa
   runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(
     async (input: any) => ({
       message: input.message,
-      session: {
-        schema: 'murph.assistant-session.v3',
-        sessionId: input.sessionId,
-        provider: 'codex-cli',
-        providerSessionId: 'thread-auto',
-        providerOptions: {
-          model: null,
-          reasoningEffort: null,
-          sandbox: 'read-only',
-          approvalPolicy: 'never',
-          profile: null,
-          oss: false,
-        },
-        alias: null,
+      session: createMockCodexRuntimeSession({
         binding: {
           conversationKey: 'channel:imessage|thread:chat-2',
           channel: 'imessage',
@@ -7086,10 +7019,15 @@ test('runAssistantAutomation merges routing and reply into one inbox decision pa
           },
         },
         createdAt: '2026-03-18T00:00:00.000Z',
-        updatedAt: '2026-03-18T00:00:01.000Z',
         lastTurnAt: '2026-03-18T00:00:01.000Z',
+        resumeState: {
+          providerSessionId: 'thread-auto',
+          resumeRouteId: null,
+        },
+        sessionId: input.sessionId,
         turnCount: 1,
-      },
+        updatedAt: '2026-03-18T00:00:01.000Z',
+      }),
       delivery: {
         channel: 'imessage',
         target: '+15551234567',
@@ -7499,19 +7437,7 @@ test('runAssistantChat delegates to the Ink UI implementation', async () => {
     startedAt: '2026-03-17T00:00:00.000Z',
     stoppedAt: '2026-03-17T00:00:01.000Z',
     turns: 2,
-    session: {
-      schema: 'murph.assistant-session.v3',
-      sessionId: 'asst_123',
-      provider: 'codex-cli',
-      providerSessionId: 'thread-ink',
-      providerOptions: {
-        model: null,
-        reasoningEffort: null,
-        sandbox: 'read-only',
-        approvalPolicy: 'never',
-        profile: null,
-        oss: false,
-      },
+    session: createMockCodexRuntimeSession({
       alias: 'chat:bob',
       binding: {
         conversationKey: null,
@@ -7523,10 +7449,15 @@ test('runAssistantChat delegates to the Ink UI implementation', async () => {
         delivery: null,
       },
       createdAt: '2026-03-17T00:00:00.000Z',
-      updatedAt: '2026-03-17T00:00:01.000Z',
       lastTurnAt: '2026-03-17T00:00:01.000Z',
+      resumeState: {
+        providerSessionId: 'thread-ink',
+        resumeRouteId: null,
+      },
+      sessionId: 'asst_123',
       turnCount: 2,
-    },
+      updatedAt: '2026-03-17T00:00:01.000Z',
+    }),
   })
 
   const result = await runAssistantChat({

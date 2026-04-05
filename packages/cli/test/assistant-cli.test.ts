@@ -2111,10 +2111,20 @@ function createMockChatResult(sessionId: string) {
     stoppedAt: '2026-03-17T23:21:22.167Z',
     turns: 0,
     session: {
-      schema: 'murph.assistant-session.v3' as const,
+      schema: 'murph.assistant-session.v4' as const,
       sessionId,
+      target: {
+        adapter: 'codex-cli' as const,
+        approvalPolicy: 'never' as const,
+        codexCommand: null,
+        model: null,
+        oss: false,
+        profile: null,
+        reasoningEffort: null,
+        sandbox: 'read-only' as const,
+      },
+      resumeState: null,
       provider: 'codex-cli' as const,
-      providerSessionId: null,
       providerOptions: {
         model: null,
         reasoningEffort: null,

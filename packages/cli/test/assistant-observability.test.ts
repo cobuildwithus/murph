@@ -512,43 +512,23 @@ test('assistant doctor repairs assistant-state permissions but leaves inline leg
     sessionPath,
     `${JSON.stringify(
       {
-        schema: 'murph.assistant-session.v3',
+        schema: 'murph.assistant-session.v4',
         sessionId: 'asst_legacyrepair',
-        provider: 'openai-compatible',
-        providerOptions: {
-          model: 'gpt-4.1-mini',
-          reasoningEffort: null,
-          sandbox: null,
-          approvalPolicy: null,
-          profile: null,
-          oss: false,
-          baseUrl: 'https://api.example.test/v1',
+        target: {
+          adapter: 'openai-compatible',
           apiKeyEnv: 'OPENAI_API_KEY',
-          providerName: 'legacy',
+          endpoint: 'https://api.example.test/v1',
           headers: {
             Authorization: 'Bearer legacy-session-secret',
             'X-Visible': 'public-header',
           },
+          model: 'gpt-4.1-mini',
+          providerName: 'legacy',
+          reasoningEffort: null,
         },
-        providerBinding: {
-          provider: 'openai-compatible',
+        resumeState: {
           providerSessionId: 'provider-binding-1',
-          providerState: null,
-          providerOptions: {
-            model: 'gpt-4.1-mini',
-            reasoningEffort: null,
-            sandbox: null,
-            approvalPolicy: null,
-            profile: null,
-            oss: false,
-            baseUrl: 'https://api.example.test/v1',
-            apiKeyEnv: 'OPENAI_API_KEY',
-            providerName: 'legacy',
-            headers: {
-              Authorization: 'Bearer legacy-binding-secret',
-              'X-Binding-Visible': 'binding-public',
-            },
-          },
+          resumeRouteId: null,
         },
         alias: 'chat:legacy',
         binding: {

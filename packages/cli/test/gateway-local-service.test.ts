@@ -186,18 +186,19 @@ test('local gateway projection derives route-backed conversations and transcript
     await saveAssistantSession(
       vaultRoot,
       assistantSessionSchema.parse({
-        schema: 'murph.assistant-session.v3',
+        schema: 'murph.assistant-session.v4',
         sessionId: 'asst_gateway_thread_labs',
-        provider: 'codex-cli',
-        providerOptions: {
+        target: {
+          adapter: 'codex-cli',
+          approvalPolicy: null,
+          codexCommand: null,
           model: null,
+          oss: false,
+          profile: null,
           reasoningEffort: null,
           sandbox: null,
-          approvalPolicy: null,
-          profile: null,
-          oss: false,
         },
-        providerBinding: null,
+        resumeState: null,
         alias: 'Lab thread',
         binding: createAssistantBinding({
           actorId: 'contact:alex',

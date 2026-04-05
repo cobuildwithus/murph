@@ -162,7 +162,6 @@ test("assistant-core operator-config writes the canonical local config shape", a
           endpoint: null,
           headers: null,
           model: "gpt-5.4",
-          options: null,
           providerName: null,
         },
         selfDeliveryTargets: {
