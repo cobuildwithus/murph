@@ -1782,7 +1782,7 @@ test('createDefaultAssistantToolCatalog share-link tool exports attached protoco
       }
     | undefined
 
-  process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = 'https://share.example.test'
+  process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = 'https://share.example.test/join'
   process.env.HOSTED_SHARE_INTERNAL_TOKENS = 'share-token'
   global.fetch = vi.fn(async (input, init) => {
     recordedRequest = {

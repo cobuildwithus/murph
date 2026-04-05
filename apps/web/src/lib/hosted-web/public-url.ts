@@ -18,7 +18,6 @@ export function readHostedPublicBaseUrl(
 ): string | null {
   return (
     normalizeConfiguredBaseUrl(source.HOSTED_ONBOARDING_PUBLIC_BASE_URL)
-    ?? normalizeConfiguredBaseUrl(source.NEXT_PUBLIC_SITE_URL)
     ?? normalizeConfiguredBaseUrl(source.HOSTED_WEB_BASE_URL)
     ?? readHostedExecutionVercelProductionBaseUrl(source, {
       allowHttpLocalhost: true,

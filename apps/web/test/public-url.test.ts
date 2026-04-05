@@ -38,10 +38,6 @@ describe("hosted public URL helpers", () => {
       HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.test",
       HOSTED_WEB_BASE_URL: "https://web.example.test",
     }))).toBe("https://join.example.test");
-    expect(resolveHostedPublicBaseUrl(createProcessEnv({
-      NEXT_PUBLIC_SITE_URL: "https://site.example.test",
-      HOSTED_WEB_BASE_URL: "https://web.example.test",
-    }))).toBe("https://site.example.test");
   });
 
   it("derives the hosted device-sync route from the canonical public origin", () => {
