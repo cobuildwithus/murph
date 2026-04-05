@@ -5,11 +5,11 @@ Cloudflare-hosted execution plane for the hosted Murph path.
 This app is intentionally separate from `apps/web`:
 
 - `apps/web` stays the public onboarding, billing, OAuth, and webhook control plane.
-- `apps/cloudflare` handles signed internal dispatch, per-user coordination, encrypted hosted bundle storage, and one-shot execution through `@murphai/assistant-runtime`.
+- `apps/cloudflare` handles Vercel OIDC-authenticated web control/dispatch, per-user coordination, encrypted hosted bundle storage, and one-shot execution through `@murphai/assistant-runtime`.
 
 ## Core responsibilities
 
-- verify signed internal dispatch from `apps/web`
+- verify Vercel OIDC-authenticated dispatch and control requests from `apps/web`
 - coordinate per-user runs through a `USER_RUNNER` Durable Object
 - store one encrypted hosted workspace snapshot in the existing `vault` bundle slot plus separately encrypted raw-artifact objects in the `BUNDLES` R2 bucket
 - perform durable hosted bootstrap explicitly on `member.activated`
@@ -67,9 +67,9 @@ Current worker routes:
 
 - `GET /health` returns a lightweight health payload and does not require the runtime secrets to be present
 - `GET /` returns the service banner payload
-- `POST /internal/dispatch` accepts only signed internal dispatch from `apps/web`
-- `GET /internal/users/:userId/status` is an operator/internal status route guarded by HMAC request signatures
-- `POST /internal/users/:userId/run` is an operator/internal manual-run route guarded by HMAC request signatures
+- `POST /internal/dispatch` accepts only Vercel OIDC-authenticated dispatch from `apps/web`
+- `GET /internal/users/:userId/status` is an internal status route guarded by Vercel OIDC workload identity
+- `POST /internal/users/:userId/run` is an internal manual-run route guarded by Vercel OIDC workload identity
 - `GET /internal/users/:userId/env` returns the configured per-user encrypted runner env key names (never the secret values)
 - `PUT /internal/users/:userId/env` merges or replaces the user's separately encrypted hosted env object
 - `DELETE /internal/users/:userId/env` clears the user's separately encrypted hosted env object without rewriting `agent-state`
@@ -82,7 +82,7 @@ The primary production path uses Cloudflare's native container support through a
 
 That means:
 
-- the Worker receives signed internal dispatch
+- the Worker receives Vercel OIDC-authenticated dispatch and control requests
 - the per-user Durable Object keeps queue/process state in its SQLite storage tables (`runner_meta`, `pending_events`, `consumed_events`, and `poisoned_events`) instead of one serialized record blob
 - the Worker's internal control routes call direct Durable Object methods such as `dispatch`, `commit`, `finalizeCommit`, `status`, and per-user env updates instead of routing those control hops back through worker-local `fetch()` URLs
 - the per-user Durable Object invokes a same-name `RunnerContainer` instance on demand
@@ -147,7 +147,7 @@ The Cloudflare app now keeps two focused Vitest lanes:
 
 ## Operational notes
 
-- The worker never stores plaintext vault material in Durable Object storage. It stores only per-user coordination state plus encrypted bundle references. Sensitive hosted dispatch bodies now stay out of Durable Object SQLite rows: the queue stores only `payload_key` references while reconstructable or sensitive payload bodies live in separately encrypted transient blobs.
+- The worker never stores plaintext vault material in Durable Object storage. It stores only per-user coordination state plus encrypted bundle references. Sensitive hosted dispatch bodies now stay out of Durable Object SQLite rows: the queue stores only `payload_key` references while reconstructable or sensitive payload bodies live in separately encrypted transient blobs, and the hosted web outbox now stages reference-backed dispatch bodies into the same Cloudflare-owned encrypted dispatch-payload store instead of reconstructing them from Postgres in the steady state.
 - Hosted assistant provider selection now has one explicit durable seam: a top-level `hostedAssistant` config in the operator config artifact. That durable hosted profile is the only persisted hosted assistant source of truth, while raw credentials still stay in Worker secrets or the separately encrypted per-user env object.
 - Hosted bundle reads/writes and per-user env object updates happen outside the Durable Object's SQLite mutation step; only the final bundle-ref/version compare-and-swap is committed inside Durable Object storage.
 - Hosted execution now writes one encrypted workspace snapshot back through the existing `vault` bundle slot. That workspace snapshot includes canonical `vault/**`, durable `vault/.runtime/**`, sibling `assistant-state/**`, and the minimal operator-home config needed for explicit `member.activated` bootstrap. Large raw artifacts under `vault/raw/**` are externalized into separately encrypted content-addressed objects behind opaque object keys; the runner restores inline workspace files first, only materializes the externalized artifact paths the current run actually needs, and preserves untouched artifact refs across later snapshots so old media does not churn through download/upload cycles just to stay referenced. Per-user runner env overrides live in their own encrypted hosted object behind an opaque per-user locator.

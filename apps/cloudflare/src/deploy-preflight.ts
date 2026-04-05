@@ -1,3 +1,5 @@
+import { HOSTED_WORKER_REQUIRED_SECRET_NAMES } from "./deploy-automation/secrets.ts";
+
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
 const REQUIRED_DEPLOY_ENV_NAMES = [
@@ -30,6 +32,14 @@ export function listMissingHostedDeployEnvironment(
 
   if (input.deployWorker && normalizeString(source.HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME) === null) {
     missing.push("HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME");
+  }
+
+  if (input.deployWorker) {
+    for (const name of HOSTED_WORKER_REQUIRED_SECRET_NAMES) {
+      if (normalizeString(source[name]) === null) {
+        missing.push(name);
+      }
+    }
   }
 
   if (

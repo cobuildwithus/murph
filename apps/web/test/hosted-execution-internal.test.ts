@@ -10,6 +10,7 @@ import {
 
 describe("hosted execution internal auth", () => {
   const originalSchedulerTokens = process.env.HOSTED_EXECUTION_SCHEDULER_TOKENS;
+  const originalCronSecret = process.env.CRON_SECRET;
   const originalWebInternalSigningSecret = process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET;
 
   afterEach(() => {
@@ -17,6 +18,12 @@ describe("hosted execution internal auth", () => {
       delete process.env.HOSTED_EXECUTION_SCHEDULER_TOKENS;
     } else {
       process.env.HOSTED_EXECUTION_SCHEDULER_TOKENS = originalSchedulerTokens;
+    }
+
+    if (originalCronSecret === undefined) {
+      delete process.env.CRON_SECRET;
+    } else {
+      process.env.CRON_SECRET = originalCronSecret;
     }
 
     if (originalWebInternalSigningSecret === undefined) {
@@ -28,12 +35,13 @@ describe("hosted execution internal auth", () => {
 
   it("fails when scheduler tokens are not configured", () => {
     delete process.env.HOSTED_EXECUTION_SCHEDULER_TOKENS;
+    delete process.env.CRON_SECRET;
 
     expect(() =>
       requireHostedExecutionSchedulerToken(
         new Request("https://join.example.test/api/internal/hosted-execution/outbox/cron"),
       ),
-    ).toThrow("HOSTED_EXECUTION_SCHEDULER_TOKENS must be configured for scheduled hosted execution drains.");
+    ).toThrow("HOSTED_EXECUTION_SCHEDULER_TOKENS or CRON_SECRET must be configured for scheduled hosted execution drains.");
   });
 
   it("accepts configured scheduler bearer tokens after normalizing the authorization header", () => {
@@ -49,6 +57,46 @@ describe("hosted execution internal auth", () => {
         }),
       }),
     ).not.toThrow();
+  });
+
+  it("accepts the CRON_SECRET fallback when scheduler tokens are unset", () => {
+    delete process.env.HOSTED_EXECUTION_SCHEDULER_TOKENS;
+    process.env.CRON_SECRET = "cron-secret";
+
+    expect(() =>
+      requireHostedExecutionSchedulerToken(
+        new Request("https://join.example.test/api/internal/hosted-execution/outbox/cron", {
+          headers: {
+            authorization: "Bearer cron-secret",
+          },
+        }),
+      ),
+    ).not.toThrow();
+  });
+
+  it("prefers explicit scheduler tokens over the CRON_SECRET fallback", () => {
+    process.env.HOSTED_EXECUTION_SCHEDULER_TOKENS = "current-scheduler,previous-scheduler";
+    process.env.CRON_SECRET = "cron-secret";
+
+    expect(() =>
+      requireHostedExecutionSchedulerToken(
+        new Request("https://join.example.test/api/internal/hosted-execution/outbox/cron", {
+          headers: {
+            authorization: "Bearer current-scheduler",
+          },
+        }),
+      ),
+    ).not.toThrow();
+
+    expect(() =>
+      requireHostedExecutionSchedulerToken(
+        new Request("https://join.example.test/api/internal/hosted-execution/outbox/cron", {
+          headers: {
+            authorization: "Bearer cron-secret",
+          },
+        }),
+      ),
+    ).toThrow("Unauthorized hosted execution request.");
   });
 
   it("requires the bound hosted execution user header for user-scoped internal routes", () => {

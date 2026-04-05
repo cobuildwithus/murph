@@ -11,7 +11,7 @@ Hosted integration control plane for Vercel deployments.
 - hosted Linq webhook ingress plus sparse chat routing state
 - per-user connection ownership mapping
 - public connection metadata plus token-audit history
-- durable `execution_outbox` records for Cloudflare-bound hosted execution intents
+- durable `execution_outbox` records for Cloudflare-bound hosted execution intents, persisted as immutable inline envelopes or staged Cloudflare-owned dispatch refs
 - immutable hosted AI usage rows imported after successful hosted commits, with optional downstream Stripe token metering
 - local-agent pairing plus sparse signal/token routes for hosted integrations
 - internal runner snapshot/apply APIs for hosted device-sync state hydration and reconciliation
@@ -100,7 +100,7 @@ Set these under `Settings -> Environment Variables` in the Vercel project that d
 
 - Enable Vercel OIDC for the project so `apps/web` can present bearer workload identity to Cloudflare on hosted execution dispatch/control requests.
 - `HOSTED_WEB_INTERNAL_SIGNING_SECRET`: generate a strong random secret and use the exact same value in Vercel and the Cloudflare hosted-execution worker for Cloudflare-owned callback routes such as the hosted device-sync connect-link bridge.
-- `HOSTED_EXECUTION_SCHEDULER_TOKENS`: generate a distinct comma-separated bearer-token set for external schedulers that call the hosted cron routes directly.
+- `HOSTED_EXECUTION_SCHEDULER_TOKENS`: generate a distinct comma-separated bearer-token set for external schedulers that call the hosted cron routes directly. Vercel cron `CRON_SECRET` remains an accepted fallback for the built-in cron invocations.
 - `HOSTED_SHARE_INTERNAL_TOKENS`: generate a distinct comma-separated bearer-token set for trusted server-to-server hosted share routes.
 - `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET`: generate a distinct strong random secret and use the same value in Vercel plus whichever trusted auth proxy or middleware signs the hosted user assertion headers. `apps/web` verifies that signature before trusting the lower-level assertion-backed device-sync bridge routes.
 
@@ -153,7 +153,7 @@ pnpm --dir apps/web prisma:migrate:deploy
 - `pnpm --dir apps/web build` and `pnpm --dir apps/web start` keep using `apps/web/.next`.
 - `pnpm --dir apps/web test` is the fast hosted-web Vitest lane. `pnpm --dir apps/web verify` adds the app-local typecheck, lint, a cold-boot `next dev` smoke under `apps/web/.next-smoke`, and the production build so the heavier preflight checks stay out of the default unit-test loop.
 - Treat `apps/web/.next`, `apps/web/.next-dev`, and `apps/web/.next-smoke` as generated local artifacts that must stay out of commits and raw source bundles.
-- Hosted execution outbox draining and hosted AI usage metering now require an authenticated external scheduler that sends `Authorization: Bearer <HOSTED_EXECUTION_SCHEDULER_TOKENS entry>` to the internal cron routes. Cloudflare-owned hosted device connect-link requests now reuse the shared HMAC signing secret instead of a separate web-internal bearer token.
+- Hosted execution outbox draining and hosted AI usage metering now require an authenticated external scheduler that sends `Authorization: Bearer <HOSTED_EXECUTION_SCHEDULER_TOKENS entry>` to the internal cron routes. Vercel cron `CRON_SECRET` remains an accepted fallback for the built-in scheduler path. Cloudflare-owned hosted device connect-link requests now reuse the shared HMAC signing secret instead of a separate web-internal bearer token.
 - Hosted Stripe webhooks now attempt inline reconciliation for the just-recorded event, then best-effort drain the matching hosted execution outbox rows immediately. The Stripe cron route remains the recovery path for failed or deferred Stripe facts and RevNet follow-up only; first-contact welcomes now commit as assistant outbox intents during hosted `member.activated` handling and drain afterward through the same post-commit assistant-delivery path as other hosted assistant sends.
 
 ## Main routes

@@ -10,7 +10,6 @@ import {
   DEFAULT_HOSTED_EXECUTION_EMAIL_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_SIDE_EFFECTS_BASE_URL,
   HOSTED_EXECUTION_CALLBACK_HOSTS,
-  HOSTED_EXECUTION_PROXY_HOSTS,
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
   readHostedExecutionWebControlPlaneEnvironment,
@@ -50,10 +49,7 @@ export function normalizeHostedAssistantRuntimeConfig(
 ): NormalizedHostedAssistantRuntimeConfig {
   const forwardedEnv = { ...(input?.forwardedEnv ?? {}) };
   const callbackBaseUrls = resolveHostedRuntimeCallbackBaseUrls(forwardedEnv);
-  const webControlPlane = readHostedExecutionWebControlPlaneEnvironment(forwardedEnv, {
-    allowHttpHosts: Object.values(HOSTED_EXECUTION_PROXY_HOSTS),
-    allowHttpLocalhost: true,
-  });
+  const webControlPlane = readHostedExecutionWebControlPlaneEnvironment(forwardedEnv);
 
   return {
     artifactsBaseUrl: callbackBaseUrls.artifactsBaseUrl,
