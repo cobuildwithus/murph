@@ -680,8 +680,17 @@ run_supervised() {
     exec "$@"
   fi
 
-  "$@" &
-  child_pid=$!
+  if [ -t 0 ]; then
+    "$@" &
+    child_pid=$!
+  elif exec 3<&0 2>/dev/null; then
+    "$@" <&3 &
+    child_pid=$!
+    exec 3<&-
+  else
+    "$@" </dev/null &
+    child_pid=$!
+  fi
 
   forward_signal() {
     local signal_name="$1"
@@ -3856,6 +3865,134 @@ done
 
     assert.equal(childStillAlive, false)
     assert.equal(result.code === 130 || result.signal === 'SIGINT', true)
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('CLI shim preserves piped stdin for supervised child launches', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-stdin-'))
+  const repoRoot = path.join(tempRoot, 'repo')
+  const cliBinPath = path.join(repoRoot, 'packages', 'cli', 'dist', 'bin.js')
+  const shimPath = path.join(tempRoot, 'vault-cli')
+  const fakeBinDirectory = path.join(tempRoot, 'bin')
+
+  try {
+    await mkdir(path.dirname(cliBinPath), { recursive: true })
+    for (const packageName of [
+      'contracts',
+      'core',
+      'device-syncd',
+      'importers',
+      'inboxd',
+      'parsers',
+      'query',
+      'runtime-state',
+    ]) {
+      const packageDistIndexPath = path.join(
+        repoRoot,
+        'packages',
+        packageName,
+        'dist',
+        'index.js',
+      )
+      await mkdir(path.dirname(packageDistIndexPath), { recursive: true })
+      await writeFile(packageDistIndexPath, 'export {}\n', 'utf8')
+    }
+
+    await writeRequiredCliDistSupportFiles(path.join(repoRoot, 'packages', 'cli'))
+    await writeFile(cliBinPath, 'console.log("built-ok")\n', 'utf8')
+    await writeExecutable(
+      path.join(fakeBinDirectory, 'node'),
+      `#!/usr/bin/env bash
+set -euo pipefail
+cat
+`,
+    )
+    await writeExecutable(
+      shimPath,
+      buildExpectedCliShimScript(cliBinPath, 'vault-cli'),
+    )
+
+    const result = await execFileAsync(
+      'bash',
+      [
+        '-lc',
+        `printf '{' | ${JSON.stringify(shimPath)} recipe upsert --input -`,
+      ],
+      {
+        env: withoutNodeV8Coverage({
+          ...process.env,
+          PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
+        }),
+      },
+    )
+
+    assert.equal(result.stdout.trim(), '{')
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('CLI shim falls back to /dev/null when stdin is closed', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-closed-stdin-'))
+  const repoRoot = path.join(tempRoot, 'repo')
+  const cliBinPath = path.join(repoRoot, 'packages', 'cli', 'dist', 'bin.js')
+  const shimPath = path.join(tempRoot, 'vault-cli')
+  const fakeBinDirectory = path.join(tempRoot, 'bin')
+
+  try {
+    await mkdir(path.dirname(cliBinPath), { recursive: true })
+    for (const packageName of [
+      'contracts',
+      'core',
+      'device-syncd',
+      'importers',
+      'inboxd',
+      'parsers',
+      'query',
+      'runtime-state',
+    ]) {
+      const packageDistIndexPath = path.join(
+        repoRoot,
+        'packages',
+        packageName,
+        'dist',
+        'index.js',
+      )
+      await mkdir(path.dirname(packageDistIndexPath), { recursive: true })
+      await writeFile(packageDistIndexPath, 'export {}\n', 'utf8')
+    }
+
+    await writeRequiredCliDistSupportFiles(path.join(repoRoot, 'packages', 'cli'))
+    await writeFile(cliBinPath, 'console.log("built-ok")\n', 'utf8')
+    await writeExecutable(
+      path.join(fakeBinDirectory, 'node'),
+      `#!/usr/bin/env bash
+set -euo pipefail
+printf 'stdin-closed-ok\\n'
+`,
+    )
+    await writeExecutable(
+      shimPath,
+      buildExpectedCliShimScript(cliBinPath, 'vault-cli'),
+    )
+
+    const result = await execFileAsync(
+      'bash',
+      [
+        '-lc',
+        `exec 0<&-; ${JSON.stringify(shimPath)} recipe upsert --input -`,
+      ],
+      {
+        env: withoutNodeV8Coverage({
+          ...process.env,
+          PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
+        }),
+      },
+    )
+
+    assert.equal(result.stdout.trim(), 'stdin-closed-ok')
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }

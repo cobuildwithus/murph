@@ -352,8 +352,17 @@ run_supervised() {
     exec "$@"
   fi
 
-  "$@" &
-  child_pid=$!
+  if [ -t 0 ]; then
+    "$@" &
+    child_pid=$!
+  elif exec 3<&0 2>/dev/null; then
+    "$@" <&3 &
+    child_pid=$!
+    exec 3<&-
+  else
+    "$@" </dev/null &
+    child_pid=$!
+  fi
 
   forward_signal() {
     local signal_name="$1"
