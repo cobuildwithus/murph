@@ -28,11 +28,13 @@ export { searchDerivedKnowledgeGraph } from './knowledge-search.ts'
 export const DERIVED_KNOWLEDGE_ROOT = 'derived/knowledge'
 export const DERIVED_KNOWLEDGE_PAGES_ROOT = `${DERIVED_KNOWLEDGE_ROOT}/pages`
 export const DERIVED_KNOWLEDGE_INDEX_PATH = `${DERIVED_KNOWLEDGE_ROOT}/index.md`
+export const DERIVED_KNOWLEDGE_LOG_PATH = `${DERIVED_KNOWLEDGE_ROOT}/log.md`
 
 export interface DerivedKnowledgeNode {
   attributes: FrontmatterObject
   body: string
   compiledAt: string | null
+  librarySlugs: string[]
   pageType: string | null
   relativePath: string
   relatedSlugs: string[]
@@ -70,6 +72,7 @@ export interface DerivedKnowledgeSearchFilters {
 
 export interface DerivedKnowledgeSearchHit {
   compiledAt: string | null
+  librarySlugs: string[]
   matchedTerms: string[]
   pagePath: string
   pageType: string | null
@@ -223,6 +226,11 @@ export function renderDerivedKnowledgeIndex(
       if (node.sourcePaths.length > 0) {
         details.push(`sources: ${node.sourcePaths.length}`)
       }
+      if (node.librarySlugs.length > 0) {
+        details.push(
+          `library: ${node.librarySlugs.map((slug) => `\`${slug}\``).join(', ')}`,
+        )
+      }
       if (details.length > 0) {
         lines.push(`  - ${details.join(' · ')}`)
       }
@@ -279,6 +287,9 @@ function toDerivedKnowledgeNode(
       attributes,
       body: narrativeBody,
       compiledAt: firstString(source, ['compiledAt']),
+      librarySlugs: orderedUniqueStrings(
+        firstStringArray(source, ['librarySlugs']),
+      ),
       pageType: firstString(source, ['pageType']),
       relativePath,
       relatedSlugs,

@@ -119,12 +119,16 @@ export type {
 } from "./export-pack.ts";
 export {
   readHealthLibraryGraph,
+  readHealthLibraryGraphWithIssues,
   type HealthLibraryEntityType,
   type HealthLibraryGraph,
+  type HealthLibraryGraphIssue,
+  type HealthLibraryGraphReadResult,
   type HealthLibraryNode,
 } from "./health-library.ts";
 export {
   DERIVED_KNOWLEDGE_INDEX_PATH,
+  DERIVED_KNOWLEDGE_LOG_PATH,
   DERIVED_KNOWLEDGE_PAGES_ROOT,
   DERIVED_KNOWLEDGE_ROOT,
   readDerivedKnowledgeGraph,

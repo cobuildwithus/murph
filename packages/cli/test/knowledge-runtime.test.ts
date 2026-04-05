@@ -7,6 +7,7 @@ import {
   getKnowledgePage,
   lintKnowledgePages,
   searchKnowledgePages,
+  tailKnowledgeLog,
   upsertKnowledgePage,
 } from '@murphai/assistant-core/knowledge'
 
@@ -29,6 +30,22 @@ describe('upsertKnowledgePage', () => {
     const sourcePath = 'research/2026/04/sleep-note.md'
     await writeVaultFile(
       vaultRoot,
+      'bank/library/sleep-architecture.md',
+      [
+        '---',
+        'title: Sleep architecture',
+        'slug: sleep-architecture',
+        'entityType: biomarker',
+        '---',
+        '',
+        '# Sleep architecture',
+        '',
+        'Stable reference page.',
+        '',
+      ].join('\n'),
+    )
+    await writeVaultFile(
+      vaultRoot,
       sourcePath,
       '# Sleep note\n\nMagnesium seemed helpful on several recent nights.\n',
     )
@@ -49,6 +66,7 @@ describe('upsertKnowledgePage', () => {
           '- [[magnesium]]',
           '',
         ].join('\n'),
+        librarySlugs: ['sleep-architecture'],
         vault: vaultRoot,
         title: 'Sleep quality',
         sourcePaths: [sourcePath],
@@ -61,6 +79,7 @@ describe('upsertKnowledgePage', () => {
     )
 
     expect(result.page).toMatchObject({
+      librarySlugs: ['sleep-architecture'],
       pagePath: 'derived/knowledge/pages/sleep-quality.md',
       pageType: 'concept',
       relatedSlugs: ['magnesium'],
@@ -91,12 +110,32 @@ describe('upsertKnowledgePage', () => {
     expect(savedIndex).toContain('# Derived knowledge index')
     expect(savedIndex).toContain('Sleep quality')
 
+    const savedLog = await readFile(
+      path.join(vaultRoot, 'derived/knowledge/log.md'),
+      'utf8',
+    )
+    expect(savedLog).toContain('# Derived knowledge log')
+    expect(savedLog).toContain('upsert | Sleep quality')
+    expect(savedLog).toContain('librarySlugs: `sleep-architecture`')
+
     const shown = await getKnowledgePage({
       vault: vaultRoot,
       slug: 'sleep-quality',
     })
     expect(shown.page.markdown).toContain('# Sleep quality')
+    expect(shown.page.librarySlugs).toEqual(['sleep-architecture'])
     expect(shown.page.relatedSlugs).toEqual(['magnesium'])
+
+    const tailed = await tailKnowledgeLog({
+      vault: vaultRoot,
+      limit: 5,
+    })
+    expect(tailed.entries[0]).toMatchObject({
+      action: 'upsert',
+      title: 'Sleep quality',
+    })
+    expect(tailed.entries[0]?.block).toContain('librarySlugs: `sleep-architecture`')
+    expect(tailed.entries[0]?.block).toContain('slug: `sleep-quality`')
   })
 
   it('reuses existing source paths when refreshing without new source paths', async () => {
@@ -416,6 +455,166 @@ describe('upsertKnowledgePage', () => {
           severity: 'error',
         }),
         ]),
+    )
+  })
+
+  it('rejects unknown bank/library links during upsert and lints stale ones', async () => {
+    const vaultRoot = await createVaultRoot()
+    await writeVaultFile(
+      vaultRoot,
+      'research/2026/04/sleep-note.md',
+      '# Sleep note\n',
+    )
+
+    await expect(
+      upsertKnowledgePage({
+        body: '# Sleep quality\n\nBody.\n',
+        vault: vaultRoot,
+        title: 'Sleep quality',
+        librarySlugs: ['missing-library-page'],
+        sourcePaths: ['research/2026/04/sleep-note.md'],
+      }),
+    ).rejects.toMatchObject({
+      code: 'knowledge_invalid_library_slug',
+    })
+
+    await writeVaultFile(
+      vaultRoot,
+      'derived/knowledge/pages/sleep-quality.md',
+      [
+        '---',
+        'title: Sleep quality',
+        'slug: sleep-quality',
+        'pageType: concept',
+        'status: active',
+        'librarySlugs:',
+        '  - missing-library-page',
+        'sourcePaths:',
+        '  - research/2026/04/sleep-note.md',
+        '---',
+        '',
+        '# Sleep quality',
+        '',
+        'Body.',
+        '',
+      ].join('\n'),
+    )
+
+    const lint = await lintKnowledgePages({
+      vault: vaultRoot,
+    })
+
+    expect(lint.problems).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'invalid_library_slug',
+          slug: 'sleep-quality',
+          severity: 'warning',
+        }),
+      ]),
+    )
+  })
+
+  it('allows stale library links to be cleared during upsert and tolerates malformed unrelated library pages', async () => {
+    const vaultRoot = await createVaultRoot()
+    await writeVaultFile(
+      vaultRoot,
+      'research/2026/04/sleep-note.md',
+      '# Sleep note\n',
+    )
+    await writeVaultFile(
+      vaultRoot,
+      'bank/library/sleep-architecture.md',
+      [
+        '---',
+        'title: Sleep architecture',
+        'slug: sleep-architecture',
+        'entityType: biomarker',
+        '---',
+        '',
+        '# Sleep architecture',
+        '',
+      ].join('\n'),
+    )
+    await writeVaultFile(
+      vaultRoot,
+      'bank/library/broken.md',
+      [
+        '---',
+        'title: Broken',
+        'slug: broken',
+        '',
+        '# Broken',
+      ].join('\n'),
+    )
+    await writeVaultFile(
+      vaultRoot,
+      'derived/knowledge/pages/sleep-quality.md',
+      [
+        '---',
+        'title: Sleep quality',
+        'slug: sleep-quality',
+        'pageType: concept',
+        'status: active',
+        'librarySlugs:',
+        '  - missing-library-page',
+        'sourcePaths:',
+        '  - research/2026/04/sleep-note.md',
+        '---',
+        '',
+        '# Sleep quality',
+        '',
+        'Body.',
+        '',
+      ].join('\n'),
+    )
+
+    const cleared = await upsertKnowledgePage(
+      {
+        body: '# Sleep quality\n\nUpdated body.\n',
+        clearLibrarySlugs: true,
+        vault: vaultRoot,
+        slug: 'sleep-quality',
+      },
+      {
+        async saveText(input: { relativePath: string; content: string }) {
+          await writeVaultFile(vaultRoot, input.relativePath, input.content)
+        },
+      },
+    )
+
+    expect(cleared.page.librarySlugs).toEqual([])
+
+    const replaced = await upsertKnowledgePage(
+      {
+        body: '# Sleep quality\n\nUpdated again.\n',
+        clearLibrarySlugs: true,
+        librarySlugs: ['sleep-architecture'],
+        vault: vaultRoot,
+        slug: 'sleep-quality',
+      },
+      {
+        async saveText(input: { relativePath: string; content: string }) {
+          await writeVaultFile(vaultRoot, input.relativePath, input.content)
+        },
+      },
+    )
+
+    expect(replaced.page.librarySlugs).toEqual(['sleep-architecture'])
+
+    const lint = await lintKnowledgePages({
+      vault: vaultRoot,
+    })
+
+    expect(lint.problems).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'library_parse_frontmatter',
+          pagePath: 'bank/library/broken.md',
+          severity: 'warning',
+          slug: null,
+        }),
+      ]),
     )
   })
 

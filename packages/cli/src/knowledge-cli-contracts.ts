@@ -8,6 +8,7 @@ import { DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT } from '@murphai/query'
 
 export const knowledgePageReferenceSchema = z.object({
   compiledAt: isoTimestampSchema.nullable(),
+  librarySlugs: z.array(slugSchema),
   pagePath: pathSchema,
   pageType: z.string().min(1).nullable(),
   relatedSlugs: z.array(z.string().min(1)),
@@ -57,6 +58,21 @@ export const knowledgeSearchResultSchema = z.object({
   vault: pathSchema,
 })
 
+export const knowledgeLogEntrySchema = z.object({
+  action: z.string().min(1),
+  block: z.string().min(1),
+  occurredAt: isoTimestampSchema,
+  title: z.string().min(1),
+})
+
+export const knowledgeLogTailResultSchema = z.object({
+  count: z.number().int().nonnegative(),
+  entries: z.array(knowledgeLogEntrySchema),
+  limit: z.number().int().positive().max(200),
+  logPath: pathSchema,
+  vault: pathSchema,
+})
+
 export const knowledgeShowResultSchema = z.object({
   page: knowledgePageSchema,
   vault: pathSchema,
@@ -91,6 +107,8 @@ export type KnowledgeIndexRebuildResult = z.infer<typeof knowledgeIndexRebuildRe
 export type KnowledgeLintResult = z.infer<typeof knowledgeLintResultSchema>
 export type KnowledgeLintProblem = z.infer<typeof knowledgeLintProblemSchema>
 export type KnowledgeListResult = z.infer<typeof knowledgeListResultSchema>
+export type KnowledgeLogEntry = z.infer<typeof knowledgeLogEntrySchema>
+export type KnowledgeLogTailResult = z.infer<typeof knowledgeLogTailResultSchema>
 export type KnowledgePage = z.infer<typeof knowledgePageSchema>
 export type KnowledgePageMetadata = z.infer<typeof knowledgePageMetadataSchema>
 export type KnowledgePageReference = z.infer<typeof knowledgePageReferenceSchema>

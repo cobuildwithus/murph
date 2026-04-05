@@ -80,6 +80,30 @@ test("buildAssistantSystemPrompt tells Murph to gather personal supplement and l
   );
   assert.match(
     prompt,
+    /Derived knowledge tools are exposed directly in this session as `assistant\.knowledge\.search`, `assistant\.knowledge\.get`, `assistant\.knowledge\.list`, `assistant\.knowledge\.upsert`, `assistant\.knowledge\.lint`, and `assistant\.knowledge\.rebuildIndex`\./u,
+  );
+  assert.match(
+    prompt,
+    /For wiki tasks, read `derived\/knowledge\/index\.md` first through `vault\.fs\.readText`, then use knowledge search and one to three targeted page reads before synthesizing anything new\./u,
+  );
+  assert.match(
+    prompt,
+    /Murph's knowledge system has two layers: `bank\/library` is the stable health reference layer, while `derived\/knowledge` is the user-specific compiled wiki/u,
+  );
+  assert.match(
+    prompt,
+    /When a derived page clearly builds on stable health reference entities under `bank\/library`, attach those stable links through `librarySlugs` metadata\./u,
+  );
+  assert.match(
+    prompt,
+    /Do not silently overwrite prior conclusions when new evidence is mixed or contradictory\./u,
+  );
+  assert.match(
+    prompt,
+    /Every knowledge upsert appends an entry to `derived\/knowledge\/log\.md`/u,
+  );
+  assert.match(
+    prompt,
     /If no close existing page exists, and the current turn produced a reusable synthesis that would likely save work or improve continuity later, create a new knowledge page in the same turn\./u,
   );
   assert.match(

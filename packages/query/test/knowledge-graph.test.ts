@@ -41,6 +41,8 @@ describe('readDerivedKnowledgeGraph', () => {
         'pageType: concept',
         'status: active',
         'summary: What seems to improve or disrupt sleep quality.',
+        'librarySlugs:',
+        '  - sleep-architecture',
         'relatedSlugs:',
         '  - magnesium',
         'sourcePaths:',
@@ -60,6 +62,7 @@ describe('readDerivedKnowledgeGraph', () => {
     expect(graph.pagesRoot).toBe(DERIVED_KNOWLEDGE_PAGES_ROOT)
     expect(graph.nodes).toHaveLength(1)
     expect(graph.bySlug.get('sleep-quality')).toMatchObject({
+      librarySlugs: ['sleep-architecture'],
       pageType: 'concept',
       relatedSlugs: ['magnesium'],
       slug: 'sleep-quality',
@@ -82,6 +85,8 @@ describe('readDerivedKnowledgeGraph', () => {
         'pageType: concept',
         'status: active',
         'summary: Magnesium seemed to help sleep continuity.',
+        'librarySlugs:',
+        '  - sleep-architecture',
         'relatedSlugs:',
         '  - magnesium',
         'sourcePaths:',
@@ -119,6 +124,7 @@ describe('readDerivedKnowledgeGraph', () => {
     expect(search.format).toBe('murph.knowledge-search.v1')
     expect(search.total).toBeGreaterThanOrEqual(1)
     expect(search.hits[0]).toMatchObject({
+      librarySlugs: ['sleep-architecture'],
       slug: 'sleep-quality',
       matchedTerms: ['magnesium', 'sleep'],
       pageType: 'concept',
@@ -145,6 +151,8 @@ describe('readDerivedKnowledgeGraph', () => {
         'pageType: sleep-pattern',
         'status: active',
         'summary: What seems to improve or disrupt sleep quality.',
+        'librarySlugs:',
+        '  - sleep-architecture',
         'relatedSlugs:',
         '  - magnesium',
         'sourcePaths:',
@@ -173,6 +181,7 @@ describe('readDerivedKnowledgeGraph', () => {
     expect(index).toContain('# Derived knowledge index')
     expect(index).toContain('## Sleep Pattern')
     expect(index).toContain('[Sleep quality](pages/sleep-quality.md)')
+    expect(index).toContain('library: `sleep-architecture`')
   })
 
   it('reports frontmatter parse failures separately from the loaded graph', async () => {

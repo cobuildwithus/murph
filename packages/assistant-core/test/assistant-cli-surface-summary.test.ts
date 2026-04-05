@@ -27,6 +27,7 @@ test('buildAssistantCliSurfaceSummary compresses llms output into a bootstrap ma
       { name: 'knowledge index rebuild' },
       { name: 'knowledge lint' },
       { name: 'knowledge list' },
+      { name: 'knowledge log tail' },
       { name: 'knowledge search' },
       { name: 'knowledge show' },
       { name: 'knowledge upsert' },
@@ -46,6 +47,6 @@ test('buildAssistantCliSurfaceSummary compresses llms output into a bootstrap ma
     /Major command families: assistant, inbox, knowledge, device, workout\./u,
   )
   assert.match(summary ?? '', /assistant: cron, memory, ask, chat, status, stop\./u)
-  assert.match(summary ?? '', /knowledge: index, lint, list, search, show, upsert\./u)
+  assert.match(summary ?? '', /knowledge: index, log, lint, list, search, show\./u)
   assert.match(summary ?? '', /device: account, provider, connect\./u)
 })

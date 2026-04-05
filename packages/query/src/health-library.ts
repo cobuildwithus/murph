@@ -1,6 +1,8 @@
 import {
+  readMarkdownDocumentOutcome,
   readMarkdownDocument,
   walkRelativeFiles,
+  type ParseFailure,
 } from "./health/loaders.ts";
 import {
   asObject,
@@ -34,6 +36,18 @@ export interface HealthLibraryGraph {
   nodes: HealthLibraryNode[];
 }
 
+export interface HealthLibraryGraphIssue {
+  lineNumber?: number;
+  parser: "frontmatter" | "json";
+  reason: string;
+  relativePath: string;
+}
+
+export interface HealthLibraryGraphReadResult {
+  graph: HealthLibraryGraph;
+  issues: HealthLibraryGraphIssue[];
+}
+
 const HEALTH_LIBRARY_ROOT = "bank/library";
 const HEALTH_LIBRARY_ENTITY_TYPES = new Set<HealthLibraryEntityType>([
   "mission",
@@ -65,6 +79,41 @@ export async function readHealthLibraryGraph(
   return {
     bySlug: new Map(nodes.map((node) => [node.slug, node])),
     nodes,
+  };
+}
+
+export async function readHealthLibraryGraphWithIssues(
+  vaultRoot: string,
+): Promise<HealthLibraryGraphReadResult> {
+  const relativePaths = await walkRelativeFiles(vaultRoot, HEALTH_LIBRARY_ROOT, ".md");
+  const nodes: HealthLibraryNode[] = [];
+  const issues: HealthLibraryGraphIssue[] = [];
+
+  for (const relativePath of relativePaths) {
+    const outcome = await readMarkdownDocumentOutcome(vaultRoot, relativePath);
+    if (!outcome.ok) {
+      issues.push(parseFailureToIssue(outcome));
+      continue;
+    }
+
+    const node = toHealthLibraryNode(
+      outcome.document.relativePath,
+      outcome.document.body,
+      outcome.document.attributes,
+    );
+    if (node) {
+      nodes.push(node);
+    }
+  }
+
+  nodes.sort((left, right) => left.slug.localeCompare(right.slug));
+
+  return {
+    graph: {
+      bySlug: new Map(nodes.map((node) => [node.slug, node])),
+      nodes,
+    },
+    issues,
   };
 }
 
@@ -129,4 +178,13 @@ function humanizeSlug(slug: string): string {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function parseFailureToIssue(failure: ParseFailure): HealthLibraryGraphIssue {
+  return {
+    lineNumber: failure.lineNumber,
+    parser: failure.parser,
+    reason: failure.reason,
+    relativePath: failure.relativePath,
+  };
 }
