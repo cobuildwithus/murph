@@ -1400,10 +1400,8 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("imports a hosted share from the inline dispatch pack without fetching through the worker proxy", async () => {
-    const previousHostedExecutionInternalTokens = process.env.HOSTED_EXECUTION_INTERNAL_TOKENS;
     const previousHostedShareInternalTokens = process.env.HOSTED_SHARE_INTERNAL_TOKENS;
     const previousHostedWebBaseUrl = process.env.HOSTED_WEB_BASE_URL;
-    process.env.HOSTED_EXECUTION_INTERNAL_TOKENS = "worker-control-token";
     delete process.env.HOSTED_SHARE_INTERNAL_TOKENS;
     delete process.env.HOSTED_WEB_BASE_URL;
 
@@ -1500,7 +1498,6 @@ describe("runHostedExecutionJob", () => {
       expect(importedFood?.attachedProtocolIds?.length).toBe(1);
       expect(result.result.summary).toContain(`Imported share pack "${pack.title}"`);
     } finally {
-      restoreEnvVar("HOSTED_EXECUTION_INTERNAL_TOKENS", previousHostedExecutionInternalTokens);
       restoreEnvVar("HOSTED_SHARE_INTERNAL_TOKENS", previousHostedShareInternalTokens);
       restoreEnvVar("HOSTED_WEB_BASE_URL", previousHostedWebBaseUrl);
     }
@@ -1563,9 +1560,7 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("exports pending hosted AI usage through the worker proxy without exposing the internal web token", async () => {
-    const previousHostedExecutionInternalTokens = process.env.HOSTED_EXECUTION_INTERNAL_TOKENS;
     const previousHostedWebBaseUrl = process.env.HOSTED_WEB_BASE_URL;
-    process.env.HOSTED_EXECUTION_INTERNAL_TOKENS = "worker-control-token";
     delete process.env.HOSTED_WEB_BASE_URL;
 
     const activation = await runHostedExecutionJob({
@@ -1680,7 +1675,6 @@ describe("runHostedExecutionJob", () => {
         vault: restored.vaultRoot,
       })).resolves.toEqual([]);
     } finally {
-      restoreEnvVar("HOSTED_EXECUTION_INTERNAL_TOKENS", previousHostedExecutionInternalTokens);
       restoreEnvVar("HOSTED_WEB_BASE_URL", previousHostedWebBaseUrl);
     }
   });

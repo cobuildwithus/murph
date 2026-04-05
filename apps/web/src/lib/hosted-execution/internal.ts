@@ -1,8 +1,12 @@
-import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution";
+import {
+  HOSTED_EXECUTION_USER_ID_HEADER,
+  readHostedExecutionSignatureHeaders,
+  verifyHostedExecutionSignature,
+} from "@murphai/hosted-execution";
 
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
-type HostedExecutionAcceptedRouteToken = "internal" | "scheduler" | "share";
+type HostedExecutionAcceptedRouteToken = "scheduler" | "share";
 
 function normalizeOptionalString(value: string | null | undefined): string | null {
   if (typeof value !== "string") {
@@ -38,11 +42,38 @@ export function authorizeHostedExecutionInternalRequest(input: {
   }
 }
 
-export function requireHostedExecutionInternalToken(request: Request): void {
-  authorizeHostedExecutionInternalRequest({
-    acceptedToken: "internal",
-    request,
+export async function requireHostedExecutionSignedRequest(input: {
+  payload?: string;
+  request: Request;
+}): Promise<void> {
+  const signingSecret = normalizeOptionalString(process.env.HOSTED_EXECUTION_SIGNING_SECRET);
+
+  if (!signingSecret) {
+    throw hostedOnboardingError({
+      code: "HOSTED_EXECUTION_SIGNING_SECRET_REQUIRED",
+      message: "HOSTED_EXECUTION_SIGNING_SECRET must be configured for signed hosted execution requests.",
+      httpStatus: 500,
+    });
+  }
+
+  const payload = input.payload ?? await input.request.clone().text();
+  const { signature, timestamp } = readHostedExecutionSignatureHeaders(input.request.headers);
+  const verified = await verifyHostedExecutionSignature({
+    method: input.request.method,
+    path: new URL(input.request.url).pathname,
+    payload,
+    secret: signingSecret,
+    signature,
+    timestamp,
   });
+
+  if (!verified) {
+    throw hostedOnboardingError({
+      code: "HOSTED_EXECUTION_UNAUTHORIZED",
+      message: "Unauthorized hosted execution request.",
+      httpStatus: 401,
+    });
+  }
 }
 
 export function requireHostedExecutionSchedulerToken(request: Request): void {
@@ -100,13 +131,11 @@ function readHostedExecutionAcceptedRouteTokens(kind: HostedExecutionAcceptedRou
     };
   }
 
-  return {
-    requiredCode: "HOSTED_EXECUTION_INTERNAL_TOKEN_REQUIRED",
-    requiredMessage: "HOSTED_EXECUTION_INTERNAL_TOKENS must be configured for internal hosted execution control routes.",
-    tokens: readTokenListFromEnv("HOSTED_EXECUTION_INTERNAL_TOKENS"),
-    unauthorizedCode: "HOSTED_EXECUTION_UNAUTHORIZED",
-    unauthorizedMessage: "Unauthorized hosted execution request.",
-  };
+  throw hostedOnboardingError({
+    code: "HOSTED_EXECUTION_INTERNAL_TOKEN_KIND_UNSUPPORTED",
+    message: "Unsupported hosted execution token kind.",
+    httpStatus: 500,
+  });
 }
 
 function readTokenListFromEnv(...keys: string[]): string[] {

@@ -18,7 +18,6 @@ const RUNNER_PING_ENDPOINT = "container/health";
 const RUNNER_EXECUTE_URL = "http://container/__internal/run";
 const RUNNER_WAIT_INTERVAL_MS = 250;
 const RUNNER_READY_TIMEOUT_MS = 20_000;
-const DEFAULT_CONTAINER_SLEEP_AFTER = "1m";
 export class HostedExecutionConfigurationError extends Error {
   readonly code: string | null;
 
@@ -60,9 +59,7 @@ type RunnerOutboundHandlerContext = OutboundHandlerContext<{
   userId?: unknown;
 } | undefined>;
 
-interface RunnerContainerEnvironmentSource extends Readonly<Record<string, unknown>> {
-  HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER?: string;
-}
+type RunnerContainerEnvironmentSource = Readonly<Record<string, unknown>>;
 
 type RunnerOutboundHandlerName =
   | "artifactsWorker"
@@ -94,11 +91,9 @@ export class RunnerContainer extends Container {
   defaultPort = RUNNER_PORT;
   requiredPorts = [RUNNER_PORT];
   pingEndpoint = RUNNER_PING_ENDPOINT;
-  sleepAfter = DEFAULT_CONTAINER_SLEEP_AFTER;
 
   constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
     super(state as never, env as never);
-    this.sleepAfter = readContainerSleepAfter(env);
   }
 
   async invoke(payload: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerResult> {
@@ -314,11 +309,6 @@ export async function destroyHostedExecutionContainer(input: {
   }
 }
 
-function readContainerSleepAfter(source: RunnerContainerEnvironmentSource): string {
-  return readOptionalString(source.HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER)
-    ?? DEFAULT_CONTAINER_SLEEP_AFTER;
-}
-
 function parseHostedExecutionContainerInvokeInput(
   payload: {
     job?: unknown;
@@ -366,13 +356,4 @@ function readTimeoutMs(value: unknown, fallback: number): number {
   }
 
   return Math.trunc(value);
-}
-
-function readOptionalString(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
 }

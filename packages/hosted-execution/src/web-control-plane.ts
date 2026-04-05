@@ -7,6 +7,7 @@ import type {
 } from "./contracts.ts";
 import { HOSTED_EXECUTION_USER_ID_HEADER } from "./contracts.ts";
 import { HOSTED_EXECUTION_PROXY_HOSTS } from "./callback-hosts.ts";
+import { createHostedExecutionSignatureHeaders } from "./auth.ts";
 import { normalizeHostedExecutionBaseUrl } from "./env.ts";
 import {
   parseHostedExecutionDeviceSyncConnectLinkResponse,
@@ -44,6 +45,7 @@ interface HostedExecutionUserBoundWebControlPlaneRequesterOptions {
   baseUrl: string;
   boundUserId: string;
   fetchImpl?: typeof fetch;
+  signingSecret?: string | null;
   timeoutMs?: number | null;
 }
 
@@ -80,6 +82,7 @@ interface HostedExecutionUserBoundRequesterResolutionInput {
   fetchImpl?: typeof fetch;
   isProxyBaseUrl: (baseUrl: string) => boolean;
   proxyHost: string;
+  signingSecret?: string | null;
   timeoutMs?: number | null;
 }
 
@@ -122,15 +125,15 @@ export function createHostedExecutionServerDeviceSyncConnectLinkClient(input: {
   baseUrl: string;
   boundUserId: string;
   fetchImpl?: typeof fetch;
-  internalToken: string;
+  signingSecret: string;
   timeoutMs?: number | null;
 }): HostedExecutionServerDeviceSyncConnectLinkClient {
   return buildHostedExecutionDeviceSyncConnectLinkClient(
     createHostedExecutionServerRequester({
-      authorizationToken: input.internalToken,
       baseUrl: input.baseUrl,
       boundUserId: input.boundUserId,
       fetchImpl: input.fetchImpl,
+      signingSecret: input.signingSecret,
       timeoutMs: input.timeoutMs ?? null,
     }),
   );
@@ -165,6 +168,7 @@ export function resolveHostedExecutionDeviceSyncConnectLinkClient(input: {
   boundUserId: string;
   fetchImpl?: typeof fetch;
   internalToken?: string | null;
+  signingSecret?: string | null;
   timeoutMs?: number | null;
 }):
   | HostedExecutionProxyDeviceSyncConnectLinkClient
@@ -177,6 +181,7 @@ export function resolveHostedExecutionDeviceSyncConnectLinkClient(input: {
     fetchImpl: input.fetchImpl,
     isProxyBaseUrl: isHostedExecutionDeviceSyncProxyBaseUrl,
     proxyHost: HOSTED_EXECUTION_PROXY_HOSTS.deviceSync,
+    signingSecret: input.signingSecret,
     timeoutMs: input.timeoutMs,
   });
 
@@ -310,13 +315,21 @@ function createHostedExecutionProxyRequester(
 }
 
 function createHostedExecutionServerRequester(
-  input: HostedExecutionUserBoundWebControlPlaneRequesterOptions & { authorizationToken: string },
+  input: HostedExecutionUserBoundWebControlPlaneRequesterOptions,
 ): HostedExecutionUserBoundWebControlPlaneRequester {
+  const authorizationToken = normalizeHostedExecutionAuthorizationToken(input.authorizationToken);
+  const signingSecret = normalizeHostedExecutionAuthorizationToken(input.signingSecret);
+
+  if (!authorizationToken && !signingSecret) {
+    throw new TypeError("Hosted web control-plane server credentials must be configured.");
+  }
+
   return createHostedExecutionUserBoundRequester({
-    authorizationToken: requireHostedExecutionAuthorizationToken(input.authorizationToken),
+    authorizationToken,
     baseUrl: requireHostedExecutionWebControlBaseUrl(input.baseUrl),
     boundUserId: input.boundUserId,
     fetchImpl: input.fetchImpl,
+    signingSecret,
     timeoutMs: input.timeoutMs ?? null,
   });
 }
@@ -340,7 +353,7 @@ function resolveHostedExecutionUserBoundRequester(
     });
   }
 
-  if (!input.authorizationToken) {
+  if (!input.authorizationToken && !input.signingSecret) {
     return null;
   }
 
@@ -349,6 +362,7 @@ function resolveHostedExecutionUserBoundRequester(
     baseUrl: normalizedBaseUrl,
     boundUserId: input.boundUserId,
     fetchImpl: input.fetchImpl,
+    signingSecret: input.signingSecret,
     timeoutMs: input.timeoutMs ?? null,
   });
 }
@@ -373,6 +387,7 @@ function createHostedExecutionUserBoundRequester(
         method: request.method,
         parse: request.parse,
         path: request.path,
+        signingSecret: input.signingSecret ?? null,
         timeoutMs: input.timeoutMs ?? null,
         url: input.baseUrl,
       });
@@ -427,16 +442,6 @@ function requireHostedExecutionWorkerProxyBaseUrl(value: string, proxyHost: stri
   return normalized;
 }
 
-function requireHostedExecutionAuthorizationToken(value: string): string {
-  const normalized = normalizeHostedExecutionAuthorizationToken(value);
-
-  if (!normalized) {
-    throw new TypeError("Hosted web control-plane authorization token must be configured.");
-  }
-
-  return normalized;
-}
-
 function normalizeHostedExecutionAuthorizationToken(value: string | null | undefined): string | null {
   if (typeof value !== "string") {
     return null;
@@ -455,6 +460,7 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
   method: "GET" | "POST";
   path: string;
   search?: string | null;
+  signingSecret?: string | null;
   timeoutMs: number | null;
 }): Promise<Response> {
   const fetchImpl = input.fetchImpl ?? fetch;
@@ -467,13 +473,30 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
     targetUrl.search = input.search;
   }
 
+  const headers = buildHostedExecutionRequestHeaders({
+    authorizationToken: normalizeHostedExecutionAuthorizationToken(input.authorizationToken),
+    boundUserId: input.boundUserId,
+    withJsonContentType: input.body !== undefined,
+  });
+  const signingSecret = normalizeHostedExecutionAuthorizationToken(input.signingSecret);
+
+  if (signingSecret) {
+    const signatureHeaders = await createHostedExecutionSignatureHeaders({
+      method: input.method,
+      path: targetUrl.pathname,
+      payload: input.body ?? "",
+      secret: signingSecret,
+      timestamp: new Date().toISOString(),
+    });
+
+    for (const [key, value] of Object.entries(signatureHeaders)) {
+      headers.set(key, value);
+    }
+  }
+
   return fetchImpl(targetUrl.toString(), {
     ...(input.body === undefined ? {} : { body: input.body }),
-    headers: buildHostedExecutionRequestHeaders({
-      authorizationToken: normalizeHostedExecutionAuthorizationToken(input.authorizationToken),
-      boundUserId: input.boundUserId,
-      withJsonContentType: input.body !== undefined,
-    }),
+    headers,
     method: input.method,
     redirect: "error",
     signal: typeof input.timeoutMs === "number" ? AbortSignal.timeout(input.timeoutMs) : undefined,
@@ -489,6 +512,7 @@ async function requestHostedExecutionWebControlPlaneJson<TResponse>(input: {
   method: "GET" | "POST";
   parse: (value: unknown) => TResponse;
   path: string;
+  signingSecret?: string | null;
   timeoutMs: number | null;
   url: string;
 }): Promise<TResponse> {
@@ -500,6 +524,7 @@ async function requestHostedExecutionWebControlPlaneJson<TResponse>(input: {
     fetchImpl: input.fetchImpl,
     method: input.method,
     path: input.path,
+    signingSecret: input.signingSecret ?? null,
     timeoutMs: input.timeoutMs,
   });
   const text = await response.text();
