@@ -378,6 +378,9 @@ importers:
       '@murphai/gateway-local':
         specifier: workspace:*
         version: link:../gateway-local
+      '@murphai/hosted-execution':
+        specifier: workspace:*
+        version: link:../hosted-execution
       '@types/react':
         specifier: ^19.2.14
         version: 19.2.14

@@ -1,23 +1,21 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { HOSTED_WEB_INTERNAL_SCHEDULER_USER_ID } from "@/src/lib/hosted-execution/internal";
 
 const mocks = vi.hoisted(() => ({
-  authorizeHostedExecutionInternalRequest: vi.fn(),
   buildHostedSharePageData: vi.fn(),
   drainHostedPendingAiUsageImports: vi.fn(),
   drainHostedExecutionOutbox: vi.fn(),
   drainHostedAiUsageStripeMetering: vi.fn(),
   getPrisma: vi.fn(),
-  requireHostedExecutionSchedulerToken: vi.fn(),
-  requireHostedExecutionUserId: vi.fn(),
+  requireHostedWebInternalServiceRequest: vi.fn(),
   resolveHostedPrivyRequestAuthContext: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/internal", () => ({
-  authorizeHostedExecutionInternalRequest: mocks.authorizeHostedExecutionInternalRequest,
-  requireHostedExecutionSchedulerToken: mocks.requireHostedExecutionSchedulerToken,
-  requireHostedExecutionUserId: mocks.requireHostedExecutionUserId,
+  HOSTED_WEB_INTERNAL_SCHEDULER_USER_ID: "system:hosted-execution-scheduler",
+  requireHostedWebInternalServiceRequest: mocks.requireHostedWebInternalServiceRequest,
 }));
 
 vi.mock("@/src/lib/hosted-execution/outbox", () => ({
@@ -61,11 +59,7 @@ describe("hosted execution async routes", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.authorizeHostedExecutionInternalRequest.mockReturnValue({
-      trustedUserId: "member_123",
-    });
-    mocks.requireHostedExecutionSchedulerToken.mockImplementation(() => {});
-    mocks.requireHostedExecutionUserId.mockReturnValue("member_123");
+    mocks.requireHostedWebInternalServiceRequest.mockResolvedValue(undefined);
     mocks.getPrisma.mockReturnValue({ prisma: true });
     mocks.resolveHostedPrivyRequestAuthContext.mockResolvedValue({
       member: {
@@ -115,7 +109,11 @@ describe("hosted execution async routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireHostedExecutionSchedulerToken).toHaveBeenCalledTimes(1);
+    expect(mocks.requireHostedWebInternalServiceRequest).toHaveBeenCalledTimes(1);
+    expect(mocks.requireHostedWebInternalServiceRequest).toHaveBeenCalledWith(
+      expect.any(Request),
+      HOSTED_WEB_INTERNAL_SCHEDULER_USER_ID,
+    );
     expect(mocks.drainHostedExecutionOutbox).toHaveBeenCalledTimes(1);
     await expect(response.json()).resolves.toEqual({
       drained: 2,
@@ -133,15 +131,13 @@ describe("hosted execution async routes", () => {
     });
   });
 
-  it("maps missing scheduler token configuration to a 500", async () => {
-    mocks.requireHostedExecutionSchedulerToken.mockImplementation(() => {
-      throw hostedOnboardingError({
-        code: "HOSTED_EXECUTION_SCHEDULER_TOKEN_REQUIRED",
-        httpStatus: 500,
-        message:
-          "HOSTED_EXECUTION_SCHEDULER_TOKENS or CRON_SECRET must be configured for scheduled hosted execution drains.",
-      });
-    });
+  it("maps missing signing secret configuration to a 500", async () => {
+    mocks.requireHostedWebInternalServiceRequest.mockRejectedValue(hostedOnboardingError({
+      code: "HOSTED_WEB_INTERNAL_SIGNING_SECRET_REQUIRED",
+      httpStatus: 500,
+      message:
+        "HOSTED_WEB_INTERNAL_SIGNING_SECRET must be configured for Cloudflare-owned hosted web routes.",
+    }));
 
     const response = await hostedExecutionCronRoute.GET(
       new Request("https://join.example.test/api/internal/hosted-execution/outbox/cron"),
@@ -150,36 +146,30 @@ describe("hosted execution async routes", () => {
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "HOSTED_EXECUTION_SCHEDULER_TOKEN_REQUIRED",
+        code: "HOSTED_WEB_INTERNAL_SIGNING_SECRET_REQUIRED",
         message:
-          "HOSTED_EXECUTION_SCHEDULER_TOKENS or CRON_SECRET must be configured for scheduled hosted execution drains.",
+          "HOSTED_WEB_INTERNAL_SIGNING_SECRET must be configured for Cloudflare-owned hosted web routes.",
         retryable: false,
       },
     });
   });
 
-  it("maps a bad scheduler token to a 401", async () => {
-    mocks.requireHostedExecutionSchedulerToken.mockImplementation(() => {
-      throw hostedOnboardingError({
-        code: "HOSTED_EXECUTION_UNAUTHORIZED",
-        httpStatus: 401,
-        message: "Unauthorized hosted execution request.",
-      });
-    });
+  it("maps a bad signed scheduler request to a 401", async () => {
+    mocks.requireHostedWebInternalServiceRequest.mockRejectedValue(hostedOnboardingError({
+      code: "HOSTED_WEB_INTERNAL_UNAUTHORIZED",
+      httpStatus: 401,
+      message: "Unauthorized hosted web internal request.",
+    }));
 
     const response = await hostedExecutionCronRoute.GET(
-      new Request("https://join.example.test/api/internal/hosted-execution/outbox/cron", {
-        headers: {
-          authorization: "Bearer wrong-token",
-        },
-      }),
+      new Request("https://join.example.test/api/internal/hosted-execution/outbox/cron"),
     );
 
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "HOSTED_EXECUTION_UNAUTHORIZED",
-        message: "Unauthorized hosted execution request.",
+        code: "HOSTED_WEB_INTERNAL_UNAUTHORIZED",
+        message: "Unauthorized hosted web internal request.",
         retryable: false,
       },
     });
@@ -187,16 +177,16 @@ describe("hosted execution async routes", () => {
 
   it("returns the hosted pending-usage import and Stripe metering cron summaries", async () => {
     const response = await hostedExecutionUsageCronRoute.GET(
-      new Request("https://join.example.test/api/internal/hosted-execution/usage/cron", {
-        headers: {
-          authorization: "Bearer cron-token",
-        },
-      }),
+      new Request("https://join.example.test/api/internal/hosted-execution/usage/cron"),
     );
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireHostedExecutionSchedulerToken).toHaveBeenCalledTimes(1);
+    expect(mocks.requireHostedWebInternalServiceRequest).toHaveBeenCalledTimes(1);
+    expect(mocks.requireHostedWebInternalServiceRequest).toHaveBeenCalledWith(
+      expect.any(Request),
+      HOSTED_WEB_INTERNAL_SCHEDULER_USER_ID,
+    );
     expect(mocks.drainHostedPendingAiUsageImports).toHaveBeenCalledTimes(1);
     expect(mocks.drainHostedAiUsageStripeMetering).toHaveBeenCalledTimes(1);
     await expect(response.json()).resolves.toEqual({
@@ -219,11 +209,7 @@ describe("hosted execution async routes", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const response = await hostedExecutionUsageCronRoute.GET(
-      new Request("https://join.example.test/api/internal/hosted-execution/usage/cron", {
-        headers: {
-          authorization: "Bearer cron-token",
-        },
-      }),
+      new Request("https://join.example.test/api/internal/hosted-execution/usage/cron"),
     );
 
     expect(response.status).toBe(200);

@@ -431,6 +431,9 @@ function createRunnerOutboundEnv(overrides: Partial<Record<string, unknown>> = {
       "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"xSelVJv6r6LPUS8GCNgj1T_7z5GXOrhgY1cCdzGb5ao\",\"y\":\"8HhciS1cAPKs_fPfgZnb1USdRtBX-4Nvp8XiBHuMcmY\",\"d\":\"HAPljluiFVW3g-UEmrJ9NVYTlclAhaC8N5LT0h7vitQ\",\"ext\":true,\"key_ops\":[\"deriveBits\"]}",
     HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK:
       "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"xSelVJv6r6LPUS8GCNgj1T_7z5GXOrhgY1cCdzGb5ao\",\"y\":\"8HhciS1cAPKs_fPfgZnb1USdRtBX-4Nvp8XiBHuMcmY\",\"ext\":true,\"key_ops\":[]}",
+    HOSTED_EXECUTION_RECOVERY_RECIPIENT_KEY_ID: "recovery:v1",
+    HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK:
+      "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"xSelVJv6r6LPUS8GCNgj1T_7z5GXOrhgY1cCdzGb5ao\",\"y\":\"8HhciS1cAPKs_fPfgZnb1USdRtBX-4Nvp8XiBHuMcmY\",\"ext\":true,\"key_ops\":[]}",
     HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: Buffer.alloc(32, 9).toString("base64"),
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
@@ -482,5 +485,9 @@ async function ensureRunnerOutboundUserEnvelope(
     envelopeEncryptionKey: environment.platformEnvelopeKey,
     envelopeEncryptionKeyId: environment.platformEnvelopeKeyId,
     envelopeEncryptionKeysById: environment.platformEnvelopeKeysById,
-  }).ensureUserCryptoContext(userId);
+    recoveryRecipientKeyId: environment.recoveryRecipientKeyId,
+    recoveryRecipientPublicKey: environment.recoveryRecipientPublicKey,
+    teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
+    teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
+  }).bootstrapManagedUserCryptoContext(userId);
 }

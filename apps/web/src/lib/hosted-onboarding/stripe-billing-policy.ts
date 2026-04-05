@@ -9,6 +9,7 @@ import {
 } from "@prisma/client";
 import type Stripe from "stripe";
 
+import { provisionManagedUserCryptoInHostedExecution } from "../hosted-execution/control";
 import { enqueueHostedExecutionOutbox } from "../hosted-execution/outbox";
 import {
   coerceStripeObjectId,
@@ -62,6 +63,8 @@ export async function activateHostedMemberFromConfirmedRevnetIssuance(input: {
       memberId: input.member.id,
     };
   }
+
+  await provisionManagedUserCryptoInHostedExecution(input.member.id);
 
   const dispatch = buildHostedMemberActivationDispatch({
     linqChatId: input.member.linqChatId,
@@ -118,6 +121,8 @@ export async function activateHostedMemberForPositiveSource(input: {
       memberId: input.member.id,
     };
   }
+
+  await provisionManagedUserCryptoInHostedExecution(input.member.id);
 
   const dispatch = buildHostedMemberActivationDispatch({
     linqChatId: input.member.linqChatId,

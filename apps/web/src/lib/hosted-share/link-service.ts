@@ -36,7 +36,7 @@ export async function createHostedShareLink(input: {
   pack: SharePack;
   prisma?: PrismaClient;
   recipientPhoneNumber?: string | null;
-  senderMemberId?: string | null;
+  senderMemberId: string;
 }): Promise<CreateHostedShareLinkResult> {
   const prisma = input.prisma ?? getPrisma();
   const pack = assertContract(sharePackSchema, input.pack, "share pack");
@@ -56,6 +56,7 @@ export async function createHostedShareLink(input: {
   }
 
   await writeHostedSharePackToHostedExecution({
+    ownerUserId: input.senderMemberId,
     pack,
     shareId,
   });
@@ -64,13 +65,13 @@ export async function createHostedShareLink(input: {
     data: {
       id: shareId,
       codeHash: hashHostedShareCode(shareCode),
-      senderMemberId: normalizeOptionalString(input.senderMemberId) ?? null,
+      senderMemberId: input.senderMemberId,
       previewTitle: HOSTED_SHARE_PRIVATE_PREVIEW_TITLE,
       expiresAt: hostedShareExpiresAt(input.expiresInHours),
     },
   }).catch(async (error) => {
     try {
-      await deleteHostedSharePackFromHostedExecution(shareId);
+      await deleteHostedSharePackFromHostedExecution({ ownerUserId: input.senderMemberId, shareId });
     } catch (cleanupError) {
       console.error(
         `Hosted share ${shareId} cleanup failed after Postgres write error.`,

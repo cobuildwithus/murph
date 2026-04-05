@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   dispatchHostedExecutionStatus: vi.fn(),
   dispatchStoredHostedExecutionStatus: vi.fn(),
   finalizeHostedShareAcceptance: vi.fn(),
+  getPrisma: vi.fn(),
   hydrateHostedExecutionDispatch: vi.fn(),
   maybeStageHostedExecutionDispatchPayload: vi.fn(),
 }));
@@ -25,6 +26,10 @@ vi.mock("@/src/lib/hosted-execution/control", () => ({
 vi.mock("@/src/lib/hosted-execution/dispatch", () => ({
   dispatchHostedExecutionStatus: mocks.dispatchHostedExecutionStatus,
   dispatchStoredHostedExecutionStatus: mocks.dispatchStoredHostedExecutionStatus,
+}));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: mocks.getPrisma,
 }));
 
 vi.mock("@/src/lib/hosted-execution/hydration", async () => {
@@ -58,6 +63,13 @@ describe("drainHostedExecutionOutbox", () => {
     mocks.deleteHostedSharePackFromHostedExecution.mockResolvedValue(undefined);
     mocks.deleteHostedStoredDispatchPayloadBestEffort.mockResolvedValue(undefined);
     mocks.dispatchStoredHostedExecutionStatus.mockImplementation(mocks.dispatchHostedExecutionStatus);
+    mocks.getPrisma.mockReturnValue({
+      hostedShareLink: {
+        findUnique: vi.fn(async () => ({
+          senderMemberId: "member_owner",
+        })),
+      },
+    });
     mocks.maybeStageHostedExecutionDispatchPayload.mockResolvedValue(null);
   });
 
@@ -86,7 +98,10 @@ describe("drainHostedExecutionOutbox", () => {
       prisma,
       shareId: "share_123",
     });
-    expect(mocks.deleteHostedSharePackFromHostedExecution).toHaveBeenCalledWith("share_123");
+    expect(mocks.deleteHostedSharePackFromHostedExecution).toHaveBeenCalledWith({
+      ownerUserId: "member_owner",
+      shareId: "share_123",
+    });
   });
 
   it("keeps completed share imports completed when share-pack cleanup fails", async () => {
@@ -115,7 +130,10 @@ describe("drainHostedExecutionOutbox", () => {
       prisma,
       shareId: "share_123",
     });
-    expect(mocks.deleteHostedSharePackFromHostedExecution).toHaveBeenCalledWith("share_123");
+    expect(mocks.deleteHostedSharePackFromHostedExecution).toHaveBeenCalledWith({
+      ownerUserId: "member_owner",
+      shareId: "share_123",
+    });
     expect(consoleError).toHaveBeenCalledWith(
       "Hosted share share_123 completed but its Cloudflare pack could not be deleted.",
       "delete failed",

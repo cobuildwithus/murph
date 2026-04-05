@@ -311,6 +311,9 @@ describe("@murphai/hosted-execution", () => {
           TEST_HOSTED_RECIPIENT_PUBLIC_JWK,
         ),
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "Zm9v",
+        HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: JSON.stringify(
+          TEST_HOSTED_RECIPIENT_PUBLIC_JWK,
+        ),
         HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
         HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
         HOSTED_WEB_INTERNAL_SIGNING_SECRET: "web-internal-secret",
@@ -321,6 +324,10 @@ describe("@murphai/hosted-execution", () => {
       automationRecipientPrivateJwkJson: JSON.stringify(TEST_HOSTED_RECIPIENT_PRIVATE_JWK),
       automationRecipientPrivateKeyringJson: null,
       automationRecipientPublicJwkJson: JSON.stringify(TEST_HOSTED_RECIPIENT_PUBLIC_JWK),
+      recoveryRecipientKeyId: "recovery:v1",
+      recoveryRecipientPublicJwkJson: JSON.stringify(TEST_HOSTED_RECIPIENT_PUBLIC_JWK),
+      teeAutomationRecipientKeyId: null,
+      teeAutomationRecipientPublicJwkJson: null,
       platformEnvelopeKeyBase64: "Zm9v",
       platformEnvelopeKeyId: "v1",
       platformEnvelopeKeyringJson: null,
@@ -903,8 +910,8 @@ describe("@murphai/hosted-execution", () => {
   });
 
   it("builds the shared hosted control route paths", () => {
-    expect(buildHostedExecutionSharePackPath("share/123")).toBe(
-      "/internal/shares/share%2F123/pack",
+    expect(buildHostedExecutionSharePackPath("member/123", "share/123")).toBe(
+      "/internal/users/member%2F123/shares/share%2F123/pack",
     );
     expect(buildHostedExecutionUserStatusPath("member/123")).toBe(
       "/internal/users/member%2F123/status",
@@ -1522,6 +1529,9 @@ describe("@murphai/hosted-execution", () => {
           TEST_HOSTED_RECIPIENT_PUBLIC_JWK,
         ),
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "Zm9v",
+        HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: JSON.stringify(
+          TEST_HOSTED_RECIPIENT_PUBLIC_JWK,
+        ),
         HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
         HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
         HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET: "dispatch-secret",
@@ -2134,14 +2144,14 @@ describe("@murphai/hosted-execution", () => {
       getBearerToken: async () => "vercel-oidc-token",
     });
 
-    await expect(client.putSharePack("share/123", sharePack)).resolves.toEqual(sharePack);
-    await expect(client.getSharePack("share/123")).resolves.toEqual(sharePack);
-    await expect(client.deleteSharePack("share/123")).resolves.toBeUndefined();
-    await expect(client.getSharePack("missing")).resolves.toBeNull();
+    await expect(client.putSharePack("member/123", "share/123", sharePack)).resolves.toEqual(sharePack);
+    await expect(client.getSharePack("member/123", "share/123")).resolves.toEqual(sharePack);
+    await expect(client.deleteSharePack("member/123", "share/123")).resolves.toBeUndefined();
+    await expect(client.getSharePack("member/123", "missing")).resolves.toBeNull();
 
     expect(fetchImpl).toHaveBeenNthCalledWith(
       1,
-      "https://worker.example.test/internal/shares/share%2F123/pack",
+      "https://worker.example.test/internal/users/member%2F123/shares/share%2F123/pack",
       expect.objectContaining({
         method: "PUT",
       }),
@@ -2152,14 +2162,14 @@ describe("@murphai/hosted-execution", () => {
     );
     expect(fetchImpl).toHaveBeenNthCalledWith(
       2,
-      "https://worker.example.test/internal/shares/share%2F123/pack",
+      "https://worker.example.test/internal/users/member%2F123/shares/share%2F123/pack",
       expect.objectContaining({
         method: "GET",
       }),
     );
     expect(fetchImpl).toHaveBeenNthCalledWith(
       3,
-      "https://worker.example.test/internal/shares/share%2F123/pack",
+      "https://worker.example.test/internal/users/member%2F123/shares/share%2F123/pack",
       expect.objectContaining({
         method: "DELETE",
       }),

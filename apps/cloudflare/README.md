@@ -22,7 +22,8 @@ This app is intentionally separate from `apps/web`:
 - public browser routes
 - canonical hosted health-data storage outside the vault bundle
 - a second inbox or assistant runtime model
-- operator-blind privacy or TEE claims
+- operator-blind privacy claims in the current managed-hosted mode (the worker still retains the automation unwrap path)
+- pretending that future TEE-only or browser user-unlock lanes are already active before those recipients exist
 - pretending the repo already has fully automatic production rollout
 
 ## Worker contract
@@ -38,12 +39,16 @@ Current worker env/config names read directly by `src/env.ts`:
 - required secret: `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY`
 - required secret: `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK`
 - required secret: `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK`
-- required secret: `HOSTED_WEB_INTERNAL_SIGNING_SECRET` signs the narrow Cloudflare-owned callbacks back into `apps/web`
+- required secret: `HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK`
+- required secret: `HOSTED_WEB_INTERNAL_SIGNING_SECRET` signs the narrow bound-user service seam back into `apps/web`
 - required non-secret: `HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG`
 - required non-secret: `HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME`
 - optional non-secret: `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production`
 - required non-secret: `HOSTED_WEB_BASE_URL`
 - optional secret: `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON` allows staged rotation of the automation unwrap key
+- optional non-secret: `HOSTED_EXECUTION_RECOVERY_RECIPIENT_KEY_ID` defaults to `recovery:v1`
+- optional non-secret: `HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_KEY_ID` selects a future enclave-only automation recipient and must be paired with the matching public JWK when enabled
+- optional secret: `HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK` publishes the future enclave-only automation recipient when that lane is enabled
 - optional secret: `HOSTED_EMAIL_CLOUDFLARE_API_TOKEN` enables hosted email delivery through Cloudflare Email Routing
 - optional secret: `HOSTED_EMAIL_SIGNING_SECRET` enables trusted hosted email ingress token generation and verification
 - optional non-secret: `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` extends the exact per-user encrypted env key allowlist in both the worker and container
@@ -73,6 +78,8 @@ Current worker routes:
 - `GET /internal/users/:userId/env` returns the configured per-user encrypted runner env key names (never the secret values)
 - `PUT /internal/users/:userId/env` merges or replaces the user's separately encrypted hosted env object
 - `DELETE /internal/users/:userId/env` clears the user's separately encrypted hosted env object without rewriting `agent-state`
+- `PUT /internal/users/:userId/crypto-context` explicitly provisions or reconciles the managed hosted root-key envelope for the user before runtime access
+- `PUT|GET|DELETE /internal/users/:userId/shares/:shareId/pack` stores owner-bound hosted share packs under the owning user root key
 
 `apps/cloudflare/wrangler.jsonc` is the checked-in scaffold for those bindings, env names, and the native container image reference. It intentionally leaves bucket names, worker name, and secrets as placeholders until a real Cloudflare account target exists, but it now pins the native container to the baseline `standard-1` instance type instead of relying on Cloudflare defaults.
 

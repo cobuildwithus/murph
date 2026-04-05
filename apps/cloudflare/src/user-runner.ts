@@ -55,6 +55,7 @@ import {
 import {
   createHostedUserKeyStore,
   type HostedUserCryptoContext,
+  type HostedUserKeyAuditRecord,
 } from "./user-key-store.js";
 import {
   HostedExecutionConfigurationError,
@@ -101,6 +102,16 @@ interface RunnerUserStores {
   userId: string;
 }
 
+function emitHostedUserKeyAuditLog(record: HostedUserKeyAuditRecord): void {
+  emitHostedExecutionStructuredLog({
+    component: "hosted.user-key-store",
+    level: "warn",
+    message: `${record.action}: ${record.reason}`,
+    phase: "runtime.starting",
+    userId: record.userId,
+  });
+}
+
 export class HostedUserRunner {
   private readonly eventTransitionLocks = new Map<string, Promise<void>>();
   private readonly queueStore: RunnerQueueStore;
@@ -130,6 +141,7 @@ export class HostedUserRunner {
       keysById: env.platformEnvelopeKeysById,
     });
     const userKeyStore = createHostedUserKeyStore({
+      auditLog: emitHostedUserKeyAuditLog,
       automationRecipientKeyId: env.automationRecipientKeyId,
       automationRecipientPrivateKey: env.automationRecipientPrivateKey,
       automationRecipientPrivateKeysById: env.automationRecipientPrivateKeysById,
@@ -138,6 +150,10 @@ export class HostedUserRunner {
       envelopeEncryptionKey: env.platformEnvelopeKey,
       envelopeEncryptionKeyId: env.platformEnvelopeKeyId,
       envelopeEncryptionKeysById: env.platformEnvelopeKeysById,
+      recoveryRecipientKeyId: env.recoveryRecipientKeyId,
+      recoveryRecipientPublicKey: env.recoveryRecipientPublicKey,
+      teeAutomationRecipientKeyId: env.teeAutomationRecipientKeyId,
+      teeAutomationRecipientPublicKey: env.teeAutomationRecipientPublicKey,
     });
     this.userKeyStore = userKeyStore;
     const runner = this;
@@ -226,7 +242,9 @@ export class HostedUserRunner {
   }
 
   private async refreshRunnerStores(userId: string): Promise<RunnerUserStores> {
-    const crypto = await this.userKeyStore.ensureUserCryptoContext(userId);
+    const crypto = await this.userKeyStore.requireUserCryptoContext(userId, {
+      reason: "user-runner-store-refresh",
+    });
     const allowedUserEnvSource = this.readAllowedUserEnvSource();
     const hostedEmailConfig = readHostedEmailConfig(this.readWorkerStringEnvSource());
 
@@ -273,7 +291,9 @@ export class HostedUserRunner {
   private async resolveUserDispatchPayloadStore(userId: string): Promise<HostedDispatchPayloadStore> {
     const crypto = this.runnerStores?.userId === userId
       ? this.runnerStores.crypto
-      : await this.userKeyStore.ensureUserCryptoContext(userId);
+      : await this.userKeyStore.requireUserCryptoContext(userId, {
+        reason: "dispatch-payload-access",
+      });
 
     return createHostedExecutionDispatchPayloadStore({
       bucket: this.bucket,
@@ -342,8 +362,20 @@ export class HostedUserRunner {
 
   async bootstrapUser(userId: string): Promise<{ userId: string }> {
     await this.queueStore.bootstrapUser(userId);
-    await this.ensureRunnerStores(userId);
     return { userId };
+  }
+
+  async provisionManagedUserCrypto(userId: string): Promise<{ recipientKinds: string[]; rootKeyId: string; userId: string }> {
+    await this.queueStore.bootstrapUser(userId);
+    const crypto = await this.userKeyStore.bootstrapManagedUserCryptoContext(userId, {
+      reason: "managed-user-provisioning",
+    });
+    this.runnerStores = null;
+    return {
+      recipientKinds: crypto.envelope.recipients.map((recipient) => recipient.kind),
+      rootKeyId: crypto.rootKeyId,
+      userId,
+    };
   }
 
   async putDeviceSyncRuntimeSnapshot(input: {

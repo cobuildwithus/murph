@@ -395,7 +395,7 @@ model HostedRevnetIssuance {
 model HostedShareLink {
   id                 String   @id
   codeHash           String   @unique @map("code_hash")
-  senderMemberId     String?  @map("sender_member_id")
+  senderMemberId     String   @map("sender_member_id")
   previewTitle       String   @map("preview_title")
   expiresAt          DateTime @map("expires_at")
   acceptedAt         DateTime? @map("accepted_at")

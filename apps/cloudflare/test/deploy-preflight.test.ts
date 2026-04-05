@@ -28,6 +28,7 @@ describe("deploy preflight helpers", () => {
       "HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY",
       "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK",
       "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK",
+      "HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK",
       "HOSTED_WEB_INTERNAL_SIGNING_SECRET",
     ]);
   });
@@ -57,6 +58,7 @@ describe("deploy preflight helpers", () => {
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "{\"kty\":\"OKP\",\"crv\":\"X25519\",\"d\":\"secret\",\"x\":\"public\"}",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "{\"kty\":\"OKP\",\"crv\":\"X25519\",\"x\":\"public\"}",
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "ZW5jcnlwdGlvbi1rZXktMzItYnl0ZXMtbG9uZy1leGFtcGxlIQ==",
+      HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "{\"kty\":\"OKP\",\"crv\":\"X25519\",\"x\":\"recovery\"}",
       HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
       HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
       HOSTED_WEB_INTERNAL_SIGNING_SECRET: "web-internal-secret",
@@ -77,6 +79,7 @@ describe("deploy preflight helpers", () => {
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "{\"kty\":\"OKP\",\"crv\":\"X25519\",\"d\":\"secret\",\"x\":\"public\"}",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "{\"kty\":\"OKP\",\"crv\":\"X25519\",\"x\":\"public\"}",
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "ZW5jcnlwdGlvbi1rZXktMzItYnl0ZXMtbG9uZy1leGFtcGxlIQ==",
+      HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "{\"kty\":\"OKP\",\"crv\":\"X25519\",\"x\":\"recovery\"}",
       HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
       HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
       HOSTED_WEB_INTERNAL_SIGNING_SECRET: "web-internal-secret",

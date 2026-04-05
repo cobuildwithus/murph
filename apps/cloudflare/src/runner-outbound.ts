@@ -586,7 +586,13 @@ async function resolveRunnerOutboundUserCryptoContext(input: {
     envelopeEncryptionKey: input.environment.platformEnvelopeKey,
     envelopeEncryptionKeyId: input.environment.platformEnvelopeKeyId,
     envelopeEncryptionKeysById: input.environment.platformEnvelopeKeysById,
-  }).requireUserCryptoContext(input.userId);
+    recoveryRecipientKeyId: input.environment.recoveryRecipientKeyId,
+    recoveryRecipientPublicKey: input.environment.recoveryRecipientPublicKey,
+    teeAutomationRecipientKeyId: input.environment.teeAutomationRecipientKeyId,
+    teeAutomationRecipientPublicKey: input.environment.teeAutomationRecipientPublicKey,
+  }).requireUserCryptoContext(input.userId, {
+    reason: "runner-outbound-access",
+  });
 }
 
 async function resolveRunnerOutboundUserRunnerStub(

@@ -19,6 +19,9 @@
       "path": "../runtime-state"
     },
     {
+      "path": "../hosted-execution"
+    },
+    {
       "path": "../assistant-core"
     },
     {

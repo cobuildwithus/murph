@@ -105,6 +105,7 @@ import type {
 
 interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLike {
   bootstrapUser(userId: string): Promise<{ userId: string }>;
+  provisionManagedUserCrypto(userId: string): Promise<{ recipientKinds: string[]; rootKeyId: string; userId: string }>;
   clearUserEnv(): Promise<HostedExecutionUserEnvStatus>;
   dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus>;
   dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult>;
@@ -232,9 +233,19 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
     async handle(context, params) {
-      return handleSharePackRoute(context, params.shareId);
+      return handleUserCryptoContextRoute(context, params.userId);
     },
-    match: matchNamedPath(/^\/internal\/shares\/(?<shareId>[^/]+)\/pack$/u),
+    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/crypto-context$/u),
+    methods: ["PUT"],
+    wrongMethodResponse: "method-not-allowed",
+  },
+  {
+    authorizeBeforeMethod: true,
+    authorization: "vercel-oidc",
+    async handle(context, params) {
+      return handleSharePackRoute(context, params.userId, params.shareId);
+    },
+    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/shares\/(?<shareId>[^/]+)\/pack$/u),
     methods: ["GET", "PUT", "DELETE"],
     wrongMethodResponse: "method-not-allowed",
   },
@@ -337,6 +348,10 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
 
   async bootstrapUser(userId: string): Promise<{ userId: string }> {
     return this.runner.bootstrapUser(userId);
+  }
+
+  async provisionManagedUserCrypto(userId: string): Promise<{ recipientKinds: string[]; rootKeyId: string; userId: string }> {
+    return this.runner.provisionManagedUserCrypto(userId);
   }
 
   async getDeviceSyncRuntimeSnapshot(input: {
@@ -729,14 +744,22 @@ function requireHostedExecutionRouteOutboxPayloadUser(
 
 async function handleSharePackRoute(
   context: WorkerRouteContext,
+  encodedUserId: string,
   encodedShareId: string,
 ): Promise<Response> {
+  const userId = decodeRouteParam(encodedUserId);
   const shareId = decodeRouteParam(encodedShareId);
+  const ownerCrypto = await resolveHostedExecutionUserCryptoContext({
+    bucket: context.env.BUNDLES,
+    environment: context.environment,
+    userId,
+  });
   const store = createHostedShareStore({
     bucket: context.env.BUNDLES,
-    key: context.environment.platformEnvelopeKey,
-    keyId: context.environment.platformEnvelopeKeyId,
-    keysById: context.environment.platformEnvelopeKeysById,
+    key: ownerCrypto.rootKey,
+    keyId: ownerCrypto.rootKeyId,
+    keysById: ownerCrypto.keysById,
+    ownerUserId: userId,
   });
 
   if (context.request.method === "GET") {
@@ -746,11 +769,20 @@ async function handleSharePackRoute(
 
   if (context.request.method === "DELETE") {
     await store.deleteSharePack(shareId);
-    return json({ ok: true, shareId });
+    return json({ ok: true, shareId, userId });
   }
 
   const pack = parseHostedExecutionSharePack(await readCachedJsonObject(context));
   return json(await store.writeSharePack(shareId, pack));
+}
+
+async function handleUserCryptoContextRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  const userId = decodeRouteParam(encodedUserId);
+  const stub = await resolveUserRunnerStub(context.env, userId);
+  return json(await stub.provisionManagedUserCrypto(userId));
 }
 
 async function handleGatewayRoute(
@@ -1066,7 +1098,13 @@ async function resolveHostedExecutionUserCryptoContext(input: {
     envelopeEncryptionKey: input.environment.platformEnvelopeKey,
     envelopeEncryptionKeyId: input.environment.platformEnvelopeKeyId,
     envelopeEncryptionKeysById: input.environment.platformEnvelopeKeysById,
-  }).requireUserCryptoContext(input.userId);
+    recoveryRecipientKeyId: input.environment.recoveryRecipientKeyId,
+    recoveryRecipientPublicKey: input.environment.recoveryRecipientPublicKey,
+    teeAutomationRecipientKeyId: input.environment.teeAutomationRecipientKeyId,
+    teeAutomationRecipientPublicKey: input.environment.teeAutomationRecipientPublicKey,
+  }).requireUserCryptoContext(input.userId, {
+    reason: "worker-route-access",
+  });
 }
 
 async function handleDispatchRoute(context: WorkerRouteContext): Promise<Response> {

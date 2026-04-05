@@ -4,6 +4,10 @@ import { access, mkdir, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/p
 import { tmpdir } from 'node:os'
 import { FOOD_STATUSES, RECIPE_STATUSES } from '@murphai/contracts'
 import { buildSharePackFromVault } from '@murphai/core'
+import {
+  HOSTED_EXECUTION_USER_ID_HEADER,
+  createHostedExecutionSignatureHeaders,
+} from '@murphai/hosted-execution'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -2378,29 +2382,52 @@ async function issueHostedShareLink(input: {
   const baseUrl = normalizeHostedShareApiBaseUrl(
     process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL ?? null,
   )
-  const token = readHostedShareApiToken(process.env.HOSTED_SHARE_INTERNAL_TOKENS ?? null)
+  const signingSecret = normalizeNullableString(process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET)
+  const senderMemberId = normalizeNullableString(input.senderMemberId)
 
-  if (!baseUrl || !token) {
+  if (!baseUrl || !signingSecret) {
     throw new Error(
-      'Hosted share link creation requires HOSTED_ONBOARDING_PUBLIC_BASE_URL plus HOSTED_SHARE_INTERNAL_TOKENS in the assistant environment.',
+      'Hosted share link creation requires HOSTED_ONBOARDING_PUBLIC_BASE_URL plus HOSTED_WEB_INTERNAL_SIGNING_SECRET in the assistant environment.',
     )
   }
 
-  const requestUrl = new URL('/api/hosted-share/internal/create', baseUrl).toString()
+  if (!senderMemberId) {
+    throw new Error(
+      'Hosted share link creation requires a hosted member identity so the share pack stays bound to its owner.',
+    )
+  }
+
+  const body = JSON.stringify({
+    pack: input.pack,
+    expiresInHours: input.expiresInHours,
+    inviteCode: input.inviteCode,
+    recipientPhoneNumber: input.recipientPhoneNumber,
+    senderMemberId,
+  })
+  const requestUrl = new URL('/api/hosted-share/internal/create', `${baseUrl}/`)
+  const signatureHeaders = await createHostedExecutionSignatureHeaders({
+    method: 'POST',
+    nonce: null,
+    path: requestUrl.pathname,
+    payload: body,
+    search: requestUrl.search,
+    secret: signingSecret,
+    timestamp: new Date().toISOString(),
+    userId: senderMemberId,
+  })
+  const headers = new Headers({
+    'content-type': 'application/json; charset=utf-8',
+    [HOSTED_EXECUTION_USER_ID_HEADER]: senderMemberId,
+  })
+
+  for (const [key, value] of Object.entries(signatureHeaders) as Array<[string, string]>) {
+    headers.set(key, value)
+  }
 
   const response = await fetch(requestUrl, {
     method: 'POST',
-    headers: {
-      authorization: `Bearer ${token}`,
-      'content-type': 'application/json; charset=utf-8',
-    },
-    body: JSON.stringify({
-      pack: input.pack,
-      expiresInHours: input.expiresInHours,
-      inviteCode: input.inviteCode,
-      recipientPhoneNumber: input.recipientPhoneNumber,
-      senderMemberId: input.senderMemberId,
-    }),
+    headers,
+    body,
   })
   const payload = (await response.json()) as
     | ({
@@ -2435,17 +2462,6 @@ function normalizeHostedShareApiBaseUrl(value: string | null): string | null {
   url.hash = ''
   url.search = ''
   return url.toString().replace(/\/$/u, '')
-}
-
-function readHostedShareApiToken(value: string | null): string | null {
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  return value
-    .split(',')
-    .map((entry) => entry.trim())
-    .find((entry) => entry.length > 0) ?? null
 }
 
 async function writeAssistantPayloadFile(

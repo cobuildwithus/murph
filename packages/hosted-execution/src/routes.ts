@@ -9,8 +9,12 @@ export function buildHostedExecutionDeviceSyncConnectLinkPath(provider: string):
 export const HOSTED_EXECUTION_AI_USAGE_RECORD_PATH =
   "/api/internal/hosted-execution/usage/record";
 
-export function buildHostedExecutionSharePackPath(shareId: string): string {
-  return `/internal/shares/${encodeURIComponent(shareId)}/pack`;
+export function buildHostedExecutionSharePackPath(userId: string, shareId: string): string {
+  return `/internal/users/${encodeURIComponent(userId)}/shares/${encodeURIComponent(shareId)}/pack`;
+}
+
+export function buildHostedExecutionUserCryptoContextPath(userId: string): string {
+  return `/internal/users/${encodeURIComponent(userId)}/crypto-context`;
 }
 
 export function buildHostedExecutionUserStatusPath(userId: string): string {

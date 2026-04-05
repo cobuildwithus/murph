@@ -25,6 +25,7 @@ import {
 } from "./parsers.ts";
 import {
   buildHostedExecutionSharePackPath,
+  buildHostedExecutionUserCryptoContextPath,
   buildHostedExecutionUserDeviceSyncRuntimePath,
   buildHostedExecutionUserDeviceSyncRuntimeSnapshotPath,
   buildHostedExecutionUserDispatchPayloadPath,
@@ -47,6 +48,12 @@ export interface HostedExecutionDispatchClientOptions {
   timeoutMs?: number;
 }
 
+export interface HostedExecutionManagedUserCryptoStatus {
+  recipientKinds: string[];
+  rootKeyId: string;
+  userId: string;
+}
+
 export interface HostedExecutionControlClient {
   applyDeviceSyncRuntimeUpdates(
     userId: string,
@@ -54,7 +61,7 @@ export interface HostedExecutionControlClient {
   ): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse>;
   clearUserEnv(userId: string): Promise<HostedExecutionUserEnvStatus>;
   deletePendingUsage(userId: string, usageIds: readonly string[]): Promise<void>;
-  deleteSharePack(shareId: string): Promise<void>;
+  deleteSharePack(userId: string, shareId: string): Promise<void>;
   deleteStoredDispatchPayload(payload: HostedExecutionOutboxPayload): Promise<void>;
   dispatchStoredPayload(payload: HostedExecutionOutboxPayload): Promise<HostedExecutionDispatchResult>;
   getDeviceSyncRuntimeSnapshot(
@@ -62,14 +69,15 @@ export interface HostedExecutionControlClient {
     input?: Omit<HostedExecutionDeviceSyncRuntimeSnapshotRequest, "userId">,
   ): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
   getPendingUsage(userId: string, limit?: number): Promise<Record<string, unknown>[]>;
-  getSharePack(shareId: string): Promise<SharePack | null>;
+  getSharePack(userId: string, shareId: string): Promise<SharePack | null>;
   getStatus(userId: string): Promise<HostedExecutionUserStatus>;
   getUserEnvStatus(userId: string): Promise<HostedExecutionUserEnvStatus>;
   putDeviceSyncRuntimeSnapshot(
     userId: string,
     snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   ): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
-  putSharePack(shareId: string, pack: SharePack): Promise<SharePack>;
+  putSharePack(userId: string, shareId: string, pack: SharePack): Promise<SharePack>;
+  provisionManagedUserCrypto(userId: string): Promise<HostedExecutionManagedUserCryptoStatus>;
   run(userId: string): Promise<HostedExecutionUserStatus>;
   storeDispatchPayload(dispatch: HostedExecutionDispatchRequest): Promise<HostedExecutionOutboxPayload>;
   updateUserEnv(userId: string, update: HostedExecutionUserEnvUpdate): Promise<HostedExecutionUserEnvStatus>;
@@ -157,14 +165,14 @@ export function createHostedExecutionControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
-    deleteSharePack(shareId) {
+    deleteSharePack(userId, shareId) {
       return requestHostedExecutionAuthorizedJson({
         baseUrl,
         fetchImpl,
         getAuthorizationHeader,
         label: "delete share pack",
         parse: () => undefined,
-        path: buildHostedExecutionSharePackPath(shareId),
+        path: buildHostedExecutionSharePackPath(userId, shareId),
         request: {
           method: "DELETE",
         },
@@ -277,14 +285,14 @@ export function createHostedExecutionControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
-    getSharePack(shareId) {
+    getSharePack(userId, shareId) {
       return requestHostedExecutionAuthorizedJson({
         baseUrl,
         fetchImpl,
         getAuthorizationHeader,
         label: "share pack",
         parse: parseHostedExecutionSharePack,
-        path: buildHostedExecutionSharePackPath(shareId),
+        path: buildHostedExecutionSharePackPath(userId, shareId),
         request: {
           method: "GET",
         },
@@ -318,7 +326,7 @@ export function createHostedExecutionControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
-    putSharePack(shareId, pack) {
+    putSharePack(userId, shareId, pack) {
       const requestPayload = parseHostedExecutionSharePack(pack);
 
       return requestHostedExecutionAuthorizedJson({
@@ -327,10 +335,24 @@ export function createHostedExecutionControlClient(
         getAuthorizationHeader,
         label: "share pack write",
         parse: parseHostedExecutionSharePack,
-        path: buildHostedExecutionSharePackPath(shareId),
+        path: buildHostedExecutionSharePackPath(userId, shareId),
         request: {
           body: JSON.stringify(requestPayload),
           headers: { "content-type": "application/json; charset=utf-8" },
+          method: "PUT",
+        },
+        timeoutMs: options.timeoutMs,
+      });
+    },
+    provisionManagedUserCrypto(userId) {
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "managed user crypto provision",
+        parse: parseHostedExecutionManagedUserCryptoStatus,
+        path: buildHostedExecutionUserCryptoContextPath(userId),
+        request: {
           method: "PUT",
         },
         timeoutMs: options.timeoutMs,
@@ -411,6 +433,42 @@ export function createHostedExecutionControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
+  };
+}
+
+function parseHostedExecutionManagedUserCryptoStatus(value: unknown): HostedExecutionManagedUserCryptoStatus {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Managed user crypto status response must be an object.");
+  }
+
+  const record = value as Record<string, unknown>;
+  const userId = typeof record.userId === "string" && record.userId.trim().length > 0
+    ? record.userId
+    : null;
+  const rootKeyId = typeof record.rootKeyId === "string" && record.rootKeyId.trim().length > 0
+    ? record.rootKeyId
+    : null;
+
+  if (!userId || !rootKeyId) {
+    throw new TypeError("Managed user crypto status response must include userId and rootKeyId.");
+  }
+
+  if (!Array.isArray(record.recipientKinds)) {
+    throw new TypeError("Managed user crypto status response must include recipientKinds.");
+  }
+
+  const recipientKinds = record.recipientKinds.map((entry, index) => {
+    if (typeof entry !== "string" || entry.trim().length === 0) {
+      throw new TypeError(`Managed user crypto status recipientKinds[${index}] must be a non-empty string.`);
+    }
+
+    return entry;
+  });
+
+  return {
+    recipientKinds,
+    rootKeyId,
+    userId,
   };
 }
 
