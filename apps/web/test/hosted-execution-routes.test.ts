@@ -9,7 +9,6 @@ const mocks = vi.hoisted(() => ({
   drainHostedExecutionOutbox: vi.fn(),
   drainHostedAiUsageStripeMetering: vi.fn(),
   getPrisma: vi.fn(),
-  requireHostedExecutionInternalToken: vi.fn(),
   requireHostedExecutionSchedulerToken: vi.fn(),
   requireHostedExecutionUserId: vi.fn(),
   resolveHostedPrivyRequestAuthContext: vi.fn(),
@@ -17,7 +16,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/hosted-execution/internal", () => ({
   authorizeHostedExecutionInternalRequest: mocks.authorizeHostedExecutionInternalRequest,
-  requireHostedExecutionInternalToken: mocks.requireHostedExecutionInternalToken,
   requireHostedExecutionSchedulerToken: mocks.requireHostedExecutionSchedulerToken,
   requireHostedExecutionUserId: mocks.requireHostedExecutionUserId,
 }));
@@ -66,7 +64,6 @@ describe("hosted execution async routes", () => {
     mocks.authorizeHostedExecutionInternalRequest.mockReturnValue({
       trustedUserId: "member_123",
     });
-    mocks.requireHostedExecutionInternalToken.mockImplementation(() => {});
     mocks.requireHostedExecutionSchedulerToken.mockImplementation(() => {});
     mocks.requireHostedExecutionUserId.mockReturnValue("member_123");
     mocks.getPrisma.mockReturnValue({ prisma: true });
