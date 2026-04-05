@@ -1261,8 +1261,6 @@ describe("hosted onboarding webhook retry safety", () => {
       });
     const member = {
       billingStatus: HostedBillingStatus.not_started,
-      encryptedBootstrapSecret: "enc:bootstrap",
-      encryptionKeyVersion: "v1",
       id: "member_123",
       invites: [],
       linqChatId: "chat_123",
@@ -1476,8 +1474,6 @@ describe("hosted onboarding webhook retry safety", () => {
   it("does not resend an already-sent Linq invite reply when reclaiming a failed receipt", async () => {
     const member = {
       billingStatus: HostedBillingStatus.not_started,
-      encryptedBootstrapSecret: "enc:bootstrap",
-      encryptionKeyVersion: "v1",
       id: "member_123",
       invites: [],
       linqChatId: "chat_123",
@@ -1644,8 +1640,6 @@ describe("hosted onboarding webhook retry safety", () => {
   it("does not resend a Linq invite reply after the external send succeeds but receipt persistence fails", async () => {
     const member = {
       billingStatus: HostedBillingStatus.not_started,
-      encryptedBootstrapSecret: "enc:bootstrap",
-      encryptionKeyVersion: "v1",
       id: "member_123",
       invites: [],
       linqChatId: "chat_123",
@@ -1825,8 +1819,6 @@ describe("hosted onboarding webhook retry safety", () => {
   it("does not replay a Linq invite reply when both sent and sent-unconfirmed receipt writes fail", async () => {
     const member = {
       billingStatus: HostedBillingStatus.not_started,
-      encryptedBootstrapSecret: "enc:bootstrap",
-      encryptionKeyVersion: "v1",
       id: "member_123",
       invites: [],
       linqChatId: "chat_123",

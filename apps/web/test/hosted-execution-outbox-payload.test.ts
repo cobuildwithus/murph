@@ -62,4 +62,44 @@ describe("hosted execution outbox payload storage", () => {
     expect(JSON.stringify(payload)).not.toContain("chat_123");
     expect(JSON.stringify(payload)).not.toContain("hbidx:phone:v1:test");
   });
+
+  it("stores gateway message sends by reference without persisting text or session identifiers", () => {
+    const payload = serializeHostedExecutionOutboxPayload({
+      event: {
+        clientRequestId: "req_123",
+        kind: "gateway.message.send",
+        replyToMessageId: null,
+        sessionKey: "gwcs_secret_123",
+        text: "private outbound message",
+        userId: "member_123",
+      },
+      eventId: "evt_gateway_123",
+      occurredAt: "2026-04-04T00:00:00.000Z",
+    });
+
+    expect((payload as { storage?: unknown }).storage).toBe("reference");
+    expect(JSON.stringify(payload)).not.toContain("private outbound message");
+    expect(JSON.stringify(payload)).not.toContain("gwcs_secret_123");
+    expect(JSON.stringify(payload)).not.toContain("req_123");
+  });
+
+  it("rejects forced inline storage for gateway message sends", () => {
+    expect(() => serializeHostedExecutionOutboxPayload(
+      {
+        event: {
+          clientRequestId: null,
+          kind: "gateway.message.send",
+          replyToMessageId: null,
+          sessionKey: "gwcs_secret_456",
+          text: "still private",
+          userId: "member_123",
+        },
+        eventId: "evt_gateway_456",
+        occurredAt: "2026-04-04T00:00:00.000Z",
+      },
+      {
+        storage: "inline",
+      },
+    )).toThrow("Hosted execution gateway.message.send outbox payloads must use reference storage.");
+  });
 });

@@ -1,5 +1,4 @@
 import { afterEach, describe as baseDescribe, expect, it, vi } from "vitest";
-import { HOSTED_USER_ROOT_KEY_ENVELOPE_SCHEMA } from "@murphai/runtime-state";
 
 import {
   DEFAULT_HOSTED_EXECUTION_ARTIFACTS_BASE_URL,
@@ -22,8 +21,6 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
   buildHostedExecutionUserEnvPath,
-  buildHostedExecutionUserKeyEnvelopePath,
-  buildHostedExecutionUserKeyRecipientPath,
   buildHostedExecutionUserRunPath,
   buildHostedExecutionUserStatusPath,
   createHostedExecutionControlClient,
@@ -78,10 +75,6 @@ const TEST_HOSTED_RECIPIENT_PRIVATE_JWK = {
   d: "HAPljluiFVW3g-UEmrJ9NVYTlclAhaC8N5LT0h7vitQ",
   key_ops: ["deriveBits"] as string[],
 } as const;
-const TEST_HOSTED_EPHEMERAL_PUBLIC_JWK = {
-  ...TEST_HOSTED_RECIPIENT_PUBLIC_JWK,
-} as const;
-
 describe("@murphai/hosted-execution", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -1470,16 +1463,6 @@ describe("@murphai/hosted-execution", () => {
     expect(buildHostedExecutionUserStatusPath("member/123")).toBe("/internal/users/member%2F123/status");
     expect(buildHostedExecutionUserRunPath("member/123")).toBe("/internal/users/member%2F123/run");
     expect(buildHostedExecutionUserEnvPath("member/123")).toBe("/internal/users/member%2F123/env");
-    expect(
-      buildHostedExecutionUserKeyEnvelopePath("member/123"),
-    ).toBe(
-      "/internal/users/member%2F123/keys/envelope",
-    );
-    expect(
-      buildHostedExecutionUserKeyRecipientPath("member/123", "user/unlock"),
-    ).toBe(
-      "/internal/users/member%2F123/keys/recipients/user%2Funlock",
-    );
   });
 
   it("rejects unsafe hosted base urls and only allows explicit internal HTTP exceptions", () => {
@@ -1905,41 +1888,31 @@ describe("@murphai/hosted-execution", () => {
     ).resolves.toBe(true);
   });
 
-  it("control client reads and upserts hosted user key envelope routes", async () => {
+  it("control client signs standard env and run routes", async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(
-        new Response(JSON.stringify(buildHostedUserRootKeyEnvelopeFixture("member/123")), {
-          status: 200,
-        }),
+        new Response(JSON.stringify({
+          configuredUserEnvKeys: ["OPENAI_API_KEY"],
+          userId: "member/123",
+        }), { status: 200 }),
       )
       .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify(
-            buildHostedUserRootKeyEnvelopeFixture("member/123", {
-              recipients: [
-                {
-                  ciphertext: "ciphertext-automation",
-                  ephemeralPublicKeyJwk: TEST_HOSTED_EPHEMERAL_PUBLIC_JWK,
-                  iv: "iv-automation",
-                  keyId: "recipient-automation-v1",
-                  kind: "automation",
-                },
-                {
-                  ciphertext: "ciphertext-user-unlock",
-                  ephemeralPublicKeyJwk: TEST_HOSTED_EPHEMERAL_PUBLIC_JWK,
-                  iv: "iv-user-unlock",
-                  keyId: "recipient-user-unlock-v1",
-                  kind: "user-unlock",
-                  metadata: {
-                    activated: true,
-                    device: "browser",
-                  },
-                },
-              ],
-            }),
-          ),
-          { status: 200 },
-        ),
+        new Response(JSON.stringify({
+          backpressuredEventIds: [],
+          bundleRefs: {
+            agentState: null,
+            vault: null,
+          },
+          inFlight: false,
+          lastError: null,
+          lastEventId: "manual:123",
+          lastRunAt: null,
+          nextWakeAt: null,
+          pendingEventCount: 0,
+          poisonedEventIds: [],
+          retryingEventId: null,
+          userId: "member/123",
+        }), { status: 200 }),
       );
     const client = createHostedExecutionControlClient({
       baseUrl: "https://worker.example.test/",
@@ -1948,46 +1921,18 @@ describe("@murphai/hosted-execution", () => {
       signingSecret: "signing-secret",
     });
 
-    await expect(client.getUserKeyEnvelope("member/123")).resolves.toEqual(
-      buildHostedUserRootKeyEnvelopeFixture("member/123"),
-    );
-    await expect(
-      client.upsertUserKeyRecipient("member/123", "user-unlock", {
-        metadata: {
-          activated: true,
-          device: "browser",
-        },
-        recipientPublicKeyJwk: TEST_HOSTED_RECIPIENT_PUBLIC_JWK,
-        recipientKeyId: "recipient-user-unlock-v1",
-      }),
-    ).resolves.toEqual(
-      buildHostedUserRootKeyEnvelopeFixture("member/123", {
-        recipients: [
-          {
-            ciphertext: "ciphertext-automation",
-            ephemeralPublicKeyJwk: TEST_HOSTED_EPHEMERAL_PUBLIC_JWK,
-            iv: "iv-automation",
-            keyId: "recipient-automation-v1",
-            kind: "automation",
-          },
-          {
-            ciphertext: "ciphertext-user-unlock",
-            ephemeralPublicKeyJwk: TEST_HOSTED_EPHEMERAL_PUBLIC_JWK,
-            iv: "iv-user-unlock",
-            keyId: "recipient-user-unlock-v1",
-            kind: "user-unlock",
-            metadata: {
-              activated: true,
-              device: "browser",
-            },
-          },
-        ],
-      }),
-    );
+    await expect(client.getUserEnvStatus("member/123")).resolves.toEqual({
+      configuredUserEnvKeys: ["OPENAI_API_KEY"],
+      userId: "member/123",
+    });
+    await expect(client.run("member/123")).resolves.toMatchObject({
+      lastEventId: "manual:123",
+      userId: "member/123",
+    });
 
     expect(fetchImpl).toHaveBeenNthCalledWith(
       1,
-      "https://worker.example.test/internal/users/member%2F123/keys/envelope",
+      "https://worker.example.test/internal/users/member%2F123/env",
       expect.objectContaining({
         method: "GET",
       }),
@@ -1995,7 +1940,7 @@ describe("@murphai/hosted-execution", () => {
     await expect(
       verifyHostedExecutionSignature({
         method: "GET",
-        path: buildHostedExecutionUserKeyEnvelopePath("member/123"),
+        path: buildHostedExecutionUserEnvPath("member/123"),
         payload: "",
         secret: "signing-secret",
         signature: new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get(HOSTED_EXECUTION_SIGNATURE_HEADER),
@@ -2006,25 +1951,18 @@ describe("@murphai/hosted-execution", () => {
 
     expect(fetchImpl).toHaveBeenNthCalledWith(
       2,
-      "https://worker.example.test/internal/users/member%2F123/keys/recipients/user-unlock",
+      "https://worker.example.test/internal/users/member%2F123/run",
       expect.objectContaining({
-        method: "PUT",
+        method: "POST",
       }),
     );
-    expect(JSON.parse(String(fetchImpl.mock.calls[1]?.[1]?.body ?? ""))).toEqual({
-      metadata: {
-        activated: true,
-        device: "browser",
-      },
-      recipientKeyId: "recipient-user-unlock-v1",
-      recipientPublicKeyJwk: TEST_HOSTED_RECIPIENT_PUBLIC_JWK,
-    });
+    expect(JSON.parse(String(fetchImpl.mock.calls[1]?.[1]?.body ?? ""))).toEqual({});
     const upsertHeaders = new Headers(fetchImpl.mock.calls[1]?.[1]?.headers);
     expect(upsertHeaders.get("content-type")).toBe("application/json; charset=utf-8");
     await expect(
       verifyHostedExecutionSignature({
-        method: "PUT",
-        path: buildHostedExecutionUserKeyRecipientPath("member/123", "user-unlock"),
+        method: "POST",
+        path: buildHostedExecutionUserRunPath("member/123"),
         payload: String(fetchImpl.mock.calls[1]?.[1]?.body ?? ""),
         secret: "signing-secret",
         signature: upsertHeaders.get(HOSTED_EXECUTION_SIGNATURE_HEADER),
@@ -2124,36 +2062,5 @@ function buildDispatchResultFixture(eventId: string) {
       retryingEventId: null,
       userId: "user-123",
     },
-  };
-}
-
-function buildHostedUserRootKeyEnvelopeFixture(
-  userId: string,
-  overrides?: {
-    recipients?: Array<{
-      ciphertext: string;
-      ephemeralPublicKeyJwk: typeof TEST_HOSTED_EPHEMERAL_PUBLIC_JWK;
-      iv: string;
-      keyId: string;
-      kind: "automation" | "user-unlock" | "recovery" | "tee-automation";
-      metadata?: Record<string, string | number | boolean | null>;
-    }>;
-  },
-) {
-  return {
-    createdAt: "2026-03-27T09:00:00.000Z",
-    recipients: overrides?.recipients ?? [
-      {
-        ciphertext: "ciphertext-automation",
-        ephemeralPublicKeyJwk: TEST_HOSTED_EPHEMERAL_PUBLIC_JWK,
-        iv: "iv-automation",
-        keyId: "recipient-automation-v1",
-        kind: "automation",
-      },
-    ],
-    rootKeyId: "root-key-v1",
-    schema: HOSTED_USER_ROOT_KEY_ENVELOPE_SCHEMA,
-    updatedAt: "2026-03-27T09:05:00.000Z",
-    userId,
   };
 }

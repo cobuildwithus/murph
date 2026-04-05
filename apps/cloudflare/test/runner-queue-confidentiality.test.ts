@@ -186,6 +186,25 @@ describe("hosted dispatch payload store confidentiality", () => {
     expect(bucket.deleted).toHaveLength(2);
   });
 
+  it("rejects legacy raw dispatch payload JSON instead of reinterpreting it", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const store = createHostedDispatchPayloadStore({
+      bucket,
+      key: createTestRootKey(37),
+      keyId: "k-current",
+    });
+
+    await expect(store.readStoredDispatch(JSON.stringify({
+      event: {
+        kind: "assistant.cron.tick",
+        reason: "manual",
+        userId: "legacy_user",
+      },
+      eventId: "evt_legacy_raw",
+      occurredAt: "2026-04-03T00:06:00.000Z",
+    }))).rejects.toThrow("Hosted dispatch payload envelope is invalid.");
+  });
+
   it("externalizes hosted email dispatch refs instead of persisting them inline", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const store = createHostedDispatchPayloadStore({

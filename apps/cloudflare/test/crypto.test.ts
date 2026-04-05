@@ -98,6 +98,42 @@ describe("readEncryptedR2Payload", () => {
       scope: "bundle",
     })).rejects.toThrow("Hosted bundle envelope scope mismatch");
   });
+
+  it("fails closed when a stored payload is rebound without the expected AAD", async () => {
+    const key = createTestRootKey(17);
+    const aad = new TextEncoder().encode("expected-aad");
+    const envelope = await encryptHostedBundle({
+      aad,
+      key,
+      keyId: "k-current",
+      plaintext: new TextEncoder().encode("{\"ok\":true}"),
+      scope: "bundle",
+    });
+    const payload = new TextEncoder().encode(JSON.stringify(envelope));
+
+    await expect(readEncryptedR2Payload({
+      aad: new TextEncoder().encode("different-aad"),
+      bucket: {
+        async get() {
+          return {
+            async arrayBuffer() {
+              return payload.buffer.slice(
+                payload.byteOffset,
+                payload.byteOffset + payload.byteLength,
+              );
+            },
+          };
+        },
+        async put() {
+          throw new Error("unexpected rewrite");
+        },
+      },
+      cryptoKey: key,
+      expectedKeyId: "k-current",
+      key: "bundles/vault/test.bundle.json",
+      scope: "bundle",
+    })).rejects.toThrow();
+  });
 });
 
 describe("hosted storage object keys", () => {

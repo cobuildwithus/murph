@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  createHostedUserRootKeyEnvelope,
-  generateHostedUserRecipientKeyPair,
-} from "@murphai/runtime-state";
+import { generateHostedUserRecipientKeyPair } from "@murphai/runtime-state";
 
 import { deriveHostedStorageOpaqueId } from "../src/crypto-context.js";
 import { createHostedUserKeyStore } from "../src/user-key-store.js";
@@ -53,12 +50,6 @@ describe("hosted user key store", () => {
       },
     });
 
-    const readBeforeMigration = await rotatedStore.readUserRootKeyEnvelope("user_live_123");
-    expect(readBeforeMigration?.userId).toBe("user_live_123");
-    expect(
-      readBeforeMigration?.recipients.find((recipient) => recipient.kind === "automation")?.keyId,
-    ).toBe("automation:v1");
-
     const migrated = await rotatedStore.ensureUserCryptoContext("user_live_123");
     const migratedEnvelopeObjectKey = [...bucket.objects.keys()][0] ?? null;
 
@@ -72,35 +63,9 @@ describe("hosted user key store", () => {
     expect(bucket.deleted).not.toContain(oldEnvelopeObjectKey);
   });
 
-  it("rejects malformed managed-recipient public JWKs", async () => {
+  it("creates one opaque automation-only envelope per new user and reuses its root key", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const automation = await generateHostedUserRecipientKeyPair();
-    const store = createHostedUserKeyStore({
-      automationRecipientKeyId: "automation:v1",
-      automationRecipientPrivateKey: automation.privateKeyJwk,
-      automationRecipientPublicKey: automation.publicKeyJwk,
-      bucket,
-      envelopeEncryptionKey: createTestRootKey(13),
-      envelopeEncryptionKeyId: "v1",
-    });
-
-    await expect(store.upsertRecipient({
-      kind: "user-unlock",
-      recipientKeyId: "browser:v1",
-      recipientPublicKeyJwk: {
-        crv: "P-256",
-        kty: "EC",
-        x: "invalid",
-        y: "invalid",
-      },
-      userId: "user_live_456",
-    })).rejects.toThrow();
-  });
-
-  it("persists explicit user root-key envelopes and reuses their root key", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
-    const automation = await generateHostedUserRecipientKeyPair();
-    const browser = await generateHostedUserRecipientKeyPair();
     const envelopeEncryptionKey = createTestRootKey(17);
     const store = createHostedUserKeyStore({
       automationRecipientKeyId: "automation:v1",
@@ -110,144 +75,24 @@ describe("hosted user key store", () => {
       envelopeEncryptionKey,
       envelopeEncryptionKeyId: "v1",
     });
-    const created = await createHostedUserRootKeyEnvelope({
-      recipients: [
-        {
-          keyId: "automation:v1",
-          kind: "automation",
-          publicKeyJwk: automation.publicKeyJwk,
-        },
-        {
-          keyId: "browser:v1",
-          kind: "user-unlock",
-          publicKeyJwk: browser.publicKeyJwk,
-        },
-      ],
-      userId: "user_live_789",
+
+    const first = await store.ensureUserCryptoContext("user_live_789");
+    const second = await store.ensureUserCryptoContext("user_live_789");
+    const objectKey = [...bucket.objects.keys()][0] ?? null;
+
+    expect(first.envelope.recipients).toHaveLength(1);
+    expect(first.envelope.recipients[0]).toMatchObject({
+      keyId: "automation:v1",
+      kind: "automation",
     });
-
-    await store.putUserRootKeyEnvelope({
-      envelope: created.envelope,
-      userId: "user_live_789",
-    });
-
-    const context = await store.ensureUserCryptoContext("user_live_789");
-    const storedEnvelope = await store.readUserRootKeyEnvelope("user_live_789");
-
-    expect([...context.rootKey]).toEqual([...created.rootKey]);
-    expect(storedEnvelope?.rootKeyId).toBe(created.envelope.rootKeyId);
-    expect(
-      storedEnvelope?.recipients.find((recipient) => recipient.kind === "user-unlock")?.keyId,
-    ).toBe("browser:v1");
-  });
-
-  it("rejects replacing an existing root key through putUserRootKeyEnvelope", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
-    const automation = await generateHostedUserRecipientKeyPair();
-    const store = createHostedUserKeyStore({
-      automationRecipientKeyId: "automation:v1",
-      automationRecipientPrivateKey: automation.privateKeyJwk,
-      automationRecipientPublicKey: automation.publicKeyJwk,
-      bucket,
-      envelopeEncryptionKey: createTestRootKey(19),
-      envelopeEncryptionKeyId: "v1",
-    });
-
-    await store.ensureUserCryptoContext("user_live_replace");
-    const replacement = await createHostedUserRootKeyEnvelope({
-      recipients: [
-        {
-          keyId: "automation:v1",
-          kind: "automation",
-          publicKeyJwk: automation.publicKeyJwk,
-        },
-      ],
-      userId: "user_live_replace",
-    });
-
-    await expect(store.putUserRootKeyEnvelope({
-      envelope: replacement.envelope,
-      userId: "user_live_replace",
-    })).rejects.toThrow(/Replacing a hosted user root key is not allowed/u);
-  });
-
-  it("rejects tee-automation recipients on the public full-envelope write path", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
-    const automation = await generateHostedUserRecipientKeyPair();
-    const tee = await generateHostedUserRecipientKeyPair();
-    const store = createHostedUserKeyStore({
-      automationRecipientKeyId: "automation:v1",
-      automationRecipientPrivateKey: automation.privateKeyJwk,
-      automationRecipientPublicKey: automation.publicKeyJwk,
-      bucket,
-      envelopeEncryptionKey: createTestRootKey(29),
-      envelopeEncryptionKeyId: "v1",
-    });
-
-    const envelope = await createHostedUserRootKeyEnvelope({
-      recipients: [
-        {
-          keyId: "automation:v1",
-          kind: "automation",
-          publicKeyJwk: automation.publicKeyJwk,
-        },
-        {
-          keyId: "tee:v1",
-          kind: "tee-automation",
-          publicKeyJwk: tee.publicKeyJwk,
-        },
-      ],
-      userId: "user_live_public",
-    });
-
-    await expect(store.putUserRootKeyEnvelope({
-      envelope: envelope.envelope,
-      userId: "user_live_public",
-    })).rejects.toThrow(/must not include tee-automation recipients/u);
-  });
-
-  it("deletes stale rotated envelope objects after rewriting the current path", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
-    const automation = await generateHostedUserRecipientKeyPair();
-    const oldKey = createTestRootKey(31);
-    const nextKey = createTestRootKey(37);
-    const oldStore = createHostedUserKeyStore({
-      automationRecipientKeyId: "automation:v1",
-      automationRecipientPrivateKey: automation.privateKeyJwk,
-      automationRecipientPublicKey: automation.publicKeyJwk,
-      bucket,
-      envelopeEncryptionKey: oldKey,
-      envelopeEncryptionKeyId: "v1",
-    });
-
-    await oldStore.ensureUserCryptoContext("user_live_rotate");
-    const originalEnvelope = await oldStore.readUserRootKeyEnvelope("user_live_rotate");
-
-    expect(originalEnvelope).not.toBeNull();
+    expect([...second.rootKey]).toEqual([...first.rootKey]);
+    expect(second.rootKeyId).toBe(first.rootKeyId);
+    expect(objectKey).toBe(await hostedUserKeyEnvelopeObjectKeyForTest(
+      envelopeEncryptionKey,
+      "user_live_789",
+    ));
+    expect(objectKey).not.toContain("user_live_789");
     expect(bucket.objects.size).toBe(1);
-
-    const rotatedStore = createHostedUserKeyStore({
-      automationRecipientKeyId: "automation:v1",
-      automationRecipientPrivateKey: automation.privateKeyJwk,
-      automationRecipientPublicKey: automation.publicKeyJwk,
-      bucket,
-      envelopeEncryptionKey: nextKey,
-      envelopeEncryptionKeyId: "v2",
-      envelopeEncryptionKeysById: {
-        v1: oldKey,
-      },
-    });
-
-    await rotatedStore.putUserRootKeyEnvelope({
-      envelope: originalEnvelope!,
-      userId: "user_live_rotate",
-    });
-
-    expect(bucket.objects.size).toBe(1);
-    expect(bucket.deleted.length).toBeGreaterThanOrEqual(1);
-    await expect(rotatedStore.readUserRootKeyEnvelope("user_live_rotate")).resolves.toEqual(
-      originalEnvelope,
-    );
   });
 
   it("ignores removed legacy v1 envelopes at the old static object path", async () => {
@@ -267,16 +112,14 @@ describe("hosted user key store", () => {
       envelopeEncryptionKeyId: "v1",
     });
 
-    expect(await store.readUserRootKeyEnvelope(legacyUserId)).toBeNull();
     const context = await store.ensureUserCryptoContext(legacyUserId);
-    const storedEnvelope = await store.readUserRootKeyEnvelope(legacyUserId);
     const currentObjectKey = await hostedUserKeyEnvelopeObjectKeyForTest(envelopeEncryptionKey, legacyUserId);
 
-    expect(storedEnvelope?.schema).toBe("murph.hosted-user-root-key-envelope.v2");
+    expect(context.envelope.schema).toBe("murph.hosted-user-root-key-envelope.v2");
     expect(
-      storedEnvelope?.recipients.find((recipient) => recipient.kind === "automation")?.keyId,
+      context.envelope.recipients.find((recipient) => recipient.kind === "automation")?.keyId,
     ).toBe("automation:v2");
-    expect(storedEnvelope?.rootKeyId).toBe(context.rootKeyId);
+    expect(context.envelope.rootKeyId).toBe(context.rootKeyId);
     expect(bucket.objects.has(currentObjectKey)).toBe(true);
     expect(bucket.objects.has(legacyObjectKey)).toBe(true);
     expect(bucket.deleted).not.toContain(legacyObjectKey);

@@ -8,12 +8,9 @@ import {
   createHostedPhoneLookupKey,
   readHostedPhoneHint,
 } from "./contact-privacy";
-import { buildHostedSecretAad } from "../device-sync/crypto";
 import { hostedOnboardingError } from "./errors";
 import { type HostedPrivyIdentity } from "./privy";
-import { getHostedOnboardingEnvironment, getHostedOnboardingSecretCodec } from "./runtime";
 import {
-  generateHostedBootstrapSecret,
   generateHostedMemberId,
 } from "./shared";
 import { normalizeHostedWalletAddress } from "./revnet";
@@ -56,8 +53,6 @@ export async function ensureHostedMemberForPhone(input: {
         status: HostedMemberStatus.invited,
         billingStatus: HostedBillingStatus.not_started,
         linqChatId: null,
-        encryptedBootstrapSecret: encryptHostedBootstrapSecret(memberId),
-        encryptionKeyVersion: getHostedOnboardingEnvironment().encryptionKeyVersion,
       },
     });
   } catch (error) {
@@ -86,20 +81,12 @@ async function refreshHostedMemberForPhone(input: {
   phoneNumber: string;
   prisma: PrismaClient | Prisma.TransactionClient;
 }): Promise<HostedMember> {
-    return input.prisma.hostedMember.update({
+  return input.prisma.hostedMember.update({
     where: {
       id: input.member.id,
     },
     data: {
       ...buildHostedMemberPhoneStorage(input.phoneNumber),
-      encryptedBootstrapSecret:
-        input.member.encryptedBootstrapSecret
-          ? undefined
-          : encryptHostedBootstrapSecret(input.member.id),
-      encryptionKeyVersion:
-        input.member.encryptionKeyVersion
-          ? undefined
-          : getHostedOnboardingEnvironment().encryptionKeyVersion,
     },
   });
 }
@@ -174,8 +161,6 @@ export async function ensureHostedMemberForPrivyIdentity(input: {
         walletChainType: input.identity.wallet.chainType,
         walletProvider: "privy",
         walletCreatedAt: input.now,
-        encryptedBootstrapSecret: encryptHostedBootstrapSecret(memberId),
-        encryptionKeyVersion: getHostedOnboardingEnvironment().encryptionKeyVersion,
       },
     });
   }
@@ -257,14 +242,6 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
         walletChainType: input.identity.wallet.chainType,
         walletProvider: "privy",
         walletCreatedAt: input.member.walletCreatedAt ?? input.now,
-        encryptedBootstrapSecret:
-          input.member.encryptedBootstrapSecret
-            ? undefined
-            : encryptHostedBootstrapSecret(input.member.id),
-        encryptionKeyVersion:
-          input.member.encryptionKeyVersion
-            ? undefined
-            : getHostedOnboardingEnvironment().encryptionKeyVersion,
       },
     });
   } catch (error) {
@@ -333,13 +310,4 @@ export async function findHostedMemberForPrivyIdentity(input: {
   }
 
   return matches.values().next().value ?? null;
-}
-
-function encryptHostedBootstrapSecret(memberId: string): string {
-  return getHostedOnboardingSecretCodec().encrypt(generateHostedBootstrapSecret(), {
-    aad: buildHostedSecretAad({
-      memberId,
-      purpose: "hosted-bootstrap-secret",
-    }),
-  });
 }

@@ -73,8 +73,6 @@ function makeMember(overrides: Record<string, unknown> = {}) {
     billingMode: null,
     billingStatus: HostedBillingStatus.not_started,
     createdAt: NOW,
-    encryptedBootstrapSecret: null,
-    encryptionKeyVersion: null,
     id: "member_123",
     linqChatId: null,
     maskedPhoneNumberHint: "*** 4567",

@@ -66,8 +66,6 @@ describe("ensureHostedMemberForPhone", () => {
     const prisma = {
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
-          encryptedBootstrapSecret: "encrypted-secret",
-          encryptionKeyVersion: "v1",
           id: "member_123",
           linqChatId: "chat_existing",
           maskedPhoneNumberHint: "*** 4567",
@@ -144,8 +142,6 @@ describe("ensureHostedMemberForPhone", () => {
         findUnique: vi.fn()
           .mockResolvedValueOnce(null)
           .mockResolvedValueOnce({
-            encryptedBootstrapSecret: "encrypted-secret",
-            encryptionKeyVersion: "v1",
             id: "member_123",
             linqChatId: "chat_existing",
             maskedPhoneNumberHint: "*** 4567",

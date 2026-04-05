@@ -18,16 +18,8 @@ import {
   type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
 import {
-  HOSTED_USER_ROOT_KEY_RECIPIENT_KINDS,
   isHostedEmailInboundSenderAuthorized,
-  isHostedUserManagedRootKeyRecipientKind,
-  parseHostedUserRecipientPublicKeyJwk,
-  parseHostedUserRootKeyEnvelope,
   readHostedVerifiedEmailFromEnv,
-  type HostedUserManagedRootKeyRecipientKind,
-  type HostedUserRecipientPublicKeyJwk,
-  type HostedUserRootKeyEnvelope,
-  type HostedUserRootKeyRecipientKind,
 } from "@murphai/runtime-state";
 import {
   parseRawEmailMessage,
@@ -115,9 +107,6 @@ interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLike {
   putPendingUsage(input: {
     usage: readonly Record<string, unknown>[];
   }): Promise<{ recorded: number; usageIds: string[] }>;
-  putUserKeyEnvelope(input: {
-    envelope: HostedUserRootKeyEnvelope;
-  }): Promise<HostedUserRootKeyEnvelope>;
   readPendingUsage(input?: { limit?: number | null }): Promise<Record<string, unknown>[]>;
   status(): Promise<HostedExecutionUserStatus>;
   updateUserEnv(update: HostedUserEnvUpdate): Promise<HostedExecutionUserEnvStatus>;
@@ -226,26 +215,6 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     authorizeBeforeMethod: true,
     authorization: "control-signed",
     async handle(context, params) {
-      return handleUserKeyEnvelopeRoute(context, params.userId);
-    },
-    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/keys\/envelope$/u),
-    methods: ["GET", "PUT"],
-    wrongMethodResponse: "method-not-allowed",
-  },
-  {
-    authorizeBeforeMethod: true,
-    authorization: "control-signed",
-    async handle(context, params) {
-      return handleUserKeyRecipientRoute(context, params.userId, params.kind);
-    },
-    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/keys\/recipients\/(?<kind>[^/]+)$/u),
-    methods: ["PUT"],
-    wrongMethodResponse: "method-not-allowed",
-  },
-  {
-    authorizeBeforeMethod: true,
-    authorization: "control-signed",
-    async handle(context, params) {
       return handlePendingUsageRoute(context, params.userId);
     },
     match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/usage\/pending$/u),
@@ -311,25 +280,6 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
 
   async bootstrapUser(userId: string): Promise<{ userId: string }> {
     return this.runner.bootstrapUser(userId);
-  }
-
-  async getUserKeyEnvelope(): Promise<HostedUserRootKeyEnvelope> {
-    return this.runner.getUserKeyEnvelope();
-  }
-
-  async putUserKeyEnvelope(input: {
-    envelope: HostedUserRootKeyEnvelope;
-  }): Promise<HostedUserRootKeyEnvelope> {
-    return this.runner.putUserKeyEnvelope(input);
-  }
-
-  async upsertUserKeyRecipient(input: {
-    kind: HostedUserManagedRootKeyRecipientKind;
-    metadata?: Record<string, string | number | boolean | null>;
-    recipientKeyId: string;
-    recipientPublicKeyJwk: HostedUserRecipientPublicKeyJwk;
-  }): Promise<HostedUserRootKeyEnvelope> {
-    return this.runner.upsertUserKeyRecipient(input);
   }
 
   async putDeviceSyncRuntimeSnapshot(input: {
@@ -607,39 +557,6 @@ async function handleUserEmailAddressRoute(
   });
 }
 
-async function handleUserKeyEnvelopeRoute(
-  context: WorkerRouteContext,
-  encodedUserId: string,
-): Promise<Response> {
-  const stub = await resolveUserRunnerStub(context.env, decodeRouteParam(encodedUserId));
-
-  if (context.request.method === "GET") {
-    return json(await requireGatewayStubMethod(stub, "getUserKeyEnvelope")());
-  }
-
-  const envelope = parseHostedUserRootKeyEnvelope(await readCachedJsonObject(context));
-  return json(await requireGatewayStubMethod(stub, "putUserKeyEnvelope")({ envelope }));
-}
-
-async function handleUserKeyRecipientRoute(
-  context: WorkerRouteContext,
-  encodedUserId: string,
-  encodedKind: string,
-): Promise<Response> {
-  const userId = decodeRouteParam(encodedUserId);
-  const kind = parseHostedUserManagedRootKeyRecipientKind(decodeRouteParam(encodedKind));
-  const payload = parseHostedUserKeyRecipientUpsertRequest(await readCachedJsonObject(context));
-  const stub = await resolveUserRunnerStub(context.env, userId);
-  const envelope = await requireGatewayStubMethod(stub, "upsertUserKeyRecipient")({
-    kind,
-    ...(payload.metadata ? { metadata: payload.metadata } : {}),
-    recipientKeyId: payload.recipientKeyId,
-    recipientPublicKeyJwk: payload.recipientPublicKeyJwk,
-  });
-
-  return json(envelope);
-}
-
 async function handlePendingUsageRoute(
   context: WorkerRouteContext,
   encodedUserId: string,
@@ -825,43 +742,6 @@ function createGatewayDispatchEventId(): string {
   return `gateway-send:${crypto.randomUUID()}`;
 }
 
-function parseHostedUserRootKeyRecipientKind(value: string): HostedUserRootKeyRecipientKind {
-  if ((HOSTED_USER_ROOT_KEY_RECIPIENT_KINDS as readonly string[]).includes(value)) {
-    return value as HostedUserRootKeyRecipientKind;
-  }
-
-  throw new TypeError("Hosted user root key recipient kind is invalid.");
-}
-
-function parseHostedUserManagedRootKeyRecipientKind(
-  value: string,
-): HostedUserManagedRootKeyRecipientKind {
-  const kind = parseHostedUserRootKeyRecipientKind(value);
-
-  if (!isHostedUserManagedRootKeyRecipientKind(kind)) {
-    throw new TypeError("Only user-managed hosted root key recipients can be updated via this route.");
-  }
-
-  return kind;
-}
-
-function parseHostedUserKeyRecipientUpsertRequest(value: Record<string, unknown>): {
-  metadata?: Record<string, string | number | boolean | null>;
-  recipientKeyId: string;
-  recipientPublicKeyJwk: HostedUserRecipientPublicKeyJwk;
-} {
-  return {
-    ...(value.metadata === undefined
-      ? {}
-      : { metadata: parseHostedUserRecipientMetadata(value.metadata) }),
-    recipientKeyId: requireString(value.recipientKeyId, "recipientKeyId"),
-    recipientPublicKeyJwk: parseHostedUserRecipientPublicKeyJwk(
-      value.recipientPublicKeyJwk,
-      "recipientPublicKeyJwk",
-    ),
-  };
-}
-
 function parsePendingUsageDeleteRequest(value: Record<string, unknown>): string[] {
   const usageIds = value.usageIds;
 
@@ -883,45 +763,6 @@ function readPendingUsageLimit(value: string | null): number | null {
   }
 
   return parsed;
-}
-
-function parseHostedUserRecipientMetadata(
-  value: unknown,
-): Record<string, string | number | boolean | null> {
-  const record = requireRecord(value, "metadata");
-  const result: Record<string, string | number | boolean | null> = {};
-
-  for (const [key, entry] of Object.entries(record)) {
-    if (
-      entry === null
-      || typeof entry === "string"
-      || typeof entry === "number"
-      || typeof entry === "boolean"
-    ) {
-      result[key] = entry as string | number | boolean | null;
-      continue;
-    }
-
-    throw new TypeError(`metadata.${key} must be a scalar JSON value.`);
-  }
-
-  return result;
-}
-
-function requireRecord(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
-  }
-
-  return value as Record<string, unknown>;
-}
-
-function requireString(value: unknown, label: string): string {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
-  }
-
-  return value.trim();
 }
 
 async function handleHostedEmailIngress(

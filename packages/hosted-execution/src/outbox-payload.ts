@@ -1,4 +1,9 @@
-import type { HostedExecutionDispatchRequest } from "./contracts.ts";
+import {
+  HOSTED_EXECUTION_INLINE_ONLY_OUTBOX_EVENT_KINDS,
+  HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KINDS,
+  type HostedExecutionDispatchRequest,
+  type HostedExecutionEventKind,
+} from "./contracts.ts";
 import {
   parseHostedExecutionDispatchRequest,
 } from "./parsers.ts";
@@ -27,6 +32,23 @@ export interface HostedExecutionReferenceOutboxPayload {
 export type HostedExecutionOutboxPayload =
   | HostedExecutionInlineOutboxPayload
   | HostedExecutionReferenceOutboxPayload;
+
+const HOSTED_EXECUTION_INLINE_ONLY_OUTBOX_EVENT_KIND_SET = new Set<HostedExecutionEventKind>(
+  HOSTED_EXECUTION_INLINE_ONLY_OUTBOX_EVENT_KINDS,
+);
+const HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KIND_SET = new Set<HostedExecutionEventKind>(
+  HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KINDS,
+);
+const HOSTED_EXECUTION_INLINE_OUTBOX_PAYLOAD_KEYS = new Set([
+  "dispatch",
+  "schemaVersion",
+  "storage",
+]);
+const HOSTED_EXECUTION_REFERENCE_OUTBOX_PAYLOAD_KEYS = new Set([
+  "dispatchRef",
+  "schemaVersion",
+  "storage",
+]);
 
 export function buildHostedExecutionOutboxPayload(
   dispatch: HostedExecutionDispatchRequest,
@@ -61,15 +83,33 @@ export function readHostedExecutionOutboxPayload(
     const storage = readText(payloadObject.storage);
 
     if (storage === "inline") {
+      if (!hasOnlyHostedExecutionKeys(payloadObject, HOSTED_EXECUTION_INLINE_OUTBOX_PAYLOAD_KEYS)) {
+        return null;
+      }
+
+      const dispatch = parseHostedExecutionDispatchRequest(payloadObject.dispatch);
+
+      if (!isHostedExecutionOutboxPayloadStorageAllowed(dispatch.event.kind, storage)) {
+        return null;
+      }
+
       return {
-        dispatch: parseHostedExecutionDispatchRequest(payloadObject.dispatch),
+        dispatch,
         schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
         storage,
       };
     }
 
     if (storage === "reference") {
+      if (!hasOnlyHostedExecutionKeys(payloadObject, HOSTED_EXECUTION_REFERENCE_OUTBOX_PAYLOAD_KEYS)) {
+        return null;
+      }
+
       const dispatchRef = readHostedExecutionDispatchRef(payloadObject);
+      if (!dispatchRef || !isHostedExecutionOutboxPayloadStorageAllowed(dispatchRef.eventKind, storage)) {
+        return null;
+      }
+
       return dispatchRef
         ? {
             dispatchRef,
@@ -88,28 +128,44 @@ export function resolveHostedExecutionDispatchPayloadStorage(
   dispatch: HostedExecutionDispatchRequest,
   requested: HostedExecutionOutboxPayloadStorage | "auto",
 ): HostedExecutionOutboxPayloadStorage {
+  const canonicalStorage = resolveHostedExecutionCanonicalOutboxPayloadStorage(dispatch.event.kind);
+
   if (requested !== "auto") {
+    if (!isHostedExecutionOutboxPayloadStorageAllowed(dispatch.event.kind, requested)) {
+      throw new TypeError(
+        `Hosted execution ${dispatch.event.kind} outbox payloads must use ${canonicalStorage} storage.`,
+      );
+    }
+
     return requested;
   }
 
-  switch (dispatch.event.kind) {
-    case "linq.message.received":
-    case "telegram.message.received":
-    case "email.message.received":
-    case "device-sync.wake":
-    case "member.activated":
-    case "gateway.message.send":
-    case "vault.share.accepted":
-      return "reference";
-    case "assistant.cron.tick":
-      return "inline";
-    default:
-      throw new TypeError("Unsupported hosted execution event kind.");
-  }
+  return canonicalStorage;
 }
 
 export const resolveHostedExecutionOutboxPayloadStorage =
   resolveHostedExecutionDispatchPayloadStorage;
+
+export function resolveHostedExecutionCanonicalOutboxPayloadStorage(
+  eventKind: HostedExecutionEventKind,
+): HostedExecutionOutboxPayloadStorage {
+  if (HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KIND_SET.has(eventKind)) {
+    return "reference";
+  }
+
+  if (HOSTED_EXECUTION_INLINE_ONLY_OUTBOX_EVENT_KIND_SET.has(eventKind)) {
+    return "inline";
+  }
+
+  throw new TypeError(`Unsupported hosted execution event kind: ${eventKind}`);
+}
+
+function isHostedExecutionOutboxPayloadStorageAllowed(
+  eventKind: HostedExecutionEventKind,
+  storage: HostedExecutionOutboxPayloadStorage,
+): boolean {
+  return resolveHostedExecutionCanonicalOutboxPayloadStorage(eventKind) === storage;
+}
 
 function readText(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
@@ -119,4 +175,11 @@ function toObject(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+}
+
+function hasOnlyHostedExecutionKeys(
+  value: Record<string, unknown>,
+  allowedKeys: ReadonlySet<string>,
+): boolean {
+  return Object.keys(value).every((key) => allowedKeys.has(key));
 }

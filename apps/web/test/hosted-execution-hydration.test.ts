@@ -21,12 +21,6 @@ import {
   isPermanentHostedExecutionHydrationError,
 } from "@/src/lib/hosted-execution/hydration";
 
-function buildShareReference() {
-  return {
-    shareId: "share_123",
-  };
-}
-
 function buildSharePack(): SharePack {
   return {
     createdAt: "2026-03-26T12:00:00.000Z",
@@ -212,7 +206,6 @@ describe("hydrateHostedExecutionDispatch", () => {
   });
 
   it("rehydrates share outbox refs with the encrypted share pack from the hosted share link", async () => {
-    const share = buildShareReference();
     const pack = buildSharePack();
     const prisma = {
       hostedShareLink: {
@@ -229,7 +222,6 @@ describe("hydrateHostedExecutionDispatch", () => {
           eventId: "evt_share_123",
           eventKind: "vault.share.accepted",
           occurredAt: "2026-03-26T12:30:00.000Z",
-          share,
           userId: "member_123",
         },
         schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
@@ -253,8 +245,6 @@ describe("hydrateHostedExecutionDispatch", () => {
   });
 
   it("rejects share outbox payloads when the schemaVersion is missing", async () => {
-    const share = buildShareReference();
-
     await expect(
       hydrateHostedExecutionDispatch(
         buildShareOutboxRecord({
@@ -262,7 +252,6 @@ describe("hydrateHostedExecutionDispatch", () => {
             eventId: "evt_share_123",
             eventKind: "vault.share.accepted",
             occurredAt: "2026-03-26T12:30:00.000Z",
-            share,
             userId: "member_123",
           },
         }) as never,
@@ -310,6 +299,34 @@ describe("hydrateHostedExecutionDispatch", () => {
         {} as never,
       ).catch((error) => isPermanentHostedExecutionHydrationError(error)),
     ).resolves.toBe(true);
+  });
+
+  it("fails closed for gateway send refs because apps/web does not own gateway send hydration", async () => {
+    await expect(
+      hydrateHostedExecutionDispatch(
+        buildWebhookOutboxRecord(
+          {
+            dispatchRef: {
+              eventId: "evt_gateway_123",
+              eventKind: "gateway.message.send",
+              occurredAt: "2026-03-26T12:30:00.000Z",
+              userId: "member_123",
+            },
+            schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+            storage: "reference",
+          },
+          {
+            eventId: "evt_gateway_123",
+            eventKind: "gateway.message.send",
+          },
+        ) as never,
+        {} as never,
+      ),
+    ).rejects.toMatchObject({
+      code: "HOSTED_EXECUTION_HYDRATION_SOURCE_UNSUPPORTED",
+      permanent: true,
+      retryable: false,
+    });
   });
 
   it("rehydrates hosted webhook dispatches from minimized sent receipt payloads", async () => {

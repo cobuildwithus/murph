@@ -1,11 +1,3 @@
-import {
-  parseHostedUserRecipientPublicKeyJwk,
-  parseHostedUserRootKeyEnvelope,
-  type HostedUserManagedRootKeyRecipientKind,
-  type HostedUserRecipientPublicKeyJwk,
-  type HostedUserRootKeyEnvelope,
-} from "@murphai/runtime-state";
-
 import { createHostedExecutionSignatureHeaders } from "./auth.ts";
 import type {
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
@@ -27,8 +19,6 @@ import {
 import {
   buildHostedExecutionUserDeviceSyncRuntimeSnapshotPath,
   buildHostedExecutionUserEnvPath,
-  buildHostedExecutionUserKeyEnvelopePath,
-  buildHostedExecutionUserKeyRecipientPath,
   buildHostedExecutionUserPendingUsagePath,
   buildHostedExecutionUserRunPath,
   buildHostedExecutionUserStatusPath,
@@ -47,12 +37,6 @@ export interface HostedExecutionDispatchClientOptions {
   timeoutMs?: number;
 }
 
-export interface HostedExecutionUserRootKeyRecipientUpsert {
-  metadata?: Record<string, string | number | boolean | null>;
-  recipientKeyId: string;
-  recipientPublicKeyJwk: HostedUserRecipientPublicKeyJwk;
-}
-
 export interface HostedExecutionControlClient {
   clearUserEnv(userId: string): Promise<HostedExecutionUserEnvStatus>;
   deletePendingUsage(userId: string, usageIds: readonly string[]): Promise<void>;
@@ -63,15 +47,8 @@ export interface HostedExecutionControlClient {
   ): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
   getStatus(userId: string): Promise<HostedExecutionUserStatus>;
   getUserEnvStatus(userId: string): Promise<HostedExecutionUserEnvStatus>;
-  getUserKeyEnvelope(userId: string): Promise<HostedUserRootKeyEnvelope>;
-  putUserKeyEnvelope(userId: string, envelope: HostedUserRootKeyEnvelope): Promise<HostedUserRootKeyEnvelope>;
   run(userId: string): Promise<HostedExecutionUserStatus>;
   updateUserEnv(userId: string, update: HostedExecutionUserEnvUpdate): Promise<HostedExecutionUserEnvStatus>;
-  upsertUserKeyRecipient(
-    userId: string,
-    kind: HostedUserManagedRootKeyRecipientKind,
-    input: HostedExecutionUserRootKeyRecipientUpsert,
-  ): Promise<HostedUserRootKeyEnvelope>;
 }
 
 export interface HostedExecutionControlClientOptions {
@@ -237,38 +214,6 @@ export function createHostedExecutionControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
-    getUserKeyEnvelope(userId) {
-      return requestHostedExecutionSignedJson({
-        baseUrl,
-        fetchImpl,
-        label: "user key envelope",
-        now: options.now,
-        parse: parseHostedUserRootKeyEnvelope,
-        path: buildHostedExecutionUserKeyEnvelopePath(userId),
-        request: { method: "GET" },
-        signingSecret,
-        timeoutMs: options.timeoutMs,
-      });
-    },
-    putUserKeyEnvelope(userId, envelope) {
-      const requestPayload = parseHostedUserRootKeyEnvelope(envelope);
-
-      return requestHostedExecutionSignedJson({
-        baseUrl,
-        fetchImpl,
-        label: "user key envelope write",
-        now: options.now,
-        parse: parseHostedUserRootKeyEnvelope,
-        path: buildHostedExecutionUserKeyEnvelopePath(userId),
-        request: {
-          body: JSON.stringify(requestPayload),
-          headers: { "content-type": "application/json; charset=utf-8" },
-          method: "PUT",
-        },
-        signingSecret,
-        timeoutMs: options.timeoutMs,
-      });
-    },
     run(userId) {
       return requestHostedExecutionSignedJson({
         baseUrl,
@@ -296,29 +241,6 @@ export function createHostedExecutionControlClient(
         now: options.now,
         parse: parseHostedExecutionUserEnvStatus,
         path: buildHostedExecutionUserEnvPath(userId),
-        request: {
-          body: JSON.stringify(requestPayload),
-          headers: { "content-type": "application/json; charset=utf-8" },
-          method: "PUT",
-        },
-        signingSecret,
-        timeoutMs: options.timeoutMs,
-      });
-    },
-    upsertUserKeyRecipient(userId, kind, input) {
-      const requestPayload = {
-        ...(input.metadata ? { metadata: input.metadata } : {}),
-        recipientKeyId: input.recipientKeyId,
-        recipientPublicKeyJwk: parseHostedUserRecipientPublicKeyJwk(input.recipientPublicKeyJwk),
-      } satisfies HostedExecutionUserRootKeyRecipientUpsert;
-
-      return requestHostedExecutionSignedJson({
-        baseUrl,
-        fetchImpl,
-        label: `user key recipient ${kind}`,
-        now: options.now,
-        parse: parseHostedUserRootKeyEnvelope,
-        path: buildHostedExecutionUserKeyRecipientPath(userId, kind),
         request: {
           body: JSON.stringify(requestPayload),
           headers: { "content-type": "application/json; charset=utf-8" },

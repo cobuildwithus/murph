@@ -9,6 +9,7 @@ import {
 } from "../src/builders";
 import {
   buildHostedExecutionOutboxPayload,
+  readHostedExecutionOutboxPayload,
   resolveHostedExecutionDispatchPayloadStorage,
 } from "../src/outbox-payload";
 
@@ -108,5 +109,65 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
         }),
       ).storage,
     ).toBe("reference");
+  });
+
+  it("rejects forcing inline storage for reference-only gateway sends", () => {
+    expect(() => buildHostedExecutionOutboxPayload(
+      buildHostedExecutionGatewayMessageSendDispatch({
+        eventId: "gateway-3",
+        occurredAt,
+        sessionKey: "session_789",
+        text: "do not persist me inline",
+        userId: "user_123",
+      }),
+      {
+        storage: "inline",
+      },
+    )).toThrow("Hosted execution gateway.message.send outbox payloads must use reference storage.");
+  });
+
+  it("rejects non-canonical stored payload shapes for gateway sends and cron ticks", () => {
+    expect(readHostedExecutionOutboxPayload({
+      dispatch: buildHostedExecutionGatewayMessageSendDispatch({
+        eventId: "gateway-4",
+        occurredAt,
+        sessionKey: "session_000",
+        text: "still private",
+        userId: "user_123",
+      }),
+      schemaVersion: "murph.execution-outbox.v2",
+      storage: "inline",
+    })).toBeNull();
+
+    expect(readHostedExecutionOutboxPayload({
+      dispatchRef: {
+        eventId: "cron-2",
+        eventKind: "assistant.cron.tick",
+        occurredAt,
+        userId: "user_123",
+      },
+      schemaVersion: "murph.execution-outbox.v2",
+      storage: "reference",
+    })).toBeNull();
+
+    expect(readHostedExecutionOutboxPayload({
+      dispatch: {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "user_123",
+        },
+        eventId: "cron-3",
+        occurredAt,
+      },
+      dispatchRef: {
+        eventId: "gateway-5",
+        eventKind: "gateway.message.send",
+        occurredAt,
+        userId: "user_123",
+      },
+      schemaVersion: "murph.execution-outbox.v2",
+      storage: "reference",
+    })).toBeNull();
   });
 });

@@ -1,9 +1,4 @@
 import {
-  parseHostedUserRecipientPublicKeyJwk,
-  type HostedUserRecipientPublicKeyJwk,
-} from "@murphai/runtime-state";
-
-import {
   DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
 } from "./callback-hosts.ts";
@@ -170,21 +165,6 @@ export function readHostedExecutionWorkerEnvironment(
       "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS",
     ),
   };
-}
-
-export function readHostedExecutionAutomationRecipientPublicKeyJwk(
-  source: EnvSource = process.env,
-): HostedUserRecipientPublicKeyJwk | null {
-  const raw = normalizeHostedExecutionString(source.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK);
-
-  if (!raw) {
-    return null;
-  }
-
-  return parseHostedUserRecipientPublicKeyJwk(
-    JSON.parse(raw) as unknown,
-    "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK",
-  );
 }
 
 export function normalizeHostedExecutionBaseUrl(

@@ -112,7 +112,7 @@ describe("RunnerQueueStore", () => {
     expect(claimed.record.lastError).toBe("Hosted execution rejected an invalid request.");
   });
 
-  it("migrates legacy pending dispatch rows without dropping queued work", async () => {
+  it("fails closed when the Durable Object still has the removed dispatch_json schema", async () => {
     const state = createState();
     const sql = state.storage.sql!;
     sql.exec("DROP TABLE pending_events");
@@ -127,221 +127,98 @@ describe("RunnerQueueStore", () => {
       )
     `);
 
-    const bucket = new MemoryEncryptedR2Bucket();
-    const dispatchPayloadStore = createHostedDispatchPayloadStore({
-      bucket,
-      key: createTestRootKey(43),
-      keyId: "k-test",
-    });
-    const dispatch = {
+    expect(() => {
+      createQueueHarness(state);
+    }).toThrow(/pending_events schema is unsupported; missing payload_key/u);
+  });
+
+  it("fails closed when a mixed queue schema still carries forbidden legacy columns", async () => {
+    const state = createState();
+    const sql = state.storage.sql!;
+    sql.exec("DROP TABLE pending_events");
+    sql.exec(`
+      CREATE TABLE pending_events (
+        event_id TEXT PRIMARY KEY,
+        payload_key TEXT NOT NULL,
+        dispatch_json TEXT,
+        attempts INTEGER NOT NULL,
+        available_at TEXT NOT NULL,
+        enqueued_at TEXT NOT NULL,
+        last_error TEXT,
+        last_error_code TEXT
+      )
+    `);
+
+    expect(() => {
+      createQueueHarness(state);
+    }).toThrow(/pending_events schema is unsupported; forbidden dispatch_json, last_error/u);
+  });
+
+  it("persists only operator-safe queue metadata in Durable Object storage", async () => {
+    const state = createState();
+    const { store } = createQueueHarness(state);
+    await store.bootstrapUser("member_secret");
+
+    await store.enqueueDispatch({
       event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "member_legacy_queue",
+        kind: "gateway.message.send",
+        userId: "member_secret",
+        clientRequestId: "client-secret",
+        replyToMessageId: null,
+        sessionKey: "session-secret",
+        text: "super secret gateway message",
       },
-      eventId: "evt_legacy_queue",
+      eventId: "evt_secret_payload",
       occurredAt: "2026-03-29T10:00:00.000Z",
-    } as const;
-    const payloadJson = await dispatchPayloadStore.writeStoredDispatch(dispatch);
-    sql.exec(
-      `INSERT INTO pending_events (
-        event_id,
-        dispatch_json,
-        attempts,
-        available_at,
-        enqueued_at,
-        last_error
-      ) VALUES (?, ?, ?, ?, ?, ?)`,
-      dispatch.eventId,
-      payloadJson,
-      1,
-      dispatch.occurredAt,
-      dispatch.occurredAt,
-      "lost ack",
-    );
-
-    const store = new RunnerQueueStore(state as never, dispatchPayloadStore);
-    await store.bootstrapUser(dispatch.event.userId);
-
-    const claimed = await store.claimNextDuePendingDispatch(
-      Date.parse("2026-03-29T10:05:00.000Z"),
-    );
-    expect(claimed.pendingDispatch).toMatchObject({
-      attempts: 1,
-      dispatch,
-      eventId: dispatch.eventId,
-      lastError: "Hosted execution runtime failed.",
     });
 
+    const sql = state.storage.sql!;
     const columns = sql.exec<{ name: string }>("PRAGMA table_info(pending_events)").toArray()
-      .map((row) => row.name)
-      .sort();
-    expect(columns).toContain("payload_key");
-    expect(columns).not.toContain("dispatch_json");
+      .map((row) => row.name);
+    const row = sql.exec<Record<string, string | number | null>>(
+      "SELECT * FROM pending_events WHERE event_id = ?",
+      "evt_secret_payload",
+    ).one();
+
+    expect(columns).toEqual([
+      "event_id",
+      "payload_key",
+      "attempts",
+      "available_at",
+      "enqueued_at",
+      "last_error_code",
+    ]);
+    expect(JSON.stringify(row)).not.toContain("super secret gateway message");
+    expect(JSON.stringify(row)).not.toContain("session-secret");
   });
 
-  it("migrates legacy reference-backed pending rows through the caller-provided reader", async () => {
+  it("deletes an encrypted payload blob when enqueue SQL fails after blob write", async () => {
     const state = createState();
+    const { bucket, store } = createQueueHarness(state);
+    await store.bootstrapUser("member_secret");
+
     const sql = state.storage.sql!;
-    sql.exec("DROP TABLE pending_events");
-    sql.exec(`
-      CREATE TABLE pending_events (
-        event_id TEXT PRIMARY KEY,
-        dispatch_json TEXT NOT NULL,
-        attempts INTEGER NOT NULL,
-        available_at TEXT NOT NULL,
-        enqueued_at TEXT NOT NULL,
-        last_error TEXT
-      )
-    `);
+    const originalExec = sql.exec.bind(sql);
+    sql.exec = ((query: string, ...bindings: unknown[]) => {
+      if (query.includes("INSERT INTO pending_events")) {
+        throw new Error("simulated enqueue failure");
+      }
 
-    const bucket = new MemoryEncryptedR2Bucket();
-    const previousKey = createTestRootKey(47);
-    const currentKey = createTestRootKey(53);
-    const legacyDispatchPayloadStore = createHostedDispatchPayloadStore({
-      bucket,
-      key: previousKey,
-      keyId: "k-previous",
-    });
-    const currentDispatchPayloadStore = createHostedDispatchPayloadStore({
-      bucket,
-      key: currentKey,
-      keyId: "k-current",
-      keysById: {
-        "k-current": currentKey,
-        "k-previous": previousKey,
-      },
-    });
-    const dispatch = {
-      event: {
-        kind: "device-sync.wake",
-        connectionId: "conn_legacy_queue",
-        hint: {
-          traceId: "trace_legacy_queue",
-        },
-        provider: "oura",
-        reason: "webhook_hint",
-        userId: "member_legacy_queue_ref",
-      },
-      eventId: "evt_legacy_queue_ref",
-      occurredAt: "2026-03-29T10:00:00.000Z",
-    } as const;
-    const payloadJson = await legacyDispatchPayloadStore.writeStoredDispatch(dispatch);
-    sql.exec(
-      `INSERT INTO pending_events (
-        event_id,
-        dispatch_json,
-        attempts,
-        available_at,
-        enqueued_at,
-        last_error
-      ) VALUES (?, ?, ?, ?, ?, ?)`,
-      dispatch.eventId,
-      payloadJson,
-      1,
-      dispatch.occurredAt,
-      dispatch.occurredAt,
-      "lost ack",
-    );
+      return originalExec(query, ...bindings);
+    }) as typeof sql.exec;
 
-    const store = new RunnerQueueStore(
-      state as never,
-      currentDispatchPayloadStore,
-      async (legacyPayloadJson) => legacyDispatchPayloadStore.readStoredDispatch(legacyPayloadJson),
-    );
-    await store.bootstrapUser(dispatch.event.userId);
-
-    const claimed = await store.claimNextDuePendingDispatch(
-      Date.parse("2026-03-29T10:05:00.000Z"),
-    );
-    expect(claimed.pendingDispatch).toMatchObject({
-      attempts: 1,
-      dispatch,
-      eventId: dispatch.eventId,
-      lastError: "Hosted execution runtime failed.",
-    });
-  });
-
-  it("poisons malformed legacy pending rows and still migrates later valid work", async () => {
-    const state = createState();
-    const sql = state.storage.sql!;
-    sql.exec("DROP TABLE pending_events");
-    sql.exec(`
-      CREATE TABLE pending_events (
-        event_id TEXT PRIMARY KEY,
-        dispatch_json TEXT NOT NULL,
-        attempts INTEGER NOT NULL,
-        available_at TEXT NOT NULL,
-        enqueued_at TEXT NOT NULL,
-        last_error TEXT
-      )
-    `);
-
-    const bucket = new MemoryEncryptedR2Bucket();
-    const dispatchPayloadStore = createHostedDispatchPayloadStore({
-      bucket,
-      key: createTestRootKey(59),
-      keyId: "k-test",
-    });
-    const dispatch = {
+    await expect(store.enqueueDispatch({
       event: {
         kind: "assistant.cron.tick",
         reason: "manual",
-        userId: "member_legacy_queue",
+        userId: "member_secret",
       },
-      eventId: "evt_legacy_queue_good",
+      eventId: "evt_enqueue_cleanup",
       occurredAt: "2026-03-29T10:00:00.000Z",
-    } as const;
-    const payloadJson = await dispatchPayloadStore.writeStoredDispatch(dispatch);
-    sql.exec(
-      `INSERT INTO pending_events (
-        event_id,
-        dispatch_json,
-        attempts,
-        available_at,
-        enqueued_at,
-        last_error
-      ) VALUES (?, ?, ?, ?, ?, ?)`,
-      "evt_legacy_queue_bad",
-      "{bad-json",
-      0,
-      "2026-03-29T10:00:00.000Z",
-      "2026-03-29T10:00:00.000Z",
-      null,
-    );
-    sql.exec(
-      `INSERT INTO pending_events (
-        event_id,
-        dispatch_json,
-        attempts,
-        available_at,
-        enqueued_at,
-        last_error
-      ) VALUES (?, ?, ?, ?, ?, ?)`,
-      dispatch.eventId,
-      payloadJson,
-      1,
-      dispatch.occurredAt,
-      dispatch.occurredAt,
-      "lost ack",
-    );
+    })).rejects.toThrow("simulated enqueue failure");
 
-    const store = new RunnerQueueStore(state as never, dispatchPayloadStore);
-    await store.bootstrapUser(dispatch.event.userId);
-
-    const claimed = await store.claimNextDuePendingDispatch(
-      Date.parse("2026-03-29T10:05:00.000Z"),
-    );
-    expect(claimed.pendingDispatch).toMatchObject({
-      attempts: 1,
-      dispatch,
-      eventId: dispatch.eventId,
-    });
-
-    const badEvent = await store.readEventState("evt_legacy_queue_bad");
-    expect(badEvent.pending).toBe(false);
-    expect(badEvent.poisoned).toBe(true);
-    expect(badEvent.lastError).toBe("Hosted execution rejected an invalid request.");
+    expect(bucket.objects.size).toBe(0);
+    expect(bucket.deleted).toHaveLength(1);
   });
 
   it("clears malformed bundle refs to null and surfaces a corruption warning", async () => {

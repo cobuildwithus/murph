@@ -1,26 +1,18 @@
 import {
   createHostedUserRootKeyEnvelope,
   findHostedWrappedRootKeyRecipient,
-  parseHostedUserRecipientPublicKeyJwk,
   parseHostedUserRootKeyEnvelope,
   unwrapHostedUserRootKeyForKind,
   wrapHostedUserRootKeyRecipient,
   type HostedUserRecipientPrivateKeyJwk,
   type HostedUserRecipientPublicKeyJwk,
   type HostedUserRootKeyEnvelope,
-  type HostedUserRootKeyRecipientKind,
 } from "@murphai/runtime-state";
 
 import type { R2BucketLike } from "./bundle-store.js";
 import { buildHostedStorageAad, deriveHostedStorageOpaqueId } from "./crypto-context.js";
 import { readEncryptedR2Payload, writeEncryptedR2Json } from "./crypto.js";
 import { listHostedStorageObjectKeys } from "./storage-paths.js";
-
-const PUBLIC_HOSTED_USER_ROOT_KEY_RECIPIENT_KINDS = new Set<HostedUserRootKeyRecipientKind>([
-  "automation",
-  "user-unlock",
-  "recovery",
-]);
 
 export interface HostedUserCryptoContext {
   envelope: HostedUserRootKeyEnvelope;
@@ -31,18 +23,6 @@ export interface HostedUserCryptoContext {
 
 export interface HostedUserKeyStore {
   ensureUserCryptoContext(userId: string): Promise<HostedUserCryptoContext>;
-  putUserRootKeyEnvelope(input: {
-    envelope: HostedUserRootKeyEnvelope;
-    userId: string;
-  }): Promise<HostedUserRootKeyEnvelope>;
-  readUserRootKeyEnvelope(userId: string): Promise<HostedUserRootKeyEnvelope | null>;
-  upsertRecipient(input: {
-    kind: HostedUserRootKeyRecipientKind;
-    metadata?: Record<string, string | number | boolean | null>;
-    recipientKeyId: string;
-    recipientPublicKeyJwk: HostedUserRecipientPublicKeyJwk;
-    userId: string;
-  }): Promise<HostedUserRootKeyEnvelope>;
 }
 
 export function createHostedUserKeyStore(input: {
@@ -89,90 +69,6 @@ export function createHostedUserKeyStore(input: {
           [envelope.rootKeyId]: rootKey,
         },
       };
-    },
-
-    async putUserRootKeyEnvelope({ envelope, userId }) {
-      const parsedEnvelope = parseHostedUserRootKeyEnvelope(envelope);
-
-      if (parsedEnvelope.userId !== userId) {
-        throw new TypeError("Hosted user root key envelope userId does not match the requested user.");
-      }
-
-      const existingEnvelope = await readStoredHostedUserRootKeyEnvelope({
-        bucket: input.bucket,
-        envelopeEncryptionKey: input.envelopeEncryptionKey,
-        envelopeEncryptionKeyId: input.envelopeEncryptionKeyId,
-        envelopeEncryptionKeysById,
-        userId,
-      });
-
-      await validateHostedUserRootKeyEnvelopeWrite({
-        automationRecipientPrivateKeysById: automationPrivateKeysById,
-        existingEnvelope,
-        nextEnvelope: parsedEnvelope,
-      });
-      await writeHostedUserRootKeyEnvelope({
-        bucket: input.bucket,
-        envelope: parsedEnvelope,
-        envelopeEncryptionKey: input.envelopeEncryptionKey,
-        envelopeEncryptionKeyId: input.envelopeEncryptionKeyId,
-        envelopeEncryptionKeysById,
-      });
-
-      return parsedEnvelope;
-    },
-
-    async readUserRootKeyEnvelope(userId) {
-      const stored = await readStoredHostedUserRootKeyEnvelope({
-        bucket: input.bucket,
-        envelopeEncryptionKey: input.envelopeEncryptionKey,
-        envelopeEncryptionKeyId: input.envelopeEncryptionKeyId,
-        envelopeEncryptionKeysById,
-        userId,
-      });
-
-      if (!stored) {
-        return null;
-      }
-
-      return stored;
-    },
-
-    async upsertRecipient(recipientInput) {
-      const context = await this.ensureUserCryptoContext(recipientInput.userId);
-      const recipientPublicKeyJwk = parseHostedUserRecipientPublicKeyJwk(
-        recipientInput.recipientPublicKeyJwk,
-        `${recipientInput.kind} recipient public key`,
-      );
-      const nextRecipient = await wrapHostedUserRootKeyRecipient({
-        recipient: {
-          keyId: recipientInput.recipientKeyId,
-          kind: recipientInput.kind,
-          ...(recipientInput.metadata ? { metadata: recipientInput.metadata } : {}),
-          publicKeyJwk: recipientPublicKeyJwk,
-        },
-        rootKey: context.rootKey,
-        rootKeyId: context.envelope.rootKeyId,
-        userId: context.envelope.userId,
-      });
-      const nextEnvelope: HostedUserRootKeyEnvelope = {
-        ...context.envelope,
-        recipients: [
-          ...context.envelope.recipients.filter((recipient) => recipient.kind !== recipientInput.kind),
-          nextRecipient,
-        ],
-        updatedAt: new Date().toISOString(),
-      };
-
-      await writeHostedUserRootKeyEnvelope({
-        bucket: input.bucket,
-        envelope: nextEnvelope,
-        envelopeEncryptionKey: input.envelopeEncryptionKey,
-        envelopeEncryptionKeyId: input.envelopeEncryptionKeyId,
-        envelopeEncryptionKeysById,
-      });
-
-      return nextEnvelope;
     },
   };
 }
@@ -337,48 +233,6 @@ async function writeHostedUserRootKeyEnvelope(input: {
   }
 }
 
-async function validateHostedUserRootKeyEnvelopeWrite(input: {
-  automationRecipientPrivateKeysById: Readonly<Record<string, HostedUserRecipientPrivateKeyJwk>>;
-  existingEnvelope: HostedUserRootKeyEnvelope | null;
-  nextEnvelope: HostedUserRootKeyEnvelope;
-}): Promise<void> {
-  assertPublicHostedUserRootKeyEnvelopeKinds(input.nextEnvelope);
-  const nextRootKey = await unwrapHostedAutomationRootKey({
-    automationRecipientPrivateKeysById: input.automationRecipientPrivateKeysById,
-    envelope: input.nextEnvelope,
-  });
-
-  if (!input.existingEnvelope) {
-    return;
-  }
-
-  const existingRootKey = await unwrapHostedAutomationRootKey({
-    automationRecipientPrivateKeysById: input.automationRecipientPrivateKeysById,
-    envelope: input.existingEnvelope,
-  });
-
-  if (
-    input.existingEnvelope.rootKeyId !== input.nextEnvelope.rootKeyId
-    || !sameBytes(existingRootKey, nextRootKey)
-  ) {
-    throw new TypeError(
-      "Replacing a hosted user root key is not allowed through putUserRootKeyEnvelope; add or rotate managed recipients instead.",
-    );
-  }
-}
-
-function assertPublicHostedUserRootKeyEnvelopeKinds(envelope: HostedUserRootKeyEnvelope): void {
-  for (const recipient of envelope.recipients) {
-    if (PUBLIC_HOSTED_USER_ROOT_KEY_RECIPIENT_KINDS.has(recipient.kind)) {
-      continue;
-    }
-
-    throw new TypeError(
-      `Hosted user root key envelopes written through the public control plane must not include ${recipient.kind} recipients.`,
-    );
-  }
-}
-
 async function unwrapHostedAutomationRootKey(input: {
   automationRecipientPrivateKeysById: Readonly<Record<string, HostedUserRecipientPrivateKeyJwk>>;
   envelope: HostedUserRootKeyEnvelope;
@@ -402,20 +256,6 @@ async function unwrapHostedAutomationRootKey(input: {
     kind: "automation",
     recipientPrivateKeyJwk,
   });
-}
-
-function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
-  if (left.byteLength !== right.byteLength) {
-    return false;
-  }
-
-  for (let index = 0; index < left.byteLength; index += 1) {
-    if (left[index] !== right[index]) {
-      return false;
-    }
-  }
-
-  return true;
 }
 
 async function hostedUserRootKeyEnvelopeObjectKey(

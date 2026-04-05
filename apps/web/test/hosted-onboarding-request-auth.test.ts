@@ -215,8 +215,6 @@ function createHostedMember(
     billingMode: null,
     billingStatus: HostedBillingStatus.active,
     createdAt: new Date("2025-03-27T08:00:00.000Z"),
-    encryptedBootstrapSecret: null,
-    encryptionKeyVersion: null,
     id: "member_123",
     linqChatId: null,
     maskedPhoneNumberHint: "***2671",
