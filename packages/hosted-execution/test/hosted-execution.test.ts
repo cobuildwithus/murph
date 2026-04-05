@@ -38,6 +38,7 @@ import {
   fetchHostedExecutionWebControlPlaneResponse,
   summarizeHostedExecutionError,
   HOSTED_EXECUTION_DISPATCH_PATH,
+  HOSTED_EXECUTION_NONCE_HEADER,
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
   parseHostedExecutionDispatchRequest,
@@ -110,11 +111,13 @@ describe("@murphai/hosted-execution", () => {
       timestamp: "2026-03-26T12:00:00.000Z",
     });
     const headers = new Headers(headerValues);
-    const { signature, timestamp } = readHostedExecutionSignatureHeaders(headers);
+    const { nonce, signature, timestamp } = readHostedExecutionSignatureHeaders(headers);
 
+    expect(nonce).toBe(headers.get(HOSTED_EXECUTION_NONCE_HEADER));
     expect(timestamp).toBe("2026-03-26T12:00:00.000Z");
     await expect(
       verifyHostedExecutionSignature({
+        nonce,
         payload: "{\"ok\":true}",
         secret: "top-secret",
         signature: `sha256=${String(signature).toUpperCase()}`,
@@ -122,6 +125,65 @@ describe("@murphai/hosted-execution", () => {
         nowMs: Date.parse("2026-03-26T12:00:00.000Z"),
       }),
     ).resolves.toBe(true);
+  });
+
+  it("binds hosted execution signatures to the user id, query string, and nonce", async () => {
+    const headerValues = await createHostedExecutionSignatureHeaders({
+      method: "POST",
+      path: "/api/internal/device-sync/runtime/snapshot",
+      payload: "{\"ok\":true}",
+      search: "?provider=oura",
+      secret: "top-secret",
+      timestamp: "2026-03-26T12:00:00.000Z",
+      userId: "member_123",
+    });
+    const headers = new Headers(headerValues);
+    const { nonce, signature, timestamp } = readHostedExecutionSignatureHeaders(headers);
+
+    await expect(
+      verifyHostedExecutionSignature({
+        method: "POST",
+        nonce,
+        path: "/api/internal/device-sync/runtime/snapshot",
+        payload: "{\"ok\":true}",
+        search: "?provider=oura",
+        secret: "top-secret",
+        signature,
+        timestamp,
+        nowMs: Date.parse("2026-03-26T12:00:00.000Z"),
+        userId: "member_123",
+      }),
+    ).resolves.toBe(true);
+
+    await expect(
+      verifyHostedExecutionSignature({
+        method: "POST",
+        nonce,
+        path: "/api/internal/device-sync/runtime/snapshot",
+        payload: "{\"ok\":true}",
+        search: "?provider=whoop",
+        secret: "top-secret",
+        signature,
+        timestamp,
+        nowMs: Date.parse("2026-03-26T12:00:00.000Z"),
+        userId: "member_123",
+      }),
+    ).resolves.toBe(false);
+
+    await expect(
+      verifyHostedExecutionSignature({
+        method: "POST",
+        nonce,
+        path: "/api/internal/device-sync/runtime/snapshot",
+        payload: "{\"ok\":true}",
+        search: "?provider=oura",
+        secret: "top-secret",
+        signature,
+        timestamp,
+        nowMs: Date.parse("2026-03-26T12:00:00.000Z"),
+        userId: "member_999",
+      }),
+    ).resolves.toBe(false);
   });
 
   it("rejects malformed signature hex", async () => {
@@ -611,16 +673,20 @@ describe("@murphai/hosted-execution", () => {
     expect((requestHeaders as Headers).get("authorization")).toBeNull();
     expect((requestHeaders as Headers).get("content-type")).toBe("application/json");
     expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
+    const nonce = (requestHeaders as Headers).get(HOSTED_EXECUTION_NONCE_HEADER);
     const timestamp = (requestHeaders as Headers).get(HOSTED_EXECUTION_TIMESTAMP_HEADER);
     await expect(
       verifyHostedExecutionSignature({
         method: "POST",
+        nonce,
         path: "/api/internal/device-sync/runtime/snapshot",
         payload: "{\"ok\":true}",
+        search: "?provider=oura",
         secret: "dispatch-secret",
         signature: (requestHeaders as Headers).get(HOSTED_EXECUTION_SIGNATURE_HEADER),
         timestamp,
         nowMs: timestamp ? Date.parse(timestamp) : Date.now(),
+        userId: "member_123",
       }),
     ).resolves.toBe(true);
   });
@@ -742,16 +808,19 @@ describe("@murphai/hosted-execution", () => {
     const requestHeaders = fetchMock.mock.calls[0]?.[1]?.headers;
     expect((requestHeaders as Headers).get("authorization")).toBeNull();
     expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
+    const nonce = (requestHeaders as Headers).get(HOSTED_EXECUTION_NONCE_HEADER);
     const timestamp = (requestHeaders as Headers).get(HOSTED_EXECUTION_TIMESTAMP_HEADER);
     await expect(
       verifyHostedExecutionSignature({
         method: "POST",
+        nonce,
         path: "/api/internal/device-sync/providers/whoop/connect-link",
         payload: "",
         secret: "dispatch-secret",
         signature: (requestHeaders as Headers).get(HOSTED_EXECUTION_SIGNATURE_HEADER),
         timestamp,
         nowMs: timestamp ? Date.parse(timestamp) : Date.now(),
+        userId: "member_123",
       }),
     ).resolves.toBe(true);
   });

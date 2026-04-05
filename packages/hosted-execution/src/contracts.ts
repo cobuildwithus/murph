@@ -15,6 +15,7 @@ import type {
 
 export const HOSTED_EXECUTION_SIGNATURE_HEADER = "x-hosted-execution-signature";
 export const HOSTED_EXECUTION_TIMESTAMP_HEADER = "x-hosted-execution-timestamp";
+export const HOSTED_EXECUTION_NONCE_HEADER = "x-hosted-execution-nonce";
 
 export const HOSTED_EXECUTION_EVENT_KINDS = [
   "member.activated",

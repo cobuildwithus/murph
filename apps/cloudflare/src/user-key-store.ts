@@ -23,6 +23,7 @@ export interface HostedUserCryptoContext {
 
 export interface HostedUserKeyStore {
   ensureUserCryptoContext(userId: string): Promise<HostedUserCryptoContext>;
+  requireUserCryptoContext(userId: string): Promise<HostedUserCryptoContext>;
 }
 
 export function createHostedUserKeyStore(input: {
@@ -46,37 +47,81 @@ export function createHostedUserKeyStore(input: {
 
   return {
     async ensureUserCryptoContext(userId) {
-      const envelope = await ensureHostedUserRootKeyEnvelope({
+      return resolveHostedUserCryptoContext({
         automationRecipientKeyId: input.automationRecipientKeyId,
         automationRecipientPrivateKeysById: automationPrivateKeysById,
         automationRecipientPublicKey: input.automationRecipientPublicKey,
+        allowAutomationRecipientMigration: true,
+        allowMissingEnvelopeBootstrap: true,
         bucket: input.bucket,
         envelopeEncryptionKey: input.envelopeEncryptionKey,
         envelopeEncryptionKeyId: input.envelopeEncryptionKeyId,
         envelopeEncryptionKeysById,
         userId,
       });
-      const rootKey = await unwrapHostedAutomationRootKey({
+    },
+    async requireUserCryptoContext(userId) {
+      return resolveHostedUserCryptoContext({
+        automationRecipientKeyId: input.automationRecipientKeyId,
         automationRecipientPrivateKeysById: automationPrivateKeysById,
-        envelope,
+        automationRecipientPublicKey: input.automationRecipientPublicKey,
+        allowAutomationRecipientMigration: false,
+        allowMissingEnvelopeBootstrap: false,
+        bucket: input.bucket,
+        envelopeEncryptionKey: input.envelopeEncryptionKey,
+        envelopeEncryptionKeyId: input.envelopeEncryptionKeyId,
+        envelopeEncryptionKeysById,
+        userId,
       });
-
-      return {
-        envelope,
-        rootKey,
-        rootKeyId: envelope.rootKeyId,
-        keysById: {
-          [envelope.rootKeyId]: rootKey,
-        },
-      };
     },
   };
 }
 
-async function ensureHostedUserRootKeyEnvelope(input: {
+async function resolveHostedUserCryptoContext(input: {
   automationRecipientKeyId: string;
   automationRecipientPrivateKeysById: Readonly<Record<string, HostedUserRecipientPrivateKeyJwk>>;
   automationRecipientPublicKey: HostedUserRecipientPublicKeyJwk;
+  allowAutomationRecipientMigration: boolean;
+  allowMissingEnvelopeBootstrap: boolean;
+  bucket: R2BucketLike;
+  envelopeEncryptionKey: Uint8Array;
+  envelopeEncryptionKeyId: string;
+  envelopeEncryptionKeysById: Readonly<Record<string, Uint8Array>>;
+  userId: string;
+}): Promise<HostedUserCryptoContext> {
+  const envelope = await resolveHostedUserRootKeyEnvelope({
+    automationRecipientKeyId: input.automationRecipientKeyId,
+    automationRecipientPrivateKeysById: input.automationRecipientPrivateKeysById,
+    automationRecipientPublicKey: input.automationRecipientPublicKey,
+    allowAutomationRecipientMigration: input.allowAutomationRecipientMigration,
+    allowMissingEnvelopeBootstrap: input.allowMissingEnvelopeBootstrap,
+    bucket: input.bucket,
+    envelopeEncryptionKey: input.envelopeEncryptionKey,
+    envelopeEncryptionKeyId: input.envelopeEncryptionKeyId,
+    envelopeEncryptionKeysById: input.envelopeEncryptionKeysById,
+    userId: input.userId,
+  });
+  const rootKey = await unwrapHostedAutomationRootKey({
+    automationRecipientPrivateKeysById: input.automationRecipientPrivateKeysById,
+    envelope,
+  });
+
+  return {
+    envelope,
+    rootKey,
+    rootKeyId: envelope.rootKeyId,
+    keysById: {
+      [envelope.rootKeyId]: rootKey,
+    },
+  };
+}
+
+async function resolveHostedUserRootKeyEnvelope(input: {
+  automationRecipientKeyId: string;
+  automationRecipientPrivateKeysById: Readonly<Record<string, HostedUserRecipientPrivateKeyJwk>>;
+  automationRecipientPublicKey: HostedUserRecipientPublicKeyJwk;
+  allowAutomationRecipientMigration: boolean;
+  allowMissingEnvelopeBootstrap: boolean;
   bucket: R2BucketLike;
   envelopeEncryptionKey: Uint8Array;
   envelopeEncryptionKeyId: string;
@@ -92,6 +137,12 @@ async function ensureHostedUserRootKeyEnvelope(input: {
   });
 
   if (!existingEnvelope) {
+    if (!input.allowMissingEnvelopeBootstrap) {
+      throw new Error(
+        `Hosted user root key envelope ${input.userId} is missing and cannot be bootstrapped outside the per-user runner lane.`,
+      );
+    }
+
     const created = await createHostedUserRootKeyEnvelope({
       recipients: [
         {
@@ -118,6 +169,10 @@ async function ensureHostedUserRootKeyEnvelope(input: {
   }
 
   if (automationRecipient.keyId === input.automationRecipientKeyId) {
+    return existingEnvelope;
+  }
+
+  if (!input.allowAutomationRecipientMigration) {
     return existingEnvelope;
   }
 

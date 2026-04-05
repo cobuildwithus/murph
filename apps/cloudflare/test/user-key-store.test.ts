@@ -95,6 +95,25 @@ describe("hosted user key store", () => {
     expect(bucket.objects.size).toBe(1);
   });
 
+  it("fails closed when generic callers request a missing envelope without the DO bootstrap lane", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const automation = await generateHostedUserRecipientKeyPair();
+    const envelopeEncryptionKey = createTestRootKey(19);
+    const store = createHostedUserKeyStore({
+      automationRecipientKeyId: "automation:v1",
+      automationRecipientPrivateKey: automation.privateKeyJwk,
+      automationRecipientPublicKey: automation.publicKeyJwk,
+      bucket,
+      envelopeEncryptionKey,
+      envelopeEncryptionKeyId: "v1",
+    });
+
+    await expect(store.requireUserCryptoContext("user_missing_123")).rejects.toThrow(
+      /cannot be bootstrapped outside the per-user runner lane/u,
+    );
+    expect(bucket.objects.size).toBe(0);
+  });
+
   it("ignores removed legacy v1 envelopes at the old static object path", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const envelopeEncryptionKey = createTestRootKey(23);

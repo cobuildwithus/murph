@@ -140,6 +140,20 @@ model DeviceBrowserAssertionNonce {
   @@map("device_browser_assertion_nonce")
 }
 
+model HostedWebInternalRequestNonce {
+  nonceHash String   @id @map("nonce_hash")
+  userId    String   @map("user_id")
+  method    String
+  path      String
+  search    String   @default("")
+  createdAt DateTime @default(now()) @map("created_at")
+  expiresAt DateTime @map("expires_at")
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt])
+  @@map("hosted_web_internal_request_nonce")
+}
+
 enum HostedMemberStatus {
   invited
   registered

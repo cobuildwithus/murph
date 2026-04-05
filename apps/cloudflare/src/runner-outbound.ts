@@ -106,6 +106,7 @@ export async function handleRunnerOutboundRequest(
 
     return handleRunnerArtifactRequest({
       bucket: env.BUNDLES,
+      env,
       environment,
       request,
       sha256: match.groups.sha256,
@@ -127,6 +128,7 @@ export async function handleRunnerOutboundRequest(
   if (url.hostname === HOSTED_EXECUTION_PROXY_HOSTS.usage) {
     return handleRunnerUsageRecordRequest({
       bucket: env.BUNDLES,
+      env,
       environment,
       request,
       url,
@@ -146,6 +148,7 @@ export async function handleRunnerOutboundRequest(
 
     return handleRunnerSideEffectRequest({
       bucket: env.BUNDLES,
+      env,
       effectId: decodeRouteParam(match.groups.effectId),
       environment,
       request,
@@ -180,6 +183,7 @@ export async function handleRunnerOutboundRequest(
 
     return handleRunnerEmailMessageReadRequest({
       bucket: env.BUNDLES,
+      env,
       environment,
       rawMessageKey: decodeRouteParam(match.groups.rawMessageKey),
       userId,
@@ -190,12 +194,14 @@ export async function handleRunnerOutboundRequest(
 }
 async function handleRunnerEmailMessageReadRequest(input: {
   bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
+  env: RunnerOutboundEnvironmentSource;
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
   rawMessageKey: string;
   userId: string;
 }): Promise<Response> {
   const crypto = await resolveRunnerOutboundUserCryptoContext({
     bucket: input.bucket,
+    env: input.env,
     environment: input.environment,
     userId: input.userId,
   });
@@ -302,6 +308,7 @@ async function forwardRunnerFinalize(
 
 async function handleRunnerArtifactRequest(input: {
   bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
+  env: RunnerOutboundEnvironmentSource;
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
   request: Request;
   sha256: string;
@@ -309,6 +316,7 @@ async function handleRunnerArtifactRequest(input: {
 }): Promise<Response> {
   const crypto = await resolveRunnerOutboundUserCryptoContext({
     bucket: input.bucket,
+    env: input.env,
     environment: input.environment,
     userId: input.userId,
   });
@@ -346,6 +354,7 @@ async function handleRunnerArtifactRequest(input: {
 
 async function handleRunnerSideEffectRequest(input: {
   bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
+  env: RunnerOutboundEnvironmentSource;
   effectId: string;
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
   request: Request;
@@ -354,6 +363,7 @@ async function handleRunnerSideEffectRequest(input: {
 }): Promise<Response> {
   const crypto = await resolveRunnerOutboundUserCryptoContext({
     bucket: input.bucket,
+    env: input.env,
     environment: input.environment,
     userId: input.userId,
   });
@@ -473,6 +483,7 @@ async function handleRunnerDeviceSyncControlRequest(input: {
 
   const crypto = await resolveRunnerOutboundUserCryptoContext({
     bucket: input.bucket,
+    env: input.env,
     environment: input.environment,
     userId: input.userId,
   });
@@ -526,6 +537,7 @@ async function forwardRunnerDeviceSyncConnectLinkRequest(input: {
 
 async function handleRunnerUsageRecordRequest(input: {
   bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
+  env: RunnerOutboundEnvironmentSource;
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
   request: Request;
   url: URL;
@@ -540,6 +552,7 @@ async function handleRunnerUsageRecordRequest(input: {
   const payload = parseHostedAiUsageRecordRequest(await readJsonObject(input.request));
   const crypto = await resolveRunnerOutboundUserCryptoContext({
     bucket: input.bucket,
+    env: input.env,
     environment: input.environment,
     userId: input.userId,
   });
@@ -558,9 +571,12 @@ async function handleRunnerUsageRecordRequest(input: {
 
 async function resolveRunnerOutboundUserCryptoContext(input: {
   bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
+  env: RunnerOutboundEnvironmentSource;
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
   userId: string;
 }) {
+  await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
+
   return createHostedUserKeyStore({
     automationRecipientKeyId: input.environment.automationRecipientKeyId,
     automationRecipientPrivateKey: input.environment.automationRecipientPrivateKey,
@@ -570,7 +586,7 @@ async function resolveRunnerOutboundUserCryptoContext(input: {
     envelopeEncryptionKey: input.environment.platformEnvelopeKey,
     envelopeEncryptionKeyId: input.environment.platformEnvelopeKeyId,
     envelopeEncryptionKeysById: input.environment.platformEnvelopeKeysById,
-  }).ensureUserCryptoContext(input.userId);
+  }).requireUserCryptoContext(input.userId);
 }
 
 async function resolveRunnerOutboundUserRunnerStub(

@@ -1,11 +1,14 @@
 import { beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
 import {
+  HOSTED_EXECUTION_NONCE_HEADER,
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
   verifyHostedExecutionSignature,
 } from "@murphai/hosted-execution";
 
+import { readHostedExecutionEnvironment } from "../src/env.ts";
 import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
+import { createHostedUserKeyStore } from "../src/user-key-store.ts";
 
 const describe = baseDescribe.sequential;
 
@@ -123,6 +126,43 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("bootstraps the bound user through the runner lane before local crypto-backed runtime reads", async () => {
+    const bootstrapUser = vi.fn(async (userId: string) => ({ userId }));
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://device-sync.worker/api/internal/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          provider: "oura",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return {
+              async commit() {
+                throw new Error("not used");
+              },
+              async finalizeCommit() {
+                throw new Error("not used");
+              },
+              bootstrapUser,
+            };
+          },
+        },
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    expect(bootstrapUser).toHaveBeenCalledTimes(1);
+    expect(bootstrapUser).toHaveBeenCalledWith("member_123");
+  });
+
   it("keeps device-sync runtime routes local even when deprecated hosted-web vars are present", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
       headers: {
@@ -201,16 +241,19 @@ describe("handleRunnerOutboundRequest", () => {
     const requestHeaders = fetchMock.mock.calls[0]?.[1]?.headers;
     expect((requestHeaders as Headers).get("authorization")).toBeNull();
     expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
+    const nonce = (requestHeaders as Headers).get(HOSTED_EXECUTION_NONCE_HEADER);
     const timestamp = (requestHeaders as Headers).get(HOSTED_EXECUTION_TIMESTAMP_HEADER);
     await expect(
       verifyHostedExecutionSignature({
         method: "POST",
+        nonce,
         path: "/app/api/internal/device-sync/providers/whoop/connect-link",
         payload: "",
         secret: "web-internal-secret",
         signature: (requestHeaders as Headers).get(HOSTED_EXECUTION_SIGNATURE_HEADER),
         timestamp,
         nowMs: timestamp ? Date.parse(timestamp) : Date.now(),
+        userId: "member_123",
       }),
     ).resolves.toBe(true);
   });
@@ -343,8 +386,25 @@ function createRunnerProxyHeaders(headers: Record<string, string> = {}) {
 
 function createRunnerOutboundEnv(overrides: Partial<Record<string, unknown>> = {}) {
   const values = new Map<string, string>();
-
-  return {
+  const defaultUserRunnerNamespace = {
+    getByName() {
+      return {
+        async bootstrapUser() {
+          return { userId: "member_123" };
+        },
+        async commit() {
+          throw new Error("not used");
+        },
+        async finalizeCommit() {
+          throw new Error("not used");
+        },
+      };
+    },
+  };
+  const userRunnerNamespace = "USER_RUNNER" in overrides
+    ? overrides.USER_RUNNER
+    : defaultUserRunnerNamespace;
+  const env = {
     BUNDLES: {
       async delete(key: string) {
         values.delete(key);
@@ -375,21 +435,52 @@ function createRunnerOutboundEnv(overrides: Partial<Record<string, unknown>> = {
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
     HOSTED_WEB_INTERNAL_SIGNING_SECRET: "web-internal-secret",
+    ...overrides,
+  };
+  const bootstrappedByUserId = new Map<string, Promise<void>>();
+
+  return {
+    ...env,
     USER_RUNNER: {
-      getByName() {
+      getByName(userId: string) {
+        const stub = userRunnerNamespace.getByName(userId) as {
+          bootstrapUser?: (boundUserId: string) => Promise<{ userId: string }>;
+          commit?: () => Promise<unknown>;
+          finalizeCommit?: () => Promise<unknown>;
+        };
         return {
-          async bootstrapUser() {
-            return { userId: "member_123" };
-          },
-          async commit() {
-            throw new Error("not used");
-          },
-          async finalizeCommit() {
-            throw new Error("not used");
+          ...stub,
+          async bootstrapUser(boundUserId: string) {
+            let seeded = bootstrappedByUserId.get(boundUserId);
+            if (!seeded) {
+              seeded = ensureRunnerOutboundUserEnvelope(env as Record<string, unknown>, boundUserId);
+              bootstrappedByUserId.set(boundUserId, seeded);
+            }
+            await seeded;
+            return stub.bootstrapUser?.(boundUserId) ?? { userId: boundUserId };
           },
         };
       },
     },
-    ...overrides,
   };
+}
+
+async function ensureRunnerOutboundUserEnvelope(
+  env: Record<string, unknown>,
+  userId: string,
+): Promise<void> {
+  const environment = readHostedExecutionEnvironment(
+    env as Readonly<Record<string, string | undefined>>,
+  );
+
+  await createHostedUserKeyStore({
+    automationRecipientKeyId: environment.automationRecipientKeyId,
+    automationRecipientPrivateKey: environment.automationRecipientPrivateKey,
+    automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
+    automationRecipientPublicKey: environment.automationRecipientPublicKey,
+    bucket: env.BUNDLES as never,
+    envelopeEncryptionKey: environment.platformEnvelopeKey,
+    envelopeEncryptionKeyId: environment.platformEnvelopeKeyId,
+    envelopeEncryptionKeysById: environment.platformEnvelopeKeysById,
+  }).ensureUserCryptoContext(userId);
 }

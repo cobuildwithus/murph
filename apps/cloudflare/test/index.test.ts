@@ -1526,6 +1526,8 @@ describe("cloudflare worker routes", () => {
     } as never, env as never);
 
     expect(setReject).not.toHaveBeenCalled();
+    expect(stub.bootstrapUser).toHaveBeenCalledTimes(1);
+    expect(stub.bootstrapUser).toHaveBeenCalledWith("member_123");
     expect(stub.dispatch).toHaveBeenCalledTimes(1);
     const dispatch = stub.dispatch.mock.calls[0]?.[0] as HostedExecutionDispatchRequest;
     const dispatchedEvent = dispatch.event as Extract<
@@ -2294,20 +2296,51 @@ function createWorkerEnv(
   overrides: Partial<Record<string, unknown>> = {},
 ) {
   const bucketStore = createBucketStore();
-
-  return {
+  const defaultUserRunnerNamespace = {
+    getByName(userId: string) {
+      return getOrCreateWrappedUserRunnerStub(userId, userRunnerStub);
+    },
+  };
+  const userRunnerNamespace = "USER_RUNNER" in overrides
+    ? overrides.USER_RUNNER
+    : defaultUserRunnerNamespace;
+  const wrappedUserRunnerStubs = new Map<string, UserRunnerStub>();
+  const env = {
     __bucketStore: bucketStore,
     ...createHostedExecutionTestEnv({
       BUNDLES: bucketStore.api,
       RUNNER_CONTAINER: createStorage().runnerContainerNamespace,
-      USER_RUNNER: {
-        getByName() {
-          return userRunnerStub;
-        },
-      },
     }),
     ...overrides,
   };
+
+  return {
+    ...env,
+    USER_RUNNER: {
+      getByName(userId: string) {
+        return (userRunnerNamespace as { getByName(boundUserId: string): UserRunnerStub }).getByName(userId);
+      },
+    },
+  };
+
+  function getOrCreateWrappedUserRunnerStub(userId: string, seedStub: UserRunnerStub): UserRunnerStub {
+    const existing = wrappedUserRunnerStubs.get(userId);
+
+    if (existing) {
+      return existing;
+    }
+
+    const baseStub = wrappedUserRunnerStubs.size === 0 ? seedStub : createUserRunnerStub();
+    const wrappedStub: UserRunnerStub = {
+      ...baseStub,
+      bootstrapUser: vi.fn(async (boundUserId: string) => {
+        await resolveHostedUserCryptoContextForTest(env as ReturnType<typeof createWorkerEnv>, boundUserId);
+        return baseStub.bootstrapUser(boundUserId);
+      }),
+    };
+    wrappedUserRunnerStubs.set(userId, wrappedStub);
+    return wrappedStub;
+  }
 }
 
 function callRunnerOutbound(
@@ -2768,26 +2801,50 @@ function createUserRunnerDurableObject(
   overrides: Partial<Record<string, unknown>> = {},
 ) {
   const bucket = createBucketStore();
-  const storage = createStorage();
+  const runnerHarnesses = new Map<string, {
+    durableObject: UserRunnerDurableObject;
+    storage: ReturnType<typeof createStorage>;
+  }>();
   const env = createHostedExecutionTestEnv({
     BUNDLES: bucket.api,
-    RUNNER_CONTAINER: storage.runnerContainerNamespace,
+    RUNNER_CONTAINER: createStorage().runnerContainerNamespace,
     ...overrides,
-  });
-  const durableObject = new UserRunnerDurableObject(storage.state, env as never);
+  }) as Record<string, unknown>;
+
+  const getOrCreateRunnerHarness = (userId: string) => {
+    const existing = runnerHarnesses.get(userId);
+
+    if (existing) {
+      return existing;
+    }
+
+    const storage = createStorage();
+    const durableObject = new UserRunnerDurableObject(storage.state, {
+      ...env,
+      RUNNER_CONTAINER: storage.runnerContainerNamespace,
+    } as never);
+    const created = {
+      durableObject,
+      storage,
+    };
+    runnerHarnesses.set(userId, created);
+    return created;
+  };
+  const defaultHarness = getOrCreateRunnerHarness("member_123");
+  env.RUNNER_CONTAINER = defaultHarness.storage.runnerContainerNamespace;
 
   return {
     bucket,
-    durableObject,
+    durableObject: defaultHarness.durableObject,
     env: {
       ...env,
       USER_RUNNER: {
-        getByName() {
-          return durableObject;
+        getByName(userId: string) {
+          return getOrCreateRunnerHarness(userId).durableObject;
         },
       },
     },
-    storage,
+    storage: defaultHarness.storage,
   };
 }
 

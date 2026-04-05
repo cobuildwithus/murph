@@ -499,10 +499,13 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
   if (signingSecret) {
     const signatureHeaders = await createHostedExecutionSignatureHeaders({
       method: input.method,
+      nonce: null,
       path: targetUrl.pathname,
       payload: input.body ?? "",
+      search: targetUrl.search,
       secret: signingSecret,
       timestamp: new Date().toISOString(),
+      userId: input.boundUserId,
     });
 
     for (const [key, value] of Object.entries(signatureHeaders)) {

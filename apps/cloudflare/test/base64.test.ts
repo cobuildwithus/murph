@@ -13,9 +13,12 @@ describe("cloudflare base64 helpers", () => {
   });
 
   it("accepts base64url keys but rejects malformed key material", () => {
-    expect(Buffer.from(decodeBase64Key("AQIDBA"))).toEqual(Buffer.from([1, 2, 3, 4]));
+    expect(Buffer.from(decodeBase64Key(Buffer.alloc(32, 7).toString("base64url")))).toEqual(Buffer.alloc(32, 7));
     expect(() => decodeBase64Key("bad key===")).toThrow(
-      "Hosted execution platform envelope keys must be valid base64 or base64url.",
+      "Hosted execution platform envelope keys must be valid 32-byte base64 or base64url values.",
+    );
+    expect(() => decodeBase64Key(Buffer.alloc(16, 7).toString("base64url"))).toThrow(
+      "Hosted execution platform envelope keys must be valid 32-byte base64 or base64url values.",
     );
   });
 });

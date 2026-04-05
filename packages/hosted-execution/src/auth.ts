@@ -1,4 +1,5 @@
 import {
+  HOSTED_EXECUTION_NONCE_HEADER,
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
 } from "./contracts.ts";
@@ -13,8 +14,11 @@ export async function createHostedExecutionSignature(input: {
   method?: string;
   payload: string;
   path?: string;
+  search?: string;
   secret: string;
   timestamp: string;
+  nonce?: string | null;
+  userId?: string | null;
 }): Promise<string> {
   const cryptoKey = await importHmacKey(input.secret, ["sign"]);
   const signature = await crypto.subtle.sign(
@@ -22,9 +26,12 @@ export async function createHostedExecutionSignature(input: {
     cryptoKey,
     encodeSignaturePayload({
       method: input.method,
+      nonce: input.nonce,
       path: input.path,
       payload: input.payload,
+      search: input.search,
       timestamp: input.timestamp,
+      userId: input.userId,
     }),
   );
 
@@ -35,11 +42,21 @@ export async function createHostedExecutionSignatureHeaders(input: {
   method?: string;
   payload: string;
   path?: string;
+  search?: string;
   secret: string;
   timestamp: string;
+  nonce?: string | null;
+  userId?: string | null;
 }): Promise<Record<string, string>> {
+  const normalizedNonce = normalizeRequestNonce(input.nonce);
+  const nonce = normalizedNonce.length > 0 ? normalizedNonce : createHostedExecutionNonce();
+
   return {
-    [HOSTED_EXECUTION_SIGNATURE_HEADER]: await createHostedExecutionSignature(input),
+    [HOSTED_EXECUTION_SIGNATURE_HEADER]: await createHostedExecutionSignature({
+      ...input,
+      nonce,
+    }),
+    [HOSTED_EXECUTION_NONCE_HEADER]: nonce,
     [HOSTED_EXECUTION_TIMESTAMP_HEADER]: input.timestamp,
   };
 }
@@ -48,9 +65,12 @@ export async function verifyHostedExecutionSignature(input: {
   method?: string;
   payload: string;
   path?: string;
+  search?: string;
   secret: string;
   signature: string | null;
   timestamp: string | null;
+  nonce?: string | null;
+  userId?: string | null;
   nowMs?: number;
   maxTimestampSkewMs?: number;
 }): Promise<boolean> {
@@ -86,18 +106,23 @@ export async function verifyHostedExecutionSignature(input: {
     signatureBytes,
     encodeSignaturePayload({
       method: input.method,
+      nonce: input.nonce,
       path: input.path,
       payload: input.payload,
+      search: input.search,
       timestamp: input.timestamp,
+      userId: input.userId,
     }),
   );
 }
 
 export function readHostedExecutionSignatureHeaders(headers: Headers): {
+  nonce: string | null;
   signature: string | null;
   timestamp: string | null;
 } {
   return {
+    nonce: headers.get(HOSTED_EXECUTION_NONCE_HEADER),
     signature: headers.get(HOSTED_EXECUTION_SIGNATURE_HEADER),
     timestamp: headers.get(HOSTED_EXECUTION_TIMESTAMP_HEADER),
   };
@@ -121,14 +146,28 @@ async function importHmacKey(
 
 function encodeSignaturePayload(input: {
   method?: string;
+  nonce?: string | null;
   path?: string;
   payload: string;
+  search?: string;
   timestamp: string;
+  userId?: string | null;
 }): ArrayBuffer {
   const method = normalizeRequestMethod(input.method);
+  const nonce = normalizeRequestNonce(input.nonce);
   const path = normalizeRequestPath(input.path);
+  const search = normalizeRequestSearch(input.search);
+  const userId = normalizeRequestUserId(input.userId);
 
-  return encodeUtf8(`${input.timestamp}.${method}.${path}.${input.payload}`);
+  return encodeUtf8(JSON.stringify([
+    input.timestamp,
+    method,
+    path,
+    search,
+    userId,
+    nonce,
+    input.payload,
+  ]));
 }
 
 function normalizeRequestMethod(value: string | undefined): string {
@@ -144,6 +183,39 @@ function normalizeRequestPath(value: string | undefined): string {
 
   const trimmed = value.trim();
   return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+}
+
+function normalizeRequestSearch(value: string | null | undefined): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return "";
+  }
+
+  const trimmed = value.trim();
+  return trimmed.startsWith("?") ? trimmed : `?${trimmed}`;
+}
+
+function normalizeRequestUserId(value: string | null | undefined): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : "";
+}
+
+function normalizeRequestNonce(value: string | null | undefined): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : "";
+}
+
+function createHostedExecutionNonce(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function normalizeHex(value: string): string {
