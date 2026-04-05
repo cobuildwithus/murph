@@ -450,6 +450,7 @@ async function handleRunnerDeviceSyncControlRequest(input: {
     return forwardRunnerDeviceSyncConnectLinkRequest({
       env: input.env,
       provider: decodeRouteParam(connectLinkMatch.groups.provider),
+      signingSecret: input.environment.dispatchSigningSecret,
       userId: input.userId,
     });
   }
@@ -495,15 +496,16 @@ async function handleRunnerDeviceSyncControlRequest(input: {
 async function forwardRunnerDeviceSyncConnectLinkRequest(input: {
   env: RunnerOutboundEnvironmentSource;
   provider: string;
+  signingSecret: string;
   userId: string;
 }): Promise<Response> {
   const config = requireRunnerOutboundHostedWebControlConfig(input.env);
   const response = await fetchHostedExecutionWebControlPlaneResponse({
-    authorizationToken: config.internalToken,
     baseUrl: config.baseUrl,
     boundUserId: input.userId,
     method: "POST",
     path: buildHostedExecutionDeviceSyncConnectLinkPath(input.provider),
+    signingSecret: input.signingSecret,
     timeoutMs: null,
   });
 
@@ -586,39 +588,18 @@ async function resolveRunnerOutboundUserRunnerStub(
 
 function requireRunnerOutboundHostedWebControlConfig(
   env: RunnerOutboundEnvironmentSource,
-): { baseUrl: string; internalToken: string } {
+): { baseUrl: string } {
   const baseUrl = normalizeHostedExecutionBaseUrl(
     typeof env.HOSTED_WEB_BASE_URL === "string" ? env.HOSTED_WEB_BASE_URL : null,
   );
-  const internalToken = readFirstEnvToken(env.HOSTED_EXECUTION_INTERNAL_TOKENS);
 
   if (!baseUrl) {
     throw new TypeError("HOSTED_WEB_BASE_URL must be configured for hosted device connect-link proxying.");
   }
 
-  if (!internalToken) {
-    throw new TypeError(
-      "HOSTED_EXECUTION_INTERNAL_TOKENS must be configured for hosted device connect-link proxying.",
-    );
-  }
-
   return {
     baseUrl,
-    internalToken,
   };
-}
-
-function readFirstEnvToken(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const token = value
-    .split(",")
-    .map((entry) => entry.trim())
-    .find(Boolean);
-
-  return token ?? null;
 }
 
 function parseHostedExecutionCommitRequest(payload: Record<string, unknown>): HostedExecutionCommitPayload & {

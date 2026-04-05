@@ -7,26 +7,18 @@ import {
 } from "../src/runner-container.ts";
 
 describe("RunnerContainer", () => {
-  it("defaults idle retention to one minute and accepts an env override", () => {
-    expect(new RunnerContainer({} as never, {} as never).sleepAfter).toBe("1m");
-    expect(
-      new RunnerContainer(
-        {} as never,
-        {
-          HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER: "9m",
-        } as never,
-      ).sleepAfter,
-    ).toBe("9m");
-  });
-
-  it("starts the container, waits for the port, and forwards the runner request", async () => {
+  it("starts the container, waits for the port, forwards the runner request, and tears the container down after the run", async () => {
     const resultPayload = createRunnerResult();
-    const { container, containerFetch, setOutboundByHosts, startAndWaitForPorts } = createContainerDouble({
+    const { container, containerFetch, destroy, setOutboundByHosts, startAndWaitForPorts } = createContainerDouble({
       containerFetch: vi.fn(async () => new Response(JSON.stringify(resultPayload), {
         headers: {
           "content-type": "application/json; charset=utf-8",
         },
         status: 200,
+      })),
+      getState: vi.fn(async () => ({
+        lastChange: Date.now(),
+        status: "running",
       })),
     });
 
@@ -111,6 +103,7 @@ describe("RunnerContainer", () => {
       }),
       8080,
     );
+    expect(destroy).toHaveBeenCalledTimes(1);
     const forwardedBody = JSON.parse(containerFetch.mock.calls[0]?.[1]?.body as string) as {
       request: ReturnType<typeof createRunnerRequest>;
       runtime: {

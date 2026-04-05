@@ -1,4 +1,9 @@
 import { beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
+import {
+  HOSTED_EXECUTION_SIGNATURE_HEADER,
+  HOSTED_EXECUTION_TIMESTAMP_HEADER,
+  verifyHostedExecutionSignature,
+} from "@murphai/hosted-execution";
 
 import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
 
@@ -130,7 +135,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("proxies hosted device connect-link requests through hosted web with the bound user header", async () => {
+  it("proxies hosted device connect-link requests through hosted web with the bound user header and HMAC signature", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       authorizationUrl: "https://provider.example.test/oauth/start",
       expiresAt: "2026-04-04T12:00:00.000Z",
@@ -150,7 +155,6 @@ describe("handleRunnerOutboundRequest", () => {
         method: "POST",
       }),
       createRunnerOutboundEnv({
-        HOSTED_EXECUTION_INTERNAL_TOKENS: "worker-control-token",
         HOSTED_WEB_BASE_URL: "https://web.example.test/app",
       }),
       "member_123",
@@ -172,8 +176,20 @@ describe("handleRunnerOutboundRequest", () => {
       }),
     );
     const requestHeaders = fetchMock.mock.calls[0]?.[1]?.headers;
-    expect((requestHeaders as Headers).get("authorization")).toBe("Bearer worker-control-token");
+    expect((requestHeaders as Headers).get("authorization")).toBeNull();
     expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
+    const timestamp = (requestHeaders as Headers).get(HOSTED_EXECUTION_TIMESTAMP_HEADER);
+    await expect(
+      verifyHostedExecutionSignature({
+        method: "POST",
+        path: "/app/api/internal/device-sync/providers/whoop/connect-link",
+        payload: "",
+        secret: "dispatch-secret",
+        signature: (requestHeaders as Headers).get(HOSTED_EXECUTION_SIGNATURE_HEADER),
+        timestamp,
+        nowMs: timestamp ? Date.parse(timestamp) : Date.now(),
+      }),
+    ).resolves.toBe(true);
   });
 
   it("returns 404 when a share pack has not been published for the bound user", async () => {

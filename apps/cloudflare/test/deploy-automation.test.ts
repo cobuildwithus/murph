@@ -34,7 +34,6 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
       HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
-      HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER: "7m",
       MURPH_WEB_SEARCH_MAX_RESULTS: "8",
       MURPH_WEB_SEARCH_PROVIDER: "brave",
       MURPH_WEB_SEARCH_TIMEOUT_MS: "10000",
@@ -124,7 +123,6 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_EMAIL_DOMAIN).toBe("mail.example.test");
     expect(config.vars.HOSTED_EMAIL_FROM_ADDRESS).toBe("assistant@mail.example.test");
     expect(config.vars.HOSTED_EMAIL_LOCAL_PART).toBe("assistant");
-    expect(config.vars.HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER).toBe("7m");
     expect(config.vars.HOSTED_AI_USAGE_BASE_URL).toBeUndefined();
     expect(config.vars.HOSTED_DEVICE_SYNC_CONTROL_BASE_URL).toBeUndefined();
     expect(config.vars.HOSTED_SHARE_API_BASE_URL).toBeUndefined();
@@ -148,7 +146,6 @@ describe("hosted deploy automation helpers", () => {
     });
 
     expect(environment.workerVars).toEqual({
-      HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER: "1m",
       MURPH_WEB_FETCH_ENABLED: "true",
     });
   });
@@ -201,7 +198,6 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "automation-public-jwk",
       HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: "bundle-key",
       HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON: "{\"v0\":\"old-key\"}",
-      HOSTED_EXECUTION_INTERNAL_TOKENS: "internal-token-a,internal-token-b",
       HOSTED_EXECUTION_SIGNING_SECRET: "signing-secret",
       OPENAI_API_KEY: "sk-user",
       TELEGRAM_BOT_TOKEN: "bot-token",
@@ -214,7 +210,6 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "automation-public-jwk",
       HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: "bundle-key",
       HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON: "{\"v0\":\"old-key\"}",
-      HOSTED_EXECUTION_INTERNAL_TOKENS: "internal-token-a,internal-token-b",
       HOSTED_EXECUTION_SIGNING_SECRET: "signing-secret",
       OPENAI_API_KEY: "sk-user",
       TELEGRAM_BOT_TOKEN: "bot-token",

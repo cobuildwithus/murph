@@ -201,7 +201,6 @@ describe("@murphai/hosted-execution", () => {
     expect(
       readHostedExecutionWebControlPlaneEnvironment({
         HOSTED_EXECUTION_SCHEDULER_TOKENS: "cron-token",
-        HOSTED_EXECUTION_INTERNAL_TOKENS: "internal-token",
         HOSTED_WEB_BASE_URL: "https://web.example.test/",
         HOSTED_SHARE_INTERNAL_TOKENS: "share-token",
       }),
@@ -223,7 +222,6 @@ describe("@murphai/hosted-execution", () => {
   it("keeps hosted web control-plane callbacks bound to the worker proxy defaults", () => {
     expect(
       readHostedExecutionWebControlPlaneEnvironment({
-        HOSTED_EXECUTION_INTERNAL_TOKENS: "internal-token",
         VERCEL_PROJECT_PRODUCTION_URL: "www.withmurph.ai",
       }),
     ).toEqual({
@@ -585,7 +583,6 @@ describe("@murphai/hosted-execution", () => {
     const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
 
     await fetchHostedExecutionWebControlPlaneResponse({
-      authorizationToken: "  internal-token  ",
       baseUrl: "https://join.example.test/",
       body: "{\"ok\":true}",
       boundUserId: "member_123",
@@ -593,6 +590,7 @@ describe("@murphai/hosted-execution", () => {
       method: "POST",
       path: "/api/internal/device-sync/runtime/snapshot",
       search: "?provider=oura",
+      signingSecret: "dispatch-secret",
       timeoutMs: 45_000,
     });
 
@@ -610,9 +608,21 @@ describe("@murphai/hosted-execution", () => {
 
     const requestHeaders = fetchImpl.mock.calls[0]?.[1]?.headers;
     expect(requestHeaders).toBeInstanceOf(Headers);
-    expect((requestHeaders as Headers).get("authorization")).toBe("Bearer internal-token");
+    expect((requestHeaders as Headers).get("authorization")).toBeNull();
     expect((requestHeaders as Headers).get("content-type")).toBe("application/json");
     expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
+    const timestamp = (requestHeaders as Headers).get(HOSTED_EXECUTION_TIMESTAMP_HEADER);
+    await expect(
+      verifyHostedExecutionSignature({
+        method: "POST",
+        path: "/api/internal/device-sync/runtime/snapshot",
+        payload: "{\"ok\":true}",
+        secret: "dispatch-secret",
+        signature: (requestHeaders as Headers).get(HOSTED_EXECUTION_SIGNATURE_HEADER),
+        timestamp,
+        nowMs: timestamp ? Date.parse(timestamp) : Date.now(),
+      }),
+    ).resolves.toBe(true);
   });
 
   it("resolves proxy device-sync clients from worker proxy urls without requiring server auth", async () => {
@@ -707,7 +717,7 @@ describe("@murphai/hosted-execution", () => {
     const client = createHostedExecutionServerDeviceSyncConnectLinkClient({
       baseUrl: "https://join.example.test",
       boundUserId: "member_123",
-      internalToken: "internal-token",
+      signingSecret: "dispatch-secret",
       timeoutMs: 10_000,
     });
 
@@ -730,8 +740,20 @@ describe("@murphai/hosted-execution", () => {
       }),
     );
     const requestHeaders = fetchMock.mock.calls[0]?.[1]?.headers;
-    expect((requestHeaders as Headers).get("authorization")).toBe("Bearer internal-token");
+    expect((requestHeaders as Headers).get("authorization")).toBeNull();
     expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
+    const timestamp = (requestHeaders as Headers).get(HOSTED_EXECUTION_TIMESTAMP_HEADER);
+    await expect(
+      verifyHostedExecutionSignature({
+        method: "POST",
+        path: "/api/internal/device-sync/providers/whoop/connect-link",
+        payload: "",
+        secret: "dispatch-secret",
+        signature: (requestHeaders as Headers).get(HOSTED_EXECUTION_SIGNATURE_HEADER),
+        timestamp,
+        nowMs: timestamp ? Date.parse(timestamp) : Date.now(),
+      }),
+    ).resolves.toBe(true);
   });
 
   it("resolves proxy device connect-link clients from worker proxy urls without requiring server auth", async () => {

@@ -1,19 +1,13 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { createHostedExecutionSignatureHeaders } from "@murphai/hosted-execution";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
-  requireHostedExecutionInternalToken: vi.fn(),
-  requireHostedExecutionUserId: vi.fn(),
   startConnection: vi.fn(),
 }));
 
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
   createHostedDeviceSyncControlPlane: mocks.createHostedDeviceSyncControlPlane,
-}));
-
-vi.mock("@/src/lib/hosted-execution/internal", () => ({
-  requireHostedExecutionInternalToken: mocks.requireHostedExecutionInternalToken,
-  requireHostedExecutionUserId: mocks.requireHostedExecutionUserId,
 }));
 
 type InternalDeviceSyncConnectLinkRouteModule = typeof import(
@@ -23,16 +17,25 @@ type InternalDeviceSyncConnectLinkRouteModule = typeof import(
 let internalDeviceSyncConnectLinkRoute: InternalDeviceSyncConnectLinkRouteModule;
 
 describe("device sync internal connect-link route", () => {
+  const originalSigningSecret = process.env.HOSTED_EXECUTION_SIGNING_SECRET;
+
   beforeAll(async () => {
     internalDeviceSyncConnectLinkRoute = await import(
       "../app/api/internal/device-sync/providers/[provider]/connect-link/route"
     );
   });
 
+  afterEach(() => {
+    if (originalSigningSecret === undefined) {
+      delete process.env.HOSTED_EXECUTION_SIGNING_SECRET;
+      return;
+    }
+
+    process.env.HOSTED_EXECUTION_SIGNING_SECRET = originalSigningSecret;
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.requireHostedExecutionInternalToken.mockImplementation(() => {});
-    mocks.requireHostedExecutionUserId.mockReturnValue("member_123");
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
       startConnection: mocks.startConnection,
     });
@@ -45,10 +48,40 @@ describe("device sync internal connect-link route", () => {
   });
 
   it("creates a hosted device connect link for the bound execution user", async () => {
+    process.env.HOSTED_EXECUTION_SIGNING_SECRET = "dispatch-secret";
+    const headers = await createSignedRequestHeaders();
+    const response = await internalDeviceSyncConnectLinkRoute.POST(
+      new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
+        headers,
+        method: "POST",
+      }),
+      {
+        params: Promise.resolve({
+          provider: "whoop",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.startConnection).toHaveBeenCalledWith(
+      "member_123",
+      "whoop",
+      "/settings?tab=wearables",
+    );
+    await expect(response.json()).resolves.toEqual({
+      authorizationUrl: "https://provider.example.test/oauth/start",
+      expiresAt: "2026-04-04T12:00:00.000Z",
+      provider: "whoop",
+      providerLabel: "WHOOP",
+    });
+  });
+
+  it("rejects unsigned requests on the internal connect-link route", async () => {
+    process.env.HOSTED_EXECUTION_SIGNING_SECRET = "dispatch-secret";
+
     const response = await internalDeviceSyncConnectLinkRoute.POST(
       new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
         headers: {
-          authorization: "Bearer internal-token",
           "x-hosted-execution-user-id": "member_123",
         },
         method: "POST",
@@ -60,19 +93,14 @@ describe("device sync internal connect-link route", () => {
       },
     );
 
-    expect(response.status).toBe(200);
-    expect(mocks.requireHostedExecutionInternalToken).toHaveBeenCalledWith(expect.any(Request));
-    expect(mocks.requireHostedExecutionUserId).toHaveBeenCalledWith(expect.any(Request));
-    expect(mocks.startConnection).toHaveBeenCalledWith(
-      "member_123",
-      "whoop",
-      "/settings?tab=wearables",
-    );
+    expect(response.status).toBe(401);
+    expect(mocks.startConnection).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
-      authorizationUrl: "https://provider.example.test/oauth/start",
-      expiresAt: "2026-04-04T12:00:00.000Z",
-      provider: "whoop",
-      providerLabel: "WHOOP",
+      error: {
+        code: "HOSTED_EXECUTION_UNAUTHORIZED",
+        message: "Unauthorized hosted execution request.",
+        retryable: false,
+      },
     });
   });
 
@@ -90,3 +118,18 @@ describe("device sync internal connect-link route", () => {
     });
   });
 });
+
+async function createSignedRequestHeaders(): Promise<HeadersInit> {
+  const headers = await createHostedExecutionSignatureHeaders({
+    method: "POST",
+    path: "/api/internal/device-sync/providers/whoop/connect-link",
+    payload: "",
+    secret: "dispatch-secret",
+    timestamp: new Date().toISOString(),
+  });
+
+  return {
+    ...headers,
+    "x-hosted-execution-user-id": "member_123",
+  };
+}
