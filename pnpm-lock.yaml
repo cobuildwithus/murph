@@ -35,9 +35,6 @@ importers:
       '@cloudflare/containers':
         specifier: ^0.2.0
         version: 0.2.0
-      '@murphai/assistant-core':
-        specifier: workspace:*
-        version: link:../../packages/assistant-core
       '@murphai/assistant-runtime':
         specifier: workspace:*
         version: link:../../packages/assistant-runtime

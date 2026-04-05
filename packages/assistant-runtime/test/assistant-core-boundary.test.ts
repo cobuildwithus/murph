@@ -65,21 +65,30 @@ test("assistant-runtime uses the dedicated @murphai/assistant-core boundary inst
     new URL("../src/index.ts", import.meta.url),
     "utf8",
   );
+  const runtimeHostedAssistantEnvSource = await readFile(
+    new URL("../src/hosted-assistant-env.ts", import.meta.url),
+    "utf8",
+  );
   const runtimeSourceFiles = await listFilesRecursive(new URL("../src/", import.meta.url));
   const assistantCoreSourceFiles = await listFilesRecursive(
     new URL("../../assistant-core/src/", import.meta.url),
   );
-  const cloudflareNodeRunnerSource = await readFile(
-    new URL("../../../apps/cloudflare/test/node-runner.test.ts", import.meta.url),
+  const cloudflareContainerEntrypointSource = await readFile(
+    new URL("../../../apps/cloudflare/src/container-entrypoint.ts", import.meta.url),
+    "utf8",
+  );
+  const cloudflareHostedEnvPolicySource = await readFile(
+    new URL("../../../apps/cloudflare/src/hosted-env-policy.ts", import.meta.url),
     "utf8",
   );
   const assistantCoreModule = await import("@murphai/assistant-core");
   const assistantRuntimeModule = await import("@murphai/assistant-runtime");
+  const assistantRuntimeHostedEnvModule = await import("@murphai/assistant-runtime/hosted-assistant-env");
   let sawAssistantCoreImport = false;
 
   assert.equal(runtimeManifest.dependencies?.["@murphai/assistant-core"], "workspace:*");
   assert.equal(runtimeManifest.dependencies?.murph, undefined);
-  assert.equal(cloudflareManifest.dependencies?.["@murphai/assistant-core"], "workspace:*");
+  assert.equal(cloudflareManifest.dependencies?.["@murphai/assistant-core"], undefined);
   assert.equal(cloudflareManifest.dependencies?.murph, undefined);
   assert.equal(assistantCoreManifest.dependencies?.murph, undefined);
   assert.equal(assistantCoreManifest.exports?.["./*"], undefined);
@@ -114,8 +123,27 @@ test("assistant-runtime uses the dedicated @murphai/assistant-core boundary inst
   );
   assert.doesNotMatch(assistantCoreTypesSource, /\bVaultCliServices\b/u);
   assert.doesNotMatch(runtimeIndexSource, /contracts\.ts/u);
-  assert.match(cloudflareNodeRunnerSource, /from ["']@murphai\/assistant-core["']/u);
-  assert.doesNotMatch(cloudflareNodeRunnerSource, /from ["']murph(\/|["'])/u);
+  assert.match(runtimeHostedAssistantEnvSource, /from ["']@murphai\/assistant-core["']/u);
+  assert.equal(
+    runtimeManifest.exports?.["./hosted-assistant-env"]?.default,
+    "./dist/hosted-assistant-env.js",
+  );
+  assert.match(
+    cloudflareContainerEntrypointSource,
+    /from ["']@murphai\/assistant-runtime\/hosted-assistant-env["']/u,
+  );
+  assert.match(
+    cloudflareHostedEnvPolicySource,
+    /from ["']@murphai\/assistant-runtime\/hosted-assistant-env["']/u,
+  );
+  assert.doesNotMatch(
+    cloudflareContainerEntrypointSource,
+    /from ["']@murphai\/assistant-core(?:\/[^"']+)?["']/u,
+  );
+  assert.doesNotMatch(
+    cloudflareHostedEnvPolicySource,
+    /from ["']@murphai\/assistant-core(?:\/[^"']+)?["']/u,
+  );
 
   for (const fileUrl of runtimeSourceFiles) {
     const source = await readFile(fileUrl, "utf8");
@@ -145,6 +173,18 @@ test("assistant-runtime uses the dedicated @murphai/assistant-core boundary inst
   assert.equal(Object.hasOwn(assistantRuntimeModule, "HostedExecutionSideEffect"), false);
   assert.equal(Object.hasOwn(assistantRuntimeModule, "runHostedAssistantRuntimeJobInProcess"), true);
   assert.equal(Object.hasOwn(assistantRuntimeModule, "readHostedRunnerCommitTimeoutMs"), true);
+  assert.equal(
+    assistantRuntimeHostedEnvModule.HostedAssistantConfigurationError,
+    assistantCoreModule.HostedAssistantConfigurationError,
+  );
+  assert.equal(
+    assistantRuntimeHostedEnvModule.readHostedAssistantApiKeyEnvName,
+    assistantCoreModule.readHostedAssistantApiKeyEnvName,
+  );
+  assert.deepEqual(
+    assistantRuntimeHostedEnvModule.HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
+    assistantCoreModule.HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
+  );
 });
 
 test("assistant-core operator-config writes the canonical local config shape", async () => {

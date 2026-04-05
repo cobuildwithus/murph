@@ -3,7 +3,7 @@ import { once } from "node:events";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { HostedAssistantConfigurationError } from "@murphai/assistant-core";
+import { HostedAssistantConfigurationError } from "@murphai/assistant-runtime/hosted-assistant-env";
 
 import {
   classifyRunnerJobError,

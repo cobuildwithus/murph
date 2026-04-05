@@ -18,6 +18,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./hosted-assistant-env": {
+      "types": "./dist/hosted-assistant-env.d.ts",
+      "import": "./dist/hosted-assistant-env.js",
+      "default": "./dist/hosted-assistant-env.js"
     }
   },
   "files": [
