@@ -943,7 +943,6 @@ async function handleHostedEmailIngress(
   );
   const rawBytes = await readHostedEmailMessageBytes(message.raw);
   const parsedMessage = parseRawEmailMessage(rawBytes);
-  const routeHeader = readRawEmailHeaderValue(rawBytes, "x-murph-route");
   const headerFrom = readRawEmailHeaderValue(rawBytes, "from");
   const rejectReason = "Hosted email message was not accepted.";
   const route = await resolveHostedEmailIngressRoute({
@@ -955,7 +954,6 @@ async function handleHostedEmailIngress(
     key: environment.bundleEncryptionKey,
     keyId: environment.bundleEncryptionKeyId,
     keysById: environment.bundleEncryptionKeysById,
-    routeHeader: routeHeader.value ?? null,
     to: message.to,
   });
 

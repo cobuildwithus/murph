@@ -1439,7 +1439,7 @@ describe("cloudflare worker routes", () => {
     await expect(readResponse.text()).resolves.toBe(raw);
   });
 
-  it("routes inbound hosted email through X-Murph-Route when the delivered To address was rewritten", async () => {
+  it("rejects rewritten inbound hosted email once legacy route-header fallback is removed", async () => {
     const stub = createUserRunnerStub();
     const env = createWorkerEnv(stub, {
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
@@ -1459,6 +1459,7 @@ describe("cloudflare worker routes", () => {
     );
     const { address } = await addressResponse.json() as { address: string };
     await seedHostedVerifiedEmailUserEnv(env, "member_123", "alice@example.test");
+    const setReject = vi.fn();
     const raw = [
       "From: Alice Example <alice@example.test>",
       "To: rewritten@example.test",
@@ -1474,18 +1475,12 @@ describe("cloudflare worker routes", () => {
     await worker.email?.({
       from: "alice@example.test",
       raw,
+      setReject,
       to: "rewritten@example.test",
     } as never, env as never);
 
-    expect(stub.dispatch).toHaveBeenCalledTimes(1);
-    expect(stub.dispatch).toHaveBeenCalledWith(expect.objectContaining({
-      event: expect.objectContaining({
-        identityId: "assistant@mail.example.test",
-        kind: "email.message.received",
-        selfAddress: address,
-        userId: "member_123",
-      }),
-    }));
+    expect(setReject).toHaveBeenCalledWith("Hosted email message was not accepted.");
+    expect(stub.dispatch).not.toHaveBeenCalled();
   });
 
   it("rejects inbound hosted email on the stable alias when the sender does not match the verified email", async () => {
@@ -1712,7 +1707,7 @@ describe("cloudflare worker routes", () => {
         expect(body.from).toBe("assistant@mail.example.test");
         expect(body.recipients).toEqual(["user@example.test"]);
         expect(body.mime_message).toContain("Reply-To: assistant+u-");
-        expect(body.mime_message).toContain("X-Murph-Route: assistant+u-");
+        expect(body.mime_message).not.toContain("X-Murph-Route:");
         expect(body.mime_message).toContain("To: user@example.test");
         return new Response(JSON.stringify({
           result: {

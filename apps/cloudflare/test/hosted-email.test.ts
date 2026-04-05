@@ -68,9 +68,9 @@ afterEach(() => {
 });
 
 describe("hosted email routing and transport", () => {
-  it("falls back to the signed route header and resolves the current sender identity", async () => {
+  it("does not resolve legacy route headers once only stable alias addresses are supported", async () => {
     const bucket = new MemoryBucket();
-    const replyAddress = await createHostedEmailUserAddress({
+    await createHostedEmailUserAddress({
       bucket,
       config: TEST_CONFIG,
       key: TEST_KEY,
@@ -83,17 +83,10 @@ describe("hosted email routing and transport", () => {
       config: ROTATED_IDENTITY_CONFIG,
       key: TEST_KEY,
       keyId: TEST_KEY_ID,
-      routeHeader: replyAddress,
       to: "unknown@mail.example.test",
     });
 
-    expect(route).toMatchObject({
-      identityId: "murph@mail.example.test",
-      kind: "user",
-      routeAddress: replyAddress,
-      target: null,
-      userId: "user_123",
-    });
+    expect(route).toBeNull();
   });
 
   it("does not rewrite the stable user alias route when the same user address is recreated", async () => {
@@ -337,7 +330,7 @@ describe("hosted email routing and transport", () => {
     })).toBe(true);
   });
 
-  it("ignores X-Murph-Route overrides when mail is addressed to the fixed public sender", async () => {
+  it("resolves the fixed public sender route without any legacy route-header override path", async () => {
     const bucket = new MemoryBucket();
     await reconcileHostedEmailVerifiedSenderRoute({
       bucket,
@@ -348,7 +341,7 @@ describe("hosted email routing and transport", () => {
       previousVerifiedEmailAddress: null,
       userId: "user_123",
     });
-    const unrelatedAlias = await createHostedEmailUserAddress({
+    await createHostedEmailUserAddress({
       bucket,
       config: TEST_CONFIG,
       key: TEST_KEY,
@@ -364,7 +357,6 @@ describe("hosted email routing and transport", () => {
       headerFrom: "owner@example.com",
       key: TEST_KEY,
       keyId: TEST_KEY_ID,
-      routeHeader: unrelatedAlias,
       to: TEST_CONFIG.fromAddress!,
     });
 
@@ -372,6 +364,7 @@ describe("hosted email routing and transport", () => {
       routeAddress: TEST_CONFIG.fromAddress,
       userId: "user_123",
     });
+    expect(route?.userId).toBe("user_123");
   });
 
   it("moves the public sender route when the verified owner address changes and rejects conflicts", async () => {
@@ -633,7 +626,7 @@ describe("hosted email routing and transport", () => {
 
       expect(body.from).toBe(TEST_CONFIG.fromAddress);
       expect(body.mime_message).toContain(`Reply-To: ${stableReplyAddress}`);
-      expect(body.mime_message).toContain(`X-Murph-Route: ${stableReplyAddress}`);
+      expect(body.mime_message).not.toContain("X-Murph-Route:");
       expect(body.recipients).toEqual(["owner@example.com"]);
 
       return new Response(JSON.stringify({ success: true }), {
@@ -684,6 +677,28 @@ describe("hosted email routing and transport", () => {
     expect(secondTarget?.replyKey).toBeNull();
     expect([...bucket.objects.keys()].every((key) => !key.startsWith("transient/hosted-email/threads/")))
       .toBe(true);
+  });
+
+  it("rejects explicit recipient values with header breaks before sending", async () => {
+    const bucket = new MemoryBucket();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendHostedEmailMessage({
+      bucket,
+      config: TEST_CONFIG,
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      request: {
+        identityId: TEST_CONFIG.fromAddress,
+        message: "Hello",
+        target: "owner@example.com\r\nBcc: attacker@example.com",
+        targetKind: "explicit",
+      },
+      userId: "user_123",
+    })).rejects.toThrow("Hosted email delivery requires at least one recipient email address.");
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

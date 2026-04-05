@@ -94,6 +94,25 @@ test("hosted email shared text normalization trims empty message ids, route keys
   assert.equal(normalizeHostedEmailSubject(undefined), null);
 });
 
+test("hosted email shared normalization rejects header-break injection strings", () => {
+  assert.equal(
+    normalizeHostedEmailAddress("owner@example.test\r\nBcc: attacker@example.test"),
+    null,
+  );
+  assert.equal(
+    normalizeHostedEmailMessageId("<message@example.test>\r\nBcc: attacker@example.test"),
+    null,
+  );
+  assert.equal(
+    normalizeHostedEmailRouteKey("reply-key\r\nX-Murph-Route: attacker@example.test"),
+    null,
+  );
+  assert.equal(
+    normalizeHostedEmailSubject("Subject line\r\nBcc: attacker@example.test"),
+    null,
+  );
+});
+
 test("hosted email sender helpers authorize only the verified email by default", () => {
   const threadTarget = createHostedEmailThreadTarget({
     cc: ["friend@example.test"],

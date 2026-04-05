@@ -69,7 +69,6 @@ export async function resolveHostedEmailIngressRoute(input: {
   key: Uint8Array;
   keyId: string;
   keysById?: Readonly<Record<string, Uint8Array>>;
-  routeHeader?: string | null;
   to: string;
 }): Promise<HostedEmailInboundRoute | null> {
   if (isHostedEmailPublicSenderAddress(input.to, input.config)) {
@@ -92,7 +91,6 @@ export async function resolveHostedEmailIngressRoute(input: {
     key: input.key,
     keyId: input.keyId,
     keysById: input.keysById,
-    routeHeader: input.routeHeader,
     to: input.to,
   });
 }
@@ -259,7 +257,6 @@ export async function resolveHostedEmailInboundRoute(input: {
   key: Uint8Array;
   keyId: string;
   keysById?: Readonly<Record<string, Uint8Array>>;
-  routeHeader?: string | null;
   to: string;
 }): Promise<HostedEmailInboundRoute | null> {
   if (!input.config.domain || !input.config.signingSecret) {
@@ -275,7 +272,6 @@ export async function resolveHostedEmailInboundRoute(input: {
 
   for (const candidate of resolveHostedEmailRouteCandidates({
     config: input.config,
-    routeHeader: input.routeHeader ?? null,
     to: input.to,
   })) {
     const token = await parseHostedEmailRouteToken({
@@ -514,13 +510,12 @@ function resolveHostedEmailRouteIdentity(
 
 function resolveHostedEmailRouteCandidates(input: {
   config: HostedEmailConfig;
-  routeHeader: string | null;
   to: string;
 }): Array<{ address: string; detail: string }> {
   const seen = new Set<string>();
   const candidates: Array<{ address: string; detail: string }> = [];
 
-  for (const value of [input.to, input.routeHeader]) {
+  for (const value of [input.to]) {
     const parsed = parseHostedEmailRouteCandidate(value, input.config);
     if (!parsed || seen.has(parsed.detail)) {
       continue;
