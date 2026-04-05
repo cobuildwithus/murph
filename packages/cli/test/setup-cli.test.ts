@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { execFile, spawn } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import {
   chmod,
   mkdir,
@@ -565,55 +565,11 @@ async function writeExecutable(
   await chmod(absolutePath, 0o755)
 }
 
-async function writeRequiredCliDistSupportFiles(
-  cliPackageRoot: string,
-): Promise<void> {
-  const cliDistRoot = path.join(cliPackageRoot, 'dist')
-  const supportPaths = [
-    path.join(cliDistRoot, 'index.js'),
-    path.join(cliDistRoot, 'setup-cli.js'),
-    path.join(cliDistRoot, 'setup-agentmail.js'),
-    path.join(cliDistRoot, 'setup-assistant.js'),
-    path.join(cliDistRoot, 'setup-assistant-account.js'),
-    path.join(cliDistRoot, 'setup-services.js'),
-    path.join(cliDistRoot, 'setup-wizard.js'),
-    path.join(cliDistRoot, 'assistant', 'provider-catalog.js'),
-    path.join(cliDistRoot, 'setup-services', 'channels.js'),
-    path.join(cliDistRoot, 'setup-services', 'process.js'),
-    path.join(cliDistRoot, 'setup-services', 'scheduled-updates.js'),
-    path.join(cliDistRoot, 'setup-services', 'shell.js'),
-    path.join(cliDistRoot, 'setup-services', 'steps.js'),
-    path.join(cliDistRoot, 'setup-services', 'toolchain.js'),
-  ]
-
-  for (const supportPath of supportPaths) {
-    await mkdir(path.dirname(supportPath), { recursive: true })
-    await writeFile(supportPath, 'module.exports = {}\n', 'utf8')
-  }
-}
-
 function buildExpectedCliShimScript(
   cliBinPath: string,
   shimName: 'murph' | 'vault-cli' = 'murph',
 ): string {
   const generatedRepoRoot = path.resolve(path.dirname(cliBinPath), '..', '..', '..')
-  const workspacePackageNames = [
-    'contracts',
-    'core',
-    'device-syncd',
-    'importers',
-    'inboxd',
-    'parsers',
-    'query',
-    'runtime-state',
-  ]
-  const workspaceCheckLines = workspacePackageNames
-    .map((packageName) => {
-      return `  if [ ! -f "\${repo_root}/packages/${packageName}/dist/index.js" ]; then
-    missing_packages+=("\${repo_root}/packages/${packageName}")
-  fi`
-    })
-    .join('\n')
 
   return `#!/usr/bin/env bash
 set -euo pipefail
@@ -675,175 +631,19 @@ resolve_repo_root() {
   find_repo_root_from_pwd
 }
 
-run_supervised() {
-  if [[ -t 0 && -t 2 ]]; then
-    exec "$@"
-  fi
-
-  if [ -t 0 ]; then
-    "$@" &
-    child_pid=$!
-  elif exec 3<&0 2>/dev/null; then
-    "$@" <&3 &
-    child_pid=$!
-    exec 3<&-
-  else
-    "$@" </dev/null &
-    child_pid=$!
-  fi
-
-  forward_signal() {
-    local signal_name="$1"
-    local exit_code="$2"
-    local attempts=0
-
-    trap - INT TERM
-    kill "-$signal_name" "$child_pid" 2>/dev/null || true
-
-    while kill -0 "$child_pid" 2>/dev/null; do
-      if [ "$attempts" -ge 20 ]; then
-        kill -KILL "$child_pid" 2>/dev/null || true
-        break
-      fi
-
-      sleep 0.1
-      attempts=$((attempts + 1))
-    done
-
-    wait "$child_pid" 2>/dev/null || true
-    exit "$exit_code"
-  }
-
-  trap 'forward_signal INT 130' INT
-  trap 'forward_signal TERM 143' TERM
-
-  while kill -0 "$child_pid" 2>/dev/null; do
-    sleep 0.1
-  done
-
-  wait "$child_pid"
-  local exit_code=$?
-  trap - INT TERM
-  return "$exit_code"
-}
-
 repo_root="$(resolve_repo_root || true)"
 if [ -z "$repo_root" ]; then
   printf '%s\n' 'Murph CLI shim could not locate the repo checkout. Run \`pnpm exec tsx packages/cli/src/bin.ts setup\` or \`./scripts/setup-host.sh\` from the repo checkout to refresh the shims, or set \`MURPH_REPO_ROOT\`.' >&2
   exit 1
 fi
 
-cli_package_root="$repo_root/packages/cli"
-cli_bin_path="$cli_package_root/dist/bin.js"
-# Only gate on the built CLI entrypoint. The package/root build commands own
-# transitive artifact completeness, and hard-coding every emitted file here is brittle.
-cli_dist_ready=false
-if [ -f "$cli_bin_path" ]; then
-  cli_dist_ready=true
+cli_bin_path="$repo_root/packages/cli/dist/bin.js"
+if [ ! -f "$cli_bin_path" ]; then
+  printf '%s\n' 'Murph CLI build output is unavailable. Run \`pnpm --dir <repo> build:test-runtime:prepared\` (preferred) or \`pnpm --dir <repo> build\` from the repo checkout.' >&2
+  exit 1
 fi
 
-is_discovery_invocation() {
-  for arg in "$@"; do
-    case "$arg" in
-      --help|--schema|--llms|--llms-full)
-        return 0
-        ;;
-    esac
-  done
-
-  return 1
-}
-
-resolve_command_token() {
-  while [ "$#" -gt 0 ]; do
-    case "$1" in
-      --)
-        if [ "$#" -gt 1 ]; then
-          printf '%s\n' "$2"
-          return 0
-        fi
-        return 1
-        ;;
-      --filter-output|--format|--token-limit|--token-offset)
-        if [ "$#" -lt 2 ]; then
-          return 1
-        fi
-        shift 2
-        continue
-        ;;
-      -*)
-        ;;
-      *)
-        printf '%s\n' "$1"
-        return 0
-        ;;
-    esac
-    shift
-  done
-
-  return 1
-}
-
-command_token="$(resolve_command_token "$@" || true)"
-
-if is_discovery_invocation "$@"; then
-  if [ "$cli_dist_ready" = true ]; then
-    run_supervised env SETUP_PROGRAM_NAME='${shimName}' node "$cli_bin_path" "$@"
-    exit $?
-  fi
-fi
-
-missing_packages=()
-if [ "$cli_dist_ready" != true ]; then
-  missing_packages+=("$cli_package_root")
-fi
-
-${workspaceCheckLines}
-
-build_failed=false
-if [ "\${#missing_packages[@]}" -gt 0 ]; then
-  if [ "$command_token" = "onboard" ]; then
-    if command -v pnpm >/dev/null 2>&1; then
-      if ! pnpm --dir "$repo_root" build:test-runtime:prepared >/dev/null; then
-        build_failed=true
-      fi
-    elif command -v corepack >/dev/null 2>&1; then
-      if ! corepack pnpm --dir "$repo_root" build:test-runtime:prepared >/dev/null; then
-        build_failed=true
-      fi
-    fi
-  else
-    if command -v pnpm >/dev/null 2>&1; then
-      for package_dir in "\${missing_packages[@]}"; do
-        if ! pnpm --dir "$package_dir" build >/dev/null; then
-          build_failed=true
-          break
-        fi
-      done
-    elif command -v corepack >/dev/null 2>&1; then
-      for package_dir in "\${missing_packages[@]}"; do
-        if ! corepack pnpm --dir "$package_dir" build >/dev/null; then
-          build_failed=true
-          break
-        fi
-      done
-    fi
-  fi
-fi
-
-if [ "$build_failed" = false ] && [ -f "$cli_bin_path" ]; then
-  cli_dist_ready=true
-else
-  cli_dist_ready=false
-fi
-
-if [ "$cli_dist_ready" = true ]; then
-  run_supervised env SETUP_PROGRAM_NAME='${shimName}' node "$cli_bin_path" "$@"
-  exit $?
-fi
-
-printf '%s\n' 'Murph CLI build output is unavailable or incomplete. Run \`pnpm --dir <repo> build:test-runtime:prepared\` (preferred) or \`pnpm --dir <repo> build\` from the repo checkout.' >&2
-exit 1
+exec env SETUP_PROGRAM_NAME='${shimName}' node "$cli_bin_path" "$@"
 `
 }
 
@@ -3228,152 +3028,69 @@ test.sequential('setup updates codexCommand when provided and preserves a saved 
   }
 })
 
-test.sequential('CLI shim rebuilds missing workspace package dist outputs before launching the built CLI', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-repair-'))
+test.sequential('CLI shim execs the built CLI directly without invoking repair helpers', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-stdin-'))
   const repoRoot = path.join(tempRoot, 'repo')
   const cliBinPath = path.join(repoRoot, 'packages', 'cli', 'dist', 'bin.js')
-  const shimPath = path.join(tempRoot, 'murph')
+  const shimPath = path.join(tempRoot, 'vault-cli')
   const fakeBinDirectory = path.join(tempRoot, 'bin')
-  const childPidPath = path.join(tempRoot, 'child.pid')
-  const runtimeStateDistIndexPath = path.join(
-    repoRoot,
-    'packages',
-    'runtime-state',
-    'dist',
-    'index.js',
-  )
+  const repairMarkerPath = path.join(tempRoot, 'repair-invoked.txt')
 
   try {
     await mkdir(path.dirname(cliBinPath), { recursive: true })
-    await mkdir(path.dirname(runtimeStateDistIndexPath), { recursive: true })
-    for (const packageName of [
-      'contracts',
-      'core',
-      'device-syncd',
-      'importers',
-      'inboxd',
-      'parsers',
-      'query',
-    ]) {
-      const packageDistIndexPath = path.join(
-        repoRoot,
-        'packages',
-        packageName,
-        'dist',
-        'index.js',
-      )
-      await mkdir(path.dirname(packageDistIndexPath), { recursive: true })
-      await writeFile(
-        packageDistIndexPath,
-        'export {}\n',
-        'utf8',
-      )
-    }
-
-    await writeRequiredCliDistSupportFiles(path.join(repoRoot, 'packages', 'cli'))
-
-    await writeFile(
-      cliBinPath,
-      `import fs from 'node:fs'
-const target = new URL('../../runtime-state/dist/index.js', import.meta.url)
-if (!fs.existsSync(target)) {
-  console.error('runtime-state dist missing')
-  process.exit(42)
-}
-console.log('built-ok')
+    await writeFile(cliBinPath, 'console.log("built-ok")\n', 'utf8')
+    await writeExecutable(
+      path.join(fakeBinDirectory, 'node'),
+      `#!/usr/bin/env bash
+set -euo pipefail
+printf 'program:%s\\n' "\${SETUP_PROGRAM_NAME:-}"
+printf 'node:%s\\n' "$1"
 `,
-      'utf8',
     )
     await writeExecutable(
       path.join(fakeBinDirectory, 'pnpm'),
       `#!/usr/bin/env bash
 set -euo pipefail
-if [ "$1" = "--dir" ] && [ "$3" = "build" ]; then
-  mkdir -p "$2/dist"
-  printf '%s\\n' 'export {}' > "$2/dist/index.js"
-  exit 0
-fi
-exit 1
-`,
-    )
-    await writeExecutable(shimPath, buildExpectedCliShimScript(cliBinPath, 'murph'))
-
-    const result = await execFileAsync(shimPath, [], {
-      env: withoutNodeV8Coverage({
-        ...process.env,
-        PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
-      }),
-    })
-
-    assert.equal(result.stdout.trim(), 'built-ok')
-    await readFile(runtimeStateDistIndexPath, 'utf8')
-  } finally {
-    await rm(tempRoot, { recursive: true, force: true })
-  }
-})
-
-test.sequential('CLI shim serves discovery commands without rebuilding missing workspace dist artifacts', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-discovery-help-'))
-  const repoRoot = path.join(tempRoot, 'repo')
-  const cliPackageRoot = path.join(repoRoot, 'packages', 'cli')
-  const cliDistRoot = path.join(cliPackageRoot, 'dist')
-  const cliBinPath = path.join(cliDistRoot, 'bin.js')
-  const shimPath = path.join(tempRoot, 'vault-cli')
-  const fakeBinDirectory = path.join(tempRoot, 'bin')
-  const buildMarkerPath = path.join(tempRoot, 'build-invoked.txt')
-  const missingWorkspaceDistIndexPath = path.join(
-    repoRoot,
-    'packages',
-    'runtime-state',
-    'dist',
-    'index.js',
-  )
-
-  try {
-    await mkdir(cliDistRoot, { recursive: true })
-    for (const packageName of [
-      'contracts',
-      'core',
-      'device-syncd',
-      'importers',
-      'inboxd',
-      'parsers',
-      'query',
-    ]) {
-      const packageDistIndexPath = path.join(
-        repoRoot,
-        'packages',
-        packageName,
-        'dist',
-        'index.js',
-      )
-      await mkdir(path.dirname(packageDistIndexPath), { recursive: true })
-      await writeFile(packageDistIndexPath, 'export {}\n', 'utf8')
-    }
-
-    await writeFile(cliBinPath, `console.log('cli-help')\n`, 'utf8')
-    await writeRequiredCliDistSupportFiles(cliPackageRoot)
-
-    await writeExecutable(
-      path.join(fakeBinDirectory, 'pnpm'),
-      `#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\\n' invoked > ${JSON.stringify(buildMarkerPath)}
+printf 'repair\\n' > ${JSON.stringify(repairMarkerPath)}
 exit 23
 `,
     )
-    await writeExecutable(shimPath, buildExpectedCliShimScript(cliBinPath, 'murph'))
+    await writeExecutable(
+      path.join(fakeBinDirectory, 'corepack'),
+      `#!/usr/bin/env bash
+set -euo pipefail
+printf 'repair\\n' > ${JSON.stringify(repairMarkerPath)}
+exit 23
+`,
+    )
+    await writeExecutable(
+      shimPath,
+      buildExpectedCliShimScript(cliBinPath, 'vault-cli'),
+    )
 
-    const result = await execFileAsync(shimPath, ['assistant', 'memory', 'upsert', '--help'], {
-      env: withoutNodeV8Coverage({
-        ...process.env,
-        PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
-      }),
-    })
+    const result = await execFileAsync(
+      shimPath,
+      ['assistant', 'memory', 'upsert', '--help'],
+      {
+        env: withoutNodeV8Coverage({
+          ...process.env,
+          PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
+        }),
+      },
+    )
 
-    assert.equal(result.stdout.trim(), 'cli-help')
-    await assert.rejects(readFile(buildMarkerPath, 'utf8'), /ENOENT/u)
-    await assert.rejects(readFile(missingWorkspaceDistIndexPath, 'utf8'), /ENOENT/u)
+    const canonicalCliBinPath = path.join(
+      await realpath(repoRoot),
+      'packages',
+      'cli',
+      'dist',
+      'bin.js',
+    )
+    assert.deepEqual(result.stdout.trim().split('\n'), [
+      'program:vault-cli',
+      `node:${canonicalCliBinPath}`,
+    ])
+    await assert.rejects(readFile(repairMarkerPath, 'utf8'), /ENOENT/u)
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }
@@ -3389,29 +3106,7 @@ test.sequential('CLI shim recovers from a moved repo checkout when invoked insid
 
   try {
     await mkdir(liveCliDistRoot, { recursive: true })
-    for (const packageName of [
-      'contracts',
-      'core',
-      'device-syncd',
-      'importers',
-      'inboxd',
-      'parsers',
-      'query',
-      'runtime-state',
-    ]) {
-      const packageDistIndexPath = path.join(
-        liveRepoRoot,
-        'packages',
-        packageName,
-        'dist',
-        'index.js',
-      )
-      await mkdir(path.dirname(packageDistIndexPath), { recursive: true })
-      await writeFile(packageDistIndexPath, 'export {}\n', 'utf8')
-    }
-
     await writeFile(path.join(liveCliDistRoot, 'bin.js'), `console.log('moved-ok')\n`, 'utf8')
-    await writeRequiredCliDistSupportFiles(path.join(liveRepoRoot, 'packages', 'cli'))
     await writeExecutable(shimPath, buildExpectedCliShimScript(staleCliBinPath, 'murph'))
 
     const result = await execFileAsync(shimPath, [], {
@@ -3425,264 +3120,36 @@ test.sequential('CLI shim recovers from a moved repo checkout when invoked insid
   }
 })
 
-test.sequential('CLI shim rebuilds missing cli dist artifacts before launching the built CLI', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-cli-repair-'))
+test.sequential('CLI shim fails loudly when the built entrypoint is missing and does not try to repair it', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-missing-build-'))
   const repoRoot = path.join(tempRoot, 'repo')
-  const cliPackageRoot = path.join(repoRoot, 'packages', 'cli')
-  const cliDistRoot = path.join(cliPackageRoot, 'dist')
-  const cliSourceBinPath = path.join(cliPackageRoot, 'src', 'bin.ts')
-  const cliBinPath = path.join(cliDistRoot, 'bin.js')
+  const cliSourceBinPath = path.join(repoRoot, 'packages', 'cli', 'src', 'bin.ts')
   const shimPath = path.join(tempRoot, 'murph')
   const fakeBinDirectory = path.join(tempRoot, 'bin')
-  const rebuiltMarkerPath = path.join(tempRoot, 'cli-rebuilt.txt')
+  const repairMarkerPath = path.join(tempRoot, 'repair-invoked.txt')
 
   try {
-    await mkdir(cliDistRoot, { recursive: true })
     await mkdir(path.dirname(cliSourceBinPath), { recursive: true })
     await writeFile(cliSourceBinPath, 'console.log("source-placeholder")\n', 'utf8')
-    for (const packageName of [
-      'contracts',
-      'core',
-      'device-syncd',
-      'importers',
-      'inboxd',
-      'parsers',
-      'query',
-      'runtime-state',
-    ]) {
-      const packageDistIndexPath = path.join(
-        repoRoot,
-        'packages',
-        packageName,
-        'dist',
-        'index.js',
-      )
-      await mkdir(path.dirname(packageDistIndexPath), { recursive: true })
-      await writeFile(packageDistIndexPath, 'export {}\n', 'utf8')
-    }
-
     await writeExecutable(
       path.join(fakeBinDirectory, 'pnpm'),
       `#!/usr/bin/env bash
 set -euo pipefail
-if [ "$1" = "--dir" ] && [ "$3" = "build" ]; then
-  mkdir -p "$2/dist"
-  printf '%s\\n' "console.log('built-ok')" > "$2/dist/bin.js"
-  printf '%s\\n' rebuilt > ${JSON.stringify(rebuiltMarkerPath)}
-  exit 0
-fi
-exit 1
+printf 'repair\\n' > ${JSON.stringify(repairMarkerPath)}
+exit 23
 `,
     )
-    await writeExecutable(shimPath, buildExpectedCliShimScript(cliBinPath, 'murph'))
-
-    const result = await execFileAsync(shimPath, [], {
-      env: withoutNodeV8Coverage({
-        ...process.env,
-        PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
-      }),
-    })
-
-    assert.equal(result.stdout.trim(), 'built-ok')
-    assert.equal((await readFile(rebuiltMarkerPath, 'utf8')).trim(), 'rebuilt')
-  } finally {
-    await rm(tempRoot, { recursive: true, force: true })
-  }
-})
-
-test.sequential('CLI shim rebuilds onboard dist artifacts when the built entrypoint is missing', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-onboard-repair-'))
-  const repoRoot = path.join(tempRoot, 'repo')
-  const cliPackageRoot = path.join(repoRoot, 'packages', 'cli')
-  const cliDistRoot = path.join(cliPackageRoot, 'dist')
-  const cliSourceBinPath = path.join(cliPackageRoot, 'src', 'bin.ts')
-  const cliBinPath = path.join(cliDistRoot, 'bin.js')
-  const shimPath = path.join(tempRoot, 'murph')
-  const fakeBinDirectory = path.join(tempRoot, 'bin')
-  const rebuiltMarkerPath = path.join(tempRoot, 'setup-cli-rebuilt.txt')
-
-  try {
-    await mkdir(repoRoot, { recursive: true })
-    const canonicalRepoRoot = await realpath(repoRoot)
-    await mkdir(cliDistRoot, { recursive: true })
-    await mkdir(path.dirname(cliSourceBinPath), { recursive: true })
-    await writeFile(cliSourceBinPath, 'console.log("source-placeholder")\n', 'utf8')
-    for (const packageName of [
-      'contracts',
-      'core',
-      'device-syncd',
-      'importers',
-      'inboxd',
-      'parsers',
-      'query',
-      'runtime-state',
-    ]) {
-      const packageDistIndexPath = path.join(
-        repoRoot,
-        'packages',
-        packageName,
-        'dist',
-        'index.js',
-      )
-      await mkdir(path.dirname(packageDistIndexPath), { recursive: true })
-      await writeFile(packageDistIndexPath, 'export {}\n', 'utf8')
-    }
-
-    await writeRequiredCliDistSupportFiles(cliPackageRoot)
-
-    await writeExecutable(
-      path.join(fakeBinDirectory, 'pnpm'),
-      `#!/usr/bin/env bash
-set -euo pipefail
-if [ "$1" = "--dir" ] && [ "$2" = ${JSON.stringify(canonicalRepoRoot)} ] && [ "$3" = "build:test-runtime:prepared" ]; then
-  mkdir -p "$2/packages/cli/dist"
-  printf '%s\\n' "console.log('onboard-built-ok')" > "$2/packages/cli/dist/bin.js"
-  printf '%s\\n' rebuilt > ${JSON.stringify(rebuiltMarkerPath)}
-  exit 0
-fi
-exit 1
-`,
-    )
-    await writeExecutable(shimPath, buildExpectedCliShimScript(cliBinPath, 'murph'))
-
-    const result = await execFileAsync(shimPath, ['--format', 'json', 'onboard', '--help'], {
-      env: withoutNodeV8Coverage({
-        ...process.env,
-        PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
-      }),
-    })
-
-    assert.equal(result.stdout.trim(), 'onboard-built-ok')
-    assert.equal((await readFile(rebuiltMarkerPath, 'utf8')).trim(), 'rebuilt')
-  } finally {
-    await rm(tempRoot, { recursive: true, force: true })
-  }
-})
-
-test.sequential('CLI shim rebuilds onboard dist artifacts through corepack when the built entrypoint is missing', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-onboard-corepack-repair-'))
-  const repoRoot = path.join(tempRoot, 'repo')
-  const cliPackageRoot = path.join(repoRoot, 'packages', 'cli')
-  const cliDistRoot = path.join(cliPackageRoot, 'dist')
-  const cliSourceBinPath = path.join(cliPackageRoot, 'src', 'bin.ts')
-  const cliBinPath = path.join(cliDistRoot, 'bin.js')
-  const shimPath = path.join(tempRoot, 'murph')
-  const fakeBinDirectory = path.join(tempRoot, 'bin')
-  const rebuiltMarkerPath = path.join(tempRoot, 'setup-cli-corepack-rebuilt.txt')
-
-  try {
-    await mkdir(repoRoot, { recursive: true })
-    const canonicalRepoRoot = await realpath(repoRoot)
-    await mkdir(cliDistRoot, { recursive: true })
-    await mkdir(path.dirname(cliSourceBinPath), { recursive: true })
-    await writeFile(cliSourceBinPath, 'console.log("source-placeholder")\n', 'utf8')
-    for (const packageName of [
-      'contracts',
-      'core',
-      'device-syncd',
-      'importers',
-      'inboxd',
-      'parsers',
-      'query',
-      'runtime-state',
-    ]) {
-      const packageDistIndexPath = path.join(
-        repoRoot,
-        'packages',
-        packageName,
-        'dist',
-        'index.js',
-      )
-      await mkdir(path.dirname(packageDistIndexPath), { recursive: true })
-      await writeFile(packageDistIndexPath, 'export {}\n', 'utf8')
-    }
-
-    await writeRequiredCliDistSupportFiles(cliPackageRoot)
-
     await writeExecutable(
       path.join(fakeBinDirectory, 'corepack'),
       `#!/usr/bin/env bash
 set -euo pipefail
-if [ "$1" = "pnpm" ] && [ "$2" = "--dir" ] && [ "$3" = ${JSON.stringify(canonicalRepoRoot)} ] && [ "$4" = "build:test-runtime:prepared" ]; then
-  mkdir -p "$3/packages/cli/dist"
-  printf '%s\\n' "console.log('onboard-corepack-built-ok')" > "$3/packages/cli/dist/bin.js"
-  printf '%s\\n' rebuilt > ${JSON.stringify(rebuiltMarkerPath)}
-  exit 0
-fi
-exit 1
-`,
-    )
-    await writeExecutable(
-      path.join(fakeBinDirectory, 'node'),
-      `#!/usr/bin/env bash
-exec ${JSON.stringify(process.execPath)} "$@"
-`,
-    )
-    await writeExecutable(shimPath, buildExpectedCliShimScript(cliBinPath, 'murph'))
-
-    const result = await execFileAsync(shimPath, ['--format', 'json', 'onboard', '--help'], {
-      env: withoutNodeV8Coverage({
-        ...process.env,
-        PATH: `${fakeBinDirectory}${path.delimiter}/usr/bin${path.delimiter}/bin`,
-      }),
-    })
-
-    assert.equal(result.stdout.trim(), 'onboard-corepack-built-ok')
-    assert.equal((await readFile(rebuiltMarkerPath, 'utf8')).trim(), 'rebuilt')
-  } finally {
-    await rm(tempRoot, { recursive: true, force: true })
-  }
-})
-
-test.sequential('CLI shim fails loudly when auto-build repair fails', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-source-fallback-'))
-  const repoRoot = path.join(tempRoot, 'repo')
-  const cliPackageRoot = path.join(repoRoot, 'packages', 'cli')
-  const cliDistRoot = path.join(cliPackageRoot, 'dist')
-  const cliSourceBinPath = path.join(cliPackageRoot, 'src', 'bin.ts')
-  const shimPath = path.join(tempRoot, 'murph')
-  const fakeBinDirectory = path.join(tempRoot, 'bin')
-
-  try {
-    await mkdir(repoRoot, { recursive: true })
-    const canonicalRepoRoot = await realpath(repoRoot)
-    await mkdir(cliDistRoot, { recursive: true })
-    await mkdir(path.dirname(cliSourceBinPath), { recursive: true })
-    await writeFile(cliSourceBinPath, 'console.log("source-placeholder")\n', 'utf8')
-    for (const packageName of [
-      'contracts',
-      'core',
-      'device-syncd',
-      'importers',
-      'inboxd',
-      'parsers',
-      'query',
-      'runtime-state',
-    ]) {
-      const packageDistIndexPath = path.join(
-        repoRoot,
-        'packages',
-        packageName,
-        'dist',
-        'index.js',
-      )
-      await mkdir(path.dirname(packageDistIndexPath), { recursive: true })
-      await writeFile(packageDistIndexPath, 'export {}\n', 'utf8')
-    }
-
-    await writeExecutable(
-      path.join(fakeBinDirectory, 'pnpm'),
-      `#!/usr/bin/env bash
-set -euo pipefail
-if [ "$1" = "--dir" ] && [ "$2" = ${JSON.stringify(canonicalRepoRoot)} ] && [ "$3" = "build:test-runtime:prepared" ]; then
-  exit 23
-fi
-exit 1
+printf 'repair\\n' > ${JSON.stringify(repairMarkerPath)}
+exit 23
 `,
     )
     await writeExecutable(
       shimPath,
-      buildExpectedCliShimScript(path.join(cliDistRoot, 'bin.js'), 'murph'),
+      buildExpectedCliShimScript(path.join(repoRoot, 'packages', 'cli', 'dist', 'bin.js'), 'murph'),
     )
 
     await assert.rejects(
@@ -3692,185 +3159,15 @@ exit 1
           PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
         }),
       }),
-      /Murph CLI build output is unavailable or incomplete\./u,
+      /Murph CLI build output is unavailable\./u,
     )
+    await assert.rejects(readFile(repairMarkerPath, 'utf8'), /ENOENT/u)
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }
 })
 
-test.sequential('CLI shim fails loudly when repair succeeds but leaves onboarding dist incomplete', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-incomplete-repair-'))
-  const repoRoot = path.join(tempRoot, 'repo')
-  const cliPackageRoot = path.join(repoRoot, 'packages', 'cli')
-  const cliDistRoot = path.join(cliPackageRoot, 'dist')
-  const cliSourceBinPath = path.join(cliPackageRoot, 'src', 'bin.ts')
-  const shimPath = path.join(tempRoot, 'murph')
-  const fakeBinDirectory = path.join(tempRoot, 'bin')
-
-  try {
-    await mkdir(repoRoot, { recursive: true })
-    const canonicalRepoRoot = await realpath(repoRoot)
-    await mkdir(cliDistRoot, { recursive: true })
-    await mkdir(path.dirname(cliSourceBinPath), { recursive: true })
-    await writeFile(cliSourceBinPath, 'console.log("source-placeholder")\n', 'utf8')
-    for (const packageName of [
-      'contracts',
-      'core',
-      'device-syncd',
-      'importers',
-      'inboxd',
-      'parsers',
-      'query',
-      'runtime-state',
-    ]) {
-      const packageDistIndexPath = path.join(
-        repoRoot,
-        'packages',
-        packageName,
-        'dist',
-        'index.js',
-      )
-      await mkdir(path.dirname(packageDistIndexPath), { recursive: true })
-      await writeFile(packageDistIndexPath, 'export {}\n', 'utf8')
-    }
-
-    await writeExecutable(
-      path.join(fakeBinDirectory, 'pnpm'),
-      `#!/usr/bin/env bash
-set -euo pipefail
-if [ "$1" = "--dir" ] && [ "$2" = ${JSON.stringify(canonicalRepoRoot)} ] && [ "$3" = "build:test-runtime:prepared" ]; then
-  mkdir -p "$2/packages/cli/dist"
-  printf '%s\\n' 'module.exports = {}' > "$2/packages/cli/dist/index.js"
-  printf '%s\\n' 'module.exports = {}' > "$2/packages/cli/dist/setup-cli.js"
-  exit 0
-fi
-exit 1
-`,
-    )
-    await writeExecutable(
-      shimPath,
-      buildExpectedCliShimScript(path.join(cliDistRoot, 'bin.js'), 'murph'),
-    )
-
-    await assert.rejects(
-      execFileAsync(shimPath, ['onboard', '--dryRun', '--vault', './vault'], {
-        env: withoutNodeV8Coverage({
-          ...process.env,
-          PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
-        }),
-      }),
-      /Murph CLI build output is unavailable or incomplete\./u,
-    )
-  } finally {
-    await rm(tempRoot, { recursive: true, force: true })
-  }
-})
-
-test.sequential('CLI shim force-stops a stubborn built child after SIGINT', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-sigint-'))
-  const repoRoot = path.join(tempRoot, 'repo')
-  const cliBinPath = path.join(repoRoot, 'packages', 'cli', 'dist', 'bin.js')
-  const shimPath = path.join(tempRoot, 'murph')
-  const fakeBinDirectory = path.join(tempRoot, 'bin')
-  const childPidPath = path.join(tempRoot, 'child.pid')
-
-  try {
-    await mkdir(path.dirname(cliBinPath), { recursive: true })
-    for (const packageName of [
-      'contracts',
-      'core',
-      'device-syncd',
-      'importers',
-      'inboxd',
-      'parsers',
-      'query',
-      'runtime-state',
-    ]) {
-      const packageDistIndexPath = path.join(
-        repoRoot,
-        'packages',
-        packageName,
-        'dist',
-        'index.js',
-      )
-      await mkdir(path.dirname(packageDistIndexPath), { recursive: true })
-      await writeFile(packageDistIndexPath, 'export {}\n', 'utf8')
-    }
-
-    await writeRequiredCliDistSupportFiles(path.join(repoRoot, 'packages', 'cli'))
-
-    await writeFile(cliBinPath, 'console.log("built-ok")\n', 'utf8')
-    await writeExecutable(
-      path.join(fakeBinDirectory, 'node'),
-      `#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\\n' "$$" > ${JSON.stringify(childPidPath)}
-trap '' INT TERM
-while true; do
-  sleep 1
-done
-`,
-    )
-    await writeExecutable(shimPath, buildExpectedCliShimScript(cliBinPath, 'murph'))
-
-    const child = spawn(shimPath, [], {
-      detached: true,
-      env: withoutNodeV8Coverage({
-        ...process.env,
-        PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
-      }),
-      stdio: 'ignore',
-    })
-
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      try {
-        await readFile(childPidPath, 'utf8')
-        break
-      } catch {
-        await new Promise((resolve) => setTimeout(resolve, 50))
-      }
-    }
-
-    process.kill(-child.pid!, 'SIGINT')
-
-    const result = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
-      (resolve, reject) => {
-        const timer = setTimeout(() => {
-          process.kill(-child.pid!, 'SIGKILL')
-          reject(new Error('shim did not exit after SIGINT'))
-        }, 10000)
-
-        child.once('exit', (code, signal) => {
-          clearTimeout(timer)
-          resolve({ code, signal })
-        })
-        child.once('error', (error) => {
-          clearTimeout(timer)
-          reject(error)
-        })
-      },
-    )
-
-    const stubbornChildPid = Number.parseInt(
-      (await readFile(childPidPath, 'utf8')).trim(),
-      10,
-    )
-    let childStillAlive = true
-    try {
-      process.kill(stubbornChildPid, 0)
-    } catch {
-      childStillAlive = false
-    }
-
-    assert.equal(childStillAlive, false)
-    assert.equal(result.code === 130 || result.signal === 'SIGINT', true)
-  } finally {
-    await rm(tempRoot, { recursive: true, force: true })
-  }
-})
-
-test.sequential('CLI shim preserves piped stdin for supervised child launches', async () => {
+test.sequential('CLI shim passes piped stdin directly to the built child process', async () => {
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-stdin-'))
   const repoRoot = path.join(tempRoot, 'repo')
   const cliBinPath = path.join(repoRoot, 'packages', 'cli', 'dist', 'bin.js')
@@ -3879,28 +3176,6 @@ test.sequential('CLI shim preserves piped stdin for supervised child launches', 
 
   try {
     await mkdir(path.dirname(cliBinPath), { recursive: true })
-    for (const packageName of [
-      'contracts',
-      'core',
-      'device-syncd',
-      'importers',
-      'inboxd',
-      'parsers',
-      'query',
-      'runtime-state',
-    ]) {
-      const packageDistIndexPath = path.join(
-        repoRoot,
-        'packages',
-        packageName,
-        'dist',
-        'index.js',
-      )
-      await mkdir(path.dirname(packageDistIndexPath), { recursive: true })
-      await writeFile(packageDistIndexPath, 'export {}\n', 'utf8')
-    }
-
-    await writeRequiredCliDistSupportFiles(path.join(repoRoot, 'packages', 'cli'))
     await writeFile(cliBinPath, 'console.log("built-ok")\n', 'utf8')
     await writeExecutable(
       path.join(fakeBinDirectory, 'node'),
@@ -3929,70 +3204,6 @@ cat
     )
 
     assert.equal(result.stdout.trim(), '{')
-  } finally {
-    await rm(tempRoot, { recursive: true, force: true })
-  }
-})
-
-test.sequential('CLI shim falls back to /dev/null when stdin is closed', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-closed-stdin-'))
-  const repoRoot = path.join(tempRoot, 'repo')
-  const cliBinPath = path.join(repoRoot, 'packages', 'cli', 'dist', 'bin.js')
-  const shimPath = path.join(tempRoot, 'vault-cli')
-  const fakeBinDirectory = path.join(tempRoot, 'bin')
-
-  try {
-    await mkdir(path.dirname(cliBinPath), { recursive: true })
-    for (const packageName of [
-      'contracts',
-      'core',
-      'device-syncd',
-      'importers',
-      'inboxd',
-      'parsers',
-      'query',
-      'runtime-state',
-    ]) {
-      const packageDistIndexPath = path.join(
-        repoRoot,
-        'packages',
-        packageName,
-        'dist',
-        'index.js',
-      )
-      await mkdir(path.dirname(packageDistIndexPath), { recursive: true })
-      await writeFile(packageDistIndexPath, 'export {}\n', 'utf8')
-    }
-
-    await writeRequiredCliDistSupportFiles(path.join(repoRoot, 'packages', 'cli'))
-    await writeFile(cliBinPath, 'console.log("built-ok")\n', 'utf8')
-    await writeExecutable(
-      path.join(fakeBinDirectory, 'node'),
-      `#!/usr/bin/env bash
-set -euo pipefail
-printf 'stdin-closed-ok\\n'
-`,
-    )
-    await writeExecutable(
-      shimPath,
-      buildExpectedCliShimScript(cliBinPath, 'vault-cli'),
-    )
-
-    const result = await execFileAsync(
-      'bash',
-      [
-        '-lc',
-        `exec 0<&-; ${JSON.stringify(shimPath)} recipe upsert --input -`,
-      ],
-      {
-        env: withoutNodeV8Coverage({
-          ...process.env,
-          PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
-        }),
-      },
-    )
-
-    assert.equal(result.stdout.trim(), 'stdin-closed-ok')
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }
