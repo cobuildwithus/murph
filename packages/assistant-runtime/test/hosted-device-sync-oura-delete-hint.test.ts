@@ -42,7 +42,7 @@ describe("hosted Oura delete wake replay", () => {
               baseUrl: input.baseUrl,
               connectionId: request?.connectionId ?? null,
               fetchImpl: input.fetchImpl,
-              internalToken: input.internalToken ?? null,
+              signingSecret: input.signingSecret ?? null,
               provider: request?.provider ?? null,
               timeoutMs: input.timeoutMs ?? null,
               userId: input.boundUserId,
@@ -175,7 +175,7 @@ describe("hosted Oura delete wake replay", () => {
       timeoutMs: null,
       webControlPlane: {
         deviceSyncRuntimeBaseUrl: "https://control.example.test",
-        internalToken: "internal-token",
+        signingSecret: "internal-token",
       },
     });
 

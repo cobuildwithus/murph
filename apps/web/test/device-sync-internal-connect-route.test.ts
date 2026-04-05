@@ -54,10 +54,10 @@ describe("device sync internal connect-link route", () => {
     });
   });
 
-  it("creates a hosted device connect link for the bound execution user", async () => {
+  it("creates a hosted device connect link for the bound execution user with the dispatch signing secret", async () => {
     process.env.HOSTED_EXECUTION_CONTROL_SIGNING_SECRET = "control-secret";
     process.env.HOSTED_EXECUTION_SIGNING_SECRET = "dispatch-secret";
-    const headers = await createSignedRequestHeaders("control-secret");
+    const headers = await createSignedRequestHeaders("dispatch-secret");
     const response = await internalDeviceSyncConnectLinkRoute.POST(
       new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
         headers,
@@ -84,13 +84,13 @@ describe("device sync internal connect-link route", () => {
     });
   });
 
-  it("rejects requests signed only with the dispatch secret when a distinct control secret is configured", async () => {
+  it("rejects requests signed only with the distinct control secret", async () => {
     process.env.HOSTED_EXECUTION_CONTROL_SIGNING_SECRET = "control-secret";
     process.env.HOSTED_EXECUTION_SIGNING_SECRET = "dispatch-secret";
 
     const response = await internalDeviceSyncConnectLinkRoute.POST(
       new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
-        headers: await createSignedRequestHeaders("dispatch-secret"),
+        headers: await createSignedRequestHeaders("control-secret"),
         method: "POST",
       }),
       {

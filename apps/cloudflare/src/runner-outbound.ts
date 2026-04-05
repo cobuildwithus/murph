@@ -450,7 +450,7 @@ async function handleRunnerDeviceSyncControlRequest(input: {
     return forwardRunnerDeviceSyncConnectLinkRequest({
       env: input.env,
       provider: decodeRouteParam(connectLinkMatch.groups.provider),
-      signingSecret: input.environment.controlSigningSecret,
+      signingSecret: input.environment.dispatchSigningSecret,
       userId: input.userId,
     });
   }

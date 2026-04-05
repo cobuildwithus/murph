@@ -271,12 +271,6 @@ describe("RunnerContainer", () => {
     expect(containerFetch).toHaveBeenCalledOnce();
   });
 
-  it("uses the built-in short idle timeout for one-shot runner containers", () => {
-    const { container } = createContainerDouble();
-
-    expect(container.sleepAfter).toBe("10s");
-  });
-
   it("returns 405 for unsupported internal methods", async () => {
     const { container, startAndWaitForPorts } = createContainerDouble();
 

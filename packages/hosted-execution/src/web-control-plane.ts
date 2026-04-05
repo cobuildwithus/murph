@@ -41,7 +41,6 @@ interface HostedExecutionUserBoundWebControlPlaneRequester {
 }
 
 interface HostedExecutionUserBoundWebControlPlaneRequesterOptions {
-  authorizationToken?: string | null;
   baseUrl: string;
   boundUserId: string;
   fetchImpl?: typeof fetch;
@@ -76,7 +75,6 @@ export interface HostedExecutionProxyAiUsageClient {
 }
 
 interface HostedExecutionUserBoundRequesterResolutionInput {
-  authorizationToken?: string | null;
   baseUrl: string | null | undefined;
   boundUserId: string;
   fetchImpl?: typeof fetch;
@@ -143,6 +141,7 @@ export function resolveHostedExecutionDeviceSyncRuntimeClient(input: {
   baseUrl: string | null | undefined;
   boundUserId: string;
   fetchImpl?: typeof fetch;
+  signingSecret?: string | null;
   timeoutMs?: number | null;
 }): HostedExecutionProxyDeviceSyncRuntimeClient | null {
   const normalizedBaseUrl = input.baseUrl ? requireHostedExecutionWebControlBaseUrl(input.baseUrl) : null;
@@ -191,7 +190,7 @@ export function resolveHostedExecutionDeviceSyncConnectLinkClient(input: {
     );
   }
 
-  const signingSecret = normalizeHostedExecutionAuthorizationToken(input.signingSecret);
+  const signingSecret = normalizeHostedExecutionSigningSecret(input.signingSecret);
 
   if (!signingSecret) {
     return null;
@@ -227,6 +226,7 @@ export function resolveHostedExecutionAiUsageClient(input: {
   baseUrl: string | null | undefined;
   boundUserId: string;
   fetchImpl?: typeof fetch;
+  signingSecret?: string | null;
   timeoutMs?: number | null;
 }): HostedExecutionProxyAiUsageClient | null {
   const normalizedBaseUrl = input.baseUrl ? requireHostedExecutionWebControlBaseUrl(input.baseUrl) : null;
@@ -335,19 +335,11 @@ function createHostedExecutionProxyRequester(
 function createHostedExecutionServerRequester(
   input: HostedExecutionUserBoundWebControlPlaneRequesterOptions,
 ): HostedExecutionUserBoundWebControlPlaneRequester {
-  const authorizationToken = normalizeHostedExecutionAuthorizationToken(input.authorizationToken);
-  const signingSecret = normalizeHostedExecutionAuthorizationToken(input.signingSecret);
-
-  if (!authorizationToken && !signingSecret) {
-    throw new TypeError("Hosted web control-plane server credentials must be configured.");
-  }
-
   return createHostedExecutionUserBoundRequester({
-    authorizationToken,
     baseUrl: requireHostedExecutionWebControlBaseUrl(input.baseUrl),
     boundUserId: input.boundUserId,
     fetchImpl: input.fetchImpl,
-    signingSecret,
+    signingSecret: requireHostedExecutionSigningSecret(input.signingSecret),
     timeoutMs: input.timeoutMs ?? null,
   });
 }
@@ -371,12 +363,11 @@ function resolveHostedExecutionUserBoundRequester(
     });
   }
 
-  if (!input.authorizationToken && !input.signingSecret) {
+  if (!input.signingSecret) {
     return null;
   }
 
   return createHostedExecutionServerRequester({
-    authorizationToken: input.authorizationToken,
     baseUrl: normalizedBaseUrl,
     boundUserId: input.boundUserId,
     fetchImpl: input.fetchImpl,
@@ -397,7 +388,6 @@ function createHostedExecutionUserBoundRequester(
       path: string;
     }) {
       return requestHostedExecutionWebControlPlaneJson({
-        authorizationToken: input.authorizationToken ?? null,
         body: request.body,
         boundUserId: input.boundUserId,
         fetchImpl: input.fetchImpl,
@@ -460,7 +450,17 @@ function requireHostedExecutionWorkerProxyBaseUrl(value: string, proxyHost: stri
   return normalized;
 }
 
-function normalizeHostedExecutionAuthorizationToken(value: string | null | undefined): string | null {
+function requireHostedExecutionSigningSecret(value: string | null | undefined): string {
+  const normalized = normalizeHostedExecutionSigningSecret(value);
+
+  if (!normalized) {
+    throw new TypeError("Hosted web control-plane signingSecret must be configured.");
+  }
+
+  return normalized;
+}
+
+function normalizeHostedExecutionSigningSecret(value: string | null | undefined): string | null {
   if (typeof value !== "string") {
     return null;
   }
@@ -470,7 +470,6 @@ function normalizeHostedExecutionAuthorizationToken(value: string | null | undef
 }
 
 export async function fetchHostedExecutionWebControlPlaneResponse(input: {
-  authorizationToken?: string | null;
   baseUrl: string;
   body?: string;
   boundUserId: string;
@@ -491,20 +490,11 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
     targetUrl.search = input.search;
   }
 
-  const authorizationToken = normalizeHostedExecutionAuthorizationToken(input.authorizationToken);
-  const signingSecret = normalizeHostedExecutionAuthorizationToken(input.signingSecret);
-
-  if (authorizationToken && signingSecret) {
-    throw new TypeError(
-      "Hosted web control-plane requests must use either bearer-token auth or signed auth, not both.",
-    );
-  }
-
   const headers = buildHostedExecutionRequestHeaders({
-    authorizationToken,
     boundUserId: input.boundUserId,
     withJsonContentType: input.body !== undefined,
   });
+  const signingSecret = normalizeHostedExecutionSigningSecret(input.signingSecret);
 
   if (signingSecret) {
     const signatureHeaders = await createHostedExecutionSignatureHeaders({
@@ -530,7 +520,6 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
 }
 
 async function requestHostedExecutionWebControlPlaneJson<TResponse>(input: {
-  authorizationToken?: string | null;
   body?: Record<string, unknown>;
   boundUserId: string;
   fetchImpl?: typeof fetch;
@@ -543,7 +532,6 @@ async function requestHostedExecutionWebControlPlaneJson<TResponse>(input: {
   url: string;
 }): Promise<TResponse> {
   const response = await fetchHostedExecutionWebControlPlaneResponse({
-    authorizationToken: input.authorizationToken,
     baseUrl: input.url,
     body: input.body === undefined ? undefined : JSON.stringify(input.body),
     boundUserId: input.boundUserId,
@@ -590,17 +578,12 @@ function formatHostedExecutionErrorSuffix(payload: unknown, text: string): strin
 }
 
 function buildHostedExecutionRequestHeaders(input: {
-  authorizationToken: string | null;
   boundUserId: string;
   withJsonContentType: boolean;
 }): Headers {
   const headers = new Headers();
 
   headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.boundUserId);
-
-  if (input.authorizationToken) {
-    headers.set("authorization", `Bearer ${input.authorizationToken}`);
-  }
 
   if (input.withJsonContentType) {
     headers.set("content-type", "application/json");

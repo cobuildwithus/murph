@@ -223,6 +223,7 @@ function createHostedDeviceConnectLinkIssuer(input: {
       baseUrl: input.webControlPlane.deviceSyncRuntimeBaseUrl,
       boundUserId: input.boundUserId,
       fetchImpl: input.fetchImpl,
+      signingSecret: input.webControlPlane.signingSecret,
       timeoutMs: input.timeoutMs,
     });
 

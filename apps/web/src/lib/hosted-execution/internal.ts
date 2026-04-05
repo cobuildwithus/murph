@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
+  normalizeHostedExecutionString,
   readHostedExecutionControlSigningSecret,
   readHostedExecutionSignatureHeaders,
   verifyHostedExecutionSignature,
@@ -75,6 +76,37 @@ export async function requireHostedExecutionSignedControlRequest(request: Reques
       code: "HOSTED_EXECUTION_CONTROL_SIGNING_SECRET_REQUIRED",
       message:
         "HOSTED_EXECUTION_CONTROL_SIGNING_SECRET or HOSTED_EXECUTION_SIGNING_SECRET must be configured for signed hosted control routes.",
+      httpStatus: 500,
+    });
+  }
+
+  const payload = await request.clone().text();
+  const { signature, timestamp } = readHostedExecutionSignatureHeaders(request.headers);
+  const verified = await verifyHostedExecutionSignature({
+    method: request.method,
+    path: new URL(request.url).pathname,
+    payload,
+    secret: signingSecret,
+    signature,
+    timestamp,
+  });
+
+  if (!verified) {
+    throw hostedOnboardingError({
+      code: "HOSTED_EXECUTION_UNAUTHORIZED",
+      message: "Unauthorized hosted execution request.",
+      httpStatus: 401,
+    });
+  }
+}
+
+export async function requireHostedExecutionSignedRequest(request: Request): Promise<void> {
+  const signingSecret = normalizeHostedExecutionString(process.env.HOSTED_EXECUTION_SIGNING_SECRET);
+
+  if (!signingSecret) {
+    throw hostedOnboardingError({
+      code: "HOSTED_EXECUTION_SIGNING_SECRET_REQUIRED",
+      message: "HOSTED_EXECUTION_SIGNING_SECRET must be configured for signed hosted execution requests.",
       httpStatus: 500,
     });
   }

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   authorizeHostedExecutionInternalRequest,
+  requireHostedExecutionSignedRequest,
   requireHostedExecutionSignedControlRequest,
   requireHostedExecutionSchedulerToken,
   requireHostedExecutionUserId,
@@ -76,7 +77,29 @@ describe("hosted execution internal auth", () => {
     ).toBe("member_123");
   });
 
-  it("verifies signed hosted control requests with the control secret when configured", async () => {
+  it("verifies signed hosted execution requests with the dispatch secret even when a distinct control secret is configured", async () => {
+    process.env.HOSTED_EXECUTION_CONTROL_SIGNING_SECRET = "control-secret";
+    process.env.HOSTED_EXECUTION_SIGNING_SECRET = "dispatch-secret";
+    const timestamp = new Date().toISOString();
+    const headers = await createHostedExecutionSignatureHeaders({
+      method: "POST",
+      path: "/api/internal/device-sync/providers/whoop/connect-link",
+      payload: "",
+      secret: "dispatch-secret",
+      timestamp,
+    });
+
+    await expect(
+      requireHostedExecutionSignedRequest(
+        new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
+          headers,
+          method: "POST",
+        }),
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("rejects control-secret signatures on dispatch-signed hosted execution routes", async () => {
     process.env.HOSTED_EXECUTION_CONTROL_SIGNING_SECRET = "control-secret";
     process.env.HOSTED_EXECUTION_SIGNING_SECRET = "dispatch-secret";
     const timestamp = new Date().toISOString();
@@ -89,29 +112,7 @@ describe("hosted execution internal auth", () => {
     });
 
     await expect(
-      requireHostedExecutionSignedControlRequest(
-        new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
-          headers,
-          method: "POST",
-        }),
-      ),
-    ).resolves.toBeUndefined();
-  });
-
-  it("rejects dispatch-secret signatures when a distinct control secret is configured", async () => {
-    process.env.HOSTED_EXECUTION_CONTROL_SIGNING_SECRET = "control-secret";
-    process.env.HOSTED_EXECUTION_SIGNING_SECRET = "dispatch-secret";
-    const timestamp = new Date().toISOString();
-    const headers = await createHostedExecutionSignatureHeaders({
-      method: "POST",
-      path: "/api/internal/device-sync/providers/whoop/connect-link",
-      payload: "",
-      secret: "dispatch-secret",
-      timestamp,
-    });
-
-    await expect(
-      requireHostedExecutionSignedControlRequest(
+      requireHostedExecutionSignedRequest(
         new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
           headers,
           method: "POST",
@@ -120,13 +121,35 @@ describe("hosted execution internal auth", () => {
     ).rejects.toThrow("Unauthorized hosted execution request.");
   });
 
+  it("verifies signed hosted control requests with the dedicated control secret when configured", async () => {
+    process.env.HOSTED_EXECUTION_CONTROL_SIGNING_SECRET = "control-secret";
+    process.env.HOSTED_EXECUTION_SIGNING_SECRET = "dispatch-secret";
+    const timestamp = new Date().toISOString();
+    const headers = await createHostedExecutionSignatureHeaders({
+      method: "POST",
+      path: "/api/internal/users/member_123/run",
+      payload: "",
+      secret: "control-secret",
+      timestamp,
+    });
+
+    await expect(
+      requireHostedExecutionSignedControlRequest(
+        new Request("https://join.example.test/api/internal/users/member_123/run", {
+          headers,
+          method: "POST",
+        }),
+      ),
+    ).resolves.toBeUndefined();
+  });
+
   it("falls back to the dispatch signing secret for control routes when no separate control secret is configured", async () => {
     delete process.env.HOSTED_EXECUTION_CONTROL_SIGNING_SECRET;
     process.env.HOSTED_EXECUTION_SIGNING_SECRET = "dispatch-secret";
     const timestamp = new Date().toISOString();
     const headers = await createHostedExecutionSignatureHeaders({
       method: "POST",
-      path: "/api/internal/device-sync/providers/whoop/connect-link",
+      path: "/api/internal/users/member_123/run",
       payload: "",
       secret: "dispatch-secret",
       timestamp,
@@ -134,7 +157,7 @@ describe("hosted execution internal auth", () => {
 
     await expect(
       requireHostedExecutionSignedControlRequest(
-        new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
+        new Request("https://join.example.test/api/internal/users/member_123/run", {
           headers,
           method: "POST",
         }),

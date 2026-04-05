@@ -140,8 +140,7 @@ test("hosted device-sync sync uses the explicit wrapped fetch for worker proxy s
     timeoutMs: 5_000,
     webControlPlane: {
       deviceSyncRuntimeBaseUrl: "http://device-sync.worker",
-      internalToken: null,
-      schedulerToken: null,
+      signingSecret: null,
       usageBaseUrl: null,
     },
   });

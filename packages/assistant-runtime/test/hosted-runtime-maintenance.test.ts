@@ -115,7 +115,7 @@ beforeEach(() => {
 
 const hostedWebControlPlane = {
   deviceSyncRuntimeBaseUrl: "https://control.example.test",
-  internalToken: "internal-token",
+  signingSecret: "dispatch-secret",
 };
 
 test("hosted maintenance loop preserves the empty-vault no-op baseline after activation bootstrap", async () => {
