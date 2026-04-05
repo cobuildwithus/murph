@@ -32,16 +32,16 @@ export class RunnerBundleSync {
 
   constructor(
     private readonly bucket: R2BucketLike,
-    private readonly bundleEncryptionKey: Uint8Array,
-    private readonly bundleEncryptionKeyId: string,
-    private readonly bundleEncryptionKeysById: Readonly<Record<string, Uint8Array>>,
+    private readonly platformEnvelopeKey: Uint8Array,
+    private readonly platformEnvelopeKeyId: string,
+    private readonly platformEnvelopeKeysById: Readonly<Record<string, Uint8Array>>,
     private readonly queueStore: RunnerQueueStore,
   ) {
     this.garbageCollector = new HostedBundleGarbageCollector(
       bucket,
-      bundleEncryptionKey,
-      bundleEncryptionKeyId,
-      bundleEncryptionKeysById,
+      platformEnvelopeKey,
+      platformEnvelopeKeyId,
+      platformEnvelopeKeysById,
     );
   }
 
@@ -112,9 +112,9 @@ export class RunnerBundleSync {
   private createBundleStore() {
     return createHostedBundleStore({
       bucket: this.bucket,
-      key: this.bundleEncryptionKey,
-      keyId: this.bundleEncryptionKeyId,
-      keysById: this.bundleEncryptionKeysById,
+      key: this.platformEnvelopeKey,
+      keyId: this.platformEnvelopeKeyId,
+      keysById: this.platformEnvelopeKeysById,
     });
   }
 

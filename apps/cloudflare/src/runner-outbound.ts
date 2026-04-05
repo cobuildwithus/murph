@@ -235,9 +235,9 @@ async function handleRunnerEmailSendRequest(input: {
     config: readHostedEmailConfig(
       input.env as unknown as Readonly<Record<string, string | undefined>>,
     ),
-    key: input.environment.bundleEncryptionKey,
-    keyId: input.environment.bundleEncryptionKeyId,
-    keysById: input.environment.bundleEncryptionKeysById,
+    key: input.environment.platformEnvelopeKey,
+    keyId: input.environment.platformEnvelopeKeyId,
+    keysById: input.environment.platformEnvelopeKeysById,
     request: parseHostedEmailSendRequest(await readJsonObject(input.request)),
     userId: input.userId,
   });
@@ -567,9 +567,9 @@ async function resolveRunnerOutboundUserCryptoContext(input: {
     automationRecipientPrivateKeysById: input.environment.automationRecipientPrivateKeysById,
     automationRecipientPublicKey: input.environment.automationRecipientPublicKey,
     bucket: input.bucket,
-    envelopeEncryptionKey: input.environment.bundleEncryptionKey,
-    envelopeEncryptionKeyId: input.environment.bundleEncryptionKeyId,
-    envelopeEncryptionKeysById: input.environment.bundleEncryptionKeysById,
+    envelopeEncryptionKey: input.environment.platformEnvelopeKey,
+    envelopeEncryptionKeyId: input.environment.platformEnvelopeKeyId,
+    envelopeEncryptionKeysById: input.environment.platformEnvelopeKeysById,
   }).ensureUserCryptoContext(input.userId);
 }
 

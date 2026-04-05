@@ -25,9 +25,9 @@ export interface HostedExecutionWorkerEnvironment {
   automationRecipientPrivateJwkJson: string;
   automationRecipientPrivateKeyringJson: string | null;
   automationRecipientPublicJwkJson: string;
-  bundleEncryptionKeyBase64: string;
-  bundleEncryptionKeyId: string;
-  bundleEncryptionKeyringJson: string | null;
+  platformEnvelopeKeyBase64: string;
+  platformEnvelopeKeyId: string;
+  platformEnvelopeKeyringJson: string | null;
   controlSigningSecret: string;
   defaultAlarmDelayMs: number;
   dispatchSigningSecret: string;
@@ -126,15 +126,15 @@ export function readHostedExecutionWorkerEnvironment(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK),
       "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK",
     ),
-    bundleEncryptionKeyBase64: requireHostedExecutionString(
-      source.HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY,
-      "HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY",
+    platformEnvelopeKeyBase64: requireHostedExecutionString(
+      source.HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY,
+      "HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY",
     ),
-    bundleEncryptionKeyId: normalizeHostedExecutionString(
-      source.HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID,
+    platformEnvelopeKeyId: normalizeHostedExecutionString(
+      source.HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID,
     ) ?? "v1",
-    bundleEncryptionKeyringJson: normalizeHostedExecutionString(
-      source.HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON,
+    platformEnvelopeKeyringJson: normalizeHostedExecutionString(
+      source.HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON,
     ),
     controlSigningSecret: requireHostedExecutionString(
       readHostedExecutionControlSigningSecret(source),

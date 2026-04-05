@@ -1921,7 +1921,7 @@ describe("cloudflare worker routes", () => {
   it("routes replies to a hosted send alias back through the configured sender identity", async () => {
     const stub = createUserRunnerStub();
     const env = createWorkerEnv(stub, {
-      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID: "v2",
+      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID: "v2",
       HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
       HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
       HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph update",
@@ -1996,7 +1996,7 @@ describe("cloudflare worker routes", () => {
   it("rejects hosted replies from saved participants when owner-only authorization is in effect", async () => {
     const stub = createUserRunnerStub();
     const env = createWorkerEnv(stub, {
-      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID: "v2",
+      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID: "v2",
       HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
       HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
       HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph update",
@@ -2064,7 +2064,7 @@ describe("cloudflare worker routes", () => {
   it("rejects hosted thread replies with an ambiguous From header", async () => {
     const stub = createUserRunnerStub();
     const env = createWorkerEnv(stub, {
-      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID: "v2",
+      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID: "v2",
       HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
       HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
       HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph update",
@@ -2398,9 +2398,9 @@ async function seedHostedVerifiedSenderRoute(
       localPart: String(env.HOSTED_EMAIL_LOCAL_PART ?? ""),
       signingSecret: String(env.HOSTED_EMAIL_SIGNING_SECRET ?? ""),
     },
-    key: environment.bundleEncryptionKey,
-    keyId: environment.bundleEncryptionKeyId,
-    keysById: environment.bundleEncryptionKeysById,
+    key: environment.platformEnvelopeKey,
+    keyId: environment.platformEnvelopeKeyId,
+    keysById: environment.platformEnvelopeKeysById,
     nextVerifiedEmailAddress: emailAddress,
     previousVerifiedEmailAddress: null,
     userId,
@@ -2754,7 +2754,7 @@ async function hostedUserKeyEnvelopeObjectKeyForTest(
   );
   const userSegment = await deriveHostedStorageOpaqueId({
     length: 24,
-    rootKey: environment.bundleEncryptionKey,
+    rootKey: environment.platformEnvelopeKey,
     scope: "user-key-envelope-path",
     value: `user:${userId}`,
   });
@@ -2776,9 +2776,9 @@ async function resolveHostedUserCryptoContextForTest(
     automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
     automationRecipientPublicKey: environment.automationRecipientPublicKey,
     bucket: env.BUNDLES,
-    envelopeEncryptionKey: environment.bundleEncryptionKey,
-    envelopeEncryptionKeyId: environment.bundleEncryptionKeyId,
-    envelopeEncryptionKeysById: environment.bundleEncryptionKeysById,
+    envelopeEncryptionKey: environment.platformEnvelopeKey,
+    envelopeEncryptionKeyId: environment.platformEnvelopeKeyId,
+    envelopeEncryptionKeysById: environment.platformEnvelopeKeysById,
   }).ensureUserCryptoContext(userId);
 }
 

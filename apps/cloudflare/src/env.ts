@@ -16,14 +16,14 @@ export type HostedExecutionEnvironment = Omit<
   | "automationRecipientPrivateJwkJson"
   | "automationRecipientPrivateKeyringJson"
   | "automationRecipientPublicJwkJson"
-  | "bundleEncryptionKeyBase64"
-  | "bundleEncryptionKeyringJson"
+  | "platformEnvelopeKeyBase64"
+  | "platformEnvelopeKeyringJson"
 > & {
   automationRecipientPrivateKey: HostedUserRecipientPrivateKeyJwk;
   automationRecipientPrivateKeysById: Readonly<Record<string, HostedUserRecipientPrivateKeyJwk>>;
   automationRecipientPublicKey: HostedUserRecipientPublicKeyJwk;
-  bundleEncryptionKey: Uint8Array;
-  bundleEncryptionKeysById: Readonly<Record<string, Uint8Array>>;
+  platformEnvelopeKey: Uint8Array;
+  platformEnvelopeKeysById: Readonly<Record<string, Uint8Array>>;
 };
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
@@ -35,11 +35,11 @@ export function readHostedExecutionEnvironment(
     automationRecipientPrivateJwkJson,
     automationRecipientPrivateKeyringJson,
     automationRecipientPublicJwkJson,
-    bundleEncryptionKeyBase64,
-    bundleEncryptionKeyringJson,
+    platformEnvelopeKeyBase64,
+    platformEnvelopeKeyringJson,
     ...environment
   } = readHostedExecutionWorkerEnvironment(source);
-  const bundleEncryptionKey = decodeBase64Key(bundleEncryptionKeyBase64);
+  const platformEnvelopeKey = decodeBase64Key(platformEnvelopeKeyBase64);
   const automationRecipientPrivateKey = parseHostedUserRecipientPrivateKeyJwk(
     parseRequiredJsonObject(automationRecipientPrivateJwkJson, "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK"),
     "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK",
@@ -58,25 +58,25 @@ export function readHostedExecutionEnvironment(
       keyringJson: automationRecipientPrivateKeyringJson,
     }),
     automationRecipientPublicKey,
-    bundleEncryptionKey,
-    bundleEncryptionKeysById: decodeHostedExecutionBundleKeyring({
-      bundleEncryptionKey,
-      bundleEncryptionKeyId: environment.bundleEncryptionKeyId,
-      bundleEncryptionKeyringJson,
+    platformEnvelopeKey,
+    platformEnvelopeKeysById: decodeHostedExecutionPlatformEnvelopeKeyring({
+      platformEnvelopeKey,
+      platformEnvelopeKeyId: environment.platformEnvelopeKeyId,
+      platformEnvelopeKeyringJson,
     }),
   };
 }
 
-function decodeHostedExecutionBundleKeyring(input: {
-  bundleEncryptionKey: Uint8Array;
-  bundleEncryptionKeyId: string;
-  bundleEncryptionKeyringJson: string | null;
+function decodeHostedExecutionPlatformEnvelopeKeyring(input: {
+  platformEnvelopeKey: Uint8Array;
+  platformEnvelopeKeyId: string;
+  platformEnvelopeKeyringJson: string | null;
 }): Readonly<Record<string, Uint8Array>> {
   const keysById: Record<string, Uint8Array> = {};
-  if (input.bundleEncryptionKeyringJson) {
+  if (input.platformEnvelopeKeyringJson) {
     const parsed = parseRequiredJsonObject(
-      input.bundleEncryptionKeyringJson,
-      "HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON",
+      input.platformEnvelopeKeyringJson,
+      "HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON",
     );
 
     for (const [rawKeyId, encodedKey] of Object.entries(parsed)) {
@@ -84,13 +84,13 @@ function decodeHostedExecutionBundleKeyring(input: {
 
       if (keyId.length === 0) {
         throw new TypeError(
-          "HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON contains a blank keyId.",
+          "HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON contains a blank keyId.",
         );
       }
 
       if (typeof encodedKey !== "string" || encodedKey.trim().length === 0) {
         throw new TypeError(
-          `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON entry ${keyId} must be a non-empty base64 string.`,
+          `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON entry ${keyId} must be a non-empty base64 string.`,
         );
       }
 
@@ -98,13 +98,13 @@ function decodeHostedExecutionBundleKeyring(input: {
     }
   }
 
-  const configuredCurrentKey = keysById[input.bundleEncryptionKeyId];
+  const configuredCurrentKey = keysById[input.platformEnvelopeKeyId];
 
   if (!configuredCurrentKey) {
-    keysById[input.bundleEncryptionKeyId] = input.bundleEncryptionKey;
-  } else if (!sameBytes(configuredCurrentKey, input.bundleEncryptionKey)) {
+    keysById[input.platformEnvelopeKeyId] = input.platformEnvelopeKey;
+  } else if (!sameBytes(configuredCurrentKey, input.platformEnvelopeKey)) {
     throw new TypeError(
-      `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID ${input.bundleEncryptionKeyId} must match the current bundle encryption key.`,
+      `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID ${input.platformEnvelopeKeyId} must match the current platform envelope key.`,
     );
   }
 

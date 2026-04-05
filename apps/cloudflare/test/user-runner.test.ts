@@ -53,9 +53,9 @@ describe("HostedUserRunner", () => {
       [TEST_AUTOMATION_RECIPIENT_KEY_ID]: TEST_AUTOMATION_RECIPIENT_PRIVATE_JWK,
     },
     automationRecipientPublicKey: TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK,
-    bundleEncryptionKey: Uint8Array.from({ length: 32 }, () => 7),
-    bundleEncryptionKeyId: "v1",
-    bundleEncryptionKeysById: {
+    platformEnvelopeKey: Uint8Array.from({ length: 32 }, () => 7),
+    platformEnvelopeKeyId: "v1",
+    platformEnvelopeKeysById: {
       v1: Uint8Array.from({ length: 32 }, () => 7),
     },
     controlToken: null,
@@ -77,8 +77,8 @@ describe("HostedUserRunner", () => {
   it("roundtrips encrypted bundle payloads through object storage", async () => {
     const bundleStore = createHostedBundleStore({
       bucket: bucket.api,
-      key: environment.bundleEncryptionKey,
-      keyId: environment.bundleEncryptionKeyId,
+      key: environment.platformEnvelopeKey,
+      keyId: environment.platformEnvelopeKeyId,
     });
     const plaintext = new TextEncoder().encode("vault bundle");
 
@@ -94,13 +94,13 @@ describe("HostedUserRunner", () => {
   it("fails clearly when reading hosted objects encrypted with a different key id", async () => {
     const bundleStore = createHostedBundleStore({
       bucket: bucket.api,
-      key: environment.bundleEncryptionKey,
+      key: environment.platformEnvelopeKey,
       keyId: "v2",
     });
     const plaintext = new TextEncoder().encode("vault bundle");
     const legacyRef = await createHostedBundleStore({
       bucket: bucket.api,
-      key: environment.bundleEncryptionKey,
+      key: environment.platformEnvelopeKey,
       keyId: "v1",
     }).writeBundle("vault", plaintext);
 
@@ -159,8 +159,8 @@ describe("HostedUserRunner", () => {
 
       const artifactStore = createHostedArtifactStore({
         bucket: bucket.api,
-        key: environment.bundleEncryptionKey,
-        keyId: environment.bundleEncryptionKeyId,
+        key: environment.platformEnvelopeKey,
+        keyId: environment.platformEnvelopeKeyId,
         userId: "member_gc",
       });
       const previousVaultBundle = await snapshotHostedBundleRoots({
@@ -191,8 +191,8 @@ describe("HostedUserRunner", () => {
       });
       const bundleStore = createHostedBundleStore({
         bucket: bucket.api,
-        key: environment.bundleEncryptionKey,
-        keyId: environment.bundleEncryptionKeyId,
+        key: environment.platformEnvelopeKey,
+        keyId: environment.platformEnvelopeKeyId,
       });
       const [previousArtifact] = listHostedBundleArtifacts({
         bytes: previousVaultBundle!,
@@ -216,8 +216,8 @@ describe("HostedUserRunner", () => {
 
       const collector = new HostedBundleGarbageCollector(
         bucket.api,
-        environment.bundleEncryptionKey,
-        environment.bundleEncryptionKeyId,
+        environment.platformEnvelopeKey,
+        environment.platformEnvelopeKeyId,
       );
 
       await collector.cleanupBundleTransition({
@@ -238,7 +238,7 @@ describe("HostedUserRunner", () => {
       expect(bucket.keys()).toContain(previousVaultRef.key);
       expect(bucket.keys()).not.toContain(
         await artifactObjectKey(
-          environment.bundleEncryptionKey,
+          environment.platformEnvelopeKey,
           "member_gc",
           previousArtifact!.ref.sha256,
         ),
@@ -268,8 +268,8 @@ describe("HostedUserRunner", () => {
 
       const artifactStore = createHostedArtifactStore({
         bucket: bucket.api,
-        key: environment.bundleEncryptionKey,
-        keyId: environment.bundleEncryptionKeyId,
+        key: environment.platformEnvelopeKey,
+        keyId: environment.platformEnvelopeKeyId,
         userId: "member_gc_same_ref",
       });
       const vaultBundle = await snapshotHostedBundleRoots({
@@ -291,8 +291,8 @@ describe("HostedUserRunner", () => {
       });
       const bundleStore = createHostedBundleStore({
         bucket: bucket.api,
-        key: environment.bundleEncryptionKey,
-        keyId: environment.bundleEncryptionKeyId,
+        key: environment.platformEnvelopeKey,
+        keyId: environment.platformEnvelopeKeyId,
       });
       const [artifact] = listHostedBundleArtifacts({
         bytes: vaultBundle!,
@@ -305,8 +305,8 @@ describe("HostedUserRunner", () => {
       };
       const collector = new HostedBundleGarbageCollector(
         bucket.api,
-        environment.bundleEncryptionKey,
-        environment.bundleEncryptionKeyId,
+        environment.platformEnvelopeKey,
+        environment.platformEnvelopeKeyId,
       );
 
       await collector.cleanupBundleTransition({
@@ -323,7 +323,7 @@ describe("HostedUserRunner", () => {
 
       expect(bucket.keys()).toContain(
         await artifactObjectKey(
-          environment.bundleEncryptionKey,
+          environment.platformEnvelopeKey,
           "member_gc_same_ref",
           artifact!.ref.sha256,
         ),
@@ -520,8 +520,8 @@ describe("HostedUserRunner", () => {
   it("roundtrips committed execution journal records through object storage", async () => {
     const journalStore = createHostedExecutionJournalStore({
       bucket: bucket.api,
-      key: environment.bundleEncryptionKey,
-      keyId: environment.bundleEncryptionKeyId,
+      key: environment.platformEnvelopeKey,
+      keyId: environment.platformEnvelopeKeyId,
     });
     const committedResult = {
       bundleRefs: {
@@ -555,8 +555,8 @@ describe("HostedUserRunner", () => {
         vault: null,
       },
       eventId: "evt_duplicate_commit",
-      key: environment.bundleEncryptionKey,
-      keyId: environment.bundleEncryptionKeyId,
+      key: environment.platformEnvelopeKey,
+      keyId: environment.platformEnvelopeKeyId,
       payload: {
         bundles: {
           agentState: Buffer.from("agent-state").toString("base64"),
@@ -578,8 +578,8 @@ describe("HostedUserRunner", () => {
           vault: null,
         },
         eventId: "evt_duplicate_commit",
-        key: environment.bundleEncryptionKey,
-        keyId: environment.bundleEncryptionKeyId,
+        key: environment.platformEnvelopeKey,
+        keyId: environment.platformEnvelopeKeyId,
         payload: {
           bundles: {
             agentState: Buffer.from("agent-state").toString("base64"),
@@ -605,8 +605,8 @@ describe("HostedUserRunner", () => {
         vault: null,
       },
       eventId: "evt_finalize_same_ref",
-      key: environment.bundleEncryptionKey,
-      keyId: environment.bundleEncryptionKeyId,
+      key: environment.platformEnvelopeKey,
+      keyId: environment.platformEnvelopeKeyId,
       payload: {
         bundles: {
           agentState: Buffer.from("agent-state").toString("base64"),
@@ -622,8 +622,8 @@ describe("HostedUserRunner", () => {
 
     const journalStore = createHostedExecutionJournalStore({
       bucket: bucket.api,
-      key: environment.bundleEncryptionKey,
-      keyId: environment.bundleEncryptionKeyId,
+      key: environment.platformEnvelopeKey,
+      keyId: environment.platformEnvelopeKeyId,
     });
     const existing = await journalStore.readCommittedResult("member_123", "evt_finalize_same_ref");
     if (!existing?.bundleRefs.agentState || !existing.bundleRefs.vault) {
@@ -650,8 +650,8 @@ describe("HostedUserRunner", () => {
     const finalized = await persistHostedExecutionFinalBundles({
       bucket: bucket.api,
       eventId: "evt_finalize_same_ref",
-      key: environment.bundleEncryptionKey,
-      keyId: environment.bundleEncryptionKeyId,
+      key: environment.platformEnvelopeKey,
+      keyId: environment.platformEnvelopeKeyId,
       payload: {
         bundles: {
           agentState: Buffer.from("agent-state").toString("base64"),
@@ -1037,10 +1037,10 @@ describe("HostedUserRunner", () => {
   it("recovers finalized committed results after automation-key rotation via the user root key envelope", async () => {
     const rotatedEnvironment = {
       ...environment,
-      bundleEncryptionKey: Uint8Array.from({ length: 32 }, () => 9),
-      bundleEncryptionKeyId: "v2",
-      bundleEncryptionKeysById: {
-        v1: environment.bundleEncryptionKey,
+      platformEnvelopeKey: Uint8Array.from({ length: 32 }, () => 9),
+      platformEnvelopeKeyId: "v2",
+      platformEnvelopeKeysById: {
+        v1: environment.platformEnvelopeKey,
         v2: Uint8Array.from({ length: 32 }, () => 9),
       },
     };
@@ -1262,9 +1262,9 @@ describe("HostedUserRunner", () => {
 
     const workerStore = createHostedDispatchPayloadStore({
       bucket: bucket.api,
-      key: environment.bundleEncryptionKey,
-      keyId: environment.bundleEncryptionKeyId,
-      keysById: environment.bundleEncryptionKeysById,
+      key: environment.platformEnvelopeKey,
+      keyId: environment.platformEnvelopeKeyId,
+      keysById: environment.platformEnvelopeKeysById,
     });
     const crypto = await resolveHostedUserCryptoContextForTest({
       bucket,
@@ -2776,8 +2776,8 @@ describe("HostedUserRunner", () => {
     await expect(
       createHostedExecutionJournalStore({
         bucket: bucket.api,
-        key: environment.bundleEncryptionKey,
-        keyId: environment.bundleEncryptionKeyId,
+        key: environment.platformEnvelopeKey,
+        keyId: environment.platformEnvelopeKeyId,
       }).readCommittedResult(dispatch.event.userId, dispatch.eventId),
     ).resolves.toBeNull();
   });
@@ -2964,7 +2964,7 @@ describe("HostedUserRunner", () => {
     });
     expect(bucket.keys()).toEqual(expect.arrayContaining([
       await userEnvObjectKeyForTest(crypto.rootKey, "member_123"),
-      await userKeyEnvelopeObjectKeyForTest(environment.bundleEncryptionKey, "member_123"),
+      await userKeyEnvelopeObjectKeyForTest(environment.platformEnvelopeKey, "member_123"),
     ]));
     await expect(runner.getUserEnvStatus("member_123")).resolves.toEqual({
       configuredUserEnvKeys: ["OPENAI_API_KEY", "XAI_API_KEY"],
@@ -2977,18 +2977,18 @@ describe("HostedUserRunner", () => {
     const previousEnvironment = {
       ...environment,
       allowedUserEnvKeys: "OPENAI_API_KEY",
-      bundleEncryptionKey: previousKey,
-      bundleEncryptionKeyId: "v1",
-      bundleEncryptionKeysById: {
+      platformEnvelopeKey: previousKey,
+      platformEnvelopeKeyId: "v1",
+      platformEnvelopeKeysById: {
         v1: previousKey,
       },
     };
     const rotatedEnvironment = {
       ...environment,
       allowedUserEnvKeys: "OPENAI_API_KEY",
-      bundleEncryptionKey: Uint8Array.from({ length: 32 }, () => 7),
-      bundleEncryptionKeyId: "v2",
-      bundleEncryptionKeysById: {
+      platformEnvelopeKey: Uint8Array.from({ length: 32 }, () => 7),
+      platformEnvelopeKeyId: "v2",
+      platformEnvelopeKeysById: {
         v1: previousKey,
         v2: Uint8Array.from({ length: 32 }, () => 7),
       },
@@ -3343,9 +3343,9 @@ async function seedRunnerQueueState(
       automationRecipientPrivateKey: JsonWebKey;
       automationRecipientPrivateKeysById: Readonly<Record<string, JsonWebKey>>;
       automationRecipientPublicKey: JsonWebKey;
-      bundleEncryptionKey: Uint8Array;
-      bundleEncryptionKeyId: string;
-      bundleEncryptionKeysById?: Readonly<Record<string, Uint8Array>>;
+      platformEnvelopeKey: Uint8Array;
+      platformEnvelopeKeyId: string;
+      platformEnvelopeKeysById?: Readonly<Record<string, Uint8Array>>;
     };
     inFlight?: boolean;
     lastError?: string | null;
@@ -3679,8 +3679,8 @@ function createRunnerSuccessPayload(input: Partial<{
 async function createCommittedRunnerSuccessResponse(input: {
   bucket: ReturnType<typeof createBucket>;
   environment: {
-    bundleEncryptionKey: Uint8Array;
-    bundleEncryptionKeyId: string;
+    platformEnvelopeKey: Uint8Array;
+    platformEnvelopeKeyId: string;
   };
   init?: RequestInit;
   payload?: ReturnType<typeof createRunnerSuccessPayload>;
@@ -3710,9 +3710,9 @@ function readDispatchedEventIds(fetchMock: ReturnType<typeof vi.fn>): string[] {
 async function commitResultForRunnerRequest(input: {
   bucket: ReturnType<typeof createBucket>;
   environment: {
-    bundleEncryptionKey: Uint8Array;
-    bundleEncryptionKeyId: string;
-    bundleEncryptionKeysById?: Readonly<Record<string, Uint8Array>>;
+    platformEnvelopeKey: Uint8Array;
+    platformEnvelopeKeyId: string;
+    platformEnvelopeKeysById?: Readonly<Record<string, Uint8Array>>;
   };
   payload: {
     bundles: {
@@ -3765,9 +3765,9 @@ async function commitResultForRunnerRequest(input: {
 async function finalizeResultForRunnerRequest(input: {
   bucket: ReturnType<typeof createBucket>;
   environment: {
-    bundleEncryptionKey: Uint8Array;
-    bundleEncryptionKeyId: string;
-    bundleEncryptionKeysById?: Readonly<Record<string, Uint8Array>>;
+    platformEnvelopeKey: Uint8Array;
+    platformEnvelopeKeyId: string;
+    platformEnvelopeKeysById?: Readonly<Record<string, Uint8Array>>;
   };
   payload: {
     bundles: {
@@ -3811,9 +3811,9 @@ async function finalizeResultForRunnerRequest(input: {
 async function resolveHostedUserCryptoContextForTest(input: {
   bucket: ReturnType<typeof createBucket>;
   environment: {
-    bundleEncryptionKey: Uint8Array;
-    bundleEncryptionKeyId: string;
-    bundleEncryptionKeysById?: Readonly<Record<string, Uint8Array>>;
+    platformEnvelopeKey: Uint8Array;
+    platformEnvelopeKeyId: string;
+    platformEnvelopeKeysById?: Readonly<Record<string, Uint8Array>>;
   };
   userId: string;
 }) {
@@ -3823,8 +3823,8 @@ async function resolveHostedUserCryptoContextForTest(input: {
     automationRecipientPrivateKeysById: input.environment.automationRecipientPrivateKeysById,
     automationRecipientPublicKey: input.environment.automationRecipientPublicKey,
     bucket: input.bucket.api,
-    envelopeEncryptionKey: input.environment.bundleEncryptionKey,
-    envelopeEncryptionKeyId: input.environment.bundleEncryptionKeyId,
-    envelopeEncryptionKeysById: input.environment.bundleEncryptionKeysById,
+    envelopeEncryptionKey: input.environment.platformEnvelopeKey,
+    envelopeEncryptionKeyId: input.environment.platformEnvelopeKeyId,
+    envelopeEncryptionKeysById: input.environment.platformEnvelopeKeysById,
   }).ensureUserCryptoContext(input.userId);
 }

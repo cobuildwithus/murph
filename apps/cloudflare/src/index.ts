@@ -618,9 +618,9 @@ async function handleUserEmailAddressRoute(
   const address = await createHostedEmailUserAddress({
     bucket: context.env.BUNDLES,
     config,
-    key: context.environment.bundleEncryptionKey,
-    keyId: context.environment.bundleEncryptionKeyId,
-    keysById: context.environment.bundleEncryptionKeysById,
+    key: context.environment.platformEnvelopeKey,
+    keyId: context.environment.platformEnvelopeKeyId,
+    keysById: context.environment.platformEnvelopeKeysById,
     userId,
   });
 
@@ -656,9 +656,9 @@ async function handleSharePackRoute(
   const shareId = decodeRouteParam(encodedShareId);
   const store = createHostedShareStore({
     bucket: context.env.BUNDLES,
-    key: context.environment.bundleEncryptionKey,
-    keyId: context.environment.bundleEncryptionKeyId,
-    keysById: context.environment.bundleEncryptionKeysById,
+    key: context.environment.platformEnvelopeKey,
+    keyId: context.environment.platformEnvelopeKeyId,
+    keysById: context.environment.platformEnvelopeKeysById,
   });
 
   if (context.request.method === "GET") {
@@ -893,9 +893,9 @@ async function handleHostedEmailIngress(
     envelopeFrom: message.from,
     hasRepeatedHeaderFrom: headerFrom.repeated,
     headerFrom: headerFrom.value ?? parsedMessage.from,
-    key: environment.bundleEncryptionKey,
-    keyId: environment.bundleEncryptionKeyId,
-    keysById: environment.bundleEncryptionKeysById,
+    key: environment.platformEnvelopeKey,
+    keyId: environment.platformEnvelopeKeyId,
+    keysById: environment.platformEnvelopeKeysById,
     to: message.to,
   });
 
@@ -985,9 +985,9 @@ async function resolveHostedExecutionUserCryptoContext(input: {
     automationRecipientPrivateKeysById: input.environment.automationRecipientPrivateKeysById,
     automationRecipientPublicKey: input.environment.automationRecipientPublicKey,
     bucket: input.bucket,
-    envelopeEncryptionKey: input.environment.bundleEncryptionKey,
-    envelopeEncryptionKeyId: input.environment.bundleEncryptionKeyId,
-    envelopeEncryptionKeysById: input.environment.bundleEncryptionKeysById,
+    envelopeEncryptionKey: input.environment.platformEnvelopeKey,
+    envelopeEncryptionKeyId: input.environment.platformEnvelopeKeyId,
+    envelopeEncryptionKeysById: input.environment.platformEnvelopeKeysById,
   }).ensureUserCryptoContext(input.userId);
 }
 

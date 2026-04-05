@@ -378,9 +378,9 @@ async function resolveHostedUserCryptoContext(userId: string) {
     automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
     automationRecipientPublicKey: environment.automationRecipientPublicKey,
     bucket: (env as { BUNDLES: never }).BUNDLES,
-    envelopeEncryptionKey: environment.bundleEncryptionKey,
-    envelopeEncryptionKeyId: environment.bundleEncryptionKeyId,
-    envelopeEncryptionKeysById: environment.bundleEncryptionKeysById,
+    envelopeEncryptionKey: environment.platformEnvelopeKey,
+    envelopeEncryptionKeyId: environment.platformEnvelopeKeyId,
+    envelopeEncryptionKeysById: environment.platformEnvelopeKeysById,
   }).ensureUserCryptoContext(userId);
 }
 

@@ -49,7 +49,7 @@ describe("opaque storage path rotation", () => {
     expect(bucket.deleted).not.toContain(objectKey);
   });
 
-  it("keeps per-user env readable and clearable across bundle-key rotation", async () => {
+  it("keeps per-user env readable and clearable across platform-envelope-key rotation", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const oldKey = createTestRootKey(5);
     const nextKey = createTestRootKey(6);
@@ -125,7 +125,7 @@ describe("opaque storage path rotation", () => {
     expect(bucket.deleted).not.toContain(objectKey);
   });
 
-  it("keeps per-user artifacts readable and deletable across bundle-key rotation", async () => {
+  it("keeps per-user artifacts readable and deletable across platform-envelope-key rotation", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const oldKey = createTestRootKey(11);
     const nextKey = createTestRootKey(12);
@@ -213,7 +213,7 @@ describe("opaque storage path rotation", () => {
     expect(bucket.deleted).not.toContain(objectKey);
   });
 
-  it("keeps execution journals readable and deletable across bundle-key rotation", async () => {
+  it("keeps execution journals readable and deletable across platform-envelope-key rotation", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const oldKey = createTestRootKey(13);
     const nextKey = createTestRootKey(14);
@@ -259,7 +259,7 @@ describe("opaque storage path rotation", () => {
     expect(bucket.deleted.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("keeps referenced dispatch payload blobs readable across bundle-key rotation", async () => {
+  it("keeps referenced dispatch payload blobs readable across platform-envelope-key rotation", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const oldKey = createTestRootKey(7);
     const nextKey = createTestRootKey(8);
@@ -295,7 +295,7 @@ describe("opaque storage path rotation", () => {
     expect(bucket.deleted.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("keeps hosted raw email messages readable across bundle-key rotation", async () => {
+  it("keeps hosted raw email messages readable across platform-envelope-key rotation", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const oldKey = createTestRootKey(9);
     const nextKey = createTestRootKey(10);

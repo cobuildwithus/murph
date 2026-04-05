@@ -13,9 +13,9 @@ import {
 export class HostedBundleGarbageCollector {
   constructor(
     private readonly bucket: R2BucketLike,
-    private readonly bundleEncryptionKey: Uint8Array,
-    private readonly bundleEncryptionKeyId: string,
-    private readonly bundleEncryptionKeysById?: Readonly<Record<string, Uint8Array>>,
+    private readonly platformEnvelopeKey: Uint8Array,
+    private readonly platformEnvelopeKeyId: string,
+    private readonly platformEnvelopeKeysById?: Readonly<Record<string, Uint8Array>>,
   ) {}
 
   async cleanupBundleTransition(input: {
@@ -29,9 +29,9 @@ export class HostedBundleGarbageCollector {
 
     const bundleStore = createHostedBundleStore({
       bucket: this.bucket,
-      key: this.bundleEncryptionKey,
-      keyId: this.bundleEncryptionKeyId,
-      keysById: this.bundleEncryptionKeysById,
+      key: this.platformEnvelopeKey,
+      keyId: this.platformEnvelopeKeyId,
+      keysById: this.platformEnvelopeKeysById,
     });
 
     await this.cleanupRemovedArtifacts({
@@ -66,9 +66,9 @@ export class HostedBundleGarbageCollector {
     );
     const artifactStore = createHostedArtifactStore({
       bucket: this.bucket,
-      key: this.bundleEncryptionKey,
-      keyId: this.bundleEncryptionKeyId,
-      keysById: this.bundleEncryptionKeysById,
+      key: this.platformEnvelopeKey,
+      keyId: this.platformEnvelopeKeyId,
+      keysById: this.platformEnvelopeKeysById,
       userId: input.userId,
     });
 
