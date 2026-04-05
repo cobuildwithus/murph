@@ -34,7 +34,10 @@ import {
 } from "@murphai/hosted-execution";
 
 import type { R2BucketLike } from "./bundle-store.js";
-import { createHostedExecutionDispatchPayloadStore } from "./dispatch-payload-store.js";
+import {
+  createHostedExecutionDispatchPayloadStore,
+  type HostedDispatchPayloadStore,
+} from "./dispatch-payload-store.js";
 import { createHostedDeviceSyncRuntimeStore } from "./device-sync-runtime-store.ts";
 import { createHostedPendingUsageStore } from "./usage-store.ts";
 import { HostedGatewayProjectionStore } from "./gateway-store.js";
@@ -121,7 +124,7 @@ export class HostedUserRunner {
     ).runnerContainerNamespace ?? null,
   ) {
     this.runnerContainerNamespace = runnerContainerNamespace;
-    const dispatchPayloadStore = createHostedExecutionDispatchPayloadStore({
+    const dispatchPayloadParserStore = createHostedExecutionDispatchPayloadStore({
       bucket,
       key: env.bundleEncryptionKey,
       keyId: env.bundleEncryptionKeyId,
@@ -138,27 +141,64 @@ export class HostedUserRunner {
       envelopeEncryptionKeysById: env.bundleEncryptionKeysById,
     });
     this.userKeyStore = userKeyStore;
+    const runner = this;
+    const dispatchPayloadStore: HostedDispatchPayloadStore = {
+      deleteDispatchPayload: async (ref) => {
+        if (!bucket.delete) {
+          return;
+        }
+
+        await bucket.delete(ref.key);
+      },
+
+      deleteStoredDispatchPayload: async (payloadJson) => {
+        const dispatchRef = dispatchPayloadParserStore.readStoredDispatchRef(payloadJson);
+
+        if (!dispatchRef) {
+          return;
+        }
+
+        await (await runner.resolveUserDispatchPayloadStore(dispatchRef.userId))
+          .deleteStoredDispatchPayload(payloadJson);
+      },
+
+      readDispatchPayload: async (ref) => {
+        const userId = await runner.tryReadBoundUserId();
+        if (!userId) {
+          throw new Error("Hosted runner user is not initialized.");
+        }
+
+        return (await runner.resolveUserDispatchPayloadStore(userId)).readDispatchPayload(ref);
+      },
+
+      readStoredDispatch: async (payloadJson) => {
+        const dispatchRef = dispatchPayloadParserStore.readStoredDispatchRef(payloadJson);
+        if (!dispatchRef) {
+          return dispatchPayloadParserStore.readStoredDispatch(payloadJson);
+        }
+
+        return (await runner.resolveUserDispatchPayloadStore(dispatchRef.userId))
+          .readStoredDispatch(payloadJson);
+      },
+
+      readStoredDispatchRef(payloadJson) {
+        return dispatchPayloadParserStore.readStoredDispatchRef(payloadJson);
+      },
+
+      writeDispatchPayload: async (dispatch) => {
+        return (await runner.resolveUserDispatchPayloadStore(dispatch.event.userId))
+          .writeDispatchPayload(dispatch);
+      },
+
+      writeStoredDispatch: async (dispatch) => {
+        return (await runner.resolveUserDispatchPayloadStore(dispatch.event.userId))
+          .writeStoredDispatch(dispatch);
+      },
+    };
     this.queueStore = new RunnerQueueStore(
       state,
       dispatchPayloadStore,
-      async (payloadJson) => {
-        try {
-          return await dispatchPayloadStore.readStoredDispatch(payloadJson);
-        } catch (error) {
-          const dispatchRef = dispatchPayloadStore.readStoredDispatchRef(payloadJson);
-          if (!dispatchRef) {
-            throw error;
-          }
-
-          const crypto = await userKeyStore.ensureUserCryptoContext(dispatchRef.userId);
-          return createHostedExecutionDispatchPayloadStore({
-            bucket,
-            key: crypto.rootKey,
-            keyId: crypto.rootKeyId,
-            keysById: crypto.keysById,
-          }).readStoredDispatch(payloadJson);
-        }
-      },
+      async (payloadJson) => dispatchPayloadStore.readStoredDispatch(payloadJson),
     );
     this.scheduler = new RunnerScheduler(this.queueStore, state, env.defaultAlarmDelayMs);
   }
@@ -227,6 +267,19 @@ export class HostedUserRunner {
 
     this.runnerStores = stores;
     return stores;
+  }
+
+  private async resolveUserDispatchPayloadStore(userId: string): Promise<HostedDispatchPayloadStore> {
+    const crypto = this.runnerStores?.userId === userId
+      ? this.runnerStores.crypto
+      : await this.userKeyStore.ensureUserCryptoContext(userId);
+
+    return createHostedExecutionDispatchPayloadStore({
+      bucket: this.bucket,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
+    });
   }
 
   private async syncDeviceSyncRuntimeSnapshotFromDispatch(
@@ -1022,6 +1075,18 @@ export class HostedUserRunner {
 
   private async requireBoundUserId(): Promise<string> {
     return (await this.queueStore.readState()).userId;
+  }
+
+  private async tryReadBoundUserId(): Promise<string | null> {
+    if (this.runnerStores?.userId) {
+      return this.runnerStores.userId;
+    }
+
+    try {
+      return (await this.queueStore.readState()).userId;
+    } catch {
+      return null;
+    }
   }
 
   private async withEventTransitionLock<T>(eventId: string, run: () => Promise<T>): Promise<T> {

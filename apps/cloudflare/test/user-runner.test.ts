@@ -6,6 +6,7 @@ import path from "node:path";
 import { beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 import { createGatewayConversationSessionKey } from "@murphai/gateway-core";
+import { deriveHostedExecutionErrorCode } from "@murphai/hosted-execution";
 import {
   createHostedUserRootKeyEnvelope,
   generateHostedUserRecipientKeyPair,
@@ -1238,6 +1239,53 @@ describe("HostedUserRunner", () => {
     expect(status.lastEventId).toBe("evt_native_container");
     expect(status.nextWakeAt).toBe("2026-03-27T18:00:00.000Z");
     expectHostedBundleKeys(bucket.keys(), ["agent-state", "vault"]);
+  });
+
+  it("stores queued dispatch payload blobs under the per-user root key", async () => {
+    const firstRun = createDeferred<Response>();
+    const fetchMock = vi.fn().mockImplementationOnce(async () => firstRun.promise);
+    vi.stubGlobal("fetch", fetchMock);
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    const dispatch = createDispatch("evt_root_key_payload");
+
+    const dispatchPromise = runner.dispatch(dispatch);
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    const sql = storage.state.storage.sql;
+    if (!sql) {
+      throw new Error("Test storage.sql is required.");
+    }
+
+    const payloadKey = sql.exec<{ payload_key: string }>(
+      "SELECT payload_key FROM pending_events WHERE event_id = ?",
+      dispatch.eventId,
+    ).one().payload_key;
+
+    const workerStore = createHostedDispatchPayloadStore({
+      bucket: bucket.api,
+      key: environment.bundleEncryptionKey,
+      keyId: environment.bundleEncryptionKeyId,
+      keysById: environment.bundleEncryptionKeysById,
+    });
+    const crypto = await resolveHostedUserCryptoContextForTest({
+      bucket,
+      environment,
+      userId: dispatch.event.userId,
+    });
+    const userStore = createHostedDispatchPayloadStore({
+      bucket: bucket.api,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
+    });
+
+    await expect(workerStore.readDispatchPayload({ key: payloadKey })).rejects.toThrow();
+    await expect(userStore.readDispatchPayload({ key: payloadKey })).resolves.toEqual(dispatch);
+
+    firstRun.resolve(new Response("runner failed", { status: 503 }));
+    await dispatchPromise;
   });
 
   it("sends forwarded env through the per-job runtime payload instead of the container start envelope", async () => {
@@ -3276,6 +3324,10 @@ async function seedRunnerQueueState(
     backpressuredEventIds?: string[];
     bucket: ReturnType<typeof createBucket>;
     environment: {
+      automationRecipientKeyId: string;
+      automationRecipientPrivateKey: JsonWebKey;
+      automationRecipientPrivateKeysById: Readonly<Record<string, JsonWebKey>>;
+      automationRecipientPublicKey: JsonWebKey;
       bundleEncryptionKey: Uint8Array;
       bundleEncryptionKeyId: string;
       bundleEncryptionKeysById?: Readonly<Record<string, Uint8Array>>;
@@ -3335,9 +3387,13 @@ async function seedRunnerQueueState(
 
   sql.exec("DELETE FROM pending_events");
   sql.exec("DELETE FROM consumed_events");
+  sql.exec("DELETE FROM backpressured_events");
   sql.exec("DELETE FROM poisoned_events");
   sql.exec("DELETE FROM runner_bundle_slots");
   sql.exec("DELETE FROM runner_meta");
+
+  const seedErrorCode = input.lastErrorCode
+    ?? (input.lastError ? deriveHostedExecutionErrorCode(input.lastError) : null);
 
   sql.exec(
     `INSERT INTO runner_meta (
@@ -3345,31 +3401,19 @@ async function seedRunnerQueueState(
       user_id,
       activated,
       in_flight,
-      last_error,
       last_error_at,
       last_error_code,
-      last_event_id,
       last_run_at,
-      next_wake_at,
-      retrying_event_id,
-      backpressured_event_ids_json,
-      run_json,
-      timeline_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      next_wake_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     1,
     input.userId,
     input.activated ? 1 : 0,
     input.inFlight ? 1 : 0,
-    input.lastError ?? null,
     input.lastErrorAt ?? null,
-    input.lastErrorCode ?? null,
-    input.lastEventId ?? null,
+    seedErrorCode,
     input.lastRunAt ?? null,
     input.nextWakeAt ?? null,
-    input.retryingEventId ?? null,
-    JSON.stringify(input.backpressuredEventIds ?? []),
-    input.run ? JSON.stringify(input.run) : null,
-    JSON.stringify(input.timeline ?? []),
   );
 
   sql.exec(
@@ -3383,11 +3427,16 @@ async function seedRunnerQueueState(
     0,
   );
 
+  const dispatchPayloadCrypto = await resolveHostedUserCryptoContextForTest({
+    bucket: input.bucket,
+    environment: input.environment,
+    userId: input.userId,
+  });
   const dispatchPayloadStore = createHostedDispatchPayloadStore({
     bucket: input.bucket.api,
-    key: input.environment.bundleEncryptionKey,
-    keyId: input.environment.bundleEncryptionKeyId,
-    keysById: input.environment.bundleEncryptionKeysById,
+    key: dispatchPayloadCrypto.rootKey,
+    keyId: dispatchPayloadCrypto.rootKeyId,
+    keysById: dispatchPayloadCrypto.keysById,
   });
 
   for (const pendingEvent of input.pendingEvents ?? []) {
@@ -3401,14 +3450,27 @@ async function seedRunnerQueueState(
         attempts,
         available_at,
         enqueued_at,
-        last_error
+        last_error_code
       ) VALUES (?, ?, ?, ?, ?, ?)`,
       pendingEvent.dispatch.eventId,
       payloadRef.key,
       pendingEvent.attempts,
       pendingEvent.availableAt,
       pendingEvent.enqueuedAt,
-      pendingEvent.lastError,
+      pendingEvent.lastError ? deriveHostedExecutionErrorCode(pendingEvent.lastError) : null,
+    );
+  }
+
+  for (const [index, eventId] of (input.backpressuredEventIds ?? []).entries()) {
+    sql.exec(
+      `INSERT INTO backpressured_events (
+        event_id,
+        rejected_at
+      ) VALUES (?, ?)`,
+      eventId,
+      input.lastErrorAt
+        ?? input.lastRunAt
+        ?? new Date(Date.UTC(2026, 2, 26, 12, 0, index)).toISOString(),
     );
   }
 
@@ -3417,12 +3479,33 @@ async function seedRunnerQueueState(
       `INSERT INTO poisoned_events (
         event_id,
         poisoned_at,
-        last_error
+        last_error_code
       ) VALUES (?, ?, ?)`,
       poisonedEvent.eventId,
       poisonedEvent.poisonedAt,
-      poisonedEvent.lastError,
+      deriveHostedExecutionErrorCode(poisonedEvent.lastError),
     );
+  }
+
+  if (input.lastEventId) {
+    const isAlreadyTracked = (input.pendingEvents ?? []).some(
+      (pendingEvent) => pendingEvent.dispatch.eventId === input.lastEventId,
+    ) || (input.poisonedEvents ?? []).some(
+      (poisonedEvent) => poisonedEvent.eventId === input.lastEventId,
+    ) || (input.backpressuredEventIds ?? []).includes(input.lastEventId);
+
+    if (!isAlreadyTracked) {
+      sql.exec(
+        `INSERT INTO consumed_events (
+          event_id,
+          recorded_at,
+          expires_at
+        ) VALUES (?, ?, ?)`,
+        input.lastEventId,
+        input.lastRunAt ?? input.lastErrorAt ?? "2026-03-26T12:00:00.000Z",
+        "2026-04-25T12:00:00.000Z",
+      );
+    }
   }
 }
 
