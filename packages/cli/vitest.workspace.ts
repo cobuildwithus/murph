@@ -19,6 +19,8 @@ const cliVitestMaxWorkers = resolveMurphVitestMaxWorkers();
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/assistantd": "../assistantd/src/index.ts",
   "@murphai/assistant-core": "../assistant-core/src/index.ts",
+  "@murphai/assistant-cli": "../assistant-cli/src/index.ts",
+  "@murphai/setup-cli": "../setup-cli/src/index.ts",
   "@murphai/contracts": "../contracts/src/index.ts",
   "@murphai/core": "../core/src/index.ts",
   "@murphai/device-syncd": "../device-syncd/src/index.ts",

@@ -1,0 +1,24 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "composite": false,
+    "incremental": false
+  },
+  "references": [
+    {
+      "path": "../assistant-core"
+    },
+    {
+      "path": "../assistant-cli"
+    }
+  ],
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts"
+  ],
+  "exclude": [
+    "dist"
+  ]
+}

@@ -17,6 +17,12 @@
       "path": "../assistant-core"
     },
     {
+      "path": "../assistant-cli"
+    },
+    {
+      "path": "../setup-cli"
+    },
+    {
       "path": "../core/tsconfig.build.json"
     },
     {

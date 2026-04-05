@@ -41,7 +41,16 @@
       "path": "./packages/parsers"
     },
     {
+      "path": "./packages/assistant-cli"
+    },
+    {
+      "path": "./packages/setup-cli"
+    },
+    {
       "path": "./packages/cli"
+    },
+    {
+      "path": "./packages/openclaw"
     },
     {
       "path": "./packages/assistant-runtime"

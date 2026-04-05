@@ -72,9 +72,9 @@ const runtimeMocks = vi.hoisted(() => ({
   runAssistantChat: vi.fn(),
 }))
 
-vi.mock('../src/assistant-runtime.js', async () => {
-  const actual = await vi.importActual<typeof import('../src/assistant-runtime.js')>(
-    '../src/assistant-runtime.js',
+vi.mock('@murphai/assistant-cli/assistant-runtime', async () => {
+  const actual = await vi.importActual<typeof import('@murphai/assistant-cli/assistant-runtime')>(
+    '@murphai/assistant-cli/assistant-runtime',
   )
 
   return {

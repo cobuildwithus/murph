@@ -35,7 +35,18 @@ pnpm add -g @murphai/murph@latest
 murph onboard
 ```
 
-`@murphai/murph` is the full local Murph package. The repo implementation lives in `packages/cli`, but that is a maintainer detail rather than the user-facing install story.
+`@murphai/murph` is the full local Murph package. The repo implementation now splits the published shell in `packages/cli` away from `packages/assistant-cli` and `packages/setup-cli`, but that is a maintainer detail rather than the user-facing install story.
+
+## OpenClaw integration
+
+If you already use OpenClaw, install the first-party Murph OpenClaw bundle after onboarding:
+
+```bash
+openclaw plugins install @murphai/openclaw
+openclaw gateway restart
+```
+
+That bundle intentionally stays vault-first. It ships a Murph skill that teaches OpenClaw to use the existing `vault-cli` surface against your configured Murph vault through OpenClaw's built-in `exec` tool, rather than creating a second Murph assistant runtime inside OpenClaw.
 
 ## From this repo
 
@@ -104,12 +115,15 @@ The result is a system you can inspect with normal filesystem tools while still 
 | `packages/parsers` | Local-first attachment parsing and derived artifact publication. |
 | `packages/query` | Read helpers, summaries, list/search helpers, export-pack generation, and the pure derived-knowledge parser/search/index helpers. |
 | `packages/device-syncd` | Local wearable/device OAuth, webhook, and reconcile daemon. |
-| `packages/assistant-core` | Headless local-only assistant/inbox/vault/operator-config boundary for non-CLI consumers plus the shared derived-knowledge service and assistant-native knowledge tools. |
+| `packages/assistant-core` | Headless local-only assistant/inbox/vault/operator-config boundary for non-CLI consumers plus the shared derived-knowledge service and shared workout/intervention usecases. |
+| `packages/assistant-cli` | CLI-only assistant wrappers, assistant commands, terminal logging, and Ink chat UI. |
+| `packages/setup-cli` | CLI-only onboarding, host setup, and setup-wizard package. |
 | `packages/gateway-core` | Headless transport-neutral gateway boundary. |
 | `packages/gateway-local` | Local vault-backed gateway runtime and projection store. |
 | `packages/assistant-runtime` | Headless hosted execution surface used by Cloudflare runner paths. |
 | `packages/assistantd` | Local assistant daemon with a loopback-only bearer-authenticated control plane. |
 | `packages/cli` | The published `@murphai/murph` package, exposing the `murph` / `vault-cli` binaries and the main operator surface. |
+| `packages/openclaw` | The published OpenClaw-compatible bundle that teaches OpenClaw to use `vault-cli` directly against the configured Murph vault. |
 | `apps/web` | Hosted Next.js control plane for onboarding, billing, OAuth, webhooks, and execution dispatch/outbox. |
 | `apps/cloudflare` | Hosted execution plane for signed internal dispatch, per-user coordination, encrypted hosted bundles, and container-backed runs. |
 | `fixtures` and `e2e` | Deterministic fixtures and smoke coverage. |

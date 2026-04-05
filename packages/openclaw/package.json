@@ -1,0 +1,36 @@
+{
+  "name": "@murphai/openclaw",
+  "version": "0.1.15",
+  "private": false,
+  "type": "module",
+  "license": "GPL-3.0-only",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cobuildwithus/murph"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "skills",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
+    "test": "vitest run --config vitest.config.ts",
+    "prepack": "pnpm build"
+  },
+  "engines": {
+    "node": ">=22.16.0"
+  }
+}

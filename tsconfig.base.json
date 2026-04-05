@@ -91,6 +91,18 @@
       "@murphai/parsers/*": [
         "packages/parsers/src/*"
       ],
+      "@murphai/assistant-cli": [
+        "packages/assistant-cli/src/index.ts"
+      ],
+      "@murphai/assistant-cli/*": [
+        "packages/assistant-cli/src/*"
+      ],
+      "@murphai/setup-cli": [
+        "packages/setup-cli/src/index.ts"
+      ],
+      "@murphai/setup-cli/*": [
+        "packages/setup-cli/src/*"
+      ],
       "@murphai/assistant-runtime": [
         "packages/assistant-runtime/src/index.ts"
       ],

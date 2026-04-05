@@ -12,6 +12,8 @@ const baseSmokeImportPaths = [
   "packages/messaging-ingress/dist/index.js",
   "packages/runtime-state/dist/index.js",
   "packages/assistant-core/dist/index.js",
+  "packages/assistant-cli/dist/index.js",
+  "packages/setup-cli/dist/index.js",
   "packages/core/dist/index.js",
   "packages/importers/dist/index.js",
   "packages/importers/dist/core-port.js",

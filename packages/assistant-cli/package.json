@@ -1,0 +1,113 @@
+{
+  "name": "@murphai/assistant-cli",
+  "version": "0.1.15",
+  "private": false,
+  "type": "module",
+  "license": "GPL-3.0-only",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cobuildwithus/murph"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./assistant-runtime": {
+      "types": "./dist/assistant-runtime.d.ts",
+      "default": "./dist/assistant-runtime.js"
+    },
+    "./assistant-chat-ink": {
+      "types": "./dist/assistant-chat-ink.d.ts",
+      "default": "./dist/assistant-chat-ink.js"
+    },
+    "./assistant-daemon-client": {
+      "types": "./dist/assistant-daemon-client.d.ts",
+      "default": "./dist/assistant-daemon-client.js"
+    },
+    "./commands/assistant": {
+      "types": "./dist/commands/assistant.d.ts",
+      "default": "./dist/commands/assistant.js"
+    },
+    "./run-terminal-logging": {
+      "types": "./dist/run-terminal-logging.d.ts",
+      "default": "./dist/run-terminal-logging.js"
+    },
+    "./assistant/automation": {
+      "types": "./dist/assistant/automation.d.ts",
+      "default": "./dist/assistant/automation.js"
+    },
+    "./assistant/cron": {
+      "types": "./dist/assistant/cron.d.ts",
+      "default": "./dist/assistant/cron.js"
+    },
+    "./assistant/doctor": {
+      "types": "./dist/assistant/doctor.d.ts",
+      "default": "./dist/assistant/doctor.js"
+    },
+    "./assistant/doctor-security": {
+      "types": "./dist/assistant/doctor-security.d.ts",
+      "default": "./dist/assistant/doctor-security.js"
+    },
+    "./assistant/outbox": {
+      "types": "./dist/assistant/outbox.d.ts",
+      "default": "./dist/assistant/outbox.js"
+    },
+    "./assistant/provider-catalog": {
+      "types": "./dist/assistant/provider-catalog.d.ts",
+      "default": "./dist/assistant/provider-catalog.js"
+    },
+    "./assistant/service": {
+      "types": "./dist/assistant/service.d.ts",
+      "default": "./dist/assistant/service.js"
+    },
+    "./assistant/status": {
+      "types": "./dist/assistant/status.d.ts",
+      "default": "./dist/assistant/status.js"
+    },
+    "./assistant/stop": {
+      "types": "./dist/assistant/stop.d.ts",
+      "default": "./dist/assistant/stop.js"
+    },
+    "./assistant/store": {
+      "types": "./dist/assistant/store.d.ts",
+      "default": "./dist/assistant/store.js"
+    },
+    "./assistant/*": {
+      "types": "./dist/assistant/*.d.ts",
+      "default": "./dist/assistant/*.js"
+    },
+    "./commands/*": {
+      "types": "./dist/commands/*.d.ts",
+      "default": "./dist/commands/*.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.json --force",
+    "typecheck": "tsc -p tsconfig.typecheck.json --pretty false",
+    "test": "pnpm exec vitest run --passWithNoTests --config vitest.config.ts --no-coverage"
+  },
+  "dependencies": {
+    "@murphai/assistant-core": "workspace:*",
+    "@murphai/assistantd": "workspace:*",
+    "@murphai/runtime-state": "workspace:*",
+    "incur": "0.3.13",
+    "ink": "^6.8.0",
+    "react": "^19.2.4"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14"
+  },
+  "engines": {
+    "node": ">=22.16.0"
+  }
+}
