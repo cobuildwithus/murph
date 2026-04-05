@@ -9,6 +9,15 @@ import {
 describe("RunnerContainer", () => {
   it("starts the container, waits for the port, forwards the runner request, and tears the container down after the run", async () => {
     const resultPayload = createRunnerResult();
+    const getState = vi.fn()
+      .mockResolvedValueOnce({
+        lastChange: Date.now(),
+        status: "stopped",
+      })
+      .mockResolvedValueOnce({
+        lastChange: Date.now(),
+        status: "running",
+      });
     const { container, containerFetch, destroy, setOutboundByHosts, startAndWaitForPorts } = createContainerDouble({
       containerFetch: vi.fn(async () => new Response(JSON.stringify(resultPayload), {
         headers: {
@@ -16,10 +25,7 @@ describe("RunnerContainer", () => {
         },
         status: 200,
       })),
-      getState: vi.fn(async () => ({
-        lastChange: Date.now(),
-        status: "running",
-      })),
+      getState,
     });
 
     const response = await container.invoke({
@@ -118,6 +124,60 @@ describe("RunnerContainer", () => {
     });
   });
 
+  it("destroys any leftover running instance before starting a new invocation", async () => {
+    const getState = vi.fn()
+      .mockResolvedValueOnce({
+        lastChange: Date.now(),
+        status: "running",
+      })
+      .mockResolvedValueOnce({
+        lastChange: Date.now(),
+        status: "running",
+      });
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+      getState,
+    });
+
+    await container.invoke({
+      job: {
+        request: createRunnerRequest("evt_replaces_stale_instance"),
+      },
+      runnerControlToken: "runner-token",
+      timeoutMs: 12_345,
+      userId: "member_123",
+    });
+
+    expect(destroy).toHaveBeenCalledTimes(2);
+    expect(destroy.mock.invocationCallOrder[0]).toBeLessThan(
+      startAndWaitForPorts.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+  });
+
+  it("treats stale-instance state lookup failures as best-effort cleanup and still starts the run", async () => {
+    const getState = vi.fn()
+      .mockRejectedValueOnce(new Error("state unavailable"))
+      .mockResolvedValueOnce({
+        lastChange: Date.now(),
+        status: "running",
+      });
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+      getState,
+    });
+
+    const response = await container.invoke({
+      job: {
+        request: createRunnerRequest("evt_state_lookup_failure"),
+      },
+      runnerControlToken: "runner-token",
+      timeoutMs: 12_345,
+      userId: "member_123",
+    });
+
+    expect(response).toEqual(createRunnerResult());
+    expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
   it("forwards the hosted run context through the container invoke boundary", async () => {
     const { containerFetch, container } = createContainerDouble();
     const run = {
@@ -209,6 +269,12 @@ describe("RunnerContainer", () => {
     expect(response).toEqual(createRunnerResult());
     expect(startAndWaitForPorts).toHaveBeenCalledOnce();
     expect(containerFetch).toHaveBeenCalledOnce();
+  });
+
+  it("uses the built-in short idle timeout for one-shot runner containers", () => {
+    const { container } = createContainerDouble();
+
+    expect(container.sleepAfter).toBe("10s");
   });
 
   it("returns 405 for unsupported internal methods", async () => {

@@ -39,6 +39,29 @@ describe("handleRunnerOutboundRequest", () => {
     });
   });
 
+  it("rejects internal worker proxy traffic when the per-run proxy token does not match", async () => {
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://device-sync.worker/api/internal/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          provider: "oura",
+        }),
+        headers: {
+          [RUNNER_PROXY_TOKEN_HEADER]: "proxy-tokez",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      createRunnerOutboundEnv(),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unauthorized",
+    });
+  });
+
   it("handles device-sync runtime requests locally and binds them to the authenticated user", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
       headers: {

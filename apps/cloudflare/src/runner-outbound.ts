@@ -924,6 +924,19 @@ function decodeRouteParam(value: string): string {
   return decodeURIComponent(value);
 }
 
+function timingSafeEquals(left: string, right: string): boolean {
+  const leftBytes = new TextEncoder().encode(left);
+  const rightBytes = new TextEncoder().encode(right);
+  const maxLength = Math.max(leftBytes.length, rightBytes.length);
+  let mismatch = leftBytes.length ^ rightBytes.length;
+
+  for (let index = 0; index < maxLength; index += 1) {
+    mismatch |= (leftBytes[index] ?? 0) ^ (rightBytes[index] ?? 0);
+  }
+
+  return mismatch === 0;
+}
+
 function requireRunnerInternalProxyAuthorization(
   request: Request,
   hostname: string,
@@ -939,7 +952,8 @@ function requireRunnerInternalProxyAuthorization(
     }, 503);
   }
 
-  if (request.headers.get(HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER) !== expectedToken) {
+  const providedToken = request.headers.get(HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER);
+  if (!providedToken || !timingSafeEquals(providedToken, expectedToken)) {
     return json({
       error: "Unauthorized",
     }, 401);

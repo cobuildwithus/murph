@@ -123,6 +123,33 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
+  it("rejects unauthorized run requests before decoding the body", async () => {
+    const server = await startHostedContainerEntrypoint({
+      controlToken: "runner-token",
+      port: 0,
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
+      body: "{]",
+      headers: {
+        authorization: "Bearer runner-tokez",
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unauthorized",
+    });
+  });
+
   it("returns a stable invalid request error when the run body is not an object", async () => {
     const server = await startHostedContainerEntrypoint({
       controlToken: "runner-token",

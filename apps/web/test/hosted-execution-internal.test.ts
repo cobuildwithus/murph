@@ -2,6 +2,7 @@ import { createHostedExecutionSignatureHeaders } from "@murphai/hosted-execution
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  authorizeHostedExecutionInternalRequest,
   requireHostedExecutionSignedControlRequest,
   requireHostedExecutionSchedulerToken,
   requireHostedExecutionUserId,
@@ -40,6 +41,21 @@ describe("hosted execution internal auth", () => {
         new Request("https://join.example.test/api/internal/hosted-execution/outbox/cron"),
       ),
     ).toThrow("HOSTED_EXECUTION_SCHEDULER_TOKENS must be configured for scheduled hosted execution drains.");
+  });
+
+  it("accepts configured scheduler bearer tokens after normalizing the authorization header", () => {
+    process.env.HOSTED_EXECUTION_SCHEDULER_TOKENS = "token-one, token-two";
+
+    expect(() =>
+      authorizeHostedExecutionInternalRequest({
+        acceptedToken: "scheduler",
+        request: new Request("https://join.example.test/api/internal/hosted-execution/outbox/cron", {
+          headers: {
+            authorization: "  Bearer token-two  ",
+          },
+        }),
+      }),
+    ).not.toThrow();
   });
 
   it("requires the bound hosted execution user header for user-scoped internal routes", () => {
