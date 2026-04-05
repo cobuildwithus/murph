@@ -2376,19 +2376,19 @@ async function issueHostedShareLink(input: {
   senderMemberId?: string | null
 }) {
   const baseUrl = normalizeHostedShareApiBaseUrl(
-    process.env.HOSTED_SHARE_API_BASE_URL
-      ?? process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL
-      ?? null,
+    process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL ?? null,
   )
   const token = readHostedShareApiToken(process.env.HOSTED_SHARE_INTERNAL_TOKENS ?? null)
 
   if (!baseUrl || !token) {
     throw new Error(
-      'Hosted share link creation requires HOSTED_SHARE_API_BASE_URL or HOSTED_ONBOARDING_PUBLIC_BASE_URL plus HOSTED_SHARE_INTERNAL_TOKENS in the assistant environment.',
+      'Hosted share link creation requires HOSTED_ONBOARDING_PUBLIC_BASE_URL plus HOSTED_SHARE_INTERNAL_TOKENS in the assistant environment.',
     )
   }
 
-  const response = await fetch(`${baseUrl}/api/hosted-share/internal/create`, {
+  const requestUrl = new URL('/api/hosted-share/internal/create', baseUrl).toString()
+
+  const response = await fetch(requestUrl, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${token}`,

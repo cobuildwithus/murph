@@ -42,7 +42,7 @@ describe("hosted onboarding landing helpers", () => {
     ).toBe("https://join.example.test/install.sh");
     expect(
       resolveHostedInstallScriptUrl(
-        createProcessEnv({ NEXT_PUBLIC_SITE_URL: "https://murph.example.test/app" }),
+        createProcessEnv({ HOSTED_WEB_BASE_URL: "https://murph.example.test/app" }),
       ),
     ).toBe("https://murph.example.test/install.sh");
     expect(
