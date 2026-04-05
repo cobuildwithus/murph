@@ -142,7 +142,7 @@ describe("buildHostedRunnerContainerEnv", () => {
     });
   });
 
-  it("preserves hosted automation per-user env", () => {
+  it("preserves hosted automation per-user env while dropping operator-only keys", () => {
     expect(filterHostedRunnerUserEnv({
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       DEEPSEEK_API_KEY: "deepseek-user",
@@ -151,7 +151,6 @@ describe("buildHostedRunnerContainerEnv", () => {
       VENICE_API_KEY: "venice-user",
       XAI_API_KEY: "xai-user",
     })).toEqual({
-      FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       DEEPSEEK_API_KEY: "deepseek-user",
       HF_TOKEN: "hf-user",
       OPENAI_API_KEY: "sk-user",

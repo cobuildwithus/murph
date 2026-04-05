@@ -1,17 +1,32 @@
 import {
   HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
   readHostedAssistantApiKeyEnvName,
-} from "@murphai/assistant-core";
+} from "@murphai/assistant-runtime/hosted-assistant-env";
 import {
   readHostedEmailCapabilities,
 } from "@murphai/hosted-execution";
+
+const OPERATOR_ONLY_RUNNER_BINARY_ENV_KEYS = [
+  "FFMPEG_COMMAND",
+  "PDFTOTEXT_COMMAND",
+  "WHISPER_COMMAND",
+  "WHISPER_MODEL_PATH",
+] as const;
+
+const HOSTED_USER_ENV_PROCESS_CONTROL_KEYS = [
+  "DYLD_INSERT_LIBRARIES",
+  "DYLD_LIBRARY_PATH",
+  "LD_LIBRARY_PATH",
+  "LD_PRELOAD",
+  "NODE_OPTIONS",
+  "NODE_PATH",
+] as const;
 
 const DEFAULT_ALLOWED_USER_ENV_KEYS = [
   "ANTHROPIC_API_KEY",
   "BRAVE_API_KEY",
   "CEREBRAS_API_KEY",
   "DEEPSEEK_API_KEY",
-  "FFMPEG_COMMAND",
   "FIREWORKS_API_KEY",
   "GOOGLE_API_KEY",
   "GOOGLE_GENERATIVE_AI_API_KEY",
@@ -28,16 +43,15 @@ const DEFAULT_ALLOWED_USER_ENV_KEYS = [
   "NGC_API_KEY",
   "OPENAI_API_KEY",
   "OPENROUTER_API_KEY",
-  "PDFTOTEXT_COMMAND",
   "PERPLEXITY_API_KEY",
   "TOGETHER_API_KEY",
   "VENICE_API_KEY",
-  "WHISPER_COMMAND",
-  "WHISPER_MODEL_PATH",
   "XAI_API_KEY",
 ] as const;
 
 const DISALLOWED_USER_ENV_KEYS = new Set([
+  ...OPERATOR_ONLY_RUNNER_BINARY_ENV_KEYS,
+  ...HOSTED_USER_ENV_PROCESS_CONTROL_KEYS,
   "HOME",
   "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID",
   "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK",
@@ -140,6 +154,8 @@ export function isHostedUserEnvKeyAllowed(
     ...parseHostedEnvCsvList(source.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS),
   ]);
 
+  // Hosted per-user env is allowed to carry per-user credentials and identity hints,
+  // but never executable selectors or process-control variables that steer the runner.
   return allowedKeys.has(key);
 }
 

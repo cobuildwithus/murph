@@ -187,7 +187,7 @@ describe("cloudflare worker runtime suite", () => {
     });
   });
 
-  it("rejects removed and unknown hosted user env keys through direct Durable Object RPC", async () => {
+  it("rejects removed, operator-only, and unknown hosted user env keys through direct Durable Object RPC", async () => {
     const userId = "member_control_env_reject";
     const stub = getUserRunnerStub(userId);
     await expect(stub.bootstrapUser(userId)).resolves.toEqual({ userId });
@@ -198,7 +198,9 @@ describe("cloudflare worker runtime suite", () => {
         env: {
           AGENTMAIL_API_BASE_URL: "https://legacy-mail.example.test/v0",
           AGENTMAIL_TIMEOUT_MS: "5000",
+          FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
           FFMPEG_THREADS: "2",
+          NODE_OPTIONS: "--require /tmp/evil-loader.js",
           PARSER_FFMPEG_PATH: "/usr/local/bin/ffmpeg",
         },
         mode: "merge",
@@ -215,12 +217,11 @@ describe("cloudflare worker runtime suite", () => {
 
     await expect(stub.updateUserEnv({
       env: {
-        FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
         OPENAI_API_KEY: "sk-user",
       },
       mode: "merge",
     })).resolves.toEqual({
-      configuredUserEnvKeys: ["FFMPEG_COMMAND", "OPENAI_API_KEY"],
+      configuredUserEnvKeys: ["OPENAI_API_KEY"],
       userId,
     });
   });
