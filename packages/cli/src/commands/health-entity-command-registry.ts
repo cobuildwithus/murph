@@ -87,7 +87,7 @@ function createHealthEntityCrudConfig(
     hints: descriptor.command.hints,
     listFilterCapabilities: descriptor.query.genericListFilterCapabilities,
     listStatusDescription: descriptor.command.listStatusDescription,
-    noun: descriptor.command.noun,
+    noun: descriptor.noun,
     outputs: {
       list: healthListResultSchema,
       scaffold: createHealthScaffoldResultSchema(descriptor.core.scaffoldNoun),
@@ -95,7 +95,7 @@ function createHealthEntityCrudConfig(
       upsert: createHealthUpsertResultSchema(descriptor),
     },
     payloadFile: descriptor.command.payloadFile,
-    pluralNoun: descriptor.command.pluralNoun,
+    pluralNoun: descriptor.plural,
     services: bindCrudServices(services, descriptor),
     showId: {
       ...descriptor.command.showId,

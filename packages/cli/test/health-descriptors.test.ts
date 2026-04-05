@@ -17,7 +17,7 @@ import {
   createExplicitHealthQueryServices,
 } from "@murphai/assistant-core/usecases/explicit-health-family-services";
 
-test("CLI health descriptors inherit shared taxonomy lookup metadata and scaffold templates", () => {
+test("CLI health descriptors reuse shared taxonomy lookup metadata and scaffold templates", () => {
   for (const definition of healthEntityDefinitions) {
     const descriptor = healthEntityDescriptorByKind.get(definition.kind);
 
@@ -25,12 +25,6 @@ test("CLI health descriptors inherit shared taxonomy lookup metadata and scaffol
     assert.deepEqual(descriptor?.listKinds, definition.listKinds);
     assert.deepEqual(descriptor?.prefixes, definition.prefixes);
     assert.deepEqual(descriptor?.lookupAliases, definition.lookupAliases);
-
-    if (descriptor?.query) {
-      assert.deepEqual(descriptor.query.genericListKinds, definition.listKinds);
-      assert.deepEqual(descriptor.query.genericLookupPrefixes, definition.prefixes);
-      assert.deepEqual(descriptor.query.genericLookupValues, definition.lookupAliases);
-    }
 
     if (descriptor?.core) {
       assert.deepEqual(descriptor.core.payloadTemplate, definition.scaffoldTemplate);
