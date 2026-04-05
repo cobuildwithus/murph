@@ -40,6 +40,26 @@ describe("buildHostedRunnerContainerEnv", () => {
     });
   });
 
+  it("does not forward worker-only runtime config into the child runner env", () => {
+    expect(buildHostedRunnerContainerEnv({
+      HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "OPENAI_API_KEY",
+      HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "1000",
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      NODE_ENV: "production",
+      OPENAI_API_KEY: "sk-test",
+    })).toEqual({
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
+      HOSTED_EMAIL_INGRESS_READY: "false",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_EMAIL_SEND_READY: "false",
+      NODE_ENV: "production",
+      OPENAI_API_KEY: "sk-test",
+    });
+  });
+
   it("does not forward prefix-only provider or channel extras", () => {
     expect(buildHostedRunnerContainerEnv({
       OPENAI_BASE_URL: "https://proxy.example.test/v1",

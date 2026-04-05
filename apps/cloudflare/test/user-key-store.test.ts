@@ -141,6 +141,115 @@ describe("hosted user key store", () => {
     ).toBe("browser:v1");
   });
 
+  it("rejects replacing an existing root key through putUserRootKeyEnvelope", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const automation = await generateHostedUserRecipientKeyPair();
+    const store = createHostedUserKeyStore({
+      automationRecipientKeyId: "automation:v1",
+      automationRecipientPrivateKey: automation.privateKeyJwk,
+      automationRecipientPublicKey: automation.publicKeyJwk,
+      bucket,
+      envelopeEncryptionKey: createTestRootKey(19),
+      envelopeEncryptionKeyId: "v1",
+    });
+
+    await store.ensureUserCryptoContext("user_live_replace");
+    const replacement = await createHostedUserRootKeyEnvelope({
+      recipients: [
+        {
+          keyId: "automation:v1",
+          kind: "automation",
+          publicKeyJwk: automation.publicKeyJwk,
+        },
+      ],
+      userId: "user_live_replace",
+    });
+
+    await expect(store.putUserRootKeyEnvelope({
+      envelope: replacement.envelope,
+      userId: "user_live_replace",
+    })).rejects.toThrow(/Replacing a hosted user root key is not allowed/u);
+  });
+
+  it("rejects tee-automation recipients on the public full-envelope write path", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const automation = await generateHostedUserRecipientKeyPair();
+    const tee = await generateHostedUserRecipientKeyPair();
+    const store = createHostedUserKeyStore({
+      automationRecipientKeyId: "automation:v1",
+      automationRecipientPrivateKey: automation.privateKeyJwk,
+      automationRecipientPublicKey: automation.publicKeyJwk,
+      bucket,
+      envelopeEncryptionKey: createTestRootKey(29),
+      envelopeEncryptionKeyId: "v1",
+    });
+
+    const envelope = await createHostedUserRootKeyEnvelope({
+      recipients: [
+        {
+          keyId: "automation:v1",
+          kind: "automation",
+          publicKeyJwk: automation.publicKeyJwk,
+        },
+        {
+          keyId: "tee:v1",
+          kind: "tee-automation",
+          publicKeyJwk: tee.publicKeyJwk,
+        },
+      ],
+      userId: "user_live_public",
+    });
+
+    await expect(store.putUserRootKeyEnvelope({
+      envelope: envelope.envelope,
+      userId: "user_live_public",
+    })).rejects.toThrow(/must not include tee-automation recipients/u);
+  });
+
+  it("deletes stale rotated envelope objects after rewriting the current path", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const automation = await generateHostedUserRecipientKeyPair();
+    const oldKey = createTestRootKey(31);
+    const nextKey = createTestRootKey(37);
+    const oldStore = createHostedUserKeyStore({
+      automationRecipientKeyId: "automation:v1",
+      automationRecipientPrivateKey: automation.privateKeyJwk,
+      automationRecipientPublicKey: automation.publicKeyJwk,
+      bucket,
+      envelopeEncryptionKey: oldKey,
+      envelopeEncryptionKeyId: "v1",
+    });
+
+    await oldStore.ensureUserCryptoContext("user_live_rotate");
+    const originalEnvelope = await oldStore.readUserRootKeyEnvelope("user_live_rotate");
+
+    expect(originalEnvelope).not.toBeNull();
+    expect(bucket.objects.size).toBe(1);
+
+    const rotatedStore = createHostedUserKeyStore({
+      automationRecipientKeyId: "automation:v1",
+      automationRecipientPrivateKey: automation.privateKeyJwk,
+      automationRecipientPublicKey: automation.publicKeyJwk,
+      bucket,
+      envelopeEncryptionKey: nextKey,
+      envelopeEncryptionKeyId: "v2",
+      envelopeEncryptionKeysById: {
+        v1: oldKey,
+      },
+    });
+
+    await rotatedStore.putUserRootKeyEnvelope({
+      envelope: originalEnvelope!,
+      userId: "user_live_rotate",
+    });
+
+    expect(bucket.objects.size).toBe(1);
+    expect(bucket.deleted.length).toBeGreaterThanOrEqual(1);
+    await expect(rotatedStore.readUserRootKeyEnvelope("user_live_rotate")).resolves.toEqual(
+      originalEnvelope,
+    );
+  });
+
   it("ignores removed legacy v1 envelopes at the old static object path", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const envelopeEncryptionKey = createTestRootKey(23);
