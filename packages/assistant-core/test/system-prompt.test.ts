@@ -50,4 +50,16 @@ test("buildAssistantSystemPrompt tells Murph to gather personal supplement and l
     prompt,
     /Usually that means the active supplement or medication records, the derived current profile when relevant, and recent blood-test or history reads that bear directly on the question\./u,
   );
+  assert.match(
+    prompt,
+    /If no close existing page exists, and the current turn produced a reusable synthesis that would likely save work or improve continuity later, create a new knowledge page in the same turn\./u,
+  );
+  assert.match(
+    prompt,
+    /Good candidates for a new page include any reusable synthesis that Murph is likely to benefit from later, including durable topic summaries, recurring user-context dossiers, protocol or experiment summaries, decision histories, open questions or active hypotheses, recurring symptom or biomarker pattern syntheses, wearable-trend summaries, research digests, and concise reference pages for recurring entities such as supplements, medications, foods, labs, or conditions\./u,
+  );
+  assert.match(
+    prompt,
+    /Do not create a knowledge page for lightweight chat, one-off operational answers, weakly supported guesses, or single-record readbacks that are unlikely to matter again\./u,
+  );
 });
