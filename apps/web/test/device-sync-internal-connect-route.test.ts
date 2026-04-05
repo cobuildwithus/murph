@@ -3,11 +3,16 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
+  getPrisma: vi.fn(),
   startConnection: vi.fn(),
 }));
 
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
   createHostedDeviceSyncControlPlane: mocks.createHostedDeviceSyncControlPlane,
+}));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: mocks.getPrisma,
 }));
 
 type InternalDeviceSyncConnectLinkRouteModule = typeof import(
@@ -35,6 +40,28 @@ describe("device sync internal connect-link route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    const consumedNonces = new Set<string>();
+    mocks.getPrisma.mockReturnValue({
+      $transaction: async <T>(callback: (tx: {
+        hostedWebInternalRequestNonce: {
+          create: (input: { data: { nonceHash: string } }) => Promise<void>;
+          deleteMany: () => Promise<void>;
+        };
+      }) => Promise<T>) => callback({
+        hostedWebInternalRequestNonce: {
+          async create({ data }) {
+            if (consumedNonces.has(data.nonceHash)) {
+              throw { code: "P2002" };
+            }
+
+            consumedNonces.add(data.nonceHash);
+          },
+          async deleteMany() {
+            return;
+          },
+        },
+      }),
+    });
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
       startConnection: mocks.startConnection,
     });
@@ -129,6 +156,73 @@ describe("device sync internal connect-link route", () => {
     });
   });
 
+  it("rejects requests whose user header was changed after signing", async () => {
+    process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = "web-internal-secret";
+
+    const response = await internalDeviceSyncConnectLinkRoute.POST(
+      new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
+        headers: {
+          ...(await createSignedRequestHeaders("web-internal-secret", "member_123")),
+          "x-hosted-execution-user-id": "member_999",
+        },
+        method: "POST",
+      }),
+      {
+        params: Promise.resolve({
+          provider: "whoop",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(401);
+    expect(mocks.startConnection).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_WEB_INTERNAL_UNAUTHORIZED",
+        message: "Unauthorized hosted web internal request.",
+        retryable: false,
+      },
+    });
+  });
+
+  it("rejects replayed signed requests on the internal connect-link route", async () => {
+    process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = "web-internal-secret";
+    const request = new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
+      headers: await createSignedRequestHeaders("web-internal-secret"),
+      method: "POST",
+    });
+
+    const firstResponse = await internalDeviceSyncConnectLinkRoute.POST(
+      request.clone(),
+      {
+        params: Promise.resolve({
+          provider: "whoop",
+        }),
+      },
+    );
+
+    expect(firstResponse.status).toBe(200);
+
+    const replayResponse = await internalDeviceSyncConnectLinkRoute.POST(
+      request.clone(),
+      {
+        params: Promise.resolve({
+          provider: "whoop",
+        }),
+      },
+    );
+
+    expect(replayResponse.status).toBe(401);
+    expect(mocks.startConnection).toHaveBeenCalledTimes(1);
+    await expect(replayResponse.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_WEB_INTERNAL_REPLAYED",
+        message: "Hosted web internal request was already used and cannot be replayed.",
+        retryable: false,
+      },
+    });
+  });
+
   it("rejects GET requests on the internal connect-link route", async () => {
     const response = await internalDeviceSyncConnectLinkRoute.GET();
 
@@ -144,17 +238,21 @@ describe("device sync internal connect-link route", () => {
   });
 });
 
-async function createSignedRequestHeaders(secret: string): Promise<HeadersInit> {
+async function createSignedRequestHeaders(
+  secret: string,
+  userId = "member_123",
+): Promise<HeadersInit> {
   const headers = await createHostedExecutionSignatureHeaders({
     method: "POST",
     path: "/api/internal/device-sync/providers/whoop/connect-link",
     payload: "",
     secret,
     timestamp: new Date().toISOString(),
+    userId,
   });
 
   return {
     ...headers,
-    "x-hosted-execution-user-id": "member_123",
+    "x-hosted-execution-user-id": userId,
   };
 }

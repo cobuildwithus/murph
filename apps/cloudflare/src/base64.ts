@@ -1,4 +1,5 @@
 const BASE64_CANONICAL_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
+const HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_LENGTH_BYTES = 32;
 
 export function encodeBase64(input: Uint8Array): string {
   return Buffer.from(input).toString("base64");
@@ -10,9 +11,17 @@ export function decodeBase64(input: string): Uint8Array {
 
 export function decodeBase64Key(input: string): Uint8Array {
   try {
-    return decodeBase64(normalizeBase64Url(input));
+    const decoded = decodeBase64(normalizeBase64Url(input));
+
+    if (decoded.byteLength !== HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_LENGTH_BYTES) {
+      throw new TypeError("invalid-length");
+    }
+
+    return decoded;
   } catch {
-    throw new TypeError("Hosted execution platform envelope keys must be valid base64 or base64url.");
+    throw new TypeError(
+      "Hosted execution platform envelope keys must be valid 32-byte base64 or base64url values.",
+    );
   }
 }
 

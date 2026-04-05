@@ -3,7 +3,6 @@ import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 import {
   requireHostedWebInternalSignedRequest,
-  requireHostedExecutionUserId,
 } from "@/src/lib/hosted-execution/internal";
 
 const HOSTED_ASSISTANT_DEVICE_CONNECT_RETURN_TO = "/settings?tab=wearables";
@@ -28,8 +27,7 @@ export const POST = withJsonError(async (
   request: Request,
   context: { params: Promise<{ provider: string }> },
 ) => {
-  await requireHostedWebInternalSignedRequest(request);
-  const userId = requireHostedExecutionUserId(request);
+  const userId = await requireHostedWebInternalSignedRequest(request);
   const provider = await resolveDecodedRouteParam(context.params, "provider");
   const controlPlane = createHostedDeviceSyncControlPlane(request);
   const result = await controlPlane.startConnection(

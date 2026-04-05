@@ -881,6 +881,7 @@ async function handleHostedEmailIngress(
     return;
   }
 
+  const stub = await resolveUserRunnerStub(env, route.userId);
   const userCrypto = await resolveHostedExecutionUserCryptoContext({
     bucket: env.BUNDLES,
     environment,
@@ -909,7 +910,6 @@ async function handleHostedEmailIngress(
     userId: route.userId,
   });
   const eventId = `email:${rawMessageKey}`;
-  const stub = await resolveUserRunnerStub(env, route.userId);
   await stub.dispatch(buildHostedExecutionEmailMessageReceivedDispatch({
     eventId,
     identityId: route.identityId,
@@ -963,7 +963,7 @@ async function resolveHostedExecutionUserCryptoContext(input: {
     envelopeEncryptionKey: input.environment.platformEnvelopeKey,
     envelopeEncryptionKeyId: input.environment.platformEnvelopeKeyId,
     envelopeEncryptionKeysById: input.environment.platformEnvelopeKeysById,
-  }).ensureUserCryptoContext(input.userId);
+  }).requireUserCryptoContext(input.userId);
 }
 
 async function handleDispatchRoute(context: WorkerRouteContext): Promise<Response> {

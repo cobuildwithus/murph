@@ -70,6 +70,14 @@ describe("readHostedExecutionEnvironment", () => {
     ).toThrow(/must be a JSON object/u);
   });
 
+  it("rejects platform-envelope keys that are not exactly 32 bytes", () => {
+    expect(() =>
+      readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: Buffer.alloc(16, 9).toString("base64url"),
+      })),
+    ).toThrow(/valid 32-byte base64 or base64url values/u);
+  });
+
   it("rejects platform-envelope keyrings that conflict with the active key id", () => {
     expect(() =>
       readHostedExecutionEnvironment(createHostedExecutionTestEnv({

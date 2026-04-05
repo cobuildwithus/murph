@@ -9,8 +9,15 @@ import {
 } from "@murphai/hosted-execution";
 
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import { getPrisma } from "../prisma";
+import {
+  PrismaHostedWebInternalRequestNonceStore,
+  type HostedWebInternalRequestNonceStore,
+} from "./internal-request-nonces";
 
 type HostedExecutionAcceptedRouteToken = "scheduler" | "share";
+const HOSTED_WEB_INTERNAL_REQUEST_MAX_TIMESTAMP_SKEW_MS = 60_000;
+const HOSTED_WEB_INTERNAL_REQUEST_NONCE_MIN_LENGTH = 16;
 
 function normalizeOptionalString(value: string | null | undefined): string | null {
   if (typeof value !== "string") {
@@ -57,7 +64,14 @@ export function authorizeHostedExecutionInternalRequest(input: {
   }
 }
 
-export async function requireHostedWebInternalSignedRequest(request: Request): Promise<void> {
+export async function requireHostedWebInternalSignedRequest(
+  request: Request,
+  options: {
+    maxTimestampSkewMs?: number;
+    nonceStore?: HostedWebInternalRequestNonceStore;
+    nowMs?: number;
+  } = {},
+): Promise<string> {
   const signingSecret = normalizeHostedExecutionString(process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET);
 
   if (!signingSecret) {
@@ -69,15 +83,24 @@ export async function requireHostedWebInternalSignedRequest(request: Request): P
     });
   }
 
+  const userId = requireHostedExecutionUserId(request);
   const payload = await request.clone().text();
-  const { signature, timestamp } = readHostedExecutionSignatureHeaders(request.headers);
+  const { nonce, signature, timestamp } = readHostedExecutionSignatureHeaders(request.headers);
+  const normalizedNonce = normalizeOptionalString(nonce);
+  const maxTimestampSkewMs =
+    options.maxTimestampSkewMs ?? HOSTED_WEB_INTERNAL_REQUEST_MAX_TIMESTAMP_SKEW_MS;
   const verified = await verifyHostedExecutionSignature({
     method: request.method,
     path: new URL(request.url).pathname,
     payload,
+    search: new URL(request.url).search,
     secret: signingSecret,
     signature,
     timestamp,
+    nonce: normalizedNonce,
+    userId,
+    maxTimestampSkewMs,
+    nowMs: options.nowMs,
   });
 
   if (!verified) {
@@ -87,6 +110,46 @@ export async function requireHostedWebInternalSignedRequest(request: Request): P
       httpStatus: 401,
     });
   }
+
+  if (!normalizedNonce || normalizedNonce.length < HOSTED_WEB_INTERNAL_REQUEST_NONCE_MIN_LENGTH) {
+    throw hostedOnboardingError({
+      code: "HOSTED_WEB_INTERNAL_UNAUTHORIZED",
+      message: "Unauthorized hosted web internal request.",
+      httpStatus: 401,
+    });
+  }
+
+  const timestampMs = parseCanonicalTimestampMs(timestamp);
+  if (timestampMs === null) {
+    throw hostedOnboardingError({
+      code: "HOSTED_WEB_INTERNAL_UNAUTHORIZED",
+      message: "Unauthorized hosted web internal request.",
+      httpStatus: 401,
+    });
+  }
+
+  const nowMs = options.nowMs ?? Date.now();
+  const consumed = await (options.nonceStore
+    ?? new PrismaHostedWebInternalRequestNonceStore(getPrisma())
+  ).consumeHostedWebInternalRequestNonce({
+    expiresAt: new Date(timestampMs + maxTimestampSkewMs).toISOString(),
+    method: request.method.toUpperCase(),
+    nonceHash: await sha256Hex(normalizedNonce),
+    now: new Date(nowMs).toISOString(),
+    path: new URL(request.url).pathname,
+    search: new URL(request.url).search,
+    userId,
+  });
+
+  if (!consumed) {
+    throw hostedOnboardingError({
+      code: "HOSTED_WEB_INTERNAL_REPLAYED",
+      message: "Hosted web internal request was already used and cannot be replayed.",
+      httpStatus: 401,
+    });
+  }
+
+  return userId;
 }
 
 export function requireHostedExecutionSchedulerToken(request: Request): void {
@@ -163,4 +226,23 @@ function readTokenListFromEnv(...keys: string[]): string[] {
       .map((entry) => entry.trim())
       .filter(Boolean);
   })));
+}
+
+function parseCanonicalTimestampMs(value: string | null): number | null {
+  if (typeof value !== "string" || value.trim() !== value) {
+    return null;
+  }
+
+  const parsedMs = Date.parse(value);
+
+  if (!Number.isFinite(parsedMs)) {
+    return null;
+  }
+
+  return new Date(parsedMs).toISOString() === value ? parsedMs : null;
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
