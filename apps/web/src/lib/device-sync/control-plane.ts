@@ -17,9 +17,9 @@ import {
   type HostedAgentSessionRecord,
   type UpdateLocalHeartbeatInput,
 } from "./prisma-store";
+import type { HostedAgentSessionBearer } from "../hosted-agent-sessions";
 import {
   HostedDeviceSyncAgentSessionService,
-  type HostedAgentSessionBearer,
   type HostedTokenExport,
 } from "./agent-session-service";
 import { HostedDeviceSyncPublicIngressService } from "./public-ingress-service";

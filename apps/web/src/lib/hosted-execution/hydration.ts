@@ -8,7 +8,7 @@ import {
 import { buildHostedDeviceSyncWakeDispatchFromSignal } from "../device-sync/hosted-dispatch";
 import { toJsonRecord } from "../device-sync/shared";
 import { buildHostedMemberActivationFirstContact } from "../hosted-onboarding/member-activation";
-import { readHostedWebhookReceiptDispatchByEventId } from "../hosted-onboarding/webhook-receipt-dispatch";
+import { readHostedWebhookReceiptDispatchByEventId } from "../hosted-webhook-receipts";
 import { findHostedShareLinkById, readHostedSharePack } from "../hosted-share/shared";
 
 type HostedExecutionHydrationClient = PrismaClient;

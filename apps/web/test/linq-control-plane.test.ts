@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
   assertBrowserMutationOrigin: vi.fn(),
   createHostedDeviceSyncControlPlaneContext: vi.fn(),
   fetch: vi.fn(),
-  hostedDeviceSyncAgentSessionService: vi.fn(),
+  hostedAgentSessionService: vi.fn(),
   getPrisma: vi.fn(),
   requireAuthenticatedHostedUser: vi.fn(),
   verifyAndParseLinqWebhookRequest: vi.fn(),
@@ -42,8 +42,8 @@ vi.mock("@/src/lib/device-sync/control-plane-context", () => ({
   createHostedDeviceSyncControlPlaneContext: mocks.createHostedDeviceSyncControlPlaneContext,
 }));
 
-vi.mock("@/src/lib/device-sync/agent-session-service", () => ({
-  HostedDeviceSyncAgentSessionService: mocks.hostedDeviceSyncAgentSessionService,
+vi.mock("@/src/lib/hosted-agent-sessions", () => ({
+  HostedAgentSessionService: mocks.hostedAgentSessionService,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -111,7 +111,7 @@ describe("HostedLinqControlPlane", () => {
     mocks.getPrisma.mockReturnValue({
       hostedWebhookReceipt: mocks.hostedWebhookReceipt,
     });
-    mocks.hostedDeviceSyncAgentSessionService.mockImplementation(() => ({
+    mocks.hostedAgentSessionService.mockImplementation(() => ({
       createAgentSession: vi.fn(),
       requireAgentSession: vi.fn(),
     }));
