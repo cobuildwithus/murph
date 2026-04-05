@@ -26,12 +26,6 @@ Constraints:
 - avoid replacing one giant file with a web of vague helpers or pass-through re-exports
 - respect existing package and trust boundaries unless the current file shape clearly violates them
 
-Execution mode:
-
-- do not stop at prose recommendations if you can safely land the change in code
-- choose the smallest high-leverage set of concrete file changes that fit this review scope
-- prefer self-contained extractions or seam cleanups over broad speculative rewrites
-
 Final response contract:
 
 - Return one downloadable `.patch` attachment containing a single unified diff for every change you chose to make in this pass.
