@@ -145,6 +145,16 @@ The root CLI is no longer just a vault editor. The built command surface include
 - root shortcuts such as `chat`, `run`, `status`, `doctor`, and `stop`
 - AI-assisted synthesis helpers such as `research`, `deepthink`, and `knowledge`
 
+### Choosing a read command
+
+- Use `vault-cli show <id>` when you already know one exact query-layer record id to inspect.
+- Use `vault-cli list` when you need structured filtering by family, kind, status, stream, tag, or date range.
+- Use `vault-cli search query --text "..."` when the target is fuzzy, remembered by phrase, or buried across notes and record bodies.
+- Use `vault-cli timeline` when the question is chronological: what changed, what happened over a window, or what stood out over time.
+- Use `vault-cli profile show current` for the current synthesized profile instead of reconstructing it manually from older snapshots.
+- Use `vault-cli wearables day` or the `wearables ... list` commands for semantic wearable summaries before drilling into raw events or samples.
+- Use family `manifest` commands such as `meal manifest`, `document manifest`, `intake manifest`, and `workout manifest` when you need immutable import provenance or raw-source context.
+
 Quick help:
 
 ```bash

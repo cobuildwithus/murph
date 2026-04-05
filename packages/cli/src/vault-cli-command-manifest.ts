@@ -7,6 +7,10 @@ import {
   healthShowResultSchema,
   type HealthCommandDescriptorEntry,
 } from '@murphai/assistant-core/health-cli-descriptors'
+import {
+  listResultSchema,
+  showResultSchema,
+} from '@murphai/assistant-core/vault-cli-contracts'
 import type { InboxServices } from '@murphai/assistant-core/inbox-services'
 import type { VaultServices } from '@murphai/assistant-core/vault-services'
 import { registerAssistantCommands } from './commands/assistant.js'
@@ -739,6 +743,20 @@ export const vaultCliCommandDescriptors = [
     id: 'read',
     bindingMode: 'direct',
     rootCommandNames: ['show', 'list'],
+    leafCommands: [
+      {
+        path: ['show'],
+        description:
+          'Read one canonical vault record through the query layer when you already know the exact query-layer record id. Use family-specific show or manifest commands for meal/document/import provenance reads when those lookup ids differ.',
+        output: showResultSchema,
+      },
+      {
+        path: ['list'],
+        description:
+          'List canonical vault records through the query layer when you need structured filtering by family, kind, status, stream, tag, or date range.',
+        output: listResultSchema,
+      },
+    ],
     directVaultServiceBindings: {
       query: ['show', 'list'],
     },
@@ -750,6 +768,18 @@ export const vaultCliCommandDescriptors = [
     id: 'search',
     bindingMode: 'none',
     rootCommandNames: ['search', 'timeline'],
+    leafCommands: [
+      {
+        path: ['search', 'query'],
+        description:
+          'Search the local read model by fuzzy text when the target is remembered by phrase rather than exact id. Prefer this over broad raw-file reads.',
+      },
+      {
+        path: ['timeline'],
+        description:
+          'Build a descending cross-record timeline when the question is about what changed, what happened over a window, or what stood out over time.',
+      },
+    ],
     register({ cli, services }) {
       registerSearchCommands(cli, services)
     },

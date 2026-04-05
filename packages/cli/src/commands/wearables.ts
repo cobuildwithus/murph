@@ -275,6 +275,17 @@ export function registerWearablesCommands(
       date: localDateSchema.describe('Calendar date in YYYY-MM-DD form.'),
       provider: repeatableProviderOptionSchema,
     }),
+    examples: [
+      {
+        description: 'Inspect one day of wearable evidence before drilling into raw records.',
+        options: {
+          date: '2026-04-05',
+          vault: './vault',
+        },
+      },
+    ],
+    hint:
+      'Use `wearables day` as the first read for date-specific wearable questions. Use the list subcommands for longer windows and provider/source freshness checks.',
     output: wearablesDayResultSchema,
     async run({ options }) {
       return services.query.showWearableDay({

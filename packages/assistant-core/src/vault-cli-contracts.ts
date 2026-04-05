@@ -357,14 +357,39 @@ export const showResultSchema = z.object({
 })
 
 export const listFilterSchema = z.object({
-  recordType: z.array(z.string().min(1)).optional(),
-  kind: z.string().min(1).optional(),
-  status: z.string().min(1).optional(),
-  stream: z.array(z.string().min(1)).optional(),
-  experiment: slugSchema.optional(),
-  from: localDateSchema.optional(),
-  to: localDateSchema.optional(),
-  tag: z.array(z.string().min(1)).optional(),
+  recordType: z
+    .array(z.string().min(1))
+    .optional()
+    .describe(
+      'Optional query record families such as event, journal, assessment, profile_snapshot, current_profile, goal, condition, allergy, protocol, history, family, genetics, food, recipe, provider, or sample.',
+    ),
+  kind: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional canonical kind filter such as meal, note, document, journal_day, or blood_test.'),
+  status: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional status filter such as active, stopped, accepted, draft, or saved.'),
+  stream: z
+    .array(z.string().min(1))
+    .optional()
+    .describe('Optional sample stream filter. Repeat for multiple streams.'),
+  experiment: slugSchema
+    .optional()
+    .describe('Optional experiment slug filter.'),
+  from: localDateSchema
+    .optional()
+    .describe('Inclusive lower date bound in YYYY-MM-DD form.'),
+  to: localDateSchema
+    .optional()
+    .describe('Inclusive upper date bound in YYYY-MM-DD form.'),
+  tag: z
+    .array(z.string().min(1))
+    .optional()
+    .describe('Optional tag filter. Repeat for multiple tags.'),
   limit: z.number().int().positive().max(200).default(50),
 })
 
