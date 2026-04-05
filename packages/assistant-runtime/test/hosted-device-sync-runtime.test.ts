@@ -80,7 +80,7 @@ describe("hosted device-sync runtime", () => {
             }) => mocks.applyHostedDeviceSyncRuntimeUpdates({
               baseUrl: input.baseUrl,
               fetchImpl: input.fetchImpl,
-              signingSecret: input.signingSecret ?? null,
+              signingSecret: null,
               occurredAt: request.occurredAt ?? null,
               timeoutMs: input.timeoutMs ?? null,
               updates: request.updates,
@@ -93,7 +93,7 @@ describe("hosted device-sync runtime", () => {
               baseUrl: input.baseUrl,
               connectionId: request?.connectionId ?? null,
               fetchImpl: input.fetchImpl,
-              signingSecret: input.signingSecret ?? null,
+              signingSecret: null,
               provider: request?.provider ?? null,
               timeoutMs: input.timeoutMs ?? null,
               userId: input.boundUserId,
@@ -1702,7 +1702,7 @@ describe("hosted device-sync runtime", () => {
 
     expect(mocks.applyHostedDeviceSyncRuntimeUpdates).toHaveBeenCalledWith(expect.objectContaining({
       baseUrl: "https://control.example.test",
-      signingSecret: "internal-token",
+      signingSecret: null,
       occurredAt: "2026-03-27T08:35:00.000Z",
       timeoutMs: null,
       updates: [

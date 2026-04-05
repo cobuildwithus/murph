@@ -74,16 +74,6 @@ export interface HostedExecutionProxyAiUsageClient {
   ): Promise<HostedExecutionAiUsageRecordResponse>;
 }
 
-interface HostedExecutionUserBoundRequesterResolutionInput {
-  baseUrl: string | null | undefined;
-  boundUserId: string;
-  fetchImpl?: typeof fetch;
-  isProxyBaseUrl: (baseUrl: string) => boolean;
-  proxyHost: string;
-  signingSecret?: string | null;
-  timeoutMs?: number | null;
-}
-
 export function createHostedExecutionProxyDeviceSyncRuntimeClient(input: {
   baseUrl: string;
   boundUserId: string;
@@ -141,7 +131,6 @@ export function resolveHostedExecutionDeviceSyncRuntimeClient(input: {
   baseUrl: string | null | undefined;
   boundUserId: string;
   fetchImpl?: typeof fetch;
-  signingSecret?: string | null;
   timeoutMs?: number | null;
 }): HostedExecutionProxyDeviceSyncRuntimeClient | null {
   const normalizedBaseUrl = input.baseUrl ? requireHostedExecutionWebControlBaseUrl(input.baseUrl) : null;
@@ -226,7 +215,6 @@ export function resolveHostedExecutionAiUsageClient(input: {
   baseUrl: string | null | undefined;
   boundUserId: string;
   fetchImpl?: typeof fetch;
-  signingSecret?: string | null;
   timeoutMs?: number | null;
 }): HostedExecutionProxyAiUsageClient | null {
   const normalizedBaseUrl = input.baseUrl ? requireHostedExecutionWebControlBaseUrl(input.baseUrl) : null;
@@ -340,38 +328,6 @@ function createHostedExecutionServerRequester(
     boundUserId: input.boundUserId,
     fetchImpl: input.fetchImpl,
     signingSecret: requireHostedExecutionSigningSecret(input.signingSecret),
-    timeoutMs: input.timeoutMs ?? null,
-  });
-}
-
-function resolveHostedExecutionUserBoundRequester(
-  input: HostedExecutionUserBoundRequesterResolutionInput,
-): HostedExecutionUserBoundWebControlPlaneRequester | null {
-  const normalizedBaseUrl = input.baseUrl ? requireHostedExecutionWebControlBaseUrl(input.baseUrl) : null;
-
-  if (!normalizedBaseUrl) {
-    return null;
-  }
-
-  if (input.isProxyBaseUrl(normalizedBaseUrl)) {
-    return createHostedExecutionProxyRequester({
-      baseUrl: normalizedBaseUrl,
-      boundUserId: input.boundUserId,
-      fetchImpl: input.fetchImpl,
-      proxyHost: input.proxyHost,
-      timeoutMs: input.timeoutMs ?? null,
-    });
-  }
-
-  if (!input.signingSecret) {
-    return null;
-  }
-
-  return createHostedExecutionServerRequester({
-    baseUrl: normalizedBaseUrl,
-    boundUserId: input.boundUserId,
-    fetchImpl: input.fetchImpl,
-    signingSecret: input.signingSecret,
     timeoutMs: input.timeoutMs ?? null,
   });
 }

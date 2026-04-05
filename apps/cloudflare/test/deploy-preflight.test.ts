@@ -25,7 +25,19 @@ describe("deploy preflight helpers", () => {
       "HOSTED_WEB_BASE_URL",
       "HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG",
       "HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME",
+      "HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY",
+      "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK",
+      "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK",
+      "HOSTED_WEB_INTERNAL_SIGNING_SECRET",
     ]);
+  });
+
+  it("does not require worker-only secrets for config-only runs", () => {
+    expect(listMissingHostedDeployEnvironment({
+      CF_BUNDLES_BUCKET: "bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
+      CF_WORKER_NAME: "hosted-runner",
+    }, { deployWorker: false })).toEqual([]);
   });
 
   it("allows config-only runs without CF_PUBLIC_BASE_URL", () => {
@@ -42,8 +54,12 @@ describe("deploy preflight helpers", () => {
       CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
       CF_PUBLIC_BASE_URL: "https://worker.example.test",
       CF_WORKER_NAME: "hosted-runner",
+      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "{\"kty\":\"OKP\",\"crv\":\"X25519\",\"d\":\"secret\",\"x\":\"public\"}",
+      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "{\"kty\":\"OKP\",\"crv\":\"X25519\",\"x\":\"public\"}",
+      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "ZW5jcnlwdGlvbi1rZXktMzItYnl0ZXMtbG9uZy1leGFtcGxlIQ==",
       HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
       HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
+      HOSTED_WEB_INTERNAL_SIGNING_SECRET: "web-internal-secret",
       HOSTED_WEB_BASE_URL: "https://web.example.test",
       MURPH_WEB_SEARCH_PROVIDER: "brave",
     }, { deployWorker: true })).toThrowError(
@@ -58,8 +74,12 @@ describe("deploy preflight helpers", () => {
       CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
       CF_PUBLIC_BASE_URL: "https://worker.example.test",
       CF_WORKER_NAME: "hosted-runner",
+      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "{\"kty\":\"OKP\",\"crv\":\"X25519\",\"d\":\"secret\",\"x\":\"public\"}",
+      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "{\"kty\":\"OKP\",\"crv\":\"X25519\",\"x\":\"public\"}",
+      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "ZW5jcnlwdGlvbi1rZXktMzItYnl0ZXMtbG9uZy1leGFtcGxlIQ==",
       HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
       HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
+      HOSTED_WEB_INTERNAL_SIGNING_SECRET: "web-internal-secret",
       HOSTED_WEB_BASE_URL: "https://web.example.test",
       MURPH_WEB_SEARCH_PROVIDER: "brave",
     }, { deployWorker: true })).not.toThrow();

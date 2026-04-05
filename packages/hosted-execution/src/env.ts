@@ -71,7 +71,6 @@ export function readHostedExecutionControlEnvironment(
 
 export function readHostedExecutionWebControlPlaneEnvironment(
   source: EnvSource = process.env,
-  _options?: HostedExecutionBaseUrlNormalizationOptions,
 ): HostedExecutionWebControlPlaneEnvironment {
   return {
     deviceSyncRuntimeBaseUrl: DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
