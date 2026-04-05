@@ -271,6 +271,7 @@ export function parseHostedUserRootKeyEnvelope(
   const recipients = readArray(record.recipients, `${label}.recipients`).map((entry, index) =>
     parseHostedWrappedRootKeyRecipient(entry, `${label}.recipients[${index}]`)
   );
+  assertHostedUserRootKeyEnvelopeUniqueRecipientKinds(recipients, `${label}.recipients`);
 
   return {
     createdAt: requireString(record.createdAt, `${label}.createdAt`),
@@ -280,6 +281,21 @@ export function parseHostedUserRootKeyEnvelope(
     updatedAt: requireString(record.updatedAt, `${label}.updatedAt`),
     userId: requireString(record.userId, `${label}.userId`),
   };
+}
+
+function assertHostedUserRootKeyEnvelopeUniqueRecipientKinds(
+  recipients: readonly HostedWrappedRootKeyRecipient[],
+  label: string,
+): void {
+  const seen = new Set<HostedUserRootKeyRecipientKind>();
+
+  for (const recipient of recipients) {
+    if (seen.has(recipient.kind)) {
+      throw new TypeError(`${label} contains duplicate ${recipient.kind} recipients.`);
+    }
+
+    seen.add(recipient.kind);
+  }
 }
 
 export function parseHostedWrappedRootKeyRecipient(
