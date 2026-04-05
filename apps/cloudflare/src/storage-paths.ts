@@ -170,6 +170,30 @@ export async function hostedDispatchPayloadObjectKeys(
   );
 }
 
+export async function hostedSharePackObjectKey(
+  rootKey: Uint8Array,
+  shareId: string,
+): Promise<string> {
+  const shareSegment = await deriveHostedStorageOpaqueId({
+    length: 48,
+    rootKey,
+    scope: "share-pack-path",
+    value: `share:${shareId}`,
+  });
+
+  return `transient/share-packs/${shareSegment}.json`;
+}
+
+export async function hostedSharePackObjectKeys(
+  rootKey: Uint8Array,
+  keysById: Readonly<Record<string, Uint8Array>> | undefined,
+  shareId: string,
+): Promise<string[]> {
+  return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
+    hostedSharePackObjectKey(candidateRootKey, shareId)
+  );
+}
+
 export async function listHostedStorageObjectKeys(
   rootKey: Uint8Array,
   keysById: Readonly<Record<string, Uint8Array>> | undefined,

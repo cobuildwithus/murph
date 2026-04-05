@@ -2,27 +2,27 @@ import { Prisma } from "@prisma/client";
 import { deviceSyncError, isDeviceSyncError } from "@murphai/device-syncd/public-ingress";
 
 import type {
+  DeviceSyncAccount,
   DeviceSyncProvider,
   DeviceSyncRegistry,
   ProviderAuthTokens,
   PublicDeviceSyncAccount,
 } from "@murphai/device-syncd/public-ingress";
 import type { AuthenticatedHostedUser } from "./auth";
+import { requireHostedExecutionControlClient } from "../hosted-execution/control";
 import {
-  buildHostedConnectionTokenCipherOptions,
-  type HostedSecretCodec,
-} from "./crypto";
+  composeHostedRuntimeDeviceSyncAccount,
+  findHostedDeviceSyncRuntimeConnection,
+  requireHostedDeviceSyncRuntimeTokenBundle,
+} from "./internal-runtime";
 import { requireHostedDeviceSyncProvider } from "./providers";
 import {
   generateHostedAgentBearerToken,
-  hostedConnectionWithSecretArgs,
   type HostedAgentSessionRecord,
-  type HostedConnectionSecretBundle,
   type HostedPrismaTransactionClient,
   type UpdateLocalHeartbeatInput,
   mapHostedPublicAccountRecord,
   PrismaDeviceSyncControlPlaneStore,
-  requireHostedConnectionBundleRecord,
 } from "./prisma-store";
 import { parseInteger, sha256Hex, toIsoTimestamp, toJsonRecord } from "./shared";
 
@@ -67,18 +67,15 @@ export class HostedDeviceSyncAgentSessionService {
   readonly request: Request;
   readonly store: PrismaDeviceSyncControlPlaneStore;
   readonly registry: DeviceSyncRegistry;
-  readonly codec: HostedSecretCodec;
 
   constructor(input: {
     request: Request;
     store: PrismaDeviceSyncControlPlaneStore;
     registry: DeviceSyncRegistry;
-    codec: HostedSecretCodec;
   }) {
     this.request = input.request;
     this.store = input.store;
     this.registry = input.registry;
-    this.codec = input.codec;
   }
 
   async requireAgentSession() {
@@ -174,20 +171,22 @@ export class HostedDeviceSyncAgentSessionService {
     tokenBundle: HostedTokenExport;
     agentSession: HostedAgentSessionBearer;
   }> {
-    const bundle = await this.store.getConnectionBundleForUser(session.userId, connectionId);
-
-    if (!bundle) {
-      throw deviceSyncError({
-        code: "CONNECTION_NOT_FOUND",
-        message: "Hosted device-sync connection was not found for the current agent user.",
-        retryable: false,
-        httpStatus: 404,
-      });
-    }
-
     const now = toIsoTimestamp(new Date());
     const connection = await this.requireOwnedConnection(session.userId, connectionId);
-    const tokenBundle = buildTokenExport(bundle, now);
+    const tokenBundle = buildTokenExport(
+      requireHostedDeviceSyncRuntimeTokenBundle({
+        connectionId,
+        runtimeConnection: findHostedDeviceSyncRuntimeConnection(
+          await requireHostedExecutionControlClient().getDeviceSyncRuntimeSnapshot(session.userId, {
+            connectionId,
+            provider: connection.provider,
+          }),
+          connectionId,
+        ),
+        userId: session.userId,
+      }),
+      now,
+    );
     await this.recordTokenAudit({
       userId: session.userId,
       connectionId,
@@ -230,7 +229,6 @@ export class HostedDeviceSyncAgentSessionService {
           id: connectionId,
           userId: session.userId,
         },
-        ...hostedConnectionWithSecretArgs,
       });
 
       if (!record) {
@@ -242,15 +240,27 @@ export class HostedDeviceSyncAgentSessionService {
         });
       }
 
-      const bundle = requireHostedConnectionBundleRecord(record, this.codec);
       const currentConnection = mapHostedPublicAccountRecord(record);
+      const runtimeSnapshot = await requireHostedExecutionControlClient().getDeviceSyncRuntimeSnapshot(
+        session.userId,
+        {
+          connectionId,
+          provider: currentConnection.provider,
+        },
+      );
+      const runtimeConnection = findHostedDeviceSyncRuntimeConnection(runtimeSnapshot, connectionId);
+      const currentTokenBundle = requireHostedDeviceSyncRuntimeTokenBundle({
+        connectionId,
+        runtimeConnection,
+        userId: session.userId,
+      });
 
       if (
         typeof options.expectedTokenVersion === "number" &&
         options.expectedTokenVersion > 0 &&
-        bundle.tokenVersion !== options.expectedTokenVersion
+        currentTokenBundle.tokenVersion !== options.expectedTokenVersion
       ) {
-        const tokenBundle = buildTokenExport(bundle, now);
+        const tokenBundle = buildTokenExport(currentTokenBundle, now);
         await this.recordTokenAudit({
           userId: session.userId,
           connectionId,
@@ -279,8 +289,8 @@ export class HostedDeviceSyncAgentSessionService {
         };
       }
 
-      if (!forceRefresh && !shouldRefreshHostedToken(bundle.account.accessTokenExpiresAt ?? null, now)) {
-        const tokenBundle = buildTokenExport(bundle, now);
+      if (!forceRefresh && !shouldRefreshHostedToken(currentTokenBundle.accessTokenExpiresAt ?? null, now)) {
+        const tokenBundle = buildTokenExport(currentTokenBundle, now);
         await this.recordTokenAudit({
           userId: session.userId,
           connectionId,
@@ -309,12 +319,16 @@ export class HostedDeviceSyncAgentSessionService {
         };
       }
 
-      const provider = requireHostedDeviceSyncProvider(this.registry, bundle.account.provider);
+      const provider = requireHostedDeviceSyncProvider(this.registry, currentConnection.provider);
       const refreshResult = await this.refreshProviderTokensWithStatusHandling({
         tx,
+        account: composeHostedRuntimeDeviceSyncAccount({
+          connection: currentConnection,
+          tokenBundle: currentTokenBundle,
+        }),
         provider,
-        bundle,
         now,
+        userId: session.userId,
       });
 
       if (refreshResult.status === "error") {
@@ -322,7 +336,7 @@ export class HostedDeviceSyncAgentSessionService {
       }
 
       const nextTokens = refreshResult.tokens;
-      const nextRefreshToken = nextTokens.refreshToken ?? bundle.account.refreshToken;
+      const nextRefreshToken = nextTokens.refreshToken ?? currentTokenBundle.refreshToken;
       const updatedConnection = await tx.deviceConnection.update({
         where: {
           id: connectionId,
@@ -335,89 +349,101 @@ export class HostedDeviceSyncAgentSessionService {
           lastErrorMessage: null,
         },
       });
-      const updatedSecret = await tx.deviceConnectionSecret.update({
-        where: {
-          connectionId,
-        },
-        data: {
-          accessTokenEncrypted: this.codec.encrypt(
-            nextTokens.accessToken,
-            buildHostedConnectionTokenCipherOptions({
-              connectionId,
-              provider: bundle.account.provider,
-              purpose: "device-sync-access-token",
-            }),
-          ),
-          refreshTokenEncrypted: nextRefreshToken
-            ? this.codec.encrypt(
-                nextRefreshToken,
-                buildHostedConnectionTokenCipherOptions({
-                  connectionId,
-                  provider: bundle.account.provider,
-                  purpose: "device-sync-refresh-token",
-                }),
-              )
-            : null,
-          tokenVersion: {
-            increment: 1,
+      await requireHostedExecutionControlClient().applyDeviceSyncRuntimeUpdates(session.userId, {
+        occurredAt: now,
+        updates: [
+          {
+            connection: {
+              status: "active",
+            },
+            connectionId,
+            localState: {
+              clearError: true,
+            },
+            observedTokenVersion: currentTokenBundle.tokenVersion,
+            observedUpdatedAt: runtimeConnection?.connection.updatedAt ?? runtimeConnection?.connection.createdAt ?? null,
+            tokenBundle: {
+              accessToken: nextTokens.accessToken,
+              accessTokenExpiresAt: nextTokens.accessTokenExpiresAt ?? null,
+              keyVersion: currentTokenBundle.keyVersion,
+              refreshToken: nextRefreshToken ?? null,
+              tokenVersion: currentTokenBundle.tokenVersion,
+            },
           },
-          keyVersion: this.codec.keyVersion,
-        },
+        ],
       });
-      const tokenBundle = {
-        accessToken: nextTokens.accessToken,
-        refreshToken: nextRefreshToken ?? null,
-        accessTokenExpiresAt: nextTokens.accessTokenExpiresAt ?? null,
-        tokenVersion: updatedSecret.tokenVersion,
-        keyVersion: updatedSecret.keyVersion,
-        exportedAt: now,
-      } satisfies HostedTokenExport;
-      await this.recordTokenAudit({
-        userId: session.userId,
+      const refreshedSnapshot = await requireHostedExecutionControlClient().getDeviceSyncRuntimeSnapshot(
+        session.userId,
+        {
+          connectionId,
+          provider: updatedConnection.provider,
+        },
+      );
+      const refreshedRuntimeConnection = findHostedDeviceSyncRuntimeConnection(refreshedSnapshot, connectionId);
+      const refreshedTokenBundle = requireHostedDeviceSyncRuntimeTokenBundle({
         connectionId,
-        provider: updatedConnection.provider,
-        action: "token_refreshed",
-        channel: "agent_refresh",
-        sessionId: session.id,
-        tokenVersion: tokenBundle.tokenVersion,
-        keyVersion: tokenBundle.keyVersion,
-        createdAt: now,
-        metadata: {
-          exportedAt: now,
-          force: forceRefresh,
-        },
-        tx,
-      });
-      await this.recordTokenAudit({
+        runtimeConnection: refreshedRuntimeConnection,
         userId: session.userId,
-        connectionId,
-        provider: updatedConnection.provider,
-        action: "token_exported",
-        channel: "agent_refresh",
-        sessionId: session.id,
-        tokenVersion: tokenBundle.tokenVersion,
-        keyVersion: tokenBundle.keyVersion,
-        createdAt: now,
-        metadata: {
-          exportedAt: now,
-          force: forceRefresh,
-          refreshed: true,
-          tokenVersionChanged: false,
-        },
-        tx,
       });
+      assertHostedDeviceSyncRuntimeRefreshApplied({
+        connectionId,
+        expectedTokenBundle: {
+          accessToken: nextTokens.accessToken,
+          accessTokenExpiresAt: nextTokens.accessTokenExpiresAt ?? null,
+          keyVersion: currentTokenBundle.keyVersion,
+          refreshToken: nextRefreshToken ?? null,
+        },
+        refreshedTokenBundle,
+      });
+      const tokenVersionChanged = refreshedTokenBundle.tokenVersion !== currentTokenBundle.tokenVersion;
+      const tokenBundle = buildTokenExport(refreshedTokenBundle, now);
 
       return {
         status: "success",
         connection: mapHostedPublicAccountRecord(updatedConnection),
         tokenBundle,
         refreshed: true,
-        tokenVersionChanged: false,
+        tokenVersionChanged,
       };
     });
 
     if (result.status === "error") {
       throw result.error;
+    }
+
+    if (result.refreshed) {
+      await this.recordTokenAudit({
+        userId: session.userId,
+        connectionId,
+        provider: result.connection.provider,
+        action: "token_refreshed",
+        channel: "agent_refresh",
+        sessionId: session.id,
+        tokenVersion: result.tokenBundle.tokenVersion,
+        keyVersion: result.tokenBundle.keyVersion,
+        createdAt: now,
+        metadata: {
+          exportedAt: now,
+          force: forceRefresh,
+        },
+      });
+      await this.recordTokenAudit({
+        userId: session.userId,
+        connectionId,
+        provider: result.connection.provider,
+        action: "token_exported",
+        channel: "agent_refresh",
+        sessionId: session.id,
+        tokenVersion: result.tokenBundle.tokenVersion,
+        keyVersion: result.tokenBundle.keyVersion,
+        createdAt: now,
+        metadata: {
+          exportedAt: now,
+          force: forceRefresh,
+          refreshed: true,
+          tokenVersionChanged: result.tokenVersionChanged,
+        },
+      });
     }
 
     return {
@@ -545,20 +571,21 @@ export class HostedDeviceSyncAgentSessionService {
 
   private async refreshProviderTokensWithStatusHandling(input: {
     tx: HostedPrismaTransactionClient;
+    account: DeviceSyncAccount;
     provider: DeviceSyncProvider;
-    bundle: HostedConnectionSecretBundle;
     now: string;
+    userId: string;
   }): Promise<HostedProviderTokenRefreshResult> {
     try {
       return {
         status: "success",
-        tokens: await input.provider.refreshTokens(input.bundle.account),
+        tokens: await input.provider.refreshTokens(input.account),
       };
     } catch (error) {
       if (isDeviceSyncError(error) && error.accountStatus) {
         await input.tx.deviceConnection.update({
           where: {
-            id: input.bundle.account.id,
+            id: input.account.id,
           },
           data: {
             status: error.accountStatus,
@@ -569,9 +596,9 @@ export class HostedDeviceSyncAgentSessionService {
         });
         await input.tx.deviceSyncSignal.create({
           data: {
-            userId: input.bundle.userId,
-            connectionId: input.bundle.account.id,
-            provider: input.bundle.account.provider,
+            userId: input.userId,
+            connectionId: input.account.id,
+            provider: input.account.provider,
             kind: error.accountStatus === "disconnected" ? "disconnected" : "reauthorization_required",
             payloadJson: toJsonRecord({
               reason: "token_refresh_failed",
@@ -592,17 +619,55 @@ export class HostedDeviceSyncAgentSessionService {
 }
 
 function buildTokenExport(
-  bundle: HostedConnectionSecretBundle,
+  tokenBundle: {
+    accessToken: string;
+    accessTokenExpiresAt: string | null;
+    keyVersion: string;
+    refreshToken: string | null;
+    tokenVersion: number;
+  },
   exportedAt: string,
 ): HostedTokenExport {
   return {
-    accessToken: bundle.account.accessToken,
-    refreshToken: bundle.account.refreshToken ?? null,
-    accessTokenExpiresAt: bundle.account.accessTokenExpiresAt ?? null,
-    tokenVersion: bundle.tokenVersion,
-    keyVersion: bundle.keyVersion,
+    accessToken: tokenBundle.accessToken,
+    refreshToken: tokenBundle.refreshToken ?? null,
+    accessTokenExpiresAt: tokenBundle.accessTokenExpiresAt ?? null,
+    tokenVersion: tokenBundle.tokenVersion,
+    keyVersion: tokenBundle.keyVersion,
     exportedAt,
   };
+}
+
+function assertHostedDeviceSyncRuntimeRefreshApplied(input: {
+  connectionId: string;
+  expectedTokenBundle: {
+    accessToken: string;
+    accessTokenExpiresAt: string | null;
+    keyVersion: string;
+    refreshToken: string | null;
+  };
+  refreshedTokenBundle: {
+    accessToken: string;
+    accessTokenExpiresAt: string | null;
+    keyVersion: string;
+    refreshToken: string | null;
+  };
+}): void {
+  if (
+    input.refreshedTokenBundle.accessToken === input.expectedTokenBundle.accessToken
+    && input.refreshedTokenBundle.accessTokenExpiresAt === input.expectedTokenBundle.accessTokenExpiresAt
+    && input.refreshedTokenBundle.keyVersion === input.expectedTokenBundle.keyVersion
+    && input.refreshedTokenBundle.refreshToken === input.expectedTokenBundle.refreshToken
+  ) {
+    return;
+  }
+
+  throw deviceSyncError({
+    code: "RUNTIME_STATE_CONFLICT",
+    message: `Hosted device-sync runtime did not persist the refreshed token bundle for connection ${input.connectionId}.`,
+    retryable: true,
+    httpStatus: 409,
+  });
 }
 
 function resolveHostedAgentSessionExpiry(now: string): string {

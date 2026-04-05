@@ -15,6 +15,9 @@ import type {
 } from "@murphai/gateway-core";
 import type {
   HostedExecutionBundleRefs,
+  HostedExecutionDeviceSyncRuntimeApplyRequest,
+  HostedExecutionDeviceSyncRuntimeApplyResponse,
+  HostedExecutionDeviceSyncRuntimeSnapshotRequest,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/hosted-execution";
 
@@ -48,6 +51,12 @@ export interface WorkerUserRunnerStubLike {
   gatewayPollEvents?(input?: GatewayPollEventsInput): Promise<GatewayPollEventsResult>;
   gatewayReadMessages?(input: GatewayReadMessagesInput): Promise<GatewayReadMessagesResult>;
   gatewayRespondToPermission?(input: GatewayRespondToPermissionInput): Promise<GatewayPermissionRequest | null>;
+  applyDeviceSyncRuntimeUpdates?(input: {
+    request: HostedExecutionDeviceSyncRuntimeApplyRequest;
+  }): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse>;
+  getDeviceSyncRuntimeSnapshot?(input: {
+    request: HostedExecutionDeviceSyncRuntimeSnapshotRequest;
+  }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
   putDeviceSyncRuntimeSnapshot?(input: {
     snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse;
   }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;

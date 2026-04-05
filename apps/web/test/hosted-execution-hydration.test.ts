@@ -7,12 +7,15 @@ import type { SharePack } from "@murphai/contracts";
 import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { createHostedWebhookDispatchSideEffect } from "@/src/lib/hosted-onboarding/webhook-receipts";
 
+const hostedSharePackMock = vi.hoisted(() => ({
+  readHostedSharePackFromHostedExecution: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-execution/control", () => ({
+  readHostedSharePackFromHostedExecution: hostedSharePackMock.readHostedSharePackFromHostedExecution,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
-  getHostedOnboardingSecretCodec: () => ({
-    keyVersion: "v1",
-    encrypt: (value: string) => value,
-    decrypt: (value: string) => value,
-  }),
   requireHostedOnboardingPublicBaseUrl: () => "https://join.example.test",
 }));
 
@@ -207,10 +210,10 @@ describe("hydrateHostedExecutionDispatch", () => {
 
   it("rehydrates share outbox refs with the encrypted share pack from the hosted share link", async () => {
     const pack = buildSharePack();
+    hostedSharePackMock.readHostedSharePackFromHostedExecution.mockResolvedValue(pack);
     const prisma = {
       hostedShareLink: {
         findUnique: vi.fn().mockResolvedValue({
-          encryptedPayload: JSON.stringify(pack),
           id: "share_123",
         }),
       },

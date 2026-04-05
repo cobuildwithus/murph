@@ -1,6 +1,5 @@
 import Stripe from "stripe";
 
-import { createHostedSecretCodec } from "../device-sync/crypto";
 import { hostedOnboardingError } from "./errors";
 import { readHostedOnboardingEnvironment, type HostedOnboardingEnvironment } from "./env";
 
@@ -21,15 +20,6 @@ export function getHostedOnboardingEnvironment(): HostedOnboardingEnvironment {
   }
 
   return environment;
-}
-
-export function getHostedOnboardingSecretCodec() {
-  const environment = getHostedOnboardingEnvironment();
-  return createHostedSecretCodec({
-    key: environment.encryptionKey,
-    keyVersion: environment.encryptionKeyVersion,
-    keysByVersion: environment.encryptionKeysByVersion,
-  });
 }
 
 export function getHostedOnboardingStripe(): Stripe | null {
@@ -62,7 +52,6 @@ export function requireHostedOnboardingPublicBaseUrl(): string {
 }
 
 export function requireHostedStripeApi(): Stripe {
-  const environment = getHostedOnboardingEnvironment();
   const stripe = getHostedOnboardingStripe();
 
   if (!stripe) {

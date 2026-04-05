@@ -3,12 +3,12 @@ import { assertContract, sharePackSchema, type SharePack } from "@murphai/contra
 
 import { getPrisma } from "../prisma";
 import {
+  deleteHostedSharePackFromHostedExecution,
+  writeHostedSharePackToHostedExecution,
+} from "../hosted-execution/control";
+import {
   issueHostedInviteForPhone,
 } from "../hosted-onboarding/invite-service";
-import {
-  getHostedOnboardingSecretCodec,
-} from "../hosted-onboarding/runtime";
-import { buildHostedSecretAad } from "../device-sync/crypto";
 
 import {
   buildHostedSharePreview,
@@ -43,7 +43,6 @@ export async function createHostedShareLink(input: {
   const shareCode = generateHostedShareCode();
   const shareId = generateHostedShareId();
   const publicBaseUrl = requireHostedSharePublicBaseUrl();
-  const codec = getHostedOnboardingSecretCodec();
   let inviteCode = normalizeOptionalString(input.inviteCode) ?? null;
 
   if (!inviteCode && normalizeOptionalString(input.recipientPhoneNumber)) {
@@ -55,21 +54,30 @@ export async function createHostedShareLink(input: {
     inviteCode = invite.invite.inviteCode;
   }
 
+  await writeHostedSharePackToHostedExecution({
+    pack,
+    shareId,
+  });
+
   await prisma.hostedShareLink.create({
     data: {
       id: shareId,
       codeHash: hashHostedShareCode(shareCode),
       senderMemberId: normalizeOptionalString(input.senderMemberId) ?? null,
       previewTitle: HOSTED_SHARE_PRIVATE_PREVIEW_TITLE,
-      encryptedPayload: codec.encrypt(JSON.stringify(pack), {
-        aad: buildHostedSecretAad({
-          purpose: "hosted-share-pack",
-          shareId,
-        }),
-      }),
-      encryptionKeyVersion: codec.keyVersion,
       expiresAt: hostedShareExpiresAt(input.expiresInHours),
     },
+  }).catch(async (error) => {
+    try {
+      await deleteHostedSharePackFromHostedExecution(shareId);
+    } catch (cleanupError) {
+      console.error(
+        `Hosted share ${shareId} cleanup failed after Postgres write error.`,
+        cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+      );
+    }
+
+    throw error;
   });
 
   const shareUrl = buildHostedShareUrl({
@@ -114,7 +122,7 @@ export async function buildHostedSharePageData(input: {
     };
   }
 
-  const preview = buildHostedSharePreview(readHostedSharePack(record).pack);
+  const preview = buildHostedSharePreview((await readHostedSharePack(record)).pack);
   const now = new Date();
   const consumed = Boolean(record.consumedAt);
   const acceptedByCurrentMember = record.consumedByMemberId === authenticatedMember?.id

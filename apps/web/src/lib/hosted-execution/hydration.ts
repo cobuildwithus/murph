@@ -173,7 +173,7 @@ async function hydrateHostedExecutionDispatchFromHostedShareLink(
     );
   }
 
-  const sharePack = readHostedSharePack(shareRecord);
+  const sharePack = await readHostedSharePack(shareRecord);
 
   return validateHydratedHostedExecutionDispatch(
     {

@@ -55,6 +55,7 @@ export async function acceptHostedShareLink(input: {
     await lockHostedShareLinkRow(tx, codeHash);
 
     const latest = await requireHostedShareLink(shareCode, tx);
+    const preview = buildHostedSharePreview((await readHostedSharePack(latest)).pack);
 
     if (latest.expiresAt <= now) {
       throw hostedOnboardingError({
@@ -68,6 +69,7 @@ export async function acceptHostedShareLink(input: {
       if (latest.consumedByMemberId === memberId) {
         return {
           outcome: "alreadyImported" as const,
+          preview,
           record: latest,
         };
       }
@@ -122,18 +124,17 @@ export async function acceptHostedShareLink(input: {
 
     return {
       outcome: "pending" as const,
+      preview,
       record,
     };
   });
-  const sharePack = readHostedSharePack(claim.record).pack;
-  const preview = buildHostedSharePreview(sharePack);
 
   if (claim.outcome === "alreadyImported") {
     return {
       alreadyImported: true,
       imported: true,
       pending: false,
-      preview,
+      preview: claim.preview,
       shareCode,
     };
   }
@@ -146,7 +147,7 @@ export async function acceptHostedShareLink(input: {
     alreadyImported: false,
     imported,
     pending: !imported,
-    preview,
+    preview: claim.preview,
     shareCode,
   };
 }

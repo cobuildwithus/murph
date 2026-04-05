@@ -74,7 +74,6 @@ vi.mock("../src/lib/hosted-onboarding/linq", async () => {
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingEnvironment: () => ({
-    encryptionKeyVersion: "v1",
     inviteTtlHours: 24,
     isProduction: false,
     linqApiBaseUrl: "https://linq.example.test",
@@ -95,11 +94,6 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     stripeWebhookSecret: "whsec_123",
     telegramBotUsername: null,
     telegramWebhookSecret: null,
-  }),
-  getHostedOnboardingSecretCodec: () => ({
-    decrypt: (value: string) => value.startsWith("enc:") ? value.slice(4) : value,
-    encrypt: (value: string) => `enc:${value}`,
-    keyVersion: "v1",
   }),
   requireHostedOnboardingPublicBaseUrl: () => "https://join.example.test",
   requireHostedStripeWebhookVerificationConfig: () => ({
@@ -265,20 +259,22 @@ describe("hosted onboarding webhook retry safety", () => {
   });
 
   it("sends the signup link immediately for an existing inactive member", async () => {
+    const invite = makePendingInvite({
+      inviteCode: "code_returning_member",
+      sentAt: null,
+    });
     const prisma = withPrismaTransaction({
       hostedBillingCheckout: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedInvite: {
-        create: vi.fn().mockResolvedValue(makePendingInvite({
-          inviteCode: "code_returning_member",
-          sentAt: null,
-        })),
+        create: vi.fn().mockResolvedValue(invite),
         findFirst: vi.fn().mockResolvedValue(null),
-        update: vi.fn().mockResolvedValue(makePendingInvite({
-          inviteCode: "code_returning_member",
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue({
+          ...invite,
           sentAt: new Date("2026-03-26T12:00:01.000Z"),
-        })),
+        }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedWebhookReceipt: {
@@ -344,12 +340,9 @@ describe("hosted onboarding webhook retry safety", () => {
                 attemptCount: 1,
                 inviteId: "invite_123",
                 lastAttemptAt: expect.any(String),
-                message: buildHostedInviteReply({
-                  activeSubscription: false,
-                  joinUrl: "https://join.example.test/join/code_returning_member",
-                }),
                 sentAt: expect.any(String),
                 status: "sent",
+                template: "invite_signup",
               }),
             ],
             status: "completed",
@@ -391,20 +384,22 @@ describe("hosted onboarding webhook retry safety", () => {
   });
 
   it("sends the signup link on the first inbound message for a new member", async () => {
+    const invite = makePendingInvite({
+      inviteCode: "code_first_contact",
+      sentAt: null,
+    });
     const prisma = withPrismaTransaction({
       hostedBillingCheckout: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedInvite: {
-        create: vi.fn().mockResolvedValue(makePendingInvite({
-          inviteCode: "code_first_contact",
-          sentAt: null,
-        })),
+        create: vi.fn().mockResolvedValue(invite),
         findFirst: vi.fn().mockResolvedValue(null),
-        update: vi.fn().mockResolvedValue(makePendingInvite({
-          inviteCode: "code_first_contact",
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue({
+          ...invite,
           sentAt: new Date("2026-03-26T12:00:01.000Z"),
-        })),
+        }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedWebhookReceipt: {
@@ -464,12 +459,9 @@ describe("hosted onboarding webhook retry safety", () => {
                 attemptCount: 1,
                 inviteId: "invite_123",
                 lastAttemptAt: expect.any(String),
-                message: buildHostedInviteReply({
-                  activeSubscription: false,
-                  joinUrl: "https://join.example.test/join/code_first_contact",
-                }),
                 sentAt: expect.any(String),
                 status: "sent",
+                template: "invite_signup",
               }),
             ],
             status: "completed",
@@ -592,6 +584,7 @@ describe("hosted onboarding webhook retry safety", () => {
       hostedInvite: {
         create: vi.fn(),
         findFirst: vi.fn().mockResolvedValue(sentInvite),
+        findUnique: vi.fn().mockResolvedValue(sentInvite),
         update: vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
           ...sentInvite,
           ...data,
@@ -678,6 +671,7 @@ describe("hosted onboarding webhook retry safety", () => {
       hostedInvite: {
         create: vi.fn(),
         findFirst: vi.fn().mockResolvedValue(pendingWebInvite),
+        findUnique: vi.fn().mockResolvedValue(pendingWebInvite),
         update: vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
           ...pendingWebInvite,
           ...data,
@@ -1302,6 +1296,7 @@ describe("hosted onboarding webhook retry safety", () => {
         findFirst: vi.fn()
           .mockResolvedValueOnce(null)
           .mockResolvedValueOnce(invite),
+        findUnique: vi.fn().mockResolvedValue(invite),
         update: vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
           ...invite,
           ...data,
@@ -1347,12 +1342,9 @@ describe("hosted onboarding webhook retry safety", () => {
             sideEffects: [
               buildLinqMessageSideEffect({
                 inviteId: "invite_123",
-                message: buildHostedInviteReply({
-                  activeSubscription: false,
-                  joinUrl: "https://join.example.test/join/join_123",
-                }),
                 replyToMessageId: "msg_123",
                 status: "pending",
+                template: "invite_signup",
               }),
             ],
             status: "processing",
@@ -1394,12 +1386,9 @@ describe("hosted onboarding webhook retry safety", () => {
                   name: "HostedOnboardingError",
                   retryable: true,
                 },
-                message: buildHostedInviteReply({
-                  activeSubscription: false,
-                  joinUrl: "https://join.example.test/join/join_123",
-                }),
                 replyToMessageId: "msg_123",
                 status: "pending",
+                template: "invite_signup",
               }),
             ],
             status: "failed",
@@ -1509,12 +1498,9 @@ describe("hosted onboarding webhook retry safety", () => {
           attemptCount: 1,
           inviteId: "invite_123",
           lastAttemptAt: "2026-03-26T12:00:00.250Z",
-          message: buildHostedInviteReply({
-            activeSubscription: false,
-            joinUrl: "https://join.example.test/join/join_123",
-          }),
           sentAt: "2026-03-26T12:00:00.400Z",
           status: "sent",
+          template: "invite_signup",
         }),
       ],
       status: "failed",
@@ -1744,8 +1730,10 @@ describe("hosted onboarding webhook retry safety", () => {
           sideEffects: [
             expect.objectContaining({
               payload: expect.objectContaining({
-                encryptedPayload: expect.stringContaining("https://join.example.test/join/join_123"),
-                keyVersion: "v1",
+                chatId: "chat_123",
+                inviteId: "invite_123",
+                replyToMessageId: "msg_123",
+                template: "invite_signup",
               }),
               result: expect.objectContaining({
                 chatId: expect.stringMatching(/^hbid:linq\.chat:v1:/),
@@ -1803,8 +1791,10 @@ describe("hosted onboarding webhook retry safety", () => {
                 retryable: null,
               },
               payload: expect.objectContaining({
-                encryptedPayload: expect.stringContaining("https://join.example.test/join/join_123"),
-                keyVersion: "v1",
+                chatId: "chat_123",
+                inviteId: "invite_123",
+                replyToMessageId: "msg_123",
+                template: "invite_signup",
               }),
               sentAt: expect.any(String),
               status: "sent_unconfirmed",
@@ -1925,8 +1915,10 @@ describe("hosted onboarding webhook retry safety", () => {
           sideEffects: [
             expect.objectContaining({
               payload: expect.objectContaining({
-                encryptedPayload: expect.stringContaining("https://join.example.test/join/join_123"),
-                keyVersion: "v1",
+                chatId: "chat_123",
+                inviteId: "invite_123",
+                replyToMessageId: "msg_123",
+                template: "invite_signup",
               }),
               result: null,
               status: "pending",
@@ -1978,8 +1970,10 @@ describe("hosted onboarding webhook retry safety", () => {
               lastAttemptAt: expect.any(String),
               lastError: null,
               payload: expect.objectContaining({
-                encryptedPayload: expect.stringContaining("https://join.example.test/join/join_123"),
-                keyVersion: "v1",
+                chatId: "chat_123",
+                inviteId: "invite_123",
+                replyToMessageId: "msg_123",
+                template: "invite_signup",
               }),
               sentAt: null,
               status: "pending",
@@ -2445,12 +2439,12 @@ function buildLinqMessageSideEffect(input: {
   inviteId: string | null;
   lastAttemptAt?: unknown;
   lastError?: unknown;
-  message?: unknown;
   messageId?: string | null;
   replyToMessageId?: unknown;
   sentAt?: unknown;
   sourceEventId?: string;
   status: "pending" | "sent" | "sent_unconfirmed";
+  template?: "daily_quota" | "invite_signin" | "invite_signup";
 }) {
   return {
     attemptCount: input.attemptCount ?? 0,
@@ -2459,13 +2453,10 @@ function buildLinqMessageSideEffect(input: {
     lastAttemptAt: input.lastAttemptAt ?? null,
     lastError: input.lastError ?? null,
     payload: {
-      encryptedPayload: `enc:${JSON.stringify({
-        chatId: input.chatId ?? "chat_123",
-        inviteId: input.inviteId,
-        message: input.message ?? expect.any(String),
-        replyToMessageId: input.replyToMessageId ?? "msg_123",
-      })}`,
-      keyVersion: "v1",
+      chatId: input.chatId ?? "chat_123",
+      inviteId: input.inviteId,
+      replyToMessageId: input.replyToMessageId ?? "msg_123",
+      template: input.template ?? "invite_signup",
     },
     result:
       input.status === "pending"
@@ -2504,6 +2495,10 @@ function makeHostedLinqDailyState(input: {
 
 function asHostedWebhookPrisma<T extends Record<string, unknown>>(prisma: T): T & HostedWebhookPrisma {
   const prismaWithHostedMember = prisma as T & HostedWebhookPrisma & {
+    hostedInvite?: {
+      findFirst?: ReturnType<typeof vi.fn>;
+      findUnique?: ReturnType<typeof vi.fn>;
+    };
     hostedMember?: {
       update?: ReturnType<typeof vi.fn>;
       updateMany?: unknown;
@@ -2512,6 +2507,10 @@ function asHostedWebhookPrisma<T extends Record<string, unknown>>(prisma: T): T 
   const hostedMember = prismaWithHostedMember.hostedMember as {
     update?: ((input: { data: Record<string, unknown> }) => Promise<unknown>) | undefined;
     updateMany?: unknown;
+  } | undefined;
+  const hostedInvite = prismaWithHostedMember.hostedInvite as {
+    findFirst?: ((input: { where?: Record<string, unknown>; select?: Record<string, unknown> }) => Promise<unknown>) | undefined;
+    findUnique?: ReturnType<typeof vi.fn>;
   } | undefined;
 
   if (hostedMember && !hostedMember.updateMany) {
@@ -2522,6 +2521,15 @@ function asHostedWebhookPrisma<T extends Record<string, unknown>>(prisma: T): T 
 
       return { count: 1 };
     });
+  }
+
+  if (hostedInvite && !hostedInvite.findUnique && hostedInvite.findFirst) {
+    hostedInvite.findUnique = vi.fn(async (input: { where?: Record<string, unknown>; select?: Record<string, unknown> }) =>
+      hostedInvite.findFirst?.({
+        select: input.select,
+        where: input.where,
+      }),
+    );
   }
 
   return prismaWithHostedMember;

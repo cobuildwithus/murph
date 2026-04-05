@@ -84,7 +84,6 @@ export class HostedLinqControlPlane {
         request: this.request,
         store: context.store,
         registry: context.registry,
-        codec: context.codec,
       });
     }
 

@@ -1,7 +1,13 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { enqueueHostedExecutionOutbox } from "../hosted-execution/outbox";
-import { sendHostedLinqChatMessage } from "./linq";
+import { hostedOnboardingError } from "./errors";
+import { buildHostedInviteUrl } from "./invite-service";
+import {
+  buildHostedDailyQuotaReply,
+  buildHostedInviteReply,
+  sendHostedLinqChatMessage,
+} from "./linq";
 import { maybeIssueHostedRevnetForStripeInvoice } from "./stripe-revnet-issuance";
 import { buildHostedWebhookReceiptLeaseWriteData } from "./webhook-receipt-store";
 import type {
@@ -90,7 +96,7 @@ async function performHostedWebhookSideEffect(
       return sendHostedLinqChatMessage({
         chatId: effect.payload.chatId,
         idempotencyKey: effect.effectId,
-        message: effect.payload.message,
+        message: await buildHostedLinqSideEffectMessage(effect, options.prisma),
         replyToMessageId: effect.payload.replyToMessageId,
         signal: options.signal,
       });
@@ -122,6 +128,58 @@ async function performHostedWebhookSideEffect(
     default:
       throw new Error(`Unsupported hosted webhook side effect kind: ${JSON.stringify(effect)}`);
   }
+}
+
+async function buildHostedLinqSideEffectMessage(
+  effect: Extract<HostedWebhookSideEffect, { kind: "linq_message_send" }>,
+  prisma: HostedWebhookReceiptPersistenceClient,
+): Promise<string> {
+  if (effect.payload.template === "daily_quota") {
+    return buildHostedDailyQuotaReply();
+  }
+
+  if (!effect.payload.inviteId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_INVITE_REQUIRED",
+      message: `Hosted webhook side effect ${effect.effectId} requires an invite id.`,
+      httpStatus: 500,
+      retryable: false,
+    });
+  }
+
+  const inviteLookup =
+    "findUnique" in prisma.hostedInvite && typeof prisma.hostedInvite.findUnique === "function"
+      ? prisma.hostedInvite.findUnique({
+          where: {
+            id: effect.payload.inviteId,
+          },
+          select: {
+            inviteCode: true,
+          },
+        })
+      : prisma.hostedInvite.findFirst({
+          where: {
+            id: effect.payload.inviteId,
+          },
+          select: {
+            inviteCode: true,
+          },
+        });
+  const invite = await inviteLookup;
+
+  if (!invite) {
+    throw hostedOnboardingError({
+      code: "HOSTED_INVITE_NOT_FOUND",
+      message: `Hosted invite ${effect.payload.inviteId} was not found for webhook side effect ${effect.effectId}.`,
+      httpStatus: 500,
+      retryable: false,
+    });
+  }
+
+  return buildHostedInviteReply({
+    activeSubscription: effect.payload.template === "invite_signin",
+    joinUrl: buildHostedInviteUrl(invite.inviteCode),
+  });
 }
 
 async function markHostedInviteSentBestEffort(

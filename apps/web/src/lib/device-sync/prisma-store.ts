@@ -20,7 +20,6 @@ import type {
   CreateHostedSignalInput,
   HostedAgentSessionAuthResult,
   HostedAgentSessionRecord,
-  HostedConnectionSecretBundle,
   CreateHostedTokenAuditInput,
   HostedPrismaTransactionClient,
   HostedSignalRecord,
@@ -35,18 +34,15 @@ export {
   hostedConnectionWithSecretArgs,
   mapHostedInternalAccountRecord,
   mapHostedPublicAccountRecord,
-  requireHostedConnectionBundleRecord,
   requireHostedPublicAccountRecord,
   type HostedConnectionWithSecretRecord,
 } from "./prisma-store/connections";
-export { buildHostedConnectionTokenCipherOptions } from "./crypto";
 export { generateHostedAgentBearerToken } from "./prisma-store/agent-sessions";
 export type {
   CreateHostedSignalInput,
   HostedAgentSessionAuthResult,
   HostedAgentSessionAuthStatus,
   HostedAgentSessionRecord,
-  HostedConnectionSecretBundle,
   CreateHostedTokenAuditInput,
   HostedPrismaTransactionClient,
   HostedSignalRecord,
@@ -58,7 +54,7 @@ export class PrismaDeviceSyncControlPlaneStore
   implements DeviceSyncPublicIngressStore, HostedBrowserAssertionNonceStore
 {
   readonly prisma: PrismaClient;
-  readonly codec: HostedSecretCodec;
+  readonly codec?: HostedSecretCodec;
   private readonly oauthSessions: PrismaHostedOAuthSessionStore;
   private readonly connections: PrismaHostedConnectionStore;
   private readonly webhookTraces: PrismaHostedWebhookTraceStore;
@@ -68,13 +64,12 @@ export class PrismaDeviceSyncControlPlaneStore
   private readonly localHeartbeats: PrismaHostedLocalHeartbeatStore;
   private readonly tokenAudits: PrismaHostedTokenAuditStore;
 
-  constructor(input: { prisma: PrismaClient; codec: HostedSecretCodec }) {
+  constructor(input: { prisma: PrismaClient; codec?: HostedSecretCodec }) {
     this.prisma = input.prisma;
     this.codec = input.codec;
     this.oauthSessions = new PrismaHostedOAuthSessionStore(this.prisma);
     this.connections = new PrismaHostedConnectionStore({
       prisma: this.prisma,
-      codec: this.codec,
     });
     this.webhookTraces = new PrismaHostedWebhookTraceStore(this.prisma);
     this.signals = new PrismaHostedSignalStore(this.prisma);
@@ -140,10 +135,6 @@ export class PrismaDeviceSyncControlPlaneStore
 
   async getConnectionOwnerId(connectionId: string): Promise<string | null> {
     return this.connections.getConnectionOwnerId(connectionId);
-  }
-
-  async getConnectionBundleForUser(userId: string, connectionId: string): Promise<HostedConnectionSecretBundle | null> {
-    return this.connections.getConnectionBundleForUser(userId, connectionId);
   }
 
   async createSignal(input: CreateHostedSignalInput): Promise<HostedSignalRecord> {

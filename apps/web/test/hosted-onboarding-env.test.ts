@@ -120,19 +120,9 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.linqApiBaseUrl).toBe("https://api.linqapp.com/api/partner/v3");
   });
 
-  it("requires HOSTED_ONBOARDING_ENCRYPTION_KEY", () => {
-    expect(() =>
-      readHostedOnboardingEnvironment({
-        HOSTED_CONTACT_PRIVACY_KEY: TEST_KEY,
-        NODE_ENV: "test",
-      }),
-    ).toThrow(/HOSTED_ONBOARDING_ENCRYPTION_KEY/u);
-  });
-
   it("requires HOSTED_CONTACT_PRIVACY_KEY", () => {
     expect(() =>
       readHostedOnboardingEnvironment({
-        HOSTED_ONBOARDING_ENCRYPTION_KEY: TEST_KEY,
         NODE_ENV: "test",
       }),
     ).toThrow(/HOSTED_CONTACT_PRIVACY_KEY/u);
@@ -158,7 +148,6 @@ describe("readHostedOnboardingEnvironment", () => {
 function createProcessEnv(values: Record<string, string>): NodeJS.ProcessEnv {
   return {
     HOSTED_CONTACT_PRIVACY_KEY: TEST_KEY,
-    HOSTED_ONBOARDING_ENCRYPTION_KEY: TEST_KEY,
     NODE_ENV: "test",
     ...values,
   };

@@ -11,18 +11,11 @@ import type {
   PublicDeviceSyncAccount,
   UpsertPublicDeviceSyncConnectionInput,
 } from "@murphai/device-syncd/public-ingress";
-import {
-  buildHostedConnectionTokenCipherOptions,
-  type HostedSecretCodec,
-} from "../crypto";
 import { generateHostedRandomPrefixedId, maybeIsoTimestamp, toJsonRecord } from "../shared";
 import { toPrismaJsonObject } from "./prisma-json";
-import type { HostedConnectionSecretBundle, HostedPrismaTransactionClient } from "./types";
+import type { HostedPrismaTransactionClient } from "./types";
 
 export const hostedConnectionWithSecretArgs = {
-  include: {
-    secret: true,
-  },
 } satisfies Prisma.DeviceConnectionDefaultArgs;
 
 type HostedPublicAccountPrismaRecord = Prisma.DeviceConnectionGetPayload<Prisma.DeviceConnectionDefaultArgs>;
@@ -30,11 +23,9 @@ export type HostedConnectionWithSecretRecord = Prisma.DeviceConnectionGetPayload
 
 export class PrismaHostedConnectionStore {
   readonly prisma: PrismaClient;
-  readonly codec: HostedSecretCodec;
 
-  constructor(input: { prisma: PrismaClient; codec: HostedSecretCodec }) {
+  constructor(input: { prisma: PrismaClient }) {
     this.prisma = input.prisma;
-    this.codec = input.codec;
   }
 
   async upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): Promise<PublicDeviceSyncAccount> {
@@ -54,25 +45,6 @@ export class PrismaHostedConnectionStore {
       });
 
       if (existing) {
-        const accessTokenEncrypted = this.codec.encrypt(
-          input.tokens.accessToken,
-          buildHostedConnectionTokenCipherOptions({
-            connectionId: existing.id,
-            provider: existing.provider,
-            purpose: "device-sync-access-token",
-          }),
-        );
-        const refreshTokenEncrypted = input.tokens.refreshToken
-          ? this.codec.encrypt(
-              input.tokens.refreshToken,
-              buildHostedConnectionTokenCipherOptions({
-                connectionId: existing.id,
-                provider: existing.provider,
-                purpose: "device-sync-refresh-token",
-              }),
-            )
-          : null;
-
         if (ownerId && existing.userId !== ownerId) {
           throw deviceSyncError({
             code: "CONNECTION_OWNERSHIP_CONFLICT",
@@ -100,27 +72,6 @@ export class PrismaHostedConnectionStore {
           },
         });
 
-        await tx.deviceConnectionSecret.upsert({
-          where: {
-            connectionId: existing.id,
-          },
-          create: {
-            connectionId: existing.id,
-            accessTokenEncrypted,
-            refreshTokenEncrypted,
-            tokenVersion: 1,
-            keyVersion: this.codec.keyVersion,
-          },
-          update: {
-            accessTokenEncrypted,
-            refreshTokenEncrypted,
-            tokenVersion: {
-              increment: 1,
-            },
-            keyVersion: this.codec.keyVersion,
-          },
-        });
-
         const updated = await tx.deviceConnection.findUnique({
           where: {
             id: existing.id,
@@ -140,24 +91,6 @@ export class PrismaHostedConnectionStore {
       }
 
       const connectionId = generateHostedRandomPrefixedId("dsc");
-      const accessTokenEncrypted = this.codec.encrypt(
-        input.tokens.accessToken,
-        buildHostedConnectionTokenCipherOptions({
-          connectionId,
-          provider: input.provider,
-          purpose: "device-sync-access-token",
-        }),
-      );
-      const refreshTokenEncrypted = input.tokens.refreshToken
-        ? this.codec.encrypt(
-            input.tokens.refreshToken,
-            buildHostedConnectionTokenCipherOptions({
-              connectionId,
-              provider: input.provider,
-              purpose: "device-sync-refresh-token",
-            }),
-          )
-        : null;
 
       await tx.deviceConnection.create({
         data: {
@@ -172,15 +105,6 @@ export class PrismaHostedConnectionStore {
           metadataJson: toPrismaJsonObject(metadata),
           connectedAt: new Date(input.connectedAt),
           nextReconcileAt: input.nextReconcileAt ? new Date(input.nextReconcileAt) : null,
-        },
-      });
-      await tx.deviceConnectionSecret.create({
-        data: {
-          connectionId,
-          accessTokenEncrypted,
-          refreshTokenEncrypted,
-          tokenVersion: 1,
-          keyVersion: this.codec.keyVersion,
         },
       });
 
@@ -254,22 +178,6 @@ export class PrismaHostedConnectionStore {
     return record?.userId ?? null;
   }
 
-  async getConnectionBundleForUser(userId: string, connectionId: string): Promise<HostedConnectionSecretBundle | null> {
-    const record = await this.prisma.deviceConnection.findFirst({
-      where: {
-        id: connectionId,
-        userId,
-      },
-      ...hostedConnectionWithSecretArgs,
-    });
-
-    if (!record) {
-      return null;
-    }
-
-    return requireHostedConnectionBundleRecord(record, this.codec);
-  }
-
   async markConnectionDisconnected(input: {
     connectionId: string;
     userId: string;
@@ -294,12 +202,6 @@ export class PrismaHostedConnectionStore {
           httpStatus: 404,
         });
       }
-
-      await tx.deviceConnectionSecret.deleteMany({
-        where: {
-          connectionId: input.connectionId,
-        },
-      });
 
       return tx.deviceConnection.update({
         where: {
@@ -381,46 +283,4 @@ export function requireHostedPublicAccountRecord(
   }
 
   return mapHostedPublicAccountRecord(record);
-}
-
-export function requireHostedConnectionBundleRecord(
-  record: HostedConnectionWithSecretRecord | null | undefined,
-  codec: HostedSecretCodec,
-): HostedConnectionSecretBundle {
-  if (!record?.secret) {
-    throw deviceSyncError({
-      code: "CONNECTION_SECRET_MISSING",
-      message: "Hosted device-sync connection no longer has an escrowed token bundle.",
-      retryable: false,
-      httpStatus: 409,
-    });
-  }
-
-  return {
-    userId: record.userId,
-    account: {
-      ...mapHostedInternalAccountRecord(record),
-      disconnectGeneration: 0,
-      accessToken: codec.decrypt(
-        record.secret.accessTokenEncrypted,
-        buildHostedConnectionTokenCipherOptions({
-          connectionId: record.id,
-          provider: record.provider,
-          purpose: "device-sync-access-token",
-        }),
-      ),
-      refreshToken: record.secret.refreshTokenEncrypted
-        ? codec.decrypt(
-            record.secret.refreshTokenEncrypted,
-            buildHostedConnectionTokenCipherOptions({
-              connectionId: record.id,
-              provider: record.provider,
-              purpose: "device-sync-refresh-token",
-            }),
-          )
-        : null,
-    },
-    tokenVersion: record.secret.tokenVersion,
-    keyVersion: record.secret.keyVersion,
-  } satisfies HostedConnectionSecretBundle;
 }

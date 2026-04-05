@@ -3,6 +3,7 @@ import {
   readHostedExecutionControlEnvironment,
   type HostedExecutionControlClient,
 } from "@murphai/hosted-execution";
+import type { SharePack } from "@murphai/contracts";
 import { createHostedVerifiedEmailUserEnv } from "@murphai/runtime-state";
 
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
@@ -65,4 +66,23 @@ export async function syncHostedVerifiedEmailToHostedExecution(input: {
       verifiedAt: input.verifiedAt,
     };
   }
+}
+
+export async function writeHostedSharePackToHostedExecution(input: {
+  pack: SharePack;
+  shareId: string;
+}): Promise<SharePack> {
+  return requireHostedExecutionControlClient().putSharePack(input.shareId, input.pack);
+}
+
+export async function readHostedSharePackFromHostedExecution(
+  shareId: string,
+): Promise<SharePack | null> {
+  return requireHostedExecutionControlClient().getSharePack(shareId);
+}
+
+export async function deleteHostedSharePackFromHostedExecution(
+  shareId: string,
+): Promise<void> {
+  await requireHostedExecutionControlClient().deleteSharePack(shareId);
 }
