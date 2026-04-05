@@ -17,7 +17,8 @@ const faqItems = [
   },
   {
     question: "How much does it cost?",
-    answer: "$5 / month.",
+    answer:
+      "Run it locally for free on your Mac or Linux computer. The managed version is just $5/month for always-online Murph and full privacy-preserving design.",
   },
 ] as const;
 
