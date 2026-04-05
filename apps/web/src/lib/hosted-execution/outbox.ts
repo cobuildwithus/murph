@@ -16,6 +16,7 @@ import {
 
 import { finalizeHostedShareAcceptance } from "../hosted-share/shared";
 import { getPrisma } from "../prisma";
+import { deleteHostedSharePackFromHostedExecution } from "./control";
 import { dispatchHostedExecutionStatus } from "./dispatch";
 import {
   hydrateHostedExecutionDispatch,
@@ -257,8 +258,7 @@ async function processHostedExecutionOutboxRecord(
       prisma,
       record,
     });
-
-    return finalizeHostedExecutionOutboxAttempt(prisma, record, {
+    const updatedRecord = await finalizeHostedExecutionOutboxAttempt(prisma, record, {
       acceptedAt:
         lifecycle.status === ExecutionOutboxStatus.pending
           ? record.acceptedAt
@@ -279,6 +279,13 @@ async function processHostedExecutionOutboxRecord(
       payloadJson: serializeHostedExecutionOutboxPayload(dispatch),
       status: lifecycle.status,
     });
+    await cleanupHostedExecutionSourceIfNeeded({
+      dispatch,
+      lifecycle,
+      record: updatedRecord,
+    });
+
+    return updatedRecord;
   } catch (error) {
     const permanentHydrationFailure = isPermanentHostedExecutionHydrationError(error);
     return finalizeHostedExecutionOutboxAttempt(prisma, record, {
@@ -435,6 +442,32 @@ async function finalizeHostedExecutionSourceIfNeeded(input: {
     prisma: input.prisma,
     shareId: input.dispatch.event.share.shareId,
   });
+}
+
+async function cleanupHostedExecutionSourceIfNeeded(input: {
+  dispatch: HostedExecutionDispatchRequest;
+  lifecycle: {
+    lastError: string | null;
+    status: ExecutionOutboxStatus;
+  };
+  record: ExecutionOutbox;
+}): Promise<void> {
+  if (
+    input.record.sourceType !== "hosted_share_link"
+    || input.lifecycle.status !== ExecutionOutboxStatus.completed
+    || input.dispatch.event.kind !== "vault.share.accepted"
+  ) {
+    return;
+  }
+
+  try {
+    await deleteHostedSharePackFromHostedExecution(input.dispatch.event.share.shareId);
+  } catch (error) {
+    console.error(
+      `Hosted share ${input.dispatch.event.share.shareId} completed but its Cloudflare pack could not be deleted.`,
+      error instanceof Error ? error.message : String(error),
+    );
+  }
 }
 
 function computeRetryDelayMs(attemptCount: number): number {

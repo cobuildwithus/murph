@@ -198,9 +198,34 @@ describe("hosted share service", () => {
     expect(finalizedPageData.stage).toBe("consumed");
     expect(finalizedPageData.share?.acceptedByCurrentMember).toBe(true);
     expect(prisma.rows[0]?.consumedByMemberId).toBe("member_123");
+
+    mocks.sharePacks.delete(prisma.rows[0]?.id ?? "");
+
+    const consumedWithoutPackPageData = await buildHostedSharePageData({
+      authenticatedMember: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+      } as never,
+      prisma: prisma as never,
+      shareCode: created.shareCode,
+    });
+
+    expect(consumedWithoutPackPageData.stage).toBe("consumed");
+    expect(consumedWithoutPackPageData.share?.preview).toEqual({
+      counts: {
+        foods: 0,
+        protocols: 0,
+        recipes: 0,
+      },
+      foodTitles: [],
+      protocolTitles: [],
+      recipeTitles: [],
+      logMealAfterImport: false,
+      title: "Shared Murph pack",
+    });
   });
 
-  it("fails before claiming a share when the Cloudflare-backed pack is missing", async () => {
+  it("claims a share without reading the Cloudflare-backed pack first", async () => {
     const prisma = createHostedSharePrisma();
     const created = await createHostedShareLink({
       prisma: prisma as never,
@@ -210,22 +235,36 @@ describe("hosted share service", () => {
 
     mocks.sharePacks.delete(prisma.rows[0]?.id ?? "");
 
-    await expect(acceptHostedShareLink({
+    const result = await acceptHostedShareLink({
       member: {
         billingStatus: HostedBillingStatus.active,
         id: "member_123",
       } as never,
       prisma: prisma as never,
       shareCode: created.shareCode,
-    })).rejects.toMatchObject({
-      code: "HOSTED_SHARE_PACK_NOT_FOUND",
-      httpStatus: 404,
+    });
+    expect(result).toMatchObject({
+      alreadyImported: false,
+      imported: false,
+      pending: true,
+      preview: {
+        counts: {
+          foods: 0,
+          protocols: 0,
+          recipes: 0,
+        },
+        foodTitles: [],
+        protocolTitles: [],
+        recipeTitles: [],
+        logMealAfterImport: false,
+        title: "Shared Murph pack",
+      },
     });
 
-    expect(prisma.rows[0]?.acceptedAt).toBeNull();
-    expect(prisma.rows[0]?.acceptedByMemberId).toBeNull();
-    expect(prisma.rows[0]?.lastEventId).toBeNull();
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(prisma.rows[0]?.acceptedAt).toBeInstanceOf(Date);
+    expect(prisma.rows[0]?.acceptedByMemberId).toBe("member_123");
+    expect(prisma.rows[0]?.lastEventId).toContain(`vault.share.accepted:${prisma.rows[0]?.id}:member_123:`);
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledOnce();
   });
 
   it("keeps the hosted share claim and reuses the same event id after a transport failure", async () => {

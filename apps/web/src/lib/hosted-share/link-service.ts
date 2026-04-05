@@ -13,6 +13,7 @@ import {
 import {
   buildHostedSharePreview,
   buildHostedShareUrl,
+  createHostedShareMinimalPreview,
   findHostedShareLinkByCode,
   generateHostedShareCode,
   generateHostedShareId,
@@ -122,7 +123,6 @@ export async function buildHostedSharePageData(input: {
     };
   }
 
-  const preview = buildHostedSharePreview((await readHostedSharePack(record)).pack);
   const now = new Date();
   const consumed = Boolean(record.consumedAt);
   const acceptedByCurrentMember = record.consumedByMemberId === authenticatedMember?.id
@@ -131,11 +131,14 @@ export async function buildHostedSharePageData(input: {
     ? "consumed"
     : acceptedByCurrentMember
       ? "processing"
-      : record.expiresAt <= now
-        ? "expired"
-        : sessionActive
-          ? "ready"
-          : "signin";
+        : record.expiresAt <= now
+          ? "expired"
+          : sessionActive
+            ? "ready"
+            : "signin";
+  const preview = stage === "consumed" || stage === "expired"
+    ? createHostedShareMinimalPreview(record.previewTitle)
+    : buildHostedSharePreview((await readHostedSharePack(record)).pack);
 
   return {
     inviteCode: normalizeOptionalString(input.inviteCode) ?? null,
