@@ -6,7 +6,7 @@ import {
   requireAuthenticatedHostedUser,
   type AuthenticatedHostedUser,
 } from "../device-sync/auth";
-import { HostedDeviceSyncAgentSessionService } from "../device-sync/agent-session-service";
+import { HostedAgentSessionService } from "../hosted-agent-sessions";
 import {
   createHostedDeviceSyncControlPlaneContext,
   type HostedDeviceSyncControlPlaneContext,
@@ -16,18 +16,16 @@ import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { readHostedPhoneHint } from "../hosted-onboarding/contact-privacy";
 import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { readRawBodyBuffer } from "../http";
-import { readHostedWebhookReceiptState } from "../hosted-onboarding/webhook-receipt-codec";
 import {
   markHostedWebhookReceiptCompleted,
   markHostedWebhookReceiptFailed,
   queueHostedWebhookReceiptSideEffects,
+  readHostedWebhookReceiptState,
   recordHostedWebhookReceipt,
-} from "../hosted-onboarding/webhook-receipt-store";
-import type {
-  HostedWebhookEventPayload,
-  HostedWebhookReceiptClaim,
-  HostedWebhookResponsePayload,
-} from "../hosted-onboarding/webhook-receipt-types";
+  type HostedWebhookEventPayload,
+  type HostedWebhookReceiptClaim,
+  type HostedWebhookResponsePayload,
+} from "../hosted-webhook-receipts";
 import { hostedLinqError } from "./errors";
 import { fetchLinqApi, LinqApiTimeoutError } from "./api";
 import { readHostedLinqEnvironment } from "./env";
@@ -62,7 +60,7 @@ export class HostedLinqControlPlane {
   readonly env = readHostedLinqEnvironment();
   private store: PrismaLinqControlPlaneStore | null = null;
   private deviceSyncContext: HostedDeviceSyncControlPlaneContext | null = null;
-  private agentSessions: HostedDeviceSyncAgentSessionService | null = null;
+  private agentSessions: HostedAgentSessionService | null = null;
   private authenticatedUserPromise: Promise<AuthenticatedHostedUser> | null = null;
 
   constructor(request: Request) {
@@ -80,10 +78,10 @@ export class HostedLinqControlPlane {
   private getAgentSessions() {
     if (!this.agentSessions) {
       const context = this.getDeviceSyncContext();
-      this.agentSessions = new HostedDeviceSyncAgentSessionService({
+      this.agentSessions = new HostedAgentSessionService({
         request: this.request,
         store: context.store,
-        registry: context.registry,
+        pairPath: HOSTED_LINQ_AGENT_PAIR_PATH,
       });
     }
 

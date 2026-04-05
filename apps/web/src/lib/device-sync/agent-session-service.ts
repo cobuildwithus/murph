@@ -8,7 +8,11 @@ import type {
   ProviderAuthTokens,
   PublicDeviceSyncAccount,
 } from "@murphai/device-syncd/public-ingress";
-import type { AuthenticatedHostedUser } from "./auth";
+import {
+  HostedAgentSessionService,
+  type HostedAgentSessionBearer,
+  type HostedAgentUser,
+} from "../hosted-agent-sessions";
 import { requireHostedExecutionControlClient } from "../hosted-execution/control";
 import {
   composeHostedRuntimeDeviceSyncAccount,
@@ -17,25 +21,23 @@ import {
 } from "./internal-runtime";
 import { requireHostedDeviceSyncProvider } from "./providers";
 import {
-  generateHostedAgentBearerToken,
   type HostedAgentSessionRecord,
   type HostedPrismaTransactionClient,
   type UpdateLocalHeartbeatInput,
   mapHostedPublicAccountRecord,
   PrismaDeviceSyncControlPlaneStore,
 } from "./prisma-store";
-import { parseInteger, sha256Hex, toIsoTimestamp, toJsonRecord } from "./shared";
+import { parseInteger, toIsoTimestamp, toJsonRecord } from "./shared";
 
+const HOSTED_DEVICE_SYNC_AGENT_PAIR_PATH = "/api/device-sync/agents/pair";
 const TOKEN_REFRESH_LEEWAY_MS = 5 * 60_000;
-const HOSTED_AGENT_SESSION_TTL_MS = 24 * 60 * 60_000;
-
-export interface HostedAgentSessionBearer {
-  id: string;
-  label: string | null;
-  createdAt: string;
-  expiresAt: string;
-  bearerToken: string;
-}
+const HOSTED_DEVICE_SYNC_AGENT_AUTH_MESSAGES = {
+  required:
+    "Hosted device-sync agent routes require a bearer token created by /api/device-sync/agents/pair.",
+  expired:
+    "Hosted device-sync agent bearer token expired. Pair again or keep using the latest bearer returned by export-token-bundle or refresh-token-bundle.",
+  invalid: "Hosted device-sync agent bearer token is invalid or revoked.",
+} as const;
 
 export interface HostedTokenExport {
   accessToken: string;
@@ -64,92 +66,37 @@ type HostedTokenRefreshLockResult =
     };
 
 export class HostedDeviceSyncAgentSessionService {
-  readonly request: Request;
   readonly store: PrismaDeviceSyncControlPlaneStore;
   readonly registry: DeviceSyncRegistry;
+  readonly agentSessions: HostedAgentSessionService;
 
   constructor(input: {
     request: Request;
     store: PrismaDeviceSyncControlPlaneStore;
     registry: DeviceSyncRegistry;
   }) {
-    this.request = input.request;
     this.store = input.store;
     this.registry = input.registry;
-  }
-
-  async requireAgentSession() {
-    const header = this.request.headers.get("authorization") ?? "";
-    const [scheme, rawToken] = header.split(/\s+/u);
-
-    if (scheme?.toLowerCase() !== "bearer" || !rawToken) {
-      throw deviceSyncError({
-        code: "AGENT_AUTH_REQUIRED",
-        message: "Hosted device-sync agent routes require a bearer token created by /api/device-sync/agents/pair.",
-        retryable: false,
-        httpStatus: 401,
-      });
-    }
-
-    const auth = await this.store.authenticateAgentSessionByTokenHash(sha256Hex(rawToken), toIsoTimestamp(new Date()));
-
-    if (auth.status === "active" && auth.session) {
-      return auth.session;
-    }
-
-    if (auth.status === "expired") {
-      throw deviceSyncError({
-        code: "AGENT_AUTH_EXPIRED",
-        message:
-          "Hosted device-sync agent bearer token expired. Pair again or keep using the latest bearer returned by export-token-bundle or refresh-token-bundle.",
-        retryable: false,
-        httpStatus: 401,
-      });
-    }
-
-    if (auth.status === "revoked" || auth.status === "missing") {
-      throw deviceSyncError({
-        code: "AGENT_AUTH_INVALID",
-        message: "Hosted device-sync agent bearer token is invalid or revoked.",
-        retryable: false,
-        httpStatus: 401,
-      });
-    }
-
-    throw deviceSyncError({
-      code: "AGENT_AUTH_INVALID",
-      message: "Hosted device-sync agent bearer token is invalid or revoked.",
-      retryable: false,
-      httpStatus: 401,
+    this.agentSessions = new HostedAgentSessionService({
+      request: input.request,
+      store: input.store,
+      pairPath: HOSTED_DEVICE_SYNC_AGENT_PAIR_PATH,
+      messages: HOSTED_DEVICE_SYNC_AGENT_AUTH_MESSAGES,
     });
   }
 
+  async requireAgentSession() {
+    return this.agentSessions.requireAgentSession();
+  }
+
   async createAgentSession(
-    user: AuthenticatedHostedUser,
+    user: HostedAgentUser,
     label: string | null,
   ): Promise<{
     agent: { id: string; label: string | null; createdAt: string; expiresAt: string };
     token: string;
   }> {
-    const token = generateHostedAgentBearerToken();
-    const now = toIsoTimestamp(new Date());
-    const session = await this.store.createAgentSession({
-      user,
-      label,
-      tokenHash: token.tokenHash,
-      now,
-      expiresAt: resolveHostedAgentSessionExpiry(now),
-    });
-
-    return {
-      agent: {
-        id: session.id,
-        label: session.label,
-        createdAt: session.createdAt,
-        expiresAt: session.expiresAt,
-      },
-      token: token.token,
-    };
+    return this.agentSessions.createAgentSession(user, label);
   }
 
   async listSignals(agentUserId: string, url: URL) {
@@ -462,29 +409,7 @@ export class HostedDeviceSyncAgentSessionService {
       revokeReason: string | null;
     };
   }> {
-    const now = toIsoTimestamp(new Date());
-    const revoked = await this.store.revokeAgentSession({
-      sessionId: session.id,
-      now,
-      reason: "agent_request",
-    });
-
-    if (!revoked?.revokedAt) {
-      throw deviceSyncError({
-        code: "AGENT_AUTH_INVALID",
-        message: "Hosted device-sync agent bearer token is invalid or revoked.",
-        retryable: false,
-        httpStatus: 401,
-      });
-    }
-
-    return {
-      agentSession: {
-        id: revoked.id,
-        revokedAt: revoked.revokedAt,
-        revokeReason: revoked.revokeReason,
-      },
-    };
+    return this.agentSessions.revokeAgentSession(session);
   }
 
   async recordLocalHeartbeat(
@@ -552,21 +477,7 @@ export class HostedDeviceSyncAgentSessionService {
   }
 
   private async rotateAgentSession(session: HostedAgentSessionRecord, now: string): Promise<HostedAgentSessionBearer> {
-    const token = generateHostedAgentBearerToken();
-    const rotated = await this.store.rotateAgentSession({
-      sessionId: session.id,
-      tokenHash: token.tokenHash,
-      now,
-      expiresAt: resolveHostedAgentSessionExpiry(now),
-    });
-
-    return {
-      id: rotated.id,
-      label: rotated.label,
-      createdAt: rotated.createdAt,
-      expiresAt: rotated.expiresAt,
-      bearerToken: token.token,
-    };
+    return this.agentSessions.rotateAgentSession(session, now);
   }
 
   private async refreshProviderTokensWithStatusHandling(input: {
@@ -670,9 +581,6 @@ function assertHostedDeviceSyncRuntimeRefreshApplied(input: {
   });
 }
 
-function resolveHostedAgentSessionExpiry(now: string): string {
-  return new Date(Date.parse(now) + HOSTED_AGENT_SESSION_TTL_MS).toISOString();
-}
 
 function shouldRefreshHostedToken(accessTokenExpiresAt: string | null, now: string): boolean {
   if (!accessTokenExpiresAt) {
