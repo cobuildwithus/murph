@@ -9,7 +9,7 @@ import {
   addInterventionRecord,
   deleteInterventionRecord,
   editInterventionRecord,
-} from '../usecases/intervention.js'
+} from '@murphai/assistant-core/usecases/intervention'
 import {
   createDirectEntityDeleteCommandDefinition,
   createDirectEventBackedEntityEditCommandDefinition,

@@ -73,7 +73,7 @@ vi.mock('@murphai/assistant-core/assistant/channel-adapters', async () => {
 import {
   buildResolveAssistantSessionInput,
   sendAssistantMessage,
-} from '../src/assistant/service.js'
+} from '@murphai/assistant-cli/assistant/service'
 import type { AssistantToolCatalog } from '@murphai/assistant-core/model-harness'
 import { getAssistantStateDocument } from '@murphai/assistant-core/assistant/state'
 import {

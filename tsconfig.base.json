@@ -133,24 +133,6 @@
       "murph": [
         "packages/cli/src/index.ts"
       ],
-      "murph/assistant/automation": [
-        "packages/cli/src/assistant/automation.ts"
-      ],
-      "murph/assistant/cron": [
-        "packages/cli/src/assistant/cron.ts"
-      ],
-      "murph/assistant/service": [
-        "packages/cli/src/assistant/service.ts"
-      ],
-      "murph/assistant/outbox": [
-        "packages/cli/src/assistant/outbox.ts"
-      ],
-      "murph/assistant/status": [
-        "packages/cli/src/assistant/status.ts"
-      ],
-      "murph/assistant/store": [
-        "packages/cli/src/assistant/store.ts"
-      ],
       "@murphai/device-syncd": [
         "packages/device-syncd/src/index.ts"
       ],

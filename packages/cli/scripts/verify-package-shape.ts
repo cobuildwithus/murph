@@ -117,16 +117,8 @@ assert(
 )
 assert(
   JSON.stringify(Object.keys(packageJson.exports ?? {}).sort()) ===
-    JSON.stringify([
-      '.',
-      './assistant/automation',
-      './assistant/cron',
-      './assistant/outbox',
-      './assistant/service',
-      './assistant/status',
-      './assistant/store',
-    ]),
-  'package.json must expose only the intentional CLI root and daemon-wrapper subpaths.',
+    JSON.stringify(['.']),
+  'package.json must expose only the CLI root entrypoint.',
 )
 assert(
   packageJson.exports?.['./assistant-core'] === undefined,
@@ -140,14 +132,19 @@ assert(
   rootTsconfigBase.compilerOptions?.paths?.['murph/vault-cli-services'] === undefined,
   'tsconfig.base.json must not preserve the removed vault-cli-services compatibility path alias.',
 )
-assert(
-  packageJson.exports?.['./assistant/service']?.default === './dist/assistant/service.js',
-  'package.json must publish assistant/service from dist/assistant/service.js.',
-)
-assert(
-  packageJson.exports?.['./assistant/service']?.types === './dist/assistant/service.d.ts',
-  'package.json must publish assistant/service types from dist/assistant/service.d.ts.',
-)
+for (const removedAssistantPathAlias of [
+  'murph/assistant/automation',
+  'murph/assistant/cron',
+  'murph/assistant/service',
+  'murph/assistant/outbox',
+  'murph/assistant/status',
+  'murph/assistant/store',
+]) {
+  assert(
+    rootTsconfigBase.compilerOptions?.paths?.[removedAssistantPathAlias] === undefined,
+    `tsconfig.base.json must not preserve the removed ${removedAssistantPathAlias} compatibility path alias.`,
+  )
+}
 assert(
   packageJson.exports?.['./assistant/state-ids'] === undefined,
   'package.json must not publish the removed assistant/state-ids compatibility subpath.',

@@ -15,7 +15,7 @@ import {
   UNSAFE_FOREGROUND_LOG_DETAILS_ENV,
   formatInboxRunEventForTerminal,
   resolveForegroundTerminalLogOptions,
-} from '../src/run-terminal-logging.js'
+} from '@murphai/assistant-cli/run-terminal-logging'
 import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 import { createVaultCli } from '../src/vault-cli.js'
 import { createUnwiredVaultServices } from '@murphai/assistant-core/vault-services'

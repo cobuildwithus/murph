@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, test } from 'vitest'
-import { createAssistantRuntimeStateService } from '../src/assistant-runtime.js'
+import { createAssistantRuntimeStateService } from '@murphai/assistant-cli/assistant-runtime'
 
 const cleanupPaths: string[] = []
 

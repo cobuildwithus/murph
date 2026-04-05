@@ -25,12 +25,12 @@ import {
   shouldAutoLaunchAssistantAfterSetup,
   shouldRunSetupWizard,
   type SuccessfulSetupContext,
-} from '../src/setup-cli.js'
+} from '@murphai/setup-cli/setup-cli'
 import {
   readAssistantAutomationState,
   saveAssistantAutomationState,
 } from '@murphai/assistant-core/assistant-state'
-import { listAssistantCronJobs } from '../src/assistant/cron.js'
+import { listAssistantCronJobs } from '@murphai/assistant-cli/assistant/cron'
 import {
   buildAssistantProviderDefaultsPatch,
   readOperatorConfig,
@@ -41,9 +41,9 @@ import {
 import {
   createSetupAssistantAccountResolver,
   detectCodexAccountFromAuthJson,
-} from '../src/setup-assistant-account.js'
-import { createSetupServices } from '../src/setup-services.js'
-import { configureSetupScheduledUpdates } from '../src/setup-services/scheduled-updates.js'
+} from '@murphai/setup-cli/setup-assistant-account'
+import { createSetupServices } from '@murphai/setup-cli/setup-services'
+import { configureSetupScheduledUpdates } from '@murphai/setup-cli/setup-services/scheduled-updates'
 import {
   describeSelectedSetupWearables,
   resolveSetupChannelMissingEnv,
@@ -61,7 +61,7 @@ import {
   resolveSetupWizardInitialScheduledUpdates,
   resolveSetupWizardAssistantSelection,
   type SetupWizardResult,
-} from '../src/setup-wizard.js'
+} from '@murphai/setup-cli/setup-wizard'
 import {
   commandOutputFromError,
   ensureCliRuntimeArtifacts,

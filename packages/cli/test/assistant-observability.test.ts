@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/pr
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, test } from 'vitest'
-import { runAssistantDoctor } from '../src/assistant/doctor.js'
+import { runAssistantDoctor } from '@murphai/assistant-cli/assistant/doctor'
 import { recordAssistantDiagnosticEvent } from '@murphai/assistant-core/assistant/diagnostics'
 import { appendAssistantRuntimeEvent } from '@murphai/assistant-core/assistant/runtime-events'
 import { readAssistantTurnReceipt } from '@murphai/assistant-core/assistant/turns'
@@ -11,9 +11,9 @@ import {
   createAssistantOutboxIntent,
   drainAssistantOutbox,
   readAssistantOutboxIntent,
-} from '../src/assistant/outbox.js'
-import { getAssistantStatus } from '../src/assistant/status.js'
-import { readAssistantStatusSnapshot } from '../src/assistant-runtime.js'
+} from '@murphai/assistant-cli/assistant/outbox'
+import { getAssistantStatus } from '@murphai/assistant-cli/assistant/status'
+import { readAssistantStatusSnapshot } from '@murphai/assistant-cli/assistant-runtime'
 import { resolveAssistantStatePaths } from '@murphai/assistant-core/assistant-state'
 import { deliverAssistantMessage } from '@murphai/assistant-core/outbound-channel'
 

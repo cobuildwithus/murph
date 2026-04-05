@@ -62,7 +62,7 @@ import {
   type AssistantModelDiscoveryResult,
   resolveAssistantModelCatalog,
   resolveAssistantTargetCapabilities,
-} from '../src/assistant/provider-catalog.js'
+} from '@murphai/assistant-cli/assistant/provider-catalog'
 import {
   buildAssistantProviderDefaultsPatch,
   resolveAssistantProviderDefaults,
@@ -74,7 +74,7 @@ import {
 import {
   createSetupAssistantResolver,
   DEFAULT_SETUP_CODEX_REASONING_EFFORT,
-} from '../src/setup-assistant.js'
+} from '@murphai/setup-cli/setup-assistant'
 
 beforeEach(() => {
   providerMocks.executeCodexPrompt.mockReset()

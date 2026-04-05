@@ -10,7 +10,7 @@ import {
   resolveAssistantInkTheme,
   resolveAssistantInkThemeMode,
   resolveAssistantInkThemeModeForOpenChat,
-} from '../src/assistant/ui/theme.js'
+} from '@murphai/assistant-cli/assistant/ui/theme'
 
 test('assistant Ink theme infers dark and light terminal backgrounds from COLORFGBG', () => {
   assert.equal(inferAssistantInkThemeModeFromColorFgbg('15;0'), 'dark')

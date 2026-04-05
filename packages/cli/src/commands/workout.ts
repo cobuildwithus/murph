@@ -33,21 +33,21 @@ import {
   logWorkoutFormat,
   saveWorkoutFormat,
   showWorkoutFormat,
-} from '../usecases/workout-format.js'
+} from '@murphai/assistant-core/usecases/workout-format'
 import {
   addWorkoutRecord,
   deleteWorkoutRecord,
   editWorkoutRecord,
-} from '../usecases/workout.js'
+} from '@murphai/assistant-core/usecases/workout'
 import {
   importWorkoutCsv,
   inspectWorkoutCsvImport,
-} from '../usecases/workout-import.js'
+} from '@murphai/assistant-core/usecases/workout-import'
 import {
   addWorkoutMeasurementRecord,
   setWorkoutUnitPreferences,
   showWorkoutUnitPreferences,
-} from '../usecases/workout-measurement.js'
+} from '@murphai/assistant-core/usecases/workout-measurement'
 import {
   createDirectEntityDeleteCommandDefinition,
   createDirectEventBackedEntityEditCommandDefinition,

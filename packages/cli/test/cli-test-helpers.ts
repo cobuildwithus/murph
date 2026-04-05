@@ -102,7 +102,7 @@ const requiredRuntimeArtifactPaths = [
 ]
 const importSmokeArtifactPaths = [
   ...requiredRuntimeArtifactPaths.filter((artifactPath) => artifactPath.endsWith('.js') && artifactPath !== binPath),
-  path.join(repoRoot, 'packages/cli/dist/setup-cli.js'),
+  path.join(repoRoot, 'packages/setup-cli/dist/setup-cli.js'),
 ]
 const cliRuntimeArtifactRepairLockPath = path.join(
   repoRoot,
