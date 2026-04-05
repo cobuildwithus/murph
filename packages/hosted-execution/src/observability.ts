@@ -227,6 +227,33 @@ export function summarizeHostedExecutionError(error: unknown): string {
   }
 }
 
+export function summarizeHostedExecutionErrorCode(
+  errorCode: string | null | undefined,
+): string | null {
+  switch (errorCode) {
+    case null:
+    case undefined:
+    case "":
+      return null;
+    case "configuration_error":
+      return "Hosted execution configuration is invalid.";
+    case "durable_commit_error":
+      return "Hosted execution failed before recording a durable commit.";
+    case "durable_finalize_error":
+      return "Hosted execution failed while finalizing a committed run.";
+    case "runner_http_error":
+      return "Hosted runner container returned an HTTP error.";
+    case "authorization_error":
+      return "Hosted execution authorization failed.";
+    case "invalid_request":
+      return "Hosted execution rejected an invalid request.";
+    case "timeout":
+      return "Hosted execution timed out.";
+    default:
+      return "Hosted execution runtime failed.";
+  }
+}
+
 export function buildHostedExecutionStructuredLogRecord(
   input: HostedExecutionStructuredLogInput,
 ): HostedExecutionStructuredLogRecord {

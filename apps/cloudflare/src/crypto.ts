@@ -14,7 +14,7 @@ export interface HostedCipherEnvelope {
   iv: string;
   keyId: string;
   schema: HostedCipherSchema;
-  scope?: HostedStorageScope;
+  scope: HostedStorageScope;
 }
 
 export async function encryptHostedBundle(input: {
@@ -65,38 +65,19 @@ export async function decryptHostedBundle(input: {
     throw new Error("Hosted bundle envelope is invalid.");
   }
 
-  if (input.envelope.scope !== undefined && input.envelope.scope !== input.scope) {
+  if (input.envelope.scope !== input.scope) {
     throw new Error(
       `Hosted bundle envelope scope mismatch: expected ${input.scope}, got ${input.envelope.scope}.`,
     );
   }
 
   const rootKey = resolveHostedBundleDecryptionKey(input);
-  if (input.envelope.scope === undefined) {
-    try {
-      return await decryptHostedEnvelopePayload({
-        aad: input.aad,
-        ciphertext: decodeBase64(input.envelope.ciphertext),
-        iv: decodeBase64(input.envelope.iv),
-        rootKey,
-        scope: "",
-      });
-    } catch {
-      return decryptHostedEnvelopePayload({
-        ciphertext: decodeBase64(input.envelope.ciphertext),
-        iv: decodeBase64(input.envelope.iv),
-        rootKey,
-        scope: "",
-      });
-    }
-  }
-
   return decryptHostedEnvelopePayload({
     aad: input.aad,
     ciphertext: decodeBase64(input.envelope.ciphertext),
     iv: decodeBase64(input.envelope.iv),
     rootKey,
-    scope: input.envelope.scope,
+    scope: input.scope,
   });
 }
 
@@ -245,7 +226,7 @@ async function decryptHostedEnvelopePayload(input: {
   ciphertext: Uint8Array;
   iv: Uint8Array;
   rootKey: Uint8Array;
-  scope: HostedStorageScope | "";
+  scope: HostedStorageScope;
 }): Promise<Uint8Array> {
   const scopedKey = await deriveHostedStorageKey(input.rootKey, input.scope);
   const cryptoKey = await importAesKey(scopedKey);

@@ -2,12 +2,14 @@ import {
   HOSTED_EXECUTION_BUNDLE_SLOTS,
   deriveHostedExecutionErrorCode,
   normalizeHostedExecutionOperatorMessage,
+  summarizeHostedExecutionErrorCode,
   summarizeHostedExecutionError,
   type HostedExecutionBundleSlot,
   type HostedExecutionDispatchRequest,
   type HostedExecutionRunLevel,
   type HostedExecutionRunPhase,
   type HostedExecutionRunStatus,
+  type HostedExecutionTimelineEntry,
 } from "@murphai/hosted-execution";
 
 import type {
@@ -19,16 +21,12 @@ import {
   runnerPendingEventsNeedsPayloadMigration,
 } from "./runner-queue-schema.js";
 import {
-  appendBoundedRunnerEventId,
   appendBoundedRunnerTimelineEntry,
   assignRunnerBundleRefs,
   classifyMalformedPendingDispatchError,
   createDefaultRunnerBundleSlots,
   createDefaultRunnerMetaRow,
-  mergeRunnerLastError,
   nextConsumedEventExactExpiryIso,
-  parseRunnerStringArray,
-  parseStoredRunnerTimelineEntries,
   projectRunnerStateRecord,
   resolveRunnerNextWakeAt,
   type RunnerBundleSlotRow,
@@ -54,7 +52,7 @@ interface PendingEventRow {
   available_at: string;
   enqueued_at: string;
   event_id: string;
-  last_error: string | null;
+  last_error_code: string | null;
   payload_key: string;
 }
 
@@ -80,8 +78,20 @@ interface EventPresenceState {
 interface PoisonedEventRow {
   [key: string]: DurableObjectSqlValue;
   event_id: string;
-  last_error: string;
+  last_error_code: string;
   poisoned_at: string;
+}
+
+interface BackpressuredEventRow {
+  [key: string]: DurableObjectSqlValue;
+  event_id: string;
+  rejected_at: string;
+}
+
+interface ConsumedEventRow {
+  [key: string]: DurableObjectSqlValue;
+  event_id: string;
+  recorded_at: string;
 }
 
 interface BundleRefSwapInput {
@@ -91,6 +101,8 @@ interface BundleRefSwapInput {
 
 export class RunnerQueueStore {
   private readonly ready: Promise<void>;
+  private volatileRun: HostedExecutionRunStatus | null = null;
+  private volatileTimeline: HostedExecutionTimelineEntry[] = [];
   private userId: string | null = null;
 
   constructor(
@@ -102,7 +114,6 @@ export class RunnerQueueStore {
   ) {
     ensureRunnerQueueSchema(this.sql);
     this.ensureCanonicalBundleSlotRowsSync();
-    this.repairStoredMetaStateSync();
     this.ready = this.migrateLegacyPendingEventsIfNeeded();
   }
 
@@ -152,14 +163,13 @@ export class RunnerQueueStore {
     await this.ready;
     this.pruneExpiredConsumedEventsSync();
 
-    const meta = this.requireMetaRowSync();
     const pending = this.readPendingDispatchMetaByEventIdSync(eventId);
     const poisoned = this.readPoisonedEventByIdSync(eventId);
 
     return {
-      backpressured: parseRunnerStringArray(meta.backpressured_event_ids_json).includes(eventId),
+      backpressured: this.hasBackpressuredEventSync(eventId),
       consumed: this.hasConsumedEventSync(eventId),
-      lastError: pending?.lastError ?? poisoned?.last_error ?? null,
+      lastError: pending?.lastError ?? summarizeHostedExecutionErrorCode(poisoned?.last_error_code),
       pending: pending !== null,
       poisoned: poisoned !== null,
     };
@@ -199,6 +209,7 @@ export class RunnerQueueStore {
     this.pruneExpiredConsumedEventsSync();
 
     const meta = this.requireMetaRowSync();
+    const nowIso = new Date().toISOString();
     if (this.hasPendingDispatchSync(dispatch.eventId) || this.hasConsumedEventSync(dispatch.eventId)) {
       return {
         accepted: false,
@@ -208,13 +219,7 @@ export class RunnerQueueStore {
     }
 
     if (this.countPendingEventsSync() >= MAX_PENDING_EVENTS) {
-      meta.backpressured_event_ids_json = JSON.stringify(
-        appendBoundedRunnerEventId(
-          parseRunnerStringArray(meta.backpressured_event_ids_json),
-          dispatch.eventId,
-          MAX_BACKPRESSURED_EVENT_IDS,
-        ),
-      );
+      this.writeBackpressuredEventSync(dispatch.eventId, nowIso);
       this.writeMetaRowSync(meta);
       return {
         accepted: false,
@@ -223,7 +228,6 @@ export class RunnerQueueStore {
       };
     }
 
-    const nowIso = new Date().toISOString();
     const payloadKey = await this.writePendingDispatchPayload(dispatch);
     this.sql.exec(
       `INSERT INTO pending_events (
@@ -232,7 +236,7 @@ export class RunnerQueueStore {
         attempts,
         available_at,
         enqueued_at,
-        last_error
+        last_error_code
       ) VALUES (?, ?, ?, ?, ?, ?)`,
       dispatch.eventId,
       payloadKey,
@@ -243,11 +247,7 @@ export class RunnerQueueStore {
     );
 
     meta.activated = meta.activated === 1 || dispatch.event.kind === "member.activated" ? 1 : 0;
-    meta.backpressured_event_ids_json = JSON.stringify(
-      parseRunnerStringArray(meta.backpressured_event_ids_json)
-        .filter((eventId) => eventId !== dispatch.eventId),
-    );
-    meta.last_event_id = dispatch.eventId;
+    this.deleteBackpressuredEventSync(dispatch.eventId);
     meta.user_id = dispatch.event.userId;
     this.writeMetaRowSync(meta);
 
@@ -276,8 +276,6 @@ export class RunnerQueueStore {
     const nextPending = await this.readNextDuePendingDispatch(nowMs);
     if (!nextPending) {
       const refreshedMeta = this.requireMetaRowSync();
-      refreshedMeta.retrying_event_id = this.readRetryingEventIdSync();
-      this.writeMetaRowSync(refreshedMeta);
       return {
         pendingDispatch: null,
         record: this.readStateFromMetaSync(refreshedMeta),
@@ -286,7 +284,6 @@ export class RunnerQueueStore {
 
     meta.in_flight = 1;
     this.clearLastErrorMetaSync(meta);
-    meta.retrying_event_id = nextPending.attempts > 0 ? nextPending.eventId : null;
     this.writeMetaRowSync(meta);
     return {
       pendingDispatch: nextPending,
@@ -309,17 +306,16 @@ export class RunnerQueueStore {
     }
     this.removePendingDispatchSync(committed.eventId);
     this.deletePoisonedEventSync(committed.eventId);
-    this.writeConsumedEventSync(committed.eventId, nextConsumedEventExactExpiryIso());
-    assignRunnerBundleRefs(bundleSlots, committed.bundleRefs);
-    meta.backpressured_event_ids_json = JSON.stringify(
-      parseRunnerStringArray(meta.backpressured_event_ids_json)
-        .filter((eventId) => eventId !== committed.eventId),
+    this.deleteBackpressuredEventSync(committed.eventId);
+    this.writeConsumedEventSync(
+      committed.eventId,
+      committed.committedAt,
+      nextConsumedEventExactExpiryIso(),
     );
+    assignRunnerBundleRefs(bundleSlots, committed.bundleRefs);
     meta.in_flight = 0;
     this.clearLastErrorMetaSync(meta);
-    meta.last_event_id = committed.eventId;
     meta.last_run_at = committed.committedAt;
-    meta.retrying_event_id = null;
     this.writeMetaRowSync(meta);
     this.writeBundleSlotStateSync(bundleSlots);
 
@@ -336,13 +332,10 @@ export class RunnerQueueStore {
     const meta = this.requireMetaRowSync();
     const bundleSlots = this.selectBundleSlotStateSync();
     assignRunnerBundleRefs(bundleSlots, committed.bundleRefs);
+    this.deleteBackpressuredEventSync(committed.eventId);
     meta.in_flight = 0;
     this.clearLastErrorMetaSync(meta);
-    meta.last_event_id = committed.eventId;
     meta.last_run_at = committed.committedAt;
-    meta.retrying_event_id = this.hasPendingDispatchSync(committed.eventId)
-      ? committed.eventId
-      : meta.retrying_event_id;
     this.writeMetaRowSync(meta);
     this.writeBundleSlotStateSync(bundleSlots);
 
@@ -366,10 +359,8 @@ export class RunnerQueueStore {
 
     if (!pending) {
       meta.in_flight = 0;
-      meta.last_error = errorMessage;
       meta.last_error_at = errorAt;
       meta.last_error_code = errorCode;
-      meta.retrying_event_id = this.readRetryingEventIdSync();
       this.writeMetaRowSync(meta);
       return {
         poisoned: false,
@@ -379,17 +370,14 @@ export class RunnerQueueStore {
 
     const nextAttempts = pending.attempts + 1;
     meta.in_flight = 0;
-    meta.last_error = errorMessage;
     meta.last_error_at = errorAt;
     meta.last_error_code = errorCode;
-    meta.last_event_id = input.eventId;
 
     if (nextAttempts >= input.maxEventAttempts) {
       this.removePendingDispatchSync(input.eventId);
       await this.deletePendingDispatchPayloadBestEffort(pending.payload_key);
-      this.writeConsumedEventSync(input.eventId, nextConsumedEventExactExpiryIso());
-      this.writePoisonedEventSync(input.eventId, errorMessage, errorAt);
-      meta.retrying_event_id = this.readRetryingEventIdSync();
+      this.writeConsumedEventSync(input.eventId, errorAt, nextConsumedEventExactExpiryIso());
+      this.writePoisonedEventSync(input.eventId, errorCode, errorAt);
       this.writeMetaRowSync(meta);
       return {
         poisoned: true,
@@ -400,14 +388,13 @@ export class RunnerQueueStore {
     const availableAt = new Date(Date.now() + input.retryDelayMs).toISOString();
     this.sql.exec(
       `UPDATE pending_events
-        SET attempts = ?, available_at = ?, last_error = ?
+        SET attempts = ?, available_at = ?, last_error_code = ?
         WHERE event_id = ?`,
       nextAttempts,
       availableAt,
-      errorMessage,
+      errorCode,
       input.eventId,
     );
-    meta.retrying_event_id = input.eventId;
     this.writeMetaRowSync(meta);
 
     return {
@@ -427,29 +414,25 @@ export class RunnerQueueStore {
     const pending = this.readPendingDispatchRowByEventIdSync(input.eventId);
     const meta = this.requireMetaRowSync();
     const errorAt = new Date().toISOString();
-    const errorMessage = summarizeHostedExecutionError(input.error);
+    const errorCode = deriveHostedExecutionErrorCode(input.error);
 
     meta.in_flight = 0;
-    meta.last_error = errorMessage;
     meta.last_error_at = errorAt;
-    meta.last_error_code = deriveHostedExecutionErrorCode(input.error);
-    meta.last_event_id = input.eventId;
+    meta.last_error_code = errorCode;
 
     if (!pending) {
-      meta.retrying_event_id = this.readRetryingEventIdSync();
       this.writeMetaRowSync(meta);
       return this.readStateFromMetaSync(meta);
     }
 
     this.sql.exec(
       `UPDATE pending_events
-        SET available_at = ?, last_error = ?
+        SET available_at = ?, last_error_code = ?
         WHERE event_id = ?`,
       new Date(Date.now() + input.retryDelayMs).toISOString(),
-      errorMessage,
+      errorCode,
       input.eventId,
     );
-    meta.retrying_event_id = input.eventId;
     this.writeMetaRowSync(meta);
 
     return this.readStateFromMetaSync(meta);
@@ -467,25 +450,22 @@ export class RunnerQueueStore {
 
     const meta = this.requireMetaRowSync();
     const bundleSlots = this.selectBundleSlotStateSync();
-    const errorMessage = summarizeHostedExecutionError(input.error);
+    const errorCode = deriveHostedExecutionErrorCode(input.error);
     assignRunnerBundleRefs(bundleSlots, input.committed.bundleRefs);
     meta.in_flight = 0;
-    meta.last_error = errorMessage;
     meta.last_error_at = new Date().toISOString();
-    meta.last_error_code = deriveHostedExecutionErrorCode(input.error);
-    meta.last_event_id = input.committed.eventId;
+    meta.last_error_code = errorCode;
     meta.last_run_at = input.committed.committedAt;
-    meta.retrying_event_id = input.committed.eventId;
     this.writeMetaRowSync(meta);
     this.writeBundleSlotStateSync(bundleSlots);
 
     this.sql.exec(
       `UPDATE pending_events
-        SET attempts = ?, available_at = ?, last_error = ?
+        SET attempts = ?, available_at = ?, last_error_code = ?
         WHERE event_id = ?`,
       input.attempts,
       new Date(Date.now() + input.retryDelayMs).toISOString(),
-      errorMessage,
+      errorCode,
       input.committed.eventId,
     );
 
@@ -495,9 +475,10 @@ export class RunnerQueueStore {
   async rememberCommittedEvent(eventId: string): Promise<RunnerStateRecord> {
     await this.ready;
     this.pruneExpiredConsumedEventsSync();
+    this.deleteBackpressuredEventSync(eventId);
 
     if (!this.hasConsumedEventSync(eventId)) {
-      this.writeConsumedEventSync(eventId, nextConsumedEventExactExpiryIso());
+      this.writeConsumedEventSync(eventId, new Date().toISOString(), nextConsumedEventExactExpiryIso());
     }
 
     return this.readStateSync();
@@ -521,31 +502,28 @@ export class RunnerQueueStore {
     const meta = this.requireMetaRowSync();
     const nowIso = new Date().toISOString();
     const errorCode = input.error === undefined ? null : deriveHostedExecutionErrorCode(input.error);
-    meta.last_event_id = input.eventId;
-    meta.run_json = JSON.stringify({
+    this.volatileRun = {
       attempt: input.attempt,
       eventId: input.eventId,
       phase: input.phase,
       runId: input.runId,
       startedAt: input.startedAt,
       updatedAt: nowIso,
-    } satisfies HostedExecutionRunStatus);
-    meta.timeline_json = JSON.stringify(
-      appendBoundedRunnerTimelineEntry(
-        parseStoredRunnerTimelineEntries(meta.timeline_json),
-        {
-          at: nowIso,
-          attempt: input.attempt,
-          component: input.component,
-          ...(errorCode ? { errorCode } : {}),
-          eventId: input.eventId,
-          level: input.level ?? (input.error === undefined ? "info" : "error"),
-          message: normalizeHostedExecutionOperatorMessage(input.message),
-          phase: input.phase,
-          runId: input.runId,
-        },
-        MAX_RUN_TIMELINE_ENTRIES,
-      ),
+    } satisfies HostedExecutionRunStatus;
+    this.volatileTimeline = appendBoundedRunnerTimelineEntry(
+      this.volatileTimeline,
+      {
+        at: nowIso,
+        attempt: input.attempt,
+        component: input.component,
+        ...(errorCode ? { errorCode } : {}),
+        eventId: input.eventId,
+        level: input.level ?? (input.error === undefined ? "info" : "error"),
+        message: normalizeHostedExecutionOperatorMessage(input.message),
+        phase: input.phase,
+        runId: input.runId,
+      },
+      MAX_RUN_TIMELINE_ENTRIES,
     );
 
     if (input.clearError) {
@@ -671,7 +649,7 @@ export class RunnerQueueStore {
       availableAt: string;
       enqueuedAt: string;
       eventId: string;
-      lastError: string | null;
+      lastErrorCode: string | null;
       payloadKey: string;
     }> = [];
     const poisonedRows: Array<{
@@ -692,7 +670,7 @@ export class RunnerQueueStore {
           availableAt: row.available_at,
           enqueuedAt: row.enqueued_at,
           eventId: row.event_id,
-          lastError: row.last_error,
+          lastErrorCode: row.last_error ? deriveHostedExecutionErrorCode(row.last_error) : null,
           payloadKey,
         });
       } catch (error) {
@@ -714,7 +692,7 @@ export class RunnerQueueStore {
         attempts INTEGER NOT NULL,
         available_at TEXT NOT NULL,
         enqueued_at TEXT NOT NULL,
-        last_error TEXT
+        last_error_code TEXT
       )
     `);
 
@@ -726,14 +704,14 @@ export class RunnerQueueStore {
           attempts,
           available_at,
           enqueued_at,
-          last_error
+          last_error_code
         ) VALUES (?, ?, ?, ?, ?, ?)`,
         row.eventId,
         row.payloadKey,
         row.attempts,
         row.availableAt,
         row.enqueuedAt,
-        row.lastError,
+        row.lastErrorCode,
       );
     }
 
@@ -745,21 +723,16 @@ export class RunnerQueueStore {
     `);
 
     for (const poisoned of poisonedRows) {
-      this.writeConsumedEventSync(poisoned.eventId, nextConsumedEventExactExpiryIso());
-      this.writePoisonedEventSync(poisoned.eventId, poisoned.message, poisoned.poisonedAt);
+      this.writeConsumedEventSync(poisoned.eventId, poisoned.poisonedAt, nextConsumedEventExactExpiryIso());
+      this.writePoisonedEventSync(poisoned.eventId, poisoned.errorCode, poisoned.poisonedAt);
 
       const meta = this.selectMetaRowSync();
       if (!meta) {
         continue;
       }
 
-      meta.last_error = mergeRunnerLastError(meta.last_error, poisoned.message);
       meta.last_error_at = poisoned.poisonedAt;
       meta.last_error_code = poisoned.errorCode;
-      meta.last_event_id = poisoned.eventId;
-      if (meta.retrying_event_id === poisoned.eventId) {
-        meta.retrying_event_id = null;
-      }
       this.writeMetaRowSync(meta);
     }
   }
@@ -773,42 +746,23 @@ export class RunnerQueueStore {
     nextPendingAvailableAtOverride: string | null = null,
   ): RunnerStateRecord {
     const projected = projectRunnerStateRecord({
+      backpressuredEventIds: this.readBackpressuredEventIdsSync(),
       bundleSlots: this.selectBundleSlotStateSync(),
+      lastEventId: this.readLatestEventIdSync(),
       meta,
       nextPendingAvailableAt: nextPendingAvailableAtOverride ?? this.readNextPendingAvailableAtSync(),
       pendingDispatches: this.readPendingDispatchMetasSync(),
       poisonedEventIds: this.readPoisonedEventIdsSync(),
+      retryingEventId: this.readRetryingEventIdSync(),
+      run: this.volatileRun,
+      timeline: this.volatileTimeline,
     });
 
     if (projected.changed) {
-      Object.assign(meta, projected.sanitizedMeta);
-      this.writeMetaRowSync(meta);
       this.writeBundleSlotStateSync(projected.sanitizedBundleSlots);
     }
 
     return projected.record;
-  }
-
-  private repairStoredMetaStateSync(): void {
-    const meta = this.selectMetaRowSync();
-    if (!meta) {
-      return;
-    }
-
-    const projected = projectRunnerStateRecord({
-      bundleSlots: this.selectBundleSlotStateSync(),
-      meta,
-      nextPendingAvailableAt: null,
-      pendingDispatches: [],
-      poisonedEventIds: [],
-    });
-    if (!projected.changed) {
-      return;
-    }
-
-    Object.assign(meta, projected.sanitizedMeta);
-    this.writeMetaRowSync(meta);
-    this.writeBundleSlotStateSync(projected.sanitizedBundleSlots);
   }
 
   private requireMetaRowSync(): RunnerMetaRow {
@@ -847,16 +801,10 @@ export class RunnerQueueStore {
         user_id,
         activated,
         in_flight,
-        last_error,
         last_error_at,
         last_error_code,
-        last_event_id,
         last_run_at,
-        next_wake_at,
-        retrying_event_id,
-        backpressured_event_ids_json,
-        run_json,
-        timeline_json
+        next_wake_at
       FROM runner_meta
       WHERE singleton = 1`,
     ).toArray()[0] ?? null;
@@ -875,31 +823,19 @@ export class RunnerQueueStore {
         user_id,
         activated,
         in_flight,
-        last_error,
         last_error_at,
         last_error_code,
-        last_event_id,
         last_run_at,
-        next_wake_at,
-        retrying_event_id,
-        backpressured_event_ids_json,
-        run_json,
-        timeline_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        next_wake_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
       meta.activated,
       meta.in_flight,
-      meta.last_error,
       meta.last_error_at,
       meta.last_error_code,
-      meta.last_event_id,
       meta.last_run_at,
       meta.next_wake_at,
-      meta.retrying_event_id,
-      meta.backpressured_event_ids_json,
-      meta.run_json,
-      meta.timeline_json,
     );
   }
 
@@ -968,7 +904,7 @@ export class RunnerQueueStore {
         attempts,
         available_at,
         enqueued_at,
-        last_error
+        last_error_code
       FROM pending_events
       ORDER BY available_at ASC, enqueued_at ASC, event_id ASC`,
     ).toArray();
@@ -986,7 +922,7 @@ export class RunnerQueueStore {
         attempts,
         available_at,
         enqueued_at,
-        last_error
+        last_error_code
       FROM pending_events
       WHERE event_id = ?`,
       eventId,
@@ -1006,7 +942,7 @@ export class RunnerQueueStore {
         attempts,
         available_at,
         enqueued_at,
-        last_error
+        last_error_code
       FROM pending_events
       WHERE available_at <= ?
       ORDER BY available_at ASC, enqueued_at ASC, event_id ASC
@@ -1023,7 +959,7 @@ export class RunnerQueueStore {
         attempts,
         available_at,
         enqueued_at,
-        last_error
+        last_error_code
       FROM pending_events
       WHERE available_at <= ?
       ORDER BY available_at ASC, enqueued_at ASC, event_id ASC`,
@@ -1084,7 +1020,7 @@ export class RunnerQueueStore {
       `SELECT
         event_id,
         poisoned_at,
-        last_error
+        last_error_code
       FROM poisoned_events
       WHERE event_id = ?`,
       eventId,
@@ -1169,7 +1105,7 @@ export class RunnerQueueStore {
       availableAt: row.available_at,
       enqueuedAt: row.enqueued_at,
       eventId: row.event_id,
-      lastError: row.last_error,
+      lastError: summarizeHostedExecutionErrorCode(row.last_error_code),
       payloadKey: row.payload_key,
     };
   }
@@ -1207,42 +1143,38 @@ export class RunnerQueueStore {
     const errorAt = new Date().toISOString();
     await this.deletePendingDispatchPayloadBestEffort(row.payload_key);
     this.removePendingDispatchSync(row.event_id);
-    this.writeConsumedEventSync(row.event_id, nextConsumedEventExactExpiryIso());
-    this.writePoisonedEventSync(row.event_id, malformedError.message, errorAt);
+    this.writeConsumedEventSync(row.event_id, errorAt, nextConsumedEventExactExpiryIso());
+    this.writePoisonedEventSync(row.event_id, malformedError.errorCode, errorAt);
 
     const meta = this.selectMetaRowSync();
     if (!meta) {
       return;
     }
 
-    meta.last_error = mergeRunnerLastError(meta.last_error, malformedError.message);
     meta.last_error_at = errorAt;
     meta.last_error_code = malformedError.errorCode;
-    meta.last_event_id = row.event_id;
-    if (meta.retrying_event_id === row.event_id) {
-      meta.retrying_event_id = null;
-    }
     this.writeMetaRowSync(meta);
   }
 
-  private writeConsumedEventSync(eventId: string, expiresAt: string): void {
+  private writeConsumedEventSync(eventId: string, recordedAt: string, expiresAt: string): void {
     this.sql.exec(
-      "INSERT OR REPLACE INTO consumed_events (event_id, expires_at) VALUES (?, ?)",
+      "INSERT OR REPLACE INTO consumed_events (event_id, recorded_at, expires_at) VALUES (?, ?, ?)",
       eventId,
+      recordedAt,
       expiresAt,
     );
   }
 
-  private writePoisonedEventSync(eventId: string, lastError: string, poisonedAt: string): void {
+  private writePoisonedEventSync(eventId: string, lastErrorCode: string, poisonedAt: string): void {
     this.sql.exec(
       `INSERT OR REPLACE INTO poisoned_events (
         event_id,
         poisoned_at,
-        last_error
+        last_error_code
       ) VALUES (?, ?, ?)`,
       eventId,
       poisonedAt,
-      lastError,
+      lastErrorCode,
     );
     this.prunePoisonedEventsSync();
   }
@@ -1252,9 +1184,97 @@ export class RunnerQueueStore {
   }
 
   private clearLastErrorMetaSync(meta: RunnerMetaRow): void {
-    meta.last_error = null;
     meta.last_error_at = null;
     meta.last_error_code = null;
+  }
+
+  private hasBackpressuredEventSync(eventId: string): boolean {
+    return this.sql.exec<{ count: DurableObjectSqlValue }>(
+      "SELECT COUNT(*) AS count FROM backpressured_events WHERE event_id = ?",
+      eventId,
+    ).toArray()[0]?.count === 1;
+  }
+
+  private readBackpressuredEventIdsSync(): string[] {
+    return this.sql.exec<{ event_id: DurableObjectSqlValue }>(
+      `SELECT event_id
+      FROM backpressured_events
+      ORDER BY rejected_at ASC, event_id ASC`,
+    ).toArray()
+      .map((row) => row.event_id)
+      .filter((eventId): eventId is string => typeof eventId === "string")
+      .slice(-MAX_BACKPRESSURED_EVENT_IDS);
+  }
+
+  private writeBackpressuredEventSync(eventId: string, rejectedAt: string): void {
+    this.sql.exec(
+      `INSERT OR REPLACE INTO backpressured_events (
+        event_id,
+        rejected_at
+      ) VALUES (?, ?)`,
+      eventId,
+      rejectedAt,
+    );
+    this.pruneBackpressuredEventsSync();
+  }
+
+  private deleteBackpressuredEventSync(eventId: string): void {
+    this.sql.exec("DELETE FROM backpressured_events WHERE event_id = ?", eventId);
+  }
+
+  private pruneBackpressuredEventsSync(): void {
+    this.sql.exec(
+      `DELETE FROM backpressured_events
+        WHERE event_id NOT IN (
+          SELECT event_id
+          FROM backpressured_events
+          ORDER BY rejected_at DESC, event_id DESC
+          LIMIT ?
+        )`,
+      MAX_BACKPRESSURED_EVENT_IDS,
+    );
+  }
+
+  private readLatestEventIdSync(): string | null {
+    if (this.volatileRun) {
+      return this.volatileRun.eventId;
+    }
+
+    const rows = [
+      ...this.sql.exec<ConsumedEventRow>(
+        `SELECT event_id, recorded_at
+        FROM consumed_events
+        ORDER BY recorded_at DESC, event_id DESC
+        LIMIT 1`,
+      ).toArray().map((row) => ({ eventId: row.event_id, at: row.recorded_at })),
+      ...this.sql.exec<PendingEventRow>(
+        `SELECT event_id, enqueued_at, payload_key, attempts, available_at, last_error_code
+        FROM pending_events
+        ORDER BY enqueued_at DESC, event_id DESC
+        LIMIT 1`,
+      ).toArray().map((row) => ({ eventId: row.event_id, at: row.enqueued_at })),
+      ...this.sql.exec<PoisonedEventRow>(
+        `SELECT event_id, poisoned_at, last_error_code
+        FROM poisoned_events
+        ORDER BY poisoned_at DESC, event_id DESC
+        LIMIT 1`,
+      ).toArray().map((row) => ({ eventId: row.event_id, at: row.poisoned_at })),
+      ...this.sql.exec<BackpressuredEventRow>(
+        `SELECT event_id, rejected_at
+        FROM backpressured_events
+        ORDER BY rejected_at DESC, event_id DESC
+        LIMIT 1`,
+      ).toArray().map((row) => ({ eventId: row.event_id, at: row.rejected_at })),
+    ].filter((row) => row.eventId && row.at);
+
+    rows.sort((left, right) => {
+      const timeDelta = Date.parse(right.at) - Date.parse(left.at);
+      return Number.isNaN(timeDelta) || timeDelta === 0
+        ? right.eventId.localeCompare(left.eventId)
+        : timeDelta;
+    });
+
+    return rows[0]?.eventId ?? null;
   }
 
   private get sql() {

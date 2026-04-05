@@ -35,7 +35,7 @@ describe("RunnerQueueStore", () => {
         attempts,
         available_at,
         enqueued_at,
-        last_error
+        last_error_code
       ) VALUES (?, ?, ?, ?, ?, ?)`,
       "evt_bad",
       "transient/dispatch-payloads/bad.json",
@@ -60,7 +60,7 @@ describe("RunnerQueueStore", () => {
         attempts,
         available_at,
         enqueued_at,
-        last_error
+        last_error_code
       ) VALUES (?, ?, ?, ?, ?, ?)`,
       "evt_good",
       payloadKey.key,
@@ -78,7 +78,7 @@ describe("RunnerQueueStore", () => {
     const badEvent = await store.readEventState("evt_bad");
     expect(badEvent.pending).toBe(false);
     expect(badEvent.poisoned).toBe(true);
-    expect(badEvent.lastError).toBe("Hosted runner poisoned a malformed pending dispatch.");
+    expect(badEvent.lastError).toBe("Hosted execution rejected an invalid request.");
     expect(badEvent.lastError).not.toContain("evt_bad");
   });
 
@@ -94,7 +94,7 @@ describe("RunnerQueueStore", () => {
         attempts,
         available_at,
         enqueued_at,
-        last_error
+        last_error_code
       ) VALUES (?, ?, ?, ?, ?, ?)`,
       "evt_bad_only",
       "transient/dispatch-payloads/bad-only.json",
@@ -109,7 +109,7 @@ describe("RunnerQueueStore", () => {
     );
     expect(claimed.pendingDispatch).toBeNull();
     expect(claimed.record.lastErrorCode).toBe("invalid_request");
-    expect(claimed.record.lastError).toBe("Hosted runner poisoned a malformed pending dispatch.");
+    expect(claimed.record.lastError).toBe("Hosted execution rejected an invalid request.");
   });
 
   it("migrates legacy pending dispatch rows without dropping queued work", async () => {
@@ -170,7 +170,7 @@ describe("RunnerQueueStore", () => {
       attempts: 1,
       dispatch,
       eventId: dispatch.eventId,
-      lastError: "lost ack",
+      lastError: "Hosted execution runtime failed.",
     });
 
     const columns = sql.exec<{ name: string }>("PRAGMA table_info(pending_events)").toArray()
@@ -258,7 +258,7 @@ describe("RunnerQueueStore", () => {
       attempts: 1,
       dispatch,
       eventId: dispatch.eventId,
-      lastError: "lost ack",
+      lastError: "Hosted execution runtime failed.",
     });
   });
 
@@ -341,7 +341,7 @@ describe("RunnerQueueStore", () => {
     const badEvent = await store.readEventState("evt_legacy_queue_bad");
     expect(badEvent.pending).toBe(false);
     expect(badEvent.poisoned).toBe(true);
-    expect(badEvent.lastError).toBe("Hosted runner poisoned a malformed pending dispatch.");
+    expect(badEvent.lastError).toBe("Hosted execution rejected an invalid request.");
   });
 
   it("clears malformed bundle refs to null and surfaces a corruption warning", async () => {
@@ -438,15 +438,6 @@ describe("RunnerQueueStore", () => {
         slot: "vault",
       },
     ]);
-
-    const meta = sql.exec<{
-      last_error: string | null;
-    }>(
-      `SELECT last_error
-      FROM runner_meta
-      WHERE singleton = 1`,
-    ).one();
-    expect(meta.last_error).toContain("cleared malformed bundle ref(s): agent-state, vault");
   });
 
   it("stores redacted operator-safe retry errors", async () => {
@@ -593,9 +584,8 @@ describe("RunnerQueueStore", () => {
 
     state.storage.sql!.exec(
       `UPDATE runner_meta
-        SET last_error = ?, last_error_at = ?, last_error_code = ?
+        SET last_error_at = ?, last_error_code = ?
         WHERE singleton = 1`,
-      "Hosted execution runtime failed.",
       "2026-03-29T10:00:00.000Z",
       "runner_http_error",
     );
@@ -676,9 +666,8 @@ describe("RunnerQueueStore", () => {
 
     state.storage.sql!.exec(
       `UPDATE runner_meta
-        SET last_error = ?, last_error_at = ?, last_error_code = ?
+        SET last_error_at = ?, last_error_code = ?
         WHERE singleton = 1`,
-      "Hosted execution runtime failed.",
       "2026-03-29T10:00:00.000Z",
       "type_error",
     );

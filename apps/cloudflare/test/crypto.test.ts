@@ -27,6 +27,7 @@ describe("readEncryptedR2Payload", () => {
       key: previousKey,
       keyId: "v1",
       plaintext,
+      scope: "bundle",
     });
     let putAttempts = 0;
 
@@ -57,8 +58,45 @@ describe("readEncryptedR2Payload", () => {
       },
       expectedKeyId: "v2",
       key: "users/member_123/bundle.json",
+      scope: "bundle",
     })).resolves.toEqual(plaintext);
     expect(putAttempts).toBe(0);
+  });
+
+  it("fails closed when an envelope omits its storage scope", async () => {
+    const key = createTestRootKey(13);
+    const envelope = await encryptHostedBundle({
+      key,
+      keyId: "k-current",
+      plaintext: new TextEncoder().encode("{\"ok\":true}"),
+      scope: "bundle",
+    });
+    const payload = new TextEncoder().encode(JSON.stringify({
+      ...envelope,
+      scope: undefined,
+    }));
+
+    await expect(readEncryptedR2Payload({
+      bucket: {
+        async get() {
+          return {
+            async arrayBuffer() {
+              return payload.buffer.slice(
+                payload.byteOffset,
+                payload.byteOffset + payload.byteLength,
+              );
+            },
+          };
+        },
+        async put() {
+          throw new Error("unexpected rewrite");
+        },
+      },
+      cryptoKey: key,
+      expectedKeyId: "k-current",
+      key: "bundles/vault/test.bundle.json",
+      scope: "bundle",
+    })).rejects.toThrow("Hosted bundle envelope scope mismatch");
   });
 });
 
