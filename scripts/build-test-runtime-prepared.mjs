@@ -6,6 +6,23 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const cliSourceRoot = path.join(repoRoot, "packages/cli/src");
+const requiredWorkspaceSmokeSubpathsByPackage = {
+  "assistant-core": [
+    "usecases/intervention",
+    "usecases/workout",
+    "usecases/workout-format",
+    "usecases/workout-import",
+    "usecases/workout-measurement",
+  ],
+  "assistant-cli": [
+    "commands/assistant",
+    "run-terminal-logging",
+  ],
+  "setup-cli": [
+    "setup-cli",
+  ],
+};
 const baseSmokeImportPaths = [
   "packages/contracts/dist/index.js",
   "packages/hosted-execution/dist/index.js",
@@ -23,12 +40,25 @@ const baseSmokeImportPaths = [
   "packages/parsers/dist/index.js",
   "packages/cli/dist/index.js",
   "packages/cli/dist/cli-entry.js",
-  "packages/cli/dist/setup-cli.js",
 ].map((relativePath) => path.join(repoRoot, relativePath));
-const assistantCoreFacadeSmokeImportPaths = collectAssistantCoreFacadeSmokeImportPaths();
+const ownerPackageSmokeImports = Object.entries(
+  requiredWorkspaceSmokeSubpathsByPackage,
+).map(([packageName, requiredSubpaths]) =>
+  collectWorkspacePackageSmokeImports({
+    packageName,
+    requiredSubpaths,
+    sourceRoot: cliSourceRoot,
+  }),
+);
+const ownerPackageSmokeImportPaths = ownerPackageSmokeImports.flatMap(
+  (ownerPackageSmokeImport) => ownerPackageSmokeImport.distImportPaths,
+);
+const publishedWorkspaceSmokeImportSpecifiers = ownerPackageSmokeImports.flatMap(
+  (ownerPackageSmokeImport) => ownerPackageSmokeImport.publishedImportSpecifiers,
+);
 const smokeImportPaths = [
   ...baseSmokeImportPaths,
-  ...assistantCoreFacadeSmokeImportPaths,
+  ...ownerPackageSmokeImportPaths,
 ];
 
 function runCommand(command, args) {
@@ -57,18 +87,39 @@ async function hasPreparedArtifacts(importAttempt = 0) {
     }
   }
 
+  if (!hasPublishedWorkspaceSmokeImports()) {
+    return false;
+  }
+
   return true;
 }
 
-function collectAssistantCoreFacadeSmokeImportPaths() {
-  const cliSourceRoot = path.join(repoRoot, "packages/cli/src");
-  const distRoot = path.join(repoRoot, "packages/assistant-core/dist");
-  const subpaths = new Set();
-  const assistantCoreFacadeImportPattern = /["'`]@murph(?:ai)?\/assistant-core\/([^"'`\s]+)["'`]/g;
+function hasPublishedWorkspaceSmokeImports() {
+  const smokeScript = `
+    const specifiers = ${JSON.stringify(publishedWorkspaceSmokeImportSpecifiers)};
+    for (const specifier of specifiers) {
+      await import(specifier);
+    }
+  `;
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", smokeScript], {
+    cwd: path.join(repoRoot, "packages/cli"),
+    stdio: "pipe",
+  });
 
-  for (const filePath of walkTypeScriptFiles(cliSourceRoot)) {
+  return result.status === 0;
+}
+
+function collectWorkspacePackageSmokeImports(input) {
+  const distRoot = path.join(repoRoot, "packages", input.packageName, "dist");
+  const subpaths = new Set();
+  const importPattern = new RegExp(
+    `["'\`]@murph(?:ai)?/${input.packageName}/([^"'\\\`\\s]+)["'\`]`,
+    "g",
+  );
+
+  for (const filePath of walkTypeScriptFiles(input.sourceRoot)) {
     const source = readFileSync(filePath, "utf8");
-    for (const match of source.matchAll(assistantCoreFacadeImportPattern)) {
+    for (const match of source.matchAll(importPattern)) {
       const subpath = match[1];
       if (!subpath) {
         continue;
@@ -79,13 +130,30 @@ function collectAssistantCoreFacadeSmokeImportPaths() {
 
   if (subpaths.size === 0) {
     throw new Error(
-      "Expected packages/cli/src to import at least one @murphai/assistant-core subpath for prepared-runtime verification.",
+      `Expected packages/cli/src to import at least one @murphai/${input.packageName} subpath.`,
     );
   }
 
-  return [...subpaths]
-    .sort()
-    .map((subpath) => path.join(distRoot, `${subpath}.js`));
+  const missingRequiredSubpaths = input.requiredSubpaths.filter(
+    (subpath) => !subpaths.has(subpath),
+  );
+
+  if (missingRequiredSubpaths.length > 0) {
+    throw new Error(
+      `Expected packages/cli/src to import required @murphai/${input.packageName} subpaths: ${missingRequiredSubpaths.join(", ")}.`,
+    );
+  }
+
+  const discoveredSubpaths = [...subpaths].sort();
+
+  return {
+    distImportPaths: discoveredSubpaths.map((subpath) =>
+      path.join(distRoot, `${subpath}.js`),
+    ),
+    publishedImportSpecifiers: input.requiredSubpaths.map(
+      (subpath) => `@murphai/${input.packageName}/${subpath}`,
+    ),
+  };
 }
 
 function walkTypeScriptFiles(directoryPath) {

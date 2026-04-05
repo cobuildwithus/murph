@@ -34,7 +34,7 @@ import {
 } from '@murphai/assistant-core/assistant-state'
 import type { AssistantRunEvent } from '@murphai/assistant-core/assistant/automation/shared'
 import { createIntegratedInboxServices } from '@murphai/assistant-core/inbox-services'
-import { formatAssistantRunEventForTerminal } from '../src/run-terminal-logging.js'
+import { formatAssistantRunEventForTerminal } from '@murphai/assistant-cli/run-terminal-logging'
 import { formatStructuredErrorMessage } from '@murphai/assistant-core/text/shared'
 import { collectVaultCliDescriptorRootCommandNames } from '../src/vault-cli-command-manifest.js'
 import { createVaultCli } from '../src/vault-cli.js'

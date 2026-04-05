@@ -111,7 +111,7 @@ import {
   scanAssistantAutoReplyOnce,
   scanAssistantInboxOnce,
   sendAssistantMessage,
-} from '../src/assistant-runtime.js'
+} from '@murphai/assistant-cli/assistant-runtime'
 import { bridgeAbortSignals } from '@murphai/assistant-core/assistant/automation/shared'
 import {
   CHAT_BANNER,
@@ -133,11 +133,11 @@ import {
   shouldShowChatComposerGuidance,
   shouldClearComposerForSubmitAction,
   type InkChatEntry,
-} from '../src/assistant/ui/view-model.js'
+} from '@murphai/assistant-cli/assistant/ui/view-model'
 import {
   DEFAULT_ASSISTANT_CHAT_MODEL_OPTIONS,
   DEFAULT_ASSISTANT_REASONING_OPTIONS,
-} from '../src/assistant/provider-catalog.js'
+} from '@murphai/assistant-cli/assistant/provider-catalog'
 import {
   applyComposerEditingInput,
   formatFooterBadgeText,
@@ -171,8 +171,8 @@ import {
   supportsAssistantInkRawMode,
   supportsAssistantTerminalHyperlinks,
   wrapAssistantPlainText,
-} from '../src/assistant/ui/ink.js'
-import { LIGHT_ASSISTANT_INK_THEME } from '../src/assistant/ui/theme.js'
+} from '@murphai/assistant-cli/assistant/ui/ink'
+import { LIGHT_ASSISTANT_INK_THEME } from '@murphai/assistant-cli/assistant/ui/theme'
 
 const cleanupPaths: string[] = []
 const DEFAULT_CODEX_REASONING_EFFORT = 'medium'
@@ -9088,7 +9088,7 @@ test('assistant Ink transcript feed keeps the empty chat state free of an intro 
 })
 
 test('assistant Ink link helpers split markdown links and map absolute file paths to file URLs', () => {
-  const fileTarget = '/tmp/mock-vault/packages/cli/src/usecases/workout.ts#L10'
+  const fileTarget = '/tmp/mock-vault/packages/assistant-core/src/usecases/workout.ts#L10'
 
   assert.deepEqual(
     splitAssistantMarkdownLinks(
@@ -9122,19 +9122,19 @@ test('assistant Ink link helpers split markdown links and map absolute file path
 
   assert.equal(
     resolveAssistantHyperlinkTarget(fileTarget),
-    'file:///tmp/mock-vault/packages/cli/src/usecases/workout.ts#L10',
+    'file:///tmp/mock-vault/packages/assistant-core/src/usecases/workout.ts#L10',
   )
   assert.equal(
     resolveAssistantHyperlinkTarget('https://example.com/reference'),
     'https://example.com/reference',
   )
-  assert.equal(resolveAssistantHyperlinkTarget('packages/cli/src/usecases/workout.ts'), null)
+  assert.equal(resolveAssistantHyperlinkTarget('packages/assistant-core/src/usecases/workout.ts'), null)
   assert.equal(
     formatAssistantTerminalHyperlink(
       'workout.ts',
-      'file:///tmp/mock-vault/packages/cli/src/usecases/workout.ts#L10',
+      'file:///tmp/mock-vault/packages/assistant-core/src/usecases/workout.ts#L10',
     ),
-    '\u001B]8;;file:///tmp/mock-vault/packages/cli/src/usecases/workout.ts#L10\u0007workout.ts\u001B]8;;\u0007',
+    '\u001B]8;;file:///tmp/mock-vault/packages/assistant-core/src/usecases/workout.ts#L10\u0007workout.ts\u001B]8;;\u0007',
   )
 })
 

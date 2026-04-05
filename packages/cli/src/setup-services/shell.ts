@@ -1,1 +1,0 @@
-export * from '@murphai/setup-cli/setup-services/shell'

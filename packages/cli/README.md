@@ -126,10 +126,12 @@ Machine-facing callers should rely on incur's native envelope via `--verbose --f
 
 Current repo-local package responsibilities include:
 
-- the thin published command graph and install surface
-- compatibility wrappers over `@murphai/assistant-cli`, `@murphai/setup-cli`, and `@murphai/assistant-core`
+- the published command graph and install surface
+- CLI-owned command routing, onboarding entry, and built binary launchers
 - inbox and device command surfaces that delegate to headless owner packages
 - release ownership for the public `@murphai/murph` package and bins
+
+Programmatic assistant, setup, and shared usecase APIs now publish from their owner packages directly: `@murphai/assistant-cli`, `@murphai/setup-cli`, and `@murphai/assistant-core`. `@murphai/murph` no longer republishes those helper surfaces through local shim files.
 
 ## Release flow
 

@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
 import { test } from 'vitest'
 
-import { resolveAssistantModelCatalog } from '../src/assistant/provider-catalog.js'
+import { resolveAssistantModelCatalog } from '@murphai/assistant-cli/assistant/provider-catalog'
 import {
   createModelSwitcherState,
   dismissModelSwitcher,
   offsetModelSwitcherSelection,
   resolveModelSwitcherSelection,
-} from '../src/assistant/ui/model-switcher.js'
+} from '@murphai/assistant-cli/assistant/ui/model-switcher'
 
 function createCatalog() {
   return resolveAssistantModelCatalog({

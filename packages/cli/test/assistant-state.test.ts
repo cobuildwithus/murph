@@ -34,14 +34,14 @@ import {
 } from '@murphai/assistant-core/assistant/memory'
 import {
   getAssistantStatus,
-} from '../src/assistant-runtime.js'
+} from '@murphai/assistant-cli/assistant-runtime'
 import {
   readAssistantRuntimeBudgetStatus,
   runAssistantRuntimeMaintenance,
 } from '@murphai/assistant-core/assistant/runtime-budgets'
 import { readAssistantCronRuns } from '@murphai/assistant-core/assistant/cron/store'
 import { withAssistantMemoryWriteLock } from '@murphai/assistant-core/assistant/memory/locking'
-import { readAssistantOutboxIntent } from '../src/assistant/outbox.js'
+import { readAssistantOutboxIntent } from '@murphai/assistant-cli/assistant/outbox'
 import { summarizeAssistantQuarantines } from '@murphai/assistant-core/assistant/quarantine'
 import { withAssistantRuntimeWriteLock } from '@murphai/assistant-core/assistant/runtime-write-lock'
 import { readAssistantSession } from '@murphai/assistant-core/assistant/store/persistence'

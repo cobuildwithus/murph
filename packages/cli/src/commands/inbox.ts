@@ -45,7 +45,7 @@ import {
   formatForegroundLogLine,
   formatInboxRunEventForTerminal,
   resolveForegroundTerminalLogOptions,
-} from '../run-terminal-logging.js'
+} from '@murphai/assistant-cli/run-terminal-logging'
 import type { VaultServices } from '@murphai/assistant-core/vault-services'
 
 const inboxInitOptionFields = {

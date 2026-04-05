@@ -6,7 +6,7 @@ import {
   reconcileComposerControlledValue,
   resolveComposerTerminalAction,
   resolveComposerVerticalCursorMove,
-} from '../src/assistant/ui/composer-editor.js'
+} from '@murphai/assistant-cli/assistant/ui/composer-editor'
 
 function createKey(overrides: Partial<Key> = {}): Key {
   return overrides as Key

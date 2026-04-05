@@ -13,7 +13,7 @@ import {
 } from '@murphai/assistant-core/vault-cli-contracts'
 import type { InboxServices } from '@murphai/assistant-core/inbox-services'
 import type { VaultServices } from '@murphai/assistant-core/vault-services'
-import { registerAssistantCommands } from './commands/assistant.js'
+import { registerAssistantCommands } from '@murphai/assistant-cli/commands/assistant'
 import { registerAuditCommands } from './commands/audit.js'
 import { registerDeviceCommands } from './commands/device.js'
 import { registerDocumentCommands } from './commands/document.js'

@@ -7,7 +7,7 @@ import {
   reduceAssistantTurnState,
   resolveAssistantQueuedPromptDisposition,
   resolveAssistantSelectionAfterSessionSync,
-} from '../src/assistant/ui/chat-controller-state.js'
+} from '@murphai/assistant-cli/assistant/ui/chat-controller-state'
 
 function createSession(
   overrides: Partial<AssistantSession> = {},

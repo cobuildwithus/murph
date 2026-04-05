@@ -41,7 +41,7 @@ import {
   runAssistantAutomation,
   sendAssistantMessage,
   stopAssistantAutomation,
-} from '../src/assistant-runtime.js'
+} from '@murphai/assistant-cli/assistant-runtime'
 import { resolveAssistantStatePaths } from '@murphai/assistant-core/assistant-state'
 import { readAssistantDiagnosticsSnapshot } from '@murphai/assistant-core/assistant/diagnostics'
 import {
@@ -53,7 +53,7 @@ import { resetInjectedAssistantFaults } from '@murphai/assistant-core/assistant/
 import {
   drainAssistantOutbox,
   listAssistantOutboxIntents,
-} from '../src/assistant/outbox.js'
+} from '@murphai/assistant-cli/assistant/outbox'
 import { listRecentAssistantTurnReceipts } from '@murphai/assistant-core/assistant/turns'
 import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 

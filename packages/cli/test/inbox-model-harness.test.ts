@@ -1771,7 +1771,7 @@ test('createDefaultAssistantToolCatalog food upsert writes payload files and cal
 
 test('createDefaultAssistantToolCatalog share-link tool exports attached protocols and posts the hosted request', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-share-tools-'))
-  const originalBaseUrl = process.env.HOSTED_SHARE_API_BASE_URL
+  const originalBaseUrl = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL
   const originalToken = process.env.HOSTED_SHARE_INTERNAL_TOKENS
   const originalFetch = global.fetch
   let recordedRequest:
@@ -1782,7 +1782,7 @@ test('createDefaultAssistantToolCatalog share-link tool exports attached protoco
       }
     | undefined
 
-  process.env.HOSTED_SHARE_API_BASE_URL = 'https://share.example.test'
+  process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = 'https://share.example.test'
   process.env.HOSTED_SHARE_INTERNAL_TOKENS = 'share-token'
   global.fetch = vi.fn(async (input, init) => {
     recordedRequest = {
@@ -1878,9 +1878,9 @@ test('createDefaultAssistantToolCatalog share-link tool exports attached protoco
     })
   } finally {
     if (originalBaseUrl === undefined) {
-      delete process.env.HOSTED_SHARE_API_BASE_URL
+      delete process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL
     } else {
-      process.env.HOSTED_SHARE_API_BASE_URL = originalBaseUrl
+      process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = originalBaseUrl
     }
 
     if (originalToken === undefined) {
@@ -1896,7 +1896,7 @@ test('createDefaultAssistantToolCatalog share-link tool exports attached protoco
 
 test('createDefaultAssistantToolCatalog share-link tool uses hosted sender identity from execution context', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-share-tools-hosted-'))
-  const originalBaseUrl = process.env.HOSTED_SHARE_API_BASE_URL
+  const originalBaseUrl = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL
   const originalToken = process.env.HOSTED_SHARE_INTERNAL_TOKENS
   const originalFetch = global.fetch
   let recordedRequest:
@@ -1907,7 +1907,7 @@ test('createDefaultAssistantToolCatalog share-link tool uses hosted sender ident
       }
     | undefined
 
-  process.env.HOSTED_SHARE_API_BASE_URL = 'https://share.example.test'
+  process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = 'https://share.example.test'
   process.env.HOSTED_SHARE_INTERNAL_TOKENS = 'share-token'
   global.fetch = vi.fn(async (input, init) => {
     recordedRequest = {
@@ -1970,9 +1970,9 @@ test('createDefaultAssistantToolCatalog share-link tool uses hosted sender ident
     assert.equal(recordedRequest?.body.senderMemberId, 'member_123')
   } finally {
     if (originalBaseUrl === undefined) {
-      delete process.env.HOSTED_SHARE_API_BASE_URL
+      delete process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL
     } else {
-      process.env.HOSTED_SHARE_API_BASE_URL = originalBaseUrl
+      process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = originalBaseUrl
     }
 
     if (originalToken === undefined) {
@@ -1988,11 +1988,11 @@ test('createDefaultAssistantToolCatalog share-link tool uses hosted sender ident
 
 test('createDefaultAssistantToolCatalog share-link tool surfaces hosted API errors', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-share-tools-error-'))
-  const originalBaseUrl = process.env.HOSTED_SHARE_API_BASE_URL
+  const originalBaseUrl = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL
   const originalToken = process.env.HOSTED_SHARE_INTERNAL_TOKENS
   const originalFetch = global.fetch
 
-  process.env.HOSTED_SHARE_API_BASE_URL = 'https://share.example.test'
+  process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = 'https://share.example.test'
   process.env.HOSTED_SHARE_INTERNAL_TOKENS = 'share-token'
   global.fetch = vi.fn(async () =>
     new Response(
@@ -2044,9 +2044,9 @@ test('createDefaultAssistantToolCatalog share-link tool surfaces hosted API erro
     assert.match(results[0]?.errorMessage ?? '', /Hosted share link creation failed upstream\./u)
   } finally {
     if (originalBaseUrl === undefined) {
-      delete process.env.HOSTED_SHARE_API_BASE_URL
+      delete process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL
     } else {
-      process.env.HOSTED_SHARE_API_BASE_URL = originalBaseUrl
+      process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = originalBaseUrl
     }
 
     if (originalToken === undefined) {

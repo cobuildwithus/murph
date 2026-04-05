@@ -8,7 +8,7 @@ export interface MurphCliRunOptions {
   exit?: ((code?: number) => void) | undefined
 }
 
-type SuccessfulSetupContext = import('./setup-cli.js').SuccessfulSetupContext
+type SuccessfulSetupContext = import('@murphai/setup-cli/setup-cli').SuccessfulSetupContext
 type CliServeOptions = Parameters<Cli.Cli['serve']>[1]
 
 let sqliteExperimentalWarningFilterInstalled = false
@@ -28,7 +28,7 @@ export async function runMurphCliAction(
 ): Promise<void> {
   const cliModule = await import('./index.js')
   const operatorConfigModule = await import('@murphai/assistant-core/operator-config')
-  const setupCliModule = await import('./setup-cli.js')
+  const setupCliModule = await import('@murphai/setup-cli/setup-cli')
   const setupRuntimeEnvModule = await import('@murphai/assistant-core/setup-runtime-env')
 
   const cli = cliModule.default
