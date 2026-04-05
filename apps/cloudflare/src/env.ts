@@ -5,6 +5,7 @@ import {
   type HostedUserRecipientPublicKeyJwk,
 } from "@murphai/runtime-state";
 import {
+  assertHostedExecutionOptionalJwkPairConfigured,
   readHostedExecutionWorkerEnvironment,
   type HostedExecutionWorkerEnvironment,
 } from "@murphai/hosted-execution";
@@ -16,6 +17,8 @@ export type HostedExecutionEnvironment = Omit<
   | "automationRecipientPrivateJwkJson"
   | "automationRecipientPrivateKeyringJson"
   | "automationRecipientPublicJwkJson"
+  | "recoveryRecipientPublicJwkJson"
+  | "teeAutomationRecipientPublicJwkJson"
   | "platformEnvelopeKeyBase64"
   | "platformEnvelopeKeyringJson"
 > & {
@@ -24,6 +27,8 @@ export type HostedExecutionEnvironment = Omit<
   automationRecipientPublicKey: HostedUserRecipientPublicKeyJwk;
   platformEnvelopeKey: Uint8Array;
   platformEnvelopeKeysById: Readonly<Record<string, Uint8Array>>;
+  recoveryRecipientPublicKey: HostedUserRecipientPublicKeyJwk;
+  teeAutomationRecipientPublicKey: HostedUserRecipientPublicKeyJwk | null;
 };
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
@@ -35,6 +40,8 @@ export function readHostedExecutionEnvironment(
     automationRecipientPrivateJwkJson,
     automationRecipientPrivateKeyringJson,
     automationRecipientPublicJwkJson,
+    recoveryRecipientPublicJwkJson,
+    teeAutomationRecipientPublicJwkJson,
     platformEnvelopeKeyBase64,
     platformEnvelopeKeyringJson,
     ...environment
@@ -48,6 +55,17 @@ export function readHostedExecutionEnvironment(
     parseRequiredJsonObject(automationRecipientPublicJwkJson, "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK"),
     "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK",
   );
+  const recoveryRecipientPublicKey = parseHostedUserRecipientPublicKeyJwk(
+    parseRequiredJsonObject(recoveryRecipientPublicJwkJson, "HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK"),
+    "HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK",
+  );
+
+  assertHostedExecutionOptionalJwkPairConfigured({
+    currentKeyId: environment.teeAutomationRecipientKeyId,
+    currentPublicJwkJson: teeAutomationRecipientPublicJwkJson,
+    keyIdLabel: "HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_KEY_ID",
+    publicJwkLabel: "HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK",
+  });
 
   return {
     ...environment,
@@ -64,6 +82,16 @@ export function readHostedExecutionEnvironment(
       platformEnvelopeKeyId: environment.platformEnvelopeKeyId,
       platformEnvelopeKeyringJson,
     }),
+    recoveryRecipientPublicKey,
+    teeAutomationRecipientPublicKey: teeAutomationRecipientPublicJwkJson
+      ? parseHostedUserRecipientPublicKeyJwk(
+        parseRequiredJsonObject(
+          teeAutomationRecipientPublicJwkJson,
+          "HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK",
+        ),
+        "HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK",
+      )
+      : null,
   };
 }
 

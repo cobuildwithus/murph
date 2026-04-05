@@ -87,6 +87,7 @@ describe("cloudflare worker runtime suite", () => {
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
 
     const dispatch = createDispatch("evt_signed_runtime", "member_signed_runtime");
+    await resolveHostedUserCryptoContext(dispatch.event.userId);
     const response = await exports.default.fetch(
       await createSignedDispatchRequest("/internal/dispatch", dispatch),
     );
@@ -147,6 +148,7 @@ describe("cloudflare worker runtime suite", () => {
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
 
     const userId = "member_alarm";
+    await resolveHostedUserCryptoContext(userId);
     const stub = getUserRunnerStub(userId);
     const initialStatus = await stub.dispatch(createDispatch("evt_alarm_seed", userId));
 
@@ -164,6 +166,7 @@ describe("cloudflare worker runtime suite", () => {
 
   it("supports direct Durable Object user-env updates inside the Workers runtime", async () => {
     const userId = "member_control";
+    await resolveHostedUserCryptoContext(userId);
     const stub = getUserRunnerStub(userId);
     await expect(stub.bootstrapUser(userId)).resolves.toEqual({ userId });
 
@@ -189,6 +192,7 @@ describe("cloudflare worker runtime suite", () => {
 
   it("rejects removed, operator-only, and unknown hosted user env keys through direct Durable Object RPC", async () => {
     const userId = "member_control_env_reject";
+    await resolveHostedUserCryptoContext(userId);
     const stub = getUserRunnerStub(userId);
     await expect(stub.bootstrapUser(userId)).resolves.toEqual({ userId });
 
@@ -229,6 +233,7 @@ describe("cloudflare worker runtime suite", () => {
   it("persists bundle journaling through the internal runner outbound handlers in the Workers runtime", async () => {
     const userId = "member_journal";
     const eventId = "evt_finalize_runtime";
+    await resolveHostedUserCryptoContext(userId);
 
     const commitResponse = await callRunnerOutbound(
       new Request(`http://commit.worker/events/${eventId}/commit`, {
@@ -387,7 +392,11 @@ async function resolveHostedUserCryptoContext(userId: string) {
     envelopeEncryptionKey: environment.platformEnvelopeKey,
     envelopeEncryptionKeyId: environment.platformEnvelopeKeyId,
     envelopeEncryptionKeysById: environment.platformEnvelopeKeysById,
-  }).ensureUserCryptoContext(userId);
+    recoveryRecipientKeyId: environment.recoveryRecipientKeyId,
+    recoveryRecipientPublicKey: environment.recoveryRecipientPublicKey,
+    teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
+    teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
+  }).bootstrapManagedUserCryptoContext(userId);
 }
 
 async function createJournalStore(userId: string) {

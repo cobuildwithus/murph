@@ -8,6 +8,11 @@ import {
   upsertFood,
   upsertProtocolItem,
 } from '@murphai/core'
+import {
+  HOSTED_EXECUTION_USER_ID_HEADER,
+  readHostedExecutionSignatureHeaders,
+  verifyHostedExecutionSignature,
+} from '@murphai/hosted-execution'
 import type { AssistantAskResult } from '@murphai/assistant-core/assistant-cli-contracts'
 import { writeAssistantChatResultArtifacts } from '@murphai/assistant-core/assistant/automation/artifacts'
 import {
@@ -1772,22 +1777,25 @@ test('createDefaultAssistantToolCatalog food upsert writes payload files and cal
 test('createDefaultAssistantToolCatalog share-link tool exports attached protocols and posts the hosted request', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-share-tools-'))
   const originalBaseUrl = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL
-  const originalToken = process.env.HOSTED_SHARE_INTERNAL_TOKENS
+  const originalSigningSecret = process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET
   const originalFetch = global.fetch
   let recordedRequest:
     | {
         body: Record<string, unknown>
         headers: Headers
+        rawBody: string
         url: string
       }
     | undefined
 
   process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = 'https://share.example.test/join'
-  process.env.HOSTED_SHARE_INTERNAL_TOKENS = 'share-token'
+  process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = 'share-signing-secret'
   global.fetch = vi.fn(async (input, init) => {
+    const rawBody = String(init?.body ?? '{}')
     recordedRequest = {
-      body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>,
+      body: JSON.parse(rawBody) as Record<string, unknown>,
       headers: new Headers(init?.headers),
+      rawBody,
       url: String(input),
     }
 
@@ -1825,6 +1833,12 @@ test('createDefaultAssistantToolCatalog share-link tool exports attached protoco
 
     const catalog = createDefaultAssistantToolCatalog(
       {
+        executionContext: {
+          hosted: {
+            memberId: 'member_123',
+            userEnvKeys: ['OPENAI_API_KEY'],
+          },
+        },
         requestId: 'req_share',
         vault: vaultRoot,
         vaultServices: createStubVaultServices(),
@@ -1852,9 +1866,26 @@ test('createDefaultAssistantToolCatalog share-link tool exports attached protoco
 
     assert.equal(results[0]?.status, 'succeeded')
     assert.equal(recordedRequest?.url, 'https://share.example.test/api/hosted-share/internal/create')
-    assert.equal(recordedRequest?.headers.get('authorization'), 'Bearer share-token')
+    assert.equal(recordedRequest?.headers.get('authorization'), null)
+    assert.equal(recordedRequest?.headers.get(HOSTED_EXECUTION_USER_ID_HEADER), 'member_123')
     assert.equal(recordedRequest?.body.shareCode, undefined)
-    assert.equal(recordedRequest?.body.senderMemberId, null)
+    assert.equal(recordedRequest?.body.senderMemberId, 'member_123')
+    const signatureHeaders = readHostedExecutionSignatureHeaders(recordedRequest!.headers)
+    const requestUrl = new URL(recordedRequest!.url)
+    assert.equal(
+      await verifyHostedExecutionSignature({
+        method: 'POST',
+        nonce: signatureHeaders.nonce,
+        path: requestUrl.pathname,
+        payload: recordedRequest!.rawBody,
+        search: requestUrl.search,
+        secret: 'share-signing-secret',
+        signature: signatureHeaders.signature,
+        timestamp: signatureHeaders.timestamp,
+        userId: 'member_123',
+      }),
+      true,
+    )
     assert.equal((recordedRequest?.body.pack as { title?: string })?.title, 'Morning Smoothie')
     assert.equal(
       Array.isArray((recordedRequest?.body.pack as { entities?: unknown[] })?.entities),
@@ -1883,10 +1914,10 @@ test('createDefaultAssistantToolCatalog share-link tool exports attached protoco
       process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = originalBaseUrl
     }
 
-    if (originalToken === undefined) {
-      delete process.env.HOSTED_SHARE_INTERNAL_TOKENS
+    if (originalSigningSecret === undefined) {
+      delete process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET
     } else {
-      process.env.HOSTED_SHARE_INTERNAL_TOKENS = originalToken
+      process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = originalSigningSecret
     }
 
     global.fetch = originalFetch
@@ -1897,7 +1928,7 @@ test('createDefaultAssistantToolCatalog share-link tool exports attached protoco
 test('createDefaultAssistantToolCatalog share-link tool uses hosted sender identity from execution context', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-share-tools-hosted-'))
   const originalBaseUrl = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL
-  const originalToken = process.env.HOSTED_SHARE_INTERNAL_TOKENS
+  const originalSigningSecret = process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET
   const originalFetch = global.fetch
   let recordedRequest:
     | {
@@ -1908,7 +1939,7 @@ test('createDefaultAssistantToolCatalog share-link tool uses hosted sender ident
     | undefined
 
   process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = 'https://share.example.test'
-  process.env.HOSTED_SHARE_INTERNAL_TOKENS = 'share-token'
+  process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = 'share-signing-secret'
   global.fetch = vi.fn(async (input, init) => {
     recordedRequest = {
       body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>,
@@ -1968,6 +1999,7 @@ test('createDefaultAssistantToolCatalog share-link tool uses hosted sender ident
 
     assert.equal(results[0]?.status, 'succeeded')
     assert.equal(recordedRequest?.body.senderMemberId, 'member_123')
+    assert.equal(recordedRequest?.headers.get(HOSTED_EXECUTION_USER_ID_HEADER), 'member_123')
   } finally {
     if (originalBaseUrl === undefined) {
       delete process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL
@@ -1975,10 +2007,10 @@ test('createDefaultAssistantToolCatalog share-link tool uses hosted sender ident
       process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = originalBaseUrl
     }
 
-    if (originalToken === undefined) {
-      delete process.env.HOSTED_SHARE_INTERNAL_TOKENS
+    if (originalSigningSecret === undefined) {
+      delete process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET
     } else {
-      process.env.HOSTED_SHARE_INTERNAL_TOKENS = originalToken
+      process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = originalSigningSecret
     }
 
     global.fetch = originalFetch
@@ -1989,11 +2021,11 @@ test('createDefaultAssistantToolCatalog share-link tool uses hosted sender ident
 test('createDefaultAssistantToolCatalog share-link tool surfaces hosted API errors', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-share-tools-error-'))
   const originalBaseUrl = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL
-  const originalToken = process.env.HOSTED_SHARE_INTERNAL_TOKENS
+  const originalSigningSecret = process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET
   const originalFetch = global.fetch
 
   process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = 'https://share.example.test'
-  process.env.HOSTED_SHARE_INTERNAL_TOKENS = 'share-token'
+  process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = 'share-signing-secret'
   global.fetch = vi.fn(async () =>
     new Response(
       JSON.stringify({
@@ -2020,6 +2052,12 @@ test('createDefaultAssistantToolCatalog share-link tool surfaces hosted API erro
 
     const catalog = createDefaultAssistantToolCatalog(
       {
+        executionContext: {
+          hosted: {
+            memberId: 'member_123',
+            userEnvKeys: ['OPENAI_API_KEY'],
+          },
+        },
         requestId: 'req_share_error',
         vault: vaultRoot,
         vaultServices: createStubVaultServices(),
@@ -2049,10 +2087,10 @@ test('createDefaultAssistantToolCatalog share-link tool surfaces hosted API erro
       process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = originalBaseUrl
     }
 
-    if (originalToken === undefined) {
-      delete process.env.HOSTED_SHARE_INTERNAL_TOKENS
+    if (originalSigningSecret === undefined) {
+      delete process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET
     } else {
-      process.env.HOSTED_SHARE_INTERNAL_TOKENS = originalToken
+      process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = originalSigningSecret
     }
 
     global.fetch = originalFetch

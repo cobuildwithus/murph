@@ -133,6 +133,7 @@ Set these in the selected GitHub environment as secrets:
 - `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY`
 - `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK`
 - `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK`
+- `HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK`
 - `HOSTED_WEB_INTERNAL_SIGNING_SECRET`
 
 Set these in the selected GitHub environment as vars:
@@ -146,20 +147,22 @@ Optional secrets for staged rotation:
 
 - `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON`
 - `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON`
+- `HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK` (only when you are enabling the future enclave-only automation recipient)
 
 Optional hosted email bridge secrets:
 
 - `HOSTED_EMAIL_CLOUDFLARE_API_TOKEN`
 - `HOSTED_EMAIL_SIGNING_SECRET`
 
-The checked-in scaffold and rendered deploy config declare the web-internal signing secret, platform envelope key, and automation recipient keypair in Wrangler's experimental `secrets.required` field, so `wrangler deploy` and `wrangler versions upload` fail early when any of them are missing from the Worker.
+The checked-in scaffold and rendered deploy config declare the web-internal signing secret, platform envelope key, automation recipient keypair, and recovery recipient public JWK in Wrangler's experimental `secrets.required` field, so `wrangler deploy` and `wrangler versions upload` fail early when any of them are missing from the Worker.
 
-The worker now authenticates `apps/web -> apps/cloudflare` dispatch/control traffic with Vercel OIDC bearer identity derived from the configured team slug, project name, and environment. The only remaining shared-secret seam is `apps/cloudflare -> apps/web` callbacks signed with `HOSTED_WEB_INTERNAL_SIGNING_SECRET`. Each native container invocation still gets its own one-shot runner control token injected at start time.
+The worker now authenticates `apps/web -> apps/cloudflare` dispatch/control traffic with Vercel OIDC bearer identity derived from the configured team slug, project name, and environment. The only remaining shared-secret seam is the narrow signed service boundary between `apps/cloudflare`, trusted scheduler/share callers, and `apps/web`, all bound with `HOSTED_WEB_INTERNAL_SIGNING_SECRET`, a bound user or service id, a timestamp, and a single-use nonce. Each native container invocation still gets its own one-shot runner control token injected at start time.
 
 - missing `HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG` or `HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME` makes bearer-authenticated web dispatch/control requests fail closed
-- mismatched `HOSTED_WEB_INTERNAL_SIGNING_SECRET` breaks Cloudflare-owned callback routes into `apps/web`
+- mismatched `HOSTED_WEB_INTERNAL_SIGNING_SECRET` breaks signed service routes into `apps/web`
 - missing `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY` prevents encrypted hosted storage from decrypting
-- missing automation recipient JWKs prevents the worker from unwrapping per-user root keys
+- missing automation recipient JWKs prevents the worker from unwrapping managed per-user root keys
+- missing recovery recipient public JWK prevents explicit managed-user provisioning from succeeding
 - changing `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY` or `CF_PLATFORM_ENVELOPE_KEY_ID` in place still requires staging older keys in `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON`; missing keyring entries fail closed on `keyId` mismatch
 - rotating the automation unwrap key in place requires staging older private JWKs in `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON` until existing envelopes are migrated
 

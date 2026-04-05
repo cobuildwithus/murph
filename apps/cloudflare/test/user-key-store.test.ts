@@ -1,160 +1,255 @@
+import {
+  findHostedWrappedRootKeyRecipient,
+  generateHostedUserRecipientKeyPair,
+  parseHostedUserRootKeyEnvelope,
+  wrapHostedUserRootKeyRecipient,
+} from "@murphai/runtime-state";
 import { describe, expect, it } from "vitest";
 
-import { generateHostedUserRecipientKeyPair } from "@murphai/runtime-state";
+import type { R2BucketLike } from "../src/bundle-store.js";
+import { buildHostedStorageAad } from "../src/crypto-context.js";
+import { readEncryptedR2Payload, writeEncryptedR2Json } from "../src/crypto.js";
+import {
+  createHostedUserKeyStore,
+  type HostedUserKeyAuditRecord,
+} from "../src/user-key-store.js";
 
-import { deriveHostedStorageOpaqueId } from "../src/crypto-context.js";
-import { createHostedUserKeyStore } from "../src/user-key-store.js";
+const PLATFORM_ENVELOPE_KEY = Uint8Array.from(Array.from({ length: 32 }, (_, index) => index + 1));
+const PLATFORM_ENVELOPE_KEY_ID = "platform:v1";
+const USER_ID = "member_test_user";
 
-import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers";
+class MemoryR2Object {
+  readonly value: string;
 
-describe("hosted user key store", () => {
-  it("reads and migrates automation recipients across automation-key rotation", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
-    const envelopeEncryptionKey = createTestRootKey(7);
-    const oldAutomation = await generateHostedUserRecipientKeyPair();
-    const nextAutomation = await generateHostedUserRecipientKeyPair();
+  constructor(value: string) {
+    this.value = value;
+  }
 
-    const oldStore = createHostedUserKeyStore({
+  async arrayBuffer(): Promise<ArrayBuffer> {
+    const encoded = new TextEncoder().encode(this.value);
+    return encoded.buffer.slice(encoded.byteOffset, encoded.byteOffset + encoded.byteLength) as ArrayBuffer;
+  }
+}
+
+class MemoryBucket implements R2BucketLike {
+  readonly objects = new Map<string, string>();
+
+  async delete(key: string): Promise<void> {
+    this.objects.delete(key);
+  }
+
+  async get(key: string): Promise<MemoryR2Object | null> {
+    const value = this.objects.get(key);
+    return value === undefined ? null : new MemoryR2Object(value);
+  }
+
+  async put(key: string, value: string): Promise<void> {
+    this.objects.set(key, value);
+  }
+}
+
+describe("createHostedUserKeyStore", () => {
+  it("fails closed when runtime access happens before managed provisioning", async () => {
+    const bucket = new MemoryBucket();
+    const automationKeys = await generateHostedUserRecipientKeyPair();
+    const recoveryKeys = await generateHostedUserRecipientKeyPair();
+    const store = createHostedUserKeyStore({
       automationRecipientKeyId: "automation:v1",
-      automationRecipientPrivateKey: oldAutomation.privateKeyJwk,
-      automationRecipientPublicKey: oldAutomation.publicKeyJwk,
+      automationRecipientPrivateKey: automationKeys.privateKeyJwk,
+      automationRecipientPublicKey: automationKeys.publicKeyJwk,
       bucket,
-      envelopeEncryptionKey,
-      envelopeEncryptionKeyId: "v1",
+      envelopeEncryptionKey: PLATFORM_ENVELOPE_KEY,
+      envelopeEncryptionKeyId: PLATFORM_ENVELOPE_KEY_ID,
+      recoveryRecipientKeyId: "recovery:v1",
+      recoveryRecipientPublicKey: recoveryKeys.publicKeyJwk,
     });
-    const original = await oldStore.ensureUserCryptoContext("user_live_123");
-    const oldEnvelopeObjectKey = [...bucket.objects.keys()][0] ?? null;
-    const currentObjectKey = await hostedUserKeyEnvelopeObjectKeyForTest(
-      envelopeEncryptionKey,
-      "user_live_123",
-    );
 
-    expect(oldEnvelopeObjectKey).toBeTruthy();
-    expect(oldEnvelopeObjectKey).toBe(currentObjectKey);
-    expect(oldEnvelopeObjectKey).not.toContain("user_live_123");
-    expect(bucket.objects.size).toBe(1);
+    await expect(
+      store.requireUserCryptoContext(USER_ID, { reason: "test-runtime-access" }),
+    ).rejects.toThrow(/Provision managed user crypto before runtime access/u);
+  });
 
-    const rotatedStore = createHostedUserKeyStore({
-      automationRecipientKeyId: "automation:v2",
-      automationRecipientPrivateKey: nextAutomation.privateKeyJwk,
-      automationRecipientPrivateKeysById: {
-        "automation:v1": oldAutomation.privateKeyJwk,
-        "automation:v2": nextAutomation.privateKeyJwk,
+  it("bootstraps automation, recovery, and optional tee recipients", async () => {
+    const bucket = new MemoryBucket();
+    const automationKeys = await generateHostedUserRecipientKeyPair();
+    const recoveryKeys = await generateHostedUserRecipientKeyPair();
+    const teeKeys = await generateHostedUserRecipientKeyPair();
+    const auditLog: HostedUserKeyAuditRecord[] = [];
+    const store = createHostedUserKeyStore({
+      auditLog: (record) => {
+        auditLog.push(record);
       },
-      automationRecipientPublicKey: nextAutomation.publicKeyJwk,
+      automationRecipientKeyId: "automation:v1",
+      automationRecipientPrivateKey: automationKeys.privateKeyJwk,
+      automationRecipientPublicKey: automationKeys.publicKeyJwk,
       bucket,
-      envelopeEncryptionKey,
-      envelopeEncryptionKeyId: "v1",
-      envelopeEncryptionKeysById: {
-        v1: envelopeEncryptionKey,
+      envelopeEncryptionKey: PLATFORM_ENVELOPE_KEY,
+      envelopeEncryptionKeyId: PLATFORM_ENVELOPE_KEY_ID,
+      recoveryRecipientKeyId: "recovery:v1",
+      recoveryRecipientPublicKey: recoveryKeys.publicKeyJwk,
+      teeAutomationRecipientKeyId: "tee-automation:v1",
+      teeAutomationRecipientPublicKey: teeKeys.publicKeyJwk,
+    });
+
+    const context = await store.bootstrapManagedUserCryptoContext(USER_ID, {
+      reason: "test-bootstrap",
+    });
+
+    expect(context.envelope.recipients.map((recipient) => recipient.kind)).toEqual([
+      "automation",
+      "recovery",
+      "tee-automation",
+    ]);
+    expect(auditLog).toEqual([
+      {
+        action: "root-key-bootstrap",
+        reason: "test-bootstrap",
+        recipientKinds: ["automation", "recovery", "tee-automation"],
+        rootKeyId: context.rootKeyId,
+        userId: USER_ID,
+      },
+    ]);
+  });
+
+  it("preserves future user-unlock recipients while reconciling managed recipients", async () => {
+    const bucket = new MemoryBucket();
+    const auditLog: HostedUserKeyAuditRecord[] = [];
+    const automationKeys = await generateHostedUserRecipientKeyPair();
+    const initialRecoveryKeys = await generateHostedUserRecipientKeyPair();
+    const nextRecoveryKeys = await generateHostedUserRecipientKeyPair();
+    const teeKeys = await generateHostedUserRecipientKeyPair();
+    const futureUserUnlockKeys = await generateHostedUserRecipientKeyPair();
+    const initialStore = createHostedUserKeyStore({
+      auditLog: (record) => {
+        auditLog.push(record);
+      },
+      automationRecipientKeyId: "automation:v1",
+      automationRecipientPrivateKey: automationKeys.privateKeyJwk,
+      automationRecipientPublicKey: automationKeys.publicKeyJwk,
+      bucket,
+      envelopeEncryptionKey: PLATFORM_ENVELOPE_KEY,
+      envelopeEncryptionKeyId: PLATFORM_ENVELOPE_KEY_ID,
+      recoveryRecipientKeyId: "recovery:v1",
+      recoveryRecipientPublicKey: initialRecoveryKeys.publicKeyJwk,
+    });
+    const initialContext = await initialStore.bootstrapManagedUserCryptoContext(USER_ID, {
+      reason: "test-bootstrap",
+    });
+    const storedEnvelope = await readStoredEnvelope(bucket, USER_ID);
+    const envelopeObjectKey = readOnlyObjectKey(bucket);
+    const futureRecipient = await wrapHostedUserRootKeyRecipient({
+      recipient: {
+        kind: "user-unlock",
+        keyId: "browser:v1",
+        publicKeyJwk: futureUserUnlockKeys.publicKeyJwk,
+      },
+      rootKey: initialContext.rootKey,
+      rootKeyId: storedEnvelope.rootKeyId,
+      userId: USER_ID,
+    });
+
+    await writeEncryptedR2Json({
+      aad: buildHostedStorageAad({
+        key: envelopeObjectKey,
+        purpose: "root-key-envelope",
+        userId: USER_ID,
+      }),
+      bucket,
+      cryptoKey: PLATFORM_ENVELOPE_KEY,
+      key: envelopeObjectKey,
+      keyId: PLATFORM_ENVELOPE_KEY_ID,
+      scope: "root-key-envelope",
+      value: {
+        ...storedEnvelope,
+        recipients: [...storedEnvelope.recipients, futureRecipient],
+        updatedAt: "2026-04-05T00:00:01.000Z",
       },
     });
 
-    const migrated = await rotatedStore.ensureUserCryptoContext("user_live_123");
-    const migratedEnvelopeObjectKey = [...bucket.objects.keys()][0] ?? null;
-
-    expect([...migrated.rootKey]).toEqual([...original.rootKey]);
-    expect(
-      migrated.envelope.recipients.find((recipient) => recipient.kind === "automation")?.keyId,
-    ).toBe("automation:v2");
-    expect(migratedEnvelopeObjectKey).toBeTruthy();
-    expect(migratedEnvelopeObjectKey).toBe(oldEnvelopeObjectKey);
-    expect(bucket.objects.size).toBe(1);
-    expect(bucket.deleted).not.toContain(oldEnvelopeObjectKey);
-  });
-
-  it("creates one opaque automation-only envelope per new user and reuses its root key", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
-    const automation = await generateHostedUserRecipientKeyPair();
-    const envelopeEncryptionKey = createTestRootKey(17);
-    const store = createHostedUserKeyStore({
+    const reconciledStore = createHostedUserKeyStore({
+      auditLog: (record) => {
+        auditLog.push(record);
+      },
       automationRecipientKeyId: "automation:v1",
-      automationRecipientPrivateKey: automation.privateKeyJwk,
-      automationRecipientPublicKey: automation.publicKeyJwk,
+      automationRecipientPrivateKey: automationKeys.privateKeyJwk,
+      automationRecipientPublicKey: automationKeys.publicKeyJwk,
       bucket,
-      envelopeEncryptionKey,
-      envelopeEncryptionKeyId: "v1",
+      envelopeEncryptionKey: PLATFORM_ENVELOPE_KEY,
+      envelopeEncryptionKeyId: PLATFORM_ENVELOPE_KEY_ID,
+      recoveryRecipientKeyId: "recovery:v2",
+      recoveryRecipientPublicKey: nextRecoveryKeys.publicKeyJwk,
+      teeAutomationRecipientKeyId: "tee-automation:v1",
+      teeAutomationRecipientPublicKey: teeKeys.publicKeyJwk,
     });
 
-    const first = await store.ensureUserCryptoContext("user_live_789");
-    const second = await store.ensureUserCryptoContext("user_live_789");
-    const objectKey = [...bucket.objects.keys()][0] ?? null;
-
-    expect(first.envelope.recipients).toHaveLength(1);
-    expect(first.envelope.recipients[0]).toMatchObject({
-      keyId: "automation:v1",
-      kind: "automation",
+    const reconciled = await reconciledStore.requireUserCryptoContext(USER_ID, {
+      reason: "test-reconcile",
     });
-    expect([...second.rootKey]).toEqual([...first.rootKey]);
-    expect(second.rootKeyId).toBe(first.rootKeyId);
-    expect(objectKey).toBe(await hostedUserKeyEnvelopeObjectKeyForTest(
-      envelopeEncryptionKey,
-      "user_live_789",
-    ));
-    expect(objectKey).not.toContain("user_live_789");
-    expect(bucket.objects.size).toBe(1);
-  });
-
-  it("fails closed when generic callers request a missing envelope without the DO bootstrap lane", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
-    const automation = await generateHostedUserRecipientKeyPair();
-    const envelopeEncryptionKey = createTestRootKey(19);
-    const store = createHostedUserKeyStore({
-      automationRecipientKeyId: "automation:v1",
-      automationRecipientPrivateKey: automation.privateKeyJwk,
-      automationRecipientPublicKey: automation.publicKeyJwk,
-      bucket,
-      envelopeEncryptionKey,
-      envelopeEncryptionKeyId: "v1",
-    });
-
-    await expect(store.requireUserCryptoContext("user_missing_123")).rejects.toThrow(
-      /cannot be bootstrapped outside the per-user runner lane/u,
+    const futureRecipientAfterReconcile = findHostedWrappedRootKeyRecipient(
+      reconciled.envelope,
+      "user-unlock",
     );
-    expect(bucket.objects.size).toBe(0);
-  });
+    const recoveryRecipient = findHostedWrappedRootKeyRecipient(reconciled.envelope, "recovery");
+    const teeRecipient = findHostedWrappedRootKeyRecipient(reconciled.envelope, "tee-automation");
 
-  it("ignores removed legacy v1 envelopes at the old static object path", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
-    const envelopeEncryptionKey = createTestRootKey(23);
-    const automation = await generateHostedUserRecipientKeyPair();
-    const legacyUserId = "user_live_legacy";
-    const legacyObjectKey = `users/keys/${encodeURIComponent(legacyUserId)}.json`;
-    await bucket.put(legacyObjectKey, "stale legacy envelope");
-
-    const store = createHostedUserKeyStore({
-      automationRecipientKeyId: "automation:v2",
-      automationRecipientPrivateKey: automation.privateKeyJwk,
-      automationRecipientPublicKey: automation.publicKeyJwk,
-      bucket,
-      envelopeEncryptionKey,
-      envelopeEncryptionKeyId: "v1",
+    expect(futureRecipientAfterReconcile?.keyId).toBe("browser:v1");
+    expect(recoveryRecipient?.keyId).toBe("recovery:v2");
+    expect(teeRecipient?.keyId).toBe("tee-automation:v1");
+    expect(reconciled.envelope.recipients.map((recipient) => recipient.kind)).toEqual([
+      "user-unlock",
+      "automation",
+      "recovery",
+      "tee-automation",
+    ]);
+    expect(auditLog.map((record) => record.action)).toEqual([
+      "root-key-bootstrap",
+      "root-key-unwrap",
+      "root-key-reconcile",
+    ]);
+    expect(auditLog[1]).toMatchObject({
+      action: "root-key-unwrap",
+      reason: "managed-recipient-reconciliation",
+      rootKeyId: reconciled.rootKeyId,
+      userId: USER_ID,
     });
-
-    const context = await store.ensureUserCryptoContext(legacyUserId);
-    const currentObjectKey = await hostedUserKeyEnvelopeObjectKeyForTest(envelopeEncryptionKey, legacyUserId);
-
-    expect(context.envelope.schema).toBe("murph.hosted-user-root-key-envelope.v2");
-    expect(
-      context.envelope.recipients.find((recipient) => recipient.kind === "automation")?.keyId,
-    ).toBe("automation:v2");
-    expect(context.envelope.rootKeyId).toBe(context.rootKeyId);
-    expect(bucket.objects.has(currentObjectKey)).toBe(true);
-    expect(bucket.objects.has(legacyObjectKey)).toBe(true);
-    expect(bucket.deleted).not.toContain(legacyObjectKey);
+    expect(auditLog[2]).toMatchObject({
+      action: "root-key-reconcile",
+      reason: "managed-recipient-reconciliation",
+      recipientKinds: ["user-unlock", "automation", "recovery", "tee-automation"],
+      rootKeyId: reconciled.rootKeyId,
+      userId: USER_ID,
+    });
   });
 });
 
-async function hostedUserKeyEnvelopeObjectKeyForTest(
-  envelopeEncryptionKey: Uint8Array,
-  userId: string,
-): Promise<string> {
-  const userSegment = await deriveHostedStorageOpaqueId({
-    length: 24,
-    rootKey: envelopeEncryptionKey,
-    scope: "user-key-envelope-path",
-    value: `user:${userId}`,
+async function readStoredEnvelope(bucket: MemoryBucket, userId: string) {
+  const objectKey = readOnlyObjectKey(bucket);
+  const plaintext = await readEncryptedR2Payload({
+    aad: buildHostedStorageAad({
+      key: objectKey,
+      purpose: "root-key-envelope",
+      userId,
+    }),
+    bucket,
+    cryptoKey: PLATFORM_ENVELOPE_KEY,
+    expectedKeyId: PLATFORM_ENVELOPE_KEY_ID,
+    key: objectKey,
+    scope: "root-key-envelope",
   });
 
-  return `users/keys/${userSegment}.json`;
+  if (!plaintext) {
+    throw new Error("Expected a stored user root key envelope.");
+  }
+
+  return parseHostedUserRootKeyEnvelope(JSON.parse(new TextDecoder().decode(plaintext)));
+}
+
+function readOnlyObjectKey(bucket: MemoryBucket): string {
+  const [objectKey] = bucket.objects.keys();
+
+  if (!objectKey) {
+    throw new Error("Expected exactly one stored object key.");
+  }
+
+  return objectKey;
 }

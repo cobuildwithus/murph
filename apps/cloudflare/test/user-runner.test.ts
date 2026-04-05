@@ -3825,5 +3825,9 @@ async function resolveHostedUserCryptoContextForTest(input: {
     envelopeEncryptionKey: input.environment.platformEnvelopeKey,
     envelopeEncryptionKeyId: input.environment.platformEnvelopeKeyId,
     envelopeEncryptionKeysById: input.environment.platformEnvelopeKeysById,
-  }).ensureUserCryptoContext(input.userId);
+    recoveryRecipientKeyId: input.environment.recoveryRecipientKeyId,
+    recoveryRecipientPublicKey: input.environment.recoveryRecipientPublicKey,
+    teeAutomationRecipientKeyId: input.environment.teeAutomationRecipientKeyId,
+    teeAutomationRecipientPublicKey: input.environment.teeAutomationRecipientPublicKey,
+  }).bootstrapManagedUserCryptoContext(input.userId);
 }

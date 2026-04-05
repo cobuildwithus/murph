@@ -42,6 +42,7 @@ export interface WorkerUserRunnerFinalizeInput {
 
 export interface WorkerUserRunnerStubLike {
   bootstrapUser?(userId: string): Promise<{ userId: string }>;
+  provisionManagedUserCrypto?(userId: string): Promise<{ recipientKinds: string[]; rootKeyId: string; userId: string }>;
   commit(input: WorkerUserRunnerCommitInput): Promise<HostedExecutionCommittedResult>;
   finalizeCommit(input: WorkerUserRunnerFinalizeInput): Promise<HostedExecutionCommittedResult>;
   gatewayFetchAttachments?(input: GatewayFetchAttachmentsInput): Promise<GatewayAttachment[]>;
@@ -93,6 +94,10 @@ export interface WorkerEnvironmentContract<
   HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK?: string;
   HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON?: string;
   HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK?: string;
+  HOSTED_EXECUTION_RECOVERY_RECIPIENT_KEY_ID?: string;
+  HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK?: string;
+  HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_KEY_ID?: string;
+  HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK?: string;
   HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY?: string;
   HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID?: string;
   HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON?: string;

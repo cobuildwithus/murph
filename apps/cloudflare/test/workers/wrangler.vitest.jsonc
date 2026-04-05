@@ -36,6 +36,8 @@
     "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID": "automation:v1",
     "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK": "{\"crv\":\"P-256\",\"ext\":true,\"key_ops\":[\"deriveBits\"],\"kty\":\"EC\",\"x\":\"xSelVJv6r6LPUS8GCNgj1T_7z5GXOrhgY1cCdzGb5ao\",\"y\":\"8HhciS1cAPKs_fPfgZnb1USdRtBX-4Nvp8XiBHuMcmY\",\"d\":\"HAPljluiFVW3g-UEmrJ9NVYTlclAhaC8N5LT0h7vitQ\"}",
     "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK": "{\"crv\":\"P-256\",\"ext\":true,\"key_ops\":[],\"kty\":\"EC\",\"x\":\"xSelVJv6r6LPUS8GCNgj1T_7z5GXOrhgY1cCdzGb5ao\",\"y\":\"8HhciS1cAPKs_fPfgZnb1USdRtBX-4Nvp8XiBHuMcmY\"}",
+    "HOSTED_EXECUTION_RECOVERY_RECIPIENT_KEY_ID": "recovery:v1",
+    "HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK": "{\"crv\":\"P-256\",\"ext\":true,\"key_ops\":[],\"kty\":\"EC\",\"x\":\"xSelVJv6r6LPUS8GCNgj1T_7z5GXOrhgY1cCdzGb5ao\",\"y\":\"8HhciS1cAPKs_fPfgZnb1USdRtBX-4Nvp8XiBHuMcmY\"}",
     "HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
     "HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID": "v1",
     "HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS": "60000",

@@ -80,8 +80,12 @@ export async function requireHostedShareLink(shareCode: string, prisma: HostedSh
 
 export async function readHostedSharePack(record: {
   id: string;
+  senderMemberId: string;
 }): Promise<{ pack: SharePack }> {
-  const pack = await readHostedSharePackFromHostedExecution(record.id);
+  const pack = await readHostedSharePackFromHostedExecution({
+    ownerUserId: record.senderMemberId,
+    shareId: record.id,
+  });
 
   if (!pack) {
     throw hostedOnboardingError({

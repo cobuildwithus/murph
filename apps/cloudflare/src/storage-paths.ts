@@ -195,25 +195,33 @@ export async function hostedDispatchPayloadObjectKeys(
 
 export async function hostedSharePackObjectKey(
   rootKey: Uint8Array,
+  userId: string,
   shareId: string,
 ): Promise<string> {
+  const userSegment = await deriveHostedStorageOpaqueId({
+    length: 24,
+    rootKey,
+    scope: "share-pack-path",
+    value: `user:${userId}`,
+  });
   const shareSegment = await deriveHostedStorageOpaqueId({
     length: 48,
     rootKey,
     scope: "share-pack-path",
-    value: `share:${shareId}`,
+    value: `share:${userId}:${shareId}`,
   });
 
-  return `transient/share-packs/${shareSegment}.json`;
+  return `transient/share-packs/${userSegment}/${shareSegment}.json`;
 }
 
 export async function hostedSharePackObjectKeys(
   rootKey: Uint8Array,
   keysById: Readonly<Record<string, Uint8Array>> | undefined,
+  userId: string,
   shareId: string,
 ): Promise<string[]> {
   return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
-    hostedSharePackObjectKey(candidateRootKey, shareId)
+    hostedSharePackObjectKey(candidateRootKey, userId, shareId)
   );
 }
 

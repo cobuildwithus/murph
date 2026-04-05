@@ -5,11 +5,12 @@ import { buildHostedStorageAad } from "./crypto-context.js";
 import { hostedSharePackObjectKey, hostedSharePackObjectKeys } from "./storage-paths.js";
 import { readEncryptedR2Json, writeEncryptedR2Json } from "./crypto.js";
 
-const HOSTED_SHARE_PACK_SCHEMA = "murph.hosted-share-pack.v1";
+const HOSTED_SHARE_PACK_SCHEMA = "murph.hosted-share-pack.v2";
 
 type HostedExecutionSharePack = ReturnType<typeof parseHostedExecutionSharePack>;
 
 interface StoredHostedSharePack {
+  ownerUserId: string;
   pack: HostedExecutionSharePack;
   schema: typeof HOSTED_SHARE_PACK_SCHEMA;
   shareId: string;
@@ -30,6 +31,7 @@ export function createHostedShareStore(input: {
   key: Uint8Array;
   keyId: string;
   keysById?: Readonly<Record<string, Uint8Array>>;
+  ownerUserId: string;
 }): HostedShareStore {
   return {
     async deleteSharePack(shareId) {
@@ -37,15 +39,15 @@ export function createHostedShareStore(input: {
         return;
       }
 
-      for (const key of await hostedSharePackObjectKeys(input.key, input.keysById, shareId)) {
+      for (const key of await hostedSharePackObjectKeys(input.key, input.keysById, input.ownerUserId, shareId)) {
         await input.bucket.delete(key);
       }
     },
 
     async readSharePack(shareId) {
-      for (const key of await hostedSharePackObjectKeys(input.key, input.keysById, shareId)) {
+      for (const key of await hostedSharePackObjectKeys(input.key, input.keysById, input.ownerUserId, shareId)) {
         const stored = await readEncryptedR2Json({
-          aad: buildSharePackAad(key, shareId),
+          aad: buildSharePackAad(key, input.ownerUserId, shareId),
           bucket: input.bucket,
           cryptoKey: input.key,
           cryptoKeysById: input.keysById,
@@ -55,9 +57,21 @@ export function createHostedShareStore(input: {
           scope: "share-pack",
         });
 
-        if (stored) {
-          return stored.pack;
+        if (!stored) {
+          continue;
         }
+
+        if (stored.ownerUserId !== input.ownerUserId) {
+          throw new Error(
+            `Hosted share pack ${shareId} owner mismatch: expected ${input.ownerUserId}, received ${stored.ownerUserId}.`,
+          );
+        }
+
+        if (stored.shareId !== shareId) {
+          throw new Error(`Hosted share pack record mismatch: expected ${shareId}, received ${stored.shareId}.`);
+        }
+
+        return stored.pack;
       }
 
       return null;
@@ -65,16 +79,17 @@ export function createHostedShareStore(input: {
 
     async writeSharePack(shareId, pack) {
       const normalizedPack = parseHostedExecutionSharePack(pack);
-      const key = await hostedSharePackObjectKey(input.key, shareId);
+      const key = await hostedSharePackObjectKey(input.key, input.ownerUserId, shareId);
 
       await writeEncryptedR2Json({
-        aad: buildSharePackAad(key, shareId),
+        aad: buildSharePackAad(key, input.ownerUserId, shareId),
         bucket: input.bucket,
         cryptoKey: input.key,
         key,
         keyId: input.keyId,
         scope: "share-pack",
         value: {
+          ownerUserId: input.ownerUserId,
           pack: normalizedPack,
           schema: HOSTED_SHARE_PACK_SCHEMA,
           shareId,
@@ -87,11 +102,13 @@ export function createHostedShareStore(input: {
   };
 }
 
-function buildSharePackAad(key: string, shareId: string): Uint8Array {
+function buildSharePackAad(key: string, ownerUserId: string, shareId: string): Uint8Array {
   return buildHostedStorageAad({
     key,
+    ownerUserId,
     purpose: "share-pack",
-    userId: shareId,
+    shareId,
+    userId: ownerUserId,
   });
 }
 
@@ -103,6 +120,7 @@ function parseStoredHostedSharePack(value: unknown): StoredHostedSharePack {
   }
 
   return {
+    ownerUserId: requireString(record.ownerUserId, "Hosted share pack ownerUserId"),
     pack: parseHostedExecutionSharePack(record.pack),
     schema: HOSTED_SHARE_PACK_SCHEMA,
     shareId: requireString(record.shareId, "Hosted share pack shareId"),

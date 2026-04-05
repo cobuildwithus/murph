@@ -222,6 +222,7 @@ describe("cloudflare worker routes", () => {
 
   it("persists runner commits through the outbound commit.worker handler", async () => {
     const harness = createUserRunnerDurableObject();
+    await resolveHostedUserCryptoContextForTest(harness.env, "member_123");
     const sideEffects = [
       {
         effectId: "outbox_123",
@@ -282,6 +283,7 @@ describe("cloudflare worker routes", () => {
 
   it("stores and reads encrypted hosted artifact objects through the outbound artifacts.worker handler", async () => {
     const harness = createUserRunnerDurableObject();
+    await resolveHostedUserCryptoContextForTest(harness.env, "member_123");
     const artifactBytes = Buffer.from("artifact-payload\n", "utf8");
 
     const writeResponse = await callRunnerOutbound(
@@ -320,6 +322,7 @@ describe("cloudflare worker routes", () => {
 
   it("rejects artifact writes when the request hash does not match the payload", async () => {
     const harness = createUserRunnerDurableObject();
+    await resolveHostedUserCryptoContextForTest(harness.env, "member_123");
 
     await expect(() => callRunnerOutbound(
       new Request("http://artifacts.worker/objects/fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b", {
@@ -341,6 +344,8 @@ describe("cloudflare worker routes", () => {
 
   it("keeps hosted artifact objects isolated per user", async () => {
     const harness = createUserRunnerDurableObject();
+    await resolveHostedUserCryptoContextForTest(harness.env, "member_alpha");
+    await resolveHostedUserCryptoContextForTest(harness.env, "member_bravo");
     const artifactBytes = Buffer.from("artifact-payload\n", "utf8");
     const artifactSha256 = "fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b";
 
@@ -374,6 +379,7 @@ describe("cloudflare worker routes", () => {
 
   it("persists finalized runner bundles through the outbound commit.worker handler", async () => {
     const harness = createUserRunnerDurableObject();
+    await resolveHostedUserCryptoContextForTest(harness.env, "member_123");
 
     await callRunnerOutbound(
       new Request("http://commit.worker/events/evt_finalize/commit", {
@@ -878,6 +884,7 @@ describe("cloudflare worker routes", () => {
     const env = createWorkerEnv(stub, {
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
     });
+    await resolveHostedUserCryptoContextForTest(env, "member_sender");
     const pack = {
       createdAt: "2026-04-05T00:00:00.000Z",
       entities: [
@@ -896,7 +903,7 @@ describe("cloudflare worker routes", () => {
     };
 
     const putResponse = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/shares/share_123/pack", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_sender/shares/share_123/pack", {
         body: JSON.stringify(pack),
         headers: {
           authorization: "Bearer control-token",
@@ -910,7 +917,7 @@ describe("cloudflare worker routes", () => {
     await expect(putResponse.json()).resolves.toEqual(pack);
 
     const getResponse = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/shares/share_123/pack", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_sender/shares/share_123/pack", {
         headers: {
           authorization: "Bearer control-token",
         },
@@ -922,7 +929,7 @@ describe("cloudflare worker routes", () => {
     await expect(getResponse.json()).resolves.toEqual(pack);
 
     const deleteResponse = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/shares/share_123/pack", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_sender/shares/share_123/pack", {
         headers: {
           authorization: "Bearer control-token",
         },
@@ -933,7 +940,7 @@ describe("cloudflare worker routes", () => {
     expect(deleteResponse.status).toBe(200);
 
     const missingResponse = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/shares/share_123/pack", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_sender/shares/share_123/pack", {
         headers: {
           authorization: "Bearer control-token",
         },
@@ -2187,6 +2194,7 @@ describe("cloudflare worker routes", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
     const harness = createUserRunnerDurableObject();
+    await resolveHostedUserCryptoContextForTest(harness.env, "member_123");
     const firstRun = createDeferred<void>();
     harness.storage.runnerContainerFetch.mockImplementationOnce(async (input: RequestInfo | URL, init?: RequestInit) => {
       await firstRun.promise;
@@ -2244,6 +2252,7 @@ describe("cloudflare worker routes", () => {
     const harness = createUserRunnerDurableObject({
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
     });
+    await resolveHostedUserCryptoContextForTest(harness.env, "member_123");
     const firstRun = createDeferred<void>();
     harness.storage.runnerContainerFetch.mockImplementationOnce(async (input: RequestInfo | URL, init?: RequestInit) => {
       await firstRun.promise;
@@ -2794,7 +2803,11 @@ async function resolveHostedUserCryptoContextForTest(
     envelopeEncryptionKey: environment.platformEnvelopeKey,
     envelopeEncryptionKeyId: environment.platformEnvelopeKeyId,
     envelopeEncryptionKeysById: environment.platformEnvelopeKeysById,
-  }).ensureUserCryptoContext(userId);
+    recoveryRecipientKeyId: environment.recoveryRecipientKeyId,
+    recoveryRecipientPublicKey: environment.recoveryRecipientPublicKey,
+    teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
+    teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
+  }).bootstrapManagedUserCryptoContext(userId);
 }
 
 function createUserRunnerDurableObject(

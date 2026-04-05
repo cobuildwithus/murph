@@ -626,7 +626,26 @@ async function cleanupHostedExecutionSourceIfNeeded(input: {
   }
 
   try {
-    await deleteHostedSharePackFromHostedExecution(input.record.sourceId);
+    const shareRecord = await getPrisma().hostedShareLink.findUnique({
+      where: {
+        id: input.record.sourceId,
+      },
+      select: {
+        senderMemberId: true,
+      },
+    });
+
+    if (!shareRecord?.senderMemberId) {
+      console.warn(
+        `Hosted share ${input.record.sourceId} completed but its owner could not be resolved for pack cleanup.`,
+      );
+      return;
+    }
+
+    await deleteHostedSharePackFromHostedExecution({
+      ownerUserId: shareRecord.senderMemberId,
+      shareId: input.record.sourceId,
+    });
   } catch (error) {
     console.error(
       `Hosted share ${input.record.sourceId} completed but its Cloudflare pack could not be deleted.`,

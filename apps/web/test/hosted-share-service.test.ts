@@ -102,10 +102,10 @@ describe("hosted share service", () => {
       mocks.sharePacks.set(shareId, pack);
       return pack;
     });
-    mocks.readHostedSharePackFromHostedExecution.mockImplementation(async (shareId: string) =>
+    mocks.readHostedSharePackFromHostedExecution.mockImplementation(async ({ shareId }: { shareId: string }) =>
       (mocks.sharePacks.get(shareId) as SharePack | undefined) ?? null
     );
-    mocks.deleteHostedSharePackFromHostedExecution.mockImplementation(async (shareId: string) => {
+    mocks.deleteHostedSharePackFromHostedExecution.mockImplementation(async ({ shareId }: { shareId: string }) => {
       mocks.sharePacks.delete(shareId);
     });
   });
@@ -126,6 +126,7 @@ describe("hosted share service", () => {
     expect(prisma.rows).toHaveLength(1);
     expect(prisma.rows[0]?.previewTitle).toBe("Shared Murph pack");
     expect(mocks.writeHostedSharePackToHostedExecution).toHaveBeenCalledWith({
+      ownerUserId: "member_sender",
       pack: buildPack(),
       shareId: prisma.rows[0]?.id,
     });
@@ -225,7 +226,7 @@ describe("hosted share service", () => {
     });
   });
 
-  it("fails fast when the Cloudflare-backed pack is missing before claim-time dispatch staging", async () => {
+  it("keeps share acceptance sparse even when the Cloudflare-backed pack is missing at claim time", async () => {
     const prisma = createHostedSharePrisma();
     const created = await createHostedShareLink({
       prisma: prisma as never,
@@ -242,14 +243,16 @@ describe("hosted share service", () => {
       } as never,
       prisma: prisma as never,
       shareCode: created.shareCode,
-    })).rejects.toMatchObject({
-      code: "HOSTED_SHARE_PACK_NOT_FOUND",
+    })).resolves.toMatchObject({
+      alreadyImported: false,
+      imported: false,
+      pending: true,
     });
 
-    expect(prisma.rows[0]?.acceptedAt).toBeNull();
-    expect(prisma.rows[0]?.acceptedByMemberId).toBeNull();
-    expect(prisma.rows[0]?.lastEventId).toBeNull();
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(prisma.rows[0]?.acceptedAt).toEqual(expect.any(Date));
+    expect(prisma.rows[0]?.acceptedByMemberId).toBe("member_123");
+    expect(prisma.rows[0]?.lastEventId).toMatch(/^vault\.share\.accepted:/u);
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the hosted share claim and reuses the same event id after a transport failure", async () => {

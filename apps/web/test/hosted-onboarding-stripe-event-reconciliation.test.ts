@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   enqueueHostedExecutionOutbox: vi.fn(),
   isHostedOnboardingRevnetEnabled: vi.fn(),
   isHostedRevnetBroadcastStatusUnknownError: vi.fn(),
+  provisionManagedUserCryptoInHostedExecution: vi.fn(),
   readHostedRevnetPaymentReceipt: vi.fn(),
   requireHostedRevnetConfig: vi.fn(),
   stripeChargesRetrieve: vi.fn(),
@@ -26,6 +27,11 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/hosted-execution/outbox", () => ({
   enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
+}));
+
+vi.mock("@/src/lib/hosted-execution/control", () => ({
+  provisionManagedUserCryptoInHostedExecution:
+    mocks.provisionManagedUserCryptoInHostedExecution,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -71,6 +77,11 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.isHostedRevnetBroadcastStatusUnknownError.mockImplementation((error: unknown) =>
       String(error instanceof Error ? error.message : error).toLowerCase().includes("already known"),
     );
+    mocks.provisionManagedUserCryptoInHostedExecution.mockResolvedValue({
+      recipientKinds: ["automation", "recovery"],
+      rootKeyId: "urk:test",
+      userId: "member_123",
+    });
     mocks.readHostedRevnetPaymentReceipt.mockResolvedValue(null);
     mocks.requireHostedRevnetConfig.mockReturnValue({
       chainId: 8453,
