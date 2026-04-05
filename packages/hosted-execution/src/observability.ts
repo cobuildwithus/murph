@@ -19,6 +19,21 @@ export const HOSTED_EXECUTION_RUN_LEVELS = ["info", "warn", "error"] as const;
 
 export type HostedExecutionRunLevel = (typeof HOSTED_EXECUTION_RUN_LEVELS)[number];
 
+export type HostedExecutionErrorCode =
+  | "authorization_error"
+  | "configuration_error"
+  | "durable_commit_error"
+  | "durable_finalize_error"
+  | "invalid_request"
+  | "range_error"
+  | "reference_error"
+  | "runner_http_error"
+  | "runtime_error"
+  | "syntax_error"
+  | "timeout"
+  | "type_error"
+  | "uri_error";
+
 const HOSTED_EXECUTION_SAFE_ERROR_NAMES = new Set([
   "AbortError",
   "Error",
@@ -36,6 +51,28 @@ const HOSTED_EXECUTION_SAFE_CONFIGURATION_MESSAGE_PATTERNS = [
   /^(?:[A-Z][A-Z0-9_]{1,127}|CF_[A-Z0-9_]{1,127}|HOSTED_[A-Z0-9_]{1,127}|DEVICE_SYNC_[A-Z0-9_]{1,127})\s+(?:must be|is)\s+configured(?:\s+for [A-Za-z0-9 ._/-]+)?\.?$/u,
   /^Native hosted execution requires a RunnerContainer binding\.$/u,
 ];
+const HOSTED_EXECUTION_NAMED_ERROR_CODES = {
+  RangeError: "range_error",
+  ReferenceError: "reference_error",
+  SyntaxError: "syntax_error",
+  TypeError: "type_error",
+  URIError: "uri_error",
+} as const satisfies Record<string, HostedExecutionErrorCode>;
+const HOSTED_EXECUTION_ERROR_SUMMARIES = {
+  authorization_error: "Hosted execution authorization failed.",
+  configuration_error: "Hosted execution configuration is invalid.",
+  durable_commit_error: "Hosted execution failed before recording a durable commit.",
+  durable_finalize_error: "Hosted execution failed while finalizing a committed run.",
+  invalid_request: "Hosted execution rejected an invalid request.",
+  range_error: "Hosted execution runtime failed.",
+  reference_error: "Hosted execution runtime failed.",
+  runner_http_error: "Hosted runner container returned an HTTP error.",
+  runtime_error: "Hosted execution runtime failed.",
+  syntax_error: "Hosted execution runtime failed.",
+  timeout: "Hosted execution timed out.",
+  type_error: "Hosted execution runtime failed.",
+  uri_error: "Hosted execution runtime failed.",
+} as const satisfies Record<HostedExecutionErrorCode, string>;
 
 export interface HostedExecutionRunContext {
   attempt: number;
@@ -133,125 +170,91 @@ export function normalizeHostedExecutionOperatorMessage(message: string): string
   return `${normalized.slice(0, HOSTED_EXECUTION_MAX_OPERATOR_MESSAGE_LENGTH - 1).trimEnd()}…`;
 }
 
-export function deriveHostedExecutionErrorCode(error: unknown): string {
+export function deriveHostedExecutionErrorCode(error: unknown): HostedExecutionErrorCode {
   const name = error instanceof Error ? error.name : "";
   const message = normalizeHostedExecutionErrorMessage(error).toLowerCase();
 
   if (
     name === "HostedExecutionConfigurationError"
-    || message.includes("not configured")
-    || message.includes("configuration")
-    || message.includes("missing token")
-    || message.includes("requires a runnercontainer binding")
-    || message.includes("must be configured")
+    || hostedExecutionMessageIncludesAny(message, [
+      "not configured",
+      "configuration",
+      "missing token",
+      "requires a runnercontainer binding",
+      "must be configured",
+    ])
   ) {
     return "configuration_error";
   }
 
-  if (message.includes("durable commit")) {
+  if (hostedExecutionMessageIncludesAny(message, ["durable commit"])) {
     return "durable_commit_error";
   }
 
-  if (message.includes("durable finalize") || message.includes("finalize")) {
+  if (hostedExecutionMessageIncludesAny(message, ["durable finalize", "finalize"])) {
     return "durable_finalize_error";
   }
 
-  if (message.includes("returned http")) {
+  if (hostedExecutionMessageIncludesAny(message, ["returned http"])) {
     return "runner_http_error";
   }
 
-  if (message.includes("authorization") || message.includes("unauthorized") || message.includes("forbidden")) {
+  if (hostedExecutionMessageIncludesAny(message, ["authorization", "unauthorized", "forbidden"])) {
     return "authorization_error";
   }
 
   if (
-    message.includes("invalid json")
-    || message.includes("invalid request")
-    || message.includes("request body must be a json object")
-    || message.includes("must be a json object")
-    || message.includes("malformed")
+    hostedExecutionMessageIncludesAny(message, [
+      "invalid json",
+      "invalid request",
+      "request body must be a json object",
+      "must be a json object",
+      "malformed",
+    ])
   ) {
     return "invalid_request";
   }
 
   if (
     name === "AbortError"
-    || message.includes("abort")
-    || message.includes("timed out")
-    || message.includes("timeout")
+    || hostedExecutionMessageIncludesAny(message, ["abort", "timed out", "timeout"])
   ) {
     return "timeout";
   }
 
-  switch (name) {
-    case "RangeError":
-      return "range_error";
-    case "ReferenceError":
-      return "reference_error";
-    case "SyntaxError":
-      return "syntax_error";
-    case "TypeError":
-      return "type_error";
-    case "URIError":
-      return "uri_error";
-    default:
-      return "runtime_error";
-  }
+  return readHostedExecutionNamedErrorCode(name) ?? "runtime_error";
 }
 
 export function summarizeHostedExecutionError(error: unknown): string {
   const message = normalizeHostedExecutionErrorMessage(error);
+  const errorCode = deriveHostedExecutionErrorCode(error);
 
-  switch (deriveHostedExecutionErrorCode(error)) {
-    case "configuration_error":
-      return readHostedExecutionSafeConfigurationMessage(message)
-        ?? "Hosted execution configuration is invalid.";
-    case "durable_commit_error":
-      return "Hosted execution failed before recording a durable commit.";
-    case "durable_finalize_error":
-      return "Hosted execution failed while finalizing a committed run.";
-    case "runner_http_error": {
-      const status = extractHostedExecutionHttpStatus(message);
-      return status
-        ? `Hosted runner container returned HTTP ${status}.`
-        : "Hosted runner container returned an HTTP error.";
-    }
-    case "authorization_error":
-      return "Hosted execution authorization failed.";
-    case "invalid_request":
-      return "Hosted execution rejected an invalid request.";
-    case "timeout":
-      return "Hosted execution timed out.";
-    default:
-      return "Hosted execution runtime failed.";
+  if (errorCode === "configuration_error") {
+    return readHostedExecutionSafeConfigurationMessage(message)
+      ?? HOSTED_EXECUTION_ERROR_SUMMARIES.configuration_error;
   }
+
+  if (errorCode === "runner_http_error") {
+    const status = extractHostedExecutionHttpStatus(message);
+    return status
+      ? `Hosted runner container returned HTTP ${status}.`
+      : HOSTED_EXECUTION_ERROR_SUMMARIES.runner_http_error;
+  }
+
+  return summarizeHostedExecutionErrorCode(errorCode)
+    ?? HOSTED_EXECUTION_ERROR_SUMMARIES.runtime_error;
 }
 
 export function summarizeHostedExecutionErrorCode(
   errorCode: string | null | undefined,
 ): string | null {
-  switch (errorCode) {
-    case null:
-    case undefined:
-    case "":
-      return null;
-    case "configuration_error":
-      return "Hosted execution configuration is invalid.";
-    case "durable_commit_error":
-      return "Hosted execution failed before recording a durable commit.";
-    case "durable_finalize_error":
-      return "Hosted execution failed while finalizing a committed run.";
-    case "runner_http_error":
-      return "Hosted runner container returned an HTTP error.";
-    case "authorization_error":
-      return "Hosted execution authorization failed.";
-    case "invalid_request":
-      return "Hosted execution rejected an invalid request.";
-    case "timeout":
-      return "Hosted execution timed out.";
-    default:
-      return "Hosted execution runtime failed.";
+  if (!errorCode) {
+    return null;
   }
+
+  return isHostedExecutionErrorCode(errorCode)
+    ? HOSTED_EXECUTION_ERROR_SUMMARIES[errorCode]
+    : HOSTED_EXECUTION_ERROR_SUMMARIES.runtime_error;
 }
 
 export function buildHostedExecutionStructuredLogRecord(
@@ -318,6 +321,30 @@ export function emitHostedExecutionStructuredLog(
   }
 
   return record;
+}
+
+function hostedExecutionMessageIncludesAny(
+  message: string,
+  fragments: readonly string[],
+): boolean {
+  return fragments.some((fragment) => message.includes(fragment));
+}
+
+function readHostedExecutionNamedErrorCode(name: string): HostedExecutionErrorCode | null {
+  return hasOwn(HOSTED_EXECUTION_NAMED_ERROR_CODES, name)
+    ? HOSTED_EXECUTION_NAMED_ERROR_CODES[name]
+    : null;
+}
+
+function isHostedExecutionErrorCode(value: string): value is HostedExecutionErrorCode {
+  return hasOwn(HOSTED_EXECUTION_ERROR_SUMMARIES, value);
+}
+
+function hasOwn<ObjectType extends object, Key extends PropertyKey>(
+  object: ObjectType,
+  key: Key,
+): key is Extract<Key, keyof ObjectType> {
+  return Object.hasOwn(object, key);
 }
 
 function readHostedExecutionSafeErrorName(error: unknown): string | null {

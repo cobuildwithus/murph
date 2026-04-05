@@ -28,27 +28,7 @@ export function parseHostedContainerImageListOutput(
     throw new Error("Cloudflare image list output must be an array.");
   }
 
-  return parsed.map((entry, index) => {
-    if (!isRecord(entry)) {
-      throw new Error(`Cloudflare image list entry ${index} must be an object.`);
-    }
-
-    const name = requireString(
-      typeof entry.name === "string" ? entry.name : undefined,
-      `Cloudflare image list entry ${index} name`,
-    );
-    const tags = Array.isArray(entry.tags)
-      ? entry.tags
-        .filter((tag): tag is string => typeof tag === "string")
-        .map((tag) => tag.trim())
-        .filter((tag) => tag.length > 0 && !tag.startsWith("sha256"))
-      : [];
-
-    return {
-      name,
-      tags,
-    };
-  });
+  return parsed.map((entry, index) => parseHostedContainerImageListEntry(entry, index));
 }
 
 export function selectHostedContainerImageTagsForCleanup(input: {
@@ -60,8 +40,10 @@ export function selectHostedContainerImageTagsForCleanup(input: {
   }
 
   return input.images.flatMap((image) => {
-    const sortedTags = [...new Set(image.tags)].sort((left, right) => right.localeCompare(left));
-    const tagsToDelete = sortedTags.slice(input.keepPerRepository);
+    const tagsToDelete = listHostedContainerImageTagsForCleanup(
+      image.tags,
+      input.keepPerRepository,
+    );
 
     return tagsToDelete.map((tag) => ({
       image: `${image.name}:${tag}`,
@@ -71,6 +53,45 @@ export function selectHostedContainerImageTagsForCleanup(input: {
   });
 }
 
+function parseHostedContainerImageListEntry(
+  entry: unknown,
+  index: number,
+): HostedContainerImageListing {
+  if (!isRecord(entry)) {
+    throw new Error(`Cloudflare image list entry ${index} must be an object.`);
+  }
+
+  return {
+    name: requireString(
+      typeof entry.name === "string" ? entry.name : undefined,
+      `Cloudflare image list entry ${index} name`,
+    ),
+    tags: normalizeHostedContainerImageTags(entry.tags),
+  };
+}
+
+function normalizeHostedContainerImageTags(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((tag): tag is string => typeof tag === "string")
+    .map((tag) => normalizeString(tag))
+    .filter((tag): tag is string => tag !== null && !tag.startsWith("sha256"));
+}
+
+function listHostedContainerImageTagsForCleanup(
+  tags: readonly string[],
+  keepPerRepository: number,
+): string[] {
+  const sortedTags = [...new Set(tags)].sort(sortHostedContainerImageTagsDescending);
+  return sortedTags.slice(keepPerRepository);
+}
+
+function sortHostedContainerImageTagsDescending(left: string, right: string): number {
+  return right.localeCompare(left);
+}
 function normalizeString(value: string | undefined): string | null {
   if (typeof value !== "string") {
     return null;

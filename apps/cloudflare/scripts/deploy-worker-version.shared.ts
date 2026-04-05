@@ -73,6 +73,27 @@ export interface HostedWorkerDeploymentDependencies {
   ): Promise<void>;
 }
 
+interface HostedWorkerDeploymentSettingsBase {
+  deploymentMessage: string;
+  includeSecrets: boolean;
+  versionTag: string;
+  versionMessage: string;
+}
+
+interface HostedWorkerDirectDeploymentSettings extends HostedWorkerDeploymentSettingsBase {
+  mode: "direct";
+}
+
+interface HostedWorkerGradualDeploymentSettings extends HostedWorkerDeploymentSettingsBase {
+  existingVersionId: string | null;
+  mode: "gradual";
+  rolloutPercentage: number;
+}
+
+type HostedWorkerDeploymentSettings =
+  | HostedWorkerDirectDeploymentSettings
+  | HostedWorkerGradualDeploymentSettings;
+
 export async function runHostedWorkerDeployment(input: {
   configPath: string;
   dependencies: HostedWorkerDeploymentDependencies;
@@ -82,48 +103,30 @@ export async function runHostedWorkerDeployment(input: {
   workerName: string;
 }): Promise<HostedWorkerDeploymentResult> {
   const env = input.env ?? process.env;
-  const mode = readDeploymentMode(env.HOSTED_EXECUTION_DEPLOYMENT_MODE);
-  const includeSecrets = readBooleanEnv(env.HOSTED_EXECUTION_INCLUDE_SECRETS, true);
-  const rolloutPercentage = mode === "gradual"
-    ? readRolloutPercentage(env.HOSTED_EXECUTION_GRADUAL_ROLLOUT_PERCENTAGE)
-    : null;
-  const existingVersionId = normalizeString(env.HOSTED_EXECUTION_DEPLOY_VERSION_ID);
-  const deployContext = normalizeString(env.HOSTED_EXECUTION_DEPLOY_CONTEXT)
-    ?? normalizeString(env.GITHUB_REF_NAME)
-    ?? "manual";
-  const versionTag = normalizeString(env.HOSTED_EXECUTION_DEPLOY_TAG)
-    ?? buildDefaultVersionTag(env, () => new Date());
-  const versionMessage = normalizeString(env.HOSTED_EXECUTION_VERSION_MESSAGE)
-    ?? `${deployContext} version ${versionTag}`;
-  const deploymentMessage = normalizeString(env.HOSTED_EXECUTION_DEPLOYMENT_MESSAGE)
-    ?? (
-      mode === "gradual"
-        ? `${deployContext} rollout ${rolloutPercentage}% ${versionTag}`
-        : `${deployContext} direct deploy ${versionTag}`
-    );
+  const deploymentSettings = resolveHostedWorkerDeploymentSettings(env, () => new Date());
 
   await input.dependencies.mkdir(path.dirname(input.resultPath), { recursive: true });
 
-  const result = mode === "direct"
+  const result = deploymentSettings.mode === "direct"
     ? await runDirectDeployment({
         configPath: input.configPath,
         dependencies: input.dependencies,
-        deploymentMessage,
-        includeSecrets,
+        deploymentMessage: deploymentSettings.deploymentMessage,
+        includeSecrets: deploymentSettings.includeSecrets,
         secretsFilePath: input.secretsFilePath,
-        versionTag,
+        versionTag: deploymentSettings.versionTag,
         workerName: input.workerName,
       })
     : await runGradualDeployment({
         configPath: input.configPath,
         dependencies: input.dependencies,
-        deploymentMessage,
-        existingVersionId,
-        includeSecrets,
-        rolloutPercentage,
+        deploymentMessage: deploymentSettings.deploymentMessage,
+        existingVersionId: deploymentSettings.existingVersionId,
+        includeSecrets: deploymentSettings.includeSecrets,
+        rolloutPercentage: deploymentSettings.rolloutPercentage,
         secretsFilePath: input.secretsFilePath,
-        versionMessage,
-        versionTag,
+        versionMessage: deploymentSettings.versionMessage,
+        versionTag: deploymentSettings.versionTag,
         workerName: input.workerName,
       });
 
@@ -179,7 +182,7 @@ async function runGradualDeployment(input: {
   deploymentMessage: string;
   existingVersionId: string | null;
   includeSecrets: boolean;
-  rolloutPercentage: number | null;
+  rolloutPercentage: number;
   secretsFilePath: string;
   versionMessage: string;
   versionTag: string;
@@ -231,7 +234,7 @@ async function runGradualDeployment(input: {
   const versionTraffic = resolveHostedWorkerDeploymentTraffic({
     candidateVersionId,
     currentDeploymentVersions: mapDeploymentVersions(currentDeployment),
-    rolloutPercentage: input.rolloutPercentage ?? 10,
+    rolloutPercentage: input.rolloutPercentage,
   });
 
   await input.dependencies.deployVersions({
@@ -256,6 +259,45 @@ async function runGradualDeployment(input: {
     smokeVersionId: candidateVersionId,
     uploadedVersionId,
     workerName: input.workerName,
+  };
+}
+
+function resolveHostedWorkerDeploymentSettings(
+  env: EnvSource,
+  now: () => Date,
+): HostedWorkerDeploymentSettings {
+  const mode = readDeploymentMode(env.HOSTED_EXECUTION_DEPLOYMENT_MODE);
+  const includeSecrets = readBooleanEnv(env.HOSTED_EXECUTION_INCLUDE_SECRETS, true);
+  const deployContext = normalizeString(env.HOSTED_EXECUTION_DEPLOY_CONTEXT)
+    ?? normalizeString(env.GITHUB_REF_NAME)
+    ?? "manual";
+  const versionTag = normalizeString(env.HOSTED_EXECUTION_DEPLOY_TAG)
+    ?? buildDefaultVersionTag(env, now);
+  const versionMessage = normalizeString(env.HOSTED_EXECUTION_VERSION_MESSAGE)
+    ?? `${deployContext} version ${versionTag}`;
+
+  if (mode === "direct") {
+    return {
+      deploymentMessage: normalizeString(env.HOSTED_EXECUTION_DEPLOYMENT_MESSAGE)
+        ?? `${deployContext} direct deploy ${versionTag}`,
+      includeSecrets,
+      mode,
+      versionMessage,
+      versionTag,
+    };
+  }
+
+  const rolloutPercentage = readRolloutPercentage(env.HOSTED_EXECUTION_GRADUAL_ROLLOUT_PERCENTAGE);
+
+  return {
+    deploymentMessage: normalizeString(env.HOSTED_EXECUTION_DEPLOYMENT_MESSAGE)
+      ?? `${deployContext} rollout ${rolloutPercentage}% ${versionTag}`,
+    existingVersionId: normalizeString(env.HOSTED_EXECUTION_DEPLOY_VERSION_ID),
+    includeSecrets,
+    mode,
+    rolloutPercentage,
+    versionMessage,
+    versionTag,
   };
 }
 
