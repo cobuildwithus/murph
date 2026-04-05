@@ -2,15 +2,17 @@ import {
   DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
 } from "./callback-hosts.ts";
+import {
+  requireHostedExecutionVercelOidcValidationEnvironment,
+  type HostedExecutionVercelOidcValidationEnvironment,
+} from "./vercel-oidc.ts";
 export interface HostedExecutionDispatchEnvironment {
   dispatchTimeoutMs: number;
   dispatchUrl: string | null;
-  signingSecret: string | null;
 }
 
 export interface HostedExecutionControlEnvironment {
   baseUrl: string | null;
-  signingSecret: string | null;
 }
 
 export interface HostedExecutionWebControlPlaneEnvironment {
@@ -28,12 +30,12 @@ export interface HostedExecutionWorkerEnvironment {
   platformEnvelopeKeyBase64: string;
   platformEnvelopeKeyId: string;
   platformEnvelopeKeyringJson: string | null;
-  controlSigningSecret: string;
   defaultAlarmDelayMs: number;
-  dispatchSigningSecret: string;
   maxEventAttempts: number;
   retryDelayMs: number;
   runnerTimeoutMs: number;
+  vercelOidcValidation: HostedExecutionVercelOidcValidationEnvironment;
+  webInternalSigningSecret: string;
 }
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
@@ -47,7 +49,6 @@ export function readHostedExecutionDispatchEnvironment(
   source: EnvSource = process.env,
 ): HostedExecutionDispatchEnvironment {
   const dispatchUrl = normalizeHostedExecutionBaseUrl(source.HOSTED_EXECUTION_DISPATCH_URL);
-  const signingSecret = normalizeHostedExecutionString(source.HOSTED_EXECUTION_SIGNING_SECRET);
   const dispatchTimeout = normalizeHostedExecutionString(source.HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS);
 
   return {
@@ -57,26 +58,15 @@ export function readHostedExecutionDispatchEnvironment(
       "HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS",
     ),
     dispatchUrl,
-    signingSecret,
   };
 }
 
 export function readHostedExecutionControlEnvironment(
   source: EnvSource = process.env,
 ): HostedExecutionControlEnvironment {
-  const dispatchUrl = normalizeHostedExecutionBaseUrl(source.HOSTED_EXECUTION_DISPATCH_URL);
-
   return {
-    baseUrl: dispatchUrl,
-    signingSecret: readHostedExecutionControlSigningSecret(source),
+    baseUrl: normalizeHostedExecutionBaseUrl(source.HOSTED_EXECUTION_DISPATCH_URL),
   };
-}
-
-export function readHostedExecutionControlSigningSecret(
-  source: EnvSource = process.env,
-): string | null {
-  return normalizeHostedExecutionString(source.HOSTED_EXECUTION_CONTROL_SIGNING_SECRET)
-    ?? normalizeHostedExecutionString(source.HOSTED_EXECUTION_SIGNING_SECRET);
 }
 
 export function readHostedExecutionWebControlPlaneEnvironment(
@@ -85,7 +75,7 @@ export function readHostedExecutionWebControlPlaneEnvironment(
 ): HostedExecutionWebControlPlaneEnvironment {
   return {
     deviceSyncRuntimeBaseUrl: DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
-    signingSecret: normalizeHostedExecutionString(source.HOSTED_EXECUTION_SIGNING_SECRET),
+    signingSecret: normalizeHostedExecutionString(source.HOSTED_WEB_INTERNAL_SIGNING_SECRET),
     usageBaseUrl: DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
   };
 }
@@ -136,18 +126,10 @@ export function readHostedExecutionWorkerEnvironment(
     platformEnvelopeKeyringJson: normalizeHostedExecutionString(
       source.HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON,
     ),
-    controlSigningSecret: requireHostedExecutionString(
-      readHostedExecutionControlSigningSecret(source),
-      "HOSTED_EXECUTION_CONTROL_SIGNING_SECRET or HOSTED_EXECUTION_SIGNING_SECRET",
-    ),
     defaultAlarmDelayMs: parsePositiveInteger(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS),
       15 * 60 * 1000,
       "HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS",
-    ),
-    dispatchSigningSecret: requireHostedExecutionString(
-      normalizeHostedExecutionString(source.HOSTED_EXECUTION_SIGNING_SECRET),
-      "HOSTED_EXECUTION_SIGNING_SECRET",
     ),
     maxEventAttempts: parsePositiveInteger(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS),
@@ -163,6 +145,11 @@ export function readHostedExecutionWorkerEnvironment(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS),
       60_000,
       "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS",
+    ),
+    vercelOidcValidation: requireHostedExecutionVercelOidcValidationEnvironment(source),
+    webInternalSigningSecret: requireHostedExecutionString(
+      normalizeHostedExecutionString(source.HOSTED_WEB_INTERNAL_SIGNING_SECRET),
+      "HOSTED_WEB_INTERNAL_SIGNING_SECRET",
     ),
   };
 }

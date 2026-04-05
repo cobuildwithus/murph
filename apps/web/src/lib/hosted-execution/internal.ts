@@ -3,7 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   normalizeHostedExecutionString,
-  readHostedExecutionControlSigningSecret,
+  readBearerAuthorizationToken,
   readHostedExecutionSignatureHeaders,
   verifyHostedExecutionSignature,
 } from "@murphai/hosted-execution";
@@ -19,17 +19,6 @@ function normalizeOptionalString(value: string | null | undefined): string | nul
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
-}
-
-function readBearerAuthorizationToken(value: string | null): string | null {
-  const normalized = normalizeOptionalString(value);
-
-  if (!normalized || !normalized.startsWith("Bearer ")) {
-    return null;
-  }
-
-  const token = normalized.slice("Bearer ".length).trim();
-  return token.length > 0 ? token : null;
 }
 
 function timingSafeEquals(left: string, right: string): boolean {
@@ -68,14 +57,14 @@ export function authorizeHostedExecutionInternalRequest(input: {
   }
 }
 
-export async function requireHostedExecutionSignedControlRequest(request: Request): Promise<void> {
-  const signingSecret = readHostedExecutionControlSigningSecret();
+export async function requireHostedWebInternalSignedRequest(request: Request): Promise<void> {
+  const signingSecret = normalizeHostedExecutionString(process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET);
 
   if (!signingSecret) {
     throw hostedOnboardingError({
-      code: "HOSTED_EXECUTION_CONTROL_SIGNING_SECRET_REQUIRED",
+      code: "HOSTED_WEB_INTERNAL_SIGNING_SECRET_REQUIRED",
       message:
-        "HOSTED_EXECUTION_CONTROL_SIGNING_SECRET or HOSTED_EXECUTION_SIGNING_SECRET must be configured for signed hosted control routes.",
+        "HOSTED_WEB_INTERNAL_SIGNING_SECRET must be configured for Cloudflare-owned hosted web routes.",
       httpStatus: 500,
     });
   }
@@ -93,39 +82,8 @@ export async function requireHostedExecutionSignedControlRequest(request: Reques
 
   if (!verified) {
     throw hostedOnboardingError({
-      code: "HOSTED_EXECUTION_UNAUTHORIZED",
-      message: "Unauthorized hosted execution request.",
-      httpStatus: 401,
-    });
-  }
-}
-
-export async function requireHostedExecutionSignedRequest(request: Request): Promise<void> {
-  const signingSecret = normalizeHostedExecutionString(process.env.HOSTED_EXECUTION_SIGNING_SECRET);
-
-  if (!signingSecret) {
-    throw hostedOnboardingError({
-      code: "HOSTED_EXECUTION_SIGNING_SECRET_REQUIRED",
-      message: "HOSTED_EXECUTION_SIGNING_SECRET must be configured for signed hosted execution requests.",
-      httpStatus: 500,
-    });
-  }
-
-  const payload = await request.clone().text();
-  const { signature, timestamp } = readHostedExecutionSignatureHeaders(request.headers);
-  const verified = await verifyHostedExecutionSignature({
-    method: request.method,
-    path: new URL(request.url).pathname,
-    payload,
-    secret: signingSecret,
-    signature,
-    timestamp,
-  });
-
-  if (!verified) {
-    throw hostedOnboardingError({
-      code: "HOSTED_EXECUTION_UNAUTHORIZED",
-      message: "Unauthorized hosted execution request.",
+      code: "HOSTED_WEB_INTERNAL_UNAUTHORIZED",
+      message: "Unauthorized hosted web internal request.",
       httpStatus: 401,
     });
   }

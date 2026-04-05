@@ -15,12 +15,17 @@ describe("deploy preflight helpers", () => {
     ]);
   });
 
-  it("requires CF_PUBLIC_BASE_URL when deploy_worker is enabled", () => {
+  it("requires the worker public URL plus hosted web OIDC validation env when deploy_worker is enabled", () => {
     expect(listMissingHostedDeployEnvironment({
       CF_BUNDLES_BUCKET: "bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
       CF_WORKER_NAME: "hosted-runner",
-    }, { deployWorker: true })).toEqual(["CF_PUBLIC_BASE_URL"]);
+    }, { deployWorker: true })).toEqual([
+      "CF_PUBLIC_BASE_URL",
+      "HOSTED_WEB_BASE_URL",
+      "HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG",
+      "HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME",
+    ]);
   });
 
   it("allows config-only runs without CF_PUBLIC_BASE_URL", () => {
@@ -37,6 +42,9 @@ describe("deploy preflight helpers", () => {
       CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
       CF_PUBLIC_BASE_URL: "https://worker.example.test",
       CF_WORKER_NAME: "hosted-runner",
+      HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
+      HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
       MURPH_WEB_SEARCH_PROVIDER: "brave",
     }, { deployWorker: true })).toThrowError(
       "Missing required GitHub environment variables for deploy workflow: BRAVE_API_KEY",
@@ -50,6 +58,9 @@ describe("deploy preflight helpers", () => {
       CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
       CF_PUBLIC_BASE_URL: "https://worker.example.test",
       CF_WORKER_NAME: "hosted-runner",
+      HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
+      HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
       MURPH_WEB_SEARCH_PROVIDER: "brave",
     }, { deployWorker: true })).not.toThrow();
   });
@@ -60,8 +71,11 @@ describe("deploy preflight helpers", () => {
       CF_BUNDLES_PREVIEW_BUCKET: "   ",
       CF_PUBLIC_BASE_URL: "   ",
       CF_WORKER_NAME: "hosted-runner",
+      HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "   ",
+      HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "   ",
+      HOSTED_WEB_BASE_URL: "   ",
     }, { deployWorker: true })).toThrowError(
-      "Missing required GitHub environment variables for deploy workflow: CF_BUNDLES_PREVIEW_BUCKET CF_PUBLIC_BASE_URL",
+      "Missing required GitHub environment variables for deploy workflow: CF_BUNDLES_PREVIEW_BUCKET CF_PUBLIC_BASE_URL HOSTED_WEB_BASE_URL HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME",
     );
   });
 

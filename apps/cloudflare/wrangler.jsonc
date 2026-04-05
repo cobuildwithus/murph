@@ -51,10 +51,10 @@
   },
   "secrets": {
     "required": [
-      "HOSTED_EXECUTION_SIGNING_SECRET",
       "HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY",
       "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK",
-      "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK"
+      "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK",
+      "HOSTED_WEB_INTERNAL_SIGNING_SECRET"
     ]
   },
   "vars": {
@@ -63,14 +63,17 @@
     "HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS": "3",
     "HOSTED_EXECUTION_RETRY_DELAY_MS": "30000",
     "HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS": "30000",
-    "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS": "120000"
+    "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS": "120000",
+    "HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT": "production"
   },
   // Configure these outside source control for real deployments:
-  // - HOSTED_EXECUTION_SIGNING_SECRET
-  // - HOSTED_EXECUTION_CONTROL_SIGNING_SECRET (optional but recommended distinct control-plane secret)
   // - HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY
   // - HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK
   // - HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK
+  // - HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME
+  // - HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG
+  // - HOSTED_WEB_BASE_URL
+  // - HOSTED_WEB_INTERNAL_SIGNING_SECRET
   // - HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON (optional JSON keyring for decrypting older platform envelope key ids)
   // Wrangler's `secrets.required` support is experimental; keep the required list tight.
   // Optional provider/toolchain vars and secrets must be configured on the Worker so the

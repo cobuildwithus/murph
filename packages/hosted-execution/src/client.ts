@@ -1,4 +1,3 @@
-import { createHostedExecutionSignatureHeaders } from "./auth.ts";
 import type { SharePack } from "@murphai/contracts";
 import type {
   HostedExecutionDeviceSyncRuntimeApplyRequest,
@@ -40,8 +39,7 @@ export interface HostedExecutionDispatchClient {
 export interface HostedExecutionDispatchClientOptions {
   baseUrl: string;
   fetchImpl?: typeof fetch;
-  now?: () => string;
-  signingSecret: string;
+  getBearerToken: () => Promise<string>;
   timeoutMs?: number;
 }
 
@@ -73,8 +71,7 @@ export interface HostedExecutionControlClient {
 export interface HostedExecutionControlClientOptions {
   baseUrl: string;
   fetchImpl?: typeof fetch;
-  now?: () => string;
-  signingSecret: string;
+  getBearerToken: () => Promise<string>;
   timeoutMs?: number;
 }
 
@@ -83,36 +80,27 @@ export function createHostedExecutionDispatchClient(
 ): HostedExecutionDispatchClient {
   const baseUrl = requireHostedExecutionBaseUrl(options.baseUrl);
   const fetchImpl = options.fetchImpl ?? fetch;
+  const getAuthorizationHeader = createHostedExecutionBearerAuthorizationHeaderProvider(
+    options.getBearerToken,
+  );
 
   return {
-    async dispatch(input) {
+    dispatch(input) {
       const requestPayload = parseHostedExecutionDispatchRequest(input);
-      const payload = JSON.stringify(requestPayload);
-      const path = HOSTED_EXECUTION_DISPATCH_PATH;
-      const timestamp = options.now?.() ?? new Date().toISOString();
-      const signatureHeaders = await createHostedExecutionSignatureHeaders({
-        method: "POST",
-        path,
-        payload,
-        secret: options.signingSecret,
-        timestamp,
-      });
 
-      return requestHostedExecutionJson({
+      return requestHostedExecutionAuthorizedJson({
         baseUrl,
         fetchImpl,
+        getAuthorizationHeader,
         label: "dispatch",
         parse: parseHostedExecutionDispatchResult,
-        path,
+        path: HOSTED_EXECUTION_DISPATCH_PATH,
         request: {
-          body: payload,
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-            ...signatureHeaders,
-          },
+          body: JSON.stringify(requestPayload),
+          headers: { "content-type": "application/json; charset=utf-8" },
           method: "POST",
-          signal: resolveHostedExecutionTimeoutSignal(options.timeoutMs),
         },
+        timeoutMs: options.timeoutMs,
       });
     },
   };
@@ -123,7 +111,9 @@ export function createHostedExecutionControlClient(
 ): HostedExecutionControlClient {
   const baseUrl = requireHostedExecutionBaseUrl(options.baseUrl);
   const fetchImpl = options.fetchImpl ?? fetch;
-  const signingSecret = requireHostedExecutionSigningSecret(options.signingSecret);
+  const getAuthorizationHeader = createHostedExecutionBearerAuthorizationHeaderProvider(
+    options.getBearerToken,
+  );
 
   return {
     applyDeviceSyncRuntimeUpdates(userId, input) {
@@ -133,11 +123,11 @@ export function createHostedExecutionControlClient(
         userId,
       } satisfies HostedExecutionDeviceSyncRuntimeApplyRequest;
 
-      return requestHostedExecutionSignedJson({
+      return requestHostedExecutionAuthorizedJson({
         baseUrl,
         fetchImpl,
+        getAuthorizationHeader,
         label: "device-sync runtime apply",
-        now: options.now,
         parse: parseHostedExecutionDeviceSyncRuntimeApplyResponse,
         path: buildHostedExecutionUserDeviceSyncRuntimePath(userId),
         request: {
@@ -145,35 +135,32 @@ export function createHostedExecutionControlClient(
           headers: { "content-type": "application/json; charset=utf-8" },
           method: "POST",
         },
-        signingSecret,
         timeoutMs: options.timeoutMs,
       });
     },
     clearUserEnv(userId) {
-      return requestHostedExecutionSignedJson({
+      return requestHostedExecutionAuthorizedJson({
         baseUrl,
         fetchImpl,
+        getAuthorizationHeader,
         label: "user env clear",
-        now: options.now,
         parse: parseHostedExecutionUserEnvStatus,
         path: buildHostedExecutionUserEnvPath(userId),
         request: { method: "DELETE" },
-        signingSecret,
         timeoutMs: options.timeoutMs,
       });
     },
     deleteSharePack(shareId) {
-      return requestHostedExecutionSignedJson({
+      return requestHostedExecutionAuthorizedJson({
         baseUrl,
         fetchImpl,
+        getAuthorizationHeader,
         label: "delete share pack",
-        now: options.now,
         parse: () => undefined,
         path: buildHostedExecutionSharePackPath(shareId),
         request: {
           method: "DELETE",
         },
-        signingSecret,
         timeoutMs: options.timeoutMs,
       });
     },
@@ -186,27 +173,26 @@ export function createHostedExecutionControlClient(
         search.set("provider", input.provider);
       }
 
-      return requestHostedExecutionSignedJson({
+      return requestHostedExecutionAuthorizedJson({
         baseUrl,
         fetchImpl,
+        getAuthorizationHeader,
         label: "device-sync runtime snapshot",
-        now: options.now,
         parse: parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
         path: buildHostedExecutionUserDeviceSyncRuntimePath(userId),
         request: {
           method: "GET",
           search: search.size > 0 ? search.toString() : null,
         },
-        signingSecret,
         timeoutMs: options.timeoutMs,
       });
     },
     deletePendingUsage(userId, usageIds) {
-      return requestHostedExecutionSignedJson({
+      return requestHostedExecutionAuthorizedJson({
         baseUrl,
         fetchImpl,
+        getAuthorizationHeader,
         label: "delete pending usage",
-        now: options.now,
         parse: () => undefined,
         path: buildHostedExecutionUserPendingUsagePath(userId),
         request: {
@@ -214,7 +200,6 @@ export function createHostedExecutionControlClient(
           headers: { "content-type": "application/json; charset=utf-8" },
           method: "DELETE",
         },
-        signingSecret,
         timeoutMs: options.timeoutMs,
       });
     },
@@ -223,11 +208,11 @@ export function createHostedExecutionControlClient(
         ? new URLSearchParams({ limit: String(Math.floor(limit)) }).toString()
         : null;
 
-      return requestHostedExecutionSignedJson({
+      return requestHostedExecutionAuthorizedJson({
         baseUrl,
         fetchImpl,
+        getAuthorizationHeader,
         label: "pending usage",
-        now: options.now,
         parse: (value) => {
           if (!Array.isArray(value)) {
             throw new TypeError("Pending usage response must be an array.");
@@ -246,22 +231,20 @@ export function createHostedExecutionControlClient(
           method: "GET",
           search,
         },
-        signingSecret,
         timeoutMs: options.timeoutMs,
       });
     },
     getSharePack(shareId) {
-      return requestHostedExecutionSignedJson({
+      return requestHostedExecutionAuthorizedJson({
         baseUrl,
         fetchImpl,
+        getAuthorizationHeader,
         label: "share pack",
-        now: options.now,
         parse: parseHostedExecutionSharePack,
         path: buildHostedExecutionSharePackPath(shareId),
         request: {
           method: "GET",
         },
-        signingSecret,
         timeoutMs: options.timeoutMs,
       }).catch((error) => {
         if (
@@ -277,11 +260,11 @@ export function createHostedExecutionControlClient(
     putDeviceSyncRuntimeSnapshot(userId, snapshot) {
       const requestPayload = parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(snapshot);
 
-      return requestHostedExecutionSignedJson({
+      return requestHostedExecutionAuthorizedJson({
         baseUrl,
         fetchImpl,
+        getAuthorizationHeader,
         label: "device-sync runtime snapshot mirror",
-        now: options.now,
         parse: parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
         path: buildHostedExecutionUserDeviceSyncRuntimeSnapshotPath(userId),
         request: {
@@ -289,18 +272,17 @@ export function createHostedExecutionControlClient(
           headers: { "content-type": "application/json; charset=utf-8" },
           method: "PUT",
         },
-        signingSecret,
         timeoutMs: options.timeoutMs,
       });
     },
     putSharePack(shareId, pack) {
       const requestPayload = parseHostedExecutionSharePack(pack);
 
-      return requestHostedExecutionSignedJson({
+      return requestHostedExecutionAuthorizedJson({
         baseUrl,
         fetchImpl,
+        getAuthorizationHeader,
         label: "share pack write",
-        now: options.now,
         parse: parseHostedExecutionSharePack,
         path: buildHostedExecutionSharePackPath(shareId),
         request: {
@@ -308,42 +290,39 @@ export function createHostedExecutionControlClient(
           headers: { "content-type": "application/json; charset=utf-8" },
           method: "PUT",
         },
-        signingSecret,
         timeoutMs: options.timeoutMs,
       });
     },
     getStatus(userId) {
-      return requestHostedExecutionSignedJson({
+      return requestHostedExecutionAuthorizedJson({
         baseUrl,
         fetchImpl,
+        getAuthorizationHeader,
         label: "status",
-        now: options.now,
         parse: parseHostedExecutionUserStatus,
         path: buildHostedExecutionUserStatusPath(userId),
         request: { method: "GET" },
-        signingSecret,
         timeoutMs: options.timeoutMs,
       });
     },
     getUserEnvStatus(userId) {
-      return requestHostedExecutionSignedJson({
+      return requestHostedExecutionAuthorizedJson({
         baseUrl,
         fetchImpl,
+        getAuthorizationHeader,
         label: "user env status",
-        now: options.now,
         parse: parseHostedExecutionUserEnvStatus,
         path: buildHostedExecutionUserEnvPath(userId),
         request: { method: "GET" },
-        signingSecret,
         timeoutMs: options.timeoutMs,
       });
     },
     run(userId) {
-      return requestHostedExecutionSignedJson({
+      return requestHostedExecutionAuthorizedJson({
         baseUrl,
         fetchImpl,
+        getAuthorizationHeader,
         label: "manual run",
-        now: options.now,
         parse: parseHostedExecutionUserStatus,
         path: buildHostedExecutionUserRunPath(userId),
         request: {
@@ -351,18 +330,17 @@ export function createHostedExecutionControlClient(
           headers: { "content-type": "application/json; charset=utf-8" },
           method: "POST",
         },
-        signingSecret,
         timeoutMs: options.timeoutMs,
       });
     },
     updateUserEnv(userId, update) {
       const requestPayload = parseHostedExecutionUserEnvUpdate(update);
 
-      return requestHostedExecutionSignedJson({
+      return requestHostedExecutionAuthorizedJson({
         baseUrl,
         fetchImpl,
+        getAuthorizationHeader,
         label: "user env update",
-        now: options.now,
         parse: parseHostedExecutionUserEnvStatus,
         path: buildHostedExecutionUserEnvPath(userId),
         request: {
@@ -370,7 +348,6 @@ export function createHostedExecutionControlClient(
           headers: { "content-type": "application/json; charset=utf-8" },
           method: "PUT",
         },
-        signingSecret,
         timeoutMs: options.timeoutMs,
       });
     },
@@ -387,30 +364,32 @@ function requireHostedExecutionBaseUrl(value: string): string {
   return normalized;
 }
 
-function requireHostedExecutionSigningSecret(value: string): string {
-  const normalized = normalizeHostedExecutionSigningSecret(value);
-
-  if (!normalized) {
-    throw new TypeError("Hosted execution signingSecret must be configured.");
+function createHostedExecutionBearerAuthorizationHeaderProvider(
+  getBearerToken: (() => Promise<string>) | undefined,
+): () => Promise<string> {
+  if (!getBearerToken) {
+    throw new TypeError("Hosted execution getBearerToken must be configured.");
   }
 
-  return normalized;
+  return async () => {
+    const rawToken = (await getBearerToken()).trim();
+    const token = rawToken.startsWith("Bearer ")
+      ? rawToken.slice("Bearer ".length).trim()
+      : rawToken;
+
+    if (!token) {
+      throw new TypeError("Hosted execution bearer token must be configured.");
+    }
+
+    return `Bearer ${token}`;
+  };
 }
 
-function normalizeHostedExecutionSigningSecret(value: string | null | undefined): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
-async function requestHostedExecutionSignedJson<TResponse>(input: {
+async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   baseUrl: string;
   fetchImpl: typeof fetch;
+  getAuthorizationHeader: () => Promise<string>;
   label: string;
-  now?: () => string;
   parse: (value: unknown) => TResponse;
   path: string;
   request: {
@@ -419,18 +398,9 @@ async function requestHostedExecutionSignedJson<TResponse>(input: {
     method: "GET" | "POST" | "PUT" | "DELETE";
     search?: string | null;
   };
-  signingSecret: string;
   timeoutMs?: number;
 }): Promise<TResponse> {
-  const payload = input.request.body ?? "";
-  const timestamp = input.now?.() ?? new Date().toISOString();
-  const signatureHeaders = await createHostedExecutionSignatureHeaders({
-    method: input.request.method,
-    path: input.path,
-    payload,
-    secret: input.signingSecret,
-    timestamp,
-  });
+  const authorization = await input.getAuthorizationHeader();
 
   return requestHostedExecutionJson({
     baseUrl: input.baseUrl,
@@ -442,7 +412,7 @@ async function requestHostedExecutionSignedJson<TResponse>(input: {
       body: input.request.body,
       headers: {
         ...input.request.headers,
-        ...signatureHeaders,
+        authorization,
       },
       method: input.request.method,
       search: input.request.search,
@@ -465,7 +435,7 @@ async function requestHostedExecutionJson<TResponse>(input: {
     signal?: AbortSignal;
   };
 }): Promise<TResponse> {
-  const targetUrl = new URL(input.path.replace(/^\/+/u, ""), `${input.baseUrl}/`);
+  const targetUrl = new URL(input.path.replace(/^\/+/, ""), `${input.baseUrl}/`);
 
   if (input.request.search) {
     targetUrl.search = input.request.search;

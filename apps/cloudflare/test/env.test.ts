@@ -16,20 +16,21 @@ describe("readHostedExecutionEnvironment", () => {
       v1: environment.platformEnvelopeKey,
     });
     expect(environment.platformEnvelopeKeyId).toBe("v1");
-    expect(environment.controlSigningSecret).toBe("dispatch-secret");
     expect(environment.defaultAlarmDelayMs).toBe(15 * 60 * 1000);
     expect(environment.maxEventAttempts).toBe(3);
     expect(environment.retryDelayMs).toBe(30_000);
     expect(environment.runnerTimeoutMs).toBe(60_000);
+    expect(environment.vercelOidcValidation.teamSlug).toBe("murph-team");
+    expect(environment.webInternalSigningSecret).toBe("web-internal-secret");
   });
 
-  it("prefers a dedicated control signing secret when configured", () => {
+  it("reads the configured Vercel OIDC environment when provided", () => {
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_EXECUTION_CONTROL_SIGNING_SECRET: "control-secret",
+      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "preview",
     }));
 
-    expect(environment.controlSigningSecret).toBe("control-secret");
-    expect(environment.dispatchSigningSecret).toBe("dispatch-secret");
+    expect(environment.vercelOidcValidation.environment).toBe("preview");
+    expect(environment.vercelOidcValidation.subject).toContain(":environment:preview");
   });
 
   it("reads the runner timeout when configured", () => {
@@ -92,8 +93,8 @@ describe("readHostedExecutionEnvironment", () => {
     expect(() =>
       readHostedExecutionEnvironment(createHostedExecutionTestEnv({
         HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET: "dispatch-secret",
-        HOSTED_EXECUTION_SIGNING_SECRET: undefined,
+        HOSTED_WEB_INTERNAL_SIGNING_SECRET: undefined,
       } as Record<string, string | undefined>)),
-    ).toThrow(/HOSTED_EXECUTION_SIGNING_SECRET/u);
+    ).toThrow(/HOSTED_WEB_INTERNAL_SIGNING_SECRET/u);
   });
 });

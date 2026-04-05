@@ -2,30 +2,33 @@ import { afterEach, beforeEach, describe as baseDescribe, expect, it, vi } from 
 
 import {
   HOSTED_EXECUTION_DISPATCH_PATH,
-  HOSTED_EXECUTION_SIGNATURE_HEADER,
-  HOSTED_EXECUTION_TIMESTAMP_HEADER,
-  verifyHostedExecutionSignature,
 } from "@murphai/hosted-execution";
 
-import {
-  dispatchHostedExecutionStatus,
-  dispatchHostedExecutionBestEffort,
-} from "@/src/lib/hosted-execution/dispatch";
+const mocks = vi.hoisted(() => ({
+  createHostedExecutionVercelOidcBearerTokenProvider: vi.fn(),
+  tokenProvider: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-execution/vercel-oidc", () => ({
+  createHostedExecutionVercelOidcBearerTokenProvider:
+    mocks.createHostedExecutionVercelOidcBearerTokenProvider,
+}));
 
 const describe = baseDescribe.sequential;
 
 describe("dispatchHostedExecutionBestEffort", () => {
   const originalDispatchUrl = process.env.HOSTED_EXECUTION_DISPATCH_URL;
-  const originalSigningSecret = process.env.HOSTED_EXECUTION_SIGNING_SECRET;
   const originalDispatchTimeoutMs = process.env.HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS;
   const originalFetch = global.fetch;
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.clearAllMocks();
     delete process.env.HOSTED_EXECUTION_DISPATCH_URL;
-    delete process.env.HOSTED_EXECUTION_SIGNING_SECRET;
     delete process.env.HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS;
     global.fetch = vi.fn();
+    mocks.createHostedExecutionVercelOidcBearerTokenProvider.mockReturnValue(mocks.tokenProvider);
+    mocks.tokenProvider.mockResolvedValue("vercel-oidc-token");
   });
 
   afterEach(() => {
@@ -35,12 +38,6 @@ describe("dispatchHostedExecutionBestEffort", () => {
       process.env.HOSTED_EXECUTION_DISPATCH_URL = originalDispatchUrl;
     } else {
       delete process.env.HOSTED_EXECUTION_DISPATCH_URL;
-    }
-
-    if (typeof originalSigningSecret === "string") {
-      process.env.HOSTED_EXECUTION_SIGNING_SECRET = originalSigningSecret;
-    } else {
-      delete process.env.HOSTED_EXECUTION_SIGNING_SECRET;
     }
 
     if (typeof originalDispatchTimeoutMs === "string") {
@@ -54,6 +51,10 @@ describe("dispatchHostedExecutionBestEffort", () => {
 
   it("preserves the existing not-configured noop result", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { dispatchHostedExecutionBestEffort } = await import(
+      "@/src/lib/hosted-execution/dispatch"
+    );
 
     await expect(
       dispatchHostedExecutionBestEffort({
@@ -75,10 +76,13 @@ describe("dispatchHostedExecutionBestEffort", () => {
 
   it("swallows dispatch failures and logs the provided context", async () => {
     process.env.HOSTED_EXECUTION_DISPATCH_URL = "https://runner.example.test";
-    process.env.HOSTED_EXECUTION_SIGNING_SECRET = "secret";
     global.fetch = vi.fn().mockResolvedValue(new Response("runner unavailable", { status: 503 }));
     const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { dispatchHostedExecutionBestEffort } = await import(
+      "@/src/lib/hosted-execution/dispatch"
+    );
 
     await expect(
       dispatchHostedExecutionBestEffort(
@@ -108,9 +112,12 @@ describe("dispatchHostedExecutionBestEffort", () => {
 
   it("swallows transport rejections and logs the provided context", async () => {
     process.env.HOSTED_EXECUTION_DISPATCH_URL = "https://runner.example.test";
-    process.env.HOSTED_EXECUTION_SIGNING_SECRET = "secret";
     global.fetch = vi.fn().mockRejectedValue(new Error("socket hang up"));
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { dispatchHostedExecutionBestEffort } = await import(
+      "@/src/lib/hosted-execution/dispatch"
+    );
 
     await expect(
       dispatchHostedExecutionBestEffort(
@@ -139,11 +146,14 @@ describe("dispatchHostedExecutionBestEffort", () => {
 
   it("uses an explicit dispatch timeout override", async () => {
     process.env.HOSTED_EXECUTION_DISPATCH_URL = "https://runner.example.test";
-    process.env.HOSTED_EXECUTION_SIGNING_SECRET = "secret";
     process.env.HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS = "45000";
     global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 503 }));
     const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { dispatchHostedExecutionBestEffort } = await import(
+      "@/src/lib/hosted-execution/dispatch"
+    );
 
     await dispatchHostedExecutionBestEffort({
       event: {
@@ -163,6 +173,10 @@ describe("dispatchHostedExecutionBestEffort", () => {
     process.env.HOSTED_EXECUTION_CLOUDFLARE_BASE_URL = "https://runner.example.test";
     process.env.HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET = "secret";
     process.env.HOSTED_EXECUTION_CLOUDFLARE_TIMEOUT_MS = "47000";
+
+    const { dispatchHostedExecutionStatus } = await import(
+      "@/src/lib/hosted-execution/dispatch"
+    );
 
     await expect(
       dispatchHostedExecutionStatus({
@@ -184,16 +198,17 @@ describe("dispatchHostedExecutionBestEffort", () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  it("signs dispatches with a fresh envelope timestamp instead of business occurredAt", async () => {
+  it("sends bearer auth on dispatch requests", async () => {
     process.env.HOSTED_EXECUTION_DISPATCH_URL = "https://runner.example.test";
-    process.env.HOSTED_EXECUTION_SIGNING_SECRET = "secret";
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-27T09:15:00.000Z"));
     global.fetch = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify(buildDispatchResultFixture("evt_123")),
         { status: 200 },
       ),
+    );
+
+    const { dispatchHostedExecutionStatus } = await import(
+      "@/src/lib/hosted-execution/dispatch"
     );
 
     await dispatchHostedExecutionStatus({
@@ -210,24 +225,11 @@ describe("dispatchHostedExecutionBestEffort", () => {
     const fetchMock = global.fetch as unknown as {
       mock: { calls: Array<[RequestInfo | URL, RequestInit | undefined]> };
     };
-    const [, init] = fetchMock.mock.calls[0] ?? [];
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
     const headers = new Headers(init?.headers);
-    const payload = typeof init?.body === "string" ? init.body : "";
-    const timestamp = headers.get(HOSTED_EXECUTION_TIMESTAMP_HEADER);
 
-    expect(timestamp).toBe("2026-03-27T09:15:00.000Z");
-    expect(timestamp).not.toBe("2026-03-20T12:00:00.000Z");
-    await expect(
-      verifyHostedExecutionSignature({
-        method: "POST",
-        path: HOSTED_EXECUTION_DISPATCH_PATH,
-        payload,
-        secret: "secret",
-        signature: headers.get(HOSTED_EXECUTION_SIGNATURE_HEADER),
-        timestamp,
-        nowMs: Date.parse("2026-03-27T09:15:00.000Z"),
-      }),
-    ).resolves.toBe(true);
+    expect(url).toBe(`https://runner.example.test${HOSTED_EXECUTION_DISPATCH_PATH}`);
+    expect(headers.get("authorization")).toBe("Bearer vercel-oidc-token");
   });
 });
 

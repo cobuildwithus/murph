@@ -20,6 +20,18 @@ export function listMissingHostedDeployEnvironment(
     missing.push("CF_PUBLIC_BASE_URL");
   }
 
+  if (input.deployWorker && normalizeString(source.HOSTED_WEB_BASE_URL) === null) {
+    missing.push("HOSTED_WEB_BASE_URL");
+  }
+
+  if (input.deployWorker && normalizeString(source.HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG) === null) {
+    missing.push("HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG");
+  }
+
+  if (input.deployWorker && normalizeString(source.HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME) === null) {
+    missing.push("HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME");
+  }
+
   if (
     normalizeString(source.MURPH_WEB_SEARCH_PROVIDER)?.toLowerCase() === "brave"
     && normalizeString(source.BRAVE_API_KEY) === null

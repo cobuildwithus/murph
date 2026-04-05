@@ -130,11 +130,17 @@ Set these in the selected GitHub environment as secrets:
 
 - `CLOUDFLARE_API_TOKEN`
 - `CLOUDFLARE_ACCOUNT_ID`
-- `HOSTED_EXECUTION_SIGNING_SECRET`
-- `HOSTED_EXECUTION_CONTROL_SIGNING_SECRET` (optional but recommended)
 - `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY`
 - `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK`
 - `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK`
+- `HOSTED_WEB_INTERNAL_SIGNING_SECRET`
+
+Set these in the selected GitHub environment as vars:
+
+- `HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG`
+- `HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME`
+- `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` (optional, defaults to `production`)
+- `HOSTED_WEB_BASE_URL`
 
 Optional secrets for staged rotation:
 
@@ -146,12 +152,12 @@ Optional hosted email bridge secrets:
 - `HOSTED_EMAIL_CLOUDFLARE_API_TOKEN`
 - `HOSTED_EMAIL_SIGNING_SECRET`
 
-The checked-in scaffold and rendered deploy config declare the signing secret, platform envelope key, and automation recipient keypair in Wrangler's experimental `secrets.required` field, so `wrangler deploy` and `wrangler versions upload` fail early when any of them are missing from the Worker.
+The checked-in scaffold and rendered deploy config declare the web-internal signing secret, platform envelope key, and automation recipient keypair in Wrangler's experimental `secrets.required` field, so `wrangler deploy` and `wrangler versions upload` fail early when any of them are missing from the Worker.
 
-The worker now authenticates dispatches with HMAC signatures derived from `HOSTED_EXECUTION_SIGNING_SECRET`. Privileged control requests can use a distinct `HOSTED_EXECUTION_CONTROL_SIGNING_SECRET` and fall back to the dispatch secret only when that separate control secret is unset. Each native container invocation gets its own one-shot runner control token injected at start time.
+The worker now authenticates `apps/web -> apps/cloudflare` dispatch/control traffic with Vercel OIDC bearer identity derived from the configured team slug, project name, and environment. The only remaining shared-secret seam is `apps/cloudflare -> apps/web` callbacks signed with `HOSTED_WEB_INTERNAL_SIGNING_SECRET`. Each native container invocation still gets its own one-shot runner control token injected at start time.
 
-- missing `HOSTED_EXECUTION_SIGNING_SECRET` makes signed dispatches fail closed
-- missing `HOSTED_EXECUTION_CONTROL_SIGNING_SECRET` only matters when you choose to split privileged control signatures away from dispatch signatures
+- missing `HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG` or `HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME` makes bearer-authenticated web dispatch/control requests fail closed
+- mismatched `HOSTED_WEB_INTERNAL_SIGNING_SECRET` breaks Cloudflare-owned callback routes into `apps/web`
 - missing `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY` prevents encrypted hosted storage from decrypting
 - missing automation recipient JWKs prevents the worker from unwrapping per-user root keys
 - changing `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY` or `CF_PLATFORM_ENVELOPE_KEY_ID` in place still requires staging older keys in `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON`; missing keyring entries fail closed on `keyId` mismatch
@@ -206,11 +212,14 @@ export CF_WORKER_NAME=hosted-runner-staging
 export CF_BUNDLES_BUCKET=hosted-execution-bundles-staging
 export CF_BUNDLES_PREVIEW_BUCKET=hosted-execution-bundles-staging-preview
 export CF_CONTAINER_INSTANCE_TYPE=standard-1
-export HOSTED_EXECUTION_SIGNING_SECRET=...
-export HOSTED_EXECUTION_CONTROL_SIGNING_SECRET=... # optional but recommended distinct control-plane secret
+export HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG=...
+export HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME=...
+export HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT=production
 export HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY=...
 export HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK=...
 export HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK=...
+export HOSTED_WEB_BASE_URL=https://your-web.example.com
+export HOSTED_WEB_INTERNAL_SIGNING_SECRET=...
 export HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID=...
 export HOSTED_EMAIL_CLOUDFLARE_API_TOKEN=...
 export HOSTED_EMAIL_DOMAIN=mail.example.test

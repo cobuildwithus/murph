@@ -11,9 +11,8 @@ import {
   parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
   parseHostedExecutionDispatchRequest,
   parseHostedExecutionSharePack,
-  readHostedExecutionSignatureHeaders,
   readHostedEmailCapabilities,
-  verifyHostedExecutionSignature,
+  verifyHostedExecutionVercelOidcRequest,
   type HostedExecutionDeviceSyncRuntimeApplyRequest,
   type HostedExecutionDeviceSyncRuntimeSnapshotRequest,
   type HostedExecutionDeviceSyncRuntimeSnapshotResponse,
@@ -131,7 +130,7 @@ interface WorkerEnvironmentSource extends WorkerEnvironmentContract<UserRunnerDu
 
 type RouteParams = Readonly<Record<string, string>>;
 type RouteMatcher = (pathname: string) => RouteParams | null;
-type WorkerRouteAuthorization = "control-signed" | "dispatch-signed" | null;
+type WorkerRouteAuthorization = "vercel-oidc" | null;
 type WrongMethodResponse = "method-not-allowed" | "not-found";
 
 interface DeclarativeRoute<Context> {
@@ -167,16 +166,16 @@ const workerPublicRoutes: readonly DeclarativeRoute<{
 
 const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
-    authorization: "dispatch-signed",
+    authorization: "vercel-oidc",
     async handle(context) {
-      return handleSignedDispatchRoute(context);
+      return handleDispatchRoute(context);
     },
     match: matchExactPath("/internal/dispatch"),
     methods: ["POST"],
   },
   {
     authorizeBeforeMethod: true,
-    authorization: "control-signed",
+    authorization: "vercel-oidc",
     async handle(context, params) {
       return handleManualRunRoute(context, params.userId);
     },
@@ -186,7 +185,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   },
   {
     authorizeBeforeMethod: true,
-    authorization: "control-signed",
+    authorization: "vercel-oidc",
     async handle(context, params) {
       return handleStatusRoute(context, params.userId);
     },
@@ -196,7 +195,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   },
   {
     authorizeBeforeMethod: true,
-    authorization: "control-signed",
+    authorization: "vercel-oidc",
     async handle(context, params) {
       return handleUserEnvRoute(context, params.userId);
     },
@@ -206,7 +205,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   },
   {
     authorizeBeforeMethod: true,
-    authorization: "control-signed",
+    authorization: "vercel-oidc",
     async handle(context, params) {
       return handleUserDeviceSyncRuntimeRoute(context, params.userId);
     },
@@ -216,7 +215,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   },
   {
     authorizeBeforeMethod: true,
-    authorization: "control-signed",
+    authorization: "vercel-oidc",
     async handle(context, params) {
       return handleUserDeviceSyncRuntimeSnapshotRoute(context, params.userId);
     },
@@ -226,7 +225,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   },
   {
     authorizeBeforeMethod: true,
-    authorization: "control-signed",
+    authorization: "vercel-oidc",
     async handle(context, params) {
       return handleSharePackRoute(context, params.shareId);
     },
@@ -236,7 +235,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   },
   {
     authorizeBeforeMethod: true,
-    authorization: "control-signed",
+    authorization: "vercel-oidc",
     async handle(context, params) {
       return handleUserEmailAddressRoute(context, params.userId);
     },
@@ -246,7 +245,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   },
   {
     authorizeBeforeMethod: true,
-    authorization: "control-signed",
+    authorization: "vercel-oidc",
     async handle(context, params) {
       return handlePendingUsageRoute(context, params.userId);
     },
@@ -256,7 +255,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   },
   {
     authorizeBeforeMethod: true,
-    authorization: "control-signed",
+    authorization: "vercel-oidc",
     async handle(context, params) {
       return handleGatewayRoute(context, params.userId, params.resource);
     },
@@ -464,38 +463,14 @@ async function authorizeRoute(
   context: { request: Request } & Partial<WorkerRouteContext>,
 ): Promise<Response | null> {
   switch (authorization) {
-    case "dispatch-signed": {
-      const secret = context.environment?.dispatchSigningSecret;
-      if (!secret) {
+    case "vercel-oidc": {
+      const validation = context.environment?.vercelOidcValidation;
+      if (!validation) {
         return unauthorized();
       }
-      const payload = await readCachedRequestText(context);
-      const { signature, timestamp } = readHostedExecutionSignatureHeaders(context.request.headers);
-      const verified = await verifyHostedExecutionSignature({
-        method: context.request.method,
-        payload,
-        path: new URL(context.request.url).pathname,
-        secret,
-        signature,
-        timestamp,
-      });
-
-      return verified ? null : unauthorized();
-    }
-    case "control-signed": {
-      const secret = context.environment?.controlSigningSecret;
-      if (!secret) {
-        return unauthorized();
-      }
-      const payload = await readCachedRequestText(context);
-      const { signature, timestamp } = readHostedExecutionSignatureHeaders(context.request.headers);
-      const verified = await verifyHostedExecutionSignature({
-        method: context.request.method,
-        payload,
-        path: new URL(context.request.url).pathname,
-        secret,
-        signature,
-        timestamp,
+      const verified = await verifyHostedExecutionVercelOidcRequest({
+        request: context.request,
+        validation,
       });
 
       return verified ? null : unauthorized();
@@ -991,7 +966,7 @@ async function resolveHostedExecutionUserCryptoContext(input: {
   }).ensureUserCryptoContext(input.userId);
 }
 
-async function handleSignedDispatchRoute(context: WorkerRouteContext): Promise<Response> {
+async function handleDispatchRoute(context: WorkerRouteContext): Promise<Response> {
   const payload = await readCachedRequestText(context);
   const dispatch = parseHostedExecutionDispatchRequest(JSON.parse(payload) as unknown);
   const result = await (await resolveUserRunnerStub(context.env, dispatch.event.userId)).dispatchWithOutcome(dispatch);

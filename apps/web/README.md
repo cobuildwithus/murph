@@ -83,8 +83,7 @@ Hosted onboarding extras:
 - `LINQ_API_TOKEN`
 - `LINQ_API_BASE_URL`
 - `HOSTED_EXECUTION_DISPATCH_URL`
-- `HOSTED_EXECUTION_SIGNING_SECRET`
-- `HOSTED_EXECUTION_CONTROL_SIGNING_SECRET` (optional but recommended distinct HMAC secret for signed control-plane routes)
+- `HOSTED_WEB_INTERNAL_SIGNING_SECRET`
 - `HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS`
 - `HOSTED_EXECUTION_SCHEDULER_TOKENS` for authenticated scheduler callers that trigger `/api/internal/hosted-execution/outbox/cron` and `/api/internal/hosted-execution/usage/cron`
 
@@ -99,8 +98,8 @@ When you set `DEVICE_SYNC_PUBLIC_BASE_URL`, point it at the stable production pr
 
 Set these under `Settings -> Environment Variables` in the Vercel project that deploys `apps/web`. Production is the minimum. Only set Preview if you also have matching preview peers and secrets instead of pointing preview deploys at production control planes.
 
-- `HOSTED_EXECUTION_SIGNING_SECRET`: generate a strong random secret and use the exact same value in Vercel and the Cloudflare hosted-execution worker for signed dispatches.
-- `HOSTED_EXECUTION_CONTROL_SIGNING_SECRET`: optional but recommended separate HMAC secret for privileged signed control-plane requests such as `/internal/users/...` control routes. When unset, those control requests fall back to `HOSTED_EXECUTION_SIGNING_SECRET`.
+- Enable Vercel OIDC for the project so `apps/web` can present bearer workload identity to Cloudflare on hosted execution dispatch/control requests.
+- `HOSTED_WEB_INTERNAL_SIGNING_SECRET`: generate a strong random secret and use the exact same value in Vercel and the Cloudflare hosted-execution worker for Cloudflare-owned callback routes such as the hosted device-sync connect-link bridge.
 - `HOSTED_EXECUTION_SCHEDULER_TOKENS`: generate a distinct comma-separated bearer-token set for external schedulers that call the hosted cron routes directly.
 - `HOSTED_SHARE_INTERNAL_TOKENS`: generate a distinct comma-separated bearer-token set for trusted server-to-server hosted share routes.
 - `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET`: generate a distinct strong random secret and use the same value in Vercel plus whichever trusted auth proxy or middleware signs the hosted user assertion headers. `apps/web` verifies that signature before trusting the lower-level assertion-backed device-sync bridge routes.

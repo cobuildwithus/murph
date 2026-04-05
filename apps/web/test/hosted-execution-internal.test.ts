@@ -3,34 +3,26 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   authorizeHostedExecutionInternalRequest,
-  requireHostedExecutionSignedRequest,
-  requireHostedExecutionSignedControlRequest,
   requireHostedExecutionSchedulerToken,
   requireHostedExecutionUserId,
+  requireHostedWebInternalSignedRequest,
 } from "@/src/lib/hosted-execution/internal";
 
 describe("hosted execution internal auth", () => {
-  const originalControlSigningSecret = process.env.HOSTED_EXECUTION_CONTROL_SIGNING_SECRET;
   const originalSchedulerTokens = process.env.HOSTED_EXECUTION_SCHEDULER_TOKENS;
-  const originalSigningSecret = process.env.HOSTED_EXECUTION_SIGNING_SECRET;
+  const originalWebInternalSigningSecret = process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET;
 
   afterEach(() => {
-    if (originalControlSigningSecret === undefined) {
-      delete process.env.HOSTED_EXECUTION_CONTROL_SIGNING_SECRET;
-    } else {
-      process.env.HOSTED_EXECUTION_CONTROL_SIGNING_SECRET = originalControlSigningSecret;
-    }
-
     if (originalSchedulerTokens === undefined) {
       delete process.env.HOSTED_EXECUTION_SCHEDULER_TOKENS;
     } else {
       process.env.HOSTED_EXECUTION_SCHEDULER_TOKENS = originalSchedulerTokens;
     }
 
-    if (originalSigningSecret === undefined) {
-      delete process.env.HOSTED_EXECUTION_SIGNING_SECRET;
+    if (originalWebInternalSigningSecret === undefined) {
+      delete process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET;
     } else {
-      process.env.HOSTED_EXECUTION_SIGNING_SECRET = originalSigningSecret;
+      process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = originalWebInternalSigningSecret;
     }
   });
 
@@ -77,20 +69,19 @@ describe("hosted execution internal auth", () => {
     ).toBe("member_123");
   });
 
-  it("verifies signed hosted execution requests with the dispatch secret even when a distinct control secret is configured", async () => {
-    process.env.HOSTED_EXECUTION_CONTROL_SIGNING_SECRET = "control-secret";
-    process.env.HOSTED_EXECUTION_SIGNING_SECRET = "dispatch-secret";
+  it("verifies Cloudflare-owned hosted web callbacks with the web internal signing secret", async () => {
+    process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = "web-internal-secret";
     const timestamp = new Date().toISOString();
     const headers = await createHostedExecutionSignatureHeaders({
       method: "POST",
       path: "/api/internal/device-sync/providers/whoop/connect-link",
       payload: "",
-      secret: "dispatch-secret",
+      secret: "web-internal-secret",
       timestamp,
     });
 
     await expect(
-      requireHostedExecutionSignedRequest(
+      requireHostedWebInternalSignedRequest(
         new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
           headers,
           method: "POST",
@@ -99,69 +90,24 @@ describe("hosted execution internal auth", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("rejects control-secret signatures on dispatch-signed hosted execution routes", async () => {
-    process.env.HOSTED_EXECUTION_CONTROL_SIGNING_SECRET = "control-secret";
-    process.env.HOSTED_EXECUTION_SIGNING_SECRET = "dispatch-secret";
+  it("rejects requests signed with the wrong secret on Cloudflare-owned hosted web routes", async () => {
+    process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = "web-internal-secret";
     const timestamp = new Date().toISOString();
     const headers = await createHostedExecutionSignatureHeaders({
       method: "POST",
       path: "/api/internal/device-sync/providers/whoop/connect-link",
       payload: "",
-      secret: "control-secret",
+      secret: "wrong-secret",
       timestamp,
     });
 
     await expect(
-      requireHostedExecutionSignedRequest(
+      requireHostedWebInternalSignedRequest(
         new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
           headers,
           method: "POST",
         }),
       ),
-    ).rejects.toThrow("Unauthorized hosted execution request.");
-  });
-
-  it("verifies signed hosted control requests with the dedicated control secret when configured", async () => {
-    process.env.HOSTED_EXECUTION_CONTROL_SIGNING_SECRET = "control-secret";
-    process.env.HOSTED_EXECUTION_SIGNING_SECRET = "dispatch-secret";
-    const timestamp = new Date().toISOString();
-    const headers = await createHostedExecutionSignatureHeaders({
-      method: "POST",
-      path: "/api/internal/users/member_123/run",
-      payload: "",
-      secret: "control-secret",
-      timestamp,
-    });
-
-    await expect(
-      requireHostedExecutionSignedControlRequest(
-        new Request("https://join.example.test/api/internal/users/member_123/run", {
-          headers,
-          method: "POST",
-        }),
-      ),
-    ).resolves.toBeUndefined();
-  });
-
-  it("falls back to the dispatch signing secret for control routes when no separate control secret is configured", async () => {
-    delete process.env.HOSTED_EXECUTION_CONTROL_SIGNING_SECRET;
-    process.env.HOSTED_EXECUTION_SIGNING_SECRET = "dispatch-secret";
-    const timestamp = new Date().toISOString();
-    const headers = await createHostedExecutionSignatureHeaders({
-      method: "POST",
-      path: "/api/internal/users/member_123/run",
-      payload: "",
-      secret: "dispatch-secret",
-      timestamp,
-    });
-
-    await expect(
-      requireHostedExecutionSignedControlRequest(
-        new Request("https://join.example.test/api/internal/users/member_123/run", {
-          headers,
-          method: "POST",
-        }),
-      ),
-    ).resolves.toBeUndefined();
+    ).rejects.toThrow("Unauthorized hosted web internal request.");
   });
 });

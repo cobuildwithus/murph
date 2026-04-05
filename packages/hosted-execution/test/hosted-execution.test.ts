@@ -44,13 +44,13 @@ import {
   readHostedExecutionDispatchRef,
   readHostedEmailCapabilities,
   readHostedExecutionControlEnvironment,
-  readHostedExecutionControlSigningSecret,
   readHostedExecutionDispatchEnvironment,
   readHostedExecutionSignatureHeaders,
   readHostedExecutionOutboxPayload,
   parseHostedExecutionSideEffectRecord,
   readHostedExecutionWebControlPlaneEnvironment,
   readHostedExecutionWorkerEnvironment,
+  createHostedExecutionVercelOidcValidationEnvironment,
   normalizeHostedExecutionBaseUrl,
   normalizeHostedDeviceSyncJobHints,
   parseHostedExecutionUserStatus,
@@ -161,72 +161,41 @@ describe("@murphai/hosted-execution", () => {
     expect(
       readHostedExecutionDispatchEnvironment({
         HOSTED_EXECUTION_DISPATCH_URL: "https://dispatch.example.test/",
-        HOSTED_EXECUTION_SIGNING_SECRET: "secret",
         HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS: "15000",
       }),
     ).toEqual({
       dispatchTimeoutMs: 15_000,
       dispatchUrl: "https://dispatch.example.test",
-      signingSecret: "secret",
     });
   });
 
-  it("prefers the dedicated control signing secret and otherwise falls back to the dispatch signing secret", () => {
-    expect(
-      readHostedExecutionControlSigningSecret({
-        HOSTED_EXECUTION_CONTROL_SIGNING_SECRET: "control-secret",
-        HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
-      }),
-    ).toBe("control-secret");
-
-    expect(
-      readHostedExecutionControlEnvironment({
-        HOSTED_EXECUTION_CONTROL_SIGNING_SECRET: "control-secret",
-        HOSTED_EXECUTION_DISPATCH_URL: "https://dispatch.example.test/",
-        HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
-      }),
-    ).toEqual({
-      baseUrl: "https://dispatch.example.test",
-      signingSecret: "control-secret",
-    });
-
-    expect(
-      readHostedExecutionControlSigningSecret({
-        HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
-      }),
-    ).toBe("dispatch-secret");
-
+  it("reads hosted control env from the shared dispatch base URL only", () => {
     expect(
       readHostedExecutionControlEnvironment({
         HOSTED_EXECUTION_DISPATCH_URL: "https://dispatch.example.test/",
-        HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
       }),
     ).toEqual({
       baseUrl: "https://dispatch.example.test",
-      signingSecret: "dispatch-secret",
     });
 
     expect(
       readHostedExecutionControlEnvironment({
-        HOSTED_EXECUTION_CONTROL_SIGNING_SECRET: "   ",
         HOSTED_EXECUTION_DISPATCH_URL: "   ",
-        HOSTED_EXECUTION_SIGNING_SECRET: "   ",
       }),
     ).toEqual({
       baseUrl: null,
-      signingSecret: null,
     });
   });
 
   it("reads hosted web control plane env from the worker proxy defaults", () => {
     expect(
       readHostedExecutionWebControlPlaneEnvironment({
-        HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
+        HOSTED_WEB_INTERNAL_SIGNING_SECRET: "web-internal-secret",
         HOSTED_WEB_BASE_URL: "https://web.example.test/",
       }),
     ).toEqual({
       deviceSyncRuntimeBaseUrl: DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
-      signingSecret: "dispatch-secret",
+      signingSecret: "web-internal-secret",
       usageBaseUrl: DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
     });
 
@@ -265,7 +234,7 @@ describe("@murphai/hosted-execution", () => {
     });
   });
 
-  it("reads hosted worker env defaults from the canonical signing-secret name", () => {
+  it("reads hosted worker env defaults from the OIDC and web-internal callback envs", () => {
     expect(
       readHostedExecutionWorkerEnvironment({
         HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "OPENAI_API_KEY",
@@ -276,7 +245,9 @@ describe("@murphai/hosted-execution", () => {
           TEST_HOSTED_RECIPIENT_PUBLIC_JWK,
         ),
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "Zm9v",
-        HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
+        HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
+        HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
+        HOSTED_WEB_INTERNAL_SIGNING_SECRET: "web-internal-secret",
       }),
     ).toEqual({
       allowedUserEnvKeys: "OPENAI_API_KEY",
@@ -287,12 +258,16 @@ describe("@murphai/hosted-execution", () => {
       platformEnvelopeKeyBase64: "Zm9v",
       platformEnvelopeKeyId: "v1",
       platformEnvelopeKeyringJson: null,
-      controlSigningSecret: "dispatch-secret",
       defaultAlarmDelayMs: 15 * 60 * 1000,
-      dispatchSigningSecret: "dispatch-secret",
       maxEventAttempts: 3,
       retryDelayMs: 30_000,
       runnerTimeoutMs: 60_000,
+      vercelOidcValidation: createHostedExecutionVercelOidcValidationEnvironment({
+        environment: "production",
+        projectName: "murph-web",
+        teamSlug: "murph-team",
+      }),
+      webInternalSigningSecret: "web-internal-secret",
     });
   });
 
@@ -1450,9 +1425,11 @@ describe("@murphai/hosted-execution", () => {
           TEST_HOSTED_RECIPIENT_PUBLIC_JWK,
         ),
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "Zm9v",
+        HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
+        HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
         HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET: "dispatch-secret",
       } as Record<string, string>),
-    ).toThrow(/HOSTED_EXECUTION_SIGNING_SECRET/u);
+    ).toThrow(/HOSTED_WEB_INTERNAL_SIGNING_SECRET/u);
   });
 
   it("builds stable encoded user control paths", () => {
@@ -1590,20 +1567,19 @@ describe("@murphai/hosted-execution", () => {
     expect(normalizeHostedDeviceSyncJobHints(null)).toEqual([]);
   });
 
-  it("dispatch client signs payloads and posts to the shared dispatch route", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-27T09:15:00.000Z"));
+  it("dispatch client attaches bearer auth and posts to the shared dispatch route", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify(buildDispatchResultFixture("evt_123")),
         { status: 200 },
       ),
     );
+    const getBearerToken = vi.fn().mockResolvedValue("vercel-oidc-token");
     const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
     const client = createHostedExecutionDispatchClient({
       baseUrl: "https://runner.example.test/",
       fetchImpl,
-      signingSecret: "secret",
+      getBearerToken,
       timeoutMs: 45_000,
     });
 
@@ -1621,33 +1597,25 @@ describe("@murphai/hosted-execution", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     const [url, init] = fetchImpl.mock.calls[0] ?? [];
     const headers = new Headers(init?.headers);
-    const payload = typeof init?.body === "string" ? init.body : "";
 
     expect(url).toBe(`https://runner.example.test${HOSTED_EXECUTION_DISPATCH_PATH}`);
-    expect(headers.get(HOSTED_EXECUTION_TIMESTAMP_HEADER)).toBe("2026-03-27T09:15:00.000Z");
-    await expect(
-      verifyHostedExecutionSignature({
-        method: "POST",
-        path: HOSTED_EXECUTION_DISPATCH_PATH,
-        payload,
-        secret: "secret",
-        signature: headers.get(HOSTED_EXECUTION_SIGNATURE_HEADER),
-        timestamp: headers.get(HOSTED_EXECUTION_TIMESTAMP_HEADER),
-        nowMs: Date.parse("2026-03-27T09:15:00.000Z"),
-      }),
-    ).resolves.toBe(true);
+    expect(headers.get("authorization")).toBe("Bearer vercel-oidc-token");
+    expect(headers.get(HOSTED_EXECUTION_SIGNATURE_HEADER)).toBeNull();
+    expect(headers.get(HOSTED_EXECUTION_TIMESTAMP_HEADER)).toBeNull();
+    expect(getBearerToken).toHaveBeenCalledTimes(1);
   });
 
   it("requires a configured baseUrl for shared clients", () => {
     expect(() =>
       createHostedExecutionDispatchClient({
         baseUrl: "   ",
-        signingSecret: "secret",
+        getBearerToken: async () => "vercel-oidc-token",
       }),
     ).toThrow("Hosted execution baseUrl must be configured.");
     expect(() =>
       createHostedExecutionControlClient({
         baseUrl: "   ",
+        getBearerToken: async () => "vercel-oidc-token",
       }),
     ).toThrow("Hosted execution baseUrl must be configured.");
   });
@@ -1662,7 +1630,7 @@ describe("@murphai/hosted-execution", () => {
     const client = createHostedExecutionDispatchClient({
       baseUrl: "https://runner.example.test/",
       fetchImpl,
-      signingSecret: "secret",
+      getBearerToken: async () => "vercel-oidc-token",
     });
 
     await client.dispatch({
@@ -1678,7 +1646,7 @@ describe("@murphai/hosted-execution", () => {
     expect(fetchImpl.mock.calls[0]?.[1]?.signal).toBeUndefined();
   });
 
-  it("dispatch client uses the global fetch fallback and an explicit timestamp override", async () => {
+  it("dispatch client uses the global fetch fallback and normalizes bearer tokens", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify(buildDispatchResultFixture("evt_456")),
@@ -1688,8 +1656,7 @@ describe("@murphai/hosted-execution", () => {
     vi.stubGlobal("fetch", fetchImpl);
     const client = createHostedExecutionDispatchClient({
       baseUrl: "https://runner.example.test/",
-      now: () => "2026-03-27T10:30:00.000Z",
-      signingSecret: "secret",
+      getBearerToken: async () => "  Bearer vercel-oidc-token  ",
     });
 
     await client.dispatch({
@@ -1703,9 +1670,9 @@ describe("@murphai/hosted-execution", () => {
     });
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
-    expect(
-      new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get(HOSTED_EXECUTION_TIMESTAMP_HEADER),
-    ).toBe("2026-03-27T10:30:00.000Z");
+    expect(new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get("authorization")).toBe(
+      "Bearer vercel-oidc-token",
+    );
   });
 
   it("control client uses bearer auth and shared control routes", async () => {
@@ -1720,9 +1687,8 @@ describe("@murphai/hosted-execution", () => {
     );
     const client = createHostedExecutionControlClient({
       baseUrl: "https://worker.example.test/",
-      now: () => "2026-03-27T10:30:00.000Z",
       fetchImpl,
-      signingSecret: "  signing-secret  ",
+      getBearerToken: async () => "vercel-oidc-token",
     });
 
     await expect(
@@ -1742,18 +1708,7 @@ describe("@murphai/hosted-execution", () => {
     expect(init?.method).toBe("PUT");
     const headers = new Headers(init?.headers);
     expect(headers.get("content-type")).toBe("application/json; charset=utf-8");
-    expect(headers.get(HOSTED_EXECUTION_TIMESTAMP_HEADER)).toBe("2026-03-27T10:30:00.000Z");
-    await expect(
-      verifyHostedExecutionSignature({
-        method: "PUT",
-        path: buildHostedExecutionUserEnvPath("member/123"),
-        payload: typeof init?.body === "string" ? init.body : "",
-        secret: "signing-secret",
-        signature: headers.get(HOSTED_EXECUTION_SIGNATURE_HEADER),
-        timestamp: headers.get(HOSTED_EXECUTION_TIMESTAMP_HEADER),
-        nowMs: Date.parse("2026-03-27T10:30:00.000Z"),
-      }),
-    ).resolves.toBe(true);
+    expect(headers.get("authorization")).toBe("Bearer vercel-oidc-token");
     expect(init?.body).toBe(JSON.stringify({
       env: {
         OPENAI_API_KEY: "secret",
@@ -1762,13 +1717,12 @@ describe("@murphai/hosted-execution", () => {
     }));
   });
 
-  it("control client requires a configured signing secret", () => {
+  it("control client requires a configured bearer token provider", () => {
     expect(() =>
       createHostedExecutionControlClient({
         baseUrl: "https://worker.example.test/",
-        signingSecret: "",
-      }),
-    ).toThrow("Hosted execution signingSecret must be configured.");
+      } as never),
+    ).toThrow("Hosted execution getBearerToken must be configured.");
   });
 
   it("control client uses the remaining shared control routes", async () => {
@@ -1810,12 +1764,11 @@ describe("@murphai/hosted-execution", () => {
           }),
           { status: 200 },
         ),
-      );
+    );
     const client = createHostedExecutionControlClient({
       baseUrl: "https://worker.example.test/",
-      now: () => "2026-03-27T10:45:00.000Z",
       fetchImpl,
-      signingSecret: "signing-secret",
+      getBearerToken: async () => "vercel-oidc-token",
     });
 
     await expect(client.run("member/123")).resolves.toMatchObject({
@@ -1841,17 +1794,7 @@ describe("@murphai/hosted-execution", () => {
     );
     const runHeaders = new Headers(fetchImpl.mock.calls[0]?.[1]?.headers);
     expect(runHeaders.get("content-type")).toBe("application/json; charset=utf-8");
-    await expect(
-      verifyHostedExecutionSignature({
-        method: "POST",
-        path: buildHostedExecutionUserRunPath("member/123"),
-        payload: String(fetchImpl.mock.calls[0]?.[1]?.body ?? ""),
-        secret: "signing-secret",
-        signature: runHeaders.get(HOSTED_EXECUTION_SIGNATURE_HEADER),
-        timestamp: runHeaders.get(HOSTED_EXECUTION_TIMESTAMP_HEADER),
-        nowMs: Date.parse("2026-03-27T10:45:00.000Z"),
-      }),
-    ).resolves.toBe(true);
+    expect(runHeaders.get("authorization")).toBe("Bearer vercel-oidc-token");
     expect(fetchImpl).toHaveBeenNthCalledWith(
       2,
       "https://worker.example.test/internal/users/member%2F123/env",
@@ -1866,31 +1809,15 @@ describe("@murphai/hosted-execution", () => {
         method: "DELETE",
       }),
     );
-    await expect(
-      verifyHostedExecutionSignature({
-        method: "GET",
-        path: buildHostedExecutionUserEnvPath("member/123"),
-        payload: "",
-        secret: "signing-secret",
-        signature: new Headers(fetchImpl.mock.calls[1]?.[1]?.headers).get(HOSTED_EXECUTION_SIGNATURE_HEADER),
-        timestamp: new Headers(fetchImpl.mock.calls[1]?.[1]?.headers).get(HOSTED_EXECUTION_TIMESTAMP_HEADER),
-        nowMs: Date.parse("2026-03-27T10:45:00.000Z"),
-      }),
-    ).resolves.toBe(true);
-    await expect(
-      verifyHostedExecutionSignature({
-        method: "DELETE",
-        path: buildHostedExecutionUserEnvPath("member/123"),
-        payload: "",
-        secret: "signing-secret",
-        signature: new Headers(fetchImpl.mock.calls[2]?.[1]?.headers).get(HOSTED_EXECUTION_SIGNATURE_HEADER),
-        timestamp: new Headers(fetchImpl.mock.calls[2]?.[1]?.headers).get(HOSTED_EXECUTION_TIMESTAMP_HEADER),
-        nowMs: Date.parse("2026-03-27T10:45:00.000Z"),
-      }),
-    ).resolves.toBe(true);
+    expect(new Headers(fetchImpl.mock.calls[1]?.[1]?.headers).get("authorization")).toBe(
+      "Bearer vercel-oidc-token",
+    );
+    expect(new Headers(fetchImpl.mock.calls[2]?.[1]?.headers).get("authorization")).toBe(
+      "Bearer vercel-oidc-token",
+    );
   });
 
-  it("control client reads and applies device-sync runtime state through the signed user route", async () => {
+  it("control client reads and applies device-sync runtime state through the authorized user route", async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(
         new Response(
@@ -1930,12 +1857,11 @@ describe("@murphai/hosted-execution", () => {
           }),
           { status: 200 },
         ),
-      );
+    );
     const client = createHostedExecutionControlClient({
       baseUrl: "https://worker.example.test/",
-      now: () => "2026-04-05T10:45:00.000Z",
       fetchImpl,
-      signingSecret: "signing-secret",
+      getBearerToken: async () => "vercel-oidc-token",
     });
 
     await expect(
@@ -2007,31 +1933,15 @@ describe("@murphai/hosted-execution", () => {
         method: "POST",
       }),
     );
-    await expect(
-      verifyHostedExecutionSignature({
-        method: "GET",
-        path: buildHostedExecutionUserDeviceSyncRuntimePath("member/123"),
-        payload: "",
-        secret: "signing-secret",
-        signature: new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get(HOSTED_EXECUTION_SIGNATURE_HEADER),
-        timestamp: new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get(HOSTED_EXECUTION_TIMESTAMP_HEADER),
-        nowMs: Date.parse("2026-04-05T10:45:00.000Z"),
-      }),
-    ).resolves.toBe(true);
-    await expect(
-      verifyHostedExecutionSignature({
-        method: "POST",
-        path: buildHostedExecutionUserDeviceSyncRuntimePath("member/123"),
-        payload: String(fetchImpl.mock.calls[1]?.[1]?.body ?? ""),
-        secret: "signing-secret",
-        signature: new Headers(fetchImpl.mock.calls[1]?.[1]?.headers).get(HOSTED_EXECUTION_SIGNATURE_HEADER),
-        timestamp: new Headers(fetchImpl.mock.calls[1]?.[1]?.headers).get(HOSTED_EXECUTION_TIMESTAMP_HEADER),
-        nowMs: Date.parse("2026-04-05T10:45:00.000Z"),
-      }),
-    ).resolves.toBe(true);
+    expect(new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get("authorization")).toBe(
+      "Bearer vercel-oidc-token",
+    );
+    expect(new Headers(fetchImpl.mock.calls[1]?.[1]?.headers).get("authorization")).toBe(
+      "Bearer vercel-oidc-token",
+    );
   });
 
-  it("control client reads and writes hosted share packs through the signed share route", async () => {
+  it("control client reads and writes hosted share packs through the authorized share route", async () => {
     const sharePack = {
       createdAt: "2026-04-05T00:00:00.000Z",
       entities: [
@@ -2055,9 +1965,8 @@ describe("@murphai/hosted-execution", () => {
       .mockResolvedValueOnce(new Response("Not found", { status: 404 }));
     const client = createHostedExecutionControlClient({
       baseUrl: "https://worker.example.test/",
-      now: () => "2026-04-05T10:45:00.000Z",
       fetchImpl,
-      signingSecret: "signing-secret",
+      getBearerToken: async () => "vercel-oidc-token",
     });
 
     await expect(client.putSharePack("share/123", sharePack)).resolves.toEqual(sharePack);
@@ -2073,17 +1982,9 @@ describe("@murphai/hosted-execution", () => {
       }),
     );
     expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body ?? ""))).toEqual(sharePack);
-    await expect(
-      verifyHostedExecutionSignature({
-        method: "PUT",
-        path: buildHostedExecutionSharePackPath("share/123"),
-        payload: String(fetchImpl.mock.calls[0]?.[1]?.body ?? ""),
-        secret: "signing-secret",
-        signature: new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get(HOSTED_EXECUTION_SIGNATURE_HEADER),
-        timestamp: new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get(HOSTED_EXECUTION_TIMESTAMP_HEADER),
-        nowMs: Date.parse("2026-04-05T10:45:00.000Z"),
-      }),
-    ).resolves.toBe(true);
+    expect(new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get("authorization")).toBe(
+      "Bearer vercel-oidc-token",
+    );
     expect(fetchImpl).toHaveBeenNthCalledWith(
       2,
       "https://worker.example.test/internal/shares/share%2F123/pack",
@@ -2100,7 +2001,7 @@ describe("@murphai/hosted-execution", () => {
     );
   });
 
-  it("control client signs standard env and run routes", async () => {
+  it("control client attaches bearer auth to standard env and run routes", async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(
         new Response(JSON.stringify({
@@ -2128,9 +2029,8 @@ describe("@murphai/hosted-execution", () => {
       );
     const client = createHostedExecutionControlClient({
       baseUrl: "https://worker.example.test/",
-      now: () => "2026-03-27T11:00:00.000Z",
       fetchImpl,
-      signingSecret: "signing-secret",
+      getBearerToken: async () => "vercel-oidc-token",
     });
 
     await expect(client.getUserEnvStatus("member/123")).resolves.toEqual({
@@ -2149,17 +2049,9 @@ describe("@murphai/hosted-execution", () => {
         method: "GET",
       }),
     );
-    await expect(
-      verifyHostedExecutionSignature({
-        method: "GET",
-        path: buildHostedExecutionUserEnvPath("member/123"),
-        payload: "",
-        secret: "signing-secret",
-        signature: new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get(HOSTED_EXECUTION_SIGNATURE_HEADER),
-        timestamp: new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get(HOSTED_EXECUTION_TIMESTAMP_HEADER),
-        nowMs: Date.parse("2026-03-27T11:00:00.000Z"),
-      }),
-    ).resolves.toBe(true);
+    expect(new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get("authorization")).toBe(
+      "Bearer vercel-oidc-token",
+    );
 
     expect(fetchImpl).toHaveBeenNthCalledWith(
       2,
@@ -2171,17 +2063,7 @@ describe("@murphai/hosted-execution", () => {
     expect(JSON.parse(String(fetchImpl.mock.calls[1]?.[1]?.body ?? ""))).toEqual({});
     const upsertHeaders = new Headers(fetchImpl.mock.calls[1]?.[1]?.headers);
     expect(upsertHeaders.get("content-type")).toBe("application/json; charset=utf-8");
-    await expect(
-      verifyHostedExecutionSignature({
-        method: "POST",
-        path: buildHostedExecutionUserRunPath("member/123"),
-        payload: String(fetchImpl.mock.calls[1]?.[1]?.body ?? ""),
-        secret: "signing-secret",
-        signature: upsertHeaders.get(HOSTED_EXECUTION_SIGNATURE_HEADER),
-        timestamp: upsertHeaders.get(HOSTED_EXECUTION_TIMESTAMP_HEADER),
-        nowMs: Date.parse("2026-03-27T11:00:00.000Z"),
-      }),
-    ).resolves.toBe(true);
+    expect(upsertHeaders.get("authorization")).toBe("Bearer vercel-oidc-token");
   });
 
   it("includes HTTP error text for non-ok shared control responses", async () => {
@@ -2189,7 +2071,7 @@ describe("@murphai/hosted-execution", () => {
     const client = createHostedExecutionControlClient({
       baseUrl: "https://worker.example.test/",
       fetchImpl,
-      signingSecret: "signing-secret",
+      getBearerToken: async () => "vercel-oidc-token",
     });
 
     await expect(client.getStatus("user-123")).rejects.toThrow(
@@ -2202,7 +2084,7 @@ describe("@murphai/hosted-execution", () => {
     vi.stubGlobal("fetch", fetchImpl);
     const client = createHostedExecutionControlClient({
       baseUrl: "https://worker.example.test/",
-      signingSecret: "signing-secret",
+      getBearerToken: async () => "vercel-oidc-token",
     });
 
     await expect(client.getStatus("user-123")).rejects.toThrow(
@@ -2216,7 +2098,7 @@ describe("@murphai/hosted-execution", () => {
     const client = createHostedExecutionControlClient({
       baseUrl: "https://worker.example.test/",
       fetchImpl,
-      signingSecret: "signing-secret",
+      getBearerToken: async () => "vercel-oidc-token",
     });
 
     await expect(client.getStatus("user-123")).rejects.toThrow(
@@ -2229,7 +2111,7 @@ describe("@murphai/hosted-execution", () => {
     const client = createHostedExecutionControlClient({
       baseUrl: "https://worker.example.test/",
       fetchImpl,
-      signingSecret: "signing-secret",
+      getBearerToken: async () => "vercel-oidc-token",
     });
 
     await expect(client.getStatus("user-123")).rejects.toThrow(
@@ -2242,7 +2124,7 @@ describe("@murphai/hosted-execution", () => {
     const client = createHostedExecutionControlClient({
       baseUrl: "https://worker.example.test/",
       fetchImpl,
-      signingSecret: "signing-secret",
+      getBearerToken: async () => "vercel-oidc-token",
     });
 
     await expect(client.getStatus("user-123")).rejects.toThrow(

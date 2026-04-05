@@ -12,4 +12,5 @@ export * from "./observability.ts";
 export * from "./parsers.ts";
 export * from "./routes.ts";
 export * from "./side-effects.ts";
+export * from "./vercel-oidc.ts";
 export * from "./web-control-plane.ts";

@@ -158,7 +158,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("proxies hosted device connect-link requests through hosted web with the dispatch signing secret", async () => {
+  it("proxies hosted device connect-link requests through hosted web with the web internal signing secret", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       authorizationUrl: "https://provider.example.test/oauth/start",
       expiresAt: "2026-04-04T12:00:00.000Z",
@@ -178,7 +178,6 @@ describe("handleRunnerOutboundRequest", () => {
         method: "POST",
       }),
       createRunnerOutboundEnv({
-        HOSTED_EXECUTION_CONTROL_SIGNING_SECRET: "control-secret",
         HOSTED_WEB_BASE_URL: "https://web.example.test/app",
       }),
       "member_123",
@@ -208,7 +207,7 @@ describe("handleRunnerOutboundRequest", () => {
         method: "POST",
         path: "/app/api/internal/device-sync/providers/whoop/connect-link",
         payload: "",
-        secret: "dispatch-secret",
+        secret: "web-internal-secret",
         signature: (requestHeaders as Headers).get(HOSTED_EXECUTION_SIGNATURE_HEADER),
         timestamp,
         nowMs: timestamp ? Date.parse(timestamp) : Date.now(),
@@ -373,7 +372,9 @@ function createRunnerOutboundEnv(overrides: Partial<Record<string, unknown>> = {
     HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK:
       "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"xSelVJv6r6LPUS8GCNgj1T_7z5GXOrhgY1cCdzGb5ao\",\"y\":\"8HhciS1cAPKs_fPfgZnb1USdRtBX-4Nvp8XiBHuMcmY\",\"ext\":true,\"key_ops\":[]}",
     HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: Buffer.alloc(32, 9).toString("base64"),
-    HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
+    HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
+    HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
+    HOSTED_WEB_INTERNAL_SIGNING_SECRET: "web-internal-secret",
     USER_RUNNER: {
       getByName() {
         return {
