@@ -38,6 +38,7 @@ import { registerKnowledgeCommands } from './commands/knowledge.js'
 import { researchRunResultSchema } from './research-cli-contracts.js'
 import {
   knowledgeIndexRebuildResultSchema,
+  knowledgeLogTailResultSchema,
   knowledgeLintResultSchema,
   knowledgeListResultSchema,
   knowledgeSearchResultSchema,
@@ -814,8 +815,14 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['knowledge', 'lint'],
         description:
-          'Run deterministic health checks over derived knowledge pages, including parse failures, duplicate slugs, missing sources, invalid sources, and missing related pages.',
+          'Run deterministic health checks over derived knowledge pages, including parse failures, duplicate slugs, missing sources, invalid sources, missing related pages, and invalid bank/library links.',
         output: knowledgeLintResultSchema,
+      },
+      {
+        path: ['knowledge', 'log', 'tail'],
+        description:
+          'Show the latest append-only derived knowledge write-log entries from derived/knowledge/log.md.',
+        output: knowledgeLogTailResultSchema,
       },
       {
         path: ['knowledge', 'index', 'rebuild'],

@@ -221,6 +221,8 @@ export function createProviderTurnAssistantToolCatalog(
   input: AssistantToolContext,
 ): AssistantToolCatalog {
   return createAssistantToolCatalog([
+    ...createAssistantKnowledgeReadToolDefinitions(input),
+    ...createAssistantKnowledgeWriteToolDefinitions(input),
     ...createAssistantCliExecutorToolDefinitions(input),
     ...createVaultTextReadToolDefinitions(input),
     ...createOutwardSideEffectToolDefinitions(input),
@@ -1392,7 +1394,7 @@ function createAssistantKnowledgeReadToolDefinitions(
     defineAssistantTool({
       name: 'assistant.knowledge.lint',
       description:
-        'Run deterministic structural checks over derived knowledge pages, including parse failures, duplicate slugs, missing sources, and broken related links.',
+        'Run deterministic structural checks over derived knowledge pages, including parse failures, duplicate slugs, missing sources, broken related links, and invalid bank/library references.',
       inputSchema: z.object({}),
       inputExample: {},
       execute: async () =>
@@ -1417,16 +1419,21 @@ function createAssistantKnowledgeWriteToolDefinitions(
         slug: knowledgeSlugSchema.optional(),
         pageType: knowledgeMetadataTagSchema.optional(),
         status: knowledgeMetadataTagSchema.optional(),
+        clearLibrarySlugs: z.boolean().optional(),
+        librarySlugs: z.array(knowledgeSlugSchema).optional(),
         sourcePaths: z.array(knowledgeSourcePathSchema).optional(),
         relatedSlugs: z.array(knowledgeSlugSchema).optional(),
       }),
       inputExample: {
         title: 'Sleep quality',
         body: '# Sleep quality\n\nMagnesium may help sleep continuity.\n',
+        librarySlugs: ['sleep-architecture'],
         sourcePaths: ['research/2026/04/sleep-note.md'],
       },
       execute: async ({
         body,
+        clearLibrarySlugs,
+        librarySlugs,
         pageType,
         relatedSlugs,
         slug,
@@ -1438,8 +1445,10 @@ function createAssistantKnowledgeWriteToolDefinitions(
           vault: input.vault,
           body,
           title,
+          clearLibrarySlugs,
           slug,
           pageType,
+          librarySlugs,
           relatedSlugs,
           sourcePaths,
           status,

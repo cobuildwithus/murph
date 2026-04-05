@@ -77,9 +77,13 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - Keep both the snapshot ledger and `bank/profile/current.md`: the ledger is the authoritative historical source and rebuild input, while the Markdown page remains the operator-facing current view.
 - Query readers must tolerate `bank/profile/current.md` being stale, missing, or malformed by falling back to the latest snapshot; the materialized page improves human readability but must not become a hard dependency for current-state reads.
 - `bank/goals`, `bank/conditions`, `bank/allergies`, `bank/foods`, `bank/workout-formats`, `bank/family`, and `bank/genetics` store one Markdown document per canonical record id or slug-safe alias or saved-default lookup key.
+- `bank/library/**/*.md` is the stable health reference layer for reusable entities such as biomarkers, domains, protocol variants, and source artifacts. It is durable reference context, not the user-specific synthesized wiki.
 - `bank/foods` stores long-lived remembered foods such as regular restaurant orders, smoothie presets, and grocery staples so assistants can resolve shorthand references without re-scraping menus or ingredient lists, and food records may optionally carry a narrow `autoLogDaily.time` rule for daily note-only meal auto-logging.
 - `bank/workout-formats` stores thin reusable workout defaults such as a saved lifting note plus optional duration, type, or distance overrides; `workout format log` still writes the canonical `activity_session` event and does not create a separate workout record family.
 - `bank/protocols/**/*.md` allows nested protocol group folders, but every path segment must remain slug-safe ASCII.
+- `derived/knowledge/index.md` is the content-oriented entrypoint into the personal compiled wiki.
+- `derived/knowledge/log.md` is the append-only chronological log of derived knowledge writes.
+- `derived/knowledge/pages/*.md` stores the non-canonical assistant-authored personal wiki pages; these pages may optionally link back to stable `bank/library` entities through `librarySlugs` frontmatter.
 
 ## Attachment Conventions
 

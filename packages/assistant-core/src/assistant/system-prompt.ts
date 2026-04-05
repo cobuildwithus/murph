@@ -312,20 +312,23 @@ function buildAssistantKnowledgeGuidanceText(input: {
   rawCommand: "vault-cli";
 }): string {
   return [
+    "Derived knowledge tools are exposed directly in this session as `assistant.knowledge.search`, `assistant.knowledge.get`, `assistant.knowledge.list`, `assistant.knowledge.upsert`, `assistant.knowledge.lint`, and `assistant.knowledge.rebuildIndex`. Use those first for wiki work instead of routing derived-knowledge tasks through generic CLI execution.",
     input.assistantCliExecutorAvailable
-      ? "Derived knowledge commands are exposed in this session through `murph.cli.run`. Use `vault-cli knowledge search|show|list|upsert|lint|index rebuild` there instead of relying on a separate hand-built knowledge tool surface."
-      : "Derived knowledge commands are not exposed through a dedicated CLI executor in this session. Use `vault-cli knowledge search|show|list|upsert|lint|index rebuild` directly instead of relying on a separate hand-built knowledge tool surface.",
-    "Use `vault-cli knowledge upsert` only after you have synthesized the page body yourself in the current turn. It persists one page and rebuilds the index; it does not launch a second model run.",
-    `Use \`${input.rawCommand} knowledge ...\` directly only when the CLI executor is unavailable in this session.`,
-    "Murph's derived knowledge wiki is non-canonical and rebuildable. It is useful for durable syntheses, dossiers, and continuity pages, but it is not the source of truth for health records.",
-    "When the user asks what Murph already knows about a topic, start with knowledge search plus one or two targeted page reads before synthesizing anything new.",
+      ? "Use `murph.cli.run` for knowledge work only when you truly need the operator-facing CLI surface itself, such as `vault-cli knowledge log tail`."
+      : `Use \`${input.rawCommand} knowledge ...\` directly only when the dedicated assistant knowledge tools do not expose the exact operator-facing surface you need.`,
+    "Murph's knowledge system has two layers: `bank/library` is the stable health reference layer, while `derived/knowledge` is the user-specific compiled wiki for syntheses, dossiers, decisions, and continuity pages.",
+    "For wiki tasks, read `derived/knowledge/index.md` first through `vault.fs.readText`, then use knowledge search and one to three targeted page reads before synthesizing anything new.",
+    "When the user asks what Murph already knows about a topic, start with the saved wiki first instead of rebuilding the answer from raw sources from scratch.",
     "If an existing page already matches the topic closely, prefer refreshing that slug instead of creating a near-duplicate page.",
     "If no close existing page exists, and the current turn produced a reusable synthesis that would likely save work or improve continuity later, create a new knowledge page in the same turn.",
     "Good candidates for a new page include any reusable synthesis that Murph is likely to benefit from later, including durable topic summaries, recurring user-context dossiers, protocol or experiment summaries, decision histories, open questions or active hypotheses, recurring symptom or biomarker pattern syntheses, wearable-trend summaries, research digests, and concise reference pages for recurring entities such as supplements, medications, foods, labs, or conditions.",
     "Do not create a knowledge page for lightweight chat, one-off operational answers, weakly supported guesses, or single-record readbacks that are unlikely to matter again.",
     "Prefer creating a new page only when the synthesis would still be useful if the same topic comes up again days or weeks later.",
-    "When persisting a page, synthesize the page in the current assistant turn and then save it through the knowledge write surface instead of editing `derived/knowledge/**` files directly.",
+    "When persisting a page, synthesize the page in the current assistant turn and then save it through `assistant.knowledge.upsert` instead of editing `derived/knowledge/**` files directly.",
     "Frontmatter is the canonical metadata source for derived knowledge pages. Generated `## Related` and `## Sources` sections are rendered output, not the metadata authority.",
+    "When a derived page clearly builds on stable health reference entities under `bank/library`, attach those stable links through `librarySlugs` metadata.",
+    "Do not silently overwrite prior conclusions when new evidence is mixed or contradictory. Update the synthesis, preserve the uncertainty, and note when newer context weakens, supersedes, or conflicts with an earlier claim.",
+    "Every knowledge upsert appends an entry to `derived/knowledge/log.md`, so durable wiki writes should be meaningful and reusable.",
     "Use vault-relative source files, or absolute source files that still resolve inside the selected vault, and never use `derived/**`, `.runtime/**`, or assistant-state runtime files as knowledge sources.",
   ].join("\n\n");
 }

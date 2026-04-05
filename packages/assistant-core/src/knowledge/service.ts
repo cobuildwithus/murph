@@ -5,11 +5,13 @@ import { VaultCliError } from '../vault-cli-errors.js'
 import { loadIntegratedRuntime } from '../usecases/runtime.js'
 import {
   DERIVED_KNOWLEDGE_INDEX_PATH,
+  DERIVED_KNOWLEDGE_LOG_PATH,
   normalizeKnowledgeSlug,
   normalizeKnowledgeTag,
   orderedUniqueStrings,
   readDerivedKnowledgeGraph,
   readDerivedKnowledgeGraphWithIssues,
+  readHealthLibraryGraphWithIssues,
   renderDerivedKnowledgeIndex,
   searchDerivedKnowledgeVault,
   summarizeKnowledgeBody,
@@ -22,6 +24,7 @@ import {
   buildKnowledgePageRelativePath,
   deriveKnowledgeTitle,
   extractKnowledgeRelatedSlugsFromBody,
+  normalizeLibrarySlugInputs,
   matchesKnowledgeFilter,
   normalizeKnowledgeBody,
   normalizeRelatedSlugInputs,
@@ -32,6 +35,7 @@ import {
 import {
   type KnowledgeGetResult,
   type KnowledgeIndexRebuildResult,
+  type KnowledgeLogTailResult,
   type KnowledgeLintProblem,
   type KnowledgeLintResult,
   type KnowledgeListResult,
@@ -49,6 +53,8 @@ const KNOWLEDGE_PROBLEM_SEVERITY_ORDER: Record<KnowledgeLintProblem['severity'],
 
 export interface KnowledgeUpsertInput {
   body: string
+  clearLibrarySlugs?: boolean | null
+  librarySlugs?: string[] | null
   vault: string
   title?: string | null
   slug?: string | null
@@ -94,9 +100,28 @@ export interface KnowledgeMaintenanceInput {
   vault: string
 }
 
+export interface KnowledgeLogTailInput {
+  limit?: number | null
+  vault: string
+}
+
 interface NormalizedKnowledgeFilters {
   pageType: string | null
   status: string | null
+}
+
+interface KnowledgeLogAppendEntry {
+  action: string
+  indexPath: string | null
+  librarySlugs: string[]
+  occurredAt: string
+  pagePath: string | null
+  pageType: string | null
+  relatedSlugs: string[]
+  slug: string | null
+  sourcePaths: string[]
+  status: string | null
+  title: string
 }
 
 export async function upsertKnowledgePage(
@@ -149,9 +174,19 @@ export async function upsertKnowledgePage(
     ...explicitRelatedSlugs,
     ...bodyRelatedSlugs,
   ])
+  const explicitLibrarySlugs = normalizeLibrarySlugInputs(input.librarySlugs)
+  const librarySlugs =
+    input.librarySlugs !== undefined
+      ? explicitLibrarySlugs
+      : input.clearLibrarySlugs === true
+        ? []
+        : existingPage?.librarySlugs ?? []
+
+  await assertKnowledgeLibrarySlugsExist(input.vault, librarySlugs)
   const markdown = buildKnowledgeMarkdown({
     body: normalizedBody,
     compiledAt: savedAt,
+    librarySlugs,
     pageType,
     relatedSlugs,
     slug,
@@ -187,6 +222,27 @@ export async function upsertKnowledgePage(
       `Knowledge page "${slug}" was written but could not be reloaded from the derived knowledge graph.`,
     )
   }
+
+  await appendKnowledgeLogEntry(
+    {
+      action: 'upsert',
+      indexPath: indexResult.indexPath,
+      librarySlugs: page.librarySlugs,
+      occurredAt: savedAt,
+      pagePath: page.relativePath,
+      pageType: page.pageType,
+      relatedSlugs: page.relatedSlugs,
+      slug: page.slug,
+      sourcePaths: page.sourcePaths,
+      status: page.status,
+      title: page.title,
+    },
+    {
+      readTextFile: dependencies.readTextFile,
+      saveText,
+      vault: input.vault,
+    },
+  )
 
   return {
     vault: input.vault,
@@ -303,9 +359,12 @@ export async function lintKnowledgePages(
   input: KnowledgeMaintenanceInput,
 ): Promise<KnowledgeLintResult> {
   const { graph, issues } = await readDerivedKnowledgeGraphWithIssues(input.vault)
+  const libraryReadResult = await readHealthLibraryGraphWithIssues(input.vault)
   const problems = await collectKnowledgeLintProblems({
     graph,
     issues,
+    libraryIssues: libraryReadResult.issues,
+    librarySlugs: libraryReadResult.graph.bySlug,
     readableFileExists: async (candidatePath) =>
       await knowledgeReadableFileExists(input.vault, candidatePath),
   })
@@ -315,6 +374,26 @@ export async function lintKnowledgePages(
     pageCount: graph.nodes.length,
     problemCount: problems.length,
     problems,
+    vault: input.vault,
+  }
+}
+
+export async function tailKnowledgeLog(
+  input: KnowledgeLogTailInput,
+  dependencies: Pick<KnowledgeServiceDependencies, 'readTextFile'> = {},
+): Promise<KnowledgeLogTailResult> {
+  const limit = normalizeKnowledgeLogLimit(input.limit)
+  const markdown = await readKnowledgeLogMarkdown(
+    input.vault,
+    dependencies.readTextFile,
+  )
+  const entries = parseKnowledgeLogEntries(markdown).slice(0, limit)
+
+  return {
+    count: entries.length,
+    entries,
+    limit,
+    logPath: DERIVED_KNOWLEDGE_LOG_PATH,
     vault: input.vault,
   }
 }
@@ -363,6 +442,8 @@ export function requireUniqueKnowledgePageBySlug(
 async function collectKnowledgeLintProblems(input: {
   graph: DerivedKnowledgeGraph
   issues: readonly DerivedKnowledgeGraphIssue[]
+  libraryIssues: readonly { lineNumber?: number; parser: 'frontmatter' | 'json'; reason: string; relativePath: string }[]
+  librarySlugs: ReadonlyMap<string, unknown>
   readableFileExists: (candidatePath: string) => Promise<boolean>
 }): Promise<KnowledgeLintProblem[]> {
   const problems: KnowledgeLintProblem[] = input.issues.map((issue) => ({
@@ -375,6 +456,18 @@ async function collectKnowledgeLintProblems(input: {
     slug: null,
     severity: 'error',
   }))
+  problems.push(
+    ...input.libraryIssues.map((issue) => ({
+      code: `library_parse_${issue.parser}`,
+      message:
+        issue.lineNumber !== undefined
+          ? `${issue.reason} (line ${issue.lineNumber}).`
+          : issue.reason,
+      pagePath: issue.relativePath,
+      slug: null,
+      severity: 'warning' as const,
+    })),
+  )
   const slugCounts = new Map<string, string[]>()
 
   for (const page of input.graph.nodes) {
@@ -386,6 +479,7 @@ async function collectKnowledgeLintProblems(input: {
       ...(await collectKnowledgePageProblems(
         page,
         input.graph,
+        input.librarySlugs,
         input.readableFileExists,
       )),
     )
@@ -413,6 +507,7 @@ async function collectKnowledgeLintProblems(input: {
 async function collectKnowledgePageProblems(
   page: DerivedKnowledgeNode,
   graph: DerivedKnowledgeGraph,
+  librarySlugs: ReadonlyMap<string, unknown>,
   readableFileExists: (candidatePath: string) => Promise<boolean>,
 ): Promise<KnowledgeLintProblem[]> {
   const problems: KnowledgeLintProblem[] = []
@@ -491,6 +586,18 @@ async function collectKnowledgePageProblems(
       problems.push({
         code: 'missing_related_page',
         message: `Related slug "${relatedSlug}" does not exist in derived knowledge pages.`,
+        pagePath,
+        slug: page.slug,
+        severity: 'warning',
+      })
+    }
+  }
+
+  for (const librarySlug of page.librarySlugs) {
+    if (!librarySlugs.has(librarySlug)) {
+      problems.push({
+        code: 'invalid_library_slug',
+        message: `Library slug "${librarySlug}" does not exist under bank/library.`,
         pagePath,
         slug: page.slug,
         severity: 'warning',
@@ -610,6 +717,29 @@ async function saveKnowledgeText(input: {
   })
 }
 
+async function appendKnowledgeLogEntry(
+  entry: KnowledgeLogAppendEntry,
+  input: {
+    readTextFile?: KnowledgeServiceDependencies['readTextFile']
+    saveText: NonNullable<KnowledgeServiceDependencies['saveText']>
+    vault: string
+  },
+): Promise<void> {
+  const existingMarkdown = await readKnowledgeLogMarkdown(
+    input.vault,
+    input.readTextFile,
+  )
+
+  await input.saveText({
+    vault: input.vault,
+    relativePath: DERIVED_KNOWLEDGE_LOG_PATH,
+    content: renderKnowledgeLogMarkdown(existingMarkdown, entry),
+    operationType: 'knowledge_log.append',
+    overwrite: true,
+    summary: `Appended derived knowledge log entry for "${entry.title}".`,
+  })
+}
+
 async function defaultReadTextFile(filePath: string): Promise<string> {
   return await readFile(filePath, 'utf8')
 }
@@ -617,6 +747,31 @@ async function defaultReadTextFile(filePath: string): Promise<string> {
 function toVaultRelativePath(vaultRoot: string, absolutePath: string): string {
   const relativePath = path.relative(path.resolve(vaultRoot), absolutePath)
   return relativePath.split(path.sep).join(path.posix.sep)
+}
+
+async function assertKnowledgeLibrarySlugsExist(
+  vaultRoot: string,
+  librarySlugs: readonly string[],
+): Promise<void> {
+  if (librarySlugs.length === 0) {
+    return
+  }
+
+  const libraryReadResult = await readHealthLibraryGraphWithIssues(vaultRoot)
+  const invalidLibrarySlugs = librarySlugs.filter(
+    (slug) => !libraryReadResult.graph.bySlug.has(slug),
+  )
+  if (invalidLibrarySlugs.length === 0) {
+    return
+  }
+
+  throw new VaultCliError(
+    'knowledge_invalid_library_slug',
+    `Unknown bank/library slug(s): ${invalidLibrarySlugs.join(', ')}.`,
+    {
+      invalidLibrarySlugs,
+    },
+  )
 }
 
 function collectNormalizedSourcePaths(
@@ -715,4 +870,113 @@ function describeKnowledgeDuplicateSlugAction(
     case 'upsert':
       return 'upserted'
   }
+}
+
+async function readKnowledgeLogMarkdown(
+  vaultRoot: string,
+  readTextFile?: KnowledgeServiceDependencies['readTextFile'],
+): Promise<string> {
+  try {
+    const absolutePath = await resolveAssistantVaultPath(
+      vaultRoot,
+      DERIVED_KNOWLEDGE_LOG_PATH,
+      'file path',
+    )
+    return await (readTextFile ?? defaultReadTextFile)(absolutePath)
+  } catch (error) {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      (error as { code?: unknown }).code === 'ENOENT'
+    ) {
+      return ''
+    }
+
+    throw error
+  }
+}
+
+function renderKnowledgeLogMarkdown(
+  existingMarkdown: string,
+  entry: KnowledgeLogAppendEntry,
+): string {
+  const trimmed = existingMarkdown.trim()
+  const lines = trimmed.length > 0
+    ? [trimmed, '']
+    : [
+        '# Derived knowledge log',
+        '',
+        '_Append-only record of assistant-authored derived wiki writes._',
+        '',
+      ]
+
+  lines.push(
+    `## [${entry.occurredAt}] ${entry.action} | ${entry.title}`,
+    '',
+    `- slug: ${renderKnowledgeLogScalar(entry.slug)}`,
+    `- pagePath: ${renderKnowledgeLogScalar(entry.pagePath)}`,
+    `- pageType: ${renderKnowledgeLogScalar(entry.pageType)}`,
+    `- status: ${renderKnowledgeLogScalar(entry.status)}`,
+    `- indexPath: ${renderKnowledgeLogScalar(entry.indexPath)}`,
+    `- sourcePaths: ${renderKnowledgeLogList(entry.sourcePaths)}`,
+    `- relatedSlugs: ${renderKnowledgeLogList(entry.relatedSlugs)}`,
+    `- librarySlugs: ${renderKnowledgeLogList(entry.librarySlugs)}`,
+    '',
+  )
+
+  return lines.join('\n')
+}
+
+function parseKnowledgeLogEntries(markdown: string): KnowledgeLogTailResult['entries'] {
+  const normalized = markdown.replace(/\r\n?/gu, '\n').trim()
+  if (normalized.length === 0) {
+    return []
+  }
+
+  const matches = [...normalized.matchAll(/^## \[(.+?)\] ([^|\n]+)\| (.+)$/gmu)]
+  if (matches.length === 0) {
+    return []
+  }
+
+  const entries: KnowledgeLogTailResult['entries'] = []
+
+  for (let index = matches.length - 1; index >= 0; index -= 1) {
+    const match = matches[index]
+    const start = match?.index ?? 0
+    const end = index + 1 < matches.length ? (matches[index + 1]?.index ?? normalized.length) : normalized.length
+    const block = normalized.slice(start, end).trim()
+    if (!match) {
+      continue
+    }
+
+    entries.push({
+      action: match[2]?.trim() ?? 'unknown',
+      block,
+      occurredAt: match[1]?.trim() ?? '',
+      title: match[3]?.trim() ?? 'Untitled',
+    })
+  }
+
+  return entries
+}
+
+function renderKnowledgeLogScalar(value: string | null): string {
+  return value ? `\`${value}\`` : '(none)'
+}
+
+function renderKnowledgeLogList(values: readonly string[]): string {
+  if (values.length === 0) {
+    return '(none)'
+  }
+
+  return values.map((value) => `\`${value}\``).join(', ')
+}
+
+function normalizeKnowledgeLogLimit(limit: number | null | undefined): number {
+  if (!Number.isFinite(limit)) {
+    return 20
+  }
+
+  return Math.max(1, Math.min(200, Math.trunc(limit ?? 20)))
 }

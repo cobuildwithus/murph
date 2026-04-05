@@ -9,6 +9,7 @@ import {
   listKnowledgePages,
   rebuildKnowledgeIndex,
   searchKnowledgePages,
+  tailKnowledgeLog,
   upsertKnowledgePage,
 } from '@murphai/assistant-core/knowledge'
 import {
@@ -17,6 +18,7 @@ import {
 } from '@murphai/assistant-core/vault-cli-contracts'
 import {
   knowledgeIndexRebuildResultSchema,
+  knowledgeLogTailResultSchema,
   knowledgeLintResultSchema,
   knowledgeListResultSchema,
   knowledgeSearchResultSchema,
@@ -57,10 +59,18 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
         .min(1)
         .optional()
         .describe('Optional page status such as active, draft, or archived.'),
+      clearLibraryLinks: z
+        .boolean()
+        .optional()
+        .describe('Clear any existing `librarySlugs` links before applying this upsert. Use this when a prior stable reference link is stale or should be removed.'),
       relatedSlug: z
         .array(slugSchema)
         .optional()
         .describe('Optional explicit related page slugs. Repeat --related-slug to add more; Murph also derives related slugs from body wikilinks.'),
+      librarySlug: z
+        .array(slugSchema)
+        .optional()
+        .describe('Optional stable `bank/library` entity slugs that this personal wiki page builds on. Repeat --library-slug to include multiple reference entities.'),
       sourcePath: z
         .array(pathSchema)
         .optional()
@@ -72,8 +82,10 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
         vault: options.vault,
         body: options.body,
         title: options.title,
+        clearLibrarySlugs: options.clearLibraryLinks,
         slug: options.slug,
         pageType: options.pageType,
+        librarySlugs: options.librarySlug,
         relatedSlugs: options.relatedSlug,
         status: options.status,
         sourcePaths: options.sourcePath,
@@ -174,6 +186,25 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
     },
   })
 
+  const log = Cli.create('log', {
+    description: 'Inspect the append-only derived knowledge activity log.',
+  })
+
+  log.command('tail', {
+    description: 'Show the latest derived knowledge write-log entries in descending occurredAt order.',
+    args: emptyArgsSchema,
+    options: withBaseOptions({
+      limit: z.number().int().positive().max(200).default(20),
+    }),
+    output: knowledgeLogTailResultSchema,
+    run({ options }) {
+      return tailKnowledgeLog({
+        vault: options.vault,
+        limit: options.limit,
+      })
+    },
+  })
+
   const index = Cli.create('index', {
     description: 'Rebuild the derived knowledge markdown index.',
   })
@@ -190,6 +221,7 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
     },
   })
 
+  knowledge.command(log)
   knowledge.command(index)
   cli.command(knowledge)
 }

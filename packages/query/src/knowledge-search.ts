@@ -16,6 +16,7 @@ const MAX_KNOWLEDGE_SEARCH_LIMIT = 200
 interface DerivedKnowledgeSearchableDocument {
   bodyText: string
   compiledAt: string | null
+  librarySlugs: string[]
   pagePath: string
   pageType: string | null
   relatedSlugs: string[]
@@ -78,6 +79,7 @@ function materializeKnowledgeSearchDocument(
   return {
     bodyText: joinCompactStrings([node.body], '\n'),
     compiledAt: node.compiledAt,
+    librarySlugs: node.librarySlugs,
     pagePath: node.relativePath,
     pageType: node.pageType,
     relatedSlugs: node.relatedSlugs,
@@ -89,6 +91,7 @@ function materializeKnowledgeSearchDocument(
       node.relativePath,
       node.pageType,
       node.status,
+      ...node.librarySlugs,
       ...node.sourcePaths,
       ...node.relatedSlugs,
     ], '\n'),
@@ -141,6 +144,7 @@ function scoreKnowledgeSearchDocument(
 
   return {
     compiledAt: candidate.compiledAt,
+    librarySlugs: candidate.librarySlugs,
     matchedTerms: [...matchedTerms].sort(),
     pagePath: candidate.pagePath,
     pageType: candidate.pageType,

@@ -13,7 +13,7 @@ The main installable product entrypoint is `@murphai/murph`, which gives you the
 - a file-native vault with canonical writes owned by `packages/core`
 - the installable `@murphai/murph` package, which provides the `murph` CLI and onboarding flow
 - provider-backed local assistant chat and automation, with runtime state in sibling `assistant-state/**`
-- a non-canonical compiled knowledge wiki under `derived/knowledge/**`, synthesized by the active assistant, persisted through shared assistant/CLI write surfaces, searchable locally, and kept rebuildable
+- a two-layer knowledge system: stable health reference pages under `bank/library/**` plus a non-canonical compiled personal wiki under `derived/knowledge/**`, synthesized by the active assistant, persisted through shared assistant/CLI write surfaces, searchable locally, and kept rebuildable
 - inbox capture, indexing, and parser-driven attachment extraction
 - local wearable/device sync through `@murphai/device-syncd`
 - a hosted Next.js integration control plane in `apps/web`
@@ -85,7 +85,7 @@ Murph is opinionated about storage boundaries:
 - Markdown is the human-facing source of truth for durable documents such as `CORE.md`, journals, profile state, goals, conditions, protocols, and registries.
 - JSONL ledgers are the machine-facing source of truth for append-only records such as events, samples, assessments, and audit entries.
 - Imported source artifacts are copied into `raw/**` and treated as immutable.
-- Derived parser output and compiled knowledge pages live under `derived/**` and stay rebuildable.
+- Derived parser output and compiled knowledge pages live under `derived/**` and stay rebuildable. For the knowledge wiki specifically, `derived/knowledge/index.md` is the content catalog, `derived/knowledge/log.md` is the append-only write log, and `derived/knowledge/pages/*.md` are the assistant-authored personal synthesis pages.
 - Local machine state lives under `.runtime/**` and stays rebuildable.
 - Assistant transcripts, metadata, and assistant memory live outside the vault under `assistant-state/**` and are not canonical health truth.
 
@@ -144,6 +144,8 @@ The root CLI is no longer just a vault editor. The built command surface include
 - `device` for local wearable/device auth, status, and daemon control
 - root shortcuts such as `chat`, `run`, `status`, `doctor`, and `stop`
 - AI-assisted synthesis helpers such as `research`, `deepthink`, and `knowledge`
+
+The `knowledge` surface is intentionally narrow: use it to persist pages, inspect saved pages, lint the wiki, rebuild the index, and tail the append-only wiki log. The assistant's wiki-maintainer workflow itself lives in the runtime prompt plus the dedicated `assistant.knowledge.*` tools, not in repo `AGENTS.md`.
 
 ### Choosing a read command
 

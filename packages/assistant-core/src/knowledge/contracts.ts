@@ -1,5 +1,6 @@
 export interface KnowledgePageReference {
   compiledAt: string | null
+  librarySlugs: string[]
   pagePath: string
   pageType: string | null
   relatedSlugs: string[]
@@ -37,6 +38,21 @@ export interface KnowledgeSearchHit extends KnowledgePageReference {
   matchedTerms: string[]
   score: number
   snippet: string
+}
+
+export interface KnowledgeLogEntry {
+  action: string
+  block: string
+  occurredAt: string
+  title: string
+}
+
+export interface KnowledgeLogTailResult {
+  count: number
+  entries: KnowledgeLogEntry[]
+  limit: number
+  logPath: string
+  vault: string
 }
 
 export interface KnowledgeSearchResult {

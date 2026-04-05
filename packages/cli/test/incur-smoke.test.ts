@@ -103,7 +103,7 @@ test('root help exposes the Incur built-ins', async () => {
   assert.match(help, /Integrations:/u)
   assert.match(help, /chat\s+Open the same assistant chat UI as/u)
   assert.match(help, /search\s+Search commands for the local read model/u)
-  assert.match(help, /timeline\s+Build a descending timeline/u)
+  assert.match(help, /timeline\s+Build a descending cross-record timeline/u)
   assert.match(help, /completions\s+Generate shell completion script/u)
   assert.match(help, /mcp add\s+Register as MCP server/u)
   assert.match(help, /skills add\s+Sync skill files to agents/u)
@@ -411,6 +411,18 @@ test('knowledge commands expose the expected schema at the built CLI boundary', 
       required?: string[]
     }
   }
+  const logTailSchema = JSON.parse(
+    await runRawCli(['knowledge', 'log', 'tail', '--schema', '--format', 'json']),
+  ) as {
+    args: {
+      properties?: Record<string, unknown>
+      required?: string[]
+    }
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
 
   assert.deepEqual(upsertSchema.args.required ?? [], [])
   assert.equal(
@@ -420,6 +432,8 @@ test('knowledge commands expose the expected schema at the built CLI boundary', 
   assert.equal('body' in upsertSchema.options.properties, true)
   assert.equal('sourcePath' in upsertSchema.options.properties, true)
   assert.equal('relatedSlug' in upsertSchema.options.properties, true)
+  assert.equal('librarySlug' in upsertSchema.options.properties, true)
+  assert.equal('clearLibraryLinks' in upsertSchema.options.properties, true)
   assert.equal('mode' in upsertSchema.options.properties, false)
   assert.deepEqual(upsertSchema.options.required, ['vault', 'body'])
   assert.match(
@@ -435,6 +449,10 @@ test('knowledge commands expose the expected schema at the built CLI boundary', 
   assert.equal('slug' in showSchema.args.properties, true)
   assert.deepEqual(showSchema.args.required, ['slug'])
   assert.deepEqual(showSchema.options.required, ['vault'])
+
+  assert.deepEqual(logTailSchema.args.required ?? [], [])
+  assert.equal('limit' in logTailSchema.options.properties, true)
+  assert.deepEqual(logTailSchema.options.required, ['vault', 'limit'])
 })
 
 test('knowledge upsert persists assistant-authored pages through the built CLI boundary', async () => {
@@ -449,11 +467,45 @@ test('knowledge upsert persists assistant-authored pages through the built CLI b
       path.join(vaultRoot, 'research', '2026', '04', 'sleep-note.md'),
       '# Sleep note\n\nMagnesium improved continuity.\n',
     )
+    await mkdir(path.join(vaultRoot, 'bank', 'library'), {
+      recursive: true,
+    })
+    await writeFile(
+      path.join(vaultRoot, 'bank', 'library', 'sleep-architecture.md'),
+      [
+        '---',
+        'title: Sleep architecture',
+        'slug: sleep-architecture',
+        'entityType: biomarker',
+        '---',
+        '',
+        '# Sleep architecture',
+        '',
+        'Stable reference page.',
+        '',
+      ].join('\n'),
+    )
+    await writeFile(
+      path.join(vaultRoot, 'bank', 'library', 'sleep-duration.md'),
+      [
+        '---',
+        'title: Sleep duration',
+        'slug: sleep-duration',
+        'entityType: biomarker',
+        '---',
+        '',
+        '# Sleep duration',
+        '',
+        'Stable reference page.',
+        '',
+      ].join('\n'),
+    )
 
     const upserted = requireData(
       await runCli<{
         bodyLength: number
         page: {
+          librarySlugs: string[]
           slug: string
           sourcePaths: string[]
           title: string
@@ -467,12 +519,15 @@ test('knowledge upsert persists assistant-authored pages through the built CLI b
         'Sleep quality',
         '--body',
         '# Sleep quality\n\nMagnesium may help sleep continuity.\n\n## Related\n\n- [[magnesium]]\n',
+        '--library-slug',
+        'sleep-architecture',
         '--source-path',
         'research/2026/04/sleep-note.md',
       ]),
     )
 
     assert.equal(upserted.bodyLength > 0, true)
+    assert.deepEqual(upserted.page.librarySlugs, ['sleep-architecture'])
     assert.equal(upserted.page.slug, 'sleep-quality')
     assert.deepEqual(upserted.page.sourcePaths, ['research/2026/04/sleep-note.md'])
 
@@ -497,6 +552,66 @@ test('knowledge upsert persists assistant-authored pages through the built CLI b
     assert.match(shown.page.body, /research\/2026\/04\/sleep-note\.md/u)
     assert.match(shown.page.markdown, /sourcePaths:/u)
     assert.match(shown.page.markdown, /relatedSlugs:/u)
+
+    const log = requireData(
+      await runCli<{
+        entries: Array<{
+          action: string
+          block: string
+          title: string
+        }>
+      }>([
+        'knowledge',
+        'log',
+        'tail',
+        '--vault',
+        vaultRoot,
+        '--limit',
+        '1',
+      ]),
+    )
+
+    assert.equal(log.entries.length, 1)
+    assert.equal(log.entries[0]?.action, 'upsert')
+    assert.equal(log.entries[0]?.title, 'Sleep quality')
+    assert.match(log.entries[0]?.block ?? '', /librarySlugs: `sleep-architecture`/u)
+    assert.match(log.entries[0]?.block ?? '', /slug: `sleep-quality`/u)
+
+    requireData(
+      await runCli<{
+        page: {
+          librarySlugs: string[]
+        }
+      }>([
+        'knowledge',
+        'upsert',
+        '--vault',
+        vaultRoot,
+        '--slug',
+        'sleep-quality',
+        '--body',
+        '# Sleep quality\n\nRefreshed note.\n',
+        '--clear-library-links',
+        '--library-slug',
+        'sleep-duration',
+      ]),
+    )
+
+    const replaced = requireData(
+      await runCli<{
+        page: {
+          librarySlugs: string[]
+        }
+      }>([
+        'knowledge',
+        'show',
+        'sleep-quality',
+        '--vault',
+        vaultRoot,
+      ]),
+    )
+
+    assert.deepEqual(replaced.page.librarySlugs, ['sleep-duration'])
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }

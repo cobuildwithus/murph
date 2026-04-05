@@ -62,6 +62,7 @@ export function extractKnowledgeRelatedSlugsFromBody(input: {
 export function buildKnowledgeMarkdown(input: {
   body: string
   compiledAt: string
+  librarySlugs: string[]
   pageType: string
   relatedSlugs: string[]
   slug: string
@@ -72,6 +73,7 @@ export function buildKnowledgeMarkdown(input: {
 }): string {
   const attributes = compactRecord({
     compiledAt: input.compiledAt,
+    librarySlugs: input.librarySlugs,
     pageType: input.pageType,
     relatedSlugs: input.relatedSlugs,
     slug: input.slug,
@@ -99,6 +101,7 @@ export function buildKnowledgePageRelativePath(slug: string): string {
 export function toKnowledgeMetadata(page: DerivedKnowledgeNode): KnowledgePageMetadata {
   return {
     compiledAt: page.compiledAt,
+    librarySlugs: page.librarySlugs,
     pagePath: page.relativePath,
     pageType: page.pageType,
     relatedSlugs: page.relatedSlugs,
@@ -147,6 +150,20 @@ export function normalizeRelatedSlugInputs(
     value
       .map((entry) => normalizeKnowledgeSlug(entry))
       .filter((entry) => entry.length > 0 && entry !== currentSlug),
+  )
+}
+
+export function normalizeLibrarySlugInputs(
+  value: readonly string[] | null | undefined,
+): string[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return orderedUniqueStrings(
+    value
+      .map((entry) => normalizeKnowledgeSlug(entry))
+      .filter((entry) => entry.length > 0),
   )
 }
 
