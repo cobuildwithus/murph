@@ -5,9 +5,11 @@ export {
   listKnowledgePages,
   rebuildKnowledgeIndex,
   searchKnowledgePages,
+  tailKnowledgeLog,
   upsertKnowledgePage,
   type KnowledgeGetInput,
   type KnowledgeListInput,
+  type KnowledgeLogTailInput,
   type KnowledgeMaintenanceInput,
   type KnowledgeSearchInput,
   type KnowledgeServiceDependencies,
@@ -16,6 +18,7 @@ export {
 
 export {
   matchesKnowledgeFilter,
+  normalizeLibrarySlugInputs,
   normalizeRelatedSlugInputs,
   normalizeSourcePathInputs,
 } from './knowledge/documents.js'
@@ -23,6 +26,8 @@ export {
 export type {
   KnowledgeGetResult,
   KnowledgeIndexRebuildResult,
+  KnowledgeLogEntry,
+  KnowledgeLogTailResult,
   KnowledgeLintProblem,
   KnowledgeLintResult,
   KnowledgeListResult,
