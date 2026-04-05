@@ -326,6 +326,22 @@ export const inboxPromoteDocumentResultSchema = z.object({
   created: z.boolean(),
 })
 
+export const inboxPreservedDocumentSchema = z.object({
+  attachmentId: z.string().min(1).nullable(),
+  ordinal: z.number().int().positive(),
+  lookupId: z.string().min(1),
+  relatedId: z.string().min(1),
+  created: z.boolean(),
+})
+
+export const inboxPreserveDocumentAttachmentsResultSchema = z.object({
+  vault: pathSchema,
+  captureId: z.string().min(1),
+  preservedCount: z.number().int().nonnegative(),
+  createdCount: z.number().int().nonnegative(),
+  documents: z.array(inboxPreservedDocumentSchema),
+})
+
 export const inboxPromoteJournalResultSchema = z.object({
   vault: pathSchema,
   captureId: z.string().min(1),
@@ -420,6 +436,10 @@ export type InboxParseResult = z.infer<typeof inboxParseResultSchema>
 export type InboxRequeueResult = z.infer<typeof inboxRequeueResultSchema>
 export type InboxPromoteMealResult = z.infer<typeof inboxPromoteMealResultSchema>
 export type InboxPromoteDocumentResult = z.infer<typeof inboxPromoteDocumentResultSchema>
+export type InboxPreservedDocument = z.infer<typeof inboxPreservedDocumentSchema>
+export type InboxPreserveDocumentAttachmentsResult = z.infer<
+  typeof inboxPreserveDocumentAttachmentsResultSchema
+>
 export type InboxPromoteJournalResult = z.infer<typeof inboxPromoteJournalResultSchema>
 export type InboxPromoteExperimentNoteResult = z.infer<
   typeof inboxPromoteExperimentNoteResultSchema

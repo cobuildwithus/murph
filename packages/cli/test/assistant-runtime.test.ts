@@ -292,6 +292,7 @@ function createPhotoOnlyAutoReplyInboxServices(): InboxServices {
       }
     },
     search: unsupportedInboxServiceCall,
+    preserveDocumentAttachments: unsupportedInboxServiceCall,
     promoteMeal: unsupportedInboxServiceCall,
     promoteDocument: unsupportedInboxServiceCall,
     promoteJournal: unsupportedInboxServiceCall,
@@ -1944,6 +1945,303 @@ test('scanAssistantAutomationOnce keeps the routing cursor pinned when a capture
   })
   assert.equal(runtimeMocks.routeInboxCaptureWithModel.mock.calls.length, 0)
   assert.deepEqual(stateProgress, [])
+})
+
+test('scanAssistantAutomationOnce preserves document attachments before auto-reply when routing is disabled', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-unified-preserve-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const preserveDocumentAttachments = vi.fn(async () => ({
+    vault: vaultRoot,
+    captureId: 'cap-doc-auto',
+    preservedCount: 1,
+    createdCount: 1,
+    documents: [
+      {
+        attachmentId: 'att-doc-auto',
+        ordinal: 1,
+        lookupId: 'evt_doc_auto',
+        relatedId: 'doc_auto',
+        created: true,
+      },
+    ],
+  }))
+
+  runtimeMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-doc-auto',
+    response: 'logged it',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+  runtimeMocks.deliverAssistantMessageOverBinding.mockResolvedValue({
+    message: 'logged it',
+    session: {
+      schema: 'murph.assistant-session.v3',
+      sessionId: 'session-doc-auto',
+      provider: 'codex-cli',
+      providerSessionId: 'thread-doc-auto',
+      providerOptions: {
+        model: null,
+        reasoningEffort: null,
+        sandbox: 'read-only',
+        approvalPolicy: 'never',
+        profile: null,
+        oss: false,
+      },
+      alias: null,
+      binding: {
+        conversationKey: 'channel:imessage|thread:chat-doc-auto',
+        channel: 'imessage',
+        identityId: null,
+        actorId: '+15550001111',
+        threadId: 'chat-doc-auto',
+        threadIsDirect: true,
+        delivery: {
+          kind: 'participant',
+          target: '+15550001111',
+        },
+      },
+      createdAt: '2026-03-18T00:00:00.000Z',
+      updatedAt: '2026-03-18T00:00:01.000Z',
+      lastTurnAt: '2026-03-18T00:00:01.000Z',
+      turnCount: 1,
+    },
+    delivery: {
+      channel: 'imessage',
+      target: '+15550001111',
+      targetKind: 'participant',
+      sentAt: '2026-03-18T00:00:01.000Z',
+      messageLength: 9,
+    },
+  })
+
+  const result = await scanAssistantAutomationOnce({
+    inboxServices: {
+      list: async () => ({
+        items: [
+          {
+            captureId: 'cap-doc-auto',
+            source: 'imessage',
+            accountId: 'self',
+            externalId: 'ext-doc-auto',
+            threadId: 'chat-doc-auto',
+            threadTitle: null,
+            actorId: '+15550001111',
+            actorName: 'Bob',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:05:00Z',
+            receivedAt: null,
+            text: 'Here is a report.',
+            attachmentCount: 1,
+            envelopePath: 'raw/inbox/doc-auto.json',
+            eventId: 'evt-doc-auto',
+            promotions: [],
+          },
+        ],
+      }),
+      show: async () => ({
+        capture: {
+          captureId: 'cap-doc-auto',
+          source: 'imessage',
+          accountId: 'self',
+          externalId: 'ext-doc-auto',
+          threadId: 'chat-doc-auto',
+          threadTitle: null,
+          threadIsDirect: true,
+          actorId: '+15550001111',
+          actorName: 'Bob',
+          actorIsSelf: false,
+          occurredAt: '2026-03-18T09:05:00Z',
+          receivedAt: null,
+          text: 'Here is a report.',
+          attachmentCount: 1,
+          envelopePath: 'raw/inbox/doc-auto.json',
+          eventId: 'evt-doc-auto',
+          createdAt: '2026-03-18T09:05:00Z',
+          promotions: [],
+          attachments: [
+            {
+              attachmentId: 'att-doc-auto',
+              ordinal: 1,
+              kind: 'document',
+              fileName: 'report.pdf',
+              mime: 'application/pdf',
+              storedPath: 'raw/inbox/captures/cap-doc-auto/attachments/1/report.pdf',
+              extractedText: 'Normal report content.',
+              transcriptText: null,
+              parseState: 'succeeded',
+            },
+          ],
+        },
+        vault: vaultRoot,
+      }),
+      preserveDocumentAttachments,
+    } as any,
+    state: {
+      inboxScanCursor: null,
+      autoReplyScanCursor: null,
+      autoReplyChannels: ['imessage'],
+      autoReplyBacklogChannels: [],
+      autoReplyPrimed: true,
+    },
+    vault: vaultRoot,
+  })
+
+  assert.deepEqual(result, {
+    routing: {
+      considered: 0,
+      failed: 0,
+      noAction: 0,
+      routed: 0,
+      skipped: 0,
+    },
+    replies: {
+      considered: 1,
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+    },
+  })
+  assert.equal(preserveDocumentAttachments.mock.calls.length, 1)
+  assert.ok(
+    (preserveDocumentAttachments.mock.invocationCallOrder[0] ?? 0) <
+      (runtimeMocks.executeAssistantProviderTurn.mock.invocationCallOrder[0] ?? 0),
+  )
+})
+
+test('scanAssistantAutomationOnce stops auto-reply when document preservation fails', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-unified-preserve-fail-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const preserveDocumentAttachments = vi.fn(async () => {
+    throw new Error('preserve exploded')
+  })
+  const events: Array<{ type: string; captureId?: string; details?: string }> = []
+  const stateProgress: Array<{
+    inboxScanCursor: { occurredAt: string; captureId: string } | null
+    autoReplyScanCursor: { occurredAt: string; captureId: string } | null
+  }> = []
+
+  const result = await scanAssistantAutomationOnce({
+    inboxServices: {
+      list: async () => ({
+        items: [
+          {
+            captureId: 'cap-doc-auto-fail',
+            source: 'imessage',
+            accountId: 'self',
+            externalId: 'ext-doc-auto-fail',
+            threadId: 'chat-doc-auto-fail',
+            threadTitle: null,
+            actorId: '+15550001111',
+            actorName: 'Bob',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:06:00Z',
+            receivedAt: null,
+            text: 'Here is a report.',
+            attachmentCount: 1,
+            envelopePath: 'raw/inbox/doc-auto-fail.json',
+            eventId: 'evt-doc-auto-fail',
+            promotions: [],
+          },
+        ],
+      }),
+      show: async () => ({
+        capture: {
+          captureId: 'cap-doc-auto-fail',
+          source: 'imessage',
+          accountId: 'self',
+          externalId: 'ext-doc-auto-fail',
+          threadId: 'chat-doc-auto-fail',
+          threadTitle: null,
+          threadIsDirect: true,
+          actorId: '+15550001111',
+          actorName: 'Bob',
+          actorIsSelf: false,
+          occurredAt: '2026-03-18T09:06:00Z',
+          receivedAt: null,
+          text: 'Here is a report.',
+          attachmentCount: 1,
+          envelopePath: 'raw/inbox/doc-auto-fail.json',
+          eventId: 'evt-doc-auto-fail',
+          createdAt: '2026-03-18T09:06:00Z',
+          promotions: [],
+          attachments: [
+            {
+              attachmentId: 'att-doc-auto-fail',
+              ordinal: 1,
+              kind: 'document',
+              fileName: 'report.pdf',
+              mime: 'application/pdf',
+              storedPath:
+                'raw/inbox/captures/cap-doc-auto-fail/attachments/1/report.pdf',
+              extractedText: 'Normal report content.',
+              transcriptText: null,
+              parseState: 'succeeded',
+            },
+          ],
+        },
+        vault: vaultRoot,
+      }),
+      preserveDocumentAttachments,
+    } as any,
+    state: {
+      inboxScanCursor: null,
+      autoReplyScanCursor: null,
+      autoReplyChannels: ['imessage'],
+      autoReplyBacklogChannels: [],
+      autoReplyPrimed: true,
+    },
+    vault: vaultRoot,
+    onEvent(event) {
+      events.push({
+        type: event.type,
+        captureId: event.captureId,
+        details: event.details,
+      })
+    },
+    async onStateProgress(next) {
+      stateProgress.push({
+        inboxScanCursor: next.inboxScanCursor,
+        autoReplyScanCursor: next.autoReplyScanCursor,
+      })
+    },
+  })
+
+  assert.deepEqual(result, {
+    routing: {
+      considered: 0,
+      failed: 0,
+      noAction: 0,
+      routed: 0,
+      skipped: 0,
+    },
+    replies: {
+      considered: 0,
+      failed: 0,
+      replied: 0,
+      skipped: 0,
+    },
+  })
+  assert.equal(preserveDocumentAttachments.mock.calls.length, 1)
+  assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 0)
+  assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 0)
+  assert.deepEqual(stateProgress, [])
+  assert.equal(
+    events.some(
+      (event) =>
+        event.type === 'capture.failed' &&
+        event.captureId === 'cap-doc-auto-fail' &&
+        event.details === 'automatic document preservation failed: preserve exploded',
+    ),
+    true,
+  )
 })
 
 test('scanAssistantAutomationOnce preserves other enabled channels while draining email backlog', async () => {

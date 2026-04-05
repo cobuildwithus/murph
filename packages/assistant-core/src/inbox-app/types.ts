@@ -23,6 +23,7 @@ import type {
   InboxPromoteExperimentNoteResult,
   InboxPromoteJournalResult,
   InboxPromoteMealResult,
+  InboxPreserveDocumentAttachmentsResult,
   InboxPromotionEntry,
   InboxProvisionedMailbox,
   InboxRequeueResult,
@@ -718,6 +719,9 @@ export interface InboxServices {
   ): Promise<InboxAttachmentReparseResult>
   show(input: CommandContext & { captureId: string }): Promise<InboxShowResult>
   search(input: SearchInput): Promise<InboxSearchResult>
+  preserveDocumentAttachments?(
+    input: PromoteInput,
+  ): Promise<InboxPreserveDocumentAttachmentsResult>
   promoteMeal(input: PromoteInput): Promise<InboxPromoteMealResult>
   promoteDocument(input: PromoteInput): Promise<InboxPromoteDocumentResult>
   promoteJournal(input: PromoteInput): Promise<InboxPromoteJournalResult>

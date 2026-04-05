@@ -227,6 +227,7 @@ function buildInboxPlacementSystemPrompt(): string {
   return [
     'You are the Murph assistant routing model.',
     'Choose the smallest safe set of CLI tool calls needed to place the capture into canonical storage.',
+    'Stored document attachments should normally end up preserved as canonical documents even when no stronger structured write is obvious.',
     'Prefer inbox.promote.* tools when a single capture-level promotion fits the evidence.',
     'Use broader vault.* tools only when the capture clearly contains structured data that should be written directly.',
     'When routing images or fallback PDF files are attached, treat them as raw evidence alongside the normalized text bundle.',

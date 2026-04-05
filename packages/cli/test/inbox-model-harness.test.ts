@@ -98,6 +98,9 @@ function createStubInboxServices(showResult: Awaited<ReturnType<InboxServices['s
     search: async () => {
       throw new Error('not implemented')
     },
+    preserveDocumentAttachments: async () => {
+      throw new Error('not implemented')
+    },
     promoteMeal: async () => {
       throw new Error('not implemented')
     },

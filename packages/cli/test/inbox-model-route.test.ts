@@ -82,6 +82,9 @@ function createStubInboxServices(input: {
     search: async () => {
       throw new Error('not implemented')
     },
+    preserveDocumentAttachments: async () => {
+      throw new Error('not implemented')
+    },
     promoteMeal:
       input.promoteMeal ??
       (async () => {

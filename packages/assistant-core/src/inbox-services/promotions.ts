@@ -6,7 +6,9 @@ import { normalizeOpaquePathSegment, normalizeRelativeVaultPath } from '@murphai
 import { resolveAssistantVaultPath } from '../assistant-vault-paths.js'
 import {
   inboxPromotionStoreSchema,
+  inboxPreserveDocumentAttachmentsResultSchema,
   type InboxPromotionEntry,
+  type InboxPreserveDocumentAttachmentsResult,
 } from '../inbox-cli-contracts.js'
 import type { QueryRuntimeModule } from '../query-runtime.js'
 import { VaultCliError } from '../vault-cli-errors.js'
@@ -25,6 +27,7 @@ import type {
   RuntimeCaptureRecord,
   RuntimeStore,
 } from '../inbox-app/types.js'
+import { isStoredDocumentAttachment } from './query.js'
 import { ensureInitialized } from './state.js'
 import {
   fileExists,
@@ -181,6 +184,99 @@ export async function promoteCanonicalAttachmentImport<
       },
     },
   )
+}
+
+export async function preserveCanonicalDocumentAttachments(input: {
+  input: PromoteInput
+  loadImporters: () => Promise<{
+    createImporters(): {
+      importDocument(input: {
+        filePath: string
+        vaultRoot: string
+        occurredAt?: string
+        title?: string
+        note?: string
+        source?: string
+      }): Promise<{
+        documentId: string
+        event: {
+          id: string
+        }
+      }>
+    }
+  }>
+  loadInbox: () => Promise<InboxRuntimeModule>
+}): Promise<InboxPreserveDocumentAttachmentsResult> {
+  const paths = await ensureInitialized(input.loadInbox, input.input.vault)
+  const inboxd = await input.loadInbox()
+  const importers = (await input.loadImporters()).createImporters()
+  const runtime = await inboxd.openInboxRuntime({
+    vaultRoot: paths.absoluteVaultRoot,
+  })
+
+  try {
+    const capture = requirePromotionCapture(runtime, input.input.captureId)
+    const documents: InboxPreserveDocumentAttachmentsResult['documents'] = []
+
+    for (const attachment of capture.attachments.filter(isStoredDocumentAttachment)) {
+      const title = resolveDocumentAttachmentTitle(attachment)
+      const canonicalPromotion = await findCanonicalPromotionMatch({
+        capture,
+        absoluteVaultRoot: paths.absoluteVaultRoot,
+        spec: documentCanonicalPromotionSpec,
+        context: {
+          documentSha256: await resolveAttachmentSha256(
+            paths.absoluteVaultRoot,
+            capture,
+            attachment,
+          ),
+          title,
+        },
+      })
+
+      if (canonicalPromotion) {
+        documents.push({
+          attachmentId: attachment.attachmentId ?? null,
+          ordinal: attachment.ordinal,
+          lookupId: canonicalPromotion.lookupId,
+          relatedId: canonicalPromotion.relatedId,
+          created: false,
+        })
+        continue
+      }
+
+      const result = await importers.importDocument({
+        filePath: await resolvePromotionAttachmentFilePath(
+          paths.absoluteVaultRoot,
+          capture,
+          attachment,
+        ),
+        vaultRoot: paths.absoluteVaultRoot,
+        occurredAt: capture.occurredAt,
+        title: title ?? undefined,
+        note: resolveCapturePromotionNote(capture) ?? undefined,
+        source: 'import',
+      })
+
+      documents.push({
+        attachmentId: attachment.attachmentId ?? null,
+        ordinal: attachment.ordinal,
+        lookupId: result.event.id,
+        relatedId: result.documentId,
+        created: true,
+      })
+    }
+
+    return inboxPreserveDocumentAttachmentsResultSchema.parse({
+      vault: paths.absoluteVaultRoot,
+      captureId: capture.captureId,
+      preservedCount: documents.length,
+      createdCount: documents.filter((document) => document.created).length,
+      documents,
+    })
+  } finally {
+    runtime.close()
+  }
 }
 
 export function requireJournalPromotionCore(core: CoreRuntimeModule) {
@@ -504,6 +600,18 @@ export const documentCanonicalPromotionSpec = {
     title: string | null
   }
 >
+
+function resolveDocumentAttachmentTitle(
+  attachment: RuntimeAttachmentRecord & { fileName?: string | null },
+): string | null {
+  return normalizeNullableString(attachment.fileName)
+}
+
+function resolveCapturePromotionNote(
+  capture: Pick<RuntimeCaptureRecord, 'text'>,
+): string | null {
+  return normalizeNullableString(capture.text)
+}
 
 async function readPromotionStore(
   paths: InboxPaths,

@@ -164,6 +164,7 @@ function buildAssistantEvidenceAndReplyStyleText(
   return [
     "You are replying through a user-facing messaging channel, not the local terminal chat UI.",
     "Answer the human request directly. Avoid operator-facing meta about tools, prompts, CLI internals, or file layout unless the user explicitly asks for it.",
+    "Treat inbound files and documents as durable evidence. When a real Murph write path preserves or logs them, it is fine to tell the user you logged them; do not claim a file was logged unless it was actually written or verified.",
     "Never include citations, source lists, footnotes, bracketed references, or appended file-path/source callouts in the reply unless the user explicitly asks for them.",
     "Do not mention internal vault paths, ledger filenames, JSONL files, assistant-state filenames, or other implementation-level storage details unless the user explicitly asks for that detail.",
     "Do not surface raw machine timestamps such as ISO-8601 values by default. Prefer natural phrasing in the user's time context, or an explicit local date/time only when that precision is actually helpful.",
