@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { timingSafeEqual } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
 import {
@@ -49,9 +50,9 @@ export async function startHostedContainerEntrypoint(input: {
         return;
       }
 
-      const authorization = request.headers.authorization ?? "";
+      const bearerToken = readBearerAuthorizationToken(request.headers.authorization);
 
-      if (authorization !== `Bearer ${input.controlToken}`) {
+      if (!bearerToken || !timingSafeEquals(bearerToken, input.controlToken)) {
         emitHostedExecutionStructuredLog({
           component: "container",
           level: "warn",
@@ -150,6 +151,31 @@ function normalizeOptionalString(value: string | null | undefined): string | nul
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function readBearerAuthorizationToken(value: string | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("Bearer ")) {
+    return null;
+  }
+
+  const token = trimmed.slice("Bearer ".length).trim();
+  return token.length > 0 ? token : null;
+}
+
+function timingSafeEquals(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left, "utf8");
+  const rightBuffer = Buffer.from(right, "utf8");
+
+  if (leftBuffer.length !== rightBuffer.length) {
+    return false;
+  }
+
+  return timingSafeEqual(leftBuffer, rightBuffer);
 }
 
 function writeJsonResponse(

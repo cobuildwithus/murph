@@ -1,3 +1,5 @@
+import { timingSafeEqual } from "node:crypto";
+
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   readHostedExecutionControlSigningSecret,
@@ -18,6 +20,28 @@ function normalizeOptionalString(value: string | null | undefined): string | nul
   return normalized.length > 0 ? normalized : null;
 }
 
+function readBearerAuthorizationToken(value: string | null): string | null {
+  const normalized = normalizeOptionalString(value);
+
+  if (!normalized || !normalized.startsWith("Bearer ")) {
+    return null;
+  }
+
+  const token = normalized.slice("Bearer ".length).trim();
+  return token.length > 0 ? token : null;
+}
+
+function timingSafeEquals(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left, "utf8");
+  const rightBuffer = Buffer.from(right, "utf8");
+
+  if (leftBuffer.length !== rightBuffer.length) {
+    return false;
+  }
+
+  return timingSafeEqual(leftBuffer, rightBuffer);
+}
+
 export function authorizeHostedExecutionInternalRequest(input: {
   acceptedToken: HostedExecutionAcceptedRouteToken;
   request: Request;
@@ -33,8 +57,8 @@ export function authorizeHostedExecutionInternalRequest(input: {
     });
   }
 
-  const authorization = input.request.headers.get("authorization");
-  if (!authorization || !tokens.some((token) => authorization === `Bearer ${token}`)) {
+  const bearerToken = readBearerAuthorizationToken(input.request.headers.get("authorization"));
+  if (!bearerToken || !tokens.some((token) => timingSafeEquals(bearerToken, token))) {
     throw hostedOnboardingError({
       code: unauthorizedCode,
       message: unauthorizedMessage,
