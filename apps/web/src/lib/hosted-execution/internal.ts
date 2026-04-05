@@ -188,10 +188,13 @@ function readHostedExecutionAcceptedRouteTokens(kind: HostedExecutionAcceptedRou
   unauthorizedMessage: string;
 } {
   if (kind === "scheduler") {
+    const schedulerTokens = readTokenListFromEnv("HOSTED_EXECUTION_SCHEDULER_TOKENS");
+
     return {
       requiredCode: "HOSTED_EXECUTION_SCHEDULER_TOKEN_REQUIRED",
-      requiredMessage: "HOSTED_EXECUTION_SCHEDULER_TOKENS must be configured for scheduled hosted execution drains.",
-      tokens: readTokenListFromEnv("HOSTED_EXECUTION_SCHEDULER_TOKENS"),
+      requiredMessage:
+        "HOSTED_EXECUTION_SCHEDULER_TOKENS or CRON_SECRET must be configured for scheduled hosted execution drains.",
+      tokens: schedulerTokens.length > 0 ? schedulerTokens : readSingleTokenListFromEnv("CRON_SECRET"),
       unauthorizedCode: "HOSTED_EXECUTION_UNAUTHORIZED",
       unauthorizedMessage: "Unauthorized hosted execution request.",
     };
@@ -212,6 +215,11 @@ function readHostedExecutionAcceptedRouteTokens(kind: HostedExecutionAcceptedRou
     message: "Unsupported hosted execution token kind.",
     httpStatus: 500,
   });
+}
+
+function readSingleTokenListFromEnv(key: string): string[] {
+  const explicit = normalizeOptionalString(process.env[key]);
+  return explicit ? [explicit] : [];
 }
 
 function readTokenListFromEnv(...keys: string[]): string[] {

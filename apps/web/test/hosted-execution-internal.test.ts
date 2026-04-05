@@ -35,15 +35,18 @@ describe("hosted execution internal auth", () => {
 
   it("fails when scheduler tokens are not configured", () => {
     delete process.env.HOSTED_EXECUTION_SCHEDULER_TOKENS;
+    delete process.env.CRON_SECRET;
 
     expect(() =>
       requireHostedExecutionSchedulerToken(
         new Request("https://join.example.test/api/internal/hosted-execution/outbox/cron"),
       ),
-    ).toThrow("HOSTED_EXECUTION_SCHEDULER_TOKENS must be configured for scheduled hosted execution drains.");
+    ).toThrow(
+      "HOSTED_EXECUTION_SCHEDULER_TOKENS or CRON_SECRET must be configured for scheduled hosted execution drains.",
+    );
   });
 
-  it("ignores CRON_SECRET when scheduler tokens are not configured", () => {
+  it("accepts CRON_SECRET when explicit scheduler tokens are not configured", () => {
     delete process.env.HOSTED_EXECUTION_SCHEDULER_TOKENS;
     process.env.CRON_SECRET = "cron-secret";
 
@@ -55,11 +58,12 @@ describe("hosted execution internal auth", () => {
           },
         }),
       ),
-    ).toThrow("HOSTED_EXECUTION_SCHEDULER_TOKENS must be configured for scheduled hosted execution drains.");
+    ).not.toThrow();
   });
 
   it("accepts configured scheduler bearer tokens after normalizing the authorization header", () => {
     process.env.HOSTED_EXECUTION_SCHEDULER_TOKENS = "token-one, token-two";
+    process.env.CRON_SECRET = "ignored-cron-secret";
 
     expect(() =>
       authorizeHostedExecutionInternalRequest({
@@ -71,6 +75,17 @@ describe("hosted execution internal auth", () => {
         }),
       }),
     ).not.toThrow();
+
+    expect(() =>
+      authorizeHostedExecutionInternalRequest({
+        acceptedToken: "scheduler",
+        request: new Request("https://join.example.test/api/internal/hosted-execution/outbox/cron", {
+          headers: {
+            authorization: "Bearer ignored-cron-secret",
+          },
+        }),
+      }),
+    ).toThrow("Unauthorized hosted execution request.");
   });
 
   it("requires the bound hosted execution user header for user-scoped internal routes", () => {

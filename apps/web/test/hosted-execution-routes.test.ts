@@ -138,7 +138,8 @@ describe("hosted execution async routes", () => {
       throw hostedOnboardingError({
         code: "HOSTED_EXECUTION_SCHEDULER_TOKEN_REQUIRED",
         httpStatus: 500,
-        message: "HOSTED_EXECUTION_SCHEDULER_TOKENS must be configured for scheduled hosted execution drains.",
+        message:
+          "HOSTED_EXECUTION_SCHEDULER_TOKENS or CRON_SECRET must be configured for scheduled hosted execution drains.",
       });
     });
 
@@ -150,7 +151,8 @@ describe("hosted execution async routes", () => {
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "HOSTED_EXECUTION_SCHEDULER_TOKEN_REQUIRED",
-        message: "HOSTED_EXECUTION_SCHEDULER_TOKENS must be configured for scheduled hosted execution drains.",
+        message:
+          "HOSTED_EXECUTION_SCHEDULER_TOKENS or CRON_SECRET must be configured for scheduled hosted execution drains.",
         retryable: false,
       },
     });
