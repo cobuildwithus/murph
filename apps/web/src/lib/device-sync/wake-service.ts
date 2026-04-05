@@ -359,8 +359,18 @@ async function publishHostedDeviceSyncWake(input: {
     snapshot,
   );
 
+  const dispatch = input.dispatch.event.kind === "device-sync.wake"
+    ? {
+        ...input.dispatch,
+        event: {
+          ...input.dispatch.event,
+          runtimeSnapshot: snapshot,
+        },
+      }
+    : input.dispatch;
+
   await enqueueHostedExecutionOutbox({
-    dispatch: input.dispatch,
+    dispatch,
     sourceId: String(input.signalId),
     sourceType: "device_sync_signal",
     storage: "reference",

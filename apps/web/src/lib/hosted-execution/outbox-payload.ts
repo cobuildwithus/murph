@@ -1,19 +1,23 @@
 import { Prisma } from "@prisma/client";
 import type {
   HostedExecutionDispatchRequest,
-  HostedExecutionOutboxPayload as SharedHostedExecutionOutboxPayload,
+  HostedExecutionDispatchPayloadRef as SharedHostedExecutionDispatchPayloadRef,
   HostedExecutionDispatchRef as SharedHostedExecutionDispatchRef,
+  HostedExecutionOutboxPayload as SharedHostedExecutionOutboxPayload,
   HostedExecutionOutboxPayloadStorage,
 } from "@murphai/hosted-execution";
 import {
-  buildHostedExecutionOutboxPayload as buildSharedHostedExecutionOutboxPayload,
   buildHostedExecutionDispatchRef as buildSharedHostedExecutionDispatchRef,
-  readHostedExecutionOutboxPayload as readSharedHostedExecutionOutboxPayload,
+  buildHostedExecutionOutboxPayload as buildSharedHostedExecutionOutboxPayload,
+  readHostedExecutionDispatchPayloadRef as readSharedHostedExecutionDispatchPayloadRef,
   readHostedExecutionDispatchRef as readSharedHostedExecutionDispatchRef,
+  readHostedExecutionOutboxPayload as readSharedHostedExecutionOutboxPayload,
 } from "@murphai/hosted-execution";
 
 export { HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION } from "@murphai/hosted-execution";
 
+export type HostedExecutionDispatchPayloadRef =
+  Prisma.InputJsonObject & SharedHostedExecutionDispatchPayloadRef;
 export type HostedExecutionDispatchRef = Prisma.InputJsonObject & SharedHostedExecutionDispatchRef;
 export type HostedExecutionOutboxPayload = SharedHostedExecutionOutboxPayload;
 
@@ -26,10 +30,21 @@ export function buildHostedExecutionDispatchRef(
 export function serializeHostedExecutionOutboxPayload(
   dispatch: HostedExecutionDispatchRequest,
   options: {
+    payloadRef?: HostedExecutionDispatchPayloadRef | null;
     storage?: HostedExecutionOutboxPayloadStorage | "auto";
   } = {},
 ): Prisma.InputJsonObject {
   return buildSharedHostedExecutionOutboxPayload(dispatch, options) as unknown as Prisma.InputJsonObject;
+}
+
+export function readHostedExecutionDispatchPayloadRef(
+  payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
+): HostedExecutionDispatchPayloadRef | null {
+  const payloadRef = readSharedHostedExecutionDispatchPayloadRef(payloadJson);
+
+  return payloadRef
+    ? payloadRef as HostedExecutionDispatchPayloadRef
+    : null;
 }
 
 export function readHostedExecutionDispatchRef(

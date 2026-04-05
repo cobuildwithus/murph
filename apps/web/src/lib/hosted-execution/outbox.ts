@@ -8,16 +8,25 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 import {
+  type HostedExecutionOutboxPayload,
   type HostedExecutionDispatchRequest,
   type HostedExecutionDispatchResult,
   type HostedExecutionOutboxPayloadStorage,
+  resolveHostedExecutionOutboxPayloadStorage,
   resolveHostedExecutionDispatchLifecycle,
 } from "@murphai/hosted-execution";
 
 import { finalizeHostedShareAcceptance } from "../hosted-share/shared";
 import { getPrisma } from "../prisma";
-import { deleteHostedSharePackFromHostedExecution } from "./control";
-import { dispatchHostedExecutionStatus } from "./dispatch";
+import {
+  deleteHostedSharePackFromHostedExecution,
+  deleteHostedStoredDispatchPayloadBestEffort,
+  maybeStageHostedExecutionDispatchPayload,
+} from "./control";
+import {
+  dispatchHostedExecutionStatus,
+  dispatchStoredHostedExecutionStatus,
+} from "./dispatch";
 import {
   hydrateHostedExecutionDispatch,
   isPermanentHostedExecutionHydrationError,
@@ -48,38 +57,43 @@ export async function enqueueHostedExecutionOutbox(
   input: EnqueueHostedExecutionOutboxInput,
 ): Promise<ExecutionOutbox> {
   const now = new Date(input.now ?? new Date().toISOString());
-  const payloadJson = serializeHostedExecutionOutboxPayload(input.dispatch, {
+  const payloadJson = await prepareHostedExecutionOutboxPayloadJson(input.dispatch, {
     storage: input.storage ?? "auto",
   });
+  let record: ExecutionOutbox | null = null;
 
-  const record = await input.tx.executionOutbox.upsert({
-    where: {
-      eventId: input.dispatch.eventId,
-    },
-    update: {},
-    create: {
-      id: generateExecutionOutboxId(),
-      userId: input.dispatch.event.userId,
-      sourceType: input.sourceType,
-      sourceId: input.sourceId ?? null,
+  try {
+    record = await input.tx.executionOutbox.upsert({
+      where: {
+        eventId: input.dispatch.eventId,
+      },
+      update: {},
+      create: {
+        id: generateExecutionOutboxId(),
+        userId: input.dispatch.event.userId,
+        sourceType: input.sourceType,
+        sourceId: input.sourceId ?? null,
+        eventId: input.dispatch.eventId,
+        eventKind: input.dispatch.event.kind,
+        payloadJson,
+        status: ExecutionOutboxStatus.pending,
+        nextAttemptAt: now,
+      },
+    });
+
+    assertHostedExecutionOutboxRecordMatches(record, {
       eventId: input.dispatch.eventId,
       eventKind: input.dispatch.event.kind,
       payloadJson,
-      status: ExecutionOutboxStatus.pending,
-      nextAttemptAt: now,
-    },
-  });
+      sourceId: input.sourceId ?? null,
+      sourceType: input.sourceType,
+      userId: input.dispatch.event.userId,
+    });
 
-  assertHostedExecutionOutboxRecordMatches(record, {
-    eventId: input.dispatch.eventId,
-    eventKind: input.dispatch.event.kind,
-    payloadJson,
-    sourceId: input.sourceId ?? null,
-    sourceType: input.sourceType,
-    userId: input.dispatch.event.userId,
-  });
-
-  return record;
+    return record;
+  } finally {
+    await cleanupHostedExecutionUnpersistedStagedPayloadIfNeeded(record?.payloadJson ?? null, payloadJson);
+  }
 }
 
 export async function drainHostedExecutionOutbox(input: {
@@ -244,16 +258,27 @@ async function processHostedExecutionOutboxRecord(
   record: ExecutionOutbox & { claimToken: string },
   nowIso: string,
 ): Promise<ExecutionOutbox> {
-  let dispatch: HostedExecutionDispatchRequest | null = null;
+  let payload = readHostedExecutionOutboxPayload(record.payloadJson);
+  let persistedPayloadJson = record.payloadJson as Prisma.InputJsonValue;
+  let cleanupPayload: HostedExecutionOutboxPayload | null = payload;
 
   try {
-    dispatch = await readHostedExecutionDispatch(record, prisma);
-    const dispatchResult = await dispatchHostedExecutionStatus(dispatch);
+    if (!payload) {
+      throw createHostedExecutionOutboxPayloadError(record.eventId);
+    }
+
+    const preparedDispatch = await prepareHostedExecutionDispatchAttempt(record, prisma, payload);
+    payload = preparedDispatch.payload;
+    cleanupPayload = preparedDispatch.payload;
+    persistedPayloadJson = preparedDispatch.payloadJson;
+
+    const dispatchResult = preparedDispatch.dispatchMode === "stored"
+      ? await dispatchStoredHostedExecutionStatus(preparedDispatch.payload)
+      : await dispatchHostedExecutionStatus(preparedDispatch.dispatch);
     const lifecycle = resolveHostedExecutionLifecycle({
       dispatchResult,
     });
     await finalizeHostedExecutionSourceIfNeeded({
-      dispatch,
       lifecycle,
       prisma,
       record,
@@ -276,19 +301,19 @@ async function processHostedExecutionOutboxRecord(
                   ? STATUS_REFRESH_DELAY_MS
                   : computeRetryDelayMs(record.attemptCount)),
             ),
-      payloadJson: serializeHostedExecutionOutboxPayload(dispatch),
+      payloadJson: persistedPayloadJson,
       status: lifecycle.status,
     });
     await cleanupHostedExecutionSourceIfNeeded({
-      dispatch,
       lifecycle,
       record: updatedRecord,
     });
+    await cleanupHostedExecutionOutboxPayloadIfTerminal(updatedRecord, cleanupPayload);
 
     return updatedRecord;
   } catch (error) {
     const permanentHydrationFailure = isPermanentHostedExecutionHydrationError(error);
-    return finalizeHostedExecutionOutboxAttempt(prisma, record, {
+    const nextRecord = await finalizeHostedExecutionOutboxAttempt(prisma, record, {
       acceptedAt: record.acceptedAt,
       completedAt: null,
       failedAt: permanentHydrationFailure ? new Date(nowIso) : null,
@@ -297,14 +322,108 @@ async function processHostedExecutionOutboxRecord(
       nextAttemptAt: permanentHydrationFailure
         ? null
         : new Date(Date.parse(nowIso) + computeRetryDelayMs(record.attemptCount)),
-      payloadJson: dispatch
-        ? serializeHostedExecutionOutboxPayload(dispatch)
-        : (record.payloadJson as Prisma.InputJsonValue),
+      payloadJson: persistedPayloadJson,
       status: permanentHydrationFailure
         ? ExecutionOutboxStatus.failed
         : (record.acceptedAt ? ExecutionOutboxStatus.accepted : ExecutionOutboxStatus.pending),
     });
+    await cleanupHostedExecutionOutboxPayloadIfTerminal(nextRecord, cleanupPayload);
+    return nextRecord;
   }
+}
+
+async function prepareHostedExecutionDispatchAttempt(
+  record: ExecutionOutbox,
+  prisma: PrismaClient,
+  payload: HostedExecutionOutboxPayload,
+): Promise<
+  | {
+      dispatch: HostedExecutionDispatchRequest;
+      dispatchMode: "direct";
+      payload: HostedExecutionOutboxPayload;
+      payloadJson: Prisma.InputJsonValue;
+    }
+  | {
+      dispatchMode: "stored";
+      payload: HostedExecutionOutboxPayload;
+      payloadJson: Prisma.InputJsonValue;
+    }
+> {
+  if (payload.storage === "inline") {
+    return {
+      dispatch: payload.dispatch,
+      dispatchMode: "direct",
+      payload,
+      payloadJson: record.payloadJson as Prisma.InputJsonValue,
+    };
+  }
+
+  if (payload.payloadRef) {
+    return {
+      dispatchMode: "stored",
+      payload,
+      payloadJson: record.payloadJson as Prisma.InputJsonValue,
+    };
+  }
+
+  const hydratedDispatch = await hydrateHostedExecutionDispatch(record, prisma);
+  const stagedPayload = await maybeStageHostedExecutionDispatchPayload(hydratedDispatch);
+
+  if (stagedPayload && stagedPayload.storage === "reference" && stagedPayload.payloadRef) {
+    return {
+      dispatchMode: "stored",
+      payload: stagedPayload,
+      payloadJson: stagedPayload as unknown as Prisma.InputJsonObject,
+    };
+  }
+
+  return {
+    dispatch: hydratedDispatch,
+    dispatchMode: "direct",
+    payload,
+    payloadJson: record.payloadJson as Prisma.InputJsonValue,
+  };
+}
+
+async function cleanupHostedExecutionOutboxPayloadIfTerminal(
+  record: ExecutionOutbox,
+  payload: HostedExecutionOutboxPayload | null,
+): Promise<void> {
+  if (!payload || !isHostedExecutionTerminalStatus(record.status)) {
+    return;
+  }
+
+  if (payload.storage !== "reference" || !payload.payloadRef) {
+    return;
+  }
+
+  await deleteHostedStoredDispatchPayloadBestEffort(payload);
+}
+
+async function cleanupHostedExecutionUnpersistedStagedPayloadIfNeeded(
+  persistedPayloadJson: Prisma.JsonValue | null,
+  requestedPayloadJson: Prisma.InputJsonValue,
+): Promise<void> {
+  const requestedPayload = readHostedExecutionOutboxPayload(requestedPayloadJson);
+
+  if (
+    !requestedPayload
+    || requestedPayload.storage !== "reference"
+    || !requestedPayload.payloadRef
+  ) {
+    return;
+  }
+
+  const persistedPayload = readHostedExecutionOutboxPayload(persistedPayloadJson);
+
+  if (
+    persistedPayload?.storage === "reference"
+    && persistedPayload.payloadRef?.key === requestedPayload.payloadRef.key
+  ) {
+    return;
+  }
+
+  await deleteHostedStoredDispatchPayloadBestEffort(requestedPayload);
 }
 
 async function finalizeHostedExecutionOutboxAttempt(
@@ -367,11 +486,25 @@ async function finalizeHostedExecutionOutboxAttempt(
   return latest;
 }
 
-function readHostedExecutionDispatch(
-  record: ExecutionOutbox,
-  prisma: PrismaClient,
-): Promise<HostedExecutionDispatchRequest> {
-  return hydrateHostedExecutionDispatch(record, prisma);
+async function prepareHostedExecutionOutboxPayloadJson(
+  dispatch: HostedExecutionDispatchRequest,
+  options: {
+    storage: HostedExecutionOutboxPayloadStorage | "auto";
+  },
+): Promise<Prisma.InputJsonObject> {
+  const storage = resolveHostedExecutionOutboxPayloadStorage(dispatch, options.storage);
+
+  if (storage === "inline") {
+    return serializeHostedExecutionOutboxPayload(dispatch, { storage });
+  }
+
+  const stagedPayload = await maybeStageHostedExecutionDispatchPayload(dispatch);
+
+  if (stagedPayload) {
+    return stagedPayload as unknown as Prisma.InputJsonObject;
+  }
+
+  return serializeHostedExecutionOutboxPayload(dispatch, { storage });
 }
 
 function assertHostedExecutionOutboxRecordMatches(
@@ -394,7 +527,7 @@ function assertHostedExecutionOutboxRecordMatches(
     || record.sourceId !== expected.sourceId
     || record.sourceType !== expected.sourceType
     || record.userId !== expected.userId
-    || !isDeepStrictEqual(
+    || !areHostedExecutionOutboxPayloadsEquivalent(
       readHostedExecutionOutboxPayload(record.payloadJson),
       readHostedExecutionOutboxPayload(expected.payloadJson),
     )
@@ -403,6 +536,40 @@ function assertHostedExecutionOutboxRecordMatches(
       `Hosted execution outbox event ${expected.eventId} already exists with conflicting metadata.`,
     );
   }
+}
+
+function areHostedExecutionOutboxPayloadsEquivalent(
+  left: HostedExecutionOutboxPayload | null,
+  right: HostedExecutionOutboxPayload | null,
+): boolean {
+  if (!left || !right || left.storage !== right.storage) {
+    return false;
+  }
+
+  if (left.storage === "inline" && right.storage === "inline") {
+    return isDeepStrictEqual(left.dispatch, right.dispatch);
+  }
+
+  if (left.storage === "reference" && right.storage === "reference") {
+    if (!isDeepStrictEqual(left.dispatchRef, right.dispatchRef)) {
+      return false;
+    }
+
+    return areHostedExecutionDispatchPayloadRefsEquivalent(left.payloadRef ?? null, right.payloadRef ?? null);
+  }
+
+  return false;
+}
+
+function areHostedExecutionDispatchPayloadRefsEquivalent(
+  left: { key: string } | null,
+  right: { key: string } | null,
+): boolean {
+  if (!left || !right) {
+    return true;
+  }
+
+  return left.key === right.key;
 }
 
 function resolveHostedExecutionLifecycle(input: {
@@ -420,7 +587,6 @@ function resolveHostedExecutionLifecycle(input: {
 }
 
 async function finalizeHostedExecutionSourceIfNeeded(input: {
-  dispatch: HostedExecutionDispatchRequest;
   lifecycle: {
     lastError: string | null;
     status: ExecutionOutboxStatus;
@@ -431,7 +597,7 @@ async function finalizeHostedExecutionSourceIfNeeded(input: {
   if (
     input.record.sourceType !== "hosted_share_link"
     || input.lifecycle.status !== ExecutionOutboxStatus.completed
-    || input.dispatch.event.kind !== "vault.share.accepted"
+    || !input.record.sourceId
   ) {
     return;
   }
@@ -440,12 +606,11 @@ async function finalizeHostedExecutionSourceIfNeeded(input: {
     eventId: input.record.eventId,
     memberId: input.record.userId,
     prisma: input.prisma,
-    shareId: input.dispatch.event.share.shareId,
+    shareId: input.record.sourceId,
   });
 }
 
 async function cleanupHostedExecutionSourceIfNeeded(input: {
-  dispatch: HostedExecutionDispatchRequest;
   lifecycle: {
     lastError: string | null;
     status: ExecutionOutboxStatus;
@@ -455,16 +620,16 @@ async function cleanupHostedExecutionSourceIfNeeded(input: {
   if (
     input.record.sourceType !== "hosted_share_link"
     || input.lifecycle.status !== ExecutionOutboxStatus.completed
-    || input.dispatch.event.kind !== "vault.share.accepted"
+    || !input.record.sourceId
   ) {
     return;
   }
 
   try {
-    await deleteHostedSharePackFromHostedExecution(input.dispatch.event.share.shareId);
+    await deleteHostedSharePackFromHostedExecution(input.record.sourceId);
   } catch (error) {
     console.error(
-      `Hosted share ${input.dispatch.event.share.shareId} completed but its Cloudflare pack could not be deleted.`,
+      `Hosted share ${input.record.sourceId} completed but its Cloudflare pack could not be deleted.`,
       error instanceof Error ? error.message : String(error),
     );
   }
@@ -489,6 +654,28 @@ function mapHostedExecutionLifecycleStatus(
     default:
       return status satisfies never;
   }
+}
+
+function isHostedExecutionTerminalStatus(status: ExecutionOutboxStatus): boolean {
+  return status === ExecutionOutboxStatus.completed || status === ExecutionOutboxStatus.failed;
+}
+
+function createHostedExecutionOutboxPayloadError(eventId: string): Error & {
+  code: string;
+  permanent: true;
+  retryable: false;
+} {
+  const error = new Error(
+    `Hosted execution outbox record ${eventId} is missing a dispatch payload.`,
+  ) as Error & {
+    code: string;
+    permanent: true;
+    retryable: false;
+  };
+  error.code = "HOSTED_EXECUTION_HYDRATION_PAYLOAD_MISSING";
+  error.permanent = true;
+  error.retryable = false;
+  return error;
 }
 
 function generateExecutionOutboxId(): string {

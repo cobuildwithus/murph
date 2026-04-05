@@ -445,6 +445,11 @@ describe("dispatchHostedDeviceSyncWake", () => {
             kind: "device-sync.wake",
             provider: "oura",
             reason: "connected",
+            runtimeSnapshot: {
+              connections: [],
+              generatedAt: "2026-03-26T12:00:00.000Z",
+              userId: "user-123",
+            },
             userId: "user-123",
           }),
           eventId: "device-sync:connection-established:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",

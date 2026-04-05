@@ -37,6 +37,10 @@ import {
   type HostedExecutionBundlePayloads,
   type HostedExecutionBundleRefs,
 } from "./bundles.ts";
+import {
+  readHostedExecutionOutboxPayload,
+  type HostedExecutionOutboxPayload,
+} from "./outbox-payload.ts";
 import type {
   HostedExecutionRunContext,
   HostedExecutionRunStatus,
@@ -59,6 +63,16 @@ export function parseHostedExecutionDispatchRequest(value: unknown): HostedExecu
     eventId: requireString(record.eventId, "Hosted execution dispatch request eventId"),
     occurredAt: requireString(record.occurredAt, "Hosted execution dispatch request occurredAt"),
   };
+}
+
+export function parseHostedExecutionOutboxPayload(value: unknown): HostedExecutionOutboxPayload {
+  const payload = readHostedExecutionOutboxPayload(value);
+
+  if (!payload) {
+    throw new TypeError("Hosted execution outbox payload is invalid.");
+  }
+
+  return payload;
 }
 
 export function parseHostedExecutionRunnerRequest(value: unknown): HostedExecutionRunnerRequest {

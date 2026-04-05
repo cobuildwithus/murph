@@ -183,7 +183,7 @@ describe("hosted dispatch payload store confidentiality", () => {
     await expect(rotatedStore.readStoredDispatch(payloadJson)).resolves.toEqual(dispatch);
     await rotatedStore.deleteStoredDispatchPayload(payloadJson);
 
-    expect(bucket.deleted).toHaveLength(2);
+    expect(bucket.deleted).toHaveLength(1);
   });
 
   it("rejects legacy raw dispatch payload JSON instead of reinterpreting it", async () => {

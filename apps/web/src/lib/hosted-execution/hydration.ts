@@ -13,6 +13,8 @@ import { findHostedShareLinkById, readHostedSharePack } from "../hosted-share/sh
 
 type HostedExecutionHydrationClient = PrismaClient;
 
+// Legacy migration fallback only. New outbox rows should publish a staged Cloudflare-owned
+// dispatch payload ref at enqueue time so web does not need to reconstruct runtime bodies.
 export interface HostedExecutionHydrationError extends Error {
   code: string;
   permanent: true;

@@ -5,13 +5,19 @@ import {
 } from "@murphai/hosted-execution";
 
 export function buildHostedMemberActivationDispatch(input: {
+  linqChatId?: string | null;
   memberId: string;
+  normalizedPhoneNumber?: string | null;
   occurredAt: string;
   sourceEventId: string;
   sourceType: string;
 }): HostedExecutionDispatchRequest {
   return buildHostedExecutionMemberActivatedDispatch({
     eventId: buildHostedMemberActivationEventId(input),
+    firstContact: buildHostedMemberActivationFirstContact({
+      linqChatId: input.linqChatId ?? null,
+      phoneLookupKey: input.normalizedPhoneNumber ?? null,
+    }),
     memberId: input.memberId,
     occurredAt: input.occurredAt,
   });

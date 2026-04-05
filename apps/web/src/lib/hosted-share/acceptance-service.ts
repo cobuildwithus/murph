@@ -11,6 +11,7 @@ import {
   requireHostedShareLink,
   hashHostedShareCode,
   normalizeOptionalString,
+  readHostedSharePack,
 } from "./shared";
 import type { AcceptHostedShareResult } from "./types";
 
@@ -87,6 +88,7 @@ export async function acceptHostedShareLink(input: {
       });
     }
 
+    const sharePack = await readHostedSharePack(latest);
     const acceptedAt = latest.acceptedAt ?? now;
     const eventId = latest.lastEventId ?? buildHostedShareAcceptanceEventId({
       acceptedAt,
@@ -113,6 +115,7 @@ export async function acceptHostedShareLink(input: {
         acceptedAt: acceptedAt.toISOString(),
         eventId,
         memberId,
+        pack: sharePack.pack,
         shareId: record.id,
       }),
       sourceId: record.id,
