@@ -21,14 +21,6 @@ export function buildHostedExecutionUserEnvPath(userId: string): string {
   return `/internal/users/${encodeURIComponent(userId)}/env`;
 }
 
-export function buildHostedExecutionUserKeyEnvelopePath(userId: string): string {
-  return `/internal/users/${encodeURIComponent(userId)}/keys/envelope`;
-}
-
-export function buildHostedExecutionUserKeyRecipientPath(userId: string, kind: string): string {
-  return `/internal/users/${encodeURIComponent(userId)}/keys/recipients/${encodeURIComponent(kind)}`;
-}
-
 export function buildHostedExecutionUserDeviceSyncRuntimeSnapshotPath(userId: string): string {
   return `/internal/users/${encodeURIComponent(userId)}/device-sync/runtime/snapshot`;
 }

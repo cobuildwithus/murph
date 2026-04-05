@@ -73,10 +73,6 @@ export function generateHostedRevnetIssuanceId(): string {
   return `hbrv_${randomBytes(12).toString("base64url")}`;
 }
 
-export function generateHostedBootstrapSecret(): string {
-  return randomBytes(32).toString("base64url");
-}
-
 export function inviteExpiresAt(now: Date, ttlHours: number): Date {
   return new Date(now.getTime() + ttlHours * 60 * 60 * 1000);
 }

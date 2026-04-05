@@ -44,6 +44,13 @@ export async function hydrateHostedExecutionDispatch(
     );
   }
 
+  if (record.eventKind === "gateway.message.send") {
+    throw createHostedExecutionHydrationError(
+      "HOSTED_EXECUTION_HYDRATION_SOURCE_UNSUPPORTED",
+      `Hosted execution outbox record ${record.eventId} cannot rehydrate gateway.message.send from apps/web storage.`,
+    );
+  }
+
   switch (record.sourceType) {
     case "device_sync_signal":
       return hydrateHostedExecutionDispatchFromDeviceSyncSignal(record, prisma);

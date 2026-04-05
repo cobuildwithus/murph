@@ -16,10 +16,7 @@ import type {
   HostedDispatchPayloadStore,
 } from "../dispatch-payload-store.js";
 import type { HostedExecutionCommittedResult } from "../execution-journal.js";
-import {
-  ensureRunnerQueueSchema,
-  runnerPendingEventsNeedsPayloadMigration,
-} from "./runner-queue-schema.js";
+import { ensureRunnerQueueSchema } from "./runner-queue-schema.js";
 import {
   appendBoundedRunnerTimelineEntry,
   assignRunnerBundleRefs,
@@ -54,16 +51,6 @@ interface PendingEventRow {
   event_id: string;
   last_error_code: string | null;
   payload_key: string;
-}
-
-interface LegacyPendingEventRow {
-  [key: string]: DurableObjectSqlValue;
-  attempts: number;
-  available_at: string;
-  dispatch_json: string;
-  enqueued_at: string;
-  event_id: string;
-  last_error: string | null;
 }
 
 interface PendingDispatchRowMeta extends PendingDispatchMetaRecord {
@@ -108,13 +95,10 @@ export class RunnerQueueStore {
   constructor(
     private readonly state: DurableObjectStateLike,
     private readonly dispatchPayloadStore: HostedDispatchPayloadStore,
-    private readonly legacyStoredDispatchReader?: (
-      payloadJson: string,
-    ) => Promise<HostedExecutionDispatchRequest>,
   ) {
     ensureRunnerQueueSchema(this.sql);
     this.ensureCanonicalBundleSlotRowsSync();
-    this.ready = this.migrateLegacyPendingEventsIfNeeded();
+    this.ready = Promise.resolve();
   }
 
   async bootstrapUser(userId: string): Promise<string> {
@@ -229,22 +213,27 @@ export class RunnerQueueStore {
     }
 
     const payloadKey = await this.writePendingDispatchPayload(dispatch);
-    this.sql.exec(
-      `INSERT INTO pending_events (
-        event_id,
-        payload_key,
-        attempts,
-        available_at,
-        enqueued_at,
-        last_error_code
-      ) VALUES (?, ?, ?, ?, ?, ?)`,
-      dispatch.eventId,
-      payloadKey,
-      0,
-      nowIso,
-      nowIso,
-      null,
-    );
+    try {
+      this.sql.exec(
+        `INSERT INTO pending_events (
+          event_id,
+          payload_key,
+          attempts,
+          available_at,
+          enqueued_at,
+          last_error_code
+        ) VALUES (?, ?, ?, ?, ?, ?)`,
+        dispatch.eventId,
+        payloadKey,
+        0,
+        nowIso,
+        nowIso,
+        null,
+      );
+    } catch (error) {
+      await this.deletePendingDispatchPayloadBestEffort(payloadKey);
+      throw error;
+    }
 
     meta.activated = meta.activated === 1 || dispatch.event.kind === "member.activated" ? 1 : 0;
     this.deleteBackpressuredEventSync(dispatch.eventId);
@@ -626,115 +615,6 @@ export class RunnerQueueStore {
       nowIso,
     );
     this.prunePoisonedEventsSync();
-  }
-
-  private async migrateLegacyPendingEventsIfNeeded(): Promise<void> {
-    if (!runnerPendingEventsNeedsPayloadMigration(this.sql)) {
-      return;
-    }
-
-    const legacyRows = this.sql.exec<LegacyPendingEventRow>(
-      `SELECT
-        event_id,
-        dispatch_json,
-        attempts,
-        available_at,
-        enqueued_at,
-        last_error
-      FROM pending_events
-      ORDER BY available_at ASC, enqueued_at ASC, event_id ASC`,
-    ).toArray();
-    const migratedRows: Array<{
-      attempts: number;
-      availableAt: string;
-      enqueuedAt: string;
-      eventId: string;
-      lastErrorCode: string | null;
-      payloadKey: string;
-    }> = [];
-    const poisonedRows: Array<{
-      errorCode: string;
-      eventId: string;
-      message: string;
-      poisonedAt: string;
-    }> = [];
-
-    for (const row of legacyRows) {
-      try {
-        const dispatch = this.legacyStoredDispatchReader
-          ? await this.legacyStoredDispatchReader(row.dispatch_json)
-          : await this.dispatchPayloadStore.readStoredDispatch(row.dispatch_json);
-        const payloadKey = await this.writePendingDispatchPayload(dispatch);
-        migratedRows.push({
-          attempts: row.attempts,
-          availableAt: row.available_at,
-          enqueuedAt: row.enqueued_at,
-          eventId: row.event_id,
-          lastErrorCode: row.last_error ? deriveHostedExecutionErrorCode(row.last_error) : null,
-          payloadKey,
-        });
-      } catch (error) {
-        const malformedError = classifyMalformedPendingDispatchError(error);
-        poisonedRows.push({
-          errorCode: malformedError.errorCode,
-          eventId: row.event_id,
-          message: malformedError.message,
-          poisonedAt: new Date().toISOString(),
-        });
-      }
-    }
-
-    this.sql.exec("DROP TABLE IF EXISTS pending_events_migrated");
-    this.sql.exec(`
-      CREATE TABLE pending_events_migrated (
-        event_id TEXT PRIMARY KEY,
-        payload_key TEXT NOT NULL,
-        attempts INTEGER NOT NULL,
-        available_at TEXT NOT NULL,
-        enqueued_at TEXT NOT NULL,
-        last_error_code TEXT
-      )
-    `);
-
-    for (const row of migratedRows) {
-      this.sql.exec(
-        `INSERT INTO pending_events_migrated (
-          event_id,
-          payload_key,
-          attempts,
-          available_at,
-          enqueued_at,
-          last_error_code
-        ) VALUES (?, ?, ?, ?, ?, ?)`,
-        row.eventId,
-        row.payloadKey,
-        row.attempts,
-        row.availableAt,
-        row.enqueuedAt,
-        row.lastErrorCode,
-      );
-    }
-
-    this.sql.exec("DROP TABLE pending_events");
-    this.sql.exec("ALTER TABLE pending_events_migrated RENAME TO pending_events");
-    this.sql.exec(`
-      CREATE INDEX IF NOT EXISTS pending_events_available_at_idx
-      ON pending_events (available_at, enqueued_at, event_id)
-    `);
-
-    for (const poisoned of poisonedRows) {
-      this.writeConsumedEventSync(poisoned.eventId, poisoned.poisonedAt, nextConsumedEventExactExpiryIso());
-      this.writePoisonedEventSync(poisoned.eventId, poisoned.errorCode, poisoned.poisonedAt);
-
-      const meta = this.selectMetaRowSync();
-      if (!meta) {
-        continue;
-      }
-
-      meta.last_error_at = poisoned.poisonedAt;
-      meta.last_error_code = poisoned.errorCode;
-      this.writeMetaRowSync(meta);
-    }
   }
 
   private readStateSync(): RunnerStateRecord {

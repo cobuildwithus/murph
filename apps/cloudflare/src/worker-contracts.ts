@@ -1,9 +1,4 @@
 import type {
-  HostedUserManagedRootKeyRecipientKind,
-  HostedUserRecipientPublicKeyJwk,
-  HostedUserRootKeyEnvelope,
-} from "@murphai/runtime-state";
-import type {
   GatewayFetchAttachmentsInput,
   GatewayGetConversationInput,
   GatewayListConversationsInput,
@@ -46,7 +41,6 @@ export interface WorkerUserRunnerStubLike {
   bootstrapUser?(userId: string): Promise<{ userId: string }>;
   commit(input: WorkerUserRunnerCommitInput): Promise<HostedExecutionCommittedResult>;
   finalizeCommit(input: WorkerUserRunnerFinalizeInput): Promise<HostedExecutionCommittedResult>;
-  getUserKeyEnvelope?(): Promise<HostedUserRootKeyEnvelope>;
   gatewayFetchAttachments?(input: GatewayFetchAttachmentsInput): Promise<GatewayAttachment[]>;
   gatewayGetConversation?(input: GatewayGetConversationInput): Promise<GatewayConversation | null>;
   gatewayListConversations?(input?: GatewayListConversationsInput): Promise<GatewayListConversationsResult>;
@@ -60,16 +54,7 @@ export interface WorkerUserRunnerStubLike {
   putPendingUsage?(input: {
     usage: readonly Record<string, unknown>[];
   }): Promise<{ recorded: number; usageIds: string[] }>;
-  putUserKeyEnvelope?(input: {
-    envelope: HostedUserRootKeyEnvelope;
-  }): Promise<HostedUserRootKeyEnvelope>;
   readPendingUsage?(input?: { limit?: number | null }): Promise<Record<string, unknown>[]>;
-  upsertUserKeyRecipient?(input: {
-    kind: HostedUserManagedRootKeyRecipientKind;
-    metadata?: Record<string, string | number | boolean | null>;
-    recipientKeyId: string;
-    recipientPublicKeyJwk: HostedUserRecipientPublicKeyJwk;
-  }): Promise<HostedUserRootKeyEnvelope>;
   deletePendingUsage?(input: { usageIds: readonly string[] }): Promise<void>;
 }
 

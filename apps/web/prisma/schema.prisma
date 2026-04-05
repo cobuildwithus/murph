@@ -239,8 +239,6 @@ model HostedMember {
   linqChatId                   String?             @map("linq_chat_id")
   telegramUserId               String?             @unique @map("telegram_user_id")
   telegramUsername             String?             @map("telegram_username")
-  encryptedBootstrapSecret     String?             @map("encrypted_bootstrap_secret")
-  encryptionKeyVersion         String?             @map("encryption_key_version")
   createdAt                    DateTime            @default(now()) @map("created_at")
   updatedAt                    DateTime            @updatedAt @map("updated_at")
   invites                      HostedInvite[]

@@ -232,6 +232,42 @@ describe("drainHostedExecutionOutbox", () => {
       eventId: dispatch.eventId,
     });
   });
+
+  it("persists gateway sends by reference without storing message text inline", async () => {
+    const dispatch = createGatewaySendDispatch();
+    const upsert = vi.fn(async ({ create }: {
+      create: ExecutionOutbox;
+    }) => structuredClone({
+      ...createOutboxRecord({
+        eventId: dispatch.eventId,
+        eventKind: dispatch.event.kind,
+        payloadJson: create.payloadJson,
+        sourceType: "gateway_send",
+        userId: dispatch.event.userId,
+      }),
+      payloadJson: create.payloadJson,
+      sourceId: create.sourceId,
+      sourceType: create.sourceType,
+    }));
+    const prisma = {
+      executionOutbox: {
+        upsert,
+      },
+    } as unknown as Pick<PrismaClient, "executionOutbox">;
+
+    const record = await enqueueHostedExecutionOutbox({
+      dispatch,
+      sourceType: "gateway_send",
+      tx: prisma as never,
+    });
+
+    expect(upsert).toHaveBeenCalledTimes(1);
+    const persistedPayload = upsert.mock.calls[0]?.[0]?.create?.payloadJson;
+    expect((persistedPayload as { storage?: unknown }).storage).toBe("reference");
+    expect(JSON.stringify(persistedPayload)).not.toContain("Please keep this private.");
+    expect(JSON.stringify(persistedPayload)).not.toContain("gwcs_secret");
+    expect(record.payloadJson).toEqual(persistedPayload);
+  });
 });
 
 function createTickDispatch(): HostedExecutionDispatchRequest {
@@ -272,6 +308,21 @@ function createShareDispatch(): HostedExecutionDispatchRequest {
       userId: "member_123",
     },
     eventId: "evt_share",
+    occurredAt: "2026-03-28T11:00:00.000Z",
+  };
+}
+
+function createGatewaySendDispatch(): HostedExecutionDispatchRequest {
+  return {
+    event: {
+      clientRequestId: "req_123",
+      kind: "gateway.message.send",
+      replyToMessageId: "5001",
+      sessionKey: "gwcs_secret",
+      text: "Please keep this private.",
+      userId: "member_123",
+    },
+    eventId: "evt_gateway_send",
     occurredAt: "2026-03-28T11:00:00.000Z",
   };
 }

@@ -23,11 +23,6 @@ import type {
   GatewayReadMessagesResult,
   GatewayRespondToPermissionInput,
 } from "@murphai/gateway-core";
-import type {
-  HostedUserManagedRootKeyRecipientKind,
-  HostedUserRecipientPublicKeyJwk,
-  HostedUserRootKeyEnvelope,
-} from "@murphai/runtime-state";
 import {
   emitHostedExecutionStructuredLog,
   resolveHostedExecutionDispatchOutcomeState,
@@ -198,7 +193,6 @@ export class HostedUserRunner {
     this.queueStore = new RunnerQueueStore(
       state,
       dispatchPayloadStore,
-      async (payloadJson) => dispatchPayloadStore.readStoredDispatch(payloadJson),
     );
     this.scheduler = new RunnerScheduler(this.queueStore, state, env.defaultAlarmDelayMs);
   }
@@ -348,10 +342,6 @@ export class HostedUserRunner {
     return { userId };
   }
 
-  async getUserKeyEnvelope(): Promise<HostedUserCryptoContext["envelope"]> {
-    return (await this.ensureRunnerStores()).crypto.envelope;
-  }
-
   async putDeviceSyncRuntimeSnapshot(input: {
     snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse;
   }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse> {
@@ -415,39 +405,6 @@ export class HostedUserRunner {
         usageIds: input.usageIds,
         userId,
       });
-    });
-  }
-
-  async putUserKeyEnvelope(input: {
-    envelope: HostedUserRootKeyEnvelope;
-  }): Promise<HostedUserCryptoContext["envelope"]> {
-    return this.withUserKeyEnvelopeLock(async () => {
-      const userId = await this.requireBoundUserId();
-      const envelope = await this.userKeyStore.putUserRootKeyEnvelope({
-        envelope: input.envelope,
-        userId,
-      });
-      this.runnerStores = null;
-      await this.ensureRunnerStoresWhileHoldingKeyLock(userId);
-      return envelope;
-    });
-  }
-
-  async upsertUserKeyRecipient(input: {
-    kind: HostedUserManagedRootKeyRecipientKind;
-    metadata?: Record<string, string | number | boolean | null>;
-    recipientKeyId: string;
-    recipientPublicKeyJwk: HostedUserRecipientPublicKeyJwk;
-  }): Promise<HostedUserCryptoContext["envelope"]> {
-    return this.withUserKeyEnvelopeLock(async () => {
-      const userId = await this.requireBoundUserId();
-      const envelope = await this.userKeyStore.upsertRecipient({
-        ...input,
-        userId,
-      });
-      this.runnerStores = null;
-      await this.ensureRunnerStoresWhileHoldingKeyLock(userId);
-      return envelope;
     });
   }
 

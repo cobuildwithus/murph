@@ -116,7 +116,7 @@ export function createHostedDispatchPayloadStore(input: {
         );
       }
 
-      return parseHostedExecutionDispatchRequest(JSON.parse(payloadJson) as unknown);
+      throw new TypeError("Hosted dispatch payload envelope is invalid.");
     },
 
     readStoredDispatchRef(payloadJson) {
@@ -131,9 +131,7 @@ export function createHostedDispatchPayloadStore(input: {
           return buildHostedExecutionDispatchRef(payload.dispatch);
         }
 
-        return buildHostedExecutionDispatchRef(
-          parseHostedExecutionDispatchRequest(JSON.parse(payloadJson) as unknown),
-        );
+        return null;
       } catch {
         return null;
       }

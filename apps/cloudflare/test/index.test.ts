@@ -1244,49 +1244,36 @@ describe("cloudflare worker routes", () => {
     expect(stub.status).not.toHaveBeenCalled();
   });
 
-  it("treats envelope GET as a read-only control route in greenfield environments", async () => {
+  it("does not expose hosted key-envelope or recipient-mutation control routes on the managed-hosted surface", async () => {
     const stub = createUserRunnerStub();
-    stub.getUserKeyEnvelope = vi.fn(async () => null);
     const env = createWorkerEnv(stub);
 
-    const response = await worker.fetch(
+    const envelopeResponse = await worker.fetch(
       await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/keys/envelope", {
         method: "GET",
       })),
       env,
     );
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toBeNull();
+    expect(envelopeResponse.status).toBe(404);
+    await expect(envelopeResponse.json()).resolves.toEqual({
+      error: "Not found",
+    });
     expect(env.__bucketStore.keys()).toEqual([]);
-  });
 
-  it("rejects automation recipient upserts through the control route", async () => {
-    const stub = createUserRunnerStub();
-    stub.upsertUserKeyRecipient = vi.fn();
-
-    const response = await worker.fetch(
+    const recipientResponse = await worker.fetch(
       await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/keys/recipients/automation", {
-        body: JSON.stringify({
-          recipientKeyBase64: Buffer.from(new Uint8Array(32)).toString("base64"),
-          recipientKeyId: "automation:v2",
-        }),
-        headers: {
-          authorization: "Bearer control-token",
-          "content-type": "application/json; charset=utf-8",
-        },
+        body: JSON.stringify({ recipientKeyId: "automation:v2" }),
+        headers: { "content-type": "application/json; charset=utf-8" },
         method: "PUT",
       })),
-      createWorkerEnv(stub, {
-        HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
-      }),
+      env,
     );
 
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({
-      error: "Invalid request.",
+    expect(recipientResponse.status).toBe(404);
+    await expect(recipientResponse.json()).resolves.toEqual({
+      error: "Not found",
     });
-    expect(stub.upsertUserKeyRecipient).not.toHaveBeenCalled();
   });
 
 

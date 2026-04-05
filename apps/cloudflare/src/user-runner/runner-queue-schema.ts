@@ -62,31 +62,63 @@ export function ensureRunnerQueueSchema(sql: DurableObjectSqlStorageLike): void 
     CREATE INDEX IF NOT EXISTS poisoned_events_poisoned_at_idx
     ON poisoned_events (poisoned_at, event_id)
   `);
-  for (const [columnName, columnDefinition] of [
-    ["last_error_at", "TEXT"],
-    ["last_error_code", "TEXT"],
-  ] as const) {
-    ensureRunnerMetaColumn(sql, columnName, columnDefinition);
-  }
-  ensurePendingEventsColumn(sql, "last_error_code", "TEXT");
-  ensureConsumedEventsColumn(sql, "recorded_at", "TEXT");
-  ensurePoisonedEventsColumn(sql, "last_error_code", "TEXT");
-  sql.exec("DROP TABLE IF EXISTS consumed_event_replay_filter");
-}
-
-export function readRunnerPendingEventsColumns(sql: DurableObjectSqlStorageLike): string[] {
-  return sql.exec<{ name: DurableObjectSqlValue }>(
-    "PRAGMA table_info(pending_events)",
-  ).toArray().map((row) => row.name).filter((name): name is string => typeof name === "string");
-}
-
-export function runnerPendingEventsNeedsPayloadMigration(sql: DurableObjectSqlStorageLike): boolean {
-  const columns = readRunnerPendingEventsColumns(sql);
-  return columns.length > 0 && !columns.includes("payload_key");
+  assertRunnerQueueTableColumns(sql, "runner_meta", {
+    requiredColumns: [
+      "singleton",
+      "user_id",
+      "activated",
+      "in_flight",
+      "last_error_at",
+      "last_error_code",
+      "last_run_at",
+      "next_wake_at",
+    ],
+  });
+  assertRunnerQueueTableColumns(sql, "runner_bundle_slots", {
+    requiredColumns: [
+      "slot",
+      "bundle_ref_json",
+      "bundle_version",
+    ],
+  });
+  assertRunnerQueueTableColumns(sql, "pending_events", {
+    forbiddenColumns: [
+      "dispatch_json",
+      "last_error",
+    ],
+    requiredColumns: [
+      "event_id",
+      "payload_key",
+      "attempts",
+      "available_at",
+      "enqueued_at",
+      "last_error_code",
+    ],
+  });
+  assertRunnerQueueTableColumns(sql, "consumed_events", {
+    requiredColumns: [
+      "event_id",
+      "recorded_at",
+      "expires_at",
+    ],
+  });
+  assertRunnerQueueTableColumns(sql, "backpressured_events", {
+    requiredColumns: [
+      "event_id",
+      "rejected_at",
+    ],
+  });
+  assertRunnerQueueTableColumns(sql, "poisoned_events", {
+    requiredColumns: [
+      "event_id",
+      "poisoned_at",
+      "last_error_code",
+    ],
+  });
 }
 
 function ensurePendingEventsTable(sql: DurableObjectSqlStorageLike): void {
-  if (readRunnerPendingEventsColumns(sql).length > 0) {
+  if (readRunnerQueueTableColumns(sql, "pending_events").length > 0) {
     return;
   }
 
@@ -102,58 +134,39 @@ function ensurePendingEventsTable(sql: DurableObjectSqlStorageLike): void {
   `);
 }
 
-function ensureRunnerMetaColumn(
+function readRunnerQueueTableColumns(
   sql: DurableObjectSqlStorageLike,
-  columnName: string,
-  columnDefinition: string,
-): void {
-  const hasColumn = sql.exec<{ name: DurableObjectSqlValue }>(
-    "PRAGMA table_info(runner_meta)",
-  ).toArray().some((row) => row.name === columnName);
-
-  if (!hasColumn) {
-    sql.exec(`ALTER TABLE runner_meta ADD COLUMN ${columnName} ${columnDefinition}`);
-  }
+  tableName: string,
+): string[] {
+  return sql.exec<{ name: DurableObjectSqlValue }>(
+    `PRAGMA table_info(${tableName})`,
+  ).toArray().map((row) => row.name).filter((name): name is string => typeof name === "string");
 }
 
-function ensurePendingEventsColumn(
+function assertRunnerQueueTableColumns(
   sql: DurableObjectSqlStorageLike,
-  columnName: string,
-  columnDefinition: string,
+  tableName: string,
+  input: {
+    forbiddenColumns?: readonly string[];
+    requiredColumns: readonly string[];
+  },
 ): void {
-  const hasColumn = sql.exec<{ name: DurableObjectSqlValue }>(
-    "PRAGMA table_info(pending_events)",
-  ).toArray().some((row) => row.name === columnName);
+  const actualColumns = readRunnerQueueTableColumns(sql, tableName);
+  const forbiddenColumns = (input.forbiddenColumns ?? [])
+    .filter((columnName) => actualColumns.includes(columnName));
+  const missingColumns = input.requiredColumns
+    .filter((columnName) => !actualColumns.includes(columnName));
 
-  if (!hasColumn) {
-    sql.exec(`ALTER TABLE pending_events ADD COLUMN ${columnName} ${columnDefinition}`);
+  if (missingColumns.length === 0 && forbiddenColumns.length === 0) {
+    return;
   }
-}
 
-function ensureConsumedEventsColumn(
-  sql: DurableObjectSqlStorageLike,
-  columnName: string,
-  columnDefinition: string,
-): void {
-  const hasColumn = sql.exec<{ name: DurableObjectSqlValue }>(
-    "PRAGMA table_info(consumed_events)",
-  ).toArray().some((row) => row.name === columnName);
+  const details = [
+    missingColumns.length > 0 ? `missing ${missingColumns.join(", ")}` : null,
+    forbiddenColumns.length > 0 ? `forbidden ${forbiddenColumns.join(", ")}` : null,
+  ].filter((value): value is string => value !== null);
 
-  if (!hasColumn) {
-    sql.exec(`ALTER TABLE consumed_events ADD COLUMN ${columnName} ${columnDefinition}`);
-  }
-}
-
-function ensurePoisonedEventsColumn(
-  sql: DurableObjectSqlStorageLike,
-  columnName: string,
-  columnDefinition: string,
-): void {
-  const hasColumn = sql.exec<{ name: DurableObjectSqlValue }>(
-    "PRAGMA table_info(poisoned_events)",
-  ).toArray().some((row) => row.name === columnName);
-
-  if (!hasColumn) {
-    sql.exec(`ALTER TABLE poisoned_events ADD COLUMN ${columnName} ${columnDefinition}`);
-  }
+  throw new Error(
+    `Hosted runner Durable Object ${tableName} schema is unsupported; ${details.join("; ")}.`,
+  );
 }

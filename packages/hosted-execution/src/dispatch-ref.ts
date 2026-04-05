@@ -2,10 +2,22 @@ import type {
   HostedExecutionDispatchRequest,
   HostedExecutionEventKind,
 } from "./contracts.ts";
-import { HOSTED_EXECUTION_EVENT_KINDS } from "./contracts.ts";
+import {
+  HOSTED_EXECUTION_EVENT_KINDS,
+  HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KINDS,
+} from "./contracts.ts";
 
 const HOSTED_EXECUTION_EVENT_KIND_SET = new Set<HostedExecutionEventKind>(HOSTED_EXECUTION_EVENT_KINDS);
+const HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KIND_SET = new Set<HostedExecutionEventKind>(
+  HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KINDS,
+);
 const HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION = "murph.execution-outbox.v2";
+const HOSTED_EXECUTION_DISPATCH_REF_KEYS = new Set([
+  "eventId",
+  "eventKind",
+  "occurredAt",
+  "userId",
+]);
 
 export interface HostedExecutionDispatchRef {
   eventId: string;
@@ -33,7 +45,11 @@ export function readHostedExecutionDispatchRef(
   const schemaVersion = readHostedExecutionText(payloadObject.schemaVersion);
   const storage = readHostedExecutionText(payloadObject.storage);
 
-  if (schemaVersion !== HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION || storage !== "reference") {
+  if (
+    schemaVersion !== HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION
+    || storage !== "reference"
+    || !hasOnlyHostedExecutionKeys(nestedRef, HOSTED_EXECUTION_DISPATCH_REF_KEYS)
+  ) {
     return null;
   }
 
@@ -55,7 +71,9 @@ export function readHostedExecutionDispatchRef(
 }
 
 function readHostedExecutionEventKind(value: unknown): HostedExecutionEventKind | null {
-  return typeof value === "string" && HOSTED_EXECUTION_EVENT_KIND_SET.has(value as HostedExecutionEventKind)
+  return typeof value === "string"
+    && HOSTED_EXECUTION_EVENT_KIND_SET.has(value as HostedExecutionEventKind)
+    && HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KIND_SET.has(value as HostedExecutionEventKind)
     ? value as HostedExecutionEventKind
     : null;
 }
@@ -70,4 +88,11 @@ function toHostedExecutionObject(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+}
+
+function hasOnlyHostedExecutionKeys(
+  value: Record<string, unknown>,
+  allowedKeys: ReadonlySet<string>,
+): boolean {
+  return Object.keys(value).every((key) => allowedKeys.has(key));
 }
