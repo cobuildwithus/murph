@@ -43,6 +43,7 @@ vi.mock("@murphai/assistant-core", async () => {
 });
 
 import {
+  buildHostedExecutionJobRuntimeForTests,
   runHostedExecutionJob as runHostedExecutionJobInternal,
   setHostedExecutionRunModeForTests,
   setHostedExecutionRunStartHookForTests,
@@ -2479,6 +2480,44 @@ describe("runHostedExecutionJob", () => {
       expect(commitFetch).toHaveBeenCalledTimes(2);
       expect(timeoutSpy).toHaveBeenCalledWith(5_000);
     } finally {
+      restoreEnvVar("HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS", previousCommitTimeout);
+    }
+  });
+
+  it("keeps worker-only runtime overrides out of forwarded child env while still applying them", () => {
+    const previousAllowedUserEnvKeys = process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS;
+    const previousCommitTimeout = process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS;
+    process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS = "OPENAI_API_KEY";
+    process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS = "15000";
+
+    try {
+      const runtime = buildHostedExecutionJobRuntimeForTests({
+        forwardedEnv: {
+          HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "CUSTOM_API_KEY",
+          HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "5000",
+          OPENAI_API_KEY: "sk-worker",
+        },
+        userEnv: {
+          CUSTOM_API_KEY: "custom-user",
+          OPENAI_API_KEY: "sk-user",
+        },
+      });
+
+      expect(runtime.commitTimeoutMs).toBe(5_000);
+      expect(runtime.forwardedEnv).toMatchObject({
+        OPENAI_API_KEY: "sk-worker",
+      });
+      expect(runtime.forwardedEnv).not.toHaveProperty(
+        "HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS",
+      );
+      expect(runtime.forwardedEnv).not.toHaveProperty(
+        "HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS",
+      );
+      expect(runtime.userEnv).toMatchObject({
+        CUSTOM_API_KEY: "custom-user",
+      });
+    } finally {
+      restoreEnvVar("HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS", previousAllowedUserEnvKeys);
       restoreEnvVar("HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS", previousCommitTimeout);
     }
   });

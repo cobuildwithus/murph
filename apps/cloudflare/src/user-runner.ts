@@ -897,6 +897,8 @@ export class HostedUserRunner {
       },
       runtime: buildHostedRunnerJobRuntimeConfig({
         forwardedEnv,
+        runtimeConfigSource: this.readRunnerRuntimeConfigSource(),
+        userEnvSource: this.readRunnerRuntimeConfigSource(),
         userEnv,
       }),
     };
@@ -1107,6 +1109,13 @@ export class HostedUserRunner {
   private readAllowedUserEnvSource(): Readonly<Record<string, string | undefined>> {
     return {
       HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: this.env.allowedUserEnvKeys ?? undefined,
+    };
+  }
+
+  private readRunnerRuntimeConfigSource(): Readonly<Record<string, string | undefined>> {
+    return {
+      ...this.readWorkerStringEnvSource(),
+      ...this.readAllowedUserEnvSource(),
     };
   }
 

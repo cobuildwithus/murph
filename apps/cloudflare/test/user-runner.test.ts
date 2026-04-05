@@ -1412,7 +1412,7 @@ describe("HostedUserRunner", () => {
     expect(bucket.keys().filter((key) => key.includes("/messages/"))).toEqual([]);
   });
 
-  it("sends forwarded env through the per-job runtime payload instead of the container start envelope", async () => {
+  it("sends forwarded env and worker-only runtime config through the per-job runtime payload instead of the container start envelope", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (_url, init) => {
@@ -1476,7 +1476,7 @@ describe("HostedUserRunner", () => {
 
     expect(invokePayload.runnerEnvironment).toBeUndefined();
     expect(invokePayload.job.runtime).toMatchObject({
-      commitTimeoutMs: 30_000,
+      commitTimeoutMs: 45_000,
       forwardedEnv: {
         OPENAI_API_KEY: "sk-worker",
       },
