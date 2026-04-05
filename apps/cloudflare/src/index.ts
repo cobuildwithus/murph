@@ -86,6 +86,7 @@ import {
   writeHostedEmailRawMessage,
   type HostedEmailWorkerRequest,
 } from "./hosted-email.ts";
+import { createHostedUserKeyStore } from "./user-key-store.ts";
 import {
   decodeHostedUserEnvPayload,
   parseHostedUserEnvUpdate,
@@ -964,13 +965,19 @@ async function handleHostedEmailIngress(
     return;
   }
 
+  const userCrypto = await resolveHostedExecutionUserCryptoContext({
+    bucket: env.BUNDLES,
+    environment,
+    userId: route.userId,
+  });
+
   if (!await authorizeHostedEmailIngress({
     env,
-    environment,
     envelopeFrom: message.from,
     hasRepeatedHeaderFrom: headerFrom.repeated,
     headerFrom: headerFrom.value ?? parsedMessage.from,
     route,
+    userCrypto,
   })) {
     if (shouldRejectHostedEmailIngressFailure({ config, to: message.to })) {
       message.setReject?.(rejectReason);
@@ -980,8 +987,8 @@ async function handleHostedEmailIngress(
 
   const rawMessageKey = await writeHostedEmailRawMessage({
     bucket: env.BUNDLES,
-    key: environment.bundleEncryptionKey,
-    keyId: environment.bundleEncryptionKeyId,
+    key: userCrypto.rootKey,
+    keyId: userCrypto.rootKeyId,
     plaintext: rawBytes,
     userId: route.userId,
   });
@@ -999,17 +1006,17 @@ async function handleHostedEmailIngress(
 
 async function authorizeHostedEmailIngress(input: {
   env: WorkerEnvironmentSource;
-  environment: ReturnType<typeof readHostedExecutionEnvironment>;
   envelopeFrom: string | null | undefined;
   hasRepeatedHeaderFrom: boolean;
   headerFrom: string | null | undefined;
   route: HostedEmailInboundRoute;
+  userCrypto: Awaited<ReturnType<typeof resolveHostedExecutionUserCryptoContext>>;
 }): Promise<boolean> {
   const userEnvPayload = await createHostedUserEnvStore({
     bucket: input.env.BUNDLES,
-    key: input.environment.bundleEncryptionKey,
-    keyId: input.environment.bundleEncryptionKeyId,
-    keysById: input.environment.bundleEncryptionKeysById,
+    key: input.userCrypto.rootKey,
+    keyId: input.userCrypto.rootKeyId,
+    keysById: input.userCrypto.keysById,
   }).readUserEnv(input.route.userId);
   const userEnv = decodeHostedUserEnvPayload(
     userEnvPayload,
@@ -1024,6 +1031,23 @@ async function authorizeHostedEmailIngress(input: {
     threadTarget: input.route.target,
     verifiedEmailAddress,
   });
+}
+
+async function resolveHostedExecutionUserCryptoContext(input: {
+  bucket: WorkerEnvironmentSource["BUNDLES"];
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  userId: string;
+}) {
+  return createHostedUserKeyStore({
+    automationRecipientKeyId: input.environment.automationRecipientKeyId,
+    automationRecipientPrivateKey: input.environment.automationRecipientPrivateKey,
+    automationRecipientPrivateKeysById: input.environment.automationRecipientPrivateKeysById,
+    automationRecipientPublicKey: input.environment.automationRecipientPublicKey,
+    bucket: input.bucket,
+    envelopeEncryptionKey: input.environment.bundleEncryptionKey,
+    envelopeEncryptionKeyId: input.environment.bundleEncryptionKeyId,
+    envelopeEncryptionKeysById: input.environment.bundleEncryptionKeysById,
+  }).ensureUserCryptoContext(input.userId);
 }
 
 async function handleSignedDispatchRoute(context: WorkerRouteContext): Promise<Response> {
