@@ -6,6 +6,7 @@ import { jsonOk, withJsonError, readJsonObject } from "@/src/lib/hosted-onboardi
 import { createHostedShareLink } from "@/src/lib/hosted-share/service";
 
 export const POST = withJsonError(async (request: Request) => {
+  const boundUserId = await requireHostedWebInternalSignedRequest(request);
   const body = await readJsonObject(request);
   const senderMemberId = typeof body.senderMemberId === "string"
     ? body.senderMemberId.trim()
@@ -18,8 +19,6 @@ export const POST = withJsonError(async (request: Request) => {
       httpStatus: 400,
     });
   }
-
-  const boundUserId = await requireHostedWebInternalSignedRequest(request);
 
   if (boundUserId !== senderMemberId) {
     throw hostedOnboardingError({

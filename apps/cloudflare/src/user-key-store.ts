@@ -196,7 +196,10 @@ async function resolveHostedUserRootKeyEnvelope(input: {
   const needsReconciliation = input.desiredManagedRecipients.some((desiredRecipient) => {
     const existingRecipient = findHostedWrappedRootKeyRecipient(existingEnvelope, desiredRecipient.kind);
     return !existingRecipient || existingRecipient.keyId !== desiredRecipient.keyId;
-  });
+  }) || existingEnvelope.recipients.some((recipient) =>
+    isManagedRecipientKind(recipient.kind)
+    && !input.desiredManagedRecipients.some((desiredRecipient) => desiredRecipient.kind === recipient.kind)
+  );
 
   if (!needsReconciliation) {
     return {
@@ -212,7 +215,7 @@ async function resolveHostedUserRootKeyEnvelope(input: {
     reason: "managed-recipient-reconciliation",
   });
   const preservedRecipients = existingEnvelope.recipients.filter((recipient) =>
-    !input.desiredManagedRecipients.some((desiredRecipient) => desiredRecipient.kind === recipient.kind)
+    !isManagedRecipientKind(recipient.kind)
   );
   const reconciledRecipients = await Promise.all(
     input.desiredManagedRecipients.map(async (desiredRecipient) => {
@@ -424,6 +427,10 @@ function buildDesiredManagedRecipients(input: {
   }
 
   return recipients;
+}
+
+function isManagedRecipientKind(kind: HostedUserRootKeyRecipientKind): boolean {
+  return kind === "automation" || kind === "recovery" || kind === "tee-automation";
 }
 
 function assertOptionalRecipientPairConfigured(input: {
