@@ -36,3 +36,11 @@ export function buildHostedExecutionUserDeviceSyncRuntimePath(userId: string): s
 export function buildHostedExecutionUserPendingUsagePath(userId: string): string {
   return `/internal/users/${encodeURIComponent(userId)}/usage/pending`;
 }
+
+export function buildHostedExecutionUserDispatchPayloadPath(userId: string): string {
+  return `/internal/users/${encodeURIComponent(userId)}/dispatch-payload`;
+}
+
+export function buildHostedExecutionUserStoredDispatchPath(userId: string): string {
+  return `/internal/users/${encodeURIComponent(userId)}/dispatch-payload/dispatch`;
+}

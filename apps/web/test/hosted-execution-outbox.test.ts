@@ -8,17 +8,23 @@ import { serializeHostedExecutionOutboxPayload } from "@/src/lib/hosted-executio
 
 const mocks = vi.hoisted(() => ({
   deleteHostedSharePackFromHostedExecution: vi.fn(),
+  deleteHostedStoredDispatchPayloadBestEffort: vi.fn(),
   dispatchHostedExecutionStatus: vi.fn(),
+  dispatchStoredHostedExecutionStatus: vi.fn(),
   finalizeHostedShareAcceptance: vi.fn(),
   hydrateHostedExecutionDispatch: vi.fn(),
+  maybeStageHostedExecutionDispatchPayload: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/control", () => ({
   deleteHostedSharePackFromHostedExecution: mocks.deleteHostedSharePackFromHostedExecution,
+  deleteHostedStoredDispatchPayloadBestEffort: mocks.deleteHostedStoredDispatchPayloadBestEffort,
+  maybeStageHostedExecutionDispatchPayload: mocks.maybeStageHostedExecutionDispatchPayload,
 }));
 
 vi.mock("@/src/lib/hosted-execution/dispatch", () => ({
   dispatchHostedExecutionStatus: mocks.dispatchHostedExecutionStatus,
+  dispatchStoredHostedExecutionStatus: mocks.dispatchStoredHostedExecutionStatus,
 }));
 
 vi.mock("@/src/lib/hosted-execution/hydration", async () => {
@@ -50,6 +56,9 @@ describe("drainHostedExecutionOutbox", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.deleteHostedSharePackFromHostedExecution.mockResolvedValue(undefined);
+    mocks.deleteHostedStoredDispatchPayloadBestEffort.mockResolvedValue(undefined);
+    mocks.dispatchStoredHostedExecutionStatus.mockImplementation(mocks.dispatchHostedExecutionStatus);
+    mocks.maybeStageHostedExecutionDispatchPayload.mockResolvedValue(null);
   });
 
   it("marks completed outcomes as completed, stores the dispatch result, and finalizes hosted share imports", async () => {
@@ -310,6 +319,88 @@ describe("drainHostedExecutionOutbox", () => {
     expect(JSON.stringify(persistedPayload)).not.toContain("gwcs_secret");
     expect(record.payloadJson).toEqual(persistedPayload);
   });
+
+  it("stages reference-backed payload refs when the Cloudflare control client is available", async () => {
+    const dispatch = createGatewaySendDispatch();
+    const stagedPayload = {
+      dispatchRef: {
+        eventId: dispatch.eventId,
+        eventKind: dispatch.event.kind,
+        occurredAt: dispatch.occurredAt,
+        userId: dispatch.event.userId,
+      },
+      payloadRef: {
+        key: "transient/dispatch-payloads/member_123/ref.json",
+      },
+      schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+      storage: "reference",
+    } as const;
+    mocks.maybeStageHostedExecutionDispatchPayload.mockResolvedValue(stagedPayload);
+
+    const upsert = vi.fn(async ({ create }: {
+      create: ExecutionOutbox;
+    }) => structuredClone({
+      ...createOutboxRecord({
+        eventId: dispatch.eventId,
+        eventKind: dispatch.event.kind,
+        payloadJson: create.payloadJson,
+        sourceType: "gateway_send",
+        userId: dispatch.event.userId,
+      }),
+      payloadJson: create.payloadJson,
+      sourceId: create.sourceId,
+      sourceType: create.sourceType,
+    }));
+    const prisma = {
+      executionOutbox: {
+        upsert,
+      },
+    } as unknown as Pick<PrismaClient, "executionOutbox">;
+
+    const record = await enqueueHostedExecutionOutbox({
+      dispatch,
+      sourceType: "gateway_send",
+      tx: prisma as never,
+    });
+
+    expect(mocks.maybeStageHostedExecutionDispatchPayload).toHaveBeenCalledWith(dispatch);
+    expect(record.payloadJson).toEqual(stagedPayload);
+  });
+
+  it("deletes a newly staged payload when the outbox upsert fails before persistence", async () => {
+    const dispatch = createGatewaySendDispatch();
+    const stagedPayload = {
+      dispatchRef: {
+        eventId: dispatch.eventId,
+        eventKind: dispatch.event.kind,
+        occurredAt: dispatch.occurredAt,
+        userId: dispatch.event.userId,
+      },
+      payloadRef: {
+        key: "transient/dispatch-payloads/member_123/ref.json",
+      },
+      schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+      storage: "reference",
+    } as const;
+    const upsertError = new Error("write failed");
+
+    mocks.maybeStageHostedExecutionDispatchPayload.mockResolvedValue(stagedPayload);
+    const prisma = {
+      executionOutbox: {
+        upsert: vi.fn(async () => {
+          throw upsertError;
+        }),
+      },
+    } as unknown as Pick<PrismaClient, "executionOutbox">;
+
+    await expect(enqueueHostedExecutionOutbox({
+      dispatch,
+      sourceType: "gateway_send",
+      tx: prisma as never,
+    })).rejects.toThrow("write failed");
+
+    expect(mocks.deleteHostedStoredDispatchPayloadBestEffort).toHaveBeenCalledWith(stagedPayload);
+  });
 });
 
 function createTickDispatch(): HostedExecutionDispatchRequest {
@@ -425,16 +516,28 @@ function createOutboxRecord(input: {
     lastError: null,
     lastStatusJson: null,
     nextAttemptAt: new Date("2026-03-28T11:00:00.000Z"),
-    payloadJson: input.payloadJson ?? {
-      storage: "reference",
-      dispatchRef: {
-        eventId: input.eventId,
-        eventKind: input.eventKind,
-        occurredAt: "2026-03-28T11:00:00.000Z",
-        userId: input.userId,
-      },
-      schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
-    },
+    payloadJson: (input.payloadJson ?? (
+      input.eventKind === "assistant.cron.tick"
+        ? serializeHostedExecutionOutboxPayload({
+            event: {
+              kind: "assistant.cron.tick",
+              reason: "manual",
+              userId: input.userId,
+            },
+            eventId: input.eventId,
+            occurredAt: "2026-03-28T11:00:00.000Z",
+          })
+        : {
+            storage: "reference",
+            dispatchRef: {
+              eventId: input.eventId,
+              eventKind: input.eventKind,
+              occurredAt: "2026-03-28T11:00:00.000Z",
+              userId: input.userId,
+            },
+            schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+          }
+    )) as ExecutionOutbox["payloadJson"],
     sourceId: input.sourceId ?? (input.sourceType === "hosted_share_link" ? "share_123" : null),
     sourceType: input.sourceType ?? "hosted_execution",
     status: ExecutionOutboxStatus.pending,

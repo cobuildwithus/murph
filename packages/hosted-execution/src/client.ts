@@ -11,11 +11,13 @@ import type {
   HostedExecutionUserStatus,
 } from "./contracts.ts";
 import { normalizeHostedExecutionBaseUrl } from "./env.ts";
+import type { HostedExecutionOutboxPayload } from "./outbox-payload.ts";
 import {
   parseHostedExecutionDeviceSyncRuntimeApplyResponse,
   parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
   parseHostedExecutionDispatchRequest,
   parseHostedExecutionDispatchResult,
+  parseHostedExecutionOutboxPayload,
   parseHostedExecutionSharePack,
   parseHostedExecutionUserEnvStatus,
   parseHostedExecutionUserEnvUpdate,
@@ -25,10 +27,12 @@ import {
   buildHostedExecutionSharePackPath,
   buildHostedExecutionUserDeviceSyncRuntimePath,
   buildHostedExecutionUserDeviceSyncRuntimeSnapshotPath,
+  buildHostedExecutionUserDispatchPayloadPath,
   buildHostedExecutionUserEnvPath,
   buildHostedExecutionUserPendingUsagePath,
   buildHostedExecutionUserRunPath,
   buildHostedExecutionUserStatusPath,
+  buildHostedExecutionUserStoredDispatchPath,
   HOSTED_EXECUTION_DISPATCH_PATH,
 } from "./routes.ts";
 
@@ -49,22 +53,25 @@ export interface HostedExecutionControlClient {
     input: Omit<HostedExecutionDeviceSyncRuntimeApplyRequest, "userId">,
   ): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse>;
   clearUserEnv(userId: string): Promise<HostedExecutionUserEnvStatus>;
+  deletePendingUsage(userId: string, usageIds: readonly string[]): Promise<void>;
   deleteSharePack(shareId: string): Promise<void>;
+  deleteStoredDispatchPayload(payload: HostedExecutionOutboxPayload): Promise<void>;
+  dispatchStoredPayload(payload: HostedExecutionOutboxPayload): Promise<HostedExecutionDispatchResult>;
   getDeviceSyncRuntimeSnapshot(
     userId: string,
     input?: Omit<HostedExecutionDeviceSyncRuntimeSnapshotRequest, "userId">,
   ): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
-  deletePendingUsage(userId: string, usageIds: readonly string[]): Promise<void>;
   getPendingUsage(userId: string, limit?: number): Promise<Record<string, unknown>[]>;
   getSharePack(shareId: string): Promise<SharePack | null>;
+  getStatus(userId: string): Promise<HostedExecutionUserStatus>;
+  getUserEnvStatus(userId: string): Promise<HostedExecutionUserEnvStatus>;
   putDeviceSyncRuntimeSnapshot(
     userId: string,
     snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   ): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
   putSharePack(shareId: string, pack: SharePack): Promise<SharePack>;
-  getStatus(userId: string): Promise<HostedExecutionUserStatus>;
-  getUserEnvStatus(userId: string): Promise<HostedExecutionUserEnvStatus>;
   run(userId: string): Promise<HostedExecutionUserStatus>;
+  storeDispatchPayload(dispatch: HostedExecutionDispatchRequest): Promise<HostedExecutionOutboxPayload>;
   updateUserEnv(userId: string, update: HostedExecutionUserEnvUpdate): Promise<HostedExecutionUserEnvStatus>;
 }
 
@@ -160,6 +167,42 @@ export function createHostedExecutionControlClient(
         path: buildHostedExecutionSharePackPath(shareId),
         request: {
           method: "DELETE",
+        },
+        timeoutMs: options.timeoutMs,
+      });
+    },
+    deleteStoredDispatchPayload(payload) {
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "delete stored dispatch payload",
+        parse: () => undefined,
+        path: buildHostedExecutionUserDispatchPayloadPath(
+          resolveHostedExecutionOutboxPayloadUserId(payload),
+        ),
+        request: {
+          body: JSON.stringify(payload),
+          headers: { "content-type": "application/json; charset=utf-8" },
+          method: "DELETE",
+        },
+        timeoutMs: options.timeoutMs,
+      });
+    },
+    dispatchStoredPayload(payload) {
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "stored dispatch",
+        parse: parseHostedExecutionDispatchResult,
+        path: buildHostedExecutionUserStoredDispatchPath(
+          resolveHostedExecutionOutboxPayloadUserId(payload),
+        ),
+        request: {
+          body: JSON.stringify(payload),
+          headers: { "content-type": "application/json; charset=utf-8" },
+          method: "POST",
         },
         timeoutMs: options.timeoutMs,
       });
@@ -333,6 +376,23 @@ export function createHostedExecutionControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
+    storeDispatchPayload(dispatch) {
+      const requestPayload = parseHostedExecutionDispatchRequest(dispatch);
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "store dispatch payload",
+        parse: parseHostedExecutionOutboxPayload,
+        path: buildHostedExecutionUserDispatchPayloadPath(dispatch.event.userId),
+        request: {
+          body: JSON.stringify(requestPayload),
+          headers: { "content-type": "application/json; charset=utf-8" },
+          method: "PUT",
+        },
+        timeoutMs: options.timeoutMs,
+      });
+    },
     updateUserEnv(userId, update) {
       const requestPayload = parseHostedExecutionUserEnvUpdate(update);
 
@@ -362,6 +422,10 @@ function requireHostedExecutionBaseUrl(value: string): string {
   }
 
   return normalized;
+}
+
+function resolveHostedExecutionOutboxPayloadUserId(payload: HostedExecutionOutboxPayload): string {
+  return payload.storage === "inline" ? payload.dispatch.event.userId : payload.dispatchRef.userId;
 }
 
 function createHostedExecutionBearerAuthorizationHeaderProvider(

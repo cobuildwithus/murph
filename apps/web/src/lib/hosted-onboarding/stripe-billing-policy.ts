@@ -64,7 +64,9 @@ export async function activateHostedMemberFromConfirmedRevnetIssuance(input: {
   }
 
   const dispatch = buildHostedMemberActivationDispatch({
+    linqChatId: input.member.linqChatId,
     memberId: input.member.id,
+    normalizedPhoneNumber: input.member.normalizedPhoneNumber,
     occurredAt: input.occurredAt,
     sourceEventId: input.sourceEventId,
     sourceType: input.sourceType,
@@ -118,7 +120,9 @@ export async function activateHostedMemberForPositiveSource(input: {
   }
 
   const dispatch = buildHostedMemberActivationDispatch({
+    linqChatId: input.member.linqChatId,
     memberId: input.member.id,
+    normalizedPhoneNumber: input.member.normalizedPhoneNumber,
     occurredAt: input.dispatchContext.occurredAt,
     sourceEventId: input.dispatchContext.sourceEventId,
     sourceType: input.sourceType,

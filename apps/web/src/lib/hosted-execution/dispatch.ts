@@ -2,6 +2,7 @@ import {
   createEmptyHostedExecutionBundleRefs,
   createHostedExecutionDispatchClient,
   HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR,
+  type HostedExecutionOutboxPayload,
   type HostedExecutionDispatchResult,
   type HostedExecutionDispatchRequest,
   type HostedExecutionDispatchEnvironment,
@@ -9,6 +10,7 @@ import {
   type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
 
+import { readHostedExecutionControlClientIfConfigured } from "./control";
 import { createHostedExecutionVercelOidcBearerTokenProvider } from "./vercel-oidc";
 
 export async function dispatchHostedExecutionStatus(
@@ -17,10 +19,28 @@ export async function dispatchHostedExecutionStatus(
   const environment = readHostedExecutionDispatchEnvironment();
 
   if (!isHostedExecutionConfigured(environment)) {
-    return buildHostedExecutionNotConfiguredStatus(input);
+    return buildHostedExecutionNotConfiguredStatus({
+      eventId: input.eventId,
+      userId: input.event.userId,
+    });
   }
 
   return postHostedExecutionDispatch(input, environment);
+}
+
+export async function dispatchStoredHostedExecutionStatus(
+  payload: HostedExecutionOutboxPayload,
+): Promise<HostedExecutionDispatchResult> {
+  const client = readHostedExecutionControlClientIfConfigured();
+
+  if (!client) {
+    return buildHostedExecutionNotConfiguredStatus({
+      eventId: payload.storage === "inline" ? payload.dispatch.eventId : payload.dispatchRef.eventId,
+      userId: payload.storage === "inline" ? payload.dispatch.event.userId : payload.dispatchRef.userId,
+    });
+  }
+
+  return client.dispatchStoredPayload(payload);
 }
 
 export async function dispatchHostedExecution(
@@ -63,9 +83,10 @@ export async function dispatchHostedExecutionBestEffort(
   }
 }
 
-function buildHostedExecutionNotConfiguredStatus(
-  input: HostedExecutionDispatchRequest,
-): HostedExecutionDispatchResult {
+function buildHostedExecutionNotConfiguredStatus(input: {
+  eventId: string;
+  userId: string;
+}): HostedExecutionDispatchResult {
   const status: HostedExecutionUserStatus = {
     bundleRefs: createEmptyHostedExecutionBundleRefs(),
     inFlight: false,
@@ -76,7 +97,7 @@ function buildHostedExecutionNotConfiguredStatus(
     pendingEventCount: 0,
     poisonedEventIds: [],
     retryingEventId: null,
-    userId: input.event.userId,
+    userId: input.userId,
   };
 
   return {
@@ -84,7 +105,7 @@ function buildHostedExecutionNotConfiguredStatus(
       eventId: input.eventId,
       lastError: status.lastError,
       state: "queued",
-      userId: input.event.userId,
+      userId: input.userId,
     },
     status,
   };

@@ -21,12 +21,14 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
   buildHostedExecutionSharePackPath,
+  buildHostedExecutionUserDispatchPayloadPath,
   buildHostedExecutionUserDeviceSyncRuntimePath,
   buildHostedExecutionUserDeviceSyncRuntimeSnapshotPath,
   buildHostedExecutionUserEnvPath,
   buildHostedExecutionUserPendingUsagePath,
   buildHostedExecutionUserRunPath,
   buildHostedExecutionUserStatusPath,
+  buildHostedExecutionUserStoredDispatchPath,
   createHostedExecutionControlClient,
   createHostedExecutionDispatchClient,
   createHostedExecutionProxyAiUsageClient,
@@ -2263,6 +2265,61 @@ describe("@murphai/hosted-execution", () => {
         method: "DELETE",
       }),
     );
+  });
+
+  it("control client stages, dispatches, and deletes stored payload refs through the user route", async () => {
+    const dispatch = buildHostedExecutionGatewayMessageSendDispatch({
+      eventId: "evt_gateway_123",
+      occurredAt: "2026-04-05T10:45:00.000Z",
+      sessionKey: "gwcs_secret",
+      text: "private outbound message",
+      userId: "member/123",
+    });
+    const storedPayload = buildHostedExecutionOutboxPayload(dispatch, {
+      payloadRef: {
+        key: "transient/dispatch-payloads/member_123/ref.json",
+      },
+      storage: "reference",
+    });
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(storedPayload), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(buildDispatchResultFixture(dispatch.eventId)), { status: 200 }),
+      )
+      .mockResolvedValueOnce(new Response("", { status: 200 }));
+    const client = createHostedExecutionControlClient({
+      baseUrl: "https://worker.example.test/",
+      fetchImpl,
+      getBearerToken: async () => "vercel-oidc-token",
+    });
+
+    await expect(client.storeDispatchPayload(dispatch)).resolves.toEqual(storedPayload);
+    await expect(client.dispatchStoredPayload(storedPayload)).resolves.toEqual(
+      buildDispatchResultFixture(dispatch.eventId),
+    );
+    await expect(client.deleteStoredDispatchPayload(storedPayload)).resolves.toBeUndefined();
+
+    expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body ?? ""))).toEqual(dispatch);
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      `https://worker.example.test${buildHostedExecutionUserDispatchPayloadPath("member/123")}`,
+      expect.objectContaining({ method: "PUT" }),
+    );
+    expect(JSON.parse(String(fetchImpl.mock.calls[1]?.[1]?.body ?? ""))).toEqual(storedPayload);
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      `https://worker.example.test${buildHostedExecutionUserStoredDispatchPath("member/123")}`,
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(JSON.parse(String(fetchImpl.mock.calls[2]?.[1]?.body ?? ""))).toEqual(storedPayload);
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      3,
+      `https://worker.example.test${buildHostedExecutionUserDispatchPayloadPath("member/123")}`,
+      expect.objectContaining({ method: "DELETE" }),
+    );
+    for (const [, init] of fetchImpl.mock.calls) {
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer vercel-oidc-token");
+    }
   });
 
   it("control client rejects malformed pending usage responses", async () => {

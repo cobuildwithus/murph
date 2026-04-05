@@ -6,6 +6,7 @@ import type {
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   HostedExecutionDispatchResult,
   HostedExecutionDispatchRequest,
+  HostedExecutionOutboxPayload,
   HostedExecutionRunLevel,
   HostedExecutionRunContext,
   HostedExecutionRunPhase,
@@ -447,6 +448,41 @@ export class HostedUserRunner {
         userId,
       });
     });
+  }
+
+  async deleteStoredDispatchPayload(input: {
+    payload: HostedExecutionOutboxPayload;
+  }): Promise<void> {
+    const userId = input.payload.storage === "inline"
+      ? input.payload.dispatch.event.userId
+      : input.payload.dispatchRef.userId;
+
+    await this.queueStore.bootstrapUser(userId);
+    await this.withUserKeyEnvelopeLock(async () => {
+      await (await this.resolveUserDispatchPayloadStore(userId))
+        .deleteStoredDispatchPayload(input.payload);
+    });
+  }
+
+  async storeDispatchPayload(input: {
+    dispatch: HostedExecutionDispatchRequest;
+  }): Promise<HostedExecutionOutboxPayload> {
+    await this.queueStore.bootstrapUser(input.dispatch.event.userId);
+    await this.ensureRunnerStores(input.dispatch.event.userId);
+    return (await this.resolveUserDispatchPayloadStore(input.dispatch.event.userId))
+      .writeStoredDispatch(input.dispatch);
+  }
+
+  async dispatchStoredPayload(input: {
+    payload: HostedExecutionOutboxPayload;
+  }): Promise<HostedExecutionDispatchResult> {
+    const dispatch = await (await this.resolveUserDispatchPayloadStore(
+      input.payload.storage === "inline"
+        ? input.payload.dispatch.event.userId
+        : input.payload.dispatchRef.userId,
+    )).readStoredDispatch(input.payload);
+
+    return this.dispatchWithOutcome(dispatch);
   }
 
   async dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {

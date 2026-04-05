@@ -159,6 +159,29 @@ export async function hostedDispatchPayloadObjectKey(
   return `transient/dispatch-payloads/${userSegment}/${eventSegment}.json`;
 }
 
+export async function hostedDispatchPayloadObjectKeyForSignature(
+  rootKey: Uint8Array,
+  userId: string,
+  eventId: string,
+  signature: string,
+): Promise<string> {
+  const userSegment = await deriveHostedStorageOpaqueId({
+    length: 24,
+    rootKey,
+    scope: "dispatch-payload-path",
+    value: `user:${userId}`,
+  });
+  const payloadSegment = await deriveHostedStorageOpaqueId({
+    length: 48,
+    rootKey,
+    scope: "dispatch-payload-path",
+    value: `payload:${userId}:${eventId}:${signature}`,
+  });
+
+  return `transient/dispatch-payloads/${userSegment}/${payloadSegment}.json`;
+}
+
+
 export async function hostedDispatchPayloadObjectKeys(
   rootKey: Uint8Array,
   keysById: Readonly<Record<string, Uint8Array>> | undefined,

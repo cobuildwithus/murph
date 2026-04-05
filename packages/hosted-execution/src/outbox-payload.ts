@@ -17,6 +17,10 @@ export const HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION = "murph.execution-o
 
 export type HostedExecutionOutboxPayloadStorage = "inline" | "reference";
 
+export interface HostedExecutionDispatchPayloadRef {
+  key: string;
+}
+
 export interface HostedExecutionInlineOutboxPayload {
   dispatch: HostedExecutionDispatchRequest;
   schemaVersion: typeof HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION;
@@ -25,6 +29,7 @@ export interface HostedExecutionInlineOutboxPayload {
 
 export interface HostedExecutionReferenceOutboxPayload {
   dispatchRef: HostedExecutionDispatchRef;
+  payloadRef?: HostedExecutionDispatchPayloadRef;
   schemaVersion: typeof HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION;
   storage: "reference";
 }
@@ -46,13 +51,18 @@ const HOSTED_EXECUTION_INLINE_OUTBOX_PAYLOAD_KEYS = new Set([
 ]);
 const HOSTED_EXECUTION_REFERENCE_OUTBOX_PAYLOAD_KEYS = new Set([
   "dispatchRef",
+  "payloadRef",
   "schemaVersion",
   "storage",
+]);
+const HOSTED_EXECUTION_DISPATCH_PAYLOAD_REF_KEYS = new Set([
+  "key",
 ]);
 
 export function buildHostedExecutionOutboxPayload(
   dispatch: HostedExecutionDispatchRequest,
   options: {
+    payloadRef?: HostedExecutionDispatchPayloadRef | null;
     storage?: HostedExecutionOutboxPayloadStorage | "auto";
   } = {},
 ): HostedExecutionOutboxPayload {
@@ -68,6 +78,7 @@ export function buildHostedExecutionOutboxPayload(
 
   return {
     dispatchRef: buildHostedExecutionDispatchRef(dispatch),
+    ...(options.payloadRef ? { payloadRef: options.payloadRef } : {}),
     schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
     storage,
   };
@@ -110,18 +121,43 @@ export function readHostedExecutionOutboxPayload(
         return null;
       }
 
-      return dispatchRef
-        ? {
-            dispatchRef,
-            schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
-            storage,
-          }
-        : null;
+      if (payloadObject.payloadRef === undefined) {
+        return {
+          dispatchRef,
+          schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+          storage,
+        };
+      }
+
+      const payloadRef = readHostedExecutionDispatchPayloadRef(payloadObject.payloadRef);
+      if (!payloadRef) {
+        return null;
+      }
+
+      return {
+        dispatchRef,
+        payloadRef,
+        schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+        storage,
+      };
     }
 
     return null;
   }
   return null;
+}
+
+export function readHostedExecutionDispatchPayloadRef(
+  value: unknown,
+): HostedExecutionDispatchPayloadRef | null {
+  const payloadObject = toObject(value);
+
+  if (!hasOnlyHostedExecutionKeys(payloadObject, HOSTED_EXECUTION_DISPATCH_PAYLOAD_REF_KEYS)) {
+    return null;
+  }
+
+  const key = readText(payloadObject.key);
+  return key ? { key } : null;
 }
 
 export function resolveHostedExecutionDispatchPayloadStorage(

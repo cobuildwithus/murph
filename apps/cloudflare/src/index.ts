@@ -10,6 +10,7 @@ import {
   emitHostedExecutionStructuredLog,
   parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
   parseHostedExecutionDispatchRequest,
+  parseHostedExecutionOutboxPayload,
   parseHostedExecutionSharePack,
   readHostedEmailCapabilities,
   verifyHostedExecutionVercelOidcRequest,
@@ -19,6 +20,7 @@ import {
   type HostedExecutionDeviceSyncRuntimeApplyResponse,
   type HostedExecutionDispatchRequest,
   type HostedExecutionDispatchResult,
+  type HostedExecutionOutboxPayload,
   type HostedExecutionUserEnvStatus,
   type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
@@ -120,7 +122,10 @@ interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLike {
     usage: readonly Record<string, unknown>[];
   }): Promise<{ recorded: number; usageIds: string[] }>;
   readPendingUsage(input?: { limit?: number | null }): Promise<Record<string, unknown>[]>;
+  deleteStoredDispatchPayload(input: { payload: HostedExecutionOutboxPayload }): Promise<void>;
+  dispatchStoredPayload(input: { payload: HostedExecutionOutboxPayload }): Promise<HostedExecutionDispatchResult>;
   status(): Promise<HostedExecutionUserStatus>;
+  storeDispatchPayload(input: { dispatch: HostedExecutionDispatchRequest }): Promise<HostedExecutionOutboxPayload>;
   updateUserEnv(update: HostedUserEnvUpdate): Promise<HostedExecutionUserEnvStatus>;
   deletePendingUsage(input: { usageIds: readonly string[] }): Promise<void>;
 }
@@ -247,6 +252,26 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
     async handle(context, params) {
+      return handleUserDispatchPayloadRoute(context, params.userId);
+    },
+    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/dispatch-payload$/u),
+    methods: ["PUT", "DELETE"],
+    wrongMethodResponse: "method-not-allowed",
+  },
+  {
+    authorizeBeforeMethod: true,
+    authorization: "vercel-oidc",
+    async handle(context, params) {
+      return handleUserStoredDispatchRoute(context, params.userId);
+    },
+    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/dispatch-payload\/dispatch$/u),
+    methods: ["POST"],
+    wrongMethodResponse: "method-not-allowed",
+  },
+  {
+    authorizeBeforeMethod: true,
+    authorization: "vercel-oidc",
+    async handle(context, params) {
       return handlePendingUsageRoute(context, params.userId);
     },
     match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/usage\/pending$/u),
@@ -344,6 +369,24 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
 
   async deletePendingUsage(input: { usageIds: readonly string[] }): Promise<void> {
     return this.runner.deletePendingUsage(input);
+  }
+
+  async deleteStoredDispatchPayload(input: {
+    payload: HostedExecutionOutboxPayload;
+  }): Promise<void> {
+    return this.runner.deleteStoredDispatchPayload(input);
+  }
+
+  async dispatchStoredPayload(input: {
+    payload: HostedExecutionOutboxPayload;
+  }): Promise<HostedExecutionDispatchResult> {
+    return this.runner.dispatchStoredPayload(input);
+  }
+
+  async storeDispatchPayload(input: {
+    dispatch: HostedExecutionDispatchRequest;
+  }): Promise<HostedExecutionOutboxPayload> {
+    return this.runner.storeDispatchPayload(input);
   }
 
   async dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {
@@ -622,6 +665,66 @@ async function handlePendingUsageRoute(
   const usageIds = parsePendingUsageDeleteRequest(await readCachedJsonObject(context));
   await requireGatewayStubMethod(stub, "deletePendingUsage")({ usageIds });
   return json({ ok: true, usageIds });
+}
+
+async function handleUserDispatchPayloadRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  const userId = decodeRouteParam(encodedUserId);
+  const stub = await resolveUserRunnerStub(context.env, userId);
+
+  if (context.request.method === "PUT") {
+    const dispatch = parseHostedExecutionDispatchRequest(await readCachedJsonObject(context));
+
+    if (dispatch.event.userId !== userId) {
+      return json({
+        error: "Stored dispatch payload userId does not match the route user.",
+      }, 400);
+    }
+
+    return json(await requireGatewayStubMethod(stub, "storeDispatchPayload")({ dispatch }));
+  }
+
+  const payload = requireHostedExecutionRouteOutboxPayloadUser(
+    parseHostedExecutionOutboxPayload(await readCachedJsonObject(context)),
+    userId,
+  );
+  await requireGatewayStubMethod(stub, "deleteStoredDispatchPayload")({ payload });
+  return json({
+    dispatchRef: payload.storage === "reference" ? payload.dispatchRef : null,
+    ok: true,
+    userId,
+  });
+}
+
+async function handleUserStoredDispatchRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  const userId = decodeRouteParam(encodedUserId);
+  const stub = await resolveUserRunnerStub(context.env, userId);
+  const payload = requireHostedExecutionRouteOutboxPayloadUser(
+    parseHostedExecutionOutboxPayload(await readCachedJsonObject(context)),
+    userId,
+  );
+  const result = await requireGatewayStubMethod(stub, "dispatchStoredPayload")({ payload });
+  return result.event.state === "backpressured" ? json(result, 429) : json(result);
+}
+
+function requireHostedExecutionRouteOutboxPayloadUser(
+  payload: HostedExecutionOutboxPayload,
+  userId: string,
+): HostedExecutionOutboxPayload {
+  const payloadUserId = payload.storage === "inline"
+    ? payload.dispatch.event.userId
+    : payload.dispatchRef.userId;
+
+  if (payloadUserId !== userId) {
+    throw new TypeError("Hosted execution outbox payload userId does not match the route user.");
+  }
+
+  return payload;
 }
 
 async function handleSharePackRoute(

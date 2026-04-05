@@ -4,6 +4,7 @@ import {
   parseHostedExecutionDispatchRequest,
   readHostedExecutionOutboxPayload,
   resolveHostedExecutionOutboxPayloadStorage,
+  type HostedExecutionDispatchPayloadRef,
   type HostedExecutionDispatchRef,
   type HostedExecutionDispatchRequest,
   type HostedExecutionOutboxPayload,
@@ -13,6 +14,7 @@ import type { R2BucketLike } from "./bundle-store.js";
 import { buildHostedStorageAad } from "./crypto-context.js";
 import {
   hostedDispatchPayloadObjectKey,
+  hostedDispatchPayloadObjectKeyForSignature,
   hostedDispatchPayloadObjectKeys,
 } from "./storage-paths.js";
 import {
@@ -20,23 +22,21 @@ import {
   writeEncryptedR2Json,
 } from "./crypto.js";
 
-export interface HostedExecutionDispatchPayloadRef {
-  key: string;
-}
-
 export interface HostedDispatchPayloadStore {
   deleteDispatchPayload(ref: HostedExecutionDispatchPayloadRef): Promise<void>;
-  deleteStoredDispatchPayload(payloadJson: string): Promise<void>;
+  deleteStoredDispatchPayload(payloadJson: unknown): Promise<void>;
   readDispatchPayload(
     ref: HostedExecutionDispatchPayloadRef,
   ): Promise<HostedExecutionDispatchRequest | null>;
-  readStoredDispatch(payloadJson: string): Promise<HostedExecutionDispatchRequest>;
-  readStoredDispatchRef(payloadJson: string): HostedExecutionDispatchRef | null;
+  readStoredDispatch(payloadJson: unknown): Promise<HostedExecutionDispatchRequest>;
+  readStoredDispatchRef(payloadJson: unknown): HostedExecutionDispatchRef | null;
   writeDispatchPayload(
     dispatch: HostedExecutionDispatchRequest,
   ): Promise<HostedExecutionDispatchPayloadRef>;
-  writeStoredDispatch(dispatch: HostedExecutionDispatchRequest): Promise<string>;
+  writeStoredDispatch(dispatch: HostedExecutionDispatchRequest): Promise<HostedExecutionOutboxPayload>;
 }
+
+const textEncoder = new TextEncoder();
 
 export function createHostedDispatchPayloadStore(input: {
   bucket: R2BucketLike;
@@ -54,17 +54,26 @@ export function createHostedDispatchPayloadStore(input: {
     },
 
     async deleteStoredDispatchPayload(payloadJson) {
-      const dispatchRef = readStoredReferenceDispatchRef(payloadJson);
+      const payload = readStoredDispatchPayloadEnvelope(payloadJson);
 
-      if (!dispatchRef || !input.bucket.delete) {
+      if (!payload || payload.storage !== "reference") {
+        return;
+      }
+
+      if (payload.payloadRef) {
+        await this.deleteDispatchPayload(payload.payloadRef);
+        return;
+      }
+
+      if (!input.bucket.delete) {
         return;
       }
 
       for (const key of await hostedDispatchPayloadObjectKeys(
         input.key,
         input.keysById,
-        dispatchRef.userId,
-        dispatchRef.eventId,
+        payload.dispatchRef.userId,
+        payload.dispatchRef.eventId,
       )) {
         await input.bucket.delete(key);
       }
@@ -93,27 +102,18 @@ export function createHostedDispatchPayloadStore(input: {
       }
 
       if (payload?.storage === "reference") {
-        for (const key of await hostedDispatchPayloadObjectKeys(
-          input.key,
-          input.keysById,
-          payload.dispatchRef.userId,
-          payload.dispatchRef.eventId,
-        )) {
-          const dispatch = await this.readDispatchPayload({
-            key,
-          });
+        const dispatch = payload.payloadRef
+          ? await this.readDispatchPayload(payload.payloadRef)
+          : await readLegacyStoredDispatch(this, payload.dispatchRef, input.key, input.keysById);
 
-          if (!dispatch) {
-            continue;
-          }
-
-          assertHostedDispatchMatchesRef(dispatch, payload.dispatchRef);
-          return dispatch;
+        if (!dispatch) {
+          throw new Error(
+            `Hosted dispatch payload ${payload.dispatchRef.userId}/${payload.dispatchRef.eventId} is missing from R2.`,
+          );
         }
 
-        throw new Error(
-          `Hosted dispatch payload ${payload.dispatchRef.userId}/${payload.dispatchRef.eventId} is missing from R2.`,
-        );
+        assertHostedDispatchMatchesRef(dispatch, payload.dispatchRef);
+        return dispatch;
       }
 
       throw new TypeError("Hosted dispatch payload envelope is invalid.");
@@ -138,10 +138,12 @@ export function createHostedDispatchPayloadStore(input: {
     },
 
     async writeDispatchPayload(dispatch) {
-      const key = await hostedDispatchPayloadObjectKey(
+      const normalizedDispatch = parseHostedExecutionDispatchRequest(dispatch);
+      const key = await hostedDispatchPayloadObjectKeyForSignature(
         input.key,
-        dispatch.event.userId,
-        dispatch.eventId,
+        normalizedDispatch.event.userId,
+        normalizedDispatch.eventId,
+        await createHostedDispatchPayloadSignature(normalizedDispatch),
       );
       await writeEncryptedR2Json({
         aad: buildCurrentDispatchPayloadAad(key),
@@ -150,33 +152,64 @@ export function createHostedDispatchPayloadStore(input: {
         key,
         keyId: input.keyId,
         scope: "dispatch-payload",
-        value: dispatch,
+        value: normalizedDispatch,
       });
 
       return { key };
     },
 
     async writeStoredDispatch(dispatch) {
-      const payload = buildHostedExecutionOutboxPayload(dispatch);
+      const normalizedDispatch = parseHostedExecutionDispatchRequest(dispatch);
+      const storage = resolveHostedExecutionOutboxPayloadStorage(normalizedDispatch, "auto");
 
-      if (payload.storage === "inline") {
-        return JSON.stringify(payload);
+      if (storage === "inline") {
+        return buildHostedExecutionOutboxPayload(normalizedDispatch, { storage });
       }
 
-      await this.writeDispatchPayload(dispatch);
-      return JSON.stringify(payload);
+      const payloadRef = await this.writeDispatchPayload(normalizedDispatch);
+      return buildHostedExecutionOutboxPayload(normalizedDispatch, {
+        payloadRef,
+        storage,
+      });
     },
   };
 }
 
-function readStoredDispatchPayloadEnvelope(payloadJson: string): HostedExecutionOutboxPayload | null {
-  return readHostedExecutionOutboxPayload(JSON.parse(payloadJson) as unknown);
+async function readLegacyStoredDispatch(
+  store: HostedDispatchPayloadStore,
+  dispatchRef: HostedExecutionDispatchRef,
+  rootKey: Uint8Array,
+  keysById: Readonly<Record<string, Uint8Array>> | undefined,
+): Promise<HostedExecutionDispatchRequest | null> {
+  for (const key of await hostedDispatchPayloadObjectKeys(
+    rootKey,
+    keysById,
+    dispatchRef.userId,
+    dispatchRef.eventId,
+  )) {
+    const dispatch = await store.readDispatchPayload({ key });
+
+    if (!dispatch) {
+      continue;
+    }
+
+    return dispatch;
+  }
+
+  const legacyKey = await hostedDispatchPayloadObjectKey(rootKey, dispatchRef.userId, dispatchRef.eventId);
+  return store.readDispatchPayload({ key: legacyKey });
 }
 
-function readStoredReferenceDispatchRef(payloadJson: string): HostedExecutionDispatchRef | null {
-  const payload = readStoredDispatchPayloadEnvelope(payloadJson);
+function readStoredDispatchPayloadEnvelope(payloadJson: unknown): HostedExecutionOutboxPayload | null {
+  if (typeof payloadJson === "string") {
+    try {
+      return readHostedExecutionOutboxPayload(JSON.parse(payloadJson) as unknown);
+    } catch {
+      return null;
+    }
+  }
 
-  return payload?.storage === "reference" ? payload.dispatchRef : null;
+  return readHostedExecutionOutboxPayload(payloadJson);
 }
 
 function buildCurrentDispatchPayloadAad(key: string): Uint8Array {
@@ -201,6 +234,30 @@ function assertHostedDispatchMatchesRef(
 
   throw new Error(
     `Hosted dispatch payload ${dispatchRef.userId}/${dispatchRef.eventId} does not match its stored dispatch ref.`,
+  );
+}
+
+async function createHostedDispatchPayloadSignature(
+  dispatch: HostedExecutionDispatchRequest,
+): Promise<string> {
+  const canonicalJson = JSON.stringify(canonicalizeJson(parseHostedExecutionDispatchRequest(dispatch)));
+  const digest = await crypto.subtle.digest("SHA-256", textEncoder.encode(canonicalJson));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function canonicalizeJson(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => canonicalizeJson(entry));
+  }
+
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, canonicalizeJson(entry)]),
   );
 }
 
