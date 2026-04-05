@@ -1,7 +1,6 @@
 export class Container {
   defaultPort?: number;
   requiredPorts?: number[];
-  sleepAfter: string | number = "10m";
   envVars: Record<string, string> = {};
   entrypoint?: string[];
   enableInternet = true;
