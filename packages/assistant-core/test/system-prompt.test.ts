@@ -52,6 +52,34 @@ test("buildAssistantSystemPrompt tells Murph to gather personal supplement and l
   );
   assert.match(
     prompt,
+    /When the target is fuzzy, remembered by phrase, or likely to require lexical recall across notes and record bodies, use `vault-cli search query`\./u,
+  );
+  assert.match(
+    prompt,
+    /When the user asks what changed, what happened over a window, or what stands out across record types, prefer `vault-cli timeline` first and then drill into a few supporting records\./u,
+  );
+  assert.match(
+    prompt,
+    /For the user's current synthesized health snapshot, prefer `vault-cli profile show current` over reconstructing that state from older snapshots by hand\./u,
+  );
+  assert.match(
+    prompt,
+    /For wearable questions, prefer `vault-cli wearables day` or the relevant `vault-cli wearables sleep\|activity\|recovery\|body\|sources list` command before inspecting raw events or samples\./u,
+  );
+  assert.match(
+    prompt,
+    /For imported-record provenance or original source payloads, prefer family-specific `manifest` reads such as `vault-cli meal manifest`, `vault-cli document manifest`, `vault-cli intake manifest`, and `vault-cli workout manifest` before scanning raw files directly\./u,
+  );
+  assert.match(
+    prompt,
+    /Many registry families follow `list\/show\/scaffold\/upsert`\. Artifact-backed families often use `add` or `import`, then `show\/list`, `manifest`, and `edit\/delete`\./u,
+  );
+  assert.match(
+    prompt,
+    /Generic `vault-cli show` expects a query-layer record id\. For family-specific lookup ids such as `meal_\*` or `doc_\*`, prefer the matching family `show` or `manifest` surface\./u,
+  );
+  assert.match(
+    prompt,
     /If no close existing page exists, and the current turn produced a reusable synthesis that would likely save work or improve continuity later, create a new knowledge page in the same turn\./u,
   );
   assert.match(

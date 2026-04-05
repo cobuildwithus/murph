@@ -8,10 +8,14 @@ import { test } from 'vitest'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import { registerEventCommands } from '../src/commands/event.js'
 import { registerFoodCommands } from '../src/commands/food.js'
+import { registerMealCommands } from '../src/commands/meal.js'
+import { registerReadCommands } from '../src/commands/read.js'
 import { registerProviderCommands } from '../src/commands/provider.js'
+import { registerSearchCommands } from '../src/commands/search.js'
 import { registerRecipeCommands } from '../src/commands/recipe.js'
 import { registerSamplesCommands } from '../src/commands/samples.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
+import { registerWearablesCommands } from '../src/commands/wearables.js'
 import { createIntegratedVaultServices } from '@murphai/assistant-core/vault-services'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData } from './cli-test-helpers.js'
@@ -33,11 +37,15 @@ function createSliceCli() {
   const services = createIntegratedVaultServices()
 
   registerVaultCommands(cli, services)
+  registerReadCommands(cli, services)
+  registerSearchCommands(cli, services)
   registerProviderCommands(cli, services)
   registerFoodCommands(cli, services)
   registerRecipeCommands(cli, services)
   registerEventCommands(cli, services)
+  registerMealCommands(cli, services)
   registerSamplesCommands(cli, services)
+  registerWearablesCommands(cli, services)
 
   return cli
 }
@@ -197,6 +205,40 @@ test('provider/food/recipe/event/samples help uses generic id selectors for read
   assert.match(eventHelp, /Usage: vault-cli event show <id> \[options\]/u)
   assert.match(sampleHelp, /Usage: vault-cli samples show <id> \[options\]/u)
   assert.match(batchHelp, /Usage: vault-cli samples batch show <id> \[options\]/u)
+})
+
+test('generic read and semantic summary help surfaces explain when to use them', async () => {
+  const showHelp = await runSliceCliRaw(['show', '--help'])
+  const listHelp = await runSliceCliRaw(['list', '--help'])
+  const searchHelp = await runSliceCliRaw(['search', 'query', '--help'])
+  const timelineHelp = await runSliceCliRaw(['timeline', '--help'])
+  const wearablesDayHelp = await runSliceCliRaw(['wearables', 'day', '--help'])
+  const mealManifestHelp = await runSliceCliRaw(['meal', 'manifest', '--help'])
+
+  assert.match(
+    showHelp,
+    /Use family-specific `show` or `manifest` commands when you have a family lookup id such as `meal_\*` or `doc_\*`/u,
+  )
+  assert.match(
+    listHelp,
+    /Use `list` for family\/kind\/status\/tag\/date filtering, `search query` for fuzzy text recall, and `timeline` for chronology across record types\./u,
+  )
+  assert.match(
+    searchHelp,
+    /Use `search query` for fuzzy recall or remembered phrases\. Use `show` for one exact id, `list` for structured filters, and `timeline` for chronology\./u,
+  )
+  assert.match(
+    timelineHelp,
+    /Use `timeline` when you need chronology across journals, events, assessments, profile snapshots, and sample summaries\./u,
+  )
+  assert.match(
+    wearablesDayHelp,
+    /Use `wearables day` as the first read for date-specific wearable questions\./u,
+  )
+  assert.match(
+    mealManifestHelp,
+    /Show the immutable raw import manifest for a meal event\./u,
+  )
 })
 
 test.sequential(

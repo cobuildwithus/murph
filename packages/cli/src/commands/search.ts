@@ -124,7 +124,7 @@ export function registerSearchCommands(
 
   search.command('query', {
     description:
-      'Search the local read model with lexical scoring and optional SQLite-backed candidate retrieval.',
+      'Search the local read model with lexical scoring and optional SQLite-backed candidate retrieval when the target is fuzzy or remembered by phrase rather than exact id.',
     args: emptyArgsSchema,
     options: withBaseOptions({
       text: z
@@ -169,6 +169,25 @@ export function registerSearchCommands(
         .default(20)
         .describe('Maximum number of hits to return.'),
     }),
+    examples: [
+      {
+        description: 'Find prior mentions of magnesium across records and notes.',
+        options: {
+          text: 'magnesium',
+          vault: './vault',
+        },
+      },
+      {
+        description: 'Search only profile and protocol records for insulin sensitivity mentions.',
+        options: {
+          text: 'insulin sensitivity',
+          recordType: ['profile_snapshot', 'current_profile', 'protocol'],
+          vault: './vault',
+        },
+      },
+    ],
+    hint:
+      'Use `search query` for fuzzy recall or remembered phrases. Use `show` for one exact id, `list` for structured filters, and `timeline` for chronology.',
     output: searchResultSchema,
     async run({ options }) {
       const query = await loadQueryRuntime()
@@ -270,7 +289,8 @@ export function registerSearchCommands(
   cli.command(
     'timeline',
     {
-      description: 'Build a descending timeline from journals, events, assessments, health history, profile snapshots, and daily sample summaries.',
+      description:
+        'Build a descending cross-record timeline when the question is about what changed, what happened over a window, or what stood out over time.',
       args: emptyArgsSchema,
       options: withBaseOptions({
         from: localDateSchema
@@ -302,6 +322,27 @@ export function registerSearchCommands(
           .default(200)
           .describe('Maximum number of timeline entries to return.'),
       }),
+      examples: [
+        {
+          description: 'Review what happened across journals, events, and summaries over the last week.',
+          options: {
+            from: '2026-04-01',
+            to: '2026-04-07',
+            vault: './vault',
+          },
+        },
+        {
+          description: 'Review recovery-related sample summaries over one experiment window.',
+          options: {
+            entryType: ['sample_summary'],
+            stream: ['hrv', 'resting_heart_rate'],
+            experiment: 'sleep-reset',
+            vault: './vault',
+          },
+        },
+      ],
+      hint:
+        'Use `timeline` when you need chronology across journals, events, assessments, profile snapshots, and sample summaries. Drill into `show` or family-specific reads after you find the relevant entries.',
       output: timelineResultSchema,
       async run({ options }) {
         const kinds = normalizeRepeatableFlagOption(options.kind, 'kind') ?? []

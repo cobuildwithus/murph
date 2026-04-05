@@ -41,6 +41,16 @@ vault-cli inbox doctor
 
 `vault-cli` is still available as a secondary alias for the operator surface, but `murph` is the primary command this package installs.
 
+When you need to read from the vault, use this chooser:
+
+- `vault-cli show <id>` for one exact query-layer record id
+- `vault-cli list` for structured filtering by family, kind, status, stream, tag, or date range
+- `vault-cli search query --text "..."` for fuzzy recall or remembered phrases
+- `vault-cli timeline` for chronology across journals, events, assessments, profile snapshots, and sample summaries
+- `vault-cli profile show current` for the current synthesized profile
+- `vault-cli wearables day` or `wearables ... list` for semantic wearable summaries
+- family `manifest` commands for immutable import provenance
+
 For durable local synthesis that should keep adding up inside the vault, use the derived knowledge wiki commands:
 
 ```bash

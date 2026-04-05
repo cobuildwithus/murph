@@ -11,7 +11,8 @@ export function registerReadCommands(cli: Cli.Cli, services: VaultServices) {
   cli.command(
     'show',
     {
-      description: 'Read one canonical vault record through the query layer.',
+      description:
+        'Read one canonical vault record through the query layer when you already know the exact query-layer record id to inspect.',
       args: z.object({
         id: z
           .string()
@@ -19,6 +20,19 @@ export function registerReadCommands(cli: Cli.Cli, services: VaultServices) {
           .describe('Queryable record identifier to resolve with `show`.'),
       }),
       options: withBaseOptions(),
+      examples: [
+        {
+          args: {
+            id: 'evt_123',
+          },
+          description: 'Show one known canonical event record by its exact query-layer id.',
+          options: {
+            vault: './vault',
+          },
+        },
+      ],
+      hint:
+        'Use family-specific `show` or `manifest` commands when you have a family lookup id such as `meal_*` or `doc_*`, or when you need import provenance rather than the canonical read-model record.',
       output: showResultSchema,
       async run({ args, options }) {
         return services.query.show({
@@ -33,7 +47,8 @@ export function registerReadCommands(cli: Cli.Cli, services: VaultServices) {
   cli.command(
     'list',
     {
-      description: 'List canonical vault records through the query layer.',
+      description:
+        'List canonical vault records through the query layer when you need filtered recent records rather than one exact id.',
       args: z.object({}),
       options: withBaseOptions({
         recordType: listFilterSchema.shape.recordType,
@@ -46,6 +61,28 @@ export function registerReadCommands(cli: Cli.Cli, services: VaultServices) {
         tag: listFilterSchema.shape.tag,
         limit: listFilterSchema.shape.limit,
       }),
+      examples: [
+        {
+          description: 'List recent meal-related event records from the last week.',
+          options: {
+            kind: 'meal',
+            from: '2026-04-01',
+            to: '2026-04-07',
+            vault: './vault',
+          },
+        },
+        {
+          description: 'List active protocols with a smaller page size.',
+          options: {
+            recordType: ['protocol'],
+            status: 'active',
+            limit: 10,
+            vault: './vault',
+          },
+        },
+      ],
+      hint:
+        'Use `list` for family/kind/status/tag/date filtering, `search query` for fuzzy text recall, and `timeline` for chronology across record types.',
       output: listResultSchema,
       async run({ options }) {
         return services.query.list({
