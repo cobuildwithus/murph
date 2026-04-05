@@ -47,7 +47,7 @@ import {
   type AssistantCronTargetInput,
   writeAssistantCronStore,
 } from './cron/store.ts'
-import { sendAssistantMessageLocal } from './service.ts'
+import { sendAssistantMessageLocal } from '../assistant-service.ts'
 import { getAssistantChannelAdapter } from './channel-adapters.ts'
 import { resolveAssistantBindingDelivery } from './bindings.ts'
 import { applyAssistantSelfDeliveryTargetDefaults } from '../operator-config.ts'
