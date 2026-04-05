@@ -231,9 +231,10 @@ async function runGradualDeployment(input: {
     throw new Error("Expected a candidate version id after upload or explicit version selection.");
   }
 
+  const currentDeploymentVersions = mapDeploymentVersions(currentDeployment);
   const versionTraffic = resolveHostedWorkerDeploymentTraffic({
     candidateVersionId,
-    currentDeploymentVersions: mapDeploymentVersions(currentDeployment),
+    currentDeploymentVersions,
     rolloutPercentage: input.rolloutPercentage,
   });
 
@@ -252,7 +253,7 @@ async function runGradualDeployment(input: {
 
   return {
     candidateVersionId,
-    currentDeploymentVersions: mapDeploymentVersions(currentDeployment),
+    currentDeploymentVersions,
     finalDeploymentVersions: mapDeploymentVersions(finalDeployment),
     mode: "gradual",
     rolloutPercentage: input.rolloutPercentage,
