@@ -1275,7 +1275,7 @@ describe("runHostedExecutionJob", () => {
     }
   });
 
-  it("imports a hosted share from the inline dispatch pack even when share control env is configured", async () => {
+  it("imports a hosted share from the inline dispatch pack", async () => {
     const sourceVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-source-"));
     cleanupPaths.push(sourceVaultRoot);
     await initializeVault({ vaultRoot: sourceVaultRoot });
@@ -1304,42 +1304,6 @@ describe("runHostedExecutionJob", () => {
         food: { id: smoothie.record.foodId },
       },
     });
-    let sharePayloadRequests = 0;
-    let lastBoundUserIdHeader: string | null = null;
-    let lastRequestBody = "";
-    const sharePayloadServer = createServer((request, response) => {
-      sharePayloadRequests += 1;
-      lastBoundUserIdHeader = typeof request.headers["x-hosted-execution-user-id"] === "string"
-        ? request.headers["x-hosted-execution-user-id"]
-        : null;
-      const chunks: Buffer[] = [];
-      request.on("data", (chunk) => {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-      });
-      request.on("end", () => {
-        lastRequestBody = Buffer.concat(chunks).toString("utf8");
-
-        if (
-          request.method === "POST"
-          && request.url === "/api/hosted-share/internal/share_123/payload"
-          && request.headers.authorization === "Bearer share-pack-token"
-        ) {
-          response.statusCode = 200;
-          response.setHeader("content-type", "application/json; charset=utf-8");
-          response.end(JSON.stringify({
-            pack,
-            shareId: "share_123",
-          }));
-          return;
-        }
-
-        response.statusCode = 404;
-        response.end("Not found");
-      });
-    });
-    await new Promise<void>((resolve) => {
-      sharePayloadServer.listen(0, () => resolve());
-    });
     const activation = await runHostedExecutionJob({
       bundles: {
         agentState: null,
@@ -1355,55 +1319,37 @@ describe("runHostedExecutionJob", () => {
       },
     });
 
-    try {
-      const address = sharePayloadServer.address();
-      if (!address || typeof address === "string") {
-        throw new Error("Expected the hosted share payload test server to expose a TCP port.");
-      }
-
-      const result = await runHostedExecutionJob({
-        bundles: activation.bundles,
-        dispatch: {
-          event: {
-            kind: "vault.share.accepted",
-            share: {
-              pack,
-              shareId: "share_123",
-            },
-            userId: "member_456",
+    const result = await runHostedExecutionJob({
+      bundles: activation.bundles,
+      dispatch: {
+        event: {
+          kind: "vault.share.accepted",
+          share: {
+            pack,
+            shareId: "share_123",
           },
-          eventId: "evt_share_123",
-          occurredAt: "2026-03-26T12:30:00.000Z",
+          userId: "member_456",
         },
-        forwardedEnv: {
-          HOSTED_SHARE_INTERNAL_TOKENS: "share-pack-token",
-        },
-      });
-      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-share-direct-"));
-      cleanupPaths.push(workspaceRoot);
-      const restored = await restoreHostedExecutionContext({
-        agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
-        vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
-        workspaceRoot,
-      });
-      const importedFood = (await listFoods(restored.vaultRoot)).find((entry) => entry.title === "Morning Smoothie");
+        eventId: "evt_share_123",
+        occurredAt: "2026-03-26T12:30:00.000Z",
+      },
+    });
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-share-direct-"));
+    cleanupPaths.push(workspaceRoot);
+    const restored = await restoreHostedExecutionContext({
+      agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
+      vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
+      workspaceRoot,
+    });
+    const importedFood = (await listFoods(restored.vaultRoot)).find((entry) => entry.title === "Morning Smoothie");
 
-      expect(sharePayloadRequests).toBe(0);
-      expect(lastBoundUserIdHeader).toBeNull();
-      expect(lastRequestBody).toBe("");
-      expect(importedFood).toBeDefined();
-      expect(result.result.summary).toContain(`Imported share pack "${pack.title}"`);
-    } finally {
-      sharePayloadServer.close();
-      await once(sharePayloadServer, "close");
-    }
+    expect(importedFood).toBeDefined();
+    expect(result.result.summary).toContain(`Imported share pack "${pack.title}"`);
   });
 
-  it("imports a hosted share from the inline dispatch pack without fetching through the worker proxy", async () => {
-    const previousHostedShareInternalTokens = process.env.HOSTED_SHARE_INTERNAL_TOKENS;
+  it("ignores hosted web env when importing an inline dispatch pack", async () => {
     const previousHostedWebBaseUrl = process.env.HOSTED_WEB_BASE_URL;
-    delete process.env.HOSTED_SHARE_INTERNAL_TOKENS;
-    delete process.env.HOSTED_WEB_BASE_URL;
+    process.env.HOSTED_WEB_BASE_URL = "https://join.example.test";
 
     const sourceVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-share-proxy-source-"));
     cleanupPaths.push(sourceVaultRoot);
@@ -1433,20 +1379,8 @@ describe("runHostedExecutionJob", () => {
         food: { id: food.record.foodId },
       },
     });
-    const fetchSpy = vi.fn(async (url: string | URL) => {
-      if (String(url) !== "http://share-pack.worker/api/hosted-share/internal/share_proxy_123/payload") {
-        throw new Error(`Unexpected fetch URL: ${String(url)}`);
-      }
-
-      return new Response(JSON.stringify({
-        pack,
-        shareId: "share_proxy_123",
-      }), {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      });
+    const fetchSpy = vi.fn(async () => {
+      throw new Error("Inline share imports should not fetch through the removed share proxy route.");
     });
     vi.stubGlobal("fetch", fetchSpy);
 
@@ -1476,12 +1410,9 @@ describe("runHostedExecutionJob", () => {
               shareId: "share_proxy_123",
             },
             userId: "member_proxy",
-          },
-          eventId: "evt_share_proxy_123",
-          occurredAt: "2026-03-26T12:30:00.000Z",
         },
-        forwardedEnv: {
-          HOSTED_SHARE_INTERNAL_TOKENS: "bad-forwarded-share-token",
+        eventId: "evt_share_proxy_123",
+        occurredAt: "2026-03-26T12:30:00.000Z",
         },
       });
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-share-proxy-"));
@@ -1498,8 +1429,8 @@ describe("runHostedExecutionJob", () => {
       expect(importedFood?.attachedProtocolIds?.length).toBe(1);
       expect(result.result.summary).toContain(`Imported share pack "${pack.title}"`);
     } finally {
-      restoreEnvVar("HOSTED_SHARE_INTERNAL_TOKENS", previousHostedShareInternalTokens);
       restoreEnvVar("HOSTED_WEB_BASE_URL", previousHostedWebBaseUrl);
+      vi.stubGlobal("fetch", initialGlobalFetch);
     }
   });
 
