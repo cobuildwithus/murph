@@ -8,7 +8,9 @@ import type { HostedEmailSendRequest } from "@murphai/assistant-runtime";
 import {
   createHostedEmailThreadTarget,
   ensureHostedEmailReplySubject,
+  normalizeHostedEmailAddress,
   normalizeHostedEmailAddressList,
+  normalizeHostedEmailSubject,
   parseHostedEmailThreadTarget,
   serializeHostedEmailThreadTarget,
   type HostedEmailThreadTarget,
@@ -108,7 +110,7 @@ async function prepareHostedEmailSend(input: {
   recipients: string[];
   threadTarget: HostedEmailThreadTarget;
 }> {
-  const fromAddress = input.config.fromAddress;
+  const fromAddress = normalizeHostedEmailAddress(input.config.fromAddress);
   if (!fromAddress) {
     throw new Error("Hosted email sender identity is not configured.");
   }
@@ -130,7 +132,7 @@ async function prepareHostedEmailSend(input: {
 
   const subject = existingThreadTarget
     ? ensureHostedEmailReplySubject(existingThreadTarget.subject, input.config.defaultSubject)
-    : input.config.defaultSubject;
+    : normalizeHostedEmailSubject(input.config.defaultSubject) ?? "Murph update";
   const messageId = createHostedEmailMessageId(fromAddress);
   const threadTarget = createHostedEmailThreadTarget({
     cc,
@@ -156,7 +158,6 @@ async function prepareHostedEmailSend(input: {
       messageId,
       references: existingThreadTarget?.references ?? [],
       replyToAddress: input.replyAddress,
-      routingAddress: input.replyAddress,
       subject,
       to,
     }),
@@ -173,21 +174,21 @@ function buildRawMimeMessage(input: {
   messageId: string;
   references: string[];
   replyToAddress: string | null;
-  routingAddress: string | null;
   subject: string;
   to: string[];
 }): string {
   const headers = [
-    `From: ${input.fromAddress}`,
-    `To: ${input.to.join(", ")}`,
-    input.cc.length > 0 ? `Cc: ${input.cc.join(", ")}` : null,
-    `Subject: ${encodeMimeHeader(input.subject)}`,
-    `Message-ID: ${input.messageId}`,
-    `Date: ${new Date().toUTCString()}`,
-    input.replyToAddress ? `Reply-To: ${input.replyToAddress}` : null,
-    input.routingAddress ? `X-Murph-Route: ${input.routingAddress}` : null,
-    input.inReplyTo ? `In-Reply-To: ${input.inReplyTo}` : null,
-    input.references.length > 0 ? `References: ${input.references.join(" ")}` : null,
+    formatMimeHeaderLine("From", input.fromAddress),
+    formatMimeHeaderLine("To", input.to.join(", ")),
+    input.cc.length > 0 ? formatMimeHeaderLine("Cc", input.cc.join(", ")) : null,
+    formatMimeHeaderLine("Subject", encodeMimeHeader(input.subject)),
+    formatMimeHeaderLine("Message-ID", input.messageId),
+    formatMimeHeaderLine("Date", new Date().toUTCString()),
+    input.replyToAddress ? formatMimeHeaderLine("Reply-To", input.replyToAddress) : null,
+    input.inReplyTo ? formatMimeHeaderLine("In-Reply-To", input.inReplyTo) : null,
+    input.references.length > 0
+      ? formatMimeHeaderLine("References", input.references.join(" "))
+      : null,
     "MIME-Version: 1.0",
     'Content-Type: text/plain; charset="utf-8"',
     "Content-Transfer-Encoding: base64",
@@ -224,6 +225,14 @@ function encodeMimeHeader(value: string): string {
   return /[^\x20-\x7E]/u.test(value)
     ? `=?UTF-8?B?${encodeUtf8Base64(value)}?=`
     : value;
+}
+
+function formatMimeHeaderLine(name: string, value: string): string {
+  if (/[\r\n]/u.test(value)) {
+    throw new Error(`Hosted email ${name} header contains an unsafe line break.`);
+  }
+
+  return `${name}: ${value}`;
 }
 
 function randomHostedEmailKey(): string {

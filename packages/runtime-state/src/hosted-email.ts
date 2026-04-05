@@ -117,8 +117,8 @@ export function normalizeHostedEmailAddress(value: string | null | undefined): s
   }
 
   const angleMatch = normalized.match(/<([^>]+)>/u);
-  const candidate = (angleMatch?.[1] ?? normalized).trim().toLowerCase();
-  return candidate.length > 0 ? candidate : null;
+  const candidate = normalizeHostedEmailOptionalText(angleMatch?.[1] ?? normalized);
+  return candidate ? candidate.toLowerCase() : null;
 }
 
 export function normalizeHostedEmailAddressList(
@@ -241,7 +241,7 @@ export function normalizeHostedEmailSubject(value: string | null | undefined): s
 
 function normalizeHostedEmailOptionalText(value: string | null | undefined): string | null {
   const normalized = value?.trim() ?? "";
-  return normalized.length > 0 ? normalized : null;
+  return normalized.length > 0 && !/[\r\n]/u.test(normalized) ? normalized : null;
 }
 
 function collectHostedEmailHeaderSenderCandidates(
