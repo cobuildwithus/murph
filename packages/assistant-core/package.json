@@ -409,6 +409,7 @@
   ],
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.json",
+    "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage",
     "typecheck": "tsc -b tsconfig.typecheck.json --pretty false"
   },
   "engines": {
