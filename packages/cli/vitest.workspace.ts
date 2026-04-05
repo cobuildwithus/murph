@@ -41,6 +41,7 @@ const cliVitestRuntimeAliases = createVitestWorkspaceRuntimeAliases(
 
 type CliVitestProjectSpec = {
   readonly env?: Record<string, string>;
+  readonly fileParallelism?: boolean;
   readonly name: string;
   readonly fileNames: readonly string[];
 };
@@ -61,6 +62,8 @@ export function createCliVitestProject(name: string, fileNames: readonly string[
       name,
       environment: "node",
       ...cliVitestConcurrency,
+      fileParallelism:
+        spec?.fileParallelism ?? cliVitestConcurrency.fileParallelism,
       env: spec?.env,
       include: fileNames.map(cliTestFile),
     },
@@ -149,6 +152,7 @@ export const cliVitestProjectSpecs: readonly CliVitestProjectSpec[] = [
   },
   {
     name: "cli-inbox-setup",
+    fileParallelism: false,
     fileNames: [
       "setup-cli.test.ts",
       "setup-channels.test.ts",

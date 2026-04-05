@@ -165,20 +165,27 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
   it("builds per-job runtime config from forwarded env instead of ambient process env", () => {
     expect(buildHostedRunnerJobRuntimeConfig({
       forwardedEnv: {
-        HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
         OPENAI_API_KEY: "sk-worker",
       },
+      runtimeConfigSource: {
+        HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "CUSTOM_API_KEY",
+        HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
+      },
+      userEnvSource: {
+        HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "CUSTOM_API_KEY",
+      },
       userEnv: {
+        CUSTOM_API_KEY: "custom-user",
         OPENAI_API_KEY: "sk-user",
         VENICE_API_KEY: "venice-user",
       },
     })).toEqual({
       commitTimeoutMs: 45_000,
       forwardedEnv: {
-        HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
         OPENAI_API_KEY: "sk-worker",
       },
       userEnv: {
+        CUSTOM_API_KEY: "custom-user",
         OPENAI_API_KEY: "sk-user",
         VENICE_API_KEY: "venice-user",
       },
