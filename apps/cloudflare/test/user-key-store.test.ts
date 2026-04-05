@@ -220,6 +220,48 @@ describe("createHostedUserKeyStore", () => {
       userId: USER_ID,
     });
   });
+
+  it("drops stale tee automation recipients when tee is no longer configured", async () => {
+    const bucket = new MemoryBucket();
+    const automationKeys = await generateHostedUserRecipientKeyPair();
+    const recoveryKeys = await generateHostedUserRecipientKeyPair();
+    const teeKeys = await generateHostedUserRecipientKeyPair();
+    const initialStore = createHostedUserKeyStore({
+      automationRecipientKeyId: "automation:v1",
+      automationRecipientPrivateKey: automationKeys.privateKeyJwk,
+      automationRecipientPublicKey: automationKeys.publicKeyJwk,
+      bucket,
+      envelopeEncryptionKey: PLATFORM_ENVELOPE_KEY,
+      envelopeEncryptionKeyId: PLATFORM_ENVELOPE_KEY_ID,
+      recoveryRecipientKeyId: "recovery:v1",
+      recoveryRecipientPublicKey: recoveryKeys.publicKeyJwk,
+      teeAutomationRecipientKeyId: "tee-automation:v1",
+      teeAutomationRecipientPublicKey: teeKeys.publicKeyJwk,
+    });
+
+    await initialStore.bootstrapManagedUserCryptoContext(USER_ID, {
+      reason: "test-bootstrap",
+    });
+
+    const storeWithoutTee = createHostedUserKeyStore({
+      automationRecipientKeyId: "automation:v1",
+      automationRecipientPrivateKey: automationKeys.privateKeyJwk,
+      automationRecipientPublicKey: automationKeys.publicKeyJwk,
+      bucket,
+      envelopeEncryptionKey: PLATFORM_ENVELOPE_KEY,
+      envelopeEncryptionKeyId: PLATFORM_ENVELOPE_KEY_ID,
+      recoveryRecipientKeyId: "recovery:v1",
+      recoveryRecipientPublicKey: recoveryKeys.publicKeyJwk,
+    });
+
+    const reconciled = await storeWithoutTee.requireUserCryptoContext(USER_ID, {
+      reason: "test-remove-tee",
+    });
+
+    expect(findHostedWrappedRootKeyRecipient(reconciled.envelope, "automation")?.keyId).toBe("automation:v1");
+    expect(findHostedWrappedRootKeyRecipient(reconciled.envelope, "recovery")?.keyId).toBe("recovery:v1");
+    expect(findHostedWrappedRootKeyRecipient(reconciled.envelope, "tee-automation")).toBeNull();
+  });
 });
 
 async function readStoredEnvelope(bucket: MemoryBucket, userId: string) {
