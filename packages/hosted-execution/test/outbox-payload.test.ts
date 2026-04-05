@@ -54,20 +54,6 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
         "auto",
       ),
     ).toBe("reference");
-  });
-
-  it("keeps synthetic or non-reconstructable events inline", () => {
-    expect(
-      resolveHostedExecutionDispatchPayloadStorage(
-        buildHostedExecutionAssistantCronTickDispatch({
-          eventId: "cron-1",
-          occurredAt,
-          reason: "alarm",
-          userId: "user_123",
-        }),
-        "auto",
-      ),
-    ).toBe("inline");
 
     expect(
       resolveHostedExecutionDispatchPayloadStorage(
@@ -76,6 +62,20 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
           occurredAt,
           sessionKey: "session_123",
           text: "hello",
+          userId: "user_123",
+        }),
+        "auto",
+      ),
+    ).toBe("reference");
+  });
+
+  it("keeps synthetic cron events inline", () => {
+    expect(
+      resolveHostedExecutionDispatchPayloadStorage(
+        buildHostedExecutionAssistantCronTickDispatch({
+          eventId: "cron-1",
+          occurredAt,
+          reason: "alarm",
           userId: "user_123",
         }),
         "auto",
@@ -107,6 +107,6 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
           userId: "user_123",
         }),
       ).storage,
-    ).toBe("inline");
+    ).toBe("reference");
   });
 });
