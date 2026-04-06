@@ -82,7 +82,7 @@ export const cliVitestProjectSpecs: readonly CliVitestProjectSpec[] = [
     name: "cli-read-model",
     fileNames: [
       "search-runtime.test.ts",
-      "list-cursor-compat.test.ts",
+      "list-surface.test.ts",
       "runtime.test.ts",
       "selector-filter-normalization.test.ts",
       "stdin-input.test.ts",

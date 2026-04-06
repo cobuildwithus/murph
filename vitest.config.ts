@@ -62,7 +62,7 @@ const ROOT_REPO_CLI_INCLUDE = new Set([
   "packages/cli/test/inbox-cli.test.ts",
   "packages/cli/test/inbox-model-harness.test.ts",
   "packages/cli/test/inbox-model-route.test.ts",
-  "packages/cli/test/list-cursor-compat.test.ts",
+  "packages/cli/test/list-surface.test.ts",
   "packages/cli/test/cli-expansion-export-intake.test.ts",
   "packages/cli/test/cli-expansion-workout.test.ts",
   "packages/cli/test/runtime.test.ts",

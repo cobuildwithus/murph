@@ -6,7 +6,15 @@ Assumptions applied for this pass:
 - local config, state, caches, and setup can be blown away and recreated
 - backwards compatibility survives only where the current architecture still actively depends on it
 
-## remove now
+Status note as of 2026-04-06:
+
+- the items that were under `remove now` in this audit have landed
+- the former `registryCompatibilitySelfIds` follow-up also landed; `projectRegistryEntity` now derives `relatedIds` directly from normalized links
+- the remaining `keep for now` entries below are preserved as the still-useful rationale for intentionally supported tolerance paths
+
+## remove now at audit time
+
+All items in this section have since landed.
 
 ### 1. Gateway opaque-id v1 envelope readers
 
@@ -35,9 +43,13 @@ Assumptions applied for this pass:
 - **Follow-on cleanup:** update any unpublished local scripts or notebooks that still import the removed alias names.
 - **Concrete risk if removed incorrectly:** hidden downstream tooling that still imports the alias names will fail to compile or load until it switches to the canonical exports.
 
-## remove after a small follow-up
+## remove after a small follow-up at audit time
+
+This follow-up has also since landed.
 
 ### 1. Registry self-id compatibility stuffing into `relatedIds`
+
+- **Status (2026-04-06):** landed; current `projectRegistryEntity` no longer appends self ids to `relatedIds`.
 
 - **Files / symbols:** `packages/query/src/health/projectors/registry.ts` - `registryCompatibilitySelfIds`, `projectRegistryEntity`; tests in `packages/query/test/health-registry-definitions.test.ts` and `packages/query/test/health-tail.test.ts`
 - **Compatibility behavior involved:** goal/condition/protocol projections still stuff their own scalar ids back into `relatedIds` so older link-less expectations continue to round-trip.
