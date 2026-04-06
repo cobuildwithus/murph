@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 import {
+  createVersionedJsonStateEnvelope,
   parseVersionedJsonStateEnvelope,
   resolveRuntimePaths,
 } from '@murphai/runtime-state/node'
@@ -272,19 +273,27 @@ test.sequential('normalizeDaemonState rewrites stale daemon state records', asyn
     await mkdir(path.dirname(paths.inboxStatePath), { recursive: true })
     await writeFile(
       paths.inboxStatePath,
-      `${JSON.stringify({
-        running: true,
-        stale: false,
-        pid: 4242,
-        startedAt: '2026-03-18T12:00:00.000Z',
-        stoppedAt: null,
-        status: 'running',
-        connectorIds: ['imessage:self'],
-        message: null,
-        statePath: '.runtime/operations/inbox/state.json',
-        configPath: '.runtime/operations/inbox/config.json',
-        databasePath: '.runtime/projections/inboxd.sqlite',
-      }, null, 2)}\n`,
+      `${JSON.stringify(
+        createVersionedJsonStateEnvelope({
+          schema: 'murph.inbox-daemon-state.v1',
+          schemaVersion: 1,
+          value: {
+            running: true,
+            stale: false,
+            pid: 4242,
+            startedAt: '2026-03-18T12:00:00.000Z',
+            stoppedAt: null,
+            status: 'running',
+            connectorIds: ['imessage:self'],
+            message: null,
+            statePath: '.runtime/operations/inbox/state.json',
+            configPath: '.runtime/operations/inbox/config.json',
+            databasePath: '.runtime/projections/inboxd.sqlite',
+          },
+        }),
+        null,
+        2,
+      )}\n`,
       'utf8',
     )
 
@@ -338,38 +347,45 @@ test.sequential('readPromotionsByCapture groups promotion entries by capture id'
     await mkdir(path.dirname(paths.inboxPromotionsPath), { recursive: true })
     await writeFile(
       paths.inboxPromotionsPath,
-      `${JSON.stringify({
-        version: 1,
-        entries: [
-          {
-            captureId: 'cap-1',
-            target: 'meal',
-            status: 'applied',
-            promotedAt: '2026-03-18T12:00:00.000Z',
-            lookupId: 'evt-1',
-            relatedId: 'meal-1',
-            note: 'Breakfast',
+      `${JSON.stringify(
+        createVersionedJsonStateEnvelope({
+          schema: 'murph.inbox-promotion-store.v1',
+          schemaVersion: 1,
+          value: {
+            entries: [
+              {
+                captureId: 'cap-1',
+                target: 'meal',
+                status: 'applied',
+                promotedAt: '2026-03-18T12:00:00.000Z',
+                lookupId: 'evt-1',
+                relatedId: 'meal-1',
+                note: 'Breakfast',
+              },
+              {
+                captureId: 'cap-1',
+                target: 'journal',
+                status: 'applied',
+                promotedAt: '2026-03-18T12:05:00.000Z',
+                lookupId: 'journal:2026-03-18',
+                relatedId: 'evt-1',
+                note: 'Breakfast',
+              },
+              {
+                captureId: 'cap-2',
+                target: 'document',
+                status: 'applied',
+                promotedAt: '2026-03-18T13:00:00.000Z',
+                lookupId: 'evt-2',
+                relatedId: 'doc-2',
+                note: null,
+              },
+            ],
           },
-          {
-            captureId: 'cap-1',
-            target: 'journal',
-            status: 'applied',
-            promotedAt: '2026-03-18T12:05:00.000Z',
-            lookupId: 'journal:2026-03-18',
-            relatedId: 'evt-1',
-            note: 'Breakfast',
-          },
-          {
-            captureId: 'cap-2',
-            target: 'document',
-            status: 'applied',
-            promotedAt: '2026-03-18T13:00:00.000Z',
-            lookupId: 'evt-2',
-            relatedId: 'doc-2',
-            note: null,
-          },
-        ],
-      }, null, 2)}\n`,
+        }),
+        null,
+        2,
+      )}\n`,
       'utf8',
     )
 

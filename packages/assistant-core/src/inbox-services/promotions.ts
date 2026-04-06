@@ -630,9 +630,6 @@ async function readPromotionStore(
     const { value } = await readVersionedJsonStateFile({
       currentPath: paths.inboxPromotionsPath,
       label: 'Inbox promotion state',
-      legacyParseValue(value) {
-        return inboxPromotionStoreSchema.parse(value)
-      },
       parseValue(value) {
         return inboxPromotionStoreSchema.parse(value)
       },

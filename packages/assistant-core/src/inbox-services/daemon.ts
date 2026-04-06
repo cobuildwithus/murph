@@ -117,9 +117,6 @@ async function readDaemonState(paths: InboxPaths): Promise<InboxDaemonState> {
     const { value } = await readVersionedJsonStateFile({
       currentPath: paths.inboxStatePath,
       label: 'Inbox daemon state',
-      legacyParseValue(value) {
-        return inboxDaemonStateSchema.parse(value)
-      },
       parseValue(value) {
         return inboxDaemonStateSchema.parse(value)
       },
