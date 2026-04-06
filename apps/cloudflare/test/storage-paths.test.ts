@@ -5,7 +5,7 @@ import {
   hostedBundleObjectKey,
   hostedDispatchPayloadObjectKey,
   hostedExecutionJournalObjectKey,
-  hostedSideEffectJournalObjectKey,
+  hostedSideEffectRecordKey,
   hostedUserEnvObjectKey,
 } from "../src/storage-paths.js";
 import { expectOpaqueStrings } from "./object-key-assertions";
@@ -24,7 +24,7 @@ describe("hosted storage paths", () => {
     const bundleKey = await hostedBundleObjectKey(rootKey, "vault", hash);
     const userEnvKey = await hostedUserEnvObjectKey(rootKey, userId);
     const journalKey = await hostedExecutionJournalObjectKey(rootKey, userId, eventId);
-    const sideEffectKey = await hostedSideEffectJournalObjectKey(rootKey, userId, effectId);
+    const sideEffectKey = await hostedSideEffectRecordKey(rootKey, userId, effectId);
     const dispatchPayloadKey = await hostedDispatchPayloadObjectKey(rootKey, userId, eventId);
 
     expect(artifactKey).toMatch(/^users\/artifacts\/[0-9a-f]{24}\/[0-9a-f]{48}\.artifact\.bin$/);

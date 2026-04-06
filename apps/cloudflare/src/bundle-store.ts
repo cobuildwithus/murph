@@ -332,8 +332,6 @@ function pendingBundleRefKey(kind: HostedExecutionBundleKind): string {
   return `pending/${kind}/candidate`;
 }
 
-export { hostedArtifactObjectKey as artifactObjectKey } from "./storage-paths.js";
-
 function inferBundleKindFromKey(key: string): HostedExecutionBundleKind {
   if (key.startsWith("bundles/vault/")) {
     return "vault";

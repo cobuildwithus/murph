@@ -5,7 +5,6 @@ import { encodeHostedBundleBase64 } from "@murphai/runtime-state/node";
 
 import {
   createHostedArtifactStore,
-  artifactObjectKey,
   createHostedBundleStore,
   describeHostedBase64BundleRef,
   describeHostedBundleBytesRef,
@@ -18,6 +17,7 @@ import {
 import { encryptHostedBundle } from "../src/crypto.js";
 import { createHostedDispatchPayloadStore } from "../src/dispatch-payload-store.js";
 import { resolveHostedEmailIngressRoute } from "../src/hosted-email/routes.js";
+import { hostedArtifactObjectKey } from "../src/storage-paths.js";
 import { RunnerBundleSync } from "../src/user-runner/runner-bundle-sync.js";
 import { RunnerQueueStore } from "../src/user-runner/runner-queue-store.js";
 import { RunnerUserEnvService } from "../src/user-runner/runner-user-env.js";
@@ -330,5 +330,5 @@ function createBucketStore() {
 }
 
 async function artifactObjectKeyForTest(_rootKey: Uint8Array, userId: string, sha256: string): Promise<string> {
-  return artifactObjectKey(_rootKey, userId, sha256);
+  return hostedArtifactObjectKey(_rootKey, userId, sha256);
 }

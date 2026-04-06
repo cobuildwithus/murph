@@ -29,7 +29,6 @@ import {
   ensureGatewayStoreBaseSchema,
   readMeta,
   readNumericMeta,
-  resetGatewayServingSnapshotSchema,
   withGatewayImmediateTransaction,
   writeMeta,
 } from './store/schema.js'
@@ -155,16 +154,9 @@ export class LocalGatewayProjectionStore {
     applySqliteRuntimeMigrations(this.database, {
       migrations: [
         {
-          version: 1,
-          migrate(candidateDatabase) {
-            ensureGatewayStoreBaseSchema(candidateDatabase)
-          },
-        },
-        {
           version: GATEWAY_STORE_SQLITE_SCHEMA_VERSION,
           migrate(candidateDatabase) {
             ensureGatewayStoreBaseSchema(candidateDatabase)
-            resetGatewayServingSnapshotSchema(candidateDatabase)
           },
         },
       ],
