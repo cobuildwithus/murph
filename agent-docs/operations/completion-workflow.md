@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-04-02
+Last verified: 2026-04-06
 
 This workflow applies to repo code/docs/test/config changes.
 Vault-only data tasks under `vault/**` skip this workflow unless the user explicitly asks for repo/process work.
@@ -12,14 +12,15 @@ Vault-only data tasks under `vault/**` skip this workflow unless the user explic
 3. If the change sprawled, duplicated existing patterns, or introduced speculative structure, cut it back before continuing.
 4. Classify the change path before audits:
    - docs/process-only and vault-only data tasks skip audit subagents unless the user explicitly asks for them
-   - repo code/test/config changes run `task-finish-review` by default
+   - tiny repo-internal workflow/tooling changes that meet the fast-path criteria below may use local final review instead of an audit subagent
+   - other repo code/test/config changes run `task-finish-review` by default
    - add a `simplify` pass when the change was developed locally rather than landed from an applied patch file, the implementation diff reaches 200 or more changed lines, and it would materially benefit from an explicit behavior-preserving simplification review before final review
 5. When the exceptional `simplify` condition applies, spawn a dedicated audit subagent for that pass and hand it `agent-docs/prompts/simplify.md` plus the audit handoff packet below. Expect this audit to take about 5 to 10 minutes on non-trivial diffs; do not rush it or cancel it early just because it has not answered in the first minute.
 6. Apply behavior-preserving simplifications from that pass, with explicit attention to missed existing helpers, duplicated logic, and abstractions that do not earn their keep immediately.
 7. For user-visible, persisted-state, operational, or trust-boundary changes, capture at least one direct scenario check in addition to scripted tests and record the exact evidence. Examples: built CLI command, focused manual flow, browser inspection, or a narrow end-to-end path.
 8. Run or re-run the required checks after the implementation is stable, after any simplify updates, and after any later review-driven fixes.
-9. Spawn a dedicated audit subagent for the final completion review and hand it `agent-docs/prompts/task-finish-review.md` plus the audit handoff packet below. Expect this audit to take about 5 to 10 minutes on non-trivial diffs; do not rush it or cancel it early just because it has not answered in the first minute.
-10. Treat the final completion review as the audit of remaining coverage and proof gaps too. If it finds meaningful missing tests or boundary-level verification, add the smallest high-impact proof before handoff instead of creating a separate coverage-audit pass.
+9. For normal repo code/test/config changes, spawn a dedicated audit subagent for the final completion review and hand it `agent-docs/prompts/task-finish-review.md` plus the audit handoff packet below. For the tiny repo-internal fast path below, do an explicit local final review instead.
+10. Treat that final review, whether local or delegated, as the audit of remaining coverage and proof gaps too. If it finds meaningful missing tests or boundary-level verification, add the smallest high-impact proof before handoff instead of creating a separate coverage-audit pass.
 11. Resolve high-severity findings before final handoff and re-run affected required checks after any post-review fixes.
 12. Do not automatically spawn another workflow audit subagent after that first final review. One extra audit rerun is allowed only when the first review forces a large or high-risk follow-up diff; otherwise finish locally after the post-fix checks.
 13. If the task used an active execution plan and the task is done or abandoned, close that plan before commit or handoff. Prefer `bash scripts/finish-task <active-plan-path> "type(scope): summary" <path> [path ...]` when the task is ready to commit.
@@ -40,9 +41,21 @@ Add a `simplify` pass before final review only when all of the following are tru
 
 If those conditions are not met, skip `simplify` and proceed directly to `task-finish-review`.
 
+## Tiny Repo-Internal Fast Path
+
+Use local final review instead of a mandatory audit subagent only when all of the following are true:
+
+1. The implementation diff is under roughly 120 changed lines.
+2. The touched files stay within repo-internal docs/process/verification tooling such as `agent-docs/**`, `docs/**`, `scripts/**`, `AGENTS.md`, `ARCHITECTURE.md`, `README.md`, `vitest.config.ts`, or root `tsconfig*.json`.
+3. The change does not touch package/app runtime logic, product behavior, persisted-state logic, auth/trust boundaries, or deploy surfaces.
+4. The verification path is the low-risk fast path from `agent-docs/operations/verification-and-runtime.md`, centered on `pnpm typecheck` plus direct touched-file checks.
+
+If any of those conditions fail, use the normal audit path.
+
 ## Required Audit Delegation
 
 - The default audit path is one mandatory subagent pass, `task-finish-review`.
+- The only standing exception is the tiny repo-internal fast path above, which uses explicit local final review instead of a spawned audit subagent.
 - `simplify` is an exceptional extra pass for locally developed non-patch changes at 200 or more changed lines, not the repo default.
 - Use explicitly spawned subagents for every required audit pass.
 - Treat those audit subagents as review-only unless the user explicitly asks for an audit worker that can patch code.
