@@ -1,5 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
+export {
+  resolveAssistantStatePaths,
+  type AssistantStatePaths,
+} from '@murphai/runtime-state/node'
 import {
   type AssistantApprovalPolicy,
   type AssistantProviderSessionOptions,
@@ -15,97 +19,6 @@ import {
 } from '../conversation-ref.js'
 import { normalizeNullableString } from '../shared.js'
 import type { AssistantSessionLocator } from './types.js'
-
-export interface AssistantStatePaths {
-  absoluteVaultRoot: string
-  assistantStateRoot: string
-  automationStatePath: string
-  cronDirectory: string
-  cronAutomationStatePath: string
-  cronJobsPath: string
-  cronRunsDirectory: string
-  diagnosticsDirectory: string
-  diagnosticEventsPath: string
-  diagnosticSnapshotPath: string
-  failoverStatePath: string
-  indexesPath: string
-  journalsDirectory: string
-  outboxDirectory: string
-  outboxQuarantineDirectory: string
-  providerRouteRecoveryDirectory: string
-  providerRouteRecoverySecretsDirectory: string
-  quarantineDirectory: string
-  resourceBudgetPath: string
-  runtimeEventsPath: string
-  secretsDirectory: string
-  sessionSecretsDirectory: string
-  sessionsDirectory: string
-  stateDirectory: string
-  statusPath: string
-  transcriptsDirectory: string
-  turnsDirectory: string
-  usageDirectory: string
-  usagePendingDirectory: string
-}
-
-export function resolveAssistantStatePaths(
-  vaultRoot: string,
-): AssistantStatePaths {
-  const absoluteVaultRoot = path.resolve(vaultRoot)
-  const assistantStateRoot = path.join(
-    absoluteVaultRoot,
-    '.runtime',
-    'operations',
-    'assistant',
-  )
-  const cronDirectory = path.join(assistantStateRoot, 'cron')
-  const diagnosticsDirectory = path.join(assistantStateRoot, 'diagnostics')
-  const journalsDirectory = path.join(assistantStateRoot, 'journals')
-  const outboxDirectory = path.join(assistantStateRoot, 'outbox')
-  const turnsDirectory = path.join(assistantStateRoot, 'receipts')
-  const secretsDirectory = path.join(assistantStateRoot, 'secrets')
-  const sessionSecretsDirectory = path.join(secretsDirectory, 'sessions')
-  const providerRouteRecoverySecretsDirectory = path.join(
-    secretsDirectory,
-    'provider-route-recovery',
-  )
-  const usageDirectory = path.join(assistantStateRoot, 'usage')
-
-  return {
-    absoluteVaultRoot,
-    assistantStateRoot,
-    automationStatePath: path.join(assistantStateRoot, 'automation-state.json'),
-    cronDirectory,
-    cronAutomationStatePath: path.join(cronDirectory, 'automation-runtime.json'),
-    cronJobsPath: path.join(cronDirectory, 'jobs.json'),
-    cronRunsDirectory: path.join(cronDirectory, 'runs'),
-    diagnosticsDirectory,
-    diagnosticEventsPath: path.join(diagnosticsDirectory, 'events.jsonl'),
-    diagnosticSnapshotPath: path.join(diagnosticsDirectory, 'snapshot.json'),
-    failoverStatePath: path.join(assistantStateRoot, 'failover.json'),
-    indexesPath: path.join(assistantStateRoot, 'indexes.json'),
-    journalsDirectory,
-    outboxDirectory,
-    outboxQuarantineDirectory: path.join(outboxDirectory, '.quarantine'),
-    providerRouteRecoveryDirectory: path.join(
-      assistantStateRoot,
-      'provider-route-recovery',
-    ),
-    providerRouteRecoverySecretsDirectory,
-    quarantineDirectory: path.join(assistantStateRoot, 'quarantine'),
-    resourceBudgetPath: path.join(assistantStateRoot, 'runtime-budgets.json'),
-    runtimeEventsPath: path.join(journalsDirectory, 'runtime-events.jsonl'),
-    secretsDirectory,
-    sessionSecretsDirectory,
-    sessionsDirectory: path.join(assistantStateRoot, 'sessions'),
-    stateDirectory: path.join(assistantStateRoot, 'state'),
-    statusPath: path.join(assistantStateRoot, 'status.json'),
-    transcriptsDirectory: path.join(assistantStateRoot, 'transcripts'),
-    turnsDirectory,
-    usageDirectory,
-    usagePendingDirectory: path.join(usageDirectory, 'pending'),
-  }
-}
 
 export function redactAssistantDisplayPath(filePath: string): string {
   const absolutePath = path.resolve(filePath)

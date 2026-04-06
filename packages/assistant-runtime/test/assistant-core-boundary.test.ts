@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
+import { resolveAssistantStatePaths as resolveRuntimeAssistantStatePaths } from "@murphai/runtime-state/node";
 import { test } from "vitest";
 
 import {
@@ -19,6 +19,7 @@ import {
   saveAssistantSelfDeliveryTarget,
   saveDefaultVaultConfig,
 } from "@murphai/assistant-core";
+import { resolveAssistantStatePaths as resolveAssistantCoreStatePaths } from "@murphai/assistant-core/assistant-state";
 
 interface PackageManifest {
   dependencies?: Record<string, string | undefined>;
@@ -184,6 +185,15 @@ test("assistant-runtime uses the dedicated @murphai/assistant-core boundary inst
   assert.deepEqual(
     assistantRuntimeHostedEnvModule.HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
     assistantCoreModule.HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
+  );
+});
+
+test("assistant-core and runtime-state share the same assistant runtime path resolver", () => {
+  const vaultRoot = "/tmp/murph-assistant-paths";
+
+  assert.deepEqual(
+    resolveAssistantCoreStatePaths(vaultRoot),
+    resolveRuntimeAssistantStatePaths(vaultRoot),
   );
 });
 
@@ -363,7 +373,7 @@ test("assistant-core automation state round-trips through canonical local storag
   );
 
   try {
-    const automationPath = resolveAssistantStatePaths(vaultRoot).automationPath;
+    const automationPath = resolveRuntimeAssistantStatePaths(vaultRoot).automationStatePath;
     const initial = await readAssistantAutomationState(vaultRoot);
     assert.equal(initial.autoReplyPrimed, true);
     assert.deepEqual(initial.autoReplyChannels, []);
@@ -388,7 +398,8 @@ test("assistant-core automation state round-trips through canonical local storag
       ...coreSaved,
       updatedAt: "2026-03-28T12:00:00.000Z",
     });
-    const rewrittenAutomationPath = resolveAssistantStatePaths(rewrittenVaultRoot).automationPath;
+    const rewrittenAutomationPath =
+      resolveRuntimeAssistantStatePaths(rewrittenVaultRoot).automationStatePath;
     await mkdir(path.dirname(rewrittenAutomationPath), { recursive: true });
     await writeFile(
       rewrittenAutomationPath,
