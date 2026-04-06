@@ -3,12 +3,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   findHostedMemberForPrivyIdentity: vi.fn(),
+  revnetEnabled: false,
   verifyHostedPrivyAccessToken: vi.fn(),
   verifyHostedPrivyIdentityToken: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
   findHostedMemberForPrivyIdentity: mocks.findHostedMemberForPrivyIdentity,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/revnet", () => ({
+  isHostedOnboardingRevnetEnabled: () => mocks.revnetEnabled,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/privy", async () => {
@@ -35,6 +40,7 @@ describe("hosted Privy request auth", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.revnetEnabled = false;
     mocks.verifyHostedPrivyAccessToken.mockResolvedValue({
       appId: "cm_app_123",
       expiration: 1743067800,
@@ -152,7 +158,7 @@ describe("hosted Privy request auth", () => {
     });
   });
 
-  it("remaps missing wallet readiness into the completion retryable conflict response", async () => {
+  it("allows the completion route to proceed with a phone-only Privy session when RevNet is disabled", async () => {
     mocks.verifyHostedPrivyIdentityToken.mockResolvedValue({
       id: "did:privy:user_123",
       linked_accounts: [
@@ -163,13 +169,19 @@ describe("hosted Privy request auth", () => {
         },
       ],
     });
+    mocks.findHostedMemberForPrivyIdentity.mockResolvedValue(null);
 
-    await expect(requireHostedPrivyCompletionRequestAuthContext(createAuthenticatedRequest(), prisma)).rejects.toMatchObject({
-      code: "PRIVY_WALLET_NOT_READY",
-      httpStatus: 409,
-      retryable: true,
+    await expect(requireHostedPrivyCompletionRequestAuthContext(createAuthenticatedRequest(), prisma)).resolves.toMatchObject({
+      identity: {
+        phone: {
+          number: "+14155552671",
+        },
+        userId: "did:privy:user_123",
+        wallet: null,
+      },
+      member: null,
     });
-    expect(mocks.findHostedMemberForPrivyIdentity).not.toHaveBeenCalled();
+    expect(mocks.findHostedMemberForPrivyIdentity).toHaveBeenCalledTimes(1);
   });
 
   it("blocks suspended members from active hosted mutations", async () => {

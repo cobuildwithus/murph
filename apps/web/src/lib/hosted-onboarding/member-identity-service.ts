@@ -125,7 +125,7 @@ function buildHostedMemberPhoneIdentity(phoneNumber: string) {
 
   return {
     maskedPhoneNumberHint: readHostedPhoneHint(phoneNumber),
-    normalizedPhoneNumber: phoneLookupKey,
+    phoneLookupKey: phoneLookupKey,
     phoneNumberVerifiedAt: null,
     privyUserId: null,
     walletAddress: null,
@@ -133,6 +133,37 @@ function buildHostedMemberPhoneIdentity(phoneNumber: string) {
     walletCreatedAt: null,
     walletProvider: null,
   };
+}
+
+function buildHostedMemberWalletStorage(input: {
+  existingWalletAddress?: string | null;
+  existingWalletChainType?: string | null;
+  existingWalletCreatedAt?: Date | null;
+  existingWalletProvider?: string | null;
+  now: Date;
+  wallet: HostedPrivyIdentity["wallet"];
+}) {
+  if (!input.wallet) {
+    return {
+      walletAddress: input.existingWalletAddress ?? null,
+      walletChainType: input.existingWalletChainType ?? null,
+      walletCreatedAt: input.existingWalletCreatedAt ?? null,
+      walletProvider: input.existingWalletProvider ?? null,
+    };
+  }
+
+  return {
+    walletAddress: normalizeHostedWalletAddress(input.wallet.address),
+    walletChainType: input.wallet.chainType,
+    walletCreatedAt: input.existingWalletCreatedAt ?? input.now,
+    walletProvider: "privy" as const,
+  };
+}
+
+export function hasHostedMemberPrivyIdentity(member: {
+  privyUserId: string | null | undefined;
+}): boolean {
+  return Boolean(member.privyUserId);
 }
 
 export async function persistHostedMemberLinqChatBinding(input: {
@@ -174,10 +205,10 @@ export async function ensureHostedMemberForPrivyIdentity(input: {
         phoneNumberVerifiedAt: input.now,
         prisma: tx,
         privyUserId: input.identity.userId,
-        walletAddress: normalizeHostedWalletAddress(input.identity.wallet.address),
-        walletChainType: input.identity.wallet.chainType,
-        walletCreatedAt: input.now,
-        walletProvider: "privy",
+        ...buildHostedMemberWalletStorage({
+          now: input.now,
+          wallet: input.identity.wallet,
+        }),
       });
       return createdMember;
     }
@@ -233,10 +264,13 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
       });
     }
 
-    const normalizedWalletAddress = normalizeHostedWalletAddress(input.identity.wallet.address);
+    const normalizedWalletAddress = input.identity.wallet
+      ? normalizeHostedWalletAddress(input.identity.wallet.address)
+      : null;
 
     if (
       currentIdentity?.walletAddress
+      && normalizedWalletAddress
       && normalizeHostedWalletAddress(currentIdentity.walletAddress) !== normalizedWalletAddress
     ) {
       throw hostedOnboardingError({
@@ -264,10 +298,14 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
         phoneNumberVerifiedAt: input.now,
         prisma: tx,
         privyUserId: input.identity.userId,
-        walletAddress: normalizedWalletAddress,
-        walletChainType: input.identity.wallet.chainType,
-        walletCreatedAt: currentIdentity?.walletCreatedAt ?? input.now,
-        walletProvider: "privy",
+        ...buildHostedMemberWalletStorage({
+          existingWalletAddress: currentIdentity?.walletAddress,
+          existingWalletChainType: currentIdentity?.walletChainType,
+          existingWalletCreatedAt: currentIdentity?.walletCreatedAt,
+          existingWalletProvider: currentIdentity?.walletProvider,
+          now: input.now,
+          wallet: input.identity.wallet,
+        }),
       });
       return updatedMember;
     } catch (error) {
@@ -289,7 +327,9 @@ export async function findHostedMemberForPrivyIdentity(input: {
   prisma: PrismaClient | Prisma.TransactionClient;
 }): Promise<HostedMember | null> {
   const matches = new Map<string, HostedMember>();
-  const normalizedWalletAddress = normalizeHostedWalletAddress(input.identity.wallet.address);
+  const normalizedWalletAddress = input.identity.wallet
+    ? normalizeHostedWalletAddress(input.identity.wallet.address)
+    : null;
   const phoneLookupKey = createHostedPhoneLookupKey(input.identity.phone.number);
 
   if (input.identity.userId) {

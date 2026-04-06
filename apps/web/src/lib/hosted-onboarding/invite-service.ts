@@ -12,7 +12,10 @@ import { getPrisma } from "../prisma";
 import { readHostedPhoneHint } from "./contact-privacy";
 import { hasHostedMemberActiveAccess } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
-import { ensureHostedMemberForPhone } from "./member-identity-service";
+import {
+  ensureHostedMemberForPhone,
+  hasHostedMemberPrivyIdentity,
+} from "./member-identity-service";
 import { isHostedOnboardingRevnetEnabled } from "./revnet";
 import { hasHostedPrivyPhoneAuthConfig } from "./privy";
 import {
@@ -87,8 +90,8 @@ export async function getHostedInviteStatus(input: {
 
   const sessionMatchesInvite = input.authenticatedMember?.id === invite.memberId;
   const inviteIdentity = requireHostedInviteMemberIdentity(invite.member);
-  const hasPrivyIdentity = Boolean(inviteIdentity?.privyUserId)
-    && (!isHostedOnboardingRevnetEnabled() || Boolean(inviteIdentity?.walletAddress));
+  const hasPrivyIdentity = hasHostedMemberPrivyIdentity(inviteIdentity)
+    && (!isHostedOnboardingRevnetEnabled() || Boolean(inviteIdentity.walletAddress));
   const isActive = hasHostedMemberActiveAccess({
     billingStatus: invite.member.billingStatus,
     memberStatus: invite.member.status,

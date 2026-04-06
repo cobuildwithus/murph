@@ -23,7 +23,7 @@ interface HostedPrivyWalletProvisioningInput extends HostedPrivyClientSessionSta
   createWallet: () => Promise<unknown>;
 }
 
-export async function ensureHostedPrivyPhoneAndWalletReady(
+export async function ensureHostedPrivyPhoneReady(
   input: HostedPrivyWalletProvisioningInput,
 ): Promise<void> {
   let sessionState = await readHostedPrivyClientSessionState(input);
@@ -38,21 +38,17 @@ export async function ensureHostedPrivyPhoneAndWalletReady(
 
   try {
     await input.createWallet();
-  } catch (error) {
+  } catch {
     sessionState = await readHostedPrivyClientSessionState(input);
 
     if (sessionState.wallet) {
       return;
     }
 
-    throw error;
+    return;
   }
 
-  sessionState = await readHostedPrivyClientSessionState(input);
-
-  if (!sessionState.wallet) {
-    throw new Error("We could not finish preparing your account. Wait a moment and try again.");
-  }
+  await readHostedPrivyClientSessionState(input);
 }
 
 export async function readHostedPrivyClientSessionState(
@@ -93,7 +89,7 @@ export function describeHostedPrivyClientSessionIssue(
   }
 
   if (issue === "missing-wallet") {
-    return "Your current Privy session is almost ready. We're finishing setup now, or you can sign out and use a different number.";
+    return "Your current Privy session is still syncing account details. You can continue now, or sign out and use a different number.";
   }
 
   return null;

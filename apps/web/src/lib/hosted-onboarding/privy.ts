@@ -9,6 +9,7 @@ import {
   type HostedPrivyWalletAccount,
   resolveHostedPrivyLinkedAccountState,
 } from "./privy-shared";
+import { isHostedOnboardingRevnetEnabled } from "./revnet";
 import { getHostedOnboardingEnvironment } from "./runtime";
 
 export interface HostedPrivyUser extends HostedPrivyLinkedAccountContainer {
@@ -25,7 +26,7 @@ const HOSTED_PRIVY_IDENTITY_TOKEN_COOKIE_NAME = "privy-id-token";
 export interface HostedPrivyIdentity {
   phone: HostedPrivyPhoneAccount;
   userId: string;
-  wallet: HostedPrivyWalletAccount;
+  wallet: HostedPrivyWalletAccount | null;
 }
 
 export interface HostedPrivyAccessTokenClaims {
@@ -135,7 +136,7 @@ export function resolveHostedPrivyIdentityFromVerifiedUser(user: HostedPrivyUser
     });
   }
 
-  if (!wallet) {
+  if (!wallet && isHostedOnboardingRevnetEnabled()) {
     throw hostedOnboardingError({
       code: "PRIVY_WALLET_REQUIRED",
       message: "Finish setup before continuing.",
@@ -146,7 +147,7 @@ export function resolveHostedPrivyIdentityFromVerifiedUser(user: HostedPrivyUser
   return {
     phone,
     userId: user.id,
-    wallet,
+    wallet: wallet ?? null,
   };
 }
 
