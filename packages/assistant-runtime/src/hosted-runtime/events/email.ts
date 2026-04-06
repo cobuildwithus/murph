@@ -20,7 +20,7 @@ export async function ingestHostedEmailMessage(
   dispatch: HostedExecutionDispatchRequest & {
     event: Extract<HostedExecutionDispatchRequest["event"], { kind: "email.message.received" }>;
   },
-  emailBaseUrl: string,
+  resultsBaseUrl: string,
   fetchImpl: typeof fetch | undefined,
   timeoutMs: number | null,
   _runtimeEnv: Readonly<Record<string, string>>,
@@ -29,7 +29,7 @@ export async function ingestHostedEmailMessage(
     description: "Hosted email message fetch",
     fetchImpl,
     timeoutMs,
-    url: buildHostedRunnerEmailMessageUrl(emailBaseUrl, dispatch.event.rawMessageKey).toString(),
+    url: buildHostedRunnerEmailMessageUrl(resultsBaseUrl, dispatch.event.rawMessageKey).toString(),
   });
 
   if (!response.ok) {

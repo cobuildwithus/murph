@@ -8,6 +8,7 @@ import {
   hostedSideEffectJournalObjectKey,
   hostedUserEnvObjectKey,
 } from "../src/storage-paths.js";
+import { expectOpaqueStrings } from "./object-key-assertions";
 
 const rootKey = new Uint8Array(Array.from({ length: 32 }, (_, index) => index + 1));
 
@@ -33,20 +34,10 @@ describe("hosted storage paths", () => {
     expect(sideEffectKey).toMatch(/^transient\/side-effects\/[0-9a-f]{24}\/[0-9a-f]{40}\.json$/);
     expect(dispatchPayloadKey).toMatch(/^transient\/dispatch-payloads\/[0-9a-f]{24}\/[0-9a-f]{40}\.json$/);
 
-    for (const key of [
-      artifactKey,
-      bundleKey,
-      userEnvKey,
-      journalKey,
-      sideEffectKey,
-      dispatchPayloadKey,
-    ]) {
-      expect(key).not.toContain(userId);
-      expect(key).not.toContain(eventId);
-      expect(key).not.toContain(effectId);
-      expect(key).not.toContain(sha256);
-      expect(key).not.toContain(hash);
-    }
+    expectOpaqueStrings(
+      [artifactKey, bundleKey, userEnvKey, journalKey, sideEffectKey, dispatchPayloadKey],
+      [userId, eventId, effectId, sha256, hash],
+    );
   });
 
   it("returns stable keys for the same inputs", async () => {

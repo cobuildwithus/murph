@@ -1,6 +1,5 @@
 import { afterEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
-import type { SharePack } from "@murphai/contracts";
 import {
   DEFAULT_HOSTED_EXECUTION_ARTIFACTS_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_COMMIT_BASE_URL,
@@ -71,37 +70,13 @@ import {
   resolveHostedExecutionDispatchOutcomeState,
   verifyHostedExecutionSignature,
 } from "@murphai/hosted-execution";
+import {
+  TEST_HOSTED_RECIPIENT_PRIVATE_JWK,
+  TEST_HOSTED_RECIPIENT_PUBLIC_JWK,
+  TEST_HOSTED_SHARE_PACK,
+} from "./test-fixtures.ts";
 
 const describe = baseDescribe.sequential;
-const SHARE_PACK: SharePack = {
-  createdAt: "2026-03-28T09:20:00.000Z",
-  entities: [
-    {
-      kind: "food",
-      payload: {
-        kind: "smoothie",
-        status: "active",
-        title: "Shared breakfast",
-      },
-      ref: "food.shared-breakfast",
-    },
-  ],
-  schemaVersion: "murph.share-pack.v1",
-  title: "Shared breakfast",
-};
-const TEST_HOSTED_RECIPIENT_PUBLIC_JWK = {
-  crv: "P-256",
-  ext: true,
-  key_ops: [] as string[],
-  kty: "EC",
-  x: "xSelVJv6r6LPUS8GCNgj1T_7z5GXOrhgY1cCdzGb5ao",
-  y: "8HhciS1cAPKs_fPfgZnb1USdRtBX-4Nvp8XiBHuMcmY",
-} as const;
-const TEST_HOSTED_RECIPIENT_PRIVATE_JWK = {
-  ...TEST_HOSTED_RECIPIENT_PUBLIC_JWK,
-  d: "HAPljluiFVW3g-UEmrJ9NVYTlclAhaC8N5LT0h7vitQ",
-  key_ops: ["deriveBits"] as string[],
-} as const;
 describe("@murphai/hosted-execution", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -1073,14 +1048,15 @@ describe("@murphai/hosted-execution", () => {
   it("exports the shared hosted callback hosts and default callback base urls", () => {
     expect(HOSTED_EXECUTION_CALLBACK_HOSTS).toEqual({
       artifacts: "artifacts.worker",
-      commit: "commit.worker",
-      email: "email.worker",
-      sideEffects: "side-effects.worker",
+      results: "results.worker",
+      commit: "results.worker",
+      email: "results.worker",
+      sideEffects: "results.worker",
     });
     expect(DEFAULT_HOSTED_EXECUTION_ARTIFACTS_BASE_URL).toBe("http://artifacts.worker");
-    expect(DEFAULT_HOSTED_EXECUTION_COMMIT_BASE_URL).toBe("http://commit.worker");
-    expect(DEFAULT_HOSTED_EXECUTION_EMAIL_BASE_URL).toBe("http://email.worker");
-    expect(DEFAULT_HOSTED_EXECUTION_SIDE_EFFECTS_BASE_URL).toBe("http://side-effects.worker");
+    expect(DEFAULT_HOSTED_EXECUTION_COMMIT_BASE_URL).toBe("http://results.worker");
+    expect(DEFAULT_HOSTED_EXECUTION_EMAIL_BASE_URL).toBe("http://results.worker");
+    expect(DEFAULT_HOSTED_EXECUTION_SIDE_EFFECTS_BASE_URL).toBe("http://results.worker");
   });
 
   it("reads hosted email capabilities with separate ingress and send readiness", () => {
@@ -1309,7 +1285,7 @@ describe("@murphai/hosted-execution", () => {
       memberId: "member_123",
       occurredAt: "2026-03-28T09:20:00.000Z",
       share: {
-        pack: SHARE_PACK,
+        pack: TEST_HOSTED_SHARE_PACK,
         shareId: "share_456",
       },
     });

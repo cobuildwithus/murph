@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { test } from "vitest";
@@ -10,13 +9,14 @@ import {
   resolveRuntimePaths,
 } from "@murphai/runtime-state/node";
 import { reconcileHostedVerifiedEmailSelfTarget } from "../src/hosted-email-route.ts";
+import { createHostedRuntimeWorkspace } from "./hosted-runtime-test-helpers.ts";
 
 test("hosted email route reconciliation saves the email self-target from hosted sender env without inbox config", async () => {
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-email-route-"));
+  const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace(
+    "hosted-runner-email-route-",
+  );
 
   try {
-    const operatorHomeRoot = path.join(workspaceRoot, "home");
-    const vaultRoot = path.join(workspaceRoot, "vault");
     await mkdir(vaultRoot, { recursive: true });
 
     const result = await reconcileHostedVerifiedEmailSelfTarget({
@@ -56,16 +56,16 @@ test("hosted email route reconciliation saves the email self-target from hosted 
       ["email"],
     );
   } finally {
-    await rm(workspaceRoot, { force: true, recursive: true });
+    await cleanup();
   }
 });
 
 test("hosted email route reconciliation uses the hosted sender address instead of a local inbox connector identity", async () => {
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-email-route-"));
+  const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace(
+    "hosted-runner-email-route-",
+  );
 
   try {
-    const operatorHomeRoot = path.join(workspaceRoot, "home");
-    const vaultRoot = path.join(workspaceRoot, "vault");
     const runtimePaths = resolveRuntimePaths(vaultRoot);
     await mkdir(path.dirname(runtimePaths.inboxConfigPath), { recursive: true });
     await writeFile(
@@ -114,16 +114,16 @@ test("hosted email route reconciliation uses the hosted sender address instead o
       },
     );
   } finally {
-    await rm(workspaceRoot, { force: true, recursive: true });
+    await cleanup();
   }
 });
 
 test("hosted email route reconciliation becomes a no-op when the saved target already matches", async () => {
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-email-route-"));
+  const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace(
+    "hosted-runner-email-route-",
+  );
 
   try {
-    const operatorHomeRoot = path.join(workspaceRoot, "home");
-    const vaultRoot = path.join(workspaceRoot, "vault");
     await mkdir(vaultRoot, { recursive: true });
 
     await reconcileHostedVerifiedEmailSelfTarget({
@@ -151,16 +151,16 @@ test("hosted email route reconciliation becomes a no-op when the saved target al
       status: "unchanged",
     });
   } finally {
-    await rm(workspaceRoot, { force: true, recursive: true });
+    await cleanup();
   }
 });
 
 test("hosted email route reconciliation stays private when no hosted sender identity is configured", async () => {
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-email-route-"));
+  const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace(
+    "hosted-runner-email-route-",
+  );
 
   try {
-    const operatorHomeRoot = path.join(workspaceRoot, "home");
-    const vaultRoot = path.join(workspaceRoot, "vault");
     await mkdir(vaultRoot, { recursive: true });
 
     const result = await reconcileHostedVerifiedEmailSelfTarget({
@@ -180,6 +180,6 @@ test("hosted email route reconciliation stays private when no hosted sender iden
     });
     await assert.rejects(readFile(path.join(operatorHomeRoot, ".murph", "config.json"), "utf8"));
   } finally {
-    await rm(workspaceRoot, { force: true, recursive: true });
+    await cleanup();
   }
 });

@@ -20,6 +20,8 @@ import {
 import { shouldRejectHostedEmailIngressFailure } from "../src/hosted-email/ingress-policy.ts";
 import { sendHostedEmailMessage } from "../src/hosted-email/transport.ts";
 
+import { MemoryEncryptedR2Bucket } from "./test-helpers";
+
 const TEST_CONFIG: HostedEmailConfig = {
   apiBaseUrl: "https://api.cloudflare.com/client/v4",
   cloudflareAccountId: "acct_123",
@@ -37,31 +39,6 @@ const ROTATED_IDENTITY_CONFIG: HostedEmailConfig = {
 const TEST_KEY = new Uint8Array(Array.from({ length: 32 }, (_, index) => index + 1));
 const TEST_KEY_ID = "v1";
 
-class MemoryBucket {
-  readonly objects = new Map<string, string>();
-
-  async get(key: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer> } | null> {
-    const value = this.objects.get(key);
-    if (value === undefined) {
-      return null;
-    }
-
-    return {
-      async arrayBuffer() {
-        return new TextEncoder().encode(value).buffer;
-      },
-    };
-  }
-
-  async put(key: string, value: string): Promise<void> {
-    this.objects.set(key, value);
-  }
-
-  async delete(key: string): Promise<void> {
-    this.objects.delete(key);
-  }
-}
-
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -69,7 +46,7 @@ afterEach(() => {
 
 describe("hosted email routing and transport", () => {
   it("does not resolve legacy route headers once only stable alias addresses are supported", async () => {
-    const bucket = new MemoryBucket();
+    const bucket = new MemoryEncryptedR2Bucket();
     await createHostedEmailUserAddress({
       bucket,
       config: TEST_CONFIG,
@@ -90,7 +67,7 @@ describe("hosted email routing and transport", () => {
   });
 
   it("does not rewrite the stable user alias route when the same user address is recreated", async () => {
-    const bucket = new MemoryBucket();
+    const bucket = new MemoryEncryptedR2Bucket();
     const putSpy = vi.spyOn(bucket, "put");
 
     const firstAddress = await createHostedEmailUserAddress({
@@ -115,7 +92,7 @@ describe("hosted email routing and transport", () => {
   });
 
   it("routes direct mail to the fixed public sender through the synced verified owner index", async () => {
-    const bucket = new MemoryBucket();
+    const bucket = new MemoryEncryptedR2Bucket();
     await reconcileHostedEmailVerifiedSenderRoute({
       bucket,
       config: TEST_CONFIG,
@@ -147,7 +124,7 @@ describe("hosted email routing and transport", () => {
   });
 
   it("stores only a sender hash in new verified-owner index records", async () => {
-    const bucket = new MemoryBucket();
+    const bucket = new MemoryEncryptedR2Bucket();
     const verifiedEmailAddress = "owner@example.com";
 
     await reconcileHostedEmailVerifiedSenderRoute({
@@ -179,7 +156,7 @@ describe("hosted email routing and transport", () => {
   });
 
   it("resolves direct-public routes only when the envelope sender matches the single From header", async () => {
-    const bucket = new MemoryBucket();
+    const bucket = new MemoryEncryptedR2Bucket();
     const verifiedEmailAddress = "owner@example.com";
 
     await reconcileHostedEmailVerifiedSenderRoute({
@@ -243,7 +220,7 @@ describe("hosted email routing and transport", () => {
   });
 
   it("does not resolve removed legacy verified-owner records and rewrites them on sync", async () => {
-    const bucket = new MemoryBucket();
+    const bucket = new MemoryEncryptedR2Bucket();
     const verifiedEmailAddress = "owner@example.com";
     const senderKey = await deriveVerifiedSenderKey(TEST_CONFIG.signingSecret!, verifiedEmailAddress);
     const objectKey = await deriveVerifiedSenderRouteObjectKey(TEST_KEY, senderKey);
@@ -331,7 +308,7 @@ describe("hosted email routing and transport", () => {
   });
 
   it("resolves the fixed public sender route without any legacy route-header override path", async () => {
-    const bucket = new MemoryBucket();
+    const bucket = new MemoryEncryptedR2Bucket();
     await reconcileHostedEmailVerifiedSenderRoute({
       bucket,
       config: TEST_CONFIG,
@@ -368,7 +345,7 @@ describe("hosted email routing and transport", () => {
   });
 
   it("moves the public sender route when the verified owner address changes and rejects conflicts", async () => {
-    const bucket = new MemoryBucket();
+    const bucket = new MemoryEncryptedR2Bucket();
     await reconcileHostedEmailVerifiedSenderRoute({
       bucket,
       config: TEST_CONFIG,
@@ -423,7 +400,7 @@ describe("hosted email routing and transport", () => {
   });
 
   it("does not rewrite the verified-owner route when the verified sender sync is a no-op", async () => {
-    const bucket = new MemoryBucket();
+    const bucket = new MemoryEncryptedR2Bucket();
     const putSpy = vi.spyOn(bucket, "put");
 
     await reconcileHostedEmailVerifiedSenderRoute({
@@ -451,7 +428,7 @@ describe("hosted email routing and transport", () => {
   });
 
   it("cleans up the previous verified-owner route when a move is retried after the destination was already written", async () => {
-    const bucket = new MemoryBucket();
+    const bucket = new MemoryEncryptedR2Bucket();
 
     await reconcileHostedEmailVerifiedSenderRoute({
       bucket,
@@ -506,7 +483,7 @@ describe("hosted email routing and transport", () => {
   });
 
   it("keeps the previous public sender route when a move conflicts", async () => {
-    const bucket = new MemoryBucket();
+    const bucket = new MemoryEncryptedR2Bucket();
     await reconcileHostedEmailVerifiedSenderRoute({
       bucket,
       config: TEST_CONFIG,
@@ -551,7 +528,7 @@ describe("hosted email routing and transport", () => {
   });
 
   it("does not resolve removed legacy per-thread aliases", async () => {
-    const bucket = new MemoryBucket();
+    const bucket = new MemoryEncryptedR2Bucket();
     const threadTarget = createHostedEmailThreadTarget({
       cc: ["teammate@example.com"],
       lastMessageId: "<message-1@example.test>",
@@ -609,7 +586,7 @@ describe("hosted email routing and transport", () => {
   });
 
   it("sends with one stable per-user reply alias and does not persist new thread routes", async () => {
-    const bucket = new MemoryBucket();
+    const bucket = new MemoryEncryptedR2Bucket();
     const stableReplyAddress = await createHostedEmailUserAddress({
       bucket,
       config: TEST_CONFIG,
@@ -680,7 +657,7 @@ describe("hosted email routing and transport", () => {
   });
 
   it("rejects explicit recipient values with header breaks before sending", async () => {
-    const bucket = new MemoryBucket();
+    const bucket = new MemoryEncryptedR2Bucket();
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -739,7 +716,7 @@ async function createRouteSignature(input: {
 }
 
 async function readStoredVerifiedSenderRoute(input: {
-  bucket: MemoryBucket;
+  bucket: MemoryEncryptedR2Bucket;
   key: Uint8Array;
   keyId: string;
   secret: string;

@@ -54,13 +54,6 @@ describe("RunnerContainer", () => {
       },
     }));
     expect(setOutboundByHosts).toHaveBeenCalledWith({
-      "commit.worker": {
-        method: "commitWorker",
-        params: {
-          internalWorkerProxyToken: expect.any(String),
-          userId: "member_123",
-        },
-      },
       "device-sync.worker": {
         method: "deviceSyncWorker",
         params: {
@@ -75,15 +68,8 @@ describe("RunnerContainer", () => {
           userId: "member_123",
         },
       },
-      "side-effects.worker": {
-        method: "sideEffectsWorker",
-        params: {
-          internalWorkerProxyToken: expect.any(String),
-          userId: "member_123",
-        },
-      },
-      "email.worker": {
-        method: "emailWorker",
+      "results.worker": {
+        method: "resultsWorker",
         params: {
           internalWorkerProxyToken: expect.any(String),
           userId: "member_123",

@@ -55,12 +55,10 @@ export interface HostedBootstrapResult {
 
 export interface NormalizedHostedAssistantRuntimeConfig {
   artifactsBaseUrl: string;
-  commitBaseUrl: string;
   commitTimeoutMs: number | null;
-  emailBaseUrl: string;
-  internalWorkerProxyToken: string | null;
   forwardedEnv: Record<string, string>;
-  sideEffectsBaseUrl: string;
+  internalWorkerProxyToken: string | null;
+  resultsBaseUrl: string;
   userEnv: Record<string, string>;
   webControlPlane: HostedExecutionWebControlPlaneEnvironment;
 }

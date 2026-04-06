@@ -15,9 +15,11 @@ import {
   createHostedExecutionSideEffectJournalStore,
 } from "../src/outbox-delivery-journal.ts";
 
+import { MemoryEncryptedR2Bucket } from "./test-helpers";
+
 describe("createHostedExecutionSideEffectJournalStore", () => {
   it("reads side-effect records stored at the authoritative effect key", async () => {
-    const bucket = createMemoryBucket();
+    const bucket = new MemoryEncryptedR2Bucket();
     const key = Buffer.alloc(32, 9);
     const record = createSentRecord({
       effectId: "outbox_authoritative",
@@ -32,7 +34,7 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
         purpose: "side-effect-journal",
         userId: "member_123",
       }),
-      bucket: bucket.api,
+      bucket,
       cryptoKey: key,
       key: objectKey,
       keyId: "v1",
@@ -41,7 +43,7 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
     });
 
     const store = createHostedExecutionSideEffectJournalStore({
-      bucket: bucket.api,
+      bucket,
       key,
       keyId: "v1",
     });
@@ -55,7 +57,7 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
   });
 
   it("reads side-effect journal records encrypted with a previous key id after rotation", async () => {
-    const bucket = createMemoryBucket();
+    const bucket = new MemoryEncryptedR2Bucket();
     const previousKey = Buffer.alloc(32, 8);
     const currentKey = Buffer.alloc(32, 9);
     const record = createSentRecord({
@@ -71,7 +73,7 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
         purpose: "side-effect-journal",
         userId: "member_123",
       }),
-      bucket: bucket.api,
+      bucket,
       cryptoKey: previousKey,
       key: objectKey,
       keyId: "v1",
@@ -80,7 +82,7 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
     });
 
     await expect(createHostedExecutionSideEffectJournalStore({
-      bucket: bucket.api,
+      bucket,
       key: currentKey,
       keyId: "v2",
       keysById: {
@@ -96,7 +98,7 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
   });
 
   it("ignores removed raw-path side-effect journal records", async () => {
-    const bucket = createMemoryBucket();
+    const bucket = new MemoryEncryptedR2Bucket();
     const previousKey = Buffer.alloc(32, 7);
     const currentKey = Buffer.alloc(32, 9);
     const record = createPreparedRecord({
@@ -112,7 +114,7 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
         purpose: "side-effect-journal",
         userId: "member_legacy",
       }),
-      bucket: bucket.api,
+      bucket,
       cryptoKey: previousKey,
       key: objectKey,
       keyId: "v1",
@@ -121,7 +123,7 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
     });
 
     const store = createHostedExecutionSideEffectJournalStore({
-      bucket: bucket.api,
+      bucket,
       key: currentKey,
       keyId: "v2",
       keysById: {
@@ -145,7 +147,7 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
   });
 
   it("promotes prepared records to sent and keeps sent delivery stable on duplicate writes", async () => {
-    const bucket = createMemoryBucket();
+    const bucket = new MemoryEncryptedR2Bucket();
     const key = Buffer.alloc(32, 9);
     const preparedRecord = createPreparedRecord({
       effectId: "outbox_promote",
@@ -156,7 +158,7 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
       fingerprint: "dedupe_promote",
     });
     const store = createHostedExecutionSideEffectJournalStore({
-      bucket: bucket.api,
+      bucket,
       key,
       keyId: "v1",
     });
@@ -176,14 +178,14 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
   });
 
   it("rejects identity conflicts instead of aliasing mismatched records", async () => {
-    const bucket = createMemoryBucket();
+    const bucket = new MemoryEncryptedR2Bucket();
     const key = Buffer.alloc(32, 9);
     const firstRecord = createPreparedRecord({
       effectId: "outbox_conflict",
       fingerprint: "dedupe_a",
     });
     const store = createHostedExecutionSideEffectJournalStore({
-      bucket: bucket.api,
+      bucket,
       key,
       keyId: "v1",
     });
@@ -203,7 +205,7 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
   });
 
   it("deletes only prepared reservations", async () => {
-    const bucket = createMemoryBucket();
+    const bucket = new MemoryEncryptedR2Bucket();
     const key = Buffer.alloc(32, 9);
     const preparedRecord = createPreparedRecord({
       effectId: "outbox_prepared",
@@ -214,7 +216,7 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
       fingerprint: "dedupe_sent",
     });
     const store = createHostedExecutionSideEffectJournalStore({
-      bucket: bucket.api,
+      bucket,
       key,
       keyId: "v1",
     });
@@ -306,31 +308,4 @@ async function sideEffectRecordKey(rootKey: Uint8Array, userId: string, effectId
 
 function legacySideEffectRecordKey(userId: string, effectId: string): string {
   return `transient/side-effects/${encodeURIComponent(userId)}/${encodeURIComponent(effectId)}.json`;
-}
-
-function createMemoryBucket() {
-  const objects = new Map<string, string>();
-  const encoder = new TextEncoder();
-
-  return {
-    api: {
-      async delete(key: string) {
-        objects.delete(key);
-      },
-      async get(key: string) {
-        const value = objects.get(key);
-        if (value === undefined) {
-          return null;
-        }
-        return {
-          async arrayBuffer() {
-            return encoder.encode(value).buffer;
-          },
-        };
-      },
-      async put(key: string, value: string) {
-        objects.set(key, value);
-      },
-    },
-  };
 }

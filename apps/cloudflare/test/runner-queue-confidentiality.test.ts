@@ -7,6 +7,7 @@ import {
 } from "../src/dispatch-payload-store.js";
 
 import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers";
+import { expectOpaqueStrings } from "./object-key-assertions";
 
 const SHARE_PACK: SharePack = {
   createdAt: "2026-04-06T00:00:00.000Z",
@@ -49,8 +50,7 @@ describe("hosted dispatch payload store confidentiality", () => {
     const payloadJson = await store.writeStoredDispatch(dispatch);
 
     expect(resolveHostedRunnerDispatchPayloadStorage(dispatch)).toBe("reference");
-    expect(payloadJson).not.toContain("super secret gateway message");
-    expect(payloadJson).not.toContain("session-secret");
+    expectOpaqueStrings([payloadJson], ["super secret gateway message", "session-secret"]);
     expect([...bucket.objects.keys()]).toHaveLength(1);
     expect(await store.readStoredDispatch(payloadJson)).toEqual(dispatch);
 
@@ -98,10 +98,10 @@ describe("hosted dispatch payload store confidentiality", () => {
     const linqPayloadJson = await store.writeStoredDispatch(linqDispatch);
     const telegramPayloadJson = await store.writeStoredDispatch(telegramDispatch);
 
-    expect(linqPayloadJson).not.toContain("private linq body");
-    expect(linqPayloadJson).not.toContain("phone-lookup");
-    expect(telegramPayloadJson).not.toContain("private telegram text");
-    expect(telegramPayloadJson).not.toContain("telegramUpdate");
+    expectOpaqueStrings(
+      [linqPayloadJson, telegramPayloadJson],
+      ["private linq body", "phone-lookup", "private telegram text", "telegramUpdate"],
+    );
     expect(await store.readStoredDispatch(linqPayloadJson)).toEqual(linqDispatch);
     expect(await store.readStoredDispatch(telegramPayloadJson)).toEqual(telegramDispatch);
   });
@@ -129,7 +129,7 @@ describe("hosted dispatch payload store confidentiality", () => {
     const payloadJson = await store.writeStoredDispatch(dispatch);
 
     expect(resolveHostedRunnerDispatchPayloadStorage(dispatch)).toBe("reference");
-    expect(payloadJson).not.toContain("hshare_123");
+    expectOpaqueStrings([payloadJson], ["hshare_123"]);
     expect(await store.readStoredDispatch(payloadJson)).toEqual(dispatch);
   });
 
@@ -159,8 +159,7 @@ describe("hosted dispatch payload store confidentiality", () => {
     const payloadJson = await store.writeStoredDispatch(dispatch);
 
     expect(resolveHostedRunnerDispatchPayloadStorage(dispatch)).toBe("reference");
-    expect(payloadJson).not.toContain("sleep.updated");
-    expect(payloadJson).not.toContain("trace_123");
+    expectOpaqueStrings([payloadJson], ["sleep.updated", "trace_123"]);
     expect(await store.readStoredDispatch(payloadJson)).toEqual(dispatch);
   });
 
@@ -246,7 +245,7 @@ describe("hosted dispatch payload store confidentiality", () => {
     const payloadJson = await store.writeStoredDispatch(dispatch);
 
     expect(resolveHostedRunnerDispatchPayloadStorage(dispatch)).toBe("reference");
-    expect(payloadJson).not.toContain("rawMessageKey");
+    expectOpaqueStrings([payloadJson], ["rawMessageKey"]);
     expect(bucket.objects.size).toBe(1);
     expect(await store.readStoredDispatch(payloadJson)).toEqual(dispatch);
   });

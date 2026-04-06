@@ -402,7 +402,7 @@ describe("handleRunnerOutboundRequest", () => {
 
   it("rejects side-effect writes when the route effect id and payload effect id differ", async () => {
     const response = await handleRunnerOutboundRequest(
-      new Request("http://side-effects.worker/effects/outbox_123", {
+      new Request("http://results.worker/effects/outbox_123", {
         body: JSON.stringify({
           effectId: "outbox_999",
           fingerprint: "dedupe_123",

@@ -11,6 +11,7 @@ import { createHostedExecutionJournalStore } from "../src/execution-journal.js";
 import { readHostedEmailRawMessage, writeHostedEmailRawMessage } from "../src/hosted-email.js";
 
 import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers";
+import { expectOpaqueStrings } from "./object-key-assertions";
 
 describe("opaque storage path rotation", () => {
   it("ignores removed raw-path per-user env objects", async () => {
@@ -44,7 +45,7 @@ describe("opaque storage path rotation", () => {
 
     expect(await store.readUserEnv(userId)).toBeNull();
     await store.clearUserEnv(userId);
-    expect(bucket.deleted).not.toContain(objectKey);
+    expectOpaqueStrings(bucket.deleted, [objectKey]);
   });
 
   it("requires a rewrite before per-user env survives platform root-key rotation", async () => {
@@ -125,7 +126,7 @@ describe("opaque storage path rotation", () => {
 
     expect(await store.readArtifact(sha256)).toBeNull();
     await store.deleteArtifact(sha256);
-    expect(bucket.deleted).not.toContain(objectKey);
+    expectOpaqueStrings(bucket.deleted, [objectKey]);
   });
 
   it("requires a rewrite before per-user artifacts survive platform root-key rotation", async () => {
@@ -220,7 +221,7 @@ describe("opaque storage path rotation", () => {
 
     expect(await store.readCommittedResult(userId, eventId)).toBeNull();
     await store.deleteCommittedResult(userId, eventId);
-    expect(bucket.deleted).not.toContain(objectKey);
+    expectOpaqueStrings(bucket.deleted, [objectKey]);
   });
 
   it("requires a rewrite before execution journals survive platform root-key rotation", async () => {

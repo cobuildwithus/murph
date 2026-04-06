@@ -228,7 +228,7 @@ describe("cloudflare worker runtime suite", () => {
     await resolveHostedUserCryptoContext(userId);
 
     const commitResponse = await callRunnerOutbound(
-      new Request(`http://commit.worker/events/${eventId}/commit`, {
+      new Request(`http://results.worker/events/${eventId}/commit`, {
         body: JSON.stringify({
           bundle: btoa("vault-commit"),
           currentBundleRef: null,
@@ -248,7 +248,7 @@ describe("cloudflare worker runtime suite", () => {
     expect(commitResponse.status).toBe(200);
 
     const finalizeResponse = await callRunnerOutbound(
-      new Request(`http://commit.worker/events/${eventId}/finalize`, {
+      new Request(`http://results.worker/events/${eventId}/finalize`, {
         body: JSON.stringify({
           bundle: btoa("vault-final"),
         }),

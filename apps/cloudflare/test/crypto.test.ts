@@ -16,6 +16,7 @@ import {
   readEncryptedR2Payload,
 } from "../src/crypto.js";
 import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers";
+import { expectOpaqueStrings, findStoredObjectKey } from "./object-key-assertions";
 
 describe("readEncryptedR2Payload", () => {
   it("reads older envelopes without rewriting them on read", async () => {
@@ -150,7 +151,7 @@ describe("hosted storage object keys", () => {
     const bundleRef = await bundleStore.writeBundle("vault", bundlePlaintext);
 
     expect(bundleRef.key).toMatch(/^bundles\/vault\//u);
-    expect(bundleRef.key).not.toContain(bundleRef.hash);
+    expectOpaqueStrings([bundleRef.key], [bundleRef.hash]);
 
     const artifactStore = createHostedArtifactStore({
       bucket,
@@ -172,11 +173,8 @@ describe("hosted storage object keys", () => {
       .map((byte) => byte.toString(16).padStart(2, "0"))
       .join("");
     await artifactStore.writeArtifact(artifactSha, artifactPlaintext);
-    const artifactKey = [...bucket.objects.keys()].find((key) => key.endsWith(".artifact.bin"));
-    expect(artifactKey).toBeTruthy();
-    const storedArtifactKey = artifactKey ?? "";
-    expect(storedArtifactKey).not.toContain("user_artifact_123");
-    expect(storedArtifactKey).not.toContain(artifactSha);
+    const storedArtifactKey = findStoredObjectKey(bucket, (key) => key.endsWith(".artifact.bin"));
+    expectOpaqueStrings([storedArtifactKey], ["user_artifact_123", artifactSha]);
 
     const userEnvStore = createHostedUserEnvStore({
       bucket,
@@ -187,10 +185,8 @@ describe("hosted storage object keys", () => {
       "user_env_123",
       new TextEncoder().encode('{"OPENAI_API_KEY":"secret"}'),
     );
-    const userEnvKey = [...bucket.objects.keys()].find((key) => key.startsWith("users/env/"));
-    expect(userEnvKey).toBeTruthy();
-    const storedUserEnvKey = userEnvKey ?? "";
-    expect(storedUserEnvKey).not.toContain("user_env_123");
+    const storedUserEnvKey = findStoredObjectKey(bucket, (key) => key.startsWith("users/env/"));
+    expectOpaqueStrings([storedUserEnvKey], ["user_env_123"]);
 
     const journalStore = createHostedExecutionJournalStore({
       bucket,
@@ -210,13 +206,10 @@ describe("hosted storage object keys", () => {
       sideEffects: [],
       userId: "user_journal_123",
     });
-    const journalKey = [...bucket.objects.keys()].find((key) =>
+    const storedJournalKey = findStoredObjectKey(bucket, (key) =>
       key.startsWith("transient/execution-journal/"),
     );
-    expect(journalKey).toBeTruthy();
-    const storedJournalKey = journalKey ?? "";
-    expect(storedJournalKey).not.toContain("user_journal_123");
-    expect(storedJournalKey).not.toContain("evt_journal_1");
+    expectOpaqueStrings([storedJournalKey], ["user_journal_123", "evt_journal_1"]);
 
     const sideEffectStore = createHostedExecutionSideEffectJournalStore({
       bucket,
@@ -231,13 +224,10 @@ describe("hosted storage object keys", () => {
         recordedAt: "2026-04-03T00:00:00.000Z",
       }),
     });
-    const sideEffectKey = [...bucket.objects.keys()].find((key) =>
+    const storedSideEffectKey = findStoredObjectKey(bucket, (key) =>
       key.startsWith("transient/side-effects/"),
     );
-    expect(sideEffectKey).toBeTruthy();
-    const storedSideEffectKey = sideEffectKey ?? "";
-    expect(storedSideEffectKey).not.toContain("user_side_effect_123");
-    expect(storedSideEffectKey).not.toContain("effect_1");
+    expectOpaqueStrings([storedSideEffectKey], ["user_side_effect_123", "effect_1"]);
 
     const rawMessageKey = await writeHostedEmailRawMessage({
       bucket,
@@ -246,12 +236,9 @@ describe("hosted storage object keys", () => {
       plaintext: new TextEncoder().encode("From: hi@example.com\n\nHello"),
       userId: "user_email_123",
     });
-    const emailKey = [...bucket.objects.keys()].find((key) =>
+    const storedEmailKey = findStoredObjectKey(bucket, (key) =>
       key.startsWith("transient/hosted-email/messages/"),
     );
-    expect(emailKey).toBeTruthy();
-    const storedEmailKey = emailKey ?? "";
-    expect(storedEmailKey).not.toContain("user_email_123");
-    expect(storedEmailKey).not.toContain(rawMessageKey);
+    expectOpaqueStrings([storedEmailKey], ["user_email_123", rawMessageKey]);
   });
 });

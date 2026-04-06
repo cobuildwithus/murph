@@ -20,7 +20,7 @@ import { assertNever } from "./utils.ts";
 
 export async function executeHostedDispatchEvent(input: {
   dispatch: HostedExecutionDispatchRequest;
-  emailBaseUrl: string;
+  resultsBaseUrl: string;
   internalWorkerFetch?: typeof fetch;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
@@ -36,7 +36,7 @@ export async function executeHostedDispatchEvent(input: {
   );
   const dispatchEffect = await handleHostedDispatchEvent({
     dispatch: input.dispatch,
-    emailBaseUrl: input.emailBaseUrl,
+    resultsBaseUrl: input.resultsBaseUrl,
     internalWorkerFetch: input.internalWorkerFetch,
     runtime: input.runtime,
     vaultRoot: input.vaultRoot,
@@ -51,7 +51,7 @@ export async function executeHostedDispatchEvent(input: {
 
 async function handleHostedDispatchEvent(input: {
   dispatch: HostedExecutionDispatchRequest;
-  emailBaseUrl: string;
+  resultsBaseUrl: string;
   internalWorkerFetch?: typeof fetch;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
@@ -92,7 +92,7 @@ async function handleHostedDispatchEvent(input: {
           ...dispatch,
           event: dispatch.event,
         },
-        input.emailBaseUrl,
+        input.resultsBaseUrl,
         input.internalWorkerFetch,
         input.runtime.commitTimeoutMs,
         input.runtime.userEnv,

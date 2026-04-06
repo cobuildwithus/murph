@@ -1,28 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import type { SharePack } from "@murphai/contracts";
-
+import { TEST_HOSTED_SHARE_PACK } from "./test-fixtures.ts";
 import {
   buildHostedExecutionVaultShareAcceptedDispatch,
   parseHostedExecutionDispatchRequest,
 } from "../src/index.ts";
-
-const SHARE_PACK: SharePack = {
-  createdAt: "2026-04-06T00:00:00.000Z",
-  entities: [
-    {
-      kind: "food",
-      payload: {
-        kind: "smoothie",
-        status: "active",
-        title: "Overnight oats",
-      },
-      ref: "food.oats",
-    },
-  ],
-  schemaVersion: "murph.share-pack.v1",
-  title: "Breakfast staples",
-};
 
 describe("vault.share.accepted dispatch contract", () => {
   it("preserves the inline share pack in the dispatch payload", () => {
@@ -31,7 +13,7 @@ describe("vault.share.accepted dispatch contract", () => {
       memberId: "member_123",
       occurredAt: "2026-04-06T00:00:00.000Z",
       share: {
-        pack: SHARE_PACK,
+        pack: TEST_HOSTED_SHARE_PACK,
         shareId: "hshare_123",
       },
     });
