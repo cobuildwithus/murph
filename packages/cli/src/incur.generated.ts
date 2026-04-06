@@ -203,6 +203,7 @@ declare module 'incur' {
       'vault repair': { args: {}; options: { vault: string; requestId?: string } }
       'vault show': { args: {}; options: { vault: string; requestId?: string } }
       'vault stats': { args: {}; options: { vault: string; requestId?: string } }
+      'vault upgrade': { args: {}; options: { vault: string; requestId?: string; dryRun: boolean } }
       'vault update': { args: {}; options: { vault: string; requestId?: string; title?: string; timezone?: string } }
       'wearables activity list': { args: {}; options: { vault: string; requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'wearables body list': { args: {}; options: { vault: string; requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }

@@ -57,6 +57,7 @@ function isCoreRuntimeModule(value: unknown): value is CoreRuntimeModule {
       "initializeVault",
       "validateVault",
       "repairVault",
+      "upgradeVault",
       "addMeal",
       "createExperiment",
       "ensureJournalDay",

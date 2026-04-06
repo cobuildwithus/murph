@@ -62,6 +62,27 @@ export const vaultValidateResultSchema = z.object({
   issues: z.array(validationIssueSchema),
 })
 
+export const vaultUpgradeStepSchema = z.object({
+  description: z.string().min(1),
+  fromFormatVersion: z.number().int().nonnegative(),
+  toFormatVersion: z.number().int().nonnegative(),
+})
+
+export const vaultUpgradeResultSchema = z.object({
+  vault: pathSchema,
+  metadataFile: pathSchema,
+  title: z.string().min(1),
+  timezone: z.string().min(1),
+  fromFormatVersion: z.number().int().nonnegative(),
+  toFormatVersion: z.number().int().nonnegative(),
+  steps: z.array(vaultUpgradeStepSchema),
+  affectedFiles: z.array(pathSchema),
+  rebuildableProjectionStores: z.array(z.string().min(1)),
+  updated: z.boolean(),
+  dryRun: z.boolean(),
+  auditPath: pathSchema.nullable(),
+})
+
 export const documentImportResultSchema = z.object({
   vault: pathSchema,
   sourceFile: pathSchema,
