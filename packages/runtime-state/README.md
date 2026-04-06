@@ -19,11 +19,14 @@ Inside the vault, `.runtime/**` is now split by durability/rebuildability and by
 
 `vault/.runtime/operations/assistant/**` is the assistant runtime residue root. Assistant runtime paths are portable only when they are explicitly allowlisted; current portable examples include session resume metadata, transcripts, outbox intents, receipts, automation execution state/cursors, and failover cooldowns. Current machine-local examples include locks, status snapshots, diagnostics, caches, secrets, and other throwaway operational state.
 
+That assistant runtime root is intentionally not a product-state incubator. If a datum is user-facing, queryable, or something future product features will build on, it belongs in canonical `vault/**` or explicit `derived/**` materializations, not under assistant runtime.
+
 Legacy flat paths such as `.runtime/search.sqlite`, `.runtime/gateway.sqlite`, `.runtime/inboxd.sqlite`, `.runtime/device-syncd.sqlite`, `.runtime/inboxd/**`, and `.runtime/parsers/**` are still read and are promoted forward automatically when the owning runtime next opens them.
 
 ## Contract
 
 - canonical user truth stays in `vault/**`; local runtime state must never become the canonical store of health facts
+- assistant runtime under `vault/.runtime/operations/assistant/**` is execution residue only and must not silently grow user-facing product state
 - every durable local JSON store should carry an explicit schema/schemaVersion envelope
 - every durable local SQLite store should carry an explicit `PRAGMA user_version` migration seam
 - hosted execution snapshots canonical `vault/**`, only the runtime-state paths explicitly marked `portable`, and the minimal operator-home hosted config needed for bootstrap; they do **not** snapshot `machine_local` runtime state such as device-sync control/token stores, inbox daemon config/state, parser toolchain overrides, rebuildable projections, caches, or tmp state

@@ -66,6 +66,7 @@ Before landing any new persisted state, classify it explicitly and place it in t
 
 Additional gate rules:
 
+- If a datum is user-facing, queryable, or something future product features will build on, it must not start life in assistant runtime or other operational state. Use canonical `vault/**`, or explicit `derived/**` materializations when the value is derived rather than authoritative.
 - Durable JSON state must include an explicit `schema` or `schemaVersion` seam.
 - Durable SQLite state must include an explicit `PRAGMA user_version` migration seam.
 - Do not hide durable local operational state under generic `.runtime/*` flat files when a typed bucket already exists.

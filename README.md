@@ -99,6 +99,7 @@ Murph is opinionated about storage boundaries:
 - Derived parser output and compiled knowledge pages live under `derived/**` and stay rebuildable. For the knowledge wiki specifically, `derived/knowledge/index.md` is the content catalog, `derived/knowledge/log.md` is the append-only write log, and `derived/knowledge/pages/*.md` are the assistant-authored personal synthesis pages.
 - Local machine state lives under `.runtime/**`, with durable non-canonical operational state in `.runtime/operations/**`, rebuildable projections in `.runtime/projections/**`, and ephemeral scratch state in `.runtime/cache/**` plus `.runtime/tmp/**`.
 - Assistant transcripts, metadata, receipts, outbox state, and related execution residue live under `vault/.runtime/operations/assistant/**`; durable user-facing `memory` and `automation` are canonical vault records.
+- If a datum is user-facing, queryable, or a future product building block, it does not belong in assistant runtime first. Treat assistant runtime as execution residue, not as a staging area for product state.
 
 The result is a system you can inspect with normal filesystem tools while still keeping write paths disciplined.
 

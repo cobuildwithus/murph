@@ -221,6 +221,56 @@ describe('monorepo release flow coverage audit', () => {
     )
   })
 
+  it('keeps the durable storage-boundary docs explicit about canonical product state versus assistant runtime residue', () => {
+    const agents = readFileSync(path.join(repoRoot, 'AGENTS.md'), 'utf8')
+    const architecture = readFileSync(path.join(repoRoot, 'ARCHITECTURE.md'), 'utf8')
+    const readme = readFileSync(path.join(repoRoot, 'README.md'), 'utf8')
+    const baselineArchitecture = readFileSync(
+      path.join(repoRoot, 'docs', 'architecture.md'),
+      'utf8',
+    )
+    const invariants = readFileSync(
+      path.join(repoRoot, 'docs', 'contracts', '00-invariants.md'),
+      'utf8',
+    )
+    const commandSurface = readFileSync(
+      path.join(repoRoot, 'docs', 'contracts', '03-command-surface.md'),
+      'utf8',
+    )
+    const safeExtensionGuide = readFileSync(
+      path.join(repoRoot, 'docs', 'safe-extension-guide.md'),
+      'utf8',
+    )
+    const workflowRouting = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'agent-workflow-routing.md'),
+      'utf8',
+    )
+    const verificationAndRuntime = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'verification-and-runtime.md'),
+      'utf8',
+    )
+    const security = readFileSync(path.join(repoRoot, 'agent-docs', 'SECURITY.md'), 'utf8')
+    const runtimeStateReadme = readFileSync(
+      path.join(repoRoot, 'packages', 'runtime-state', 'README.md'),
+      'utf8',
+    )
+
+    expect(agents).toContain('it must not land in assistant runtime or other local operational state first')
+    expect(architecture).toContain('Storage-policy hard line:')
+    expect(architecture).toContain('execution residue, replay/continuity artifacts, and operator diagnostics only')
+    expect(readme).toContain('it does not belong in assistant runtime first')
+    expect(baselineArchitecture).toContain('do not use assistant runtime as a first stop for user-facing or queryable product state')
+    expect(invariants).toContain('never in assistant runtime state')
+    expect(commandSurface).toContain('runtime inspection/control only')
+    expect(commandSurface).toContain('not an `assistant` runtime CRUD surface')
+    expect(safeExtensionGuide).toContain('do not prototype it in assistant runtime first')
+    expect(workflowRouting).toContain('it must not start life in assistant runtime or other operational state')
+    expect(verificationAndRuntime).toContain('it must not start in assistant runtime first')
+    expect(security).toContain('not a product-state staging area')
+    expect(runtimeStateReadme).toContain('intentionally not a product-state incubator')
+    expect(runtimeStateReadme).toContain('execution residue only')
+  })
+
   it('verifies the live release manifest and publish set', () => {
     const summary = JSON.parse(
       execFileSync('node', ['scripts/verify-release-target.mjs', '--json'], {

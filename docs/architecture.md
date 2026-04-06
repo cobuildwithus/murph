@@ -92,6 +92,7 @@ repo/
   - store only runtime/session/outbox/receipt/diagnostic/continuity artifacts locally
   - durable user-facing memory belongs in `bank/memory.md`
   - durable scheduled prompt configuration belongs in `bank/automations/*.md`
+  - do not use assistant runtime as a first stop for user-facing or queryable product state; product nouns must start in canonical vault records or explicit derived materializations
 - Device provider credentials:
   - stay encrypted in the local device-sync runtime database under `.runtime/operations/device-sync/state.sqlite`
   - never land in canonical vault files or append-only health ledgers
