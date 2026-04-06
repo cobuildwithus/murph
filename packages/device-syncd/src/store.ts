@@ -147,6 +147,7 @@ interface StoredWebhookTraceRow {
 }
 
 const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 2;
+const MINIMIZED_WEBHOOK_TRACE_PAYLOAD_JSON = stringifyJson({});
 function mapAccountRow(row: StoredAccountRow | undefined): StoredDeviceSyncAccount | null {
   if (!row) {
     return null;
@@ -1322,7 +1323,7 @@ export class SqliteDeviceSyncStore {
           input.externalAccountId,
           input.eventType,
           input.receivedAt,
-          stringifyJson(input.payload ?? {}),
+          MINIMIZED_WEBHOOK_TRACE_PAYLOAD_JSON,
           input.processingExpiresAt,
         );
 
@@ -1359,7 +1360,7 @@ export class SqliteDeviceSyncStore {
         input.externalAccountId,
         input.eventType,
         input.receivedAt,
-        stringifyJson(input.payload ?? {}),
+        MINIMIZED_WEBHOOK_TRACE_PAYLOAD_JSON,
         input.processingExpiresAt,
         input.provider,
         input.traceId,
@@ -1373,12 +1374,13 @@ export class SqliteDeviceSyncStore {
   completeWebhookTrace(provider: string, traceId: string): void {
     this.database.prepare(`
       update webhook_trace
-      set status = 'processed',
+      set payload_json = ?,
+          status = 'processed',
           processing_expires_at = null
       where provider = ?
         and trace_id = ?
         and coalesce(status, 'processed') = 'processing'
-    `).run(provider, traceId);
+    `).run(MINIMIZED_WEBHOOK_TRACE_PAYLOAD_JSON, provider, traceId);
   }
 
   releaseWebhookTrace(provider: string, traceId: string): void {

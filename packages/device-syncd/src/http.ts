@@ -2,6 +2,8 @@ import { Buffer } from "node:buffer";
 import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 
+import { isLoopbackHostname } from "@murphai/runtime-state";
+
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import { DEFAULT_DEVICE_SYNC_HOST } from "./shared.ts";
 import { resolveDeviceSyncWebhookVerificationResponse } from "./webhook-verification.ts";
@@ -89,7 +91,9 @@ export function assertDeviceSyncControlRequest(input: {
 export async function startDeviceSyncHttpServer(input: CreateDeviceSyncHttpServerInput): Promise<NodeServerHandle> {
   const service = input.service;
   const bodyLimitBytes = Math.max(1024, input.bodyLimitBytes ?? DEFAULT_BODY_LIMIT_BYTES);
-  const host = input.config?.host ?? DEFAULT_DEVICE_SYNC_HOST;
+  const configuredHost = input.config?.host?.trim();
+  const host = configuredHost && configuredHost.length > 0 ? configuredHost : DEFAULT_DEVICE_SYNC_HOST;
+  assertLoopbackControlListenerHost(host);
   const port = input.config?.port ?? 8788;
   const controlToken = requireControlToken(input.config?.controlToken);
   const publicListener = resolvePublicListener(input.config);
@@ -430,6 +434,16 @@ async function closeServer(server: Server): Promise<void> {
   });
 }
 
+function assertLoopbackControlListenerHost(host: string): void {
+  if (isLoopbackHostname(host)) {
+    return;
+  }
+
+  throw new TypeError(
+    "Device sync control listener host must be a loopback hostname or address. Use publicHost/publicPort for externally reachable callback and webhook routes.",
+  );
+}
+
 function requireControlToken(controlToken: string | undefined): string {
   if (typeof controlToken === "string" && controlToken.trim()) {
     return controlToken.trim();
@@ -722,11 +736,10 @@ function sendError(response: ServerResponse, error: unknown): void {
     return;
   }
 
-  const message = error instanceof Error ? error.message : String(error);
   sendJson(response, 500, {
     error: {
       code: "INTERNAL_ERROR",
-      message,
+      message: "Internal server error.",
     },
   });
 }
