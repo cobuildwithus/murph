@@ -1,7 +1,10 @@
 import {
-  createAssistantToolCatalog,
+  CliBackedCapabilityHost,
+  NativeLocalCapabilityHost,
+  createAssistantCapabilityRegistry,
+  createAssistantToolCatalogFromCapabilities,
   type AssistantToolCatalog,
-  type AssistantToolDefinition,
+  type AssistantCapabilityDefinition,
 } from '../model-harness.js'
 import {
   createAssistantCliExecutorToolDefinitions,
@@ -22,30 +25,41 @@ import type {
   AssistantToolContext,
 } from './shared.js'
 
-interface AssistantToolConcernDefinitions {
-  assistantRuntimeTools: AssistantToolDefinition[]
-  canonicalVaultWriteTools: AssistantToolDefinition[]
-  outwardSideEffectTools: AssistantToolDefinition[]
-  queryAndReadTools: AssistantToolDefinition[]
+interface AssistantCapabilityConcernDefinitions {
+  assistantRuntimeTools: AssistantCapabilityDefinition[]
+  canonicalVaultWriteTools: AssistantCapabilityDefinition[]
+  outwardSideEffectTools: AssistantCapabilityDefinition[]
+  queryAndReadTools: AssistantCapabilityDefinition[]
+}
+
+const defaultAssistantCapabilityHosts = [
+  new CliBackedCapabilityHost(),
+  new NativeLocalCapabilityHost(),
+] as const
+
+export function createDefaultAssistantCapabilityRegistry(
+  input: AssistantToolContext,
+  options: AssistantToolCatalogOptions = {},
+) {
+  return createAssistantCapabilityRegistry(
+    listDefaultAssistantCapabilities(input, options),
+  )
 }
 
 export function createDefaultAssistantToolCatalog(
   input: AssistantToolContext,
   options: AssistantToolCatalogOptions = {},
 ): AssistantToolCatalog {
-  const concerns = resolveAssistantToolConcernDefinitions(input, options)
-  return createAssistantToolCatalog([
-    ...concerns.assistantRuntimeTools,
-    ...concerns.queryAndReadTools,
-    ...concerns.canonicalVaultWriteTools,
-    ...concerns.outwardSideEffectTools,
-  ])
+  return createAssistantToolCatalogFromCapabilities(
+    listDefaultAssistantCapabilities(input, options),
+    defaultAssistantCapabilityHosts,
+  )
 }
 
-export function createInboxRoutingAssistantToolCatalog(
+export function createInboxRoutingAssistantCapabilityRegistry(
   input: AssistantToolContext,
-): AssistantToolCatalog {
-  return createDefaultAssistantToolCatalog(input, {
+) {
+  return createDefaultAssistantCapabilityRegistry(input, {
     includeAssistantRuntimeTools: false,
     includeQueryTools: false,
     includeStatefulWriteTools: false,
@@ -55,10 +69,60 @@ export function createInboxRoutingAssistantToolCatalog(
   })
 }
 
+export function createInboxRoutingAssistantToolCatalog(
+  input: AssistantToolContext,
+): AssistantToolCatalog {
+  return createAssistantToolCatalogFromCapabilities(
+    listInboxRoutingAssistantCapabilities(input),
+    defaultAssistantCapabilityHosts,
+  )
+}
+
+export function createProviderTurnAssistantCapabilityRegistry(
+  input: AssistantToolContext,
+) {
+  return createAssistantCapabilityRegistry(listProviderTurnAssistantCapabilities(input))
+}
+
 export function createProviderTurnAssistantToolCatalog(
   input: AssistantToolContext,
 ): AssistantToolCatalog {
-  return createAssistantToolCatalog([
+  return createAssistantToolCatalogFromCapabilities(
+    listProviderTurnAssistantCapabilities(input),
+    defaultAssistantCapabilityHosts,
+  )
+}
+
+function listDefaultAssistantCapabilities(
+  input: AssistantToolContext,
+  options: AssistantToolCatalogOptions = {},
+): AssistantCapabilityDefinition[] {
+  const concerns = resolveAssistantToolConcernDefinitions(input, options)
+  return [
+    ...concerns.assistantRuntimeTools,
+    ...concerns.queryAndReadTools,
+    ...concerns.canonicalVaultWriteTools,
+    ...concerns.outwardSideEffectTools,
+  ]
+}
+
+function listInboxRoutingAssistantCapabilities(
+  input: AssistantToolContext,
+): AssistantCapabilityDefinition[] {
+  return listDefaultAssistantCapabilities(input, {
+    includeAssistantRuntimeTools: false,
+    includeQueryTools: false,
+    includeStatefulWriteTools: false,
+    includeVaultTextReadTool: false,
+    includeVaultWriteTools: true,
+    includeWebSearchTools: false,
+  })
+}
+
+function listProviderTurnAssistantCapabilities(
+  input: AssistantToolContext,
+): AssistantCapabilityDefinition[] {
+  return [
     ...createAssistantKnowledgeReadToolDefinitions(input),
     ...createAssistantKnowledgeWriteToolDefinitions(input),
     ...createAssistantCliExecutorToolDefinitions(input),
@@ -67,13 +131,13 @@ export function createProviderTurnAssistantToolCatalog(
     ...createWebSearchToolDefinitions(),
     ...createWebFetchToolDefinitions(),
     ...createWebPdfReadToolDefinitions(),
-  ])
+  ]
 }
 
 function resolveAssistantToolConcernDefinitions(
   input: AssistantToolContext,
   options: AssistantToolCatalogOptions,
-): AssistantToolConcernDefinitions {
+): AssistantCapabilityConcernDefinitions {
   const includeAssistantRuntimeTools = options.includeAssistantRuntimeTools ?? true
   const includeVaultWriteTools = options.includeVaultWriteTools ?? true
 

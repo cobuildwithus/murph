@@ -56,6 +56,11 @@ vi.mock('@ai-sdk/openai-compatible', () => ({
 }))
 
 import {
+  CliBackedCapabilityHost,
+  NativeLocalCapabilityHost,
+  createAssistantCapabilityRegistry,
+  createAssistantToolCatalogFromCapabilities,
+  defineAssistantCapability,
   createAssistantToolCatalog,
   defineAssistantTool,
   resolveAssistantLanguageModel,
@@ -95,6 +100,117 @@ test('defineAssistantTool infers execute input from the tool schema', () => {
     value: string
     count?: number | undefined
   }>()
+})
+
+test('assistant capability registry preserves capability metadata and host options', () => {
+  const registry = createAssistantCapabilityRegistry([
+    defineAssistantCapability({
+      name: 'host.echo',
+      description: 'Echo through multiple execution hosts.',
+      inputSchema: z.object({
+        value: z.string().min(1),
+      }),
+      inputExample: {
+        value: 'hello',
+      },
+      mutationSemantics: 'read-only',
+      riskClass: 'low',
+      preferredExecutionMode: 'cli-backed',
+      executionBindings: {
+        'cli-backed': async ({ value }) => ({
+          host: 'cli',
+          value,
+        }),
+        'native-local': async ({ value }) => ({
+          host: 'native',
+          value,
+        }),
+      },
+    }),
+  ])
+
+  assert.deepEqual(registry.getCapability('host.echo'), {
+    name: 'host.echo',
+    description: 'Echo through multiple execution hosts.',
+    inputExample: {
+      value: 'hello',
+    },
+    mutationSemantics: 'read-only',
+    riskClass: 'low',
+    preferredExecutionMode: 'cli-backed',
+    executionModes: ['cli-backed', 'native-local'],
+    provenance: {
+      origin: 'hand-authored-helper',
+      localOnly: true,
+      generatedFrom: null,
+      policyWrappers: [],
+    },
+  })
+})
+
+test('createAssistantToolCatalogFromCapabilities binds the preferred host when available and falls back otherwise', async () => {
+  const capability = defineAssistantCapability({
+    name: 'host.echo',
+    description: 'Echo through multiple execution hosts.',
+    inputSchema: z.object({
+      value: z.string().min(1),
+    }),
+    preferredExecutionMode: 'cli-backed',
+    executionBindings: {
+      'cli-backed': async ({ value }) => ({
+        host: 'cli',
+        value,
+      }),
+      'native-local': async ({ value }) => ({
+        host: 'native',
+        value,
+      }),
+    },
+  })
+
+  const preferredCatalog = createAssistantToolCatalogFromCapabilities(
+    [capability],
+    [new CliBackedCapabilityHost(), new NativeLocalCapabilityHost()],
+  )
+  const fallbackCatalog = createAssistantToolCatalogFromCapabilities(
+    [capability],
+    [new NativeLocalCapabilityHost()],
+  )
+
+  assert.equal(preferredCatalog.listTools()[0]?.preferredExecutionMode, 'cli-backed')
+  assert.equal(preferredCatalog.listTools()[0]?.executionMode, 'cli-backed')
+  assert.equal(fallbackCatalog.listTools()[0]?.preferredExecutionMode, 'cli-backed')
+  assert.equal(fallbackCatalog.listTools()[0]?.executionMode, 'native-local')
+
+  const preferredResult = await preferredCatalog.executeCalls({
+    calls: [
+      {
+        tool: 'host.echo',
+        input: {
+          value: 'hello',
+        },
+      },
+    ],
+  })
+  const fallbackResult = await fallbackCatalog.executeCalls({
+    calls: [
+      {
+        tool: 'host.echo',
+        input: {
+          value: 'hello',
+        },
+      },
+    ],
+  })
+
+  assert.deepEqual(preferredResult[0]?.result, {
+    host: 'cli',
+    value: 'hello',
+  })
+  assert.deepEqual(fallbackResult[0]?.result, {
+    host: 'native',
+    value: 'hello',
+  })
 })
 
 test('resolveAssistantLanguageModel uses gateway when no baseUrl is provided', () => {
