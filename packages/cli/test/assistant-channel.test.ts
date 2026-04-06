@@ -677,7 +677,6 @@ test('deliverAssistantMessage persists canonical email thread targets returned b
     lastMessageId: '<msg_9@example.test>',
     references: ['<msg_1@example.test>', '<msg_9@example.test>'],
     replyAliasAddress: 'assistant+reply@example.test',
-    replyKey: 'reply_123',
     subject: 'Check-in',
     to: ['user@example.com'],
   }))

@@ -116,9 +116,7 @@ describe("hosted email routing and transport", () => {
 
     expect(route).toMatchObject({
       identityId: TEST_CONFIG.fromAddress,
-      kind: "user",
       routeAddress: TEST_CONFIG.fromAddress,
-      target: null,
       userId: "user_123",
     });
   });
@@ -180,7 +178,6 @@ describe("hosted email routing and transport", () => {
       to: TEST_CONFIG.fromAddress!,
     })).resolves.toMatchObject({
       identityId: TEST_CONFIG.fromAddress,
-      kind: "user",
       routeAddress: TEST_CONFIG.fromAddress,
       userId: "user_123",
     });
@@ -534,7 +531,6 @@ describe("hosted email routing and transport", () => {
       lastMessageId: "<message-1@example.test>",
       references: ["<message-0@example.test>"],
       replyAliasAddress: "assistant+legacy@mail.example.test",
-      replyKey: "legacyreplykey123",
       subject: "Status update",
       to: ["owner@example.com"],
     });
@@ -649,9 +645,7 @@ describe("hosted email routing and transport", () => {
     expect(firstTarget).not.toBeNull();
     expect(secondTarget).not.toBeNull();
     expect(firstTarget?.replyAliasAddress).toBe(stableReplyAddress);
-    expect(firstTarget?.replyKey).toBeNull();
     expect(secondTarget?.replyAliasAddress).toBe(stableReplyAddress);
-    expect(secondTarget?.replyKey).toBeNull();
     expect([...bucket.objects.keys()].every((key) => !key.startsWith("transient/hosted-email/threads/")))
       .toBe(true);
   });

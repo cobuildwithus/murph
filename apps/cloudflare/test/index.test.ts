@@ -1862,7 +1862,6 @@ describe("cloudflare worker routes", () => {
     expect(threadTarget?.to).toEqual(["user@example.test"]);
     expect(threadTarget?.replyAliasAddress).toContain("assistant+u-");
     expect(threadTarget?.replyAliasAddress?.endsWith("@mail.example.test")).toBe(true);
-    expect(threadTarget?.replyKey).toBeNull();
     expect(threadTarget?.lastMessageId).toMatch(/^<hosted\./u);
     expect(threadTarget?.subject).toBe("Murph update");
   });
