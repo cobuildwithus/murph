@@ -77,7 +77,7 @@ export interface RunnerStateRecord {
 }
 
 export const COMMITTED_RESULT_FRESH_WINDOW_MS = 7 * 24 * 60 * 60_000;
-export const CONSUMED_EVENT_EXACT_TTL_MS = 30 * 24 * 60 * 60_000;
+export const CONSUMED_EVENT_EXACT_TTL_MS = 24 * 60 * 60_000;
 export const MAX_BACKPRESSURED_EVENT_IDS = 16;
 export const MAX_PENDING_EVENTS = 64;
 export const MAX_POISONED_EVENT_IDS = 16;
