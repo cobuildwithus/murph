@@ -5,6 +5,13 @@ const mocks = vi.hoisted(() => ({
   runtimeEnv: {
     privyAppId: "cm_app_123" as string | null,
     privyVerificationKey: "line-1\\nline-2" as string | null,
+    revnetChainId: null as number | null,
+    revnetProjectId: null as string | null,
+    revnetRpcUrl: null as string | null,
+    revnetStripeCurrency: null as string | null,
+    revnetTerminalAddress: null as string | null,
+    revnetTreasuryPrivateKey: null as string | null,
+    revnetWeiPerStripeMinorUnit: null as string | null,
     telegramBotUsername: null as string | null,
     telegramWebhookSecret: null as string | null,
   },
@@ -41,6 +48,13 @@ describe("hosted Privy verification", () => {
     vi.clearAllMocks();
     mocks.runtimeEnv.privyAppId = "cm_app_123";
     mocks.runtimeEnv.privyVerificationKey = "line-1\\nline-2";
+    mocks.runtimeEnv.revnetChainId = null;
+    mocks.runtimeEnv.revnetProjectId = null;
+    mocks.runtimeEnv.revnetRpcUrl = null;
+    mocks.runtimeEnv.revnetStripeCurrency = null;
+    mocks.runtimeEnv.revnetTerminalAddress = null;
+    mocks.runtimeEnv.revnetTreasuryPrivateKey = null;
+    mocks.runtimeEnv.revnetWeiPerStripeMinorUnit = null;
     mocks.cookies.mockResolvedValue({
       get: vi.fn().mockReturnValue(undefined),
     });
@@ -251,7 +265,33 @@ describe("hosted Privy verification", () => {
     });
   });
 
-  it("maps missing server-side wallet state to a retryable not-ready error for completion", async () => {
+  it("allows phone-only server-side completion state when RevNet is disabled", async () => {
+    mocks.cookies.mockResolvedValue({
+      get: vi.fn().mockImplementation((name: string) =>
+        name === "privy-id-token" ? { value: "cookie-token" } : undefined),
+    });
+    mocks.verifyIdentityToken.mockResolvedValue({
+      id: "did:privy:user_123",
+      linked_accounts: [
+        {
+          latest_verified_at: 1741194420,
+          phone_number: "+1 415 555 2671",
+          type: "phone",
+        },
+      ],
+    });
+
+    await expect(requireHostedPrivyCompletionIdentityFromCookies()).resolves.toMatchObject({
+      phone: {
+        number: "+14155552671",
+      },
+      userId: "did:privy:user_123",
+      wallet: null,
+    });
+  });
+
+  it("maps missing server-side wallet state to a retryable not-ready error for completion when RevNet is enabled", async () => {
+    enableRevnet();
     mocks.cookies.mockResolvedValue({
       get: vi.fn().mockImplementation((name: string) =>
         name === "privy-id-token" ? { value: "cookie-token" } : undefined),
@@ -313,7 +353,35 @@ describe("hosted Privy verification", () => {
     });
   });
 
-  it("rejects verified sessions that do not include an embedded wallet account", async () => {
+  it("allows verified sessions without an embedded wallet account when RevNet is disabled", async () => {
+    mocks.verifyIdentityToken.mockResolvedValue({
+      id: "did:privy:user_123",
+      linked_accounts: [
+        {
+          latest_verified_at: 1741194420,
+          phoneNumber: "+1 415 555 2671",
+          type: "phone",
+        },
+        {
+          address: "0x1111111111111111111111111111111111111111",
+          chain_type: "ethereum",
+          type: "wallet",
+          wallet_client: "metamask",
+        },
+      ],
+    });
+
+    await expect(requireHostedPrivyIdentity("signed-identity-token")).resolves.toMatchObject({
+      phone: {
+        number: "+14155552671",
+      },
+      userId: "did:privy:user_123",
+      wallet: null,
+    });
+  });
+
+  it("requires a Privy wallet when RevNet is enabled", async () => {
+    enableRevnet();
     mocks.verifyIdentityToken.mockResolvedValue({
       id: "did:privy:user_123",
       linked_accounts: [
@@ -338,7 +406,7 @@ describe("hosted Privy verification", () => {
     });
   });
 
-  it("rejects verified sessions that only include a non-ethereum embedded wallet", async () => {
+  it("allows verified sessions that only include a non-ethereum embedded wallet when RevNet is disabled", async () => {
     mocks.verifyIdentityToken.mockResolvedValue({
       id: "did:privy:user_123",
       linked_accounts: [
@@ -362,10 +430,12 @@ describe("hosted Privy verification", () => {
       ],
     });
 
-    await expect(requireHostedPrivyIdentity("signed-identity-token")).rejects.toMatchObject({
-      code: "PRIVY_WALLET_REQUIRED",
-      message: "Finish setup before continuing.",
-      httpStatus: 400,
+    await expect(requireHostedPrivyIdentity("signed-identity-token")).resolves.toMatchObject({
+      phone: {
+        number: "+14155552671",
+      },
+      userId: "did:privy:user_123",
+      wallet: null,
     });
   });
 
@@ -389,4 +459,14 @@ function createProcessEnv(values: Record<string, string>): NodeJS.ProcessEnv {
     NODE_ENV: "test",
     ...values,
   };
+}
+
+function enableRevnet() {
+  mocks.runtimeEnv.revnetChainId = 8453;
+  mocks.runtimeEnv.revnetProjectId = "1";
+  mocks.runtimeEnv.revnetRpcUrl = "https://rpc.example.test/base";
+  mocks.runtimeEnv.revnetStripeCurrency = "usd";
+  mocks.runtimeEnv.revnetTerminalAddress = "0x0000000000000000000000000000000000000001";
+  mocks.runtimeEnv.revnetTreasuryPrivateKey = `0x${"11".repeat(32)}`;
+  mocks.runtimeEnv.revnetWeiPerStripeMinorUnit = "2000000000000";
 }

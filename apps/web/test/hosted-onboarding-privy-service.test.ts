@@ -36,19 +36,31 @@ const SECONDARY_PHONE_NUMBER = "+15557654321";
 const SECONDARY_PHONE_LOOKUP_KEY = createHostedPhoneLookupKey(SECONDARY_PHONE_NUMBER)!;
 type CompleteHostedPrivyVerificationInput = Parameters<typeof completeHostedPrivyVerification>[0];
 type CompleteHostedPrivyVerificationPrisma = CompleteHostedPrivyVerificationInput["prisma"];
+type WalletOverrides = Partial<NonNullable<HostedPrivyIdentity["wallet"]>> | null;
+type IdentityOverrides = Omit<Partial<HostedPrivyIdentity>, "wallet"> & {
+  wallet?: WalletOverrides;
+};
 
-function makeIdentity(overrides: Partial<HostedPrivyIdentity> = {}) {
+function makeIdentity(overrides: IdentityOverrides = {}): HostedPrivyIdentity {
+  const identity = baseIdentity();
+  const wallet: HostedPrivyIdentity["wallet"] =
+    overrides.wallet === null
+      ? null
+      : overrides.wallet
+        ? {
+            ...identity.wallet,
+            ...overrides.wallet,
+          } as NonNullable<HostedPrivyIdentity["wallet"]>
+        : identity.wallet;
+
   return {
-    ...baseIdentity(),
+    ...identity,
     ...overrides,
     phone: {
-      ...baseIdentity().phone,
+      ...identity.phone,
       ...(overrides.phone ?? {}),
     },
-    wallet: {
-      ...baseIdentity().wallet,
-      ...(overrides.wallet ?? {}),
-    },
+    wallet,
   };
 }
 
@@ -76,7 +88,7 @@ function makeMember(overrides: Record<string, unknown> = {}) {
     id: "member_123",
     linqChatId: null,
     maskedPhoneNumberHint: "*** 4567",
-    normalizedPhoneNumber: DEFAULT_PHONE_LOOKUP_KEY,
+    phoneLookupKey: DEFAULT_PHONE_LOOKUP_KEY,
     phoneNumberVerifiedAt: null,
     privyUserId: null,
     status: HostedMemberStatus.invited,
@@ -109,7 +121,7 @@ function makeInvite(member: ReturnType<typeof makeMember>, overrides: Record<str
             createdAt: NOW,
             maskedPhoneNumberHint: member.maskedPhoneNumberHint,
             memberId: member.id,
-            normalizedPhoneNumber: member.normalizedPhoneNumber,
+            phoneLookupKey: member.phoneLookupKey,
             phoneNumberVerifiedAt: member.phoneNumberVerifiedAt,
             privyUserId: member.privyUserId,
             updatedAt: NOW,
@@ -137,7 +149,7 @@ describe("completeHostedPrivyVerification", () => {
   it("binds a verified Privy identity onto an invite-bound member", async () => {
     const inviteMember = makeMember({
       maskedPhoneNumberHint: "*** 4321",
-      normalizedPhoneNumber: SECONDARY_PHONE_LOOKUP_KEY,
+      phoneLookupKey: SECONDARY_PHONE_LOOKUP_KEY,
     });
     const invite = {
       ...makeInvite(inviteMember),
@@ -147,7 +159,7 @@ describe("completeHostedPrivyVerification", () => {
           createdAt: NOW,
           maskedPhoneNumberHint: "*** 4567",
           memberId: inviteMember.id,
-          normalizedPhoneNumber: DEFAULT_PHONE_LOOKUP_KEY,
+          phoneLookupKey: DEFAULT_PHONE_LOOKUP_KEY,
           phoneNumberVerifiedAt: null,
           privyUserId: null,
           updatedAt: NOW,
@@ -217,7 +229,7 @@ describe("completeHostedPrivyVerification", () => {
           createdAt: NOW,
           maskedPhoneNumberHint: "*** 4567",
           memberId: inviteMember.id,
-          normalizedPhoneNumber: DEFAULT_PHONE_LOOKUP_KEY,
+          phoneLookupKey: DEFAULT_PHONE_LOOKUP_KEY,
           phoneNumberVerifiedAt: NOW,
           privyUserId: "did:privy:user_123",
           updatedAt: NOW,
@@ -254,7 +266,7 @@ describe("completeHostedPrivyVerification", () => {
   it("creates a hosted member and a web invite for a new public phone signup", async () => {
     const createdMember = makeMember({
       id: "member_new",
-      normalizedPhoneNumber: DEFAULT_PHONE_LOOKUP_KEY,
+      phoneLookupKey: DEFAULT_PHONE_LOOKUP_KEY,
       phoneNumberVerifiedAt: NOW,
       privyUserId: "did:privy:user_123",
       status: HostedMemberStatus.registered,
@@ -314,6 +326,54 @@ describe("completeHostedPrivyVerification", () => {
     expect(result.joinUrl).toBe("https://join.example.test/join/public-invite-code");
     expect(result.inviteCode).toBe("public-invite-code");
     expect(result.stage).toBe("checkout");
+  });
+
+  it("creates a hosted member and a web invite for a new public phone signup even when the Privy wallet is not ready yet", async () => {
+    const createdMember = makeMember({
+      id: "member_phone_only",
+      phoneLookupKey: DEFAULT_PHONE_LOOKUP_KEY,
+      phoneNumberVerifiedAt: NOW,
+      privyUserId: "did:privy:user_123",
+      status: HostedMemberStatus.registered,
+      walletAddress: null,
+      walletChainType: null,
+      walletCreatedAt: null,
+      walletProvider: null,
+    });
+    const createdInvite = makeInvite(createdMember, {
+      channel: "web",
+      id: "invite_phone_only",
+      inviteCode: "public-phone-only-invite",
+      memberId: "member_phone_only",
+      status: HostedInviteStatus.pending,
+    });
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(createdInvite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      hostedMember: {
+        create: vi.fn().mockResolvedValue(createdMember),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+    });
+
+    await expect(
+      completeHostedPrivyVerification({
+        identity: makeIdentity({
+          wallet: null,
+        }),
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toEqual({
+      inviteCode: "public-phone-only-invite",
+      joinUrl: "https://join.example.test/join/public-phone-only-invite",
+      stage: "checkout",
+    });
+
+    expect(prisma.hostedMember.create).toHaveBeenCalledTimes(1);
   });
 
   it("marks an already-active invite flow as paid and preserves the paid timestamp", async () => {
@@ -432,7 +492,7 @@ describe("completeHostedPrivyVerification", () => {
       hostedMember: {
         create: vi.fn(),
         findUnique: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => {
-          if (where.privyUserId || where.normalizedPhoneNumber || where.walletAddress) {
+          if (where.privyUserId || where.phoneLookupKey || where.walletAddress) {
             return suspendedMember;
           }
 
@@ -465,7 +525,7 @@ describe("completeHostedPrivyVerification", () => {
     const walletMember = makeMember({
       id: "member_wallet",
       maskedPhoneNumberHint: "*** 4321",
-      normalizedPhoneNumber: SECONDARY_PHONE_LOOKUP_KEY,
+      phoneLookupKey: SECONDARY_PHONE_LOOKUP_KEY,
       walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
     });
     const prisma = asCompleteHostedPrivyVerificationPrisma({
@@ -481,7 +541,7 @@ describe("completeHostedPrivyVerification", () => {
             return null;
           }
 
-          if (where.normalizedPhoneNumber) {
+          if (where.phoneLookupKey) {
             return phoneMember;
           }
 
@@ -585,6 +645,73 @@ describe("completeHostedPrivyVerification", () => {
 
     expect(prisma.hostedMember.update).not.toHaveBeenCalled();
   });
+
+  it("preserves an existing stored wallet when the current Privy session has not produced one yet", async () => {
+    const existingWalletCreatedAt = new Date("2026-03-20T12:00:00.000Z");
+    const inviteMember = makeMember({
+      walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+      walletChainType: "ethereum",
+      walletCreatedAt: existingWalletCreatedAt,
+      walletProvider: "privy",
+    });
+    const invite = makeInvite(inviteMember);
+    const storedIdentity = invite.member.identity as {
+      walletAddress: string | null;
+      walletChainType: string | null;
+      walletCreatedAt: Date | null;
+      walletProvider: string | null;
+    };
+    const identityUpsert = vi.fn(async ({
+      create,
+      update,
+    }: {
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }) => ({
+      ...create,
+      ...update,
+    }));
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      hostedMember: {
+        update: vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
+          ...inviteMember,
+          ...data,
+        })),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue(invite.member.identity),
+        upsert: identityUpsert,
+      },
+    });
+
+    await expect(
+      completeHostedPrivyVerification({
+        identity: makeIdentity({
+          wallet: null,
+        }),
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toEqual({
+      inviteCode: "invite-code",
+      joinUrl: "https://join.example.test/join/invite-code",
+      stage: "checkout",
+    });
+
+    expect(identityUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        walletAddress: storedIdentity.walletAddress,
+        walletChainType: storedIdentity.walletChainType,
+        walletCreatedAt: existingWalletCreatedAt,
+        walletProvider: storedIdentity.walletProvider,
+      }),
+    }));
+  });
 });
 
 function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknown>>(
@@ -620,7 +747,7 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
             inviteIdentity &&
             (where.memberId === inviteIdentity.memberId ||
               where.privyUserId === inviteIdentity.privyUserId ||
-              where.normalizedPhoneNumber === inviteIdentity.normalizedPhoneNumber ||
+              where.phoneLookupKey === inviteIdentity.phoneLookupKey ||
               where.walletAddress === inviteIdentity.walletAddress)
           ) {
             return include?.member ? { ...inviteIdentity, member: inviteMember } : inviteIdentity;
@@ -664,10 +791,10 @@ function readMemberIdentity(member: unknown) {
       : typeof record.id === "string"
         ? record.id
         : null;
-  const normalizedPhoneNumber =
-    typeof identity.normalizedPhoneNumber === "string" ? identity.normalizedPhoneNumber : null;
+  const phoneLookupKey =
+    typeof identity.phoneLookupKey === "string" ? identity.phoneLookupKey : null;
 
-  if (!memberId || !normalizedPhoneNumber) {
+  if (!memberId || !phoneLookupKey) {
     return null;
   }
 
@@ -676,7 +803,7 @@ function readMemberIdentity(member: unknown) {
     maskedPhoneNumberHint:
       typeof identity.maskedPhoneNumberHint === "string" ? identity.maskedPhoneNumberHint : "*** 4567",
     memberId,
-    normalizedPhoneNumber,
+    phoneLookupKey,
     phoneNumberVerifiedAt:
       identity.phoneNumberVerifiedAt instanceof Date ? identity.phoneNumberVerifiedAt : null,
     privyUserId: typeof identity.privyUserId === "string" ? identity.privyUserId : null,

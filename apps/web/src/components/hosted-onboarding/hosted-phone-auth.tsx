@@ -26,7 +26,7 @@ import { normalizePhoneNumberForCountry } from "@/src/lib/hosted-onboarding/phon
 import {
   canContinueHostedPrivyClientSession,
   describeHostedPrivyClientSessionIssue,
-  ensureHostedPrivyPhoneAndWalletReady,
+  ensureHostedPrivyPhoneReady,
   HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS,
   readHostedPrivyClientSessionState,
   resolveHostedPrivyClientSessionIssue,
@@ -499,7 +499,7 @@ async function finalizeHostedPrivyVerification(input: {
   refreshUser: () => Promise<{ linkedAccounts?: unknown } | null>;
   user: { linkedAccounts?: unknown } | null;
 }) {
-  await ensureHostedPrivyPhoneAndWalletReady(input);
+  await ensureHostedPrivyPhoneReady(input);
   const payload = await requestHostedPrivyCompletionWithRetry(input.inviteCode);
 
   if (input.onCompleted) {

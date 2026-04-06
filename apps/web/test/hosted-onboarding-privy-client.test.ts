@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   canContinueHostedPrivyClientSession,
   describeHostedPrivyClientSessionIssue,
-  ensureHostedPrivyPhoneAndWalletReady,
+  ensureHostedPrivyPhoneReady,
   resolveHostedPrivyClientSessionIssue,
   shouldShowHostedPrivyManualResumeState,
   shouldShowHostedPrivyRestartState,
@@ -32,7 +32,7 @@ describe("hosted Privy client wallet readiness", () => {
     expect(canContinueHostedPrivyClientSession("missing-wallet")).toBe(true);
     expect(
       describeHostedPrivyClientSessionIssue("missing-wallet"),
-    ).toContain("almost ready");
+    ).toContain("still syncing account details");
   });
 
   it("switches from manual resume to restart mode when the authenticated session is missing a phone", () => {
@@ -110,7 +110,7 @@ describe("hosted Privy client wallet readiness", () => {
       });
 
     await expect(
-      ensureHostedPrivyPhoneAndWalletReady({
+      ensureHostedPrivyPhoneReady({
         createWallet,
         refreshUser,
         user: {
@@ -128,7 +128,7 @@ describe("hosted Privy client wallet readiness", () => {
     expect(createWallet).toHaveBeenCalledTimes(1);
   });
 
-  it("fails cleanly when setup completion does not produce a linked embedded account", async () => {
+  it("treats wallet creation as best effort when setup completion still has no linked embedded account", async () => {
     const createWallet = vi.fn().mockResolvedValue({});
     const refreshUser = vi.fn<() => Promise<{ linkedAccounts?: unknown } | null>>().mockResolvedValue({
       linkedAccounts: [
@@ -141,7 +141,7 @@ describe("hosted Privy client wallet readiness", () => {
     });
 
     await expect(
-      ensureHostedPrivyPhoneAndWalletReady({
+      ensureHostedPrivyPhoneReady({
         createWallet,
         refreshUser,
         user: {
@@ -154,7 +154,7 @@ describe("hosted Privy client wallet readiness", () => {
           ],
         },
       }),
-    ).rejects.toThrow("We could not finish preparing your account. Wait a moment and try again.");
+    ).resolves.toBeUndefined();
   });
 
   it("refreshes the client session once when the initial user state is incomplete", async () => {
@@ -181,7 +181,7 @@ describe("hosted Privy client wallet readiness", () => {
       });
 
     await expect(
-      ensureHostedPrivyPhoneAndWalletReady({
+      ensureHostedPrivyPhoneReady({
         createWallet,
         refreshUser,
         user: null,
@@ -190,5 +190,36 @@ describe("hosted Privy client wallet readiness", () => {
 
     expect(createWallet).not.toHaveBeenCalled();
     expect(refreshUser).toHaveBeenCalledTimes(1);
+  });
+
+  it("still returns control when wallet creation throws and the session remains phone-only", async () => {
+    const createWallet = vi.fn().mockRejectedValue(new Error("wallet create failed"));
+    const refreshUser = vi.fn<() => Promise<{ linkedAccounts?: unknown } | null>>().mockResolvedValue({
+      linkedAccounts: [
+        {
+          latest_verified_at: 1741194420,
+          phone_number: "+1 415 555 2671",
+          type: "phone",
+        },
+      ],
+    });
+
+    await expect(
+      ensureHostedPrivyPhoneReady({
+        createWallet,
+        refreshUser,
+        user: {
+          linkedAccounts: [
+            {
+              latest_verified_at: 1741194420,
+              phone_number: "+1 415 555 2671",
+              type: "phone",
+            },
+          ],
+        },
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(createWallet).toHaveBeenCalledTimes(1);
   });
 });
