@@ -59,7 +59,7 @@ Before landing any new persisted state, classify it explicitly and place it in t
 | State class | Canonical root | Required rule |
 | --- | --- | --- |
 | Canonical product truth | `vault/**` | Must be writable only through `packages/core`-owned canonical mutation paths. |
-| Durable local operational state | `.runtime/operations/**` | Use for tokens, cursors, daemon/service metadata, local tool config, and other non-canonical state you expect to survive restarts. Also decide whether the state is hostable or local-only. |
+| Durable local operational state | `.runtime/operations/**` | Use for tokens, cursors, daemon/service metadata, local tool config, and other non-canonical state you expect to survive restarts. Also classify each path explicitly as `portable` or `machine_local`; hosted bundle inclusion should follow that portability allowlist. |
 | Rebuildable local projection | `.runtime/projections/**` | Use for indexes, serving stores, and other derived read models that can be rebuilt from canonical evidence plus durable operational state. |
 | Assistant/session state | `assistant-state/**` | Use for durable but non-canonical assistant memory, outbox, diagnostics, receipts, and related session state. |
 | Ephemeral scratch/cache | `.runtime/cache/**` or `.runtime/tmp/**` | Use only for deleteable caches, sockets, temp files, or scratch artifacts. |

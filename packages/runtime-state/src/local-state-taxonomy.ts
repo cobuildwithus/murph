@@ -1,12 +1,18 @@
 import path from "node:path";
 
 export type VaultLocalStateClassification = "operational" | "projection" | "ephemeral";
+export type VaultLocalStatePortability = "portable" | "machine_local";
 
 export interface VaultLocalStateBucketDescriptor {
   classification: VaultLocalStateClassification;
+  defaultPortability: VaultLocalStatePortability;
   description: string;
   rebuildable: boolean;
   rootRelativePath: string;
+}
+
+export interface VaultLocalStateDescriptor extends VaultLocalStateBucketDescriptor {
+  portability: VaultLocalStatePortability;
 }
 
 export const RUNTIME_ROOT_RELATIVE_PATH = ".runtime";
@@ -18,13 +24,15 @@ export const RUNTIME_TEMP_ROOT_RELATIVE_PATH = `${RUNTIME_ROOT_RELATIVE_PATH}/tm
 export const vaultLocalStateBucketDescriptors: readonly VaultLocalStateBucketDescriptor[] = [
   {
     classification: "operational",
+    defaultPortability: "machine_local",
     description:
-      "Durable local operational state such as tokens, cursors, daemon launcher metadata, and user-configured local tool settings.",
+      "Durable local operational state such as tokens, cursors, daemon launcher metadata, and user-configured local tool settings. Operational state is machine-local by default and must be classified explicitly before it can move with a hosted snapshot.",
     rebuildable: false,
     rootRelativePath: RUNTIME_OPERATIONAL_ROOT_RELATIVE_PATH,
   },
   {
     classification: "projection",
+    defaultPortability: "machine_local",
     description:
       "Rebuildable local projections and indexes derived from canonical vault evidence or other durable runtime state.",
     rebuildable: true,
@@ -32,6 +40,7 @@ export const vaultLocalStateBucketDescriptors: readonly VaultLocalStateBucketDes
   },
   {
     classification: "ephemeral",
+    defaultPortability: "machine_local",
     description:
       "Throwaway caches and temporary scratch files that may be deleted at any time without affecting durable runtime behavior.",
     rebuildable: true,
@@ -39,6 +48,7 @@ export const vaultLocalStateBucketDescriptors: readonly VaultLocalStateBucketDes
   },
   {
     classification: "ephemeral",
+    defaultPortability: "machine_local",
     description:
       "Temporary runtime scratch files and sockets that are valid only for the current local process or short-lived task.",
     rebuildable: true,
@@ -56,6 +66,30 @@ export function classifyVaultLocalStateRelativePath(
       hasVaultLocalStatePrefix(normalized, descriptor.rootRelativePath),
     ) ?? null
   );
+}
+
+export function describeVaultLocalStateRelativePath(
+  relativePath: string,
+): VaultLocalStateDescriptor | null {
+  const normalized = normalizeVaultLocalStateRelativePath(relativePath);
+  const bucket = classifyVaultLocalStateRelativePath(normalized);
+
+  if (!bucket) {
+    return null;
+  }
+
+  const portability = resolveVaultLocalStatePortability(normalized, bucket);
+
+  return {
+    ...bucket,
+    portability,
+  };
+}
+
+export function getVaultLocalStatePortability(
+  relativePath: string,
+): VaultLocalStatePortability | null {
+  return describeVaultLocalStateRelativePath(relativePath)?.portability ?? null;
 }
 
 export function isVaultOperationalRelativePath(relativePath: string): boolean {
@@ -84,6 +118,28 @@ function hasVaultLocalStatePrefix(relativePath: string, prefix: string): boolean
   return relativePath === prefix || relativePath.startsWith(`${prefix}${path.posix.sep}`);
 }
 
+function resolveVaultLocalStatePortability(
+  relativePath: string,
+  bucket: VaultLocalStateBucketDescriptor,
+): VaultLocalStatePortability {
+  if (bucket.classification !== "operational") {
+    return bucket.defaultPortability;
+  }
+
+  if (isPortableOperationalRelativePath(relativePath)) {
+    return "portable";
+  }
+
+  return bucket.defaultPortability;
+}
+
+function isPortableOperationalRelativePath(relativePath: string): boolean {
+  return (
+    relativePath === INBOX_PROMOTIONS_RELATIVE_PATH
+    || relativePath.startsWith(PORTABLE_WRITE_OPERATION_PREFIX)
+  );
+}
+
 function normalizeVaultLocalStateRelativePath(value: string): string {
   return value
     .replace(/\\/gu, "/")
@@ -91,3 +147,6 @@ function normalizeVaultLocalStateRelativePath(value: string): string {
     .replace(/^\.\//u, "")
     .replace(/^\/+|\/+$/gu, "");
 }
+
+const INBOX_PROMOTIONS_RELATIVE_PATH = `${RUNTIME_OPERATIONAL_ROOT_RELATIVE_PATH}/inbox/promotions.json`;
+const PORTABLE_WRITE_OPERATION_PREFIX = `${RUNTIME_OPERATIONAL_ROOT_RELATIVE_PATH}/op_`;

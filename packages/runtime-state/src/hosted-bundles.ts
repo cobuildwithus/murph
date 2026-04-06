@@ -4,12 +4,12 @@ import { mkdir } from "node:fs/promises";
 
 import { resolveAssistantStatePaths } from "./assistant-state.ts";
 import {
-  isVaultEphemeralRelativePath,
-  isVaultProjectionRelativePath,
+  describeVaultLocalStateRelativePath,
+  RUNTIME_OPERATIONAL_ROOT_RELATIVE_PATH,
+  RUNTIME_ROOT_RELATIVE_PATH,
 } from "./local-state-taxonomy.ts";
 import {
-  DEVICE_SYNC_DB_RELATIVE_PATH,
-  DEVICE_SYNC_RUNTIME_DIRECTORY_RELATIVE_PATH,
+  INBOX_RUNTIME_DIRECTORY_RELATIVE_PATH,
 } from "./runtime-paths.ts";
 import type { HostedBundleArtifactRef } from "./hosted-bundle.ts";
 import {
@@ -39,8 +39,7 @@ export async function snapshotHostedExecutionContext(input: {
   preservedArtifacts?: readonly HostedBundleArtifactRestoreInput[];
   vaultRoot: string;
 }): Promise<{
-  agentStateBundle: null;
-  vaultBundle: Uint8Array;
+  bundle: Uint8Array;
 }> {
   const vaultRoot = path.resolve(input.vaultRoot);
   const assistantStateRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
@@ -98,16 +97,14 @@ export async function snapshotHostedExecutionContext(input: {
   }
 
   return {
-    agentStateBundle: null,
-    vaultBundle,
+    bundle: vaultBundle,
   };
 }
 
 export async function restoreHostedExecutionContext(input: {
-  agentStateBundle?: Uint8Array | ArrayBuffer | null;
   artifactResolver?: HostedWorkspaceArtifactResolver;
+  bundle?: Uint8Array | ArrayBuffer | null;
   shouldRestoreArtifact?: HostedBundleArtifactRestoreFilter;
-  vaultBundle?: Uint8Array | ArrayBuffer | null;
   workspaceRoot: string;
 }): Promise<{
   assistantStateRoot: string;
@@ -123,10 +120,10 @@ export async function restoreHostedExecutionContext(input: {
   await mkdir(assistantStateRoot, { recursive: true });
   await mkdir(operatorHomeRoot, { recursive: true });
 
-  if (input.vaultBundle) {
+  if (input.bundle) {
     await restoreHostedBundleRoots({
       artifactResolver: input.artifactResolver,
-      bytes: input.vaultBundle,
+      bytes: input.bundle,
       expectedKind: "vault",
       roots: {
         [WORKSPACE_ASSISTANT_ROOT]: assistantStateRoot,
@@ -134,17 +131,6 @@ export async function restoreHostedExecutionContext(input: {
         vault: vaultRoot,
       },
       shouldRestoreArtifact: input.shouldRestoreArtifact,
-    });
-  }
-
-  if (input.agentStateBundle) {
-    await restoreHostedBundleRoots({
-      bytes: input.agentStateBundle,
-      expectedKind: "agent-state",
-      roots: {
-        [WORKSPACE_ASSISTANT_ROOT]: assistantStateRoot,
-        [WORKSPACE_OPERATOR_HOME_ROOT]: operatorHomeRoot,
-      },
     });
   }
 
@@ -157,11 +143,11 @@ export async function restoreHostedExecutionContext(input: {
 
 export async function materializeHostedExecutionArtifacts(input: {
   artifactResolver: HostedWorkspaceArtifactResolver;
-  vaultBundle?: Uint8Array | ArrayBuffer | null;
+  bundle?: Uint8Array | ArrayBuffer | null;
   shouldRestoreArtifact?: HostedBundleArtifactRestoreFilter;
   workspaceRoot: string;
 }): Promise<void> {
-  if (!input.vaultBundle) {
+  if (!input.bundle) {
     return;
   }
 
@@ -176,7 +162,7 @@ export async function materializeHostedExecutionArtifacts(input: {
 
   await materializeHostedBundleArtifacts({
     artifactResolver: input.artifactResolver,
-    bytes: input.vaultBundle,
+    bytes: input.bundle,
     expectedKind: "vault",
     roots: {
       [WORKSPACE_ASSISTANT_ROOT]: assistantStateRoot,
@@ -189,32 +175,33 @@ export async function materializeHostedExecutionArtifacts(input: {
 
 function shouldIncludeWorkspaceSnapshotVaultRelativePath(relativePath: string): boolean {
   const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(relativePath);
+  const localStateDescriptor = describeVaultLocalStateRelativePath(normalizedRelativePath);
+
+  if (isVaultRuntimeRelativePath(normalizedRelativePath)) {
+    return (
+      !isEnvironmentRelativePath(normalizedRelativePath)
+      && (
+        localStateDescriptor?.portability === "portable"
+        || isPortableVaultLocalStateContainerRelativePath(normalizedRelativePath)
+      )
+    );
+  }
 
   return (
     !isDotGitRelativePath(normalizedRelativePath)
     && !isEnvironmentRelativePath(normalizedRelativePath)
     && !isExportPackRelativePath(normalizedRelativePath)
-    && !isHostedSnapshotExcludedVaultRuntimeRelativePath(normalizedRelativePath)
+    && (
+      localStateDescriptor === null
+      || localStateDescriptor.portability === "portable"
+      || isPortableVaultLocalStateContainerRelativePath(normalizedRelativePath)
+    )
   );
 }
 
-function isHostedSnapshotExcludedVaultRuntimeRelativePath(relativePath: string): boolean {
-  if (!(relativePath === ".runtime" || relativePath.startsWith(`.runtime${path.posix.sep}`))) {
-    return false;
-  }
-
-  return (
-    isLocalOnlyOperationalRuntimeRelativePath(relativePath)
-    || isEphemeralVaultRuntimeRelativePath(relativePath)
-    || isVaultProjectionRelativePath(relativePath)
-  );
-}
-
-function isLocalOnlyOperationalRuntimeRelativePath(relativePath: string): boolean {
-  return hasRelativePathPrefix(relativePath, DEVICE_SYNC_RUNTIME_DIRECTORY_RELATIVE_PATH)
-    || hasRelativePathPrefix(relativePath, DEVICE_SYNC_DB_RELATIVE_PATH)
-    || hasRelativePathPrefix(relativePath, `${DEVICE_SYNC_DB_RELATIVE_PATH}-shm`)
-    || hasRelativePathPrefix(relativePath, `${DEVICE_SYNC_DB_RELATIVE_PATH}-wal`);
+function isVaultRuntimeRelativePath(relativePath: string): boolean {
+  return relativePath === RUNTIME_ROOT_RELATIVE_PATH
+    || relativePath.startsWith(`${RUNTIME_ROOT_RELATIVE_PATH}${path.posix.sep}`);
 }
 
 function isDotGitRelativePath(relativePath: string): boolean {
@@ -235,25 +222,12 @@ function isExportPackRelativePath(relativePath: string): boolean {
   );
 }
 
-function isEphemeralVaultRuntimeRelativePath(relativePath: string): boolean {
-  if (!(relativePath === ".runtime" || relativePath.startsWith(`.runtime${path.posix.sep}`))) {
-    return false;
-  }
-
-  const baseName = path.posix.basename(relativePath);
+function isPortableVaultLocalStateContainerRelativePath(relativePath: string): boolean {
   return (
-    isVaultEphemeralRelativePath(relativePath)
-    || baseName === "stdout.log"
-    || baseName === "stderr.log"
-    || baseName.endsWith(".pid")
-    || baseName.endsWith(".lock")
-    || baseName.endsWith(".sock")
-    || baseName.endsWith(".tmp")
+    relativePath === RUNTIME_ROOT_RELATIVE_PATH
+    || relativePath === RUNTIME_OPERATIONAL_ROOT_RELATIVE_PATH
+    || relativePath === INBOX_RUNTIME_DIRECTORY_RELATIVE_PATH
   );
-}
-
-function hasRelativePathPrefix(relativePath: string, prefix: string): boolean {
-  return relativePath === prefix || relativePath.startsWith(`${prefix}${path.posix.sep}`);
 }
 
 function normalizeWorkspaceSnapshotRelativePath(relativePath: string): string {

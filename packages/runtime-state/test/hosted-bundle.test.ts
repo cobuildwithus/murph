@@ -12,6 +12,7 @@ import {
 } from "../src/index.ts";
 import { serializeHostedBundleArchive } from "../src/hosted-bundle.ts";
 import {
+  describeVaultLocalStateRelativePath,
   decodeHostedBundleBase64,
   encodeHostedBundleBase64,
   hasHostedBundleArtifactPath,
@@ -114,7 +115,21 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await mkdir(path.join(vaultRoot, "exports", "packs"), { recursive: true });
     await mkdir(assistantStateRoot, { recursive: true });
     await mkdir(path.join(operatorHomeRoot, ".murph", "hosted"), { recursive: true });
+    await mkdir(path.join(vaultRoot, ".runtime", "operations", "device-sync"), { recursive: true });
+    await mkdir(path.join(vaultRoot, ".runtime", "operations", "inbox"), { recursive: true });
+    await mkdir(path.join(vaultRoot, ".runtime", "operations", "op_test", "payloads"), { recursive: true });
+    await mkdir(path.join(vaultRoot, ".runtime", "operations", "parsers"), { recursive: true });
     await writeFile(path.join(vaultRoot, "vault.json"), "{\"schema\":\"vault\"}\n");
+    await writeFile(path.join(vaultRoot, ".runtime", "operations", "device-sync", "state.sqlite"), "sqlite-control-state\n");
+    await writeFile(path.join(vaultRoot, ".runtime", "operations", "device-sync", "launcher.json"), "{\"pid\":1234}\n");
+    await writeFile(path.join(vaultRoot, ".runtime", "operations", "device-sync", "stdout.log"), "skip-log\n");
+    await writeFile(path.join(vaultRoot, ".runtime", "operations", "inbox", "config.json"), "{\"version\":1,\"connectors\":[]}\n");
+    await writeFile(path.join(vaultRoot, ".runtime", "operations", "inbox", "state.json"), "{\"running\":false}\n");
+    await writeFile(path.join(vaultRoot, ".runtime", "operations", "inbox", "promotions.json"), "{\"version\":1,\"entries\":[]}\n");
+    await writeFile(path.join(vaultRoot, ".runtime", "operations", "parsers", "toolchain.json"), "{\"version\":1}\n");
+    await writeFile(path.join(vaultRoot, ".runtime", "operations", "op_test.json"), "{\"status\":\"committed\"}\n");
+    await writeFile(path.join(vaultRoot, ".runtime", "operations", "op_test", "payloads", "staged.md"), "staged payload\n");
+    await writeFile(path.join(vaultRoot, ".runtime", "search.sqlite"), "legacy-search\n");
     await writeFile(path.join(vaultRoot, ".env.local"), "secret=true\n");
     await writeFile(path.join(vaultRoot, "exports", "packs", "bundle.zip"), "skip-me\n");
     await writeFile(path.join(vaultRoot, "raw", "notes.json"), "{\"keep\":true}\n");
@@ -126,7 +141,7 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       "{\"schema\":\"murph.hosted-user-env.v1\",\"env\":{\"OPENAI_API_KEY\":\"sk-user\"}}\n",
     );
 
-    const bundles = await snapshotHostedExecutionContext({
+    const snapshot = await snapshotHostedExecutionContext({
       artifactSink: async (artifact) => {
         artifacts.set(artifact.ref.sha256, artifact.bytes);
       },
@@ -134,10 +149,9 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       vaultRoot,
     });
 
-    assert.equal(bundles.agentStateBundle, null);
     assert.equal(
       readHostedBundleTextFile({
-        bytes: bundles.vaultBundle,
+        bytes: snapshot.bundle,
         expectedKind: "vault",
         path: "vault.json",
         root: "vault",
@@ -146,7 +160,7 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     );
     assert.equal(
       readHostedBundleTextFile({
-        bytes: bundles.vaultBundle,
+        bytes: snapshot.bundle,
         expectedKind: "vault",
         path: "automation.json",
         root: "assistant-state",
@@ -155,7 +169,7 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     );
     assert.equal(
       readHostedBundleTextFile({
-        bytes: bundles.vaultBundle,
+        bytes: snapshot.bundle,
         expectedKind: "vault",
         path: ".murph/config.json",
         root: "operator-home",
@@ -164,7 +178,7 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     );
     assert.equal(
       readHostedBundleTextFile({
-        bytes: bundles.vaultBundle,
+        bytes: snapshot.bundle,
         expectedKind: "vault",
         path: ".murph/hosted/user-env.json",
         root: "operator-home",
@@ -173,16 +187,79 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     );
     assert.equal(
       readHostedBundleTextFile({
-        bytes: bundles.vaultBundle,
+        bytes: snapshot.bundle,
         expectedKind: "vault",
         path: "raw/inbox/2026-03-28/capture_123/attachments/report.pdf",
         root: "vault",
       }),
       null,
     );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/inbox/promotions.json",
+        root: "vault",
+      }),
+      "{\"version\":1,\"entries\":[]}\n",
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/op_test.json",
+        root: "vault",
+      }),
+      "{\"status\":\"committed\"}\n",
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/op_test/payloads/staged.md",
+        root: "vault",
+      }),
+      "staged payload\n",
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/inbox/config.json",
+        root: "vault",
+      }),
+      null,
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/device-sync/state.sqlite",
+        root: "vault",
+      }),
+      null,
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/search.sqlite",
+        root: "vault",
+      }),
+      null,
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/parsers/toolchain.json",
+        root: "vault",
+      }),
+      null,
+    );
 
     const artifactRefs = listHostedBundleArtifacts({
-      bytes: bundles.vaultBundle,
+      bytes: snapshot.bundle,
       expectedKind: "vault",
     });
     assert.deepEqual(
@@ -200,14 +277,25 @@ test("hosted execution snapshots collapse into one workspace bundle and external
 
         return bytes;
       },
-      agentStateBundle: bundles.agentStateBundle,
-      vaultBundle: bundles.vaultBundle,
+      bundle: snapshot.bundle,
       workspaceRoot: restoreRoot,
     });
 
     assert.equal(
       await readFile(path.join(restored.vaultRoot, "vault.json"), "utf8"),
       "{\"schema\":\"vault\"}\n",
+    );
+    assert.equal(
+      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "inbox", "promotions.json"), "utf8"),
+      "{\"version\":1,\"entries\":[]}\n",
+    );
+    assert.equal(
+      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "op_test.json"), "utf8"),
+      "{\"status\":\"committed\"}\n",
+    );
+    assert.equal(
+      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "op_test", "payloads", "staged.md"), "utf8"),
+      "staged payload\n",
     );
     assert.equal(
       await readFile(path.join(restored.assistantStateRoot, "automation.json"), "utf8"),
@@ -226,16 +314,56 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await assert.rejects(
       readFile(path.join(restored.operatorHomeRoot, ".murph", "hosted", "user-env.json"), "utf8"),
     );
-    await assert.rejects(readFile(path.join(restored.vaultRoot, ".runtime", "device-syncd.sqlite"), "utf8"));
-    await assert.rejects(readFile(path.join(restored.vaultRoot, ".runtime", "device-syncd", "launcher.json"), "utf8"));
-    await assert.rejects(readFile(path.join(restored.vaultRoot, ".runtime", "device-syncd", "control-token"), "utf8"));
-    await assert.rejects(readFile(path.join(restored.vaultRoot, ".runtime", "device-syncd", "stdout.log"), "utf8"));
+    await assert.rejects(
+      readFile(path.join(restored.vaultRoot, ".runtime", "operations", "device-sync", "state.sqlite"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.vaultRoot, ".runtime", "operations", "device-sync", "launcher.json"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.vaultRoot, ".runtime", "operations", "device-sync", "stdout.log"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.vaultRoot, ".runtime", "operations", "inbox", "config.json"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.vaultRoot, ".runtime", "operations", "inbox", "state.json"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.vaultRoot, ".runtime", "operations", "parsers", "toolchain.json"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.vaultRoot, ".runtime", "search.sqlite"), "utf8"),
+    );
     await assert.rejects(readFile(path.join(restored.vaultRoot, ".env.local"), "utf8"));
     await assert.rejects(readFile(path.join(restored.vaultRoot, "exports", "packs", "bundle.zip"), "utf8"));
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
     await rm(restoreRoot, { force: true, recursive: true });
   }
+});
+
+test("runtime-state portability defaults operational paths to machine-local unless explicitly marked portable", () => {
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/inbox/promotions.json")).toMatchObject({
+    classification: "operational",
+    portability: "portable",
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/op_test.json")).toMatchObject({
+    classification: "operational",
+    portability: "portable",
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/inbox/config.json")).toMatchObject({
+    classification: "operational",
+    portability: "machine_local",
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/parsers/toolchain.json")).toMatchObject({
+    classification: "operational",
+    portability: "machine_local",
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/projections/search.sqlite")).toMatchObject({
+    classification: "projection",
+    portability: "machine_local",
+  });
 });
 
 test("hosted execution can defer artifact materialization until a targeted restore request", async () => {
@@ -265,7 +393,7 @@ test("hosted execution can defer artifact materialization until a targeted resto
 
     assert.equal(
       hasHostedBundleArtifactPath({
-        bytes: snapshot.vaultBundle,
+        bytes: snapshot.bundle,
         expectedKind: "vault",
         path: "raw/inbox/example/scan.pdf",
         root: "vault",
@@ -284,7 +412,7 @@ test("hosted execution can defer artifact materialization until a targeted resto
         return bytes;
       },
       shouldRestoreArtifact: () => false,
-      vaultBundle: snapshot.vaultBundle,
+      bundle: snapshot.bundle,
       workspaceRoot: restoreRoot,
     });
 
@@ -306,7 +434,7 @@ test("hosted execution can defer artifact materialization until a targeted resto
       shouldRestoreArtifact: ({ path: artifactPath, root }) => (
         root === "vault" && artifactPath === "raw/inbox/example/scan.pdf"
       ),
-      vaultBundle: snapshot.vaultBundle,
+      bundle: snapshot.bundle,
       workspaceRoot: restoreRoot,
     });
 
@@ -350,7 +478,7 @@ test("hosted execution snapshots externalize large non-text raw files but keep l
     });
 
     const artifactRefs = listHostedBundleArtifacts({
-      bytes: snapshot.vaultBundle,
+      bytes: snapshot.bundle,
       expectedKind: "vault",
     });
     assert.deepEqual(
@@ -359,7 +487,7 @@ test("hosted execution snapshots externalize large non-text raw files but keep l
     );
     assert.equal(
       readHostedBundleTextFile({
-        bytes: snapshot.vaultBundle,
+        bytes: snapshot.bundle,
         expectedKind: "vault",
         path: "raw/captures/payload",
         root: "vault",
@@ -368,7 +496,7 @@ test("hosted execution snapshots externalize large non-text raw files but keep l
     );
     assert.equal(
       readHostedBundleTextFile({
-        bytes: snapshot.vaultBundle,
+        bytes: snapshot.bundle,
         expectedKind: "vault",
         path: "raw/captures/notes.txt",
         root: "vault",
@@ -385,7 +513,7 @@ test("hosted execution snapshots externalize large non-text raw files but keep l
 
         return bytes;
       },
-      vaultBundle: snapshot.vaultBundle,
+      bundle: snapshot.bundle,
       workspaceRoot: restoreRoot,
     });
 
@@ -433,7 +561,7 @@ test("hosted execution restore rejects externalized artifacts whose bytes do not
 
         return Buffer.from("corrupt-artifact\n", "utf8");
       },
-      vaultBundle: snapshot.vaultBundle,
+      bundle: snapshot.bundle,
       workspaceRoot: restoreRoot,
     })).rejects.toThrow("Hosted bundle artifact vault:raw/captures/report.pdf");
   } finally {
