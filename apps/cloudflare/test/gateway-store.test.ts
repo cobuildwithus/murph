@@ -1,11 +1,24 @@
 import { describe, expect, it } from "vitest";
 
+import {
+  gatewayPermissionRequestSchema,
+  gatewayProjectionSnapshotSchema,
+  type GatewayPermissionRequest,
+  type GatewayProjectionSnapshot,
+} from "@murphai/gateway-core";
+
 import { buildHostedStorageAad } from "../src/crypto-context.ts";
 import {
   decryptHostedBundle,
   encryptHostedBundle,
   type HostedCipherEnvelope,
 } from "../src/crypto.ts";
+import {
+  mergeGatewayPermissionOverrides,
+  readGatewayPermissionOverrides,
+  sameGatewayPermissionResolutionOverrides,
+  type GatewayPermissionResolutionOverride,
+} from "../src/gateway-store-permissions.js";
 import { HostedGatewayProjectionStore } from "../src/gateway-store.ts";
 import type { DurableObjectStateLike } from "../src/user-runner/types.js";
 
@@ -595,4 +608,196 @@ describe("HostedGatewayProjectionStore", () => {
       "gateway.state storage is invalid.",
     );
   });
+
+  it("normalizes persisted permission overrides on read without rewriting equivalent state", async () => {
+    const baseSnapshot = gatewayProjectionSnapshotSchema.parse({
+      schema: "murph.gateway-projection-snapshot.v1",
+      generatedAt: "2026-04-06T00:04:00.000Z",
+      conversations: [],
+      messages: [],
+      permissions: [
+        gatewayPermissionRequestSchema.parse({
+          schema: "murph.gateway-permission-request.v1",
+          requestId: "request-b",
+          sessionKey: EMAIL_THREAD_SESSION_KEY,
+          action: "send-message",
+          description: "Second request",
+          status: "open",
+          requestedAt: "2026-04-06T00:00:00.000Z",
+          resolvedAt: null,
+          note: null,
+        }),
+        gatewayPermissionRequestSchema.parse({
+          schema: "murph.gateway-permission-request.v1",
+          requestId: "request-a",
+          sessionKey: EMAIL_THREAD_SESSION_KEY,
+          action: "send-message",
+          description: "First request",
+          status: "open",
+          requestedAt: "2026-04-06T00:00:00.000Z",
+          resolvedAt: null,
+          note: null,
+        }),
+      ],
+    });
+    const encryptedState = await encryptHostedBundle({
+      aad: GATEWAY_STATE_STORAGE_AAD,
+      key: TEST_CRYPTO.key,
+      keyId: TEST_CRYPTO.keyId,
+      plaintext: new TextEncoder().encode(JSON.stringify({
+        baseSnapshot,
+        events: [],
+        nextCursor: 0,
+        permissionOverrides: [
+          {
+            note: "",
+            requestId: "request-b",
+            resolvedAt: "2026-04-06T00:10:00.000Z",
+            status: "approved",
+          },
+          {
+            note: "kept",
+            requestId: "request-a",
+            resolvedAt: "2026-04-06T00:09:00.000Z",
+            status: "denied",
+          },
+        ],
+        schema: "murph.hosted-gateway-state.v1",
+      })),
+      scope: "gateway-store",
+    });
+    const writes: string[] = [];
+    const { store } = createStore({
+      initialValues: {
+        "gateway.state": encryptedState,
+      },
+      onPut(key) {
+        writes.push(key);
+      },
+    });
+
+    expect(await store.listOpenPermissions()).toEqual([]);
+
+    await store.applySnapshot(baseSnapshot);
+
+    expect(writes).toEqual([]);
+  });
 });
+
+describe("gateway permission overrides", () => {
+  it("returns the existing snapshot when an override adds no new state", () => {
+    const permission = createGatewayPermissionOverrideTestPermission();
+    const snapshot = createGatewayPermissionOverrideTestSnapshot(permission, {
+      generatedAt: permission.resolvedAt ?? "2026-04-06T00:05:00.000Z",
+    });
+
+    const merged = mergeGatewayPermissionOverrides(snapshot, [
+      createGatewayPermissionOverrideTestOverride(permission),
+    ]);
+
+    expect(merged).toBe(snapshot);
+  });
+
+  it("still advances snapshot freshness when a matching override is newer", () => {
+    const permission = createGatewayPermissionOverrideTestPermission();
+    const snapshot = createGatewayPermissionOverrideTestSnapshot(permission, {
+      generatedAt: "2026-04-06T00:04:00.000Z",
+    });
+
+    const merged = mergeGatewayPermissionOverrides(snapshot, [
+      createGatewayPermissionOverrideTestOverride(permission),
+    ]);
+
+    expect(merged).not.toBe(snapshot);
+    expect(merged).toEqual(
+      createGatewayPermissionOverrideTestSnapshot(permission, {
+        generatedAt: permission.resolvedAt ?? "2026-04-06T00:05:00.000Z",
+      }),
+    );
+    expect(merged?.permissions[0]).toEqual(permission);
+  });
+
+  it("sorts overrides and normalizes blank notes", () => {
+    const parsed = readGatewayPermissionOverrides([
+      {
+        note: "",
+        requestId: "request-b",
+        resolvedAt: "2026-04-06T00:10:00.000Z",
+        status: "approved",
+      },
+      {
+        note: "kept",
+        requestId: "request-a",
+        resolvedAt: "2026-04-06T00:09:00.000Z",
+        status: "denied",
+      },
+    ]);
+
+    expect(parsed).toEqual([
+      {
+        note: "kept",
+        requestId: "request-a",
+        resolvedAt: "2026-04-06T00:09:00.000Z",
+        status: "denied",
+      },
+      {
+        note: null,
+        requestId: "request-b",
+        resolvedAt: "2026-04-06T00:10:00.000Z",
+        status: "approved",
+      },
+    ]);
+    expect(sameGatewayPermissionResolutionOverrides(parsed, [...parsed])).toBe(true);
+    expect(
+      sameGatewayPermissionResolutionOverrides(parsed, [
+        { ...parsed[0]!, note: "changed" },
+        parsed[1]!,
+      ]),
+    ).toBe(false);
+  });
+});
+
+function createGatewayPermissionOverrideTestPermission(
+  overrides: Partial<GatewayPermissionRequest> = {},
+): GatewayPermissionRequest {
+  return gatewayPermissionRequestSchema.parse({
+    schema: "murph.gateway-permission-request.v1",
+    requestId: "request-a",
+    sessionKey: "session-a",
+    action: "send-message",
+    description: "Allow sending a message",
+    status: "approved",
+    requestedAt: "2026-04-06T00:00:00.000Z",
+    resolvedAt: "2026-04-06T00:05:00.000Z",
+    note: "kept",
+    ...overrides,
+  });
+}
+
+function createGatewayPermissionOverrideTestSnapshot(
+  permission: GatewayPermissionRequest,
+  overrides: Partial<GatewayProjectionSnapshot> = {},
+): GatewayProjectionSnapshot {
+  return gatewayProjectionSnapshotSchema.parse({
+    schema: "murph.gateway-projection-snapshot.v1",
+    generatedAt: "2026-04-06T00:05:00.000Z",
+    conversations: [],
+    messages: [],
+    permissions: [permission],
+    ...overrides,
+  });
+}
+
+function createGatewayPermissionOverrideTestOverride(
+  permission: GatewayPermissionRequest,
+): GatewayPermissionResolutionOverride {
+  const status: GatewayPermissionResolutionOverride["status"] =
+    permission.status === "open" ? "approved" : permission.status;
+
+  return {
+    note: permission.note,
+    requestId: permission.requestId,
+    resolvedAt: permission.resolvedAt ?? "2026-04-06T00:05:00.000Z",
+    status,
+  };
+}

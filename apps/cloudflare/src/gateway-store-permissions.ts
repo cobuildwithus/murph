@@ -33,16 +33,17 @@ export function mergeGatewayPermissionOverrides(
       generatedAt = override.resolvedAt;
     }
 
-    const merged = gatewayPermissionRequestSchema.parse({
+    if (sameGatewayPermissionOverrideApplication(permission, override)) {
+      return permission;
+    }
+
+    changed = true;
+    return gatewayPermissionRequestSchema.parse({
       ...permission,
       note: override.note,
       resolvedAt: override.resolvedAt,
       status: override.status,
     });
-    if (!sameStructuredValue(permission, merged)) {
-      changed = true;
-    }
-    return merged;
   });
 
   if (!changed && generatedAt === snapshot.generatedAt) {
@@ -64,39 +65,23 @@ export function readGatewayPermissionOverrides(
   }
 
   if (!Array.isArray(value)) {
-    throw new TypeError("gateway.state storage is invalid.");
+    invalidGatewayStateStorage();
   }
 
-  return value.map((entry): GatewayPermissionResolutionOverride => {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-      throw new TypeError("gateway.state storage is invalid.");
-    }
+  return value
+    .map(parseGatewayPermissionResolutionOverride)
+    .sort((left, right) => left.requestId.localeCompare(right.requestId));
+}
 
-    const record = entry as Record<string, unknown>;
-    if (typeof record.requestId !== "string" || record.requestId.length === 0) {
-      throw new TypeError("gateway.state storage is invalid.");
-    }
+export function sameGatewayPermissionResolutionOverrides(
+  left: readonly GatewayPermissionResolutionOverride[],
+  right: readonly GatewayPermissionResolutionOverride[],
+): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
 
-    const status = record.status;
-    if (status !== "approved" && status !== "denied" && status !== "expired") {
-      throw new TypeError("gateway.state storage is invalid.");
-    }
-
-    if (typeof record.resolvedAt !== "string" || Number.isNaN(Date.parse(record.resolvedAt))) {
-      throw new TypeError("gateway.state storage is invalid.");
-    }
-
-    if (record.note !== null && record.note !== undefined && typeof record.note !== "string") {
-      throw new TypeError("gateway.state storage is invalid.");
-    }
-
-    return {
-      note: typeof record.note === "string" && record.note.length > 0 ? record.note : null,
-      requestId: record.requestId,
-      resolvedAt: record.resolvedAt,
-      status,
-    };
-  }).sort((left, right) => left.requestId.localeCompare(right.requestId));
+  return left.every((entry, index) => sameGatewayPermissionResolutionOverride(entry, right[index]));
 }
 
 export function pruneGatewayPermissionOverrides(
@@ -131,6 +116,80 @@ export function upsertGatewayPermissionOverride(
   return nextOverrides.sort((left, right) => left.requestId.localeCompare(right.requestId));
 }
 
-function sameStructuredValue(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+function parseGatewayPermissionResolutionOverride(
+  value: unknown,
+): GatewayPermissionResolutionOverride {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    invalidGatewayStateStorage();
+  }
+
+  const record = value as Record<string, unknown>;
+  const requestId = record.requestId;
+  if (typeof requestId !== "string" || requestId.length === 0) {
+    invalidGatewayStateStorage();
+  }
+
+  const status = record.status;
+  if (!isGatewayPermissionResolutionStatus(status)) {
+    invalidGatewayStateStorage();
+  }
+
+  const resolvedAt = record.resolvedAt;
+  if (typeof resolvedAt !== "string" || Number.isNaN(Date.parse(resolvedAt))) {
+    invalidGatewayStateStorage();
+  }
+
+  return {
+    note: normalizeGatewayPermissionResolutionNote(record.note),
+    requestId,
+    resolvedAt,
+    status,
+  };
+}
+
+function sameGatewayPermissionOverrideApplication(
+  permission: GatewayPermissionRequest,
+  override: GatewayPermissionResolutionOverride,
+): boolean {
+  return (
+    permission.note === override.note
+    && permission.requestId === override.requestId
+    && permission.resolvedAt === override.resolvedAt
+    && permission.status === override.status
+  );
+}
+
+function sameGatewayPermissionResolutionOverride(
+  left: GatewayPermissionResolutionOverride,
+  right: GatewayPermissionResolutionOverride | undefined,
+): boolean {
+  return Boolean(
+    right
+    && left.note === right.note
+    && left.requestId === right.requestId
+    && left.resolvedAt === right.resolvedAt
+    && left.status === right.status
+  );
+}
+
+function normalizeGatewayPermissionResolutionNote(value: unknown): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    invalidGatewayStateStorage();
+  }
+
+  return value.length > 0 ? value : null;
+}
+
+function isGatewayPermissionResolutionStatus(
+  value: unknown,
+): value is GatewayPermissionResolutionOverride["status"] {
+  return value === "approved" || value === "denied" || value === "expired";
+}
+
+function invalidGatewayStateStorage(): never {
+  throw new TypeError("gateway.state storage is invalid.");
 }
