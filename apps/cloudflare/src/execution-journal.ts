@@ -25,7 +25,6 @@ import {
 } from "./crypto-context.js";
 import {
   hostedExecutionJournalObjectKey,
-  hostedExecutionJournalObjectKeys,
 } from "./storage-paths.js";
 import { readEncryptedR2Json, writeEncryptedR2Json } from "./crypto.js";
 
@@ -74,61 +73,44 @@ export function createHostedExecutionJournalStore(input: {
         return;
       }
 
-      for (const key of await hostedExecutionJournalObjectKeys(
-        input.key,
-        input.keysById,
-        userId,
-        eventId,
-      )) {
-        await input.bucket.delete(key);
-      }
+      await input.bucket.delete(
+        await hostedExecutionJournalObjectKey(input.key, userId, eventId),
+      );
     },
 
     async readCommittedResult(userId, eventId) {
-      for (const key of await hostedExecutionJournalObjectKeys(
-        input.key,
-        input.keysById,
-        userId,
-        eventId,
-      )) {
-        const value = await readEncryptedR2Json({
-          aad: buildHostedStorageAad({
-            eventId,
-            key,
-            purpose: "execution-journal",
-            userId,
-          }),
-          bucket: input.bucket,
-          cryptoKey: input.key,
-          cryptoKeysById: input.keysById,
-          expectedKeyId: input.keyId,
-          key,
-          parse(value) {
-            return normalizeHostedExecutionCommittedResult(value as HostedExecutionCommittedResult);
-          },
-          scope: "execution-journal",
-        });
-
-        if (value) {
-          return value;
-        }
-      }
-
-      return null;
-    },
-
-    async writeCommittedResult(userId, eventId, value) {
-      const key = await hostedExecutionJournalObjectKey(input.key, userId, eventId);
-      await writeEncryptedR2Json({
+      const objectKey = await hostedExecutionJournalObjectKey(input.key, userId, eventId);
+      return await readEncryptedR2Json({
         aad: buildHostedStorageAad({
           eventId,
-          key,
+          key: objectKey,
           purpose: "execution-journal",
           userId,
         }),
         bucket: input.bucket,
         cryptoKey: input.key,
-        key,
+        cryptoKeysById: input.keysById,
+        expectedKeyId: input.keyId,
+        key: objectKey,
+        parse(value) {
+          return normalizeHostedExecutionCommittedResult(value as HostedExecutionCommittedResult);
+        },
+        scope: "execution-journal",
+      });
+    },
+
+    async writeCommittedResult(userId, eventId, value) {
+      const objectKey = await hostedExecutionJournalObjectKey(input.key, userId, eventId);
+      await writeEncryptedR2Json({
+        aad: buildHostedStorageAad({
+          eventId,
+          key: objectKey,
+          purpose: "execution-journal",
+          userId,
+        }),
+        bucket: input.bucket,
+        cryptoKey: input.key,
+        key: objectKey,
         keyId: input.keyId,
         scope: "execution-journal",
         value,
@@ -147,12 +129,13 @@ export async function persistHostedExecutionCommit(input: {
   payload: HostedExecutionCommitPayload;
   userId: string;
 }): Promise<HostedExecutionCommittedResult> {
-  const existing = await createHostedExecutionJournalStore({
+  const journalStore = createHostedExecutionJournalStore({
     bucket: input.bucket,
     key: input.key,
     keyId: input.keyId,
     keysById: input.keysById,
-  }).readCommittedResult(input.userId, input.eventId);
+  });
+  const existing = await journalStore.readCommittedResult(input.userId, input.eventId);
 
   if (existing) {
     assertEquivalentDuplicateCommit(existing, input);
@@ -182,12 +165,7 @@ export async function persistHostedExecutionCommit(input: {
     userId: input.userId,
   };
 
-  await createHostedExecutionJournalStore({
-    bucket: input.bucket,
-    key: input.key,
-    keyId: input.keyId,
-    keysById: input.keysById,
-  }).writeCommittedResult(input.userId, input.eventId, committedResult);
+  await journalStore.writeCommittedResult(input.userId, input.eventId, committedResult);
 
   return committedResult;
 }

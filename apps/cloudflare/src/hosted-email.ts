@@ -9,7 +9,6 @@ import {
   buildHostedStorageAad,
   deriveHostedStorageOpaqueId,
 } from "./crypto-context.js";
-import { listHostedStorageObjectKeys } from "./storage-paths.js";
 import {
   readEncryptedR2Payload,
   writeEncryptedR2Payload,
@@ -45,33 +44,26 @@ export async function readHostedEmailRawMessage(input: {
   rawMessageKey: string;
   userId: string;
 }): Promise<Uint8Array | null> {
-  for (const key of await hostedEmailRawMessageObjectKeys(
+  const objectKey = await hostedEmailRawMessageObjectKey(
     input.key,
-    input.keysById,
     input.userId,
     input.rawMessageKey,
-  )) {
-    const payload = await readEncryptedR2Payload({
-      aad: buildHostedStorageAad({
-        key,
-        purpose: "email-raw",
-        rawMessageKey: input.rawMessageKey,
-        userId: input.userId,
-      }),
-      bucket: input.bucket,
-      cryptoKey: input.key,
-      cryptoKeysById: input.keysById,
-      expectedKeyId: input.keyId,
-      key,
-      scope: "email-raw",
-    });
+  );
 
-    if (payload) {
-      return payload;
-    }
-  }
-
-  return null;
+  return await readEncryptedR2Payload({
+    aad: buildHostedStorageAad({
+      key: objectKey,
+      purpose: "email-raw",
+      rawMessageKey: input.rawMessageKey,
+      userId: input.userId,
+    }),
+    bucket: input.bucket,
+    cryptoKey: input.key,
+    cryptoKeysById: input.keysById,
+    expectedKeyId: input.keyId,
+    key: objectKey,
+    scope: "email-raw",
+  });
 }
 
 export async function writeHostedEmailRawMessage(input: {
@@ -111,14 +103,9 @@ export async function deleteHostedEmailRawMessage(input: {
     return;
   }
 
-  for (const key of await hostedEmailRawMessageObjectKeys(
-    input.key,
-    input.keysById,
-    input.userId,
-    input.rawMessageKey,
-  )) {
-    await input.bucket.delete(key);
-  }
+  await input.bucket.delete(
+    await hostedEmailRawMessageObjectKey(input.key, input.userId, input.rawMessageKey),
+  );
 }
 
 export async function readHostedEmailMessageBytes(
@@ -191,17 +178,6 @@ async function hostedEmailRawMessageObjectKey(
   });
 
   return `transient/hosted-email/messages/${userSegment}/${messageSegment}.eml`;
-}
-
-async function hostedEmailRawMessageObjectKeys(
-  rootKey: Uint8Array,
-  keysById: Readonly<Record<string, Uint8Array>> | undefined,
-  userId: string,
-  rawMessageKey: string,
-): Promise<string[]> {
-  return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
-    hostedEmailRawMessageObjectKey(candidateRootKey, userId, rawMessageKey)
-  );
 }
 
 function randomOpaqueToken(bytes: number): string {

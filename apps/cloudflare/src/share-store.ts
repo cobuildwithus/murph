@@ -2,7 +2,7 @@ import { parseHostedExecutionSharePack } from "@murphai/hosted-execution";
 
 import type { R2BucketLike } from "./bundle-store.js";
 import { buildHostedStorageAad } from "./crypto-context.js";
-import { hostedSharePackObjectKey, hostedSharePackObjectKeys } from "./storage-paths.js";
+import { hostedSharePackObjectKey } from "./storage-paths.js";
 import { readEncryptedR2Json, writeEncryptedR2Json } from "./crypto.js";
 
 const HOSTED_SHARE_PACK_SCHEMA = "murph.hosted-share-pack.v2";
@@ -39,42 +39,43 @@ export function createHostedShareStore(input: {
         return;
       }
 
-      for (const key of await hostedSharePackObjectKeys(input.key, input.keysById, input.ownerUserId, shareId)) {
-        await input.bucket.delete(key);
-      }
+      await input.bucket.delete(
+        await hostedSharePackObjectKey(input.key, input.ownerUserId, shareId),
+      );
     },
 
     async readSharePack(shareId) {
-      for (const key of await hostedSharePackObjectKeys(input.key, input.keysById, input.ownerUserId, shareId)) {
-        const stored = await readEncryptedR2Json({
-          aad: buildSharePackAad(key, input.ownerUserId, shareId),
-          bucket: input.bucket,
-          cryptoKey: input.key,
-          cryptoKeysById: input.keysById,
-          expectedKeyId: input.keyId,
-          key,
-          parse: parseStoredHostedSharePack,
-          scope: "share-pack",
-        });
+      const objectKey = await hostedSharePackObjectKey(
+        input.key,
+        input.ownerUserId,
+        shareId,
+      );
+      const stored = await readEncryptedR2Json({
+        aad: buildSharePackAad(objectKey, input.ownerUserId, shareId),
+        bucket: input.bucket,
+        cryptoKey: input.key,
+        cryptoKeysById: input.keysById,
+        expectedKeyId: input.keyId,
+        key: objectKey,
+        parse: parseStoredHostedSharePack,
+        scope: "share-pack",
+      });
 
-        if (!stored) {
-          continue;
-        }
-
-        if (stored.ownerUserId !== input.ownerUserId) {
-          throw new Error(
-            `Hosted share pack ${shareId} owner mismatch: expected ${input.ownerUserId}, received ${stored.ownerUserId}.`,
-          );
-        }
-
-        if (stored.shareId !== shareId) {
-          throw new Error(`Hosted share pack record mismatch: expected ${shareId}, received ${stored.shareId}.`);
-        }
-
-        return stored.pack;
+      if (!stored) {
+        return null;
       }
 
-      return null;
+      if (stored.ownerUserId !== input.ownerUserId) {
+        throw new Error(
+          `Hosted share pack ${shareId} owner mismatch: expected ${input.ownerUserId}, received ${stored.ownerUserId}.`,
+        );
+      }
+
+      if (stored.shareId !== shareId) {
+        throw new Error(`Hosted share pack record mismatch: expected ${shareId}, received ${stored.shareId}.`);
+      }
+
+      return stored.pack;
     },
 
     async writeSharePack(shareId, pack) {
