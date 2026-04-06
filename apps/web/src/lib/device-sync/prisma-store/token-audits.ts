@@ -57,12 +57,11 @@ function emitHostedTokenAuditLog(record: HostedTokenAuditRecord): void {
     event: "device_sync_token_audit",
     action: record.action,
     channel: record.channel,
-    connectionId: record.connectionId,
+    connectionScoped: true,
+    hasSessionContext: Boolean(record.sessionId),
     provider: record.provider,
-    sessionId: record.sessionId,
     tokenVersion: record.tokenVersion,
     keyVersion: record.keyVersion,
     createdAt: record.createdAt,
-    userId: record.userId,
   }));
 }

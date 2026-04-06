@@ -23,8 +23,6 @@ import type { HostedEmailSendRequest } from "@murphai/assistant-runtime";
 import { gatewayProjectionSnapshotSchema } from "@murphai/gateway-core";
 
 import { createHostedArtifactStore } from "./bundle-store.ts";
-import { createHostedDeviceSyncRuntimeStore } from "./device-sync-runtime-store.ts";
-import { createHostedPendingUsageStore } from "./usage-store.ts";
 import { createHostedUserKeyStore } from "./user-key-store.js";
 import { readHostedExecutionEnvironment } from "./env.ts";
 import type {
@@ -116,7 +114,6 @@ export async function handleRunnerOutboundRequest(
 
   if (url.hostname === HOSTED_EXECUTION_PROXY_HOSTS.deviceSync) {
     return handleRunnerDeviceSyncControlRequest({
-      bucket: env.BUNDLES,
       env,
       environment,
       request,
@@ -127,9 +124,7 @@ export async function handleRunnerOutboundRequest(
 
   if (url.hostname === HOSTED_EXECUTION_PROXY_HOSTS.usage) {
     return handleRunnerUsageRecordRequest({
-      bucket: env.BUNDLES,
       env,
-      environment,
       request,
       url,
       userId,
@@ -446,7 +441,6 @@ async function handleRunnerSideEffectRequest(input: {
 }
 
 async function handleRunnerDeviceSyncControlRequest(input: {
-  bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
   env: RunnerOutboundEnvironmentSource;
   request: Request;
@@ -480,32 +474,23 @@ async function handleRunnerDeviceSyncControlRequest(input: {
   ) {
     return notFound();
   }
-
-  const crypto = await resolveRunnerOutboundUserCryptoContext({
-    bucket: input.bucket,
-    env: input.env,
-    environment: input.environment,
-    userId: input.userId,
-  });
-  const store = createHostedDeviceSyncRuntimeStore({
-    bucket: input.bucket,
-    key: crypto.rootKey,
-    keyId: crypto.rootKeyId,
-    keysById: crypto.keysById,
-  });
+  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
 
   if (input.url.pathname === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH) {
     return json(
-      await store.readSnapshot(
-        parseHostedDeviceSyncRuntimeSnapshotRequest(await readJsonObject(input.request), input.userId),
-      ),
+      await requireRunnerOutboundUserStubMethod(stub, "getDeviceSyncRuntimeSnapshot")({
+        request: parseHostedDeviceSyncRuntimeSnapshotRequest(
+          await readJsonObject(input.request),
+          input.userId,
+        ),
+      }),
     );
   }
 
   return json(
-    await store.applyUpdates(
-      parseHostedDeviceSyncRuntimeApplyRequest(await readJsonObject(input.request), input.userId),
-    ),
+    await requireRunnerOutboundUserStubMethod(stub, "applyDeviceSyncRuntimeUpdates")({
+      request: parseHostedDeviceSyncRuntimeApplyRequest(await readJsonObject(input.request), input.userId),
+    }),
   );
 }
 
@@ -536,9 +521,7 @@ async function forwardRunnerDeviceSyncConnectLinkRequest(input: {
 
 
 async function handleRunnerUsageRecordRequest(input: {
-  bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
   env: RunnerOutboundEnvironmentSource;
-  environment: ReturnType<typeof readHostedExecutionEnvironment>;
   request: Request;
   url: URL;
   userId: string;
@@ -550,20 +533,11 @@ async function handleRunnerUsageRecordRequest(input: {
   }
 
   const payload = parseHostedAiUsageRecordRequest(await readJsonObject(input.request));
-  const crypto = await resolveRunnerOutboundUserCryptoContext({
-    bucket: input.bucket,
-    env: input.env,
-    environment: input.environment,
-    userId: input.userId,
-  });
-  const result = await createHostedPendingUsageStore({
-    bucket: input.bucket,
-    key: crypto.rootKey,
-    keyId: crypto.rootKeyId,
-    keysById: crypto.keysById,
-  }).appendUsage({
+  const result = await requireRunnerOutboundUserStubMethod(
+    await resolveRunnerOutboundUserRunnerStub(input.env, input.userId),
+    "putPendingUsage",
+  )({
     usage: payload.usage,
-    userId: input.userId,
   });
 
   return json(result);
@@ -611,6 +585,19 @@ async function resolveRunnerOutboundUserRunnerStub(
     }
   }
   return stub;
+}
+
+function requireRunnerOutboundUserStubMethod<TKey extends keyof RunnerOutboundUserRunnerStubLike>(
+  stub: RunnerOutboundUserRunnerStubLike,
+  key: TKey,
+): Exclude<RunnerOutboundUserRunnerStubLike[TKey], undefined> {
+  const method = stub[key];
+
+  if (typeof method !== "function") {
+    throw new TypeError(`User runner stub does not implement ${String(key)}.`);
+  }
+
+  return method as Exclude<RunnerOutboundUserRunnerStubLike[TKey], undefined>;
 }
 
 function requireRunnerOutboundHostedWebControlConfig(
@@ -742,7 +729,7 @@ function parseHostedDeviceSyncRuntimeApplyRequest(
 
 function parseHostedAiUsageRecordRequest(
   value: Record<string, unknown>,
-): HostedExecutionAiUsageRecordRequest {
+): HostedExecutionAiUsageRecordRequest & { usage: readonly Record<string, unknown>[] } {
   return {
     usage: requireArray(value.usage, "usage").map((entry, index) =>
       requireRecord(entry, `usage[${index}]`)

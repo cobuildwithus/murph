@@ -37,24 +37,28 @@ function createHeartbeatStore(seed: MutableConnection[]) {
   );
 
   const deviceConnection = {
-    updateMany: async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
-      const connection = findConnection(connections, where);
-
-      if (!connection) {
-        return { count: 0 };
-      }
-
-      applyConnectionUpdate(connection, data);
-      return { count: 1 };
-    },
     findFirst: async ({ where }: { where: Record<string, unknown> }) => {
       return cloneConnection(findConnection(connections, where) ?? null);
     },
+    update: async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+      const connection = findConnection(connections, where);
+
+      if (!connection) {
+        throw new Error("Connection not found");
+      }
+
+      applyConnectionUpdate(connection, data);
+      return cloneConnection(connection);
+    },
+  };
+  const tx = {
+    $queryRaw: async () => undefined,
+    deviceConnection,
   };
 
   const store = new PrismaDeviceSyncControlPlaneStore({
     prisma: {
-      deviceConnection,
+      $transaction: async <T>(callback: (client: typeof tx) => Promise<T>) => callback(tx),
     } as never,
     codec: {
       keyVersion: "v1",
@@ -121,6 +125,22 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
       lastErrorCode: "OLD_CODE",
       lastErrorMessage: "New failure",
     });
+  });
+
+  it("rejects regressive heartbeat timestamps before writing stale state", async () => {
+    const { connections, store } = createHeartbeatStore([
+      createConnection({
+        lastSyncStartedAt: new Date("2026-03-25T02:00:00.000Z"),
+      }),
+    ]);
+
+    await expect(store.updateConnectionFromLocalHeartbeat("user-123", "dsc_123", {
+      lastSyncStartedAt: "2026-03-25T01:30:00.000Z",
+    })).rejects.toMatchObject({
+      code: "INVALID_LOCAL_HEARTBEAT",
+      httpStatus: 400,
+    });
+    expect(connections.get("dsc_123")?.lastSyncStartedAt?.toISOString()).toBe("2026-03-25T02:00:00.000Z");
   });
 });
 
