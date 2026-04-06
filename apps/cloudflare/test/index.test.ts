@@ -220,7 +220,7 @@ describe("cloudflare worker routes", () => {
     expect(stub.dispatch).not.toHaveBeenCalled();
   });
 
-  it("persists runner commits through the outbound commit.worker handler", async () => {
+  it("persists runner commits through the outbound results.worker handler", async () => {
     const harness = createUserRunnerDurableObject();
     await resolveHostedUserCryptoContextForTest(harness.env, "member_123");
     const sideEffects = [
@@ -233,7 +233,7 @@ describe("cloudflare worker routes", () => {
     ];
 
     const response = await callRunnerOutbound(
-      new Request("http://commit.worker/events/evt_commit/commit", {
+      new Request("http://results.worker/events/evt_commit/commit", {
         body: JSON.stringify({
           bundle: Buffer.from("vault").toString("base64"),
           currentBundleRef: null,
@@ -371,12 +371,12 @@ describe("cloudflare worker routes", () => {
     );
   });
 
-  it("persists finalized runner bundles through the outbound commit.worker handler", async () => {
+  it("persists finalized runner bundles through the outbound results.worker handler", async () => {
     const harness = createUserRunnerDurableObject();
     await resolveHostedUserCryptoContextForTest(harness.env, "member_123");
 
     await callRunnerOutbound(
-      new Request("http://commit.worker/events/evt_finalize/commit", {
+      new Request("http://results.worker/events/evt_finalize/commit", {
         body: JSON.stringify({
           bundle: Buffer.from("vault-committed").toString("base64"),
           currentBundleRef: null,
@@ -394,7 +394,7 @@ describe("cloudflare worker routes", () => {
     );
 
     const finalizeResponse = await callRunnerOutbound(
-      new Request("http://commit.worker/events/evt_finalize/finalize", {
+      new Request("http://results.worker/events/evt_finalize/finalize", {
         body: JSON.stringify({
           bundle: Buffer.from("vault-final").toString("base64"),
         }),
@@ -434,7 +434,7 @@ describe("cloudflare worker routes", () => {
     const journalStore = await createHostedExecutionJournalStoreForTest(harness.env, "member_123");
 
     await callRunnerOutbound(
-      new Request("http://commit.worker/events/evt_finalize_auth/commit", {
+      new Request("http://results.worker/events/evt_finalize_auth/commit", {
         body: JSON.stringify({
           bundle: Buffer.from("vault-committed").toString("base64"),
           currentBundleRef: null,
@@ -452,7 +452,7 @@ describe("cloudflare worker routes", () => {
     );
 
     await expect(() => callRunnerOutbound(
-      new Request("http://commit.worker/events/evt_finalize_auth/finalize", {
+      new Request("http://results.worker/events/evt_finalize_auth/finalize", {
         body: JSON.stringify({
           bundle: 42,
         }),
@@ -465,7 +465,7 @@ describe("cloudflare worker routes", () => {
     )).rejects.toThrow("bundle must be a string or null.");
 
     await expect(() => callRunnerOutbound(
-      new Request("http://commit.worker/events/evt_bad_commit/commit", {
+      new Request("http://results.worker/events/evt_bad_commit/commit", {
         body: JSON.stringify({
           bundle: 42,
           currentBundleRef: {},
@@ -509,7 +509,7 @@ describe("cloudflare worker routes", () => {
   it("persists side-effect journal records through the side-effects route and reads them back through the outbox route", async () => {
     const env = createWorkerEnv();
     const response = await callRunnerOutbound(
-      new Request("http://side-effects.worker/effects/outbox_123?kind=assistant.delivery&fingerprint=dedupe_123", {
+      new Request("http://results.worker/effects/outbox_123?kind=assistant.delivery&fingerprint=dedupe_123", {
         body: JSON.stringify({
           ...createPreparedSideEffectRecord({
             effectId: "outbox_123",
@@ -527,7 +527,7 @@ describe("cloudflare worker routes", () => {
     expect(response.status).toBe(200);
 
     const readResponse = await callRunnerOutbound(
-      new Request("http://side-effects.worker/intents/outbox_123?kind=assistant.delivery&fingerprint=dedupe_123", {
+      new Request("http://results.worker/intents/outbox_123?kind=assistant.delivery&fingerprint=dedupe_123", {
         method: "GET",
       }),
       env,
@@ -549,7 +549,7 @@ describe("cloudflare worker routes", () => {
     const env = createWorkerEnv();
 
     await callRunnerOutbound(
-      new Request("http://side-effects.worker/intents/outbox_a?kind=assistant.delivery&fingerprint=dedupe_123", {
+      new Request("http://results.worker/intents/outbox_a?kind=assistant.delivery&fingerprint=dedupe_123", {
         body: JSON.stringify({
           ...createPreparedSideEffectRecord({
             effectId: "outbox_a",
@@ -565,7 +565,7 @@ describe("cloudflare worker routes", () => {
     );
 
     const conflictResponse = await callRunnerOutbound(
-      new Request("http://side-effects.worker/effects/outbox_a?kind=assistant.delivery&fingerprint=dedupe_conflict", {
+      new Request("http://results.worker/effects/outbox_a?kind=assistant.delivery&fingerprint=dedupe_conflict", {
         body: JSON.stringify({
           ...createPreparedSideEffectRecord({
             effectId: "outbox_a",
@@ -590,7 +590,7 @@ describe("cloudflare worker routes", () => {
     const env = createWorkerEnv();
 
     await callRunnerOutbound(
-      new Request("http://side-effects.worker/effects/outbox_prepared?kind=assistant.delivery&fingerprint=dedupe_prepared", {
+      new Request("http://results.worker/effects/outbox_prepared?kind=assistant.delivery&fingerprint=dedupe_prepared", {
         body: JSON.stringify(createPreparedSideEffectRecord({
           effectId: "outbox_prepared",
           fingerprint: "dedupe_prepared",
@@ -603,7 +603,7 @@ describe("cloudflare worker routes", () => {
       env,
     );
     await callRunnerOutbound(
-      new Request("http://side-effects.worker/effects/outbox_sent?kind=assistant.delivery&fingerprint=dedupe_sent", {
+      new Request("http://results.worker/effects/outbox_sent?kind=assistant.delivery&fingerprint=dedupe_sent", {
         body: JSON.stringify(createSentSideEffectRecord({
           effectId: "outbox_sent",
           fingerprint: "dedupe_sent",
@@ -617,7 +617,7 @@ describe("cloudflare worker routes", () => {
     );
 
     const deletePreparedResponse = await callRunnerOutbound(
-      new Request("http://side-effects.worker/effects/outbox_prepared?kind=assistant.delivery&fingerprint=dedupe_prepared", {
+      new Request("http://results.worker/effects/outbox_prepared?kind=assistant.delivery&fingerprint=dedupe_prepared", {
         method: "DELETE",
       }),
       env,
@@ -625,7 +625,7 @@ describe("cloudflare worker routes", () => {
     expect(deletePreparedResponse.status).toBe(200);
 
     const readPreparedResponse = await callRunnerOutbound(
-      new Request("http://side-effects.worker/effects/outbox_prepared?kind=assistant.delivery&fingerprint=dedupe_prepared", {
+      new Request("http://results.worker/effects/outbox_prepared?kind=assistant.delivery&fingerprint=dedupe_prepared", {
         method: "GET",
       }),
       env,
@@ -636,7 +636,7 @@ describe("cloudflare worker routes", () => {
     });
 
     const deleteSentResponse = await callRunnerOutbound(
-      new Request("http://side-effects.worker/effects/outbox_sent?kind=assistant.delivery&fingerprint=dedupe_sent", {
+      new Request("http://results.worker/effects/outbox_sent?kind=assistant.delivery&fingerprint=dedupe_sent", {
         method: "DELETE",
       }),
       env,
@@ -644,7 +644,7 @@ describe("cloudflare worker routes", () => {
     expect(deleteSentResponse.status).toBe(200);
 
     const readSentResponse = await callRunnerOutbound(
-      new Request("http://side-effects.worker/effects/outbox_sent?kind=assistant.delivery&fingerprint=dedupe_sent", {
+      new Request("http://results.worker/effects/outbox_sent?kind=assistant.delivery&fingerprint=dedupe_sent", {
         method: "GET",
       }),
       env,
@@ -684,7 +684,7 @@ describe("cloudflare worker routes", () => {
     });
 
     const response = await callRunnerOutbound(
-      new Request(`http://side-effects.worker/intents/${record.effectId}?kind=${record.kind}&fingerprint=${record.fingerprint}`, {
+      new Request(`http://results.worker/intents/${record.effectId}?kind=${record.kind}&fingerprint=${record.fingerprint}`, {
         method: "GET",
       }),
       env,
@@ -1514,7 +1514,7 @@ describe("cloudflare worker routes", () => {
     expect(dispatch.eventId).toBe(`email:${dispatchedEvent.rawMessageKey}`);
 
     const readResponse = await callRunnerOutbound(
-      new Request(`http://email.worker/messages/${dispatchedEvent.rawMessageKey}`, {
+      new Request(`http://results.worker/messages/${dispatchedEvent.rawMessageKey}`, {
         method: "GET",
       }),
       env,
@@ -1805,7 +1805,7 @@ describe("cloudflare worker routes", () => {
     expect(stub.dispatch).not.toHaveBeenCalled();
   });
 
-  it("sends hosted email through email.worker and returns a canonical serialized thread target", async () => {
+  it("sends hosted email through results.worker and returns a canonical serialized thread target", async () => {
     const env = createWorkerEnv(createUserRunnerStub(), {
       HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
       HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
@@ -1843,7 +1843,7 @@ describe("cloudflare worker routes", () => {
     );
 
     const response = await callRunnerOutbound(
-      new Request("http://email.worker/send", {
+      new Request("http://results.worker/send", {
         body: JSON.stringify({
           identityId: "different@example.test",
           message: "Hosted email hello.",
@@ -1898,7 +1898,7 @@ describe("cloudflare worker routes", () => {
     );
 
     const sendResponse = await callRunnerOutbound(
-      new Request("http://email.worker/send", {
+      new Request("http://results.worker/send", {
         body: JSON.stringify({
           identityId: "different@example.test",
           message: "Hosted email hello.",
@@ -1973,7 +1973,7 @@ describe("cloudflare worker routes", () => {
     );
 
     const sendResponse = await callRunnerOutbound(
-      new Request("http://email.worker/send", {
+      new Request("http://results.worker/send", {
         body: JSON.stringify({
           identityId: "different@example.test",
           message: "Hosted email hello.",
@@ -2041,7 +2041,7 @@ describe("cloudflare worker routes", () => {
     );
 
     const sendResponse = await callRunnerOutbound(
-      new Request("http://email.worker/send", {
+      new Request("http://results.worker/send", {
         body: JSON.stringify({
           identityId: "different@example.test",
           message: "Hosted email hello.",
@@ -2101,7 +2101,7 @@ describe("cloudflare worker routes", () => {
     });
 
     const wrongMethodOutboxResponse = await callRunnerOutbound(
-      new Request("http://side-effects.worker/intents/outbox_123", {
+      new Request("http://results.worker/intents/outbox_123", {
         method: "POST",
       }),
       createWorkerEnv(),

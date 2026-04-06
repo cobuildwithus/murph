@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { test } from "vitest";
@@ -11,20 +10,20 @@ import {
   prepareHostedDispatchContext,
   reconcileHostedAssistantChannelCapabilities,
 } from "../src/hosted-runtime/context.ts";
+import {
+  createHostedRuntimeWorkspace,
+  HOSTED_RUNTIME_EMAIL_CAPABILITY_ENV,
+} from "./hosted-runtime-test-helpers.ts";
 
 test("hosted channel capability reconciliation enables email and telegram auto-reply exactly once", async () => {
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runtime-context-"));
-  const vaultRoot = path.join(workspaceRoot, "vault");
+  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
 
   try {
-    const firstResult = await reconcileHostedAssistantChannelCapabilities(vaultRoot, {
-      HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
-      HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
-      HOSTED_EMAIL_DOMAIN: "mail.example.test",
-      HOSTED_EMAIL_LOCAL_PART: "assistant",
-      HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
-      TELEGRAM_BOT_TOKEN: "telegram-token",
-    }, true);
+    const firstResult = await reconcileHostedAssistantChannelCapabilities(
+      vaultRoot,
+      HOSTED_RUNTIME_EMAIL_CAPABILITY_ENV,
+      true,
+    );
 
     assert.deepEqual(firstResult, {
       emailAutoReplyEnabled: true,
@@ -37,27 +36,23 @@ test("hosted channel capability reconciliation enables email and telegram auto-r
       ["email", "telegram"],
     );
 
-    const secondResult = await reconcileHostedAssistantChannelCapabilities(vaultRoot, {
-      HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
-      HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
-      HOSTED_EMAIL_DOMAIN: "mail.example.test",
-      HOSTED_EMAIL_LOCAL_PART: "assistant",
-      HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
-      TELEGRAM_BOT_TOKEN: "telegram-token",
-    }, true);
+    const secondResult = await reconcileHostedAssistantChannelCapabilities(
+      vaultRoot,
+      HOSTED_RUNTIME_EMAIL_CAPABILITY_ENV,
+      true,
+    );
 
     assert.deepEqual(secondResult, {
       emailAutoReplyEnabled: true,
       telegramAutoReplyEnabled: true,
     });
   } finally {
-    await rm(workspaceRoot, { force: true, recursive: true });
+    await cleanup();
   }
 });
 
 test("hosted dispatch context still requires member activation bootstrap before follow-up events", async () => {
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runtime-context-"));
-  const vaultRoot = path.join(workspaceRoot, "vault");
+  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
 
   try {
     await assert.rejects(
@@ -101,13 +96,12 @@ test("hosted dispatch context still requires member activation bootstrap before 
     });
     await access(path.join(vaultRoot, "vault.json"));
   } finally {
-    await rm(workspaceRoot, { force: true, recursive: true });
+    await cleanup();
   }
 });
 
 test("hosted dispatch context does not enable new auto-reply channels on non-activation follow-up events", async () => {
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runtime-context-"));
-  const vaultRoot = path.join(workspaceRoot, "vault");
+  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
 
   try {
     await prepareHostedDispatchContext(
@@ -134,14 +128,7 @@ test("hosted dispatch context does not enable new auto-reply channels on non-act
         eventId: "evt_tick_after_bootstrap",
         occurredAt: "2026-03-28T09:10:00.000Z",
       },
-      {
-        HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
-        HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
-        HOSTED_EMAIL_DOMAIN: "mail.example.test",
-        HOSTED_EMAIL_LOCAL_PART: "assistant",
-        HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
-        TELEGRAM_BOT_TOKEN: "telegram-token",
-      },
+      HOSTED_RUNTIME_EMAIL_CAPABILITY_ENV,
     );
 
     const automationState = JSON.parse(
@@ -150,6 +137,6 @@ test("hosted dispatch context does not enable new auto-reply channels on non-act
 
     assert.deepEqual(automationState.autoReplyChannels, []);
   } finally {
-    await rm(workspaceRoot, { force: true, recursive: true });
+    await cleanup();
   }
 });

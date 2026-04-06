@@ -3,6 +3,24 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH =
   "/api/internal/device-sync/runtime/snapshot";
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH =
   "/api/internal/device-sync/runtime/apply";
+export const HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH = "/send";
+
+export function buildHostedExecutionRunnerCommitPath(eventId: string): string {
+  return `/events/${encodeURIComponent(eventId)}/commit`;
+}
+
+export function buildHostedExecutionRunnerFinalizePath(eventId: string): string {
+  return `/events/${encodeURIComponent(eventId)}/finalize`;
+}
+
+export function buildHostedExecutionRunnerSideEffectPath(effectId: string): string {
+  return `/effects/${encodeURIComponent(effectId)}`;
+}
+
+export function buildHostedExecutionRunnerEmailMessagePath(rawMessageKey: string): string {
+  return `/messages/${encodeURIComponent(rawMessageKey)}`;
+}
+
 export function buildHostedExecutionDeviceSyncConnectLinkPath(provider: string): string {
   return `/api/internal/device-sync/providers/${encodeURIComponent(provider)}/connect-link`;
 }

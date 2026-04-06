@@ -6,7 +6,6 @@ import {
 } from "@murphai/runtime-state";
 import { describe, expect, it } from "vitest";
 
-import type { R2BucketLike } from "../src/bundle-store.js";
 import { buildHostedStorageAad } from "../src/crypto-context.js";
 import { readEncryptedR2Payload, writeEncryptedR2Json } from "../src/crypto.js";
 import {
@@ -14,43 +13,15 @@ import {
   type HostedUserKeyAuditRecord,
 } from "../src/user-key-store.js";
 
+import { MemoryEncryptedR2Bucket } from "./test-helpers";
+
 const PLATFORM_ENVELOPE_KEY = Uint8Array.from(Array.from({ length: 32 }, (_, index) => index + 1));
 const PLATFORM_ENVELOPE_KEY_ID = "platform:v1";
 const USER_ID = "member_test_user";
 
-class MemoryR2Object {
-  readonly value: string;
-
-  constructor(value: string) {
-    this.value = value;
-  }
-
-  async arrayBuffer(): Promise<ArrayBuffer> {
-    const encoded = new TextEncoder().encode(this.value);
-    return encoded.buffer.slice(encoded.byteOffset, encoded.byteOffset + encoded.byteLength) as ArrayBuffer;
-  }
-}
-
-class MemoryBucket implements R2BucketLike {
-  readonly objects = new Map<string, string>();
-
-  async delete(key: string): Promise<void> {
-    this.objects.delete(key);
-  }
-
-  async get(key: string): Promise<MemoryR2Object | null> {
-    const value = this.objects.get(key);
-    return value === undefined ? null : new MemoryR2Object(value);
-  }
-
-  async put(key: string, value: string): Promise<void> {
-    this.objects.set(key, value);
-  }
-}
-
 describe("createHostedUserKeyStore", () => {
   it("fails closed when runtime access happens before managed provisioning", async () => {
-    const bucket = new MemoryBucket();
+    const bucket = new MemoryEncryptedR2Bucket();
     const automationKeys = await generateHostedUserRecipientKeyPair();
     const recoveryKeys = await generateHostedUserRecipientKeyPair();
     const store = createHostedUserKeyStore({
@@ -70,7 +41,7 @@ describe("createHostedUserKeyStore", () => {
   });
 
   it("bootstraps automation, recovery, and optional tee recipients", async () => {
-    const bucket = new MemoryBucket();
+    const bucket = new MemoryEncryptedR2Bucket();
     const automationKeys = await generateHostedUserRecipientKeyPair();
     const recoveryKeys = await generateHostedUserRecipientKeyPair();
     const teeKeys = await generateHostedUserRecipientKeyPair();
@@ -112,7 +83,7 @@ describe("createHostedUserKeyStore", () => {
   });
 
   it("preserves future user-unlock recipients while reconciling managed recipients", async () => {
-    const bucket = new MemoryBucket();
+    const bucket = new MemoryEncryptedR2Bucket();
     const auditLog: HostedUserKeyAuditRecord[] = [];
     const automationKeys = await generateHostedUserRecipientKeyPair();
     const initialRecoveryKeys = await generateHostedUserRecipientKeyPair();
@@ -222,7 +193,7 @@ describe("createHostedUserKeyStore", () => {
   });
 
   it("drops stale tee automation recipients when tee is no longer configured", async () => {
-    const bucket = new MemoryBucket();
+    const bucket = new MemoryEncryptedR2Bucket();
     const automationKeys = await generateHostedUserRecipientKeyPair();
     const recoveryKeys = await generateHostedUserRecipientKeyPair();
     const teeKeys = await generateHostedUserRecipientKeyPair();
@@ -264,7 +235,7 @@ describe("createHostedUserKeyStore", () => {
   });
 });
 
-async function readStoredEnvelope(bucket: MemoryBucket, userId: string) {
+async function readStoredEnvelope(bucket: MemoryEncryptedR2Bucket, userId: string) {
   const objectKey = readOnlyObjectKey(bucket);
   const plaintext = await readEncryptedR2Payload({
     aad: buildHostedStorageAad({
@@ -286,7 +257,7 @@ async function readStoredEnvelope(bucket: MemoryBucket, userId: string) {
   return parseHostedUserRootKeyEnvelope(JSON.parse(new TextDecoder().decode(plaintext)));
 }
 
-function readOnlyObjectKey(bucket: MemoryBucket): string {
+function readOnlyObjectKey(bucket: MemoryEncryptedR2Bucket): string {
   const [objectKey] = bucket.objects.keys();
 
   if (!objectKey) {

@@ -1,6 +1,8 @@
 import {
-  DEFAULT_HOSTED_EXECUTION_EMAIL_BASE_URL,
+  DEFAULT_HOSTED_EXECUTION_RESULTS_BASE_URL,
   HOSTED_EXECUTION_CALLBACK_HOSTS,
+  HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
+  buildHostedExecutionRunnerEmailMessagePath,
   normalizeHostedExecutionBaseUrl,
 } from "@murphai/hosted-execution";
 
@@ -18,9 +20,9 @@ export interface HostedEmailSendRequest {
 }
 
 export function normalizeHostedEmailBaseUrl(value: string | null | undefined): string {
-  const candidate = value?.trim() ? value.trim() : DEFAULT_HOSTED_EXECUTION_EMAIL_BASE_URL;
+  const candidate = value?.trim() ? value.trim() : DEFAULT_HOSTED_EXECUTION_RESULTS_BASE_URL;
   const normalized = normalizeHostedExecutionBaseUrl(candidate, {
-    allowHttpHosts: [HOSTED_EXECUTION_CALLBACK_HOSTS.email],
+    allowHttpHosts: [HOSTED_EXECUTION_CALLBACK_HOSTS.results],
     allowHttpLocalhost: true,
   });
 
@@ -32,15 +34,15 @@ export function normalizeHostedEmailBaseUrl(value: string | null | undefined): s
 }
 
 export function buildHostedRunnerEmailMessageUrl(baseUrl: string, rawMessageKey: string): URL {
-  return new URL(`/messages/${encodeURIComponent(rawMessageKey)}`, baseUrl);
+  return new URL(buildHostedExecutionRunnerEmailMessagePath(rawMessageKey), baseUrl);
 }
 
 export function buildHostedRunnerEmailSendUrl(baseUrl: string): URL {
-  return new URL("/send", baseUrl);
+  return new URL(HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH, baseUrl);
 }
 
 export function createHostedEmailChannelDependencies(input: {
-  emailBaseUrl: string;
+  resultsBaseUrl: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number | null;
 }): {
@@ -49,7 +51,7 @@ export function createHostedEmailChannelDependencies(input: {
   return {
     sendEmail: async (sendInput) => sendHostedEmailOverWorker({
       ...sendInput,
-      emailBaseUrl: input.emailBaseUrl,
+      resultsBaseUrl: input.resultsBaseUrl,
       fetchImpl: input.fetchImpl,
       timeoutMs: sendInput.timeoutMs ?? input.timeoutMs ?? null,
     }),
@@ -57,7 +59,7 @@ export function createHostedEmailChannelDependencies(input: {
 }
 
 export async function sendHostedEmailOverWorker(input: HostedEmailSendRequest & {
-  emailBaseUrl: string;
+  resultsBaseUrl: string;
   fetchImpl?: typeof fetch;
 }): Promise<
   | {
@@ -69,7 +71,7 @@ export async function sendHostedEmailOverWorker(input: HostedEmailSendRequest & 
     description: "Hosted email send worker",
     fetchImpl: input.fetchImpl,
     timeoutMs: input.timeoutMs ?? null,
-    url: buildHostedRunnerEmailSendUrl(input.emailBaseUrl).toString(),
+    url: buildHostedRunnerEmailSendUrl(input.resultsBaseUrl).toString(),
     init: {
       body: JSON.stringify({
         identityId: input.identityId,

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import type { SharePack } from "@murphai/contracts";
 import {
   buildHostedExecutionAssistantCronTickDispatch,
   buildHostedExecutionDeviceSyncWakeDispatch,
@@ -13,24 +12,9 @@ import {
   readHostedExecutionOutboxPayload,
   resolveHostedExecutionDispatchPayloadStorage,
 } from "../src/outbox-payload";
+import { TEST_HOSTED_SHARE_PACK } from "./test-fixtures.ts";
 
 const occurredAt = "2026-04-04T00:00:00.000Z";
-const SHARE_PACK: SharePack = {
-  createdAt: occurredAt,
-  entities: [
-    {
-      kind: "food",
-      payload: {
-        kind: "smoothie",
-        status: "active",
-        title: "Shared breakfast",
-      },
-      ref: "food.shared-breakfast",
-    },
-  ],
-  schemaVersion: "murph.share-pack.v1",
-  title: "Shared breakfast",
-};
 
 describe("resolveHostedExecutionDispatchPayloadStorage", () => {
   it("uses reference storage for reconstructable hosted events", () => {
@@ -66,7 +50,7 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
           memberId: "user_123",
           occurredAt,
           share: {
-            pack: SHARE_PACK,
+            pack: TEST_HOSTED_SHARE_PACK,
             shareId: "share_123",
           },
         }),

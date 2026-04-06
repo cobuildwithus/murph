@@ -202,7 +202,7 @@ test("hosted email send worker tolerates non-JSON error bodies and applies the h
   await assert.rejects(
     () =>
       sendHostedEmailOverWorker({
-        emailBaseUrl: "https://email.example.test",
+        resultsBaseUrl: "https://results.example.test",
         identityId: "assistant@mail.example.test",
         message: "hello",
         target: "user@example.com",

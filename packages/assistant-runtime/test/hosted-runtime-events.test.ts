@@ -96,7 +96,7 @@ test("hosted gateway dispatch forwards clientRequestId to the local gateway send
 
   const metrics = await executeHostedDispatchEvent({
     dispatch,
-    emailBaseUrl: "https://email.example.test",
+    resultsBaseUrl: "https://results.example.test",
     runtime: {
       commitTimeoutMs: null,
       userEnv: {},
@@ -148,7 +148,7 @@ test("hosted member activation dispatch queues the first-contact welcome through
       eventId: "evt_activation",
       occurredAt: "2026-04-04T00:00:00.000Z",
     },
-    emailBaseUrl: "https://email.example.test",
+    resultsBaseUrl: "https://results.example.test",
     runtime: {
       commitTimeoutMs: null,
       userEnv: {},

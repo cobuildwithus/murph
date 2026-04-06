@@ -4,6 +4,7 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
   HOSTED_EXECUTION_PROXY_HOSTS,
+  HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
   buildHostedExecutionDeviceSyncConnectLinkPath,
   fetchHostedExecutionWebControlPlaneResponse,
@@ -51,10 +52,8 @@ export interface RunnerOutboundEnvironmentSource extends WorkerEnvironmentContra
 
 const RUNNER_INTERNAL_PROXY_HOSTNAMES = new Set<string>([
   HOSTED_EXECUTION_CALLBACK_HOSTS.artifacts,
-  HOSTED_EXECUTION_CALLBACK_HOSTS.commit,
+  HOSTED_EXECUTION_CALLBACK_HOSTS.results,
   HOSTED_EXECUTION_PROXY_HOSTS.deviceSync,
-  HOSTED_EXECUTION_CALLBACK_HOSTS.email,
-  HOSTED_EXECUTION_CALLBACK_HOSTS.sideEffects,
   HOSTED_EXECUTION_PROXY_HOSTS.usage,
 ]);
 
@@ -77,20 +76,15 @@ export async function handleRunnerOutboundRequest(
     return authorizationError;
   }
 
-  if (url.hostname === HOSTED_EXECUTION_CALLBACK_HOSTS.commit) {
-    const match = /^\/events\/(?<eventId>[^/]+)\/(?<action>commit|finalize)$/u.exec(url.pathname);
-    if (!match?.groups) {
-      return notFound();
-    }
-
-    if (request.method !== "POST") {
-      return methodNotAllowed();
-    }
-
-    const eventId = decodeRouteParam(match.groups.eventId);
-    return match.groups.action === "commit"
-      ? forwardRunnerCommit(userId, eventId, await readJsonObject(request), env)
-      : forwardRunnerFinalize(userId, eventId, await readJsonObject(request), env);
+  if (url.hostname === HOSTED_EXECUTION_CALLBACK_HOSTS.results) {
+    return handleRunnerResultsRequest({
+      bucket: env.BUNDLES,
+      env,
+      environment,
+      request,
+      url,
+      userId,
+    });
   }
 
   if (url.hostname === HOSTED_EXECUTION_CALLBACK_HOSTS.artifacts) {
@@ -134,62 +128,78 @@ export async function handleRunnerOutboundRequest(
     });
   }
 
-  if (url.hostname === HOSTED_EXECUTION_CALLBACK_HOSTS.sideEffects) {
-    const match = /^\/(?:intents|effects)\/(?<effectId>[^/]+)$/u.exec(url.pathname);
-    if (!match?.groups) {
-      return notFound();
+  return notFound();
+}
+
+async function handleRunnerResultsRequest(input: {
+  bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
+  env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  request: Request;
+  url: URL;
+  userId: string;
+}): Promise<Response> {
+  const commitMatch = /^\/events\/(?<eventId>[^/]+)\/(?<action>commit|finalize)$/u.exec(input.url.pathname);
+  if (commitMatch?.groups) {
+    if (input.request.method !== "POST") {
+      return methodNotAllowed();
     }
 
-    if (request.method !== "DELETE" && request.method !== "GET" && request.method !== "PUT") {
+    const eventId = decodeRouteParam(commitMatch.groups.eventId);
+    return commitMatch.groups.action === "commit"
+      ? forwardRunnerCommit(input.userId, eventId, await readJsonObject(input.request), input.env)
+      : forwardRunnerFinalize(input.userId, eventId, await readJsonObject(input.request), input.env);
+  }
+
+  const sideEffectMatch = /^\/(?:intents|effects)\/(?<effectId>[^/]+)$/u.exec(input.url.pathname);
+  if (sideEffectMatch?.groups) {
+    if (input.request.method !== "DELETE" && input.request.method !== "GET" && input.request.method !== "PUT") {
       return methodNotAllowed();
     }
 
     return handleRunnerSideEffectRequest({
-      bucket: env.BUNDLES,
-      env,
-      effectId: decodeRouteParam(match.groups.effectId),
-      environment,
-      request,
-      url,
-      userId,
+      bucket: input.bucket,
+      env: input.env,
+      effectId: decodeRouteParam(sideEffectMatch.groups.effectId),
+      environment: input.environment,
+      request: input.request,
+      url: input.url,
+      userId: input.userId,
     });
   }
 
-  if (url.hostname === HOSTED_EXECUTION_CALLBACK_HOSTS.email) {
-    if (url.pathname === "/send") {
-      if (request.method !== "POST") {
-        return methodNotAllowed();
-      }
-
-      return handleRunnerEmailSendRequest({
-        bucket: env.BUNDLES,
-        env,
-        environment,
-        request,
-        userId,
-      });
+  if (input.url.pathname === HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH) {
+    if (input.request.method !== "POST") {
+      return methodNotAllowed();
     }
 
-    const match = /^\/messages\/(?<rawMessageKey>[^/]+)$/u.exec(url.pathname);
-    if (!match?.groups) {
-      return notFound();
-    }
+    return handleRunnerEmailSendRequest({
+      bucket: input.bucket,
+      env: input.env,
+      environment: input.environment,
+      request: input.request,
+      userId: input.userId,
+    });
+  }
 
-    if (request.method !== "GET") {
+  const messageMatch = /^\/messages\/(?<rawMessageKey>[^/]+)$/u.exec(input.url.pathname);
+  if (messageMatch?.groups) {
+    if (input.request.method !== "GET") {
       return methodNotAllowed();
     }
 
     return handleRunnerEmailMessageReadRequest({
-      bucket: env.BUNDLES,
-      env,
-      environment,
-      rawMessageKey: decodeRouteParam(match.groups.rawMessageKey),
-      userId,
+      bucket: input.bucket,
+      env: input.env,
+      environment: input.environment,
+      rawMessageKey: decodeRouteParam(messageMatch.groups.rawMessageKey),
+      userId: input.userId,
     });
   }
 
   return notFound();
 }
+
 async function handleRunnerEmailMessageReadRequest(input: {
   bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
   env: RunnerOutboundEnvironmentSource;

@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
 
 import { beforeEach, test, vi } from "vitest";
+
+import { createHostedRuntimeWorkspace } from "./hosted-runtime-test-helpers.ts";
 
 const mocks = vi.hoisted(() => ({
   createConfiguredDeviceSyncProviders: vi.fn(() => []),
@@ -119,8 +118,7 @@ const hostedWebControlPlane = {
 };
 
 test("hosted maintenance loop preserves the empty-vault no-op baseline after activation bootstrap", async () => {
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runtime-maintenance-"));
-  const vaultRoot = path.join(workspaceRoot, "vault");
+  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-maintenance-");
 
   try {
     const { prepareHostedDispatchContext } = await import("../src/hosted-runtime/context.ts");
@@ -163,13 +161,12 @@ test("hosted maintenance loop preserves the empty-vault no-op baseline after act
     });
     assert.equal(mocks.runAssistantAutomation.mock.calls.length, 0);
   } finally {
-    await rm(workspaceRoot, { force: true, recursive: true });
+    await cleanup();
   }
 });
 
 test("hosted maintenance loop prefers the earliest device-sync or assistant wake", async () => {
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runtime-maintenance-"));
-  const vaultRoot = path.join(workspaceRoot, "vault");
+  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-maintenance-");
 
   try {
     const deviceSyncService = {
@@ -236,7 +233,7 @@ test("hosted maintenance loop prefers the earliest device-sync or assistant wake
     assert.equal(mocks.runAssistantAutomation.mock.calls.length, 1);
     assert.deepEqual(deviceSyncService.getNextWakeAt.mock.calls, [[]]);
   } finally {
-    await rm(workspaceRoot, { force: true, recursive: true });
+    await cleanup();
   }
 });
 

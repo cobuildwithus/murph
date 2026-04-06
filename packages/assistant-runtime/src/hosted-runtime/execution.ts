@@ -49,7 +49,7 @@ export async function executeHostedDispatchForCommit(input: {
   restored: HostedRestoredExecutionContext;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "artifactsBaseUrl" | "commitTimeoutMs" | "emailBaseUrl" | "userEnv" | "webControlPlane"
+    "artifactsBaseUrl" | "commitTimeoutMs" | "resultsBaseUrl" | "userEnv" | "webControlPlane"
   >;
   runtimeEnv: Readonly<Record<string, string>>;
 }): Promise<HostedCommittedExecutionState> {
@@ -62,7 +62,7 @@ export async function executeHostedDispatchForCommit(input: {
   });
   const dispatchMetrics = await executeHostedDispatchEvent({
     dispatch: input.request.dispatch,
-    emailBaseUrl: input.runtime.emailBaseUrl,
+    resultsBaseUrl: input.runtime.resultsBaseUrl,
     internalWorkerFetch: input.internalWorkerFetch,
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
@@ -130,7 +130,7 @@ export async function completeHostedExecutionAfterCommit(input: {
   run?: HostedExecutionRunContext | null;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "artifactsBaseUrl" | "commitBaseUrl" | "commitTimeoutMs" | "emailBaseUrl" | "sideEffectsBaseUrl" | "userEnv" | "webControlPlane"
+    "artifactsBaseUrl" | "commitTimeoutMs" | "resultsBaseUrl" | "userEnv" | "webControlPlane"
   >;
   restored: HostedRestoredExecutionContext;
   committedExecution: HostedCommittedExecutionState;
@@ -146,9 +146,8 @@ export async function completeHostedExecutionAfterCommit(input: {
     commit: input.commit,
     commitTimeoutMs: input.runtime.commitTimeoutMs,
     dispatch: input.dispatch,
-    emailBaseUrl: input.runtime.emailBaseUrl,
+    resultsBaseUrl: input.runtime.resultsBaseUrl,
     fetchImpl: input.internalWorkerFetch,
-    sideEffectsBaseUrl: input.runtime.sideEffectsBaseUrl,
     sideEffects: input.committedExecution.committedSideEffects,
     vaultRoot: input.restored.vaultRoot,
   });

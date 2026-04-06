@@ -85,9 +85,7 @@ async function runHostedExecutionJob(
 
 function installHostedFetchBaseUrlProxy(input: {
   artifactsBaseUrl?: string;
-  commitBaseUrl?: string;
-  emailBaseUrl?: string;
-  sideEffectsBaseUrl?: string;
+  resultsBaseUrl?: string;
 }): () => void {
   const previousFetch = global.fetch;
   const delegateFetch = previousFetch ?? fetch;
@@ -96,14 +94,8 @@ function installHostedFetchBaseUrlProxy(input: {
   if (input.artifactsBaseUrl) {
     baseUrlByHost.set("artifacts.worker", input.artifactsBaseUrl);
   }
-  if (input.commitBaseUrl) {
-    baseUrlByHost.set("commit.worker", input.commitBaseUrl);
-  }
-  if (input.emailBaseUrl) {
-    baseUrlByHost.set("email.worker", input.emailBaseUrl);
-  }
-  if (input.sideEffectsBaseUrl) {
-    baseUrlByHost.set("side-effects.worker", input.sideEffectsBaseUrl);
+  if (input.resultsBaseUrl) {
+    baseUrlByHost.set("results.worker", input.resultsBaseUrl);
   }
 
   global.fetch = async (requestInput, init) => {
@@ -582,7 +574,7 @@ describe("runHostedExecutionJob", () => {
         throw new Error("Expected the hosted email test server to expose a TCP port.");
       }
       const restoreFetch = installHostedFetchBaseUrlProxy({
-        emailBaseUrl: `http://127.0.0.1:${address.port}`,
+        resultsBaseUrl: `http://127.0.0.1:${address.port}`,
       });
 
       const result = await runHostedExecutionJob({
@@ -660,7 +652,7 @@ describe("runHostedExecutionJob", () => {
         throw new Error("Expected the hosted email test server to expose a TCP port.");
       }
       const restoreFetch = installHostedFetchBaseUrlProxy({
-        emailBaseUrl: `http://127.0.0.1:${address.port}`,
+        resultsBaseUrl: `http://127.0.0.1:${address.port}`,
       });
 
 	      const result = await runHostedExecutionJob({
@@ -1839,13 +1831,13 @@ describe("runHostedExecutionJob", () => {
       vi.fn(async (url, init) => {
         fetchCalls.push(`${init?.method ?? "GET"} ${String(url)}`);
 
-        if (String(url).startsWith("http://commit.worker/events/")) {
+        if (String(url).startsWith("http://results.worker/events/")) {
           return new Response(JSON.stringify({ ok: true }), { status: 200 });
         }
 
         if (
           String(url).startsWith(
-            "http://side-effects.worker/effects/",
+            "http://results.worker/effects/",
           )
         ) {
           return new Response(JSON.stringify({
@@ -1895,9 +1887,9 @@ describe("runHostedExecutionJob", () => {
     });
 
     expect(fetchCalls).toEqual([
-      "POST http://commit.worker/events/evt_outbox/commit",
-      "GET http://side-effects.worker/effects/outbox_hosted_reconcile?fingerprint=dedupe_hosted&kind=assistant.delivery",
-      "POST http://commit.worker/events/evt_outbox/finalize",
+      "POST http://results.worker/events/evt_outbox/commit",
+      "GET http://results.worker/effects/outbox_hosted_reconcile?fingerprint=dedupe_hosted&kind=assistant.delivery",
+      "POST http://results.worker/events/evt_outbox/finalize",
     ]);
 
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-restored-"));
@@ -2037,7 +2029,7 @@ describe("runHostedExecutionJob", () => {
 
         if (
           String(url)
-          === "http://commit.worker/events/evt_outbox_send/commit"
+          === "http://results.worker/events/evt_outbox_send/commit"
         ) {
           expect(JSON.parse(String(init?.body))).toMatchObject({
             sideEffects: [
@@ -2054,7 +2046,7 @@ describe("runHostedExecutionJob", () => {
 
         if (
           String(url)
-          === "http://side-effects.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery"
+          === "http://results.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery"
           && (init?.method ?? "GET") === "GET"
         ) {
           return new Response(JSON.stringify({
@@ -2065,7 +2057,7 @@ describe("runHostedExecutionJob", () => {
 
         if (
           String(url)
-          === "http://side-effects.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery"
+          === "http://results.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery"
           && init?.method === "PUT"
         ) {
           return new Response(JSON.stringify({
@@ -2076,7 +2068,7 @@ describe("runHostedExecutionJob", () => {
 
         if (
           String(url)
-          === "http://commit.worker/events/evt_outbox_send/finalize"
+          === "http://results.worker/events/evt_outbox_send/finalize"
         ) {
           return new Response(JSON.stringify({ ok: true }), { status: 200 });
         }
@@ -2108,10 +2100,10 @@ describe("runHostedExecutionJob", () => {
       });
 
       expect(fetchCalls).toEqual([
-        "POST http://commit.worker/events/evt_outbox_send/commit",
-        "GET http://side-effects.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery",
-        "PUT http://side-effects.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery",
-        "POST http://commit.worker/events/evt_outbox_send/finalize",
+        "POST http://results.worker/events/evt_outbox_send/commit",
+        "GET http://results.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery",
+        "PUT http://results.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery",
+        "POST http://results.worker/events/evt_outbox_send/finalize",
       ]);
 
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-journal-restored-"));
@@ -2263,7 +2255,7 @@ describe("runHostedExecutionJob", () => {
 
         if (
           String(url)
-          === "http://side-effects.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume&kind=assistant.delivery"
+          === "http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume&kind=assistant.delivery"
           && (init?.method ?? "GET") === "GET"
         ) {
           return new Response(JSON.stringify({
@@ -2274,7 +2266,7 @@ describe("runHostedExecutionJob", () => {
 
         if (
           String(url)
-          === "http://side-effects.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume&kind=assistant.delivery"
+          === "http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume&kind=assistant.delivery"
           && init?.method === "PUT"
         ) {
           return new Response(JSON.stringify({
@@ -2283,7 +2275,7 @@ describe("runHostedExecutionJob", () => {
           }), { status: 200 });
         }
 
-        if (String(url) === "http://commit.worker/events/evt_outbox_resume/finalize") {
+        if (String(url) === "http://results.worker/events/evt_outbox_resume/finalize") {
           return new Response(JSON.stringify({ ok: true }), { status: 200 });
         }
 
@@ -2331,11 +2323,11 @@ describe("runHostedExecutionJob", () => {
 
     expect(hostedCliMocks.runAssistantAutomation).not.toHaveBeenCalled();
     expect(fetchCalls).toEqual([
-      "GET http://side-effects.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume&kind=assistant.delivery",
-      "PUT http://side-effects.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume&kind=assistant.delivery",
-      "POST http://commit.worker/events/evt_outbox_resume/finalize",
+      "GET http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume&kind=assistant.delivery",
+      "PUT http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume&kind=assistant.delivery",
+      "POST http://results.worker/events/evt_outbox_resume/finalize",
     ]);
-    expect(fetchCalls).not.toContain("POST http://commit.worker/events/evt_outbox_resume/commit");
+    expect(fetchCalls).not.toContain("POST http://results.worker/events/evt_outbox_resume/commit");
     expect(result.result).toEqual({
       eventsHandled: 1,
       summary: "committed",
@@ -2408,7 +2400,7 @@ describe("runHostedExecutionJob", () => {
       const [commitUrl, commitInit] = commitFetch.mock.calls[0] ?? [];
       const [finalizeUrl, finalizeInit] = commitFetch.mock.calls[1] ?? [];
       expect(commitUrl).toBe(
-        "http://commit.worker/events/evt_commit/commit",
+        "http://results.worker/events/evt_commit/commit",
       );
       expect(commitInit?.headers).toMatchObject({
         "content-type": "application/json; charset=utf-8",
@@ -2421,7 +2413,7 @@ describe("runHostedExecutionJob", () => {
         result: result.result,
       });
       expect(String(finalizeUrl)).toBe(
-        "http://commit.worker/events/evt_commit/finalize",
+        "http://results.worker/events/evt_commit/finalize",
       );
       expect(finalizeInit?.headers).toMatchObject({
         "content-type": "application/json; charset=utf-8",

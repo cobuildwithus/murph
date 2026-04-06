@@ -5,6 +5,7 @@ import type { HostedExecutionCommittedResult } from "../src/execution-journal.js
 import { RunnerQueueStore } from "../src/user-runner/runner-queue-store.js";
 import { createTestSqlStorage } from "./sql-storage.js";
 import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers";
+import { expectOpaqueStrings } from "./object-key-assertions";
 
 function createQueueHarness(state: { storage: { sql: ReturnType<typeof createTestSqlStorage> } }) {
   const bucket = new MemoryEncryptedR2Bucket();
@@ -79,7 +80,7 @@ describe("RunnerQueueStore", () => {
     expect(badEvent.pending).toBe(false);
     expect(badEvent.poisoned).toBe(true);
     expect(badEvent.lastError).toBe("Hosted execution rejected an invalid request.");
-    expect(badEvent.lastError).not.toContain("evt_bad");
+    expectOpaqueStrings([badEvent.lastError], ["evt_bad"]);
   });
 
   it("classifies malformed pending rows as invalid requests", async () => {
@@ -210,8 +211,10 @@ describe("RunnerQueueStore", () => {
       "enqueued_at",
       "last_error_code",
     ]);
-    expect(JSON.stringify(row)).not.toContain("super secret gateway message");
-    expect(JSON.stringify(row)).not.toContain("session-secret");
+    expectOpaqueStrings([JSON.stringify(row)], [
+      "super secret gateway message",
+      "session-secret",
+    ]);
   });
 
   it("deletes an encrypted payload blob when enqueue SQL fails after blob write", async () => {
@@ -339,8 +342,7 @@ describe("RunnerQueueStore", () => {
 
     const eventState = await store.readEventState("evt_secret_retry");
     expect(eventState.lastError).toBe("Hosted execution authorization failed.");
-    expect(eventState.lastError).not.toContain("secret-token");
-    expect(eventState.lastError).not.toContain("ops@example.com");
+    expectOpaqueStrings([eventState.lastError], ["secret-token", "ops@example.com"]);
   });
 
   it("keeps runtime exception summaries generic in persisted retry state", async () => {
@@ -398,7 +400,7 @@ describe("RunnerQueueStore", () => {
 
     const eventState = await store.readEventState("evt_secret_config");
     expect(eventState.lastError).toBe("Hosted execution configuration is invalid.");
-    expect(eventState.lastError).not.toContain("sk-live-secret");
+    expectOpaqueStrings([eventState.lastError], ["sk-live-secret"]);
   });
 
   it("stores sanitized finalize-retry summaries for committed results", async () => {
@@ -441,8 +443,7 @@ describe("RunnerQueueStore", () => {
 
     const eventState = await store.readEventState("evt_secret_finalize");
     expect(eventState.lastError).toBe("Hosted execution authorization failed.");
-    expect(eventState.lastError).not.toContain("secret-token");
-    expect(eventState.lastError).not.toContain("ops@example.com");
+    expectOpaqueStrings([eventState.lastError], ["secret-token", "ops@example.com"]);
   });
 
   it("clears stale last-error text when committed bundles are synchronized after a finalize retry", async () => {

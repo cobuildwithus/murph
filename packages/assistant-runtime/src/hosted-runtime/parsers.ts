@@ -53,6 +53,7 @@ export function parseHostedAssistantRuntimeConfig(
   rejectRemovedHostedAssistantRuntimeField(record, "artifactsBaseUrl");
   rejectRemovedHostedAssistantRuntimeField(record, "commitBaseUrl");
   rejectRemovedHostedAssistantRuntimeField(record, "emailBaseUrl");
+  rejectRemovedHostedAssistantRuntimeField(record, "resultsBaseUrl");
   rejectRemovedHostedAssistantRuntimeField(record, "sideEffectsBaseUrl");
   rejectRemovedHostedAssistantRuntimeField(record, "webControlPlane");
 

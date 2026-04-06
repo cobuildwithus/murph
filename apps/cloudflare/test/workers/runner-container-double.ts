@@ -25,7 +25,7 @@ export class RunnerContainerTestDouble extends DurableObject {
     const runnerResult = buildRunnerResult(payload.job.request);
     const commitResponse = await handleRunnerOutboundRequest(
       new Request(
-        `http://commit.worker/events/${encodeURIComponent(payload.job.request.dispatch.eventId)}/commit`,
+        `http://results.worker/events/${encodeURIComponent(payload.job.request.dispatch.eventId)}/commit`,
         {
           body: JSON.stringify({
             bundle: runnerResult.bundle,

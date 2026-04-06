@@ -6,9 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   DEFAULT_HOSTED_EXECUTION_ARTIFACTS_BASE_URL,
-  DEFAULT_HOSTED_EXECUTION_COMMIT_BASE_URL,
-  DEFAULT_HOSTED_EXECUTION_EMAIL_BASE_URL,
-  DEFAULT_HOSTED_EXECUTION_SIDE_EFFECTS_BASE_URL,
+  DEFAULT_HOSTED_EXECUTION_RESULTS_BASE_URL,
   HOSTED_EXECUTION_CALLBACK_HOSTS,
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
@@ -18,6 +16,7 @@ import type {
   HostedAssistantRuntimeConfig,
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
+
 const HOSTED_RUNTIME_CHILD_AMBIENT_ENV_KEYS = [
   "LANG",
   "LC_ALL",
@@ -30,6 +29,8 @@ const HOSTED_RUNTIME_CHILD_AMBIENT_ENV_KEYS = [
 ] as const;
 const HOSTED_RUNTIME_TEST_ARTIFACTS_BASE_URL_ENV =
   "HOSTED_EXECUTION_TEST_ARTIFACTS_BASE_URL";
+const HOSTED_RUNTIME_TEST_RESULTS_BASE_URL_ENV =
+  "HOSTED_EXECUTION_TEST_RESULTS_BASE_URL";
 const HOSTED_RUNTIME_TEST_COMMIT_BASE_URL_ENV =
   "HOSTED_EXECUTION_TEST_COMMIT_BASE_URL";
 const HOSTED_RUNTIME_TEST_EMAIL_BASE_URL_ENV =
@@ -53,12 +54,10 @@ export function normalizeHostedAssistantRuntimeConfig(
 
   return {
     artifactsBaseUrl: callbackBaseUrls.artifactsBaseUrl,
-    commitBaseUrl: callbackBaseUrls.commitBaseUrl,
     commitTimeoutMs: input?.commitTimeoutMs ?? null,
-    emailBaseUrl: callbackBaseUrls.emailBaseUrl,
-    internalWorkerProxyToken: normalizeHostedExecutionString(input?.internalWorkerProxyToken),
     forwardedEnv,
-    sideEffectsBaseUrl: callbackBaseUrls.sideEffectsBaseUrl,
+    internalWorkerProxyToken: normalizeHostedExecutionString(input?.internalWorkerProxyToken),
+    resultsBaseUrl: callbackBaseUrls.resultsBaseUrl,
     userEnv: { ...(input?.userEnv ?? {}) },
     webControlPlane,
   };
@@ -94,7 +93,7 @@ function resolveHostedRuntimeCallbackBaseUrls(
   forwardedEnv: Readonly<Record<string, string>>,
 ): Pick<
   NormalizedHostedAssistantRuntimeConfig,
-  "artifactsBaseUrl" | "commitBaseUrl" | "emailBaseUrl" | "sideEffectsBaseUrl"
+  "artifactsBaseUrl" | "resultsBaseUrl"
 > {
   return {
     artifactsBaseUrl: normalizeHostedRuntimeCallbackBaseUrl(
@@ -102,22 +101,38 @@ function resolveHostedRuntimeCallbackBaseUrls(
       DEFAULT_HOSTED_EXECUTION_ARTIFACTS_BASE_URL,
       HOSTED_EXECUTION_CALLBACK_HOSTS.artifacts,
     ),
-    commitBaseUrl: normalizeHostedRuntimeCallbackBaseUrl(
-      forwardedEnv[HOSTED_RUNTIME_TEST_COMMIT_BASE_URL_ENV],
-      DEFAULT_HOSTED_EXECUTION_COMMIT_BASE_URL,
-      HOSTED_EXECUTION_CALLBACK_HOSTS.commit,
-    ),
-    emailBaseUrl: normalizeHostedRuntimeCallbackBaseUrl(
-      forwardedEnv[HOSTED_RUNTIME_TEST_EMAIL_BASE_URL_ENV],
-      DEFAULT_HOSTED_EXECUTION_EMAIL_BASE_URL,
-      HOSTED_EXECUTION_CALLBACK_HOSTS.email,
-    ),
-    sideEffectsBaseUrl: normalizeHostedRuntimeCallbackBaseUrl(
-      forwardedEnv[HOSTED_RUNTIME_TEST_SIDE_EFFECTS_BASE_URL_ENV],
-      DEFAULT_HOSTED_EXECUTION_SIDE_EFFECTS_BASE_URL,
-      HOSTED_EXECUTION_CALLBACK_HOSTS.sideEffects,
+    resultsBaseUrl: normalizeHostedRuntimeCallbackBaseUrl(
+      readHostedRuntimeResultsBaseUrlOverride(forwardedEnv),
+      DEFAULT_HOSTED_EXECUTION_RESULTS_BASE_URL,
+      HOSTED_EXECUTION_CALLBACK_HOSTS.results,
     ),
   };
+}
+
+function readHostedRuntimeResultsBaseUrlOverride(
+  forwardedEnv: Readonly<Record<string, string>>,
+): string | undefined {
+  const configuredValues = [
+    forwardedEnv[HOSTED_RUNTIME_TEST_RESULTS_BASE_URL_ENV],
+    forwardedEnv[HOSTED_RUNTIME_TEST_COMMIT_BASE_URL_ENV],
+    forwardedEnv[HOSTED_RUNTIME_TEST_EMAIL_BASE_URL_ENV],
+    forwardedEnv[HOSTED_RUNTIME_TEST_SIDE_EFFECTS_BASE_URL_ENV],
+  ]
+    .map((value) => normalizeHostedExecutionString(value))
+    .filter((value): value is string => value !== null);
+
+  if (configuredValues.length === 0) {
+    return undefined;
+  }
+
+  const [firstValue, ...restValues] = configuredValues;
+  if (restValues.some((value) => value !== firstValue)) {
+    throw new TypeError(
+      "Hosted assistant runtime results callback base URL overrides must agree.",
+    );
+  }
+
+  return firstValue;
 }
 
 function normalizeHostedRuntimeCallbackBaseUrl(
