@@ -4,6 +4,7 @@ export {
   createInboxRoutingAssistantCapabilityRegistry,
   createInboxRoutingAssistantToolCatalog,
   createProviderTurnAssistantCapabilityRegistry,
+  createProviderTurnAssistantCapabilityRuntime,
   createProviderTurnAssistantToolCatalog,
 } from './assistant-cli-tools/catalog-profiles.js'
 export { readAssistantCliLlmsManifest } from './assistant-cli-tools/execution-adapters.js'

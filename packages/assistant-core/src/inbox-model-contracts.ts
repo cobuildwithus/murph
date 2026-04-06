@@ -8,7 +8,6 @@ import { routingImageEligibilityReasonValues } from './inbox-routing-vision.js'
 export const assistantCapabilityHostKindValues = [
   'cli-backed',
   'native-local',
-  'hosted-or-remote',
 ] as const
 
 export const assistantToolBackendKindValues = [

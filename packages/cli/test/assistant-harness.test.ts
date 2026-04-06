@@ -56,6 +56,7 @@ vi.mock('@ai-sdk/openai-compatible', () => ({
 }))
 
 import {
+  type AssistantCapabilityHost,
   CliBackedCapabilityHost,
   NativeLocalCapabilityHost,
   createAssistantCapabilityRegistry,
@@ -281,6 +282,75 @@ test('createAssistantToolCatalogFromCapabilities reuses the registry catalog ass
   })
 
   assert.deepEqual(helperResult, registryResult)
+})
+
+test('assistant capability registry rejects duplicate capability names', () => {
+  assert.throws(
+    () =>
+      createAssistantCapabilityRegistry([
+        defineAssistantCapability({
+          name: 'duplicate.echo',
+          description: 'First duplicate capability.',
+          inputSchema: z.object({}),
+          executionBindings: {
+            'native-local': async () => ({ value: 'first' }),
+          },
+        }),
+        defineAssistantCapability({
+          name: 'duplicate.echo',
+          description: 'Second duplicate capability.',
+          inputSchema: z.object({}),
+          executionBindings: {
+            'native-local': async () => ({ value: 'second' }),
+          },
+        }),
+      ]),
+    /Duplicate assistant capability "duplicate\.echo" cannot be registered\./u,
+  )
+})
+
+test('assistant tool catalogs reject duplicate bound tool names from one host set', () => {
+  const registry = createAssistantCapabilityRegistry([
+    defineAssistantCapability({
+      name: 'duplicate.first',
+      description: 'First distinct capability.',
+      inputSchema: z.object({}),
+      executionBindings: {
+        'native-local': async () => ({ value: 'first' }),
+      },
+    }),
+    defineAssistantCapability({
+      name: 'duplicate.second',
+      description: 'Second distinct capability.',
+      inputSchema: z.object({}),
+      executionBindings: {
+        'native-local': async () => ({ value: 'second' }),
+      },
+    }),
+  ])
+  const duplicateBindingHost: AssistantCapabilityHost = {
+    hostKind: 'native-local',
+    bindCapability(capability) {
+      return {
+        name: 'duplicate.bound',
+        description: capability.description,
+        provenance: capability.provenance,
+        backendKind: capability.backendKind,
+        mutationSemantics: capability.mutationSemantics,
+        riskClass: capability.riskClass,
+        preferredHostKind: capability.preferredHostKind,
+        selectedHostKind: 'native-local',
+        inputSchema: capability.inputSchema,
+        outputSchema: capability.outputSchema,
+        execute: async () => ({ source: capability.name }),
+      }
+    },
+  }
+
+  assert.throws(
+    () => registry.createToolCatalog([duplicateBindingHost]),
+    /Duplicate assistant bound tool "duplicate\.bound" cannot be added to one catalog\./u,
+  )
 })
 
 test('resolveAssistantLanguageModel uses gateway when no baseUrl is provided', () => {
