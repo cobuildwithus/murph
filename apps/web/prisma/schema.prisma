@@ -7,14 +7,14 @@ datasource db {
 }
 
 model DeviceConnection {
-  id                String             @id
-  userId            String             @map("user_id")
+  id                String            @id
+  userId            String            @map("user_id")
   provider          String
-  externalAccountId String             @map("external_account_id")
-  displayName       String?            @map("display_name")
-  connectedAt       DateTime           @map("connected_at")
-  createdAt         DateTime           @default(now()) @map("created_at")
-  updatedAt         DateTime           @updatedAt @map("updated_at")
+  externalAccountId String            @map("external_account_id")
+  displayName       String?           @map("display_name")
+  connectedAt       DateTime          @map("connected_at")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
   signals           DeviceSyncSignal[]
   tokenAudits       DeviceTokenAudit[]
 
@@ -22,6 +22,7 @@ model DeviceConnection {
   @@index([userId, provider])
   @@map("device_connection")
 }
+
 
 model DeviceTokenAudit {
   id           Int              @id @default(autoincrement())
@@ -58,15 +59,15 @@ model DeviceOauthSession {
 }
 
 model DeviceWebhookTrace {
-  provider            String
-  traceId             String    @map("trace_id")
-  externalAccountId   String    @map("external_account_id")
-  eventType           String    @map("event_type")
-  status              String    @default("processed")
+  provider          String
+  traceId           String   @map("trace_id")
+  externalAccountId String   @map("external_account_id")
+  eventType         String   @map("event_type")
+  status            String   @default("processed")
   processingExpiresAt DateTime? @map("processing_expires_at")
-  receivedAt          DateTime  @map("received_at")
-  payloadJson         Json?     @map("payload_json")
-  createdAt           DateTime  @default(now()) @map("created_at")
+  receivedAt        DateTime @map("received_at")
+  payloadJson       Json?    @map("payload_json")
+  createdAt         DateTime @default(now()) @map("created_at")
 
   @@id([provider, traceId])
   @@index([provider, externalAccountId])
@@ -90,17 +91,17 @@ model DeviceSyncSignal {
 }
 
 model DeviceAgentSession {
-  id                  String    @id
-  userId              String    @map("user_id")
+  id                  String   @id
+  userId              String   @map("user_id")
   label               String?
-  tokenHash           String    @unique @map("token_hash")
-  createdAt           DateTime  @default(now()) @map("created_at")
-  updatedAt           DateTime  @updatedAt @map("updated_at")
-  expiresAt           DateTime  @map("expires_at")
+  tokenHash           String   @unique @map("token_hash")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+  expiresAt           DateTime @map("expires_at")
   lastSeenAt          DateTime? @map("last_seen_at")
   revokedAt           DateTime? @map("revoked_at")
-  revokeReason        String?   @map("revoke_reason")
-  replacedBySessionId String?   @map("replaced_by_session_id")
+  revokeReason        String?  @map("revoke_reason")
+  replacedBySessionId String?  @map("replaced_by_session_id")
 
   @@index([userId])
   @@index([expiresAt])
@@ -200,103 +201,82 @@ enum ExecutionOutboxStatus {
 }
 
 model HostedMember {
-  id                                String                  @id
-  maskedPhoneNumberHint             String                  @map("phone_number")
-  normalizedPhoneNumber             String                  @unique @map("normalized_phone_number")
-  phoneNumberVerifiedAt             DateTime?               @map("phone_number_verified_at")
-  privyUserId                       String?                 @unique @map("privy_user_id")
-  walletAddress                     String?                 @unique @map("wallet_address")
-  walletChainType                   String?                 @map("wallet_chain_type")
-  walletProvider                    String?                 @map("wallet_provider")
-  walletCreatedAt                   DateTime?               @map("wallet_created_at")
-  status                            HostedMemberStatus      @default(invited)
-  billingStatus                     HostedBillingStatus     @default(not_started) @map("billing_status")
-  billingMode                       HostedBillingMode?      @map("billing_mode")
-  stripeCustomerId                  String?                 @unique @map("stripe_customer_id")
-  stripeSubscriptionId              String?                 @unique @map("stripe_subscription_id")
-  stripeLatestCheckoutSessionId     String?                 @map("stripe_latest_checkout_session_id")
-  stripeLatestBillingEventCreatedAt DateTime?               @map("stripe_latest_billing_event_created_at")
-  stripeLatestBillingEventId        String?                 @map("stripe_latest_billing_event_id")
-  linqChatId                        String?                 @map("linq_chat_id")
-  telegramUserId                    String?                 @unique @map("telegram_user_id")
-  telegramUsername                  String?                 @map("telegram_username")
-  createdAt                         DateTime                @default(now()) @map("created_at")
-  updatedAt                         DateTime                @updatedAt @map("updated_at")
-  invites                           HostedInvite[]
-  checkouts                         HostedBillingCheckout[]
-  revnetIssuances                   HostedRevnetIssuance[]
-  aiUsage                           HostedAiUsage[]
-  linqDailyStates                   HostedLinqDailyState[]
-  identity                          HostedMemberIdentity?
-  routing                           HostedMemberRouting?
-  billingRef                        HostedMemberBillingRef?
+  id                           String              @id
+  maskedPhoneNumberHint        String              @map("phone_number")
+  normalizedPhoneNumber        String              @unique @map("normalized_phone_number")
+  phoneNumberVerifiedAt        DateTime?           @map("phone_number_verified_at")
+  privyUserId                  String?             @unique @map("privy_user_id")
+  walletAddress                String?             @unique @map("wallet_address")
+  walletChainType              String?             @map("wallet_chain_type")
+  walletProvider               String?             @map("wallet_provider")
+  walletCreatedAt              DateTime?           @map("wallet_created_at")
+  status                       HostedMemberStatus  @default(invited)
+  billingStatus                HostedBillingStatus @default(not_started) @map("billing_status")
+  billingMode                  HostedBillingMode?  @map("billing_mode")
+  stripeCustomerId             String?             @unique @map("stripe_customer_id")
+  stripeSubscriptionId         String?             @unique @map("stripe_subscription_id")
+  stripeLatestCheckoutSessionId String?            @map("stripe_latest_checkout_session_id")
+  stripeLatestBillingEventCreatedAt DateTime?      @map("stripe_latest_billing_event_created_at")
+  stripeLatestBillingEventId  String?              @map("stripe_latest_billing_event_id")
+  linqChatId                   String?             @map("linq_chat_id")
+  telegramUserId               String?             @unique @map("telegram_user_id")
+  telegramUsername             String?             @map("telegram_username")
+  createdAt                    DateTime            @default(now()) @map("created_at")
+  updatedAt                    DateTime            @updatedAt @map("updated_at")
+  invites                      HostedInvite[]
+  sessions                     HostedSession[]
+  checkouts                    HostedBillingCheckout[]
+  revnetIssuances              HostedRevnetIssuance[]
+  aiUsage                      HostedAiUsage[]
+  linqDailyStates              HostedLinqDailyState[]
 
   @@index([status])
   @@index([billingStatus])
   @@map("hosted_member")
 }
 
-model HostedMemberIdentity {
-  memberId              String       @unique @map("member_id")
-  maskedPhoneNumberHint String       @map("phone_number")
-  normalizedPhoneNumber String       @unique @map("normalized_phone_number")
-  phoneNumberVerifiedAt DateTime?    @map("phone_number_verified_at")
-  privyUserId           String?      @unique @map("privy_user_id")
-  walletAddress         String?      @unique @map("wallet_address")
-  walletChainType       String?      @map("wallet_chain_type")
-  walletProvider        String?      @map("wallet_provider")
-  walletCreatedAt       DateTime?    @map("wallet_created_at")
-  createdAt             DateTime     @default(now()) @map("created_at")
-  updatedAt             DateTime     @updatedAt @map("updated_at")
-  member                HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
-
-  @@map("hosted_member_identity")
-}
-
-model HostedMemberRouting {
-  memberId       String       @unique @map("member_id")
-  linqChatId     String?      @map("linq_chat_id")
-  telegramUserId String?      @unique @map("telegram_user_id")
-  createdAt      DateTime     @default(now()) @map("created_at")
-  updatedAt      DateTime     @updatedAt @map("updated_at")
-  member         HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
-
-  @@map("hosted_member_routing")
-}
-
-model HostedMemberBillingRef {
-  memberId                          String       @unique @map("member_id")
-  stripeCustomerId                  String?      @unique @map("stripe_customer_id")
-  stripeSubscriptionId              String?      @unique @map("stripe_subscription_id")
-  stripeLatestCheckoutSessionId     String?      @map("stripe_latest_checkout_session_id")
-  stripeLatestBillingEventCreatedAt DateTime?    @map("stripe_latest_billing_event_created_at")
-  stripeLatestBillingEventId        String?      @map("stripe_latest_billing_event_id")
-  createdAt                         DateTime     @default(now()) @map("created_at")
-  updatedAt                         DateTime     @updatedAt @map("updated_at")
-  member                            HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
-
-  @@map("hosted_member_billing_ref")
-}
-
 model HostedInvite {
-  id              String                  @id
-  memberId        String                  @map("member_id")
-  inviteCode      String                  @unique @map("invite_code")
-  status          HostedInviteStatus      @default(pending)
-  channel         String                  @default("linq")
-  sentAt          DateTime?               @map("sent_at")
-  openedAt        DateTime?               @map("opened_at")
-  authenticatedAt DateTime?               @map("authenticated_at")
-  paidAt          DateTime?               @map("paid_at")
-  expiresAt       DateTime                @map("expires_at")
-  createdAt       DateTime                @default(now()) @map("created_at")
-  updatedAt       DateTime                @updatedAt @map("updated_at")
-  member          HostedMember            @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  id              String             @id
+  memberId        String             @map("member_id")
+  inviteCode      String             @unique @map("invite_code")
+  status          HostedInviteStatus @default(pending)
+  channel         String             @default("linq")
+  sentAt          DateTime?          @map("sent_at")
+  openedAt        DateTime?          @map("opened_at")
+  authenticatedAt DateTime?          @map("authenticated_at")
+  paidAt          DateTime?          @map("paid_at")
+  expiresAt       DateTime           @map("expires_at")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+  member          HostedMember       @relation(fields: [memberId], references: [id], onDelete: Cascade)
   checkouts       HostedBillingCheckout[]
+  sessions        HostedSession[]
 
   @@index([memberId, createdAt])
   @@index([expiresAt])
   @@map("hosted_invite")
+}
+
+model HostedSession {
+  id           String        @id
+  memberId     String        @map("member_id")
+  inviteId     String?       @map("invite_id")
+  tokenHash    String        @unique @map("token_hash")
+  userAgent    String?       @map("user_agent")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+  expiresAt    DateTime      @map("expires_at")
+  lastSeenAt   DateTime?     @map("last_seen_at")
+  revokedAt    DateTime?     @map("revoked_at")
+  revokeReason String?       @map("revoke_reason")
+  member       HostedMember  @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  invite       HostedInvite? @relation(fields: [inviteId], references: [id], onDelete: SetNull)
+
+  @@index([memberId])
+  @@index([inviteId])
+  @@index([expiresAt])
+  @@index([revokedAt])
+  @@map("hosted_session")
 }
 
 model HostedBillingCheckout {
@@ -328,26 +308,26 @@ model HostedBillingCheckout {
 }
 
 model HostedStripeEvent {
-  eventId           String                  @id @map("event_id")
-  type              String
-  stripeCreatedAt   DateTime                @map("stripe_created_at")
-  receivedAt        DateTime                @map("received_at")
-  status            HostedStripeEventStatus @default(pending)
-  attemptCount      Int                     @default(0) @map("attempt_count")
-  nextAttemptAt     DateTime                @default(now()) @map("next_attempt_at")
-  claimExpiresAt    DateTime?               @map("claim_expires_at")
-  processedAt       DateTime?               @map("processed_at")
-  lastErrorCode     String?                 @map("last_error_code")
-  lastErrorMessage  String?                 @map("last_error_message")
-  customerId        String?                 @map("customer_id")
-  subscriptionId    String?                 @map("subscription_id")
-  invoiceId         String?                 @map("invoice_id")
-  checkoutSessionId String?                 @map("checkout_session_id")
-  chargeId          String?                 @map("charge_id")
-  paymentIntentId   String?                 @map("payment_intent_id")
-  payloadJson       Json                    @map("payload_json")
-  createdAt         DateTime                @default(now()) @map("created_at")
-  updatedAt         DateTime                @updatedAt @map("updated_at")
+  eventId             String                 @id @map("event_id")
+  type                String
+  stripeCreatedAt     DateTime               @map("stripe_created_at")
+  receivedAt          DateTime               @map("received_at")
+  status              HostedStripeEventStatus @default(pending)
+  attemptCount        Int                    @default(0) @map("attempt_count")
+  nextAttemptAt       DateTime               @default(now()) @map("next_attempt_at")
+  claimExpiresAt      DateTime?              @map("claim_expires_at")
+  processedAt         DateTime?              @map("processed_at")
+  lastErrorCode       String?                @map("last_error_code")
+  lastErrorMessage    String?                @map("last_error_message")
+  customerId          String?                @map("customer_id")
+  subscriptionId      String?                @map("subscription_id")
+  invoiceId           String?                @map("invoice_id")
+  checkoutSessionId   String?                @map("checkout_session_id")
+  chargeId            String?                @map("charge_id")
+  paymentIntentId     String?                @map("payment_intent_id")
+  payloadJson         Json                   @map("payload_json")
+  createdAt           DateTime               @default(now()) @map("created_at")
+  updatedAt           DateTime               @updatedAt @map("updated_at")
 
   @@index([status, stripeCreatedAt, createdAt])
   @@index([status, nextAttemptAt, stripeCreatedAt, createdAt])
@@ -360,31 +340,31 @@ model HostedStripeEvent {
 }
 
 model HostedRevnetIssuance {
-  id                       String                     @id
-  memberId                 String                     @map("member_id")
-  idempotencyKey           String                     @unique @map("idempotency_key")
-  stripeInvoiceId          String                     @unique @map("stripe_invoice_id")
-  stripePaymentIntentId    String?                    @map("stripe_payment_intent_id")
-  stripeChargeId           String?                    @map("stripe_charge_id")
-  chainId                  Int                        @map("chain_id")
-  projectId                String                     @map("project_id")
-  terminalAddress          String                     @map("terminal_address")
-  paymentAssetAddress      String                     @map("payment_asset_address")
-  beneficiaryAddress       String                     @map("beneficiary_address")
-  stripePaymentAmountMinor Int                        @map("stripe_payment_amount_minor")
-  stripePaymentCurrency    String                     @map("stripe_payment_currency")
-  paymentAmount            String                     @map("payment_amount")
-  status                   HostedRevnetIssuanceStatus @default(pending)
-  attemptCount             Int                        @default(0) @map("attempt_count")
-  nextAttemptAt            DateTime                   @default(now()) @map("next_attempt_at")
-  payTxHash                String?                    @unique @map("pay_tx_hash")
-  failureCode              String?                    @map("failure_code")
-  failureMessage           String?                    @map("failure_message")
-  submittedAt              DateTime?                  @map("submitted_at")
-  confirmedAt              DateTime?                  @map("confirmed_at")
-  createdAt                DateTime                   @default(now()) @map("created_at")
-  updatedAt                DateTime                   @updatedAt @map("updated_at")
-  member                   HostedMember               @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  id                    String                     @id
+  memberId              String                     @map("member_id")
+  idempotencyKey        String                     @unique @map("idempotency_key")
+  stripeInvoiceId       String                     @unique @map("stripe_invoice_id")
+  stripePaymentIntentId String?                    @map("stripe_payment_intent_id")
+  stripeChargeId        String?                    @map("stripe_charge_id")
+  chainId               Int                        @map("chain_id")
+  projectId             String                     @map("project_id")
+  terminalAddress       String                     @map("terminal_address")
+  paymentAssetAddress   String                     @map("payment_asset_address")
+  beneficiaryAddress    String                     @map("beneficiary_address")
+  stripePaymentAmountMinor Int                     @map("stripe_payment_amount_minor")
+  stripePaymentCurrency String                     @map("stripe_payment_currency")
+  paymentAmount         String                     @map("payment_amount")
+  status                HostedRevnetIssuanceStatus @default(pending)
+  attemptCount          Int                        @default(0) @map("attempt_count")
+  nextAttemptAt         DateTime                   @default(now()) @map("next_attempt_at")
+  payTxHash             String?                    @unique @map("pay_tx_hash")
+  failureCode           String?                    @map("failure_code")
+  failureMessage        String?                    @map("failure_message")
+  submittedAt           DateTime?                  @map("submitted_at")
+  confirmedAt           DateTime?                  @map("confirmed_at")
+  createdAt             DateTime                   @default(now()) @map("created_at")
+  updatedAt             DateTime                   @updatedAt @map("updated_at")
+  member                HostedMember               @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@index([memberId, createdAt])
   @@index([status, createdAt])
@@ -395,18 +375,18 @@ model HostedRevnetIssuance {
 }
 
 model HostedShareLink {
-  id                 String    @id
-  codeHash           String    @unique @map("code_hash")
-  senderMemberId     String    @map("sender_member_id")
-  previewTitle       String    @map("preview_title")
-  expiresAt          DateTime  @map("expires_at")
+  id                 String   @id
+  codeHash           String   @unique @map("code_hash")
+  senderMemberId     String   @map("sender_member_id")
+  previewTitle       String   @map("preview_title")
+  expiresAt          DateTime @map("expires_at")
   acceptedAt         DateTime? @map("accepted_at")
-  acceptedByMemberId String?   @map("accepted_by_member_id")
+  acceptedByMemberId String?  @map("accepted_by_member_id")
   consumedAt         DateTime? @map("consumed_at")
-  consumedByMemberId String?   @map("consumed_by_member_id")
-  lastEventId        String?   @map("last_event_id")
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
+  consumedByMemberId String?  @map("consumed_by_member_id")
+  lastEventId        String?  @map("last_event_id")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
 
   @@index([senderMemberId, createdAt])
   @@index([expiresAt])
@@ -417,12 +397,12 @@ model HostedShareLink {
 
 model HostedWebhookReceipt {
   source          String
-  eventId         String    @map("event_id")
-  firstReceivedAt DateTime  @map("first_received_at")
+  eventId         String   @map("event_id")
+  firstReceivedAt DateTime @map("first_received_at")
   claimExpiresAt  DateTime? @map("claim_expires_at")
-  payloadJson     Json?     @map("payload_json")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+  payloadJson     Json?    @map("payload_json")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
   @@id([source, eventId])
   @@index([firstReceivedAt])
@@ -430,25 +410,25 @@ model HostedWebhookReceipt {
 }
 
 model ExecutionOutbox {
-  id             String                @id
-  userId         String                @map("user_id")
-  sourceType     String                @map("source_type")
-  sourceId       String?               @map("source_id")
-  eventId        String                @unique @map("event_id")
-  eventKind      String                @map("event_kind")
-  payloadJson    Json                  @map("payload_json")
-  status         ExecutionOutboxStatus @default(pending)
-  attemptCount   Int                   @default(0) @map("attempt_count")
-  lastAttemptAt  DateTime?             @map("last_attempt_at")
-  nextAttemptAt  DateTime?             @default(now()) @map("next_attempt_at")
-  claimToken     String?               @map("claim_token")
-  claimExpiresAt DateTime?             @map("claim_expires_at")
-  acceptedAt     DateTime?             @map("accepted_at")
-  completedAt    DateTime?             @map("completed_at")
-  failedAt       DateTime?             @map("failed_at")
-  lastError      String?               @map("last_error")
-  createdAt      DateTime              @default(now()) @map("created_at")
-  updatedAt      DateTime              @updatedAt @map("updated_at")
+  id            String                @id
+  userId        String                @map("user_id")
+  sourceType    String                @map("source_type")
+  sourceId      String?               @map("source_id")
+  eventId       String                @unique @map("event_id")
+  eventKind     String                @map("event_kind")
+  payloadJson   Json                  @map("payload_json")
+  status        ExecutionOutboxStatus @default(pending)
+  attemptCount  Int                   @default(0) @map("attempt_count")
+  lastAttemptAt DateTime?             @map("last_attempt_at")
+  nextAttemptAt DateTime?             @default(now()) @map("next_attempt_at")
+  claimToken    String?               @map("claim_token")
+  claimExpiresAt DateTime?            @map("claim_expires_at")
+  acceptedAt    DateTime?             @map("accepted_at")
+  completedAt   DateTime?             @map("completed_at")
+  failedAt      DateTime?             @map("failed_at")
+  lastError     String?               @map("last_error")
+  createdAt     DateTime              @default(now()) @map("created_at")
+  updatedAt     DateTime              @updatedAt @map("updated_at")
 
   @@index([status, nextAttemptAt, createdAt])
   @@index([userId, createdAt])
