@@ -58,7 +58,7 @@ export async function activateHostedMemberFromConfirmedRevnetIssuance(input: {
   sourceType: string;
 }): Promise<HostedMemberActivationResult> {
   const activated = await tryActivateHostedMemberIfStillAllowed({
-    billingMode: input.member.billingMode,
+    billingMode: HostedBillingMode.subscription,
     member: input.member,
     prisma: input.prisma,
     revnetIssuanceStatus: HostedRevnetIssuanceStatus.confirmed,
@@ -322,7 +322,6 @@ async function shouldApplyHostedStripeBillingUpdate(input: {
 }
 
 async function shouldApplyHostedSameSecondStripeCollision(input: {
-  billingMode: HostedBillingMode | null;
   billingStatus: HostedBillingStatus;
   currentMember: HostedMemberAggregate;
   dispatchContext: HostedStripeDispatchContext;
@@ -371,15 +370,13 @@ async function shouldApplyHostedSameSecondStripeCollision(input: {
 }
 
 async function resolveHostedCanonicalStripeBillingStatus(input: {
-  billingMode: HostedBillingMode | null;
   currentMember: HostedMemberAggregate;
   dispatchContext: HostedStripeDispatchContext;
   stripeSubscriptionId?: string | null;
 }): Promise<HostedBillingStatus | null> {
   const subscriptionId = input.stripeSubscriptionId ?? input.currentMember.stripeSubscriptionId;
-  const billingMode = input.billingMode ?? input.currentMember.billingMode;
 
-  if (billingMode !== HostedBillingMode.subscription || !subscriptionId) {
+  if (!subscriptionId) {
     return null;
   }
 

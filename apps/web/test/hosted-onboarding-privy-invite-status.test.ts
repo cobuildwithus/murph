@@ -5,10 +5,6 @@ import {
 } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const environmentState = vi.hoisted(() => ({
-  revnetEnabled: false,
-}));
-
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingEnvironment: () => ({
     encryptionKeyVersion: "v1",
@@ -20,14 +16,6 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     privyAppId: "cm_app_123",
     privyVerificationKey: "privy-verification-key",
     publicBaseUrl: "https://join.example.test",
-    revnetChainId: environmentState.revnetEnabled ? 8453 : null,
-    revnetProjectId: environmentState.revnetEnabled ? "1" : null,
-    revnetRpcUrl: environmentState.revnetEnabled ? "https://rpc.example.test/base" : null,
-    revnetStripeCurrency: environmentState.revnetEnabled ? "usd" : null,
-    revnetTerminalAddress: environmentState.revnetEnabled ? "0x0000000000000000000000000000000000000001" : null,
-    revnetTreasuryPrivateKey: environmentState.revnetEnabled ? `0x${"11".repeat(32)}` : null,
-    revnetWeiPerStripeMinorUnit: environmentState.revnetEnabled ? "2000000000000" : null,
-    stripeBillingMode: "subscription",
     stripePriceId: "price_123",
     stripeSecretKey: "sk_test_123",
     stripeWebhookSecret: "whsec_123",
@@ -43,7 +31,6 @@ const NOW = new Date("2026-04-06T12:00:00.000Z");
 
 describe("getHostedInviteStatus", () => {
   beforeEach(() => {
-    environmentState.revnetEnabled = false;
     vi.clearAllMocks();
   });
 
@@ -75,7 +62,7 @@ describe("getHostedInviteStatus", () => {
     });
   });
 
-  it("treats identity-side Privy binding as enough to authenticate when Revnet is disabled", async () => {
+  it("treats identity-side Privy binding as enough to authenticate", async () => {
     const prisma = {
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
@@ -105,34 +92,6 @@ describe("getHostedInviteStatus", () => {
       member: {
         phoneHint: "*** 4567",
       },
-    });
-  });
-
-  it("still requires an identity-side wallet before authentication when Revnet is enabled", async () => {
-    environmentState.revnetEnabled = true;
-    const prisma = {
-      hostedInvite: {
-        findUnique: vi.fn().mockResolvedValue(createInvite({
-          member: createMember({
-            identity: createIdentity({
-              privyUserId: "did:privy:user_123",
-              walletAddress: null,
-            }),
-            privyUserId: null,
-            walletAddress: null,
-          }),
-        })),
-      },
-    } as never;
-
-    await expect(
-      getHostedInviteStatus({
-        inviteCode: "invite-code",
-        now: NOW,
-        prisma,
-      }),
-    ).resolves.toMatchObject({
-      stage: "register",
     });
   });
 });

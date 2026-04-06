@@ -16,7 +16,6 @@ import {
   ensureHostedMemberForPhone,
   hasHostedMemberPrivyIdentity,
 } from "./member-identity-service";
-import { isHostedOnboardingRevnetEnabled } from "./revnet";
 import { hasHostedPrivyPhoneAuthConfig } from "./privy";
 import {
   getHostedOnboardingEnvironment,
@@ -90,8 +89,7 @@ export async function getHostedInviteStatus(input: {
 
   const sessionMatchesInvite = input.authenticatedMember?.id === invite.memberId;
   const inviteIdentity = requireHostedInviteMemberIdentity(invite.member);
-  const hasPrivyIdentity = hasHostedMemberPrivyIdentity(inviteIdentity)
-    && (!isHostedOnboardingRevnetEnabled() || Boolean(inviteIdentity.walletAddress));
+  const hasPrivyIdentity = hasHostedMemberPrivyIdentity(inviteIdentity);
   const isActive = hasHostedMemberActiveAccess({
     billingStatus: invite.member.billingStatus,
     memberStatus: invite.member.status,

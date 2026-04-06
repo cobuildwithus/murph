@@ -27,7 +27,10 @@ import {
   coerceStripeSubscriptionId,
 } from "./billing";
 import { readHostedMemberAggregate } from "./hosted-member-store";
-import { readHostedRevnetPaymentReceipt } from "./revnet";
+import {
+  isHostedOnboardingRevnetEnabled,
+  readHostedRevnetPaymentReceipt,
+} from "./revnet";
 import { drainHostedRevnetIssuanceSubmissionQueue } from "./stripe-revnet-issuance";
 
 const STRIPE_EVENT_LEASE_MS = 10 * 60_000;
@@ -172,6 +175,10 @@ export async function reconcileSubmittedHostedRevnetIssuances(input: {
   limit?: number;
   prisma: PrismaClient;
 }): Promise<string[]> {
+  if (!isHostedOnboardingRevnetEnabled()) {
+    return [];
+  }
+
   const confirmedIssuanceIds: string[] = [];
   const issuances = await input.prisma.hostedRevnetIssuance.findMany({
     where: {

@@ -179,6 +179,149 @@ describe("hosted Stripe event reconciliation", () => {
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
+  it("still activates legacy paid payment-mode checkouts while old sessions remain in flight", async () => {
+    const harness = createStripeQueueHarness({
+      checkouts: [
+        {
+          checkoutUrl: "https://billing.example.test/cs_legacy_123",
+          id: "checkout_legacy_123",
+          inviteId: "invite_123",
+          memberId: "member_123",
+          mode: HostedBillingMode.payment,
+          priceId: "price_123",
+          status: HostedBillingCheckoutStatus.open,
+          stripeCheckoutSessionId: "cs_legacy_123",
+        },
+      ],
+      invites: [
+        makeInvite(),
+      ],
+      members: [
+        makeMember({
+          billingMode: HostedBillingMode.payment,
+          billingStatus: HostedBillingStatus.checkout_open,
+          status: HostedMemberStatus.registered,
+          stripeSubscriptionId: null,
+        }),
+      ],
+    });
+
+    await recordAndDrainStripeEvent({
+      event: buildStripeEvent({
+        createdAt: "2026-03-28T10:25:00.000Z",
+        id: "evt_payment_checkout_completed_123",
+        object: {
+          amount_total: 500,
+          client_reference_id: "member_123",
+          currency: "usd",
+          customer: "cus_123",
+          id: "cs_legacy_123",
+          metadata: {
+            inviteId: "invite_123",
+            memberId: "member_123",
+          },
+          mode: "payment",
+          payment_status: "paid",
+          subscription: null,
+        },
+        type: "checkout.session.completed",
+      }),
+      prisma: harness.prisma,
+    });
+
+    expect(harness.checkouts[0]).toMatchObject({
+      amountTotal: 500,
+      completedAt: expect.any(Date),
+      currency: "usd",
+      status: HostedBillingCheckoutStatus.completed,
+    });
+    expect(harness.members[0]).toMatchObject({
+      billingMode: HostedBillingMode.payment,
+      billingStatus: HostedBillingStatus.active,
+      status: HostedMemberStatus.registered,
+      stripeLatestCheckoutSessionId: "cs_legacy_123",
+      stripeSubscriptionId: null,
+    });
+    expect(harness.invites[0]).toMatchObject({
+      paidAt: expect.any(Date),
+      status: HostedInviteStatus.paid,
+    });
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceId: "stripe:evt_payment_checkout_completed_123",
+        sourceType: "hosted_stripe_event",
+      }),
+    );
+  });
+
+  it("does not activate legacy payment-mode checkouts when payment remains unpaid", async () => {
+    const harness = createStripeQueueHarness({
+      checkouts: [
+        {
+          checkoutUrl: "https://billing.example.test/cs_legacy_124",
+          id: "checkout_legacy_124",
+          inviteId: "invite_123",
+          memberId: "member_123",
+          mode: HostedBillingMode.payment,
+          priceId: "price_123",
+          status: HostedBillingCheckoutStatus.open,
+          stripeCheckoutSessionId: "cs_legacy_124",
+        },
+      ],
+      invites: [
+        makeInvite(),
+      ],
+      members: [
+        makeMember({
+          billingMode: HostedBillingMode.payment,
+          billingStatus: HostedBillingStatus.checkout_open,
+          status: HostedMemberStatus.registered,
+          stripeSubscriptionId: null,
+        }),
+      ],
+    });
+
+    await recordAndDrainStripeEvent({
+      event: buildStripeEvent({
+        createdAt: "2026-03-28T10:26:00.000Z",
+        id: "evt_payment_checkout_unpaid_123",
+        object: {
+          amount_total: 500,
+          client_reference_id: "member_123",
+          currency: "usd",
+          customer: "cus_123",
+          id: "cs_legacy_124",
+          metadata: {
+            inviteId: "invite_123",
+            memberId: "member_123",
+          },
+          mode: "payment",
+          payment_status: "unpaid",
+          subscription: null,
+        },
+        type: "checkout.session.completed",
+      }),
+      prisma: harness.prisma,
+    });
+
+    expect(harness.checkouts[0]).toMatchObject({
+      amountTotal: 500,
+      completedAt: expect.any(Date),
+      currency: "usd",
+      status: HostedBillingCheckoutStatus.completed,
+    });
+    expect(harness.members[0]).toMatchObject({
+      billingMode: HostedBillingMode.payment,
+      billingStatus: HostedBillingStatus.incomplete,
+      status: HostedMemberStatus.registered,
+    });
+    expect(harness.invites[0]).toMatchObject({
+      paidAt: null,
+      status: HostedInviteStatus.pending,
+    });
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+  });
+
   it("stores sparse Stripe snapshots and clears them after successful processing", async () => {
     const harness = createStripeQueueHarness({
       checkouts: [
@@ -982,8 +1125,7 @@ describe("hosted Stripe event reconciliation", () => {
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
-  it("still records same-second RevNet recovery invoices when canonical subscription state is active", async () => {
-    mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(true);
+  it("still records same-second invoice recovery when canonical subscription state is active", async () => {
     const sameSecond = new Date("2026-03-28T10:20:00.000Z");
     const harness = createStripeQueueHarness({
       invites: [
@@ -1023,15 +1165,11 @@ describe("hosted Stripe event reconciliation", () => {
     });
 
     expect(harness.members[0]).toMatchObject({
-      billingStatus: HostedBillingStatus.incomplete,
+      billingStatus: HostedBillingStatus.active,
       status: HostedMemberStatus.registered,
       stripeLatestBillingEventId: "evt_same_second_paid_revnet",
     });
-    expect(harness.revnetIssuances[0]).toMatchObject({
-      payTxHash: "0xabc123",
-      status: HostedRevnetIssuanceStatus.submitted,
-      stripeInvoiceId: "in_same_second_revnet",
-    });
+    expect(harness.revnetIssuances).toHaveLength(0);
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
@@ -1045,7 +1183,7 @@ describe("hosted Stripe event reconciliation", () => {
       ],
       members: [
         makeMember({
-          billingMode: HostedBillingMode.payment,
+          billingMode: HostedBillingMode.subscription,
           billingStatus: HostedBillingStatus.active,
           status: HostedMemberStatus.registered,
           stripeLatestBillingEventCreatedAt: sameSecond,
@@ -1156,149 +1294,7 @@ describe("hosted Stripe event reconciliation", () => {
     });
   });
 
-  it("activates and dispatches on payment checkout.session.completed when payment is settled", async () => {
-    const harness = createStripeQueueHarness({
-      checkouts: [
-        {
-          checkoutUrl: "https://billing.example.test/cs_123",
-          id: "checkout_123",
-          inviteId: "invite_123",
-          memberId: "member_123",
-          mode: HostedBillingMode.payment,
-          priceId: "price_123",
-          status: HostedBillingCheckoutStatus.open,
-          stripeCheckoutSessionId: "cs_123",
-        },
-      ],
-      invites: [
-        makeInvite(),
-      ],
-      members: [
-        makeMember({
-          billingMode: HostedBillingMode.payment,
-          billingStatus: HostedBillingStatus.checkout_open,
-          status: HostedMemberStatus.registered,
-          stripeSubscriptionId: null,
-        }),
-      ],
-    });
-
-    await recordAndDrainStripeEvent({
-      event: buildStripeEvent({
-        createdAt: "2026-03-28T10:25:00.000Z",
-        id: "evt_payment_checkout_completed_123",
-        object: {
-          amount_total: 500,
-          client_reference_id: "member_123",
-          currency: "usd",
-          customer: "cus_123",
-          id: "cs_123",
-          metadata: {
-            inviteId: "invite_123",
-            memberId: "member_123",
-          },
-          mode: "payment",
-          payment_status: "paid",
-          subscription: null,
-        },
-        type: "checkout.session.completed",
-      }),
-      prisma: harness.prisma,
-    });
-
-    expect(harness.checkouts[0]).toMatchObject({
-      amountTotal: 500,
-      completedAt: expect.any(Date),
-      currency: "usd",
-      status: HostedBillingCheckoutStatus.completed,
-    });
-    expect(harness.members[0]).toMatchObject({
-      billingStatus: HostedBillingStatus.active,
-      status: HostedMemberStatus.registered,
-      stripeLatestCheckoutSessionId: "cs_123",
-      stripeSubscriptionId: null,
-    });
-    expect(harness.invites[0]).toMatchObject({
-      paidAt: expect.any(Date),
-      status: HostedInviteStatus.paid,
-    });
-    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sourceId: "stripe:evt_payment_checkout_completed_123",
-        sourceType: "hosted_stripe_event",
-      }),
-    );
-  });
-
-  it("does not activate on payment checkout.session.completed when payment remains unpaid", async () => {
-    const harness = createStripeQueueHarness({
-      checkouts: [
-        {
-          checkoutUrl: "https://billing.example.test/cs_123",
-          id: "checkout_123",
-          inviteId: "invite_123",
-          memberId: "member_123",
-          mode: HostedBillingMode.payment,
-          priceId: "price_123",
-          status: HostedBillingCheckoutStatus.open,
-          stripeCheckoutSessionId: "cs_123",
-        },
-      ],
-      invites: [
-        makeInvite(),
-      ],
-      members: [
-        makeMember({
-          billingMode: HostedBillingMode.payment,
-          billingStatus: HostedBillingStatus.checkout_open,
-          status: HostedMemberStatus.registered,
-          stripeSubscriptionId: null,
-        }),
-      ],
-    });
-
-    await recordAndDrainStripeEvent({
-      event: buildStripeEvent({
-        createdAt: "2026-03-28T10:26:00.000Z",
-        id: "evt_payment_checkout_unpaid_123",
-        object: {
-          amount_total: 500,
-          client_reference_id: "member_123",
-          currency: "usd",
-          customer: "cus_123",
-          id: "cs_123",
-          metadata: {
-            inviteId: "invite_123",
-            memberId: "member_123",
-          },
-          mode: "payment",
-          payment_status: "unpaid",
-          subscription: null,
-        },
-        type: "checkout.session.completed",
-      }),
-      prisma: harness.prisma,
-    });
-
-    expect(harness.checkouts[0]).toMatchObject({
-      amountTotal: 500,
-      completedAt: expect.any(Date),
-      currency: "usd",
-      status: HostedBillingCheckoutStatus.completed,
-    });
-    expect(harness.members[0]).toMatchObject({
-      billingStatus: HostedBillingStatus.incomplete,
-      status: HostedMemberStatus.registered,
-    });
-    expect(harness.invites[0]).toMatchObject({
-      paidAt: null,
-      status: HostedInviteStatus.pending,
-    });
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
-  });
-
-  it("submits RevNet issuance on invoice.paid but waits for confirmation before activation", async () => {
-    mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(true);
+  it("activates subscription access on invoice.paid without creating RevNet issuance", async () => {
     const harness = createStripeQueueHarness({
       invites: [
         makeInvite(),
@@ -1335,26 +1331,25 @@ describe("hosted Stripe event reconciliation", () => {
     });
 
     expect(harness.members[0]).toMatchObject({
-      billingStatus: HostedBillingStatus.incomplete,
+      billingStatus: HostedBillingStatus.active,
       status: HostedMemberStatus.registered,
     });
     expect(harness.invites[0]).toMatchObject({
-      paidAt: null,
-      status: HostedInviteStatus.pending,
+      paidAt: expect.any(Date),
+      status: HostedInviteStatus.paid,
     });
-    expect(harness.revnetIssuances[0]).toMatchObject({
-      beneficiaryAddress: "0x00000000000000000000000000000000000000aa",
-      payTxHash: "0xabc123",
-      paymentAssetAddress: REVNET_NATIVE_TOKEN,
-      status: HostedRevnetIssuanceStatus.submitted,
-      stripeInvoiceId: "in_123",
-      stripePaymentIntentId: "pi_123",
-    });
-    expect(mocks.submitHostedRevnetPayment).toHaveBeenCalledTimes(1);
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(harness.revnetIssuances).toHaveLength(0);
+    expect(mocks.submitHostedRevnetPayment).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceId: "stripe:evt_invoice_paid_revnet_123",
+        sourceType: "hosted_stripe_event",
+      }),
+    );
   });
 
   it("activates a submitted RevNet issuance only after onchain confirmation", async () => {
+    mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(true);
     mocks.readHostedRevnetPaymentReceipt.mockResolvedValue({
       status: "success",
     });
@@ -1402,7 +1397,29 @@ describe("hosted Stripe event reconciliation", () => {
     );
   });
 
+  it("skips submitted RevNet receipt reconciliation while issuance is disabled", async () => {
+    const harness = createStripeQueueHarness({
+      revnetIssuances: [
+        makeRevnetIssuance({
+          payTxHash: "0xabc123",
+          status: HostedRevnetIssuanceStatus.submitted,
+        }),
+      ],
+    });
+
+    await expect(reconcileSubmittedHostedRevnetIssuances({
+      prisma: harness.prisma,
+    })).resolves.toEqual([]);
+
+    expect(mocks.readHostedRevnetPaymentReceipt).not.toHaveBeenCalled();
+    expect(harness.revnetIssuances[0]).toMatchObject({
+      payTxHash: "0xabc123",
+      status: HostedRevnetIssuanceStatus.submitted,
+    });
+  });
+
   it("marks submitted RevNet issuance failed when receipt is reverted and does not activate", async () => {
+    mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(true);
     mocks.readHostedRevnetPaymentReceipt.mockResolvedValue({
       status: "reverted",
     });
@@ -1440,8 +1457,7 @@ describe("hosted Stripe event reconciliation", () => {
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
-  it("fails closed after a broadcast when tx-hash persistence fails and retries do not rebroadcast", async () => {
-    mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(true);
+  it("does not create RevNet issuance records while issuance is disabled", async () => {
     const harness = createStripeQueueHarness({
       invites: [
         makeInvite(),
@@ -1455,58 +1471,6 @@ describe("hosted Stripe event reconciliation", () => {
         }),
       ],
     });
-    const baseUpdateImpl = harness.prisma.hostedRevnetIssuance.update.getMockImplementation();
-    harness.prisma.hostedRevnetIssuance.update.mockImplementation(async (args: {
-      data: Record<string, unknown>;
-      where: Record<string, unknown>;
-    }) => {
-      if ("payTxHash" in args.data || args.data.status === HostedRevnetIssuanceStatus.submitted) {
-        throw new Error("db write failed");
-      }
-
-      return baseUpdateImpl?.(args) ?? harness.revnetIssuances[0]!;
-    });
-    harness.prisma.hostedRevnetIssuance.updateMany.mockImplementation(async ({ data, where }: {
-      data: Record<string, unknown>;
-      where: Record<string, unknown>;
-    }) => {
-      if ("payTxHash" in data || data.status === HostedRevnetIssuanceStatus.submitted) {
-        return { count: 0 };
-      }
-
-      const issuance = harness.revnetIssuances.find((candidate) => {
-        if ("id" in where && candidate.id !== where.id) {
-          return false;
-        }
-
-        if ("payTxHash" in where && candidate.payTxHash !== where.payTxHash) {
-          return false;
-        }
-
-        if ("status" in where && candidate.status !== where.status) {
-          return false;
-        }
-
-        if ("updatedAt" in where) {
-          const updatedAt = where.updatedAt as Date;
-          if (candidate.updatedAt.getTime() !== updatedAt.getTime()) {
-            return false;
-          }
-        }
-
-        return true;
-      });
-
-      if (!issuance) {
-        return { count: 0 };
-      }
-
-      Object.assign(issuance, data, {
-        updatedAt: new Date(issuance.updatedAt.getTime() + 1),
-      });
-      return { count: 1 };
-    });
-
     await recordHostedStripeEvent({
       event: buildStripeEvent({
         createdAt: "2026-03-28T10:35:00.000Z",
@@ -1532,11 +1496,7 @@ describe("hosted Stripe event reconciliation", () => {
       prisma: harness.prisma,
     });
 
-    expect(harness.revnetIssuances[0]).toMatchObject({
-      failureCode: null,
-      payTxHash: null,
-      status: HostedRevnetIssuanceStatus.submitting,
-    });
+    expect(harness.revnetIssuances).toHaveLength(0);
     expect(harness.stripeEvents[0]).toMatchObject({
       lastErrorCode: null,
       processedAt: expect.any(Date),
@@ -1547,7 +1507,7 @@ describe("hosted Stripe event reconciliation", () => {
       prisma: harness.prisma,
     });
 
-    expect(mocks.submitHostedRevnetPayment).toHaveBeenCalledTimes(1);
+    expect(mocks.submitHostedRevnetPayment).not.toHaveBeenCalled();
     expect(harness.stripeEvents[0]).toMatchObject({
       processedAt: expect.any(Date),
       status: HostedStripeEventStatus.completed,
@@ -1564,7 +1524,7 @@ describe("hosted Stripe event reconciliation", () => {
       ],
       members: [
         makeMember({
-          billingMode: HostedBillingMode.payment,
+          billingMode: HostedBillingMode.subscription,
           billingStatus: HostedBillingStatus.active,
           status: HostedMemberStatus.registered,
           stripeSubscriptionId: null,
@@ -1860,7 +1820,7 @@ describe("hosted Stripe event reconciliation", () => {
       ],
       members: [
         makeMember({
-          billingMode: HostedBillingMode.payment,
+          billingMode: HostedBillingMode.subscription,
           billingStatus: HostedBillingStatus.active,
           status: HostedMemberStatus.registered,
           stripeSubscriptionId: null,
@@ -1912,7 +1872,7 @@ describe("hosted Stripe event reconciliation", () => {
       ],
       members: [
         makeMember({
-          billingMode: HostedBillingMode.payment,
+          billingMode: HostedBillingMode.subscription,
           billingStatus: HostedBillingStatus.active,
           status: HostedMemberStatus.registered,
           stripeCustomerId: "cus_existing_123",
@@ -2010,6 +1970,7 @@ describe("hosted Stripe event reconciliation", () => {
   });
 
   it("does not let recent claimed RevNet rows crowd out due retries from the submission queue", async () => {
+    mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(true);
     const recentSubmitting = makeRevnetIssuance({
       attemptCount: 1,
       id: "issuance_recent",
@@ -2053,6 +2014,7 @@ describe("hosted Stripe event reconciliation", () => {
   });
 
   it("records definite RevNet submission failures with backoff and skips them until due", async () => {
+    mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(true);
     mocks.submitHostedRevnetPayment.mockRejectedValueOnce(new Error("rpc unavailable"));
     const harness = createStripeQueueHarness({
       revnetIssuances: [
@@ -2082,6 +2044,7 @@ describe("hosted Stripe event reconciliation", () => {
   });
 
   it("auto-retries a stale claimed RevNet issuance that never reached submission", async () => {
+    mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(true);
     const harness = createStripeQueueHarness({
       revnetIssuances: [
         makeRevnetIssuance({
@@ -2107,6 +2070,7 @@ describe("hosted Stripe event reconciliation", () => {
   });
 
   it("keeps broadcast-unknown RevNet submissions stuck even after they become stale", async () => {
+    mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(true);
     const harness = createStripeQueueHarness({
       revnetIssuances: [
         makeRevnetIssuance({
@@ -2132,6 +2096,7 @@ describe("hosted Stripe event reconciliation", () => {
   });
 
   it("confirms and activates RevNet issuance without depending on legacy member-row CAS hooks", async () => {
+    mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(true);
     mocks.readHostedRevnetPaymentReceipt.mockResolvedValue({
       status: "success",
     });

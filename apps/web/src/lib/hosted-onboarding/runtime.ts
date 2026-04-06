@@ -66,7 +66,6 @@ export function requireHostedStripeApi(): Stripe {
 }
 
 export function requireHostedStripeCheckoutConfig(): {
-  billingMode: "payment" | "subscription";
   priceId: string;
   stripe: Stripe;
 } {
@@ -81,7 +80,6 @@ export function requireHostedStripeCheckoutConfig(): {
   }
 
   return {
-    billingMode: environment.stripeBillingMode,
     priceId: environment.stripePriceId,
     stripe: requireHostedStripeApi(),
   };
