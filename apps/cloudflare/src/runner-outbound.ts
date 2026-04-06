@@ -28,13 +28,12 @@ import { createHostedUserKeyStore } from "./user-key-store.js";
 import { readHostedExecutionEnvironment } from "./env.ts";
 import type {
   HostedExecutionCommitPayload,
-  HostedExecutionFinalizePayload,
 } from "./execution-journal.ts";
 import { json, methodNotAllowed, notFound, readJsonObject } from "./json.ts";
 import {
   HostedExecutionSideEffectConflictError,
   createHostedExecutionSideEffectJournalStore,
-} from "./outbox-delivery-journal.ts";
+} from "./side-effect-journal.ts";
 import {
   readHostedEmailConfig,
   readHostedEmailRawMessage,
@@ -139,16 +138,14 @@ async function handleRunnerResultsRequest(input: {
   url: URL;
   userId: string;
 }): Promise<Response> {
-  const commitMatch = /^\/events\/(?<eventId>[^/]+)\/(?<action>commit|finalize)$/u.exec(input.url.pathname);
+  const commitMatch = /^\/events\/(?<eventId>[^/]+)\/commit$/u.exec(input.url.pathname);
   if (commitMatch?.groups) {
     if (input.request.method !== "POST") {
       return methodNotAllowed();
     }
 
     const eventId = decodeRouteParam(commitMatch.groups.eventId);
-    return commitMatch.groups.action === "commit"
-      ? forwardRunnerCommit(input.userId, eventId, await readJsonObject(input.request), input.env)
-      : forwardRunnerFinalize(input.userId, eventId, await readJsonObject(input.request), input.env);
+    return forwardRunnerCommit(input.userId, eventId, await readJsonObject(input.request), input.env);
   }
 
   const sideEffectMatch = /^\/(?:intents|effects)\/(?<effectId>[^/]+)$/u.exec(input.url.pathname);
@@ -293,22 +290,6 @@ async function forwardRunnerCommit(
     committed: await stub.commit({
       eventId,
       payload: parseHostedExecutionCommitRequest(payload),
-    }),
-    ok: true,
-  });
-}
-
-async function forwardRunnerFinalize(
-  userId: string,
-  eventId: string,
-  payload: Record<string, unknown>,
-  env: RunnerOutboundEnvironmentSource,
-): Promise<Response> {
-  const stub = await resolveRunnerOutboundUserRunnerStub(env, userId);
-  return json({
-    finalized: await stub.finalizeCommit({
-      eventId,
-      payload: parseHostedExecutionFinalizeRequest(payload),
     }),
     ok: true,
   });
@@ -661,18 +642,6 @@ function parseHostedExecutionCommitRequest(payload: Record<string, unknown>): Ho
       summary: requireString(result.summary, "result.summary"),
     },
     sideEffects: parseHostedExecutionSideEffects(payload.sideEffects),
-  };
-}
-
-function parseHostedExecutionFinalizeRequest(
-  payload: Record<string, unknown>,
-): HostedExecutionFinalizePayload {
-  return {
-    bundle: parseHostedExecutionBundlePayload(payload.bundle, "bundle"),
-    gatewayProjectionSnapshot:
-      payload.gatewayProjectionSnapshot === undefined || payload.gatewayProjectionSnapshot === null
-        ? null
-        : gatewayProjectionSnapshotSchema.parse(payload.gatewayProjectionSnapshot),
   };
 }
 

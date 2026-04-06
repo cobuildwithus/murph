@@ -1,14 +1,14 @@
 import {
   formatHostedRuntimeChildResult,
   parseHostedAssistantRuntimeJobInput,
-  runHostedAssistantRuntimeJobInProcess,
+  runHostedAssistantRuntimeJobInProcessDetailed,
 } from "./hosted-runtime.js";
 
 async function main(): Promise<void> {
   const input = parseHostedAssistantRuntimeJobInput(JSON.parse(await readStandardInput()) as unknown);
 
   try {
-    const result = await runHostedAssistantRuntimeJobInProcess(input);
+    const result = await runHostedAssistantRuntimeJobInProcessDetailed(input);
     process.stdout.write(`${formatHostedRuntimeChildResult({ ok: true, result })}\n`);
   } catch (error) {
     process.stdout.write(

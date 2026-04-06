@@ -39,12 +39,14 @@ import {
   executeHostedDispatchForCommit,
 } from "./hosted-runtime/execution.ts";
 import type {
+  HostedAssistantRuntimeJobResult,
   HostedAssistantRuntimeJobInput,
 } from "./hosted-runtime/models.ts";
 
 export type {
   HostedAssistantRuntimeConfig,
   HostedAssistantRuntimeJobInput,
+  HostedAssistantRuntimeJobResult,
   HostedAssistantRuntimeJobRequest,
   HostedExecutionCommitCallback,
 } from "./hosted-runtime/models.ts";
@@ -65,7 +67,7 @@ interface HostedAssistantRuntimeChildResult {
     name?: string | null;
     stack?: string | null;
   };
-  result?: HostedExecutionRunnerResult;
+  result?: HostedAssistantRuntimeJobResult;
 }
 
 const HOSTED_RUNTIME_CHILD_RESULT_PREFIX = "__HB_ASSISTANT_RUNTIME_RESULT__";
@@ -73,6 +75,12 @@ const HOSTED_RUNTIME_CHILD_RESULT_PREFIX = "__HB_ASSISTANT_RUNTIME_RESULT__";
 export async function runHostedAssistantRuntimeJobInProcess(
   input: HostedAssistantRuntimeJobInput,
 ): Promise<HostedExecutionRunnerResult> {
+  return (await runHostedAssistantRuntimeJobInProcessDetailed(input)).result;
+}
+
+export async function runHostedAssistantRuntimeJobInProcessDetailed(
+  input: HostedAssistantRuntimeJobInput,
+): Promise<HostedAssistantRuntimeJobResult> {
   emitHostedExecutionStructuredLog({
     component: "runtime",
     dispatch: input.request.dispatch,
@@ -245,6 +253,15 @@ export async function runHostedAssistantRuntimeJobIsolated(
     signal?: AbortSignal;
   },
 ): Promise<HostedExecutionRunnerResult> {
+  return (await runHostedAssistantRuntimeJobIsolatedDetailed(input, options)).result;
+}
+
+export async function runHostedAssistantRuntimeJobIsolatedDetailed(
+  input: HostedAssistantRuntimeJobInput,
+  options?: {
+    signal?: AbortSignal;
+  },
+): Promise<HostedAssistantRuntimeJobResult> {
   const runtime = input.runtime;
   const childEntry = resolveHostedRuntimeChildEntry();
   const isTypeScriptChild = childEntry.endsWith(".ts");
@@ -261,7 +278,7 @@ export async function runHostedAssistantRuntimeJobIsolated(
       throw createHostedRuntimeAbortError(abortSignal);
     }
 
-    return await new Promise<HostedExecutionRunnerResult>((resolve, reject) => {
+    return await new Promise<HostedAssistantRuntimeJobResult>((resolve, reject) => {
       const child = spawn(process.execPath, childArgs, {
         cwd: launcherRoot,
         detached: process.platform !== "win32",
@@ -293,7 +310,7 @@ export async function runHostedAssistantRuntimeJobIsolated(
         reject(error);
       };
 
-      const settleResult = (result: HostedExecutionRunnerResult) => {
+      const settleResult = (result: HostedAssistantRuntimeJobResult) => {
         if (settled) {
           return;
         }
@@ -327,7 +344,7 @@ export async function runHostedAssistantRuntimeJobIsolated(
             return;
           }
 
-          settleResult(payload.result as HostedExecutionRunnerResult);
+          settleResult(payload.result as HostedAssistantRuntimeJobResult);
         } catch (error) {
           settleError(
             new Error(

@@ -47,7 +47,7 @@ function createCloudflareNodeProject(name: string, patterns: readonly string[]) 
 export const cloudflareNodeVitestProjects = [
   createCloudflareNodeProject("cloudflare-node-runner", [
     "node-runner*.test.ts",
-    "outbox-delivery-journal.test.ts",
+    "side-effect-journal.test.ts",
     "runner-*.test.ts",
     "user-env.test.ts",
     "user-key-store.test.ts",

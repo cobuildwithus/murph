@@ -13,7 +13,10 @@ import type {
   HostedExecutionUserEnvStatus,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
-import type { HostedAssistantRuntimeJobInput } from "@murphai/assistant-runtime";
+import type {
+  HostedAssistantRuntimeJobInput,
+  HostedAssistantRuntimeJobResult,
+} from "@murphai/assistant-runtime";
 import type {
   GatewayFetchAttachmentsInput,
   GatewayGetConversationInput,
@@ -673,27 +676,6 @@ export class HostedUserRunner {
     });
   }
 
-  async finalizeCommit(input: {
-    eventId: string;
-    payload: HostedExecutionFinalizePayload;
-  }): Promise<HostedExecutionCommittedResult> {
-    return this.applyHostedTransition({
-      eventId: input.eventId,
-      gatewayProjectionSnapshot: input.payload.gatewayProjectionSnapshot ?? null,
-      run: async (userId, stores) => {
-        return persistHostedExecutionFinalBundles({
-          bucket: this.bucket,
-          eventId: input.eventId,
-          key: stores.crypto.rootKey,
-          keyId: stores.crypto.rootKeyId,
-          keysById: stores.crypto.keysById,
-          payload: input.payload,
-          userId,
-        });
-      },
-    });
-  }
-
   private async runQueuedEvents(userId: string): Promise<HostedExecutionUserStatus> {
     await this.ensureRunnerStores(userId);
     let record = await this.queueStore.readState();
@@ -758,10 +740,13 @@ export class HostedUserRunner {
               }
             : null,
         );
-        record = await (await this.ensureRunnerStores(record.userId)).commitRecovery.requireCommittedDispatch(
+        const durableCommit = await (await this.ensureRunnerStores(record.userId)).commitRecovery.readCommittedDispatch(
           record.userId,
           nextPending.dispatch.eventId,
         );
+        if (!durableCommit) {
+          throw new Error("Hosted runner returned before recording a durable commit.");
+        }
         record = await this.advanceRunPhase({
           clearError: true,
           dispatch: nextPending.dispatch,
@@ -769,13 +754,14 @@ export class HostedUserRunner {
           phase: "commit.recorded",
           run,
         });
-        record = await (await this.ensureRunnerStores(record.userId)).bundleSync.applyRunnerResultBundles(
+        await this.finalizeReturnedRunnerResult({
+          eventId: nextPending.dispatch.eventId,
+          finalGatewayProjectionSnapshot: runnerResult.finalGatewayProjectionSnapshot,
+          result: runnerResult.result,
+        });
+        record = await (await this.ensureRunnerStores(record.userId)).commitRecovery.requireCommittedDispatch(
           record.userId,
-          record.bundleVersion,
-          runnerResult.bundle,
-        );
-        record = await this.scheduler.syncNextWake(
-          runnerResult.result.nextWakeAt ?? null,
+          nextPending.dispatch.eventId,
         );
         record = await this.advanceRunPhase({
           clearError: true,
@@ -876,7 +862,7 @@ export class HostedUserRunner {
         sideEffects: HostedExecutionCommittedResult["sideEffects"];
       };
     } | null = null,
-  ) {
+  ): Promise<HostedAssistantRuntimeJobResult> {
     if (!this.runnerContainerNamespace) {
       throw new Error("Native hosted execution requires a RunnerContainer binding.");
     }
@@ -911,6 +897,31 @@ export class HostedUserRunner {
       runnerControlToken: crypto.randomUUID(),
       timeoutMs: this.env.runnerTimeoutMs,
       userId,
+    });
+  }
+
+  private async finalizeReturnedRunnerResult(input: {
+    eventId: string;
+    finalGatewayProjectionSnapshot: HostedExecutionFinalizePayload["gatewayProjectionSnapshot"];
+    result: HostedAssistantRuntimeJobResult["result"];
+  }): Promise<HostedExecutionCommittedResult> {
+    return this.applyHostedTransition({
+      eventId: input.eventId,
+      gatewayProjectionSnapshot: input.finalGatewayProjectionSnapshot ?? null,
+      run: async (userId, stores) => {
+        return persistHostedExecutionFinalBundles({
+          bucket: this.bucket,
+          eventId: input.eventId,
+          key: stores.crypto.rootKey,
+          keyId: stores.crypto.rootKeyId,
+          keysById: stores.crypto.keysById,
+          payload: {
+            bundle: input.result.bundle,
+            gatewayProjectionSnapshot: input.finalGatewayProjectionSnapshot ?? null,
+          },
+          userId,
+        });
+      },
     });
   }
 

@@ -48,7 +48,10 @@ export class VitestUserRunnerDurableObject extends DurableObject {
   async commit(input: {
     eventId: string;
     payload: {
-      bundle: string | null;
+      bundle: {
+        agentState: string | null;
+        vault: string | null;
+      };
       currentBundleRef: HostedExecutionBundleRef | null;
       result: {
         eventsHandled: number;
@@ -58,15 +61,6 @@ export class VitestUserRunnerDurableObject extends DurableObject {
     };
   }) {
     return this.runner.commit(input);
-  }
-
-  async finalizeCommit(input: {
-    eventId: string;
-    payload: {
-      bundle: string | null;
-    };
-  }) {
-    return this.runner.finalizeCommit(input);
   }
 
   async status(): Promise<HostedExecutionUserStatus> {

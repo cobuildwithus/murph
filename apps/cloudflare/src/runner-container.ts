@@ -2,12 +2,12 @@ import { Container, type OutboundHandlerContext } from "@cloudflare/containers";
 import {
   parseHostedAssistantRuntimeJobInput,
   type HostedAssistantRuntimeJobInput,
+  type HostedAssistantRuntimeJobResult,
 } from "@murphai/assistant-runtime";
 import {
   emitHostedExecutionStructuredLog,
   HOSTED_EXECUTION_CALLBACK_HOSTS,
   HOSTED_EXECUTION_PROXY_HOSTS,
-  type HostedExecutionRunnerResult,
 } from "@murphai/hosted-execution";
 
 import { methodNotAllowed } from "./json.ts";
@@ -47,7 +47,7 @@ interface HostedExecutionContainerRunnerInput {
 
 export interface HostedExecutionContainerStubLike {
   destroyInstance(): Promise<void>;
-  invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerResult>;
+  invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedAssistantRuntimeJobResult>;
 }
 
 export interface HostedExecutionContainerNamespaceLike {
@@ -90,7 +90,7 @@ export class RunnerContainer extends Container {
     super(state as never, env as never);
   }
 
-  async invoke(payload: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerResult> {
+  async invoke(payload: HostedExecutionContainerInvokeRequest): Promise<HostedAssistantRuntimeJobResult> {
     return this.invokeHostedExecution(parseHostedExecutionContainerInvokeInput(payload));
   }
 
@@ -110,7 +110,7 @@ export class RunnerContainer extends Container {
 
   private async invokeHostedExecution(
     input: HostedExecutionContainerInvokeInput,
-  ): Promise<HostedExecutionRunnerResult> {
+  ): Promise<HostedAssistantRuntimeJobResult> {
     const dispatch = input.job.request.dispatch;
     const run = input.job.request.run ?? null;
     const internalWorkerProxyToken = crypto.randomUUID();
@@ -170,7 +170,7 @@ export class RunnerContainer extends Container {
         throw await classifyHostedRunnerContainerErrorResponse(response);
       }
 
-      return (await response.json()) as HostedExecutionRunnerResult;
+      return (await response.json()) as HostedAssistantRuntimeJobResult;
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "container",
@@ -225,7 +225,7 @@ export class RunnerContainer extends Container {
 
 export async function invokeHostedExecutionContainerRunner(
   input: HostedExecutionContainerRunnerInput,
-): Promise<HostedExecutionRunnerResult> {
+): Promise<HostedAssistantRuntimeJobResult> {
   if (typeof input.runnerControlToken !== "string" || input.runnerControlToken.trim().length === 0) {
     throw new HostedExecutionConfigurationError(
       "Hosted execution native runner control token is required.",

@@ -1,13 +1,11 @@
 import {
-  runHostedAssistantRuntimeJobInProcess,
-  runHostedAssistantRuntimeJobIsolated,
+  runHostedAssistantRuntimeJobInProcessDetailed,
+  runHostedAssistantRuntimeJobIsolatedDetailed,
   type HostedAssistantRuntimeConfig,
   type HostedAssistantRuntimeJobInput,
+  type HostedAssistantRuntimeJobResult,
 } from "@murphai/assistant-runtime";
-import {
-  readHostedEmailCapabilities,
-  type HostedExecutionRunnerResult,
-} from "@murphai/hosted-execution";
+import { readHostedEmailCapabilities } from "@murphai/hosted-execution";
 
 import {
   buildHostedRunnerContainerEnv,
@@ -17,7 +15,7 @@ import { normalizeHostedUserEnv } from "./user-env.ts";
 
 let hostedExecutionRunStartHookForTests: (() => void) | null = null;
 let hostedExecutionRunModeForTests: "in-process" | "isolated" | null = null;
-let hostedExecutionIsolatedRunnerForTests: typeof runHostedAssistantRuntimeJobIsolated | null = null;
+let hostedExecutionIsolatedRunnerForTests: typeof runHostedAssistantRuntimeJobIsolatedDetailed | null = null;
 const hostedExecutionWorkerOnlyRuntimeEnvKeys = new Set([
   "HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS",
   "HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS",
@@ -34,7 +32,7 @@ export function setHostedExecutionRunStartHookForTests(hook: (() => void) | null
 }
 
 export function setHostedExecutionIsolatedRunnerForTests(
-  runner: typeof runHostedAssistantRuntimeJobIsolated | null,
+  runner: typeof runHostedAssistantRuntimeJobIsolatedDetailed | null,
 ): void {
   hostedExecutionIsolatedRunnerForTests = runner;
 }
@@ -50,18 +48,19 @@ export async function runHostedExecutionJob(
   options?: {
     signal?: AbortSignal;
   },
-): Promise<HostedExecutionRunnerResult> {
+): Promise<HostedAssistantRuntimeJobResult> {
   hostedExecutionRunStartHookForTests?.();
   const runtime = buildHostedExecutionJobRuntime(input.runtime ?? {});
 
   if (hostedExecutionRunModeForTests === "in-process") {
-    return await runHostedAssistantRuntimeJobInProcess({
+    return await runHostedAssistantRuntimeJobInProcessDetailed({
       request: input.request,
       runtime,
     });
   }
 
-  const runIsolated = hostedExecutionIsolatedRunnerForTests ?? runHostedAssistantRuntimeJobIsolated;
+  const runIsolated =
+    hostedExecutionIsolatedRunnerForTests ?? runHostedAssistantRuntimeJobIsolatedDetailed;
 
   return await runIsolated({
     request: input.request,

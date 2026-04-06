@@ -222,7 +222,7 @@ describe("cloudflare worker runtime suite", () => {
     });
   });
 
-  it("persists bundle journaling through the internal runner outbound handlers in the Workers runtime", async () => {
+  it("hard-cuts the removed finalize route from the internal runner outbound handlers in the Workers runtime", async () => {
     const userId = "member_journal";
     const eventId = "evt_finalize_runtime";
     await resolveHostedUserCryptoContext(userId);
@@ -260,10 +260,10 @@ describe("cloudflare worker runtime suite", () => {
       userId,
     );
 
-    expect(finalizeResponse.status).toBe(200);
+    expect(finalizeResponse.status).toBe(404);
     await expect((await createJournalStore(userId)).readCommittedResult(userId, eventId)).resolves.toMatchObject({
       eventId,
-      finalizedAt: expect.any(String),
+      finalizedAt: null,
       result: {
         summary: "committed",
       },

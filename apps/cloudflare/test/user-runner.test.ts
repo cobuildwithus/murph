@@ -36,6 +36,8 @@ import {
   TEST_AUTOMATION_RECIPIENT_KEY_ID,
   TEST_AUTOMATION_RECIPIENT_PRIVATE_JWK,
   TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK,
+  TEST_RECOVERY_RECIPIENT_KEY_ID,
+  TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK as TEST_RECOVERY_RECIPIENT_PUBLIC_JWK,
 } from "./hosted-execution-fixtures";
 import { createTestSqlStorage } from "./sql-storage.js";
 
@@ -62,6 +64,8 @@ describe("HostedUserRunner", () => {
     defaultAlarmDelayMs: 60_000,
     dispatchSigningSecret: "dispatch-secret",
     maxEventAttempts: 3,
+    recoveryRecipientKeyId: TEST_RECOVERY_RECIPIENT_KEY_ID,
+    recoveryRecipientPublicKey: TEST_RECOVERY_RECIPIENT_PUBLIC_JWK,
     retryDelayMs: 10_000,
     runnerControlToken: "runner-token",
     runnerTimeoutMs: 60_000,
@@ -454,19 +458,13 @@ describe("HostedUserRunner", () => {
 
       await persistHostedExecutionCommit({
         bucket: bucket.api,
-        currentBundleRefs: {
-          agentState: previousAgentRef,
-          vault: previousVaultRef,
-        },
+        currentBundleRef: previousVaultRef,
         eventId: "evt_recovered_gc",
         key: crypto.rootKey,
         keyId: crypto.rootKeyId,
         keysById: crypto.keysById,
         payload: {
-          bundles: {
-            agentState: Buffer.from(nextAgentBytes).toString("base64"),
-            vault: Buffer.from(nextVaultBundle!).toString("base64"),
-          },
+          bundle: Buffer.from(nextVaultBundle!).toString("base64"),
           result: {
             eventsHandled: 1,
             summary: "recovered",
@@ -481,10 +479,7 @@ describe("HostedUserRunner", () => {
         keyId: crypto.rootKeyId,
         keysById: crypto.keysById,
         payload: {
-          bundles: {
-            agentState: Buffer.from(nextAgentBytes).toString("base64"),
-            vault: Buffer.from(nextVaultBundle!).toString("base64"),
-          },
+          bundle: Buffer.from(nextVaultBundle!).toString("base64"),
         },
         userId: "member_recovered_gc",
       });
@@ -524,10 +519,7 @@ describe("HostedUserRunner", () => {
       keyId: environment.platformEnvelopeKeyId,
     });
     const committedResult = {
-      bundleRefs: {
-        agentState: null,
-        vault: null,
-      },
+      bundleRef: null,
       committedAt: "2026-03-27T00:00:00.000Z",
       eventId: "evt_roundtrip",
       finalizedAt: null,
@@ -550,18 +542,12 @@ describe("HostedUserRunner", () => {
   it("rejects duplicate durable commits whose payload diverges from the first write", async () => {
     await persistHostedExecutionCommit({
       bucket: bucket.api,
-      currentBundleRefs: {
-        agentState: null,
-        vault: null,
-      },
+      currentBundleRef: null,
       eventId: "evt_duplicate_commit",
       key: environment.platformEnvelopeKey,
       keyId: environment.platformEnvelopeKeyId,
       payload: {
-        bundles: {
-          agentState: Buffer.from("agent-state").toString("base64"),
-          vault: Buffer.from("vault").toString("base64"),
-        },
+        bundle: Buffer.from("vault").toString("base64"),
         result: {
           eventsHandled: 1,
           summary: "ok",
@@ -573,18 +559,12 @@ describe("HostedUserRunner", () => {
     await expect(
       persistHostedExecutionCommit({
         bucket: bucket.api,
-        currentBundleRefs: {
-          agentState: null,
-          vault: null,
-        },
+        currentBundleRef: null,
         eventId: "evt_duplicate_commit",
         key: environment.platformEnvelopeKey,
         keyId: environment.platformEnvelopeKeyId,
         payload: {
-          bundles: {
-            agentState: Buffer.from("agent-state").toString("base64"),
-            vault: Buffer.from("vault").toString("base64"),
-          },
+          bundle: Buffer.from("vault").toString("base64"),
           result: {
             eventsHandled: 1,
             summary: "changed",
@@ -600,18 +580,12 @@ describe("HostedUserRunner", () => {
   it("does not rewrite finalized journal records when bundle refs only differ by updatedAt", async () => {
     await persistHostedExecutionCommit({
       bucket: bucket.api,
-      currentBundleRefs: {
-        agentState: null,
-        vault: null,
-      },
+      currentBundleRef: null,
       eventId: "evt_finalize_same_ref",
       key: environment.platformEnvelopeKey,
       keyId: environment.platformEnvelopeKeyId,
       payload: {
-        bundles: {
-          agentState: Buffer.from("agent-state").toString("base64"),
-          vault: Buffer.from("vault").toString("base64"),
-        },
+        bundle: Buffer.from("vault").toString("base64"),
         result: {
           eventsHandled: 1,
           summary: "ok",
@@ -626,21 +600,15 @@ describe("HostedUserRunner", () => {
       keyId: environment.platformEnvelopeKeyId,
     });
     const existing = await journalStore.readCommittedResult("member_123", "evt_finalize_same_ref");
-    if (!existing?.bundleRefs.agentState || !existing.bundleRefs.vault) {
-      throw new Error("Expected committed bundle refs to exist.");
+    if (!existing?.bundleRef) {
+      throw new Error("Expected committed bundle ref to exist.");
     }
 
     const finalizedRecord = {
       ...existing,
-      bundleRefs: {
-        agentState: {
-          ...existing.bundleRefs.agentState,
-          updatedAt: "2026-03-27T00:00:01.000Z",
-        },
-        vault: {
-          ...existing.bundleRefs.vault,
-          updatedAt: "2026-03-27T00:00:01.000Z",
-        },
+      bundleRef: {
+        ...existing.bundleRef,
+        updatedAt: "2026-03-27T00:00:01.000Z",
       },
       finalizedAt: "2026-03-27T00:00:02.000Z",
     };
@@ -653,10 +621,7 @@ describe("HostedUserRunner", () => {
       key: environment.platformEnvelopeKey,
       keyId: environment.platformEnvelopeKeyId,
       payload: {
-        bundles: {
-          agentState: Buffer.from("agent-state").toString("base64"),
-          vault: Buffer.from("vault").toString("base64"),
-        },
+        bundle: Buffer.from("vault").toString("base64"),
       },
       userId: "member_123",
     });
@@ -667,19 +632,17 @@ describe("HostedUserRunner", () => {
 
   it("rejects duplicate runner commits whose payload diverges from the first write", async () => {
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.bootstrapUser("member_123");
+    await resolveHostedUserCryptoContextForTest({
+      bucket,
+      environment,
+      userId: "member_123",
+    });
 
     await runner.commit({
       eventId: "evt_duplicate_runner_commit",
       payload: {
-        bundles: {
-          agentState: Buffer.from("agent-state").toString("base64"),
-          vault: Buffer.from("vault").toString("base64"),
-        },
-        currentBundleRefs: {
-          agentState: null,
-          vault: null,
-        },
+        bundle: Buffer.from("vault").toString("base64"),
+        currentBundleRef: null,
         result: {
           eventsHandled: 1,
           summary: "ok",
@@ -691,14 +654,8 @@ describe("HostedUserRunner", () => {
       runner.commit({
         eventId: "evt_duplicate_runner_commit",
         payload: {
-          bundles: {
-            agentState: Buffer.from("agent-state").toString("base64"),
-            vault: Buffer.from("vault-updated").toString("base64"),
-          },
-          currentBundleRefs: {
-            agentState: null,
-            vault: null,
-          },
+          bundle: Buffer.from("vault-updated").toString("base64"),
+          currentBundleRef: null,
           result: {
             eventsHandled: 1,
             summary: "ok",
@@ -714,19 +671,17 @@ describe("HostedUserRunner", () => {
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     const routeKey = "channel:email|identity:murph%40example.com|thread:thread-labs";
     const sessionKey = createGatewayConversationSessionKey(routeKey);
-    await runner.bootstrapUser("member_123");
+    await resolveHostedUserCryptoContextForTest({
+      bucket,
+      environment,
+      userId: "member_123",
+    });
 
     await runner.commit({
       eventId: "evt_gateway_projection",
       payload: {
-        bundles: {
-          agentState: Buffer.from("agent-state").toString("base64"),
-          vault: Buffer.from("vault").toString("base64"),
-        },
-        currentBundleRefs: {
-          agentState: null,
-          vault: null,
-        },
+        bundle: Buffer.from("vault").toString("base64"),
+        currentBundleRef: null,
         gatewayProjectionSnapshot: {
           conversations: [{
             canSend: true,
@@ -776,10 +731,19 @@ describe("HostedUserRunner", () => {
     const baselineEvents = await runner.gatewayPollEvents({ cursor: 0, limit: 10 });
     expect(baselineEvents.events).toHaveLength(0);
 
-    await runner.finalizeCommit({
+    const crypto = await resolveHostedUserCryptoContextForTest({
+      bucket,
+      environment,
+      userId: "member_123",
+    });
+    await persistHostedExecutionFinalBundles({
+      bucket: bucket.api,
       eventId: "evt_gateway_projection",
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
       payload: {
-        bundles: {
+        bundle: {
           agentState: Buffer.from("agent-state-final").toString("base64"),
           vault: Buffer.from("vault-final").toString("base64"),
         },
@@ -828,6 +792,16 @@ describe("HostedUserRunner", () => {
           schema: "murph.gateway-projection-snapshot.v1",
         },
       },
+      userId: "member_123",
+    });
+    await runner.dispatch({
+      event: {
+        kind: "assistant.cron.tick",
+        reason: "manual",
+        userId: "member_123",
+      },
+      eventId: "evt_gateway_projection",
+      occurredAt: "2026-03-26T12:05:00.000Z",
     });
 
     const messages = await runner.gatewayReadMessages({
@@ -844,7 +818,11 @@ describe("HostedUserRunner", () => {
 
   it("stores pending hosted AI usage in worker-owned storage and supports read/delete", async () => {
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.bootstrapUser("member_123");
+    await resolveHostedUserCryptoContextForTest({
+      bucket,
+      environment,
+      userId: "member_123",
+    });
     await expect(runner.putPendingUsage({
       usage: [{
         apiKeyEnv: null,
@@ -916,10 +894,7 @@ describe("HostedUserRunner", () => {
       keyId: crypto.rootKeyId,
       keysById: crypto.keysById,
     }).writeCommittedResult("member_123", "evt_gateway_recovery", {
-      bundleRefs: {
-        agentState: null,
-        vault: null,
-      },
+      bundleRef: null,
       committedAt: "2026-03-26T12:00:01.000Z",
       eventId: "evt_gateway_recovery",
       finalizedAt: null,
@@ -957,19 +932,20 @@ describe("HostedUserRunner", () => {
 
   it("ignores stale gateway snapshots so finalize cannot rewind the hot projection", async () => {
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.bootstrapUser("member_123");
+    await resolveHostedUserCryptoContextForTest({
+      bucket,
+      environment,
+      userId: "member_123",
+    });
 
     await runner.commit({
       eventId: "evt_gateway_stale_projection",
       payload: {
-        bundles: {
+        bundle: {
           agentState: Buffer.from("agent-state-newer").toString("base64"),
           vault: Buffer.from("vault-newer").toString("base64"),
         },
-        currentBundleRefs: {
-          agentState: null,
-          vault: null,
-        },
+        currentBundleRef: null,
         gatewayProjectionSnapshot: createGatewayProjectionSnapshot({
           generatedAt: "2026-03-26T12:05:00.000Z",
           lastActivityAt: "2026-03-26T12:05:00.000Z",
@@ -997,10 +973,19 @@ describe("HostedUserRunner", () => {
       },
     });
 
-    await runner.finalizeCommit({
+    const crypto = await resolveHostedUserCryptoContextForTest({
+      bucket,
+      environment,
+      userId: "member_123",
+    });
+    await persistHostedExecutionFinalBundles({
+      bucket: bucket.api,
       eventId: "evt_gateway_stale_projection",
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
       payload: {
-        bundles: {
+        bundle: {
           agentState: Buffer.from("agent-state-older").toString("base64"),
           vault: Buffer.from("vault-older").toString("base64"),
         },
@@ -1019,7 +1004,9 @@ describe("HostedUserRunner", () => {
           title: "Lab thread",
         }),
       },
+      userId: "member_123",
     });
+    await runner.dispatch(createDispatch("evt_gateway_stale_projection"));
 
     const listed = await runner.gatewayListConversations({ limit: 10 });
     expect(listed.conversations).toHaveLength(1);
@@ -1076,10 +1063,7 @@ describe("HostedUserRunner", () => {
       keyId: crypto.rootKeyId,
       keysById: crypto.keysById,
     }).writeCommittedResult(dispatch.event.userId, dispatch.eventId, {
-      bundleRefs: {
-        agentState: null,
-        vault: null,
-      },
+      bundleRef: null,
       committedAt: "2026-03-26T12:00:01.000Z",
       eventId: dispatch.eventId,
       finalizedAt: "2026-03-26T12:00:02.000Z",
@@ -1133,7 +1117,7 @@ describe("HostedUserRunner", () => {
           requestBody: JSON.parse(String(init?.body)),
         });
 
-        return new Response(JSON.stringify(resultPayload), {
+        return new Response(JSON.stringify(serializeRunnerSuccessPayload(resultPayload)), {
           status: 200,
         });
       }),
@@ -1152,8 +1136,9 @@ describe("HostedUserRunner", () => {
     expect(status.userId).toBe("member_123");
     expect(status.lastEventId).toBe("evt_123");
     expect(status.lastError).toBeNull();
-    expect(status.bundleRefs.vault?.size).toBe(5);
-    expect(status.bundleRefs.agentState?.size).toBe(11);
+    expect(status.bundleRef).toMatchObject({
+      key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
+    });
     expect(status.pendingEventCount).toBe(0);
     expect(status.poisonedEventIds).toEqual([]);
     expect(status.retryingEventId).toBeNull();
@@ -1215,7 +1200,7 @@ describe("HostedUserRunner", () => {
           requestBody: JSON.parse(String(init?.body)),
         });
 
-        return new Response(JSON.stringify(resultPayload), {
+        return new Response(JSON.stringify(serializeRunnerSuccessPayload(resultPayload)), {
           status: 200,
         });
       }),
@@ -1385,10 +1370,7 @@ describe("HostedUserRunner", () => {
       keyId: crypto.rootKeyId,
       keysById: crypto.keysById,
     }).writeCommittedResult(userId, dispatch.eventId, {
-      bundleRefs: {
-        agentState: null,
-        vault: null,
-      },
+      bundleRef: null,
       committedAt: "2026-03-26T12:00:01.000Z",
       eventId: dispatch.eventId,
       finalizedAt: "2026-03-26T12:00:02.000Z",
@@ -1551,12 +1533,13 @@ describe("HostedUserRunner", () => {
           requestBody: JSON.parse(String(init?.body)),
         });
 
-        return new Response(JSON.stringify(resultPayload), {
+        return new Response(JSON.stringify(serializeRunnerSuccessPayload(resultPayload)), {
           status: 200,
         });
       }),
     );
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    await runner.provisionManagedUserCrypto("member_123");
 
     await runner.dispatch(createDispatch("evt_commit_callback"));
 
@@ -1573,10 +1556,7 @@ describe("HostedUserRunner", () => {
       job: {
         request: {
           commit: {
-            bundleRefs: {
-              agentState: null | { hash: string; key: string; size: number; updatedAt: string };
-              vault: null | { hash: string; key: string; size: number; updatedAt: string };
-            };
+            bundleRef: null | { hash: string; key: string; size: number; updatedAt: string };
           };
           run: {
             attempt: number;
@@ -1587,10 +1567,7 @@ describe("HostedUserRunner", () => {
       };
     };
 
-    expect(invokePayload.job.request.commit.bundleRefs).toEqual({
-      agentState: null,
-      vault: null,
-    });
+    expect(invokePayload.job.request.commit.bundleRef).toBeNull();
     expect(invokePayload.job.request.run).toMatchObject({
       attempt: 1,
       runId: expect.any(String),
@@ -1614,7 +1591,7 @@ describe("HostedUserRunner", () => {
           requestBody: JSON.parse(String(init?.body)),
         });
 
-        return new Response(JSON.stringify(resultPayload), {
+        return new Response(JSON.stringify(serializeRunnerSuccessPayload(resultPayload)), {
           status: 200,
         });
       }),
@@ -1628,7 +1605,7 @@ describe("HostedUserRunner", () => {
       bucket.api,
     );
 
-    await runner.bootstrapUser("member_123");
+    await runner.provisionManagedUserCrypto("member_123");
     await runner.updateUserEnv({
       env: {
         OPENAI_API_KEY: "sk-user",
@@ -1702,12 +1679,13 @@ describe("HostedUserRunner", () => {
           requestBody: JSON.parse(String(init?.body)),
         });
 
-        return new Response(JSON.stringify(finalPayload), {
+        return new Response(JSON.stringify(serializeRunnerSuccessPayload(finalPayload)), {
           status: 200,
         });
       }),
     );
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    await runner.provisionManagedUserCrypto("member_123");
 
     const status = await runner.dispatch({
       event: {
@@ -1718,8 +1696,9 @@ describe("HostedUserRunner", () => {
       occurredAt: "2026-03-26T12:00:00.000Z",
     });
 
-    expect(status.bundleRefs.agentState?.size).toBe("agent-state-final".length);
-    expect(status.bundleRefs.vault?.size).toBe("vault-final".length);
+    expect(status.bundleRef).toMatchObject({
+      key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
+    });
   });
 
   it("keeps a successful dispatch green when artifact cleanup deletes fail during commit and finalize transitions", async () => {
@@ -1874,8 +1853,9 @@ describe("HostedUserRunner", () => {
 
       expect(status.lastError).toBeNull();
       expect(status.pendingEventCount).toBe(0);
-      expect(status.bundleRefs.agentState?.size).toBe("agent-state-final".length);
-      expect(status.bundleRefs.vault?.size).toBe(finalVaultBundle!.byteLength);
+      expect(status.bundleRef).toMatchObject({
+        key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
+      });
       expect(bucket.keys()).toContain(
         await hostedArtifactObjectKey(crypto.rootKey, "member_cleanup_failure", previousArtifact!.ref.sha256),
       );
@@ -1938,8 +1918,9 @@ describe("HostedUserRunner", () => {
 
     expect(status.lastError).toBeNull();
     expect(status.pendingEventCount).toBe(0);
-    expect(status.bundleRefs.agentState?.size).toBe("agent-state-finalized".length);
-    expect(status.bundleRefs.vault?.size).toBe("vault-finalized".length);
+    expect(status.bundleRef).toMatchObject({
+      key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
+    });
   });
 
   it("keeps committed events retryable until durable finalize succeeds", async () => {
@@ -1989,12 +1970,13 @@ describe("HostedUserRunner", () => {
           requestBody,
         });
 
-        return new Response(JSON.stringify(finalPayload), {
+        return new Response(JSON.stringify(serializeRunnerSuccessPayload(finalPayload)), {
           status: 200,
         });
       });
     vi.stubGlobal("fetch", fetchSpy);
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    await runner.provisionManagedUserCrypto("member_123");
 
     const firstStatus = await runner.dispatch({
       event: {
@@ -2007,8 +1989,9 @@ describe("HostedUserRunner", () => {
 
     expect(firstStatus.pendingEventCount).toBe(1);
     expect(firstStatus.retryingEventId).toBe("evt_finalize_retry");
-    expect(firstStatus.bundleRefs.agentState?.size).toBe("agent-state-committed".length);
-    expect(firstStatus.bundleRefs.vault?.size).toBe("vault-committed".length);
+    expect(firstStatus.bundleRef).toMatchObject({
+      key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
+    });
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/destroy")).toBe(0);
 
     vi.setSystemTime(new Date("2026-03-26T12:00:11.000Z"));
@@ -2017,8 +2000,9 @@ describe("HostedUserRunner", () => {
     const finalStatus = await runner.status("member_123");
     expect(finalStatus.pendingEventCount).toBe(0);
     expect(finalStatus.retryingEventId).toBeNull();
-    expect(finalStatus.bundleRefs.agentState?.size).toBe("agent-state-final".length);
-    expect(finalStatus.bundleRefs.vault?.size).toBe("vault-final".length);
+    expect(finalStatus.bundleRef).toMatchObject({
+      key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
+    });
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/destroy")).toBe(0);
   });
 
@@ -2046,12 +2030,13 @@ describe("HostedUserRunner", () => {
           requestBody: JSON.parse(String(init?.body)),
         });
 
-        return new Response(JSON.stringify(resultPayload), {
+        return new Response(JSON.stringify(serializeRunnerSuccessPayload(resultPayload)), {
           status: 200,
         });
       }),
     );
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    await runner.provisionManagedUserCrypto("member_123");
 
     const first = await runner.dispatch({
       event: {
@@ -2073,11 +2058,11 @@ describe("HostedUserRunner", () => {
       occurredAt: "2026-03-26T12:01:00.000Z",
     });
 
-    expect(second.bundleRefs).toEqual(first.bundleRefs);
-    expect(bucket.putCount()).toBe(writeCountAfterFirstRun + 2);
+    expect(second.bundleRef).toEqual(first.bundleRef);
+    expect(bucket.putCount()).toBe(writeCountAfterFirstRun + 3);
   });
 
-  it("serializes commit and finalize for the same event through one transition lock", async () => {
+  it("serializes duplicate commit attempts for the same event through one transition lock", async () => {
     const originalPut = bucket.api.put;
     const firstWriteStarted = createDeferred<void>();
     const releaseFirstWrite = createDeferred<void>();
@@ -2099,14 +2084,11 @@ describe("HostedUserRunner", () => {
       const commitPromise = runner.commit({
         eventId: "evt_transition_lock",
         payload: {
-          bundles: {
+          bundle: {
             agentState: Buffer.from("agent-state").toString("base64"),
             vault: Buffer.from("vault").toString("base64"),
           },
-          currentBundleRefs: {
-            agentState: null,
-            vault: null,
-          },
+          currentBundleRef: null,
           result: {
             eventsHandled: 1,
             summary: "ok",
@@ -2115,29 +2097,34 @@ describe("HostedUserRunner", () => {
       });
 
       await firstWriteStarted.promise;
-      let finalizeSettled = false;
-      const finalizePromise = runner.finalizeCommit({
+      let secondCommitSettled = false;
+      const secondCommitPromise = runner.commit({
         eventId: "evt_transition_lock",
         payload: {
-          bundles: {
-            agentState: Buffer.from("agent-state-final").toString("base64"),
-            vault: Buffer.from("vault-final").toString("base64"),
+          bundle: {
+            agentState: Buffer.from("agent-state").toString("base64"),
+            vault: Buffer.from("vault").toString("base64"),
+          },
+          currentBundleRef: null,
+          result: {
+            eventsHandled: 1,
+            summary: "ok",
           },
         },
       }).finally(() => {
-        finalizeSettled = true;
+        secondCommitSettled = true;
       });
 
       await Promise.resolve();
-      expect(finalizeSettled).toBe(false);
+      expect(secondCommitSettled).toBe(false);
 
       releaseFirstWrite.resolve();
       await expect(commitPromise).resolves.toMatchObject({
         eventId: "evt_transition_lock",
       });
-      await expect(finalizePromise).resolves.toMatchObject({
+      await expect(secondCommitPromise).resolves.toMatchObject({
         eventId: "evt_transition_lock",
-        finalizedAt: expect.any(String),
+        finalizedAt: null,
       });
     } finally {
       bucket.api.put = originalPut;
@@ -2649,16 +2636,13 @@ describe("HostedUserRunner", () => {
     });
     await persistHostedExecutionCommit({
       bucket: bucket.api,
-      currentBundleRefs: {
-        agentState: null,
-        vault: null,
-      },
+      currentBundleRef: null,
       eventId: dispatch.eventId,
       key: crypto.rootKey,
       keyId: crypto.rootKeyId,
       keysById: crypto.keysById,
       payload: {
-        bundles: {
+        bundle: {
           agentState: Buffer.from("agent-state").toString("base64"),
           vault: Buffer.from("vault").toString("base64"),
         },
@@ -2676,7 +2660,7 @@ describe("HostedUserRunner", () => {
       keyId: crypto.rootKeyId,
       keysById: crypto.keysById,
       payload: {
-        bundles: {
+        bundle: {
           agentState: Buffer.from("agent-state").toString("base64"),
           vault: Buffer.from("vault").toString("base64"),
         },
@@ -2729,16 +2713,13 @@ describe("HostedUserRunner", () => {
     });
     await persistHostedExecutionCommit({
       bucket: bucket.api,
-      currentBundleRefs: {
-        agentState: null,
-        vault: null,
-      },
+      currentBundleRef: null,
       eventId: dispatch.eventId,
       key: crypto.rootKey,
       keyId: crypto.rootKeyId,
       keysById: crypto.keysById,
       payload: {
-        bundles: {
+        bundle: {
           agentState: Buffer.from("agent-state").toString("base64"),
           vault: Buffer.from("vault").toString("base64"),
         },
@@ -2756,7 +2737,7 @@ describe("HostedUserRunner", () => {
       keyId: crypto.rootKeyId,
       keysById: crypto.keysById,
       payload: {
-        bundles: {
+        bundle: {
           agentState: Buffer.from("agent-state").toString("base64"),
           vault: Buffer.from("vault").toString("base64"),
         },
@@ -3082,7 +3063,7 @@ describe("HostedUserRunner", () => {
           requestBody: JSON.parse(String(init?.body)),
         });
 
-        return new Response(JSON.stringify(resultPayload), {
+        return new Response(JSON.stringify(serializeRunnerSuccessPayload(resultPayload)), {
           status: 200,
         });
       }),
@@ -3172,7 +3153,7 @@ describe("HostedUserRunner", () => {
           requestBody: JSON.parse(String(init?.body)),
         });
 
-        return new Response(JSON.stringify(resultPayload), {
+        return new Response(JSON.stringify(serializeRunnerSuccessPayload(resultPayload)), {
           status: 200,
         });
       }),
@@ -3653,6 +3634,7 @@ function createDeferred<T>() {
 function createRunnerSuccessPayload(input: Partial<{
   agentState: string | null;
   eventsHandled: number;
+  gatewayProjectionSnapshot: Record<string, unknown> | null;
   sideEffects: Array<{
     effectId: string;
     fingerprint: string;
@@ -3671,7 +3653,29 @@ function createRunnerSuccessPayload(input: Partial<{
       eventsHandled: input.eventsHandled ?? 1,
       summary: input.summary ?? "ok",
     },
+    gatewayProjectionSnapshot: input.gatewayProjectionSnapshot ?? null,
     sideEffects: input.sideEffects ?? [],
+  };
+}
+
+function serializeRunnerSuccessPayload(
+  payload: ReturnType<typeof createRunnerSuccessPayload>,
+): {
+  finalGatewayProjectionSnapshot: Record<string, unknown> | null;
+  result: {
+    bundle: string | null;
+    result: {
+      eventsHandled: number;
+      summary: string;
+    };
+  };
+} {
+  return {
+    finalGatewayProjectionSnapshot: payload.gatewayProjectionSnapshot,
+    result: {
+      bundle: payload.bundles.vault ?? payload.bundles.agentState,
+      result: payload.result,
+    },
   };
 }
 
@@ -3693,7 +3697,7 @@ async function createCommittedRunnerSuccessResponse(input: {
     requestBody: JSON.parse(String(input.init?.body)),
   });
 
-  return new Response(JSON.stringify(payload), {
+  return new Response(JSON.stringify(serializeRunnerSuccessPayload(payload)), {
     status: 200,
   });
 }
@@ -3718,6 +3722,7 @@ async function commitResultForRunnerRequest(input: {
       agentState: string | null;
       vault: string | null;
     };
+    gatewayProjectionSnapshot?: Record<string, unknown> | null;
     result: {
       eventsHandled: number;
       summary: string;
@@ -3731,10 +3736,7 @@ async function commitResultForRunnerRequest(input: {
   };
   requestBody: {
     commit: {
-      bundleRefs: {
-        agentState: { hash: string; key: string; size: number; updatedAt: string } | null;
-        vault: { hash: string; key: string; size: number; updatedAt: string } | null;
-      };
+      bundleRef: { hash: string; key: string; size: number; updatedAt: string } | null;
     };
     dispatch: {
       event: {
@@ -3751,12 +3753,17 @@ async function commitResultForRunnerRequest(input: {
   });
   await persistHostedExecutionCommit({
     bucket: input.bucket.api,
-    currentBundleRefs: input.requestBody.commit.bundleRefs,
+    currentBundleRef: input.requestBody.commit.bundleRef,
     eventId: input.requestBody.dispatch.eventId,
     key: crypto.rootKey,
     keyId: crypto.rootKeyId,
     keysById: crypto.keysById,
-    payload: input.payload,
+    payload: {
+      bundle: input.payload.bundles.vault ?? input.payload.bundles.agentState ?? null,
+      gatewayProjectionSnapshot: input.payload.gatewayProjectionSnapshot ?? null,
+      result: input.payload.result,
+      sideEffects: input.payload.sideEffects,
+    },
     userId: input.requestBody.dispatch.event.userId,
   });
 }
@@ -3773,6 +3780,7 @@ async function finalizeResultForRunnerRequest(input: {
       agentState: string | null;
       vault: string | null;
     };
+    gatewayProjectionSnapshot?: Record<string, unknown> | null;
     sideEffects?: Array<{
       effectId: string;
       fingerprint: string;
@@ -3801,7 +3809,8 @@ async function finalizeResultForRunnerRequest(input: {
     keyId: crypto.rootKeyId,
     keysById: crypto.keysById,
     payload: {
-      bundles: input.payload.bundles,
+      bundle: input.payload.bundles.vault ?? input.payload.bundles.agentState ?? null,
+      gatewayProjectionSnapshot: input.payload.gatewayProjectionSnapshot ?? null,
     },
     userId: input.requestBody.dispatch.event.userId,
   });
