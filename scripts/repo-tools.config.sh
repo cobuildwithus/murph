@@ -34,7 +34,7 @@ required_files=(
   "agent-docs/RELIABILITY.md"
   "agent-docs/SECURITY.md"
   "agent-docs/product-specs/index.md"
-  "agent-docs/product-specs/repo-bootstrap.md"
+  "agent-docs/product-specs/repo-v1.md"
   "agent-docs/references/README.md"
   "agent-docs/references/repo-scope.md"
   "agent-docs/references/testing-ci-map.md"
@@ -55,7 +55,7 @@ export COBUILD_DRIFT_CODE_CHANGE_LABEL='Architecture-sensitive code/process'
 export COBUILD_DRIFT_LARGE_CHANGE_THRESHOLD='10'
 export COBUILD_DRIFT_CHANGED_COUNT_EXCLUDE_PATTERN='^agent-docs/generated/|^agent-docs/exec-plans/(active|completed)/|^pnpm-lock\.yaml$'
 export COBUILD_DRIFT_ALLOW_RELEASE_ARTIFACTS_ONLY='0'
-export COBUILD_COMMITTER_EXAMPLE='feat(bootstrap): add repo harness'
+export COBUILD_COMMITTER_EXAMPLE='feat(repo): update canonical docs'
 export COBUILD_DOC_GARDENING_EXTRA_TRACKED_PATHS=ARCHITECTURE.md$'\n'
 export COBUILD_AUDIT_CONTEXT_PREFIX='murph-audit'
 export COBUILD_AUDIT_CONTEXT_TITLE='Murph Audit Bundle'

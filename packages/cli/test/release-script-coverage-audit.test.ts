@@ -22,6 +22,7 @@ const cliPackageJson = JSON.parse(
   readFileSync(path.join(packageDir, 'package.json'), 'utf8'),
 ) as {
   bin?: Record<string, string>
+  bundleDependencies?: string[]
   dependencies?: Record<string, string>
   files?: string[]
   name?: string
@@ -175,19 +176,19 @@ describe('monorepo release flow coverage audit', () => {
       const fullEntries = listZipEntries(fullBundle.zipPath)
 
       expect(leanEntries).toContain('agent-docs/operations/verification-and-runtime.md')
-      expect(leanEntries).toContain('agent-docs/product-specs/repo-bootstrap.md')
+      expect(leanEntries).toContain('agent-docs/product-specs/repo-v1.md')
       expect(leanEntries).toContain('docs/architecture.md')
       expect(leanEntries).not.toContain('agent-docs/generated/doc-inventory.md')
       expect(leanEntries).not.toContain('agent-docs/exec-plans/completed/README.md')
       expect(leanEntries).not.toContain('agent-docs/prompts/task-finish-review.md')
       expect(leanEntries).not.toContain('packages/cli/test/release-script-coverage-audit.test.ts')
       expect(leanEntries).not.toContain('apps/web/test/device-sync-http.test.ts')
-      expect(leanEntries).not.toContain('docs/legacy-removal-audit-2026-03-31.md')
+      expect(leanEntries).not.toContain('docs/device-sync-hosted-control-plane.md')
       expect(leanEntries).not.toContain('.github/workflows/release.yml')
 
       expect(fullEntries).toContain('packages/cli/test/release-script-coverage-audit.test.ts')
       expect(fullEntries).toContain('apps/web/test/device-sync-http.test.ts')
-      expect(fullEntries).toContain('docs/legacy-removal-audit-2026-03-31.md')
+      expect(fullEntries).toContain('docs/device-sync-hosted-control-plane.md')
       expect(fullEntries).toContain('.github/workflows/release.yml')
       expect(fullEntries).toContain('agent-docs/exec-plans/completed/README.md')
       expect(fullEntries).toContain('agent-docs/prompts/task-finish-review.md')
