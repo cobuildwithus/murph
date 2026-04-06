@@ -29,13 +29,9 @@ export function resolveDeviceDaemonPaths(vaultRoot: string): DeviceDaemonPaths {
   return {
     absoluteVaultRoot: runtimePaths.absoluteVaultRoot,
     launcherStatePath: runtimePaths.deviceSyncLauncherStatePath,
-    legacyLauncherStatePath: runtimePaths.deviceSyncLauncherStateLegacyPath,
     stdoutLogPath: runtimePaths.deviceSyncStdoutLogPath,
-    legacyStdoutLogPath: runtimePaths.deviceSyncStdoutLogLegacyPath,
     stderrLogPath: runtimePaths.deviceSyncStderrLogPath,
-    legacyStderrLogPath: runtimePaths.deviceSyncStderrLogLegacyPath,
     stateDbPath: runtimePaths.deviceSyncDbPath,
-    legacyStateDbPath: runtimePaths.deviceSyncDbLegacyPath,
   }
 }
 

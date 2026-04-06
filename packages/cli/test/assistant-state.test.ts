@@ -35,6 +35,7 @@ import {
 import {
   getAssistantStatus,
 } from '@murphai/assistant-cli/assistant-runtime'
+import { createAssistantBackendTarget } from '@murphai/assistant-core'
 import {
   readAssistantRuntimeBudgetStatus,
   runAssistantRuntimeMaintenance,
@@ -2123,8 +2124,22 @@ test('assistant session secrets persist in private sidecars with private permiss
     participantId: 'contact:secret-user',
   })
   const statePaths = resolveAssistantStatePaths(vaultRoot)
+  const target = createAssistantBackendTarget({
+    provider: 'openai-compatible',
+    model: 'gpt-4.1-mini',
+    reasoningEffort: null,
+    baseUrl: 'https://api.example.test/v1',
+    apiKeyEnv: 'OPENAI_API_KEY',
+    providerName: 'example',
+    headers: {
+      Authorization: 'Bearer session-secret-token',
+      'X-Visible': 'public-header',
+    },
+  })
+  assert.ok(target)
   const updatedSession = await saveAssistantSession(vaultRoot, {
     ...resolved.session,
+    target,
     provider: 'openai-compatible',
     providerOptions: {
       model: 'gpt-4.1-mini',

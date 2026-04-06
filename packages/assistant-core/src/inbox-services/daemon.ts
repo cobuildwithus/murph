@@ -2,8 +2,7 @@ import {
   createVersionedJsonStateEnvelope,
   hasLocalStatePath,
   parseVersionedJsonStateEnvelope,
-  promoteLegacyLocalStateDirectory,
-  readLocalStateTextFileWithFallback,
+  readLocalStateTextFile,
 } from '@murphai/runtime-state/node'
 import { inboxDaemonStateSchema, type InboxDaemonState } from '../inbox-cli-contracts.js'
 import type { InboxPaths } from '../inbox-app/types.js'
@@ -25,10 +24,7 @@ export async function normalizeDaemonState(
     killProcess?: (pid: number, signal?: NodeJS.Signals | number) => void
   },
 ): Promise<InboxDaemonState> {
-  if (!(await hasLocalStatePath({
-    currentPath: paths.inboxStatePath,
-    legacyPath: paths.inboxStateLegacyPath,
-  }))) {
+  if (!(await hasLocalStatePath({ currentPath: paths.inboxStatePath }))) {
     return idleState(paths)
   }
 
@@ -88,10 +84,6 @@ export async function writeDaemonState(
   paths: InboxPaths,
   state: InboxDaemonState,
 ): Promise<void> {
-  await promoteLegacyLocalStateDirectory({
-    currentPath: paths.inboxRuntimeRoot,
-    legacyPath: paths.inboxRuntimeLegacyRoot,
-  })
   await writeJsonFile(
     paths.inboxStatePath,
     createVersionedJsonStateEnvelope({
@@ -126,16 +118,12 @@ export function createProcessSignalBridge(): {
 
 async function readDaemonState(paths: InboxPaths): Promise<InboxDaemonState> {
   try {
-    const raw = await readLocalStateTextFileWithFallback({
+    const raw = await readLocalStateTextFile({
       currentPath: paths.inboxStatePath,
-      legacyPath: paths.inboxStateLegacyPath,
     })
 
     return parseVersionedJsonStateEnvelope(JSON.parse(raw.text) as unknown, {
       label: 'Inbox daemon state',
-      legacyParseValue(value) {
-        return inboxDaemonStateSchema.parse(value)
-      },
       parseValue(value) {
         return inboxDaemonStateSchema.parse(value)
       },

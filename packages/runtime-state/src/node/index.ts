@@ -33,7 +33,7 @@ export * from "../process-env.ts";
 export * from "../runtime-paths.ts";
 export * from "../shared.ts";
 export * from "../local-state-taxonomy.ts";
-export * from "../local-state-compat.ts";
+export * from "../local-state-files.ts";
 export * from "../versioned-json-state.ts";
 export * from "../sqlite.ts";
 export * from "../ulid.ts";

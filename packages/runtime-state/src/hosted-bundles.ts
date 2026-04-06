@@ -8,13 +8,8 @@ import {
   isVaultProjectionRelativePath,
 } from "./local-state-taxonomy.ts";
 import {
-  DEVICE_SYNC_DB_LEGACY_RELATIVE_PATH,
   DEVICE_SYNC_DB_RELATIVE_PATH,
-  DEVICE_SYNC_RUNTIME_DIRECTORY_LEGACY_RELATIVE_PATH,
   DEVICE_SYNC_RUNTIME_DIRECTORY_RELATIVE_PATH,
-  GATEWAY_DB_LEGACY_RELATIVE_PATH,
-  INBOX_DB_LEGACY_RELATIVE_PATH,
-  SEARCH_DB_LEGACY_RELATIVE_PATH,
 } from "./runtime-paths.ts";
 import type { HostedBundleArtifactRef } from "./hosted-bundle.ts";
 import {
@@ -210,7 +205,6 @@ function isHostedSnapshotExcludedVaultRuntimeRelativePath(relativePath: string):
 
   return (
     isLocalOnlyOperationalRuntimeRelativePath(relativePath)
-    || isLegacyProjectionRuntimeRelativePath(relativePath)
     || isEphemeralVaultRuntimeRelativePath(relativePath)
     || isVaultProjectionRelativePath(relativePath)
   );
@@ -218,25 +212,9 @@ function isHostedSnapshotExcludedVaultRuntimeRelativePath(relativePath: string):
 
 function isLocalOnlyOperationalRuntimeRelativePath(relativePath: string): boolean {
   return hasRelativePathPrefix(relativePath, DEVICE_SYNC_RUNTIME_DIRECTORY_RELATIVE_PATH)
-    || hasRelativePathPrefix(relativePath, DEVICE_SYNC_RUNTIME_DIRECTORY_LEGACY_RELATIVE_PATH)
     || hasRelativePathPrefix(relativePath, DEVICE_SYNC_DB_RELATIVE_PATH)
-    || hasRelativePathPrefix(relativePath, DEVICE_SYNC_DB_LEGACY_RELATIVE_PATH)
     || hasRelativePathPrefix(relativePath, `${DEVICE_SYNC_DB_RELATIVE_PATH}-shm`)
-    || hasRelativePathPrefix(relativePath, `${DEVICE_SYNC_DB_RELATIVE_PATH}-wal`)
-    || hasRelativePathPrefix(relativePath, `${DEVICE_SYNC_DB_LEGACY_RELATIVE_PATH}-shm`)
-    || hasRelativePathPrefix(relativePath, `${DEVICE_SYNC_DB_LEGACY_RELATIVE_PATH}-wal`);
-}
-
-function isLegacyProjectionRuntimeRelativePath(relativePath: string): boolean {
-  return hasRelativePathPrefix(relativePath, SEARCH_DB_LEGACY_RELATIVE_PATH)
-    || hasRelativePathPrefix(relativePath, `${SEARCH_DB_LEGACY_RELATIVE_PATH}-shm`)
-    || hasRelativePathPrefix(relativePath, `${SEARCH_DB_LEGACY_RELATIVE_PATH}-wal`)
-    || hasRelativePathPrefix(relativePath, GATEWAY_DB_LEGACY_RELATIVE_PATH)
-    || hasRelativePathPrefix(relativePath, `${GATEWAY_DB_LEGACY_RELATIVE_PATH}-shm`)
-    || hasRelativePathPrefix(relativePath, `${GATEWAY_DB_LEGACY_RELATIVE_PATH}-wal`)
-    || hasRelativePathPrefix(relativePath, INBOX_DB_LEGACY_RELATIVE_PATH)
-    || hasRelativePathPrefix(relativePath, `${INBOX_DB_LEGACY_RELATIVE_PATH}-shm`)
-    || hasRelativePathPrefix(relativePath, `${INBOX_DB_LEGACY_RELATIVE_PATH}-wal`);
+    || hasRelativePathPrefix(relativePath, `${DEVICE_SYNC_DB_RELATIVE_PATH}-wal`);
 }
 
 function isDotGitRelativePath(relativePath: string): boolean {

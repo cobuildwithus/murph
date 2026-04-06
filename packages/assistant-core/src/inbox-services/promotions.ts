@@ -5,7 +5,6 @@ import { z } from 'zod'
 import { normalizeOpaquePathSegment, normalizeRelativeVaultPath } from '@murphai/core'
 import {
   hasLocalStatePath,
-  promoteLegacyLocalStateDirectory,
 } from '@murphai/runtime-state/node'
 import { resolveAssistantVaultPath } from '../assistant-vault-paths.js'
 import {
@@ -620,10 +619,7 @@ function resolveCapturePromotionNote(
 async function readPromotionStore(
   paths: InboxPaths,
 ): Promise<PromotionStore> {
-  if (!(await hasLocalStatePath({
-    currentPath: paths.inboxPromotionsPath,
-    legacyPath: paths.inboxPromotionsLegacyPath,
-  }))) {
+  if (!(await hasLocalStatePath({ currentPath: paths.inboxPromotionsPath }))) {
     return {
       version: PROMOTION_STORE_VERSION,
       entries: [],
@@ -631,10 +627,7 @@ async function readPromotionStore(
   }
 
   return readJsonWithSchema(
-    {
-      currentPath: paths.inboxPromotionsPath,
-      legacyPath: paths.inboxPromotionsLegacyPath,
-    },
+    paths.inboxPromotionsPath,
     inboxPromotionStoreSchema,
     'INBOX_PROMOTIONS_INVALID',
     'Inbox promotion state is invalid.',
@@ -645,10 +638,6 @@ async function writePromotionStore(
   paths: InboxPaths,
   store: PromotionStore,
 ): Promise<void> {
-  await promoteLegacyLocalStateDirectory({
-    currentPath: paths.inboxRuntimeRoot,
-    legacyPath: paths.inboxRuntimeLegacyRoot,
-  })
   await writeJsonFile(
     paths.inboxPromotionsPath,
     inboxPromotionStoreSchema.parse(store),

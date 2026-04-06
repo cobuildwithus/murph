@@ -5,7 +5,6 @@ import {
   applySqliteRuntimeMigrations,
   hasLocalStatePathSync,
   openSqliteRuntimeDatabase,
-  promoteLegacyLocalStateFileSync,
   resolveRuntimePaths,
   tableExists,
   withImmediateTransaction,
@@ -51,7 +50,6 @@ interface SearchDocumentRow {
 interface SearchDatabaseLocation {
   absolutePath: string;
   dbPath: string;
-  legacyAbsolutePath: string;
 }
 
 interface ResolvedSqliteSearchStatus extends SqliteSearchStatus {
@@ -230,7 +228,6 @@ async function searchVaultSqliteWithStatus(
     {
       absolutePath: status.absolutePath,
       dbPath: status.dbPath,
-      legacyAbsolutePath: currentSearchDatabaseLocation(vaultRoot).legacyAbsolutePath,
     },
     {
       create: false,
@@ -341,12 +338,6 @@ function openSearchDatabase(
   location: SearchDatabaseLocation,
   options: { create?: boolean; readOnly?: boolean } = {},
 ): DatabaseSync {
-  promoteLegacyLocalStateFileSync({
-    currentPath: location.absolutePath,
-    legacyPath: location.legacyAbsolutePath,
-    companionSuffixes: SQLITE_WAL_COMPANION_SUFFIXES,
-  });
-
   const database = openSqliteRuntimeDatabase(location.absolutePath, options);
 
   if (!(options.readOnly ?? false)) {
@@ -381,10 +372,7 @@ function resolveReadableSearchStatus(vaultRoot: string): ResolvedSqliteSearchSta
 }
 
 function readSearchStatus(location: SearchDatabaseLocation): ResolvedSqliteSearchStatus | null {
-  if (!hasLocalStatePathSync({
-    currentPath: location.absolutePath,
-    legacyPath: location.legacyAbsolutePath,
-  })) {
+  if (!hasLocalStatePathSync({ currentPath: location.absolutePath })) {
     return null;
   }
 
@@ -420,7 +408,6 @@ function currentSearchDatabaseLocation(vaultRoot: string): SearchDatabaseLocatio
   return {
     absolutePath: runtimePaths.searchDbPath,
     dbPath: SEARCH_DB_RELATIVE_PATH,
-    legacyAbsolutePath: runtimePaths.searchDbLegacyPath,
   };
 }
 

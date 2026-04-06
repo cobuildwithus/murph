@@ -367,7 +367,6 @@ export interface VaultRepairResult {
   metadataFile: string
   title: string
   timezone: string
-  repairedFields: string[]
   createdDirectories: string[]
   updated: boolean
   auditPath: string | null
@@ -892,7 +891,6 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
     metadataFile: string
     title: string
     timezone: string
-    repairedFields: string[]
     createdDirectories: string[]
     updated: boolean
     auditPath: string | null

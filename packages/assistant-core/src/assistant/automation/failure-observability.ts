@@ -26,7 +26,6 @@ const SAFE_FAILURE_CONTEXT_KEYS = new Set([
   'providerSessionId',
   'providerStalled',
   'recoverableConnectionLoss',
-  'repairedFields',
   'retryAfterSeconds',
   'retryable',
   'status',

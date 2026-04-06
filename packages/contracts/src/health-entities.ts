@@ -163,12 +163,6 @@ export function defineRegistryEntity(
   };
 }
 
-const RELATED_IDS_COMPATIBILITY_RELATION: HealthEntityRegistryLinkMetadata = {
-  type: "related_to",
-  keys: ["relatedIds"],
-  cardinality: "many",
-};
-
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -284,7 +278,6 @@ const checkedHealthEntityDefinitions = [
       },
       upsertPayloadSchema: goalUpsertPayloadSchema,
       relationKeys: [
-        RELATED_IDS_COMPATIBILITY_RELATION,
         {
           type: "parent_goal",
           keys: ["parentGoalId"],
@@ -340,7 +333,6 @@ const checkedHealthEntityDefinitions = [
       },
       upsertPayloadSchema: conditionUpsertPayloadSchema,
       relationKeys: [
-        RELATED_IDS_COMPATIBILITY_RELATION,
         {
           type: "related_goal",
           keys: ["relatedGoalIds"],
@@ -387,7 +379,6 @@ const checkedHealthEntityDefinitions = [
       },
       upsertPayloadSchema: allergyUpsertPayloadSchema,
       relationKeys: [
-        RELATED_IDS_COMPATIBILITY_RELATION,
         {
           type: "related_condition",
           keys: ["relatedConditionIds"],
@@ -442,7 +433,6 @@ const checkedHealthEntityDefinitions = [
       },
       upsertPayloadSchema: protocolUpsertPayloadSchema,
       relationKeys: [
-        RELATED_IDS_COMPATIBILITY_RELATION,
         {
           type: "supports_goal",
           keys: ["goalIds", "relatedGoalIds"],
@@ -546,7 +536,6 @@ const checkedHealthEntityDefinitions = [
       },
       upsertPayloadSchema: familyMemberUpsertPayloadSchema,
       relationKeys: [
-        RELATED_IDS_COMPATIBILITY_RELATION,
         {
           type: "related_variant",
           keys: ["relatedVariantIds"],
@@ -588,7 +577,6 @@ const checkedHealthEntityDefinitions = [
       },
       upsertPayloadSchema: geneticVariantUpsertPayloadSchema,
       relationKeys: [
-        RELATED_IDS_COMPATIBILITY_RELATION,
         {
           type: "source_family_member",
           keys: ["sourceFamilyMemberIds"],

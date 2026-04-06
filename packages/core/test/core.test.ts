@@ -499,22 +499,17 @@ test("deleteEvent leaves historical rows in place and the same event id can be r
   assert.equal((aprilRecords[0] as EventRecord).note, "Latest active revision.");
 });
 
-test("loadVault backfills additive metadata defaults in memory and repairVault persists them", async () => {
+test("repairVault recreates missing required directories when metadata is current", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   const metadataPath = path.join(vaultRoot, "vault.json");
-  const staleMetadata = JSON.parse(await fs.readFile(metadataPath, "utf8")) as {
+  const originalMetadata = JSON.parse(await fs.readFile(metadataPath, "utf8")) as {
     idPolicy: {
       prefixes: Record<string, string>;
     };
     paths: Record<string, string>;
   };
-  delete staleMetadata.idPolicy.prefixes.recipe;
-  delete staleMetadata.idPolicy.prefixes.food;
-  delete staleMetadata.paths.recipesRoot;
-  delete staleMetadata.paths.foodsRoot;
-  await fs.writeFile(metadataPath, `${JSON.stringify(staleMetadata, null, 2)}\n`, "utf8");
   await fs.rm(path.join(vaultRoot, "bank/recipes"), { recursive: true, force: true });
   await fs.rm(path.join(vaultRoot, "bank/foods"), { recursive: true, force: true });
 
@@ -524,27 +519,8 @@ test("loadVault backfills additive metadata defaults in memory and repairVault p
   assert.equal(loaded.metadata.idPolicy.prefixes.food, "food");
   assert.equal(loaded.metadata.paths.recipesRoot, "bank/recipes");
   assert.equal(loaded.metadata.paths.foodsRoot, "bank/foods");
-  assert.deepEqual(loaded.compatibilityRepairs.sort(), [
-    "idPolicy.prefixes.food",
-    "idPolicy.prefixes.recipe",
-    "paths.foodsRoot",
-    "paths.recipesRoot",
-  ]);
-
   const validationBeforeRepair = await validateVault({ vaultRoot });
   assert.equal(validationBeforeRepair.valid, false);
-  assert.deepEqual(
-    validationBeforeRepair.issues
-      .filter((issue) => issue.severity === "warning")
-      .map((issue) => issue.code)
-      .sort(),
-    [
-      "VAULT_METADATA_REPAIR_RECOMMENDED",
-      "VAULT_METADATA_REPAIR_RECOMMENDED",
-      "VAULT_METADATA_REPAIR_RECOMMENDED",
-      "VAULT_METADATA_REPAIR_RECOMMENDED",
-    ],
-  );
   assert.equal(
     validationBeforeRepair.issues.some((issue) => issue.path === "bank/recipes"),
     true,
@@ -566,18 +542,9 @@ test("loadVault backfills additive metadata defaults in memory and repairVault p
 
   assert.equal(repaired.updated, true);
   assert.equal(repaired.metadataFile, "vault.json");
-  assert.deepEqual(repaired.repairedFields.sort(), [
-    "idPolicy.prefixes.food",
-    "idPolicy.prefixes.recipe",
-    "paths.foodsRoot",
-    "paths.recipesRoot",
-  ]);
   assert.deepEqual(repaired.createdDirectories.sort(), ["bank/foods", "bank/recipes"]);
   assert.equal(typeof repaired.auditPath, "string");
-  assert.equal(persistedMetadata.idPolicy.prefixes.recipe, "rcp");
-  assert.equal(persistedMetadata.idPolicy.prefixes.food, "food");
-  assert.equal(persistedMetadata.paths.recipesRoot, "bank/recipes");
-  assert.equal(persistedMetadata.paths.foodsRoot, "bank/foods");
+  assert.deepEqual(persistedMetadata, originalMetadata);
   assert.equal(repairedRecipesDirectory.isDirectory(), true);
   assert.equal(repairedFoodsDirectory.isDirectory(), true);
 
@@ -595,10 +562,41 @@ test("repairVault returns a no-op result when metadata and directories are alrea
   const operationPathsAfterRepair = await listWriteOperationMetadataPaths(vaultRoot);
 
   assert.equal(repaired.updated, false);
-  assert.deepEqual(repaired.repairedFields, []);
   assert.deepEqual(repaired.createdDirectories, []);
   assert.equal(repaired.auditPath, null);
   assert.deepEqual(operationPathsAfterRepair, operationPathsBeforeRepair);
+});
+
+test("loadVault and repairVault reject stale metadata instead of auto-repairing additive fields", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+
+  const metadataPath = path.join(vaultRoot, "vault.json");
+  const staleMetadata = JSON.parse(await fs.readFile(metadataPath, "utf8")) as {
+    idPolicy: {
+      prefixes: Record<string, string>;
+    };
+    paths: Record<string, string>;
+  };
+  delete staleMetadata.idPolicy.prefixes.recipe;
+  delete staleMetadata.paths.recipesRoot;
+  await fs.writeFile(metadataPath, `${JSON.stringify(staleMetadata, null, 2)}\n`, "utf8");
+
+  await assert.rejects(
+    () => loadVault({ vaultRoot }),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_INVALID_METADATA",
+  );
+  await assert.rejects(
+    () => repairVault({ vaultRoot }),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_INVALID_METADATA",
+  );
+
+  const validation = await validateVault({ vaultRoot });
+  assert.equal(validation.valid, false);
+  assert.equal(
+    validation.issues.some((issue) => issue.code === "VAULT_METADATA_REPAIR_RECOMMENDED"),
+    false,
+  );
 });
 
 test("copyRawArtifact enforces raw immutability and importDocument appends contract-shaped events", async () => {

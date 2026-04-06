@@ -76,7 +76,6 @@ const vaultRepairResultSchema = z.object({
   metadataFile: pathSchema,
   title: z.string().min(1),
   timezone: z.string().min(1),
-  repairedFields: z.array(z.string().min(1)),
   createdDirectories: z.array(pathSchema),
   updated: z.boolean(),
   auditPath: pathSchema.nullable(),

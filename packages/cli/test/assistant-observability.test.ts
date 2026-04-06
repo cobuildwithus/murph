@@ -16,6 +16,7 @@ import { getAssistantStatus } from '@murphai/assistant-cli/assistant/status'
 import { readAssistantStatusSnapshot } from '@murphai/assistant-cli/assistant-runtime'
 import { resolveAssistantStatePaths } from '@murphai/assistant-core/assistant-state'
 import { deliverAssistantMessage } from '@murphai/assistant-core/outbound-channel'
+import { createVersionedJsonStateEnvelope } from '@murphai/runtime-state/node'
 
 const cleanupPaths: string[] = []
 
@@ -74,7 +75,7 @@ test('assistant status surfaces recent receipts and doctor passes on healthy loc
   )
 })
 
-test('assistant observability still reads legacy blocked turn receipts and status snapshots', async () => {
+test('assistant observability reads blocked turn receipts and status snapshots', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-observability-legacy-blocked-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
@@ -131,10 +132,14 @@ test('assistant observability still reads legacy blocked turn receipts and statu
   await writeFile(
     statePaths.statusPath,
     `${JSON.stringify(
-      {
-        ...baselineStatus,
-        recentTurns: [legacyReceipt],
-      },
+      createVersionedJsonStateEnvelope({
+        schema: 'murph.assistant-status-snapshot.v1',
+        schemaVersion: 1,
+        value: {
+          ...baselineStatus,
+          recentTurns: [legacyReceipt],
+        },
+      }),
       null,
       2,
     )}\n`,

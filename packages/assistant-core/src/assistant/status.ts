@@ -162,9 +162,6 @@ export async function readAssistantStatusSnapshot(
     const raw = await readFile(paths.statusPath, 'utf8')
     return parseVersionedJsonStateEnvelope(JSON.parse(raw) as unknown, {
       label: 'Assistant status snapshot',
-      legacyParseValue(value) {
-        return assistantStatusResultSchema.parse(value)
-      },
       parseValue(value) {
         return assistantStatusResultSchema.parse(value)
       },

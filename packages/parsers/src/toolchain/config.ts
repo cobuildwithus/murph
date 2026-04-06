@@ -3,8 +3,7 @@ import { promises as fs } from "node:fs";
 
 import {
   hasLocalStatePath,
-  promoteLegacyLocalStateDirectory,
-  readLocalStateTextFileWithFallback,
+  readLocalStateTextFile,
   resolveParserRuntimePaths,
 } from "@murphai/runtime-state/node";
 
@@ -28,9 +27,7 @@ export interface ParserToolchainConfig {
 export interface ParserToolchainPaths {
   runtimeRoot: string;
   parsersRoot: string;
-  legacyParsersRoot: string;
   configPath: string;
-  legacyConfigPath: string;
 }
 
 export interface WriteParserToolchainConfigInput {
@@ -45,9 +42,7 @@ export function getParserToolchainPaths(vaultRoot: string): ParserToolchainPaths
   return {
     runtimeRoot: runtimePaths.runtimeRoot,
     parsersRoot: runtimePaths.parserRuntimeRoot,
-    legacyParsersRoot: runtimePaths.parserRuntimeLegacyRoot,
     configPath: runtimePaths.parserToolchainConfigPath,
-    legacyConfigPath: runtimePaths.parserToolchainConfigLegacyPath,
   };
 }
 
@@ -55,16 +50,12 @@ export async function readParserToolchainConfig(
   vaultRoot: string,
 ): Promise<{ config: ParserToolchainConfig; configPath: string } | null> {
   const paths = getParserToolchainPaths(vaultRoot);
-  if (!(await hasLocalStatePath({
-    currentPath: paths.configPath,
-    legacyPath: paths.legacyConfigPath,
-  }))) {
+  if (!(await hasLocalStatePath({ currentPath: paths.configPath }))) {
     return null;
   }
 
-  const { path: configPath, text: raw } = await readLocalStateTextFileWithFallback({
+  const { path: configPath, text: raw } = await readLocalStateTextFile({
     currentPath: paths.configPath,
-    legacyPath: paths.legacyConfigPath,
   });
   const config = parseParserToolchainConfig(JSON.parse(raw) as unknown);
   await validateParserToolchainPaths(vaultRoot, config.tools);
@@ -88,10 +79,6 @@ export async function writeParserToolchainConfig(
     tools: mergedTools,
   };
 
-  await promoteLegacyLocalStateDirectory({
-    currentPath: paths.parsersRoot,
-    legacyPath: paths.legacyParsersRoot,
-  });
   await ensureDirectory(paths.parsersRoot);
   await fs.writeFile(
     paths.configPath,

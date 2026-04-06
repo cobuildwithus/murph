@@ -27,13 +27,6 @@ export function formatStructuredErrorMessage(error: unknown): string {
     lines.push(...details.errors.map((entry) => `- ${redactSensitivePathSegments(entry)}`))
   }
 
-  if (details.repairedFields.length > 0) {
-    lines.push('compatibility repairs detected:')
-    lines.push(
-      ...details.repairedFields.map((entry) => `- ${redactSensitivePathSegments(entry)}`),
-    )
-  }
-
   if (lines.length === 0) {
     return message
   }
@@ -43,7 +36,6 @@ export function formatStructuredErrorMessage(error: unknown): string {
 
 function readStructuredErrorDetails(error: unknown): {
   errors: string[]
-  repairedFields: string[]
 } {
   const detailRecords = [] as Array<Record<string, unknown>>
 
@@ -59,9 +51,6 @@ function readStructuredErrorDetails(error: unknown): {
 
   return {
     errors: detailRecords.flatMap((record) => stringArrayFromUnknown(record.errors)),
-    repairedFields: detailRecords.flatMap((record) =>
-      stringArrayFromUnknown(record.repairedFields),
-    ),
   }
 }
 

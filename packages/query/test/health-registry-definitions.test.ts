@@ -119,7 +119,6 @@ test("protocol shared registry definition owns payload and relation metadata", (
   }
 
   const links = extractHealthEntityRegistryLinks("protocol", {
-    relatedIds: ["goal_compat_01"],
     goalId: "goal_scalar_01",
     conditionIds: ["cond_array_01"],
     protocolIds: ["prot_related_01"],
@@ -129,7 +128,6 @@ test("protocol shared registry definition owns payload and relation metadata", (
   assert.deepEqual(
     links.map((link: { type: string; targetId: string }) => ({ type: link.type, targetId: link.targetId })),
     [
-      { type: "related_to", targetId: "goal_compat_01" },
       { type: "supports_goal", targetId: "goal_scalar_01" },
       { type: "addresses_condition", targetId: "cond_array_01" },
       { type: "related_protocol", targetId: "prot_related_01" },
@@ -138,25 +136,13 @@ test("protocol shared registry definition owns payload and relation metadata", (
   );
   assert.deepEqual(
     extractHealthEntityRegistryRelatedIds("protocol", {
-      relatedIds: ["goal_compat_01"],
       goalId: "goal_scalar_01",
       conditionIds: ["cond_array_01"],
       protocolIds: ["prot_related_01"],
       protocolId: "prot_self_01",
     }),
-    ["goal_compat_01", "goal_scalar_01", "cond_array_01", "prot_related_01", "prot_self_01"],
+    ["goal_scalar_01", "cond_array_01", "prot_related_01", "prot_self_01"],
   );
-});
-
-test("shared registry relation metadata preserves compatibility relatedIds links", () => {
-  for (const kind of ["goal", "condition", "allergy", "protocol", "family", "genetics"] as const) {
-    assert.deepEqual(
-      extractHealthEntityRegistryRelatedIds(kind, {
-        relatedIds: ["compat_related_01", "compat_related_01"],
-      }),
-      ["compat_related_01"],
-    );
-  }
 });
 
 test("protocol query projection merges mixed relation alias arrays into normalized links", () => {
@@ -176,7 +162,6 @@ test("protocol query projection merges mixed relation alias arrays into normaliz
         relatedConditionIds: ["cond_secondary_01", "cond_shared_01"],
         protocolIds: ["prot_related_01", "prot_shared_01"],
         relatedProtocolIds: ["prot_related_02", "prot_shared_01"],
-        relatedIds: ["misc_related_01"],
       },
     },
     protocolRegistryDefinition,
@@ -189,7 +174,6 @@ test("protocol query projection merges mixed relation alias arrays into normaliz
   assert.deepEqual(
     entity.links.map((link) => ({ type: link.type, targetId: link.targetId })),
     [
-      { type: "related_to", targetId: "misc_related_01" },
       { type: "supports_goal", targetId: "goal_primary_01" },
       { type: "supports_goal", targetId: "goal_shared_01" },
       { type: "supports_goal", targetId: "goal_secondary_01" },
@@ -202,7 +186,6 @@ test("protocol query projection merges mixed relation alias arrays into normaliz
     ],
   );
   assert.deepEqual(entity.relatedIds, [
-    "misc_related_01",
     "goal_primary_01",
     "goal_shared_01",
     "goal_secondary_01",
@@ -245,7 +228,6 @@ test("protocol query projection round-trips shared protocol relation and ingredi
           note: "Paired to smooth GI tolerance.",
         },
       ],
-      relatedIds: ["goal_compat_01"],
       relatedGoalIds: ["goal_01JNY0B2W4VG5C2A0G9S8M7R6Q"],
       relatedConditionIds: ["cond_01JNY0B2W4VG5C2A0G9S8M7R6R"],
       relatedProtocolIds: ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"],
@@ -755,20 +737,17 @@ test("bank registry definitions inherit canonical registry metadata from shared 
 test("bank entity projections normalize food and workout format metadata through the shared seam", () => {
   assert.deepEqual(
     extractBankEntityRegistryLinks("food", {
-      relatedIds: ["misc_related_01"],
       attachedProtocolIds: ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"],
     }).map((link) => ({ type: link.type, targetId: link.targetId })),
     [
-      { type: "related_to", targetId: "misc_related_01" },
       { type: "related_protocol", targetId: "prot_01JNY0B2W4VG5C2A0G9S8M7R6S" },
     ],
   );
   assert.deepEqual(
     extractBankEntityRegistryRelatedIds("food", {
-      relatedIds: ["misc_related_01"],
       attachedProtocolIds: ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"],
     }),
-    ["misc_related_01", "prot_01JNY0B2W4VG5C2A0G9S8M7R6S"],
+    ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"],
   );
 
   const foodRecord = toRegistryRecord(
@@ -786,7 +765,6 @@ test("bank entity projections normalize food and workout format metadata through
         autoLogDaily: {
           time: "08:00",
         },
-        relatedIds: ["misc_related_01"],
         attachedProtocolIds: ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"],
       },
     },
@@ -801,7 +779,6 @@ test("bank entity projections normalize food and workout format metadata through
   const foodEntity = projectRegistryEntity("food", foodRecord!);
   assert.equal(foodEntity.recordClass, "bank");
   assert.deepEqual(foodEntity.relatedIds, [
-    "misc_related_01",
     "prot_01JNY0B2W4VG5C2A0G9S8M7R6S",
   ]);
 

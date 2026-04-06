@@ -7312,7 +7312,6 @@ test('runAssistantAutomation preserves structured daemon failure details in the 
           '$.idPolicy.prefixes.protocol: Invalid input: expected "prot"',
           '$.paths: Unrecognized key: "regimensRoot"',
         ],
-        repairedFields: ['paths.protocolsRoot'],
       },
     },
   )
@@ -7342,8 +7341,6 @@ test('runAssistantAutomation preserves structured daemon failure details in the 
     'details:',
     '- $.idPolicy.prefixes.protocol: Invalid input: expected "prot"',
     '- $.paths: Unrecognized key: "regimensRoot"',
-    'compatibility repairs detected:',
-    '- paths.protocolsRoot',
   ].join('\n')
 
   assert.equal(result.reason, 'error')

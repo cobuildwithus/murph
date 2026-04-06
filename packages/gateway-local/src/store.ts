@@ -16,7 +16,6 @@ import {
 import {
   applySqliteRuntimeMigrations,
   openSqliteRuntimeDatabase,
-  promoteLegacyLocalStateFileSync,
   resolveGatewayRuntimePaths,
 } from '@murphai/runtime-state/node'
 
@@ -154,11 +153,6 @@ export class LocalGatewayProjectionStore {
     dependencies: LocalGatewayProjectionStoreDependencies = {},
   ) {
     const runtimePaths = resolveGatewayRuntimePaths(vault)
-    promoteLegacyLocalStateFileSync({
-      currentPath: runtimePaths.gatewayDbPath,
-      legacyPath: runtimePaths.gatewayDbLegacyPath,
-      companionSuffixes: SQLITE_WAL_COMPANION_SUFFIXES,
-    })
     this.database = openSqliteRuntimeDatabase(runtimePaths.gatewayDbPath)
     applySqliteRuntimeMigrations(this.database, {
       migrations: [
