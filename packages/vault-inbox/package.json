@@ -1,0 +1,110 @@
+{
+  "name": "@murphai/vault-inbox",
+  "version": "0.1.16",
+  "private": false,
+  "type": "module",
+  "license": "GPL-3.0-only",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cobuildwithus/murph"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./commands/*": {
+      "types": "./dist/commands/*.d.ts",
+      "default": "./dist/commands/*.js"
+    },
+    "./health-cli-descriptors": {
+      "types": "./dist/health-cli-descriptors.d.ts",
+      "default": "./dist/health-cli-descriptors.js"
+    },
+    "./health-cli-method-types": {
+      "types": "./dist/health-cli-method-types.d.ts",
+      "default": "./dist/health-cli-method-types.js"
+    },
+    "./health-registry-command-metadata": {
+      "types": "./dist/health-registry-command-metadata.d.ts",
+      "default": "./dist/health-registry-command-metadata.js"
+    },
+    "./inbox-app/*": {
+      "types": "./dist/inbox-app/*.d.ts",
+      "default": "./dist/inbox-app/*.js"
+    },
+    "./inbox-cli-contracts": {
+      "types": "./dist/inbox-cli-contracts.d.ts",
+      "default": "./dist/inbox-cli-contracts.js"
+    },
+    "./inbox-services": {
+      "types": "./dist/inbox-services.d.ts",
+      "default": "./dist/inbox-services.js"
+    },
+    "./inbox-services/*": {
+      "types": "./dist/inbox-services/*.d.ts",
+      "default": "./dist/inbox-services/*.js"
+    },
+    "./json-input": {
+      "types": "./dist/json-input.d.ts",
+      "default": "./dist/json-input.js"
+    },
+    "./knowledge": {
+      "types": "./dist/knowledge.d.ts",
+      "default": "./dist/knowledge.js"
+    },
+    "./knowledge/*": {
+      "types": "./dist/knowledge/*.d.ts",
+      "default": "./dist/knowledge/*.js"
+    },
+    "./option-utils": {
+      "types": "./dist/option-utils.d.ts",
+      "default": "./dist/option-utils.js"
+    },
+    "./query-runtime": {
+      "types": "./dist/query-runtime.d.ts",
+      "default": "./dist/query-runtime.js"
+    },
+    "./runtime-import": {
+      "types": "./dist/runtime-import.d.ts",
+      "default": "./dist/runtime-import.js"
+    },
+    "./usecases/*": {
+      "types": "./dist/usecases/*.d.ts",
+      "default": "./dist/usecases/*.js"
+    },
+    "./vault-services": {
+      "types": "./dist/vault-services.d.ts",
+      "default": "./dist/vault-services.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.json --force",
+    "typecheck": "tsc -p tsconfig.typecheck.json --pretty false"
+  },
+  "dependencies": {
+    "@murphai/assistant-engine": "workspace:*",
+    "@murphai/contracts": "workspace:*",
+    "@murphai/core": "workspace:*",
+    "@murphai/device-syncd": "workspace:*",
+    "@murphai/importers": "workspace:*",
+    "@murphai/inboxd": "workspace:*",
+    "@murphai/operator-config": "workspace:*",
+    "@murphai/parsers": "workspace:*",
+    "@murphai/query": "workspace:*",
+    "@murphai/runtime-state": "workspace:*",
+    "zod": "^4.1.8"
+  },
+  "engines": {
+    "node": ">=22.16.0"
+  }
+}

@@ -23,8 +23,16 @@
       "path": "packages/runtime-state"
     },
     {
-      "name": "@murphai/assistant-core",
-      "path": "packages/assistant-core"
+      "name": "@murphai/operator-config",
+      "path": "packages/operator-config"
+    },
+    {
+      "name": "@murphai/vault-inbox",
+      "path": "packages/vault-inbox"
+    },
+    {
+      "name": "@murphai/assistant-engine",
+      "path": "packages/assistant-engine"
     },
     {
       "name": "@murphai/assistant-cli",

@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { Box, Text, useInput, useStdout, type Key } from 'ink'
-import { normalizeNullableString } from '@murphai/assistant-core/assistant-runtime'
+import { normalizeNullableString } from '@murphai/assistant-engine/assistant-runtime'
 
 import {
   CHAT_COMPOSER_HINT,

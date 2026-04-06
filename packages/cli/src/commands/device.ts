@@ -1,5 +1,5 @@
 import { Cli, z } from 'incur'
-import { emptyArgsSchema, withBaseOptions } from '@murphai/assistant-core/command-helpers'
+import { emptyArgsSchema, withBaseOptions } from '@murphai/operator-config/command-helpers'
 import {
   deviceAccountDisconnectResultSchema,
   deviceAccountListResultSchema,
@@ -11,8 +11,8 @@ import {
   deviceDaemonStopResultSchema,
   deviceProviderListResultSchema,
   deviceSyncBaseUrlSchema,
-} from '@murphai/assistant-core/device-cli-contracts'
-import type { VaultServices } from '@murphai/assistant-core/vault-services'
+} from '@murphai/operator-config/device-cli-contracts'
+import type { VaultServices } from '@murphai/vault-inbox/vault-services'
 
 const providerNameSchema = z
   .string()

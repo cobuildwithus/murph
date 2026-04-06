@@ -14,26 +14,26 @@ import {
   resolveAssistantSession,
   resolveAssistantStatePaths,
   saveAssistantSession,
-} from '@murphai/assistant-core/assistant-state'
+} from '@murphai/assistant-engine/assistant-state'
 import {
   getAssistantStatus,
 } from '@murphai/assistant-cli/assistant-runtime'
-import { createAssistantBackendTarget } from '@murphai/assistant-core'
+import { createAssistantBackendTarget } from '@murphai/operator-config/assistant-backend'
 import {
   readAssistantRuntimeBudgetStatus,
   runAssistantRuntimeMaintenance,
-} from '@murphai/assistant-core/assistant/runtime-budgets'
-import { readAssistantCronRuns } from '@murphai/assistant-core/assistant/cron/store'
+} from '@murphai/assistant-engine/assistant/runtime-budgets'
+import { readAssistantCronRuns } from '@murphai/assistant-engine/assistant/cron/store'
 import { readAssistantOutboxIntent } from '@murphai/assistant-cli/assistant/outbox'
-import { summarizeAssistantQuarantines } from '@murphai/assistant-core/assistant/quarantine'
-import { withAssistantRuntimeWriteLock } from '@murphai/assistant-core/assistant/runtime-write-lock'
-import { readAssistantSession } from '@murphai/assistant-core/assistant/store/persistence'
-import { readAssistantTurnReceipt } from '@murphai/assistant-core/assistant/turns'
+import { summarizeAssistantQuarantines } from '@murphai/assistant-engine/assistant/quarantine'
+import { withAssistantRuntimeWriteLock } from '@murphai/assistant-engine/assistant/runtime-write-lock'
+import { readAssistantSession } from '@murphai/assistant-engine/assistant/store/persistence'
+import { readAssistantTurnReceipt } from '@murphai/assistant-engine/assistant/turns'
 import {
   assistantSessionSchema,
   parseAssistantSessionRecord,
-} from '@murphai/assistant-core/assistant-cli-contracts'
-import { redactAssistantSessionForDisplay } from '@murphai/assistant-core/assistant/redaction'
+} from '@murphai/operator-config/assistant-cli-contracts'
+import { redactAssistantSessionForDisplay } from '@murphai/assistant-engine/assistant/redaction'
 
 const cleanupPaths: string[] = []
 

@@ -5,16 +5,16 @@ import {
   pathSchema,
   showResultSchema,
   slugSchema,
-} from '@murphai/assistant-core/vault-cli-contracts'
+} from '@murphai/operator-config/vault-cli-contracts'
 import {
   deleteEventRecord,
   editEventRecord,
-} from '@murphai/assistant-core/usecases/event-record-mutations'
+} from '@murphai/vault-inbox/usecases/event-record-mutations'
 import {
   eventScaffoldKindSchema,
   showEventRecord,
-} from '@murphai/assistant-core/usecases/provider-event'
-import type { VaultServices } from '@murphai/assistant-core/vault-services'
+} from '@murphai/vault-inbox/usecases/provider-event'
+import type { VaultServices } from '@murphai/vault-inbox/vault-services'
 import { registerLedgerEventEntityGroup } from './health-command-factory.js'
 import {
   createEntityDeleteCommandConfig,

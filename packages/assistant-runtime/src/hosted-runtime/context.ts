@@ -8,13 +8,17 @@ import {
 import {
   createIntegratedInboxServices,
   createIntegratedVaultServices,
+} from "@murphai/vault-inbox";
+import {
   ensureHostedAssistantOperatorDefaults,
-  readAssistantAutomationState,
   readOperatorConfig,
   resolveHostedAssistantConfig,
   resolveHostedAssistantOperatorDefaultsState,
+} from "@murphai/operator-config";
+import {
+  readAssistantAutomationState,
   saveAssistantAutomationState,
-} from "@murphai/assistant-core";
+} from "@murphai/assistant-engine";
 
 import type { HostedBootstrapResult } from "./models.ts";
 

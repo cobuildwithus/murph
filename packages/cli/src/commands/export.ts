@@ -3,15 +3,15 @@ import {
   emptyArgsSchema,
   requestIdFromOptions,
   withBaseOptions,
-} from '@murphai/assistant-core/command-helpers'
+} from '@murphai/operator-config/command-helpers'
 import {
   exportPackResultSchema,
   isoTimestampSchema,
   localDateSchema,
   pathSchema,
   slugSchema,
-} from '@murphai/assistant-core/vault-cli-contracts'
-import type { VaultServices } from '@murphai/assistant-core/vault-services'
+} from '@murphai/operator-config/vault-cli-contracts'
+import type { VaultServices } from '@murphai/vault-inbox/vault-services'
 import {
   exportPackManifestSchema,
   listStoredExportPacks,

@@ -1,4 +1,4 @@
-import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   applyLimit,
   compareByLatest,
@@ -10,9 +10,9 @@ import {
   toCommandShowEntity,
   type AuditCommandListItem,
   type CommandShowEntity,
-} from '@murphai/assistant-core/commands/query-record-command-helpers'
+} from '@murphai/vault-inbox/commands/query-record-command-helpers'
 
-export type { AuditCommandListItem } from '@murphai/assistant-core/commands/query-record-command-helpers'
+export type { AuditCommandListItem } from '@murphai/vault-inbox/commands/query-record-command-helpers'
 
 export type AuditSortOrder = 'asc' | 'desc'
 

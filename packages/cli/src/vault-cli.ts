@@ -3,11 +3,11 @@ import { Cli } from 'incur'
 import {
   createIntegratedVaultServices,
   type VaultServices,
-} from '@murphai/assistant-core/vault-services'
+} from '@murphai/vault-inbox/vault-services'
 import {
   createIntegratedInboxServices,
   type InboxServices,
-} from '@murphai/assistant-core/inbox-services'
+} from '@murphai/vault-inbox/inbox-services'
 import { incurErrorBridge } from './incur-error-bridge.js'
 import { registerVaultCliCommandDescriptors } from './vault-cli-command-manifest.js'
 

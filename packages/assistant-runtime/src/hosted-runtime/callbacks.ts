@@ -17,12 +17,12 @@ import {
 import {
   dispatchAssistantOutboxIntent,
   listAssistantOutboxIntents,
+  normalizeAssistantDeliveryError,
   shouldDispatchAssistantOutboxIntent,
   type AssistantChannelDelivery,
   type AssistantOutboxDispatchHooks,
   type AssistantOutboxIntent,
-} from "@murphai/assistant-core";
-import { normalizeAssistantDeliveryError } from "@murphai/assistant-core/assistant-outbox";
+} from "@murphai/assistant-engine";
 
 import type {
   HostedCommittedExecutionState,

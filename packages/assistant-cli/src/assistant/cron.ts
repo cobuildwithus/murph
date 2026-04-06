@@ -15,19 +15,19 @@ import {
   listAssistantCronRuns as listAssistantCronRunsLocal,
   processDueAssistantCronJobsLocal,
   setAssistantCronJobTarget as setAssistantCronJobTargetLocal,
-} from '@murphai/assistant-core/assistant-cron'
+} from '@murphai/assistant-engine/assistant-cron'
 import type {
   AssistantCronJob,
   AssistantCronRunRecord,
   AssistantCronTargetSnapshot,
-} from '@murphai/assistant-core/assistant-cli-contracts'
+} from '@murphai/operator-config/assistant-cli-contracts'
 
-export * from '@murphai/assistant-core/assistant-cron'
+export * from '@murphai/assistant-engine/assistant-cron'
 export type {
   AssistantCronJob,
   AssistantCronRunRecord,
   AssistantCronTargetSnapshot,
-} from '@murphai/assistant-core/assistant-cli-contracts'
+} from '@murphai/operator-config/assistant-cli-contracts'
 
 export async function listAssistantCronJobs(
   vault: string,

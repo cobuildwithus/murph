@@ -5,7 +5,7 @@ import {
   mealAddResultSchema,
   pathSchema,
   showResultSchema,
-} from '@murphai/assistant-core/vault-cli-contracts'
+} from '@murphai/operator-config/vault-cli-contracts'
 import {
   deleteMealRecord,
   editMealRecord,
@@ -14,9 +14,9 @@ import {
   rawImportManifestResultSchema,
   showMealManifest,
   showMealRecord,
-} from '@murphai/assistant-core/usecases/document-meal-read'
-import { loadImportersRuntimeModule } from '@murphai/assistant-core/usecases/runtime'
-import type { VaultServices } from '@murphai/assistant-core/vault-services'
+} from '@murphai/vault-inbox/usecases/document-meal-read'
+import { loadImportersRuntimeModule } from '@murphai/vault-inbox/usecases/runtime'
+import type { VaultServices } from '@murphai/vault-inbox/vault-services'
 import { registerArtifactBackedEntityGroup } from './health-command-factory.js'
 import {
   createEntityDeleteCommandConfig,

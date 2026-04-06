@@ -7,7 +7,7 @@ import {
   assertAssistantOutboxIntentId,
   assertAssistantSessionId,
   isAssistantSessionNotFoundError,
-} from '@murphai/assistant-core'
+} from '@murphai/assistant-engine'
 import {
   gatewayFetchAttachmentsInputSchema,
   gatewayGetConversationInputSchema,

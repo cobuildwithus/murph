@@ -7,15 +7,15 @@ import type {
 import {
   assistantSessionSecretsSchema,
   parseAssistantSessionRecord,
-} from '@murphai/assistant-core/assistant-cli-contracts'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import {
   auditAssistantStatePermissions,
   isMissingFileError,
-} from '@murphai/assistant-core/assistant-runtime'
+} from '@murphai/assistant-engine/assistant-runtime'
 import {
   extractAssistantSessionSecretsForPersistence,
-} from '@murphai/assistant-core/assistant-state'
-import { resolveAssistantSessionPath } from '@murphai/assistant-core/assistant-state'
+} from '@murphai/assistant-engine/assistant-state'
+import { resolveAssistantSessionPath } from '@murphai/assistant-engine/assistant-state'
 
 export interface AssistantStateSecrecyAudit {
   malformedSessionSecretSidecars: number

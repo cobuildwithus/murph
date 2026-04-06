@@ -13,7 +13,7 @@ import {
 
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
-  "@murphai/assistant-core": "../assistant-core/src/index.ts",
+  "@murphai/assistant-engine": "../assistant-engine/dist/index.js",
   "@murphai/assistant-runtime": "./src/index.ts",
   "@murphai/contracts": "../contracts/src/index.ts",
   "@murphai/core": "../core/src/index.ts",
@@ -24,8 +24,10 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/importers": "../importers/src/index.ts",
   "@murphai/inboxd": "../inboxd/src/index.ts",
   "@murphai/messaging-ingress": "../messaging-ingress/src/index.ts",
+  "@murphai/operator-config": "../operator-config/src/index.ts",
   "@murphai/parsers": "../parsers/src/index.ts",
   "@murphai/runtime-state": "../runtime-state/src/index.ts",
+  "@murphai/vault-inbox": "../vault-inbox/src/index.ts",
 } as const;
 
 export default defineProject({

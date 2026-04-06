@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, test } from 'vitest'
 import { runAssistantDoctor } from '@murphai/assistant-cli/assistant/doctor'
-import { recordAssistantDiagnosticEvent } from '@murphai/assistant-core/assistant/diagnostics'
-import { appendAssistantRuntimeEvent } from '@murphai/assistant-core/assistant/runtime-events'
-import { readAssistantTurnReceipt } from '@murphai/assistant-core/assistant/turns'
+import { recordAssistantDiagnosticEvent } from '@murphai/assistant-engine/assistant/diagnostics'
+import { appendAssistantRuntimeEvent } from '@murphai/assistant-engine/assistant/runtime-events'
+import { readAssistantTurnReceipt } from '@murphai/assistant-engine/assistant/turns'
 import {
   createAssistantOutboxIntent,
   drainAssistantOutbox,
@@ -14,8 +14,8 @@ import {
 } from '@murphai/assistant-cli/assistant/outbox'
 import { getAssistantStatus } from '@murphai/assistant-cli/assistant/status'
 import { readAssistantStatusSnapshot } from '@murphai/assistant-cli/assistant-runtime'
-import { resolveAssistantStatePaths } from '@murphai/assistant-core/assistant-state'
-import { deliverAssistantMessage } from '@murphai/assistant-core/outbound-channel'
+import { resolveAssistantStatePaths } from '@murphai/assistant-engine/assistant-state'
+import { deliverAssistantMessage } from '@murphai/assistant-engine/outbound-channel'
 import { createVersionedJsonStateEnvelope } from '@murphai/runtime-state/node'
 
 const cleanupPaths: string[] = []

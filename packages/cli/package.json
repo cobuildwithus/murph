@@ -49,9 +49,11 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "@murphai/assistant-core": "workspace:*",
     "@murphai/assistant-cli": "workspace:*",
+    "@murphai/assistant-engine": "workspace:*",
+    "@murphai/operator-config": "workspace:*",
     "@murphai/setup-cli": "workspace:*",
+    "@murphai/vault-inbox": "workspace:*",
     "@murphai/assistantd": "workspace:*",
     "@murphai/contracts": "workspace:*",
     "@murphai/core": "workspace:*",

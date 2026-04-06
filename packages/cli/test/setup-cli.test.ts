@@ -29,7 +29,7 @@ import {
 import {
   readAssistantAutomationState,
   saveAssistantAutomationState,
-} from '@murphai/assistant-core/assistant-state'
+} from '@murphai/assistant-engine/assistant-state'
 import { listAssistantCronJobs } from '@murphai/assistant-cli/assistant/cron'
 import {
   buildAssistantProviderDefaultsPatch,
@@ -37,7 +37,7 @@ import {
   resolveOperatorConfigPath,
   saveAssistantOperatorDefaultsPatch,
   saveDefaultVaultConfig,
-} from '@murphai/assistant-core/operator-config'
+} from '@murphai/operator-config/operator-config'
 import {
   createSetupAssistantAccountResolver,
   detectCodexAccountFromAuthJson,
@@ -48,10 +48,10 @@ import {
   describeSelectedSetupWearables,
   resolveSetupChannelMissingEnv,
   resolveSetupWearableMissingEnv,
-} from '@murphai/assistant-core/setup-runtime-env'
-import type { InboxSourceSetEnabledResult } from '@murphai/assistant-core/inbox-app/types'
-import type { InboxConnectorConfig } from '@murphai/assistant-core/inbox-cli-contracts'
-import type { SetupResult } from '@murphai/assistant-core/setup-cli-contracts'
+} from '@murphai/operator-config/setup-runtime-env'
+import type { InboxSourceSetEnabledResult } from '@murphai/vault-inbox/inbox-app/types'
+import type { InboxConnectorConfig } from '@murphai/vault-inbox/inbox-cli-contracts'
+import type { SetupResult } from '@murphai/operator-config/setup-cli-contracts'
 import {
   buildSetupWizardPublicUrlReview,
   createSetupWizardCompletionController,

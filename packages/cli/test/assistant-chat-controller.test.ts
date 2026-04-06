@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'vitest'
-import type { AssistantSession } from '@murphai/assistant-core/assistant-cli-contracts'
+import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 
 import {
   reduceAssistantPromptQueueState,

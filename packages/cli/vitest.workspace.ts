@@ -18,8 +18,9 @@ const cliVitestConcurrency = resolveMurphVitestConcurrency();
 const cliVitestMaxWorkers = resolveMurphVitestMaxWorkers();
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/assistantd": "../assistantd/src/index.ts",
-  "@murphai/assistant-core": "../assistant-core/src/index.ts",
   "@murphai/assistant-cli": "../assistant-cli/src/index.ts",
+  "@murphai/assistant-engine": "../assistant-engine/src/index.ts",
+  "@murphai/operator-config": "../operator-config/src/index.ts",
   "@murphai/setup-cli": "../setup-cli/src/index.ts",
   "@murphai/contracts": "../contracts/src/index.ts",
   "@murphai/core": "../core/src/index.ts",
@@ -33,6 +34,7 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/parsers": "../parsers/src/index.ts",
   "@murphai/query": "../query/src/index.ts",
   "@murphai/runtime-state": "../runtime-state/src/index.ts",
+  "@murphai/vault-inbox": "../vault-inbox/src/index.ts",
   murph: "./src/index.ts",
 } as const;
 const cliVitestRuntimeAliases = createVitestWorkspaceRuntimeAliases(

@@ -37,9 +37,9 @@ async function readJsonlRecordsIfPresent(vaultRoot: string, relativePath: string
   }
 }
 
-vi.mock('@murphai/assistant-core/outbound-channel', async () => {
-  const actual = await vi.importActual<typeof import('@murphai/assistant-core/outbound-channel')>(
-    '@murphai/assistant-core/outbound-channel',
+vi.mock('@murphai/assistant-engine/outbound-channel', async () => {
+  const actual = await vi.importActual<typeof import('@murphai/assistant-engine/outbound-channel')>(
+    '@murphai/assistant-engine/outbound-channel',
   )
 
   return {
@@ -49,9 +49,9 @@ vi.mock('@murphai/assistant-core/outbound-channel', async () => {
   }
 })
 
-vi.mock('@murphai/assistant-core/assistant-provider', async () => {
-  const actual = await vi.importActual<typeof import('@murphai/assistant-core/assistant-provider')>(
-    '@murphai/assistant-core/assistant-provider',
+vi.mock('@murphai/assistant-engine/assistant-provider', async () => {
+  const actual = await vi.importActual<typeof import('@murphai/assistant-engine/assistant-provider')>(
+    '@murphai/assistant-engine/assistant-provider',
   )
 
   return {
@@ -62,9 +62,9 @@ vi.mock('@murphai/assistant-core/assistant-provider', async () => {
   }
 })
 
-vi.mock('@murphai/assistant-core/assistant/channel-adapters', async () => {
-  const actual = await vi.importActual<typeof import('@murphai/assistant-core/assistant/channel-adapters')>(
-    '@murphai/assistant-core/assistant/channel-adapters',
+vi.mock('@murphai/assistant-engine/assistant/channel-adapters', async () => {
+  const actual = await vi.importActual<typeof import('@murphai/assistant-engine/assistant/channel-adapters')>(
+    '@murphai/assistant-engine/assistant/channel-adapters',
   )
 
   return {
@@ -87,33 +87,33 @@ import {
   buildResolveAssistantSessionInput,
   sendAssistantMessage,
 } from '@murphai/assistant-cli/assistant/service'
-import type { AssistantToolCatalog } from '@murphai/assistant-core/model-harness'
-import { resolveAssistantStateDocumentPath } from '@murphai/assistant-core/assistant/state'
+import type { AssistantToolCatalog } from '@murphai/assistant-engine/model-harness'
+import { resolveAssistantStateDocumentPath } from '@murphai/assistant-engine/assistant/state'
 import {
   resolveAssistantMemoryTurnContext,
-} from '@murphai/assistant-core/assistant/memory'
+} from '@murphai/assistant-engine/assistant/memory'
 import {
   resolveAssistantConversationAutoReplyEligibility,
   resolveAssistantConversationPolicy,
-} from '@murphai/assistant-core/assistant/conversation-policy'
-import { sanitizeAssistantOutboundReply } from '@murphai/assistant-core/assistant/reply-sanitizer'
+} from '@murphai/assistant-engine/assistant/conversation-policy'
+import { sanitizeAssistantOutboundReply } from '@murphai/assistant-engine/assistant/reply-sanitizer'
 import {
   VAULT_ENV,
   buildAssistantProviderDefaultsPatch,
   saveAssistantOperatorDefaultsPatch,
-} from '@murphai/assistant-core/operator-config'
+} from '@murphai/operator-config/operator-config'
 import {
   buildAssistantFailoverRoutes,
   recordAssistantFailoverRouteFailure,
-} from '@murphai/assistant-core/assistant/failover'
+} from '@murphai/assistant-engine/assistant/failover'
 import {
   appendAssistantTranscriptEntries,
   listAssistantTranscriptEntries,
   resolveAssistantSession,
   resolveAssistantStatePaths,
   saveAssistantSession,
-} from '@murphai/assistant-core/assistant-state'
-import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
+} from '@murphai/assistant-engine/assistant-state'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 const cleanupPaths: string[] = []
 const CANONICAL_WRITE_GUARD_RECEIPT_DIRECTORY_ENV =
@@ -2399,7 +2399,10 @@ test('sendAssistantMessage injects and persists a CLI surface bootstrap contract
 
   const call = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
   assert.equal(call?.continuityContext, null)
-  assert.match(call?.systemPrompt ?? '', /Murph CLI Contract:/u)
+  assert.match(
+    call?.systemPrompt ?? '',
+    /This assistant runtime is for Murph vault and assistant operations/u,
+  )
 
   const snapshot = await readAssistantStateRecord(
     vaultRoot,

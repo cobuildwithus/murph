@@ -5,13 +5,13 @@ import { fileURLToPath } from 'node:url'
 import {
   createIntegratedInboxServices,
   type InboxServices,
-} from '@murphai/assistant-core/inbox-services'
+} from '@murphai/vault-inbox/inbox-services'
 import {
   createIntegratedVaultServices,
   type VaultServices,
-} from '@murphai/assistant-core/vault-services'
+} from '@murphai/vault-inbox/vault-services'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { resolveEffectiveTopLevelToken } from '@murphai/assistant-core/command-helpers'
+import { resolveEffectiveTopLevelToken } from '@murphai/operator-config/command-helpers'
 import {
   buildAssistantProviderDefaultsPatch,
   normalizeVaultForConfig,
@@ -32,7 +32,7 @@ import {
   type SetupWearable,
   type WhisperModel,
 } from '@murphai/operator-config/setup-cli-contracts'
-import type { InboxBootstrapResult } from '@murphai/assistant-core/inbox-cli-contracts'
+import type { InboxBootstrapResult } from '@murphai/vault-inbox/inbox-cli-contracts'
 import {
   configureSetupChannels,
   normalizeSetupChannels,

@@ -10,9 +10,9 @@ const robustnessMocks = vi.hoisted(() => ({
   executeAssistantProviderTurn: vi.fn(),
 }))
 
-vi.mock('@murphai/assistant-core/outbound-channel', async () => {
-  const actual = await vi.importActual<typeof import('@murphai/assistant-core/outbound-channel')>(
-    '@murphai/assistant-core/outbound-channel',
+vi.mock('@murphai/assistant-engine/outbound-channel', async () => {
+  const actual = await vi.importActual<typeof import('@murphai/assistant-engine/outbound-channel')>(
+    '@murphai/assistant-engine/outbound-channel',
   )
 
   return {
@@ -22,9 +22,9 @@ vi.mock('@murphai/assistant-core/outbound-channel', async () => {
   }
 })
 
-vi.mock('@murphai/assistant-core/assistant-provider', async () => {
-  const actual = await vi.importActual<typeof import('@murphai/assistant-core/assistant-provider')>(
-    '@murphai/assistant-core/assistant-provider',
+vi.mock('@murphai/assistant-engine/assistant-provider', async () => {
+  const actual = await vi.importActual<typeof import('@murphai/assistant-engine/assistant-provider')>(
+    '@murphai/assistant-engine/assistant-provider',
   )
 
   return {
@@ -42,20 +42,20 @@ import {
   sendAssistantMessage,
   stopAssistantAutomation,
 } from '@murphai/assistant-cli/assistant-runtime'
-import { resolveAssistantStatePaths } from '@murphai/assistant-core/assistant-state'
-import { readAssistantDiagnosticsSnapshot } from '@murphai/assistant-core/assistant/diagnostics'
+import { resolveAssistantStatePaths } from '@murphai/assistant-engine/assistant-state'
+import { readAssistantDiagnosticsSnapshot } from '@murphai/assistant-engine/assistant/diagnostics'
 import {
   buildAssistantFailoverRoutes,
   readAssistantFailoverState,
   recordAssistantFailoverRouteFailure,
-} from '@murphai/assistant-core/assistant/failover'
-import { resetInjectedAssistantFaults } from '@murphai/assistant-core/assistant/fault-injection'
+} from '@murphai/assistant-engine/assistant/failover'
+import { resetInjectedAssistantFaults } from '@murphai/assistant-engine/assistant/fault-injection'
 import {
   drainAssistantOutbox,
   listAssistantOutboxIntents,
 } from '@murphai/assistant-cli/assistant/outbox'
-import { listRecentAssistantTurnReceipts } from '@murphai/assistant-core/assistant/turns'
-import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
+import { listRecentAssistantTurnReceipts } from '@murphai/assistant-engine/assistant/turns'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 const cleanupPaths: string[] = []
 

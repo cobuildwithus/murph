@@ -11,7 +11,10 @@
       "path": "../operator-config"
     },
     {
-      "path": "../assistant-core"
+      "path": "../assistant-engine"
+    },
+    {
+      "path": "../vault-inbox"
     },
     {
       "path": "../assistant-cli"

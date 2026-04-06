@@ -16,24 +16,24 @@ import {
   saveAssistantSelfDeliveryTarget,
   saveAssistantOperatorDefaultsPatch,
   saveDefaultVaultConfig,
-} from '@murphai/assistant-core/operator-config'
+} from '@murphai/operator-config/operator-config'
 import {
   createProviderTurnAssistantToolCatalog,
-} from '@murphai/assistant-core/assistant-cli-tools'
+} from '@murphai/assistant-engine/assistant-cli-tools'
 import {
   assistantMemoryTurnEnvKeys,
-} from '@murphai/assistant-core/assistant/memory'
+} from '@murphai/assistant-engine/assistant/memory'
 import {
   resolveAssistantSession,
   resolveAssistantStatePaths,
-} from '@murphai/assistant-core/assistant-state'
-import type { AssistantRunEvent } from '@murphai/assistant-core/assistant/automation/shared'
-import { createIntegratedInboxServices } from '@murphai/assistant-core/inbox-services'
+} from '@murphai/assistant-engine/assistant-state'
+import type { AssistantRunEvent } from '@murphai/assistant-engine/assistant/automation/shared'
+import { createIntegratedInboxServices } from '@murphai/vault-inbox/inbox-services'
 import { formatAssistantRunEventForTerminal } from '@murphai/assistant-cli/run-terminal-logging'
-import { formatStructuredErrorMessage } from '@murphai/assistant-core/text/shared'
+import { formatStructuredErrorMessage } from '@murphai/operator-config/text/shared'
 import { collectVaultCliDescriptorRootCommandNames } from '../src/vault-cli-command-manifest.js'
 import { createVaultCli } from '../src/vault-cli.js'
-import { createUnwiredVaultServices } from '@murphai/assistant-core/vault-services'
+import { createUnwiredVaultServices } from '@murphai/vault-inbox/vault-services'
 import {
   requireData,
   runCli,

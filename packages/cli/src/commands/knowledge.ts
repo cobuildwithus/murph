@@ -2,7 +2,7 @@ import { Cli, z } from 'incur'
 import {
   emptyArgsSchema,
   withBaseOptions,
-} from '@murphai/assistant-core/command-helpers'
+} from '@murphai/operator-config/command-helpers'
 import {
   getKnowledgePage,
   lintKnowledgePages,
@@ -11,11 +11,11 @@ import {
   searchKnowledgePages,
   tailKnowledgeLog,
   upsertKnowledgePage,
-} from '@murphai/assistant-core/knowledge'
+} from '@murphai/vault-inbox/knowledge'
 import {
   pathSchema,
   slugSchema,
-} from '@murphai/assistant-core/vault-cli-contracts'
+} from '@murphai/operator-config/vault-cli-contracts'
 import {
   knowledgeIndexRebuildResultSchema,
   knowledgeLogTailResultSchema,

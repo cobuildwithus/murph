@@ -11,7 +11,7 @@ import {
   getManagedDeviceSyncDaemonStatus,
   startManagedDeviceSyncDaemon,
   stopManagedDeviceSyncDaemon,
-} from '@murphai/assistant-core/device-daemon'
+} from '@murphai/operator-config/device-daemon'
 
 const DEVICE_DAEMON_STATE_SCHEMA = 'murph.device-daemon-launcher-state.v1'
 const DEVICE_DAEMON_STATE_SCHEMA_VERSION = 1

@@ -18,7 +18,8 @@ export const cloudflareVitestAliases = [
   },
   ...createVitestWorkspaceRuntimeAliases(
     resolveWorkspaceSourceEntries(repoRoot, {
-      "@murphai/assistant-core": "packages/assistant-core/src/index.ts",
+      "@murphai/assistant-engine": "packages/assistant-engine/src/index.ts",
+      "@murphai/operator-config": "packages/operator-config/src/index.ts",
       "@murphai/assistant-runtime": "packages/assistant-runtime/src/index.ts",
       "@murphai/murph": "packages/cli/src/index.ts",
       "@murphai/contracts": "packages/contracts/src/index.ts",
@@ -33,6 +34,7 @@ export const cloudflareVitestAliases = [
       "@murphai/parsers": "packages/parsers/src/index.ts",
       "@murphai/query": "packages/query/src/index.ts",
       "@murphai/runtime-state": "packages/runtime-state/src/index.ts",
+      "@murphai/vault-inbox": "packages/vault-inbox/src/index.ts",
     }),
   ),
 ];

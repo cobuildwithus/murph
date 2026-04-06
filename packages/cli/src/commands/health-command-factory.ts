@@ -4,19 +4,19 @@ import {
   requestIdFromOptions,
   withBaseOptions,
   type CommonCommandOptions,
-} from '@murphai/assistant-core/command-helpers'
+} from '@murphai/operator-config/command-helpers'
 import {
   inputFileOptionSchema,
   normalizeInputFileOption,
-} from '@murphai/assistant-core/json-input'
+} from '@murphai/vault-inbox/json-input'
 import type {
   CommandContext,
   EntityLookupInput as ShowCommandContext,
   HealthListInput as ListCommandContext,
   JsonFileInput as UpsertCommandContext,
-} from '@murphai/assistant-core/health-cli-method-types'
-export { healthPayloadSchema } from '@murphai/assistant-core/health-cli-descriptors'
-export { inputFileOptionSchema, normalizeInputFileOption } from '@murphai/assistant-core/json-input'
+} from '@murphai/vault-inbox/health-cli-method-types'
+export { healthPayloadSchema } from '@murphai/vault-inbox/health-cli-descriptors'
+export { inputFileOptionSchema, normalizeInputFileOption } from '@murphai/vault-inbox/json-input'
 
 const limitOptionSchema = z.number().int().positive().max(200).default(50)
 const localDateOptionSchema = z

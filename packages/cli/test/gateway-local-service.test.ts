@@ -12,12 +12,12 @@ import {
 } from '@murphai/runtime-state/node'
 import { test } from 'vitest'
 
-import { assistantSessionSchema } from '@murphai/assistant-core/assistant-cli-contracts'
-import { createAssistantBinding } from '@murphai/assistant-core/assistant/bindings'
+import { assistantSessionSchema } from '@murphai/operator-config/assistant-cli-contracts'
+import { createAssistantBinding } from '@murphai/assistant-engine/assistant/bindings'
 import {
   assistantGatewayLocalMessageSender,
   assistantGatewayLocalProjectionSourceReader,
-} from '@murphai/assistant-core/gateway-local-adapter'
+} from '@murphai/assistant-engine/gateway-local-adapter'
 import { listAssistantOutboxIntentsLocal, saveAssistantOutboxIntent } from '@murphai/assistant-cli/assistant/outbox'
 import { saveAssistantSession } from '@murphai/assistant-cli/assistant/store'
 import {

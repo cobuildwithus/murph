@@ -13,20 +13,20 @@ import {
   readHostedExecutionSignatureHeaders,
   verifyHostedExecutionSignature,
 } from '@murphai/hosted-execution'
-import type { AssistantAskResult } from '@murphai/assistant-core/assistant-cli-contracts'
-import { writeAssistantChatResultArtifacts } from '@murphai/assistant-core/assistant/automation/artifacts'
+import type { AssistantAskResult } from '@murphai/operator-config/assistant-cli-contracts'
+import { writeAssistantChatResultArtifacts } from '@murphai/assistant-engine/assistant/automation/artifacts'
 import {
   createDefaultAssistantCapabilityRegistry,
   createDefaultAssistantToolCatalog,
   createInboxRoutingAssistantToolCatalog,
-} from '@murphai/assistant-core/assistant-cli-tools'
-import { materializeInboxModelBundle } from '@murphai/assistant-core/inbox-model-harness'
+} from '@murphai/assistant-engine/assistant-cli-tools'
+import { materializeInboxModelBundle } from '@murphai/assistant-engine/inbox-model-harness'
 import {
   CliBackedCapabilityHost,
   NativeLocalCapabilityHost,
-} from '@murphai/assistant-core/model-harness'
-import type { InboxServices } from '@murphai/assistant-core/inbox-services'
-import type { VaultServices } from '@murphai/assistant-core/vault-services'
+} from '@murphai/assistant-engine/model-harness'
+import type { InboxServices } from '@murphai/vault-inbox/inbox-services'
+import type { VaultServices } from '@murphai/vault-inbox/vault-services'
 import { resolveAssistantStatePaths } from '@murphai/runtime-state/node'
 
 const test = baseTest.sequential

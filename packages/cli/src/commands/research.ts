@@ -1,5 +1,5 @@
 import { Cli, z } from 'incur'
-import { withBaseOptions } from '@murphai/assistant-core/command-helpers'
+import { withBaseOptions } from '@murphai/operator-config/command-helpers'
 import { researchRunResultSchema } from '../research-cli-contracts.js'
 import {
   runDeepthinkPrompt,

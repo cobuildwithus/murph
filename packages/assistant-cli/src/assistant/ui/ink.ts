@@ -4,15 +4,15 @@ import * as React from 'react'
 import { Box, render } from 'ink'
 import {
   assistantChatResultSchema,
-} from '@murphai/assistant-core/assistant-cli-contracts'
-import { resolveCodexDisplayOptions } from '@murphai/assistant-core/assistant-codex'
+} from '@murphai/operator-config/assistant-cli-contracts'
+import { resolveCodexDisplayOptions } from '@murphai/assistant-engine/assistant-codex'
 import {
   resolveAssistantOperatorDefaults,
   resolveAssistantProviderDefaults,
-} from '@murphai/assistant-core/operator-config'
+} from '@murphai/operator-config/operator-config'
 import {
   redactAssistantSessionForDisplay,
-} from '@murphai/assistant-core/assistant-runtime'
+} from '@murphai/assistant-engine/assistant-runtime'
 
 import {
   openAssistantConversation,

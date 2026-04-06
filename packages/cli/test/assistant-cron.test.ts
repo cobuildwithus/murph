@@ -15,9 +15,9 @@ const cronServiceMocks = vi.hoisted(() => ({
   sendAssistantMessage: vi.fn(),
 }))
 
-vi.mock('@murphai/assistant-core/assistant-service', async () => {
-  const actual = await vi.importActual<typeof import('@murphai/assistant-core/assistant-service')>(
-    '@murphai/assistant-core/assistant-service',
+vi.mock('@murphai/assistant-engine/assistant-service', async () => {
+  const actual = await vi.importActual<typeof import('@murphai/assistant-engine/assistant-service')>(
+    '@murphai/assistant-engine/assistant-service',
   )
 
   return {
@@ -44,7 +44,7 @@ import {
   setAssistantCronJobTarget,
   setAssistantCronJobEnabled,
 } from '@murphai/assistant-cli/assistant/cron'
-import { saveAssistantSelfDeliveryTarget } from '@murphai/assistant-core/operator-config'
+import { saveAssistantSelfDeliveryTarget } from '@murphai/operator-config/operator-config'
 
 const cleanupPaths: string[] = []
 

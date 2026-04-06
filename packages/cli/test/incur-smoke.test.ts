@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { Cli, z } from 'incur'
-import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { localParallelCliTest as test } from './local-parallel-test.js'
 import {
   collectVaultCliDescriptorRootCommandNames,
@@ -14,8 +14,8 @@ import {
   vaultCliCommandDescriptors,
 } from '../src/vault-cli-command-manifest.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
-import { createIntegratedInboxServices } from '@murphai/assistant-core/inbox-services'
-import { createUnwiredVaultServices } from '@murphai/assistant-core/vault-services'
+import { createIntegratedInboxServices } from '@murphai/vault-inbox/inbox-services'
+import { createUnwiredVaultServices } from '@murphai/vault-inbox/vault-services'
 import { createVaultCli } from '../src/vault-cli.js'
 import {
   binPath,

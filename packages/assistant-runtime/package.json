@@ -35,7 +35,9 @@
     "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage"
   },
   "dependencies": {
-    "@murphai/assistant-core": "workspace:*",
+    "@murphai/assistant-engine": "workspace:*",
+    "@murphai/operator-config": "workspace:*",
+    "@murphai/vault-inbox": "workspace:*",
     "@murphai/core": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
     "@murphai/gateway-core": "workspace:*",

@@ -15,11 +15,11 @@ import {
   showStoredExportPack,
 } from '../src/commands/export-intake-read-helpers.js'
 import { registerIntakeCommands } from '../src/commands/intake.js'
-import { materializeExportPack } from '@murphai/assistant-core/usecases/shared'
+import { materializeExportPack } from '@murphai/vault-inbox/usecases/shared'
 import {
   createIntegratedVaultServices,
   createUnwiredVaultServices,
-} from '@murphai/assistant-core/vault-services'
+} from '@murphai/vault-inbox/vault-services'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData } from './cli-test-helpers.js'
 

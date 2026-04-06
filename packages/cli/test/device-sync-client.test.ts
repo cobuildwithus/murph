@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 
 import { test } from "vitest";
 
-import { createDeviceSyncClient } from "@murphai/assistant-core/device-sync-client";
-import { VaultCliError } from "@murphai/assistant-core/vault-cli-errors";
+import { createDeviceSyncClient } from "@murphai/operator-config/device-sync-client";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 
 test("createDeviceSyncClient sends bearer auth to control-plane routes", async () => {
   const observedAuthHeaders: string[] = [];

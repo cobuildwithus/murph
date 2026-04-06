@@ -14,7 +14,13 @@
       "path": "./packages/runtime-state"
     },
     {
-      "path": "./packages/assistant-core"
+      "path": "./packages/operator-config"
+    },
+    {
+      "path": "./packages/vault-inbox"
+    },
+    {
+      "path": "./packages/assistant-engine"
     },
     {
       "path": "./packages/gateway-core"

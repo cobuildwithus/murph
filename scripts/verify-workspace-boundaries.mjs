@@ -199,11 +199,17 @@ function verifyWorkspaceImportPolicy({
 
   if (
     sourceMember === "apps/cloudflare"
-    && (specifier === "@murphai/assistant-core"
-      || specifier.startsWith("@murphai/assistant-core/"))
+    && (
+      specifier === "@murphai/assistant-engine"
+      || specifier.startsWith("@murphai/assistant-engine/")
+      || specifier === "@murphai/operator-config"
+      || specifier.startsWith("@murphai/operator-config/")
+      || specifier === "@murphai/vault-inbox"
+      || specifier.startsWith("@murphai/vault-inbox/")
+    )
     && filePath.includes(`${path.sep}apps${path.sep}cloudflare${path.sep}src${path.sep}`)
   ) {
-    return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} directly; apps/cloudflare must depend on @murphai/assistant-runtime or another hosted-runtime owner surface instead of the lower assistant-core boundary.`;
+    return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} directly; apps/cloudflare must depend on @murphai/assistant-runtime or another hosted-runtime owner surface instead of lower local assistant owner packages.`;
   }
 
   return null;

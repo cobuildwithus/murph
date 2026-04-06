@@ -1,15 +1,15 @@
 import * as React from 'react'
-import { type AssistantSession } from '@murphai/assistant-core/assistant-cli-contracts'
-import type { AssistantProviderProgressEvent } from '@murphai/assistant-core/assistant-provider'
+import { type AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
+import type { AssistantProviderProgressEvent } from '@murphai/assistant-engine/assistant-provider'
 import type {
   AssistantProviderTraceEvent,
   AssistantProviderTraceUpdate,
-} from '@murphai/assistant-core/assistant-provider'
+} from '@murphai/assistant-engine/assistant-provider'
 import {
   extractRecoveredAssistantSession,
   isAssistantProviderConnectionLostError,
   isAssistantProviderInterruptedError,
-} from '@murphai/assistant-core/assistant-provider'
+} from '@murphai/assistant-engine/assistant-provider'
 
 import { sendAssistantMessage, type AssistantChatInput } from '../service.js'
 import { appendAssistantTranscriptEntries, isAssistantSessionNotFoundError } from '../store.js'

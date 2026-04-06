@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   matchesKnowledgeFilter,
   normalizeSourcePathInputs,
-} from '@murphai/assistant-core/knowledge'
+} from '@murphai/vault-inbox/knowledge'
 
 describe('normalizeSourcePathInputs', () => {
   it('trims, drops blanks, and preserves unique source paths in first-seen order', () => {

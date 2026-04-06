@@ -1,9 +1,9 @@
 import { Cli, z } from 'incur'
-import { withBaseOptions } from '@murphai/assistant-core/command-helpers'
+import { withBaseOptions } from '@murphai/operator-config/command-helpers'
 import {
   inputFileOptionSchema,
   normalizeInputFileOption,
-} from '@murphai/assistant-core/json-input'
+} from '@murphai/vault-inbox/json-input'
 import {
   isoTimestampSchema,
   listResultSchema,
@@ -16,8 +16,8 @@ import {
   workoutImportInspectResultSchema,
   workoutMeasurementAddResultSchema,
   workoutUnitPreferencesResultSchema,
-} from '@murphai/assistant-core/vault-cli-contracts'
-import type { VaultServices } from '@murphai/assistant-core/vault-services'
+} from '@murphai/operator-config/vault-cli-contracts'
+import type { VaultServices } from '@murphai/vault-inbox/vault-services'
 import {
   listWorkoutRecords,
   listWorkoutMeasurementRecords,
@@ -27,27 +27,27 @@ import {
   showWorkoutRecord,
   workoutImportManifestResultSchema,
   workoutLookupSchema,
-} from '@murphai/assistant-core/usecases/workout-read'
+} from '@murphai/vault-inbox/usecases/workout-read'
 import {
   listWorkoutFormats,
   logWorkoutFormat,
   saveWorkoutFormat,
   showWorkoutFormat,
-} from '@murphai/assistant-core/usecases/workout-format'
+} from '@murphai/vault-inbox/usecases/workout-format'
 import {
   addWorkoutRecord,
   deleteWorkoutRecord,
   editWorkoutRecord,
-} from '@murphai/assistant-core/usecases/workout'
+} from '@murphai/vault-inbox/usecases/workout'
 import {
   importWorkoutCsv,
   inspectWorkoutCsvImport,
-} from '@murphai/assistant-core/usecases/workout-import'
+} from '@murphai/vault-inbox/usecases/workout-import'
 import {
   addWorkoutMeasurementRecord,
   setWorkoutUnitPreferences,
   showWorkoutUnitPreferences,
-} from '@murphai/assistant-core/usecases/workout-measurement'
+} from '@murphai/vault-inbox/usecases/workout-measurement'
 import {
   createDirectEntityDeleteCommandDefinition,
   createDirectEventBackedEntityEditCommandDefinition,

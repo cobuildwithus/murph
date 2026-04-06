@@ -1,6 +1,4 @@
 import {
-  createIntegratedInboxServices,
-  createIntegratedVaultServices,
   drainAssistantOutbox,
   getAssistantCronJob,
   getAssistantCronJobTarget,
@@ -20,11 +18,11 @@ import {
   updateAssistantSessionOptions,
   type AssistantAskResult,
   type AssistantCronJob,
-  type AssistantCronTargetMutationResult,
-  type AssistantCronTargetSnapshot,
   type AssistantCronProcessDueResult,
   type AssistantCronRunRecord,
   type AssistantCronStatusSnapshot,
+  type AssistantCronTargetMutationResult,
+  type AssistantCronTargetSnapshot,
   type AssistantMessageInput,
   type AssistantOutboxDispatchMode,
   type AssistantOutboxIntent,
@@ -32,11 +30,15 @@ import {
   type AssistantSession,
   type AssistantStatusResult,
   type RunAssistantAutomationInput,
-} from '@murphai/assistant-core'
+} from '@murphai/assistant-engine'
+import {
+  createIntegratedInboxServices,
+  createIntegratedVaultServices,
+} from '@murphai/vault-inbox'
 import {
   assistantGatewayLocalMessageSender,
   assistantGatewayLocalProjectionSourceReader,
-} from '@murphai/assistant-core/gateway-local-adapter'
+} from '@murphai/assistant-engine/gateway-local-adapter'
 import { createLocalGatewayService } from '@murphai/gateway-local'
 import type { GatewayService } from '@murphai/gateway-core'
 
