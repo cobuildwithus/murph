@@ -6,14 +6,14 @@ import {
 } from "../src/deploy-automation/container-images.js";
 import { runWranglerJson, runWranglerLogged } from "./wrangler-runner.js";
 
-const args = parseCliArgs(process.argv.slice(2));
+const cliArgs = parseCliArgs(process.argv.slice(2));
 
-if (args.showHelp) {
+if (cliArgs.showHelp) {
   printUsage();
   process.exit(0);
 }
 
-if (!args.filter) {
+if (!cliArgs.repositoryFilter) {
   throw new Error("Pass --filter with a repository regex so image cleanup stays intentionally scoped.");
 }
 
@@ -23,13 +23,13 @@ const rawList = await runWranglerJson([
   "list",
   "--json",
   "--filter",
-  args.filter,
-  ...(args.configPath ? ["--config", args.configPath] : []),
+  cliArgs.repositoryFilter,
+  ...(cliArgs.configPath ? ["--config", cliArgs.configPath] : []),
 ]);
 const images = parseHostedContainerImageListOutput(rawList);
 const tagsToDelete = selectHostedContainerImageTagsForCleanup({
   images,
-  keepPerRepository: args.keepPerRepository,
+  keepPerRepository: cliArgs.keepPerRepository,
 });
 
 if (tagsToDelete.length === 0) {
@@ -42,7 +42,7 @@ for (const entry of tagsToDelete) {
   console.log(`- delete ${entry.image}`);
 }
 
-if (!args.apply) {
+if (!cliArgs.apply) {
   console.log("Dry run only. Re-run with --apply to delete these images.");
   process.exit(0);
 }
@@ -53,7 +53,7 @@ for (const entry of tagsToDelete) {
     "images",
     "delete",
     entry.image,
-    ...(args.configPath ? ["--config", args.configPath] : []),
+    ...(cliArgs.configPath ? ["--config", cliArgs.configPath] : []),
   ]);
 }
 
@@ -62,13 +62,13 @@ console.log(`Deleted ${tagsToDelete.length} Cloudflare container image tag(s).`)
 function parseCliArgs(argv: string[]): {
   apply: boolean;
   configPath: string | null;
-  filter: string | null;
+  repositoryFilter: string | null;
   keepPerRepository: number;
   showHelp: boolean;
 } {
   let apply = false;
   let configPath: string | null = null;
-  let filter: string | null = null;
+  let repositoryFilter: string | null = null;
   let keepPerRepository = 10;
   let showHelp = false;
 
@@ -91,7 +91,7 @@ function parseCliArgs(argv: string[]): {
         index += 1;
         continue;
       case "--filter":
-        filter = requireCliValue(argv, index, current);
+        repositoryFilter = requireCliValue(argv, index, current);
         index += 1;
         continue;
       case "--keep": {
@@ -113,7 +113,7 @@ function parseCliArgs(argv: string[]): {
   return {
     apply,
     configPath,
-    filter,
+    repositoryFilter,
     keepPerRepository,
     showHelp,
   };
