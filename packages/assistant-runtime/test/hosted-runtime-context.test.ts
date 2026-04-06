@@ -31,7 +31,7 @@ test("hosted channel capability reconciliation enables email and telegram auto-r
     });
     assert.deepEqual(
       JSON.parse(
-        await readFile(resolveAssistantStatePaths(vaultRoot).automationPath, "utf8"),
+        await readFile(resolveAssistantStatePaths(vaultRoot).automationStatePath, "utf8"),
       ).autoReplyChannels,
       ["email", "telegram"],
     );
@@ -132,7 +132,7 @@ test("hosted dispatch context does not enable new auto-reply channels on non-act
     );
 
     const automationState = JSON.parse(
-      await readFile(resolveAssistantStatePaths(vaultRoot).automationPath, "utf8"),
+      await readFile(resolveAssistantStatePaths(vaultRoot).automationStatePath, "utf8"),
     ) as { autoReplyChannels: string[] };
 
     assert.deepEqual(automationState.autoReplyChannels, []);
