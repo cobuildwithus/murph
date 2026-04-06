@@ -15,8 +15,9 @@ import {
   assistantToolExecutionResultSchema,
   assistantToolSpecSchema,
   type AssistantToolCall,
-  type AssistantToolExecutionPreference,
+  type AssistantToolBackendKind,
   type AssistantToolExecutionResult,
+  type AssistantToolHostKind,
   type AssistantToolMutationSemantics,
   type AssistantToolProvenance,
   type AssistantToolRiskClass,
@@ -27,7 +28,8 @@ import { isAssistantOpenAIBaseUrl } from './assistant/shared.js'
 
 export type JsonRecord = Record<string, unknown>
 
-export type AssistantCapabilityExecutionMode = AssistantToolExecutionPreference
+export type AssistantCapabilityHostKind = AssistantToolHostKind
+export type AssistantCapabilityBackendKind = AssistantToolBackendKind
 export type AssistantCapabilityMutationSemantics = AssistantToolMutationSemantics
 export type AssistantCapabilityRiskClass = AssistantToolRiskClass
 
@@ -36,25 +38,6 @@ export type AssistantCapabilityExecutor<
   TResult = unknown,
 > = (input: z.infer<TSchema>) => Promise<TResult>
 
-export interface AssistantToolDefinition<
-  TSchema extends ZodTypeAny = ZodTypeAny,
-  TResult = unknown,
-> {
-  name: string
-  description: string
-  provenance?: AssistantToolProvenance
-  mutationSemantics?: AssistantCapabilityMutationSemantics
-  riskClass?: AssistantCapabilityRiskClass
-  preferredExecutionMode?: AssistantCapabilityExecutionMode
-  executionMode?: AssistantCapabilityExecutionMode
-  inputSchema: TSchema
-  outputSchema?: ZodType<TResult>
-  inputExample?: JsonRecord
-  execute(input: z.infer<TSchema>): Promise<TResult>
-}
-
-type AnyAssistantToolDefinition = AssistantToolDefinition<ZodTypeAny, unknown>
-
 export interface AssistantCapabilityDefinition<
   TSchema extends ZodTypeAny = ZodTypeAny,
   TResult = unknown,
@@ -62,26 +45,48 @@ export interface AssistantCapabilityDefinition<
   name: string
   description: string
   provenance?: AssistantToolProvenance
+  backendKind?: AssistantCapabilityBackendKind
   mutationSemantics?: AssistantCapabilityMutationSemantics
   riskClass?: AssistantCapabilityRiskClass
-  preferredExecutionMode?: AssistantCapabilityExecutionMode
+  preferredHostKind?: AssistantCapabilityHostKind
   inputSchema: TSchema
   outputSchema?: ZodType<TResult>
   inputExample?: JsonRecord
   executionBindings: Partial<
-    Record<AssistantCapabilityExecutionMode, AssistantCapabilityExecutor<TSchema, TResult>>
+    Record<AssistantCapabilityHostKind, AssistantCapabilityExecutor<TSchema, TResult>>
   >
 }
 
 type AnyAssistantCapabilityDefinition = AssistantCapabilityDefinition<ZodTypeAny, unknown>
 
-export interface AssistantCapabilitySpec {
+interface AssistantBoundToolDefinition<
+  TSchema extends ZodTypeAny = ZodTypeAny,
+  TResult = unknown,
+> {
+  name: string
   description: string
-  executionModes: AssistantCapabilityExecutionMode[]
+  provenance: AssistantToolProvenance
+  backendKind: AssistantCapabilityBackendKind
+  mutationSemantics: AssistantCapabilityMutationSemantics
+  riskClass: AssistantCapabilityRiskClass
+  preferredHostKind: AssistantCapabilityHostKind
+  selectedHostKind: AssistantCapabilityHostKind
+  inputSchema: TSchema
+  outputSchema: ZodType<TResult>
+  inputExample?: JsonRecord
+  execute(input: z.infer<TSchema>): Promise<TResult>
+}
+
+type AnyAssistantBoundToolDefinition = AssistantBoundToolDefinition<ZodTypeAny, unknown>
+
+export interface AssistantCapabilitySpec {
+  backendKind: AssistantCapabilityBackendKind
+  description: string
+  supportedHostKinds: AssistantCapabilityHostKind[]
   inputExample: JsonRecord | null
   mutationSemantics: AssistantCapabilityMutationSemantics
   name: string
-  preferredExecutionMode: AssistantCapabilityExecutionMode
+  preferredHostKind: AssistantCapabilityHostKind
   provenance: AssistantToolProvenance
   riskClass: AssistantCapabilityRiskClass
 }
@@ -94,43 +99,16 @@ export interface AssistantCapabilityRegistry {
 }
 
 export interface AssistantCapabilityHost {
-  readonly executionMode: AssistantCapabilityExecutionMode
+  readonly hostKind: AssistantCapabilityHostKind
   bindCapability(
     capability: AnyAssistantCapabilityDefinition,
-  ): AnyAssistantToolDefinition | null
+  ): AnyAssistantBoundToolDefinition | null
 }
 
 function resolveAssistantOutputSchema<TResult>(
   outputSchema?: ZodType<TResult>,
 ): ZodType<TResult> {
   return outputSchema ?? z.custom<TResult>(() => true)
-}
-
-export function defineAssistantTool<
-  TSchema extends ZodTypeAny,
-  TResult = unknown,
->(
-  definition: AssistantToolDefinition<TSchema, TResult>,
-): AssistantToolDefinition<TSchema, TResult> {
-  const provenance = definition.provenance ?? inferAssistantToolProvenance(definition.name)
-  const preferredExecutionMode =
-    definition.preferredExecutionMode ??
-    inferAssistantCapabilityExecutionMode(definition.name, provenance)
-  const mutationSemantics =
-    definition.mutationSemantics ??
-    inferAssistantCapabilityMutationSemantics(definition.name, provenance)
-
-  return {
-    ...definition,
-    provenance,
-    mutationSemantics,
-    riskClass:
-      definition.riskClass ??
-      inferAssistantCapabilityRiskClass(mutationSemantics, definition.name, provenance),
-    preferredExecutionMode,
-    executionMode: definition.executionMode ?? preferredExecutionMode,
-    outputSchema: resolveAssistantOutputSchema(definition.outputSchema),
-  }
 }
 
 export function defineAssistantCapability<
@@ -140,29 +118,32 @@ export function defineAssistantCapability<
   definition: AssistantCapabilityDefinition<TSchema, TResult>,
 ): AssistantCapabilityDefinition<TSchema, TResult> {
   const provenance = definition.provenance ?? inferAssistantToolProvenance(definition.name)
-  const preferredExecutionMode =
-    definition.preferredExecutionMode ??
-    inferAssistantCapabilityExecutionMode(definition.name, provenance)
+  const backendKind =
+    definition.backendKind ?? inferAssistantCapabilityBackendKind(definition.name, provenance)
+  const preferredHostKind =
+    definition.preferredHostKind ??
+    inferAssistantCapabilityHostKind(definition.name, provenance)
   const mutationSemantics =
     definition.mutationSemantics ??
     inferAssistantCapabilityMutationSemantics(definition.name, provenance)
-  const defaultBinding = definition.executionBindings[preferredExecutionMode]
+  const defaultBinding = definition.executionBindings[preferredHostKind]
   const executionBindings =
     defaultBinding === undefined
       ? definition.executionBindings
       : {
           ...definition.executionBindings,
-          [preferredExecutionMode]: defaultBinding,
+          [preferredHostKind]: defaultBinding,
         }
 
   return {
     ...definition,
     provenance,
+    backendKind,
     mutationSemantics,
     riskClass:
       definition.riskClass ??
       inferAssistantCapabilityRiskClass(mutationSemantics, definition.name, provenance),
-    preferredExecutionMode,
+    preferredHostKind,
     outputSchema: resolveAssistantOutputSchema(definition.outputSchema),
     executionBindings,
   }
@@ -229,23 +210,35 @@ function inferAssistantToolProvenance(name: string): AssistantToolProvenance {
   }
 }
 
-function inferAssistantCapabilityExecutionMode(
+function inferAssistantCapabilityHostKind(
   _name: string,
   provenance: AssistantToolProvenance,
-): AssistantCapabilityExecutionMode {
+): AssistantCapabilityHostKind {
   if (provenance.origin === 'cli-backed') {
     return 'cli-backed'
   }
 
-  if (provenance.origin === 'configured-web-read') {
-    return 'native-local'
-  }
-
-  if (provenance.origin === 'hosted-api-backed') {
-    return 'native-local'
-  }
-
   return 'native-local'
+}
+
+function inferAssistantCapabilityBackendKind(
+  _name: string,
+  provenance: AssistantToolProvenance,
+): AssistantCapabilityBackendKind {
+  switch (provenance.origin) {
+    case 'cli-backed':
+      return 'cli-wrapper'
+    case 'configured-web-read':
+      return 'configured-web-read'
+    case 'hosted-api-backed':
+      return 'hosted-api'
+    case 'native-local-only':
+      return 'native-file'
+    case 'descriptor-generated':
+    case 'hand-authored-helper':
+    case 'vault-service-backed':
+      return 'local-service'
+  }
 }
 
 function inferAssistantCapabilityMutationSemantics(
@@ -352,32 +345,32 @@ export function createAssistantCapabilityRegistry<
 }
 
 export class CliBackedCapabilityHost implements AssistantCapabilityHost {
-  readonly executionMode = 'cli-backed' as const
+  readonly hostKind = 'cli-backed' as const
 
   bindCapability(
     capability: AnyAssistantCapabilityDefinition,
-  ): AnyAssistantToolDefinition | null {
-    return bindAssistantCapabilityToTool(capability, this.executionMode)
+  ): AnyAssistantBoundToolDefinition | null {
+    return bindAssistantCapabilityToBoundTool(capability, this.hostKind)
   }
 }
 
 export class NativeLocalCapabilityHost implements AssistantCapabilityHost {
-  readonly executionMode = 'native-local' as const
+  readonly hostKind = 'native-local' as const
 
   bindCapability(
     capability: AnyAssistantCapabilityDefinition,
-  ): AnyAssistantToolDefinition | null {
-    return bindAssistantCapabilityToTool(capability, this.executionMode)
+  ): AnyAssistantBoundToolDefinition | null {
+    return bindAssistantCapabilityToBoundTool(capability, this.hostKind)
   }
 }
 
 export class HostedOrRemoteCapabilityHost implements AssistantCapabilityHost {
-  readonly executionMode = 'hosted-or-remote' as const
+  readonly hostKind = 'hosted-or-remote' as const
 
   bindCapability(
     capability: AnyAssistantCapabilityDefinition,
-  ): AnyAssistantToolDefinition | null {
-    return bindAssistantCapabilityToTool(capability, this.executionMode)
+  ): AnyAssistantBoundToolDefinition | null {
+    return bindAssistantCapabilityToBoundTool(capability, this.hostKind)
   }
 }
 
@@ -478,15 +471,12 @@ const OPENAI_RESPONSES_AUTO_COMPACTION_CONTEXT = Object.freeze([
 type AssistantFetchInput = Parameters<typeof fetch>[0]
 type AssistantFetchInit = Parameters<typeof fetch>[1]
 
-export function createAssistantToolCatalog<
-  const TDefinitions extends readonly AnyAssistantToolDefinition[],
->(
-  definitions: TDefinitions,
+function createBoundAssistantToolCatalog(
+  definitions: readonly AnyAssistantBoundToolDefinition[],
 ): AssistantToolCatalog {
-  const normalizedDefinitions = definitions.map((definition) => defineAssistantTool(definition))
-  const toolMap = new Map<string, (typeof normalizedDefinitions)[number]>()
+  const toolMap = new Map<string, AnyAssistantBoundToolDefinition>()
 
-  for (const definition of normalizedDefinitions) {
+  for (const definition of definitions) {
     toolMap.set(definition.name, definition)
   }
 
@@ -574,10 +564,11 @@ export function createAssistantToolCatalog<
           name: definition.name,
           description: definition.description,
           inputExample: definition.inputExample ?? null,
+          backendKind: definition.backendKind,
           mutationSemantics: definition.mutationSemantics,
           riskClass: definition.riskClass,
-          preferredExecutionMode: definition.preferredExecutionMode,
-          executionMode: definition.executionMode,
+          preferredHostKind: definition.preferredHostKind,
+          selectedHostKind: definition.selectedHostKind,
           provenance: definition.provenance,
         }),
       )
@@ -589,7 +580,7 @@ export function createAssistantToolCatalogFromCapabilities(
   capabilities: readonly AnyAssistantCapabilityDefinition[],
   hosts: readonly AssistantCapabilityHost[],
 ): AssistantToolCatalog {
-  return bindAssistantCapabilitiesToCatalog(capabilities, hosts)
+  return createAssistantCapabilityRegistry(capabilities).createToolCatalog(hosts)
 }
 
 export async function generateAssistantObject<TSchema extends z.ZodTypeAny>(
@@ -671,7 +662,7 @@ export function normalizeJsonRecord(value: unknown): JsonRecord {
   return value as JsonRecord
 }
 
-async function executeCall<TDefinition extends AnyAssistantToolDefinition>(
+async function executeCall<TDefinition extends AnyAssistantBoundToolDefinition>(
   toolMap: Map<string, TDefinition>,
   call: AssistantToolCall,
   mode: AssistantToolExecutionMode,
@@ -717,7 +708,7 @@ async function executeDefinition<
   TSchema extends ZodTypeAny,
   TResult,
 >(
-  definition: AssistantToolDefinition<TSchema, TResult>,
+  definition: AssistantBoundToolDefinition<TSchema, TResult>,
   input: z.infer<TSchema>,
   mode: AssistantToolExecutionMode,
 ): Promise<TResult | JsonRecord> {
@@ -741,9 +732,12 @@ function toAssistantCapabilitySpec(
   const provenance =
     normalizedCapability.provenance ??
     inferAssistantToolProvenance(normalizedCapability.name)
-  const preferredExecutionMode =
-    normalizedCapability.preferredExecutionMode ??
-    inferAssistantCapabilityExecutionMode(normalizedCapability.name, provenance)
+  const backendKind =
+    normalizedCapability.backendKind ??
+    inferAssistantCapabilityBackendKind(normalizedCapability.name, provenance)
+  const preferredHostKind =
+    normalizedCapability.preferredHostKind ??
+    inferAssistantCapabilityHostKind(normalizedCapability.name, provenance)
   const mutationSemantics =
     normalizedCapability.mutationSemantics ??
     inferAssistantCapabilityMutationSemantics(normalizedCapability.name, provenance)
@@ -756,15 +750,16 @@ function toAssistantCapabilitySpec(
     )
 
   return {
+    backendKind,
     name: normalizedCapability.name,
     description: normalizedCapability.description,
     inputExample: normalizedCapability.inputExample ?? null,
     mutationSemantics,
     riskClass,
-    preferredExecutionMode,
-    executionModes: Object.keys(
+    preferredHostKind,
+    supportedHostKinds: Object.keys(
       normalizedCapability.executionBindings,
-    ) as AssistantCapabilityExecutionMode[],
+    ) as AssistantCapabilityHostKind[],
     provenance,
   }
 }
@@ -772,18 +767,16 @@ function toAssistantCapabilitySpec(
 function resolveAssistantCapabilityHostBinding(
   capability: AnyAssistantCapabilityDefinition,
   hosts: readonly AssistantCapabilityHost[],
-): AnyAssistantToolDefinition | null {
+): AnyAssistantBoundToolDefinition | null {
   const normalizedCapability = defineAssistantCapability(capability)
-  const preferredExecutionMode =
-    normalizedCapability.preferredExecutionMode ??
-    inferAssistantCapabilityExecutionMode(
+  const preferredHostKind =
+    normalizedCapability.preferredHostKind ??
+    inferAssistantCapabilityHostKind(
       normalizedCapability.name,
       normalizedCapability.provenance ??
         inferAssistantToolProvenance(normalizedCapability.name),
     )
-  const preferredHost = hosts.find(
-    (host) => host.executionMode === preferredExecutionMode,
-  )
+  const preferredHost = hosts.find((host) => host.hostKind === preferredHostKind)
 
   if (preferredHost) {
     const preferredBinding = preferredHost.bindCapability(normalizedCapability)
@@ -806,7 +799,7 @@ function bindAssistantCapabilitiesToCatalog(
   capabilities: readonly AnyAssistantCapabilityDefinition[],
   hosts: readonly AssistantCapabilityHost[],
 ): AssistantToolCatalog {
-  return createAssistantToolCatalog(
+  return createBoundAssistantToolCatalog(
     capabilities.flatMap((capability) => {
       const boundTool = resolveAssistantCapabilityHostBinding(capability, hosts)
       return boundTool ? [boundTool] : []
@@ -814,21 +807,24 @@ function bindAssistantCapabilitiesToCatalog(
   )
 }
 
-function bindAssistantCapabilityToTool(
+function bindAssistantCapabilityToBoundTool(
   capability: AnyAssistantCapabilityDefinition,
-  executionMode: AssistantCapabilityExecutionMode,
-): AnyAssistantToolDefinition | null {
+  selectedHostKind: AssistantCapabilityHostKind,
+): AnyAssistantBoundToolDefinition | null {
   const normalizedCapability = defineAssistantCapability(capability)
-  const execute = normalizedCapability.executionBindings[executionMode]
+  const execute = normalizedCapability.executionBindings[selectedHostKind]
   if (!execute) {
     return null
   }
   const provenance =
     normalizedCapability.provenance ??
     inferAssistantToolProvenance(normalizedCapability.name)
-  const preferredExecutionMode =
-    normalizedCapability.preferredExecutionMode ??
-    inferAssistantCapabilityExecutionMode(normalizedCapability.name, provenance)
+  const backendKind =
+    normalizedCapability.backendKind ??
+    inferAssistantCapabilityBackendKind(normalizedCapability.name, provenance)
+  const preferredHostKind =
+    normalizedCapability.preferredHostKind ??
+    inferAssistantCapabilityHostKind(normalizedCapability.name, provenance)
   const mutationSemantics =
     normalizedCapability.mutationSemantics ??
     inferAssistantCapabilityMutationSemantics(normalizedCapability.name, provenance)
@@ -840,19 +836,20 @@ function bindAssistantCapabilityToTool(
       provenance,
     )
 
-  return defineAssistantTool({
+  return {
     name: normalizedCapability.name,
     description: normalizedCapability.description,
     provenance,
+    backendKind,
     mutationSemantics,
     riskClass,
-    preferredExecutionMode,
-    executionMode,
+    preferredHostKind,
+    selectedHostKind,
     inputSchema: normalizedCapability.inputSchema,
-    outputSchema: normalizedCapability.outputSchema,
+    outputSchema: resolveAssistantOutputSchema(normalizedCapability.outputSchema),
     inputExample: normalizedCapability.inputExample,
     execute: async (input) => await execute(input),
-  })
+  }
 }
 
 function resolveAssistantPromptOrMessages(

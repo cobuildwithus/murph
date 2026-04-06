@@ -5,6 +5,20 @@ import {
 } from './vault-cli-contracts.js'
 import { routingImageEligibilityReasonValues } from './inbox-routing-vision.js'
 
+export const assistantCapabilityHostKindValues = [
+  'cli-backed',
+  'native-local',
+  'hosted-or-remote',
+] as const
+
+export const assistantToolBackendKindValues = [
+  'cli-wrapper',
+  'local-service',
+  'configured-web-read',
+  'hosted-api',
+  'native-file',
+] as const
+
 export const assistantToolSpecSchema = z.object({
   name: z.string().min(1),
   description: z.string().min(1),
@@ -17,16 +31,9 @@ export const assistantToolSpecSchema = z.object({
     'outward-side-effect',
   ]),
   riskClass: z.enum(['low', 'medium', 'high']),
-  preferredExecutionMode: z.enum([
-    'cli-backed',
-    'native-local',
-    'hosted-or-remote',
-  ]),
-  executionMode: z.enum([
-    'cli-backed',
-    'native-local',
-    'hosted-or-remote',
-  ]),
+  backendKind: z.enum(assistantToolBackendKindValues),
+  preferredHostKind: z.enum(assistantCapabilityHostKindValues),
+  selectedHostKind: z.enum(assistantCapabilityHostKindValues),
   provenance: z.object({
     origin: z.enum([
       'descriptor-generated',
@@ -162,7 +169,8 @@ export const inboxModelRouteResultSchema = z.object({
 export type AssistantToolSpec = z.infer<typeof assistantToolSpecSchema>
 export type AssistantToolMutationSemantics = AssistantToolSpec['mutationSemantics']
 export type AssistantToolRiskClass = AssistantToolSpec['riskClass']
-export type AssistantToolExecutionPreference = AssistantToolSpec['preferredExecutionMode']
+export type AssistantToolBackendKind = AssistantToolSpec['backendKind']
+export type AssistantToolHostKind = AssistantToolSpec['preferredHostKind']
 export type AssistantToolProvenance = AssistantToolSpec['provenance']
 export type AssistantToolCall = z.infer<typeof assistantToolCallSchema>
 export type AssistantToolExecutionResult = z.infer<

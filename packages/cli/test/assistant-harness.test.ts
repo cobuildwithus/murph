@@ -61,8 +61,6 @@ import {
   createAssistantCapabilityRegistry,
   createAssistantToolCatalogFromCapabilities,
   defineAssistantCapability,
-  createAssistantToolCatalog,
-  defineAssistantTool,
   resolveAssistantLanguageModel,
 } from '@murphai/assistant-core/model-harness'
 
@@ -82,21 +80,27 @@ afterEach(() => {
   delete process.env[TEST_API_KEY_ENV]
 })
 
-test('defineAssistantTool infers execute input from the tool schema', () => {
-  const definition = defineAssistantTool({
+test('defineAssistantCapability infers binding input from the capability schema', () => {
+  const capability = defineAssistantCapability({
     name: 'typed.echo',
-    description: 'Compile-time typed echo tool.',
+    description: 'Compile-time typed echo capability.',
     inputSchema: z.object({
       value: z.string().min(1),
       count: z.number().int().positive().optional(),
     }),
-    execute: async ({ value, count }) => ({
-      echoed: value,
-      count,
-    }),
+    backendKind: 'local-service',
+    preferredHostKind: 'native-local',
+    executionBindings: {
+      'native-local': async ({ value, count }) => ({
+        echoed: value,
+        count,
+      }),
+    },
   })
 
-  expectTypeOf<Parameters<typeof definition.execute>[0]>().toEqualTypeOf<{
+  expectTypeOf<
+    Parameters<NonNullable<typeof capability.executionBindings['native-local']>>[0]
+  >().toEqualTypeOf<{
     value: string
     count?: number | undefined
   }>()
@@ -113,9 +117,10 @@ test('assistant capability registry preserves capability metadata and host optio
       inputExample: {
         value: 'hello',
       },
+      backendKind: 'local-service',
       mutationSemantics: 'read-only',
       riskClass: 'low',
-      preferredExecutionMode: 'cli-backed',
+      preferredHostKind: 'cli-backed',
       executionBindings: {
         'cli-backed': async ({ value }) => ({
           host: 'cli',
@@ -130,6 +135,7 @@ test('assistant capability registry preserves capability metadata and host optio
   ])
 
   assert.deepEqual(registry.getCapability('host.echo'), {
+    backendKind: 'local-service',
     name: 'host.echo',
     description: 'Echo through multiple execution hosts.',
     inputExample: {
@@ -137,8 +143,8 @@ test('assistant capability registry preserves capability metadata and host optio
     },
     mutationSemantics: 'read-only',
     riskClass: 'low',
-    preferredExecutionMode: 'cli-backed',
-    executionModes: ['cli-backed', 'native-local'],
+    preferredHostKind: 'cli-backed',
+    supportedHostKinds: ['cli-backed', 'native-local'],
     provenance: {
       origin: 'hand-authored-helper',
       localOnly: true,
@@ -153,7 +159,7 @@ test('assistant capability registry preserves capability metadata and host optio
   ])
 
   assert.equal(catalog.hasTool('host.echo'), true)
-  assert.equal(catalog.listTools()[0]?.executionMode, 'cli-backed')
+  assert.equal(catalog.listTools()[0]?.selectedHostKind, 'cli-backed')
 })
 
 test('createAssistantToolCatalogFromCapabilities binds the preferred host when available and falls back otherwise', async () => {
@@ -163,7 +169,8 @@ test('createAssistantToolCatalogFromCapabilities binds the preferred host when a
     inputSchema: z.object({
       value: z.string().min(1),
     }),
-    preferredExecutionMode: 'cli-backed',
+    backendKind: 'local-service',
+    preferredHostKind: 'cli-backed',
     executionBindings: {
       'cli-backed': async ({ value }) => ({
         host: 'cli',
@@ -185,10 +192,10 @@ test('createAssistantToolCatalogFromCapabilities binds the preferred host when a
     [new NativeLocalCapabilityHost()],
   )
 
-  assert.equal(preferredCatalog.listTools()[0]?.preferredExecutionMode, 'cli-backed')
-  assert.equal(preferredCatalog.listTools()[0]?.executionMode, 'cli-backed')
-  assert.equal(fallbackCatalog.listTools()[0]?.preferredExecutionMode, 'cli-backed')
-  assert.equal(fallbackCatalog.listTools()[0]?.executionMode, 'native-local')
+  assert.equal(preferredCatalog.listTools()[0]?.preferredHostKind, 'cli-backed')
+  assert.equal(preferredCatalog.listTools()[0]?.selectedHostKind, 'cli-backed')
+  assert.equal(fallbackCatalog.listTools()[0]?.preferredHostKind, 'cli-backed')
+  assert.equal(fallbackCatalog.listTools()[0]?.selectedHostKind, 'native-local')
 
   const preferredResult = await preferredCatalog.executeCalls({
     calls: [
@@ -219,6 +226,61 @@ test('createAssistantToolCatalogFromCapabilities binds the preferred host when a
     host: 'native',
     value: 'hello',
   })
+})
+
+test('createAssistantToolCatalogFromCapabilities reuses the registry catalog assembly path', async () => {
+  const capabilities = [
+    defineAssistantCapability({
+      name: 'host.echo',
+      description: 'Echo through multiple execution hosts.',
+      inputSchema: z.object({
+        value: z.string().min(1),
+      }),
+      inputExample: {
+        value: 'hello',
+      },
+      executionBindings: {
+        'cli-backed': async ({ value }) => ({
+          host: 'cli',
+          value,
+        }),
+        'native-local': async ({ value }) => ({
+          host: 'native',
+          value,
+        }),
+      },
+    }),
+  ] as const
+  const hosts = [new CliBackedCapabilityHost(), new NativeLocalCapabilityHost()] as const
+  const registryCatalog = createAssistantCapabilityRegistry(capabilities).createToolCatalog(
+    hosts,
+  )
+  const helperCatalog = createAssistantToolCatalogFromCapabilities(capabilities, hosts)
+
+  assert.deepEqual(helperCatalog.listTools(), registryCatalog.listTools())
+
+  const registryResult = await registryCatalog.executeCalls({
+    calls: [
+      {
+        tool: 'host.echo',
+        input: {
+          value: 'hello',
+        },
+      },
+    ],
+  })
+  const helperResult = await helperCatalog.executeCalls({
+    calls: [
+      {
+        tool: 'host.echo',
+        input: {
+          value: 'hello',
+        },
+      },
+    ],
+  })
+
+  assert.deepEqual(helperResult, registryResult)
 })
 
 test('resolveAssistantLanguageModel uses gateway when no baseUrl is provided', () => {
@@ -367,23 +429,30 @@ test('resolveAssistantLanguageModel uses the openai-compatible provider with env
   assert.match(String(headers?.['user-agent']), /^ai-sdk\/openai-compatible\//u)
 })
 
-test('createAssistantToolCatalog preview mode validates input but does not execute the tool', async () => {
+test('capability tool catalog preview mode validates input but does not execute the tool', async () => {
   const execute = vi.fn(async ({ value }: { value: string }) => ({
     echoed: value,
   }))
-  const catalog = createAssistantToolCatalog([
-    {
-      name: 'echo',
-      description: 'Echo the supplied value.',
-      inputSchema: z.object({
-        value: z.string().min(1),
+  const catalog = createAssistantToolCatalogFromCapabilities(
+    [
+      defineAssistantCapability({
+        name: 'echo',
+        description: 'Echo the supplied value.',
+        inputSchema: z.object({
+          value: z.string().min(1),
+        }),
+        inputExample: {
+          value: 'hello',
+        },
+        backendKind: 'local-service',
+        preferredHostKind: 'native-local',
+        executionBindings: {
+          'native-local': execute,
+        },
       }),
-      inputExample: {
-        value: 'hello',
-      },
-      execute,
-    },
-  ])
+    ],
+    [new NativeLocalCapabilityHost()],
+  )
 
   const results = await catalog.executeCalls({
     calls: [
@@ -409,20 +478,27 @@ test('createAssistantToolCatalog preview mode validates input but does not execu
   assert.equal(catalog.listTools()[0]?.provenance.origin, 'hand-authored-helper')
 })
 
-test('createAssistantToolCatalog apply mode executes tools and reports unknown, invalid, and skipped calls', async () => {
+test('capability tool catalog apply mode executes tools and reports unknown, invalid, and skipped calls', async () => {
   const execute = vi.fn(async ({ value }: { value: string }) => ({
     echoed: value,
   }))
-  const catalog = createAssistantToolCatalog([
-    {
-      name: 'echo',
-      description: 'Echo the supplied value.',
-      inputSchema: z.object({
-        value: z.string().min(1),
+  const catalog = createAssistantToolCatalogFromCapabilities(
+    [
+      defineAssistantCapability({
+        name: 'echo',
+        description: 'Echo the supplied value.',
+        inputSchema: z.object({
+          value: z.string().min(1),
+        }),
+        backendKind: 'local-service',
+        preferredHostKind: 'native-local',
+        executionBindings: {
+          'native-local': execute,
+        },
       }),
-      execute,
-    },
-  ])
+    ],
+    [new NativeLocalCapabilityHost()],
+  )
 
   const applied = await catalog.executeCalls({
     calls: [

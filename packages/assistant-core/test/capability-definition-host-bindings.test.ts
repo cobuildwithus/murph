@@ -39,10 +39,12 @@ test('helper-defined capabilities can expose multiple execution bindings across 
       policyWrappers: [],
     },
     'cli-backed',
+    'local-service',
   )
   const registry = createAssistantCapabilityRegistry([capability])
 
   assert.deepEqual(registry.getCapability('host.echo'), {
+    backendKind: 'local-service',
     name: 'host.echo',
     description: 'Echo through CLI or native execution.',
     inputExample: {
@@ -50,8 +52,8 @@ test('helper-defined capabilities can expose multiple execution bindings across 
     },
     mutationSemantics: 'read-only',
     riskClass: 'low',
-    preferredExecutionMode: 'cli-backed',
-    executionModes: ['cli-backed', 'native-local'],
+    preferredHostKind: 'cli-backed',
+    supportedHostKinds: ['cli-backed', 'native-local'],
     provenance: {
       origin: 'hand-authored-helper',
       localOnly: true,
@@ -68,8 +70,8 @@ test('helper-defined capabilities can expose multiple execution bindings across 
     new NativeLocalCapabilityHost(),
   ])
 
-  assert.equal(preferredCatalog.listTools()[0]?.executionMode, 'cli-backed')
-  assert.equal(fallbackCatalog.listTools()[0]?.executionMode, 'native-local')
+  assert.equal(preferredCatalog.listTools()[0]?.selectedHostKind, 'cli-backed')
+  assert.equal(fallbackCatalog.listTools()[0]?.selectedHostKind, 'native-local')
 
   const preferredResult = await preferredCatalog.executeCalls({
     calls: [
