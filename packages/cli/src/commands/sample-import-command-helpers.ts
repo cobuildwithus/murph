@@ -1,5 +1,5 @@
 import { loadRuntimeModule } from '@murphai/assistant-engine/runtime-import'
-import type { ImportersRuntimeModule } from '@murphai/vault-inbox/usecases/types'
+import type { ImportersRuntimeModule } from '@murphai/assistant-engine/usecases/types'
 import { createRuntimeUnavailableError } from '@murphai/assistant-engine/commands/query-record-command-helpers'
 
 export interface ImportCsvSamplesOptions {

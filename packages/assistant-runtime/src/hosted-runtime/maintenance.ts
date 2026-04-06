@@ -11,7 +11,7 @@ import {
 } from "@murphai/parsers";
 import {
   createIntegratedInboxServices,
-} from "@murphai/vault-inbox";
+} from "@murphai/assistant-engine";
 import {
   getAssistantCronStatus,
   runAssistantAutomation,

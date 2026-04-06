@@ -25,8 +25,8 @@ import {
   CliBackedCapabilityHost,
   NativeLocalCapabilityHost,
 } from '@murphai/assistant-engine/model-harness'
-import type { InboxServices } from '@murphai/vault-inbox/inbox-services'
-import type { VaultServices } from '@murphai/vault-inbox/vault-services'
+import type { InboxServices } from '@murphai/assistant-engine/inbox-services'
+import type { VaultServices } from '@murphai/assistant-engine/vault-services'
 import { resolveAssistantStatePaths } from '@murphai/runtime-state/node'
 
 const test = baseTest.sequential

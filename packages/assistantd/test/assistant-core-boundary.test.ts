@@ -7,7 +7,7 @@ interface PackageManifest {
   dependencies?: Record<string, string>
 }
 
-test('assistantd depends on the engine and vault-inbox owners directly', async () => {
+test('assistantd depends on the canonical assistant-engine owner directly', async () => {
   const assistantdManifest = JSON.parse(
     await readFile(new URL('../package.json', import.meta.url), 'utf8'),
   ) as PackageManifest
@@ -21,10 +21,9 @@ test('assistantd depends on the engine and vault-inbox owners directly', async (
   )
 
   assert.equal(assistantdManifest.dependencies?.['@murphai/assistant-engine'], 'workspace:*')
-  assert.equal(assistantdManifest.dependencies?.['@murphai/vault-inbox'], 'workspace:*')
+  assert.equal(assistantdManifest.dependencies?.['@murphai/vault-inbox'], undefined)
   assert.equal(assistantdManifest.dependencies?.['@murphai/assistant-core'], undefined)
   assert.match(serviceSource, /from '@murphai\/assistant-engine'/)
-  assert.match(serviceSource, /from '@murphai\/vault-inbox'/)
   assert.match(httpSource, /from '@murphai\/assistant-engine'/)
   assert.doesNotMatch(serviceSource, /@murphai\/assistant-core/u)
   assert.doesNotMatch(httpSource, /@murphai\/assistant-core/u)

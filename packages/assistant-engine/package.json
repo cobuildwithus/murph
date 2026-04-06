@@ -143,6 +143,14 @@
       "types": "./dist/inbox-services/state.d.ts",
       "default": "./dist/inbox-services/state.js"
     },
+    "./inbox-services/*": {
+      "types": "./dist/inbox-services/*.d.ts",
+      "default": "./dist/inbox-services/*.js"
+    },
+    "./inbox-services": {
+      "types": "./dist/inbox-services.d.ts",
+      "default": "./dist/inbox-services.js"
+    },
     "./inbox-model-contracts": {
       "types": "./dist/inbox-model-contracts.d.ts",
       "default": "./dist/inbox-model-contracts.js"
@@ -162,6 +170,14 @@
     "./knowledge/documents": {
       "types": "./dist/knowledge/documents.d.ts",
       "default": "./dist/knowledge/documents.js"
+    },
+    "./knowledge/*": {
+      "types": "./dist/knowledge/*.d.ts",
+      "default": "./dist/knowledge/*.js"
+    },
+    "./knowledge": {
+      "types": "./dist/knowledge.d.ts",
+      "default": "./dist/knowledge.js"
     },
     "./model-harness": {
       "types": "./dist/model-harness.d.ts",
@@ -187,6 +203,10 @@
       "types": "./dist/runtime-import.d.ts",
       "default": "./dist/runtime-import.js"
     },
+    "./usecases/*": {
+      "types": "./dist/usecases/*.d.ts",
+      "default": "./dist/usecases/*.js"
+    },
     "./usecases/record-mutations": {
       "types": "./dist/usecases/record-mutations.d.ts",
       "default": "./dist/usecases/record-mutations.js"
@@ -202,6 +222,10 @@
     "./usecases/workout-model": {
       "types": "./dist/usecases/workout-model.d.ts",
       "default": "./dist/usecases/workout-model.js"
+    },
+    "./vault-services": {
+      "types": "./dist/vault-services.d.ts",
+      "default": "./dist/vault-services.js"
     }
   },
   "files": [

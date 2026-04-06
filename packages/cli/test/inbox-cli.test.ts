@@ -12,7 +12,7 @@ import {
 import {
   createIntegratedInboxServices,
   type InboxRunEvent,
-} from '@murphai/vault-inbox/inbox-services'
+} from '@murphai/assistant-engine/inbox-services'
 import {
   UNSAFE_FOREGROUND_LOG_DETAILS_ENV,
   formatInboxRunEventForTerminal,
@@ -20,7 +20,7 @@ import {
 } from '@murphai/assistant-cli/run-terminal-logging'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { createVaultCli } from '../src/vault-cli.js'
-import { createUnwiredVaultServices } from '@murphai/vault-inbox/vault-services'
+import { createUnwiredVaultServices } from '@murphai/assistant-engine/vault-services'
 import { requireData, type CliEnvelope } from './cli-test-helpers.js'
 
 const builtCoreRuntimeUrl = new URL('../../core/dist/index.js', import.meta.url).href

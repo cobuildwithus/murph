@@ -23,7 +23,7 @@ import {
   resolveAssistantProviderDefaults,
   saveAssistantOperatorDefaultsPatch,
 } from '@murphai/operator-config/operator-config'
-import type { InboxServices } from '@murphai/vault-inbox/inbox-services'
+import type { InboxServices } from '@murphai/assistant-engine/inbox-services'
 import {
   extractRecoveredAssistantSession,
   isAssistantProviderInterruptedError,

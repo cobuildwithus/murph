@@ -2,11 +2,6 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "paths": {
-      "@murphai/vault-inbox/knowledge": [
-        "packages/vault-inbox/src/knowledge.ts"
-      ]
-    },
     "rootDir": ".",
     "composite": false,
     "incremental": false
@@ -26,9 +21,6 @@
     },
     {
       "path": "../operator-config"
-    },
-    {
-      "path": "../vault-inbox"
     },
     {
       "path": "../assistant-cli"

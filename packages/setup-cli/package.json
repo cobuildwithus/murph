@@ -56,7 +56,6 @@
   "dependencies": {
     "@murphai/assistant-engine": "workspace:*",
     "@murphai/operator-config": "workspace:*",
-    "@murphai/vault-inbox": "workspace:*",
     "incur": "0.3.13",
     "ink": "^6.8.0",
     "react": "^19.2.4"

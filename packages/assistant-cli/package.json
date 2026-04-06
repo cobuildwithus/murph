@@ -92,7 +92,6 @@
   "dependencies": {
     "@murphai/assistant-engine": "workspace:*",
     "@murphai/operator-config": "workspace:*",
-    "@murphai/vault-inbox": "workspace:*",
     "@murphai/assistantd": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
     "incur": "0.3.13",

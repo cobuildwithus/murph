@@ -14,8 +14,8 @@ import {
   vaultCliCommandDescriptors,
 } from '../src/vault-cli-command-manifest.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
-import { createIntegratedInboxServices } from '@murphai/vault-inbox/inbox-services'
-import { createUnwiredVaultServices } from '@murphai/vault-inbox/vault-services'
+import { createIntegratedInboxServices } from '@murphai/assistant-engine/inbox-services'
+import { createUnwiredVaultServices } from '@murphai/assistant-engine/vault-services'
 import { createVaultCli } from '../src/vault-cli.js'
 import {
   binPath,

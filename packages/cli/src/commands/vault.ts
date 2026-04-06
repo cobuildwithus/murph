@@ -13,7 +13,7 @@ import {
   vaultUpgradeResultSchema,
   vaultValidateResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
-import type { VaultServices } from '@murphai/vault-inbox/vault-services'
+import type { VaultServices } from '@murphai/assistant-engine/vault-services'
 
 const unknownRecordSchema = z.record(z.string(), z.unknown())
 

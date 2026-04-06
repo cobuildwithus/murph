@@ -61,23 +61,23 @@ const mocks = vi.hoisted(() => ({
   })),
 }));
 
-vi.mock("@murphai/vault-inbox", () => ({
+vi.mock("@murphai/assistant-engine", () => ({
   createIntegratedInboxServices: mocks.createIntegratedInboxServices,
   createIntegratedVaultServices: mocks.createIntegratedVaultServices,
-}));
-
-vi.mock("@murphai/operator-config", () => ({
-  ensureHostedAssistantOperatorDefaults: mocks.ensureHostedAssistantOperatorDefaults,
-  readOperatorConfig: mocks.readOperatorConfig,
-  resolveHostedAssistantConfig: mocks.resolveHostedAssistantConfig,
-  resolveHostedAssistantOperatorDefaultsState: mocks.resolveHostedAssistantOperatorDefaultsState,
-}));
-
-vi.mock("@murphai/assistant-engine", () => ({
   getAssistantCronStatus: mocks.getAssistantCronStatus,
   readAssistantAutomationState: mocks.readAssistantAutomationState,
   runAssistantAutomation: mocks.runAssistantAutomation,
   saveAssistantAutomationState: mocks.saveAssistantAutomationState,
+}));
+
+vi.mock("@murphai/operator-config/hosted-assistant-config", () => ({
+  ensureHostedAssistantOperatorDefaults: mocks.ensureHostedAssistantOperatorDefaults,
+  resolveHostedAssistantOperatorDefaultsState: mocks.resolveHostedAssistantOperatorDefaultsState,
+}));
+
+vi.mock("@murphai/operator-config/operator-config", () => ({
+  readOperatorConfig: mocks.readOperatorConfig,
+  resolveHostedAssistantConfig: mocks.resolveHostedAssistantConfig,
 }));
 
 vi.mock("@murphai/device-syncd/config", () => ({

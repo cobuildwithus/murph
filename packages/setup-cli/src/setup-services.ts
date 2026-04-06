@@ -5,11 +5,11 @@ import { fileURLToPath } from 'node:url'
 import {
   createIntegratedInboxServices,
   type InboxServices,
-} from '@murphai/vault-inbox/inbox-services'
+} from '@murphai/assistant-engine/inbox-services'
 import {
   createIntegratedVaultServices,
   type VaultServices,
-} from '@murphai/vault-inbox/vault-services'
+} from '@murphai/assistant-engine/vault-services'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { resolveEffectiveTopLevelToken } from '@murphai/operator-config/command-helpers'
 import {

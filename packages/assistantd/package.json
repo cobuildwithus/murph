@@ -34,7 +34,6 @@
   },
   "dependencies": {
     "@murphai/assistant-engine": "workspace:*",
-    "@murphai/vault-inbox": "workspace:*",
     "@murphai/gateway-core": "workspace:*",
     "@murphai/gateway-local": "workspace:*",
     "@murphai/runtime-state": "workspace:*"

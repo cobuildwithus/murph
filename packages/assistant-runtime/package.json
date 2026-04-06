@@ -34,7 +34,6 @@
   "dependencies": {
     "@murphai/assistant-engine": "workspace:*",
     "@murphai/operator-config": "workspace:*",
-    "@murphai/vault-inbox": "workspace:*",
     "@murphai/core": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
     "@murphai/gateway-core": "workspace:*",

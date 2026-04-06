@@ -42,14 +42,14 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   assert.equal(cliManifest.dependencies?.['@murphai/assistant-cli'], 'workspace:*')
   assert.equal(cliManifest.dependencies?.['@murphai/setup-cli'], 'workspace:*')
   assert.equal(cliManifest.dependencies?.['@murphai/operator-config'], 'workspace:*')
-  assert.equal(cliManifest.dependencies?.['@murphai/vault-inbox'], 'workspace:*')
+  assert.equal(cliManifest.dependencies?.['@murphai/assistant-engine'], 'workspace:*')
 
   assert.equal(assistantCliManifest.dependencies?.['@murphai/assistant-engine'], 'workspace:*')
   assert.equal(assistantCliManifest.dependencies?.['@murphai/operator-config'], 'workspace:*')
 
   assert.equal(setupCliManifest.dependencies?.['@murphai/assistant-engine'], 'workspace:*')
   assert.equal(setupCliManifest.dependencies?.['@murphai/operator-config'], 'workspace:*')
-  assert.equal(setupCliManifest.dependencies?.['@murphai/vault-inbox'], 'workspace:*')
+  assert.equal(setupCliManifest.dependencies?.['@murphai/vault-inbox'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./assistant-backend'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./assistant-cli-contracts'], undefined)
 
@@ -58,7 +58,6 @@ test('cli and split owner packages publish the expected owner dependencies', asy
     '../assistant-cli',
     '../operator-config',
     '../setup-cli',
-    '../vault-inbox',
   ]) {
     assert.equal(
       cliTsconfig.references?.some((reference) => reference.path === referencePath),
@@ -76,8 +75,6 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   assert.deepEqual(repoTsconfigBase.compilerOptions?.paths?.['@murphai/operator-config/*'], [
     'packages/operator-config/src/*',
   ])
-  assert.deepEqual(repoTsconfigBase.compilerOptions?.paths?.['@murphai/vault-inbox/*'], [
-    'packages/vault-inbox/src/*',
-  ])
+  assert.equal(repoTsconfigBase.compilerOptions?.paths?.['@murphai/vault-inbox/*'], undefined)
   assert.equal(repoTsconfigBase.compilerOptions?.paths?.['@murphai/assistant-core/*'], undefined)
 })

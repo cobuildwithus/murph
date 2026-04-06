@@ -2,7 +2,7 @@
 
 Workspace-private local assistant runtime control plane for Murph.
 
-`assistantd` is the local daemon boundary for the personal assistant runtime. It keeps the canonical vault write surface in Murph core/CLI while giving the assistant runtime a single loopback-owned control plane for chat turns, session access, outbox draining, cron processing, automation scans, diagnostics, and status through `@murphai/assistant-engine` plus the vault/inbox service owner `@murphai/vault-inbox`.
+`assistantd` is the local daemon boundary for the personal assistant runtime. It keeps the canonical vault write surface in Murph core/CLI while giving the assistant runtime a single loopback-owned control plane for chat turns, session access, outbox draining, cron processing, automation scans, diagnostics, and status through `@murphai/assistant-engine`, which now also owns the canonical vault/inbox service surfaces used by the daemon.
 
 Like `device-syncd`, the daemon binds the control plane to localhost by default and requires a bearer token for every control-plane request. It is meant to run one daemon per selected vault.
 

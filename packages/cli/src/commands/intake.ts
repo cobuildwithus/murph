@@ -8,8 +8,8 @@ import {
   pathSchema,
   showResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
-import { loadImportersRuntimeModule } from '@murphai/vault-inbox/usecases/runtime'
-import type { VaultServices } from '@murphai/vault-inbox/vault-services'
+import { loadImportersRuntimeModule } from '@murphai/assistant-engine/usecases/runtime'
+import type { VaultServices } from '@murphai/assistant-engine/vault-services'
 import {
   showAssessmentManifest,
   showAssessmentRaw,

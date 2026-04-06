@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { test } from "vitest";
 
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
-import { createIntegratedInboxServices } from "@murphai/vault-inbox/inbox-services";
+import { createIntegratedInboxServices } from "@murphai/assistant-engine/inbox-services";
 
 const builtCoreRuntimeUrl = new URL("../../core/dist/index.js", import.meta.url).href;
 const builtInboxRuntimeUrl = new URL("../../inboxd/dist/index.js", import.meta.url).href;

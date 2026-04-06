@@ -7,7 +7,7 @@ interface PackageManifest {
   dependencies?: Record<string, string>
 }
 
-test('assistant-runtime depends on the split owner packages directly', async () => {
+test('assistant-runtime depends on the canonical engine and operator-config owners directly', async () => {
   const runtimeManifest = JSON.parse(
     await readFile(new URL('../package.json', import.meta.url), 'utf8'),
   ) as PackageManifest
@@ -22,7 +22,7 @@ test('assistant-runtime depends on the split owner packages directly', async () 
 
   assert.equal(runtimeManifest.dependencies?.['@murphai/assistant-engine'], 'workspace:*')
   assert.equal(runtimeManifest.dependencies?.['@murphai/operator-config'], 'workspace:*')
-  assert.equal(runtimeManifest.dependencies?.['@murphai/vault-inbox'], 'workspace:*')
+  assert.equal(runtimeManifest.dependencies?.['@murphai/vault-inbox'], undefined)
   assert.equal(runtimeManifest.dependencies?.['@murphai/assistant-core'], undefined)
   assert.match(
     hostedRuntimeSource,
@@ -36,7 +36,7 @@ test('assistant-runtime depends on the split owner packages directly', async () 
     hostedContextSource,
     /from "@murphai\/operator-config\/operator-config"/,
   )
-  assert.match(hostedContextSource, /from "@murphai\/vault-inbox"/)
+  assert.match(hostedContextSource, /from "@murphai\/assistant-engine"/)
   assert.doesNotMatch(hostedRuntimeSource, /@murphai\/assistant-core/u)
   assert.doesNotMatch(hostedContextSource, /@murphai\/assistant-core/u)
 })

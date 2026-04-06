@@ -17,9 +17,6 @@
       "path": "./packages/operator-config"
     },
     {
-      "path": "./packages/vault-inbox"
-    },
-    {
       "path": "./packages/assistant-engine"
     },
     {

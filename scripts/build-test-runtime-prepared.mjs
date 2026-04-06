@@ -13,12 +13,15 @@ const requiredWorkspaceSmokeSubpathsByPackage = {
     "vault-cli-contracts",
     "vault-cli-errors",
   ],
-  "vault-inbox": [
+  "assistant-engine": [
+    "inbox-services",
+    "knowledge",
     "usecases/intervention",
     "usecases/workout",
     "usecases/workout-format",
     "usecases/workout-import",
     "usecases/workout-measurement",
+    "vault-services"
   ],
   "assistant-cli": [
     "commands/assistant",
@@ -34,7 +37,6 @@ const baseSmokeImportPaths = [
   "packages/messaging-ingress/dist/index.js",
   "packages/runtime-state/dist/index.js",
   "packages/operator-config/dist/index.js",
-  "packages/vault-inbox/dist/index.js",
   "packages/assistant-engine/dist/index.js",
   "packages/assistant-cli/dist/index.js",
   "packages/setup-cli/dist/index.js",
@@ -152,14 +154,16 @@ function collectWorkspacePackageSmokeImports(input) {
   }
 
   const discoveredSubpaths = [...subpaths].sort();
+  const publishedImportSpecifiers = [
+    `@murphai/${input.packageName}`,
+    ...discoveredSubpaths.map((subpath) => `@murphai/${input.packageName}/${subpath}`),
+  ];
 
   return {
     distImportPaths: discoveredSubpaths.map((subpath) =>
       path.join(distRoot, `${subpath}.js`),
     ),
-    publishedImportSpecifiers: input.requiredSubpaths.map(
-      (subpath) => `@murphai/${input.packageName}/${subpath}`,
-    ),
+    publishedImportSpecifiers,
   };
 }
 

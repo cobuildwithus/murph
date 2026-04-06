@@ -2,7 +2,7 @@ import type { AssistantRunEvent } from '@murphai/assistant-engine/assistant-auto
 import type {
   InboxRunEvent,
   RuntimeCaptureRecordInput,
-} from '@murphai/vault-inbox/inbox-services'
+} from '@murphai/assistant-engine/inbox-services'
 import { normalizeNullableString as normalizeLabel } from '@murphai/operator-config/text/shared'
 
 export type ForegroundLogScope = 'assistant' | 'inbox'

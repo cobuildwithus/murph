@@ -12,7 +12,7 @@ import {
   deviceProviderListResultSchema,
   deviceSyncBaseUrlSchema,
 } from '@murphai/operator-config/device-cli-contracts'
-import type { VaultServices } from '@murphai/vault-inbox/vault-services'
+import type { VaultServices } from '@murphai/assistant-engine/vault-services'
 
 const providerNameSchema = z
   .string()

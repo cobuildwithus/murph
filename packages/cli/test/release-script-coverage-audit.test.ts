@@ -315,7 +315,6 @@ describe('monorepo release flow coverage audit', () => {
         '@murphai/query',
         '@murphai/runtime-state',
         '@murphai/setup-cli',
-        '@murphai/vault-inbox',
       ],
       name: '@murphai/murph',
     }))

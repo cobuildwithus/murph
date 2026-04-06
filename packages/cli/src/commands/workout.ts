@@ -17,7 +17,7 @@ import {
   workoutMeasurementAddResultSchema,
   workoutUnitPreferencesResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
-import type { VaultServices } from '@murphai/vault-inbox/vault-services'
+import type { VaultServices } from '@murphai/assistant-engine/vault-services'
 import {
   listWorkoutRecords,
   listWorkoutMeasurementRecords,
@@ -27,27 +27,27 @@ import {
   showWorkoutRecord,
   workoutImportManifestResultSchema,
   workoutLookupSchema,
-} from '@murphai/vault-inbox/usecases/workout-read'
+} from '@murphai/assistant-engine/usecases/workout-read'
 import {
   listWorkoutFormats,
   logWorkoutFormat,
   saveWorkoutFormat,
   showWorkoutFormat,
-} from '@murphai/vault-inbox/usecases/workout-format'
+} from '@murphai/assistant-engine/usecases/workout-format'
 import {
   addWorkoutRecord,
   deleteWorkoutRecord,
   editWorkoutRecord,
-} from '@murphai/vault-inbox/usecases/workout'
+} from '@murphai/assistant-engine/usecases/workout'
 import {
   importWorkoutCsv,
   inspectWorkoutCsvImport,
-} from '@murphai/vault-inbox/usecases/workout-import'
+} from '@murphai/assistant-engine/usecases/workout-import'
 import {
   addWorkoutMeasurementRecord,
   setWorkoutUnitPreferences,
   showWorkoutUnitPreferences,
-} from '@murphai/vault-inbox/usecases/workout-measurement'
+} from '@murphai/assistant-engine/usecases/workout-measurement'
 import {
   createDirectEntityDeleteCommandDefinition,
   createDirectEventBackedEntityEditCommandDefinition,
