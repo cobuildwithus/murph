@@ -1,6 +1,6 @@
 # `@murphai/importers`
 
-Owns ingestion adapters for documents, meals, and sample streams. Importers may parse inputs and prepare metadata, but they must route all canonical writes through `@murphai/core`.
+Workspace-private ingestion adapters for documents, meals, and sample streams. Importers may parse inputs and prepare metadata, but they must route all canonical writes through `@murphai/core`.
 
 Adding a new wearable provider? Pair the importer work with the transport half described in `docs/device-provider-contribution-kit.md` at the repo root, and use the scaffolds listed in `docs/templates/README.md` so the provider lands through both seams together.
 

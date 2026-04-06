@@ -1,7 +1,7 @@
 {
   "name": "@murphai/assistantd",
   "version": "0.1.16",
-  "private": false,
+  "private": true,
   "type": "module",
   "license": "GPL-3.0-only",
   "repository": {
@@ -26,9 +26,6 @@
       "types": "./dist/client.d.ts",
       "default": "./dist/client.js"
     }
-  },
-  "publishConfig": {
-    "access": "public"
   },
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.json --force",

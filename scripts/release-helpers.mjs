@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -105,6 +105,53 @@ export async function writeJson(filePath, value) {
   await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+function isNodeErrorWithCode(error, code) {
+  return Boolean(
+    error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      error.code === code,
+  );
+}
+
+export async function loadWorkspacePackages(repoRoot = resolveRepoRoot()) {
+  const packagesDir = path.join(repoRoot, 'packages');
+  const directoryEntries = await readdir(packagesDir, {
+    withFileTypes: true,
+  });
+  const workspacePackages = [];
+
+  for (const directoryEntry of directoryEntries) {
+    if (!directoryEntry.isDirectory()) {
+      continue;
+    }
+
+    const dirPath = path.join(packagesDir, directoryEntry.name);
+    const packageJsonPath = path.join(dirPath, 'package.json');
+
+    let packageJson;
+    try {
+      packageJson = await readJson(packageJsonPath);
+    } catch (error) {
+      if (isNodeErrorWithCode(error, 'ENOENT')) {
+        continue;
+      }
+      throw error;
+    }
+
+    workspacePackages.push({
+      dirPath,
+      name: packageJson.name,
+      packageJson,
+      packageJsonPath,
+      path: path.relative(repoRoot, dirPath),
+      workspaceDependencies: collectWorkspaceDependencies(packageJson),
+    });
+  }
+
+  return workspacePackages.sort((left, right) => left.path.localeCompare(right.path));
+}
+
 export async function loadReleaseManifest(repoRoot = resolveRepoRoot()) {
   const manifestPath = path.join(repoRoot, 'scripts', 'release-manifest.json');
   return readJson(manifestPath);
@@ -114,6 +161,13 @@ export async function loadReleaseContext(repoRoot = resolveRepoRoot()) {
   const manifest = await loadReleaseManifest(repoRoot);
   const rootPackageJsonPath = path.join(repoRoot, 'package.json');
   const rootPackageJson = await readJson(rootPackageJsonPath);
+  const workspacePackages = await loadWorkspacePackages(repoRoot);
+  const workspacePackageByName = new Map(
+    workspacePackages.map((entry) => [entry.name, entry]),
+  );
+  const workspacePackageByPath = new Map(
+    workspacePackages.map((entry) => [entry.path, entry]),
+  );
 
   const packages = [];
   const seenNames = new Set();
@@ -130,10 +184,12 @@ export async function loadReleaseContext(repoRoot = resolveRepoRoot()) {
     seenNames.add(entry.name);
     seenPaths.add(entry.path);
 
+    const workspaceEntry = workspacePackageByPath.get(entry.path);
     const dirPath = path.join(repoRoot, entry.path);
     const packageJsonPath = path.join(dirPath, 'package.json');
-    const packageJson = await readJson(packageJsonPath);
-    const workspaceDependencies = collectWorkspaceDependencies(packageJson);
+    const packageJson = workspaceEntry?.packageJson ?? await readJson(packageJsonPath);
+    const workspaceDependencies =
+      workspaceEntry?.workspaceDependencies ?? collectWorkspaceDependencies(packageJson);
 
     packages.push({
       ...entry,
@@ -155,9 +211,13 @@ export async function loadReleaseContext(repoRoot = resolveRepoRoot()) {
     packageByName,
     packages,
     primaryPackage,
+    releasePackageNames: new Set(packages.map((entry) => entry.name)),
     repoRoot,
     rootPackageJson,
     rootPackageJsonPath,
+    workspacePackageByName,
+    workspacePackageByPath,
+    workspacePackages,
   };
 }
 
@@ -231,6 +291,176 @@ export function topologicallySortReleasePackages(packages) {
   return sorted;
 }
 
+export function normalizeBundleDependencyNames(packageJson) {
+  const rawBundleDependencies =
+    packageJson?.bundleDependencies ?? packageJson?.bundledDependencies;
+
+  if (!Array.isArray(rawBundleDependencies)) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(
+      rawBundleDependencies
+        .filter((entry) => typeof entry === 'string')
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0),
+    ),
+  ).sort((left, right) => left.localeCompare(right));
+}
+
+export function resolveBundledWorkspaceDependencies(
+  packageJson,
+  workspacePackageByName,
+  releasePackageNames,
+) {
+  return normalizeBundleDependencyNames(packageJson).filter(
+    (dependencyName) =>
+      workspacePackageByName.has(dependencyName) &&
+      !releasePackageNames.has(dependencyName),
+  );
+}
+
+export function collectBundledWorkspacePackageClosure(
+  entryName,
+  workspacePackageByName,
+  releasePackageNames,
+) {
+  const rootEntry = workspacePackageByName.get(entryName);
+  if (!rootEntry) {
+    throw new Error(`Unknown workspace package: ${entryName}`);
+  }
+
+  const pendingNames = rootEntry.workspaceDependencies
+    .map((dependency) => dependency.name)
+    .filter((dependencyName) => !releasePackageNames.has(dependencyName));
+  const bundledNames = new Set();
+
+  while (pendingNames.length > 0) {
+    const dependencyName = pendingNames.pop();
+    if (!dependencyName || bundledNames.has(dependencyName)) {
+      continue;
+    }
+
+    bundledNames.add(dependencyName);
+
+    const dependencyEntry = workspacePackageByName.get(dependencyName);
+    if (!dependencyEntry) {
+      continue;
+    }
+
+    for (const dependency of dependencyEntry.workspaceDependencies) {
+      if (!releasePackageNames.has(dependency.name)) {
+        pendingNames.push(dependency.name);
+      }
+    }
+  }
+
+  return Array.from(bundledNames).sort((left, right) =>
+    left.localeCompare(right),
+  );
+}
+
+export function collectBundledDependencyRequirements(
+  entryName,
+  workspacePackageByName,
+  releasePackageNames,
+) {
+  const rootEntry = workspacePackageByName.get(entryName);
+  if (!rootEntry) {
+    throw new Error(`Unknown workspace package: ${entryName}`);
+  }
+
+  const pendingNames = rootEntry.workspaceDependencies
+    .map((dependency) => dependency.name)
+    .filter((dependencyName) => !releasePackageNames.has(dependencyName));
+  const privateWorkspaceDependencies = new Set();
+  const publicWorkspaceDependencies = new Set();
+  const externalDependencies = new Set();
+
+  while (pendingNames.length > 0) {
+    const dependencyName = pendingNames.pop();
+    if (!dependencyName || privateWorkspaceDependencies.has(dependencyName)) {
+      continue;
+    }
+
+    privateWorkspaceDependencies.add(dependencyName);
+
+    const dependencyEntry = workspacePackageByName.get(dependencyName);
+    if (!dependencyEntry) {
+      continue;
+    }
+
+    for (const dependency of dependencyEntry.workspaceDependencies) {
+      if (releasePackageNames.has(dependency.name)) {
+        publicWorkspaceDependencies.add(dependency.name);
+      } else {
+        pendingNames.push(dependency.name);
+      }
+    }
+
+    for (const sectionName of [
+      'dependencies',
+      'optionalDependencies',
+      'peerDependencies',
+    ]) {
+      const section = dependencyEntry.packageJson?.[sectionName];
+      for (const dependencyName of Object.keys(section ?? {})) {
+        if (!dependencyName.startsWith('@murphai/')) {
+          externalDependencies.add(dependencyName);
+        }
+      }
+    }
+  }
+
+  return {
+    externalDependencies: Array.from(externalDependencies).sort((left, right) =>
+      left.localeCompare(right),
+    ),
+    privateWorkspaceDependencies: Array.from(privateWorkspaceDependencies).sort(
+      (left, right) => left.localeCompare(right),
+    ),
+    publicWorkspaceDependencies: Array.from(publicWorkspaceDependencies).sort(
+      (left, right) => left.localeCompare(right),
+    ),
+  };
+}
+
+export function clonePackageJsonWithResolvedWorkspaceVersions(
+  packageJson,
+  workspacePackageByName,
+) {
+  const nextPackageJson = JSON.parse(JSON.stringify(packageJson));
+  const dependencySectionNames = [
+    'dependencies',
+    'optionalDependencies',
+    'peerDependencies',
+    'devDependencies',
+  ];
+
+  for (const sectionName of dependencySectionNames) {
+    const section = nextPackageJson[sectionName];
+    if (!section || typeof section !== 'object') {
+      continue;
+    }
+
+    for (const [dependencyName, version] of Object.entries(section)) {
+      if (typeof version !== 'string' || !version.startsWith('workspace:')) {
+        continue;
+      }
+
+      const dependencyEntry = workspacePackageByName.get(dependencyName);
+      if (!dependencyEntry) {
+        continue;
+      }
+
+      section[dependencyName] = dependencyEntry.packageJson.version;
+    }
+  }
+
+  return nextPackageJson;
+}
+
 export function validateReleaseContext(context, options = {}) {
   const errors = [];
   const { expectVersion } = options;
@@ -265,11 +495,45 @@ export function validateReleaseContext(context, options = {}) {
 
   const versions = new Set();
 
+  for (const entry of context.workspacePackages) {
+    if (context.releasePackageNames.has(entry.name)) {
+      continue;
+    }
+
+    if (entry.packageJson?.private !== true) {
+      errors.push(
+        `${path.relative(context.repoRoot, entry.packageJsonPath)} must be private: true because it is outside the public release manifest.`,
+      );
+    }
+  }
+
   for (const entry of packages) {
     const packageName = entry.packageJson?.name;
     const packageVersion = entry.packageJson?.version;
     const repositoryUrl = repositoryUrlFrom(entry.packageJson?.repository);
     const exportEntry = entry.packageJson?.exports?.['.'];
+    const bundledWorkspaceDependencies = resolveBundledWorkspaceDependencies(
+      entry.packageJson,
+      context.workspacePackageByName,
+      context.releasePackageNames,
+    );
+    const bundledDependencyRequirements = collectBundledDependencyRequirements(
+      entry.name,
+      context.workspacePackageByName,
+      context.releasePackageNames,
+    );
+    const bundledWorkspaceDependencySet = new Set(bundledWorkspaceDependencies);
+    const directRuntimeDependencyNames = new Set(
+      Object.keys(entry.packageJson?.dependencies ?? {}).concat(
+        Object.keys(entry.packageJson?.optionalDependencies ?? {}),
+        Object.keys(entry.packageJson?.peerDependencies ?? {}),
+      ),
+    );
+    const directWorkspaceDependencyNames = new Set(
+      entry.workspaceDependencies.map((dependency) => dependency.name),
+    );
+    const requiredBundledWorkspaceDependencies =
+      bundledDependencyRequirements.privateWorkspaceDependencies;
 
     if (packageName !== entry.name) {
       errors.push(
@@ -328,9 +592,83 @@ export function validateReleaseContext(context, options = {}) {
     }
 
     for (const dependency of entry.workspaceDependencies) {
-      if (!packageByName.has(dependency.name)) {
+      if (packageByName.has(dependency.name)) {
+        continue;
+      }
+
+      if (!context.workspacePackageByName.has(dependency.name)) {
         errors.push(
-          `${path.relative(context.repoRoot, entry.packageJsonPath)} depends on workspace package ${dependency.name}, but it is not in the release manifest publish set.`,
+          `${path.relative(context.repoRoot, entry.packageJsonPath)} depends on workspace package ${dependency.name}, but no matching workspace package.json was found.`,
+        );
+      }
+    }
+
+    for (const dependencyName of requiredBundledWorkspaceDependencies) {
+      const dependencyEntry = context.workspacePackageByName.get(dependencyName);
+
+      if (!dependencyEntry) {
+        errors.push(
+          `${path.relative(context.repoRoot, entry.packageJsonPath)} depends on internal workspace package ${dependencyName}, but no matching workspace package.json was found.`,
+        );
+        continue;
+      }
+
+      if (dependencyEntry.packageJson?.private !== true) {
+        errors.push(
+          `${path.relative(context.repoRoot, entry.packageJsonPath)} depends on internal workspace package ${dependencyName}, but ${path.relative(context.repoRoot, dependencyEntry.packageJsonPath)} must be private: true when it stays out of the public release manifest.`,
+        );
+      }
+
+      if (!bundledWorkspaceDependencySet.has(dependencyName)) {
+        errors.push(
+          `${path.relative(context.repoRoot, entry.packageJsonPath)} depends on internal workspace package ${dependencyName}, but bundleDependencies must include it so the packed tarball stays installable.`,
+        );
+      }
+    }
+
+    for (const dependencyName of bundledWorkspaceDependencies) {
+      const dependencyEntry = context.workspacePackageByName.get(dependencyName);
+
+      if (!directWorkspaceDependencyNames.has(dependencyName)) {
+        errors.push(
+          `${path.relative(context.repoRoot, entry.packageJsonPath)} bundleDependencies includes ${dependencyName}, but it must also be declared in dependencies, optionalDependencies, or peerDependencies so the packed tarball exposes a coherent dependency graph.`,
+        );
+      }
+
+      if (!dependencyEntry) {
+        if (dependencyName.startsWith('@murphai/')) {
+          errors.push(
+            `${path.relative(context.repoRoot, entry.packageJsonPath)} bundleDependencies includes ${dependencyName}, but no matching workspace package.json was found.`,
+          );
+        }
+        continue;
+      }
+
+      if (packageByName.has(dependencyName)) {
+        errors.push(
+          `${path.relative(context.repoRoot, entry.packageJsonPath)} bundleDependencies should not include published workspace package ${dependencyName}; keep public packages as normal dependencies instead.`,
+        );
+      }
+
+      if (dependencyEntry.packageJson?.private !== true) {
+        errors.push(
+          `${path.relative(context.repoRoot, entry.packageJsonPath)} bundleDependencies includes ${dependencyName}, but ${path.relative(context.repoRoot, dependencyEntry.packageJsonPath)} must be private: true when it is bundled instead of published.`,
+        );
+      }
+    }
+
+    for (const dependencyName of bundledDependencyRequirements.publicWorkspaceDependencies) {
+      if (!directRuntimeDependencyNames.has(dependencyName)) {
+        errors.push(
+          `${path.relative(context.repoRoot, entry.packageJsonPath)} bundles internal workspace packages that depend on published workspace package ${dependencyName}, but ${dependencyName} must also be declared in dependencies, optionalDependencies, or peerDependencies so npm installs it.`,
+        );
+      }
+    }
+
+    for (const dependencyName of bundledDependencyRequirements.externalDependencies) {
+      if (!directRuntimeDependencyNames.has(dependencyName)) {
+        errors.push(
+          `${path.relative(context.repoRoot, entry.packageJsonPath)} bundles internal workspace packages that depend on external package ${dependencyName}, but ${dependencyName} must also be declared in dependencies, optionalDependencies, or peerDependencies so npm installs it.`,
         );
       }
     }
@@ -402,6 +740,11 @@ export function validateReleaseContext(context, options = {}) {
         }
       : null,
     packages: orderedPackages.map((entry) => ({
+      bundledWorkspaceDependencies: resolveBundledWorkspaceDependencies(
+        entry.packageJson,
+        context.workspacePackageByName,
+        context.releasePackageNames,
+      ),
       name: entry.name,
       packageJsonPath: path.relative(context.repoRoot, entry.packageJsonPath),
       path: entry.path,

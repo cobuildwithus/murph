@@ -1,11 +1,14 @@
-import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
+import { cp, copyFile, mkdir, readdir, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
+  clonePackageJsonWithResolvedWorkspaceVersions,
   loadReleaseContext,
   parseReleaseArgs,
+  resolveBundledWorkspaceDependencies,
   validateReleaseContext,
+  writeJson,
 } from './release-helpers.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -32,6 +35,126 @@ async function tgzFiles(directoryPath) {
     }
     throw error;
   }
+}
+
+function stageDirectoryName(packageName) {
+  return packageName.replace(/^@/u, '').replace(/\//gu, '__');
+}
+
+async function pathExists(targetPath) {
+  try {
+    await stat(targetPath);
+    return true;
+  } catch (error) {
+    if (error && typeof error === 'object' && error.code === 'ENOENT') {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function copyPayloadPath(sourcePath, targetPath) {
+  const sourceStats = await stat(sourcePath);
+
+  if (sourceStats.isDirectory()) {
+    await cp(sourcePath, targetPath, {
+      recursive: true,
+    });
+    return;
+  }
+
+  await mkdir(path.dirname(targetPath), {
+    recursive: true,
+  });
+  await copyFile(sourcePath, targetPath);
+}
+
+async function copyPublishPayload(entry, targetDir) {
+  const includePaths = ['package.json', ...(entry.packageJson.files ?? [])];
+  const seenPaths = new Set();
+
+  for (const relativePath of includePaths) {
+    if (typeof relativePath !== 'string' || relativePath.length === 0) {
+      continue;
+    }
+
+    if (seenPaths.has(relativePath)) {
+      continue;
+    }
+    seenPaths.add(relativePath);
+
+    const sourcePath = path.join(entry.dirPath, relativePath);
+    if (!(await pathExists(sourcePath))) {
+      throw new Error(
+        `Cannot pack ${entry.name}: missing ${path.relative(entry.dirPath, sourcePath)}. Run the package build before packing publishables.`,
+      );
+    }
+
+    await copyPayloadPath(sourcePath, path.join(targetDir, relativePath));
+  }
+}
+
+function buildTarballPackageJson(entry, context, bundledWorkspaceDependencies) {
+  const tarballPackageJson = clonePackageJsonWithResolvedWorkspaceVersions(
+    entry.packageJson,
+    context.workspacePackageByName,
+  );
+
+  delete tarballPackageJson.devDependencies;
+  delete tarballPackageJson.scripts;
+
+  if (bundledWorkspaceDependencies.length > 0) {
+    tarballPackageJson.bundleDependencies = bundledWorkspaceDependencies;
+  } else {
+    delete tarballPackageJson.bundleDependencies;
+    delete tarballPackageJson.bundledDependencies;
+  }
+
+  return tarballPackageJson;
+}
+
+async function materializeStage(entry, context, stageDir) {
+  await rm(stageDir, {
+    force: true,
+    recursive: true,
+  });
+  await mkdir(stageDir, {
+    recursive: true,
+  });
+
+  await copyPublishPayload(entry, stageDir);
+
+  const bundledWorkspaceDependencies = resolveBundledWorkspaceDependencies(
+    entry.packageJson,
+    context.workspacePackageByName,
+    context.releasePackageNames,
+  );
+
+  for (const dependencyName of bundledWorkspaceDependencies) {
+    const dependencyEntry = context.workspacePackageByName.get(dependencyName);
+    if (!dependencyEntry) {
+      throw new Error(
+        `Cannot bundle ${dependencyName} for ${entry.name}: no matching workspace package was found.`,
+      );
+    }
+
+    const dependencyTargetDir = path.join(
+      stageDir,
+      'node_modules',
+      ...dependencyName.split('/'),
+    );
+
+    await copyPublishPayload(dependencyEntry, dependencyTargetDir);
+    await writeJson(
+      path.join(dependencyTargetDir, 'package.json'),
+      buildTarballPackageJson(dependencyEntry, context, []),
+    );
+  }
+
+  await writeJson(
+    path.join(stageDir, 'package.json'),
+    buildTarballPackageJson(entry, context, bundledWorkspaceDependencies),
+  );
 }
 
 const options = parseReleaseArgs(process.argv.slice(2), {
@@ -80,6 +203,7 @@ const packOutputPath = path.resolve(
   context.repoRoot,
   options.packOutput || path.join(options.outDir, 'pack-output.json'),
 );
+const stageRoot = path.join(outDir, '.staging');
 
 if (options.clean) {
   await rm(outDir, { force: true, recursive: true });
@@ -87,16 +211,21 @@ if (options.clean) {
 
 await mkdir(outDir, { recursive: true });
 await mkdir(path.dirname(packOutputPath), { recursive: true });
+await rm(stageRoot, { force: true, recursive: true });
+await mkdir(stageRoot, { recursive: true });
 
 const packedPackages = [];
 
 for (const entry of context.orderedPackages) {
+  const stageDir = path.join(stageRoot, stageDirectoryName(entry.name));
+  await materializeStage(entry, context, stageDir);
+
   const beforeFiles = new Set(await tgzFiles(outDir));
   const { stdout } = await execFileAsync(
-    'pnpm',
-    ['pack', '--json', '--pack-destination', outDir],
+    'npm',
+    ['pack', '--ignore-scripts', '--json', '--pack-destination', outDir],
     {
-      cwd: entry.dirPath,
+      cwd: stageDir,
     },
   );
 
@@ -110,7 +239,7 @@ for (const entry of context.orderedPackages) {
 
   if (!rawTarballPath) {
     throw new Error(
-      `Unable to resolve tarball filename for ${entry.name} from pnpm pack output.`,
+      `Unable to resolve tarball filename for ${entry.name} from npm pack output.`,
     );
   }
 
@@ -140,5 +269,5 @@ const packOutput = {
   version: summary.version,
 };
 
-await writeFile(packOutputPath, `${JSON.stringify(packOutput, null, 2)}\n`);
+await writeJson(packOutputPath, packOutput);
 console.log(`Wrote pack manifest: ${path.relative(context.repoRoot, packOutputPath)}`);

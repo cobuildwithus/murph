@@ -1,12 +1,9 @@
 {
   "name": "@murphai/inboxd",
   "version": "0.1.16",
-  "private": false,
+  "private": true,
   "description": "Local inbox ingestion runtime for Murph.",
   "license": "GPL-3.0-only",
-  "publishConfig": {
-    "access": "public"
-  },
   "repository": {
     "type": "git",
     "url": "https://github.com/cobuildwithus/murph"

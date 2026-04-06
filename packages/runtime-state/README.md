@@ -1,6 +1,6 @@
 # `@murphai/runtime-state`
 
-Shared runtime-state helpers for Murph packages that need explicit local state
+Workspace-private shared runtime-state helpers for Murph packages that need explicit local state
 next to a vault without turning that state into canonical product truth.
 
 ## Scope

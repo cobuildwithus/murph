@@ -77,10 +77,10 @@ vault-cli knowledge lint
 - local assistant chat, runtime automation, status, outbox, canonical memory, and canonical automation commands
 - a non-canonical derived knowledge wiki you can upsert and inspect under `derived/knowledge/**`
 - inbox capture, review, backfill, and parser-driven attachment extraction
-- optional local device sync through `@murphai/device-syncd`
-- optional local assistant daemon support through `@murphai/assistantd`
+- optional local device sync through the bundled workspace-private `packages/device-syncd` runtime
+- optional local assistant daemon support through the bundled workspace-private `packages/assistantd` daemon
 
-`@murphai/murph` is the installable local Murph product entrypoint. The wider monorepo also contains hosted control and execution apps, but those are repo internals rather than something npm users need to install directly.
+`@murphai/murph` is the installable local Murph product entrypoint. The wider monorepo also contains hosted control and execution apps plus many workspace-private owner packages, but the public npm surface is intentionally small: `@murphai/murph`, `@murphai/openclaw-plugin`, `@murphai/contracts`, `@murphai/hosted-execution`, and `@murphai/gateway-core`.
 
 ## From source
 
@@ -138,7 +138,7 @@ Current repo-local package responsibilities include:
 - inbox and device command surfaces that delegate to headless owner packages
 - release ownership for the public `@murphai/murph` package and bins
 
-Programmatic assistant, setup, and shared usecase APIs now publish from their owner packages directly: `@murphai/assistant-cli`, `@murphai/setup-cli`, `@murphai/assistant-engine`, `@murphai/operator-config`, and `@murphai/vault-inbox`. `@murphai/murph` no longer republishes those helper surfaces through local shim files.
+Programmatic assistant, setup, and shared usecase APIs now stay in workspace-private owner packages such as `@murphai/assistant-cli`, `@murphai/setup-cli`, `@murphai/assistant-engine`, `@murphai/operator-config`, and `@murphai/vault-inbox`. The public npm install story is still `@murphai/murph`; the release flow bundles those private owners into the CLI tarball instead of publishing them as separate npm products.
 
 ## Release flow
 
@@ -156,9 +156,9 @@ bash scripts/release.sh preminor --preid alpha
 bash scripts/release.sh 0.1.0-rc.1 --dry-run
 ```
 
-The release flow bumps every publishable package in the manifest to one shared version, updates `packages/cli/CHANGELOG.md`, writes `packages/cli/release-notes/v<version>.md`, and then creates a repository tag so `.github/workflows/release.yml` can pack and publish all tarballs in dependency order.
+The release flow bumps the five public packages in the manifest to one shared version, updates `packages/cli/CHANGELOG.md`, writes `packages/cli/release-notes/v<version>.md`, and then creates a repository tag so `.github/workflows/release.yml` can pack and publish the public tarballs in dependency order. Workspace-private runtime packages remain in the monorepo and are bundled into the public tarballs when a public package still depends on them at runtime.
 
-npm trusted publishing is configured per package on npm, not once per repository. Because this monorepo publishes multiple `@murphai/*` packages, maintainers should bootstrap those package-level trust bindings before relying on tag-driven release publication:
+npm trusted publishing is configured per package on npm, not once per repository. Because this monorepo still publishes a small set of `@murphai/*` packages, maintainers should bootstrap those package-level trust bindings before relying on tag-driven release publication:
 
 ```bash
 pnpm release:trust:github -- --dry-run

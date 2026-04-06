@@ -15,64 +15,8 @@
       "path": "packages/hosted-execution"
     },
     {
-      "name": "@murphai/messaging-ingress",
-      "path": "packages/messaging-ingress"
-    },
-    {
-      "name": "@murphai/runtime-state",
-      "path": "packages/runtime-state"
-    },
-    {
-      "name": "@murphai/operator-config",
-      "path": "packages/operator-config"
-    },
-    {
-      "name": "@murphai/vault-inbox",
-      "path": "packages/vault-inbox"
-    },
-    {
-      "name": "@murphai/assistant-engine",
-      "path": "packages/assistant-engine"
-    },
-    {
-      "name": "@murphai/assistant-cli",
-      "path": "packages/assistant-cli"
-    },
-    {
-      "name": "@murphai/setup-cli",
-      "path": "packages/setup-cli"
-    },
-    {
       "name": "@murphai/gateway-core",
       "path": "packages/gateway-core"
-    },
-    {
-      "name": "@murphai/gateway-local",
-      "path": "packages/gateway-local"
-    },
-    {
-      "name": "@murphai/core",
-      "path": "packages/core"
-    },
-    {
-      "name": "@murphai/importers",
-      "path": "packages/importers"
-    },
-    {
-      "name": "@murphai/query",
-      "path": "packages/query"
-    },
-    {
-      "name": "@murphai/device-syncd",
-      "path": "packages/device-syncd"
-    },
-    {
-      "name": "@murphai/inboxd",
-      "path": "packages/inboxd"
-    },
-    {
-      "name": "@murphai/parsers",
-      "path": "packages/parsers"
     },
     {
       "name": "@murphai/murph",
@@ -81,14 +25,6 @@
     {
       "name": "@murphai/openclaw-plugin",
       "path": "packages/openclaw-plugin"
-    },
-    {
-      "name": "@murphai/assistant-runtime",
-      "path": "packages/assistant-runtime"
-    },
-    {
-      "name": "@murphai/assistantd",
-      "path": "packages/assistantd"
     }
   ]
 }

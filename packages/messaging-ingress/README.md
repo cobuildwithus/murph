@@ -1,6 +1,6 @@
 # `@murphai/messaging-ingress`
 
-Shared stateless ingress semantics for Murph messaging providers.
+Workspace-private shared stateless ingress semantics for Murph messaging providers.
 
 This package owns provider-specific webhook parsing, verification, target grammar,
 message extraction, summary helpers, and sparse allowlisted payload minimization.

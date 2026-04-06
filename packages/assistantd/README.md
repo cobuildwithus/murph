@@ -1,6 +1,6 @@
 # @murphai/assistantd
 
-Published local assistant runtime control plane for Murph.
+Workspace-private local assistant runtime control plane for Murph.
 
 `assistantd` is the local daemon boundary for the personal assistant runtime. It keeps the canonical vault write surface in Murph core/CLI while giving the assistant runtime a single loopback-owned control plane for chat turns, session access, outbox draining, cron processing, automation scans, diagnostics, and status through `@murphai/assistant-engine` plus the vault/inbox service owner `@murphai/vault-inbox`.
 
@@ -11,7 +11,7 @@ What it does:
 - owns assistant session execution through one runtime authority per vault
 - keeps assistant runtime state under `vault/.runtime/operations/assistant/**`, not in canonical vault files
 - exposes status, session, outbox, cron, and automation control routes for local clients
-- publishes `@murphai/assistantd/client` as the loopback-only HTTP client surface for daemon-routed callers
+- exposes `@murphai/assistantd/client` as the loopback-only HTTP client surface for daemon-routed callers inside this workspace or bundled public tarballs
 - lets the CLI operate as an HTTP client when `MURPH_ASSISTANTD_BASE_URL` and `MURPH_ASSISTANTD_CONTROL_TOKEN` are configured
 
 What it does not do:
@@ -78,4 +78,4 @@ These routes serve the operational conversation/message gateway surface for loca
 
 Local gateway helpers now honor the same assistantd base-url/token environment variables as the assistant client path, so consumers can route steady-state gateway reads/sends through the daemon whenever it is configured. The transport-neutral gateway contracts stay in `@murphai/gateway-core`; the vault-backed local runtime now lives in `@murphai/gateway-local`.
 
-The published `@murphai/assistantd/client` subpath now owns that loopback client config plus the gateway daemon client helpers. CLI-only assistant routing helpers may still wrap it where they need package-local assistant contracts, but the daemon transport substrate itself no longer lives in `packages/cli`.
+The workspace-private `@murphai/assistantd/client` subpath now owns that loopback client config plus the gateway daemon client helpers. CLI-only assistant routing helpers may still wrap it where they need package-local assistant contracts, but the daemon transport substrate itself no longer lives in `packages/cli`.

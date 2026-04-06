@@ -279,7 +279,7 @@ describe('monorepo release flow coverage audit', () => {
         env: withoutNodeV8Coverage(),
       }),
     ) as {
-      packages: Array<{ name: string }>
+      packages: Array<{ bundledWorkspaceDependencies?: string[]; name: string }>
       primaryPackage: { name: string } | null
       version: string
     }
@@ -288,27 +288,36 @@ describe('monorepo release flow coverage audit', () => {
     expect(summary.primaryPackage?.name).toBe('@murphai/murph')
     expect(summary.packages.map((entry) => entry.name)).toEqual([
       '@murphai/contracts',
-      '@murphai/messaging-ingress',
-      '@murphai/runtime-state',
-      '@murphai/gateway-core',
-      '@murphai/core',
-      '@murphai/importers',
-      '@murphai/query',
-      '@murphai/device-syncd',
-      '@murphai/parsers',
-      '@murphai/openclaw-plugin',
       '@murphai/hosted-execution',
-      '@murphai/inboxd',
-      '@murphai/operator-config',
-      '@murphai/gateway-local',
-      '@murphai/assistant-engine',
-      '@murphai/vault-inbox',
-      '@murphai/setup-cli',
-      '@murphai/assistant-runtime',
-      '@murphai/assistantd',
-      '@murphai/assistant-cli',
+      '@murphai/gateway-core',
       '@murphai/murph',
+      '@murphai/openclaw-plugin',
     ])
+
+    expect(summary.packages).toContainEqual(expect.objectContaining({
+      bundledWorkspaceDependencies: ['@murphai/runtime-state'],
+      name: '@murphai/hosted-execution',
+    }))
+    expect(summary.packages).toContainEqual(expect.objectContaining({
+      bundledWorkspaceDependencies: [
+        '@murphai/assistant-cli',
+        '@murphai/assistant-engine',
+        '@murphai/assistantd',
+        '@murphai/core',
+        '@murphai/device-syncd',
+        '@murphai/gateway-local',
+        '@murphai/importers',
+        '@murphai/inboxd',
+        '@murphai/messaging-ingress',
+        '@murphai/operator-config',
+        '@murphai/parsers',
+        '@murphai/query',
+        '@murphai/runtime-state',
+        '@murphai/setup-cli',
+        '@murphai/vault-inbox',
+      ],
+      name: '@murphai/murph',
+    }))
   })
 
   it('keeps release script help usage stable for both --help and -h', () => {
@@ -412,6 +421,11 @@ describe('monorepo release flow coverage audit', () => {
     expect(cliPackageJson.bin?.murph).toBe('dist/bin.js')
     expect(cliPackageJson.bin?.['vault-cli']).toBe('dist/bin.js')
     expect(cliPackageJson.dependencies?.['@murphai/device-syncd']).toBe('workspace:*')
+    expect(cliPackageJson.dependencies?.['@murphai/gateway-local']).toBe('workspace:*')
+    expect(cliPackageJson.dependencies?.['@murphai/messaging-ingress']).toBe('workspace:*')
+    expect(cliPackageJson.bundleDependencies).toContain('@murphai/assistant-engine')
+    expect(cliPackageJson.bundleDependencies).toContain('@murphai/gateway-local')
+    expect(cliPackageJson.bundleDependencies).toContain('@murphai/messaging-ingress')
     expect(cliPackageJson.scripts?.['release:check']).toBeUndefined()
     expect(existsSync(path.join(packageDir, 'scripts', 'release.sh'))).toBe(false)
     expect(existsSync(path.join(packageDir, 'scripts', 'release-check.sh'))).toBe(false)

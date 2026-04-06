@@ -1,6 +1,6 @@
 # `@murphai/inboxd`
 
-Source-agnostic inbox ingestion for Murph.
+Workspace-private source-agnostic inbox ingestion for Murph.
 
 This package keeps canonical inbox evidence in the vault and uses local runtime state for source cursors, a durable local capture mutation cursor, transient dedupe caches, capture-local search tables, and attachment job state.
 

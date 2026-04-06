@@ -35,5 +35,8 @@
     "@murphai/contracts": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
     "jose": "^6.2.2"
-  }
+  },
+  "bundleDependencies": [
+    "@murphai/runtime-state"
+  ]
 }
