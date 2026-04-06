@@ -9,6 +9,27 @@ export const assistantToolSpecSchema = z.object({
   name: z.string().min(1),
   description: z.string().min(1),
   inputExample: z.record(z.string(), z.unknown()).nullable(),
+  provenance: z.object({
+    origin: z.enum([
+      'descriptor-generated',
+      'hand-authored-helper',
+      'vault-service-backed',
+      'cli-backed',
+      'configured-web-read',
+      'hosted-api-backed',
+      'native-local-only',
+    ]),
+    localOnly: z.boolean(),
+    generatedFrom: z.string().min(1).nullable(),
+    policyWrappers: z.array(z.enum([
+      'command-blocking',
+      'default-vault-injection',
+      'format-default',
+      'stdin-input-materialization',
+      'argv-redaction',
+      'output-redaction',
+    ])),
+  }),
 })
 
 export const assistantToolCallSchema = z.object({
@@ -121,6 +142,7 @@ export const inboxModelRouteResultSchema = z.object({
 })
 
 export type AssistantToolSpec = z.infer<typeof assistantToolSpecSchema>
+export type AssistantToolProvenance = AssistantToolSpec['provenance']
 export type AssistantToolCall = z.infer<typeof assistantToolCallSchema>
 export type AssistantToolExecutionResult = z.infer<
   typeof assistantToolExecutionResultSchema

@@ -282,6 +282,7 @@ test('createAssistantToolCatalog preview mode validates input but does not execu
     },
   })
   assert.equal(execute.mock.calls.length, 0)
+  assert.equal(catalog.listTools()[0]?.provenance.origin, 'hand-authored-helper')
 })
 
 test('createAssistantToolCatalog apply mode executes tools and reports unknown, invalid, and skipped calls', async () => {

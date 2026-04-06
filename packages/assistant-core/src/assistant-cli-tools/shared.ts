@@ -1,0 +1,56 @@
+export interface AssistantToolContext {
+  allowSensitiveHealthContext?: boolean
+  captureId?: string
+  cliEnv?: NodeJS.ProcessEnv
+  executionContext?: import('../assistant/execution-context.js').AssistantExecutionContext | null
+  inboxServices?: import('../inbox-services.js').InboxServices
+  requestId?: string | null
+  sessionId?: string | null
+  vault: string
+  vaultServices?: import('../vault-services.js').VaultServices
+  workingDirectory?: string | null
+}
+
+export interface AssistantToolCatalogOptions {
+  includeAssistantRuntimeTools?: boolean
+  includeQueryTools?: boolean
+  includeStatefulWriteTools?: boolean
+  includeVaultTextReadTool?: boolean
+  includeVaultWriteTools?: boolean
+  includeWebSearchTools?: boolean
+}
+
+export interface AssistantCliLlmsManifestSchemaNode {
+  description?: string
+  enum?: readonly string[]
+  items?: AssistantCliLlmsManifestSchemaNode
+  properties?: Record<string, AssistantCliLlmsManifestSchemaNode>
+  required?: readonly string[]
+  type?: string
+}
+
+export interface AssistantCliLlmsManifestCommandSchema {
+  args?: AssistantCliLlmsManifestSchemaNode
+  options?: AssistantCliLlmsManifestSchemaNode
+  output?: AssistantCliLlmsManifestSchemaNode
+}
+
+export interface AssistantCliLlmsManifestCommand {
+  description?: string
+  examples?: readonly unknown[]
+  name: string
+  schema?: AssistantCliLlmsManifestCommandSchema
+}
+
+export interface AssistantCliLlmsManifest {
+  commands: AssistantCliLlmsManifestCommand[]
+  version?: string
+}
+
+export const assistantToolTextReadDefaultMaxChars = 8_000
+export const assistantToolTextReadMaxChars = 20_000
+export const assistantToolTextReadChunkBytes = 4_096
+export const assistantCliExecutorToolName = 'murph.cli.run'
+export const assistantCliDefaultTimeoutMs = 10 * 60 * 1000
+export const assistantCliMaxTimeoutMs = 60 * 60 * 1000
+export const assistantCliMaxOutputChars = 80_000

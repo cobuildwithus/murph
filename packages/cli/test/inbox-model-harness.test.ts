@@ -1097,6 +1097,10 @@ test('createDefaultAssistantToolCatalog exposes assistant runtime, recipe, and f
     vault: '/tmp/murph-vault',
     vaultServices: createStubVaultServices(),
   })
+  const tools = catalog.listTools()
+  const readTextTool = tools.find((tool) => tool.name === 'vault.fs.readText')
+  const goalUpsertTool = tools.find((tool) => tool.name === 'vault.goal.upsert')
+  const shareLinkTool = tools.find((tool) => tool.name === 'vault.share.createLink')
 
   assert.equal(catalog.hasTool('assistant.state.show'), true)
   assert.equal(catalog.hasTool('assistant.memory.search'), true)
@@ -1118,6 +1122,10 @@ test('createDefaultAssistantToolCatalog exposes assistant runtime, recipe, and f
   assert.equal(catalog.hasTool('vault.food.list'), true)
   assert.equal(catalog.hasTool('vault.food.upsert'), true)
   assert.equal(catalog.hasTool('vault.share.createLink'), true)
+  assert.equal(readTextTool?.provenance.origin, 'native-local-only')
+  assert.equal(goalUpsertTool?.provenance.origin, 'descriptor-generated')
+  assert.equal(goalUpsertTool?.provenance.generatedFrom, 'healthEntityDescriptors')
+  assert.equal(shareLinkTool?.provenance.origin, 'hosted-api-backed')
 })
 
 test('createDefaultAssistantToolCatalog can upsert and read derived knowledge pages directly', async () => {
