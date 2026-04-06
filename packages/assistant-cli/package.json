@@ -78,10 +78,6 @@
     "./assistant/*": {
       "types": "./dist/assistant/*.d.ts",
       "default": "./dist/assistant/*.js"
-    },
-    "./commands/*": {
-      "types": "./dist/commands/*.d.ts",
-      "default": "./dist/commands/*.js"
     }
   },
   "files": [

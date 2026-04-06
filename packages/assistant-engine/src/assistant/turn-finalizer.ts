@@ -1,7 +1,7 @@
 import {
   assistantBackendTargetToProviderConfigInput,
   createAssistantModelTarget,
-} from '../assistant-backend.js'
+} from '@murphai/operator-config/assistant-backend'
 import {
   assistantProviderBindingSchema,
   type AssistantSession,

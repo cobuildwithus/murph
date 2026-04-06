@@ -45,7 +45,7 @@ import {
   resolveAssistantStatePaths,
   type AssistantStatePaths,
 } from './store/paths.js'
-import { createAssistantModelTarget } from '../assistant-backend.js'
+import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 export {
   redactAssistantDisplayPath,
   resolveAssistantAliasKey,

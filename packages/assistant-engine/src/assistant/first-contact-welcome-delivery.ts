@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 
 import type { AssistantSession } from '../assistant-cli-contracts.js'
 import { resolveAssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
-import { createDefaultLocalAssistantModelTarget } from '../assistant-backend.js'
+import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { finalizeAssistantTurnFromDeliveryOutcome } from './delivery-service.js'
 import {

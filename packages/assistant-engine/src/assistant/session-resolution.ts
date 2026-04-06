@@ -1,6 +1,6 @@
 import {
   type AssistantModelTarget,
-} from '../assistant-backend.js'
+} from '@murphai/operator-config/assistant-backend'
 import type { AssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import {
   compactAssistantProviderConfigInput,

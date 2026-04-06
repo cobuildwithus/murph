@@ -1,6 +1,6 @@
 import type { ModelMessage, UserModelMessage } from 'ai'
 import { getAssistantBindingContextLines } from '../bindings.js'
-import { resolveOpenAICompatibleProviderTitle } from '../openai-compatible-provider-presets.js'
+import { resolveOpenAICompatibleProviderTitle } from '@murphai/operator-config/assistant/openai-compatible-provider-presets'
 import {
   normalizeNullableString,
   readAssistantEnvString,

@@ -11,10 +11,12 @@ import {
 } from "@murphai/vault-inbox";
 import {
   ensureHostedAssistantOperatorDefaults,
+  resolveHostedAssistantOperatorDefaultsState,
+} from "@murphai/operator-config/hosted-assistant-config";
+import {
   readOperatorConfig,
   resolveHostedAssistantConfig,
-  resolveHostedAssistantOperatorDefaultsState,
-} from "@murphai/operator-config";
+} from "@murphai/operator-config/operator-config";
 import {
   readAssistantAutomationState,
   saveAssistantAutomationState,
