@@ -5,7 +5,6 @@ import path from "node:path";
 import { afterEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 import { ContainerProxy as PackageContainerProxy } from "@cloudflare/containers";
-import { artifactObjectKey } from "../src/bundle-store.ts";
 import { buildHostedStorageAad, deriveHostedStorageOpaqueId } from "../src/crypto-context.ts";
 import {
   createHostedVerifiedEmailUserEnv,
@@ -18,6 +17,7 @@ import { readHostedExecutionEnvironment } from "../src/env.ts";
 import { createHostedExecutionJournalStore, persistHostedExecutionCommit } from "../src/execution-journal.ts";
 import { reconcileHostedEmailVerifiedSenderRoute } from "../src/hosted-email.ts";
 import worker, { ContainerProxy as ExportedContainerProxy, UserRunnerDurableObject } from "../src/index.ts";
+import { hostedArtifactObjectKey } from "../src/storage-paths.ts";
 import { createHostedUserKeyStore } from "../src/user-key-store.ts";
 import { encodeHostedUserEnvPayload } from "../src/user-env.ts";
 import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
@@ -371,7 +371,7 @@ describe("cloudflare worker routes", () => {
     );
   });
 
-  it("persists finalized runner bundles through the outbound results.worker handler", async () => {
+  it("hard-cuts the removed runner finalize route from the outbound results.worker handler", async () => {
     const harness = createUserRunnerDurableObject();
     await resolveHostedUserCryptoContextForTest(harness.env, "member_123");
 
@@ -407,22 +407,12 @@ describe("cloudflare worker routes", () => {
     );
     const journalStore = await createHostedExecutionJournalStoreForTest(harness.env, "member_123");
 
-    expect(finalizeResponse.status).toBe(200);
-    await expect(finalizeResponse.json()).resolves.toMatchObject({
-      finalized: {
-        eventId: "evt_finalize",
-        finalizedAt: expect.any(String),
-        result: {
-          summary: "committed",
-        },
-      },
-      ok: true,
-    });
+    expect(finalizeResponse.status).toBe(404);
     await expect(journalStore.readCommittedResult("member_123", "evt_finalize")).resolves.toMatchObject({
       bundleRef: {
-        size: "vault-final".length,
+        size: "vault-committed".length,
       },
-      finalizedAt: expect.any(String),
+      finalizedAt: null,
       result: {
         summary: "committed",
       },
@@ -451,7 +441,7 @@ describe("cloudflare worker routes", () => {
       harness.env,
     );
 
-    await expect(() => callRunnerOutbound(
+    const removedFinalizeResponse = await callRunnerOutbound(
       new Request("http://results.worker/events/evt_finalize_auth/finalize", {
         body: JSON.stringify({
           bundle: 42,
@@ -462,7 +452,8 @@ describe("cloudflare worker routes", () => {
         method: "POST",
       }),
       harness.env,
-    )).rejects.toThrow("bundle must be a string or null.");
+    );
+    expect(removedFinalizeResponse.status).toBe(404);
 
     await expect(() => callRunnerOutbound(
       new Request("http://results.worker/events/evt_bad_commit/commit", {
@@ -2725,7 +2716,7 @@ async function hostedArtifactObjectKeyForTest(
   sha256: string,
 ): Promise<string> {
   const crypto = await resolveHostedUserCryptoContextForTest(env, userId);
-  return artifactObjectKey(crypto.rootKey, userId, sha256);
+  return hostedArtifactObjectKey(crypto.rootKey, userId, sha256);
 }
 
 async function hostedUserKeyEnvelopeObjectKeyForTest(

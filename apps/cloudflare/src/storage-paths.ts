@@ -231,8 +231,3 @@ export async function listHostedStorageObjectKeys(
 ): Promise<string[]> {
   return [await mapKey(rootKey)];
 }
-
-export {
-  hostedSideEffectRecordKey as hostedSideEffectJournalObjectKey,
-  hostedSideEffectRecordKeys as hostedSideEffectJournalObjectKeys,
-};

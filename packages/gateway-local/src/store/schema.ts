@@ -125,22 +125,6 @@ export function ensureGatewayStoreBaseSchema(database: DatabaseSync): void {
   `)
 }
 
-export function resetGatewayServingSnapshotSchema(database: DatabaseSync): void {
-  database.exec(`
-    DROP INDEX IF EXISTS gateway_conversations_activity_idx;
-    DROP INDEX IF EXISTS gateway_messages_session_created_idx;
-    DROP INDEX IF EXISTS gateway_attachments_message_idx;
-    DROP INDEX IF EXISTS gateway_attachments_session_idx;
-    DROP TABLE IF EXISTS gateway_attachments;
-    DROP TABLE IF EXISTS gateway_messages;
-    DROP TABLE IF EXISTS gateway_conversations;
-  `)
-
-  for (const obsoleteMetaKey of ['snapshot.empty', 'snapshot.initialized'] as const) {
-    writeMeta(database, obsoleteMetaKey, null)
-  }
-}
-
 export function readMeta(database: DatabaseSync, key: string): string | null {
   const row = database
     .prepare('SELECT value FROM gateway_meta WHERE key = ?')

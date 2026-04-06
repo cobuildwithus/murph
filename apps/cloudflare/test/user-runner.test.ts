@@ -15,7 +15,6 @@ import {
 } from "@murphai/runtime-state/node";
 
 import {
-  artifactObjectKey,
   createHostedArtifactStore,
   createHostedBundleStore,
 } from "../src/bundle-store.js";
@@ -29,6 +28,7 @@ import {
 } from "../src/execution-journal.js";
 import { createHostedDispatchPayloadStore } from "../src/dispatch-payload-store.js";
 import { writeHostedEmailRawMessage } from "../src/hosted-email.js";
+import { hostedArtifactObjectKey } from "../src/storage-paths.js";
 import { createHostedPendingUsageStore } from "../src/usage-store.js";
 import { createHostedUserKeyStore } from "../src/user-key-store.js";
 import { HostedUserRunner } from "../src/user-runner.js";
@@ -237,7 +237,7 @@ describe("HostedUserRunner", () => {
       expect(bucket.keys()).toContain(previousAgentRef.key);
       expect(bucket.keys()).toContain(previousVaultRef.key);
       expect(bucket.keys()).not.toContain(
-        await artifactObjectKey(
+        await hostedArtifactObjectKey(
           environment.platformEnvelopeKey,
           "member_gc",
           previousArtifact!.ref.sha256,
@@ -322,7 +322,7 @@ describe("HostedUserRunner", () => {
       });
 
       expect(bucket.keys()).toContain(
-        await artifactObjectKey(
+        await hostedArtifactObjectKey(
           environment.platformEnvelopeKey,
           "member_gc_same_ref",
           artifact!.ref.sha256,
@@ -508,7 +508,7 @@ describe("HostedUserRunner", () => {
       expect(status.retryingEventId).toBeNull();
       expect(status.lastError).toBeNull();
       expect(bucket.keys()).not.toContain(
-        await artifactObjectKey(crypto.rootKey, "member_recovered_gc", previousArtifact!.ref.sha256),
+        await hostedArtifactObjectKey(crypto.rootKey, "member_recovered_gc", previousArtifact!.ref.sha256),
       );
       expect(bucket.keys()).toContain(previousVaultRef.key);
       expect(bucket.keys()).toContain(previousAgentRef.key);
@@ -1877,18 +1877,18 @@ describe("HostedUserRunner", () => {
       expect(status.bundleRefs.agentState?.size).toBe("agent-state-final".length);
       expect(status.bundleRefs.vault?.size).toBe(finalVaultBundle!.byteLength);
       expect(bucket.keys()).toContain(
-        await artifactObjectKey(crypto.rootKey, "member_cleanup_failure", previousArtifact!.ref.sha256),
+        await hostedArtifactObjectKey(crypto.rootKey, "member_cleanup_failure", previousArtifact!.ref.sha256),
       );
       expect(bucket.keys()).toContain(
-        await artifactObjectKey(crypto.rootKey, "member_cleanup_failure", committedArtifact!.ref.sha256),
+        await hostedArtifactObjectKey(crypto.rootKey, "member_cleanup_failure", committedArtifact!.ref.sha256),
       );
       expect(
         deleteArtifactSpy.mock.calls
           .map(([key]) => String(key))
           .filter((key) => key.includes("users/artifacts/")),
       ).toEqual(expect.arrayContaining([
-        await artifactObjectKey(crypto.rootKey, "member_cleanup_failure", previousArtifact!.ref.sha256),
-        await artifactObjectKey(crypto.rootKey, "member_cleanup_failure", committedArtifact!.ref.sha256),
+        await hostedArtifactObjectKey(crypto.rootKey, "member_cleanup_failure", previousArtifact!.ref.sha256),
+        await hostedArtifactObjectKey(crypto.rootKey, "member_cleanup_failure", committedArtifact!.ref.sha256),
       ]));
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
