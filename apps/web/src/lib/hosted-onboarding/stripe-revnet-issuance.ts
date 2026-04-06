@@ -1,7 +1,6 @@
 import { REVNET_NATIVE_TOKEN } from "@cobuild/wire";
 import {
   Prisma,
-  type HostedMember,
   type HostedRevnetIssuance,
   type PrismaClient,
 } from "@prisma/client";
@@ -11,6 +10,7 @@ import type Stripe from "stripe";
 import { requireHostedMemberWalletAddressForRevnet } from "./billing-service";
 import { coerceStripeObjectId } from "./billing";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
+import { type HostedMemberAggregate } from "./hosted-member-store";
 import {
   coerceHostedWalletAddress,
   convertStripeMinorAmountToRevnetPaymentAmount,
@@ -101,7 +101,7 @@ type HostedRevnetIssuanceClaimState =
 
 export async function maybeIssueHostedRevnetForStripeInvoice(input: {
   invoice: Stripe.Invoice;
-  member: HostedMember;
+  member: HostedMemberAggregate;
   prisma: PrismaClient | Prisma.TransactionClient;
 }): Promise<void> {
   const issuance = await ensureHostedRevnetIssuanceForStripeInvoice(input);
@@ -135,7 +135,7 @@ export async function maybeIssueHostedRevnetForStripeInvoice(input: {
 
 export async function ensureHostedRevnetIssuanceForStripeInvoice(input: {
   invoice: Stripe.Invoice;
-  member: HostedMember;
+  member: HostedMemberAggregate;
   prisma: PrismaClient | Prisma.TransactionClient;
 }): Promise<HostedRevnetIssuanceRecord | null> {
   const eligibility = loadHostedRevnetIssuanceEligibility(input);
@@ -332,7 +332,7 @@ function isHostedRevnetIssuanceBroadcastStatusUnknown(issuance: HostedRevnetIssu
 
 function loadHostedRevnetIssuanceEligibility(input: {
   invoice: Stripe.Invoice;
-  member: HostedMember;
+  member: HostedMemberAggregate;
   prisma: PrismaClient | Prisma.TransactionClient;
 }): HostedRevnetIssuanceEligibility {
   if (input.member.status === HostedMemberStatus.suspended) {

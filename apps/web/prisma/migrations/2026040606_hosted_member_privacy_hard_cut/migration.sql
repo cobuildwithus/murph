@@ -1,0 +1,17 @@
+ALTER TABLE "hosted_member"
+DROP COLUMN "phone_number",
+DROP COLUMN "normalized_phone_number",
+DROP COLUMN "phone_number_verified_at",
+DROP COLUMN "privy_user_id",
+DROP COLUMN "wallet_address",
+DROP COLUMN "wallet_chain_type",
+DROP COLUMN "wallet_provider",
+DROP COLUMN "wallet_created_at",
+DROP COLUMN "stripe_customer_id",
+DROP COLUMN "stripe_subscription_id",
+DROP COLUMN "stripe_latest_checkout_session_id",
+DROP COLUMN "stripe_latest_billing_event_created_at",
+DROP COLUMN "stripe_latest_billing_event_id",
+DROP COLUMN "linq_chat_id",
+DROP COLUMN "telegram_user_id",
+DROP COLUMN "telegram_username";

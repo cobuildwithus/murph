@@ -86,9 +86,9 @@ export async function getHostedInviteStatus(input: {
   }
 
   const sessionMatchesInvite = input.authenticatedMember?.id === invite.memberId;
-  const inviteIdentity = invite.member.identity ?? invite.member;
-  const hasPrivyIdentity = Boolean(inviteIdentity.privyUserId)
-    && (!isHostedOnboardingRevnetEnabled() || Boolean(inviteIdentity.walletAddress));
+  const inviteIdentity = requireHostedInviteMemberIdentity(invite.member);
+  const hasPrivyIdentity = Boolean(inviteIdentity?.privyUserId)
+    && (!isHostedOnboardingRevnetEnabled() || Boolean(inviteIdentity?.walletAddress));
   const isActive = hasHostedMemberActiveAccess({
     billingStatus: invite.member.billingStatus,
     memberStatus: invite.member.status,
@@ -109,16 +109,16 @@ export async function getHostedInviteStatus(input: {
       billingReady,
       phoneAuthReady,
     },
-    invite: {
-      code: invite.inviteCode,
-      expiresAt: invite.expiresAt.toISOString(),
+      invite: {
+        code: invite.inviteCode,
+        expiresAt: invite.expiresAt.toISOString(),
+        phoneHint: readHostedPhoneHint(inviteIdentity.maskedPhoneNumberHint),
+        status: inviteStatus,
+      },
+      member: {
       phoneHint: readHostedPhoneHint(inviteIdentity.maskedPhoneNumberHint),
-      status: inviteStatus,
-    },
-    member: {
-      phoneHint: readHostedPhoneHint(inviteIdentity.maskedPhoneNumberHint),
-      status: invite.member.status,
-    },
+        status: invite.member.status,
+      },
     session: {
       authenticated: Boolean(input.authenticatedMember),
       expiresAt: null,
@@ -244,6 +244,28 @@ export async function requireHostedInviteForAuthentication(
   }
 
   return invite;
+}
+
+export function requireHostedInviteMemberIdentity(
+  member: Prisma.HostedInviteGetPayload<{
+    include: {
+      member: {
+        include: {
+          identity: true;
+        };
+      };
+    };
+  }>["member"],
+) {
+  if (member.identity) {
+    return member.identity;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_MEMBER_IDENTITY_MISSING",
+    message: "Hosted invite identity state is missing.",
+    httpStatus: 500,
+  });
 }
 
 async function findHostedInviteByCode(inviteCode: string, prisma: PrismaClient) {

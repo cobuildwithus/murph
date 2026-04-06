@@ -101,7 +101,24 @@ function makeInvite(member: ReturnType<typeof makeMember>, overrides: Record<str
     expiresAt: new Date("2026-03-27T12:00:00.000Z"),
     id: "invite_123",
     inviteCode: "invite-code",
-    member,
+    member: "identity" in member
+      ? member
+      : {
+          ...member,
+          identity: {
+            createdAt: NOW,
+            maskedPhoneNumberHint: member.maskedPhoneNumberHint,
+            memberId: member.id,
+            normalizedPhoneNumber: member.normalizedPhoneNumber,
+            phoneNumberVerifiedAt: member.phoneNumberVerifiedAt,
+            privyUserId: member.privyUserId,
+            updatedAt: NOW,
+            walletAddress: member.walletAddress,
+            walletChainType: member.walletChainType,
+            walletCreatedAt: member.walletCreatedAt,
+            walletProvider: member.walletProvider,
+          },
+        },
     memberId: member.id,
     openedAt: NOW,
     paidAt: null,
@@ -166,14 +183,7 @@ describe("completeHostedPrivyVerification", () => {
         id: "member_123",
       },
       data: expect.objectContaining({
-        normalizedPhoneNumber: DEFAULT_PHONE_LOOKUP_KEY,
-        phoneNumberVerifiedAt: NOW,
-        privyUserId: "did:privy:user_123",
         status: HostedMemberStatus.registered,
-        walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
-        walletChainType: "ethereum",
-        walletCreatedAt: NOW,
-        walletProvider: "privy",
       }),
     });
     expect(prisma.hostedInvite.update).toHaveBeenCalledWith({
@@ -282,15 +292,7 @@ describe("completeHostedPrivyVerification", () => {
     expect(prisma.hostedMember.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         billingStatus: HostedBillingStatus.not_started,
-        maskedPhoneNumberHint: "*** 4567",
-        normalizedPhoneNumber: DEFAULT_PHONE_LOOKUP_KEY,
-        phoneNumberVerifiedAt: NOW,
-        privyUserId: "did:privy:user_123",
         status: HostedMemberStatus.registered,
-        walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
-        walletChainType: "ethereum",
-        walletCreatedAt: NOW,
-        walletProvider: "privy",
       }),
     });
     expect(prisma.hostedInvite.create).toHaveBeenCalledWith({
@@ -517,6 +519,9 @@ describe("completeHostedPrivyVerification", () => {
       hostedMember: {
         update: vi.fn(),
       },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue(invite.member.identity),
+      },
     });
 
     await expect(
@@ -554,6 +559,9 @@ describe("completeHostedPrivyVerification", () => {
       hostedMember: {
         update: vi.fn(),
       },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue(invite.member.identity),
+      },
     });
 
     await expect(
@@ -583,6 +591,53 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
   prisma: T,
 ): T & CompleteHostedPrivyVerificationPrisma {
   const prismaWithQueryRaw = prisma as T & CompleteHostedPrivyVerificationPrisma;
+  const hostedInvite = prismaWithQueryRaw.hostedInvite as unknown as
+    | {
+        findUnique?: ((input: { where?: Record<string, unknown> }) => Promise<unknown>) | undefined;
+      }
+    | undefined;
+  const hostedMember = prismaWithQueryRaw.hostedMember as unknown as
+    | {
+        findUnique?: ((input: { where?: Record<string, unknown> }) => Promise<unknown>) | undefined;
+      }
+    | undefined;
+
+  if (!("hostedMemberIdentity" in prismaWithQueryRaw) || !prismaWithQueryRaw.hostedMemberIdentity) {
+    Object.defineProperty(prismaWithQueryRaw, "hostedMemberIdentity", {
+      configurable: true,
+      value: {
+        findUnique: vi.fn(async ({
+          include,
+          where,
+        }: {
+          include?: { member?: boolean };
+          where: Record<string, unknown>;
+        }) => {
+          const invite = await hostedInvite?.findUnique?.({ where: {} });
+          const inviteMember = (invite as { member?: unknown } | null)?.member ?? null;
+          const inviteIdentity = readMemberIdentity(inviteMember);
+          if (
+            inviteIdentity &&
+            (where.memberId === inviteIdentity.memberId ||
+              where.privyUserId === inviteIdentity.privyUserId ||
+              where.normalizedPhoneNumber === inviteIdentity.normalizedPhoneNumber ||
+              where.walletAddress === inviteIdentity.walletAddress)
+          ) {
+            return include?.member ? { ...inviteIdentity, member: inviteMember } : inviteIdentity;
+          }
+
+          const member = await hostedMember?.findUnique?.({ where });
+          const identity = readMemberIdentity(member);
+          return identity && include?.member ? { ...identity, member } : identity;
+        }),
+        upsert: vi.fn(async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => ({
+          ...create,
+          ...update,
+        })),
+      },
+    });
+  }
+
   if (!("$queryRaw" in prismaWithQueryRaw)) {
     Object.defineProperty(prismaWithQueryRaw, "$queryRaw", {
       configurable: true,
@@ -590,4 +645,45 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
     });
   }
   return prismaWithQueryRaw;
+}
+
+function readMemberIdentity(member: unknown) {
+  if (!member || typeof member !== "object") {
+    return null;
+  }
+
+  const record = member as Record<string, unknown>;
+  const identity =
+    record.identity && typeof record.identity === "object"
+      ? (record.identity as Record<string, unknown>)
+      : record;
+
+  const memberId =
+    typeof identity.memberId === "string"
+      ? identity.memberId
+      : typeof record.id === "string"
+        ? record.id
+        : null;
+  const normalizedPhoneNumber =
+    typeof identity.normalizedPhoneNumber === "string" ? identity.normalizedPhoneNumber : null;
+
+  if (!memberId || !normalizedPhoneNumber) {
+    return null;
+  }
+
+  return {
+    createdAt: identity.createdAt instanceof Date ? identity.createdAt : NOW,
+    maskedPhoneNumberHint:
+      typeof identity.maskedPhoneNumberHint === "string" ? identity.maskedPhoneNumberHint : "*** 4567",
+    memberId,
+    normalizedPhoneNumber,
+    phoneNumberVerifiedAt:
+      identity.phoneNumberVerifiedAt instanceof Date ? identity.phoneNumberVerifiedAt : null,
+    privyUserId: typeof identity.privyUserId === "string" ? identity.privyUserId : null,
+    updatedAt: identity.updatedAt instanceof Date ? identity.updatedAt : NOW,
+    walletAddress: typeof identity.walletAddress === "string" ? identity.walletAddress : null,
+    walletChainType: typeof identity.walletChainType === "string" ? identity.walletChainType : null,
+    walletCreatedAt: identity.walletCreatedAt instanceof Date ? identity.walletCreatedAt : null,
+    walletProvider: typeof identity.walletProvider === "string" ? identity.walletProvider : null,
+  };
 }

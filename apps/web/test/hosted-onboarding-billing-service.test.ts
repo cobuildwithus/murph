@@ -29,9 +29,16 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
-  requireHostedInviteForAuthentication: mocks.requireHostedInviteForAuthentication,
-}));
+vi.mock("@/src/lib/hosted-onboarding/invite-service", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/invite-service")
+  >("@/src/lib/hosted-onboarding/invite-service");
+
+  return {
+    ...actual,
+    requireHostedInviteForAuthentication: mocks.requireHostedInviteForAuthentication,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingEnvironment: () => ({
@@ -200,6 +207,7 @@ describe("createHostedBillingCheckout", () => {
     ] as const;
 
     const createPendingCheckout = vi.fn(async ({ data }) => data);
+    const hostedMemberBillingRefUpsert = vi.fn().mockResolvedValue({});
     const prisma = asHostedBillingCheckoutPrisma({
       hostedBillingCheckout: {
         create: createPendingCheckout,
@@ -215,6 +223,10 @@ describe("createHostedBillingCheckout", () => {
         }),
         update: vi.fn().mockResolvedValue({}),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMemberBillingRef: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: hostedMemberBillingRefUpsert,
       },
     });
 
@@ -248,9 +260,9 @@ describe("createHostedBillingCheckout", () => {
     });
     expect(createdCustomerMetadata).not.toHaveProperty("normalizedPhoneNumber");
     expect(createdCustomerMetadata).not.toHaveProperty("walletAddress");
-    expect(prisma.hostedMember.updateMany).toHaveBeenCalledWith(
+    expect(hostedMemberBillingRefUpsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
+        create: expect.objectContaining({
           stripeCustomerId: "cus_123",
         }),
       }),
@@ -875,6 +887,45 @@ describe("createHostedBillingCheckout", () => {
     expect(mocks.stripe.customers.update).not.toHaveBeenCalled();
     expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
   });
+
+  it("fails closed when the invite is missing split identity state", async () => {
+    mocks.requireHostedInviteForAuthentication.mockResolvedValue({
+      id: "invite_123",
+      inviteCode: "invite-code",
+      member: {
+        billingStatus: HostedBillingStatus.not_started,
+        identity: null,
+        id: "member_123",
+        status: HostedMemberStatus.registered,
+      },
+      memberId: "member_123",
+    });
+
+    await expect(
+      createHostedBillingCheckout({
+        inviteCode: "invite-code",
+        ...makeCheckoutAuth(),
+        now: NOW,
+        prisma: asHostedBillingCheckoutPrisma({
+          hostedBillingCheckout: {
+            create: vi.fn(),
+            findFirst: vi.fn(),
+          },
+          hostedMember: {
+            findUnique: vi.fn(),
+            update: vi.fn(),
+            updateMany: vi.fn(),
+          },
+        }),
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_IDENTITY_MISSING",
+      httpStatus: 500,
+    });
+    expect(mocks.stripe.customers.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.customers.update).not.toHaveBeenCalled();
+    expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
+  });
 });
 
 function makeInvite(overrides: {
@@ -886,13 +937,11 @@ function makeInvite(overrides: {
     inviteCode: "invite-code",
     member: {
       billingStatus: HostedBillingStatus.not_started,
+      identity: {
+        walletAddress: overrides.walletAddress,
+      },
       id: "member_123",
-      normalizedPhoneNumber: "+15551234567",
       status: HostedMemberStatus.registered,
-      stripeCustomerId: overrides.stripeCustomerId ?? null,
-      stripeLatestCheckoutSessionId: null,
-      stripeSubscriptionId: null,
-      walletAddress: overrides.walletAddress,
     },
     memberId: "member_123",
   };
@@ -914,7 +963,15 @@ function asHostedBillingCheckoutPrisma<T extends Record<string, unknown>>(prisma
     hostedMember.update ??= vi.fn().mockResolvedValue({});
     hostedMember.updateMany ??= vi.fn().mockResolvedValue({ count: 0 });
   }
-  if ("hostedMemberBillingRef" in prismaWithQueryRaw && prismaWithQueryRaw.hostedMemberBillingRef) {
+  if (!("hostedMemberBillingRef" in prismaWithQueryRaw) || !prismaWithQueryRaw.hostedMemberBillingRef) {
+    Object.defineProperty(prismaWithQueryRaw, "hostedMemberBillingRef", {
+      configurable: true,
+      value: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: vi.fn().mockResolvedValue({}),
+      },
+    });
+  } else {
     const hostedMemberBillingRef =
       prismaWithQueryRaw.hostedMemberBillingRef as unknown as Record<string, unknown>;
     hostedMemberBillingRef.findUnique ??= vi.fn().mockResolvedValue(null);

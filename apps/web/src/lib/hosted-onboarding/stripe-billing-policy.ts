@@ -4,7 +4,6 @@ import {
   HostedInviteStatus,
   HostedMemberStatus,
   HostedRevnetIssuanceStatus,
-  type HostedMember,
   type Prisma,
 } from "@prisma/client";
 import type Stripe from "stripe";
@@ -24,10 +23,10 @@ import {
 } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import {
+  type HostedMemberAggregate,
   findHostedMemberByStripeCustomerId,
   findHostedMemberByStripeSubscriptionId,
-  readHostedMemberRoutingState,
-  readHostedMemberStripeBillingRef,
+  readHostedMemberAggregate,
   writeHostedMemberStripeBillingRef,
 } from "./hosted-member-store";
 import { requireHostedStripeApi } from "./runtime";
@@ -52,7 +51,7 @@ export type HostedMemberActivationResult = {
 type HostedOnboardingPrismaClient = Prisma.TransactionClient;
 
 export async function activateHostedMemberFromConfirmedRevnetIssuance(input: {
-  member: HostedMember;
+  member: HostedMemberAggregate;
   occurredAt: string;
   prisma: HostedOnboardingPrismaClient;
   sourceEventId: string;
@@ -75,15 +74,11 @@ export async function activateHostedMemberFromConfirmedRevnetIssuance(input: {
   }
 
   await provisionManagedUserCryptoInHostedExecution(input.member.id);
-  const routing = await readHostedMemberRoutingState({
-    memberId: input.member.id,
-    prisma: input.prisma,
-  });
 
   const dispatch = buildHostedMemberActivationDispatch({
-    linqChatId: routing?.linqChatId ?? null,
+    linqChatId: input.member.linqChatId,
     memberId: input.member.id,
-    normalizedPhoneNumber: input.member.normalizedPhoneNumber,
+    phoneLookupKey: input.member.normalizedPhoneNumber,
     occurredAt: input.occurredAt,
     sourceEventId: input.sourceEventId,
     sourceType: input.sourceType,
@@ -118,7 +113,7 @@ export function resolveHostedSubscriptionBillingStatus(input: {
 export async function activateHostedMemberForPositiveSource(input: {
   billingMode: HostedBillingMode;
   dispatchContext: HostedStripeDispatchContext;
-  member: HostedMember;
+  member: HostedMemberAggregate;
   prisma: HostedOnboardingPrismaClient;
   skipIfBillingAlreadyActive?: boolean;
   sourceType: string;
@@ -139,15 +134,11 @@ export async function activateHostedMemberForPositiveSource(input: {
   }
 
   await provisionManagedUserCryptoInHostedExecution(input.member.id);
-  const routing = await readHostedMemberRoutingState({
-    memberId: input.member.id,
-    prisma: input.prisma,
-  });
 
   const dispatch = buildHostedMemberActivationDispatch({
-    linqChatId: routing?.linqChatId ?? null,
+    linqChatId: input.member.linqChatId,
     memberId: input.member.id,
-    normalizedPhoneNumber: input.member.normalizedPhoneNumber,
+    phoneLookupKey: input.member.normalizedPhoneNumber,
     occurredAt: input.dispatchContext.occurredAt,
     sourceEventId: input.dispatchContext.sourceEventId,
     sourceType: input.sourceType,
@@ -168,7 +159,7 @@ export async function activateHostedMemberForPositiveSource(input: {
 
 async function tryActivateHostedMemberIfStillAllowed(input: {
   billingMode: HostedBillingMode | null;
-  member: HostedMember;
+  member: HostedMemberAggregate;
   prisma: HostedOnboardingPrismaClient;
   revnetIssuanceStatus?: HostedRevnetIssuanceStatus | null;
   revnetRequired?: boolean;
@@ -183,7 +174,10 @@ async function tryActivateHostedMemberIfStillAllowed(input: {
       return false;
     }
 
-    if (input.skipIfBillingAlreadyActive) {
+    if (
+      input.skipIfBillingAlreadyActive &&
+      currentMember.billingStatus === HostedBillingStatus.active
+    ) {
       return false;
     }
 
@@ -228,13 +222,13 @@ export async function updateHostedMemberStripeBillingIfFresh(input: {
   billingMode: HostedBillingMode | null;
   billingStatus: HostedBillingStatus;
   dispatchContext: HostedStripeDispatchContext;
-  member: HostedMember;
+  member: HostedMemberAggregate;
   memberStatusOverride?: HostedMemberStatus;
   prisma: HostedOnboardingPrismaClient;
   stripeCustomerId?: string | null;
   stripeLatestCheckoutSessionId?: string | null;
   stripeSubscriptionId?: string | null;
-}): Promise<HostedMember | null> {
+}): Promise<HostedMemberAggregate | null> {
   return withHostedOnboardingTransaction(input.prisma, async (tx) => {
     await lockHostedMemberRow(tx, input.member.id);
 
@@ -289,40 +283,17 @@ export async function updateHostedMemberStripeBillingIfFresh(input: {
 async function findHostedMemberById(
   prisma: HostedOnboardingPrismaClient,
   memberId: string,
-): Promise<HostedMember | null> {
-  const member = await prisma.hostedMember.findUnique({
-    where: {
-      id: memberId,
-    },
-  });
-
-  if (!member) {
-    return null;
-  }
-
-  const billingRef = await readHostedMemberStripeBillingRef({
+): Promise<HostedMemberAggregate | null> {
+  return readHostedMemberAggregate({
     memberId,
     prisma,
   });
-
-  if (!billingRef) {
-    return member;
-  }
-
-  return {
-    ...member,
-    stripeCustomerId: billingRef.stripeCustomerId,
-    stripeLatestBillingEventCreatedAt: billingRef.stripeLatestBillingEventCreatedAt,
-    stripeLatestBillingEventId: billingRef.stripeLatestBillingEventId,
-    stripeLatestCheckoutSessionId: billingRef.stripeLatestCheckoutSessionId,
-    stripeSubscriptionId: billingRef.stripeSubscriptionId,
-  };
 }
 
 async function shouldApplyHostedStripeBillingUpdate(input: {
   billingMode: HostedBillingMode | null;
   billingStatus: HostedBillingStatus;
-  currentMember: HostedMember;
+  currentMember: HostedMemberAggregate;
   dispatchContext: HostedStripeDispatchContext;
   stripeSubscriptionId?: string | null;
 }): Promise<boolean> {
@@ -353,7 +324,7 @@ async function shouldApplyHostedStripeBillingUpdate(input: {
 async function shouldApplyHostedSameSecondStripeCollision(input: {
   billingMode: HostedBillingMode | null;
   billingStatus: HostedBillingStatus;
-  currentMember: HostedMember;
+  currentMember: HostedMemberAggregate;
   dispatchContext: HostedStripeDispatchContext;
   stripeSubscriptionId?: string | null;
 }): Promise<boolean> {
@@ -401,7 +372,7 @@ async function shouldApplyHostedSameSecondStripeCollision(input: {
 
 async function resolveHostedCanonicalStripeBillingStatus(input: {
   billingMode: HostedBillingMode | null;
-  currentMember: HostedMember;
+  currentMember: HostedMemberAggregate;
   dispatchContext: HostedStripeDispatchContext;
   stripeSubscriptionId?: string | null;
 }): Promise<HostedBillingStatus | null> {
@@ -433,7 +404,7 @@ function isHostedStripeSubscriptionSourceType(sourceType: string): boolean {
 
 export async function suspendHostedMemberForBillingReversal(input: {
   dispatchContext: Pick<HostedStripeDispatchContext, "eventCreatedAt" | "sourceEventId">;
-  member: HostedMember;
+  member: HostedMemberAggregate;
   prisma: HostedOnboardingPrismaClient;
   reason: string;
   stripeCustomerId?: string | null;
@@ -464,7 +435,7 @@ export async function findMemberForStripeObject(input: {
   memberId: string | null;
   prisma: HostedOnboardingPrismaClient;
   subscriptionId: string | null;
-}): Promise<HostedMember | null> {
+}): Promise<HostedMemberAggregate | null> {
   if (input.memberId) {
     const member = await findHostedMemberById(input.prisma, input.memberId);
 
@@ -512,7 +483,7 @@ export async function findMemberForStripeReversal(input: {
   paymentIntentId: string | null;
   prisma: HostedOnboardingPrismaClient;
   subscriptionId: string | null;
-}): Promise<HostedMember | null> {
+}): Promise<HostedMemberAggregate | null> {
   const directMember = await findMemberForStripeObject({
     clientReferenceId: null,
     customerId: input.customerId,
@@ -556,7 +527,9 @@ export async function findMemberForStripeReversal(input: {
     },
   });
 
-  return issuance?.member ?? null;
+  return issuance?.member
+    ? findHostedMemberById(input.prisma, issuance.member.id)
+    : null;
 }
 
 export async function resolveStripeCustomerContext(input: {

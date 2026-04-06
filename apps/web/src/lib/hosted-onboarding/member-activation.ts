@@ -7,7 +7,7 @@ import {
 export function buildHostedMemberActivationDispatch(input: {
   linqChatId?: string | null;
   memberId: string;
-  normalizedPhoneNumber?: string | null;
+  phoneLookupKey?: string | null;
   occurredAt: string;
   sourceEventId: string;
   sourceType: string;
@@ -16,7 +16,7 @@ export function buildHostedMemberActivationDispatch(input: {
     eventId: buildHostedMemberActivationEventId(input),
     firstContact: buildHostedMemberActivationFirstContact({
       linqChatId: input.linqChatId ?? null,
-      phoneLookupKey: input.normalizedPhoneNumber ?? null,
+      phoneLookupKey: input.phoneLookupKey ?? null,
     }),
     memberId: input.memberId,
     occurredAt: input.occurredAt,

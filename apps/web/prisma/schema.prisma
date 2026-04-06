@@ -200,36 +200,20 @@ enum ExecutionOutboxStatus {
 }
 
 model HostedMember {
-  id                                String                  @id
-  maskedPhoneNumberHint             String                  @map("phone_number")
-  normalizedPhoneNumber             String                  @unique @map("normalized_phone_number")
-  phoneNumberVerifiedAt             DateTime?               @map("phone_number_verified_at")
-  privyUserId                       String?                 @unique @map("privy_user_id")
-  walletAddress                     String?                 @unique @map("wallet_address")
-  walletChainType                   String?                 @map("wallet_chain_type")
-  walletProvider                    String?                 @map("wallet_provider")
-  walletCreatedAt                   DateTime?               @map("wallet_created_at")
-  status                            HostedMemberStatus      @default(invited)
-  billingStatus                     HostedBillingStatus     @default(not_started) @map("billing_status")
-  billingMode                       HostedBillingMode?      @map("billing_mode")
-  stripeCustomerId                  String?                 @unique @map("stripe_customer_id")
-  stripeSubscriptionId              String?                 @unique @map("stripe_subscription_id")
-  stripeLatestCheckoutSessionId     String?                 @map("stripe_latest_checkout_session_id")
-  stripeLatestBillingEventCreatedAt DateTime?               @map("stripe_latest_billing_event_created_at")
-  stripeLatestBillingEventId        String?                 @map("stripe_latest_billing_event_id")
-  linqChatId                        String?                 @map("linq_chat_id")
-  telegramUserId                    String?                 @unique @map("telegram_user_id")
-  telegramUsername                  String?                 @map("telegram_username")
-  createdAt                         DateTime                @default(now()) @map("created_at")
-  updatedAt                         DateTime                @updatedAt @map("updated_at")
-  invites                           HostedInvite[]
-  checkouts                         HostedBillingCheckout[]
-  revnetIssuances                   HostedRevnetIssuance[]
-  aiUsage                           HostedAiUsage[]
-  linqDailyStates                   HostedLinqDailyState[]
-  identity                          HostedMemberIdentity?
-  routing                           HostedMemberRouting?
-  billingRef                        HostedMemberBillingRef?
+  id              String                  @id
+  status          HostedMemberStatus      @default(invited)
+  billingStatus   HostedBillingStatus     @default(not_started) @map("billing_status")
+  billingMode     HostedBillingMode?      @map("billing_mode")
+  createdAt       DateTime                @default(now()) @map("created_at")
+  updatedAt       DateTime                @updatedAt @map("updated_at")
+  invites         HostedInvite[]
+  checkouts       HostedBillingCheckout[]
+  revnetIssuances HostedRevnetIssuance[]
+  aiUsage         HostedAiUsage[]
+  linqDailyStates HostedLinqDailyState[]
+  identity        HostedMemberIdentity?
+  routing         HostedMemberRouting?
+  billingRef      HostedMemberBillingRef?
 
   @@index([status])
   @@index([billingStatus])

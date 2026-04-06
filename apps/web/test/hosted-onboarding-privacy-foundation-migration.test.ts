@@ -30,4 +30,20 @@ describe("hosted-member privacy foundation migration", () => {
     expect(migrationSql).toContain('DROP COLUMN "telegram_username"');
     expect(migrationSql).toContain('DROP TABLE "hosted_session"');
   });
+
+  it("hard-cuts legacy identity, routing, and billing columns off hosted_member", () => {
+    const migrationSql = readFileSync(
+      new URL("../prisma/migrations/2026040606_hosted_member_privacy_hard_cut/migration.sql", import.meta.url),
+      "utf8",
+    );
+
+    expect(migrationSql).toContain('ALTER TABLE "hosted_member"');
+    expect(migrationSql).toContain('DROP COLUMN "normalized_phone_number"');
+    expect(migrationSql).toContain('DROP COLUMN "privy_user_id"');
+    expect(migrationSql).toContain('DROP COLUMN "wallet_address"');
+    expect(migrationSql).toContain('DROP COLUMN "stripe_customer_id"');
+    expect(migrationSql).toContain('DROP COLUMN "linq_chat_id"');
+    expect(migrationSql).toContain('DROP COLUMN "telegram_username"');
+    expect(migrationSql).not.toContain("email");
+  });
 });

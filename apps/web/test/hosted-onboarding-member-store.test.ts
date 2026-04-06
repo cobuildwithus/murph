@@ -8,24 +8,19 @@ import {
   findHostedMemberByStripeCustomerId,
   findHostedMemberByStripeSubscriptionId,
   findHostedMemberByTelegramUserLookupKey,
-  readHostedMemberStripeBillingRef,
+  readHostedMemberAggregate,
   readHostedMemberRoutingState,
-  syncHostedMemberPrivacyFoundationFromMember,
+  readHostedMemberStripeBillingRef,
+  upsertHostedMemberIdentity,
   upsertHostedMemberLinqChatBinding,
   upsertHostedMemberTelegramRoutingBinding,
   writeHostedMemberStripeBillingRef,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
 
 describe("hosted-member-store", () => {
-  it("finds a member by privy user id from the additive identity table", async () => {
-    const member = createHostedMember({
-      privyUserId: "did:privy:user_123",
-    });
-    const hostedMemberFindUnique = vi.fn();
+  it("finds a member by privy user id from the identity table", async () => {
+    const member = createHostedMember();
     const prisma = {
-      hostedMember: {
-        findUnique: hostedMemberFindUnique,
-      },
       hostedMemberIdentity: {
         findUnique: vi.fn().mockResolvedValue({
           member,
@@ -39,18 +34,15 @@ describe("hosted-member-store", () => {
         privyUserId: "did:privy:user_123",
       }),
     ).resolves.toEqual(member);
-    expect(hostedMemberFindUnique).not.toHaveBeenCalled();
   });
 
-  it("falls back to the legacy member row when the additive phone identity row is missing", async () => {
+  it("finds a member by phone lookup key from the identity table", async () => {
     const member = createHostedMember();
-    const hostedMemberFindUnique = vi.fn().mockResolvedValue(member);
     const prisma = {
-      hostedMember: {
-        findUnique: hostedMemberFindUnique,
-      },
       hostedMemberIdentity: {
-        findUnique: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue({
+          member,
+        }),
       },
     } as never;
 
@@ -60,26 +52,17 @@ describe("hosted-member-store", () => {
         prisma,
       }),
     ).resolves.toEqual(member);
-    expect(hostedMemberFindUnique).toHaveBeenCalledWith({
-      where: {
-        normalizedPhoneNumber: "hbidx:phone:v1:abc123",
-      },
-    });
   });
 
-  it("finds a member by Telegram lookup key from the additive routing table", async () => {
-    const member = createHostedMember({
-      billingStatus: HostedBillingStatus.active,
-      telegramUserId: "tg_user_123",
-    });
-    const hostedMemberFindUnique = vi.fn();
+  it("finds a member by Telegram lookup key from the routing table", async () => {
     const prisma = {
-      hostedMember: {
-        findUnique: hostedMemberFindUnique,
-      },
       hostedMemberRouting: {
         findUnique: vi.fn().mockResolvedValue({
-          member,
+          member: {
+            billingStatus: HostedBillingStatus.active,
+            id: "member_123",
+            status: HostedMemberStatus.registered,
+          },
         }),
       },
     } as never;
@@ -89,11 +72,14 @@ describe("hosted-member-store", () => {
         prisma,
         telegramUserId: "tg_user_123",
       }),
-    ).resolves.toEqual(member);
-    expect(hostedMemberFindUnique).not.toHaveBeenCalled();
+    ).resolves.toEqual({
+      billingStatus: HostedBillingStatus.active,
+      id: "member_123",
+      status: HostedMemberStatus.registered,
+    });
   });
 
-  it("reads member routing state from the additive routing table", async () => {
+  it("reads member routing state from the routing table", async () => {
     const prisma = {
       hostedMemberRouting: {
         findUnique: vi.fn().mockResolvedValue({
@@ -116,7 +102,7 @@ describe("hosted-member-store", () => {
     });
   });
 
-  it("upserts Linq chat bindings into the additive routing table only", async () => {
+  it("upserts Linq chat bindings into the routing table", async () => {
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       hostedMemberRouting: {
@@ -135,8 +121,8 @@ describe("hosted-member-store", () => {
         memberId: "member_123",
       },
       create: {
-        memberId: "member_123",
         linqChatId: "chat_123",
+        memberId: "member_123",
         telegramUserId: null,
       },
       update: {
@@ -145,7 +131,7 @@ describe("hosted-member-store", () => {
     });
   });
 
-  it("upserts Telegram bindings into the additive routing table and clears stored usernames", async () => {
+  it("upserts Telegram bindings into the routing table", async () => {
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       hostedMemberRouting: {
@@ -164,8 +150,8 @@ describe("hosted-member-store", () => {
         memberId: "member_123",
       },
       create: {
-        memberId: "member_123",
         linqChatId: null,
+        memberId: "member_123",
         telegramUserId: "tg_user_123",
       },
       update: {
@@ -174,24 +160,88 @@ describe("hosted-member-store", () => {
     });
   });
 
-  it("reads Stripe billing refs from the additive table without falling back to legacy member columns", async () => {
+  it("upserts identity rows through the identity table", async () => {
+    const upsert = vi.fn().mockResolvedValue({
+      maskedPhoneNumberHint: "*** 4567",
+      memberId: "member_123",
+      normalizedPhoneNumber: "hbidx:phone:v1:abc123",
+      phoneNumberVerifiedAt: null,
+      privyUserId: "did:privy:user_123",
+      walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+      walletChainType: "ethereum",
+      walletCreatedAt: null,
+      walletProvider: "privy",
+    });
     const prisma = {
-      hostedMember: {
-        findUnique: vi.fn().mockResolvedValue(createHostedMember({
-          stripeCustomerId: "cus_legacy_123",
-        })),
+      hostedMemberIdentity: {
+        upsert,
       },
+    } as never;
+
+    await expect(
+      upsertHostedMemberIdentity({
+        maskedPhoneNumberHint: "*** 4567",
+        memberId: "member_123",
+        normalizedPhoneNumber: "hbidx:phone:v1:abc123",
+        phoneNumberVerifiedAt: null,
+        prisma,
+        privyUserId: "did:privy:user_123",
+        walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+        walletChainType: "ethereum",
+        walletCreatedAt: null,
+        walletProvider: "privy",
+      }),
+    ).resolves.toEqual({
+      maskedPhoneNumberHint: "*** 4567",
+      memberId: "member_123",
+      normalizedPhoneNumber: "hbidx:phone:v1:abc123",
+      phoneNumberVerifiedAt: null,
+      privyUserId: "did:privy:user_123",
+      walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+      walletChainType: "ethereum",
+      walletCreatedAt: null,
+      walletProvider: "privy",
+    });
+
+    expect(upsert).toHaveBeenCalledWith({
+      where: {
+        memberId: "member_123",
+      },
+      create: {
+        maskedPhoneNumberHint: "*** 4567",
+        memberId: "member_123",
+        normalizedPhoneNumber: "hbidx:phone:v1:abc123",
+        phoneNumberVerifiedAt: null,
+        privyUserId: "did:privy:user_123",
+        walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+        walletChainType: "ethereum",
+        walletCreatedAt: null,
+        walletProvider: "privy",
+      },
+      update: {
+        maskedPhoneNumberHint: "*** 4567",
+        normalizedPhoneNumber: "hbidx:phone:v1:abc123",
+        phoneNumberVerifiedAt: null,
+        privyUserId: "did:privy:user_123",
+        walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+        walletChainType: "ethereum",
+        walletCreatedAt: null,
+        walletProvider: "privy",
+      },
+    });
+  });
+
+  it("reads Stripe billing refs from the billing-ref table", async () => {
+    const prisma = {
       hostedMemberBillingRef: {
-        findUnique: vi.fn()
-          .mockResolvedValueOnce({
-            memberId: "member_123",
-            stripeCustomerId: "cus_additive_123",
-            stripeLatestBillingEventCreatedAt: null,
-            stripeLatestBillingEventId: null,
-            stripeLatestCheckoutSessionId: null,
-            stripeSubscriptionId: null,
-          })
-          .mockResolvedValueOnce(null),
+        findUnique: vi.fn().mockResolvedValue({
+          memberId: "member_123",
+          stripeCustomerId: "cus_123",
+          stripeLatestBillingEventCreatedAt: null,
+          stripeLatestBillingEventId: "evt_123",
+          stripeLatestCheckoutSessionId: "cs_123",
+          stripeSubscriptionId: "sub_123",
+        }),
       },
     } as never;
 
@@ -202,31 +252,17 @@ describe("hosted-member-store", () => {
       }),
     ).resolves.toEqual({
       memberId: "member_123",
-      stripeCustomerId: "cus_additive_123",
-      stripeLatestBillingEventCreatedAt: null,
-      stripeLatestBillingEventId: null,
-      stripeLatestCheckoutSessionId: null,
-      stripeSubscriptionId: null,
-    });
-
-    await expect(
-      readHostedMemberStripeBillingRef({
-        memberId: "member_123",
-        prisma,
-      }),
-    ).resolves.toBeNull();
-  });
-
-  it("finds members by Stripe billing refs from the additive table", async () => {
-    const member = createHostedMember({
       stripeCustomerId: "cus_123",
+      stripeLatestBillingEventCreatedAt: null,
+      stripeLatestBillingEventId: "evt_123",
+      stripeLatestCheckoutSessionId: "cs_123",
       stripeSubscriptionId: "sub_123",
     });
-    const hostedMemberFindUnique = vi.fn();
+  });
+
+  it("finds members by Stripe billing refs from the billing-ref table", async () => {
+    const member = createHostedMember();
     const prisma = {
-      hostedMember: {
-        findUnique: hostedMemberFindUnique,
-      },
       hostedMemberBillingRef: {
         findUnique: vi.fn()
           .mockResolvedValueOnce({
@@ -250,11 +286,9 @@ describe("hosted-member-store", () => {
         stripeSubscriptionId: "sub_123",
       }),
     ).resolves.toEqual(member);
-    expect(hostedMemberFindUnique).not.toHaveBeenCalled();
   });
 
-  it("writes Stripe billing refs through the additive billing table without mutating legacy member columns", async () => {
-    const update = vi.fn().mockResolvedValue({});
+  it("writes Stripe billing refs through the billing-ref table", async () => {
     const upsert = vi.fn().mockResolvedValue({
       memberId: "member_123",
       stripeCustomerId: "cus_123",
@@ -264,9 +298,6 @@ describe("hosted-member-store", () => {
       stripeSubscriptionId: "sub_123",
     });
     const prisma = {
-      hostedMember: {
-        update,
-      },
       hostedMemberBillingRef: {
         upsert,
       },
@@ -290,7 +321,6 @@ describe("hosted-member-store", () => {
       stripeSubscriptionId: "sub_123",
     });
 
-    expect(update).not.toHaveBeenCalled();
     expect(upsert).toHaveBeenCalledWith({
       where: {
         memberId: "member_123",
@@ -312,14 +342,10 @@ describe("hosted-member-store", () => {
     });
   });
 
-  it("binds Stripe customer ids through the helper without reopening the service layer to raw hosted-member writes", async () => {
-    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+  it("binds Stripe customer ids without mutating the member row", async () => {
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $queryRaw: vi.fn().mockResolvedValue([]),
-      hostedMember: {
-        updateMany,
-      },
       hostedMemberBillingRef: {
         findUnique: vi.fn().mockResolvedValue(null),
         upsert,
@@ -334,7 +360,6 @@ describe("hosted-member-store", () => {
       }),
     ).resolves.toBe(true);
 
-    expect(updateMany).not.toHaveBeenCalled();
     expect(upsert).toHaveBeenCalledWith({
       where: {
         memberId: "member_123",
@@ -353,128 +378,102 @@ describe("hosted-member-store", () => {
     });
   });
 
-  it("syncs identity refs and seeds missing billing refs without rewriting routing ownership", async () => {
-    const hostedMemberIdentityUpsert = vi.fn().mockResolvedValue({});
-    const hostedMemberBillingRefCreate = vi.fn().mockResolvedValue({});
-    const member = createHostedMember({
-      linqChatId: "chat_123",
-      privyUserId: "did:privy:user_123",
-      stripeCustomerId: "cus_123",
-      stripeSubscriptionId: "sub_123",
-      telegramUserId: "tg_user_123",
-      walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
-    });
+  it("reads the canonical aggregate from split identity, routing, and billing-ref state", async () => {
     const prisma = {
-      hostedMemberIdentity: {
-        upsert: hostedMemberIdentityUpsert,
-      },
-      hostedMemberBillingRef: {
-        create: hostedMemberBillingRefCreate,
-        findUnique: vi.fn().mockResolvedValue(null),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          ...createHostedMember(),
+          billingRef: {
+            memberId: "member_123",
+            stripeCustomerId: "cus_123",
+            stripeLatestBillingEventCreatedAt: null,
+            stripeLatestBillingEventId: "evt_123",
+            stripeLatestCheckoutSessionId: "cs_123",
+            stripeSubscriptionId: "sub_123",
+          },
+          identity: {
+            maskedPhoneNumberHint: "*** 4567",
+            memberId: "member_123",
+            normalizedPhoneNumber: "hbidx:phone:v1:abc123",
+            phoneNumberVerifiedAt: null,
+            privyUserId: "did:privy:user_123",
+            walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+            walletChainType: "ethereum",
+            walletCreatedAt: null,
+            walletProvider: "privy",
+          },
+          routing: {
+            linqChatId: "chat_123",
+            memberId: "member_123",
+            telegramUserId: "tg_user_123",
+          },
+        }),
       },
     } as never;
 
-    await syncHostedMemberPrivacyFoundationFromMember({
-      member,
-      prisma,
-    });
-
-    expect(hostedMemberIdentityUpsert).toHaveBeenCalledWith({
-      where: {
+    await expect(
+      readHostedMemberAggregate({
         memberId: "member_123",
-      },
-      create: expect.objectContaining({
-        memberId: "member_123",
-        normalizedPhoneNumber: member.normalizedPhoneNumber,
-        privyUserId: "did:privy:user_123",
-        walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+        prisma,
       }),
-      update: expect.objectContaining({
-        normalizedPhoneNumber: member.normalizedPhoneNumber,
-        privyUserId: "did:privy:user_123",
-        walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
-      }),
-    });
-    expect(hostedMemberBillingRefCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({
+    ).resolves.toEqual({
+      billingMode: null,
+      billingRef: {
         memberId: "member_123",
         stripeCustomerId: "cus_123",
+        stripeLatestBillingEventCreatedAt: null,
+        stripeLatestBillingEventId: "evt_123",
+        stripeLatestCheckoutSessionId: "cs_123",
         stripeSubscriptionId: "sub_123",
-      }),
-    });
-  });
-
-  it("does not overwrite existing additive billing refs from legacy member snapshots", async () => {
-    const hostedMemberIdentityUpsert = vi.fn().mockResolvedValue({});
-    const hostedMemberBillingRefCreate = vi.fn().mockResolvedValue({});
-    const hostedMemberBillingRefFindUnique = vi.fn().mockResolvedValue({
-      memberId: "member_123",
-      stripeCustomerId: "cus_additive_123",
-      stripeLatestBillingEventCreatedAt: new Date("2026-04-06T00:00:00.000Z"),
-      stripeLatestBillingEventId: "evt_additive_123",
-      stripeLatestCheckoutSessionId: "cs_additive_123",
-      stripeSubscriptionId: "sub_additive_123",
-    });
-    const member = createHostedMember({
-      stripeCustomerId: "cus_legacy_123",
-      stripeLatestBillingEventId: "evt_legacy_123",
-      stripeSubscriptionId: "sub_legacy_123",
-    });
-    const prisma = {
-      hostedMemberIdentity: {
-        upsert: hostedMemberIdentityUpsert,
       },
-      hostedMemberBillingRef: {
-        create: hostedMemberBillingRefCreate,
-        findUnique: hostedMemberBillingRefFindUnique,
-      },
-    } as never;
-
-    await syncHostedMemberPrivacyFoundationFromMember({
-      member,
-      prisma,
-    });
-
-    expect(hostedMemberIdentityUpsert).toHaveBeenCalledOnce();
-    expect(hostedMemberBillingRefFindUnique).toHaveBeenCalledWith({
-      where: {
+      billingStatus: HostedBillingStatus.not_started,
+      createdAt: new Date("2026-04-06T00:00:00.000Z"),
+      id: "member_123",
+      identity: {
+        maskedPhoneNumberHint: "*** 4567",
         memberId: "member_123",
+        normalizedPhoneNumber: "hbidx:phone:v1:abc123",
+        phoneNumberVerifiedAt: null,
+        privyUserId: "did:privy:user_123",
+        walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+        walletChainType: "ethereum",
+        walletCreatedAt: null,
+        walletProvider: "privy",
       },
+      linqChatId: "chat_123",
+      maskedPhoneNumberHint: "*** 4567",
+      normalizedPhoneNumber: "hbidx:phone:v1:abc123",
+      phoneNumberVerifiedAt: null,
+      privyUserId: "did:privy:user_123",
+      routing: {
+        linqChatId: "chat_123",
+        memberId: "member_123",
+        telegramUserId: "tg_user_123",
+      },
+      status: HostedMemberStatus.invited,
+      stripeCustomerId: "cus_123",
+      stripeLatestBillingEventCreatedAt: null,
+      stripeLatestBillingEventId: "evt_123",
+      stripeLatestCheckoutSessionId: "cs_123",
+      stripeSubscriptionId: "sub_123",
+      telegramUserId: "tg_user_123",
+      updatedAt: new Date("2026-04-06T00:00:00.000Z"),
+      walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+      walletChainType: "ethereum",
+      walletCreatedAt: null,
+      walletProvider: "privy",
     });
-    expect(hostedMemberBillingRefCreate).not.toHaveBeenCalled();
   });
 });
 
 function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember {
   return {
-    ...baseHostedMember(),
-    ...overrides,
-  };
-}
-
-function baseHostedMember(): HostedMember {
-  return {
     billingMode: null,
     billingStatus: HostedBillingStatus.not_started,
     createdAt: new Date("2026-04-06T00:00:00.000Z"),
     id: "member_123",
-    linqChatId: null,
-    maskedPhoneNumberHint: "*** 4567",
-    normalizedPhoneNumber: "hbidx:phone:v1:abc123",
-    phoneNumberVerifiedAt: null,
-    privyUserId: null,
     status: HostedMemberStatus.invited,
-    stripeCustomerId: null,
-    stripeLatestBillingEventCreatedAt: null,
-    stripeLatestBillingEventId: null,
-    stripeLatestCheckoutSessionId: null,
-    stripeSubscriptionId: null,
-    telegramUserId: null,
-    telegramUsername: null,
     updatedAt: new Date("2026-04-06T00:00:00.000Z"),
-    walletAddress: null,
-    walletChainType: null,
-    walletCreatedAt: null,
-    walletProvider: null,
+    ...overrides,
   };
 }

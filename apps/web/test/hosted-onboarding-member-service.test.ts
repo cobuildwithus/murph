@@ -57,21 +57,48 @@ describe("ensureHostedMemberForPhone", () => {
   });
 
   it("rewrites phone storage to blind-indexed lookup data without dropping the stored signup chat binding", async () => {
-    const update = vi.fn().mockResolvedValue({
+    const existingMember = {
       id: "member_123",
       linqChatId: "chat_existing",
       maskedPhoneNumberHint: "*** 4567",
       phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
+    };
+    const identityUpsert = vi.fn().mockResolvedValue({
+      memberId: "member_123",
+    });
+    const currentIdentity = {
+      maskedPhoneNumberHint: "*** 4567",
+      memberId: "member_123",
+      normalizedPhoneNumber: "hbidx:phone:v1:existing",
+      phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
+      privyUserId: "did:privy:user_123",
+      walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+      walletChainType: "ethereum",
+      walletCreatedAt: new Date("2026-03-20T12:00:00.000Z"),
+      walletProvider: "privy",
+    };
+    const identityFindUnique = vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => {
+      if (where.memberId === "member_123") {
+        return currentIdentity;
+      }
+
+      if (typeof where.normalizedPhoneNumber === "string") {
+        return {
+          ...currentIdentity,
+          member: existingMember,
+          normalizedPhoneNumber: where.normalizedPhoneNumber,
+        };
+      }
+
+      return null;
     });
     const prisma = {
       hostedMember: {
-        findUnique: vi.fn().mockResolvedValue({
-          id: "member_123",
-          linqChatId: "chat_existing",
-          maskedPhoneNumberHint: "*** 4567",
-          phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
-        }),
-        update,
+        findUnique: vi.fn().mockResolvedValue(existingMember),
+      },
+      hostedMemberIdentity: {
+        findUnique: identityFindUnique,
+        upsert: identityUpsert,
       },
     } as never;
 
@@ -80,25 +107,39 @@ describe("ensureHostedMemberForPhone", () => {
       prisma,
     });
 
-    expect(update).toHaveBeenCalledWith({
+    expect(identityUpsert).toHaveBeenCalledWith({
       where: {
-        id: "member_123",
+        memberId: "member_123",
       },
-      data: expect.objectContaining({
+      create: expect.objectContaining({
         maskedPhoneNumberHint: "*** 4567",
         normalizedPhoneNumber: expect.stringMatching(/^hbidx:phone:v1:/),
       }),
+      update: expect.objectContaining({
+        maskedPhoneNumberHint: "*** 4567",
+        normalizedPhoneNumber: expect.stringMatching(/^hbidx:phone:v1:/),
+        phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
+        privyUserId: "did:privy:user_123",
+        walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+        walletChainType: "ethereum",
+        walletCreatedAt: new Date("2026-03-20T12:00:00.000Z"),
+        walletProvider: "privy",
+      }),
     });
-    expect(update.mock.calls[0]?.[0]).not.toEqual(
+    expect(identityUpsert.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
-        data: expect.objectContaining({
-          phoneNumberVerifiedAt: expect.anything(),
+        create: expect.objectContaining({
+          phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
         }),
       }),
     );
   });
 
   it("creates new members with blind phone lookup storage", async () => {
+    const identityUpsert = vi.fn().mockResolvedValue({
+      memberId: "member_123",
+    });
+    const identityFindUnique = vi.fn().mockResolvedValue(null);
     const create = vi.fn().mockResolvedValue({
       id: "member_123",
       linqChatId: null,
@@ -109,6 +150,10 @@ describe("ensureHostedMemberForPhone", () => {
         create,
         findUnique: vi.fn().mockResolvedValue(null),
       },
+      hostedMemberIdentity: {
+        findUnique: identityFindUnique,
+        upsert: identityUpsert,
+      },
     } as never;
 
     await ensureHostedMemberForPhone({
@@ -118,6 +163,19 @@ describe("ensureHostedMemberForPhone", () => {
 
     expect(create).toHaveBeenCalledWith({
       data: expect.objectContaining({
+        billingStatus: "not_started",
+        status: "invited",
+      }),
+    });
+    expect(identityUpsert).toHaveBeenCalledWith({
+      where: {
+        memberId: expect.any(String),
+      },
+      create: expect.objectContaining({
+        maskedPhoneNumberHint: "*** 4567",
+        normalizedPhoneNumber: expect.stringMatching(/^hbidx:phone:v1:/),
+      }),
+      update: expect.objectContaining({
         maskedPhoneNumberHint: "*** 4567",
         normalizedPhoneNumber: expect.stringMatching(/^hbidx:phone:v1:/),
       }),
@@ -125,11 +183,34 @@ describe("ensureHostedMemberForPhone", () => {
   });
 
   it("recovers from a concurrent create conflict by refreshing the winning member row", async () => {
-    const update = vi.fn().mockResolvedValue({
+    const concurrentMember = {
       id: "member_123",
-      linqChatId: null,
+      linqChatId: "chat_existing",
       maskedPhoneNumberHint: "*** 4567",
+    };
+    const identityUpsert = vi.fn().mockResolvedValue({
+      memberId: "member_123",
     });
+    const identityFindUnique = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockImplementation(async ({ where }: { where: Record<string, unknown> }) => {
+        if (typeof where.normalizedPhoneNumber === "string") {
+          return {
+            maskedPhoneNumberHint: "*** 4567",
+            member: concurrentMember,
+            memberId: "member_123",
+            normalizedPhoneNumber: where.normalizedPhoneNumber,
+            phoneNumberVerifiedAt: null,
+            privyUserId: null,
+            walletAddress: null,
+            walletChainType: null,
+            walletCreatedAt: null,
+            walletProvider: null,
+          };
+        }
+
+        return null;
+      });
     const create = vi.fn().mockRejectedValue(
       new Prisma.PrismaClientKnownRequestError("duplicate", {
         clientVersion: "test",
@@ -141,12 +222,11 @@ describe("ensureHostedMemberForPhone", () => {
         create,
         findUnique: vi.fn()
           .mockResolvedValueOnce(null)
-          .mockResolvedValueOnce({
-            id: "member_123",
-            linqChatId: "chat_existing",
-            maskedPhoneNumberHint: "*** 4567",
-          }),
-        update,
+          .mockResolvedValueOnce(concurrentMember),
+      },
+      hostedMemberIdentity: {
+        findUnique: identityFindUnique,
+        upsert: identityUpsert,
       },
     } as never;
 
@@ -156,11 +236,15 @@ describe("ensureHostedMemberForPhone", () => {
     });
 
     expect(create).toHaveBeenCalledTimes(1);
-    expect(update).toHaveBeenCalledWith({
+    expect(identityUpsert).toHaveBeenCalledWith({
       where: {
-        id: "member_123",
+        memberId: "member_123",
       },
-      data: expect.objectContaining({
+      create: expect.objectContaining({
+        maskedPhoneNumberHint: "*** 4567",
+        normalizedPhoneNumber: expect.stringMatching(/^hbidx:phone:v1:/),
+      }),
+      update: expect.objectContaining({
         maskedPhoneNumberHint: "*** 4567",
         normalizedPhoneNumber: expect.stringMatching(/^hbidx:phone:v1:/),
       }),

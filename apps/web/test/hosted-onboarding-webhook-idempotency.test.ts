@@ -2505,18 +2505,30 @@ function asHostedWebhookPrisma<T extends Record<string, unknown>>(prisma: T): T 
       findUnique?: ReturnType<typeof vi.fn>;
     };
     hostedMember?: {
+      findUnique?: ((input: { where?: Record<string, unknown>; include?: Record<string, unknown> }) => Promise<unknown>) | undefined;
       update?: ReturnType<typeof vi.fn>;
       updateMany?: unknown;
     };
+    hostedMemberIdentity?: {
+      findUnique?: ReturnType<typeof vi.fn>;
+      upsert?: ReturnType<typeof vi.fn>;
+    };
     hostedMemberRouting?: {
+      findUnique?: ReturnType<typeof vi.fn>;
       upsert?: ReturnType<typeof vi.fn>;
     };
   };
   const hostedMember = prismaWithHostedMember.hostedMember as {
+    findUnique?: ((input: { where?: Record<string, unknown>; include?: Record<string, unknown> }) => Promise<unknown>) | undefined;
     update?: ((input: { data: Record<string, unknown> }) => Promise<unknown>) | undefined;
     updateMany?: unknown;
   } | undefined;
+  const hostedMemberIdentity = prismaWithHostedMember.hostedMemberIdentity as {
+    findUnique?: ((input: { include?: Record<string, unknown>; where: Record<string, unknown> }) => Promise<unknown>) | undefined;
+    upsert?: ((input: { create: Record<string, unknown>; update: Record<string, unknown> }) => Promise<unknown>) | undefined;
+  } | undefined;
   const hostedMemberRouting = prismaWithHostedMember.hostedMemberRouting as {
+    findUnique?: ((input: { where: Record<string, unknown> }) => Promise<unknown>) | undefined;
     upsert?: ((input: { create: Record<string, unknown>; update: Record<string, unknown> }) => Promise<unknown>) | undefined;
   } | undefined;
   const hostedInvite = prismaWithHostedMember.hostedInvite as {
@@ -2536,6 +2548,7 @@ function asHostedWebhookPrisma<T extends Record<string, unknown>>(prisma: T): T 
 
   if (!hostedMemberRouting?.upsert) {
     const hostedMemberRoutingFallback = {
+      findUnique: vi.fn().mockResolvedValue(null),
       upsert: vi.fn(async (input: { create: Record<string, unknown>; update: Record<string, unknown> }) => {
         if (hostedMember?.update) {
           await hostedMember.update({
@@ -2549,6 +2562,32 @@ function asHostedWebhookPrisma<T extends Record<string, unknown>>(prisma: T): T 
     Object.defineProperty(prismaWithHostedMember, "hostedMemberRouting", {
       configurable: true,
       value: hostedMemberRoutingFallback,
+    });
+  }
+
+  if (!hostedMemberIdentity?.findUnique) {
+    const hostedMemberIdentityFallback = {
+      findUnique: vi.fn(async ({ include, where }: { include?: Record<string, unknown>; where: Record<string, unknown> }) => {
+        const member = await hostedMember?.findUnique?.({
+          include,
+          where,
+        });
+        const identity = readHostedMemberIdentityFromMockMember(member, where.normalizedPhoneNumber);
+
+        if (!identity) {
+          return null;
+        }
+
+        return include?.member ? { ...identity, member } : identity;
+      }),
+      upsert: vi.fn(async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => ({
+        ...create,
+        ...update,
+      })),
+    };
+    Object.defineProperty(prismaWithHostedMember, "hostedMemberIdentity", {
+      configurable: true,
+      value: hostedMemberIdentityFallback,
     });
   }
 
@@ -2582,6 +2621,56 @@ function withPrismaTransaction<T extends Record<string, unknown>>(prisma: T): T 
 
 function readMockCallPayloads(calls: unknown[][]): Record<string, unknown>[] {
   return calls.map((call) => ((call[0] as Record<string, unknown> | undefined) ?? {}));
+}
+
+function readHostedMemberIdentityFromMockMember(
+  member: unknown,
+  requestedPhoneLookupKey?: unknown,
+) {
+  if (!member || typeof member !== "object") {
+    return null;
+  }
+
+  const record = member as Record<string, unknown>;
+  const identity =
+    record.identity && typeof record.identity === "object"
+      ? (record.identity as Record<string, unknown>)
+      : record;
+  const memberId =
+    typeof identity.memberId === "string"
+      ? identity.memberId
+      : typeof record.id === "string"
+        ? record.id
+        : null;
+
+  if (!memberId) {
+    return null;
+  }
+
+  const normalizedPhoneNumber =
+    typeof requestedPhoneLookupKey === "string"
+      ? requestedPhoneLookupKey
+      : typeof identity.normalizedPhoneNumber === "string"
+        ? identity.normalizedPhoneNumber
+        : null;
+
+  if (!normalizedPhoneNumber) {
+    return null;
+  }
+
+  return {
+    maskedPhoneNumberHint:
+      typeof identity.maskedPhoneNumberHint === "string" ? identity.maskedPhoneNumberHint : "*** 4567",
+    memberId,
+    normalizedPhoneNumber,
+    phoneNumberVerifiedAt:
+      identity.phoneNumberVerifiedAt instanceof Date ? identity.phoneNumberVerifiedAt : null,
+    privyUserId: typeof identity.privyUserId === "string" ? identity.privyUserId : null,
+    walletAddress: typeof identity.walletAddress === "string" ? identity.walletAddress : null,
+    walletChainType: typeof identity.walletChainType === "string" ? identity.walletChainType : null,
+    walletCreatedAt: identity.walletCreatedAt instanceof Date ? identity.walletCreatedAt : null,
+    walletProvider: typeof identity.walletProvider === "string" ? identity.walletProvider : null,
+  };
 }
 
 function readPayloadJsonFromUpdateCall(call: Record<string, unknown> | undefined): unknown {
