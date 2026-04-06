@@ -114,7 +114,6 @@ export const exampleInboxCaptureRecords: readonly Readonly<InboxCaptureRecord>[]
     captureId: "cap_3f9f0d778d89c3beec6b8a13dc",
     identityKey: "imessage\u0000self\u0000msg-123",
     eventId: "evt_01JNV41B483QH9GQ1Y08D7RMTA",
-    auditId: "aud_01JNV45RHN0TQ9ZXE0A7YSE1YQ",
     source: "imessage",
     accountId: "self",
     externalId: "msg-123",

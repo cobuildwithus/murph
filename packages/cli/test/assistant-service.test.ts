@@ -7,6 +7,7 @@ import path from 'node:path'
 import {
   applyCanonicalWriteBatch,
   initializeVault,
+  isVaultError,
   listWriteOperationMetadataPaths,
   readJsonlRecords,
   updateVaultSummary,
@@ -23,6 +24,18 @@ const serviceMocks = vi.hoisted(() => ({
   executeAssistantProviderTurn: vi.fn(),
   getAssistantChannelAdapter: vi.fn(),
 }))
+
+async function readJsonlRecordsIfPresent(vaultRoot: string, relativePath: string) {
+  try {
+    return await readJsonlRecords({ vaultRoot, relativePath })
+  } catch (error) {
+    if (isVaultError(error) && error.code === 'VAULT_FILE_MISSING') {
+      return []
+    }
+
+    throw error
+  }
+}
 
 vi.mock('@murphai/assistant-core/outbound-channel', async () => {
   const actual = await vi.importActual<typeof import('@murphai/assistant-core/outbound-channel')>(
@@ -3890,8 +3903,8 @@ test('sendAssistantMessage allows concurrent inbox canonical writes that go thro
   let persistedCapture:
     | {
         eventId: string
-        auditId?: string
         envelopePath: string
+        createdAt: string
       }
     | null = null
 
@@ -3946,21 +3959,21 @@ test('sendAssistantMessage allows concurrent inbox canonical writes that go thro
   const persisted = persistedCapture as {
     createdAt: string
     eventId: string
-    auditId?: string
     envelopePath: string
   }
-  const auditRelativePath = `audit/${persisted.createdAt.slice(0, 4)}/${persisted.createdAt.slice(0, 7)}.jsonl`
 
-  const eventRecords = await readJsonlRecords({
+  assert.deepEqual(
+    await readJsonlRecordsIfPresent(vaultRoot, 'ledger/events/2026/2026-03.jsonl'),
+    [],
+  )
+  const auditRecords = (await readJsonlRecordsIfPresent(
     vaultRoot,
-    relativePath: 'ledger/events/2026/2026-03.jsonl',
-  })
-  const auditRecords = await readJsonlRecords({
-    vaultRoot,
-    relativePath: auditRelativePath,
-  })
-  assert.equal(eventRecords.filter((record) => record.id === persisted.eventId).length, 1)
-  assert.equal(auditRecords.filter((record) => record.id === persisted.auditId).length, 1)
+    `audit/${persisted.createdAt.slice(0, 4)}/${persisted.createdAt.slice(0, 7)}.jsonl`,
+  )) as Array<{ action?: string }>
+  assert.equal(
+    auditRecords.some((record) => record.action === 'intake_import'),
+    false,
+  )
   assert.match(persisted.envelopePath, /^raw\/inbox\/telegram\/bot\/2026\/03\/cap_/u)
 })
 

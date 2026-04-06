@@ -12,9 +12,7 @@ export interface PipelineContext {
   vaultRoot: string;
   runtime: InboxRuntimeStore;
   ids: {
-    capture(): string;
     event(): string;
-    audit(): string;
   };
 }
 
@@ -64,10 +62,9 @@ export async function processCapture(
   });
 
   if (storedEnvelope) {
-    const evidence = await ensureStoredCaptureCanonicalEvidence({
+    await ensureStoredCaptureCanonicalEvidence({
       vaultRoot,
       envelope: storedEnvelope,
-      createAuditId: ids.audit,
     });
     const runtimeCaptureId = runtime.upsertCaptureIndex({
       captureId: storedEnvelope.captureId,
@@ -83,7 +80,6 @@ export async function processCapture(
     return {
       captureId: runtimeCaptureId,
       eventId: storedEnvelope.eventId,
-      auditId: evidence.auditId,
       envelopePath: storedEnvelope.stored.envelopePath,
       createdAt: storedEnvelope.stored.storedAt,
       deduped: true,
@@ -91,13 +87,11 @@ export async function processCapture(
   }
 
   const eventId = ids.event();
-  const auditId = ids.audit();
 
   const persisted = await persistCanonicalInboxCapture({
     vaultRoot,
     captureId,
     eventId,
-    auditId,
     input,
   });
   const runtimeCaptureId = runtime.upsertCaptureIndex({
@@ -114,7 +108,6 @@ export async function processCapture(
   return {
     captureId: runtimeCaptureId,
     eventId,
-    auditId,
     envelopePath: persisted.stored.envelopePath,
     createdAt: persisted.stored.storedAt,
     deduped: false,
@@ -123,8 +116,6 @@ export async function processCapture(
 
 function defaultIds(): PipelineContext["ids"] {
   return {
-    capture: () => generatePrefixedId("cap"),
     event: () => generatePrefixedId("evt"),
-    audit: () => generatePrefixedId("aud"),
   };
 }
