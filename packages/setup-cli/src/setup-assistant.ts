@@ -11,18 +11,18 @@ import {
   resolveOpenAICompatibleProviderPresetFromId,
   type OpenAICompatibleProviderPreset,
 } from '@murphai/assistant-core/assistant-provider'
-import { normalizeNullableString } from '@murphai/assistant-core/assistant-runtime'
+import { normalizeNullableString } from '@murphai/operator-config/assistant/shared'
 import {
   createSetupAssistantAccountResolver,
   formatSetupAssistantAccountLabel,
   type SetupAssistantAccountResolver,
 } from './setup-assistant-account.js'
-import { prepareSetupPromptInput } from '@murphai/assistant-core/setup-prompt-io'
+import { prepareSetupPromptInput } from '@murphai/operator-config/setup-prompt-io'
 import {
   type SetupAssistantPreset,
   type SetupCommandOptions,
   type SetupConfiguredAssistant,
-} from '@murphai/assistant-core/setup-cli-contracts'
+} from '@murphai/operator-config/setup-cli-contracts'
 
 export const DEFAULT_SETUP_ASSISTANT_PRESET: SetupAssistantPreset = 'codex'
 export const DEFAULT_SETUP_CODEX_MODEL = 'gpt-5.4'

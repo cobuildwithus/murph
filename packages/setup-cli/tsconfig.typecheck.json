@@ -8,6 +8,9 @@
   },
   "references": [
     {
+      "path": "../operator-config"
+    },
+    {
       "path": "../assistant-core"
     },
     {

@@ -4,7 +4,7 @@ import type {
   SetupStepResult,
   SetupStepStatus,
   WhisperModel,
-} from '@murphai/assistant-core/setup-cli-contracts'
+} from '@murphai/operator-config/setup-cli-contracts'
 
 export const DEFAULT_TOOLCHAIN_DIRECTORY = path.join('.murph', 'toolchain')
 export const DEFAULT_USER_BIN_DIRECTORY = path.join('.local', 'bin')

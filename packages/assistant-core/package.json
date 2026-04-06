@@ -441,6 +441,7 @@
     "@mozilla/readability": "0.6.0",
     "@murphai/contracts": "workspace:*",
     "@murphai/core": "workspace:*",
+    "@murphai/operator-config": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
     "@murphai/gateway-core": "workspace:*",
     "@murphai/hosted-execution": "workspace:*",

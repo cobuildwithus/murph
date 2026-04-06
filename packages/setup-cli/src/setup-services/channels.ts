@@ -2,7 +2,7 @@ import {
   readAssistantAutomationState,
   saveAssistantAutomationState,
 } from '@murphai/assistant-core/assistant-state'
-import { resolveAgentmailApiKey } from '@murphai/assistant-core/agentmail-runtime'
+import { resolveAgentmailApiKey } from '@murphai/operator-config/agentmail-runtime'
 import { getAssistantChannelAdapter } from '@murphai/assistant-core/assistant-runtime'
 import { describeLinqConnectorEndpoint as describeLinqEndpoint } from '@murphai/assistant-core/inbox-app/linq-endpoint'
 import type { InboxServices } from '@murphai/assistant-core/inbox-services'
@@ -13,15 +13,15 @@ import type {
 import {
   resolveSetupChannelMissingEnv,
   SETUP_RUNTIME_ENV_NOTICE,
-} from '@murphai/assistant-core/setup-runtime-env'
+} from '@murphai/operator-config/setup-runtime-env'
 import {
   type SetupChannel,
   type SetupConfiguredChannel,
   type SetupStepResult,
   setupChannelValues,
-} from '@murphai/assistant-core/setup-cli-contracts'
-import { resolveTelegramBotToken } from '@murphai/assistant-core/telegram-runtime'
-import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
+} from '@murphai/operator-config/setup-cli-contracts'
+import { resolveTelegramBotToken } from '@murphai/operator-config/telegram-runtime'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { createStep } from './steps.js'
 
 const IMESSAGE_SETUP_CONNECTOR_ID = 'imessage:self'

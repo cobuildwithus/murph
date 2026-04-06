@@ -7,12 +7,12 @@ import { readFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import readline from 'node:readline'
-import { normalizeNullableString } from '@murphai/assistant-core/assistant-runtime'
+import { normalizeNullableString } from '@murphai/operator-config/assistant/shared'
 import type {
   SetupAssistantAccount,
   SetupAssistantQuotaWindow,
   SetupConfiguredAssistant,
-} from '@murphai/assistant-core/setup-cli-contracts'
+} from '@murphai/operator-config/setup-cli-contracts'
 
 const CODEX_AUTH_DIRECTORY = '.codex'
 const CODEX_AUTH_FILE_NAME = 'auth.json'
