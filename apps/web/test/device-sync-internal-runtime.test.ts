@@ -176,4 +176,44 @@ describe("device-sync hosted runtime helpers", () => {
       userId: "user-123",
     });
   });
+
+  it("ignores removed flat runtime update fields and only reads canonical nested updates", async () => {
+    const {
+      parseHostedDeviceSyncRuntimeApplyRequest,
+    } = await import(
+      "@/src/lib/device-sync/internal-runtime"
+    );
+
+    expect(parseHostedDeviceSyncRuntimeApplyRequest({
+      updates: [
+        {
+          connection: {
+            displayName: "Oura",
+            status: "active",
+          },
+          connectionId: "dsc_123",
+          displayName: "legacy-top-level-name",
+          lastErrorCode: "legacy-top-level-error",
+          localState: {
+            lastErrorCode: "oauth_expired",
+          },
+        },
+      ],
+      userId: "user-123",
+    }, "user-123")).toEqual({
+      updates: [
+        {
+          connection: {
+            displayName: "Oura",
+            status: "active",
+          },
+          connectionId: "dsc_123",
+          localState: {
+            lastErrorCode: "oauth_expired",
+          },
+        },
+      ],
+      userId: "user-123",
+    });
+  });
 });

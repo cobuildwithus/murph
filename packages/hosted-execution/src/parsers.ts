@@ -466,8 +466,6 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(
     `Hosted device-sync runtime apply request updates[${index}]`,
   );
 
-  assertNoLegacyHostedExecutionDeviceSyncRuntimeFlatFields(record, index);
-
   return {
     connectionId: requireString(
       record.connectionId,
@@ -522,35 +520,6 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(
           ),
         }),
   };
-}
-
-function assertNoLegacyHostedExecutionDeviceSyncRuntimeFlatFields(
-  record: Record<string, unknown>,
-  index: number,
-): void {
-  const legacyConnectionKeys = ["displayName", "metadata", "scopes", "status"];
-  const legacyLocalStateKeys = [
-    "clearError",
-    "lastErrorCode",
-    "lastErrorMessage",
-    "lastSyncCompletedAt",
-    "lastSyncErrorAt",
-    "lastSyncStartedAt",
-    "lastWebhookAt",
-    "nextReconcileAt",
-  ];
-
-  if (legacyConnectionKeys.some((key) => record[key] !== undefined)) {
-    throw new TypeError(
-      `Hosted device-sync runtime apply request updates[${index}].connection must be used for hosted-authoritative connection fields.`,
-    );
-  }
-
-  if (legacyLocalStateKeys.some((key) => record[key] !== undefined)) {
-    throw new TypeError(
-      `Hosted device-sync runtime apply request updates[${index}].localState must be used for local observation fields.`,
-    );
-  }
 }
 
 function parseHostedExecutionDeviceSyncRuntimeConnectionSeed(

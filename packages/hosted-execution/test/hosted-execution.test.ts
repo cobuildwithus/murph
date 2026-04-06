@@ -47,6 +47,7 @@ import {
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
   parseHostedExecutionDispatchRequest,
+  parseHostedExecutionDeviceSyncRuntimeApplyRequest,
   readHostedExecutionDispatchRef,
   readHostedEmailCapabilities,
   readHostedExecutionControlEnvironment,
@@ -2214,6 +2215,40 @@ describe("@murphai/hosted-execution", () => {
     expect(new Headers(fetchImpl.mock.calls[1]?.[1]?.headers).get("authorization")).toBe(
       "Bearer vercel-oidc-token",
     );
+  });
+
+  it("ignores removed flat device-sync runtime update fields and keeps only canonical nested updates", () => {
+    expect(parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+      updates: [
+        {
+          connection: {
+            displayName: "Oura",
+            status: "active",
+          },
+          connectionId: "dsc_123",
+          displayName: "legacy-top-level-name",
+          lastErrorCode: "legacy-top-level-error",
+          localState: {
+            lastErrorCode: "oauth_expired",
+          },
+        },
+      ],
+      userId: "member/123",
+    })).toEqual({
+      updates: [
+        {
+          connection: {
+            displayName: "Oura",
+            status: "active",
+          },
+          connectionId: "dsc_123",
+          localState: {
+            lastErrorCode: "oauth_expired",
+          },
+        },
+      ],
+      userId: "member/123",
+    });
   });
 
   it("control client lists dirty pending-usage users through the shared route", async () => {
