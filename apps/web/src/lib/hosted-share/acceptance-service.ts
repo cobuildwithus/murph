@@ -1,4 +1,4 @@
-import { Prisma, type HostedMember, type PrismaClient } from "@prisma/client";
+import { HostedMemberStatus, Prisma, type HostedMember, type PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
 import { enqueueHostedExecutionOutbox } from "../hosted-execution/outbox";
@@ -39,6 +39,14 @@ export async function acceptHostedShareLink(input: {
       code: "AUTH_REQUIRED",
       message: "Sign in again before adding a shared bundle.",
       httpStatus: 401,
+    });
+  }
+
+  if (member.status === HostedMemberStatus.suspended) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_SUSPENDED",
+      message: "This hosted account is suspended. Contact support to restore access.",
+      httpStatus: 403,
     });
   }
 
