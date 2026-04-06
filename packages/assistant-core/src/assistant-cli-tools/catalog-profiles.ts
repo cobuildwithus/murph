@@ -36,12 +36,17 @@ const defaultAssistantCapabilityHosts = [
   new NativeLocalCapabilityHost(),
 ] as const
 
+export interface AssistantCapabilityRuntime {
+  toolCatalog: AssistantToolCatalog
+}
+
 const inboxRoutingAssistantToolCatalogOptions = {
   includeAssistantRuntimeTools: false,
+  includeCanonicalWriteTools: true,
+  includeOutwardSideEffectTools: true,
   includeQueryTools: false,
   includeStatefulWriteTools: false,
   includeVaultTextReadTool: false,
-  includeVaultWriteTools: true,
   includeWebSearchTools: false,
 } satisfies AssistantToolCatalogOptions
 
@@ -83,12 +88,20 @@ export function createProviderTurnAssistantCapabilityRegistry(
   return createAssistantCapabilityRegistry(listProviderTurnAssistantCapabilities(input))
 }
 
+export function createProviderTurnAssistantCapabilityRuntime(
+  input: AssistantToolContext,
+): AssistantCapabilityRuntime {
+  return {
+    toolCatalog: createProviderTurnAssistantCapabilityRegistry(input).createToolCatalog(
+      defaultAssistantCapabilityHosts,
+    ),
+  }
+}
+
 export function createProviderTurnAssistantToolCatalog(
   input: AssistantToolContext,
 ): AssistantToolCatalog {
-  return createProviderTurnAssistantCapabilityRegistry(input).createToolCatalog(
-    defaultAssistantCapabilityHosts,
-  )
+  return createProviderTurnAssistantCapabilityRuntime(input).toolCatalog
 }
 
 function listDefaultAssistantCapabilities(
@@ -130,7 +143,10 @@ function resolveAssistantToolConcernDefinitions(
   options: AssistantToolCatalogOptions,
 ): AssistantCapabilityConcernDefinitions {
   const includeAssistantRuntimeTools = options.includeAssistantRuntimeTools ?? true
-  const includeVaultWriteTools = options.includeVaultWriteTools ?? true
+  const includeCanonicalWriteTools =
+    options.includeCanonicalWriteTools ?? options.includeVaultWriteTools ?? true
+  const includeOutwardSideEffectTools =
+    options.includeOutwardSideEffectTools ?? options.includeVaultWriteTools ?? true
 
   return {
     assistantRuntimeTools: includeAssistantRuntimeTools
@@ -138,11 +154,11 @@ function resolveAssistantToolConcernDefinitions(
       : [],
     canonicalVaultWriteTools: [
       ...createInboxPromotionToolDefinitions(input),
-      ...(includeVaultWriteTools
+      ...(includeCanonicalWriteTools
         ? createCanonicalVaultWriteToolDefinitions(input, options)
         : []),
     ],
-    outwardSideEffectTools: includeVaultWriteTools
+    outwardSideEffectTools: includeOutwardSideEffectTools
       ? createOutwardSideEffectToolDefinitions(input)
       : [],
     queryAndReadTools: createQueryAndReadToolDefinitions(input, options),

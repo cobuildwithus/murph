@@ -13,6 +13,8 @@ export interface AssistantToolContext {
 
 export interface AssistantToolCatalogOptions {
   includeAssistantRuntimeTools?: boolean
+  includeCanonicalWriteTools?: boolean
+  includeOutwardSideEffectTools?: boolean
   includeQueryTools?: boolean
   includeStatefulWriteTools?: boolean
   includeVaultTextReadTool?: boolean

@@ -2054,6 +2054,7 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the CLI-firs
       | undefined
 
     assert.equal(providerCall?.provider, 'openai-compatible')
+    assert.equal('capabilityRegistry' in (providerCall?.toolRuntime ?? {}), false)
     assert.equal(toolCatalog?.hasTool('murph.cli.run'), true)
     assert.equal(toolCatalog?.hasTool('vault.fs.readText'), true)
     assert.equal(toolCatalog?.hasTool('assistant.state.show'), false)
@@ -2075,6 +2076,7 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the CLI-firs
     assert.equal(toolCatalog?.hasTool('vault.show'), false)
     assert.equal(toolCatalog?.hasTool('vault.journal.append'), false)
     assert.ok(providerCall?.systemPrompt)
+    assert.doesNotMatch(providerCall?.systemPrompt ?? '', /murph\.device\.connect/u)
 
     const toolResults = await toolCatalog!.executeCalls({
       mode: 'apply',
@@ -2240,6 +2242,126 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the CLI-firs
     )
     assert.match(journalMarkdown, /Auto-reply mutation proof\./u)
     assert.equal(result.response, 'auto-reply')
+  } finally {
+    restoreEnvironmentVariable('HOME', originalHome)
+  }
+})
+
+test('sendAssistantMessage carries the provider-turn bound tool catalog into hosted tool runtime and prompt gating', async () => {
+  const parent = await mkdtemp(
+    path.join(tmpdir(), 'murph-assistant-service-hosted-device-connect-registry-'),
+  )
+  const homeRoot = path.join(parent, 'home')
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(homeRoot, { recursive: true })
+  await mkdir(vaultRoot, { recursive: true })
+  await initializeVault({ vaultRoot })
+
+  const originalHome = process.env.HOME
+  process.env.HOME = homeRoot
+
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'openai-compatible',
+    providerSessionId: null,
+    response: 'hosted auto-reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  try {
+    const result = await sendAssistantMessage({
+      vault: vaultRoot,
+      alias: 'chat:hosted-device-connect-tools',
+      provider: 'openai-compatible',
+      model: 'gpt-oss:20b',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      prompt: 'Can you help me connect WHOOP?',
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: async ({ provider }) => ({
+            authorizationUrl: `https://provider.example.test/${provider}`,
+            expiresAt: '2026-04-06T00:00:00.000Z',
+            provider,
+            providerLabel: 'WHOOP',
+          }),
+          memberId: 'member_123',
+          userEnvKeys: [],
+        },
+      },
+    })
+
+    const providerCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+    const toolCatalog = providerCall?.toolRuntime?.toolCatalog as
+      | AssistantToolCatalog
+      | undefined
+
+    assert.equal(providerCall?.provider, 'openai-compatible')
+    assert.equal('capabilityRegistry' in (providerCall?.toolRuntime ?? {}), false)
+    assert.equal(toolCatalog?.hasTool('murph.cli.run'), true)
+    assert.equal(toolCatalog?.hasTool('murph.device.connect'), true)
+    assert.match(providerCall?.systemPrompt ?? '', /use `murph\.device\.connect` first/iu)
+    assert.equal(result.response, 'hosted auto-reply')
+  } finally {
+    restoreEnvironmentVariable('HOME', originalHome)
+  }
+})
+
+test('sendAssistantMessage keeps murph.device.connect out of the prompt when the hosted provider does not support tool runtime', async () => {
+  const parent = await mkdtemp(
+    path.join(tmpdir(), 'murph-assistant-service-hosted-device-connect-codex-'),
+  )
+  const homeRoot = path.join(parent, 'home')
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(homeRoot, { recursive: true })
+  await mkdir(vaultRoot, { recursive: true })
+  await initializeVault({ vaultRoot })
+
+  const originalHome = process.env.HOME
+  process.env.HOME = homeRoot
+
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-hosted-codex',
+    response: 'codex hosted auto-reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  try {
+    const result = await sendAssistantMessage({
+      vault: vaultRoot,
+      alias: 'chat:hosted-device-connect-codex',
+      provider: 'codex-cli',
+      prompt: 'Can you help me connect WHOOP?',
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: async ({ provider }) => ({
+            authorizationUrl: `https://provider.example.test/${provider}`,
+            expiresAt: '2026-04-06T00:00:00.000Z',
+            provider,
+            providerLabel: 'WHOOP',
+          }),
+          memberId: 'member_123',
+          userEnvKeys: [],
+        },
+      },
+    })
+
+    const providerCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+    const toolCatalog = providerCall?.toolRuntime?.toolCatalog as
+      | AssistantToolCatalog
+      | undefined
+
+    assert.equal(providerCall?.provider, 'codex-cli')
+    assert.equal(toolCatalog?.hasTool('murph.device.connect'), true)
+    assert.doesNotMatch(providerCall?.systemPrompt ?? '', /murph\.device\.connect/u)
+    assert.equal(result.response, 'codex hosted auto-reply')
   } finally {
     restoreEnvironmentVariable('HOME', originalHome)
   }

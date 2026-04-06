@@ -8,7 +8,7 @@ import {
   resolveAssistantCliAccessContext,
 } from '../assistant-cli-access.js'
 import {
-  createProviderTurnAssistantToolCatalog,
+  createProviderTurnAssistantCapabilityRuntime,
 } from '../assistant-cli-tools.js'
 import {
   executeAssistantProviderTurnAttempt,
@@ -97,9 +97,9 @@ interface AssistantProviderTurnExecutionPlan {
   input: AssistantMessageInput
   memoryTurnEnv: NodeJS.ProcessEnv
   primaryRoute: ResolvedAssistantFailoverRoute | null
+  providerTurnRuntime: ReturnType<typeof createProviderTurnAssistantCapabilityRuntime>
   routes: readonly ResolvedAssistantFailoverRoute[]
   sharedPlan: AssistantTurnSharedPlan
-  toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
   turnId: string
 }
 
@@ -228,7 +228,7 @@ function buildAssistantProviderTurnExecutionPlan(input: {
     turnId: `${input.resolvedSession.sessionId}:${input.turnCreatedAt}`,
     vault: input.input.vault,
   })
-  const toolCatalog = createProviderTurnAssistantToolCatalog({
+  const providerTurnRuntime = createProviderTurnAssistantCapabilityRuntime({
     allowSensitiveHealthContext: input.plan.allowSensitiveHealthContext,
     cliEnv: memoryTurnEnv,
     executionContext,
@@ -243,9 +243,9 @@ function buildAssistantProviderTurnExecutionPlan(input: {
     input: input.input,
     memoryTurnEnv,
     primaryRoute: input.routes[0] ?? null,
+    providerTurnRuntime,
     routes: input.routes,
     sharedPlan: input.plan,
-    toolCatalog,
     turnId: input.turnId,
   }
 }
@@ -281,18 +281,20 @@ async function resolveAssistantProviderAttemptPlan(input: {
       route,
       session: input.session,
       sharedPlan: input.executionPlan.sharedPlan,
-      toolCatalog: input.executionPlan.toolCatalog,
+      toolCatalog: input.executionPlan.providerTurnRuntime.toolCatalog,
     }),
     session: input.session,
   }
 }
 
 async function resolveAssistantRouteTurnPlan(input: {
+  toolCatalog: ReturnType<
+    typeof createProviderTurnAssistantCapabilityRuntime
+  >['toolCatalog']
   input: AssistantMessageInput
   route: ResolvedAssistantFailoverRoute
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
-  toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
 }): Promise<AssistantRouteTurnPlan> {
   const workingDirectory = input.sharedPlan.requestedWorkingDirectory
   const sessionResumeRouteId = readAssistantProviderResumeRouteId(input.session)
@@ -323,7 +325,9 @@ async function resolveAssistantRouteTurnPlan(input: {
   const assistantCliExecutorAvailable =
     providerCapabilities.supportsToolRuntime &&
     input.toolCatalog.hasTool('murph.cli.run')
-  const assistantHostedDeviceConnectAvailable = input.toolCatalog.hasTool('murph.device.connect')
+  const assistantHostedDeviceConnectAvailable =
+    providerCapabilities.supportsToolRuntime &&
+    input.toolCatalog.hasTool('murph.device.connect')
   const assistantStateToolsAvailable = assistantCliExecutorAvailable
   const assistantMemoryRecallToolsAvailable = assistantCliExecutorAvailable
   const [assistantMemoryPrompt, assistantCliContract] = await Promise.all([
@@ -412,7 +416,7 @@ async function executeAssistantProviderAttempt(input: {
       fault: 'provider',
       message: 'Injected assistant provider failure.',
     })
-    const toolCatalog = executionPlan.toolCatalog
+    const { toolCatalog } = executionPlan.providerTurnRuntime
     const toolRuntime = {
       allowSensitiveHealthContext: executionPlan.sharedPlan.allowSensitiveHealthContext,
       requestId: executionPlan.turnId,

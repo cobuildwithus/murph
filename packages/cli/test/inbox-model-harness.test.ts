@@ -1484,10 +1484,11 @@ test('createDefaultAssistantToolCatalog can bind a bounded text-read-only profil
     },
     {
       includeAssistantRuntimeTools: false,
+      includeCanonicalWriteTools: false,
+      includeOutwardSideEffectTools: false,
       includeQueryTools: false,
       includeStatefulWriteTools: false,
       includeVaultTextReadTool: true,
-      includeVaultWriteTools: false,
     },
   )
 
@@ -1500,6 +1501,42 @@ test('createDefaultAssistantToolCatalog can bind a bounded text-read-only profil
   assert.equal(catalog.hasTool('vault.journal.append'), false)
   assert.equal(catalog.hasTool('vault.recipe.upsert'), false)
   assert.equal(catalog.hasTool('vault.share.createLink'), false)
+})
+
+test('createDefaultAssistantToolCatalog keeps includeVaultWriteTools as a compatibility alias behind the split write options', () => {
+  const aliasCatalog = createDefaultAssistantToolCatalog(
+    {
+      vault: '/tmp/murph-vault',
+      vaultServices: createStubVaultServices(),
+    },
+    {
+      includeAssistantRuntimeTools: false,
+      includeQueryTools: false,
+      includeStatefulWriteTools: false,
+      includeVaultTextReadTool: true,
+      includeVaultWriteTools: false,
+    },
+  )
+  const explicitOverrideCatalog = createDefaultAssistantToolCatalog(
+    {
+      vault: '/tmp/murph-vault',
+      vaultServices: createStubVaultServices(),
+    },
+    {
+      includeAssistantRuntimeTools: false,
+      includeCanonicalWriteTools: false,
+      includeOutwardSideEffectTools: true,
+      includeQueryTools: false,
+      includeStatefulWriteTools: false,
+      includeVaultTextReadTool: true,
+      includeVaultWriteTools: false,
+    },
+  )
+
+  assert.equal(aliasCatalog.hasTool('vault.recipe.upsert'), false)
+  assert.equal(aliasCatalog.hasTool('vault.share.createLink'), false)
+  assert.equal(explicitOverrideCatalog.hasTool('vault.recipe.upsert'), false)
+  assert.equal(explicitOverrideCatalog.hasTool('vault.share.createLink'), true)
 })
 
 test('createDefaultAssistantToolCatalog vault.fs.readText enforces bounded UTF-8 reads inside the vault', async () => {

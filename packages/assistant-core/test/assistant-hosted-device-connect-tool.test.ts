@@ -1,57 +1,65 @@
-import assert from "node:assert/strict";
+import assert from 'node:assert/strict'
 
-import { test } from "vitest";
+import { test } from 'vitest'
 
-import { createProviderTurnAssistantToolCatalog } from "../src/assistant-cli-tools.ts";
+import {
+  createProviderTurnAssistantCapabilityRuntime,
+  createProviderTurnAssistantToolCatalog,
+} from '../src/assistant-cli-tools.ts'
 
-test("provider-turn tool catalogs expose murph.device.connect only when the hosted callback is available", async () => {
+test('provider-turn tool catalogs expose murph.device.connect only when the hosted callback is available', async () => {
+  const localRuntime = createProviderTurnAssistantCapabilityRuntime({
+    vault: '/tmp/murph-assistant-local',
+  })
   const localCatalog = createProviderTurnAssistantToolCatalog({
-    vault: "/tmp/murph-assistant-local",
-  });
+    vault: '/tmp/murph-assistant-local',
+  })
   const issueDeviceConnectLink = async ({ provider }: { provider: string }) => ({
-    authorizationUrl: "https://provider.example.test/oauth/start",
-    expiresAt: "2026-04-04T12:00:00.000Z",
+    authorizationUrl: 'https://provider.example.test/oauth/start',
+    expiresAt: '2026-04-04T12:00:00.000Z',
     provider,
-    providerLabel: "WHOOP",
-  });
-  const hostedCatalog = createProviderTurnAssistantToolCatalog({
+    providerLabel: 'WHOOP',
+  })
+  const hostedRuntime = createProviderTurnAssistantCapabilityRuntime({
     executionContext: {
       hosted: {
         issueDeviceConnectLink,
-        memberId: "member_123",
+        memberId: 'member_123',
         userEnvKeys: [],
       },
     },
-    vault: "/tmp/murph-assistant-hosted",
-  });
+    vault: '/tmp/murph-assistant-hosted',
+  })
+  const hostedCatalog = hostedRuntime.toolCatalog
 
-  assert.equal(localCatalog.hasTool("murph.device.connect"), false);
-  assert.equal(hostedCatalog.hasTool("murph.device.connect"), true);
+  assert.equal(localRuntime.toolCatalog.hasTool('murph.device.connect'), false)
+  assert.equal(localCatalog.hasTool('murph.device.connect'), false)
+  assert.equal(hostedCatalog.hasTool('murph.device.connect'), true)
 
   const [result] = await hostedCatalog.executeCalls({
     calls: [
       {
         input: {
-          provider: "whoop",
+          provider: 'whoop',
         },
-        tool: "murph.device.connect",
+        tool: 'murph.device.connect',
       },
     ],
-  });
+  })
 
   assert.deepEqual(result, {
     errorCode: null,
     errorMessage: null,
     input: {
-      provider: "whoop",
+      provider: 'whoop',
     },
     result: {
-      authorizationUrl: "https://provider.example.test/oauth/start",
-      expiresAt: "2026-04-04T12:00:00.000Z",
-      provider: "whoop",
-      providerLabel: "WHOOP",
+      authorizationUrl: 'https://provider.example.test/oauth/start',
+      expiresAt: '2026-04-04T12:00:00.000Z',
+      provider: 'whoop',
+      providerLabel: 'WHOOP',
     },
-    status: "succeeded",
-    tool: "murph.device.connect",
-  });
-});
+    status: 'succeeded',
+    tool: 'murph.device.connect',
+  })
+})
