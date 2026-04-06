@@ -53,14 +53,16 @@ describe("cloudflare worker routes", () => {
     expect(ExportedContainerProxy).toBe(PackageContainerProxy);
   });
 
-  it("imports inbox email parsing through the email-only subpath", async () => {
-    const workerSource = await readFile(
-      path.resolve("apps/cloudflare/src/index.ts"),
-      "utf8",
-    );
+  it("keeps inbox email parsing isolated to the hosted email ingress module", async () => {
+    const [workerSource, hostedEmailIngressSource] = await Promise.all([
+      readFile(path.resolve("apps/cloudflare/src/index.ts"), "utf8"),
+      readFile(path.resolve("apps/cloudflare/src/hosted-email/worker-ingress.ts"), "utf8"),
+    ]);
 
     expect(workerSource).not.toMatch(/from "@murphai\/inboxd";/u);
-    expect(workerSource).toMatch(/@murphai\/inboxd\/connectors\/email\/parsed/u);
+    expect(workerSource).not.toMatch(/@murphai\/inboxd\/connectors\/email\/parsed/u);
+    expect(hostedEmailIngressSource).not.toMatch(/from "@murphai\/inboxd";/u);
+    expect(hostedEmailIngressSource).toMatch(/@murphai\/inboxd\/connectors\/email\/parsed/u);
   });
 
   it("serves a health endpoint even before secrets are configured", async () => {
