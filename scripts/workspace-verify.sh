@@ -526,6 +526,8 @@ run_test_packages_coverage() {
 }
 
 run_test_coverage() {
+  run_timed_step "Dependency policy" run_dependency_policy_check
+  run_timed_step "Workspace boundary checks" run_workspace_boundary_check
   run_timed_step "Doc gardening" bash "scripts/doc-gardening.sh" --fail-on-issues
 
   if [[ "$test_lane_parallel" == "1" ]]; then

@@ -58,7 +58,7 @@
     "doctor:inbox": "node packages/cli/dist/bin.js inbox doctor",
     "zip:src": "bash scripts/package-audit-context.sh --zip",
     "zip:src:full": "bash scripts/package-audit-context-full.sh --zip",
-    "verify:repo": "pnpm typecheck && pnpm test && pnpm test:coverage",
+    "verify:repo": "pnpm typecheck && pnpm test:coverage",
     "setup:macos": "bash scripts/setup-macos.sh",
     "setup:host": "bash scripts/setup-host.sh",
     "setup:linux": "bash scripts/setup-linux.sh",
