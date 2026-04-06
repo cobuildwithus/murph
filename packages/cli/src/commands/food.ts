@@ -1,19 +1,19 @@
 import { FOOD_STATUSES } from '@murphai/contracts'
 import { Cli, z } from 'incur'
 
-import { requestIdFromOptions, withBaseOptions } from '@murphai/assistant-core/command-helpers'
+import { requestIdFromOptions, withBaseOptions } from '@murphai/operator-config/command-helpers'
 import {
   isoTimestampSchema,
   listItemSchema,
   pathSchema,
   showResultSchema,
-} from '@murphai/assistant-core/vault-cli-contracts'
-import type { VaultServices } from '@murphai/assistant-core/vault-services'
-import { dailyFoodTimeSchema } from '@murphai/assistant-core/usecases/food-autolog'
+} from '@murphai/operator-config/vault-cli-contracts'
+import type { VaultServices } from '@murphai/vault-inbox/vault-services'
+import { dailyFoodTimeSchema } from '@murphai/vault-inbox/usecases/food-autolog'
 import {
   deleteFoodRecord,
   editFoodRecord,
-} from '@murphai/assistant-core/usecases/food'
+} from '@murphai/vault-inbox/usecases/food'
 import { createRegistryDocEntityGroup } from './health-command-factory.js'
 import {
   createDirectEntityDeleteCommandDefinition,

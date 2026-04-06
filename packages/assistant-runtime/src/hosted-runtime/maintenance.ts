@@ -11,10 +11,12 @@ import {
 } from "@murphai/parsers";
 import {
   createIntegratedInboxServices,
+} from "@murphai/vault-inbox";
+import {
   getAssistantCronStatus,
   runAssistantAutomation,
-} from "@murphai/assistant-core";
-import type { AssistantExecutionContext } from "@murphai/assistant-core";
+  type AssistantExecutionContext,
+} from "@murphai/assistant-engine";
 
 import type {
   HostedMaintenanceMetrics,

@@ -10,9 +10,9 @@ import {
 } from '@murphai/runtime-state/node'
 import { test } from 'vitest'
 
-import { instantiateConnector } from '@murphai/assistant-core/inbox-services/connectors'
-import { normalizeDaemonState } from '@murphai/assistant-core/inbox-services/daemon'
-import { readPromotionsByCapture } from '@murphai/assistant-core/inbox-services/promotions'
+import { instantiateConnector } from '@murphai/vault-inbox/inbox-services/connectors'
+import { normalizeDaemonState } from '@murphai/vault-inbox/inbox-services/daemon'
+import { readPromotionsByCapture } from '@murphai/vault-inbox/inbox-services/promotions'
 
 test('instantiateConnector delegates iMessage defaults through the connector factory', async () => {
   let received: {

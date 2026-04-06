@@ -2,20 +2,20 @@ import { Cli, z } from 'incur'
 import {
   emptyArgsSchema,
   withBaseOptions,
-} from '@murphai/assistant-core/command-helpers'
+} from '@murphai/operator-config/command-helpers'
 import {
   listItemSchema,
   localDateSchema,
   pathSchema,
   showResultSchema,
-} from '@murphai/assistant-core/vault-cli-contracts'
+} from '@murphai/operator-config/vault-cli-contracts'
 import {
   type AuditSortOrder,
   type AuditCommandListItem,
   listAudits,
   showAudit,
 } from './audit-command-helpers.js'
-import type { VaultServices } from '@murphai/assistant-core/vault-services'
+import type { VaultServices } from '@murphai/vault-inbox/vault-services'
 
 const auditIdSchema = z
   .string()

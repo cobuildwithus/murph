@@ -19,7 +19,7 @@ The main installable product entrypoint is `@murphai/murph`, which gives you the
 - a hosted Next.js integration control plane in `apps/web`
 - a hosted Cloudflare execution plane in `apps/cloudflare`
 - shared hosted execution contracts and env/client helpers in `@murphai/hosted-execution`
-- headless package boundaries plus the explicit local gateway runtime package: `@murphai/assistant-core`, `@murphai/gateway-core`, `@murphai/gateway-local`, `@murphai/assistant-runtime`, and `@murphai/assistantd`
+- headless package boundaries plus the explicit local gateway/runtime packages: `@murphai/assistant-engine`, `@murphai/vault-inbox`, `@murphai/operator-config`, `@murphai/gateway-core`, `@murphai/gateway-local`, `@murphai/assistant-runtime`, and `@murphai/assistantd`
 
 ## Install
 
@@ -116,7 +116,9 @@ The result is a system you can inspect with normal filesystem tools while still 
 | `packages/parsers` | Local-first attachment parsing and derived artifact publication. |
 | `packages/query` | Read helpers, summaries, list/search helpers, export-pack generation, and the pure derived-knowledge parser/search/index helpers. |
 | `packages/device-syncd` | Local wearable/device OAuth, webhook, and reconcile daemon. |
-| `packages/assistant-core` | Headless local-only assistant/inbox/vault/operator-config boundary for non-CLI consumers plus the shared derived-knowledge service and shared workout/intervention usecases. |
+| `packages/assistant-engine` | Headless local-only assistant execution/runtime package, provider-turn plumbing, tool catalog surfaces, and assistant runtime state/store helpers. |
+| `packages/vault-inbox` | Vault service assembly, inbox service assembly, inbox app helpers, shared derived-knowledge helpers, and CLI-facing vault/inbox usecases. |
+| `packages/operator-config` | Operator config persistence, setup/runtime-env helpers, hosted assistant config, and setup/device-client contracts. |
 | `packages/assistant-cli` | CLI-only assistant wrappers, assistant commands, terminal logging, and Ink chat UI. |
 | `packages/setup-cli` | CLI-only onboarding, host setup, and setup-wizard package. |
 | `packages/gateway-core` | Headless transport-neutral gateway boundary. |

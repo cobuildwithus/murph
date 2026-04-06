@@ -1,9 +1,9 @@
 import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
-import { queueAssistantFirstContactWelcome } from "@murphai/assistant-core";
+import { queueAssistantFirstContactWelcome } from "@murphai/assistant-engine";
 import {
   assistantGatewayLocalMessageSender,
   assistantGatewayLocalProjectionSourceReader,
-} from "@murphai/assistant-core/gateway-local-adapter";
+} from "@murphai/assistant-engine/gateway-local-adapter";
 import { sendGatewayMessageLocal } from "@murphai/gateway-local";
 
 import { prepareHostedDispatchContext } from "./context.ts";

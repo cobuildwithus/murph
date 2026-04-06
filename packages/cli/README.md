@@ -138,7 +138,7 @@ Current repo-local package responsibilities include:
 - inbox and device command surfaces that delegate to headless owner packages
 - release ownership for the public `@murphai/murph` package and bins
 
-Programmatic assistant, setup, and shared usecase APIs now publish from their owner packages directly: `@murphai/assistant-cli`, `@murphai/setup-cli`, and `@murphai/assistant-core`. `@murphai/murph` no longer republishes those helper surfaces through local shim files.
+Programmatic assistant, setup, and shared usecase APIs now publish from their owner packages directly: `@murphai/assistant-cli`, `@murphai/setup-cli`, `@murphai/assistant-engine`, `@murphai/operator-config`, and `@murphai/vault-inbox`. `@murphai/murph` no longer republishes those helper surfaces through local shim files.
 
 ## Release flow
 

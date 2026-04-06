@@ -1,7 +1,7 @@
 import {
   resolveAssistantSelfDeliveryTarget,
   saveAssistantSelfDeliveryTarget,
-} from "@murphai/assistant-core";
+} from "@murphai/operator-config";
 import {
   readHostedVerifiedEmailFromEnv,
 } from "@murphai/runtime-state";

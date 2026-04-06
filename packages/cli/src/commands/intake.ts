@@ -1,15 +1,15 @@
 import { rawImportManifestSchema } from '@murphai/contracts'
 import { Cli, z } from 'incur'
-import { requestIdFromOptions, withBaseOptions } from '@murphai/assistant-core/command-helpers'
+import { requestIdFromOptions, withBaseOptions } from '@murphai/operator-config/command-helpers'
 import {
   isoTimestampSchema,
   listResultSchema,
   localDateSchema,
   pathSchema,
   showResultSchema,
-} from '@murphai/assistant-core/vault-cli-contracts'
-import { loadImportersRuntimeModule } from '@murphai/assistant-core/usecases/runtime'
-import type { VaultServices } from '@murphai/assistant-core/vault-services'
+} from '@murphai/operator-config/vault-cli-contracts'
+import { loadImportersRuntimeModule } from '@murphai/vault-inbox/usecases/runtime'
+import type { VaultServices } from '@murphai/vault-inbox/vault-services'
 import {
   showAssessmentManifest,
   showAssessmentRaw,

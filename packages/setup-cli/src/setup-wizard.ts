@@ -5,8 +5,8 @@ import {
   resolveOpenAICompatibleProviderPreset,
   resolveOpenAICompatibleProviderPresetFromId,
   type OpenAICompatibleProviderPreset,
-} from '@murphai/assistant-core/assistant-provider'
-import { listAssistantCronPresets } from '@murphai/assistant-core/assistant-cron'
+} from '@murphai/assistant-engine/assistant-provider'
+import { listAssistantCronPresets } from '@murphai/assistant-engine/assistant-cron'
 import {
   DEFAULT_SETUP_OPENAI_COMPATIBLE_BASE_URL,
   getDefaultSetupAssistantPreset as getDefaultAssistantPreset,

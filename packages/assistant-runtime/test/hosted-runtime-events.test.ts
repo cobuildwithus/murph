@@ -58,7 +58,7 @@ vi.mock("@murphai/gateway-local", () => ({
   sendGatewayMessageLocal: mocks.sendGatewayMessageLocal,
 }));
 
-vi.mock("@murphai/assistant-core", () => ({
+vi.mock("@murphai/assistant-engine", () => ({
   queueAssistantFirstContactWelcome: mocks.queueAssistantFirstContactWelcome,
 }));
 
@@ -79,7 +79,7 @@ test("hosted gateway dispatch forwards clientRequestId to the local gateway send
   const {
     assistantGatewayLocalMessageSender,
     assistantGatewayLocalProjectionSourceReader,
-  } = await import("@murphai/assistant-core/gateway-local-adapter");
+  } = await import("@murphai/assistant-engine/gateway-local-adapter");
 
   const dispatch = {
     event: {
@@ -130,7 +130,7 @@ test("hosted gateway dispatch forwards clientRequestId to the local gateway send
   });
 });
 
-test("hosted member activation dispatch queues the first-contact welcome through assistant-core", async () => {
+test("hosted member activation dispatch queues the first-contact welcome through assistant-engine", async () => {
   const { executeHostedDispatchEvent } = await import("../src/hosted-runtime/events.ts");
 
   const metrics = await executeHostedDispatchEvent({

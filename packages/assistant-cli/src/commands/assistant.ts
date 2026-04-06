@@ -16,9 +16,9 @@ import {
   assistantSessionShowResultSchema,
   assistantStopResultSchema,
   assistantStatusResultSchema,
-} from '@murphai/assistant-core/assistant-cli-contracts'
-import { deliverAssistantMessage } from '@murphai/assistant-core/outbound-channel'
-import type { ConversationRef } from '@murphai/assistant-core/assistant-runtime'
+} from '@murphai/operator-config/assistant-cli-contracts'
+import { deliverAssistantMessage } from '@murphai/assistant-engine/outbound-channel'
+import type { ConversationRef } from '@murphai/assistant-engine/assistant-runtime'
 import {
   runAssistantAutomation,
   runAssistantChat,
@@ -30,36 +30,36 @@ import { getAssistantStatus } from '../assistant/status.js'
 import {
   redactAssistantSessionForDisplay,
   redactAssistantSessionsForDisplay,
-} from '@murphai/assistant-core/assistant-runtime'
+} from '@murphai/assistant-engine/assistant-runtime'
 import {
   redactAssistantDisplayPath,
   getAssistantSession,
   listAssistantSessions,
   resolveAssistantStatePaths,
-} from '@murphai/assistant-core/assistant-state'
+} from '@murphai/assistant-engine/assistant-state'
 import {
   emptyArgsSchema,
   parseHeadersJsonOption,
   requestIdFromOptions,
   withBaseOptions,
-} from '@murphai/assistant-core/command-helpers'
-import type { InboxServices } from '@murphai/assistant-core/inbox-services'
+} from '@murphai/operator-config/command-helpers'
+import type { InboxServices } from '@murphai/vault-inbox/inbox-services'
 import {
   applyAssistantSelfDeliveryTargetDefaults,
   clearAssistantSelfDeliveryTargets,
   listAssistantSelfDeliveryTargets,
   resolveOperatorConfigPath,
   saveAssistantSelfDeliveryTarget,
-} from '@murphai/assistant-core/operator-config'
+} from '@murphai/operator-config/operator-config'
 import {
   formatAssistantRunEventForTerminal,
   formatForegroundLogLine,
   formatInboxRunEventForTerminal,
   resolveForegroundTerminalLogOptions,
 } from '../run-terminal-logging.js'
-import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
-import type { VaultServices } from '@murphai/assistant-core/vault-services'
-import { requestIdSchema } from '@murphai/assistant-core/vault-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import type { VaultServices } from '@murphai/vault-inbox/vault-services'
+import { requestIdSchema } from '@murphai/operator-config/vault-cli-contracts'
 
 const assistantSessionOptionFields = {
   session: z

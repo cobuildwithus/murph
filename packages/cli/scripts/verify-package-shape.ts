@@ -72,8 +72,12 @@ assert(
   'package.json must depend on @murphai/device-syncd so the published @murphai/murph package installs the managed device daemon.',
 )
 assert(
-  packageJson.dependencies?.['@murphai/assistant-core'] === 'workspace:*',
-  'package.json must depend on @murphai/assistant-core so the CLI can import the headless owner package directly.',
+  packageJson.dependencies?.['@murphai/operator-config'] === 'workspace:*',
+  'package.json must depend on @murphai/operator-config so the published @murphai/murph package installs the operator-config owner directly.',
+)
+assert(
+  packageJson.dependencies?.['@murphai/vault-inbox'] === 'workspace:*',
+  'package.json must depend on @murphai/vault-inbox so the published @murphai/murph package installs the vault and inbox owner directly.',
 )
 assert(
   packageJson.dependencies?.['@murphai/assistant-cli'] === 'workspace:*',
@@ -242,8 +246,12 @@ assert(
   'tsconfig.build.json must extend ./tsconfig.json.',
 )
 assert(
-  tsconfig.references?.some((reference) => reference.path === '../assistant-core') === true,
-  'tsconfig.json must reference ../assistant-core so build outputs include the headless owner package.',
+  tsconfig.references?.some((reference) => reference.path === '../operator-config') === true,
+  'tsconfig.json must reference ../operator-config so build outputs include the operator-config owner package.',
+)
+assert(
+  tsconfig.references?.some((reference) => reference.path === '../vault-inbox') === true,
+  'tsconfig.json must reference ../vault-inbox so build outputs include the vault and inbox owner package.',
 )
 assert(
   tsconfig.references?.some((reference) => reference.path === '../assistant-cli') === true,
@@ -254,8 +262,12 @@ assert(
   'tsconfig.json must reference ../setup-cli so the published shell can build against the onboarding package.',
 )
 assert(
-  tsconfigTypecheck.references?.some((reference) => reference.path === '../assistant-core') === true,
-  'tsconfig.typecheck.json must reference ../assistant-core so package-local typecheck follows the headless facade dependency.',
+  tsconfigTypecheck.references?.some((reference) => reference.path === '../operator-config') === true,
+  'tsconfig.typecheck.json must reference ../operator-config so package-local typecheck follows the operator-config owner dependency.',
+)
+assert(
+  tsconfigTypecheck.references?.some((reference) => reference.path === '../vault-inbox') === true,
+  'tsconfig.typecheck.json must reference ../vault-inbox so package-local typecheck follows the vault and inbox owner dependency.',
 )
 assert(
   tsconfigTypecheck.references?.some((reference) => reference.path === '../assistant-cli') === true,

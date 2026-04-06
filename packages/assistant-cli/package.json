@@ -97,7 +97,9 @@
     "test": "pnpm exec vitest run --passWithNoTests --config vitest.config.ts --no-coverage"
   },
   "dependencies": {
-    "@murphai/assistant-core": "workspace:*",
+    "@murphai/assistant-engine": "workspace:*",
+    "@murphai/operator-config": "workspace:*",
+    "@murphai/vault-inbox": "workspace:*",
     "@murphai/assistantd": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
     "incur": "0.3.13",

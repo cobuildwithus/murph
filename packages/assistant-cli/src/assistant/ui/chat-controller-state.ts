@@ -1,5 +1,5 @@
-import type { AssistantSession } from '@murphai/assistant-core/assistant-cli-contracts'
-import { normalizeNullableString } from '@murphai/assistant-core/assistant-runtime'
+import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
+import { normalizeNullableString } from '@murphai/assistant-engine/assistant-runtime'
 
 export interface AssistantPromptQueueState {
   prompts: readonly string[]

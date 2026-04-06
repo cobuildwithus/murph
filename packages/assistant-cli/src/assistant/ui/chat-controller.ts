@@ -1,12 +1,12 @@
 import * as React from 'react'
 import { useApp } from 'ink'
-import { type AssistantSession } from '@murphai/assistant-core/assistant-cli-contracts'
-import { resolveCodexDisplayOptions } from '@murphai/assistant-core/assistant-codex'
+import { type AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
+import { resolveCodexDisplayOptions } from '@murphai/assistant-engine/assistant-codex'
 import {
   resolveAssistantOperatorDefaults,
   resolveAssistantProviderDefaults,
-} from '@murphai/assistant-core/operator-config'
-import { normalizeNullableString } from '@murphai/assistant-core/assistant-runtime'
+} from '@murphai/operator-config/operator-config'
+import { normalizeNullableString } from '@murphai/assistant-engine/assistant-runtime'
 import { type AssistantChatInput } from '../service.js'
 import { listAssistantTranscriptEntries } from '../store.js'
 import {

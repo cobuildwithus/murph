@@ -16,7 +16,7 @@ import { registerRecipeCommands } from '../src/commands/recipe.js'
 import { registerSamplesCommands } from '../src/commands/samples.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { registerWearablesCommands } from '../src/commands/wearables.js'
-import { createIntegratedVaultServices } from '@murphai/assistant-core/vault-services'
+import { createIntegratedVaultServices } from '@murphai/vault-inbox/vault-services'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData } from './cli-test-helpers.js'
 

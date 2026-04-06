@@ -2,16 +2,16 @@ import { Cli, z } from 'incur'
 import {
   requestIdFromOptions,
   withBaseOptions,
-} from '@murphai/assistant-core/command-helpers'
+} from '@murphai/operator-config/command-helpers'
 import {
   listResultSchema,
   journalEnsureResultSchema,
   localDateSchema,
   showResultSchema,
-} from '@murphai/assistant-core/vault-cli-contracts'
-import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
-import type { VaultServices } from '@murphai/assistant-core/vault-services'
-import { normalizeRepeatableFlagOption } from '@murphai/assistant-core/option-utils'
+} from '@murphai/operator-config/vault-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import type { VaultServices } from '@murphai/vault-inbox/vault-services'
+import { normalizeRepeatableFlagOption } from '@murphai/vault-inbox/option-utils'
 
 export const journalMutationResultSchema = z.object({
   vault: z.string().min(1),

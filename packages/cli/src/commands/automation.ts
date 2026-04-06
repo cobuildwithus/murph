@@ -6,11 +6,11 @@ import {
 } from "@murphai/contracts";
 import {
   withBaseOptions,
-} from "@murphai/assistant-core/command-helpers";
-import { loadJsonInputObject, textInputOptionSchema } from "@murphai/assistant-core/json-input";
+} from "@murphai/operator-config/command-helpers";
+import { loadJsonInputObject, textInputOptionSchema } from "@murphai/vault-inbox/json-input";
 import {
   pathSchema,
-} from "@murphai/assistant-core/vault-cli-contracts";
+} from "@murphai/operator-config/vault-cli-contracts";
 import {
   scaffoldAutomationPayload,
   upsertAutomation,

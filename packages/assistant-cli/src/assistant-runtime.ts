@@ -2,19 +2,19 @@ export type {
   AssistantConversationAudience,
   AssistantConversationDeliveryPolicy,
   AssistantConversationPolicy,
-} from '@murphai/assistant-core/assistant-runtime'
+} from '@murphai/assistant-engine/assistant-runtime'
 export {
   resolveAssistantConversationAutoReplyEligibility,
   resolveAssistantConversationAudience,
   resolveAssistantConversationPolicy,
   shouldExposeSensitiveHealthContext,
-} from '@murphai/assistant-core/assistant-runtime'
+} from '@murphai/assistant-engine/assistant-runtime'
 export type {
   AssistantRuntimeStateService,
-} from '@murphai/assistant-core/assistant-state'
+} from '@murphai/assistant-engine/assistant-state'
 export {
   createAssistantRuntimeStateService,
-} from '@murphai/assistant-core/assistant-state'
+} from '@murphai/assistant-engine/assistant-state'
 
 export type {
   AddAssistantCronJobInput,
@@ -51,7 +51,7 @@ export type {
 } from './assistant/service.js'
 export type {
   ConversationRef,
-} from '@murphai/assistant-core/assistant-runtime'
+} from '@murphai/assistant-engine/assistant-runtime'
 export {
   openAssistantConversation,
   sendAssistantMessage,
@@ -84,7 +84,7 @@ export type {
 } from './assistant/outbox.js'
 export type {
   AssistantOutboxIntent,
-} from '@murphai/assistant-core/assistant-cli-contracts'
+} from '@murphai/operator-config/assistant-cli-contracts'
 export {
   dispatchAssistantOutboxIntent,
   drainAssistantOutbox,
@@ -93,7 +93,7 @@ export {
 } from './assistant/outbox.js'
 export async function runAssistantChat(
   input: import('./assistant/service.js').AssistantChatInput,
-): Promise<import('@murphai/assistant-core/assistant-cli-contracts').AssistantChatResult> {
+): Promise<import('@murphai/operator-config/assistant-cli-contracts').AssistantChatResult> {
   const { runAssistantChatWithInk } = await import('./assistant-chat-ink.js')
   return runAssistantChatWithInk(input)
 }

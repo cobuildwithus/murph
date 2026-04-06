@@ -15,9 +15,9 @@ import {
 } from "@murphai/hosted-execution";
 import {
   refreshAssistantStatusSnapshot,
-} from "@murphai/assistant-core";
-import type { AssistantExecutionContext } from "@murphai/assistant-core";
-import { assistantGatewayLocalProjectionSourceReader } from "@murphai/assistant-core/gateway-local-adapter";
+  type AssistantExecutionContext,
+} from "@murphai/assistant-engine";
+import { assistantGatewayLocalProjectionSourceReader } from "@murphai/assistant-engine/gateway-local-adapter";
 import { exportGatewayProjectionSnapshotLocal } from "@murphai/gateway-local";
 
 import { reconcileHostedVerifiedEmailSelfTarget } from "../hosted-email-route.ts";

@@ -1,7 +1,7 @@
 import path from 'node:path'
 import type { Cli } from 'incur'
 
-import { formatStructuredErrorMessage } from '@murphai/assistant-core/text/shared'
+import { formatStructuredErrorMessage } from '@murphai/operator-config/text/shared'
 
 export interface MurphCliRunOptions {
   argv0?: string
@@ -27,9 +27,9 @@ export async function runMurphCliAction(
   options: MurphCliRunOptions = {},
 ): Promise<void> {
   const cliModule = await import('./index.js')
-  const operatorConfigModule = await import('@murphai/assistant-core/operator-config')
+  const operatorConfigModule = await import('@murphai/operator-config/operator-config')
   const setupCliModule = await import('@murphai/setup-cli/setup-cli')
-  const setupRuntimeEnvModule = await import('@murphai/assistant-core/setup-runtime-env')
+  const setupRuntimeEnvModule = await import('@murphai/operator-config/setup-runtime-env')
 
   const cli = cliModule.default
   const {

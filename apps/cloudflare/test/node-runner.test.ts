@@ -18,7 +18,7 @@ import {
   snapshotHostedExecutionContext as snapshotHostedExecutionContextActual,
   writePendingAssistantUsageRecord,
 } from "@murphai/runtime-state/node";
-import { assistantOutboxIntentSchema } from "@murphai/assistant-core";
+import { assistantOutboxIntentSchema } from "@murphai/operator-config/assistant-cli-contracts";
 import type {
   HostedAssistantRuntimeConfig,
   HostedAssistantRuntimeJobInput,
@@ -29,9 +29,9 @@ const hostedCliMocks = vi.hoisted(() => ({
   runAssistantAutomation: vi.fn(),
 }));
 
-vi.mock("@murphai/assistant-core", async () => {
-  const actual = await vi.importActual<typeof import("@murphai/assistant-core")>(
-    "@murphai/assistant-core",
+vi.mock("@murphai/assistant-engine", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/assistant-engine")>(
+    "@murphai/assistant-engine",
   );
   return {
     ...actual,
@@ -205,8 +205,8 @@ describe("runHostedExecutionJob", () => {
   beforeEach(async () => {
     vi.restoreAllMocks();
     setHostedExecutionRunModeForTests("in-process");
-    const actualAssistantCore = await vi.importActual<typeof import("@murphai/assistant-core")>(
-      "@murphai/assistant-core",
+    const actualAssistantCore = await vi.importActual<typeof import("@murphai/assistant-engine")>(
+      "@murphai/assistant-engine",
     );
     hostedCliMocks.dispatchAssistantOutboxIntent.mockImplementation((input) =>
       actualAssistantCore.dispatchAssistantOutboxIntent(input));

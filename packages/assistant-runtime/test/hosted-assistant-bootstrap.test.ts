@@ -15,7 +15,7 @@ import {
   saveAssistantOperatorDefaultsPatch,
   saveHostedAssistantConfig,
   tryParseHostedAssistantConfig,
-} from "@murphai/assistant-core";
+} from "@murphai/operator-config";
 
 const temporaryPaths: string[] = [];
 

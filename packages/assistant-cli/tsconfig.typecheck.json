@@ -11,7 +11,13 @@
       "path": "../runtime-state"
     },
     {
-      "path": "../assistant-core"
+      "path": "../assistant-engine"
+    },
+    {
+      "path": "../operator-config"
+    },
+    {
+      "path": "../vault-inbox"
     },
     {
       "path": "../assistantd"

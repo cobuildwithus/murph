@@ -1,15 +1,15 @@
 import { Cli, z } from 'incur'
-import { withBaseOptions } from '@murphai/assistant-core/command-helpers'
+import { withBaseOptions } from '@murphai/operator-config/command-helpers'
 import {
   interventionAddResultSchema,
   isoTimestampSchema,
-} from '@murphai/assistant-core/vault-cli-contracts'
-import type { VaultServices } from '@murphai/assistant-core/vault-services'
+} from '@murphai/operator-config/vault-cli-contracts'
+import type { VaultServices } from '@murphai/vault-inbox/vault-services'
 import {
   addInterventionRecord,
   deleteInterventionRecord,
   editInterventionRecord,
-} from '@murphai/assistant-core/usecases/intervention'
+} from '@murphai/vault-inbox/usecases/intervention'
 import {
   createDirectEntityDeleteCommandDefinition,
   createDirectEventBackedEntityEditCommandDefinition,

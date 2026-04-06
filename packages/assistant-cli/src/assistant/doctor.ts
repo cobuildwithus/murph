@@ -22,19 +22,19 @@ import {
   type AssistantDoctorResult,
   type AssistantOutboxIntent,
   type AssistantTurnReceipt,
-} from '@murphai/assistant-core/assistant-cli-contracts'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import {
   inspectAndRepairAssistantStateSecrecy,
   type AssistantStateSecrecyAudit,
 } from './doctor-security.js'
-import { summarizeAssistantQuarantines } from '@murphai/assistant-core/assistant-runtime'
-import { withAssistantRuntimeWriteLock } from '@murphai/assistant-core/assistant-state'
+import { summarizeAssistantQuarantines } from '@murphai/assistant-engine/assistant-runtime'
+import { withAssistantRuntimeWriteLock } from '@murphai/assistant-engine/assistant-state'
 import {
   isMissingFileError,
   parseAssistantJsonLinesWithTailSalvage,
-} from '@murphai/assistant-core/assistant-runtime'
+} from '@murphai/assistant-engine/assistant-runtime'
 import { redactAssistantDisplayPath } from './store.js'
-import { resolveAssistantStatePaths } from '@murphai/assistant-core/assistant-state'
+import { resolveAssistantStatePaths } from '@murphai/assistant-engine/assistant-state'
 
 const STALE_OUTBOX_INTENT_MS = 15 * 60 * 1000
 const ASSISTANT_STATUS_SNAPSHOT_SCHEMA = 'murph.assistant-status-snapshot.v1'

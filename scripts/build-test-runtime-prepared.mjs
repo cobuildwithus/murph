@@ -8,7 +8,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const cliSourceRoot = path.join(repoRoot, "packages/cli/src");
 const requiredWorkspaceSmokeSubpathsByPackage = {
-  "assistant-core": [
+  "operator-config": [
+    "command-helpers",
+    "vault-cli-contracts",
+    "vault-cli-errors",
+  ],
+  "vault-inbox": [
     "usecases/intervention",
     "usecases/workout",
     "usecases/workout-format",
@@ -28,7 +33,9 @@ const baseSmokeImportPaths = [
   "packages/hosted-execution/dist/index.js",
   "packages/messaging-ingress/dist/index.js",
   "packages/runtime-state/dist/index.js",
-  "packages/assistant-core/dist/index.js",
+  "packages/operator-config/dist/index.js",
+  "packages/vault-inbox/dist/index.js",
+  "packages/assistant-engine/dist/index.js",
   "packages/assistant-cli/dist/index.js",
   "packages/setup-cli/dist/index.js",
   "packages/core/dist/index.js",

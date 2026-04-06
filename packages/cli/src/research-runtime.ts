@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { normalizeNullableString as normalizeOptionalText } from '@murphai/assistant-core/text/shared'
+import { normalizeNullableString as normalizeOptionalText } from '@murphai/operator-config/text/shared'
 import {
   runReviewGptPrompt,
   saveVaultTextNote,

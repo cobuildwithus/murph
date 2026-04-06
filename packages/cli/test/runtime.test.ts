@@ -3,7 +3,7 @@ import { access, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { localParallelCliTest as test } from './local-parallel-test.js'
-import { createRuntimeUnavailableError } from '@murphai/assistant-core/runtime-errors'
+import { createRuntimeUnavailableError } from '@murphai/operator-config/runtime-errors'
 import {
   ensureCliRuntimeArtifactsWithOptions,
   repoRoot,

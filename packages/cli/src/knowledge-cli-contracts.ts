@@ -3,7 +3,7 @@ import {
   isoTimestampSchema,
   pathSchema,
   slugSchema,
-} from '@murphai/assistant-core/vault-cli-contracts'
+} from '@murphai/operator-config/vault-cli-contracts'
 import { DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT } from '@murphai/query'
 
 export const knowledgePageReferenceSchema = z.object({

@@ -4,7 +4,7 @@ import {
   parseHeadersJsonOption,
   requestIdFromOptions,
   withBaseOptions,
-} from '@murphai/assistant-core/command-helpers'
+} from '@murphai/operator-config/command-helpers'
 import {
   inboxAttachmentListResultSchema,
   inboxAttachmentParseResultSchema,
@@ -31,22 +31,22 @@ import {
   inboxSourceListResultSchema,
   inboxSourceRemoveResultSchema,
   inboxSourceValues,
-} from '@murphai/assistant-core/inbox-cli-contracts'
+} from '@murphai/vault-inbox/inbox-cli-contracts'
 import {
   inboxModelBundleResultSchema,
   inboxModelRouteResultSchema,
-} from '@murphai/assistant-core/inbox-model-contracts'
+} from '@murphai/assistant-engine/inbox-model-contracts'
 import {
   materializeInboxModelBundle,
   routeInboxCaptureWithModel,
-} from '@murphai/assistant-core/inbox-model-harness'
-import type { InboxServices } from '@murphai/assistant-core/inbox-services'
+} from '@murphai/assistant-engine/inbox-model-harness'
+import type { InboxServices } from '@murphai/vault-inbox/inbox-services'
 import {
   formatForegroundLogLine,
   formatInboxRunEventForTerminal,
   resolveForegroundTerminalLogOptions,
 } from '@murphai/assistant-cli/run-terminal-logging'
-import type { VaultServices } from '@murphai/assistant-core/vault-services'
+import type { VaultServices } from '@murphai/vault-inbox/vault-services'
 
 const inboxInitOptionFields = {
   rebuild: z

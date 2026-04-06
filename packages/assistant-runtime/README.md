@@ -18,6 +18,6 @@ Current non-goals:
 - owning shared hosted execution contracts, callback hosts, or side-effect codecs that belong in `@murphai/hosted-execution`
 - replacing the canonical vault or hosted bundle model
 
-The current implementation imports its local-only assistant, inbox, vault, and operator-config seams directly through `@murphai/assistant-core`, so hosted runtimes use the same single headless boundary as the local daemon without depending on a legacy CLI compatibility path. Shared hosted execution contracts remain owned by `@murphai/hosted-execution`; this package should not re-export that surface.
+The current implementation imports its local-only assistant runtime from `@murphai/assistant-engine`, vault/inbox app surfaces from `@murphai/vault-inbox`, and operator/setup config seams from `@murphai/operator-config`. Shared hosted execution contracts remain owned by `@murphai/hosted-execution`; this package should not re-export that surface.
 
-Hosted runtime env/config helpers that Cloudflare needs at the app boundary now publish from `@murphai/assistant-runtime/hosted-assistant-env` so hosted apps do not need to reach into `@murphai/assistant-core` directly.
+Hosted runtime env/config helpers that Cloudflare needs at the app boundary now publish from `@murphai/assistant-runtime/hosted-assistant-env` so hosted apps do not need to reach into the owner packages directly.

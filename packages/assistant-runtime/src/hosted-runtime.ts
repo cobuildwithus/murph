@@ -17,8 +17,8 @@ import {
 } from "@murphai/hosted-execution";
 import {
   HostedAssistantConfigurationError,
-  type AssistantExecutionContext,
-} from "@murphai/assistant-core";
+} from "@murphai/operator-config";
+import type { AssistantExecutionContext } from "@murphai/assistant-engine";
 
 import {
   commitHostedExecutionResult,

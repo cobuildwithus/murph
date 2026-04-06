@@ -1,21 +1,21 @@
 import { Cli, z } from 'incur'
-import { emptyArgsSchema, withBaseOptions } from '@murphai/assistant-core/command-helpers'
+import { emptyArgsSchema, withBaseOptions } from '@murphai/operator-config/command-helpers'
 import {
   ALL_QUERY_ENTITY_FAMILIES,
   loadQueryRuntime,
-} from '@murphai/assistant-core/query-runtime'
+} from '@murphai/vault-inbox/query-runtime'
 import {
   isoTimestampSchema,
   localDateSchema,
   pathSchema,
   slugSchema,
-} from '@murphai/assistant-core/vault-cli-contracts'
-import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
+} from '@murphai/operator-config/vault-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   normalizeRepeatableEnumFlagOption,
   normalizeRepeatableFlagOption,
-} from '@murphai/assistant-core/option-utils'
-import type { VaultServices } from '@murphai/assistant-core/vault-services'
+} from '@murphai/vault-inbox/option-utils'
+import type { VaultServices } from '@murphai/vault-inbox/vault-services'
 
 const recordTypeValues = ALL_QUERY_ENTITY_FAMILIES
 

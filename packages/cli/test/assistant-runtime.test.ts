@@ -11,35 +11,35 @@ import {
   resolveAssistantSession,
   resolveAssistantStatePaths,
   saveAssistantAutomationState,
-} from '@murphai/assistant-core/assistant-state'
+} from '@murphai/assistant-engine/assistant-state'
 import { listPendingAssistantUsageRecords } from '@murphai/runtime-state/node'
-import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
-import { listAssistantTurnReceipts } from '@murphai/assistant-core/assistant/receipts'
-import { readAssistantSession } from '@murphai/assistant-core/assistant/store/persistence'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { listAssistantTurnReceipts } from '@murphai/assistant-engine/assistant/receipts'
+import { readAssistantSession } from '@murphai/assistant-engine/assistant/store/persistence'
 import {
   buildAssistantProviderDefaultsPatch,
   resolveOperatorConfigPath,
   resolveAssistantOperatorDefaults,
   resolveAssistantProviderDefaults,
   saveAssistantOperatorDefaultsPatch,
-} from '@murphai/assistant-core/operator-config'
-import type { InboxServices } from '@murphai/assistant-core/inbox-services'
+} from '@murphai/operator-config/operator-config'
+import type { InboxServices } from '@murphai/vault-inbox/inbox-services'
 import {
   extractRecoveredAssistantSession,
   isAssistantProviderInterruptedError,
-} from '@murphai/assistant-core/assistant/provider-turn-recovery'
-import * as assistantAutomationArtifacts from '@murphai/assistant-core/assistant/automation/artifacts'
+} from '@murphai/assistant-engine/assistant/provider-turn-recovery'
+import * as assistantAutomationArtifacts from '@murphai/assistant-engine/assistant/automation/artifacts'
 import {
   buildAssistantAutoReplyPrompt,
-} from '@murphai/assistant-core/assistant/automation/prompt-builder'
-import { sanitizeAssistantOutboundReply } from '@murphai/assistant-core/assistant/reply-sanitizer'
+} from '@murphai/assistant-engine/assistant/automation/prompt-builder'
+import { sanitizeAssistantOutboundReply } from '@murphai/assistant-engine/assistant/reply-sanitizer'
 import {
   assertAssistantCronJobId,
   assertAssistantCronRunId,
   assertAssistantOutboxIntentId,
   assertAssistantSessionId,
   assertAssistantTurnId,
-} from '@murphai/assistant-core/assistant/state-ids'
+} from '@murphai/assistant-engine/assistant/state-ids'
 
 const runtimeMocks = vi.hoisted(() => ({
   deliverAssistantMessageOverBinding: vi.fn(),
@@ -69,9 +69,9 @@ vi.mock('@murphai/assistant-cli/assistant-chat-ink', () => ({
   runAssistantChatWithInk: runtimeMocks.runAssistantChatWithInk,
 }))
 
-vi.mock('@murphai/assistant-core/outbound-channel', async () => {
-  const actual = await vi.importActual<typeof import('@murphai/assistant-core/outbound-channel')>(
-    '@murphai/assistant-core/outbound-channel',
+vi.mock('@murphai/assistant-engine/outbound-channel', async () => {
+  const actual = await vi.importActual<typeof import('@murphai/assistant-engine/outbound-channel')>(
+    '@murphai/assistant-engine/outbound-channel',
   )
 
   return {
@@ -81,9 +81,9 @@ vi.mock('@murphai/assistant-core/outbound-channel', async () => {
   }
 })
 
-vi.mock('@murphai/assistant-core/assistant-provider', async () => {
-  const actual = await vi.importActual<typeof import('@murphai/assistant-core/assistant-provider')>(
-    '@murphai/assistant-core/assistant-provider',
+vi.mock('@murphai/assistant-engine/assistant-provider', async () => {
+  const actual = await vi.importActual<typeof import('@murphai/assistant-engine/assistant-provider')>(
+    '@murphai/assistant-engine/assistant-provider',
   )
 
   return {
@@ -98,7 +98,7 @@ vi.mock('@murphai/assistant-core/assistant-provider', async () => {
   }
 })
 
-vi.mock('@murphai/assistant-core/inbox-model-harness', () => ({
+vi.mock('@murphai/assistant-engine/inbox-model-harness', () => ({
   routeInboxCaptureWithModel: runtimeMocks.routeInboxCaptureWithModel,
 }))
 
@@ -111,7 +111,7 @@ import {
   scanAssistantInboxOnce,
   sendAssistantMessage,
 } from '@murphai/assistant-cli/assistant-runtime'
-import { bridgeAbortSignals } from '@murphai/assistant-core/assistant/automation/shared'
+import { bridgeAbortSignals } from '@murphai/assistant-engine/assistant/automation/shared'
 import {
   CHAT_BANNER,
   CHAT_COMPOSER_HINT,
@@ -586,7 +586,10 @@ test('sendAssistantMessage keeps older local history in raw transcript files wit
     (call) => call[0],
   )
   assert.equal(providerCalls[0]?.continuityContext, null)
-  assert.match(providerCalls[0]?.systemPrompt ?? '', /Murph CLI Contract:/u)
+  assert.match(
+    providerCalls[0]?.systemPrompt ?? '',
+    /This assistant runtime is for Murph vault and assistant operations/u,
+  )
   const latestProviderCall = providerCalls.at(-1)
   assert.equal(latestProviderCall?.continuityContext, null)
   assert.equal((latestProviderCall?.conversationMessages?.length ?? 0) > 0, true)

@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { Box, Static, Text, useStdout, type StaticProps } from 'ink'
-import { normalizeNullableString } from '@murphai/assistant-core/assistant-runtime'
+import { normalizeNullableString } from '@murphai/assistant-engine/assistant-runtime'
 
 import type { InkChatEntry } from './view-model.js'
 import {

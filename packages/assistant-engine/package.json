@@ -1,0 +1,148 @@
+{
+  "name": "@murphai/assistant-engine",
+  "version": "0.1.16",
+  "private": false,
+  "type": "module",
+  "license": "GPL-3.0-only",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cobuildwithus/murph"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./assistant-automation": {
+      "types": "./dist/assistant-automation.d.ts",
+      "default": "./dist/assistant-automation.js"
+    },
+    "./assistant-cli-access": {
+      "types": "./dist/assistant-cli-access.d.ts",
+      "default": "./dist/assistant-cli-access.js"
+    },
+    "./assistant-cli-tools": {
+      "types": "./dist/assistant-cli-tools.d.ts",
+      "default": "./dist/assistant-cli-tools.js"
+    },
+    "./assistant-cli-tools/*": {
+      "types": "./dist/assistant-cli-tools/*.d.ts",
+      "default": "./dist/assistant-cli-tools/*.js"
+    },
+    "./assistant-codex": {
+      "types": "./dist/assistant-codex.d.ts",
+      "default": "./dist/assistant-codex.js"
+    },
+    "./assistant-cron": {
+      "types": "./dist/assistant-cron.d.ts",
+      "default": "./dist/assistant-cron.js"
+    },
+    "./assistant-outbox": {
+      "types": "./dist/assistant-outbox.d.ts",
+      "default": "./dist/assistant-outbox.js"
+    },
+    "./assistant-provider": {
+      "types": "./dist/assistant-provider.d.ts",
+      "default": "./dist/assistant-provider.js"
+    },
+    "./assistant-runtime": {
+      "types": "./dist/assistant-runtime.d.ts",
+      "default": "./dist/assistant-runtime.js"
+    },
+    "./assistant-service": {
+      "types": "./dist/assistant-service.d.ts",
+      "default": "./dist/assistant-service.js"
+    },
+    "./assistant-state": {
+      "types": "./dist/assistant-state.d.ts",
+      "default": "./dist/assistant-state.js"
+    },
+    "./assistant-status": {
+      "types": "./dist/assistant-status.d.ts",
+      "default": "./dist/assistant-status.js"
+    },
+    "./assistant-store": {
+      "types": "./dist/assistant-store.d.ts",
+      "default": "./dist/assistant-store.js"
+    },
+    "./assistant-vault-paths": {
+      "types": "./dist/assistant-vault-paths.d.ts",
+      "default": "./dist/assistant-vault-paths.js"
+    },
+    "./assistant/*": {
+      "types": "./dist/assistant/*.d.ts",
+      "default": "./dist/assistant/*.js"
+    },
+    "./commands/*": {
+      "types": "./dist/commands/*.d.ts",
+      "default": "./dist/commands/*.js"
+    },
+    "./child-process-env": {
+      "types": "./dist/child-process-env.d.ts",
+      "default": "./dist/child-process-env.js"
+    },
+    "./gateway-local-adapter": {
+      "types": "./dist/gateway-local-adapter.d.ts",
+      "default": "./dist/gateway-local-adapter.js"
+    },
+    "./inbox-model-contracts": {
+      "types": "./dist/inbox-model-contracts.d.ts",
+      "default": "./dist/inbox-model-contracts.js"
+    },
+    "./inbox-model-harness": {
+      "types": "./dist/inbox-model-harness.d.ts",
+      "default": "./dist/inbox-model-harness.js"
+    },
+    "./model-harness": {
+      "types": "./dist/model-harness.d.ts",
+      "default": "./dist/model-harness.js"
+    },
+    "./outbound-channel": {
+      "types": "./dist/outbound-channel.d.ts",
+      "default": "./dist/outbound-channel.js"
+    },
+    "./process-kill": {
+      "types": "./dist/process-kill.d.ts",
+      "default": "./dist/process-kill.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.json --force",
+    "typecheck": "tsc -p tsconfig.typecheck.json --pretty false",
+    "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^2.0.35",
+    "@ai-sdk/openai-compatible": "^2.0.35",
+    "@mozilla/readability": "0.6.0",
+    "@murphai/contracts": "workspace:*",
+    "@murphai/core": "workspace:*",
+    "@murphai/device-syncd": "workspace:*",
+    "@murphai/gateway-core": "workspace:*",
+    "@murphai/gateway-local": "workspace:*",
+    "@murphai/hosted-execution": "workspace:*",
+    "@murphai/importers": "workspace:*",
+    "@murphai/inboxd": "workspace:*",
+    "@murphai/messaging-ingress": "workspace:*",
+    "@murphai/operator-config": "workspace:*",
+    "@murphai/parsers": "workspace:*",
+    "@murphai/query": "workspace:*",
+    "@murphai/runtime-state": "workspace:*",
+    "ai": "^6.0.116",
+    "linkedom": "0.18.12",
+    "pdfjs-dist": "5.6.205",
+    "zod": "^4.1.8"
+  },
+  "engines": {
+    "node": ">=22.16.0"
+  }
+}

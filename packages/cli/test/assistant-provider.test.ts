@@ -28,15 +28,15 @@ vi.mock('ai', () => ({
   stepCountIs: providerMocks.stepCountIs,
 }))
 
-vi.mock('@murphai/assistant-core/assistant-codex', () => ({
+vi.mock('@murphai/assistant-engine/assistant-codex', () => ({
   executeCodexPrompt: providerMocks.executeCodexPrompt,
 }))
 
-vi.mock('@murphai/assistant-core/model-harness', () => ({
+vi.mock('@murphai/assistant-engine/model-harness', () => ({
   resolveAssistantLanguageModel: providerMocks.resolveAssistantLanguageModel,
 }))
 
-vi.mock('@murphai/assistant-core/assistant-cli-tools', () => ({
+vi.mock('@murphai/assistant-engine/assistant-cli-tools', () => ({
   createDefaultAssistantToolCatalog: toolMocks.createDefaultAssistantToolCatalog,
 }))
 
@@ -56,7 +56,7 @@ import {
   executeAssistantProviderTurnAttempt,
   executeAssistantProviderTurn,
   resolveAssistantProviderCapabilities,
-} from '@murphai/assistant-core/assistant/provider-registry'
+} from '@murphai/assistant-engine/assistant/provider-registry'
 import {
   defaultDiscoverOpenAICompatibleModels,
   type AssistantModelDiscoveryResult,
@@ -66,11 +66,11 @@ import {
 import {
   buildAssistantProviderDefaultsPatch,
   resolveAssistantProviderDefaults,
-} from '@murphai/assistant-core/operator-config'
-import { prepareAssistantDirectCliEnv } from '@murphai/assistant-core/assistant-cli-access'
+} from '@murphai/operator-config/operator-config'
+import { prepareAssistantDirectCliEnv } from '@murphai/assistant-engine/assistant-cli-access'
 import {
   serializeAssistantProviderSessionOptions,
-} from '@murphai/assistant-core/assistant/provider-config'
+} from '@murphai/operator-config/assistant/provider-config'
 import {
   createSetupAssistantResolver,
   DEFAULT_SETUP_CODEX_REASONING_EFFORT,

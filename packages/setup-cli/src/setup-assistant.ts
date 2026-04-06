@@ -4,13 +4,13 @@ import {
   discoverAssistantProviderModels,
   resolveAssistantTargetCapabilities,
   type AssistantModelDiscoveryResult,
-} from '@murphai/assistant-core/assistant/provider-catalog'
+} from '@murphai/assistant-engine/assistant/provider-catalog'
 import {
   getOpenAICompatibleProviderPreset,
   resolveOpenAICompatibleProviderPreset,
   resolveOpenAICompatibleProviderPresetFromId,
   type OpenAICompatibleProviderPreset,
-} from '@murphai/assistant-core/assistant-provider'
+} from '@murphai/assistant-engine/assistant-provider'
 import { normalizeNullableString } from '@murphai/operator-config/assistant/shared'
 import {
   createSetupAssistantAccountResolver,
