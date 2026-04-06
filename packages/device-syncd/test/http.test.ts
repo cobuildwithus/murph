@@ -152,6 +152,21 @@ test("device sync http server protects control routes and keeps webhooks on the 
   }
 });
 
+test("device sync http server rejects non-loopback control listener hosts", async () => {
+  await assert.rejects(
+    () =>
+      startDeviceSyncHttpServer({
+        service: createStubService(),
+        config: {
+          host: "0.0.0.0",
+          port: 0,
+          controlToken: "control-token-for-tests",
+        },
+      }),
+    /Device sync control listener host must be a loopback hostname or address/u,
+  );
+});
+
 test("device sync http server redacts provider response bodies from control-plane JSON errors", async () => {
   const sensitiveBodySnippet =
     "account_id=acct_fake_sensitive_123 access_token=tok_fake_sensitive_456 scope=heartrate";
@@ -209,6 +224,44 @@ test("device sync http server redacts provider response bodies from control-plan
   }
 });
 
+test("device sync http server does not expose raw unexpected error text to control-plane clients", async () => {
+  const server = await startDeviceSyncHttpServer({
+    service: createStubService({
+      describeProviders() {
+        throw new Error("sensitive control-plane failure: provider token leaked");
+      },
+    }),
+    config: {
+      host: "127.0.0.1",
+      port: 0,
+      controlToken: "control-token-for-tests",
+    },
+  });
+
+  try {
+    const controlBaseUrl = `http://127.0.0.1:${server.control.port}`;
+    const response = await fetch(`${controlBaseUrl}/providers`, {
+      headers: {
+        Authorization: "Bearer control-token-for-tests",
+      },
+    });
+
+    assert.equal(response.status, 500);
+
+    const body = await response.text();
+
+    assert.deepEqual(JSON.parse(body), {
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "Internal server error.",
+      },
+    });
+    assert.doesNotMatch(body, /provider token leaked/u);
+    assert.doesNotMatch(body, /sensitive control-plane failure/u);
+  } finally {
+    await server.close();
+  }
+});
 test("device sync public error payload keeps only sanitized provider status details", () => {
   const sensitiveBodySnippet =
     "account_id=acct_fake_sensitive_123 access_token=tok_fake_sensitive_456 scope=heartrate";

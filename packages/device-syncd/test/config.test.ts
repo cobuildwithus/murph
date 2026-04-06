@@ -92,6 +92,19 @@ test("loadDeviceSyncEnvironment supports an explicit control token and public li
   assert.equal(loaded.http.publicPort, 9876);
 });
 
+test("loadDeviceSyncEnvironment rejects non-loopback DEVICE_SYNC_HOST values", () => {
+  assert.throws(
+    () =>
+      loadDeviceSyncEnvironment({
+        DEVICE_SYNC_HOST: "0.0.0.0",
+        OURA_CLIENT_ID: "oura-client-id",
+        OURA_CLIENT_SECRET: "oura-client-secret",
+        ...createDeviceSyncEnv(),
+      }),
+    /DEVICE_SYNC_HOST must be a loopback hostname or address/u,
+  );
+});
+
 test("loadDeviceSyncEnvironment ignores the removed bare PORT alias", () => {
   const loaded = loadDeviceSyncEnvironment({
     OURA_CLIENT_ID: "oura-client-id",
