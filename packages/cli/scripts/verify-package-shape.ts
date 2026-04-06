@@ -1,6 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { configSchemaPath, generateIncurConfigSchema } from './incur-config-schema.js'
 
 interface PackageJsonShape {
   name?: string
@@ -93,6 +94,10 @@ assert(
 assert(
   packageJson.files?.includes('CHANGELOG.md') === true,
   'package.json files must include CHANGELOG.md for package-scoped releases.',
+)
+assert(
+  packageJson.files?.includes('config.schema.json') === true,
+  'package.json files must include config.schema.json so published installs ship incur config-schema autocomplete.',
 )
 assert(
   packageJson.bin?.['vault-cli'] === 'dist/bin.js',
@@ -287,6 +292,16 @@ for (const filePath of packageLocalTsFiles) {
 }
 
 const libraryEntry = await readFile(path.join(packageDir, 'src/index.ts'), 'utf8')
+const configSchema = JSON.parse(
+  await readFile(configSchemaPath, 'utf8'),
+) as {
+  type?: string
+  properties?: {
+    commands?: {
+      properties?: Record<string, unknown>
+    }
+  }
+}
 assert(
   !/\.serve\(\)/u.test(libraryEntry),
   'src/index.ts must stay import-safe and avoid serving the CLI on package import.',
@@ -302,6 +317,19 @@ assert(
     !/\bcreateUnwiredVaultCliServices\b/u.test(libraryEntry) &&
     !/\bVaultCliServices\b/u.test(libraryEntry),
   'src/index.ts must not re-export the removed CLI-shaped service compatibility aliases.',
+)
+assert(
+  configSchema.type === 'object',
+  'config.schema.json must stay a JSON object schema.',
+)
+assert(
+  typeof configSchema.properties?.commands?.properties?.vault === 'object' &&
+    typeof configSchema.properties?.commands?.properties?.assistant === 'object',
+  'config.schema.json must cover the nested vault and assistant command groups.',
+)
+assert(
+  JSON.stringify(configSchema) === JSON.stringify(JSON.parse(await generateIncurConfigSchema())),
+  'config.schema.json must stay in sync with the current built CLI entrypoint. Run pnpm --dir packages/cli gen:config-schema after CLI config-surface changes.',
 )
 
 console.log('packages/cli package shape verified.')

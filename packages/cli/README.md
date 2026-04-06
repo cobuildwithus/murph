@@ -103,6 +103,7 @@ The CLI supports incur's built-in config loading for command option defaults. By
 
 - `murph --config <path> ...` selects an explicit config file
 - `murph --no-config ...` disables config loading for a single run
+- the published package now ships `config.schema.json` so editors can validate and autocomplete those config files
 
 Config files only supply command `options`, following incur's nested `commands` shape. For example:
 
@@ -116,6 +117,12 @@ Config files only supply command `options`, following incur's nested `commands` 
     }
   }
 }
+```
+
+To refresh the shipped schema artifact from the built CLI entrypoint during package work:
+
+```bash
+pnpm --dir packages/cli gen:config-schema
 ```
 
 ## Maintainer notes
