@@ -84,7 +84,7 @@ export async function runHostedAssistantRuntimeJobInProcess(
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-"));
 
   try {
-    const incomingVaultBundle = decodeHostedBundleBase64(input.request.bundles.vault);
+    const incomingBundle = decodeHostedBundleBase64(input.request.bundle);
     const internalWorkerFetch = createHostedInternalWorkerFetch(runtime.internalWorkerProxyToken);
     const artifactResolver = createHostedArtifactResolver({
       baseUrl: runtime.artifactsBaseUrl,
@@ -93,10 +93,9 @@ export async function runHostedAssistantRuntimeJobInProcess(
     });
     const materializedArtifactPaths = new Set<string>();
     const restored = await restoreHostedExecutionContext({
-      agentStateBundle: decodeHostedBundleBase64(input.request.bundles.agentState),
       artifactResolver,
+      bundle: incomingBundle,
       shouldRestoreArtifact: () => false,
-      vaultBundle: incomingVaultBundle,
       workspaceRoot,
     });
     const runtimeEnv = {
@@ -126,7 +125,7 @@ export async function runHostedAssistantRuntimeJobInProcess(
         const committedExecution = input.request.resume?.committedResult
           ? resumeHostedCommittedExecution(input.request)
           : await executeHostedDispatchForCommit({
-              artifactMaterializer: incomingVaultBundle
+              artifactMaterializer: incomingBundle
                 ? async (relativePaths) => {
                     const pendingPaths = [...new Set(relativePaths)]
                       .filter((relativePath) => !materializedArtifactPaths.has(relativePath));
@@ -136,10 +135,10 @@ export async function runHostedAssistantRuntimeJobInProcess(
 
                     await materializeHostedExecutionArtifacts({
                       artifactResolver,
+                      bundle: incomingBundle,
                       shouldRestoreArtifact: ({ path: artifactPath, root }) => (
                         root === "vault" && pendingPaths.includes(artifactPath)
                       ),
-                      vaultBundle: incomingVaultBundle,
                       workspaceRoot,
                     });
                     for (const relativePath of pendingPaths) {

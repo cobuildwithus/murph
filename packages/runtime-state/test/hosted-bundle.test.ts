@@ -42,7 +42,7 @@ test("hosted bundle helpers round-trip multi-root archives and base64 helpers", 
     await writeFile(path.join(betaRoot, "skip.txt"), "skip\n");
 
     const bundle = await snapshotHostedBundleRoots({
-      kind: "agent-state",
+      kind: "vault",
       roots: [
         {
           root: alphaRoot,
@@ -68,7 +68,7 @@ test("hosted bundle helpers round-trip multi-root archives and base64 helpers", 
     const restoreRoot = path.join(workspaceRoot, "restore");
     await restoreHostedBundleRoots({
       bytes: bundle,
-      expectedKind: "agent-state",
+      expectedKind: "vault",
       roots: {
         alpha: path.join(restoreRoot, "alpha"),
         beta: path.join(restoreRoot, "beta"),
@@ -573,7 +573,7 @@ test("hosted execution restore rejects externalized artifacts whose bytes do not
 test("hosted bundle text helpers patch and remove individual files deterministically", async () => {
   let bundle = writeHostedBundleTextFile({
     bytes: null,
-    kind: "agent-state",
+    kind: "vault",
     path: ".murph/hosted/user-env.json",
     root: "operator-home",
     text: "{\"ok\":true}\n",
@@ -582,7 +582,7 @@ test("hosted bundle text helpers patch and remove individual files deterministic
   assert.equal(
     readHostedBundleTextFile({
       bytes: bundle,
-      expectedKind: "agent-state",
+      expectedKind: "vault",
       path: ".murph/hosted/user-env.json",
       root: "operator-home",
     }),
@@ -591,7 +591,7 @@ test("hosted bundle text helpers patch and remove individual files deterministic
 
   bundle = writeHostedBundleTextFile({
     bytes: bundle,
-    kind: "agent-state",
+    kind: "vault",
     path: ".murph/hosted/user-env.json",
     root: "operator-home",
     text: "{\"ok\":false}\n",
@@ -600,7 +600,7 @@ test("hosted bundle text helpers patch and remove individual files deterministic
   assert.equal(
     readHostedBundleTextFile({
       bytes: bundle,
-      expectedKind: "agent-state",
+      expectedKind: "vault",
       path: ".murph/hosted/user-env.json",
       root: "operator-home",
     }),
@@ -609,7 +609,7 @@ test("hosted bundle text helpers patch and remove individual files deterministic
 
   bundle = writeHostedBundleTextFile({
     bytes: bundle,
-    kind: "agent-state",
+    kind: "vault",
     path: ".murph/hosted/user-env.json",
     root: "operator-home",
     text: null,
@@ -618,7 +618,7 @@ test("hosted bundle text helpers patch and remove individual files deterministic
   assert.equal(
     readHostedBundleTextFile({
       bytes: bundle,
-      expectedKind: "agent-state",
+      expectedKind: "vault",
       path: ".murph/hosted/user-env.json",
       root: "operator-home",
     }),
@@ -642,7 +642,7 @@ test("hosted bundle restore rejects backslash and drive-style traversal archive 
       await assert.rejects(
         restoreHostedBundleRoots({
           bytes: createHostedBundleArchiveBytes(archivePath),
-          expectedKind: "agent-state",
+          expectedKind: "vault",
           roots: {
             alpha: restoreRoot,
           },
@@ -815,7 +815,7 @@ function createHostedBundleArchiveBytes(archivePath: string): Uint8Array {
               root: "alpha",
             },
           ],
-          kind: "agent-state",
+          kind: "vault",
           schema: HOSTED_BUNDLE_SCHEMA,
         }),
         "utf8",

@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { mapHostedExecutionBundleSlots } from "@murphai/hosted-execution";
-
 import {
   createHostedArtifactStore,
   createHostedUserEnvStore,
@@ -187,7 +185,7 @@ describe("opaque storage path rotation", () => {
       keyId: "old",
       scope: "execution-journal",
       value: {
-        bundleRefs: mapHostedExecutionBundleSlots(() => null),
+        bundleRef: null,
         committedAt: "2026-04-04T00:00:00.000Z",
         eventId,
         finalizedAt: null,
@@ -226,7 +224,7 @@ describe("opaque storage path rotation", () => {
       keyId: "old",
       keysById: { old: oldKey },
     }).writeCommittedResult(userId, eventId, {
-      bundleRefs: mapHostedExecutionBundleSlots(() => null),
+      bundleRef: null,
       committedAt: "2026-04-04T00:00:00.000Z",
       eventId,
       finalizedAt: null,

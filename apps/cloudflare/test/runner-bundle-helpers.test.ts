@@ -54,13 +54,13 @@ describe("describeHostedBase64BundleRef", () => {
   it("derives payload identity without manufacturing updatedAt metadata", () => {
     const plaintext = Uint8Array.from([7, 8, 9]);
     const described = describeHostedBase64BundleRef({
-      kind: "agent-state",
+      kind: "vault",
       value: encodeHostedBundleBase64(plaintext),
     });
 
     expect(described).not.toBeNull();
     expect(described?.plaintext).toEqual(plaintext);
-    expect(described?.ref).toEqual(describeHostedBundleBytesRef("agent-state", plaintext));
+    expect(described?.ref).toEqual(describeHostedBundleBytesRef("vault", plaintext));
     expect(Object.hasOwn(described!.ref, "updatedAt")).toBe(false);
   });
 });

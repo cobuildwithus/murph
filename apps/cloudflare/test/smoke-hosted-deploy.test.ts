@@ -92,32 +92,22 @@ describe("runSmokeHostedDeploy", () => {
         statusReadCount += 1;
 
         return new Response(JSON.stringify({
-          bundleRefs: {
-            agentState: statusReadCount >= 2
-              ? {
-                  hash: "agent-hash",
-                  key: "bundles/agent",
-                  size: 11,
-                  updatedAt: "2026-03-27T01:00:00.000Z",
-                }
-              : null,
-            vault: statusReadCount >= 2
-              ? {
-                  hash: "vault-hash",
-                  key: "bundles/vault",
-                  size: 7,
-                  updatedAt: "2026-03-27T01:00:00.000Z",
-                }
-              : null,
-          },
-        inFlight: statusReadCount < 2,
-        lastError: null,
-        lastRunAt: statusReadCount >= 2 ? "2026-03-27T01:00:00.000Z" : "2026-03-27T00:59:00.000Z",
-        pendingEventCount: statusReadCount < 2 ? 1 : 0,
-        poisonedEventIds: [],
-        retryingEventId: null,
-        userId: "member_123",
-      }), { status: 200 });
+          bundleRef: statusReadCount >= 2
+            ? {
+                hash: "vault-hash",
+                key: "bundles/vault",
+                size: 7,
+                updatedAt: "2026-03-27T01:00:00.000Z",
+              }
+            : null,
+          inFlight: statusReadCount < 2,
+          lastError: null,
+          lastRunAt: statusReadCount >= 2 ? "2026-03-27T01:00:00.000Z" : "2026-03-27T00:59:00.000Z",
+          pendingEventCount: statusReadCount < 2 ? 1 : 0,
+          poisonedEventIds: [],
+          retryingEventId: null,
+          userId: "member_123",
+        }), { status: 200 });
       }
 
       return new Response(null, { status: 204 });
@@ -215,10 +205,7 @@ describe("runSmokeHostedDeploy", () => {
       }
 
       return new Response(JSON.stringify({
-        bundleRefs: {
-          agentState: null,
-          vault: null,
-        },
+        bundleRef: null,
         inFlight: false,
         lastError: "runner stalled",
         lastRunAt: null,
@@ -264,20 +251,12 @@ describe("runSmokeHostedDeploy", () => {
         statusReadCount += 1;
 
         return new Response(JSON.stringify({
-          bundleRefs: {
-            agentState: statusReadCount >= 2 ? {
-              hash: "agent-hash",
-              key: "bundles/agent",
-              size: 11,
-              updatedAt: "2026-03-27T01:00:00.000Z",
-            } : null,
-            vault: statusReadCount >= 2 ? {
-              hash: "vault-hash",
-              key: "bundles/vault",
-              size: 7,
-              updatedAt: "2026-03-27T01:00:00.000Z",
-            } : null,
-          },
+          bundleRef: statusReadCount >= 2 ? {
+            hash: "vault-hash",
+            key: "bundles/vault",
+            size: 7,
+            updatedAt: "2026-03-27T01:00:00.000Z",
+          } : null,
           inFlight: statusReadCount < 2,
           lastError: null,
           lastRunAt: statusReadCount >= 2 ? "2026-03-27T01:00:00.000Z" : "2026-03-27T00:59:00.000Z",

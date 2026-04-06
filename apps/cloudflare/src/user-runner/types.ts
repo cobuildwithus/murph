@@ -1,6 +1,5 @@
 import type {
-  HostedExecutionBundleRefs,
-  HostedExecutionBundleSlotMap,
+  HostedExecutionBundleRef,
   HostedExecutionDispatchRequest,
   HostedExecutionRunStatus,
   HostedExecutionTimelineEntry,
@@ -53,13 +52,13 @@ export interface PendingDispatchRecord extends PendingDispatchMetaRecord {
   dispatch: HostedExecutionDispatchRequest;
 }
 
-export type RunnerBundleVersions = HostedExecutionBundleSlotMap<number>;
+export type RunnerBundleVersion = number;
 
 export interface RunnerStateRecord {
   runtimeBootstrapped: boolean;
   backpressuredEventIds: string[];
-  bundleRefs: HostedExecutionBundleRefs;
-  bundleVersions: RunnerBundleVersions;
+  bundleRef: HostedExecutionBundleRef | null;
+  bundleVersion: RunnerBundleVersion;
   inFlight: boolean;
   lastError: string | null;
   lastErrorAt: string | null;
@@ -99,7 +98,7 @@ export function earliestIsoTimestamp(
 export function toUserStatus(record: RunnerStateRecord): HostedExecutionUserStatus {
   return {
     backpressuredEventIds: record.backpressuredEventIds,
-    bundleRefs: record.bundleRefs,
+    bundleRef: record.bundleRef,
     inFlight: record.inFlight,
     lastError: record.lastError,
     ...(record.lastErrorAt ? {

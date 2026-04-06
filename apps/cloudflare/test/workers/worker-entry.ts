@@ -48,14 +48,8 @@ export class VitestUserRunnerDurableObject extends DurableObject {
   async commit(input: {
     eventId: string;
     payload: {
-      bundles: {
-        agentState: string | null;
-        vault: string | null;
-      };
-      currentBundleRefs: {
-        agentState: HostedExecutionBundleRef | null;
-        vault: HostedExecutionBundleRef | null;
-      };
+      bundle: string | null;
+      currentBundleRef: HostedExecutionBundleRef | null;
       result: {
         eventsHandled: number;
         nextWakeAt?: string | null;
@@ -69,10 +63,7 @@ export class VitestUserRunnerDurableObject extends DurableObject {
   async finalizeCommit(input: {
     eventId: string;
     payload: {
-      bundles: {
-        agentState: string | null;
-        vault: string | null;
-      };
+      bundle: string | null;
     };
   }) {
     return this.runner.finalizeCommit(input);

@@ -235,14 +235,8 @@ describe("cloudflare worker routes", () => {
     const response = await callRunnerOutbound(
       new Request("http://commit.worker/events/evt_commit/commit", {
         body: JSON.stringify({
-          bundles: {
-            agentState: Buffer.from("agent-state").toString("base64"),
-            vault: Buffer.from("vault").toString("base64"),
-          },
-          currentBundleRefs: {
-            agentState: null,
-            vault: null,
-          },
+          bundle: Buffer.from("vault").toString("base64"),
+          currentBundleRef: null,
           result: {
             eventsHandled: 1,
             summary: "ok",
@@ -267,14 +261,14 @@ describe("cloudflare worker routes", () => {
       },
       ok: true,
     });
-    expectHostedBundleKeys(harness.bucket.keys(), ["agent-state", "vault"]);
+    expectHostedBundleKeys(harness.bucket.keys(), ["vault"]);
     expect(harness.bucket.keys()).toContainEqual(expect.stringMatching(
       /^transient\/execution-journal\/[0-9a-f]+\/[0-9a-f]+\.json$/u,
     ));
     await expect(hostedUserKeyEnvelopeObjectKeyForTest(harness.env, "member_123")).resolves.toSatisfy(
       (expectedKey) => harness.bucket.keys().includes(expectedKey),
     );
-    expect(harness.bucket.keys()).toHaveLength(4);
+    expect(harness.bucket.keys()).toHaveLength(3);
     const journalStore = await createHostedExecutionJournalStoreForTest(harness.env, "member_123");
     await expect(journalStore.readCommittedResult("member_123", "evt_commit")).resolves.toMatchObject({
       sideEffects,
@@ -384,14 +378,8 @@ describe("cloudflare worker routes", () => {
     await callRunnerOutbound(
       new Request("http://commit.worker/events/evt_finalize/commit", {
         body: JSON.stringify({
-          bundles: {
-            agentState: Buffer.from("agent-state-committed").toString("base64"),
-            vault: Buffer.from("vault-committed").toString("base64"),
-          },
-          currentBundleRefs: {
-            agentState: null,
-            vault: null,
-          },
+          bundle: Buffer.from("vault-committed").toString("base64"),
+          currentBundleRef: null,
           result: {
             eventsHandled: 1,
             summary: "committed",
@@ -408,10 +396,7 @@ describe("cloudflare worker routes", () => {
     const finalizeResponse = await callRunnerOutbound(
       new Request("http://commit.worker/events/evt_finalize/finalize", {
         body: JSON.stringify({
-          bundles: {
-            agentState: Buffer.from("agent-state-final").toString("base64"),
-            vault: Buffer.from("vault-final").toString("base64"),
-          },
+          bundle: Buffer.from("vault-final").toString("base64"),
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -434,13 +419,8 @@ describe("cloudflare worker routes", () => {
       ok: true,
     });
     await expect(journalStore.readCommittedResult("member_123", "evt_finalize")).resolves.toMatchObject({
-      bundleRefs: {
-        agentState: {
-          size: "agent-state-final".length,
-        },
-        vault: {
-          size: "vault-final".length,
-        },
+      bundleRef: {
+        size: "vault-final".length,
       },
       finalizedAt: expect.any(String),
       result: {
@@ -456,14 +436,8 @@ describe("cloudflare worker routes", () => {
     await callRunnerOutbound(
       new Request("http://commit.worker/events/evt_finalize_auth/commit", {
         body: JSON.stringify({
-          bundles: {
-            agentState: Buffer.from("agent-state-committed").toString("base64"),
-            vault: Buffer.from("vault-committed").toString("base64"),
-          },
-          currentBundleRefs: {
-            agentState: null,
-            vault: null,
-          },
+          bundle: Buffer.from("vault-committed").toString("base64"),
+          currentBundleRef: null,
           result: {
             eventsHandled: 1,
             summary: "committed",
@@ -480,10 +454,7 @@ describe("cloudflare worker routes", () => {
     await expect(() => callRunnerOutbound(
       new Request("http://commit.worker/events/evt_finalize_auth/finalize", {
         body: JSON.stringify({
-          bundles: {
-            agentState: 42,
-            vault: Buffer.from("vault-final").toString("base64"),
-          },
+          bundle: 42,
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -491,19 +462,13 @@ describe("cloudflare worker routes", () => {
         method: "POST",
       }),
       harness.env,
-    )).rejects.toThrow("bundles.agentState must be a string or null.");
+    )).rejects.toThrow("bundle must be a string or null.");
 
     await expect(() => callRunnerOutbound(
       new Request("http://commit.worker/events/evt_bad_commit/commit", {
         body: JSON.stringify({
-          bundles: {
-            agentState: Buffer.from("agent-state").toString("base64"),
-            vault: 42,
-          },
-          currentBundleRefs: {
-            agentState: {},
-            vault: null,
-          },
+          bundle: 42,
+          currentBundleRef: {},
           result: {
             eventsHandled: 1,
             summary: "bad",
@@ -515,7 +480,7 @@ describe("cloudflare worker routes", () => {
         method: "POST",
       }),
       harness.env,
-    )).rejects.toThrow("bundles.vault must be a string or null.");
+    )).rejects.toThrow("bundle must be a string or null.");
 
     const publicCommitResponse = await worker.fetch(
       new Request("https://runner.example.test/internal/runner-events/member_123/evt_commit/commit", {
@@ -2654,7 +2619,7 @@ async function sideEffectRecordObjectKey(
 
 function expectHostedBundleKeys(
   keys: string[],
-  kinds: Array<"agent-state" | "vault">,
+  kinds: Array<"vault">,
 ): void {
   for (const kind of kinds) {
     expect(keys).toContainEqual(expect.stringMatching(
@@ -2669,10 +2634,7 @@ async function createCommittedRunnerSuccessResponse(input: {
   payload: ReturnType<typeof createRunnerSuccessPayload>;
   requestBody: {
     commit: {
-      bundleRefs: {
-        agentState: { hash: string; key: string; size: number; updatedAt: string } | null;
-        vault: { hash: string; key: string; size: number; updatedAt: string } | null;
-      };
+      bundleRef: { hash: string; key: string; size: number; updatedAt: string } | null;
     };
     dispatch: {
       event: {
@@ -2690,7 +2652,7 @@ async function createCommittedRunnerSuccessResponse(input: {
 
   await persistHostedExecutionCommit({
     bucket: input.bucket.api,
-    currentBundleRefs: input.requestBody.commit.bundleRefs,
+    currentBundleRef: input.requestBody.commit.bundleRef,
     eventId: input.requestBody.dispatch.eventId,
     key: crypto.rootKey,
     keyId: crypto.rootKeyId,
@@ -2724,10 +2686,7 @@ async function createRunnerContainerInvokeSuccessResponse(input: {
     job: {
       request: {
         commit: {
-          bundleRefs: {
-            agentState: { hash: string; key: string; size: number; updatedAt: string } | null;
-            vault: { hash: string; key: string; size: number; updatedAt: string } | null;
-          };
+          bundleRef: { hash: string; key: string; size: number; updatedAt: string } | null;
         };
         dispatch: {
           event: {
@@ -2890,10 +2849,7 @@ function createUserRunnerStub() {
     commit: vi.fn(async (input: {
       eventId: string;
     }) => ({
-      bundleRefs: {
-        agentState: null,
-        vault: null,
-      },
+      bundleRef: null,
       committedAt: "2026-03-26T12:00:00.000Z",
       eventId: input.eventId,
       finalizedAt: null,
@@ -2906,10 +2862,7 @@ function createUserRunnerStub() {
       buildDispatchResultFixture(input.event.userId, input.eventId)),
     dispatch: vi.fn(async (input: HostedExecutionDispatchRequest) => ({
       backpressuredEventIds: [],
-      bundleRefs: {
-        agentState: null,
-        vault: null,
-      },
+      bundleRef: null,
       inFlight: false,
       lastError: null,
       lastEventId: input.eventId,
@@ -2923,10 +2876,7 @@ function createUserRunnerStub() {
     finalizeCommit: vi.fn(async (input: {
       eventId: string;
     }) => ({
-      bundleRefs: {
-        agentState: null,
-        vault: null,
-      },
+      bundleRef: null,
       committedAt: "2026-03-26T12:00:00.000Z",
       eventId: input.eventId,
       finalizedAt: "2026-03-26T12:00:01.000Z",
@@ -3025,10 +2975,7 @@ function createUserRunnerStub() {
     })),
     status: vi.fn(async () => ({
       backpressuredEventIds: [],
-      bundleRefs: {
-        agentState: null,
-        vault: null,
-      },
+      bundleRef: null,
       inFlight: false,
       lastError: null,
       lastEventId: null,
@@ -3082,10 +3029,7 @@ function buildDispatchResultFixture(userId: string, eventId: string) {
     },
     status: {
       backpressuredEventIds: [],
-      bundleRefs: {
-        agentState: null,
-        vault: null,
-      },
+      bundleRef: null,
       inFlight: false,
       lastError: null,
       lastEventId: eventId,

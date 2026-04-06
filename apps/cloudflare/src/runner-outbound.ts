@@ -8,12 +8,12 @@ import {
   buildHostedExecutionDeviceSyncConnectLinkPath,
   fetchHostedExecutionWebControlPlaneResponse,
   normalizeHostedExecutionBaseUrl,
-  parseHostedExecutionBundlePayloads,
-  parseHostedExecutionBundleRefsRecord,
+  parseHostedExecutionBundlePayload,
+  parseHostedExecutionBundleRef,
   parseHostedExecutionSideEffectRecord,
   parseHostedExecutionSideEffects,
   type HostedExecutionAiUsageRecordRequest,
-  type HostedExecutionBundleRefs,
+  type HostedExecutionBundleRef,
   type HostedExecutionDeviceSyncRuntimeApplyRequest,
   type HostedExecutionDeviceSyncRuntimeConnectionUpdate,
   type HostedExecutionDeviceSyncRuntimeSnapshotRequest,
@@ -634,16 +634,13 @@ function requireRunnerOutboundHostedWebControlConfig(
 }
 
 function parseHostedExecutionCommitRequest(payload: Record<string, unknown>): HostedExecutionCommitPayload & {
-  currentBundleRefs: HostedExecutionBundleRefs;
+  currentBundleRef: HostedExecutionBundleRef | null;
 } {
   const result = requireRecord(payload.result, "result");
 
   return {
-    bundles: parseHostedExecutionBundlePayloads(payload.bundles, "bundles"),
-    currentBundleRefs: parseHostedExecutionBundleRefsRecord(
-      payload.currentBundleRefs,
-      "currentBundleRefs",
-    ),
+    bundle: parseHostedExecutionBundlePayload(payload.bundle, "bundle"),
+    currentBundleRef: parseHostedExecutionBundleRef(payload.currentBundleRef, "currentBundleRef"),
     gatewayProjectionSnapshot:
       payload.gatewayProjectionSnapshot === undefined || payload.gatewayProjectionSnapshot === null
         ? null
@@ -661,7 +658,7 @@ function parseHostedExecutionFinalizeRequest(
   payload: Record<string, unknown>,
 ): HostedExecutionFinalizePayload {
   return {
-    bundles: parseHostedExecutionBundlePayloads(payload.bundles, "bundles"),
+    bundle: parseHostedExecutionBundlePayload(payload.bundle, "bundle"),
     gatewayProjectionSnapshot:
       payload.gatewayProjectionSnapshot === undefined || payload.gatewayProjectionSnapshot === null
         ? null

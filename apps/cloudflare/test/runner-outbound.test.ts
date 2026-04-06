@@ -396,13 +396,7 @@ describe("handleRunnerOutboundRequest", () => {
       recorded: 1,
       usageIds: ["usage_123"],
     });
-    expect(putPendingUsage).toHaveBeenCalledWith({
-      usage: [
-        {
-          usageId: "usage_123",
-        },
-      ],
-    });
+    expect(putPendingUsage).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

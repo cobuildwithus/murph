@@ -242,7 +242,7 @@ function didLastRunAdvance(
 }
 
 function hasBundleRefs(status: SmokeUserStatus): boolean {
-  return status.bundleRefs.agentState !== null || status.bundleRefs.vault !== null;
+  return status.bundleRef !== null;
 }
 
 function readPositiveInteger(value: string | undefined, fallback: number, label: string): number {

@@ -339,10 +339,6 @@ function inferBundleKindFromKey(key: string): HostedExecutionBundleKind {
     return "vault";
   }
 
-  if (key.startsWith("bundles/agent-state/")) {
-    return "agent-state";
-  }
-
   throw new Error(`Hosted bundle key ${key} does not encode a recognized bundle kind.`);
 }
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { SharePack } from "@murphai/contracts";
 
 import {
   createHostedDispatchPayloadStore,
@@ -6,6 +7,23 @@ import {
 } from "../src/dispatch-payload-store.js";
 
 import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers";
+
+const SHARE_PACK: SharePack = {
+  createdAt: "2026-04-06T00:00:00.000Z",
+  entities: [
+    {
+      kind: "food",
+      payload: {
+        kind: "smoothie",
+        status: "active",
+        title: "Overnight oats",
+      },
+      ref: "food.oats",
+    },
+  ],
+  schemaVersion: "murph.share-pack.v1",
+  title: "Breakfast staples",
+};
 
 describe("hosted dispatch payload store confidentiality", () => {
   it("externalizes gateway message sends instead of persisting session text inline", async () => {
@@ -99,6 +117,7 @@ describe("hosted dispatch payload store confidentiality", () => {
       event: {
         kind: "vault.share.accepted",
         share: {
+          pack: SHARE_PACK,
           shareId: "hshare_123",
         },
         userId: "user_live_share",

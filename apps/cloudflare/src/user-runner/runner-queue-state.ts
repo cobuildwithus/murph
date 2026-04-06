@@ -5,13 +5,9 @@
  */
 
 import {
-  HOSTED_EXECUTION_BUNDLE_SLOTS,
   deriveHostedExecutionErrorCode,
-  mapHostedExecutionBundleSlots,
-  resolveHostedExecutionBundleKind,
   summarizeHostedExecutionErrorCode,
   summarizeHostedExecutionError,
-  type HostedExecutionBundleSlotMap,
   type HostedExecutionRunStatus,
   type HostedExecutionTimelineEntry,
 } from "@murphai/hosted-execution";
@@ -26,7 +22,7 @@ import {
   CONSUMED_EVENT_EXACT_TTL_MS,
   type DurableObjectSqlValue,
   type PendingDispatchMetaRecord,
-  type RunnerBundleVersions,
+  type RunnerBundleVersion,
   type RunnerStateRecord,
   earliestIsoTimestamp,
 } from "./types.js";
@@ -49,15 +45,15 @@ export interface RunnerBundleSlotRow {
   slot: string;
 }
 
-export interface RunnerStoredBundleSlots {
-  bundleRefJsonBySlot: HostedExecutionBundleSlotMap<string | null>;
-  bundleVersions: RunnerBundleVersions;
+export interface RunnerStoredBundleState {
+  bundleRefJson: string | null;
+  bundleVersion: RunnerBundleVersion;
 }
 
 export interface RunnerStateProjection {
   changed: boolean;
   record: RunnerStateRecord;
-  sanitizedBundleSlots: RunnerStoredBundleSlots;
+  sanitizedBundleState: RunnerStoredBundleState;
 }
 
 export function appendBoundedRunnerTimelineEntry(
@@ -69,18 +65,16 @@ export function appendBoundedRunnerTimelineEntry(
 }
 
 export function assignRunnerBundleRefs(
-  bundleSlots: RunnerStoredBundleSlots,
-  nextBundleRefs: RunnerStateRecord["bundleRefs"],
+  bundleState: RunnerStoredBundleState,
+  nextBundleRef: RunnerStateRecord["bundleRef"],
 ): void {
-  for (const slot of HOSTED_EXECUTION_BUNDLE_SLOTS) {
-    const currentRef = parseHostedBundleRefJson(bundleSlots.bundleRefJsonBySlot[slot]);
-    if (sameHostedBundlePayloadRef(currentRef, nextBundleRefs[slot])) {
-      continue;
-    }
-
-    bundleSlots.bundleRefJsonBySlot[slot] = serializeHostedExecutionBundleRef(nextBundleRefs[slot]);
-    bundleSlots.bundleVersions[slot] += 1;
+  const currentRef = parseHostedBundleRefJson(bundleState.bundleRefJson);
+  if (sameHostedBundlePayloadRef(currentRef, nextBundleRef)) {
+    return;
   }
+
+  bundleState.bundleRefJson = serializeHostedExecutionBundleRef(nextBundleRef);
+  bundleState.bundleVersion += 1;
 }
 
 export function classifyMalformedPendingDispatchError(error: unknown): {
@@ -113,10 +107,10 @@ export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
   };
 }
 
-export function createDefaultRunnerBundleSlots(): RunnerStoredBundleSlots {
+export function createDefaultRunnerBundleState(): RunnerStoredBundleState {
   return {
-    bundleRefJsonBySlot: mapHostedExecutionBundleSlots(() => null),
-    bundleVersions: mapHostedExecutionBundleSlots(() => 0),
+    bundleRefJson: null,
+    bundleVersion: 0,
   };
 }
 
@@ -126,7 +120,7 @@ export function nextConsumedEventExactExpiryIso(): string {
 
 export function projectRunnerStateRecord(input: {
   backpressuredEventIds: readonly string[];
-  bundleSlots: RunnerStoredBundleSlots;
+  bundleState: RunnerStoredBundleState;
   lastEventId: string | null;
   meta: RunnerMetaRow;
   nextPendingAvailableAt: string | null;
@@ -136,7 +130,7 @@ export function projectRunnerStateRecord(input: {
   run: HostedExecutionRunStatus | null;
   timeline: readonly HostedExecutionTimelineEntry[];
 }): RunnerStateProjection {
-  const bundleRefState = sanitizeStoredBundleRefs(input.bundleSlots);
+  const bundleRefState = sanitizeStoredBundleRef(input.bundleState);
   const nextLastError = summarizeHostedExecutionErrorCode(input.meta.last_error_code) ?? bundleRefState.warning;
 
   return {
@@ -144,8 +138,8 @@ export function projectRunnerStateRecord(input: {
     record: {
       runtimeBootstrapped: input.meta.runtime_bootstrapped === 1,
       backpressuredEventIds: [...input.backpressuredEventIds],
-      bundleRefs: bundleRefState.bundleRefs,
-      bundleVersions: bundleRefState.sanitizedBundleSlots.bundleVersions,
+      bundleRef: bundleRefState.bundleRef,
+      bundleVersion: bundleRefState.sanitizedBundleState.bundleVersion,
       inFlight: input.meta.in_flight === 1,
       lastError: nextLastError,
       lastErrorAt: input.meta.last_error_at,
@@ -161,7 +155,7 @@ export function projectRunnerStateRecord(input: {
       timeline: [...input.timeline],
       userId: input.meta.user_id,
     },
-    sanitizedBundleSlots: bundleRefState.sanitizedBundleSlots,
+    sanitizedBundleState: bundleRefState.sanitizedBundleState,
   };
 }
 
@@ -215,35 +209,24 @@ function parseHostedBundleRefJson(value: string | null): HostedExecutionBundleRe
   }
 }
 
-function sanitizeStoredBundleRefs(bundleSlots: RunnerStoredBundleSlots): {
-  bundleRefs: RunnerStateRecord["bundleRefs"];
+function sanitizeStoredBundleRef(bundleState: RunnerStoredBundleState): {
+  bundleRef: RunnerStateRecord["bundleRef"];
   changed: boolean;
-  sanitizedBundleSlots: RunnerStoredBundleSlots;
+  sanitizedBundleState: RunnerStoredBundleState;
   warning: string | null;
 } {
-  let changed = false;
-  const clearedKinds: string[] = [];
-  const sanitizedBundleSlots = createDefaultRunnerBundleSlots();
-
-  const bundleRefs = mapHostedExecutionBundleSlots((slot) => {
-    const parsedRef = parseHostedBundleRefJson(bundleSlots.bundleRefJsonBySlot[slot]);
-
-    if (bundleSlots.bundleRefJsonBySlot[slot] && !parsedRef) {
-      changed = true;
-      clearedKinds.push(resolveHostedExecutionBundleKind(slot));
-    }
-
-    sanitizedBundleSlots.bundleRefJsonBySlot[slot] = serializeHostedExecutionBundleRef(parsedRef);
-    sanitizedBundleSlots.bundleVersions[slot] = bundleSlots.bundleVersions[slot];
-    return parsedRef;
-  });
+  const parsedRef = parseHostedBundleRefJson(bundleState.bundleRefJson);
+  const changed = Boolean(bundleState.bundleRefJson && !parsedRef);
+  const sanitizedBundleState = createDefaultRunnerBundleState();
+  sanitizedBundleState.bundleRefJson = serializeHostedExecutionBundleRef(parsedRef);
+  sanitizedBundleState.bundleVersion = bundleState.bundleVersion;
 
   return {
-    bundleRefs,
+    bundleRef: parsedRef,
     changed,
-    sanitizedBundleSlots,
-    warning: clearedKinds.length > 0
-      ? `Hosted runner cleared malformed bundle ref(s): ${clearedKinds.join(", ")}.`
+    sanitizedBundleState,
+    warning: changed
+      ? "Hosted runner cleared malformed bundle ref(s): vault."
       : null,
   };
 }

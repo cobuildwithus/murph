@@ -12,10 +12,7 @@ interface RunnerContainerInvokePayload {
   job: HostedAssistantRuntimeJobInput & {
     request: HostedExecutionRunnerRequest & {
       commit?: {
-        bundleRefs: {
-          agentState: HostedExecutionBundleRef | null;
-          vault: HostedExecutionBundleRef | null;
-        };
+        bundleRef: HostedExecutionBundleRef | null;
       } | null;
     };
   };
@@ -31,11 +28,8 @@ export class RunnerContainerTestDouble extends DurableObject {
         `http://commit.worker/events/${encodeURIComponent(payload.job.request.dispatch.eventId)}/commit`,
         {
           body: JSON.stringify({
-            bundles: runnerResult.bundles,
-            currentBundleRefs: payload.job.request.commit?.bundleRefs ?? {
-              agentState: null,
-              vault: null,
-            },
+            bundle: runnerResult.bundle,
+            currentBundleRef: payload.job.request.commit?.bundleRef ?? null,
             result: runnerResult.result,
           }),
           headers: {
@@ -63,14 +57,8 @@ export class RunnerContainerTestDouble extends DurableObject {
 function buildRunnerResult(
   request: HostedExecutionRunnerRequest,
 ): HostedExecutionRunnerResult {
-  const agentState = request.bundles.agentState ?? btoa(`agent-state:${request.dispatch.eventId}`);
-  const vault = request.bundles.vault ?? btoa(`vault:${request.dispatch.eventId}`);
-
   return {
-    bundles: {
-      agentState,
-      vault,
-    },
+    bundle: request.bundle ?? btoa(`vault:${request.dispatch.eventId}`),
     result: {
       eventsHandled: 1,
       ...(request.dispatch.event.kind === "member.activated"

@@ -232,23 +232,13 @@ describe("RunnerQueueStore", () => {
         SET bundle_ref_json = ?
         WHERE slot = ?`,
       "{not-json",
-      "agentState",
-    );
-    sql.exec(
-      `UPDATE runner_bundle_slots
-        SET bundle_ref_json = ?
-        WHERE slot = ?`,
-      JSON.stringify({
-        hash: 7,
-      }),
       "vault",
     );
 
     const { store: repairedStore } = createQueueHarness(state);
     const record = await repairedStore.readState();
-    expect(record.bundleRefs.agentState).toBeNull();
-    expect(record.bundleRefs.vault).toBeNull();
-    expect(record.lastError).toContain("cleared malformed bundle ref(s): agent-state, vault");
+    expect(record.bundleRef).toBeNull();
+    expect(record.lastError).toContain("cleared malformed bundle ref(s): vault");
 
     const bundleSlots = sql.exec<{
       bundle_ref_json: string | null;
@@ -259,10 +249,6 @@ describe("RunnerQueueStore", () => {
       ORDER BY slot ASC`,
     ).toArray();
     expect(bundleSlots).toEqual([
-      {
-        bundle_ref_json: null,
-        slot: "agentState",
-      },
       {
         bundle_ref_json: null,
         slot: "vault",
@@ -281,21 +267,11 @@ describe("RunnerQueueStore", () => {
         SET bundle_ref_json = ?
         WHERE slot = ?`,
       "{not-json",
-      "agentState",
-    );
-    sql.exec(
-      `UPDATE runner_bundle_slots
-        SET bundle_ref_json = ?
-        WHERE slot = ?`,
-      JSON.stringify({
-        hash: 7,
-      }),
       "vault",
     );
 
     const bundleMetaState = await store.readBundleMetaState();
-    expect(bundleMetaState.bundleRefs.agentState).toBeNull();
-    expect(bundleMetaState.bundleRefs.vault).toBeNull();
+    expect(bundleMetaState.bundleRef).toBeNull();
 
     const bundleSlots = sql.exec<{
       bundle_ref_json: string | null;
@@ -306,10 +282,6 @@ describe("RunnerQueueStore", () => {
       ORDER BY slot ASC`,
     ).toArray();
     expect(bundleSlots).toEqual([
-      {
-        bundle_ref_json: null,
-        slot: "agentState",
-      },
       {
         bundle_ref_json: null,
         slot: "vault",
@@ -422,10 +394,7 @@ describe("RunnerQueueStore", () => {
     });
 
     const committed: HostedExecutionCommittedResult = {
-      bundleRefs: {
-        agentState: null,
-        vault: null,
-      },
+      bundleRef: null,
       committedAt: "2026-03-29T10:00:00.000Z",
       eventId: "evt_secret_finalize",
       finalizedAt: null,
@@ -468,10 +437,7 @@ describe("RunnerQueueStore", () => {
     );
 
     const committed: HostedExecutionCommittedResult = {
-      bundleRefs: {
-        agentState: null,
-        vault: null,
-      },
+      bundleRef: null,
       committedAt: "2026-03-29T10:00:00.000Z",
       eventId: "evt_finalize_cleared",
       finalizedAt: null,

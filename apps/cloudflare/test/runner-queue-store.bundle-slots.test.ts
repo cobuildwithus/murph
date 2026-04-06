@@ -1,6 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
 
-import { HOSTED_EXECUTION_BUNDLE_SLOTS } from "@murphai/hosted-execution";
 import {
   serializeHostedExecutionBundleRef,
   type HostedExecutionBundleRef,
@@ -149,61 +148,39 @@ function readBundleSlotRows(db: DatabaseSync): Array<{
 }
 
 describe("RunnerQueueStore bundle slot storage", () => {
-  it("stores canonical bundle slots outside runner_meta for fresh state", async () => {
+  it("stores the canonical vault bundle slot outside runner_meta for fresh state", async () => {
     const { db, store } = createRunnerQueueStoreHarness();
     await store.bootstrapUser("user-fresh");
 
     const runnerMetaColumns = db.prepare("PRAGMA table_info(runner_meta)").all() as Array<{
       name: string;
     }>;
-    expect(runnerMetaColumns.map((column) => column.name)).not.toContain("agent_state_bundle_ref_json");
     expect(runnerMetaColumns.map((column) => column.name)).not.toContain("vault_bundle_ref_json");
-    expect(runnerMetaColumns.map((column) => column.name)).not.toContain("agent_state_bundle_version");
     expect(runnerMetaColumns.map((column) => column.name)).not.toContain("vault_bundle_version");
 
-    expect(readBundleSlotRows(db)).toEqual(
-      HOSTED_EXECUTION_BUNDLE_SLOTS
-        .map((slot) => ({
-          bundle_ref_json: null,
-          bundle_version: 0,
-          slot,
-        }))
-        .sort((left, right) => left.slot.localeCompare(right.slot)),
-    );
+    expect(readBundleSlotRows(db)).toEqual([
+      {
+        bundle_ref_json: null,
+        bundle_version: 0,
+        slot: "vault",
+      },
+    ]);
   });
 
-  it("keeps compare-and-swap bundle versions in canonical slot rows", async () => {
-    const agentStateRef = makeBundleRef("agent-state/current");
+  it("keeps compare-and-swap bundle versions in the canonical vault slot row", async () => {
     const currentVaultRef = makeBundleRef("vault/current");
     const nextVaultRef = makeBundleRef("vault/next");
     const { db, store } = createRunnerQueueStoreHarness();
     await store.bootstrapUser("user-cas");
 
     const initial = await store.compareAndSwapBundleRefs({
-      expectedVersions: {
-        agentState: 0,
-        vault: 0,
-      },
-      nextBundleRefs: {
-        agentState: agentStateRef,
-        vault: currentVaultRef,
-      },
+      expectedVersion: 0,
+      nextBundleRef: currentVaultRef,
     });
     expect(initial.applied).toBe(true);
-    expect(initial.record.bundleRefs).toEqual({
-      agentState: agentStateRef,
-      vault: currentVaultRef,
-    });
-    expect(initial.record.bundleVersions).toEqual({
-      agentState: 1,
-      vault: 1,
-    });
+    expect(initial.record.bundleRef).toEqual(currentVaultRef);
+    expect(initial.record.bundleVersion).toBe(1);
     expect(readBundleSlotRows(db)).toEqual([
-      {
-        bundle_ref_json: serializeHostedExecutionBundleRef(agentStateRef),
-        bundle_version: 1,
-        slot: "agentState",
-      },
       {
         bundle_ref_json: serializeHostedExecutionBundleRef(currentVaultRef),
         bundle_version: 1,
@@ -212,34 +189,22 @@ describe("RunnerQueueStore bundle slot storage", () => {
     ]);
 
     const swapped = await store.compareAndSwapBundleRefs({
-      expectedVersions: initial.record.bundleVersions,
-      nextBundleRefs: {
-        ...initial.record.bundleRefs,
-        vault: nextVaultRef,
-      },
+      expectedVersion: initial.record.bundleVersion,
+      nextBundleRef: nextVaultRef,
     });
     expect(swapped.applied).toBe(true);
-    expect(swapped.record.bundleVersions).toEqual({
-      agentState: 1,
-      vault: 2,
-    });
-    expect(swapped.record.bundleRefs).toEqual({
-      agentState: agentStateRef,
-      vault: nextVaultRef,
-    });
+    expect(swapped.record.bundleVersion).toBe(2);
+    expect(swapped.record.bundleRef).toEqual(nextVaultRef);
 
     const rejected = await store.compareAndSwapBundleRefs({
-      expectedVersions: initial.record.bundleVersions,
-      nextBundleRefs: swapped.record.bundleRefs,
+      expectedVersion: initial.record.bundleVersion,
+      nextBundleRef: swapped.record.bundleRef,
     });
     expect(rejected.applied).toBe(false);
-    expect(rejected.record.bundleVersions).toEqual({
-      agentState: 1,
-      vault: 2,
-    });
+    expect(rejected.record.bundleVersion).toBe(2);
   });
 
-  it("repairs malformed bundle-slot refs without dropping their versions", async () => {
+  it("repairs malformed bundle refs without dropping their version", async () => {
     const vaultRef = makeBundleRef("vault/current");
     const { db, store } = createRunnerQueueStoreHarness();
     await store.bootstrapUser("user-malformed");
@@ -248,34 +213,26 @@ describe("RunnerQueueStore bundle slot storage", () => {
       UPDATE runner_bundle_slots
       SET bundle_ref_json = ?, bundle_version = ?
       WHERE slot = ?
-    `).run(JSON.stringify({ key: "missing-required-fields" }), 7, "agentState");
-    db.prepare(`
-      UPDATE runner_bundle_slots
-      SET bundle_ref_json = ?, bundle_version = ?
-      WHERE slot = ?
-    `).run(serializeHostedExecutionBundleRef(vaultRef), 3, "vault");
+    `).run(JSON.stringify({ key: "missing-required-fields" }), 7, "vault");
 
     const state = await store.readState();
-    expect(state.bundleRefs).toEqual({
-      agentState: null,
-      vault: vaultRef,
-    });
-    expect(state.bundleVersions).toEqual({
-      agentState: 7,
-      vault: 3,
-    });
-    expect(state.lastError).toContain("Hosted runner cleared malformed bundle ref(s): agent-state.");
+    expect(state.bundleRef).toBeNull();
+    expect(state.bundleVersion).toBe(7);
+    expect(state.lastError).toContain("Hosted runner cleared malformed bundle ref(s): vault.");
     expect(readBundleSlotRows(db)).toEqual([
       {
         bundle_ref_json: null,
         bundle_version: 7,
-        slot: "agentState",
-      },
-      {
-        bundle_ref_json: serializeHostedExecutionBundleRef(vaultRef),
-        bundle_version: 3,
         slot: "vault",
       },
     ]);
+
+    const repaired = await store.compareAndSwapBundleRefs({
+      expectedVersion: state.bundleVersion,
+      nextBundleRef: vaultRef,
+    });
+    expect(repaired.applied).toBe(true);
+    expect(repaired.record.bundleRef).toEqual(vaultRef);
+    expect(repaired.record.bundleVersion).toBe(8);
   });
 });

@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildHostedAssistantDeliveryPreparedRecord,
-  mapHostedExecutionBundleSlots,
 } from "@murphai/hosted-execution";
 import {
   createHostedArtifactStore,
@@ -199,7 +198,7 @@ describe("hosted storage object keys", () => {
       keyId,
     });
     await journalStore.writeCommittedResult("user_journal_123", "evt_journal_1", {
-      bundleRefs: mapHostedExecutionBundleSlots(() => null),
+      bundleRef: null,
       committedAt: "2026-04-03T00:00:00.000Z",
       eventId: "evt_journal_1",
       finalizedAt: null,

@@ -4,11 +4,7 @@ import {
   sameHostedBundlePayloadRef,
 } from "@murphai/runtime-state/node";
 import {
-  HOSTED_EXECUTION_BUNDLE_SLOTS,
-  mapHostedExecutionBundleSlotsAsync,
-  resolveHostedExecutionBundleKind,
-  type HostedExecutionBundleRefs,
-  type HostedExecutionBundleSlot,
+  type HostedExecutionBundleRef,
   type HostedExecutionRunnerResult,
 } from "@murphai/hosted-execution";
 
@@ -21,7 +17,7 @@ import {
 import { HostedBundleGarbageCollector } from "../bundle-gc.js";
 import { RunnerQueueStore } from "./runner-queue-store.js";
 import {
-  type RunnerBundleVersions,
+  type RunnerBundleVersion,
   type RunnerStateRecord,
 } from "./types.js";
 
@@ -45,65 +41,58 @@ export class RunnerBundleSync {
     );
   }
 
-  async readBundlesForRunner(): Promise<HostedExecutionRunnerResult["bundles"]> {
+  async readBundlesForRunner(): Promise<HostedExecutionRunnerResult["bundle"]> {
     const store = this.createBundleStore();
     const bundleState = await this.queueStore.readBundleMetaState();
-    return mapHostedExecutionBundleSlotsAsync(async (slot) =>
-      encodeHostedBundleBase64(await readRequiredBundleForRunner({
-        bundleStore: store,
-        ref: bundleState.bundleRefs[slot],
-        slot,
-      }))
-    );
+    return encodeHostedBundleBase64(await readRequiredBundleForRunner({
+      bundleStore: store,
+      ref: bundleState.bundleRef,
+    }));
   }
 
   async applyRunnerResultBundles(
     userId: string,
-    expectedVersions: RunnerBundleVersions,
-    bundles: HostedExecutionRunnerResult["bundles"],
+    expectedVersion: RunnerBundleVersion,
+    bundle: HostedExecutionRunnerResult["bundle"],
   ): Promise<RunnerStateRecord> {
-    let nextExpectedVersions = expectedVersions;
+    let nextExpectedVersion = expectedVersion;
     const bundleStore = this.createBundleStore();
-    const nextBundleBytesBySlot = await mapHostedExecutionBundleSlotsAsync((slot) =>
-      decodeHostedBundleBase64(bundles[slot])
-    );
+    const nextBundleBytes = decodeHostedBundleBase64(bundle);
 
     for (let attempt = 0; attempt < BUNDLE_SWAP_RETRY_LIMIT; attempt += 1) {
       const bundleState = await this.queueStore.readBundleMetaState();
-      const nextBundleRefs = await mapHostedExecutionBundleSlotsAsync(async (slot) =>
-        bundles[slot] === null
-          ? null
-          : writeHostedBundleBytesIfChanged({
-              bundleStore,
-              currentRef: bundleState.bundleRefs[slot],
-              kind: resolveHostedExecutionBundleKind(slot),
-              plaintext: nextBundleBytesBySlot[slot] ?? new Uint8Array(),
-            })
-      );
+      const nextBundleRef = bundle === null
+        ? null
+        : await writeHostedBundleBytesIfChanged({
+            bundleStore,
+            currentRef: bundleState.bundleRef,
+            kind: "vault",
+            plaintext: nextBundleBytes ?? new Uint8Array(),
+          });
 
       const swapped = await this.queueStore.compareAndSwapBundleRefs({
-        expectedVersions: nextExpectedVersions,
-        nextBundleRefs,
+        expectedVersion: nextExpectedVersion,
+        nextBundleRef,
       });
 
       if (swapped.applied) {
         await this.cleanupBundleTransitionBestEffort({
-          nextBundleRefs,
-          previousBundleRefs: bundleState.bundleRefs,
+          nextBundleRef,
+          previousBundleRef: bundleState.bundleRef,
           userId,
         });
         return swapped.record;
       }
 
       assertBundleRefsStillCompatible({
-        currentBundleRefs: swapped.record.bundleRefs,
-        currentVersions: swapped.record.bundleVersions,
-        nextBundleRefs,
-        previousExpectedVersions: nextExpectedVersions,
+        currentBundleRef: swapped.record.bundleRef,
+        currentVersion: swapped.record.bundleVersion,
+        nextBundleRef,
+        previousExpectedVersion: nextExpectedVersion,
         userId,
       });
 
-      nextExpectedVersions = swapped.record.bundleVersions;
+      nextExpectedVersion = swapped.record.bundleVersion;
     }
 
     throw new Error(`Hosted bundle update for ${userId} conflicted too many times.`);
@@ -119,8 +108,8 @@ export class RunnerBundleSync {
   }
 
   private async cleanupBundleTransitionBestEffort(input: {
-    nextBundleRefs: HostedExecutionBundleRefs;
-    previousBundleRefs: HostedExecutionBundleRefs;
+    nextBundleRef: HostedExecutionBundleRef | null;
+    previousBundleRef: HostedExecutionBundleRef | null;
     userId: string;
   }): Promise<void> {
     try {
@@ -133,8 +122,7 @@ export class RunnerBundleSync {
 
 async function readRequiredBundleForRunner(input: {
   bundleStore: HostedBundleStore;
-  ref: HostedExecutionBundleRefs[HostedExecutionBundleSlot];
-  slot: HostedExecutionBundleSlot;
+  ref: HostedExecutionBundleRef | null;
 }): Promise<Uint8Array | null> {
   if (!input.ref) {
     return null;
@@ -143,7 +131,7 @@ async function readRequiredBundleForRunner(input: {
   const bytes = await input.bundleStore.readBundle(input.ref);
   if (!bytes) {
     throw new Error(
-      `Hosted ${resolveHostedExecutionBundleKind(input.slot)} bundle ${input.ref.key} is missing from R2.`,
+      `Hosted vault bundle ${input.ref.key} is missing from R2.`,
     );
   }
 
@@ -151,25 +139,18 @@ async function readRequiredBundleForRunner(input: {
 }
 
 function assertBundleRefsStillCompatible(input: {
-  currentBundleRefs: RunnerStateRecord["bundleRefs"];
-  currentVersions: RunnerBundleVersions;
-  nextBundleRefs: RunnerStateRecord["bundleRefs"];
-  previousExpectedVersions: RunnerBundleVersions;
+  currentBundleRef: RunnerStateRecord["bundleRef"];
+  currentVersion: RunnerBundleVersion;
+  nextBundleRef: RunnerStateRecord["bundleRef"];
+  previousExpectedVersion: RunnerBundleVersion;
   userId: string;
 }): void {
-  for (const slot of HOSTED_EXECUTION_BUNDLE_SLOTS) {
-    if (
-      input.currentVersions[slot] === input.previousExpectedVersions[slot]
-      || sameHostedBundlePayloadRef(
-        input.currentBundleRefs[slot],
-        input.nextBundleRefs[slot],
-      )
-    ) {
-      continue;
-    }
-
+  if (
+    input.currentVersion !== input.previousExpectedVersion
+    && !sameHostedBundlePayloadRef(input.currentBundleRef, input.nextBundleRef)
+  ) {
     throw new Error(
-      `Hosted ${resolveHostedExecutionBundleKind(slot)} bundle changed while applying the runner result for ${input.userId}.`,
+      `Hosted vault bundle changed while applying the runner result for ${input.userId}.`,
     );
   }
 }

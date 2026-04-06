@@ -3,17 +3,13 @@ import {
   type GatewayProjectionSnapshot,
 } from "@murphai/gateway-core";
 import {
-  HOSTED_EXECUTION_BUNDLE_SLOTS,
-  mapHostedExecutionBundleSlots,
-  mapHostedExecutionBundleSlotsAsync,
+  type HostedExecutionBundleRef,
   parseHostedExecutionSideEffects,
-  resolveHostedExecutionBundleKind,
-  type HostedExecutionBundleRefs,
-  type HostedExecutionBundleSlot,
   type HostedExecutionSideEffect,
   type HostedExecutionRunnerResult,
 } from "@murphai/hosted-execution";
 import {
+  parseHostedExecutionBundleRef,
   sameHostedBundlePayloadRef,
   type HostedExecutionBundleRefIdentity,
 } from "@murphai/runtime-state";
@@ -34,11 +30,11 @@ import {
 import { readEncryptedR2Json, writeEncryptedR2Json } from "./crypto.js";
 
 export interface HostedExecutionRunnerCommitRequest {
-  bundleRefs: HostedExecutionBundleRefs;
+  bundleRef: HostedExecutionBundleRef | null;
 }
 
 export interface HostedExecutionCommittedResult {
-  bundleRefs: HostedExecutionBundleRefs;
+  bundleRef: HostedExecutionBundleRef | null;
   committedAt: string;
   eventId: string;
   finalizedAt: string | null;
@@ -49,14 +45,14 @@ export interface HostedExecutionCommittedResult {
 }
 
 export interface HostedExecutionCommitPayload {
-  bundles: HostedExecutionRunnerResult["bundles"];
+  bundle: HostedExecutionRunnerResult["bundle"];
   gatewayProjectionSnapshot?: GatewayProjectionSnapshot | null;
   result: HostedExecutionRunnerResult["result"];
   sideEffects?: HostedExecutionSideEffect[];
 }
 
 export interface HostedExecutionFinalizePayload {
-  bundles: HostedExecutionRunnerResult["bundles"];
+  bundle: HostedExecutionRunnerResult["bundle"];
   gatewayProjectionSnapshot?: GatewayProjectionSnapshot | null;
 }
 
@@ -143,7 +139,7 @@ export function createHostedExecutionJournalStore(input: {
 
 export async function persistHostedExecutionCommit(input: {
   bucket: R2BucketLike;
-  currentBundleRefs: HostedExecutionRunnerCommitRequest["bundleRefs"];
+  currentBundleRef: HostedExecutionRunnerCommitRequest["bundleRef"];
   eventId: string;
   key: Uint8Array;
   keyId: string;
@@ -171,14 +167,12 @@ export async function persistHostedExecutionCommit(input: {
   });
   const committedAt = new Date().toISOString();
   const committedResult: HostedExecutionCommittedResult = {
-    bundleRefs: await mapHostedExecutionBundleSlotsAsync((slot) =>
-      writeHostedBase64BundleIfChanged({
-        bundleStore,
-        currentRef: input.currentBundleRefs[slot],
-        kind: resolveHostedExecutionBundleKind(slot),
-        value: input.payload.bundles[slot],
-      })
-    ),
+    bundleRef: await writeHostedBase64BundleIfChanged({
+      bundleStore,
+      currentRef: input.currentBundleRef,
+      kind: "vault",
+      value: input.payload.bundle,
+    }),
     committedAt,
     eventId: input.eventId,
     finalizedAt: null,
@@ -227,19 +221,15 @@ export async function persistHostedExecutionFinalBundles(input: {
     keyId: input.keyId,
     keysById: input.keysById,
   });
-  const nextBundleRefs = await mapHostedExecutionBundleSlotsAsync((slot) =>
-    writeHostedBase64BundleIfChanged({
-      bundleStore,
-      currentRef: existing.bundleRefs[slot],
-      kind: resolveHostedExecutionBundleKind(slot),
-      value: input.payload.bundles[slot],
-    })
-  );
+  const nextBundleRef = await writeHostedBase64BundleIfChanged({
+    bundleStore,
+    currentRef: existing.bundleRef,
+    kind: "vault",
+    value: input.payload.bundle,
+  });
 
   if (
-    HOSTED_EXECUTION_BUNDLE_SLOTS.every((slot) =>
-      sameHostedBundlePayloadRef(nextBundleRefs[slot], existing.bundleRefs[slot])
-    )
+    sameHostedBundlePayloadRef(nextBundleRef, existing.bundleRef)
     && existing.finalizedAt !== null
   ) {
     return existing;
@@ -247,7 +237,7 @@ export async function persistHostedExecutionFinalBundles(input: {
 
   const finalizedResult: HostedExecutionCommittedResult = {
     ...existing,
-    bundleRefs: nextBundleRefs,
+    bundleRef: nextBundleRef,
     finalizedAt: existing.finalizedAt ?? new Date().toISOString(),
     gatewayProjectionSnapshot:
       input.payload.gatewayProjectionSnapshot ?? existing.gatewayProjectionSnapshot,
@@ -261,6 +251,10 @@ function normalizeHostedExecutionCommittedResult(
 ): HostedExecutionCommittedResult {
   return {
     ...value,
+    bundleRef: parseHostedExecutionBundleRef(
+      (value as { bundleRef?: unknown }).bundleRef,
+      "Hosted execution committed result bundleRef",
+    ),
     finalizedAt: value.finalizedAt ?? null,
     gatewayProjectionSnapshot:
       (value as { gatewayProjectionSnapshot?: unknown }).gatewayProjectionSnapshot === undefined
@@ -288,7 +282,7 @@ function requireCommittedResultString(value: unknown, label: string): string {
 function assertEquivalentDuplicateCommit(
   existing: HostedExecutionCommittedResult,
   input: {
-    currentBundleRefs: HostedExecutionRunnerCommitRequest["bundleRefs"];
+    currentBundleRef: HostedExecutionRunnerCommitRequest["bundleRef"];
     eventId: string;
     payload: HostedExecutionCommitPayload;
     userId: string;
@@ -325,32 +319,23 @@ function assertEquivalentDuplicateCommit(
     );
   }
 
-  const expectedBundleRefs = mapHostedExecutionBundleSlots((slot) =>
-    resolveExpectedCommittedBundleRef(
-      slot,
-      input.currentBundleRefs[slot],
-      input.payload.bundles[slot],
-    )
+  const expectedBundleRef = resolveExpectedCommittedBundleRef(
+    input.currentBundleRef,
+    input.payload.bundle,
   );
-
-  for (const slot of HOSTED_EXECUTION_BUNDLE_SLOTS) {
-    if (sameHostedBundlePayloadRef(existing.bundleRefs[slot], expectedBundleRefs[slot])) {
-      continue;
-    }
-
+  if (!sameHostedBundlePayloadRef(existing.bundleRef, expectedBundleRef)) {
     throw new Error(
-      `Hosted execution commit ${input.eventId} ${resolveHostedExecutionBundleKind(slot)} bundle ref does not match the existing durable commit.`,
+      `Hosted execution commit ${input.eventId} vault bundle ref does not match the existing durable commit.`,
     );
   }
 }
 
 function resolveExpectedCommittedBundleRef(
-  slot: HostedExecutionBundleSlot,
-  currentRef: HostedExecutionBundleRefs[HostedExecutionBundleSlot],
+  currentRef: HostedExecutionBundleRef | null,
   value: string | null,
 ): HostedExecutionBundleRefIdentity | null {
   const decoded = describeHostedBase64BundleRef({
-    kind: resolveHostedExecutionBundleKind(slot),
+    kind: "vault",
     value,
   });
 

@@ -77,7 +77,7 @@ Current worker routes:
 - `POST /internal/users/:userId/run` is an internal manual-run route guarded by Vercel OIDC workload identity
 - `GET /internal/users/:userId/env` returns the configured per-user encrypted runner env key names (never the secret values)
 - `PUT /internal/users/:userId/env` merges or replaces the user's separately encrypted hosted env object
-- `DELETE /internal/users/:userId/env` clears the user's separately encrypted hosted env object without rewriting `agent-state`
+- `DELETE /internal/users/:userId/env` clears the user's separately encrypted hosted env object without rewriting the hosted vault bundle
 - `PUT /internal/users/:userId/crypto-context` explicitly provisions or reconciles the managed hosted root-key envelope for the user before runtime access
 - `PUT|GET|DELETE /internal/users/:userId/shares/:shareId/pack` stores owner-bound hosted share packs under the owning user root key
 

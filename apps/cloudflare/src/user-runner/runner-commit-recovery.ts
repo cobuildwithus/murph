@@ -99,11 +99,11 @@ export class RunnerCommitRecovery {
     committed: HostedExecutionCommittedResult,
     apply: () => Promise<RunnerStateRecord>,
   ): Promise<RunnerStateRecord> {
-    const previousBundleRefs = (await this.queueStore.readBundleMetaState()).bundleRefs;
+    const previousBundleRef = (await this.queueStore.readBundleMetaState()).bundleRef;
     await apply();
     await this.cleanupBundleTransitionBestEffort({
-      nextBundleRefs: committed.bundleRefs,
-      previousBundleRefs,
+      nextBundleRef: committed.bundleRef,
+      previousBundleRef,
       userId,
     });
     return this.scheduler.syncNextWake(committed.result.nextWakeAt ?? null);
@@ -127,8 +127,8 @@ export class RunnerCommitRecovery {
   }
 
   private async cleanupBundleTransitionBestEffort(input: {
-    nextBundleRefs: HostedExecutionCommittedResult["bundleRefs"];
-    previousBundleRefs: HostedExecutionCommittedResult["bundleRefs"];
+    nextBundleRef: HostedExecutionCommittedResult["bundleRef"];
+    previousBundleRef: HostedExecutionCommittedResult["bundleRef"];
     userId: string;
   }): Promise<void> {
     try {
