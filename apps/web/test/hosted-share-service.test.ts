@@ -409,9 +409,49 @@ describe("hosted share service", () => {
       prisma: prisma as never,
       shareCode: created.shareCode,
     })).rejects.toMatchObject({
-      code: "HOSTED_SHARE_ACTIVE_REQUIRED",
+      code: "HOSTED_MEMBER_SUSPENDED",
       httpStatus: 403,
     });
+  });
+
+  it("rejects hosted share creation when the sender member cannot be found", async () => {
+    const prisma = createHostedSharePrisma({ hostedMembers: [] });
+
+    await expect(createHostedShareLink({
+      prisma: prisma as never,
+      pack: buildPack(),
+      senderMemberId: "member_sender",
+    })).rejects.toMatchObject({
+      code: "HOSTED_SHARE_SENDER_NOT_FOUND",
+      httpStatus: 404,
+    });
+
+    expect(prisma.rows).toHaveLength(0);
+    expect(shareHarness.sharePacks.size).toBe(0);
+  });
+
+  it("rejects hosted share creation for suspended senders", async () => {
+    const prisma = createHostedSharePrisma({
+      hostedMembers: [
+        {
+          billingStatus: HostedBillingStatus.active,
+          id: "member_sender",
+          status: HostedMemberStatus.suspended,
+        },
+      ],
+    });
+
+    await expect(createHostedShareLink({
+      prisma: prisma as never,
+      pack: buildPack(),
+      senderMemberId: "member_sender",
+    })).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_SUSPENDED",
+      httpStatus: 403,
+    });
+
+    expect(prisma.rows).toHaveLength(0);
+    expect(shareHarness.sharePacks.size).toBe(0);
   });
 
 });
@@ -431,12 +471,32 @@ type HostedShareRow = {
   updatedAt: Date;
 };
 
-function createHostedSharePrisma() {
+type HostedShareMemberRow = {
+  billingStatus: HostedBillingStatus;
+  id: string;
+  status: HostedMemberStatus;
+};
+
+function createHostedSharePrisma(input?: {
+  hostedMembers?: HostedShareMemberRow[];
+}) {
   const rows: HostedShareRow[] = [];
   const outboxRows: ExecutionOutbox[] = [];
+  const hostedMembers = input?.hostedMembers ?? [
+    {
+      billingStatus: HostedBillingStatus.active,
+      id: "member_sender",
+      status: HostedMemberStatus.registered,
+    },
+  ];
   const prismaLike = {
+    hostedMembers,
     rows,
     outboxRows,
+    hostedMember: {
+      findUnique: async ({ where }: { where: { id: string } }) =>
+        hostedMembers.find((member) => member.id === where.id) ?? null,
+    },
     hostedShareLink: {
       create: async ({
         data,

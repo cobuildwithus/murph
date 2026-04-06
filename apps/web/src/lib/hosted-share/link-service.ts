@@ -1,4 +1,8 @@
-import { type HostedMember, type PrismaClient } from "@prisma/client";
+import {
+  HostedMemberStatus,
+  type HostedMember,
+  type PrismaClient,
+} from "@prisma/client";
 import { assertContract, sharePackSchema, type SharePack } from "@murphai/contracts";
 
 import { getPrisma } from "../prisma";
@@ -10,6 +14,7 @@ import {
   issueHostedInviteForPhone,
 } from "../hosted-onboarding/invite-service";
 import { hasHostedMemberActiveAccess } from "../hosted-onboarding/entitlement";
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
 import {
   buildHostedSharePreview,
@@ -46,6 +51,11 @@ export async function createHostedShareLink(input: {
   const shareId = generateHostedShareId();
   const publicBaseUrl = requireHostedSharePublicBaseUrl();
   let inviteCode = normalizeOptionalString(input.inviteCode) ?? null;
+
+  await requireActiveHostedShareSenderMember({
+    memberId: input.senderMemberId,
+    prisma,
+  });
 
   if (!inviteCode && normalizeOptionalString(input.recipientPhoneNumber)) {
     const invite = await issueHostedInviteForPhone({
@@ -161,4 +171,42 @@ export async function buildHostedSharePageData(input: {
     },
     stage,
   };
+}
+
+async function requireActiveHostedShareSenderMember(input: {
+  memberId: string;
+  prisma: PrismaClient;
+}): Promise<void> {
+  const member = await input.prisma.hostedMember.findUnique({
+    where: {
+      id: input.memberId,
+    },
+  });
+
+  if (!member) {
+    throw hostedOnboardingError({
+      code: "HOSTED_SHARE_SENDER_NOT_FOUND",
+      message: "The authenticated hosted share sender could not be found.",
+      httpStatus: 404,
+    });
+  }
+
+  if (member.status === HostedMemberStatus.suspended) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_SUSPENDED",
+      message: "This hosted account is suspended. Contact support to restore access.",
+      httpStatus: 403,
+    });
+  }
+
+  if (!hasHostedMemberActiveAccess({
+    billingStatus: member.billingStatus,
+    memberStatus: member.status,
+  })) {
+    throw hostedOnboardingError({
+      code: "HOSTED_SHARE_ACTIVE_REQUIRED",
+      message: "Finish hosted activation before creating a shared bundle.",
+      httpStatus: 403,
+    });
+  }
 }
