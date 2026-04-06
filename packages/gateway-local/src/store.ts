@@ -13,7 +13,12 @@ import {
   type GatewayRespondToPermissionInput,
   type GatewayWaitForEventsInput,
 } from '@murphai/gateway-core'
-import { openSqliteRuntimeDatabase, resolveGatewayRuntimePaths } from '@murphai/runtime-state/node'
+import {
+  applySqliteRuntimeMigrations,
+  openSqliteRuntimeDatabase,
+  promoteLegacyLocalStateFileSync,
+  resolveGatewayRuntimePaths,
+} from '@murphai/runtime-state/node'
 
 import { normalizeNullableString } from './shared.js'
 import {
@@ -21,9 +26,11 @@ import {
   respondToPermissionInDatabase,
 } from './store/permissions.js'
 import {
-  ensureGatewayStoreSchema,
+  GATEWAY_STORE_SQLITE_SCHEMA_VERSION,
+  ensureGatewayStoreBaseSchema,
   readMeta,
   readNumericMeta,
+  resetGatewayServingSnapshotSchema,
   withGatewayImmediateTransaction,
   writeMeta,
 } from './store/schema.js'
@@ -51,6 +58,7 @@ const CAPTURE_EMPTY_META_KEY = 'captures.empty'
 const CAPTURE_INITIALIZED_META_KEY = 'captures.initialized'
 const SESSION_SIGNATURE_META_KEY = 'sessions.signature'
 const OUTBOX_SIGNATURE_META_KEY = 'outbox.signature'
+const SQLITE_WAL_COMPANION_SUFFIXES = ['-shm', '-wal'] as const
 
 const EMPTY_GATEWAY_LOCAL_PROJECTION_SOURCE_READER: GatewayLocalProjectionSourceReader = {
   async listOutboxSources() {
@@ -145,8 +153,32 @@ export class LocalGatewayProjectionStore {
     private readonly vault: string,
     dependencies: LocalGatewayProjectionStoreDependencies = {},
   ) {
-    this.database = openSqliteRuntimeDatabase(resolveGatewayRuntimePaths(vault).gatewayDbPath)
-    ensureGatewayStoreSchema(this.database)
+    const runtimePaths = resolveGatewayRuntimePaths(vault)
+    promoteLegacyLocalStateFileSync({
+      currentPath: runtimePaths.gatewayDbPath,
+      legacyPath: runtimePaths.gatewayDbLegacyPath,
+      companionSuffixes: SQLITE_WAL_COMPANION_SUFFIXES,
+    })
+    this.database = openSqliteRuntimeDatabase(runtimePaths.gatewayDbPath)
+    applySqliteRuntimeMigrations(this.database, {
+      migrations: [
+        {
+          version: 1,
+          migrate(candidateDatabase) {
+            ensureGatewayStoreBaseSchema(candidateDatabase)
+          },
+        },
+        {
+          version: GATEWAY_STORE_SQLITE_SCHEMA_VERSION,
+          migrate(candidateDatabase) {
+            ensureGatewayStoreBaseSchema(candidateDatabase)
+            resetGatewayServingSnapshotSchema(candidateDatabase)
+          },
+        },
+      ],
+      schemaVersion: GATEWAY_STORE_SQLITE_SCHEMA_VERSION,
+      storeName: 'gateway local projection',
+    })
     this.sourceReader =
       dependencies.sourceReader ?? EMPTY_GATEWAY_LOCAL_PROJECTION_SOURCE_READER
   }

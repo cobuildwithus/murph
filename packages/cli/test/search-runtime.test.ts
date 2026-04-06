@@ -481,7 +481,7 @@ test('timeline merges journals, events, and sample summaries into one descending
 
 test('search index status and rebuild expose the shared sqlite runtime state without creating it early', async () => {
   const fixture = await makeRetrievalFixture()
-  const runtimeDatabasePath = path.join(fixture.vaultRoot, '.runtime/search.sqlite')
+  const runtimeDatabasePath = path.join(fixture.vaultRoot, '.runtime/projections/search.sqlite')
 
   try {
     assert.equal(existsSync(runtimeDatabasePath), false)
@@ -502,7 +502,7 @@ test('search index status and rebuild expose the shared sqlite runtime state wit
     assert.equal(initialStatus.ok, true)
     assert.equal(requireData(initialStatus).backend, 'sqlite')
     assert.equal(requireData(initialStatus).exists, false)
-    assert.equal(requireData(initialStatus).dbPath, '.runtime/search.sqlite')
+    assert.equal(requireData(initialStatus).dbPath, '.runtime/projections/search.sqlite')
     assert.equal(existsSync(runtimeDatabasePath), false)
 
     const rebuild = await runCli<{
@@ -523,7 +523,7 @@ test('search index status and rebuild expose the shared sqlite runtime state wit
     assert.equal(requireData(rebuild).backend, 'sqlite')
     assert.equal(requireData(rebuild).exists, true)
     assert.equal(requireData(rebuild).rebuilt, true)
-    assert.equal(requireData(rebuild).dbPath, '.runtime/search.sqlite')
+    assert.equal(requireData(rebuild).dbPath, '.runtime/projections/search.sqlite')
     assert.equal(requireData(rebuild).documentCount > 0, true)
     assert.equal(existsSync(runtimeDatabasePath), true)
 
@@ -558,7 +558,7 @@ test('search index status and rebuild expose the shared sqlite runtime state wit
 
 test('search index status ignores a copied inbox search db until index rebuild restores the canonical search db', async () => {
   const fixture = await makeRetrievalFixture()
-  const searchDatabasePath = path.join(fixture.vaultRoot, '.runtime/search.sqlite')
+  const searchDatabasePath = path.join(fixture.vaultRoot, '.runtime/projections/search.sqlite')
   const legacyDatabasePath = path.join(fixture.vaultRoot, '.runtime/inboxd.sqlite')
 
   try {
@@ -574,7 +574,7 @@ test('search index status ignores a copied inbox search db until index rebuild r
     ])
 
     assert.equal(initialRebuild.ok, true)
-    assert.equal(requireData(initialRebuild).dbPath, '.runtime/search.sqlite')
+    assert.equal(requireData(initialRebuild).dbPath, '.runtime/projections/search.sqlite')
 
     await mkdir(path.dirname(legacyDatabasePath), { recursive: true })
     await copyFile(searchDatabasePath, legacyDatabasePath)
@@ -595,7 +595,7 @@ test('search index status ignores a copied inbox search db until index rebuild r
     assert.equal(legacyStatus.ok, true)
     assert.equal(requireData(legacyStatus).backend, 'sqlite')
     assert.equal(requireData(legacyStatus).exists, false)
-    assert.equal(requireData(legacyStatus).dbPath, '.runtime/search.sqlite')
+    assert.equal(requireData(legacyStatus).dbPath, '.runtime/projections/search.sqlite')
 
     const sqliteSearch = await runCli<{
       filters: { backend: string }
@@ -636,7 +636,7 @@ test('search index status ignores a copied inbox search db until index rebuild r
     assert.equal(requireData(rebuilt).backend, 'sqlite')
     assert.equal(requireData(rebuilt).exists, true)
     assert.equal(requireData(rebuilt).rebuilt, true)
-    assert.equal(requireData(rebuilt).dbPath, '.runtime/search.sqlite')
+    assert.equal(requireData(rebuilt).dbPath, '.runtime/projections/search.sqlite')
     assert.equal(existsSync(searchDatabasePath), true)
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
@@ -669,7 +669,7 @@ test('search index status treats a pre-existing inbox runtime db as unindexed an
     assert.equal(initialStatus.ok, true)
     assert.equal(requireData(initialStatus).backend, 'sqlite')
     assert.equal(requireData(initialStatus).exists, false)
-    assert.equal(requireData(initialStatus).dbPath, '.runtime/search.sqlite')
+    assert.equal(requireData(initialStatus).dbPath, '.runtime/projections/search.sqlite')
 
     const sqliteSearch = await runCli([
       'search',

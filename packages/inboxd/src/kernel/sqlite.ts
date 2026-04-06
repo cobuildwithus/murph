@@ -1,6 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
+  applySqliteRuntimeMigrations,
   openSqliteRuntimeDatabase,
+  promoteLegacyLocalStateFileSync,
   resolveRuntimePaths,
   withImmediateTransaction as withTransaction,
 } from "@murphai/runtime-state/node";
@@ -33,6 +35,8 @@ import {
 } from "../shared.ts";
 
 const ATTACHMENT_PARSE_PIPELINE = "attachment_text" as const;
+const INBOX_RUNTIME_SQLITE_SCHEMA_VERSION = 1;
+const SQLITE_WAL_COMPANION_SUFFIXES = ["-shm", "-wal"] as const;
 const PARSEABLE_ATTACHMENT_KINDS = new Set<StoredAttachment["kind"]>([
   "audio",
   "document",
@@ -74,10 +78,35 @@ export interface OpenInboxRuntimeInput {
 export async function openInboxRuntime({
   vaultRoot,
 }: OpenInboxRuntimeInput): Promise<InboxRuntimeStore> {
-  const runtimePaths = resolveRuntimePaths(vaultRoot);
-  const databasePath = runtimePaths.inboxDbPath;
-  const database = openSqliteRuntimeDatabase(databasePath);
+  const database = openInboxRuntimeDatabase(vaultRoot);
+  return createInboxRuntimeStore(database, resolveRuntimePaths(vaultRoot).inboxDbPath);
+}
 
+
+function openInboxRuntimeDatabase(vaultRoot: string): DatabaseSync {
+  const runtimePaths = resolveRuntimePaths(vaultRoot);
+  promoteLegacyLocalStateFileSync({
+    currentPath: runtimePaths.inboxDbPath,
+    legacyPath: runtimePaths.inboxDbLegacyPath,
+    companionSuffixes: SQLITE_WAL_COMPANION_SUFFIXES,
+  });
+
+  const database = openSqliteRuntimeDatabase(runtimePaths.inboxDbPath);
+  applySqliteRuntimeMigrations(database, {
+    migrations: [{
+      version: INBOX_RUNTIME_SQLITE_SCHEMA_VERSION,
+      migrate(candidateDatabase) {
+        ensureInboxRuntimeSchema(candidateDatabase);
+      },
+    }],
+    schemaVersion: INBOX_RUNTIME_SQLITE_SCHEMA_VERSION,
+    storeName: 'inbox runtime',
+  });
+
+  return database;
+}
+
+function ensureInboxRuntimeSchema(database: DatabaseSync): void {
   database.exec(`
     create table if not exists source_cursor (
       source text not null,
@@ -284,8 +313,6 @@ export async function openInboxRuntime({
     create index if not exists attachment_parse_job_capture_idx
     on attachment_parse_job (capture_id, attachment_id);
   `);
-
-  return createInboxRuntimeStore(database, databasePath);
 }
 
 
@@ -294,10 +321,7 @@ export async function listInboxCaptureMutations(input: {
   limit?: number;
   vaultRoot: string;
 }): Promise<InboxCaptureMutationRecord[]> {
-  const runtime = await openInboxRuntime({ vaultRoot: input.vaultRoot });
-  runtime.close();
-  const runtimePaths = resolveRuntimePaths(input.vaultRoot);
-  const database = openSqliteRuntimeDatabase(runtimePaths.inboxDbPath);
+  const database = openInboxRuntimeDatabase(input.vaultRoot);
   try {
     const rows = database
       .prepare(
@@ -326,10 +350,7 @@ export async function listInboxCaptureMutations(input: {
 }
 
 export async function readInboxCaptureMutationHead(vaultRoot: string): Promise<number> {
-  const runtime = await openInboxRuntime({ vaultRoot });
-  runtime.close();
-  const runtimePaths = resolveRuntimePaths(vaultRoot);
-  const database = openSqliteRuntimeDatabase(runtimePaths.inboxDbPath);
+  const database = openInboxRuntimeDatabase(vaultRoot);
   try {
     const row = database
       .prepare("select max(mutation_cursor) as cursor from capture")

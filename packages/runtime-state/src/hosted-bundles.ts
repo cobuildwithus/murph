@@ -3,6 +3,19 @@ import path from "node:path";
 import { mkdir } from "node:fs/promises";
 
 import { resolveAssistantStatePaths } from "./assistant-state.ts";
+import {
+  isVaultEphemeralRelativePath,
+  isVaultProjectionRelativePath,
+} from "./local-state-taxonomy.ts";
+import {
+  DEVICE_SYNC_DB_LEGACY_RELATIVE_PATH,
+  DEVICE_SYNC_DB_RELATIVE_PATH,
+  DEVICE_SYNC_RUNTIME_DIRECTORY_LEGACY_RELATIVE_PATH,
+  DEVICE_SYNC_RUNTIME_DIRECTORY_RELATIVE_PATH,
+  GATEWAY_DB_LEGACY_RELATIVE_PATH,
+  INBOX_DB_LEGACY_RELATIVE_PATH,
+  SEARCH_DB_LEGACY_RELATIVE_PATH,
+} from "./runtime-paths.ts";
 import type { HostedBundleArtifactRef } from "./hosted-bundle.ts";
 import {
   materializeHostedBundleArtifacts,
@@ -180,23 +193,50 @@ export async function materializeHostedExecutionArtifacts(input: {
 }
 
 function shouldIncludeWorkspaceSnapshotVaultRelativePath(relativePath: string): boolean {
+  const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(relativePath);
+
   return (
-    !isDotGitRelativePath(relativePath)
-    && !isDeviceSyncLocalRuntimeRelativePath(relativePath)
-    && !isEnvironmentRelativePath(relativePath)
-    && !isExportPackRelativePath(relativePath)
-    && !isEphemeralVaultRuntimeRelativePath(relativePath)
+    !isDotGitRelativePath(normalizedRelativePath)
+    && !isEnvironmentRelativePath(normalizedRelativePath)
+    && !isExportPackRelativePath(normalizedRelativePath)
+    && !isHostedSnapshotExcludedVaultRuntimeRelativePath(normalizedRelativePath)
   );
 }
 
-function isDeviceSyncLocalRuntimeRelativePath(relativePath: string): boolean {
+function isHostedSnapshotExcludedVaultRuntimeRelativePath(relativePath: string): boolean {
+  if (!(relativePath === ".runtime" || relativePath.startsWith(`.runtime${path.posix.sep}`))) {
+    return false;
+  }
+
   return (
-    relativePath === ".runtime/device-syncd.sqlite"
-    || relativePath === ".runtime/device-syncd.sqlite-shm"
-    || relativePath === ".runtime/device-syncd.sqlite-wal"
-    || relativePath === ".runtime/device-syncd"
-    || relativePath.startsWith(`.runtime/device-syncd${path.posix.sep}`)
+    isLocalOnlyOperationalRuntimeRelativePath(relativePath)
+    || isLegacyProjectionRuntimeRelativePath(relativePath)
+    || isEphemeralVaultRuntimeRelativePath(relativePath)
+    || isVaultProjectionRelativePath(relativePath)
   );
+}
+
+function isLocalOnlyOperationalRuntimeRelativePath(relativePath: string): boolean {
+  return hasRelativePathPrefix(relativePath, DEVICE_SYNC_RUNTIME_DIRECTORY_RELATIVE_PATH)
+    || hasRelativePathPrefix(relativePath, DEVICE_SYNC_RUNTIME_DIRECTORY_LEGACY_RELATIVE_PATH)
+    || hasRelativePathPrefix(relativePath, DEVICE_SYNC_DB_RELATIVE_PATH)
+    || hasRelativePathPrefix(relativePath, DEVICE_SYNC_DB_LEGACY_RELATIVE_PATH)
+    || hasRelativePathPrefix(relativePath, `${DEVICE_SYNC_DB_RELATIVE_PATH}-shm`)
+    || hasRelativePathPrefix(relativePath, `${DEVICE_SYNC_DB_RELATIVE_PATH}-wal`)
+    || hasRelativePathPrefix(relativePath, `${DEVICE_SYNC_DB_LEGACY_RELATIVE_PATH}-shm`)
+    || hasRelativePathPrefix(relativePath, `${DEVICE_SYNC_DB_LEGACY_RELATIVE_PATH}-wal`);
+}
+
+function isLegacyProjectionRuntimeRelativePath(relativePath: string): boolean {
+  return hasRelativePathPrefix(relativePath, SEARCH_DB_LEGACY_RELATIVE_PATH)
+    || hasRelativePathPrefix(relativePath, `${SEARCH_DB_LEGACY_RELATIVE_PATH}-shm`)
+    || hasRelativePathPrefix(relativePath, `${SEARCH_DB_LEGACY_RELATIVE_PATH}-wal`)
+    || hasRelativePathPrefix(relativePath, GATEWAY_DB_LEGACY_RELATIVE_PATH)
+    || hasRelativePathPrefix(relativePath, `${GATEWAY_DB_LEGACY_RELATIVE_PATH}-shm`)
+    || hasRelativePathPrefix(relativePath, `${GATEWAY_DB_LEGACY_RELATIVE_PATH}-wal`)
+    || hasRelativePathPrefix(relativePath, INBOX_DB_LEGACY_RELATIVE_PATH)
+    || hasRelativePathPrefix(relativePath, `${INBOX_DB_LEGACY_RELATIVE_PATH}-shm`)
+    || hasRelativePathPrefix(relativePath, `${INBOX_DB_LEGACY_RELATIVE_PATH}-wal`);
 }
 
 function isDotGitRelativePath(relativePath: string): boolean {
@@ -224,8 +264,7 @@ function isEphemeralVaultRuntimeRelativePath(relativePath: string): boolean {
 
   const baseName = path.posix.basename(relativePath);
   return (
-    relativePath.startsWith(`.runtime/tmp${path.posix.sep}`)
-    || relativePath.startsWith(`.runtime/cache${path.posix.sep}`)
+    isVaultEphemeralRelativePath(relativePath)
     || baseName === "stdout.log"
     || baseName === "stderr.log"
     || baseName.endsWith(".pid")
@@ -233,6 +272,18 @@ function isEphemeralVaultRuntimeRelativePath(relativePath: string): boolean {
     || baseName.endsWith(".sock")
     || baseName.endsWith(".tmp")
   );
+}
+
+function hasRelativePathPrefix(relativePath: string, prefix: string): boolean {
+  return relativePath === prefix || relativePath.startsWith(`${prefix}${path.posix.sep}`);
+}
+
+function normalizeWorkspaceSnapshotRelativePath(relativePath: string): string {
+  return relativePath
+    .replace(/\\/gu, "/")
+    .replace(/\/+/gu, "/")
+    .replace(/^\.\//u, "")
+    .replace(/^\/+|\/+$/gu, "");
 }
 
 function shouldIncludeHostedOperatorHomeRelativePath(relativePath: string): boolean {

@@ -52,6 +52,7 @@ Always read these before repo code/docs/test/config work:
 - Do not use `as any` or lazy `as unknown` / `as unknown as T` casts to silence TypeScript errors; prove the type with control flow or helpers, or isolate the boundary with a narrow documented assertion.
 - Historical plan docs under `agent-docs/exec-plans/completed/` are immutable snapshots.
 - Do not invent compatibility, deployment, or runtime requirements. Document them in repo docs and scripts in the same change that introduces them.
+- Before landing new persisted state, classify it explicitly as canonical `vault/**`, durable local operational state under `.runtime/operations/**`, rebuildable local projection under `.runtime/projections/**`, out-of-vault `assistant-state/**`, or ephemeral cache/tmp state. Durable JSON state needs an explicit schema/schemaVersion seam, and durable SQLite state needs an explicit `user_version` migration seam.
 
 ## Workflow Defaults
 

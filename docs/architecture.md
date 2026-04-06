@@ -45,13 +45,13 @@ repo/
 ## Package Boundaries
 
 - `packages/contracts` defines the shared language: canonical Zod contracts, TypeScript types, parse helpers, and generated JSON Schema artifacts.
-- `packages/runtime-state` defines canonical `.runtime` paths plus shared SQLite defaults for rebuildable local state.
+- `packages/runtime-state` defines canonical local-state taxonomy and paths (`.runtime/operations/**`, `.runtime/projections/**`, `.runtime/cache/**`, `.runtime/tmp/**`) plus shared JSON/SQLite versioning helpers and migration defaults.
 - `packages/core` owns vault bootstrap, filesystem primitives, domain mutations, audit emission, and canonical write rules.
 - `packages/importers` parses external inputs, hosts provider-adapter normalization for direct API connectors, and delegates all canonical writes to core.
-- `packages/device-syncd` owns local provider OAuth state, reconnect/disconnect control, scheduled wearable imports, and optional webhook intake while keeping provider credentials outside the canonical vault.
-- `packages/inboxd` owns source-agnostic inbox capture, raw evidence persistence, the append-only `ledger/inbox-captures` canonical capture log, inbox-local runtime cursors/source-specific checkpoints/capture indexes, and attachment-level derived-job orchestration.
+- `packages/device-syncd` owns local provider OAuth state, reconnect/disconnect control, scheduled wearable imports, and optional webhook intake while keeping provider credentials in durable local operational state under `.runtime/operations/device-sync/**` and outside the canonical vault.
+- `packages/inboxd` owns source-agnostic inbox capture, raw evidence persistence, the append-only `ledger/inbox-captures` canonical capture log, inbox-local runtime cursors/source-specific checkpoints/capture indexes, and attachment-level derived-job orchestration, with its rebuildable SQLite projection under `.runtime/projections/inboxd.sqlite` and daemon/config JSON state under `.runtime/operations/inbox/**`.
 - `packages/parsers` owns local-first multimedia parsing for inbox attachments and writes only derived artifacts under `derived/inbox/**`.
-- `packages/query` reads canonical vault state, builds derived export packs, owns the optional lexical search index under `.runtime/search.sqlite`, exposes the stable health reference graph under `bank/library/**`, and exposes read helpers for the non-canonical compiled knowledge wiki under `derived/knowledge/**`.
+- `packages/query` reads canonical vault state, builds derived export packs, owns the optional lexical search index under `.runtime/projections/search.sqlite`, exposes the stable health reference graph under `bank/library/**`, and exposes read helpers for the non-canonical compiled knowledge wiki under `derived/knowledge/**`.
 - `packages/assistant-cli` owns CLI-only assistant wrappers, assistant commands, foreground terminal logging, and the Ink chat UI.
 - `packages/setup-cli` owns CLI-only onboarding, host setup, and setup-wizard flows.
 - `packages/cli` exposes the published `vault-cli` / `murph` shell, composes the command graph, and must not bypass core for canonical writes.
@@ -78,10 +78,13 @@ repo/
   - `derived/knowledge/log.md`
   - `derived/knowledge/pages/*.md`
 - Local runtime state:
-  - `.runtime/inboxd.sqlite`
-  - `.runtime/inboxd/*.json`
-  - `.runtime/search.sqlite`
-  - `.runtime/device-syncd.sqlite`
+  - `.runtime/operations/inbox/*.json`
+  - `.runtime/operations/parsers/toolchain.json`
+  - `.runtime/operations/device-sync/state.sqlite`
+  - `.runtime/projections/inboxd.sqlite`
+  - `.runtime/projections/search.sqlite`
+  - `.runtime/projections/gateway.sqlite`
+  - `.runtime/cache/**` and `.runtime/tmp/**` for ephemeral scratch state only
 - Out-of-vault assistant/session state:
   - `assistant-state/`
   - provider-owned transcript history should remain external when the chosen chat adapter supports it
@@ -89,7 +92,7 @@ repo/
   - store only manual aliases, explicit conversation bindings, provider session ids, automation cursors, local transcript files, and non-canonical Markdown memory docs for naming, response preferences, standing instructions, selected health context, and recent project context locally
   - do not store prompt/response excerpts in that memory layer; selected health context there remains non-canonical and the vault stays authoritative
 - Device provider credentials:
-  - stay encrypted in the local device-sync runtime database
+  - stay encrypted in the local device-sync runtime database under `.runtime/operations/device-sync/state.sqlite`
   - never land in canonical vault files or append-only health ledgers
 
 ## First Release Scope

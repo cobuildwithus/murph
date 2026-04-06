@@ -1,5 +1,9 @@
 import { mkdir } from 'node:fs/promises'
-import { resolveRuntimePaths } from '@murphai/runtime-state/node'
+import {
+  hasLocalStatePath,
+  promoteLegacyLocalStateDirectory,
+  resolveRuntimePaths,
+} from '@murphai/runtime-state/node'
 import {
   inboxRuntimeConfigSchema,
   type InboxConnectorConfig,
@@ -35,7 +39,10 @@ export async function ensureInitializedWithInbox(
   const paths = resolveRuntimePaths(vaultRoot)
   await inboxd.ensureInboxVault(paths.absoluteVaultRoot)
 
-  if (!(await fileExists(paths.inboxConfigPath))) {
+  if (!(await hasLocalStatePath({
+    currentPath: paths.inboxConfigPath,
+    legacyPath: paths.inboxConfigLegacyPath,
+  }))) {
     throw new VaultCliError(
       'INBOX_NOT_INITIALIZED',
       'Inbox runtime is not initialized. Run `vault-cli inbox init` first.',
@@ -82,7 +89,10 @@ export async function ensureConfigFile(
   paths: InboxPaths,
   createdPaths: string[],
 ): Promise<void> {
-  if (await fileExists(paths.inboxConfigPath)) {
+  if (await hasLocalStatePath({
+    currentPath: paths.inboxConfigPath,
+    legacyPath: paths.inboxConfigLegacyPath,
+  })) {
     return
   }
 
@@ -90,6 +100,10 @@ export async function ensureConfigFile(
     version: CONFIG_VERSION,
     connectors: [],
   }
+  await promoteLegacyLocalStateDirectory({
+    currentPath: paths.inboxRuntimeRoot,
+    legacyPath: paths.inboxRuntimeLegacyRoot,
+  })
   await writeJsonFile(paths.inboxConfigPath, emptyConfig)
   createdPaths.push(relativeToVault(paths.absoluteVaultRoot, paths.inboxConfigPath))
 }
@@ -98,7 +112,10 @@ export async function readConfig(
   paths: InboxPaths,
 ): Promise<InboxRuntimeConfig> {
   return readJsonWithSchema(
-    paths.inboxConfigPath,
+    {
+      currentPath: paths.inboxConfigPath,
+      legacyPath: paths.inboxConfigLegacyPath,
+    },
     inboxRuntimeConfigSchema,
     'INBOX_CONFIG_INVALID',
     'Inbox runtime config is invalid.',
@@ -109,6 +126,10 @@ export async function writeConfig(
   paths: InboxPaths,
   config: InboxRuntimeConfig,
 ): Promise<void> {
+  await promoteLegacyLocalStateDirectory({
+    currentPath: paths.inboxRuntimeRoot,
+    legacyPath: paths.inboxRuntimeLegacyRoot,
+  })
   await writeJsonFile(paths.inboxConfigPath, inboxRuntimeConfigSchema.parse(config))
 }
 

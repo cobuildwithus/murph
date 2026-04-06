@@ -2,35 +2,21 @@
 
 Source-agnostic inbox ingestion for Murph.
 
-This package keeps canonical inbox evidence in the vault and uses a local SQLite
-runtime database for source cursors, a durable local capture mutation cursor, transient dedupe caches, capture-local search
-tables, and attachment job state.
+This package keeps canonical inbox evidence in the vault and uses local runtime state for source cursors, a durable local capture mutation cursor, transient dedupe caches, capture-local search tables, and attachment job state.
 
-Stateless provider ingress semantics that need to be shared with hosted callers
-now live in `@murphai/messaging-ingress`. `@murphai/inboxd` consumes that package
-for provider webhook parsing/minimization and keeps ownership of polling
-drivers, runtime state, and capture persistence.
+Stateless provider ingress semantics that need to be shared with hosted callers now live in `@murphai/messaging-ingress`. `@murphai/inboxd` consumes that package for provider webhook parsing/minimization and keeps ownership of polling drivers, runtime state, and capture persistence.
 
-Consumers that only need shared Linq or Telegram webhook parsing, verification,
-targets, summaries, or sparse minimization should depend on
-`@murphai/messaging-ingress` directly instead of `@murphai/inboxd` convenience
-subpaths.
+Consumers that only need shared Linq or Telegram webhook parsing, verification, targets, summaries, or sparse minimization should depend on `@murphai/messaging-ingress` directly instead of `@murphai/inboxd` convenience subpaths.
 
-Consumers that need inbox-owned normalization without the full inboxd barrel
-should use the focused connector exports such as
-`@murphai/inboxd/connectors/linq/normalize` and
-`@murphai/inboxd/connectors/telegram/normalize`.
+Consumers that need inbox-owned normalization without the full inboxd barrel should use the focused connector exports such as `@murphai/inboxd/connectors/linq/normalize` and `@murphai/inboxd/connectors/telegram/normalize`.
 
 ## Runtime expectations
 
 - Run on Node.js `>=22.16.0`.
-- `@murphai/inboxd` resolves runtime paths and opens its SQLite runtime
-  database through `@murphai/runtime-state`, storing machine-local state
-  under `<vault>/.runtime/inboxd.sqlite`.
-- Query-owned lexical search state lives separately under
-  `<vault>/.runtime/search.sqlite`.
-- The package writes runtime state next to the vault and expects normal local
-  filesystem read/write access there.
+- `@murphai/inboxd` resolves runtime paths and opens its SQLite projection database through `@murphai/runtime-state`, storing rebuildable capture/search state under `<vault>/.runtime/projections/inboxd.sqlite`.
+- Inbox daemon/config state lives separately under `<vault>/.runtime/operations/inbox/*.json`.
+- Query-owned lexical search state lives separately under `<vault>/.runtime/projections/search.sqlite`.
+- The package writes runtime state next to the vault and expects normal local filesystem read/write access there.
 
 ## Core model
 
@@ -38,9 +24,8 @@ should use the focused connector exports such as
 - raw source evidence is persisted under `raw/inbox/<source>/...`
 - append-only `ledger/inbox-captures/YYYY/YYYY-MM.jsonl` records the authoritative structured inbox-capture trail
 - append-only vault events and audits remain compatibility and audit projections layered on top of that canonical capture log
-- inbox SQLite runtime state lives under `<vault>/.runtime/inboxd.sqlite`
-- any idempotent promotion from inbox captures into canonical records must be
-  derivable from canonical vault evidence rather than local `.runtime` state alone
+- inbox SQLite projection state lives under `<vault>/.runtime/projections/inboxd.sqlite`
+- any idempotent promotion from inbox captures into canonical records must be derivable from canonical vault evidence rather than local `.runtime` state alone
 
 ## Current scope
 
@@ -61,46 +46,8 @@ The inbox runtime exposes attachment-job primitives that stay safely outside can
 - `failAttachmentParseJob(...)`
 - `requeueAttachmentParseJobs(...)`
 
-These methods mutate only inbox-local runtime state such as `.runtime/inboxd.sqlite` and attachment parse metadata. They do not write canonical health records directly.
+These methods mutate only inbox-local projection state such as `.runtime/projections/inboxd.sqlite` and attachment parse metadata. They do not write canonical health records directly.
 
 When combined with `@murphai/parsers`, operators can drive those queues through `vault-cli inbox setup|doctor|parse|requeue` without mixing parser state into canonical health records.
 
-`@murphai/inboxd` also owns the optional inbox-plus-parser composition helpers
-`createParsedInboxPipeline(...)` and `runInboxDaemonWithParsers(...)`, so the
-parser package stays focused on parser contracts, registry/toolchain discovery,
-and parse execution rather than on inbox runtime orchestration.
-
-## Telegram adapter contract
-
-The Telegram connector is local-first and poll-first by default.
-
-- Use `createTelegramBotApiPollDriver(...)` when you want the package to construct a grammY-backed poll driver from a bot token.
-- Use `createTelegramApiPollDriver({ api })` when you already have a grammY `Api` instance.
-- The connector stores source-native cursors such as Telegram `update_id` checkpoints instead of forcing every source through the same `occurredAt`/`externalId` cursor shape.
-- Downloaded media can be persisted directly from in-memory bytes, so remote transports do not need temp files just to enter the vault.
-- Telegram backfill drains pending updates page-by-page so source-native cursors only advance after captures have been normalized and persisted locally.
-- Local Bot API servers that return absolute file paths from `getFile` are supported during attachment hydration.
-- The CLI runtime expects a bot token in `TELEGRAM_BOT_TOKEN` or `TELEGRAM_BOT_TOKEN` when it instantiates the grammY-backed Telegram poll driver.
-
-## iMessage adapter contract
-
-The iMessage connector is macOS-only. `@murphai/inboxd` now depends directly
-on `@photon-ai/imessage-kit`, and `loadImessageKitDriver()` adapts its
-`IMessageSDK` surface onto the inboxd polling driver contract.
-
-- Any workspace that runs `@murphai/inboxd` or `vault-cli` must install the
-  package dependency tree, including the native SQLite dependency chain that
-  `@photon-ai/imessage-kit` expects at runtime.
-- `vault-cli inbox doctor` still separates adapter wiring from the live probe:
-  `driver-import` confirms the driver boundary is available, while `probe`
-  exercises the actual SDK/database access.
-- Other inbox connectors remain source-agnostic, but the package install now
-  always includes the iMessage adapter.
-
-## Operator notes
-
-- Use `vault-cli inbox doctor --source-id imessage:self` before `backfill` or
-  `run` to confirm macOS access, Messages database readability, and adapter
-  importability.
-- A `probe` failure usually means macOS denied Messages database access or the
-  underlying SQLite/native dependency stack failed to initialize cleanly.
+`@murphai/inboxd` also owns the optional inbox-plus-parser composition helpers `createParsedInboxPipeline(...)` and `runInboxDaemonWithParsers(...)`, so the parser package stays focused on parser contracts, registry/toolchain discovery, and parse execution rather than on inbox runtime orchestration.

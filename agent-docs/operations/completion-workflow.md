@@ -8,7 +8,7 @@ Vault-only data tasks under `vault/**` skip this workflow unless the user explic
 ## Sequence
 
 1. Complete functional implementation first.
-2. Run a scope/shape check before polish: confirm the diff is still proportional to the task, new abstractions are immediately justified, and any architecture/API/trust-boundary change is documented or split into an explicit plan.
+2. Run a scope/shape check before polish: confirm the diff is still proportional to the task, new abstractions are immediately justified, any new persisted state is explicitly classified and versioned, and any architecture/API/trust-boundary change is documented or split into an explicit plan.
 3. If the change sprawled, duplicated existing patterns, or introduced speculative structure, cut it back before continuing.
 4. Classify the change path before audits:
    - docs/process-only and vault-only data tasks skip audit subagents unless the user explicitly asks for them

@@ -1,11 +1,21 @@
+import {
+  createVersionedJsonStateEnvelope,
+  hasLocalStatePath,
+  parseVersionedJsonStateEnvelope,
+  promoteLegacyLocalStateDirectory,
+  readLocalStateTextFileWithFallback,
+} from '@murphai/runtime-state/node'
 import { inboxDaemonStateSchema, type InboxDaemonState } from '../inbox-cli-contracts.js'
 import type { InboxPaths } from '../inbox-app/types.js'
+import { VaultCliError } from '../vault-cli-errors.js'
 import {
-  fileExists,
-  readJsonWithSchema,
+  errorMessage,
   relativeToVault,
   writeJsonFile,
 } from './shared.js'
+
+const INBOX_DAEMON_STATE_SCHEMA = 'murph.inbox-daemon-state.v1'
+const INBOX_DAEMON_STATE_SCHEMA_VERSION = 1
 
 export async function normalizeDaemonState(
   paths: InboxPaths,
@@ -15,16 +25,14 @@ export async function normalizeDaemonState(
     killProcess?: (pid: number, signal?: NodeJS.Signals | number) => void
   },
 ): Promise<InboxDaemonState> {
-  if (!(await fileExists(paths.inboxStatePath))) {
+  if (!(await hasLocalStatePath({
+    currentPath: paths.inboxStatePath,
+    legacyPath: paths.inboxStateLegacyPath,
+  }))) {
     return idleState(paths)
   }
 
-  const state = await readJsonWithSchema(
-    paths.inboxStatePath,
-    inboxDaemonStateSchema,
-    'INBOX_STATE_INVALID',
-    'Inbox daemon state is invalid.',
-  )
+  const state = await readDaemonState(paths)
 
   if (!state.running || !state.pid) {
     return state
@@ -80,7 +88,18 @@ export async function writeDaemonState(
   paths: InboxPaths,
   state: InboxDaemonState,
 ): Promise<void> {
-  await writeJsonFile(paths.inboxStatePath, inboxDaemonStateSchema.parse(state))
+  await promoteLegacyLocalStateDirectory({
+    currentPath: paths.inboxRuntimeRoot,
+    legacyPath: paths.inboxRuntimeLegacyRoot,
+  })
+  await writeJsonFile(
+    paths.inboxStatePath,
+    createVersionedJsonStateEnvelope({
+      schema: INBOX_DAEMON_STATE_SCHEMA,
+      schemaVersion: INBOX_DAEMON_STATE_SCHEMA_VERSION,
+      value: inboxDaemonStateSchema.parse(state),
+    }),
+  )
 }
 
 export function createProcessSignalBridge(): {
@@ -102,6 +121,33 @@ export function createProcessSignalBridge(): {
   return {
     cleanup,
     signal: controller.signal,
+  }
+}
+
+async function readDaemonState(paths: InboxPaths): Promise<InboxDaemonState> {
+  try {
+    const raw = await readLocalStateTextFileWithFallback({
+      currentPath: paths.inboxStatePath,
+      legacyPath: paths.inboxStateLegacyPath,
+    })
+
+    return parseVersionedJsonStateEnvelope(JSON.parse(raw.text) as unknown, {
+      label: 'Inbox daemon state',
+      legacyParseValue(value) {
+        return inboxDaemonStateSchema.parse(value)
+      },
+      parseValue(value) {
+        return inboxDaemonStateSchema.parse(value)
+      },
+      schema: INBOX_DAEMON_STATE_SCHEMA,
+      schemaVersion: INBOX_DAEMON_STATE_SCHEMA_VERSION,
+    })
+  } catch (error) {
+    throw new VaultCliError(
+      'INBOX_STATE_INVALID',
+      'Inbox daemon state is invalid.',
+      { error: errorMessage(error) },
+    )
   }
 }
 

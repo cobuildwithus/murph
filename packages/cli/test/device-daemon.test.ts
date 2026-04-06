@@ -112,7 +112,7 @@ test.sequential(
 
       const launcherState = JSON.parse(
         await readFile(
-          path.join(vaultRoot, '.runtime/device-syncd/launcher.json'),
+          path.join(vaultRoot, '.runtime/operations/device-sync/launcher.json'),
           'utf8',
         ),
       ) as {
@@ -121,17 +121,17 @@ test.sequential(
         controlToken?: string
       }
       const persistedControlToken = await readFile(
-        path.join(vaultRoot, '.runtime/device-syncd/control-token'),
+        path.join(vaultRoot, '.runtime/operations/device-sync/control-token'),
         'utf8',
       )
       const launcherDirectoryStats = await stat(
-        path.join(vaultRoot, '.runtime/device-syncd'),
+        path.join(vaultRoot, '.runtime/operations/device-sync'),
       )
       const launcherStateStats = await stat(
-        path.join(vaultRoot, '.runtime/device-syncd/launcher.json'),
+        path.join(vaultRoot, '.runtime/operations/device-sync/launcher.json'),
       )
       const controlTokenStats = await stat(
-        path.join(vaultRoot, '.runtime/device-syncd/control-token'),
+        path.join(vaultRoot, '.runtime/operations/device-sync/control-token'),
       )
 
       assert.equal(launcherState.pid, 4242)
@@ -436,7 +436,7 @@ test.sequential(
         status.message,
         'Stale device-sync daemon state found; recorded PID is no longer running.',
       )
-      assert.equal(status.statePath, '.runtime/device-syncd/launcher.json')
+      assert.equal(status.statePath, '.runtime/operations/device-sync/launcher.json')
       assert.deepEqual(healthCheckAuthorizations, ['Bearer control-token-for-tests'])
       assert.deepEqual(healthCheckUrls, ['http://localhost:8788/healthz'])
     } finally {
@@ -507,13 +507,13 @@ test.sequential(
       assert.equal(result.running, false)
       await assert.rejects(() =>
         readFile(
-          path.join(vaultRoot, '.runtime/device-syncd/launcher.json'),
+          path.join(vaultRoot, '.runtime/operations/device-sync/launcher.json'),
           'utf8',
         ),
       )
       await assert.rejects(() =>
         readFile(
-          path.join(vaultRoot, '.runtime/device-syncd/control-token'),
+          path.join(vaultRoot, '.runtime/operations/device-sync/control-token'),
           'utf8',
         ),
       )

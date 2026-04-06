@@ -1,5 +1,9 @@
 import { readFile } from 'node:fs/promises'
 import {
+  createVersionedJsonStateEnvelope,
+  parseVersionedJsonStateEnvelope,
+} from '@murphai/runtime-state/node'
+import {
   assistantStatusResultSchema,
   type AssistantFailoverState,
   type AssistantStatusResult,
@@ -29,6 +33,9 @@ import {
   isMissingFileError,
   writeJsonFileAtomic,
 } from './shared.js'
+
+const ASSISTANT_STATUS_SNAPSHOT_SCHEMA = 'murph.assistant-status-snapshot.v1'
+const ASSISTANT_STATUS_SNAPSHOT_SCHEMA_VERSION = 1
 
 export async function getAssistantStatus(
   input:
@@ -114,7 +121,14 @@ export async function refreshAssistantStatusSnapshot(
 ): Promise<AssistantStatusResult> {
   const status = await getAssistantStatusLocal(vault)
   await withAssistantRuntimeWriteLock(vault, async (paths) => {
-    await writeJsonFileAtomic(paths.statusPath, status)
+    await writeJsonFileAtomic(
+      paths.statusPath,
+      createVersionedJsonStateEnvelope({
+        schema: ASSISTANT_STATUS_SNAPSHOT_SCHEMA,
+        schemaVersion: ASSISTANT_STATUS_SNAPSHOT_SCHEMA_VERSION,
+        value: status,
+      }),
+    )
     await appendAssistantRuntimeEventAtPaths(paths, {
       at: status.generatedAt,
       component: 'status',
@@ -146,7 +160,17 @@ export async function readAssistantStatusSnapshot(
 
   try {
     const raw = await readFile(paths.statusPath, 'utf8')
-    return assistantStatusResultSchema.parse(JSON.parse(raw) as unknown)
+    return parseVersionedJsonStateEnvelope(JSON.parse(raw) as unknown, {
+      label: 'Assistant status snapshot',
+      legacyParseValue(value) {
+        return assistantStatusResultSchema.parse(value)
+      },
+      parseValue(value) {
+        return assistantStatusResultSchema.parse(value)
+      },
+      schema: ASSISTANT_STATUS_SNAPSHOT_SCHEMA,
+      schemaVersion: ASSISTANT_STATUS_SNAPSHOT_SCHEMA_VERSION,
+    })
   } catch (error) {
     if (isMissingFileError(error)) {
       return null

@@ -826,6 +826,7 @@ test("openInboxRuntime rejects runtime rows missing canonical attachment ids", a
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const databasePath = resolveRuntimePaths(vaultRoot).inboxDbPath;
+  await fs.mkdir(path.dirname(databasePath), { recursive: true });
   const database = openDatabaseSync(databasePath);
 
   try {

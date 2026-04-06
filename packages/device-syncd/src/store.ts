@@ -1,6 +1,13 @@
 import type { DatabaseSync } from "node:sqlite";
 
-import { openSqliteRuntimeDatabase, withImmediateTransaction } from "@murphai/runtime-state/node";
+import {
+  DEVICE_SYNC_DB_LEGACY_RELATIVE_PATH,
+  DEVICE_SYNC_DB_RELATIVE_PATH,
+  applySqliteRuntimeMigrations,
+  openSqliteRuntimeDatabase,
+  promoteLegacyLocalStateFileSync,
+  withImmediateTransaction,
+} from "@murphai/runtime-state/node";
 
 import {
   generatePrefixedId,
@@ -141,6 +148,9 @@ interface StoredWebhookTraceRow {
   processing_expires_at: string | null;
 }
 
+const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 1;
+const SQLITE_WAL_COMPANION_SUFFIXES = ["-shm", "-wal"] as const;
+
 function mapAccountRow(row: StoredAccountRow | undefined): StoredDeviceSyncAccount | null {
   if (!row) {
     return null;
@@ -248,14 +258,9 @@ function resolveHydratedHostedAccountTokens(input: {
   };
 }
 
-export class SqliteDeviceSyncStore {
-  readonly databasePath: string;
-  readonly database: DatabaseSync;
 
-  constructor(databasePath: string) {
-    this.databasePath = databasePath;
-    this.database = openSqliteRuntimeDatabase(databasePath);
-    this.database.exec(`
+function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
+  database.exec(`
       create table if not exists oauth_state (
         state text primary key,
         provider text not null,
@@ -344,6 +349,41 @@ export class SqliteDeviceSyncStore {
       create index if not exists webhook_trace_received_idx
       on webhook_trace (received_at desc);
     `);
+}
+
+function resolveLegacyDeviceSyncDatabasePath(databasePath: string): string | null {
+  const normalizedDatabasePath = databasePath.replace(/\\/gu, "/");
+  const canonicalSuffix = `/${DEVICE_SYNC_DB_RELATIVE_PATH}`;
+
+  if (!normalizedDatabasePath.endsWith(canonicalSuffix)) {
+    return null;
+  }
+
+  return `${databasePath.slice(0, databasePath.length - DEVICE_SYNC_DB_RELATIVE_PATH.length)}${DEVICE_SYNC_DB_LEGACY_RELATIVE_PATH}`;
+}
+
+export class SqliteDeviceSyncStore {
+  readonly databasePath: string;
+  readonly database: DatabaseSync;
+
+  constructor(databasePath: string) {
+    this.databasePath = databasePath;
+    promoteLegacyLocalStateFileSync({
+      currentPath: databasePath,
+      legacyPath: resolveLegacyDeviceSyncDatabasePath(databasePath),
+      companionSuffixes: SQLITE_WAL_COMPANION_SUFFIXES,
+    });
+    this.database = openSqliteRuntimeDatabase(databasePath);
+    applySqliteRuntimeMigrations(this.database, {
+      migrations: [{
+        version: DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION,
+        migrate(candidateDatabase) {
+          ensureDeviceSyncStoreSchema(candidateDatabase);
+        },
+      }],
+      schemaVersion: DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION,
+      storeName: "device sync runtime",
+    });
   }
 
   close(): void {
