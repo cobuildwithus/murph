@@ -12,8 +12,8 @@ importers:
         specifier: ^0.1.15
         version: 0.1.15
       '@cobuild/review-gpt':
-        specifier: ^0.5.41
-        version: 0.5.41
+        specifier: ^0.5.43
+        version: 0.5.43
       '@types/node':
         specifier: ^25.5.0
         version: 25.5.0
@@ -829,8 +829,8 @@ packages:
     resolution: {integrity: sha512-CjzP5OHu6RhOOjmPl/1djZNVEbjttt62rBSzvuPK7u9NrZ37F2lkHT+QmZ4Lb+ZDmMhPTqlwdyqnzwD0Gkhm1Q==}
     hasBin: true
 
-  '@cobuild/review-gpt@0.5.41':
-    resolution: {integrity: sha512-vTNVTFUsquKGwEj2pGmuDcdP8G/3Z5JF7ZHR++JscgenR+A4mRmrg9RtCr4IuToThlOaBcQwjruyTXN+FH+NFA==}
+  '@cobuild/review-gpt@0.5.43':
+    resolution: {integrity: sha512-MgeWw9ViQn53G0Bk+/3ZhHk8DyKM8VrrhM/tPND/yxZ34cvK8/bbZhR4ABSZPAu3RWU+048zVSSLkC6BBwNzLg==}
     hasBin: true
 
   '@cobuild/wire@0.3.6':
@@ -8221,7 +8221,7 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.15': {}
 
-  '@cobuild/review-gpt@0.5.41':
+  '@cobuild/review-gpt@0.5.43':
     dependencies:
       '@cobuild/repo-tools': 0.1.15
       incur: 0.3.13(openapi-types@12.1.3)
