@@ -565,9 +565,11 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionStateUpdate(
     ...(record.metadata === undefined
       ? {}
       : {
-          metadata: requireObject(
-            record.metadata,
-            `Hosted device-sync runtime apply request updates[${index}].connection.metadata`,
+          metadata: sanitizeHostedExecutionDeviceSyncMetadata(
+            requireObject(
+              record.metadata,
+              `Hosted device-sync runtime apply request updates[${index}].connection.metadata`,
+            ),
           ),
         }),
     ...(record.scopes === undefined
@@ -694,19 +696,21 @@ function parseHostedExecutionDeviceSyncRuntimeConnection(
   }
 
   return {
-    accessTokenExpiresAt: readNullableString(record.accessTokenExpiresAt, `${label}.accessTokenExpiresAt`),
-    connectedAt: requireString(record.connectedAt, `${label}.connectedAt`),
-    createdAt: requireString(record.createdAt, `${label}.createdAt`),
+    accessTokenExpiresAt: readNullableIsoTimestamp(record.accessTokenExpiresAt, `${label}.accessTokenExpiresAt`),
+    connectedAt: requireIsoTimestamp(record.connectedAt, `${label}.connectedAt`),
+    createdAt: requireIsoTimestamp(record.createdAt, `${label}.createdAt`),
     displayName: readNullableString(record.displayName, `${label}.displayName`),
     externalAccountId: requireString(record.externalAccountId, `${label}.externalAccountId`),
     id: requireString(record.id, `${label}.id`),
-    metadata: requireObject(record.metadata, `${label}.metadata`),
+    metadata: sanitizeHostedExecutionDeviceSyncMetadata(
+      requireObject(record.metadata, `${label}.metadata`),
+    ),
     provider: requireString(record.provider, `${label}.provider`),
     scopes: requireStringArray(record.scopes, `${label}.scopes`),
     status,
     ...(record.updatedAt === undefined
       ? {}
-      : { updatedAt: readNullableString(record.updatedAt, `${label}.updatedAt`) ?? undefined }),
+      : { updatedAt: readNullableIsoTimestamp(record.updatedAt, `${label}.updatedAt`) ?? undefined }),
   };
 }
 
@@ -719,11 +723,11 @@ function parseHostedExecutionDeviceSyncRuntimeLocalState(
   return {
     lastErrorCode: readNullableString(record.lastErrorCode, `${label}.lastErrorCode`),
     lastErrorMessage: readNullableString(record.lastErrorMessage, `${label}.lastErrorMessage`),
-    lastSyncCompletedAt: readNullableString(record.lastSyncCompletedAt, `${label}.lastSyncCompletedAt`),
-    lastSyncErrorAt: readNullableString(record.lastSyncErrorAt, `${label}.lastSyncErrorAt`),
-    lastSyncStartedAt: readNullableString(record.lastSyncStartedAt, `${label}.lastSyncStartedAt`),
-    lastWebhookAt: readNullableString(record.lastWebhookAt, `${label}.lastWebhookAt`),
-    nextReconcileAt: readNullableString(record.nextReconcileAt, `${label}.nextReconcileAt`),
+    lastSyncCompletedAt: readNullableIsoTimestamp(record.lastSyncCompletedAt, `${label}.lastSyncCompletedAt`),
+    lastSyncErrorAt: readNullableIsoTimestamp(record.lastSyncErrorAt, `${label}.lastSyncErrorAt`),
+    lastSyncStartedAt: readNullableIsoTimestamp(record.lastSyncStartedAt, `${label}.lastSyncStartedAt`),
+    lastWebhookAt: readNullableIsoTimestamp(record.lastWebhookAt, `${label}.lastWebhookAt`),
+    nextReconcileAt: readNullableIsoTimestamp(record.nextReconcileAt, `${label}.nextReconcileAt`),
   };
 }
 
@@ -739,7 +743,7 @@ function parseHostedExecutionDeviceSyncRuntimeTokenBundle(
 
   return {
     accessToken: requireString(record.accessToken, `${label}.accessToken`),
-    accessTokenExpiresAt: readNullableString(record.accessTokenExpiresAt, `${label}.accessTokenExpiresAt`),
+    accessTokenExpiresAt: readNullableIsoTimestamp(record.accessTokenExpiresAt, `${label}.accessTokenExpiresAt`),
     keyVersion: requireString(record.keyVersion, `${label}.keyVersion`),
     refreshToken: readNullableString(record.refreshToken, `${label}.refreshToken`),
     tokenVersion: requirePositiveInteger(record.tokenVersion, `${label}.tokenVersion`),
@@ -1159,6 +1163,70 @@ function requireObject(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+const HOSTED_EXECUTION_DEVICE_SYNC_METADATA_MAX_ENTRIES = 16;
+const HOSTED_EXECUTION_DEVICE_SYNC_METADATA_MAX_KEY_LENGTH = 64;
+const HOSTED_EXECUTION_DEVICE_SYNC_METADATA_MAX_STRING_LENGTH = 256;
+const HOSTED_EXECUTION_DEVICE_SYNC_METADATA_BLOCKED_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+const ISO_8601_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
+
+type HostedExecutionDeviceSyncMetadataScalar = string | number | boolean | null;
+
+function sanitizeHostedExecutionDeviceSyncMetadataValue(
+  value: unknown,
+): HostedExecutionDeviceSyncMetadataScalar | undefined {
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value === "string") {
+    return value.length <= HOSTED_EXECUTION_DEVICE_SYNC_METADATA_MAX_STRING_LENGTH
+      ? value
+      : undefined;
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : undefined;
+  }
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  return undefined;
+}
+
+function sanitizeHostedExecutionDeviceSyncMetadata(
+  value: Record<string, unknown>,
+): Record<string, HostedExecutionDeviceSyncMetadataScalar> {
+  const sanitized: Record<string, HostedExecutionDeviceSyncMetadataScalar> = {};
+
+  for (const [rawKey, rawValue] of Object.entries(value)) {
+    if (Object.keys(sanitized).length >= HOSTED_EXECUTION_DEVICE_SYNC_METADATA_MAX_ENTRIES) {
+      break;
+    }
+
+    const key = rawKey.trim();
+
+    if (
+      !key
+      || key.length > HOSTED_EXECUTION_DEVICE_SYNC_METADATA_MAX_KEY_LENGTH
+      || HOSTED_EXECUTION_DEVICE_SYNC_METADATA_BLOCKED_KEYS.has(key)
+    ) {
+      continue;
+    }
+
+    const normalizedValue = sanitizeHostedExecutionDeviceSyncMetadataValue(rawValue);
+
+    if (normalizedValue === undefined) {
+      continue;
+    }
+
+    sanitized[key] = normalizedValue;
+  }
+
+  return sanitized;
+}
+
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
     throw new TypeError(`${label} must be a non-empty string.`);
@@ -1259,6 +1327,11 @@ function readOptionalStringArray(value: unknown, label: string): string[] | unde
 
 function requireIsoTimestamp(value: unknown, label: string): string {
   const candidate = requireString(value, label);
+
+  if (!ISO_8601_TIMESTAMP_PATTERN.test(candidate)) {
+    throw new TypeError(`${label} must be an ISO-8601 timestamp.`);
+  }
+
   const parsed = Date.parse(candidate);
 
   if (!Number.isFinite(parsed)) {

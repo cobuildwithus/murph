@@ -2219,6 +2219,16 @@ describe("@murphai/hosted-execution", () => {
         {
           connection: {
             displayName: "Oura",
+            metadata: {
+              allowed: "ok",
+              blank: "  ",
+              count: 4,
+              nested: {
+                nope: true,
+              },
+              prototype: "blocked",
+              truthy: true,
+            },
             status: "active",
           },
           connectionId: "dsc_123",
@@ -2235,11 +2245,186 @@ describe("@murphai/hosted-execution", () => {
         {
           connection: {
             displayName: "Oura",
+            metadata: {
+              allowed: "ok",
+              blank: "  ",
+              count: 4,
+              truthy: true,
+            },
             status: "active",
           },
           connectionId: "dsc_123",
           localState: {
             lastErrorCode: "oauth_expired",
+          },
+        },
+      ],
+      userId: "member/123",
+    });
+  });
+
+  it("requires ISO timestamps and sanitizes metadata in device-sync runtime snapshots", () => {
+    expect(() => parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+      updates: [
+        {
+          connectionId: "dsc_123",
+          seed: {
+            connection: {
+              accessTokenExpiresAt: "not-an-iso-timestamp",
+              connectedAt: "2026-04-05T10:00:00.000Z",
+              createdAt: "2026-04-05T10:00:00.000Z",
+              displayName: "Oura",
+              externalAccountId: "acct_123",
+              id: "dsc_123",
+              metadata: {},
+              provider: "oura",
+              scopes: ["heartrate"],
+              status: "active",
+            },
+            localState: {
+              lastWebhookAt: null,
+            },
+            tokenBundle: null,
+          },
+        },
+      ],
+      userId: "member/123",
+    })).toThrow("Hosted device-sync runtime apply request updates[0].seed.connection.accessTokenExpiresAt must be an ISO-8601 timestamp.");
+
+    expect(() => parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+      updates: [
+        {
+          connectionId: "dsc_123",
+          seed: {
+            connection: {
+              accessTokenExpiresAt: null,
+              connectedAt: "2026-04-05",
+              createdAt: "2026-04-05T10:00:00.000Z",
+              displayName: "Oura",
+              externalAccountId: "acct_123",
+              id: "dsc_123",
+              metadata: {},
+              provider: "oura",
+              scopes: ["heartrate"],
+              status: "active",
+            },
+            localState: {
+              lastWebhookAt: null,
+            },
+            tokenBundle: null,
+          },
+        },
+      ],
+      userId: "member/123",
+    })).toThrow("Hosted device-sync runtime apply request updates[0].seed.connection.connectedAt must be an ISO-8601 timestamp.");
+
+    expect(() => parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+      updates: [
+        {
+          connectionId: "dsc_123",
+          seed: {
+            connection: {
+              accessTokenExpiresAt: null,
+              connectedAt: "2026-04-05T10:00:00",
+              createdAt: "2026-04-05T10:00:00.000Z",
+              displayName: "Oura",
+              externalAccountId: "acct_123",
+              id: "dsc_123",
+              metadata: {},
+              provider: "oura",
+              scopes: ["heartrate"],
+              status: "active",
+            },
+            localState: {
+              lastWebhookAt: null,
+            },
+            tokenBundle: null,
+          },
+        },
+      ],
+      userId: "member/123",
+    })).toThrow("Hosted device-sync runtime apply request updates[0].seed.connection.connectedAt must be an ISO-8601 timestamp.");
+
+    expect(parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+      updates: [
+        {
+          connectionId: "dsc_123",
+          seed: {
+            connection: {
+              accessTokenExpiresAt: "2026-04-05T11:00:00.000Z",
+              connectedAt: "2026-04-05T10:00:00.000Z",
+              createdAt: "2026-04-05T10:00:00.000Z",
+              displayName: "Oura",
+              externalAccountId: "acct_123",
+              id: "dsc_123",
+              metadata: {
+                allowed: "ok",
+                booleanFlag: true,
+                constructor: "blocked",
+                nested: {
+                  nope: true,
+                },
+                numberFlag: 9,
+                tooLong: "x".repeat(257),
+              },
+              provider: "oura",
+              scopes: ["heartrate"],
+              status: "active",
+              updatedAt: "2026-04-05T10:05:00.000Z",
+            },
+            localState: {
+              lastWebhookAt: "2026-04-05T10:06:00.000Z",
+              nextReconcileAt: null,
+            },
+            tokenBundle: {
+              accessToken: "access-token",
+              accessTokenExpiresAt: "2026-04-05T11:00:00.000Z",
+              keyVersion: "v1",
+              refreshToken: "refresh-token",
+              tokenVersion: 2,
+            },
+          },
+        },
+      ],
+      userId: "member/123",
+    })).toEqual({
+      updates: [
+        {
+          connectionId: "dsc_123",
+          seed: {
+            connection: {
+              accessTokenExpiresAt: "2026-04-05T11:00:00.000Z",
+              connectedAt: "2026-04-05T10:00:00.000Z",
+              createdAt: "2026-04-05T10:00:00.000Z",
+              displayName: "Oura",
+              externalAccountId: "acct_123",
+              id: "dsc_123",
+              metadata: {
+                allowed: "ok",
+                booleanFlag: true,
+                numberFlag: 9,
+              },
+              provider: "oura",
+              scopes: ["heartrate"],
+              status: "active",
+              updatedAt: "2026-04-05T10:05:00.000Z",
+            },
+            localState: {
+              lastErrorCode: null,
+              lastErrorMessage: null,
+              lastSyncCompletedAt: null,
+              lastSyncErrorAt: null,
+              lastSyncStartedAt: null,
+              lastWebhookAt: "2026-04-05T10:06:00.000Z",
+              nextReconcileAt: null,
+            },
+            tokenBundle: {
+              accessToken: "access-token",
+              accessTokenExpiresAt: "2026-04-05T11:00:00.000Z",
+              keyVersion: "v1",
+              refreshToken: "refresh-token",
+              tokenVersion: 2,
+            },
           },
         },
       ],
