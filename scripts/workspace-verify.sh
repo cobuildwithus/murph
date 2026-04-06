@@ -89,7 +89,6 @@ normalize_non_negative_integer() {
   printf '%s\n' "$fallback"
 }
 
-readonly repo_vitest_max_workers="${MURPH_VITEST_MAX_WORKERS:-$([[ -n "${CI:-}" ]] && echo 50% || echo 50%)}"
 readonly app_verify_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly app_verify_parallel="${MURPH_APP_VERIFY_PARALLEL:-$app_verify_parallel_default}"
 readonly test_lane_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
@@ -472,7 +471,10 @@ run_fixture_smoke_verification() {
 }
 
 run_repo_vitest() {
-  MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run --config "vitest.config.ts" --maxWorkers "$repo_vitest_max_workers" "$@"
+  # Keep worker selection centralized in the Vitest configs so local runs use
+  # the faster 75% default while CI stays at 50%, with the same env override
+  # path (`MURPH_VITEST_MAX_WORKERS`) for both lanes.
+  MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run --config "vitest.config.ts" "$@"
 }
 
 run_typecheck() {
@@ -568,7 +570,7 @@ run_verify_cli() {
   run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts
   run_timed_step \
     "CLI workspace Vitest" \
-    env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" "${cli_verify_test_files[@]}" --no-coverage --maxWorkers "$repo_vitest_max_workers"
+    env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" "${cli_verify_test_files[@]}" --no-coverage
 }
 
 main() {
