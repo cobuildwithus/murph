@@ -21,7 +21,6 @@ import {
   type HostedBundleArtifactSnapshotInput,
 } from "./hosted-bundle-node.ts";
 
-const WORKSPACE_ASSISTANT_ROOT = "assistant-state";
 const WORKSPACE_OPERATOR_HOME_ROOT = "operator-home";
 const RAW_ARTIFACT_EXTERNALIZE_THRESHOLD_BYTES = 256 * 1024;
 
@@ -72,11 +71,6 @@ export async function snapshotHostedExecutionContext(input: {
           return shouldIncludeWorkspaceSnapshotVaultRelativePath(relativePath);
         },
       },
-      {
-        optional: true,
-        root: assistantStateRoot,
-        rootKey: WORKSPACE_ASSISTANT_ROOT,
-      },
       ...(input.operatorHomeRoot
         ? [
             {
@@ -126,7 +120,6 @@ export async function restoreHostedExecutionContext(input: {
       bytes: input.bundle,
       expectedKind: "vault",
       roots: {
-        [WORKSPACE_ASSISTANT_ROOT]: assistantStateRoot,
         [WORKSPACE_OPERATOR_HOME_ROOT]: operatorHomeRoot,
         vault: vaultRoot,
       },
@@ -165,7 +158,6 @@ export async function materializeHostedExecutionArtifacts(input: {
     bytes: input.bundle,
     expectedKind: "vault",
     roots: {
-      [WORKSPACE_ASSISTANT_ROOT]: assistantStateRoot,
       [WORKSPACE_OPERATOR_HOME_ROOT]: operatorHomeRoot,
       vault: vaultRoot,
     },

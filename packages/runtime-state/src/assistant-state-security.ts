@@ -1,7 +1,9 @@
 import { appendFile, chmod, lstat, mkdir, readdir } from 'node:fs/promises'
 import path from 'node:path'
 
-import { ASSISTANT_STATE_DIRECTORY_NAME } from './shared.ts'
+import {
+  ASSISTANT_RUNTIME_DIRECTORY_NAME,
+} from './shared.ts'
 
 export const ASSISTANT_STATE_DIRECTORY_MODE = 0o700
 export const ASSISTANT_STATE_FILE_MODE = 0o600
@@ -26,7 +28,7 @@ export interface AssistantStatePermissionAudit {
 export function isAssistantStatePath(targetPath: string): boolean {
   const absolutePath = path.resolve(targetPath)
   const segments = absolutePath.split(path.sep).filter((segment) => segment.length > 0)
-  return segments.includes(ASSISTANT_STATE_DIRECTORY_NAME)
+  return hasAssistantRuntimeRootSegments(segments)
 }
 
 export async function ensureAssistantStateDirectory(directoryPath: string): Promise<void> {
@@ -182,16 +184,35 @@ async function applyAssistantStateDirectoryModes(directoryPath: string): Promise
     .filter((segment) => segment.length > 0)
 
   let currentPath = root
-  let insideAssistantState = false
+  const assistantRuntimeRootIndex = findAssistantRuntimeRootIndex(relativeSegments)
+  if (assistantRuntimeRootIndex < 0) {
+    return
+  }
 
-  for (const segment of relativeSegments) {
+  for (let index = 0; index < relativeSegments.length; index += 1) {
+    const segment = relativeSegments[index]!
     currentPath = currentPath ? path.join(currentPath, segment) : segment
-    if (segment === ASSISTANT_STATE_DIRECTORY_NAME) {
-      insideAssistantState = true
-    }
-    if (!insideAssistantState) {
+    if (index < assistantRuntimeRootIndex) {
       continue
     }
     await chmod(currentPath, ASSISTANT_STATE_DIRECTORY_MODE)
   }
+}
+
+function hasAssistantRuntimeRootSegments(segments: readonly string[]): boolean {
+  return findAssistantRuntimeRootIndex(segments) >= 0
+}
+
+function findAssistantRuntimeRootIndex(segments: readonly string[]): number {
+  for (let index = 0; index <= segments.length - 3; index += 1) {
+    if (
+      segments[index] === '.runtime' &&
+      segments[index + 1] === 'operations' &&
+      segments[index + 2] === ASSISTANT_RUNTIME_DIRECTORY_NAME
+    ) {
+      return index
+    }
+  }
+
+  return -1
 }

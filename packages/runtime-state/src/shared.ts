@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 
-export const ASSISTANT_STATE_DIRECTORY_NAME = "assistant-state";
+export const ASSISTANT_RUNTIME_DIRECTORY_NAME = "assistant";
+export const ASSISTANT_STATE_DIRECTORY_NAME = ASSISTANT_RUNTIME_DIRECTORY_NAME;
 
 export interface SiblingLocalStateBucketRoot {
   absoluteVaultRoot: string;

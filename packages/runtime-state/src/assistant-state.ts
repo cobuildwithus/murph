@@ -1,9 +1,6 @@
 import path from "node:path";
 
-import {
-  ASSISTANT_STATE_DIRECTORY_NAME,
-  resolveSiblingLocalStateBucketRoot,
-} from "./shared.ts";
+import { resolveRuntimePaths, ASSISTANT_RUNTIME_DIRECTORY_RELATIVE_PATH } from "./runtime-paths.ts";
 
 export interface AssistantStatePaths {
   absoluteVaultRoot: string;
@@ -39,10 +36,8 @@ export interface AssistantStatePaths {
 }
 
 export function resolveAssistantStatePaths(vaultRoot: string): AssistantStatePaths {
-  const { absoluteVaultRoot, rootPath } = resolveSiblingLocalStateBucketRoot(
-    vaultRoot,
-    ASSISTANT_STATE_DIRECTORY_NAME,
-  );
+  const { absoluteVaultRoot } = resolveRuntimePaths(vaultRoot);
+  const rootPath = path.join(absoluteVaultRoot, ASSISTANT_RUNTIME_DIRECTORY_RELATIVE_PATH);
   const cronDirectory = path.join(rootPath, "cron");
   const diagnosticsDirectory = path.join(rootPath, "diagnostics");
   const journalsDirectory = path.join(rootPath, "journals");
