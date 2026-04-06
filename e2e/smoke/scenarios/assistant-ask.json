@@ -6,5 +6,5 @@
     "fixtures/minimal-vault/CORE.md"
   ],
   "goldenOutput": "fixtures/golden-outputs/assistant",
-  "purpose": "Documents one-shot local assistant turns backed by an external provider session, including optional outbound delivery, while keeping only minimal Murph metadata under assistant-state/."
+  "purpose": "Documents one-shot local assistant turns backed by an external provider session, including optional outbound delivery, while keeping assistant runtime residue under vault/.runtime/operations/assistant/."
 }

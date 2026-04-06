@@ -1,0 +1,10 @@
+{
+  "id": "automation-upsert",
+  "command": "vault-cli automation upsert --vault <path> --input @payload.json",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/show",
+  "purpose": "Documents canonical automation writes into bank/automations/ from a scaffold-shaped JSON payload."
+}

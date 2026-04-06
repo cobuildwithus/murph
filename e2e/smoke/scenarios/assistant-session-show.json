@@ -6,5 +6,5 @@
     "fixtures/minimal-vault/CORE.md"
   ],
   "goldenOutput": "fixtures/golden-outputs/assistant",
-  "purpose": "Documents single-session inspection for alias/thread/provider metadata persisted under assistant-state/."
+  "purpose": "Documents single-session inspection for alias/thread/provider metadata persisted under vault/.runtime/operations/assistant/."
 }

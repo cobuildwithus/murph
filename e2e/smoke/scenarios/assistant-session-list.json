@@ -6,5 +6,5 @@
     "fixtures/minimal-vault/CORE.md"
   ],
   "goldenOutput": "fixtures/golden-outputs/assistant",
-  "purpose": "Documents inspection of local assistant session metadata stored outside the canonical vault."
+  "purpose": "Documents inspection of local assistant session metadata stored under vault/.runtime/operations/assistant/."
 }

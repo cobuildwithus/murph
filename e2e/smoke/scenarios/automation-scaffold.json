@@ -1,0 +1,10 @@
+{
+  "id": "automation-scaffold",
+  "command": "vault-cli automation scaffold --vault <path>",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/show",
+  "purpose": "Documents the canonical automation payload template used before automation upsert."
+}

@@ -1,0 +1,10 @@
+{
+  "id": "automation-show",
+  "command": "vault-cli automation show <lookup> --vault <path>",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/show",
+  "purpose": "Documents canonical automation reads by id or slug from bank/automations/."
+}
