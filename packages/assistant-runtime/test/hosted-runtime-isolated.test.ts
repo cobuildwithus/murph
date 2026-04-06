@@ -52,10 +52,7 @@ describe("runHostedAssistantRuntimeJobIsolated", () => {
             child.stdout.emit("data", runtimeModule.formatHostedRuntimeChildResult({
               ok: true,
               result: {
-                bundles: {
-                  agentState: null,
-                  vault: null,
-                },
+                bundle: null,
                 result: {
                   eventsHandled: 1,
                   nextWakeAt: null,
@@ -239,10 +236,7 @@ function createMockChildProcess(input: {
 function createHostedRuntimeJobInput() {
   return {
     request: {
-      bundles: {
-        agentState: null,
-        vault: null,
-      },
+      bundle: null,
       dispatch: {
         event: {
           kind: "member.activated" as const,

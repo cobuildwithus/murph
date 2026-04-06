@@ -242,10 +242,7 @@ function buildDispatchResultFixture(eventId: string) {
       userId: "user-123",
     },
     status: {
-      bundleRefs: {
-        agentState: null,
-        vault: null,
-      },
+      bundleRef: null,
       inFlight: false,
       lastError: null,
       lastEventId: eventId,

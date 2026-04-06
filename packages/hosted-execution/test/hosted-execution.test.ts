@@ -1,5 +1,6 @@
 import { afterEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
+import type { SharePack } from "@murphai/contracts";
 import {
   DEFAULT_HOSTED_EXECUTION_ARTIFACTS_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_COMMIT_BASE_URL,
@@ -71,6 +72,22 @@ import {
 } from "@murphai/hosted-execution";
 
 const describe = baseDescribe.sequential;
+const SHARE_PACK: SharePack = {
+  createdAt: "2026-03-28T09:20:00.000Z",
+  entities: [
+    {
+      kind: "food",
+      payload: {
+        kind: "smoothie",
+        status: "active",
+        title: "Shared breakfast",
+      },
+      ref: "food.shared-breakfast",
+    },
+  ],
+  schemaVersion: "murph.share-pack.v1",
+  title: "Shared breakfast",
+};
 const TEST_HOSTED_RECIPIENT_PUBLIC_JWK = {
   crv: "P-256",
   ext: true,
@@ -468,10 +485,7 @@ describe("@murphai/hosted-execution", () => {
 
   it("parses hosted execution user status run traces when present", () => {
     expect(parseHostedExecutionUserStatus({
-      bundleRefs: {
-        agentState: null,
-        vault: null,
-      },
+      bundleRef: null,
       inFlight: false,
       lastError: null,
       lastErrorAt: "2026-03-26T12:00:01.000Z",
@@ -1294,6 +1308,7 @@ describe("@murphai/hosted-execution", () => {
       memberId: "member_123",
       occurredAt: "2026-03-28T09:20:00.000Z",
       share: {
+        pack: SHARE_PACK,
         shareId: "share_456",
       },
     });
@@ -1445,10 +1460,7 @@ describe("@murphai/hosted-execution", () => {
         },
         status: {
           backpressuredEventIds: [],
-          bundleRefs: {
-            agentState: null,
-            vault: null,
-          },
+          bundleRef: null,
           inFlight: false,
           lastError: null,
           lastEventId: "evt_queued",
@@ -1475,10 +1487,7 @@ describe("@murphai/hosted-execution", () => {
         },
         status: {
           backpressuredEventIds: [],
-          bundleRefs: {
-            agentState: null,
-            vault: null,
-          },
+          bundleRef: null,
           inFlight: false,
           lastError: "runner failed repeatedly",
           lastEventId: "evt_poisoned",
@@ -1581,10 +1590,7 @@ describe("@murphai/hosted-execution", () => {
         },
         status: {
           backpressuredEventIds: [],
-          bundleRefs: {
-            agentState: null,
-            vault: null,
-          },
+          bundleRef: null,
           inFlight: false,
           lastError: null,
           lastEventId: "evt_duplicate",
@@ -1611,10 +1617,7 @@ describe("@murphai/hosted-execution", () => {
         },
         status: {
           backpressuredEventIds: ["evt_backpressured"],
-          bundleRefs: {
-            agentState: null,
-            vault: null,
-          },
+          bundleRef: null,
           inFlight: true,
           lastError: "runner busy",
           lastEventId: "evt_backpressured",
@@ -1641,10 +1644,7 @@ describe("@murphai/hosted-execution", () => {
         },
         status: {
           backpressuredEventIds: [],
-          bundleRefs: {
-            agentState: null,
-            vault: null,
-          },
+          bundleRef: null,
           inFlight: false,
           lastError: "Hosted execution dispatch is not configured.",
           lastEventId: "evt_config",
@@ -2008,10 +2008,7 @@ describe("@murphai/hosted-execution", () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
-            bundleRefs: {
-              agentState: null,
-              vault: null,
-            },
+            bundleRef: null,
             inFlight: false,
             lastError: null,
             lastEventId: "evt_123",
@@ -2398,10 +2395,7 @@ describe("@murphai/hosted-execution", () => {
       .mockResolvedValueOnce(
         new Response(JSON.stringify({
           backpressuredEventIds: [],
-          bundleRefs: {
-            agentState: null,
-            vault: null,
-          },
+          bundleRef: null,
           inFlight: false,
           lastError: null,
           lastEventId: "manual:123",
@@ -2677,10 +2671,7 @@ function buildDispatchResultFixture(eventId: string) {
       userId: "user-123",
     },
     status: {
-      bundleRefs: {
-        agentState: null,
-        vault: null,
-      },
+      bundleRef: null,
       inFlight: false,
       lastError: null,
       lastEventId: eventId,
