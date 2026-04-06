@@ -34,7 +34,6 @@ import {
 } from './store/schema.js'
 import {
   hasGatewaySnapshotState,
-  readGatewayTableCount,
   readSnapshotOrEmpty,
   readSnapshotState,
   rebuildSnapshotStateFrom,
@@ -44,6 +43,7 @@ import {
   computeOutboxSyncSignature,
   computeSessionSyncSignature,
   loadCaptureSyncState,
+  readGatewaySourceEventCount,
   replaceCaptureSourcesForCaptureIds,
   replaceOutboxSources,
   replaceSessionSources,
@@ -175,7 +175,7 @@ export class LocalGatewayProjectionStore {
     const storedCaptureCursor = readNumericMeta(this.database, CAPTURE_CURSOR_META_KEY)
     const captureSyncInitialized = readMeta(this.database, CAPTURE_INITIALIZED_META_KEY) === '1'
     const captureSyncEmpty = readMeta(this.database, CAPTURE_EMPTY_META_KEY) === '1'
-    const captureSourceCount = readGatewayTableCount(this.database, 'gateway_capture_sources')
+    const captureSourceCount = readGatewaySourceEventCount(this.database, 'capture')
     const captureSyncState = await loadCaptureSyncState(
       this.vault,
       !captureSyncInitialized || (captureSourceCount === 0 && !captureSyncEmpty)
@@ -188,6 +188,8 @@ export class LocalGatewayProjectionStore {
     ])
     const sessionSignature = computeSessionSyncSignature(sessions)
     const outboxSignature = computeOutboxSyncSignature(outboxIntents)
+    const sessionSourceCount = readGatewaySourceEventCount(this.database, 'session')
+    const outboxSourceCount = readGatewaySourceEventCount(this.database, 'outbox')
 
     await withGatewayImmediateTransaction(this.database, async () => {
       let previousState: ReturnType<typeof readSnapshotState> | null = null
@@ -219,18 +221,24 @@ export class LocalGatewayProjectionStore {
         writeMeta(
           this.database,
           CAPTURE_EMPTY_META_KEY,
-          readGatewayTableCount(this.database, 'gateway_capture_sources') === 0 ? '1' : '0',
+          readGatewaySourceEventCount(this.database, 'capture') === 0 ? '1' : '0',
         )
       }
 
-      if (readMeta(this.database, SESSION_SIGNATURE_META_KEY) !== sessionSignature) {
+      if (
+        readMeta(this.database, SESSION_SIGNATURE_META_KEY) !== sessionSignature ||
+        sessionSourceCount !== sessions.length
+      ) {
         ensurePreviousState()
         replaceSessionSources(this.database, sessions)
         writeMeta(this.database, SESSION_SIGNATURE_META_KEY, sessionSignature)
         changed = true
       }
 
-      if (readMeta(this.database, OUTBOX_SIGNATURE_META_KEY) !== outboxSignature) {
+      if (
+        readMeta(this.database, OUTBOX_SIGNATURE_META_KEY) !== outboxSignature ||
+        outboxSourceCount !== outboxIntents.length
+      ) {
         ensurePreviousState()
         replaceOutboxSources(this.database, outboxIntents)
         writeMeta(this.database, OUTBOX_SIGNATURE_META_KEY, outboxSignature)
@@ -269,15 +277,12 @@ export class LocalGatewayProjectionStore {
     const row = this.database
       .prepare(
         `SELECT provider_message_id AS providerMessageId
-           FROM gateway_outbox_sources
+           FROM gateway_source_events
           WHERE message_id = ?
-          UNION ALL
-         SELECT provider_message_id AS providerMessageId
-           FROM gateway_capture_sources
-          WHERE message_id = ?
+            AND source_event_kind IN ('outbox', 'capture')
           LIMIT 1`,
       )
-      .get(messageId, messageId) as { providerMessageId: string | null } | undefined
+      .get(messageId) as { providerMessageId: string | null } | undefined
 
     return normalizeNullableString(row?.providerMessageId)
   }

@@ -157,7 +157,7 @@ function buildSnapshotFromDatabase(
   for (const row of readSessionSourceRows(database)) {
     const conversation = ensureConversationAccumulator(projection, row.routeKey, row.sessionKey)
     conversation.route = mergeGatewayConversationRoutes(conversation.route, {
-      channel: row.channel,
+      channel: row.source,
       identityId: row.identityId,
       participantId: row.participantId,
       threadId: row.threadId,
@@ -181,7 +181,7 @@ function buildSnapshotFromDatabase(
   for (const row of readOutboxSourceRows(database)) {
     const conversation = ensureConversationAccumulator(projection, row.routeKey, row.sessionKey)
     conversation.route = mergeGatewayConversationRoutes(conversation.route, {
-      channel: row.channel,
+      channel: row.source,
       identityId: row.identityId,
       participantId: row.actorId,
       threadId: row.threadId,
@@ -227,7 +227,7 @@ function buildSnapshotFromDatabase(
     const conversation = ensureConversationAccumulator(projection, row.routeKey, row.sessionKey)
     conversation.route = mergeGatewayConversationRoutes(conversation.route, {
       channel: row.source,
-      identityId: row.source === 'email' || row.source === 'linq' ? row.accountId : null,
+      identityId: row.identityId,
       participantId: row.actorId,
       threadId: row.threadId,
       directness: row.directness,
@@ -243,7 +243,7 @@ function buildSnapshotFromDatabase(
       conversation.latestParticipantDisplayNameAt = row.occurredAt
     }
 
-    const attachments = (attachmentsByCaptureId.get(row.captureId) ?? [])
+    const attachments = (attachmentsByCaptureId.get(row.sourceRecordId) ?? [])
       .sort((left, right) => left.ordinal - right.ordinal)
       .map((attachment) => materializeGatewayAttachmentFromRow(row.messageId, attachment))
 

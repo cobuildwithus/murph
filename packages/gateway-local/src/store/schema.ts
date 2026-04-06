@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 
-export const GATEWAY_STORE_SQLITE_SCHEMA_VERSION = 3
+export const GATEWAY_STORE_SQLITE_SCHEMA_VERSION = 4
 
 export const SNAPSHOT_GENERATED_AT_META_KEY = 'snapshot.generatedAt'
 
@@ -26,23 +26,30 @@ export function ensureGatewayStoreBaseSchema(database: DatabaseSync): void {
       value TEXT NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS gateway_capture_sources (
-      capture_id TEXT PRIMARY KEY,
+    CREATE TABLE IF NOT EXISTS gateway_source_events (
+      source_event_id TEXT PRIMARY KEY,
+      source_event_kind TEXT NOT NULL,
+      source_record_id TEXT NOT NULL,
       route_key TEXT NOT NULL,
       session_key TEXT NOT NULL,
-      source TEXT NOT NULL,
-      account_id TEXT,
-      external_id TEXT NOT NULL,
-      provider_message_id TEXT,
+      source TEXT,
+      identity_id TEXT,
       actor_id TEXT,
       actor_display_name TEXT,
       actor_is_self INTEGER NOT NULL,
+      alias TEXT,
       directness TEXT,
       occurred_at TEXT NOT NULL,
       text TEXT,
       thread_id TEXT,
       thread_title TEXT,
-      message_id TEXT NOT NULL UNIQUE
+      reply_kind TEXT,
+      reply_target TEXT,
+      status TEXT,
+      sent_at TEXT,
+      provider_message_id TEXT,
+      provider_thread_id TEXT,
+      message_id TEXT
     );
 
     CREATE TABLE IF NOT EXISTS gateway_capture_attachments (
@@ -58,43 +65,6 @@ export function ensureGatewayStoreBaseSchema(database: DatabaseSync): void {
       extracted_text TEXT,
       transcript_text TEXT,
       PRIMARY KEY (capture_id, ordinal)
-    );
-
-    CREATE TABLE IF NOT EXISTS gateway_session_sources (
-      session_id TEXT PRIMARY KEY,
-      route_key TEXT NOT NULL,
-      session_key TEXT NOT NULL,
-      alias TEXT,
-      channel TEXT,
-      identity_id TEXT,
-      participant_id TEXT,
-      thread_id TEXT,
-      directness TEXT,
-      reply_kind TEXT,
-      reply_target TEXT,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS gateway_outbox_sources (
-      intent_id TEXT PRIMARY KEY,
-      route_key TEXT NOT NULL,
-      session_key TEXT NOT NULL,
-      status TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      sent_at TEXT,
-      message TEXT NOT NULL,
-      channel TEXT,
-      identity_id TEXT,
-      actor_id TEXT,
-      thread_id TEXT,
-      directness TEXT,
-      reply_kind TEXT,
-      reply_target TEXT,
-      provider_message_id TEXT,
-      provider_thread_id TEXT,
-      reply_to_message_id TEXT,
-      message_id TEXT NOT NULL UNIQUE
     );
 
     CREATE TABLE IF NOT EXISTS gateway_permissions (
@@ -118,10 +88,21 @@ export function ensureGatewayStoreBaseSchema(database: DatabaseSync): void {
       summary TEXT
     );
 
-    CREATE INDEX IF NOT EXISTS gateway_capture_sources_route_provider_idx
-      ON gateway_capture_sources(route_key, provider_message_id, actor_is_self);
-    CREATE INDEX IF NOT EXISTS gateway_outbox_sources_route_provider_idx
-      ON gateway_outbox_sources(route_key, provider_message_id);
+    CREATE INDEX IF NOT EXISTS gateway_source_events_kind_record_idx
+      ON gateway_source_events(source_event_kind, source_record_id);
+    CREATE INDEX IF NOT EXISTS gateway_source_events_kind_route_provider_idx
+      ON gateway_source_events(source_event_kind, route_key, provider_message_id, actor_is_self);
+    CREATE INDEX IF NOT EXISTS gateway_source_events_kind_session_occurred_idx
+      ON gateway_source_events(source_event_kind, session_key, occurred_at);
+    CREATE UNIQUE INDEX IF NOT EXISTS gateway_source_events_message_idx
+      ON gateway_source_events(message_id)
+      WHERE message_id IS NOT NULL;
+
+    DROP INDEX IF EXISTS gateway_capture_sources_route_provider_idx;
+    DROP INDEX IF EXISTS gateway_outbox_sources_route_provider_idx;
+    DROP TABLE IF EXISTS gateway_capture_sources;
+    DROP TABLE IF EXISTS gateway_session_sources;
+    DROP TABLE IF EXISTS gateway_outbox_sources;
   `)
 }
 
