@@ -82,4 +82,13 @@ describe("hosted email route crypto", () => {
       parseHostedEmailRouteToken({ secret: "top-secret", token: tampered }),
     ).resolves.toBeNull();
   });
+
+  it("rejects legacy non-user alias token scopes", async () => {
+    await expect(
+      parseHostedEmailRouteToken({
+        secret: "top-secret",
+        token: "t-legacyreplykey123-0123456789abcdef0123456789abcdef",
+      }),
+    ).resolves.toBeNull();
+  });
 });

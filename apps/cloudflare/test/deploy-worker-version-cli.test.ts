@@ -101,6 +101,30 @@ describe("runDeployWorkerVersionCli", () => {
     ]);
   });
 
+  it("fails deployment-status reads with worker-scoped JSON context", async () => {
+    wranglerMocks.runWranglerJson.mockResolvedValueOnce("{not json");
+
+    await expect(
+      runDeployWorkerVersionCli(
+        ["--config", "./.deploy/wrangler.generated.jsonc"],
+        {
+          deployRoot: path.join("/tmp", "repo", "apps", "cloudflare"),
+          env: {
+            CF_WORKER_NAME: "hosted-worker",
+            HOSTED_EXECUTION_DEPLOYMENT_MODE: "direct",
+          },
+          log: false,
+          runHostedWorkerDeployment: async ({ dependencies }) => {
+            await dependencies.readCurrentDeployment("hosted-worker", "/tmp/config.jsonc");
+            throw new Error("Expected readCurrentDeployment to fail.");
+          },
+        },
+      ),
+    ).rejects.toThrow(
+      "Wrangler deployment status for worker hosted-worker must be valid JSON:",
+    );
+  });
+
   it("reads the most recent matching wrangler JSONL entry without parsing the whole file up front", async () => {
     wranglerMocks.runWranglerLogged.mockImplementationOnce(async (_args: string[], options?: { envOverrides?: Record<string, string> }) => {
       const outputFilePath = options?.envOverrides?.WRANGLER_OUTPUT_FILE_PATH;
@@ -164,5 +188,49 @@ describe("runDeployWorkerVersionCli", () => {
         }),
       }),
     );
+  });
+
+  it("fails malformed Wrangler output lines with file and line context", async () => {
+    wranglerMocks.runWranglerLogged.mockImplementationOnce(async (_args: string[], options?: { envOverrides?: Record<string, string> }) => {
+      const outputFilePath = options?.envOverrides?.WRANGLER_OUTPUT_FILE_PATH;
+
+      if (!outputFilePath) {
+        throw new Error("Expected WRANGLER_OUTPUT_FILE_PATH.");
+      }
+
+      await writeFile(
+        outputFilePath,
+        [
+          JSON.stringify({ type: "other", version_id: "ignore-me" }),
+          "{not json",
+        ].join("\n"),
+        "utf8",
+      );
+    });
+
+    await expect(
+      runDeployWorkerVersionCli(
+        ["--config", "./.deploy/wrangler.generated.jsonc"],
+        {
+          deployRoot: path.join("/tmp", "repo", "apps", "cloudflare"),
+          env: {
+            CF_WORKER_NAME: "hosted-worker",
+            HOSTED_EXECUTION_DEPLOYMENT_MODE: "direct",
+          },
+          log: false,
+          runHostedWorkerDeployment: async ({ dependencies, secretsFilePath }) => {
+            await dependencies.uploadVersion({
+              configPath: "/tmp/config.jsonc",
+              includeSecrets: false,
+              message: "upload message",
+              secretsFilePath,
+              tag: "deploy-tag",
+              workerName: "hosted-worker",
+            });
+            throw new Error("Expected uploadVersion to fail.");
+          },
+        },
+      ),
+    ).rejects.toThrow(/Wrangler output entry in .* at line 2 must be valid JSON:/);
   });
 });

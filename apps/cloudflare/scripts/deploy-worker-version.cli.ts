@@ -127,7 +127,10 @@ async function readCurrentDeployment(
       currentWorkerName,
     ]);
 
-    return JSON.parse(stdout) as DeploymentStatusPayload;
+    return parseJsonValue<DeploymentStatusPayload>(
+      stdout,
+      `Wrangler deployment status for worker ${currentWorkerName}`,
+    );
   } catch (error) {
     if (isWranglerNoDeploymentsError(error)) {
       return null;
@@ -150,7 +153,10 @@ async function readWranglerOutputFile(
       continue;
     }
 
-    const entry = JSON.parse(line) as Record<string, unknown>;
+    const entry = parseJsonValue<Record<string, unknown>>(
+      line,
+      `Wrangler output entry in ${outputFilePath} at line ${index + 1}`,
+    );
 
     if (entry.type === entryType) {
       return entry;
@@ -174,6 +180,16 @@ async function readRenderedDeployConfig(configFilePath: string): Promise<Record<
 
 function isWranglerNoDeploymentsError(error: unknown): boolean {
   return error instanceof Error && error.message.includes("has no deployments");
+}
+
+function parseJsonValue<T>(value: string, label: string): T {
+  try {
+    return JSON.parse(value) as T;
+  } catch (error) {
+    throw new Error(
+      `${label} must be valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 function requireEnv(name: string, env: Readonly<Record<string, string | undefined>>): string {
