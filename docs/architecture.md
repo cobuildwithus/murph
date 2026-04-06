@@ -44,7 +44,7 @@ repo/
 
 - `packages/contracts` defines the shared language: canonical Zod contracts, TypeScript types, parse helpers, and generated JSON Schema artifacts.
 - `packages/runtime-state` defines canonical local-state taxonomy and paths (`.runtime/operations/**`, `.runtime/projections/**`, `.runtime/cache/**`, `.runtime/tmp/**`) plus shared JSON/SQLite versioning helpers and migration defaults.
-- `packages/core` owns vault bootstrap, filesystem primitives, domain mutations, audit emission, and canonical write rules.
+- `packages/core` owns vault bootstrap, filesystem primitives, domain mutations, audit emission, canonical write rules, and the ordered canonical `vault upgrade` registry for live-vault evolution; current-format canonical reads/writes fail closed until an outdated vault has been upgraded.
 - `packages/importers` parses external inputs, hosts provider-adapter normalization for direct API connectors, and delegates all canonical writes to core.
 - `packages/device-syncd` owns local provider OAuth state, reconnect/disconnect control, scheduled wearable imports, and optional webhook intake while keeping provider credentials in durable local operational state under `.runtime/operations/device-sync/**` and outside the canonical vault.
 - `packages/inboxd` owns source-agnostic inbox capture, raw evidence persistence, the append-only `ledger/inbox-captures` canonical capture log, inbox-local runtime cursors/source-specific checkpoints/capture indexes, and attachment-level derived-job orchestration, with its rebuildable SQLite projection under `.runtime/projections/inboxd.sqlite` and daemon/config JSON state under `.runtime/operations/inbox/**`.
@@ -78,6 +78,7 @@ repo/
   - `derived/knowledge/log.md`
   - `derived/knowledge/pages/*.md`
 - Local runtime state:
+  - canonical `vault.json` / markdown evolution happens through ordered, audited `vault upgrade` steps in `packages/core`; rebuildable `.runtime/projections/**` stores are repaired or rebuilt separately and never become canonical migration state; validation may read known legacy metadata in memory to classify upgrade requirements, but scaffold-only repair stays current-format-only and older vaults must run `vault upgrade` before core write paths resume; only `vault upgrade` writes upgraded canonical metadata back to disk
   - `.runtime/operations/inbox/*.json`
   - `.runtime/operations/parsers/toolchain.json`
   - `.runtime/operations/device-sync/state.sqlite`
@@ -101,6 +102,10 @@ repo/
 
 - `vault-cli init`
 - `vault-cli validate`
+- `vault-cli vault repair`
+- `vault-cli vault upgrade`
+
+Operator note: `vault-cli vault repair` remains scaffold-only. Canonical metadata or document-shape evolution must go through ordered `vault upgrade` steps, while rebuildable `.runtime/projections/**` stores remain outside both commands and can be rebuilt separately.
 - `vault-cli document import`
 - `vault-cli meal add`
 - `vault-cli workout add`
