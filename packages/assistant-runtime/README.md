@@ -1,8 +1,8 @@
 # `@murphai/assistant-runtime`
 
-Headless hosted/runtime surface for Murph assistant execution.
+Workspace-private headless hosted/runtime surface for Murph assistant execution.
 
-This package exists so hosted runtimes such as `apps/cloudflare` do not need to import their execution seams directly from the published `@murphai/murph` CLI package.
+This package exists so hosted runtimes such as `apps/cloudflare` do not need to import their execution seams directly from the public `@murphai/murph` CLI package.
 
 Current responsibilities:
 
@@ -20,4 +20,4 @@ Current non-goals:
 
 The current implementation imports its local-only assistant runtime from `@murphai/assistant-engine`, vault/inbox app surfaces from `@murphai/vault-inbox`, and operator/setup config seams from `@murphai/operator-config`. Shared hosted execution contracts remain owned by `@murphai/hosted-execution`; this package should not re-export that surface.
 
-Hosted runtime env/config helpers that Cloudflare needs at the app boundary now publish from `@murphai/assistant-runtime/hosted-assistant-env` so hosted apps do not need to reach into the owner packages directly.
+Hosted runtime env/config helpers that Cloudflare needs at the app boundary now export from `@murphai/assistant-runtime/hosted-assistant-env` so hosted apps do not need to reach into lower owner packages directly.

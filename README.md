@@ -15,11 +15,11 @@ The main installable product entrypoint is `@murphai/murph`, which gives you the
 - provider-backed local assistant chat and automation, with runtime state under `vault/.runtime/operations/assistant/**`
 - a two-layer knowledge system: stable health reference pages under `bank/library/**` plus a non-canonical compiled personal wiki under `derived/knowledge/**`, synthesized by the active assistant, persisted through shared assistant/CLI write surfaces, searchable locally, and kept rebuildable
 - inbox capture, indexing, and parser-driven attachment extraction
-- local wearable/device sync through `@murphai/device-syncd`
+- local wearable/device sync through the workspace-private `packages/device-syncd` runtime bundled into `@murphai/murph`
 - a hosted Next.js integration control plane in `apps/web`
 - a hosted Cloudflare execution plane in `apps/cloudflare`
 - shared hosted execution contracts and env/client helpers in `@murphai/hosted-execution`
-- headless package boundaries plus the explicit local gateway/runtime packages: `@murphai/assistant-engine`, `@murphai/vault-inbox`, `@murphai/operator-config`, `@murphai/gateway-core`, `@murphai/gateway-local`, `@murphai/assistant-runtime`, and `@murphai/assistantd`
+- workspace-private headless owner/runtime packages such as `@murphai/assistant-engine`, `@murphai/vault-inbox`, `@murphai/operator-config`, `@murphai/gateway-local`, `@murphai/assistant-runtime`, and `@murphai/assistantd`, plus the public contract package `@murphai/gateway-core`
 
 ## Install
 
@@ -35,7 +35,7 @@ pnpm add -g @murphai/murph@latest
 murph onboard
 ```
 
-`@murphai/murph` is the full local Murph package. The repo implementation now splits the published shell in `packages/cli` away from `packages/assistant-cli` and `packages/setup-cli`, but that is a maintainer detail rather than the user-facing install story.
+`@murphai/murph` is the full local Murph package. The repo keeps many internal workspace packages, but the public npm surface is intentionally narrow: `@murphai/murph`, `@murphai/openclaw-plugin`, `@murphai/contracts`, `@murphai/hosted-execution`, and `@murphai/gateway-core`. The remaining owner packages stay workspace-private and are bundled into those public tarballs only when a public package still needs them at runtime.
 
 ## OpenClaw integration
 
@@ -105,26 +105,28 @@ The result is a system you can inspect with normal filesystem tools while still 
 
 ## Repo structure
 
+Only five packages are published to npm: `@murphai/murph`, `@murphai/openclaw-plugin`, `@murphai/contracts`, `@murphai/hosted-execution`, and `@murphai/gateway-core`. The remaining `packages/*` entries are workspace-private owner packages that stay installable from a checkout and can be bundled into public tarballs, but they are not intended to be consumed as standalone npm products.
+
 | Path | Responsibility |
 | --- | --- |
 | `packages/contracts` | Canonical Zod contracts, types, examples, and generated JSON Schema artifacts. |
 | `packages/hosted-execution` | Shared hosted dispatch contracts, env readers, signing helpers, and typed clients. |
-| `packages/runtime-state` | Shared local-state taxonomy, `.runtime` path resolution, JSON-state versioning, and SQLite migration helpers. |
-| `packages/core` | The only package allowed to mutate canonical vault data. |
-| `packages/importers` | External adapters that normalize inputs and delegate writes to `core`. |
-| `packages/inboxd` | Inbox capture, canonical evidence persistence, runtime indexing, and attachment parse-job orchestration. |
-| `packages/parsers` | Local-first attachment parsing and derived artifact publication. |
-| `packages/query` | Read helpers, summaries, list/search helpers, export-pack generation, and the pure derived-knowledge parser/search/index helpers. |
-| `packages/device-syncd` | Local wearable/device OAuth, webhook, and reconcile daemon. |
-| `packages/assistant-engine` | Headless local-only assistant execution/runtime package, provider-turn plumbing, tool catalog surfaces, and assistant runtime state/store helpers. |
-| `packages/vault-inbox` | Vault service assembly, inbox service assembly, inbox app helpers, shared derived-knowledge helpers, and CLI-facing vault/inbox usecases. |
-| `packages/operator-config` | Operator config persistence, setup/runtime-env helpers, hosted assistant config, and setup/device-client contracts. |
-| `packages/assistant-cli` | CLI-only assistant wrappers, assistant commands, terminal logging, and Ink chat UI. |
-| `packages/setup-cli` | CLI-only onboarding, host setup, and setup-wizard package. |
+| `packages/runtime-state` | Workspace-private shared local-state taxonomy, `.runtime` path resolution, JSON-state versioning, and SQLite migration helpers. |
+| `packages/core` | Workspace-private canonical mutation owner. No other package may write canonical vault data directly. |
+| `packages/importers` | Workspace-private external adapters that normalize inputs and delegate writes to `core`. |
+| `packages/inboxd` | Workspace-private inbox capture, canonical evidence persistence, runtime indexing, and attachment parse-job orchestration. |
+| `packages/parsers` | Workspace-private local-first attachment parsing and derived artifact publication. |
+| `packages/query` | Workspace-private read helpers, summaries, list/search helpers, export-pack generation, and derived-knowledge parser/search/index helpers. |
+| `packages/device-syncd` | Workspace-private local wearable/device OAuth, webhook, and reconcile daemon. |
+| `packages/assistant-engine` | Workspace-private headless assistant execution/runtime owner. |
+| `packages/vault-inbox` | Workspace-private vault service, inbox service, and shared usecase owner. |
+| `packages/operator-config` | Workspace-private operator config, setup/runtime-env, and hosted assistant config owner. |
+| `packages/assistant-cli` | Workspace-private CLI-only assistant wrappers, commands, terminal logging, and Ink chat UI. |
+| `packages/setup-cli` | Workspace-private CLI-only onboarding, host setup, and setup-wizard package. |
 | `packages/gateway-core` | Headless transport-neutral gateway boundary. |
-| `packages/gateway-local` | Local vault-backed gateway runtime and projection store. |
-| `packages/assistant-runtime` | Headless hosted execution surface used by Cloudflare runner paths. |
-| `packages/assistantd` | Local assistant daemon with a loopback-only bearer-authenticated control plane. |
+| `packages/gateway-local` | Workspace-private local vault-backed gateway runtime and projection store. |
+| `packages/assistant-runtime` | Workspace-private headless hosted execution surface used by Cloudflare runner paths. |
+| `packages/assistantd` | Workspace-private local assistant daemon with a loopback-only bearer-authenticated control plane. |
 | `packages/cli` | The published `@murphai/murph` package, exposing the `murph` / `vault-cli` binaries and the main operator surface. |
 | `packages/openclaw-plugin` | The published OpenClaw-compatible bundle that teaches OpenClaw to use `vault-cli` directly against the configured Murph vault. |
 | `apps/web` | Hosted Next.js control plane for onboarding, billing, OAuth, webhooks, and execution dispatch/outbox. |
@@ -138,8 +140,8 @@ Murph now has three distinct runtime tiers:
 ### 1. Local operator surface
 
 - `vault-cli` / `murph` for vault operations, assistant chat, automation, onboarding, and diagnostics
-- `@murphai/device-syncd` for local wearable sync
-- `@murphai/assistantd` for the local assistant control plane
+- the workspace-private `packages/device-syncd` runtime for local wearable sync
+- the workspace-private `packages/assistantd` daemon for the local assistant control plane
 
 ### 2. Hosted control plane
 
@@ -148,7 +150,7 @@ Murph now has three distinct runtime tiers:
 
 ### 3. Hosted execution plane
 
-- `apps/cloudflare` restores encrypted hosted bundles, coordinates per-user runs, and executes one-shot inbox/parser/assistant/device-sync/share-import work through `@murphai/assistant-runtime`
+- `apps/cloudflare` restores encrypted hosted bundles, coordinates per-user runs, and executes one-shot inbox/parser/assistant/device-sync/share-import work through the workspace-private `@murphai/assistant-runtime` package
 - it is intentionally separate from the public hosted web app
 
 ## CLI surface

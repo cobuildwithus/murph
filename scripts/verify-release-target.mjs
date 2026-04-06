@@ -40,11 +40,16 @@ console.log(`Verified ${summary.packages.length} publishable packages at ${summa
 console.log(`Primary package: ${summary.primaryPackage?.name ?? 'UNCONFIRMED'}`);
 console.log(`Release notes: ${summary.releaseNotesPath}`);
 for (const entry of summary.packages) {
+  const directDependencySummary =
+    entry.workspaceDependencies.length > 0
+      ? ` -> ${entry.workspaceDependencies.join(', ')}`
+      : '';
+  const bundledDependencySummary =
+    entry.bundledWorkspaceDependencies.length > 0
+      ? ` [bundles ${entry.bundledWorkspaceDependencies.join(', ')}]`
+      : '';
+
   console.log(
-    `- ${entry.name}@${entry.version} (${entry.path})${
-      entry.workspaceDependencies.length > 0
-        ? ` -> ${entry.workspaceDependencies.join(', ')}`
-        : ''
-    }`,
+    `- ${entry.name}@${entry.version} (${entry.path})${directDependencySummary}${bundledDependencySummary}`,
   );
 }

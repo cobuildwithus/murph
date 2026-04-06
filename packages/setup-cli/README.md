@@ -1,6 +1,6 @@
 # @murphai/setup-cli
 
-CLI-only onboarding and host setup surface for Murph.
+Workspace-private CLI-only onboarding and host setup surface for Murph.
 
 This package owns the setup wizard, host provisioning helpers, AgentMail setup helpers,
 and assistant/channel/wearable onboarding flows. It depends on
