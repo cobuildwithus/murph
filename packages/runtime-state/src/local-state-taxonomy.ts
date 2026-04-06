@@ -150,6 +150,8 @@ function isPortableOperationalRelativePath(relativePath: string): boolean {
     || relativePath.startsWith(`${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/receipts/`)
     || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/sessions`
     || relativePath.startsWith(`${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/sessions/`)
+    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/state`
+    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/state/onboarding`
     || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/transcripts`
     || relativePath.startsWith(`${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/transcripts/`)
     || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/state/onboarding/first-contact`

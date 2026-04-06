@@ -1,6 +1,6 @@
 {
   "id": "automation-list",
-  "command": "vault-cli automation list --vault <path> [--status active --status paused --status archived] [--text <query>] [--limit <n>]",
+  "command": "vault-cli automation list --vault <path> [--status <status> ...] [--text <query>] [--limit <n>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/CORE.md"
