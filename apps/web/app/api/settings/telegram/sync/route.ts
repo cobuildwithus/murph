@@ -59,7 +59,7 @@ export const POST = withJsonError(async (request: Request) => {
       await upsertHostedMemberTelegramRoutingBinding({
         memberId: auth.member.id,
         prisma: getPrisma(),
-        telegramUserId: telegramLookupKey,
+        telegramUserLookupKey: telegramLookupKey,
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {

@@ -18,7 +18,8 @@ This note records the final greenfield state reached after the hosted-member pri
 ### `HostedMember` is now entitlement-only
 
 - `apps/web/prisma/schema.prisma` keeps only `id`, `status`, `billingStatus`, `billingMode`, timestamps, and the split-table relations on `HostedMember`.
-- `apps/web/prisma/migrations/2026040604_hosted_member_privacy_greenfield_baseline/migration.sql` creates the split identity, routing, and billing-ref tables in one greenfield baseline and drops the legacy phone, Privy, wallet, Stripe, Linq, and Telegram columns from `hosted_member`.
+- `apps/web/prisma/migrations/2026032602_hosted_onboarding_init/migration.sql` now creates `HostedMember`, `HostedMemberIdentity`, `HostedMemberRouting`, and `HostedMemberBillingRef` directly in the final greenfield launch shape, without raw phone, Telegram username, or Stripe-id columns on `hosted_member`.
+- The old hosted-member privacy transition migrations now remain only as explicit greenfield no-ops so a clean database no longer replays add-then-drop churn for hosted-member identity, routing, or billing state.
 - `apps/web/src/lib/hosted-onboarding/member-identity-service.ts` now creates and refreshes core members separately from `HostedMemberIdentity`, instead of mirroring identity state through the core row.
 - `apps/web/src/lib/hosted-onboarding/{authentication-service,invite-service,billing-service}.ts` now consume identity or billing-ref state through the split ownership lanes instead of treating `HostedMember` as a person-shaped record.
 
@@ -26,7 +27,7 @@ This note records the final greenfield state reached after the hosted-member pri
 
 - `apps/web/app/api/settings/telegram/sync/route.ts` writes Telegram linkage through `upsertHostedMemberTelegramRoutingBinding(...)`.
 - `apps/web/src/lib/hosted-onboarding/webhook-provider-{linq,telegram}.ts` resolve routing through the additive routing/identity helpers.
-- `apps/web/prisma/schema.prisma` and `apps/web/prisma/migrations/2026040604_hosted_member_privacy_greenfield_baseline/migration.sql` drop `telegram_username` from durable hosted-member routing state.
+- `apps/web/prisma/schema.prisma` and `apps/web/prisma/migrations/2026032602_hosted_onboarding_init/migration.sql` omit `telegram_username` from durable hosted-member routing state.
 - The UI still displays the current Telegram username from the live sync payload, not from durable Postgres routing state.
 
 ### Verified email still stays out of Postgres
@@ -42,14 +43,14 @@ This note records the final greenfield state reached after the hosted-member pri
   - The only in-repo reference outside Prisma was a test-harness stub in `apps/web/test/hosted-onboarding-stripe-event-reconciliation.test.ts`.
 - Landed cleanup:
   - `apps/web/prisma/schema.prisma` no longer defines `HostedSession` or the related Prisma relations.
-- `apps/web/prisma/migrations/2026040604_hosted_member_privacy_greenfield_baseline/migration.sql` drops `hosted_session` as part of the same clean baseline.
+- `apps/web/prisma/migrations/2026032602_hosted_onboarding_init/migration.sql` no longer creates `hosted_session` in the first place.
 - `apps/web/scripts/local-reset-hosted-onboarding.ts` no longer expects a `sessions` relation count.
 
-### The staged privacy migration train is collapsed
+### The greenfield migration train now launches directly in the final shape
 
-- The old additive rollout sequence is gone; the repo no longer carries separate foundation, cleanup, and hard-cut migrations for hosted-member privacy.
-- The migration history now models the true launch shape directly with a single hosted-member privacy baseline, which avoids greenfield confusion about backfills, transitional Telegram username storage, or deferred column removal.
-- This history rewrite is safe only for clean databases that never applied the deleted staged migration ids; any dev, staging, or preview database that already recorded them must be reset before using the new baseline.
+- `2026032602_hosted_onboarding_init` now models the true launch shape directly instead of creating a wide `hosted_member` row and then splitting it later.
+- The old hosted-member transition steps remain only as explicit greenfield no-ops, which avoids add-then-drop churn for phone lookup keys, Telegram linkage, Stripe refs, `HostedSession`, or the deprecated `active` member-status variant.
+- This history rewrite is safe only for clean databases; any environment that already applied the old hosted-onboarding migration history still needs a reset before using the rewritten launch chain.
 
 ## Verification
 

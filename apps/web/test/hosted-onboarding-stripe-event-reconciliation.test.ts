@@ -2249,7 +2249,7 @@ function makeMember(overrides: Partial<MutableMember> = {}): MutableMember {
     billingStatus: HostedBillingStatus.not_started,
     id: "member_123",
     linqChatId: null,
-    normalizedPhoneNumber: "+15551234567",
+    phoneLookupKey: "+15551234567",
     status: HostedMemberStatus.registered,
     stripeCustomerId: "cus_123",
     stripeLatestBillingEventCreatedAt: null,
@@ -2314,7 +2314,7 @@ function createStripeQueueHarness(input: {
   const memberRouting = members.map((member) => ({
     linqChatId: member.linqChatId,
     memberId: member.id,
-    telegramUserId: null as string | null,
+    telegramUserLookupKey: null as string | null,
   }));
   const revnetIssuances = input.revnetIssuances ?? [];
   const sessions = input.sessions ?? [];
@@ -2327,7 +2327,7 @@ function createStripeQueueHarness(input: {
   const buildIdentityFromMember = (member: MutableMember) => ({
     maskedPhoneNumberHint: "*** 4567",
     memberId: member.id,
-    normalizedPhoneNumber: member.normalizedPhoneNumber,
+    phoneLookupKey: member.phoneLookupKey,
     phoneNumberVerifiedAt: null,
     privyUserId: null as string | null,
     walletAddress: member.walletAddress,
@@ -2486,8 +2486,8 @@ function createStripeQueueHarness(input: {
   }) => {
     const member = members.find((candidate) =>
       ("memberId" in where && candidate.id === where.memberId) ||
-      ("normalizedPhoneNumber" in where &&
-        candidate.normalizedPhoneNumber === where.normalizedPhoneNumber) ||
+      ("phoneLookupKey" in where &&
+        candidate.phoneLookupKey === where.phoneLookupKey) ||
       ("privyUserId" in where && where.privyUserId === null) ||
       ("walletAddress" in where && candidate.walletAddress === where.walletAddress));
 
@@ -2550,7 +2550,7 @@ function createStripeQueueHarness(input: {
   const hostedMemberRoutingFindUnique = vi.fn(async ({ where }: { where: Record<string, unknown> }) =>
     memberRouting.find((routing) =>
       ("memberId" in where && routing.memberId === where.memberId) ||
-      ("telegramUserId" in where && routing.telegramUserId === where.telegramUserId)) ?? null);
+      ("telegramUserLookupKey" in where && routing.telegramUserLookupKey === where.telegramUserLookupKey)) ?? null);
   const hostedMemberUpdateMany = vi.fn(async ({ data, where }: { data: Record<string, unknown>; where: Record<string, unknown> }) => {
     const member = members.find((candidate) => candidate.id === where.id);
 
@@ -2971,7 +2971,7 @@ type MutableMember = {
   billingStatus: HostedBillingStatus;
   id: string;
   linqChatId: string | null;
-  normalizedPhoneNumber: string;
+  phoneLookupKey: string;
   status: HostedMemberStatus;
   stripeCustomerId: string | null;
   stripeLatestBillingEventCreatedAt: Date | null;

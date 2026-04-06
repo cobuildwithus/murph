@@ -1,3 +1,2 @@
-ALTER TABLE "hosted_member"
-  ADD COLUMN "onboarding_welcome_queued_at" TIMESTAMP(3),
-  ADD COLUMN "onboarding_welcome_sent_at" TIMESTAMP(3);
+-- Greenfield no-op: hosted activation welcome timestamps were removed before
+-- launch and never enter the hosted member schema.

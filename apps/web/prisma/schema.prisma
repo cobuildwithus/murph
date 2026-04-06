@@ -223,7 +223,7 @@ model HostedMember {
 model HostedMemberIdentity {
   memberId              String       @unique @map("member_id")
   maskedPhoneNumberHint String       @map("masked_phone_number_hint")
-  phoneLookupKey String       @unique @map("phone_lookup_key")
+  phoneLookupKey        String       @unique @map("phone_lookup_key")
   phoneNumberVerifiedAt DateTime?    @map("phone_number_verified_at")
   privyUserId           String?      @unique @map("privy_user_id")
   walletAddress         String?      @unique @map("wallet_address")
@@ -238,13 +238,13 @@ model HostedMemberIdentity {
 }
 
 model HostedMemberRouting {
-  memberId       String       @unique @map("member_id")
+  memberId              String       @unique @map("member_id")
   /// Hosted Linq onboarding and auto-reply reuse one direct thread per member.
-  linqChatId     String?      @unique @map("linq_chat_id")
+  linqChatId            String?      @unique @map("linq_chat_id")
   telegramUserLookupKey String?      @unique @map("telegram_user_lookup_key")
-  createdAt      DateTime     @default(now()) @map("created_at")
-  updatedAt      DateTime     @updatedAt @map("updated_at")
-  member         HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  createdAt             DateTime     @default(now()) @map("created_at")
+  updatedAt             DateTime     @updatedAt @map("updated_at")
+  member                HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@map("hosted_member_routing")
 }
