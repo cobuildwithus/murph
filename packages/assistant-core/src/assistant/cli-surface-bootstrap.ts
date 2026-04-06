@@ -1,6 +1,8 @@
 import {
   readAssistantCliLlmsManifest,
   type AssistantCliLlmsManifest,
+  type AssistantCliLlmsManifestCommand,
+  type AssistantCliLlmsManifestSchemaNode,
 } from '../assistant-cli-tools.js'
 import {
   getAssistantStateDocument,
@@ -8,18 +10,16 @@ import {
 } from './state.js'
 
 const assistantCliSurfaceBootstrapSchemaVersion =
-  'murph.assistant-cli-surface-bootstrap.v1'
-const assistantCliSurfaceBootstrapForcedFamilies = [
-  'assistant',
-  'inbox',
-  'knowledge',
-  'device',
-] as const
-const assistantCliSurfaceBootstrapRootCommandLimit = 10
-const assistantCliSurfaceBootstrapFamilyLimit = 8
-const assistantCliSurfaceBootstrapFamilyEntryLimit = 6
+  'murph.assistant-cli-surface-bootstrap.v2'
+const assistantCliSurfaceBootstrapContractCharBudget = 40_000
+const assistantCliSurfaceBootstrapFamilyIndexEntryLimit = 8
+const assistantCliSurfaceBootstrapOptionalOptionLimit = 4
+const assistantCliSurfaceBootstrapIgnoredOptionNames = new Set([
+  'requestId',
+  'vault',
+])
 
-let cachedAssistantCliSurfaceSummaryPromise: Promise<string | null> | null = null
+let cachedAssistantCliSurfaceContractPromise: Promise<string | null> | null = null
 
 export function buildAssistantCliSurfaceBootstrapDocId(sessionId: string): string {
   return `sessions/${sessionId}/cli-surface-bootstrap`
@@ -36,200 +36,345 @@ export async function resolveAssistantCliSurfaceBootstrapContext(input: {
     docId,
     vault: input.vault,
   })
-  const persistedSummary = parsePersistedAssistantCliSurfaceSummary(existing.value)
-  if (persistedSummary) {
-    return persistedSummary
+  const persistedContract = parsePersistedAssistantCliSurfaceContract(existing.value)
+  if (persistedContract) {
+    return persistedContract
   }
 
-  const summary = await loadAssistantCliSurfaceSummary({
+  const contract = await loadAssistantCliSurfaceContract({
     cliEnv: input.cliEnv,
     vault: input.vault,
     workingDirectory: input.workingDirectory,
   })
-  if (!summary) {
+  if (!contract) {
     return null
   }
 
   await putAssistantStateDocument({
     docId,
     value: {
+      contract,
       generatedAt: new Date().toISOString(),
       schemaVersion: assistantCliSurfaceBootstrapSchemaVersion,
-      summary,
     },
     vault: input.vault,
   })
 
-  return summary
+  return contract
 }
 
-export function buildAssistantCliSurfaceSummary(
+export function buildAssistantCliSurfaceContract(
   manifest: AssistantCliLlmsManifest,
+  input?: {
+    sourceDetail?: 'compact' | 'full'
+  },
 ): string | null {
-  const commandNames = normalizeAssistantCliManifestCommandNames(manifest)
-  if (commandNames.length === 0) {
+  const commands = normalizeAssistantCliManifestCommands(manifest)
+  if (commands.length === 0) {
     return null
   }
+  const sourceDetail = input?.sourceDetail ?? 'full'
 
-  const rootCommands = commandNames
-    .filter((name) => !name.includes(' '))
-    .slice(0, assistantCliSurfaceBootstrapRootCommandLimit)
-  const groupedFamilies = groupAssistantCliManifestFamilies(commandNames)
-  const selectedFamilies = selectAssistantCliSurfaceFamilies(groupedFamilies)
-  const familyLines = selectedFamilies
-    .map(([family, names]) => summarizeAssistantCliSurfaceFamily(family, names))
-    .filter((line): line is string => line !== null)
-
-  return [
-    'CLI surface summary:',
-    'Generated from compact `vault-cli --llms --format json` output.',
-    rootCommands.length > 0
-      ? `Standalone root commands: ${rootCommands.join(', ')}.`
-      : null,
-    selectedFamilies.length > 0
-      ? `Major command families: ${selectedFamilies.map(([family]) => family).join(', ')}.`
-      : null,
-    ...familyLines,
-    'Many record families use list/show/scaffold/upsert or edit/delete variants. Confirm exact args with `--schema --format json`.',
+  const fallbackModes: readonly AssistantCliContractRenderMode[] = [
+    'with-common-options',
+    'required-only',
+    'description-only',
   ]
-    .filter((line): line is string => Boolean(line))
-    .join('\n')
+
+  for (const mode of fallbackModes) {
+    const contract = renderAssistantCliSurfaceContract(commands, mode, sourceDetail)
+    if (contract.length <= assistantCliSurfaceBootstrapContractCharBudget) {
+      return contract
+    }
+  }
+
+  const minimalContract = renderAssistantCliSurfaceContract(
+    commands,
+    'description-only',
+    sourceDetail,
+  )
+  return minimalContract.slice(0, assistantCliSurfaceBootstrapContractCharBudget).trimEnd()
 }
 
-function parsePersistedAssistantCliSurfaceSummary(
+function parsePersistedAssistantCliSurfaceContract(
   value: Record<string, unknown> | null,
 ): string | null {
   if (!value) {
     return null
   }
 
+  const contract = value.contract
+  if (typeof contract === 'string' && contract.trim().length > 0) {
+    return contract.trim()
+  }
+
   const summary = value.summary
   return typeof summary === 'string' && summary.trim().length > 0 ? summary.trim() : null
 }
 
-async function loadAssistantCliSurfaceSummary(input: {
+async function loadAssistantCliSurfaceContract(input: {
   cliEnv?: NodeJS.ProcessEnv
   vault: string
   workingDirectory?: string | null
 }): Promise<string | null> {
-  if (cachedAssistantCliSurfaceSummaryPromise === null) {
-    cachedAssistantCliSurfaceSummaryPromise = generateAssistantCliSurfaceSummary(input)
+  if (cachedAssistantCliSurfaceContractPromise === null) {
+    cachedAssistantCliSurfaceContractPromise = generateAssistantCliSurfaceContract(input)
   }
 
   try {
-    return await cachedAssistantCliSurfaceSummaryPromise
+    const contract = await cachedAssistantCliSurfaceContractPromise
+    if (contract === null) {
+      cachedAssistantCliSurfaceContractPromise = null
+    }
+
+    return contract
   } catch {
-    cachedAssistantCliSurfaceSummaryPromise = null
+    cachedAssistantCliSurfaceContractPromise = null
     return null
   }
 }
 
-async function generateAssistantCliSurfaceSummary(input: {
+async function generateAssistantCliSurfaceContract(input: {
   cliEnv?: NodeJS.ProcessEnv
   vault: string
   workingDirectory?: string | null
 }): Promise<string | null> {
-  const manifest = await readAssistantCliLlmsManifest({
-    cliEnv: input.cliEnv,
-    vault: input.vault,
-    workingDirectory: input.workingDirectory,
-  })
-  return buildAssistantCliSurfaceSummary(manifest)
-}
-
-function normalizeAssistantCliManifestCommandNames(
-  manifest: AssistantCliLlmsManifest,
-): string[] {
-  const names = manifest.commands
-    .map((command) => command.name.trim())
-    .filter((name) => name.length > 0)
-
-  return [...new Set(names)].sort((left, right) => left.localeCompare(right))
-}
-
-function groupAssistantCliManifestFamilies(
-  commandNames: readonly string[],
-): Map<string, string[]> {
-  const families = new Map<string, string[]>()
-
-  for (const commandName of commandNames) {
-    const separatorIndex = commandName.indexOf(' ')
-    if (separatorIndex === -1) {
-      continue
-    }
-
-    const family = commandName.slice(0, separatorIndex)
-    const entries = families.get(family) ?? []
-    entries.push(commandName)
-    families.set(family, entries)
-  }
-
-  return families
-}
-
-function selectAssistantCliSurfaceFamilies(
-  families: ReadonlyMap<string, readonly string[]>,
-): Array<[string, readonly string[]]> {
-  const selected = new Set<string>()
-  const ordered: Array<[string, readonly string[]]> = []
-
-  for (const family of assistantCliSurfaceBootstrapForcedFamilies) {
-    const entries = families.get(family)
-    if (!entries) {
-      continue
-    }
-
-    selected.add(family)
-    ordered.push([family, entries])
-  }
-
-  const remaining = [...families.entries()]
-    .filter(([family]) => !selected.has(family))
-    .sort((left, right) => {
-      const bySize = right[1].length - left[1].length
-      return bySize !== 0 ? bySize : left[0].localeCompare(right[0])
+  try {
+    const manifest = await readAssistantCliLlmsManifest({
+      cliEnv: input.cliEnv,
+      detail: 'full',
+      vault: input.vault,
+      workingDirectory: input.workingDirectory,
     })
-
-  for (const entry of remaining) {
-    if (ordered.length >= assistantCliSurfaceBootstrapFamilyLimit) {
-      break
-    }
-
-    ordered.push(entry)
+    return buildAssistantCliSurfaceContract(manifest, {
+      sourceDetail: 'full',
+    })
+  } catch {
+    const manifest = await readAssistantCliLlmsManifest({
+      cliEnv: input.cliEnv,
+      detail: 'compact',
+      vault: input.vault,
+      workingDirectory: input.workingDirectory,
+    })
+    return buildAssistantCliSurfaceContract(manifest, {
+      sourceDetail: 'compact',
+    })
   }
-
-  return ordered
 }
 
-function summarizeAssistantCliSurfaceFamily(
-  family: string,
-  commandNames: readonly string[],
-): string | null {
-  const directCommands = new Set<string>()
-  const nestedGroups = new Map<string, number>()
+function normalizeAssistantCliManifestCommands(
+  manifest: AssistantCliLlmsManifest,
+): AssistantCliLlmsManifestCommand[] {
+  const seenCommandNames = new Set<string>()
+  const commands: AssistantCliLlmsManifestCommand[] = []
 
-  for (const commandName of commandNames) {
-    const parts = commandName.split(' ')
-    if (parts.length === 2) {
-      directCommands.add(parts[1]!)
+  for (const command of manifest.commands) {
+    const name = command.name.trim()
+    if (name.length === 0 || seenCommandNames.has(name)) {
       continue
     }
 
-    if (parts.length > 2) {
-      const subgroup = parts[1]!
-      nestedGroups.set(subgroup, (nestedGroups.get(subgroup) ?? 0) + 1)
+    seenCommandNames.add(name)
+    commands.push({
+      ...command,
+      description:
+        typeof command.description === 'string' && command.description.trim().length > 0
+          ? command.description.trim()
+          : undefined,
+      name,
+    })
+  }
+
+  return commands
+}
+
+type AssistantCliContractRenderMode =
+  | 'description-only'
+  | 'required-only'
+  | 'with-common-options'
+
+type AssistantCliCommandGroup = {
+  commands: AssistantCliLlmsManifestCommand[]
+  family: string
+}
+
+function renderAssistantCliSurfaceContract(
+  commands: readonly AssistantCliLlmsManifestCommand[],
+  mode: AssistantCliContractRenderMode,
+  sourceDetail: 'compact' | 'full',
+): string {
+  const groupedCommands = groupAssistantCliManifestCommands(commands)
+  const lines = [
+    'Murph CLI Contract:',
+    'Canonical executor: `murph.cli.run`. Pass only the tokens after `vault-cli`.',
+    sourceDetail === 'full'
+      ? 'This block is compiled automatically from `vault-cli --llms-full --format json` at session bootstrap.'
+      : 'This block is compiled automatically from `vault-cli --llms --format json` at session bootstrap because the full manifest was unavailable.',
+    'Use this contract first. Only fall back to `--schema --format json` or `--help` when a needed detail is missing here.',
+    '',
+    'Family Index:',
+    ...buildAssistantCliFamilyIndexLines(groupedCommands),
+  ]
+
+  for (const group of groupedCommands) {
+    lines.push('')
+    lines.push(`${group.family}:`)
+    for (const command of group.commands) {
+      lines.push(renderAssistantCliContractCommandLine(command, mode))
     }
   }
 
-  const rankedEntries = [
-    ...[...nestedGroups.entries()]
-      .sort((left, right) => {
-        const byCount = right[1] - left[1]
-        return byCount !== 0 ? byCount : left[0].localeCompare(right[0])
-      })
-      .map(([entry]) => entry),
-    ...[...directCommands].sort((left, right) => left.localeCompare(right)),
-  ].slice(0, assistantCliSurfaceBootstrapFamilyEntryLimit)
+  return lines.join('\n')
+}
 
-  return rankedEntries.length > 0 ? `${family}: ${rankedEntries.join(', ')}.` : null
+function buildAssistantCliFamilyIndexLines(
+  groups: readonly AssistantCliCommandGroup[],
+): string[] {
+  return groups.map((group) => {
+    const renderedLeafCommands = group.commands
+      .map((command) => renderAssistantCliFamilyLeafCommandName(group.family, command.name))
+      .slice(0, assistantCliSurfaceBootstrapFamilyIndexEntryLimit)
+    const remainingCount = group.commands.length - renderedLeafCommands.length
+    return `- ${group.family} (${group.commands.length}): ${renderedLeafCommands.join(', ')}${remainingCount > 0 ? ` +${remainingCount} more` : ''}`
+  })
+}
+
+function groupAssistantCliManifestCommands(
+  commands: readonly AssistantCliLlmsManifestCommand[],
+): AssistantCliCommandGroup[] {
+  const groups = new Map<string, AssistantCliLlmsManifestCommand[]>()
+
+  for (const command of commands) {
+    const family = readAssistantCliCommandFamily(command.name)
+    const entries = groups.get(family) ?? []
+    entries.push(command)
+    groups.set(family, entries)
+  }
+
+  return [...groups.entries()].map(([family, groupedCommands]) => ({
+    commands: groupedCommands,
+    family,
+  }))
+}
+
+function readAssistantCliCommandFamily(commandName: string): string {
+  const separatorIndex = commandName.indexOf(' ')
+  return separatorIndex === -1 ? 'root' : commandName.slice(0, separatorIndex)
+}
+
+function renderAssistantCliFamilyLeafCommandName(
+  family: string,
+  commandName: string,
+): string {
+  if (family === 'root') {
+    return commandName
+  }
+
+  return commandName === family ? family : commandName.slice(family.length + 1)
+}
+
+function renderAssistantCliContractCommandLine(
+  command: AssistantCliLlmsManifestCommand,
+  mode: AssistantCliContractRenderMode,
+): string {
+  const normalizedDescription = truncateAssistantCliText(command.description ?? '', 220)
+  const parts = [`- \`${command.name}\`${normalizedDescription ? `: ${normalizedDescription}` : ''}`]
+  const argsSchema = command.schema?.args
+  const optionsSchema = command.schema?.options
+  const requiredArgs = readAssistantCliRequiredSchemaPropertyNames(argsSchema).map(
+    (name) => `<${name}>`,
+  )
+  const requiredOptions = readAssistantCliRequiredSchemaPropertyNames(optionsSchema)
+    .filter((name) => !assistantCliSurfaceBootstrapIgnoredOptionNames.has(name))
+    .map((name) => renderAssistantCliOptionSignature(name, optionsSchema?.properties?.[name]))
+  const commonOptions =
+    mode === 'with-common-options'
+      ? readAssistantCliCommonOptionalOptionNames(optionsSchema).map((name) =>
+          renderAssistantCliOptionSignature(name, optionsSchema?.properties?.[name]),
+        )
+      : []
+
+  if (mode !== 'description-only') {
+    if (requiredArgs.length > 0) {
+      parts.push(`args ${requiredArgs.join(' ')}`)
+    }
+
+    if (requiredOptions.length > 0) {
+      parts.push(`required ${requiredOptions.join(', ')}`)
+    }
+  }
+
+  if (mode === 'with-common-options' && commonOptions.length > 0) {
+    parts.push(`common ${commonOptions.join(', ')}`)
+  }
+
+  return `${parts.join('; ')}.`
+}
+
+function readAssistantCliRequiredSchemaPropertyNames(
+  schema: AssistantCliLlmsManifestSchemaNode | undefined,
+): string[] {
+  const requiredNames = new Set(schema?.required ?? [])
+  const propertyNames = Object.keys(schema?.properties ?? {})
+
+  return propertyNames.filter((name) => requiredNames.has(name))
+}
+
+function readAssistantCliCommonOptionalOptionNames(
+  schema: AssistantCliLlmsManifestSchemaNode | undefined,
+): string[] {
+  const requiredNames = new Set(schema?.required ?? [])
+  const propertyEntries = Object.entries(schema?.properties ?? {})
+
+  return propertyEntries
+    .filter(([name]) => !assistantCliSurfaceBootstrapIgnoredOptionNames.has(name))
+    .filter(([name]) => !requiredNames.has(name))
+    .slice(0, assistantCliSurfaceBootstrapOptionalOptionLimit)
+    .map(([name]) => name)
+}
+
+function renderAssistantCliOptionSignature(
+  optionName: string,
+  schema: AssistantCliLlmsManifestSchemaNode | undefined,
+): string {
+  const suffix = renderAssistantCliOptionValueSuffix(schema)
+  return `--${optionName}${suffix}`
+}
+
+function renderAssistantCliOptionValueSuffix(
+  schema: AssistantCliLlmsManifestSchemaNode | undefined,
+): string {
+  if (!schema) {
+    return ''
+  }
+
+  if (schema.type === 'boolean') {
+    return ''
+  }
+
+  if (Array.isArray(schema.enum) && schema.enum.length > 0) {
+    const renderedValues =
+      schema.enum.length <= 6
+        ? schema.enum.join('|')
+        : `${schema.enum.slice(0, 6).join('|')}...`
+    return `=${renderedValues}`
+  }
+
+  if (schema.type === 'array') {
+    return '=list'
+  }
+
+  if (schema.type === 'integer' || schema.type === 'number') {
+    return `=${schema.type}`
+  }
+
+  return ''
+}
+
+function truncateAssistantCliText(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
+    return value
+  }
+
+  return `${value.slice(0, maxLength - 3).trimEnd()}...`
 }
