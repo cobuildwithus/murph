@@ -9,6 +9,24 @@ export const assistantToolSpecSchema = z.object({
   name: z.string().min(1),
   description: z.string().min(1),
   inputExample: z.record(z.string(), z.unknown()).nullable(),
+  mutationSemantics: z.enum([
+    'read-only',
+    'mixed',
+    'assistant-runtime-write',
+    'canonical-write',
+    'outward-side-effect',
+  ]),
+  riskClass: z.enum(['low', 'medium', 'high']),
+  preferredExecutionMode: z.enum([
+    'cli-backed',
+    'native-local',
+    'hosted-or-remote',
+  ]),
+  executionMode: z.enum([
+    'cli-backed',
+    'native-local',
+    'hosted-or-remote',
+  ]),
   provenance: z.object({
     origin: z.enum([
       'descriptor-generated',
@@ -142,6 +160,9 @@ export const inboxModelRouteResultSchema = z.object({
 })
 
 export type AssistantToolSpec = z.infer<typeof assistantToolSpecSchema>
+export type AssistantToolMutationSemantics = AssistantToolSpec['mutationSemantics']
+export type AssistantToolRiskClass = AssistantToolSpec['riskClass']
+export type AssistantToolExecutionPreference = AssistantToolSpec['preferredExecutionMode']
 export type AssistantToolProvenance = AssistantToolSpec['provenance']
 export type AssistantToolCall = z.infer<typeof assistantToolCallSchema>
 export type AssistantToolExecutionResult = z.infer<

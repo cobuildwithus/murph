@@ -53,8 +53,9 @@ import {
 } from '../health-cli-descriptors.js'
 import { resolveAssistantVaultPath } from '../assistant-vault-paths.js'
 import {
-  defineAssistantTool,
-  type AssistantToolDefinition,
+  defineAssistantCapability,
+  type AssistantCapabilityDefinition,
+  type AssistantCapabilityExecutionMode,
 } from '../model-harness.js'
 import {
   listAssistantSelfDeliveryTargets,
@@ -1542,7 +1543,7 @@ export function createCanonicalVaultWriteToolDefinitions(
 export function createOutwardSideEffectToolDefinitions(
   input: AssistantToolContext,
 ) {
-  const tools: AssistantToolDefinition[] = []
+  const tools: AssistantCapabilityDefinition[] = []
 
   if (input.executionContext?.hosted?.issueDeviceConnectLink) {
     tools.push(
@@ -1677,91 +1678,105 @@ function defineHandAuthoredHelperTool<
   TSchema extends ZodTypeAny,
   TResult,
 >(
-  definition: Omit<AssistantToolDefinition<TSchema, TResult>, 'provenance'>,
+  definition: Omit<AssistantCapabilityDefinition<TSchema, TResult>, 'executionBindings'> & {
+    execute(input: z.infer<TSchema>): Promise<TResult>
+  },
 ) {
   return defineAssistantCapabilityTool(definition, {
     origin: 'hand-authored-helper',
     localOnly: true,
     generatedFrom: null,
     policyWrappers: [],
-  })
+  }, 'native-local')
 }
 
 function defineVaultServiceBackedTool<
   TSchema extends ZodTypeAny,
   TResult,
 >(
-  definition: Omit<AssistantToolDefinition<TSchema, TResult>, 'provenance'>,
+  definition: Omit<AssistantCapabilityDefinition<TSchema, TResult>, 'executionBindings'> & {
+    execute(input: z.infer<TSchema>): Promise<TResult>
+  },
 ) {
   return defineAssistantCapabilityTool(definition, {
     origin: 'vault-service-backed',
     localOnly: true,
     generatedFrom: null,
     policyWrappers: [],
-  })
+  }, 'native-local')
 }
 
 function defineCliBackedTool<
   TSchema extends ZodTypeAny,
   TResult,
 >(
-  definition: Omit<AssistantToolDefinition<TSchema, TResult>, 'provenance'>,
+  definition: Omit<AssistantCapabilityDefinition<TSchema, TResult>, 'executionBindings'> & {
+    execute(input: z.infer<TSchema>): Promise<TResult>
+  },
 ) {
   return defineAssistantCapabilityTool(definition, {
     origin: 'cli-backed',
     localOnly: true,
     generatedFrom: null,
     policyWrappers: [...assistantCliPolicyWrapperKinds],
-  })
+  }, 'cli-backed')
 }
 
 function defineConfiguredWebReadTool<
   TSchema extends ZodTypeAny,
   TResult,
 >(
-  definition: Omit<AssistantToolDefinition<TSchema, TResult>, 'provenance'>,
+  definition: Omit<AssistantCapabilityDefinition<TSchema, TResult>, 'executionBindings'> & {
+    execute(input: z.infer<TSchema>): Promise<TResult>
+  },
 ) {
   return defineAssistantCapabilityTool(definition, {
     origin: 'configured-web-read',
     localOnly: false,
     generatedFrom: null,
     policyWrappers: [],
-  })
+  }, 'native-local')
 }
 
 function defineHostedApiBackedTool<
   TSchema extends ZodTypeAny,
   TResult,
 >(
-  definition: Omit<AssistantToolDefinition<TSchema, TResult>, 'provenance'>,
+  definition: Omit<AssistantCapabilityDefinition<TSchema, TResult>, 'executionBindings'> & {
+    execute(input: z.infer<TSchema>): Promise<TResult>
+  },
 ) {
   return defineAssistantCapabilityTool(definition, {
     origin: 'hosted-api-backed',
     localOnly: false,
     generatedFrom: null,
     policyWrappers: [],
-  })
+  }, 'native-local')
 }
 
 function defineNativeLocalOnlyTool<
   TSchema extends ZodTypeAny,
   TResult,
 >(
-  definition: Omit<AssistantToolDefinition<TSchema, TResult>, 'provenance'>,
+  definition: Omit<AssistantCapabilityDefinition<TSchema, TResult>, 'executionBindings'> & {
+    execute(input: z.infer<TSchema>): Promise<TResult>
+  },
 ) {
   return defineAssistantCapabilityTool(definition, {
     origin: 'native-local-only',
     localOnly: true,
     generatedFrom: null,
     policyWrappers: [],
-  })
+  }, 'native-local')
 }
 
 function defineDescriptorGeneratedTool<
   TSchema extends ZodTypeAny,
   TResult,
 >(
-  definition: Omit<AssistantToolDefinition<TSchema, TResult>, 'provenance'>,
+  definition: Omit<AssistantCapabilityDefinition<TSchema, TResult>, 'executionBindings'> & {
+    execute(input: z.infer<TSchema>): Promise<TResult>
+  },
   generatedFrom: string,
 ) {
   return defineAssistantCapabilityTool(definition, {
@@ -1769,18 +1784,26 @@ function defineDescriptorGeneratedTool<
     localOnly: true,
     generatedFrom,
     policyWrappers: [],
-  })
+  }, 'native-local')
 }
 
 function defineAssistantCapabilityTool<
   TSchema extends ZodTypeAny,
   TResult,
 >(
-  definition: Omit<AssistantToolDefinition<TSchema, TResult>, 'provenance'>,
+  definition: Omit<AssistantCapabilityDefinition<TSchema, TResult>, 'executionBindings'> & {
+    execute(input: z.infer<TSchema>): Promise<TResult>
+  },
   provenance: AssistantToolProvenance,
+  preferredExecutionMode: AssistantCapabilityExecutionMode,
 ) {
-  return defineAssistantTool({
-    ...definition,
+  const { execute, ...capability } = definition
+  return defineAssistantCapability({
+    ...capability,
+    preferredExecutionMode,
+    executionBindings: {
+      [preferredExecutionMode]: execute,
+    },
     provenance,
   })
 }

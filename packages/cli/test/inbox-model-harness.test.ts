@@ -1123,9 +1123,17 @@ test('createDefaultAssistantToolCatalog exposes assistant runtime, recipe, and f
   assert.equal(catalog.hasTool('vault.food.upsert'), true)
   assert.equal(catalog.hasTool('vault.share.createLink'), true)
   assert.equal(readTextTool?.provenance.origin, 'native-local-only')
+  assert.equal(readTextTool?.mutationSemantics, 'read-only')
+  assert.equal(readTextTool?.riskClass, 'low')
+  assert.equal(readTextTool?.executionMode, 'native-local')
   assert.equal(goalUpsertTool?.provenance.origin, 'descriptor-generated')
   assert.equal(goalUpsertTool?.provenance.generatedFrom, 'healthEntityDescriptors')
+  assert.equal(goalUpsertTool?.mutationSemantics, 'canonical-write')
+  assert.equal(goalUpsertTool?.riskClass, 'high')
+  assert.equal(goalUpsertTool?.preferredExecutionMode, 'native-local')
   assert.equal(shareLinkTool?.provenance.origin, 'hosted-api-backed')
+  assert.equal(shareLinkTool?.mutationSemantics, 'outward-side-effect')
+  assert.equal(shareLinkTool?.executionMode, 'native-local')
 })
 
 test('createDefaultAssistantToolCatalog can upsert and read derived knowledge pages directly', async () => {
