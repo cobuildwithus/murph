@@ -256,7 +256,6 @@ test('formatStructuredErrorMessage expands structured validation details and red
           '$.paths.protocolsRoot: Invalid input: expected "bank/protocols"',
           'Invalid JSON in "/Users/example/vault/vault.json".',
         ],
-        repairedFields: ['paths.protocolsRoot'],
       },
     },
   )
@@ -268,8 +267,6 @@ test('formatStructuredErrorMessage expands structured validation details and red
       'details:',
       '- $.paths.protocolsRoot: Invalid input: expected "bank/protocols"',
       '- Invalid JSON in "<HOME_DIR>/vault/vault.json".',
-      'compatibility repairs detected:',
-      '- paths.protocolsRoot',
     ].join('\n'),
   )
 })

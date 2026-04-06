@@ -9,10 +9,6 @@ import {
   type AssistantProviderBinding,
   type AssistantSessionResumeState,
 } from '../assistant-cli-contracts.js'
-import {
-  assistantModelTargetsEqual,
-  createAssistantModelTarget,
-} from '../assistant-backend.js'
 import { normalizeNullableString } from './shared.js'
 
 export function readAssistantProviderResumeRouteId(input: {
@@ -205,19 +201,7 @@ export function normalizeAssistantSessionSnapshot(
 export function serializeAssistantSessionForPersistence(
   session: AssistantSession,
 ): z.infer<typeof assistantPersistedSessionSchema> {
-  const compatibilityTarget = createAssistantModelTarget({
-    provider: session.provider,
-    ...session.providerOptions,
-    ...(session.provider === 'codex-cli' && session.target?.adapter === 'codex-cli'
-      ? { codexCommand: session.target.codexCommand }
-      : {}),
-  })
-  const target =
-    compatibilityTarget &&
-    (!session.target ||
-      !assistantModelTargetsEqual(session.target, compatibilityTarget))
-      ? compatibilityTarget
-      : session.target ?? compatibilityTarget
+  const target = session.target
   if (!target) {
     throw new TypeError('Assistant session target is required.')
   }
@@ -229,14 +213,8 @@ export function serializeAssistantSessionForPersistence(
           resumeRouteId: session.providerBinding.providerState?.resumeRouteId ?? null,
         }
       : null
-  const compatibilityTargetChanged =
-    compatibilityTarget !== null &&
-    session.target !== null &&
-    !assistantModelTargetsEqual(session.target, compatibilityTarget)
   const resumeState = normalizeAssistantSessionResumeState(
-    compatibilityTargetChanged
-      ? bindingResumeState
-      : session.resumeState ?? bindingResumeState,
+    session.resumeState ?? bindingResumeState,
   )
 
   return assistantPersistedSessionSchema.parse({

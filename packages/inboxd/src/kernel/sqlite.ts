@@ -2,7 +2,6 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   applySqliteRuntimeMigrations,
   openSqliteRuntimeDatabase,
-  promoteLegacyLocalStateFileSync,
   resolveRuntimePaths,
   withImmediateTransaction as withTransaction,
 } from "@murphai/runtime-state/node";
@@ -85,12 +84,6 @@ export async function openInboxRuntime({
 
 function openInboxRuntimeDatabase(vaultRoot: string): DatabaseSync {
   const runtimePaths = resolveRuntimePaths(vaultRoot);
-  promoteLegacyLocalStateFileSync({
-    currentPath: runtimePaths.inboxDbPath,
-    legacyPath: runtimePaths.inboxDbLegacyPath,
-    companionSuffixes: SQLITE_WAL_COMPANION_SUFFIXES,
-  });
-
   const database = openSqliteRuntimeDatabase(runtimePaths.inboxDbPath);
   applySqliteRuntimeMigrations(database, {
     migrations: [{

@@ -110,16 +110,11 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       "attachments",
       "report.pdf",
     );
-    await mkdir(path.join(vaultRoot, ".runtime", "device-syncd"), { recursive: true });
     await mkdir(path.dirname(rawAttachmentPath), { recursive: true });
     await mkdir(path.join(vaultRoot, "exports", "packs"), { recursive: true });
     await mkdir(assistantStateRoot, { recursive: true });
     await mkdir(path.join(operatorHomeRoot, ".murph", "hosted"), { recursive: true });
     await writeFile(path.join(vaultRoot, "vault.json"), "{\"schema\":\"vault\"}\n");
-    await writeFile(path.join(vaultRoot, ".runtime", "device-syncd.sqlite"), "sqlite-control-state\n");
-    await writeFile(path.join(vaultRoot, ".runtime", "device-syncd", "launcher.json"), "{\"pid\":1234}\n");
-    await writeFile(path.join(vaultRoot, ".runtime", "device-syncd", "control-token"), "control-token\n");
-    await writeFile(path.join(vaultRoot, ".runtime", "device-syncd", "stdout.log"), "skip-log\n");
     await writeFile(path.join(vaultRoot, ".env.local"), "secret=true\n");
     await writeFile(path.join(vaultRoot, "exports", "packs", "bundle.zip"), "skip-me\n");
     await writeFile(path.join(vaultRoot, "raw", "notes.json"), "{\"keep\":true}\n");
@@ -148,33 +143,6 @@ test("hosted execution snapshots collapse into one workspace bundle and external
         root: "vault",
       }),
       "{\"schema\":\"vault\"}\n",
-    );
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: bundles.vaultBundle,
-        expectedKind: "vault",
-        path: ".runtime/device-syncd.sqlite",
-        root: "vault",
-      }),
-      null,
-    );
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: bundles.vaultBundle,
-        expectedKind: "vault",
-        path: ".runtime/device-syncd/launcher.json",
-        root: "vault",
-      }),
-      null,
-    );
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: bundles.vaultBundle,
-        expectedKind: "vault",
-        path: ".runtime/device-syncd/control-token",
-        root: "vault",
-      }),
-      null,
     );
     assert.equal(
       readHostedBundleTextFile({

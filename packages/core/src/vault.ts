@@ -81,7 +81,6 @@ interface RepairVaultResult {
   metadataFile: string;
   title: string;
   timezone: string;
-  repairedFields: string[];
   createdDirectories: string[];
   updated: boolean;
   auditPath: string | null;
@@ -119,7 +118,6 @@ interface LoadedVault {
   vaultRoot: string;
   metadata: VaultMetadata;
   layout: typeof VAULT_LAYOUT;
-  compatibilityRepairs: string[];
 }
 
 interface InitializedVault extends LoadedVault {
@@ -250,7 +248,7 @@ export async function initializeVault({
 
 export async function loadVault({ vaultRoot }: LoadVaultInput = {}): Promise<LoadedVault> {
   const absoluteRoot = normalizeVaultRoot(vaultRoot);
-  const { metadata, repairedFields } = await loadVaultMetadata(
+  const { metadata } = await loadVaultMetadata(
     absoluteRoot,
     "VAULT_INVALID_METADATA",
     "Vault metadata failed contract validation.",
@@ -262,25 +260,23 @@ export async function loadVault({ vaultRoot }: LoadVaultInput = {}): Promise<Loa
     layout: {
       ...VAULT_LAYOUT,
     },
-    compatibilityRepairs: repairedFields,
   };
 }
 
 export async function repairVault({ vaultRoot }: LoadVaultInput = {}): Promise<RepairVaultResult> {
   const absoluteRoot = normalizeVaultRoot(vaultRoot);
-  const { metadata, repairedFields } = await loadVaultMetadata(
+  const { metadata } = await loadVaultMetadata(
     absoluteRoot,
     "VAULT_INVALID_METADATA",
     "Vault metadata failed contract validation.",
   );
   const createdDirectories = await ensureMissingRequiredDirectories(absoluteRoot);
 
-  if (repairedFields.length === 0 && createdDirectories.length === 0) {
+  if (createdDirectories.length === 0) {
     return {
       metadataFile: VAULT_LAYOUT.metadata,
       title: metadata.title,
       timezone: metadata.timezone,
-      repairedFields,
       createdDirectories,
       updated: false,
       auditPath: null,
@@ -290,31 +286,21 @@ export async function repairVault({ vaultRoot }: LoadVaultInput = {}): Promise<R
   let auditPath: string | null = null;
   const occurredAt = new Date().toISOString();
 
-  if (repairedFields.length > 0 || createdDirectories.length > 0) {
+  if (createdDirectories.length > 0) {
     auditPath = await runCanonicalWrite({
       vaultRoot: absoluteRoot,
       operationType: "vault_repair",
       summary: `Repair vault ${metadata.vaultId}`,
       occurredAt,
       mutate: async ({ batch }) => {
-        if (repairedFields.length > 0) {
-          await batch.stageTextWrite(
-            VAULT_LAYOUT.metadata,
-            `${JSON.stringify(metadata, null, 2)}\n`,
-            {
-              overwrite: true,
-            },
-          );
-        }
-
         const audit = await emitAuditRecord({
           vaultRoot: absoluteRoot,
           batch,
           action: "vault_repair",
           commandName: "core.repairVault",
-          summary: "Repaired vault metadata and additive scaffold directories.",
+          summary: "Created missing required scaffold directories.",
           occurredAt,
-          files: repairedFields.length > 0 ? [VAULT_LAYOUT.metadata, ...createdDirectories] : createdDirectories,
+          files: createdDirectories,
           targetIds: [metadata.vaultId],
         });
 
@@ -327,7 +313,6 @@ export async function repairVault({ vaultRoot }: LoadVaultInput = {}): Promise<R
     metadataFile: VAULT_LAYOUT.metadata,
     title: metadata.title,
     timezone: metadata.timezone,
-    repairedFields,
     createdDirectories,
     updated: true,
     auditPath,
@@ -903,16 +888,6 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
   try {
     const loadedVault = await loadVault({ vaultRoot: absoluteRoot });
     metadata = loadedVault.metadata;
-    issues.push(
-      ...loadedVault.compatibilityRepairs.map((fieldPath) =>
-        validationIssue(
-          "VAULT_METADATA_REPAIR_RECOMMENDED",
-          `Vault metadata is missing additive field "${fieldPath}". Run \`vault repair\` to persist the current scaffold.`,
-          VAULT_LAYOUT.metadata,
-          "warning",
-        ),
-      ),
-    );
   } catch (error) {
     issues.push(
       validationIssue(

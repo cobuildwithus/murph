@@ -138,7 +138,6 @@ function createIntegratedCoreServices(): CoreWriteServices {
         metadataFile: result.metadataFile,
         title: result.title,
         timezone: result.timezone,
-        repairedFields: result.repairedFields,
         createdDirectories: result.createdDirectories,
         updated: result.updated,
         auditPath: result.auditPath,

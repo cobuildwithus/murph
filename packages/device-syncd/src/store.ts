@@ -1,11 +1,9 @@
 import type { DatabaseSync } from "node:sqlite";
 
 import {
-  DEVICE_SYNC_DB_LEGACY_RELATIVE_PATH,
   DEVICE_SYNC_DB_RELATIVE_PATH,
   applySqliteRuntimeMigrations,
   openSqliteRuntimeDatabase,
-  promoteLegacyLocalStateFileSync,
   withImmediateTransaction,
 } from "@murphai/runtime-state/node";
 
@@ -351,28 +349,12 @@ function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
     `);
 }
 
-function resolveLegacyDeviceSyncDatabasePath(databasePath: string): string | null {
-  const normalizedDatabasePath = databasePath.replace(/\\/gu, "/");
-  const canonicalSuffix = `/${DEVICE_SYNC_DB_RELATIVE_PATH}`;
-
-  if (!normalizedDatabasePath.endsWith(canonicalSuffix)) {
-    return null;
-  }
-
-  return `${databasePath.slice(0, databasePath.length - DEVICE_SYNC_DB_RELATIVE_PATH.length)}${DEVICE_SYNC_DB_LEGACY_RELATIVE_PATH}`;
-}
-
 export class SqliteDeviceSyncStore {
   readonly databasePath: string;
   readonly database: DatabaseSync;
 
   constructor(databasePath: string) {
     this.databasePath = databasePath;
-    promoteLegacyLocalStateFileSync({
-      currentPath: databasePath,
-      legacyPath: resolveLegacyDeviceSyncDatabasePath(databasePath),
-      companionSuffixes: SQLITE_WAL_COMPANION_SUFFIXES,
-    });
     this.database = openSqliteRuntimeDatabase(databasePath);
     applySqliteRuntimeMigrations(this.database, {
       migrations: [{

@@ -70,12 +70,6 @@ interface DefineBankRegistryEntityInput extends Omit<BankEntityDefinition, "regi
   };
 }
 
-const RELATED_IDS_COMPATIBILITY_RELATION: BankEntityRegistryLinkMetadata = {
-  type: "related_to",
-  keys: ["relatedIds"],
-  cardinality: "many",
-};
-
 type HealthBackedBankEntityKind = Extract<BankEntityKind, HealthEntityKind>;
 
 const HEALTH_BANK_ENTITY_KINDS = [
@@ -117,7 +111,6 @@ const checkedBankEntityDefinitions = [
       idField: "foodId",
       upsertPayloadSchema: foodUpsertPayloadSchema as ZodTypeAny,
       relationKeys: [
-        RELATED_IDS_COMPATIBILITY_RELATION,
         {
           type: "related_protocol",
           keys: ["attachedProtocolIds"],
@@ -146,7 +139,6 @@ const checkedBankEntityDefinitions = [
       idField: "recipeId",
       upsertPayloadSchema: recipeUpsertPayloadSchema as ZodTypeAny,
       relationKeys: [
-        RELATED_IDS_COMPATIBILITY_RELATION,
         {
           type: "related_goal",
           keys: ["relatedGoalIds"],
@@ -177,7 +169,6 @@ const checkedBankEntityDefinitions = [
       frontmatterSchema: providerFrontmatterSchema as ZodTypeAny,
       directory: "bank/providers",
       idField: "providerId",
-      relationKeys: [RELATED_IDS_COMPATIBILITY_RELATION],
       titleKeys: ["title"],
       statusKeys: ["status"],
     },

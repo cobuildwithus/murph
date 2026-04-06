@@ -11,20 +11,12 @@ import {
 import { listHostedStorageObjectKeys } from "./storage-paths.js";
 
 const HOSTED_PENDING_USAGE_DIRTY_USER_SCHEMA = "murph.hosted-pending-usage-dirty.v1";
-const HOSTED_PENDING_USAGE_LEGACY_SCHEMA = "murph.hosted-pending-usage.v1";
 const HOSTED_PENDING_USAGE_RECORD_SCHEMA = "murph.hosted-pending-usage-record.v2";
 const HOSTED_PENDING_USAGE_DIRTY_PREFIX = "transient/assistant-usage-dirty/";
 const HOSTED_PENDING_USAGE_RECORD_PREFIX = "transient/assistant-usage/";
 
 interface StoredHostedPendingUsageDirtyUser {
   schema: typeof HOSTED_PENDING_USAGE_DIRTY_USER_SCHEMA;
-  updatedAt: string;
-  userId: string;
-}
-
-interface StoredHostedPendingUsageLegacy {
-  records: Record<string, unknown>[];
-  schema: typeof HOSTED_PENDING_USAGE_LEGACY_SCHEMA;
   updatedAt: string;
   userId: string;
 }
@@ -38,8 +30,6 @@ interface StoredHostedPendingUsageRecord {
 }
 
 interface HostedPendingUsageState {
-  hasLegacyData: boolean;
-  legacyRecords: Record<string, unknown>[];
   records: Record<string, unknown>[];
 }
 
@@ -93,15 +83,6 @@ export function createHostedPendingUsageStore(input: {
 
       const now = new Date().toISOString();
 
-      if (state.hasLegacyData) {
-        await migrateLegacyHostedPendingUsageRecords({
-          ...input,
-          legacyRecords: state.legacyRecords,
-          updatedAt: now,
-          userId: request.userId,
-        });
-      }
-
       for (const record of accepted) {
         await writeStoredHostedPendingUsageRecord({
           ...input,
@@ -112,7 +93,7 @@ export function createHostedPendingUsageStore(input: {
       }
 
       const totalRecords = state.records.length + accepted.length;
-      if (totalRecords > 0 && (accepted.length > 0 || state.hasLegacyData)) {
+      if (totalRecords > 0 && accepted.length > 0) {
         await writeHostedPendingUsageDirtyUser({
           bucket: input.bucket,
           key: input.dirtyKey,
@@ -141,18 +122,6 @@ export function createHostedPendingUsageStore(input: {
         userId: request.userId,
       });
       const now = new Date().toISOString();
-
-      if (state.hasLegacyData) {
-        const remainingLegacyRecords = state.legacyRecords.filter(
-          (record) => !usageIds.has(readUsageId(record)),
-        );
-        await migrateLegacyHostedPendingUsageRecords({
-          ...input,
-          legacyRecords: remainingLegacyRecords,
-          updatedAt: now,
-          userId: request.userId,
-        });
-      }
 
       if (input.bucket.delete) {
         for (const usageId of usageIds) {
@@ -274,66 +243,10 @@ async function readHostedPendingUsageState(input: {
   const recordsByUsageId = new Map(
     perRecordRecords.map((record) => [readUsageId(record), cloneUsageRecord(record)]),
   );
-  const legacy = await readStoredHostedPendingUsageLegacy({
-    bucket: input.bucket,
-    key: input.key,
-    keyId: input.keyId,
-    keysById: input.keysById,
-    userId: input.userId,
-  });
-
-  for (const record of legacy?.records ?? []) {
-    const usageId = readUsageId(record);
-    if (!recordsByUsageId.has(usageId)) {
-      recordsByUsageId.set(usageId, cloneUsageRecord(record));
-    }
-  }
 
   return {
-    hasLegacyData: Boolean(legacy),
-    legacyRecords: legacy?.records.map((record) => cloneUsageRecord(record)) ?? [],
     records: [...recordsByUsageId.values()],
   };
-}
-
-async function migrateLegacyHostedPendingUsageRecords(input: {
-  bucket: R2BucketLike;
-  dirtyKey: Uint8Array;
-  dirtyKeyId: string;
-  dirtyKeysById?: Readonly<Record<string, Uint8Array>>;
-  key: Uint8Array;
-  keyId: string;
-  keysById?: Readonly<Record<string, Uint8Array>>;
-  legacyRecords: readonly Record<string, unknown>[];
-  updatedAt: string;
-  userId: string;
-}): Promise<void> {
-  for (const record of input.legacyRecords) {
-    await writeStoredHostedPendingUsageRecord({
-      bucket: input.bucket,
-      key: input.key,
-      keyId: input.keyId,
-      record,
-      updatedAt: input.updatedAt,
-      userId: input.userId,
-    });
-  }
-
-  await deleteStoredHostedPendingUsageLegacy({
-    bucket: input.bucket,
-    key: input.key,
-    keysById: input.keysById,
-    userId: input.userId,
-  });
-
-  if (input.legacyRecords.length === 0) {
-    await deleteHostedPendingUsageDirtyUser({
-      bucket: input.bucket,
-      key: input.dirtyKey,
-      keysById: input.dirtyKeysById,
-      userId: input.userId,
-    });
-  }
 }
 
 async function readStoredHostedPendingUsageRecords(input: {
@@ -390,54 +303,6 @@ async function readStoredHostedPendingUsageRecords(input: {
   }
 
   return [...recordsByUsageId.values()];
-}
-
-async function readStoredHostedPendingUsageLegacy(input: {
-  bucket: R2BucketLike;
-  key: Uint8Array;
-  keyId: string;
-  keysById?: Readonly<Record<string, Uint8Array>>;
-  userId: string;
-}): Promise<StoredHostedPendingUsageLegacy | null> {
-  for (const key of await pendingUsageLegacyObjectKeys(input.key, input.keysById, input.userId)) {
-    const record = await readEncryptedR2Json({
-      aad: buildHostedStorageAad({
-        key,
-        purpose: "assistant-usage",
-        userId: input.userId,
-      }),
-      bucket: input.bucket,
-      cryptoKey: input.key,
-      cryptoKeysById: input.keysById,
-      expectedKeyId: input.keyId,
-      key,
-      parse(value) {
-        return parseStoredHostedPendingUsageLegacy(value);
-      },
-      scope: "assistant-usage",
-    });
-
-    if (record) {
-      return record;
-    }
-  }
-
-  return null;
-}
-
-async function deleteStoredHostedPendingUsageLegacy(input: {
-  bucket: R2BucketLike;
-  key: Uint8Array;
-  keysById?: Readonly<Record<string, Uint8Array>>;
-  userId: string;
-}): Promise<void> {
-  if (!input.bucket.delete) {
-    return;
-  }
-
-  for (const key of await pendingUsageLegacyObjectKeys(input.key, input.keysById, input.userId)) {
-    await input.bucket.delete(key);
-  }
 }
 
 async function writeStoredHostedPendingUsageRecord(input: {
@@ -553,23 +418,6 @@ function parseStoredHostedPendingUsageDirtyUser(value: unknown): StoredHostedPen
   };
 }
 
-function parseStoredHostedPendingUsageLegacy(value: unknown): StoredHostedPendingUsageLegacy {
-  const record = requireRecord(value, "Hosted pending usage legacy record");
-
-  return {
-    records: requireArray(record.records, "Hosted pending usage legacy record.records").map((entry, index) =>
-      cloneUsageRecord(requireRecord(entry, `Hosted pending usage legacy record.records[${index}]`))
-    ),
-    schema: requireSchema(
-      record.schema,
-      "Hosted pending usage legacy record.schema",
-      HOSTED_PENDING_USAGE_LEGACY_SCHEMA,
-    ),
-    updatedAt: normalizeRequiredString(record.updatedAt, "Hosted pending usage legacy record.updatedAt"),
-    userId: normalizeRequiredString(record.userId, "Hosted pending usage legacy record.userId"),
-  };
-}
-
 function sortHostedPendingUsageRecords(
   records: readonly Record<string, unknown>[],
 ): Record<string, unknown>[] {
@@ -639,27 +487,6 @@ async function pendingUsageRecordObjectPrefixes(
     listHostedStorageRootKeys(rootKey, keysById).map((candidateRootKey) =>
       pendingUsageRecordObjectPrefix(candidateRootKey, userId)
     ),
-  );
-}
-
-async function pendingUsageLegacyObjectKey(rootKey: Uint8Array, userId: string): Promise<string> {
-  const userSegment = await deriveHostedStorageOpaqueId({
-    length: 24,
-    rootKey,
-    scope: "assistant-usage-path",
-    value: `user:${userId}`,
-  });
-
-  return `${HOSTED_PENDING_USAGE_RECORD_PREFIX}${userSegment}.json`;
-}
-
-async function pendingUsageLegacyObjectKeys(
-  rootKey: Uint8Array,
-  keysById: Readonly<Record<string, Uint8Array>> | undefined,
-  userId: string,
-): Promise<string[]> {
-  return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
-    pendingUsageLegacyObjectKey(candidateRootKey, userId)
   );
 }
 

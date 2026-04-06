@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
 import {
+  createVersionedJsonStateEnvelope,
   openSqliteRuntimeDatabase,
   parseVersionedJsonStateEnvelope,
   resolveRuntimePaths,
@@ -902,11 +903,29 @@ async function readPersistedInboxDaemonState(absolutePath: string): Promise<{
   const parsed = JSON.parse(await readFile(absolutePath, 'utf8')) as unknown
   return parseVersionedJsonStateEnvelope(parsed, {
     label: 'Inbox daemon state',
-    legacyParseValue: parsePersistedInboxDaemonState,
     parseValue: parsePersistedInboxDaemonState,
     schema: INBOX_DAEMON_STATE_SCHEMA,
     schemaVersion: INBOX_DAEMON_STATE_SCHEMA_VERSION,
   })
+}
+
+async function writePersistedInboxDaemonState(
+  absolutePath: string,
+  value: Record<string, unknown>,
+): Promise<void> {
+  await writeFile(
+    absolutePath,
+    `${JSON.stringify(
+      createVersionedJsonStateEnvelope({
+        schema: INBOX_DAEMON_STATE_SCHEMA,
+        schemaVersion: INBOX_DAEMON_STATE_SCHEMA_VERSION,
+        value,
+      }),
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  )
 }
 
 function parsePersistedInboxDaemonState(value: unknown): {
@@ -2899,46 +2918,36 @@ test.sequential('stop signals the recorded pid and waits for state to settle', a
     })
     const statePath = path.join(fixture.vaultRoot, idleState.statePath)
 
-    await writeFile(
+    await writePersistedInboxDaemonState(
       statePath,
-      `${JSON.stringify(
-        {
-          ...idleState,
-          running: true,
-          stale: false,
-          pid: 4242,
-          startedAt: '2026-03-13T09:00:00.000Z',
-          stoppedAt: null,
-          status: 'running',
-          connectorIds: ['imessage:self'],
-          message: null,
-        },
-        null,
-        2,
-      )}\n`,
-      'utf8',
+      {
+        ...idleState,
+        running: true,
+        stale: false,
+        pid: 4242,
+        startedAt: '2026-03-13T09:00:00.000Z',
+        stoppedAt: null,
+        status: 'running',
+        connectorIds: ['imessage:self'],
+        message: null,
+      },
     )
 
     setTimeout(async () => {
-      await writeFile(
+      await writePersistedInboxDaemonState(
         statePath,
-        `${JSON.stringify(
-          {
-            ...idleState,
-            running: false,
-            stale: false,
-            pid: 4242,
-            startedAt: '2026-03-13T09:00:00.000Z',
-            stoppedAt: '2026-03-13T09:00:02.000Z',
-            status: 'stopped',
-            connectorIds: ['imessage:self'],
-            message: 'Inbox daemon stopped by signal.',
-          },
-          null,
-          2,
-        )}\n`,
-        'utf8',
-      )
+        {
+          ...idleState,
+          running: false,
+          stale: false,
+          pid: 4242,
+          startedAt: '2026-03-13T09:00:00.000Z',
+          stoppedAt: '2026-03-13T09:00:02.000Z',
+          status: 'stopped',
+          connectorIds: ['imessage:self'],
+          message: 'Inbox daemon stopped by signal.',
+        },
+      ).catch(() => undefined)
     }, 50)
 
     const stopped = await services.stop({
@@ -3022,26 +3031,21 @@ test.sequential(
         vaultRoot: fixture.vaultRoot,
       })
 
-      await writeFile(
+      await writePersistedInboxDaemonState(
         paths.inboxStatePath,
-        `${JSON.stringify(
-          {
-            running: true,
-            stale: false,
-            pid: 7777,
-            startedAt: '2026-03-13T09:00:00.000Z',
-            stoppedAt: null,
-            status: 'running',
-            connectorIds: ['imessage:self'],
-            statePath: '.runtime/operations/inbox/state.json',
-            configPath: '.runtime/operations/inbox/config.json',
-            databasePath: '.runtime/projections/inboxd.sqlite',
-            message: null,
-          },
-          null,
-          2,
-        )}\n`,
-        'utf8',
+        {
+          running: true,
+          stale: false,
+          pid: 7777,
+          startedAt: '2026-03-13T09:00:00.000Z',
+          stoppedAt: null,
+          status: 'running',
+          connectorIds: ['imessage:self'],
+          statePath: '.runtime/operations/inbox/state.json',
+          configPath: '.runtime/operations/inbox/config.json',
+          databasePath: '.runtime/projections/inboxd.sqlite',
+          message: null,
+        },
       )
 
       await expectVaultCliError(
@@ -3068,27 +3072,22 @@ test.sequential(
         /Stale daemon state/u,
       )
 
-      await writeFile(
+      await writePersistedInboxDaemonState(
         paths.inboxStatePath,
-        `${JSON.stringify(
-          {
-            ...persistedStaleState,
-            running: false,
-            stale: false,
-            pid: null,
-            startedAt: null,
-            stoppedAt: null,
-            status: 'idle',
-            connectorIds: [],
-            statePath: '.runtime/operations/inbox/state.json',
-            configPath: '.runtime/operations/inbox/config.json',
-            databasePath: '.runtime/projections/inboxd.sqlite',
-            message: null,
-          },
-          null,
-          2,
-        )}\n`,
-        'utf8',
+        {
+          ...persistedStaleState,
+          running: false,
+          stale: false,
+          pid: null,
+          startedAt: null,
+          stoppedAt: null,
+          status: 'idle',
+          connectorIds: [],
+          statePath: '.runtime/operations/inbox/state.json',
+          configPath: '.runtime/operations/inbox/config.json',
+          databasePath: '.runtime/projections/inboxd.sqlite',
+          message: null,
+        },
       )
 
       await assert.rejects(
@@ -3145,26 +3144,21 @@ test.sequential('stop reports not-running and timeout edge cases', async () => {
       'INBOX_NOT_RUNNING',
     )
 
-    await writeFile(
+    await writePersistedInboxDaemonState(
       paths.inboxStatePath,
-      `${JSON.stringify(
-        {
-          running: true,
-          stale: false,
-          pid: 8888,
-          startedAt: '2026-03-13T09:00:00.000Z',
-          stoppedAt: null,
-          status: 'running',
-          connectorIds: ['imessage:self'],
-          statePath: '.runtime/operations/inbox/state.json',
-          configPath: '.runtime/operations/inbox/config.json',
-          databasePath: '.runtime/projections/inboxd.sqlite',
-          message: null,
-        },
-        null,
-        2,
-      )}\n`,
-      'utf8',
+      {
+        running: true,
+        stale: false,
+        pid: 8888,
+        startedAt: '2026-03-13T09:00:00.000Z',
+        stoppedAt: null,
+        status: 'running',
+        connectorIds: ['imessage:self'],
+        statePath: '.runtime/operations/inbox/state.json',
+        configPath: '.runtime/operations/inbox/config.json',
+        databasePath: '.runtime/projections/inboxd.sqlite',
+        message: null,
+      },
     )
 
     await expectVaultCliError(
@@ -3223,26 +3217,21 @@ test.sequential('stop force-kills a stubborn live daemon and returns stale state
       vaultRoot: fixture.vaultRoot,
     })
 
-    await writeFile(
+    await writePersistedInboxDaemonState(
       paths.inboxStatePath,
-      `${JSON.stringify(
-        {
-          running: true,
-          stale: false,
-          pid: 8787,
-          startedAt: '2026-03-13T09:00:00.000Z',
-          stoppedAt: null,
-          status: 'running',
-          connectorIds: ['imessage:self'],
-          statePath: '.runtime/operations/inbox/state.json',
-          configPath: '.runtime/operations/inbox/config.json',
-          databasePath: '.runtime/projections/inboxd.sqlite',
-          message: null,
-        },
-        null,
-        2,
-      )}\n`,
-      'utf8',
+      {
+        running: true,
+        stale: false,
+        pid: 8787,
+        startedAt: '2026-03-13T09:00:00.000Z',
+        stoppedAt: null,
+        status: 'running',
+        connectorIds: ['imessage:self'],
+        statePath: '.runtime/operations/inbox/state.json',
+        configPath: '.runtime/operations/inbox/config.json',
+        databasePath: '.runtime/projections/inboxd.sqlite',
+        message: null,
+      },
     )
 
     const stopped = await services.stop({
@@ -3300,26 +3289,21 @@ test.sequential('stop ignores missing suspended pid recovery signals and still r
       vaultRoot: fixture.vaultRoot,
     })
 
-    await writeFile(
+    await writePersistedInboxDaemonState(
       paths.inboxStatePath,
-      `${JSON.stringify(
-        {
-          running: true,
-          stale: false,
-          pid: 8989,
-          startedAt: '2026-03-13T09:00:00.000Z',
-          stoppedAt: null,
-          status: 'running',
-          connectorIds: ['imessage:self'],
-          statePath: '.runtime/operations/inbox/state.json',
-          configPath: '.runtime/operations/inbox/config.json',
-          databasePath: '.runtime/projections/inboxd.sqlite',
-          message: null,
-        },
-        null,
-        2,
-      )}\n`,
-      'utf8',
+      {
+        running: true,
+        stale: false,
+        pid: 8989,
+        startedAt: '2026-03-13T09:00:00.000Z',
+        stoppedAt: null,
+        status: 'running',
+        connectorIds: ['imessage:self'],
+        statePath: '.runtime/operations/inbox/state.json',
+        configPath: '.runtime/operations/inbox/config.json',
+        databasePath: '.runtime/projections/inboxd.sqlite',
+        message: null,
+      },
     )
 
     const stopped = await services.stop({

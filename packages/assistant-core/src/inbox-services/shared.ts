@@ -1,7 +1,6 @@
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
-import { readLocalStateTextFileWithFallback } from '@murphai/runtime-state/node'
 import {
   inboxDoctorCheckSchema,
   type InboxConnectorConfig,
@@ -21,15 +20,13 @@ import type {
 export { errorMessage, normalizeNullableString } from '../text/shared.js'
 
 export async function readJsonWithSchema<T>(
-  absolutePath: string | { currentPath: string; legacyPath?: string | null },
+  absolutePath: string,
   schema: z.ZodType<T>,
   code: string,
   message: string,
 ): Promise<T> {
   try {
-    const raw = typeof absolutePath === 'string'
-      ? await readFile(absolutePath, 'utf8')
-      : (await readLocalStateTextFileWithFallback(absolutePath)).text
+    const raw = await readFile(absolutePath, 'utf8')
     const parsed = JSON.parse(raw) as unknown
     return schema.parse(parsed)
   } catch (error) {

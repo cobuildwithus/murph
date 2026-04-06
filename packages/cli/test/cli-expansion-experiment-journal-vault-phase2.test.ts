@@ -503,14 +503,10 @@ test.sequential(
         }
         paths: Record<string, string>
       }
-      delete staleMetadata.idPolicy.prefixes.recipe
-      delete staleMetadata.paths.recipesRoot
-      await writeFile(metadataPath, `${JSON.stringify(staleMetadata, null, 2)}\n`, 'utf8')
       await rm(path.join(vaultRoot, 'bank/recipes'), { recursive: true, force: true })
 
       const repaired = await runSliceCli<{
         metadataFile: string
-        repairedFields: string[]
         createdDirectories: string[]
         updated: boolean
         auditPath: string | null
@@ -525,10 +521,6 @@ test.sequential(
       assert.equal(repaired.meta?.command, 'vault repair')
       assert.equal(requireData(repaired).metadataFile, 'vault.json')
       assert.equal(requireData(repaired).updated, true)
-      assert.deepEqual(requireData(repaired).repairedFields.sort(), [
-        'idPolicy.prefixes.recipe',
-        'paths.recipesRoot',
-      ])
       assert.deepEqual(requireData(repaired).createdDirectories, ['bank/recipes'])
       assert.equal(typeof requireData(repaired).auditPath, 'string')
 
@@ -541,7 +533,7 @@ test.sequential(
         paths: Record<string, string>
       }
 
-      assert.equal(repairedMetadata.idPolicy.prefixes.recipe, 'rcp')
+      assert.deepEqual(repairedMetadata, staleMetadata)
       assert.equal(repairedMetadata.paths.recipesRoot, 'bank/recipes')
       const validated = await runSliceCli<{
         valid: boolean

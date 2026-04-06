@@ -31,13 +31,9 @@ export interface DeviceDaemonStateRecord {
 export interface DeviceDaemonPaths {
   absoluteVaultRoot: string
   launcherStatePath: string
-  legacyLauncherStatePath: string
   stdoutLogPath: string
-  legacyStdoutLogPath: string
   stderrLogPath: string
-  legacyStderrLogPath: string
   stateDbPath: string
-  legacyStateDbPath: string
 }
 
 export interface DeviceDaemonStatusResult {
