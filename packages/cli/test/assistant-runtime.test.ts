@@ -2039,7 +2039,7 @@ test('scanAssistantAutomationOnce preserves document attachments before auto-rep
       {
         attachmentId: 'att-doc-auto',
         ordinal: 1,
-        lookupId: 'evt_doc_auto',
+        lookupId: 'doc_auto',
         relatedId: 'doc_auto',
         created: true,
       },

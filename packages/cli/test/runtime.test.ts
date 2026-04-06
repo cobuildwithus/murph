@@ -193,13 +193,14 @@ test(
       assert.equal(document.ok, true)
       assert.equal(document.meta?.command, 'document import')
       assert.match(requireData(document).documentId, /^doc_/u)
-      assert.match(requireData(document).lookupId, /^evt_/u)
+      assert.equal(requireData(document).lookupId, requireData(document).documentId)
       assert.equal(requireData(document).rawFile.length > 0, true)
       assert.equal(requireData(document).manifestFile.length > 0, true)
       await access(path.join(fixture.vaultRoot, requireData(document).manifestFile))
 
       const meal = await runCli<{
         mealId: string
+        lookupId: string
         manifestFile: string
       }>([
         'meal',
@@ -212,6 +213,7 @@ test(
       assert.equal(meal.ok, true)
       assert.equal(meal.meta?.command, 'meal add')
       assert.match(requireData(meal).mealId, /^meal_/u)
+      assert.equal(requireData(meal).lookupId, requireData(meal).mealId)
       assert.equal(requireData(meal).manifestFile.length > 0, true)
       await access(path.join(fixture.vaultRoot, requireData(meal).manifestFile))
 

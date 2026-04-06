@@ -68,7 +68,7 @@ export function registerMealCommands(cli: Cli.Cli, _services: VaultServices) {
           vault: String(options.vault ?? ''),
           mealId: result.mealId,
           eventId: result.event.id,
-          lookupId: result.event.id,
+          lookupId: result.mealId,
           occurredAt: result.event.occurredAt ?? null,
           photoPath: result.photo?.relativePath ?? null,
           audioPath: result.audio?.relativePath ?? null,
@@ -80,7 +80,7 @@ export function registerMealCommands(cli: Cli.Cli, _services: VaultServices) {
       },
     },
     show: {
-      description: 'Show one meal event by meal id or event id.',
+      description: 'Show one meal by meal id.',
       argName: 'id',
       argSchema: mealLookupSchema,
       output: showResultSchema,
@@ -100,7 +100,7 @@ export function registerMealCommands(cli: Cli.Cli, _services: VaultServices) {
       },
     },
     manifest: {
-      description: 'Show the immutable raw import manifest for a meal event.',
+      description: 'Show the immutable raw import manifest for a meal.',
       argName: 'id',
       argSchema: mealLookupSchema,
       output: rawImportManifestResultSchema,

@@ -114,7 +114,7 @@ export function createInboxPromotionOps(
           })
 
           return {
-            lookupId: result.event.id,
+            lookupId: result.mealId,
             relatedId: result.mealId,
           }
         },
@@ -178,7 +178,7 @@ export function createInboxPromotionOps(
           })
 
           return {
-            lookupId: result.event.id,
+            lookupId: result.documentId,
             relatedId: result.documentId,
           }
         },

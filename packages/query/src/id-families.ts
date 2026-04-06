@@ -146,7 +146,7 @@ export function deriveVaultRecordIdentity(
 
   return {
     displayId: displayId ?? fallbackId,
-    primaryLookupId: fallbackId,
+    primaryLookupId: displayId ?? fallbackId,
   };
 }
 

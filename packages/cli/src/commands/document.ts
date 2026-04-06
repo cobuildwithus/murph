@@ -63,7 +63,7 @@ export function registerDocumentCommands(
       },
     },
     show: {
-      description: 'Show one imported document event by document id or event id.',
+      description: 'Show one imported document event by document id.',
       argName: 'id',
       argSchema: documentLookupSchema,
       output: showResultSchema,
@@ -88,7 +88,7 @@ export function registerDocumentCommands(
       },
     },
     manifest: {
-      description: 'Show the immutable raw import manifest for a document event.',
+      description: 'Show the immutable raw import manifest for a document.',
       argName: 'id',
       argSchema: documentLookupSchema,
       output: rawImportManifestResultSchema,

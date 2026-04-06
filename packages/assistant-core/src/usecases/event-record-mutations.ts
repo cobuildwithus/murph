@@ -103,7 +103,7 @@ function buildMutableEventPayload(record: QueryCanonicalEntity): JsonObject {
   delete base.lifecycle
 
   if (typeof base.id !== 'string' || base.id.trim().length === 0) {
-    base.id = record.primaryLookupId
+    base.id = resolveCanonicalEventId(record)
   }
 
   if (typeof base.kind !== 'string' || base.kind.trim().length === 0) {
@@ -142,6 +142,25 @@ function buildMutableEventPayload(record: QueryCanonicalEntity): JsonObject {
   }
 
   return base
+}
+
+function resolveCanonicalEventId(record: QueryCanonicalEntity): string {
+  const attributeId =
+    typeof record.attributes.id === 'string' && record.attributes.id.trim().length > 0
+      ? record.attributes.id.trim()
+      : null
+  if (attributeId) {
+    return attributeId
+  }
+
+  const eventAlias = record.lookupIds.find(
+    (lookupId) => typeof lookupId === 'string' && lookupId.startsWith('evt_'),
+  )
+  if (eventAlias) {
+    return eventAlias
+  }
+
+  return record.primaryLookupId
 }
 
 function preserveCanonicalEventIdentity(
@@ -371,11 +390,7 @@ export async function deleteEventRecord(
   input: EventRecordMutationLookupInput,
 ) {
   const record = await requireEventRecord(input)
-  const eventId =
-    typeof record.primaryLookupId === 'string' &&
-    record.primaryLookupId.trim().length > 0
-      ? record.primaryLookupId
-      : input.lookup
+  const eventId = resolveCanonicalEventId(record)
   const core = await loadEventMutationCoreRuntime()
 
   try {

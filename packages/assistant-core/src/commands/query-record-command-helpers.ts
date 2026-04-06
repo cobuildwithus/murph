@@ -94,10 +94,6 @@ export function toOwnedEventCommandShowEntity(
     toCommandEntityLinks(record, {
       extraLinkKeys,
       includeRelatedIds: false,
-      seedIds:
-        record.entityId !== record.primaryLookupId
-          ? [record.primaryLookupId]
-          : [],
       sort: false,
     }),
   )
