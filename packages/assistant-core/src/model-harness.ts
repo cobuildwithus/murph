@@ -87,6 +87,7 @@ export interface AssistantCapabilitySpec {
 }
 
 export interface AssistantCapabilityRegistry {
+  createToolCatalog(hosts: readonly AssistantCapabilityHost[]): AssistantToolCatalog
   getCapability(name: string): AssistantCapabilitySpec | null
   hasCapability(name: string): boolean
   listCapabilities(): AssistantCapabilitySpec[]
@@ -326,6 +327,13 @@ export function createAssistantCapabilityRegistry<
   }
 
   return {
+    createToolCatalog(hosts) {
+      return bindAssistantCapabilitiesToCatalog(
+        Array.from(capabilityMap.values()),
+        hosts,
+      )
+    },
+
     getCapability(name) {
       const capability = capabilityMap.get(name)
       return capability ? toAssistantCapabilitySpec(capability) : null
@@ -581,12 +589,7 @@ export function createAssistantToolCatalogFromCapabilities(
   capabilities: readonly AnyAssistantCapabilityDefinition[],
   hosts: readonly AssistantCapabilityHost[],
 ): AssistantToolCatalog {
-  return createAssistantToolCatalog(
-    capabilities.flatMap((capability) => {
-      const boundTool = resolveAssistantCapabilityHostBinding(capability, hosts)
-      return boundTool ? [boundTool] : []
-    }),
-  )
+  return bindAssistantCapabilitiesToCatalog(capabilities, hosts)
 }
 
 export async function generateAssistantObject<TSchema extends z.ZodTypeAny>(
@@ -797,6 +800,18 @@ function resolveAssistantCapabilityHostBinding(
   }
 
   return null
+}
+
+function bindAssistantCapabilitiesToCatalog(
+  capabilities: readonly AnyAssistantCapabilityDefinition[],
+  hosts: readonly AssistantCapabilityHost[],
+): AssistantToolCatalog {
+  return createAssistantToolCatalog(
+    capabilities.flatMap((capability) => {
+      const boundTool = resolveAssistantCapabilityHostBinding(capability, hosts)
+      return boundTool ? [boundTool] : []
+    }),
+  )
 }
 
 function bindAssistantCapabilityToTool(

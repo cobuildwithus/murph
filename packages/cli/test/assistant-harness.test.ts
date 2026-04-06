@@ -146,6 +146,14 @@ test('assistant capability registry preserves capability metadata and host optio
       policyWrappers: [],
     },
   })
+
+  const catalog = registry.createToolCatalog([
+    new CliBackedCapabilityHost(),
+    new NativeLocalCapabilityHost(),
+  ])
+
+  assert.equal(catalog.hasTool('host.echo'), true)
+  assert.equal(catalog.listTools()[0]?.executionMode, 'cli-backed')
 })
 
 test('createAssistantToolCatalogFromCapabilities binds the preferred host when available and falls back otherwise', async () => {
