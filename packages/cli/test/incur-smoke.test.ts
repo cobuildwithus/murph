@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -200,6 +200,62 @@ test('root config autodiscovery resolves ~/.config/murph/config.json', async () 
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }
+})
+
+test('published config schema artifact covers nested config defaults', async () => {
+  const schema = JSON.parse(
+    await readFile(new URL('../config.schema.json', import.meta.url), 'utf8'),
+  ) as {
+    type?: string
+    properties?: {
+      commands?: {
+        properties?: {
+          vault?: {
+            properties?: {
+              commands?: {
+                properties?: {
+                  paths?: {
+                    properties?: {
+                      options?: {
+                        properties?: {
+                          vault?: unknown
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+          assistant?: {
+            properties?: {
+              commands?: {
+                properties?: {
+                  chat?: {
+                    properties?: {
+                      options?: {
+                        properties?: {
+                          model?: unknown
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  assert.equal(schema.type, 'object')
+  assert.ok(
+    schema.properties?.commands?.properties?.vault?.properties?.commands?.properties?.paths?.properties?.options?.properties?.vault,
+  )
+  assert.ok(
+    schema.properties?.commands?.properties?.assistant?.properties?.commands?.properties?.chat?.properties?.options?.properties?.model,
+  )
 })
 
 test('VaultCliError remains a typed incur envelope through the CLI bridge', async () => {
