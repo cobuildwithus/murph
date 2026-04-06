@@ -33,19 +33,46 @@ import { normalizeNullableString } from '../shared.js'
 
 const CAPTURE_SYNC_BATCH_SIZE = 500
 
-export interface CaptureSourceRow {
-  accountId: string | null
+type GatewaySourceEventKind = 'capture' | 'outbox' | 'session'
+
+interface GatewaySourceEventRow {
   actorDisplayName: string | null
   actorId: string | null
   actorIsSelf: number
-  captureId: string
+  alias: string | null
   directness: GatewayConversationRoute['directness']
+  identityId: string | null
+  messageId: string | null
+  occurredAt: string
+  providerMessageId: string | null
+  providerThreadId: string | null
+  replyKind: GatewayConversationRoute['reply']['kind']
+  replyTarget: string | null
+  routeKey: string
+  sessionKey: string
+  source: string | null
+  sourceEventId: string
+  sourceEventKind: GatewaySourceEventKind
+  sourceRecordId: string
+  status: GatewayLocalOutboxSource['status'] | null
+  text: string | null
+  threadId: string | null
+  threadTitle: string | null
+}
+
+export interface CaptureSourceRow {
+  actorDisplayName: string | null
+  actorId: string | null
+  actorIsSelf: number
+  directness: GatewayConversationRoute['directness']
+  identityId: string | null
   messageId: string
   occurredAt: string
   providerMessageId: string | null
   routeKey: string
   sessionKey: string
   source: string
+  sourceRecordId: string
   text: string | null
   threadId: string | null
   threadTitle: string | null
@@ -66,26 +93,24 @@ export interface CaptureAttachmentRow {
 
 export interface SessionSourceRow {
   alias: string | null
-  channel: string | null
   directness: GatewayConversationRoute['directness']
   identityId: string | null
   participantId: string | null
   replyKind: GatewayConversationRoute['reply']['kind']
   replyTarget: string | null
   routeKey: string
-  sessionId: string
   sessionKey: string
+  source: string | null
+  sourceRecordId: string
   threadId: string | null
   updatedAt: string
 }
 
 export interface OutboxSourceRow {
   actorId: string | null
-  channel: string | null
   createdAt: string
   directness: GatewayConversationRoute['directness']
   identityId: string | null
-  intentId: string
   message: string
   messageId: string
   providerMessageId: string | null
@@ -95,6 +120,8 @@ export interface OutboxSourceRow {
   routeKey: string
   sentAt: string | null
   sessionKey: string
+  source: string | null
+  sourceRecordId: string
   status: GatewayLocalOutboxSource['status']
   threadId: string | null
   updatedAt: string
@@ -142,7 +169,9 @@ export async function listAllInboxCapturesByCreatedOrder(
 
 export function clearCaptureSources(database: DatabaseSync): void {
   database.prepare('DELETE FROM gateway_capture_attachments').run()
-  database.prepare('DELETE FROM gateway_capture_sources').run()
+  database
+    .prepare("DELETE FROM gateway_source_events WHERE source_event_kind = 'capture'")
+    .run()
 }
 
 export function replaceCaptureSourcesForCaptureIds(
@@ -153,7 +182,10 @@ export function replaceCaptureSourcesForCaptureIds(
   const deleteAttachments = database.prepare(
     'DELETE FROM gateway_capture_attachments WHERE capture_id = ?',
   )
-  const deleteCapture = database.prepare('DELETE FROM gateway_capture_sources WHERE capture_id = ?')
+  const deleteCapture = database.prepare(`
+    DELETE FROM gateway_source_events
+    WHERE source_event_kind = 'capture' AND source_record_id = ?
+  `)
 
   for (const captureId of new Set(captureIds)) {
     deleteAttachments.run(captureId)
@@ -165,31 +197,36 @@ export function replaceCaptureSourcesForCaptureIds(
 
 export function upsertCaptureSources(database: DatabaseSync, captures: readonly InboxCaptureRecord[]): void {
   const upsertCapture = database.prepare(`
-    INSERT INTO gateway_capture_sources (
-      capture_id,
+    INSERT INTO gateway_source_events (
+      source_event_id,
+      source_event_kind,
+      source_record_id,
       route_key,
       session_key,
       source,
-      account_id,
-      external_id,
-      provider_message_id,
+      identity_id,
       actor_id,
       actor_display_name,
       actor_is_self,
+      alias,
       directness,
       occurred_at,
       text,
       thread_id,
       thread_title,
+      reply_kind,
+      reply_target,
+      status,
+      sent_at,
+      provider_message_id,
+      provider_thread_id,
       message_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(capture_id) DO UPDATE SET
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(source_event_id) DO UPDATE SET
       route_key = excluded.route_key,
       session_key = excluded.session_key,
       source = excluded.source,
-      account_id = excluded.account_id,
-      external_id = excluded.external_id,
-      provider_message_id = excluded.provider_message_id,
+      identity_id = excluded.identity_id,
       actor_id = excluded.actor_id,
       actor_display_name = excluded.actor_display_name,
       actor_is_self = excluded.actor_is_self,
@@ -198,6 +235,8 @@ export function upsertCaptureSources(database: DatabaseSync, captures: readonly 
       text = excluded.text,
       thread_id = excluded.thread_id,
       thread_title = excluded.thread_title,
+      provider_message_id = excluded.provider_message_id,
+      provider_thread_id = excluded.provider_thread_id,
       message_id = excluded.message_id
   `)
   const insertAttachment = database.prepare(`
@@ -229,21 +268,28 @@ export function upsertCaptureSources(database: DatabaseSync, captures: readonly 
     const sessionKey = createGatewayConversationSessionKey(routeKey)
     const messageId = createGatewayCaptureMessageId(routeKey, capture.captureId)
     upsertCapture.run(
+      `capture:${capture.captureId}`,
+      'capture',
       capture.captureId,
       routeKey,
       sessionKey,
       capture.source,
-      normalizeNullableString(capture.accountId ?? null),
-      capture.externalId,
-      resolveCaptureProviderMessageId(capture),
+      resolveCaptureIdentityId(capture),
       normalizeNullableString(capture.actor.id ?? null),
       normalizeNullableString(capture.actor.displayName ?? null),
       capture.actor.isSelf ? 1 : 0,
+      null,
       route.directness,
       capture.occurredAt,
       capture.text,
       normalizeNullableString(capture.thread.id),
       normalizeNullableString(capture.thread.title ?? null),
+      null,
+      null,
+      null,
+      null,
+      resolveCaptureProviderMessageId(capture),
+      normalizeNullableString(capture.thread.id),
       messageId,
     )
 
@@ -268,22 +314,35 @@ export function upsertCaptureSources(database: DatabaseSync, captures: readonly 
 }
 
 export function replaceSessionSources(database: DatabaseSync, sessions: readonly GatewayLocalSessionSource[]): void {
-  database.prepare('DELETE FROM gateway_session_sources').run()
+  database
+    .prepare("DELETE FROM gateway_source_events WHERE source_event_kind = 'session'")
+    .run()
   const insert = database.prepare(`
-    INSERT INTO gateway_session_sources (
-      session_id,
+    INSERT INTO gateway_source_events (
+      source_event_id,
+      source_event_kind,
+      source_record_id,
       route_key,
       session_key,
-      alias,
-      channel,
+      source,
       identity_id,
-      participant_id,
-      thread_id,
+      actor_id,
+      actor_display_name,
+      actor_is_self,
+      alias,
       directness,
+      occurred_at,
+      text,
+      thread_id,
+      thread_title,
       reply_kind,
       reply_target,
-      updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      status,
+      sent_at,
+      provider_message_id,
+      provider_thread_id,
+      message_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
 
   for (const session of sessions) {
@@ -294,46 +353,63 @@ export function replaceSessionSources(database: DatabaseSync, sessions: readonly
     }
 
     insert.run(
+      `session:${session.sessionId}`,
+      'session',
       session.sessionId,
       routeKey,
       createGatewayConversationSessionKey(routeKey),
-      normalizeNullableString(session.alias),
       route.channel,
       route.identityId,
       route.participantId,
-      route.threadId,
+      null,
+      0,
+      normalizeNullableString(session.alias),
       route.directness,
+      session.updatedAt,
+      null,
+      route.threadId,
+      null,
       route.reply.kind,
       route.reply.target,
-      session.updatedAt,
+      null,
+      null,
+      null,
+      null,
+      null,
     )
   }
 }
 
 export function replaceOutboxSources(database: DatabaseSync, intents: readonly GatewayLocalOutboxSource[]): void {
-  database.prepare('DELETE FROM gateway_outbox_sources').run()
+  database
+    .prepare("DELETE FROM gateway_source_events WHERE source_event_kind = 'outbox'")
+    .run()
   const insert = database.prepare(`
-    INSERT INTO gateway_outbox_sources (
-      intent_id,
+    INSERT INTO gateway_source_events (
+      source_event_id,
+      source_event_kind,
+      source_record_id,
       route_key,
       session_key,
-      status,
-      created_at,
-      updated_at,
-      sent_at,
-      message,
-      channel,
+      source,
       identity_id,
       actor_id,
-      thread_id,
+      actor_display_name,
+      actor_is_self,
+      alias,
       directness,
+      occurred_at,
+      text,
+      thread_id,
+      thread_title,
       reply_kind,
       reply_target,
+      status,
+      sent_at,
       provider_message_id,
       provider_thread_id,
-      reply_to_message_id,
       message_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
 
   for (const intent of intents) {
@@ -344,24 +420,28 @@ export function replaceOutboxSources(database: DatabaseSync, intents: readonly G
     }
 
     insert.run(
+      `outbox:${intent.intentId}`,
+      'outbox',
       intent.intentId,
       routeKey,
       createGatewayConversationSessionKey(routeKey),
-      intent.status,
-      intent.createdAt,
-      intent.updatedAt,
-      intent.sentAt,
-      intent.message,
       route.channel,
       route.identityId,
       route.participantId,
-      route.threadId,
+      null,
+      1,
+      null,
       route.directness,
+      intent.sentAt ?? intent.updatedAt,
+      intent.message,
+      route.threadId,
+      null,
       route.reply.kind,
       route.reply.target,
+      intent.status,
+      intent.sentAt,
       intent.delivery?.providerMessageId ?? null,
       intent.delivery?.providerThreadId ?? null,
-      normalizeNullableString(intent.replyToMessageId),
       createGatewayOutboxMessageId(routeKey, intent.intentId),
     )
   }
@@ -399,34 +479,35 @@ export function computeOutboxSyncSignature(intents: readonly GatewayLocalOutboxS
 export function readSessionSourceRows(database: DatabaseSync): SessionSourceRow[] {
   return database.prepare(`
     SELECT
-      session_id AS sessionId,
+      source_record_id AS sourceRecordId,
       route_key AS routeKey,
       session_key AS sessionKey,
       alias,
-      channel,
+      source,
       identity_id AS identityId,
-      participant_id AS participantId,
+      actor_id AS participantId,
       thread_id AS threadId,
       directness,
       reply_kind AS replyKind,
       reply_target AS replyTarget,
-      updated_at AS updatedAt
-    FROM gateway_session_sources
+      occurred_at AS updatedAt
+    FROM gateway_source_events
+    WHERE source_event_kind = 'session'
   `).all() as unknown as SessionSourceRow[]
 }
 
 export function readOutboxSourceRows(database: DatabaseSync): OutboxSourceRow[] {
   return database.prepare(`
     SELECT
-      intent_id AS intentId,
+      source_record_id AS sourceRecordId,
       route_key AS routeKey,
       session_key AS sessionKey,
       status,
-      created_at AS createdAt,
-      updated_at AS updatedAt,
+      occurred_at AS createdAt,
+      occurred_at AS updatedAt,
       sent_at AS sentAt,
-      message,
-      channel,
+      text AS message,
+      source,
       identity_id AS identityId,
       actor_id AS actorId,
       thread_id AS threadId,
@@ -436,18 +517,19 @@ export function readOutboxSourceRows(database: DatabaseSync): OutboxSourceRow[] 
       provider_message_id AS providerMessageId,
       provider_thread_id AS providerThreadId,
       message_id AS messageId
-    FROM gateway_outbox_sources
+    FROM gateway_source_events
+    WHERE source_event_kind = 'outbox'
   `).all() as unknown as OutboxSourceRow[]
 }
 
 export function readCaptureSourceRows(database: DatabaseSync): CaptureSourceRow[] {
   return database.prepare(`
     SELECT
-      capture_id AS captureId,
+      source_record_id AS sourceRecordId,
       route_key AS routeKey,
       session_key AS sessionKey,
       source,
-      account_id AS accountId,
+      identity_id AS identityId,
       provider_message_id AS providerMessageId,
       actor_id AS actorId,
       actor_display_name AS actorDisplayName,
@@ -458,8 +540,9 @@ export function readCaptureSourceRows(database: DatabaseSync): CaptureSourceRow[
       thread_id AS threadId,
       thread_title AS threadTitle,
       message_id AS messageId
-    FROM gateway_capture_sources
-    ORDER BY occurred_at ASC, capture_id ASC
+    FROM gateway_source_events
+    WHERE source_event_kind = 'capture'
+    ORDER BY occurred_at ASC, source_record_id ASC
   `).all() as unknown as CaptureSourceRow[]
 }
 
@@ -478,6 +561,20 @@ export function readCaptureAttachmentRows(database: DatabaseSync): CaptureAttach
       transcript_text AS transcriptText
     FROM gateway_capture_attachments
   `).all() as unknown as CaptureAttachmentRow[]
+}
+
+export function readGatewaySourceEventCount(
+  database: DatabaseSync,
+  sourceEventKind: GatewaySourceEventKind,
+): number {
+  const row = database
+    .prepare(`
+      SELECT COUNT(*) AS count
+      FROM gateway_source_events
+      WHERE source_event_kind = ?
+    `)
+    .get(sourceEventKind) as { count: number | null }
+  return row.count ?? 0
 }
 
 export async function loadCaptureSyncState(
@@ -549,6 +646,16 @@ function resolveCaptureProviderMessageId(capture: InboxCaptureRecord): string | 
     }
     default:
       return normalizeNullableString(capture.externalId)
+  }
+}
+
+function resolveCaptureIdentityId(capture: InboxCaptureRecord): string | null {
+  switch (capture.source) {
+    case 'email':
+    case 'linq':
+      return normalizeNullableString(capture.accountId ?? null)
+    default:
+      return null
   }
 }
 
