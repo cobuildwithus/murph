@@ -1,6 +1,7 @@
 import {
   ASSESSMENT_SOURCES as CONTRACT_ASSESSMENT_SOURCES,
   CONTRACT_SCHEMA_VERSION,
+  type AssessmentResponseRecord as ContractAssessmentResponseRecord,
   type AssessmentSource,
 } from "@murphai/contracts";
 
@@ -14,18 +15,7 @@ export const ASSESSMENT_SOURCES = CONTRACT_ASSESSMENT_SOURCES;
 
 export type { AssessmentSource };
 
-export interface AssessmentResponseRecord {
-  schemaVersion: typeof ASSESSMENT_RESPONSE_SCHEMA_VERSION;
-  id: string;
-  assessmentType: string;
-  recordedAt: string;
-  source: AssessmentSource;
-  rawPath: string;
-  title?: string;
-  questionnaireSlug?: string;
-  responses: UnknownRecord;
-  relatedIds?: string[];
-}
+export type AssessmentResponseRecord = ContractAssessmentResponseRecord;
 
 export interface ImportAssessmentResponseInput {
   vaultRoot: string;

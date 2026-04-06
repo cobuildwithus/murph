@@ -1,4 +1,4 @@
-import type { HostedEmailSendRequest } from "@murphai/assistant-runtime";
+import { parseHostedEmailSendRequest } from "@murphai/assistant-runtime";
 import {
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
   parseHostedExecutionBundlePayload,
@@ -158,20 +158,6 @@ async function handleRunnerEmailSendRequest(input: {
     ok: true,
     target: payload.target,
   });
-}
-
-function parseHostedEmailSendRequest(value: Record<string, unknown>): HostedEmailSendRequest {
-  const targetKind = value.targetKind;
-  if (targetKind !== "explicit" && targetKind !== "participant" && targetKind !== "thread") {
-    throw new TypeError("targetKind must be explicit, participant, or thread.");
-  }
-
-  return {
-    identityId: readOptionalString(value.identityId, "identityId"),
-    message: requireString(value.message, "message"),
-    target: requireString(value.target, "target"),
-    targetKind,
-  };
 }
 
 async function forwardRunnerCommit(

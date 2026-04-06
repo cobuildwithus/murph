@@ -1,6 +1,20 @@
+import {
+  AUTOMATION_DOC_TYPE,
+  AUTOMATION_SCHEMA_VERSION,
+  automationContinuityPolicyValues,
+  automationScheduleKindValues,
+  automationStatusValues,
+  isValidIanaTimeZone,
+  type AutomationContinuityPolicy,
+  type AutomationRoute,
+  type AutomationSchedule,
+  type AutomationScheduleKind,
+  type AutomationScaffoldPayload as ContractAutomationScaffoldPayload,
+  type AutomationStatus,
+} from "@murphai/contracts";
+
 import { generateRecordId } from "./ids.ts";
 import { VaultError } from "./errors.ts";
-import { isValidIanaTimeZone } from "@murphai/contracts/time";
 import {
   loadMarkdownRegistryDocuments,
   readRegistryRecord,
@@ -20,12 +34,6 @@ import {
 import type { FrontmatterObject } from "./types.ts";
 
 const AUTOMATIONS_DIRECTORY = "bank/automations";
-const AUTOMATION_SCHEMA_VERSION = "vault-automation.v1" as const;
-const AUTOMATION_DOC_TYPE = "automation" as const;
-const automationStatusValues = ["active", "paused", "archived"] as const;
-const automationContinuityPolicyValues = ["fresh", "preserve"] as const;
-
-const automationScheduleKinds = ["at", "every", "cron", "dailyLocal"] as const;
 const dailyLocalTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
 
 function requireValidTimeZone(value: unknown, fieldName: string): string {
@@ -37,45 +45,12 @@ function requireValidTimeZone(value: unknown, fieldName: string): string {
   return timeZone;
 }
 
-export interface AutomationScheduleAt {
-  kind: "at";
-  at: string;
-}
-
-export interface AutomationScheduleEvery {
-  kind: "every";
-  everyMs: number;
-}
-
-export interface AutomationScheduleCron {
-  kind: "cron";
-  expression: string;
-  timeZone: string;
-}
-
-export interface AutomationScheduleDailyLocal {
-  kind: "dailyLocal";
-  localTime: string;
-  timeZone: string;
-}
-
-export type AutomationSchedule =
-  | AutomationScheduleAt
-  | AutomationScheduleEvery
-  | AutomationScheduleCron
-  | AutomationScheduleDailyLocal;
-
-export interface AutomationRoute {
-  channel: string;
-  deliverResponse: boolean;
-  deliveryTarget: string | null;
-  identityId: string | null;
-  participantId: string | null;
-  sourceThreadId: string | null;
-}
-
-export type AutomationStatus = (typeof automationStatusValues)[number];
-export type AutomationContinuityPolicy = (typeof automationContinuityPolicyValues)[number];
+export type {
+  AutomationContinuityPolicy,
+  AutomationRoute,
+  AutomationSchedule,
+  AutomationStatus,
+};
 
 export interface AutomationRecord {
   schemaVersion: typeof AUTOMATION_SCHEMA_VERSION;
@@ -96,18 +71,7 @@ export interface AutomationRecord {
   markdown: string;
 }
 
-export interface AutomationScaffoldPayload {
-  automationId?: string;
-  continuityPolicy?: AutomationContinuityPolicy;
-  prompt: string;
-  route: AutomationRoute;
-  schedule: AutomationSchedule;
-  slug?: string;
-  status?: AutomationStatus;
-  summary?: string;
-  tags?: string[];
-  title: string;
-}
+export type AutomationScaffoldPayload = ContractAutomationScaffoldPayload;
 
 export interface UpsertAutomationInput extends AutomationScaffoldPayload {
   allowSlugRename?: boolean;
@@ -177,7 +141,7 @@ function normalizeAutomationSchedule(
   const object = requireObject(value, "schedule");
   const kind = requireString(object.kind, "schedule.kind", 24);
 
-  if (!automationScheduleKinds.includes(kind as (typeof automationScheduleKinds)[number])) {
+  if (!automationScheduleKindValues.includes(kind as AutomationScheduleKind)) {
     throw new VaultError("VAULT_INVALID_INPUT", "schedule.kind must match a supported automation schedule.");
   }
 
