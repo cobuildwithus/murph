@@ -18,7 +18,6 @@ export interface AssistantToolCatalogOptions {
   includeQueryTools?: boolean
   includeStatefulWriteTools?: boolean
   includeVaultTextReadTool?: boolean
-  includeVaultWriteTools?: boolean
   includeWebSearchTools?: boolean
 }
 

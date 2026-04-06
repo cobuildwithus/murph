@@ -8,7 +8,7 @@ import {
   resolveAssistantCliAccessContext,
 } from '../assistant-cli-access.js'
 import {
-  createProviderTurnAssistantCapabilityRuntime,
+  createProviderTurnAssistantToolCatalog,
 } from '../assistant-cli-tools.js'
 import {
   executeAssistantProviderTurnAttempt,
@@ -97,7 +97,7 @@ interface AssistantProviderTurnExecutionPlan {
   input: AssistantMessageInput
   memoryTurnEnv: NodeJS.ProcessEnv
   primaryRoute: ResolvedAssistantFailoverRoute | null
-  providerTurnRuntime: ReturnType<typeof createProviderTurnAssistantCapabilityRuntime>
+  toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
   routes: readonly ResolvedAssistantFailoverRoute[]
   sharedPlan: AssistantTurnSharedPlan
   turnId: string
@@ -228,7 +228,7 @@ function buildAssistantProviderTurnExecutionPlan(input: {
     turnId: `${input.resolvedSession.sessionId}:${input.turnCreatedAt}`,
     vault: input.input.vault,
   })
-  const providerTurnRuntime = createProviderTurnAssistantCapabilityRuntime({
+  const toolCatalog = createProviderTurnAssistantToolCatalog({
     allowSensitiveHealthContext: input.plan.allowSensitiveHealthContext,
     cliEnv: memoryTurnEnv,
     executionContext,
@@ -243,7 +243,7 @@ function buildAssistantProviderTurnExecutionPlan(input: {
     input: input.input,
     memoryTurnEnv,
     primaryRoute: input.routes[0] ?? null,
-    providerTurnRuntime,
+    toolCatalog,
     routes: input.routes,
     sharedPlan: input.plan,
     turnId: input.turnId,
@@ -281,16 +281,14 @@ async function resolveAssistantProviderAttemptPlan(input: {
       route,
       session: input.session,
       sharedPlan: input.executionPlan.sharedPlan,
-      toolCatalog: input.executionPlan.providerTurnRuntime.toolCatalog,
+      toolCatalog: input.executionPlan.toolCatalog,
     }),
     session: input.session,
   }
 }
 
 async function resolveAssistantRouteTurnPlan(input: {
-  toolCatalog: ReturnType<
-    typeof createProviderTurnAssistantCapabilityRuntime
-  >['toolCatalog']
+  toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
   input: AssistantMessageInput
   route: ResolvedAssistantFailoverRoute
   session: AssistantSession
@@ -416,7 +414,7 @@ async function executeAssistantProviderAttempt(input: {
       fault: 'provider',
       message: 'Injected assistant provider failure.',
     })
-    const { toolCatalog } = executionPlan.providerTurnRuntime
+    const { toolCatalog } = executionPlan
     const toolRuntime = {
       allowSensitiveHealthContext: executionPlan.sharedPlan.allowSensitiveHealthContext,
       requestId: executionPlan.turnId,
