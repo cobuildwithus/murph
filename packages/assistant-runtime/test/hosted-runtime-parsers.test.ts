@@ -8,19 +8,13 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
   it("parses the nested runtime envelope", () => {
     const parsed = parseHostedAssistantRuntimeJobInput({
       request: {
-        bundles: {
-          agentState: "agent-state-bundle",
-          vault: null,
-        },
+        bundle: "vault-bundle",
         commit: {
-          bundleRefs: {
-            agentState: {
-              hash: "abc123",
-              key: "bundles/user/agent-state.json",
-              size: 42,
-              updatedAt: "2026-04-01T00:00:02.000Z",
-            },
-            vault: null,
+          bundleRef: {
+            hash: "abc123",
+            key: "bundles/user/vault.json",
+            size: 42,
+            updatedAt: "2026-04-01T00:00:02.000Z",
           },
         },
         dispatch: {
@@ -72,7 +66,8 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
       kind: "member.activated",
       userId: "member_123",
     });
-    expect(parsed.request.commit?.bundleRefs.agentState?.key).toBe("bundles/user/agent-state.json");
+    expect(parsed.request.bundle).toBe("vault-bundle");
+    expect(parsed.request.commit?.bundleRef?.key).toBe("bundles/user/vault.json");
     expect(parsed.runtime?.internalWorkerProxyToken).toBe("proxy_123");
     expect(parsed.runtime?.userEnv).toEqual({ OPENAI_API_KEY: "secret" });
   });
@@ -80,10 +75,7 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
   it("rejects malformed nested runtime env records", () => {
     expect(() => parseHostedAssistantRuntimeJobInput({
       request: {
-        bundles: {
-          agentState: null,
-          vault: null,
-        },
+        bundle: null,
         dispatch: {
           event: {
             kind: "member.activated",
@@ -104,10 +96,7 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
   it("rejects removed runtime callback override fields", () => {
     expect(() => parseHostedAssistantRuntimeJobInput({
       request: {
-        bundles: {
-          agentState: null,
-          vault: null,
-        },
+        bundle: null,
         dispatch: {
           event: {
             kind: "member.activated",

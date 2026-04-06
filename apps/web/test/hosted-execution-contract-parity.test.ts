@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { SharePack } from "@murphai/contracts";
 import {
   HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
   HOSTED_EXECUTION_EVENT_KINDS,
@@ -19,6 +20,23 @@ import {
 } from "@murphai/hosted-execution";
 
 import { serializeHostedExecutionOutboxPayload } from "@/src/lib/hosted-execution/outbox-payload";
+
+const SHARE_PACK: SharePack = {
+  createdAt: "2026-03-26T12:05:00.000Z",
+  entities: [
+    {
+      kind: "food",
+      payload: {
+        kind: "smoothie",
+        status: "active",
+        title: "Shared breakfast",
+      },
+      ref: "food.shared-breakfast",
+    },
+  ],
+  schemaVersion: "murph.share-pack.v1",
+  title: "Shared breakfast",
+};
 
 describe("hosted execution contract parity", () => {
   it("keeps builder, parser, and app-local outbox serialization aligned for every event kind", () => {
@@ -109,6 +127,7 @@ describe("hosted execution contract parity", () => {
         memberId: "member_123",
         occurredAt: "2026-03-26T12:05:00.000Z",
         share: {
+          pack: SHARE_PACK,
           shareId: "share_123",
         },
       }),

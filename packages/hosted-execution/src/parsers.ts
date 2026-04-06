@@ -34,9 +34,8 @@ import type {
   HostedExecutionVaultShareAcceptedEvent,
 } from "./contracts.ts";
 import {
-  mapHostedExecutionBundleSlots,
-  type HostedExecutionBundlePayloads,
-  type HostedExecutionBundleRefs,
+  type HostedExecutionBundlePayload,
+  type HostedExecutionBundleRefState,
 } from "./bundles.ts";
 import {
   readHostedExecutionOutboxPayload,
@@ -80,9 +79,9 @@ export function parseHostedExecutionRunnerRequest(value: unknown): HostedExecuti
   const record = requireObject(value, "Hosted execution runner request");
 
   return {
-    bundles: parseHostedExecutionBundlePayloads(
-      record.bundles,
-      "Hosted execution runner request bundles",
+    bundle: parseHostedExecutionBundlePayload(
+      record.bundle,
+      "Hosted execution runner request bundle",
     ),
     dispatch: parseHostedExecutionDispatchRequest(record.dispatch),
     ...(record.run === undefined ? {} : {
@@ -96,9 +95,9 @@ export function parseHostedExecutionRunnerResult(value: unknown): HostedExecutio
   const result = requireObject(record.result, "Hosted execution runner result.result");
 
   return {
-    bundles: parseHostedExecutionBundlePayloads(
-      record.bundles,
-      "Hosted execution runner result bundles",
+    bundle: parseHostedExecutionBundlePayload(
+      record.bundle,
+      "Hosted execution runner result bundle",
     ),
     result: {
       eventsHandled: requireNumber(result.eventsHandled, "Hosted execution runner result eventsHandled"),
@@ -137,9 +136,9 @@ export function parseHostedExecutionUserStatus(value: unknown): HostedExecutionU
       record.backpressuredEventIds,
       "Hosted execution user status backpressuredEventIds",
     ),
-    bundleRefs: parseHostedExecutionBundleRefsRecord(
-      record.bundleRefs,
-      "Hosted execution user status bundleRefs",
+    bundleRef: parseHostedExecutionBundleRef(
+      record.bundleRef,
+      "Hosted execution user status bundleRef",
     ),
     inFlight: requireBoolean(record.inFlight, "Hosted execution user status inFlight"),
     lastError: readNullableString(record.lastError, "Hosted execution user status lastError"),
@@ -241,26 +240,18 @@ export function parseHostedExecutionTimelineEntries(value: unknown): HostedExecu
   });
 }
 
-export function parseHostedExecutionBundlePayloads(
+export function parseHostedExecutionBundlePayload(
   value: unknown,
-  label = "Hosted execution bundles",
-): HostedExecutionBundlePayloads {
-  const record = requireObject(value, label);
-
-  return mapHostedExecutionBundleSlots((slot) =>
-    readNullableStringValue(record[slot], `${label}.${slot}`)
-  );
+  label = "Hosted execution bundle",
+): HostedExecutionBundlePayload {
+  return readNullableStringValue(value, label);
 }
 
-export function parseHostedExecutionBundleRefsRecord(
+export function parseHostedExecutionBundleRef(
   value: unknown,
-  label = "Hosted execution bundle refs",
-): HostedExecutionBundleRefs {
-  const record = requireObject(value, label);
-
-  return mapHostedExecutionBundleSlots((slot) =>
-    parseHostedExecutionBundleRef(record[slot], `${label}.${slot}`)
-  );
+  label = "Hosted execution bundle ref",
+): HostedExecutionBundleRefState {
+  return parseRuntimeHostedExecutionBundleRef(value, label);
 }
 
 export function parseHostedExecutionUserEnvStatus(value: unknown): HostedExecutionUserEnvStatus {
@@ -391,13 +382,6 @@ export function parseHostedExecutionDeviceSyncRuntimeApplyResponse(
     ).map((entry, index) => parseHostedExecutionDeviceSyncRuntimeApplyEntry(entry, index)),
     userId: requireString(record.userId, "Hosted device-sync runtime apply response userId"),
   };
-}
-
-export function parseHostedExecutionBundleRef(
-  value: unknown,
-  label = "Hosted execution bundle ref",
-): HostedExecutionBundleRef | null {
-  return parseRuntimeHostedExecutionBundleRef(value, label);
 }
 
 function parseHostedExecutionDeviceSyncRuntimeConnectionSnapshot(
@@ -986,7 +970,7 @@ export function parseHostedExecutionShareReference(value: unknown): HostedExecut
   const record = requireObject(value, "Hosted execution share reference");
 
   return {
-    ...(record.pack === undefined ? {} : { pack: assertContract(sharePackSchema, record.pack, "share pack") }),
+    pack: assertContract(sharePackSchema, record.pack, "share pack"),
     shareId: requireString(record.shareId, "Hosted execution share reference shareId"),
   };
 }

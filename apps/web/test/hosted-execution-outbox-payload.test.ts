@@ -1,6 +1,24 @@
 import { describe, expect, it } from "vitest";
 
+import type { SharePack } from "@murphai/contracts";
 import { serializeHostedExecutionOutboxPayload } from "@/src/lib/hosted-execution/outbox-payload";
+
+const SHARE_PACK: SharePack = {
+  createdAt: "2026-04-04T00:00:00.000Z",
+  entities: [
+    {
+      kind: "food",
+      payload: {
+        kind: "smoothie",
+        status: "active",
+        title: "Shared breakfast",
+      },
+      ref: "food.shared-breakfast",
+    },
+  ],
+  schemaVersion: "murph.share-pack.v1",
+  title: "Shared breakfast",
+};
 
 describe("hosted execution outbox payload storage", () => {
   it("stores hosted share acceptance by reference without persisting the share id inline", () => {
@@ -8,6 +26,7 @@ describe("hosted execution outbox payload storage", () => {
       event: {
         kind: "vault.share.accepted",
         share: {
+          pack: SHARE_PACK,
           shareId: "hshare_123",
         },
         userId: "member_123",

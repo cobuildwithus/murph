@@ -25,6 +25,7 @@ vi.mock("../src/hosted-runtime/events/inbox-pipeline.ts", () => ({
 
 import {
   createHostedExecutionProxyDeviceSyncRuntimeClient,
+  parseHostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution";
 import { parseHostedEmailThreadTarget } from "@murphai/runtime-state";
 import { syncHostedDeviceSyncControlPlaneState } from "../src/hosted-device-sync-runtime.ts";
@@ -84,21 +85,20 @@ test("hosted share dispatch now requires an inline pack", async () => {
   const fetchMock = vi.fn(async () => new Response("unused", { status: 200 }));
   const hostedFetch = createHostedInternalWorkerFetch("runner-proxy-token", fetchMock as typeof fetch);
 
-  await assert.rejects(
+  assert.throws(
     () =>
-      handleHostedShareAcceptedDispatch({
-        dispatch: {
-          event: {
-            kind: "vault.share.accepted",
-            share: {
-              shareId: "share_123",
-            },
-            userId: "member_123",
+      parseHostedExecutionDispatchRequest({
+        event: {
+          kind: "vault.share.accepted",
+          share: {
+            shareId: "share_123",
           },
+          userId: "member_123",
         },
-        vaultRoot: "/tmp/share-vault",
+        eventId: "evt_share",
+        occurredAt: "2026-03-27T08:05:00.000Z",
       }),
-    /missing an inline share pack/u,
+    /share pack/u,
   );
 
   await hostedFetch("https://external.example.test/health");

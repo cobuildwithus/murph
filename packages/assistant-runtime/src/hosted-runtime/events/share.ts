@@ -13,10 +13,6 @@ export async function handleHostedShareAcceptedDispatch(input: {
 }): Promise<HostedDispatchEffect> {
   const pack = input.dispatch.event.share.pack;
 
-  if (!pack) {
-    throw new Error("Hosted share dispatch is missing an inline share pack.");
-  }
-
   return {
     shareImportResult: await importSharePackIntoVault({
       pack,

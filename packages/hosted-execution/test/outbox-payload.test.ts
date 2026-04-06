@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { SharePack } from "@murphai/contracts";
 import {
   buildHostedExecutionAssistantCronTickDispatch,
   buildHostedExecutionDeviceSyncWakeDispatch,
@@ -14,6 +15,22 @@ import {
 } from "../src/outbox-payload";
 
 const occurredAt = "2026-04-04T00:00:00.000Z";
+const SHARE_PACK: SharePack = {
+  createdAt: occurredAt,
+  entities: [
+    {
+      kind: "food",
+      payload: {
+        kind: "smoothie",
+        status: "active",
+        title: "Shared breakfast",
+      },
+      ref: "food.shared-breakfast",
+    },
+  ],
+  schemaVersion: "murph.share-pack.v1",
+  title: "Shared breakfast",
+};
 
 describe("resolveHostedExecutionDispatchPayloadStorage", () => {
   it("uses reference storage for reconstructable hosted events", () => {
@@ -49,6 +66,7 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
           memberId: "user_123",
           occurredAt,
           share: {
+            pack: SHARE_PACK,
             shareId: "share_123",
           },
         }),
@@ -95,6 +113,11 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
           reason: "connected",
           userId: "user_123",
         }),
+        {
+          payloadRef: {
+            key: "transient/dispatch-payloads/user_123/device-sync-2.json",
+          },
+        },
       ).storage,
     ).toBe("reference");
 
@@ -107,6 +130,11 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
           text: "hello again",
           userId: "user_123",
         }),
+        {
+          payloadRef: {
+            key: "transient/dispatch-payloads/user_123/gateway-2.json",
+          },
+        },
       ).storage,
     ).toBe("reference");
   });

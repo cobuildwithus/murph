@@ -168,7 +168,6 @@ async function tryActivateHostedMemberIfStillAllowed(input: {
     }
 
     const entitlement = deriveHostedEntitlement({
-      billingMode: input.billingMode ?? currentMember.billingMode,
       billingStatus: HostedBillingStatus.active,
       memberStatus: currentMember.status,
       revnetIssuanceStatus: input.revnetIssuanceStatus,
@@ -254,7 +253,6 @@ export async function updateHostedMemberStripeBillingIfFresh(input: {
     }
 
     const entitlement = deriveHostedEntitlement({
-      billingMode: input.billingMode ?? currentMember.billingMode,
       billingStatus: input.billingStatus,
       memberStatus: currentMember.status,
     });

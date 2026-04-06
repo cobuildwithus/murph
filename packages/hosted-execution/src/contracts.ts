@@ -3,8 +3,8 @@ import type {
   HostedExecutionBundleRef as RuntimeHostedExecutionBundleRef,
 } from "@murphai/runtime-state";
 import type {
-  HostedExecutionBundlePayloads,
-  HostedExecutionBundleRefs,
+  HostedExecutionBundlePayload,
+  HostedExecutionBundleRefState,
 } from "./bundles.ts";
 import type { SharePack } from "@murphai/contracts";
 import type {
@@ -119,7 +119,7 @@ export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseE
 }
 
 export interface HostedExecutionShareReference {
-  pack?: SharePack;
+  pack: SharePack;
   shareId: string;
 }
 
@@ -155,13 +155,13 @@ export interface HostedExecutionDispatchRequest {
 export type HostedExecutionBundleKind = RuntimeHostedExecutionBundleKind;
 
 export interface HostedExecutionRunnerRequest {
-  bundles: HostedExecutionBundlePayloads;
+  bundle: HostedExecutionBundlePayload;
   dispatch: HostedExecutionDispatchRequest;
   run?: HostedExecutionRunContext | null;
 }
 
 export interface HostedExecutionRunnerResult {
-  bundles: HostedExecutionBundlePayloads;
+  bundle: HostedExecutionBundlePayload;
   result: {
     eventsHandled: number;
     nextWakeAt?: string | null;
@@ -173,7 +173,7 @@ export type HostedExecutionBundleRef = RuntimeHostedExecutionBundleRef;
 
 export interface HostedExecutionUserStatus {
   backpressuredEventIds?: string[];
-  bundleRefs: HostedExecutionBundleRefs;
+  bundleRef: HostedExecutionBundleRefState;
   inFlight: boolean;
   lastError: string | null;
   lastErrorAt?: string | null;
