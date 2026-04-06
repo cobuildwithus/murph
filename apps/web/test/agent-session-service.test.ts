@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createDeviceSyncRegistry,
@@ -42,6 +42,10 @@ vi.mock("@/src/lib/hosted-execution/control", () => ({
 }));
 
 describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("persists provider-directed status changes before surfacing refresh errors", async () => {
     mocks.getDeviceSyncRuntimeSnapshot.mockResolvedValue({
       connections: [
@@ -123,20 +127,24 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
       accountStatus: "reauthorization_required",
     });
 
-    expect(tx.deviceConnection.update).toHaveBeenCalledTimes(1);
-    expect(tx.deviceConnection.update).toHaveBeenCalledWith({
-      where: {
-        id: "conn-1",
-      },
-      data: {
-        status: "reauthorization_required",
-        lastSyncErrorAt: expect.any(Date),
-        lastErrorCode: "WHOOP_REFRESH_TOKEN_MISSING",
-        lastErrorMessage: "WHOOP refresh token is missing.",
-      },
-    });
+    expect(tx.deviceConnection.update).not.toHaveBeenCalled();
     expect(tx.deviceSyncSignal.create).toHaveBeenCalledTimes(1);
-    expect(mocks.applyDeviceSyncRuntimeUpdates).not.toHaveBeenCalled();
+    expect(mocks.applyDeviceSyncRuntimeUpdates).toHaveBeenCalledTimes(1);
+    expect(mocks.applyDeviceSyncRuntimeUpdates).toHaveBeenCalledWith("user-1", {
+      occurredAt: expect.any(String),
+      updates: [
+        expect.objectContaining({
+          connection: {
+            status: "reauthorization_required",
+          },
+          connectionId: "conn-1",
+          localState: expect.objectContaining({
+            lastErrorCode: "WHOOP_REFRESH_TOKEN_MISSING",
+            lastErrorMessage: "WHOOP refresh token is missing.",
+          }),
+        }),
+      ],
+    });
     expect(rotateAgentSession).not.toHaveBeenCalled();
   });
 
@@ -283,7 +291,8 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
       retryable: true,
     });
 
-    expect(tx.deviceConnection.update).toHaveBeenCalledTimes(1);
+    expect(tx.deviceConnection.update).not.toHaveBeenCalled();
+    expect(mocks.applyDeviceSyncRuntimeUpdates).toHaveBeenCalledTimes(1);
     expect(createTokenAudit).not.toHaveBeenCalled();
     expect(rotateAgentSession).not.toHaveBeenCalled();
   });

@@ -15,16 +15,19 @@ import {
 } from "../hosted-agent-sessions";
 import { requireHostedExecutionControlClient } from "../hosted-execution/control";
 import {
+  buildHostedDeviceSyncRuntimeSeedFromPublicAccount,
+  buildHostedPublicDeviceSyncAccount,
   composeHostedRuntimeDeviceSyncAccount,
   findHostedDeviceSyncRuntimeConnection,
   requireHostedDeviceSyncRuntimeTokenBundle,
 } from "./internal-runtime";
 import { requireHostedDeviceSyncProvider } from "./providers";
 import {
+  type HostedConnectionRecord,
+  hostedConnectionRecordArgs,
   type HostedAgentSessionRecord,
   type HostedPrismaTransactionClient,
   type UpdateLocalHeartbeatInput,
-  mapHostedPublicAccountRecord,
   PrismaDeviceSyncControlPlaneStore,
 } from "./prisma-store";
 import { parseInteger, toIsoTimestamp, toJsonRecord } from "./shared";
@@ -176,6 +179,7 @@ export class HostedDeviceSyncAgentSessionService {
           id: connectionId,
           userId: session.userId,
         },
+        ...hostedConnectionRecordArgs,
       });
 
       if (!record) {
@@ -187,15 +191,19 @@ export class HostedDeviceSyncAgentSessionService {
         });
       }
 
-      const currentConnection = mapHostedPublicAccountRecord(record);
+      const staticConnection = mapHostedConnectionRecord(record);
       const runtimeSnapshot = await requireHostedExecutionControlClient().getDeviceSyncRuntimeSnapshot(
         session.userId,
         {
           connectionId,
-          provider: currentConnection.provider,
+          provider: staticConnection.provider,
         },
       );
       const runtimeConnection = findHostedDeviceSyncRuntimeConnection(runtimeSnapshot, connectionId);
+      const currentConnection = buildHostedPublicDeviceSyncAccount({
+        record: staticConnection,
+        runtimeConnection,
+      });
       const currentTokenBundle = requireHostedDeviceSyncRuntimeTokenBundle({
         connectionId,
         runtimeConnection,
@@ -273,6 +281,7 @@ export class HostedDeviceSyncAgentSessionService {
           connection: currentConnection,
           tokenBundle: currentTokenBundle,
         }),
+        currentTokenBundle,
         provider,
         now,
         userId: session.userId,
@@ -284,18 +293,6 @@ export class HostedDeviceSyncAgentSessionService {
 
       const nextTokens = refreshResult.tokens;
       const nextRefreshToken = nextTokens.refreshToken ?? currentTokenBundle.refreshToken;
-      const updatedConnection = await tx.deviceConnection.update({
-        where: {
-          id: connectionId,
-        },
-        data: {
-          status: "active",
-          accessTokenExpiresAt: nextTokens.accessTokenExpiresAt ? new Date(nextTokens.accessTokenExpiresAt) : null,
-          lastSyncErrorAt: null,
-          lastErrorCode: null,
-          lastErrorMessage: null,
-        },
-      });
       await requireHostedExecutionControlClient().applyDeviceSyncRuntimeUpdates(session.userId, {
         occurredAt: now,
         updates: [
@@ -307,8 +304,28 @@ export class HostedDeviceSyncAgentSessionService {
             localState: {
               clearError: true,
             },
-            observedTokenVersion: currentTokenBundle.tokenVersion,
-            observedUpdatedAt: runtimeConnection?.connection.updatedAt ?? runtimeConnection?.connection.createdAt ?? null,
+            seed: buildHostedDeviceSyncRuntimeSeedFromPublicAccount({
+              account: {
+                ...currentConnection,
+                accessTokenExpiresAt: nextTokens.accessTokenExpiresAt ?? null,
+                lastErrorCode: null,
+                lastErrorMessage: null,
+                lastSyncErrorAt: null,
+                status: "active",
+              },
+              localState: {
+                lastErrorCode: null,
+                lastErrorMessage: null,
+                lastSyncErrorAt: null,
+              },
+              tokenBundle: {
+                accessToken: nextTokens.accessToken,
+                accessTokenExpiresAt: nextTokens.accessTokenExpiresAt ?? null,
+                keyVersion: currentTokenBundle.keyVersion,
+                refreshToken: nextRefreshToken ?? null,
+                tokenVersion: currentTokenBundle.tokenVersion,
+              },
+            }),
             tokenBundle: {
               accessToken: nextTokens.accessToken,
               accessTokenExpiresAt: nextTokens.accessTokenExpiresAt ?? null,
@@ -323,7 +340,7 @@ export class HostedDeviceSyncAgentSessionService {
         session.userId,
         {
           connectionId,
-          provider: updatedConnection.provider,
+          provider: staticConnection.provider,
         },
       );
       const refreshedRuntimeConnection = findHostedDeviceSyncRuntimeConnection(refreshedSnapshot, connectionId);
@@ -347,7 +364,10 @@ export class HostedDeviceSyncAgentSessionService {
 
       return {
         status: "success",
-        connection: mapHostedPublicAccountRecord(updatedConnection),
+        connection: buildHostedPublicDeviceSyncAccount({
+          record: staticConnection,
+          runtimeConnection: refreshedRuntimeConnection,
+        }),
         tokenBundle,
         refreshed: true,
         tokenVersionChanged,
@@ -483,6 +503,13 @@ export class HostedDeviceSyncAgentSessionService {
   private async refreshProviderTokensWithStatusHandling(input: {
     tx: HostedPrismaTransactionClient;
     account: DeviceSyncAccount;
+    currentTokenBundle: {
+      accessToken: string;
+      accessTokenExpiresAt: string | null;
+      keyVersion: string;
+      refreshToken: string | null;
+      tokenVersion: number;
+    };
     provider: DeviceSyncProvider;
     now: string;
     userId: string;
@@ -494,16 +521,44 @@ export class HostedDeviceSyncAgentSessionService {
       };
     } catch (error) {
       if (isDeviceSyncError(error) && error.accountStatus) {
-        await input.tx.deviceConnection.update({
-          where: {
-            id: input.account.id,
-          },
-          data: {
-            status: error.accountStatus,
-            lastSyncErrorAt: new Date(input.now),
-            lastErrorCode: error.code,
-            lastErrorMessage: error.message,
-          },
+        const seedAccount: PublicDeviceSyncAccount = {
+          ...input.account,
+          lastErrorCode: error.code,
+          lastErrorMessage: error.message,
+          lastSyncErrorAt: input.now,
+          nextReconcileAt: error.accountStatus === "disconnected" ? null : input.account.nextReconcileAt,
+          status: error.accountStatus,
+        };
+
+        await requireHostedExecutionControlClient().applyDeviceSyncRuntimeUpdates(input.userId, {
+          occurredAt: input.now,
+          updates: [
+            {
+              connection: {
+                status: error.accountStatus,
+              },
+              connectionId: input.account.id,
+              localState: {
+                lastErrorCode: error.code,
+                lastErrorMessage: error.message,
+                lastSyncErrorAt: input.now,
+                ...(error.accountStatus === "disconnected" ? { nextReconcileAt: null } : {}),
+              },
+              seed: buildHostedDeviceSyncRuntimeSeedFromPublicAccount({
+                account: seedAccount,
+                localState: {
+                  lastErrorCode: error.code,
+                  lastErrorMessage: error.message,
+                  lastSyncErrorAt: input.now,
+                  ...(error.accountStatus === "disconnected" ? { nextReconcileAt: null } : {}),
+                },
+                tokenBundle: error.accountStatus === "disconnected"
+                  ? null
+                  : { ...input.currentTokenBundle },
+              }),
+              ...(error.accountStatus === "disconnected" ? { tokenBundle: null } : {}),
+            },
+          ],
         });
         await input.tx.deviceSyncSignal.create({
           data: {
@@ -527,6 +582,28 @@ export class HostedDeviceSyncAgentSessionService {
       };
     }
   }
+}
+
+function mapHostedConnectionRecord(record: HostedConnectionRecord): {
+  connectedAt: string;
+  createdAt: string;
+  displayName: string | null;
+  externalAccountId: string;
+  id: string;
+  provider: string;
+  updatedAt: string;
+  userId: string;
+} {
+  return {
+    connectedAt: record.connectedAt.toISOString(),
+    createdAt: record.createdAt.toISOString(),
+    displayName: record.displayName,
+    externalAccountId: record.externalAccountId,
+    id: record.id,
+    provider: record.provider,
+    updatedAt: record.updatedAt.toISOString(),
+    userId: record.userId,
+  };
 }
 
 function buildTokenExport(

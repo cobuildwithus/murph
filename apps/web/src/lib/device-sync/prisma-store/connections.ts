@@ -4,22 +4,34 @@ import {
   deviceSyncError,
   sanitizeStoredDeviceSyncMetadata,
   toRedactedPublicDeviceSyncAccount,
+  type PublicDeviceSyncAccount,
+  type UpsertPublicDeviceSyncConnectionInput,
 } from "@murphai/device-syncd/public-ingress";
 
-import type {
-  DeviceSyncAccountStatus,
-  PublicDeviceSyncAccount,
-  UpsertPublicDeviceSyncConnectionInput,
-} from "@murphai/device-syncd/public-ingress";
-import { generateHostedRandomPrefixedId, maybeIsoTimestamp, toJsonRecord } from "../shared";
-import { toPrismaJsonObject } from "./prisma-json";
-import type { HostedPrismaTransactionClient } from "./types";
+import {
+  readHostedExecutionControlClientIfConfigured,
+} from "../../hosted-execution/control";
+import {
+  buildHostedPublicDeviceSyncAccount,
+  findHostedDeviceSyncRuntimeConnection,
+  type HostedStaticDeviceSyncConnectionRecord,
+} from "../internal-runtime";
+import { generateHostedRandomPrefixedId } from "../shared";
 
-export const hostedConnectionWithSecretArgs = {
+export const hostedConnectionRecordArgs = {
+  select: {
+    connectedAt: true,
+    createdAt: true,
+    displayName: true,
+    externalAccountId: true,
+    id: true,
+    provider: true,
+    updatedAt: true,
+    userId: true,
+  },
 } satisfies Prisma.DeviceConnectionDefaultArgs;
 
-type HostedPublicAccountPrismaRecord = Prisma.DeviceConnectionGetPayload<Prisma.DeviceConnectionDefaultArgs>;
-export type HostedConnectionWithSecretRecord = Prisma.DeviceConnectionGetPayload<typeof hostedConnectionWithSecretArgs>;
+export type HostedConnectionRecord = Prisma.DeviceConnectionGetPayload<typeof hostedConnectionRecordArgs>;
 
 export class PrismaHostedConnectionStore {
   readonly prisma: PrismaClient;
@@ -30,10 +42,10 @@ export class PrismaHostedConnectionStore {
 
   async upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): Promise<PublicDeviceSyncAccount> {
     const ownerId = typeof input.ownerId === "string" && input.ownerId.trim() ? input.ownerId.trim() : null;
-    const accessTokenExpiresAt = input.tokens.accessTokenExpiresAt ? new Date(input.tokens.accessTokenExpiresAt) : null;
-    const metadata = sanitizeStoredDeviceSyncMetadata(input.metadata ?? {});
+    const displayName = normalizeNullableString(input.displayName);
+    const connectedAt = new Date(input.connectedAt);
 
-    return this.prisma.$transaction(async (tx) => {
+    const record = await this.prisma.$transaction(async (tx) => {
       const existing = await tx.deviceConnection.findUnique({
         where: {
           provider_externalAccountId: {
@@ -41,7 +53,7 @@ export class PrismaHostedConnectionStore {
             externalAccountId: input.externalAccountId,
           },
         },
-        ...hostedConnectionWithSecretArgs,
+        ...hostedConnectionRecordArgs,
       });
 
       if (existing) {
@@ -54,31 +66,16 @@ export class PrismaHostedConnectionStore {
           });
         }
 
-        await tx.deviceConnection.update({
+        return tx.deviceConnection.update({
           where: {
             id: existing.id,
           },
           data: {
-            displayName: input.displayName ?? null,
-            status: input.status ?? "active",
-            scopes: input.scopes ?? [],
-            accessTokenExpiresAt,
-            metadataJson: toPrismaJsonObject(metadata),
-            connectedAt: new Date(input.connectedAt),
-            nextReconcileAt: input.nextReconcileAt ? new Date(input.nextReconcileAt) : null,
-            lastSyncErrorAt: null,
-            lastErrorCode: null,
-            lastErrorMessage: null,
+            connectedAt,
+            displayName,
           },
+          ...hostedConnectionRecordArgs,
         });
-
-        const updated = await tx.deviceConnection.findUnique({
-          where: {
-            id: existing.id,
-          },
-        });
-
-        return requireHostedPublicAccountRecord(updated);
       }
 
       if (!ownerId) {
@@ -90,32 +87,32 @@ export class PrismaHostedConnectionStore {
         });
       }
 
-      const connectionId = generateHostedRandomPrefixedId("dsc");
-
-      await tx.deviceConnection.create({
+      return tx.deviceConnection.create({
         data: {
-          id: connectionId,
-          userId: ownerId,
-          provider: input.provider,
+          connectedAt,
+          displayName,
           externalAccountId: input.externalAccountId,
-          displayName: input.displayName ?? null,
-          status: input.status ?? "active",
-          scopes: input.scopes ?? [],
-          accessTokenExpiresAt,
-          metadataJson: toPrismaJsonObject(metadata),
-          connectedAt: new Date(input.connectedAt),
-          nextReconcileAt: input.nextReconcileAt ? new Date(input.nextReconcileAt) : null,
+          id: generateHostedRandomPrefixedId("dsc"),
+          provider: input.provider,
+          userId: ownerId,
         },
+        ...hostedConnectionRecordArgs,
       });
-
-      const created = await tx.deviceConnection.findUnique({
-        where: {
-          id: connectionId,
-        },
-      });
-
-      return requireHostedPublicAccountRecord(created);
     });
+
+    return toRedactedPublicDeviceSyncAccount(
+      buildHostedPublicDeviceSyncAccount({
+        record: mapHostedConnectionRecord(record),
+        fallback: {
+          accessTokenExpiresAt: input.tokens.accessTokenExpiresAt ?? null,
+          displayName,
+          metadata: sanitizeStoredDeviceSyncMetadata(input.metadata ?? {}),
+          nextReconcileAt: input.nextReconcileAt ?? null,
+          scopes: input.scopes ?? [],
+          status: input.status ?? "active",
+        },
+      }),
+    );
   }
 
   async getConnectionByExternalAccount(
@@ -129,40 +126,48 @@ export class PrismaHostedConnectionStore {
           externalAccountId,
         },
       },
+      ...hostedConnectionRecordArgs,
     });
 
-    return record ? mapHostedPublicAccountRecord(record) : null;
+    return record ? this.hydrateConnectionRecord(record) : null;
   }
 
   async markWebhookReceived(accountId: string, now: string): Promise<void> {
-    // Use raw SQL so `last_webhook_at` can advance without Prisma bumping `updated_at`.
-    await this.prisma.$executeRaw`
-      update device_connection
-      set last_webhook_at = ${new Date(now)}
-      where id = ${accountId}
-    `;
+    const record = await this.getConnectionRecordById(accountId);
+
+    if (!record) {
+      return;
+    }
+
+    const controlClient = readHostedExecutionControlClientIfConfigured();
+
+    if (!controlClient) {
+      return;
+    }
+
+    await controlClient.applyDeviceSyncRuntimeUpdates(record.userId, {
+      occurredAt: now,
+      updates: [
+        {
+          connectionId: record.id,
+          localState: {
+            lastWebhookAt: now,
+          },
+        },
+      ],
+    });
   }
 
   async listConnectionsForUser(userId: string): Promise<PublicDeviceSyncAccount[]> {
-    const records = await this.prisma.deviceConnection.findMany({
-      where: {
-        userId,
-      },
-      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-    });
+    const records = await this.listConnectionRecordsForUser(userId);
 
-    return records.map((record) => mapHostedPublicAccountRecord(record));
+    return this.hydrateConnectionRecords(records);
   }
 
   async getConnectionForUser(userId: string, connectionId: string): Promise<PublicDeviceSyncAccount | null> {
-    const record = await this.prisma.deviceConnection.findFirst({
-      where: {
-        id: connectionId,
-        userId,
-      },
-    });
+    const record = await this.getConnectionRecordForUser(userId, connectionId);
 
-    return record ? mapHostedPublicAccountRecord(record) : null;
+    return record ? this.hydrateConnectionRecord(record) : null;
   }
 
   async getConnectionOwnerId(connectionId: string): Promise<string | null> {
@@ -178,109 +183,92 @@ export class PrismaHostedConnectionStore {
     return record?.userId ?? null;
   }
 
-  async markConnectionDisconnected(input: {
-    connectionId: string;
-    userId: string;
-    now: string;
-    errorCode?: string | null;
-    errorMessage?: string | null;
-    tx?: HostedPrismaTransactionClient;
-  }): Promise<PublicDeviceSyncAccount> {
-    const run = async (tx: HostedPrismaTransactionClient) => {
-      const existing = await tx.deviceConnection.findFirst({
-        where: {
-          id: input.connectionId,
-          userId: input.userId,
-        },
-      });
-
-      if (!existing) {
-        throw deviceSyncError({
-          code: "CONNECTION_NOT_FOUND",
-          message: "Hosted device-sync connection was not found for the current user.",
-          retryable: false,
-          httpStatus: 404,
-        });
-      }
-
-      return tx.deviceConnection.update({
-        where: {
-          id: input.connectionId,
-        },
-        data: {
-          status: "disconnected",
-          accessTokenExpiresAt: null,
-          nextReconcileAt: null,
-          lastSyncErrorAt: null,
-          lastErrorCode: input.errorCode ?? null,
-          lastErrorMessage: input.errorMessage ?? null,
-          updatedAt: new Date(input.now),
-        },
-      });
-    };
-    const updated = input.tx
-      ? await run(input.tx)
-      : await this.prisma.$transaction(run);
-
-    return mapHostedPublicAccountRecord(updated);
+  async listConnectionRecordsForUser(userId: string): Promise<HostedConnectionRecord[]> {
+    return this.prisma.deviceConnection.findMany({
+      where: {
+        userId,
+      },
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      ...hostedConnectionRecordArgs,
+    });
   }
 
-  async updateConnectionStatus(input: {
-    connectionId: string;
-    status: DeviceSyncAccountStatus;
-    now: string;
-    errorCode?: string | null;
-    errorMessage?: string | null;
-  }): Promise<PublicDeviceSyncAccount> {
-    const updated = await this.prisma.deviceConnection.update({
+  async getConnectionRecordForUser(userId: string, connectionId: string): Promise<HostedConnectionRecord | null> {
+    return this.prisma.deviceConnection.findFirst({
       where: {
-        id: input.connectionId,
+        id: connectionId,
+        userId,
       },
-      data: {
-        status: input.status,
-        lastSyncErrorAt: new Date(input.now),
-        lastErrorCode: input.errorCode ?? null,
-        lastErrorMessage: input.errorMessage ?? null,
-      },
+      ...hostedConnectionRecordArgs,
     });
+  }
 
-    return mapHostedPublicAccountRecord(updated);
+  async getConnectionRecordById(connectionId: string): Promise<HostedConnectionRecord | null> {
+    return this.prisma.deviceConnection.findUnique({
+      where: {
+        id: connectionId,
+      },
+      ...hostedConnectionRecordArgs,
+    });
+  }
+
+  private async hydrateConnectionRecord(record: HostedConnectionRecord): Promise<PublicDeviceSyncAccount> {
+    const controlClient = readHostedExecutionControlClientIfConfigured();
+    const runtimeSnapshot = controlClient
+      ? await controlClient.getDeviceSyncRuntimeSnapshot(record.userId, {
+          connectionId: record.id,
+          provider: record.provider,
+        })
+      : null;
+    const runtimeConnection = runtimeSnapshot
+      ? findHostedDeviceSyncRuntimeConnection(runtimeSnapshot, record.id)
+      : null;
+
+    return toRedactedPublicDeviceSyncAccount(
+      buildHostedPublicDeviceSyncAccount({
+        record: mapHostedConnectionRecord(record),
+        runtimeConnection,
+      }),
+    );
+  }
+
+  private async hydrateConnectionRecords(records: readonly HostedConnectionRecord[]): Promise<PublicDeviceSyncAccount[]> {
+    if (records.length === 0) {
+      return [];
+    }
+
+    const controlClient = readHostedExecutionControlClientIfConfigured();
+    const runtimeSnapshot = controlClient
+      ? await controlClient.getDeviceSyncRuntimeSnapshot(records[0].userId, {})
+      : null;
+
+    return records.map((record) => toRedactedPublicDeviceSyncAccount(
+      buildHostedPublicDeviceSyncAccount({
+        record: mapHostedConnectionRecord(record),
+        runtimeConnection: runtimeSnapshot ? findHostedDeviceSyncRuntimeConnection(runtimeSnapshot, record.id) : null,
+      }),
+    ));
   }
 }
 
-export function mapHostedInternalAccountRecord(record: HostedPublicAccountPrismaRecord): PublicDeviceSyncAccount {
+function mapHostedConnectionRecord(record: HostedConnectionRecord): HostedStaticDeviceSyncConnectionRecord {
   return {
+    connectedAt: record.connectedAt.toISOString(),
+    createdAt: record.createdAt.toISOString(),
+    displayName: normalizeNullableString(record.displayName),
+    externalAccountId: record.externalAccountId,
     id: record.id,
     provider: record.provider,
-    externalAccountId: record.externalAccountId,
-    displayName: record.displayName,
-    status: record.status,
-    scopes: Array.isArray(record.scopes) ? record.scopes.filter((scope: unknown) => typeof scope === "string") : [],
-    accessTokenExpiresAt: maybeIsoTimestamp(record.accessTokenExpiresAt),
-    metadata: sanitizeStoredDeviceSyncMetadata(toJsonRecord(record.metadataJson)),
-    connectedAt: record.connectedAt.toISOString(),
-    lastWebhookAt: maybeIsoTimestamp(record.lastWebhookAt),
-    lastSyncStartedAt: maybeIsoTimestamp(record.lastSyncStartedAt),
-    lastSyncCompletedAt: maybeIsoTimestamp(record.lastSyncCompletedAt),
-    lastSyncErrorAt: maybeIsoTimestamp(record.lastSyncErrorAt),
-    lastErrorCode: record.lastErrorCode,
-    lastErrorMessage: record.lastErrorMessage,
-    nextReconcileAt: maybeIsoTimestamp(record.nextReconcileAt),
-    createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
-  } satisfies PublicDeviceSyncAccount;
+    userId: record.userId,
+  } satisfies HostedStaticDeviceSyncConnectionRecord;
 }
 
-export function mapHostedPublicAccountRecord(record: HostedPublicAccountPrismaRecord): PublicDeviceSyncAccount {
-  return toRedactedPublicDeviceSyncAccount(mapHostedInternalAccountRecord(record));
-}
-
-export function requireHostedPublicAccountRecord(
-  record: HostedPublicAccountPrismaRecord | null | undefined,
-): PublicDeviceSyncAccount {
-  if (!record) {
-    throw new TypeError("Expected device connection record.");
+function normalizeNullableString(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
   }
 
-  return mapHostedPublicAccountRecord(record);
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 }
