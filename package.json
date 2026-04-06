@@ -47,6 +47,7 @@
     "review:gpt": "bash scripts/review-gpt.sh",
     "review:gpt:full": "cobuild-review-gpt --config scripts/review-gpt-full.config.sh",
     "review:gpt:delay": "bash scripts/review-gpt-delay.sh",
+    "review:gpt:schedule": "bash scripts/review-gpt-delay.sh",
     "review:gpt:data": "bash scripts/review-gpt-data.sh",
     "chatgpt:thread:export": "cobuild-review-gpt thread export --format json --filter-output exportPath",
     "chatgpt:thread:download": "cobuild-review-gpt thread download --format json --filter-output downloadedFile",
