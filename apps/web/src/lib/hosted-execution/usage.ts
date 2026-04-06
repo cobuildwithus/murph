@@ -8,6 +8,7 @@ import {
   type AssistantUsageRecord,
 } from "@murphai/runtime-state/node";
 
+import { readHostedMemberPrivateState } from "../hosted-onboarding/member-private-state";
 import { getPrisma } from "../prisma";
 import { requireHostedExecutionControlClient } from "./control";
 
@@ -48,7 +49,7 @@ export async function listHostedAiUsagePendingStripeMetering(input: {
       member: {
         billingRef: {
           is: {
-            stripeCustomerId: {
+            stripeCustomerLookupKey: {
               not: null,
             },
           },
@@ -76,26 +77,19 @@ export async function listHostedAiUsagePendingStripeMetering(input: {
       requestedModel: true,
       stripeMeterStatus: true,
       totalTokens: true,
-      member: {
-        select: {
-          billingRef: {
-            select: {
-              stripeCustomerId: true,
-            },
-          },
-        },
-      },
     },
   });
 
-  return records.flatMap((record) => {
-    const stripeCustomerId = record.member.billingRef?.stripeCustomerId;
+  const candidates = await Promise.all(records.map(async (record) => {
+    const stripeCustomerId = (await readHostedMemberPrivateState({
+      memberId: record.memberId,
+    }))?.stripeCustomerId;
 
     if (!stripeCustomerId || !isAssistantUsageCredentialSource(record.credentialSource)) {
-      return [];
+      return null;
     }
 
-    return [{
+    return {
       apiKeyEnv: record.apiKeyEnv,
       credentialSource: record.credentialSource,
       id: record.id,
@@ -108,8 +102,10 @@ export async function listHostedAiUsagePendingStripeMetering(input: {
       stripeCustomerId,
       stripeMeterStatus: record.stripeMeterStatus,
       totalTokens: record.totalTokens,
-    }];
-  });
+    } satisfies HostedAiUsageStripeCandidate;
+  }));
+
+  return candidates.flatMap((candidate) => candidate ? [candidate] : []);
 }
 
 function isAssistantUsageCredentialSource(

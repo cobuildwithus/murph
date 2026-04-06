@@ -47,6 +47,7 @@ import {
 import { handleGatewayRoute } from "./worker-routes/gateway.ts";
 import {
   handleManualRunRoute,
+  handleMemberPrivateStateRoute,
   handlePendingUsageRoute,
   handlePendingUsageUsersRoute,
   handleSharePackRoute,
@@ -154,6 +155,16 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     },
     match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/crypto-context$/u),
     methods: ["PUT"],
+    wrongMethodResponse: "method-not-allowed",
+  },
+  {
+    authorizeBeforeMethod: true,
+    authorization: "vercel-oidc",
+    async handle(context, params) {
+      return handleMemberPrivateStateRoute(context, params.userId);
+    },
+    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/member-private-state$/u),
+    methods: ["GET", "PUT", "DELETE"],
     wrongMethodResponse: "method-not-allowed",
   },
   {

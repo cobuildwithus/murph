@@ -176,9 +176,10 @@ function assertHostedPrivyWalletAvailableWhenRequired(identity: HostedPrivyIdent
 }
 
 export function hasHostedMemberPrivyIdentity(member: {
-  privyUserId: string | null | undefined;
+  privyUserId?: string | null | undefined;
+  privyUserLookupKey?: string | null | undefined;
 }): boolean {
-  return Boolean(member.privyUserId);
+  return Boolean(member.privyUserId ?? member.privyUserLookupKey);
 }
 
 export async function persistHostedMemberLinqChatBinding(input: {
