@@ -32,8 +32,8 @@ export async function completeHostedPrivyVerification(input: {
     : null;
   const member = invite
     ? await reconcileHostedPrivyIdentityOnMember({
-        expectedPhoneHint: readHostedPhoneHint(invite.member.maskedPhoneNumberHint),
-        expectedPhoneLookupKey: invite.member.normalizedPhoneNumber,
+        expectedPhoneHint: readHostedPhoneHint((invite.member.identity ?? invite.member).maskedPhoneNumberHint),
+        expectedPhoneLookupKey: (invite.member.identity ?? invite.member).normalizedPhoneNumber,
         identity: input.identity,
         member: invite.member,
         prisma,

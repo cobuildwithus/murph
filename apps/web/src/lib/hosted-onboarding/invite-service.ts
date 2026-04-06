@@ -13,6 +13,7 @@ import { readHostedPhoneHint } from "./contact-privacy";
 import { hasHostedMemberActiveAccess } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import { ensureHostedMemberForPhone } from "./member-identity-service";
+import { isHostedOnboardingRevnetEnabled } from "./revnet";
 import { hasHostedPrivyPhoneAuthConfig } from "./privy";
 import {
   getHostedOnboardingEnvironment,
@@ -85,7 +86,9 @@ export async function getHostedInviteStatus(input: {
   }
 
   const sessionMatchesInvite = input.authenticatedMember?.id === invite.memberId;
-  const hasPrivyIdentity = Boolean(invite.member.privyUserId && invite.member.walletAddress);
+  const inviteIdentity = invite.member.identity ?? invite.member;
+  const hasPrivyIdentity = Boolean(inviteIdentity.privyUserId)
+    && (!isHostedOnboardingRevnetEnabled() || Boolean(inviteIdentity.walletAddress));
   const isActive = hasHostedMemberActiveAccess({
     billingStatus: invite.member.billingStatus,
     memberStatus: invite.member.status,
@@ -109,11 +112,11 @@ export async function getHostedInviteStatus(input: {
     invite: {
       code: invite.inviteCode,
       expiresAt: invite.expiresAt.toISOString(),
-      phoneHint: readHostedPhoneHint(invite.member.maskedPhoneNumberHint),
+      phoneHint: readHostedPhoneHint(inviteIdentity.maskedPhoneNumberHint),
       status: inviteStatus,
     },
     member: {
-      phoneHint: readHostedPhoneHint(invite.member.maskedPhoneNumberHint),
+      phoneHint: readHostedPhoneHint(inviteIdentity.maskedPhoneNumberHint),
       status: invite.member.status,
     },
     session: {
@@ -249,7 +252,11 @@ async function findHostedInviteByCode(inviteCode: string, prisma: PrismaClient) 
       inviteCode,
     },
     include: {
-      member: true,
+      member: {
+        include: {
+          identity: true,
+        },
+      },
     },
   });
 }

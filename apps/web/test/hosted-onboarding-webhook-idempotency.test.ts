@@ -353,12 +353,17 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(1);
     expect(prisma.hostedInvite.findFirst).toHaveBeenCalledTimes(1);
     expect(prisma.hostedMember.create).not.toHaveBeenCalled();
-    expect(prisma.hostedMember.update).toHaveBeenCalledWith({
-      data: {
+    expect(prisma.hostedMemberRouting.upsert).toHaveBeenCalledWith({
+      create: {
+        linqChatId: "chat_123",
+        memberId: "member_123",
+        telegramUserId: null,
+      },
+      update: {
         linqChatId: "chat_123",
       },
       where: expect.objectContaining({
-        id: "member_123",
+        memberId: "member_123",
       }),
     });
     expect(prisma.hostedInvite.create).toHaveBeenCalledTimes(1);
@@ -2503,10 +2508,16 @@ function asHostedWebhookPrisma<T extends Record<string, unknown>>(prisma: T): T 
       update?: ReturnType<typeof vi.fn>;
       updateMany?: unknown;
     };
+    hostedMemberRouting?: {
+      upsert?: ReturnType<typeof vi.fn>;
+    };
   };
   const hostedMember = prismaWithHostedMember.hostedMember as {
     update?: ((input: { data: Record<string, unknown> }) => Promise<unknown>) | undefined;
     updateMany?: unknown;
+  } | undefined;
+  const hostedMemberRouting = prismaWithHostedMember.hostedMemberRouting as {
+    upsert?: ((input: { create: Record<string, unknown>; update: Record<string, unknown> }) => Promise<unknown>) | undefined;
   } | undefined;
   const hostedInvite = prismaWithHostedMember.hostedInvite as {
     findFirst?: ((input: { where?: Record<string, unknown>; select?: Record<string, unknown> }) => Promise<unknown>) | undefined;
@@ -2520,6 +2531,24 @@ function asHostedWebhookPrisma<T extends Record<string, unknown>>(prisma: T): T 
       }
 
       return { count: 1 };
+    });
+  }
+
+  if (!hostedMemberRouting?.upsert) {
+    const hostedMemberRoutingFallback = {
+      upsert: vi.fn(async (input: { create: Record<string, unknown>; update: Record<string, unknown> }) => {
+        if (hostedMember?.update) {
+          await hostedMember.update({
+            data: input.update,
+          });
+        }
+
+        return input.create;
+      }),
+    };
+    Object.defineProperty(prismaWithHostedMember, "hostedMemberRouting", {
+      configurable: true,
+      value: hostedMemberRoutingFallback,
     });
   }
 

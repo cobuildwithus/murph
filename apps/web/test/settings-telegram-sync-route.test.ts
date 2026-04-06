@@ -7,8 +7,11 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 const mocks = vi.hoisted(() => ({
   buildHostedTelegramBotLink: vi.fn(),
   getPrisma: vi.fn(),
-  hostedMemberUpdate: vi.fn(),
+  prismaClient: {
+    label: "test-prisma",
+  },
   requireHostedPrivyActiveRequestAuthContext: vi.fn(),
+  upsertHostedMemberTelegramRoutingBinding: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -21,6 +24,10 @@ vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/telegram", () => ({
   buildHostedTelegramBotLink: mocks.buildHostedTelegramBotLink,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  upsertHostedMemberTelegramRoutingBinding: mocks.upsertHostedMemberTelegramRoutingBinding,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -43,12 +50,8 @@ describe("settings telegram sync route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.getPrisma.mockReturnValue({
-      hostedMember: {
-        update: mocks.hostedMemberUpdate,
-      },
-    });
-    mocks.hostedMemberUpdate.mockResolvedValue({});
+    mocks.getPrisma.mockReturnValue(mocks.prismaClient);
+    mocks.upsertHostedMemberTelegramRoutingBinding.mockResolvedValue(undefined);
     mocks.requireHostedPrivyActiveRequestAuthContext.mockResolvedValue({
       linkedAccounts: [],
       member: {
@@ -87,14 +90,10 @@ describe("settings telegram sync route", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(mocks.requireHostedPrivyActiveRequestAuthContext).toHaveBeenCalledWith(expect.any(Request));
-    expect(mocks.hostedMemberUpdate).toHaveBeenCalledWith({
-      data: {
-        telegramUserId: createHostedTelegramUserLookupKey("456"),
-        telegramUsername: null,
-      },
-      where: {
-        id: "member_123",
-      },
+    expect(mocks.upsertHostedMemberTelegramRoutingBinding).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+      telegramUserId: createHostedTelegramUserLookupKey("456"),
     });
     expect(mocks.buildHostedTelegramBotLink).toHaveBeenCalledWith("connect");
     await expect(response.json()).resolves.toEqual({
@@ -127,7 +126,7 @@ describe("settings telegram sync route", () => {
     );
 
     expect(response.status).toBe(401);
-    expect(mocks.hostedMemberUpdate).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberTelegramRoutingBinding).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "AUTH_REQUIRED",
@@ -146,7 +145,7 @@ describe("settings telegram sync route", () => {
     );
 
     expect(response.status).toBe(400);
-    expect(mocks.hostedMemberUpdate).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberTelegramRoutingBinding).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "TELEGRAM_USER_ID_REQUIRED",
@@ -177,7 +176,7 @@ describe("settings telegram sync route", () => {
     );
 
     expect(response.status).toBe(403);
-    expect(mocks.hostedMemberUpdate).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberTelegramRoutingBinding).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "PRIVY_SESSION_MISMATCH",
@@ -210,7 +209,7 @@ describe("settings telegram sync route", () => {
     );
 
     expect(response.status).toBe(409);
-    expect(mocks.hostedMemberUpdate).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberTelegramRoutingBinding).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "PRIVY_TELEGRAM_NOT_READY",
@@ -221,7 +220,7 @@ describe("settings telegram sync route", () => {
   });
 
   it("surfaces unique-constraint conflicts when the Telegram identity is already linked elsewhere", async () => {
-    mocks.hostedMemberUpdate.mockRejectedValue(createUniqueConstraintError());
+    mocks.upsertHostedMemberTelegramRoutingBinding.mockRejectedValue(createUniqueConstraintError());
 
     const response = await settingsTelegramSyncRoute.POST(
       new Request("https://join.example.test/api/settings/telegram/sync", {
@@ -237,6 +236,7 @@ describe("settings telegram sync route", () => {
     );
 
     expect(response.status).toBe(409);
+    expect(mocks.upsertHostedMemberTelegramRoutingBinding).toHaveBeenCalledTimes(1);
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "TELEGRAM_IDENTITY_CONFLICT",
@@ -276,7 +276,7 @@ describe("settings telegram sync route", () => {
     );
 
     expect(response.status).toBe(409);
-    expect(mocks.hostedMemberUpdate).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberTelegramRoutingBinding).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "PRIVY_TELEGRAM_NOT_READY",
@@ -321,7 +321,7 @@ describe("settings telegram sync route", () => {
     );
 
     expect(response.status).toBe(409);
-    expect(mocks.hostedMemberUpdate).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberTelegramRoutingBinding).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "PRIVY_TELEGRAM_AMBIGUOUS",
@@ -352,7 +352,7 @@ describe("settings telegram sync route", () => {
     );
 
     expect(response.status).toBe(403);
-    expect(mocks.hostedMemberUpdate).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberTelegramRoutingBinding).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "HOSTED_MEMBER_SUSPENDED",
@@ -383,7 +383,7 @@ describe("settings telegram sync route", () => {
     );
 
     expect(response.status).toBe(403);
-    expect(mocks.hostedMemberUpdate).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberTelegramRoutingBinding).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "HOSTED_ACCESS_REQUIRED",

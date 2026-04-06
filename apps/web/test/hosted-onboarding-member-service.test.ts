@@ -200,11 +200,11 @@ describe("hosted-onboarding member-service barrel", () => {
 });
 
 describe("persistHostedMemberLinqChatBinding", () => {
-  it("stores the latest Linq chat id for future activation welcomes", async () => {
-    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+  it("stores the latest Linq chat id in the additive routing table for future activation welcomes", async () => {
+    const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
-      hostedMember: {
-        updateMany,
+      hostedMemberRouting: {
+        upsert,
       },
     } as never;
 
@@ -214,31 +214,26 @@ describe("persistHostedMemberLinqChatBinding", () => {
       prisma,
     });
 
-    expect(updateMany).toHaveBeenCalledWith({
-      data: {
+    expect(upsert).toHaveBeenCalledWith({
+      create: {
+        linqChatId: "chat_new",
+        memberId: "member_123",
+        telegramUserId: null,
+      },
+      update: {
         linqChatId: "chat_new",
       },
       where: {
-        OR: [
-          {
-            linqChatId: null,
-          },
-          {
-            linqChatId: {
-              not: "chat_new",
-            },
-          },
-        ],
-        id: "member_123",
+        memberId: "member_123",
       },
     });
   });
 
   it("ignores empty chat ids", async () => {
-    const updateMany = vi.fn();
+    const upsert = vi.fn();
     const prisma = {
-      hostedMember: {
-        updateMany,
+      hostedMemberRouting: {
+        upsert,
       },
     } as never;
 
@@ -248,6 +243,6 @@ describe("persistHostedMemberLinqChatBinding", () => {
       prisma,
     });
 
-    expect(updateMany).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
   });
 });

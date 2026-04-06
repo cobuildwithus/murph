@@ -52,7 +52,7 @@ export async function drainHostedAiUsageStripeMetering(): Promise<HostedAiUsageS
       continue;
     }
 
-    const stripeCustomerId = candidate.member.stripeCustomerId;
+    const stripeCustomerId = candidate.stripeCustomerId;
     const value = resolveHostedAiUsageStripeValue(candidate);
 
     if (value === null) {

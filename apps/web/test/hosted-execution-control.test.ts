@@ -63,6 +63,7 @@ describe("hosted verified email sync helper", () => {
       mode: "merge",
     });
     expect(run).toHaveBeenCalledWith("member_123");
+    expect(updateUserEnv.mock.invocationCallOrder[0]).toBeLessThan(run.mock.invocationCallOrder[0]);
   });
 
   it("keeps the verified email saved even when the best-effort hosted run trigger fails", async () => {

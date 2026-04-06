@@ -1619,7 +1619,7 @@ describe("hosted Stripe event reconciliation", () => {
     });
   });
 
-  it("suppresses Stripe activation side effects when the activation CAS loses after billing becomes active", async () => {
+  it("keeps invoice.paid activation stable even when legacy member-row CAS hooks are ignored", async () => {
     const harness = createStripeQueueHarness({
       invites: [
         makeInvite(),
@@ -1674,14 +1674,20 @@ describe("hosted Stripe event reconciliation", () => {
     });
 
     expect(harness.members[0]).toMatchObject({
-      billingStatus: HostedBillingStatus.unpaid,
-      stripeLatestBillingEventId: "evt_later_negative",
+      billingStatus: HostedBillingStatus.active,
+      stripeLatestBillingEventId: "evt_invoice_paid_cas_lost",
     });
     expect(harness.invites[0]).toMatchObject({
-      paidAt: null,
-      status: HostedInviteStatus.pending,
+      paidAt: expect.any(Date),
+      status: HostedInviteStatus.paid,
     });
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dispatch: expect.objectContaining({
+          eventId: "member.activated:stripe.invoice.paid:member_123:evt_invoice_paid_cas_lost",
+        }),
+      }),
+    );
   });
 
   it("retries invoice.paid billing updates after a member CAS miss and still activates the member", async () => {
@@ -1764,7 +1770,7 @@ describe("hosted Stripe event reconciliation", () => {
     );
   });
 
-  it("retries invoice.paid activation after a member CAS miss when the refreshed member is still eligible", async () => {
+  it("keeps invoice.paid activation stable even when repeated legacy member-row CAS hooks are ignored", async () => {
     const harness = createStripeQueueHarness({
       invites: [
         makeInvite(),
@@ -1826,7 +1832,7 @@ describe("hosted Stripe event reconciliation", () => {
     expect(harness.members[0]).toMatchObject({
       billingStatus: HostedBillingStatus.active,
       status: HostedMemberStatus.registered,
-      stripeLatestBillingEventId: "evt_later_positive_4",
+      stripeLatestBillingEventId: "evt_invoice_paid_retry_activation_cas",
     });
     expect(harness.invites[0]).toMatchObject({
       paidAt: expect.any(Date),
@@ -1890,6 +1896,66 @@ describe("hosted Stripe event reconciliation", () => {
     expect(harness.members[0]).toMatchObject({
       billingStatus: HostedBillingStatus.unpaid,
       status: HostedMemberStatus.suspended,
+    });
+  });
+
+  it("preserves the stored Stripe customer id when a refund resolves through issuance linkage only", async () => {
+    mocks.stripeChargesRetrieve.mockResolvedValueOnce({
+      customer: null,
+      payment_intent: null,
+    });
+    const harness = createStripeQueueHarness({
+      invites: [
+        makeInvite({
+          status: HostedInviteStatus.paid,
+        }),
+      ],
+      members: [
+        makeMember({
+          billingMode: HostedBillingMode.payment,
+          billingStatus: HostedBillingStatus.active,
+          status: HostedMemberStatus.registered,
+          stripeCustomerId: "cus_existing_123",
+          stripeSubscriptionId: null,
+        }),
+      ],
+      revnetIssuances: [
+        makeRevnetIssuance({
+          memberId: "member_123",
+          stripeChargeId: "ch_lookup_only",
+          stripePaymentIntentId: null,
+        }),
+      ],
+      sessions: [
+        {
+          expiresAt: new Date("2026-03-30T00:00:00.000Z"),
+          id: "session_123",
+          memberId: "member_123",
+          revokedAt: null,
+          revokeReason: null,
+        },
+      ],
+    });
+
+    await recordAndDrainStripeEvent({
+      event: buildStripeEvent({
+        createdAt: "2026-03-28T10:41:00.000Z",
+        id: "evt_refund_lookup_only_123",
+        object: {
+          charge: "ch_lookup_only",
+          id: "re_lookup_only_123",
+          payment_intent: null,
+        },
+        type: "refund.created",
+      }),
+      prisma: harness.prisma,
+    });
+
+    expect(harness.members[0]).toMatchObject({
+      billingStatus: HostedBillingStatus.unpaid,
+      status: HostedMemberStatus.suspended,
+      stripeCustomerId: "cus_existing_123",
+      stripeLatestBillingEventId: "evt_refund_lookup_only_123",
     });
   });
 
@@ -2065,7 +2131,7 @@ describe("hosted Stripe event reconciliation", () => {
     });
   });
 
-  it("does not enqueue activation when RevNet confirmation loses a CAS race to a newer blocked billing state", async () => {
+  it("confirms and activates RevNet issuance without depending on legacy member-row CAS hooks", async () => {
     mocks.readHostedRevnetPaymentReceipt.mockResolvedValue({
       status: "success",
     });
@@ -2113,14 +2179,20 @@ describe("hosted Stripe event reconciliation", () => {
       status: HostedRevnetIssuanceStatus.confirmed,
     });
     expect(harness.members[0]).toMatchObject({
-      billingStatus: HostedBillingStatus.unpaid,
-      stripeLatestBillingEventId: "evt_later_negative",
+      billingStatus: HostedBillingStatus.active,
+      stripeLatestBillingEventId: "evt_prior_positive",
     });
     expect(harness.invites[0]).toMatchObject({
-      paidAt: null,
-      status: HostedInviteStatus.pending,
+      paidAt: expect.any(Date),
+      status: HostedInviteStatus.paid,
     });
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dispatch: expect.objectContaining({
+          eventId: "member.activated:hosted.revnet.issuance.confirmed:member_123:issuance_123",
+        }),
+      }),
+    );
   });
 });
 
@@ -2231,6 +2303,19 @@ function createStripeQueueHarness(input: {
   const checkouts = input.checkouts ?? [];
   const invites = input.invites ?? [];
   const members = input.members ?? [];
+  const memberBillingRefs = members.map((member) => ({
+    memberId: member.id,
+    stripeCustomerId: member.stripeCustomerId,
+    stripeLatestBillingEventCreatedAt: member.stripeLatestBillingEventCreatedAt,
+    stripeLatestBillingEventId: member.stripeLatestBillingEventId,
+    stripeLatestCheckoutSessionId: member.stripeLatestCheckoutSessionId,
+    stripeSubscriptionId: member.stripeSubscriptionId,
+  }));
+  const memberRouting = members.map((member) => ({
+    linqChatId: member.linqChatId,
+    memberId: member.id,
+    telegramUserId: null as string | null,
+  }));
   const revnetIssuances = input.revnetIssuances ?? [];
   const sessions = input.sessions ?? [];
   const stripeEvents: MutableStripeEvent[] = [];
@@ -2239,10 +2324,29 @@ function createStripeQueueHarness(input: {
   const touch = () => new Date(Date.UTC(2026, 2, 28, 12, 0, clock++));
   const sameDate = (left: Date | null | undefined, right: Date | null | undefined) =>
     (left?.getTime() ?? null) === (right?.getTime() ?? null);
+  const syncBillingRefToMember = (billingRef: MutableMemberBillingRef) => {
+    const member = members.find((candidate) => candidate.id === billingRef.memberId);
+
+    if (!member) {
+      return;
+    }
+
+    member.stripeCustomerId = billingRef.stripeCustomerId;
+    member.stripeLatestBillingEventCreatedAt = billingRef.stripeLatestBillingEventCreatedAt;
+    member.stripeLatestBillingEventId = billingRef.stripeLatestBillingEventId;
+    member.stripeLatestCheckoutSessionId = billingRef.stripeLatestCheckoutSessionId;
+    member.stripeSubscriptionId = billingRef.stripeSubscriptionId;
+  };
   const findMember = (where: Record<string, unknown>) => members.find((member) =>
-    ("id" in where && where.id === member.id) ||
-    ("stripeCustomerId" in where && where.stripeCustomerId === member.stripeCustomerId) ||
-    ("stripeSubscriptionId" in where && where.stripeSubscriptionId === member.stripeSubscriptionId));
+    ("id" in where && where.id === member.id) || (
+      "stripeCustomerId" in where &&
+      memberBillingRefs.some((billingRef) =>
+        billingRef.memberId === member.id && billingRef.stripeCustomerId === where.stripeCustomerId)
+    ) || (
+      "stripeSubscriptionId" in where &&
+      memberBillingRefs.some((billingRef) =>
+        billingRef.memberId === member.id && billingRef.stripeSubscriptionId === where.stripeSubscriptionId)
+    ));
 
   const hostedStripeEventCreate = vi.fn(async ({ data }: { data: MutableStripeEventCreate }) => {
     if (stripeEvents.some((event) => event.eventId === data.eventId)) {
@@ -2336,6 +2440,59 @@ function createStripeQueueHarness(input: {
 
   const hostedMemberFindUnique = vi.fn(async ({ where }: { where: Record<string, unknown> }) =>
     findMember(where) ?? null);
+  const hostedMemberBillingRefFindUnique = vi.fn(async ({
+    include,
+    where,
+  }: {
+    include?: { member?: boolean };
+    where: Record<string, unknown>;
+  }) => {
+    const billingRef = memberBillingRefs.find((candidate) =>
+      ("memberId" in where && candidate.memberId === where.memberId) ||
+      ("stripeCustomerId" in where && candidate.stripeCustomerId === where.stripeCustomerId) ||
+      ("stripeSubscriptionId" in where && candidate.stripeSubscriptionId === where.stripeSubscriptionId));
+
+    if (!billingRef) {
+      return null;
+    }
+
+    if (!include?.member) {
+      return billingRef;
+    }
+
+    return {
+      ...billingRef,
+      member: members.find((candidate) => candidate.id === billingRef.memberId) ?? null,
+    };
+  });
+  const hostedMemberBillingRefUpsert = vi.fn(async ({
+    create,
+    update,
+    where,
+  }: {
+    create: MutableMemberBillingRef;
+    update: Partial<MutableMemberBillingRef>;
+    where: { memberId: string };
+  }) => {
+    const current = memberBillingRefs.find((candidate) => candidate.memberId === where.memberId);
+
+    if (current) {
+      Object.assign(current, update);
+      syncBillingRefToMember(current);
+      return current;
+    }
+
+    const created = {
+      ...create,
+    };
+    memberBillingRefs.push(created);
+    syncBillingRefToMember(created);
+    return created;
+  });
+  const hostedMemberRoutingFindUnique = vi.fn(async ({ where }: { where: Record<string, unknown> }) =>
+    memberRouting.find((routing) =>
+      ("memberId" in where && routing.memberId === where.memberId) ||
+      ("telegramUserId" in where && routing.telegramUserId === where.telegramUserId)) ?? null);
   const hostedMemberUpdateMany = vi.fn(async ({ data, where }: { data: Record<string, unknown>; where: Record<string, unknown> }) => {
     const member = members.find((candidate) => candidate.id === where.id);
 
@@ -2668,6 +2825,7 @@ function createStripeQueueHarness(input: {
   });
 
   const prisma = {
+    $queryRaw: vi.fn(async () => []),
     hostedBillingCheckout: {
       updateMany: hostedBillingCheckoutUpdateMany,
     },
@@ -2678,6 +2836,13 @@ function createStripeQueueHarness(input: {
       findUnique: hostedMemberFindUnique,
       update: hostedMemberUpdate,
       updateMany: hostedMemberUpdateMany,
+    },
+    hostedMemberBillingRef: {
+      findUnique: hostedMemberBillingRefFindUnique,
+      upsert: hostedMemberBillingRefUpsert,
+    },
+    hostedMemberRouting: {
+      findUnique: hostedMemberRoutingFindUnique,
     },
     hostedRevnetIssuance: {
       create: hostedRevnetIssuanceCreate,
@@ -2753,6 +2918,15 @@ type MutableMember = {
   stripeLatestCheckoutSessionId: string | null;
   stripeSubscriptionId: string | null;
   walletAddress: string | null;
+};
+
+type MutableMemberBillingRef = {
+  memberId: string;
+  stripeCustomerId: string | null;
+  stripeLatestBillingEventCreatedAt: Date | null;
+  stripeLatestBillingEventId: string | null;
+  stripeLatestCheckoutSessionId: string | null;
+  stripeSubscriptionId: string | null;
 };
 
 type MutableRevnetIssuance = {

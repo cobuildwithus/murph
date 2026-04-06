@@ -71,11 +71,13 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-      hostedMember: {
+      hostedMemberRouting: {
         findUnique: vi.fn().mockResolvedValue({
-          billingStatus: HostedBillingStatus.active,
-          id: "member_telegram_123",
-          status: HostedMemberStatus.registered,
+          member: {
+            billingStatus: HostedBillingStatus.active,
+            id: "member_telegram_123",
+            status: HostedMemberStatus.registered,
+          },
         }),
       },
     }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
@@ -158,15 +160,15 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
 
   it("rejects Telegram webhooks whose configured secret token is missing", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
-    const hostedMemberFindUnique = vi.fn();
+    const hostedMemberRoutingFindUnique = vi.fn();
     const prisma = withPrismaTransaction({
       hostedWebhookReceipt: {
         create: vi.fn(),
         findUnique: vi.fn(),
         updateMany: vi.fn(),
       },
-      hostedMember: {
-        findUnique: hostedMemberFindUnique,
+      hostedMemberRouting: {
+        findUnique: hostedMemberRoutingFindUnique,
       },
     }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
 
@@ -195,20 +197,20 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       code: "TELEGRAM_WEBHOOK_SECRET_REQUIRED",
       httpStatus: 401,
     });
-    expect(hostedMemberFindUnique).not.toHaveBeenCalled();
+    expect(hostedMemberRoutingFindUnique).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
   it("rejects Telegram webhooks when the server-side secret is not configured", async () => {
-    const hostedMemberFindUnique = vi.fn();
+    const hostedMemberRoutingFindUnique = vi.fn();
     const prisma = withPrismaTransaction({
       hostedWebhookReceipt: {
         create: vi.fn(),
         findUnique: vi.fn(),
         updateMany: vi.fn(),
       },
-      hostedMember: {
-        findUnique: hostedMemberFindUnique,
+      hostedMemberRouting: {
+        findUnique: hostedMemberRoutingFindUnique,
       },
     }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
 
@@ -237,7 +239,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       code: "TELEGRAM_WEBHOOK_SECRET_NOT_CONFIGURED",
       httpStatus: 500,
     });
-    expect(hostedMemberFindUnique).not.toHaveBeenCalled();
+    expect(hostedMemberRoutingFindUnique).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
@@ -259,11 +261,13 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-      hostedMember: {
+      hostedMemberRouting: {
         findUnique: vi.fn().mockResolvedValue({
-          billingStatus: HostedBillingStatus.active,
-          id: "member_telegram_123",
-          status: HostedMemberStatus.suspended,
+          member: {
+            billingStatus: HostedBillingStatus.active,
+            id: "member_telegram_123",
+            status: HostedMemberStatus.suspended,
+          },
         }),
       },
     }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
@@ -299,7 +303,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
 
   it("ignores business-account self messages flagged through sender_business_bot", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
-    const hostedMemberFindUnique = vi.fn();
+    const hostedMemberRoutingFindUnique = vi.fn();
     const prisma = withPrismaTransaction({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -316,8 +320,8 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-      hostedMember: {
-        findUnique: hostedMemberFindUnique,
+      hostedMemberRouting: {
+        findUnique: hostedMemberRoutingFindUnique,
       },
     }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
 
@@ -354,13 +358,13 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       ok: true,
       reason: "own-message",
     });
-    expect(hostedMemberFindUnique).not.toHaveBeenCalled();
+    expect(hostedMemberRoutingFindUnique).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
   it("ignores plain self messages when Telegram marks the sender as the bot user", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
-    const hostedMemberFindUnique = vi.fn();
+    const hostedMemberRoutingFindUnique = vi.fn();
     const prisma = withPrismaTransaction({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -377,8 +381,8 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-      hostedMember: {
-        findUnique: hostedMemberFindUnique,
+      hostedMemberRouting: {
+        findUnique: hostedMemberRoutingFindUnique,
       },
     }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
 
@@ -410,7 +414,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       ok: true,
       reason: "own-message",
     });
-    expect(hostedMemberFindUnique).not.toHaveBeenCalled();
+    expect(hostedMemberRoutingFindUnique).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
@@ -432,11 +436,13 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-      hostedMember: {
+      hostedMemberRouting: {
         findUnique: vi.fn().mockResolvedValue({
-          billingStatus: HostedBillingStatus.active,
-          id: "member_telegram_456",
-          status: HostedMemberStatus.registered,
+          member: {
+            billingStatus: HostedBillingStatus.active,
+            id: "member_telegram_456",
+            status: HostedMemberStatus.registered,
+          },
         }),
       },
     }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
@@ -501,15 +507,15 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
   it("rejects malformed Telegram message payloads before receipt persistence", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const hostedWebhookReceiptCreate = vi.fn();
-    const hostedMemberFindUnique = vi.fn();
+    const hostedMemberRoutingFindUnique = vi.fn();
     const prisma = withPrismaTransaction({
       hostedWebhookReceipt: {
         create: hostedWebhookReceiptCreate,
         findUnique: vi.fn(),
         updateMany: vi.fn(),
       },
-      hostedMember: {
-        findUnique: hostedMemberFindUnique,
+      hostedMemberRouting: {
+        findUnique: hostedMemberRoutingFindUnique,
       },
     }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
 
@@ -534,22 +540,22 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     ).rejects.toThrowError(new TypeError("message.chat must be a JSON object."));
 
     expect(hostedWebhookReceiptCreate).not.toHaveBeenCalled();
-    expect(hostedMemberFindUnique).not.toHaveBeenCalled();
+    expect(hostedMemberRoutingFindUnique).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
   it("rejects malformed direct-message topic payloads even when the secret is valid", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const hostedWebhookReceiptCreate = vi.fn();
-    const hostedMemberFindUnique = vi.fn();
+    const hostedMemberRoutingFindUnique = vi.fn();
     const prisma = withPrismaTransaction({
       hostedWebhookReceipt: {
         create: hostedWebhookReceiptCreate,
         findUnique: vi.fn(),
         updateMany: vi.fn(),
       },
-      hostedMember: {
-        findUnique: hostedMemberFindUnique,
+      hostedMemberRouting: {
+        findUnique: hostedMemberRoutingFindUnique,
       },
     }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
 
@@ -581,14 +587,10 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     ).rejects.toThrowError(new TypeError("message.direct_messages_topic.topic_id must be an integer."));
 
     expect(hostedWebhookReceiptCreate).not.toHaveBeenCalled();
-    expect(hostedMemberFindUnique).not.toHaveBeenCalled();
+    expect(hostedMemberRoutingFindUnique).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 });
-
-function asPrismaTransactionClient<T extends Record<string, unknown>>(prisma: T) {
-  return prisma as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
-}
 
 function withPrismaTransaction<T extends Record<string, unknown>>(prisma: T): T {
   const prismaWithTransaction = prisma as T & {

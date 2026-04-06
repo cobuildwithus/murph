@@ -118,8 +118,29 @@ describe("completeHostedPrivyVerification", () => {
   });
 
   it("binds a verified Privy identity onto an invite-bound member", async () => {
-    const inviteMember = makeMember();
-    const invite = makeInvite(inviteMember);
+    const inviteMember = makeMember({
+      maskedPhoneNumberHint: "*** 4321",
+      normalizedPhoneNumber: SECONDARY_PHONE_LOOKUP_KEY,
+    });
+    const invite = {
+      ...makeInvite(inviteMember),
+      member: {
+        ...inviteMember,
+        identity: {
+          createdAt: NOW,
+          maskedPhoneNumberHint: "*** 4567",
+          memberId: inviteMember.id,
+          normalizedPhoneNumber: DEFAULT_PHONE_LOOKUP_KEY,
+          phoneNumberVerifiedAt: null,
+          privyUserId: null,
+          updatedAt: NOW,
+          walletAddress: null,
+          walletChainType: null,
+          walletCreatedAt: null,
+          walletProvider: null,
+        },
+      },
+    };
     const prisma = asCompleteHostedPrivyVerificationPrisma({
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(invite),
@@ -169,6 +190,55 @@ describe("completeHostedPrivyVerification", () => {
       joinUrl: "https://join.example.test/join/invite-code",
       stage: "checkout",
     });
+  });
+
+  it("rejects invite verification when the current identity-side wallet conflicts with the verified Privy wallet", async () => {
+    const inviteMember = makeMember();
+    const invite = makeInvite(inviteMember);
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(invite),
+      },
+      hostedMember: {
+        update: vi.fn(),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue({
+          createdAt: NOW,
+          maskedPhoneNumberHint: "*** 4567",
+          memberId: inviteMember.id,
+          normalizedPhoneNumber: DEFAULT_PHONE_LOOKUP_KEY,
+          phoneNumberVerifiedAt: NOW,
+          privyUserId: "did:privy:user_123",
+          updatedAt: NOW,
+          walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+          walletChainType: "ethereum",
+          walletCreatedAt: NOW,
+          walletProvider: "privy",
+        }),
+      },
+    });
+
+    await expect(
+      completeHostedPrivyVerification({
+        identity: makeIdentity({
+          wallet: {
+            address: "0x1111111111111111111111111111111111111111",
+            chainType: "ethereum",
+            id: "wallet_conflict",
+            type: "wallet",
+          },
+        }),
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+      }),
+    ).rejects.toMatchObject({
+      code: "PRIVY_WALLET_MISMATCH",
+      httpStatus: 409,
+    });
+
+    expect(prisma.hostedMember.update).not.toHaveBeenCalled();
   });
 
   it("creates a hosted member and a web invite for a new public phone signup", async () => {
