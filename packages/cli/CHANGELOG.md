@@ -2,6 +2,131 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.1.16] - 2026-04-06
+
+### Added
+- add compiled cli contract bootstrap
+- ship incur config schema
+- harden hosted crypto and signed share flows
+- split assistant/setup packages and add openclaw bundle
+- cut over hosted execution dispatch payload refs
+- land managed-hosted cutover batch 2
+- update homepage pricing copy
+- auto-preserve inbound document attachments
+- land managed-hosted cutover batch 1
+- tighten wiki maintainer workflow
+- add assistant wearable connect links
+- unify provider activity logging
+- refine onboarding prompt guidance
+- inline stripe activation and welcome
+- cap hosted linq inbound messages
+- send signup links on first text
+
+### Fixed
+- stabilize workspace verification
+- dedupe cli prompt guidance
+- harden hosted state writes
+- tighten signed share route verification
+- harden hosted user env policy
+- preserve hosted runtime config boundaries
+- use public assistant service entrypoint for cron
+- restore vercel cron auth fallback
+- require scheduler tokens for internal cron auth
+- land production-readiness follow-up
+- scrub persisted assistant headers
+- land wake-up review fixes
+- harden internal auth and user bootstrap
+- preserve shim stdin for piped commands
+- align email ingress key scope
+- export log helpers
+- hard-cut queue metadata persistence
+- move dispatch payloads to root keys
+- externalize gateway send payloads
+- harden outbound header handling
+- finish hardening follow-up
+- harden root key writes
+- encourage knowledge page creation
+- split control signing from dispatch
+- prefer personal vault context in health prompts
+- serialize hosted envelope writes
+- hard-cut hosted storage fallbacks
+- cut over inline share hydration
+- use canonical target headers for session secrets
+- restore legacy hosted storage path fallback
+- hard-cut greenfield hosted compat
+- suppress repeat member activation dispatches
+- port pro sparse activation patch
+- prefer hosted device connect tool
+- cap cli tool output
+- harden cli tool fallback
+- bind recipient aad to envelope context
+- move memory file ops onto cli
+- harden root-key recipient updates
+- final security prod cleanup
+- land security follow-up hardening
+- cut provider turns over to cli runtime
+
+### Changed
+- refresh first-contact welcome copy
+- add capability registry hosts
+- bump review-gpt to 0.5.41
+- split assistant tool runtime owners
+- bump review-gpt to 0.5.40
+- bump review-gpt to 0.5.38
+- tighten boundary seams
+- unify shared descriptor metadata
+- clear completed watch row for 69d231bd
+- close completed ChatGPT watch row
+- drop legacy env aliases
+- remove assistant and setup shim wrappers
+- bump review-gpt to 0.5.37
+- split hosted agent session seams
+- simplify email routing paths
+- remove legacy session and dispatch fallbacks
+- simplify deploy and observability helpers
+- restore green verification
+- commit remaining cleanup
+- cut over web control edge to vercel oidc
+- finalize managed-hosted cutover
+- simplify generated shims
+- hard-cut stale runner proxy scaffolding
+- remove stale runner sleepAfter stub
+- simplify signed web control and runner lifecycle
+- teach canonical query routing
+- clear completed hosted hardening lane
+- close hardening ledger row
+- bootstrap cli surface summary
+- ban markdown in channel replies
+- tighten incur cli guidance
+- drop stale internal-token mock
+- remove final connect-link bearer seam
+- split deploy and gateway policy helpers
+- simplify runner payload and wake flow
+- simplify hosted privy auth flow
+- hard-cut legacy hosted config reader
+- wire hosted deploy env contract
+- split ink seams into focused modules
+- bump review-gpt to 0.5.35
+- hard-cut messaging ingress subpaths
+- bump review-gpt to 0.5.34
+- cut wrapper package edges
+- simplify hosted runner helpers
+- extract composer editor seam
+- finish target cutover follow-up
+- unify target and resume persistence
+- centralize hosted storage paths
+- centralize provider activity summaries
+- bump review-gpt to 0.5.33
+- normalize hosted type imports
+- complete ownership rewrite
+- bump review-gpt to 0.5.32
+- normalize first-contact activation payloads
+- move first contact into hosted runtime
+- bump review-gpt to 0.5.31
+- simplify stripe inline reconcile path
+- hard-cut scheduler auth
+- remove legacy fallbacks
+
 ## [0.1.15] - 2026-04-04
 
 ### Fixed
