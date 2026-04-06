@@ -42,7 +42,7 @@ murph onboard
 If you already use OpenClaw, install the first-party Murph OpenClaw bundle after onboarding:
 
 ```bash
-openclaw plugins install @murphai/openclaw
+openclaw plugins install @murphai/openclaw-plugin
 openclaw gateway restart
 ```
 
@@ -123,7 +123,7 @@ The result is a system you can inspect with normal filesystem tools while still 
 | `packages/assistant-runtime` | Headless hosted execution surface used by Cloudflare runner paths. |
 | `packages/assistantd` | Local assistant daemon with a loopback-only bearer-authenticated control plane. |
 | `packages/cli` | The published `@murphai/murph` package, exposing the `murph` / `vault-cli` binaries and the main operator surface. |
-| `packages/openclaw` | The published OpenClaw-compatible bundle that teaches OpenClaw to use `vault-cli` directly against the configured Murph vault. |
+| `packages/openclaw-plugin` | The published OpenClaw-compatible bundle that teaches OpenClaw to use `vault-cli` directly against the configured Murph vault. |
 | `apps/web` | Hosted Next.js control plane for onboarding, billing, OAuth, webhooks, and execution dispatch/outbox. |
 | `apps/cloudflare` | Hosted execution plane for signed internal dispatch, per-user coordination, encrypted hosted bundles, and container-backed runs. |
 | `fixtures` and `e2e` | Deterministic fixtures and smoke coverage. |

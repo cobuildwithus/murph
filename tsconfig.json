@@ -50,7 +50,7 @@
       "path": "./packages/cli"
     },
     {
-      "path": "./packages/openclaw"
+      "path": "./packages/openclaw-plugin"
     },
     {
       "path": "./packages/assistant-runtime"

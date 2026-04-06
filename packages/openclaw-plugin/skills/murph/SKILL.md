@@ -2,7 +2,7 @@
 name: murph
 description: Use Murph's existing vault CLI as the canonical way to read and update a Murph vault from OpenClaw.
 user-invocable: false
-homepage: https://github.com/cobuildwithus/murph/tree/main/packages/openclaw
+homepage: https://github.com/cobuildwithus/murph/tree/main/packages/openclaw-plugin
 metadata: {"openclaw":{"requires":{"bins":["vault-cli"]}}}
 ---
 

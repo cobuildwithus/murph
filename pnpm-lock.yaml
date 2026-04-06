@@ -483,7 +483,7 @@ importers:
 
   packages/messaging-ingress: {}
 
-  packages/openclaw: {}
+  packages/openclaw-plugin: {}
 
   packages/parsers:
     dependencies:

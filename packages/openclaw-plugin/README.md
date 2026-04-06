@@ -1,4 +1,4 @@
-# @murphai/openclaw
+# @murphai/openclaw-plugin
 
 First-party OpenClaw bundle for Murph.
 
@@ -22,7 +22,7 @@ murph onboard
 Then install the OpenClaw bundle:
 
 ```bash
-openclaw plugins install @murphai/openclaw
+openclaw plugins install @murphai/openclaw-plugin
 openclaw gateway restart
 ```
 
@@ -46,6 +46,6 @@ The integration is intentionally vault-first and simple:
 ## Local Development
 
 ```bash
-openclaw plugins install ./packages/openclaw
+openclaw plugins install ./packages/openclaw-plugin
 openclaw gateway restart
 ```
