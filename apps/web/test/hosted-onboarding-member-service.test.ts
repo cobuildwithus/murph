@@ -1,6 +1,11 @@
 import { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const memberPrivateStateMocks = vi.hoisted(() => ({
+  readHostedMemberPrivateState: vi.fn(),
+  writeHostedMemberPrivateStatePatch: vi.fn(),
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/runtime")>(
     "@/src/lib/hosted-onboarding/runtime",
@@ -31,6 +36,11 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   };
 });
 
+vi.mock("@/src/lib/hosted-onboarding/member-private-state", () => ({
+  readHostedMemberPrivateState: memberPrivateStateMocks.readHostedMemberPrivateState,
+  writeHostedMemberPrivateStatePatch: memberPrivateStateMocks.writeHostedMemberPrivateStatePatch,
+}));
+
 import * as barrel from "@/src/lib/hosted-onboarding/member-service";
 import {
   completeHostedPrivyVerification,
@@ -54,6 +64,21 @@ import {
 describe("ensureHostedMemberForPhone", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    memberPrivateStateMocks.readHostedMemberPrivateState.mockResolvedValue(null);
+    memberPrivateStateMocks.writeHostedMemberPrivateStatePatch.mockImplementation(
+      async ({ memberId, patch }: { memberId: string; patch: Record<string, string | null | undefined> }) => ({
+        linqChatId: patch.linqChatId ?? null,
+        memberId,
+        privyUserId: patch.privyUserId ?? null,
+        schema: "murph.hosted-member-private-state.v1",
+        stripeCustomerId: patch.stripeCustomerId ?? null,
+        stripeLatestBillingEventId: patch.stripeLatestBillingEventId ?? null,
+        stripeLatestCheckoutSessionId: patch.stripeLatestCheckoutSessionId ?? null,
+        stripeSubscriptionId: patch.stripeSubscriptionId ?? null,
+        updatedAt: "2026-04-07T00:00:00.000Z",
+        walletAddress: patch.walletAddress ?? null,
+      }),
+    );
   });
 
   it("rewrites phone storage to blind-indexed lookup data without dropping the stored signup chat binding", async () => {
@@ -71,8 +96,8 @@ describe("ensureHostedMemberForPhone", () => {
       memberId: "member_123",
       phoneLookupKey: "hbidx:phone:v1:existing",
       phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
-      privyUserId: "did:privy:user_123",
-      walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+      privyUserLookupKey: "hbidx:privy-user:v1:existing",
+      walletAddressLookupKey: "hbidx:wallet-address:v1:existing",
       walletChainType: "ethereum",
       walletCreatedAt: new Date("2026-03-20T12:00:00.000Z"),
       walletProvider: "privy",
@@ -119,8 +144,8 @@ describe("ensureHostedMemberForPhone", () => {
         maskedPhoneNumberHint: "*** 4567",
         phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/),
         phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
-        privyUserId: "did:privy:user_123",
-        walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+        privyUserLookupKey: null,
+        walletAddressLookupKey: null,
         walletChainType: "ethereum",
         walletCreatedAt: new Date("2026-03-20T12:00:00.000Z"),
         walletProvider: "privy",
@@ -180,6 +205,70 @@ describe("ensureHostedMemberForPhone", () => {
         phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/),
       }),
     });
+  });
+
+  it("fails closed instead of clearing lookup keys when member private state is unavailable", async () => {
+    const identityUpsert = vi.fn();
+    const currentIdentity = {
+      maskedPhoneNumberHint: "*** 4567",
+      memberId: "member_123",
+      phoneLookupKey: "hbidx:phone:v1:existing",
+      phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
+      privyUserLookupKey: "hbidx:privy-user:v1:existing",
+      walletAddressLookupKey: "hbidx:wallet-address:v1:existing",
+      walletChainType: "ethereum",
+      walletCreatedAt: new Date("2026-03-20T12:00:00.000Z"),
+      walletProvider: "privy",
+    };
+    const prisma = {
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "member_123",
+          linqChatId: "chat_existing",
+          maskedPhoneNumberHint: "*** 4567",
+          phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
+        }),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => {
+          if (where.memberId === "member_123") {
+            return currentIdentity;
+          }
+
+          if (typeof where.phoneLookupKey === "string") {
+            return {
+              ...currentIdentity,
+              member: {
+                id: "member_123",
+                linqChatId: "chat_existing",
+                maskedPhoneNumberHint: "*** 4567",
+                phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
+              },
+              phoneLookupKey: where.phoneLookupKey,
+            };
+          }
+
+          return null;
+        }),
+        upsert: identityUpsert,
+      },
+    } as never;
+    memberPrivateStateMocks.readHostedMemberPrivateState.mockRejectedValue({
+      code: "HOSTED_MEMBER_PRIVATE_STATE_NOT_CONFIGURED",
+      httpStatus: 500,
+    });
+
+    await expect(
+      ensureHostedMemberForPhone({
+        phoneNumber: "+15551234567",
+        prisma,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_PRIVATE_STATE_NOT_CONFIGURED",
+      httpStatus: 500,
+    });
+
+    expect(identityUpsert).not.toHaveBeenCalled();
   });
 
   it("recovers from a concurrent create conflict by refreshing the winning member row", async () => {
@@ -302,23 +391,23 @@ describe("persistHostedMemberLinqChatBinding", () => {
 
     expect(updateMany).toHaveBeenCalledWith({
       data: {
-        linqChatId: null,
+        linqChatLookupKey: null,
       },
       where: {
         NOT: {
           memberId: "member_123",
         },
-        linqChatId: "chat_new",
+        linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
       },
     });
     expect(upsert).toHaveBeenCalledWith({
       create: {
-        linqChatId: "chat_new",
+        linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
         memberId: "member_123",
         telegramUserLookupKey: null,
       },
       update: {
-        linqChatId: "chat_new",
+        linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
       },
       where: {
         memberId: "member_123",

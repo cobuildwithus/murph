@@ -1,6 +1,14 @@
 import { Prisma } from "@prisma/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const memberPrivateStateMocks = vi.hoisted(() => ({
+  readHostedMemberPrivateState: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-private-state", () => ({
+  readHostedMemberPrivateState: memberPrivateStateMocks.readHostedMemberPrivateState,
+}));
+
 import {
   importHostedAiUsageRecords,
   listHostedAiUsagePendingStripeMetering,
@@ -47,6 +55,7 @@ const BASE_USAGE_RECORD = {
 
 afterEach(() => {
   delete process.env.HOSTED_AI_USAGE_PERSIST_DEBUG_FIELDS;
+  vi.clearAllMocks();
 });
 
 describe("readHostedAiUsageStoragePolicy", () => {
@@ -171,16 +180,23 @@ describe("importHostedAiUsageRecords", () => {
 
 describe("listHostedAiUsagePendingStripeMetering", () => {
   it("queries pending metering candidates in occurred order", async () => {
+    memberPrivateStateMocks.readHostedMemberPrivateState.mockResolvedValue({
+      linqChatId: null,
+      memberId: "member_123",
+      privyUserId: null,
+      schema: "murph.hosted-member-private-state.v1",
+      stripeCustomerId: "cus_123",
+      stripeLatestBillingEventId: null,
+      stripeLatestCheckoutSessionId: null,
+      stripeSubscriptionId: null,
+      updatedAt: "2026-04-07T00:00:00.000Z",
+      walletAddress: null,
+    });
     const findMany = vi.fn(async () => [{
       apiKeyEnv: null,
       credentialSource: "platform",
       id: "usage_123",
       inputTokens: 10,
-      member: {
-        billingRef: {
-          stripeCustomerId: "cus_123",
-        },
-      },
       memberId: "member_123",
       occurredAt: new Date("2026-03-29T12:00:00.000Z"),
       outputTokens: 5,
@@ -209,7 +225,7 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
         member: {
           billingRef: {
             is: {
-              stripeCustomerId: {
+              stripeCustomerLookupKey: {
                 not: null,
               },
             },
@@ -237,15 +253,6 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
         requestedModel: true,
         stripeMeterStatus: true,
         totalTokens: true,
-        member: {
-          select: {
-            billingRef: {
-              select: {
-                stripeCustomerId: true,
-              },
-            },
-          },
-        },
       },
     });
     expect(

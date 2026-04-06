@@ -909,6 +909,134 @@ describe("cloudflare worker routes", () => {
     expect(missingResponse.status).toBe(404);
   });
 
+  it("serves member private state through the signed direct worker route", async () => {
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+    });
+    await resolveHostedUserCryptoContextForTest(env, "member_123");
+    const state = {
+      linqChatId: "chat_123",
+      memberId: "member_123",
+      privyUserId: "did:privy:123",
+      schema: "murph.hosted-member-private-state.v1",
+      stripeCustomerId: "cus_123",
+      stripeLatestBillingEventId: "evt_123",
+      stripeLatestCheckoutSessionId: "cs_123",
+      stripeSubscriptionId: "sub_123",
+      updatedAt: "2026-04-07T00:00:00.000Z",
+      walletAddress: "0xabc",
+    };
+
+    const putResponse = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/member-private-state", {
+        body: JSON.stringify(state),
+        headers: {
+          authorization: "Bearer control-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "PUT",
+      })),
+      env,
+    );
+    expect(putResponse.status).toBe(200);
+    await expect(putResponse.json()).resolves.toEqual(state);
+
+    const getResponse = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/member-private-state", {
+        headers: {
+          authorization: "Bearer control-token",
+        },
+        method: "GET",
+      })),
+      env,
+    );
+    expect(getResponse.status).toBe(200);
+    await expect(getResponse.json()).resolves.toEqual(state);
+
+    const mismatchResponse = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/member-private-state", {
+        body: JSON.stringify({
+          ...state,
+          memberId: "member_other",
+        }),
+        headers: {
+          authorization: "Bearer control-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "PUT",
+      })),
+      env,
+    );
+    expect(mismatchResponse.status).toBe(400);
+    await expect(mismatchResponse.json()).resolves.toEqual({
+      error: "Hosted member private state memberId does not match the route user.",
+    });
+
+    const deleteResponse = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/member-private-state", {
+        headers: {
+          authorization: "Bearer control-token",
+        },
+        method: "DELETE",
+      })),
+      env,
+    );
+    expect(deleteResponse.status).toBe(200);
+    await expect(deleteResponse.json()).resolves.toEqual({
+      ok: true,
+      userId: "member_123",
+    });
+
+    const missingResponse = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/member-private-state", {
+        headers: {
+          authorization: "Bearer control-token",
+        },
+        method: "GET",
+      })),
+      env,
+    );
+    expect(missingResponse.status).toBe(404);
+    await expect(missingResponse.json()).resolves.toEqual({
+      error: "Not found",
+    });
+  });
+
+  it("treats missing member private state crypto context as not found on reads and no-op on deletes", async () => {
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+    });
+
+    const getResponse = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/member-private-state", {
+        headers: {
+          authorization: "Bearer control-token",
+        },
+        method: "GET",
+      })),
+      env,
+    );
+    expect(getResponse.status).toBe(404);
+    await expect(getResponse.json()).resolves.toEqual({
+      error: "Not found",
+    });
+
+    const deleteResponse = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/member-private-state", {
+        headers: {
+          authorization: "Bearer control-token",
+        },
+        method: "DELETE",
+      })),
+      env,
+    );
+    expect(deleteResponse.status).toBe(200);
+    await expect(deleteResponse.json()).resolves.toEqual({
+      ok: true,
+      userId: "member_123",
+    });
+  });
+
   it("forwards hosted gateway read and send routes through the gateway seam", async () => {
     const stub = createUserRunnerStub();
     const env = createWorkerEnv(stub, {

@@ -30,6 +30,41 @@ export function createHostedEmailLookupKey(value: string | null | undefined): st
   return normalized ? createHostedBlindIndex("email", normalized) : null;
 }
 
+export function createHostedPrivyUserLookupKey(value: string | null | undefined): string | null {
+  const normalized = normalizeHostedOpaqueInput(value);
+  return normalized ? createHostedBlindIndex("privy-user", normalized) : null;
+}
+
+export function createHostedWalletAddressLookupKey(value: string | null | undefined): string | null {
+  const normalized = normalizeHostedOpaqueInput(value);
+  return normalized ? createHostedBlindIndex("wallet-address", normalized.toLowerCase()) : null;
+}
+
+export function createHostedLinqChatLookupKey(value: string | number | null | undefined): string | null {
+  const normalized = normalizeHostedOpaqueInput(value);
+  return normalized ? createHostedBlindIndex("linq-chat", normalized) : null;
+}
+
+export function createHostedStripeCustomerLookupKey(value: string | null | undefined): string | null {
+  const normalized = normalizeHostedOpaqueInput(value);
+  return normalized ? createHostedBlindIndex("stripe-customer", normalized) : null;
+}
+
+export function createHostedStripeSubscriptionLookupKey(value: string | null | undefined): string | null {
+  const normalized = normalizeHostedOpaqueInput(value);
+  return normalized ? createHostedBlindIndex("stripe-subscription", normalized) : null;
+}
+
+export function createHostedStripeCheckoutSessionLookupKey(value: string | null | undefined): string | null {
+  const normalized = normalizeHostedOpaqueInput(value);
+  return normalized ? createHostedBlindIndex("stripe-checkout-session", normalized) : null;
+}
+
+export function createHostedStripeBillingEventLookupKey(value: string | null | undefined): string | null {
+  const normalized = normalizeHostedOpaqueInput(value);
+  return normalized ? createHostedBlindIndex("stripe-billing-event", normalized) : null;
+}
+
 export function createHostedOpaqueIdentifier(
   kind: string,
   value: string | number | null | undefined,

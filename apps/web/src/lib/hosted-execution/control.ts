@@ -5,6 +5,7 @@ import {
   type HostedExecutionDispatchRequest,
   type HostedExecutionManagedUserCryptoStatus,
   type HostedExecutionOutboxPayload,
+  type HostedMemberPrivateState,
 } from "@murphai/hosted-execution";
 import type { SharePack } from "@murphai/contracts";
 import { createHostedVerifiedEmailUserEnv } from "@murphai/runtime-state";
@@ -69,6 +70,31 @@ export async function deleteHostedStoredDispatchPayloadBestEffort(
       error instanceof Error ? error.message : String(error),
     );
   }
+}
+
+export async function readHostedMemberPrivateStateFromHostedExecution(
+  memberId: string,
+): Promise<HostedMemberPrivateState | null> {
+  const client = readHostedExecutionControlClientIfConfigured();
+  return client ? client.getMemberPrivateState(memberId) : null;
+}
+
+export async function writeHostedMemberPrivateStateToHostedExecution(
+  state: HostedMemberPrivateState,
+): Promise<HostedMemberPrivateState> {
+  return requireHostedExecutionControlClient().putMemberPrivateState(state.memberId, state);
+}
+
+export async function deleteHostedMemberPrivateStateFromHostedExecution(
+  memberId: string,
+): Promise<void> {
+  const client = readHostedExecutionControlClientIfConfigured();
+
+  if (!client) {
+    return;
+  }
+
+  await client.deleteMemberPrivateState(memberId);
 }
 
 export async function syncHostedVerifiedEmailToHostedExecution(input: {

@@ -3,7 +3,6 @@ import {
   Prisma,
   type HostedBillingCheckout,
   type HostedMember,
-  type HostedMemberIdentity,
   type PrismaClient,
 } from "@prisma/client";
 import {
@@ -569,7 +568,7 @@ async function finalizeHostedBillingCheckoutReservation(input: {
 
 export function requireHostedMemberWalletAddressForRevnet(member: {
   id: string;
-  walletAddress: HostedMemberIdentity["walletAddress"] | null | undefined;
+  walletAddress: string | null | undefined;
 }) {
   const walletAddress = coerceHostedWalletAddress(member.walletAddress);
 
