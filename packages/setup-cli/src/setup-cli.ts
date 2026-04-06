@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { Cli, z } from 'incur'
-import { assistantAutomationStateSchema } from '@murphai/assistant-core/assistant-cli-contracts'
+import { assistantAutomationStateSchema } from '@murphai/operator-config/assistant-cli-contracts'
 import { resolveAssistantStatePaths } from '@murphai/assistant-core/assistant-state'
 import {
   type SetupAssistantPreset,
@@ -14,7 +14,7 @@ import {
   setupCommandOptionsSchema,
   setupResultSchema,
   setupWearableValues,
-} from '@murphai/assistant-core/setup-cli-contracts'
+} from '@murphai/operator-config/setup-cli-contracts'
 import {
   createSetupAssistantResolver,
   getDefaultSetupAssistantPreset,
@@ -30,7 +30,7 @@ import {
   SETUP_RUNTIME_ENV_NOTICE,
   type SetupRuntimeEnvResolver,
   type SetupWizardRuntimeStatus,
-} from '@murphai/assistant-core/setup-runtime-env'
+} from '@murphai/operator-config/setup-runtime-env'
 import {
   createSetupServices,
   detectSetupProgramName,

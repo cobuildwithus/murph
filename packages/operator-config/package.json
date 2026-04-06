@@ -1,0 +1,176 @@
+{
+  "name": "@murphai/operator-config",
+  "version": "0.1.16",
+  "private": false,
+  "type": "module",
+  "license": "GPL-3.0-only",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cobuildwithus/murph"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./assistant-cli-contracts": {
+      "types": "./dist/assistant-cli-contracts.d.ts",
+      "import": "./dist/assistant-cli-contracts.js",
+      "default": "./dist/assistant-cli-contracts.js"
+    },
+    "./assistant/shared": {
+      "types": "./dist/assistant/shared.d.ts",
+      "import": "./dist/assistant/shared.js",
+      "default": "./dist/assistant/shared.js"
+    },
+    "./assistant-backend": {
+      "types": "./dist/assistant-backend.d.ts",
+      "import": "./dist/assistant-backend.js",
+      "default": "./dist/assistant-backend.js"
+    },
+    "./assistant/hosted-config": {
+      "types": "./dist/assistant/hosted-config.d.ts",
+      "import": "./dist/assistant/hosted-config.js",
+      "default": "./dist/assistant/hosted-config.js"
+    },
+    "./assistant/openai-compatible-provider-presets": {
+      "types": "./dist/assistant/openai-compatible-provider-presets.d.ts",
+      "import": "./dist/assistant/openai-compatible-provider-presets.js",
+      "default": "./dist/assistant/openai-compatible-provider-presets.js"
+    },
+    "./assistant/provider-config": {
+      "types": "./dist/assistant/provider-config.d.ts",
+      "import": "./dist/assistant/provider-config.js",
+      "default": "./dist/assistant/provider-config.js"
+    },
+    "./agentmail-runtime": {
+      "types": "./dist/agentmail-runtime.d.ts",
+      "import": "./dist/agentmail-runtime.js",
+      "default": "./dist/agentmail-runtime.js"
+    },
+    "./command-helpers": {
+      "types": "./dist/command-helpers.d.ts",
+      "import": "./dist/command-helpers.js",
+      "default": "./dist/command-helpers.js"
+    },
+    "./device-cli-contracts": {
+      "types": "./dist/device-cli-contracts.d.ts",
+      "import": "./dist/device-cli-contracts.js",
+      "default": "./dist/device-cli-contracts.js"
+    },
+    "./device-daemon": {
+      "types": "./dist/device-daemon.d.ts",
+      "import": "./dist/device-daemon.js",
+      "default": "./dist/device-daemon.js"
+    },
+    "./device-sync-client": {
+      "types": "./dist/device-sync-client.d.ts",
+      "import": "./dist/device-sync-client.js",
+      "default": "./dist/device-sync-client.js"
+    },
+    "./env-values": {
+      "types": "./dist/env-values.d.ts",
+      "import": "./dist/env-values.js",
+      "default": "./dist/env-values.js"
+    },
+    "./http-json-retry": {
+      "types": "./dist/http-json-retry.d.ts",
+      "import": "./dist/http-json-retry.js",
+      "default": "./dist/http-json-retry.js"
+    },
+    "./http-retry": {
+      "types": "./dist/http-retry.d.ts",
+      "import": "./dist/http-retry.js",
+      "default": "./dist/http-retry.js"
+    },
+    "./hosted-assistant-config": {
+      "types": "./dist/hosted-assistant-config.d.ts",
+      "import": "./dist/hosted-assistant-config.js",
+      "default": "./dist/hosted-assistant-config.js"
+    },
+    "./imessage-readiness": {
+      "types": "./dist/imessage-readiness.d.ts",
+      "import": "./dist/imessage-readiness.js",
+      "default": "./dist/imessage-readiness.js"
+    },
+    "./inbox-cli-contracts": {
+      "types": "./dist/inbox-cli-contracts.d.ts",
+      "import": "./dist/inbox-cli-contracts.js",
+      "default": "./dist/inbox-cli-contracts.js"
+    },
+    "./linq-runtime": {
+      "types": "./dist/linq-runtime.d.ts",
+      "import": "./dist/linq-runtime.js",
+      "default": "./dist/linq-runtime.js"
+    },
+    "./operator-config": {
+      "types": "./dist/operator-config.d.ts",
+      "import": "./dist/operator-config.js",
+      "default": "./dist/operator-config.js"
+    },
+    "./runtime-errors": {
+      "types": "./dist/runtime-errors.d.ts",
+      "import": "./dist/runtime-errors.js",
+      "default": "./dist/runtime-errors.js"
+    },
+    "./setup-cli-contracts": {
+      "types": "./dist/setup-cli-contracts.d.ts",
+      "import": "./dist/setup-cli-contracts.js",
+      "default": "./dist/setup-cli-contracts.js"
+    },
+    "./setup-prompt-io": {
+      "types": "./dist/setup-prompt-io.d.ts",
+      "import": "./dist/setup-prompt-io.js",
+      "default": "./dist/setup-prompt-io.js"
+    },
+    "./setup-runtime-env": {
+      "types": "./dist/setup-runtime-env.d.ts",
+      "import": "./dist/setup-runtime-env.js",
+      "default": "./dist/setup-runtime-env.js"
+    },
+    "./telegram-runtime": {
+      "types": "./dist/telegram-runtime.d.ts",
+      "import": "./dist/telegram-runtime.js",
+      "default": "./dist/telegram-runtime.js"
+    },
+    "./text/*": {
+      "types": "./dist/text/*.d.ts",
+      "import": "./dist/text/*.js",
+      "default": "./dist/text/*.js"
+    },
+    "./vault-cli-contracts": {
+      "types": "./dist/vault-cli-contracts.d.ts",
+      "import": "./dist/vault-cli-contracts.js",
+      "default": "./dist/vault-cli-contracts.js"
+    },
+    "./vault-cli-errors": {
+      "types": "./dist/vault-cli-errors.d.ts",
+      "import": "./dist/vault-cli-errors.js",
+      "default": "./dist/vault-cli-errors.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.json --force",
+    "typecheck": "tsc -p tsconfig.typecheck.json --pretty false"
+  },
+  "dependencies": {
+    "@murphai/contracts": "workspace:*",
+    "@murphai/device-syncd": "workspace:*",
+    "@murphai/inboxd": "workspace:*",
+    "@murphai/runtime-state": "workspace:*",
+    "zod": "^4.1.8"
+  },
+  "engines": {
+    "node": ">=22.16.0"
+  }
+}

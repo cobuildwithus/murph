@@ -1,11 +1,11 @@
 import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
-import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type {
   SetupStepKind,
   SetupStepResult,
   WhisperModel,
-} from '@murphai/assistant-core/setup-cli-contracts'
+} from '@murphai/operator-config/setup-cli-contracts'
 import {
   assertCommandSucceeded,
   isExecutable,

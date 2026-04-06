@@ -18,12 +18,12 @@ import {
   type SetupWearable,
   setupChannelValues,
   setupWearableValues,
-} from '@murphai/assistant-core/setup-cli-contracts'
+} from '@murphai/operator-config/setup-cli-contracts'
 import {
   SETUP_RUNTIME_ENV_NOTICE,
   type SetupWizardRuntimeStatus,
-} from '@murphai/assistant-core/setup-runtime-env'
-import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
+} from '@murphai/operator-config/setup-runtime-env'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 export interface SetupWizardResult {
   assistantApiKeyEnv?: string | null

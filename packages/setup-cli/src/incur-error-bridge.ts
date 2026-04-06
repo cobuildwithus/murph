@@ -1,5 +1,5 @@
 import { Errors, middleware } from 'incur'
-import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 function readOptionalBoolean(
   value: unknown,

@@ -10,7 +10,7 @@ import {
   createIntegratedVaultServices,
   type VaultServices,
 } from '@murphai/assistant-core/vault-services'
-import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { resolveEffectiveTopLevelToken } from '@murphai/assistant-core/command-helpers'
 import {
   buildAssistantProviderDefaultsPatch,
@@ -20,7 +20,7 @@ import {
   saveAssistantOperatorDefaultsPatch,
   saveDefaultVaultConfig,
   type AssistantOperatorDefaults,
-} from '@murphai/assistant-core/operator-config'
+} from '@murphai/operator-config/operator-config'
 import {
   type SetupChannel,
   type SetupConfiguredAssistant,
@@ -31,7 +31,7 @@ import {
   type SetupTools,
   type SetupWearable,
   type WhisperModel,
-} from '@murphai/assistant-core/setup-cli-contracts'
+} from '@murphai/operator-config/setup-cli-contracts'
 import type { InboxBootstrapResult } from '@murphai/assistant-core/inbox-cli-contracts'
 import {
   configureSetupChannels,
@@ -72,7 +72,7 @@ import {
   ensureWhisperModel,
   resolveExecutablePath,
 } from './setup-services/toolchain.js'
-import { describeSelectedSetupWearables } from '@murphai/assistant-core/setup-runtime-env'
+import { describeSelectedSetupWearables } from '@murphai/operator-config/setup-runtime-env'
 
 interface SetupInput {
   vault: string
