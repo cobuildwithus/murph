@@ -66,6 +66,11 @@ describe("handleRunnerOutboundRequest", () => {
   });
 
   it("handles device-sync runtime requests locally and binds them to the authenticated user", async () => {
+    const getDeviceSyncRuntimeSnapshot = vi.fn(async (input: { request: { userId: string } }) => ({
+      connections: [],
+      generatedAt: "2026-04-05T00:00:00.000Z",
+      userId: input.request.userId,
+    }));
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
       headers: {
         "content-type": "application/json; charset=utf-8",
@@ -84,7 +89,21 @@ describe("handleRunnerOutboundRequest", () => {
         }),
         method: "POST",
       }),
-      createRunnerOutboundEnv(),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return {
+              async commit() {
+                throw new Error("not used");
+              },
+              async finalizeCommit() {
+                throw new Error("not used");
+              },
+              getDeviceSyncRuntimeSnapshot,
+            };
+          },
+        },
+      }),
       "member_123",
       RUNNER_PROXY_TOKEN,
     );
@@ -92,8 +111,14 @@ describe("handleRunnerOutboundRequest", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       connections: [],
-      generatedAt: expect.any(String),
+      generatedAt: "2026-04-05T00:00:00.000Z",
       userId: "member_123",
+    });
+    expect(getDeviceSyncRuntimeSnapshot).toHaveBeenCalledWith({
+      request: {
+        provider: "oura",
+        userId: "member_123",
+      },
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -150,6 +175,13 @@ describe("handleRunnerOutboundRequest", () => {
                 throw new Error("not used");
               },
               bootstrapUser,
+              async getDeviceSyncRuntimeSnapshot(input: { request: { userId: string } }) {
+                return {
+                  connections: [],
+                  generatedAt: "2026-04-05T00:00:00.000Z",
+                  userId: input.request.userId,
+                };
+              },
             };
           },
         },
@@ -311,6 +343,10 @@ describe("handleRunnerOutboundRequest", () => {
   });
 
   it("records hosted AI usage locally instead of proxying through hosted web", async () => {
+    const putPendingUsage = vi.fn(async (input: { usage: Array<{ usageId?: string }> }) => ({
+      recorded: input.usage.length,
+      usageIds: input.usage.map((entry) => entry.usageId ?? "missing"),
+    }));
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       recorded: 1,
       usageIds: ["usage_123"],
@@ -336,7 +372,21 @@ describe("handleRunnerOutboundRequest", () => {
         }),
         method: "POST",
       }),
-      createRunnerOutboundEnv(),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return {
+              async commit() {
+                throw new Error("not used");
+              },
+              async finalizeCommit() {
+                throw new Error("not used");
+              },
+              putPendingUsage,
+            };
+          },
+        },
+      }),
       "member_123",
       RUNNER_PROXY_TOKEN,
     );
@@ -345,6 +395,13 @@ describe("handleRunnerOutboundRequest", () => {
     await expect(response.json()).resolves.toEqual({
       recorded: 1,
       usageIds: ["usage_123"],
+    });
+    expect(putPendingUsage).toHaveBeenCalledWith({
+      usage: [
+        {
+          usageId: "usage_123",
+        },
+      ],
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -397,6 +454,26 @@ function createRunnerOutboundEnv(overrides: Partial<Record<string, unknown>> = {
         },
         async finalizeCommit() {
           throw new Error("not used");
+        },
+        async applyDeviceSyncRuntimeUpdates(input: { request: { userId: string } }) {
+          return {
+            appliedAt: "2026-04-05T00:00:00.000Z",
+            updates: [],
+            userId: input.request.userId,
+          };
+        },
+        async getDeviceSyncRuntimeSnapshot(input: { request: { userId: string } }) {
+          return {
+            connections: [],
+            generatedAt: "2026-04-05T00:00:00.000Z",
+            userId: input.request.userId,
+          };
+        },
+        async putPendingUsage(input: { usage: Array<{ usageId?: string }> }) {
+          return {
+            recorded: input.usage.length,
+            usageIds: input.usage.map((entry) => entry.usageId ?? "missing"),
+          };
         },
       };
     },
