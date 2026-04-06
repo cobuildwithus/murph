@@ -58,7 +58,7 @@ readonly typecheck_package_dirs=(
   "packages/gateway-core"
   "packages/gateway-local"
   "packages/cli"
-  "packages/openclaw"
+  "packages/openclaw-plugin"
   "packages/assistantd"
   "packages/assistant-runtime"
   "apps/web"
@@ -276,7 +276,7 @@ run_test_packages_common() {
     local contracts_test_pid="$!"
     pids+=("$contracts_test_pid")
     register_background_pid "$contracts_test_pid"
-    pnpm --dir "packages/openclaw" test &
+    pnpm --dir "packages/openclaw-plugin" test &
     local openclaw_test_pid="$!"
     pids+=("$openclaw_test_pid")
     register_background_pid "$openclaw_test_pid"
@@ -290,7 +290,7 @@ run_test_packages_common() {
 
   pnpm no-js
   pnpm --dir "packages/contracts" test
-  pnpm --dir "packages/openclaw" test
+  pnpm --dir "packages/openclaw-plugin" test
 }
 
 run_test_apps() {

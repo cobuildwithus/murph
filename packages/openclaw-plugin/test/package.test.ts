@@ -9,9 +9,9 @@ import bundle, { MURPH_OPENCLAW_SKILL_PATH } from "../src/index.ts";
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const skillPath = path.join(packageDir, MURPH_OPENCLAW_SKILL_PATH);
 
-describe("@murphai/openclaw", () => {
+describe("@murphai/openclaw-plugin", () => {
   test("exports vault-first bundle metadata", () => {
-    expect(bundle.packageName).toBe("@murphai/openclaw");
+    expect(bundle.packageName).toBe("@murphai/openclaw-plugin");
     expect(bundle.bundleFormat).toBe("claude");
     expect(bundle.requiresBins).toEqual(["vault-cli"]);
     expect(bundle.vaultFirst).toBe(true);

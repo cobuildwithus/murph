@@ -71,8 +71,8 @@
       "path": "packages/cli"
     },
     {
-      "name": "@murphai/openclaw",
-      "path": "packages/openclaw"
+      "name": "@murphai/openclaw-plugin",
+      "path": "packages/openclaw-plugin"
     },
     {
       "name": "@murphai/assistant-runtime",

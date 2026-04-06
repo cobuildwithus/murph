@@ -6,7 +6,7 @@ import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
 export default defineProject({
   test: {
     ...murphVitestNoTimeouts,
-    name: "openclaw",
+    name: "openclaw-plugin",
     environment: "node",
     ...resolveMurphVitestConcurrency(),
     include: ["test/**/*.test.ts"],

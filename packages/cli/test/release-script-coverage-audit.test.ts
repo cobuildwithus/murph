@@ -247,7 +247,7 @@ describe('monorepo release flow coverage audit', () => {
       '@murphai/query',
       '@murphai/device-syncd',
       '@murphai/parsers',
-      '@murphai/openclaw',
+      '@murphai/openclaw-plugin',
       '@murphai/hosted-execution',
       '@murphai/inboxd',
       '@murphai/assistant-core',

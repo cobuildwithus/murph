@@ -46,7 +46,7 @@ vault-cli inbox doctor
 If you already run OpenClaw, install the first-party Murph bundle after `murph onboard`:
 
 ```bash
-openclaw plugins install @murphai/openclaw
+openclaw plugins install @murphai/openclaw-plugin
 openclaw gateway restart
 ```
 
