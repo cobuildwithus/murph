@@ -1,4 +1,9 @@
-import { type HostedMember, HostedBillingStatus, HostedMemberStatus } from "@prisma/client";
+import {
+  Prisma,
+  type HostedMember,
+  HostedBillingStatus,
+  HostedMemberStatus,
+} from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -70,7 +75,7 @@ describe("hosted-member-store", () => {
     await expect(
       findHostedMemberByTelegramUserLookupKey({
         prisma,
-        telegramUserId: "tg_user_123",
+        telegramUserLookupKey: "tg_user_123",
       }),
     ).resolves.toEqual({
       billingStatus: HostedBillingStatus.active,
@@ -85,7 +90,7 @@ describe("hosted-member-store", () => {
         findUnique: vi.fn().mockResolvedValue({
           linqChatId: "chat_123",
           memberId: "member_123",
-          telegramUserId: "tg_user_123",
+          telegramUserLookupKey: "tg_user_123",
         }),
       },
     } as never;
@@ -98,14 +103,16 @@ describe("hosted-member-store", () => {
     ).resolves.toEqual({
       linqChatId: "chat_123",
       memberId: "member_123",
-      telegramUserId: "tg_user_123",
+      telegramUserLookupKey: "tg_user_123",
     });
   });
 
   it("upserts Linq chat bindings into the routing table", async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       hostedMemberRouting: {
+        updateMany,
         upsert,
       },
     } as never;
@@ -123,12 +130,94 @@ describe("hosted-member-store", () => {
       create: {
         linqChatId: "chat_123",
         memberId: "member_123",
-        telegramUserId: null,
+        telegramUserLookupKey: null,
       },
       update: {
         linqChatId: "chat_123",
       },
     });
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        linqChatId: "chat_123",
+        NOT: {
+          memberId: "member_123",
+        },
+      },
+      data: {
+        linqChatId: null,
+      },
+    });
+  });
+
+  it("clears the same Linq direct-thread binding off any other member before rebinding it", async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = {
+      hostedMemberRouting: {
+        updateMany,
+        upsert,
+      },
+    } as never;
+
+    await upsertHostedMemberLinqChatBinding({
+      linqChatId: "chat_123",
+      memberId: "member_456",
+      prisma,
+    });
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        linqChatId: "chat_123",
+        NOT: {
+          memberId: "member_456",
+        },
+      },
+      data: {
+        linqChatId: null,
+      },
+    });
+    expect(upsert).toHaveBeenCalledWith({
+      where: {
+        memberId: "member_456",
+      },
+      create: {
+        linqChatId: "chat_123",
+        memberId: "member_456",
+        telegramUserLookupKey: null,
+      },
+      update: {
+        linqChatId: "chat_123",
+      },
+    });
+  });
+
+  it("retries once when the exclusive Linq binding races another writer", async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
+    const upsert = vi.fn()
+      .mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError("duplicate", {
+          clientVersion: "test",
+          code: "P2002",
+        }),
+      )
+      .mockResolvedValueOnce({});
+    const prisma = {
+      hostedMemberRouting: {
+        updateMany,
+        upsert,
+      },
+    } as never;
+
+    await expect(
+      upsertHostedMemberLinqChatBinding({
+        linqChatId: "chat_123",
+        memberId: "member_123",
+        prisma,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(updateMany).toHaveBeenCalledTimes(2);
+    expect(upsert).toHaveBeenCalledTimes(2);
   });
 
   it("upserts Telegram bindings into the routing table", async () => {
@@ -142,7 +231,7 @@ describe("hosted-member-store", () => {
     await upsertHostedMemberTelegramRoutingBinding({
       memberId: "member_123",
       prisma,
-      telegramUserId: "tg_user_123",
+      telegramUserLookupKey: "tg_user_123",
     });
 
     expect(upsert).toHaveBeenCalledWith({
@@ -152,10 +241,10 @@ describe("hosted-member-store", () => {
       create: {
         linqChatId: null,
         memberId: "member_123",
-        telegramUserId: "tg_user_123",
+        telegramUserLookupKey: "tg_user_123",
       },
       update: {
-        telegramUserId: "tg_user_123",
+        telegramUserLookupKey: "tg_user_123",
       },
     });
   });
@@ -164,7 +253,7 @@ describe("hosted-member-store", () => {
     const upsert = vi.fn().mockResolvedValue({
       maskedPhoneNumberHint: "*** 4567",
       memberId: "member_123",
-      normalizedPhoneNumber: "hbidx:phone:v1:abc123",
+      phoneLookupKey: "hbidx:phone:v1:abc123",
       phoneNumberVerifiedAt: null,
       privyUserId: "did:privy:user_123",
       walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
@@ -182,7 +271,7 @@ describe("hosted-member-store", () => {
       upsertHostedMemberIdentity({
         maskedPhoneNumberHint: "*** 4567",
         memberId: "member_123",
-        normalizedPhoneNumber: "hbidx:phone:v1:abc123",
+        phoneLookupKey: "hbidx:phone:v1:abc123",
         phoneNumberVerifiedAt: null,
         prisma,
         privyUserId: "did:privy:user_123",
@@ -194,7 +283,7 @@ describe("hosted-member-store", () => {
     ).resolves.toEqual({
       maskedPhoneNumberHint: "*** 4567",
       memberId: "member_123",
-      normalizedPhoneNumber: "hbidx:phone:v1:abc123",
+      phoneLookupKey: "hbidx:phone:v1:abc123",
       phoneNumberVerifiedAt: null,
       privyUserId: "did:privy:user_123",
       walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
@@ -210,7 +299,7 @@ describe("hosted-member-store", () => {
       create: {
         maskedPhoneNumberHint: "*** 4567",
         memberId: "member_123",
-        normalizedPhoneNumber: "hbidx:phone:v1:abc123",
+        phoneLookupKey: "hbidx:phone:v1:abc123",
         phoneNumberVerifiedAt: null,
         privyUserId: "did:privy:user_123",
         walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
@@ -220,7 +309,7 @@ describe("hosted-member-store", () => {
       },
       update: {
         maskedPhoneNumberHint: "*** 4567",
-        normalizedPhoneNumber: "hbidx:phone:v1:abc123",
+        phoneLookupKey: "hbidx:phone:v1:abc123",
         phoneNumberVerifiedAt: null,
         privyUserId: "did:privy:user_123",
         walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
@@ -394,7 +483,7 @@ describe("hosted-member-store", () => {
           identity: {
             maskedPhoneNumberHint: "*** 4567",
             memberId: "member_123",
-            normalizedPhoneNumber: "hbidx:phone:v1:abc123",
+            phoneLookupKey: "hbidx:phone:v1:abc123",
             phoneNumberVerifiedAt: null,
             privyUserId: "did:privy:user_123",
             walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
@@ -405,7 +494,7 @@ describe("hosted-member-store", () => {
           routing: {
             linqChatId: "chat_123",
             memberId: "member_123",
-            telegramUserId: "tg_user_123",
+            telegramUserLookupKey: "tg_user_123",
           },
         }),
       },
@@ -432,7 +521,7 @@ describe("hosted-member-store", () => {
       identity: {
         maskedPhoneNumberHint: "*** 4567",
         memberId: "member_123",
-        normalizedPhoneNumber: "hbidx:phone:v1:abc123",
+        phoneLookupKey: "hbidx:phone:v1:abc123",
         phoneNumberVerifiedAt: null,
         privyUserId: "did:privy:user_123",
         walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
@@ -442,13 +531,13 @@ describe("hosted-member-store", () => {
       },
       linqChatId: "chat_123",
       maskedPhoneNumberHint: "*** 4567",
-      normalizedPhoneNumber: "hbidx:phone:v1:abc123",
+      phoneLookupKey: "hbidx:phone:v1:abc123",
       phoneNumberVerifiedAt: null,
       privyUserId: "did:privy:user_123",
       routing: {
         linqChatId: "chat_123",
         memberId: "member_123",
-        telegramUserId: "tg_user_123",
+        telegramUserLookupKey: "tg_user_123",
       },
       status: HostedMemberStatus.invited,
       stripeCustomerId: "cus_123",
@@ -456,7 +545,7 @@ describe("hosted-member-store", () => {
       stripeLatestBillingEventId: "evt_123",
       stripeLatestCheckoutSessionId: "cs_123",
       stripeSubscriptionId: "sub_123",
-      telegramUserId: "tg_user_123",
+      telegramUserLookupKey: "tg_user_123",
       updatedAt: new Date("2026-04-06T00:00:00.000Z"),
       walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
       walletChainType: "ethereum",

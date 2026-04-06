@@ -36,7 +36,7 @@ export interface HostedMemberStripeBillingRefSnapshot {
 export interface HostedMemberIdentityState {
   maskedPhoneNumberHint: string;
   memberId: string;
-  normalizedPhoneNumber: string;
+  phoneLookupKey: string;
   phoneNumberVerifiedAt: Date | null;
   privyUserId: string | null;
   walletAddress: string | null;
@@ -48,7 +48,7 @@ export interface HostedMemberIdentityState {
 export interface HostedMemberIdentityWriteInput {
   maskedPhoneNumberHint: string;
   memberId: string;
-  normalizedPhoneNumber: string;
+  phoneLookupKey: string;
   phoneNumberVerifiedAt: Date | null;
   prisma: HostedMemberStoreClient;
   privyUserId: string | null;
@@ -71,7 +71,7 @@ export interface HostedMemberStripeBillingRefWriteInput {
 export interface HostedMemberRoutingStateSnapshot {
   linqChatId: string | null;
   memberId: string;
-  telegramUserId: string | null;
+  telegramUserLookupKey: string | null;
 }
 
 export interface HostedMemberAggregate extends HostedMemberCoreState {
@@ -79,7 +79,7 @@ export interface HostedMemberAggregate extends HostedMemberCoreState {
   identity: HostedMemberIdentityState | null;
   linqChatId: string | null;
   maskedPhoneNumberHint: string | null;
-  normalizedPhoneNumber: string | null;
+  phoneLookupKey: string | null;
   phoneNumberVerifiedAt: Date | null;
   privyUserId: string | null;
   routing: HostedMemberRoutingStateSnapshot | null;
@@ -88,7 +88,7 @@ export interface HostedMemberAggregate extends HostedMemberCoreState {
   stripeLatestBillingEventId: string | null;
   stripeLatestCheckoutSessionId: string | null;
   stripeSubscriptionId: string | null;
-  telegramUserId: string | null;
+  telegramUserLookupKey: string | null;
   walletAddress: string | null;
   walletChainType: string | null;
   walletCreatedAt: Date | null;
@@ -122,7 +122,7 @@ export async function findHostedMemberByPhoneLookupKey(input: {
 }): Promise<HostedMember | null> {
   const identityRecord = await input.prisma.hostedMemberIdentity.findUnique({
     where: {
-      normalizedPhoneNumber: input.phoneLookupKey,
+      phoneLookupKey: input.phoneLookupKey,
     },
     include: {
       member: true,
@@ -150,11 +150,11 @@ export async function findHostedMemberByWalletAddress(input: {
 
 export async function findHostedMemberByTelegramUserLookupKey(input: {
   prisma: HostedMemberStoreClient;
-  telegramUserId: string;
+  telegramUserLookupKey: string;
 }): Promise<HostedMemberTelegramLookupSnapshot | null> {
   const routingRecord = await input.prisma.hostedMemberRouting.findUnique({
     where: {
-      telegramUserId: input.telegramUserId,
+      telegramUserLookupKey: input.telegramUserLookupKey,
     },
     select: {
       member: {
@@ -226,7 +226,7 @@ export async function readHostedMemberRoutingState(input: {
     select: {
       linqChatId: true,
       memberId: true,
-      telegramUserId: true,
+      telegramUserLookupKey: true,
     },
   });
 }
@@ -303,27 +303,52 @@ export async function upsertHostedMemberLinqChatBinding(input: {
     return;
   }
 
-  await withHostedOnboardingTransaction(input.prisma, async (tx) => {
-    await tx.hostedMemberRouting.upsert({
-      where: {
-        memberId: input.memberId,
-      },
-      create: {
-        memberId: input.memberId,
-        linqChatId: input.linqChatId,
-        telegramUserId: null,
-      },
-      update: {
-        linqChatId: input.linqChatId,
-      },
-    });
-  });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await withHostedOnboardingTransaction(input.prisma, async (tx) => {
+        // Hosted Linq replies and activation welcomes reuse the direct thread id, so
+        // the latest observed chat binding must be exclusive to one member.
+        await tx.hostedMemberRouting.updateMany({
+          where: {
+            linqChatId: input.linqChatId,
+            NOT: {
+              memberId: input.memberId,
+            },
+          },
+          data: {
+            linqChatId: null,
+          },
+        });
+
+        await tx.hostedMemberRouting.upsert({
+          where: {
+            memberId: input.memberId,
+          },
+          create: {
+            memberId: input.memberId,
+            linqChatId: input.linqChatId,
+            telegramUserLookupKey: null,
+          },
+          update: {
+            linqChatId: input.linqChatId,
+          },
+        });
+      });
+      return;
+    } catch (error) {
+      if (attempt === 0 && isPrismaUniqueConstraintError(error)) {
+        continue;
+      }
+
+      throw error;
+    }
+  }
 }
 
 export async function upsertHostedMemberTelegramRoutingBinding(input: {
   memberId: string;
   prisma: HostedMemberStoreClient;
-  telegramUserId: string;
+  telegramUserLookupKey: string;
 }): Promise<void> {
   await withHostedOnboardingTransaction(input.prisma, async (tx) => {
     await tx.hostedMemberRouting.upsert({
@@ -333,10 +358,10 @@ export async function upsertHostedMemberTelegramRoutingBinding(input: {
       create: {
         memberId: input.memberId,
         linqChatId: null,
-        telegramUserId: input.telegramUserId,
+        telegramUserLookupKey: input.telegramUserLookupKey,
       },
       update: {
-        telegramUserId: input.telegramUserId,
+        telegramUserLookupKey: input.telegramUserLookupKey,
       },
     });
   });
@@ -403,7 +428,7 @@ function buildHostedMemberIdentityCreateData(
   return {
     maskedPhoneNumberHint: input.maskedPhoneNumberHint,
     memberId: input.memberId,
-    normalizedPhoneNumber: input.normalizedPhoneNumber,
+    phoneLookupKey: input.phoneLookupKey,
     phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
     privyUserId: input.privyUserId,
     walletAddress: input.walletAddress,
@@ -418,7 +443,7 @@ function buildHostedMemberIdentityUpdateData(
 ): Prisma.HostedMemberIdentityUncheckedUpdateInput {
   return {
     maskedPhoneNumberHint: input.maskedPhoneNumberHint,
-    normalizedPhoneNumber: input.normalizedPhoneNumber,
+    phoneLookupKey: input.phoneLookupKey,
     phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
     privyUserId: input.privyUserId,
     walletAddress: input.walletAddress,
@@ -465,6 +490,10 @@ function buildHostedMemberBillingRefUpdateData(
   return data;
 }
 
+function isPrismaUniqueConstraintError(error: unknown): error is Prisma.PrismaClientKnownRequestError {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+}
+
 function mapHostedMemberBillingRefSnapshot(
   billingRef: HostedMemberBillingRef,
 ): HostedMemberStripeBillingRefSnapshot {
@@ -484,7 +513,7 @@ function mapHostedMemberIdentityState(
   return {
     maskedPhoneNumberHint: identity.maskedPhoneNumberHint,
     memberId: identity.memberId,
-    normalizedPhoneNumber: identity.normalizedPhoneNumber,
+    phoneLookupKey: identity.phoneLookupKey,
     phoneNumberVerifiedAt: identity.phoneNumberVerifiedAt,
     privyUserId: identity.privyUserId,
     walletAddress: identity.walletAddress,
@@ -495,12 +524,12 @@ function mapHostedMemberIdentityState(
 }
 
 function mapHostedMemberRoutingState(
-  routing: Pick<Prisma.HostedMemberRoutingUncheckedCreateInput, "linqChatId" | "memberId" | "telegramUserId">,
+  routing: Pick<Prisma.HostedMemberRoutingUncheckedCreateInput, "linqChatId" | "memberId" | "telegramUserLookupKey">,
 ): HostedMemberRoutingStateSnapshot {
   return {
     linqChatId: routing.linqChatId ?? null,
     memberId: routing.memberId,
-    telegramUserId: routing.telegramUserId ?? null,
+    telegramUserLookupKey: routing.telegramUserLookupKey ?? null,
   };
 }
 
@@ -518,7 +547,7 @@ function buildHostedMemberAggregate(
     identity: input.identity,
     linqChatId: input.routing?.linqChatId ?? null,
     maskedPhoneNumberHint: input.identity?.maskedPhoneNumberHint ?? null,
-    normalizedPhoneNumber: input.identity?.normalizedPhoneNumber ?? null,
+    phoneLookupKey: input.identity?.phoneLookupKey ?? null,
     phoneNumberVerifiedAt: input.identity?.phoneNumberVerifiedAt ?? null,
     privyUserId: input.identity?.privyUserId ?? null,
     routing: input.routing,
@@ -527,7 +556,7 @@ function buildHostedMemberAggregate(
     stripeLatestBillingEventId: input.billingRef?.stripeLatestBillingEventId ?? null,
     stripeLatestCheckoutSessionId: input.billingRef?.stripeLatestCheckoutSessionId ?? null,
     stripeSubscriptionId: input.billingRef?.stripeSubscriptionId ?? null,
-    telegramUserId: input.routing?.telegramUserId ?? null,
+    telegramUserLookupKey: input.routing?.telegramUserLookupKey ?? null,
     walletAddress: input.identity?.walletAddress ?? null,
     walletChainType: input.identity?.walletChainType ?? null,
     walletCreatedAt: input.identity?.walletCreatedAt ?? null,
