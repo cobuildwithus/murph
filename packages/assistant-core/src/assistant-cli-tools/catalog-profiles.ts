@@ -36,6 +36,15 @@ const defaultAssistantCapabilityHosts = [
   new NativeLocalCapabilityHost(),
 ] as const
 
+const inboxRoutingAssistantToolCatalogOptions = {
+  includeAssistantRuntimeTools: false,
+  includeQueryTools: false,
+  includeStatefulWriteTools: false,
+  includeVaultTextReadTool: false,
+  includeVaultWriteTools: true,
+  includeWebSearchTools: false,
+} satisfies AssistantToolCatalogOptions
+
 export function createDefaultAssistantCapabilityRegistry(
   input: AssistantToolContext,
   options: AssistantToolCatalogOptions = {},
@@ -57,14 +66,7 @@ export function createDefaultAssistantToolCatalog(
 export function createInboxRoutingAssistantCapabilityRegistry(
   input: AssistantToolContext,
 ) {
-  return createDefaultAssistantCapabilityRegistry(input, {
-    includeAssistantRuntimeTools: false,
-    includeQueryTools: false,
-    includeStatefulWriteTools: false,
-    includeVaultTextReadTool: false,
-    includeVaultWriteTools: true,
-    includeWebSearchTools: false,
-  })
+  return createAssistantCapabilityRegistry(listInboxRoutingAssistantCapabilities(input))
 }
 
 export function createInboxRoutingAssistantToolCatalog(
@@ -105,14 +107,7 @@ function listDefaultAssistantCapabilities(
 function listInboxRoutingAssistantCapabilities(
   input: AssistantToolContext,
 ): AssistantCapabilityDefinition[] {
-  return listDefaultAssistantCapabilities(input, {
-    includeAssistantRuntimeTools: false,
-    includeQueryTools: false,
-    includeStatefulWriteTools: false,
-    includeVaultTextReadTool: false,
-    includeVaultWriteTools: true,
-    includeWebSearchTools: false,
-  })
+  return listDefaultAssistantCapabilities(input, inboxRoutingAssistantToolCatalogOptions)
 }
 
 function listProviderTurnAssistantCapabilities(
