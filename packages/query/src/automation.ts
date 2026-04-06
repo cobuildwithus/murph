@@ -1,5 +1,18 @@
+import {
+  AUTOMATION_DOC_TYPE,
+  AUTOMATION_SCHEMA_VERSION,
+  automationContinuityPolicyValues,
+  automationScheduleKindValues,
+  automationStatusValues,
+  isValidIanaTimeZone,
+  type AutomationContinuityPolicy,
+  type AutomationRoute,
+  type AutomationSchedule,
+  type AutomationScheduleKind,
+  type AutomationStatus,
+} from "@murphai/contracts";
+
 import { readMarkdownDocument, walkRelativeFiles } from "./health/loaders.ts";
-import { isValidIanaTimeZone } from "@murphai/contracts/time";
 import {
   applyLimit,
   compareNullableStrings,
@@ -10,53 +23,14 @@ import {
 import { parseFrontmatterDocument, type FrontmatterObject } from "./health/shared.ts";
 
 const AUTOMATIONS_DIRECTORY = "bank/automations";
-const AUTOMATION_SCHEMA_VERSION = "vault-automation.v1" as const;
-const AUTOMATION_DOC_TYPE = "automation" as const;
-
-const automationStatusValues = ["active", "paused", "archived"] as const;
-const automationContinuityPolicyValues = ["fresh", "preserve"] as const;
-const automationScheduleKinds = ["at", "every", "cron", "dailyLocal"] as const;
 const dailyLocalTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
 
-export type AutomationStatus = (typeof automationStatusValues)[number];
-export type AutomationContinuityPolicy = (typeof automationContinuityPolicyValues)[number];
-
-export interface AutomationScheduleAt {
-  kind: "at";
-  at: string;
-}
-
-export interface AutomationScheduleEvery {
-  kind: "every";
-  everyMs: number;
-}
-
-export interface AutomationScheduleCron {
-  kind: "cron";
-  expression: string;
-  timeZone: string;
-}
-
-export interface AutomationScheduleDailyLocal {
-  kind: "dailyLocal";
-  localTime: string;
-  timeZone: string;
-}
-
-export type AutomationSchedule =
-  | AutomationScheduleAt
-  | AutomationScheduleEvery
-  | AutomationScheduleCron
-  | AutomationScheduleDailyLocal;
-
-export interface AutomationRoute {
-  channel: string;
-  deliverResponse: boolean;
-  deliveryTarget: string | null;
-  identityId: string | null;
-  participantId: string | null;
-  sourceThreadId: string | null;
-}
+export type {
+  AutomationContinuityPolicy,
+  AutomationRoute,
+  AutomationSchedule,
+  AutomationStatus,
+};
 
 export interface AutomationQueryRecord {
   schemaVersion: typeof AUTOMATION_SCHEMA_VERSION;
@@ -149,7 +123,7 @@ function normalizeAutomationSchedule(value: unknown): AutomationSchedule {
 
   const object = value as Record<string, unknown>;
   const kind = requireStringValue(object.kind, "schedule.kind");
-  if (!automationScheduleKinds.includes(kind as (typeof automationScheduleKinds)[number])) {
+  if (!automationScheduleKindValues.includes(kind as AutomationScheduleKind)) {
     throw new Error("schedule.kind must match a supported automation schedule.");
   }
 

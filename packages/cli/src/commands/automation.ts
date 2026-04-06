@@ -1,7 +1,11 @@
 import { Cli, z } from "incur";
 
 import {
+  automationContinuityPolicyValues,
+  automationRouteSchema,
   automationScaffoldPayloadSchema,
+  automationScheduleSchema,
+  automationStatusValues,
   type AutomationScaffoldPayload,
 } from "@murphai/contracts";
 import {
@@ -19,77 +23,7 @@ import {
   listAutomations,
   showAutomation,
 } from "@murphai/query";
-import { isValidIanaTimeZone } from "@murphai/contracts/time";
-
-const automationStatusValues = [
-  "active",
-  "paused",
-  "archived",
-] as const;
-
-const automationContinuityPolicyValues = [
-  "fresh",
-  "preserve",
-] as const;
-
-const dailyLocalTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
 const automationSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
-
-const automationScheduleAtSchema = z
-  .object({
-    kind: z.literal("at"),
-    at: z.string().min(1),
-  })
-  .strict();
-
-const automationScheduleEverySchema = z
-  .object({
-    kind: z.literal("every"),
-    everyMs: z.number().int().positive(),
-  })
-  .strict();
-
-const automationScheduleCronSchema = z
-  .object({
-    kind: z.literal("cron"),
-    expression: z.string().min(1),
-    timeZone: z
-      .string()
-      .min(1)
-      .refine((value) => isValidIanaTimeZone(value), "Expected a valid IANA timezone."),
-  })
-  .strict();
-
-const automationScheduleDailyLocalSchema = z
-  .object({
-    kind: z.literal("dailyLocal"),
-    localTime: z
-      .string()
-      .regex(dailyLocalTimePattern, "Expected a 24-hour HH:MM time."),
-    timeZone: z
-      .string()
-      .min(1)
-      .refine((value) => isValidIanaTimeZone(value), "Expected a valid IANA timezone."),
-  })
-  .strict();
-
-const automationScheduleSchema = z.discriminatedUnion("kind", [
-  automationScheduleAtSchema,
-  automationScheduleEverySchema,
-  automationScheduleCronSchema,
-  automationScheduleDailyLocalSchema,
-]);
-
-const automationRouteSchema = z
-  .object({
-    channel: z.string().min(1),
-    deliverResponse: z.boolean(),
-    deliveryTarget: z.string().min(1).nullable(),
-    identityId: z.string().min(1).nullable(),
-    participantId: z.string().min(1).nullable(),
-    sourceThreadId: z.string().min(1).nullable(),
-  })
-  .strict();
 
 export const automationRecordSchema = z
   .object({
@@ -137,18 +71,7 @@ export const automationUpsertResultSchema = z.object({
 export const automationScaffoldResultSchema = z.object({
   vault: pathSchema,
   noun: z.literal("automation"),
-  payload: z.object({
-    automationId: z.string().min(1).optional(),
-    continuityPolicy: z.enum(automationContinuityPolicyValues),
-    prompt: z.string().min(1),
-    route: automationRouteSchema,
-    schedule: automationScheduleSchema,
-    slug: z.string().regex(automationSlugPattern).optional(),
-    status: z.enum(automationStatusValues),
-    summary: z.string().min(1).nullable().optional(),
-    tags: z.array(z.string().min(1)).optional(),
-    title: z.string().min(1),
-  }),
+  payload: automationScaffoldPayloadSchema,
 });
 
 export function createAutomationScaffoldPayload(): z.infer<

@@ -31,6 +31,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/references/repo-scope.md` | Concrete repo scope and routing boundaries. | Repo ownership boundary | High | 2026-04-06 |
 | `agent-docs/references/testing-ci-map.md` | Verification map for packages, apps, smoke flows, and CI. | Testing and CI truth | High | 2026-04-06 |
 | `agent-docs/references/health-entity-taxonomy-seam.md` | Shared owner seam for health taxonomy metadata. | Health taxonomy seam | Medium | 2026-04-06 |
+| `agent-docs/references/data-model-seams.md` | Current shared-owner notes for high-leverage data-model seams. | Data-model seam guidance | Medium | 2026-04-06 |
 | `agent-docs/operations/agent-workflow-routing.md` | Workflow router for task classes, plans, audits, verification, and commit paths. | Agent workflow routing | High | 2026-04-06 |
 | `agent-docs/operations/verification-and-runtime.md` | Verification rules and runtime assumptions for repo work. | Verification policy | High | 2026-04-06 |
 | `agent-docs/operations/completion-workflow.md` | Required post-implementation audit and completion flow. | Completion workflow | High | 2026-04-06 |
