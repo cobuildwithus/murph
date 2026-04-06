@@ -258,7 +258,7 @@ describe("createHostedBillingCheckout", () => {
     expect(createdCustomerMetadata).toEqual({
       memberId: "member_123",
     });
-    expect(createdCustomerMetadata).not.toHaveProperty("normalizedPhoneNumber");
+    expect(createdCustomerMetadata).not.toHaveProperty("phoneLookupKey");
     expect(createdCustomerMetadata).not.toHaveProperty("walletAddress");
     expect(hostedMemberBillingRefUpsert).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -817,7 +817,7 @@ describe("createHostedBillingCheckout", () => {
     expect(updatedCustomerMetadata).toEqual({
       memberId: "member_123",
     });
-    expect(updatedCustomerMetadata).not.toHaveProperty("normalizedPhoneNumber");
+    expect(updatedCustomerMetadata).not.toHaveProperty("phoneLookupKey");
     expect(updatedCustomerMetadata).not.toHaveProperty("walletAddress");
   });
 

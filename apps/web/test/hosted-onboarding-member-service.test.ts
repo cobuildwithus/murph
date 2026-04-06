@@ -69,7 +69,7 @@ describe("ensureHostedMemberForPhone", () => {
     const currentIdentity = {
       maskedPhoneNumberHint: "*** 4567",
       memberId: "member_123",
-      normalizedPhoneNumber: "hbidx:phone:v1:existing",
+      phoneLookupKey: "hbidx:phone:v1:existing",
       phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
       privyUserId: "did:privy:user_123",
       walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
@@ -82,11 +82,11 @@ describe("ensureHostedMemberForPhone", () => {
         return currentIdentity;
       }
 
-      if (typeof where.normalizedPhoneNumber === "string") {
+      if (typeof where.phoneLookupKey === "string") {
         return {
           ...currentIdentity,
           member: existingMember,
-          normalizedPhoneNumber: where.normalizedPhoneNumber,
+          phoneLookupKey: where.phoneLookupKey,
         };
       }
 
@@ -113,11 +113,11 @@ describe("ensureHostedMemberForPhone", () => {
       },
       create: expect.objectContaining({
         maskedPhoneNumberHint: "*** 4567",
-        normalizedPhoneNumber: expect.stringMatching(/^hbidx:phone:v1:/),
+        phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/),
       }),
       update: expect.objectContaining({
         maskedPhoneNumberHint: "*** 4567",
-        normalizedPhoneNumber: expect.stringMatching(/^hbidx:phone:v1:/),
+        phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/),
         phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
         privyUserId: "did:privy:user_123",
         walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
@@ -173,11 +173,11 @@ describe("ensureHostedMemberForPhone", () => {
       },
       create: expect.objectContaining({
         maskedPhoneNumberHint: "*** 4567",
-        normalizedPhoneNumber: expect.stringMatching(/^hbidx:phone:v1:/),
+        phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/),
       }),
       update: expect.objectContaining({
         maskedPhoneNumberHint: "*** 4567",
-        normalizedPhoneNumber: expect.stringMatching(/^hbidx:phone:v1:/),
+        phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/),
       }),
     });
   });
@@ -194,12 +194,12 @@ describe("ensureHostedMemberForPhone", () => {
     const identityFindUnique = vi.fn()
       .mockResolvedValueOnce(null)
       .mockImplementation(async ({ where }: { where: Record<string, unknown> }) => {
-        if (typeof where.normalizedPhoneNumber === "string") {
+        if (typeof where.phoneLookupKey === "string") {
           return {
             maskedPhoneNumberHint: "*** 4567",
             member: concurrentMember,
             memberId: "member_123",
-            normalizedPhoneNumber: where.normalizedPhoneNumber,
+            phoneLookupKey: where.phoneLookupKey,
             phoneNumberVerifiedAt: null,
             privyUserId: null,
             walletAddress: null,
@@ -242,11 +242,11 @@ describe("ensureHostedMemberForPhone", () => {
       },
       create: expect.objectContaining({
         maskedPhoneNumberHint: "*** 4567",
-        normalizedPhoneNumber: expect.stringMatching(/^hbidx:phone:v1:/),
+        phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/),
       }),
       update: expect.objectContaining({
         maskedPhoneNumberHint: "*** 4567",
-        normalizedPhoneNumber: expect.stringMatching(/^hbidx:phone:v1:/),
+        phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/),
       }),
     });
   });
@@ -285,9 +285,11 @@ describe("hosted-onboarding member-service barrel", () => {
 
 describe("persistHostedMemberLinqChatBinding", () => {
   it("stores the latest Linq chat id in the additive routing table for future activation welcomes", async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       hostedMemberRouting: {
+        updateMany,
         upsert,
       },
     } as never;
@@ -298,11 +300,22 @@ describe("persistHostedMemberLinqChatBinding", () => {
       prisma,
     });
 
+    expect(updateMany).toHaveBeenCalledWith({
+      data: {
+        linqChatId: null,
+      },
+      where: {
+        NOT: {
+          memberId: "member_123",
+        },
+        linqChatId: "chat_new",
+      },
+    });
     expect(upsert).toHaveBeenCalledWith({
       create: {
         linqChatId: "chat_new",
         memberId: "member_123",
-        telegramUserId: null,
+        telegramUserLookupKey: null,
       },
       update: {
         linqChatId: "chat_new",
@@ -315,8 +328,10 @@ describe("persistHostedMemberLinqChatBinding", () => {
 
   it("ignores empty chat ids", async () => {
     const upsert = vi.fn();
+    const updateMany = vi.fn();
     const prisma = {
       hostedMemberRouting: {
+        updateMany,
         upsert,
       },
     } as never;
@@ -327,6 +342,7 @@ describe("persistHostedMemberLinqChatBinding", () => {
       prisma,
     });
 
+    expect(updateMany).not.toHaveBeenCalled();
     expect(upsert).not.toHaveBeenCalled();
   });
 });

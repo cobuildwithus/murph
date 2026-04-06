@@ -125,7 +125,7 @@ function buildHostedMemberPhoneIdentity(phoneNumber: string) {
 
   return {
     maskedPhoneNumberHint: readHostedPhoneHint(phoneNumber),
-    phoneLookupKey: phoneLookupKey,
+    phoneLookupKey,
     phoneNumberVerifiedAt: null,
     privyUserId: null,
     walletAddress: null,

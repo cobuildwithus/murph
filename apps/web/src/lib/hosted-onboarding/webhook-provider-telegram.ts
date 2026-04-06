@@ -67,7 +67,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
 
   const existingMember = await findHostedMemberByTelegramUserLookupKey({
     prisma: input.prisma,
-    telegramUserId: telegramUserLookupKey,
+    telegramUserLookupKey,
   });
 
   if (!existingMember) {

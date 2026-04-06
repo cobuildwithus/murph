@@ -98,7 +98,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           id: "member_123",
           invites: [],
           linqChatId: "chat_123",
-          normalizedPhoneNumber: "+15551234567",
+          phoneLookupKey: "+15551234567",
         }),
       },
     });
@@ -190,7 +190,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       id: "member_123",
       invites: [],
       linqChatId: "chat_123",
-      normalizedPhoneNumber: "+15551234567",
+      phoneLookupKey: "+15551234567",
     });
     const transactionClient = {
       hostedWebhookReceipt: {
@@ -218,7 +218,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           id: "member_123",
           invites: [],
           linqChatId: "chat_123",
-          normalizedPhoneNumber: "+15551234567",
+          phoneLookupKey: "+15551234567",
         }),
       },
     }, transactionClient) as unknown as Parameters<typeof handleHostedOnboardingLinqWebhook>[0]["prisma"] & {
@@ -373,7 +373,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           id: "member_123",
           invites: [],
           linqChatId: "chat_123",
-          normalizedPhoneNumber: "+15551234567",
+          phoneLookupKey: "+15551234567",
         }),
       },
     };
@@ -395,7 +395,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           id: "member_123",
           invites: [],
           linqChatId: "chat_123",
-          normalizedPhoneNumber: "+15551234567",
+          phoneLookupKey: "+15551234567",
         }),
       },
     }, transactionClient) as unknown as Parameters<typeof handleHostedOnboardingLinqWebhook>[0]["prisma"] & {
@@ -470,7 +470,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
-          normalizedPhoneNumber: "+15551234567",
+          phoneLookupKey: "+15551234567",
           status: HostedMemberStatus.suspended,
         }),
       },
@@ -530,7 +530,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         create: vi.fn().mockResolvedValue({
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
-          normalizedPhoneNumber: "+15551234567",
+          phoneLookupKey: "+15551234567",
         }),
         findUnique: vi.fn().mockResolvedValue(null),
         update: vi.fn(),
@@ -632,7 +632,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         create: vi.fn().mockResolvedValue({
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
-          normalizedPhoneNumber: "+15551234567",
+          phoneLookupKey: "+15551234567",
         }),
         findUnique: vi.fn().mockResolvedValue(null),
         update: vi.fn(),
@@ -706,7 +706,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         findUnique: vi.fn().mockResolvedValue({
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
-          normalizedPhoneNumber: "+15551234567",
+          phoneLookupKey: "+15551234567",
           status: HostedMemberStatus.invited,
         }),
       },
@@ -750,7 +750,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         findUnique: vi.fn().mockResolvedValue({
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
-          normalizedPhoneNumber: "+15551234567",
+          phoneLookupKey: "+15551234567",
           status: HostedMemberStatus.registered,
         }),
       },
@@ -801,7 +801,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         findUnique: vi.fn().mockResolvedValue({
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
-          normalizedPhoneNumber: "+15551234567",
+          phoneLookupKey: "+15551234567",
           status: HostedMemberStatus.invited,
         }),
       },
@@ -886,6 +886,7 @@ function asPrismaTransactionClient<T extends Record<string, unknown>>(prisma: T)
     };
     hostedMemberRouting?: {
       findUnique?: ReturnType<typeof vi.fn>;
+      updateMany?: ReturnType<typeof vi.fn>;
       upsert?: ReturnType<typeof vi.fn>;
     };
     hostedMember?: {
@@ -920,7 +921,7 @@ function asPrismaTransactionClient<T extends Record<string, unknown>>(prisma: T)
             include,
             where,
           });
-          const identity = readHostedMemberIdentityFromMockMember(member, where.normalizedPhoneNumber);
+          const identity = readHostedMemberIdentityFromMockMember(member, where.phoneLookupKey);
 
           if (!identity) {
             return null;
@@ -941,6 +942,7 @@ function asPrismaTransactionClient<T extends Record<string, unknown>>(prisma: T)
       configurable: true,
       value: {
         findUnique: vi.fn().mockResolvedValue(null),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
         upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
       },
     });
@@ -1022,14 +1024,14 @@ function readHostedMemberIdentityFromMockMember(
     return null;
   }
 
-  const normalizedPhoneNumber =
+  const phoneLookupKey =
     typeof requestedPhoneLookupKey === "string"
       ? requestedPhoneLookupKey
-      : typeof identity.normalizedPhoneNumber === "string"
-        ? identity.normalizedPhoneNumber
+      : typeof identity.phoneLookupKey === "string"
+        ? identity.phoneLookupKey
         : null;
 
-  if (!normalizedPhoneNumber) {
+  if (!phoneLookupKey) {
     return null;
   }
 
@@ -1037,7 +1039,7 @@ function readHostedMemberIdentityFromMockMember(
     maskedPhoneNumberHint:
       typeof identity.maskedPhoneNumberHint === "string" ? identity.maskedPhoneNumberHint : "*** 4567",
     memberId,
-    normalizedPhoneNumber,
+    phoneLookupKey,
     phoneNumberVerifiedAt:
       identity.phoneNumberVerifiedAt instanceof Date ? identity.phoneNumberVerifiedAt : null,
     privyUserId: typeof identity.privyUserId === "string" ? identity.privyUserId : null,

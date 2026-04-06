@@ -93,7 +93,7 @@ describe("settings telegram sync route", () => {
     expect(mocks.upsertHostedMemberTelegramRoutingBinding).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prismaClient,
-      telegramUserId: createHostedTelegramUserLookupKey("456"),
+      telegramUserLookupKey: createHostedTelegramUserLookupKey("456"),
     });
     expect(mocks.buildHostedTelegramBotLink).toHaveBeenCalledWith("connect");
     await expect(response.json()).resolves.toEqual({

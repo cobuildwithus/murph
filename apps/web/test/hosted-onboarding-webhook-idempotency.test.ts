@@ -289,13 +289,13 @@ describe("hosted onboarding webhook retry safety", () => {
           id: "member_123",
           invites: [],
           linqChatId: "chat_123",
-          normalizedPhoneNumber: "+15551234567",
+          phoneLookupKey: "+15551234567",
         }),
         update: vi.fn().mockResolvedValue({
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
           linqChatId: "chat_123",
-          normalizedPhoneNumber: "+15551234567",
+          phoneLookupKey: "+15551234567",
         }),
       },
     });
@@ -357,7 +357,7 @@ describe("hosted onboarding webhook retry safety", () => {
       create: {
         linqChatId: "chat_123",
         memberId: "member_123",
-        telegramUserId: null,
+        telegramUserLookupKey: null,
       },
       update: {
         linqChatId: "chat_123",
@@ -417,7 +417,7 @@ describe("hosted onboarding webhook retry safety", () => {
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
           linqChatId: "chat_123",
-          normalizedPhoneNumber: "+15551234567",
+          phoneLookupKey: "+15551234567",
         }),
         findUnique: vi.fn().mockResolvedValue(null),
         update: vi.fn(),
@@ -522,7 +522,7 @@ describe("hosted onboarding webhook retry safety", () => {
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
           linqChatId: "chat_123",
-          normalizedPhoneNumber: "+15551234567",
+          phoneLookupKey: "+15551234567",
         }),
         update: vi.fn(),
       },
@@ -607,13 +607,13 @@ describe("hosted onboarding webhook retry safety", () => {
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
           linqChatId: "chat_123",
-          normalizedPhoneNumber: "+15551234567",
+          phoneLookupKey: "+15551234567",
         }),
         update: vi.fn().mockResolvedValue({
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
           linqChatId: "chat_123",
-          normalizedPhoneNumber: "+15551234567",
+          phoneLookupKey: "+15551234567",
         }),
       },
     });
@@ -694,13 +694,13 @@ describe("hosted onboarding webhook retry safety", () => {
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
           linqChatId: null,
-          normalizedPhoneNumber: "+15551234567",
+          phoneLookupKey: "+15551234567",
         }),
         update: vi.fn().mockResolvedValue({
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
           linqChatId: "chat_123",
-          normalizedPhoneNumber: "+15551234567",
+          phoneLookupKey: "+15551234567",
         }),
       },
     });
@@ -1263,7 +1263,7 @@ describe("hosted onboarding webhook retry safety", () => {
       id: "member_123",
       invites: [],
       linqChatId: "chat_123",
-      normalizedPhoneNumber: "+15551234567",
+      phoneLookupKey: "+15551234567",
       phoneNumber: "+15551234567",
       phoneNumberVerifiedAt: new Date("2026-03-26T12:00:00.000Z"),
       status: "invited",
@@ -1471,7 +1471,7 @@ describe("hosted onboarding webhook retry safety", () => {
       id: "member_123",
       invites: [],
       linqChatId: "chat_123",
-      normalizedPhoneNumber: "+15551234567",
+      phoneLookupKey: "+15551234567",
       phoneNumber: "+15551234567",
       phoneNumberVerifiedAt: new Date("2026-03-26T12:00:00.000Z"),
       status: "invited",
@@ -1634,7 +1634,7 @@ describe("hosted onboarding webhook retry safety", () => {
       id: "member_123",
       invites: [],
       linqChatId: "chat_123",
-      normalizedPhoneNumber: "+15551234567",
+      phoneLookupKey: "+15551234567",
       phoneNumber: "+15551234567",
       phoneNumberVerifiedAt: new Date("2026-03-26T12:00:00.000Z"),
       status: "invited",
@@ -1817,7 +1817,7 @@ describe("hosted onboarding webhook retry safety", () => {
       id: "member_123",
       invites: [],
       linqChatId: "chat_123",
-      normalizedPhoneNumber: "+15551234567",
+      phoneLookupKey: "+15551234567",
       phoneNumber: "+15551234567",
       phoneNumberVerifiedAt: new Date("2026-03-26T12:00:00.000Z"),
       status: "invited",
@@ -2327,7 +2327,7 @@ function makeActiveMember() {
     id: "member_123",
     invites: [],
     linqChatId: "chat_123",
-    normalizedPhoneNumber: "+15551234567",
+    phoneLookupKey: "+15551234567",
   };
 }
 
@@ -2515,6 +2515,7 @@ function asHostedWebhookPrisma<T extends Record<string, unknown>>(prisma: T): T 
     };
     hostedMemberRouting?: {
       findUnique?: ReturnType<typeof vi.fn>;
+      updateMany?: ReturnType<typeof vi.fn>;
       upsert?: ReturnType<typeof vi.fn>;
     };
   };
@@ -2529,6 +2530,7 @@ function asHostedWebhookPrisma<T extends Record<string, unknown>>(prisma: T): T 
   } | undefined;
   const hostedMemberRouting = prismaWithHostedMember.hostedMemberRouting as {
     findUnique?: ((input: { where: Record<string, unknown> }) => Promise<unknown>) | undefined;
+    updateMany?: ((input: { data: Record<string, unknown>; where: Record<string, unknown> }) => Promise<unknown>) | undefined;
     upsert?: ((input: { create: Record<string, unknown>; update: Record<string, unknown> }) => Promise<unknown>) | undefined;
   } | undefined;
   const hostedInvite = prismaWithHostedMember.hostedInvite as {
@@ -2549,6 +2551,7 @@ function asHostedWebhookPrisma<T extends Record<string, unknown>>(prisma: T): T 
   if (!hostedMemberRouting?.upsert) {
     const hostedMemberRoutingFallback = {
       findUnique: vi.fn().mockResolvedValue(null),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       upsert: vi.fn(async (input: { create: Record<string, unknown>; update: Record<string, unknown> }) => {
         if (hostedMember?.update) {
           await hostedMember.update({
@@ -2572,7 +2575,7 @@ function asHostedWebhookPrisma<T extends Record<string, unknown>>(prisma: T): T 
           include,
           where,
         });
-        const identity = readHostedMemberIdentityFromMockMember(member, where.normalizedPhoneNumber);
+        const identity = readHostedMemberIdentityFromMockMember(member, where.phoneLookupKey);
 
         if (!identity) {
           return null;
@@ -2647,14 +2650,14 @@ function readHostedMemberIdentityFromMockMember(
     return null;
   }
 
-  const normalizedPhoneNumber =
+  const phoneLookupKey =
     typeof requestedPhoneLookupKey === "string"
       ? requestedPhoneLookupKey
-      : typeof identity.normalizedPhoneNumber === "string"
-        ? identity.normalizedPhoneNumber
+      : typeof identity.phoneLookupKey === "string"
+        ? identity.phoneLookupKey
         : null;
 
-  if (!normalizedPhoneNumber) {
+  if (!phoneLookupKey) {
     return null;
   }
 
@@ -2662,7 +2665,7 @@ function readHostedMemberIdentityFromMockMember(
     maskedPhoneNumberHint:
       typeof identity.maskedPhoneNumberHint === "string" ? identity.maskedPhoneNumberHint : "*** 4567",
     memberId,
-    normalizedPhoneNumber,
+    phoneLookupKey,
     phoneNumberVerifiedAt:
       identity.phoneNumberVerifiedAt instanceof Date ? identity.phoneNumberVerifiedAt : null,
     privyUserId: typeof identity.privyUserId === "string" ? identity.privyUserId : null,
