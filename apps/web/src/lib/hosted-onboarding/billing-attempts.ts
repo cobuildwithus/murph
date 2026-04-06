@@ -94,6 +94,7 @@ export async function failHostedBillingAttemptById(input: {
       },
     },
     data: {
+      checkoutUrl: null,
       status: HostedBillingCheckoutStatus.failed,
       ...(input.stripeCheckoutSessionId
         ? {
@@ -119,6 +120,7 @@ export async function completeHostedBillingAttemptBySessionId(input: {
     },
     data: {
       amountTotal: input.amountTotal,
+      checkoutUrl: null,
       completedAt: input.completedAt ?? new Date(),
       currency: input.currency,
       status: HostedBillingCheckoutStatus.completed,
@@ -139,6 +141,7 @@ export async function expireHostedBillingAttemptBySessionId(input: {
       status: HostedBillingCheckoutStatus.open,
     },
     data: {
+      checkoutUrl: null,
       expiredAt: input.expiredAt ?? new Date(),
       status: HostedBillingCheckoutStatus.expired,
     },

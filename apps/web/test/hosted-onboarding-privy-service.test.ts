@@ -539,7 +539,7 @@ describe("completeHostedPrivyVerification", () => {
       hostedMember: {
         create: vi.fn(),
         findUnique: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => {
-          if (where.privyUserId || where.phoneLookupKey || where.walletAddress) {
+          if (where.id === suspendedMember.id || where.privyUserId || where.phoneLookupKey || where.walletAddress) {
             return suspendedMember;
           }
 
@@ -772,9 +772,34 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
     | undefined;
   const hostedMember = prismaWithQueryRaw.hostedMember as unknown as
     | {
+        create?: ((input: { data?: Record<string, unknown> }) => Promise<unknown>) | undefined;
         findUnique?: ((input: { where?: Record<string, unknown> }) => Promise<unknown>) | undefined;
+        update?: ((input: { data?: Record<string, unknown>; where?: Record<string, unknown> }) => Promise<unknown>) | undefined;
       }
     | undefined;
+
+  if (!("hostedMember" in prismaWithQueryRaw) || !prismaWithQueryRaw.hostedMember || typeof hostedMember?.findUnique !== "function") {
+    Object.defineProperty(prismaWithQueryRaw, "hostedMember", {
+      configurable: true,
+      value: {
+        ...(hostedMember ?? {}),
+        findUnique: vi.fn(async ({ where }: { where?: Record<string, unknown> }) => {
+          const invite = await hostedInvite?.findUnique?.({ where: {} });
+          const inviteMember = (invite as { member?: unknown } | null)?.member ?? null;
+
+          if (
+            inviteMember
+            && typeof where?.id === "string"
+            && (inviteMember as { id?: unknown }).id === where.id
+          ) {
+            return inviteMember;
+          }
+
+          return null;
+        }),
+      },
+    });
+  }
 
   if (!("hostedMemberIdentity" in prismaWithQueryRaw) || !prismaWithQueryRaw.hostedMemberIdentity) {
     Object.defineProperty(prismaWithQueryRaw, "hostedMemberIdentity", {
