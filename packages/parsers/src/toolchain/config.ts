@@ -3,13 +3,15 @@ import { promises as fs } from "node:fs";
 
 import {
   hasLocalStatePath,
-  readLocalStateTextFile,
+  readVersionedJsonStateFile,
   resolveParserRuntimePaths,
+  writeVersionedJsonStateFile,
 } from "@murphai/runtime-state/node";
 
 import { ensureDirectory } from "../shared.js";
 
-export const PARSER_TOOLCHAIN_VERSION = 1 as const;
+export const PARSER_TOOLCHAIN_SCHEMA = "murph.parser-toolchain-config.v1" as const;
+export const PARSER_TOOLCHAIN_SCHEMA_VERSION = 1 as const;
 
 export type ParserToolName = "ffmpeg" | "pdftotext" | "whisper";
 
@@ -19,7 +21,6 @@ export interface ParserToolchainToolConfig {
 }
 
 export interface ParserToolchainConfig {
-  version: typeof PARSER_TOOLCHAIN_VERSION;
   updatedAt: string;
   tools: Partial<Record<ParserToolName, ParserToolchainToolConfig>>;
 }
@@ -54,10 +55,18 @@ export async function readParserToolchainConfig(
     return null;
   }
 
-  const { path: configPath, text: raw } = await readLocalStateTextFile({
+  const { filePath: configPath, value: config } = await readVersionedJsonStateFile({
     currentPath: paths.configPath,
+    label: "Parser toolchain config",
+    legacyParseValue(value) {
+      return parseParserToolchainConfig(value);
+    },
+    parseValue(value) {
+      return parseParserToolchainConfig(value);
+    },
+    schema: PARSER_TOOLCHAIN_SCHEMA,
+    schemaVersion: PARSER_TOOLCHAIN_SCHEMA_VERSION,
   });
-  const config = parseParserToolchainConfig(JSON.parse(raw) as unknown);
   await validateParserToolchainPaths(vaultRoot, config.tools);
 
   return {
@@ -74,17 +83,17 @@ export async function writeParserToolchainConfig(
   const mergedTools = mergeToolConfigs(existing?.config.tools ?? {}, input.tools ?? {});
   await validateParserToolchainPaths(input.vaultRoot, mergedTools);
   const config: ParserToolchainConfig = {
-    version: PARSER_TOOLCHAIN_VERSION,
     updatedAt: (input.now ?? new Date()).toISOString(),
     tools: mergedTools,
   };
 
   await ensureDirectory(paths.parsersRoot);
-  await fs.writeFile(
-    paths.configPath,
-    `${JSON.stringify(config, null, 2)}\n`,
-    "utf8",
-  );
+  await writeVersionedJsonStateFile({
+    filePath: paths.configPath,
+    schema: PARSER_TOOLCHAIN_SCHEMA,
+    schemaVersion: PARSER_TOOLCHAIN_SCHEMA_VERSION,
+    value: config,
+  });
 
   return {
     config,
@@ -166,10 +175,6 @@ function parseParserToolchainConfig(value: unknown): ParserToolchainConfig {
     throw new TypeError("Parser toolchain config must be an object.");
   }
 
-  if (value.version !== PARSER_TOOLCHAIN_VERSION) {
-    throw new TypeError(`Parser toolchain config version must be ${PARSER_TOOLCHAIN_VERSION}.`);
-  }
-
   const updatedAt = requireNonEmptyString(value.updatedAt, "Parser toolchain config updatedAt must be a string.");
   const rawTools = value.tools;
   if (!isPlainObject(rawTools)) {
@@ -187,7 +192,6 @@ function parseParserToolchainConfig(value: unknown): ParserToolchainConfig {
   }
 
   return {
-    version: PARSER_TOOLCHAIN_VERSION,
     updatedAt,
     tools,
   };

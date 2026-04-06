@@ -35,5 +35,6 @@ export * from "../shared.ts";
 export * from "../local-state-taxonomy.ts";
 export * from "../local-state-files.ts";
 export * from "../versioned-json-state.ts";
+export * from "../versioned-json-files.ts";
 export * from "../sqlite.ts";
 export * from "../ulid.ts";

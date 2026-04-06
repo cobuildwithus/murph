@@ -26,7 +26,6 @@ export const inboxConnectorConfigSchema = z.object({
 })
 
 export const inboxRuntimeConfigSchema = z.object({
-  version: z.literal(1),
   connectors: z.array(inboxConnectorConfigSchema),
 })
 
@@ -68,7 +67,6 @@ export const inboxPromotionEntrySchema = z.object({
 })
 
 export const inboxPromotionStoreSchema = z.object({
-  version: z.literal(1),
   entries: z.array(inboxPromotionEntrySchema),
 })
 

@@ -669,7 +669,7 @@ function makeBootstrapResult(vault: string, options?: {
       rebuiltCaptures: 0,
     },
     setup: {
-      configPath: '.runtime/parsers/toolchain.json',
+      configPath: '.runtime/operations/parsers/toolchain.json',
       updatedAt: '2026-03-13T12:00:00.000Z',
       tools: {
         ffmpeg: {
@@ -702,7 +702,7 @@ function makeBootstrapResult(vault: string, options?: {
       connectors: [],
       parserToolchain: options?.parserToolchainPath
         ? {
-            configPath: '.runtime/parsers/toolchain.json',
+            configPath: '.runtime/operations/parsers/toolchain.json',
             discoveredAt: '2026-03-13T12:05:00.000Z',
             tools: {
               ffmpeg: {
@@ -753,7 +753,8 @@ function makeSetupResult(
         title: 'Vault initialization',
       },
       {
-        detail: 'Wrote parser toolchain config under .runtime/parsers and completed inbox doctor checks.',
+        detail:
+          'Wrote parser toolchain config under .runtime/operations/parsers/toolchain.json and completed inbox doctor checks.',
         id: 'inbox-bootstrap',
         kind: 'configure',
         status: 'completed',

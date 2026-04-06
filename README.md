@@ -97,7 +97,7 @@ Murph is opinionated about storage boundaries:
 - JSONL ledgers are the machine-facing source of truth for append-only records such as events, samples, assessments, and audit entries.
 - Imported source artifacts are copied into `raw/**` and treated as immutable.
 - Derived parser output and compiled knowledge pages live under `derived/**` and stay rebuildable. For the knowledge wiki specifically, `derived/knowledge/index.md` is the content catalog, `derived/knowledge/log.md` is the append-only write log, and `derived/knowledge/pages/*.md` are the assistant-authored personal synthesis pages.
-- Local machine state lives under `.runtime/**` and stays rebuildable.
+- Local machine state lives under `.runtime/**`, with durable non-canonical operational state in `.runtime/operations/**`, rebuildable projections in `.runtime/projections/**`, and ephemeral scratch state in `.runtime/cache/**` plus `.runtime/tmp/**`.
 - Assistant transcripts, metadata, and assistant memory live outside the vault under `assistant-state/**` and are not canonical health truth.
 
 The result is a system you can inspect with normal filesystem tools while still keeping write paths disciplined.
@@ -108,7 +108,7 @@ The result is a system you can inspect with normal filesystem tools while still 
 | --- | --- |
 | `packages/contracts` | Canonical Zod contracts, types, examples, and generated JSON Schema artifacts. |
 | `packages/hosted-execution` | Shared hosted dispatch contracts, env readers, signing helpers, and typed clients. |
-| `packages/runtime-state` | Shared `.runtime` path and rebuildable local-state helpers. |
+| `packages/runtime-state` | Shared local-state taxonomy, `.runtime` path resolution, JSON-state versioning, and SQLite migration helpers. |
 | `packages/core` | The only package allowed to mutate canonical vault data. |
 | `packages/importers` | External adapters that normalize inputs and delegate writes to `core`. |
 | `packages/inboxd` | Inbox capture, canonical evidence persistence, runtime indexing, and attachment parse-job orchestration. |

@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import {
+  readVersionedJsonStateFile,
   toVaultRelativePath,
+  writeVersionedJsonStateFile,
 } from '@murphai/runtime-state/node'
 import { VaultCliError } from '../vault-cli-errors.js'
 import type {
@@ -12,7 +14,10 @@ import type {
   DeviceDaemonStatusResult,
   DeviceDaemonStopResult,
 } from './types.js'
-import { DEVICE_DAEMON_STATE_VERSION } from './types.js'
+import {
+  DEVICE_DAEMON_STATE_SCHEMA,
+  DEVICE_DAEMON_STATE_SCHEMA_VERSION,
+} from './types.js'
 import { isMissingFileError } from './process.js'
 
 const MANAGED_CONTROL_TOKEN_FILE_NAME = 'control-token'
@@ -69,57 +74,32 @@ export async function readDeviceDaemonState(
   paths: DeviceDaemonPaths,
   dependencies: Pick<DeviceDaemonDependencies, 'readFile'>,
 ): Promise<DeviceDaemonStateRecord | null> {
-  let text: string
-
   try {
-    text = await dependencies.readFile(paths.launcherStatePath)
+    const { value } = await readVersionedJsonStateFile(
+      {
+        currentPath: paths.launcherStatePath,
+        label: 'Device sync daemon launcher state',
+        legacyParseValue(value) {
+          return parseDeviceDaemonStateRecord(value)
+        },
+        parseValue(value) {
+          return parseDeviceDaemonStateRecord(value)
+        },
+        schema: DEVICE_DAEMON_STATE_SCHEMA,
+        schemaVersion: DEVICE_DAEMON_STATE_SCHEMA_VERSION,
+      },
+      dependencies,
+    )
+    return value
   } catch (error) {
-    if (!isMissingFileError(error)) {
-      throw error
+    if (isMissingFileError(error)) {
+      return null
     }
-    return null
-  }
 
-  let parsed: unknown
-
-  try {
-    parsed = JSON.parse(text) as unknown
-  } catch {
     throw new VaultCliError(
       'DEVICE_SYNC_STATE_INVALID',
       'Device sync daemon launcher state is invalid.',
     )
-  }
-
-  if (
-    !parsed ||
-    typeof parsed !== 'object' ||
-    Array.isArray(parsed) ||
-    (parsed as { version?: unknown }).version !== DEVICE_DAEMON_STATE_VERSION ||
-    typeof (parsed as { pid?: unknown }).pid !== 'number' ||
-    !Number.isInteger((parsed as { pid: number }).pid) ||
-    (parsed as { pid: number }).pid <= 0 ||
-    typeof (parsed as { baseUrl?: unknown }).baseUrl !== 'string' ||
-    typeof (parsed as { startedAt?: unknown }).startedAt !== 'string'
-  ) {
-    throw new VaultCliError(
-      'DEVICE_SYNC_STATE_INVALID',
-      'Device sync daemon launcher state is invalid.',
-    )
-  }
-
-  const state = parsed as {
-    version: number
-    pid: number
-    baseUrl: string
-    startedAt: string
-  }
-
-  return {
-    version: state.version,
-    pid: state.pid,
-    baseUrl: state.baseUrl,
-    startedAt: state.startedAt,
   }
 }
 
@@ -132,11 +112,16 @@ export async function writeDeviceDaemonState(
     path.dirname(paths.launcherStatePath),
     dependencies,
   )
-  await dependencies.writeFile(
-    paths.launcherStatePath,
-    JSON.stringify(state, null, 2),
+  await writeVersionedJsonStateFile(
+    {
+      filePath: paths.launcherStatePath,
+      mode: DEVICE_DAEMON_RUNTIME_FILE_MODE,
+      schema: DEVICE_DAEMON_STATE_SCHEMA,
+      schemaVersion: DEVICE_DAEMON_STATE_SCHEMA_VERSION,
+      value: parseDeviceDaemonStateRecord(state),
+    },
+    dependencies,
   )
-  await dependencies.chmod(paths.launcherStatePath, DEVICE_DAEMON_RUNTIME_FILE_MODE)
 }
 
 export async function writeManagedControlToken(
@@ -170,6 +155,33 @@ export function resolveManagedControlToken(paths: DeviceDaemonPaths): string | n
 
 function resolveManagedControlTokenPath(paths: DeviceDaemonPaths): string {
   return path.join(path.dirname(paths.launcherStatePath), MANAGED_CONTROL_TOKEN_FILE_NAME)
+}
+
+function parseDeviceDaemonStateRecord(value: unknown): DeviceDaemonStateRecord {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('Device sync daemon launcher state must be an object.')
+  }
+
+  const pid = (value as { pid?: unknown }).pid
+  if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) {
+    throw new TypeError('Device sync daemon launcher state pid must be a positive integer.')
+  }
+
+  const baseUrl = (value as { baseUrl?: unknown }).baseUrl
+  if (typeof baseUrl !== 'string' || baseUrl.trim().length === 0) {
+    throw new TypeError('Device sync daemon launcher state baseUrl must be a string.')
+  }
+
+  const startedAt = (value as { startedAt?: unknown }).startedAt
+  if (typeof startedAt !== 'string' || startedAt.trim().length === 0) {
+    throw new TypeError('Device sync daemon launcher state startedAt must be a string.')
+  }
+
+  return {
+    pid,
+    baseUrl,
+    startedAt,
+  }
 }
 
 async function ensurePrivateDeviceDaemonDirectory(

@@ -303,7 +303,7 @@ export function createSetupServices(
       steps.push(
         createStep({
           detail:
-            'Wrote parser toolchain config under .runtime/parsers and completed inbox doctor checks.',
+            'Wrote parser toolchain config under .runtime/operations/parsers/toolchain.json and completed inbox doctor checks.',
           id: 'inbox-bootstrap',
           kind: 'configure',
           status: 'completed',

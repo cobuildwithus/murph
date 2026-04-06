@@ -1,6 +1,9 @@
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
-import type { AssistantStatePaths } from '@murphai/runtime-state/node'
+import {
+  parseVersionedJsonStateEnvelope,
+  type AssistantStatePaths,
+} from '@murphai/runtime-state/node'
 import {
   assistantAutomationStateSchema,
   assistantDiagnosticEventSchema,
@@ -34,6 +37,8 @@ import { redactAssistantDisplayPath } from './store.js'
 import { resolveAssistantStatePaths } from '@murphai/assistant-core/assistant-state'
 
 const STALE_OUTBOX_INTENT_MS = 15 * 60 * 1000
+const ASSISTANT_STATUS_SNAPSHOT_SCHEMA = 'murph.assistant-status-snapshot.v1'
+const ASSISTANT_STATUS_SNAPSHOT_SCHEMA_VERSION = 1
 
 export async function runAssistantDoctor(
   vault: string,
@@ -84,7 +89,11 @@ async function runAssistantDoctorAtPaths(
     scanJsonLinesFile(paths.runtimeEventsPath, assistantRuntimeEventSchema),
     scanJsonFile(paths.diagnosticSnapshotPath, assistantDiagnosticsSnapshotSchema),
     scanJsonFile(paths.failoverStatePath, assistantFailoverStateSchema),
-    scanJsonFile(paths.statusPath, assistantStatusResultSchema),
+    scanJsonFile(paths.statusPath, assistantStatusResultSchema, {
+      label: 'Assistant status snapshot',
+      schema: ASSISTANT_STATUS_SNAPSHOT_SCHEMA,
+      schemaVersion: ASSISTANT_STATUS_SNAPSHOT_SCHEMA_VERSION,
+    }),
     scanJsonFile(paths.resourceBudgetPath, assistantRuntimeBudgetSnapshotSchema),
     inspectAndRepairAssistantStateSecrecy(paths, {
       repair: input.repair,
@@ -430,13 +439,37 @@ function createDoctorCheck(input: {
 async function scanJsonFile<T>(
   filePath: string,
   schema: { parse(input: unknown): T },
+  versionedState:
+    | {
+        label: string
+        schema: string
+        schemaVersion: number
+      }
+    | undefined = undefined,
 ): Promise<{
   parseError: boolean
   present: boolean
 }> {
   try {
     const raw = await readFile(filePath, 'utf8')
-    schema.parse(JSON.parse(raw) as unknown)
+    const parsed = JSON.parse(raw) as unknown
+
+    if (versionedState) {
+      parseVersionedJsonStateEnvelope(parsed, {
+        label: versionedState.label,
+        legacyParseValue(value) {
+          return schema.parse(value)
+        },
+        parseValue(value) {
+          return schema.parse(value)
+        },
+        schema: versionedState.schema,
+        schemaVersion: versionedState.schemaVersion,
+      })
+    } else {
+      schema.parse(parsed)
+    }
+
     return {
       parseError: false,
       present: true,

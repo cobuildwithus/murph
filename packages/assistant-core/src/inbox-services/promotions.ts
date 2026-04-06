@@ -5,6 +5,8 @@ import { z } from 'zod'
 import { normalizeOpaquePathSegment, normalizeRelativeVaultPath } from '@murphai/core'
 import {
   hasLocalStatePath,
+  readVersionedJsonStateFile,
+  writeVersionedJsonStateFile,
 } from '@murphai/runtime-state/node'
 import { resolveAssistantVaultPath } from '../assistant-vault-paths.js'
 import {
@@ -35,12 +37,11 @@ import { ensureInitialized } from './state.js'
 import {
   fileExists,
   normalizeNullableString,
-  readJsonWithSchema,
   relativeToVault,
-  writeJsonFile,
 } from './shared.js'
 
-const PROMOTION_STORE_VERSION = 1
+const INBOX_PROMOTION_STORE_SCHEMA = 'murph.inbox-promotion-store.v1'
+const INBOX_PROMOTION_STORE_SCHEMA_VERSION = 1
 const RAW_MEALS_DIRECTORY = path.posix.join('raw', 'meals')
 const RAW_DOCUMENTS_DIRECTORY = path.posix.join('raw', 'documents')
 
@@ -621,27 +622,45 @@ async function readPromotionStore(
 ): Promise<PromotionStore> {
   if (!(await hasLocalStatePath({ currentPath: paths.inboxPromotionsPath }))) {
     return {
-      version: PROMOTION_STORE_VERSION,
       entries: [],
     } satisfies PromotionStore
   }
 
-  return readJsonWithSchema(
-    paths.inboxPromotionsPath,
-    inboxPromotionStoreSchema,
-    'INBOX_PROMOTIONS_INVALID',
-    'Inbox promotion state is invalid.',
-  )
+  try {
+    const { value } = await readVersionedJsonStateFile({
+      currentPath: paths.inboxPromotionsPath,
+      label: 'Inbox promotion state',
+      legacyParseValue(value) {
+        return inboxPromotionStoreSchema.parse(value)
+      },
+      parseValue(value) {
+        return inboxPromotionStoreSchema.parse(value)
+      },
+      schema: INBOX_PROMOTION_STORE_SCHEMA,
+      schemaVersion: INBOX_PROMOTION_STORE_SCHEMA_VERSION,
+    })
+    return value
+  } catch (error) {
+    throw new VaultCliError(
+      'INBOX_PROMOTIONS_INVALID',
+      'Inbox promotion state is invalid.',
+      {
+        error: error instanceof Error ? error.message : String(error),
+      },
+    )
+  }
 }
 
 async function writePromotionStore(
   paths: InboxPaths,
   store: PromotionStore,
 ): Promise<void> {
-  await writeJsonFile(
-    paths.inboxPromotionsPath,
-    inboxPromotionStoreSchema.parse(store),
-  )
+  await writeVersionedJsonStateFile({
+    filePath: paths.inboxPromotionsPath,
+    schema: INBOX_PROMOTION_STORE_SCHEMA,
+    schemaVersion: INBOX_PROMOTION_STORE_SCHEMA_VERSION,
+    value: inboxPromotionStoreSchema.parse(store),
+  })
 }
 
 function findAppliedPromotionEntry(
