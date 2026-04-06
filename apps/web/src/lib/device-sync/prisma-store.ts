@@ -2,7 +2,6 @@ import { PrismaClient } from "@prisma/client";
 
 import type {
   ClaimDeviceSyncWebhookTraceInput,
-  DeviceSyncAccountStatus,
   DeviceSyncPublicIngressStore,
   DeviceSyncWebhookTraceClaimResult,
   OAuthStateRecord,
@@ -18,9 +17,9 @@ import { PrismaHostedLocalHeartbeatStore } from "./prisma-store/local-heartbeats
 import { PrismaHostedOAuthSessionStore } from "./prisma-store/oauth-sessions";
 import type {
   CreateHostedSignalInput,
+  CreateHostedTokenAuditInput,
   HostedAgentSessionAuthResult,
   HostedAgentSessionRecord,
-  CreateHostedTokenAuditInput,
   HostedPrismaTransactionClient,
   HostedSignalRecord,
   HostedTokenAuditRecord,
@@ -31,19 +30,16 @@ import { PrismaHostedTokenAuditStore } from "./prisma-store/token-audits";
 import { PrismaHostedWebhookTraceStore } from "./prisma-store/webhook-traces";
 
 export {
-  hostedConnectionWithSecretArgs,
-  mapHostedInternalAccountRecord,
-  mapHostedPublicAccountRecord,
-  requireHostedPublicAccountRecord,
-  type HostedConnectionWithSecretRecord,
+  hostedConnectionRecordArgs,
+  type HostedConnectionRecord,
 } from "./prisma-store/connections";
 export { generateHostedAgentBearerToken } from "./prisma-store/agent-sessions";
 export type {
   CreateHostedSignalInput,
+  CreateHostedTokenAuditInput,
   HostedAgentSessionAuthResult,
   HostedAgentSessionAuthStatus,
   HostedAgentSessionRecord,
-  CreateHostedTokenAuditInput,
   HostedPrismaTransactionClient,
   HostedSignalRecord,
   HostedTokenAuditRecord,
@@ -137,6 +133,10 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.connections.getConnectionOwnerId(connectionId);
   }
 
+  async getConnectionRecordForUser(userId: string, connectionId: string) {
+    return this.connections.getConnectionRecordForUser(userId, connectionId);
+  }
+
   async createSignal(input: CreateHostedSignalInput): Promise<HostedSignalRecord> {
     return this.signals.createSignal(input);
   }
@@ -190,27 +190,6 @@ export class PrismaDeviceSyncControlPlaneStore
     replacedBySessionId?: string | null;
   }): Promise<HostedAgentSessionRecord | null> {
     return this.agentSessions.revokeAgentSession(input);
-  }
-
-  async markConnectionDisconnected(input: {
-    connectionId: string;
-    userId: string;
-    now: string;
-    errorCode?: string | null;
-    errorMessage?: string | null;
-    tx?: HostedPrismaTransactionClient;
-  }): Promise<PublicDeviceSyncAccount> {
-    return this.connections.markConnectionDisconnected(input);
-  }
-
-  async updateConnectionStatus(input: {
-    connectionId: string;
-    status: DeviceSyncAccountStatus;
-    now: string;
-    errorCode?: string | null;
-    errorMessage?: string | null;
-  }): Promise<PublicDeviceSyncAccount> {
-    return this.connections.updateConnectionStatus(input);
   }
 
   async updateConnectionFromLocalHeartbeat(

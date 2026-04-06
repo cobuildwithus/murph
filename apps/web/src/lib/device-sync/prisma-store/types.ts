@@ -1,6 +1,5 @@
 import type { Prisma } from "@prisma/client";
 
-import type { DeviceSyncAccount, DeviceSyncAccountStatus } from "@murphai/device-syncd/public-ingress";
 
 export type HostedPrismaTransactionClient = Prisma.TransactionClient;
 
@@ -68,13 +67,6 @@ export interface CreateHostedTokenAuditInput {
   tx?: HostedPrismaTransactionClient;
 }
 
-export interface HostedConnectionSecretBundle {
-  userId: string;
-  account: DeviceSyncAccount;
-  tokenVersion: number;
-  keyVersion: string;
-}
-
 export interface CreateHostedSignalInput {
   userId: string;
   connectionId?: string | null;
@@ -86,7 +78,6 @@ export interface CreateHostedSignalInput {
 }
 
 export interface UpdateLocalHeartbeatInput {
-  status?: DeviceSyncAccountStatus;
   lastSyncStartedAt?: string | null;
   lastSyncCompletedAt?: string | null;
   lastSyncErrorAt?: string | null;

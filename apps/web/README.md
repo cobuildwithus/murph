@@ -2,7 +2,7 @@
 
 Hosted integration control plane for Vercel deployments.
 
-`apps/web` is the hosted integration control plane for OAuth callbacks, webhooks, sparse connection metadata, sparse Linq routing state, and sparse local-agent APIs. Canonical decryptable device-sync token escrow now lives in the Cloudflare runtime store.
+`apps/web` is the hosted integration control plane for OAuth callbacks, webhooks, sparse connection metadata, sparse Linq routing state, and sparse local-agent APIs. Canonical decryptable device-sync token escrow plus mutable hosted device-sync runtime state now live in the Cloudflare runtime store; Postgres keeps only static connection identity/mapping rows, sparse signals, and token-audit history.
 
 ## Core responsibilities
 

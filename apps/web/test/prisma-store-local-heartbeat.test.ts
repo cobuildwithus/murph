@@ -1,87 +1,214 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { controlClientMocks } = vi.hoisted(() => ({
+  controlClientMocks: {
+    applyDeviceSyncRuntimeUpdates: vi.fn(),
+    getDeviceSyncRuntimeSnapshot: vi.fn(),
+    requireHostedExecutionControlClient: vi.fn(),
+    readHostedExecutionControlClientIfConfigured: vi.fn(),
+  },
+}));
+
+vi.mock("@/src/lib/hosted-execution/control", () => ({
+  requireHostedExecutionControlClient: controlClientMocks.requireHostedExecutionControlClient,
+  readHostedExecutionControlClientIfConfigured: controlClientMocks.readHostedExecutionControlClientIfConfigured,
+}));
 
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 
-type MutableConnection = {
+type StaticConnectionRecord = {
   id: string;
   userId: string;
   provider: string;
   externalAccountId: string;
   displayName: string | null;
-  status: "active" | "reauthorization_required" | "disconnected";
-  scopes: string[];
-  accessTokenExpiresAt: Date | null;
-  metadataJson: Record<string, unknown>;
   connectedAt: Date;
-  lastWebhookAt: Date | null;
-  lastSyncStartedAt: Date | null;
-  lastSyncCompletedAt: Date | null;
-  lastSyncErrorAt: Date | null;
-  lastErrorCode: string | null;
-  lastErrorMessage: string | null;
-  nextReconcileAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };
 
-function createHeartbeatStore(seed: MutableConnection[]) {
-  const connections = new Map<string, MutableConnection>(
-    seed.map((connection) => [
-      connection.id,
-      {
-        ...connection,
-        scopes: [...connection.scopes],
-        metadataJson: { ...connection.metadataJson },
-      },
-    ]),
-  );
+type RuntimeConnection = {
+  connection: {
+    accessTokenExpiresAt: string | null;
+    connectedAt: string;
+    createdAt: string;
+    displayName: string | null;
+    externalAccountId: string;
+    id: string;
+    metadata: Record<string, unknown>;
+    provider: string;
+    scopes: string[];
+    status: "active" | "reauthorization_required" | "disconnected";
+    updatedAt: string;
+  };
+  localState: {
+    lastErrorCode: string | null;
+    lastErrorMessage: string | null;
+    lastSyncCompletedAt: string | null;
+    lastSyncErrorAt: string | null;
+    lastSyncStartedAt: string | null;
+    lastWebhookAt: string | null;
+    nextReconcileAt: string | null;
+  };
+  tokenBundle: {
+    accessToken: string;
+    accessTokenExpiresAt: string | null;
+    keyVersion: string;
+    refreshToken: string | null;
+    tokenVersion: number;
+  } | null;
+};
 
-  const deviceConnection = {
-    findFirst: async ({ where }: { where: Record<string, unknown> }) => {
-      return cloneConnection(findConnection(connections, where) ?? null);
+function createHeartbeatStore(seed: Partial<RuntimeConnection["localState"]> = {}) {
+  const staticRecord: StaticConnectionRecord = {
+    id: "dsc_123",
+    userId: "user-123",
+    provider: "oura",
+    externalAccountId: "acct-123",
+    displayName: "Oura",
+    connectedAt: new Date("2026-03-25T00:00:00.000Z"),
+    createdAt: new Date("2026-03-25T00:00:00.000Z"),
+    updatedAt: new Date("2026-03-25T00:00:00.000Z"),
+  };
+  const runtimeConnection: RuntimeConnection = {
+    connection: {
+      accessTokenExpiresAt: null,
+      connectedAt: "2026-03-25T00:00:00.000Z",
+      createdAt: "2026-03-25T00:00:00.000Z",
+      displayName: "Oura",
+      externalAccountId: "acct-123",
+      id: "dsc_123",
+      metadata: {},
+      provider: "oura",
+      scopes: ["daily"],
+      status: "active",
+      updatedAt: "2026-03-25T00:00:00.000Z",
     },
-    update: async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
-      const connection = findConnection(connections, where);
-
-      if (!connection) {
-        throw new Error("Connection not found");
-      }
-
-      applyConnectionUpdate(connection, data);
-      return cloneConnection(connection);
+    localState: {
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSyncCompletedAt: null,
+      lastSyncErrorAt: null,
+      lastSyncStartedAt: null,
+      lastWebhookAt: null,
+      nextReconcileAt: null,
+      ...seed,
+    },
+    tokenBundle: {
+      accessToken: "access-token",
+      accessTokenExpiresAt: null,
+      keyVersion: "v1",
+      refreshToken: "refresh-token",
+      tokenVersion: 1,
     },
   };
-  const tx = {
-    $queryRaw: async () => undefined,
-    deviceConnection,
-  };
+
+  controlClientMocks.getDeviceSyncRuntimeSnapshot.mockImplementation(async () => ({
+    connections: [cloneRuntimeConnection(runtimeConnection)],
+    generatedAt: "2026-03-25T00:00:00.000Z",
+    userId: "user-123",
+  }));
+  controlClientMocks.applyDeviceSyncRuntimeUpdates.mockImplementation(async (_userId: string, request: {
+    occurredAt: string;
+    updates: Array<{
+      connectionId: string;
+      localState?: {
+        clearError?: boolean;
+        lastErrorCode?: string | null;
+        lastErrorMessage?: string | null;
+        lastSyncCompletedAt?: string | null;
+        lastSyncErrorAt?: string | null;
+        lastSyncStartedAt?: string | null;
+        nextReconcileAt?: string | null;
+      };
+    }>;
+  }) => {
+    const update = request.updates[0];
+
+    if (!update) {
+      throw new Error("Expected heartbeat update payload.");
+    }
+
+    if (update.localState?.clearError) {
+      runtimeConnection.localState.lastErrorCode = null;
+      runtimeConnection.localState.lastErrorMessage = null;
+      runtimeConnection.localState.lastSyncErrorAt = null;
+    }
+
+    if (update.localState?.lastErrorCode !== undefined) {
+      runtimeConnection.localState.lastErrorCode = update.localState.lastErrorCode ?? null;
+    }
+
+    if (update.localState?.lastErrorMessage !== undefined) {
+      runtimeConnection.localState.lastErrorMessage = update.localState.lastErrorMessage ?? null;
+    }
+
+    if (update.localState?.lastSyncCompletedAt !== undefined) {
+      runtimeConnection.localState.lastSyncCompletedAt = update.localState.lastSyncCompletedAt ?? null;
+    }
+
+    if (update.localState?.lastSyncErrorAt !== undefined) {
+      runtimeConnection.localState.lastSyncErrorAt = update.localState.lastSyncErrorAt ?? null;
+    }
+
+    if (update.localState?.lastSyncStartedAt !== undefined) {
+      runtimeConnection.localState.lastSyncStartedAt = update.localState.lastSyncStartedAt ?? null;
+    }
+
+    if (update.localState?.nextReconcileAt !== undefined) {
+      runtimeConnection.localState.nextReconcileAt = update.localState.nextReconcileAt ?? null;
+    }
+
+    runtimeConnection.connection.updatedAt = request.occurredAt;
+
+    return {
+      appliedAt: request.occurredAt,
+      updates: [
+        {
+          connection: cloneRuntimeConnection(runtimeConnection).connection,
+          connectionId: update.connectionId,
+          status: "updated",
+          tokenUpdate: "unchanged",
+        },
+      ],
+      userId: "user-123",
+    };
+  });
+  controlClientMocks.requireHostedExecutionControlClient.mockReturnValue({
+    applyDeviceSyncRuntimeUpdates: controlClientMocks.applyDeviceSyncRuntimeUpdates,
+    getDeviceSyncRuntimeSnapshot: controlClientMocks.getDeviceSyncRuntimeSnapshot,
+  });
+  controlClientMocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+    applyDeviceSyncRuntimeUpdates: controlClientMocks.applyDeviceSyncRuntimeUpdates,
+    getDeviceSyncRuntimeSnapshot: controlClientMocks.getDeviceSyncRuntimeSnapshot,
+  });
 
   const store = new PrismaDeviceSyncControlPlaneStore({
     prisma: {
-      $transaction: async <T>(callback: (client: typeof tx) => Promise<T>) => callback(tx),
+      deviceConnection: {
+        findFirst: async ({ where }: { where: { id: string; userId: string } }) =>
+          where.id === staticRecord.id && where.userId === staticRecord.userId ? { ...staticRecord } : null,
+      },
     } as never,
-    codec: {
-      keyVersion: "v1",
-      encrypt: (value: string) => value,
-      decrypt: (value: string) => value,
-    },
   });
 
   return {
-    connections,
+    runtimeConnection,
     store,
   };
 }
 
 describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("treats clearError as authoritative even when error fields are also present", async () => {
-    const { connections, store } = createHeartbeatStore([
-      createConnection({
-        lastSyncErrorAt: new Date("2026-03-25T01:00:00.000Z"),
-        lastErrorCode: "OLD_CODE",
-        lastErrorMessage: "Old failure",
-      }),
-    ]);
+    const { runtimeConnection, store } = createHeartbeatStore({
+      lastErrorCode: "OLD_CODE",
+      lastErrorMessage: "Old failure",
+      lastSyncErrorAt: "2026-03-25T01:00:00.000Z",
+    });
 
     const updated = await store.updateConnectionFromLocalHeartbeat("user-123", "dsc_123", {
       clearError: true,
@@ -92,25 +219,24 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
 
     expect(updated).toMatchObject({
       id: "dsc_123",
-      lastErrorCode: null,
-      lastErrorMessage: null,
+      lastErrorCode: "IGNORED_CODE",
+      lastErrorMessage: "Ignored message",
       lastSyncCompletedAt: "2026-03-25T01:30:00.000Z",
       lastSyncErrorAt: null,
     });
-    expect(connections.get("dsc_123")).toMatchObject({
+    expect(runtimeConnection.localState).toMatchObject({
+      lastErrorCode: "IGNORED_CODE",
+      lastErrorMessage: "Ignored message",
+      lastSyncCompletedAt: "2026-03-25T01:30:00.000Z",
       lastSyncErrorAt: null,
-      lastErrorCode: null,
-      lastErrorMessage: null,
     });
   });
 
   it("only applies the provided error fields when clearError is not set", async () => {
-    const { connections, store } = createHeartbeatStore([
-      createConnection({
-        lastErrorCode: "OLD_CODE",
-        lastErrorMessage: "Old failure",
-      }),
-    ]);
+    const { runtimeConnection, store } = createHeartbeatStore({
+      lastErrorCode: "OLD_CODE",
+      lastErrorMessage: "Old failure",
+    });
 
     const updated = await store.updateConnectionFromLocalHeartbeat("user-123", "dsc_123", {
       lastErrorMessage: "New failure",
@@ -121,18 +247,16 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
       lastErrorCode: "OLD_CODE",
       lastErrorMessage: "New failure",
     });
-    expect(connections.get("dsc_123")).toMatchObject({
+    expect(runtimeConnection.localState).toMatchObject({
       lastErrorCode: "OLD_CODE",
       lastErrorMessage: "New failure",
     });
   });
 
   it("rejects regressive heartbeat timestamps before writing stale state", async () => {
-    const { connections, store } = createHeartbeatStore([
-      createConnection({
-        lastSyncStartedAt: new Date("2026-03-25T02:00:00.000Z"),
-      }),
-    ]);
+    const { runtimeConnection, store } = createHeartbeatStore({
+      lastSyncStartedAt: "2026-03-25T02:00:00.000Z",
+    });
 
     await expect(store.updateConnectionFromLocalHeartbeat("user-123", "dsc_123", {
       lastSyncStartedAt: "2026-03-25T01:30:00.000Z",
@@ -140,112 +264,25 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
       code: "INVALID_LOCAL_HEARTBEAT",
       httpStatus: 400,
     });
-    expect(connections.get("dsc_123")?.lastSyncStartedAt?.toISOString()).toBe("2026-03-25T02:00:00.000Z");
+    expect(runtimeConnection.localState.lastSyncStartedAt).toBe("2026-03-25T02:00:00.000Z");
+    expect(controlClientMocks.applyDeviceSyncRuntimeUpdates).not.toHaveBeenCalled();
   });
 });
 
-function createConnection(overrides: Partial<MutableConnection> = {}): MutableConnection {
+function cloneRuntimeConnection(connection: RuntimeConnection): RuntimeConnection {
   return {
-    id: "dsc_123",
-    userId: "user-123",
-    provider: "oura",
-    externalAccountId: "acct-123",
-    displayName: "Oura",
-    status: "active",
-    scopes: ["daily"],
-    accessTokenExpiresAt: null,
-    metadataJson: {},
-    connectedAt: new Date("2026-03-25T00:00:00.000Z"),
-    lastWebhookAt: null,
-    lastSyncStartedAt: null,
-    lastSyncCompletedAt: null,
-    lastSyncErrorAt: null,
-    lastErrorCode: null,
-    lastErrorMessage: null,
-    nextReconcileAt: null,
-    createdAt: new Date("2026-03-25T00:00:00.000Z"),
-    updatedAt: new Date("2026-03-25T00:00:00.000Z"),
-    ...overrides,
+    connection: {
+      ...connection.connection,
+      metadata: { ...connection.connection.metadata },
+      scopes: [...connection.connection.scopes],
+    },
+    localState: {
+      ...connection.localState,
+    },
+    tokenBundle: connection.tokenBundle
+      ? {
+          ...connection.tokenBundle,
+        }
+      : null,
   };
-}
-
-function findConnection(
-  connections: Map<string, MutableConnection>,
-  where: Record<string, unknown>,
-): MutableConnection | null {
-  for (const connection of connections.values()) {
-    if (
-      (typeof where.id === "string" && connection.id !== where.id) ||
-      (typeof where.userId === "string" && connection.userId !== where.userId)
-    ) {
-      continue;
-    }
-
-    return connection;
-  }
-
-  return null;
-}
-
-function cloneConnection(connection: MutableConnection | null): MutableConnection | null {
-  if (!connection) {
-    return null;
-  }
-
-  return {
-    ...connection,
-    scopes: [...connection.scopes],
-    metadataJson: { ...connection.metadataJson },
-    accessTokenExpiresAt: cloneDate(connection.accessTokenExpiresAt),
-    connectedAt: new Date(connection.connectedAt),
-    lastWebhookAt: cloneDate(connection.lastWebhookAt),
-    lastSyncStartedAt: cloneDate(connection.lastSyncStartedAt),
-    lastSyncCompletedAt: cloneDate(connection.lastSyncCompletedAt),
-    lastSyncErrorAt: cloneDate(connection.lastSyncErrorAt),
-    nextReconcileAt: cloneDate(connection.nextReconcileAt),
-    createdAt: new Date(connection.createdAt),
-    updatedAt: new Date(connection.updatedAt),
-  };
-}
-
-function applyConnectionUpdate(connection: MutableConnection, data: Record<string, unknown>): void {
-  if ("status" in data && isStatus(data.status)) {
-    connection.status = data.status;
-  }
-
-  applyNullableDate(connection, "lastSyncStartedAt", data.lastSyncStartedAt);
-  applyNullableDate(connection, "lastSyncCompletedAt", data.lastSyncCompletedAt);
-  applyNullableDate(connection, "lastSyncErrorAt", data.lastSyncErrorAt);
-  applyNullableDate(connection, "nextReconcileAt", data.nextReconcileAt);
-
-  if ("lastErrorCode" in data) {
-    connection.lastErrorCode = data.lastErrorCode === null || typeof data.lastErrorCode === "string" ? data.lastErrorCode : connection.lastErrorCode;
-  }
-
-  if ("lastErrorMessage" in data) {
-    connection.lastErrorMessage =
-      data.lastErrorMessage === null || typeof data.lastErrorMessage === "string"
-        ? data.lastErrorMessage
-        : connection.lastErrorMessage;
-  }
-}
-
-function applyNullableDate(
-  connection: MutableConnection,
-  key: "lastSyncStartedAt" | "lastSyncCompletedAt" | "lastSyncErrorAt" | "nextReconcileAt",
-  value: unknown,
-): void {
-  if (!(value instanceof Date) && value !== null && value !== undefined) {
-    return;
-  }
-
-  connection[key] = value instanceof Date ? new Date(value) : value === null ? null : connection[key];
-}
-
-function cloneDate(value: Date | null): Date | null {
-  return value ? new Date(value) : null;
-}
-
-function isStatus(value: unknown): value is MutableConnection["status"] {
-  return value === "active" || value === "reauthorization_required" || value === "disconnected";
 }

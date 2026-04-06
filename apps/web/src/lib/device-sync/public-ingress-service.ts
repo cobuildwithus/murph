@@ -1,6 +1,7 @@
 import {
   createDeviceSyncPublicIngress,
   deviceSyncError,
+  sanitizeStoredDeviceSyncMetadata,
   type BeginConnectionResult,
   type CompleteConnectionResult,
   type HandleWebhookResult,
@@ -9,6 +10,7 @@ import {
 } from "@murphai/device-syncd/public-ingress";
 
 import type { HostedDeviceSyncControlPlaneContext } from "./control-plane-context";
+import { buildHostedDeviceSyncRuntimeSeedFromPublicAccount } from "./internal-runtime";
 import {
   createHostedBrowserConnectionId,
   toHostedBrowserDeviceSyncConnection,
@@ -38,14 +40,14 @@ export class HostedDeviceSyncPublicIngressService {
         onConnectionEstablished: async ({ account, connection, now, provider }) => {
           const userId = await this.requireHostedConnectionOwnerId(account.id);
           const controlClient = requireHostedExecutionControlClient();
-          const existingRuntime = await controlClient.getDeviceSyncRuntimeSnapshot(userId, {
-            connectionId: account.id,
-            provider: account.provider,
-          });
-          const existingConnection =
-            existingRuntime.connections.find((entry) => entry.connection.id === account.id)
-            ?? null;
-          const nextTokenVersion = (existingConnection?.tokenBundle?.tokenVersion ?? 0) + 1;
+          const metadata = sanitizeStoredDeviceSyncMetadata(connection.metadata ?? {});
+          const tokenBundle = {
+            accessToken: connection.tokens.accessToken,
+            accessTokenExpiresAt: connection.tokens.accessTokenExpiresAt ?? null,
+            keyVersion: this.context.env.encryptionKeyVersion,
+            refreshToken: connection.tokens.refreshToken ?? null,
+            tokenVersion: 1,
+          } as const;
 
           await controlClient.applyDeviceSyncRuntimeUpdates(userId, {
             occurredAt: now,
@@ -54,7 +56,7 @@ export class HostedDeviceSyncPublicIngressService {
                 connectionId: account.id,
                 connection: {
                   displayName: account.displayName,
-                  metadata: account.metadata,
+                  metadata,
                   scopes: account.scopes,
                   status: account.status,
                 },
@@ -67,46 +69,15 @@ export class HostedDeviceSyncPublicIngressService {
                   lastWebhookAt: account.lastWebhookAt,
                   nextReconcileAt: account.nextReconcileAt,
                 },
-                observedTokenVersion: existingConnection?.tokenBundle?.tokenVersion ?? null,
-                observedUpdatedAt: existingConnection?.connection.updatedAt ?? null,
-                seed: {
-                  connection: {
-                    accessTokenExpiresAt: connection.tokens.accessTokenExpiresAt ?? null,
-                    connectedAt: account.connectedAt,
-                    createdAt: account.createdAt,
-                    displayName: account.displayName,
-                    externalAccountId: account.externalAccountId,
-                    id: account.id,
-                    metadata: account.metadata,
-                    provider: account.provider,
-                    scopes: account.scopes,
-                    status: account.status,
-                    updatedAt: account.updatedAt,
+                seed: buildHostedDeviceSyncRuntimeSeedFromPublicAccount({
+                  account: {
+                    ...account,
+                    accessTokenExpiresAt: tokenBundle.accessTokenExpiresAt,
+                    metadata,
                   },
-                  localState: {
-                    lastErrorCode: account.lastErrorCode,
-                    lastErrorMessage: account.lastErrorMessage,
-                    lastSyncCompletedAt: account.lastSyncCompletedAt,
-                    lastSyncErrorAt: account.lastSyncErrorAt,
-                    lastSyncStartedAt: account.lastSyncStartedAt,
-                    lastWebhookAt: account.lastWebhookAt,
-                    nextReconcileAt: account.nextReconcileAt,
-                  },
-                  tokenBundle: {
-                    accessToken: connection.tokens.accessToken,
-                    accessTokenExpiresAt: connection.tokens.accessTokenExpiresAt ?? null,
-                    keyVersion: this.context.env.encryptionKeyVersion,
-                    refreshToken: connection.tokens.refreshToken ?? null,
-                    tokenVersion: nextTokenVersion,
-                  },
-                },
-                tokenBundle: {
-                  accessToken: connection.tokens.accessToken,
-                  accessTokenExpiresAt: connection.tokens.accessTokenExpiresAt ?? null,
-                  keyVersion: this.context.env.encryptionKeyVersion,
-                  refreshToken: connection.tokens.refreshToken ?? null,
-                  tokenVersion: nextTokenVersion,
-                },
+                  tokenBundle,
+                }),
+                tokenBundle,
               },
             ],
           });
