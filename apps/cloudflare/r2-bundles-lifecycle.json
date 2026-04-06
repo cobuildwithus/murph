@@ -1,7 +1,7 @@
 {
   "rules": [
     {
-      "id": "delete-transient-execution-journal-after-7d",
+      "id": "delete-transient-execution-journal-after-6h",
       "enabled": true,
       "conditions": {
         "prefix": "transient/execution-journal/"
@@ -9,12 +9,12 @@
       "deleteObjectsTransition": {
         "condition": {
           "type": "Age",
-          "maxAge": 604800
+          "maxAge": 21600
         }
       }
     },
     {
-      "id": "delete-transient-side-effects-after-7d",
+      "id": "delete-transient-side-effects-after-6h",
       "enabled": true,
       "conditions": {
         "prefix": "transient/side-effects/"
@@ -22,12 +22,12 @@
       "deleteObjectsTransition": {
         "condition": {
           "type": "Age",
-          "maxAge": 604800
+          "maxAge": 21600
         }
       }
     },
     {
-      "id": "delete-transient-dispatch-payloads-after-7d",
+      "id": "delete-transient-dispatch-payloads-after-6h",
       "enabled": true,
       "conditions": {
         "prefix": "transient/dispatch-payloads/"
@@ -35,12 +35,38 @@
       "deleteObjectsTransition": {
         "condition": {
           "type": "Age",
+          "maxAge": 21600
+        }
+      }
+    },
+    {
+      "id": "delete-transient-assistant-usage-after-7d",
+      "enabled": true,
+      "conditions": {
+        "prefix": "transient/assistant-usage/"
+      },
+      "deleteObjectsTransition": {
+        "condition": {
+          "type": "Age",
           "maxAge": 604800
         }
       }
     },
     {
-      "id": "delete-transient-share-packs-after-30d",
+      "id": "delete-transient-assistant-usage-dirty-after-7d",
+      "enabled": true,
+      "conditions": {
+        "prefix": "transient/assistant-usage-dirty/"
+      },
+      "deleteObjectsTransition": {
+        "condition": {
+          "type": "Age",
+          "maxAge": 604800
+        }
+      }
+    },
+    {
+      "id": "delete-transient-share-packs-after-24h",
       "enabled": true,
       "conditions": {
         "prefix": "transient/share-packs/"
@@ -48,25 +74,12 @@
       "deleteObjectsTransition": {
         "condition": {
           "type": "Age",
-          "maxAge": 2592000
+          "maxAge": 86400
         }
       }
     },
     {
-      "id": "delete-transient-hosted-email-thread-routes-after-7d",
-      "enabled": true,
-      "conditions": {
-        "prefix": "transient/hosted-email/threads/"
-      },
-      "deleteObjectsTransition": {
-        "condition": {
-          "type": "Age",
-          "maxAge": 604800
-        }
-      }
-    },
-    {
-      "id": "delete-transient-hosted-email-raw-messages-after-7d",
+      "id": "delete-transient-hosted-email-raw-messages-after-1h",
       "enabled": true,
       "conditions": {
         "prefix": "transient/hosted-email/messages/"
@@ -74,7 +87,7 @@
       "deleteObjectsTransition": {
         "condition": {
           "type": "Age",
-          "maxAge": 604800
+          "maxAge": 3600
         }
       }
     }

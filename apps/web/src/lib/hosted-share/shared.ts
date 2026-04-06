@@ -14,7 +14,8 @@ import { readHostedSharePackFromHostedExecution } from "../hosted-execution/cont
 
 import type { HostedSharePreview, HostedSharePrismaClient } from "./types";
 
-const DEFAULT_HOSTED_SHARE_TTL_HOURS = 24 * 7;
+const DEFAULT_HOSTED_SHARE_TTL_HOURS = 24;
+const MAX_HOSTED_SHARE_TTL_HOURS = 24;
 const HOSTED_SHARE_CODE_BYTES = 24;
 const DEFAULT_HOSTED_SHARE_PRIVATE_PREVIEW_TITLE = "Shared Murph pack";
 
@@ -199,7 +200,7 @@ export function hashHostedShareCode(value: string): string {
 
 export function hostedShareExpiresAt(hours: number | undefined): Date {
   const ttlHours = Number.isFinite(hours) && typeof hours === "number" && hours > 0
-    ? Math.min(hours, 24 * 30)
+    ? Math.min(hours, MAX_HOSTED_SHARE_TTL_HOURS)
     : DEFAULT_HOSTED_SHARE_TTL_HOURS;
 
   return new Date(Date.now() + ttlHours * 60 * 60 * 1000);

@@ -112,6 +112,7 @@ describe("hosted share service", () => {
 
   it("creates a hosted share link and threads a recipient invite into the final url", async () => {
     const prisma = createHostedSharePrisma();
+    const startedAt = Date.now();
     const result = await createHostedShareLink({
       prisma: prisma as never,
       pack: buildPack(),
@@ -125,6 +126,8 @@ describe("hosted share service", () => {
     expect(result.preview.counts.foods).toBe(1);
     expect(prisma.rows).toHaveLength(1);
     expect(prisma.rows[0]?.previewTitle).toBe("Shared Murph pack");
+    expect((prisma.rows[0]?.expiresAt?.getTime() ?? 0) - startedAt).toBeGreaterThan(23 * 60 * 60 * 1000);
+    expect((prisma.rows[0]?.expiresAt?.getTime() ?? 0) - startedAt).toBeLessThanOrEqual(24 * 60 * 60 * 1000 + 5_000);
     expect(mocks.writeHostedSharePackToHostedExecution).toHaveBeenCalledWith({
       ownerUserId: "member_sender",
       pack: buildPack(),
@@ -132,7 +135,7 @@ describe("hosted share service", () => {
     });
   });
 
-  it("keeps explicitly extended hosted share links aligned with the 30 day retention window", async () => {
+  it("caps explicitly extended hosted share links to the privacy-first 24 hour window", async () => {
     const prisma = createHostedSharePrisma();
     const startedAt = Date.now();
 
@@ -145,8 +148,8 @@ describe("hosted share service", () => {
 
     const expiresAt = prisma.rows[0]?.expiresAt?.getTime();
     expect(expiresAt).toBeTypeOf("number");
-    expect((expiresAt ?? 0) - startedAt).toBeGreaterThan(29 * 24 * 60 * 60 * 1000);
-    expect((expiresAt ?? 0) - startedAt).toBeLessThanOrEqual(30 * 24 * 60 * 60 * 1000 + 5_000);
+    expect((expiresAt ?? 0) - startedAt).toBeGreaterThan(23 * 60 * 60 * 1000);
+    expect((expiresAt ?? 0) - startedAt).toBeLessThanOrEqual(24 * 60 * 60 * 1000 + 5_000);
   });
 
   it("imports a hosted share link for an active hosted member", async () => {
