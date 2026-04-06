@@ -1,0 +1,10 @@
+{
+  "id": "memory-search",
+  "command": "vault-cli memory search [text] --vault <path> [--section identity|preference|instruction|context] [--limit <n>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/search",
+  "purpose": "Documents canonical memory search over bank/memory.md."
+}

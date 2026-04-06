@@ -6,5 +6,5 @@
     "fixtures/minimal-vault/CORE.md"
   ],
   "goldenOutput": "fixtures/golden-outputs/assistant",
-  "purpose": "Documents tolerant assistant-state diagnostics for transcripts, receipts, outbox intents, and automation metadata."
+  "purpose": "Documents tolerant assistant runtime diagnostics for transcripts, receipts, outbox intents, and runtime automation state."
 }

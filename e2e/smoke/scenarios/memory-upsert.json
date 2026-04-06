@@ -1,0 +1,10 @@
+{
+  "id": "memory-upsert",
+  "command": "vault-cli memory upsert <text> --vault <path> --section identity|preference|instruction|context [--memoryId <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/show",
+  "purpose": "Documents canonical memory writes into bank/memory.md."
+}

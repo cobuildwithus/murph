@@ -12,7 +12,7 @@ The main installable product entrypoint is `@murphai/murph`, which gives you the
 
 - a file-native vault with canonical writes owned by `packages/core`
 - the installable `@murphai/murph` package, which provides the `murph` CLI and onboarding flow
-- provider-backed local assistant chat and automation, with runtime state in sibling `assistant-state/**`
+- provider-backed local assistant chat and automation, with runtime state under `vault/.runtime/operations/assistant/**`
 - a two-layer knowledge system: stable health reference pages under `bank/library/**` plus a non-canonical compiled personal wiki under `derived/knowledge/**`, synthesized by the active assistant, persisted through shared assistant/CLI write surfaces, searchable locally, and kept rebuildable
 - inbox capture, indexing, and parser-driven attachment extraction
 - local wearable/device sync through `@murphai/device-syncd`
@@ -98,7 +98,7 @@ Murph is opinionated about storage boundaries:
 - Imported source artifacts are copied into `raw/**` and treated as immutable.
 - Derived parser output and compiled knowledge pages live under `derived/**` and stay rebuildable. For the knowledge wiki specifically, `derived/knowledge/index.md` is the content catalog, `derived/knowledge/log.md` is the append-only write log, and `derived/knowledge/pages/*.md` are the assistant-authored personal synthesis pages.
 - Local machine state lives under `.runtime/**`, with durable non-canonical operational state in `.runtime/operations/**`, rebuildable projections in `.runtime/projections/**`, and ephemeral scratch state in `.runtime/cache/**` plus `.runtime/tmp/**`.
-- Assistant transcripts, metadata, and assistant memory live outside the vault under `assistant-state/**` and are not canonical health truth.
+- Assistant transcripts, metadata, receipts, outbox state, and related execution residue live under `vault/.runtime/operations/assistant/**`; durable user-facing `memory` and `automation` are canonical vault records.
 
 The result is a system you can inspect with normal filesystem tools while still keeping write paths disciplined.
 

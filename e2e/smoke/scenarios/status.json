@@ -6,5 +6,5 @@
     "fixtures/minimal-vault/CORE.md"
   ],
   "goldenOutput": "fixtures/golden-outputs/assistant",
-  "purpose": "Documents the root alias for assistant-state inspection of recent sessions, receipts, and pending outbox work."
+  "purpose": "Documents the root alias for assistant runtime inspection of recent sessions, receipts, and pending outbox work."
 }

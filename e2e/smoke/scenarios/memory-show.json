@@ -1,0 +1,10 @@
+{
+  "id": "memory-show",
+  "command": "vault-cli memory show [memoryId] --vault <path>",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/show",
+  "purpose": "Documents canonical memory reads from bank/memory.md, with an optional record lookup."
+}

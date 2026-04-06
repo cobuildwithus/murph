@@ -6,5 +6,5 @@
     "fixtures/minimal-vault/CORE.md"
   ],
   "goldenOutput": "fixtures/golden-outputs/assistant",
-  "purpose": "Documents the root alias for read-only assistant-state diagnostics and corruption-tolerant health checks."
+  "purpose": "Documents the root alias for read-only assistant runtime diagnostics and corruption-tolerant health checks."
 }

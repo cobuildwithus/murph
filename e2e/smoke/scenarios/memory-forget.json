@@ -1,0 +1,10 @@
+{
+  "id": "memory-forget",
+  "command": "vault-cli memory forget <memoryId> --vault <path>",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/show",
+  "purpose": "Documents canonical memory deletion from bank/memory.md."
+}
