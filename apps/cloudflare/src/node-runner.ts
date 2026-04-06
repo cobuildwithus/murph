@@ -17,10 +17,7 @@ import { normalizeHostedUserEnv } from "./user-env.ts";
 
 let hostedExecutionRunStartHookForTests: (() => void) | null = null;
 let hostedExecutionRunModeForTests: "in-process" | "isolated" | null = null;
-let hostedExecutionRunHandlersForTests: {
-  inProcess?: typeof runHostedAssistantRuntimeJobInProcess;
-  isolated?: typeof runHostedAssistantRuntimeJobIsolated;
-} | null = null;
+let hostedExecutionIsolatedRunnerForTests: typeof runHostedAssistantRuntimeJobIsolated | null = null;
 const hostedExecutionWorkerOnlyRuntimeEnvKeys = new Set([
   "HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS",
   "HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS",
@@ -36,11 +33,10 @@ export function setHostedExecutionRunStartHookForTests(hook: (() => void) | null
   hostedExecutionRunStartHookForTests = hook;
 }
 
-export function setHostedExecutionRunHandlersForTests(handlers: {
-  inProcess?: typeof runHostedAssistantRuntimeJobInProcess;
-  isolated?: typeof runHostedAssistantRuntimeJobIsolated;
-} | null): void {
-  hostedExecutionRunHandlersForTests = handlers;
+export function setHostedExecutionIsolatedRunnerForTests(
+  runner: typeof runHostedAssistantRuntimeJobIsolated | null,
+): void {
+  hostedExecutionIsolatedRunnerForTests = runner;
 }
 
 export function buildHostedExecutionJobRuntimeForTests(
@@ -59,15 +55,13 @@ export async function runHostedExecutionJob(
   const runtime = buildHostedExecutionJobRuntime(input.runtime ?? {});
 
   if (hostedExecutionRunModeForTests === "in-process") {
-    const runInProcess = hostedExecutionRunHandlersForTests?.inProcess ?? runHostedAssistantRuntimeJobInProcess;
-
-    return await runInProcess({
+    return await runHostedAssistantRuntimeJobInProcess({
       request: input.request,
       runtime,
     });
   }
 
-  const runIsolated = hostedExecutionRunHandlersForTests?.isolated ?? runHostedAssistantRuntimeJobIsolated;
+  const runIsolated = hostedExecutionIsolatedRunnerForTests ?? runHostedAssistantRuntimeJobIsolated;
 
   return await runIsolated({
     request: input.request,
