@@ -1,6 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd -- "$script_dir/../../.." && pwd)"
+sqlite_warning_filter_option="--require=$repo_root/config/sqlite-warning-filter.cjs"
+
+compose_node_options_with_sqlite_warning_filter() {
+  local node_options="${NODE_OPTIONS:-}"
+
+  if [[ "$node_options" == *"$sqlite_warning_filter_option"* ]]; then
+    printf '%s\n' "$node_options"
+    return
+  fi
+
+  if [[ -n "$node_options" ]]; then
+    printf '%s %s\n' "$node_options" "$sqlite_warning_filter_option"
+    return
+  fi
+
+  printf '%s\n' "$sqlite_warning_filter_option"
+}
+
 verify_step_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 verify_step_parallel="${MURPH_VERIFY_STEP_PARALLEL:-$verify_step_parallel_default}"
 tracked_background_pids=()
@@ -112,10 +132,12 @@ if [[ "$verify_step_parallel" == "1" ]]; then
   test_pid="$!"
   register_background_pid "$test_pid"
   pnpm dev:smoke
-  next build
+  next_build_node_options="$(compose_node_options_with_sqlite_warning_filter)"
+  NODE_OPTIONS="$next_build_node_options" next build
   wait_for_background_jobs "$test_pid"
 else
   pnpm test
   pnpm dev:smoke
-  next build
+  next_build_node_options="$(compose_node_options_with_sqlite_warning_filter)"
+  NODE_OPTIONS="$next_build_node_options" next build
 fi
