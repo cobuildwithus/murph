@@ -5,17 +5,9 @@ import { prepareDeviceProviderSnapshotImport } from "@murphai/importers";
 
 import { DeviceSyncError } from "../src/errors.ts";
 import { createOuraDeviceSyncProvider, resolveOuraWebhookVerificationChallenge } from "../src/providers/oura.ts";
+import { createJsonResponse } from "./helpers.ts";
 
 import type { DeviceSyncAccount, DeviceSyncJobRecord, ProviderJobContext } from "../src/types.ts";
-
-function createJsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      "Content-Type": "application/json",
-    },
-  });
-}
 
 function createAccount(scopes: string[]): DeviceSyncAccount {
   return {

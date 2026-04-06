@@ -4,6 +4,7 @@ import { test } from "vitest";
 
 import { loadDeviceSyncEnvironment } from "../src/config.ts";
 import { computeRetryDelayMs } from "../src/shared.ts";
+import { createDeviceSyncEnv } from "./helpers.ts";
 
 test("computeRetryDelayMs uses the 15-second slot for the first retry", () => {
   assert.equal(computeRetryDelayMs(1), 15_000);
@@ -12,12 +13,9 @@ test("computeRetryDelayMs uses the 15-second slot for the first retry", () => {
 
 test("loadDeviceSyncEnvironment supports Oura-only deployments", () => {
   const loaded = loadDeviceSyncEnvironment({
-    DEVICE_SYNC_VAULT_ROOT: "/tmp/murph-vault",
-    DEVICE_SYNC_PUBLIC_BASE_URL: "https://sync.example.test/device-sync",
-    DEVICE_SYNC_SECRET: "secret-for-tests",
-    DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
     OURA_CLIENT_ID: "oura-client-id",
     OURA_CLIENT_SECRET: "oura-client-secret",
+    ...createDeviceSyncEnv(),
   });
 
   assert.equal(loaded.service.providers.length, 1);
@@ -28,12 +26,9 @@ test("loadDeviceSyncEnvironment supports Oura-only deployments", () => {
 
 test("loadDeviceSyncEnvironment supports Garmin-only deployments", () => {
   const loaded = loadDeviceSyncEnvironment({
-    DEVICE_SYNC_VAULT_ROOT: "/tmp/murph-vault",
-    DEVICE_SYNC_PUBLIC_BASE_URL: "https://sync.example.test/device-sync",
-    DEVICE_SYNC_SECRET: "secret-for-tests",
-    DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
     GARMIN_CLIENT_ID: "garmin-client-id",
     GARMIN_CLIENT_SECRET: "garmin-client-secret",
+    ...createDeviceSyncEnv(),
   });
 
   assert.equal(loaded.service.providers.length, 1);
@@ -42,14 +37,11 @@ test("loadDeviceSyncEnvironment supports Garmin-only deployments", () => {
 
 test("loadDeviceSyncEnvironment supports mixed WHOOP and Oura deployments", () => {
   const loaded = loadDeviceSyncEnvironment({
-    DEVICE_SYNC_VAULT_ROOT: "/tmp/murph-vault",
-    DEVICE_SYNC_PUBLIC_BASE_URL: "https://sync.example.test/device-sync",
-    DEVICE_SYNC_SECRET: "secret-for-tests",
-    DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
     WHOOP_CLIENT_ID: "whoop-client-id",
     WHOOP_CLIENT_SECRET: "whoop-client-secret",
     OURA_CLIENT_ID: "oura-client-id",
     OURA_CLIENT_SECRET: "oura-client-secret",
+    ...createDeviceSyncEnv(),
   });
 
   assert.deepEqual(
@@ -60,16 +52,13 @@ test("loadDeviceSyncEnvironment supports mixed WHOOP and Oura deployments", () =
 
 test("loadDeviceSyncEnvironment supports Garmin, WHOOP, and Oura together", () => {
   const loaded = loadDeviceSyncEnvironment({
-    DEVICE_SYNC_VAULT_ROOT: "/tmp/murph-vault",
-    DEVICE_SYNC_PUBLIC_BASE_URL: "https://sync.example.test/device-sync",
-    DEVICE_SYNC_SECRET: "secret-for-tests",
-    DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
     GARMIN_CLIENT_ID: "garmin-client-id",
     GARMIN_CLIENT_SECRET: "garmin-client-secret",
     WHOOP_CLIENT_ID: "whoop-client-id",
     WHOOP_CLIENT_SECRET: "whoop-client-secret",
     OURA_CLIENT_ID: "oura-client-id",
     OURA_CLIENT_SECRET: "oura-client-secret",
+    ...createDeviceSyncEnv(),
   });
 
   assert.deepEqual(
@@ -82,11 +71,8 @@ test("loadDeviceSyncEnvironment rejects incomplete provider credentials", () => 
   assert.throws(
     () =>
       loadDeviceSyncEnvironment({
-        DEVICE_SYNC_VAULT_ROOT: "/tmp/murph-vault",
-        DEVICE_SYNC_PUBLIC_BASE_URL: "https://sync.example.test/device-sync",
-        DEVICE_SYNC_SECRET: "secret-for-tests",
-        DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
         OURA_CLIENT_ID: "oura-client-id",
+        ...createDeviceSyncEnv(),
       }),
     /Oura configuration is incomplete/u,
   );
@@ -94,14 +80,11 @@ test("loadDeviceSyncEnvironment rejects incomplete provider credentials", () => 
 
 test("loadDeviceSyncEnvironment supports an explicit control token and public listener", () => {
   const loaded = loadDeviceSyncEnvironment({
-    DEVICE_SYNC_VAULT_ROOT: "/tmp/murph-vault",
-    DEVICE_SYNC_PUBLIC_BASE_URL: "https://sync.example.test/device-sync",
-    DEVICE_SYNC_SECRET: "secret-for-tests",
-    DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
     DEVICE_SYNC_PUBLIC_HOST: "0.0.0.0",
     DEVICE_SYNC_PUBLIC_PORT: "9876",
     OURA_CLIENT_ID: "oura-client-id",
     OURA_CLIENT_SECRET: "oura-client-secret",
+    ...createDeviceSyncEnv(),
   });
 
   assert.equal(loaded.http.controlToken, "control-token-for-tests");
@@ -111,13 +94,10 @@ test("loadDeviceSyncEnvironment supports an explicit control token and public li
 
 test("loadDeviceSyncEnvironment ignores the removed bare PORT alias", () => {
   const loaded = loadDeviceSyncEnvironment({
-    DEVICE_SYNC_VAULT_ROOT: "/tmp/murph-vault",
-    DEVICE_SYNC_PUBLIC_BASE_URL: "https://sync.example.test/device-sync",
-    DEVICE_SYNC_SECRET: "secret-for-tests",
-    DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
     OURA_CLIENT_ID: "oura-client-id",
     OURA_CLIENT_SECRET: "oura-client-secret",
     PORT: "9999",
+    ...createDeviceSyncEnv(),
   } as NodeJS.ProcessEnv);
 
   assert.equal(loaded.http.port, 8788);
@@ -127,13 +107,10 @@ test("loadDeviceSyncEnvironment rejects partial public listener configuration", 
   assert.throws(
     () =>
       loadDeviceSyncEnvironment({
-        DEVICE_SYNC_VAULT_ROOT: "/tmp/murph-vault",
-        DEVICE_SYNC_PUBLIC_BASE_URL: "https://sync.example.test/device-sync",
-        DEVICE_SYNC_SECRET: "secret-for-tests",
-        DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
         DEVICE_SYNC_PUBLIC_HOST: "0.0.0.0",
         OURA_CLIENT_ID: "oura-client-id",
         OURA_CLIENT_SECRET: "oura-client-secret",
+        ...createDeviceSyncEnv(),
       }),
     /DEVICE_SYNC_PUBLIC_HOST and DEVICE_SYNC_PUBLIC_PORT together/u,
   );
@@ -143,10 +120,7 @@ test("loadDeviceSyncEnvironment requires at least one provider", () => {
   assert.throws(
     () =>
       loadDeviceSyncEnvironment({
-        DEVICE_SYNC_VAULT_ROOT: "/tmp/murph-vault",
-        DEVICE_SYNC_PUBLIC_BASE_URL: "https://sync.example.test/device-sync",
-        DEVICE_SYNC_SECRET: "secret-for-tests",
-        DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
+        ...createDeviceSyncEnv(),
       }),
     /No device sync providers are configured/u,
   );
@@ -156,9 +130,9 @@ test("loadDeviceSyncEnvironment requires DEVICE_SYNC_CONTROL_TOKEN", () => {
   assert.throws(
     () =>
       loadDeviceSyncEnvironment({
-        DEVICE_SYNC_VAULT_ROOT: "/tmp/murph-vault",
-        DEVICE_SYNC_PUBLIC_BASE_URL: "https://sync.example.test/device-sync",
-        DEVICE_SYNC_SECRET: "secret-for-tests",
+        ...createDeviceSyncEnv({
+          DEVICE_SYNC_CONTROL_TOKEN: undefined,
+        }),
         OURA_CLIENT_ID: "oura-client-id",
         OURA_CLIENT_SECRET: "oura-client-secret",
       }),
@@ -171,9 +145,9 @@ test("loadDeviceSyncEnvironment requires DEVICE_SYNC_VAULT_ROOT instead of the r
     () =>
       loadDeviceSyncEnvironment({
         VAULT_ROOT: "/tmp/murph-vault",
-        DEVICE_SYNC_PUBLIC_BASE_URL: "https://sync.example.test/device-sync",
-        DEVICE_SYNC_SECRET: "secret-for-tests",
-        DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
+        ...createDeviceSyncEnv({
+          DEVICE_SYNC_VAULT_ROOT: undefined,
+        }),
         OURA_CLIENT_ID: "oura-client-id",
         OURA_CLIENT_SECRET: "oura-client-secret",
       } as NodeJS.ProcessEnv),
@@ -183,13 +157,10 @@ test("loadDeviceSyncEnvironment requires DEVICE_SYNC_VAULT_ROOT instead of the r
 
 test("loadDeviceSyncEnvironment exposes the optional Oura webhook verification token on the HTTP config", () => {
   const loaded = loadDeviceSyncEnvironment({
-    DEVICE_SYNC_VAULT_ROOT: "/tmp/murph-vault",
-    DEVICE_SYNC_PUBLIC_BASE_URL: "https://sync.example.test/device-sync",
-    DEVICE_SYNC_SECRET: "secret-for-tests",
-    DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
     OURA_CLIENT_ID: "oura-client-id",
     OURA_CLIENT_SECRET: "oura-client-secret",
     OURA_WEBHOOK_VERIFICATION_TOKEN: "verify-token-for-tests",
+    ...createDeviceSyncEnv(),
   });
 
   assert.equal(loaded.http.ouraWebhookVerificationToken, "verify-token-for-tests");
@@ -197,13 +168,10 @@ test("loadDeviceSyncEnvironment exposes the optional Oura webhook verification t
 
 test("loadDeviceSyncEnvironment wires Oura webhook timestamp tolerance into the provider", async () => {
   const loaded = loadDeviceSyncEnvironment({
-    DEVICE_SYNC_VAULT_ROOT: "/tmp/murph-vault",
-    DEVICE_SYNC_PUBLIC_BASE_URL: "https://sync.example.test/device-sync",
-    DEVICE_SYNC_SECRET: "secret-for-tests",
-    DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
     OURA_CLIENT_ID: "oura-client-id",
     OURA_CLIENT_SECRET: "oura-client-secret",
     OURA_WEBHOOK_TIMESTAMP_TOLERANCE_MS: "1000",
+    ...createDeviceSyncEnv(),
   });
   const provider = loaded.service.providers.find((entry) => entry.provider === "oura");
   const rawBody = Buffer.from(

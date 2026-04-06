@@ -5,17 +5,9 @@ import { test } from "vitest";
 import { DeviceSyncError } from "../src/errors.ts";
 import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.ts";
 import { sha256Text, subtractDays } from "../src/shared.ts";
+import { createJsonResponse, readUrl } from "./helpers.ts";
 
 import type { DeviceSyncAccount, DeviceSyncJobRecord, ProviderJobContext, StoredDeviceSyncAccount } from "../src/types.ts";
-
-function createJsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      "Content-Type": "application/json",
-    },
-  });
-}
 
 function createAccount(scopes: string[], overrides: Partial<DeviceSyncAccount> = {}): DeviceSyncAccount {
   return {
@@ -76,10 +68,6 @@ function createJob(kind: string, payload: Record<string, unknown>): DeviceSyncJo
     startedAt: null,
     finishedAt: null,
   };
-}
-
-function readUrl(input: RequestInfo | URL): string {
-  return typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
 }
 
 function readAuthorizationHeader(init?: RequestInit): string | null {
