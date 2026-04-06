@@ -2,21 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import { createGarminDeviceSyncProvider } from "../src/providers/garmin.ts";
+import { createJsonResponse, readUrl } from "./helpers.ts";
 
 import type { DeviceSyncAccount, DeviceSyncJobRecord, ProviderJobContext, StoredDeviceSyncAccount } from "../src/types.ts";
-
-function createJsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      "Content-Type": "application/json",
-    },
-  });
-}
-
-function readUrl(input: RequestInfo | URL): string {
-  return typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-}
 
 function readRequestBody(init?: RequestInit): string | null {
   if (typeof init?.body === "string") {
