@@ -381,7 +381,16 @@ function renderToolCatalog(tools: InboxModelBundle['tools']): string {
   return tools
     .map((tool, index) => {
       const example = tool.inputExample ? JSON.stringify(tool.inputExample) : '{}'
-      return `${index + 1}. ${tool.name}\n   Description: ${tool.description}\n   Input example: ${example}`
+      const provenanceBits = [
+        tool.provenance.origin,
+        tool.provenance.localOnly ? 'local-only' : 'networked',
+        tool.provenance.generatedFrom ? `generated:${tool.provenance.generatedFrom}` : null,
+        tool.provenance.policyWrappers.length > 0
+          ? `policies:${tool.provenance.policyWrappers.join(',')}`
+          : null,
+      ].filter((value): value is string => value !== null)
+
+      return `${index + 1}. ${tool.name}\n   Description: ${tool.description}\n   Provenance: ${provenanceBits.join(' | ')}\n   Input example: ${example}`
     })
     .join('\n\n')
 }

@@ -16,6 +16,7 @@ import {
   assistantToolSpecSchema,
   type AssistantToolCall,
   type AssistantToolExecutionResult,
+  type AssistantToolProvenance,
   type AssistantToolSpec,
 } from './inbox-model-contracts.js'
 import { errorMessage } from './text/shared.js'
@@ -29,6 +30,7 @@ export interface AssistantToolDefinition<
 > {
   name: string
   description: string
+  provenance?: AssistantToolProvenance
   inputSchema: TSchema
   inputExample?: JsonRecord
   execute(input: z.infer<TSchema>): Promise<TResult>
@@ -42,7 +44,71 @@ export function defineAssistantTool<
 >(
   definition: AssistantToolDefinition<TSchema, TResult>,
 ): AssistantToolDefinition<TSchema, TResult> {
-  return definition
+  return {
+    ...definition,
+    provenance: definition.provenance ?? inferAssistantToolProvenance(definition.name),
+  }
+}
+
+function inferAssistantToolProvenance(name: string): AssistantToolProvenance {
+  if (name === 'murph.cli.run') {
+    return {
+      origin: 'cli-backed',
+      localOnly: true,
+      generatedFrom: 'vault-cli',
+      policyWrappers: [
+        'command-blocking',
+        'default-vault-injection',
+        'format-default',
+        'stdin-input-materialization',
+        'argv-redaction',
+        'output-redaction',
+      ],
+    }
+  }
+
+  if (name === 'vault.share.createLink' || name === 'murph.device.connect') {
+    return {
+      origin: 'hosted-api-backed',
+      localOnly: false,
+      generatedFrom: null,
+      policyWrappers: [],
+    }
+  }
+
+  if (name.startsWith('assistant.web.') || name.startsWith('web.')) {
+    return {
+      origin: 'configured-web-read',
+      localOnly: false,
+      generatedFrom: null,
+      policyWrappers: [],
+    }
+  }
+
+  if (name.startsWith('vault.fs.')) {
+    return {
+      origin: 'native-local-only',
+      localOnly: true,
+      generatedFrom: null,
+      policyWrappers: ['output-redaction'],
+    }
+  }
+
+  if (name.startsWith('vault.') || name.startsWith('inbox.')) {
+    return {
+      origin: 'vault-service-backed',
+      localOnly: true,
+      generatedFrom: null,
+      policyWrappers: [],
+    }
+  }
+
+  return {
+    origin: 'hand-authored-helper',
+    localOnly: true,
+    generatedFrom: null,
+    policyWrappers: [],
+  }
 }
 
 export type AssistantToolExecutionMode = 'preview' | 'apply'
@@ -147,9 +213,10 @@ export function createAssistantToolCatalog<
 >(
   definitions: TDefinitions,
 ): AssistantToolCatalog {
-  const toolMap = new Map<string, TDefinitions[number]>()
+  const normalizedDefinitions = definitions.map((definition) => defineAssistantTool(definition))
+  const toolMap = new Map<string, (typeof normalizedDefinitions)[number]>()
 
-  for (const definition of definitions) {
+  for (const definition of normalizedDefinitions) {
     toolMap.set(definition.name, definition)
   }
 
@@ -237,6 +304,7 @@ export function createAssistantToolCatalog<
           name: definition.name,
           description: definition.description,
           inputExample: definition.inputExample ?? null,
+          provenance: definition.provenance,
         }),
       )
     },
