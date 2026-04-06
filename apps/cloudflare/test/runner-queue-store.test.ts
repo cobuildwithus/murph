@@ -154,6 +154,28 @@ describe("RunnerQueueStore", () => {
     }).toThrow(/pending_events schema is unsupported; forbidden dispatch_json, last_error/u);
   });
 
+  it("fails closed when runner_meta still carries the removed activated column", async () => {
+    const state = createState();
+    const sql = state.storage.sql!;
+    sql.exec("DROP TABLE runner_meta");
+    sql.exec(`
+      CREATE TABLE runner_meta (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        user_id TEXT NOT NULL,
+        activated INTEGER NOT NULL DEFAULT 0,
+        in_flight INTEGER NOT NULL DEFAULT 0,
+        last_error_at TEXT,
+        last_error_code TEXT,
+        last_run_at TEXT,
+        next_wake_at TEXT
+      )
+    `);
+
+    expect(() => {
+      createQueueHarness(state);
+    }).toThrow(/runner_meta schema is unsupported; missing runtime_bootstrapped; forbidden activated/u);
+  });
+
   it("persists only operator-safe queue metadata in Durable Object storage", async () => {
     const state = createState();
     const { store } = createQueueHarness(state);

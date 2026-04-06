@@ -62,8 +62,10 @@ export function ensureRunnerQueueSchema(sql: DurableObjectSqlStorageLike): void 
     CREATE INDEX IF NOT EXISTS poisoned_events_poisoned_at_idx
     ON poisoned_events (poisoned_at, event_id)
   `);
-  migrateLegacyRunnerMetaActivatedColumn(sql);
   assertRunnerQueueTableColumns(sql, "runner_meta", {
+    forbiddenColumns: [
+      "activated",
+    ],
     requiredColumns: [
       "singleton",
       "user_id",
@@ -116,50 +118,6 @@ export function ensureRunnerQueueSchema(sql: DurableObjectSqlStorageLike): void 
       "last_error_code",
     ],
   });
-}
-
-function migrateLegacyRunnerMetaActivatedColumn(sql: DurableObjectSqlStorageLike): void {
-  const columns = readRunnerQueueTableColumns(sql, "runner_meta");
-  if (columns.length === 0 || !columns.includes("activated") || columns.includes("runtime_bootstrapped")) {
-    return;
-  }
-
-  sql.exec(`ALTER TABLE runner_meta RENAME TO runner_meta_legacy`);
-  sql.exec(`
-    CREATE TABLE runner_meta (
-      singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-      user_id TEXT NOT NULL,
-      runtime_bootstrapped INTEGER NOT NULL DEFAULT 0,
-      in_flight INTEGER NOT NULL DEFAULT 0,
-      last_error_at TEXT,
-      last_error_code TEXT,
-      last_run_at TEXT,
-      next_wake_at TEXT
-    )
-  `);
-  sql.exec(`
-    INSERT INTO runner_meta (
-      singleton,
-      user_id,
-      runtime_bootstrapped,
-      in_flight,
-      last_error_at,
-      last_error_code,
-      last_run_at,
-      next_wake_at
-    )
-    SELECT
-      singleton,
-      user_id,
-      activated,
-      in_flight,
-      last_error_at,
-      last_error_code,
-      last_run_at,
-      next_wake_at
-    FROM runner_meta_legacy
-  `);
-  sql.exec(`DROP TABLE runner_meta_legacy`);
 }
 
 function ensurePendingEventsTable(sql: DurableObjectSqlStorageLike): void {
