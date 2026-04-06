@@ -1052,7 +1052,15 @@ test("sqlite store splits connection, credential, and observation state into exp
       select name
       from sqlite_master
       where type = 'table'
-        and name in ('device_account', 'device_connection', 'device_credential_state', 'device_observation_state')
+        and name in (
+          'device_account',
+          'device_connection',
+          'device_credential_state',
+          'device_job',
+          'device_observation_state',
+          'oauth_state',
+          'webhook_trace'
+        )
       order by name asc
     `).all() as Array<{ name?: string }>
   )
@@ -1062,7 +1070,10 @@ test("sqlite store splits connection, credential, and observation state into exp
   assert.deepEqual(sqliteTables, [
     "device_connection",
     "device_credential_state",
+    "device_job",
     "device_observation_state",
+    "oauth_state",
+    "webhook_trace",
   ]);
   assert.deepEqual(readTableColumns(store, "device_connection"), [
     "id",
@@ -1133,197 +1144,65 @@ test("sqlite store splits connection, credential, and observation state into exp
   store.close();
 });
 
-test("sqlite store migrates legacy hybrid device_account rows into split authority tables", async () => {
-  const vaultRoot = await makeTempDirectory("murph-device-syncd-legacy-migration");
+test("sqlite store reopens an existing split-schema database at the current schema version", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-reopen-current-schema");
+  const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
+
+  const initialStore = new SqliteDeviceSyncStore(databasePath);
+  const created = initialStore.upsertAccount({
+    connectedAt: "2026-03-20T10:00:00.000Z",
+    displayName: "Reopen Account",
+    externalAccountId: "demo-reopen",
+    metadata: {
+      source: "reopen-test",
+    },
+    nextReconcileAt: "2026-03-28T00:00:00.000Z",
+    provider: "demo",
+    scopes: ["offline", "read:data"],
+    status: "active",
+    tokens: {
+      accessToken: "reopen-access",
+      accessTokenEncrypted: "enc:reopen-access",
+      accessTokenExpiresAt: "2026-03-28T00:00:00.000Z",
+      refreshToken: "reopen-refresh",
+      refreshTokenEncrypted: "enc:reopen-refresh",
+    },
+  });
+  initialStore.close();
+
+  const reopenedStore = new SqliteDeviceSyncStore(databasePath);
+  const reopened = reopenedStore.getAccountById(created.id);
+
+  assert.ok(reopened);
+  assert.equal(reopened?.displayName, "Reopen Account");
+  assert.equal(reopened?.accessTokenEncrypted, "enc:reopen-access");
+
+  reopenedStore.markWebhookReceived(created.id, "2026-03-21T12:00:00.000Z");
+  assert.equal(reopenedStore.getAccountById(created.id)?.lastWebhookAt, "2026-03-21T12:00:00.000Z");
+
+  reopenedStore.close();
+});
+
+test("sqlite store rejects unsupported hybrid device_account tables even when the schema version claims current", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-legacy-reject");
   const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
   const database = openSqliteRuntimeDatabase(databasePath);
 
   try {
     database.exec(`
       create table device_account (
-        id text primary key,
-        provider text not null,
-        external_account_id text not null,
-        display_name text,
-        status text not null,
-        scopes_json text not null,
-        disconnect_generation integer not null default 0,
-        access_token_encrypted text not null,
-        refresh_token_encrypted text,
-        access_token_expires_at text,
-        hosted_observed_updated_at text,
-        hosted_observed_token_version integer,
-        metadata_json text not null,
-        connected_at text not null,
-        last_webhook_at text,
-        last_sync_started_at text,
-        last_sync_completed_at text,
-        last_sync_error_at text,
-        last_error_code text,
-        last_error_message text,
-        next_reconcile_at text,
-        created_at text not null,
-        updated_at text not null,
-        unique (provider, external_account_id)
-      );
-
-      create table device_job (
-        id text primary key,
-        provider text not null,
-        account_id text not null references device_account(id) on delete cascade,
-        kind text not null,
-        payload_json text not null,
-        priority integer not null default 0,
-        available_at text not null,
-        attempts integer not null default 0,
-        max_attempts integer not null default 5,
-        dedupe_key text,
-        status text not null,
-        lease_owner text,
-        lease_expires_at text,
-        last_error_code text,
-        last_error_message text,
-        created_at text not null,
-        updated_at text not null,
-        started_at text,
-        finished_at text
+        id text primary key
       );
     `);
-
-    database.prepare(`
-      insert into device_account (
-        id,
-        provider,
-        external_account_id,
-        display_name,
-        status,
-        scopes_json,
-        disconnect_generation,
-        access_token_encrypted,
-        refresh_token_encrypted,
-        access_token_expires_at,
-        hosted_observed_updated_at,
-        hosted_observed_token_version,
-        metadata_json,
-        connected_at,
-        last_webhook_at,
-        last_sync_started_at,
-        last_sync_completed_at,
-        last_sync_error_at,
-        last_error_code,
-        last_error_message,
-        next_reconcile_at,
-        created_at,
-        updated_at
-      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      "legacy-account",
-      "demo",
-      "demo-legacy",
-      "Legacy Account",
-      "active",
-      JSON.stringify(["offline"]),
-      2,
-      "enc:legacy-access",
-      "enc:legacy-refresh",
-      "2026-03-29T00:00:00.000Z",
-      "2026-03-27T08:00:00.000Z",
-      7,
-      JSON.stringify({ source: "legacy" }),
-      "2026-03-20T10:00:00.000Z",
-      "2026-03-27T07:50:00.000Z",
-      "2026-03-27T07:55:00.000Z",
-      "2026-03-27T08:00:00.000Z",
-      null,
-      null,
-      null,
-      "2026-03-28T00:00:00.000Z",
-      "2026-03-20T10:00:00.000Z",
-      "2026-03-27T08:00:00.000Z",
-    );
-
-    database.prepare(`
-      insert into device_job (
-        id,
-        provider,
-        account_id,
-        kind,
-        payload_json,
-        priority,
-        available_at,
-        attempts,
-        max_attempts,
-        dedupe_key,
-        status,
-        lease_owner,
-        lease_expires_at,
-        last_error_code,
-        last_error_message,
-        created_at,
-        updated_at,
-        started_at,
-        finished_at
-      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      "legacy-job",
-      "demo",
-      "legacy-account",
-      "reconcile",
-      JSON.stringify({ from: "legacy" }),
-      10,
-      "2026-03-28T00:00:00.000Z",
-      0,
-      5,
-      "legacy:reconcile",
-      "queued",
-      null,
-      null,
-      null,
-      null,
-      "2026-03-27T08:00:00.000Z",
-      "2026-03-27T08:00:00.000Z",
-      null,
-      null,
-    );
-
-    writeSqliteRuntimeUserVersion(database, 1);
+    writeSqliteRuntimeUserVersion(database, 2);
   } finally {
     database.close();
   }
 
-  const store = new SqliteDeviceSyncStore(databasePath);
-  const migrated = store.getAccountById("legacy-account");
-
-  assert.ok(migrated);
-  assert.equal(migrated?.displayName, "Legacy Account");
-  assert.equal(migrated?.disconnectGeneration, 2);
-  assert.equal(migrated?.accessTokenEncrypted, "enc:legacy-access");
-  assert.equal(migrated?.refreshTokenEncrypted, "enc:legacy-refresh");
-  assert.equal(migrated?.hostedObservedUpdatedAt, "2026-03-27T08:00:00.000Z");
-  assert.equal(migrated?.hostedObservedTokenVersion, 7);
-  assert.equal(migrated?.nextReconcileAt, "2026-03-28T00:00:00.000Z");
-  assert.deepEqual(store.getJobById("legacy-job")?.payload, { from: "legacy" });
-
-  const sqliteTables = (
-    store.database.prepare(`
-      select name
-      from sqlite_master
-      where type = 'table'
-        and name in ('device_account', 'device_connection', 'device_credential_state', 'device_observation_state', 'device_job')
-      order by name asc
-    `).all() as Array<{ name?: string }>
-  )
-    .map((row) => row.name)
-    .filter((name): name is string => typeof name === "string");
-
-  assert.deepEqual(sqliteTables, [
-    "device_connection",
-    "device_credential_state",
-    "device_job",
-    "device_observation_state",
-  ]);
-
-  store.close();
+  assert.throws(
+    () => new SqliteDeviceSyncStore(databasePath),
+    /Unsupported legacy device-sync runtime schema detected/,
+  );
 });
 
 test("sqlite store persists the webhook trace claim lifecycle", async () => {
