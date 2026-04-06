@@ -111,8 +111,8 @@ function buildAssistantVaultNavigationText(input: {
       ? "- Inspect or change Murph vault/runtime state through `murph.cli.run`. That tool shells out to the real local `vault-cli`, so treat it as the primary Murph runtime surface for provider turns."
       : "- Inspect or change Murph vault/runtime state through `vault-cli` semantics when the direct CLI executor is unavailable.",
     input.assistantCliExecutorAvailable
-      ? "- Use `murph.cli.run` with exact `vault-cli` semantics instead of guessing command shapes. Start narrow with `--help` or `--schema --format json`, and use `--llms` or `--llms-full` only when you truly need broad discovery."
-      : "- Use exact `vault-cli` semantics instead of guessing command shapes. Start narrow with `--help` or `--schema --format json`, and use `--llms` or `--llms-full` only when you truly need broad discovery.",
+      ? "- Use `murph.cli.run` with exact `vault-cli` semantics instead of guessing command shapes."
+      : "- Use exact `vault-cli` semantics instead of guessing command shapes.",
     "- Use canonical query surfaces as the source of truth for health data.",
     "- When you already know one exact query-layer record id or one exact canonical record to inspect, start with `vault-cli show`.",
     "- When you need filtered recent records by family, kind, status, stream, tag, or date range, start with `vault-cli list`.",
