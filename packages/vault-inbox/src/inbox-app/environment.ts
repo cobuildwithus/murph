@@ -11,8 +11,8 @@ import {
   resolveAgentmailBaseUrl,
 } from '@murphai/operator-config/agentmail-runtime'
 import { ensureImessageMessagesDbReadable } from '@murphai/operator-config/imessage-readiness'
-import { loadQueryRuntime } from '../query-runtime.js'
-import { loadRuntimeModule } from '../runtime-import.js'
+import { loadQueryRuntime } from '@murphai/assistant-engine/query-runtime'
+import { loadRuntimeModule } from '@murphai/assistant-engine/runtime-import'
 import { SETUP_RUNTIME_ENV_NOTICE } from '@murphai/operator-config/setup-runtime-env'
 import {
   resolveTelegramApiBaseUrl,
@@ -32,10 +32,10 @@ import type {
   ProvisionedMailboxResolution,
   RecoveredProvisionedMailbox,
   TelegramDriver,
-} from './types.js'
+} from '@murphai/assistant-engine/inbox-app/types'
 import type { ImportersFactoryRuntimeModule } from '../usecases/types.js'
 
-import { normalizeNullableString } from '../inbox-services/shared.js'
+import { normalizeNullableString } from '@murphai/assistant-engine/inbox-services/shared'
 
 const IMESSAGE_MESSAGES_DB_RELATIVE_PATH = ['Library', 'Messages', 'chat.db'].join('/')
 

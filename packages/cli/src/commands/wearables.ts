@@ -4,7 +4,7 @@ import {
   requestIdFromOptions,
   withBaseOptions,
 } from '@murphai/operator-config/command-helpers'
-import { normalizeRepeatableFlagOption } from '@murphai/vault-inbox/option-utils'
+import { normalizeRepeatableFlagOption } from '@murphai/assistant-engine/option-utils'
 import {
   localDateSchema,
   pathSchema,

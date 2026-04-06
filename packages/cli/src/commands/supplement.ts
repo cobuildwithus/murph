@@ -4,7 +4,7 @@ import {
   createHealthScaffoldResultSchema,
   healthListResultSchema,
   healthShowResultSchema,
-} from "@murphai/vault-inbox/health-cli-descriptors"
+} from "@murphai/assistant-engine/health-cli-descriptors"
 import {
   createRegistryDocEntityGroup,
   suggestedCommandsCta,

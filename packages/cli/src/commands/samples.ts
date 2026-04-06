@@ -3,7 +3,7 @@ import { emptyArgsSchema, requestIdFromOptions, withBaseOptions } from '@murphai
 import {
   inputFileOptionSchema,
   normalizeInputFileOption,
-} from '@murphai/vault-inbox/json-input'
+} from '@murphai/assistant-engine/json-input'
 import {
   listItemSchema,
   localDateSchema,
@@ -23,7 +23,7 @@ import {
   listSamples as listSamplesWithArtifacts,
   showSample as showSampleWithArtifacts,
 } from './sample-query-command-helpers.js'
-import { normalizeRepeatableFlagOption } from '@murphai/vault-inbox/option-utils'
+import { normalizeRepeatableFlagOption } from '@murphai/assistant-engine/option-utils'
 
 const sampleIdSchema = z
   .string()

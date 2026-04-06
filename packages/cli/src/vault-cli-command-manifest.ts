@@ -6,7 +6,7 @@ import {
   healthListResultSchema,
   healthShowResultSchema,
   type HealthCommandDescriptorEntry,
-} from '@murphai/vault-inbox/health-cli-descriptors'
+} from '@murphai/assistant-engine/health-cli-descriptors'
 import {
   listResultSchema,
   showResultSchema,
