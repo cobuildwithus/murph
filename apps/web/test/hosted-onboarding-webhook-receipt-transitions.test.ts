@@ -37,10 +37,6 @@ import {
   markHostedWebhookReceiptSideEffectSent,
   queueHostedWebhookReceiptSideEffects,
 } from "../src/lib/hosted-onboarding/webhook-receipt-transitions";
-import {
-  createHostedOpaqueIdentifier,
-  readHostedPhoneHint,
-} from "../src/lib/hosted-onboarding/contact-privacy";
 import { isHostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import {
   readHostedWebhookReceiptState,
@@ -109,7 +105,7 @@ describe("hosted webhook receipt transitions", () => {
     assert.equal(nextEffect.lastError?.message, "Delivery confirmation timed out.");
   });
 
-  it("stores sparse Linq dispatch payloads from creation time and preserves them when sent", () => {
+  it("stores pending Linq dispatch payloads from creation time and preserves them when sent", () => {
     const dispatchEffect = createHostedWebhookDispatchSideEffect({
       dispatch: buildHostedExecutionLinqMessageReceivedDispatch({
         eventId: "evt_123",
@@ -163,8 +159,8 @@ describe("hosted webhook receipt transitions", () => {
       }),
     });
 
-    if ("dispatch" in dispatchEffect.payload) {
-      throw new Error("Expected a sparse dispatch payload reference.");
+    if (!("dispatch" in dispatchEffect.payload)) {
+      throw new Error("Expected an in-memory pending dispatch payload.");
     }
 
     const nextState = markHostedWebhookReceiptSideEffectSent(
@@ -180,31 +176,31 @@ describe("hosted webhook receipt transitions", () => {
       throw new Error("Expected a hosted execution dispatch side effect.");
     }
 
-    if ("dispatch" in nextEffect.payload) {
-      throw new Error("Expected a sparse dispatch payload reference.");
+    if (!("dispatch" in nextEffect.payload)) {
+      throw new Error("Expected an in-memory pending dispatch payload.");
     }
 
     assert.equal(nextEffect.status, "sent");
-    assert.equal(nextEffect.payload.storage, "reference");
-    assert.equal(nextEffect.payload.phoneLookupKey, "hbidx:phone:v1:test");
-    const linqEvent = nextEffect.payload.linqEvent as Record<string, unknown>;
-    const linqData = linqEvent.data as Record<string, unknown>;
-    const linqMessage = linqData.message as Record<string, unknown>;
-    const linqReply = linqMessage.reply_to as Record<string, unknown>;
+    assert.equal(nextEffect.payload.storage, "pending");
+    const rebuiltDispatch = buildHostedWebhookDispatchFromPayload(nextEffect.payload);
+    assert.equal(rebuiltDispatch?.event.kind, "linq.message.received");
+    if (rebuiltDispatch?.event.kind !== "linq.message.received") {
+      throw new Error("Expected a pending Linq dispatch payload.");
+    }
 
-    assert.equal(linqEvent.unused, undefined);
+    const linqData = rebuiltDispatch.event.linqEvent.data as {
+      chat_id: string;
+      from: string;
+      recipient_phone: string;
+    };
+    assert.equal(rebuiltDispatch.event.phoneLookupKey, "hbidx:phone:v1:test");
     assert.equal(linqData.chat_id, "chat_123");
-    assert.equal(typeof linqData.from, "string");
-    assert.match(linqData.from as string, /^hbid:linq\.from:v1:/);
-    assert.equal(linqData.recipient_phone, undefined);
-    assert.equal(typeof linqMessage.id, "string");
-    assert.match(linqMessage.id as string, /^hbid:linq\.message:v1:/);
-    assert.equal(typeof linqReply.message_id, "string");
-    assert.match(linqReply.message_id as string, /^hbid:linq\.message:v1:/);
+    assert.equal(linqData.from, "+15551234567");
+    assert.equal(linqData.recipient_phone, "+15550000000");
     assert.deepEqual(nextEffect.result, { dispatched: true });
   });
 
-  it("preserves Linq dispatch phoneLookupKey through receipt serialization", () => {
+  it("persists only staged Linq dispatch refs through receipt serialization", () => {
     const dispatchEffect = createHostedWebhookDispatchSideEffect({
       dispatch: buildHostedExecutionLinqMessageReceivedDispatch({
         eventId: "evt_123",
@@ -236,26 +232,39 @@ describe("hosted webhook receipt transitions", () => {
         userId: "member_123",
       }),
     });
+    const stagedEffect = {
+      ...dispatchEffect,
+      payload: {
+        dispatchRef: {
+          eventId: "evt_123",
+          eventKind: "linq.message.received" as const,
+          occurredAt: "2026-03-26T12:00:00.000Z",
+          userId: "member_123",
+        },
+        payloadRef: {
+          key: "dispatch/staged-linq-123",
+        },
+        schemaVersion: "murph.execution-outbox.v2" as const,
+        storage: "reference" as const,
+      },
+    };
 
     const persistedState = readHostedWebhookReceiptState(
       serializeHostedWebhookReceiptState(
-        buildReceiptState({ sideEffects: [dispatchEffect] }),
+        buildReceiptState({ sideEffects: [stagedEffect] }),
       ),
     );
-    const persistedEffect = getHostedWebhookSideEffect(persistedState, dispatchEffect.effectId);
+    const persistedEffect = getHostedWebhookSideEffect(persistedState, stagedEffect.effectId);
 
     assert.equal(persistedEffect.kind, "hosted_execution_dispatch");
     if (persistedEffect.kind !== "hosted_execution_dispatch") {
       throw new Error("Expected a hosted execution dispatch side effect.");
     }
 
-    assert.equal(persistedEffect.payload.phoneLookupKey, "hbidx:phone:v1:test");
+    assert.equal(persistedEffect.payload.storage, "reference");
+    assert.equal("phoneLookupKey" in persistedEffect.payload, false);
     const rebuiltDispatch = buildHostedWebhookDispatchFromPayload(persistedEffect.payload);
-    assert.ok(rebuiltDispatch);
-    assert.equal(rebuiltDispatch?.event.kind, "linq.message.received");
-    if (rebuiltDispatch?.event.kind === "linq.message.received") {
-      assert.equal(rebuiltDispatch.event.phoneLookupKey, "hbidx:phone:v1:test");
-    }
+    assert.equal(rebuiltDispatch, null);
   });
 
   it("fails closed when a persisted Linq side effect still uses the removed plaintext payload shape", () => {
@@ -312,7 +321,7 @@ describe("hosted webhook receipt transitions", () => {
     }
   });
 
-  it("stores sparse Telegram snapshots from creation time and preserves them when sent", () => {
+  it("stores pending Telegram dispatch payloads from creation time and preserves them when sent", () => {
     const dispatchEffect = createHostedWebhookDispatchSideEffect({
       dispatch: buildHostedExecutionTelegramMessageReceivedDispatch({
         botUserId: "999",
@@ -405,8 +414,8 @@ describe("hosted webhook receipt transitions", () => {
       }),
     });
 
-    if ("dispatch" in dispatchEffect.payload) {
-      throw new Error("Expected a sparse dispatch payload reference.");
+    if (!("dispatch" in dispatchEffect.payload)) {
+      throw new Error("Expected an in-memory pending dispatch payload.");
     }
 
     const nextState = markHostedWebhookReceiptSideEffectSent(
@@ -422,56 +431,29 @@ describe("hosted webhook receipt transitions", () => {
       throw new Error("Expected a hosted execution dispatch side effect.");
     }
 
-    if ("dispatch" in nextEffect.payload) {
-      throw new Error("Expected a sparse dispatch payload reference.");
+    if (!("dispatch" in nextEffect.payload)) {
+      throw new Error("Expected an in-memory pending dispatch payload.");
     }
 
-    const telegramUpdate = nextEffect.payload.telegramUpdate as {
-      business_message: null;
-      message: {
-        chat: Record<string, unknown>;
-        contact: Record<string, unknown>;
-        from: Record<string, unknown>;
-        reply_to_message: {
-          chat: Record<string, unknown>;
-          direct_messages_topic: Record<string, unknown>;
-          from: Record<string, unknown>;
-        };
-        sender_business_bot: Record<string, unknown>;
-      };
-      update_id: number;
-    };
+    assert.equal(nextEffect.payload.storage, "pending");
+    const rebuiltDispatch = buildHostedWebhookDispatchFromPayload(nextEffect.payload);
+    assert.equal(rebuiltDispatch?.event.kind, "telegram.message.received");
+    if (rebuiltDispatch?.event.kind !== "telegram.message.received") {
+      throw new Error("Expected a pending Telegram dispatch payload.");
+    }
 
-    assert.equal(telegramUpdate.update_id, 123);
-    assert.equal(telegramUpdate.business_message, null);
-    assert.equal(telegramUpdate.message.chat.id, 456);
-    assert.equal(telegramUpdate.message.chat.first_name, null);
-    assert.equal(telegramUpdate.message.chat.username, null);
-    assert.equal(telegramUpdate.message.contact.phone_number, readHostedPhoneHint("+15551234567"));
-    assert.equal(telegramUpdate.message.contact.user_id, createHostedOpaqueIdentifier("telegram.user", 456));
-    assert.equal(telegramUpdate.message.contact.first_name, null);
-    assert.equal(telegramUpdate.message.contact.vcard, null);
-    assert.equal(telegramUpdate.message.from.id, createHostedOpaqueIdentifier("telegram.user", 456));
-    assert.equal(telegramUpdate.message.from.first_name, null);
-    assert.equal(
-      telegramUpdate.message.reply_to_message.chat.id,
-      456,
-    );
-    assert.equal(
-      telegramUpdate.message.reply_to_message.from.id,
-      createHostedOpaqueIdentifier("telegram.user", 999),
-    );
-    assert.deepEqual(
-      telegramUpdate.message.reply_to_message.direct_messages_topic,
-      {
-        topic_id: 9,
-        title: "Priority thread",
-      },
-    );
-    assert.equal(
-      telegramUpdate.message.sender_business_bot.id,
-      createHostedOpaqueIdentifier("telegram.user", 999),
-    );
+    const telegramMessage = rebuiltDispatch.event.telegramUpdate.message as {
+      chat: { id: number };
+      contact?: { phone_number?: string };
+      from?: { id?: number };
+      reply_to_message?: { from?: { id?: number } };
+    };
+    assert.equal(rebuiltDispatch.event.botUserId, "999");
+    assert.equal(rebuiltDispatch.event.telegramUpdate.update_id, 123);
+    assert.equal(telegramMessage.chat.id, 456);
+    assert.equal(telegramMessage.contact?.phone_number, "+15551234567");
+    assert.equal(telegramMessage.from?.id, 456);
+    assert.equal(telegramMessage.reply_to_message?.from?.id, 999);
   });
 });
 

@@ -28,6 +28,7 @@ import {
   dispatchStoredHostedExecutionStatus,
 } from "./dispatch";
 import {
+  buildHostedExecutionDispatchRef,
   readHostedExecutionOutboxPayload,
   serializeHostedExecutionOutboxPayload,
 } from "./outbox-payload";
@@ -49,6 +50,14 @@ export interface EnqueueHostedExecutionOutboxInput {
   tx: HostedExecutionOutboxClient;
 }
 
+export interface EnqueueHostedExecutionOutboxPayloadInput {
+  now?: string;
+  payload: HostedExecutionOutboxPayload;
+  sourceId?: string | null;
+  sourceType: string;
+  tx: HostedExecutionOutboxClient;
+}
+
 export async function enqueueHostedExecutionOutbox(
   input: EnqueueHostedExecutionOutboxInput,
 ): Promise<ExecutionOutbox> {
@@ -59,37 +68,64 @@ export async function enqueueHostedExecutionOutbox(
   let record: ExecutionOutbox | null = null;
 
   try {
-    record = await input.tx.executionOutbox.upsert({
-      where: {
-        eventId: input.dispatch.eventId,
-      },
-      update: {},
-      create: {
-        id: generateExecutionOutboxId(),
-        userId: input.dispatch.event.userId,
-        sourceType: input.sourceType,
-        sourceId: input.sourceId ?? null,
-        eventId: input.dispatch.eventId,
-        eventKind: input.dispatch.event.kind,
-        payloadJson,
-        status: ExecutionOutboxStatus.pending,
-        nextAttemptAt: now,
-      },
-    });
-
-    assertHostedExecutionOutboxRecordMatches(record, {
-      eventId: input.dispatch.eventId,
-      eventKind: input.dispatch.event.kind,
+    record = await upsertHostedExecutionOutboxRecord({
+      dispatchRef: buildHostedExecutionDispatchRef(input.dispatch),
+      now,
       payloadJson,
       sourceId: input.sourceId ?? null,
       sourceType: input.sourceType,
-      userId: input.dispatch.event.userId,
+      tx: input.tx,
     });
 
     return record;
   } finally {
     await cleanupHostedExecutionUnpersistedStagedPayloadIfNeeded(record?.payloadJson ?? null, payloadJson);
   }
+}
+
+export async function enqueueHostedExecutionOutboxPayload(
+  input: EnqueueHostedExecutionOutboxPayloadInput,
+): Promise<ExecutionOutbox> {
+  const now = new Date(input.now ?? new Date().toISOString());
+  const payload = input.payload;
+  const payloadJson = serializeExistingHostedExecutionOutboxPayload(payload);
+
+  const dispatchRef = payload.storage === "inline"
+    ? buildHostedExecutionDispatchRef(payload.dispatch)
+    : payload.dispatchRef;
+
+  return upsertHostedExecutionOutboxRecord({
+    dispatchRef,
+    now,
+    payloadJson,
+    sourceId: input.sourceId ?? null,
+    sourceType: input.sourceType,
+    tx: input.tx,
+  });
+}
+
+function serializeExistingHostedExecutionOutboxPayload(
+  payload: HostedExecutionOutboxPayload,
+): Prisma.InputJsonObject {
+  if (payload.storage === "inline") {
+    return serializeHostedExecutionOutboxPayload(payload.dispatch, {
+      storage: "inline",
+    });
+  }
+
+  return {
+    dispatchRef: {
+      eventId: payload.dispatchRef.eventId,
+      eventKind: payload.dispatchRef.eventKind,
+      occurredAt: payload.dispatchRef.occurredAt,
+      userId: payload.dispatchRef.userId,
+    },
+    payloadRef: {
+      key: payload.payloadRef.key,
+    },
+    schemaVersion: payload.schemaVersion,
+    storage: payload.storage,
+  } satisfies Prisma.InputJsonObject;
 }
 
 export async function drainHostedExecutionOutbox(input: {
@@ -459,6 +495,48 @@ async function finalizeHostedExecutionOutboxAttempt(
   }
 
   return latest;
+}
+
+async function upsertHostedExecutionOutboxRecord(input: {
+  dispatchRef: {
+    eventId: string;
+    eventKind: string;
+    userId: string;
+  };
+  now: Date;
+  payloadJson: Prisma.InputJsonObject;
+  sourceId: string | null;
+  sourceType: string;
+  tx: HostedExecutionOutboxClient;
+}): Promise<ExecutionOutbox> {
+  const record = await input.tx.executionOutbox.upsert({
+    where: {
+      eventId: input.dispatchRef.eventId,
+    },
+    update: {},
+    create: {
+      id: generateExecutionOutboxId(),
+      userId: input.dispatchRef.userId,
+      sourceType: input.sourceType,
+      sourceId: input.sourceId,
+      eventId: input.dispatchRef.eventId,
+      eventKind: input.dispatchRef.eventKind,
+      payloadJson: input.payloadJson,
+      status: ExecutionOutboxStatus.pending,
+      nextAttemptAt: input.now,
+    },
+  });
+
+  assertHostedExecutionOutboxRecordMatches(record, {
+    eventId: input.dispatchRef.eventId,
+    eventKind: input.dispatchRef.eventKind,
+    payloadJson: input.payloadJson,
+    sourceId: input.sourceId,
+    sourceType: input.sourceType,
+    userId: input.dispatchRef.userId,
+  });
+
+  return record;
 }
 
 async function prepareHostedExecutionOutboxPayloadJson(

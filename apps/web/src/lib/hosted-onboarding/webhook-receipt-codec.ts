@@ -1,13 +1,15 @@
 import { randomBytes } from "node:crypto";
 
-import {
-  readHostedExecutionDispatchRef,
-} from "@murphai/hosted-execution";
 import { Prisma } from "@prisma/client";
 
 import { createHostedOpaqueIdentifier } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
+import {
+  readHostedWebhookStoredDispatchSideEffectPayload,
+  requireHostedWebhookStoredDispatchSideEffectPayload,
+} from "./webhook-dispatch-payload";
 import type {
+  HostedWebhookDispatchSideEffect,
   HostedWebhookEventPayload,
   HostedWebhookLinqMessageSideEffect,
   HostedWebhookReceiptClaim,
@@ -258,9 +260,11 @@ function serializeHostedWebhookSideEffect(
     lastAttemptAt: effect.lastAttemptAt,
     lastError: effect.lastError,
     payload:
-      effect.kind === "linq_message_send"
-        ? serializeHostedLinqMessageSideEffectPayload(effect.payload)
-        : effect.payload as unknown as Prisma.InputJsonValue,
+      effect.kind === "hosted_execution_dispatch"
+        ? serializeHostedWebhookDispatchSideEffectPayload(effect)
+        : effect.kind === "linq_message_send"
+          ? serializeHostedLinqMessageSideEffectPayload(effect.payload)
+          : effect.payload as unknown as Prisma.InputJsonValue,
     result:
       effect.kind === "linq_message_send"
         ? serializeHostedLinqMessageSideEffectResult(effect.result)
@@ -291,10 +295,10 @@ function readHostedWebhookSideEffect(
 
   switch (kind) {
     case "hosted_execution_dispatch": {
-      const dispatchRef = readHostedExecutionDispatchRef(payload);
+      const storedPayload = readHostedWebhookStoredDispatchSideEffectPayload(payload);
 
-      if (!dispatchRef) {
-        return null;
+      if (!storedPayload) {
+        throw buildHostedWebhookSideEffectPayloadError(effectId);
       }
 
       return {
@@ -303,15 +307,7 @@ function readHostedWebhookSideEffect(
         kind,
         lastAttemptAt,
         lastError,
-        payload: {
-          botUserId: readHostedWebhookReceiptString(payload.botUserId),
-          phoneLookupKey: readHostedWebhookReceiptString(payload.phoneLookupKey),
-          schemaVersion: payload.schemaVersion as string,
-          dispatchRef,
-          storage: "reference",
-          linqEvent: toHostedWebhookReceiptRecord(payload.linqEvent),
-          telegramUpdate: toHostedWebhookReceiptRecord(payload.telegramUpdate),
-        },
+        payload: storedPayload,
         result: result.dispatched === true ? { dispatched: true } : null,
         sentAt,
         status,
@@ -376,6 +372,17 @@ function readHostedWebhookSideEffect(
     default:
       return null;
   }
+}
+
+function serializeHostedWebhookDispatchSideEffectPayload(
+  effect: HostedWebhookDispatchSideEffect,
+): Prisma.InputJsonValue {
+  const payload = requireHostedWebhookStoredDispatchSideEffectPayload(
+    effect.payload,
+    effect.effectId,
+  );
+
+  return payload as unknown as Prisma.InputJsonValue;
 }
 
 function buildHostedWebhookSideEffectPayloadError(effectId: string): Error {

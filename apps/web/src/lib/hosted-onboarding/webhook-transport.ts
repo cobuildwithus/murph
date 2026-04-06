@@ -1,6 +1,6 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 
-import { enqueueHostedExecutionOutbox } from "../hosted-execution/outbox";
+import { enqueueHostedExecutionOutboxPayload } from "../hosted-execution/outbox";
 import { hostedOnboardingError } from "./errors";
 import { readHostedMemberAggregate } from "./hosted-member-store";
 import { buildHostedInviteUrl } from "./invite-service";
@@ -56,8 +56,8 @@ async function enqueueHostedWebhookDispatchEffectWithTransaction(
   input: HostedWebhookDispatchEnqueueInput,
   transaction: Prisma.TransactionClient,
 ): Promise<number> {
-  await enqueueHostedExecutionOutbox({
-    dispatch: input.dispatch,
+  await enqueueHostedExecutionOutboxPayload({
+    payload: input.payload,
     sourceId: `${input.source}:${input.eventId}`,
     sourceType: "hosted_webhook_receipt",
     tx: transaction,
