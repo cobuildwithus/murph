@@ -17,6 +17,7 @@
 - Agent layers, MCP surfaces, and future UIs call `vault-cli` or exported package APIs.
 - Assistant runtime state is stored under `vault/.runtime/operations/assistant/**`.
 - Durable user-facing memory and scheduled prompt configuration live in canonical vault records, not assistant runtime state.
+- If a datum is user-facing, queryable, or something future product features will build on, it belongs in canonical vault records or explicit derived materializations, never in assistant runtime state.
 - No agent gets arbitrary write access to vault files as part of the public contract.
 
 ## Append-Only Bias

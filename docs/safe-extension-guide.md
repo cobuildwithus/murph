@@ -12,6 +12,7 @@ This guide is the downstream integration reference for extending the Murph vault
 - Keep machine-facing truth in append-only JSONL ledgers (`ledger/events`, `ledger/samples`, `audit`).
 - Keep imported source artifacts immutable under `raw/`.
 - Keep assistant or session runtime state under `vault/.runtime/operations/assistant/**`, and keep durable user-facing memory plus scheduled assistant configuration in canonical vault records rather than assistant runtime state.
+- If a datum is user-facing, queryable, or something future product features will build on, make it a canonical vault noun or an explicit derived materialization immediately; do not prototype it in assistant runtime first.
 - Do not introduce SQLite, vector storage, OCR-heavy parsing, semantic search, canonical transcript storage inside the vault, or automatic promotion of chat logs into canonical health state in the baseline.
 
 ## Package Roles
@@ -44,6 +45,15 @@ If a proposed record cannot be represented as Markdown truth plus append-only JS
 4. Emit enough audit context to explain provenance and failure modes.
 
 Importers may prepare payloads, but they do not decide new canonical storage rules on their own.
+
+### Add a new assistant-facing feature
+
+1. Decide whether the feature creates durable product state or only runtime residue.
+2. If it creates durable product state, give it a canonical vault home and owner before implementation.
+3. If it is only runtime residue, keep it under `vault/.runtime/operations/assistant/**` with an explicit schema/schemaVersion seam.
+4. Do not ship user-facing or queryable feature data in assistant runtime as a temporary shortcut.
+
+Assistant runtime is for sessions, transcripts, receipts, outbox state, diagnostics, locks, and similar execution artifacts. It is not a product-state incubator.
 
 ### Add a new device/provider connector
 
@@ -115,6 +125,7 @@ Downstream follow-up stays blocked until the source lanes publish the frozen hea
 - Canonical state stored outside the documented vault layout
 - Mutable artifacts under `raw/`
 - Assistant state written into the vault root
+- User-facing or queryable feature state landing in assistant runtime instead of canonical vault records
 - New public commands outside `vault-cli`
 - Cross-package imports that let non-core packages mutate canonical state implicitly
 
