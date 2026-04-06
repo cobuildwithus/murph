@@ -96,9 +96,6 @@ describe("handleRunnerOutboundRequest", () => {
               async commit() {
                 throw new Error("not used");
               },
-              async finalizeCommit() {
-                throw new Error("not used");
-              },
               getDeviceSyncRuntimeSnapshot,
             };
           },
@@ -169,9 +166,6 @@ describe("handleRunnerOutboundRequest", () => {
           getByName() {
             return {
               async commit() {
-                throw new Error("not used");
-              },
-              async finalizeCommit() {
                 throw new Error("not used");
               },
               bootstrapUser,
@@ -379,9 +373,6 @@ describe("handleRunnerOutboundRequest", () => {
               async commit() {
                 throw new Error("not used");
               },
-              async finalizeCommit() {
-                throw new Error("not used");
-              },
               putPendingUsage,
             };
           },
@@ -444,9 +435,6 @@ function createRunnerOutboundEnv(overrides: Partial<Record<string, unknown>> = {
           return { userId: "member_123" };
         },
         async commit() {
-          throw new Error("not used");
-        },
-        async finalizeCommit() {
           throw new Error("not used");
         },
         async applyDeviceSyncRuntimeUpdates(input: { request: { userId: string } }) {

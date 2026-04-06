@@ -25,7 +25,6 @@ import type { R2BucketLike } from "./bundle-store.ts";
 import type {
   HostedExecutionCommitPayload,
   HostedExecutionCommittedResult,
-  HostedExecutionFinalizePayload,
 } from "./execution-journal.ts";
 
 export interface WorkerUserRunnerCommitInput {
@@ -35,16 +34,10 @@ export interface WorkerUserRunnerCommitInput {
   };
 }
 
-export interface WorkerUserRunnerFinalizeInput {
-  eventId: string;
-  payload: HostedExecutionFinalizePayload;
-}
-
 export interface WorkerUserRunnerStubLike {
   bootstrapUser?(userId: string): Promise<{ userId: string }>;
   provisionManagedUserCrypto?(userId: string): Promise<{ recipientKinds: string[]; rootKeyId: string; userId: string }>;
   commit(input: WorkerUserRunnerCommitInput): Promise<HostedExecutionCommittedResult>;
-  finalizeCommit(input: WorkerUserRunnerFinalizeInput): Promise<HostedExecutionCommittedResult>;
   gatewayFetchAttachments?(input: GatewayFetchAttachmentsInput): Promise<GatewayAttachment[]>;
   gatewayGetConversation?(input: GatewayGetConversationInput): Promise<GatewayConversation | null>;
   gatewayListConversations?(input?: GatewayListConversationsInput): Promise<GatewayListConversationsResult>;

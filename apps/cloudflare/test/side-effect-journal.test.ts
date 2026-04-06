@@ -13,7 +13,7 @@ import { writeEncryptedR2Json } from "../src/crypto.ts";
 import {
   HostedExecutionSideEffectConflictError,
   createHostedExecutionSideEffectJournalStore,
-} from "../src/outbox-delivery-journal.ts";
+} from "../src/side-effect-journal.ts";
 
 import { MemoryEncryptedR2Bucket } from "./test-helpers";
 

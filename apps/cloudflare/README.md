@@ -91,13 +91,13 @@ That means:
 
 - the Worker receives Vercel OIDC-authenticated dispatch and control requests
 - the per-user Durable Object keeps queue/process state in its SQLite storage tables (`runner_meta`, `pending_events`, `consumed_events`, and `poisoned_events`) instead of one serialized record blob
-- the Worker's internal control routes call direct Durable Object methods such as `dispatch`, `commit`, `finalizeCommit`, `status`, and per-user env updates instead of routing those control hops back through worker-local `fetch()` URLs
+- the Worker's internal control routes call direct Durable Object methods such as `dispatch`, `commit`, `status`, and per-user env updates instead of routing those control hops back through worker-local `fetch()` URLs
 - the per-user Durable Object invokes a same-name `RunnerContainer` instance on demand
 - the `RunnerContainer` uses the official `@cloudflare/containers` `Container` class to handle startup, port readiness, per-run env injection, and host-specific outbound interception before forwarding the encrypted bundle payloads and dispatch into the internal runner bridge
 - those worker-owned outbound proxy hosts now require an in-memory per-run proxy token from the trusted Worker/container bridge in addition to the bound `userId`, so random code inside one one-shot runner container instance cannot call them directly with `curl` or borrowed env
 - the worker-owned hosted-AI-usage proxy host injects the Durable Object's bound `userId` into the worker-side usage buffer path, and any later web import still happens from the Durable Object with the broader web control token kept out of the runner environment
 - worker-owned callback and web-control base URLs now normalize to HTTPS by default and only permit explicit loopback or internal worker-host HTTP exceptions
-- the runner process posts durable commit/finalize, hosted email, and assistant-delivery reconciliation requests through one internal `http://results.worker` callback seam; that outbound handler runs inside Workers, calls Durable Objects and R2 directly, and never traverses the public Worker URL
+- the runner process posts the durable commit callback plus hosted email and assistant-delivery journal requests through one internal `http://results.worker` seam; the fuller final result now returns directly to the Durable Object, so bundle finalization no longer needs a second worker callback hop
 - the container-local bridge is intentionally thin; the execution core lives in `packages/assistant-runtime`
 - the queue Durable Object invokes the per-user container on demand and explicitly tears it down after every run so each invocation gets a fresh per-run control token and a clean process boundary
 
@@ -183,4 +183,4 @@ The Cloudflare app now keeps two focused Vitest lanes:
 
 - Only assistant delivery is implemented as a hosted side-effect kind today. Future provider mutations, callbacks, or outbound deliveries should extend the same committed side-effect journal rather than bypassing it.
 - Cloudflare container lifecycle is currently one-shot: start on demand, run one hosted job, then tear the instance down. If you later want pooling or warm reuse, add that back as an explicit design with credential/lease isolation rather than relying on container idle retention.
-- The internal runner callback fanout is now one `results.worker` seam for commit/finalize, hosted email, and side-effect journal access. The next simplification pass should have the container return a fuller final result to the Durable Object so the Worker can eventually collapse even that remaining callback seam.
+- The remaining `results.worker` seam is now only for the durable commit callback plus true outward effects such as hosted email and side-effect journal access. Future outward mutations should extend that same committed side-effect journal instead of adding separate reliability lanes.

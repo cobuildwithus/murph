@@ -11,7 +11,6 @@ import {
 } from "./crypto-context.js";
 import {
   hostedSideEffectRecordKey,
-  hostedSideEffectRecordKeys,
 } from "./storage-paths.js";
 import {
   readEncryptedR2Json,
@@ -23,6 +22,13 @@ export class HostedExecutionSideEffectConflictError extends Error {
     super(message);
     this.name = "HostedExecutionSideEffectConflictError";
   }
+}
+
+interface HostedExecutionSideEffectJournalContext {
+  bucket: R2BucketLike;
+  key: Uint8Array;
+  keyId: string;
+  keysById?: Readonly<Record<string, Uint8Array>>;
 }
 
 export interface HostedExecutionSideEffectJournalStore {
@@ -44,21 +50,13 @@ export interface HostedExecutionSideEffectJournalStore {
   }): Promise<HostedExecutionSideEffectRecord>;
 }
 
-export function createHostedExecutionSideEffectJournalStore(input: {
-  bucket: R2BucketLike;
-  key: Uint8Array;
-  keyId: string;
-  keysById?: Readonly<Record<string, Uint8Array>>;
-}): HostedExecutionSideEffectJournalStore {
+export function createHostedExecutionSideEffectJournalStore(
+  input: HostedExecutionSideEffectJournalContext,
+): HostedExecutionSideEffectJournalStore {
   return {
     async deletePrepared(query) {
-      const keys = await hostedSideEffectRecordKeys(
-        input.key,
-        input.keysById,
-        query.userId,
-        query.effectId,
-      );
-      const existing = await readRecordAtKeys(input, keys, query.userId, query.effectId);
+      const objectKey = await hostedSideEffectRecordKey(input.key, query.userId, query.effectId);
+      const existing = await readRecordAtKey(input, objectKey, query.userId, query.effectId);
 
       if (!existing) {
         return false;
@@ -73,19 +71,13 @@ export function createHostedExecutionSideEffectJournalStore(input: {
         throw new Error("Hosted side-effect journal cleanup requires R2 delete support.");
       }
 
-      for (const key of keys) {
-        await input.bucket.delete(key);
-      }
+      await input.bucket.delete(objectKey);
       return true;
     },
 
     async read(query) {
-      const existing = await readRecordAtKeys(
-        input,
-        await hostedSideEffectRecordKeys(input.key, input.keysById, query.userId, query.effectId),
-        query.userId,
-        query.effectId,
-      );
+      const objectKey = await hostedSideEffectRecordKey(input.key, query.userId, query.effectId);
+      const existing = await readRecordAtKey(input, objectKey, query.userId, query.effectId);
 
       if (!existing) {
         return null;
@@ -98,15 +90,14 @@ export function createHostedExecutionSideEffectJournalStore(input: {
     async write(writeInput) {
       const record = parseHostedExecutionSideEffectRecord(writeInput.record);
       assertSideEffectRecordIsSelfConsistent(record);
-      const key = await hostedSideEffectRecordKey(input.key, writeInput.userId, record.effectId);
-      const existing = await readRecordAtKeys(
+      const objectKey = await hostedSideEffectRecordKey(
+        input.key,
+        writeInput.userId,
+        record.effectId,
+      );
+      const existing = await readRecordAtKey(
         input,
-        await hostedSideEffectRecordKeys(
-          input.key,
-          input.keysById,
-          writeInput.userId,
-          record.effectId,
-        ),
+        objectKey,
         writeInput.userId,
         record.effectId,
       );
@@ -116,27 +107,28 @@ export function createHostedExecutionSideEffectJournalStore(input: {
         return durableRecord;
       }
 
-      await writeRecordAtKey(input, key, writeInput.userId, record.effectId, durableRecord);
+      await writeRecordAtKey(
+        input,
+        objectKey,
+        writeInput.userId,
+        record.effectId,
+        durableRecord,
+      );
       return durableRecord;
     },
   };
 }
 
 async function readRecordAtKey(
-  input: {
-    bucket: R2BucketLike;
-    key: Uint8Array;
-    keyId: string;
-    keysById?: Readonly<Record<string, Uint8Array>>;
-  },
-  key: string,
+  input: HostedExecutionSideEffectJournalContext,
+  objectKey: string,
   userId: string,
   effectId: string,
 ): Promise<HostedExecutionSideEffectRecord | null> {
   const value = await readEncryptedR2Json({
     aad: buildHostedStorageAad({
       effectId,
-      key,
+      key: objectKey,
       purpose: "side-effect-journal",
       userId,
     }),
@@ -144,7 +136,7 @@ async function readRecordAtKey(
     cryptoKey: input.key,
     cryptoKeysById: input.keysById,
     expectedKeyId: input.keyId,
-    key,
+    key: objectKey,
     parse(value) {
       return value;
     },
@@ -158,36 +150,9 @@ async function readRecordAtKey(
   return parseHostedExecutionSideEffectRecord(value);
 }
 
-async function readRecordAtKeys(
-  input: {
-    bucket: R2BucketLike;
-    key: Uint8Array;
-    keyId: string;
-    keysById?: Readonly<Record<string, Uint8Array>>;
-  },
-  keys: string[],
-  userId: string,
-  effectId: string,
-): Promise<HostedExecutionSideEffectRecord | null> {
-  for (const key of keys) {
-    const value = await readRecordAtKey(input, key, userId, effectId);
-
-    if (value) {
-      return value;
-    }
-  }
-
-  return null;
-}
-
 async function writeRecordAtKey(
-  input: {
-    bucket: R2BucketLike;
-    key: Uint8Array;
-    keyId: string;
-    keysById?: Readonly<Record<string, Uint8Array>>;
-  },
-  key: string,
+  input: HostedExecutionSideEffectJournalContext,
+  objectKey: string,
   userId: string,
   effectId: string,
   value: HostedExecutionSideEffectRecord,
@@ -195,13 +160,13 @@ async function writeRecordAtKey(
   await writeEncryptedR2Json({
     aad: buildHostedStorageAad({
       effectId,
-      key,
+      key: objectKey,
       purpose: "side-effect-journal",
       userId,
     }),
     bucket: input.bucket,
     cryptoKey: input.key,
-    key,
+    key: objectKey,
     keyId: input.keyId,
     scope: "side-effect-journal",
     value,

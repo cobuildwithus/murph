@@ -3,7 +3,6 @@ import {
   buildHostedAssistantDeliverySentRecord,
   buildHostedAssistantDeliverySideEffect,
   buildHostedExecutionRunnerCommitPath,
-  buildHostedExecutionRunnerFinalizePath,
   buildHostedExecutionRunnerSideEffectPath,
   parseHostedExecutionSideEffects,
   type HostedExecutionDispatchRequest,
@@ -77,7 +76,6 @@ export async function commitHostedExecutionResult(input: {
     buildHostedRunnerCommitUrl(
       input.runtime.resultsBaseUrl,
       input.dispatch.eventId,
-      "commit",
     ).toString(),
     {
       body: JSON.stringify({
@@ -97,48 +95,6 @@ export async function commitHostedExecutionResult(input: {
   if (!response.ok) {
     throw new Error(
       `Hosted runner durable commit failed for ${input.dispatch.event.userId}/${input.dispatch.eventId} with HTTP ${response.status}.`,
-    );
-  }
-}
-
-export async function finalizeHostedExecutionResult(input: {
-  commit: HostedExecutionCommitCallback | null;
-  committedResult: HostedExecutionRunnerResult;
-  dispatch: HostedExecutionDispatchRequest;
-  fetchImpl?: typeof fetch;
-  finalGatewayProjectionSnapshot?: GatewayProjectionSnapshot | null;
-  finalResult: HostedExecutionRunnerResult;
-  runtime: {
-    resultsBaseUrl: string;
-    commitTimeoutMs: number | null;
-  };
-}): Promise<void> {
-  if (!input.commit || sameHostedExecutionBundles(input.committedResult, input.finalResult)) {
-    return;
-  }
-
-  const response = await (input.fetchImpl ?? fetch)(
-    buildHostedRunnerCommitUrl(
-      input.runtime.resultsBaseUrl,
-      input.dispatch.eventId,
-      "finalize",
-    ).toString(),
-    {
-      body: JSON.stringify({
-        bundle: input.finalResult.bundle,
-        gatewayProjectionSnapshot: input.finalGatewayProjectionSnapshot ?? null,
-      }),
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      method: "POST",
-      signal: AbortSignal.timeout(readHostedRunnerCommitTimeoutMs(input.runtime.commitTimeoutMs)),
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error(
-      `Hosted runner durable finalize failed for ${input.dispatch.event.userId}/${input.dispatch.eventId} with HTTP ${response.status}.`,
     );
   }
 }
@@ -504,25 +460,15 @@ function createHostedAssistantDeliveryConfirmationPendingError(input: {
 function buildHostedRunnerCommitUrl(
   baseUrl: string,
   eventId: string,
-  action: "commit" | "finalize",
 ): URL {
   return new URL(
-    action === "commit"
-      ? buildHostedExecutionRunnerCommitPath(eventId)
-      : buildHostedExecutionRunnerFinalizePath(eventId),
+    buildHostedExecutionRunnerCommitPath(eventId),
     baseUrl,
   );
 }
 
 function buildHostedRunnerSideEffectUrl(baseUrl: string, effectId: string): URL {
   return new URL(buildHostedExecutionRunnerSideEffectPath(effectId), baseUrl);
-}
-
-function sameHostedExecutionBundles(
-  left: HostedExecutionRunnerResult,
-  right: HostedExecutionRunnerResult,
-): boolean {
-  return left.bundle === right.bundle;
 }
 
 function createHostedRunnerSideEffectJournalError(

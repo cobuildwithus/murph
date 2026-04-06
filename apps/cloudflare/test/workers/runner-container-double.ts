@@ -1,8 +1,10 @@
-import type { HostedAssistantRuntimeJobInput } from "@murphai/assistant-runtime";
+import type {
+  HostedAssistantRuntimeJobInput,
+  HostedAssistantRuntimeJobResult,
+} from "@murphai/assistant-runtime";
 import type {
   HostedExecutionBundleRef,
   HostedExecutionRunnerRequest,
-  HostedExecutionRunnerResult,
 } from "@murphai/runtime-state";
 import { DurableObject } from "cloudflare:workers";
 
@@ -20,7 +22,7 @@ interface RunnerContainerInvokePayload {
 }
 
 export class RunnerContainerTestDouble extends DurableObject {
-  async invoke(payload: RunnerContainerInvokePayload): Promise<HostedExecutionRunnerResult> {
+  async invoke(payload: RunnerContainerInvokePayload): Promise<HostedAssistantRuntimeJobResult> {
     const internalWorkerProxyToken = payload.job.runtime?.internalWorkerProxyToken ?? "proxy-token";
     const runnerResult = buildRunnerResult(payload.job.request);
     const commitResponse = await handleRunnerOutboundRequest(
@@ -28,9 +30,10 @@ export class RunnerContainerTestDouble extends DurableObject {
         `http://results.worker/events/${encodeURIComponent(payload.job.request.dispatch.eventId)}/commit`,
         {
           body: JSON.stringify({
-            bundle: runnerResult.bundle,
+            bundle: runnerResult.result.bundle,
             currentBundleRef: payload.job.request.commit?.bundleRef ?? null,
-            result: runnerResult.result,
+            gatewayProjectionSnapshot: runnerResult.finalGatewayProjectionSnapshot,
+            result: runnerResult.result.result,
           }),
           headers: {
             "content-type": "application/json; charset=utf-8",
@@ -56,17 +59,26 @@ export class RunnerContainerTestDouble extends DurableObject {
 
 function buildRunnerResult(
   request: HostedExecutionRunnerRequest,
-): HostedExecutionRunnerResult {
+): HostedAssistantRuntimeJobResult {
   return {
-    bundle: request.bundle ?? btoa(`vault:${request.dispatch.eventId}`),
+    finalGatewayProjectionSnapshot: {
+      conversations: [],
+      generatedAt: new Date().toISOString(),
+      messages: [],
+      permissions: [],
+      schema: "murph.gateway-projection-snapshot.v1",
+    },
     result: {
-      eventsHandled: 1,
-      ...(request.dispatch.event.kind === "member.activated"
-        ? {
-            nextWakeAt: new Date(Date.now() + 60_000).toISOString(),
-          }
-        : {}),
-      summary: `runtime:${request.dispatch.eventId}`,
+      bundle: request.bundle ?? btoa(`vault:${request.dispatch.eventId}`),
+      result: {
+        eventsHandled: 1,
+        ...(request.dispatch.event.kind === "member.activated"
+          ? {
+              nextWakeAt: new Date(Date.now() + 60_000).toISOString(),
+            }
+          : {}),
+        summary: `runtime:${request.dispatch.eventId}`,
+      },
     },
   };
 }

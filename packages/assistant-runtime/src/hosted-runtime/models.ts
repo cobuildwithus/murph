@@ -69,6 +69,11 @@ export interface HostedCommittedExecutionState {
   committedSideEffects: HostedExecutionSideEffect[];
 }
 
+export interface HostedAssistantRuntimeJobResult {
+  finalGatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
+  result: HostedExecutionRunnerResult;
+}
+
 export type HostedShareImportResult = Awaited<ReturnType<typeof importSharePackIntoVault>>;
 
 export interface HostedDispatchEffect {

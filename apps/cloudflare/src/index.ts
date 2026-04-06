@@ -99,7 +99,6 @@ import { createHostedPendingUsageDirtyUserStore } from "./usage-store.ts";
 import type {
   WorkerEnvironmentContract,
   WorkerUserRunnerCommitInput,
-  WorkerUserRunnerFinalizeInput,
   WorkerUserRunnerStubLike,
 } from "./worker-contracts.ts";
 
@@ -405,10 +404,6 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
 
   async commit(input: WorkerUserRunnerCommitInput): Promise<HostedExecutionCommittedResult> {
     return this.runner.commit(input);
-  }
-
-  async finalizeCommit(input: WorkerUserRunnerFinalizeInput): Promise<HostedExecutionCommittedResult> {
-    return this.runner.finalizeCommit(input);
   }
 
   async gatewayListConversations(input?: GatewayListConversationsInput) {

@@ -25,11 +25,11 @@ import { createHostedArtifactUploadSink } from "./artifacts.ts";
 import {
   collectHostedExecutionSideEffects,
   drainHostedCommittedSideEffectsAfterCommit,
-  finalizeHostedExecutionResult,
 } from "./callbacks.ts";
 import { executeHostedDispatchEvent } from "./events.ts";
 import { runHostedMaintenanceLoop } from "./maintenance.ts";
 import type {
+  HostedAssistantRuntimeJobResult,
   HostedAssistantRuntimeJobRequest,
   HostedCommittedExecutionState,
   HostedExecutionCommitCallback,
@@ -134,7 +134,7 @@ export async function completeHostedExecutionAfterCommit(input: {
   >;
   restored: HostedRestoredExecutionContext;
   committedExecution: HostedCommittedExecutionState;
-}): Promise<HostedExecutionRunnerResult> {
+}): Promise<HostedAssistantRuntimeJobResult> {
   emitHostedExecutionStructuredLog({
     component: "runtime",
     dispatch: input.dispatch,
@@ -192,25 +192,10 @@ export async function completeHostedExecutionAfterCommit(input: {
     result: input.committedExecution.committedResult.result,
   };
 
-  await finalizeHostedExecutionResult({
-    commit: input.commit,
-    committedResult: input.committedExecution.committedResult,
-    dispatch: input.dispatch,
-    fetchImpl: input.internalWorkerFetch,
+  return {
     finalGatewayProjectionSnapshot,
-    finalResult,
-    runtime: input.runtime,
-  });
-
-  emitHostedExecutionStructuredLog({
-    component: "runtime",
-    dispatch: input.dispatch,
-    message: "Hosted runtime finalized the committed result.",
-    phase: "finalize.recorded",
-    run: input.run ?? null,
-  });
-
-  return finalResult;
+    result: finalResult,
+  };
 }
 
 function collectHostedBundleArtifactHashes(bytes: Uint8Array | null): Set<string> {

@@ -10,7 +10,7 @@ import {
 } from "../src/bundle-store.js";
 import { createHostedExecutionJournalStore } from "../src/execution-journal.js";
 import { writeHostedEmailRawMessage } from "../src/hosted-email.js";
-import { createHostedExecutionSideEffectJournalStore } from "../src/outbox-delivery-journal.js";
+import { createHostedExecutionSideEffectJournalStore } from "../src/side-effect-journal.js";
 import {
   encryptHostedBundle,
   readEncryptedR2Payload,

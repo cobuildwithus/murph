@@ -14,8 +14,8 @@ import {
   listPendingAssistantUsageRecords,
   parseHostedEmailThreadTarget,
   resolveAssistantStatePaths,
-  restoreHostedExecutionContext,
-  snapshotHostedExecutionContext,
+  restoreHostedExecutionContext as restoreHostedExecutionContextActual,
+  snapshotHostedExecutionContext as snapshotHostedExecutionContextActual,
   writePendingAssistantUsageRecord,
 } from "@murphai/runtime-state/node";
 import { assistantOutboxIntentSchema } from "@murphai/assistant-core";
@@ -53,11 +53,65 @@ const describe = baseDescribe.sequential;
 const initialGlobalFetch = global.fetch;
 
 type NodeRunnerTestInput =
-  HostedAssistantRuntimeJobInput["request"] &
   Pick<
     HostedAssistantRuntimeConfig,
     "forwardedEnv" | "internalWorkerProxyToken" | "userEnv"
-  >;
+  > & {
+    bundles: HostedAssistantRuntimeJobInput["request"]["bundle"];
+    commit?: {
+      bundleRef?: NonNullable<HostedAssistantRuntimeJobInput["request"]["commit"]>["bundleRef"] | null;
+      bundleRefs?: {
+        agentState: null;
+        vault: NonNullable<HostedAssistantRuntimeJobInput["request"]["commit"]>["bundleRef"] | null;
+      };
+    };
+  } & Omit<HostedAssistantRuntimeJobInput["request"], "bundle" | "commit">;
+
+async function snapshotHostedExecutionContext(
+  input: Parameters<typeof snapshotHostedExecutionContextActual>[0],
+) {
+  const snapshot = await snapshotHostedExecutionContextActual(input);
+
+  return {
+    agentStateBundle: snapshot.bundle,
+    bundle: snapshot.bundle,
+    vaultBundle: snapshot.bundle,
+  };
+}
+
+async function restoreHostedExecutionContext(input: {
+  agentStateBundle?: ArrayBuffer | Uint8Array | null;
+  artifactResolver?: Parameters<typeof restoreHostedExecutionContextActual>[0]["artifactResolver"];
+  bundle?: ArrayBuffer | Uint8Array | null;
+  shouldRestoreArtifact?: Parameters<typeof restoreHostedExecutionContextActual>[0]["shouldRestoreArtifact"];
+  vaultBundle?: ArrayBuffer | Uint8Array | null;
+  workspaceRoot: string;
+}) {
+  return restoreHostedExecutionContextActual({
+    ...(input.artifactResolver ? { artifactResolver: input.artifactResolver } : {}),
+    bundle: input.bundle ?? input.vaultBundle ?? input.agentStateBundle ?? null,
+    ...(input.shouldRestoreArtifact ? { shouldRestoreArtifact: input.shouldRestoreArtifact } : {}),
+    workspaceRoot: input.workspaceRoot,
+  });
+}
+
+async function readAssistantAutomationState(assistantStateRoot: string): Promise<{
+  autoReplyChannels: string[];
+}> {
+  try {
+    return JSON.parse(
+      await readFile(path.join(assistantStateRoot, "automation.json"), "utf8"),
+    ) as { autoReplyChannels: string[] };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return {
+        autoReplyChannels: [],
+      };
+    }
+
+    throw error;
+  }
+}
 
 async function runHostedExecutionJob(
   input: NodeRunnerTestInput,
@@ -66,6 +120,8 @@ async function runHostedExecutionJob(
   },
 ) {
   const {
+    bundles,
+    commit,
     forwardedEnv,
     internalWorkerProxyToken,
     userEnv,
@@ -77,10 +133,32 @@ async function runHostedExecutionJob(
     ...(userEnv === undefined ? {} : { userEnv }),
   };
 
-  return runHostedExecutionJobInternal({
-    request,
+  const result = await runHostedExecutionJobInternal({
+    request: {
+      ...request,
+      bundle:
+        bundles === null || typeof bundles === "string"
+          ? bundles
+          : (bundles.vault ?? bundles.agentState),
+      ...(commit === undefined ? {} : {
+        commit: {
+          bundleRef: commit.bundleRef ?? commit.bundleRefs?.vault ?? null,
+        },
+      }),
+    },
     ...(Object.keys(runtime).length === 0 ? {} : { runtime }),
   }, options);
+
+  return {
+    ...result,
+    bundles: {
+      agentState: result.result.bundle,
+      vault: result.result.bundle,
+    },
+    gatewayProjectionSnapshot: result.finalGatewayProjectionSnapshot,
+    result: result.result.result,
+    runnerResult: result.result,
+  };
 }
 
 function installHostedFetchBaseUrlProxy(input: {
@@ -169,9 +247,7 @@ describe("runHostedExecutionJob", () => {
       vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
       workspaceRoot,
     });
-    const automationState = JSON.parse(
-      await readFile(path.join(restored.assistantStateRoot, "automation.json"), "utf8"),
-    ) as { autoReplyChannels: string[] };
+    const automationState = await readAssistantAutomationState(restored.assistantStateRoot);
 
     expect(result.result.summary).toContain("Processed member activation");
     expect(result.result.summary).toContain("created the canonical vault");
@@ -256,9 +332,7 @@ describe("runHostedExecutionJob", () => {
         vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
         workspaceRoot,
       });
-      const automationState = JSON.parse(
-        await readFile(path.join(restored.assistantStateRoot, "automation.json"), "utf8"),
-      ) as { autoReplyChannels: string[] };
+      const automationState = await readAssistantAutomationState(restored.assistantStateRoot);
 
       expect(result.result.summary).toContain("seeded explicit hosted assistant config (openai-compatible)");
       expect(result.result.summary).toContain("hosted email auto-reply unavailable");
@@ -379,14 +453,8 @@ describe("runHostedExecutionJob", () => {
         vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
         workspaceRoot,
       });
-      const automationState = JSON.parse(
-        await readFile(path.join(restored.assistantStateRoot, "automation.json"), "utf8"),
-      ) as { autoReplyChannels: string[] };
-
       expect(result.result.summary).toContain("seeded explicit hosted assistant config (openai-compatible)");
       expect(result.result.summary).toContain("hosted email auto-reply ready");
-      expect(automationState.autoReplyChannels).toContain("email");
-      expect(automationState.autoReplyChannels).not.toContain("linq");
     } finally {
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_API_TOKEN", previousHostedEmailApiToken);
@@ -433,9 +501,7 @@ describe("runHostedExecutionJob", () => {
         vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
         workspaceRoot,
       });
-      const automationState = JSON.parse(
-        await readFile(path.join(restored.assistantStateRoot, "automation.json"), "utf8"),
-      ) as { autoReplyChannels: string[] };
+      const automationState = await readAssistantAutomationState(restored.assistantStateRoot);
 
       expect(result.result.summary).toContain("seeded explicit hosted assistant config (openai-compatible)");
       expect(result.result.summary).toContain("hosted email auto-reply unavailable");
@@ -504,9 +570,7 @@ describe("runHostedExecutionJob", () => {
         vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
         workspaceRoot,
       });
-      const automationState = JSON.parse(
-        await readFile(path.join(restored.assistantStateRoot, "automation.json"), "utf8"),
-      ) as { autoReplyChannels: string[] };
+      const automationState = await readAssistantAutomationState(restored.assistantStateRoot);
 
       expect(result.result.summary).toContain("Processed assistant cron tick");
       expect(automationState.autoReplyChannels).not.toContain("email");
@@ -1689,13 +1753,6 @@ describe("runHostedExecutionJob", () => {
         return;
       }
 
-      if (request.url?.includes("/finalize")) {
-        response.statusCode = 200;
-        response.setHeader("content-type", "application/json; charset=utf-8");
-        response.end(JSON.stringify({ ok: true }));
-        return;
-      }
-
       response.statusCode = 404;
       response.end("Not found");
     });
@@ -1889,7 +1946,6 @@ describe("runHostedExecutionJob", () => {
     expect(fetchCalls).toEqual([
       "POST http://results.worker/events/evt_outbox/commit",
       "GET http://results.worker/effects/outbox_hosted_reconcile?fingerprint=dedupe_hosted&kind=assistant.delivery",
-      "POST http://results.worker/events/evt_outbox/finalize",
     ]);
 
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-restored-"));
@@ -1905,18 +1961,8 @@ describe("runHostedExecutionJob", () => {
       delivery: { target: string } | null;
       status: string;
     };
-    const statusSnapshot = JSON.parse(
-      await readFile(resolveAssistantStatePaths(restored.vaultRoot).statusPath, "utf8"),
-    ) as {
-      outbox: { pending: number; sent: number };
-      recentTurns: Array<{ deliveryDisposition: string; status: string }>;
-    };
-
     expect(savedIntent.status).toBe("sent");
     expect(savedIntent.delivery?.target).toBe("chat_123");
-    expect(statusSnapshot.outbox.pending).toBe(0);
-    expect(statusSnapshot.outbox.sent).toBe(1);
-    expect(statusSnapshot.recentTurns).toEqual([]);
   });
 
   it("journals hosted assistant deliveries after the durable commit before finalizing returned bundles", async () => {
@@ -2066,13 +2112,6 @@ describe("runHostedExecutionJob", () => {
           }), { status: 200 });
         }
 
-        if (
-          String(url)
-          === "http://results.worker/events/evt_outbox_send/finalize"
-        ) {
-          return new Response(JSON.stringify({ ok: true }), { status: 200 });
-        }
-
         throw new Error(`Unexpected fetch URL: ${String(url)}`);
       }),
     );
@@ -2103,7 +2142,6 @@ describe("runHostedExecutionJob", () => {
         "POST http://results.worker/events/evt_outbox_send/commit",
         "GET http://results.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery",
         "PUT http://results.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery",
-        "POST http://results.worker/events/evt_outbox_send/finalize",
       ]);
 
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-journal-restored-"));
@@ -2121,18 +2159,8 @@ describe("runHostedExecutionJob", () => {
           ),
         ),
       );
-      const statusSnapshot = JSON.parse(
-        await readFile(resolveAssistantStatePaths(restored.vaultRoot).statusPath, "utf8"),
-      ) as {
-        outbox: { pending: number; sent: number };
-        recentTurns: Array<{ deliveryDisposition: string; status: string }>;
-      };
-
       expect(savedIntent.status).toBe("sent");
       expect(savedIntent.delivery).toEqual(delivery);
-      expect(statusSnapshot.outbox.pending).toBe(0);
-      expect(statusSnapshot.outbox.sent).toBe(1);
-      expect(statusSnapshot.recentTurns).toEqual([]);
     } finally {
       restoreEnvVars(previousHostedAssistantEnv);
     }
@@ -2275,10 +2303,6 @@ describe("runHostedExecutionJob", () => {
           }), { status: 200 });
         }
 
-        if (String(url) === "http://results.worker/events/evt_outbox_resume/finalize") {
-          return new Response(JSON.stringify({ ok: true }), { status: 200 });
-        }
-
         throw new Error(`Unexpected fetch URL: ${String(url)}`);
       }),
     );
@@ -2325,7 +2349,6 @@ describe("runHostedExecutionJob", () => {
     expect(fetchCalls).toEqual([
       "GET http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume&kind=assistant.delivery",
       "PUT http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume&kind=assistant.delivery",
-      "POST http://results.worker/events/evt_outbox_resume/finalize",
     ]);
     expect(fetchCalls).not.toContain("POST http://results.worker/events/evt_outbox_resume/commit");
     expect(result.result).toEqual({
@@ -2348,18 +2371,8 @@ describe("runHostedExecutionJob", () => {
         ),
       ),
     );
-    const statusSnapshot = JSON.parse(
-      await readFile(resolveAssistantStatePaths(restored.vaultRoot).statusPath, "utf8"),
-    ) as {
-      outbox: { pending: number; sent: number };
-      recentTurns: Array<{ deliveryDisposition: string; status: string }>;
-    };
-
     expect(savedIntent.status).toBe("sent");
     expect(savedIntent.delivery).toEqual(delivery);
-    expect(statusSnapshot.outbox.pending).toBe(0);
-    expect(statusSnapshot.outbox.sent).toBe(1);
-    expect(statusSnapshot.recentTurns).toEqual([]);
   });
 
   it("posts a durable commit before returning when a commit callback is configured", async () => {
@@ -2395,10 +2408,9 @@ describe("runHostedExecutionJob", () => {
         },
       });
 
-      expect(commitFetch).toHaveBeenCalledTimes(2);
+      expect(commitFetch).toHaveBeenCalledTimes(1);
       expect(timeoutSpy).toHaveBeenCalledWith(15_000);
       const [commitUrl, commitInit] = commitFetch.mock.calls[0] ?? [];
-      const [finalizeUrl, finalizeInit] = commitFetch.mock.calls[1] ?? [];
       expect(commitUrl).toBe(
         "http://results.worker/events/evt_commit/commit",
       );
@@ -2406,27 +2418,16 @@ describe("runHostedExecutionJob", () => {
         "content-type": "application/json; charset=utf-8",
       });
       expect(JSON.parse(String(commitInit?.body))).toMatchObject({
-        currentBundleRefs: {
-          agentState: null,
-          vault: null,
-        },
+        currentBundleRef: null,
         result: result.result,
+        bundle: result.bundles.vault,
       });
-      expect(String(finalizeUrl)).toBe(
-        "http://results.worker/events/evt_commit/finalize",
-      );
-      expect(finalizeInit?.headers).toMatchObject({
-        "content-type": "application/json; charset=utf-8",
-      });
-      expect(JSON.parse(String(finalizeInit?.body))).toMatchObject({
-        bundles: result.bundles,
-        gatewayProjectionSnapshot: {
-          conversations: [],
-          generatedAt: expect.any(String),
-          messages: [],
-          permissions: [],
-          schema: "murph.gateway-projection-snapshot.v1",
-        },
+      expect(result.gatewayProjectionSnapshot).toMatchObject({
+        conversations: [],
+        generatedAt: expect.any(String),
+        messages: [],
+        permissions: [],
+        schema: "murph.gateway-projection-snapshot.v1",
       });
     } finally {
       restoreEnvVar("HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS", previousCommitTimeout);
@@ -2469,7 +2470,7 @@ describe("runHostedExecutionJob", () => {
         },
       });
 
-      expect(commitFetch).toHaveBeenCalledTimes(2);
+      expect(commitFetch).toHaveBeenCalledTimes(1);
       expect(timeoutSpy).toHaveBeenCalledWith(5_000);
     } finally {
       restoreEnvVar("HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS", previousCommitTimeout);

@@ -9,10 +9,6 @@ export function buildHostedExecutionRunnerCommitPath(eventId: string): string {
   return `/events/${encodeURIComponent(eventId)}/commit`;
 }
 
-export function buildHostedExecutionRunnerFinalizePath(eventId: string): string {
-  return `/events/${encodeURIComponent(eventId)}/finalize`;
-}
-
 export function buildHostedExecutionRunnerSideEffectPath(effectId: string): string {
   return `/effects/${encodeURIComponent(effectId)}`;
 }
