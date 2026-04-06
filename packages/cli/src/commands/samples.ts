@@ -11,7 +11,7 @@ import {
   showResultSchema,
   samplesImportCsvResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
-import type { VaultServices } from '@murphai/vault-inbox/vault-services'
+import type { VaultServices } from '@murphai/assistant-engine/vault-services'
 import {
   importCsvSamples as importCsvSamplesWithArtifacts,
 } from './sample-import-command-helpers.js'

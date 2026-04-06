@@ -15,7 +15,7 @@ import {
   listAudits,
   showAudit,
 } from './audit-command-helpers.js'
-import type { VaultServices } from '@murphai/vault-inbox/vault-services'
+import type { VaultServices } from '@murphai/assistant-engine/vault-services'
 
 const auditIdSchema = z
   .string()

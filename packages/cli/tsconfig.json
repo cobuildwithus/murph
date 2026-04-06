@@ -20,9 +20,6 @@
       "path": "../operator-config"
     },
     {
-      "path": "../vault-inbox"
-    },
-    {
       "path": "../assistant-cli"
     },
     {

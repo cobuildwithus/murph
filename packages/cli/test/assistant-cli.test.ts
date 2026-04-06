@@ -28,12 +28,12 @@ import {
   resolveAssistantStatePaths,
 } from '@murphai/assistant-engine/assistant-state'
 import type { AssistantRunEvent } from '@murphai/assistant-engine/assistant/automation/shared'
-import { createIntegratedInboxServices } from '@murphai/vault-inbox/inbox-services'
+import { createIntegratedInboxServices } from '@murphai/assistant-engine/inbox-services'
 import { formatAssistantRunEventForTerminal } from '@murphai/assistant-cli/run-terminal-logging'
 import { formatStructuredErrorMessage } from '@murphai/operator-config/text/shared'
 import { collectVaultCliDescriptorRootCommandNames } from '../src/vault-cli-command-manifest.js'
 import { createVaultCli } from '../src/vault-cli.js'
-import { createUnwiredVaultServices } from '@murphai/vault-inbox/vault-services'
+import { createUnwiredVaultServices } from '@murphai/assistant-engine/vault-services'
 import {
   requireData,
   runCli,

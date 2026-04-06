@@ -6,13 +6,13 @@ import {
   pathSchema,
   showResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
-import type { VaultServices } from '@murphai/vault-inbox/vault-services'
+import type { VaultServices } from '@murphai/assistant-engine/vault-services'
 import {
   deleteDocumentRecord,
   documentLookupSchema,
   editDocumentRecord,
   rawImportManifestResultSchema,
-} from '@murphai/vault-inbox/usecases/document-meal-read'
+} from '@murphai/assistant-engine/usecases/document-meal-read'
 import { registerArtifactBackedEntityGroup } from './health-command-factory.js'
 import {
   createEntityDeleteCommandConfig,

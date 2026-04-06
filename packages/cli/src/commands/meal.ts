@@ -14,9 +14,9 @@ import {
   rawImportManifestResultSchema,
   showMealManifest,
   showMealRecord,
-} from '@murphai/vault-inbox/usecases/document-meal-read'
-import { loadImportersRuntimeModule } from '@murphai/vault-inbox/usecases/runtime'
-import type { VaultServices } from '@murphai/vault-inbox/vault-services'
+} from '@murphai/assistant-engine/usecases/document-meal-read'
+import { loadImportersRuntimeModule } from '@murphai/assistant-engine/usecases/runtime'
+import type { VaultServices } from '@murphai/assistant-engine/vault-services'
 import { registerArtifactBackedEntityGroup } from './health-command-factory.js'
 import {
   createEntityDeleteCommandConfig,

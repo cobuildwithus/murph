@@ -10,7 +10,7 @@ import {
   showResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import type { VaultServices } from '@murphai/vault-inbox/vault-services'
+import type { VaultServices } from '@murphai/assistant-engine/vault-services'
 import { normalizeRepeatableFlagOption } from '@murphai/assistant-engine/option-utils'
 
 export const journalMutationResultSchema = z.object({

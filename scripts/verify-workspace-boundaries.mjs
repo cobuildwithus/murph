@@ -210,22 +210,12 @@ function verifyWorkspaceImportPolicy({
   }
 
   if (
-    specifier.startsWith("@murphai/vault-inbox/inbox-app/")
-    && !isTestFile
-    && sourceMember !== "packages/vault-inbox"
-  ) {
-    return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} from a vault-inbox internal inbox-app/* subpath; workspace consumers must use a dedicated top-level vault-inbox entrypoint instead of inbox-app internals.`;
-  }
-
-  if (
     sourceMember === "apps/cloudflare"
     && (
       specifier === "@murphai/assistant-engine"
       || specifier.startsWith("@murphai/assistant-engine/")
       || specifier === "@murphai/operator-config"
       || specifier.startsWith("@murphai/operator-config/")
-      || specifier === "@murphai/vault-inbox"
-      || specifier.startsWith("@murphai/vault-inbox/")
     )
     && filePath.includes(`${path.sep}apps${path.sep}cloudflare${path.sep}src${path.sep}`)
   ) {

@@ -138,7 +138,7 @@ Current repo-local package responsibilities include:
 - inbox and device command surfaces that delegate to headless owner packages
 - release ownership for the public `@murphai/murph` package and bins
 
-Programmatic assistant, setup, and shared usecase APIs now stay in workspace-private owner packages such as `@murphai/assistant-cli`, `@murphai/setup-cli`, `@murphai/assistant-engine`, `@murphai/operator-config`, and `@murphai/vault-inbox`. The public npm install story is still `@murphai/murph`; the release flow bundles those private owners into the CLI tarball instead of publishing them as separate npm products.
+Programmatic assistant, setup, and shared usecase APIs now stay in workspace-private owner packages such as `@murphai/assistant-cli`, `@murphai/setup-cli`, `@murphai/assistant-engine`, and `@murphai/operator-config`. The public npm install story is still `@murphai/murph`; the release flow bundles those private owners into the CLI tarball instead of publishing them as separate npm products.
 
 ## Release flow
 

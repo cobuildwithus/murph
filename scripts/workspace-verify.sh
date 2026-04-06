@@ -47,7 +47,6 @@ readonly typecheck_package_dirs=(
   "packages/hosted-execution"
   "packages/runtime-state"
   "packages/operator-config"
-  "packages/vault-inbox"
   "packages/assistant-engine"
   "packages/assistant-cli"
   "packages/setup-cli"

@@ -76,8 +76,8 @@ assert(
   'package.json must depend on @murphai/operator-config so the published @murphai/murph package installs the operator-config owner directly.',
 )
 assert(
-  packageJson.dependencies?.['@murphai/vault-inbox'] === 'workspace:*',
-  'package.json must depend on @murphai/vault-inbox so the published @murphai/murph package installs the vault and inbox owner directly.',
+  packageJson.dependencies?.['@murphai/assistant-engine'] === 'workspace:*',
+  'package.json must depend on @murphai/assistant-engine so the published @murphai/murph package installs the vault and inbox owner directly.',
 )
 assert(
   packageJson.dependencies?.['@murphai/assistant-cli'] === 'workspace:*',
@@ -250,8 +250,12 @@ assert(
   'tsconfig.json must reference ../operator-config so build outputs include the operator-config owner package.',
 )
 assert(
-  tsconfig.references?.some((reference) => reference.path === '../vault-inbox') === true,
-  'tsconfig.json must reference ../vault-inbox so build outputs include the vault and inbox owner package.',
+  tsconfig.references?.some((reference) => reference.path === '../assistant-engine') === true,
+  'tsconfig.json must reference ../assistant-engine so build outputs include the canonical assistant/vault/inbox owner package.',
+)
+assert(
+  tsconfig.references?.some((reference) => reference.path === '../vault-inbox') !== true,
+  'tsconfig.json must not keep a ../vault-inbox reference after collapsing to the assistant-engine owner.',
 )
 assert(
   tsconfig.references?.some((reference) => reference.path === '../assistant-cli') === true,
@@ -266,8 +270,12 @@ assert(
   'tsconfig.typecheck.json must reference ../operator-config so package-local typecheck follows the operator-config owner dependency.',
 )
 assert(
-  tsconfigTypecheck.references?.some((reference) => reference.path === '../vault-inbox') === true,
-  'tsconfig.typecheck.json must reference ../vault-inbox so package-local typecheck follows the vault and inbox owner dependency.',
+  tsconfigTypecheck.references?.some((reference) => reference.path === '../assistant-engine') === true,
+  'tsconfig.typecheck.json must reference ../assistant-engine so package-local typecheck follows the canonical assistant/vault/inbox owner dependency.',
+)
+assert(
+  tsconfigTypecheck.references?.some((reference) => reference.path === '../vault-inbox') !== true,
+  'tsconfig.typecheck.json must not keep a ../vault-inbox reference after collapsing to the assistant-engine owner.',
 )
 assert(
   tsconfigTypecheck.references?.some((reference) => reference.path === '../assistant-cli') === true,

@@ -15,7 +15,7 @@ import {
   normalizeRepeatableEnumFlagOption,
   normalizeRepeatableFlagOption,
 } from '@murphai/assistant-engine/option-utils'
-import type { VaultServices } from '@murphai/vault-inbox/vault-services'
+import type { VaultServices } from '@murphai/assistant-engine/vault-services'
 
 const recordTypeValues = ALL_QUERY_ENTITY_FAMILIES
 

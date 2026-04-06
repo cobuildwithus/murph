@@ -8,7 +8,7 @@ import {
 import {
   createIntegratedInboxServices,
   createIntegratedVaultServices,
-} from "@murphai/vault-inbox";
+} from "@murphai/assistant-engine";
 import {
   ensureHostedAssistantOperatorDefaults,
   resolveHostedAssistantOperatorDefaultsState,

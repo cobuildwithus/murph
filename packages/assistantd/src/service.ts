@@ -30,11 +30,9 @@ import {
   type AssistantSession,
   type AssistantStatusResult,
   type RunAssistantAutomationInput,
-} from '@murphai/assistant-engine'
-import {
   createIntegratedInboxServices,
   createIntegratedVaultServices,
-} from '@murphai/vault-inbox'
+} from '@murphai/assistant-engine'
 import {
   assistantGatewayLocalMessageSender,
   assistantGatewayLocalProjectionSourceReader,

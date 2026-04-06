@@ -15,9 +15,6 @@
       "path": "../assistant-engine"
     },
     {
-      "path": "../vault-inbox"
-    },
-    {
       "path": "../gateway-core"
     },
     {

@@ -14,9 +14,6 @@
       "path": "../assistant-engine"
     },
     {
-      "path": "../vault-inbox"
-    },
-    {
       "path": "../assistant-cli"
     }
   ],

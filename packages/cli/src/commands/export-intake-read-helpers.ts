@@ -9,8 +9,8 @@ import {
   type QueryRuntimeModule,
   type QueryCanonicalEntity as AssessmentEntity,
 } from '@murphai/assistant-engine/query-runtime'
-import { materializeExportPack } from '@murphai/vault-inbox/usecases/shared'
-import { resolveVaultRelativePath } from '@murphai/vault-inbox/usecases/vault-usecase-helpers'
+import { materializeExportPack } from '@murphai/assistant-engine/usecases/shared'
+import { resolveVaultRelativePath } from '@murphai/assistant-engine/usecases/vault-usecase-helpers'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { pathSchema } from '@murphai/operator-config/vault-cli-contracts'
 

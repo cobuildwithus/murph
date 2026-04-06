@@ -5,7 +5,7 @@ import {
 import { resolveAgentmailApiKey } from '@murphai/operator-config/agentmail-runtime'
 import { getAssistantChannelAdapter } from '@murphai/assistant-engine/assistant-runtime'
 import { describeLinqConnectorEndpoint as describeLinqEndpoint } from '@murphai/assistant-engine/inbox-app/linq-endpoint'
-import type { InboxServices } from '@murphai/vault-inbox/inbox-services'
+import type { InboxServices } from '@murphai/assistant-engine/inbox-services'
 import type {
   SetupAgentmailInboxSelection,
   SetupAgentmailSelectionResolver,

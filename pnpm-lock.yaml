@@ -205,9 +205,6 @@ importers:
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
-      '@murphai/vault-inbox':
-        specifier: workspace:*
-        version: link:../vault-inbox
       incur:
         specifier: 0.3.13
         version: 0.3.13(openapi-types@12.1.3)
@@ -320,9 +317,6 @@ importers:
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
-      '@murphai/vault-inbox':
-        specifier: workspace:*
-        version: link:../vault-inbox
 
   packages/assistantd:
     dependencies:
@@ -338,9 +332,6 @@ importers:
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
-      '@murphai/vault-inbox':
-        specifier: workspace:*
-        version: link:../vault-inbox
 
   packages/cli:
     dependencies:
@@ -404,9 +395,6 @@ importers:
       '@murphai/setup-cli':
         specifier: workspace:*
         version: link:../setup-cli
-      '@murphai/vault-inbox':
-        specifier: workspace:*
-        version: link:../vault-inbox
       '@photon-ai/imessage-kit':
         specifier: 2.1.2
         version: 2.1.2
@@ -585,9 +573,6 @@ importers:
       '@murphai/operator-config':
         specifier: workspace:*
         version: link:../operator-config
-      '@murphai/vault-inbox':
-        specifier: workspace:*
-        version: link:../vault-inbox
       incur:
         specifier: 0.3.13
         version: 0.3.13(openapi-types@12.1.3)
@@ -601,42 +586,6 @@ importers:
       '@types/react':
         specifier: ^19.2.14
         version: 19.2.14
-
-  packages/vault-inbox:
-    dependencies:
-      '@murphai/assistant-engine':
-        specifier: workspace:*
-        version: link:../assistant-engine
-      '@murphai/contracts':
-        specifier: workspace:*
-        version: link:../contracts
-      '@murphai/core':
-        specifier: workspace:*
-        version: link:../core
-      '@murphai/device-syncd':
-        specifier: workspace:*
-        version: link:../device-syncd
-      '@murphai/importers':
-        specifier: workspace:*
-        version: link:../importers
-      '@murphai/inboxd':
-        specifier: workspace:*
-        version: link:../inboxd
-      '@murphai/operator-config':
-        specifier: workspace:*
-        version: link:../operator-config
-      '@murphai/parsers':
-        specifier: workspace:*
-        version: link:../parsers
-      '@murphai/query':
-        specifier: workspace:*
-        version: link:../query
-      '@murphai/runtime-state':
-        specifier: workspace:*
-        version: link:../runtime-state
-      zod:
-        specifier: ^4.1.8
-        version: 4.3.6
 
 packages:
 

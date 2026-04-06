@@ -34,7 +34,6 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/parsers": "../parsers/src/index.ts",
   "@murphai/query": "../query/src/index.ts",
   "@murphai/runtime-state": "../runtime-state/src/index.ts",
-  "@murphai/vault-inbox": "../vault-inbox/src/index.ts",
   murph: "./src/index.ts",
 } as const;
 const cliVitestRuntimeAliases = createVitestWorkspaceRuntimeAliases(

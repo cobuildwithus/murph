@@ -124,12 +124,6 @@
       "@murphai/operator-config/*": [
         "packages/operator-config/src/*"
       ],
-      "@murphai/vault-inbox": [
-        "packages/vault-inbox/src/index.ts"
-      ],
-      "@murphai/vault-inbox/*": [
-        "packages/vault-inbox/src/*"
-      ],
       "@murphai/assistant-engine": [
         "packages/assistant-engine/src/index.ts"
       ],

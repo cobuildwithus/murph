@@ -19,7 +19,7 @@ The main installable product entrypoint is `@murphai/murph`, which gives you the
 - a hosted Next.js integration control plane in `apps/web`
 - a hosted Cloudflare execution plane in `apps/cloudflare`
 - shared hosted execution contracts and env/client helpers in `@murphai/hosted-execution`
-- workspace-private headless owner/runtime packages such as `@murphai/assistant-engine`, `@murphai/vault-inbox`, `@murphai/operator-config`, `@murphai/gateway-local`, `@murphai/assistant-runtime`, and `@murphai/assistantd`, plus the public contract package `@murphai/gateway-core`
+- workspace-private headless owner/runtime packages such as `@murphai/assistant-engine`, `@murphai/operator-config`, `@murphai/gateway-local`, `@murphai/assistant-runtime`, and `@murphai/assistantd`, plus the public contract package `@murphai/gateway-core`
 
 ## Install
 
@@ -119,7 +119,6 @@ Only five packages are published to npm: `@murphai/murph`, `@murphai/openclaw-pl
 | `packages/query` | Workspace-private read helpers, summaries, list/search helpers, export-pack generation, and derived-knowledge parser/search/index helpers. |
 | `packages/device-syncd` | Workspace-private local wearable/device OAuth, webhook, and reconcile daemon. |
 | `packages/assistant-engine` | Workspace-private headless assistant execution/runtime owner. |
-| `packages/vault-inbox` | Workspace-private vault service, inbox service, and shared usecase owner. |
 | `packages/operator-config` | Workspace-private operator config, setup/runtime-env, and hosted assistant config owner. |
 | `packages/assistant-cli` | Workspace-private CLI-only assistant wrappers, commands, terminal logging, and Ink chat UI. |
 | `packages/setup-cli` | Workspace-private CLI-only onboarding, host setup, and setup-wizard package. |

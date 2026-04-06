@@ -14,7 +14,7 @@ import {
   type HealthCommandDescriptorEntry,
 } from "@murphai/assistant-engine/health-cli-descriptors";
 import { pathSchema } from "@murphai/operator-config/vault-cli-contracts";
-import type { VaultServices } from "@murphai/vault-inbox/vault-services";
+import type { VaultServices } from "@murphai/assistant-engine/vault-services";
 
 function requireHealthCommandDescriptor(commandName: string): HealthCommandDescriptorEntry {
   const descriptor = healthEntityDescriptorByCommandName.get(commandName);

@@ -11,7 +11,7 @@ import {
   searchKnowledgePages,
   tailKnowledgeLog,
   upsertKnowledgePage,
-} from '@murphai/vault-inbox/knowledge'
+} from '@murphai/assistant-engine/knowledge'
 import {
   pathSchema,
   slugSchema,

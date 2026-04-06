@@ -8,7 +8,7 @@ import { test } from 'vitest'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import { registerAuditCommands } from '../src/commands/audit.js'
 import { registerSamplesCommands } from '../src/commands/samples.js'
-import { createUnwiredVaultServices } from '@murphai/vault-inbox/vault-services'
+import { createUnwiredVaultServices } from '@murphai/assistant-engine/vault-services'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData, runCli } from './cli-test-helpers.js'
 

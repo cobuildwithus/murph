@@ -10,7 +10,7 @@ import {
   suggestedCommandsCta,
 } from "./health-command-factory.js"
 import { localDateSchema, pathSchema } from "@murphai/operator-config/vault-cli-contracts"
-import type { VaultServices } from "@murphai/vault-inbox/vault-services"
+import type { VaultServices } from "@murphai/assistant-engine/vault-services"
 
 const limitOptionSchema = z.number().int().positive().max(200).default(50)
 const supplementSlugSchema = z

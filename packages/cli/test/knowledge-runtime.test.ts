@@ -9,7 +9,7 @@ import {
   searchKnowledgePages,
   tailKnowledgeLog,
   upsertKnowledgePage,
-} from '@murphai/vault-inbox/knowledge'
+} from '@murphai/assistant-engine/knowledge'
 
 const createdVaultRoots: string[] = []
 

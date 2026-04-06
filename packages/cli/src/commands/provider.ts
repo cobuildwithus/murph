@@ -4,11 +4,11 @@ import {
   pathSchema,
   showResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
-import type { VaultServices } from '@murphai/vault-inbox/vault-services'
+import type { VaultServices } from '@murphai/assistant-engine/vault-services'
 import {
   deleteProviderRecord,
   editProviderRecord,
-} from '@murphai/vault-inbox/usecases/provider-event'
+} from '@murphai/assistant-engine/usecases/provider-event'
 import { registerRegistryDocEntityGroup } from './health-command-factory.js'
 import {
   createEntityDeleteCommandConfig,

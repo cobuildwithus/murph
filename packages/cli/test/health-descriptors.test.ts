@@ -15,7 +15,7 @@ import { getHealthRegistryCommandMetadata } from "@murphai/assistant-engine/heal
 import {
   createExplicitHealthCoreServices,
   createExplicitHealthQueryServices,
-} from "@murphai/vault-inbox/usecases/explicit-health-family-services";
+} from "@murphai/assistant-engine/usecases/explicit-health-family-services";
 
 test("CLI health descriptors reuse shared taxonomy lookup metadata and scaffold templates", () => {
   for (const definition of healthEntityDefinitions) {

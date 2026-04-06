@@ -27,7 +27,6 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/operator-config": "../operator-config/src/index.ts",
   "@murphai/parsers": "../parsers/src/index.ts",
   "@murphai/runtime-state": "../runtime-state/src/index.ts",
-  "@murphai/vault-inbox": "../vault-inbox/src/index.ts",
 } as const;
 
 export default defineProject({
