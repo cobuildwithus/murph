@@ -157,7 +157,6 @@ model HostedWebInternalRequestNonce {
 enum HostedMemberStatus {
   invited
   registered
-  active
   suspended
 }
 
@@ -445,7 +444,6 @@ model ExecutionOutbox {
   completedAt   DateTime?             @map("completed_at")
   failedAt      DateTime?             @map("failed_at")
   lastError     String?               @map("last_error")
-  lastStatusJson Json?                @map("last_status_json")
   createdAt     DateTime              @default(now()) @map("created_at")
   updatedAt     DateTime              @updatedAt @map("updated_at")
 

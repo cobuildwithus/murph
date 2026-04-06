@@ -70,7 +70,7 @@ function initializeSchema(database: DatabaseSync): void {
     CREATE TABLE IF NOT EXISTS runner_meta (
       singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
       user_id TEXT NOT NULL,
-      activated INTEGER NOT NULL DEFAULT 0,
+      runtime_bootstrapped INTEGER NOT NULL DEFAULT 0,
       in_flight INTEGER NOT NULL DEFAULT 0,
       last_error_at TEXT,
       last_error_code TEXT,

@@ -235,7 +235,8 @@ export class RunnerQueueStore {
       throw error;
     }
 
-    meta.activated = meta.activated === 1 || dispatch.event.kind === "member.activated" ? 1 : 0;
+    meta.runtime_bootstrapped =
+      meta.runtime_bootstrapped === 1 || dispatch.event.kind === "member.activated" ? 1 : 0;
     this.deleteBackpressuredEventSync(dispatch.eventId);
     meta.user_id = dispatch.event.userId;
     this.writeMetaRowSync(meta);
@@ -578,7 +579,7 @@ export class RunnerQueueStore {
     const meta = this.requireMetaRowSync();
     const nextPendingAvailableAt = this.readNextPendingAvailableAtSync();
     meta.next_wake_at = resolveRunnerNextWakeAt({
-      activated: meta.activated === 1,
+      runtimeBootstrapped: meta.runtime_bootstrapped === 1,
       defaultAlarmDelayMs: input.defaultAlarmDelayMs,
       nextPendingAvailableAt,
       preferredWakeAt: input.preferredWakeAt ?? null,
@@ -679,7 +680,7 @@ export class RunnerQueueStore {
     const row = this.sql.exec<RunnerMetaRow>(
       `SELECT
         user_id,
-        activated,
+        runtime_bootstrapped,
         in_flight,
         last_error_at,
         last_error_code,
@@ -701,7 +702,7 @@ export class RunnerQueueStore {
       `INSERT OR REPLACE INTO runner_meta (
         singleton,
         user_id,
-        activated,
+        runtime_bootstrapped,
         in_flight,
         last_error_at,
         last_error_code,
@@ -710,7 +711,7 @@ export class RunnerQueueStore {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
-      meta.activated,
+      meta.runtime_bootstrapped,
       meta.in_flight,
       meta.last_error_at,
       meta.last_error_code,

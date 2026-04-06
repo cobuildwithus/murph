@@ -268,7 +268,7 @@ describe("hosted Stripe event reconciliation", () => {
         makeMember({
           billingMode: HostedBillingMode.subscription,
           billingStatus: HostedBillingStatus.active,
-          status: HostedMemberStatus.active,
+          status: HostedMemberStatus.registered,
         }),
       ],
       sessions: [
@@ -301,7 +301,7 @@ describe("hosted Stripe event reconciliation", () => {
 
     expect(harness.members[0]).toMatchObject({
       billingStatus: HostedBillingStatus.unpaid,
-      status: HostedMemberStatus.active,
+      status: HostedMemberStatus.registered,
     });
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
@@ -317,7 +317,7 @@ describe("hosted Stripe event reconciliation", () => {
         makeMember({
           billingMode: HostedBillingMode.subscription,
           billingStatus: HostedBillingStatus.active,
-          status: HostedMemberStatus.active,
+          status: HostedMemberStatus.registered,
         }),
       ],
       sessions: [
@@ -350,7 +350,7 @@ describe("hosted Stripe event reconciliation", () => {
 
     expect(harness.members[0]).toMatchObject({
       billingStatus: HostedBillingStatus.canceled,
-      status: HostedMemberStatus.active,
+      status: HostedMemberStatus.registered,
     });
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
@@ -366,7 +366,7 @@ describe("hosted Stripe event reconciliation", () => {
         makeMember({
           billingMode: HostedBillingMode.subscription,
           billingStatus: HostedBillingStatus.active,
-          status: HostedMemberStatus.active,
+          status: HostedMemberStatus.registered,
         }),
       ],
       sessions: [
@@ -402,7 +402,7 @@ describe("hosted Stripe event reconciliation", () => {
 
     expect(harness.members[0]).toMatchObject({
       billingStatus: HostedBillingStatus.paused,
-      status: HostedMemberStatus.active,
+      status: HostedMemberStatus.registered,
     });
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
@@ -418,7 +418,7 @@ describe("hosted Stripe event reconciliation", () => {
         makeMember({
           billingMode: HostedBillingMode.subscription,
           billingStatus: HostedBillingStatus.active,
-          status: HostedMemberStatus.active,
+          status: HostedMemberStatus.registered,
         }),
       ],
       sessions: [
@@ -451,7 +451,7 @@ describe("hosted Stripe event reconciliation", () => {
 
     expect(harness.members[0]).toMatchObject({
       billingStatus: HostedBillingStatus.canceled,
-      status: HostedMemberStatus.active,
+      status: HostedMemberStatus.registered,
     });
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
@@ -536,7 +536,7 @@ describe("hosted Stripe event reconciliation", () => {
 
     expect(harness.members[0]).toMatchObject({
       billingStatus: HostedBillingStatus.active,
-      status: HostedMemberStatus.active,
+      status: HostedMemberStatus.registered,
       stripeLatestBillingEventId: "evt_invoice_paid_123",
     });
     expect(harness.invites[0]).toMatchObject({
@@ -608,7 +608,7 @@ describe("hosted Stripe event reconciliation", () => {
 
     expect(harness.members[0]).toMatchObject({
       billingStatus: HostedBillingStatus.active,
-      status: HostedMemberStatus.active,
+      status: HostedMemberStatus.registered,
       stripeLatestBillingEventId: "evt_invoice_paid_inline_123",
     });
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
@@ -632,7 +632,7 @@ describe("hosted Stripe event reconciliation", () => {
         makeMember({
           billingMode: HostedBillingMode.subscription,
           billingStatus: HostedBillingStatus.active,
-          status: HostedMemberStatus.active,
+          status: HostedMemberStatus.registered,
           stripeLatestBillingEventCreatedAt: new Date("2026-03-28T10:00:00.000Z"),
           stripeLatestBillingEventId: "evt_prior_positive",
         }),
@@ -662,7 +662,7 @@ describe("hosted Stripe event reconciliation", () => {
 
     expect(harness.members[0]).toMatchObject({
       billingStatus: HostedBillingStatus.active,
-      status: HostedMemberStatus.active,
+      status: HostedMemberStatus.registered,
       stripeLatestBillingEventId: "evt_invoice_paid_already_active",
     });
     expect(harness.invites[0]).toMatchObject({
@@ -710,7 +710,7 @@ describe("hosted Stripe event reconciliation", () => {
 
     expect(harness.members[0]).toMatchObject({
       billingStatus: HostedBillingStatus.active,
-      status: HostedMemberStatus.active,
+      status: HostedMemberStatus.registered,
       stripeLatestBillingEventId: "evt_invoice_paid_no_linq_chat",
     });
   });
@@ -730,7 +730,7 @@ describe("hosted Stripe event reconciliation", () => {
         makeMember({
           billingMode: HostedBillingMode.subscription,
           billingStatus: startingStatus,
-          status: HostedMemberStatus.active,
+          status: HostedMemberStatus.registered,
         }),
       ],
     });
@@ -758,7 +758,7 @@ describe("hosted Stripe event reconciliation", () => {
 
     expect(harness.members[0]).toMatchObject({
       billingStatus: HostedBillingStatus.active,
-      status: HostedMemberStatus.active,
+      status: HostedMemberStatus.registered,
       stripeLatestBillingEventId: `evt_invoice_paid_resume_${startingStatus}`,
     });
     expect(harness.invites[0]).toMatchObject({
@@ -802,7 +802,7 @@ describe("hosted Stripe event reconciliation", () => {
 
     expect(harness.members[0]).toMatchObject({
       billingStatus: HostedBillingStatus.active,
-      status: HostedMemberStatus.active,
+      status: HostedMemberStatus.registered,
       stripeLatestBillingEventId: "evt_invoice_paid_direct_subscription_123",
     });
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
@@ -824,7 +824,7 @@ describe("hosted Stripe event reconciliation", () => {
         makeMember({
           billingMode: HostedBillingMode.subscription,
           billingStatus: HostedBillingStatus.unpaid,
-          status: HostedMemberStatus.active,
+          status: HostedMemberStatus.registered,
           stripeLatestBillingEventCreatedAt: newerEventCreatedAt,
           stripeLatestBillingEventId: "evt_subscription_unpaid_123",
         }),
@@ -854,7 +854,7 @@ describe("hosted Stripe event reconciliation", () => {
 
     expect(harness.members[0]).toMatchObject({
       billingStatus: HostedBillingStatus.unpaid,
-      status: HostedMemberStatus.active,
+      status: HostedMemberStatus.registered,
       stripeLatestBillingEventCreatedAt: newerEventCreatedAt,
       stripeLatestBillingEventId: "evt_subscription_unpaid_123",
     });
@@ -870,7 +870,7 @@ describe("hosted Stripe event reconciliation", () => {
         makeMember({
           billingMode: HostedBillingMode.subscription,
           billingStatus: HostedBillingStatus.active,
-          status: HostedMemberStatus.active,
+          status: HostedMemberStatus.registered,
         }),
       ],
       sessions: [
@@ -925,7 +925,7 @@ describe("hosted Stripe event reconciliation", () => {
     expect(mocks.stripeSubscriptionsRetrieve).toHaveBeenCalledWith("sub_123");
     expect(harness.members[0]).toMatchObject({
       billingStatus: HostedBillingStatus.active,
-      status: HostedMemberStatus.active,
+      status: HostedMemberStatus.registered,
       stripeLatestBillingEventId: "evt_same_second_a_paid",
     });
     expect(harness.invites[0]).toMatchObject({
@@ -946,7 +946,7 @@ describe("hosted Stripe event reconciliation", () => {
         makeMember({
           billingMode: HostedBillingMode.subscription,
           billingStatus: HostedBillingStatus.unpaid,
-          status: HostedMemberStatus.active,
+          status: HostedMemberStatus.registered,
           stripeLatestBillingEventCreatedAt: sameSecond,
           stripeLatestBillingEventId: "evt_same_second_unpaid",
         }),
@@ -976,7 +976,7 @@ describe("hosted Stripe event reconciliation", () => {
 
     expect(harness.members[0]).toMatchObject({
       billingStatus: HostedBillingStatus.unpaid,
-      status: HostedMemberStatus.active,
+      status: HostedMemberStatus.registered,
       stripeLatestBillingEventId: "evt_same_second_unpaid",
     });
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
@@ -993,7 +993,7 @@ describe("hosted Stripe event reconciliation", () => {
         makeMember({
           billingMode: HostedBillingMode.subscription,
           billingStatus: HostedBillingStatus.unpaid,
-          status: HostedMemberStatus.active,
+          status: HostedMemberStatus.registered,
           stripeLatestBillingEventCreatedAt: sameSecond,
           stripeLatestBillingEventId: "evt_same_second_unpaid",
           walletAddress: "0x00000000000000000000000000000000000000aa",
@@ -1024,7 +1024,7 @@ describe("hosted Stripe event reconciliation", () => {
 
     expect(harness.members[0]).toMatchObject({
       billingStatus: HostedBillingStatus.incomplete,
-      status: HostedMemberStatus.active,
+      status: HostedMemberStatus.registered,
       stripeLatestBillingEventId: "evt_same_second_paid_revnet",
     });
     expect(harness.revnetIssuances[0]).toMatchObject({
@@ -1047,7 +1047,7 @@ describe("hosted Stripe event reconciliation", () => {
         makeMember({
           billingMode: HostedBillingMode.payment,
           billingStatus: HostedBillingStatus.active,
-          status: HostedMemberStatus.active,
+          status: HostedMemberStatus.registered,
           stripeLatestBillingEventCreatedAt: sameSecond,
           stripeLatestBillingEventId: "evt_same_second_paid",
           stripeSubscriptionId: null,
@@ -1214,7 +1214,7 @@ describe("hosted Stripe event reconciliation", () => {
     });
     expect(harness.members[0]).toMatchObject({
       billingStatus: HostedBillingStatus.active,
-      status: HostedMemberStatus.active,
+      status: HostedMemberStatus.registered,
       stripeLatestCheckoutSessionId: "cs_123",
       stripeSubscriptionId: null,
     });
@@ -1388,7 +1388,7 @@ describe("hosted Stripe event reconciliation", () => {
     });
     expect(harness.members[0]).toMatchObject({
       billingStatus: HostedBillingStatus.active,
-      status: HostedMemberStatus.active,
+      status: HostedMemberStatus.registered,
     });
     expect(harness.invites[0]).toMatchObject({
       paidAt: expect.any(Date),
@@ -1566,7 +1566,7 @@ describe("hosted Stripe event reconciliation", () => {
         makeMember({
           billingMode: HostedBillingMode.payment,
           billingStatus: HostedBillingStatus.active,
-          status: HostedMemberStatus.active,
+          status: HostedMemberStatus.registered,
           stripeSubscriptionId: null,
         }),
       ],
@@ -1744,7 +1744,7 @@ describe("hosted Stripe event reconciliation", () => {
 
     expect(harness.members[0]).toMatchObject({
       billingStatus: HostedBillingStatus.active,
-      status: HostedMemberStatus.active,
+      status: HostedMemberStatus.registered,
       stripeLatestBillingEventId: "evt_invoice_paid_retry_billing_cas",
     });
     expect(harness.invites[0]).toMatchObject({
@@ -1825,7 +1825,7 @@ describe("hosted Stripe event reconciliation", () => {
 
     expect(harness.members[0]).toMatchObject({
       billingStatus: HostedBillingStatus.active,
-      status: HostedMemberStatus.active,
+      status: HostedMemberStatus.registered,
       stripeLatestBillingEventId: "evt_later_positive_4",
     });
     expect(harness.invites[0]).toMatchObject({
@@ -1856,7 +1856,7 @@ describe("hosted Stripe event reconciliation", () => {
         makeMember({
           billingMode: HostedBillingMode.payment,
           billingStatus: HostedBillingStatus.active,
-          status: HostedMemberStatus.active,
+          status: HostedMemberStatus.registered,
           stripeSubscriptionId: null,
         }),
       ],

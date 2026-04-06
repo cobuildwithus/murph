@@ -14,6 +14,8 @@ describe("hosted execution outbox payload storage", () => {
       },
       eventId: "evt_share_123",
       occurredAt: "2026-04-04T00:00:00.000Z",
+    }, {
+      payloadRef: buildTestPayloadRef("evt_share_123"),
     });
 
     expect((payload as { storage?: unknown }).storage).toBe("reference");
@@ -35,6 +37,8 @@ describe("hosted execution outbox payload storage", () => {
       },
       eventId: "evt_wake_123",
       occurredAt: "2026-04-04T00:00:00.000Z",
+    }, {
+      payloadRef: buildTestPayloadRef("evt_wake_123"),
     });
 
     expect((payload as { storage?: unknown }).storage).toBe("reference");
@@ -56,6 +60,8 @@ describe("hosted execution outbox payload storage", () => {
       },
       eventId: "evt_activation_123",
       occurredAt: "2026-04-04T00:00:00.000Z",
+    }, {
+      payloadRef: buildTestPayloadRef("evt_activation_123"),
     });
 
     expect((payload as { storage?: unknown }).storage).toBe("reference");
@@ -75,6 +81,8 @@ describe("hosted execution outbox payload storage", () => {
       },
       eventId: "evt_gateway_123",
       occurredAt: "2026-04-04T00:00:00.000Z",
+    }, {
+      payloadRef: buildTestPayloadRef("evt_gateway_123"),
     });
 
     expect((payload as { storage?: unknown }).storage).toBe("reference");
@@ -103,3 +111,9 @@ describe("hosted execution outbox payload storage", () => {
     )).toThrow("Hosted execution gateway.message.send outbox payloads must use reference storage.");
   });
 });
+
+function buildTestPayloadRef(eventId: string): { key: string } {
+  return {
+    key: `transient/dispatch-payloads/member_123/${eventId}.json`,
+  };
+}

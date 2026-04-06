@@ -751,7 +751,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           normalizedPhoneNumber: "+15551234567",
-          status: HostedMemberStatus.active,
+          status: HostedMemberStatus.registered,
         }),
       },
     });

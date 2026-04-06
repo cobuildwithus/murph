@@ -56,7 +56,7 @@ export interface PendingDispatchRecord extends PendingDispatchMetaRecord {
 export type RunnerBundleVersions = HostedExecutionBundleSlotMap<number>;
 
 export interface RunnerStateRecord {
-  activated: boolean;
+  runtimeBootstrapped: boolean;
   backpressuredEventIds: string[];
   bundleRefs: HostedExecutionBundleRefs;
   bundleVersions: RunnerBundleVersions;

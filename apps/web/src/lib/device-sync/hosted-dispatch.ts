@@ -83,7 +83,7 @@ export function mapHostedDeviceSyncWakeReason(
     case "webhook-accepted":
       return "webhook_hint";
     default:
-      return source satisfies never;
+      throw new Error(`Unsupported hosted device-sync wake source: ${String(source)}`);
   }
 }
 

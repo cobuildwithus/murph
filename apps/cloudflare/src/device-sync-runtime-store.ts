@@ -1,35 +1,32 @@
+import {
+  parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
+} from "@murphai/hosted-execution";
 import type {
   HostedExecutionDeviceSyncRuntimeApplyEntry,
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
+  HostedExecutionDeviceSyncRuntimeConnectionSeed,
   HostedExecutionDeviceSyncRuntimeConnectionSnapshot,
   HostedExecutionDeviceSyncRuntimeSnapshotRequest,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/hosted-execution";
-import { parseHostedExecutionDeviceSyncRuntimeSnapshotResponse } from "@murphai/hosted-execution";
 
 import type { R2BucketLike } from "./bundle-store.js";
-import {
-  buildHostedStorageAad,
-  deriveHostedStorageOpaqueId,
-} from "./crypto-context.js";
+import { buildHostedStorageAad, deriveHostedStorageOpaqueId } from "./crypto-context.js";
+import { readEncryptedR2Json, writeEncryptedR2Json } from "./crypto.js";
 import { listHostedStorageObjectKeys } from "./storage-paths.js";
-import {
-  readEncryptedR2Json,
-  writeEncryptedR2Json,
-} from "./crypto.js";
 
-const DEVICE_SYNC_RUNTIME_MIRROR_SCHEMA = "murph.hosted-device-sync-runtime-mirror.v1";
+const DEVICE_SYNC_RUNTIME_SCHEMA = "murph.hosted-device-sync-runtime.v1";
+const DEVICE_SYNC_RUNTIME_LEGACY_SCHEMA = "murph.hosted-device-sync-runtime-mirror.v1";
 
-interface StoredDeviceSyncRuntimeMirror {
+interface StoredDeviceSyncRuntimeState {
   generatedAt: string;
-  schema: typeof DEVICE_SYNC_RUNTIME_MIRROR_SCHEMA;
+  schema: typeof DEVICE_SYNC_RUNTIME_SCHEMA | typeof DEVICE_SYNC_RUNTIME_LEGACY_SCHEMA;
   snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse;
 }
 
 export interface HostedDeviceSyncRuntimeStore {
   applyUpdates(request: HostedExecutionDeviceSyncRuntimeApplyRequest): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse>;
-  mergeSnapshot(snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
   readSnapshot(request: HostedExecutionDeviceSyncRuntimeSnapshotRequest): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
 }
 
@@ -42,17 +39,21 @@ export function createHostedDeviceSyncRuntimeStore(input: {
   return {
     async applyUpdates(request) {
       const appliedAt = request.occurredAt ?? new Date().toISOString();
-      const current = await readStoredDeviceSyncRuntimeMirror({
+      const current = await readStoredDeviceSyncRuntimeState({
         ...input,
         userId: request.userId,
       });
       const snapshot = current?.snapshot ?? emptySnapshot(request.userId, appliedAt);
-      const byConnectionId = new Map(snapshot.connections.map((entry) => [entry.connection.id, cloneConnectionSnapshot(entry)]));
+      const byConnectionId = new Map(
+        snapshot.connections.map((entry) => [entry.connection.id, cloneConnectionSnapshot(entry)]),
+      );
       const updates: HostedExecutionDeviceSyncRuntimeApplyEntry[] = [];
 
       for (const update of request.updates) {
-        const currentConnection = byConnectionId.get(update.connectionId);
-        if (!currentConnection) {
+        const currentConnection = byConnectionId.get(update.connectionId) ?? null;
+        const createdFromSeed = !currentConnection && Boolean(update.seed);
+
+        if (!currentConnection && !update.seed) {
           updates.push({
             connection: null,
             connectionId: update.connectionId,
@@ -62,22 +63,26 @@ export function createHostedDeviceSyncRuntimeStore(input: {
           continue;
         }
 
-        const nextConnection = cloneConnectionSnapshot(currentConnection);
+        const baseConnection = currentConnection
+          ? cloneConnectionSnapshot(currentConnection)
+          : createSeededConnectionSnapshot(update.connectionId, update.seed!, appliedAt);
+        const nextConnection = cloneConnectionSnapshot(baseConnection);
         const connectionMutationRequested = Boolean(update.connection) || update.tokenBundle !== undefined;
-        const localStateMutationRequested = Boolean(update.localState);
         const connectionVersionMismatch = Boolean(
-          connectionMutationRequested
+          currentConnection
+          && connectionMutationRequested
           && update.observedUpdatedAt !== undefined
           && update.observedUpdatedAt !== null
           && (nextConnection.connection.updatedAt ?? null) !== update.observedUpdatedAt,
         );
         const tokenVersionMismatch = Boolean(
-          update.tokenBundle !== undefined
+          currentConnection
+          && update.tokenBundle !== undefined
           && update.tokenBundle !== null
           && nextConnection.tokenBundle
           && update.observedTokenVersion !== undefined
           && update.observedTokenVersion !== null
-          && nextConnection.tokenBundle.tokenVersion !== update.observedTokenVersion
+          && nextConnection.tokenBundle.tokenVersion !== update.observedTokenVersion,
         );
 
         if (!connectionVersionMismatch && update.connection) {
@@ -122,16 +127,16 @@ export function createHostedDeviceSyncRuntimeStore(input: {
           tokenUpdate = "skipped_version_mismatch";
         } else if (update.connection?.status === "disconnected") {
           nextConnection.tokenBundle = null;
-          tokenUpdate = currentConnection.tokenBundle ? "cleared" : "missing";
+          tokenUpdate = baseConnection.tokenBundle ? "cleared" : "missing";
         } else if (update.tokenBundle === null) {
           nextConnection.tokenBundle = null;
-          tokenUpdate = currentConnection.tokenBundle ? "cleared" : "missing";
+          tokenUpdate = baseConnection.tokenBundle ? "cleared" : "missing";
         } else {
-          const nextTokenVersion = currentConnection.tokenBundle
-            ? hasSameTokenBundle(currentConnection.tokenBundle, update.tokenBundle)
-              ? currentConnection.tokenBundle.tokenVersion
-              : currentConnection.tokenBundle.tokenVersion + 1
-            : 1;
+          const nextTokenVersion = baseConnection.tokenBundle
+            ? hasSameTokenBundle(baseConnection.tokenBundle, update.tokenBundle)
+              ? baseConnection.tokenBundle.tokenVersion
+              : baseConnection.tokenBundle.tokenVersion + 1
+            : Math.max(1, update.tokenBundle.tokenVersion);
 
           nextConnection.tokenBundle = {
             ...update.tokenBundle,
@@ -141,9 +146,15 @@ export function createHostedDeviceSyncRuntimeStore(input: {
           tokenUpdate = "applied";
         }
 
+        if (!nextConnection.connection.updatedAt) {
+          nextConnection.connection.updatedAt = baseConnection.connection.updatedAt ?? appliedAt;
+        }
+
         if (!connectionVersionMismatch && connectionMutationRequested) {
           nextConnection.connection.updatedAt = appliedAt;
-        } else if (!nextConnection.connection.updatedAt) {
+        }
+
+        if (createdFromSeed && !nextConnection.connection.updatedAt) {
           nextConnection.connection.updatedAt = appliedAt;
         }
 
@@ -151,7 +162,7 @@ export function createHostedDeviceSyncRuntimeStore(input: {
         updates.push({
           connection: nextConnection.connection,
           connectionId: update.connectionId,
-          status: "updated",
+          status: createdFromSeed ? "created" : "updated",
           tokenUpdate,
         });
       }
@@ -162,11 +173,11 @@ export function createHostedDeviceSyncRuntimeStore(input: {
         userId: request.userId,
       };
 
-      await writeStoredDeviceSyncRuntimeMirror({
+      await writeStoredDeviceSyncRuntimeState({
         ...input,
-        mirror: {
+        state: {
           generatedAt: appliedAt,
-          schema: DEVICE_SYNC_RUNTIME_MIRROR_SCHEMA,
+          schema: DEVICE_SYNC_RUNTIME_SCHEMA,
           snapshot: nextSnapshot,
         },
         userId: request.userId,
@@ -179,44 +190,8 @@ export function createHostedDeviceSyncRuntimeStore(input: {
       };
     },
 
-    async mergeSnapshot(snapshot) {
-      const current = await readStoredDeviceSyncRuntimeMirror({
-        ...input,
-        userId: snapshot.userId,
-      });
-      const currentByConnectionId = new Map(
-        (current?.snapshot.connections ?? []).map((entry) => [entry.connection.id, cloneConnectionSnapshot(entry)]),
-      );
-
-      for (const incoming of snapshot.connections) {
-        const existing = currentByConnectionId.get(incoming.connection.id);
-        currentByConnectionId.set(
-          incoming.connection.id,
-          selectPreferredConnectionSnapshot(existing ?? null, incoming),
-        );
-      }
-
-      const mergedSnapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse = {
-        connections: sortConnectionSnapshots([...currentByConnectionId.values()]),
-        generatedAt: snapshot.generatedAt,
-        userId: snapshot.userId,
-      };
-
-      await writeStoredDeviceSyncRuntimeMirror({
-        ...input,
-        mirror: {
-          generatedAt: snapshot.generatedAt,
-          schema: DEVICE_SYNC_RUNTIME_MIRROR_SCHEMA,
-          snapshot: mergedSnapshot,
-        },
-        userId: snapshot.userId,
-      });
-
-      return mergedSnapshot;
-    },
-
     async readSnapshot(request) {
-      const current = await readStoredDeviceSyncRuntimeMirror({
+      const current = await readStoredDeviceSyncRuntimeState({
         ...input,
         userId: request.userId,
       });
@@ -250,43 +225,26 @@ function cloneConnectionSnapshot(
   return structuredClone(entry);
 }
 
-function selectPreferredConnectionSnapshot(
-  existing: HostedExecutionDeviceSyncRuntimeConnectionSnapshot | null,
-  incoming: HostedExecutionDeviceSyncRuntimeConnectionSnapshot,
+function createSeededConnectionSnapshot(
+  connectionId: string,
+  seed: HostedExecutionDeviceSyncRuntimeConnectionSeed,
+  appliedAt: string,
 ): HostedExecutionDeviceSyncRuntimeConnectionSnapshot {
-  if (!existing) {
-    return cloneConnectionSnapshot(incoming);
+  if (seed.connection.id !== connectionId) {
+    throw new TypeError(
+      `Hosted device-sync runtime seed connectionId mismatch: expected ${connectionId}, received ${seed.connection.id}.`,
+    );
   }
 
-  const existingUpdatedAt = existing.connection.updatedAt ?? existing.connection.createdAt;
-  const incomingUpdatedAt = incoming.connection.updatedAt ?? incoming.connection.createdAt;
-
-  if (existingUpdatedAt.localeCompare(incomingUpdatedAt) > 0) {
-    return cloneConnectionSnapshot(existing);
-  }
-
-  if (existingUpdatedAt === incomingUpdatedAt) {
-    const existingTokenVersion = existing.tokenBundle?.tokenVersion ?? -1;
-    const incomingTokenVersion = incoming.tokenBundle?.tokenVersion ?? -1;
-
-    if (existingTokenVersion > incomingTokenVersion) {
-      return cloneConnectionSnapshot(existing);
-    }
-  }
-
-  const next = cloneConnectionSnapshot(incoming);
-
-  // Metadata-only mirrors from hosted web must not erase the canonical Cloudflare token escrow.
-  if (
-    next.tokenBundle === null
-    && existing.tokenBundle
-    && next.connection.status !== "disconnected"
-  ) {
-    next.tokenBundle = structuredClone(existing.tokenBundle);
-    next.connection.accessTokenExpiresAt = existing.tokenBundle.accessTokenExpiresAt;
-  }
-
-  return next;
+  return {
+    connection: {
+      ...structuredClone(seed.connection),
+      accessTokenExpiresAt: seed.tokenBundle?.accessTokenExpiresAt ?? seed.connection.accessTokenExpiresAt,
+      updatedAt: seed.connection.updatedAt ?? seed.connection.createdAt ?? appliedAt,
+    },
+    localState: structuredClone(seed.localState),
+    tokenBundle: seed.tokenBundle ? structuredClone(seed.tokenBundle) : null,
+  };
 }
 
 function sortConnectionSnapshots(
@@ -313,14 +271,14 @@ function hasSameTokenBundle(
     && left.refreshToken === right.refreshToken;
 }
 
-async function readStoredDeviceSyncRuntimeMirror(input: {
+async function readStoredDeviceSyncRuntimeState(input: {
   bucket: R2BucketLike;
   key: Uint8Array;
   keyId: string;
   keysById?: Readonly<Record<string, Uint8Array>>;
   userId: string;
-}): Promise<StoredDeviceSyncRuntimeMirror | null> {
-  for (const key of await deviceSyncRuntimeMirrorObjectKeys(input.key, input.keysById, input.userId)) {
+}): Promise<StoredDeviceSyncRuntimeState | null> {
+  for (const key of await deviceSyncRuntimeStateObjectKeys(input.key, input.keysById, input.userId)) {
     const value = await readEncryptedR2Json({
       aad: buildHostedStorageAad({
         key,
@@ -333,7 +291,7 @@ async function readStoredDeviceSyncRuntimeMirror(input: {
       expectedKeyId: input.keyId,
       key,
       parse(value) {
-        return parseStoredDeviceSyncRuntimeMirror(value);
+        return parseStoredDeviceSyncRuntimeState(value);
       },
       scope: "device-sync-runtime",
     });
@@ -346,14 +304,14 @@ async function readStoredDeviceSyncRuntimeMirror(input: {
   return null;
 }
 
-async function writeStoredDeviceSyncRuntimeMirror(input: {
+async function writeStoredDeviceSyncRuntimeState(input: {
   bucket: R2BucketLike;
   key: Uint8Array;
   keyId: string;
-  mirror: StoredDeviceSyncRuntimeMirror;
+  state: StoredDeviceSyncRuntimeState;
   userId: string;
 }): Promise<void> {
-  const key = await deviceSyncRuntimeMirrorObjectKey(input.key, input.userId);
+  const key = await deviceSyncRuntimeStateObjectKey(input.key, input.userId);
   await writeEncryptedR2Json({
     aad: buildHostedStorageAad({
       key,
@@ -365,33 +323,34 @@ async function writeStoredDeviceSyncRuntimeMirror(input: {
     key,
     keyId: input.keyId,
     scope: "device-sync-runtime",
-    value: input.mirror,
+    value: input.state,
   });
 }
 
-function parseStoredDeviceSyncRuntimeMirror(value: unknown): StoredDeviceSyncRuntimeMirror {
-  const record = requireRecord(value, "Hosted device-sync runtime mirror");
+function parseStoredDeviceSyncRuntimeState(value: unknown): StoredDeviceSyncRuntimeState {
+  const record = requireRecord(value, "Hosted device-sync runtime state");
 
   return {
-    generatedAt: requireString(record.generatedAt, "Hosted device-sync runtime mirror generatedAt"),
-    schema: requireSchema(record.schema, "Hosted device-sync runtime mirror schema"),
-    snapshot: requireSnapshot(record.snapshot),
+    generatedAt: requireString(record.generatedAt, "Hosted device-sync runtime state.generatedAt"),
+    schema: requireSchema(record.schema, "Hosted device-sync runtime state.schema"),
+    snapshot: parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(record.snapshot),
   };
 }
 
-function requireSnapshot(value: unknown): HostedExecutionDeviceSyncRuntimeSnapshotResponse {
-  return parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(value);
-}
-
-function requireSchema(value: unknown, label: string): typeof DEVICE_SYNC_RUNTIME_MIRROR_SCHEMA {
+function requireSchema(
+  value: unknown,
+  label: string,
+): StoredDeviceSyncRuntimeState["schema"] {
   const schema = requireString(value, label);
-  if (schema !== DEVICE_SYNC_RUNTIME_MIRROR_SCHEMA) {
-    throw new TypeError(`${label} must be ${DEVICE_SYNC_RUNTIME_MIRROR_SCHEMA}.`);
+  if (schema !== DEVICE_SYNC_RUNTIME_SCHEMA && schema !== DEVICE_SYNC_RUNTIME_LEGACY_SCHEMA) {
+    throw new TypeError(
+      `${label} must be ${DEVICE_SYNC_RUNTIME_SCHEMA} or ${DEVICE_SYNC_RUNTIME_LEGACY_SCHEMA}.`,
+    );
   }
   return schema;
 }
 
-async function deviceSyncRuntimeMirrorObjectKey(rootKey: Uint8Array, userId: string): Promise<string> {
+async function deviceSyncRuntimeStateObjectKey(rootKey: Uint8Array, userId: string): Promise<string> {
   const userSegment = await deriveHostedStorageOpaqueId({
     length: 24,
     rootKey,
@@ -402,13 +361,13 @@ async function deviceSyncRuntimeMirrorObjectKey(rootKey: Uint8Array, userId: str
   return `transient/device-sync-runtime/${userSegment}.json`;
 }
 
-async function deviceSyncRuntimeMirrorObjectKeys(
+async function deviceSyncRuntimeStateObjectKeys(
   rootKey: Uint8Array,
   keysById: Readonly<Record<string, Uint8Array>> | undefined,
   userId: string,
 ): Promise<string[]> {
   return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
-    deviceSyncRuntimeMirrorObjectKey(candidateRootKey, userId)
+    deviceSyncRuntimeStateObjectKey(candidateRootKey, userId)
   );
 }
 
@@ -419,16 +378,10 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function requireArray(value: unknown, label: string): unknown[] {
-  if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array.`);
-  }
-  return value;
-}
-
 function requireString(value: unknown, label: string): string {
-  if (typeof value !== "string" || value.length === 0) {
+  if (typeof value !== "string" || value.trim().length === 0) {
     throw new TypeError(`${label} must be a non-empty string.`);
   }
-  return value;
+
+  return value.trim();
 }

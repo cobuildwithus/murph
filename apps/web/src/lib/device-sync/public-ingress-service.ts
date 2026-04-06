@@ -42,25 +42,21 @@ export class HostedDeviceSyncPublicIngressService {
             connectionId: account.id,
             provider: account.provider,
           });
-          const existingTokenVersion =
-            existingRuntime.connections.find((entry) => entry.connection.id === account.id)?.tokenBundle?.tokenVersion
-            ?? 0;
+          const existingConnection =
+            existingRuntime.connections.find((entry) => entry.connection.id === account.id)
+            ?? null;
+          const nextTokenVersion = (existingConnection?.tokenBundle?.tokenVersion ?? 0) + 1;
 
-          await controlClient.putDeviceSyncRuntimeSnapshot(userId, {
-            connections: [
+          await controlClient.applyDeviceSyncRuntimeUpdates(userId, {
+            occurredAt: now,
+            updates: [
               {
+                connectionId: account.id,
                 connection: {
-                  accessTokenExpiresAt: connection.tokens.accessTokenExpiresAt ?? null,
-                  connectedAt: account.connectedAt,
-                  createdAt: account.createdAt,
                   displayName: account.displayName,
-                  externalAccountId: account.externalAccountId,
-                  id: account.id,
                   metadata: account.metadata,
-                  provider: account.provider,
                   scopes: account.scopes,
                   status: account.status,
-                  updatedAt: account.updatedAt,
                 },
                 localState: {
                   lastErrorCode: account.lastErrorCode,
@@ -71,17 +67,48 @@ export class HostedDeviceSyncPublicIngressService {
                   lastWebhookAt: account.lastWebhookAt,
                   nextReconcileAt: account.nextReconcileAt,
                 },
+                observedTokenVersion: existingConnection?.tokenBundle?.tokenVersion ?? null,
+                observedUpdatedAt: existingConnection?.connection.updatedAt ?? null,
+                seed: {
+                  connection: {
+                    accessTokenExpiresAt: connection.tokens.accessTokenExpiresAt ?? null,
+                    connectedAt: account.connectedAt,
+                    createdAt: account.createdAt,
+                    displayName: account.displayName,
+                    externalAccountId: account.externalAccountId,
+                    id: account.id,
+                    metadata: account.metadata,
+                    provider: account.provider,
+                    scopes: account.scopes,
+                    status: account.status,
+                    updatedAt: account.updatedAt,
+                  },
+                  localState: {
+                    lastErrorCode: account.lastErrorCode,
+                    lastErrorMessage: account.lastErrorMessage,
+                    lastSyncCompletedAt: account.lastSyncCompletedAt,
+                    lastSyncErrorAt: account.lastSyncErrorAt,
+                    lastSyncStartedAt: account.lastSyncStartedAt,
+                    lastWebhookAt: account.lastWebhookAt,
+                    nextReconcileAt: account.nextReconcileAt,
+                  },
+                  tokenBundle: {
+                    accessToken: connection.tokens.accessToken,
+                    accessTokenExpiresAt: connection.tokens.accessTokenExpiresAt ?? null,
+                    keyVersion: this.context.env.encryptionKeyVersion,
+                    refreshToken: connection.tokens.refreshToken ?? null,
+                    tokenVersion: nextTokenVersion,
+                  },
+                },
                 tokenBundle: {
                   accessToken: connection.tokens.accessToken,
                   accessTokenExpiresAt: connection.tokens.accessTokenExpiresAt ?? null,
                   keyVersion: this.context.env.encryptionKeyVersion,
                   refreshToken: connection.tokens.refreshToken ?? null,
-                  tokenVersion: existingTokenVersion + 1,
+                  tokenVersion: nextTokenVersion,
                 },
               },
             ],
-            generatedAt: now,
-            userId,
           });
 
           await handleHostedDeviceSyncConnectionEstablished({

@@ -28,10 +28,6 @@ import {
   dispatchStoredHostedExecutionStatus,
 } from "./dispatch";
 import {
-  hydrateHostedExecutionDispatch,
-  isPermanentHostedExecutionHydrationError,
-} from "./hydration";
-import {
   readHostedExecutionOutboxPayload,
   serializeHostedExecutionOutboxPayload,
 } from "./outbox-payload";
@@ -267,7 +263,7 @@ async function processHostedExecutionOutboxRecord(
       throw createHostedExecutionOutboxPayloadError(record.eventId);
     }
 
-    const preparedDispatch = await prepareHostedExecutionDispatchAttempt(record, prisma, payload);
+    const preparedDispatch = await prepareHostedExecutionDispatchAttempt(record, payload);
     payload = preparedDispatch.payload;
     cleanupPayload = preparedDispatch.payload;
     persistedPayloadJson = preparedDispatch.payloadJson;
@@ -291,7 +287,6 @@ async function processHostedExecutionOutboxRecord(
       completedAt: lifecycle.status === ExecutionOutboxStatus.completed ? new Date(nowIso) : null,
       failedAt: lifecycle.status === ExecutionOutboxStatus.failed ? new Date(nowIso) : null,
       lastError: lifecycle.lastError,
-      lastStatusJson: dispatchResult as unknown as Prisma.InputJsonValue,
       nextAttemptAt:
         lifecycle.status === ExecutionOutboxStatus.completed || lifecycle.status === ExecutionOutboxStatus.failed
           ? null
@@ -312,18 +307,17 @@ async function processHostedExecutionOutboxRecord(
 
     return updatedRecord;
   } catch (error) {
-    const permanentHydrationFailure = isPermanentHostedExecutionHydrationError(error);
+    const permanentPayloadFailure = isPermanentHostedExecutionOutboxError(error);
     const nextRecord = await finalizeHostedExecutionOutboxAttempt(prisma, record, {
       acceptedAt: record.acceptedAt,
       completedAt: null,
-      failedAt: permanentHydrationFailure ? new Date(nowIso) : null,
+      failedAt: permanentPayloadFailure ? new Date(nowIso) : null,
       lastError: error instanceof Error ? error.message : String(error),
-      lastStatusJson: record.lastStatusJson as Prisma.InputJsonValue | null,
-      nextAttemptAt: permanentHydrationFailure
+      nextAttemptAt: permanentPayloadFailure
         ? null
         : new Date(Date.parse(nowIso) + computeRetryDelayMs(record.attemptCount)),
       payloadJson: persistedPayloadJson,
-      status: permanentHydrationFailure
+      status: permanentPayloadFailure
         ? ExecutionOutboxStatus.failed
         : (record.acceptedAt ? ExecutionOutboxStatus.accepted : ExecutionOutboxStatus.pending),
     });
@@ -334,7 +328,6 @@ async function processHostedExecutionOutboxRecord(
 
 async function prepareHostedExecutionDispatchAttempt(
   record: ExecutionOutbox,
-  prisma: PrismaClient,
   payload: HostedExecutionOutboxPayload,
 ): Promise<
   | {
@@ -358,28 +351,12 @@ async function prepareHostedExecutionDispatchAttempt(
     };
   }
 
-  if (payload.payloadRef) {
-    return {
-      dispatchMode: "stored",
-      payload,
-      payloadJson: record.payloadJson as Prisma.InputJsonValue,
-    };
-  }
-
-  const hydratedDispatch = await hydrateHostedExecutionDispatch(record, prisma);
-  const stagedPayload = await maybeStageHostedExecutionDispatchPayload(hydratedDispatch);
-
-  if (stagedPayload && stagedPayload.storage === "reference" && stagedPayload.payloadRef) {
-    return {
-      dispatchMode: "stored",
-      payload: stagedPayload,
-      payloadJson: stagedPayload as unknown as Prisma.InputJsonObject,
-    };
+  if (!payload.payloadRef) {
+    throw createHostedExecutionOutboxPayloadRefError(record.eventId);
   }
 
   return {
-    dispatch: hydratedDispatch,
-    dispatchMode: "direct",
+    dispatchMode: "stored",
     payload,
     payloadJson: record.payloadJson as Prisma.InputJsonValue,
   };
@@ -434,7 +411,6 @@ async function finalizeHostedExecutionOutboxAttempt(
     completedAt: Date | null;
     failedAt: Date | null;
     lastError: string | null;
-    lastStatusJson: Prisma.InputJsonValue | null;
     nextAttemptAt: Date | null;
     payloadJson: Prisma.InputJsonValue;
     status: ExecutionOutboxStatus;
@@ -451,7 +427,6 @@ async function finalizeHostedExecutionOutboxAttempt(
       completedAt: input.completedAt,
       failedAt: input.failedAt,
       lastError: input.lastError,
-      lastStatusJson: input.lastStatusJson ?? Prisma.JsonNull,
       nextAttemptAt: input.nextAttemptAt ?? record.nextAttemptAt,
       payloadJson: input.payloadJson,
       claimToken: null,
@@ -500,11 +475,11 @@ async function prepareHostedExecutionOutboxPayloadJson(
 
   const stagedPayload = await maybeStageHostedExecutionDispatchPayload(dispatch);
 
-  if (stagedPayload) {
+  if (stagedPayload && stagedPayload.storage === "reference" && stagedPayload.payloadRef) {
     return stagedPayload as unknown as Prisma.InputJsonObject;
   }
 
-  return serializeHostedExecutionOutboxPayload(dispatch, { storage });
+  throw createHostedExecutionOutboxPayloadRefError(dispatch.eventId);
 }
 
 function assertHostedExecutionOutboxRecordMatches(
@@ -555,7 +530,7 @@ function areHostedExecutionOutboxPayloadsEquivalent(
       return false;
     }
 
-    return areHostedExecutionDispatchPayloadRefsEquivalent(left.payloadRef ?? null, right.payloadRef ?? null);
+    return areHostedExecutionDispatchPayloadRefsEquivalent(left.payloadRef, right.payloadRef);
   }
 
   return false;
@@ -566,7 +541,7 @@ function areHostedExecutionDispatchPayloadRefsEquivalent(
   right: { key: string } | null,
 ): boolean {
   if (!left || !right) {
-    return true;
+    return left === right;
   }
 
   return left.key === right.key;
@@ -691,7 +666,36 @@ function createHostedExecutionOutboxPayloadError(eventId: string): Error & {
     permanent: true;
     retryable: false;
   };
-  error.code = "HOSTED_EXECUTION_HYDRATION_PAYLOAD_MISSING";
+  error.code = "HOSTED_EXECUTION_OUTBOX_PAYLOAD_MISSING";
+  error.permanent = true;
+  error.retryable = false;
+  return error;
+}
+
+function isPermanentHostedExecutionOutboxError(
+  error: unknown,
+): error is Error & { permanent: true; retryable: false } {
+  return Boolean(
+    error
+      && typeof error === "object"
+      && "permanent" in error
+      && (error as { permanent?: unknown }).permanent === true,
+  );
+}
+
+function createHostedExecutionOutboxPayloadRefError(eventId: string): Error & {
+  code: string;
+  permanent: true;
+  retryable: false;
+} {
+  const error = new Error(
+    `Hosted execution outbox record ${eventId} is missing a staged payloadRef for reference dispatch.`,
+  ) as Error & {
+    code: string;
+    permanent: true;
+    retryable: false;
+  };
+  error.code = "HOSTED_EXECUTION_OUTBOX_PAYLOAD_REF_MISSING";
   error.permanent = true;
   error.retryable = false;
   return error;

@@ -8,7 +8,6 @@ import {
   buildHostedExecutionEmailMessageReceivedDispatch,
   buildHostedExecutionGatewayMessageSendDispatch,
   emitHostedExecutionStructuredLog,
-  parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
   parseHostedExecutionDispatchRequest,
   parseHostedExecutionOutboxPayload,
   parseHostedExecutionSharePack,
@@ -96,6 +95,7 @@ import {
   type DurableObjectStateLike,
 } from "./user-runner.ts";
 import { createHostedShareStore } from "./share-store.ts";
+import { createHostedPendingUsageDirtyUserStore } from "./usage-store.ts";
 import type {
   WorkerEnvironmentContract,
   WorkerUserRunnerCommitInput,
@@ -116,9 +116,6 @@ interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLike {
   applyDeviceSyncRuntimeUpdates(input: {
     request: HostedExecutionDeviceSyncRuntimeApplyRequest;
   }): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse>;
-  putDeviceSyncRuntimeSnapshot(input: {
-    snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse;
-  }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
   putPendingUsage(input: {
     usage: readonly Record<string, unknown>[];
   }): Promise<{ recorded: number; usageIds: string[] }>;
@@ -223,16 +220,6 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
     async handle(context, params) {
-      return handleUserDeviceSyncRuntimeSnapshotRoute(context, params.userId);
-    },
-    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/device-sync\/runtime\/snapshot$/u),
-    methods: ["PUT"],
-    wrongMethodResponse: "method-not-allowed",
-  },
-  {
-    authorizeBeforeMethod: true,
-    authorization: "vercel-oidc",
-    async handle(context, params) {
       return handleUserCryptoContextRoute(context, params.userId);
     },
     match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/crypto-context$/u),
@@ -277,6 +264,16 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     },
     match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/dispatch-payload\/dispatch$/u),
     methods: ["POST"],
+    wrongMethodResponse: "method-not-allowed",
+  },
+  {
+    authorizeBeforeMethod: true,
+    authorization: "vercel-oidc",
+    async handle(context) {
+      return handlePendingUsageUsersRoute(context);
+    },
+    match: matchExactPath("/internal/usage/pending-users"),
+    methods: ["GET"],
     wrongMethodResponse: "method-not-allowed",
   },
   {
@@ -364,12 +361,6 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     request: HostedExecutionDeviceSyncRuntimeApplyRequest;
   }): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
     return this.runner.applyDeviceSyncRuntimeUpdates(input);
-  }
-
-  async putDeviceSyncRuntimeSnapshot(input: {
-    snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse;
-  }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse> {
-    return this.runner.putDeviceSyncRuntimeSnapshot(input);
   }
 
   async putPendingUsage(input: {
@@ -581,27 +572,6 @@ async function handleUserEnvRoute(
   return json(await stub.clearUserEnv());
 }
 
-async function handleUserDeviceSyncRuntimeSnapshotRoute(
-  context: WorkerRouteContext,
-  encodedUserId: string,
-): Promise<Response> {
-  const userId = decodeRouteParam(encodedUserId);
-  const snapshot = parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
-    await readCachedJsonObject(context),
-  );
-
-  if (snapshot.userId !== userId) {
-    return json({
-      error: "Device-sync runtime snapshot userId does not match the route user.",
-    }, 400);
-  }
-
-  const stub = await resolveUserRunnerStub(context.env, userId);
-  return json(
-    await requireGatewayStubMethod(stub, "putDeviceSyncRuntimeSnapshot")({ snapshot }),
-  );
-}
-
 async function handleUserDeviceSyncRuntimeRoute(
   context: WorkerRouteContext,
   encodedUserId: string,
@@ -662,6 +632,20 @@ async function handleUserEmailAddressRoute(
     identityId: capabilities.senderIdentity,
     userId,
   });
+}
+
+async function handlePendingUsageUsersRoute(
+  context: WorkerRouteContext,
+): Promise<Response> {
+  const limit = readPendingUsageLimit(context.url.searchParams.get("limit"));
+  return json(await createHostedPendingUsageDirtyUserStore({
+    bucket: context.env.BUNDLES,
+    key: context.environment.platformEnvelopeKey,
+    keyId: context.environment.platformEnvelopeKeyId,
+    keysById: context.environment.platformEnvelopeKeysById,
+  }).listDirtyUsers(
+    limit === null ? undefined : { limit },
+  ));
 }
 
 async function handlePendingUsageRoute(

@@ -39,6 +39,7 @@ import {
   readHostedEmailRawMessage,
   sendHostedEmailMessage,
 } from "./hosted-email.ts";
+import { createHostedPendingUsageStore } from "./usage-store.ts";
 import type {
   WorkerEnvironmentContract,
   WorkerUserRunnerStubLike,
@@ -124,7 +125,9 @@ export async function handleRunnerOutboundRequest(
 
   if (url.hostname === HOSTED_EXECUTION_PROXY_HOSTS.usage) {
     return handleRunnerUsageRecordRequest({
+      bucket: env.BUNDLES,
       env,
+      environment,
       request,
       url,
       userId,
@@ -521,7 +524,9 @@ async function forwardRunnerDeviceSyncConnectLinkRequest(input: {
 
 
 async function handleRunnerUsageRecordRequest(input: {
+  bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
   env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
   request: Request;
   url: URL;
   userId: string;
@@ -533,11 +538,23 @@ async function handleRunnerUsageRecordRequest(input: {
   }
 
   const payload = parseHostedAiUsageRecordRequest(await readJsonObject(input.request));
-  const result = await requireRunnerOutboundUserStubMethod(
-    await resolveRunnerOutboundUserRunnerStub(input.env, input.userId),
-    "putPendingUsage",
-  )({
+  const crypto = await resolveRunnerOutboundUserCryptoContext({
+    bucket: input.bucket,
+    env: input.env,
+    environment: input.environment,
+    userId: input.userId,
+  });
+  const result = await createHostedPendingUsageStore({
+    bucket: input.bucket,
+    dirtyKey: input.environment.platformEnvelopeKey,
+    dirtyKeyId: input.environment.platformEnvelopeKeyId,
+    dirtyKeysById: input.environment.platformEnvelopeKeysById,
+    key: crypto.rootKey,
+    keyId: crypto.rootKeyId,
+    keysById: crypto.keysById,
+  }).appendUsage({
     usage: payload.usage,
+    userId: input.userId,
   });
 
   return json(result);

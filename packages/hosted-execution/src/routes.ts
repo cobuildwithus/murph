@@ -29,16 +29,16 @@ export function buildHostedExecutionUserEnvPath(userId: string): string {
   return `/internal/users/${encodeURIComponent(userId)}/env`;
 }
 
-export function buildHostedExecutionUserDeviceSyncRuntimeSnapshotPath(userId: string): string {
-  return `/internal/users/${encodeURIComponent(userId)}/device-sync/runtime/snapshot`;
-}
-
 export function buildHostedExecutionUserDeviceSyncRuntimePath(userId: string): string {
   return `/internal/users/${encodeURIComponent(userId)}/device-sync/runtime`;
 }
 
 export function buildHostedExecutionUserPendingUsagePath(userId: string): string {
   return `/internal/users/${encodeURIComponent(userId)}/usage/pending`;
+}
+
+export function buildHostedExecutionPendingUsageUsersPath(): string {
+  return "/internal/usage/pending-users";
 }
 
 export function buildHostedExecutionUserDispatchPayloadPath(userId: string): string {

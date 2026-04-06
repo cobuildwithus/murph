@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   applyDeviceSyncRuntimeUpdates: vi.fn(),
-  buildHostedDeviceSyncRuntimeSnapshot: vi.fn(),
   completeWebhookTrace: vi.fn(),
   createDeviceSyncPublicIngress: vi.fn(),
   createSignal: vi.fn(),
@@ -14,7 +13,6 @@ const mocks = vi.hoisted(() => ({
   getDeviceSyncRuntimeSnapshot: vi.fn(),
   listConnectionsForUser: vi.fn(),
   markConnectionDisconnected: vi.fn(),
-  putDeviceSyncRuntimeSnapshot: vi.fn(),
   readHostedDeviceSyncEnvironment: vi.fn(),
   registryGet: vi.fn(),
   registryList: vi.fn(),
@@ -52,7 +50,6 @@ vi.mock("@/src/lib/hosted-execution/control", () => ({
   requireHostedExecutionControlClient: vi.fn(() => ({
     applyDeviceSyncRuntimeUpdates: mocks.applyDeviceSyncRuntimeUpdates,
     getDeviceSyncRuntimeSnapshot: mocks.getDeviceSyncRuntimeSnapshot,
-    putDeviceSyncRuntimeSnapshot: mocks.putDeviceSyncRuntimeSnapshot,
   })),
 }));
 
@@ -86,16 +83,6 @@ vi.mock("@/src/lib/device-sync/env", () => ({
     },
   })),
 }));
-
-vi.mock("@/src/lib/device-sync/internal-runtime", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/device-sync/internal-runtime")>(
-    "@/src/lib/device-sync/internal-runtime",
-  );
-  return {
-    ...actual,
-    buildHostedDeviceSyncRuntimeSnapshot: mocks.buildHostedDeviceSyncRuntimeSnapshot,
-  };
-});
 
 function createHostedEnv(overrides: Partial<{
   allowedReturnOrigins: string[];
@@ -171,16 +158,6 @@ describe("dispatchHostedDeviceSyncWake", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.readHostedDeviceSyncEnvironment.mockImplementation(() => createHostedEnv());
-    mocks.buildHostedDeviceSyncRuntimeSnapshot.mockResolvedValue({
-      connections: [],
-      generatedAt: "2026-03-26T12:00:00.000Z",
-      userId: "user-123",
-    });
-    mocks.putDeviceSyncRuntimeSnapshot.mockResolvedValue({
-      connections: [],
-      generatedAt: "2026-03-26T12:00:00.000Z",
-      userId: "user-123",
-    });
     mocks.getDeviceSyncRuntimeSnapshot.mockResolvedValue({
       connections: [
         {
@@ -418,22 +395,6 @@ describe("dispatchHostedDeviceSyncWake", () => {
         userId: "user-123",
       },
     });
-    expect(mocks.buildHostedDeviceSyncRuntimeSnapshot).toHaveBeenCalledWith(
-      expect.anything(),
-      {
-        connectionId: "dsc_123",
-        provider: "oura",
-        userId: "user-123",
-      },
-    );
-    expect(mocks.putDeviceSyncRuntimeSnapshot).toHaveBeenCalledWith(
-      "user-123",
-      {
-        connections: [],
-        generatedAt: "2026-03-26T12:00:00.000Z",
-        userId: "user-123",
-      },
-    );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
         dispatch: expect.objectContaining({
@@ -445,11 +406,6 @@ describe("dispatchHostedDeviceSyncWake", () => {
             kind: "device-sync.wake",
             provider: "oura",
             reason: "connected",
-            runtimeSnapshot: {
-              connections: [],
-              generatedAt: "2026-03-26T12:00:00.000Z",
-              userId: "user-123",
-            },
             userId: "user-123",
           }),
           eventId: "device-sync:connection-established:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
@@ -618,9 +574,6 @@ describe("dispatchHostedDeviceSyncWake", () => {
       mocks.applyDeviceSyncRuntimeUpdates.mock.invocationCallOrder[0],
     );
     expect(mocks.applyDeviceSyncRuntimeUpdates.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.putDeviceSyncRuntimeSnapshot.mock.invocationCallOrder[0],
-    );
-    expect(mocks.putDeviceSyncRuntimeSnapshot.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.enqueueHostedExecutionOutbox.mock.invocationCallOrder[0],
     );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
@@ -1035,19 +988,8 @@ describe("dispatchHostedDeviceSyncWake", () => {
     expect(JSON.stringify(signalInput?.payload ?? {})).not.toContain("provider-secret-token");
     expect(JSON.stringify(signalInput?.payload ?? {})).not.toContain("123-45-6789");
     expect(JSON.stringify(signalInput?.payload ?? {})).not.toContain("job-secret-refresh-token");
-    expect(mocks.putDeviceSyncRuntimeSnapshot).toHaveBeenCalledWith(
-      "user-123",
-      {
-        connections: [],
-        generatedAt: "2026-03-26T12:00:00.000Z",
-        userId: "user-123",
-      },
-    );
     expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123");
     expect(mocks.createSignal.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.putDeviceSyncRuntimeSnapshot.mock.invocationCallOrder[0],
-    );
-    expect(mocks.putDeviceSyncRuntimeSnapshot.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.enqueueHostedExecutionOutbox.mock.invocationCallOrder[0],
     );
     expect(mocks.enqueueHostedExecutionOutbox.mock.invocationCallOrder[0]).toBeLessThan(

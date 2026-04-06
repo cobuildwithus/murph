@@ -33,7 +33,7 @@ import {
 
 export interface RunnerMetaRow {
   [key: string]: DurableObjectSqlValue;
-  activated: number;
+  runtime_bootstrapped: number;
   in_flight: number;
   last_error_at: string | null;
   last_error_code: string | null;
@@ -103,7 +103,7 @@ export function classifyMalformedPendingDispatchError(error: unknown): {
 
 export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
   return {
-    activated: 0,
+    runtime_bootstrapped: 0,
     in_flight: 0,
     last_error_at: null,
     last_error_code: null,
@@ -142,7 +142,7 @@ export function projectRunnerStateRecord(input: {
   return {
     changed: bundleRefState.changed,
     record: {
-      activated: input.meta.activated === 1,
+      runtimeBootstrapped: input.meta.runtime_bootstrapped === 1,
       backpressuredEventIds: [...input.backpressuredEventIds],
       bundleRefs: bundleRefState.bundleRefs,
       bundleVersions: bundleRefState.sanitizedBundleSlots.bundleVersions,
@@ -166,7 +166,7 @@ export function projectRunnerStateRecord(input: {
 }
 
 export function resolveRunnerNextWakeAt(input: {
-  activated: boolean;
+  runtimeBootstrapped: boolean;
   defaultAlarmDelayMs: number;
   nextPendingAvailableAt: string | null;
   preferredWakeAt?: string | null;
@@ -175,7 +175,7 @@ export function resolveRunnerNextWakeAt(input: {
     input.nextPendingAvailableAt,
     normalizePreferredWakeAt(input.preferredWakeAt ?? null),
   );
-  const fallbackWakeAt = input.activated
+  const fallbackWakeAt = input.runtimeBootstrapped
     ? new Date(Date.now() + input.defaultAlarmDelayMs).toISOString()
     : null;
   return scheduledWakeAt ?? fallbackWakeAt;

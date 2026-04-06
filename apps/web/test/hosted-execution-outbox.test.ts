@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({
   dispatchStoredHostedExecutionStatus: vi.fn(),
   finalizeHostedShareAcceptance: vi.fn(),
   getPrisma: vi.fn(),
-  hydrateHostedExecutionDispatch: vi.fn(),
   maybeStageHostedExecutionDispatchPayload: vi.fn(),
 }));
 
@@ -31,17 +30,6 @@ vi.mock("@/src/lib/hosted-execution/dispatch", () => ({
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
-
-vi.mock("@/src/lib/hosted-execution/hydration", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/hosted-execution/hydration")>(
-    "@/src/lib/hosted-execution/hydration",
-  );
-
-  return {
-    ...actual,
-    hydrateHostedExecutionDispatch: mocks.hydrateHostedExecutionDispatch,
-  };
-});
 
 vi.mock("@/src/lib/hosted-share/shared", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-share/shared")>("@/src/lib/hosted-share/shared");
@@ -70,7 +58,19 @@ describe("drainHostedExecutionOutbox", () => {
         })),
       },
     });
-    mocks.maybeStageHostedExecutionDispatchPayload.mockResolvedValue(null);
+    mocks.maybeStageHostedExecutionDispatchPayload.mockImplementation(async (dispatch: HostedExecutionDispatchRequest) => ({
+      dispatchRef: {
+        eventId: dispatch.eventId,
+        eventKind: dispatch.event.kind,
+        occurredAt: dispatch.occurredAt,
+        userId: dispatch.event.userId,
+      },
+      payloadRef: {
+        key: `transient/dispatch-payloads/${dispatch.event.userId}/${dispatch.eventId}.json`,
+      },
+      schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+      storage: "reference",
+    }));
   });
 
   it("marks completed outcomes as completed, stores the dispatch result, and finalizes hosted share imports", async () => {
@@ -82,7 +82,6 @@ describe("drainHostedExecutionOutbox", () => {
       sourceType: "hosted_share_link",
       userId: dispatch.event.userId,
     }));
-    mocks.hydrateHostedExecutionDispatch.mockResolvedValue(dispatch);
     mocks.dispatchHostedExecutionStatus.mockResolvedValue(dispatchResult);
 
     const [record] = await drainHostedExecutionOutbox({
@@ -91,7 +90,6 @@ describe("drainHostedExecutionOutbox", () => {
     });
 
     expect(record?.status).toBe(ExecutionOutboxStatus.completed);
-    expect(record?.lastStatusJson).toEqual(dispatchResult);
     expect(mocks.finalizeHostedShareAcceptance).toHaveBeenCalledWith({
       eventId: dispatch.eventId,
       memberId: dispatch.event.userId,
@@ -114,7 +112,6 @@ describe("drainHostedExecutionOutbox", () => {
       userId: dispatch.event.userId,
     }));
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    mocks.hydrateHostedExecutionDispatch.mockResolvedValue(dispatch);
     mocks.dispatchHostedExecutionStatus.mockResolvedValue(dispatchResult);
     mocks.deleteHostedSharePackFromHostedExecution.mockRejectedValue(new Error("delete failed"));
 
@@ -150,7 +147,6 @@ describe("drainHostedExecutionOutbox", () => {
       sourceType: "device_sync",
       userId: dispatch.event.userId,
     }));
-    mocks.hydrateHostedExecutionDispatch.mockResolvedValue(dispatch);
     mocks.dispatchHostedExecutionStatus.mockResolvedValue(createDispatchResult("duplicate_consumed"));
 
     const [record] = await drainHostedExecutionOutbox({
@@ -175,7 +171,6 @@ describe("drainHostedExecutionOutbox", () => {
         eventKind: dispatch.event.kind,
         userId: dispatch.event.userId,
       }));
-      mocks.hydrateHostedExecutionDispatch.mockResolvedValue(dispatch);
       mocks.dispatchHostedExecutionStatus.mockResolvedValue(createDispatchResult(eventState, {
         eventLastError: lastError,
       }));
@@ -186,9 +181,6 @@ describe("drainHostedExecutionOutbox", () => {
       });
 
       expect(record?.status).toBe(expectedStatus);
-      expect(record?.lastStatusJson).toEqual(createDispatchResult(eventState, {
-        eventLastError: lastError,
-      }));
     },
   );
 
@@ -202,7 +194,6 @@ describe("drainHostedExecutionOutbox", () => {
       eventKind: dispatch.event.kind,
       userId: dispatch.event.userId,
     }));
-    mocks.hydrateHostedExecutionDispatch.mockResolvedValue(dispatch);
     mocks.dispatchHostedExecutionStatus.mockResolvedValue(dispatchResult);
 
     const [record] = await drainHostedExecutionOutbox({
@@ -225,7 +216,6 @@ describe("drainHostedExecutionOutbox", () => {
       eventKind: dispatch.event.kind,
       userId: dispatch.event.userId,
     }));
-    mocks.hydrateHostedExecutionDispatch.mockResolvedValue(dispatch);
     mocks.dispatchHostedExecutionStatus.mockResolvedValue(dispatchResult);
 
     const [record] = await drainHostedExecutionOutbox({
@@ -237,19 +227,22 @@ describe("drainHostedExecutionOutbox", () => {
     expect(record?.lastError).toBe("poisoned by runner");
   });
 
-  it("marks permanent hydration failures as terminal failed rows instead of retrying forever", async () => {
+  it("marks missing staged payload refs as terminal failed rows instead of retrying forever", async () => {
     const prisma = createOutboxPrisma(createOutboxRecord({
       eventId: "evt_tick",
-      eventKind: "assistant.cron.tick",
+      eventKind: "vault.share.accepted",
+      payloadJson: {
+        dispatchRef: {
+          eventId: "evt_tick",
+          eventKind: "vault.share.accepted",
+          occurredAt: "2026-03-28T11:00:00.000Z",
+          userId: "member_123",
+        },
+        schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+        storage: "reference",
+      },
       userId: "member_123",
     }));
-    mocks.hydrateHostedExecutionDispatch.mockRejectedValue(
-      Object.assign(new Error("Device-sync sourceId is required for hosted execution evt_tick."), {
-        code: "HOSTED_EXECUTION_HYDRATION_SOURCE_ID_REQUIRED",
-        permanent: true,
-        retryable: false,
-      }),
-    );
 
     const [record] = await drainHostedExecutionOutbox({
       now: "2026-03-28T11:00:00.000Z",
@@ -286,7 +279,11 @@ describe("drainHostedExecutionOutbox", () => {
     const prisma = createEnqueueOutboxPrisma(createOutboxRecord({
       eventId: dispatch.eventId,
       eventKind: dispatch.event.kind,
-      payloadJson: JSON.parse(JSON.stringify(serializeHostedExecutionOutboxPayload(dispatch))),
+      payloadJson: JSON.parse(JSON.stringify(serializeHostedExecutionOutboxPayload(dispatch, {
+        payloadRef: {
+          key: "transient/dispatch-payloads/member_123/evt_share.json",
+        },
+      }))),
       sourceId: "share_123",
       sourceType: "hosted_share_link",
       userId: dispatch.event.userId,
@@ -532,7 +529,6 @@ function createOutboxRecord(input: {
     id: "execout_123",
     lastAttemptAt: null,
     lastError: null,
-    lastStatusJson: null,
     nextAttemptAt: new Date("2026-03-28T11:00:00.000Z"),
     payloadJson: (input.payloadJson ?? (
       input.eventKind === "assistant.cron.tick"
@@ -546,14 +542,17 @@ function createOutboxRecord(input: {
             occurredAt: "2026-03-28T11:00:00.000Z",
           })
         : {
-            storage: "reference",
             dispatchRef: {
               eventId: input.eventId,
               eventKind: input.eventKind,
               occurredAt: "2026-03-28T11:00:00.000Z",
               userId: input.userId,
             },
+            payloadRef: {
+              key: `transient/dispatch-payloads/${input.userId}/${input.eventId}.json`,
+            },
             schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+            storage: "reference",
           }
     )) as ExecutionOutbox["payloadJson"],
     sourceId: input.sourceId ?? (input.sourceType === "hosted_share_link" ? "share_123" : null),

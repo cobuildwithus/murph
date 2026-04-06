@@ -9,6 +9,7 @@ import type {
   HostedExecutionDeviceSyncJobHint,
   HostedExecutionDeviceSyncRuntimeConnectionUpdate,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
+  HostedExecutionDeviceSyncRuntimeConnectionSeed,
   HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot,
   HostedExecutionDeviceSyncRuntimeConnectionSnapshot,
   HostedExecutionDeviceSyncRuntimeLocalStateSnapshot,
@@ -438,9 +439,9 @@ function parseHostedExecutionDeviceSyncRuntimeApplyEntry(
     `Hosted device-sync runtime apply response updates[${index}].tokenUpdate`,
   );
 
-  if (status !== "missing" && status !== "updated") {
+  if (status !== "created" && status !== "missing" && status !== "updated") {
     throw new TypeError(
-      `Hosted device-sync runtime apply response updates[${index}].status must be "missing" or "updated".`,
+      `Hosted device-sync runtime apply response updates[${index}].status must be "created", "missing", or "updated".`,
     );
   }
 
@@ -520,6 +521,14 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(
             `Hosted device-sync runtime apply request updates[${index}].observedTokenVersion`,
           ),
         }),
+    ...(record.seed === undefined
+      ? {}
+      : {
+          seed: parseHostedExecutionDeviceSyncRuntimeConnectionSeed(
+            record.seed,
+            `Hosted device-sync runtime apply request updates[${index}].seed`,
+          ),
+        }),
     ...(record.tokenBundle === undefined
       ? {}
       : {
@@ -558,6 +567,28 @@ function assertNoLegacyHostedExecutionDeviceSyncRuntimeFlatFields(
       `Hosted device-sync runtime apply request updates[${index}].localState must be used for local observation fields.`,
     );
   }
+}
+
+function parseHostedExecutionDeviceSyncRuntimeConnectionSeed(
+  value: unknown,
+  label: string,
+): HostedExecutionDeviceSyncRuntimeConnectionSeed {
+  const record = requireObject(value, label);
+
+  return {
+    connection: parseHostedExecutionDeviceSyncRuntimeConnection(
+      record.connection,
+      `${label}.connection`,
+    ),
+    localState: parseHostedExecutionDeviceSyncRuntimeLocalState(
+      record.localState,
+      `${label}.localState`,
+    ),
+    tokenBundle: parseHostedExecutionDeviceSyncRuntimeTokenBundle(
+      record.tokenBundle,
+      `${label}.tokenBundle`,
+    ),
+  };
 }
 
 function parseHostedExecutionDeviceSyncRuntimeConnectionStateUpdate(
