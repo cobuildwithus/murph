@@ -391,10 +391,11 @@ function renderToolCatalog(tools: InboxModelBundle['tools']): string {
       ].filter((value): value is string => value !== null)
 
       const executionBits = [
+        `backend:${tool.backendKind}`,
         `mutation:${tool.mutationSemantics}`,
         `risk:${tool.riskClass}`,
-        `preferred:${tool.preferredExecutionMode}`,
-        `host:${tool.executionMode}`,
+        `preferred-host:${tool.preferredHostKind}`,
+        `selected-host:${tool.selectedHostKind}`,
       ]
 
       return `${index + 1}. ${tool.name}\n   Description: ${tool.description}\n   Provenance: ${provenanceBits.join(' | ')}\n   Execution: ${executionBits.join(' | ')}\n   Input example: ${example}`

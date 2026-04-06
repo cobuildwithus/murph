@@ -55,8 +55,9 @@ import { resolveAssistantVaultPath } from '../assistant-vault-paths.js'
 import {
   defineAssistantCapability,
   type AssistantCapabilityDefinition,
+  type AssistantCapabilityBackendKind,
   type AssistantCapabilityExecutor,
-  type AssistantCapabilityExecutionMode,
+  type AssistantCapabilityHostKind,
 } from '../model-harness.js'
 import {
   listAssistantSelfDeliveryTargets,
@@ -1685,7 +1686,7 @@ type AssistantCapabilityToolDefinitionInput<
   | (Omit<AssistantCapabilityDefinition<TSchema, TResult>, 'executionBindings'> & {
     executionBindings: Partial<
       Record<
-        AssistantCapabilityExecutionMode,
+        AssistantCapabilityHostKind,
         AssistantCapabilityExecutor<TSchema, TResult>
       >
     >
@@ -1702,7 +1703,7 @@ function defineHandAuthoredHelperTool<
     localOnly: true,
     generatedFrom: null,
     policyWrappers: [],
-  }, 'native-local')
+  }, 'native-local', 'local-service')
 }
 
 function defineVaultServiceBackedTool<
@@ -1716,7 +1717,7 @@ function defineVaultServiceBackedTool<
     localOnly: true,
     generatedFrom: null,
     policyWrappers: [],
-  }, 'native-local')
+  }, 'native-local', 'local-service')
 }
 
 function defineCliBackedTool<
@@ -1730,7 +1731,7 @@ function defineCliBackedTool<
     localOnly: true,
     generatedFrom: null,
     policyWrappers: [...assistantCliPolicyWrapperKinds],
-  }, 'cli-backed')
+  }, 'cli-backed', 'cli-wrapper')
 }
 
 function defineConfiguredWebReadTool<
@@ -1744,7 +1745,7 @@ function defineConfiguredWebReadTool<
     localOnly: false,
     generatedFrom: null,
     policyWrappers: [],
-  }, 'native-local')
+  }, 'native-local', 'configured-web-read')
 }
 
 function defineHostedApiBackedTool<
@@ -1758,7 +1759,7 @@ function defineHostedApiBackedTool<
     localOnly: false,
     generatedFrom: null,
     policyWrappers: [],
-  }, 'native-local')
+  }, 'native-local', 'hosted-api')
 }
 
 function defineNativeLocalOnlyTool<
@@ -1772,7 +1773,7 @@ function defineNativeLocalOnlyTool<
     localOnly: true,
     generatedFrom: null,
     policyWrappers: ['output-redaction'],
-  }, 'native-local')
+  }, 'native-local', 'native-file')
 }
 
 function defineDescriptorGeneratedTool<
@@ -1787,7 +1788,7 @@ function defineDescriptorGeneratedTool<
     localOnly: true,
     generatedFrom,
     policyWrappers: [],
-  }, 'native-local')
+  }, 'native-local', 'local-service')
 }
 
 export function defineAssistantCapabilityTool<
@@ -1796,18 +1797,24 @@ export function defineAssistantCapabilityTool<
 >(
   definition: AssistantCapabilityToolDefinitionInput<TSchema, TResult>,
   provenance: AssistantToolProvenance,
-  defaultExecutionMode: AssistantCapabilityExecutionMode,
+  defaultHostKind: AssistantCapabilityHostKind,
+  defaultBackendKind: AssistantCapabilityBackendKind,
 ) {
   const executionBindings =
     'executionBindings' in definition
       ? definition.executionBindings
       : {
-          [defaultExecutionMode]: definition.execute,
+          [defaultHostKind]: definition.execute,
         }
-  const { preferredExecutionMode = defaultExecutionMode, ...capability } = definition
+  const {
+    backendKind = defaultBackendKind,
+    preferredHostKind = defaultHostKind,
+    ...capability
+  } = definition
   return defineAssistantCapability({
     ...capability,
-    preferredExecutionMode,
+    backendKind,
+    preferredHostKind,
     executionBindings,
     provenance,
   })
