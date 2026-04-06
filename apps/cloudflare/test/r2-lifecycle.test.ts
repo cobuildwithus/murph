@@ -46,7 +46,7 @@ describe("r2 lifecycle helpers", () => {
 });
 
 describe("R2 transient lifecycle rules", () => {
-  it("covers encrypted transient dispatch payloads, journals, and raw email artifacts", () => {
+  it("covers the privacy-first transient backstops for hosted execution artifacts", () => {
     const config = JSON.parse(
       readFileSync(new URL("../r2-bundles-lifecycle.json", import.meta.url), "utf8"),
     ) as {
@@ -68,10 +68,13 @@ describe("R2 transient lifecycle rules", () => {
       ]),
     );
 
-    expect(maxAgeByPrefix.get("transient/execution-journal/")).toBe(604800);
-    expect(maxAgeByPrefix.get("transient/side-effects/")).toBe(604800);
-    expect(maxAgeByPrefix.get("transient/dispatch-payloads/")).toBe(604800);
-    expect(maxAgeByPrefix.get("transient/hosted-email/messages/")).toBe(604800);
-    expect(maxAgeByPrefix.get("transient/hosted-email/threads/")).toBe(604800);
+    expect(maxAgeByPrefix.get("transient/execution-journal/")).toBe(21600);
+    expect(maxAgeByPrefix.get("transient/side-effects/")).toBe(21600);
+    expect(maxAgeByPrefix.get("transient/dispatch-payloads/")).toBe(21600);
+    expect(maxAgeByPrefix.get("transient/assistant-usage/")).toBe(604800);
+    expect(maxAgeByPrefix.get("transient/assistant-usage-dirty/")).toBe(604800);
+    expect(maxAgeByPrefix.get("transient/share-packs/")).toBe(86400);
+    expect(maxAgeByPrefix.get("transient/hosted-email/messages/")).toBe(3600);
+    expect(maxAgeByPrefix.has("transient/hosted-email/threads/")).toBe(false);
   });
 });
