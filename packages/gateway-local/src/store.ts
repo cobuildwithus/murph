@@ -34,11 +34,10 @@ import {
   writeMeta,
 } from './store/schema.js'
 import {
-  hasGatewayServingSnapshot,
+  hasGatewaySnapshotState,
   readGatewayTableCount,
   readSnapshotOrEmpty,
   readSnapshotState,
-  rebuildSnapshotState,
   rebuildSnapshotStateFrom,
 } from './store/snapshot-state.js'
 import {
@@ -57,7 +56,6 @@ const CAPTURE_EMPTY_META_KEY = 'captures.empty'
 const CAPTURE_INITIALIZED_META_KEY = 'captures.initialized'
 const SESSION_SIGNATURE_META_KEY = 'sessions.signature'
 const OUTBOX_SIGNATURE_META_KEY = 'outbox.signature'
-const SQLITE_WAL_COMPANION_SUFFIXES = ['-shm', '-wal'] as const
 
 const EMPTY_GATEWAY_LOCAL_PROJECTION_SOURCE_READER: GatewayLocalProjectionSourceReader = {
   async listOutboxSources() {
@@ -200,14 +198,21 @@ export class LocalGatewayProjectionStore {
     const outboxSignature = computeOutboxSyncSignature(outboxIntents)
 
     await withGatewayImmediateTransaction(this.database, async () => {
+      let previousState: ReturnType<typeof readSnapshotState> | null = null
+      const ensurePreviousState = (): ReturnType<typeof readSnapshotState> => {
+        previousState ??= readSnapshotState(this.database)
+        return previousState
+      }
       let changed = false
 
       if (captureSyncState.kind === 'rebuild') {
+        ensurePreviousState()
         clearCaptureSources(this.database)
         upsertCaptureSources(this.database, captureSyncState.captures)
         writeMeta(this.database, CAPTURE_CURSOR_META_KEY, String(captureSyncState.headCursor))
         changed = true
       } else if (captureSyncState.kind === 'incremental') {
+        ensurePreviousState()
         replaceCaptureSourcesForCaptureIds(
           this.database,
           captureSyncState.changedCaptureIds,
@@ -227,19 +232,21 @@ export class LocalGatewayProjectionStore {
       }
 
       if (readMeta(this.database, SESSION_SIGNATURE_META_KEY) !== sessionSignature) {
+        ensurePreviousState()
         replaceSessionSources(this.database, sessions)
         writeMeta(this.database, SESSION_SIGNATURE_META_KEY, sessionSignature)
         changed = true
       }
 
       if (readMeta(this.database, OUTBOX_SIGNATURE_META_KEY) !== outboxSignature) {
+        ensurePreviousState()
         replaceOutboxSources(this.database, outboxIntents)
         writeMeta(this.database, OUTBOX_SIGNATURE_META_KEY, outboxSignature)
         changed = true
       }
 
-      if (changed || !hasGatewayServingSnapshot(this.database)) {
-        rebuildSnapshotState(this.database)
+      if (changed || !hasGatewaySnapshotState(this.database)) {
+        rebuildSnapshotStateFrom(this.database, previousState ?? readSnapshotState(this.database))
       }
     })
   }

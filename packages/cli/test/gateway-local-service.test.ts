@@ -470,7 +470,7 @@ test('local gateway hides actor-derived titles unless includeDerivedTitles is en
   }
 })
 
-test('local gateway persists serving tables and advances the inbox-backed capture cursor', async () => {
+test('local gateway persists source tables only and advances the inbox-backed capture cursor', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-gateway-serving-store-'))
 
   try {
@@ -512,11 +512,16 @@ test('local gateway persists serving tables and advances the inbox-backed captur
 
     const gatewayDb = openSqliteRuntimeDatabase(resolveGatewayRuntimePaths(vaultRoot).gatewayDbPath)
     try {
-      const conversationCount = gatewayDb
-        .prepare('SELECT COUNT(*) AS count FROM gateway_conversations')
+      const captureSourceCount = gatewayDb
+        .prepare('SELECT COUNT(*) AS count FROM gateway_capture_sources')
         .get() as { count: number }
-      const messageCount = gatewayDb
-        .prepare('SELECT COUNT(*) AS count FROM gateway_messages')
+      const legacyServingTableCount = gatewayDb
+        .prepare(`
+          SELECT COUNT(*) AS count
+            FROM sqlite_master
+           WHERE type = 'table'
+             AND name IN ('gateway_conversations', 'gateway_messages', 'gateway_attachments')
+        `)
         .get() as { count: number }
       const snapshotJson = gatewayDb
         .prepare('SELECT value FROM gateway_meta WHERE key = ?')
@@ -525,8 +530,8 @@ test('local gateway persists serving tables and advances the inbox-backed captur
         .prepare('SELECT value FROM gateway_meta WHERE key = ?')
         .get('captures.cursor') as { value?: string } | undefined
 
-      assert.equal(conversationCount.count, 1)
-      assert.equal(messageCount.count, 1)
+      assert.equal(captureSourceCount.count, 1)
+      assert.equal(legacyServingTableCount.count, 0)
       assert.equal(snapshotJson, undefined)
       assert.ok(captureSignature?.value)
       firstCaptureCursor = captureSignature?.value ?? null
@@ -577,15 +582,20 @@ test('local gateway persists serving tables and advances the inbox-backed captur
       const captureSourceCount = gatewayDbAfterIncrement
         .prepare('SELECT COUNT(*) AS count FROM gateway_capture_sources')
         .get() as { count: number }
-      const messageCount = gatewayDbAfterIncrement
-        .prepare('SELECT COUNT(*) AS count FROM gateway_messages')
+      const legacyServingTableCount = gatewayDbAfterIncrement
+        .prepare(`
+          SELECT COUNT(*) AS count
+            FROM sqlite_master
+           WHERE type = 'table'
+             AND name IN ('gateway_conversations', 'gateway_messages', 'gateway_attachments')
+        `)
         .get() as { count: number }
       const captureSignature = gatewayDbAfterIncrement
         .prepare('SELECT value FROM gateway_meta WHERE key = ?')
         .get('captures.cursor') as { value?: string } | undefined
 
       assert.equal(captureSourceCount.count, 2)
-      assert.equal(messageCount.count, 2)
+      assert.equal(legacyServingTableCount.count, 0)
       assert.ok(captureSignature?.value)
       assert.ok(firstCaptureCursor)
       assert.notEqual(captureSignature?.value, firstCaptureCursor)
@@ -597,7 +607,7 @@ test('local gateway persists serving tables and advances the inbox-backed captur
   }
 })
 
-test('local gateway bootstraps empty serving snapshots once and keeps the stored snapshot metadata stable', async () => {
+test('local gateway bootstraps empty source-backed snapshots once and keeps the stored snapshot metadata stable', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-gateway-empty-serving-store-'))
 
   try {
@@ -611,8 +621,16 @@ test('local gateway bootstraps empty serving snapshots once and keeps the stored
       limit: 10,
       search: null,
     })
+    const firstEvents = await pollGatewayEventsLocalWrapper(vaultRoot, {
+      cursor: 0,
+      kinds: [],
+      limit: 20,
+      sessionKey: null,
+    })
     assert.equal(firstSnapshot.generatedAt.length > 0, true)
     assert.equal(first.conversations.length, 0)
+    assert.deepEqual(firstEvents.events, [])
+    assert.equal(firstEvents.nextCursor, 0)
 
     const gatewayDb = openSqliteRuntimeDatabase(resolveGatewayRuntimePaths(vaultRoot).gatewayDbPath)
     let firstGeneratedAt: string | null = null
@@ -620,28 +638,21 @@ test('local gateway bootstraps empty serving snapshots once and keeps the stored
       const cursor = gatewayDb
         .prepare('SELECT value FROM gateway_meta WHERE key = ?')
         .get('captures.cursor') as { value?: string } | undefined
-      const snapshotInitialized = gatewayDb
-        .prepare('SELECT value FROM gateway_meta WHERE key = ?')
-        .get('snapshot.initialized') as { value?: string } | undefined
       const snapshotGeneratedAt = gatewayDb
         .prepare('SELECT value FROM gateway_meta WHERE key = ?')
         .get('snapshot.generatedAt') as { value?: string } | undefined
-      const snapshotEmpty = gatewayDb
-        .prepare('SELECT value FROM gateway_meta WHERE key = ?')
-        .get('snapshot.empty') as { value?: string } | undefined
-      const conversationCount = gatewayDb
-        .prepare('SELECT COUNT(*) AS count FROM gateway_conversations')
-        .get() as { count: number }
-      const messageCount = gatewayDb
-        .prepare('SELECT COUNT(*) AS count FROM gateway_messages')
+      const legacyServingTableCount = gatewayDb
+        .prepare(`
+          SELECT COUNT(*) AS count
+            FROM sqlite_master
+           WHERE type = 'table'
+             AND name IN ('gateway_conversations', 'gateway_messages', 'gateway_attachments')
+        `)
         .get() as { count: number }
 
       assert.equal(cursor?.value, '0')
-      assert.equal(snapshotInitialized?.value, '1')
-      assert.equal(snapshotEmpty?.value, '1')
       assert.ok(snapshotGeneratedAt?.value)
-      assert.equal(conversationCount.count, 0)
-      assert.equal(messageCount.count, 0)
+      assert.equal(legacyServingTableCount.count, 0)
       firstGeneratedAt = snapshotGeneratedAt?.value ?? null
     } finally {
       gatewayDb.close()
@@ -655,8 +666,16 @@ test('local gateway bootstraps empty serving snapshots once and keeps the stored
       limit: 10,
       search: null,
     })
+    const secondEvents = await pollGatewayEventsLocalWrapper(vaultRoot, {
+      cursor: 0,
+      kinds: [],
+      limit: 20,
+      sessionKey: null,
+    })
     assert.equal(secondSnapshot.generatedAt, firstSnapshot.generatedAt)
     assert.equal(second.conversations.length, 0)
+    assert.deepEqual(secondEvents.events, [])
+    assert.equal(secondEvents.nextCursor, firstEvents.nextCursor)
 
     const gatewayDbAfterSecondRead = openSqliteRuntimeDatabase(
       resolveGatewayRuntimePaths(vaultRoot).gatewayDbPath,
@@ -665,17 +684,18 @@ test('local gateway bootstraps empty serving snapshots once and keeps the stored
       const snapshotGeneratedAt = gatewayDbAfterSecondRead
         .prepare('SELECT value FROM gateway_meta WHERE key = ?')
         .get('snapshot.generatedAt') as { value?: string } | undefined
-      const snapshotInitialized = gatewayDbAfterSecondRead
-        .prepare('SELECT value FROM gateway_meta WHERE key = ?')
-        .get('snapshot.initialized') as { value?: string } | undefined
-      const snapshotEmpty = gatewayDbAfterSecondRead
-        .prepare('SELECT value FROM gateway_meta WHERE key = ?')
-        .get('snapshot.empty') as { value?: string } | undefined
+      const legacyServingTableCount = gatewayDbAfterSecondRead
+        .prepare(`
+          SELECT COUNT(*) AS count
+            FROM sqlite_master
+           WHERE type = 'table'
+             AND name IN ('gateway_conversations', 'gateway_messages', 'gateway_attachments')
+        `)
+        .get() as { count: number }
 
-      assert.equal(snapshotInitialized?.value, '1')
-      assert.equal(snapshotEmpty?.value, '1')
       assert.ok(firstGeneratedAt)
       assert.equal(snapshotGeneratedAt?.value, firstGeneratedAt)
+      assert.equal(legacyServingTableCount.count, 0)
     } finally {
       gatewayDbAfterSecondRead.close()
     }
@@ -684,7 +704,7 @@ test('local gateway bootstraps empty serving snapshots once and keeps the stored
   }
 })
 
-test('local gateway rebuilds capture-serving rows when they are lost but the stored cursor is still current', async () => {
+test('local gateway rebuilds capture source rows when they are lost but the stored cursor is still current', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-gateway-capture-recovery-'))
 
   try {
@@ -741,8 +761,6 @@ test('local gateway rebuilds capture-serving rows when they are lost but the sto
 
       gatewayDb.prepare('DELETE FROM gateway_capture_attachments').run()
       gatewayDb.prepare('DELETE FROM gateway_capture_sources').run()
-      gatewayDb.prepare('DELETE FROM gateway_conversations').run()
-      gatewayDb.prepare('DELETE FROM gateway_messages').run()
     } finally {
       gatewayDb.close()
     }
@@ -957,7 +975,7 @@ test('local gateway refreshes message projection when an existing capture is rew
   }
 })
 
-test('local gateway rebuilds when a legacy serving store is missing the capture cursor meta', async () => {
+test('local gateway rebuilds when a source-backed store is missing the capture cursor meta', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-gateway-legacy-cursor-rebuild-'))
 
   try {

@@ -5,7 +5,6 @@ import {
   applyGatewayProjectionSnapshotToEventLog,
 } from '@murphai/gateway-core'
 import {
-  gatewayAttachmentSchema,
   gatewayConversationSchema,
   gatewayMessageSchema,
   gatewayPermissionRequestSchema,
@@ -15,13 +14,11 @@ import {
   type GatewayConversationRoute,
   type GatewayConversationTitleSource,
   type GatewayEvent,
-  type GatewayPermissionRequest,
   type GatewayProjectionSnapshot,
 } from '@murphai/gateway-core'
 import {
   gatewayConversationRouteCanSend,
   mergeGatewayConversationRoutes,
-  resolveGatewayConversationRouteKey,
 } from '@murphai/gateway-core'
 import {
   compareGatewayConversationsDescending,
@@ -30,7 +27,11 @@ import {
 } from '@murphai/gateway-core'
 import { normalizeNullableString } from '../shared.js'
 import { readPermissionRows } from './permissions.js'
-import { readMeta, writeMeta } from './schema.js'
+import {
+  readMeta,
+  SNAPSHOT_GENERATED_AT_META_KEY,
+  writeMeta,
+} from './schema.js'
 import {
   type CaptureAttachmentRow,
   type CaptureSourceRow,
@@ -41,10 +42,6 @@ import {
   readOutboxSourceRows,
   readSessionSourceRows,
 } from './source-sync.js'
-
-const SNAPSHOT_EMPTY_META_KEY = 'snapshot.empty'
-const SNAPSHOT_GENERATED_AT_META_KEY = 'snapshot.generatedAt'
-const SNAPSHOT_INITIALIZED_META_KEY = 'snapshot.initialized'
 
 interface GatewayProjectionMessageAccumulator {
   actorDisplayName: string | null
@@ -76,15 +73,11 @@ export interface GatewaySnapshotState {
   snapshot: GatewayProjectionSnapshot | null
 }
 
-export function rebuildSnapshotState(database: DatabaseSync): void {
-  rebuildSnapshotStateFrom(database, readSnapshotState(database))
-}
-
 export function rebuildSnapshotStateFrom(
   database: DatabaseSync,
   previousState: GatewaySnapshotState,
 ): void {
-  const nextSnapshot = buildSnapshotFromDatabase(database)
+  const nextSnapshot = buildSnapshotFromDatabase(database, new Date().toISOString())
   const nextState = applyGatewayProjectionSnapshotToEventLog(
     previousState,
     nextSnapshot,
@@ -102,7 +95,6 @@ export function readSnapshotState(database: DatabaseSync): GatewaySnapshotState 
 }
 
 export function writeSnapshotState(database: DatabaseSync, state: GatewaySnapshotState): void {
-  replaceServingSnapshot(database, state.snapshot)
   database.prepare('DELETE FROM gateway_events').run()
   const insert = database.prepare(`
     INSERT INTO gateway_events (
@@ -128,21 +120,9 @@ export function writeSnapshotState(database: DatabaseSync, state: GatewaySnapsho
   }
 
   if (state.snapshot) {
-    writeMeta(database, SNAPSHOT_INITIALIZED_META_KEY, '1')
     writeMeta(database, SNAPSHOT_GENERATED_AT_META_KEY, state.snapshot.generatedAt)
-    writeMeta(
-      database,
-      SNAPSHOT_EMPTY_META_KEY,
-      state.snapshot.conversations.length === 0 &&
-        state.snapshot.messages.length === 0 &&
-        state.snapshot.permissions.length === 0
-        ? '1'
-        : '0',
-    )
   } else {
-    writeMeta(database, SNAPSHOT_INITIALIZED_META_KEY, null)
     writeMeta(database, SNAPSHOT_GENERATED_AT_META_KEY, null)
-    writeMeta(database, SNAPSHOT_EMPTY_META_KEY, null)
   }
 }
 
@@ -156,18 +136,8 @@ export function readSnapshotOrEmpty(database: DatabaseSync): GatewayProjectionSn
   })
 }
 
-export function hasGatewayServingSnapshot(database: DatabaseSync): boolean {
-  if (readMeta(database, SNAPSHOT_INITIALIZED_META_KEY) !== '1') {
-    return false
-  }
-
-  if (readMeta(database, SNAPSHOT_EMPTY_META_KEY) === '1') {
-    return true
-  }
-
-  return readGatewayTableCount(database, 'gateway_conversations') > 0 ||
-    readGatewayTableCount(database, 'gateway_messages') > 0 ||
-    readGatewayTableCount(database, 'gateway_permissions') > 0
+export function hasGatewaySnapshotState(database: DatabaseSync): boolean {
+  return readMeta(database, SNAPSHOT_GENERATED_AT_META_KEY) !== null
 }
 
 export function readGatewayTableCount(database: DatabaseSync, tableName: string): number {
@@ -177,111 +147,10 @@ export function readGatewayTableCount(database: DatabaseSync, tableName: string)
   return row.count ?? 0
 }
 
-function replaceServingSnapshot(
+function buildSnapshotFromDatabase(
   database: DatabaseSync,
-  snapshot: GatewayProjectionSnapshot | null,
-): void {
-  database.prepare('DELETE FROM gateway_attachments').run()
-  database.prepare('DELETE FROM gateway_messages').run()
-  database.prepare('DELETE FROM gateway_conversations').run()
-
-  if (!snapshot) {
-    return
-  }
-
-  const insertConversation = database.prepare(`
-    INSERT INTO gateway_conversations (
-      session_key,
-      route_key,
-      channel,
-      identity_id,
-      participant_id,
-      thread_id,
-      directness,
-      reply_kind,
-      reply_target,
-      title,
-      title_source,
-      last_message_preview,
-      last_activity_at,
-      message_count,
-      can_send
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `)
-  const insertMessage = database.prepare(`
-    INSERT INTO gateway_messages (
-      message_id,
-      session_key,
-      created_at,
-      direction,
-      actor_display_name,
-      text
-    ) VALUES (?, ?, ?, ?, ?, ?)
-  `)
-  const insertAttachment = database.prepare(`
-    INSERT INTO gateway_attachments (
-      attachment_id,
-      session_key,
-      message_id,
-      ordinal,
-      kind,
-      mime,
-      file_name,
-      byte_size,
-      parse_state,
-      extracted_text,
-      transcript_text
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `)
-
-  for (const conversation of snapshot.conversations) {
-    insertConversation.run(
-      conversation.sessionKey,
-      resolveGatewayConversationRouteKey(conversation.route) ?? conversation.sessionKey,
-      conversation.route.channel,
-      conversation.route.identityId,
-      conversation.route.participantId,
-      conversation.route.threadId,
-      conversation.route.directness,
-      conversation.route.reply.kind,
-      conversation.route.reply.target,
-      conversation.title,
-      conversation.titleSource,
-      conversation.lastMessagePreview,
-      conversation.lastActivityAt,
-      conversation.messageCount,
-      conversation.canSend ? 1 : 0,
-    )
-  }
-
-  for (const message of snapshot.messages) {
-    insertMessage.run(
-      message.messageId,
-      message.sessionKey,
-      message.createdAt,
-      message.direction,
-      message.actorDisplayName,
-      message.text,
-    )
-    for (const [attachmentIndex, attachment] of message.attachments.entries()) {
-      insertAttachment.run(
-        attachment.attachmentId,
-        message.sessionKey,
-        message.messageId,
-        attachmentIndex,
-        attachment.kind,
-        attachment.mime,
-        attachment.fileName,
-        attachment.byteSize,
-        attachment.parseState,
-        attachment.extractedText,
-        attachment.transcriptText,
-      )
-    }
-  }
-}
-
-function buildSnapshotFromDatabase(database: DatabaseSync): GatewayProjectionSnapshot {
+  generatedAt: string = new Date().toISOString(),
+): GatewayProjectionSnapshot {
   const projection = new Map<string, GatewayConversationAccumulator>()
   const sentOutboxByProviderKey = new Map<string, GatewayProjectionMessageAccumulator>()
 
@@ -440,7 +309,7 @@ function buildSnapshotFromDatabase(database: DatabaseSync): GatewayProjectionSna
 
   return gatewayProjectionSnapshotSchema.parse({
     schema: 'murph.gateway-projection-snapshot.v1',
-    generatedAt: new Date().toISOString(),
+    generatedAt,
     conversations,
     messages,
     permissions,
@@ -580,138 +449,12 @@ function compareProjectionMessagesAscending(
 }
 
 function readStoredSnapshot(database: DatabaseSync): GatewayProjectionSnapshot | null {
-  if (!hasGatewayServingSnapshot(database)) {
+  const generatedAt = readMeta(database, SNAPSHOT_GENERATED_AT_META_KEY)
+  if (generatedAt === null) {
     return null
   }
 
-  const generatedAt = readMeta(database, SNAPSHOT_GENERATED_AT_META_KEY) ?? new Date().toISOString()
-
-  const conversations = database
-    .prepare(`
-      SELECT
-        session_key AS sessionKey,
-        channel,
-        identity_id AS identityId,
-        participant_id AS participantId,
-        thread_id AS threadId,
-        directness,
-        reply_kind AS replyKind,
-        reply_target AS replyTarget,
-        title,
-        title_source AS titleSource,
-        last_message_preview AS lastMessagePreview,
-        last_activity_at AS lastActivityAt,
-        message_count AS messageCount,
-        can_send AS canSend
-      FROM gateway_conversations
-      ORDER BY coalesce(last_activity_at, '') DESC, session_key ASC
-    `)
-    .all()
-    .map((row) => gatewayConversationSchema.parse({
-      schema: 'murph.gateway-conversation.v1',
-      sessionKey: (row as { sessionKey: string }).sessionKey,
-      title: (row as { title: string | null }).title,
-      titleSource: (row as { titleSource: GatewayConversationTitleSource | null }).titleSource,
-      lastMessagePreview: (row as { lastMessagePreview: string | null }).lastMessagePreview,
-      lastActivityAt: (row as { lastActivityAt: string | null }).lastActivityAt,
-      messageCount: (row as { messageCount: number | null }).messageCount,
-      canSend: ((row as { canSend: number }).canSend ?? 0) === 1,
-      route: {
-        channel: (row as { channel: string | null }).channel,
-        identityId: (row as { identityId: string | null }).identityId,
-        participantId: (row as { participantId: string | null }).participantId,
-        threadId: (row as { threadId: string | null }).threadId,
-        directness: (row as { directness: GatewayConversationRoute['directness'] }).directness,
-        reply: {
-          kind: (row as { replyKind: GatewayConversationRoute['reply']['kind'] }).replyKind,
-          target: (row as { replyTarget: string | null }).replyTarget,
-        },
-      },
-    })) as GatewayConversation[]
-
-  const attachmentsByMessageId = database
-    .prepare(`
-      SELECT
-        attachment_id AS attachmentId,
-        message_id AS messageId,
-        kind,
-        mime,
-        file_name AS fileName,
-        byte_size AS byteSize,
-        parse_state AS parseState,
-        extracted_text AS extractedText,
-        transcript_text AS transcriptText
-      FROM gateway_attachments
-      ORDER BY message_id ASC, ordinal ASC, attachment_id ASC
-    `)
-    .all()
-    .reduce((map, row) => {
-      const attachment = gatewayAttachmentSchema.parse({
-        schema: 'murph.gateway-attachment.v1',
-        attachmentId: (row as { attachmentId: string }).attachmentId,
-        messageId: (row as { messageId: string }).messageId,
-        kind: (row as { kind: GatewayAttachment['kind'] }).kind,
-        mime: (row as { mime: string | null }).mime,
-        fileName: (row as { fileName: string | null }).fileName,
-        byteSize: (row as { byteSize: number | null }).byteSize,
-        parseState: (row as { parseState: string | null }).parseState,
-        extractedText: (row as { extractedText: string | null }).extractedText,
-        transcriptText: (row as { transcriptText: string | null }).transcriptText,
-      })
-      const attachments = map.get(attachment.messageId) ?? []
-      attachments.push(attachment)
-      map.set(attachment.messageId, attachments)
-      return map
-    }, new Map<string, GatewayAttachment[]>())
-
-  const messages = database
-    .prepare(`
-      SELECT
-        message_id AS messageId,
-        session_key AS sessionKey,
-        created_at AS createdAt,
-        direction,
-        actor_display_name AS actorDisplayName,
-        text
-      FROM gateway_messages
-      ORDER BY created_at ASC, message_id ASC
-    `)
-    .all()
-    .map((row) => {
-      const messageId = (row as { messageId: string }).messageId
-      return gatewayMessageSchema.parse({
-        schema: 'murph.gateway-message.v1',
-        messageId,
-        sessionKey: (row as { sessionKey: string }).sessionKey,
-        createdAt: (row as { createdAt: string }).createdAt,
-        direction: (row as { direction: 'inbound' | 'outbound' | 'system' }).direction,
-        actorDisplayName: (row as { actorDisplayName: string | null }).actorDisplayName,
-        text: (row as { text: string | null }).text,
-        attachments: attachmentsByMessageId.get(messageId) ?? [],
-      })
-    })
-
-  const permissions = readPermissionRows(database).map((row) =>
-    gatewayPermissionRequestSchema.parse({
-      schema: 'murph.gateway-permission-request.v1',
-      requestId: row.requestId,
-      sessionKey: row.sessionKey,
-      action: row.action,
-      description: row.description,
-      status: row.status,
-      requestedAt: row.requestedAt,
-      resolvedAt: row.resolvedAt,
-      note: row.note,
-    }),
-  )
-
-  return gatewayProjectionSnapshotSchema.parse({
-    schema: 'murph.gateway-projection-snapshot.v1',
-    generatedAt,
-    conversations,
-    messages,
-    permissions,
-  })
+  return buildSnapshotFromDatabase(database, generatedAt)
 }
 
 function readStoredEvents(database: DatabaseSync): GatewayEvent[] {
