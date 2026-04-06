@@ -20,7 +20,7 @@ interface StoredHostedPendingUsage {
 
 export interface HostedPendingUsageStore {
   appendUsage(input: {
-    usage: readonly object[];
+    usage: readonly Record<string, unknown>[];
     userId: string;
   }): Promise<{ recorded: number; usageIds: string[] }>;
   deleteUsage(input: {
