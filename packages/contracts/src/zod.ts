@@ -15,6 +15,7 @@ import {
   CONDITION_VERIFICATION_STATUSES,
   CONTRACT_ID_FORMAT,
   CONTRACT_SCHEMA_VERSION,
+  CURRENT_VAULT_FORMAT_VERSION,
   ERROR_CODE_VALUES,
   EVENT_KINDS,
   EVENT_SOURCES,
@@ -563,6 +564,7 @@ export const vaultMetadataSchema = withContractMetadata(
   z
     .object({
       schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.vault),
+      formatVersion: z.literal(CURRENT_VAULT_FORMAT_VERSION).optional(),
       vaultId: idSchema(ID_PREFIXES.vault),
       createdAt: isoDateTimeString(),
       title: boundedString(1, 120),

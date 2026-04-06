@@ -6,6 +6,10 @@
       "type": "string",
       "const": "murph.vault.v1"
     },
+    "formatVersion": {
+      "type": "number",
+      "const": 1
+    },
     "vaultId": {
       "type": "string",
       "pattern": "^vault_[0-9A-HJKMNP-TV-Z]{26}$"

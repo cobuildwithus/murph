@@ -1,6 +1,7 @@
 export {
   BASELINE_EVENT_KINDS,
   BASELINE_SAMPLE_STREAMS,
+  CURRENT_VAULT_FORMAT_VERSION,
   DEFAULT_TIMEZONE,
   ID_PREFIXES,
   REQUIRED_DIRECTORIES,
@@ -49,6 +50,7 @@ export {
   promoteInboxExperimentNote,
   promoteInboxJournal,
   repairVault,
+  upgradeVault,
   rebuildCurrentProfile,
   stopExperiment,
   stopProtocolItem,

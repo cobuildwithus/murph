@@ -28,7 +28,7 @@ import {
 
 import {
   DEFAULT_TIMEZONE,
-  FRONTMATTER_SCHEMA_VERSIONS,
+  CURRENT_VAULT_FORMAT_VERSION,
   REQUIRED_DIRECTORIES,
   VAULT_LAYOUT,
 } from "./constants.ts";
@@ -42,7 +42,7 @@ import {
   walkVaultFiles,
 } from "./fs.ts";
 import { VaultError } from "./errors.ts";
-import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.ts";
+import { parseFrontmatterDocument } from "./frontmatter.ts";
 import { generateVaultId } from "./ids.ts";
 import { readJsonlRecords } from "./jsonl.ts";
 import { normalizeVaultRoot, resolveVaultPath } from "./path-safety.ts";
@@ -54,17 +54,16 @@ import {
 } from "./operations/write-batch.ts";
 import { buildCurrentProfileMarkdown, listProfileSnapshots } from "./profile/storage.ts";
 import { toIsoTimestamp } from "./time.ts";
-import { buildVaultMetadata, loadVaultMetadata } from "./vault-metadata.ts";
+import { buildVaultCoreDocument } from "./vault-core-document.ts";
+import {
+  buildVaultMetadata,
+  buildVaultMetadataUpgradeError,
+  loadVaultMetadata,
+  loadVaultMetadataWithCompatibility,
+} from "./vault-metadata.ts";
 
 import type { DateInput, UnknownRecord, ValidationIssue } from "./types.ts";
 import { isPlainRecord } from "./types.ts";
-
-interface BuildCoreDocumentInput {
-  vaultId: string;
-  title: string;
-  timezone: string;
-  updatedAt: string;
-}
 
 interface InitializeVaultInput {
   vaultRoot?: string;
@@ -144,25 +143,6 @@ function assertContractShape<T>(
   }
 }
 
-function buildCoreDocument({
-  vaultId,
-  title,
-  timezone,
-  updatedAt,
-}: BuildCoreDocumentInput): string {
-  return stringifyFrontmatterDocument({
-    attributes: {
-      schemaVersion: FRONTMATTER_SCHEMA_VERSIONS.core,
-      docType: "core",
-      vaultId,
-      title,
-      timezone,
-      updatedAt,
-    },
-    body: `# ${title}\n\n## Notes\n\n`,
-  });
-}
-
 function validationIssue(
   code: string,
   message: string,
@@ -204,7 +184,7 @@ export async function initializeVault({
     "VAULT_INVALID_METADATA",
     "Generated vault metadata failed contract validation.",
   );
-  const coreDocument = buildCoreDocument({
+  const coreDocument = buildVaultCoreDocument({
     vaultId: metadata.vaultId,
     title,
     timezone,
@@ -886,8 +866,29 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
   let metadata: VaultMetadata | null = null;
 
   try {
-    const loadedVault = await loadVault({ vaultRoot: absoluteRoot });
+    const loadedVault = await loadVaultMetadataWithCompatibility(
+      absoluteRoot,
+      "VAULT_INVALID_METADATA",
+      "Vault metadata failed contract validation.",
+    );
     metadata = loadedVault.metadata;
+
+    if (loadedVault.storedFormatVersion !== CURRENT_VAULT_FORMAT_VERSION) {
+      const upgradeError = buildVaultMetadataUpgradeError(loadedVault.storedFormatVersion);
+      issues.push(
+        validationIssue(
+          upgradeError.code,
+          upgradeError.message,
+          VAULT_LAYOUT.metadata,
+        ),
+      );
+
+      return {
+        valid: false,
+        issues,
+        metadata,
+      };
+    }
   } catch (error) {
     issues.push(
       validationIssue(

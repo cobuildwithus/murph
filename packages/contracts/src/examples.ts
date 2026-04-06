@@ -1,3 +1,5 @@
+import { CURRENT_VAULT_FORMAT_VERSION } from "./constants.ts";
+
 import type {
   AllergyFrontmatter,
   AssessmentResponseRecord,
@@ -44,6 +46,7 @@ type HealthFrontmatterExamples = {
 
 export const exampleVaultMetadata: Readonly<VaultMetadata> = Object.freeze<VaultMetadata>({
   schemaVersion: "murph.vault.v1",
+  formatVersion: CURRENT_VAULT_FORMAT_VERSION,
   vaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
   createdAt: "2026-03-12T14:00:00Z",
   title: "Murph Vault",
