@@ -518,47 +518,47 @@ export async function writeAutomationState(
   state: AssistantAutomationState,
 ): Promise<AssistantAutomationState> {
   const parsed = assistantAutomationStateSchema.parse(state)
-  await writeJsonFileAtomic(paths.automationPath, parsed)
-  assistantAutomationStateCache.set(paths.automationPath, parsed)
+  await writeJsonFileAtomic(paths.automationStatePath, parsed)
+  assistantAutomationStateCache.set(paths.automationStatePath, parsed)
   return parsed
 }
 
 export async function readAutomationState(
   paths: AssistantStatePaths,
 ): Promise<AssistantAutomationState> {
-  const cached = assistantAutomationStateCache.get(paths.automationPath)
+  const cached = assistantAutomationStateCache.get(paths.automationStatePath)
   if (cached !== undefined) {
     return cached
   }
 
   let raw: string
   try {
-    raw = await readFile(paths.automationPath, 'utf8')
+    raw = await readFile(paths.automationStatePath, 'utf8')
   } catch (error) {
     if (!isMissingFileError(error)) {
       throw error
     }
     const initial = createInitialAutomationState()
-    await writeJsonFileAtomic(paths.automationPath, initial)
-    assistantAutomationStateCache.set(paths.automationPath, initial)
+    await writeJsonFileAtomic(paths.automationStatePath, initial)
+    assistantAutomationStateCache.set(paths.automationStatePath, initial)
     return initial
   }
 
   try {
     const parsed = assistantAutomationStateSchema.parse(JSON.parse(raw) as unknown)
-    assistantAutomationStateCache.set(paths.automationPath, parsed)
+    assistantAutomationStateCache.set(paths.automationStatePath, parsed)
     return parsed
   } catch (error) {
-    assistantAutomationStateCache.delete(paths.automationPath)
+    assistantAutomationStateCache.delete(paths.automationStatePath)
     await quarantineAssistantStateFile({
       artifactKind: 'automation',
       error,
-      filePath: paths.automationPath,
+      filePath: paths.automationStatePath,
       paths,
     })
     const initial = createInitialAutomationState()
-    await writeJsonFileAtomic(paths.automationPath, initial)
-    assistantAutomationStateCache.set(paths.automationPath, initial)
+    await writeJsonFileAtomic(paths.automationStatePath, initial)
+    assistantAutomationStateCache.set(paths.automationStatePath, initial)
     await appendAssistantRuntimeEventAtPaths(paths, {
       component: 'automation',
       entityId: 'automation',
@@ -637,7 +637,6 @@ function createInitialAutomationState(): AssistantAutomationState {
     inboxScanCursor: null,
     autoReplyScanCursor: null,
     autoReplyChannels: [],
-    preferredChannels: [],
     autoReplyBacklogChannels: [],
     autoReplyPrimed: true,
     updatedAt: new Date().toISOString(),

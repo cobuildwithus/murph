@@ -139,9 +139,10 @@ function isPortableOperationalRelativePath(relativePath: string): boolean {
     relativePath === INBOX_PROMOTIONS_RELATIVE_PATH
     || relativePath.startsWith(PORTABLE_WRITE_OPERATION_PREFIX)
     || relativePath === ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH
-    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/automation.json`
+    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/automation-state.json`
     || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/failover.json`
     || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/cron`
+    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/cron/automation-runtime.json`
     || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/cron/jobs.json`
     || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/outbox`
     || relativePath.startsWith(`${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/outbox/`)
@@ -151,6 +152,8 @@ function isPortableOperationalRelativePath(relativePath: string): boolean {
     || relativePath.startsWith(`${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/sessions/`)
     || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/transcripts`
     || relativePath.startsWith(`${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/transcripts/`)
+    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/state/onboarding/first-contact`
+    || relativePath.startsWith(`${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/state/onboarding/first-contact/`)
     || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/usage`
     || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/usage/pending`
     || relativePath.startsWith(`${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/usage/pending/`)

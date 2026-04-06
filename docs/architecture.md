@@ -38,8 +38,6 @@ repo/
   e2e/
     smoke/
     scenarios/
-
-  assistant-state/
 ```
 
 ## Package Boundaries
@@ -61,6 +59,8 @@ repo/
 - Markdown canonical docs:
   - `CORE.md`
   - `journal/YYYY/YYYY-MM-DD.md`
+  - `bank/memory.md`
+  - `bank/automations/*.md`
   - `bank/experiments/<slug>.md`
 - Append-only JSONL ledgers:
   - `ledger/inbox-captures/*.jsonl`
@@ -85,12 +85,13 @@ repo/
   - `.runtime/projections/search.sqlite`
   - `.runtime/projections/gateway.sqlite`
   - `.runtime/cache/**` and `.runtime/tmp/**` for ephemeral scratch state only
-- Out-of-vault assistant/session state:
-  - `assistant-state/`
+- Assistant runtime state:
+  - `vault/.runtime/operations/assistant/**`
   - provider-owned transcript history should remain external when the chosen chat adapter supports it
   - channel-native send history should remain external when the chosen delivery adapter supports it
-  - store only manual aliases, explicit conversation bindings, provider session ids, automation cursors, local transcript files, and non-canonical Markdown memory docs for naming, response preferences, standing instructions, selected health context, and recent project context locally
-  - do not store prompt/response excerpts in that memory layer; selected health context there remains non-canonical and the vault stays authoritative
+  - store only runtime/session/outbox/receipt/diagnostic/continuity artifacts locally
+  - durable user-facing memory belongs in `bank/memory.md`
+  - durable scheduled prompt configuration belongs in `bank/automations/*.md`
 - Device provider credentials:
   - stay encrypted in the local device-sync runtime database under `.runtime/operations/device-sync/state.sqlite`
   - never land in canonical vault files or append-only health ledgers

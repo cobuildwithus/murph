@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
@@ -8,6 +8,7 @@ import {
   toMonthlyShardRelativePath,
   upsertFood,
 } from '@murphai/core'
+import { showAutomation } from '@murphai/query'
 import { afterEach, beforeEach, test, vi } from 'vitest'
 
 const cronServiceMocks = vi.hoisted(() => ({
@@ -43,9 +44,7 @@ import {
   setAssistantCronJobTarget,
   setAssistantCronJobEnabled,
 } from '@murphai/assistant-cli/assistant/cron'
-import { computeAssistantCronNextRunAt } from '@murphai/assistant-core/assistant/cron/schedule'
 import { saveAssistantSelfDeliveryTarget } from '@murphai/assistant-core/operator-config'
-import { resolveAssistantStatePaths } from '@murphai/assistant-cli/assistant/store'
 
 const cleanupPaths: string[] = []
 
@@ -180,6 +179,13 @@ test('assistant cron preset installs materialize regular cron jobs with resolved
   const listed = await listAssistantCronJobs(vaultRoot)
   assert.equal(listed.length, 1)
   assert.equal(listed[0]?.jobId, installed.job.jobId)
+
+  const automation = await showAutomation(vaultRoot, installed.job.jobId)
+  assert.equal(automation?.title, 'morning-mindfulness-text')
+  assert.equal(automation?.status, 'active')
+  assert.equal(automation?.route.channel, 'telegram')
+  assert.equal(automation?.route.sourceThreadId, '123456789')
+  assert.match(automation?.prompt ?? '', /10 minute seated meditation before work/u)
 })
 
 test('assistant cron jobs reuse the sole saved self-delivery target when no route flags are provided', async () => {
@@ -374,6 +380,14 @@ test('assistant cron jobs persist cleanly and can be enabled, disabled, and remo
 
   const afterStatus = await getAssistantCronStatus(vaultRoot)
   assert.equal(afterStatus.totalJobs, 0)
+
+  await assert.rejects(
+    () => getAssistantCronJob(vaultRoot, job.jobId),
+    /ASSISTANT_CRON_JOB_NOT_FOUND|not found/u,
+  )
+
+  const removedAutomation = await showAutomation(vaultRoot, job.jobId)
+  assert.equal(removedAutomation?.status, 'archived')
 })
 
 test('assistant cron targets can be inspected and updated in place', async () => {
@@ -445,72 +459,6 @@ test('assistant cron targets can be inspected and updated in place', async () =>
   assert.equal(reset.job.target.alias, null)
 })
 
-test('assistant cron jobs only bind assistant state when configured', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-state-doc-'))
-  const vaultRoot = path.join(parent, 'vault')
-  cleanupPaths.push(parent)
-
-  await mkdir(vaultRoot, { recursive: true })
-
-  const statelessJob = await addAssistantCronJob({
-    vault: vaultRoot,
-    name: 'stateless-check-in',
-    prompt: 'Check in quietly.',
-    ...testCronDeliveryTarget,
-    schedule: buildAssistantCronSchedule({
-      every: '2h',
-    }),
-  })
-  assert.equal(statelessJob.stateDocId, null)
-
-  const defaultStatefulJob = await addAssistantCronJob({
-    vault: vaultRoot,
-    name: 'stateful-check-in',
-    prompt: 'Check in with carry-over state.',
-    ...testCronDeliveryTarget,
-    schedule: buildAssistantCronSchedule({
-      every: '2h',
-    }),
-    bindState: true,
-  })
-  assert.equal(defaultStatefulJob.stateDocId, `cron/${defaultStatefulJob.jobId}`)
-
-  const explicitStatefulJob = await addAssistantCronJob({
-    vault: vaultRoot,
-    name: 'explicit-stateful-check-in',
-    prompt: 'Check in with explicit state.',
-    ...testCronDeliveryTarget,
-    schedule: buildAssistantCronSchedule({
-      every: '2h',
-    }),
-    stateDocId: 'cron/weekly-health-snapshot',
-  })
-  assert.equal(explicitStatefulJob.stateDocId, 'cron/weekly-health-snapshot')
-})
-
-test('assistant cron rejects invalid stateDocId bindings', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-invalid-state-doc-'))
-  const vaultRoot = path.join(parent, 'vault')
-  cleanupPaths.push(parent)
-
-  await mkdir(vaultRoot, { recursive: true })
-
-  await assert.rejects(
-    () =>
-      addAssistantCronJob({
-        vault: vaultRoot,
-        name: 'invalid-state-binding',
-        prompt: 'This should not be created.',
-        ...testCronDeliveryTarget,
-        schedule: buildAssistantCronSchedule({
-          every: '2h',
-        }),
-        stateDocId: '../escape',
-      }),
-    /stateDocId must use slash-delimited segments/u,
-  )
-})
-
 test('assistant cron assigns vault timezones to cron schedules and computes next runs in local time', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-timezone-'))
   const vaultRoot = path.join(parent, 'vault')
@@ -535,68 +483,6 @@ test('assistant cron assigns vault timezones to cron schedules and computes next
   assert.equal(job.schedule.kind, 'cron')
   assert.equal(job.schedule.timeZone, 'Australia/Melbourne')
   assert.equal(job.state.nextRunAt, '2026-03-27T21:00:00.000Z')
-})
-
-test('assistant cron quarantines legacy stored cron jobs that are missing persisted timezones', async () => {
-  vi.useFakeTimers()
-
-  try {
-    vi.setSystemTime(new Date('2026-03-26T21:30:00.000Z'))
-
-    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-legacy-timezone-'))
-    const vaultRoot = path.join(parent, 'vault')
-    cleanupPaths.push(parent)
-
-    await initializeVault({
-      vaultRoot,
-      timezone: 'Australia/Melbourne',
-    })
-
-    const job = await addAssistantCronJob({
-      vault: vaultRoot,
-      name: 'legacy-morning-check-in',
-      prompt: 'Send my migrated morning check-in.',
-      ...testCronDeliveryTarget,
-      schedule: buildAssistantCronSchedule({
-        cron: '0 8 * * *',
-      }),
-    })
-
-    await setAssistantCronJobEnabled(vaultRoot, job.jobId, false)
-
-    const paths = resolveAssistantStatePaths(vaultRoot)
-    const store = JSON.parse(await readFile(paths.cronJobsPath, 'utf8')) as {
-      version: number
-      jobs: Array<Record<string, unknown>>
-    }
-    const legacyJob = store.jobs[0] as {
-      schedule?: Record<string, unknown>
-      state?: Record<string, unknown>
-    }
-
-    assert.equal(legacyJob.schedule?.kind, 'cron')
-    delete legacyJob.schedule?.timeZone
-    legacyJob.state = {
-      ...(legacyJob.state ?? {}),
-      nextRunAt: null,
-    }
-
-    await writeFile(paths.cronJobsPath, `${JSON.stringify(store, null, 2)}\n`, 'utf8')
-
-    const listed = await listAssistantCronJobs(vaultRoot)
-    assert.deepEqual(listed, [])
-
-    const quarantineEntries = await readdir(
-      path.join(paths.quarantineDirectory, 'cron-store'),
-    )
-    assert.equal(quarantineEntries.some((entry) => entry.endsWith('.meta.json')), true)
-    assert.equal(
-      quarantineEntries.some((entry) => entry.includes(path.basename(paths.cronJobsPath))),
-      true,
-    )
-  } finally {
-    vi.useRealTimers()
-  }
 })
 
 test('assistant cron daily-local schedules stay pinned to local time across DST changes', async () => {
@@ -692,7 +578,6 @@ test('assistant cron manual runs record history and remove completed one-shot jo
     schedule: buildAssistantCronSchedule({
       at: new Date(Date.now() + 60_000).toISOString(),
     }),
-    bindState: true,
   })
 
   const result = await runAssistantCronJobNow({
@@ -712,19 +597,14 @@ test('assistant cron manual runs record history and remove completed one-shot jo
     cronServiceMocks.sendAssistantMessage.mock.calls[0]?.[0]?.channel,
     'telegram',
   )
-  assert.match(
-    String(cronServiceMocks.sendAssistantMessage.mock.calls[0]?.[0]?.prompt ?? ''),
-    /This cron job is bound to assistant state document/u,
-  )
-  assert.match(
-    String(cronServiceMocks.sendAssistantMessage.mock.calls[0]?.[0]?.prompt ?? ''),
-    new RegExp(job.stateDocId ?? '', 'u'),
-  )
 
   await assert.rejects(
     () => getAssistantCronJob(vaultRoot, job.jobId),
     /ASSISTANT_CRON_JOB_NOT_FOUND|not found/u,
   )
+
+  const archived = await showAutomation(vaultRoot, job.jobId)
+  assert.equal(archived?.status, 'archived')
 
   const history = await listAssistantCronRuns({
     vault: vaultRoot,

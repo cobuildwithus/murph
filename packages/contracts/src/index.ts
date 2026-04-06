@@ -5,6 +5,8 @@ export * from "./examples.ts";
 export * from "./frontmatter.ts";
 export * from "./health-entities.ts";
 export * from "./ids.ts";
+export * from "./automation.ts";
+export * from "./memory.ts";
 export * from "./shares.ts";
 export * from "./time.ts";
 export * from "./types.ts";

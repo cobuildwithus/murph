@@ -122,22 +122,6 @@
       "types": "./dist/assistant/memory.d.ts",
       "default": "./dist/assistant/memory.js"
     },
-    "./assistant/memory/extraction": {
-      "types": "./dist/assistant/memory/extraction.d.ts",
-      "default": "./dist/assistant/memory/extraction.js"
-    },
-    "./assistant/memory/locking": {
-      "types": "./dist/assistant/memory/locking.d.ts",
-      "default": "./dist/assistant/memory/locking.js"
-    },
-    "./assistant/memory/search": {
-      "types": "./dist/assistant/memory/search.d.ts",
-      "default": "./dist/assistant/memory/search.js"
-    },
-    "./assistant/memory/storage-format": {
-      "types": "./dist/assistant/memory/storage-format.d.ts",
-      "default": "./dist/assistant/memory/storage-format.js"
-    },
     "./assistant/provider-config": {
       "types": "./dist/assistant/provider-config.d.ts",
       "default": "./dist/assistant/provider-config.js"

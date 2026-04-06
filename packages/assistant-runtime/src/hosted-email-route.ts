@@ -1,7 +1,5 @@
 import {
   resolveAssistantSelfDeliveryTarget,
-  readAssistantAutomationState,
-  saveAssistantAutomationState,
   saveAssistantSelfDeliveryTarget,
 } from "@murphai/assistant-core";
 import {
@@ -18,7 +16,6 @@ type HostedEmailSelfTargetStatus =
 export interface HostedEmailSelfTargetReconciliationResult {
   emailAddress: string | null;
   identityId: string | null;
-  preferredChannelsUpdated: boolean;
   selfTargetUpdated: boolean;
   status: HostedEmailSelfTargetStatus;
 }
@@ -34,7 +31,6 @@ export async function reconcileHostedVerifiedEmailSelfTarget(input: {
     return {
       emailAddress: null,
       identityId: null,
-      preferredChannelsUpdated: false,
       selfTargetUpdated: false,
       status: "no-verified-email",
     };
@@ -45,7 +41,6 @@ export async function reconcileHostedVerifiedEmailSelfTarget(input: {
     return {
       emailAddress: verifiedEmail.address,
       identityId: null,
-      preferredChannelsUpdated: false,
       selfTargetUpdated: false,
       status: "missing-sender-identity",
     };
@@ -65,26 +60,11 @@ export async function reconcileHostedVerifiedEmailSelfTarget(input: {
     await saveAssistantSelfDeliveryTarget(nextTarget, input.operatorHomeRoot);
   }
 
-  const automationState = await readAssistantAutomationState(input.vaultRoot);
-  const preferredChannels = automationState.preferredChannels.includes("email")
-    ? automationState.preferredChannels
-    : [...automationState.preferredChannels, "email"];
-  const preferredChannelsUpdated = preferredChannels.length !== automationState.preferredChannels.length;
-
-  if (preferredChannelsUpdated) {
-    await saveAssistantAutomationState(input.vaultRoot, {
-      ...automationState,
-      preferredChannels,
-      updatedAt: new Date().toISOString(),
-    });
-  }
-
   return {
     emailAddress: verifiedEmail.address,
     identityId: senderIdentity,
-    preferredChannelsUpdated,
     selfTargetUpdated,
-    status: selfTargetUpdated || preferredChannelsUpdated ? "saved" : "unchanged",
+    status: selfTargetUpdated ? "saved" : "unchanged",
   };
 }
 

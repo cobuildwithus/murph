@@ -857,44 +857,23 @@ test('deepthink schema stays aligned with research schema', async () => {
   assert.deepEqual(deepthinkSchema.options, researchSchema.options)
 })
 
-test('assistant cron add schema exposes the scheduler-specific options', async () => {
+test('automation upsert schema exposes the canonical automation payload input', async () => {
   const schema = JSON.parse(
-    await runRawCli(['assistant', 'cron', 'add', '--schema', '--format', 'json']),
+    await runRawCli(['automation', 'upsert', '--schema', '--format', 'json']),
   ) as {
-    args: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
     options: {
       properties: Record<string, unknown>
       required?: string[]
     }
   }
 
-  assert.equal('prompt' in schema.args.properties, true)
-  assert.deepEqual(schema.args.required, ['prompt'])
-  assert.equal('name' in schema.options.properties, true)
-  assert.equal('at' in schema.options.properties, true)
-  assert.equal('every' in schema.options.properties, true)
-  assert.equal('cron' in schema.options.properties, true)
-  assert.equal('state' in schema.options.properties, true)
-  assert.equal('stateDoc' in schema.options.properties, true)
-  assert.equal('deliverResponse' in schema.options.properties, false)
-  assert.equal('deliveryTarget' in schema.options.properties, true)
-  assert.deepEqual(schema.options.required, ['vault', 'name'])
+  assert.equal('input' in schema.options.properties, true)
+  assert.deepEqual(schema.options.required, ['vault', 'input'])
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
-test('assistant cron preset install schema exposes preset variables, instructions, and delivery options', async () => {
+test('automation show schema accepts an id-or-slug lookup', async () => {
   const schema = JSON.parse(
-    await runRawCli([
-      'assistant',
-      'cron',
-      'preset',
-      'install',
-      '--schema',
-      '--format',
-      'json',
-    ]),
+    await runRawCli(['automation', 'show', '--schema', '--format', 'json']),
   ) as {
     args: {
       properties: Record<string, unknown>
@@ -906,32 +885,14 @@ test('assistant cron preset install schema exposes preset variables, instruction
     }
   }
 
-  assert.equal('preset' in schema.args.properties, true)
-  assert.deepEqual(schema.args.required, ['preset'])
-  assert.equal('name' in schema.options.properties, true)
-  assert.equal('var' in schema.options.properties, true)
-  assert.equal('instructions' in schema.options.properties, true)
-  assert.equal('at' in schema.options.properties, true)
-  assert.equal('every' in schema.options.properties, true)
-  assert.equal('cron' in schema.options.properties, true)
-  assert.equal('state' in schema.options.properties, true)
-  assert.equal('stateDoc' in schema.options.properties, true)
-  assert.equal('deliverResponse' in schema.options.properties, false)
-  assert.equal('deliveryTarget' in schema.options.properties, true)
+  assert.equal('lookup' in schema.args.properties, true)
+  assert.deepEqual(schema.args.required, ['lookup'])
   assert.deepEqual(schema.options.required, ['vault'])
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
-test('assistant cron target set schema exposes the retargeting sources and delivery options', async () => {
+test('memory upsert schema exposes canonical memory write fields', async () => {
   const schema = JSON.parse(
-    await runRawCli([
-      'assistant',
-      'cron',
-      'target',
-      'set',
-      '--schema',
-      '--format',
-      'json',
-    ]),
+    await runRawCli(['memory', 'upsert', '--schema', '--format', 'json']),
   ) as {
     args: {
       properties: Record<string, unknown>
@@ -943,31 +904,16 @@ test('assistant cron target set schema exposes the retargeting sources and deliv
     }
   }
 
-  assert.equal('job' in schema.args.properties, true)
-  assert.deepEqual(schema.args.required, ['job'])
-  assert.equal('toSelf' in schema.options.properties, true)
-  assert.equal('copyFrom' in schema.options.properties, true)
-  assert.equal('dryRun' in schema.options.properties, true)
-  assert.equal('resetContinuity' in schema.options.properties, true)
-  assert.equal('channel' in schema.options.properties, true)
-  assert.equal('identity' in schema.options.properties, true)
-  assert.equal('participant' in schema.options.properties, true)
-  assert.equal('sourceThread' in schema.options.properties, true)
-  assert.equal('deliveryTarget' in schema.options.properties, true)
-  assert.deepEqual(schema.options.required, ['vault'])
+  assert.equal('text' in schema.args.properties, true)
+  assert.deepEqual(schema.args.required, ['text'])
+  assert.equal('section' in schema.options.properties, true)
+  assert.equal('memoryId' in schema.options.properties, true)
+  assert.deepEqual(schema.options.required, ['vault', 'section'])
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
-test('assistant state schemas expose document ids and JSON input payload flags', async () => {
-  const listSchema = JSON.parse(
-    await runRawCli(['assistant', 'state', 'list', '--schema', '--format', 'json']),
-  ) as {
-    options: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
-  const putSchema = JSON.parse(
-    await runRawCli(['assistant', 'state', 'put', '--schema', '--format', 'json']),
+test('memory show schema accepts an optional memory id', async () => {
+  const schema = JSON.parse(
+    await runRawCli(['memory', 'show', '--schema', '--format', 'json']),
   ) as {
     args: {
       properties: Record<string, unknown>
@@ -979,12 +925,9 @@ test('assistant state schemas expose document ids and JSON input payload flags',
     }
   }
 
-  assert.equal('prefix' in listSchema.options.properties, true)
-  assert.deepEqual(listSchema.options.required, ['vault'])
-  assert.equal('doc' in putSchema.args.properties, true)
-  assert.deepEqual(putSchema.args.required, ['doc'])
-  assert.equal('input' in putSchema.options.properties, true)
-  assert.deepEqual(putSchema.options.required, ['vault', 'input'])
+  assert.equal('memoryId' in schema.args.properties, true)
+  assert.deepEqual(schema.args.required ?? [], [])
+  assert.deepEqual(schema.options.required, ['vault'])
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
 test('assistant session list schema emits the normalized session output shape', async () => {
@@ -1047,18 +990,12 @@ test('assistant session show schema emits the normalized session output shape', 
   assert.equal('target' in (sessionVariant?.properties ?? {}), true)
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
-test('assistant cron help explains when to opt into assistant state', async () => {
-  const addHelp = await runRawCli(['assistant', 'cron', 'add', '--help'])
-  const presetInstallHelp = await runRawCli(['assistant', 'cron', 'preset', 'install', '--help'])
+test('automation help points operators at canonical automations', async () => {
+  const upsertHelp = await runRawCli(['automation', 'upsert', '--help'])
+  const scaffoldHelp = await runRawCli(['automation', 'scaffold', '--help'])
 
-  assert.match(
-    addHelp,
-    /Add --state or --stateDoc only when the job needs run-to-run scratch state such as cooldowns, dedupe, unresolved follow-ups, or delivery policy; leave it off for stateless jobs that can recompute everything each run\./u,
-  )
-  assert.match(
-    presetInstallHelp,
-    /Add --state only when the job needs run-to-run scratch state such as cooldowns, dedupe, unresolved follow-ups, or delivery policy; leave it off for stateless digest\/report jobs\./u,
-  )
+  assert.match(upsertHelp, /Create or update one automation record from a JSON payload\./u)
+  assert.match(scaffoldHelp, /Emit a canonical automation payload template/u)
 }, INCUR_HELP_TIMEOUT_MS)
 
 test('food schedule schema exposes the recurring food options', async () => {

@@ -11,10 +11,6 @@ test("buildAssistantSystemPrompt tells Murph to gather personal supplement and l
     assistantCliExecutorAvailable: true,
     assistantCronToolsAvailable: true,
     assistantHostedDeviceConnectAvailable: false,
-    assistantMemoryDailyPath: "assistant-state/memory/2026-04-05.md",
-    assistantMemoryLongTermPath: "assistant-state/MEMORY.md",
-    assistantMemoryPrompt: null,
-    assistantStateToolsAvailable: true,
     channel: "telegram",
     cliAccess: {
       rawCommand: "vault-cli",

@@ -5,18 +5,17 @@ import { resolveRuntimePaths, ASSISTANT_RUNTIME_DIRECTORY_RELATIVE_PATH } from "
 export interface AssistantStatePaths {
   absoluteVaultRoot: string;
   assistantStateRoot: string;
-  automationPath: string;
+  automationStatePath: string;
   cronDirectory: string;
+  cronAutomationStatePath: string;
   cronJobsPath: string;
   cronRunsDirectory: string;
-  dailyMemoryDirectory: string;
   diagnosticsDirectory: string;
   diagnosticEventsPath: string;
   diagnosticSnapshotPath: string;
   failoverStatePath: string;
   indexesPath: string;
   journalsDirectory: string;
-  longTermMemoryPath: string;
   outboxDirectory: string;
   outboxQuarantineDirectory: string;
   providerRouteRecoveryDirectory: string;
@@ -54,18 +53,17 @@ export function resolveAssistantStatePaths(vaultRoot: string): AssistantStatePat
   return {
     absoluteVaultRoot,
     assistantStateRoot: rootPath,
-    automationPath: path.join(rootPath, "automation.json"),
+    automationStatePath: path.join(rootPath, "automation-state.json"),
     cronDirectory,
+    cronAutomationStatePath: path.join(cronDirectory, "automation-runtime.json"),
     cronJobsPath: path.join(cronDirectory, "jobs.json"),
     cronRunsDirectory: path.join(cronDirectory, "runs"),
-    dailyMemoryDirectory: path.join(rootPath, "memory"),
     diagnosticsDirectory,
     diagnosticEventsPath: path.join(diagnosticsDirectory, "events.jsonl"),
     diagnosticSnapshotPath: path.join(diagnosticsDirectory, "snapshot.json"),
     failoverStatePath: path.join(rootPath, "failover.json"),
     indexesPath: path.join(rootPath, "indexes.json"),
     journalsDirectory,
-    longTermMemoryPath: path.join(rootPath, "MEMORY.md"),
     outboxDirectory,
     outboxQuarantineDirectory: path.join(outboxDirectory, ".quarantine"),
     providerRouteRecoveryDirectory: path.join(rootPath, "provider-route-recovery"),

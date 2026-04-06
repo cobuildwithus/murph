@@ -605,12 +605,12 @@ test('executeAssistantProviderTurnAttempt collects provider-agnostic activity la
     input.onProgress?.({
       id: 'cmd-1',
       kind: 'command',
-      label: '$ node /tmp/bin.js assistant memory get --vault /tmp/vault',
+      label: '$ node /tmp/bin.js memory show --vault /tmp/vault',
       rawEvent: { type: 'item.started' },
-      safeLabel: 'assistant memory get',
-      safeText: 'running assistant memory get',
+      safeLabel: 'memory show',
+      safeText: 'running memory show',
       state: 'running',
-      text: '$ node /tmp/bin.js assistant memory get --vault /tmp/vault',
+      text: '$ node /tmp/bin.js memory show --vault /tmp/vault',
     })
     input.onProgress?.({
       id: 'tool-1',
@@ -654,7 +654,7 @@ test('executeAssistantProviderTurnAttempt collects provider-agnostic activity la
     assert.fail('expected the provider attempt to succeed')
   }
   assert.deepEqual(result.metadata.activityLabels, [
-    'assistant memory get',
+    'memory show',
     'murph.cli.run',
   ])
   assert.equal(onEvent.mock.calls.length, 3)
@@ -921,10 +921,10 @@ test('executeAssistantProviderTurn forwards reasoning effort to Venice chat comp
 test('executeAssistantProviderTurn uses the prebuilt canonical assistant tool catalog for OpenAI-compatible tool-runtime turns', async () => {
   const languageModel = { provider: 'mock-model' }
   const aiSdkTools = {
-    'assistant.cron.list': { description: 'cron' },
-    'assistant.memory.search': { description: 'memory' },
+    'assistant.knowledge.list': { description: 'knowledge-list' },
+    'assistant.knowledge.search': { description: 'knowledge' },
     'assistant.selfTarget.list': { description: 'self-target' },
-    'assistant.state.show': { description: 'state' },
+    'assistant.knowledge.upsert': { description: 'knowledge-upsert' },
     'vault.fs.readText': { description: 'read-text' },
     'vault.show': { description: 'show' },
   } as any
@@ -979,19 +979,19 @@ test('executeAssistantProviderTurn records tool raw-events and trace updates for
     options?.onToolEvent?.({
       kind: 'started',
       mode: 'apply',
-      tool: 'assistant.memory.search',
-      input: { text: 'tone' },
+      tool: 'assistant.knowledge.search',
+      input: { text: 'lipids' },
     })
     options?.onToolEvent?.({
       kind: 'succeeded',
       mode: 'apply',
-      tool: 'assistant.memory.search',
-      input: { text: 'tone' },
+      tool: 'assistant.knowledge.search',
+      input: { text: 'lipids' },
       result: { results: [] },
     })
 
     return {
-      'assistant.memory.search': { description: 'memory' },
+      'assistant.knowledge.search': { description: 'knowledge' },
     } as any
   })
 
@@ -1024,19 +1024,19 @@ test('executeAssistantProviderTurn records tool raw-events and trace updates for
       type: 'assistant.tool.started',
       sequence: 1,
       mode: 'apply',
-      tool: 'assistant.memory.search',
-      input: { text: 'tone' },
+      tool: 'assistant.knowledge.search',
+      input: { text: 'lipids' },
     },
     {
       type: 'assistant.tool.succeeded',
       sequence: 2,
       mode: 'apply',
-      tool: 'assistant.memory.search',
+      tool: 'assistant.knowledge.search',
     },
   ])
   assert.equal(onTraceEvent.mock.calls.length, 2)
-  assert.equal(onTraceEvent.mock.calls[0]?.[0]?.updates[0]?.text, 'Running assistant.memory.search…')
-  assert.equal(onTraceEvent.mock.calls[1]?.[0]?.updates[0]?.text, 'Finished assistant.memory.search.')
+  assert.equal(onTraceEvent.mock.calls[0]?.[0]?.updates[0]?.text, 'Running assistant.knowledge.search…')
+  assert.equal(onTraceEvent.mock.calls[1]?.[0]?.updates[0]?.text, 'Finished assistant.knowledge.search.')
 })
 
 test('executeAssistantProviderTurnAttempt reports provider-agnostic tool execution metadata on OpenAI-compatible failures', async () => {
@@ -1047,12 +1047,12 @@ test('executeAssistantProviderTurnAttempt reports provider-agnostic tool executi
     options?.onToolEvent?.({
       kind: 'started',
       mode: 'apply',
-      tool: 'assistant.memory.search',
-      input: { text: 'tone' },
+      tool: 'assistant.knowledge.search',
+      input: { text: 'lipids' },
     })
 
     return {
-      'assistant.memory.search': { description: 'memory' },
+      'assistant.knowledge.search': { description: 'knowledge' },
     } as any
   })
 
@@ -1085,32 +1085,32 @@ test('executeAssistantProviderTurnAttempt reports provider-agnostic tool executi
     assert.fail('expected the provider attempt to fail')
   }
   assert.equal(result.metadata.executedToolCount, 1)
-  assert.deepEqual(result.metadata.activityLabels, ['assistant.memory.search'])
+  assert.deepEqual(result.metadata.activityLabels, ['assistant.knowledge.search'])
   assert.deepEqual(result.metadata.rawToolEvents, [
     {
       type: 'assistant.tool.started',
       sequence: 1,
       mode: 'apply',
-      tool: 'assistant.memory.search',
-      input: { text: 'tone' },
+      tool: 'assistant.knowledge.search',
+      input: { text: 'lipids' },
     },
   ])
   assert.deepEqual(onEvent.mock.calls.map((call) => call[0]), [
     {
       id: 'tool-1',
       kind: 'tool',
-      label: 'assistant.memory.search',
+      label: 'assistant.knowledge.search',
       rawEvent: {
         type: 'assistant.tool.started',
         sequence: 1,
         mode: 'apply',
-        tool: 'assistant.memory.search',
-        input: { text: 'tone' },
+        tool: 'assistant.knowledge.search',
+        input: { text: 'lipids' },
       },
-      safeLabel: 'assistant.memory.search',
-      safeText: 'using assistant.memory.search',
+      safeLabel: 'assistant.knowledge.search',
+      safeText: 'using assistant.knowledge.search',
       state: 'running',
-      text: 'Running assistant.memory.search.',
+      text: 'Running assistant.knowledge.search.',
     },
   ])
 })

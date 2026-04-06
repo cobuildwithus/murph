@@ -66,27 +66,6 @@ export {
   stopAssistantAutomation,
 } from './assistant/stop.js'
 export type {
-  AssistantMemoryForgetInput,
-  AssistantMemoryGetInput,
-  AssistantMemoryPromptInput,
-  AssistantMemorySearchInput,
-  AssistantMemorySearchResponse,
-  AssistantMemoryTurnContext,
-  AssistantMemoryTurnContextInput,
-  AssistantMemoryUpsertInput,
-  AssistantMemoryUpsertWriteResult,
-} from '@murphai/assistant-core/assistant-runtime'
-export {
-  assertAssistantMemoryTurnContextVault,
-  createAssistantMemoryTurnContextEnv,
-  forgetAssistantMemory,
-  getAssistantMemory,
-  loadAssistantMemoryPromptBlock,
-  resolveAssistantMemoryTurnContext,
-  searchAssistantMemory,
-  upsertAssistantMemory,
-} from '@murphai/assistant-core/assistant-runtime'
-export type {
   AssistantAutoReplyScanResult,
   AssistantAutomationScanResult,
   AssistantInboxScanResult,
@@ -112,25 +91,6 @@ export {
   listAssistantOutboxIntents,
   shouldDispatchAssistantOutboxIntent,
 } from './assistant/outbox.js'
-export type {
-  AssistantStateDeleteDocumentInput,
-  AssistantStateDeleteDocumentResult,
-  AssistantStateDocumentSnapshot,
-  AssistantStateGetDocumentInput,
-  AssistantStateListDocumentsInput,
-  AssistantStatePatchDocumentInput,
-  AssistantStatePutDocumentInput,
-} from '@murphai/assistant-core/assistant-state'
-export {
-  buildDefaultAssistantCronStateDocId,
-  deleteAssistantStateDocument,
-  getAssistantStateDocument,
-  listAssistantStateDocuments,
-  patchAssistantStateDocument,
-  putAssistantStateDocument,
-  resolveAssistantStateDocumentPath,
-} from '@murphai/assistant-core/assistant-state'
-
 export async function runAssistantChat(
   input: import('./assistant/service.js').AssistantChatInput,
 ): Promise<import('@murphai/assistant-core/assistant-cli-contracts').AssistantChatResult> {

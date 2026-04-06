@@ -12,7 +12,6 @@ import {
   resolveAssistantStatePaths,
   saveAssistantAutomationState,
 } from '@murphai/assistant-core/assistant-state'
-import { upsertAssistantMemory } from '@murphai/assistant-core/assistant/memory'
 import { listPendingAssistantUsageRecords } from '@murphai/runtime-state/node'
 import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 import { listAssistantTurnReceipts } from '@murphai/assistant-core/assistant/receipts'
@@ -3961,7 +3960,7 @@ test('scanAssistantAutoReplyOnce queues hosted auto-replies without sending befo
   assert.equal(snapshot?.recentTurns[0]?.deliveryDisposition, 'queued')
 })
 
-test('scanAssistantAutoReplyOnce injects persisted assistant memory into auto-reply turns', async () => {
+test('scanAssistantAutoReplyOnce does not bootstrap persisted memory text into auto-reply prompts', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-auto-reply-onboarding-memory-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot, { recursive: true })
@@ -3993,21 +3992,6 @@ test('scanAssistantAutoReplyOnce injects persisted assistant memory into auto-re
       messageLength: 10,
     },
   })
-
-  await Promise.all([
-    upsertAssistantMemory({
-      vault: vaultRoot,
-      text: 'Call the user Chris.',
-      scope: 'long-term',
-      section: 'Identity',
-    }),
-    upsertAssistantMemory({
-      vault: vaultRoot,
-      text: 'Keep answers concise.',
-      scope: 'long-term',
-      section: 'Standing instructions',
-    }),
-  ])
 
   const inboxServices = {
     async list() {
@@ -4062,9 +4046,9 @@ test('scanAssistantAutoReplyOnce injects persisted assistant memory into auto-re
   })
 
   const providerCall = runtimeMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
-  assert.match(providerCall?.systemPrompt ?? '', /Core assistant memory:/u)
-  assert.match(providerCall?.systemPrompt ?? '', /Call the user Chris\./u)
-  assert.match(providerCall?.systemPrompt ?? '', /Keep answers concise\./u)
+  assert.doesNotMatch(providerCall?.systemPrompt ?? '', /Core assistant memory:/u)
+  assert.doesNotMatch(providerCall?.systemPrompt ?? '', /Call the user Chris\./u)
+  assert.doesNotMatch(providerCall?.systemPrompt ?? '', /Keep answers concise\./u)
   assert.doesNotMatch(providerCall?.systemPrompt ?? '', /Known onboarding answers/u)
   assert.doesNotMatch(providerCall?.systemPrompt ?? '', /what goals they want help with/u)
 })
@@ -7044,7 +7028,6 @@ test('runAssistantAutomation merges routing and reply into one inbox decision pa
     inboxScanCursor: null,
     autoReplyScanCursor: null,
     autoReplyChannels: ['imessage'],
-    preferredChannels: [],
     autoReplyBacklogChannels: [],
     autoReplyPrimed: true,
     updatedAt: '2026-03-18T00:00:00.000Z',

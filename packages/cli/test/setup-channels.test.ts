@@ -339,7 +339,6 @@ test('configureSetupChannels adds a Linq connector and persists auto-reply when 
 
     const automationState = await readAssistantAutomationState(vault)
     assert.deepEqual(automationState.autoReplyChannels, ['linq'])
-    assert.deepEqual(automationState.preferredChannels, ['linq'])
   } finally {
     await rm(vault, { recursive: true, force: true })
   }
@@ -561,7 +560,6 @@ test('configureSetupChannels keeps email selected in onboarding preferences even
 
     const automationState = await readAssistantAutomationState(vault)
     assert.deepEqual(automationState.autoReplyChannels, [])
-    assert.deepEqual(automationState.preferredChannels, ['email'])
     assert.deepEqual(automationState.autoReplyBacklogChannels, [])
   } finally {
     await rm(vault, { recursive: true, force: true })
@@ -647,7 +645,6 @@ test('configureSetupChannels treats an empty but reachable AgentMail inbox as co
 
     const automationState = await readAssistantAutomationState(vault)
     assert.deepEqual(automationState.autoReplyChannels, ['email'])
-    assert.deepEqual(automationState.preferredChannels, ['email'])
     assert.deepEqual(automationState.autoReplyBacklogChannels, ['email'])
   } finally {
     await rm(vault, { recursive: true, force: true })
@@ -768,7 +765,6 @@ test('configureSetupChannels disables stale setup connectors that were not selec
 
     const automationState = await readAssistantAutomationState(vault)
     assert.deepEqual(automationState.autoReplyChannels, ['email'])
-    assert.deepEqual(automationState.preferredChannels, ['email'])
     assert.deepEqual(automationState.autoReplyBacklogChannels, ['email'])
   } finally {
     await rm(vault, { recursive: true, force: true })

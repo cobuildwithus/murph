@@ -616,21 +616,11 @@ export async function configureSetupChannels(input: {
         .filter((channel) => channel.autoReply)
         .map((channel) => channel.channel),
       platform,
-      preferredChannels: filterPersistedSetupChannels(input.channels, platform),
       vault: input.vault,
     })
   }
 
   return configured
-}
-
-function filterPersistedSetupChannels(
-  channels: readonly SetupChannel[],
-  platform: NodeJS.Platform,
-): SetupChannel[] {
-  return normalizeSetupChannels(channels).filter((channel) =>
-    isSetupChannelSupportedOnPlatform(channel, platform),
-  )
 }
 
 async function configureIMessageChannel(
@@ -909,7 +899,6 @@ async function probeSetupReadiness(input: {
 async function updateAssistantChannelState(input: {
   autoReplyChannels: readonly SetupChannel[]
   platform: NodeJS.Platform
-  preferredChannels: readonly SetupChannel[]
   vault: string
 }): Promise<void> {
   const state = await readAssistantAutomationState(input.vault)
@@ -918,18 +907,9 @@ async function updateAssistantChannelState(input: {
       isSetupChannel(channel) &&
       !isSetupChannelSupportedOnPlatform(channel, input.platform),
   )
-  const preservedPreferredChannels = state.preferredChannels.filter(
-    (channel): channel is SetupChannel =>
-      isSetupChannel(channel) &&
-      !isSetupChannelSupportedOnPlatform(channel, input.platform),
-  )
   const autoReplyChannels = normalizeSetupChannels([
     ...input.autoReplyChannels,
     ...preservedAutoReplyChannels,
-  ])
-  const preferredChannels = normalizeSetupChannels([
-    ...input.preferredChannels,
-    ...preservedPreferredChannels,
   ])
   const nextBacklogChannels = normalizeSetupChannels(
     state.autoReplyBacklogChannels.filter(
@@ -943,14 +923,11 @@ async function updateAssistantChannelState(input: {
   const autoReplyChanged =
     autoReplyChannels.length !== state.autoReplyChannels.length ||
     autoReplyChannels.some((channel, index) => state.autoReplyChannels[index] !== channel)
-  const preferredChanged =
-    preferredChannels.length !== state.preferredChannels.length ||
-    preferredChannels.some((channel, index) => state.preferredChannels[index] !== channel)
   const backlogChanged =
     nextBacklogChannels.length !== state.autoReplyBacklogChannels.length ||
     nextBacklogChannels.some((channel, index) => state.autoReplyBacklogChannels[index] !== channel)
 
-  if (!autoReplyChanged && !preferredChanged && !backlogChanged) {
+  if (!autoReplyChanged && !backlogChanged) {
     return
   }
 
@@ -964,7 +941,6 @@ async function updateAssistantChannelState(input: {
           ? null
           : state.autoReplyScanCursor,
     autoReplyChannels,
-    preferredChannels,
     autoReplyBacklogChannels: nextBacklogChannels,
     autoReplyPrimed:
       autoReplyChannels.length === 0
@@ -972,7 +948,6 @@ async function updateAssistantChannelState(input: {
         : autoReplyChanged
           ? false
           : state.autoReplyPrimed,
-    preferredScheduledUpdates: state.preferredScheduledUpdates,
     updatedAt: new Date().toISOString(),
   })
 }

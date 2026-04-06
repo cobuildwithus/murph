@@ -81,7 +81,7 @@ async function runAssistantDoctorAtPaths(
   ] = await Promise.all([
     summarizeAssistantQuarantines({ paths }),
     scanSessionFiles(paths.sessionsDirectory),
-    scanJsonFile(paths.automationPath, assistantAutomationStateSchema),
+    scanJsonFile(paths.automationStatePath, assistantAutomationStateSchema),
     scanTranscriptFiles(paths.transcriptsDirectory),
     scanTurnReceiptFiles(paths.turnsDirectory),
     scanOutboxFiles(paths.outboxDirectory),

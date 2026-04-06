@@ -4,33 +4,9 @@ import {
   assistantAskResultSchema,
   assistantChatProviderValues,
   assistantChatResultSchema,
-  assistantCronAddResultSchema,
-  assistantCronListResultSchema,
-  assistantCronPresetInstallResultSchema,
-  assistantCronPresetListResultSchema,
-  assistantCronPresetShowResultSchema,
-  assistantCronRemoveResultSchema,
-  assistantCronRunResultSchema,
-  assistantCronRunsResultSchema,
-  assistantCronShowResultSchema,
-  assistantCronStatusResultSchema,
-  assistantCronTargetSetResultSchema,
-  assistantCronTargetShowResultSchema,
   assistantDeliverResultSchema,
   assistantDoctorResultSchema,
-  assistantMemoryFileAppendResultSchema,
-  assistantMemoryFileReadResultSchema,
-  assistantMemoryFileWriteResultSchema,
-  assistantMemoryGetResultSchema,
-  assistantMemoryQueryScopeValues,
-  assistantMemorySearchResultSchema,
-  assistantMemoryVisibleSectionValues,
   assistantRunResultSchema,
-  assistantStateDeleteResultSchema,
-  assistantStateListResultSchema,
-  assistantStatePatchResultSchema,
-  assistantStatePutResultSchema,
-  assistantStateShowResultSchema,
   assistantSelfDeliveryTargetClearResultSchema,
   assistantSelfDeliveryTargetListResultSchema,
   assistantSelfDeliveryTargetSetResultSchema,
@@ -44,28 +20,9 @@ import {
 import { deliverAssistantMessage } from '@murphai/assistant-core/outbound-channel'
 import type { ConversationRef } from '@murphai/assistant-core/assistant-runtime'
 import {
-  addAssistantCronJob,
-  buildAssistantCronSchedule,
-  getAssistantCronPreset,
-  getAssistantCronJob,
-  getAssistantCronJobTarget,
-  getAssistantCronStatus,
-  getAssistantStateDocument,
-  installAssistantCronPreset,
-  listAssistantCronPresets,
-  listAssistantCronJobs,
-  listAssistantCronRuns,
-  listAssistantStateDocuments,
-  deleteAssistantStateDocument,
-  patchAssistantStateDocument,
-  putAssistantStateDocument,
-  removeAssistantCronJob,
   runAssistantAutomation,
   runAssistantChat,
-  runAssistantCronJobNow,
   sendAssistantMessage,
-  setAssistantCronJobTarget,
-  setAssistantCronJobEnabled,
   stopAssistantAutomation,
 } from '../assistant-runtime.js'
 import { runAssistantDoctor } from '../assistant/doctor.js'
@@ -75,23 +32,9 @@ import {
   redactAssistantSessionsForDisplay,
 } from '@murphai/assistant-core/assistant-runtime'
 import {
-  assertAssistantMemoryTurnContextVault,
-  appendAssistantMemoryMarkdownFile,
-  getAssistantMemory,
-  readAssistantMemoryMarkdownFile,
-  redactAssistantMemoryRecord,
-  redactAssistantMemorySearchHit,
-  resolveAssistantMemoryStoragePaths,
-  resolveAssistantMemoryTurnContext,
-  searchAssistantMemory,
-  writeAssistantMemoryMarkdownFile,
-} from '@murphai/assistant-core/assistant-runtime'
-import {
   redactAssistantDisplayPath,
   getAssistantSession,
   listAssistantSessions,
-  redactAssistantStateDocumentListEntry,
-  redactAssistantStateDocumentSnapshot,
   resolveAssistantStatePaths,
 } from '@murphai/assistant-core/assistant-state'
 import {
@@ -102,17 +45,9 @@ import {
 } from '@murphai/assistant-core/command-helpers'
 import type { InboxServices } from '@murphai/assistant-core/inbox-services'
 import {
-  inputFileOptionSchema,
-  loadJsonInputObject,
-  loadTextInput,
-  textInputOptionSchema,
-} from '@murphai/assistant-core/json-input'
-import { normalizeRepeatableFlagOption } from '@murphai/assistant-core/option-utils'
-import {
   applyAssistantSelfDeliveryTargetDefaults,
   clearAssistantSelfDeliveryTargets,
   listAssistantSelfDeliveryTargets,
-  resolveAssistantSelfDeliveryTarget,
   resolveOperatorConfigPath,
   saveAssistantSelfDeliveryTarget,
 } from '@murphai/assistant-core/operator-config'
@@ -125,10 +60,6 @@ import {
 import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 import type { VaultServices } from '@murphai/assistant-core/vault-services'
 import { requestIdSchema } from '@murphai/assistant-core/vault-cli-contracts'
-
-const assistantMemoryMarkdownFilePathSchema = z
-  .string()
-  .regex(/^(MEMORY\.md|memory\/\d{4}-\d{2}-\d{2}\.md)$/u)
 
 const assistantSessionOptionFields = {
   session: z
@@ -249,59 +180,6 @@ const assistantDeliveryOptionFields = {
   ),
 }
 
-const assistantCronDeliveryOptionFields = {
-  deliveryTarget: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(
-      'Optional explicit outbound destination for each cron run. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound cron jobs reply in place.',
-    ),
-}
-
-const assistantCronTargetSourceOptionFields = {
-  copyFrom: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(
-      'Copy the current delivery target from another assistant cron job instead of providing route flags directly.',
-    ),
-  dryRun: z
-    .boolean()
-    .optional()
-    .describe('Validate and preview the target change without writing scheduler state.'),
-  resetContinuity: z
-    .boolean()
-    .optional()
-    .describe(
-      'Clear the saved sessionId and alias while retargeting so the next run starts fresh instead of rebinding the existing assistant session.',
-    ),
-  toSelf: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(
-      'Use the saved self-delivery target for one channel, such as email or telegram.',
-    ),
-}
-
-const assistantCronStateOptionFields = {
-  state: z
-    .boolean()
-    .optional()
-    .describe(
-      'Bind this cron job to a default assistant state document under assistant-state/state/cron/<jobId>.json. Use this only when the cron needs run-to-run scratch state such as cooldowns, dedupe, unresolved follow-ups, or delivery policy.',
-    ),
-  stateDoc: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(
-      'Optional explicit assistant state document id to bind to this cron job, such as cron/weekly-health-snapshot. Prefer this only when the cron needs stable cross-run scratch state or must share one state doc across related jobs.',
-    ),
-}
-
 const assistantSelfDeliveryTargetOptionFields = {
   identity: z
     .string()
@@ -325,44 +203,6 @@ const assistantSelfDeliveryTargetOptionFields = {
     .describe(
       'Optional explicit outbound destination to save for this channel target, such as a phone number, Telegram chat id, or email address.',
     ),
-}
-
-function parseAssistantCronPresetVariables(
-  value: readonly string[] | undefined,
-): Record<string, string> {
-  const entries = normalizeRepeatableFlagOption(value, 'var') ?? []
-  const variables: Record<string, string> = {}
-
-  for (const entry of entries) {
-    const separatorIndex = entry.indexOf('=')
-    if (separatorIndex <= 0 || separatorIndex === entry.length - 1) {
-      throw new VaultCliError(
-        'invalid_option',
-        'Preset variables must use key=value form. Repeat --var for multiple values.',
-      )
-    }
-
-    const key = entry.slice(0, separatorIndex).trim()
-    const variableValue = entry.slice(separatorIndex + 1).trim()
-
-    if (key.length === 0 || variableValue.length === 0) {
-      throw new VaultCliError(
-        'invalid_option',
-        'Preset variables must use key=value form with non-empty keys and values.',
-      )
-    }
-
-    if (Object.hasOwn(variables, key)) {
-      throw new VaultCliError(
-        'invalid_option',
-        `Preset variable "${key}" was provided more than once. Repeat --var only for different keys.`,
-      )
-    }
-
-    variables[key] = variableValue
-  }
-
-  return variables
 }
 
 function assertAssistantSelfDeliveryTargetInput(input: {
@@ -439,10 +279,10 @@ function createAssistantStatusCommandDefinition(input?: {
     args: emptyArgsSchema,
     description:
       input?.description ??
-      'Show a compact assistant-state snapshot including recent turn receipts and the outbound outbox backlog.',
+      'Show a compact assistant runtime snapshot including recent turn receipts and the outbound outbox backlog.',
     hint:
       input?.hint ??
-      'Use this when the assistant feels stuck, duplicated a send, or you want the latest receipt timeline without opening files under assistant-state/.',
+      'Use this when the assistant feels stuck, duplicated a send, or you want the latest receipt timeline without opening the local runtime files under `.runtime/operations/assistant/`.',
     options: withBaseOptions({
       session: z
         .string()
@@ -482,16 +322,16 @@ function createAssistantDoctorCommandDefinition(input?: {
     args: emptyArgsSchema,
     description:
       input?.description ??
-      'Run lightweight assistant-state diagnostics for session files, receipts, transcripts, automation state, and the outbound outbox.',
+      'Run lightweight assistant runtime diagnostics for session files, receipts, transcripts, automation state, and the outbound outbox.',
     hint:
       input?.hint ??
-      'Use --repair to tighten assistant-state permissions in place.',
+      'Use --repair to tighten local assistant runtime permissions in place.',
     options: withBaseOptions({
       repair: z
         .boolean()
         .default(false)
         .describe(
-          'Repair assistant-state file and directory permissions in place.',
+          'Repair local assistant runtime file and directory permissions in place.',
         ),
     }),
     output: assistantDoctorResultSchema,
@@ -550,28 +390,6 @@ function buildAssistantStateRootResultPaths(vault: string, stateRoot: string) {
 function buildAssistantStateResultPaths(vault: string) {
   const statePaths = resolveAssistantStatePaths(vault)
   return buildAssistantStateRootResultPaths(vault, statePaths.assistantStateRoot)
-}
-
-function buildAssistantStateDocumentResultPaths(vault: string) {
-  const statePaths = resolveAssistantStatePaths(vault)
-  return {
-    ...buildAssistantStateRootResultPaths(vault, statePaths.assistantStateRoot),
-    documentsRoot: redactAssistantDisplayPath(statePaths.stateDirectory),
-  }
-}
-
-function buildAssistantMemoryResultPaths(vault: string) {
-  const statePaths = resolveAssistantMemoryStoragePaths(vault)
-  return buildAssistantStateRootResultPaths(vault, statePaths.assistantStateRoot)
-}
-
-function buildAssistantCronResultPaths(vault: string) {
-  const statePaths = resolveAssistantStatePaths(vault)
-  return {
-    ...buildAssistantStateRootResultPaths(vault, statePaths.assistantStateRoot),
-    jobsPath: redactAssistantDisplayPath(statePaths.cronJobsPath),
-    runsRoot: redactAssistantDisplayPath(statePaths.cronRunsDirectory),
-  }
 }
 
 function buildAssistantOperatorConfigResult() {
@@ -641,92 +459,6 @@ async function resolveAssistantDeliveryRouteFromCli(input: {
       allowSingleSavedTargetFallback: input.allowSingleSavedTargetFallback,
     },
   )
-}
-
-function assistantCronStateOptionsFromCli<T extends {
-  state?: boolean
-  stateDoc?: string
-}>(options: T) {
-  return {
-    bindState: options.state,
-    stateDocId: options.stateDoc,
-  }
-}
-
-async function resolveAssistantCronTargetFromCli(input: {
-  copyFrom?: string
-  deliveryTarget?: string
-  identity?: string
-  participant?: string
-  sourceThread?: string
-  toSelf?: string
-  channel?: string
-  vault: string
-}) {
-  const hasExplicitRoute =
-    Boolean(input.channel) ||
-    Boolean(input.identity) ||
-    Boolean(input.participant) ||
-    Boolean(input.sourceThread) ||
-    Boolean(input.deliveryTarget)
-  const selectedSources = [
-    input.toSelf ? 'to-self' : null,
-    input.copyFrom ? 'copy-from' : null,
-    hasExplicitRoute ? 'explicit-route' : null,
-  ].filter((value): value is string => value !== null)
-
-  if (selectedSources.length !== 1) {
-    throw new VaultCliError(
-      'invalid_option',
-      'Provide exactly one cron target source: --toSelf <channel>, --copyFrom <job>, or an explicit route via --channel/--identity/--participant/--sourceThread/--deliveryTarget.',
-    )
-  }
-
-  if (input.toSelf) {
-    const savedTarget = await resolveAssistantSelfDeliveryTarget(input.toSelf)
-    if (!savedTarget) {
-      throw new VaultCliError(
-        'ASSISTANT_SELF_TARGET_NOT_FOUND',
-        `No saved self-delivery target exists for channel "${input.toSelf}". Save one first with \`assistant self-target set ${input.toSelf} ...\`.`,
-      )
-    }
-
-    return {
-      channel: savedTarget.channel,
-      identityId: savedTarget.identityId ?? undefined,
-      participantId: savedTarget.participantId ?? undefined,
-      sourceThreadId: savedTarget.sourceThreadId ?? undefined,
-      deliveryTarget: savedTarget.deliveryTarget ?? undefined,
-    }
-  }
-
-  if (input.copyFrom) {
-    const sourceJobTarget = await getAssistantCronJobTarget(input.vault, input.copyFrom)
-    return {
-      channel: sourceJobTarget.target.channel ?? undefined,
-      identityId: sourceJobTarget.target.identityId ?? undefined,
-      participantId: sourceJobTarget.target.participantId ?? undefined,
-      sourceThreadId: sourceJobTarget.target.sourceThreadId ?? undefined,
-      deliveryTarget: sourceJobTarget.target.deliveryTarget ?? undefined,
-    }
-  }
-
-  const resolvedRoute = await resolveAssistantDeliveryRouteFromCli({
-    allowSingleSavedTargetFallback: false,
-    channel: input.channel,
-    identity: input.identity,
-    participant: input.participant,
-    sourceThread: input.sourceThread,
-    deliveryTarget: input.deliveryTarget,
-  })
-
-  return {
-    channel: resolvedRoute.channel ?? undefined,
-    identityId: resolvedRoute.identityId ?? undefined,
-    participantId: resolvedRoute.participantId ?? undefined,
-    sourceThreadId: resolvedRoute.sourceThreadId ?? undefined,
-    deliveryTarget: resolvedRoute.deliveryTarget ?? undefined,
-  }
 }
 
 async function runAssistantChatCommand(context: {
@@ -859,10 +591,10 @@ function createAssistantRunCommandDefinition(
     args: emptyArgsSchema,
     description:
       input?.description ??
-      'Start the local assistant automation loop that watches the inbox runtime, runs due assistant cron jobs, auto-replies over configured channels such as iMessage or Telegram, and optionally applies model-routed canonical promotions.',
+      'Start the local assistant automation loop that watches the inbox runtime, runs due automations, auto-replies over configured channels such as iMessage or Telegram, and optionally applies model-routed canonical promotions.',
     hint:
       input?.hint ??
-      'Use --baseUrl with a local OpenAI-compatible model endpoint such as Ollama when you also want canonical inbox triage. Channel auto-reply can run without a routing model, and assistant cron schedules fire while this loop is active.',
+      'Use --baseUrl with a local OpenAI-compatible model endpoint such as Ollama when you also want canonical inbox triage. Channel auto-reply can run without a routing model, and due automations fire while this loop is active.',
     examples: [
       {
         options: {
@@ -961,7 +693,7 @@ export function registerAssistantCommands(
       description:
         'Send one message through the local provider-backed assistant and persist session metadata plus a local transcript outside the canonical vault.',
       hint:
-        'Murph persists a local transcript plus per-session metadata under assistant-state/, and still reuses provider-side history when available. Use --deliverResponse to send the assistant reply back out over a mapped channel such as iMessage, Telegram, or email.',
+        'Murph persists a local transcript plus per-session metadata under `.runtime/operations/assistant/`, and still reuses provider-side history when available. Use --deliverResponse to send the assistant reply back out over a mapped channel such as iMessage, Telegram, or email.',
       examples: [
         {
           args: {
@@ -1165,364 +897,6 @@ export function registerAssistantCommands(
     )
   }
 
-  const registerStateCommands = () => {
-    const state = Cli.create('state', {
-      description:
-        'Inspect and update small non-canonical assistant state documents stored outside the vault under assistant-state/state.',
-    })
-
-    state.command('list', {
-      args: emptyArgsSchema,
-      description: 'List assistant state documents, optionally filtered by a prefix namespace.',
-      hint:
-        'Use prefixes such as `cron` or `cron/<jobId>` to narrow the scratchpad documents that belong to one workflow.',
-      options: withBaseOptions({
-        prefix: z
-          .string()
-          .min(1)
-          .optional()
-          .describe('Optional slash-delimited document prefix such as cron or cron/job_123.'),
-      }),
-      output: assistantStateListResultSchema,
-      async run(context) {
-        const documents = await listAssistantStateDocuments({
-          vault: context.options.vault,
-          prefix: context.options.prefix,
-        })
-
-        return {
-          ...buildAssistantStateDocumentResultPaths(context.options.vault),
-          prefix: context.options.prefix ?? null,
-          documents: documents.map(redactAssistantStateDocumentListEntry),
-        }
-      },
-    })
-
-    state.command('show', {
-      args: z.object({
-        doc: z.string().min(1).describe('Assistant state document id such as cron/job_123.'),
-      }),
-      description: 'Show one assistant state document by id.',
-      options: withBaseOptions(),
-      output: assistantStateShowResultSchema,
-      async run(context) {
-        const document = await getAssistantStateDocument({
-          vault: context.options.vault,
-          docId: context.args.doc,
-        })
-
-        return {
-          ...buildAssistantStateDocumentResultPaths(context.options.vault),
-          document: redactAssistantStateDocumentSnapshot(document),
-        }
-      },
-    })
-
-    state.command('put', {
-      args: z.object({
-        doc: z.string().min(1).describe('Assistant state document id such as cron/job_123.'),
-      }),
-      description: 'Replace one assistant state document with a JSON object payload.',
-      hint:
-        'Use this for full replacement. For incremental updates that preserve existing keys, use `assistant state patch`.',
-      options: withBaseOptions({
-        input: inputFileOptionSchema.describe(
-          'JSON object payload in @file.json form or - for stdin.',
-        ),
-      }),
-      output: assistantStatePutResultSchema,
-      async run(context) {
-        const value = await loadJsonInputObject(context.options.input, 'assistant state document')
-        const document = await putAssistantStateDocument({
-          vault: context.options.vault,
-          docId: context.args.doc,
-          value,
-        })
-
-        return {
-          ...buildAssistantStateDocumentResultPaths(context.options.vault),
-          document: redactAssistantStateDocumentSnapshot(document),
-        }
-      },
-    })
-
-    state.command('patch', {
-      args: z.object({
-        doc: z.string().min(1).describe('Assistant state document id such as cron/job_123.'),
-      }),
-      description: 'Merge-patch one assistant state document with a JSON object payload.',
-      hint:
-        'This uses JSON Merge Patch semantics: object keys merge recursively, `null` deletes a key, and arrays replace the previous value.',
-      options: withBaseOptions({
-        input: inputFileOptionSchema.describe(
-          'JSON object merge-patch payload in @file.json form or - for stdin.',
-        ),
-      }),
-      output: assistantStatePatchResultSchema,
-      async run(context) {
-        const patch = await loadJsonInputObject(context.options.input, 'assistant state patch')
-        const document = await patchAssistantStateDocument({
-          vault: context.options.vault,
-          docId: context.args.doc,
-          patch,
-        })
-
-        return {
-          ...buildAssistantStateDocumentResultPaths(context.options.vault),
-          document: redactAssistantStateDocumentSnapshot(document),
-        }
-      },
-    })
-
-    state.command('delete', {
-      args: z.object({
-        doc: z.string().min(1).describe('Assistant state document id such as cron/job_123.'),
-      }),
-      description: 'Delete one assistant state document by id.',
-      options: withBaseOptions(),
-      output: assistantStateDeleteResultSchema,
-      async run(context) {
-        const result = await deleteAssistantStateDocument({
-          vault: context.options.vault,
-          docId: context.args.doc,
-        })
-
-        return {
-          ...buildAssistantStateDocumentResultPaths(context.options.vault),
-          docId: result.docId,
-          documentPath: redactAssistantDisplayPath(result.documentPath),
-          existed: result.existed,
-        }
-      },
-    })
-
-    assistant.command(state)
-  }
-
-  const registerMemoryCommands = () => {
-    const memory = Cli.create('memory', {
-      description:
-        'Inspect non-canonical assistant memory stored as Markdown outside the vault under assistant-state/.',
-    })
-    const memoryFile = Cli.create('file', {
-      description:
-        'Read and edit assistant memory Markdown files (`MEMORY.md` or `memory/YYYY-MM-DD.md`) through the canonical CLI.',
-    })
-
-    memory.command('search', {
-      args: emptyArgsSchema,
-      description:
-        'Search assistant memory across durable long-term notes and short-lived daily notes.',
-      hint:
-        'Use --scope long-term for durable identity/preferences/instructions and --scope daily for recent project context.',
-      examples: [
-        {
-          options: {
-            vault: './vault',
-            scope: 'long-term',
-            text: 'concise answers',
-          },
-          description: 'Search durable assistant response preferences.',
-        },
-        {
-          options: {
-            vault: './vault',
-            scope: 'daily',
-            limit: 5,
-          },
-          description: 'List the latest recent-context notes.',
-        },
-      ],
-      options: withBaseOptions({
-        text: z
-          .string()
-          .min(1)
-          .optional()
-          .describe('Optional lexical query for assistant memory search.'),
-        scope: z
-          .enum(assistantMemoryQueryScopeValues)
-          .default('all')
-          .describe('Choose long-term memory, daily notes, or both.'),
-        section: z
-          .enum(assistantMemoryVisibleSectionValues)
-          .optional()
-          .describe('Optional section filter such as Identity or Notes.'),
-        limit: z
-          .number()
-          .int()
-          .positive()
-          .max(25)
-          .default(8)
-          .describe('Maximum number of assistant memory hits to return.'),
-      }),
-      output: assistantMemorySearchResultSchema,
-      async run(context) {
-        const turnContext = resolveAssistantMemoryTurnContext()
-        if (turnContext) {
-          assertAssistantMemoryTurnContextVault(turnContext, context.options.vault)
-        }
-
-        const result = await searchAssistantMemory({
-          vault: context.options.vault,
-          text: context.options.text,
-          scope: context.options.scope,
-          section: context.options.section,
-          limit: context.options.limit,
-          includeSensitiveHealthContext:
-            turnContext?.allowSensitiveHealthContext ?? true,
-        })
-
-        return {
-          ...buildAssistantMemoryResultPaths(context.options.vault),
-          query: result.query,
-          scope: result.scope,
-          section: result.section,
-          results: result.results.map(redactAssistantMemorySearchHit),
-        }
-      },
-    })
-
-    memory.command('get', {
-      args: z.object({
-        memoryId: z.string().min(1).describe('Assistant memory id returned by search.'),
-      }),
-      description: 'Fetch one assistant memory record by id.',
-      options: withBaseOptions(),
-      output: assistantMemoryGetResultSchema,
-      async run(context) {
-        const turnContext = resolveAssistantMemoryTurnContext()
-        if (turnContext) {
-          assertAssistantMemoryTurnContextVault(turnContext, context.options.vault)
-        }
-
-        const memoryRecord = await getAssistantMemory({
-          vault: context.options.vault,
-          id: context.args.memoryId,
-          includeSensitiveHealthContext:
-            turnContext?.allowSensitiveHealthContext ?? true,
-        })
-
-        return {
-          ...buildAssistantMemoryResultPaths(context.options.vault),
-          memory: redactAssistantMemoryRecord(memoryRecord),
-        }
-      },
-    })
-
-    memoryFile.command('read', {
-      args: z.object({
-        path: assistantMemoryMarkdownFilePathSchema.describe(
-          'Assistant memory Markdown file path (`MEMORY.md` or `memory/YYYY-MM-DD.md`).',
-        ),
-      }),
-      description: 'Read one assistant memory Markdown file.',
-      hint:
-        'Shared contexts may read `MEMORY.md`, but daily memory files require a private assistant turn context.',
-      options: withBaseOptions({
-        maxChars: z
-          .number()
-          .int()
-          .positive()
-          .max(20_000)
-          .optional()
-          .describe('Optional maximum number of characters to return before truncation.'),
-      }),
-      output: assistantMemoryFileReadResultSchema,
-      async run(context) {
-        const turnContext = resolveAssistantMemoryTurnContext()
-        if (turnContext) {
-          assertAssistantMemoryTurnContextVault(turnContext, context.options.vault)
-        }
-
-        return {
-          ...buildAssistantMemoryResultPaths(context.options.vault),
-          ...(await readAssistantMemoryMarkdownFile(
-            context.options.vault,
-            context.args.path,
-            context.options.maxChars,
-            turnContext?.allowSensitiveHealthContext ?? true,
-          )),
-        }
-      },
-    })
-
-    memoryFile.command('append', {
-      args: z.object({
-        path: assistantMemoryMarkdownFilePathSchema.describe(
-          'Assistant memory Markdown file path (`MEMORY.md` or `memory/YYYY-MM-DD.md`).',
-        ),
-      }),
-      description: 'Append one memory bullet to an assistant memory Markdown file.',
-      hint:
-        'Use this for straightforward new memory. It adds one bullet without rewriting the whole file.',
-      options: withBaseOptions({
-        section: z
-          .enum(assistantMemoryVisibleSectionValues)
-          .optional()
-          .describe('Required for `MEMORY.md`; daily memory appends only allow `Notes`.'),
-        text: z
-          .string()
-          .min(1)
-          .describe('One bullet line to append. Do not include multiple lines or headings.'),
-      }),
-      output: assistantMemoryFileAppendResultSchema,
-      async run(context) {
-        const turnContext = resolveAssistantMemoryTurnContext()
-        if (turnContext) {
-          assertAssistantMemoryTurnContextVault(turnContext, context.options.vault)
-        }
-
-        return {
-          ...buildAssistantMemoryResultPaths(context.options.vault),
-          ...(await appendAssistantMemoryMarkdownFile(
-            context.options.vault,
-            context.args.path,
-            context.options.text,
-            context.options.section,
-            turnContext?.allowSensitiveHealthContext ?? true,
-          )),
-        }
-      },
-    })
-
-    memoryFile.command('write', {
-      args: z.object({
-        path: assistantMemoryMarkdownFilePathSchema.describe(
-          'Assistant memory Markdown file path (`MEMORY.md` or `memory/YYYY-MM-DD.md`).',
-        ),
-      }),
-      description: 'Replace one assistant memory Markdown file with explicit text input.',
-      hint:
-        'Dangerous: read the latest file immediately before using this, because a stale write can delete older memories.',
-      options: withBaseOptions({
-        input: textInputOptionSchema.describe(
-          'Markdown text payload in @file form or - for stdin.',
-        ),
-      }),
-      output: assistantMemoryFileWriteResultSchema,
-      async run(context) {
-        const turnContext = resolveAssistantMemoryTurnContext()
-        if (turnContext) {
-          assertAssistantMemoryTurnContextVault(turnContext, context.options.vault)
-        }
-
-        return {
-          ...buildAssistantMemoryResultPaths(context.options.vault),
-          ...(await writeAssistantMemoryMarkdownFile(
-            context.options.vault,
-            context.args.path,
-            await loadTextInput(context.options.input, 'assistant memory file'),
-            turnContext?.allowSensitiveHealthContext ?? true,
-          )),
-        }
-      },
-    })
-
-    memory.command(memoryFile)
-
-    assistant.command(memory)
-  }
-
   const registerSelfTargetCommands = () => {
     const selfTarget = Cli.create('self-target', {
       description:
@@ -1628,549 +1002,6 @@ export function registerAssistantCommands(
     assistant.command(selfTarget)
   }
 
-  const registerCronCommands = () => {
-    const cron = Cli.create('cron', {
-      description:
-        'Manage scheduled assistant prompts stored outside the canonical vault under assistant-state/cron.',
-    })
-
-    const preset = Cli.create('preset', {
-      description:
-        'Browse and materialize built-in assistant cron templates without editing scheduler state files directly.',
-    })
-
-    preset.command('list', {
-      args: emptyArgsSchema,
-      description: 'List the built-in assistant cron presets that can be installed later.',
-      hint:
-        'Presets are templates, not active jobs. Use `assistant cron preset install` to turn one into a real cron job.',
-      options: withBaseOptions(),
-      output: assistantCronPresetListResultSchema,
-      async run(context) {
-        return {
-          ...buildAssistantVaultResultPath(context.options.vault),
-          presets: listAssistantCronPresets(),
-        }
-      },
-    })
-
-    preset.command('show', {
-      args: z.object({
-        preset: z.string().min(1).describe('Assistant cron preset id to inspect.'),
-      }),
-      description: 'Show one built-in assistant cron preset, including its prompt template.',
-      options: withBaseOptions(),
-      output: assistantCronPresetShowResultSchema,
-      async run(context) {
-        const presetDefinition = getAssistantCronPreset(context.args.preset)
-        return {
-          ...buildAssistantVaultResultPath(context.options.vault),
-          preset: {
-            id: presetDefinition.id,
-            category: presetDefinition.category,
-            title: presetDefinition.title,
-            description: presetDefinition.description,
-            suggestedName: presetDefinition.suggestedName,
-            suggestedSchedule: presetDefinition.suggestedSchedule,
-            suggestedScheduleLabel: presetDefinition.suggestedScheduleLabel,
-            variables: presetDefinition.variables,
-          },
-          promptTemplate: presetDefinition.promptTemplate,
-        }
-      },
-    })
-
-    preset.command('install', {
-      args: z.object({
-        preset: z.string().min(1).describe('Assistant cron preset id to install.'),
-      }),
-      description: 'Create one assistant cron job from a built-in preset template.',
-      hint:
-        'Repeat --var key=value to fill preset slots. If you omit --at, --every, and --cron, Murph uses the preset’s suggested schedule. Cron jobs require an explicit outbound channel route and always deliver their response. Add --state only when the job needs run-to-run scratch state such as cooldowns, dedupe, unresolved follow-ups, or delivery policy; leave it off for stateless digest/report jobs.',
-      examples: [
-        {
-          args: {
-            preset: 'condition-research-roundup',
-          },
-          options: {
-            vault: './vault',
-            name: 'cholesterol-research-roundup',
-            var: ['condition_or_goal=lowering cholesterol'],
-          },
-          description: 'Install the condition research preset with a cholesterol-focused variable override.',
-        },
-        {
-          args: {
-            preset: 'environment-health-watch',
-          },
-          options: {
-            vault: './vault',
-            var: ['location_context=Brisbane, Queensland, Australia'],
-            channel: 'telegram',
-            participant: '123456789',
-            sourceThread: '123456789',
-          },
-          description: 'Install the environment-health preset and deliver the weekly report back into a Telegram chat.',
-        },
-      ],
-      options: withBaseOptions({
-        name: z
-          .string()
-          .min(1)
-          .optional()
-          .describe('Optional cron job name override. Defaults to the preset’s suggested name.'),
-        var: z
-          .array(z.string().min(1))
-          .optional()
-          .describe(
-            'Optional preset variable assignment in key=value form. Repeat --var for multiple values.',
-          ),
-        instructions: z
-          .string()
-          .min(1)
-          .optional()
-          .describe('Optional extra instructions appended to the preset prompt before the job is created.'),
-        at: z
-          .string()
-          .min(1)
-          .optional()
-          .describe('Optional one-shot ISO 8601 timestamp with an explicit offset.'),
-        every: z
-          .string()
-          .min(1)
-          .optional()
-          .describe('Optional recurring interval such as 30m, 2h, or 1d.'),
-        cron: z
-          .string()
-          .min(1)
-          .optional()
-          .describe('Optional five-field cron expression override.'),
-        disabled: z
-          .boolean()
-          .optional()
-          .describe('Create the preset-backed cron job in a disabled state without scheduling it yet.'),
-        ...assistantSessionOptionFields,
-        ...assistantCronDeliveryOptionFields,
-        ...assistantCronStateOptionFields,
-      }),
-      output: assistantCronPresetInstallResultSchema,
-      async run(context) {
-        const schedule =
-          context.options.at || context.options.every || context.options.cron
-            ? buildAssistantCronSchedule({
-                at: context.options.at,
-                every: context.options.every,
-                cron: context.options.cron,
-              })
-            : undefined
-        const savedRoute = await resolveAssistantDeliveryRouteFromCli({
-          allowSingleSavedTargetFallback: true,
-          channel: context.options.channel,
-          identity: context.options.identity,
-          participant: context.options.participant,
-          sourceThread: context.options.sourceThread,
-          deliveryTarget: context.options.deliveryTarget,
-        })
-        const result = await installAssistantCronPreset({
-          vault: context.options.vault,
-          presetId: context.args.preset,
-          name: context.options.name,
-          variables: parseAssistantCronPresetVariables(context.options.var),
-          additionalInstructions: context.options.instructions,
-          schedule,
-          enabled: context.options.disabled ? false : true,
-          ...assistantCronStateOptionsFromCli(context.options),
-          ...assistantConversationOptionsFromCli({
-            ...context.options,
-            channel: savedRoute.channel ?? context.options.channel,
-            identity: savedRoute.identityId ?? context.options.identity,
-            participant: savedRoute.participantId ?? context.options.participant,
-            sourceThread: savedRoute.sourceThreadId ?? context.options.sourceThread,
-          }),
-          deliveryTarget: savedRoute.deliveryTarget ?? context.options.deliveryTarget,
-        })
-
-        return {
-          ...buildAssistantCronResultPaths(context.options.vault),
-          preset: result.preset,
-          job: result.job,
-          resolvedPrompt: result.resolvedPrompt,
-          resolvedVariables: result.resolvedVariables,
-        }
-      },
-    })
-
-    cron.command(preset)
-
-    cron.command('status', {
-      args: emptyArgsSchema,
-      description: 'Show scheduler counts and the next upcoming assistant cron run.',
-      hint: 'Assistant cron jobs execute while `assistant run` is active for the vault.',
-      options: withBaseOptions(),
-      output: assistantCronStatusResultSchema,
-      async run(context) {
-        const status = await getAssistantCronStatus(context.options.vault)
-        return {
-          ...buildAssistantCronResultPaths(context.options.vault),
-          ...status,
-        }
-      },
-    })
-
-    cron.command('list', {
-      args: emptyArgsSchema,
-      description: 'List assistant cron jobs for one vault.',
-      options: withBaseOptions(),
-      output: assistantCronListResultSchema,
-      async run(context) {
-        const jobs = await listAssistantCronJobs(context.options.vault)
-        return {
-          ...buildAssistantCronResultPaths(context.options.vault),
-          jobs,
-        }
-      },
-    })
-
-    cron.command('show', {
-      args: z.object({
-        job: z.string().min(1).describe('Assistant cron job id or name to inspect.'),
-      }),
-      description: 'Show one assistant cron job record.',
-      options: withBaseOptions(),
-      output: assistantCronShowResultSchema,
-      async run(context) {
-        const job = await getAssistantCronJob(context.options.vault, context.args.job)
-        return {
-          ...buildAssistantCronResultPaths(context.options.vault),
-          job,
-        }
-      },
-    })
-
-    const target = Cli.create('target', {
-      description:
-        'Inspect or replace the outbound delivery target for an existing assistant cron job.',
-    })
-
-    target.command('show', {
-      args: z.object({
-        job: z.string().min(1).describe('Assistant cron job id or name to inspect.'),
-      }),
-      description: 'Show the current outbound delivery target for one assistant cron job.',
-      hint:
-        'Use this before retargeting a cron job so you can see the current channel, explicit destination, and inferred binding delivery.',
-      options: withBaseOptions(),
-      output: assistantCronTargetShowResultSchema,
-      async run(context) {
-        return {
-          ...buildAssistantCronResultPaths(context.options.vault),
-          cronTarget: await getAssistantCronJobTarget(
-            context.options.vault,
-            context.args.job,
-          ),
-        }
-      },
-    })
-
-    target.command('set', {
-      args: z.object({
-        job: z.string().min(1).describe('Assistant cron job id or name to retarget.'),
-      }),
-      description:
-        'Replace the outbound delivery target for one assistant cron job in place.',
-      hint:
-        'Provide exactly one target source: `--toSelf <channel>`, `--copyFrom <job>`, or an explicit route via `--channel` plus the usual delivery flags. When the audience changes, Murph clears stored cron session continuity so the next run does not reuse the old routed conversation.',
-      examples: [
-        {
-          args: {
-            job: 'weekly-health-snapshot',
-          },
-          options: {
-            vault: './vault',
-            toSelf: 'email',
-          },
-          description: 'Retarget an existing cron job to the saved email self-target.',
-        },
-        {
-          args: {
-            job: 'condition-research-roundup',
-          },
-          options: {
-            vault: './vault',
-            copyFrom: 'weekly-health-snapshot',
-          },
-          description: 'Copy the current delivery target from another cron job.',
-        },
-      ],
-      options: withBaseOptions({
-        ...assistantCronTargetSourceOptionFields,
-        ...assistantCronDeliveryOptionFields,
-        channel: assistantSessionOptionFields.channel,
-        identity: assistantSessionOptionFields.identity,
-        participant: assistantSessionOptionFields.participant,
-        sourceThread: assistantSessionOptionFields.sourceThread,
-      }),
-      output: assistantCronTargetSetResultSchema,
-      async run(context) {
-        const resolvedTarget = await resolveAssistantCronTargetFromCli({
-          vault: context.options.vault,
-          channel: context.options.channel,
-          copyFrom: context.options.copyFrom,
-          deliveryTarget: context.options.deliveryTarget,
-          identity: context.options.identity,
-          participant: context.options.participant,
-          sourceThread: context.options.sourceThread,
-          toSelf: context.options.toSelf,
-        })
-        const result = await setAssistantCronJobTarget({
-          vault: context.options.vault,
-          job: context.args.job,
-          dryRun: context.options.dryRun,
-          resetContinuity: context.options.resetContinuity,
-          ...resolvedTarget,
-        })
-
-        return {
-          ...buildAssistantCronResultPaths(context.options.vault),
-          job: result.job,
-          beforeTarget: result.beforeTarget,
-          afterTarget: result.afterTarget,
-          changed: result.changed,
-          continuityReset: result.continuityReset,
-          dryRun: result.dryRun,
-        }
-      },
-    })
-
-    cron.command(target)
-
-    cron.command('add', {
-      args: z.object({
-        prompt: z.string().min(1).describe('Prompt to send when the assistant cron job fires.'),
-      }),
-      description: 'Create one assistant cron job backed by the local assistant runtime.',
-      hint:
-        'Provide exactly one of --at, --every, or --cron. One-shot jobs are deleted after they succeed unless you pass --keepAfterRun. Cron jobs require an explicit outbound channel route and always deliver their response. Add --state or --stateDoc only when the job needs run-to-run scratch state such as cooldowns, dedupe, unresolved follow-ups, or delivery policy; leave it off for stateless jobs that can recompute everything each run.',
-      examples: [
-        {
-          args: {
-            prompt: 'Check whether I have been sitting too long and remind me to stretch.',
-          },
-          options: {
-            vault: './vault',
-            name: 'stretch-reminder',
-            every: '2h',
-          },
-          description: 'Create a recurring interval job.',
-        },
-        {
-          args: {
-            prompt: 'Remind me to review my lab results after dinner.',
-          },
-          options: {
-            vault: './vault',
-            name: 'lab-review-tonight',
-            at: '2026-03-22T18:30:00+10:00',
-          },
-          description: 'Create a one-shot reminder at a specific timestamp.',
-        },
-        {
-          args: {
-            prompt: 'Every weekday morning, ask me for a quick symptom check-in.',
-          },
-          options: {
-            vault: './vault',
-            name: 'weekday-symptom-check',
-            cron: '0 8 * * 1-5',
-            channel: 'telegram',
-            participant: '-1001234567890',
-          },
-          description: 'Create a cron expression job that also delivers the reply back out.',
-        },
-      ],
-      options: withBaseOptions({
-        name: z
-          .string()
-          .min(1)
-          .describe('Unique assistant cron job name.'),
-        at: z
-          .string()
-          .min(1)
-          .optional()
-          .describe('One-shot ISO 8601 timestamp with an explicit offset.'),
-        every: z
-          .string()
-          .min(1)
-          .optional()
-          .describe('Recurring interval such as 30m, 2h, or 1d.'),
-        cron: z
-          .string()
-          .min(1)
-          .optional()
-          .describe('Five-field cron expression: minute hour day-of-month month day-of-week.'),
-        keepAfterRun: z
-          .boolean()
-          .optional()
-          .describe('Keep a completed one-shot job in the scheduler instead of deleting it.'),
-        disabled: z
-          .boolean()
-          .optional()
-          .describe('Create the job in a disabled state without scheduling it yet.'),
-        ...assistantSessionOptionFields,
-        ...assistantCronDeliveryOptionFields,
-        ...assistantCronStateOptionFields,
-      }),
-      output: assistantCronAddResultSchema,
-      async run(context) {
-        const savedRoute = await resolveAssistantDeliveryRouteFromCli({
-          allowSingleSavedTargetFallback: true,
-          channel: context.options.channel,
-          identity: context.options.identity,
-          participant: context.options.participant,
-          sourceThread: context.options.sourceThread,
-          deliveryTarget: context.options.deliveryTarget,
-        })
-        const job = await addAssistantCronJob({
-          vault: context.options.vault,
-          name: context.options.name,
-          prompt: context.args.prompt,
-          schedule: buildAssistantCronSchedule({
-            at: context.options.at,
-            every: context.options.every,
-            cron: context.options.cron,
-          }),
-          enabled: context.options.disabled ? false : true,
-          keepAfterRun: context.options.keepAfterRun,
-          ...assistantCronStateOptionsFromCli(context.options),
-          ...assistantConversationOptionsFromCli({
-            ...context.options,
-            channel: savedRoute.channel ?? context.options.channel,
-            identity: savedRoute.identityId ?? context.options.identity,
-            participant: savedRoute.participantId ?? context.options.participant,
-            sourceThread: savedRoute.sourceThreadId ?? context.options.sourceThread,
-          }),
-          deliveryTarget: savedRoute.deliveryTarget ?? context.options.deliveryTarget,
-        })
-
-        return {
-          ...buildAssistantCronResultPaths(context.options.vault),
-          job,
-        }
-      },
-    })
-
-    cron.command('remove', {
-      args: z.object({
-        job: z.string().min(1).describe('Assistant cron job id or name to remove.'),
-      }),
-      description: 'Remove one assistant cron job from the scheduler.',
-      options: withBaseOptions(),
-      output: assistantCronRemoveResultSchema,
-      async run(context) {
-        const removed = await removeAssistantCronJob(
-          context.options.vault,
-          context.args.job,
-        )
-        return {
-          ...buildAssistantCronResultPaths(context.options.vault),
-          removed,
-        }
-      },
-    })
-
-    cron.command('enable', {
-      args: z.object({
-        job: z.string().min(1).describe('Assistant cron job id or name to enable.'),
-      }),
-      description: 'Enable one assistant cron job.',
-      options: withBaseOptions(),
-      output: assistantCronShowResultSchema,
-      async run(context) {
-        const job = await setAssistantCronJobEnabled(
-          context.options.vault,
-          context.args.job,
-          true,
-        )
-        return {
-          ...buildAssistantCronResultPaths(context.options.vault),
-          job,
-        }
-      },
-    })
-
-    cron.command('disable', {
-      args: z.object({
-        job: z.string().min(1).describe('Assistant cron job id or name to disable.'),
-      }),
-      description: 'Disable one assistant cron job without deleting it.',
-      options: withBaseOptions(),
-      output: assistantCronShowResultSchema,
-      async run(context) {
-        const job = await setAssistantCronJobEnabled(
-          context.options.vault,
-          context.args.job,
-          false,
-        )
-        return {
-          ...buildAssistantCronResultPaths(context.options.vault),
-          job,
-        }
-      },
-    })
-
-    cron.command('run', {
-      args: z.object({
-        job: z.string().min(1).describe('Assistant cron job id or name to run immediately.'),
-      }),
-      description: 'Run one assistant cron job immediately, regardless of its next scheduled time.',
-      options: withBaseOptions(),
-      output: assistantCronRunResultSchema,
-      async run(context) {
-        const result = await runAssistantCronJobNow({
-          vault: context.options.vault,
-          job: context.args.job,
-        })
-        return {
-          ...buildAssistantCronResultPaths(context.options.vault),
-          job: result.job,
-          removedAfterRun: result.removedAfterRun,
-          run: result.run,
-        }
-      },
-    })
-
-    cron.command('runs', {
-      args: z.object({
-        job: z.string().min(1).describe('Assistant cron job id or name to inspect run history for.'),
-      }),
-      description: 'List recent run history for one assistant cron job.',
-      options: withBaseOptions({
-        limit: z
-          .number()
-          .int()
-          .positive()
-          .max(100)
-          .default(20)
-          .describe('Maximum number of recent runs to return.'),
-      }),
-      output: assistantCronRunsResultSchema,
-      async run(context) {
-        const result = await listAssistantCronRuns({
-          vault: context.options.vault,
-          job: context.args.job,
-          limit: context.options.limit,
-        })
-        return {
-          ...buildAssistantCronResultPaths(context.options.vault),
-          jobId: result.jobId,
-          runs: result.runs,
-        }
-      },
-    })
-
-    assistant.command(cron)
-  }
-
   const registerObservabilityCommands = () => {
     assistant.command('status', createAssistantStatusCommandDefinition())
     assistant.command('doctor', createAssistantDoctorCommandDefinition())
@@ -2242,7 +1073,7 @@ export function registerAssistantCommands(
       'status',
       createAssistantStatusCommandDefinition({
         description:
-          'Show the same assistant-state snapshot as `assistant status` directly from the CLI root.',
+          'Show the same assistant runtime snapshot as `assistant status` directly from the CLI root.',
         hint:
           'Shorthand for `assistant status`. Use this to inspect recent turn receipts, session freshness, and pending outbox work.',
       }),
@@ -2251,7 +1082,7 @@ export function registerAssistantCommands(
       'doctor',
       createAssistantDoctorCommandDefinition({
         description:
-          'Run the same assistant-state diagnostics as `assistant doctor` directly from the CLI root.',
+          'Run the same assistant runtime diagnostics as `assistant doctor` directly from the CLI root.',
         hint:
           'Shorthand for `assistant doctor`. Use this when debugging transcript corruption, missing receipts, or stale outbox intents.',
       }),
@@ -2268,10 +1099,7 @@ export function registerAssistantCommands(
   }
 
   registerConversationCommands()
-  registerStateCommands()
-  registerMemoryCommands()
   registerSelfTargetCommands()
-  registerCronCommands()
   registerObservabilityCommands()
   registerSessionCommands()
 

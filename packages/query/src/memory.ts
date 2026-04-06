@@ -12,14 +12,14 @@ import {
   type MemoryRecord,
   type MemorySearchHit,
   type SearchMemoryRecordsInput,
-} from "../../contracts/src/memory.js";
+} from "@murphai/contracts";
 
 export type {
   MemoryDocumentSnapshot,
   MemoryRecord,
   MemorySearchHit,
   SearchMemoryRecordsInput,
-} from "../../contracts/src/memory.js";
+} from "@murphai/contracts";
 
 export async function readMemoryDocument(
   vaultRoot: string,

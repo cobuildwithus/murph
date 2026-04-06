@@ -74,7 +74,7 @@ vault-cli knowledge lint
 ## What you get
 
 - a file-native health vault with canonical writes owned by `@murphai/core`
-- local assistant chat, automation, status, cron, and outbox commands
+- local assistant chat, runtime automation, status, outbox, canonical memory, and canonical automation commands
 - a non-canonical derived knowledge wiki you can upsert and inspect under `derived/knowledge/**`
 - inbox capture, review, backfill, and parser-driven attachment extraction
 - optional local device sync through `@murphai/device-syncd`

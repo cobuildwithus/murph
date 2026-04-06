@@ -1,5 +1,4 @@
 import path from 'node:path'
-import type { AssistantMemoryRecordProvenance } from '../../assistant-cli-contracts.js'
 import { VaultCliError } from '../../vault-cli-errors.js'
 import { VAULT_ENV } from '../../operator-config.js'
 import { normalizeNullableString } from '../shared.js'
@@ -32,9 +31,15 @@ export interface AssistantMemoryTurnContextInput {
   vault: string
 }
 
+export interface AssistantMemoryTurnProvenance {
+  sessionId: string | null
+  turnId: string | null
+  writtenBy: 'assistant'
+}
+
 export interface AssistantMemoryTurnContext {
   allowSensitiveHealthContext: boolean
-  provenance: AssistantMemoryRecordProvenance
+  provenance: AssistantMemoryTurnProvenance
   sourcePrompt: string
   vault: string
 }

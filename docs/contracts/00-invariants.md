@@ -15,7 +15,8 @@
 ## Assistant Boundary
 
 - Agent layers, MCP surfaces, and future UIs call `vault-cli` or exported package APIs.
-- Assistant/session state is stored outside the canonical vault under `assistant-state/`, including local transcript files plus non-canonical Markdown memory docs for naming, response preferences, standing instructions, selected health context, and recent project context.
+- Assistant runtime state is stored under `vault/.runtime/operations/assistant/**`.
+- Durable user-facing memory and scheduled prompt configuration live in canonical vault records, not assistant runtime state.
 - No agent gets arbitrary write access to vault files as part of the public contract.
 
 ## Append-Only Bias

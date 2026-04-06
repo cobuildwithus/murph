@@ -44,31 +44,16 @@ vault-cli assistant stop --vault <path> [--request-id <id>]
 vault-cli status --vault <path> [--session <id>] [--limit <n>] [--request-id <id>]
 vault-cli doctor --vault <path> [--repair] [--request-id <id>]
 vault-cli stop --vault <path> [--request-id <id>]
-vault-cli assistant cron status --vault <path> [--request-id <id>]
-vault-cli assistant cron list --vault <path> [--request-id <id>]
-vault-cli assistant cron preset list --vault <path> [--request-id <id>]
-vault-cli assistant cron preset show <preset> --vault <path> [--request-id <id>]
-vault-cli assistant cron preset install <preset> --vault <path> [--name <name>] [--var <key=value>]... [--instructions <text>] [--at <ts>] [--every <duration>] [--cron <expr>] [--disabled] [--state] [--stateDoc <docId>] [--session <id>] [--alias <alias>] [--channel <channel>] [--identity <id>] [--participant <id>] [--sourceThread <id>] [--deliveryTarget <target>] [--request-id <id>]
-vault-cli assistant cron show <job> --vault <path> [--request-id <id>]
-vault-cli assistant cron target show <job> --vault <path> [--request-id <id>]
-vault-cli assistant cron target set <job> --vault <path> [--toSelf <channel>] [--copyFrom <job>] [--dryRun] [--resetContinuity] [--channel <channel>] [--identity <id>] [--participant <id>] [--sourceThread <id>] [--deliveryTarget <target>] [--request-id <id>]
-vault-cli assistant cron add <prompt> --vault <path> --name <name> [--at <ts>] [--every <duration>] [--cron <expr>] [--keepAfterRun] [--disabled] [--state] [--stateDoc <docId>] [--session <id>] [--alias <alias>] [--channel <channel>] [--identity <id>] [--participant <id>] [--sourceThread <id>] [--deliveryTarget <target>] [--request-id <id>]
-vault-cli assistant cron remove <job> --vault <path> [--request-id <id>]
-vault-cli assistant cron enable <job> --vault <path> [--request-id <id>]
-vault-cli assistant cron disable <job> --vault <path> [--request-id <id>]
-vault-cli assistant cron run <job> --vault <path> [--request-id <id>]
-vault-cli assistant cron runs <job> --vault <path> [--limit <n>] [--request-id <id>]
 vault-cli assistant session list --vault <path> [--request-id <id>]
 vault-cli assistant session show <sessionId> --vault <path> [--request-id <id>]
-vault-cli assistant state list --vault <path> [--prefix <prefix>] [--request-id <id>]
-vault-cli assistant state show <doc> --vault <path> [--request-id <id>]
-vault-cli assistant state put <doc> --vault <path> --input @payload.json|-
-vault-cli assistant state patch <doc> --vault <path> --input @patch.json|-
-vault-cli assistant state delete <doc> --vault <path> [--request-id <id>]
-vault-cli assistant memory search --vault <path> [--text <query>] [--scope long-term|daily|all] [--section <section>] [--limit <n>] [--request-id <id>]
-vault-cli assistant memory get <memoryId> --vault <path> [--request-id <id>]
-vault-cli assistant memory upsert <text> --vault <path> [--scope long-term|daily|both] [--section <section>] [--sourcePrompt <text>] [--request-id <id>]
-vault-cli assistant memory forget <memoryId> --vault <path> [--request-id <id>]
+vault-cli memory show [memoryId] --vault <path>
+vault-cli memory search [text] --vault <path> [--section <section>] [--limit <n>]
+vault-cli memory upsert <text> --vault <path> --section <section> [--memoryId <id>]
+vault-cli memory forget <memoryId> --vault <path>
+vault-cli automation scaffold --vault <path>
+vault-cli automation show <lookup> --vault <path>
+vault-cli automation list --vault <path> [--status <status> ...] [--text <query>] [--limit <n>]
+vault-cli automation upsert --vault <path> --input @payload.json|-
 vault-cli device provider list --vault <path> [--baseUrl <url>]
 vault-cli device connect <provider> --vault <path> [--baseUrl <url>] [--returnTo <url>] [--open]
 vault-cli device account list --vault <path> [--baseUrl <url>] [--provider <provider>]
@@ -178,7 +163,7 @@ vault-cli inbox model route <captureId> --vault <path> --model <model> [--baseUr
 
 For event-backed edit commands (`event`, `document`, `meal`, `workout`, `intervention`), changing `occurredAt` or `timeZone` without patching `dayKey` directly now requires `--day-key-policy keep|recompute`. This prevents silent stale-day retention and prevents legacy records without explicit `timeZone` provenance from silently materializing the vault default timezone into the saved record during edits.
 
-`vault-cli assistant ask|chat|deliver|status|doctor` persist or inspect out-of-vault assistant session state. Durable assistant memory is now managed explicitly through `vault-cli assistant memory search|get|upsert|forget`, small runtime scratchpads are managed through `vault-cli assistant state list|show|put|patch|delete`, and scheduled assistant prompts are managed through `vault-cli assistant cron preset list|show|install` plus `vault-cli assistant cron add|status|list|show|target show|target set|enable|disable|remove|run|runs`, with only a small core long-term block injected automatically into fresh sessions. Accepted inbound assistant-automation captures may also auto-preserve stored document attachments into the canonical document import surface before later model routing or reply behavior runs, while leaving the original inbox capture evidence in place under `raw/inbox/**`. New prompt-backed cron jobs must bind an explicit outbound channel route and always deliver their generated response, while optional `--state` / `--stateDoc` bindings let a cron carry forward non-canonical state only when the operator opts in. Existing cron jobs can now be retargeted in place through `assistant cron target set` instead of remove-and-recreate flows; by default the cron keeps its saved assistant session continuity and explicitly rebinds that session to the new routed audience, while `--resetContinuity` clears the stored `sessionId` and `alias` when the operator wants the next run to start fresh. Interactive onboarding still does not materialize preset cron jobs automatically because it does not yet collect those delivery destinations. Coarse system-written turn receipts, replay-safe outbox intents, diagnostics snapshots, persisted status snapshots, provider failover cooldown state, and scratchpad docs live under `assistant-state/` for read-only `status` / `doctor` inspection plus bounded state-tool updates. Session/provider-route-recovery JSON keeps only public provider headers; secret-bearing provider headers live in private sidecars under `assistant-state/secrets/**`, assistant-state files/directories default to private modes, and `assistant doctor --repair` migrates legacy inline secret headers plus repairs permissive assistant-state modes in place. In provider-backed Codex sessions the live state, memory, and cron paths are exposed as bounded MCP tool surfaces, while OpenAI-compatible sessions replay the recent local transcript plus the same bootstrap system context on each turn. Assistant-originated writes are rebound to the real host-side user turn instead of trusting client-supplied provenance text, selected non-canonical health context only loads in private contexts, assistant cron state stays outside the canonical vault under `assistant-state/cron/`, and the vault remains authoritative.
+`vault-cli assistant ask|chat|deliver|status|doctor|run|stop|session` persist or inspect assistant runtime state only. Durable user-facing memory is managed through the top-level canonical `memory` noun backed by `bank/memory.md`, and durable scheduled assistant prompts are managed through the top-level canonical `automation` noun backed by `bank/automations/*.md`. Accepted inbound assistant-automation captures may still auto-preserve stored document attachments into the canonical document import surface before later model routing or reply behavior runs, while leaving the original inbox capture evidence in place under `raw/inbox/**`. Coarse system-written turn receipts, replay-safe outbox intents, diagnostics snapshots, persisted status snapshots, provider failover cooldown state, and other assistant runtime artifacts live under `vault/.runtime/operations/assistant/**` for read-only `status` / `doctor` inspection. Session/provider-route-recovery JSON keeps only public provider headers; secret-bearing provider headers live in private sidecars under `vault/.runtime/operations/assistant/secrets/**`, and `assistant doctor --repair` can tighten permissive runtime modes in place. In provider-backed Codex sessions the live assistant runtime and canonical `memory` / `automation` surfaces are exposed as bounded tool surfaces, while OpenAI-compatible sessions replay the recent local transcript plus the same bootstrap system context on each turn. Assistant-originated writes are rebound to the real host-side user turn instead of trusting client-supplied provenance text, and the canonical vault remains authoritative.
 
 `vault-cli knowledge *` manages Murph's non-canonical personal compiled wiki under `derived/knowledge/**`. That wiki is distinct from the stable reference layer under `bank/library/**`: `bank/library` is durable shared health context, while `derived/knowledge` is the assistant-authored user-specific synthesis layer. `knowledge upsert` writes one page and refreshes `derived/knowledge/index.md`; each upsert also appends a chronological entry to `derived/knowledge/log.md`. `knowledge log tail` is the intentionally small operator-facing log inspection surface; richer wiki-maintainer behavior belongs in the assistant runtime prompt plus the first-class assistant knowledge tools, not in `AGENTS.md`.
 
@@ -212,7 +197,7 @@ The command surface is organized around reusable capability bundles, not a paylo
 ## Noun Composition
 
 - `goal`, `condition`, `allergy`, `family`, `genetics`, `history`, `blood-test`, `provider`, `food`, and `event` are payload-CRUD nouns.
-- `food` is a payload-CRUD noun backed by `bank/foods/*.md` for recurring meals, grocery staples, smoothies, and remembered restaurant orders, and `food schedule` adds the thinnest first-class recurring-food layer by pairing a remembered food with a daily note-only meal auto-log rule backed by assistant cron internals.
+- `food` is a payload-CRUD noun backed by `bank/foods/*.md` for recurring meals, grocery staples, smoothies, and remembered restaurant orders, and `food schedule` adds the thinnest first-class recurring-food layer by pairing a remembered food with a daily note-only meal auto-log rule backed by assistant runtime automation internals.
 - `recipe` is also a payload-CRUD noun backed by `bank/recipes/*.md`.
 - `profile` is primarily payload CRUD and also exposes `rebuild` for the derived current-profile view.
 - `protocol` is primarily payload CRUD and also exposes `stop` as an id-preserving lifecycle helper.
@@ -228,7 +213,9 @@ The command surface is organized around reusable capability bundles, not a paylo
 - `export` composes readable and derived/admin capabilities.
 - `audit` is a readable noun with `tail` as its stream-style follow-up.
 - `inbox` is a runtime-control noun, including attachment inspection, deterministic promotion flows, and audited model-routing helpers.
-- `assistant` is a provider-backed orchestration noun for local chat turns, outbound delivery, session inspection, scheduled assistant cron prompts, and always-on inbox triage; it stores only minimal assistant metadata outside the canonical vault, uses explicit conversation bindings for session reuse, can opt into self-authored auto-reply plus age-based session rollover for dedicated self-chat threads, treats `--deliveryTarget` as a one-send override, only fires due cron jobs while `assistant run` is active for the vault, and delegates canonical promotions back through inbox/core boundaries.
+- `assistant` is a provider-backed orchestration noun for local chat turns, outbound delivery, session inspection, runtime diagnostics, and always-on inbox triage; it stores only runtime metadata under `vault/.runtime/operations/assistant/**`, uses explicit conversation bindings for session reuse, can opt into self-authored auto-reply plus age-based session rollover for dedicated self-chat threads, treats `--deliveryTarget` as a one-send override, only fires due canonical automations while `assistant run` is active for the vault, and delegates canonical promotions back through inbox/core boundaries.
+- `memory` is a canonical product noun backed by `bank/memory.md`.
+- `automation` is a canonical product noun backed by `bank/automations/*.md`.
 - Top-level `chat` is a shorthand alias for `assistant chat`; it shares the same prompt/options/output contract so installed `murph chat` discovery stays truthful.
 - Top-level `status` is a shorthand alias for `assistant status`; it shares the same option/output contract so installed `murph status` discovery stays truthful.
 - Top-level `doctor` is a shorthand alias for `assistant doctor`; it shares the same option/output contract so installed `murph doctor` discovery stays truthful.
@@ -722,7 +709,7 @@ The five-file pack shape stays stable; health extensions enrich `manifest.json`,
 ## Boundary Rules
 
 - `init`, `validate`, `meal add`, `document import`, `samples import-csv`, and `intake import` delegate to `packages/core` or `packages/importers` write paths that preserve immutable raw evidence and append-only ledgers.
-- `provider upsert`, `food upsert`, `food schedule`, `recipe upsert`, `event upsert`, `samples add`, `workout add`, `workout format save|show|list|log`, `intervention add`, `experiment create|update|checkpoint|stop`, `journal ensure|append|link|unlink`, `vault repair|update`, `intake project`, health `<noun> scaffold`, health `<noun> upsert`, `profile current rebuild`, `protocol stop`, and `supplement stop` all delegate to `packages/core` exports or to CLI-local helpers built only on top of `packages/core` frontmatter/jsonl primitives, importer entrypoints, canonical write locks, and assistant cron state.
+- `provider upsert`, `food upsert`, `food schedule`, `recipe upsert`, `event upsert`, `samples add`, `workout add`, `workout format save|show|list|log`, `intervention add`, `experiment create|update|checkpoint|stop`, `journal ensure|append|link|unlink`, `vault repair|update`, `intake project`, health `<noun> scaffold`, health `<noun> upsert`, `profile current rebuild`, `protocol stop`, and `supplement stop` all delegate to `packages/core` exports or to CLI-local helpers built only on top of `packages/core` frontmatter/jsonl primitives, importer entrypoints, canonical write locks, and assistant runtime automation state.
 - `show`, `list`, `search query`, `search index status|rebuild`, `timeline`, `document/meal/samples/intake/export` follow-up reads, `audit show|list|tail`, and `vault show|paths|stats` delegate to the read model plus immutable-manifest inspection helpers.
 - `inbox` bootstrap/setup, capture review, attachment parse, and promote commands delegate to `packages/inboxd`, `packages/parsers`, and shared `packages/core` primitives without directly writing arbitrary vault files from the CLI layer.
 - Contract validation errors normalize to the shared codes in `docs/contracts/04-error-codes.md`.

@@ -129,24 +129,6 @@
         ]
       }
     },
-    "tags": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-      },
-      "uniqueItems": true
-    },
-    "note": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 4000
-    },
-    "templateText": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 4000
-    },
     "template": {
       "type": "object",
       "properties": {
@@ -156,9 +138,9 @@
           "maxLength": 4000
         },
         "exercises": {
-          "type": "array",
           "minItems": 1,
           "maxItems": 100,
+          "type": "array",
           "items": {
             "type": "object",
             "properties": {
@@ -200,9 +182,9 @@
                 "maxLength": 4000
               },
               "plannedSets": {
-                "type": "array",
                 "minItems": 1,
                 "maxItems": 150,
+                "type": "array",
                 "items": {
                   "type": "object",
                   "properties": {
@@ -268,6 +250,24 @@
         "exercises"
       ],
       "additionalProperties": false
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+      },
+      "uniqueItems": true
+    },
+    "note": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "templateText": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
     }
   },
   "required": [

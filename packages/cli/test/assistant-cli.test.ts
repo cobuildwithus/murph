@@ -1,10 +1,7 @@
 import assert from 'node:assert/strict'
-import { execFile } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { promisify } from 'node:util'
 import { Cli } from 'incur'
 import { afterEach, beforeEach, test, vi } from 'vitest'
 import {
@@ -25,8 +22,6 @@ import {
 } from '@murphai/assistant-core/assistant-cli-tools'
 import {
   assistantMemoryTurnEnvKeys,
-  createAssistantMemoryTurnContextEnv,
-  resolveAssistantMemoryStoragePaths,
 } from '@murphai/assistant-core/assistant/memory'
 import {
   resolveAssistantSession,
@@ -40,19 +35,12 @@ import { collectVaultCliDescriptorRootCommandNames } from '../src/vault-cli-comm
 import { createVaultCli } from '../src/vault-cli.js'
 import { createUnwiredVaultServices } from '@murphai/assistant-core/vault-services'
 import {
-  ensureCliRuntimeArtifacts,
-  repoRoot,
   requireData,
   runCli,
   withoutNodeV8Coverage,
 } from './cli-test-helpers.js'
 
 const cleanupPaths: string[] = []
-const require = createRequire(import.meta.url)
-const execFileAsync = promisify(execFile)
-const sourceBinPath = path.join(repoRoot, 'packages/cli/src/bin.ts')
-const sourceTsconfigPath = path.join(repoRoot, 'packages/cli/tsconfig.typecheck.json')
-const tsxCliPath = require.resolve('tsx/cli')
 const ASSISTANT_CLI_TIMEOUT_MS = 60_000
 
 function isolateAssistantMemoryEnv(
@@ -145,16 +133,16 @@ test('formatAssistantRunEventForTerminal shows raw auto-reply provider progress 
 test('formatAssistantRunEventForTerminal shows safe command labels by default', () => {
   const event: AssistantRunEvent = {
     captureId: 'cap_safe_123',
-    details: '$ node /tmp/bin.js assistant memory get --vault /tmp/vault',
+    details: '$ node /tmp/bin.js memory show --vault /tmp/vault',
     providerKind: 'command',
     providerState: 'running',
-    safeDetails: 'running assistant memory get',
+    safeDetails: 'running memory show',
     type: 'capture.reply-progress',
   }
 
   const message = formatAssistantRunEventForTerminal(event)
 
-  assert.equal(message, 'reply-progress cap_safe_123: running assistant memory get')
+  assert.equal(message, 'reply-progress cap_safe_123: running memory show')
   assert.doesNotMatch(message ?? '', /\/tmp\/vault/u)
 })
 
@@ -293,29 +281,8 @@ test('formatAssistantRunEventForTerminal shows daemon failure details by default
   )
 })
 
-test('assistant memory path resolver exposes only the memory path subset', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-paths-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
-
-  const statePaths = resolveAssistantStatePaths(vaultRoot)
-  const memoryPaths = resolveAssistantMemoryStoragePaths(vaultRoot)
-
-  assert.deepEqual(memoryPaths, {
-    assistantStateRoot: statePaths.assistantStateRoot,
-    dailyMemoryDirectory: statePaths.dailyMemoryDirectory,
-    longTermMemoryPath: statePaths.longTermMemoryPath,
-  })
-  assert.deepEqual(Object.keys(memoryPaths).sort(), [
-    'assistantStateRoot',
-    'dailyMemoryDirectory',
-    'longTermMemoryPath',
-  ])
-})
-
 test.sequential(
-  'assistant session list and show expose assistant-state metadata through the CLI',
+  'assistant session list and show expose assistant runtime metadata through the CLI',
   async () => {
     const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cli-'))
     const vaultRoot = path.join(parent, 'vault')
@@ -331,6 +298,7 @@ test.sequential(
       sourceThreadId: 'thread-42',
       model: 'gpt-oss:20b',
     })
+    const statePaths = resolveAssistantStatePaths(vaultRoot)
 
     const listed = requireData(
       await runCli<{
@@ -344,7 +312,7 @@ test.sequential(
     assert.equal(listed.sessions.length, 1)
     assert.equal(listed.sessions[0]?.sessionId, created.session.sessionId)
     assert.equal(listed.sessions[0]?.alias, 'telegram:bob')
-    assert.equal(listed.stateRoot.includes(path.join(parent, 'assistant-state')), true)
+    assert.equal(listed.stateRoot, statePaths.assistantStateRoot)
     assert.equal(
       Object.prototype.hasOwnProperty.call(listed.sessions[0] ?? {}, 'lastAssistantMessage'),
       false,
@@ -374,7 +342,7 @@ test.sequential(
 )
 
 test.sequential(
-  'assistant session list and show redact HOME-based vault and state paths',
+  'assistant session list and show redact HOME-based vault and runtime paths',
   async () => {
     const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cli-home-'))
     const homeRoot = path.join(parent, 'home')
@@ -392,6 +360,13 @@ test.sequential(
         vault: vaultRoot,
         alias: 'telegram:bob',
       })
+      const expectedStateRoot = path.join(
+        '~',
+        'vault',
+        '.runtime',
+        'operations',
+        'assistant',
+      )
 
       const listed = requireData(
         await runCli<{
@@ -400,7 +375,7 @@ test.sequential(
         }>(['assistant', 'session', 'list', '--vault', vaultRoot]),
       )
       assert.equal(listed.vault, path.join('~', 'vault'))
-      assert.equal(listed.stateRoot.startsWith(path.join('~', 'assistant-state')), true)
+      assert.equal(listed.stateRoot, expectedStateRoot)
 
       const shown = requireData(
         await runCli<{
@@ -413,7 +388,7 @@ test.sequential(
       )
 
       assert.equal(shown.vault, path.join('~', 'vault'))
-      assert.equal(shown.stateRoot.startsWith(path.join('~', 'assistant-state')), true)
+      assert.equal(shown.stateRoot, expectedStateRoot)
       assert.equal(shown.session.sessionId, created.session.sessionId)
     } finally {
       restoreEnvironmentVariable('HOME', originalHome)
@@ -512,635 +487,6 @@ test.sequential(
 )
 
 test.sequential(
-  'assistant cron add/list/show/status/disable/enable/remove expose typed scheduler records through the CLI',
-  async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-cli-'))
-    const vaultRoot = path.join(parent, 'vault')
-    await mkdir(vaultRoot, { recursive: true })
-    cleanupPaths.push(parent)
-
-    const added = requireData(
-      await runCli<{
-        jobsPath: string
-        job: {
-          jobId: string
-          name: string
-          stateDocId: string | null
-          target: {
-            channel: string | null
-            deliverResponse: boolean
-          }
-          schedule: {
-            kind: string
-          }
-          enabled: boolean
-        }
-      }>([
-        'assistant',
-        'cron',
-        'add',
-        'Check whether I need to stretch.',
-        '--vault',
-        vaultRoot,
-        '--name',
-        'stretch-reminder',
-        '--every',
-        '2h',
-        '--state',
-        '--channel',
-        'telegram',
-        '--sourceThread',
-        '123456789',
-      ]),
-    )
-
-    assert.equal(added.job.name, 'stretch-reminder')
-    assert.equal(added.job.schedule.kind, 'every')
-    assert.equal(added.job.enabled, true)
-    assert.equal(added.job.target.channel, 'telegram')
-    assert.equal(added.job.target.deliverResponse, true)
-    assert.equal(added.job.stateDocId, `cron/${added.job.jobId}`)
-    assert.equal(added.jobsPath.includes(path.join(parent, 'assistant-state')), true)
-
-    const status = requireData(
-      await runCli<{
-        totalJobs: number
-        enabledJobs: number
-        dueJobs: number
-      }>(['assistant', 'cron', 'status', '--vault', vaultRoot]),
-    )
-    assert.equal(status.totalJobs, 1)
-    assert.equal(status.enabledJobs, 1)
-    assert.equal(status.dueJobs, 0)
-
-    const listed = requireData(
-      await runCli<{
-        jobs: Array<{
-          jobId: string
-          name: string
-        }>
-      }>(['assistant', 'cron', 'list', '--vault', vaultRoot]),
-    )
-    assert.equal(listed.jobs.length, 1)
-    assert.equal(listed.jobs[0]?.name, 'stretch-reminder')
-
-    const shown = requireData(
-      await runCli<{
-        job: {
-          jobId: string
-          enabled: boolean
-        }
-      }>(['assistant', 'cron', 'show', added.job.jobId, '--vault', vaultRoot]),
-    )
-    assert.equal(shown.job.jobId, added.job.jobId)
-    assert.equal(shown.job.enabled, true)
-
-    const disabled = requireData(
-      await runCli<{
-        job: {
-          enabled: boolean
-        }
-      }>(['assistant', 'cron', 'disable', 'stretch-reminder', '--vault', vaultRoot]),
-    )
-    assert.equal(disabled.job.enabled, false)
-
-    const enabled = requireData(
-      await runCli<{
-        job: {
-          enabled: boolean
-        }
-      }>(['assistant', 'cron', 'enable', 'stretch-reminder', '--vault', vaultRoot]),
-    )
-    assert.equal(enabled.job.enabled, true)
-
-    const removed = requireData(
-      await runCli<{
-        removed: {
-          jobId: string
-        }
-      }>(['assistant', 'cron', 'remove', 'stretch-reminder', '--vault', vaultRoot]),
-    )
-    assert.equal(removed.removed.jobId, added.job.jobId)
-  },
-  ASSISTANT_CLI_TIMEOUT_MS,
-)
-
-test.sequential(
-  'assistant cron target show/set expose readable target inspection and in-place retargeting',
-  async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-target-cli-'))
-    const homeRoot = path.join(parent, 'home')
-    const vaultRoot = path.join(parent, 'vault')
-    await mkdir(homeRoot, { recursive: true })
-    await mkdir(vaultRoot, { recursive: true })
-    cleanupPaths.push(parent)
-
-    const originalHome = process.env.HOME
-    process.env.HOME = homeRoot
-
-    try {
-      await saveAssistantSelfDeliveryTarget(
-        {
-          channel: 'email',
-          identityId: 'sender@example.com',
-          participantId: null,
-          sourceThreadId: null,
-          deliveryTarget: 'me@example.com',
-        },
-        homeRoot,
-      )
-
-      const added = requireData(
-        await runCli<{
-          job: {
-            jobId: string
-          }
-        }>([
-          'assistant',
-          'cron',
-          'add',
-          'Send my weekly health snapshot.',
-          '--vault',
-          vaultRoot,
-          '--name',
-          'weekly-health-snapshot',
-          '--every',
-          '1d',
-          '--channel',
-          'telegram',
-          '--sourceThread',
-          '123456789',
-          '--session',
-          'session_target_cli',
-          '--alias',
-          'routine:weekly-health-snapshot',
-        ]),
-      )
-
-      const shown = requireData(
-        await runCli<{
-          cronTarget: {
-            jobId: string
-            jobName: string
-            target: {
-              channel: string | null
-              sourceThreadId: string | null
-            }
-            bindingDelivery: {
-              kind: string
-              target: string
-            } | null
-          }
-        }>([
-          'assistant',
-          'cron',
-          'target',
-          'show',
-          'weekly-health-snapshot',
-          '--vault',
-          vaultRoot,
-        ]),
-      )
-      assert.equal(shown.cronTarget.jobId, added.job.jobId)
-      assert.equal(shown.cronTarget.jobName, 'weekly-health-snapshot')
-      assert.equal(shown.cronTarget.target.channel, 'telegram')
-      assert.equal(shown.cronTarget.target.sourceThreadId, '123456789')
-      assert.equal(shown.cronTarget.bindingDelivery?.kind, 'thread')
-
-      const dryRun = requireData(
-        await runCli<{
-          changed: boolean
-          continuityReset: boolean
-          dryRun: boolean
-          beforeTarget: {
-            target: {
-              channel: string | null
-            }
-          }
-          afterTarget: {
-            target: {
-              channel: string | null
-              identityId: string | null
-              deliveryTarget: string | null
-              sessionId: string | null
-              alias: string | null
-            }
-          }
-        }>([
-          'assistant',
-          'cron',
-          'target',
-          'set',
-          'weekly-health-snapshot',
-          '--vault',
-          vaultRoot,
-          '--toSelf',
-          'email',
-          '--dryRun',
-        ]),
-      )
-      assert.equal(dryRun.changed, true)
-      assert.equal(dryRun.continuityReset, false)
-      assert.equal(dryRun.dryRun, true)
-      assert.equal(dryRun.beforeTarget.target.channel, 'telegram')
-      assert.equal(dryRun.afterTarget.target.channel, 'email')
-      assert.equal(dryRun.afterTarget.target.identityId, 'sender@example.com')
-      assert.equal(dryRun.afterTarget.target.deliveryTarget, 'me@example.com')
-      assert.equal(dryRun.afterTarget.target.sessionId, 'session_target_cli')
-      assert.equal(dryRun.afterTarget.target.alias, 'routine:weekly-health-snapshot')
-
-      const updated = requireData(
-        await runCli<{
-          changed: boolean
-          continuityReset: boolean
-          dryRun: boolean
-          job: {
-            target: {
-              channel: string | null
-              identityId: string | null
-              deliveryTarget: string | null
-              sessionId: string | null
-              alias: string | null
-            }
-          }
-        }>([
-          'assistant',
-          'cron',
-          'target',
-          'set',
-          'weekly-health-snapshot',
-          '--vault',
-          vaultRoot,
-          '--toSelf',
-          'email',
-        ]),
-      )
-      assert.equal(updated.changed, true)
-      assert.equal(updated.continuityReset, false)
-      assert.equal(updated.dryRun, false)
-      assert.equal(updated.job.target.channel, 'email')
-      assert.equal(updated.job.target.identityId, 'sender@example.com')
-      assert.equal(updated.job.target.deliveryTarget, 'me@example.com')
-      assert.equal(updated.job.target.sessionId, 'session_target_cli')
-      assert.equal(updated.job.target.alias, 'routine:weekly-health-snapshot')
-
-      const shownAfter = requireData(
-        await runCli<{
-          cronTarget: {
-            target: {
-              channel: string | null
-              identityId: string | null
-              deliveryTarget: string | null
-            }
-          }
-        }>([
-          'assistant',
-          'cron',
-          'target',
-          'show',
-          'weekly-health-snapshot',
-          '--vault',
-          vaultRoot,
-        ]),
-      )
-      assert.equal(shownAfter.cronTarget.target.channel, 'email')
-      assert.equal(shownAfter.cronTarget.target.identityId, 'sender@example.com')
-      assert.equal(shownAfter.cronTarget.target.deliveryTarget, 'me@example.com')
-
-      const reset = requireData(
-        await runCli<{
-          changed: boolean
-          continuityReset: boolean
-          job: {
-            target: {
-              sessionId: string | null
-              alias: string | null
-            }
-          }
-        }>([
-          'assistant',
-          'cron',
-          'target',
-          'set',
-          'weekly-health-snapshot',
-          '--vault',
-          vaultRoot,
-          '--toSelf',
-          'email',
-          '--resetContinuity',
-        ]),
-      )
-      assert.equal(reset.changed, false)
-      assert.equal(reset.continuityReset, true)
-      assert.equal(reset.job.target.sessionId, null)
-      assert.equal(reset.job.target.alias, null)
-    } finally {
-      restoreEnvironmentVariable('HOME', originalHome)
-    }
-  },
-  ASSISTANT_CLI_TIMEOUT_MS,
-)
-
-test.sequential(
-  'assistant cron state binding options are optional and validated',
-  async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-state-cli-'))
-    const vaultRoot = path.join(parent, 'vault')
-    await mkdir(vaultRoot, { recursive: true })
-    cleanupPaths.push(parent)
-
-    const stateless = requireData(
-      await runCli<{
-        job: {
-          jobId: string
-          stateDocId: string | null
-        }
-      }>([
-        'assistant',
-        'cron',
-        'add',
-        'Check in quietly.',
-        '--vault',
-        vaultRoot,
-        '--name',
-        'stateless-check-in',
-        '--every',
-        '2h',
-        '--channel',
-        'telegram',
-        '--sourceThread',
-        '123456789',
-      ]),
-    )
-    assert.equal(stateless.job.stateDocId, null)
-
-    const explicit = requireData(
-      await runCli<{
-        job: {
-          stateDocId: string | null
-        }
-      }>([
-        'assistant',
-        'cron',
-        'add',
-        'Check in with explicit state.',
-        '--vault',
-        vaultRoot,
-        '--name',
-        'explicit-state-check-in',
-        '--every',
-        '2h',
-        '--stateDoc',
-        'cron/weekly-health-snapshot',
-        '--channel',
-        'telegram',
-        '--sourceThread',
-        '123456789',
-      ]),
-    )
-    assert.equal(explicit.job.stateDocId, 'cron/weekly-health-snapshot')
-
-    const invalid = await runCli([
-      'assistant',
-      'cron',
-      'add',
-      'This should not be created.',
-      '--vault',
-      vaultRoot,
-      '--name',
-      'invalid-state-binding',
-      '--every',
-      '2h',
-      '--stateDoc',
-      '../escape',
-      '--channel',
-      'telegram',
-      '--sourceThread',
-      '123456789',
-    ])
-    assert.equal(invalid.ok, false)
-    if (!invalid.ok) {
-      assert.match(String(invalid.error.message ?? ''), /stateDocId must use slash-delimited segments/u)
-    }
-  },
-  ASSISTANT_CLI_TIMEOUT_MS,
-)
-
-test.sequential(
-  'assistant state list/show/put/patch/delete expose typed scratchpad documents through the CLI',
-  async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-state-cli-'))
-    const vaultRoot = path.join(parent, 'vault')
-    await mkdir(vaultRoot, { recursive: true })
-    cleanupPaths.push(parent)
-
-    const missing = requireData(
-      await runCli<{
-        document: {
-          exists: boolean
-          value: Record<string, unknown> | null
-        }
-      }>(['assistant', 'state', 'show', 'cron/job_123', '--vault', vaultRoot]),
-    )
-    assert.equal(missing.document.exists, false)
-    assert.equal(missing.document.value, null)
-
-    const created = requireData(
-      await runCli<{
-        documentsRoot: string
-        document: {
-          exists: boolean
-          value: Record<string, unknown> | null
-        }
-      }>(
-        ['assistant', 'state', 'put', 'cron/job_123', '--vault', vaultRoot, '--input', '-'],
-        {
-          stdin: JSON.stringify({
-            pending: {
-              signal: 'sleep_drop',
-            },
-            status: 'awaiting_user_context',
-          }),
-        },
-      ),
-    )
-    assert.equal(created.document.exists, true)
-    assert.deepEqual(created.document.value, {
-      pending: {
-        signal: 'sleep_drop',
-      },
-      status: 'awaiting_user_context',
-    })
-    assert.equal(created.documentsRoot.includes(path.join(parent, 'assistant-state')), true)
-
-    const patched = requireData(
-      await runCli<{
-        document: {
-          value: Record<string, unknown> | null
-        }
-      }>(
-        ['assistant', 'state', 'patch', 'cron/job_123', '--vault', vaultRoot, '--input', '-'],
-        {
-          stdin: JSON.stringify({
-            pending: {
-              cooldownUntil: '2026-03-29T10:00:00.000Z',
-            },
-          }),
-        },
-      ),
-    )
-    assert.deepEqual(patched.document.value, {
-      pending: {
-        signal: 'sleep_drop',
-        cooldownUntil: '2026-03-29T10:00:00.000Z',
-      },
-      status: 'awaiting_user_context',
-    })
-
-    const listed = requireData(
-      await runCli<{
-        prefix: string | null
-        documents: Array<{
-          docId: string
-        }>
-      }>(['assistant', 'state', 'list', '--vault', vaultRoot, '--prefix', 'cron']),
-    )
-    assert.equal(listed.prefix, 'cron')
-    assert.deepEqual(
-      listed.documents.map((document) => document.docId),
-      ['cron/job_123'],
-    )
-
-    const deleted = requireData(
-      await runCli<{
-        docId: string
-        existed: boolean
-      }>(['assistant', 'state', 'delete', 'cron/job_123', '--vault', vaultRoot]),
-    )
-    assert.equal(deleted.docId, 'cron/job_123')
-    assert.equal(deleted.existed, true)
-  },
-  ASSISTANT_CLI_TIMEOUT_MS,
-)
-
-test.sequential(
-  'assistant cron preset list/show/install expose built-in templates and materialize jobs through the CLI',
-  async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-preset-cli-'))
-    const vaultRoot = path.join(parent, 'vault')
-    await mkdir(vaultRoot, { recursive: true })
-    cleanupPaths.push(parent)
-
-    const presetList = requireData(
-      await runCli<{
-        presets: Array<{
-          id: string
-          suggestedSchedule: {
-            kind: string
-          }
-        }>
-      }>(['assistant', 'cron', 'preset', 'list', '--vault', vaultRoot]),
-    )
-    assert.ok(
-      presetList.presets.some((preset) => preset.id === 'environment-health-watch'),
-    )
-    assert.ok(
-      presetList.presets.some((preset) => preset.id === 'morning-mindfulness'),
-    )
-    assert.ok(
-      presetList.presets.some((preset) => preset.id === 'weekly-health-snapshot'),
-    )
-
-    const presetShown = requireData(
-      await runCli<{
-        preset: {
-          id: string
-          suggestedScheduleLabel: string
-        }
-        promptTemplate: string
-      }>([
-        'assistant',
-        'cron',
-        'preset',
-        'show',
-        'morning-mindfulness',
-        '--vault',
-        vaultRoot,
-      ]),
-    )
-    assert.equal(presetShown.preset.id, 'morning-mindfulness')
-    assert.equal(presetShown.preset.suggestedScheduleLabel, 'Daily at 7:00')
-    assert.match(presetShown.promptTemplate, /morning mindfulness prompt/u)
-    assert.match(presetShown.promptTemplate, /text-message friendly/u)
-
-    const installed = requireData(
-      await runCli<{
-        preset: {
-          id: string
-        }
-        job: {
-          name: string
-          enabled: boolean
-          target: {
-            channel: string | null
-            participantId: string | null
-            sourceThreadId: string | null
-            deliverResponse: boolean
-          }
-          schedule: {
-            kind: string
-          }
-        }
-        resolvedPrompt: string
-        resolvedVariables: Record<string, string>
-      }>([
-        'assistant',
-        'cron',
-        'preset',
-        'install',
-        'morning-mindfulness',
-        '--vault',
-        vaultRoot,
-        '--name',
-        'morning-mindfulness-text',
-        '--var',
-        'practice_window=a 10 minute seated meditation before work',
-        '--var',
-        'focus_for_today=breath awareness and relaxing my shoulders and gratitude',
-        '--channel',
-        'telegram',
-        '--participant',
-        'mindfulness-chat',
-        '--sourceThread',
-        'mindfulness-chat',
-        '--instructions',
-        'If you include a quote-like line, keep it short.',
-      ]),
-    )
-
-    assert.equal(installed.preset.id, 'morning-mindfulness')
-    assert.equal(installed.job.name, 'morning-mindfulness-text')
-    assert.equal(installed.job.enabled, true)
-    assert.equal(installed.job.schedule.kind, 'cron')
-    assert.equal(installed.job.target.channel, 'telegram')
-    assert.equal(installed.job.target.participantId, 'mindfulness-chat')
-    assert.equal(installed.job.target.sourceThreadId, 'mindfulness-chat')
-    assert.equal(installed.job.target.deliverResponse, true)
-    assert.equal(
-      installed.resolvedVariables.practice_window,
-      'a 10 minute seated meditation before work',
-    )
-    assert.equal(
-      installed.resolvedVariables.focus_for_today,
-      'breath awareness and relaxing my shoulders and gratitude',
-    )
-    assert.match(installed.resolvedPrompt, /text-message friendly/u)
-    assert.match(installed.resolvedPrompt, /If you include a quote-like line, keep it short/u)
-  },
-  ASSISTANT_CLI_TIMEOUT_MS,
-)
-
-test.sequential(
   'assistant self-target commands manage local saved outbound routes without needing a vault',
   async () => {
     const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-self-target-cli-'))
@@ -1228,496 +574,6 @@ test.sequential(
       }),
     )
     assert.deepEqual(emptyList.targets, [])
-  },
-  ASSISTANT_CLI_TIMEOUT_MS,
-)
-
-test.sequential(
-  'assistant memory search/get expose typed memory records from Markdown-backed memory files',
-  async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-cli-'))
-    const vaultRoot = path.join(parent, 'vault')
-    await mkdir(vaultRoot, { recursive: true })
-    cleanupPaths.push(parent)
-
-    await ensureCliRuntimeArtifacts()
-
-    const memoryPaths = resolveAssistantMemoryStoragePaths(vaultRoot)
-    await mkdir(memoryPaths.assistantStateRoot, { recursive: true })
-    await writeFile(
-      memoryPaths.longTermMemoryPath,
-      [
-        '# Assistant memory',
-        '',
-        'This file lives outside the canonical vault.',
-        '',
-        '## Identity',
-        '- Call the user Alex.',
-        '',
-        '## Preferences',
-        '',
-        '## Standing instructions',
-        '',
-        '## Health context',
-        '',
-      ].join('\n'),
-      'utf8',
-    )
-
-    const search = requireData(
-      await runCli<{
-        stateRoot: string
-        query: string | null
-        scope: string
-        results: Array<{
-          id: string
-          section: string
-          text: string
-        }>
-      }>([
-        'assistant',
-        'memory',
-        'search',
-        '--vault',
-        vaultRoot,
-        '--scope',
-        'long-term',
-        '--text',
-        'Alex',
-      ], {
-        env: isolateAssistantMemoryEnv(),
-      }),
-    )
-    assert.equal(search.stateRoot.includes(path.join(parent, 'assistant-state')), true)
-    assert.equal(search.query, 'Alex')
-    assert.equal(search.scope, 'long-term')
-    assert.equal(search.results[0]?.section, 'Identity')
-    assert.equal(search.results[0]?.text, 'Call the user Alex.')
-
-    const fetched = requireData(
-      await runCli<{
-        stateRoot: string
-        memory: {
-          id: string
-          section: string
-          text: string
-        }
-      }>([
-        'assistant',
-        'memory',
-        'get',
-        search.results[0]?.id ?? '',
-        '--vault',
-        vaultRoot,
-      ], {
-        env: isolateAssistantMemoryEnv(),
-      }),
-    )
-    assert.equal(fetched.stateRoot, search.stateRoot)
-    assert.equal(fetched.memory.id, search.results[0]?.id)
-    assert.equal(fetched.memory.section, 'Identity')
-    assert.equal(fetched.memory.text, 'Call the user Alex.')
-  },
-  ASSISTANT_CLI_TIMEOUT_MS,
-)
-
-test.sequential(
-  'assistant memory search/get honor the bound assistant turn context for private health memory',
-  async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-turn-cli-'))
-    const vaultRoot = path.join(parent, 'vault')
-    await mkdir(vaultRoot, { recursive: true })
-    cleanupPaths.push(parent)
-
-    await ensureCliRuntimeArtifacts()
-
-    const memoryPaths = resolveAssistantMemoryStoragePaths(vaultRoot)
-    await mkdir(memoryPaths.assistantStateRoot, { recursive: true })
-    await writeFile(
-      memoryPaths.longTermMemoryPath,
-      [
-        '# Assistant memory',
-        '',
-        'This file lives outside the canonical vault.',
-        '',
-        '## Identity',
-        '',
-        '## Preferences',
-        '',
-        '## Standing instructions',
-        '',
-        '## Health context',
-        '- User has high cholesterol.',
-        '',
-      ].join('\n'),
-      'utf8',
-    )
-
-    const nonPrivateEnv = createAssistantMemoryTurnContextEnv({
-      allowSensitiveHealthContext: false,
-      sessionId: 'asst_cli_non_private',
-      sourcePrompt: 'Do you remember my cholesterol?',
-      turnId: 'turn_cli_non_private',
-      vault: vaultRoot,
-    })
-    const privateEnv = createAssistantMemoryTurnContextEnv({
-      allowSensitiveHealthContext: true,
-      sessionId: 'asst_cli_private',
-      sourcePrompt: 'Do you remember my cholesterol?',
-      turnId: 'turn_cli_private',
-      vault: vaultRoot,
-    })
-
-    const hiddenSearch = requireData(
-      await runCli<{ results: Array<{ id: string }> }>(
-        [
-          'assistant',
-          'memory',
-          'search',
-          '--vault',
-          vaultRoot,
-          '--scope',
-          'long-term',
-          '--text',
-          'cholesterol',
-        ],
-        {
-          env: isolateAssistantMemoryEnv(nonPrivateEnv),
-        },
-      ),
-    )
-    assert.deepEqual(hiddenSearch.results, [])
-
-    const visibleSearch = requireData(
-      await runCli<{
-        results: Array<{
-          id: string
-          section: string
-          text: string
-        }>
-      }>(
-        [
-          'assistant',
-          'memory',
-          'search',
-          '--vault',
-          vaultRoot,
-          '--scope',
-          'long-term',
-          '--text',
-          'cholesterol',
-        ],
-        {
-          env: isolateAssistantMemoryEnv(privateEnv),
-        },
-      ),
-    )
-    assert.equal(visibleSearch.results[0]?.section, 'Health context')
-    assert.equal(visibleSearch.results[0]?.text, 'User has high cholesterol.')
-
-    const fetched = requireData(
-      await runCli<{
-        memory: {
-          id: string
-          section: string
-          text: string
-        }
-      }>([
-        'assistant',
-        'memory',
-        'get',
-        visibleSearch.results[0]?.id ?? '',
-        '--vault',
-        vaultRoot,
-      ], {
-        env: isolateAssistantMemoryEnv(privateEnv),
-      }),
-    )
-    assert.equal(fetched.memory.section, 'Health context')
-    assert.equal(fetched.memory.text, 'User has high cholesterol.')
-  },
-  ASSISTANT_CLI_TIMEOUT_MS,
-)
-
-test.sequential(
-  'assistant memory file read/append/write expose the canonical Markdown memory file surface',
-  async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-file-cli-'))
-    const vaultRoot = path.join(parent, 'vault')
-    await mkdir(vaultRoot, { recursive: true })
-    cleanupPaths.push(parent)
-
-    await ensureCliRuntimeArtifacts()
-
-    const memoryPaths = resolveAssistantMemoryStoragePaths(vaultRoot)
-    await mkdir(memoryPaths.assistantStateRoot, { recursive: true })
-    await writeFile(
-      memoryPaths.longTermMemoryPath,
-      [
-        '# Assistant memory',
-        '',
-        'This file lives outside the canonical vault.',
-        '',
-        '## Identity',
-        '- Call the user Alex.',
-        '',
-        '## Preferences',
-        '',
-        '## Standing instructions',
-        '',
-        '## Health context',
-        '- User has high cholesterol.',
-        '',
-      ].join('\n'),
-      'utf8',
-    )
-
-    const sharedEnv = isolateAssistantMemoryEnv(
-      createAssistantMemoryTurnContextEnv({
-        allowSensitiveHealthContext: false,
-        sessionId: 'asst_cli_memory_file_shared',
-        sourcePrompt: 'Remember my preference.',
-        turnId: 'turn_cli_memory_file_shared',
-        vault: vaultRoot,
-      }),
-    )
-    const privateEnv = isolateAssistantMemoryEnv(
-      createAssistantMemoryTurnContextEnv({
-        allowSensitiveHealthContext: true,
-        sessionId: 'asst_cli_memory_file_private',
-        sourcePrompt: 'Remember my health context.',
-        turnId: 'turn_cli_memory_file_private',
-        vault: vaultRoot,
-      }),
-    )
-
-    const sharedRead = requireData(
-      await runCli<{
-        text: string
-        present: boolean
-      }>(['assistant', 'memory', 'file', 'read', 'MEMORY.md', '--vault', vaultRoot], {
-        env: sharedEnv,
-      }),
-    )
-    assert.equal(sharedRead.present, true)
-    assert.doesNotMatch(sharedRead.text, /high cholesterol/u)
-
-    const sharedAppend = requireData(
-      await runCli<{
-        appended: boolean
-        section: string
-        totalBullets: number
-      }>([
-        'assistant',
-        'memory',
-        'file',
-        'append',
-        'MEMORY.md',
-        '--vault',
-        vaultRoot,
-        '--section',
-        'Preferences',
-        '--text',
-        'Keep responses concise.',
-      ], {
-        env: sharedEnv,
-      }),
-    )
-    assert.equal(sharedAppend.appended, true)
-    assert.equal(sharedAppend.section, 'Preferences')
-    assert.equal(sharedAppend.totalBullets, 1)
-
-    const sharedRewriteFile = path.join(parent, 'memory-shared-rewrite.md')
-    await writeFile(
-      sharedRewriteFile,
-      [
-        '# Assistant memory',
-        '',
-        'This file lives outside the canonical vault.',
-        '',
-        '## Identity',
-        '- Call the user Alex.',
-        '',
-        '## Preferences',
-        '- Keep responses concise.',
-        '',
-        '## Standing instructions',
-        '',
-        '## Health context',
-        '',
-      ].join('\n'),
-      'utf8',
-    )
-    const deniedSharedWrite = await runCli(
-      [
-        'assistant',
-        'memory',
-        'file',
-        'write',
-        'MEMORY.md',
-        '--vault',
-        vaultRoot,
-        '--input',
-        `@${sharedRewriteFile}`,
-      ],
-      {
-        env: sharedEnv,
-      },
-    )
-    assert.equal(deniedSharedWrite.ok, false)
-    if (deniedSharedWrite.ok) {
-      assert.fail('Expected shared assistant memory rewrite to fail when hidden health context exists.')
-    }
-    assert.match(deniedSharedWrite.error.code ?? '', /ASSISTANT_MEMORY_FILE_ACCESS_DENIED/u)
-
-    const conflictingAppend = await runCli(
-      [
-        'assistant',
-        'memory',
-        'file',
-        'append',
-        'MEMORY.md',
-        '--vault',
-        vaultRoot,
-        '--section',
-        'Identity',
-        '--text',
-        'Call the user Jordan.',
-      ],
-      {
-        env: sharedEnv,
-      },
-    )
-    assert.equal(conflictingAppend.ok, false)
-    if (conflictingAppend.ok) {
-      assert.fail('Expected conflicting assistant memory append to fail.')
-    }
-    assert.match(conflictingAppend.error.code ?? '', /ASSISTANT_MEMORY_FILE_APPEND_REQUIRES_EDIT/u)
-
-    const deniedDailyAppend = await runCli(
-      [
-        'assistant',
-        'memory',
-        'file',
-        'append',
-        'memory/2026-04-02.md',
-        '--vault',
-        vaultRoot,
-        '--text',
-        'Working on onboarding.',
-      ],
-      {
-        env: sharedEnv,
-      },
-    )
-    assert.equal(deniedDailyAppend.ok, false)
-    if (deniedDailyAppend.ok) {
-      assert.fail('Expected shared daily assistant memory append to fail.')
-    }
-    assert.match(deniedDailyAppend.error.code ?? '', /ASSISTANT_MEMORY_FILE_ACCESS_DENIED/u)
-
-    const privateDailyAppend = requireData(
-      await runCli<{
-        appended: boolean
-        path: string
-      }>([
-        'assistant',
-        'memory',
-        'file',
-        'append',
-        'memory/2026-04-02.md',
-        '--vault',
-        vaultRoot,
-        '--text',
-        'Working on onboarding.',
-      ], {
-        env: privateEnv,
-      }),
-    )
-    assert.equal(privateDailyAppend.appended, true)
-    assert.equal(privateDailyAppend.path, 'memory/2026-04-02.md')
-
-    const operatorHealthAppend = requireData(
-      await runCli<{
-        appended: boolean
-        section: string
-      }>([
-        'assistant',
-        'memory',
-        'file',
-        'append',
-        'MEMORY.md',
-        '--vault',
-        vaultRoot,
-        '--section',
-        'Health context',
-        '--text',
-        'User is tracking ApoB.',
-      ]),
-    )
-    assert.equal(operatorHealthAppend.appended, true)
-    assert.equal(operatorHealthAppend.section, 'Health context')
-
-    const operatorDailyRead = requireData(
-      await runCli<{
-        text: string
-      }>([
-        'assistant',
-        'memory',
-        'file',
-        'read',
-        'memory/2026-04-02.md',
-        '--vault',
-        vaultRoot,
-      ]),
-    )
-    assert.match(operatorDailyRead.text, /Working on onboarding\./u)
-
-    const replacementFile = path.join(parent, 'memory-rewrite.md')
-    await writeFile(
-      replacementFile,
-      [
-        '# Assistant memory',
-        '',
-        'This file lives outside the canonical vault.',
-        '',
-        '## Identity',
-        '- Call the user Alex.',
-        '',
-        '## Preferences',
-        '- Keep responses concise.',
-        '',
-        '## Standing instructions',
-        '- Ask one clarifying question when context is thin.',
-        '',
-        '## Health context',
-        '- User has high cholesterol.',
-        '',
-      ].join('\n'),
-      'utf8',
-    )
-
-    const rewrite = requireData(
-      await runCli<{
-        totalChars: number
-      }>([
-        'assistant',
-        'memory',
-        'file',
-        'write',
-        'MEMORY.md',
-        '--vault',
-        vaultRoot,
-        '--input',
-        `@${replacementFile}`,
-      ]),
-    )
-    assert.ok(rewrite.totalChars > 0)
-
-    const finalMarkdown = await readFile(memoryPaths.longTermMemoryPath, 'utf8')
-    assert.match(finalMarkdown, /Keep responses concise\./u)
-    assert.match(finalMarkdown, /Ask one clarifying question when context is thin\./u)
-    assert.match(finalMarkdown, /high cholesterol/u)
   },
   ASSISTANT_CLI_TIMEOUT_MS,
 )
@@ -1849,8 +705,8 @@ test('default-vault injection skips incomplete command groups', () => {
     ['assistant', 'session'],
   )
   assert.deepEqual(
-    applyDefaultVaultToArgs(['assistant', 'memory', 'file'], '/tmp/default-vault'),
-    ['assistant', 'memory', 'file'],
+    applyDefaultVaultToArgs(['memory'], '/tmp/default-vault'),
+    ['memory'],
   )
   assert.deepEqual(applyDefaultVaultToArgs(['device'], '/tmp/default-vault'), ['device'])
   assert.deepEqual(applyDefaultVaultToArgs(['wearables'], '/tmp/default-vault'), ['wearables'])
@@ -1869,8 +725,8 @@ test('default-vault injection skips incomplete command groups', () => {
     ['assistant', 'session', 'list', '--vault', '/tmp/default-vault'],
   )
   assert.deepEqual(
-    applyDefaultVaultToArgs(['assistant', 'memory', 'file', 'read', 'MEMORY.md'], '/tmp/default-vault'),
-    ['assistant', 'memory', 'file', 'read', 'MEMORY.md', '--vault', '/tmp/default-vault'],
+    applyDefaultVaultToArgs(['memory', 'show'], '/tmp/default-vault'),
+    ['memory', 'show', '--vault', '/tmp/default-vault'],
   )
   assert.deepEqual(
     applyDefaultVaultToArgs(['workout', 'format', 'list'], '/tmp/default-vault'),
@@ -1969,33 +825,6 @@ function commandSchemaShapeKeys(
   const shape = schema?.shape ?? schema?.def?.shape ?? {}
   return Object.keys(shape).sort()
 }
-
-test.sequential(
-  'assistant memory search falls back to the assistant-bound vault env when --vault is omitted',
-  async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-env-'))
-    const vaultRoot = path.join(parent, 'vault')
-    await mkdir(vaultRoot, { recursive: true })
-    cleanupPaths.push(parent)
-
-    const search = requireData(
-      await runCli<{
-        stateRoot: string
-        vault: string
-        results: unknown[]
-      }>(['assistant', 'memory', 'search'], {
-        env: isolateAssistantMemoryEnv({
-          [VAULT_ENV]: vaultRoot,
-        }),
-      }),
-    )
-
-    assert.equal(search.vault, vaultRoot)
-    assert.equal(search.stateRoot.includes(path.join(parent, 'assistant-state')), true)
-    assert.deepEqual(search.results, [])
-  },
-  ASSISTANT_CLI_TIMEOUT_MS,
-)
 
 test('root chat prints only a resume hint after a human TTY session exits', async () => {
   runtimeMocks.runAssistantChat.mockResolvedValue(createMockChatResult('asst_human'))
@@ -2218,68 +1047,10 @@ async function runSourceCli<TData = Record<string, unknown>>(
     duration: string
   }
 }> {
-  await ensureCliRuntimeArtifacts()
-
-  try {
-    const { stdout } = await execFileAsync(
-      process.execPath,
-      [tsxCliPath, '--tsconfig', sourceTsconfigPath, sourceBinPath, ...withMachineOutput(args)],
-      {
-        cwd: repoRoot,
-        env: withoutNodeV8Coverage({
-          ...process.env,
-          ...options?.env,
-        }),
-      },
-    )
-
-    return JSON.parse(stdout) as any
-  } catch (error) {
-    const output = outputFromError(error)
-    if (output !== null) {
-      return JSON.parse(output) as any
-    }
-
-    throw error
-  }
-}
-
-function withMachineOutput(args: string[]): string[] {
-  const nextArgs = [...args]
-
-  if (!nextArgs.includes('--verbose')) {
-    nextArgs.push('--verbose')
-  }
-
-  if (!nextArgs.includes('--json') && !nextArgs.includes('--format')) {
-    nextArgs.push('--format', 'json')
-  }
-
-  return nextArgs
-}
-
-function outputFromError(error: unknown): string | null {
-  if (!error || typeof error !== 'object') {
-    return null
-  }
-
-  const maybeOutput = error as {
-    stdout?: Buffer | string
-    stderr?: Buffer | string
-  }
-
-  return decodeCommandOutput(maybeOutput.stdout) ?? decodeCommandOutput(maybeOutput.stderr)
-}
-
-function decodeCommandOutput(output: Buffer | string | undefined): string | null {
-  if (typeof output === 'string') {
-    return output.trim().length > 0 ? output : null
-  }
-
-  if (Buffer.isBuffer(output)) {
-    const text = output.toString('utf8').trim()
-    return text.length > 0 ? text : null
-  }
-
-  return null
+  return runCli(args, {
+    env: withoutNodeV8Coverage({
+      ...process.env,
+      ...options?.env,
+    }),
+  })
 }

@@ -11,7 +11,7 @@ This guide is the downstream integration reference for extending the Murph vault
 - Keep human-facing truth in Markdown (`CORE.md`, `journal/`, `bank/`).
 - Keep machine-facing truth in append-only JSONL ledgers (`ledger/events`, `ledger/samples`, `audit`).
 - Keep imported source artifacts immutable under `raw/`.
-- Keep assistant or session state outside the canonical vault under `assistant-state/`, including local transcript files plus only small non-canonical Markdown memory docs for naming, response preferences, standing instructions, selected health context, and recent project context.
+- Keep assistant or session runtime state under `vault/.runtime/operations/assistant/**`, and keep durable user-facing memory plus scheduled assistant configuration in canonical vault records rather than assistant runtime state.
 - Do not introduce SQLite, vector storage, OCR-heavy parsing, semantic search, canonical transcript storage inside the vault, or automatic promotion of chat logs into canonical health state in the baseline.
 
 ## Package Roles

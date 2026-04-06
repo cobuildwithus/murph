@@ -285,10 +285,8 @@ function inferAssistantCapabilityMutationSemantics(
   }
 
   if (
-    name.startsWith('assistant.state.') ||
     name.startsWith('assistant.knowledge.upsert') ||
     name.startsWith('assistant.knowledge.rebuildIndex') ||
-    name.startsWith('assistant.cron.') ||
     name.startsWith('assistant.selfTarget.')
   ) {
     return 'assistant-runtime-write'

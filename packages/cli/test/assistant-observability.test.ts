@@ -290,7 +290,7 @@ test('assistant status defaults torn local state files and doctor surfaces recov
     '{"schema":"murph.assistant-turn-receipt.v1"',
     'utf8',
   )
-  await writeFile(statePaths.automationPath, '{"version":2', 'utf8')
+  await writeFile(statePaths.automationStatePath, '{"version":2', 'utf8')
   await writeFile(
     statePaths.diagnosticSnapshotPath,
     '{"schema":"murph.assistant-diagnostics.v1"',

@@ -46,6 +46,10 @@
               "type": "string",
               "const": "aud"
             },
+            "automation": {
+              "type": "string",
+              "const": "auto"
+            },
             "condition": {
               "type": "string",
               "const": "cond"
@@ -77,6 +81,10 @@
             "meal": {
               "type": "string",
               "const": "meal"
+            },
+            "memory": {
+              "type": "string",
+              "const": "mem"
             },
             "pack": {
               "type": "string",
@@ -123,6 +131,7 @@
             "allergy",
             "assessment",
             "audit",
+            "automation",
             "condition",
             "document",
             "event",
@@ -131,6 +140,7 @@
             "food",
             "goal",
             "meal",
+            "memory",
             "pack",
             "profileSnapshot",
             "provider",

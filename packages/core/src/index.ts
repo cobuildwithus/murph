@@ -8,6 +8,8 @@ export {
   VAULT_SCHEMA_VERSION,
 } from "./constants.ts";
 export { VaultError, isVaultError } from "./errors.ts";
+export * from "./automation.ts";
+export * from "./memory.ts";
 export {
   assertPathWithinVault,
   assertPathWithinVaultOnDisk,

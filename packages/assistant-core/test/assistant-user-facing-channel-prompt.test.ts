@@ -11,10 +11,6 @@ test("user-facing channel prompt bans markdown styling in replies", () => {
     assistantCliExecutorAvailable: false,
     assistantCronToolsAvailable: false,
     assistantHostedDeviceConnectAvailable: false,
-    assistantMemoryDailyPath: "assistant-state/memory/2026-04-05.md",
-    assistantMemoryLongTermPath: "assistant-state/MEMORY.md",
-    assistantMemoryPrompt: null,
-    assistantStateToolsAvailable: false,
     channel: "telegram",
     cliAccess: {
       rawCommand: "vault-cli",
@@ -44,10 +40,6 @@ test("local chat prompt does not inject the user-facing no-markdown rule", () =>
     assistantCliExecutorAvailable: false,
     assistantCronToolsAvailable: false,
     assistantHostedDeviceConnectAvailable: false,
-    assistantMemoryDailyPath: "assistant-state/memory/2026-04-05.md",
-    assistantMemoryLongTermPath: "assistant-state/MEMORY.md",
-    assistantMemoryPrompt: null,
-    assistantStateToolsAvailable: false,
     channel: "local",
     cliAccess: {
       rawCommand: "vault-cli",

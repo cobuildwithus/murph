@@ -17,7 +17,7 @@ import {
   type SearchMemoryRecordsInput,
   type UpsertMemoryRecordInput,
   upsertMemoryRecord,
-} from "../../contracts/src/memory.js";
+} from "@murphai/contracts";
 
 import {
   ensureVaultDirectory,
@@ -36,7 +36,7 @@ export type {
   MemorySection,
   SearchMemoryRecordsInput,
   UpsertMemoryRecordInput,
-} from "../../contracts/src/memory.js";
+} from "@murphai/contracts";
 
 export function resolveMemoryDocumentPath(vaultRoot: string): string {
   return resolveVaultPath(vaultRoot, memoryDocumentRelativePath).absolutePath;

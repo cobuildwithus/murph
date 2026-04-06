@@ -1,13 +1,14 @@
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
 import {
   readAssistantCliLlmsManifest,
   type AssistantCliLlmsManifest,
   type AssistantCliLlmsManifestCommand,
   type AssistantCliLlmsManifestSchemaNode,
 } from '../assistant-cli-tools.js'
-import {
-  getAssistantStateDocument,
-  putAssistantStateDocument,
-} from './state.js'
+import { ensureAssistantStateDirectory, isMissingFileError, writeJsonFileAtomic } from './shared.js'
+import { resolveAssistantStatePaths } from './store/paths.js'
+import { resolveAssistantStateDocumentPath } from './state.js'
 
 const assistantCliSurfaceBootstrapSchemaVersion =
   'murph.assistant-cli-surface-bootstrap.v2'
@@ -32,12 +33,15 @@ export async function resolveAssistantCliSurfaceBootstrapContext(input: {
   workingDirectory?: string | null
 }): Promise<string | null> {
   const docId = buildAssistantCliSurfaceBootstrapDocId(input.sessionId)
-  const existing = await getAssistantStateDocument({
+  const stateDirectory = resolveAssistantStatePaths(input.vault).stateDirectory
+  const documentPath = resolveAssistantStateDocumentPath(
+    {
+      stateDirectory,
+    },
     docId,
-    vault: input.vault,
-  })
-  const persistedContract = parsePersistedAssistantCliSurfaceContract(existing.value)
-  if (persistedContract) {
+  )
+  const persistedContract = await readPersistedAssistantCliSurfaceContract(documentPath)
+  if (persistedContract !== null) {
     return persistedContract
   }
 
@@ -50,14 +54,11 @@ export async function resolveAssistantCliSurfaceBootstrapContext(input: {
     return null
   }
 
-  await putAssistantStateDocument({
-    docId,
-    value: {
-      contract,
-      generatedAt: new Date().toISOString(),
-      schemaVersion: assistantCliSurfaceBootstrapSchemaVersion,
-    },
-    vault: input.vault,
+  await ensureAssistantStateDirectory(path.dirname(documentPath))
+  await writeJsonFileAtomic(documentPath, {
+    contract,
+    generatedAt: new Date().toISOString(),
+    schemaVersion: assistantCliSurfaceBootstrapSchemaVersion,
   })
 
   return contract
@@ -96,20 +97,26 @@ export function buildAssistantCliSurfaceContract(
   return minimalContract.slice(0, assistantCliSurfaceBootstrapContractCharBudget).trimEnd()
 }
 
-function parsePersistedAssistantCliSurfaceContract(
-  value: Record<string, unknown> | null,
-): string | null {
-  if (!value) {
+async function readPersistedAssistantCliSurfaceContract(
+  documentPath: string,
+): Promise<string | null> {
+  try {
+    const raw = await readFile(documentPath, 'utf8')
+    const value = JSON.parse(raw) as Record<string, unknown>
+    const contract = value.contract
+    if (typeof contract === 'string' && contract.trim().length > 0) {
+      return contract.trim()
+    }
+
+    const summary = value.summary
+    return typeof summary === 'string' && summary.trim().length > 0 ? summary.trim() : null
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return null
+    }
+
     return null
   }
-
-  const contract = value.contract
-  if (typeof contract === 'string' && contract.trim().length > 0) {
-    return contract.trim()
-  }
-
-  const summary = value.summary
-  return typeof summary === 'string' && summary.trim().length > 0 ? summary.trim() : null
 }
 
 async function loadAssistantCliSurfaceContract(input: {

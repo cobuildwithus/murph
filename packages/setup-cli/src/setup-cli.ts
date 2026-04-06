@@ -1,6 +1,5 @@
 import { readFile } from 'node:fs/promises'
 import { Cli, z } from 'incur'
-import { listAssistantCronPresets } from '@murphai/assistant-core/assistant-cron'
 import { assistantAutomationStateSchema } from '@murphai/assistant-core/assistant-cli-contracts'
 import { resolveAssistantStatePaths } from '@murphai/assistant-core/assistant-state'
 import {
@@ -352,42 +351,18 @@ export async function resolveInitialSetupWizardChannels(
     return getDefaultSetupWizardChannels(platform)
   }
 
-  const preferredChannels = setupChannelValues.filter((channel) =>
-    state.preferredChannels.includes(channel),
+  const savedChannels = setupChannelValues.filter((channel) =>
+    state.autoReplyChannels.includes(channel),
   )
-  const savedChannels =
-    preferredChannels.length > 0
-      ? preferredChannels
-      : setupChannelValues.filter((channel) => state.autoReplyChannels.includes(channel))
   return savedChannels.length > 0
     ? savedChannels
     : getDefaultSetupWizardChannels(platform)
 }
 
 export async function resolveInitialSetupWizardScheduledUpdates(
-  vault: string,
+  _vault: string,
 ): Promise<string[]> {
-  const state = await readInitialSetupWizardAutomationState(vault)
-
-  if (state?.preferredScheduledUpdates === undefined) {
-    return getDefaultSetupWizardScheduledUpdates()
-  }
-
-  if (state.preferredScheduledUpdates.length === 0) {
-    return []
-  }
-
-  const available = new Set(
-    listAssistantCronPresets().map((preset) => preset.id),
-  )
-
-  const savedScheduledUpdates = state.preferredScheduledUpdates.filter((presetId) =>
-    available.has(presetId),
-  )
-
-  return savedScheduledUpdates.length > 0
-    ? savedScheduledUpdates
-    : getDefaultSetupWizardScheduledUpdates()
+  return getDefaultSetupWizardScheduledUpdates()
 }
 
 async function readInitialSetupWizardAutomationState(vault: string) {
@@ -435,9 +410,9 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
     )
   ) {
     commands.push({
-      command: 'assistant cron list',
+      command: 'automation list',
       description:
-        'Inspect the scheduled assistant jobs installed during onboarding and confirm their next run times.',
+        'Inspect the canonical automations you already created and confirm their schedules and routes.',
     })
   }
 
@@ -503,9 +478,9 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
   }
 
   commands.push({
-    command: 'assistant cron preset list',
+    command: 'automation scaffold',
     description:
-      'Browse built-in cron templates for environment checks, condition research, ingestible watchlists, longevity roundups, and weekly health compass summaries.',
+      'Start a canonical automation payload when you are ready to add scheduled summaries or other assistant automations.',
   })
 
   return commands

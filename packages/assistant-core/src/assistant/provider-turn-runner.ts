@@ -31,12 +31,7 @@ import {
   type ResolvedAssistantFailoverRoute,
 } from './failover.js'
 import { maybeThrowInjectedAssistantFault } from './fault-injection.js'
-import {
-  createAssistantMemoryTurnContextEnv,
-  loadAssistantMemoryPromptBlock,
-  resolveAssistantDailyMemoryPath,
-  resolveAssistantMemoryStoragePaths,
-} from './memory.js'
+import { createAssistantMemoryTurnContextEnv } from './memory/turn-context.js'
 import {
   attachRecoveredAssistantSession,
   recoverAssistantSessionAfterProviderFailure,
@@ -319,31 +314,20 @@ async function resolveAssistantRouteTurnPlan(input: {
     }),
     input.input.prompt,
   )
-  const assistantMemoryPaths = resolveAssistantMemoryStoragePaths(input.input.vault)
   const assistantCliExecutorAvailable =
     providerCapabilities.supportsToolRuntime &&
     input.toolCatalog.hasTool('murph.cli.run')
   const assistantHostedDeviceConnectAvailable =
     providerCapabilities.supportsToolRuntime &&
     input.toolCatalog.hasTool('murph.device.connect')
-  const assistantStateToolsAvailable = assistantCliExecutorAvailable
-  const assistantMemoryRecallToolsAvailable = assistantCliExecutorAvailable
-  const [assistantMemoryPrompt, assistantCliContract] = await Promise.all([
-    !assistantMemoryRecallToolsAvailable || input.session.turnCount === 0
-      ? loadAssistantMemoryPromptBlock({
-          includeSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
-          vault: input.input.vault,
-        })
-      : Promise.resolve(null),
-    shouldInjectBootstrapContext
-      ? resolveAssistantCliSurfaceBootstrapContext({
-          cliEnv: input.sharedPlan.cliAccess.env,
-          sessionId: input.session.sessionId,
-          vault: input.input.vault,
-          workingDirectory,
-        })
-      : Promise.resolve(null),
-  ])
+  const assistantCliContract = shouldInjectBootstrapContext
+    ? await resolveAssistantCliSurfaceBootstrapContext({
+        cliEnv: input.sharedPlan.cliAccess.env,
+        sessionId: input.session.sessionId,
+        vault: input.input.vault,
+        workingDirectory,
+      })
+    : null
   const assistantCronToolsAvailable = assistantCliExecutorAvailable
 
   return {
@@ -363,13 +347,9 @@ async function resolveAssistantRouteTurnPlan(input: {
       assistantCliContract,
       allowSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
       assistantCliExecutorAvailable,
-      assistantStateToolsAvailable,
       assistantCronToolsAvailable,
       assistantHostedDeviceConnectAvailable,
       cliAccess: input.sharedPlan.cliAccess,
-      assistantMemoryDailyPath: resolveAssistantDailyMemoryPath(assistantMemoryPaths),
-      assistantMemoryLongTermPath: assistantMemoryPaths.longTermMemoryPath,
-      assistantMemoryPrompt,
       channel: resolvedChannel,
       firstTurnCheckIn: shouldInjectFirstTurnCheckIn,
     }),

@@ -1,5 +1,13 @@
 import { createHash } from 'node:crypto'
-import { getAssistantStateDocument, putAssistantStateDocument } from './state.js'
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+import {
+  ensureAssistantStateDirectory,
+  isMissingFileError,
+  writeJsonFileAtomic,
+} from './shared.js'
+import { resolveAssistantStatePaths } from './store/paths.js'
+import { resolveAssistantStateDocumentPath } from './state.js'
 import { normalizeNullableString } from './shared.js'
 
 export interface AssistantFirstContactLocator {
@@ -14,12 +22,10 @@ export async function hasAssistantSeenFirstContact(input: {
   docIds: readonly string[]
   vault: string
 }): Promise<boolean> {
+  const stateDirectory = resolveAssistantStatePaths(input.vault).stateDirectory
   for (const docId of uniqueAssistantFirstContactDocIds(input.docIds)) {
-    const snapshot = await getAssistantStateDocument({
-      docId,
-      vault: input.vault,
-    })
-    if (snapshot.exists) {
+    const snapshot = await readAssistantFirstContactStateRecord(stateDirectory, docId)
+    if (snapshot !== null) {
       return true
     }
   }
@@ -32,14 +38,17 @@ export async function markAssistantFirstContactSeen(input: {
   seenAt: string
   vault: string
 }): Promise<void> {
+  const stateDirectory = resolveAssistantStatePaths(input.vault).stateDirectory
+  await ensureAssistantStateDirectory(stateDirectory)
   for (const docId of uniqueAssistantFirstContactDocIds(input.docIds)) {
-    await putAssistantStateDocument({
+    const documentPath = resolveAssistantStateDocumentPath(
+      { stateDirectory },
       docId,
-      vault: input.vault,
-      value: {
-        schemaVersion: 'murph.assistant-first-contact.v1',
-        seenAt: input.seenAt,
-      },
+    )
+    await ensureAssistantStateDirectory(path.dirname(documentPath))
+    await writeJsonFileAtomic(documentPath, {
+      schemaVersion: 'murph.assistant-first-contact.v1',
+      seenAt: input.seenAt,
     })
   }
 }
@@ -95,9 +104,33 @@ function buildAssistantFirstContactStateDocId(input: {
 function uniqueAssistantFirstContactDocIds(
   docIds: ReadonlyArray<string | null>,
 ): string[] {
-  return [...new Set(
-    docIds
-      .map((docId) => normalizeNullableString(docId))
-      .filter((docId): docId is string => docId !== null),
-  )]
+  return [
+    ...new Set(
+      docIds
+        .map((docId) => normalizeNullableString(docId))
+        .filter((docId): docId is string => docId !== null),
+    ),
+  ]
+}
+
+async function readAssistantFirstContactStateRecord(
+  stateDirectory: string,
+  docId: string,
+): Promise<Record<string, unknown> | null> {
+  const documentPath = resolveAssistantStateDocumentPath({ stateDirectory }, docId)
+  try {
+    const raw = await readFile(documentPath, 'utf8')
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null
+    }
+
+    return parsed as Record<string, unknown>
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return null
+    }
+
+    return null
+  }
 }
