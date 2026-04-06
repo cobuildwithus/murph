@@ -9,6 +9,7 @@ import {
   type HostedPrivyWalletAccount,
   resolveHostedPrivyLinkedAccountState,
 } from "./privy-shared";
+import { isHostedOnboardingRevnetEnabled } from "./revnet";
 import { getHostedOnboardingEnvironment } from "./runtime";
 
 export interface HostedPrivyUser extends HostedPrivyLinkedAccountContainer {
@@ -131,6 +132,14 @@ export function resolveHostedPrivyIdentityFromVerifiedUser(user: HostedPrivyUser
     throw hostedOnboardingError({
       code: "PRIVY_PHONE_REQUIRED",
       message: "Finish phone verification before continuing.",
+      httpStatus: 400,
+    });
+  }
+
+  if (!wallet && isHostedOnboardingRevnetEnabled()) {
+    throw hostedOnboardingError({
+      code: "PRIVY_WALLET_REQUIRED",
+      message: "Finish setup before continuing.",
       httpStatus: 400,
     });
   }
