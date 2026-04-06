@@ -6,6 +6,7 @@ export interface VersionedJsonStateEnvelope<T> {
 
 export interface ParseVersionedJsonStateEnvelopeInput<T> {
   label: string;
+  legacyParseValue?: ((value: unknown) => T) | undefined;
   parseValue: (value: unknown) => T;
   schema: string;
   schemaVersion: number;
@@ -41,6 +42,11 @@ export function parseVersionedJsonStateEnvelope<T>(
 
     return input.parseValue(value.value);
   }
+
+  if (typeof input.legacyParseValue === "function") {
+    return input.legacyParseValue(value);
+  }
+
   throw new TypeError(`${input.label} must be a versioned ${input.schema} envelope.`);
 }
 

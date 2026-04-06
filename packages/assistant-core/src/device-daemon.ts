@@ -50,7 +50,6 @@ import type {
 import {
   DEVICE_DAEMON_START_TIMEOUT_MS,
   DEVICE_DAEMON_STOP_TIMEOUT_MS,
-  DEVICE_DAEMON_STATE_VERSION,
 } from './device-daemon/types.js'
 import { VaultCliError } from './vault-cli-errors.js'
 export type {
@@ -233,7 +232,6 @@ export async function startManagedDeviceSyncDaemon(input: {
   })
 
   const stateRecord: DeviceDaemonStateRecord = {
-    version: DEVICE_DAEMON_STATE_VERSION,
     pid: child.pid,
     baseUrl,
     startedAt: dependencies.now().toISOString(),

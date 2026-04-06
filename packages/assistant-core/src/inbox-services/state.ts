@@ -1,7 +1,9 @@
 import { mkdir } from 'node:fs/promises'
 import {
   hasLocalStatePath,
+  readVersionedJsonStateFile,
   resolveRuntimePaths,
+  writeVersionedJsonStateFile,
 } from '@murphai/runtime-state/node'
 import {
   inboxRuntimeConfigSchema,
@@ -17,12 +19,11 @@ import type {
 import {
   connectorNamespaceKey,
   fileExists,
-  readJsonWithSchema,
   relativeToVault,
-  writeJsonFile,
 } from './shared.js'
 
-const CONFIG_VERSION = 1
+const INBOX_RUNTIME_CONFIG_SCHEMA = 'murph.inbox-runtime-config.v1'
+const INBOX_RUNTIME_CONFIG_SCHEMA_VERSION = 1
 
 export async function ensureInitialized(
   loadInbox: () => Promise<InboxRuntimeModule>,
@@ -90,29 +91,55 @@ export async function ensureConfigFile(
   }
 
   const emptyConfig: InboxRuntimeConfig = {
-    version: CONFIG_VERSION,
     connectors: [],
   }
-  await writeJsonFile(paths.inboxConfigPath, emptyConfig)
+  await writeVersionedJsonStateFile({
+    filePath: paths.inboxConfigPath,
+    schema: INBOX_RUNTIME_CONFIG_SCHEMA,
+    schemaVersion: INBOX_RUNTIME_CONFIG_SCHEMA_VERSION,
+    value: inboxRuntimeConfigSchema.parse(emptyConfig),
+  })
   createdPaths.push(relativeToVault(paths.absoluteVaultRoot, paths.inboxConfigPath))
 }
 
 export async function readConfig(
   paths: InboxPaths,
 ): Promise<InboxRuntimeConfig> {
-  return readJsonWithSchema(
-    paths.inboxConfigPath,
-    inboxRuntimeConfigSchema,
-    'INBOX_CONFIG_INVALID',
-    'Inbox runtime config is invalid.',
-  )
+  try {
+    const { value } = await readVersionedJsonStateFile({
+      currentPath: paths.inboxConfigPath,
+      label: 'Inbox runtime config',
+      legacyParseValue(value) {
+        return inboxRuntimeConfigSchema.parse(value)
+      },
+      parseValue(value) {
+        return inboxRuntimeConfigSchema.parse(value)
+      },
+      schema: INBOX_RUNTIME_CONFIG_SCHEMA,
+      schemaVersion: INBOX_RUNTIME_CONFIG_SCHEMA_VERSION,
+    })
+    return value
+  } catch (error) {
+    throw new VaultCliError(
+      'INBOX_CONFIG_INVALID',
+      'Inbox runtime config is invalid.',
+      {
+        error: error instanceof Error ? error.message : String(error),
+      },
+    )
+  }
 }
 
 export async function writeConfig(
   paths: InboxPaths,
   config: InboxRuntimeConfig,
 ): Promise<void> {
-  await writeJsonFile(paths.inboxConfigPath, inboxRuntimeConfigSchema.parse(config))
+  await writeVersionedJsonStateFile({
+    filePath: paths.inboxConfigPath,
+    schema: INBOX_RUNTIME_CONFIG_SCHEMA,
+    schemaVersion: INBOX_RUNTIME_CONFIG_SCHEMA_VERSION,
+    value: inboxRuntimeConfigSchema.parse(config),
+  })
 }
 
 export async function rebuildRuntime(

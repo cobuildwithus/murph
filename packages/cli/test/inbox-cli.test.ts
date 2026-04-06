@@ -631,7 +631,7 @@ function createFakeParsersRuntimeModule(input?: {
       }
 
     return {
-      configPath: path.join(runtimePaths.runtimeRoot, 'parsers', 'toolchain.json'),
+      configPath: runtimePaths.parserToolchainConfigPath,
       discoveredAt,
       tools,
     }
@@ -1326,11 +1326,23 @@ test.sequential(
       assert.equal(removed.connectorCount, 0)
       assert.equal(removed.configPath, '.runtime/operations/inbox/config.json')
 
-      const config = await readJsonFile<{
-        version: number
-        connectors: unknown[]
-      }>(inboxPaths(fixture.vaultRoot).inboxConfigPath)
-      assert.equal(config.version, 1)
+      const config = parseVersionedJsonStateEnvelope(
+        await readJsonFile<unknown>(inboxPaths(fixture.vaultRoot).inboxConfigPath),
+        {
+          label: 'Inbox runtime config',
+          parseValue(value) {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) {
+              throw new TypeError('Inbox runtime config must be an object.')
+            }
+
+            return value as {
+              connectors: unknown[]
+            }
+          },
+          schema: 'murph.inbox-runtime-config.v1',
+          schemaVersion: 1,
+        },
+      )
       assert.deepEqual(config.connectors, [])
     } finally {
       await rm(fixture.vaultRoot, { recursive: true, force: true })
@@ -1412,7 +1424,10 @@ test.sequential(
         true,
       )
       assert.equal(bootstrapResult.init.rebuiltCaptures, 257)
-      assert.equal(bootstrapResult.setup.configPath, '.runtime/parsers/toolchain.json')
+      assert.equal(
+        bootstrapResult.setup.configPath,
+        '.runtime/operations/parsers/toolchain.json',
+      )
       assert.equal(bootstrapResult.setup.tools.whisper.available, true)
       assert.equal(bootstrapResult.setup.tools.whisper.command, '/opt/whisper-cli')
       assert.equal(
@@ -3821,7 +3836,10 @@ test.sequential('inbox setup and doctor expose additive parser toolchain status'
       whisperModelPath: './models/ggml-base.en.bin',
     })
 
-    assert.equal(setupResult.configPath, '.runtime/parsers/toolchain.json')
+    assert.equal(
+      setupResult.configPath,
+      '.runtime/operations/parsers/toolchain.json',
+    )
     assert.equal(setupResult.tools.whisper.available, true)
     assert.equal(setupResult.tools.whisper.command, '/opt/whisper-cli')
     assert.equal(
@@ -3837,7 +3855,10 @@ test.sequential('inbox setup and doctor expose additive parser toolchain status'
     })
 
     assert.equal(doctorResult.ok, true)
-    assert.equal(doctorResult.parserToolchain?.configPath, '.runtime/parsers/toolchain.json')
+    assert.equal(
+      doctorResult.parserToolchain?.configPath,
+      '.runtime/operations/parsers/toolchain.json',
+    )
     assert.equal(
       doctorResult.parserToolchain?.tools.whisper.modelPath,
       './models/ggml-base.en.bin',

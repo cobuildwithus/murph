@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 import { test } from 'vitest'
+import { parseVersionedJsonStateEnvelope } from '@murphai/runtime-state/node'
 
 import {
   ensureManagedDeviceSyncControlPlane,
@@ -11,6 +12,9 @@ import {
   startManagedDeviceSyncDaemon,
   stopManagedDeviceSyncDaemon,
 } from '@murphai/assistant-core/device-daemon'
+
+const DEVICE_DAEMON_STATE_SCHEMA = 'murph.device-daemon-launcher-state.v1'
+const DEVICE_DAEMON_STATE_SCHEMA_VERSION = 1
 
 interface SpawnProcessInput {
   command: string
@@ -115,11 +119,22 @@ test.sequential(
           path.join(vaultRoot, '.runtime/operations/device-sync/launcher.json'),
           'utf8',
         ),
-      ) as {
-        pid: number
-        baseUrl: string
-        controlToken?: string
-      }
+      ) as unknown
+      const persistedLauncherState = parseVersionedJsonStateEnvelope(launcherState, {
+        label: 'Device sync daemon launcher state',
+        parseValue(value) {
+          if (!value || typeof value !== 'object' || Array.isArray(value)) {
+            throw new TypeError('Device sync daemon launcher state must be an object.')
+          }
+          return value as {
+            pid: number
+            baseUrl: string
+            controlToken?: string
+          }
+        },
+        schema: DEVICE_DAEMON_STATE_SCHEMA,
+        schemaVersion: DEVICE_DAEMON_STATE_SCHEMA_VERSION,
+      })
       const persistedControlToken = await readFile(
         path.join(vaultRoot, '.runtime/operations/device-sync/control-token'),
         'utf8',
@@ -134,9 +149,9 @@ test.sequential(
         path.join(vaultRoot, '.runtime/operations/device-sync/control-token'),
       )
 
-      assert.equal(launcherState.pid, 4242)
-      assert.equal(launcherState.baseUrl, 'http://localhost:8788')
-      assert.equal('controlToken' in launcherState, false)
+      assert.equal(persistedLauncherState.pid, 4242)
+      assert.equal(persistedLauncherState.baseUrl, 'http://localhost:8788')
+      assert.equal('controlToken' in persistedLauncherState, false)
       assert.equal(persistedControlToken.trim(), 'control-token-for-tests')
       assert.equal(launcherDirectoryStats.mode & 0o777, 0o700)
       assert.equal(launcherStateStats.mode & 0o777, 0o600)

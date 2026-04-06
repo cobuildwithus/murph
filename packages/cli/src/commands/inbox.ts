@@ -221,7 +221,7 @@ export function registerInboxCommands(
   inbox.command('setup', {
     args: emptyArgsSchema,
     description:
-      'Write parser toolchain config under .runtime/parsers and report discovered local tool availability.',
+      'Write parser toolchain config under .runtime/operations/parsers/toolchain.json and report discovered local tool availability.',
     examples: [
       {
         options: { vault: './vault' },

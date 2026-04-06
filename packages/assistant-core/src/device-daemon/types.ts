@@ -1,7 +1,8 @@
 export const DEVICE_DAEMON_START_TIMEOUT_MS = 5_000
 export const DEVICE_DAEMON_STOP_TIMEOUT_MS = 5_000
 export const DEVICE_DAEMON_HEALTH_POLL_MS = 100
-export const DEVICE_DAEMON_STATE_VERSION = 1
+export const DEVICE_DAEMON_STATE_SCHEMA = 'murph.device-daemon-launcher-state.v1'
+export const DEVICE_DAEMON_STATE_SCHEMA_VERSION = 1
 export const DEVICE_SYNC_PUBLIC_BASE_URL_ENV =
   'DEVICE_SYNC_PUBLIC_BASE_URL'
 export const DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEYS = [
@@ -22,7 +23,6 @@ export const DEVICE_SYNC_STATE_DB_PATH_ENV_KEYS = [
 ] as const
 
 export interface DeviceDaemonStateRecord {
-  version: number
   pid: number
   baseUrl: string
   startedAt: string

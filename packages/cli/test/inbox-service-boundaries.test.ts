@@ -3,7 +3,10 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
-import { resolveRuntimePaths } from '@murphai/runtime-state/node'
+import {
+  parseVersionedJsonStateEnvelope,
+  resolveRuntimePaths,
+} from '@murphai/runtime-state/node'
 import { test } from 'vitest'
 
 import { instantiateConnector } from '@murphai/assistant-core/inbox-services/connectors'
@@ -278,9 +281,9 @@ test.sequential('normalizeDaemonState rewrites stale daemon state records', asyn
         status: 'running',
         connectorIds: ['imessage:self'],
         message: null,
-        statePath: '.runtime/inboxd/state.json',
-        configPath: '.runtime/inboxd/config.json',
-        databasePath: '.runtime/inboxd.sqlite',
+        statePath: '.runtime/operations/inbox/state.json',
+        configPath: '.runtime/operations/inbox/config.json',
+        databasePath: '.runtime/projections/inboxd.sqlite',
       }, null, 2)}\n`,
       'utf8',
     )
@@ -302,10 +305,24 @@ test.sequential('normalizeDaemonState rewrites stale daemon state records', asyn
       'Stale daemon state found; recorded PID is no longer running.',
     )
 
-    const persisted = JSON.parse(await readFile(paths.inboxStatePath, 'utf8')) as {
-      stale: boolean
-      status: string
-    }
+    const persisted = parseVersionedJsonStateEnvelope(
+      JSON.parse(await readFile(paths.inboxStatePath, 'utf8')) as unknown,
+      {
+        label: 'Inbox daemon state',
+        parseValue(value) {
+          if (!value || typeof value !== 'object' || Array.isArray(value)) {
+            throw new TypeError('Inbox daemon state must be an object.')
+          }
+
+          return value as {
+            stale: boolean
+            status: string
+          }
+        },
+        schema: 'murph.inbox-daemon-state.v1',
+        schemaVersion: 1,
+      },
+    )
     assert.equal(persisted.stale, true)
     assert.equal(persisted.status, 'stale')
   } finally {

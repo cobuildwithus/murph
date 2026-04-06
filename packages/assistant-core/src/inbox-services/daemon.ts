@@ -1,8 +1,7 @@
 import {
-  createVersionedJsonStateEnvelope,
   hasLocalStatePath,
-  parseVersionedJsonStateEnvelope,
-  readLocalStateTextFile,
+  readVersionedJsonStateFile,
+  writeVersionedJsonStateFile,
 } from '@murphai/runtime-state/node'
 import { inboxDaemonStateSchema, type InboxDaemonState } from '../inbox-cli-contracts.js'
 import type { InboxPaths } from '../inbox-app/types.js'
@@ -10,7 +9,6 @@ import { VaultCliError } from '../vault-cli-errors.js'
 import {
   errorMessage,
   relativeToVault,
-  writeJsonFile,
 } from './shared.js'
 
 const INBOX_DAEMON_STATE_SCHEMA = 'murph.inbox-daemon-state.v1'
@@ -84,14 +82,12 @@ export async function writeDaemonState(
   paths: InboxPaths,
   state: InboxDaemonState,
 ): Promise<void> {
-  await writeJsonFile(
-    paths.inboxStatePath,
-    createVersionedJsonStateEnvelope({
-      schema: INBOX_DAEMON_STATE_SCHEMA,
-      schemaVersion: INBOX_DAEMON_STATE_SCHEMA_VERSION,
-      value: inboxDaemonStateSchema.parse(state),
-    }),
-  )
+  await writeVersionedJsonStateFile({
+    filePath: paths.inboxStatePath,
+    schema: INBOX_DAEMON_STATE_SCHEMA,
+    schemaVersion: INBOX_DAEMON_STATE_SCHEMA_VERSION,
+    value: inboxDaemonStateSchema.parse(state),
+  })
 }
 
 export function createProcessSignalBridge(): {
@@ -118,18 +114,19 @@ export function createProcessSignalBridge(): {
 
 async function readDaemonState(paths: InboxPaths): Promise<InboxDaemonState> {
   try {
-    const raw = await readLocalStateTextFile({
+    const { value } = await readVersionedJsonStateFile({
       currentPath: paths.inboxStatePath,
-    })
-
-    return parseVersionedJsonStateEnvelope(JSON.parse(raw.text) as unknown, {
       label: 'Inbox daemon state',
+      legacyParseValue(value) {
+        return inboxDaemonStateSchema.parse(value)
+      },
       parseValue(value) {
         return inboxDaemonStateSchema.parse(value)
       },
       schema: INBOX_DAEMON_STATE_SCHEMA,
       schemaVersion: INBOX_DAEMON_STATE_SCHEMA_VERSION,
     })
+    return value
   } catch (error) {
     throw new VaultCliError(
       'INBOX_STATE_INVALID',
