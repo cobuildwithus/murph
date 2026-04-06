@@ -4,6 +4,7 @@ import { getPrisma } from "@/src/lib/prisma";
 import { createHostedTelegramUserLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { upsertHostedMemberTelegramRoutingBinding } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
 import { resolveHostedPrivyTelegramAccountSelection } from "@/src/lib/hosted-onboarding/privy-shared";
 import { requireHostedPrivyActiveRequestAuthContext } from "@/src/lib/hosted-onboarding/request-auth";
@@ -55,14 +56,10 @@ export const POST = withJsonError(async (request: Request) => {
     }
 
     try {
-      await getPrisma().hostedMember.update({
-        where: {
-          id: auth.member.id,
-        },
-        data: {
-          telegramUserId: telegramLookupKey,
-          telegramUsername: null,
-        },
+      await upsertHostedMemberTelegramRoutingBinding({
+        memberId: auth.member.id,
+        prisma: getPrisma(),
+        telegramUserId: telegramLookupKey,
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {

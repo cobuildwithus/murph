@@ -176,6 +176,11 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
       credentialSource: "platform",
       id: "usage_123",
       inputTokens: 10,
+      member: {
+        billingRef: {
+          stripeCustomerId: "cus_123",
+        },
+      },
       memberId: "member_123",
       occurredAt: new Date("2026-03-29T12:00:00.000Z"),
       outputTokens: 5,
@@ -183,9 +188,6 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
       requestedModel: "gpt-5.4-mini",
       stripeMeterStatus: "pending",
       totalTokens: 15,
-      member: {
-        stripeCustomerId: "cus_123",
-      },
     }]);
     const prisma = {
       hostedAiUsage: {
@@ -205,8 +207,12 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
         },
         stripeMeterStatus: "pending",
         member: {
-          stripeCustomerId: {
-            not: null,
+          billingRef: {
+            is: {
+              stripeCustomerId: {
+                not: null,
+              },
+            },
           },
         },
       },
@@ -233,7 +239,11 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
         totalTokens: true,
         member: {
           select: {
-            stripeCustomerId: true,
+            billingRef: {
+              select: {
+                stripeCustomerId: true,
+              },
+            },
           },
         },
       },
@@ -253,11 +263,9 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
       outputTokens: 5,
       provider: "openai-compatible",
       requestedModel: "gpt-5.4-mini",
+      stripeCustomerId: "cus_123",
       stripeMeterStatus: "pending",
       totalTokens: 15,
-      member: {
-        stripeCustomerId: "cus_123",
-      },
     }]);
   });
 });

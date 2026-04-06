@@ -28,11 +28,9 @@ export interface HostedAiUsageStripeCandidate {
   outputTokens: number | null;
   provider: string;
   requestedModel: string | null;
+  stripeCustomerId: string;
   stripeMeterStatus: string;
   totalTokens: number | null;
-  member: {
-    stripeCustomerId: string;
-  };
 }
 
 export async function listHostedAiUsagePendingStripeMetering(input: {
@@ -48,8 +46,12 @@ export async function listHostedAiUsagePendingStripeMetering(input: {
       },
       stripeMeterStatus: "pending",
       member: {
-        stripeCustomerId: {
-          not: null,
+        billingRef: {
+          is: {
+            stripeCustomerId: {
+              not: null,
+            },
+          },
         },
       },
     },
@@ -76,23 +78,38 @@ export async function listHostedAiUsagePendingStripeMetering(input: {
       totalTokens: true,
       member: {
         select: {
-          stripeCustomerId: true,
+          billingRef: {
+            select: {
+              stripeCustomerId: true,
+            },
+          },
         },
       },
     },
   });
 
-  return records.flatMap((record) =>
-    record.member.stripeCustomerId && isAssistantUsageCredentialSource(record.credentialSource)
-      ? [{
-          ...record,
-          credentialSource: record.credentialSource,
-          member: {
-            stripeCustomerId: record.member.stripeCustomerId,
-          },
-        }]
-      : [],
-  );
+  return records.flatMap((record) => {
+    const stripeCustomerId = record.member.billingRef?.stripeCustomerId;
+
+    if (!stripeCustomerId || !isAssistantUsageCredentialSource(record.credentialSource)) {
+      return [];
+    }
+
+    return [{
+      apiKeyEnv: record.apiKeyEnv,
+      credentialSource: record.credentialSource,
+      id: record.id,
+      inputTokens: record.inputTokens,
+      memberId: record.memberId,
+      occurredAt: record.occurredAt,
+      outputTokens: record.outputTokens,
+      provider: record.provider,
+      requestedModel: record.requestedModel,
+      stripeCustomerId,
+      stripeMeterStatus: record.stripeMeterStatus,
+      totalTokens: record.totalTokens,
+    }];
+  });
 }
 
 function isAssistantUsageCredentialSource(

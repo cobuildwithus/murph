@@ -10,6 +10,7 @@ import {
   parseHostedTelegramWebhookUpdate,
   summarizeHostedTelegramWebhook,
 } from "./telegram";
+import { findHostedMemberByTelegramUserLookupKey } from "./hosted-member-store";
 import {
   createHostedWebhookDispatchSideEffect,
   type HostedWebhookDispatchSideEffect,
@@ -64,15 +65,9 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     return buildIgnoredTelegramWebhookPlan("missing-sender");
   }
 
-  const existingMember = await input.prisma.hostedMember.findUnique({
-    where: {
-      telegramUserId: telegramUserLookupKey,
-    },
-    select: {
-      billingStatus: true,
-      id: true,
-      status: true,
-    },
+  const existingMember = await findHostedMemberByTelegramUserLookupKey({
+    prisma: input.prisma,
+    telegramUserId: telegramUserLookupKey,
   });
 
   if (!existingMember) {

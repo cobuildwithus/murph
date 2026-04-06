@@ -1,4 +1,5 @@
 import {
+  HostedBillingMode,
   HostedBillingCheckoutStatus,
   HostedBillingStatus,
   HostedMemberStatus,
@@ -258,7 +259,8 @@ describe("createHostedBillingCheckout", () => {
       1,
       expect.objectContaining({
         data: expect.objectContaining({
-          stripeCustomerId: "cus_123",
+          billingMode: HostedBillingMode.subscription,
+          billingStatus: HostedBillingStatus.checkout_open,
         }),
       }),
     );
@@ -267,7 +269,7 @@ describe("createHostedBillingCheckout", () => {
   it("reuses an existing open checkout attempt instead of minting another Stripe session", async () => {
     mocks.requireHostedInviteForAuthentication.mockResolvedValue(
       makeInvite({
-        stripeCustomerId: "cus_existing_123",
+        stripeCustomerId: null,
         walletAddress: "0x00000000000000000000000000000000000000aa",
       }),
     );
@@ -312,10 +314,21 @@ describe("createHostedBillingCheckout", () => {
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
           id: "member_123",
-          stripeCustomerId: "cus_existing_123",
+          stripeCustomerId: null,
         }),
         update: vi.fn().mockResolvedValue({}),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMemberBillingRef: {
+        findUnique: vi.fn().mockResolvedValue({
+          memberId: "member_123",
+          stripeCustomerId: "cus_existing_123",
+          stripeLatestBillingEventCreatedAt: null,
+          stripeLatestBillingEventId: null,
+          stripeLatestCheckoutSessionId: null,
+          stripeSubscriptionId: null,
+        }),
+        upsert: vi.fn().mockResolvedValue({}),
       },
     });
 
@@ -334,14 +347,31 @@ describe("createHostedBillingCheckout", () => {
     expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
     expect(mocks.stripe.checkout.sessions.retrieve).toHaveBeenCalledWith("cs_existing_123");
     expect(prisma.hostedBillingCheckout.create).not.toHaveBeenCalled();
+    expect(prisma.hostedMember.update).toHaveBeenCalledTimes(1);
     expect(prisma.hostedMember.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           billingStatus: HostedBillingStatus.checkout_open,
-          stripeLatestCheckoutSessionId: "cs_existing_123",
         }),
       }),
     );
+    expect(prisma.hostedMemberBillingRef.upsert).toHaveBeenCalledWith({
+      where: {
+        memberId: "member_123",
+      },
+      create: {
+        memberId: "member_123",
+        stripeCustomerId: "cus_existing_123",
+        stripeLatestBillingEventCreatedAt: null,
+        stripeLatestBillingEventId: null,
+        stripeLatestCheckoutSessionId: "cs_existing_123",
+        stripeSubscriptionId: null,
+      },
+      update: {
+        stripeCustomerId: "cus_existing_123",
+        stripeLatestCheckoutSessionId: "cs_existing_123",
+      },
+    });
   });
 
   it("does not reuse an open checkout attempt when a share context is present", async () => {
@@ -707,7 +737,7 @@ describe("createHostedBillingCheckout", () => {
   it("updates an existing Stripe customer without writing phone or wallet values into metadata", async () => {
     mocks.requireHostedInviteForAuthentication.mockResolvedValue(
       makeInvite({
-        stripeCustomerId: "cus_existing_123",
+        stripeCustomerId: null,
         walletAddress: "0x00000000000000000000000000000000000000aa",
       }),
     );
@@ -737,10 +767,20 @@ describe("createHostedBillingCheckout", () => {
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
           id: "member_123",
-          stripeCustomerId: "cus_existing_123",
+          stripeCustomerId: null,
         }),
         update: vi.fn().mockResolvedValue({}),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMemberBillingRef: {
+        findUnique: vi.fn().mockResolvedValue({
+          memberId: "member_123",
+          stripeCustomerId: "cus_existing_123",
+          stripeLatestBillingEventCreatedAt: null,
+          stripeLatestBillingEventId: null,
+          stripeLatestCheckoutSessionId: null,
+          stripeSubscriptionId: null,
+        }),
       },
     });
 
@@ -873,6 +913,12 @@ function asHostedBillingCheckoutPrisma<T extends Record<string, unknown>>(prisma
     hostedMember.findUnique ??= vi.fn().mockResolvedValue(null);
     hostedMember.update ??= vi.fn().mockResolvedValue({});
     hostedMember.updateMany ??= vi.fn().mockResolvedValue({ count: 0 });
+  }
+  if ("hostedMemberBillingRef" in prismaWithQueryRaw && prismaWithQueryRaw.hostedMemberBillingRef) {
+    const hostedMemberBillingRef =
+      prismaWithQueryRaw.hostedMemberBillingRef as unknown as Record<string, unknown>;
+    hostedMemberBillingRef.findUnique ??= vi.fn().mockResolvedValue(null);
+    hostedMemberBillingRef.upsert ??= vi.fn().mockResolvedValue({});
   }
   if (!("$queryRaw" in prismaWithQueryRaw)) {
     Object.defineProperty(prismaWithQueryRaw, "$queryRaw", {

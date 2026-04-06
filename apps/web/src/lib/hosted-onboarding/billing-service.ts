@@ -28,6 +28,11 @@ import {
   findActiveHostedBillingAttemptForMember,
 } from "./billing-attempts";
 import {
+  bindHostedMemberStripeCustomerIdIfMissing,
+  readHostedMemberStripeBillingRef,
+  writeHostedMemberStripeBillingRef,
+} from "./hosted-member-store";
+import {
   requireHostedOnboardingPublicBaseUrl,
   requireHostedStripeCheckoutConfig,
 } from "./runtime";
@@ -95,7 +100,6 @@ export async function createHostedBillingCheckout(input: HostedBillingCheckoutIn
   const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
   const customerId = await ensureHostedStripeCustomer({
     memberId: invite.member.id,
-    memberSnapshot: invite.member,
     prisma,
     stripe,
   });
@@ -158,16 +162,23 @@ export async function createHostedBillingCheckout(input: HostedBillingCheckoutIn
       continue;
     }
 
-    await prisma.hostedMember.update({
-      where: {
-        id: invite.member.id,
-      },
-      data: {
-        billingMode: mode,
-        billingStatus: HostedBillingStatus.checkout_open,
+    await runHostedBillingCheckoutTransaction(prisma, async (transaction) => {
+      await lockHostedMemberRow(transaction, invite.member.id);
+      await transaction.hostedMember.update({
+        where: {
+          id: invite.member.id,
+        },
+        data: {
+          billingMode: mode,
+          billingStatus: HostedBillingStatus.checkout_open,
+        },
+      });
+      await writeHostedMemberStripeBillingRef({
+        memberId: invite.member.id,
+        prisma: transaction,
         stripeCustomerId: customerId,
         stripeLatestCheckoutSessionId: reusableCheckout.stripeCheckoutSessionId,
-      },
+      });
     });
 
     if (reservation.kind === "open") {
@@ -251,31 +262,24 @@ async function resolveHostedBillingCheckoutAuth(
 
 async function ensureHostedStripeCustomer(input: {
   memberId: string;
-  memberSnapshot: Pick<HostedMember, "id" | "stripeCustomerId">;
   prisma: PrismaClient;
   stripe: Stripe;
 }): Promise<string> {
   const customerMetadata = {
     memberId: input.memberId,
   };
-  const currentMember = typeof input.prisma.hostedMember.findUnique === "function"
-    ? await input.prisma.hostedMember.findUnique({
-      where: {
-        id: input.memberId,
-      },
-      select: {
-        id: true,
-        stripeCustomerId: true,
-      },
-    })
-    : input.memberSnapshot;
+  const currentBillingRef = await readHostedMemberStripeBillingRef({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  const currentStripeCustomerId = currentBillingRef?.stripeCustomerId ?? null;
 
-  if (currentMember?.stripeCustomerId) {
-    await input.stripe.customers.update(currentMember.stripeCustomerId, {
+  if (currentStripeCustomerId) {
+    await input.stripe.customers.update(currentStripeCustomerId, {
       metadata: customerMetadata,
     });
 
-    return currentMember.stripeCustomerId;
+    return currentStripeCustomerId;
   }
 
   const customer = await input.stripe.customers.create(
@@ -287,37 +291,31 @@ async function ensureHostedStripeCustomer(input: {
     },
   );
 
-  const bindResult = await input.prisma.hostedMember.updateMany({
-    where: {
-      id: input.memberId,
-      stripeCustomerId: null,
-    },
-    data: {
-      stripeCustomerId: customer.id,
-    },
+  const bound = await bindHostedMemberStripeCustomerIdIfMissing({
+    memberId: input.memberId,
+    prisma: input.prisma,
+    stripeCustomerId: customer.id,
   });
 
-  if (bindResult.count === 1) {
-    return customer.id;
-  }
-
-  const reboundMember = typeof input.prisma.hostedMember.findUnique === "function"
-    ? await input.prisma.hostedMember.findUnique({
-      where: {
-        id: input.memberId,
-      },
-      select: {
-        stripeCustomerId: true,
-      },
-    })
-    : null;
-
-  if (reboundMember?.stripeCustomerId) {
-    await input.stripe.customers.update(reboundMember.stripeCustomerId, {
+  if (bound) {
+    await input.stripe.customers.update(customer.id, {
       metadata: customerMetadata,
     });
 
-    return reboundMember.stripeCustomerId;
+    return customer.id;
+  }
+
+  const reboundBillingRef = await readHostedMemberStripeBillingRef({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+
+  if (reboundBillingRef?.stripeCustomerId) {
+    await input.stripe.customers.update(reboundBillingRef.stripeCustomerId, {
+      metadata: customerMetadata,
+    });
+
+    return reboundBillingRef.stripeCustomerId;
   }
 
   throw hostedOnboardingError({
@@ -530,9 +528,14 @@ async function finalizeHostedBillingCheckoutReservation(input: {
           data: {
             billingMode: latestAttempt.mode,
             billingStatus: HostedBillingStatus.checkout_open,
-            stripeCustomerId: input.customerId,
-            stripeLatestCheckoutSessionId: checkoutSession.id,
           },
+        });
+        await writeHostedMemberStripeBillingRef({
+          memberId: input.memberId,
+          prisma: transaction,
+          stripeCustomerId: input.customerId,
+          stripeLatestCheckoutSessionId: checkoutSession.id,
+          stripeSubscriptionId: coerceStripeSubscriptionId(checkoutSession.subscription),
         });
         return;
       }
@@ -561,9 +564,14 @@ async function finalizeHostedBillingCheckoutReservation(input: {
         data: {
           billingMode: latestAttempt.mode,
           billingStatus: HostedBillingStatus.checkout_open,
-          stripeCustomerId: input.customerId,
-          stripeLatestCheckoutSessionId: checkoutSession.id,
         },
+      });
+      await writeHostedMemberStripeBillingRef({
+        memberId: input.memberId,
+        prisma: transaction,
+        stripeCustomerId: input.customerId,
+        stripeLatestCheckoutSessionId: checkoutSession.id,
+        stripeSubscriptionId: coerceStripeSubscriptionId(checkoutSession.subscription),
       });
     });
   } catch (error) {

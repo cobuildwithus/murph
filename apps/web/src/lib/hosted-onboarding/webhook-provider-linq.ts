@@ -15,6 +15,7 @@ import {
   ensureHostedMemberForPhone,
   persistHostedMemberLinqChatBinding,
 } from "./member-identity-service";
+import { findHostedMemberByPhoneLookupKey } from "./hosted-member-store";
 import {
   claimHostedLinqOnboardingLinkNotice,
   claimHostedLinqQuotaReplyNotice,
@@ -63,10 +64,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
     return buildIgnoredLinqWebhookPlan("invalid-phone");
   }
 
-  const existingMember = await input.prisma.hostedMember.findUnique({
-    where: {
-      normalizedPhoneNumber: phoneLookupKey,
-    },
+  const existingMember = await findHostedMemberByPhoneLookupKey({
+    phoneLookupKey,
+    prisma: input.prisma,
   });
 
   if (summary.isFromMe) {

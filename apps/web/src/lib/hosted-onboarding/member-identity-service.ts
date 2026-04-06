@@ -12,68 +12,81 @@ import { hostedOnboardingError } from "./errors";
 import { type HostedPrivyIdentity } from "./privy";
 import {
   generateHostedMemberId,
+  withHostedOnboardingTransaction,
 } from "./shared";
 import { normalizeHostedWalletAddress } from "./revnet";
+import {
+  findHostedMemberByPhoneLookupKey,
+  findHostedMemberByPrivyUserId,
+  findHostedMemberByWalletAddress,
+  readHostedMemberIdentity,
+  syncHostedMemberPrivacyFoundationFromMember,
+  upsertHostedMemberLinqChatBinding,
+} from "./hosted-member-store";
 
 export async function ensureHostedMemberForPhone(input: {
   phoneNumber: string;
   prisma: PrismaClient | Prisma.TransactionClient;
 }): Promise<HostedMember> {
-  const phoneLookupKey = createHostedPhoneLookupKey(input.phoneNumber);
+  return withHostedOnboardingTransaction(input.prisma, async (tx) => {
+    const phoneLookupKey = createHostedPhoneLookupKey(input.phoneNumber);
 
-  if (!phoneLookupKey) {
-    throw hostedOnboardingError({
-      code: "PHONE_NUMBER_INVALID",
-      message: "A valid phone number is required to issue a hosted invite.",
-      httpStatus: 400,
-    });
-  }
-
-  const existingMember = await input.prisma.hostedMember.findUnique({
-    where: {
-      normalizedPhoneNumber: phoneLookupKey,
-    },
-  });
-
-  if (existingMember) {
-    return refreshHostedMemberForPhone({
-      member: existingMember,
-      phoneNumber: input.phoneNumber,
-      prisma: input.prisma,
-    });
-  }
-
-  const memberId = generateHostedMemberId();
-
-  try {
-    return await input.prisma.hostedMember.create({
-      data: {
-        ...buildHostedMemberPhoneStorage(input.phoneNumber),
-        id: memberId,
-        status: HostedMemberStatus.invited,
-        billingStatus: HostedBillingStatus.not_started,
-        linqChatId: null,
-      },
-    });
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      const concurrentMember = await input.prisma.hostedMember.findUnique({
-        where: {
-          normalizedPhoneNumber: phoneLookupKey,
-        },
+    if (!phoneLookupKey) {
+      throw hostedOnboardingError({
+        code: "PHONE_NUMBER_INVALID",
+        message: "A valid phone number is required to issue a hosted invite.",
+        httpStatus: 400,
       });
-
-      if (concurrentMember) {
-        return refreshHostedMemberForPhone({
-          member: concurrentMember,
-          phoneNumber: input.phoneNumber,
-          prisma: input.prisma,
-        });
-      }
     }
 
-    throw error;
-  }
+    const existingMember = await findHostedMemberByPhoneLookupKey({
+      phoneLookupKey,
+      prisma: tx,
+    });
+
+    if (existingMember) {
+      return refreshHostedMemberForPhone({
+        member: existingMember,
+        phoneNumber: input.phoneNumber,
+        prisma: tx,
+      });
+    }
+
+    const memberId = generateHostedMemberId();
+
+    try {
+      const createdMember = await tx.hostedMember.create({
+        data: {
+          ...buildHostedMemberPhoneStorage(input.phoneNumber),
+          id: memberId,
+          status: HostedMemberStatus.invited,
+          billingStatus: HostedBillingStatus.not_started,
+        },
+      });
+      await syncHostedMemberPrivacyFoundationFromMember({
+        member: createdMember,
+        prisma: tx,
+      });
+      return createdMember;
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        const concurrentMember = await findHostedMemberByPhoneLookupKey({
+          phoneLookupKey,
+          prisma: tx,
+        });
+
+        if (concurrentMember) {
+          return refreshHostedMemberForPhone({
+            member: concurrentMember,
+            phoneNumber: input.phoneNumber,
+            prisma: tx,
+          });
+        }
+      }
+
+      throw error;
+    }
+  });
 }
 
 async function refreshHostedMemberForPhone(input: {
@@ -81,7 +94,7 @@ async function refreshHostedMemberForPhone(input: {
   phoneNumber: string;
   prisma: PrismaClient | Prisma.TransactionClient;
 }): Promise<HostedMember> {
-  return input.prisma.hostedMember.update({
+  const updatedMember = await input.prisma.hostedMember.update({
     where: {
       id: input.member.id,
     },
@@ -89,6 +102,11 @@ async function refreshHostedMemberForPhone(input: {
       ...buildHostedMemberPhoneStorage(input.phoneNumber),
     },
   });
+  await syncHostedMemberPrivacyFoundationFromMember({
+    member: updatedMember,
+    prisma: input.prisma,
+  });
+  return updatedMember;
 }
 
 function buildHostedMemberPhoneStorage(phoneNumber: string) {
@@ -112,27 +130,10 @@ export async function persistHostedMemberLinqChatBinding(input: {
   memberId: string;
   prisma: PrismaClient | Prisma.TransactionClient;
 }): Promise<void> {
-  if (!input.linqChatId) {
-    return;
-  }
-
-  await input.prisma.hostedMember.updateMany({
-    where: {
-      id: input.memberId,
-      OR: [
-        {
-          linqChatId: null,
-        },
-        {
-          linqChatId: {
-            not: input.linqChatId,
-          },
-        },
-      ],
-    },
-    data: {
-      linqChatId: input.linqChatId,
-    },
+  await upsertHostedMemberLinqChatBinding({
+    linqChatId: input.linqChatId,
+    memberId: input.memberId,
+    prisma: input.prisma,
   });
 }
 
@@ -149,7 +150,7 @@ export async function ensureHostedMemberForPrivyIdentity(input: {
   if (!existingMember) {
     const memberId = generateHostedMemberId();
 
-    return input.prisma.hostedMember.create({
+    const createdMember = await input.prisma.hostedMember.create({
       data: {
         id: memberId,
         ...buildHostedMemberPhoneStorage(input.identity.phone.number),
@@ -163,6 +164,11 @@ export async function ensureHostedMemberForPrivyIdentity(input: {
         walletCreatedAt: input.now,
       },
     });
+    await syncHostedMemberPrivacyFoundationFromMember({
+      member: createdMember,
+      prisma: input.prisma,
+    });
+    return createdMember;
   }
 
   return reconcileHostedPrivyIdentityOnMember({
@@ -182,6 +188,14 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
   now: Date;
 }): Promise<HostedMember> {
   const phoneLookupKey = createHostedPhoneLookupKey(input.identity.phone.number);
+  const currentIdentity = await readHostedMemberIdentity({
+    memberId: input.member.id,
+    prisma: input.prisma,
+  }) ?? {
+    privyUserId: input.member.privyUserId,
+    walletAddress: input.member.walletAddress,
+    walletCreatedAt: input.member.walletCreatedAt,
+  };
 
   if (!phoneLookupKey) {
     throw hostedOnboardingError({
@@ -202,7 +216,7 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
     });
   }
 
-  if (input.member.privyUserId && input.member.privyUserId !== input.identity.userId) {
+  if (currentIdentity.privyUserId && currentIdentity.privyUserId !== input.identity.userId) {
     throw hostedOnboardingError({
       code: "PRIVY_USER_MISMATCH",
       message: "This phone number is already linked to a different Privy account.",
@@ -213,8 +227,8 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
   const normalizedWalletAddress = normalizeHostedWalletAddress(input.identity.wallet.address);
 
   if (
-    input.member.walletAddress
-    && normalizeHostedWalletAddress(input.member.walletAddress) !== normalizedWalletAddress
+    currentIdentity.walletAddress
+    && normalizeHostedWalletAddress(currentIdentity.walletAddress) !== normalizedWalletAddress
   ) {
     throw hostedOnboardingError({
       code: "PRIVY_WALLET_MISMATCH",
@@ -224,7 +238,7 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
   }
 
   try {
-    return await input.prisma.hostedMember.update({
+    const updatedMember = await input.prisma.hostedMember.update({
       where: {
         id: input.member.id,
       },
@@ -239,9 +253,14 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
         walletAddress: normalizedWalletAddress,
         walletChainType: input.identity.wallet.chainType,
         walletProvider: "privy",
-        walletCreatedAt: input.member.walletCreatedAt ?? input.now,
+        walletCreatedAt: currentIdentity.walletCreatedAt ?? input.now,
       },
     });
+    await syncHostedMemberPrivacyFoundationFromMember({
+      member: updatedMember,
+      prisma: input.prisma,
+    });
+    return updatedMember;
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       throw hostedOnboardingError({
@@ -264,10 +283,9 @@ export async function findHostedMemberForPrivyIdentity(input: {
   const phoneLookupKey = createHostedPhoneLookupKey(input.identity.phone.number);
 
   if (input.identity.userId) {
-    const memberByPrivyUserId = await input.prisma.hostedMember.findUnique({
-      where: {
-        privyUserId: input.identity.userId,
-      },
+    const memberByPrivyUserId = await findHostedMemberByPrivyUserId({
+      privyUserId: input.identity.userId,
+      prisma: input.prisma,
     });
 
     if (memberByPrivyUserId) {
@@ -276,11 +294,10 @@ export async function findHostedMemberForPrivyIdentity(input: {
   }
 
   const memberByPhoneNumber = phoneLookupKey
-    ? await input.prisma.hostedMember.findUnique({
-      where: {
-        normalizedPhoneNumber: phoneLookupKey,
-      },
-    })
+    ? await findHostedMemberByPhoneLookupKey({
+        phoneLookupKey,
+        prisma: input.prisma,
+      })
     : null;
 
   if (memberByPhoneNumber) {
@@ -288,10 +305,9 @@ export async function findHostedMemberForPrivyIdentity(input: {
   }
 
   if (normalizedWalletAddress) {
-    const memberByWalletAddress = await input.prisma.hostedMember.findUnique({
-      where: {
-        walletAddress: normalizedWalletAddress,
-      },
+    const memberByWalletAddress = await findHostedMemberByWalletAddress({
+      prisma: input.prisma,
+      walletAddress: normalizedWalletAddress,
     });
 
     if (memberByWalletAddress) {
