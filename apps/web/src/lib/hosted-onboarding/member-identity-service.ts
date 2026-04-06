@@ -14,7 +14,10 @@ import {
   generateHostedMemberId,
   withHostedOnboardingTransaction,
 } from "./shared";
-import { normalizeHostedWalletAddress } from "./revnet";
+import {
+  isHostedOnboardingRevnetEnabled,
+  normalizeHostedWalletAddress,
+} from "./revnet";
 import {
   findHostedMemberByPhoneLookupKey,
   findHostedMemberByPrivyUserId,
@@ -160,6 +163,16 @@ function buildHostedMemberWalletStorage(input: {
   };
 }
 
+function assertHostedPrivyWalletAvailableWhenRequired(identity: HostedPrivyIdentity): void {
+  if (!identity.wallet && isHostedOnboardingRevnetEnabled()) {
+    throw hostedOnboardingError({
+      code: "PRIVY_WALLET_REQUIRED",
+      message: "Finish setup before continuing.",
+      httpStatus: 400,
+    });
+  }
+}
+
 export function hasHostedMemberPrivyIdentity(member: {
   privyUserId: string | null | undefined;
 }): boolean {
@@ -183,6 +196,8 @@ export async function ensureHostedMemberForPrivyIdentity(input: {
   now: Date;
   prisma: PrismaClient;
 }): Promise<HostedMember> {
+  assertHostedPrivyWalletAvailableWhenRequired(input.identity);
+
   return withHostedOnboardingTransaction(input.prisma, async (tx) => {
     const existingMember = await findHostedMemberForPrivyIdentity({
       identity: input.identity,
@@ -230,6 +245,8 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
   prisma: PrismaClient | Prisma.TransactionClient;
   now: Date;
 }): Promise<HostedMember> {
+  assertHostedPrivyWalletAvailableWhenRequired(input.identity);
+
   return withHostedOnboardingTransaction(input.prisma, async (tx) => {
     const phoneLookupKey = createHostedPhoneLookupKey(input.identity.phone.number);
     const currentIdentity = await readHostedMemberIdentity({

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   cookies: vi.fn(),
+  isHostedOnboardingRevnetEnabled: vi.fn(),
   runtimeEnv: {
     privyAppId: "cm_app_123" as string | null,
     privyVerificationKey: "line-1\\nline-2" as string | null,
@@ -21,6 +22,17 @@ vi.mock("next/headers", () => ({
   cookies: mocks.cookies,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/revnet", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/revnet")>(
+    "@/src/lib/hosted-onboarding/revnet",
+  );
+
+  return {
+    ...actual,
+    isHostedOnboardingRevnetEnabled: mocks.isHostedOnboardingRevnetEnabled,
+  };
+});
+
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingEnvironment: () => mocks.runtimeEnv,
 }));
@@ -39,6 +51,7 @@ import {
 describe("hosted Privy verification", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(false);
     mocks.runtimeEnv.privyAppId = "cm_app_123";
     mocks.runtimeEnv.privyVerificationKey = "line-1\\nline-2";
     mocks.cookies.mockResolvedValue({
@@ -273,6 +286,30 @@ describe("hosted Privy verification", () => {
       },
       userId: "did:privy:user_123",
       wallet: null,
+    });
+  });
+
+  it("maps missing server-side wallet state to a retryable not-ready error for completion when RevNet is enabled", async () => {
+    mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(true);
+    mocks.cookies.mockResolvedValue({
+      get: vi.fn().mockImplementation((name: string) =>
+        name === "privy-id-token" ? { value: "cookie-token" } : undefined),
+    });
+    mocks.verifyIdentityToken.mockResolvedValue({
+      id: "did:privy:user_123",
+      linked_accounts: [
+        {
+          latest_verified_at: 1741194420,
+          phone_number: "+1 415 555 2671",
+          type: "phone",
+        },
+      ],
+    });
+
+    await expect(requireHostedPrivyCompletionIdentityFromCookies()).rejects.toMatchObject({
+      code: "PRIVY_WALLET_NOT_READY",
+      httpStatus: 409,
+      retryable: true,
     });
   });
 
