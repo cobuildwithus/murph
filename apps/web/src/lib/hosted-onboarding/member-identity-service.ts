@@ -1,4 +1,4 @@
-import { Prisma, type HostedMember, type PrismaClient } from "@prisma/client";
+import { Prisma, type HostedMember } from "@prisma/client";
 import {
   HostedBillingStatus,
   HostedMemberStatus,
@@ -12,6 +12,8 @@ import { hostedOnboardingError } from "./errors";
 import { type HostedPrivyIdentity } from "./privy";
 import {
   generateHostedMemberId,
+  lockHostedMemberRow,
+  type HostedOnboardingPrismaClient,
   withHostedOnboardingTransaction,
 } from "./shared";
 import {
@@ -29,7 +31,7 @@ import {
 
 export async function ensureHostedMemberForPhone(input: {
   phoneNumber: string;
-  prisma: PrismaClient | Prisma.TransactionClient;
+  prisma: HostedOnboardingPrismaClient;
 }): Promise<HostedMember> {
   return withHostedOnboardingTransaction(input.prisma, async (tx) => {
     const phoneLookupKey = createHostedPhoneLookupKey(input.phoneNumber);
@@ -95,7 +97,7 @@ export async function ensureHostedMemberForPhone(input: {
 async function refreshHostedMemberForPhone(input: {
   member: HostedMember;
   phoneNumber: string;
-  prisma: PrismaClient | Prisma.TransactionClient;
+  prisma: HostedOnboardingPrismaClient;
 }): Promise<HostedMember> {
   const currentIdentity = await readHostedMemberIdentity({
     memberId: input.member.id,
@@ -182,7 +184,7 @@ export function hasHostedMemberPrivyIdentity(member: {
 export async function persistHostedMemberLinqChatBinding(input: {
   linqChatId: string | null;
   memberId: string;
-  prisma: PrismaClient | Prisma.TransactionClient;
+  prisma: HostedOnboardingPrismaClient;
 }): Promise<void> {
   await upsertHostedMemberLinqChatBinding({
     linqChatId: input.linqChatId,
@@ -194,7 +196,7 @@ export async function persistHostedMemberLinqChatBinding(input: {
 export async function ensureHostedMemberForPrivyIdentity(input: {
   identity: HostedPrivyIdentity;
   now: Date;
-  prisma: PrismaClient;
+  prisma: HostedOnboardingPrismaClient;
 }): Promise<HostedMember> {
   assertHostedPrivyWalletAvailableWhenRequired(input.identity);
 
@@ -242,13 +244,20 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
   expectedPhoneLookupKey?: string;
   identity: HostedPrivyIdentity;
   member: HostedMember;
-  prisma: PrismaClient | Prisma.TransactionClient;
+  prisma: HostedOnboardingPrismaClient;
   now: Date;
 }): Promise<HostedMember> {
   assertHostedPrivyWalletAvailableWhenRequired(input.identity);
 
   return withHostedOnboardingTransaction(input.prisma, async (tx) => {
     const phoneLookupKey = createHostedPhoneLookupKey(input.identity.phone.number);
+    await lockHostedMemberRow(tx, input.member.id);
+
+    const currentMember = await tx.hostedMember.findUnique({
+      where: {
+        id: input.member.id,
+      },
+    });
     const currentIdentity = await readHostedMemberIdentity({
       memberId: input.member.id,
       prisma: tx,
@@ -259,6 +268,14 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
         code: "PHONE_NUMBER_INVALID",
         message: "A valid phone number is required to continue.",
         httpStatus: 400,
+      });
+    }
+
+    if (!currentMember) {
+      throw hostedOnboardingError({
+        code: "HOSTED_MEMBER_NOT_FOUND",
+        message: "Finish signup from your latest Murph link before continuing.",
+        httpStatus: 403,
       });
     }
 
@@ -300,18 +317,18 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
     try {
       const updatedMember = await tx.hostedMember.update({
         where: {
-          id: input.member.id,
+          id: currentMember.id,
         },
         data: {
           status:
-            input.member.status === HostedMemberStatus.suspended
+            currentMember.status === HostedMemberStatus.suspended
               ? HostedMemberStatus.suspended
               : HostedMemberStatus.registered,
         },
       });
       await upsertHostedMemberIdentity({
         ...buildHostedMemberPhoneIdentity(input.identity.phone.number),
-        memberId: input.member.id,
+        memberId: currentMember.id,
         phoneNumberVerifiedAt: input.now,
         prisma: tx,
         privyUserId: input.identity.userId,
@@ -341,7 +358,7 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
 
 export async function findHostedMemberForPrivyIdentity(input: {
   identity: HostedPrivyIdentity;
-  prisma: PrismaClient | Prisma.TransactionClient;
+  prisma: HostedOnboardingPrismaClient;
 }): Promise<HostedMember | null> {
   const matches = new Map<string, HostedMember>();
   const normalizedWalletAddress = input.identity.wallet
