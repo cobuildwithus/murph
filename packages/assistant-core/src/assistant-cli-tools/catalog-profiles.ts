@@ -63,7 +63,15 @@ export function createDefaultAssistantToolCatalog(
   input: AssistantToolContext,
   options: AssistantToolCatalogOptions = {},
 ): AssistantToolCatalog {
-  return createDefaultAssistantCapabilityRegistry(input, options).createToolCatalog(
+  return bindAssistantCapabilitiesToDefaultToolCatalog(
+    listDefaultAssistantCapabilities(input, options),
+  )
+}
+
+function bindAssistantCapabilitiesToDefaultToolCatalog(
+  capabilities: readonly AssistantCapabilityDefinition[],
+): AssistantToolCatalog {
+  return createAssistantCapabilityRegistry(capabilities).createToolCatalog(
     defaultAssistantCapabilityHosts,
   )
 }
@@ -77,8 +85,8 @@ export function createInboxRoutingAssistantCapabilityRegistry(
 export function createInboxRoutingAssistantToolCatalog(
   input: AssistantToolContext,
 ): AssistantToolCatalog {
-  return createInboxRoutingAssistantCapabilityRegistry(input).createToolCatalog(
-    defaultAssistantCapabilityHosts,
+  return bindAssistantCapabilitiesToDefaultToolCatalog(
+    listInboxRoutingAssistantCapabilities(input),
   )
 }
 
@@ -92,16 +100,16 @@ export function createProviderTurnAssistantCapabilityRuntime(
   input: AssistantToolContext,
 ): AssistantCapabilityRuntime {
   return {
-    toolCatalog: createProviderTurnAssistantCapabilityRegistry(input).createToolCatalog(
-      defaultAssistantCapabilityHosts,
-    ),
+    toolCatalog: createProviderTurnAssistantToolCatalog(input),
   }
 }
 
 export function createProviderTurnAssistantToolCatalog(
   input: AssistantToolContext,
 ): AssistantToolCatalog {
-  return createProviderTurnAssistantCapabilityRuntime(input).toolCatalog
+  return bindAssistantCapabilitiesToDefaultToolCatalog(
+    listProviderTurnAssistantCapabilities(input),
+  )
 }
 
 function listDefaultAssistantCapabilities(
@@ -143,21 +151,19 @@ function resolveAssistantToolConcernDefinitions(
   options: AssistantToolCatalogOptions,
 ): AssistantCapabilityConcernDefinitions {
   const includeAssistantRuntimeTools = options.includeAssistantRuntimeTools ?? true
-  const includeCanonicalWriteTools =
-    options.includeCanonicalWriteTools ?? options.includeVaultWriteTools ?? true
-  const includeOutwardSideEffectTools =
-    options.includeOutwardSideEffectTools ?? options.includeVaultWriteTools ?? true
+  const includeCanonicalWriteTools = options.includeCanonicalWriteTools ?? true
+  const includeOutwardSideEffectTools = options.includeOutwardSideEffectTools ?? true
 
   return {
     assistantRuntimeTools: includeAssistantRuntimeTools
       ? createAssistantRuntimeToolDefinitions(input, options)
       : [],
-    canonicalVaultWriteTools: [
-      ...createInboxPromotionToolDefinitions(input),
-      ...(includeCanonicalWriteTools
-        ? createCanonicalVaultWriteToolDefinitions(input, options)
-        : []),
-    ],
+    canonicalVaultWriteTools: includeCanonicalWriteTools
+      ? [
+          ...createInboxPromotionToolDefinitions(input),
+          ...createCanonicalVaultWriteToolDefinitions(input, options),
+        ]
+      : [],
     outwardSideEffectTools: includeOutwardSideEffectTools
       ? createOutwardSideEffectToolDefinitions(input)
       : [],

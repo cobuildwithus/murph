@@ -143,14 +143,28 @@ export function defineAssistantCapability<
   const mutationSemantics =
     definition.mutationSemantics ??
     inferAssistantCapabilityMutationSemantics(definition.name, provenance)
-  const defaultBinding = definition.executionBindings[preferredHostKind]
-  const executionBindings =
-    defaultBinding === undefined
-      ? definition.executionBindings
-      : {
-          ...definition.executionBindings,
-          [preferredHostKind]: defaultBinding,
-        }
+  const executionBindings = Object.fromEntries(
+    Object.entries(definition.executionBindings).filter(
+      (entry): entry is [
+        AssistantCapabilityHostKind,
+        AssistantCapabilityExecutor<TSchema, TResult>,
+      ] => entry[1] !== undefined,
+    ),
+  ) as Partial<Record<AssistantCapabilityHostKind, AssistantCapabilityExecutor<TSchema, TResult>>>
+  const supportedHostKinds = Object.keys(executionBindings) as AssistantCapabilityHostKind[]
+  const defaultBinding = executionBindings[preferredHostKind]
+
+  if (supportedHostKinds.length === 0) {
+    throw new Error(
+      `Assistant capability "${definition.name}" must declare at least one execution binding.`,
+    )
+  }
+
+  if (defaultBinding === undefined) {
+    throw new Error(
+      `Assistant capability "${definition.name}" prefers host "${preferredHostKind}" but does not declare a binding for it.`,
+    )
+  }
 
   return {
     ...definition,

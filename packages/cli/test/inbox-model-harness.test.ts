@@ -1503,18 +1503,19 @@ test('createDefaultAssistantToolCatalog can bind a bounded text-read-only profil
   assert.equal(catalog.hasTool('vault.share.createLink'), false)
 })
 
-test('createDefaultAssistantToolCatalog keeps includeVaultWriteTools as a compatibility alias behind the split write options', () => {
-  const aliasCatalog = createDefaultAssistantToolCatalog(
+test('createDefaultAssistantToolCatalog lets canonical writes and outward side effects be configured independently', () => {
+  const noWriteCatalog = createDefaultAssistantToolCatalog(
     {
       vault: '/tmp/murph-vault',
       vaultServices: createStubVaultServices(),
     },
     {
       includeAssistantRuntimeTools: false,
+      includeCanonicalWriteTools: false,
+      includeOutwardSideEffectTools: false,
       includeQueryTools: false,
       includeStatefulWriteTools: false,
       includeVaultTextReadTool: true,
-      includeVaultWriteTools: false,
     },
   )
   const explicitOverrideCatalog = createDefaultAssistantToolCatalog(
@@ -1529,14 +1530,66 @@ test('createDefaultAssistantToolCatalog keeps includeVaultWriteTools as a compat
       includeQueryTools: false,
       includeStatefulWriteTools: false,
       includeVaultTextReadTool: true,
-      includeVaultWriteTools: false,
     },
   )
 
-  assert.equal(aliasCatalog.hasTool('vault.recipe.upsert'), false)
-  assert.equal(aliasCatalog.hasTool('vault.share.createLink'), false)
+  assert.equal(noWriteCatalog.hasTool('vault.recipe.upsert'), false)
+  assert.equal(noWriteCatalog.hasTool('vault.share.createLink'), false)
   assert.equal(explicitOverrideCatalog.hasTool('vault.recipe.upsert'), false)
   assert.equal(explicitOverrideCatalog.hasTool('vault.share.createLink'), true)
+})
+
+test('createDefaultAssistantToolCatalog disables inbox promotion tools when canonical writes are disabled', () => {
+  const input = {
+    captureId: 'cap_1',
+    inboxServices: createStubInboxServices({
+      vault: '/tmp/murph-vault',
+      capture: {
+        captureId: 'cap_1',
+        source: 'imessage',
+        accountId: 'self',
+        externalId: 'message-1',
+        threadId: 'thread-1',
+        threadTitle: 'Care team',
+        actorId: 'contact-1',
+        actorName: 'Clinician',
+        actorIsSelf: false,
+        occurredAt: '2026-03-13T10:00:00.000Z',
+        receivedAt: '2026-03-13T10:00:02.000Z',
+        text: 'Please file this lab summary and note the follow-up plan.',
+        attachmentCount: 1,
+        envelopePath: 'raw/inbox/captures/cap_1/envelope.json',
+        eventId: 'evt_1',
+        promotions: [],
+        createdAt: '2026-03-13T10:00:02.000Z',
+        threadIsDirect: true,
+        attachments: [],
+      },
+    }),
+    vault: '/tmp/murph-vault',
+    vaultServices: createStubVaultServices(),
+  }
+  const disabledCatalog = createDefaultAssistantToolCatalog(input, {
+    includeAssistantRuntimeTools: false,
+    includeCanonicalWriteTools: false,
+    includeOutwardSideEffectTools: false,
+    includeQueryTools: false,
+    includeStatefulWriteTools: false,
+    includeVaultTextReadTool: false,
+  })
+  const enabledCatalog = createDefaultAssistantToolCatalog(input, {
+    includeAssistantRuntimeTools: false,
+    includeCanonicalWriteTools: true,
+    includeOutwardSideEffectTools: false,
+    includeQueryTools: false,
+    includeStatefulWriteTools: false,
+    includeVaultTextReadTool: false,
+  })
+
+  assert.equal(disabledCatalog.hasTool('inbox.promote.document'), false)
+  assert.equal(disabledCatalog.hasTool('inbox.promote.journal'), false)
+  assert.equal(enabledCatalog.hasTool('inbox.promote.document'), true)
+  assert.equal(enabledCatalog.hasTool('inbox.promote.journal'), true)
 })
 
 test('createDefaultAssistantToolCatalog vault.fs.readText enforces bounded UTF-8 reads inside the vault', async () => {
