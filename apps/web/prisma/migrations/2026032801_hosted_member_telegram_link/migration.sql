@@ -1,2 +1,0 @@
--- Greenfield no-op: hosted routing launches in split-table form from
--- 2026032602_hosted_onboarding_init and never stores durable telegram usernames.

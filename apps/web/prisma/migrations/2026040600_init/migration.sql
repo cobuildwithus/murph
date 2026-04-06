@@ -1,0 +1,690 @@
+-- Murph canonical v1 baseline generated from prisma/schema.prisma on 2026-04-06.
+
+-- CreateSchema
+CREATE SCHEMA IF NOT EXISTS "public";
+
+-- CreateEnum
+CREATE TYPE "HostedMemberStatus" AS ENUM ('invited', 'registered', 'suspended');
+
+-- CreateEnum
+CREATE TYPE "HostedInviteStatus" AS ENUM ('pending', 'opened', 'authenticated', 'paid', 'expired');
+
+-- CreateEnum
+CREATE TYPE "HostedBillingStatus" AS ENUM ('not_started', 'checkout_open', 'active', 'incomplete', 'past_due', 'canceled', 'unpaid', 'paused');
+
+-- CreateEnum
+CREATE TYPE "HostedBillingMode" AS ENUM ('payment', 'subscription');
+
+-- CreateEnum
+CREATE TYPE "HostedBillingCheckoutStatus" AS ENUM ('pending', 'open', 'completed', 'expired', 'failed', 'superseded');
+
+-- CreateEnum
+CREATE TYPE "HostedStripeEventStatus" AS ENUM ('pending', 'processing', 'completed', 'failed', 'poisoned');
+
+-- CreateEnum
+CREATE TYPE "HostedRevnetIssuanceStatus" AS ENUM ('pending', 'submitting', 'submitted', 'confirmed', 'failed');
+
+-- CreateEnum
+CREATE TYPE "ExecutionOutboxStatus" AS ENUM ('pending', 'dispatching', 'accepted', 'completed', 'failed');
+
+-- CreateTable
+CREATE TABLE "device_connection" (
+    "id" TEXT NOT NULL,
+    "user_id" TEXT NOT NULL,
+    "provider" TEXT NOT NULL,
+    "external_account_id" TEXT NOT NULL,
+    "display_name" TEXT,
+    "connected_at" TIMESTAMP(3) NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "device_connection_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "device_token_audit" (
+    "id" SERIAL NOT NULL,
+    "user_id" TEXT NOT NULL,
+    "connection_id" TEXT NOT NULL,
+    "provider" TEXT NOT NULL,
+    "action" TEXT NOT NULL,
+    "channel" TEXT NOT NULL,
+    "session_id" TEXT,
+    "token_version" INTEGER NOT NULL,
+    "key_version" TEXT NOT NULL,
+    "metadata_json" JSONB,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "device_token_audit_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "device_oauth_session" (
+    "state" TEXT NOT NULL,
+    "user_id" TEXT,
+    "provider" TEXT NOT NULL,
+    "return_to" TEXT,
+    "metadata_json" JSONB NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL,
+    "expires_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "device_oauth_session_pkey" PRIMARY KEY ("state")
+);
+
+-- CreateTable
+CREATE TABLE "device_webhook_trace" (
+    "provider" TEXT NOT NULL,
+    "trace_id" TEXT NOT NULL,
+    "external_account_id" TEXT NOT NULL,
+    "event_type" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'processed',
+    "processing_expires_at" TIMESTAMP(3),
+    "received_at" TIMESTAMP(3) NOT NULL,
+    "payload_json" JSONB,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "device_webhook_trace_pkey" PRIMARY KEY ("provider","trace_id")
+);
+
+-- CreateTable
+CREATE TABLE "device_sync_signal" (
+    "id" SERIAL NOT NULL,
+    "user_id" TEXT NOT NULL,
+    "connection_id" TEXT,
+    "provider" TEXT NOT NULL,
+    "kind" TEXT NOT NULL,
+    "payload_json" JSONB,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "device_sync_signal_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "device_agent_session" (
+    "id" TEXT NOT NULL,
+    "user_id" TEXT NOT NULL,
+    "label" TEXT,
+    "token_hash" TEXT NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+    "expires_at" TIMESTAMP(3) NOT NULL,
+    "last_seen_at" TIMESTAMP(3),
+    "revoked_at" TIMESTAMP(3),
+    "revoke_reason" TEXT,
+    "replaced_by_session_id" TEXT,
+
+    CONSTRAINT "device_agent_session_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "device_browser_assertion_nonce" (
+    "nonce_hash" TEXT NOT NULL,
+    "user_id" TEXT NOT NULL,
+    "method" TEXT NOT NULL,
+    "path" TEXT NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "expires_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "device_browser_assertion_nonce_pkey" PRIMARY KEY ("nonce_hash")
+);
+
+-- CreateTable
+CREATE TABLE "hosted_web_internal_request_nonce" (
+    "nonce_hash" TEXT NOT NULL,
+    "user_id" TEXT NOT NULL,
+    "method" TEXT NOT NULL,
+    "path" TEXT NOT NULL,
+    "search" TEXT NOT NULL DEFAULT '',
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "expires_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "hosted_web_internal_request_nonce_pkey" PRIMARY KEY ("nonce_hash")
+);
+
+-- CreateTable
+CREATE TABLE "hosted_member" (
+    "id" TEXT NOT NULL,
+    "status" "HostedMemberStatus" NOT NULL DEFAULT 'invited',
+    "billing_status" "HostedBillingStatus" NOT NULL DEFAULT 'not_started',
+    "billing_mode" "HostedBillingMode",
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "hosted_member_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "hosted_member_identity" (
+    "member_id" TEXT NOT NULL,
+    "masked_phone_number_hint" TEXT NOT NULL,
+    "phone_lookup_key" TEXT NOT NULL,
+    "phone_number_verified_at" TIMESTAMP(3),
+    "privy_user_id" TEXT,
+    "wallet_address" TEXT,
+    "wallet_chain_type" TEXT,
+    "wallet_provider" TEXT,
+    "wallet_created_at" TIMESTAMP(3),
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL
+);
+
+-- CreateTable
+CREATE TABLE "hosted_member_routing" (
+    "member_id" TEXT NOT NULL,
+    "linq_chat_id" TEXT,
+    "telegram_user_lookup_key" TEXT,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL
+);
+
+-- CreateTable
+CREATE TABLE "hosted_member_billing_ref" (
+    "member_id" TEXT NOT NULL,
+    "stripe_customer_id" TEXT,
+    "stripe_subscription_id" TEXT,
+    "stripe_latest_checkout_session_id" TEXT,
+    "stripe_latest_billing_event_created_at" TIMESTAMP(3),
+    "stripe_latest_billing_event_id" TEXT,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL
+);
+
+-- CreateTable
+CREATE TABLE "hosted_invite" (
+    "id" TEXT NOT NULL,
+    "member_id" TEXT NOT NULL,
+    "invite_code" TEXT NOT NULL,
+    "status" "HostedInviteStatus" NOT NULL DEFAULT 'pending',
+    "channel" TEXT NOT NULL DEFAULT 'linq',
+    "sent_at" TIMESTAMP(3),
+    "opened_at" TIMESTAMP(3),
+    "authenticated_at" TIMESTAMP(3),
+    "paid_at" TIMESTAMP(3),
+    "expires_at" TIMESTAMP(3) NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "hosted_invite_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "hosted_billing_checkout" (
+    "id" TEXT NOT NULL,
+    "member_id" TEXT NOT NULL,
+    "invite_id" TEXT,
+    "has_share_context" BOOLEAN NOT NULL DEFAULT false,
+    "stripe_checkout_session_id" TEXT,
+    "stripe_customer_id" TEXT,
+    "stripe_subscription_id" TEXT,
+    "price_id" TEXT NOT NULL,
+    "mode" "HostedBillingMode" NOT NULL,
+    "status" "HostedBillingCheckoutStatus" NOT NULL DEFAULT 'pending',
+    "checkout_url" TEXT,
+    "amount_total" INTEGER,
+    "currency" TEXT,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "completed_at" TIMESTAMP(3),
+    "expired_at" TIMESTAMP(3),
+    "superseded_at" TIMESTAMP(3),
+
+    CONSTRAINT "hosted_billing_checkout_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "hosted_stripe_event" (
+    "event_id" TEXT NOT NULL,
+    "type" TEXT NOT NULL,
+    "stripe_created_at" TIMESTAMP(3) NOT NULL,
+    "received_at" TIMESTAMP(3) NOT NULL,
+    "status" "HostedStripeEventStatus" NOT NULL DEFAULT 'pending',
+    "attempt_count" INTEGER NOT NULL DEFAULT 0,
+    "next_attempt_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "claim_expires_at" TIMESTAMP(3),
+    "processed_at" TIMESTAMP(3),
+    "last_error_code" TEXT,
+    "last_error_message" TEXT,
+    "customer_id" TEXT,
+    "subscription_id" TEXT,
+    "invoice_id" TEXT,
+    "checkout_session_id" TEXT,
+    "charge_id" TEXT,
+    "payment_intent_id" TEXT,
+    "payload_json" JSONB NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "hosted_stripe_event_pkey" PRIMARY KEY ("event_id")
+);
+
+-- CreateTable
+CREATE TABLE "hosted_revnet_issuance" (
+    "id" TEXT NOT NULL,
+    "member_id" TEXT NOT NULL,
+    "idempotency_key" TEXT NOT NULL,
+    "stripe_invoice_id" TEXT NOT NULL,
+    "stripe_payment_intent_id" TEXT,
+    "stripe_charge_id" TEXT,
+    "chain_id" INTEGER NOT NULL,
+    "project_id" TEXT NOT NULL,
+    "terminal_address" TEXT NOT NULL,
+    "payment_asset_address" TEXT NOT NULL,
+    "beneficiary_address" TEXT NOT NULL,
+    "stripe_payment_amount_minor" INTEGER NOT NULL,
+    "stripe_payment_currency" TEXT NOT NULL,
+    "payment_amount" TEXT NOT NULL,
+    "status" "HostedRevnetIssuanceStatus" NOT NULL DEFAULT 'pending',
+    "attempt_count" INTEGER NOT NULL DEFAULT 0,
+    "next_attempt_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "pay_tx_hash" TEXT,
+    "failure_code" TEXT,
+    "failure_message" TEXT,
+    "submitted_at" TIMESTAMP(3),
+    "confirmed_at" TIMESTAMP(3),
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "hosted_revnet_issuance_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "hosted_share_link" (
+    "id" TEXT NOT NULL,
+    "code_hash" TEXT NOT NULL,
+    "sender_member_id" TEXT NOT NULL,
+    "preview_title" TEXT NOT NULL,
+    "expires_at" TIMESTAMP(3) NOT NULL,
+    "accepted_at" TIMESTAMP(3),
+    "accepted_by_member_id" TEXT,
+    "consumed_at" TIMESTAMP(3),
+    "consumed_by_member_id" TEXT,
+    "last_event_id" TEXT,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "hosted_share_link_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "hosted_webhook_receipt" (
+    "source" TEXT NOT NULL,
+    "event_id" TEXT NOT NULL,
+    "first_received_at" TIMESTAMP(3) NOT NULL,
+    "claim_expires_at" TIMESTAMP(3),
+    "payload_json" JSONB,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "hosted_webhook_receipt_pkey" PRIMARY KEY ("source","event_id")
+);
+
+-- CreateTable
+CREATE TABLE "execution_outbox" (
+    "id" TEXT NOT NULL,
+    "user_id" TEXT NOT NULL,
+    "source_type" TEXT NOT NULL,
+    "source_id" TEXT,
+    "event_id" TEXT NOT NULL,
+    "event_kind" TEXT NOT NULL,
+    "payload_json" JSONB NOT NULL,
+    "status" "ExecutionOutboxStatus" NOT NULL DEFAULT 'pending',
+    "attempt_count" INTEGER NOT NULL DEFAULT 0,
+    "last_attempt_at" TIMESTAMP(3),
+    "next_attempt_at" TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP,
+    "claim_token" TEXT,
+    "claim_expires_at" TIMESTAMP(3),
+    "accepted_at" TIMESTAMP(3),
+    "completed_at" TIMESTAMP(3),
+    "failed_at" TIMESTAMP(3),
+    "last_error" TEXT,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "execution_outbox_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "hosted_ai_usage" (
+    "id" TEXT NOT NULL,
+    "member_id" TEXT NOT NULL,
+    "session_id" TEXT NOT NULL,
+    "turn_id" TEXT NOT NULL,
+    "attempt_count" INTEGER NOT NULL,
+    "occurred_at" TIMESTAMP(3) NOT NULL,
+    "provider" TEXT NOT NULL,
+    "route_id" TEXT,
+    "requested_model" TEXT,
+    "served_model" TEXT,
+    "provider_name" TEXT,
+    "base_url" TEXT,
+    "api_key_env" TEXT,
+    "credential_source" TEXT,
+    "input_tokens" INTEGER,
+    "output_tokens" INTEGER,
+    "reasoning_tokens" INTEGER,
+    "cached_input_tokens" INTEGER,
+    "cache_write_tokens" INTEGER,
+    "total_tokens" INTEGER,
+    "provider_session_id" TEXT,
+    "provider_request_id" TEXT,
+    "provider_metadata_json" JSONB,
+    "raw_usage_json" JSONB,
+    "stripe_meter_status" TEXT NOT NULL DEFAULT 'pending',
+    "stripe_metered_at" TIMESTAMP(3),
+    "stripe_meter_identifier" TEXT,
+    "stripe_meter_error" TEXT,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "hosted_ai_usage_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "hosted_linq_daily_state" (
+    "member_id" TEXT NOT NULL,
+    "day_utc" TIMESTAMP(3) NOT NULL,
+    "inbound_count" INTEGER NOT NULL DEFAULT 0,
+    "outbound_count" INTEGER NOT NULL DEFAULT 0,
+    "onboarding_link_sent_at" TIMESTAMP(3),
+    "quota_reply_sent_at" TIMESTAMP(3),
+    "first_seen_at" TIMESTAMP(3) NOT NULL,
+    "last_seen_at" TIMESTAMP(3) NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "hosted_linq_daily_state_pkey" PRIMARY KEY ("member_id","day_utc")
+);
+
+-- CreateTable
+CREATE TABLE "linq_recipient_binding" (
+    "id" TEXT NOT NULL,
+    "user_id" TEXT NOT NULL,
+    "recipient_phone" TEXT NOT NULL,
+    "recipient_phone_mask" TEXT,
+    "label" TEXT,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "linq_recipient_binding_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "linq_webhook_event" (
+    "id" SERIAL NOT NULL,
+    "user_id" TEXT NOT NULL,
+    "binding_id" TEXT NOT NULL,
+    "recipient_phone" TEXT NOT NULL,
+    "event_id" TEXT NOT NULL,
+    "trace_id" TEXT,
+    "event_type" TEXT NOT NULL,
+    "chat_id" TEXT,
+    "message_id" TEXT,
+    "occurred_at" TIMESTAMP(3),
+    "received_at" TIMESTAMP(3) NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "linq_webhook_event_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE INDEX "device_connection_user_id_provider_idx" ON "device_connection"("user_id", "provider");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "device_connection_provider_external_account_id_key" ON "device_connection"("provider", "external_account_id");
+
+-- CreateIndex
+CREATE INDEX "device_token_audit_user_id_id_idx" ON "device_token_audit"("user_id", "id");
+
+-- CreateIndex
+CREATE INDEX "device_token_audit_connection_id_created_at_idx" ON "device_token_audit"("connection_id", "created_at");
+
+-- CreateIndex
+CREATE INDEX "device_token_audit_created_at_idx" ON "device_token_audit"("created_at");
+
+-- CreateIndex
+CREATE INDEX "device_oauth_session_expires_at_idx" ON "device_oauth_session"("expires_at");
+
+-- CreateIndex
+CREATE INDEX "device_oauth_session_user_id_provider_idx" ON "device_oauth_session"("user_id", "provider");
+
+-- CreateIndex
+CREATE INDEX "device_webhook_trace_provider_external_account_id_idx" ON "device_webhook_trace"("provider", "external_account_id");
+
+-- CreateIndex
+CREATE INDEX "device_webhook_trace_received_at_idx" ON "device_webhook_trace"("received_at");
+
+-- CreateIndex
+CREATE INDEX "device_sync_signal_user_id_id_idx" ON "device_sync_signal"("user_id", "id");
+
+-- CreateIndex
+CREATE INDEX "device_sync_signal_connection_id_idx" ON "device_sync_signal"("connection_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "device_agent_session_token_hash_key" ON "device_agent_session"("token_hash");
+
+-- CreateIndex
+CREATE INDEX "device_agent_session_user_id_idx" ON "device_agent_session"("user_id");
+
+-- CreateIndex
+CREATE INDEX "device_agent_session_expires_at_idx" ON "device_agent_session"("expires_at");
+
+-- CreateIndex
+CREATE INDEX "device_agent_session_revoked_at_idx" ON "device_agent_session"("revoked_at");
+
+-- CreateIndex
+CREATE INDEX "device_agent_session_replaced_by_session_id_idx" ON "device_agent_session"("replaced_by_session_id");
+
+-- CreateIndex
+CREATE INDEX "device_browser_assertion_nonce_user_id_expires_at_idx" ON "device_browser_assertion_nonce"("user_id", "expires_at");
+
+-- CreateIndex
+CREATE INDEX "device_browser_assertion_nonce_expires_at_idx" ON "device_browser_assertion_nonce"("expires_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_web_internal_request_nonce_user_id_expires_at_idx" ON "hosted_web_internal_request_nonce"("user_id", "expires_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_web_internal_request_nonce_expires_at_idx" ON "hosted_web_internal_request_nonce"("expires_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_member_status_idx" ON "hosted_member"("status");
+
+-- CreateIndex
+CREATE INDEX "hosted_member_billing_status_idx" ON "hosted_member"("billing_status");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "hosted_member_identity_member_id_key" ON "hosted_member_identity"("member_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "hosted_member_identity_phone_lookup_key_key" ON "hosted_member_identity"("phone_lookup_key");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "hosted_member_identity_privy_user_id_key" ON "hosted_member_identity"("privy_user_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "hosted_member_identity_wallet_address_key" ON "hosted_member_identity"("wallet_address");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "hosted_member_routing_member_id_key" ON "hosted_member_routing"("member_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "hosted_member_routing_linq_chat_id_key" ON "hosted_member_routing"("linq_chat_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "hosted_member_routing_telegram_user_lookup_key_key" ON "hosted_member_routing"("telegram_user_lookup_key");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "hosted_member_billing_ref_member_id_key" ON "hosted_member_billing_ref"("member_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "hosted_member_billing_ref_stripe_customer_id_key" ON "hosted_member_billing_ref"("stripe_customer_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "hosted_member_billing_ref_stripe_subscription_id_key" ON "hosted_member_billing_ref"("stripe_subscription_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "hosted_invite_invite_code_key" ON "hosted_invite"("invite_code");
+
+-- CreateIndex
+CREATE INDEX "hosted_invite_member_id_created_at_idx" ON "hosted_invite"("member_id", "created_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_invite_expires_at_idx" ON "hosted_invite"("expires_at");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "hosted_billing_checkout_stripe_checkout_session_id_key" ON "hosted_billing_checkout"("stripe_checkout_session_id");
+
+-- CreateIndex
+CREATE INDEX "hosted_billing_checkout_member_id_created_at_idx" ON "hosted_billing_checkout"("member_id", "created_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_billing_checkout_invite_id_created_at_idx" ON "hosted_billing_checkout"("invite_id", "created_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_billing_checkout_stripe_customer_id_idx" ON "hosted_billing_checkout"("stripe_customer_id");
+
+-- CreateIndex
+CREATE INDEX "hosted_billing_checkout_stripe_subscription_id_idx" ON "hosted_billing_checkout"("stripe_subscription_id");
+
+-- CreateIndex
+CREATE INDEX "hosted_stripe_event_status_stripe_created_at_created_at_idx" ON "hosted_stripe_event"("status", "stripe_created_at", "created_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_stripe_event_status_next_attempt_at_stripe_created_a_idx" ON "hosted_stripe_event"("status", "next_attempt_at", "stripe_created_at", "created_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_stripe_event_claim_expires_at_idx" ON "hosted_stripe_event"("claim_expires_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_stripe_event_customer_id_stripe_created_at_idx" ON "hosted_stripe_event"("customer_id", "stripe_created_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_stripe_event_subscription_id_stripe_created_at_idx" ON "hosted_stripe_event"("subscription_id", "stripe_created_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_stripe_event_invoice_id_stripe_created_at_idx" ON "hosted_stripe_event"("invoice_id", "stripe_created_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_stripe_event_checkout_session_id_stripe_created_at_idx" ON "hosted_stripe_event"("checkout_session_id", "stripe_created_at");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "hosted_revnet_issuance_idempotency_key_key" ON "hosted_revnet_issuance"("idempotency_key");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "hosted_revnet_issuance_stripe_invoice_id_key" ON "hosted_revnet_issuance"("stripe_invoice_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "hosted_revnet_issuance_pay_tx_hash_key" ON "hosted_revnet_issuance"("pay_tx_hash");
+
+-- CreateIndex
+CREATE INDEX "hosted_revnet_issuance_member_id_created_at_idx" ON "hosted_revnet_issuance"("member_id", "created_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_revnet_issuance_status_created_at_idx" ON "hosted_revnet_issuance"("status", "created_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_revnet_issuance_status_next_attempt_at_created_at_idx" ON "hosted_revnet_issuance"("status", "next_attempt_at", "created_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_revnet_issuance_stripe_payment_intent_id_idx" ON "hosted_revnet_issuance"("stripe_payment_intent_id");
+
+-- CreateIndex
+CREATE INDEX "hosted_revnet_issuance_stripe_charge_id_idx" ON "hosted_revnet_issuance"("stripe_charge_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "hosted_share_link_code_hash_key" ON "hosted_share_link"("code_hash");
+
+-- CreateIndex
+CREATE INDEX "hosted_share_link_sender_member_id_created_at_idx" ON "hosted_share_link"("sender_member_id", "created_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_share_link_expires_at_idx" ON "hosted_share_link"("expires_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_share_link_accepted_by_member_id_accepted_at_idx" ON "hosted_share_link"("accepted_by_member_id", "accepted_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_share_link_consumed_by_member_id_consumed_at_idx" ON "hosted_share_link"("consumed_by_member_id", "consumed_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_webhook_receipt_first_received_at_idx" ON "hosted_webhook_receipt"("first_received_at");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "execution_outbox_event_id_key" ON "execution_outbox"("event_id");
+
+-- CreateIndex
+CREATE INDEX "execution_outbox_status_next_attempt_at_created_at_idx" ON "execution_outbox"("status", "next_attempt_at", "created_at");
+
+-- CreateIndex
+CREATE INDEX "execution_outbox_user_id_created_at_idx" ON "execution_outbox"("user_id", "created_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_ai_usage_member_id_occurred_at_idx" ON "hosted_ai_usage"("member_id", "occurred_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_ai_usage_stripe_meter_status_occurred_at_idx" ON "hosted_ai_usage"("stripe_meter_status", "occurred_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_ai_usage_turn_id_attempt_count_idx" ON "hosted_ai_usage"("turn_id", "attempt_count");
+
+-- CreateIndex
+CREATE INDEX "hosted_linq_daily_state_day_utc_idx" ON "hosted_linq_daily_state"("day_utc");
+
+-- CreateIndex
+CREATE INDEX "linq_recipient_binding_user_id_recipient_phone_idx" ON "linq_recipient_binding"("user_id", "recipient_phone");
+
+-- CreateIndex
+CREATE INDEX "linq_recipient_binding_user_id_recipient_phone_mask_idx" ON "linq_recipient_binding"("user_id", "recipient_phone_mask");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "linq_recipient_binding_recipient_phone_key" ON "linq_recipient_binding"("recipient_phone");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "linq_webhook_event_event_id_key" ON "linq_webhook_event"("event_id");
+
+-- CreateIndex
+CREATE INDEX "linq_webhook_event_user_id_id_idx" ON "linq_webhook_event"("user_id", "id");
+
+-- CreateIndex
+CREATE INDEX "linq_webhook_event_binding_id_id_idx" ON "linq_webhook_event"("binding_id", "id");
+
+-- CreateIndex
+CREATE INDEX "linq_webhook_event_recipient_phone_id_idx" ON "linq_webhook_event"("recipient_phone", "id");
+
+-- CreateIndex
+CREATE INDEX "linq_webhook_event_received_at_idx" ON "linq_webhook_event"("received_at");
+
+-- AddForeignKey
+ALTER TABLE "device_token_audit" ADD CONSTRAINT "device_token_audit_connection_id_fkey" FOREIGN KEY ("connection_id") REFERENCES "device_connection"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "device_sync_signal" ADD CONSTRAINT "device_sync_signal_connection_id_fkey" FOREIGN KEY ("connection_id") REFERENCES "device_connection"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "hosted_member_identity" ADD CONSTRAINT "hosted_member_identity_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "hosted_member_routing" ADD CONSTRAINT "hosted_member_routing_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "hosted_member_billing_ref" ADD CONSTRAINT "hosted_member_billing_ref_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "hosted_invite" ADD CONSTRAINT "hosted_invite_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "hosted_billing_checkout" ADD CONSTRAINT "hosted_billing_checkout_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "hosted_billing_checkout" ADD CONSTRAINT "hosted_billing_checkout_invite_id_fkey" FOREIGN KEY ("invite_id") REFERENCES "hosted_invite"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "hosted_revnet_issuance" ADD CONSTRAINT "hosted_revnet_issuance_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "hosted_ai_usage" ADD CONSTRAINT "hosted_ai_usage_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "hosted_linq_daily_state" ADD CONSTRAINT "hosted_linq_daily_state_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "linq_webhook_event" ADD CONSTRAINT "linq_webhook_event_binding_id_fkey" FOREIGN KEY ("binding_id") REFERENCES "linq_recipient_binding"("id") ON DELETE CASCADE ON UPDATE CASCADE;

@@ -1,3 +1,0 @@
--- Greenfield no-op: hosted onboarding launches without raw phone/session
--- storage, and the remaining hosted-share / hosted-ai-usage minimization is
--- already reflected by the final launch schema and runtime writes.

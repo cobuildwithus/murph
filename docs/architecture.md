@@ -1,10 +1,10 @@
-# Murph Baseline Architecture
+# Murph Architecture
 
 ## Purpose
 
 Murph stores durable health records in a file-native vault. Markdown remains the human-reviewable source of truth, derived machine-readable ledgers stay append-only, and all canonical writes flow through one core library.
 
-## Target Repo Shape
+## Repo Shape
 
 ```text
 repo/
@@ -98,24 +98,17 @@ repo/
   - stay encrypted in the local device-sync runtime database under `.runtime/operations/device-sync/state.sqlite`
   - never land in canonical vault files or append-only health ledgers
 
-## First Release Scope
+## Runtime Surfaces
 
-- `vault-cli init`
-- `vault-cli validate`
-- `vault-cli vault repair`
-- `vault-cli vault upgrade`
-
-Operator note: `vault-cli vault repair` remains scaffold-only. Canonical metadata or document-shape evolution must go through ordered `vault upgrade` steps, while rebuildable `.runtime/projections/**` stores remain outside both commands and can be rebuilt separately.
-- `vault-cli document import`
-- `vault-cli meal add`
-- `vault-cli workout add`
-- `vault-cli intervention add`
-- `vault-cli samples import-csv`
-- `vault-cli experiment create`
-- `vault-cli journal ensure`
-- `vault-cli show`
-- `vault-cli list`
-- `vault-cli export pack`
+- Local operator surface:
+  - `murph` and `vault-cli`
+  - `packages/device-syncd`
+  - `packages/assistantd`
+- Hosted control plane:
+  - `apps/web`
+- Hosted execution plane:
+  - `apps/cloudflare`
+  - `packages/assistant-runtime`
 
 ## Explicit Non-Goals
 

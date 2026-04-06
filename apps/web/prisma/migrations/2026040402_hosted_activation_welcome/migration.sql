@@ -1,2 +1,0 @@
--- Greenfield no-op: hosted activation welcome timestamps were removed before
--- launch and never enter the hosted member schema.

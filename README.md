@@ -58,7 +58,7 @@ Preferred setup from a checkout:
 pnpm onboard --vault ./vault
 ```
 
-`pnpm onboard` is the repo-local install and onboarding entrypoint. It bootstraps the host wrapper, installs or reuses local dependencies, builds the workspace, initializes the target vault, saves that vault as the default CLI vault, installs `murph` and `vault-cli` shims for future shells, and hands off to the interactive onboarding flow for assistant defaults, channels, and optional wearable setup.
+`pnpm onboard` is the repo-local install and onboarding entrypoint. It sets up the host wrapper, installs or reuses local dependencies, builds the workspace, initializes the target vault, saves that vault as the default CLI vault, installs `murph` and `vault-cli` shims for future shells, and hands off to the interactive onboarding flow for assistant defaults, channels, and optional wearable setup.
 
 If `pnpm` is not available yet, use:
 
@@ -111,7 +111,7 @@ Only five packages are published to npm: `@murphai/murph`, `@murphai/openclaw-pl
 | --- | --- |
 | `packages/contracts` | Canonical Zod contracts, types, examples, and generated JSON Schema artifacts. |
 | `packages/hosted-execution` | Shared hosted dispatch contracts, env readers, signing helpers, and typed clients. |
-| `packages/runtime-state` | Workspace-private shared local-state taxonomy, `.runtime` path resolution, JSON-state versioning, and SQLite migration helpers. |
+| `packages/runtime-state` | Workspace-private shared local-state taxonomy, `.runtime` path resolution, JSON-state versioning, and SQLite schema-version helpers. |
 | `packages/core` | Workspace-private canonical mutation owner. No other package may write canonical vault data directly. |
 | `packages/importers` | Workspace-private external adapters that normalize inputs and delegate writes to `core`. |
 | `packages/inboxd` | Workspace-private inbox capture, canonical evidence persistence, runtime indexing, and attachment parse-job orchestration. |

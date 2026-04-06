@@ -1,2 +1,0 @@
--- Greenfield no-op: the hosted-member privacy split now launches directly from
--- 2026032602_hosted_onboarding_init, so no later hard-cut migration is needed.

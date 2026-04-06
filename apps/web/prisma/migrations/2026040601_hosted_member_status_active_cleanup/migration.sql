@@ -1,2 +1,0 @@
--- Greenfield no-op: hosted member status launches without the deprecated
--- `active` enum variant from 2026032602_hosted_onboarding_init.

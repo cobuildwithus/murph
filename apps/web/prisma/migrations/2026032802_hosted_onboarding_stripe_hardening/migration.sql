@@ -1,2 +1,0 @@
--- Greenfield no-op: billing-ref freshness fields and receipt claim columns
--- launch in the final schema from 2026032602_hosted_onboarding_init.
