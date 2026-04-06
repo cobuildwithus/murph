@@ -100,7 +100,7 @@ test("hosted execution snapshots collapse into one workspace bundle and external
 
   try {
     const vaultRoot = path.join(workspaceRoot, "vault");
-    const assistantStateRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+    const assistantRuntimeRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
     const operatorHomeRoot = path.join(workspaceRoot, "home");
     const rawAttachmentPath = path.join(
       vaultRoot,
@@ -113,7 +113,15 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     );
     await mkdir(path.dirname(rawAttachmentPath), { recursive: true });
     await mkdir(path.join(vaultRoot, "exports", "packs"), { recursive: true });
-    await mkdir(assistantStateRoot, { recursive: true });
+    await mkdir(path.join(assistantRuntimeRoot, "cron", "runs"), { recursive: true });
+    await mkdir(path.join(assistantRuntimeRoot, "diagnostics"), { recursive: true });
+    await mkdir(path.join(assistantRuntimeRoot, "outbox", ".quarantine"), { recursive: true });
+    await mkdir(path.join(assistantRuntimeRoot, "receipts"), { recursive: true });
+    await mkdir(path.join(assistantRuntimeRoot, "secrets", "sessions"), { recursive: true });
+    await mkdir(path.join(assistantRuntimeRoot, "sessions"), { recursive: true });
+    await mkdir(path.join(assistantRuntimeRoot, "state", "onboarding", "first-contact"), { recursive: true });
+    await mkdir(path.join(assistantRuntimeRoot, "transcripts"), { recursive: true });
+    await mkdir(path.join(assistantRuntimeRoot, "usage", "pending"), { recursive: true });
     await mkdir(path.join(operatorHomeRoot, ".murph", "hosted"), { recursive: true });
     await mkdir(path.join(vaultRoot, ".runtime", "operations", "device-sync"), { recursive: true });
     await mkdir(path.join(vaultRoot, ".runtime", "operations", "inbox"), { recursive: true });
@@ -134,7 +142,21 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await writeFile(path.join(vaultRoot, "exports", "packs", "bundle.zip"), "skip-me\n");
     await writeFile(path.join(vaultRoot, "raw", "notes.json"), "{\"keep\":true}\n");
     await writeFile(rawAttachmentPath, Buffer.from("pdf-binary-artifact\n", "utf8"));
-    await writeFile(path.join(assistantStateRoot, "automation.json"), "{\"autoReplyChannels\":[\"linq\"]}\n");
+    await writeFile(path.join(assistantRuntimeRoot, "automation.json"), "{\"autoReplyChannels\":[\"linq\"]}\n");
+    await writeFile(path.join(assistantRuntimeRoot, "cron", "jobs.json"), "{\"version\":1,\"jobs\":[{\"jobId\":\"cron_1\"}]}\n");
+    await writeFile(path.join(assistantRuntimeRoot, "cron", "runs", "cronrun_1.jsonl"), "{\"status\":\"ok\"}\n");
+    await writeFile(path.join(assistantRuntimeRoot, "diagnostics", "events.jsonl"), "{\"kind\":\"assistant.scan\"}\n");
+    await writeFile(path.join(assistantRuntimeRoot, "diagnostics", "snapshot.json"), "{\"status\":\"healthy\"}\n");
+    await writeFile(path.join(assistantRuntimeRoot, "failover.json"), "{\"cooldownUntil\":\"2026-04-06T00:00:00Z\"}\n");
+    await writeFile(path.join(assistantRuntimeRoot, "outbox", "intent_1.json"), "{\"intent\":\"deliver\"}\n");
+    await writeFile(path.join(assistantRuntimeRoot, "outbox", ".quarantine", "ignored.json"), "{\"ignored\":true}\n");
+    await writeFile(path.join(assistantRuntimeRoot, "receipts", "turn_1.json"), "{\"receipt\":\"saved\"}\n");
+    await writeFile(path.join(assistantRuntimeRoot, "sessions", "session_1.json"), "{\"session\":\"saved\"}\n");
+    await writeFile(path.join(assistantRuntimeRoot, "state", "onboarding", "first-contact", "bootstrap.json"), "{\"state\":\"scratch\"}\n");
+    await writeFile(path.join(assistantRuntimeRoot, "status.json"), "{\"status\":\"running\"}\n");
+    await writeFile(path.join(assistantRuntimeRoot, "transcripts", "session_1.jsonl"), "{\"role\":\"assistant\"}\n");
+    await writeFile(path.join(assistantRuntimeRoot, "usage", "pending", "usage_1.json"), "{\"usage\":true}\n");
+    await writeFile(path.join(assistantRuntimeRoot, "secrets", "sessions", "session_1.json"), "{\"secret\":true}\n");
     await writeFile(path.join(operatorHomeRoot, ".murph", "config.json"), "{\"schema\":\"cfg\"}\n");
     await writeFile(
       path.join(operatorHomeRoot, ".murph", "hosted", "user-env.json"),
@@ -162,10 +184,127 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       readHostedBundleTextFile({
         bytes: snapshot.bundle,
         expectedKind: "vault",
-        path: "automation.json",
-        root: "assistant-state",
+        path: ".runtime/operations/assistant",
+        root: "vault",
+      }),
+      null,
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/assistant/automation.json",
+        root: "vault",
       }),
       "{\"autoReplyChannels\":[\"linq\"]}\n",
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/assistant/cron/jobs.json",
+        root: "vault",
+      }),
+      "{\"version\":1,\"jobs\":[{\"jobId\":\"cron_1\"}]}\n",
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/assistant/sessions/session_1.json",
+        root: "vault",
+      }),
+      "{\"session\":\"saved\"}\n",
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/assistant/transcripts/session_1.jsonl",
+        root: "vault",
+      }),
+      "{\"role\":\"assistant\"}\n",
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/assistant/outbox/intent_1.json",
+        root: "vault",
+      }),
+      "{\"intent\":\"deliver\"}\n",
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/assistant/receipts/turn_1.json",
+        root: "vault",
+      }),
+      "{\"receipt\":\"saved\"}\n",
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/assistant/usage/pending/usage_1.json",
+        root: "vault",
+      }),
+      "{\"usage\":true}\n",
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/assistant/failover.json",
+        root: "vault",
+      }),
+      "{\"cooldownUntil\":\"2026-04-06T00:00:00Z\"}\n",
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/assistant/status.json",
+        root: "vault",
+      }),
+      null,
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/assistant/diagnostics/events.jsonl",
+        root: "vault",
+      }),
+      null,
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/assistant/diagnostics/snapshot.json",
+        root: "vault",
+      }),
+      null,
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/assistant/cron/runs/cronrun_1.jsonl",
+        root: "vault",
+      }),
+      null,
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/assistant/state/onboarding/first-contact/bootstrap.json",
+        root: "vault",
+      }),
+      null,
     );
     assert.equal(
       readHostedBundleTextFile({
@@ -220,6 +359,15 @@ test("hosted execution snapshots collapse into one workspace bundle and external
         root: "vault",
       }),
       "staged payload\n",
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/assistant/secrets/sessions/session_1.json",
+        root: "vault",
+      }),
+      null,
     );
     assert.equal(
       readHostedBundleTextFile({
@@ -298,8 +446,36 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       "staged payload\n",
     );
     assert.equal(
-      await readFile(path.join(restored.assistantStateRoot, "automation.json"), "utf8"),
+      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "automation.json"), "utf8"),
       "{\"autoReplyChannels\":[\"linq\"]}\n",
+    );
+    assert.equal(
+      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "cron", "jobs.json"), "utf8"),
+      "{\"version\":1,\"jobs\":[{\"jobId\":\"cron_1\"}]}\n",
+    );
+    assert.equal(
+      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "sessions", "session_1.json"), "utf8"),
+      "{\"session\":\"saved\"}\n",
+    );
+    assert.equal(
+      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "transcripts", "session_1.jsonl"), "utf8"),
+      "{\"role\":\"assistant\"}\n",
+    );
+    assert.equal(
+      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "outbox", "intent_1.json"), "utf8"),
+      "{\"intent\":\"deliver\"}\n",
+    );
+    assert.equal(
+      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "receipts", "turn_1.json"), "utf8"),
+      "{\"receipt\":\"saved\"}\n",
+    );
+    assert.equal(
+      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "usage", "pending", "usage_1.json"), "utf8"),
+      "{\"usage\":true}\n",
+    );
+    assert.equal(
+      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "failover.json"), "utf8"),
+      "{\"cooldownUntil\":\"2026-04-06T00:00:00Z\"}\n",
     );
     assert.equal(
       await readFile(path.join(restored.operatorHomeRoot, ".murph", "config.json"), "utf8"),
@@ -315,8 +491,28 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       readFile(path.join(restored.operatorHomeRoot, ".murph", "hosted", "user-env.json"), "utf8"),
     );
     await assert.rejects(
+      readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "status.json"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "diagnostics", "events.jsonl"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "diagnostics", "snapshot.json"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "cron", "runs", "cronrun_1.jsonl"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "state", "onboarding", "first-contact", "bootstrap.json"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "secrets", "sessions", "session_1.json"), "utf8"),
+    );
+    await assert.rejects(
       readFile(path.join(restored.vaultRoot, ".runtime", "operations", "device-sync", "state.sqlite"), "utf8"),
     );
+    await assert.rejects(readFile(path.join(restored.vaultRoot, ".env.local"), "utf8"));
+    await assert.rejects(readFile(path.join(restored.vaultRoot, "exports", "packs", "bundle.zip"), "utf8"));
     await assert.rejects(
       readFile(path.join(restored.vaultRoot, ".runtime", "operations", "device-sync", "launcher.json"), "utf8"),
     );
@@ -335,8 +531,6 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await assert.rejects(
       readFile(path.join(restored.vaultRoot, ".runtime", "search.sqlite"), "utf8"),
     );
-    await assert.rejects(readFile(path.join(restored.vaultRoot, ".env.local"), "utf8"));
-    await assert.rejects(readFile(path.join(restored.vaultRoot, "exports", "packs", "bundle.zip"), "utf8"));
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
     await rm(restoreRoot, { force: true, recursive: true });
@@ -344,6 +538,34 @@ test("hosted execution snapshots collapse into one workspace bundle and external
 });
 
 test("runtime-state portability defaults operational paths to machine-local unless explicitly marked portable", () => {
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant")).toMatchObject({
+    classification: "operational",
+    portability: "portable",
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/automation.json")).toMatchObject({
+    classification: "operational",
+    portability: "portable",
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/cron/jobs.json")).toMatchObject({
+    classification: "operational",
+    portability: "portable",
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/sessions/session_1.json")).toMatchObject({
+    classification: "operational",
+    portability: "portable",
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/status.json")).toMatchObject({
+    classification: "operational",
+    portability: "machine_local",
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/diagnostics/snapshot.json")).toMatchObject({
+    classification: "operational",
+    portability: "machine_local",
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/cron/runs/cronrun_1.jsonl")).toMatchObject({
+    classification: "operational",
+    portability: "machine_local",
+  });
   expect(describeVaultLocalStateRelativePath(".runtime/operations/inbox/promotions.json")).toMatchObject({
     classification: "operational",
     portability: "portable",

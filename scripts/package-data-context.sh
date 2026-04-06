@@ -8,22 +8,18 @@ ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null)" || {
 
 cd "$ROOT_DIR"
 
-format="zip"
 out_dir="$ROOT_DIR/output-packages"
 prefix="murph-data-bundle"
 vault_path=""
-include_assistant_state=1
 
 vault_file_count=0
-assistant_state_file_count=0
 
 usage() {
   local exit_code="${1:-0}"
   cat >&2 <<'USAGE'
 Usage: package-data-context.sh [options]
 
-Create a ZIP bundle containing the selected Murph vault plus the matching
-vault-scoped assistant-state directory.
+Create a ZIP bundle containing the selected Murph vault.
 
 Options:
   --vault <path>             Vault root to package. Defaults to VAULT
@@ -33,8 +29,6 @@ Options:
   --name <prefix>            Output filename prefix (default: murph-data-bundle)
   --docs / --no-docs         Accepted as no-op compatibility flags
   --tests / --no-tests       Accepted as no-op compatibility flags
-  --with-assistant-state     Include the matching assistant-state bucket (default)
-  --no-assistant-state       Exclude assistant-state files
   -h, --help                 Show this help message
 USAGE
   exit "$exit_code"
@@ -110,26 +104,6 @@ import path from 'node:path'
 const [candidatePath] = process.argv.slice(2)
 process.stdout.write(path.resolve(candidatePath))
 EOF
-}
-
-hash_vault_root() {
-  local absolute_vault_root="$1"
-  node --input-type=module - "$absolute_vault_root" <<'EOF'
-import crypto from 'node:crypto'
-
-const [absoluteVaultRoot] = process.argv.slice(2)
-process.stdout.write(
-  crypto.createHash('sha1').update(absoluteVaultRoot).digest('hex').slice(0, 12),
-)
-EOF
-}
-
-resolve_assistant_state_root() {
-  local absolute_vault_root="$1"
-  local vault_name vault_hash
-  vault_name="$(basename "$absolute_vault_root")"
-  vault_hash="$(hash_vault_root "$absolute_vault_root")"
-  printf '%s\n' "$(dirname "$absolute_vault_root")/assistant-state/${vault_name}-${vault_hash}"
 }
 
 display_path() {
@@ -208,8 +182,6 @@ copy_tree_into_stage() {
 
   if [[ "$tree_kind" == "vault" ]]; then
     vault_file_count=$copied_count
-  else
-    assistant_state_file_count=$copied_count
   fi
 }
 
@@ -228,7 +200,6 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --zip)
-      format="zip"
       shift
       ;;
     --out-dir)
@@ -249,14 +220,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --docs|--no-docs|--with-docs|--no-tests|--tests|--with-tests)
       # review-gpt forwards docs/tests packaging toggles; data bundles do not use them.
-      shift
-      ;;
-    --with-assistant-state)
-      include_assistant_state=1
-      shift
-      ;;
-    --no-assistant-state)
-      include_assistant_state=0
       shift
       ;;
     -h|--help)
@@ -307,29 +270,15 @@ trap 'rm -rf "$stage_dir"' EXIT
 mkdir -p "$bundle_root"
 copy_tree_into_stage "$absolute_vault_root" "$bundle_root/vault" "vault"
 
-assistant_state_root=""
-assistant_state_status="excluded"
-if [[ "$include_assistant_state" == "1" ]]; then
-  assistant_state_root="$(resolve_assistant_state_root "$absolute_vault_root")"
-  if [[ -d "$assistant_state_root" ]]; then
-    copy_tree_into_stage "$assistant_state_root" "$bundle_root/assistant-state" "assistant-state"
-    assistant_state_status="included"
-  else
-    assistant_state_status="missing"
-  fi
-fi
-
-total_file_count=$((vault_file_count + assistant_state_file_count + 1))
+total_file_count=$((vault_file_count + 1))
 
 cat > "$bundle_root/bundle-manifest.json" <<EOF
 {
   "format": "murph.data-bundle.v1",
   "generatedAt": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
   "includes": {
-    "vault": true,
-    "assistantState": $([[ "$assistant_state_status" == "included" ]] && printf 'true' || printf 'false')
+    "vault": true
   },
-  "assistantStateStatus": "$assistant_state_status",
   "excludes": [
     ".env*",
     ".runtime/**",
@@ -344,7 +293,6 @@ cat > "$bundle_root/bundle-manifest.json" <<EOF
   ],
   "counts": {
     "vaultFiles": $vault_file_count,
-    "assistantStateFiles": $assistant_state_file_count,
     "totalFiles": $total_file_count
   }
 }
@@ -360,5 +308,4 @@ zip_display_path="$(display_path "$zip_path")"
 
 echo "Data package created."
 echo "Vault files: $vault_file_count"
-echo "Assistant-state files: $assistant_state_file_count ($assistant_state_status)"
 echo "ZIP: $zip_display_path ($(du -h "$zip_path" | awk '{print $1}'))"

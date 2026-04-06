@@ -20,13 +20,14 @@ export const RUNTIME_OPERATIONAL_ROOT_RELATIVE_PATH = `${RUNTIME_ROOT_RELATIVE_P
 export const RUNTIME_PROJECTION_ROOT_RELATIVE_PATH = `${RUNTIME_ROOT_RELATIVE_PATH}/projections`;
 export const RUNTIME_CACHE_ROOT_RELATIVE_PATH = `${RUNTIME_ROOT_RELATIVE_PATH}/cache`;
 export const RUNTIME_TEMP_ROOT_RELATIVE_PATH = `${RUNTIME_ROOT_RELATIVE_PATH}/tmp`;
+export const ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH = `${RUNTIME_OPERATIONAL_ROOT_RELATIVE_PATH}/assistant`;
 
 export const vaultLocalStateBucketDescriptors: readonly VaultLocalStateBucketDescriptor[] = [
   {
     classification: "operational",
     defaultPortability: "machine_local",
     description:
-      "Durable local operational state such as tokens, cursors, daemon launcher metadata, and user-configured local tool settings. Operational state is machine-local by default and must be classified explicitly before it can move with a hosted snapshot.",
+      "Durable local operational state such as tokens, cursors, daemon launcher metadata, assistant runtime residue, and user-configured local tool settings. Operational state is machine-local by default and must be classified explicitly before it can move with a hosted snapshot.",
     rebuildable: false,
     rootRelativePath: RUNTIME_OPERATIONAL_ROOT_RELATIVE_PATH,
   },
@@ -137,6 +138,22 @@ function isPortableOperationalRelativePath(relativePath: string): boolean {
   return (
     relativePath === INBOX_PROMOTIONS_RELATIVE_PATH
     || relativePath.startsWith(PORTABLE_WRITE_OPERATION_PREFIX)
+    || relativePath === ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH
+    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/automation.json`
+    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/failover.json`
+    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/cron`
+    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/cron/jobs.json`
+    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/outbox`
+    || relativePath.startsWith(`${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/outbox/`)
+    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/receipts`
+    || relativePath.startsWith(`${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/receipts/`)
+    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/sessions`
+    || relativePath.startsWith(`${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/sessions/`)
+    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/transcripts`
+    || relativePath.startsWith(`${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/transcripts/`)
+    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/usage`
+    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/usage/pending`
+    || relativePath.startsWith(`${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/usage/pending/`)
   );
 }
 
