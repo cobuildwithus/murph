@@ -3188,19 +3188,30 @@ cat
       buildExpectedCliShimScript(cliBinPath, 'vault-cli'),
     )
 
-    const result = await execFileAsync(
-      'bash',
-      [
-        '-lc',
-        `printf '{' | ${JSON.stringify(shimPath)} recipe upsert --input -`,
-      ],
-      {
-        env: withoutNodeV8Coverage({
-          ...process.env,
-          PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
-        }),
-      },
-    )
+    const result = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+      const child = execFile(
+        shimPath,
+        ['recipe', 'upsert', '--input', '-'],
+        {
+          encoding: 'utf8',
+          env: withoutNodeV8Coverage({
+            ...process.env,
+            PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
+          }),
+        },
+        (error, stdout, stderr) => {
+          if (error) {
+            Object.assign(error, { stderr, stdout })
+            reject(error)
+            return
+          }
+
+          resolve({ stderr, stdout })
+        },
+      )
+
+      child.stdin?.end('{')
+    })
 
     assert.equal(result.stdout.trim(), '{')
   } finally {
