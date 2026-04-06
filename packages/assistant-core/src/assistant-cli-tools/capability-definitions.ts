@@ -1766,7 +1766,7 @@ function defineNativeLocalOnlyTool<
     origin: 'native-local-only',
     localOnly: true,
     generatedFrom: null,
-    policyWrappers: [],
+    policyWrappers: ['output-redaction'],
   }, 'native-local')
 }
 

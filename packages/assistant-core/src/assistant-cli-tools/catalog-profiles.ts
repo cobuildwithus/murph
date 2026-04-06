@@ -2,7 +2,6 @@ import {
   CliBackedCapabilityHost,
   NativeLocalCapabilityHost,
   createAssistantCapabilityRegistry,
-  createAssistantToolCatalogFromCapabilities,
   type AssistantToolCatalog,
   type AssistantCapabilityDefinition,
 } from '../model-harness.js'
@@ -50,8 +49,7 @@ export function createDefaultAssistantToolCatalog(
   input: AssistantToolContext,
   options: AssistantToolCatalogOptions = {},
 ): AssistantToolCatalog {
-  return createAssistantToolCatalogFromCapabilities(
-    listDefaultAssistantCapabilities(input, options),
+  return createDefaultAssistantCapabilityRegistry(input, options).createToolCatalog(
     defaultAssistantCapabilityHosts,
   )
 }
@@ -72,8 +70,7 @@ export function createInboxRoutingAssistantCapabilityRegistry(
 export function createInboxRoutingAssistantToolCatalog(
   input: AssistantToolContext,
 ): AssistantToolCatalog {
-  return createAssistantToolCatalogFromCapabilities(
-    listInboxRoutingAssistantCapabilities(input),
+  return createInboxRoutingAssistantCapabilityRegistry(input).createToolCatalog(
     defaultAssistantCapabilityHosts,
   )
 }
@@ -87,8 +84,7 @@ export function createProviderTurnAssistantCapabilityRegistry(
 export function createProviderTurnAssistantToolCatalog(
   input: AssistantToolContext,
 ): AssistantToolCatalog {
-  return createAssistantToolCatalogFromCapabilities(
-    listProviderTurnAssistantCapabilities(input),
+  return createProviderTurnAssistantCapabilityRegistry(input).createToolCatalog(
     defaultAssistantCapabilityHosts,
   )
 }

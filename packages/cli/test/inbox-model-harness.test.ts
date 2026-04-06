@@ -16,10 +16,15 @@ import {
 import type { AssistantAskResult } from '@murphai/assistant-core/assistant-cli-contracts'
 import { writeAssistantChatResultArtifacts } from '@murphai/assistant-core/assistant/automation/artifacts'
 import {
+  createDefaultAssistantCapabilityRegistry,
   createDefaultAssistantToolCatalog,
   createInboxRoutingAssistantToolCatalog,
 } from '@murphai/assistant-core/assistant-cli-tools'
 import { materializeInboxModelBundle } from '@murphai/assistant-core/inbox-model-harness'
+import {
+  CliBackedCapabilityHost,
+  NativeLocalCapabilityHost,
+} from '@murphai/assistant-core/model-harness'
 import type { InboxServices } from '@murphai/assistant-core/inbox-services'
 import type { VaultServices } from '@murphai/assistant-core/vault-services'
 import { resolveAssistantStatePaths } from '@murphai/runtime-state/node'
@@ -1093,14 +1098,24 @@ test('materializeInboxModelBundle ignores derived manifests from another capture
 })
 
 test('createDefaultAssistantToolCatalog exposes assistant runtime, recipe, and food tools', () => {
+  const registry = createDefaultAssistantCapabilityRegistry({
+    vault: '/tmp/murph-vault',
+    vaultServices: createStubVaultServices(),
+  })
   const catalog = createDefaultAssistantToolCatalog({
     vault: '/tmp/murph-vault',
     vaultServices: createStubVaultServices(),
   })
+  const registryCatalog = registry.createToolCatalog([
+    new CliBackedCapabilityHost(),
+    new NativeLocalCapabilityHost(),
+  ])
   const tools = catalog.listTools()
   const readTextTool = tools.find((tool) => tool.name === 'vault.fs.readText')
   const goalUpsertTool = tools.find((tool) => tool.name === 'vault.goal.upsert')
   const shareLinkTool = tools.find((tool) => tool.name === 'vault.share.createLink')
+  const toolNames = tools.map((tool) => tool.name).sort()
+  const registryToolNames = registryCatalog.listTools().map((tool) => tool.name).sort()
 
   assert.equal(catalog.hasTool('assistant.state.show'), true)
   assert.equal(catalog.hasTool('assistant.memory.search'), true)
@@ -1123,6 +1138,7 @@ test('createDefaultAssistantToolCatalog exposes assistant runtime, recipe, and f
   assert.equal(catalog.hasTool('vault.food.upsert'), true)
   assert.equal(catalog.hasTool('vault.share.createLink'), true)
   assert.equal(readTextTool?.provenance.origin, 'native-local-only')
+  assert.deepEqual(readTextTool?.provenance.policyWrappers, ['output-redaction'])
   assert.equal(readTextTool?.mutationSemantics, 'read-only')
   assert.equal(readTextTool?.riskClass, 'low')
   assert.equal(readTextTool?.executionMode, 'native-local')
@@ -1134,6 +1150,7 @@ test('createDefaultAssistantToolCatalog exposes assistant runtime, recipe, and f
   assert.equal(shareLinkTool?.provenance.origin, 'hosted-api-backed')
   assert.equal(shareLinkTool?.mutationSemantics, 'outward-side-effect')
   assert.equal(shareLinkTool?.executionMode, 'native-local')
+  assert.deepEqual(toolNames, registryToolNames)
 })
 
 test('createDefaultAssistantToolCatalog can upsert and read derived knowledge pages directly', async () => {
