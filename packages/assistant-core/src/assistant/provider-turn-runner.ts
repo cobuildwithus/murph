@@ -63,6 +63,7 @@ interface AssistantTurnSharedPlan {
 }
 
 interface AssistantRouteTurnPlan {
+  assistantCliContract: string | null
   cliEnv: NodeJS.ProcessEnv
   conversationMessages?: ReadonlyArray<{
     content: string
@@ -325,7 +326,7 @@ async function resolveAssistantRouteTurnPlan(input: {
   const assistantHostedDeviceConnectAvailable = input.toolCatalog.hasTool('murph.device.connect')
   const assistantStateToolsAvailable = assistantCliExecutorAvailable
   const assistantMemoryRecallToolsAvailable = assistantCliExecutorAvailable
-  const [assistantMemoryPrompt, continuityContext] = await Promise.all([
+  const [assistantMemoryPrompt, assistantCliContract] = await Promise.all([
     !assistantMemoryRecallToolsAvailable || input.session.turnCount === 0
       ? loadAssistantMemoryPromptBlock({
           includeSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
@@ -344,9 +345,10 @@ async function resolveAssistantRouteTurnPlan(input: {
   const assistantCronToolsAvailable = assistantCliExecutorAvailable
 
   return {
+    assistantCliContract,
     cliEnv: input.sharedPlan.cliAccess.env,
     conversationMessages,
-    continuityContext,
+    continuityContext: null,
     firstTurnCheckInInjected: shouldInjectFirstTurnCheckIn,
     resumeProviderSessionId,
     sessionContext: shouldInjectBootstrapContext
@@ -356,6 +358,7 @@ async function resolveAssistantRouteTurnPlan(input: {
       : undefined,
     workingDirectory,
     systemPrompt: buildAssistantSystemPrompt({
+      assistantCliContract,
       allowSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
       assistantCliExecutorAvailable,
       assistantStateToolsAvailable,

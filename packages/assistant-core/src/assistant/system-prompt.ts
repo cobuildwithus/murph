@@ -6,6 +6,7 @@ import { isAssistantUserFacingChannel } from "./channel-presentation.js";
 import { ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE } from "./first-contact-welcome.js";
 
 export interface AssistantSystemPromptInput {
+  assistantCliContract: string | null;
   allowSensitiveHealthContext: boolean;
   assistantCliExecutorAvailable: boolean;
   assistantCronToolsAvailable: boolean;
@@ -54,6 +55,7 @@ export function buildAssistantSystemPrompt(
       assistantCronToolsAvailable: input.assistantCronToolsAvailable,
     }),
     buildAssistantCliGuidanceText(input.cliAccess),
+    buildAssistantCliContractText(input.assistantCliContract),
   ]
     .filter((value): value is string => Boolean(value))
     .join("\n\n");
@@ -271,6 +273,16 @@ function buildAssistantMemoryGuidanceText(input: {
     "Do not claim you updated assistant memory in this session unless a real memory-file edit happened.",
     ...sharedLines,
   ].join("\n\n");
+}
+
+function buildAssistantCliContractText(
+  contract: string | null
+): string | null {
+  if (!contract) {
+    return null;
+  }
+
+  return contract;
 }
 
 function buildAssistantCronGuidanceText(input: {

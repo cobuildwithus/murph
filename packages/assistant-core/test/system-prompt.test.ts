@@ -6,6 +6,7 @@ import { buildAssistantSystemPrompt } from "../src/assistant/system-prompt.js";
 
 test("buildAssistantSystemPrompt tells Murph to gather personal supplement and lab context before generic advice", () => {
   const prompt = buildAssistantSystemPrompt({
+    assistantCliContract: null,
     allowSensitiveHealthContext: true,
     assistantCliExecutorAvailable: true,
     assistantCronToolsAvailable: true,

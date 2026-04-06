@@ -6,6 +6,7 @@ import { buildAssistantSystemPrompt } from "../src/assistant/system-prompt.js";
 
 test("user-facing channel prompt bans markdown styling in replies", () => {
   const prompt = buildAssistantSystemPrompt({
+    assistantCliContract: null,
     allowSensitiveHealthContext: true,
     assistantCliExecutorAvailable: false,
     assistantCronToolsAvailable: false,
@@ -38,6 +39,7 @@ test("user-facing channel prompt bans markdown styling in replies", () => {
 
 test("local chat prompt does not inject the user-facing no-markdown rule", () => {
   const prompt = buildAssistantSystemPrompt({
+    assistantCliContract: null,
     allowSensitiveHealthContext: true,
     assistantCliExecutorAvailable: false,
     assistantCronToolsAvailable: false,
