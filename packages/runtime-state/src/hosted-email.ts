@@ -6,7 +6,6 @@ export interface HostedEmailThreadTarget {
   lastMessageId: string | null;
   references: string[];
   replyAliasAddress: string | null;
-  replyKey: string | null;
   schema: typeof HOSTED_EMAIL_THREAD_TARGET_SCHEMA;
   subject: string | null;
   to: string[];
@@ -17,7 +16,6 @@ export function createHostedEmailThreadTarget(input: {
   lastMessageId?: string | null;
   references?: ReadonlyArray<string> | null;
   replyAliasAddress?: string | null;
-  replyKey?: string | null;
   subject?: string | null;
   to?: ReadonlyArray<string> | null;
 }): HostedEmailThreadTarget {
@@ -32,7 +30,6 @@ export function createHostedEmailThreadTarget(input: {
     lastMessageId,
     references,
     replyAliasAddress: normalizeHostedEmailAddress(input.replyAliasAddress),
-    replyKey: normalizeHostedEmailRouteKey(input.replyKey),
     schema: HOSTED_EMAIL_THREAD_TARGET_SCHEMA,
     subject: normalizeHostedEmailSubject(input.subject),
     to: normalizeHostedEmailAddressList(input.to ?? []),
@@ -178,25 +175,15 @@ export function resolveHostedEmailDirectSenderLookupAddress(input: {
 }
 
 export function resolveHostedEmailAuthorizedSenderAddresses(input: {
-  allowThreadParticipants?: boolean;
-  threadTarget?: HostedEmailThreadTarget | null;
   verifiedEmailAddress?: string | null;
 }): string[] {
-  const allowThreadParticipants = input.allowThreadParticipants === true;
-
-  return normalizeHostedEmailAddressList([
-    input.verifiedEmailAddress,
-    ...(allowThreadParticipants ? input.threadTarget?.to ?? [] : []),
-    ...(allowThreadParticipants ? input.threadTarget?.cc ?? [] : []),
-  ]);
+  return normalizeHostedEmailAddressList([input.verifiedEmailAddress]);
 }
 
 export function isHostedEmailInboundSenderAuthorized(input: {
-  allowThreadParticipants?: boolean;
   envelopeFrom?: string | null;
   hasRepeatedHeaderFrom?: boolean;
   headerFrom?: string | null;
-  threadTarget?: HostedEmailThreadTarget | null;
   verifiedEmailAddress?: string | null;
 }): boolean {
   const sender = resolveHostedEmailInboundSenderAddress(input);
@@ -228,10 +215,6 @@ function resolveHostedEmailHeaderSenderAddress(value: string | null | undefined)
 }
 
 export function normalizeHostedEmailMessageId(value: string | null | undefined): string | null {
-  return normalizeHostedEmailOptionalText(value);
-}
-
-export function normalizeHostedEmailRouteKey(value: string | null | undefined): string | null {
   return normalizeHostedEmailOptionalText(value);
 }
 

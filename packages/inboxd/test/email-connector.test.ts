@@ -301,7 +301,6 @@ test("parseRawEmailMessage parses multipart email and normalizeParsedEmailMessag
     lastMessageId: '<msg_122@example.test>',
     references: ['<msg_100@example.test>', '<msg_122@example.test>'],
     replyAliasAddress: 'assistant+reply@example.test',
-    replyKey: 'reply_123',
     subject: 'Weekly check-in',
     to: ['alice@example.test'],
   }));

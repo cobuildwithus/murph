@@ -143,7 +143,6 @@ async function prepareHostedEmailSend(input: {
       messageId,
     ].filter((value): value is string => Boolean(value && value.trim())),
     replyAliasAddress: input.replyAddress,
-    replyKey: null,
     subject,
     to,
   });

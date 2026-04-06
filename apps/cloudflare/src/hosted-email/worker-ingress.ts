@@ -137,7 +137,6 @@ async function authorizeHostedEmailIngress(input: {
     envelopeFrom: input.envelopeFrom,
     hasRepeatedHeaderFrom: input.hasRepeatedHeaderFrom,
     headerFrom: input.headerFrom,
-    threadTarget: input.route.target,
     verifiedEmailAddress,
   });
 }

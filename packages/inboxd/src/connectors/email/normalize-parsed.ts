@@ -125,7 +125,6 @@ function resolveParsedEmailThreadTarget(input: {
       (value): value is string => Boolean(value && value.trim()),
     ),
     replyAliasAddress: null,
-    replyKey: null,
     subject: normalizeTextValue(input.message.subject ?? null),
     to: replyRecipient ? [replyRecipient] : [],
   });
