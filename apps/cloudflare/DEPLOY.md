@@ -164,7 +164,7 @@ The worker now authenticates `apps/web -> apps/cloudflare` dispatch/control traf
 - missing `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY` prevents encrypted hosted storage from decrypting
 - missing automation recipient JWKs prevents the worker from unwrapping managed per-user root keys
 - missing recovery recipient public JWK prevents explicit managed-user provisioning from succeeding
-- changing `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY` or `CF_PLATFORM_ENVELOPE_KEY_ID` in place still requires staging older keys in `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON`; missing keyring entries fail closed on `keyId` mismatch
+- changing `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY` or `CF_PLATFORM_ENVELOPE_KEY_ID` in place still requires staging older keys in `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON` for decrypt-by-`keyId`, but semantic-ID hosted objects also need a rewrite to the new canonical path because the worker no longer probes older root-key-derived locations; missing keyring entries still fail closed on `keyId` mismatch
 - rotating the automation unwrap key in place requires staging older private JWKs in `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON` until existing envelopes are migrated
 
 ### Optional provider/runtime secrets

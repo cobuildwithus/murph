@@ -1,4 +1,3 @@
-import { encodeBase64 } from "./base64.js";
 import {
   buildHostedStorageAad,
   deriveHostedStorageOpaqueId,
@@ -8,7 +7,6 @@ import {
   readEncryptedR2Json,
   writeEncryptedR2Json,
 } from "./crypto.js";
-import { listHostedStorageObjectKeys } from "./storage-paths.js";
 
 const HOSTED_PENDING_USAGE_DIRTY_USER_SCHEMA = "murph.hosted-pending-usage-dirty.v1";
 const HOSTED_PENDING_USAGE_RECORD_SCHEMA = "murph.hosted-pending-usage-record.v2";
@@ -508,13 +506,11 @@ async function pendingUsageRecordObjectKey(
 
 async function pendingUsageRecordObjectKeys(
   rootKey: Uint8Array,
-  keysById: Readonly<Record<string, Uint8Array>> | undefined,
+  _keysById: Readonly<Record<string, Uint8Array>> | undefined,
   userId: string,
   usageId: string,
 ): Promise<string[]> {
-  return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
-    pendingUsageRecordObjectKey(candidateRootKey, userId, usageId)
-  );
+  return [await pendingUsageRecordObjectKey(rootKey, userId, usageId)];
 }
 
 async function pendingUsageRecordObjectPrefix(rootKey: Uint8Array, userId: string): Promise<string> {
@@ -530,14 +526,10 @@ async function pendingUsageRecordObjectPrefix(rootKey: Uint8Array, userId: strin
 
 async function pendingUsageRecordObjectPrefixes(
   rootKey: Uint8Array,
-  keysById: Readonly<Record<string, Uint8Array>> | undefined,
+  _keysById: Readonly<Record<string, Uint8Array>> | undefined,
   userId: string,
 ): Promise<string[]> {
-  return Promise.all(
-    listHostedStorageRootKeys(rootKey, keysById).map((candidateRootKey) =>
-      pendingUsageRecordObjectPrefix(candidateRootKey, userId)
-    ),
-  );
+  return [await pendingUsageRecordObjectPrefix(rootKey, userId)];
 }
 
 async function pendingUsageDirtyUserObjectKey(rootKey: Uint8Array, userId: string): Promise<string> {
@@ -553,12 +545,10 @@ async function pendingUsageDirtyUserObjectKey(rootKey: Uint8Array, userId: strin
 
 async function pendingUsageDirtyUserObjectKeys(
   rootKey: Uint8Array,
-  keysById: Readonly<Record<string, Uint8Array>> | undefined,
+  _keysById: Readonly<Record<string, Uint8Array>> | undefined,
   userId: string,
 ): Promise<string[]> {
-  return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
-    pendingUsageDirtyUserObjectKey(candidateRootKey, userId)
-  );
+  return [await pendingUsageDirtyUserObjectKey(rootKey, userId)];
 }
 
 async function listHostedR2ObjectKeys(input: {
@@ -592,26 +582,6 @@ async function listHostedR2ObjectKeys(input: {
   }
 
   return limit === null ? keys : keys.slice(0, limit);
-}
-
-function listHostedStorageRootKeys(
-  rootKey: Uint8Array,
-  keysById: Readonly<Record<string, Uint8Array>> | undefined,
-): Uint8Array[] {
-  const seen = new Set<string>();
-  const unique: Uint8Array[] = [];
-
-  for (const key of [rootKey, ...Object.values(keysById ?? {})]) {
-    const signature = encodeBase64(key);
-    if (seen.has(signature)) {
-      continue;
-    }
-
-    seen.add(signature);
-    unique.push(key);
-  }
-
-  return unique;
 }
 
 function requireSchema<T extends string>(value: unknown, label: string, expected: T): T {

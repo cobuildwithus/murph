@@ -57,7 +57,7 @@ Current worker env/config names read directly by `src/env.ts`:
 - optional non-secret: `HOSTED_EMAIL_DEFAULT_SUBJECT` overrides the default hosted email subject
 - optional non-secret: `HOSTED_EMAIL_DOMAIN`, `HOSTED_EMAIL_FROM_ADDRESS`, and `HOSTED_EMAIL_LOCAL_PART` configure the fixed hosted email sender identity plus stable per-user reply aliases
 - optional non-secret: `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID` defaults to `v1`
-- optional secret: `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON` may provide a JSON object of `{ keyId: base64Key }` entries so older encrypted hosted objects remain readable during key rotation
+- optional secret: `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON` may provide a JSON object of `{ keyId: base64Key }` entries so already-addressed hosted ciphertext can still decrypt during key rotation
 - optional non-secret: `HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS` defaults to `21600000` in the checked-in Wrangler scaffold
 - optional non-secret: `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS` defaults to `3`
 - optional non-secret: `HOSTED_EXECUTION_RETRY_DELAY_MS` defaults to `30000`
@@ -173,7 +173,7 @@ The Cloudflare app now keeps two focused Vitest lanes:
 - Manual deploy smoke no longer stops at `POST /run` acceptance. It now polls the operator status route until the queue drains, `lastRunAt` advances, and durable bundle refs exist, so a broken containerized run does not look healthy just because the enqueue succeeded.
 - The checked-in Wrangler scaffold and rendered deploy config now declare the four required hosted runtime secrets through Wrangler's experimental `secrets.required` support, so local `wrangler` validation and deploy/version uploads fail early when those names are unset. Keep that list tight and treat optional provider secrets as separately managed Worker configuration.
 - The repo now ships `apps/cloudflare/r2-bundles-lifecycle.json` plus `pnpm --dir apps/cloudflare r2:lifecycle:apply` so the configured bundles buckets can expire transient execution journals, transient dispatch payload blobs, committed side-effect journal objects, hosted email thread routes, and hosted raw email messages under their `transient/**` prefixes after 7 days. Successful runs also best-effort delete consumed queue payload blobs and raw email bodies earlier so the lifecycle rules stay a backstop instead of the primary cleanup path.
-- Stored ciphertext envelopes now decrypt by their embedded `keyId` through the configured keyring. The repo still writes with one active platform envelope key at a time, so rotations should stage the old keys in `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON` until older objects age out or are rewritten; missing keyring entries still fail closed.
+- Stored ciphertext envelopes now decrypt by their embedded `keyId` through the configured keyring. That only helps once the caller already has the canonical object key or explicit object ref; semantic-ID stores such as per-user env, usage, journals, email routes/messages, and similar opaque path lookups no longer probe prior root-key-derived paths. Rotate those stores by rewriting objects at the new canonical path before cutting over, and keep the old keys in `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON` until the rewritten ciphertext no longer needs them. Missing keyring entries still fail closed.
 
 ## Runtime boundary
 

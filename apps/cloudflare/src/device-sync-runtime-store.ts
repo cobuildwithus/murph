@@ -17,11 +17,10 @@ import { readEncryptedR2Json, writeEncryptedR2Json } from "./crypto.js";
 import { listHostedStorageObjectKeys } from "./storage-paths.js";
 
 const DEVICE_SYNC_RUNTIME_SCHEMA = "murph.hosted-device-sync-runtime.v1";
-const DEVICE_SYNC_RUNTIME_LEGACY_SCHEMA = "murph.hosted-device-sync-runtime-mirror.v1";
 
 interface StoredDeviceSyncRuntimeState {
   generatedAt: string;
-  schema: typeof DEVICE_SYNC_RUNTIME_SCHEMA | typeof DEVICE_SYNC_RUNTIME_LEGACY_SCHEMA;
+  schema: typeof DEVICE_SYNC_RUNTIME_SCHEMA;
   snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse;
 }
 
@@ -342,10 +341,8 @@ function requireSchema(
   label: string,
 ): StoredDeviceSyncRuntimeState["schema"] {
   const schema = requireString(value, label);
-  if (schema !== DEVICE_SYNC_RUNTIME_SCHEMA && schema !== DEVICE_SYNC_RUNTIME_LEGACY_SCHEMA) {
-    throw new TypeError(
-      `${label} must be ${DEVICE_SYNC_RUNTIME_SCHEMA} or ${DEVICE_SYNC_RUNTIME_LEGACY_SCHEMA}.`,
-    );
+  if (schema !== DEVICE_SYNC_RUNTIME_SCHEMA) {
+    throw new TypeError(`${label} must be ${DEVICE_SYNC_RUNTIME_SCHEMA}.`);
   }
   return schema;
 }

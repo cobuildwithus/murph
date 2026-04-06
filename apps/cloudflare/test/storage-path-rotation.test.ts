@@ -47,7 +47,7 @@ describe("opaque storage path rotation", () => {
     expect(bucket.deleted).not.toContain(objectKey);
   });
 
-  it("keeps per-user env readable and clearable across platform-envelope-key rotation", async () => {
+  it("requires a rewrite before per-user env survives platform root-key rotation", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const oldKey = createTestRootKey(5);
     const nextKey = createTestRootKey(6);
@@ -68,11 +68,16 @@ describe("opaque storage path rotation", () => {
       keysById: { next: nextKey, old: oldKey },
     });
 
-    expect(await rotatedStore.readUserEnv(userId)).toEqual(plaintext);
+    expect(await rotatedStore.readUserEnv(userId)).toBeNull();
 
     await rotatedStore.clearUserEnv(userId);
-    expect(await rotatedStore.readUserEnv(userId)).toBeNull();
-    expect(bucket.deleted.length).toBeGreaterThanOrEqual(1);
+    expect(bucket.deleted).toHaveLength(1);
+    expect(await createHostedUserEnvStore({
+      bucket,
+      key: oldKey,
+      keyId: "old",
+      keysById: { next: nextKey, old: oldKey },
+    }).readUserEnv(userId)).toEqual(plaintext);
   });
 
   it("ignores removed raw-path per-user artifacts", async () => {
@@ -123,7 +128,7 @@ describe("opaque storage path rotation", () => {
     expect(bucket.deleted).not.toContain(objectKey);
   });
 
-  it("keeps per-user artifacts readable and deletable across platform-envelope-key rotation", async () => {
+  it("requires a rewrite before per-user artifacts survive platform root-key rotation", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const oldKey = createTestRootKey(11);
     const nextKey = createTestRootKey(12);
@@ -158,10 +163,17 @@ describe("opaque storage path rotation", () => {
       userId,
     });
 
-    expect(await rotatedStore.readArtifact(sha256)).toEqual(plaintext);
+    expect(await rotatedStore.readArtifact(sha256)).toBeNull();
     await rotatedStore.deleteArtifact(sha256);
     expect(await rotatedStore.readArtifact(sha256)).toBeNull();
-    expect(bucket.deleted.length).toBeGreaterThanOrEqual(1);
+    expect(bucket.deleted).toHaveLength(1);
+    expect(await createHostedArtifactStore({
+      bucket,
+      key: oldKey,
+      keyId: "old",
+      keysById: { next: nextKey, old: oldKey },
+      userId,
+    }).readArtifact(sha256)).toEqual(plaintext);
   });
 
   it("ignores removed raw-path execution journals", async () => {
@@ -211,7 +223,7 @@ describe("opaque storage path rotation", () => {
     expect(bucket.deleted).not.toContain(objectKey);
   });
 
-  it("keeps execution journals readable and deletable across platform-envelope-key rotation", async () => {
+  it("requires a rewrite before execution journals survive platform root-key rotation", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const oldKey = createTestRootKey(13);
     const nextKey = createTestRootKey(14);
@@ -244,7 +256,16 @@ describe("opaque storage path rotation", () => {
       keysById: { next: nextKey, old: oldKey },
     });
 
-    expect(await rotatedStore.readCommittedResult(userId, eventId)).toMatchObject({
+    expect(await rotatedStore.readCommittedResult(userId, eventId)).toBeNull();
+    await rotatedStore.deleteCommittedResult(userId, eventId);
+    expect(await rotatedStore.readCommittedResult(userId, eventId)).toBeNull();
+    expect(bucket.deleted).toHaveLength(1);
+    expect(await createHostedExecutionJournalStore({
+      bucket,
+      key: oldKey,
+      keyId: "old",
+      keysById: { next: nextKey, old: oldKey },
+    }).readCommittedResult(userId, eventId)).toMatchObject({
       eventId,
       result: {
         eventsHandled: 1,
@@ -252,9 +273,6 @@ describe("opaque storage path rotation", () => {
       },
       userId,
     });
-    await rotatedStore.deleteCommittedResult(userId, eventId);
-    expect(await rotatedStore.readCommittedResult(userId, eventId)).toBeNull();
-    expect(bucket.deleted.length).toBeGreaterThanOrEqual(1);
   });
 
   it("keeps referenced dispatch payload blobs readable across platform-envelope-key rotation", async () => {
@@ -263,10 +281,13 @@ describe("opaque storage path rotation", () => {
     const nextKey = createTestRootKey(8);
     const dispatch = {
       event: {
-        kind: "vault.share.accepted",
-        share: {
-          shareId: "hshare_123",
+        kind: "device-sync.wake",
+        connectionId: "conn_rotated",
+        hint: {
+          traceId: "trace_rotated",
         },
+        provider: "oura",
+        reason: "webhook_hint",
         userId: "user_live_share",
       },
       eventId: "evt_share_123",
@@ -293,7 +314,7 @@ describe("opaque storage path rotation", () => {
     expect(bucket.deleted.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("keeps hosted raw email messages readable across platform-envelope-key rotation", async () => {
+  it("requires a rewrite before hosted raw email messages survive platform root-key rotation", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const oldKey = createTestRootKey(9);
     const nextKey = createTestRootKey(10);
@@ -315,6 +336,6 @@ describe("opaque storage path rotation", () => {
       keysById: { next: nextKey, old: oldKey },
       rawMessageKey,
       userId,
-    })).toEqual(plaintext);
+    })).toBeNull();
   });
 });
