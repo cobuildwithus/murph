@@ -155,13 +155,6 @@ export async function reconcileHostedAssistantChannelCapabilities(
       telegramAutoReplyEnabled,
     },
   );
-  const nextPreferredChannels = reconcileHostedAssistantChannels(
-    automationState.preferredChannels,
-    {
-      emailAutoReplyEnabled,
-      telegramAutoReplyEnabled,
-    },
-  );
   const nextBacklogChannels = reconcileHostedAssistantBacklogChannels(
     automationState.autoReplyBacklogChannels,
     nextAutoReplyChannels,
@@ -170,9 +163,6 @@ export async function reconcileHostedAssistantChannelCapabilities(
   const channelsChanged = !sameHostedAssistantChannels(
     automationState.autoReplyChannels,
     nextAutoReplyChannels,
-  ) || !sameHostedAssistantChannels(
-    automationState.preferredChannels,
-    nextPreferredChannels,
   ) || !sameHostedAssistantChannels(
     automationState.autoReplyBacklogChannels,
     nextBacklogChannels,
@@ -183,7 +173,6 @@ export async function reconcileHostedAssistantChannelCapabilities(
       ...automationState,
       autoReplyScanCursor: null,
       autoReplyChannels: nextAutoReplyChannels,
-      preferredChannels: nextPreferredChannels,
       autoReplyBacklogChannels: nextBacklogChannels,
       autoReplyPrimed: false,
       updatedAt: new Date().toISOString(),

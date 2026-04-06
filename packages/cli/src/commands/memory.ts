@@ -5,15 +5,15 @@ import {
   memoryRecordSchema,
   memorySearchHitSchema,
   memorySectionSchema,
-} from "../../../contracts/src/memory.js";
+  type MemorySection,
+} from "@murphai/contracts";
 import {
   forgetMemory,
   getMemoryRecord,
   readMemoryDocument,
   searchMemory,
   upsertMemory,
-} from "../../../core/src/memory.js";
-import type { MemorySection } from "../../../contracts/src/memory.js";
+} from "@murphai/core";
 
 const vaultOptionSchema = z.object({
   vault: z.string().min(1).describe("Vault root."),

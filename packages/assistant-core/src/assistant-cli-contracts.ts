@@ -66,37 +66,6 @@ export const assistantTurnEventKindValues = [
   'failed',
   'completed',
 ] as const
-export const assistantMemoryRecordKindValues = [
-  'long-term',
-  'daily',
-] as const
-export const assistantMemoryWriteActorValues = [
-  'assistant',
-  'operator',
-] as const
-export const assistantMemoryQueryScopeValues = [
-  'long-term',
-  'daily',
-  'all',
-] as const
-export const assistantMemoryWriteScopeValues = [
-  'long-term',
-  'daily',
-  'both',
-] as const
-export const assistantMemoryLongTermSectionValues = [
-  'Identity',
-  'Preferences',
-  'Standing instructions',
-  'Health context',
-] as const
-export const assistantMemoryVisibleSectionValues = [
-  ...assistantMemoryLongTermSectionValues,
-  'Notes',
-] as const
-const assistantMemoryMarkdownFilePathSchema = z
-  .string()
-  .regex(/^(MEMORY\.md|memory\/\d{4}-\d{2}-\d{2}\.md)$/u)
 export const assistantCronScheduleKindValues = [
   'at',
   'every',
@@ -197,8 +166,6 @@ export const assistantRuntimeEventKindValues = [
   'runtime-budget.quarantined',
   'cron.store.quarantined',
   'cron.run.quarantined',
-  'memory.upserted',
-  'memory.removed',
   'runtime.maintenance',
 ] as const
 
@@ -711,7 +678,6 @@ export const assistantStatusAutomationSchema = z
     inboxScanCursor: z.lazy(() => assistantAutomationCursorSchema).nullable(),
     autoReplyScanCursor: z.lazy(() => assistantAutomationCursorSchema).nullable(),
     autoReplyChannels: z.array(z.string().min(1)),
-    preferredChannels: z.array(z.string().min(1)),
     autoReplyBacklogChannels: z.array(z.string().min(1)),
     autoReplyPrimed: z.boolean(),
     updatedAt: isoTimestampSchema.nullable(),
@@ -778,27 +744,6 @@ export const assistantDoctorResultSchema = z
     checks: z.array(assistantDoctorCheckSchema),
   })
   .strict()
-
-export const assistantMemoryRecordProvenanceSchema = z.object({
-  writtenBy: z.enum(assistantMemoryWriteActorValues),
-  sessionId: z.string().min(1).nullable(),
-  turnId: z.string().min(1).nullable(),
-})
-
-export const assistantMemoryRecordSchema = z.object({
-  id: z.string().min(1),
-  kind: z.enum(assistantMemoryRecordKindValues),
-  section: z.enum(assistantMemoryVisibleSectionValues),
-  text: z.string().min(1),
-  recordedAt: z.string().min(1).nullable(),
-  sourcePath: pathSchema,
-  sourceLine: z.number().int().positive(),
-  provenance: assistantMemoryRecordProvenanceSchema.nullable(),
-})
-
-export const assistantMemorySearchHitSchema = assistantMemoryRecordSchema.extend({
-  score: z.number().int().nonnegative(),
-})
 
 export const assistantCronAtScheduleSchema = z
   .object({
@@ -906,7 +851,6 @@ export const assistantCronJobSchema = z
     prompt: z.string().min(1),
     schedule: assistantCronScheduleSchema,
     target: assistantCronTargetSchema,
-    stateDocId: z.string().min(1).nullable().default(null),
     foodAutoLog: assistantCronFoodAutoLogSchema.optional(),
     createdAt: isoTimestampSchema,
     updatedAt: isoTimestampSchema,
@@ -991,94 +935,6 @@ export const assistantSessionShowResultSchema = z.object({
   vault: pathSchema,
   stateRoot: pathSchema,
   session: assistantSessionOutputSchema,
-})
-
-export const assistantMemorySearchResultSchema = z.object({
-  vault: pathSchema,
-  stateRoot: pathSchema,
-  query: z.string().min(1).nullable(),
-  scope: z.enum(assistantMemoryQueryScopeValues),
-  section: z.enum(assistantMemoryVisibleSectionValues).nullable(),
-  results: z.array(assistantMemorySearchHitSchema),
-})
-
-export const assistantMemoryGetResultSchema = z.object({
-  vault: pathSchema,
-  stateRoot: pathSchema,
-  memory: assistantMemoryRecordSchema,
-})
-
-export const assistantMemoryFileReadResultSchema = z.object({
-  vault: pathSchema,
-  stateRoot: pathSchema,
-  path: assistantMemoryMarkdownFilePathSchema,
-  present: z.boolean(),
-  text: z.string(),
-  totalChars: z.number().int().nonnegative(),
-  truncated: z.boolean(),
-})
-
-export const assistantMemoryFileWriteResultSchema = z.object({
-  vault: pathSchema,
-  stateRoot: pathSchema,
-  path: assistantMemoryMarkdownFilePathSchema,
-  totalChars: z.number().int().nonnegative(),
-})
-
-export const assistantMemoryFileAppendResultSchema = z.object({
-  vault: pathSchema,
-  stateRoot: pathSchema,
-  path: assistantMemoryMarkdownFilePathSchema,
-  appended: z.boolean(),
-  section: z.enum(assistantMemoryVisibleSectionValues),
-  totalBullets: z.number().int().nonnegative(),
-})
-
-export const assistantStateDocumentValueSchema = z.record(
-  z.string(),
-  z.unknown(),
-)
-
-export const assistantStateDocumentSchema = z.object({
-  docId: z.string().min(1),
-  documentPath: pathSchema,
-  exists: z.boolean(),
-  updatedAt: isoTimestampSchema.nullable(),
-  value: assistantStateDocumentValueSchema.nullable(),
-})
-
-export const assistantStateDocumentListEntrySchema = z.object({
-  docId: z.string().min(1),
-  documentPath: pathSchema,
-  updatedAt: isoTimestampSchema,
-})
-
-export const assistantStateListResultSchema = z.object({
-  vault: pathSchema,
-  stateRoot: pathSchema,
-  documentsRoot: pathSchema,
-  prefix: z.string().min(1).nullable(),
-  documents: z.array(assistantStateDocumentListEntrySchema),
-})
-
-export const assistantStateShowResultSchema = z.object({
-  vault: pathSchema,
-  stateRoot: pathSchema,
-  documentsRoot: pathSchema,
-  document: assistantStateDocumentSchema,
-})
-
-export const assistantStatePutResultSchema = assistantStateShowResultSchema
-
-export const assistantStatePatchResultSchema = assistantStateShowResultSchema
-
-export const assistantStateDeleteResultSchema = z.object({
-  vault: pathSchema,
-  stateRoot: pathSchema,
-  documentsRoot: pathSchema,
-  docId: z.string().min(1),
-  documentPath: pathSchema,
-  existed: z.boolean(),
 })
 
 export const assistantCronStatusResultSchema = z.object({
@@ -1250,8 +1106,6 @@ export const assistantAutomationStateSchema = z
     inboxScanCursor: assistantAutomationCursorSchema.nullable(),
     autoReplyScanCursor: assistantAutomationCursorSchema.nullable(),
     autoReplyChannels: z.array(z.string().min(1)),
-    preferredChannels: z.array(z.string().min(1)).default([]),
-    preferredScheduledUpdates: z.array(z.string().min(1)).optional(),
     autoReplyBacklogChannels: z.array(z.string().min(1)).default([]),
     autoReplyPrimed: z.boolean(),
     updatedAt: isoTimestampSchema,
@@ -1350,54 +1204,6 @@ export type AssistantSessionListResult = z.infer<
 >
 export type AssistantSessionShowResult = z.infer<
   typeof assistantSessionShowResultSchema
->
-export type AssistantMemoryRecord = z.infer<
-  typeof assistantMemoryRecordSchema
->
-export type AssistantMemoryRecordProvenance = z.infer<
-  typeof assistantMemoryRecordProvenanceSchema
->
-export type AssistantMemorySearchHit = z.infer<
-  typeof assistantMemorySearchHitSchema
->
-export type AssistantMemorySearchResult = z.infer<
-  typeof assistantMemorySearchResultSchema
->
-export type AssistantMemoryGetResult = z.infer<
-  typeof assistantMemoryGetResultSchema
->
-export type AssistantMemoryFileReadResult = z.infer<
-  typeof assistantMemoryFileReadResultSchema
->
-export type AssistantMemoryFileWriteResult = z.infer<
-  typeof assistantMemoryFileWriteResultSchema
->
-export type AssistantMemoryFileAppendResult = z.infer<
-  typeof assistantMemoryFileAppendResultSchema
->
-export type AssistantStateDocumentValue = z.infer<
-  typeof assistantStateDocumentValueSchema
->
-export type AssistantStateDocument = z.infer<
-  typeof assistantStateDocumentSchema
->
-export type AssistantStateDocumentListEntry = z.infer<
-  typeof assistantStateDocumentListEntrySchema
->
-export type AssistantStateListResult = z.infer<
-  typeof assistantStateListResultSchema
->
-export type AssistantStateShowResult = z.infer<
-  typeof assistantStateShowResultSchema
->
-export type AssistantStatePutResult = z.infer<
-  typeof assistantStatePutResultSchema
->
-export type AssistantStatePatchResult = z.infer<
-  typeof assistantStatePatchResultSchema
->
-export type AssistantStateDeleteResult = z.infer<
-  typeof assistantStateDeleteResultSchema
 >
 export type AssistantCronSchedule = z.infer<typeof assistantCronScheduleSchema>
 export type AssistantCronScheduleInput = z.infer<typeof assistantCronScheduleInputSchema>
@@ -1509,16 +1315,6 @@ export type AssistantTurnEventKind =
   (typeof assistantTurnEventKindValues)[number]
 export type AssistantOutboxIntentStatus =
   (typeof assistantOutboxIntentStatusValues)[number]
-export type AssistantMemoryRecordKind =
-  (typeof assistantMemoryRecordKindValues)[number]
-export type AssistantMemoryQueryScope =
-  (typeof assistantMemoryQueryScopeValues)[number]
-export type AssistantMemoryWriteScope =
-  (typeof assistantMemoryWriteScopeValues)[number]
-export type AssistantMemoryLongTermSection =
-  (typeof assistantMemoryLongTermSectionValues)[number]
-export type AssistantMemoryVisibleSection =
-  (typeof assistantMemoryVisibleSectionValues)[number]
 export type AssistantCronScheduleKind =
   (typeof assistantCronScheduleKindValues)[number]
 export type AssistantCronTrigger = (typeof assistantCronTriggerValues)[number]

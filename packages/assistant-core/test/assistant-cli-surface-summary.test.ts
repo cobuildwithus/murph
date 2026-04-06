@@ -26,26 +26,16 @@ test('buildAssistantCliSurfaceContract compiles llms-full output into a terse pr
         },
       },
       {
-        name: 'assistant cron add',
-        description: 'Create one assistant cron job backed by the local assistant runtime.',
+        name: 'automation upsert',
+        description: 'Create or update one automation record from a JSON payload.',
         schema: {
-          args: {
-            properties: {
-              prompt: { type: 'string' },
-            },
-            required: ['prompt'],
-            type: 'object',
-          },
           options: {
             properties: {
-              alias: { type: 'string' },
-              channel: { type: 'string' },
-              name: { type: 'string' },
+              input: { type: 'string' },
               requestId: { type: 'string' },
-              session: { type: 'string' },
               vault: { type: 'string' },
             },
-            required: ['name', 'vault'],
+            required: ['input', 'vault'],
             type: 'object',
           },
         },
@@ -142,7 +132,7 @@ test('buildAssistantCliSurfaceContract compiles llms-full output into a terse pr
   )
   assert.match(contract ?? '', /Family Index:/u)
   assert.match(contract ?? '', /- root \(1\): chat/u)
-  assert.match(contract ?? '', /- assistant \(1\): cron add/u)
+  assert.match(contract ?? '', /- automation \(1\): upsert/u)
   assert.match(contract ?? '', /- `journal append`: Append freeform markdown text to one journal day\.; args <date>; required --text\./u)
   assert.match(contract ?? '', /- `search query`: Search the local read model when the target is fuzzy or remembered by phrase rather than exact id\.; required --limit=integer; common --backend=auto\|scan\|sqlite, --kind=list, --recordType=list, --text\./u)
   assert.doesNotMatch(contract ?? '', /additionalProperties/u)

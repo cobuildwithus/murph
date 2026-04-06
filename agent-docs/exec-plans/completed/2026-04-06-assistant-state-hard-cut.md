@@ -1,6 +1,6 @@
 # Hard-cut assistant-state into canonical memory, canonical automation, and vault runtime assistant ops
 
-Status: active
+Status: completed
 Created: 2026-04-06
 Updated: 2026-04-06
 
@@ -54,9 +54,7 @@ Updated: 2026-04-06
    Mitigation: Reuse existing bank/query/command-noun patterns and delete old assistant-only surfaces instead of wrapping them.
 2. Risk: Hosted continuity breaks if assistant runtime portability is under-classified.
    Mitigation: Explicitly classify assistant runtime subpaths and add hosted snapshot tests plus direct scenario proof.
-3. Risk: Setup/onboarding still writes product preferences into runtime state.
-   Mitigation: Split global assistant settings from runtime cursors and redirect setup writes to canonical settings.
-4. Risk: Architectural docs drift from the hard cut.
+3. Risk: Architectural docs drift from the hard cut.
    Mitigation: Update architecture/contracts/command docs in the same change.
 
 ## Workstreams
@@ -80,12 +78,31 @@ Updated: 2026-04-06
 
 ## Verification
 
-- Planned commands:
-  - `pnpm typecheck`
-  - focused package tests for `runtime-state`, `assistant-core`, `cli`, and any new memory/automation query/core surfaces
-  - direct hosted snapshot scenario proving portable assistant runtime survives while machine-local files do not
-  - direct CLI/product scenario proving canonical memory and automation read/write/query behavior
+- Completed commands:
+  - `pnpm --dir packages/runtime-state build`
+  - `pnpm --dir packages/contracts build`
+  - `pnpm --dir packages/core build`
+  - `pnpm --dir packages/query build`
+  - `pnpm --dir packages/assistant-core build`
+  - `pnpm --dir packages/assistant-cli build`
+  - `pnpm --dir packages/cli build`
+  - `pnpm --dir packages/assistant-core exec tsc -p tsconfig.json --noEmit --pretty false`
+  - `pnpm --dir packages/assistant-cli exec tsc -p tsconfig.typecheck.json --pretty false`
+  - `pnpm --dir packages/cli exec tsc -p tsconfig.typecheck.json --pretty false`
+  - `pnpm --dir packages/runtime-state test`
+  - `pnpm --dir packages/assistant-runtime test`
+  - `pnpm --dir packages/assistantd test`
+  - `pnpm --dir packages/cli exec vitest run --config vitest.workspace.ts test/assistant-runtime-state-service.test.ts test/assistant-daemon-client.test.ts test/assistant-cli.test.ts --no-coverage`
+  - `pnpm --dir packages/cli exec vitest run --config vitest.workspace.ts test/setup-cli.test.ts test/assistant-cron.test.ts --no-coverage`
+  - `pnpm --dir packages/cli exec vitest run --config vitest.workspace.ts test/assistant-provider.test.ts test/incur-smoke.test.ts --no-coverage`
+  - `pnpm --dir packages/cli exec vitest run --config vitest.workspace.ts test/assistant-state.test.ts test/release-script-coverage-audit.test.ts --no-coverage`
+  - `pnpm --dir packages/cli exec vitest run --config vitest.workspace.ts test/assistant-service.test.ts test/assistant-runtime.test.ts --no-coverage`
+  - `pnpm --dir packages/assistantd exec vitest run test/http.test.ts --no-coverage`
+  - `pnpm --dir packages/cli exec vitest run --config vitest.workspace.ts test/assistant-daemon-client.test.ts --no-coverage`
 
 ## Notes
 
 - This task is explicitly large enough to require a `simplify` audit before the final review pass.
+- No separate canonical settings noun is planned for this hard cut.
+- Canonical durable assistant memory remains one file at `bank/memory.md`.
+Completed: 2026-04-06

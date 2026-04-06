@@ -386,7 +386,6 @@ test("assistant-core automation state round-trips through canonical local storag
 
     const rewritten = assistantAutomationStateSchema.parse({
       ...coreSaved,
-      preferredChannels: ["telegram"],
       updatedAt: "2026-03-28T12:00:00.000Z",
     });
     const rewrittenAutomationPath = resolveAssistantStatePaths(rewrittenVaultRoot).automationPath;

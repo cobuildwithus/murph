@@ -142,7 +142,11 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await writeFile(path.join(vaultRoot, "exports", "packs", "bundle.zip"), "skip-me\n");
     await writeFile(path.join(vaultRoot, "raw", "notes.json"), "{\"keep\":true}\n");
     await writeFile(rawAttachmentPath, Buffer.from("pdf-binary-artifact\n", "utf8"));
-    await writeFile(path.join(assistantRuntimeRoot, "automation.json"), "{\"autoReplyChannels\":[\"linq\"]}\n");
+    await writeFile(path.join(assistantRuntimeRoot, "automation-state.json"), "{\"autoReplyChannels\":[\"linq\"]}\n");
+    await writeFile(
+      path.join(assistantRuntimeRoot, "cron", "automation-runtime.json"),
+      "{\"version\":1,\"automations\":[{\"automationId\":\"automation_1\"}]}\n",
+    );
     await writeFile(path.join(assistantRuntimeRoot, "cron", "jobs.json"), "{\"version\":1,\"jobs\":[{\"jobId\":\"cron_1\"}]}\n");
     await writeFile(path.join(assistantRuntimeRoot, "cron", "runs", "cronrun_1.jsonl"), "{\"status\":\"ok\"}\n");
     await writeFile(path.join(assistantRuntimeRoot, "diagnostics", "events.jsonl"), "{\"kind\":\"assistant.scan\"}\n");
@@ -176,7 +180,12 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       { expected: null, path: ".runtime/operations/assistant", root: "vault" },
       {
         expected: "{\"autoReplyChannels\":[\"linq\"]}\n",
-        path: ".runtime/operations/assistant/automation.json",
+        path: ".runtime/operations/assistant/automation-state.json",
+        root: "vault",
+      },
+      {
+        expected: "{\"version\":1,\"automations\":[{\"automationId\":\"automation_1\"}]}\n",
+        path: ".runtime/operations/assistant/cron/automation-runtime.json",
         root: "vault",
       },
       {
@@ -219,7 +228,7 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       { expected: null, path: ".runtime/operations/assistant/diagnostics/snapshot.json", root: "vault" },
       { expected: null, path: ".runtime/operations/assistant/cron/runs/cronrun_1.jsonl", root: "vault" },
       {
-        expected: null,
+        expected: "{\"state\":\"scratch\"}\n",
         path: ".runtime/operations/assistant/state/onboarding/first-contact/bootstrap.json",
         root: "vault",
       },
@@ -288,8 +297,12 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       "staged payload\n",
     );
     assert.equal(
-      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "automation.json"), "utf8"),
+      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "automation-state.json"), "utf8"),
       "{\"autoReplyChannels\":[\"linq\"]}\n",
+    );
+    assert.equal(
+      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "cron", "automation-runtime.json"), "utf8"),
+      "{\"version\":1,\"automations\":[{\"automationId\":\"automation_1\"}]}\n",
     );
     assert.equal(
       await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "cron", "jobs.json"), "utf8"),
@@ -314,6 +327,10 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     assert.equal(
       await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "usage", "pending", "usage_1.json"), "utf8"),
       "{\"usage\":true}\n",
+    );
+    assert.equal(
+      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "state", "onboarding", "first-contact", "bootstrap.json"), "utf8"),
+      "{\"state\":\"scratch\"}\n",
     );
     assert.equal(
       await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "failover.json"), "utf8"),
@@ -343,9 +360,6 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     );
     await assert.rejects(
       readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "cron", "runs", "cronrun_1.jsonl"), "utf8"),
-    );
-    await assert.rejects(
-      readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "state", "onboarding", "first-contact", "bootstrap.json"), "utf8"),
     );
     await assert.rejects(
       readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "secrets", "sessions", "session_1.json"), "utf8"),
@@ -405,7 +419,11 @@ test("runtime-state portability defaults operational paths to machine-local unle
     classification: "operational",
     portability: "portable",
   });
-  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/automation.json")).toMatchObject({
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/automation-state.json")).toMatchObject({
+    classification: "operational",
+    portability: "portable",
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/cron/automation-runtime.json")).toMatchObject({
     classification: "operational",
     portability: "portable",
   });
@@ -428,6 +446,10 @@ test("runtime-state portability defaults operational paths to machine-local unle
   expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/cron/runs/cronrun_1.jsonl")).toMatchObject({
     classification: "operational",
     portability: "machine_local",
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/state/onboarding/first-contact/bootstrap.json")).toMatchObject({
+    classification: "operational",
+    portability: "portable",
   });
   expect(describeVaultLocalStateRelativePath(".runtime/operations/inbox/promotions.json")).toMatchObject({
     classification: "operational",

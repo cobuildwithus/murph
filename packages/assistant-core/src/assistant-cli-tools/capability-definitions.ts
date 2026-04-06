@@ -1,11 +1,6 @@
 import { FOOD_STATUSES, RECIPE_STATUSES } from '@murphai/contracts'
 import { buildSharePackFromVault } from '@murphai/core'
 import { z, type ZodTypeAny } from 'zod'
-import {
-  assistantCronScheduleInputSchema,
-  assistantMemoryQueryScopeValues,
-  assistantMemoryVisibleSectionValues,
-} from '../assistant-cli-contracts.js'
 import type { AssistantToolProvenance } from '../inbox-model-contracts.js'
 import {
   getKnowledgePage,
@@ -15,12 +10,6 @@ import {
   searchKnowledgePages,
   upsertKnowledgePage,
 } from '../knowledge.js'
-import {
-  getAssistantMemory,
-  redactAssistantMemoryRecord,
-  redactAssistantMemorySearchHit,
-  searchAssistantMemory,
-} from '../assistant/memory.js'
 import {
   assistantWebFetchExtractModeValues,
   fetchAssistantWeb,
@@ -37,16 +26,6 @@ import {
   resolveConfiguredAssistantWebSearchProvider,
   searchAssistantWeb,
 } from '../assistant/web-search.js'
-import {
-  deleteAssistantStateDocument,
-  getAssistantStateDocument,
-  listAssistantStateDocuments,
-  patchAssistantStateDocument,
-  putAssistantStateDocument,
-  redactAssistantStateDocumentListEntry,
-  redactAssistantStateDocumentSnapshot,
-} from '../assistant/state.js'
-import { redactAssistantDisplayPath } from '../assistant/store.js'
 import {
   healthEntityDescriptors,
   hasHealthCommandDescriptor,
@@ -103,20 +82,6 @@ const shareEntitySelectorSchema = z
   .refine((value) => Boolean(value.id || value.slug), {
     message: 'Provide either an id or slug.',
   })
-const assistantMemoryQueryScopeSchema = z.enum(assistantMemoryQueryScopeValues)
-const assistantMemoryVisibleSectionSchema = z.enum(assistantMemoryVisibleSectionValues)
-const assistantCronDeliveryTargetSchema = z.object({
-  channel: z.string().min(1).optional(),
-  deliveryTarget: z.string().min(1).optional(),
-  identityId: z.string().min(1).optional(),
-  participantId: z.string().min(1).optional(),
-  sourceThreadId: z.string().min(1).optional(),
-})
-const assistantCronTargetMutationSchema = assistantCronDeliveryTargetSchema.extend({
-  dryRun: z.boolean().optional(),
-  job: z.string().min(1),
-  resetContinuity: z.boolean().optional(),
-})
 const knowledgeMetadataTagSchema = z.string().min(1)
 const knowledgeSourcePathSchema = z.string().min(1)
 const knowledgeSlugSchema = z.string().min(1)
@@ -289,190 +254,6 @@ export function createAssistantRuntimeToolDefinitions(
   const readOnlyTools = [
     ...createAssistantKnowledgeReadToolDefinitions(input),
     defineHandAuthoredHelperTool({
-      name: 'assistant.state.list',
-      description:
-        'List small non-canonical assistant scratch-state documents, optionally filtered by prefix.',
-      inputSchema: z.object({
-        prefix: z.string().min(1).optional(),
-      }),
-      inputExample: {
-        prefix: 'cron/',
-      },
-      execute: async ({ prefix }) =>
-        (await listAssistantStateDocuments({
-          vault: input.vault,
-          prefix,
-        })).map((entry) => redactAssistantStateDocumentListEntry(entry)),
-    }),
-    defineHandAuthoredHelperTool({
-      name: 'assistant.state.show',
-      description:
-        'Show one assistant scratch-state document by doc id.',
-      inputSchema: z.object({
-        docId: z.string().min(1),
-      }),
-      inputExample: {
-        docId: 'cron/my-reminder',
-      },
-      execute: async ({ docId }) =>
-        redactAssistantStateDocumentSnapshot(
-          await getAssistantStateDocument({
-            docId,
-            vault: input.vault,
-          }),
-        ),
-    }),
-    defineHandAuthoredHelperTool({
-      name: 'assistant.memory.search',
-      description:
-        'Search assistant memory for prior preferences, naming, standing instructions, or durable health context.',
-      inputSchema: z.object({
-        text: z.string().min(1).optional(),
-        scope: assistantMemoryQueryScopeSchema.optional(),
-        section: assistantMemoryVisibleSectionSchema.optional(),
-        limit: z.number().int().positive().max(50).optional(),
-      }),
-      inputExample: {
-        text: 'tone',
-        limit: 5,
-      },
-      execute: async ({ text, scope, section, limit }) => {
-        const result = await searchAssistantMemory({
-          vault: input.vault,
-          text,
-          scope,
-          section: section ?? null,
-          limit,
-          includeSensitiveHealthContext: allowSensitiveHealthContextForAssistantTools(input),
-        })
-        return {
-          ...result,
-          results: result.results.map(redactAssistantMemorySearchHit),
-        }
-      },
-    }),
-    defineHandAuthoredHelperTool({
-      name: 'assistant.memory.get',
-      description:
-        'Show one assistant memory record by id.',
-      inputSchema: z.object({
-        id: z.string().min(1),
-      }),
-      inputExample: {
-        id: 'long-term:preferences%7Cslot%3Aassistant-style%3Atone',
-      },
-      execute: async ({ id }) =>
-        redactAssistantMemoryRecord(
-          await getAssistantMemory({
-            id,
-            vault: input.vault,
-            includeSensitiveHealthContext: allowSensitiveHealthContextForAssistantTools(input),
-          }),
-        ),
-    }),
-    defineHandAuthoredHelperTool({
-      name: 'assistant.cron.status',
-      description:
-        'Show the current assistant cron scheduler snapshot for the active vault.',
-      inputSchema: z.object({}),
-      inputExample: {},
-      execute: async () => (await loadAssistantCronTools()).getAssistantCronStatus(input.vault),
-    }),
-    defineHandAuthoredHelperTool({
-      name: 'assistant.cron.list',
-      description:
-        'List configured assistant cron jobs for the active vault.',
-      inputSchema: z.object({}),
-      inputExample: {},
-      execute: async () => (await loadAssistantCronTools()).listAssistantCronJobs(input.vault),
-    }),
-    defineHandAuthoredHelperTool({
-      name: 'assistant.cron.show',
-      description:
-        'Show one assistant cron job by job id or job name.',
-      inputSchema: z.object({
-        job: z.string().min(1),
-      }),
-      inputExample: {
-        job: 'weekly-digest',
-      },
-      execute: async ({ job }) => (await loadAssistantCronTools()).getAssistantCronJob(input.vault, job),
-    }),
-    defineHandAuthoredHelperTool({
-      name: 'assistant.cron.target.show',
-      description:
-        'Show the outbound target currently configured for one assistant cron job.',
-      inputSchema: z.object({
-        job: z.string().min(1),
-      }),
-      inputExample: {
-        job: 'weekly-digest',
-      },
-      execute: async ({ job }) =>
-        (await loadAssistantCronTools()).getAssistantCronJobTarget(input.vault, job),
-    }),
-    defineHandAuthoredHelperTool({
-      name: 'assistant.cron.target.set',
-      description:
-        'Retarget one existing assistant cron job in place using an explicit outbound route or a saved self-target for the selected channel.',
-      inputSchema: assistantCronTargetMutationSchema,
-      inputExample: {
-        job: 'weekly-digest',
-        channel: 'telegram',
-      },
-      execute: async ({ channel, deliveryTarget, dryRun, identityId, job, participantId, resetContinuity, sourceThreadId }) =>
-        (await loadAssistantCronTools()).setAssistantCronJobTarget({
-          vault: input.vault,
-          job,
-          channel,
-          deliveryTarget,
-          dryRun,
-          identityId,
-          participantId,
-          resetContinuity,
-          sourceThreadId,
-        }),
-    }),
-    defineHandAuthoredHelperTool({
-      name: 'assistant.cron.runs',
-      description:
-        'List recent runs for one assistant cron job.',
-      inputSchema: z.object({
-        job: z.string().min(1),
-        limit: z.number().int().positive().max(100).optional(),
-      }),
-      inputExample: {
-        job: 'weekly-digest',
-        limit: 10,
-      },
-      execute: async ({ job, limit }) =>
-        (await loadAssistantCronTools()).listAssistantCronRuns({
-          vault: input.vault,
-          job,
-          limit,
-        }),
-    }),
-    defineHandAuthoredHelperTool({
-      name: 'assistant.cron.preset.list',
-      description:
-        'List built-in assistant cron presets.',
-      inputSchema: z.object({}),
-      inputExample: {},
-      execute: async () => (await loadAssistantCronTools()).listAssistantCronPresets(),
-    }),
-    defineHandAuthoredHelperTool({
-      name: 'assistant.cron.preset.show',
-      description:
-        'Show one built-in assistant cron preset definition.',
-      inputSchema: z.object({
-        presetId: z.string().min(1),
-      }),
-      inputExample: {
-        presetId: 'weekly-summary',
-      },
-      execute: async ({ presetId }) => (await loadAssistantCronTools()).getAssistantCronPreset(presetId),
-    }),
-    defineHandAuthoredHelperTool({
       name: 'assistant.selfTarget.list',
       description:
         'List saved outbound self-target routes such as email, Telegram, or phone delivery settings.',
@@ -501,215 +282,6 @@ export function createAssistantRuntimeToolDefinitions(
   return [
     ...readOnlyTools,
     ...createAssistantKnowledgeWriteToolDefinitions(input),
-    defineHandAuthoredHelperTool({
-      name: 'assistant.state.put',
-      description:
-        'Replace one assistant scratch-state document with the provided JSON object.',
-      inputSchema: z.object({
-        docId: z.string().min(1),
-        value: jsonObjectSchema,
-      }),
-      inputExample: {
-        docId: 'cron/my-reminder',
-        value: {
-          snoozedUntil: '2026-03-31',
-        },
-      },
-      execute: async ({ docId, value }) =>
-        redactAssistantStateDocumentSnapshot(
-          await putAssistantStateDocument({
-            docId,
-            value,
-            vault: input.vault,
-          }),
-        ),
-    }),
-    defineHandAuthoredHelperTool({
-      name: 'assistant.state.patch',
-      description:
-        'Merge one JSON object patch into an existing assistant scratch-state document.',
-      inputSchema: z.object({
-        docId: z.string().min(1),
-        patch: jsonObjectSchema,
-      }),
-      inputExample: {
-        docId: 'cron/my-reminder',
-        patch: {
-          snoozedUntil: '2026-03-31',
-        },
-      },
-      execute: async ({ docId, patch }) =>
-        redactAssistantStateDocumentSnapshot(
-          await patchAssistantStateDocument({
-            docId,
-            patch,
-            vault: input.vault,
-          }),
-        ),
-    }),
-    defineHandAuthoredHelperTool({
-      name: 'assistant.state.delete',
-      description:
-        'Delete one assistant scratch-state document by doc id.',
-      inputSchema: z.object({
-        docId: z.string().min(1),
-      }),
-      inputExample: {
-        docId: 'cron/my-reminder',
-      },
-      execute: async ({ docId }) => {
-        const deleted = await deleteAssistantStateDocument({
-          docId,
-          vault: input.vault,
-        })
-        return {
-          ...deleted,
-          documentPath: redactAssistantDisplayPath(deleted.documentPath),
-        }
-      },
-    }),
-    defineHandAuthoredHelperTool({
-      name: 'assistant.cron.add',
-      description:
-        'Create one assistant cron job with an explicit prompt, schedule, and outbound delivery target.',
-      inputSchema: assistantCronDeliveryTargetSchema.extend({
-        name: z.string().min(1),
-        prompt: z.string().min(1),
-        schedule: assistantCronScheduleInputSchema,
-        enabled: z.boolean().optional(),
-        keepAfterRun: z.boolean().optional(),
-        bindState: z.boolean().optional(),
-        stateDocId: z.string().min(1).nullable().optional(),
-      }),
-      inputExample: {
-        name: 'weekly-digest',
-        prompt: 'Summarize the past week and propose one small next step.',
-        schedule: {
-          kind: 'dailyLocal',
-          localTime: '09:00',
-          timeZone: 'America/Los_Angeles',
-        },
-        channel: 'telegram',
-      },
-      execute: async ({ bindState, channel, deliveryTarget, enabled, identityId, keepAfterRun, name, participantId, prompt, schedule, sourceThreadId, stateDocId }) =>
-        (await loadAssistantCronTools()).addAssistantCronJob({
-          vault: input.vault,
-          name,
-          prompt,
-          schedule,
-          channel,
-          deliveryTarget,
-          enabled,
-          identityId,
-          keepAfterRun,
-          bindState,
-          participantId,
-          sourceThreadId,
-          stateDocId: stateDocId ?? null,
-        }),
-    }),
-    defineHandAuthoredHelperTool({
-      name: 'assistant.cron.preset.install',
-      description:
-        'Install one built-in assistant cron preset into the active vault with optional schedule, routing, and variable overrides.',
-      inputSchema: assistantCronDeliveryTargetSchema.extend({
-        presetId: z.string().min(1),
-        name: z.string().min(1).optional(),
-        schedule: assistantCronScheduleInputSchema.optional(),
-        enabled: z.boolean().optional(),
-        bindState: z.boolean().optional(),
-        stateDocId: z.string().min(1).nullable().optional(),
-        additionalInstructions: z.string().min(1).optional(),
-        variables: z.record(z.string(), z.string().nullable()).optional(),
-      }),
-      inputExample: {
-        presetId: 'weekly-summary',
-        channel: 'telegram',
-      },
-      execute: async ({
-        additionalInstructions,
-        bindState,
-        channel,
-        deliveryTarget,
-        enabled,
-        identityId,
-        name,
-        participantId,
-        presetId,
-        schedule,
-        sourceThreadId,
-        stateDocId,
-        variables,
-      }) =>
-        (await loadAssistantCronTools()).installAssistantCronPreset({
-          vault: input.vault,
-          presetId,
-          name: name ?? null,
-          schedule: schedule ?? null,
-          channel,
-          deliveryTarget,
-          enabled,
-          identityId,
-          bindState,
-          participantId,
-          sourceThreadId,
-          stateDocId: stateDocId ?? null,
-          additionalInstructions: additionalInstructions ?? null,
-          variables: variables ?? null,
-        }),
-    }),
-    defineHandAuthoredHelperTool({
-      name: 'assistant.cron.enable',
-      description:
-        'Enable one assistant cron job by job id or job name.',
-      inputSchema: z.object({
-        job: z.string().min(1),
-      }),
-      inputExample: {
-        job: 'weekly-digest',
-      },
-      execute: async ({ job }) => (await loadAssistantCronTools()).setAssistantCronJobEnabled(input.vault, job, true),
-    }),
-    defineHandAuthoredHelperTool({
-      name: 'assistant.cron.disable',
-      description:
-        'Disable one assistant cron job by job id or job name.',
-      inputSchema: z.object({
-        job: z.string().min(1),
-      }),
-      inputExample: {
-        job: 'weekly-digest',
-      },
-      execute: async ({ job }) => (await loadAssistantCronTools()).setAssistantCronJobEnabled(input.vault, job, false),
-    }),
-    defineHandAuthoredHelperTool({
-      name: 'assistant.cron.remove',
-      description:
-        'Remove one assistant cron job by job id or job name.',
-      inputSchema: z.object({
-        job: z.string().min(1),
-      }),
-      inputExample: {
-        job: 'weekly-digest',
-      },
-      execute: async ({ job }) => (await loadAssistantCronTools()).removeAssistantCronJob(input.vault, job),
-    }),
-    defineHandAuthoredHelperTool({
-      name: 'assistant.cron.runNow',
-      description:
-        'Run one assistant cron job immediately.',
-      inputSchema: z.object({
-        job: z.string().min(1),
-      }),
-      inputExample: {
-        job: 'weekly-digest',
-      },
-      execute: async ({ job }) =>
-        (await loadAssistantCronTools()).runAssistantCronJobNow({
-          vault: input.vault,
-          job,
-        }),
-    }),
   ]
 }
 
@@ -1666,14 +1238,6 @@ export function createHealthUpsertToolDefinitions(
         },
       }, 'healthEntityDescriptors'),
     )
-}
-
-async function loadAssistantCronTools() {
-  return await import('../assistant/cron.js')
-}
-
-function allowSensitiveHealthContextForAssistantTools(input: AssistantToolContext): boolean {
-  return input.allowSensitiveHealthContext === true
 }
 
 type AssistantCapabilityToolDefinitionInput<

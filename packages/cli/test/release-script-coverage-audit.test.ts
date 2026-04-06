@@ -4,7 +4,6 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { resolveAssistantStatePaths } from '@murphai/assistant-core/assistant-state'
 import {
   detectWorkspacePackageCycles,
   formatWorkspacePackageCycles,
@@ -432,7 +431,7 @@ describe('monorepo release flow coverage audit', () => {
     )
   })
 
-  it('packages the selected vault and matching assistant-state without runtime or export-pack residue', () => {
+  it('packages only canonical vault files without runtime or export-pack residue', () => {
     const parentRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-review-gpt-data-'))
     const vaultRoot = path.join(parentRoot, 'vault')
     const outputRoot = path.join(repoRoot, '.tmp-review-gpt-data')
@@ -440,23 +439,27 @@ describe('monorepo release flow coverage audit', () => {
     rmSync(outputRoot, { recursive: true, force: true })
     mkdirSync(path.join(vaultRoot, 'journal', '2026'), { recursive: true })
     mkdirSync(path.join(vaultRoot, '.runtime'), { recursive: true })
+    mkdirSync(path.join(vaultRoot, '.runtime', 'operations', 'assistant', 'sessions'), {
+      recursive: true,
+    })
     mkdirSync(path.join(vaultRoot, 'exports', 'packs', 'existing-pack'), { recursive: true })
     writeFileSync(path.join(vaultRoot, 'vault.json'), '{ "id": "vault_test" }\n', 'utf8')
     writeFileSync(path.join(vaultRoot, 'CORE.md'), '# Vault\n', 'utf8')
     writeFileSync(path.join(vaultRoot, 'journal', '2026', '2026-03-18.md'), '# Journal\n', 'utf8')
+    writeFileSync(
+      path.join(vaultRoot, '.runtime', 'operations', 'assistant', 'MEMORY.md'),
+      '# Memory\n',
+      'utf8',
+    )
+    writeFileSync(
+      path.join(vaultRoot, '.runtime', 'operations', 'assistant', 'sessions', 'session.json'),
+      '{"sessionId":"asst_test"}\n',
+      'utf8',
+    )
     writeFileSync(path.join(vaultRoot, '.runtime', 'secret.json'), '{"token":"nope"}\n', 'utf8')
     writeFileSync(
       path.join(vaultRoot, 'exports', 'packs', 'existing-pack', 'manifest.json'),
       '{"packId":"existing-pack"}\n',
-      'utf8',
-    )
-
-    const assistantPaths = resolveAssistantStatePaths(vaultRoot)
-    mkdirSync(assistantPaths.sessionsDirectory, { recursive: true })
-    writeFileSync(assistantPaths.longTermMemoryPath, '# Memory\n', 'utf8')
-    writeFileSync(
-      path.join(assistantPaths.sessionsDirectory, 'session.json'),
-      '{"sessionId":"asst_test"}\n',
       'utf8',
     )
 
@@ -482,7 +485,7 @@ describe('monorepo release flow coverage audit', () => {
       )
 
       expect(output).toContain('Data package created.')
-      expect(output).toContain('Assistant-state files: 2 (included)')
+      expect(output).toContain('Vault files: 3')
       expect(output).not.toContain(vaultRoot)
 
       const zipMatch = output.match(/^ZIP: ([^ ]+) \(/m)
@@ -503,8 +506,10 @@ describe('monorepo release flow coverage audit', () => {
       expect(entries).toContain(`${bundleDir}/vault/vault.json`)
       expect(entries).toContain(`${bundleDir}/vault/CORE.md`)
       expect(entries).toContain(`${bundleDir}/vault/journal/2026/2026-03-18.md`)
-      expect(entries).toContain(`${bundleDir}/assistant-state/MEMORY.md`)
-      expect(entries).toContain(`${bundleDir}/assistant-state/sessions/session.json`)
+      expect(entries).not.toContain(`${bundleDir}/vault/.runtime/operations/assistant/MEMORY.md`)
+      expect(entries).not.toContain(
+        `${bundleDir}/vault/.runtime/operations/assistant/sessions/session.json`,
+      )
       expect(entries).not.toContain(`${bundleDir}/vault/.runtime/secret.json`)
       expect(entries).not.toContain(
         `${bundleDir}/vault/exports/packs/existing-pack/manifest.json`,

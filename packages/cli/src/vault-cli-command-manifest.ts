@@ -15,6 +15,7 @@ import type { InboxServices } from '@murphai/assistant-core/inbox-services'
 import type { VaultServices } from '@murphai/assistant-core/vault-services'
 import { registerAssistantCommands } from '@murphai/assistant-cli/commands/assistant'
 import { registerAuditCommands } from './commands/audit.js'
+import { registerAutomationCommands } from './commands/automation.js'
 import { registerDeviceCommands } from './commands/device.js'
 import { registerDocumentCommands } from './commands/document.js'
 import { registerEventCommands } from './commands/event.js'
@@ -28,6 +29,7 @@ import {
 import { registerInboxCommands } from './commands/inbox.js'
 import { registerIntakeCommands } from './commands/intake.js'
 import { registerJournalCommands } from './commands/journal.js'
+import { registerMemoryCommands } from './commands/memory.js'
 import { registerMealCommands } from './commands/meal.js'
 import { registerProfileCommands } from './commands/profile.js'
 import { registerRecipeCommands } from './commands/recipe.js'
@@ -275,6 +277,14 @@ export const vaultCliCommandDescriptors = [
     },
   },
   {
+    id: 'automation',
+    bindingMode: 'none',
+    rootCommandNames: ['automation'],
+    register({ cli }) {
+      registerAutomationCommands(cli)
+    },
+  },
+  {
     id: 'audit',
     bindingMode: 'none',
     rootCommandNames: ['audit'],
@@ -339,6 +349,14 @@ export const vaultCliCommandDescriptors = [
     },
     register({ cli, services }) {
       registerDeviceCommands(cli, services)
+    },
+  },
+  {
+    id: 'memory',
+    bindingMode: 'none',
+    rootCommandNames: ['memory'],
+    register({ cli }) {
+      registerMemoryCommands(cli)
     },
   },
   {

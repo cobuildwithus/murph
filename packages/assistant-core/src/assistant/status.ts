@@ -101,7 +101,6 @@ export async function getAssistantStatusLocal(
       inboxScanCursor: automation.inboxScanCursor,
       autoReplyScanCursor: automation.autoReplyScanCursor,
       autoReplyChannels: automation.autoReplyChannels,
-      preferredChannels: automation.preferredChannels,
       autoReplyBacklogChannels: automation.autoReplyBacklogChannels,
       autoReplyPrimed: automation.autoReplyPrimed,
       updatedAt: automation.updatedAt,

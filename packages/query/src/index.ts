@@ -160,4 +160,6 @@ export {
   stripGeneratedKnowledgeSections,
   stripKnowledgeLeadingHeading,
 } from "./knowledge-format.ts";
+export * from "./automation.ts";
 export * from "./health/index.ts";
+export * from "./memory.ts";

@@ -1,6 +1,7 @@
 export const CONTRACT_SCHEMA_VERSION = Object.freeze({
   assessmentResponse: "murph.assessment-response.v1",
   audit: "murph.audit.v1",
+  automationFrontmatter: "murph.frontmatter.automation.v1",
   event: "murph.event.v1",
   inboxCapture: "murph.inbox-capture.v1",
   allergyFrontmatter: "murph.frontmatter.allergy.v1",
@@ -11,6 +12,7 @@ export const CONTRACT_SCHEMA_VERSION = Object.freeze({
   geneticVariantFrontmatter: "murph.frontmatter.genetic-variant.v1",
   goalFrontmatter: "murph.frontmatter.goal.v1",
   journalDayFrontmatter: "murph.frontmatter.journal-day.v1",
+  memoryFrontmatter: "murph.frontmatter.memory.v1",
   coreFrontmatter: "murph.frontmatter.core.v1",
   profileCurrentFrontmatter: "murph.frontmatter.profile-current.v1",
   profileSnapshot: "murph.profile-snapshot.v1",
@@ -30,6 +32,7 @@ export const ID_PREFIXES = Object.freeze({
   allergy: "alg",
   assessment: "asmt",
   audit: "aud",
+  automation: "automation",
   condition: "cond",
   document: "doc",
   event: "evt",
@@ -38,6 +41,7 @@ export const ID_PREFIXES = Object.freeze({
   food: "food",
   goal: "goal",
   meal: "meal",
+  memory: "mem",
   pack: "pack",
   profileSnapshot: "psnap",
   provider: "prov",
@@ -195,6 +199,7 @@ export const FILE_CHANGE_OPERATIONS = Object.freeze(["create", "append", "update
 
 export const FRONTMATTER_DOC_TYPES = Object.freeze({
   allergy: "allergy",
+  automation: "automation",
   core: "core",
   condition: "condition",
   experiment: "experiment",
@@ -203,6 +208,7 @@ export const FRONTMATTER_DOC_TYPES = Object.freeze({
   geneticVariant: "genetic_variant",
   goal: "goal",
   journalDay: "journal_day",
+  memory: "memory",
   profileCurrent: "profile_current",
   provider: "provider",
   recipe: "recipe",

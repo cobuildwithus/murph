@@ -11,10 +11,6 @@ export interface AssistantSystemPromptInput {
   assistantCliExecutorAvailable: boolean;
   assistantCronToolsAvailable: boolean;
   assistantHostedDeviceConnectAvailable?: boolean;
-  assistantMemoryDailyPath: string;
-  assistantMemoryLongTermPath: string;
-  assistantMemoryPrompt: string | null;
-  assistantStateToolsAvailable: boolean;
   channel: string | null;
   cliAccess: Pick<AssistantCliAccessContext, "rawCommand" | "setupCommand">;
   firstTurnCheckIn: boolean;
@@ -35,17 +31,6 @@ export function buildAssistantSystemPrompt(
     buildAssistantAudienceSafetyText(input.allowSensitiveHealthContext),
     buildAssistantEvidenceAndReplyStyleText(input.channel),
     buildAssistantFirstTurnCheckInGuidanceText(input.firstTurnCheckIn),
-    input.assistantMemoryPrompt,
-    buildAssistantStateGuidanceText({
-      rawCommand: input.cliAccess.rawCommand,
-      assistantStateToolsAvailable: input.assistantStateToolsAvailable,
-    }),
-    buildAssistantMemoryGuidanceText({
-      assistantCliExecutorAvailable: input.assistantCliExecutorAvailable,
-      rawCommand: input.cliAccess.rawCommand,
-      assistantMemoryDailyPath: input.assistantMemoryDailyPath,
-      assistantMemoryLongTermPath: input.assistantMemoryLongTermPath,
-    }),
     buildAssistantKnowledgeGuidanceText({
       assistantCliExecutorAvailable: input.assistantCliExecutorAvailable,
       rawCommand: input.cliAccess.rawCommand,
@@ -168,35 +153,12 @@ function buildAssistantEvidenceAndReplyStyleText(
     "Answer the human request directly. Avoid operator-facing meta about tools, prompts, CLI internals, or file layout unless the user explicitly asks for it.",
     "Treat inbound files and documents as durable evidence. When a real Murph write path preserves or logs them, it is fine to tell the user you logged them; do not claim a file was logged unless it was actually written or verified.",
     "Never include citations, source lists, footnotes, bracketed references, or appended file-path/source callouts in the reply unless the user explicitly asks for them.",
-    "Do not mention internal vault paths, ledger filenames, JSONL files, assistant-state filenames, or other implementation-level storage details unless the user explicitly asks for that detail.",
+    "Do not mention internal vault paths, ledger filenames, JSONL files, or other implementation-level storage details unless the user explicitly asks for that detail.",
     "Do not surface raw machine timestamps such as ISO-8601 values by default. Prefer natural phrasing in the user's time context, or an explicit local date/time only when that precision is actually helpful.",
     "Do not use Markdown styling in user-facing channel replies. Do not wrap words in backticks or asterisks, and do not use hash headings, bullet markers, or code fences just for presentation.",
     "If you need emphasis or structure, use plain sentences, short plain-text lines, or simple numbered lines without Markdown markers.",
     "Reply naturally in plain conversational prose that fits the channel.",
   ].join("\n");
-}
-
-function buildAssistantStateGuidanceText(input: {
-  assistantStateToolsAvailable: boolean;
-  rawCommand: "vault-cli";
-}): string {
-  return buildAssistantToolAccessGuidanceText({
-    preferredAccessAvailable: input.assistantStateToolsAvailable,
-    preferredAccessLines: [
-      "Assistant state commands are exposed in this session through `murph.cli.run`. Use `vault-cli assistant state ...` there, and do not edit `assistant-state/state/` files directly.",
-      "Use assistant state only for small non-canonical runtime scratchpads such as cron cooldowns, unresolved follow-ups, pending hypotheses, or delivery policy decisions.",
-      "Assistant state is not long-term memory and not canonical vault data. Do not store durable confirmed facts there when they belong in assistant memory or the vault.",
-      "Before repeating a follow-up question, reminder, or operational suggestion, inspect assistant scratch state first with `vault-cli assistant state show` or `vault-cli assistant state list`.",
-      "Prefer `vault-cli assistant state patch` for incremental updates rather than rewriting whole scratch documents when possible.",
-    ],
-    unavailableLines: [
-      "Assistant state commands are not exposed in this session.",
-      `Use \`${input.rawCommand} assistant state list|show|put|patch|delete\` for small runtime scratchpads, and do not edit \`assistant-state/state/\` files directly.`,
-      "Use assistant state only for small non-canonical runtime scratchpads such as cron cooldowns, unresolved follow-ups, pending hypotheses, or delivery policy decisions.",
-      "Assistant state is not long-term memory and not canonical vault data. Do not store durable confirmed facts there when they belong in assistant memory or the vault.",
-      "Do not claim you inspected or updated assistant scratch state in this session unless a real tool call happened.",
-    ],
-  });
 }
 
 function buildAssistantFirstTurnCheckInGuidanceText(
@@ -211,9 +173,8 @@ Only use it when the user's opening message is just a greeting, a brief opener, 
 If you use it, send this exact message as one short onboarding note:
 \`${ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE}\`
 Use that wording as one short onboarding message, not as a longer intake list and not as a rewritten intro plus separate capability paragraph.
-If the user's name or broad goals are already clear from the current conversation or stored memory, do not send this exact message.
+If the user's name or broad goals are already clear from the current conversation, do not send this exact message.
 If the first user message already asks for something concrete, do not add this welcome.
-Do not search or write assistant memory just because this is the first-contact welcome.
 If the user replies with their name and broad goals, treat that as onboarding context, not as a request to choose priorities or start coaching.
 Broad symptom statements during onboarding also count as context, not as an implicit request for immediate troubleshooting or analysis.
 Do not ask which goal to tackle first unless the user explicitly asks for help deciding where to start.
@@ -227,52 +188,6 @@ Another good note later in the onboarding exchange that you should include: \`If
 Later in onboarding, if it still fits, frame things as gradual: they can gradually build their personal health vault by sharing meals, workouts, sleep or energy notes, symptoms, and questions through text, photos, voice memos, Telegram messages, or email.
 Do not ask for a full weekly recap, a long normal-week summary, or a broad upfront questionnaire unless the user explicitly wants that.
 Make it clear the check-in is optional, keep it brief, and do not turn it into a longer interview.`;
-}
-
-function buildAssistantMemoryGuidanceText(input: {
-  assistantCliExecutorAvailable: boolean;
-  assistantMemoryDailyPath: string;
-  assistantMemoryLongTermPath: string;
-  rawCommand: "vault-cli";
-}): string {
-  const memoryPathsLine = `Write durable memory in \`${input.assistantMemoryLongTermPath}\` and short-lived recent-context notes in \`${input.assistantMemoryDailyPath}\`.`;
-  const sharedLines = [
-    "The active vault is already bound in this session. Do not switch vaults unless the user explicitly targets a different vault.",
-    memoryPathsLine,
-    "Keep the Markdown structure intact: preserve the preamble, keep long-term facts under the existing section headings, and add or update concise bullet lines instead of freeform sprawl.",
-    "Use long-term memory for durable preferences, identity, standing instructions, recurring practical constraints, and durable health context. Use daily memory for short-lived context from the current stretch of conversation.",
-    "For lightweight chat, greetings, obvious one-off questions, or simple acknowledgements, reply directly without searching or updating assistant memory.",
-    "Before asking again for a stable preference, standing instruction, or recurring context, search assistant memory first.",
-    "Use assistant memory lightly and selectively when a stable identity, preference, standing instruction, useful project context, or other future-relevant context is likely to help later conversations.",
-    "When writing durable memory, phrase the stored sentence cleanly and canonically, such as `Call the user Alex.`, `User prefers the default assistant tone.`, or `Keep responses brief.`",
-    "Store confirmed durable facts, not speculative diagnoses, not one-off passing chatter, and not conclusions you merely inferred without user confirmation.",
-    "If a memory item is mistaken or obsolete, edit or remove the stale bullet directly instead of appending a contradiction.",
-    "Do not search or write assistant memory solely because this is the first chat turn or because you are doing the optional first-chat check-in.",
-    "Sensitive health memory still requires a private assistant context. Do not store it from shared or non-private conversations.",
-  ];
-
-  if (input.assistantCliExecutorAvailable) {
-    return [
-      "Assistant memory commands are exposed in this session through `murph.cli.run`.",
-      "Use `murph.cli.run` with `vault-cli assistant memory search|get` for recall and `vault-cli assistant memory file read|append|write` for Markdown memory files.",
-      "Search assistant memory only when the current request likely depends on prior preferences, ongoing goals, recurring health context, or earlier plans.",
-      "Prefer `vault-cli assistant memory file append` for straightforward new memory. It adds one bullet without rewriting the whole file.",
-      "Treat `vault-cli assistant memory file write` as dangerous: it replaces the entire file and can accidentally delete or overwrite older memories if you write stale content.",
-      "Shared assistant contexts can be blocked from `vault-cli assistant memory file write` when `MEMORY.md` already contains hidden health context, so prefer append unless you truly need a deliberate full rewrite.",
-      "Use `vault-cli assistant memory file write` only for deliberate edits, removals, or restructures that append cannot express, and read the latest file immediately before any full write.",
-      "You may update assistant memory without a separate remember request, but only when the user has clearly stated a durable fact that is likely to help later conversations.",
-      ...sharedLines,
-    ].join("\n\n");
-  }
-
-  return [
-    "Assistant memory commands are not exposed through a dedicated CLI executor in this session.",
-    "Use the injected core memory block if present, but do not claim you searched assistant memory unless a real tool call happened.",
-    `Use \`${input.rawCommand} assistant memory search|get\` for recall and \`${input.rawCommand} assistant memory file read|append|write\` for Markdown memory files when the bound executor is unavailable.`,
-    "When prior continuity would matter and you cannot search memory in this session, ask one brief clarifying question or continue with the current-turn context only instead of inventing recall.",
-    "Do not claim you updated assistant memory in this session unless a real memory-file edit happened.",
-    ...sharedLines,
-  ].join("\n\n");
 }
 
 function buildAssistantCliContractText(
@@ -292,30 +207,26 @@ function buildAssistantCronGuidanceText(input: {
   return buildAssistantToolAccessGuidanceText({
     preferredAccessAvailable: input.assistantCronToolsAvailable,
     preferredAccessLines: [
-      "Scheduled assistant automation commands are exposed in this session through `murph.cli.run`. Use `vault-cli assistant cron ...` there, and do not edit `assistant-state/cron/` files directly.",
-      "Built-in cron presets are available through `assistant cron preset list`, `assistant cron preset show`, and `assistant cron preset install`.",
-      "When a user is onboarding or asks for automation ideas, offer the relevant preset first, then customize its variables, schedule, and outbound channel settings for them.",
+      "Scheduled assistant automation commands are exposed in this session through `murph.cli.run`. Use `vault-cli automation ...` there rather than editing assistant runtime files directly.",
+      "Use `vault-cli automation scaffold` to start a canonical automation payload, then `vault-cli automation upsert` to create or update it.",
       "Prefer digest-style or summary-style automation over nagging coaching. Default to weekly or daily summaries unless the user clearly asks for a higher-frequency nudge.",
-      "Before asking the user to repeat phone, Telegram, or email routing details for an outbound cron job, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.",
-      "Use `vault-cli assistant cron add` for one-shot reminders with `--at` and recurring jobs with `--every` or `--cron`.",
-      "Inspect the scheduler with `vault-cli assistant cron status`, `vault-cli assistant cron list`, `vault-cli assistant cron show`, `vault-cli assistant cron target show`, and `vault-cli assistant cron runs` before changing an existing job.",
-      "When the user wants to retarget an existing cron job without recreating it, use `vault-cli assistant cron target set`.",
-      "Cron schedules execute while `vault-cli assistant run` is active for the vault.",
+      "Before asking the user to repeat phone, Telegram, or email routing details for an automation route, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.",
+      "Inspect existing canonical automations with `vault-cli automation list` and `vault-cli automation show` before changing one.",
+      "Automation schedules execute while `vault-cli assistant run` is active for the vault.",
       "When a user or cron prompt asks for research on a complex topic or a broad current-evidence scan, default to `research` so the tool runs `review:gpt --deep-research --send --wait`. Use `deepthink` only when the task is a GPT Pro synthesis without Deep Research.",
       "Deep Research can legitimately take 10 to 60 minutes, sometimes longer, so keep waiting on the tool unless it actually errors or times out. Murph defaults the overall timeout to 40m.",
       "`--timeout` is the normal control. `--wait-timeout` is only for the uncommon case where you want the assistant-response wait cap different from the overall timeout.",
-      "Cron prompts may explicitly tell you to use the research tool. In that case, run `research` for Deep Research or `deepthink` for GPT Pro before composing the final cron reply.",
+      "Automation prompts may explicitly tell you to use the research tool. In that case, run `research` for Deep Research or `deepthink` for GPT Pro before composing the final automation reply.",
       "Both research commands wait for completion and save a markdown note under `research/` inside the vault.",
     ],
     unavailableLines: [
       "Scheduled assistant automation commands are not exposed in this session.",
-      `Use \`${input.rawCommand} assistant cron ...\` when you need to inspect or change scheduled automation and the bound tools are unavailable.`,
-      "Built-in cron presets are available through `assistant cron preset list`, `assistant cron preset show`, and `assistant cron preset install`.",
-      "When a user is onboarding or asks for automation ideas, offer the relevant preset first, then customize its variables, schedule, and outbound channel settings for them.",
+      `Use \`${input.rawCommand} automation ...\` when you need to inspect or change scheduled automation and the bound tools are unavailable.`,
+      "Use `automation scaffold` to start a canonical automation payload and `automation upsert` to save it.",
       "Prefer digest-style or summary-style automation over nagging coaching. Default to weekly or daily summaries unless the user clearly asks for a higher-frequency nudge.",
-      "Before asking the user to repeat phone, Telegram, or email routing details for an outbound cron job, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.",
-      "Do not claim you created, changed, or inspected a cron job in this session unless a real tool call happened.",
-      "Cron schedules execute while `assistant run` is active for the vault.",
+      "Before asking the user to repeat phone, Telegram, or email routing details for an automation route, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.",
+      "Do not claim you created, changed, or inspected an automation in this session unless a real tool call happened.",
+      "Automation schedules execute while `assistant run` is active for the vault.",
     ],
   });
 }
@@ -342,7 +253,7 @@ function buildAssistantKnowledgeGuidanceText(input: {
     "When a derived page clearly builds on stable health reference entities under `bank/library`, attach those stable links through `librarySlugs` metadata.",
     "Do not silently overwrite prior conclusions when new evidence is mixed or contradictory. Update the synthesis, preserve the uncertainty, and note when newer context weakens, supersedes, or conflicts with an earlier claim.",
     "Every knowledge upsert appends an entry to `derived/knowledge/log.md`, so durable wiki writes should be meaningful and reusable.",
-    "Use vault-relative source files, or absolute source files that still resolve inside the selected vault, and never use `derived/**`, `.runtime/**`, or assistant-state runtime files as knowledge sources.",
+    "Use vault-relative source files, or absolute source files that still resolve inside the selected vault, and never use `derived/**` or `.runtime/**` files as knowledge sources.",
   ].join("\n\n");
 }
 

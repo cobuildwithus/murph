@@ -142,7 +142,7 @@ test('setup wizard initial scheduled updates preserve explicit opt-out selection
   )
 })
 
-test('setup scheduled updates defer preset-backed jobs until an explicit delivery route is configured', async () => {
+test('setup scheduled updates defer preset-backed jobs instead of installing runtime config during onboarding', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-scheduled-updates-'))
   const steps: SetupResult['steps'] = []
 
@@ -167,7 +167,14 @@ test('setup scheduled updates defer preset-backed jobs until an explicit deliver
     assert.equal(steps.length, 1)
     assert.equal(steps[0]?.id, 'assistant-scheduled-updates')
     assert.equal(steps[0]?.status, 'skipped')
-    assert.match(steps[0]?.detail ?? '', /require an explicit outbound channel route/i)
+    assert.match(
+      steps[0]?.detail ?? '',
+      /Onboarding does not install them automatically\./i,
+    )
+    assert.match(
+      steps[0]?.detail ?? '',
+      /Create the ones you want later as canonical automations\./i,
+    )
 
     const jobs = await listAssistantCronJobs(vaultRoot)
     assert.deepEqual(jobs, [])
@@ -197,27 +204,6 @@ test('setup scheduled updates keep returning deferred recommendations on repeate
   assert.equal(steps[0]?.status, 'skipped')
 })
 
-test('setup scheduled updates persist the selected presets for later onboarding reruns', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-scheduled-updates-state-'))
-
-  try {
-    await configureSetupScheduledUpdates({
-      dryRun: false,
-      presetIds: ['environment-health-watch', 'weekly-health-snapshot'],
-      steps: [],
-      vault: vaultRoot,
-    })
-
-    const automationState = await readAssistantAutomationState(vaultRoot)
-    assert.deepEqual(automationState.preferredScheduledUpdates, [
-      'environment-health-watch',
-      'weekly-health-snapshot',
-    ])
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true })
-  }
-})
-
 test('setup scheduled updates surface deferred recommendation details without prompt templates and keep dry-run wording', async () => {
   const steps: SetupResult['steps'] = []
   const scheduledUpdates = await configureSetupScheduledUpdates({
@@ -236,7 +222,11 @@ test('setup scheduled updates surface deferred recommendation details without pr
   assert.match(steps[0]?.detail ?? '', /^Would defer 1 assistant scheduled update:/u)
   assert.match(
     steps[0]?.detail ?? '',
-    /assistant cron preset install --channel \.\.\./u,
+    /Onboarding does not install them automatically\./u,
+  )
+  assert.match(
+    steps[0]?.detail ?? '',
+    /Create the ones you want later as canonical automations\./u,
   )
 })
 
@@ -280,10 +270,6 @@ test('setup scheduled updates can be fully opted out during onboarding', async (
     assert.deepEqual(scheduledUpdates, [])
     assert.equal(steps[0]?.status, 'skipped')
     assert.match(steps[0]?.detail ?? '', /No assistant scheduled updates selected/u)
-    assert.deepEqual(
-      (await readAssistantAutomationState(vaultRoot)).preferredScheduledUpdates,
-      [],
-    )
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
@@ -1357,60 +1343,24 @@ test('interactive onboarding on Linux starts without the macOS-only iMessage def
   }
 })
 
-test('resolveInitialSetupWizardChannels reuses saved preferred email channels even when auto-reply is disabled', async () => {
+test('resolveInitialSetupWizardChannels falls back to channel defaults when no auto-reply channels are persisted', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-wizard-'))
-  const initialState = await readAssistantAutomationState(vaultRoot)
-
-  await saveAssistantAutomationState(vaultRoot, {
-    ...initialState,
-    autoReplyChannels: [],
-    preferredChannels: ['email'],
-    autoReplyPrimed: true,
-    updatedAt: '2026-03-24T00:00:00.000Z',
-  })
+  const expectedChannels = process.platform === 'darwin' ? ['imessage'] : []
 
   try {
     assert.deepEqual(
       await resolveInitialSetupWizardChannels(vaultRoot),
-      ['email'],
+      expectedChannels,
     )
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
 })
 
-test('resolveInitialSetupWizardScheduledUpdates reuses saved selections and respects explicit opt-out', async () => {
+test('resolveInitialSetupWizardScheduledUpdates always returns the canonical starter defaults', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-wizard-scheduled-updates-'))
-  const initialState = await readAssistantAutomationState(vaultRoot)
 
   try {
-    assert.deepEqual(
-      await resolveInitialSetupWizardScheduledUpdates(vaultRoot),
-      getDefaultSetupWizardScheduledUpdates(),
-    )
-
-    await saveAssistantAutomationState(vaultRoot, {
-      ...initialState,
-      preferredScheduledUpdates: ['environment-health-watch'],
-      updatedAt: '2026-03-24T00:00:00.000Z',
-    })
-    assert.deepEqual(
-      await resolveInitialSetupWizardScheduledUpdates(vaultRoot),
-      ['environment-health-watch'],
-    )
-
-    await saveAssistantAutomationState(vaultRoot, {
-      ...initialState,
-      preferredScheduledUpdates: [],
-      updatedAt: '2026-03-24T00:00:01.000Z',
-    })
-    assert.deepEqual(await resolveInitialSetupWizardScheduledUpdates(vaultRoot), [])
-
-    await saveAssistantAutomationState(vaultRoot, {
-      ...initialState,
-      preferredScheduledUpdates: ['missing-preset'],
-      updatedAt: '2026-03-24T00:00:02.000Z',
-    })
     assert.deepEqual(
       await resolveInitialSetupWizardScheduledUpdates(vaultRoot),
       getDefaultSetupWizardScheduledUpdates(),
@@ -4010,7 +3960,6 @@ test.sequential('Linux setup preserves existing iMessage state while adding Tele
     inboxScanCursor: null,
     autoReplyScanCursor: null,
     autoReplyChannels: ['imessage'],
-    preferredChannels: ['imessage'],
     autoReplyBacklogChannels: [],
     autoReplyPrimed: false,
     updatedAt: '2026-03-24T23:00:00.000Z',
@@ -4154,7 +4103,6 @@ test.sequential('Linux setup preserves existing iMessage state while adding Tele
 
     const automationState = await readAssistantAutomationState(vaultRoot)
     assert.deepEqual(automationState.autoReplyChannels, ['telegram', 'imessage'])
-    assert.deepEqual(automationState.preferredChannels, ['telegram', 'imessage'])
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }

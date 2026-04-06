@@ -142,7 +142,6 @@ const TEST_CRON_JOB = {
     deliveryTarget: null,
     deliverResponse: true,
   },
-  stateDocId: null,
   createdAt: '2026-03-28T00:00:00.000Z',
   updatedAt: '2026-03-28T00:00:00.000Z',
   state: {
@@ -369,12 +368,12 @@ test('assistant daemon client routes serializable assistant operations through t
         return new Response(
           JSON.stringify({
             vault: '/tmp/vault',
-            stateRoot: '/tmp/assistant-state',
-            statusPath: '/tmp/assistant-state/status.json',
-            outboxRoot: '/tmp/assistant-state/outbox',
-            diagnosticsPath: '/tmp/assistant-state/diagnostics.snapshot.json',
-            failoverStatePath: '/tmp/assistant-state/failover.json',
-            turnsRoot: '/tmp/assistant-state/turns',
+            stateRoot: '/tmp/vault/.runtime/operations/assistant',
+            statusPath: '/tmp/vault/.runtime/operations/assistant/status.json',
+            outboxRoot: '/tmp/vault/.runtime/operations/assistant/outbox',
+            diagnosticsPath: '/tmp/vault/.runtime/operations/assistant/diagnostics.snapshot.json',
+            failoverStatePath: '/tmp/vault/.runtime/operations/assistant/failover.json',
+            turnsRoot: '/tmp/vault/.runtime/operations/assistant/turns',
             generatedAt: '2026-03-28T00:00:00.000Z',
             runLock: {
               state: 'unlocked',
@@ -388,7 +387,6 @@ test('assistant daemon client routes serializable assistant operations through t
               inboxScanCursor: null,
               autoReplyScanCursor: null,
               autoReplyChannels: [],
-              preferredChannels: [],
               autoReplyBacklogChannels: [],
               autoReplyPrimed: false,
               updatedAt: '2026-03-28T00:00:00.000Z',

@@ -1097,7 +1097,7 @@ test('materializeInboxModelBundle ignores derived manifests from another capture
   }
 })
 
-test('createDefaultAssistantToolCatalog exposes assistant runtime, recipe, and food tools', () => {
+test('createDefaultAssistantToolCatalog exposes the current assistant runtime, recipe, and food tools', () => {
   const registry = createDefaultAssistantCapabilityRegistry({
     vault: '/tmp/murph-vault',
     vaultServices: createStubVaultServices(),
@@ -1117,15 +1117,15 @@ test('createDefaultAssistantToolCatalog exposes assistant runtime, recipe, and f
   const toolNames = tools.map((tool) => tool.name).sort()
   const registryToolNames = registryCatalog.listTools().map((tool) => tool.name).sort()
 
-  assert.equal(catalog.hasTool('assistant.state.show'), true)
-  assert.equal(catalog.hasTool('assistant.memory.search'), true)
+  assert.equal(catalog.hasTool('assistant.state.show'), false)
+  assert.equal(catalog.hasTool('assistant.memory.search'), false)
   assert.equal(catalog.hasTool('assistant.knowledge.search'), true)
   assert.equal(catalog.hasTool('assistant.knowledge.get'), true)
   assert.equal(catalog.hasTool('assistant.knowledge.list'), true)
   assert.equal(catalog.hasTool('assistant.knowledge.upsert'), true)
   assert.equal(catalog.hasTool('assistant.knowledge.lint'), true)
   assert.equal(catalog.hasTool('assistant.knowledge.rebuildIndex'), true)
-  assert.equal(catalog.hasTool('assistant.cron.list'), true)
+  assert.equal(catalog.hasTool('assistant.cron.list'), false)
   assert.equal(catalog.hasTool('assistant.selfTarget.list'), true)
   assert.equal(catalog.hasTool('vault.fs.readText'), true)
   assert.equal(catalog.hasTool('web.fetch'), false)

@@ -925,7 +925,7 @@ test('sendAssistantMessage does not fail over a tool-bound OpenAI-compatible tur
           rawToolEvents: [
             {
               type: 'assistant.tool.started',
-              tool: 'assistant.memory.search',
+              tool: 'assistant.knowledge.search',
             },
           ],
         },

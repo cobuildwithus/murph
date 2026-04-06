@@ -17,7 +17,7 @@ It exposes a localhost control plane for:
 - updating assistant session options
 - reading runtime status and sessions
 - draining the assistant outbox
-- processing due assistant cron work
+- processing due canonical automation work
 - running a one-shot automation scan
 
 The daemon is bound to a **single vault** and requires a bearer token for every route.
@@ -50,11 +50,9 @@ A new `createAssistantRuntimeStateService(vault)` façade centralizes access to 
 - outbox
 - diagnostics
 - status
-- memory
-- state documents
 - turn receipts
 
-The backing store is still file-based under sibling `assistant-state/**`, but callers now have a single state-service entry point instead of directly mixing helpers across many modules.
+The backing store is still file-based under `vault/.runtime/operations/assistant/**`, but callers now have a single state-service entry point instead of directly mixing helpers across many modules.
 
 ### 4. Explicit conversation policy
 
@@ -145,8 +143,8 @@ Do not treat assistant runtime context as canonical memory, and do not read it a
 
 ## Compatibility notes
 
-- Existing assistant sessions remain file-backed under `assistant-state/sessions/**`.
-- Existing transcripts remain file-backed under `assistant-state/transcripts/**`.
+- Existing assistant sessions remain file-backed under `vault/.runtime/operations/assistant/sessions/**`.
+- Existing transcripts remain file-backed under `vault/.runtime/operations/assistant/transcripts/**`.
 - Existing automation, outbox, diagnostics, and receipt stores remain file-backed.
 - No hosted-runtime architecture changes are required for this migration.
 

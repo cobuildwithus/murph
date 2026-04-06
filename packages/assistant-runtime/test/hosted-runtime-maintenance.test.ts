@@ -41,7 +41,6 @@ const mocks = vi.hoisted(() => ({
   readAssistantAutomationState: vi.fn(async () => ({
     autoReplyChannels: [],
     autoReplyBacklogChannels: [],
-    preferredChannels: [],
     updatedAt: "2026-03-28T09:00:00.000Z",
   })),
   readOperatorConfig: vi.fn(async () => null),

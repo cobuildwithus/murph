@@ -88,10 +88,9 @@ import {
   sendAssistantMessage,
 } from '@murphai/assistant-cli/assistant/service'
 import type { AssistantToolCatalog } from '@murphai/assistant-core/model-harness'
-import { getAssistantStateDocument } from '@murphai/assistant-core/assistant/state'
+import { resolveAssistantStateDocumentPath } from '@murphai/assistant-core/assistant/state'
 import {
   resolveAssistantMemoryTurnContext,
-  upsertAssistantMemory,
 } from '@murphai/assistant-core/assistant/memory'
 import {
   resolveAssistantConversationAutoReplyEligibility,
@@ -109,7 +108,6 @@ import {
 } from '@murphai/assistant-core/assistant/failover'
 import {
   appendAssistantTranscriptEntries,
-  listAssistantStateDocuments,
   listAssistantTranscriptEntries,
   resolveAssistantSession,
   resolveAssistantStatePaths,
@@ -252,6 +250,71 @@ async function waitForPredicate(
 
     await new Promise((resolve) => setTimeout(resolve, 10))
   }
+}
+
+async function readAssistantStateRecord(
+  vaultRoot: string,
+  docId: string,
+): Promise<Record<string, unknown> | null> {
+  const documentPath = resolveAssistantStateDocumentPath(
+    {
+      stateDirectory: resolveAssistantStatePaths(vaultRoot).stateDirectory,
+    },
+    docId,
+  )
+
+  try {
+    return JSON.parse(await readFile(documentPath, 'utf8')) as Record<string, unknown>
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null
+    }
+
+    throw error
+  }
+}
+
+async function listAssistantStateRecordDocIds(
+  vaultRoot: string,
+  prefix: string,
+): Promise<string[]> {
+  const rootDirectory = resolveAssistantStatePaths(vaultRoot).stateDirectory
+  const documentIds: string[] = []
+
+  async function visit(currentDirectory: string, segments: string[]): Promise<void> {
+    let entries
+    try {
+      entries = await readdir(currentDirectory, {
+        withFileTypes: true,
+      })
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return
+      }
+
+      throw error
+    }
+
+    for (const entry of entries) {
+      const nextPath = path.join(currentDirectory, entry.name)
+      if (entry.isDirectory()) {
+        await visit(nextPath, [...segments, entry.name])
+        continue
+      }
+
+      if (!entry.isFile() || !entry.name.endsWith('.json')) {
+        continue
+      }
+
+      const docId = [...segments, entry.name.replace(/\.json$/u, '')].join('/')
+      if (docId === prefix || docId.startsWith(`${prefix}/`)) {
+        documentIds.push(docId)
+      }
+    }
+  }
+
+  await visit(rootDirectory, [])
+  return documentIds.sort()
 }
 
 test('buildResolveAssistantSessionInput keeps locator shaping and operator default fallbacks stable', () => {
@@ -1930,66 +1993,6 @@ test('sendAssistantMessage replays the local transcript for OpenAI-compatible se
         content: 'first reply',
       },
     ])
-    const privateMemoryResults = await firstToolCatalog!.executeCalls({
-      mode: 'apply',
-      calls: [
-        {
-          tool: 'murph.cli.run',
-          input: {
-            args: [
-              'assistant',
-              'memory',
-              'file',
-              'append',
-              'MEMORY.md',
-              '--section',
-              'Health context',
-              '--text',
-              'User is tracking LDL.',
-            ],
-          },
-        },
-        {
-          tool: 'murph.cli.run',
-          input: {
-            args: [
-              'assistant',
-              'memory',
-              'file',
-              'append',
-              'memory/2026-03-31.md',
-              '--text',
-              'Private follow-up note.',
-            ],
-          },
-        },
-        {
-          tool: 'murph.cli.run',
-          input: {
-            args: ['assistant', 'memory', 'file', 'read', 'memory/2026-03-31.md'],
-          },
-        },
-      ],
-    })
-    assert.deepEqual(
-      privateMemoryResults.map((result) => result.status),
-      ['succeeded', 'succeeded', 'succeeded'],
-    )
-    assert.match(
-      String(
-        ((privateMemoryResults[2]?.result as { json?: { text?: string } } | undefined)?.json?.text ??
-          ''),
-      ),
-      /Private follow-up note\./u,
-    )
-    const statePaths = resolveAssistantStatePaths(vaultRoot)
-    const memoryMarkdown = await readFile(statePaths.longTermMemoryPath, 'utf8')
-    assert.match(memoryMarkdown, /User is tracking LDL\./u)
-    const dailyMemoryMarkdown = await readFile(
-      path.join(statePaths.assistantStateRoot, 'memory/2026-03-31.md'),
-      'utf8',
-    )
-    assert.match(dailyMemoryMarkdown, /Private follow-up note\./u)
     assert.equal(first.session.providerBinding?.providerSessionId ?? null, null)
     assert.equal(second.session.providerBinding?.providerSessionId ?? null, null)
     assert.equal(second.session.providerOptions.baseUrl, 'http://127.0.0.1:11434/v1')
@@ -2097,33 +2100,13 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the CLI-firs
         {
           tool: 'murph.cli.run',
           input: {
-            args: [
-              'assistant',
-              'memory',
-              'file',
-              'append',
-              'MEMORY.md',
-              '--section',
-              'Identity',
-              '--text',
-              'Call the user Alex.',
-            ],
+            args: ['assistant', 'session', 'list'],
           },
         },
         {
           tool: 'murph.cli.run',
           input: {
-            args: ['assistant', 'memory', 'file', 'read', 'MEMORY.md'],
-          },
-        },
-        {
-          tool: 'murph.cli.run',
-          input: {
-            args: ['assistant', 'state', 'put', 'automation/reply-check', '--input', '-'],
-            stdin: JSON.stringify({
-              lastReply: 'auto-reply',
-              source: 'auto-reply',
-            }),
+            args: ['assistant', 'session', 'show', result.session.sessionId],
           },
         },
         {
@@ -2132,118 +2115,19 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the CLI-firs
             args: ['journal', 'append', '2026-03-31', '--text', 'Auto-reply mutation proof.'],
           },
         },
-        {
-          tool: 'murph.cli.run',
-          input: {
-            args: [
-              'assistant',
-              'memory',
-              'file',
-              'append',
-              'MEMORY.md',
-              '--section',
-              'Health context',
-              '--text',
-              'User has high cholesterol.',
-            ],
-          },
-        },
-        {
-          tool: 'murph.cli.run',
-          input: {
-            args: [
-              'assistant',
-              'memory',
-              'file',
-              'append',
-              'memory/2026-03-31.md',
-              '--text',
-              'Auto-reply context note.',
-            ],
-          },
-        },
-        {
-          tool: 'murph.cli.run',
-          input: {
-            args: ['assistant', 'memory', 'file', 'read', 'memory/2026-03-31.md'],
-          },
-        },
       ],
     })
-    assert.deepEqual(
-      toolResults.map((result) => result.status),
-      ['succeeded', 'succeeded', 'succeeded', 'succeeded', 'succeeded', 'succeeded', 'succeeded'],
-    )
-    assert.match(
-      String(
-        ((toolResults[1]?.result as { json?: { text?: string } } | undefined)?.json?.text ?? ''),
-      ),
-      /Call the user Alex\./u,
-    )
-    const statePaths = resolveAssistantStatePaths(vaultRoot)
-    const memoryMarkdown = await readFile(statePaths.longTermMemoryPath, 'utf8')
-    assert.match(memoryMarkdown, /high cholesterol/u)
-    const dailyMemoryMarkdown = await readFile(
-      path.join(statePaths.assistantStateRoot, 'memory/2026-03-31.md'),
-      'utf8',
-    )
-    assert.match(dailyMemoryMarkdown, /Auto-reply context note\./u)
-    const searchResults = await toolCatalog!.executeCalls({
-      mode: 'apply',
-      calls: [
-        {
-          tool: 'murph.cli.run',
-          input: {
-            args: ['assistant', 'memory', 'search', '--text', 'Alex', '--limit', '5'],
-          },
-        },
-        {
-          tool: 'murph.cli.run',
-          input: {
-            args: ['assistant', 'memory', 'search', '--text', 'Auto-reply context note', '--limit', '5'],
-          },
-        },
-      ],
-    })
-    const longTermHit = (
-      (((searchResults[0]?.result as { json?: { results?: Array<{ id?: string; sourcePath?: string }> } } | undefined)
-        ?.json?.results) ?? [])
-    )[0]
-    const dailyHit = (
-      (((searchResults[1]?.result as { json?: { results?: Array<{ sourcePath?: string }> } } | undefined)
-        ?.json?.results) ?? [])
-    )[0]
-    assert.match(longTermHit?.sourcePath ?? '', /(?:^|\/)MEMORY\.md$/u)
-    assert.match(dailyHit?.sourcePath ?? '', /(?:^|\/)memory\/2026-03-31\.md$/u)
-    const memoryGetResults = await toolCatalog!.executeCalls({
-      mode: 'apply',
-      calls: longTermHit && 'id' in longTermHit
-        ? [
-            {
-              tool: 'murph.cli.run',
-              input: {
-                args: ['assistant', 'memory', 'get', longTermHit.id],
-              },
-            },
-          ]
-        : [],
-    })
-    const fetchedMemory = (memoryGetResults[0]?.result as {
-      json?: { memory?: { sourcePath?: string } }
-    } | undefined)?.json?.memory
-    assert.match(fetchedMemory?.sourcePath ?? '', /(?:^|\/)MEMORY\.md$/u)
+    assert.deepEqual(toolResults.map((entry) => entry.status), ['succeeded', 'succeeded', 'succeeded'])
+    const listedSessions = (toolResults[0]?.result as {
+      json?: { sessions?: Array<{ sessionId?: string }> }
+    } | undefined)?.json?.sessions
+    const shownSession = (toolResults[1]?.result as {
+      json?: { session?: { sessionId?: string } }
+    } | undefined)?.json?.session
+    assert.ok(listedSessions?.some((session) => session.sessionId === result.session.sessionId))
+    assert.equal(shownSession?.sessionId, result.session.sessionId)
 
-    const stateSnapshot = await getAssistantStateDocument({
-      vault: vaultRoot,
-      docId: 'automation/reply-check',
-    })
-    assert.equal(stateSnapshot.exists, true)
-    assert.deepEqual(stateSnapshot.value, {
-      lastReply: 'auto-reply',
-      source: 'auto-reply',
-    })
-
-    const journalRelativePath = (toolResults[3]?.result as {
+    const journalRelativePath = (toolResults[2]?.result as {
       json?: { journalPath?: string }
     } | undefined)?.json?.journalPath
     assert.equal(typeof journalRelativePath, 'string')
@@ -2517,14 +2401,14 @@ test('sendAssistantMessage injects and persists a CLI surface bootstrap contract
   assert.equal(call?.continuityContext, null)
   assert.match(call?.systemPrompt ?? '', /Murph CLI Contract:/u)
 
-  const snapshot = await getAssistantStateDocument({
-    docId: `sessions/${result.session.sessionId}/cli-surface-bootstrap`,
-    vault: vaultRoot,
-  })
-  assert.equal(snapshot.exists, true)
-  assert.equal(typeof snapshot.value?.contract, 'string')
+  const snapshot = await readAssistantStateRecord(
+    vaultRoot,
+    `sessions/${result.session.sessionId}/cli-surface-bootstrap`,
+  )
+  assert.equal(snapshot !== null, true)
+  assert.equal(typeof snapshot?.contract, 'string')
   assert.equal(
-    (call?.systemPrompt ?? '').includes(String(snapshot.value?.contract ?? '')),
+    (call?.systemPrompt ?? '').includes(String(snapshot?.contract ?? '')),
     true,
   )
 })
@@ -2989,17 +2873,14 @@ test('sendAssistantMessage injects the first-chat check-in only for the first ev
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
   const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
 
-  const firstContactDocs = await listAssistantStateDocuments({
-    prefix: 'onboarding/first-contact',
-    vault: vaultRoot,
-  })
+  const firstContactDocs = await listAssistantStateRecordDocIds(
+    vaultRoot,
+    'onboarding/first-contact',
+  )
   assert.equal(firstContactDocs.length, 2)
   for (const firstContactDoc of firstContactDocs) {
-    const firstContactState = await getAssistantStateDocument({
-      docId: firstContactDoc.docId,
-      vault: vaultRoot,
-    })
-    assert.equal(firstContactState.exists, true)
+    const firstContactState = await readAssistantStateRecord(vaultRoot, firstContactDoc)
+    assert.equal(firstContactState !== null, true)
   }
 })
 
@@ -3057,10 +2938,10 @@ test('sendAssistantMessage does not burn first-contact onboarding for queue-only
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
   const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
 
-  const firstContactDocs = await listAssistantStateDocuments({
-    prefix: 'onboarding/first-contact',
-    vault: vaultRoot,
-  })
+  const firstContactDocs = await listAssistantStateRecordDocIds(
+    vaultRoot,
+    'onboarding/first-contact',
+  )
   assert.equal(firstContactDocs.length, 0)
 })
 
@@ -3241,372 +3122,6 @@ function restoreEnvironmentVariable(
 
   process.env[key] = value
 }
-
-function requireTurnContext(env: NodeJS.ProcessEnv | undefined) {
-  const turnContext = resolveAssistantMemoryTurnContext(env)
-  if (!turnContext) {
-    throw new Error('Expected assistant memory turn context on the provider turn.')
-  }
-
-  return turnContext
-}
-
-test('sendAssistantMessage loads only explicit assistant-written core memory into fresh sessions', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-memory-'))
-  const vaultRoot = path.join(parent, 'vault')
-  cleanupPaths.push(parent)
-
-  await mkdir(vaultRoot, { recursive: true })
-
-  serviceMocks.executeAssistantProviderTurn
-    .mockImplementationOnce(async (input: { env?: NodeJS.ProcessEnv }) => {
-      const turnContext = requireTurnContext(input.env)
-
-      await Promise.all([
-        upsertAssistantMemory({
-          vault: vaultRoot,
-          text: 'Call me Chris.',
-          scope: 'both',
-          section: 'Identity',
-          turnContext,
-        }),
-        upsertAssistantMemory({
-          vault: vaultRoot,
-          text: 'Keep answers concise.',
-          scope: 'long-term',
-          section: 'Standing instructions',
-          turnContext,
-        }),
-      ])
-
-      return {
-        provider: 'codex-cli',
-        providerSessionId: 'thread-memory-1',
-        response: 'Noted.',
-        stderr: '',
-        stdout: '',
-        rawEvents: [],
-      }
-    })
-    .mockResolvedValueOnce({
-      provider: 'codex-cli',
-      providerSessionId: 'thread-memory-2',
-      response: 'I remember.',
-      stderr: '',
-      stdout: '',
-      rawEvents: [],
-    })
-
-  await sendAssistantMessage({
-    vault: vaultRoot,
-    alias: 'chat:one',
-    prompt: 'Call me Chris. Going forward, keep answers concise.',
-  })
-
-  await sendAssistantMessage({
-    vault: vaultRoot,
-    alias: 'chat:two',
-    prompt: 'What should you remember across sessions?',
-  })
-
-  const statePaths = resolveAssistantStatePaths(vaultRoot)
-  const longTermMemory = await readFile(statePaths.longTermMemoryPath, 'utf8')
-  const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
-
-  assert.match(longTermMemory, /Call the user Chris\./u)
-  assert.match(longTermMemory, /keep answers concise\./iu)
-  assert.match(secondCall?.systemPrompt ?? '', /Core assistant memory:/u)
-  assert.match(secondCall?.systemPrompt ?? '', /Call the user Chris\./u)
-  assert.match(secondCall?.systemPrompt ?? '', /keep answers concise\./iu)
-  assert.doesNotMatch(secondCall?.systemPrompt ?? '', /Recent daily assistant memory/u)
-})
-
-test('sendAssistantMessage no longer auto-persists memory without explicit assistant upserts', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-no-auto-memory-'))
-  const vaultRoot = path.join(parent, 'vault')
-  cleanupPaths.push(parent)
-
-  await mkdir(vaultRoot, { recursive: true })
-
-  serviceMocks.executeAssistantProviderTurn
-    .mockResolvedValueOnce({
-      provider: 'codex-cli',
-      providerSessionId: 'thread-no-auto-1',
-      response: 'I can do that.',
-      stderr: '',
-      stdout: '',
-      rawEvents: [],
-    })
-    .mockResolvedValueOnce({
-      provider: 'codex-cli',
-      providerSessionId: 'thread-no-auto-2',
-      response: 'There is nothing stored yet.',
-      stderr: '',
-      stdout: '',
-      rawEvents: [],
-    })
-
-  await sendAssistantMessage({
-    vault: vaultRoot,
-    alias: 'chat:no-auto-one',
-    prompt: 'Call me Chris. Going forward, keep answers concise.',
-  })
-
-  await sendAssistantMessage({
-    vault: vaultRoot,
-    alias: 'chat:no-auto-two',
-    prompt: 'What should you remember?',
-  })
-
-  const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
-  assert.doesNotMatch(secondCall?.systemPrompt ?? '', /Core assistant memory:/u)
-})
-
-test('sendAssistantMessage bootstraps only the latest mutable long-term memory written into the Markdown memory files', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-upsert-'))
-  const vaultRoot = path.join(parent, 'vault')
-  cleanupPaths.push(parent)
-
-  await mkdir(vaultRoot, { recursive: true })
-
-  serviceMocks.executeAssistantProviderTurn
-    .mockImplementationOnce(async (input: { env?: NodeJS.ProcessEnv }) => {
-      const turnContext = requireTurnContext(input.env)
-
-      await Promise.all([
-        upsertAssistantMemory({
-          vault: vaultRoot,
-          text: 'Call me Chris.',
-          scope: 'both',
-          section: 'Identity',
-          turnContext,
-        }),
-        upsertAssistantMemory({
-          vault: vaultRoot,
-          text: 'Keep answers concise.',
-          scope: 'long-term',
-          section: 'Standing instructions',
-          turnContext,
-        }),
-        upsertAssistantMemory({
-          vault: vaultRoot,
-          text: 'Use imperial units.',
-          scope: 'long-term',
-          section: 'Preferences',
-          turnContext,
-        }),
-      ])
-
-      return {
-        provider: 'codex-cli',
-        providerSessionId: 'thread-upsert-1',
-        response: 'Noted.',
-        stderr: '',
-        stdout: '',
-        rawEvents: [],
-      }
-    })
-    .mockImplementationOnce(async (input: { env?: NodeJS.ProcessEnv }) => {
-      const turnContext = requireTurnContext(input.env)
-
-      await Promise.all([
-        upsertAssistantMemory({
-          vault: vaultRoot,
-          text: 'Call me Alex.',
-          scope: 'both',
-          section: 'Identity',
-          turnContext,
-        }),
-        upsertAssistantMemory({
-          vault: vaultRoot,
-          text: 'Keep answers detailed.',
-          scope: 'long-term',
-          section: 'Standing instructions',
-          turnContext,
-        }),
-        upsertAssistantMemory({
-          vault: vaultRoot,
-          text: 'Use metric units.',
-          scope: 'long-term',
-          section: 'Preferences',
-          turnContext,
-        }),
-      ])
-
-      return {
-        provider: 'codex-cli',
-        providerSessionId: 'thread-upsert-2',
-        response: 'Updated.',
-        stderr: '',
-        stdout: '',
-        rawEvents: [],
-      }
-    })
-    .mockResolvedValueOnce({
-      provider: 'codex-cli',
-      providerSessionId: 'thread-upsert-3',
-      response: 'I remember the latest preferences.',
-      stderr: '',
-      stdout: '',
-      rawEvents: [],
-    })
-
-  await sendAssistantMessage({
-    vault: vaultRoot,
-    alias: 'chat:upsert-one',
-    prompt: 'Call me Chris. Going forward, keep answers concise. Use imperial units.',
-  })
-
-  await sendAssistantMessage({
-    vault: vaultRoot,
-    alias: 'chat:upsert-two',
-    prompt:
-      'Actually, call me Alex from now on. From now on, keep answers detailed. Use metric units.',
-  })
-
-  await sendAssistantMessage({
-    vault: vaultRoot,
-    alias: 'chat:upsert-three',
-    prompt: 'What should you remember across sessions now?',
-  })
-
-  const statePaths = resolveAssistantStatePaths(vaultRoot)
-  const longTermMemory = await readFile(statePaths.longTermMemoryPath, 'utf8')
-  const thirdCall = serviceMocks.executeAssistantProviderTurn.mock.calls[2]?.[0]
-
-  assert.match(longTermMemory, /Call the user Alex\./u)
-  assert.doesNotMatch(longTermMemory, /Call the user Chris\./u)
-  assert.match(longTermMemory, /keep answers detailed\./iu)
-  assert.doesNotMatch(longTermMemory, /keep answers concise\./iu)
-  assert.match(longTermMemory, /Use metric units\./u)
-  assert.doesNotMatch(longTermMemory, /Use imperial units\./u)
-  assert.match(thirdCall?.systemPrompt ?? '', /Call the user Alex\./u)
-  assert.doesNotMatch(thirdCall?.systemPrompt ?? '', /Call the user Chris\./u)
-  assert.match(thirdCall?.systemPrompt ?? '', /keep answers detailed\./iu)
-  assert.doesNotMatch(thirdCall?.systemPrompt ?? '', /keep answers concise\./iu)
-  assert.match(thirdCall?.systemPrompt ?? '', /Use metric units\./u)
-  assert.doesNotMatch(thirdCall?.systemPrompt ?? '', /Use imperial units\./u)
-})
-
-test('sendAssistantMessage can persist selected health context into assistant memory for private future sessions', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-sensitive-memory-'))
-  const vaultRoot = path.join(parent, 'vault')
-  cleanupPaths.push(parent)
-
-  await mkdir(vaultRoot, { recursive: true })
-
-  serviceMocks.executeAssistantProviderTurn
-    .mockImplementationOnce(async (input: { env?: NodeJS.ProcessEnv }) => {
-      await upsertAssistantMemory({
-        vault: vaultRoot,
-        text: 'User has diabetes.',
-        scope: 'both',
-        section: 'Health context',
-        turnContext: requireTurnContext(input.env),
-      })
-
-      return {
-        provider: 'codex-cli',
-        providerSessionId: 'thread-sensitive-1',
-        response: 'Noted.',
-        stderr: '',
-        stdout: '',
-        rawEvents: [],
-      }
-    })
-    .mockResolvedValueOnce({
-      provider: 'codex-cli',
-      providerSessionId: 'thread-sensitive-2',
-      response: 'I remember.',
-      stderr: '',
-      stdout: '',
-      rawEvents: [],
-    })
-
-  await sendAssistantMessage({
-    vault: vaultRoot,
-    alias: 'chat:health-one',
-    prompt: 'I have diabetes.',
-  })
-
-  await sendAssistantMessage({
-    vault: vaultRoot,
-    alias: 'chat:health-two',
-    prompt: 'What health context should carry into future chats?',
-  })
-
-  const statePaths = resolveAssistantStatePaths(vaultRoot)
-  const longTermMemory = await readFile(statePaths.longTermMemoryPath, 'utf8')
-  const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
-
-  assert.match(longTermMemory, /## Health context/u)
-  assert.match(longTermMemory, /User has diabetes\./u)
-  assert.match(secondCall?.systemPrompt ?? '', /Core assistant memory:/u)
-  assert.match(secondCall?.systemPrompt ?? '', /User has diabetes\./u)
-})
-
-test('sendAssistantMessage blocks health-memory upserts in non-private assistant contexts', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-group-health-memory-'))
-  const vaultRoot = path.join(parent, 'vault')
-  cleanupPaths.push(parent)
-
-  await mkdir(vaultRoot, { recursive: true })
-
-  serviceMocks.executeAssistantProviderTurn
-    .mockImplementationOnce(async (input: { env?: NodeJS.ProcessEnv }) => {
-      await assert.rejects(
-        upsertAssistantMemory({
-          vault: vaultRoot,
-          text: 'User has diabetes.',
-          scope: 'long-term',
-          section: 'Health context',
-          turnContext: requireTurnContext(input.env),
-        }),
-        /private assistant contexts/u,
-      )
-
-      return {
-        provider: 'codex-cli',
-        providerSessionId: 'thread-group-health-1',
-        response: 'I should not store that here.',
-        stderr: '',
-        stdout: '',
-        rawEvents: [],
-      }
-    })
-    .mockResolvedValueOnce({
-      provider: 'codex-cli',
-      providerSessionId: 'thread-group-health-2',
-      response: 'No private health memory is available here.',
-      stderr: '',
-      stdout: '',
-      rawEvents: [],
-    })
-
-  await sendAssistantMessage({
-    vault: vaultRoot,
-    alias: 'chat:group-health-one',
-    channel: 'imessage',
-    participantId: 'contact:group',
-    sourceThreadId: 'thread-group',
-    threadIsDirect: false,
-    prompt: 'Remember that I have diabetes.',
-  })
-
-  await sendAssistantMessage({
-    vault: vaultRoot,
-    alias: 'chat:group-health-two',
-    channel: 'imessage',
-    participantId: 'contact:group',
-    sourceThreadId: 'thread-group-2',
-    threadIsDirect: false,
-    prompt: 'What private health context is available?',
-  })
-
-  const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
-  assert.doesNotMatch(secondCall?.systemPrompt ?? '', /Health context/u)
-})
-
 
 test('sendAssistantMessage forwards provider progress callbacks to the provider turn', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-progress-'))
@@ -4397,7 +3912,7 @@ test('sendAssistantMessage preserves the primary provider error for tool-bound o
         rawToolEvents: [
           {
             type: 'assistant.tool.started',
-            tool: 'assistant.memory.search',
+            tool: 'assistant.knowledge.search',
           },
         ],
       },

@@ -36,6 +36,10 @@ const workspaceCliBinPath = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '../../../cli/src/bin.ts',
 )
+const workspaceBuiltCliBinPath = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../../cli/dist/bin.js',
+)
 const workspaceTsxBinPath = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '../../../../node_modules/.bin',
@@ -388,6 +392,13 @@ async function resolveAssistantCliLauncher(
     }
   }
 
+  if (await pathExists(workspaceBuiltCliBinPath)) {
+    return {
+      argvPrefix: [workspaceBuiltCliBinPath],
+      command: process.execPath,
+    }
+  }
+
   const workspaceTsxCliPath = resolveWorkspaceTsxCliPath()
   if (workspaceTsxCliPath !== null) {
     return {
@@ -458,6 +469,15 @@ async function resolveExecutableOnPath(
   }
 
   return null
+}
+
+async function pathExists(candidatePath: string): Promise<boolean> {
+  try {
+    await access(candidatePath, constants.F_OK)
+    return true
+  } catch {
+    return false
+  }
 }
 
 async function isExecutable(candidatePath: string): Promise<boolean> {

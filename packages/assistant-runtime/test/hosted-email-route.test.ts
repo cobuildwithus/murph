@@ -5,7 +5,6 @@ import path from "node:path";
 import { test } from "vitest";
 
 import {
-  resolveAssistantStatePaths,
   resolveRuntimePaths,
 } from "@murphai/runtime-state/node";
 import { reconcileHostedVerifiedEmailSelfTarget } from "../src/hosted-email-route.ts";
@@ -33,7 +32,6 @@ test("hosted email route reconciliation saves the email self-target from hosted 
     assert.deepEqual(result, {
       emailAddress: "user@example.com",
       identityId: "assistant@mail.example.test",
-      preferredChannelsUpdated: true,
       selfTargetUpdated: true,
       status: "saved",
     });
@@ -48,12 +46,6 @@ test("hosted email route reconciliation saves the email self-target from hosted 
         participantId: "user@example.com",
         sourceThreadId: null,
       },
-    );
-    assert.deepEqual(
-      JSON.parse(
-        await readFile(resolveAssistantStatePaths(vaultRoot).automationPath, "utf8"),
-      ).preferredChannels,
-      ["email"],
     );
   } finally {
     await cleanup();
@@ -97,7 +89,6 @@ test("hosted email route reconciliation uses the hosted sender address instead o
     assert.deepEqual(result, {
       emailAddress: "user@example.com",
       identityId: "assistant@mail.example.test",
-      preferredChannelsUpdated: true,
       selfTargetUpdated: true,
       status: "saved",
     });
@@ -146,7 +137,6 @@ test("hosted email route reconciliation becomes a no-op when the saved target al
     assert.deepEqual(result, {
       emailAddress: "user@example.com",
       identityId: "assistant@mail.example.test",
-      preferredChannelsUpdated: false,
       selfTargetUpdated: false,
       status: "unchanged",
     });
@@ -174,7 +164,6 @@ test("hosted email route reconciliation stays private when no hosted sender iden
     assert.deepEqual(result, {
       emailAddress: "user@example.com",
       identityId: null,
-      preferredChannelsUpdated: false,
       selfTargetUpdated: false,
       status: "missing-sender-identity",
     });

@@ -9,7 +9,7 @@ Like `device-syncd`, the daemon binds the control plane to localhost by default 
 What it does:
 - serves a localhost-only assistant control plane for local chat turns and runtime state inspection
 - owns assistant session execution through one runtime authority per vault
-- keeps assistant runtime state in sibling `assistant-state/**`, not in canonical vault files
+- keeps assistant runtime state under `vault/.runtime/operations/assistant/**`, not in canonical vault files
 - exposes status, session, outbox, cron, and automation control routes for local clients
 - publishes `@murphai/assistantd/client` as the loopback-only HTTP client surface for daemon-routed callers
 - lets the CLI operate as an HTTP client when `MURPH_ASSISTANTD_BASE_URL` and `MURPH_ASSISTANTD_CONTROL_TOKEN` are configured

@@ -590,344 +590,6 @@
                     }
                   }
                 },
-                "state": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "commands": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "list": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
-                                "requestId": {
-                                  "description": "Optional caller-supplied request id for audit correlation.",
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 128
-                                },
-                                "prefix": {
-                                  "description": "Optional slash-delimited document prefix such as cron or cron/job_123.",
-                                  "type": "string",
-                                  "minLength": 1
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "show": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
-                                "requestId": {
-                                  "description": "Optional caller-supplied request id for audit correlation.",
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 128
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "put": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
-                                "requestId": {
-                                  "description": "Optional caller-supplied request id for audit correlation.",
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 128
-                                },
-                                "input": {
-                                  "type": "string",
-                                  "description": "JSON object payload in @file.json form or - for stdin."
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "patch": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
-                                "requestId": {
-                                  "description": "Optional caller-supplied request id for audit correlation.",
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 128
-                                },
-                                "input": {
-                                  "type": "string",
-                                  "description": "JSON object merge-patch payload in @file.json form or - for stdin."
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "delete": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
-                                "requestId": {
-                                  "description": "Optional caller-supplied request id for audit correlation.",
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 128
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                },
-                "memory": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "commands": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "search": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
-                                "requestId": {
-                                  "description": "Optional caller-supplied request id for audit correlation.",
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 128
-                                },
-                                "text": {
-                                  "description": "Optional lexical query for assistant memory search.",
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "scope": {
-                                  "default": "all",
-                                  "description": "Choose long-term memory, daily notes, or both.",
-                                  "type": "string",
-                                  "enum": [
-                                    "long-term",
-                                    "daily",
-                                    "all"
-                                  ]
-                                },
-                                "section": {
-                                  "description": "Optional section filter such as Identity or Notes.",
-                                  "type": "string",
-                                  "enum": [
-                                    "Identity",
-                                    "Preferences",
-                                    "Standing instructions",
-                                    "Health context",
-                                    "Notes"
-                                  ]
-                                },
-                                "limit": {
-                                  "default": 8,
-                                  "description": "Maximum number of assistant memory hits to return.",
-                                  "type": "integer",
-                                  "exclusiveMinimum": 0,
-                                  "maximum": 25
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "get": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
-                                "requestId": {
-                                  "description": "Optional caller-supplied request id for audit correlation.",
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 128
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "file": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "commands": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "read": {
-                                  "type": "object",
-                                  "additionalProperties": false,
-                                  "properties": {
-                                    "options": {
-                                      "type": "object",
-                                      "additionalProperties": false,
-                                      "properties": {
-                                        "vault": {
-                                          "type": "string",
-                                          "minLength": 1,
-                                          "description": "Vault root to operate against."
-                                        },
-                                        "requestId": {
-                                          "description": "Optional caller-supplied request id for audit correlation.",
-                                          "type": "string",
-                                          "minLength": 1,
-                                          "maxLength": 128
-                                        },
-                                        "maxChars": {
-                                          "description": "Optional maximum number of characters to return before truncation.",
-                                          "type": "integer",
-                                          "exclusiveMinimum": 0,
-                                          "maximum": 20000
-                                        }
-                                      }
-                                    }
-                                  }
-                                },
-                                "append": {
-                                  "type": "object",
-                                  "additionalProperties": false,
-                                  "properties": {
-                                    "options": {
-                                      "type": "object",
-                                      "additionalProperties": false,
-                                      "properties": {
-                                        "vault": {
-                                          "type": "string",
-                                          "minLength": 1,
-                                          "description": "Vault root to operate against."
-                                        },
-                                        "requestId": {
-                                          "description": "Optional caller-supplied request id for audit correlation.",
-                                          "type": "string",
-                                          "minLength": 1,
-                                          "maxLength": 128
-                                        },
-                                        "section": {
-                                          "description": "Required for `MEMORY.md`; daily memory appends only allow `Notes`.",
-                                          "type": "string",
-                                          "enum": [
-                                            "Identity",
-                                            "Preferences",
-                                            "Standing instructions",
-                                            "Health context",
-                                            "Notes"
-                                          ]
-                                        },
-                                        "text": {
-                                          "type": "string",
-                                          "minLength": 1,
-                                          "description": "One bullet line to append. Do not include multiple lines or headings."
-                                        }
-                                      }
-                                    }
-                                  }
-                                },
-                                "write": {
-                                  "type": "object",
-                                  "additionalProperties": false,
-                                  "properties": {
-                                    "options": {
-                                      "type": "object",
-                                      "additionalProperties": false,
-                                      "properties": {
-                                        "vault": {
-                                          "type": "string",
-                                          "minLength": 1,
-                                          "description": "Vault root to operate against."
-                                        },
-                                        "requestId": {
-                                          "description": "Optional caller-supplied request id for audit correlation.",
-                                          "type": "string",
-                                          "minLength": 1,
-                                          "maxLength": 128
-                                        },
-                                        "input": {
-                                          "type": "string",
-                                          "description": "Markdown text payload in @file form or - for stdin."
-                                        }
-                                      }
-                                    }
-                                  }
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                },
                 "self-target": {
                   "type": "object",
                   "additionalProperties": false,
@@ -1032,567 +694,6 @@
                     }
                   }
                 },
-                "cron": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "commands": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "preset": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "commands": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "list": {
-                                  "type": "object",
-                                  "additionalProperties": false,
-                                  "properties": {
-                                    "options": {
-                                      "type": "object",
-                                      "additionalProperties": false,
-                                      "properties": {
-                                        "vault": {
-                                          "type": "string",
-                                          "minLength": 1,
-                                          "description": "Vault root to operate against."
-                                        },
-                                        "requestId": {
-                                          "description": "Optional caller-supplied request id for audit correlation.",
-                                          "type": "string",
-                                          "minLength": 1,
-                                          "maxLength": 128
-                                        }
-                                      }
-                                    }
-                                  }
-                                },
-                                "show": {
-                                  "type": "object",
-                                  "additionalProperties": false,
-                                  "properties": {
-                                    "options": {
-                                      "type": "object",
-                                      "additionalProperties": false,
-                                      "properties": {
-                                        "vault": {
-                                          "type": "string",
-                                          "minLength": 1,
-                                          "description": "Vault root to operate against."
-                                        },
-                                        "requestId": {
-                                          "description": "Optional caller-supplied request id for audit correlation.",
-                                          "type": "string",
-                                          "minLength": 1,
-                                          "maxLength": 128
-                                        }
-                                      }
-                                    }
-                                  }
-                                },
-                                "install": {
-                                  "type": "object",
-                                  "additionalProperties": false,
-                                  "properties": {
-                                    "options": {
-                                      "type": "object",
-                                      "additionalProperties": false,
-                                      "properties": {
-                                        "vault": {
-                                          "type": "string",
-                                          "minLength": 1,
-                                          "description": "Vault root to operate against."
-                                        },
-                                        "requestId": {
-                                          "description": "Optional caller-supplied request id for audit correlation.",
-                                          "type": "string",
-                                          "minLength": 1,
-                                          "maxLength": 128
-                                        },
-                                        "name": {
-                                          "description": "Optional cron job name override. Defaults to the preset’s suggested name.",
-                                          "type": "string",
-                                          "minLength": 1
-                                        },
-                                        "var": {
-                                          "description": "Optional preset variable assignment in key=value form. Repeat --var for multiple values.",
-                                          "type": "array",
-                                          "items": {
-                                            "type": "string",
-                                            "minLength": 1
-                                          }
-                                        },
-                                        "instructions": {
-                                          "description": "Optional extra instructions appended to the preset prompt before the job is created.",
-                                          "type": "string",
-                                          "minLength": 1
-                                        },
-                                        "at": {
-                                          "description": "Optional one-shot ISO 8601 timestamp with an explicit offset.",
-                                          "type": "string",
-                                          "minLength": 1
-                                        },
-                                        "every": {
-                                          "description": "Optional recurring interval such as 30m, 2h, or 1d.",
-                                          "type": "string",
-                                          "minLength": 1
-                                        },
-                                        "cron": {
-                                          "description": "Optional five-field cron expression override.",
-                                          "type": "string",
-                                          "minLength": 1
-                                        },
-                                        "disabled": {
-                                          "description": "Create the preset-backed cron job in a disabled state without scheduling it yet.",
-                                          "type": "boolean"
-                                        },
-                                        "session": {
-                                          "description": "Existing Murph assistant session id to resume.",
-                                          "type": "string",
-                                          "minLength": 1
-                                        },
-                                        "alias": {
-                                          "description": "Optional stable alias used to map an external conversation onto one assistant session.",
-                                          "type": "string",
-                                          "minLength": 1
-                                        },
-                                        "channel": {
-                                          "description": "Optional channel label such as imessage, telegram, linq, or email.",
-                                          "type": "string",
-                                          "minLength": 1
-                                        },
-                                        "identity": {
-                                          "description": "Optional local assistant identity id for multi-user routing.",
-                                          "type": "string",
-                                          "minLength": 1
-                                        },
-                                        "participant": {
-                                          "description": "Optional remote actor id for multi-user routing and direct-conversation binding.",
-                                          "type": "string",
-                                          "minLength": 1
-                                        },
-                                        "sourceThread": {
-                                          "description": "Optional upstream thread id from the source channel. Thread ids anchor stored conversation bindings when present.",
-                                          "type": "string",
-                                          "minLength": 1
-                                        },
-                                        "deliveryTarget": {
-                                          "description": "Optional explicit outbound destination for each cron run. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound cron jobs reply in place.",
-                                          "type": "string",
-                                          "minLength": 1
-                                        },
-                                        "state": {
-                                          "description": "Bind this cron job to a default assistant state document under assistant-state/state/cron/<jobId>.json. Use this only when the cron needs run-to-run scratch state such as cooldowns, dedupe, unresolved follow-ups, or delivery policy.",
-                                          "type": "boolean"
-                                        },
-                                        "stateDoc": {
-                                          "description": "Optional explicit assistant state document id to bind to this cron job, such as cron/weekly-health-snapshot. Prefer this only when the cron needs stable cross-run scratch state or must share one state doc across related jobs.",
-                                          "type": "string",
-                                          "minLength": 1
-                                        }
-                                      }
-                                    }
-                                  }
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "status": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
-                                "requestId": {
-                                  "description": "Optional caller-supplied request id for audit correlation.",
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 128
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "list": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
-                                "requestId": {
-                                  "description": "Optional caller-supplied request id for audit correlation.",
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 128
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "show": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
-                                "requestId": {
-                                  "description": "Optional caller-supplied request id for audit correlation.",
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 128
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "target": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "commands": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "show": {
-                                  "type": "object",
-                                  "additionalProperties": false,
-                                  "properties": {
-                                    "options": {
-                                      "type": "object",
-                                      "additionalProperties": false,
-                                      "properties": {
-                                        "vault": {
-                                          "type": "string",
-                                          "minLength": 1,
-                                          "description": "Vault root to operate against."
-                                        },
-                                        "requestId": {
-                                          "description": "Optional caller-supplied request id for audit correlation.",
-                                          "type": "string",
-                                          "minLength": 1,
-                                          "maxLength": 128
-                                        }
-                                      }
-                                    }
-                                  }
-                                },
-                                "set": {
-                                  "type": "object",
-                                  "additionalProperties": false,
-                                  "properties": {
-                                    "options": {
-                                      "type": "object",
-                                      "additionalProperties": false,
-                                      "properties": {
-                                        "vault": {
-                                          "type": "string",
-                                          "minLength": 1,
-                                          "description": "Vault root to operate against."
-                                        },
-                                        "requestId": {
-                                          "description": "Optional caller-supplied request id for audit correlation.",
-                                          "type": "string",
-                                          "minLength": 1,
-                                          "maxLength": 128
-                                        },
-                                        "copyFrom": {
-                                          "description": "Copy the current delivery target from another assistant cron job instead of providing route flags directly.",
-                                          "type": "string",
-                                          "minLength": 1
-                                        },
-                                        "dryRun": {
-                                          "description": "Validate and preview the target change without writing scheduler state.",
-                                          "type": "boolean"
-                                        },
-                                        "resetContinuity": {
-                                          "description": "Clear the saved sessionId and alias while retargeting so the next run starts fresh instead of rebinding the existing assistant session.",
-                                          "type": "boolean"
-                                        },
-                                        "toSelf": {
-                                          "description": "Use the saved self-delivery target for one channel, such as email or telegram.",
-                                          "type": "string",
-                                          "minLength": 1
-                                        },
-                                        "deliveryTarget": {
-                                          "description": "Optional explicit outbound destination for each cron run. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound cron jobs reply in place.",
-                                          "type": "string",
-                                          "minLength": 1
-                                        },
-                                        "channel": {
-                                          "description": "Optional channel label such as imessage, telegram, linq, or email.",
-                                          "type": "string",
-                                          "minLength": 1
-                                        },
-                                        "identity": {
-                                          "description": "Optional local assistant identity id for multi-user routing.",
-                                          "type": "string",
-                                          "minLength": 1
-                                        },
-                                        "participant": {
-                                          "description": "Optional remote actor id for multi-user routing and direct-conversation binding.",
-                                          "type": "string",
-                                          "minLength": 1
-                                        },
-                                        "sourceThread": {
-                                          "description": "Optional upstream thread id from the source channel. Thread ids anchor stored conversation bindings when present.",
-                                          "type": "string",
-                                          "minLength": 1
-                                        }
-                                      }
-                                    }
-                                  }
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "add": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
-                                "requestId": {
-                                  "description": "Optional caller-supplied request id for audit correlation.",
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 128
-                                },
-                                "name": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Unique assistant cron job name."
-                                },
-                                "at": {
-                                  "description": "One-shot ISO 8601 timestamp with an explicit offset.",
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "every": {
-                                  "description": "Recurring interval such as 30m, 2h, or 1d.",
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "cron": {
-                                  "description": "Five-field cron expression: minute hour day-of-month month day-of-week.",
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "keepAfterRun": {
-                                  "description": "Keep a completed one-shot job in the scheduler instead of deleting it.",
-                                  "type": "boolean"
-                                },
-                                "disabled": {
-                                  "description": "Create the job in a disabled state without scheduling it yet.",
-                                  "type": "boolean"
-                                },
-                                "session": {
-                                  "description": "Existing Murph assistant session id to resume.",
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "alias": {
-                                  "description": "Optional stable alias used to map an external conversation onto one assistant session.",
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "channel": {
-                                  "description": "Optional channel label such as imessage, telegram, linq, or email.",
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "identity": {
-                                  "description": "Optional local assistant identity id for multi-user routing.",
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "participant": {
-                                  "description": "Optional remote actor id for multi-user routing and direct-conversation binding.",
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "sourceThread": {
-                                  "description": "Optional upstream thread id from the source channel. Thread ids anchor stored conversation bindings when present.",
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "deliveryTarget": {
-                                  "description": "Optional explicit outbound destination for each cron run. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound cron jobs reply in place.",
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "state": {
-                                  "description": "Bind this cron job to a default assistant state document under assistant-state/state/cron/<jobId>.json. Use this only when the cron needs run-to-run scratch state such as cooldowns, dedupe, unresolved follow-ups, or delivery policy.",
-                                  "type": "boolean"
-                                },
-                                "stateDoc": {
-                                  "description": "Optional explicit assistant state document id to bind to this cron job, such as cron/weekly-health-snapshot. Prefer this only when the cron needs stable cross-run scratch state or must share one state doc across related jobs.",
-                                  "type": "string",
-                                  "minLength": 1
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "remove": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
-                                "requestId": {
-                                  "description": "Optional caller-supplied request id for audit correlation.",
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 128
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "enable": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
-                                "requestId": {
-                                  "description": "Optional caller-supplied request id for audit correlation.",
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 128
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "disable": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
-                                "requestId": {
-                                  "description": "Optional caller-supplied request id for audit correlation.",
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 128
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "run": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
-                                "requestId": {
-                                  "description": "Optional caller-supplied request id for audit correlation.",
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 128
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "runs": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
-                                "requestId": {
-                                  "description": "Optional caller-supplied request id for audit correlation.",
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 128
-                                },
-                                "limit": {
-                                  "default": 20,
-                                  "description": "Maximum number of recent runs to return.",
-                                  "type": "integer",
-                                  "exclusiveMinimum": 0,
-                                  "maximum": 100
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                },
                 "status": {
                   "type": "object",
                   "additionalProperties": false,
@@ -1649,7 +750,7 @@
                         },
                         "repair": {
                           "default": false,
-                          "description": "Repair assistant-state file and directory permissions in place.",
+                          "description": "Repair local assistant runtime file and directory permissions in place.",
                           "type": "boolean"
                         }
                       }
@@ -2000,7 +1101,7 @@
                 },
                 "repair": {
                   "default": false,
-                  "description": "Repair assistant-state file and directory permissions in place.",
+                  "description": "Repair local assistant runtime file and directory permissions in place.",
                   "type": "boolean"
                 }
               }
@@ -2025,6 +1126,137 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 128
+                }
+              }
+            }
+          }
+        },
+        "automation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "commands": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "scaffold": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "vault": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Vault root to operate against."
+                        },
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        }
+                      }
+                    }
+                  }
+                },
+                "show": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "vault": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Vault root to operate against."
+                        },
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        }
+                      }
+                    }
+                  }
+                },
+                "list": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "vault": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Vault root to operate against."
+                        },
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "status": {
+                          "description": "Optional repeated status filter.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "active",
+                              "paused",
+                              "archived"
+                            ]
+                          }
+                        },
+                        "text": {
+                          "description": "Optional lexical filter across title, prompt, route, and metadata.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "limit": {
+                          "default": 50,
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 200
+                        }
+                      }
+                    }
+                  }
+                },
+                "upsert": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "vault": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Vault root to operate against."
+                        },
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "input": {
+                          "type": "string",
+                          "description": "Automation payload in @file.json form or - for stdin."
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -2672,6 +1904,117 @@
                               }
                             }
                           }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "memory": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "commands": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "show": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "vault": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Vault root."
+                        }
+                      }
+                    }
+                  }
+                },
+                "search": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "vault": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Vault root."
+                        },
+                        "section": {
+                          "description": "Optional section filter.",
+                          "type": "string",
+                          "enum": [
+                            "Identity",
+                            "Preferences",
+                            "Instructions",
+                            "Context"
+                          ]
+                        },
+                        "limit": {
+                          "default": 25,
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 100
+                        }
+                      }
+                    }
+                  }
+                },
+                "upsert": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "vault": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Vault root."
+                        },
+                        "section": {
+                          "type": "string",
+                          "enum": [
+                            "Identity",
+                            "Preferences",
+                            "Instructions",
+                            "Context"
+                          ],
+                          "description": "Memory section to write into."
+                        },
+                        "memoryId": {
+                          "description": "Optional existing memory id to update.",
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    }
+                  }
+                },
+                "forget": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "vault": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Vault root."
                         }
                       }
                     }
