@@ -97,12 +97,6 @@ export function ensureGatewayStoreBaseSchema(database: DatabaseSync): void {
     CREATE UNIQUE INDEX IF NOT EXISTS gateway_source_events_message_idx
       ON gateway_source_events(message_id)
       WHERE message_id IS NOT NULL;
-
-    DROP INDEX IF EXISTS gateway_capture_sources_route_provider_idx;
-    DROP INDEX IF EXISTS gateway_outbox_sources_route_provider_idx;
-    DROP TABLE IF EXISTS gateway_capture_sources;
-    DROP TABLE IF EXISTS gateway_session_sources;
-    DROP TABLE IF EXISTS gateway_outbox_sources;
   `)
 }
 

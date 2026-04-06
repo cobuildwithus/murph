@@ -524,7 +524,7 @@ test('local gateway persists source tables only and advances the inbox-backed ca
     const gatewayDb = openSqliteRuntimeDatabase(resolveGatewayRuntimePaths(vaultRoot).gatewayDbPath)
     try {
       const captureSourceCount = readGatewayCaptureSourceEventCount(gatewayDb)
-      const legacyServingTableCount = gatewayDb
+      const servingTableCount = gatewayDb
         .prepare(`
           SELECT COUNT(*) AS count
             FROM sqlite_master
@@ -540,7 +540,7 @@ test('local gateway persists source tables only and advances the inbox-backed ca
         .get('captures.cursor') as { value?: string } | undefined
 
       assert.equal(captureSourceCount, 1)
-      assert.equal(legacyServingTableCount.count, 0)
+      assert.equal(servingTableCount.count, 0)
       assert.equal(snapshotJson, undefined)
       assert.ok(captureSignature?.value)
       firstCaptureCursor = captureSignature?.value ?? null
@@ -589,7 +589,7 @@ test('local gateway persists source tables only and advances the inbox-backed ca
     )
     try {
       const captureSourceCount = readGatewayCaptureSourceEventCount(gatewayDbAfterIncrement)
-      const legacyServingTableCount = gatewayDbAfterIncrement
+      const servingTableCount = gatewayDbAfterIncrement
         .prepare(`
           SELECT COUNT(*) AS count
             FROM sqlite_master
@@ -602,7 +602,7 @@ test('local gateway persists source tables only and advances the inbox-backed ca
         .get('captures.cursor') as { value?: string } | undefined
 
       assert.equal(captureSourceCount, 2)
-      assert.equal(legacyServingTableCount.count, 0)
+      assert.equal(servingTableCount.count, 0)
       assert.ok(captureSignature?.value)
       assert.ok(firstCaptureCursor)
       assert.notEqual(captureSignature?.value, firstCaptureCursor)
@@ -648,7 +648,7 @@ test('local gateway bootstraps empty source-backed snapshots once and keeps the 
       const snapshotGeneratedAt = gatewayDb
         .prepare('SELECT value FROM gateway_meta WHERE key = ?')
         .get('snapshot.generatedAt') as { value?: string } | undefined
-      const legacyServingTableCount = gatewayDb
+      const servingTableCount = gatewayDb
         .prepare(`
           SELECT COUNT(*) AS count
             FROM sqlite_master
@@ -659,7 +659,7 @@ test('local gateway bootstraps empty source-backed snapshots once and keeps the 
 
       assert.equal(cursor?.value, '0')
       assert.ok(snapshotGeneratedAt?.value)
-      assert.equal(legacyServingTableCount.count, 0)
+      assert.equal(servingTableCount.count, 0)
       firstGeneratedAt = snapshotGeneratedAt?.value ?? null
     } finally {
       gatewayDb.close()
@@ -691,7 +691,7 @@ test('local gateway bootstraps empty source-backed snapshots once and keeps the 
       const snapshotGeneratedAt = gatewayDbAfterSecondRead
         .prepare('SELECT value FROM gateway_meta WHERE key = ?')
         .get('snapshot.generatedAt') as { value?: string } | undefined
-      const legacyServingTableCount = gatewayDbAfterSecondRead
+      const servingTableCount = gatewayDbAfterSecondRead
         .prepare(`
           SELECT COUNT(*) AS count
             FROM sqlite_master
@@ -702,212 +702,9 @@ test('local gateway bootstraps empty source-backed snapshots once and keeps the 
 
       assert.ok(firstGeneratedAt)
       assert.equal(snapshotGeneratedAt?.value, firstGeneratedAt)
-      assert.equal(legacyServingTableCount.count, 0)
+      assert.equal(servingTableCount.count, 0)
     } finally {
       gatewayDbAfterSecondRead.close()
-    }
-  } finally {
-    await rm(vaultRoot, { force: true, recursive: true })
-  }
-})
-
-test('local gateway tolerates obsolete serving tables and meta during schema upgrade without resetting them', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-gateway-obsolete-serving-store-'))
-
-  try {
-    await initializeVault({ vaultRoot })
-
-    await exportGatewayProjectionSnapshotLocal(vaultRoot)
-
-    const gatewayDb = openSqliteRuntimeDatabase(resolveGatewayRuntimePaths(vaultRoot).gatewayDbPath)
-    try {
-      gatewayDb.exec(`
-        CREATE TABLE IF NOT EXISTS gateway_conversations (
-          conversation_id TEXT PRIMARY KEY
-        );
-        CREATE TABLE IF NOT EXISTS gateway_messages (
-          message_id TEXT PRIMARY KEY
-        );
-        CREATE TABLE IF NOT EXISTS gateway_attachments (
-          attachment_id TEXT PRIMARY KEY
-        );
-        CREATE INDEX IF NOT EXISTS gateway_conversations_activity_idx
-          ON gateway_conversations(conversation_id);
-        CREATE INDEX IF NOT EXISTS gateway_messages_session_created_idx
-          ON gateway_messages(message_id);
-        CREATE INDEX IF NOT EXISTS gateway_attachments_message_idx
-          ON gateway_attachments(attachment_id);
-        CREATE INDEX IF NOT EXISTS gateway_attachments_session_idx
-          ON gateway_attachments(attachment_id);
-      `)
-      gatewayDb
-        .prepare(
-          `
-            INSERT INTO gateway_meta (key, value)
-            VALUES (?, ?)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value
-          `,
-        )
-        .run('snapshot.empty', '1')
-      gatewayDb
-        .prepare(
-          `
-            INSERT INTO gateway_meta (key, value)
-            VALUES (?, ?)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value
-          `,
-        )
-        .run('snapshot.initialized', '1')
-      gatewayDb.exec('PRAGMA user_version = 2')
-    } finally {
-      gatewayDb.close()
-    }
-
-    const snapshot = await exportGatewayProjectionSnapshotLocal(vaultRoot)
-    const conversations = await listGatewayConversationsLocal(vaultRoot, {
-      channel: null,
-      includeDerivedTitles: true,
-      includeLastMessage: true,
-      limit: 10,
-      search: null,
-    })
-
-    assert.equal(snapshot.generatedAt.length > 0, true)
-    assert.equal(conversations.conversations.length, 0)
-
-    const gatewayDbAfterUpgrade = openSqliteRuntimeDatabase(
-      resolveGatewayRuntimePaths(vaultRoot).gatewayDbPath,
-    )
-    try {
-      const schemaVersion = gatewayDbAfterUpgrade
-        .prepare('PRAGMA user_version')
-        .get() as { user_version: number }
-      const legacyServingTableCount = gatewayDbAfterUpgrade
-        .prepare(`
-          SELECT COUNT(*) AS count
-            FROM sqlite_master
-           WHERE type = 'table'
-             AND name IN ('gateway_conversations', 'gateway_messages', 'gateway_attachments')
-        `)
-        .get() as { count: number }
-      const snapshotEmpty = gatewayDbAfterUpgrade
-        .prepare('SELECT value FROM gateway_meta WHERE key = ?')
-        .get('snapshot.empty') as { value?: string } | undefined
-      const snapshotInitialized = gatewayDbAfterUpgrade
-        .prepare('SELECT value FROM gateway_meta WHERE key = ?')
-        .get('snapshot.initialized') as { value?: string } | undefined
-
-      assert.equal(schemaVersion.user_version, 4)
-      assert.equal(legacyServingTableCount.count, 3)
-      assert.equal(snapshotEmpty?.value, '1')
-      assert.equal(snapshotInitialized?.value, '1')
-    } finally {
-      gatewayDbAfterUpgrade.close()
-    }
-  } finally {
-    await rm(vaultRoot, { force: true, recursive: true })
-  }
-})
-
-test('local gateway recreates unified session source events after a legacy-schema upgrade when signatures are unchanged', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-gateway-session-source-upgrade-'))
-
-  try {
-    await initializeVault({ vaultRoot })
-
-    await saveAssistantSession(
-      vaultRoot,
-      assistantSessionSchema.parse({
-        schema: 'murph.assistant-session.v4',
-        sessionId: 'asst_gateway_upgrade_session',
-        target: {
-          adapter: 'codex-cli',
-          approvalPolicy: null,
-          codexCommand: null,
-          model: null,
-          oss: false,
-          profile: null,
-          reasoningEffort: null,
-          sandbox: null,
-        },
-        resumeState: null,
-        alias: 'Upgrade thread',
-        binding: createAssistantBinding({
-          actorId: 'contact:alex',
-          channel: 'email',
-          deliveryKind: 'thread',
-          identityId: 'murph@example.com',
-          threadId: 'thread-upgrade',
-          threadIsDirect: false,
-        }),
-        createdAt: '2026-03-30T08:55:00.000Z',
-        updatedAt: '2026-03-30T09:05:00.000Z',
-        lastTurnAt: null,
-        turnCount: 1,
-      }),
-    )
-
-    const initial = await listGatewayConversationsLocal(vaultRoot, {
-      channel: null,
-      includeDerivedTitles: true,
-      includeLastMessage: true,
-      limit: 10,
-      search: null,
-    })
-    assert.equal(initial.conversations.length, 1)
-
-    const gatewayDb = openSqliteRuntimeDatabase(resolveGatewayRuntimePaths(vaultRoot).gatewayDbPath)
-    try {
-      gatewayDb.exec(`
-        CREATE TABLE IF NOT EXISTS gateway_session_sources (
-          session_id TEXT PRIMARY KEY,
-          route_key TEXT NOT NULL,
-          session_key TEXT NOT NULL,
-          alias TEXT,
-          channel TEXT,
-          identity_id TEXT,
-          participant_id TEXT,
-          thread_id TEXT,
-          directness TEXT,
-          reply_kind TEXT,
-          reply_target TEXT,
-          updated_at TEXT NOT NULL
-        );
-      `)
-      gatewayDb.prepare('DELETE FROM gateway_source_events WHERE source_event_kind = ?').run('session')
-      gatewayDb.exec('PRAGMA user_version = 3')
-    } finally {
-      gatewayDb.close()
-    }
-
-    const rebuilt = await listGatewayConversationsLocal(vaultRoot, {
-      channel: null,
-      includeDerivedTitles: true,
-      includeLastMessage: true,
-      limit: 10,
-      search: null,
-    })
-    assert.equal(rebuilt.conversations.length, 1)
-
-    const gatewayDbAfterUpgrade = openSqliteRuntimeDatabase(
-      resolveGatewayRuntimePaths(vaultRoot).gatewayDbPath,
-    )
-    try {
-      const schemaVersion = gatewayDbAfterUpgrade
-        .prepare('PRAGMA user_version')
-        .get() as { user_version: number }
-      const sessionSourceCount = gatewayDbAfterUpgrade
-        .prepare(`
-          SELECT COUNT(*) AS count
-          FROM gateway_source_events
-          WHERE source_event_kind = 'session'
-        `)
-        .get() as { count: number }
-
-      assert.equal(schemaVersion.user_version, 4)
-      assert.equal(sessionSourceCount.count, 1)
-    } finally {
-      gatewayDbAfterUpgrade.close()
     }
   } finally {
     await rm(vaultRoot, { force: true, recursive: true })
@@ -1186,7 +983,7 @@ test('local gateway refreshes message projection when an existing capture is rew
 })
 
 test('local gateway rebuilds when a source-backed store is missing the capture cursor meta', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-gateway-legacy-cursor-rebuild-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-gateway-cursor-rebuild-'))
 
   try {
     await initializeVault({ vaultRoot })
@@ -1198,8 +995,8 @@ test('local gateway rebuilds when a source-backed store is missing the capture c
       source: 'linq',
       externalId: 'linq:8271',
       thread: {
-        id: 'chat-legacy-cursor-rebuild',
-        title: 'Legacy title',
+        id: 'chat-cursor-rebuild',
+        title: 'Original title',
         isDirect: true,
       },
       actor: {
@@ -1209,7 +1006,7 @@ test('local gateway rebuilds when a source-backed store is missing the capture c
       },
       occurredAt: '2026-03-30T10:00:00.000Z',
       receivedAt: '2026-03-30T10:00:01.000Z',
-      text: 'Legacy capture text',
+      text: 'Original capture text',
       attachments: [],
       raw: {},
     })
