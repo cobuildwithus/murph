@@ -1,5 +1,5 @@
 import type { HostedEmailConfig } from "./config.ts";
-import { isHostedEmailPublicSenderAddress } from "./routes.ts";
+import { isHostedEmailPublicSenderAddress } from "./route-addressing.ts";
 
 export function shouldRejectHostedEmailIngressFailure(input: {
   config: HostedEmailConfig;
