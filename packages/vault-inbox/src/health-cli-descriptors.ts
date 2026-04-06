@@ -30,7 +30,7 @@ import {
   localDateSchema,
   pathSchema,
   showResultSchema,
-} from "./vault-cli-contracts.js";
+} from "@murphai/operator-config/vault-cli-contracts";
 import {
   getHealthRegistryCommandMetadata,
   type HealthRegistryCommandKind,

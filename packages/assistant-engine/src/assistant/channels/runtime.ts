@@ -7,23 +7,23 @@ import {
   createAgentmailApiClient,
   resolveAgentmailApiKey,
   resolveAgentmailBaseUrl,
-} from '../../agentmail-runtime.js'
+} from '@murphai/operator-config/agentmail-runtime'
 import {
   ensureImessageMessagesDbReadable,
   mapImessageMessagesDbRuntimeError,
-} from '../../imessage-readiness.js'
+} from '@murphai/operator-config/imessage-readiness'
 import {
   resolveLinqApiToken,
   sendLinqChatMessage,
   startLinqChatTypingIndicator,
   stopLinqChatTypingIndicator,
-} from '../../linq-runtime.js'
+} from '@murphai/operator-config/linq-runtime'
 import {
   resolveTelegramApiBaseUrl,
   resolveTelegramBotToken,
-} from '../../telegram-runtime.js'
-import { createTimeoutAbortController } from '../../http-retry.js'
-import { VaultCliError } from '../../vault-cli-errors.js'
+} from '@murphai/operator-config/telegram-runtime'
+import { createTimeoutAbortController } from '@murphai/operator-config/http-retry'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type {
   AssistantChannelActivityHandle,
   AssistantDeliveryCandidate,

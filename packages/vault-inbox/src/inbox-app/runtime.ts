@@ -1,7 +1,7 @@
-import { VaultCliError } from '../vault-cli-errors.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   resolveLinqWebhookSecret,
-} from '../linq-runtime.js'
+} from '@murphai/operator-config/linq-runtime'
 import type {
   InboxAppEnvironment,
   InboxServices,

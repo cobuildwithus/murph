@@ -3,7 +3,7 @@ import {
   resolveAssistantLanguageModel,
   type AssistantAiSdkToolEvent,
 } from '../../model-harness.js'
-import { VaultCliError } from '../../vault-cli-errors.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   createCatalogModel,
   DEFAULT_OPENAI_COMPATIBLE_MODEL_CAPABILITIES,

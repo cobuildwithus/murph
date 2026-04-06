@@ -1,6 +1,6 @@
 import type { JsonObject } from "@murphai/contracts"
 
-import type { ReadEntity } from "./vault-cli-contracts.js"
+import type { ReadEntity } from "@murphai/operator-config/vault-cli-contracts"
 
 export type { JsonObject }
 

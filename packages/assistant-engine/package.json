@@ -1,12 +1,9 @@
 {
   "name": "@murphai/assistant-engine",
   "version": "0.1.16",
-  "private": false,
+  "private": true,
   "type": "module",
   "license": "GPL-3.0-only",
-  "publishConfig": {
-    "access": "public"
-  },
   "repository": {
     "type": "git",
     "url": "https://github.com/cobuildwithus/murph"
@@ -49,6 +46,10 @@
     "./assistant-provider": {
       "types": "./dist/assistant-provider.d.ts",
       "default": "./dist/assistant-provider.js"
+    },
+    "./assistant-provider-catalog": {
+      "types": "./dist/assistant-provider-catalog.d.ts",
+      "default": "./dist/assistant-provider-catalog.js"
     },
     "./assistant-runtime": {
       "types": "./dist/assistant-runtime.d.ts",

@@ -3,7 +3,7 @@ import {
   assistantChannelDeliverySchema,
   type AssistantBindingDelivery,
 } from '../../assistant-cli-contracts.js'
-import { VaultCliError } from '../../vault-cli-errors.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { ConversationRef } from '../conversation-ref.js'
 import type {
   AssistantChannelAdapter,

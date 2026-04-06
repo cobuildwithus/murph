@@ -4,7 +4,7 @@ import {
 import {
   executeCodexPrompt,
 } from '../../assistant-codex.js'
-import { VaultCliError } from '../../vault-cli-errors.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   DEFAULT_CODEX_MODELS,
 } from './catalog.js'

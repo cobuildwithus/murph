@@ -13,7 +13,7 @@ import {
   stripKnowledgeLeadingHeading,
   type DerivedKnowledgeNode,
 } from '@murphai/query'
-import { normalizeNullableString } from '../text/shared.js'
+import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import {
   type KnowledgePage,
   type KnowledgePageMetadata,

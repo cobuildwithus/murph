@@ -12,7 +12,7 @@ import {
 import {
   resolveAssistantProviderDefaults,
   type AssistantOperatorDefaults,
-} from '../operator-config.js'
+} from '@murphai/operator-config/operator-config'
 import { quarantineAssistantStateFile } from './quarantine.js'
 import { appendAssistantRuntimeEventAtPaths } from './runtime-events.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'

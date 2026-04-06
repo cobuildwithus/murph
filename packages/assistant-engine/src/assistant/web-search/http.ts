@@ -3,12 +3,12 @@ import {
   readJsonErrorResponse,
   requestJsonWithRetry,
   type JsonFetchResponse,
-} from '../../http-json-retry.js'
+} from '@murphai/operator-config/http-json-retry'
 import {
   waitForRetryDelay,
   type ResponseHeadersLike,
-} from '../../http-retry.js'
-import { VaultCliError } from '../../vault-cli-errors.js'
+} from '@murphai/operator-config/http-retry'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   errorMessage,
   normalizeNullableString,

@@ -1,8 +1,8 @@
 import type {
   AgentmailFetch,
-} from '../../agentmail-runtime.js'
-import type { InboxShowResult } from '../../inbox-cli-contracts.js'
-import type { LinqFetch } from '../../linq-runtime.js'
+} from '@murphai/operator-config/agentmail-runtime'
+import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
+import type { LinqFetch } from '@murphai/operator-config/linq-runtime'
 import type {
   AssistantBindingDelivery,
 } from '../../assistant-cli-contracts.js'

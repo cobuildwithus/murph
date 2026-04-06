@@ -3,7 +3,7 @@ import {
   isoTimestampSchema,
   pathSchema,
   timeZoneSchema,
-} from './vault-cli-contracts.js'
+} from '@murphai/operator-config/vault-cli-contracts'
 import { isValidAssistantOpaqueId } from './assistant/state-ids.js'
 
 export const assistantSandboxValues = [

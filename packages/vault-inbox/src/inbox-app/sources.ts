@@ -1,5 +1,5 @@
-import type { InboxConnectorConfig } from '../inbox-cli-contracts.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+import type { InboxConnectorConfig } from '@murphai/operator-config/inbox-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type {
   InboxAppEnvironment,
   InboxServices,

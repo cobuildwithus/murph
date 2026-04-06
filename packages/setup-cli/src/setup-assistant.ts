@@ -4,7 +4,7 @@ import {
   discoverAssistantProviderModels,
   resolveAssistantTargetCapabilities,
   type AssistantModelDiscoveryResult,
-} from '@murphai/assistant-engine/assistant/provider-catalog'
+} from '@murphai/assistant-engine/assistant-provider-catalog'
 import {
   getOpenAICompatibleProviderPreset,
   resolveOpenAICompatibleProviderPreset,

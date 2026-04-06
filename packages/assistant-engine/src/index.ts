@@ -8,6 +8,7 @@
 
 export * from './assistant-automation.js'
 export * from './assistant-cli-access.js'
+export * from './assistant-cli-contracts.js'
 export * from './assistant-cli-tools.js'
 export * from './assistant-codex.js'
 export * from './assistant-cron.js'

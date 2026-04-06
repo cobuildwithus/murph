@@ -6,8 +6,8 @@ import {
   type QueryVaultReadModel as QueryReadModel,
   type QueryCanonicalEntity as QueryRecord,
 } from '../query-runtime.js'
-import { createRuntimeUnavailableError as buildRuntimeUnavailableError } from '../runtime-errors.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+import { createRuntimeUnavailableError as buildRuntimeUnavailableError } from '@murphai/operator-config/runtime-errors'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   inferEntityKind,
   isQueryableRecordId,
@@ -245,7 +245,7 @@ export function numberOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
-export { createRuntimeUnavailableError } from '../runtime-errors.js'
+export { createRuntimeUnavailableError } from '@murphai/operator-config/runtime-errors'
 
 export async function readJsonObject(
   absolutePath: string,

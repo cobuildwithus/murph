@@ -5,7 +5,7 @@ import {
   normalizeOpaquePathSegment,
   normalizeRelativeVaultPath,
 } from '@murphai/core'
-import type { InboxShowResult } from './inbox-cli-contracts.js'
+import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
 import {
   inboxModelAttachmentBundleSchema,
   type InboxModelAttachmentBundle,
@@ -19,7 +19,7 @@ import {
   type AssistantUserMessageContentPart,
 } from './model-harness.js'
 import { resolveAssistantVaultPath } from './assistant-vault-paths.js'
-import { errorMessage, normalizeNullableString } from './text/shared.js'
+import { errorMessage, normalizeNullableString } from '@murphai/operator-config/text/shared'
 
 const DEFAULT_MAX_FRAGMENT_CHARS = 6000
 

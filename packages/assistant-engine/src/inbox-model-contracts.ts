@@ -2,7 +2,7 @@ import { z } from 'zod'
 import {
   isoTimestampSchema,
   pathSchema,
-} from './vault-cli-contracts.js'
+} from '@murphai/operator-config/vault-cli-contracts'
 import { routingImageEligibilityReasonValues } from './inbox-routing-vision.js'
 
 export const assistantCapabilityHostKindValues = [

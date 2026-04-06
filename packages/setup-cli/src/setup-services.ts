@@ -32,7 +32,7 @@ import {
   type SetupWearable,
   type WhisperModel,
 } from '@murphai/operator-config/setup-cli-contracts'
-import type { InboxBootstrapResult } from '@murphai/vault-inbox/inbox-cli-contracts'
+import type { InboxBootstrapResult } from '@murphai/operator-config/inbox-cli-contracts'
 import {
   configureSetupChannels,
   normalizeSetupChannels,

@@ -1,12 +1,9 @@
 {
   "name": "@murphai/vault-inbox",
   "version": "0.1.16",
-  "private": false,
+  "private": true,
   "type": "module",
   "license": "GPL-3.0-only",
-  "publishConfig": {
-    "access": "public"
-  },
   "repository": {
     "type": "git",
     "url": "https://github.com/cobuildwithus/murph"
@@ -38,10 +35,6 @@
       "types": "./dist/inbox-app/*.d.ts",
       "default": "./dist/inbox-app/*.js"
     },
-    "./inbox-cli-contracts": {
-      "types": "./dist/inbox-cli-contracts.d.ts",
-      "default": "./dist/inbox-cli-contracts.js"
-    },
     "./inbox-services": {
       "types": "./dist/inbox-services.d.ts",
       "default": "./dist/inbox-services.js"
@@ -53,6 +46,10 @@
     "./json-input": {
       "types": "./dist/json-input.d.ts",
       "default": "./dist/json-input.js"
+    },
+    "./linq-endpoint": {
+      "types": "./dist/linq-endpoint.d.ts",
+      "default": "./dist/linq-endpoint.js"
     },
     "./knowledge": {
       "types": "./dist/knowledge.d.ts",

@@ -12,7 +12,7 @@ import {
   type WorkoutFormatRecord,
 } from '@murphai/core'
 import { loadJsonInputObject } from '../json-input.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { asListEnvelope } from './shared.js'
 import {
   normalizeOptionalText,

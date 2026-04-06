@@ -3,7 +3,7 @@ import {
   type AssistantCronPreset,
   type AssistantCronPresetVariable,
 } from '../../assistant-cli-contracts.js'
-import { VaultCliError } from '../../vault-cli-errors.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { normalizeNullableString } from '../shared.js'
 
 const PRESET_TEMPLATE_VARIABLE_PATTERN = /\{\{\s*([a-z0-9_-]+)\s*\}\}/giu

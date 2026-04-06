@@ -1,4 +1,4 @@
-import { VaultCliError } from '../vault-cli-errors.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 const ASSISTANT_FAULTS_ENV = 'ASSISTANT_FAULTS'
 const consumedFaults = new Map<string, number>()

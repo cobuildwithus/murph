@@ -50,7 +50,7 @@ import {
   resolveSetupWearableMissingEnv,
 } from '@murphai/operator-config/setup-runtime-env'
 import type { InboxSourceSetEnabledResult } from '@murphai/vault-inbox/inbox-app/types'
-import type { InboxConnectorConfig } from '@murphai/vault-inbox/inbox-cli-contracts'
+import type { InboxConnectorConfig } from '@murphai/operator-config/inbox-cli-contracts'
 import type { SetupResult } from '@murphai/operator-config/setup-cli-contracts'
 import {
   buildSetupWizardPublicUrlReview,

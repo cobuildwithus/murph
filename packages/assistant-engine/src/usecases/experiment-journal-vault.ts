@@ -6,12 +6,12 @@ import {
   type QueryRuntimeModule,
 } from '../query-runtime.js'
 import { loadRuntimeModule } from '../runtime-import.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   isoTimestampSchema,
   localDateSchema,
   slugSchema,
-} from '../vault-cli-contracts.js'
+} from '@murphai/operator-config/vault-cli-contracts'
 import {
   asListEnvelope,
   readJsonPayload,

@@ -9,18 +9,18 @@ import {
   matchesAgentmailHttpError,
   resolveAgentmailApiKey,
   resolveAgentmailBaseUrl,
-} from '../agentmail-runtime.js'
-import { ensureImessageMessagesDbReadable } from '../imessage-readiness.js'
+} from '@murphai/operator-config/agentmail-runtime'
+import { ensureImessageMessagesDbReadable } from '@murphai/operator-config/imessage-readiness'
 import { loadQueryRuntime } from '../query-runtime.js'
 import { loadRuntimeModule } from '../runtime-import.js'
-import { SETUP_RUNTIME_ENV_NOTICE } from '../setup-runtime-env.js'
+import { SETUP_RUNTIME_ENV_NOTICE } from '@murphai/operator-config/setup-runtime-env'
 import {
   resolveTelegramApiBaseUrl,
   resolveTelegramBotToken,
   resolveTelegramFileBaseUrl,
-} from '../telegram-runtime.js'
-import type { InboxConnectorConfig } from '../inbox-cli-contracts.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+} from '@murphai/operator-config/telegram-runtime'
+import type { InboxConnectorConfig } from '@murphai/operator-config/inbox-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type {
   CoreRuntimeModule,
   EmailDriver,

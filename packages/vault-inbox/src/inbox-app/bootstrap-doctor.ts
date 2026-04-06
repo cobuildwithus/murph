@@ -2,7 +2,7 @@ import { resolveRuntimePaths } from '@murphai/runtime-state/node'
 import type {
   InboxConnectorConfig,
   InboxDoctorCheck,
-} from '../inbox-cli-contracts.js'
+} from '@murphai/operator-config/inbox-cli-contracts'
 import type {
   DoctorContext,
   DoctorTargetResolution,

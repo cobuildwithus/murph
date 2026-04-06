@@ -1,5 +1,5 @@
 import type { AssistantAutomationCursor } from '../../assistant-cli-contracts.js'
-import type { InboxShowResult } from '../../inbox-cli-contracts.js'
+import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
 import type { InboxServices } from '../../inbox-services.js'
 import { routeInboxCaptureWithModel } from '../../inbox-model-harness.js'
 import { shouldBypassParserWaitForRouting } from '../../inbox-routing-vision.js'

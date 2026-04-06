@@ -1,8 +1,8 @@
 import type { ConnectorRestartPolicy } from '@murphai/inboxd'
 import type { RuntimePaths } from '@murphai/runtime-state/node'
 import { z } from 'zod'
-import type { AgentmailApiClient } from '../agentmail-runtime.js'
-import { inboxPromotionStoreSchema } from '../inbox-cli-contracts.js'
+import type { AgentmailApiClient } from '@murphai/operator-config/agentmail-runtime'
+import { inboxPromotionStoreSchema } from '@murphai/operator-config/inbox-cli-contracts'
 import type {
   InboxAttachmentListResult,
   InboxAttachmentParseResult,
@@ -35,7 +35,7 @@ import type {
   InboxSourceAddResult,
   InboxSourceListResult,
   InboxSourceRemoveResult,
-} from '../inbox-cli-contracts.js'
+} from '@murphai/operator-config/inbox-cli-contracts'
 import type { QueryRuntimeModule } from '../query-runtime.js'
 import type { ImportersFactoryRuntimeModule } from '../usecases/types.js'
 

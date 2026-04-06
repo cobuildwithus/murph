@@ -31,7 +31,7 @@ import {
   inboxSourceListResultSchema,
   inboxSourceRemoveResultSchema,
   inboxSourceValues,
-} from '@murphai/vault-inbox/inbox-cli-contracts'
+} from '@murphai/operator-config/inbox-cli-contracts'
 import {
   inboxModelBundleResultSchema,
   inboxModelRouteResultSchema,

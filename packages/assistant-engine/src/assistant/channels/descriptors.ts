@@ -1,14 +1,14 @@
 import {
   resolveAgentmailApiKey,
-} from '../../agentmail-runtime.js'
+} from '@murphai/operator-config/agentmail-runtime'
 import {
   resolveLinqApiToken,
   resolveLinqWebhookSecret,
-} from '../../linq-runtime.js'
+} from '@murphai/operator-config/linq-runtime'
 import {
   resolveTelegramBotToken,
-} from '../../telegram-runtime.js'
-import { VaultCliError } from '../../vault-cli-errors.js'
+} from '@murphai/operator-config/telegram-runtime'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   createAssistantChannelAdapter,
   inferFallbackBindingDelivery,

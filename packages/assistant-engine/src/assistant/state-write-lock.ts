@@ -8,7 +8,7 @@ import {
   inspectDirectoryLock,
   isProcessRunning,
 } from '@murphai/runtime-state/node'
-import { VaultCliError } from '../vault-cli-errors.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 export interface AssistantStateWriteLockMetadata {
   command: string

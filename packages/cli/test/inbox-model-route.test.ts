@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, test, vi } from 'vitest'
-import type { InboxShowResult } from '@murphai/vault-inbox/inbox-cli-contracts'
+import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
 import type { InboxServices } from '@murphai/vault-inbox/inbox-services'
 
 const routeHarnessMocks = vi.hoisted(() => ({

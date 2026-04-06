@@ -5,11 +5,11 @@ import {
   inboxDoctorCheckSchema,
   type InboxConnectorConfig,
   type InboxDoctorCheck,
-} from '../inbox-cli-contracts.js'
-import { errorMessage, normalizeNullableString } from '../text/shared.js'
+} from '@murphai/operator-config/inbox-cli-contracts'
+import { errorMessage, normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { extractIsoDatePrefix } from '@murphai/contracts'
 
-import { VaultCliError } from '../vault-cli-errors.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type {
   RuntimeAttachmentParseJobRecord,
   RuntimeAttachmentRecord,
@@ -17,7 +17,7 @@ import type {
   RuntimeStore,
 } from '../inbox-app/types.js'
 
-export { errorMessage, normalizeNullableString } from '../text/shared.js'
+export { errorMessage, normalizeNullableString } from '@murphai/operator-config/text/shared'
 
 export async function readJsonWithSchema<T>(
   absolutePath: string,

@@ -23,7 +23,7 @@ import {
 import { loadRuntimeModule } from '../runtime-import.ts'
 import { renderAutoLoggedFoodMealNote } from '../usecases/food-autolog.ts'
 import { loadImporterRuntime } from '../usecases/runtime.ts'
-import { VaultCliError } from '../vault-cli-errors.ts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { withAssistantCronWriteLock } from './cron/locking.ts'
 import {
   buildAssistantCronSchedule,
@@ -65,7 +65,7 @@ import {
 import { sendAssistantMessageLocal } from '../assistant-service.ts'
 import { getAssistantChannelAdapter } from './channel-adapters.ts'
 import { resolveAssistantBindingDelivery } from './bindings.ts'
-import { applyAssistantSelfDeliveryTargetDefaults } from '../operator-config.ts'
+import { applyAssistantSelfDeliveryTargetDefaults } from '@murphai/operator-config/operator-config'
 import {
   resolveAssistantStatePaths,
   type AssistantStatePaths,

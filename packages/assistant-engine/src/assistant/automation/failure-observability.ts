@@ -3,7 +3,7 @@ import {
   formatStructuredErrorMessage,
   normalizeNullableString,
 } from '../shared.js'
-import { redactSensitivePathSegments } from '../../text/shared.js'
+import { redactSensitivePathSegments } from '@murphai/operator-config/text/shared'
 
 export type AssistantAutoReplyFailureKind =
   | 'delivery'

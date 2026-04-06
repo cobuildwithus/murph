@@ -6,7 +6,7 @@ import {
   listAssistantCronJobs,
 } from '../assistant/cron.js'
 import { loadRuntimeModule } from '../runtime-import.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   buildDailyFoodCronExpression,
   buildDailyFoodCronJobName,

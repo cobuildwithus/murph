@@ -24,8 +24,8 @@
       "@murphai/assistant-engine/process-kill": [
         "../assistant-engine/src/process-kill.ts"
       ],
-      "@murphai/assistant-engine/assistant/cron": [
-        "../assistant-engine/src/assistant/cron.ts"
+      "@murphai/assistant-engine/assistant-cron": [
+        "../assistant-engine/src/assistant-cron.ts"
       ]
     }
   },

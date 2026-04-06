@@ -15,8 +15,8 @@ import {
   type AssistantProviderProgressEvent,
 } from './assistant/provider-progress.js'
 import { sanitizeChildProcessEnv } from './child-process-env.js'
-import { normalizeNullableString } from './text/shared.js'
-import { VaultCliError } from './vault-cli-errors.js'
+import { normalizeNullableString } from '@murphai/operator-config/text/shared'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 export interface CodexExecInput {
   abortSignal?: AbortSignal
