@@ -162,7 +162,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     source: "disconnect",
     userId: input.userId,
   });
-  const signal = await input.store.prisma.$transaction(async (tx) => {
+  await input.store.prisma.$transaction(async (tx) => {
     return input.store.createSignal({
       userId: input.userId,
       connectionId: input.connectionId,
@@ -175,12 +175,8 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   });
 
   await publishHostedDeviceSyncWake({
-    connectionId: input.connectionId,
     dispatch,
-    provider: existing.provider,
-    signalId: signal.id,
     store: input.store,
-    userId: input.userId,
   });
 
   return {
@@ -224,7 +220,7 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
     source: "connection-established",
     userId: ownerId,
   });
-  const signal = await input.store.prisma.$transaction(async (tx) => {
+  await input.store.prisma.$transaction(async (tx) => {
     return input.store.createSignal({
       userId: ownerId,
       connectionId: input.account.id,
@@ -237,12 +233,8 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
   });
 
   await publishHostedDeviceSyncWake({
-    connectionId: input.account.id,
     dispatch,
-    provider: input.account.provider,
-    signalId: signal.id,
     store: input.store,
-    userId: ownerId,
   });
 }
 
@@ -296,8 +288,13 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     traceId: input.webhook.traceId ?? null,
     userId: ownerId,
   });
-  const signal = await input.store.prisma.$transaction(async (tx) => {
-    return input.store.createSignal({
+  await publishHostedDeviceSyncWake({
+    dispatch,
+    store: input.store,
+  });
+
+  await input.store.prisma.$transaction(async (tx) => {
+    await input.store.createSignal({
       userId: ownerId,
       connectionId: input.account.id,
       provider: input.account.provider,
@@ -306,20 +303,11 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
       createdAt: input.now,
       tx,
     });
-  });
 
-  await publishHostedDeviceSyncWake({
-    connectionId: input.account.id,
-    dispatch,
-    provider: input.account.provider,
-    signalId: signal.id,
-    store: input.store,
-    userId: ownerId,
+    if (input.webhook.traceId) {
+      await input.store.completeWebhookTrace(input.account.provider, input.webhook.traceId, tx);
+    }
   });
-
-  if (input.webhook.traceId) {
-    await input.store.completeWebhookTrace(input.account.provider, input.webhook.traceId);
-  }
 }
 
 export async function dispatchHostedDeviceSyncWake(input: {
@@ -341,7 +329,7 @@ export async function dispatchHostedDeviceSyncWake(input: {
     hint,
   });
 
-  const signal = await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx) => {
     return tx.deviceSyncSignal.create({
       data: {
         connectionId: input.connectionId,
@@ -355,12 +343,8 @@ export async function dispatchHostedDeviceSyncWake(input: {
   });
 
   await publishHostedDeviceSyncWake({
-    connectionId: input.connectionId,
     dispatch,
-    provider: input.provider,
-    signalId: signal.id,
     store,
-    userId: input.userId,
   });
 
   return {
@@ -369,16 +353,14 @@ export async function dispatchHostedDeviceSyncWake(input: {
 }
 
 async function publishHostedDeviceSyncWake(input: {
-  connectionId: string;
   dispatch: HostedExecutionDispatchRequest;
-  provider: string;
-  signalId: number;
   store: PrismaDeviceSyncControlPlaneStore;
-  userId: string;
 }): Promise<void> {
+  // Webhook retries rebuild fresh signal rows, so the outbox identity must stay tied to
+  // the stable wake event id instead of the transient signal primary key.
   await enqueueHostedExecutionOutbox({
     dispatch: input.dispatch,
-    sourceId: String(input.signalId),
+    sourceId: input.dispatch.eventId,
     sourceType: "device_sync_signal",
     storage: "reference",
     tx: input.store.prisma,

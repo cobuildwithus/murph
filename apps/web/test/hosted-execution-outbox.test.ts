@@ -275,6 +275,36 @@ describe("drainHostedExecutionOutbox", () => {
     );
   });
 
+  it("migrates legacy numeric device-sync source ids onto stable event ids", async () => {
+    const dispatch = createTickDispatch();
+    const prisma = createEnqueueOutboxPrisma(createOutboxRecord({
+      eventId: dispatch.eventId,
+      eventKind: dispatch.event.kind,
+      sourceId: "8",
+      sourceType: "device_sync_signal",
+      userId: dispatch.event.userId,
+    }));
+
+    await expect(enqueueHostedExecutionOutbox({
+      dispatch,
+      sourceId: dispatch.eventId,
+      sourceType: "device_sync_signal",
+      tx: prisma as never,
+    })).resolves.toMatchObject({
+      eventId: dispatch.eventId,
+      sourceId: dispatch.eventId,
+    });
+
+    expect(prisma.executionOutbox.update).toHaveBeenCalledWith({
+      where: {
+        id: "execout_123",
+      },
+      data: {
+        sourceId: dispatch.eventId,
+      },
+    });
+  });
+
   it("accepts idempotent re-enqueue when stored payload JSON key order differs", async () => {
     const dispatch = createShareDispatch();
     const prisma = createEnqueueOutboxPrisma(createOutboxRecord({
@@ -612,9 +642,26 @@ function createOutboxPrisma(record: ExecutionOutbox): PrismaClient {
 }
 
 function createEnqueueOutboxPrisma(record: ExecutionOutbox): Pick<PrismaClient, "executionOutbox"> {
+  let current = structuredClone(record);
+
   return {
     executionOutbox: {
-      upsert: vi.fn(async () => structuredClone(record)),
+      upsert: vi.fn(async () => structuredClone(current)),
+      update: vi.fn(async ({ data, where }: {
+        data: Partial<ExecutionOutbox>;
+        where: { id: string };
+      }) => {
+        if (where.id !== current.id) {
+          throw new Error(`missing execution outbox record ${where.id}`);
+        }
+
+        current = {
+          ...current,
+          ...data,
+        };
+
+        return structuredClone(current);
+      }),
     },
   } as unknown as Pick<PrismaClient, "executionOutbox">;
 }
