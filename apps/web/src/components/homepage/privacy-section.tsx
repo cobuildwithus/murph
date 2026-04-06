@@ -2,8 +2,8 @@ import type React from "react";
 
 const privacyFeatures = [
   {
-    label: "Zero data retention",
-    body: "We never store, sell, or share your health data. Your information is yours — period.",
+    label: "No data sales",
+    body: "We do not sell your health data or turn it into an ad-targeting business. Your information stays under your control.",
   },
   {
     label: "Local transcription",
@@ -46,8 +46,8 @@ export function PrivacySection() {
           </h2>
           <p className="mt-4 text-lg leading-relaxed text-stone-400">
             Most health apps monetize your data. Murph is built the other
-            way around — local-first processing, encrypted infrastructure,
-            and zero data retention by design.
+            way around — local-first processing where possible, encrypted
+            infrastructure for hosted runs, and privacy-first defaults.
           </p>
         </div>
         <div className="grid gap-px bg-stone-800 sm:grid-cols-2 lg:grid-cols-3">

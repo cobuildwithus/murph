@@ -73,7 +73,9 @@ test("HomePage renders the fallback copy when hosted phone auth is not ready", a
   assert.match(markup, /Encrypted cloud snapshots for hosted runs/);
   assert.match(markup, /curl -fsSL https:\/\/YOUR_DOMAIN\/install\.sh \| bash/u);
   assert.match(markup, /Your health data stays yours\./);
-  assert.match(markup, /Zero data retention/);
+  assert.match(markup, /local-first processing where possible, encrypted infrastructure for hosted runs, and privacy-first defaults\./i);
+  assert.match(markup, /No data sales/);
+  assert.doesNotMatch(markup, /Zero data retention/);
   assert.doesNotMatch(markup, /--no-onboard/u);
   assert.doesNotMatch(markup, /data-hosted-phone-auth=/);
 });
@@ -114,7 +116,9 @@ test("HomePage renders the hosted phone auth UI when hosted phone auth is ready"
   assert.match(markup, /Encrypted cloud snapshots for hosted runs/);
   assert.match(markup, /curl -fsSL https:\/\/murph\.example\.test\/install\.sh \| bash/u);
   assert.match(markup, /Your health data stays yours\./);
-  assert.match(markup, /Zero data retention/);
+  assert.match(markup, /local-first processing where possible, encrypted infrastructure for hosted runs, and privacy-first defaults\./i);
+  assert.match(markup, /No data sales/);
+  assert.doesNotMatch(markup, /Zero data retention/);
   assert.doesNotMatch(markup, /--no-onboard/u);
   assert.doesNotMatch(markup, /Phone signup is not configured for this environment yet\./);
 });
@@ -152,7 +156,9 @@ test("HomePage keeps the fallback copy when the server auth config is ready but 
   assert.match(markup, /Encrypted cloud snapshots for hosted runs/);
   assert.match(markup, /https:\/\/murph\.example\.test\/install\.sh/u);
   assert.match(markup, /Your health data stays yours\./);
-  assert.match(markup, /Zero data retention/);
+  assert.match(markup, /local-first processing where possible, encrypted infrastructure for hosted runs, and privacy-first defaults\./i);
+  assert.match(markup, /No data sales/);
+  assert.doesNotMatch(markup, /Zero data retention/);
   assert.doesNotMatch(markup, /--no-onboard/u);
   assert.doesNotMatch(markup, /data-hosted-phone-auth=/);
 });
