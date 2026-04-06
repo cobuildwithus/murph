@@ -18,7 +18,6 @@ CREATE TABLE "hosted_member_routing" (
   "member_id" TEXT NOT NULL,
   "linq_chat_id" TEXT,
   "telegram_user_id" TEXT,
-  "telegram_username" TEXT,
   "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -50,6 +49,9 @@ CREATE UNIQUE INDEX "hosted_member_identity_wallet_address_key"
 CREATE UNIQUE INDEX "hosted_member_routing_telegram_user_id_key"
   ON "hosted_member_routing" ("telegram_user_id");
 
+CREATE UNIQUE INDEX "hosted_member_routing_linq_chat_id_key"
+  ON "hosted_member_routing" ("linq_chat_id");
+
 CREATE UNIQUE INDEX "hosted_member_billing_ref_stripe_customer_id_key"
   ON "hosted_member_billing_ref" ("stripe_customer_id");
 
@@ -68,67 +70,22 @@ ALTER TABLE "hosted_member_billing_ref"
   ADD CONSTRAINT "hosted_member_billing_ref_member_id_fkey"
   FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
-INSERT INTO "hosted_member_identity" (
-  "member_id",
-  "phone_number",
-  "normalized_phone_number",
-  "phone_number_verified_at",
-  "privy_user_id",
-  "wallet_address",
-  "wallet_chain_type",
-  "wallet_provider",
-  "wallet_created_at",
-  "created_at",
-  "updated_at"
-)
-SELECT
-  "id",
-  "phone_number",
-  "normalized_phone_number",
-  "phone_number_verified_at",
-  "privy_user_id",
-  "wallet_address",
-  "wallet_chain_type",
-  "wallet_provider",
-  "wallet_created_at",
-  "created_at",
-  "updated_at"
-FROM "hosted_member";
+DROP TABLE "hosted_session";
 
-INSERT INTO "hosted_member_routing" (
-  "member_id",
-  "linq_chat_id",
-  "telegram_user_id",
-  "telegram_username",
-  "created_at",
-  "updated_at"
-)
-SELECT
-  "id",
-  "linq_chat_id",
-  "telegram_user_id",
-  "telegram_username",
-  "created_at",
-  "updated_at"
-FROM "hosted_member";
-
-INSERT INTO "hosted_member_billing_ref" (
-  "member_id",
-  "stripe_customer_id",
-  "stripe_subscription_id",
-  "stripe_latest_checkout_session_id",
-  "stripe_latest_billing_event_created_at",
-  "stripe_latest_billing_event_id",
-  "created_at",
-  "updated_at"
-)
-SELECT
-  "id",
-  "stripe_customer_id",
-  "stripe_subscription_id",
-  "stripe_latest_checkout_session_id",
-  "stripe_latest_billing_event_created_at",
-  "stripe_latest_billing_event_id",
-  "created_at",
-  "updated_at"
-FROM "hosted_member";
+ALTER TABLE "hosted_member"
+DROP COLUMN "phone_number",
+DROP COLUMN "normalized_phone_number",
+DROP COLUMN "phone_number_verified_at",
+DROP COLUMN "privy_user_id",
+DROP COLUMN "wallet_address",
+DROP COLUMN "wallet_chain_type",
+DROP COLUMN "wallet_provider",
+DROP COLUMN "wallet_created_at",
+DROP COLUMN "stripe_customer_id",
+DROP COLUMN "stripe_subscription_id",
+DROP COLUMN "stripe_latest_checkout_session_id",
+DROP COLUMN "stripe_latest_billing_event_created_at",
+DROP COLUMN "stripe_latest_billing_event_id",
+DROP COLUMN "linq_chat_id",
+DROP COLUMN "telegram_user_id",
+DROP COLUMN "telegram_username";
