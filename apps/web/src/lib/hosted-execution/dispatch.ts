@@ -1,5 +1,4 @@
 import {
-  createEmptyHostedExecutionBundleRefs,
   createHostedExecutionDispatchClient,
   HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR,
   type HostedExecutionOutboxPayload,
@@ -88,7 +87,7 @@ function buildHostedExecutionNotConfiguredStatus(input: {
   userId: string;
 }): HostedExecutionDispatchResult {
   const status: HostedExecutionUserStatus = {
-    bundleRefs: createEmptyHostedExecutionBundleRefs(),
+    bundleRef: null,
     inFlight: false,
     lastError: HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR,
     lastEventId: null,

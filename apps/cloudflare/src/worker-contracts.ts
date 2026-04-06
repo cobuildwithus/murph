@@ -14,7 +14,7 @@ import type {
   GatewayRespondToPermissionInput,
 } from "@murphai/gateway-core";
 import type {
-  HostedExecutionBundleRefs,
+  HostedExecutionBundleRef,
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
   HostedExecutionDeviceSyncRuntimeSnapshotRequest,
@@ -31,7 +31,7 @@ import type {
 export interface WorkerUserRunnerCommitInput {
   eventId: string;
   payload: HostedExecutionCommitPayload & {
-    currentBundleRefs: HostedExecutionBundleRefs;
+    currentBundleRef: HostedExecutionBundleRef | null;
   };
 }
 

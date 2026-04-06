@@ -86,13 +86,13 @@ export async function executeHostedDispatchForCommit(input: {
       artifactsBaseUrl: input.runtime.artifactsBaseUrl,
       fetchImpl: input.internalWorkerFetch,
       knownArtifactHashes: collectHostedBundleArtifactHashes(
-        decodeHostedBundleBase64(input.request.bundles.vault),
+        decodeHostedBundleBase64(input.request.bundle),
       ),
       timeoutMs: input.runtime.commitTimeoutMs,
     }),
     operatorHomeRoot: input.restored.operatorHomeRoot,
     preservedArtifacts: collectPreservedHostedArtifacts({
-      bytes: decodeHostedBundleBase64(input.request.bundles.vault),
+      bytes: decodeHostedBundleBase64(input.request.bundle),
       materializedArtifactPaths: input.materializedArtifactPaths ?? new Set(),
     }),
     vaultRoot: input.restored.vaultRoot,
@@ -108,10 +108,7 @@ export async function executeHostedDispatchForCommit(input: {
   return {
     committedGatewayProjectionSnapshot,
     committedResult: {
-      bundles: {
-        agentState: encodeHostedBundleBase64(committedSnapshot.agentStateBundle),
-        vault: encodeHostedBundleBase64(committedSnapshot.vaultBundle),
-      },
+      bundle: encodeHostedBundleBase64(committedSnapshot.bundle),
       result: {
         eventsHandled: 1,
         nextWakeAt: maintenanceMetrics.nextWakeAt,
@@ -174,13 +171,13 @@ export async function completeHostedExecutionAfterCommit(input: {
       artifactsBaseUrl: input.runtime.artifactsBaseUrl,
       fetchImpl: input.internalWorkerFetch,
       knownArtifactHashes: collectHostedBundleArtifactHashes(
-        decodeHostedBundleBase64(input.committedExecution.committedResult.bundles.vault),
+        decodeHostedBundleBase64(input.committedExecution.committedResult.bundle),
       ),
       timeoutMs: input.runtime.commitTimeoutMs,
     }),
     operatorHomeRoot: input.restored.operatorHomeRoot,
     preservedArtifacts: collectPreservedHostedArtifacts({
-      bytes: decodeHostedBundleBase64(input.committedExecution.committedResult.bundles.vault),
+      bytes: decodeHostedBundleBase64(input.committedExecution.committedResult.bundle),
       materializedArtifactPaths: input.materializedArtifactPaths ?? new Set(),
     }),
     vaultRoot: input.restored.vaultRoot,
@@ -192,10 +189,7 @@ export async function completeHostedExecutionAfterCommit(input: {
     },
   );
   const finalResult: HostedExecutionRunnerResult = {
-    bundles: {
-      agentState: encodeHostedBundleBase64(finalSnapshot.agentStateBundle),
-      vault: encodeHostedBundleBase64(finalSnapshot.vaultBundle),
-    },
+    bundle: encodeHostedBundleBase64(finalSnapshot.bundle),
     result: input.committedExecution.committedResult.result,
   };
 

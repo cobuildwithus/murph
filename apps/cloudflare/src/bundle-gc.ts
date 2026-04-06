@@ -2,7 +2,7 @@ import {
   listHostedBundleArtifacts,
   sameHostedBundlePayloadRef,
 } from "@murphai/runtime-state/node";
-import type { HostedExecutionBundleRefs } from "@murphai/hosted-execution";
+import type { HostedExecutionBundleRef } from "@murphai/hosted-execution";
 
 import {
   createHostedArtifactStore,
@@ -19,8 +19,8 @@ export class HostedBundleGarbageCollector {
   ) {}
 
   async cleanupBundleTransition(input: {
-    nextBundleRefs: HostedExecutionBundleRefs;
-    previousBundleRefs: HostedExecutionBundleRefs;
+    nextBundleRef: HostedExecutionBundleRef | null;
+    previousBundleRef: HostedExecutionBundleRef | null;
     userId: string;
   }): Promise<void> {
     if (!this.bucket.delete) {
@@ -36,25 +36,25 @@ export class HostedBundleGarbageCollector {
 
     await this.cleanupRemovedArtifacts({
       bundleStore,
-      nextVaultRef: input.nextBundleRefs.vault,
-      previousVaultRef: input.previousBundleRefs.vault,
+      nextBundleRef: input.nextBundleRef,
+      previousBundleRef: input.previousBundleRef,
       userId: input.userId,
     });
   }
 
   private async cleanupRemovedArtifacts(input: {
     bundleStore: ReturnType<typeof createHostedBundleStore>;
-    nextVaultRef: HostedExecutionBundleRefs["vault"];
-    previousVaultRef: HostedExecutionBundleRefs["vault"];
+    nextBundleRef: HostedExecutionBundleRef | null;
+    previousBundleRef: HostedExecutionBundleRef | null;
     userId: string;
   }): Promise<void> {
-    if (sameHostedBundlePayloadRef(input.previousVaultRef, input.nextVaultRef)) {
+    if (sameHostedBundlePayloadRef(input.previousBundleRef, input.nextBundleRef)) {
       return;
     }
 
     const previousArtifacts = await this.readArtifactHashes(
       input.bundleStore,
-      input.previousVaultRef,
+      input.previousBundleRef,
     );
     if (previousArtifacts.size === 0) {
       return;
@@ -62,7 +62,7 @@ export class HostedBundleGarbageCollector {
 
     const nextArtifacts = await this.readArtifactHashes(
       input.bundleStore,
-      input.nextVaultRef,
+      input.nextBundleRef,
     );
     const artifactStore = createHostedArtifactStore({
       bucket: this.bucket,
@@ -81,7 +81,7 @@ export class HostedBundleGarbageCollector {
 
   private async readArtifactHashes(
     bundleStore: ReturnType<typeof createHostedBundleStore>,
-    ref: HostedExecutionBundleRefs["vault"],
+    ref: HostedExecutionBundleRef | null,
   ): Promise<Set<string>> {
     if (!ref) {
       return new Set();

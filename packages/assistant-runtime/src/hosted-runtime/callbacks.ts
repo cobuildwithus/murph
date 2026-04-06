@@ -45,10 +45,7 @@ export function resumeHostedCommittedExecution(
       permissions: [],
     },
     committedResult: {
-      bundles: {
-        agentState: request.bundles.agentState,
-        vault: request.bundles.vault,
-      },
+      bundle: request.bundle,
       result: request.resume!.committedResult.result,
     },
     committedSideEffects: parseHostedExecutionSideEffects(
@@ -81,7 +78,7 @@ export async function commitHostedExecutionResult(input: {
     ).toString(),
     {
       body: JSON.stringify({
-        currentBundleRefs: input.commit.bundleRefs,
+        currentBundleRef: input.commit.bundleRef,
         gatewayProjectionSnapshot: input.gatewayProjectionSnapshot ?? null,
         ...input.result,
         sideEffects: input.sideEffects,
@@ -125,7 +122,7 @@ export async function finalizeHostedExecutionResult(input: {
     ).toString(),
     {
       body: JSON.stringify({
-        bundles: input.finalResult.bundles,
+        bundle: input.finalResult.bundle,
         gatewayProjectionSnapshot: input.finalGatewayProjectionSnapshot ?? null,
       }),
       headers: {
@@ -521,10 +518,7 @@ function sameHostedExecutionBundles(
   left: HostedExecutionRunnerResult,
   right: HostedExecutionRunnerResult,
 ): boolean {
-  return (
-    left.bundles.agentState === right.bundles.agentState
-    && left.bundles.vault === right.bundles.vault
-  );
+  return left.bundle === right.bundle;
 }
 
 function createHostedRunnerSideEffectJournalError(

@@ -212,7 +212,7 @@ export function parseHostedBundleArchive(bytes: Uint8Array | ArrayBuffer): Hoste
     throw new Error("Hosted bundle archive is invalid.");
   }
 
-  if (parsed.kind !== "vault" && parsed.kind !== "agent-state") {
+  if (parsed.kind !== "vault") {
     throw new Error("Hosted bundle archive kind is invalid.");
   }
 

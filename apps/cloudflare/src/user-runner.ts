@@ -1,5 +1,5 @@
 import type {
-  HostedExecutionBundleRefs,
+  HostedExecutionBundleRef,
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
   HostedExecutionDeviceSyncRuntimeSnapshotRequest,
@@ -652,7 +652,7 @@ export class HostedUserRunner {
   async commit(input: {
     eventId: string;
     payload: HostedExecutionCommitPayload & {
-      currentBundleRefs: HostedExecutionBundleRefs;
+      currentBundleRef: HostedExecutionBundleRef | null;
     };
   }): Promise<HostedExecutionCommittedResult> {
     return this.applyHostedTransition({
@@ -661,7 +661,7 @@ export class HostedUserRunner {
       run: async (userId, stores) => {
         return persistHostedExecutionCommit({
           bucket: this.bucket,
-          currentBundleRefs: input.payload.currentBundleRefs,
+          currentBundleRef: input.payload.currentBundleRef,
           eventId: input.eventId,
           key: stores.crypto.rootKey,
           keyId: stores.crypto.rootKeyId,
@@ -771,8 +771,8 @@ export class HostedUserRunner {
         });
         record = await (await this.ensureRunnerStores(record.userId)).bundleSync.applyRunnerResultBundles(
           record.userId,
-          record.bundleVersions,
-          runnerResult.bundles,
+          record.bundleVersion,
+          runnerResult.bundle,
         );
         record = await this.scheduler.syncNextWake(
           runnerResult.result.nextWakeAt ?? null,
@@ -889,9 +889,9 @@ export class HostedUserRunner {
     const forwardedEnv = buildHostedRunnerContainerEnv(this.runnerRuntimeEnvSource);
     const job: HostedAssistantRuntimeJobInput = {
       request: {
-        bundles: await bundleSync.readBundlesForRunner(),
+        bundle: await bundleSync.readBundlesForRunner(),
         commit: {
-          bundleRefs: bundleState.bundleRefs,
+          bundleRef: bundleState.bundleRef,
         },
         dispatch,
         run,

@@ -585,11 +585,12 @@ function createOutboxPrisma(record: ExecutionOutbox): PrismaClient {
           return { count: 0 };
         }
 
+        const currentNextAttemptAt = current.nextAttemptAt;
         if (
           "nextAttemptAt" in where
           && where.nextAttemptAt
-          && current.nextAttemptAt
-          && current.nextAttemptAt > (where.nextAttemptAt as Date)
+          && currentNextAttemptAt
+          && currentNextAttemptAt > (where.nextAttemptAt as Date)
         ) {
           return { count: 0 };
         }

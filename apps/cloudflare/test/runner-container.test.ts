@@ -358,10 +358,7 @@ describe("RunnerContainer", () => {
     const extendedRequest = {
       ...createRunnerRequest("evt_extended"),
       commit: {
-        bundleRefs: {
-          agentState: null,
-          vault: null,
-        },
+        bundleRef: null,
       },
       resume: {
         committedResult: {
@@ -398,10 +395,7 @@ describe("RunnerContainer", () => {
     expect(forwarded).toMatchObject({
       request: {
         commit: {
-          bundleRefs: {
-            agentState: null,
-            vault: null,
-          },
+          bundleRef: null,
         },
         resume: {
           committedResult: {
@@ -534,10 +528,7 @@ function createRunnerRequest(
   } = {},
 ) {
   return {
-    bundles: {
-      agentState: null,
-      vault: null,
-    },
+    bundle: null,
     dispatch: {
       event: {
         kind: "assistant.cron.tick" as const,
@@ -553,10 +544,7 @@ function createRunnerRequest(
 
 function createRunnerResult() {
   return {
-    bundles: {
-      agentState: null,
-      vault: null,
-    },
+    bundle: null,
     result: {
       eventsHandled: 1,
       summary: "ok",

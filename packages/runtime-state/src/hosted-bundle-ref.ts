@@ -1,4 +1,4 @@
-export type HostedExecutionBundleKind = "vault" | "agent-state";
+export type HostedExecutionBundleKind = "vault";
 
 export interface HostedExecutionBundleRef {
   hash: string;

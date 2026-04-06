@@ -100,14 +100,9 @@ describe("cloudflare worker runtime suite", () => {
         state: "completed",
       },
       status: {
-        bundleRefs: {
-          agentState: expect.objectContaining({
-            key: expect.stringMatching(/^bundles\/agent-state\/[0-9a-f]+\.bundle\.json$/u),
-          }),
-          vault: expect.objectContaining({
-            key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
-          }),
-        },
+        bundleRef: expect.objectContaining({
+          key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
+        }),
         lastEventId: "evt_signed_runtime",
         nextWakeAt: "2026-03-26T12:01:00.000Z",
         pendingEventCount: 0,
@@ -115,10 +110,7 @@ describe("cloudflare worker runtime suite", () => {
         userId: dispatch.event.userId,
       },
     });
-    await expect(readBundleText(dispatch.event.userId, payload.status.bundleRefs.agentState)).resolves.toBe(
-      `agent-state:${dispatch.eventId}`,
-    );
-    await expect(readBundleText(dispatch.event.userId, payload.status.bundleRefs.vault)).resolves.toBe(
+    await expect(readBundleText(dispatch.event.userId, payload.status.bundleRef)).resolves.toBe(
       `vault:${dispatch.eventId}`,
     );
   });
@@ -238,14 +230,8 @@ describe("cloudflare worker runtime suite", () => {
     const commitResponse = await callRunnerOutbound(
       new Request(`http://commit.worker/events/${eventId}/commit`, {
         body: JSON.stringify({
-          bundles: {
-            agentState: btoa("agent-state-commit"),
-            vault: btoa("vault-commit"),
-          },
-          currentBundleRefs: {
-            agentState: null,
-            vault: null,
-          },
+          bundle: btoa("vault-commit"),
+          currentBundleRef: null,
           result: {
             eventsHandled: 1,
             summary: "committed",
@@ -264,10 +250,7 @@ describe("cloudflare worker runtime suite", () => {
     const finalizeResponse = await callRunnerOutbound(
       new Request(`http://commit.worker/events/${eventId}/finalize`, {
         body: JSON.stringify({
-          bundles: {
-            agentState: btoa("agent-state-final"),
-            vault: btoa("vault-final"),
-          },
+          bundle: btoa("vault-final"),
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
