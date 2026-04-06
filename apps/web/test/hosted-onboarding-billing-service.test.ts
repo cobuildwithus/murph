@@ -51,14 +51,6 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     privyAppId: "cm_app_123",
     privyVerificationKey: "privy-key",
     publicBaseUrl: "https://join.example.test",
-    revnetChainId: 8453,
-    revnetProjectId: "1",
-    revnetRpcUrl: "https://rpc.example.test",
-    revnetStripeCurrency: "usd",
-    revnetTerminalAddress: "0x0000000000000000000000000000000000000001",
-    revnetTreasuryPrivateKey: `0x${"11".repeat(32)}`,
-    revnetWeiPerStripeMinorUnit: "2000000000000",
-    stripeBillingMode: "subscription",
     stripePriceId: "price_123",
     stripeSecretKey: "sk_test_123",
     stripeWebhookSecret: "whsec_123",
@@ -107,7 +99,6 @@ describe("createHostedBillingCheckout", () => {
     vi.clearAllMocks();
     mocks.requireHostedOnboardingPublicBaseUrl.mockReturnValue("https://join.example.test");
     mocks.requireHostedStripeCheckoutConfig.mockReturnValue({
-      billingMode: "subscription",
       priceId: "price_123",
       stripe: mocks.stripe,
     });
@@ -132,10 +123,10 @@ describe("createHostedBillingCheckout", () => {
     });
   });
 
-  it("requires a stored hosted wallet before checkout instead of binding one from the current Privy cookie", async () => {
+  it("does not require a stored hosted wallet before checkout", async () => {
     const prisma = asHostedBillingCheckoutPrisma({
       hostedBillingCheckout: {
-        create: vi.fn().mockResolvedValue({}),
+        create: vi.fn(async ({ data }) => data),
         findFirst: vi.fn().mockResolvedValue(null),
         findUnique: vi.fn().mockResolvedValue({
           id: "checkout_123",
@@ -162,18 +153,15 @@ describe("createHostedBillingCheckout", () => {
         now: NOW,
         prisma,
       }),
-    ).rejects.toMatchObject({
-      code: "HOSTED_WALLET_ADDRESS_REQUIRED",
-      httpStatus: 400,
+    ).resolves.toEqual({
+      alreadyActive: false,
+      url: "https://billing.example.test/session_123",
     });
-    expect(mocks.stripe.customers.create).not.toHaveBeenCalled();
-    expect(mocks.stripe.customers.update).not.toHaveBeenCalled();
-    expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
-    expect(prisma.hostedMember.updateMany).not.toHaveBeenCalled();
-    expect(prisma.hostedMember.update).not.toHaveBeenCalled();
+    expect(mocks.stripe.customers.create).toHaveBeenCalled();
+    expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalled();
   });
 
-  it("keeps checkout wallet handling read-only and only binds the Stripe customer id", async () => {
+  it("writes only checkout and customer metadata when creating Stripe state", async () => {
     mocks.requireHostedInviteForAuthentication.mockResolvedValue(
       makeInvite({
         walletAddress: "0x00000000000000000000000000000000000000aa",
@@ -821,50 +809,6 @@ describe("createHostedBillingCheckout", () => {
     expect(updatedCustomerMetadata).not.toHaveProperty("walletAddress");
   });
 
-  it("rejects a new trusted wallet when the hosted member already has a different verified wallet", async () => {
-    mocks.requireHostedInviteForAuthentication.mockResolvedValue(
-      makeInvite({
-        walletAddress: "0x00000000000000000000000000000000000000aa",
-      }),
-    );
-    const linkedAccounts = [
-      {
-        address: "0x00000000000000000000000000000000000000bb",
-        chain_type: "ethereum",
-        connector_type: "embedded",
-        delegated: false,
-        id: "wallet_456",
-        imported: false,
-        type: "wallet",
-        wallet_client: "privy",
-        wallet_client_type: "privy",
-        wallet_index: 0,
-      },
-    ] as const;
-
-    await expect(
-      createHostedBillingCheckout({
-        inviteCode: "invite-code",
-        ...makeCheckoutAuth(linkedAccounts),
-        now: NOW,
-        prisma: asHostedBillingCheckoutPrisma({
-          hostedBillingCheckout: {
-            create: vi.fn(),
-            findFirst: vi.fn(),
-          },
-          hostedMember: {
-            update: vi.fn(),
-          },
-        }),
-      }),
-    ).rejects.toMatchObject({
-      code: "HOSTED_WALLET_ADDRESS_CONFLICT",
-      httpStatus: 409,
-    });
-    expect(mocks.stripe.customers.create).not.toHaveBeenCalled();
-    expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
-  });
-
   it("fails closed before any Stripe calls when request auth is missing", async () => {
     await expect(
       createHostedBillingCheckout({
@@ -882,46 +826,7 @@ describe("createHostedBillingCheckout", () => {
           },
         }),
       }),
-    ).rejects.toThrow("Hosted billing checkout requires member and linkedAccounts from Privy request auth.");
-    expect(mocks.stripe.customers.create).not.toHaveBeenCalled();
-    expect(mocks.stripe.customers.update).not.toHaveBeenCalled();
-    expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
-  });
-
-  it("fails closed when the invite is missing split identity state", async () => {
-    mocks.requireHostedInviteForAuthentication.mockResolvedValue({
-      id: "invite_123",
-      inviteCode: "invite-code",
-      member: {
-        billingStatus: HostedBillingStatus.not_started,
-        identity: null,
-        id: "member_123",
-        status: HostedMemberStatus.registered,
-      },
-      memberId: "member_123",
-    });
-
-    await expect(
-      createHostedBillingCheckout({
-        inviteCode: "invite-code",
-        ...makeCheckoutAuth(),
-        now: NOW,
-        prisma: asHostedBillingCheckoutPrisma({
-          hostedBillingCheckout: {
-            create: vi.fn(),
-            findFirst: vi.fn(),
-          },
-          hostedMember: {
-            findUnique: vi.fn(),
-            update: vi.fn(),
-            updateMany: vi.fn(),
-          },
-        }),
-      }),
-    ).rejects.toMatchObject({
-      code: "HOSTED_MEMBER_IDENTITY_MISSING",
-      httpStatus: 500,
-    });
+    ).rejects.toThrow("Hosted billing checkout requires the authenticated hosted member.");
     expect(mocks.stripe.customers.create).not.toHaveBeenCalled();
     expect(mocks.stripe.customers.update).not.toHaveBeenCalled();
     expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();

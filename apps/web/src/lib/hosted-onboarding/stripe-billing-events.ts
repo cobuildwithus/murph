@@ -15,7 +15,6 @@ import {
   coerceStripeSubscriptionId,
   mapStripeSubscriptionStatusToHostedBillingStatus,
 } from "./billing";
-import { isHostedOnboardingRevnetEnabled } from "./revnet";
 import { normalizeNullableString } from "./shared";
 import {
   activateHostedMemberForPositiveSource,
@@ -27,7 +26,6 @@ import {
   updateHostedMemberStripeBillingIfFresh,
 } from "./stripe-billing-policy";
 import { isHostedAccessBlockedBillingStatus } from "./entitlement";
-import { ensureHostedRevnetIssuanceForStripeInvoice } from "./stripe-revnet-issuance";
 
 type HostedOnboardingPrismaClient = Prisma.TransactionClient;
 
@@ -92,6 +90,7 @@ export async function applyStripeCheckoutCompleted(
     };
   }
 
+  // Keep old payment-mode checkout sessions drainable until the persisted rows age out.
   if (mode === HostedBillingMode.payment && paymentSettled) {
     const activation = await activateHostedMemberForPositiveSource({
       billingMode: mode,
@@ -206,23 +205,24 @@ export async function applyStripeInvoicePaid(
     };
   }
 
-  const billingMode = subscriptionId ? HostedBillingMode.subscription : (member.billingMode ?? HostedBillingMode.payment);
+  if (!subscriptionId) {
+    return {
+      activatedMemberId: null,
+      createdOrUpdatedRevnetIssuance: false,
+      hostedExecutionEventId: null,
+    };
+  }
+
   const hadActiveBilling = member.billingStatus === HostedBillingStatus.active;
   const startingBillingStatus = member.billingStatus;
   const updatedMember = await updateHostedMemberStripeBillingIfFresh({
-    billingMode,
-    billingStatus:
-      billingMode === HostedBillingMode.subscription && isHostedOnboardingRevnetEnabled()
-        ? resolveHostedSubscriptionBillingStatus({
-          currentBillingStatus: member.billingStatus,
-          nextBillingStatus: HostedBillingStatus.active,
-        })
-        : HostedBillingStatus.active,
+    billingMode: HostedBillingMode.subscription,
+    billingStatus: HostedBillingStatus.active,
     dispatchContext,
     member,
     prisma,
     stripeCustomerId: coerceStripeObjectId(invoice.customer) ?? member.stripeCustomerId,
-    stripeSubscriptionId: subscriptionId ?? member.stripeSubscriptionId,
+    stripeSubscriptionId: subscriptionId,
   });
 
   if (!updatedMember) {
@@ -233,22 +233,7 @@ export async function applyStripeInvoicePaid(
     };
   }
 
-  if (billingMode === HostedBillingMode.subscription && isHostedOnboardingRevnetEnabled()) {
-    const issuance = await ensureHostedRevnetIssuanceForStripeInvoice({
-      invoice,
-      member: updatedMember,
-      prisma,
-    });
-
-    return {
-      activatedMemberId: null,
-      createdOrUpdatedRevnetIssuance: issuance !== null,
-      hostedExecutionEventId: null,
-    };
-  }
-
   if (
-    billingMode === HostedBillingMode.subscription &&
     isHostedAccessBlockedBillingStatus(startingBillingStatus)
   ) {
     return {
@@ -259,7 +244,7 @@ export async function applyStripeInvoicePaid(
   }
 
   const activation = await activateHostedMemberForPositiveSource({
-    billingMode,
+    billingMode: HostedBillingMode.subscription,
     dispatchContext,
     member: updatedMember,
     prisma,
@@ -293,11 +278,8 @@ export async function applyStripeInvoicePaymentFailed(
   }
 
   await updateHostedMemberStripeBillingIfFresh({
-    billingMode: member.billingMode,
-    billingStatus:
-      (member.billingMode ?? HostedBillingMode.payment) === HostedBillingMode.subscription
-        ? HostedBillingStatus.past_due
-        : HostedBillingStatus.incomplete,
+    billingMode: HostedBillingMode.subscription,
+    billingStatus: HostedBillingStatus.past_due,
     dispatchContext,
     member,
     prisma,

@@ -10,7 +10,6 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 
 import { hostedOnboardingError } from "./errors";
-import { getHostedOnboardingEnvironment } from "./runtime";
 import { normalizeNullableString } from "./shared";
 
 export interface HostedRevnetConfig {
@@ -24,19 +23,10 @@ export interface HostedRevnetConfig {
 }
 
 const treasurySubmissionLocks = new Map<string, Promise<void>>();
+const HOSTED_ONBOARDING_REVNET_ISSUANCE_ENABLED = false as const;
 
 export function isHostedOnboardingRevnetEnabled(): boolean {
-  const environment = getHostedOnboardingEnvironment();
-
-  return Boolean(
-    environment.revnetChainId &&
-      environment.revnetProjectId &&
-      environment.revnetRpcUrl &&
-      environment.revnetTerminalAddress &&
-      environment.revnetStripeCurrency &&
-      environment.revnetTreasuryPrivateKey &&
-      environment.revnetWeiPerStripeMinorUnit,
-  );
+  return HOSTED_ONBOARDING_REVNET_ISSUANCE_ENABLED;
 }
 
 export function coerceHostedWalletAddress(value: string | null | undefined): Address | null {
@@ -191,133 +181,14 @@ export async function readHostedRevnetPaymentReceipt(input: {
 }
 
 export function requireHostedRevnetConfig(): HostedRevnetConfig {
-  const environment = getHostedOnboardingEnvironment();
-
   if (!isHostedOnboardingRevnetEnabled()) {
     throw hostedOnboardingError({
       code: "REVNET_CONFIG_REQUIRED",
-      message: "Hosted RevNet issuance is not configured for this environment.",
+      message: "Hosted RevNet issuance is currently disabled.",
       httpStatus: 500,
     });
   }
-
-  const projectId = parseUnsignedBigInt(
-    environment.revnetProjectId,
-    "HOSTED_ONBOARDING_REVNET_PROJECT_ID",
-  );
-  const terminalAddress = parseAddress(
-    environment.revnetTerminalAddress,
-    "HOSTED_ONBOARDING_REVNET_TERMINAL_ADDRESS",
-  );
-
-  if (!environment.revnetChainId) {
-    throw hostedOnboardingError({
-      code: "REVNET_CHAIN_ID_REQUIRED",
-      message: "HOSTED_ONBOARDING_REVNET_CHAIN_ID must be configured for Hosted RevNet issuance.",
-      httpStatus: 500,
-    });
-  }
-
-  if (!environment.revnetRpcUrl) {
-    throw hostedOnboardingError({
-      code: "REVNET_RPC_URL_REQUIRED",
-      message: "HOSTED_ONBOARDING_REVNET_RPC_URL must be configured for Hosted RevNet issuance.",
-      httpStatus: 500,
-    });
-  }
-
-  if (!environment.revnetTreasuryPrivateKey) {
-    throw hostedOnboardingError({
-      code: "REVNET_PRIVATE_KEY_REQUIRED",
-      message: "HOSTED_ONBOARDING_REVNET_TREASURY_PRIVATE_KEY must be configured for Hosted RevNet issuance.",
-      httpStatus: 500,
-    });
-  }
-
-  if (!environment.revnetStripeCurrency) {
-    throw hostedOnboardingError({
-      code: "REVNET_STRIPE_CURRENCY_REQUIRED",
-      message: "HOSTED_ONBOARDING_REVNET_STRIPE_CURRENCY must be configured for Hosted RevNet issuance.",
-      httpStatus: 500,
-    });
-  }
-
-  if (!environment.revnetWeiPerStripeMinorUnit) {
-    throw hostedOnboardingError({
-      code: "REVNET_WEI_RATE_REQUIRED",
-      message: "HOSTED_ONBOARDING_REVNET_WEI_PER_STRIPE_MINOR_UNIT must be configured for Hosted RevNet issuance.",
-      httpStatus: 500,
-    });
-  }
-
-  const weiPerStripeMinorUnit = parseUnsignedBigInt(
-    environment.revnetWeiPerStripeMinorUnit,
-    "HOSTED_ONBOARDING_REVNET_WEI_PER_STRIPE_MINOR_UNIT",
-  );
-
-  if (weiPerStripeMinorUnit < 1n) {
-    throw hostedOnboardingError({
-      code: "REVNET_WEI_RATE_INVALID",
-      message: "HOSTED_ONBOARDING_REVNET_WEI_PER_STRIPE_MINOR_UNIT must be a positive integer.",
-      httpStatus: 500,
-    });
-  }
-
-  return {
-    chainId: environment.revnetChainId,
-    projectId,
-    rpcUrl: environment.revnetRpcUrl,
-    stripeCurrency: environment.revnetStripeCurrency,
-    terminalAddress,
-    treasuryPrivateKey: parsePrivateKey(environment.revnetTreasuryPrivateKey),
-    weiPerStripeMinorUnit,
-  };
-}
-
-function parseAddress(value: string | null, label: string): Address {
-  if (!value) {
-    throw hostedOnboardingError({
-      code: `${label}_REQUIRED`,
-      message: `${label} must be configured for Hosted RevNet issuance.`,
-      httpStatus: 500,
-    });
-  }
-
-  try {
-    return getAddress(value);
-  } catch {
-    throw hostedOnboardingError({
-      code: `${label}_INVALID`,
-      message: `${label} must be a valid EVM address.`,
-      httpStatus: 500,
-    });
-  }
-}
-
-function parsePrivateKey(value: string): Hex {
-  const normalized = value.trim();
-
-  if (!/^0x[0-9a-fA-F]{64}$/u.test(normalized)) {
-    throw hostedOnboardingError({
-      code: "REVNET_PRIVATE_KEY_INVALID",
-      message: "HOSTED_ONBOARDING_REVNET_TREASURY_PRIVATE_KEY must be a 32-byte hex private key.",
-      httpStatus: 500,
-    });
-  }
-
-  return normalized as Hex;
-}
-
-function parseUnsignedBigInt(value: string | null, label: string): bigint {
-  if (!value || !/^\d+$/u.test(value)) {
-    throw hostedOnboardingError({
-      code: `${label}_INVALID`,
-      message: `${label} must be an unsigned integer string.`,
-      httpStatus: 500,
-    });
-  }
-
-  return BigInt(value);
+  throw new Error("Hosted RevNet issuance cannot be configured while it is disabled.");
 }
 
 function resolveHostedRevnetPaymentAmount(

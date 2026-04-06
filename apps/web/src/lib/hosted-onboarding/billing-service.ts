@@ -15,15 +15,7 @@ import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
-import {
-  requireHostedInviteForAuthentication,
-  requireHostedInviteMemberIdentity,
-} from "./invite-service";
-import {
-  extractHostedPrivyWalletAccount,
-  HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE,
-  type PrivyLinkedAccountLike,
-} from "./privy-shared";
+import { requireHostedInviteForAuthentication } from "./invite-service";
 import {
   createPendingHostedBillingAttempt,
   expireHostedBillingAttemptBySessionId,
@@ -46,16 +38,11 @@ import {
   buildStripeSuccessUrl,
   coerceStripeSubscriptionId,
 } from "./billing";
-import {
-  coerceHostedWalletAddress,
-  isHostedOnboardingRevnetEnabled,
-  normalizeHostedWalletAddress,
-} from "./revnet";
+import { coerceHostedWalletAddress } from "./revnet";
 import { lockHostedMemberRow } from "./shared";
 
 export interface HostedBillingCheckoutInput {
   inviteCode: string;
-  linkedAccounts?: readonly PrivyLinkedAccountLike[];
   member?: HostedMember;
   now?: Date;
   prisma?: PrismaClient;
@@ -95,20 +82,14 @@ export async function createHostedBillingCheckout(input: HostedBillingCheckoutIn
   }
 
   const shareCode = normalizeNullableString(input.shareCode);
-  const inviteIdentity = requireHostedInviteMemberIdentity(invite.member);
-  resolveHostedMemberWalletAddress({
-    existingWalletAddress: inviteIdentity.walletAddress,
-    linkedAccounts: [...auth.linkedAccounts],
-    requireWalletAddress: isHostedOnboardingRevnetEnabled(),
-  });
-  const { billingMode, priceId, stripe } = requireHostedStripeCheckoutConfig();
+  const { priceId, stripe } = requireHostedStripeCheckoutConfig();
   const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
   const customerId = await ensureHostedStripeCustomer({
     memberId: invite.member.id,
     prisma,
     stripe,
   });
-  const mode = billingMode === "payment" ? HostedBillingMode.payment : HostedBillingMode.subscription;
+  const mode = HostedBillingMode.subscription;
   const requestContext = {
     hasShareContext: shareCode !== null,
     inviteId: invite.id,
@@ -134,7 +115,6 @@ export async function createHostedBillingCheckout(input: HostedBillingCheckoutIn
 
     if (reservation.kind === "pending") {
       return finalizeHostedBillingCheckoutReservation({
-        billingMode,
         customerId,
         inviteCode: invite.inviteCode,
         memberId: invite.member.id,
@@ -254,15 +234,12 @@ async function resolveReusableHostedBillingCheckout(input: {
 
 async function resolveHostedBillingCheckoutAuth(
   input: HostedBillingCheckoutInput,
-): Promise<{ linkedAccounts: readonly PrivyLinkedAccountLike[]; member: HostedMember }> {
-  if (input.member && input.linkedAccounts) {
-    return {
-      linkedAccounts: input.linkedAccounts,
-      member: input.member,
-    };
+): Promise<{ member: HostedMember }> {
+  if (input.member) {
+    return { member: input.member };
   }
 
-  throw new TypeError("Hosted billing checkout requires member and linkedAccounts from Privy request auth.");
+  throw new TypeError("Hosted billing checkout requires the authenticated hosted member.");
 }
 
 async function ensureHostedStripeCustomer(input: {
@@ -441,7 +418,6 @@ async function reserveHostedBillingCheckout(input: {
 }
 
 async function finalizeHostedBillingCheckoutReservation(input: {
-  billingMode: "payment" | "subscription";
   customerId: string;
   inviteCode: string;
   memberId: string;
@@ -468,20 +444,13 @@ async function finalizeHostedBillingCheckoutReservation(input: {
       },
     ],
     metadata: checkoutMetadata,
-    mode: input.billingMode,
+    mode: "subscription",
     payment_method_types: ["card"],
+    subscription_data: {
+      metadata: checkoutMetadata,
+    },
     success_url: buildStripeSuccessUrl(input.publicBaseUrl, input.inviteCode, input.shareCode),
   };
-
-  if (input.billingMode === "subscription") {
-    checkoutSessionParams.subscription_data = {
-      metadata: checkoutMetadata,
-    };
-  } else {
-    checkoutSessionParams.payment_intent_data = {
-      metadata: checkoutMetadata,
-    };
-  }
 
   const checkoutSession = await input.stripe.checkout.sessions.create(
     checkoutSessionParams,
@@ -596,53 +565,6 @@ async function finalizeHostedBillingCheckoutReservation(input: {
     alreadyActive: false,
     url: checkoutSession.url,
   };
-}
-
-function resolveHostedMemberWalletAddress(input: {
-  existingWalletAddress: string | null | undefined;
-  linkedAccounts: readonly PrivyLinkedAccountLike[];
-  requireWalletAddress: boolean;
-}): string | null {
-  const normalizedExistingWalletAddress = normalizeNullableString(input.existingWalletAddress);
-  const privyWalletAddress = normalizeHostedWalletAddress(
-    extractHostedPrivyWalletAccount(input.linkedAccounts, HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE)?.address,
-  );
-
-  if (normalizedExistingWalletAddress) {
-    const walletAddress = normalizeHostedWalletAddress(normalizedExistingWalletAddress);
-
-    if (walletAddress) {
-      if (privyWalletAddress && privyWalletAddress !== walletAddress) {
-        throw hostedOnboardingError({
-          code: "HOSTED_WALLET_ADDRESS_CONFLICT",
-          message: "This hosted member is already bound to different verified account details.",
-          httpStatus: 409,
-        });
-      }
-
-      return walletAddress;
-    }
-
-    if (!input.requireWalletAddress) {
-      return null;
-    }
-
-    throw hostedOnboardingError({
-      code: "HOSTED_WALLET_ADDRESS_INVALID",
-      message: "The hosted account details are invalid.",
-      httpStatus: 400,
-    });
-  }
-
-  if (input.requireWalletAddress) {
-    throw hostedOnboardingError({
-      code: "HOSTED_WALLET_ADDRESS_REQUIRED",
-      message: "Your account setup must finish before Stripe checkout can begin.",
-      httpStatus: 400,
-    });
-  }
-
-  return null;
 }
 
 export function requireHostedMemberWalletAddressForRevnet(member: {

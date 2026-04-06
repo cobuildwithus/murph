@@ -19,17 +19,13 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.publicBaseUrl).toBe("https://join.example.test");
     expect(environment.privyAppId).toBe("cm_app_123");
     expect(environment.privyVerificationKey).toBe("privy-verification-key");
-    expect(environment.revnetChainId).toBeNull();
-    expect(environment.revnetStripeCurrency).toBeNull();
-    expect(environment.stripeBillingMode).toBe("payment");
     expect(environment.inviteTtlHours).toBe(24 * 7);
   });
 
-  it("reads explicit Linq config and Stripe subscription mode", () => {
+  it("reads explicit Linq config", () => {
     const environment = readHostedOnboardingEnvironment(createProcessEnv({
       LINQ_API_TOKEN: "linq-token",
       LINQ_API_BASE_URL: "https://linq.example.test/api",
-      HOSTED_ONBOARDING_STRIPE_BILLING_MODE: "subscription",
       NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123",
       TELEGRAM_BOT_USERNAME: "murph_bot",
       TELEGRAM_WEBHOOK_SECRET: "telegram-secret",
@@ -38,7 +34,6 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.linqApiToken).toBe("linq-token");
     expect(environment.linqApiBaseUrl).toBe("https://linq.example.test/api");
     expect(environment.privyAppId).toBe("cm_app_123");
-    expect(environment.stripeBillingMode).toBe("subscription");
     expect(environment.telegramBotUsername).toBe("murph_bot");
     expect(environment.telegramWebhookSecret).toBe("telegram-secret");
   });
@@ -49,65 +44,6 @@ describe("readHostedOnboardingEnvironment", () => {
     }));
 
     expect(environment.publicBaseUrl).toBe("https://www.withmurph.ai");
-  });
-
-  it("reads hosted RevNet config when the full subscription configuration is present", () => {
-    const environment = readHostedOnboardingEnvironment(createProcessEnv({
-      HOSTED_ONBOARDING_REVNET_CHAIN_ID: "8453",
-      HOSTED_ONBOARDING_REVNET_PROJECT_ID: "1",
-      HOSTED_ONBOARDING_REVNET_RPC_URL: "https://rpc.example.test/base",
-      HOSTED_ONBOARDING_REVNET_STRIPE_CURRENCY: "USD",
-      HOSTED_ONBOARDING_REVNET_TERMINAL_ADDRESS: "0x0000000000000000000000000000000000000001",
-      HOSTED_ONBOARDING_REVNET_TREASURY_PRIVATE_KEY: `0x${"11".repeat(32)}`,
-      HOSTED_ONBOARDING_REVNET_WEI_PER_STRIPE_MINOR_UNIT: "2000000000000",
-      HOSTED_ONBOARDING_STRIPE_BILLING_MODE: "subscription",
-    }));
-
-    expect(environment.revnetChainId).toBe(8453);
-    expect(environment.revnetProjectId).toBe("1");
-    expect(environment.revnetRpcUrl).toBe("https://rpc.example.test/base");
-    expect(environment.revnetStripeCurrency).toBe("usd");
-    expect(environment.revnetTerminalAddress).toBe("0x0000000000000000000000000000000000000001");
-    expect(environment.revnetWeiPerStripeMinorUnit).toBe("2000000000000");
-  });
-
-  it("rejects partial hosted RevNet configuration", () => {
-    expect(() =>
-      readHostedOnboardingEnvironment(createProcessEnv({
-        HOSTED_ONBOARDING_REVNET_CHAIN_ID: "8453",
-        HOSTED_ONBOARDING_STRIPE_BILLING_MODE: "subscription",
-      })),
-    ).toThrow(/Hosted RevNet issuance is partially configured/u);
-  });
-
-  it("requires subscription billing mode when hosted RevNet issuance is configured", () => {
-    expect(() =>
-      readHostedOnboardingEnvironment(createProcessEnv({
-        HOSTED_ONBOARDING_REVNET_CHAIN_ID: "8453",
-        HOSTED_ONBOARDING_REVNET_PROJECT_ID: "1",
-        HOSTED_ONBOARDING_REVNET_RPC_URL: "https://rpc.example.test/base",
-        HOSTED_ONBOARDING_REVNET_STRIPE_CURRENCY: "usd",
-        HOSTED_ONBOARDING_REVNET_TERMINAL_ADDRESS: "0x0000000000000000000000000000000000000001",
-        HOSTED_ONBOARDING_REVNET_TREASURY_PRIVATE_KEY: `0x${"11".repeat(32)}`,
-        HOSTED_ONBOARDING_REVNET_WEI_PER_STRIPE_MINOR_UNIT: "2000000000000",
-        HOSTED_ONBOARDING_STRIPE_BILLING_MODE: "payment",
-      })),
-    ).toThrow(/requires HOSTED_ONBOARDING_STRIPE_BILLING_MODE=subscription/u);
-  });
-
-  it("rejects a non-numeric RevNet wei pricing multiplier", () => {
-    expect(() =>
-      readHostedOnboardingEnvironment(createProcessEnv({
-        HOSTED_ONBOARDING_REVNET_CHAIN_ID: "8453",
-        HOSTED_ONBOARDING_REVNET_PROJECT_ID: "1",
-        HOSTED_ONBOARDING_REVNET_RPC_URL: "https://rpc.example.test/base",
-        HOSTED_ONBOARDING_REVNET_STRIPE_CURRENCY: "usd",
-        HOSTED_ONBOARDING_REVNET_TERMINAL_ADDRESS: "0x0000000000000000000000000000000000000001",
-        HOSTED_ONBOARDING_REVNET_TREASURY_PRIVATE_KEY: `0x${"11".repeat(32)}`,
-        HOSTED_ONBOARDING_REVNET_WEI_PER_STRIPE_MINOR_UNIT: "not-a-number",
-        HOSTED_ONBOARDING_STRIPE_BILLING_MODE: "subscription",
-      })),
-    ).toThrow(/HOSTED_ONBOARDING_REVNET_WEI_PER_STRIPE_MINOR_UNIT must be an unsigned integer string/u);
   });
 
   it("ignores removed branded Linq aliases", () => {

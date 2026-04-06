@@ -411,12 +411,6 @@ describe("hosted onboarding routes", () => {
     expect(mocks.requireHostedPrivyRequestAuthContext).toHaveBeenCalledWith(request);
     expect(mocks.createHostedBillingCheckout).toHaveBeenCalledWith({
       inviteCode: "invite-code",
-      linkedAccounts: [
-        {
-          address: "user@example.com",
-          type: "email",
-        },
-      ],
       member: { id: "member_123" },
     });
     await expect(response.json()).resolves.toEqual({
@@ -442,12 +436,6 @@ describe("hosted onboarding routes", () => {
     expect(mocks.requireHostedPrivyRequestAuthContext).toHaveBeenCalledWith(request);
     expect(mocks.createHostedBillingCheckout).toHaveBeenCalledWith({
       inviteCode: "invite-code",
-      linkedAccounts: [
-        {
-          address: "user@example.com",
-          type: "email",
-        },
-      ],
       member: { id: "member_123" },
     });
     await expect(response.json()).resolves.toEqual({
@@ -480,12 +468,6 @@ describe("hosted onboarding routes", () => {
     expect(mocks.requireHostedPrivyRequestAuthContext).toHaveBeenCalledWith(request);
     expect(mocks.createHostedBillingCheckout).toHaveBeenCalledWith({
       inviteCode: "invite-code",
-      linkedAccounts: [
-        {
-          address: "user@example.com",
-          type: "email",
-        },
-      ],
       member: { id: "member_123" },
       shareCode: "share_123",
     });

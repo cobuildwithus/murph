@@ -76,7 +76,6 @@ Hosted onboarding extras:
 - enable Privy identity tokens in the dashboard under `User management > Authentication > Advanced`
 - enable Privy access + identity tokens so hosted browser requests can authenticate API calls with bearer + identity-token headers
 - `HOSTED_ONBOARDING_INVITE_TTL_HOURS`
-- `HOSTED_ONBOARDING_STRIPE_BILLING_MODE`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID`
 - `STRIPE_SECRET_KEY`
 - `STRIPE_WEBHOOK_SECRET`
@@ -226,23 +225,22 @@ The onboarding lane is intentionally thin:
 - a Linq webhook can text back a hosted join link to a new phone number or a trigger phrase like "I want to get healthy"
 - the public landing page can start the same flow with Privy SMS verification
 - the invite page binds the verified phone number to a hosted member row in Postgres
-- Privy handles phone OTP, the browser makes one explicit completion attempt after verifying phone and best-effort wallet provisioning, and the backend locally verifies the client's bearer access token plus identity token instead of minting a separate hosted session cookie; the wallet only becomes mandatory later when RevNet-backed billing actually needs it
+- Privy handles phone OTP, the browser makes one explicit completion attempt after verifying phone and best-effort wallet provisioning, and the backend locally verifies the client's bearer access token plus identity token instead of minting a separate hosted session cookie; wallet sync is still attempted, but it is not a hosted onboarding or checkout precondition
 - checkout uses Stripe Checkout so Apple Pay can appear directly inside the hosted payment handoff when available in Safari, but the hosted app now reuses one open checkout attempt per member and sends Stripe idempotency keys for customer/session creation so retries do not mint parallel customers or subscriptions
-- Stripe webhook ingress now verifies and stores a durable Stripe fact quickly, then immediately reconciles that specific event inline so billing activation and `member.activated` dispatching are not gated on a scheduler; the hosted Stripe cron remains the recovery path that replays failed or deferred Stripe facts plus optional RevNet follow-up
-- in subscription mode, `invoice.paid` is now the only positive Stripe entitlement source, `customer.subscription.*` only tracks negative or status transitions, and `checkout.session.completed` just completes the local checkout attempt plus attaches Stripe ids
-- optional hosted RevNet issuance can submit an onchain payment during queued Stripe reconciliation after `invoice.paid`, using invoice-level Postgres idempotency plus stored tx hashes to prevent duplicate issuance and failing closed for operator repair if a tx broadcast succeeds but the write-back does not
+- Stripe webhook ingress now verifies and stores a durable Stripe fact quickly, then immediately reconciles that specific event inline so billing activation and `member.activated` dispatching are not gated on a scheduler; the hosted Stripe cron remains the recovery path that replays failed or deferred Stripe facts
+- hosted billing is subscription-only, `invoice.paid` is the only positive Stripe entitlement source, `customer.subscription.*` only tracks negative or status transitions, and `checkout.session.completed` just completes the local checkout attempt plus attaches Stripe ids
 - hosted share links now keep preview metadata plus a Cloudflare-backed one-time share-pack reference for foods, recipes, and supplement/protocol records, optionally issuing or reusing a phone-bound invite so `/join/:inviteCode?share=...` can import the shared bundle after activation; the default and maximum hosted share-link lifetime is now 24 hours to keep that transient share-pack storage privacy-first
 - once a member has active billing entitlement, hosted onboarding, hosted share acceptance, and hosted device-sync wakes write signed internal execution intents to the shared Postgres `execution_outbox` in the same transaction as their control-plane state changes instead of synchronously depending on `apps/cloudflare`
 - new steady-state outbox rows are immutable: inline events store the full dispatch body, while reference-backed events stage the full dispatch into Cloudflare-owned encrypted dispatch-payload storage and persist only the dispatch ref plus opaque payload ref in Postgres
 - a best-effort drain still runs after commit, but Cloudflare delivery retries and dedupe now converge through the outbox row instead of request/response coupling; new reference-backed rows now require a staged Cloudflare payload ref instead of falling back to web-side dispatch reconstruction
 - hosted onboarding webhook receipts still keep receipt-local side-effect markers for retry-safe Linq invite replies, persist the planned response plus queued side effects before any external send, and use a reclaimable processing lease so a retried Linq or Telegram webhook can resume abandoned work instead of being dropped as a duplicate
-- the current hosted outward-effect lanes are now explicit: Cloudflare-bound execution uses `execution_outbox`, receipt-owned Linq or Telegram replies use the webhook receipt side-effect journal, Stripe facts use inline webhook reconciliation plus cron recovery, and RevNet issuance uses invoice-owned idempotency state
+- the current hosted outward-effect lanes are now explicit: Cloudflare-bound execution uses `execution_outbox`, receipt-owned Linq or Telegram replies use the webhook receipt side-effect journal, and Stripe facts use inline webhook reconciliation plus cron recovery
 - Stripe customer/subscription/invoice entitlement writes now carry a latest-applied billing event marker so out-of-order webhook delivery cannot regress a later cancellation, pause, or unpaid state back to active
 - subscription cancellation, pause, unpaid, refund, and dispute paths revoke hosted access by suspending the member until manual recovery or a newer fresh Stripe success event restores entitlement
 
-Current RevNet MVP assumptions:
+Current hosted billing assumptions:
 
-- RevNet issuance is only enabled when `HOSTED_ONBOARDING_STRIPE_BILLING_MODE=subscription`.
-- The configured treasury key must already control a wallet funded on the target chain.
-- Stripe webhook ingress now activates standard subscription access inline from `invoice.paid`; when optional RevNet issuance is enabled, the same reconciliation path may submit issuance from `invoice.paid`, and RevNet-backed subscription activation still waits for confirmed issuance rather than raw `invoice.paid`.
-- Chargebacks, disputes, and refunds are not clawed back onchain in this MVP; instead the Stripe webhook suspends hosted access and halts future activation or RevNet issuance until manual review.
+- Hosted checkout is always Stripe subscription mode.
+- `invoice.paid` is the only positive activation source; `checkout.session.completed` and `customer.subscription.*` do not grant access by themselves.
+- RevNet issuance code remains in-tree but is currently hard-disabled and no `HOSTED_ONBOARDING_REVNET_*` envs are read.
+- Chargebacks, disputes, and refunds are not clawed back onchain; the Stripe webhook suspends hosted access and halts future activation until manual review.
