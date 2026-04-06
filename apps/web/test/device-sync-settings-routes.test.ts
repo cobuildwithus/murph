@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
+import { createJsonPostRequest, createRouteContext } from "./route-test-helpers";
 
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
@@ -154,21 +155,18 @@ describe("device sync settings routes", () => {
 
   it("starts a hosted settings connect flow for the requested provider", async () => {
     const response = await settingsDeviceSyncConnectRoute.POST(
-      new Request("https://join.example.test/api/settings/device-sync/providers/oura/connect", {
-        body: JSON.stringify({
+      createJsonPostRequest(
+        "https://join.example.test/api/settings/device-sync/providers/oura/connect",
+        {
           returnTo: "/settings?tab=wearables",
-        }),
-        headers: {
-          "content-type": "application/json",
-          origin: "https://join.example.test",
         },
-        method: "POST",
-      }),
-      {
-        params: Promise.resolve({
-          provider: "oura",
-        }),
-      },
+        {
+          headers: {
+            origin: "https://join.example.test",
+          },
+        },
+      ),
+      createRouteContext({ provider: "oura" }),
     );
 
     expect(response.status).toBe(200);
@@ -199,11 +197,7 @@ describe("device sync settings routes", () => {
   it("returns one settings source for an opaque connection id status lookup", async () => {
     const response = await settingsDeviceSyncStatusRoute.GET(
       new Request("https://join.example.test/api/settings/device-sync/connections/dspc_oura_123/status"),
-      {
-        params: Promise.resolve({
-          connectionId: "dspc_oura_123",
-        }),
-      },
+      createRouteContext({ connectionId: "dspc_oura_123" }),
     );
 
     expect(response.status).toBe(200);
@@ -228,11 +222,7 @@ describe("device sync settings routes", () => {
         },
         method: "POST",
       }),
-      {
-        params: Promise.resolve({
-          connectionId: "dspc_oura_123",
-        }),
-      },
+      createRouteContext({ connectionId: "dspc_oura_123" }),
     );
 
     expect(response.status).toBe(200);
@@ -254,21 +244,18 @@ describe("device sync settings routes", () => {
     }));
 
     const response = await settingsDeviceSyncConnectRoute.POST(
-      new Request("https://join.example.test/api/settings/device-sync/providers/oura/connect", {
-        body: JSON.stringify({
+      createJsonPostRequest(
+        "https://join.example.test/api/settings/device-sync/providers/oura/connect",
+        {
           returnTo: "/settings",
-        }),
-        headers: {
-          "content-type": "application/json",
-          origin: "https://join.example.test",
         },
-        method: "POST",
-      }),
-      {
-        params: Promise.resolve({
-          provider: "oura",
-        }),
-      },
+        {
+          headers: {
+            origin: "https://join.example.test",
+          },
+        },
+      ),
+      createRouteContext({ provider: "oura" }),
     );
 
     expect(response.status).toBe(401);
@@ -292,21 +279,18 @@ describe("device sync settings routes", () => {
     });
 
     const response = await settingsDeviceSyncConnectRoute.POST(
-      new Request("https://join.example.test/api/settings/device-sync/providers/oura/connect", {
-        body: JSON.stringify({
+      createJsonPostRequest(
+        "https://join.example.test/api/settings/device-sync/providers/oura/connect",
+        {
           returnTo: "/settings",
-        }),
-        headers: {
-          "content-type": "application/json",
-          origin: "https://evil.example.test",
         },
-        method: "POST",
-      }),
-      {
-        params: Promise.resolve({
-          provider: "oura",
-        }),
-      },
+        {
+          headers: {
+            origin: "https://evil.example.test",
+          },
+        },
+      ),
+      createRouteContext({ provider: "oura" }),
     );
 
     expect(response.status).toBe(403);
@@ -335,11 +319,7 @@ describe("device sync settings routes", () => {
         },
         method: "POST",
       }),
-      {
-        params: Promise.resolve({
-          connectionId: "dspc_oura_123",
-        }),
-      },
+      createRouteContext({ connectionId: "dspc_oura_123" }),
     );
 
     expect(response.status).toBe(401);
@@ -369,11 +349,7 @@ describe("device sync settings routes", () => {
         },
         method: "POST",
       }),
-      {
-        params: Promise.resolve({
-          connectionId: "dspc_oura_123",
-        }),
-      },
+      createRouteContext({ connectionId: "dspc_oura_123" }),
     );
 
     expect(response.status).toBe(403);

@@ -1,8 +1,9 @@
 import { execFile, spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdir, rm, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
+import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 export interface CliSuccessEnvelope<TData = Record<string, unknown>> {
@@ -162,6 +163,19 @@ interface CliCommandHarnessPool {
 }
 
 export type CliProcessExecutionMode = 'harness' | 'isolated'
+
+export async function createTempVaultContext(prefix: string): Promise<{
+  parentRoot: string
+  vaultRoot: string
+}> {
+  const parentRoot = await mkdtemp(path.join(tmpdir(), prefix))
+  const vaultRoot = path.join(parentRoot, 'vault')
+  await mkdir(vaultRoot, { recursive: true })
+  return {
+    parentRoot,
+    vaultRoot,
+  }
+}
 
 function parseBooleanEnv(value: string | undefined): boolean | undefined {
   if (value === undefined) {

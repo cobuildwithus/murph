@@ -2,6 +2,8 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
 
+import { createBearerRequest, createJsonPostRequest, createRouteContext } from "./route-test-helpers";
+
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
   exportTokenBundle: vi.fn(),
@@ -21,12 +23,6 @@ type RevokeRouteModule = typeof import("../app/api/device-sync/agent/session/rev
 let exportRoute: ExportRouteModule;
 let refreshRoute: RefreshRouteModule;
 let revokeRoute: RevokeRouteModule;
-
-function createRouteContext(connectionId: string) {
-  return {
-    params: Promise.resolve({ connectionId }),
-  };
-}
 
 describe("hosted device-sync agent token routes", () => {
   const session = {
@@ -123,13 +119,12 @@ describe("hosted device-sync agent token routes", () => {
     );
 
     const response = await exportRoute.POST(
-      new Request("https://example.test/api/device-sync/agent/connections/dsc_123/export-token-bundle", {
-        method: "POST",
-        headers: {
-          authorization: "Bearer hbds_agent_expired",
-        },
-      }),
-      createRouteContext("dsc_123"),
+      createBearerRequest(
+        "https://example.test/api/device-sync/agent/connections/dsc_123/export-token-bundle",
+        "hbds_agent_expired",
+        { method: "POST" },
+      ),
+      createRouteContext({ connectionId: "dsc_123" }),
     );
 
     expect(response.status).toBe(401);
@@ -154,17 +149,19 @@ describe("hosted device-sync agent token routes", () => {
     );
 
     const response = await refreshRoute.POST(
-      new Request("https://example.test/api/device-sync/agent/connections/dsc_123/refresh-token-bundle", {
-        method: "POST",
-        headers: {
-          authorization: "Bearer hbds_agent_expired",
-        },
-        body: JSON.stringify({
+      createJsonPostRequest(
+        "https://example.test/api/device-sync/agent/connections/dsc_123/refresh-token-bundle",
+        {
           expectedTokenVersion: 2,
           force: true,
-        }),
-      }),
-      createRouteContext("dsc_123"),
+        },
+        {
+          headers: {
+            authorization: "Bearer hbds_agent_expired",
+          },
+        },
+      ),
+      createRouteContext({ connectionId: "dsc_123" }),
     );
 
     expect(response.status).toBe(401);
@@ -180,13 +177,12 @@ describe("hosted device-sync agent token routes", () => {
 
   it("passes the authenticated session into export-token-bundle so the handler can rotate it", async () => {
     const response = await exportRoute.POST(
-      new Request("https://example.test/api/device-sync/agent/connections/dsc_123/export-token-bundle", {
-        method: "POST",
-        headers: {
-          authorization: "Bearer hbds_agent_active",
-        },
-      }),
-      createRouteContext("dsc_123"),
+      createBearerRequest(
+        "https://example.test/api/device-sync/agent/connections/dsc_123/export-token-bundle",
+        "hbds_agent_active",
+        { method: "POST" },
+      ),
+      createRouteContext({ connectionId: "dsc_123" }),
     );
 
     expect(response.status).toBe(200);
@@ -205,17 +201,19 @@ describe("hosted device-sync agent token routes", () => {
 
   it("passes the authenticated session and refresh options into refresh-token-bundle", async () => {
     const response = await refreshRoute.POST(
-      new Request("https://example.test/api/device-sync/agent/connections/dsc_123/refresh-token-bundle", {
-        method: "POST",
-        headers: {
-          authorization: "Bearer hbds_agent_active",
-        },
-        body: JSON.stringify({
+      createJsonPostRequest(
+        "https://example.test/api/device-sync/agent/connections/dsc_123/refresh-token-bundle",
+        {
           expectedTokenVersion: 2,
           force: true,
-        }),
-      }),
-      createRouteContext("dsc_123"),
+        },
+        {
+          headers: {
+            authorization: "Bearer hbds_agent_active",
+          },
+        },
+      ),
+      createRouteContext({ connectionId: "dsc_123" }),
     );
 
     expect(response.status).toBe(200);
@@ -238,11 +236,8 @@ describe("hosted device-sync agent token routes", () => {
 
   it("passes the authenticated session into revoke so the handler can invalidate it", async () => {
     const response = await revokeRoute.POST(
-      new Request("https://example.test/api/device-sync/agent/session/revoke", {
+      createBearerRequest("https://example.test/api/device-sync/agent/session/revoke", "hbds_agent_active", {
         method: "POST",
-        headers: {
-          authorization: "Bearer hbds_agent_active",
-        },
       }),
     );
 
