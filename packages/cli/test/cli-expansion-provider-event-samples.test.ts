@@ -217,7 +217,7 @@ test('generic read and semantic summary help surfaces explain when to use them',
 
   assert.match(
     showHelp,
-    /Use family-specific `show` or `manifest` commands when you have a family lookup id such as `meal_\*` or `doc_\*`/u,
+    /Use generic `show` with canonical read ids such as `meal_\*`, `doc_\*`, `evt_\*`, or `journal:\*`\./u,
   )
   assert.match(
     listHelp,

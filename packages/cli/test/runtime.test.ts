@@ -269,7 +269,7 @@ test(
 )
 
 test(
-  'show enforces non-queryable related ids and accepts returned lookup ids',
+  'show accepts canonical family ids and still rejects non-record ids',
   async () => {
     const fixture = await makeFixtureVault()
 
@@ -320,15 +320,39 @@ test(
       assert.equal(requireData(showSample).entity.id, fixture.samples.lookupIds[0])
       assert.equal(requireData(showSample).entity.kind, 'sample')
 
+      const showMeal = await runCli<{
+        entity: {
+          id: string
+          kind: string
+        }
+      }>([
+        'show',
+        fixture.meal.mealId,
+        '--vault',
+        fixture.vaultRoot,
+      ])
+      assert.equal(showMeal.ok, true)
+      assert.equal(showMeal.meta?.command, 'show')
+      assert.equal(requireData(showMeal).entity.id, fixture.meal.mealId)
+      assert.equal(requireData(showMeal).entity.kind, 'meal')
+
+      const showDocumentByFamilyId = await runCli<{
+        entity: {
+          id: string
+          kind: string
+        }
+      }>([
+        'show',
+        fixture.document.documentId,
+        '--vault',
+        fixture.vaultRoot,
+      ])
+      assert.equal(showDocumentByFamilyId.ok, true)
+      assert.equal(showDocumentByFamilyId.meta?.command, 'show')
+      assert.equal(requireData(showDocumentByFamilyId).entity.id, fixture.document.documentId)
+      assert.equal(requireData(showDocumentByFamilyId).entity.kind, 'document')
+
       const invalidLookups = [
-        [
-          fixture.meal.mealId,
-          'Meal ids are stable related ids, not query-layer record ids. Use the returned lookupId/eventId with `show` instead.',
-        ],
-        [
-          fixture.document.documentId,
-          'Document ids are stable related ids, not query-layer record ids. Use the returned lookupId/eventId with `show` instead.',
-        ],
         [
           fixture.samples.transformId,
           'Transform ids identify an import batch, not a query-layer record. Use the returned lookupIds or `list --kind sample` instead.',

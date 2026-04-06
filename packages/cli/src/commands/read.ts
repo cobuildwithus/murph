@@ -12,12 +12,12 @@ export function registerReadCommands(cli: Cli.Cli, services: VaultServices) {
     'show',
     {
       description:
-        'Read one canonical vault record through the query layer when you already know the exact query-layer record id to inspect.',
+        'Read one canonical vault record through the query layer when you already know the exact canonical read id to inspect.',
       args: z.object({
         id: z
           .string()
           .min(1)
-          .describe('Queryable record identifier to resolve with `show`.'),
+          .describe('Canonical read identifier to resolve with `show`.'),
       }),
       options: withBaseOptions(),
       examples: [
@@ -25,14 +25,14 @@ export function registerReadCommands(cli: Cli.Cli, services: VaultServices) {
           args: {
             id: 'evt_123',
           },
-          description: 'Show one known canonical event record by its exact query-layer id.',
+          description: 'Show one known canonical event record by its exact canonical read id.',
           options: {
             vault: './vault',
           },
         },
       ],
       hint:
-        'Use family-specific `show` or `manifest` commands when you have a family lookup id such as `meal_*` or `doc_*`, or when you need import provenance rather than the canonical read-model record.',
+        'Use generic `show` with canonical read ids such as `meal_*`, `doc_*`, `evt_*`, or `journal:*`. Prefer family-specific `manifest` commands when you need import provenance rather than the canonical read-model record.',
       output: showResultSchema,
       async run({ args, options }) {
         return services.query.show({

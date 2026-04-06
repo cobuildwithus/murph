@@ -31,8 +31,8 @@ test('link-kind and queryable helpers preserve provider and current semantics', 
 
   assert.equal(isVaultQueryableRecordId('current'), true)
   assert.equal(isVaultQueryableRecordId('core'), true)
-  assert.equal(isVaultQueryableRecordId('doc_01JNV422Y2M5ZBV64ZP4N1DRB1'), false)
-  assert.equal(isVaultQueryableRecordId('meal_01JNV422Y2M5ZBV64ZP4N1DRB1'), false)
+  assert.equal(isVaultQueryableRecordId('doc_01JNV422Y2M5ZBV64ZP4N1DRB1'), true)
+  assert.equal(isVaultQueryableRecordId('meal_01JNV422Y2M5ZBV64ZP4N1DRB1'), true)
   assert.equal(isVaultQueryableRecordId('xfm_01JNV422Y2M5ZBV64ZP4N1DRB1'), false)
   assert.equal(isVaultQueryableRecordId('pack_focus'), false)
 })

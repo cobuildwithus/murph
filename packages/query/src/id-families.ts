@@ -100,17 +100,13 @@ export const ID_FAMILY_REGISTRY = Object.freeze<IdFamilyDefinition[]>([
     family: "meal",
     entityKind: "meal",
     prefix: "meal_",
-    queryable: false,
-    lookupConstraint:
-      "Meal ids are stable related ids, not query-layer record ids. Use the returned lookupId/eventId with `show` instead.",
+    queryable: true,
   },
   {
     family: "document",
     entityKind: "document",
     prefix: "doc_",
-    queryable: false,
-    lookupConstraint:
-      "Document ids are stable related ids, not query-layer record ids. Use the returned lookupId/eventId with `show` instead.",
+    queryable: true,
   },
   {
     family: "transform",

@@ -127,10 +127,14 @@ test("id-family helpers no longer register the hard-cut legacy colon-prefixed fa
   assert.equal(isQueryableLookupId("sample:path:12"), false);
   assert.equal(isQueryableLookupId("aud_01JNV40W8VFYQ2H7CMJY5A9R4K"), true);
   assert.equal(isQueryableLookupId("food_01JNV40W8VFYQ2H7CMJY5A9R4K"), true);
+  assert.equal(isQueryableLookupId("meal_01JNV40W8VFYQ2H7CMJY5A9R4K"), true);
+  assert.equal(isQueryableLookupId("doc_01JNV40W8VFYQ2H7CMJY5A9R4K"), true);
   assert.equal(isQueryableLookupId("rcp_01JNV40W8VFYQ2H7CMJY5A9R4K"), true);
   assert.equal(isQueryableLookupId("prov_01JNV40W8VFYQ2H7CMJY5A9R4K"), true);
   assert.equal(isQueryableLookupId("wfmt_01JNV40W8VFYQ2H7CMJY5A9R4K"), true);
   assert.equal(inferIdEntityKind("food_01JNV40W8VFYQ2H7CMJY5A9R4K"), "food");
+  assert.equal(inferIdEntityKind("meal_01JNV40W8VFYQ2H7CMJY5A9R4K"), "meal");
+  assert.equal(inferIdEntityKind("doc_01JNV40W8VFYQ2H7CMJY5A9R4K"), "document");
   assert.equal(inferIdEntityKind("rcp_01JNV40W8VFYQ2H7CMJY5A9R4K"), "recipe");
   assert.equal(inferIdEntityKind("prov_01JNV40W8VFYQ2H7CMJY5A9R4K"), "provider");
   assert.equal(
@@ -138,6 +142,8 @@ test("id-family helpers no longer register the hard-cut legacy colon-prefixed fa
     "workout_format",
   );
   assert.equal(describeLookupConstraint("food_01JNV40W8VFYQ2H7CMJY5A9R4K"), null);
+  assert.equal(describeLookupConstraint("meal_01JNV40W8VFYQ2H7CMJY5A9R4K"), null);
+  assert.equal(describeLookupConstraint("doc_01JNV40W8VFYQ2H7CMJY5A9R4K"), null);
 });
 
 test("readVault collapses append-only event revisions to the latest active current-view record", async () => {
