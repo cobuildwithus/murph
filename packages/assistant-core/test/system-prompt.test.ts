@@ -73,7 +73,7 @@ test("buildAssistantSystemPrompt tells Murph to gather personal supplement and l
   );
   assert.match(
     prompt,
-    /Generic `vault-cli show` expects a query-layer record id\. For family-specific lookup ids such as `meal_\*` or `doc_\*`, prefer the matching family `show` or `manifest` surface\./u,
+    /Generic `vault-cli show` accepts canonical read ids, including stable family ids such as `meal_\*` or `doc_\*`\. Prefer the matching family `manifest` surface when you need import provenance or raw artifacts\./u,
   );
   assert.match(
     prompt,

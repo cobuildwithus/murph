@@ -766,7 +766,7 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['show'],
         description:
-          'Read one canonical vault record through the query layer when you already know the exact query-layer record id. Use family-specific show or manifest commands for meal/document/import provenance reads when those lookup ids differ.',
+          'Read one canonical vault record through the query layer when you already know the exact canonical read id. Generic `show` accepts canonical family ids such as `meal_*` and `doc_*`; use family-specific manifest commands for import provenance reads.',
         output: showResultSchema,
       },
       {

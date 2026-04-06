@@ -54,7 +54,7 @@ That bundle teaches OpenClaw to call `vault-cli` directly against the same confi
 
 When you need to read from the vault, use this chooser:
 
-- `vault-cli show <id>` for one exact query-layer record id
+- `vault-cli show <id>` for one exact canonical read id, including stable family ids such as `meal_*` or `doc_*`
 - `vault-cli list` for structured filtering by family, kind, status, stream, tag, or date range
 - `vault-cli search query --text "..."` for fuzzy recall or remembered phrases
 - `vault-cli timeline` for chronology across journals, events, assessments, profile snapshots, and sample summaries

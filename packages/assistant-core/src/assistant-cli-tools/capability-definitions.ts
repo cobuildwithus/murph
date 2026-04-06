@@ -509,7 +509,7 @@ export function createVaultQueryToolDefinitions(
     defineVaultServiceBackedTool({
       name: 'vault.show',
       description:
-        'Show one canonical record or document by its lookup id. Use this to inspect an existing entity before deciding how to write related data.',
+        'Show one canonical record or document by its canonical read id. Use this to inspect an existing entity before deciding how to write related data.',
       inputSchema: z.object({
         id: z.string().min(1),
       }),

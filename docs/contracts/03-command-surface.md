@@ -269,14 +269,14 @@ Every command now uses native `incur` command definitions directly:
 
 ## Lookup Rules
 
-- `show` accepts query-layer ids such as `core`, `journal:<YYYY-MM-DD>`, `exp_*`, `evt_*`, `smp_*`, `aud_*`, `asmt_*`, `psnap_*`, `goal_*`, `cond_*`, `alg_*`, `prot_*`, `fam_*`, and `var_*`.
+- `show` accepts canonical read ids such as `core`, `journal:<YYYY-MM-DD>`, `exp_*`, `evt_*`, `smp_*`, `aud_*`, `asmt_*`, `psnap_*`, `goal_*`, `cond_*`, `alg_*`, `prot_*`, `fam_*`, `var_*`, `doc_*`, and `meal_*`.
 - `profile show current` and `profile current rebuild` target the derived `bank/profile/current.md` view rather than a standalone canonical record id.
 - `provider show` accepts either the canonical `prov_*` id or the stable provider slug stored in `bank/providers/<slug>.md`.
 - `food show` accepts either the canonical `food_*` id or the stable food slug stored in `bank/foods/<slug>.md`.
 - `recipe show` accepts either the canonical `rcp_*` id or the stable recipe slug stored in `bank/recipes/<slug>.md`.
 - `event show` accepts the canonical `evt_*` id. Specialized nouns such as `document`, `meal`, `history`, `blood-test`, and `experiment` remain the preferred follow-up surface when they already exist. `workout add`, `workout format log`, and `intervention add` intentionally return the queryable event id and rely on `event show|list` plus generic `show|list` for follow-on reads.
 - `blood-test show` accepts the canonical `evt_*` id and may also resolve the stored blood test by its title, `testName`, or `labPanelId`.
-- Generic `show` still expects query-layer ids for event-backed records, but `document show`, `document manifest`, `meal show`, and `meal manifest` accept the stable `doc_*` and `meal_*` related ids as well as `evt_*`.
+- Generic `show` accepts canonical read ids for event-backed records, including the stable `doc_*` and `meal_*` family ids as well as `evt_*` aliases. `document manifest` and `meal manifest` remain the provenance-oriented follow-up surface when the caller needs immutable import artifacts rather than the canonical read-model record.
 - `samples batch show` and `samples batch list` are the first-class follow-up surface for `xfm_*` import-batch ids; generic `show` still does not accept them.
 - `intake manifest` and `intake raw` are the first-class follow-up surface for immutable assessment evidence under `raw/assessments/**`.
 - `audit show|list|tail` and `vault show|paths|stats|repair|update` are first-class vault noun commands layered on top of the read model and core metadata write path.
@@ -514,7 +514,7 @@ The freeform note is preserved verbatim in `note`. The structured fields stay in
 
 ### `show`
 
-`entity.id` is the surfaced display identity for the record. For meal/document events, that can differ from the lookup id accepted by `show`.
+`entity.id` is the surfaced canonical read identity for the record. For meal/document events, `show` accepts both the stable family id and the event alias, but the surfaced id stays on the stable family id.
 
 ```json
 {
@@ -572,7 +572,7 @@ The freeform note is preserved verbatim in `note`. The structured fields stay in
 
 ### `search query`
 
-`recordId` is the surfaced display identity; `aliasIds` includes the queryable lookup id when that differs.
+`recordId` is the surfaced canonical read identity; `aliasIds` includes alternate read aliases such as the event id when that differs.
 
 ```json
 {

@@ -99,7 +99,7 @@ function buildAssistantVaultNavigationText(input: {
       ? "- Use `murph.cli.run` with exact `vault-cli` semantics instead of guessing command shapes."
       : "- Use exact `vault-cli` semantics instead of guessing command shapes.",
     "- Use canonical query surfaces as the source of truth for health data.",
-    "- When you already know one exact query-layer record id or one exact canonical record to inspect, start with `vault-cli show`.",
+    "- When you already know one exact canonical record to inspect, start with `vault-cli show`.",
     "- When you need filtered recent records by family, kind, status, stream, tag, or date range, start with `vault-cli list`.",
     "- When the target is fuzzy, remembered by phrase, or likely to require lexical recall across notes and record bodies, use `vault-cli search query`.",
     "- When the user asks what changed, what happened over a window, or what stands out across record types, prefer `vault-cli timeline` first and then drill into a few supporting records.",
@@ -107,7 +107,7 @@ function buildAssistantVaultNavigationText(input: {
     "- For wearable questions, prefer `vault-cli wearables day` or the relevant `vault-cli wearables sleep|activity|recovery|body|sources list` command before inspecting raw events or samples.",
     "- For imported-record provenance or original source payloads, prefer family-specific `manifest` reads such as `vault-cli meal manifest`, `vault-cli document manifest`, `vault-cli intake manifest`, and `vault-cli workout manifest` before scanning raw files directly.",
     "- Many registry families follow `list/show/scaffold/upsert`. Artifact-backed families often use `add` or `import`, then `show/list`, `manifest`, and `edit/delete`. Some families add `rename`, `stop`, or `schedule`.",
-    "- Generic `vault-cli show` expects a query-layer record id. For family-specific lookup ids such as `meal_*` or `doc_*`, prefer the matching family `show` or `manifest` surface.",
+    "- Generic `vault-cli show` accepts canonical read ids, including stable family ids such as `meal_*` or `doc_*`. Prefer the matching family `manifest` surface when you need import provenance or raw artifacts.",
     "- For remembered foods or recipes, use `vault-cli food ...` and `vault-cli recipe ...`.",
     "- If the user is asking about themselves and a recent lab, active protocol, profile snapshot, symptom history, wearable trend, or prior log could change the answer, err on the side of a quick targeted read before responding.",
     "- For supplement, medication, biomarker, or lab-driven questions, gather the smallest personal context that could change the answer before replying. Usually that means the active supplement or medication records, the derived current profile when relevant, and recent blood-test or history reads that bear directly on the question.",
