@@ -52,6 +52,80 @@ describe("hosted pending usage dirty user store", () => {
       "user-b",
     ]);
   });
+
+  it("dedupes usage records within a request and across stored records", async () => {
+    const bucket = createBucketStore();
+    const usageStore = createHostedPendingUsageStore({
+      bucket: bucket.api,
+      dirtyKey: textEncoder.encode("dirty-root-key"),
+      dirtyKeyId: "dirty-root-key",
+      key: textEncoder.encode("usage-root-key"),
+      keyId: "usage-root-key",
+    });
+
+    await expect(usageStore.appendUsage({
+      usage: [
+        { occurredAt: "2026-04-06T00:00:00.000Z", usageId: "usage-a" },
+        { occurredAt: "2026-04-06T00:00:00.000Z", usageId: "usage-a" },
+      ],
+      userId: "user-a",
+    })).resolves.toEqual({
+      recorded: 1,
+      usageIds: ["usage-a"],
+    });
+
+    await expect(usageStore.appendUsage({
+      usage: [
+        { occurredAt: "2026-04-06T00:00:00.000Z", usageId: "usage-a" },
+        { occurredAt: "2026-04-06T00:00:01.000Z", usageId: "usage-b" },
+        { occurredAt: "2026-04-06T00:00:01.000Z", usageId: "usage-b" },
+      ],
+      userId: "user-a",
+    })).resolves.toEqual({
+      recorded: 1,
+      usageIds: ["usage-b"],
+    });
+
+    await expect(usageStore.readUsage({ userId: "user-a" })).resolves.toEqual([
+      { occurredAt: "2026-04-06T00:00:00.000Z", usageId: "usage-a" },
+      { occurredAt: "2026-04-06T00:00:01.000Z", usageId: "usage-b" },
+    ]);
+  });
+
+  it("vacuums stale dirty-user markers when a zero-record delete is requested", async () => {
+    const bucket = createBucketStore();
+    const usageStore = createHostedPendingUsageStore({
+      bucket: bucket.api,
+      dirtyKey: textEncoder.encode("dirty-root-key"),
+      dirtyKeyId: "dirty-root-key",
+      key: textEncoder.encode("usage-root-key"),
+      keyId: "usage-root-key",
+    });
+    const dirtyUserStore = createHostedPendingUsageDirtyUserStore({
+      bucket: bucket.api,
+      key: textEncoder.encode("dirty-root-key"),
+      keyId: "dirty-root-key",
+    });
+
+    await usageStore.appendUsage({
+      usage: [{ occurredAt: "2026-04-06T00:00:00.000Z", usageId: "usage-a" }],
+      userId: "user-a",
+    });
+
+    const usageObjects = await bucket.api.list({ prefix: "transient/assistant-usage/" });
+    for (const object of usageObjects.objects) {
+      await bucket.api.delete(object.key);
+    }
+
+    await expect(dirtyUserStore.listDirtyUsers()).resolves.toEqual(["user-a"]);
+
+    await usageStore.deleteUsage({
+      usageIds: [],
+      userId: "user-a",
+    });
+
+    await expect(dirtyUserStore.listDirtyUsers()).resolves.toEqual([]);
+  });
 });
 
 function createBucketStore() {

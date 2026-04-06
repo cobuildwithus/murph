@@ -1,16 +1,18 @@
-import { HostedBillingStatus, Prisma, type HostedMember, type PrismaClient } from "@prisma/client";
+import { Prisma, type HostedMember, type PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
 import { enqueueHostedExecutionOutbox } from "../hosted-execution/outbox";
+import { hasHostedMemberActiveAccess } from "../hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
 import {
   buildHostedShareAcceptanceDispatch,
   buildHostedShareAcceptanceEventId,
   createHostedShareMinimalPreview,
-  requireHostedShareLink,
   hashHostedShareCode,
   normalizeOptionalString,
+  readHostedSharePack,
+  requireHostedShareLink,
 } from "./shared";
 import type { AcceptHostedShareResult } from "./types";
 
@@ -40,7 +42,10 @@ export async function acceptHostedShareLink(input: {
     });
   }
 
-  if (member.billingStatus !== HostedBillingStatus.active) {
+  if (!hasHostedMemberActiveAccess({
+    billingStatus: member.billingStatus,
+    memberStatus: member.status,
+  })) {
     throw hostedOnboardingError({
       code: "HOSTED_SHARE_ACTIVE_REQUIRED",
       message: "Finish hosted activation before adding a shared bundle.",
@@ -93,6 +98,9 @@ export async function acceptHostedShareLink(input: {
       memberId,
       shareId: latest.id,
     });
+    // Validate the Cloudflare-backed pack before claiming the share so a missing pack
+    // cannot leave the link in a half-accepted state.
+    const { pack } = await readHostedSharePack(latest);
     const record = latest.acceptedAt?.getTime() === acceptedAt.getTime()
       && latest.acceptedByMemberId === memberId
       && latest.lastEventId === eventId
@@ -113,6 +121,7 @@ export async function acceptHostedShareLink(input: {
         acceptedAt: acceptedAt.toISOString(),
         eventId,
         memberId,
+        pack,
         shareId: record.id,
       }),
       sourceId: record.id,

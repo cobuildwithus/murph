@@ -1,7 +1,10 @@
-import { HostedMemberStatus, type HostedMember, type PrismaClient } from "@prisma/client";
+import { type HostedMember, type PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
-import { isHostedAccessBlockedBillingStatus } from "./entitlement";
+import {
+  hasHostedMemberActiveAccess,
+  isHostedMemberSuspended,
+} from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import { findHostedMemberForPrivyIdentity } from "./member-identity-service";
 import {
@@ -125,12 +128,12 @@ export async function requireHostedPrivyActiveRequestAuthContext(
   prisma: PrismaClient = getPrisma(),
 ): Promise<HostedPrivyAuthenticatedRequestContext> {
   const context = await requireHostedPrivyRequestAuthContext(request, prisma);
-  assertHostedMemberAccessAllowed(context.member);
+  assertHostedMemberActiveAccessAllowed(context.member);
   return context;
 }
 
-function assertHostedMemberAccessAllowed(member: HostedMember): void {
-  if (member.status === HostedMemberStatus.suspended) {
+function assertHostedMemberActiveAccessAllowed(member: HostedMember): void {
+  if (isHostedMemberSuspended(member.status)) {
     throw hostedOnboardingError({
       code: "HOSTED_MEMBER_SUSPENDED",
       message: "This hosted account is suspended. Contact support to restore access.",
@@ -138,7 +141,10 @@ function assertHostedMemberAccessAllowed(member: HostedMember): void {
     });
   }
 
-  if (isHostedAccessBlockedBillingStatus(member.billingStatus)) {
+  if (!hasHostedMemberActiveAccess({
+    billingStatus: member.billingStatus,
+    memberStatus: member.status,
+  })) {
     throw hostedOnboardingError({
       code: "HOSTED_ACCESS_REQUIRED",
       message: "Finish hosted activation before continuing.",

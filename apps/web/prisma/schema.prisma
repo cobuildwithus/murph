@@ -437,7 +437,7 @@ model ExecutionOutbox {
   status        ExecutionOutboxStatus @default(pending)
   attemptCount  Int                   @default(0) @map("attempt_count")
   lastAttemptAt DateTime?             @map("last_attempt_at")
-  nextAttemptAt DateTime              @default(now()) @map("next_attempt_at")
+  nextAttemptAt DateTime?             @default(now()) @map("next_attempt_at")
   claimToken    String?               @map("claim_token")
   claimExpiresAt DateTime?            @map("claim_expires_at")
   acceptedAt    DateTime?             @map("accepted_at")

@@ -265,6 +265,7 @@ export async function drainHostedPendingAiUsageImports(input: {
       const usage = await client.getPendingUsage(userId, input.limitPerUser ?? 200);
 
       if (usage.length === 0) {
+        await client.deletePendingUsage(userId, []);
         continue;
       }
 

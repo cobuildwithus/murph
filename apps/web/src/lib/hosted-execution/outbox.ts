@@ -427,7 +427,7 @@ async function finalizeHostedExecutionOutboxAttempt(
       completedAt: input.completedAt,
       failedAt: input.failedAt,
       lastError: input.lastError,
-      nextAttemptAt: input.nextAttemptAt ?? record.nextAttemptAt,
+      nextAttemptAt: input.nextAttemptAt,
       payloadJson: input.payloadJson,
       claimToken: null,
       claimExpiresAt: null,

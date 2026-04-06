@@ -1,5 +1,4 @@
 import {
-  HostedBillingStatus,
   HostedInviteStatus,
   HostedMemberStatus,
   type PrismaClient,
@@ -7,6 +6,7 @@ import {
 
 import { getPrisma } from "../prisma";
 import { readHostedPhoneHint } from "./contact-privacy";
+import { hasHostedMemberActiveAccess } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import { type HostedPrivyIdentity } from "./privy";
 import {
@@ -58,7 +58,10 @@ export async function completeHostedPrivyVerification(input: {
     memberId: member.id,
     prisma,
   });
-  const stage = member.billingStatus === HostedBillingStatus.active ? "active" : "checkout";
+  const stage = hasHostedMemberActiveAccess({
+    billingStatus: member.billingStatus,
+    memberStatus: member.status,
+  }) ? "active" : "checkout";
 
   await prisma.hostedInvite.update({
     where: {

@@ -1,5 +1,4 @@
 import {
-  HostedBillingStatus,
   HostedInviteStatus,
   type HostedInvite,
   type HostedMember,
@@ -11,6 +10,7 @@ import type { HostedInviteStatusPayload } from "./types";
 
 import { getPrisma } from "../prisma";
 import { readHostedPhoneHint } from "./contact-privacy";
+import { hasHostedMemberActiveAccess } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import { ensureHostedMemberForPhone } from "./member-identity-service";
 import { hasHostedPrivyPhoneAuthConfig } from "./privy";
@@ -86,7 +86,10 @@ export async function getHostedInviteStatus(input: {
 
   const sessionMatchesInvite = input.authenticatedMember?.id === invite.memberId;
   const hasPrivyIdentity = Boolean(invite.member.privyUserId && invite.member.walletAddress);
-  const isActive = invite.member.billingStatus === HostedBillingStatus.active;
+  const isActive = hasHostedMemberActiveAccess({
+    billingStatus: invite.member.billingStatus,
+    memberStatus: invite.member.status,
+  });
   const stage =
     invite.expiresAt <= now || inviteStatus === HostedInviteStatus.expired
       ? "expired"
