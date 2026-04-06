@@ -18,7 +18,7 @@ import type {
   HealthListInput,
   HealthQueryServiceMethods,
   JsonFileInput,
-} from "../health-cli-method-types.js";
+} from "@murphai/assistant-engine/health-cli-method-types";
 import type {
   CoreRuntimeModule,
   CoreWriteServices,
@@ -26,7 +26,7 @@ import type {
   QueryServices,
   StopProtocolInput,
 } from "./types.js";
-import { getHealthRegistryCommandMetadata } from "../health-registry-command-metadata.js";
+import { getHealthRegistryCommandMetadata } from "@murphai/assistant-engine/health-registry-command-metadata";
 import {
   asEntityEnvelope,
   asListEnvelope,

@@ -91,6 +91,62 @@
       "types": "./dist/gateway-local-adapter.d.ts",
       "default": "./dist/gateway-local-adapter.js"
     },
+    "./health-cli-descriptors": {
+      "types": "./dist/health-cli-descriptors.d.ts",
+      "default": "./dist/health-cli-descriptors.js"
+    },
+    "./health-cli-method-types": {
+      "types": "./dist/health-cli-method-types.d.ts",
+      "default": "./dist/health-cli-method-types.js"
+    },
+    "./health-registry-command-metadata": {
+      "types": "./dist/health-registry-command-metadata.d.ts",
+      "default": "./dist/health-registry-command-metadata.js"
+    },
+    "./inbox-app/linq-endpoint": {
+      "types": "./dist/inbox-app/linq-endpoint.d.ts",
+      "default": "./dist/inbox-app/linq-endpoint.js"
+    },
+    "./inbox-app/promotions": {
+      "types": "./dist/inbox-app/promotions.d.ts",
+      "default": "./dist/inbox-app/promotions.js"
+    },
+    "./inbox-app/reads": {
+      "types": "./dist/inbox-app/reads.d.ts",
+      "default": "./dist/inbox-app/reads.js"
+    },
+    "./inbox-app/sources": {
+      "types": "./dist/inbox-app/sources.d.ts",
+      "default": "./dist/inbox-app/sources.js"
+    },
+    "./inbox-app/types": {
+      "types": "./dist/inbox-app/types.d.ts",
+      "default": "./dist/inbox-app/types.js"
+    },
+    "./inbox-services/connectors": {
+      "types": "./dist/inbox-services/connectors.d.ts",
+      "default": "./dist/inbox-services/connectors.js"
+    },
+    "./inbox-services/daemon": {
+      "types": "./dist/inbox-services/daemon.d.ts",
+      "default": "./dist/inbox-services/daemon.js"
+    },
+    "./inbox-services/parser": {
+      "types": "./dist/inbox-services/parser.d.ts",
+      "default": "./dist/inbox-services/parser.js"
+    },
+    "./inbox-services/query": {
+      "types": "./dist/inbox-services/query.d.ts",
+      "default": "./dist/inbox-services/query.js"
+    },
+    "./inbox-services/shared": {
+      "types": "./dist/inbox-services/shared.d.ts",
+      "default": "./dist/inbox-services/shared.js"
+    },
+    "./inbox-services/state": {
+      "types": "./dist/inbox-services/state.d.ts",
+      "default": "./dist/inbox-services/state.js"
+    },
     "./inbox-model-contracts": {
       "types": "./dist/inbox-model-contracts.d.ts",
       "default": "./dist/inbox-model-contracts.js"
@@ -99,9 +155,25 @@
       "types": "./dist/inbox-model-harness.d.ts",
       "default": "./dist/inbox-model-harness.js"
     },
+    "./json-input": {
+      "types": "./dist/json-input.d.ts",
+      "default": "./dist/json-input.js"
+    },
+    "./knowledge/contracts": {
+      "types": "./dist/knowledge/contracts.d.ts",
+      "default": "./dist/knowledge/contracts.js"
+    },
+    "./knowledge/documents": {
+      "types": "./dist/knowledge/documents.d.ts",
+      "default": "./dist/knowledge/documents.js"
+    },
     "./model-harness": {
       "types": "./dist/model-harness.d.ts",
       "default": "./dist/model-harness.js"
+    },
+    "./option-utils": {
+      "types": "./dist/option-utils.d.ts",
+      "default": "./dist/option-utils.js"
     },
     "./outbound-channel": {
       "types": "./dist/outbound-channel.d.ts",
@@ -110,6 +182,30 @@
     "./process-kill": {
       "types": "./dist/process-kill.d.ts",
       "default": "./dist/process-kill.js"
+    },
+    "./query-runtime": {
+      "types": "./dist/query-runtime.d.ts",
+      "default": "./dist/query-runtime.js"
+    },
+    "./runtime-import": {
+      "types": "./dist/runtime-import.d.ts",
+      "default": "./dist/runtime-import.js"
+    },
+    "./usecases/record-mutations": {
+      "types": "./dist/usecases/record-mutations.d.ts",
+      "default": "./dist/usecases/record-mutations.js"
+    },
+    "./usecases/text-duration": {
+      "types": "./dist/usecases/text-duration.d.ts",
+      "default": "./dist/usecases/text-duration.js"
+    },
+    "./usecases/workout-artifacts": {
+      "types": "./dist/usecases/workout-artifacts.d.ts",
+      "default": "./dist/usecases/workout-artifacts.js"
+    },
+    "./usecases/workout-model": {
+      "types": "./dist/usecases/workout-model.d.ts",
+      "default": "./dist/usecases/workout-model.js"
     }
   },
   "files": [

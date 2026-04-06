@@ -6,7 +6,7 @@ import {
 import {
   inputFileOptionSchema,
   normalizeInputFileOption,
-} from '@murphai/vault-inbox/json-input'
+} from '@murphai/assistant-engine/json-input'
 import {
   deleteResultSchema,
   showResultSchema,

@@ -9,30 +9,30 @@ import type {
   ParserRuntimeDrainResult,
   PollConnector,
   RuntimeCaptureRecordInput,
-} from './types.js'
-import { instantiateConnector } from '../inbox-services/connectors.js'
+} from '@murphai/assistant-engine/inbox-app/types'
+import { instantiateConnector } from '@murphai/assistant-engine/inbox-services/connectors'
 import {
   buildDaemonState,
   createProcessSignalBridge,
   normalizeDaemonState,
   writeDaemonState,
-} from '../inbox-services/daemon.js'
+} from '@murphai/assistant-engine/inbox-services/daemon'
 import {
   createParserServiceContext,
   summarizeParserDrain,
-} from '../inbox-services/parser.js'
-import { buildCaptureCursor } from '../inbox-services/query.js'
+} from '@murphai/assistant-engine/inbox-services/parser'
+import { buildCaptureCursor } from '@murphai/assistant-engine/inbox-services/query'
 import {
   ensureInitialized,
   readConfig,
   requireConnector,
-} from '../inbox-services/state.js'
+} from '@murphai/assistant-engine/inbox-services/state'
 import {
   errorMessage,
   normalizeOptionalCommandLimit,
   relativeToVault,
   runtimeNamespaceAccountId,
-} from '../inbox-services/shared.js'
+} from '@murphai/assistant-engine/inbox-services/shared'
 import { tryKillProcess } from '@murphai/assistant-engine/process-kill'
 
 const FOREGROUND_CONNECTOR_RESTART_POLICY = {

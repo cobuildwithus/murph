@@ -14,7 +14,7 @@ import type {
 import type {
   CommandContext,
   JsonObject,
-} from "../health-cli-method-types.js"
+} from "@murphai/assistant-engine/health-cli-method-types"
 import type {
   CoreWriteServices,
   DeviceSyncServices,
@@ -47,7 +47,7 @@ import {
 import {
   normalizeRepeatableEnumFlagOption,
   normalizeRepeatableFlagOption,
-} from "../option-utils.js"
+} from "@murphai/assistant-engine/option-utils"
 import {
   listDocumentRecords as listDocumentsUseCase,
   showDocumentManifest as showDocumentImportManifestUseCase,

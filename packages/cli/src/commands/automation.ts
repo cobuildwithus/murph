@@ -11,7 +11,7 @@ import {
 import {
   withBaseOptions,
 } from "@murphai/operator-config/command-helpers";
-import { loadJsonInputObject, textInputOptionSchema } from "@murphai/vault-inbox/json-input";
+import { loadJsonInputObject, textInputOptionSchema } from "@murphai/assistant-engine/json-input";
 import {
   pathSchema,
 } from "@murphai/operator-config/vault-cli-contracts";

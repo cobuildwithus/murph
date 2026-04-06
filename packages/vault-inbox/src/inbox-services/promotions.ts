@@ -15,7 +15,7 @@ import {
   type InboxPromotionEntry,
   type InboxPreserveDocumentAttachmentsResult,
 } from '@murphai/operator-config/inbox-cli-contracts'
-import type { QueryRuntimeModule } from '../query-runtime.js'
+import type { QueryRuntimeModule } from '@murphai/assistant-engine/query-runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type {
   CanonicalAttachmentPromotionResult,
@@ -31,14 +31,14 @@ import type {
   RuntimeAttachmentRecord,
   RuntimeCaptureRecord,
   RuntimeStore,
-} from '../inbox-app/types.js'
-import { isStoredDocumentAttachment } from './query.js'
-import { ensureInitialized } from './state.js'
+} from '@murphai/assistant-engine/inbox-app/types'
+import { isStoredDocumentAttachment } from '@murphai/assistant-engine/inbox-services/query'
+import { ensureInitialized } from '@murphai/assistant-engine/inbox-services/state'
 import {
   fileExists,
   normalizeNullableString,
   relativeToVault,
-} from './shared.js'
+} from '@murphai/assistant-engine/inbox-services/shared'
 
 const INBOX_PROMOTION_STORE_SCHEMA = 'murph.inbox-promotion-store.v1'
 const INBOX_PROMOTION_STORE_SCHEMA_VERSION = 1

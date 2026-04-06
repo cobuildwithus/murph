@@ -1,6 +1,6 @@
-import { loadRuntimeModule } from '@murphai/vault-inbox/runtime-import'
+import { loadRuntimeModule } from '@murphai/assistant-engine/runtime-import'
 import type { ImportersRuntimeModule } from '@murphai/vault-inbox/usecases/types'
-import { createRuntimeUnavailableError } from '@murphai/vault-inbox/commands/query-record-command-helpers'
+import { createRuntimeUnavailableError } from '@murphai/assistant-engine/commands/query-record-command-helpers'
 
 export interface ImportCsvSamplesOptions {
   delimiter?: string

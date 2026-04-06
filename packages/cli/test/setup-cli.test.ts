@@ -49,7 +49,7 @@ import {
   resolveSetupChannelMissingEnv,
   resolveSetupWearableMissingEnv,
 } from '@murphai/operator-config/setup-runtime-env'
-import type { InboxSourceSetEnabledResult } from '@murphai/vault-inbox/inbox-app/types'
+import type { InboxSourceSetEnabledResult } from '@murphai/assistant-engine/inbox-app/types'
 import type { InboxConnectorConfig } from '@murphai/operator-config/inbox-cli-contracts'
 import type { SetupResult } from '@murphai/operator-config/setup-cli-contracts'
 import {

@@ -1,4 +1,4 @@
-import { loadRuntimeModule } from "../runtime-import.js"
+import { loadRuntimeModule } from "@murphai/assistant-engine/runtime-import"
 import { createRuntimeUnavailableError } from "@murphai/operator-config/runtime-errors"
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors"
 import {
@@ -6,9 +6,9 @@ import {
   healthCoreServiceMethodNames,
   healthQueryRuntimeMethodNames,
   healthQueryServiceMethodNames,
-} from "../health-cli-descriptors.js"
+} from "@murphai/assistant-engine/health-cli-descriptors"
 
-import type { JsonObject } from "../health-cli-method-types.js"
+import type { JsonObject } from "@murphai/assistant-engine/health-cli-method-types"
 import type {
   CoreRuntimeModule,
   ImportersFactoryRuntimeModule,

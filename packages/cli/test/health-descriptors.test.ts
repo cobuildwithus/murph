@@ -10,8 +10,8 @@ import {
   findHealthDescriptorForLookup,
   healthEntityDescriptorByKind,
   inferHealthEntityKind,
-} from "@murphai/vault-inbox/health-cli-descriptors";
-import { getHealthRegistryCommandMetadata } from "@murphai/vault-inbox/health-registry-command-metadata";
+} from "@murphai/assistant-engine/health-cli-descriptors";
+import { getHealthRegistryCommandMetadata } from "@murphai/assistant-engine/health-registry-command-metadata";
 import {
   createExplicitHealthCoreServices,
   createExplicitHealthQueryServices,
