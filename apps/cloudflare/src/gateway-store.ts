@@ -38,6 +38,7 @@ import {
   mergeGatewayPermissionOverrides,
   pruneGatewayPermissionOverrides,
   readGatewayPermissionOverrides,
+  sameGatewayPermissionResolutionOverrides,
   upsertGatewayPermissionOverride,
   type GatewayPermissionResolutionOverride,
 } from "./gateway-store-permissions.js";
@@ -113,7 +114,10 @@ export class HostedGatewayProjectionStore {
         DEFAULT_GATEWAY_EVENT_RETENTION,
       );
       const baseSnapshotChanged = !sameStructuredValue(current.baseSnapshot, parsed);
-      const overridesChanged = !sameStructuredValue(current.permissionOverrides, nextOverrides);
+      const overridesChanged = !sameGatewayPermissionResolutionOverrides(
+        current.permissionOverrides,
+        nextOverrides,
+      );
 
       if (nextState === currentState && !baseSnapshotChanged && !overridesChanged) {
         return;
@@ -207,7 +211,7 @@ export class HostedGatewayProjectionStore {
 
       if (
         nextState !== currentState
-        || !sameStructuredValue(current.permissionOverrides, nextOverrides)
+        || !sameGatewayPermissionResolutionOverrides(current.permissionOverrides, nextOverrides)
       ) {
         await this.writeStoredState({
           baseSnapshot: current.baseSnapshot,
@@ -265,14 +269,13 @@ export class HostedGatewayProjectionStore {
     const record = parseStoredGatewayStateRecord(
       JSON.parse(utf8Decoder.decode(plaintext)) as unknown,
     );
-    const normalizedOverrides = readGatewayPermissionOverrides(record.permissionOverrides);
 
     return {
       baseSnapshot: record.baseSnapshot,
       events: record.events,
       nextCursor: record.nextCursor,
-      permissionOverrides: normalizedOverrides,
-      snapshot: mergeGatewayPermissionOverrides(record.baseSnapshot, normalizedOverrides),
+      permissionOverrides: record.permissionOverrides,
+      snapshot: mergeGatewayPermissionOverrides(record.baseSnapshot, record.permissionOverrides),
     };
   }
 
