@@ -310,6 +310,7 @@ export type WearableSourceListResult = WearableListResult<QueryWearableSourceHea
 export interface VaultShowResult {
   vault: string
   schemaVersion: string | null
+  formatVersion: number | null
   vaultId: string | null
   title: string | null
   timezone: string | null
@@ -369,6 +370,25 @@ export interface VaultRepairResult {
   timezone: string
   createdDirectories: string[]
   updated: boolean
+  auditPath: string | null
+}
+
+export interface VaultUpgradeResult {
+  vault: string
+  metadataFile: string
+  title: string
+  timezone: string
+  fromFormatVersion: number
+  toFormatVersion: number
+  steps: Array<{
+    description: string
+    fromFormatVersion: number
+    toFormatVersion: number
+  }>
+  affectedFiles: string[]
+  rebuildableProjectionStores: string[]
+  updated: boolean
+  dryRun: boolean
   auditPath: string | null
 }
 
@@ -559,6 +579,11 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
     },
   ): Promise<VaultUpdateResult>
   repairVault(input: CommandContext): Promise<VaultRepairResult>
+  upgradeVault(
+    input: CommandContext & {
+      dryRun?: boolean
+    },
+  ): Promise<VaultUpgradeResult>
   projectAssessment(
     input: ProjectAssessmentInput,
   ): Promise<AssessmentProjectionResult>
@@ -893,6 +918,26 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
     timezone: string
     createdDirectories: string[]
     updated: boolean
+    auditPath: string | null
+  }>
+  upgradeVault(input: {
+    vaultRoot: string
+    dryRun?: boolean
+  }): Promise<{
+    metadataFile: string
+    title: string
+    timezone: string
+    fromFormatVersion: number
+    toFormatVersion: number
+    steps: Array<{
+      description: string
+      fromFormatVersion: number
+      toFormatVersion: number
+    }>
+    affectedFiles: string[]
+    rebuildableProjectionStores: string[]
+    updated: boolean
+    dryRun: boolean
     auditPath: string | null
   }>
   addMeal(input: {

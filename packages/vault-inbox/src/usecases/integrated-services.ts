@@ -143,6 +143,33 @@ function createIntegratedCoreServices(): CoreWriteServices {
         auditPath: result.auditPath,
       }
     },
+    async upgradeVault(
+      input: CommandContext & {
+        dryRun?: boolean
+      },
+    ) {
+      const { vault } = input
+      const { core } = await loadIntegratedRuntime()
+      const result = await core.upgradeVault({
+        vaultRoot: vault,
+        dryRun: input.dryRun,
+      })
+
+      return {
+        vault,
+        metadataFile: result.metadataFile,
+        title: result.title,
+        timezone: result.timezone,
+        fromFormatVersion: result.fromFormatVersion,
+        toFormatVersion: result.toFormatVersion,
+        steps: result.steps,
+        affectedFiles: result.affectedFiles,
+        rebuildableProjectionStores: result.rebuildableProjectionStores,
+        updated: result.updated,
+        dryRun: result.dryRun,
+        auditPath: result.auditPath,
+      }
+    },
     async addMeal(input: CommandContext & {
       photo?: string
       audio?: string

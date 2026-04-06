@@ -501,6 +501,7 @@ export async function showVaultSummary(vault: string) {
   return {
     vault,
     schemaVersion: stringOrNull(metadata?.schemaVersion),
+    formatVersion: resolveVaultFormatVersion(metadata),
     vaultId: stringOrNull(metadata?.vaultId),
     title: stringOrNull(metadata?.title),
     timezone: stringOrNull(metadata?.timezone),
@@ -509,6 +510,16 @@ export async function showVaultSummary(vault: string) {
     coreTitle: readModel.coreDocument?.title ?? null,
     coreUpdatedAt: normalizeIsoTimestamp(readModel.coreDocument?.occurredAt),
   }
+}
+
+function resolveVaultFormatVersion(metadata: Record<string, unknown> | null | undefined) {
+  if (!metadata) {
+    return null
+  }
+
+  return typeof metadata.formatVersion === 'number' && Number.isInteger(metadata.formatVersion)
+    ? metadata.formatVersion
+    : 0
 }
 
 export async function updateVaultSummary(input: {

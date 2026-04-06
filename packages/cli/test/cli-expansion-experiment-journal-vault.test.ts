@@ -261,6 +261,7 @@ test.sequential(
 
       const showResult = await runCli<{
         schemaVersion: string | null
+        formatVersion: number | null
         vaultId: string | null
         title: string | null
         corePath: string | null
@@ -301,6 +302,7 @@ test.sequential(
       assert.equal(showResult.ok, true)
       assert.equal(showResult.meta?.command, 'vault show')
       assert.match(requireData(showResult).schemaVersion ?? '', /^murph\./u)
+      assert.equal(requireData(showResult).formatVersion, 1)
       assert.match(requireData(showResult).vaultId ?? '', /^vault_/u)
       assert.equal(requireData(showResult).corePath, 'CORE.md')
       assert.equal(requireData(showResult).title !== null, true)

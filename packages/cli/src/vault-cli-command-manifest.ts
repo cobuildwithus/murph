@@ -261,7 +261,7 @@ export const vaultCliCommandDescriptors = [
     bindingMode: 'direct',
     rootCommandNames: ['init', 'validate', 'vault'],
     directVaultServiceBindings: {
-      core: ['init', 'validate', 'updateVault', 'repairVault'],
+      core: ['init', 'validate', 'updateVault', 'repairVault', 'upgradeVault'],
       query: ['showVault', 'showVaultPaths', 'showVaultStats'],
     },
     register({ cli, services }) {

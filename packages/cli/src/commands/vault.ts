@@ -10,6 +10,7 @@ import {
   pathSchema,
   timeZoneSchema,
   vaultInitResultSchema,
+  vaultUpgradeResultSchema,
   vaultValidateResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { VaultServices } from '@murphai/vault-inbox/vault-services'
@@ -19,6 +20,7 @@ const unknownRecordSchema = z.record(z.string(), z.unknown())
 const vaultShowResultSchema = z.object({
   vault: pathSchema,
   schemaVersion: z.string().min(1).nullable(),
+  formatVersion: z.number().int().nonnegative().nullable(),
   vaultId: z.string().min(1).nullable(),
   title: z.string().min(1).nullable(),
   timezone: z.string().min(1).nullable(),
@@ -180,7 +182,7 @@ export function registerVaultCommands(cli: Cli.Cli, services: VaultServices) {
 
   vaultGroup.command('repair', {
     description:
-      'Repair additive vault metadata and scaffold drift so older vaults can adopt newer contract fields without manual edits.',
+      'Repair scaffold-only drift on current-format vaults such as missing required directories. Legacy formatVersion vaults should run upgrade first.',
     args: emptyArgsSchema,
     options: withBaseOptions(),
     output: vaultRepairResultSchema,
@@ -188,6 +190,23 @@ export function registerVaultCommands(cli: Cli.Cli, services: VaultServices) {
       return services.core.repairVault({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
+      })
+    },
+  })
+
+  vaultGroup.command('upgrade', {
+    description:
+      'Plan or apply ordered canonical vault upgrades. Rebuildable .runtime projection stores stay separate.',
+    args: emptyArgsSchema,
+    options: withBaseOptions({
+      dryRun: z.boolean().default(false).describe('Preview the upgrade plan without writing canonical files.'),
+    }),
+    output: vaultUpgradeResultSchema,
+    async run({ options }) {
+      return services.core.upgradeVault({
+        vault: options.vault,
+        requestId: requestIdFromOptions(options),
+        dryRun: options.dryRun,
       })
     },
   })
