@@ -5,6 +5,7 @@ import path from 'node:path'
 import { test } from 'vitest'
 import {
   openSqliteRuntimeDatabase,
+  parseVersionedJsonStateEnvelope,
   resolveRuntimePaths,
 } from '@murphai/runtime-state/node'
 import {
@@ -25,6 +26,8 @@ const builtCoreRuntimeUrl = new URL('../../core/dist/index.js', import.meta.url)
 const builtInboxRuntimeUrl = new URL('../../inboxd/dist/index.js', import.meta.url).href
 const builtImportersRuntimeUrl = new URL('../../importers/dist/index.js', import.meta.url).href
 const builtParsersRuntimeUrl = new URL('../../parsers/dist/index.js', import.meta.url).href
+const INBOX_DAEMON_STATE_SCHEMA = 'murph.inbox-daemon-state.v1'
+const INBOX_DAEMON_STATE_SCHEMA_VERSION = 1
 
 test('formatInboxRunEventForTerminal omits connector identifiers by default', () => {
   const event: InboxRunEvent = {
@@ -891,6 +894,46 @@ async function readJsonFile<T>(absolutePath: string): Promise<T> {
   return JSON.parse(await readFile(absolutePath, 'utf8')) as T
 }
 
+async function readPersistedInboxDaemonState(absolutePath: string): Promise<{
+  stale?: boolean
+  status?: string
+  message?: string | null
+}> {
+  const parsed = JSON.parse(await readFile(absolutePath, 'utf8')) as unknown
+  return parseVersionedJsonStateEnvelope(parsed, {
+    label: 'Inbox daemon state',
+    legacyParseValue: parsePersistedInboxDaemonState,
+    parseValue: parsePersistedInboxDaemonState,
+    schema: INBOX_DAEMON_STATE_SCHEMA,
+    schemaVersion: INBOX_DAEMON_STATE_SCHEMA_VERSION,
+  })
+}
+
+function parsePersistedInboxDaemonState(value: unknown): {
+  stale?: boolean
+  status?: string
+  message?: string | null
+} {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('Inbox daemon state must be an object.')
+  }
+
+  const candidate = value as {
+    stale?: unknown
+    status?: unknown
+    message?: unknown
+  }
+
+  return {
+    stale: typeof candidate.stale === 'boolean' ? candidate.stale : undefined,
+    status: typeof candidate.status === 'string' ? candidate.status : undefined,
+    message:
+      typeof candidate.message === 'string' || candidate.message === null
+        ? candidate.message
+        : undefined,
+  }
+}
+
 async function updateCaptureAttachmentRuntimeRecord(input: {
   captureId: string
   sha256?: string | null
@@ -1034,8 +1077,8 @@ test.sequential(
         vault: fixture.vaultRoot,
         requestId: null,
       })
-      assert.equal(initResult.createdPaths.includes('.runtime/inboxd.sqlite'), true)
-      assert.equal(initResult.createdPaths.includes('.runtime/inboxd/config.json'), true)
+      assert.equal(initResult.createdPaths.includes('.runtime/projections/inboxd.sqlite'), true)
+      assert.equal(initResult.createdPaths.includes('.runtime/operations/inbox/config.json'), true)
 
       const addResult = await services.sourceAdd({
         vault: fixture.vaultRoot,
@@ -1162,11 +1205,11 @@ test.sequential(
           rebuiltCaptures: number
         }>(['inbox', 'init', '--vault', fixture.vaultRoot], services),
       )
-      assert.equal(initResult.runtimeDirectory, '.runtime/inboxd')
-      assert.equal(initResult.databasePath, '.runtime/inboxd.sqlite')
-      assert.equal(initResult.configPath, '.runtime/inboxd/config.json')
-      assert.equal(initResult.createdPaths.includes('.runtime/inboxd.sqlite'), true)
-      assert.equal(initResult.createdPaths.includes('.runtime/inboxd/config.json'), true)
+      assert.equal(initResult.runtimeDirectory, '.runtime/operations/inbox')
+      assert.equal(initResult.databasePath, '.runtime/projections/inboxd.sqlite')
+      assert.equal(initResult.configPath, '.runtime/operations/inbox/config.json')
+      assert.equal(initResult.createdPaths.includes('.runtime/projections/inboxd.sqlite'), true)
+      assert.equal(initResult.createdPaths.includes('.runtime/operations/inbox/config.json'), true)
       assert.equal(initResult.rebuiltCaptures, 0)
 
       const added = requireData(
@@ -1195,7 +1238,7 @@ test.sequential(
           '25',
         ], services),
       )
-      assert.equal(added.configPath, '.runtime/inboxd/config.json')
+      assert.equal(added.configPath, '.runtime/operations/inbox/config.json')
       assert.equal(added.connector.id, 'imessage:self')
       assert.equal(added.connector.source, 'imessage')
       assert.equal(added.connector.enabled, true)
@@ -1213,7 +1256,7 @@ test.sequential(
           }>
         }>(['inbox', 'source', 'list', '--vault', fixture.vaultRoot], services),
       )
-      assert.equal(listed.configPath, '.runtime/inboxd/config.json')
+      assert.equal(listed.configPath, '.runtime/operations/inbox/config.json')
       assert.equal(listed.connectors.length, 1)
       assert.equal(listed.connectors[0]?.id, 'imessage:self')
 
@@ -1234,8 +1277,8 @@ test.sequential(
       )
       assert.equal(doctor.ok, true)
       assert.equal(doctor.target, null)
-      assert.equal(doctor.configPath, '.runtime/inboxd/config.json')
-      assert.equal(doctor.databasePath, '.runtime/inboxd.sqlite')
+      assert.equal(doctor.configPath, '.runtime/operations/inbox/config.json')
+      assert.equal(doctor.databasePath, '.runtime/projections/inboxd.sqlite')
       assert.equal(
         doctor.checks.some(
           (check) => check.name === 'connectors' && check.status === 'pass',
@@ -1262,7 +1305,7 @@ test.sequential(
       assert.equal(removed.removed, true)
       assert.equal(removed.connectorId, 'imessage:self')
       assert.equal(removed.connectorCount, 0)
-      assert.equal(removed.configPath, '.runtime/inboxd/config.json')
+      assert.equal(removed.configPath, '.runtime/operations/inbox/config.json')
 
       const config = await readJsonFile<{
         version: number
@@ -1342,11 +1385,11 @@ test.sequential(
         ], services),
       )
 
-      assert.equal(bootstrapResult.init.runtimeDirectory, '.runtime/inboxd')
-      assert.equal(bootstrapResult.init.databasePath, '.runtime/inboxd.sqlite')
-      assert.equal(bootstrapResult.init.configPath, '.runtime/inboxd/config.json')
+      assert.equal(bootstrapResult.init.runtimeDirectory, '.runtime/operations/inbox')
+      assert.equal(bootstrapResult.init.databasePath, '.runtime/projections/inboxd.sqlite')
+      assert.equal(bootstrapResult.init.configPath, '.runtime/operations/inbox/config.json')
       assert.equal(
-        bootstrapResult.init.createdPaths.includes('.runtime/inboxd/config.json'),
+        bootstrapResult.init.createdPaths.includes('.runtime/operations/inbox/config.json'),
         true,
       )
       assert.equal(bootstrapResult.init.rebuiltCaptures, 257)
@@ -2990,9 +3033,9 @@ test.sequential(
             stoppedAt: null,
             status: 'running',
             connectorIds: ['imessage:self'],
-            statePath: '.runtime/inboxd/state.json',
-            configPath: '.runtime/inboxd/config.json',
-            databasePath: '.runtime/inboxd.sqlite',
+            statePath: '.runtime/operations/inbox/state.json',
+            configPath: '.runtime/operations/inbox/config.json',
+            databasePath: '.runtime/projections/inboxd.sqlite',
             message: null,
           },
           null,
@@ -3017,11 +3060,7 @@ test.sequential(
       assert.equal(staleState.stale, true)
       assert.equal(staleState.status, 'stale')
 
-      const persistedStaleState = await readJsonFile<{
-        stale: boolean
-        status: string
-        message: string | null
-      }>(paths.inboxStatePath)
+      const persistedStaleState = await readPersistedInboxDaemonState(paths.inboxStatePath)
       assert.equal(persistedStaleState.stale, true)
       assert.equal(persistedStaleState.status, 'stale')
       assert.match(
@@ -3041,9 +3080,9 @@ test.sequential(
             stoppedAt: null,
             status: 'idle',
             connectorIds: [],
-            statePath: '.runtime/inboxd/state.json',
-            configPath: '.runtime/inboxd/config.json',
-            databasePath: '.runtime/inboxd.sqlite',
+            statePath: '.runtime/operations/inbox/state.json',
+            configPath: '.runtime/operations/inbox/config.json',
+            databasePath: '.runtime/projections/inboxd.sqlite',
             message: null,
           },
           null,
@@ -3117,9 +3156,9 @@ test.sequential('stop reports not-running and timeout edge cases', async () => {
           stoppedAt: null,
           status: 'running',
           connectorIds: ['imessage:self'],
-          statePath: '.runtime/inboxd/state.json',
-          configPath: '.runtime/inboxd/config.json',
-          databasePath: '.runtime/inboxd.sqlite',
+          statePath: '.runtime/operations/inbox/state.json',
+          configPath: '.runtime/operations/inbox/config.json',
+          databasePath: '.runtime/projections/inboxd.sqlite',
           message: null,
         },
         null,
@@ -3195,9 +3234,9 @@ test.sequential('stop force-kills a stubborn live daemon and returns stale state
           stoppedAt: null,
           status: 'running',
           connectorIds: ['imessage:self'],
-          statePath: '.runtime/inboxd/state.json',
-          configPath: '.runtime/inboxd/config.json',
-          databasePath: '.runtime/inboxd.sqlite',
+          statePath: '.runtime/operations/inbox/state.json',
+          configPath: '.runtime/operations/inbox/config.json',
+          databasePath: '.runtime/projections/inboxd.sqlite',
           message: null,
         },
         null,
@@ -3272,9 +3311,9 @@ test.sequential('stop ignores missing suspended pid recovery signals and still r
           stoppedAt: null,
           status: 'running',
           connectorIds: ['imessage:self'],
-          statePath: '.runtime/inboxd/state.json',
-          configPath: '.runtime/inboxd/config.json',
-          databasePath: '.runtime/inboxd.sqlite',
+          statePath: '.runtime/operations/inbox/state.json',
+          configPath: '.runtime/operations/inbox/config.json',
+          databasePath: '.runtime/projections/inboxd.sqlite',
           message: null,
         },
         null,

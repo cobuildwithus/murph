@@ -55,7 +55,70 @@ export interface HealthEntityRegistryLinkMetadata {
   cardinality: HealthEntityRegistryLinkCardinality;
 }
 
+export type HealthEntityRegistryProjectionSortBehavior = "gene-title" | "priority-title" | "title";
+
+export interface HealthEntityRegistryProjectionHelpers {
+  firstBoolean(
+    source: Record<string, unknown>,
+    keys: readonly string[],
+  ): boolean | null;
+  firstNumber(
+    source: Record<string, unknown>,
+    keys: readonly string[],
+  ): number | null;
+  firstObject(
+    source: Record<string, unknown>,
+    keys: readonly string[],
+  ): Record<string, unknown> | null;
+  firstString(
+    source: Record<string, unknown>,
+    keys: readonly string[],
+  ): string | null;
+  firstStringArray(
+    source: Record<string, unknown>,
+    keys: readonly string[],
+  ): string[];
+}
+
+export interface HealthEntityRegistryProjectionContext {
+  attributes: Record<string, unknown>;
+  helpers: HealthEntityRegistryProjectionHelpers;
+  relativePath: string;
+}
+
+export interface HealthEntityRegistryProjectionMetadata {
+  sortBehavior?: HealthEntityRegistryProjectionSortBehavior;
+  transform(
+    context: HealthEntityRegistryProjectionContext,
+  ): Record<string, unknown>;
+}
+
+export interface HealthEntityRegistryCommandMetadata {
+  commandDescription?: string;
+  payloadFile?: string;
+  runtimeMethodName?: string;
+}
+
+export interface ResolvedHealthEntityRegistryCommandMetadata {
+  commandDescription: string;
+  commandName: HealthEntityRegistryKind;
+  listServiceMethodName: string;
+  listStatusDescription?: string;
+  payloadFile: string;
+  runtimeListMethodName: string;
+  runtimeMethodName: string;
+  runtimeShowMethodName: string;
+  scaffoldServiceMethodName: string;
+  showId: {
+    description: string;
+    example: string;
+  };
+  showServiceMethodName: string;
+  upsertServiceMethodName: string;
+}
+
 export interface HealthEntityRegistryMetadata {
+  command?: HealthEntityRegistryCommandMetadata;
   directory: string;
   idField?: string;
   idKeys: readonly string[];
@@ -63,8 +126,9 @@ export interface HealthEntityRegistryMetadata {
   titleKeys: readonly string[];
   statusKeys: readonly string[];
   frontmatterSchema?: ZodTypeAny;
-  upsertPayloadSchema?: ZodTypeAny;
   patchPayloadSchema?: ZodTypeAny;
+  projection?: HealthEntityRegistryProjectionMetadata;
+  upsertPayloadSchema?: ZodTypeAny;
   relationKeys?: readonly HealthEntityRegistryLinkMetadata[];
 }
 
@@ -104,6 +168,57 @@ const RELATED_IDS_COMPATIBILITY_RELATION: HealthEntityRegistryLinkMetadata = {
   keys: ["relatedIds"],
   cardinality: "many",
 };
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function projectSupplementIngredients(
+  value: unknown,
+): Array<{
+  compound: string;
+  label: string | null;
+  amount: number | null;
+  unit: string | null;
+  active: boolean;
+  note: string | null;
+}> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((entry) => {
+    if (!isPlainObject(entry)) {
+      return [];
+    }
+
+    const compound = typeof entry.compound === "string" ? entry.compound.trim() : "";
+    if (!compound) {
+      return [];
+    }
+
+    return [{
+      compound,
+      label:
+        typeof entry.label === "string" && entry.label.trim().length > 0
+          ? entry.label.trim()
+          : null,
+      amount:
+        typeof entry.amount === "number" && Number.isFinite(entry.amount)
+          ? entry.amount
+          : null,
+      unit:
+        typeof entry.unit === "string" && entry.unit.trim().length > 0
+          ? entry.unit.trim()
+          : null,
+      active: typeof entry.active === "boolean" ? entry.active : true,
+      note:
+        typeof entry.note === "string" && entry.note.trim().length > 0
+          ? entry.note.trim()
+          : null,
+    }];
+  });
+}
 
 const checkedHealthEntityDefinitions = [
   {
@@ -150,6 +265,23 @@ const checkedHealthEntityDefinitions = [
       directory: "bank/goals",
       idField: "goalId",
       patchPayloadSchema: goalUpsertPatchPayloadSchema,
+      projection: {
+        sortBehavior: "priority-title",
+        transform({ attributes, helpers }) {
+          const window = helpers.firstObject(attributes, ["window"]);
+
+          return {
+            horizon: helpers.firstString(attributes, ["horizon"]),
+            priority: helpers.firstNumber(attributes, ["priority"]),
+            windowStartAt: window ? helpers.firstString(window, ["startAt"]) : null,
+            windowTargetAt: window ? helpers.firstString(window, ["targetAt"]) : null,
+            parentGoalId: helpers.firstString(attributes, ["parentGoalId"]),
+            relatedGoalIds: helpers.firstStringArray(attributes, ["relatedGoalIds"]),
+            relatedExperimentIds: helpers.firstStringArray(attributes, ["relatedExperimentIds"]),
+            domains: helpers.firstStringArray(attributes, ["domains"]),
+          };
+        },
+      },
       upsertPayloadSchema: goalUpsertPayloadSchema,
       relationKeys: [
         RELATED_IDS_COMPATIBILITY_RELATION,
@@ -190,6 +322,22 @@ const checkedHealthEntityDefinitions = [
       directory: "bank/conditions",
       idField: "conditionId",
       patchPayloadSchema: conditionUpsertPatchPayloadSchema,
+      projection: {
+        sortBehavior: "title",
+        transform({ attributes, helpers }) {
+          return {
+            clinicalStatus: helpers.firstString(attributes, ["clinicalStatus"]),
+            verificationStatus: helpers.firstString(attributes, ["verificationStatus"]),
+            assertedOn: helpers.firstString(attributes, ["assertedOn"]),
+            resolvedOn: helpers.firstString(attributes, ["resolvedOn"]),
+            severity: helpers.firstString(attributes, ["severity"]),
+            bodySites: helpers.firstStringArray(attributes, ["bodySites"]),
+            relatedGoalIds: helpers.firstStringArray(attributes, ["relatedGoalIds"]),
+            relatedProtocolIds: helpers.firstStringArray(attributes, ["relatedProtocolIds"]),
+            note: helpers.firstString(attributes, ["note"]),
+          };
+        },
+      },
       upsertPayloadSchema: conditionUpsertPayloadSchema,
       relationKeys: [
         RELATED_IDS_COMPATIBILITY_RELATION,
@@ -224,6 +372,19 @@ const checkedHealthEntityDefinitions = [
       directory: "bank/allergies",
       idField: "allergyId",
       patchPayloadSchema: allergyUpsertPatchPayloadSchema,
+      projection: {
+        sortBehavior: "title",
+        transform({ attributes, helpers }) {
+          return {
+            substance: helpers.firstString(attributes, ["substance"]),
+            criticality: helpers.firstString(attributes, ["criticality"]),
+            reaction: helpers.firstString(attributes, ["reaction"]),
+            recordedOn: helpers.firstString(attributes, ["recordedOn"]),
+            relatedConditionIds: helpers.firstStringArray(attributes, ["relatedConditionIds"]),
+            note: helpers.firstString(attributes, ["note"]),
+          };
+        },
+      },
       upsertPayloadSchema: allergyUpsertPayloadSchema,
       relationKeys: [
         RELATED_IDS_COMPATIBILITY_RELATION,
@@ -251,9 +412,34 @@ const checkedHealthEntityDefinitions = [
       group: "sleep",
     },
     registry: {
+      command: {
+        runtimeMethodName: "upsertProtocolItem",
+      },
       frontmatterSchema: protocolFrontmatterSchema,
       directory: "bank/protocols",
       idField: "protocolId",
+      projection: {
+        transform({ attributes, helpers, relativePath }) {
+          return {
+            kind: helpers.firstString(attributes, ["kind"]),
+            startedOn: helpers.firstString(attributes, ["startedOn"]),
+            stoppedOn: helpers.firstString(attributes, ["stoppedOn"]),
+            substance: helpers.firstString(attributes, ["substance"]),
+            dose: helpers.firstNumber(attributes, ["dose"]),
+            unit: helpers.firstString(attributes, ["unit"]),
+            schedule: helpers.firstString(attributes, ["schedule"]),
+            brand: helpers.firstString(attributes, ["brand"]),
+            manufacturer: helpers.firstString(attributes, ["manufacturer"]),
+            servingSize: helpers.firstString(attributes, ["servingSize"]),
+            ingredients: projectSupplementIngredients(attributes.ingredients),
+            relatedGoalIds: helpers.firstStringArray(attributes, ["relatedGoalIds", "goalIds"]),
+            relatedConditionIds: helpers.firstStringArray(attributes, ["relatedConditionIds", "conditionIds"]),
+            group:
+              helpers.firstString(attributes, ["group"])
+              ?? deriveProtocolGroupFromRelativePath(relativePath),
+          };
+        },
+      },
       upsertPayloadSchema: protocolUpsertPayloadSchema,
       relationKeys: [
         RELATED_IDS_COMPATIBILITY_RELATION,
@@ -346,6 +532,18 @@ const checkedHealthEntityDefinitions = [
       directory: "bank/family",
       idField: "familyMemberId",
       patchPayloadSchema: familyMemberUpsertPatchPayloadSchema,
+      projection: {
+        sortBehavior: "title",
+        transform({ attributes, helpers }) {
+          return {
+            relationship: helpers.firstString(attributes, ["relationship"]),
+            deceased: helpers.firstBoolean(attributes, ["deceased"]),
+            conditions: helpers.firstStringArray(attributes, ["conditions"]),
+            relatedVariantIds: helpers.firstStringArray(attributes, ["relatedVariantIds"]),
+            note: helpers.firstString(attributes, ["note"]),
+          };
+        },
+      },
       upsertPayloadSchema: familyMemberUpsertPayloadSchema,
       relationKeys: [
         RELATED_IDS_COMPATIBILITY_RELATION,
@@ -375,6 +573,19 @@ const checkedHealthEntityDefinitions = [
       directory: "bank/genetics",
       idField: "variantId",
       patchPayloadSchema: geneticVariantUpsertPatchPayloadSchema,
+      projection: {
+        sortBehavior: "gene-title",
+        transform({ attributes, helpers }) {
+          return {
+            gene: helpers.firstString(attributes, ["gene"]),
+            zygosity: helpers.firstString(attributes, ["zygosity"]),
+            significance: helpers.firstString(attributes, ["significance"]),
+            inheritance: helpers.firstString(attributes, ["inheritance"]),
+            sourceFamilyMemberIds: helpers.firstStringArray(attributes, ["sourceFamilyMemberIds"]),
+            note: helpers.firstString(attributes, ["note"]),
+          };
+        },
+      },
       upsertPayloadSchema: geneticVariantUpsertPayloadSchema,
       relationKeys: [
         RELATED_IDS_COMPATIBILITY_RELATION,
@@ -441,6 +652,53 @@ export function extractHealthEntityRegistryRelatedIds(
   return extractRegistryRelatedIds(extractHealthEntityRegistryLinks(kind, attributes));
 }
 
+export function getHealthEntityRegistryProjectionMetadata(
+  kind: HealthEntityRegistryKind,
+): HealthEntityRegistryProjectionMetadata {
+  const projection = requireHealthEntityRegistryDefinition(kind).registry.projection;
+
+  if (!projection) {
+    throw new Error(`Health entity "${kind}" is missing shared registry projection metadata.`);
+  }
+
+  return projection;
+}
+
+export function getHealthEntityRegistryCommandMetadata(
+  kind: HealthEntityRegistryKind,
+): ResolvedHealthEntityRegistryCommandMetadata {
+  const definition = requireHealthEntityRegistryDefinition(kind);
+  const command = definition.registry.command;
+  const singularMethodStem = toHealthRegistryMethodStem(definition.noun);
+  const pluralMethodStem = toHealthRegistryMethodStem(definition.plural);
+
+  return {
+    commandDescription:
+      command?.commandDescription
+      ?? `${capitalize(definition.noun)} registry commands for the health extension surface.`,
+    commandName: kind,
+    listServiceMethodName: `list${pluralMethodStem}`,
+    ...(definition.registry.statusKeys.length > 0
+      ? {
+          listStatusDescription: `Optional ${toHealthRegistryStatusLabel(definition.noun)} status to filter by.`,
+        }
+      : {}),
+    payloadFile: command?.payloadFile ?? `${kind}.json`,
+    runtimeListMethodName: `list${pluralMethodStem}`,
+    runtimeMethodName:
+      command?.runtimeMethodName
+      ?? `upsert${singularMethodStem}`,
+    runtimeShowMethodName: `show${singularMethodStem}`,
+    scaffoldServiceMethodName: `scaffold${singularMethodStem}`,
+    showId: {
+      description: `${capitalize(definition.noun)} id or slug to show.`,
+      example: `<${toCommandIdExample(definition.noun)}-id>`,
+    },
+    showServiceMethodName: `show${singularMethodStem}`,
+    upsertServiceMethodName: `upsert${singularMethodStem}`,
+  };
+}
+
 export function deriveProtocolGroupFromRelativePath(
   relativePath: string,
   rootDirectory = "bank/protocols",
@@ -470,6 +728,27 @@ function normalizeHealthEntityRelativePath(value: string): string {
     .replace(/\/+/gu, "/")
     .replace(/^\.\//u, "")
     .replace(/^\/+|\/+$/gu, "");
+}
+
+function capitalize(value: string): string {
+  return value.length > 0 ? `${value[0]?.toUpperCase()}${value.slice(1)}` : value;
+}
+
+function toHealthRegistryMethodStem(value: string): string {
+  return value
+    .trim()
+    .split(/[\s_-]+/u)
+    .filter(Boolean)
+    .map(capitalize)
+    .join("");
+}
+
+function toHealthRegistryStatusLabel(value: string): string {
+  return value.trim().replace(/[\s_]+/gu, "-");
+}
+
+function toCommandIdExample(noun: string): string {
+  return noun.trim().replace(/\s+/gu, "-");
 }
 
 export const goalRegistryEntityDefinition = requireHealthEntityRegistryDefinition("goal");

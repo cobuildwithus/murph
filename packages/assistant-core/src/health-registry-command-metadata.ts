@@ -1,5 +1,5 @@
 import {
-  requireHealthEntityRegistryDefinition,
+  getHealthEntityRegistryCommandMetadata as getSharedHealthEntityRegistryCommandMetadata,
   type HealthEntityRegistryKind,
 } from "@murphai/contracts";
 
@@ -33,36 +33,6 @@ export interface HealthRegistryCommandMetadata {
 
 export type HealthRegistryCommandKind = HealthEntityRegistryKind;
 
-interface HealthRegistryCommandDerivation {
-  commandDescription: string;
-  runtimeMethod?: HealthCoreRuntimeMethodName;
-}
-
-const healthRegistryCommandDerivationByKind: Record<
-  HealthRegistryCommandKind,
-  HealthRegistryCommandDerivation
-> = {
-  goal: {
-    commandDescription: "Goal registry commands for the health extension surface.",
-  },
-  condition: {
-    commandDescription: "Condition registry commands for the health extension surface.",
-  },
-  allergy: {
-    commandDescription: "Allergy registry commands for the health extension surface.",
-  },
-  protocol: {
-    commandDescription: "Protocol registry commands for the health extension surface.",
-    runtimeMethod: "upsertProtocolItem",
-  },
-  family: {
-    commandDescription: "Family registry commands for the health extension surface.",
-  },
-  genetics: {
-    commandDescription: "Genetic variant commands for the health extension surface.",
-  },
-};
-
 const healthRegistryCommandMetadataByKind = {
   goal: buildHealthRegistryCommandMetadata("goal"),
   condition: buildHealthRegistryCommandMetadata("condition"),
@@ -81,55 +51,26 @@ export function getHealthRegistryCommandMetadata(
 function buildHealthRegistryCommandMetadata(
   kind: HealthRegistryCommandKind,
 ): HealthRegistryCommandMetadata {
-  const definition = requireHealthEntityRegistryDefinition(kind);
-  const derivation = healthRegistryCommandDerivationByKind[kind];
-  const singularMethodStem = toHealthRegistryMethodStem(definition.noun);
-  const pluralMethodStem = toHealthRegistryMethodStem(definition.plural);
+  const command = getSharedHealthEntityRegistryCommandMetadata(kind);
 
   return {
-    commandDescription: derivation.commandDescription,
-    commandName: kind,
-    listServiceMethod: `list${pluralMethodStem}` as HealthQueryListServiceMethodName,
-    ...(definition.registry.statusKeys.length > 0
+    commandDescription: command.commandDescription,
+    commandName: command.commandName,
+    listServiceMethod: command.listServiceMethodName as HealthQueryListServiceMethodName,
+    ...(command.listStatusDescription
       ? {
-          listStatusDescription: `Optional ${toHealthRegistryStatusLabel(definition.noun)} status to filter by.`,
+          listStatusDescription: command.listStatusDescription,
         }
       : {}),
-    payloadFile: `${kind}.json`,
-    runtimeListMethod: `list${pluralMethodStem}` as HealthQueryRuntimeListMethodName,
-    runtimeMethod:
-      derivation.runtimeMethod
-      ?? (`upsert${singularMethodStem}` as HealthCoreRuntimeMethodName),
-    runtimeShowMethod: `show${singularMethodStem}` as HealthQueryRuntimeShowMethodName,
-    scaffoldServiceMethod: `scaffold${singularMethodStem}` as HealthCoreScaffoldServiceMethodName,
-    showId: {
-      description: `${capitalize(definition.noun)} id or slug to show.`,
-      example: `<${toCommandIdExample(definition.noun)}-id>`,
-    },
-    showServiceMethod: `show${singularMethodStem}` as HealthQueryShowServiceMethodName,
-    upsertServiceMethod: `upsert${singularMethodStem}` as HealthCoreUpsertServiceMethodName,
+    payloadFile: command.payloadFile,
+    runtimeListMethod: command.runtimeListMethodName as HealthQueryRuntimeListMethodName,
+    runtimeMethod: command.runtimeMethodName as HealthCoreRuntimeMethodName,
+    runtimeShowMethod: command.runtimeShowMethodName as HealthQueryRuntimeShowMethodName,
+    scaffoldServiceMethod: command.scaffoldServiceMethodName as HealthCoreScaffoldServiceMethodName,
+    showId: command.showId,
+    showServiceMethod: command.showServiceMethodName as HealthQueryShowServiceMethodName,
+    upsertServiceMethod: command.upsertServiceMethodName as HealthCoreUpsertServiceMethodName,
   };
-}
-
-function capitalize(value: string): string {
-  return value.length > 0 ? `${value[0].toUpperCase()}${value.slice(1)}` : value;
-}
-
-function toHealthRegistryMethodStem(value: string): string {
-  return value
-    .trim()
-    .split(/[\s_-]+/u)
-    .filter(Boolean)
-    .map(capitalize)
-    .join("");
-}
-
-function toHealthRegistryStatusLabel(value: string): string {
-  return value.trim().replace(/[\s_]+/gu, "-");
-}
-
-function toCommandIdExample(noun: string): string {
-  return noun.trim().replace(/\s+/gu, "-");
 }
 
 export { healthRegistryCommandMetadataByKind };

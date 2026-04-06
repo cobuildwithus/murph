@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { toVaultRelativePath } from '@murphai/runtime-state/node'
+import {
+  promoteLegacyLocalStateDirectory,
+  toVaultRelativePath,
+} from '@murphai/runtime-state/node'
 import { VaultCliError } from '../vault-cli-errors.js'
 import type {
   DeviceDaemonDependencies,
@@ -72,11 +75,19 @@ export async function readDeviceDaemonState(
   try {
     text = await dependencies.readFile(paths.launcherStatePath)
   } catch (error) {
-    if (isMissingFileError(error)) {
-      return null
+    if (!isMissingFileError(error)) {
+      throw error
     }
 
-    throw error
+    try {
+      text = await dependencies.readFile(paths.legacyLauncherStatePath)
+    } catch (legacyError) {
+      if (isMissingFileError(legacyError)) {
+        return null
+      }
+
+      throw legacyError
+    }
   }
 
   let parsed: unknown
@@ -127,6 +138,10 @@ export async function writeDeviceDaemonState(
   state: DeviceDaemonStateRecord,
   dependencies: Pick<DeviceDaemonDependencies, 'mkdir' | 'writeFile' | 'chmod'>,
 ): Promise<void> {
+  await promoteLegacyLocalStateDirectory({
+    currentPath: path.dirname(paths.launcherStatePath),
+    legacyPath: path.dirname(paths.legacyLauncherStatePath),
+  })
   await ensurePrivateDeviceDaemonDirectory(
     path.dirname(paths.launcherStatePath),
     dependencies,
@@ -144,6 +159,10 @@ export async function writeManagedControlToken(
   dependencies: Pick<DeviceDaemonDependencies, 'mkdir' | 'writeFile' | 'chmod'>,
 ): Promise<void> {
   const controlTokenPath = resolveManagedControlTokenPath(paths)
+  await promoteLegacyLocalStateDirectory({
+    currentPath: path.dirname(controlTokenPath),
+    legacyPath: path.dirname(resolveManagedControlTokenLegacyPath(paths)),
+  })
   await ensurePrivateDeviceDaemonDirectory(
     path.dirname(controlTokenPath),
     dependencies,
@@ -156,19 +175,31 @@ export async function removeManagedControlToken(
   paths: DeviceDaemonPaths,
   dependencies: Pick<DeviceDaemonDependencies, 'removeFile'>,
 ): Promise<void> {
-  await dependencies.removeFile(resolveManagedControlTokenPath(paths))
+  await dependencies.removeFile(resolveManagedControlTokenPath(paths)).catch(() => undefined)
+  await dependencies.removeFile(resolveManagedControlTokenLegacyPath(paths)).catch(() => undefined)
 }
 
 export function resolveManagedControlToken(paths: DeviceDaemonPaths): string | null {
-  try {
-    return readFileSync(resolveManagedControlTokenPath(paths), 'utf8').trim() || null
-  } catch {
-    return null
+  for (const controlTokenPath of [
+    resolveManagedControlTokenPath(paths),
+    resolveManagedControlTokenLegacyPath(paths),
+  ]) {
+    try {
+      return readFileSync(controlTokenPath, 'utf8').trim() || null
+    } catch {
+      continue
+    }
   }
+
+  return null
 }
 
 function resolveManagedControlTokenPath(paths: DeviceDaemonPaths): string {
   return path.join(path.dirname(paths.launcherStatePath), MANAGED_CONTROL_TOKEN_FILE_NAME)
+}
+
+function resolveManagedControlTokenLegacyPath(paths: DeviceDaemonPaths): string {
+  return path.join(path.dirname(paths.legacyLauncherStatePath), MANAGED_CONTROL_TOKEN_FILE_NAME)
 }
 
 async function ensurePrivateDeviceDaemonDirectory(

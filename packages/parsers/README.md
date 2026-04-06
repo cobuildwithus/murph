@@ -2,12 +2,7 @@
 
 Local-first multimedia parsing for inbox attachments and other vault-backed media.
 
-This package consumes attachment-level parse jobs from the inbox runtime,
-selects the best available local parser from a deterministic priority stack,
-and writes normalized derived artifacts under `derived/inbox/...` for later
-chat/model layers. The default ordering is text/native CLI first, with raw-PDF
-routing fallback handled in the model layer rather than by a second PDF OCR
-pass, and remote APIs nowhere in the default stack.
+This package consumes attachment-level parse jobs from the inbox runtime, selects the best available local parser from a deterministic priority stack, and writes normalized derived artifacts under `derived/inbox/...` for later chat/model layers. The default ordering is text/native CLI first, with raw-PDF routing fallback handled in the model layer rather than by a second PDF OCR pass, and remote APIs nowhere in the default stack.
 
 ## Current default stack
 
@@ -35,6 +30,6 @@ This keeps parsing additive to `@murphai/inboxd`: raw inbox evidence remains can
 
 ## Toolchain config and discovery
 
-- `writeParserToolchainConfig(...)` persists local command and model-path overrides under `<vault>/.runtime/parsers/toolchain.json`
+- `writeParserToolchainConfig(...)` persists local command and model-path overrides under `<vault>/.runtime/operations/parsers/toolchain.json`
 - `discoverParserToolchain(...)` reports which local tools are currently available plus where each setting came from
 - `createConfiguredParserRegistry(...)` builds a default registry from the discovered toolchain state

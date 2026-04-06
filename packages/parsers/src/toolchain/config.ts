@@ -1,9 +1,14 @@
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
-import { resolveRuntimePaths } from "@murphai/runtime-state/node";
+import {
+  hasLocalStatePath,
+  promoteLegacyLocalStateDirectory,
+  readLocalStateTextFileWithFallback,
+  resolveParserRuntimePaths,
+} from "@murphai/runtime-state/node";
 
-import { ensureDirectory, fileExists, readUtf8IfExists } from "../shared.js";
+import { ensureDirectory } from "../shared.js";
 
 export const PARSER_TOOLCHAIN_VERSION = 1 as const;
 
@@ -23,7 +28,9 @@ export interface ParserToolchainConfig {
 export interface ParserToolchainPaths {
   runtimeRoot: string;
   parsersRoot: string;
+  legacyParsersRoot: string;
   configPath: string;
+  legacyConfigPath: string;
 }
 
 export interface WriteParserToolchainConfigInput {
@@ -33,13 +40,14 @@ export interface WriteParserToolchainConfigInput {
 }
 
 export function getParserToolchainPaths(vaultRoot: string): ParserToolchainPaths {
-  const runtimePaths = resolveRuntimePaths(vaultRoot);
-  const parsersRoot = path.join(runtimePaths.runtimeRoot, "parsers");
+  const runtimePaths = resolveParserRuntimePaths(vaultRoot);
 
   return {
     runtimeRoot: runtimePaths.runtimeRoot,
-    parsersRoot,
-    configPath: path.join(parsersRoot, "toolchain.json"),
+    parsersRoot: runtimePaths.parserRuntimeRoot,
+    legacyParsersRoot: runtimePaths.parserRuntimeLegacyRoot,
+    configPath: runtimePaths.parserToolchainConfigPath,
+    legacyConfigPath: runtimePaths.parserToolchainConfigLegacyPath,
   };
 }
 
@@ -47,21 +55,23 @@ export async function readParserToolchainConfig(
   vaultRoot: string,
 ): Promise<{ config: ParserToolchainConfig; configPath: string } | null> {
   const paths = getParserToolchainPaths(vaultRoot);
-  if (!(await fileExists(paths.configPath))) {
+  if (!(await hasLocalStatePath({
+    currentPath: paths.configPath,
+    legacyPath: paths.legacyConfigPath,
+  }))) {
     return null;
   }
 
-  const raw = await readUtf8IfExists(paths.configPath);
-  if (raw === null) {
-    return null;
-  }
-
+  const { path: configPath, text: raw } = await readLocalStateTextFileWithFallback({
+    currentPath: paths.configPath,
+    legacyPath: paths.legacyConfigPath,
+  });
   const config = parseParserToolchainConfig(JSON.parse(raw) as unknown);
   await validateParserToolchainPaths(vaultRoot, config.tools);
 
   return {
     config,
-    configPath: paths.configPath,
+    configPath,
   };
 }
 
@@ -78,6 +88,10 @@ export async function writeParserToolchainConfig(
     tools: mergedTools,
   };
 
+  await promoteLegacyLocalStateDirectory({
+    currentPath: paths.parsersRoot,
+    legacyPath: paths.legacyParsersRoot,
+  });
   await ensureDirectory(paths.parsersRoot);
   await fs.writeFile(
     paths.configPath,

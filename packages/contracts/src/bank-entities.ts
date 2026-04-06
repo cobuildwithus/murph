@@ -44,8 +44,10 @@ export type BankEntityRegistryLink = HealthEntityRegistryLink;
 export type BankEntityRegistryLinkCardinality = HealthEntityRegistryLinkCardinality;
 export type BankEntityRegistryLinkMetadata = HealthEntityRegistryLinkMetadata;
 
-// Query-owned sort/materialization metadata lives in @murphai/query;
-// contracts only describe canonical registry layout and validation.
+// Health-backed bank entities inherit shared registry command/projection metadata
+// from `health-entities.ts`. Non-health bank families still add any extra
+// read-model projection metadata in their owning adapter layers until they are
+// ported onto the same shared definition shape.
 export interface BankEntityRegistryMetadata extends HealthEntityRegistryMetadata {}
 
 export type BankEntityDefinitionWithRegistry = BankEntityDefinition;

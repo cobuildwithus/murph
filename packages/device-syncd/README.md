@@ -14,8 +14,8 @@ For non-daemon callers, `@murphai/device-syncd/client` is the canonical shared c
 What it does:
 - serves a provider-agnostic local control plane for CLI and web auth flows
 - owns OAuth connection state
-- stores encrypted provider tokens in SQLite under `.runtime/device-syncd.sqlite`
-- keeps `.runtime/device-syncd.sqlite` plus `.runtime/device-syncd/**` local-only; those control, cursor, and log artifacts are not part of hosted `agent-state` bundles
+- stores encrypted provider tokens in SQLite under `.runtime/operations/device-sync/state.sqlite`
+- keeps `.runtime/operations/device-sync/**` local-only; those secrets, cursors, launcher artifacts, and logs are excluded from hosted workspace snapshots because the hosted lane has its own Cloudflare-owned device-sync control plane and token escrow
 - accepts provider webhooks when a provider supports them
 - runs background backfill and reconcile jobs
 - serializes active jobs per account so rotating refresh-token flows do not race
@@ -118,59 +118,6 @@ Oura settings:
 ## Run
 
 ```bash
-murph device daemon start --vault ./vault
-```
-
-Manual direct execution remains available:
-
-```bash
+# from the repo root
 node packages/device-syncd/dist/bin.js
 ```
-
-The published bin name is also `murph-device-syncd`.
-
-## Control-plane clients
-
-- `@murphai/device-syncd/client` is the canonical shared client/helper surface for device-sync control-plane callers
-- `@murphai/device-syncd/public-ingress` is the canonical shared callback/webhook ingress surface for hosted or alternate HTTP adapters
-- `@murphai/device-syncd` stays focused on the daemon/runtime surface rather than duplicating the shared ingress exports
-- `vault-cli device ...` can auto-start and reuse this daemon for the selected vault, or it can target an explicit control plane through `DEVICE_SYNC_BASE_URL`
-- `vault-cli` authenticates local control routes with `DEVICE_SYNC_CONTROL_TOKEN`
-- cross-origin `returnTo` URLs are accepted only when their origin appears in `DEVICE_SYNC_ALLOWED_RETURN_ORIGINS`; relative paths remain allowed by default
-
-## HTTP routes
-
-Control routes: loopback-only plus `Authorization: Bearer <token>`
-- `GET /healthz`
-- `GET /providers`
-- `GET /connect/:provider?returnTo=/settings/devices`
-- `POST /providers/:provider/connect`
-- `GET /accounts`
-- `GET /accounts/:id`
-- `POST /accounts/:id/reconcile`
-- `POST /accounts/:id/disconnect`
-
-Public routes: keep them on localhost unless you explicitly expose a separate callback/webhook listener
-- `GET /oauth/:provider/callback`
-- `GET /webhooks/:provider` for provider webhook verification/health checks (`GET /webhooks/oura` answers Oura's verification challenge when configured)
-- `POST /webhooks/:provider` for providers that support webhooks
-
-## Notes for Garmin
-
-Murph's Garmin connector is designed for the same connect-once experience as the other first-class wearable providers:
-- the operator registers one Garmin API application once
-- users connect their Garmin account through the normal OAuth PKCE consent flow
-- `device-syncd` keeps the account alive with refresh tokens
-- scheduled backfill and reconcile jobs pull recent Garmin windows directly so sync keeps working without requiring a public Garmin webhook path
-
-## Notes for Oura
-
-Murph's Oura connector is designed for the least-friction user path:
-- the operator registers one Oura API application once
-- users connect their Oura account through the normal OAuth consent flow
-- `device-syncd` keeps the account alive with refresh tokens
-- reconcile jobs poll recent windows so ongoing sync works even without webhook setup
-
-That keeps the user-facing experience at connect once, then auto-sync while still fitting the same provider lifecycle used by WHOOP.
-
-If you do enable Oura webhooks locally, set `OURA_WEBHOOK_VERIFICATION_TOKEN` and expose `GET /webhooks/oura` plus `POST /webhooks/oura` through your public listener or tunnel so Oura can complete its verification handshake.

@@ -1,98 +1,26 @@
 import {
-  deriveProtocolGroupFromRelativePath,
+  getHealthEntityRegistryProjectionMetadata,
   type BankEntityKind,
   type HealthEntityRegistryKind,
+  type HealthEntityRegistryProjectionContext as BankEntityRegistryProjectionContext,
+  type HealthEntityRegistryProjectionHelpers as BankEntityRegistryProjectionHelpers,
+  type HealthEntityRegistryProjectionMetadata as BankRegistryQueryMetadata,
+  type HealthEntityRegistryProjectionSortBehavior as BankEntitySortBehavior,
 } from "@murphai/contracts";
 
-export type BankEntitySortBehavior = "gene-title" | "priority-title" | "title";
-
-export interface BankEntityRegistryProjectionHelpers {
-  firstBoolean(
-    source: Record<string, unknown>,
-    keys: readonly string[],
-  ): boolean | null;
-  firstNumber(
-    source: Record<string, unknown>,
-    keys: readonly string[],
-  ): number | null;
-  firstObject(
-    source: Record<string, unknown>,
-    keys: readonly string[],
-  ): Record<string, unknown> | null;
-  firstString(
-    source: Record<string, unknown>,
-    keys: readonly string[],
-  ): string | null;
-  firstStringArray(
-    source: Record<string, unknown>,
-    keys: readonly string[],
-  ): string[];
-}
-
-export interface BankEntityRegistryProjectionContext {
-  attributes: Record<string, unknown>;
-  helpers: BankEntityRegistryProjectionHelpers;
-  relativePath: string;
-}
-
-export interface BankRegistryQueryMetadata {
-  sortBehavior?: BankEntitySortBehavior;
-  transform(
-    context: BankEntityRegistryProjectionContext,
-  ): Record<string, unknown>;
-}
+export type {
+  BankEntityRegistryProjectionContext,
+  BankEntityRegistryProjectionHelpers,
+  BankEntitySortBehavior,
+  BankRegistryQueryMetadata,
+};
 
 export type HealthRegistryProjectionKind = HealthEntityRegistryKind;
 
+type NonHealthBankEntityKind = Exclude<BankEntityKind, HealthRegistryProjectionKind>;
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function projectSupplementIngredients(
-  value: unknown,
-): Array<{
-  compound: string;
-  label: string | null;
-  amount: number | null;
-  unit: string | null;
-  active: boolean;
-  note: string | null;
-}> {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value.flatMap((entry) => {
-    if (!isPlainObject(entry)) {
-      return [];
-    }
-
-    const compound = typeof entry.compound === "string" ? entry.compound.trim() : "";
-    if (!compound) {
-      return [];
-    }
-
-    return [{
-      compound,
-      label:
-        typeof entry.label === "string" && entry.label.trim().length > 0
-          ? entry.label.trim()
-          : null,
-      amount:
-        typeof entry.amount === "number" && Number.isFinite(entry.amount)
-          ? entry.amount
-          : null,
-      unit:
-        typeof entry.unit === "string" && entry.unit.trim().length > 0
-          ? entry.unit.trim()
-          : null,
-      active: typeof entry.active === "boolean" ? entry.active : true,
-      note:
-        typeof entry.note === "string" && entry.note.trim().length > 0
-          ? entry.note.trim()
-          : null,
-    }];
-  });
 }
 
 function projectFoodAutoLogDaily(
@@ -120,100 +48,7 @@ function projectWorkoutStrengthExercises(
   );
 }
 
-const bankRegistryQueryMetadataByKind: Record<BankEntityKind, BankRegistryQueryMetadata> = {
-  goal: {
-    sortBehavior: "priority-title",
-    transform({ attributes, helpers }) {
-      const window = helpers.firstObject(attributes, ["window"]);
-
-      return {
-        horizon: helpers.firstString(attributes, ["horizon"]),
-        priority: helpers.firstNumber(attributes, ["priority"]),
-        windowStartAt: window ? helpers.firstString(window, ["startAt"]) : null,
-        windowTargetAt: window ? helpers.firstString(window, ["targetAt"]) : null,
-        parentGoalId: helpers.firstString(attributes, ["parentGoalId"]),
-        relatedGoalIds: helpers.firstStringArray(attributes, ["relatedGoalIds"]),
-        relatedExperimentIds: helpers.firstStringArray(attributes, ["relatedExperimentIds"]),
-        domains: helpers.firstStringArray(attributes, ["domains"]),
-      };
-    },
-  },
-  condition: {
-    sortBehavior: "title",
-    transform({ attributes, helpers }) {
-      return {
-        clinicalStatus: helpers.firstString(attributes, ["clinicalStatus"]),
-        verificationStatus: helpers.firstString(attributes, ["verificationStatus"]),
-        assertedOn: helpers.firstString(attributes, ["assertedOn"]),
-        resolvedOn: helpers.firstString(attributes, ["resolvedOn"]),
-        severity: helpers.firstString(attributes, ["severity"]),
-        bodySites: helpers.firstStringArray(attributes, ["bodySites"]),
-        relatedGoalIds: helpers.firstStringArray(attributes, ["relatedGoalIds"]),
-        relatedProtocolIds: helpers.firstStringArray(attributes, ["relatedProtocolIds"]),
-        note: helpers.firstString(attributes, ["note"]),
-      };
-    },
-  },
-  allergy: {
-    sortBehavior: "title",
-    transform({ attributes, helpers }) {
-      return {
-        substance: helpers.firstString(attributes, ["substance"]),
-        criticality: helpers.firstString(attributes, ["criticality"]),
-        reaction: helpers.firstString(attributes, ["reaction"]),
-        recordedOn: helpers.firstString(attributes, ["recordedOn"]),
-        relatedConditionIds: helpers.firstStringArray(attributes, ["relatedConditionIds"]),
-        note: helpers.firstString(attributes, ["note"]),
-      };
-    },
-  },
-  protocol: {
-    transform({ attributes, helpers, relativePath }) {
-      return {
-        kind: helpers.firstString(attributes, ["kind"]),
-        startedOn: helpers.firstString(attributes, ["startedOn"]),
-        stoppedOn: helpers.firstString(attributes, ["stoppedOn"]),
-        substance: helpers.firstString(attributes, ["substance"]),
-        dose: helpers.firstNumber(attributes, ["dose"]),
-        unit: helpers.firstString(attributes, ["unit"]),
-        schedule: helpers.firstString(attributes, ["schedule"]),
-        brand: helpers.firstString(attributes, ["brand"]),
-        manufacturer: helpers.firstString(attributes, ["manufacturer"]),
-        servingSize: helpers.firstString(attributes, ["servingSize"]),
-        ingredients: projectSupplementIngredients(attributes.ingredients),
-        relatedGoalIds: helpers.firstStringArray(attributes, ["relatedGoalIds", "goalIds"]),
-        relatedConditionIds: helpers.firstStringArray(attributes, ["relatedConditionIds", "conditionIds"]),
-        group:
-          helpers.firstString(attributes, ["group"]) ??
-          deriveProtocolGroupFromRelativePath(relativePath),
-      };
-    },
-  },
-  family: {
-    sortBehavior: "title",
-    transform({ attributes, helpers }) {
-      return {
-        relationship: helpers.firstString(attributes, ["relationship"]),
-        deceased: helpers.firstBoolean(attributes, ["deceased"]),
-        conditions: helpers.firstStringArray(attributes, ["conditions"]),
-        relatedVariantIds: helpers.firstStringArray(attributes, ["relatedVariantIds"]),
-        note: helpers.firstString(attributes, ["note"]),
-      };
-    },
-  },
-  genetics: {
-    sortBehavior: "gene-title",
-    transform({ attributes, helpers }) {
-      return {
-        gene: helpers.firstString(attributes, ["gene"]),
-        zygosity: helpers.firstString(attributes, ["zygosity"]),
-        significance: helpers.firstString(attributes, ["significance"]),
-        inheritance: helpers.firstString(attributes, ["inheritance"]),
-        sourceFamilyMemberIds: helpers.firstStringArray(attributes, ["sourceFamilyMemberIds"]),
-        note: helpers.firstString(attributes, ["note"]),
-      };
-    },
-  },
+const bankRegistryQueryMetadataByKind: Record<NonHealthBankEntityKind, BankRegistryQueryMetadata> = {
   food: {
     sortBehavior: "title",
     transform({ attributes, helpers }) {
@@ -288,11 +123,24 @@ const bankRegistryQueryMetadataByKind: Record<BankEntityKind, BankRegistryQueryM
 export function getBankRegistryQueryMetadata(
   kind: BankEntityKind,
 ): BankRegistryQueryMetadata {
-  return bankRegistryQueryMetadataByKind[kind];
+  return isHealthRegistryProjectionKind(kind)
+    ? getHealthEntityRegistryProjectionMetadata(kind)
+    : bankRegistryQueryMetadataByKind[kind];
 }
 
 export function getHealthRegistryQueryMetadata(
   kind: HealthRegistryProjectionKind,
 ): BankRegistryQueryMetadata {
-  return getBankRegistryQueryMetadata(kind);
+  return getHealthEntityRegistryProjectionMetadata(kind);
+}
+
+function isHealthRegistryProjectionKind(
+  kind: BankEntityKind,
+): kind is HealthRegistryProjectionKind {
+  return kind === "goal"
+    || kind === "condition"
+    || kind === "allergy"
+    || kind === "protocol"
+    || kind === "family"
+    || kind === "genetics";
 }

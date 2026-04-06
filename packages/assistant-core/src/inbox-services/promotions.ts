@@ -3,6 +3,10 @@ import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
 import { normalizeOpaquePathSegment, normalizeRelativeVaultPath } from '@murphai/core'
+import {
+  hasLocalStatePath,
+  promoteLegacyLocalStateDirectory,
+} from '@murphai/runtime-state/node'
 import { resolveAssistantVaultPath } from '../assistant-vault-paths.js'
 import {
   inboxPromotionStoreSchema,
@@ -616,7 +620,10 @@ function resolveCapturePromotionNote(
 async function readPromotionStore(
   paths: InboxPaths,
 ): Promise<PromotionStore> {
-  if (!(await fileExists(paths.inboxPromotionsPath))) {
+  if (!(await hasLocalStatePath({
+    currentPath: paths.inboxPromotionsPath,
+    legacyPath: paths.inboxPromotionsLegacyPath,
+  }))) {
     return {
       version: PROMOTION_STORE_VERSION,
       entries: [],
@@ -624,7 +631,10 @@ async function readPromotionStore(
   }
 
   return readJsonWithSchema(
-    paths.inboxPromotionsPath,
+    {
+      currentPath: paths.inboxPromotionsPath,
+      legacyPath: paths.inboxPromotionsLegacyPath,
+    },
     inboxPromotionStoreSchema,
     'INBOX_PROMOTIONS_INVALID',
     'Inbox promotion state is invalid.',
@@ -635,6 +645,10 @@ async function writePromotionStore(
   paths: InboxPaths,
   store: PromotionStore,
 ): Promise<void> {
+  await promoteLegacyLocalStateDirectory({
+    currentPath: paths.inboxRuntimeRoot,
+    legacyPath: paths.inboxRuntimeLegacyRoot,
+  })
   await writeJsonFile(
     paths.inboxPromotionsPath,
     inboxPromotionStoreSchema.parse(store),

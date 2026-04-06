@@ -1,9 +1,11 @@
-import { existsSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import { extractIsoDatePrefix } from "@murphai/contracts";
 import {
   SEARCH_DB_RELATIVE_PATH,
+  applySqliteRuntimeMigrations,
+  hasLocalStatePathSync,
   openSqliteRuntimeDatabase,
+  promoteLegacyLocalStateFileSync,
   resolveRuntimePaths,
   tableExists,
   withImmediateTransaction,
@@ -22,6 +24,8 @@ import {
 } from "./search-shared.ts";
 
 const SEARCH_SCHEMA_VERSION = "murph.search.v1";
+const SEARCH_SQLITE_SCHEMA_VERSION = 1;
+const SQLITE_WAL_COMPANION_SUFFIXES = ["-shm", "-wal"] as const;
 const DEFAULT_CANDIDATE_MULTIPLIER = 25;
 const DEFAULT_MIN_CANDIDATES = 50;
 const MAX_CANDIDATES = 1_000;
@@ -47,6 +51,7 @@ interface SearchDocumentRow {
 interface SearchDatabaseLocation {
   absolutePath: string;
   dbPath: string;
+  legacyAbsolutePath: string;
 }
 
 interface ResolvedSqliteSearchStatus extends SqliteSearchStatus {
@@ -225,6 +230,7 @@ async function searchVaultSqliteWithStatus(
     {
       absolutePath: status.absolutePath,
       dbPath: status.dbPath,
+      legacyAbsolutePath: currentSearchDatabaseLocation(vaultRoot).legacyAbsolutePath,
     },
     {
       create: false,
@@ -335,7 +341,28 @@ function openSearchDatabase(
   location: SearchDatabaseLocation,
   options: { create?: boolean; readOnly?: boolean } = {},
 ): DatabaseSync {
-  return openSqliteRuntimeDatabase(location.absolutePath, options);
+  promoteLegacyLocalStateFileSync({
+    currentPath: location.absolutePath,
+    legacyPath: location.legacyAbsolutePath,
+    companionSuffixes: SQLITE_WAL_COMPANION_SUFFIXES,
+  });
+
+  const database = openSqliteRuntimeDatabase(location.absolutePath, options);
+
+  if (!(options.readOnly ?? false)) {
+    applySqliteRuntimeMigrations(database, {
+      migrations: [{
+        version: SEARCH_SQLITE_SCHEMA_VERSION,
+        migrate(candidateDatabase) {
+          ensureSearchSchema(candidateDatabase);
+        },
+      }],
+      schemaVersion: SEARCH_SQLITE_SCHEMA_VERSION,
+      storeName: "search index",
+    });
+  }
+
+  return database;
 }
 
 function emptySearchStatus(): SqliteSearchStatus {
@@ -354,7 +381,10 @@ function resolveReadableSearchStatus(vaultRoot: string): ResolvedSqliteSearchSta
 }
 
 function readSearchStatus(location: SearchDatabaseLocation): ResolvedSqliteSearchStatus | null {
-  if (!existsSync(location.absolutePath)) {
+  if (!hasLocalStatePathSync({
+    currentPath: location.absolutePath,
+    legacyPath: location.legacyAbsolutePath,
+  })) {
     return null;
   }
 
@@ -390,6 +420,7 @@ function currentSearchDatabaseLocation(vaultRoot: string): SearchDatabaseLocatio
   return {
     absolutePath: runtimePaths.searchDbPath,
     dbPath: SEARCH_DB_RELATIVE_PATH,
+    legacyAbsolutePath: runtimePaths.searchDbLegacyPath,
   };
 }
 

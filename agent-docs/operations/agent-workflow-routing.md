@@ -43,6 +43,25 @@ Then load only the task-relevant docs listed below.
 - Required completion-workflow audit subagent passes are repo-policy pre-authorized. When a repo task reaches that workflow, do not stop only to ask the user for separate permission to run them.
 - `scripts/finish-task` resolves the file/directory paths you pass into exact changed file paths, closes the active plan, moves it to `agent-docs/exec-plans/completed/`, and creates a scoped commit containing the closed-plan artifact plus those resolved paths.
 
+## Persisted State Placement Gate
+
+Before landing any new persisted state, classify it explicitly and place it in the matching root.
+
+| State class | Canonical root | Required rule |
+| --- | --- | --- |
+| Canonical product truth | `vault/**` | Must be writable only through `packages/core`-owned canonical mutation paths. |
+| Durable local operational state | `.runtime/operations/**` | Use for tokens, cursors, daemon/service metadata, local tool config, and other non-canonical state you expect to survive restarts. Also decide whether the state is hostable or local-only. |
+| Rebuildable local projection | `.runtime/projections/**` | Use for indexes, serving stores, and other derived read models that can be rebuilt from canonical evidence plus durable operational state. |
+| Assistant/session state | `assistant-state/**` | Use for durable but non-canonical assistant memory, outbox, diagnostics, receipts, and related session state. |
+| Ephemeral scratch/cache | `.runtime/cache/**` or `.runtime/tmp/**` | Use only for deleteable caches, sockets, temp files, or scratch artifacts. |
+
+Additional gate rules:
+
+- Durable JSON state must include an explicit `schema` or `schemaVersion` seam.
+- Durable SQLite state must include an explicit `PRAGMA user_version` migration seam.
+- Do not hide durable local operational state under generic `.runtime/*` flat files when a typed bucket already exists.
+- Do not put local-only secrets/tokens into hosted snapshots just because they are durable locally; make the hosted-vs-local snapshot policy explicit.
+
 ## Mechanical Vs Policy
 
 - Mechanical/enforced rules live in scripts, tests, lint-like guards, or CI wherever possible.
