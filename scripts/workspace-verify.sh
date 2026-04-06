@@ -462,6 +462,15 @@ prepare_repo_vitest_runtime_artifacts() {
   run_timed_step "CLI package shape verification" pnpm exec tsx "packages/cli/scripts/verify-package-shape.ts"
 }
 
+run_repo_acceptance_guards() {
+  run_timed_step "Dependency policy" run_dependency_policy_check
+  run_timed_step "Workspace boundary checks" run_workspace_boundary_check
+}
+
+run_fixture_smoke_verification() {
+  pnpm exec tsx "e2e/smoke/verify-fixtures.ts" "$@"
+}
+
 run_repo_vitest() {
   MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run --config "vitest.config.ts" --maxWorkers "$repo_vitest_max_workers" "$@"
 }
@@ -478,8 +487,7 @@ run_typecheck() {
 }
 
 run_test() {
-  run_timed_step "Dependency policy" run_dependency_policy_check
-  run_timed_step "Workspace boundary checks" run_workspace_boundary_check
+  run_repo_acceptance_guards
   run_timed_step "Package smoke prerequisites" run_test_packages_common
 
   if [[ "$test_lane_parallel" == "1" ]]; then
@@ -494,7 +502,7 @@ run_test() {
     run_timed_step "Repo Vitest" run_repo_vitest --no-coverage &
     test_packages_pid="$!"
     register_background_pid "$test_packages_pid"
-    run_timed_step "Fixture smoke verification" pnpm exec tsx "e2e/smoke/verify-fixtures.ts" &
+    run_timed_step "Fixture smoke verification" run_fixture_smoke_verification &
     smoke_pid="$!"
     register_background_pid "$smoke_pid"
 
@@ -504,7 +512,7 @@ run_test() {
     run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts
     run_timed_step "Repo Vitest" run_repo_vitest --no-coverage
     run_timed_step "App verification" run_test_apps
-    run_timed_step "Fixture smoke verification" pnpm exec tsx "e2e/smoke/verify-fixtures.ts"
+    run_timed_step "Fixture smoke verification" run_fixture_smoke_verification
   fi
 }
 
@@ -526,8 +534,7 @@ run_test_packages_coverage() {
 }
 
 run_test_coverage() {
-  run_timed_step "Dependency policy" run_dependency_policy_check
-  run_timed_step "Workspace boundary checks" run_workspace_boundary_check
+  run_repo_acceptance_guards
   run_timed_step "Doc gardening" bash "scripts/doc-gardening.sh" --fail-on-issues
 
   if [[ "$test_lane_parallel" == "1" ]]; then
@@ -541,7 +548,7 @@ run_test_coverage() {
     run_timed_step "Package coverage suite" run_test_packages_coverage 1 &
     coverage_pid="$!"
     register_background_pid "$coverage_pid"
-    run_timed_step "Fixture smoke coverage" pnpm exec tsx "e2e/smoke/verify-fixtures.ts" --coverage &
+    run_timed_step "Fixture smoke coverage" run_fixture_smoke_verification --coverage &
     smoke_pid="$!"
     register_background_pid "$smoke_pid"
 
@@ -550,7 +557,7 @@ run_test_coverage() {
   else
     run_timed_step "Package coverage suite" run_test_packages_coverage
     run_timed_step "App verification" run_test_apps
-    run_timed_step "Fixture smoke coverage" pnpm exec tsx "e2e/smoke/verify-fixtures.ts" --coverage
+    run_timed_step "Fixture smoke coverage" run_fixture_smoke_verification --coverage
   fi
 }
 
@@ -558,8 +565,7 @@ run_verify_cli() {
   run_timed_step "Assistant CLI typecheck" pnpm --dir "packages/assistant-cli" typecheck
   run_timed_step "Setup CLI typecheck" pnpm --dir "packages/setup-cli" typecheck
   run_timed_step "CLI package typecheck" pnpm --dir "packages/cli" typecheck
-  run_timed_step "Prepared runtime artifacts" run_test_runtime_artifact_build_with_retry
-  run_timed_step "CLI package shape verification" pnpm exec tsx "packages/cli/scripts/verify-package-shape.ts"
+  run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts
   run_timed_step \
     "CLI workspace Vitest" \
     env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" "${cli_verify_test_files[@]}" --no-coverage --maxWorkers "$repo_vitest_max_workers"
