@@ -26,7 +26,7 @@ import {
 export const INBOX_CAPTURE_LEDGER_DIRECTORY = "ledger/inbox-captures";
 
 export function buildInboxCaptureRecord(input: {
-  auditId: string;
+  auditId?: string;
   eventId: string;
   inbound: InboundCapture;
   stored: StoredCapture;
@@ -36,7 +36,7 @@ export function buildInboxCaptureRecord(input: {
     captureId: input.stored.captureId,
     identityKey: createInboxCaptureIdentityKey(input.inbound),
     eventId: input.eventId,
-    auditId: input.auditId,
+    ...(input.auditId ? { auditId: input.auditId } : {}),
     source: input.inbound.source,
     accountId: input.inbound.accountId ?? null,
     externalId: input.inbound.externalId,

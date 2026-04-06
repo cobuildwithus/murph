@@ -282,7 +282,6 @@
     "captureId",
     "identityKey",
     "eventId",
-    "auditId",
     "source",
     "externalId",
     "thread",

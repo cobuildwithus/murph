@@ -852,7 +852,7 @@ export const inboxCaptureRecordSchema = withContractMetadata(
       captureId: patternedString(INBOX_CAPTURE_ID_PATTERN),
       identityKey: boundedString(1, 1024),
       eventId: idSchema(ID_PREFIXES.event),
-      auditId: idSchema(ID_PREFIXES.audit),
+      auditId: idSchema(ID_PREFIXES.audit).optional(),
       source: boundedString(1, 160),
       accountId: boundedString(1, 255).nullable().optional(),
       externalId: boundedString(1, 255),

@@ -23,7 +23,7 @@ Consumers that need inbox-owned normalization without the full inboxd barrel sho
 - every inbound source normalizes into a single `InboundCapture` envelope
 - raw source evidence is persisted under `raw/inbox/<source>/...`
 - append-only `ledger/inbox-captures/YYYY/YYYY-MM.jsonl` records the authoritative structured inbox-capture trail
-- append-only vault events and audits remain compatibility and audit projections layered on top of that canonical capture log
+- generic events and audits are derived compatibility or reference projections; intake capture itself is canonical without requiring peer event/audit rows
 - inbox SQLite projection state lives under `<vault>/.runtime/projections/inboxd.sqlite`
 - any idempotent promotion from inbox captures into canonical records must be derivable from canonical vault evidence rather than local `.runtime` state alone
 
@@ -33,7 +33,7 @@ Consumers that need inbox-owned normalization without the full inboxd barrel sho
 - a generic normalized chat-poll connector factory for source-specific transports
 - iMessage and Telegram poll connectors over injected driver boundaries
 - source-specific checkpoints for connectors whose cursors are not derivable from `occurredAt`/`externalId`
-- capture pipeline with atomic raw persistence, inbox-capture ledger append, compatibility event/audit append, dedupe, FTS, and a durable local capture mutation cursor for downstream projections like the gateway store
+- capture pipeline with atomic raw persistence, inbox-capture ledger append, dedupe, FTS, and a durable local capture mutation cursor for downstream projections like the gateway store
 - runtime list, show, and search helpers for future CLI/agent surfaces
 - `vault-cli inbox ...` is the intended human/operator surface layered on top of this package
 

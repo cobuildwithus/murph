@@ -4,7 +4,6 @@ import { mkdir, readFile, rename, stat } from "node:fs/promises";
 
 import {
   assertContract,
-  auditRecordSchema,
   inboxCaptureRecordSchema,
   type AuditRecord,
   type EventRecord,
@@ -27,7 +26,6 @@ import {
   createDeterministicInboxCaptureId,
   createInboxCaptureIdentityKey,
   assertVaultPathOnDisk,
-  generatePrefixedId,
   normalizeStoredAttachments,
   normalizeAccountKey,
   normalizeRelativePath,
@@ -41,10 +39,8 @@ import {
 import type { InboxRuntimeStore } from "../kernel/sqlite.ts";
 import {
   INBOX_CAPTURE_LEDGER_DIRECTORY,
-  buildInboxCaptureAuditPath,
   buildInboxCaptureAuditPathForStoredAt,
   buildInboxCaptureAuditRecord,
-  buildInboxCaptureEventPath,
   buildInboxCaptureEventPathForOccurredAt,
   buildInboxCaptureEventRecord,
   buildInboxCaptureLedgerPath,
@@ -76,10 +72,6 @@ interface EnvelopeEntry {
   envelope: StoredCaptureEnvelope;
 }
 
-export interface StoredCaptureCanonicalEvidence {
-  auditId?: string;
-}
-
 interface PreparedRawCapturePersistence {
   stored: StoredCapture;
   sanitizedInput: InboundCapture;
@@ -87,23 +79,13 @@ interface PreparedRawCapturePersistence {
   rawContents: CanonicalRawContentInput[];
 }
 
-export interface PersistCanonicalInboxCaptureInput extends PersistRawCaptureInput {
-  auditId: string;
-}
+export type PersistCanonicalInboxCaptureInput = PersistRawCaptureInput;
 
 export interface PersistCanonicalInboxCaptureResult {
   stored: StoredCapture;
   capture: {
     relativePath: string;
     record: CanonicalInboxCaptureRecord;
-  };
-  event: {
-    relativePath: string;
-    record: EventRecord;
-  };
-  audit: {
-    relativePath: string;
-    record: AuditRecord;
   };
 }
 
@@ -311,11 +293,9 @@ export async function persistCanonicalInboxCapture({
   vaultRoot,
   captureId,
   eventId,
-  auditId,
   input,
   storedAt = new Date().toISOString(),
 }: PersistCanonicalInboxCaptureInput): Promise<PersistCanonicalInboxCaptureResult> {
-  const vault = await loadVault({ vaultRoot });
   const prepared = await prepareRawCapturePersistence({
     captureId,
     eventId,
@@ -324,26 +304,9 @@ export async function persistCanonicalInboxCapture({
   });
   const capturePath = buildInboxCaptureLedgerPathForOccurredAt(input.occurredAt);
   const captureRecord = buildInboxCaptureRecord({
-    auditId,
     eventId,
     inbound: prepared.sanitizedInput,
     stored: prepared.stored,
-  });
-  const eventPath = buildInboxCaptureEventPathForOccurredAt(input.occurredAt);
-  const eventRecord = buildInboxCaptureEventRecord({
-    eventId,
-    inbound: prepared.sanitizedInput,
-    stored: prepared.stored,
-    timeZone: vault.metadata.timezone,
-  });
-  const auditPath = buildInboxCaptureAuditPathForStoredAt(prepared.stored.storedAt);
-  const auditRecord = buildInboxCaptureAuditRecord({
-    auditId,
-    eventId,
-    inbound: prepared.sanitizedInput,
-    stored: prepared.stored,
-    capturePath,
-    eventPath,
   });
 
   await applyCanonicalWriteBatch({
@@ -358,14 +321,6 @@ export async function persistCanonicalInboxCapture({
         relativePath: capturePath,
         record: captureRecord,
       },
-      {
-        relativePath: eventPath,
-        record: eventRecord,
-      },
-      {
-        relativePath: auditPath,
-        record: auditRecord,
-      },
     ],
   });
 
@@ -374,14 +329,6 @@ export async function persistCanonicalInboxCapture({
     capture: {
       relativePath: capturePath,
       record: captureRecord,
-    },
-    event: {
-      relativePath: eventPath,
-      record: eventRecord,
-    },
-    audit: {
-      relativePath: auditPath,
-      record: auditRecord,
     },
   };
 }
@@ -436,12 +383,8 @@ export async function findStoredCaptureEnvelope(input: {
 export async function ensureStoredCaptureCanonicalEvidence(input: {
   vaultRoot: string;
   envelope: StoredCaptureEnvelope;
-  createAuditId?: () => string;
-}): Promise<StoredCaptureCanonicalEvidence> {
-  const vault = await loadVault({ vaultRoot: input.vaultRoot });
+}): Promise<void> {
   const capturePath = buildInboxCaptureLedgerPath(input.envelope);
-  const eventPath = buildInboxCaptureEventPath(input.envelope);
-  const auditPath = buildInboxCaptureAuditPath(input.envelope);
   const lock = await acquireCanonicalWriteLock(input.vaultRoot);
 
   try {
@@ -449,84 +392,26 @@ export async function ensureStoredCaptureCanonicalEvidence(input: {
       vaultRoot: input.vaultRoot,
       relativePath: capturePath,
     });
-    const existingCapture = findMatchingInboxCaptureRecord(captureRecords, input.envelope);
+    if (findMatchingInboxCaptureRecord(captureRecords, input.envelope)) {
+      return;
+    }
 
-    const eventRecords = await readJsonlRecordsIfPresent({
+    await applyCanonicalWriteBatch({
       vaultRoot: input.vaultRoot,
-      relativePath: eventPath,
+      operationType: "inbox_capture_canonical_evidence",
+      summary: `Ensure canonical evidence for inbox capture ${input.envelope.captureId}`,
+      occurredAt: input.envelope.stored.storedAt,
+      jsonlAppends: [
+        {
+          relativePath: capturePath,
+          record: buildInboxCaptureRecord({
+            eventId: input.envelope.eventId,
+            inbound: input.envelope.input,
+            stored: input.envelope.stored,
+          }),
+        },
+      ],
     });
-    const eventExists = eventRecords.some((record) =>
-      isInboxCaptureEventRecord(record, input.envelope),
-    );
-
-    const auditRecords = await readJsonlRecordsIfPresent({
-      vaultRoot: input.vaultRoot,
-      relativePath: auditPath,
-    });
-    const existingAudit = findMatchingInboxCaptureAuditRecord(
-      auditRecords,
-      input.envelope,
-      eventPath,
-    );
-    const auditId =
-      existingCapture?.auditId ??
-      existingAudit?.id ??
-      input.createAuditId?.() ??
-      generatePrefixedId("aud");
-    const jsonlAppends: Array<{
-      relativePath: string;
-      record: AuditRecord | EventRecord | CanonicalInboxCaptureRecord;
-    }> = [];
-
-    if (!existingCapture) {
-      jsonlAppends.push({
-        relativePath: capturePath,
-        record: buildInboxCaptureRecord({
-          auditId,
-          eventId: input.envelope.eventId,
-          inbound: input.envelope.input,
-          stored: input.envelope.stored,
-        }),
-      });
-    }
-
-    if (!eventExists) {
-      jsonlAppends.push({
-        relativePath: eventPath,
-        record: buildInboxCaptureEventRecord({
-          eventId: input.envelope.eventId,
-          inbound: input.envelope.input,
-          stored: input.envelope.stored,
-          timeZone: vault.metadata.timezone,
-        }),
-      });
-    }
-
-    if (!existingAudit) {
-      jsonlAppends.push({
-        relativePath: auditPath,
-        record: buildInboxCaptureAuditRecord({
-          auditId,
-          eventId: input.envelope.eventId,
-          inbound: input.envelope.input,
-          stored: input.envelope.stored,
-          capturePath,
-          eventPath,
-        }),
-      });
-    }
-
-    if (jsonlAppends.length > 0) {
-      await applyCanonicalWriteBatch({
-        vaultRoot: input.vaultRoot,
-        operationType: "inbox_capture_canonical_evidence",
-        summary: `Ensure canonical evidence for inbox capture ${input.envelope.captureId}`,
-        occurredAt: input.envelope.stored.storedAt,
-        jsonlAppends,
-      });
-    }
-
-    return { auditId };
   } finally {
     await lock.release();
   }
@@ -654,7 +539,7 @@ export async function rebuildRuntimeFromVault(input: {
   }
 
   for (const entry of [...canonicalEntries.values()].sort(compareEnvelopeEntries)) {
-    const evidence = await ensureStoredCaptureCanonicalEvidence({
+    await ensureStoredCaptureCanonicalEvidence({
       vaultRoot: input.vaultRoot,
       envelope: entry.envelope,
     });
@@ -669,9 +554,6 @@ export async function rebuildRuntimeFromVault(input: {
       stored: entry.envelope.stored,
     });
     restoredIdentityKeys.add(createInboxCaptureIdentityKey(entry.envelope.input));
-    if (evidence.auditId) {
-      // keep return value consumed for deterministic repair flows
-    }
   }
 }
 
@@ -1003,67 +885,6 @@ function findMatchingInboxCaptureRecord(
 ): CanonicalInboxCaptureRecord | null {
   const identityKey = createInboxCaptureIdentityKey(envelope.input);
   return selectMatchingInboxCaptureRecord(records, identityKey, envelope.captureId);
-}
-
-function isInboxCaptureEventRecord(record: unknown, envelope: StoredCaptureEnvelope): boolean {
-  if (!isPlainRecord(record)) {
-    return false;
-  }
-
-  return (
-    record.id === envelope.eventId &&
-    record.kind === "note" &&
-    record.occurredAt === envelope.input.occurredAt &&
-    record.recordedAt === envelope.stored.storedAt &&
-    hasStringArrayEntry(record.rawRefs, envelope.stored.envelopePath)
-  );
-}
-
-function findMatchingInboxCaptureAuditRecord(
-  records: ReadonlyArray<unknown>,
-  envelope: StoredCaptureEnvelope,
-  eventPath: string,
-): AuditRecord | null {
-  for (const record of records) {
-    if (!isInboxCaptureAuditRecord(record, envelope, eventPath)) {
-      continue;
-    }
-
-    return assertContract<AuditRecord>(auditRecordSchema, record, "inbox capture audit record");
-  }
-
-  return null;
-}
-
-function isInboxCaptureAuditRecord(
-  record: unknown,
-  envelope: StoredCaptureEnvelope,
-  eventPath: string,
-): boolean {
-  if (!isPlainRecord(record)) {
-    return false;
-  }
-
-  return (
-    record.action === "intake_import" &&
-    record.status === "success" &&
-    record.occurredAt === envelope.stored.storedAt &&
-    record.commandName === `inboxd.processCapture:${sanitizeSegment(envelope.input.source, "source")}` &&
-    hasStringArrayEntry(record.targetIds, envelope.eventId) &&
-    hasAuditChange(record.changes, envelope.stored.envelopePath, "create") &&
-    hasAuditChange(record.changes, eventPath, "append")
-  );
-}
-
-function hasStringArrayEntry(value: unknown, expected: string): boolean {
-  return Array.isArray(value) && value.some((entry) => entry === expected);
-}
-
-function hasAuditChange(value: unknown, expectedPath: string, expectedOp: string): boolean {
-  return (
-    Array.isArray(value) &&
-    value.some((entry) => isPlainRecord(entry) && entry.path === expectedPath && entry.op === expectedOp)
-  );
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

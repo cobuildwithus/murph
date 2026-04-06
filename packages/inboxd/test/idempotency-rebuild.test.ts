@@ -206,7 +206,7 @@ test("processCapture recovers from a crash after vault persistence without dupli
   });
   assert.equal(captureRecords.length, 1);
   assert.equal(captureRecords[0]?.captureId, captureId);
-  assert.equal(captureRecords[0]?.auditId, auditId);
+  assert.equal(captureRecords[0]?.auditId, undefined);
 
   const eventRecords = await readJsonlRecords({
     vaultRoot,
@@ -320,10 +320,9 @@ test("processCapture repairs a raw-only stored envelope by appending missing inb
   assert.equal(repaired.deduped, true);
   assert.equal(repaired.captureId, captureId);
   assert.equal(repaired.eventId, eventId);
-  assert.match(repaired.auditId ?? "", /^aud_/u);
   assert.equal((await readInboxCaptureRecordsForCapture(vaultRoot, inbound.occurredAt)).length, 1);
-  assert.equal((await readEventRecordsForCapture(vaultRoot, inbound.occurredAt)).length, 1);
-  assert.equal((await readImportAuditsForCapture(vaultRoot, stored.storedAt)).length, 1);
+  assert.equal((await readEventRecordsForCapture(vaultRoot, inbound.occurredAt)).length, 0);
+  assert.equal((await readImportAuditsForCapture(vaultRoot, stored.storedAt)).length, 0);
   assert.equal(countRows(runtime.databasePath, "capture"), 1);
   assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 0);
 
@@ -345,10 +344,16 @@ test("processCapture repairs a raw-only stored envelope by appending missing inb
   );
   assert.equal(
     repairOperation.actions.some((action) => action.targetRelativePath === "ledger/events/2026/2026-03.jsonl"),
-    true,
+    false,
   );
   assert.equal(
     repairOperation.actions.some((action) => action.targetRelativePath === "audit/2026/2026-03.jsonl"),
+    false,
+  );
+  assert.equal(
+    repairOperation.actions.every(
+      (action) => action.targetRelativePath === "ledger/inbox-captures/2026/2026-03.jsonl",
+    ),
     true,
   );
 
@@ -389,10 +394,9 @@ test("processCapture repairs a stored envelope when only the audit append was lo
   assert.equal(repaired.deduped, true);
   assert.equal(repaired.captureId, captureId);
   assert.equal(repaired.eventId, eventId);
-  assert.match(repaired.auditId ?? "", /^aud_/u);
   assert.equal((await readInboxCaptureRecordsForCapture(vaultRoot, inbound.occurredAt)).length, 1);
   assert.equal((await readEventRecordsForCapture(vaultRoot, inbound.occurredAt)).length, 1);
-  assert.equal((await readImportAuditsForCapture(vaultRoot, stored.storedAt)).length, 1);
+  assert.equal((await readImportAuditsForCapture(vaultRoot, stored.storedAt)).length, 0);
   assert.equal(countRows(runtime.databasePath, "capture"), 1);
 
   pipeline.close();
@@ -509,8 +513,8 @@ test("rebuildRuntimeFromVault repairs raw-only captures and remains idempotent a
   assert.equal(countRows(runtime.databasePath, "capture"), 1);
   assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
   assert.equal((await readInboxCaptureRecordsForCapture(vaultRoot, inbound.occurredAt)).length, 1);
-  assert.equal((await readEventRecordsForCapture(vaultRoot, inbound.occurredAt)).length, 1);
-  assert.equal((await readImportAuditsForCapture(vaultRoot, stored.storedAt)).length, 1);
+  assert.equal((await readEventRecordsForCapture(vaultRoot, inbound.occurredAt)).length, 0);
+  assert.equal((await readImportAuditsForCapture(vaultRoot, stored.storedAt)).length, 0);
 
   runtime.close();
 });
@@ -569,8 +573,8 @@ test("rebuildRuntimeFromVault canonicalizes safe stored capture ids back to the 
   assert.equal(capture.attachments[0]?.attachmentId, `att_${captureId}_01`);
   assert.equal(countRows(runtime.databasePath, "capture"), 1);
   assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
-  assert.equal((await readEventRecordsForCapture(vaultRoot, inbound.occurredAt)).length, 1);
-  assert.equal((await readImportAuditsForCapture(vaultRoot, stored.storedAt)).length, 1);
+  assert.equal((await readEventRecordsForCapture(vaultRoot, inbound.occurredAt)).length, 0);
+  assert.equal((await readImportAuditsForCapture(vaultRoot, stored.storedAt)).length, 0);
 
   runtime.close();
 });
@@ -764,7 +768,7 @@ test("rebuildRuntimeFromVault repairs captures missing only the audit record", a
   assert.equal(countRows(runtime.databasePath, "capture"), 1);
   assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 0);
   assert.equal((await readEventRecordsForCapture(vaultRoot, inbound.occurredAt)).length, 1);
-  assert.equal((await readImportAuditsForCapture(vaultRoot, stored.storedAt)).length, 1);
+  assert.equal((await readImportAuditsForCapture(vaultRoot, stored.storedAt)).length, 0);
 
   runtime.close();
 });

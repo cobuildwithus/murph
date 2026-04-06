@@ -7,7 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "vitest";
 import { resolveRuntimePaths } from "@murphai/runtime-state/node";
 
-import { initializeVault, readJsonlRecords } from "@murphai/core";
+import { initializeVault, isVaultError, readJsonlRecords } from "@murphai/core";
 
 import {
   createConnectorRegistry,
@@ -37,6 +37,18 @@ async function writeExternalFile(directory: string, fileName: string, content: s
   return filePath;
 }
 
+async function readJsonlRecordsIfPresent(vaultRoot: string, relativePath: string): Promise<unknown[]> {
+  try {
+    return await readJsonlRecords({ vaultRoot, relativePath });
+  } catch (error) {
+    if (isVaultError(error) && error.code === "VAULT_FILE_MISSING") {
+      return [];
+    }
+
+    throw error;
+  }
+}
+
 test("toIsoTimestamp rejects invalid values with the inbox-specific TypeError", () => {
   assert.throws(
     () => toIsoTimestamp("not-a-timestamp"),
@@ -46,7 +58,7 @@ test("toIsoTimestamp rejects invalid values with the inbox-specific TypeError", 
   );
 });
 
-test("processCapture stores redacted raw evidence, note events, audit records, and attachment jobs", async () => {
+test("processCapture stores redacted raw evidence, one canonical intake record, and attachment jobs", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-vault");
   const sourceRoot = await makeTempDirectory("murph-inbox-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
@@ -206,7 +218,7 @@ test("processCapture stores redacted raw evidence, note events, audit records, a
   assert.equal(captureRecords.length, 1);
   assert.equal(captureRecords[0]?.captureId, first.captureId);
   assert.equal(captureRecords[0]?.eventId, first.eventId);
-  assert.equal(captureRecords[0]?.auditId, first.auditId);
+  assert.equal(captureRecords[0]?.auditId, undefined);
   assert.equal(captureRecords[0]?.envelopePath, capture.envelopePath);
   assert.equal(
     Array.isArray(captureRecords[0]?.rawRefs) &&
@@ -214,29 +226,16 @@ test("processCapture stores redacted raw evidence, note events, audit records, a
     true,
   );
 
-  const eventRecords = await readJsonlRecords({
-    vaultRoot,
-    relativePath: "ledger/events/2026/2026-03.jsonl",
-  });
-  assert.equal(eventRecords.length, 1);
-  assert.equal(eventRecords[0]?.kind, "note");
-  assert.equal(
-    Array.isArray(eventRecords[0]?.rawRefs) &&
-      eventRecords[0]?.rawRefs.includes(capture.envelopePath),
-    true,
+  assert.deepEqual(
+    await readJsonlRecordsIfPresent(vaultRoot, "ledger/events/2026/2026-03.jsonl"),
+    [],
   );
-
-  const auditRecords = await readJsonlRecords({
-    vaultRoot,
-    relativePath: `audit/${first.createdAt.slice(0, 4)}/${first.createdAt.slice(0, 7)}.jsonl`,
-  });
-  const intakeImportAudit = auditRecords.find((record) => record.id === first.auditId);
-  assert.ok(intakeImportAudit);
-  assert.equal(intakeImportAudit?.action, "intake_import");
-  assert.equal(
-    Array.isArray(intakeImportAudit?.changes) &&
-      intakeImportAudit?.changes.some((change) => change.path === "ledger/inbox-captures/2026/2026-03.jsonl"),
-    true,
+  assert.deepEqual(
+    await readJsonlRecordsIfPresent(
+      vaultRoot,
+      `audit/${first.createdAt.slice(0, 4)}/${first.createdAt.slice(0, 7)}.jsonl`,
+    ),
+    [],
   );
 
   pipeline.close();
