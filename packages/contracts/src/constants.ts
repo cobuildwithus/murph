@@ -26,6 +26,8 @@ export const CONTRACT_SCHEMA_VERSION = Object.freeze({
   vault: "murph.vault.v1",
 } as const);
 
+export const CURRENT_VAULT_FORMAT_VERSION = 1 as const;
+
 export const CONTRACT_ID_FORMAT = "prefix_ulid" as const;
 
 export const ID_PREFIXES = Object.freeze({
@@ -169,6 +171,7 @@ export const AUDIT_ACTIONS = Object.freeze([
   "intake_import",
   "intake_project",
   "vault_init",
+  "vault_upgrade",
   "vault_repair",
   "document_import",
   "device_import",

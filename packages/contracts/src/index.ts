@@ -9,6 +9,7 @@ export * from "./automation.ts";
 export * from "./memory.ts";
 export * from "./shares.ts";
 export * from "./time.ts";
+export * from "./vault.ts";
 export * from "./types.ts";
 export * from "./validate.ts";
 export * from "./zod.ts";

@@ -176,6 +176,13 @@ assert.equal(
   )?.maxLength,
   40,
 );
+assert.equal(
+  (
+    (schemaCatalog["vault-metadata"] as { properties?: Record<string, { const?: unknown }> }).properties
+      ?.formatVersion
+  )?.const,
+  1,
+);
 assert.equal(isStrictIsoDate("2024-02-29"), true);
 assert.equal(isStrictIsoDate("2024-02-31"), false);
 assert.equal(isStrictIsoDateTime("2024-04-30T12:00:00Z"), true);

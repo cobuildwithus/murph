@@ -105,6 +105,7 @@ const ROOT_REPO_PROJECTS: RootRepoProject[] = [
       "packages/core/test/share-pack.test.ts",
       "packages/core/test/health-history-family.test.ts",
       "packages/core/test/ids.test.ts",
+      "packages/core/test/vault-upgrade.test.ts",
     ],
   },
   {
@@ -205,6 +206,9 @@ export default defineConfig({
         "packages/core/src/jsonl.ts",
         "packages/core/src/mutations.ts",
         "packages/core/src/raw.ts",
+        "packages/core/src/vault-core-document.ts",
+        "packages/core/src/vault-metadata.ts",
+        "packages/core/src/vault-upgrade.ts",
         "packages/core/src/vault.ts",
         "packages/importers/src/csv-sample-importer.ts",
         "packages/importers/src/document-importer.ts",
