@@ -137,7 +137,9 @@ describe("runHostedWorkerDeployment", () => {
       env: {
         CF_WORKER_NAME: "hosted-worker",
         GITHUB_OUTPUT: "/tmp/github-output.txt",
+        HOSTED_EXECUTION_DEPLOYMENT_MESSAGE: "manual direct deploy",
         HOSTED_EXECUTION_DEPLOYMENT_MODE: "direct",
+        HOSTED_EXECUTION_VERSION_MESSAGE: "unused direct version message",
       },
       resultPath: "/tmp/deployment-result.json",
       secretsFilePath: "/tmp/worker-secrets.json",
@@ -146,7 +148,7 @@ describe("runHostedWorkerDeployment", () => {
 
     expect(dependencies.deployDirect).toHaveBeenCalledWith({
       configPath: "/tmp/wrangler.generated.jsonc",
-      deploymentMessage: expect.stringContaining("direct deploy"),
+      deploymentMessage: "manual direct deploy",
       includeSecrets: true,
       secretsFilePath: "/tmp/worker-secrets.json",
       versionTag: expect.any(String),
@@ -173,6 +175,68 @@ describe("runHostedWorkerDeployment", () => {
         flag: "a",
       },
     );
+  });
+
+  it("keeps deployment and version message overrides scoped to the gradual upload flow", async () => {
+    const currentDeployment: DeploymentStatusPayload = {
+      created_on: "2026-03-27T00:00:00.000Z",
+      versions: [
+        {
+          percentage: 100,
+          version_id: "version-a",
+        },
+      ],
+    };
+    const finalDeployment: DeploymentStatusPayload = {
+      created_on: "2026-03-27T00:05:00.000Z",
+      versions: [
+        {
+          percentage: 75,
+          version_id: "version-a",
+        },
+        {
+          percentage: 25,
+          version_id: "uploaded-version",
+        },
+      ],
+    };
+    const readCurrentDeployment = vi
+      .fn<HostedWorkerDeploymentDependencies["readCurrentDeployment"]>()
+      .mockResolvedValueOnce(currentDeployment)
+      .mockResolvedValueOnce(finalDeployment);
+    const dependencies = createDependencies({
+      readCurrentDeployment,
+    });
+
+    await runHostedWorkerDeployment({
+      configPath: "/tmp/wrangler.generated.jsonc",
+      dependencies,
+      env: {
+        CF_WORKER_NAME: "hosted-worker",
+        HOSTED_EXECUTION_DEPLOYMENT_MESSAGE: "manual rollout deploy",
+        HOSTED_EXECUTION_DEPLOYMENT_MODE: "gradual",
+        HOSTED_EXECUTION_GRADUAL_ROLLOUT_PERCENTAGE: "25",
+        HOSTED_EXECUTION_VERSION_MESSAGE: "manual candidate version",
+      },
+      resultPath: "/tmp/deployment-result.json",
+      secretsFilePath: "/tmp/worker-secrets.json",
+      workerName: "hosted-worker",
+    });
+
+    expect(dependencies.uploadVersion).toHaveBeenCalledWith({
+      configPath: "/tmp/wrangler.generated.jsonc",
+      includeSecrets: true,
+      message: "manual candidate version",
+      secretsFilePath: "/tmp/worker-secrets.json",
+      tag: expect.any(String),
+      workerName: "hosted-worker",
+    });
+    expect(dependencies.deployVersions).toHaveBeenCalledWith({
+      configPath: "/tmp/wrangler.generated.jsonc",
+      deploymentMessage: "manual rollout deploy",
+      versionSpecs: ["version-a@75", "uploaded-version@25"],
+      workerName: "hosted-worker",
+    });
   });
 });
 

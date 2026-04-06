@@ -1,4 +1,4 @@
-import { spawn, type SpawnOptions } from "node:child_process";
+import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 
 export function resolvePnpmCommand(): string {
   return process.platform === "win32" ? "pnpm.cmd" : "pnpm";
@@ -11,23 +11,13 @@ export async function runWranglerLogged(
     envOverrides?: Record<string, string>;
   } = {},
 ): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const child = spawnWranglerProcess(wranglerArgs, {
-      cwd: options.cwd,
-      env: resolveWranglerEnv(options.envOverrides),
-      stdio: "inherit",
-    });
-
-    child.once("error", reject);
-    child.once("close", (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-
-      reject(createWranglerExitError(wranglerArgs, code));
-    });
+  const child = spawnWranglerProcess(wranglerArgs, {
+    cwd: options.cwd,
+    env: resolveWranglerEnv(options.envOverrides),
+    stdio: "inherit",
   });
+
+  await waitForWranglerExit(child, wranglerArgs);
 }
 
 export async function runWranglerJson(
@@ -36,43 +26,33 @@ export async function runWranglerJson(
     cwd?: string;
   } = {},
 ): Promise<string> {
-  return await new Promise<string>((resolve, reject) => {
-    const child = spawnWranglerProcess(wranglerArgs, {
-      cwd: options.cwd,
-      env: process.env,
-      stdio: ["inherit", "pipe", "pipe"],
-    });
-
-    const stdoutStream = child.stdout;
-    const stderrStream = child.stderr;
-
-    if (!stdoutStream || !stderrStream) {
-      reject(new Error("wrangler json runner requires piped stdout and stderr streams."));
-      return;
-    }
-
-    let stdout = "";
-    let stderr = "";
-
-    stdoutStream.setEncoding("utf8");
-    stdoutStream.on("data", (chunk) => {
-      stdout += chunk;
-    });
-    stderrStream.setEncoding("utf8");
-    stderrStream.on("data", (chunk) => {
-      stderr += chunk;
-    });
-
-    child.once("error", reject);
-    child.once("close", (code) => {
-      if (code === 0) {
-        resolve(stdout.trim());
-        return;
-      }
-
-      reject(createWranglerExitError(wranglerArgs, code, stderr));
-    });
+  const child = spawnWranglerProcess(wranglerArgs, {
+    cwd: options.cwd,
+    env: process.env,
+    stdio: ["inherit", "pipe", "pipe"],
   });
+
+  const stdoutStream = child.stdout;
+  const stderrStream = child.stderr;
+
+  if (!stdoutStream || !stderrStream) {
+    throw new Error("wrangler json runner requires piped stdout and stderr streams.");
+  }
+
+  let stdout = "";
+  let stderr = "";
+
+  stdoutStream.setEncoding("utf8");
+  stdoutStream.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  stderrStream.setEncoding("utf8");
+  stderrStream.on("data", (chunk) => {
+    stderr += chunk;
+  });
+
+  await waitForWranglerExit(child, wranglerArgs, () => stderr);
+  return stdout.trim();
 }
 
 function spawnWranglerProcess(
@@ -87,6 +67,24 @@ function spawnWranglerProcess(
     cwd: options.cwd ?? process.cwd(),
     env: options.env,
     stdio: options.stdio,
+  });
+}
+
+async function waitForWranglerExit(
+  child: ChildProcess,
+  wranglerArgs: string[],
+  readStderr: () => string = () => "",
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+
+      reject(createWranglerExitError(wranglerArgs, code, readStderr()));
+    });
   });
 }
 

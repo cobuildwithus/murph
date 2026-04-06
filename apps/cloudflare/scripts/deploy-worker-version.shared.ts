@@ -77,7 +77,6 @@ interface HostedWorkerDeploymentSettingsBase {
   deploymentMessage: string;
   includeSecrets: boolean;
   versionTag: string;
-  versionMessage: string;
 }
 
 interface HostedWorkerDirectDeploymentSettings extends HostedWorkerDeploymentSettingsBase {
@@ -88,6 +87,7 @@ interface HostedWorkerGradualDeploymentSettings extends HostedWorkerDeploymentSe
   existingVersionId: string | null;
   mode: "gradual";
   rolloutPercentage: number;
+  versionMessage: string;
 }
 
 type HostedWorkerDeploymentSettings =
@@ -107,28 +107,32 @@ export async function runHostedWorkerDeployment(input: {
 
   await input.dependencies.mkdir(path.dirname(input.resultPath), { recursive: true });
 
-  const result = deploymentSettings.mode === "direct"
-    ? await runDirectDeployment({
-        configPath: input.configPath,
-        dependencies: input.dependencies,
-        deploymentMessage: deploymentSettings.deploymentMessage,
-        includeSecrets: deploymentSettings.includeSecrets,
-        secretsFilePath: input.secretsFilePath,
-        versionTag: deploymentSettings.versionTag,
-        workerName: input.workerName,
-      })
-    : await runGradualDeployment({
-        configPath: input.configPath,
-        dependencies: input.dependencies,
-        deploymentMessage: deploymentSettings.deploymentMessage,
-        existingVersionId: deploymentSettings.existingVersionId,
-        includeSecrets: deploymentSettings.includeSecrets,
-        rolloutPercentage: deploymentSettings.rolloutPercentage,
-        secretsFilePath: input.secretsFilePath,
-        versionMessage: deploymentSettings.versionMessage,
-        versionTag: deploymentSettings.versionTag,
-        workerName: input.workerName,
-      });
+  let result: HostedWorkerDeploymentResult;
+
+  if (deploymentSettings.mode === "direct") {
+    result = await runDirectDeployment({
+      configPath: input.configPath,
+      dependencies: input.dependencies,
+      deploymentMessage: deploymentSettings.deploymentMessage,
+      includeSecrets: deploymentSettings.includeSecrets,
+      secretsFilePath: input.secretsFilePath,
+      versionTag: deploymentSettings.versionTag,
+      workerName: input.workerName,
+    });
+  } else {
+    result = await runGradualDeployment({
+      configPath: input.configPath,
+      dependencies: input.dependencies,
+      deploymentMessage: deploymentSettings.deploymentMessage,
+      existingVersionId: deploymentSettings.existingVersionId,
+      includeSecrets: deploymentSettings.includeSecrets,
+      rolloutPercentage: deploymentSettings.rolloutPercentage,
+      secretsFilePath: input.secretsFilePath,
+      versionMessage: deploymentSettings.versionMessage,
+      versionTag: deploymentSettings.versionTag,
+      workerName: input.workerName,
+    });
+  }
 
   await input.dependencies.writeFile(
     input.resultPath,
@@ -274,25 +278,23 @@ function resolveHostedWorkerDeploymentSettings(
     ?? "manual";
   const versionTag = normalizeString(env.HOSTED_EXECUTION_DEPLOY_TAG)
     ?? buildDefaultVersionTag(env, now);
-  const versionMessage = normalizeString(env.HOSTED_EXECUTION_VERSION_MESSAGE)
-    ?? `${deployContext} version ${versionTag}`;
+  const deploymentMessageOverride = normalizeString(env.HOSTED_EXECUTION_DEPLOYMENT_MESSAGE);
 
   if (mode === "direct") {
     return {
-      deploymentMessage: normalizeString(env.HOSTED_EXECUTION_DEPLOYMENT_MESSAGE)
-        ?? `${deployContext} direct deploy ${versionTag}`,
+      deploymentMessage: deploymentMessageOverride ?? `${deployContext} direct deploy ${versionTag}`,
       includeSecrets,
       mode,
-      versionMessage,
       versionTag,
     };
   }
 
   const rolloutPercentage = readRolloutPercentage(env.HOSTED_EXECUTION_GRADUAL_ROLLOUT_PERCENTAGE);
+  const versionMessage = normalizeString(env.HOSTED_EXECUTION_VERSION_MESSAGE)
+    ?? `${deployContext} version ${versionTag}`;
 
   return {
-    deploymentMessage: normalizeString(env.HOSTED_EXECUTION_DEPLOYMENT_MESSAGE)
-      ?? `${deployContext} rollout ${rolloutPercentage}% ${versionTag}`,
+    deploymentMessage: deploymentMessageOverride ?? `${deployContext} rollout ${rolloutPercentage}% ${versionTag}`,
     existingVersionId: normalizeString(env.HOSTED_EXECUTION_DEPLOY_VERSION_ID),
     includeSecrets,
     mode,

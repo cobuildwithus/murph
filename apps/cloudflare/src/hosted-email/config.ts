@@ -37,8 +37,7 @@ export function readHostedEmailConfig(
 }
 
 function normalizeHostedEmailApiBaseUrl(value: string | undefined): string {
-  const normalized = value?.trim() ?? "";
-  return normalized.length > 0 ? normalized.replace(/\/$/u, "") : "https://api.cloudflare.com/client/v4";
+  return normalizeOptionalString(value)?.replace(/\/$/u, "") ?? "https://api.cloudflare.com/client/v4";
 }
 
 function normalizeOptionalString(value: string | undefined): string | null {
