@@ -55,6 +55,7 @@ import { resolveAssistantVaultPath } from '../assistant-vault-paths.js'
 import {
   defineAssistantCapability,
   type AssistantCapabilityDefinition,
+  type AssistantCapabilityExecutor,
   type AssistantCapabilityExecutionMode,
 } from '../model-harness.js'
 import {
@@ -1674,13 +1675,27 @@ function allowSensitiveHealthContextForAssistantTools(input: AssistantToolContex
   return input.allowSensitiveHealthContext === true
 }
 
+type AssistantCapabilityToolDefinitionInput<
+  TSchema extends ZodTypeAny,
+  TResult,
+> =
+  | (Omit<AssistantCapabilityDefinition<TSchema, TResult>, 'executionBindings'> & {
+    execute(input: z.infer<TSchema>): Promise<TResult>
+  })
+  | (Omit<AssistantCapabilityDefinition<TSchema, TResult>, 'executionBindings'> & {
+    executionBindings: Partial<
+      Record<
+        AssistantCapabilityExecutionMode,
+        AssistantCapabilityExecutor<TSchema, TResult>
+      >
+    >
+  })
+
 function defineHandAuthoredHelperTool<
   TSchema extends ZodTypeAny,
   TResult,
 >(
-  definition: Omit<AssistantCapabilityDefinition<TSchema, TResult>, 'executionBindings'> & {
-    execute(input: z.infer<TSchema>): Promise<TResult>
-  },
+  definition: AssistantCapabilityToolDefinitionInput<TSchema, TResult>,
 ) {
   return defineAssistantCapabilityTool(definition, {
     origin: 'hand-authored-helper',
@@ -1694,9 +1709,7 @@ function defineVaultServiceBackedTool<
   TSchema extends ZodTypeAny,
   TResult,
 >(
-  definition: Omit<AssistantCapabilityDefinition<TSchema, TResult>, 'executionBindings'> & {
-    execute(input: z.infer<TSchema>): Promise<TResult>
-  },
+  definition: AssistantCapabilityToolDefinitionInput<TSchema, TResult>,
 ) {
   return defineAssistantCapabilityTool(definition, {
     origin: 'vault-service-backed',
@@ -1710,9 +1723,7 @@ function defineCliBackedTool<
   TSchema extends ZodTypeAny,
   TResult,
 >(
-  definition: Omit<AssistantCapabilityDefinition<TSchema, TResult>, 'executionBindings'> & {
-    execute(input: z.infer<TSchema>): Promise<TResult>
-  },
+  definition: AssistantCapabilityToolDefinitionInput<TSchema, TResult>,
 ) {
   return defineAssistantCapabilityTool(definition, {
     origin: 'cli-backed',
@@ -1726,9 +1737,7 @@ function defineConfiguredWebReadTool<
   TSchema extends ZodTypeAny,
   TResult,
 >(
-  definition: Omit<AssistantCapabilityDefinition<TSchema, TResult>, 'executionBindings'> & {
-    execute(input: z.infer<TSchema>): Promise<TResult>
-  },
+  definition: AssistantCapabilityToolDefinitionInput<TSchema, TResult>,
 ) {
   return defineAssistantCapabilityTool(definition, {
     origin: 'configured-web-read',
@@ -1742,9 +1751,7 @@ function defineHostedApiBackedTool<
   TSchema extends ZodTypeAny,
   TResult,
 >(
-  definition: Omit<AssistantCapabilityDefinition<TSchema, TResult>, 'executionBindings'> & {
-    execute(input: z.infer<TSchema>): Promise<TResult>
-  },
+  definition: AssistantCapabilityToolDefinitionInput<TSchema, TResult>,
 ) {
   return defineAssistantCapabilityTool(definition, {
     origin: 'hosted-api-backed',
@@ -1758,9 +1765,7 @@ function defineNativeLocalOnlyTool<
   TSchema extends ZodTypeAny,
   TResult,
 >(
-  definition: Omit<AssistantCapabilityDefinition<TSchema, TResult>, 'executionBindings'> & {
-    execute(input: z.infer<TSchema>): Promise<TResult>
-  },
+  definition: AssistantCapabilityToolDefinitionInput<TSchema, TResult>,
 ) {
   return defineAssistantCapabilityTool(definition, {
     origin: 'native-local-only',
@@ -1774,9 +1779,7 @@ function defineDescriptorGeneratedTool<
   TSchema extends ZodTypeAny,
   TResult,
 >(
-  definition: Omit<AssistantCapabilityDefinition<TSchema, TResult>, 'executionBindings'> & {
-    execute(input: z.infer<TSchema>): Promise<TResult>
-  },
+  definition: AssistantCapabilityToolDefinitionInput<TSchema, TResult>,
   generatedFrom: string,
 ) {
   return defineAssistantCapabilityTool(definition, {
@@ -1787,23 +1790,25 @@ function defineDescriptorGeneratedTool<
   }, 'native-local')
 }
 
-function defineAssistantCapabilityTool<
+export function defineAssistantCapabilityTool<
   TSchema extends ZodTypeAny,
   TResult,
 >(
-  definition: Omit<AssistantCapabilityDefinition<TSchema, TResult>, 'executionBindings'> & {
-    execute(input: z.infer<TSchema>): Promise<TResult>
-  },
+  definition: AssistantCapabilityToolDefinitionInput<TSchema, TResult>,
   provenance: AssistantToolProvenance,
-  preferredExecutionMode: AssistantCapabilityExecutionMode,
+  defaultExecutionMode: AssistantCapabilityExecutionMode,
 ) {
-  const { execute, ...capability } = definition
+  const executionBindings =
+    'executionBindings' in definition
+      ? definition.executionBindings
+      : {
+          [defaultExecutionMode]: definition.execute,
+        }
+  const { preferredExecutionMode = defaultExecutionMode, ...capability } = definition
   return defineAssistantCapability({
     ...capability,
     preferredExecutionMode,
-    executionBindings: {
-      [preferredExecutionMode]: execute,
-    },
+    executionBindings,
     provenance,
   })
 }
