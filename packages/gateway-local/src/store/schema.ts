@@ -1,10 +1,8 @@
 import type { DatabaseSync } from 'node:sqlite'
 
-export const GATEWAY_STORE_SQLITE_SCHEMA_VERSION = 2
+export const GATEWAY_STORE_SQLITE_SCHEMA_VERSION = 3
 
-const SNAPSHOT_EMPTY_META_KEY = 'snapshot.empty'
-const SNAPSHOT_GENERATED_AT_META_KEY = 'snapshot.generatedAt'
-const SNAPSHOT_INITIALIZED_META_KEY = 'snapshot.initialized'
+export const SNAPSHOT_GENERATED_AT_META_KEY = 'snapshot.generatedAt'
 
 export async function withGatewayImmediateTransaction<T>(
   database: DatabaseSync,
@@ -136,62 +134,11 @@ export function resetGatewayServingSnapshotSchema(database: DatabaseSync): void 
     DROP TABLE IF EXISTS gateway_attachments;
     DROP TABLE IF EXISTS gateway_messages;
     DROP TABLE IF EXISTS gateway_conversations;
-
-    CREATE TABLE IF NOT EXISTS gateway_conversations (
-      session_key TEXT PRIMARY KEY,
-      route_key TEXT NOT NULL,
-      channel TEXT,
-      identity_id TEXT,
-      participant_id TEXT,
-      thread_id TEXT,
-      directness TEXT,
-      reply_kind TEXT,
-      reply_target TEXT,
-      title TEXT,
-      title_source TEXT,
-      last_message_preview TEXT,
-      last_activity_at TEXT,
-      message_count INTEGER,
-      can_send INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS gateway_messages (
-      message_id TEXT PRIMARY KEY,
-      session_key TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      direction TEXT NOT NULL,
-      actor_display_name TEXT,
-      text TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS gateway_attachments (
-      attachment_id TEXT PRIMARY KEY,
-      session_key TEXT NOT NULL,
-      message_id TEXT NOT NULL,
-      ordinal INTEGER NOT NULL,
-      kind TEXT NOT NULL,
-      mime TEXT,
-      file_name TEXT,
-      byte_size INTEGER,
-      parse_state TEXT,
-      extracted_text TEXT,
-      transcript_text TEXT
-    );
-
-    CREATE INDEX IF NOT EXISTS gateway_conversations_activity_idx
-      ON gateway_conversations(last_activity_at DESC, session_key ASC);
-    CREATE INDEX IF NOT EXISTS gateway_messages_session_created_idx
-      ON gateway_messages(session_key, created_at ASC, message_id ASC);
-    CREATE INDEX IF NOT EXISTS gateway_attachments_message_idx
-      ON gateway_attachments(message_id);
-    CREATE INDEX IF NOT EXISTS gateway_attachments_session_idx
-      ON gateway_attachments(session_key);
   `)
 
-  database.prepare('DELETE FROM gateway_events').run()
-  writeMeta(database, SNAPSHOT_EMPTY_META_KEY, null)
-  writeMeta(database, SNAPSHOT_GENERATED_AT_META_KEY, null)
-  writeMeta(database, SNAPSHOT_INITIALIZED_META_KEY, null)
+  for (const obsoleteMetaKey of ['snapshot.empty', 'snapshot.initialized'] as const) {
+    writeMeta(database, obsoleteMetaKey, null)
+  }
 }
 
 export function readMeta(database: DatabaseSync, key: string): string | null {
