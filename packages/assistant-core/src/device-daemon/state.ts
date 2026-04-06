@@ -79,9 +79,6 @@ export async function readDeviceDaemonState(
       {
         currentPath: paths.launcherStatePath,
         label: 'Device sync daemon launcher state',
-        legacyParseValue(value) {
-          return parseDeviceDaemonStateRecord(value)
-        },
         parseValue(value) {
           return parseDeviceDaemonStateRecord(value)
         },

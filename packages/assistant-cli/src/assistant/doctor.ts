@@ -457,9 +457,6 @@ async function scanJsonFile<T>(
     if (versionedState) {
       parseVersionedJsonStateEnvelope(parsed, {
         label: versionedState.label,
-        legacyParseValue(value) {
-          return schema.parse(value)
-        },
         parseValue(value) {
           return schema.parse(value)
         },

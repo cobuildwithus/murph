@@ -5,6 +5,7 @@ import { promises as fs } from "node:fs";
 import { test } from "vitest";
 
 import { initializeVault } from "@murphai/core";
+import { createVersionedJsonStateEnvelope } from "@murphai/runtime-state/node";
 import {
   createParsedInboxPipeline,
   createInboxPipeline,
@@ -342,15 +343,22 @@ test("parser toolchain config rejects relative whisper model paths that escape t
   await fs.mkdir(path.dirname(configPath), { recursive: true });
   await fs.writeFile(
     configPath,
-    `${JSON.stringify({
-      version: 1,
-      updatedAt: "2026-03-13T12:34:56.000Z",
-      tools: {
-        whisper: {
-          modelPath: "../shared/model.bin",
+    `${JSON.stringify(
+      createVersionedJsonStateEnvelope({
+        schema: "murph.parser-toolchain-config.v1",
+        schemaVersion: 1,
+        value: {
+          updatedAt: "2026-03-13T12:34:56.000Z",
+          tools: {
+            whisper: {
+              modelPath: "../shared/model.bin",
+            },
+          },
         },
-      },
-    }, null, 2)}\n`,
+      }),
+      null,
+      2,
+    )}\n`,
     "utf8",
   );
 
@@ -389,15 +397,22 @@ test("parser toolchain config rejects relative whisper model paths that escape t
   await fs.mkdir(path.dirname(configPath), { recursive: true });
   await fs.writeFile(
     configPath,
-    `${JSON.stringify({
-      version: 1,
-      updatedAt: "2026-03-13T12:34:56.000Z",
-      tools: {
-        whisper: {
-          modelPath: "models-link/model.bin",
+    `${JSON.stringify(
+      createVersionedJsonStateEnvelope({
+        schema: "murph.parser-toolchain-config.v1",
+        schemaVersion: 1,
+        value: {
+          updatedAt: "2026-03-13T12:34:56.000Z",
+          tools: {
+            whisper: {
+              modelPath: "models-link/model.bin",
+            },
+          },
         },
-      },
-    }, null, 2)}\n`,
+      }),
+      null,
+      2,
+    )}\n`,
     "utf8",
   );
 

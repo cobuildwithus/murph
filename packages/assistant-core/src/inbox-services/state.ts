@@ -109,9 +109,6 @@ export async function readConfig(
     const { value } = await readVersionedJsonStateFile({
       currentPath: paths.inboxConfigPath,
       label: 'Inbox runtime config',
-      legacyParseValue(value) {
-        return inboxRuntimeConfigSchema.parse(value)
-      },
       parseValue(value) {
         return inboxRuntimeConfigSchema.parse(value)
       },

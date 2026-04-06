@@ -58,9 +58,6 @@ export async function readParserToolchainConfig(
   const { filePath: configPath, value: config } = await readVersionedJsonStateFile({
     currentPath: paths.configPath,
     label: "Parser toolchain config",
-    legacyParseValue(value) {
-      return parseParserToolchainConfig(value);
-    },
     parseValue(value) {
       return parseParserToolchainConfig(value);
     },

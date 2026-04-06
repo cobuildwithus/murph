@@ -3354,7 +3354,19 @@ test.sequential('doctor reports invalid config, missing source, and connector di
       requestId: null,
     })
 
-    await writeFile(paths.inboxConfigPath, '{"version":1,"connectors":"bad"}\n', 'utf8')
+    await writeFile(
+      paths.inboxConfigPath,
+      `${JSON.stringify(
+        createVersionedJsonStateEnvelope({
+          schema: 'murph.inbox-runtime-config.v1',
+          schemaVersion: 1,
+          value: {
+            connectors: 'bad',
+          },
+        }),
+      )}\n`,
+      'utf8',
+    )
     const invalidConfig = await baselineServices.doctor({
       vault: fixture.vaultRoot,
       requestId: null,
@@ -3371,21 +3383,24 @@ test.sequential('doctor reports invalid config, missing source, and connector di
     await writeFile(
       paths.inboxConfigPath,
       `${JSON.stringify(
-        {
-          version: 1,
-          connectors: [
-            {
-              id: 'imessage:self',
-              source: 'imessage',
-              enabled: true,
-              accountId: 'self',
-              options: {
-                includeOwnMessages: true,
-                backfillLimit: 5,
+        createVersionedJsonStateEnvelope({
+          schema: 'murph.inbox-runtime-config.v1',
+          schemaVersion: 1,
+          value: {
+            connectors: [
+              {
+                id: 'imessage:self',
+                source: 'imessage',
+                enabled: true,
+                accountId: 'self',
+                options: {
+                  includeOwnMessages: true,
+                  backfillLimit: 5,
+                },
               },
-            },
-          ],
-        },
+            ],
+          },
+        }),
         null,
         2,
       )}\n`,
@@ -4399,7 +4414,19 @@ test.sequential('status and stop reject corrupted daemon state, and inbox operat
       vaultRoot: fixture.vaultRoot,
     })
 
-    await writeFile(paths.inboxStatePath, '{"running":"nope"}\n', 'utf8')
+    await writeFile(
+      paths.inboxStatePath,
+      `${JSON.stringify(
+        createVersionedJsonStateEnvelope({
+          schema: INBOX_DAEMON_STATE_SCHEMA,
+          schemaVersion: INBOX_DAEMON_STATE_SCHEMA_VERSION,
+          value: {
+            running: 'nope',
+          },
+        }),
+      )}\n`,
+      'utf8',
+    )
     await expectVaultCliError(
       services.status({
         vault: fixture.vaultRoot,
@@ -4426,7 +4453,19 @@ test.sequential('status and stop reject corrupted daemon state, and inbox operat
       vaultRoot: fixture.vaultRoot,
     })
 
-    await writeFile(paths.inboxPromotionsPath, '{"version":1,"entries":"bad"}\n', 'utf8')
+    await writeFile(
+      paths.inboxPromotionsPath,
+      `${JSON.stringify(
+        createVersionedJsonStateEnvelope({
+          schema: 'murph.inbox-promotion-store.v1',
+          schemaVersion: 1,
+          value: {
+            entries: 'bad',
+          },
+        }),
+      )}\n`,
+      'utf8',
+    )
     await expectVaultCliError(
       services.list({
         vault: fixture.vaultRoot,
@@ -4795,20 +4834,23 @@ test.sequential('promotion safeguards cover missing photos, invalid stored ids, 
       await writeFile(
         inboxPaths(photoFixture.vaultRoot).inboxPromotionsPath,
         `${JSON.stringify(
-          {
-            version: 1,
-            entries: [
-              {
-                captureId: photoCaptureId,
-                target: 'meal',
-                status: 'applied',
-                promotedAt: '2026-03-13T09:00:00.000Z',
-                lookupId: null,
-                relatedId: null,
-                note: 'toast',
-              },
-            ],
-          },
+          createVersionedJsonStateEnvelope({
+            schema: 'murph.inbox-promotion-store.v1',
+            schemaVersion: 1,
+            value: {
+              entries: [
+                {
+                  captureId: photoCaptureId,
+                  target: 'meal',
+                  status: 'applied',
+                  promotedAt: '2026-03-13T09:00:00.000Z',
+                  lookupId: null,
+                  relatedId: null,
+                  note: 'toast',
+                },
+              ],
+            },
+          }),
           null,
           2,
         )}\n`,
