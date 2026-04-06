@@ -106,12 +106,14 @@ export async function activateHostedMemberForPositiveSource(input: {
   dispatchContext: HostedStripeDispatchContext;
   member: HostedMember;
   prisma: HostedOnboardingPrismaClient;
+  skipIfBillingAlreadyActive?: boolean;
   sourceType: string;
 }): Promise<HostedMemberActivationResult> {
   const activated = await tryActivateHostedMemberIfStillAllowed({
     billingMode: input.billingMode,
     member: input.member,
     prisma: input.prisma,
+    skipIfBillingAlreadyActive: input.skipIfBillingAlreadyActive ?? false,
   });
 
   if (!activated) {
@@ -152,6 +154,7 @@ async function tryActivateHostedMemberIfStillAllowed(input: {
   prisma: HostedOnboardingPrismaClient;
   revnetIssuanceStatus?: HostedRevnetIssuanceStatus | null;
   revnetRequired?: boolean;
+  skipIfBillingAlreadyActive?: boolean;
 }): Promise<boolean> {
   let currentMember: HostedMember | null = input.member;
 
@@ -160,7 +163,7 @@ async function tryActivateHostedMemberIfStillAllowed(input: {
       return false;
     }
 
-    if (currentMember.status === HostedMemberStatus.active) {
+    if (input.skipIfBillingAlreadyActive) {
       return false;
     }
 
@@ -195,7 +198,7 @@ async function tryActivateHostedMemberIfStillAllowed(input: {
       data: {
         billingMode: input.billingMode ?? currentMember.billingMode,
         billingStatus: HostedBillingStatus.active,
-        status: HostedMemberStatus.active,
+        status: HostedMemberStatus.registered,
       },
     });
 

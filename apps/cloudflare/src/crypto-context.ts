@@ -4,6 +4,7 @@ const utf8Encoder = new TextEncoder();
 export type HostedStorageScope =
   | "artifact"
   | "assistant-usage"
+  | "assistant-usage-dirty"
   | "bundle"
   | "dispatch-payload"
   | "device-sync-runtime"

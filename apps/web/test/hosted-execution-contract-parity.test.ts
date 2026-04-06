@@ -127,7 +127,15 @@ describe("hosted execution contract parity", () => {
     for (const kind of HOSTED_EXECUTION_EVENT_KINDS) {
       const dispatch = dispatchBuilders[kind]();
       const dispatchRef = buildHostedExecutionDispatchRef(dispatch);
-      const payload = serializeHostedExecutionOutboxPayload(dispatch);
+      const payload = serializeHostedExecutionOutboxPayload(dispatch, {
+        ...(kind === "assistant.cron.tick"
+          ? {}
+          : {
+              payloadRef: {
+                key: `transient/dispatch-payloads/member_123/${dispatch.eventId}.json`,
+              },
+            }),
+      });
       const parsedDispatchRef = readHostedExecutionDispatchRef(payload);
 
       expect(dispatch.event.kind).toBe(kind);

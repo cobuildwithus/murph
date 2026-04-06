@@ -249,7 +249,7 @@ describe("completeHostedPrivyVerification", () => {
       billingStatus: HostedBillingStatus.active,
       phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
       privyUserId: "did:privy:user_123",
-      status: HostedMemberStatus.active,
+      status: HostedMemberStatus.registered,
       walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
       walletChainType: "ethereum",
       walletCreatedAt: new Date("2026-03-20T12:00:00.000Z"),

@@ -3039,11 +3039,6 @@ function createUserRunnerStub() {
       retryingEventId: null,
       userId: "member_123",
     })),
-    putDeviceSyncRuntimeSnapshot: vi.fn(async (input: {
-      snapshot: {
-        userId: string;
-      };
-    }) => input.snapshot),
     updateUserEnv: vi.fn(async (update: { env: Record<string, string | null> }) => ({
       configuredUserEnvKeys: Object.keys(update.env).sort(),
       userId: "member_123",

@@ -303,25 +303,6 @@ export class HostedUserRunner {
     });
   }
 
-  private async syncDeviceSyncRuntimeSnapshotFromDispatch(
-    dispatch: HostedExecutionDispatchRequest,
-  ): Promise<void> {
-    if (dispatch.event.kind !== "device-sync.wake" || !dispatch.event.runtimeSnapshot) {
-      return;
-    }
-
-    const runtimeSnapshot = dispatch.event.runtimeSnapshot;
-    await this.withUserKeyEnvelopeLock(async () => {
-      const { crypto } = await this.ensureRunnerStoresWhileHoldingKeyLock(dispatch.event.userId);
-      await createHostedDeviceSyncRuntimeStore({
-        bucket: this.bucket,
-        key: crypto.rootKey,
-        keyId: crypto.rootKeyId,
-        keysById: crypto.keysById,
-      }).mergeSnapshot(runtimeSnapshot);
-    });
-  }
-
   async gatewayListConversations(
     input?: GatewayListConversationsInput,
   ): Promise<GatewayListConversationsResult> {
@@ -378,24 +359,6 @@ export class HostedUserRunner {
     };
   }
 
-  async putDeviceSyncRuntimeSnapshot(input: {
-    snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse;
-  }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse> {
-    const userId = await this.requireBoundUserId();
-
-    if (input.snapshot.userId !== userId) {
-      throw new TypeError("Hosted device-sync runtime snapshot userId does not match the bound user.");
-    }
-
-    const { crypto } = await this.ensureRunnerStores(userId);
-    return createHostedDeviceSyncRuntimeStore({
-      bucket: this.bucket,
-      key: crypto.rootKey,
-      keyId: crypto.rootKeyId,
-      keysById: crypto.keysById,
-    }).mergeSnapshot(input.snapshot);
-  }
-
   async getDeviceSyncRuntimeSnapshot(input: {
     request: HostedExecutionDeviceSyncRuntimeSnapshotRequest;
   }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse> {
@@ -442,6 +405,9 @@ export class HostedUserRunner {
       const { crypto } = await this.ensureRunnerStoresWhileHoldingKeyLock(userId);
       return createHostedPendingUsageStore({
         bucket: this.bucket,
+        dirtyKey: this.env.platformEnvelopeKey,
+        dirtyKeyId: this.env.platformEnvelopeKeyId,
+        dirtyKeysById: this.env.platformEnvelopeKeysById,
         key: crypto.rootKey,
         keyId: crypto.rootKeyId,
         keysById: crypto.keysById,
@@ -457,6 +423,9 @@ export class HostedUserRunner {
     const { crypto } = await this.ensureRunnerStores(userId);
     return createHostedPendingUsageStore({
       bucket: this.bucket,
+      dirtyKey: this.env.platformEnvelopeKey,
+      dirtyKeyId: this.env.platformEnvelopeKeyId,
+      dirtyKeysById: this.env.platformEnvelopeKeysById,
       key: crypto.rootKey,
       keyId: crypto.rootKeyId,
       keysById: crypto.keysById,
@@ -472,6 +441,9 @@ export class HostedUserRunner {
       const { crypto } = await this.ensureRunnerStoresWhileHoldingKeyLock(userId);
       await createHostedPendingUsageStore({
         bucket: this.bucket,
+        dirtyKey: this.env.platformEnvelopeKey,
+        dirtyKeyId: this.env.platformEnvelopeKeyId,
+        dirtyKeysById: this.env.platformEnvelopeKeysById,
         key: crypto.rootKey,
         keyId: crypto.rootKeyId,
         keysById: crypto.keysById,
@@ -520,7 +492,6 @@ export class HostedUserRunner {
   async dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {
     await this.queueStore.bootstrapUser(input.event.userId);
     await this.ensureRunnerStores(input.event.userId);
-    await this.syncDeviceSyncRuntimeSnapshotFromDispatch(input);
     return this.dispatchBootstrapped(input);
   }
 
@@ -529,7 +500,6 @@ export class HostedUserRunner {
   ): Promise<HostedExecutionDispatchResult> {
     await this.queueStore.bootstrapUser(input.event.userId);
     await this.ensureRunnerStores(input.event.userId);
-    await this.syncDeviceSyncRuntimeSnapshotFromDispatch(input);
     const initialState = await this.queueStore.readEventState(input.eventId);
     const status = await this.dispatchBootstrapped(input);
     const nextState = await this.queueStore.readEventState(input.eventId);
@@ -620,11 +590,11 @@ export class HostedUserRunner {
     }
 
     record = await this.queueStore.clearNextWakeIfDue(Date.now());
-    if (!record.activated && record.pendingEventCount === 0) {
+    if (!record.runtimeBootstrapped && record.pendingEventCount === 0) {
       return;
     }
 
-    if (record.activated && !(await this.queueStore.hasDuePendingDispatch(Date.now()))) {
+    if (record.runtimeBootstrapped && !(await this.queueStore.hasDuePendingDispatch(Date.now()))) {
       const enqueueResult = await this.queueStore.enqueueDispatch({
         event: {
           kind: "assistant.cron.tick",
@@ -642,7 +612,7 @@ export class HostedUserRunner {
       }
     }
 
-    if (!record.activated && record.pendingEventCount === 0) {
+    if (!record.runtimeBootstrapped && record.pendingEventCount === 0) {
       return;
     }
 

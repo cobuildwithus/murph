@@ -33,64 +33,6 @@ describe("device-sync hosted runtime helpers", () => {
     vi.clearAllMocks();
   });
 
-  it("builds metadata-only runtime snapshots from hosted device connections", async () => {
-    const { buildHostedDeviceSyncRuntimeSnapshot } = await import(
-      "@/src/lib/device-sync/internal-runtime"
-    );
-    const store = {
-      prisma: {
-        deviceConnection: {
-          findMany: vi.fn().mockResolvedValue([
-            {
-              connectedAt: "2026-03-20T10:00:00.000Z",
-              createdAt: "2026-03-20T10:00:00.000Z",
-              displayName: "Alice Oura",
-              externalAccountId: "oura_alice",
-              id: "dsc_123",
-              metadataJson: { source: "oauth" },
-              provider: "oura",
-              scopes: ["heartrate"],
-              status: "active",
-              updatedAt: "2026-03-20T10:00:00.000Z",
-              userId: "user-123",
-            },
-          ]),
-        },
-      },
-    };
-
-    const snapshot = await buildHostedDeviceSyncRuntimeSnapshot(
-      store as never,
-      {
-        userId: "user-123",
-      },
-    );
-
-    expect(snapshot).toEqual({
-      connections: [
-        {
-          connection: expect.objectContaining({
-            id: "dsc_123",
-            metadata: { source: "oauth" },
-            provider: "oura",
-          }),
-          localState: {
-            lastErrorCode: null,
-            lastErrorMessage: null,
-            lastSyncCompletedAt: null,
-            lastSyncErrorAt: null,
-            lastSyncStartedAt: null,
-            lastWebhookAt: null,
-            nextReconcileAt: null,
-          },
-          tokenBundle: null,
-        },
-      ],
-      generatedAt: expect.any(String),
-      userId: "user-123",
-    });
-  });
-
   it("requires a token bundle when composing a Cloudflare-backed runtime account", async () => {
     const {
       composeHostedRuntimeDeviceSyncAccount,

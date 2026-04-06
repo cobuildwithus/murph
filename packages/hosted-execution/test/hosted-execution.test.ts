@@ -20,10 +20,10 @@ import {
   buildHostedExecutionVaultShareAcceptedDispatch,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
+  buildHostedExecutionPendingUsageUsersPath,
   buildHostedExecutionSharePackPath,
   buildHostedExecutionUserDispatchPayloadPath,
   buildHostedExecutionUserDeviceSyncRuntimePath,
-  buildHostedExecutionUserDeviceSyncRuntimeSnapshotPath,
   buildHostedExecutionUserEnvPath,
   buildHostedExecutionUserPendingUsagePath,
   buildHostedExecutionUserRunPath,
@@ -1044,14 +1044,14 @@ describe("@murphai/hosted-execution", () => {
     expect(buildHostedExecutionUserEnvPath("member/123")).toBe(
       "/internal/users/member%2F123/env",
     );
-    expect(buildHostedExecutionUserDeviceSyncRuntimeSnapshotPath("member/123")).toBe(
-      "/internal/users/member%2F123/device-sync/runtime/snapshot",
-    );
     expect(buildHostedExecutionUserDeviceSyncRuntimePath("member/123")).toBe(
       "/internal/users/member%2F123/device-sync/runtime",
     );
     expect(buildHostedExecutionUserPendingUsagePath("member/123")).toBe(
       "/internal/users/member%2F123/usage/pending",
+    );
+    expect(buildHostedExecutionPendingUsageUsersPath()).toBe(
+      "/internal/usage/pending-users",
     );
   });
 
@@ -1298,9 +1298,21 @@ describe("@murphai/hosted-execution", () => {
       },
     });
     const inlinePayload = buildHostedExecutionOutboxPayload(inlineDispatch);
-    const referencePayload = buildHostedExecutionOutboxPayload(referenceDispatch);
-    const activationPayload = buildHostedExecutionOutboxPayload(activationDispatch);
-    const sharePayload = buildHostedExecutionOutboxPayload(shareDispatch);
+    const referencePayload = buildHostedExecutionOutboxPayload(referenceDispatch, {
+      payloadRef: {
+        key: "transient/dispatch-payloads/member_123/email.json",
+      },
+    });
+    const activationPayload = buildHostedExecutionOutboxPayload(activationDispatch, {
+      payloadRef: {
+        key: "transient/dispatch-payloads/member_123/member-activated.json",
+      },
+    });
+    const sharePayload = buildHostedExecutionOutboxPayload(shareDispatch, {
+      payloadRef: {
+        key: "transient/dispatch-payloads/member_123/share.json",
+      },
+    });
 
     expect(inlinePayload).toEqual({
       dispatch: inlineDispatch,
@@ -1309,16 +1321,25 @@ describe("@murphai/hosted-execution", () => {
     });
     expect(referencePayload).toEqual({
       dispatchRef: buildHostedExecutionDispatchRef(referenceDispatch),
+      payloadRef: {
+        key: "transient/dispatch-payloads/member_123/email.json",
+      },
       schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
       storage: "reference",
     });
     expect(activationPayload).toEqual({
       dispatchRef: buildHostedExecutionDispatchRef(activationDispatch),
+      payloadRef: {
+        key: "transient/dispatch-payloads/member_123/member-activated.json",
+      },
       schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
       storage: "reference",
     });
     expect(sharePayload).toEqual({
       dispatchRef: buildHostedExecutionDispatchRef(shareDispatch),
+      payloadRef: {
+        key: "transient/dispatch-payloads/member_123/share.json",
+      },
       schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
       storage: "reference",
     });
@@ -2198,14 +2219,10 @@ describe("@murphai/hosted-execution", () => {
     );
   });
 
-  it("control client writes device-sync runtime snapshot mirrors through the dedicated snapshot route", async () => {
+  it("control client lists dirty pending-usage users through the shared route", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       new Response(
-        JSON.stringify({
-          connections: [],
-          generatedAt: "2026-04-05T10:45:00.000Z",
-          userId: "member/123",
-        }),
+        JSON.stringify(["member/123", "member/456"]),
         { status: 200 },
       ),
     );
@@ -2215,25 +2232,15 @@ describe("@murphai/hosted-execution", () => {
       getBearerToken: async () => "vercel-oidc-token",
     });
 
-    await expect(client.putDeviceSyncRuntimeSnapshot("member/123", {
-      connections: [],
-      generatedAt: "2026-04-05T10:45:00.000Z",
-      userId: "member/123",
-    })).resolves.toEqual({
-      connections: [],
-      generatedAt: "2026-04-05T10:45:00.000Z",
-      userId: "member/123",
-    });
+    await expect(client.getPendingUsageDirtyUsers(2)).resolves.toEqual([
+      "member/123",
+      "member/456",
+    ]);
 
     expect(fetchImpl).toHaveBeenCalledWith(
-      "https://worker.example.test/internal/users/member%2F123/device-sync/runtime/snapshot",
+      "https://worker.example.test/internal/usage/pending-users?limit=2",
       expect.objectContaining({
-        body: JSON.stringify({
-          connections: [],
-          generatedAt: "2026-04-05T10:45:00.000Z",
-          userId: "member/123",
-        }),
-        method: "PUT",
+        method: "GET",
       }),
     );
   });

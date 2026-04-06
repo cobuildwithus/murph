@@ -2,6 +2,7 @@ import type { DeviceSyncAccountStatus } from "@murphai/device-syncd/public-ingre
 import { sanitizeStoredDeviceSyncMetadata } from "@murphai/device-syncd/public-ingress";
 import {
   type HostedExecutionDeviceSyncRuntimeApplyRequest as HostedDeviceSyncRuntimeApplyRequest,
+  type HostedExecutionDeviceSyncRuntimeConnectionSeed as HostedDeviceSyncRuntimeConnectionSeed,
   type HostedExecutionDeviceSyncRuntimeConnectionUpdate as HostedDeviceSyncRuntimeConnectionUpdate,
   type HostedExecutionDeviceSyncRuntimeSnapshotRequest as HostedDeviceSyncRuntimeSnapshotRequest,
   type HostedExecutionDeviceSyncRuntimeTokenBundle as HostedDeviceSyncRuntimeTokenBundle,
@@ -86,6 +87,9 @@ function parseHostedDeviceSyncRuntimeConnectionUpdate(
             `updates[${index}].observedTokenVersion`,
           ),
         }),
+    ...(record.seed === undefined
+      ? {}
+      : { seed: parseHostedDeviceSyncRuntimeConnectionSeed(record.seed, index) }),
     ...(record.tokenBundle === undefined
       ? {}
       : {
@@ -124,6 +128,28 @@ function assertNoLegacyHostedDeviceSyncRuntimeFlatFields(
       `updates[${index}].localState must be used for local observation fields.`,
     );
   }
+}
+
+function parseHostedDeviceSyncRuntimeConnectionSeed(
+  value: unknown,
+  index: number,
+): HostedDeviceSyncRuntimeConnectionSeed {
+  const record = requireObject(value, `updates[${index}].seed`);
+
+  return {
+    connection: parseHostedDeviceSyncRuntimeConnectionStateSnapshot(
+      record.connection,
+      `updates[${index}].seed.connection`,
+    ),
+    localState: parseHostedDeviceSyncRuntimeLocalStateSnapshot(
+      record.localState,
+      `updates[${index}].seed.localState`,
+    ),
+    tokenBundle: parseHostedDeviceSyncRuntimeTokenBundle(
+      record.tokenBundle,
+      `updates[${index}].seed.tokenBundle`,
+    ),
+  };
 }
 
 function parseHostedDeviceSyncRuntimeConnectionStateUpdate(
@@ -221,11 +247,51 @@ function parseHostedDeviceSyncRuntimeLocalStateUpdate(
   };
 }
 
+function parseHostedDeviceSyncRuntimeConnectionStateSnapshot(
+  value: unknown,
+  label: string,
+): HostedDeviceSyncRuntimeConnectionSeed["connection"] {
+  const record = requireObject(value, label);
+
+  return {
+    accessTokenExpiresAt: readNullableIsoTimestamp(record.accessTokenExpiresAt, `${label}.accessTokenExpiresAt`),
+    connectedAt: requireIsoTimestamp(record.connectedAt, `${label}.connectedAt`),
+    createdAt: requireIsoTimestamp(record.createdAt, `${label}.createdAt`),
+    displayName: readNullableString(record.displayName, `${label}.displayName`),
+    externalAccountId: requireString(record.externalAccountId, `${label}.externalAccountId`),
+    id: requireString(record.id, `${label}.id`),
+    metadata: sanitizeStoredDeviceSyncMetadata(requireObject(record.metadata, `${label}.metadata`)),
+    provider: requireString(record.provider, `${label}.provider`),
+    scopes: requireStringArray(record.scopes, `${label}.scopes`),
+    status: parseDeviceSyncStatus(record.status, `${label}.status`),
+    ...(record.updatedAt === undefined
+      ? {}
+      : { updatedAt: readNullableIsoTimestamp(record.updatedAt, `${label}.updatedAt`) ?? undefined }),
+  };
+}
+
+function parseHostedDeviceSyncRuntimeLocalStateSnapshot(
+  value: unknown,
+  label: string,
+): HostedDeviceSyncRuntimeConnectionSeed["localState"] {
+  const record = requireObject(value, label);
+
+  return {
+    lastErrorCode: readNullableString(record.lastErrorCode, `${label}.lastErrorCode`),
+    lastErrorMessage: readNullableString(record.lastErrorMessage, `${label}.lastErrorMessage`),
+    lastSyncCompletedAt: readNullableIsoTimestamp(record.lastSyncCompletedAt, `${label}.lastSyncCompletedAt`),
+    lastSyncErrorAt: readNullableIsoTimestamp(record.lastSyncErrorAt, `${label}.lastSyncErrorAt`),
+    lastSyncStartedAt: readNullableIsoTimestamp(record.lastSyncStartedAt, `${label}.lastSyncStartedAt`),
+    lastWebhookAt: readNullableIsoTimestamp(record.lastWebhookAt, `${label}.lastWebhookAt`),
+    nextReconcileAt: readNullableIsoTimestamp(record.nextReconcileAt, `${label}.nextReconcileAt`),
+  };
+}
+
 function parseHostedDeviceSyncRuntimeTokenBundle(
   value: unknown,
   label: string,
 ): HostedDeviceSyncRuntimeTokenBundle | null {
-  if (value === null) {
+  if (value === null || value === undefined) {
     return null;
   }
 

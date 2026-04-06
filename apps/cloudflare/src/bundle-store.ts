@@ -25,6 +25,15 @@ import {
 
 export interface R2BucketLike extends EncryptedR2BucketLike {
   delete?(key: string): Promise<void>;
+  list?(input: {
+    cursor?: string;
+    limit?: number;
+    prefix?: string;
+  }): Promise<{
+    cursor?: string;
+    objects: Array<{ key: string }>;
+    truncated: boolean;
+  }>;
 }
 
 export interface HostedBundleStore {

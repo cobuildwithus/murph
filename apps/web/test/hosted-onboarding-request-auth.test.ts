@@ -221,7 +221,7 @@ function createHostedMember(
     normalizedPhoneNumber: "+14155552671",
     phoneNumberVerifiedAt: new Date("2025-03-27T08:30:00.000Z"),
     privyUserId: "did:privy:user_123",
-    status: HostedMemberStatus.active,
+    status: HostedMemberStatus.registered,
     stripeCustomerId: null,
     stripeLatestBillingEventCreatedAt: null,
     stripeLatestBillingEventId: null,

@@ -406,7 +406,7 @@ describe("HostedUserRunner", () => {
       const previousVaultRef = await bundleStore.writeBundle("vault", previousVaultBundle!);
 
       await seedRunnerQueueState({
-        activated: true,
+        runtimeBootstrapped: true,
         bucket,
         environment,
         pendingEvents: [
@@ -895,7 +895,7 @@ describe("HostedUserRunner", () => {
       userId: "member_123",
     });
     await seedRunnerQueueState({
-      activated: true,
+      runtimeBootstrapped: true,
       bucket,
       environment,
       pendingEvents: [{
@@ -1053,7 +1053,7 @@ describe("HostedUserRunner", () => {
     });
 
     await seedRunnerQueueState({
-      activated: true,
+      runtimeBootstrapped: true,
       bucket,
       environment: rotatedEnvironment,
       pendingEvents: [
@@ -1362,7 +1362,7 @@ describe("HostedUserRunner", () => {
     };
 
     await seedRunnerQueueState({
-      activated: true,
+      runtimeBootstrapped: true,
       bucket,
       environment,
       pendingEvents: [
@@ -1513,7 +1513,7 @@ describe("HostedUserRunner", () => {
       }),
     );
     await seedRunnerQueueState({
-      activated: true,
+      runtimeBootstrapped: true,
       bucket,
       environment,
       lastError: null,
@@ -2704,7 +2704,7 @@ describe("HostedUserRunner", () => {
       occurredAt: "2026-03-26T12:20:00.000Z",
     };
     await seedRunnerQueueState({
-      activated: false,
+      runtimeBootstrapped: false,
       bucket,
       environment,
       lastError: "timeout",
@@ -3334,7 +3334,7 @@ function createStorage() {
 
 async function seedRunnerQueueState(
   input: {
-    activated?: boolean;
+    runtimeBootstrapped?: boolean;
     backpressuredEventIds?: string[];
     bucket: ReturnType<typeof createBucket>;
     environment: {
@@ -3413,7 +3413,7 @@ async function seedRunnerQueueState(
     `INSERT INTO runner_meta (
       singleton,
       user_id,
-      activated,
+      runtime_bootstrapped,
       in_flight,
       last_error_at,
       last_error_code,
@@ -3422,7 +3422,7 @@ async function seedRunnerQueueState(
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     1,
     input.userId,
-    input.activated ? 1 : 0,
+    input.runtimeBootstrapped ? 1 : 0,
     input.inFlight ? 1 : 0,
     input.lastErrorAt ?? null,
     seedErrorCode,

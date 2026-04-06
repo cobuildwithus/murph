@@ -272,6 +272,12 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionSnapshot {
   tokenBundle: HostedExecutionDeviceSyncRuntimeTokenBundle | null;
 }
 
+export interface HostedExecutionDeviceSyncRuntimeConnectionSeed {
+  connection: HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot;
+  localState: HostedExecutionDeviceSyncRuntimeLocalStateSnapshot;
+  tokenBundle: HostedExecutionDeviceSyncRuntimeTokenBundle | null;
+}
+
 export interface HostedExecutionDeviceSyncRuntimeSnapshotRequest {
   connectionId?: string | null;
   provider?: string | null;
@@ -308,6 +314,7 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionUpdate {
   localState?: HostedExecutionDeviceSyncRuntimeLocalStateUpdate;
   observedUpdatedAt?: string | null;
   observedTokenVersion?: number | null;
+  seed?: HostedExecutionDeviceSyncRuntimeConnectionSeed;
   tokenBundle?: HostedExecutionDeviceSyncRuntimeTokenBundle | null;
 }
 
@@ -320,7 +327,7 @@ export interface HostedExecutionDeviceSyncRuntimeApplyRequest {
 export interface HostedExecutionDeviceSyncRuntimeApplyEntry {
   connection: HostedExecutionDeviceSyncRuntimeConnectionSnapshot["connection"] | null;
   connectionId: string;
-  status: "missing" | "updated";
+  status: "created" | "missing" | "updated";
   tokenUpdate: "applied" | "cleared" | "missing" | "skipped_version_mismatch" | "unchanged";
 }
 

@@ -255,26 +255,14 @@ export async function drainHostedPendingAiUsageImports(input: {
 } = {}): Promise<HostedPendingAiUsageImportDrainResult> {
   const prisma = input.prisma ?? getPrisma();
   const client = requireHostedExecutionControlClient();
-  const members = await prisma.hostedMember.findMany({
-    where: {
-      status: {
-        in: ["registered", "active", "suspended"],
-      },
-    },
-    select: {
-      id: true,
-    },
-    orderBy: {
-      createdAt: "asc",
-    },
-  });
+  const dirtyUserIds = await client.getPendingUsageDirtyUsers();
 
   let imported = 0;
   let failedUsers = 0;
 
-  for (const member of members) {
+  for (const userId of dirtyUserIds) {
     try {
-      const usage = await client.getPendingUsage(member.id, input.limitPerUser ?? 200);
+      const usage = await client.getPendingUsage(userId, input.limitPerUser ?? 200);
 
       if (usage.length === 0) {
         continue;
@@ -282,19 +270,19 @@ export async function drainHostedPendingAiUsageImports(input: {
 
       const result = await importHostedAiUsageRecords({
         prisma,
-        trustedUserId: member.id,
+        trustedUserId: userId,
         usage,
       });
 
       if (result.recordedIds.length > 0) {
-        await client.deletePendingUsage(member.id, result.recordedIds);
+        await client.deletePendingUsage(userId, result.recordedIds);
       }
 
       imported += result.recordedIds.length;
     } catch (error) {
       failedUsers += 1;
       console.error(
-        `Failed to import hosted pending AI usage for ${member.id}.`,
+        `Failed to import hosted pending AI usage for ${userId}.`,
         error instanceof Error ? error.message : String(error),
       );
     }
@@ -303,7 +291,7 @@ export async function drainHostedPendingAiUsageImports(input: {
   return {
     failedUsers,
     imported,
-    scannedUsers: members.length,
+    scannedUsers: dirtyUserIds.length,
   };
 }
 

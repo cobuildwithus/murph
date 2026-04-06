@@ -29,7 +29,7 @@ export interface HostedExecutionInlineOutboxPayload {
 
 export interface HostedExecutionReferenceOutboxPayload {
   dispatchRef: HostedExecutionDispatchRef;
-  payloadRef?: HostedExecutionDispatchPayloadRef;
+  payloadRef: HostedExecutionDispatchPayloadRef;
   schemaVersion: typeof HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION;
   storage: "reference";
 }
@@ -76,9 +76,15 @@ export function buildHostedExecutionOutboxPayload(
     };
   }
 
+  if (!options.payloadRef) {
+    throw new TypeError(
+      `Hosted execution ${dispatch.event.kind} reference payloads require a staged payloadRef.`,
+    );
+  }
+
   return {
     dispatchRef: buildHostedExecutionDispatchRef(dispatch),
-    ...(options.payloadRef ? { payloadRef: options.payloadRef } : {}),
+    payloadRef: options.payloadRef,
     schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
     storage,
   };
@@ -119,14 +125,6 @@ export function readHostedExecutionOutboxPayload(
       const dispatchRef = readHostedExecutionDispatchRef(payloadObject);
       if (!dispatchRef || !isHostedExecutionOutboxPayloadStorageAllowed(dispatchRef.eventKind, storage)) {
         return null;
-      }
-
-      if (payloadObject.payloadRef === undefined) {
-        return {
-          dispatchRef,
-          schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
-          storage,
-        };
       }
 
       const payloadRef = readHostedExecutionDispatchPayloadRef(payloadObject.payloadRef);

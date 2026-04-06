@@ -235,9 +235,7 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
         status:
           input.member.status === HostedMemberStatus.suspended
             ? HostedMemberStatus.suspended
-            : input.member.billingStatus === HostedBillingStatus.active
-              ? HostedMemberStatus.active
-              : HostedMemberStatus.registered,
+            : HostedMemberStatus.registered,
         walletAddress: normalizedWalletAddress,
         walletChainType: input.identity.wallet.chainType,
         walletProvider: "privy",

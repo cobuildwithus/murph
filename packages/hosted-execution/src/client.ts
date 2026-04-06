@@ -26,8 +26,8 @@ import {
 import {
   buildHostedExecutionSharePackPath,
   buildHostedExecutionUserCryptoContextPath,
+  buildHostedExecutionPendingUsageUsersPath,
   buildHostedExecutionUserDeviceSyncRuntimePath,
-  buildHostedExecutionUserDeviceSyncRuntimeSnapshotPath,
   buildHostedExecutionUserDispatchPayloadPath,
   buildHostedExecutionUserEnvPath,
   buildHostedExecutionUserPendingUsagePath,
@@ -69,13 +69,10 @@ export interface HostedExecutionControlClient {
     input?: Omit<HostedExecutionDeviceSyncRuntimeSnapshotRequest, "userId">,
   ): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
   getPendingUsage(userId: string, limit?: number): Promise<Record<string, unknown>[]>;
+  getPendingUsageDirtyUsers(limit?: number): Promise<string[]>;
   getSharePack(userId: string, shareId: string): Promise<SharePack | null>;
   getStatus(userId: string): Promise<HostedExecutionUserStatus>;
   getUserEnvStatus(userId: string): Promise<HostedExecutionUserEnvStatus>;
-  putDeviceSyncRuntimeSnapshot(
-    userId: string,
-    snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse,
-  ): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
   putSharePack(userId: string, shareId: string, pack: SharePack): Promise<SharePack>;
   provisionManagedUserCrypto(userId: string): Promise<HostedExecutionManagedUserCryptoStatus>;
   run(userId: string): Promise<HostedExecutionUserStatus>;
@@ -285,6 +282,37 @@ export function createHostedExecutionControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
+    getPendingUsageDirtyUsers(limit) {
+      const search = typeof limit === "number" && Number.isFinite(limit) && limit > 0
+        ? new URLSearchParams({ limit: String(Math.floor(limit)) }).toString()
+        : null;
+
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "pending usage dirty users",
+        parse: (value) => {
+          if (!Array.isArray(value)) {
+            throw new TypeError("Pending usage dirty users response must be an array.");
+          }
+
+          return value.map((entry, index) => {
+            if (typeof entry !== "string" || entry.length === 0) {
+              throw new TypeError(`Pending usage dirty users[${index}] must be a non-empty string.`);
+            }
+
+            return entry;
+          });
+        },
+        path: buildHostedExecutionPendingUsageUsersPath(),
+        request: {
+          method: "GET",
+          search,
+        },
+        timeoutMs: options.timeoutMs,
+      });
+    },
     getSharePack(userId, shareId) {
       return requestHostedExecutionAuthorizedJson({
         baseUrl,
@@ -306,24 +334,6 @@ export function createHostedExecutionControlClient(
         }
 
         throw error;
-      });
-    },
-    putDeviceSyncRuntimeSnapshot(userId, snapshot) {
-      const requestPayload = parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(snapshot);
-
-      return requestHostedExecutionAuthorizedJson({
-        baseUrl,
-        fetchImpl,
-        getAuthorizationHeader,
-        label: "device-sync runtime snapshot mirror",
-        parse: parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
-        path: buildHostedExecutionUserDeviceSyncRuntimeSnapshotPath(userId),
-        request: {
-          body: JSON.stringify(requestPayload),
-          headers: { "content-type": "application/json; charset=utf-8" },
-          method: "PUT",
-        },
-        timeoutMs: options.timeoutMs,
       });
     },
     putSharePack(userId, shareId, pack) {

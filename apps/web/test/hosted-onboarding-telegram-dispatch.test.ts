@@ -75,7 +75,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         findUnique: vi.fn().mockResolvedValue({
           billingStatus: HostedBillingStatus.active,
           id: "member_telegram_123",
-          status: HostedMemberStatus.active,
+          status: HostedMemberStatus.registered,
         }),
       },
     }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
@@ -436,7 +436,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         findUnique: vi.fn().mockResolvedValue({
           billingStatus: HostedBillingStatus.active,
           id: "member_telegram_456",
-          status: HostedMemberStatus.active,
+          status: HostedMemberStatus.registered,
         }),
       },
     }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];

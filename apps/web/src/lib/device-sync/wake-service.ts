@@ -24,7 +24,6 @@ import {
   type HostedDeviceSyncWakeSource,
 } from "./hosted-dispatch";
 import {
-  buildHostedDeviceSyncRuntimeSnapshot,
   composeHostedRuntimeDeviceSyncAccount,
   findHostedDeviceSyncRuntimeConnection,
 } from "./internal-runtime";
@@ -348,29 +347,8 @@ async function publishHostedDeviceSyncWake(input: {
   store: PrismaDeviceSyncControlPlaneStore;
   userId: string;
 }): Promise<void> {
-  const snapshot = await buildHostedDeviceSyncRuntimeSnapshot(input.store, {
-    connectionId: input.connectionId,
-    provider: input.provider,
-    userId: input.userId,
-  });
-
-  await requireHostedExecutionControlClient().putDeviceSyncRuntimeSnapshot(
-    input.userId,
-    snapshot,
-  );
-
-  const dispatch = input.dispatch.event.kind === "device-sync.wake"
-    ? {
-        ...input.dispatch,
-        event: {
-          ...input.dispatch.event,
-          runtimeSnapshot: snapshot,
-        },
-      }
-    : input.dispatch;
-
   await enqueueHostedExecutionOutbox({
-    dispatch,
+    dispatch: input.dispatch,
     sourceId: String(input.signalId),
     sourceType: "device_sync_signal",
     storage: "reference",
@@ -401,7 +379,7 @@ function mapHostedDeviceSyncSignalKind(source: HostedDeviceSyncWakeSource): stri
     case "webhook-accepted":
       return "webhook_hint";
     default:
-      return source satisfies never;
+      throw new Error(`Unsupported hosted device-sync wake source: ${String(source)}`);
   }
 }
 

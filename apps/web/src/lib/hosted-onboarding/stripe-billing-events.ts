@@ -26,6 +26,7 @@ import {
   type HostedStripeDispatchContext,
   updateHostedMemberStripeBillingIfFresh,
 } from "./stripe-billing-policy";
+import { isHostedAccessBlockedBillingStatus } from "./entitlement";
 import { ensureHostedRevnetIssuanceForStripeInvoice } from "./stripe-revnet-issuance";
 
 type HostedOnboardingPrismaClient = Prisma.TransactionClient;
@@ -72,6 +73,7 @@ export async function applyStripeCheckoutCompleted(
     };
   }
 
+  const hadActiveBilling = member.billingStatus === HostedBillingStatus.active;
   const updatedMember = await updateHostedMemberStripeBillingIfFresh({
     billingMode: mode,
     billingStatus: nextBillingStatus,
@@ -96,6 +98,7 @@ export async function applyStripeCheckoutCompleted(
       dispatchContext,
       member: updatedMember,
       prisma,
+      skipIfBillingAlreadyActive: hadActiveBilling,
       sourceType: "stripe.checkout.session.completed",
     });
 
@@ -204,6 +207,8 @@ export async function applyStripeInvoicePaid(
   }
 
   const billingMode = subscriptionId ? HostedBillingMode.subscription : (member.billingMode ?? HostedBillingMode.payment);
+  const hadActiveBilling = member.billingStatus === HostedBillingStatus.active;
+  const startingBillingStatus = member.billingStatus;
   const updatedMember = await updateHostedMemberStripeBillingIfFresh({
     billingMode,
     billingStatus:
@@ -242,11 +247,23 @@ export async function applyStripeInvoicePaid(
     };
   }
 
+  if (
+    billingMode === HostedBillingMode.subscription &&
+    isHostedAccessBlockedBillingStatus(startingBillingStatus)
+  ) {
+    return {
+      activatedMemberId: null,
+      createdOrUpdatedRevnetIssuance: false,
+      hostedExecutionEventId: null,
+    };
+  }
+
   const activation = await activateHostedMemberForPositiveSource({
     billingMode,
     dispatchContext,
     member: updatedMember,
     prisma,
+    skipIfBillingAlreadyActive: hadActiveBilling,
     sourceType: "stripe.invoice.paid",
   });
 

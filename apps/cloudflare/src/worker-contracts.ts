@@ -58,9 +58,6 @@ export interface WorkerUserRunnerStubLike {
   getDeviceSyncRuntimeSnapshot?(input: {
     request: HostedExecutionDeviceSyncRuntimeSnapshotRequest;
   }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
-  putDeviceSyncRuntimeSnapshot?(input: {
-    snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse;
-  }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
   putPendingUsage?(input: {
     usage: readonly Record<string, unknown>[];
   }): Promise<{ recorded: number; usageIds: string[] }>;
