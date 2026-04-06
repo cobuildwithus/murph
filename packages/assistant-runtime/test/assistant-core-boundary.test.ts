@@ -24,8 +24,18 @@ test('assistant-runtime depends on the split owner packages directly', async () 
   assert.equal(runtimeManifest.dependencies?.['@murphai/operator-config'], 'workspace:*')
   assert.equal(runtimeManifest.dependencies?.['@murphai/vault-inbox'], 'workspace:*')
   assert.equal(runtimeManifest.dependencies?.['@murphai/assistant-core'], undefined)
-  assert.match(hostedRuntimeSource, /from "@murphai\/operator-config"/)
-  assert.match(hostedContextSource, /from "@murphai\/operator-config"/)
+  assert.match(
+    hostedRuntimeSource,
+    /from "@murphai\/operator-config\/hosted-assistant-config"/,
+  )
+  assert.match(
+    hostedContextSource,
+    /from "@murphai\/operator-config\/hosted-assistant-config"/,
+  )
+  assert.match(
+    hostedContextSource,
+    /from "@murphai\/operator-config\/operator-config"/,
+  )
   assert.match(hostedContextSource, /from "@murphai\/vault-inbox"/)
   assert.doesNotMatch(hostedRuntimeSource, /@murphai\/assistant-core/u)
   assert.doesNotMatch(hostedContextSource, /@murphai\/assistant-core/u)

@@ -6,7 +6,7 @@ import {
   assistantBackendTargetToProviderConfigInput,
   createAssistantModelTarget,
   type AssistantModelTarget,
-} from '../assistant-backend.js'
+} from '@murphai/operator-config/assistant-backend'
 import type { AssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import { resolveAssistantBackendTarget } from '@murphai/operator-config/operator-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'

@@ -1,4 +1,4 @@
-export * from './assistant/openai-compatible-provider-presets.js'
+export * from '@murphai/operator-config/assistant/openai-compatible-provider-presets'
 export * from './assistant/provider-config.js'
 export * from './assistant/provider-registry.js'
 export * from './assistant/provider-state.js'

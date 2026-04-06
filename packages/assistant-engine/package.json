@@ -27,10 +27,6 @@
       "types": "./dist/assistant-cli-tools.d.ts",
       "default": "./dist/assistant-cli-tools.js"
     },
-    "./assistant-cli-tools/*": {
-      "types": "./dist/assistant-cli-tools/*.d.ts",
-      "default": "./dist/assistant-cli-tools/*.js"
-    },
     "./assistant-codex": {
       "types": "./dist/assistant-codex.d.ts",
       "default": "./dist/assistant-codex.js"

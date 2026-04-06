@@ -15,10 +15,6 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./commands/*": {
-      "types": "./dist/commands/*.d.ts",
-      "default": "./dist/commands/*.js"
-    },
     "./health-cli-descriptors": {
       "types": "./dist/health-cli-descriptors.d.ts",
       "default": "./dist/health-cli-descriptors.js"
@@ -30,10 +26,6 @@
     "./health-registry-command-metadata": {
       "types": "./dist/health-registry-command-metadata.d.ts",
       "default": "./dist/health-registry-command-metadata.js"
-    },
-    "./inbox-app/*": {
-      "types": "./dist/inbox-app/*.d.ts",
-      "default": "./dist/inbox-app/*.js"
     },
     "./inbox-services": {
       "types": "./dist/inbox-services.d.ts",
@@ -54,10 +46,6 @@
     "./knowledge": {
       "types": "./dist/knowledge.d.ts",
       "default": "./dist/knowledge.js"
-    },
-    "./knowledge/*": {
-      "types": "./dist/knowledge/*.d.ts",
-      "default": "./dist/knowledge/*.js"
     },
     "./option-utils": {
       "types": "./dist/option-utils.d.ts",

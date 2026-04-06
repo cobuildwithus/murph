@@ -3,7 +3,7 @@ import {
   type AssistantAskResult,
   type AssistantSession,
 } from '../assistant-cli-contracts.js'
-import { createDefaultLocalAssistantModelTarget } from '../assistant-backend.js'
+import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import {
   type ResolvedAssistantSession,
   appendAssistantTranscriptEntries,
