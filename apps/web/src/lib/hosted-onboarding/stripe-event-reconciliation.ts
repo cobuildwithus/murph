@@ -26,6 +26,7 @@ import {
   coerceStripeObjectId,
   coerceStripeSubscriptionId,
 } from "./billing";
+import { readHostedMemberAggregate } from "./hosted-member-store";
 import { readHostedRevnetPaymentReceipt } from "./revnet";
 import { drainHostedRevnetIssuanceSubmissionQueue } from "./stripe-revnet-issuance";
 
@@ -224,10 +225,9 @@ export async function reconcileSubmittedHostedRevnetIssuances(input: {
         },
       });
 
-      const member = await transaction.hostedMember.findUnique({
-        where: {
-          id: issuance.memberId,
-        },
+      const member = await readHostedMemberAggregate({
+        memberId: issuance.memberId,
+        prisma: transaction,
       });
 
       if (!member) {

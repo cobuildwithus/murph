@@ -880,11 +880,22 @@ function asPrismaTransactionClient<T extends Record<string, unknown>>(prisma: T)
       findFirst?: ((input: { where?: Record<string, unknown>; select?: Record<string, unknown> }) => Promise<unknown>) | undefined;
       findUnique?: ReturnType<typeof vi.fn>;
     };
+    hostedMemberIdentity?: {
+      findUnique?: ReturnType<typeof vi.fn>;
+      upsert?: ReturnType<typeof vi.fn>;
+    };
+    hostedMemberRouting?: {
+      findUnique?: ReturnType<typeof vi.fn>;
+      upsert?: ReturnType<typeof vi.fn>;
+    };
     hostedMember?: {
+      findUnique?: ((input: { where?: Record<string, unknown>; include?: Record<string, unknown> }) => Promise<unknown>) | undefined;
       updateMany?: ReturnType<typeof vi.fn>;
     };
   };
   const hostedInvite = prismaWithHostedMember.hostedInvite;
+  const hostedMemberIdentity = prismaWithHostedMember.hostedMemberIdentity;
+  const hostedMemberRouting = prismaWithHostedMember.hostedMemberRouting;
   const hostedMember = prismaWithHostedMember.hostedMember;
 
   if (hostedInvite && !hostedInvite.findUnique && hostedInvite.findFirst) {
@@ -898,6 +909,41 @@ function asPrismaTransactionClient<T extends Record<string, unknown>>(prisma: T)
 
   if (hostedMember && !hostedMember.updateMany) {
     hostedMember.updateMany = vi.fn().mockResolvedValue({ count: 1 });
+  }
+
+  if (!hostedMemberIdentity?.findUnique) {
+    Object.defineProperty(prismaWithHostedMember, "hostedMemberIdentity", {
+      configurable: true,
+      value: {
+        findUnique: vi.fn(async ({ include, where }: { include?: Record<string, unknown>; where: Record<string, unknown> }) => {
+          const member = await hostedMember?.findUnique?.({
+            include,
+            where,
+          });
+          const identity = readHostedMemberIdentityFromMockMember(member, where.normalizedPhoneNumber);
+
+          if (!identity) {
+            return null;
+          }
+
+          return include?.member ? { ...identity, member } : identity;
+        }),
+        upsert: vi.fn(async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => ({
+          ...create,
+          ...update,
+        })),
+      },
+    });
+  }
+
+  if (!hostedMemberRouting?.upsert) {
+    Object.defineProperty(prismaWithHostedMember, "hostedMemberRouting", {
+      configurable: true,
+      value: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+      },
+    });
   }
 
   return prismaWithHostedMember as unknown as Parameters<typeof handleHostedOnboardingLinqWebhook>[0]["prisma"];
@@ -950,6 +996,56 @@ function readPersistedLinqDispatchEvent(
   return payload?.linqEvent && typeof payload.linqEvent === "object"
     ? (payload.linqEvent as Record<string, unknown>)
     : undefined;
+}
+
+function readHostedMemberIdentityFromMockMember(
+  member: unknown,
+  requestedPhoneLookupKey?: unknown,
+) {
+  if (!member || typeof member !== "object") {
+    return null;
+  }
+
+  const record = member as Record<string, unknown>;
+  const identity =
+    record.identity && typeof record.identity === "object"
+      ? (record.identity as Record<string, unknown>)
+      : record;
+  const memberId =
+    typeof identity.memberId === "string"
+      ? identity.memberId
+      : typeof record.id === "string"
+        ? record.id
+        : null;
+
+  if (!memberId) {
+    return null;
+  }
+
+  const normalizedPhoneNumber =
+    typeof requestedPhoneLookupKey === "string"
+      ? requestedPhoneLookupKey
+      : typeof identity.normalizedPhoneNumber === "string"
+        ? identity.normalizedPhoneNumber
+        : null;
+
+  if (!normalizedPhoneNumber) {
+    return null;
+  }
+
+  return {
+    maskedPhoneNumberHint:
+      typeof identity.maskedPhoneNumberHint === "string" ? identity.maskedPhoneNumberHint : "*** 4567",
+    memberId,
+    normalizedPhoneNumber,
+    phoneNumberVerifiedAt:
+      identity.phoneNumberVerifiedAt instanceof Date ? identity.phoneNumberVerifiedAt : null,
+    privyUserId: typeof identity.privyUserId === "string" ? identity.privyUserId : null,
+    walletAddress: typeof identity.walletAddress === "string" ? identity.walletAddress : null,
+    walletChainType: typeof identity.walletChainType === "string" ? identity.walletChainType : null,
+    walletCreatedAt: identity.walletCreatedAt instanceof Date ? identity.walletCreatedAt : null,
+    walletProvider: typeof identity.walletProvider === "string" ? identity.walletProvider : null,
+  };
 }
 
 function buildHostedLinqWebhookBody(input: {

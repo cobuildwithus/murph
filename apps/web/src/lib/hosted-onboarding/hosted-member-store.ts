@@ -12,29 +12,17 @@ import {
 } from "./shared";
 
 type HostedMemberStoreClient = HostedOnboardingPrismaClient;
-
-type HostedMemberIdentitySnapshot = Pick<
+type HostedMemberCoreState = Pick<
   HostedMember,
-  | "id"
-  | "maskedPhoneNumberHint"
-  | "normalizedPhoneNumber"
-  | "phoneNumberVerifiedAt"
-  | "privyUserId"
-  | "walletAddress"
-  | "walletChainType"
-  | "walletProvider"
-  | "walletCreatedAt"
+  "billingMode" | "billingStatus" | "createdAt" | "id" | "status" | "updatedAt"
 >;
-
-type HostedMemberBillingRefSnapshotSource = Pick<
-  HostedMember,
-  | "id"
-  | "stripeCustomerId"
-  | "stripeSubscriptionId"
-  | "stripeLatestCheckoutSessionId"
-  | "stripeLatestBillingEventCreatedAt"
-  | "stripeLatestBillingEventId"
->;
+type HostedMemberRecordWithRelations = Prisma.HostedMemberGetPayload<{
+  include: {
+    billingRef: true;
+    identity: true;
+    routing: true;
+  };
+}>;
 
 export interface HostedMemberStripeBillingRefSnapshot {
   memberId: string;
@@ -50,6 +38,19 @@ export interface HostedMemberIdentityState {
   memberId: string;
   normalizedPhoneNumber: string;
   phoneNumberVerifiedAt: Date | null;
+  privyUserId: string | null;
+  walletAddress: string | null;
+  walletChainType: string | null;
+  walletCreatedAt: Date | null;
+  walletProvider: string | null;
+}
+
+export interface HostedMemberIdentityWriteInput {
+  maskedPhoneNumberHint: string;
+  memberId: string;
+  normalizedPhoneNumber: string;
+  phoneNumberVerifiedAt: Date | null;
+  prisma: HostedMemberStoreClient;
   privyUserId: string | null;
   walletAddress: string | null;
   walletChainType: string | null;
@@ -73,6 +74,27 @@ export interface HostedMemberRoutingStateSnapshot {
   telegramUserId: string | null;
 }
 
+export interface HostedMemberAggregate extends HostedMemberCoreState {
+  billingRef: HostedMemberStripeBillingRefSnapshot | null;
+  identity: HostedMemberIdentityState | null;
+  linqChatId: string | null;
+  maskedPhoneNumberHint: string | null;
+  normalizedPhoneNumber: string | null;
+  phoneNumberVerifiedAt: Date | null;
+  privyUserId: string | null;
+  routing: HostedMemberRoutingStateSnapshot | null;
+  stripeCustomerId: string | null;
+  stripeLatestBillingEventCreatedAt: Date | null;
+  stripeLatestBillingEventId: string | null;
+  stripeLatestCheckoutSessionId: string | null;
+  stripeSubscriptionId: string | null;
+  telegramUserId: string | null;
+  walletAddress: string | null;
+  walletChainType: string | null;
+  walletCreatedAt: Date | null;
+  walletProvider: string | null;
+}
+
 export type HostedMemberTelegramLookupSnapshot = Pick<
   HostedMember,
   "billingStatus" | "id" | "status"
@@ -82,88 +104,54 @@ export async function findHostedMemberByPrivyUserId(input: {
   prisma: HostedMemberStoreClient;
   privyUserId: string;
 }): Promise<HostedMember | null> {
-  const identityRecord = typeof input.prisma.hostedMemberIdentity?.findUnique === "function"
-    ? await input.prisma.hostedMemberIdentity.findUnique({
-        where: {
-          privyUserId: input.privyUserId,
-        },
-        include: {
-          member: true,
-        },
-      })
-    : null;
-
-  if (identityRecord?.member) {
-    return identityRecord.member;
-  }
-
-  return input.prisma.hostedMember.findUnique({
+  const identityRecord = await input.prisma.hostedMemberIdentity.findUnique({
     where: {
       privyUserId: input.privyUserId,
     },
+    include: {
+      member: true,
+    },
   });
+
+  return identityRecord?.member ?? null;
 }
 
 export async function findHostedMemberByPhoneLookupKey(input: {
   phoneLookupKey: string;
   prisma: HostedMemberStoreClient;
 }): Promise<HostedMember | null> {
-  const identityRecord = typeof input.prisma.hostedMemberIdentity?.findUnique === "function"
-    ? await input.prisma.hostedMemberIdentity.findUnique({
-        where: {
-          normalizedPhoneNumber: input.phoneLookupKey,
-        },
-        include: {
-          member: true,
-        },
-      })
-    : null;
-
-  if (identityRecord?.member) {
-    return identityRecord.member;
-  }
-
-  return input.prisma.hostedMember.findUnique({
+  const identityRecord = await input.prisma.hostedMemberIdentity.findUnique({
     where: {
       normalizedPhoneNumber: input.phoneLookupKey,
     },
+    include: {
+      member: true,
+    },
   });
+
+  return identityRecord?.member ?? null;
 }
 
 export async function findHostedMemberByWalletAddress(input: {
   prisma: HostedMemberStoreClient;
   walletAddress: string;
 }): Promise<HostedMember | null> {
-  const identityRecord = typeof input.prisma.hostedMemberIdentity?.findUnique === "function"
-    ? await input.prisma.hostedMemberIdentity.findUnique({
-        where: {
-          walletAddress: input.walletAddress,
-        },
-        include: {
-          member: true,
-        },
-      })
-    : null;
-
-  if (identityRecord?.member) {
-    return identityRecord.member;
-  }
-
-  return input.prisma.hostedMember.findUnique({
+  const identityRecord = await input.prisma.hostedMemberIdentity.findUnique({
     where: {
       walletAddress: input.walletAddress,
     },
+    include: {
+      member: true,
+    },
   });
+
+  return identityRecord?.member ?? null;
 }
 
 export async function findHostedMemberByTelegramUserLookupKey(input: {
   prisma: HostedMemberStoreClient;
   telegramUserId: string;
 }): Promise<HostedMemberTelegramLookupSnapshot | null> {
-  if (typeof input.prisma.hostedMemberRouting?.findUnique !== "function") {
-    return null;
-  }
-
   const routingRecord = await input.prisma.hostedMemberRouting.findUnique({
     where: {
       telegramUserId: input.telegramUserId,
@@ -186,102 +174,51 @@ export async function findHostedMemberByStripeCustomerId(input: {
   prisma: HostedMemberStoreClient;
   stripeCustomerId: string;
 }): Promise<HostedMember | null> {
-  const billingRefRecord = typeof input.prisma.hostedMemberBillingRef?.findUnique === "function"
-    ? await input.prisma.hostedMemberBillingRef.findUnique({
-        where: {
-          stripeCustomerId: input.stripeCustomerId,
-        },
-        include: {
-          member: true,
-        },
-      })
-    : null;
-
-  if (billingRefRecord?.member) {
-    return billingRefRecord.member;
-  }
-
-  return input.prisma.hostedMember.findUnique({
+  const billingRefRecord = await input.prisma.hostedMemberBillingRef.findUnique({
     where: {
       stripeCustomerId: input.stripeCustomerId,
     },
+    include: {
+      member: true,
+    },
   });
+
+  return billingRefRecord?.member ?? null;
 }
 
 export async function findHostedMemberByStripeSubscriptionId(input: {
   prisma: HostedMemberStoreClient;
   stripeSubscriptionId: string;
 }): Promise<HostedMember | null> {
-  const billingRefRecord = typeof input.prisma.hostedMemberBillingRef?.findUnique === "function"
-    ? await input.prisma.hostedMemberBillingRef.findUnique({
-        where: {
-          stripeSubscriptionId: input.stripeSubscriptionId,
-        },
-        include: {
-          member: true,
-        },
-      })
-    : null;
-
-  if (billingRefRecord?.member) {
-    return billingRefRecord.member;
-  }
-
-  return input.prisma.hostedMember.findUnique({
+  const billingRefRecord = await input.prisma.hostedMemberBillingRef.findUnique({
     where: {
       stripeSubscriptionId: input.stripeSubscriptionId,
     },
+    include: {
+      member: true,
+    },
   });
+
+  return billingRefRecord?.member ?? null;
 }
 
 export async function readHostedMemberIdentity(input: {
   memberId: string;
   prisma: HostedMemberStoreClient;
 }): Promise<HostedMemberIdentityState | null> {
-  const identityRecord = typeof input.prisma.hostedMemberIdentity?.findUnique === "function"
-    ? await input.prisma.hostedMemberIdentity.findUnique({
-        where: {
-          memberId: input.memberId,
-        },
-      })
-    : null;
-
-  if (identityRecord) {
-    return mapHostedMemberIdentityState(identityRecord);
-  }
-
-  if (typeof input.prisma.hostedMember.findUnique !== "function") {
-    return null;
-  }
-
-  const member = await input.prisma.hostedMember.findUnique({
+  const identityRecord = await input.prisma.hostedMemberIdentity.findUnique({
     where: {
-      id: input.memberId,
-    },
-    select: {
-      id: true,
-      maskedPhoneNumberHint: true,
-      normalizedPhoneNumber: true,
-      phoneNumberVerifiedAt: true,
-      privyUserId: true,
-      walletAddress: true,
-      walletChainType: true,
-      walletCreatedAt: true,
-      walletProvider: true,
+      memberId: input.memberId,
     },
   });
 
-  return member ? mapLegacyHostedMemberIdentityState(member) : null;
+  return identityRecord ? mapHostedMemberIdentityState(identityRecord) : null;
 }
 
 export async function readHostedMemberRoutingState(input: {
   memberId: string;
   prisma: HostedMemberStoreClient;
 }): Promise<HostedMemberRoutingStateSnapshot | null> {
-  if (typeof input.prisma.hostedMemberRouting?.findUnique !== "function") {
-    return null;
-  }
-
   return input.prisma.hostedMemberRouting.findUnique({
     where: {
       memberId: input.memberId,
@@ -294,6 +231,69 @@ export async function readHostedMemberRoutingState(input: {
   });
 }
 
+export async function readHostedMemberStripeBillingRef(input: {
+  memberId: string;
+  prisma: HostedMemberStoreClient;
+}): Promise<HostedMemberStripeBillingRefSnapshot | null> {
+  const billingRef = await input.prisma.hostedMemberBillingRef.findUnique({
+    where: {
+      memberId: input.memberId,
+    },
+  });
+
+  return billingRef ? mapHostedMemberBillingRefSnapshot(billingRef) : null;
+}
+
+export async function readHostedMemberAggregate(input: {
+  memberId: string;
+  prisma: HostedMemberStoreClient;
+}): Promise<HostedMemberAggregate | null> {
+  const memberRecord = await input.prisma.hostedMember.findUnique({
+    where: {
+      id: input.memberId,
+    },
+    include: {
+      billingRef: true,
+      identity: true,
+      routing: true,
+    },
+  }) as HostedMemberRecordWithRelations | null;
+
+  if (!memberRecord) {
+    return null;
+  }
+
+  const identity = memberRecord.identity
+    ? mapHostedMemberIdentityState(memberRecord.identity)
+    : null;
+  const routing = memberRecord.routing
+    ? mapHostedMemberRoutingState(memberRecord.routing)
+    : null;
+  const billingRef = memberRecord.billingRef
+    ? mapHostedMemberBillingRefSnapshot(memberRecord.billingRef)
+    : null;
+
+  return buildHostedMemberAggregate(memberRecord, {
+    billingRef,
+    identity,
+    routing,
+  });
+}
+
+export async function upsertHostedMemberIdentity(
+  input: HostedMemberIdentityWriteInput,
+): Promise<HostedMemberIdentityState> {
+  const identity = await input.prisma.hostedMemberIdentity.upsert({
+    where: {
+      memberId: input.memberId,
+    },
+    create: buildHostedMemberIdentityCreateData(input),
+    update: buildHostedMemberIdentityUpdateData(input),
+  });
+
+  return mapHostedMemberIdentityState(identity);
+}
+
 export async function upsertHostedMemberLinqChatBinding(input: {
   linqChatId: string | null;
   memberId: string;
@@ -304,10 +304,6 @@ export async function upsertHostedMemberLinqChatBinding(input: {
   }
 
   await withHostedOnboardingTransaction(input.prisma, async (tx) => {
-    if (typeof tx.hostedMemberRouting?.upsert !== "function") {
-      return;
-    }
-
     await tx.hostedMemberRouting.upsert({
       where: {
         memberId: input.memberId,
@@ -330,10 +326,6 @@ export async function upsertHostedMemberTelegramRoutingBinding(input: {
   telegramUserId: string;
 }): Promise<void> {
   await withHostedOnboardingTransaction(input.prisma, async (tx) => {
-    if (typeof tx.hostedMemberRouting?.upsert !== "function") {
-      return;
-    }
-
     await tx.hostedMemberRouting.upsert({
       where: {
         memberId: input.memberId,
@@ -350,59 +342,10 @@ export async function upsertHostedMemberTelegramRoutingBinding(input: {
   });
 }
 
-export async function readHostedMemberStripeBillingRef(input: {
-  memberId: string;
-  prisma: HostedMemberStoreClient;
-}): Promise<HostedMemberStripeBillingRefSnapshot | null> {
-  if (typeof input.prisma.hostedMemberBillingRef?.findUnique === "function") {
-    const billingRef = await input.prisma.hostedMemberBillingRef.findUnique({
-      where: {
-        memberId: input.memberId,
-      },
-    });
-
-    return billingRef ? mapHostedMemberBillingRefSnapshot(billingRef) : null;
-  }
-
-  const member = await input.prisma.hostedMember.findUnique({
-    where: {
-      id: input.memberId,
-    },
-    select: {
-      id: true,
-      stripeCustomerId: true,
-      stripeLatestBillingEventCreatedAt: true,
-      stripeLatestBillingEventId: true,
-      stripeLatestCheckoutSessionId: true,
-      stripeSubscriptionId: true,
-    },
-  });
-
-  return member ? mapLegacyHostedMemberBillingRefSnapshot(member) : null;
-}
-
 export async function writeHostedMemberStripeBillingRef(
   input: HostedMemberStripeBillingRefWriteInput,
-): Promise<HostedMemberStripeBillingRefSnapshot | null> {
+): Promise<HostedMemberStripeBillingRefSnapshot> {
   return withHostedOnboardingTransaction(input.prisma, async (tx) => {
-    if (typeof tx.hostedMemberBillingRef?.upsert !== "function") {
-      const legacyUpdate = buildHostedMemberStripeBillingRefLegacyWriteData(input);
-
-      if (Object.keys(legacyUpdate).length > 0) {
-        await tx.hostedMember.update({
-          where: {
-            id: input.memberId,
-          },
-          data: legacyUpdate,
-        });
-      }
-
-      return readHostedMemberStripeBillingRef({
-        memberId: input.memberId,
-        prisma: tx,
-      });
-    }
-
     const billingRef = await tx.hostedMemberBillingRef.upsert({
       where: {
         memberId: input.memberId,
@@ -421,121 +364,67 @@ export async function bindHostedMemberStripeCustomerIdIfMissing(input: {
   stripeCustomerId: string;
 }): Promise<boolean> {
   return withHostedOnboardingTransaction(input.prisma, async (tx) => {
-    if (typeof tx.hostedMemberBillingRef?.upsert === "function") {
-      await lockHostedMemberRow(tx, input.memberId);
+    await lockHostedMemberRow(tx, input.memberId);
 
-      const currentBillingRef = await tx.hostedMemberBillingRef.findUnique({
-        where: {
-          memberId: input.memberId,
-        },
-      });
+    const currentBillingRef = await tx.hostedMemberBillingRef.findUnique({
+      where: {
+        memberId: input.memberId,
+      },
+    });
 
-      if (currentBillingRef?.stripeCustomerId) {
-        return false;
-      }
-
-      await tx.hostedMemberBillingRef.upsert({
-        where: {
-          memberId: input.memberId,
-        },
-        create: {
-          memberId: input.memberId,
-          stripeCustomerId: input.stripeCustomerId,
-          stripeLatestBillingEventCreatedAt: null,
-          stripeLatestBillingEventId: null,
-          stripeLatestCheckoutSessionId: null,
-          stripeSubscriptionId: null,
-        },
-        update: {
-          stripeCustomerId: input.stripeCustomerId,
-        },
-      });
-
-      return true;
+    if (currentBillingRef?.stripeCustomerId) {
+      return false;
     }
 
-    const legacyBindResult = await tx.hostedMember.updateMany({
+    await tx.hostedMemberBillingRef.upsert({
       where: {
-        id: input.memberId,
-        stripeCustomerId: null,
+        memberId: input.memberId,
       },
-      data: {
+      create: {
+        memberId: input.memberId,
+        stripeCustomerId: input.stripeCustomerId,
+        stripeLatestBillingEventCreatedAt: null,
+        stripeLatestBillingEventId: null,
+        stripeLatestCheckoutSessionId: null,
+        stripeSubscriptionId: null,
+      },
+      update: {
         stripeCustomerId: input.stripeCustomerId,
       },
     });
 
-    return legacyBindResult.count === 1;
+    return true;
   });
 }
 
-export async function syncHostedMemberPrivacyFoundationFromMember(input: {
-  member: HostedMemberIdentitySnapshot & HostedMemberBillingRefSnapshotSource;
-  prisma: HostedMemberStoreClient;
-}): Promise<void> {
-  if (typeof input.prisma.hostedMemberIdentity?.upsert === "function") {
-    await input.prisma.hostedMemberIdentity.upsert({
-      where: {
-        memberId: input.member.id,
-      },
-      create: buildHostedMemberIdentityCreateData(input.member),
-      update: buildHostedMemberIdentityUpdateData(input.member),
-    });
-  }
-
-  if (
-    typeof input.prisma.hostedMemberBillingRef?.findUnique === "function" &&
-    typeof input.prisma.hostedMemberBillingRef.create === "function"
-  ) {
-    const existingBillingRef = await input.prisma.hostedMemberBillingRef.findUnique({
-      where: {
-        memberId: input.member.id,
-      },
-    });
-
-    if (!existingBillingRef) {
-      await input.prisma.hostedMemberBillingRef.create({
-        data: buildHostedMemberBillingRefCreateData({
-          memberId: input.member.id,
-          prisma: input.prisma,
-          stripeCustomerId: input.member.stripeCustomerId,
-          stripeLatestBillingEventCreatedAt: input.member.stripeLatestBillingEventCreatedAt,
-          stripeLatestBillingEventId: input.member.stripeLatestBillingEventId,
-          stripeLatestCheckoutSessionId: input.member.stripeLatestCheckoutSessionId,
-          stripeSubscriptionId: input.member.stripeSubscriptionId,
-        }),
-      });
-    }
-  }
-}
-
 function buildHostedMemberIdentityCreateData(
-  member: HostedMemberIdentitySnapshot,
+  input: HostedMemberIdentityWriteInput,
 ): Prisma.HostedMemberIdentityUncheckedCreateInput {
   return {
-    memberId: member.id,
-    maskedPhoneNumberHint: member.maskedPhoneNumberHint,
-    normalizedPhoneNumber: member.normalizedPhoneNumber,
-    phoneNumberVerifiedAt: member.phoneNumberVerifiedAt,
-    privyUserId: member.privyUserId,
-    walletAddress: member.walletAddress,
-    walletChainType: member.walletChainType,
-    walletProvider: member.walletProvider,
-    walletCreatedAt: member.walletCreatedAt,
+    maskedPhoneNumberHint: input.maskedPhoneNumberHint,
+    memberId: input.memberId,
+    normalizedPhoneNumber: input.normalizedPhoneNumber,
+    phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
+    privyUserId: input.privyUserId,
+    walletAddress: input.walletAddress,
+    walletChainType: input.walletChainType,
+    walletCreatedAt: input.walletCreatedAt,
+    walletProvider: input.walletProvider,
   };
 }
 
 function buildHostedMemberIdentityUpdateData(
-  member: HostedMemberIdentitySnapshot,
+  input: HostedMemberIdentityWriteInput,
 ): Prisma.HostedMemberIdentityUncheckedUpdateInput {
   return {
-    maskedPhoneNumberHint: member.maskedPhoneNumberHint,
-    normalizedPhoneNumber: member.normalizedPhoneNumber,
-    phoneNumberVerifiedAt: member.phoneNumberVerifiedAt,
-    privyUserId: member.privyUserId,
-    walletAddress: member.walletAddress,
-    walletChainType: member.walletChainType,
-    walletProvider: member.walletProvider,
-    walletCreatedAt: member.walletCreatedAt,
+    maskedPhoneNumberHint: input.maskedPhoneNumberHint,
+    normalizedPhoneNumber: input.normalizedPhoneNumber,
+    phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
+    privyUserId: input.privyUserId,
+    walletAddress: input.walletAddress,
+    walletChainType: input.walletChainType,
+    walletCreatedAt: input.walletCreatedAt,
+    walletProvider: input.walletProvider,
   };
 }
 
@@ -556,30 +445,6 @@ function buildHostedMemberBillingRefUpdateData(
   input: HostedMemberStripeBillingRefWriteInput,
 ): Prisma.HostedMemberBillingRefUncheckedUpdateInput {
   const data: Prisma.HostedMemberBillingRefUncheckedUpdateInput = {};
-
-  if (input.stripeCustomerId !== undefined) {
-    data.stripeCustomerId = input.stripeCustomerId;
-  }
-  if (input.stripeLatestBillingEventCreatedAt !== undefined) {
-    data.stripeLatestBillingEventCreatedAt = input.stripeLatestBillingEventCreatedAt;
-  }
-  if (input.stripeLatestBillingEventId !== undefined) {
-    data.stripeLatestBillingEventId = input.stripeLatestBillingEventId;
-  }
-  if (input.stripeLatestCheckoutSessionId !== undefined) {
-    data.stripeLatestCheckoutSessionId = input.stripeLatestCheckoutSessionId;
-  }
-  if (input.stripeSubscriptionId !== undefined) {
-    data.stripeSubscriptionId = input.stripeSubscriptionId;
-  }
-
-  return data;
-}
-
-function buildHostedMemberStripeBillingRefLegacyWriteData(
-  input: HostedMemberStripeBillingRefWriteInput,
-): Prisma.HostedMemberUncheckedUpdateInput {
-  const data: Prisma.HostedMemberUncheckedUpdateInput = {};
 
   if (input.stripeCustomerId !== undefined) {
     data.stripeCustomerId = input.stripeCustomerId;
@@ -629,42 +494,43 @@ function mapHostedMemberIdentityState(
   };
 }
 
-function mapLegacyHostedMemberIdentityState(
-  member: Pick<
-    HostedMember,
-    | "id"
-    | "maskedPhoneNumberHint"
-    | "normalizedPhoneNumber"
-    | "phoneNumberVerifiedAt"
-    | "privyUserId"
-    | "walletAddress"
-    | "walletChainType"
-    | "walletCreatedAt"
-    | "walletProvider"
-  >,
-): HostedMemberIdentityState {
+function mapHostedMemberRoutingState(
+  routing: Pick<Prisma.HostedMemberRoutingUncheckedCreateInput, "linqChatId" | "memberId" | "telegramUserId">,
+): HostedMemberRoutingStateSnapshot {
   return {
-    maskedPhoneNumberHint: member.maskedPhoneNumberHint,
-    memberId: member.id,
-    normalizedPhoneNumber: member.normalizedPhoneNumber,
-    phoneNumberVerifiedAt: member.phoneNumberVerifiedAt,
-    privyUserId: member.privyUserId,
-    walletAddress: member.walletAddress,
-    walletChainType: member.walletChainType,
-    walletCreatedAt: member.walletCreatedAt,
-    walletProvider: member.walletProvider,
+    linqChatId: routing.linqChatId ?? null,
+    memberId: routing.memberId,
+    telegramUserId: routing.telegramUserId ?? null,
   };
 }
 
-function mapLegacyHostedMemberBillingRefSnapshot(
-  member: HostedMemberBillingRefSnapshotSource,
-): HostedMemberStripeBillingRefSnapshot {
+function buildHostedMemberAggregate(
+  member: HostedMemberCoreState,
+  input: {
+    billingRef: HostedMemberStripeBillingRefSnapshot | null;
+    identity: HostedMemberIdentityState | null;
+    routing: HostedMemberRoutingStateSnapshot | null;
+  },
+): HostedMemberAggregate {
   return {
-    memberId: member.id,
-    stripeCustomerId: member.stripeCustomerId,
-    stripeLatestBillingEventCreatedAt: member.stripeLatestBillingEventCreatedAt,
-    stripeLatestBillingEventId: member.stripeLatestBillingEventId,
-    stripeLatestCheckoutSessionId: member.stripeLatestCheckoutSessionId,
-    stripeSubscriptionId: member.stripeSubscriptionId,
+    ...member,
+    billingRef: input.billingRef,
+    identity: input.identity,
+    linqChatId: input.routing?.linqChatId ?? null,
+    maskedPhoneNumberHint: input.identity?.maskedPhoneNumberHint ?? null,
+    normalizedPhoneNumber: input.identity?.normalizedPhoneNumber ?? null,
+    phoneNumberVerifiedAt: input.identity?.phoneNumberVerifiedAt ?? null,
+    privyUserId: input.identity?.privyUserId ?? null,
+    routing: input.routing,
+    stripeCustomerId: input.billingRef?.stripeCustomerId ?? null,
+    stripeLatestBillingEventCreatedAt: input.billingRef?.stripeLatestBillingEventCreatedAt ?? null,
+    stripeLatestBillingEventId: input.billingRef?.stripeLatestBillingEventId ?? null,
+    stripeLatestCheckoutSessionId: input.billingRef?.stripeLatestCheckoutSessionId ?? null,
+    stripeSubscriptionId: input.billingRef?.stripeSubscriptionId ?? null,
+    telegramUserId: input.routing?.telegramUserId ?? null,
+    walletAddress: input.identity?.walletAddress ?? null,
+    walletChainType: input.identity?.walletChainType ?? null,
+    walletCreatedAt: input.identity?.walletCreatedAt ?? null,
+    walletProvider: input.identity?.walletProvider ?? null,
   };
 }

@@ -3,6 +3,7 @@ import {
   Prisma,
   type HostedBillingCheckout,
   type HostedMember,
+  type HostedMemberIdentity,
   type PrismaClient,
 } from "@prisma/client";
 import {
@@ -14,7 +15,10 @@ import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
-import { requireHostedInviteForAuthentication } from "./invite-service";
+import {
+  requireHostedInviteForAuthentication,
+  requireHostedInviteMemberIdentity,
+} from "./invite-service";
 import {
   extractHostedPrivyWalletAccount,
   HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE,
@@ -91,8 +95,9 @@ export async function createHostedBillingCheckout(input: HostedBillingCheckoutIn
   }
 
   const shareCode = normalizeNullableString(input.shareCode);
+  const inviteIdentity = requireHostedInviteMemberIdentity(invite.member);
   resolveHostedMemberWalletAddress({
-    existingWalletAddress: invite.member.walletAddress,
+    existingWalletAddress: inviteIdentity.walletAddress,
     linkedAccounts: [...auth.linkedAccounts],
     requireWalletAddress: isHostedOnboardingRevnetEnabled(),
   });
@@ -640,7 +645,10 @@ function resolveHostedMemberWalletAddress(input: {
   return null;
 }
 
-export function requireHostedMemberWalletAddressForRevnet(member: HostedMember) {
+export function requireHostedMemberWalletAddressForRevnet(member: {
+  id: string;
+  walletAddress: HostedMemberIdentity["walletAddress"] | null | undefined;
+}) {
   const walletAddress = coerceHostedWalletAddress(member.walletAddress);
 
   if (!walletAddress) {

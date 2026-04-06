@@ -4,8 +4,7 @@ Last updated: 2026-04-06
 
 ## Purpose
 
-This note records the state reached after the hosted-member privacy cutover batches were integrated in the live tree.
-It captures both what is now proven safe and what is still explicitly deferred.
+This note records the final greenfield state reached after the hosted-member privacy cutover batches and hard cut landed in the live tree.
 
 ## Landed
 
@@ -13,7 +12,15 @@ It captures both what is now proven safe and what is still explicitly deferred.
 
 - `apps/web/src/lib/hosted-onboarding/billing-service.ts` now reads and binds Stripe customer ids through `hosted-member-store` billing-ref helpers instead of writing Stripe refs directly in the service layer.
 - `apps/web/src/lib/hosted-onboarding/stripe-billing-policy.ts` now resolves Stripe customer/subscription lookups through the additive billing-ref helper surface and writes Stripe freshness snapshots through `writeHostedMemberStripeBillingRef(...)`.
+- `apps/web/src/lib/hosted-onboarding/stripe-billing-policy.ts` now reads one canonical hosted-member aggregate for activation, billing freshness, and first-contact dispatch, and `skipIfBillingAlreadyActive` now only suppresses activation when the reloaded member is already active.
 - `apps/web/src/lib/hosted-execution/usage.ts` and `apps/web/src/lib/hosted-execution/stripe-metering.ts` now source Stripe customer ids from `HostedMemberBillingRef` instead of the core `HostedMember` row.
+
+### `HostedMember` is now entitlement-only
+
+- `apps/web/prisma/schema.prisma` keeps only `id`, `status`, `billingStatus`, `billingMode`, timestamps, and the split-table relations on `HostedMember`.
+- `apps/web/prisma/migrations/2026040606_hosted_member_privacy_hard_cut/migration.sql` drops the legacy phone, Privy, wallet, Stripe, Linq, and Telegram columns from `hosted_member`.
+- `apps/web/src/lib/hosted-onboarding/member-identity-service.ts` now creates and refreshes core members separately from `HostedMemberIdentity`, instead of mirroring identity state through the core row.
+- `apps/web/src/lib/hosted-onboarding/{authentication-service,invite-service,billing-service}.ts` now consume identity or billing-ref state through the split ownership lanes instead of treating `HostedMember` as a person-shaped record.
 
 ### Routing no longer durably stores Telegram usernames
 
@@ -22,6 +29,12 @@ It captures both what is now proven safe and what is still explicitly deferred.
 - `apps/web/prisma/schema.prisma` and the cleanup migration drop `telegram_username` from `HostedMemberRouting`.
 - The UI still displays the current Telegram username from the live sync payload, not from durable Postgres routing state.
 
+### Verified email still stays out of Postgres
+
+- The hard cut keeps verified email outside the hosted web account model; `HostedMember`, `HostedMemberIdentity`, `HostedMemberRouting`, and `HostedMemberBillingRef` do not own email identity fields.
+- The verified-email path remains `Privy verified email -> hosted execution user env -> Cloudflare verified-sender and route state`.
+- `apps/web/test/hosted-member-email-runtime-boundary.test.ts` and `apps/web/test/settings-email-sync-route.test.ts` still prove that the email sync path does not introduce a durable Prisma identity field.
+
 ### `HostedSession` is removed
 
 - Direct proof before removal:
@@ -29,24 +42,8 @@ It captures both what is now proven safe and what is still explicitly deferred.
   - The only in-repo reference outside Prisma was a test-harness stub in `apps/web/test/hosted-onboarding-stripe-event-reconciliation.test.ts`.
 - Landed cleanup:
   - `apps/web/prisma/schema.prisma` no longer defines `HostedSession` or the related Prisma relations.
-  - `apps/web/prisma/migrations/2026040605_hosted_member_privacy_cleanup/migration.sql` drops `hosted_session`.
-  - `apps/web/scripts/local-reset-hosted-onboarding.ts` no longer expects a `sessions` relation count.
-
-## Explicitly deferred
-
-### Full identity-column removal from `HostedMember`
-
-This hard cut is still not safe in the live tree.
-
-- `apps/web/src/lib/hosted-onboarding/member-identity-service.ts` still creates and refreshes members with phone, Privy, and wallet fields on `HostedMember`, then mirrors them into `HostedMemberIdentity`.
-- `apps/web/src/lib/hosted-onboarding/billing-service.ts` and related auth flows still consume `member.walletAddress` and `member.normalizedPhoneNumber` on the core member object.
-- `apps/web/src/lib/hosted-onboarding/authentication-service.ts` still relies on `(invite.member.identity ?? invite.member).normalizedPhoneNumber` during reconciliation.
-
-Required stance:
-
-- Keep the additive split and helper ownership in place.
-- Do not claim the core row is entitlement-only yet.
-- Treat the remaining identity-column removal as a follow-up migration after those live readers are cut over.
+- `apps/web/prisma/migrations/2026040605_hosted_member_privacy_cleanup/migration.sql` drops `hosted_session`.
+- `apps/web/scripts/local-reset-hosted-onboarding.ts` no longer expects a `sessions` relation count.
 
 ## Verification
 

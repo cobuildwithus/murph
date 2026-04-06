@@ -2324,6 +2324,17 @@ function createStripeQueueHarness(input: {
   const touch = () => new Date(Date.UTC(2026, 2, 28, 12, 0, clock++));
   const sameDate = (left: Date | null | undefined, right: Date | null | undefined) =>
     (left?.getTime() ?? null) === (right?.getTime() ?? null);
+  const buildIdentityFromMember = (member: MutableMember) => ({
+    maskedPhoneNumberHint: "*** 4567",
+    memberId: member.id,
+    normalizedPhoneNumber: member.normalizedPhoneNumber,
+    phoneNumberVerifiedAt: null,
+    privyUserId: null as string | null,
+    walletAddress: member.walletAddress,
+    walletChainType: null as string | null,
+    walletCreatedAt: null as Date | null,
+    walletProvider: null as string | null,
+  });
   const syncBillingRefToMember = (billingRef: MutableMemberBillingRef) => {
     const member = members.find((candidate) => candidate.id === billingRef.memberId);
 
@@ -2438,8 +2449,55 @@ function createStripeQueueHarness(input: {
     return event;
   });
 
-  const hostedMemberFindUnique = vi.fn(async ({ where }: { where: Record<string, unknown> }) =>
-    findMember(where) ?? null);
+  const hostedMemberFindUnique = vi.fn(async ({
+    include,
+    where,
+  }: {
+    include?: { billingRef?: boolean; identity?: boolean; routing?: boolean };
+    where: Record<string, unknown>;
+  }) => {
+    const member = findMember(where);
+
+    if (!member) {
+      return null;
+    }
+
+    if (!include) {
+      return member;
+    }
+
+    return {
+      ...member,
+      billingRef: include.billingRef
+        ? memberBillingRefs.find((candidate) => candidate.memberId === member.id) ?? null
+        : undefined,
+      identity: include.identity ? buildIdentityFromMember(member) : undefined,
+      routing: include.routing
+        ? memberRouting.find((candidate) => candidate.memberId === member.id) ?? null
+        : undefined,
+    };
+  });
+  const hostedMemberIdentityFindUnique = vi.fn(async ({
+    include,
+    where,
+  }: {
+    include?: { member?: boolean };
+    where: Record<string, unknown>;
+  }) => {
+    const member = members.find((candidate) =>
+      ("memberId" in where && candidate.id === where.memberId) ||
+      ("normalizedPhoneNumber" in where &&
+        candidate.normalizedPhoneNumber === where.normalizedPhoneNumber) ||
+      ("privyUserId" in where && where.privyUserId === null) ||
+      ("walletAddress" in where && candidate.walletAddress === where.walletAddress));
+
+    if (!member) {
+      return null;
+    }
+
+    const identity = buildIdentityFromMember(member);
+    return include?.member ? { ...identity, member } : identity;
+  });
   const hostedMemberBillingRefFindUnique = vi.fn(async ({
     include,
     where,
@@ -2836,6 +2894,9 @@ function createStripeQueueHarness(input: {
       findUnique: hostedMemberFindUnique,
       update: hostedMemberUpdate,
       updateMany: hostedMemberUpdateMany,
+    },
+    hostedMemberIdentity: {
+      findUnique: hostedMemberIdentityFindUnique,
     },
     hostedMemberBillingRef: {
       findUnique: hostedMemberBillingRefFindUnique,

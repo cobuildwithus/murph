@@ -329,7 +329,7 @@ export async function applyStripeRefundCreated(
     member,
     prisma,
     reason: dispatchContext.sourceType,
-    stripeCustomerId: customerId ?? null,
+    stripeCustomerId: customerId ?? undefined,
   });
 }
 
@@ -356,7 +356,7 @@ export async function applyStripeDisputeUpdated(
     member,
     prisma,
     reason: dispatchContext.sourceType,
-    stripeCustomerId: customerId ?? null,
+    stripeCustomerId: customerId ?? undefined,
   });
 }
 

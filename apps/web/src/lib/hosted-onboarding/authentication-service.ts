@@ -12,6 +12,7 @@ import { type HostedPrivyIdentity } from "./privy";
 import {
   buildHostedInviteUrl,
   issueHostedInvite,
+  requireHostedInviteMemberIdentity,
   requireHostedInviteForAuthentication,
 } from "./invite-service";
 import {
@@ -31,14 +32,17 @@ export async function completeHostedPrivyVerification(input: {
     ? await requireHostedInviteForAuthentication(input.inviteCode, prisma, now)
     : null;
   const member = invite
-    ? await reconcileHostedPrivyIdentityOnMember({
-        expectedPhoneHint: readHostedPhoneHint((invite.member.identity ?? invite.member).maskedPhoneNumberHint),
-        expectedPhoneLookupKey: (invite.member.identity ?? invite.member).normalizedPhoneNumber,
-        identity: input.identity,
-        member: invite.member,
-        prisma,
-        now,
-      })
+    ? await (async () => {
+        const inviteIdentity = requireHostedInviteMemberIdentity(invite.member);
+        return reconcileHostedPrivyIdentityOnMember({
+          expectedPhoneHint: readHostedPhoneHint(inviteIdentity.maskedPhoneNumberHint),
+          expectedPhoneLookupKey: inviteIdentity.normalizedPhoneNumber,
+          identity: input.identity,
+          member: invite.member,
+          prisma,
+          now,
+        });
+      })()
     : await ensureHostedMemberForPrivyIdentity({
         identity: input.identity,
         prisma,
