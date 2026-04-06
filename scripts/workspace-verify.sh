@@ -65,11 +65,25 @@ readonly typecheck_package_dirs=(
   "apps/cloudflare"
 )
 
+normalize_positive_integer() {
+  local value="${1:-}"
+  local fallback="$2"
+
+  if [[ "$value" =~ ^[1-9][0-9]*$ ]]; then
+    printf '%s\n' "$value"
+    return
+  fi
+
+  printf '%s\n' "$fallback"
+}
+
 readonly repo_vitest_max_workers="${MURPH_VITEST_MAX_WORKERS:-$([[ -n "${CI:-}" ]] && echo 50% || echo 50%)}"
 readonly app_verify_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly app_verify_parallel="${MURPH_APP_VERIFY_PARALLEL:-$app_verify_parallel_default}"
 readonly test_lane_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly test_lane_parallel="${MURPH_TEST_LANES_PARALLEL:-$test_lane_parallel_default}"
+readonly typecheck_workspace_concurrency_default="$([[ -n "${CI:-}" ]] && echo 2 || echo 4)"
+readonly typecheck_workspace_concurrency="$(normalize_positive_integer "${MURPH_TYPECHECK_WORKSPACE_CONCURRENCY:-$typecheck_workspace_concurrency_default}" "$typecheck_workspace_concurrency_default")"
 tracked_background_pids=("")
 
 register_background_pid() {
@@ -187,9 +201,24 @@ run_workspace_boundary_check() {
 }
 
 run_typecheck_packages() {
+  local package_dir
+
+  if [[ "$typecheck_workspace_concurrency" -le 1 ]]; then
+    for package_dir in "${typecheck_package_dirs[@]}"; do
+      run_package_command_with_retry "$package_dir" typecheck
+    done
+    return 0
+  fi
+
+  local filter_args=()
+
   for package_dir in "${typecheck_package_dirs[@]}"; do
-    run_package_command_with_retry "$package_dir" typecheck
+    filter_args+=("--filter" "./${package_dir}")
   done
+
+  run_command_with_retry \
+    "Workspace package typecheck" \
+    pnpm -r --sort --workspace-concurrency="$typecheck_workspace_concurrency" "${filter_args[@]}" typecheck
 }
 
 run_command_with_retry() {
