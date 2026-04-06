@@ -7,8 +7,8 @@ import { urlToHttpOptions } from 'node:url'
 import { createBrotliDecompress, createUnzip } from 'node:zlib'
 import { Readability } from '@mozilla/readability'
 import { DOMParser } from 'linkedom'
-import { createTimeoutAbortController } from '../http-retry.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+import { createTimeoutAbortController } from '@murphai/operator-config/http-retry'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   errorMessage,
   normalizeNullableString,

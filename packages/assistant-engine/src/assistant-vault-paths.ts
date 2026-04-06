@@ -1,6 +1,6 @@
 import { lstat, realpath } from 'node:fs/promises'
 import path from 'node:path'
-import { VaultCliError } from './vault-cli-errors.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 const ASSISTANT_INBOX_ARTIFACT_ROOT = path.posix.join('derived', 'inbox')
 const ASSISTANT_CAPTURE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/u

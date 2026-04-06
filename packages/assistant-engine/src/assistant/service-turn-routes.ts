@@ -1,7 +1,7 @@
 import {
   type AssistantModelTarget,
 } from '../assistant-backend.js'
-import type { AssistantOperatorDefaults } from '../operator-config.js'
+import type { AssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import type { ResolvedAssistantFailoverRoute } from './failover.js'
 import {
   compactAssistantProviderConfigInput,

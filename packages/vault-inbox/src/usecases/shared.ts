@@ -8,7 +8,7 @@ import {
   type JsonObject,
 } from "@murphai/contracts"
 
-import { VaultCliError } from "../vault-cli-errors.js"
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors"
 import {
   inferHealthEntityKind,
   isHealthQueryableRecordId,
@@ -27,7 +27,7 @@ import {
 import type {
   HealthEntityEnvelope,
 } from "../health-cli-method-types.js"
-import type { VaultValidateResult } from "../vault-cli-contracts.js"
+import type { VaultValidateResult } from "@murphai/operator-config/vault-cli-contracts"
 import type {
   QueryEntity,
 } from "./types.js"

@@ -1,5 +1,5 @@
 import path from 'node:path'
-import type { InboxShowResult } from './inbox-cli-contracts.js'
+import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
 
 export const ROUTING_VISION_SUPPORTED_MEDIA_TYPES = [
   'image/jpeg',

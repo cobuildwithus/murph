@@ -23,7 +23,7 @@ import {
   type AssistantToolRiskClass,
   type AssistantToolSpec,
 } from './inbox-model-contracts.js'
-import { errorMessage } from './text/shared.js'
+import { errorMessage } from '@murphai/operator-config/text/shared'
 import { isAssistantOpenAIBaseUrl } from './assistant/shared.js'
 
 export type JsonRecord = Record<string, unknown>

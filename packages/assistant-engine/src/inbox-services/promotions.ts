@@ -14,9 +14,9 @@ import {
   inboxPreserveDocumentAttachmentsResultSchema,
   type InboxPromotionEntry,
   type InboxPreserveDocumentAttachmentsResult,
-} from '../inbox-cli-contracts.js'
+} from '@murphai/operator-config/inbox-cli-contracts'
 import type { QueryRuntimeModule } from '../query-runtime.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type {
   CanonicalAttachmentPromotionResult,
   CanonicalPromotionLookupSpec,

@@ -9,8 +9,8 @@ import {
   toOwnedEventCommandShowEntity,
   type QueryRecord,
 } from '../commands/query-record-command-helpers.js'
-import { VaultCliError } from '../vault-cli-errors.js'
-import { pathSchema } from '../vault-cli-contracts.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { pathSchema } from '@murphai/operator-config/vault-cli-contracts'
 import {
   deleteEventRecord,
   editEventRecord,

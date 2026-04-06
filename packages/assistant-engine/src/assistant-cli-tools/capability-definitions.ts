@@ -41,7 +41,7 @@ import {
 import {
   listAssistantSelfDeliveryTargets,
   resolveAssistantSelfDeliveryTarget,
-} from '../operator-config.js'
+} from '@murphai/operator-config/operator-config'
 import type {
   AssistantToolCatalogOptions,
   AssistantToolContext,

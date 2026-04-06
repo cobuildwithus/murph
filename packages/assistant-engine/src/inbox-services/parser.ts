@@ -4,8 +4,8 @@ import {
   type InboxDoctorResult,
   type InboxParserToolStatus,
   type InboxParserToolchainStatus,
-} from '../inbox-cli-contracts.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+} from '@murphai/operator-config/inbox-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type {
   InboxParserServiceRuntime,
   ParserDoctorRuntimeReport,

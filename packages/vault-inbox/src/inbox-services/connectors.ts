@@ -1,6 +1,6 @@
 import type {
   InboxConnectorConfig,
-} from '../inbox-cli-contracts.js'
+} from '@murphai/operator-config/inbox-cli-contracts'
 import type {
   EmailDriver,
   ImessageDriver,

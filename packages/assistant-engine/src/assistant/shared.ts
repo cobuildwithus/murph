@@ -11,14 +11,14 @@ import {
   errorMessage,
   formatStructuredErrorMessage,
   normalizeNullableString,
-} from '../text/shared.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+} from '@murphai/operator-config/text/shared'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 export {
   errorMessage,
   formatStructuredErrorMessage,
   normalizeNullableString,
-} from '../text/shared.js'
+} from '@murphai/operator-config/text/shared'
 
 export function readAssistantEnvString(
   env: NodeJS.ProcessEnv | null | undefined,

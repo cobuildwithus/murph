@@ -7,7 +7,7 @@ import {
   type QueryCanonicalEntity,
 } from '../query-runtime.js'
 import { loadRuntimeModule } from '../runtime-import.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   applyRecordPatch,
   type JsonObject,

@@ -2,14 +2,14 @@ import {
   probeLinqApi,
   resolveLinqApiToken,
   resolveLinqWebhookSecret,
-} from '../linq-runtime.js'
-import { SETUP_RUNTIME_ENV_NOTICE } from '../setup-runtime-env.js'
-import { resolveTelegramBotToken } from '../telegram-runtime.js'
-import { resolveAgentmailApiKey } from '../agentmail-runtime.js'
+} from '@murphai/operator-config/linq-runtime'
+import { SETUP_RUNTIME_ENV_NOTICE } from '@murphai/operator-config/setup-runtime-env'
+import { resolveTelegramBotToken } from '@murphai/operator-config/telegram-runtime'
+import { resolveAgentmailApiKey } from '@murphai/operator-config/agentmail-runtime'
 import type {
   InboxConnectorConfig,
   InboxDoctorCheck,
-} from '../inbox-cli-contracts.js'
+} from '@murphai/operator-config/inbox-cli-contracts'
 import type {
   DoctorContext,
   InboxAppEnvironment,

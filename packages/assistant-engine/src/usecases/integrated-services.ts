@@ -1,16 +1,16 @@
 import { resolveSystemTimeZone } from "@murphai/contracts"
-import { VaultCliError } from "../vault-cli-errors.js"
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors"
 import {
   ensureManagedDeviceSyncControlPlane,
   getManagedDeviceSyncDaemonStatus,
   startManagedDeviceSyncDaemon,
   stopManagedDeviceSyncDaemon,
-} from "../device-daemon.js"
-import { createDeviceSyncClient } from "../device-sync-client.js"
+} from "@murphai/operator-config/device-daemon"
+import { createDeviceSyncClient } from "@murphai/operator-config/device-sync-client"
 
 import type {
   ListFilters,
-} from "../vault-cli-contracts.js"
+} from "@murphai/operator-config/vault-cli-contracts"
 import type {
   CommandContext,
   JsonObject,

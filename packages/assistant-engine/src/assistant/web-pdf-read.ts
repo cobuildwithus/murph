@@ -1,5 +1,5 @@
-import { createAbortError, createTimeoutAbortController } from '../http-retry.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+import { createAbortError, createTimeoutAbortController } from '@murphai/operator-config/http-retry'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   errorMessage,
   normalizeNullableString,

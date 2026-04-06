@@ -13,7 +13,7 @@ import { prepareAssistantDirectCliEnv } from '../assistant-cli-access.js'
 import { normalizeNullableString } from '../assistant/shared.js'
 import { resolveAssistantVaultPath } from '../assistant-vault-paths.js'
 import { sanitizeChildProcessEnv } from '../child-process-env.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { AssistantToolContext, AssistantCliLlmsManifest } from './shared.js'
 import {
   assistantCliDefaultTimeoutMs,

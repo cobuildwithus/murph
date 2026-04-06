@@ -5,9 +5,9 @@ import {
   applyDefaultVaultToArgs,
   hasExplicitVaultOption,
   ROOT_OPTIONS_WITH_VALUES,
-} from '../operator-config.js'
-import { redactSensitivePathSegments } from '../text/shared.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+} from '@murphai/operator-config/operator-config'
+import { redactSensitivePathSegments } from '@murphai/operator-config/text/shared'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   assistantCliMaxOutputChars,
 } from './shared.js'

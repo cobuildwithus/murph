@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { resolveOperatorHomeDirectory } from './operator-config.js'
+import { resolveOperatorHomeDirectory } from '@murphai/operator-config/operator-config'
 
 const DEFAULT_USER_BIN_SEGMENTS = ['.local', 'bin'] as const
 

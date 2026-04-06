@@ -8,7 +8,7 @@ import type {
   DeviceDaemonStatusResult,
   DeviceDaemonStopResult,
   DeviceProviderListResult,
-} from "../device-cli-contracts.js"
+} from "@murphai/operator-config/device-cli-contracts"
 import type {
   DocumentImportResult,
   ExperimentCreateResult,
@@ -22,7 +22,7 @@ import type {
   ShowResult,
   VaultInitResult,
   VaultValidateResult,
-} from "../vault-cli-contracts.js"
+} from "@murphai/operator-config/vault-cli-contracts"
 import type { RawImportManifestResult } from "./document-meal-read.js"
 import type {
   CommandContext,

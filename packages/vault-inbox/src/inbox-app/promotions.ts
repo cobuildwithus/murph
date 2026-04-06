@@ -1,4 +1,4 @@
-import { VaultCliError } from '../vault-cli-errors.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { toVaultCliError } from '../usecases/vault-usecase-helpers.js'
 import type {
   InboxAppEnvironment,

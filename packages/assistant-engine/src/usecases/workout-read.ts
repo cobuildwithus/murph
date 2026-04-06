@@ -8,8 +8,8 @@ import {
   toCommandShowEntity,
   type QueryRecord,
 } from '../commands/query-record-command-helpers.js'
-import { VaultCliError } from '../vault-cli-errors.js'
-import { pathSchema } from '../vault-cli-contracts.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { pathSchema } from '@murphai/operator-config/vault-cli-contracts'
 import { asListEnvelope } from './shared.js'
 
 const DEFAULT_LIST_LIMIT = 50

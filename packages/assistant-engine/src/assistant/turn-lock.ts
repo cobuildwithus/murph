@@ -4,7 +4,7 @@ import {
   type AssistantStatePaths,
 } from './store/paths.js'
 import { createAssistantStateWriteLock } from './state-write-lock.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 const ASSISTANT_TURN_LOCK_DIRECTORY = '.locks/assistant-turn'
 const ASSISTANT_TURN_LOCK_METADATA_PATH =

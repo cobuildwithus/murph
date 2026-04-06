@@ -2,7 +2,7 @@ import {
   isVaultError,
   resolveVaultPathOnDisk,
 } from '@murphai/core'
-import { VaultCliError } from '../vault-cli-errors.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   inferEntityKind,
   isQueryableRecordId,

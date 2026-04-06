@@ -14,7 +14,7 @@ import {
 import { applyCanonicalWriteBatch } from '@murphai/core'
 import { parseDelimitedRows } from '@murphai/importers'
 import { generateUlid } from '@murphai/runtime-state'
-import { VaultCliError } from '../vault-cli-errors.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { upsertEventRecord } from './provider-event.js'
 import { compactObject, normalizeOptionalText } from './vault-usecase-helpers.js'
 import { buildStructuredWorkoutEventPayload } from './workout.js'

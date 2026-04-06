@@ -11,7 +11,7 @@ import {
   resolveAssistantSession,
   saveAssistantSession,
 } from './store.js'
-import { resolveAssistantOperatorDefaults } from '../operator-config.js'
+import { resolveAssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import {
   normalizeAssistantDeliveryError,
 } from './outbox.js'

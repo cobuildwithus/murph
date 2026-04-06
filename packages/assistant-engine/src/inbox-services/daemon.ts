@@ -3,9 +3,9 @@ import {
   readVersionedJsonStateFile,
   writeVersionedJsonStateFile,
 } from '@murphai/runtime-state/node'
-import { inboxDaemonStateSchema, type InboxDaemonState } from '../inbox-cli-contracts.js'
+import { inboxDaemonStateSchema, type InboxDaemonState } from '@murphai/operator-config/inbox-cli-contracts'
 import type { InboxPaths } from '../inbox-app/types.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   errorMessage,
   relativeToVault,

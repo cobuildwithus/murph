@@ -7,7 +7,7 @@ import {
   type AssistantSession,
   type AssistantSessionSecrets,
 } from '../assistant-cli-contracts.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { quarantineAssistantStateFile } from './quarantine.js'
 import {
   mergeAssistantHeaders,

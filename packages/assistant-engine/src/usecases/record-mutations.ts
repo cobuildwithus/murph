@@ -1,7 +1,7 @@
 import type { JsonObject, JsonValue } from '@murphai/contracts'
 
 import { loadJsonInputObject } from '../json-input.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 export type { JsonObject, JsonValue }
 

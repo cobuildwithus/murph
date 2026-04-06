@@ -7,9 +7,9 @@ import {
   createAssistantModelTarget,
   type AssistantModelTarget,
 } from '../assistant-backend.js'
-import type { AssistantOperatorDefaults } from '../operator-config.js'
-import { resolveAssistantBackendTarget } from '../operator-config.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+import type { AssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
+import { resolveAssistantBackendTarget } from '@murphai/operator-config/operator-config'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   buildAssistantFailoverRoutes,
   type ResolvedAssistantFailoverRoute,

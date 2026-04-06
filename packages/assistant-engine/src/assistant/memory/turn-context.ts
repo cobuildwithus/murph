@@ -1,6 +1,6 @@
 import path from 'node:path'
-import { VaultCliError } from '../../vault-cli-errors.js'
-import { VAULT_ENV } from '../../operator-config.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { VAULT_ENV } from '@murphai/operator-config/operator-config'
 import { normalizeNullableString } from '../shared.js'
 
 const ASSISTANT_MEMORY_TURN_VAULT_ENV =

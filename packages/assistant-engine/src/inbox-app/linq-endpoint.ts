@@ -1,4 +1,4 @@
-import type { InboxConnectorConfig } from '../inbox-cli-contracts.js'
+import type { InboxConnectorConfig } from '@murphai/operator-config/inbox-cli-contracts'
 
 export function describeLinqConnectorEndpoint(
   connector: Pick<InboxConnectorConfig, 'options'>,

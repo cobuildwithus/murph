@@ -4,9 +4,9 @@ import { z } from 'zod'
 import {
   addAssistantCronJob,
   listAssistantCronJobs,
-} from '@murphai/assistant-engine/assistant/cron'
+} from '@murphai/assistant-engine/assistant-cron'
 import { loadRuntimeModule } from '../runtime-import.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   buildDailyFoodCronExpression,
   buildDailyFoodCronJobName,

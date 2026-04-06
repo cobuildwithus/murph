@@ -11,7 +11,7 @@ import {
   type AssistantModelMessage,
   type AssistantModelSpec,
 } from './model-harness.js'
-import type { InboxShowResult } from './inbox-cli-contracts.js'
+import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
 import type { InboxServices } from './inbox-services.js'
 import {
   assistantExecutionPlanSchema,
@@ -29,9 +29,9 @@ import {
   inferInboxMultimodalInputMode,
   prepareInboxMultimodalUserMessageContent,
 } from './inbox-multimodal.js'
-import { errorMessage, normalizeNullableString } from './text/shared.js'
+import { errorMessage, normalizeNullableString } from '@murphai/operator-config/text/shared'
 import type { VaultServices } from './vault-services.js'
-import { VaultCliError } from './vault-cli-errors.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 const DEFAULT_MAX_ROUTING_CHARS = 24000
 

@@ -193,8 +193,28 @@ function verifyWorkspaceImportPolicy({
   sourceMember,
   specifier,
 }) {
+  const isTestFile = /(?:^|[\\/])(test|tests)[\\/].*\.[cm]?[jt]sx?$|\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(
+    path.relative(repoRoot, filePath),
+  );
+
   if (specifier === "@murphai/device-syncd" && sourceMember !== "packages/device-syncd") {
     return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} from the device-sync daemon root; internal workspace consumers must use @murphai/device-syncd/public-ingress, @murphai/device-syncd/client, or another explicit subpath so they do not depend on the daemon root convenience surface.`;
+  }
+
+  if (
+    specifier.startsWith("@murphai/assistant-engine/assistant/")
+    && !isTestFile
+    && sourceMember !== "packages/assistant-engine"
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} from an assistant-engine internal assistant/* subpath; workspace consumers must use a dedicated top-level assistant-engine entrypoint instead of reaching through the package's internal assistant namespace.`;
+  }
+
+  if (
+    specifier.startsWith("@murphai/vault-inbox/inbox-app/")
+    && !isTestFile
+    && sourceMember !== "packages/vault-inbox"
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} from a vault-inbox internal inbox-app/* subpath; workspace consumers must use a dedicated top-level vault-inbox entrypoint instead of inbox-app internals.`;
   }
 
   if (

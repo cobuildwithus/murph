@@ -1,4 +1,4 @@
-import type { InboxListResult } from '../../inbox-cli-contracts.js'
+import type { InboxListResult } from '@murphai/operator-config/inbox-cli-contracts'
 import {
   loadTelegramAutoReplyMetadata,
   type TelegramAutoReplyMetadata,
