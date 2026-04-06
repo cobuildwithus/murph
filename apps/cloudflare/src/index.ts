@@ -940,7 +940,7 @@ function parsePendingUsageDeleteRequest(value: Record<string, unknown>): string[
   const usageIds = value.usageIds;
 
   if (!Array.isArray(usageIds) || usageIds.some((entry) => typeof entry !== "string" || entry.trim().length === 0)) {
-    throw new TypeError("usageIds must be a non-empty string array.");
+    throw new TypeError("usageIds must be a string array of non-empty values.");
   }
 
   return usageIds.map((usageId) => usageId.trim());

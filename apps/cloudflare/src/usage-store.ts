@@ -63,37 +63,46 @@ export function createHostedPendingUsageStore(input: {
 }): HostedPendingUsageStore {
   return {
     async appendUsage(request) {
-      const state = await readHostedPendingUsageState({
-        ...input,
-        userId: request.userId,
-      });
-      const existingUsageIds = new Set(state.records.map((record) => readUsageId(record)));
       const acceptedUsageIds = new Set<string>();
-      const accepted = request.usage
+      const uniqueRecords = request.usage
         .map((record, index) => cloneUsageRecord(requireRecord(record, `usage[${index}]`)))
         .filter((record) => {
           const usageId = readUsageId(record);
-          if (existingUsageIds.has(usageId) || acceptedUsageIds.has(usageId)) {
+          if (acceptedUsageIds.has(usageId)) {
             return false;
           }
 
           acceptedUsageIds.add(usageId);
           return true;
         });
-
       const now = new Date().toISOString();
+      const recordedIds: string[] = [];
 
-      for (const record of accepted) {
+      for (const record of uniqueRecords) {
+        const usageId = readUsageId(record);
+        const existing = await readStoredHostedPendingUsageRecordByUsageId({
+          bucket: input.bucket,
+          key: input.key,
+          keyId: input.keyId,
+          keysById: input.keysById,
+          usageId,
+          userId: request.userId,
+        });
+
+        if (existing) {
+          continue;
+        }
+
         await writeStoredHostedPendingUsageRecord({
           ...input,
           record,
           updatedAt: now,
           userId: request.userId,
         });
+        recordedIds.push(usageId);
       }
 
-      const totalRecords = state.records.length + accepted.length;
-      if (totalRecords > 0 && accepted.length > 0) {
+      if (recordedIds.length > 0) {
         await writeHostedPendingUsageDirtyUser({
           bucket: input.bucket,
           key: input.dirtyKey,
@@ -104,8 +113,8 @@ export function createHostedPendingUsageStore(input: {
       }
 
       return {
-        recorded: accepted.length,
-        usageIds: accepted.map((record) => readUsageId(record)),
+        recorded: recordedIds.length,
+        usageIds: recordedIds,
       };
     },
 
@@ -113,12 +122,10 @@ export function createHostedPendingUsageStore(input: {
       const usageIds = new Set(
         request.usageIds.map((entry) => normalizeRequiredString(entry, "usageIds[]")),
       );
-      if (usageIds.size === 0) {
-        return;
-      }
-
+      const shouldVacuumDirtyMarker = usageIds.size === 0;
       const state = await readHostedPendingUsageState({
         ...input,
+        requireListing: shouldVacuumDirtyMarker,
         userId: request.userId,
       });
       const now = new Date().toISOString();
@@ -147,6 +154,10 @@ export function createHostedPendingUsageStore(input: {
           keysById: input.dirtyKeysById,
           userId: request.userId,
         });
+        return;
+      }
+
+      if (shouldVacuumDirtyMarker) {
         return;
       }
 
@@ -303,6 +314,45 @@ async function readStoredHostedPendingUsageRecords(input: {
   }
 
   return [...recordsByUsageId.values()];
+}
+
+async function readStoredHostedPendingUsageRecordByUsageId(input: {
+  bucket: R2BucketLike;
+  key: Uint8Array;
+  keyId: string;
+  keysById?: Readonly<Record<string, Uint8Array>>;
+  usageId: string;
+  userId: string;
+}): Promise<Record<string, unknown> | null> {
+  for (const key of await pendingUsageRecordObjectKeys(
+    input.key,
+    input.keysById,
+    input.userId,
+    input.usageId,
+  )) {
+    const record = await readEncryptedR2Json({
+      aad: buildHostedStorageAad({
+        key,
+        purpose: "assistant-usage",
+        userId: input.userId,
+      }),
+      bucket: input.bucket,
+      cryptoKey: input.key,
+      cryptoKeysById: input.keysById,
+      expectedKeyId: input.keyId,
+      key,
+      parse(value) {
+        return parseStoredHostedPendingUsageRecord(value).record;
+      },
+      scope: "assistant-usage",
+    });
+
+    if (record) {
+      return cloneUsageRecord(record);
+    }
+  }
+
+  return null;
 }
 
 async function writeStoredHostedPendingUsageRecord(input: {

@@ -90,6 +90,7 @@ describe("drainHostedExecutionOutbox", () => {
     });
 
     expect(record?.status).toBe(ExecutionOutboxStatus.completed);
+    expect(record?.nextAttemptAt).toBeNull();
     expect(mocks.finalizeHostedShareAcceptance).toHaveBeenCalledWith({
       eventId: dispatch.eventId,
       memberId: dispatch.event.userId,
@@ -251,7 +252,7 @@ describe("drainHostedExecutionOutbox", () => {
 
     expect(record?.status).toBe(ExecutionOutboxStatus.failed);
     expect(record?.failedAt).toEqual(new Date("2026-03-28T11:00:00.000Z"));
-    expect(record?.nextAttemptAt).toEqual(new Date("2026-03-28T11:00:00.000Z"));
+    expect(record?.nextAttemptAt).toBeNull();
   });
 
   it("rejects reused event ids when source metadata changes", async () => {
@@ -491,10 +492,7 @@ function createDispatchResult(
     },
     status: {
       backpressuredEventIds: eventState === "backpressured" ? ["evt_tick"] : [],
-      bundleRefs: {
-        agentState: null,
-        vault: null,
-      },
+      bundleRef: null,
       inFlight: false,
       lastError: input.statusLastError ?? null,
       lastEventId: "evt_tick",
@@ -587,7 +585,12 @@ function createOutboxPrisma(record: ExecutionOutbox): PrismaClient {
           return { count: 0 };
         }
 
-        if ("nextAttemptAt" in where && where.nextAttemptAt && current.nextAttemptAt > (where.nextAttemptAt as Date)) {
+        if (
+          "nextAttemptAt" in where
+          && where.nextAttemptAt
+          && current.nextAttemptAt
+          && current.nextAttemptAt > (where.nextAttemptAt as Date)
+        ) {
           return { count: 0 };
         }
 

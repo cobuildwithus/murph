@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { HostedBillingStatus } from "@prisma/client";
+import { HostedBillingStatus, HostedMemberStatus } from "@prisma/client";
 import type { SharePack } from "@murphai/contracts";
 
 const mocks = vi.hoisted(() => ({
@@ -164,6 +164,7 @@ describe("hosted share service", () => {
       member: {
         billingStatus: HostedBillingStatus.active,
         id: "member_123",
+        status: HostedMemberStatus.registered,
       } as never,
       prisma: prisma as never,
       shareCode: created.shareCode,
@@ -172,6 +173,7 @@ describe("hosted share service", () => {
       authenticatedMember: {
         billingStatus: HostedBillingStatus.active,
         id: "member_123",
+        status: HostedMemberStatus.registered,
       } as never,
       prisma: prisma as never,
       shareCode: created.shareCode,
@@ -194,6 +196,7 @@ describe("hosted share service", () => {
       authenticatedMember: {
         billingStatus: HostedBillingStatus.active,
         id: "member_123",
+        status: HostedMemberStatus.registered,
       } as never,
       prisma: prisma as never,
       shareCode: created.shareCode,
@@ -209,6 +212,7 @@ describe("hosted share service", () => {
       authenticatedMember: {
         billingStatus: HostedBillingStatus.active,
         id: "member_123",
+        status: HostedMemberStatus.registered,
       } as never,
       prisma: prisma as never,
       shareCode: created.shareCode,
@@ -229,7 +233,7 @@ describe("hosted share service", () => {
     });
   });
 
-  it("keeps share acceptance sparse even when the Cloudflare-backed pack is missing at claim time", async () => {
+  it("fails before enqueue when the Cloudflare-backed pack is missing at claim time", async () => {
     const prisma = createHostedSharePrisma();
     const created = await createHostedShareLink({
       prisma: prisma as never,
@@ -243,19 +247,16 @@ describe("hosted share service", () => {
       member: {
         billingStatus: HostedBillingStatus.active,
         id: "member_123",
+        status: HostedMemberStatus.registered,
       } as never,
       prisma: prisma as never,
       shareCode: created.shareCode,
-    })).resolves.toMatchObject({
-      alreadyImported: false,
-      imported: false,
-      pending: true,
+    })).rejects.toMatchObject({
+      code: "HOSTED_SHARE_PACK_NOT_FOUND",
+      httpStatus: 404,
     });
 
-    expect(prisma.rows[0]?.acceptedAt).toEqual(expect.any(Date));
-    expect(prisma.rows[0]?.acceptedByMemberId).toBe("member_123");
-    expect(prisma.rows[0]?.lastEventId).toMatch(/^vault\.share\.accepted:/u);
-    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
   it("keeps the hosted share claim and reuses the same event id after a transport failure", async () => {
@@ -276,6 +277,7 @@ describe("hosted share service", () => {
       member: {
         billingStatus: HostedBillingStatus.active,
         id: "member_123",
+        status: HostedMemberStatus.registered,
       } as never,
       prisma: prisma as never,
       shareCode: created.shareCode,
@@ -290,6 +292,7 @@ describe("hosted share service", () => {
       member: {
         billingStatus: HostedBillingStatus.active,
         id: "member_123",
+        status: HostedMemberStatus.registered,
       } as never,
       prisma: prisma as never,
       shareCode: created.shareCode,
@@ -311,6 +314,7 @@ describe("hosted share service", () => {
       member: {
         billingStatus: HostedBillingStatus.active,
         id: "member_123",
+        status: HostedMemberStatus.registered,
       } as never,
       prisma: prisma as never,
       shareCode: created.shareCode,
@@ -319,6 +323,44 @@ describe("hosted share service", () => {
     expect(finalized.alreadyImported).toBe(true);
     expect(finalized.imported).toBe(true);
     expect(prisma.rows[0]?.consumedByMemberId).toBe("member_123");
+  });
+
+  it("treats suspended members as inactive for share page access and share acceptance", async () => {
+    const prisma = createHostedSharePrisma();
+    const created = await createHostedShareLink({
+      prisma: prisma as never,
+      pack: buildPack(),
+      senderMemberId: "member_sender",
+    });
+
+    await expect(buildHostedSharePageData({
+      authenticatedMember: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+        status: HostedMemberStatus.suspended,
+      } as never,
+      prisma: prisma as never,
+      shareCode: created.shareCode,
+    })).resolves.toMatchObject({
+      session: {
+        active: false,
+        authenticated: true,
+      },
+      stage: "signin",
+    });
+
+    await expect(acceptHostedShareLink({
+      member: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+        status: HostedMemberStatus.suspended,
+      } as never,
+      prisma: prisma as never,
+      shareCode: created.shareCode,
+    })).rejects.toMatchObject({
+      code: "HOSTED_SHARE_ACTIVE_REQUIRED",
+      httpStatus: 403,
+    });
   });
 
 });

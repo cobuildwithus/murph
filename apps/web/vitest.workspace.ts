@@ -48,9 +48,11 @@ function createHostedWebProject(name: string, patterns: readonly string[]) {
 export const hostedWebVitestProjects = [
   createHostedWebProject("hosted-web-onboarding-core", [
     "hosted-onboarding-billing-service.test.ts",
+    "hosted-onboarding-entitlement.test.ts",
     "hosted-onboarding-env.test.ts",
     "hosted-onboarding-landing.test.ts",
     "hosted-onboarding-member-service.test.ts",
+    "hosted-onboarding-request-auth.test.ts",
     "hosted-onboarding-routes.test.ts",
     "hosted-onboarding-session.test.ts",
     "hosted-onboarding-shared.test.ts",

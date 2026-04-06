@@ -1,4 +1,4 @@
-import { HostedBillingStatus, PrismaClient, type HostedMember } from "@prisma/client";
+import { type HostedMember, type PrismaClient } from "@prisma/client";
 import { assertContract, sharePackSchema, type SharePack } from "@murphai/contracts";
 
 import { getPrisma } from "../prisma";
@@ -9,6 +9,7 @@ import {
 import {
   issueHostedInviteForPhone,
 } from "../hosted-onboarding/invite-service";
+import { hasHostedMemberActiveAccess } from "../hosted-onboarding/entitlement";
 
 import {
   buildHostedSharePreview,
@@ -110,7 +111,12 @@ export async function buildHostedSharePageData(input: {
   const prisma = input.prisma ?? getPrisma();
   const record = await findHostedShareLinkByCode(input.shareCode, prisma);
   const authenticatedMember = input.authenticatedMember ?? null;
-  const sessionActive = authenticatedMember?.billingStatus === HostedBillingStatus.active;
+  const sessionActive = authenticatedMember
+    ? hasHostedMemberActiveAccess({
+        billingStatus: authenticatedMember.billingStatus,
+        memberStatus: authenticatedMember.status,
+      })
+    : false;
 
   if (!record) {
     return {
