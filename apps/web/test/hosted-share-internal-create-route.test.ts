@@ -1,5 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createJsonPostRequest } from "./route-test-helpers";
+
 const mocks = vi.hoisted(() => ({
   createHostedShareLink: vi.fn(),
   requireHostedWebInternalSignedRequest: vi.fn(),
@@ -36,28 +38,22 @@ describe("hosted share internal create route", () => {
 
   it("verifies the signed request before consuming the JSON body", async () => {
     const response = await hostedShareInternalCreateRoute.POST(
-      new Request("https://join.example.test/api/hosted-share/internal/create", {
-        body: JSON.stringify({
-          pack: {
-            createdAt: "2026-04-05T00:00:00.000Z",
-            entities: [
-              {
-                kind: "protocol",
-                payload: {
-                  title: "Shared protocol",
-                },
-                ref: "protocol:shared",
+      createJsonPostRequest("https://join.example.test/api/hosted-share/internal/create", {
+        pack: {
+          createdAt: "2026-04-05T00:00:00.000Z",
+          entities: [
+            {
+              kind: "protocol",
+              payload: {
+                title: "Shared protocol",
               },
-            ],
-            schemaVersion: "murph.share-pack.v1",
-            title: "Shared pack",
-          },
-          senderMemberId: "member_sender",
-        }),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
+              ref: "protocol:shared",
+            },
+          ],
+          schemaVersion: "murph.share-pack.v1",
+          title: "Shared pack",
         },
-        method: "POST",
+        senderMemberId: "member_sender",
       }),
     );
 

@@ -171,240 +171,82 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       vaultRoot,
     });
 
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
-        path: "vault.json",
-        root: "vault",
-      }),
-      "{\"schema\":\"vault\"}\n",
-    );
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
-        path: ".runtime/operations/assistant",
-        root: "vault",
-      }),
-      null,
-    );
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
+    assertHostedBundleTextEntries(snapshot.bundle, [
+      { expected: "{\"schema\":\"vault\"}\n", path: "vault.json", root: "vault" },
+      { expected: null, path: ".runtime/operations/assistant", root: "vault" },
+      {
+        expected: "{\"autoReplyChannels\":[\"linq\"]}\n",
         path: ".runtime/operations/assistant/automation.json",
         root: "vault",
-      }),
-      "{\"autoReplyChannels\":[\"linq\"]}\n",
-    );
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
+      },
+      {
+        expected: "{\"version\":1,\"jobs\":[{\"jobId\":\"cron_1\"}]}\n",
         path: ".runtime/operations/assistant/cron/jobs.json",
         root: "vault",
-      }),
-      "{\"version\":1,\"jobs\":[{\"jobId\":\"cron_1\"}]}\n",
-    );
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
+      },
+      {
+        expected: "{\"session\":\"saved\"}\n",
         path: ".runtime/operations/assistant/sessions/session_1.json",
         root: "vault",
-      }),
-      "{\"session\":\"saved\"}\n",
-    );
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
+      },
+      {
+        expected: "{\"role\":\"assistant\"}\n",
         path: ".runtime/operations/assistant/transcripts/session_1.jsonl",
         root: "vault",
-      }),
-      "{\"role\":\"assistant\"}\n",
-    );
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
+      },
+      {
+        expected: "{\"intent\":\"deliver\"}\n",
         path: ".runtime/operations/assistant/outbox/intent_1.json",
         root: "vault",
-      }),
-      "{\"intent\":\"deliver\"}\n",
-    );
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
+      },
+      {
+        expected: "{\"receipt\":\"saved\"}\n",
         path: ".runtime/operations/assistant/receipts/turn_1.json",
         root: "vault",
-      }),
-      "{\"receipt\":\"saved\"}\n",
-    );
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
+      },
+      {
+        expected: "{\"usage\":true}\n",
         path: ".runtime/operations/assistant/usage/pending/usage_1.json",
         root: "vault",
-      }),
-      "{\"usage\":true}\n",
-    );
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
+      },
+      {
+        expected: "{\"cooldownUntil\":\"2026-04-06T00:00:00Z\"}\n",
         path: ".runtime/operations/assistant/failover.json",
         root: "vault",
-      }),
-      "{\"cooldownUntil\":\"2026-04-06T00:00:00Z\"}\n",
-    );
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
-        path: ".runtime/operations/assistant/status.json",
-        root: "vault",
-      }),
-      null,
-    );
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
-        path: ".runtime/operations/assistant/diagnostics/events.jsonl",
-        root: "vault",
-      }),
-      null,
-    );
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
-        path: ".runtime/operations/assistant/diagnostics/snapshot.json",
-        root: "vault",
-      }),
-      null,
-    );
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
-        path: ".runtime/operations/assistant/cron/runs/cronrun_1.jsonl",
-        root: "vault",
-      }),
-      null,
-    );
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
+      },
+      { expected: null, path: ".runtime/operations/assistant/status.json", root: "vault" },
+      { expected: null, path: ".runtime/operations/assistant/diagnostics/events.jsonl", root: "vault" },
+      { expected: null, path: ".runtime/operations/assistant/diagnostics/snapshot.json", root: "vault" },
+      { expected: null, path: ".runtime/operations/assistant/cron/runs/cronrun_1.jsonl", root: "vault" },
+      {
+        expected: null,
         path: ".runtime/operations/assistant/state/onboarding/first-contact/bootstrap.json",
         root: "vault",
-      }),
-      null,
-    );
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
-        path: ".murph/config.json",
-        root: "operator-home",
-      }),
-      "{\"schema\":\"cfg\"}\n",
-    );
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
-        path: ".murph/hosted/user-env.json",
-        root: "operator-home",
-      }),
-      null,
-    );
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
-        path: "raw/inbox/2026-03-28/capture_123/attachments/report.pdf",
-        root: "vault",
-      }),
-      null,
-    );
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
+      },
+      { expected: "{\"schema\":\"cfg\"}\n", path: ".murph/config.json", root: "operator-home" },
+      { expected: null, path: ".murph/hosted/user-env.json", root: "operator-home" },
+      { expected: null, path: "raw/inbox/2026-03-28/capture_123/attachments/report.pdf", root: "vault" },
+      {
+        expected: "{\"version\":1,\"entries\":[]}\n",
         path: ".runtime/operations/inbox/promotions.json",
         root: "vault",
-      }),
-      "{\"version\":1,\"entries\":[]}\n",
-    );
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
+      },
+      {
+        expected: "{\"status\":\"committed\"}\n",
         path: ".runtime/operations/op_test.json",
         root: "vault",
-      }),
-      "{\"status\":\"committed\"}\n",
-    );
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
+      },
+      {
+        expected: "staged payload\n",
         path: ".runtime/operations/op_test/payloads/staged.md",
         root: "vault",
-      }),
-      "staged payload\n",
-    );
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
-        path: ".runtime/operations/assistant/secrets/sessions/session_1.json",
-        root: "vault",
-      }),
-      null,
-    );
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
-        path: ".runtime/operations/inbox/config.json",
-        root: "vault",
-      }),
-      null,
-    );
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
-        path: ".runtime/operations/device-sync/state.sqlite",
-        root: "vault",
-      }),
-      null,
-    );
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
-        path: ".runtime/search.sqlite",
-        root: "vault",
-      }),
-      null,
-    );
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
-        path: ".runtime/operations/parsers/toolchain.json",
-        root: "vault",
-      }),
-      null,
-    );
+      },
+      { expected: null, path: ".runtime/operations/assistant/secrets/sessions/session_1.json", root: "vault" },
+      { expected: null, path: ".runtime/operations/inbox/config.json", root: "vault" },
+      { expected: null, path: ".runtime/operations/device-sync/state.sqlite", root: "vault" },
+      { expected: null, path: ".runtime/search.sqlite", root: "vault" },
+      { expected: null, path: ".runtime/operations/parsers/toolchain.json", root: "vault" },
+    ]);
 
     const artifactRefs = listHostedBundleArtifacts({
       bytes: snapshot.bundle,
@@ -536,6 +378,27 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await rm(restoreRoot, { force: true, recursive: true });
   }
 });
+
+function assertHostedBundleTextEntries(
+  bytes: Uint8Array,
+  entries: ReadonlyArray<{
+    expected: string | null;
+    path: string;
+    root: "operator-home" | "vault";
+  }>,
+): void {
+  for (const { expected, path, root } of entries) {
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes,
+        expectedKind: "vault",
+        path,
+        root,
+      }),
+      expected,
+    );
+  }
+}
 
 test("runtime-state portability defaults operational paths to machine-local unless explicitly marked portable", () => {
   expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant")).toMatchObject({

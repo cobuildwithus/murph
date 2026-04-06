@@ -1,11 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 
 import { Cli } from "incur";
 import { afterEach, test } from "vitest";
-
 import {
   buildMemoryPromptBlock,
   createEmptyMemoryDocument,
@@ -14,18 +12,20 @@ import {
   renderMemoryDocument,
   searchMemoryRecords,
   upsertMemoryRecord,
-} from "../../contracts/src/memory.js";
+} from "@murphai/contracts";
 import {
   forgetMemory,
   readMemoryDocument as readMemoryDocumentFromCore,
   resolveMemoryDocumentPath,
   upsertMemory,
-} from "../../core/src/memory.js";
-import { registerMemoryCommands } from "../src/commands/memory.js";
+} from "@murphai/core";
 import {
   readMemoryDocument as readMemoryDocumentFromQuery,
   searchMemory as searchMemoryFromQuery,
-} from "../../query/src/memory.js";
+} from "@murphai/query";
+
+import { createTempVaultContext } from "./cli-test-helpers.js";
+import { registerMemoryCommands } from "../src/commands/memory.js";
 
 const cleanupPaths: string[] = [];
 
@@ -74,10 +74,8 @@ test("memory document renders and parses as one canonical markdown file", () => 
 });
 
 test("core and query agree on the canonical bank/memory.md file", async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), "murph-memory-"));
-  cleanupPaths.push(parent);
-  const vaultRoot = path.join(parent, "vault");
-  await mkdir(vaultRoot, { recursive: true });
+  const { parentRoot, vaultRoot } = await createTempVaultContext("murph-memory-");
+  cleanupPaths.push(parentRoot);
 
   const write = await upsertMemory(vaultRoot, {
     section: "Context",

@@ -1,18 +1,13 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, test } from 'vitest'
+import { createTempVaultContext } from './cli-test-helpers.js'
 import {
   appendAssistantTranscriptEntries,
-  deleteAssistantStateDocument,
-  getAssistantStateDocument,
   getAssistantSession,
-  listAssistantStateDocuments,
   listAssistantTranscriptEntries,
   listAssistantSessions,
-  patchAssistantStateDocument,
-  putAssistantStateDocument,
   readAssistantAutomationState,
   redactAssistantDisplayPath,
   resolveAssistantAliasKey,
@@ -54,6 +49,15 @@ import {
 import { redactAssistantSessionForDisplay } from '@murphai/assistant-core/assistant/redaction'
 
 const cleanupPaths: string[] = []
+
+async function createAssistantStateVault(prefix: string): Promise<{
+  parentRoot: string
+  vaultRoot: string
+}> {
+  const context = await createTempVaultContext(prefix)
+  cleanupPaths.push(context.parentRoot)
+  return context
+}
 
 afterEach(async () => {
   await Promise.all(
@@ -117,10 +121,7 @@ test('resolveAssistantAliasKey only derives actor-scoped fallback keys when the 
 })
 
 test('resolveAssistantSession does not auto-reuse actor-scoped conversation keys for explicit group conversations without thread ids', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-group-routing-scope-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-group-routing-scope-')
 
   const first = await resolveAssistantSession({
     vault: vaultRoot,
@@ -141,19 +142,19 @@ test('resolveAssistantSession does not auto-reuse actor-scoped conversation keys
   assert.notEqual(second.session.sessionId, first.session.sessionId)
 })
 
-test('assistant sessions live outside the vault, omit redundant path metadata, and reuse alias mappings', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-state-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+test('assistant sessions live under the vault runtime area, omit redundant path metadata, and reuse alias mappings', async () => {
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-state-')
 
   const statePaths = resolveAssistantStatePaths(vaultRoot)
   assert.equal(statePaths.absoluteVaultRoot, path.resolve(vaultRoot))
-  assert.equal(statePaths.assistantStateRoot.includes(path.join(parent, 'assistant-state')), true)
-  assert.equal(statePaths.assistantStateRoot.startsWith(path.resolve(vaultRoot)), false)
   assert.equal(
-    statePaths.transcriptsDirectory.includes(path.join(parent, 'assistant-state')),
-    true,
+    statePaths.assistantStateRoot,
+    path.join(path.resolve(vaultRoot), '.runtime', 'operations', 'assistant'),
+  )
+  assert.equal(statePaths.assistantStateRoot.startsWith(path.resolve(vaultRoot)), true)
+  assert.equal(
+    statePaths.transcriptsDirectory,
+    path.join(statePaths.assistantStateRoot, 'transcripts'),
   )
   assert.equal(statePaths.longTermMemoryPath, path.join(statePaths.assistantStateRoot, 'MEMORY.md'))
   assert.equal(statePaths.dailyMemoryDirectory, path.join(statePaths.assistantStateRoot, 'memory'))
@@ -233,191 +234,8 @@ test('assistant sessions live outside the vault, omit redundant path metadata, a
   assert.equal('lastAssistantMessage' in fetched, false)
 })
 
-test('assistant state documents support show put patch list and delete with JSON merge patch semantics', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-doc-state-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
-
-  const missing = await getAssistantStateDocument({
-    vault: vaultRoot,
-    docId: 'cron/job_123',
-  })
-  assert.equal(missing.exists, false)
-  assert.equal(missing.updatedAt, null)
-  assert.equal(missing.value, null)
-  assert.equal(
-    missing.documentPath,
-    path.join(resolveAssistantStatePaths(vaultRoot).stateDirectory, 'cron', 'job_123.json'),
-  )
-
-  const created = await putAssistantStateDocument({
-    vault: vaultRoot,
-    docId: 'cron/job_123',
-    value: {
-      pending: {
-        signal: 'sleep_drop',
-      },
-      status: 'awaiting_user_context',
-      stale: true,
-    },
-  })
-  assert.equal(created.exists, true)
-  assert.equal(created.value?.status, 'awaiting_user_context')
-  assert.deepEqual(created.value?.pending, {
-    signal: 'sleep_drop',
-  })
-
-  const patched = await patchAssistantStateDocument({
-    vault: vaultRoot,
-    docId: 'cron/job_123',
-    patch: {
-      pending: {
-        cooldownUntil: '2026-03-29T10:00:00.000Z',
-      },
-      stale: null,
-    },
-  })
-  assert.equal(patched.exists, true)
-  assert.deepEqual(patched.value, {
-    pending: {
-      signal: 'sleep_drop',
-      cooldownUntil: '2026-03-29T10:00:00.000Z',
-    },
-    status: 'awaiting_user_context',
-  })
-
-  const listed = await listAssistantStateDocuments({
-    vault: vaultRoot,
-    prefix: 'cron',
-  })
-  assert.equal(listed.length, 1)
-  assert.equal(listed[0]?.docId, 'cron/job_123')
-
-  const deleted = await deleteAssistantStateDocument({
-    vault: vaultRoot,
-    docId: 'cron/job_123',
-  })
-  assert.equal(deleted.existed, true)
-
-  const afterDelete = await getAssistantStateDocument({
-    vault: vaultRoot,
-    docId: 'cron/job_123',
-  })
-  assert.equal(afterDelete.exists, false)
-  assert.equal(afterDelete.value, null)
-})
-
-test('assistant state patch creates missing documents and replaces arrays', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-doc-patch-create-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
-
-  const created = await patchAssistantStateDocument({
-    vault: vaultRoot,
-    docId: 'cron/job_456',
-    patch: {
-      arr: [1, 2],
-      obj: {
-        a: 1,
-      },
-    },
-  })
-  assert.equal(created.exists, true)
-  assert.deepEqual(created.value, {
-    arr: [1, 2],
-    obj: {
-      a: 1,
-    },
-  })
-
-  const updated = await patchAssistantStateDocument({
-    vault: vaultRoot,
-    docId: 'cron/job_456',
-    patch: {
-      arr: [3],
-      obj: {
-        b: 2,
-      },
-    },
-  })
-  assert.deepEqual(updated.value, {
-    arr: [3],
-    obj: {
-      a: 1,
-      b: 2,
-    },
-  })
-
-  const listed = await listAssistantStateDocuments({
-    vault: vaultRoot,
-    prefix: 'cron',
-  })
-  assert.deepEqual(
-    listed.map((entry) => entry.docId),
-    ['cron/job_456'],
-  )
-})
-
-test('assistant state documents reject invalid document ids', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-doc-invalid-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
-
-  await assert.rejects(
-    () =>
-      getAssistantStateDocument({
-        vault: vaultRoot,
-        docId: '../escape',
-      }),
-    /slash-delimited segments/u,
-  )
-})
-
-test('assistant state document listing ignores invalid on-disk filenames', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-doc-invalid-list-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
-
-  const statePaths = resolveAssistantStatePaths(vaultRoot)
-  await mkdir(path.join(statePaths.stateDirectory, 'cron'), {
-    recursive: true,
-  })
-  await writeFile(
-    path.join(statePaths.stateDirectory, 'cron', 'bad name.json'),
-    JSON.stringify({
-      ignored: true,
-    }),
-    'utf8',
-  )
-
-  await putAssistantStateDocument({
-    vault: vaultRoot,
-    docId: 'cron/job_123',
-    value: {
-      kept: true,
-    },
-  })
-
-  const listed = await listAssistantStateDocuments({
-    vault: vaultRoot,
-    prefix: 'cron',
-  })
-
-  assert.deepEqual(
-    listed.map((entry) => entry.docId),
-    ['cron/job_123'],
-  )
-})
-
 test('resolveAssistantSession prefers explicit sessionId over conversation-key matches', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-id-precedence-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-session-id-precedence-')
 
   const sessionIdMatch = await resolveAssistantSession({
     vault: vaultRoot,
@@ -458,10 +276,7 @@ test('resolveAssistantSession prefers explicit sessionId over conversation-key m
 })
 
 test('resolveAssistantSession does not clear bindings when conversation only carries lookup metadata', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-lookup-conversation-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-session-lookup-conversation-')
 
   const created = await resolveAssistantSession({
     vault: vaultRoot,
@@ -497,10 +312,7 @@ test('resolveAssistantSession does not clear bindings when conversation only car
 })
 
 test('resolveAssistantSession ignores primitive conversation payloads when patching bindings', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-primitive-conversation-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-session-primitive-conversation-')
 
   const created = await resolveAssistantSession({
     vault: vaultRoot,
@@ -527,10 +339,7 @@ test('resolveAssistantSession ignores primitive conversation payloads when patch
 })
 
 test('resolveAssistantSession only enriches missing nested conversation fields that were explicitly provided', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-partial-conversation-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-session-partial-conversation-')
 
   const created = await resolveAssistantSession({
     vault: vaultRoot,
@@ -562,10 +371,7 @@ test('resolveAssistantSession only enriches missing nested conversation fields t
 })
 
 test('resolveAssistantSession ignores alias-only nested conversation payloads when patching bindings', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-alias-only-conversation-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-session-alias-only-conversation-')
 
   const created = await resolveAssistantSession({
     vault: vaultRoot,
@@ -602,10 +408,7 @@ test('resolveAssistantSession ignores alias-only nested conversation payloads wh
 })
 
 test('resolveAssistantSession rejects participant retargeting when a saved session is already bound to a different actor', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-participant-conflict-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-session-participant-conflict-')
 
   const created = await resolveAssistantSession({
     vault: vaultRoot,
@@ -637,10 +440,7 @@ test('resolveAssistantSession rejects participant retargeting when a saved sessi
 })
 
 test('resolveAssistantSession rejects clearing a saved thread binding because that would broaden the routed audience', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-clear-thread-conflict-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-session-clear-thread-conflict-')
 
   const created = await resolveAssistantSession({
     vault: vaultRoot,
@@ -677,10 +477,7 @@ test('resolveAssistantSession rejects clearing a saved thread binding because th
 })
 
 test('resolveAssistantSession rejects clearing a saved participant binding because that would broaden the routed audience', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-clear-participant-conflict-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-session-clear-participant-conflict-')
 
   const created = await resolveAssistantSession({
     vault: vaultRoot,
@@ -714,10 +511,7 @@ test('resolveAssistantSession rejects clearing a saved participant binding becau
 })
 
 test('resolveAssistantSession can explicitly rebind a saved session to a new delivery channel when allowed', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-rebind-channel-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-session-rebind-channel-')
 
   const created = await resolveAssistantSession({
     vault: vaultRoot,
@@ -783,10 +577,7 @@ test('resolveAssistantSession can explicitly rebind a saved session to a new del
 })
 
 test('resolveAssistantSession rejects alias reuse when the supplied routing metadata points at a different conversation', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-alias-routing-conflict-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-alias-routing-conflict-')
 
   const aliasMatch = await resolveAssistantSession({
     vault: vaultRoot,
@@ -836,10 +627,7 @@ test('resolveAssistantSession rejects alias reuse when the supplied routing meta
 })
 
 test('resolveAssistantSession rotates conversation-key sessions after the max age threshold', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-rotate-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-session-rotate-')
 
   const first = await resolveAssistantSession({
     vault: vaultRoot,
@@ -889,10 +677,7 @@ test('resolveAssistantSession rotates conversation-key sessions after the max ag
 })
 
 test('resolveAssistantSession merges conversation refs with explicit locator overrides when creating bindings', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-conversation-ref-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-session-conversation-ref-')
 
   const resolved = await resolveAssistantSession({
     vault: vaultRoot,
@@ -921,10 +706,7 @@ test('resolveAssistantSession merges conversation refs with explicit locator ove
 })
 
 test('assistant memory write locks allow nested reentry while serializing concurrent same-root callers', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-lock-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-memory-lock-')
 
   const paths = resolveAssistantMemoryStoragePaths(vaultRoot)
   const events: string[] = []
@@ -975,10 +757,7 @@ test('assistant memory write locks allow nested reentry while serializing concur
 })
 
 test('assistant runtime write locks allow nested reentry while serializing concurrent same-root callers', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-runtime-lock-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-runtime-lock-')
 
   const events: string[] = []
   const firstHolding = createDeferred<void>()
@@ -1028,10 +807,7 @@ test('assistant runtime write locks allow nested reentry while serializing concu
 })
 
 test('saveAssistantSession waits for the assistant runtime write lock before mutating session state', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-save-lock-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-save-lock-')
 
   const resolved = await resolveAssistantSession({
     vault: vaultRoot,
@@ -1070,10 +846,7 @@ test('saveAssistantSession waits for the assistant runtime write lock before mut
 })
 
 test('resolveAssistantSession create-if-missing waits for the assistant runtime write lock before creating session indexes', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-resolve-lock-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-resolve-lock-')
 
   const lockHeld = createDeferred<void>()
   const releaseLock = createDeferred<void>()
@@ -1106,10 +879,7 @@ test('resolveAssistantSession create-if-missing waits for the assistant runtime 
 })
 
 test('assistant transcripts are stored separately from session metadata', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-transcript-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-transcript-')
 
   const resolved = await resolveAssistantSession({
     vault: vaultRoot,
@@ -1165,10 +935,7 @@ test('assistant transcripts are stored separately from session metadata', async 
 })
 
 test('resolveAssistantSession rebuilds torn indexes from session files and listAssistantSessions skips torn session JSON', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-index-rebuild-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-index-rebuild-')
 
   const resolved = await resolveAssistantSession({
     vault: vaultRoot,
@@ -1217,10 +984,7 @@ function createDeferred<T>() {
 }
 
 test('getAssistantSession explains vault-scoped session drift when only a transcript remains', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-missing-session-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-missing-session-')
 
   const sessionId = 'asst_orphaned'
   await appendAssistantTranscriptEntries(vaultRoot, sessionId, [
@@ -1240,9 +1004,8 @@ test('getAssistantSession explains vault-scoped session drift when only a transc
       assert.equal(error.context?.sessionExists, false)
       assert.equal(error.context?.transcriptExists, true)
       assert.equal(
-        typeof error.context?.stateRoot === 'string' &&
-          error.context.stateRoot.includes(path.join(parent, 'assistant-state')),
-        true,
+        error.context?.stateRoot,
+        path.join(path.resolve(vaultRoot), '.runtime', 'operations', 'assistant'),
       )
       return true
     },
@@ -1250,10 +1013,7 @@ test('getAssistantSession explains vault-scoped session drift when only a transc
 })
 
 test('getAssistantSession rejects non-canonical assistant state payloads with excerpt fields', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-state-migrate-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-state-migrate-')
 
   const statePaths = resolveAssistantStatePaths(vaultRoot)
   await mkdir(statePaths.sessionsDirectory, {
@@ -1307,10 +1067,7 @@ test('getAssistantSession rejects non-canonical assistant state payloads with ex
 })
 
 test('getAssistantSession rejects invalid provider payloads instead of coercing them', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-state-provider-hard-cut-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-state-provider-hard-cut-')
 
   const statePaths = resolveAssistantStatePaths(vaultRoot)
   await mkdir(statePaths.sessionsDirectory, {
@@ -1354,10 +1111,7 @@ test('getAssistantSession rejects invalid provider payloads instead of coercing 
 })
 
 test('resolveAssistantSession ignores legacy aliases.json fallback state', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-alias-hard-cut-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-alias-hard-cut-')
 
   const statePaths = resolveAssistantStatePaths(vaultRoot)
   await mkdir(statePaths.sessionsDirectory, {
@@ -1425,10 +1179,7 @@ test('resolveAssistantSession ignores legacy aliases.json fallback state', async
 })
 
 test('readAssistantAutomationState quarantines and rebuilds legacy automation v1 payloads', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-automation-hard-cut-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-automation-hard-cut-')
 
   const statePaths = resolveAssistantStatePaths(vaultRoot)
   await mkdir(statePaths.sessionsDirectory, {
@@ -1462,17 +1213,16 @@ test('readAssistantAutomationState quarantines and rebuilds legacy automation v1
 })
 
 test('redactAssistantDisplayPath hides HOME-prefixed paths and leaves external paths untouched', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-redact-'))
-  const homeRoot = path.join(parent, 'home')
+  const { parentRoot } = await createAssistantStateVault('murph-assistant-redact-')
+  const homeRoot = path.join(parentRoot, 'home')
   const nestedPath = path.join(homeRoot, 'vault', 'sessions')
-  const outsidePath = path.join(parent, 'outside')
+  const outsidePath = path.join(parentRoot, 'outside')
   await mkdir(nestedPath, {
     recursive: true,
   })
   await mkdir(outsidePath, {
     recursive: true,
   })
-  cleanupPaths.push(parent)
 
   const originalHome = process.env.HOME
   process.env.HOME = homeRoot
@@ -1502,10 +1252,7 @@ function restoreEnvironmentVariable(
 }
 
 test('upsertAssistantMemory writes vault-scoped Markdown memory with provenance metadata and forget removes targeted records', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-memory-')
 
   const now = new Date('2026-03-17T09:15:00.000Z')
   const result = await upsertAssistantMemory({
@@ -1624,10 +1371,7 @@ test('extractAssistantMemory only keeps durable health context by default', () =
 })
 
 test('upsertAssistantMemory binds assistant writes to the active turn context', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-turn-context-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-turn-context-')
 
   const turnContext = resolveAssistantMemoryTurnContext(
     createAssistantMemoryTurnContextEnv({
@@ -1685,10 +1429,7 @@ test('upsertAssistantMemory binds assistant writes to the active turn context', 
 })
 
 test('upsertAssistantMemory accepts canonical identity and tone writes from a compound bound user turn', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-compound-turn-context-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-compound-turn-context-')
 
   const turnContext = resolveAssistantMemoryTurnContext(
     createAssistantMemoryTurnContextEnv({
@@ -1725,10 +1466,7 @@ test('upsertAssistantMemory accepts canonical identity and tone writes from a co
 })
 
 test('upsertAssistantMemory replaces mutable long-term identity and response-style memory', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-upsert-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-memory-upsert-')
 
   const firstNow = new Date('2026-03-17T09:15:00.000Z')
   const secondNow = new Date('2026-03-17T11:45:00.000Z')
@@ -1805,10 +1543,7 @@ test('upsertAssistantMemory replaces mutable long-term identity and response-sty
 })
 
 test('upsertAssistantMemory exposes typed search/get results with cited file locations', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-search-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-memory-search-')
 
   const now = new Date('2026-03-18T09:45:00.000Z')
   const upserted = await upsertAssistantMemory({
@@ -1846,10 +1581,7 @@ test('upsertAssistantMemory exposes typed search/get results with cited file loc
 })
 
 test('loadAssistantMemoryPromptBlock keeps daily notes out of the core bootstrap prompt and gates health memory by privacy', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-core-prompt-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-memory-core-prompt-')
 
   await upsertAssistantMemory({
     vault: vaultRoot,
@@ -1893,10 +1625,7 @@ test('loadAssistantMemoryPromptBlock keeps daily notes out of the core bootstrap
 })
 
 test('upsertAssistantMemory accepts durable health context without explicit remember phrasing in private contexts', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-health-policy-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-memory-health-policy-')
 
   const result = await upsertAssistantMemory({
     vault: vaultRoot,
@@ -1913,10 +1642,7 @@ test('upsertAssistantMemory accepts durable health context without explicit reme
 })
 
 test('upsertAssistantMemory still blocks health context outside private assistant contexts', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-health-private-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-memory-health-private-')
 
   await assert.rejects(
     upsertAssistantMemory({
@@ -1991,10 +1717,7 @@ test('assistant session schema rejects path-like session identifiers before pers
 })
 
 test('assistant storage readers reject traversal-like opaque ids at the filesystem boundary', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-storage-ids-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-storage-ids-')
 
   const paths = resolveAssistantStatePaths(vaultRoot)
   const invalidId = '../escape'
@@ -2021,10 +1744,7 @@ test('assistant storage readers reject traversal-like opaque ids at the filesyst
 })
 
 test('assistant runtime budget snapshots are quarantined, recreated, and fully pruned with orphan payload cleanup', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-runtime-budget-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-runtime-budget-')
 
   const paths = resolveAssistantStatePaths(vaultRoot)
   await mkdir(path.dirname(paths.resourceBudgetPath), {
@@ -2083,10 +1803,7 @@ test('assistant runtime budget snapshots are quarantined, recreated, and fully p
 })
 
 test('assistant status includes runtime-budget quarantine details on the same recovery read', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-status-runtime-budget-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-status-runtime-budget-')
 
   const paths = resolveAssistantStatePaths(vaultRoot)
   await mkdir(path.dirname(paths.resourceBudgetPath), {
@@ -2112,10 +1829,7 @@ test('assistant status includes runtime-budget quarantine details on the same re
 })
 
 test('assistant session secrets persist in private sidecars with private permissions and redacted display output', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-secrets-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-session-secrets-')
 
   const resolved = await resolveAssistantSession({
     vault: vaultRoot,
@@ -2235,10 +1949,7 @@ test('assistant session secrets persist in private sidecars with private permiss
 })
 
 test('malformed session secret sidecars are quarantined instead of being treated as cleanly missing', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-sidecar-corruption-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-sidecar-corruption-')
 
   const statePaths = resolveAssistantStatePaths(vaultRoot)
   const resolved = await resolveAssistantSession({

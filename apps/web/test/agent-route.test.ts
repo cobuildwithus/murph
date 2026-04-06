@@ -4,6 +4,8 @@ import {
 import { createOuraDeviceSyncProvider } from "@murphai/device-syncd/providers/oura";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createBearerRequest, createJsonPostRequest, createRouteContext } from "./route-test-helpers";
+
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
   deviceSyncEnv: {
@@ -32,12 +34,6 @@ let exportRoute: ExportRouteModule;
 let refreshRoute: RefreshRouteModule;
 let signalsRoute: SignalsRouteModule;
 let webhookRoute: WebhookRouteModule;
-
-function createRouteContext(connectionId: string) {
-  return {
-    params: Promise.resolve({ connectionId }),
-  };
-}
 
 describe("hosted device-sync agent and webhook routes", () => {
   beforeAll(async () => {
@@ -99,13 +95,12 @@ describe("hosted device-sync agent and webhook routes", () => {
     );
 
     const response = await exportRoute.POST(
-      new Request("https://example.test/api/device-sync/agent/connections/dsc_123/export-token-bundle", {
-        method: "POST",
-        headers: {
-          authorization: "Bearer expired-session-token",
-        },
-      }),
-      createRouteContext("dsc_123"),
+      createBearerRequest(
+        "https://example.test/api/device-sync/agent/connections/dsc_123/export-token-bundle",
+        "expired-session-token",
+        { method: "POST" },
+      ),
+      createRouteContext({ connectionId: "dsc_123" }),
     );
 
     expect(response.status).toBe(401);
@@ -131,17 +126,19 @@ describe("hosted device-sync agent and webhook routes", () => {
     );
 
     const response = await refreshRoute.POST(
-      new Request("https://example.test/api/device-sync/agent/connections/dsc_123/refresh-token-bundle", {
-        method: "POST",
-        headers: {
-          authorization: "Bearer expired-session-token",
-        },
-        body: JSON.stringify({
+      createJsonPostRequest(
+        "https://example.test/api/device-sync/agent/connections/dsc_123/refresh-token-bundle",
+        {
           expectedTokenVersion: 7,
           force: true,
-        }),
-      }),
-      createRouteContext("dsc_123"),
+        },
+        {
+          headers: {
+            authorization: "Bearer expired-session-token",
+          },
+        },
+      ),
+      createRouteContext({ connectionId: "dsc_123" }),
     );
 
     expect(response.status).toBe(401);
@@ -158,11 +155,7 @@ describe("hosted device-sync agent and webhook routes", () => {
 
   it("passes the authenticated agent user and returns sparse webhook hints from signals", async () => {
     const response = await signalsRoute.GET(
-      new Request("https://example.test/api/device-sync/agent/signals?after=7&limit=2", {
-        headers: {
-          authorization: "Bearer active-session-token",
-        },
-      }),
+      createBearerRequest("https://example.test/api/device-sync/agent/signals?after=7&limit=2", "active-session-token"),
     );
 
     expect(response.status).toBe(200);
@@ -193,9 +186,7 @@ describe("hosted device-sync agent and webhook routes", () => {
       new Request(
         "https://example.test/api/device-sync/webhooks/oura?verification_token=verify-token&challenge=oura-challenge-token",
       ),
-      {
-        params: Promise.resolve({ provider: "oura" }),
-      },
+      createRouteContext({ provider: "oura" }),
     );
 
     expect(mocks.webhookRegistry.get).toHaveBeenCalledWith("oura");
@@ -215,9 +206,7 @@ describe("hosted device-sync agent and webhook routes", () => {
       new Request("https://example.test/api/device-sync/webhooks/oura%2Flegacy", {
         method: "POST",
       }),
-      {
-        params: Promise.resolve({ provider: "oura%2Flegacy" }),
-      },
+      createRouteContext({ provider: "oura%2Flegacy" }),
     );
 
     expect(response.status).toBe(202);
@@ -232,9 +221,7 @@ describe("hosted device-sync agent and webhook routes", () => {
       new Request(
         "https://example.test/api/device-sync/webhooks/oura?verification_token=wrong-token&challenge=oura-challenge-token",
       ),
-      {
-        params: Promise.resolve({ provider: "oura" }),
-      },
+      createRouteContext({ provider: "oura" }),
     );
 
     expect(response.status).toBe(403);
@@ -254,9 +241,7 @@ describe("hosted device-sync agent and webhook routes", () => {
       new Request(
         "https://example.test/api/device-sync/webhooks/oura?verification_token=verify-token&challenge=oura-challenge-token",
       ),
-      {
-        params: Promise.resolve({ provider: "oura" }),
-      },
+      createRouteContext({ provider: "oura" }),
     );
 
     expect(response.status).toBe(500);

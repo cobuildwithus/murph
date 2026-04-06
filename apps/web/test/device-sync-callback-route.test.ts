@@ -1,5 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createRouteContext } from "./route-test-helpers";
+
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
   handleOAuthCallback: vi.fn(),
@@ -13,12 +15,6 @@ vi.mock("@/src/lib/device-sync/control-plane", () => ({
 type CallbackRouteModule = typeof import("../app/api/device-sync/oauth/[provider]/callback/route");
 
 let callbackRoute: CallbackRouteModule;
-
-function createRouteContext(provider: string) {
-  return {
-    params: Promise.resolve({ provider }),
-  };
-}
 
 describe("hosted device-sync callback route", () => {
   beforeAll(async () => {
@@ -55,7 +51,7 @@ describe("hosted device-sync callback route", () => {
 
     const response = await callbackRoute.GET(
       new Request("https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz"),
-      createRouteContext("oura"),
+      createRouteContext({ provider: "oura" }),
     );
 
     expect(response.status).toBe(302);
@@ -67,7 +63,7 @@ describe("hosted device-sync callback route", () => {
   it("does not include the raw connection id in the fallback callback html", async () => {
     const response = await callbackRoute.GET(
       new Request("https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz"),
-      createRouteContext("oura"),
+      createRouteContext({ provider: "oura" }),
     );
 
     expect(response.status).toBe(200);
@@ -82,7 +78,7 @@ describe("hosted device-sync callback route", () => {
 
     const response = await callbackRoute.GET(
       new Request("https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz"),
-      createRouteContext("oura"),
+      createRouteContext({ provider: "oura" }),
     );
 
     expect(response.status).toBe(500);
@@ -105,7 +101,7 @@ describe("hosted device-sync callback route", () => {
 
     const response = await callbackRoute.GET(
       new Request("https://control.example.test/api/device-sync/oauth/%25E0%25A4%25A/callback?code=abc&state=xyz"),
-      createRouteContext("%E0%A4%A"),
+      createRouteContext({ provider: "%E0%A4%A" }),
     );
 
     expect(response.status).toBe(500);

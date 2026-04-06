@@ -1,5 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createJsonPostRequest, createRouteContext } from "./route-test-helpers";
+
 const nextServer = vi.hoisted(() => ({
   NextResponse: class NextResponse extends Response {
     static json(payload: unknown, init?: ResponseInit) {
@@ -76,12 +78,6 @@ type RouteModule = typeof import("../app/api/device-sync/agent/connections/[conn
 
 let route: RouteModule;
 
-function createRouteContext(connectionId: string) {
-  return {
-    params: Promise.resolve({ connectionId }),
-  };
-}
-
 describe("hosted device-sync local-heartbeat route", () => {
   beforeAll(async () => {
     route = await import("../app/api/device-sync/agent/connections/[connectionId]/local-heartbeat/route");
@@ -106,19 +102,20 @@ describe("hosted device-sync local-heartbeat route", () => {
 
   it("rejects attempts to overwrite server-owned heartbeat fields", async () => {
     const response = await route.POST(
-      new Request("https://example.test/api/device-sync/agent/connections/dsc_123/local-heartbeat", {
-        method: "POST",
-        headers: {
-          authorization: "Bearer live-session-token",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
+      createJsonPostRequest(
+        "https://example.test/api/device-sync/agent/connections/dsc_123/local-heartbeat",
+        {
           status: "disconnected",
           nextReconcileAt: "2099-01-01T00:00:00.000Z",
           clearError: true,
-        }),
-      }),
-      createRouteContext("dsc_123"),
+        },
+        {
+          headers: {
+            authorization: "Bearer live-session-token",
+          },
+        },
+      ),
+      createRouteContext({ connectionId: "dsc_123" }),
     );
 
     expect(response.status).toBe(400);
@@ -133,18 +130,19 @@ describe("hosted device-sync local-heartbeat route", () => {
 
   it("rejects malformed or out-of-contract telemetry values", async () => {
     const response = await route.POST(
-      new Request("https://example.test/api/device-sync/agent/connections/dsc_123/local-heartbeat", {
-        method: "POST",
-        headers: {
-          authorization: "Bearer live-session-token",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          lastSyncStartedAt: "not-a-date",
+      createJsonPostRequest(
+        "https://example.test/api/device-sync/agent/connections/dsc_123/local-heartbeat",
+        {
           lastErrorCode: "SYNC_FAILED",
-        }),
-      }),
-      createRouteContext("dsc_123"),
+          lastSyncStartedAt: "not-a-date",
+        },
+        {
+          headers: {
+            authorization: "Bearer live-session-token",
+          },
+        },
+      ),
+      createRouteContext({ connectionId: "dsc_123" }),
     );
 
     expect(response.status).toBe(400);
@@ -158,20 +156,21 @@ describe("hosted device-sync local-heartbeat route", () => {
 
   it("forwards only validated telemetry fields with canonical timestamps", async () => {
     await route.POST(
-      new Request("https://example.test/api/device-sync/agent/connections/dsc_123/local-heartbeat", {
-        method: "POST",
-        headers: {
-          authorization: "Bearer live-session-token",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          lastSyncStartedAt: "2026-03-25T10:00:00+10:00",
-          lastSyncErrorAt: "2026-03-25T10:15:00+10:00",
+      createJsonPostRequest(
+        "https://example.test/api/device-sync/agent/connections/dsc_123/local-heartbeat",
+        {
           lastErrorCode: "AUTH_REFRESH_FAILED",
           lastErrorMessage: "Refresh token expired",
-        }),
-      }),
-      createRouteContext("dsc_123"),
+          lastSyncErrorAt: "2026-03-25T10:15:00+10:00",
+          lastSyncStartedAt: "2026-03-25T10:00:00+10:00",
+        },
+        {
+          headers: {
+            authorization: "Bearer live-session-token",
+          },
+        },
+      ),
+      createRouteContext({ connectionId: "dsc_123" }),
     );
 
     expect(mocks.recordLocalHeartbeat).toHaveBeenCalledWith("user-123", "dsc_123", {
