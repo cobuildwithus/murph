@@ -1,21 +1,13 @@
 import type {
   HostedExecutionDispatchRequest,
-  HostedExecutionDispatchRef,
-} from "@murphai/hosted-execution";
-import {
-  HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
-  buildHostedExecutionDispatchRef,
 } from "@murphai/hosted-execution";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import {
-  minimizeHostedLinqMessageReceivedEvent,
-  minimizeHostedTelegramUpdate,
-} from "./webhook-event-snapshots";
-import {
-  sanitizeHostedLinqEventForStorage,
-  sanitizeHostedTelegramUpdateForStorage,
-} from "./contact-privacy";
+  createHostedWebhookDispatchSideEffectPayload,
+  type HostedWebhookDispatchSideEffectPayload as HostedWebhookDispatchPayload,
+  type HostedWebhookStoredDispatchSideEffectPayload as HostedWebhookStoredDispatchPayload,
+} from "./webhook-dispatch-payload";
 
 export type HostedWebhookEventPayload = Prisma.InputJsonObject;
 export type HostedWebhookResponsePayload = Prisma.InputJsonObject;
@@ -36,15 +28,8 @@ export type HostedWebhookSideEffectErrorState = {
 
 export type HostedWebhookSideEffectStatus = "pending" | "sent" | "sent_unconfirmed";
 
-export type HostedWebhookDispatchSideEffectPayload = {
-  schemaVersion: string;
-  botUserId?: string | null;
-  dispatchRef: HostedExecutionDispatchRef;
-  phoneLookupKey?: string | null;
-  storage: "reference";
-  linqEvent?: Record<string, unknown> | null;
-  telegramUpdate?: Record<string, unknown> | null;
-};
+export type HostedWebhookDispatchSideEffectPayload = HostedWebhookDispatchPayload;
+export type HostedWebhookStoredDispatchSideEffectPayload = HostedWebhookStoredDispatchPayload;
 
 export type HostedWebhookDispatchSideEffect = {
   attemptCount: number;
@@ -134,10 +119,10 @@ export type HostedWebhookSideEffectResult =
 export type HostedWebhookReceiptPersistenceClient = PrismaClient | Prisma.TransactionClient;
 
 export type HostedWebhookDispatchEnqueueInput = {
-  dispatch: HostedExecutionDispatchRequest;
   eventId: string;
   nextPayloadJson: Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput;
   nextStatus: HostedWebhookReceiptStatus | null;
+  payload: HostedWebhookStoredDispatchSideEffectPayload;
   previousClaim: HostedWebhookReceiptClaim;
   prismaOrTransaction: HostedWebhookReceiptPersistenceClient;
   source: string;
@@ -184,45 +169,11 @@ export function createHostedWebhookDispatchSideEffect(input: {
     kind: "hosted_execution_dispatch",
     lastAttemptAt: null,
     lastError: null,
-    payload: buildHostedWebhookDispatchSideEffectPayload(input.dispatch),
+    payload: createHostedWebhookDispatchSideEffectPayload(input.dispatch),
     result: null,
     sentAt: null,
     status: "pending",
   };
-}
-
-function buildHostedWebhookDispatchSideEffectPayload(
-  dispatch: HostedExecutionDispatchRequest,
-): HostedWebhookDispatchSideEffectPayload {
-  const basePayload = {
-    dispatchRef: buildHostedExecutionDispatchRef(dispatch),
-    schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
-    storage: "reference",
-  } satisfies HostedWebhookDispatchSideEffectPayload;
-
-  switch (dispatch.event.kind) {
-    case "linq.message.received":
-      return {
-        ...basePayload,
-        linqEvent: sanitizeHostedLinqEventForStorage(
-          minimizeHostedLinqMessageReceivedEvent(dispatch.event.linqEvent as never),
-          {
-            omitRecipientPhone: true,
-          },
-        ),
-        phoneLookupKey: dispatch.event.phoneLookupKey,
-      };
-    case "telegram.message.received":
-      return {
-        ...basePayload,
-        botUserId: dispatch.event.botUserId,
-        telegramUpdate: sanitizeHostedTelegramUpdateForStorage(
-          minimizeHostedTelegramUpdate(dispatch.event.telegramUpdate as never),
-        ),
-      };
-    default:
-      return basePayload;
-  }
 }
 
 export function createHostedWebhookLinqMessageSideEffect(input: {

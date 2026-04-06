@@ -5,7 +5,11 @@ import {
   readHostedWebhookReceiptState,
   toHostedWebhookReceiptJsonInput,
 } from "./webhook-receipt-codec";
-import { buildHostedWebhookDispatchFromPayload } from "./webhook-receipt-dispatch";
+import {
+  deleteHostedStoredDispatchPayloadBestEffort,
+  requireHostedWebhookStoredDispatchSideEffectPayload,
+  stageHostedWebhookDispatchSideEffectPayload,
+} from "./webhook-dispatch-payload";
 import {
   claimHostedWebhookReceipt,
   completeHostedWebhookReceipt,
@@ -23,6 +27,7 @@ import type {
   HostedWebhookReceiptState,
   HostedWebhookResponsePayload,
   HostedWebhookSideEffect,
+  HostedWebhookStoredDispatchSideEffectPayload,
 } from "./webhook-receipt-types";
 
 const RECEIPT_CLAIM_LEASE_MS = 10 * 60_000;
@@ -67,17 +72,24 @@ export async function queueHostedWebhookReceiptSideEffects(input: {
   response: HostedWebhookResponsePayload;
   source: string;
 }): Promise<HostedWebhookReceiptClaim> {
-  return updateHostedWebhookReceiptClaim({
-    claimedReceipt: input.claimedReceipt,
-    eventId: input.eventId,
-    mutate: (currentState) =>
-      queueHostedWebhookReceiptStateSideEffects(currentState, input.desiredSideEffects, {
-        plannedAt: new Date().toISOString(),
-        response: input.response,
-      }),
-    prisma: input.prisma,
-    source: input.source,
-  });
+  const stagedSideEffects = await stageHostedWebhookReceiptSideEffects(input.desiredSideEffects);
+
+  try {
+    return await updateHostedWebhookReceiptClaim({
+      claimedReceipt: input.claimedReceipt,
+      eventId: input.eventId,
+      mutate: (currentState) =>
+        queueHostedWebhookReceiptStateSideEffects(currentState, stagedSideEffects.sideEffects, {
+          plannedAt: new Date().toISOString(),
+          response: input.response,
+        }),
+      prisma: input.prisma,
+      source: input.source,
+    });
+  } catch (error) {
+    await cleanupHostedWebhookReceiptStagedPayloads(stagedSideEffects.cleanupPayloads);
+    throw error;
+  }
 }
 
 export async function markHostedWebhookReceiptCompleted(input: {
@@ -168,11 +180,10 @@ export async function markHostedWebhookDispatchEffectQueued(input: {
   sentAt: string;
   source: string;
 }): Promise<HostedWebhookReceiptClaim> {
-  const dispatch = buildHostedWebhookDispatchFromPayload(input.dispatchEffect.payload);
-
-  if (!dispatch) {
-    throw buildHostedWebhookDispatchPayloadError(input.dispatchEffect.effectId);
-  }
+  const payload = requireHostedWebhookStoredDispatchSideEffectPayload(
+    input.dispatchEffect.payload,
+    input.dispatchEffect.effectId,
+  );
 
   return compareAndSwapHostedWebhookReceiptClaim({
     claimedReceipt: input.claimedReceipt,
@@ -199,15 +210,61 @@ export async function markHostedWebhookDispatchEffectQueued(input: {
     source: input.source,
     updateReceipt: ({ currentClaim, nextClaim }) =>
       input.enqueueDispatchEffect({
-        dispatch,
         eventId: input.eventId,
         nextPayloadJson: toHostedWebhookReceiptJsonInput(nextClaim.payloadJson),
         nextStatus: nextClaim.state.status,
+        payload,
         previousClaim: currentClaim,
         prismaOrTransaction: input.prisma,
         source: input.source,
       }),
   });
+}
+
+async function stageHostedWebhookReceiptSideEffects(
+  desiredSideEffects: readonly HostedWebhookSideEffect[],
+): Promise<{
+  cleanupPayloads: HostedWebhookStoredDispatchSideEffectPayload[];
+  sideEffects: HostedWebhookSideEffect[];
+}> {
+  const cleanupPayloads: HostedWebhookStoredDispatchSideEffectPayload[] = [];
+  const sideEffects: HostedWebhookSideEffect[] = [];
+
+  try {
+    for (const effect of desiredSideEffects) {
+      if (effect.kind !== "hosted_execution_dispatch") {
+        sideEffects.push(effect);
+        continue;
+      }
+
+      const stagedPayload = await stageHostedWebhookDispatchSideEffectPayload(effect.payload);
+
+      if (effect.payload.storage !== "reference") {
+        cleanupPayloads.push(stagedPayload);
+      }
+
+      sideEffects.push({
+        ...effect,
+        payload: stagedPayload,
+      });
+    }
+  } catch (error) {
+    await cleanupHostedWebhookReceiptStagedPayloads(cleanupPayloads);
+    throw error;
+  }
+
+  return {
+    cleanupPayloads,
+    sideEffects,
+  };
+}
+
+async function cleanupHostedWebhookReceiptStagedPayloads(
+  payloads: readonly HostedWebhookStoredDispatchSideEffectPayload[],
+): Promise<void> {
+  await Promise.all(
+    payloads.map((payload) => deleteHostedStoredDispatchPayloadBestEffort(payload)),
+  );
 }
 
 async function reclaimHostedWebhookReceipt(
@@ -513,14 +570,6 @@ function buildHostedWebhookReceiptUpdateError(): Error {
     message: "Hosted webhook receipt could not be updated safely.",
     httpStatus: 503,
     retryable: true,
-  });
-}
-
-function buildHostedWebhookDispatchPayloadError(effectId: string): Error {
-  return hostedOnboardingError({
-    code: "WEBHOOK_DISPATCH_PAYLOAD_INVALID",
-    message: `Hosted webhook dispatch side effect ${effectId} does not retain enough data to rebuild its dispatch.`,
-    httpStatus: 500,
   });
 }
 
