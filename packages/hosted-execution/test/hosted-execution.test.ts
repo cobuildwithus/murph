@@ -10,6 +10,9 @@ import {
   HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
   HOSTED_EXECUTION_CALLBACK_HOSTS,
   buildHostedExecutionDeviceSyncConnectLinkPath,
+  buildHostedExecutionRunnerCommitPath,
+  buildHostedExecutionRunnerEmailMessagePath,
+  buildHostedExecutionRunnerSideEffectPath,
   buildHostedExecutionDispatchRef,
   buildHostedExecutionOutboxPayload,
   buildHostedExecutionAssistantCronTickDispatch,
@@ -20,8 +23,10 @@ import {
   buildHostedExecutionVaultShareAcceptedDispatch,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
+  HOSTED_EXECUTION_AI_USAGE_RECORD_PATH,
   buildHostedExecutionPendingUsageUsersPath,
   buildHostedExecutionSharePackPath,
+  buildHostedExecutionUserCryptoContextPath,
   buildHostedExecutionUserDispatchPayloadPath,
   buildHostedExecutionUserDeviceSyncRuntimePath,
   buildHostedExecutionUserEnvPath,
@@ -1022,8 +1027,20 @@ describe("@murphai/hosted-execution", () => {
   });
 
   it("builds the shared hosted control route paths", () => {
+    expect(buildHostedExecutionRunnerCommitPath("event/123")).toBe(
+      "/events/event%2F123/commit",
+    );
+    expect(buildHostedExecutionRunnerSideEffectPath("effect/123")).toBe(
+      "/effects/effect%2F123",
+    );
+    expect(buildHostedExecutionRunnerEmailMessagePath("raw/message")).toBe(
+      "/messages/raw%2Fmessage",
+    );
     expect(buildHostedExecutionSharePackPath("member/123", "share/123")).toBe(
       "/internal/users/member%2F123/shares/share%2F123/pack",
+    );
+    expect(buildHostedExecutionUserCryptoContextPath("member/123")).toBe(
+      "/internal/users/member%2F123/crypto-context",
     );
     expect(buildHostedExecutionUserStatusPath("member/123")).toBe(
       "/internal/users/member%2F123/status",
@@ -1042,6 +1059,9 @@ describe("@murphai/hosted-execution", () => {
     );
     expect(buildHostedExecutionPendingUsageUsersPath()).toBe(
       "/internal/usage/pending-users",
+    );
+    expect(HOSTED_EXECUTION_AI_USAGE_RECORD_PATH).toBe(
+      "/api/internal/hosted-execution/usage/record",
     );
   });
 

@@ -1,6 +1,6 @@
 {
   "id": "automation-upsert",
-  "command": "vault-cli automation upsert --vault <path> --input @payload.json",
+  "command": "vault-cli automation upsert --vault <path> --input @payload.json|-",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/CORE.md"

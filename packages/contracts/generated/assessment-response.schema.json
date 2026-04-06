@@ -50,7 +50,7 @@
       "type": "array",
       "items": {
         "type": "string",
-        "pattern": "^(?:alg|asmt|aud|auto|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+        "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
       },
       "uniqueItems": true
     }

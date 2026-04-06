@@ -366,7 +366,7 @@ export async function resolveInitialSetupWizardScheduledUpdates(
 }
 
 async function readInitialSetupWizardAutomationState(vault: string) {
-  const automationPath = resolveAssistantStatePaths(vault).automationPath
+  const automationPath = resolveAssistantStatePaths(vault).automationStatePath
 
   try {
     const raw = await readFile(automationPath, 'utf8')

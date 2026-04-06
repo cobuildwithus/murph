@@ -48,7 +48,7 @@
             },
             "automation": {
               "type": "string",
-              "const": "auto"
+              "const": "automation"
             },
             "condition": {
               "type": "string",
