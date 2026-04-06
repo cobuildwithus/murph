@@ -53,8 +53,10 @@ import {
   readHostedExecutionSignatureHeaders,
   readHostedExecutionOutboxPayload,
   parseHostedExecutionSideEffectRecord,
+  readHostedExecutionVercelProductionBaseUrl,
   readHostedExecutionWebControlPlaneEnvironment,
   readHostedExecutionWorkerEnvironment,
+  assertHostedExecutionOptionalJwkPairConfigured,
   createHostedExecutionVercelOidcValidationEnvironment,
   normalizeHostedExecutionBaseUrl,
   normalizeHostedDeviceSyncJobHints,
@@ -342,6 +344,126 @@ describe("@murphai/hosted-execution", () => {
       }),
       webInternalSigningSecret: "web-internal-secret",
     });
+  });
+
+  it("reads hosted worker env overrides for recovery, tee, keyring, and timing configuration", () => {
+    expect(
+      readHostedExecutionWorkerEnvironment({
+        HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "OPENAI_API_KEY,ANTHROPIC_API_KEY",
+        HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID: "automation:v2",
+        HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: JSON.stringify(
+          TEST_HOSTED_RECIPIENT_PRIVATE_JWK,
+        ),
+        HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON: JSON.stringify({
+          "automation:v1": TEST_HOSTED_RECIPIENT_PRIVATE_JWK,
+        }),
+        HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: JSON.stringify(
+          TEST_HOSTED_RECIPIENT_PUBLIC_JWK,
+        ),
+        HOSTED_EXECUTION_RECOVERY_RECIPIENT_KEY_ID: "recovery:v2",
+        HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: JSON.stringify(
+          TEST_HOSTED_RECIPIENT_PUBLIC_JWK,
+        ),
+        HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_KEY_ID: "tee:v1",
+        HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK: JSON.stringify(
+          TEST_HOSTED_RECIPIENT_PUBLIC_JWK,
+        ),
+        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "Zm9v",
+        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID: "v2",
+        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON: JSON.stringify({
+          v1: "YmFy",
+        }),
+        HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS: "1234",
+        HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS: "5",
+        HOSTED_EXECUTION_RETRY_DELAY_MS: "60000",
+        HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "120000",
+        HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
+        HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
+        HOSTED_WEB_INTERNAL_SIGNING_SECRET: "web-internal-secret",
+      }),
+    ).toMatchObject({
+      allowedUserEnvKeys: "OPENAI_API_KEY,ANTHROPIC_API_KEY",
+      automationRecipientKeyId: "automation:v2",
+      automationRecipientPrivateKeyringJson: JSON.stringify({
+        "automation:v1": TEST_HOSTED_RECIPIENT_PRIVATE_JWK,
+      }),
+      recoveryRecipientKeyId: "recovery:v2",
+      teeAutomationRecipientKeyId: "tee:v1",
+      teeAutomationRecipientPublicJwkJson: JSON.stringify(TEST_HOSTED_RECIPIENT_PUBLIC_JWK),
+      platformEnvelopeKeyId: "v2",
+      platformEnvelopeKeyringJson: JSON.stringify({
+        v1: "YmFy",
+      }),
+      defaultAlarmDelayMs: 1234,
+      maxEventAttempts: 5,
+      retryDelayMs: 60000,
+      runnerTimeoutMs: 120000,
+    });
+  });
+
+  it("rejects invalid hosted worker env timing overrides", () => {
+    expect(() =>
+      readHostedExecutionWorkerEnvironment({
+        HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: JSON.stringify(
+          TEST_HOSTED_RECIPIENT_PRIVATE_JWK,
+        ),
+        HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: JSON.stringify(
+          TEST_HOSTED_RECIPIENT_PUBLIC_JWK,
+        ),
+        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "Zm9v",
+        HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: JSON.stringify(
+          TEST_HOSTED_RECIPIENT_PUBLIC_JWK,
+        ),
+        HOSTED_EXECUTION_RETRY_DELAY_MS: "0",
+        HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
+        HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
+        HOSTED_WEB_INTERNAL_SIGNING_SECRET: "web-internal-secret",
+      }),
+    ).toThrow("HOSTED_EXECUTION_RETRY_DELAY_MS must be a positive integer.");
+  });
+
+  it("normalizes vercel production URLs and optional tee-recipient pairs", () => {
+    expect(
+      readHostedExecutionVercelProductionBaseUrl({
+        VERCEL_PROJECT_PRODUCTION_URL: "www.withmurph.ai",
+      }),
+    ).toBe("https://www.withmurph.ai");
+    expect(
+      readHostedExecutionVercelProductionBaseUrl({
+        VERCEL_PROJECT_PRODUCTION_URL: "http://localhost:3000/",
+      }, {
+        allowHttpLocalhost: true,
+      }),
+    ).toBe("http://localhost:3000");
+
+    expect(() =>
+      assertHostedExecutionOptionalJwkPairConfigured({
+        currentKeyId: "tee:v1",
+        currentPublicJwkJson: null,
+        keyIdLabel: "TEE_KEY_ID",
+        publicJwkLabel: "TEE_PUBLIC_JWK",
+      }),
+    ).toThrow(
+      "TEE_KEY_ID and TEE_PUBLIC_JWK must either both be configured or both be omitted.",
+    );
+    expect(() =>
+      assertHostedExecutionOptionalJwkPairConfigured({
+        currentKeyId: null,
+        currentPublicJwkJson: JSON.stringify(TEST_HOSTED_RECIPIENT_PUBLIC_JWK),
+        keyIdLabel: "TEE_KEY_ID",
+        publicJwkLabel: "TEE_PUBLIC_JWK",
+      }),
+    ).toThrow(
+      "TEE_KEY_ID and TEE_PUBLIC_JWK must either both be configured or both be omitted.",
+    );
+    expect(() =>
+      assertHostedExecutionOptionalJwkPairConfigured({
+        currentKeyId: "tee:v1",
+        currentPublicJwkJson: JSON.stringify(TEST_HOSTED_RECIPIENT_PUBLIC_JWK),
+        keyIdLabel: "TEE_KEY_ID",
+        publicJwkLabel: "TEE_PUBLIC_JWK",
+      }),
+    ).not.toThrow();
   });
 
   it("parses hosted execution user status run traces when present", () => {
@@ -2176,6 +2298,88 @@ describe("@murphai/hosted-execution", () => {
     );
   });
 
+  it("control client rethrows non-404 share pack failures", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response("share pack unavailable", { status: 503 }));
+    const client = createHostedExecutionControlClient({
+      baseUrl: "https://worker.example.test/",
+      fetchImpl,
+      getBearerToken: async () => "vercel-oidc-token",
+    });
+
+    await expect(client.getSharePack("member/123", "share/123")).rejects.toThrow(
+      "Hosted execution share pack failed with HTTP 503: share pack unavailable.",
+    );
+  });
+
+  it("control client provisions managed user crypto through the dedicated route", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        recipientKinds: ["automation", "recovery"],
+        rootKeyId: "urk:test",
+        userId: "member/123",
+      }), { status: 200 }),
+    );
+    const client = createHostedExecutionControlClient({
+      baseUrl: "https://worker.example.test/",
+      fetchImpl,
+      getBearerToken: async () => "Bearer vercel-oidc-token",
+      timeoutMs: 5000,
+    });
+
+    await expect(client.provisionManagedUserCrypto("member/123")).resolves.toEqual({
+      recipientKinds: ["automation", "recovery"],
+      rootKeyId: "urk:test",
+      userId: "member/123",
+    });
+
+    const [, init] = fetchImpl.mock.calls[0] ?? [];
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://worker.example.test/internal/users/member%2F123/crypto-context",
+      expect.objectContaining({
+        method: "PUT",
+      }),
+    );
+    expect(new Headers(init?.headers).get("authorization")).toBe("Bearer vercel-oidc-token");
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("control client rejects malformed managed user crypto responses", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response("[]", { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        recipientKinds: ["automation"],
+        rootKeyId: "urk:test",
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        recipientKinds: "automation",
+        rootKeyId: "urk:test",
+        userId: "member/123",
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        recipientKinds: [""],
+        rootKeyId: "urk:test",
+        userId: "member/123",
+      }), { status: 200 }));
+    const client = createHostedExecutionControlClient({
+      baseUrl: "https://worker.example.test/",
+      fetchImpl,
+      getBearerToken: async () => "vercel-oidc-token",
+    });
+
+    await expect(client.provisionManagedUserCrypto("member/123")).rejects.toThrow(
+      "Managed user crypto status response must be an object.",
+    );
+    await expect(client.provisionManagedUserCrypto("member/123")).rejects.toThrow(
+      "Managed user crypto status response must include userId and rootKeyId.",
+    );
+    await expect(client.provisionManagedUserCrypto("member/123")).rejects.toThrow(
+      "Managed user crypto status response must include recipientKinds.",
+    );
+    await expect(client.provisionManagedUserCrypto("member/123")).rejects.toThrow(
+      "Managed user crypto status recipientKinds[0] must be a non-empty string.",
+    );
+  });
+
   it("control client attaches bearer auth to standard env and run routes", async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(
@@ -2347,6 +2551,31 @@ describe("@murphai/hosted-execution", () => {
     );
     await expect(client.getPendingUsage("member/123")).rejects.toThrow(
       "Pending usage[0] must be an object.",
+    );
+  });
+
+  it("control client omits invalid pending usage limits from the query string", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ id: "usage_123" }]), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ id: "usage_123" }]), { status: 200 }));
+    const client = createHostedExecutionControlClient({
+      baseUrl: "https://worker.example.test/",
+      fetchImpl,
+      getBearerToken: async () => "vercel-oidc-token",
+    });
+
+    await expect(client.getPendingUsage("member/123", Number.NaN)).resolves.toEqual([{ id: "usage_123" }]);
+    await expect(client.getPendingUsage("member/123", 0)).resolves.toEqual([{ id: "usage_123" }]);
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      "https://worker.example.test/internal/users/member%2F123/usage/pending",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      "https://worker.example.test/internal/users/member%2F123/usage/pending",
+      expect.objectContaining({ method: "GET" }),
     );
   });
 

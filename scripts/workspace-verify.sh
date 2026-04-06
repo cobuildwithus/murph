@@ -65,7 +65,7 @@ readonly typecheck_package_dirs=(
   "apps/cloudflare"
 )
 
-readonly repo_vitest_max_workers="${MURPH_VITEST_MAX_WORKERS:-$([[ -n "${CI:-}" ]] && echo 50% || echo 75%)}"
+readonly repo_vitest_max_workers="${MURPH_VITEST_MAX_WORKERS:-$([[ -n "${CI:-}" ]] && echo 50% || echo 50%)}"
 readonly app_verify_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly app_verify_parallel="${MURPH_APP_VERIFY_PARALLEL:-$app_verify_parallel_default}"
 readonly test_lane_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
@@ -298,14 +298,17 @@ run_test_apps() {
     local pids=()
 
     # App verification should not emit V8 coverage into the repo coverage workspace.
+    # The repo Vitest lane already covers Cloudflare node/workers tests, so keep
+    # only the app-local typecheck here to avoid duplicating that matrix under a
+    # second process tree that can linger after the root lane is already green.
     run_package_command_without_node_v8_coverage_with_retry "apps/web" verify &
     local hosted_web_verify_pid="$!"
     pids+=("$hosted_web_verify_pid")
     register_background_pid "$hosted_web_verify_pid"
-    run_package_command_without_node_v8_coverage_with_retry "apps/cloudflare" verify &
-    local cloudflare_verify_pid="$!"
-    pids+=("$cloudflare_verify_pid")
-    register_background_pid "$cloudflare_verify_pid"
+    run_package_command_without_node_v8_coverage_with_retry "apps/cloudflare" typecheck &
+    local cloudflare_typecheck_pid="$!"
+    pids+=("$cloudflare_typecheck_pid")
+    register_background_pid "$cloudflare_typecheck_pid"
 
     if ! wait_for_background_jobs "${pids[@]}"; then
       return 1
@@ -315,7 +318,7 @@ run_test_apps() {
   fi
 
   run_package_command_without_node_v8_coverage_with_retry "apps/web" verify
-  run_package_command_without_node_v8_coverage_with_retry "apps/cloudflare" verify
+  run_package_command_without_node_v8_coverage_with_retry "apps/cloudflare" typecheck
 }
 
 prepare_repo_vitest_runtime_artifacts() {
@@ -345,20 +348,22 @@ run_test() {
 
   if [[ "$test_lane_parallel" == "1" ]]; then
     local test_packages_pid
-    local test_apps_pid
     local smoke_pid
 
-    (prepare_repo_vitest_runtime_artifacts && run_repo_vitest --no-coverage) &
+    # The app verify lane imports built workspace artifacts, so a clean run must
+    # finish the shared prepared-artifact build before any app checks start.
+    # Keep repo Vitest and fixture smoke parallel, but do not overlap them with
+    # app verify because hosted-web verify also runs Vitest and Prisma generation.
+    prepare_repo_vitest_runtime_artifacts
+    run_repo_vitest --no-coverage &
     test_packages_pid="$!"
     register_background_pid "$test_packages_pid"
-    run_test_apps &
-    test_apps_pid="$!"
-    register_background_pid "$test_apps_pid"
     pnpm exec tsx "e2e/smoke/verify-fixtures.ts" &
     smoke_pid="$!"
     register_background_pid "$smoke_pid"
 
-    wait_for_background_jobs "$test_packages_pid" "$test_apps_pid" "$smoke_pid"
+    wait_for_background_jobs "$test_packages_pid" "$smoke_pid"
+    run_test_apps
   else
     prepare_repo_vitest_runtime_artifacts
     run_repo_vitest --no-coverage
@@ -385,20 +390,21 @@ run_test_coverage() {
 
   if [[ "$test_lane_parallel" == "1" ]]; then
     local coverage_pid
-    local test_apps_pid
     local smoke_pid
 
+    # Coverage and app verify both depend on the prepared runtime artifacts.
+    # Keep coverage and fixture smoke parallel, but wait to start app verify
+    # until the repo Vitest lane has released Prisma/client and app-test resources.
+    prepare_repo_vitest_runtime_artifacts
     run_test_packages_coverage &
     coverage_pid="$!"
     register_background_pid "$coverage_pid"
-    run_test_apps &
-    test_apps_pid="$!"
-    register_background_pid "$test_apps_pid"
     pnpm exec tsx "e2e/smoke/verify-fixtures.ts" --coverage &
     smoke_pid="$!"
     register_background_pid "$smoke_pid"
 
-    wait_for_background_jobs "$coverage_pid" "$test_apps_pid" "$smoke_pid"
+    wait_for_background_jobs "$coverage_pid" "$smoke_pid"
+    run_test_apps
   else
     run_test_packages_coverage
     run_test_apps
