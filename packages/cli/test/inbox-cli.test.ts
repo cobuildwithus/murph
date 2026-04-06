@@ -1178,7 +1178,7 @@ test.sequential(
         captureId,
       })
       assert.equal(promoteResult.created, true)
-      assert.match(promoteResult.lookupId, /^evt_/u)
+      assert.match(promoteResult.lookupId, /^meal_/u)
       assert.match(promoteResult.relatedId, /^meal_/u)
 
       const repeatPromotion = await services.promoteMeal({
@@ -4602,7 +4602,7 @@ test.sequential('document promotion remains idempotent after local promotion sta
       captureId,
     })
     assert.equal(firstPromotion.created, true)
-    assert.match(firstPromotion.lookupId, /^evt_/u)
+    assert.match(firstPromotion.lookupId, /^doc_/u)
     assert.match(firstPromotion.relatedId, /^doc_/u)
     assert.equal((await listDocumentManifestPaths(fixture.vaultRoot)).length, 1)
 

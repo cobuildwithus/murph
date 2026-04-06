@@ -686,17 +686,17 @@ test(
       const mealRecord = lookupEntityById(vault, "meal_01JNV4MEAL00000000000001");
       assert.equal(mealRecord?.family, "event");
       assert.equal(mealRecord?.entityId, "meal_01JNV4MEAL00000000000001");
-      assert.equal(mealRecord?.primaryLookupId, "evt_01JNV4MEAL000000000000001");
+      assert.equal(mealRecord?.primaryLookupId, "meal_01JNV4MEAL00000000000001");
       assert.equal(mealRecord?.attributes.kind, "meal");
       assert.deepEqual(mealRecord?.attributes.eventIds, ["evt_01JNV4MEAL000000000000001"]);
 
       const mealEventAlias = lookupEntityById(vault, "evt_01JNV4MEAL000000000000001");
       assert.equal(mealEventAlias?.entityId, "meal_01JNV4MEAL00000000000001");
-      assert.equal(mealEventAlias?.primaryLookupId, "evt_01JNV4MEAL000000000000001");
+      assert.equal(mealEventAlias?.primaryLookupId, "meal_01JNV4MEAL00000000000001");
 
       const documentRecord = lookupEntityById(vault, "doc_01JNV4DOC0000000000000001");
       assert.equal(documentRecord?.entityId, "doc_01JNV4DOC0000000000000001");
-      assert.equal(documentRecord?.primaryLookupId, "evt_01JNV4DOC000000000000001");
+      assert.equal(documentRecord?.primaryLookupId, "doc_01JNV4DOC0000000000000001");
       assert.equal(documentRecord?.attributes.documentId, "doc_01JNV4DOC0000000000000001");
       assert.equal(
         documentRecord?.attributes.documentPath,

@@ -265,7 +265,7 @@ export async function preserveCanonicalDocumentAttachments(input: {
       documents.push({
         attachmentId: attachment.attachmentId ?? null,
         ordinal: attachment.ordinal,
-        lookupId: result.event.id,
+        lookupId: result.documentId,
         relatedId: result.documentId,
         created: true,
       })

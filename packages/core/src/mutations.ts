@@ -1409,7 +1409,7 @@ export async function importDocument({
         ],
         canonicalProvenance: {
           eventId: event.record.id,
-          lookupId: event.record.id,
+          lookupId: documentId,
           occurredAt: event.record.occurredAt,
           title: event.record.title ?? null,
           note: event.record.note ?? null,
@@ -1542,7 +1542,7 @@ export async function addMeal({
         ],
         canonicalProvenance: {
           eventId: event.record.id,
-          lookupId: event.record.id,
+          lookupId: mealId,
           occurredAt: event.record.occurredAt,
           note: event.record.note ?? null,
         },

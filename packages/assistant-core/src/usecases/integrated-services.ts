@@ -163,7 +163,7 @@ function createIntegratedCoreServices(): CoreWriteServices {
         vault,
         mealId: result.mealId,
         eventId: result.event.id,
-        lookupId: result.event.id,
+        lookupId: result.mealId,
         occurredAt: result.event.occurredAt ?? null,
         photoPath: result.photo?.relativePath ?? null,
         audioPath: result.audio?.relativePath ?? null,
@@ -373,7 +373,7 @@ function createIntegratedImporterServices(): ImporterServices {
         manifestFile: result.manifestPath,
         documentId: result.documentId,
         eventId: result.event.id,
-        lookupId: result.event.id,
+        lookupId: result.documentId,
       }
     },
     async importSamplesCsv(input) {

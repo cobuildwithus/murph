@@ -182,7 +182,7 @@ test(
 )
 
 test.sequential(
-  'document import/show/list/manifest support document ids, event ids, and manifest inspection',
+  'document import/show/list/manifest use stable document ids for canonical reads',
   async () => {
     const vaultRoot = await createVault()
 
@@ -233,23 +233,7 @@ test.sequential(
       assert.equal(requireData(showByDocumentId).entity.occurredAt, '2026-03-12T09:30:00.000Z')
       assert.equal(requireData(showByDocumentId).entity.data.source, 'device')
       assert.equal(requireData(showByDocumentId).entity.data.note, 'Fasted lipid panel.')
-      assert.deepEqual(requireData(showByDocumentId).entity.links, [
-        {
-          id: currentDocument.lookupId,
-          kind: 'event',
-          queryable: true,
-        },
-      ])
-
-      const showByEventId = await runSourceCli<ShowEnvelope>([
-        'document',
-        'show',
-        currentDocument.lookupId,
-        '--vault',
-        vaultRoot,
-      ])
-      assert.equal(showByEventId.ok, true)
-      assert.equal(requireData(showByEventId).entity.id, currentDocument.documentId)
+      assert.deepEqual(requireData(showByDocumentId).entity.links, [])
 
       const listedDocuments = await runSourceCli<ListEnvelope>([
         'document',
@@ -273,7 +257,7 @@ test.sequential(
         [currentDocument.documentId],
       )
       assert.equal(requireData(listedDocuments).items[0]?.data.source, 'device')
-      assert.equal(requireData(listedDocuments).items[0]?.links[0]?.id, currentDocument.lookupId)
+      assert.deepEqual(requireData(listedDocuments).items[0]?.links, [])
       assert.equal(
         requireData(listedDocuments).items.some((item) => item.id === olderDocument.documentId),
         false,
@@ -500,7 +484,7 @@ test.sequential(
 )
 
 test.sequential(
-  'meal add/show/list/manifest support meal ids, event ids, and manifest inspection',
+  'meal add/show/list/manifest use stable meal ids for canonical reads',
   async () => {
     const vaultRoot = await createVault()
 
@@ -534,28 +518,6 @@ test.sequential(
         ]),
       )
 
-      const showByEventId = await runSourceCli<ShowEnvelope>([
-        'meal',
-        'show',
-        currentMeal.lookupId,
-        '--vault',
-        vaultRoot,
-      ])
-      assert.equal(showByEventId.ok, true)
-      assert.equal(showByEventId.meta?.command, 'meal show')
-      assert.equal(requireData(showByEventId).entity.id, currentMeal.mealId)
-      assert.equal(requireData(showByEventId).entity.kind, 'meal')
-      assert.equal(requireData(showByEventId).entity.occurredAt, '2026-03-12T12:15:00.000Z')
-      assert.equal(requireData(showByEventId).entity.data.source, 'device')
-      assert.equal(requireData(showByEventId).entity.data.note, 'Eggs and avocado.')
-      assert.deepEqual(requireData(showByEventId).entity.links, [
-        {
-          id: currentMeal.lookupId,
-          kind: 'event',
-          queryable: true,
-        },
-      ])
-
       const showByMealId = await runSourceCli<ShowEnvelope>([
         'meal',
         'show',
@@ -564,7 +526,13 @@ test.sequential(
         vaultRoot,
       ])
       assert.equal(showByMealId.ok, true)
+      assert.equal(showByMealId.meta?.command, 'meal show')
       assert.equal(requireData(showByMealId).entity.id, currentMeal.mealId)
+      assert.equal(requireData(showByMealId).entity.kind, 'meal')
+      assert.equal(requireData(showByMealId).entity.occurredAt, '2026-03-12T12:15:00.000Z')
+      assert.equal(requireData(showByMealId).entity.data.source, 'device')
+      assert.equal(requireData(showByMealId).entity.data.note, 'Eggs and avocado.')
+      assert.deepEqual(requireData(showByMealId).entity.links, [])
 
       const listedMeals = await runSourceCli<ListEnvelope>([
         'meal',
@@ -588,7 +556,7 @@ test.sequential(
         [currentMeal.mealId],
       )
       assert.equal(requireData(listedMeals).items[0]?.data.source, 'device')
-      assert.equal(requireData(listedMeals).items[0]?.links[0]?.id, currentMeal.lookupId)
+      assert.deepEqual(requireData(listedMeals).items[0]?.links, [])
       assert.equal(
         requireData(listedMeals).items.some((item) => item.id === olderMeal.mealId),
         false,

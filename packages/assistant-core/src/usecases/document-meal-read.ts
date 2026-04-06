@@ -20,23 +20,23 @@ import { asListEnvelope } from './shared.js'
 type DocumentMealKind = 'document' | 'meal'
 
 const DEFAULT_LIST_LIMIT = 50
-const OWNED_EVENT_LINK_KEYS = ['relatedIds', 'eventIds']
+const OWNED_EVENT_LINK_KEYS: string[] = []
 
 export const documentLookupSchema = z
   .string()
   .regex(
-    /^(?:doc_|evt_).+/u,
-    'Expected a document id (`doc_*`) or event id (`evt_*`).',
+    /^doc_.+/u,
+    'Expected a document id (`doc_*`).',
   )
-  .describe('Document id (`doc_*`) or event lookup id (`evt_*`).')
+  .describe('Document id (`doc_*`).')
 
 export const mealLookupSchema = z
   .string()
   .regex(
-    /^(?:meal_|evt_).+/u,
-    'Expected a meal id (`meal_*`) or event id (`evt_*`).',
+    /^meal_.+/u,
+    'Expected a meal id (`meal_*`).',
   )
-  .describe('Meal id (`meal_*`) or event lookup id (`evt_*`).')
+  .describe('Meal id (`meal_*`).')
 
 export const rawImportManifestResultSchema = z.object({
   vault: pathSchema,
@@ -223,7 +223,7 @@ async function showOwnedManifest(
   return {
     vault,
     entityId: record.entityId,
-    lookupId: record.primaryLookupId,
+    lookupId: record.entityId,
     kind: expectedKind,
     manifestFile,
     manifest,

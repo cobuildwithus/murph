@@ -1253,7 +1253,7 @@ function normalizeRecordData(
     data.entityId = displayId;
     data.eventIds = uniqueStrings([
       ...normalizeUniqueStringArray(data.eventIds),
-      primaryLookupId,
+      rawRecordId,
     ]);
     data.relatedIds = uniqueStrings(normalizeUniqueStringArray(data.relatedIds)).filter(
       (relatedId) => relatedId !== displayId,

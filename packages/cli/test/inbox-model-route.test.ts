@@ -254,7 +254,7 @@ test('routeInboxCaptureWithModel previews and applies text-only document plans w
     vault: vaultRoot,
     captureId: 'cap_doc',
     target: 'document' as const,
-    lookupId: 'evt_doc',
+    lookupId: 'doc_1',
     relatedId: 'doc_1',
     created: true,
   }))

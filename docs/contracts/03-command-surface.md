@@ -264,7 +264,7 @@ Every command now uses native `incur` command definitions directly:
 - Retrieval filters and similar multi-value options use repeatable flags such as `--kind meal --kind note`, `--entry-type event --entry-type sample_summary`, or `--metadata-columns device --metadata-columns context`. Comma-delimited tokens such as `--kind meal,note` are invalid and should be rewritten as repeated flags.
 - Canonical ids emitted by core/import flows follow the frozen `<prefix>_<ULID>` policy in `docs/contracts/02-record-schemas.md`.
 - Commands that create or read canonical records align to the generated schemas in `packages/contracts/generated/`.
-- Write/import commands return `lookupId` or `lookupIds` when the follow-on read path should use a queryable id rather than a related or batch id.
+- Write/import commands return `lookupId` or `lookupIds` when the follow-on read path should use the canonical read id rather than a batch id or internal provenance id.
 - `upsert --input @file.json` uses one file argument and does not expose per-field mutation flags in the public grammar.
 
 ## Lookup Rules
@@ -274,15 +274,15 @@ Every command now uses native `incur` command definitions directly:
 - `provider show` accepts either the canonical `prov_*` id or the stable provider slug stored in `bank/providers/<slug>.md`.
 - `food show` accepts either the canonical `food_*` id or the stable food slug stored in `bank/foods/<slug>.md`.
 - `recipe show` accepts either the canonical `rcp_*` id or the stable recipe slug stored in `bank/recipes/<slug>.md`.
-- `event show` accepts the canonical `evt_*` id. Specialized nouns such as `document`, `meal`, `history`, `blood-test`, and `experiment` remain the preferred follow-up surface when they already exist. `workout add`, `workout format log`, and `intervention add` intentionally return the queryable event id and rely on `event show|list` plus generic `show|list` for follow-on reads.
+- `event show` accepts the canonical `evt_*` id. Specialized nouns such as `document`, `meal`, `history`, `blood-test`, and `experiment` remain the preferred follow-up surface when they already exist. `workout add`, `workout format log`, and `intervention add` intentionally return the event id and rely on `event show|list` plus generic `show|list` for follow-on reads.
 - `blood-test show` accepts the canonical `evt_*` id and may also resolve the stored blood test by its title, `testName`, or `labPanelId`.
-- Generic `show` accepts canonical read ids for event-backed records, including the stable `doc_*` and `meal_*` family ids as well as `evt_*` aliases. `document manifest` and `meal manifest` remain the provenance-oriented follow-up surface when the caller needs immutable import artifacts rather than the canonical read-model record.
+- Generic `show` accepts canonical read ids for event-backed records, including the stable `doc_*` and `meal_*` family ids. `event show` remains the explicit provenance-oriented follow-up surface when the caller needs the internal event id path, while `document manifest` and `meal manifest` expose immutable import artifacts.
 - `samples batch show` and `samples batch list` are the first-class follow-up surface for `xfm_*` import-batch ids; generic `show` still does not accept them.
 - `intake manifest` and `intake raw` are the first-class follow-up surface for immutable assessment evidence under `raw/assessments/**`.
 - `audit show|list|tail` and `vault show|paths|stats|repair|update` are first-class vault noun commands layered on top of the read model and core metadata write path.
 - Export pack ids identify derived files under `exports/packs/`; they are not valid `show` targets.
 - `sample-summary:<date>:<stream>` ids emitted by `timeline` are derived context handles, not valid `show` targets.
-- A successful `show` response may surface a stable display id such as `meal_*` or `doc_*` in `entity.id` even when the lookup key was a queryable event id such as `evt_*`.
+- A successful `show` response surfaces the canonical read id in `entity.id`.
 - `device account show|reconcile|disconnect` accept the device-sync control-plane account ids returned by `device account list`; they are not canonical vault ids.
 
 ## Success Output
@@ -366,7 +366,7 @@ The examples below are the full successful non-verbose `--format json` response 
   "manifestFile": "<path>",
   "documentId": "doc_123",
   "eventId": "evt_123",
-  "lookupId": "evt_123"
+  "lookupId": "doc_123"
 }
 ```
 
@@ -377,7 +377,7 @@ The examples below are the full successful non-verbose `--format json` response 
   "vault": "<path>",
   "mealId": "meal_123",
   "eventId": "evt_123",
-  "lookupId": "evt_123",
+  "lookupId": "meal_123",
   "occurredAt": "2026-03-12T09:30:00-05:00",
   "photoPath": null,
   "audioPath": null,
@@ -514,7 +514,7 @@ The freeform note is preserved verbatim in `note`. The structured fields stay in
 
 ### `show`
 
-`entity.id` is the surfaced canonical read identity for the record. For meal/document events, `show` accepts both the stable family id and the event alias, but the surfaced id stays on the stable family id.
+`entity.id` is the surfaced canonical read identity for the record. For meal/document events, that identity is the stable family id.
 
 ```json
 {
@@ -527,13 +527,7 @@ The freeform note is preserved verbatim in `note`. The structured fields stay in
     "path": "<path>",
     "markdown": "# Lunch",
     "data": {},
-    "links": [
-      {
-        "id": "evt_123",
-        "kind": "event",
-        "queryable": true
-      }
-    ]
+    "links": []
   }
 }
 ```
