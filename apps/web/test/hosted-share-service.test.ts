@@ -1,42 +1,52 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
-import { HostedBillingStatus, HostedMemberStatus } from "@prisma/client";
+import { HostedBillingStatus, HostedMemberStatus, type ExecutionOutbox } from "@prisma/client";
 import type { SharePack } from "@murphai/contracts";
+import {
+  HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+  type HostedExecutionDispatchRequest,
+  type HostedExecutionOutboxPayload,
+} from "@murphai/hosted-execution";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({
-  deleteHostedSharePackFromHostedExecution: vi.fn(),
-  drainHostedExecutionOutbox: vi.fn(),
-  drainHostedExecutionOutboxBestEffort: vi.fn(),
-  enqueueHostedExecutionOutbox: vi.fn(),
-  findHostedExecutionOutboxByEventId: vi.fn(),
+const shareHarness = vi.hoisted(() => ({
   issueHostedInviteForPhone: vi.fn(),
-  readHostedSharePackFromHostedExecution: vi.fn(),
-  readHostedExecutionOutboxOutcome: vi.fn(),
-  sharePacks: new Map<string, unknown>(),
-  writeHostedSharePackToHostedExecution: vi.fn(),
-}));
-
-vi.mock("@/src/lib/hosted-execution/outbox", () => ({
-  drainHostedExecutionOutbox: mocks.drainHostedExecutionOutbox,
-  drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
-  enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
-  findHostedExecutionOutboxByEventId: mocks.findHostedExecutionOutboxByEventId,
-  readHostedExecutionOutboxOutcome: mocks.readHostedExecutionOutboxOutcome,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
-  requireHostedOnboardingPublicBaseUrl: () => "https://join.example.test",
+  sharePacks: new Map<string, SharePack>(),
+  stagedPayloads: [] as HostedExecutionDispatchRequest[],
 }));
 
 vi.mock("@/src/lib/hosted-execution/control", () => ({
-  deleteHostedSharePackFromHostedExecution: mocks.deleteHostedSharePackFromHostedExecution,
-  readHostedSharePackFromHostedExecution: mocks.readHostedSharePackFromHostedExecution,
-  writeHostedSharePackToHostedExecution: mocks.writeHostedSharePackToHostedExecution,
+  deleteHostedSharePackFromHostedExecution: async ({ ownerUserId, shareId }: { ownerUserId: string; shareId: string }) => {
+    shareHarness.sharePacks.delete(`${ownerUserId}:${shareId}`);
+  },
+  deleteHostedStoredDispatchPayloadBestEffort: async () => {},
+  maybeStageHostedExecutionDispatchPayload: async (dispatch: HostedExecutionDispatchRequest) => {
+    shareHarness.stagedPayloads.push(dispatch);
+    return createStagedPayload(dispatch);
+  },
+  readHostedSharePackFromHostedExecution: async ({ ownerUserId, shareId }: { ownerUserId: string; shareId: string }) =>
+    shareHarness.sharePacks.get(`${ownerUserId}:${shareId}`) ?? null,
+  writeHostedSharePackToHostedExecution: async ({
+    ownerUserId,
+    pack,
+    shareId,
+  }: {
+    ownerUserId: string;
+    pack: SharePack;
+    shareId: string;
+  }) => {
+    shareHarness.sharePacks.set(`${ownerUserId}:${shareId}`, pack);
+    return pack;
+  },
 }));
+vi.mock("@/src/lib/hosted-onboarding/invite-service", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/invite-service")>(
+    "@/src/lib/hosted-onboarding/invite-service",
+  );
 
-vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
-  issueHostedInviteForPhone: mocks.issueHostedInviteForPhone,
-}));
+  return {
+    ...actual,
+    issueHostedInviteForPhone: shareHarness.issueHostedInviteForPhone,
+  };
+});
 
 import {
   acceptHostedShareLink,
@@ -44,6 +54,10 @@ import {
   createHostedShareLink,
 } from "@/src/lib/hosted-share/service";
 import { finalizeHostedShareAcceptance } from "@/src/lib/hosted-share/shared";
+
+let originalHostedOnboardingPublicBaseUrl: string | undefined;
+let originalHostedContactPrivacyKey: string | undefined;
+const TEST_CONTACT_PRIVACY_KEY = Buffer.alloc(32, 7).toString("base64url");
 
 function buildPack(): SharePack {
   return {
@@ -81,42 +95,59 @@ function buildPack(): SharePack {
   };
 }
 
+function createStagedPayload(
+  dispatch: HostedExecutionDispatchRequest,
+): HostedExecutionOutboxPayload {
+  return {
+    dispatchRef: {
+      eventId: dispatch.eventId,
+      eventKind: dispatch.event.kind,
+      occurredAt: dispatch.occurredAt,
+      userId: dispatch.event.userId,
+    },
+    payloadRef: {
+      key: `transient/dispatch-payloads/${dispatch.event.userId}/${dispatch.eventId}.json`,
+    },
+    schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+    storage: "reference",
+  };
+}
+
 describe("hosted share service", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.issueHostedInviteForPhone.mockResolvedValue({
-      invite: {
-        inviteCode: "invite_123",
-      },
-    });
-    mocks.drainHostedExecutionOutbox.mockResolvedValue([]);
-    mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
-    mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
-    mocks.findHostedExecutionOutboxByEventId.mockResolvedValue({
-      lastError: null,
-      status: "completed",
-    });
-    mocks.readHostedExecutionOutboxOutcome.mockReturnValue("completed");
-    mocks.sharePacks.clear();
-    mocks.writeHostedSharePackToHostedExecution.mockImplementation(async ({ pack, shareId }) => {
-      mocks.sharePacks.set(shareId, pack);
-      return pack;
-    });
-    mocks.readHostedSharePackFromHostedExecution.mockImplementation(async ({ shareId }: { shareId: string }) =>
-      (mocks.sharePacks.get(shareId) as SharePack | undefined) ?? null
+    shareHarness.issueHostedInviteForPhone.mockReset();
+    shareHarness.issueHostedInviteForPhone.mockRejectedValue(
+      new Error("Unexpected invite issuance in hosted share service test."),
     );
-    mocks.deleteHostedSharePackFromHostedExecution.mockImplementation(async ({ shareId }: { shareId: string }) => {
-      mocks.sharePacks.delete(shareId);
-    });
+    shareHarness.sharePacks.clear();
+    shareHarness.stagedPayloads = [];
+    originalHostedOnboardingPublicBaseUrl = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
+    originalHostedContactPrivacyKey = process.env.HOSTED_CONTACT_PRIVACY_KEY;
+    process.env.HOSTED_CONTACT_PRIVACY_KEY = TEST_CONTACT_PRIVACY_KEY;
+    process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = "https://join.example.test";
   });
 
-  it("creates a hosted share link and threads a recipient invite into the final url", async () => {
+  afterEach(() => {
+    if (originalHostedOnboardingPublicBaseUrl === undefined) {
+      delete process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
+    } else {
+      process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = originalHostedOnboardingPublicBaseUrl;
+    }
+
+    if (originalHostedContactPrivacyKey === undefined) {
+      delete process.env.HOSTED_CONTACT_PRIVACY_KEY;
+    } else {
+      process.env.HOSTED_CONTACT_PRIVACY_KEY = originalHostedContactPrivacyKey;
+    }
+  });
+
+  it("creates a hosted share link and threads an explicit invite code into the final url", async () => {
     const prisma = createHostedSharePrisma();
     const startedAt = Date.now();
     const result = await createHostedShareLink({
       prisma: prisma as never,
       pack: buildPack(),
-      recipientPhoneNumber: "+15551234567",
+      inviteCode: "invite_123",
       senderMemberId: "member_sender",
     });
 
@@ -128,11 +159,32 @@ describe("hosted share service", () => {
     expect(prisma.rows[0]?.previewTitle).toBe("Shared Murph pack");
     expect((prisma.rows[0]?.expiresAt?.getTime() ?? 0) - startedAt).toBeGreaterThan(23 * 60 * 60 * 1000);
     expect((prisma.rows[0]?.expiresAt?.getTime() ?? 0) - startedAt).toBeLessThanOrEqual(24 * 60 * 60 * 1000 + 5_000);
-    expect(mocks.writeHostedSharePackToHostedExecution).toHaveBeenCalledWith({
-      ownerUserId: "member_sender",
-      pack: buildPack(),
-      shareId: prisma.rows[0]?.id,
+    expect(shareHarness.sharePacks.get(`member_sender:${prisma.rows[0]?.id ?? ""}`)).toEqual(buildPack());
+  });
+
+  it("issues a hosted invite when a recipient phone number is provided", async () => {
+    const prisma = createHostedSharePrisma();
+    shareHarness.issueHostedInviteForPhone.mockResolvedValue({
+      invite: {
+        inviteCode: "invite_phone_123",
+      },
     });
+
+    const result = await createHostedShareLink({
+      prisma: prisma as never,
+      pack: buildPack(),
+      recipientPhoneNumber: "+15551234567",
+      senderMemberId: "member_sender",
+    });
+
+    expect(shareHarness.issueHostedInviteForPhone).toHaveBeenCalledWith({
+      channel: "share",
+      phoneNumber: "+15551234567",
+      prisma,
+    });
+    expect(result.joinUrl).toContain("/join/invite_phone_123?share=");
+    expect(result.shareUrl).toContain(`/share/${encodeURIComponent(result.shareCode)}?invite=invite_phone_123`);
+    expect(result.url).toBe(result.joinUrl);
   });
 
   it("caps explicitly extended hosted share links to the privacy-first 24 hour window", async () => {
@@ -206,7 +258,7 @@ describe("hosted share service", () => {
     expect(finalizedPageData.share?.acceptedByCurrentMember).toBe(true);
     expect(prisma.rows[0]?.consumedByMemberId).toBe("member_123");
 
-    mocks.sharePacks.delete(prisma.rows[0]?.id ?? "");
+    shareHarness.sharePacks.delete(`member_sender:${prisma.rows[0]?.id ?? ""}`);
 
     const consumedWithoutPackPageData = await buildHostedSharePageData({
       authenticatedMember: {
@@ -241,7 +293,7 @@ describe("hosted share service", () => {
       senderMemberId: "member_sender",
     });
 
-    mocks.sharePacks.delete(prisma.rows[0]?.id ?? "");
+    shareHarness.sharePacks.delete(`member_sender:${prisma.rows[0]?.id ?? ""}`);
 
     await expect(acceptHostedShareLink({
       member: {
@@ -256,21 +308,16 @@ describe("hosted share service", () => {
       httpStatus: 404,
     });
 
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(prisma.outboxRows).toHaveLength(0);
+    expect(shareHarness.stagedPayloads).toHaveLength(0);
   });
 
-  it("keeps the hosted share claim and reuses the same event id after a transport failure", async () => {
+  it("keeps the hosted share claim and reuses the same event id across retries before finalization", async () => {
     const prisma = createHostedSharePrisma();
     const created = await createHostedShareLink({
       prisma: prisma as never,
       pack: buildPack(),
       senderMemberId: "member_sender",
-    });
-    const dispatchEventIds: string[] = [];
-
-    mocks.enqueueHostedExecutionOutbox.mockImplementation(async ({ dispatch }: { dispatch: { eventId: string } }) => {
-      dispatchEventIds.push(dispatch.eventId);
-      return undefined;
     });
 
     await expect(acceptHostedShareLink({
@@ -287,6 +334,8 @@ describe("hosted share service", () => {
     });
     expect(prisma.rows[0]?.acceptedByMemberId).toBe("member_123");
     expect(prisma.rows[0]?.consumedAt).toBeNull();
+    expect(prisma.outboxRows).toHaveLength(1);
+    expect(shareHarness.stagedPayloads).toHaveLength(1);
 
     const retried = await acceptHostedShareLink({
       member: {
@@ -300,11 +349,13 @@ describe("hosted share service", () => {
 
     expect(retried.imported).toBe(false);
     expect(retried.pending).toBe(true);
-    expect(dispatchEventIds).toHaveLength(2);
-    expect(dispatchEventIds[0]).toBe(dispatchEventIds[1]);
+    expect(prisma.outboxRows).toHaveLength(1);
+    expect(prisma.outboxRows[0]?.eventId).toBe(prisma.rows[0]?.lastEventId);
+    expect(shareHarness.stagedPayloads).toHaveLength(2);
+    expect(shareHarness.stagedPayloads[0]?.eventId).toBe(shareHarness.stagedPayloads[1]?.eventId);
 
     await finalizeHostedShareAcceptance({
-      eventId: dispatchEventIds[1] ?? "",
+      eventId: prisma.rows[0]?.lastEventId ?? "",
       memberId: "member_123",
       prisma: prisma as never,
       shareId: prisma.rows[0]?.id ?? "",
@@ -382,8 +433,10 @@ type HostedShareRow = {
 
 function createHostedSharePrisma() {
   const rows: HostedShareRow[] = [];
+  const outboxRows: ExecutionOutbox[] = [];
   const prismaLike = {
     rows,
+    outboxRows,
     hostedShareLink: {
       create: async ({
         data,
@@ -466,6 +519,25 @@ function createHostedSharePrisma() {
           throw new Error("row missing");
         }
         Object.assign(row, data, { updatedAt: new Date() });
+        return row;
+      },
+    },
+    executionOutbox: {
+      upsert: async ({
+        create,
+        where,
+      }: {
+        create: ExecutionOutbox;
+        where: { eventId: string };
+      }) => {
+        const existing = outboxRows.find((entry) => entry.eventId === where.eventId);
+
+        if (existing) {
+          return existing;
+        }
+
+        const row = structuredClone(create) as ExecutionOutbox;
+        outboxRows.push(row);
         return row;
       },
     },

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   runHostedExecutionJob,
-  setHostedExecutionRunHandlersForTests,
+  setHostedExecutionIsolatedRunnerForTests,
   setHostedExecutionRunModeForTests,
 } from "../src/node-runner.ts";
 
@@ -11,9 +11,7 @@ describe("runHostedExecutionJob abort forwarding", () => {
 
   beforeEach(() => {
     setHostedExecutionRunModeForTests(null);
-    setHostedExecutionRunHandlersForTests({
-      isolated: runHostedAssistantRuntimeJobIsolated,
-    });
+    setHostedExecutionIsolatedRunnerForTests(runHostedAssistantRuntimeJobIsolated);
     runHostedAssistantRuntimeJobIsolated.mockReset();
     runHostedAssistantRuntimeJobIsolated.mockResolvedValue({
       bundles: {
@@ -29,7 +27,7 @@ describe("runHostedExecutionJob abort forwarding", () => {
   });
 
   afterEach(() => {
-    setHostedExecutionRunHandlersForTests(null);
+    setHostedExecutionIsolatedRunnerForTests(null);
     setHostedExecutionRunModeForTests(null);
   });
 
