@@ -67,7 +67,7 @@ interface StoredGatewayState {
   events: GatewayEvent[];
   nextCursor: number;
   permissionOverrides: GatewayPermissionResolutionOverride[];
-  snapshot: GatewayProjectionSnapshot | null;
+  projectedSnapshot: GatewayProjectionSnapshot | null;
 }
 
 interface HostedGatewayProjectionStoreCrypto {
@@ -103,11 +103,7 @@ export class HostedGatewayProjectionStore {
         current.permissionOverrides,
         parsed,
       );
-      const currentState: GatewayEventLogState = {
-        events: current.events,
-        nextCursor: current.nextCursor,
-        snapshot: current.snapshot,
-      };
+      const currentState = toGatewayEventLogState(current);
       const nextState = applyGatewayProjectionSnapshotToEventLog(
         currentState,
         mergeGatewayPermissionOverrides(parsed, nextOverrides) ?? parsed,
@@ -171,7 +167,7 @@ export class HostedGatewayProjectionStore {
     const parsed = gatewayRespondToPermissionInputSchema.parse(input);
     return this.withStateLock(async () => {
       const current = await this.readStoredState();
-      const snapshot = current.snapshot ?? createEmptyGatewaySnapshot();
+      const snapshot = current.projectedSnapshot ?? createEmptyGatewaySnapshot();
       const index = snapshot.permissions.findIndex(
         (permission) => permission.requestId === parsed.requestId,
       );
@@ -197,11 +193,7 @@ export class HostedGatewayProjectionStore {
         status: nextStatus,
       });
       const nextOverrides = upsertGatewayPermissionOverride(current.permissionOverrides, updated);
-      const currentState: GatewayEventLogState = {
-        events: current.events,
-        nextCursor: current.nextCursor,
-        snapshot: current.snapshot,
-      };
+      const currentState = toGatewayEventLogState(current);
       const nextState = applyGatewayProjectionSnapshotToEventLog(
         currentState,
         mergeGatewayPermissionOverrides(current.baseSnapshot, nextOverrides)
@@ -237,12 +229,7 @@ export class HostedGatewayProjectionStore {
   }
 
   private async readState(): Promise<GatewayEventLogState> {
-    const state = await this.readStoredState();
-    return {
-      events: state.events,
-      nextCursor: state.nextCursor,
-      snapshot: state.snapshot,
-    };
+    return toGatewayEventLogState(await this.readStoredState());
   }
 
   private async readStoredState(): Promise<StoredGatewayState> {
@@ -254,7 +241,7 @@ export class HostedGatewayProjectionStore {
         events: [],
         nextCursor: 0,
         permissionOverrides: [],
-        snapshot: null,
+        projectedSnapshot: null,
       };
     }
 
@@ -275,7 +262,10 @@ export class HostedGatewayProjectionStore {
       events: record.events,
       nextCursor: record.nextCursor,
       permissionOverrides: record.permissionOverrides,
-      snapshot: mergeGatewayPermissionOverrides(record.baseSnapshot, record.permissionOverrides),
+      projectedSnapshot: mergeGatewayPermissionOverrides(
+        record.baseSnapshot,
+        record.permissionOverrides,
+      ),
     };
   }
 
@@ -321,6 +311,14 @@ export class HostedGatewayProjectionStore {
       }
     }
   }
+}
+
+function toGatewayEventLogState(state: StoredGatewayState): GatewayEventLogState {
+  return {
+    events: state.events,
+    nextCursor: state.nextCursor,
+    snapshot: state.projectedSnapshot,
+  };
 }
 
 function parseStoredGatewayStateRecord(value: unknown): StoredGatewayStateRecord {
