@@ -188,8 +188,6 @@ export class LocalGatewayProjectionStore {
     ])
     const sessionSignature = computeSessionSyncSignature(sessions)
     const outboxSignature = computeOutboxSyncSignature(outboxIntents)
-    const sessionSourceCount = readGatewaySourceEventCount(this.database, 'session')
-    const outboxSourceCount = readGatewaySourceEventCount(this.database, 'outbox')
 
     await withGatewayImmediateTransaction(this.database, async () => {
       let previousState: ReturnType<typeof readSnapshotState> | null = null
@@ -225,20 +223,14 @@ export class LocalGatewayProjectionStore {
         )
       }
 
-      if (
-        readMeta(this.database, SESSION_SIGNATURE_META_KEY) !== sessionSignature ||
-        sessionSourceCount !== sessions.length
-      ) {
+      if (readMeta(this.database, SESSION_SIGNATURE_META_KEY) !== sessionSignature) {
         ensurePreviousState()
         replaceSessionSources(this.database, sessions)
         writeMeta(this.database, SESSION_SIGNATURE_META_KEY, sessionSignature)
         changed = true
       }
 
-      if (
-        readMeta(this.database, OUTBOX_SIGNATURE_META_KEY) !== outboxSignature ||
-        outboxSourceCount !== outboxIntents.length
-      ) {
+      if (readMeta(this.database, OUTBOX_SIGNATURE_META_KEY) !== outboxSignature) {
         ensurePreviousState()
         replaceOutboxSources(this.database, outboxIntents)
         writeMeta(this.database, OUTBOX_SIGNATURE_META_KEY, outboxSignature)
