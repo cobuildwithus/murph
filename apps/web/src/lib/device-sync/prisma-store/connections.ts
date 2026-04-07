@@ -16,7 +16,7 @@ import {
   findHostedDeviceSyncRuntimeConnection,
   type HostedStaticDeviceSyncConnectionRecord,
 } from "../internal-runtime";
-import { generateHostedRandomPrefixedId } from "../shared";
+import { asRecord, generateHostedRandomPrefixedId } from "../shared";
 
 export const hostedConnectionRecordArgs = {
   select: {
@@ -32,6 +32,29 @@ export const hostedConnectionRecordArgs = {
 } satisfies Prisma.DeviceConnectionDefaultArgs;
 
 export type HostedConnectionRecord = Prisma.DeviceConnectionGetPayload<typeof hostedConnectionRecordArgs>;
+
+const hostedConnectionSignalRecordArgs = {
+  select: {
+    connectionId: true,
+    createdAt: true,
+    id: true,
+    kind: true,
+    payloadJson: true,
+  },
+} satisfies Prisma.DeviceSyncSignalDefaultArgs;
+
+type HostedConnectionSignalRecord = Prisma.DeviceSyncSignalGetPayload<typeof hostedConnectionSignalRecordArgs>;
+
+interface HostedDurableConnectionSummary {
+  lastErrorCode?: string | null;
+  lastErrorMessage?: string | null;
+  lastSyncErrorAt?: string | null;
+  lastWebhookAt?: string | null;
+  nextReconcileAt?: string | null;
+  scopes?: string[];
+  status?: "active" | "disconnected" | "reauthorization_required";
+  updatedAt?: string | null;
+}
 
 export class PrismaHostedConnectionStore {
   readonly prisma: PrismaClient;
@@ -129,7 +152,7 @@ export class PrismaHostedConnectionStore {
       ...hostedConnectionRecordArgs,
     });
 
-    return record ? this.hydrateConnectionRecord(record) : null;
+    return record ? this.hydrateRuntimeConnectionRecord(record) : null;
   }
 
   async markWebhookReceived(accountId: string, now: string): Promise<void> {
@@ -161,13 +184,25 @@ export class PrismaHostedConnectionStore {
   async listConnectionsForUser(userId: string): Promise<PublicDeviceSyncAccount[]> {
     const records = await this.listConnectionRecordsForUser(userId);
 
-    return this.hydrateConnectionRecords(records);
+    return this.buildDurableConnectionRecords(records);
   }
 
   async getConnectionForUser(userId: string, connectionId: string): Promise<PublicDeviceSyncAccount | null> {
     const record = await this.getConnectionRecordForUser(userId, connectionId);
 
-    return record ? this.hydrateConnectionRecord(record) : null;
+    return record ? this.buildDurableConnectionRecord(record) : null;
+  }
+
+  async listRuntimeConnectionsForUser(userId: string): Promise<PublicDeviceSyncAccount[]> {
+    const records = await this.listConnectionRecordsForUser(userId);
+
+    return this.hydrateRuntimeConnectionRecords(records);
+  }
+
+  async getRuntimeConnectionForUser(userId: string, connectionId: string): Promise<PublicDeviceSyncAccount | null> {
+    const record = await this.getConnectionRecordForUser(userId, connectionId);
+
+    return record ? this.hydrateRuntimeConnectionRecord(record) : null;
   }
 
   async getConnectionOwnerId(connectionId: string): Promise<string | null> {
@@ -212,7 +247,19 @@ export class PrismaHostedConnectionStore {
     });
   }
 
-  private async hydrateConnectionRecord(record: HostedConnectionRecord): Promise<PublicDeviceSyncAccount> {
+  private async buildDurableConnectionRecord(record: HostedConnectionRecord): Promise<PublicDeviceSyncAccount> {
+    const summaries = await this.listDurableConnectionSummaries(record.userId, [record.id]);
+    const summary = summaries.get(record.id);
+
+    return toRedactedPublicDeviceSyncAccount(
+      buildHostedPublicDeviceSyncAccount({
+        record: mapHostedConnectionRecord(record),
+        fallback: buildHostedDurableConnectionFallback(record, summary),
+      }),
+    );
+  }
+
+  private async hydrateRuntimeConnectionRecord(record: HostedConnectionRecord): Promise<PublicDeviceSyncAccount> {
     const controlClient = readHostedExecutionControlClientIfConfigured();
     const runtimeSnapshot = controlClient
       ? await controlClient.getDeviceSyncRuntimeSnapshot(record.userId, {
@@ -232,7 +279,25 @@ export class PrismaHostedConnectionStore {
     );
   }
 
-  private async hydrateConnectionRecords(records: readonly HostedConnectionRecord[]): Promise<PublicDeviceSyncAccount[]> {
+  private async buildDurableConnectionRecords(records: readonly HostedConnectionRecord[]): Promise<PublicDeviceSyncAccount[]> {
+    if (records.length === 0) {
+      return [];
+    }
+
+    const summaries = await this.listDurableConnectionSummaries(
+      records[0].userId,
+      records.map((record) => record.id),
+    );
+
+    return records.map((record) => toRedactedPublicDeviceSyncAccount(
+      buildHostedPublicDeviceSyncAccount({
+        record: mapHostedConnectionRecord(record),
+        fallback: buildHostedDurableConnectionFallback(record, summaries.get(record.id)),
+      }),
+    ));
+  }
+
+  private async hydrateRuntimeConnectionRecords(records: readonly HostedConnectionRecord[]): Promise<PublicDeviceSyncAccount[]> {
     if (records.length === 0) {
       return [];
     }
@@ -248,6 +313,41 @@ export class PrismaHostedConnectionStore {
         runtimeConnection: runtimeSnapshot ? findHostedDeviceSyncRuntimeConnection(runtimeSnapshot, record.id) : null,
       }),
     ));
+  }
+
+  private async listDurableConnectionSummaries(
+    userId: string,
+    connectionIds: readonly string[],
+  ): Promise<Map<string, HostedDurableConnectionSummary>> {
+    const normalizedConnectionIds = [...new Set(connectionIds)];
+
+    if (normalizedConnectionIds.length === 0) {
+      return new Map();
+    }
+
+    const signalRecords = await this.prisma.deviceSyncSignal.findMany({
+      where: {
+        userId,
+        connectionId: {
+          in: normalizedConnectionIds,
+        },
+      },
+      orderBy: [{ id: "desc" }],
+      ...hostedConnectionSignalRecordArgs,
+    });
+    const summaries = new Map<string, HostedDurableConnectionSummary>();
+
+    for (const signalRecord of signalRecords) {
+      if (!signalRecord.connectionId) {
+        continue;
+      }
+
+      const summary = summaries.get(signalRecord.connectionId) ?? {};
+      applyHostedDurableSignalSummary(summary, signalRecord);
+      summaries.set(signalRecord.connectionId, summary);
+    }
+
+    return summaries;
   }
 }
 
@@ -271,4 +371,127 @@ function normalizeNullableString(value: string | null | undefined): string | nul
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function buildHostedDurableConnectionFallback(
+  record: HostedConnectionRecord,
+  summary: HostedDurableConnectionSummary | undefined,
+): {
+  lastErrorCode?: string | null;
+  lastErrorMessage?: string | null;
+  lastSyncErrorAt?: string | null;
+  lastWebhookAt?: string | null;
+  nextReconcileAt?: string | null;
+  scopes?: readonly string[] | null;
+  status?: "active" | "disconnected" | "reauthorization_required";
+  updatedAt?: string | null;
+} {
+  const updatedAt = newestIsoTimestamp(summary?.updatedAt ?? null, record.updatedAt.toISOString());
+
+  return {
+    lastErrorCode: summary?.lastErrorCode ?? null,
+    lastErrorMessage: summary?.lastErrorMessage ?? null,
+    lastSyncErrorAt: summary?.lastSyncErrorAt ?? null,
+    lastWebhookAt: summary?.lastWebhookAt ?? null,
+    nextReconcileAt: summary?.nextReconcileAt ?? null,
+    scopes: summary?.scopes ?? [],
+    status: summary?.status ?? "active",
+    updatedAt,
+  };
+}
+
+function applyHostedDurableSignalSummary(
+  summary: HostedDurableConnectionSummary,
+  signalRecord: HostedConnectionSignalRecord,
+): void {
+  const signalCreatedAt = signalRecord.createdAt.toISOString();
+  const payload = asRecord(signalRecord.payloadJson);
+
+  summary.updatedAt = newestIsoTimestamp(summary.updatedAt ?? null, signalCreatedAt);
+
+  if (summary.scopes === undefined) {
+    const scopes = readStringList(payload.scopes);
+
+    if (scopes) {
+      summary.scopes = scopes;
+    }
+  }
+
+  if (summary.nextReconcileAt === undefined && payload.nextReconcileAt !== undefined) {
+    summary.nextReconcileAt = readNullableString(payload.nextReconcileAt);
+  }
+
+  if (signalRecord.kind === "webhook_hint" && summary.lastWebhookAt === undefined) {
+    summary.lastWebhookAt = readNullableString(payload.occurredAt) ?? signalCreatedAt;
+  }
+
+  if (summary.status === undefined) {
+    switch (signalRecord.kind) {
+      case "connected":
+        summary.status = "active";
+        break;
+      case "disconnected":
+        summary.status = "disconnected";
+        summary.nextReconcileAt = null;
+        applyHostedSignalErrorFields(summary, payload, signalCreatedAt);
+        break;
+      case "reauthorization_required":
+        summary.status = "reauthorization_required";
+        applyHostedSignalErrorFields(summary, payload, signalCreatedAt);
+        break;
+      default:
+        break;
+    }
+  }
+}
+
+function applyHostedSignalErrorFields(
+  summary: HostedDurableConnectionSummary,
+  payload: Record<string, unknown>,
+  signalCreatedAt: string,
+): void {
+  if (summary.lastSyncErrorAt === undefined) {
+    summary.lastSyncErrorAt = readNullableString(payload.occurredAt) ?? signalCreatedAt;
+  }
+
+  const warning = asRecord(payload.revokeWarning);
+  const code = readNullableString(payload.code) ?? readNullableString(warning.code);
+  const message = readNullableString(payload.message) ?? readNullableString(warning.message);
+
+  if (summary.lastErrorCode === undefined) {
+    summary.lastErrorCode = code ?? null;
+  }
+
+  if (summary.lastErrorMessage === undefined) {
+    summary.lastErrorMessage = message ?? null;
+  }
+}
+
+function readNullableString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readStringList(value: unknown): string[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const entries = value
+    .filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
+  return entries.length > 0 ? [...new Set(entries)] : [];
+}
+
+function newestIsoTimestamp(left: string | null, right: string | null): string | null {
+  if (!left) {
+    return right;
+  }
+
+  if (!right) {
+    return left;
+  }
+
+  return left >= right ? left : right;
 }

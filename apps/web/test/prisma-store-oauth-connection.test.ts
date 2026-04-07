@@ -44,6 +44,14 @@ type MutableConnectionRecord = {
   updatedAt: Date;
 };
 
+type MutableSignalRecord = {
+  id: number;
+  connectionId: string | null;
+  kind: string;
+  payloadJson: Record<string, unknown> | null;
+  createdAt: Date;
+};
+
 describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -281,6 +289,193 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(tx.deviceConnectionSecret.upsert).not.toHaveBeenCalled();
   });
 
+  it("serves ordinary hosted connection lists from durable Prisma metadata without live runtime reads", async () => {
+    const connection = createConnection({
+      id: "dsc_123",
+      provider: "oura",
+      updatedAt: new Date("2026-03-25T00:00:00.000Z"),
+      userId: "user-123",
+    });
+    const signals: MutableSignalRecord[] = [
+      {
+        id: 2,
+        connectionId: "dsc_123",
+        kind: "webhook_hint",
+        payloadJson: {
+          occurredAt: "2026-03-25T06:00:00.000Z",
+        },
+        createdAt: new Date("2026-03-25T06:01:00.000Z"),
+      },
+      {
+        id: 1,
+        connectionId: "dsc_123",
+        kind: "connected",
+        payloadJson: {
+          nextReconcileAt: "2026-03-25T07:00:00.000Z",
+          scopes: ["daily", "sleep"],
+        },
+        createdAt: new Date("2026-03-25T00:30:00.000Z"),
+      },
+    ];
+
+    runtimeMocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      applyDeviceSyncRuntimeUpdates: runtimeMocks.applyDeviceSyncRuntimeUpdates,
+      getDeviceSyncRuntimeSnapshot: runtimeMocks.getDeviceSyncRuntimeSnapshot,
+    });
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {
+        deviceConnection: {
+          findMany: async () => [cloneConnection(connection)],
+        },
+        deviceSyncSignal: {
+          findMany: async () => cloneSignals(signals),
+        },
+      } as never,
+    });
+
+    await expect(store.listConnectionsForUser("user-123")).resolves.toEqual([
+      expect.objectContaining({
+        id: "dsc_123",
+        provider: "oura",
+        status: "active",
+        scopes: ["daily", "sleep"],
+        nextReconcileAt: "2026-03-25T07:00:00.000Z",
+        lastWebhookAt: "2026-03-25T06:00:00.000Z",
+        updatedAt: "2026-03-25T06:01:00.000Z",
+      }),
+    ]);
+    expect(runtimeMocks.getDeviceSyncRuntimeSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("keeps webhook-ingress external-account lookups on the live runtime path", async () => {
+    const connection = createConnection({
+      id: "dsc_123",
+      provider: "oura",
+      userId: "user-123",
+    });
+
+    runtimeMocks.getDeviceSyncRuntimeSnapshot.mockResolvedValue({
+      connections: [
+        {
+          connection: {
+            accessTokenExpiresAt: null,
+            connectedAt: "2026-03-25T00:00:00.000Z",
+            createdAt: "2026-03-25T00:00:00.000Z",
+            displayName: "Oura ring",
+            externalAccountId: "acct_456",
+            id: "dsc_123",
+            metadata: {},
+            provider: "oura",
+            scopes: ["daily"],
+            status: "disconnected",
+            updatedAt: "2026-03-25T08:00:00.000Z",
+          },
+          localState: {
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSyncCompletedAt: null,
+            lastSyncErrorAt: null,
+            lastSyncStartedAt: null,
+            lastWebhookAt: null,
+            nextReconcileAt: null,
+          },
+          tokenBundle: null,
+        },
+      ],
+      generatedAt: "2026-03-25T08:00:00.000Z",
+      userId: "user-123",
+    });
+    runtimeMocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      applyDeviceSyncRuntimeUpdates: runtimeMocks.applyDeviceSyncRuntimeUpdates,
+      getDeviceSyncRuntimeSnapshot: runtimeMocks.getDeviceSyncRuntimeSnapshot,
+    });
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {
+        deviceConnection: {
+          findUnique: async () => cloneConnection(connection),
+        },
+      } as never,
+    });
+
+    await expect(store.getConnectionByExternalAccount("oura", "acct_456")).resolves.toEqual(expect.objectContaining({
+      id: "dsc_123",
+      status: "disconnected",
+      updatedAt: "2026-03-25T08:00:00.000Z",
+    }));
+    expect(runtimeMocks.getDeviceSyncRuntimeSnapshot).toHaveBeenCalledWith("user-123", {
+      connectionId: "dsc_123",
+      provider: "oura",
+    });
+  });
+
+  it("keeps explicit operational connection reads on the live Cloudflare runtime path", async () => {
+    const connection = createConnection({
+      id: "dsc_123",
+      provider: "oura",
+      userId: "user-123",
+    });
+
+    runtimeMocks.getDeviceSyncRuntimeSnapshot.mockResolvedValue({
+      connections: [
+        {
+          connection: {
+            accessTokenExpiresAt: null,
+            connectedAt: "2026-03-25T00:00:00.000Z",
+            createdAt: "2026-03-25T00:00:00.000Z",
+            displayName: "Oura ring",
+            externalAccountId: "acct_456",
+            id: "dsc_123",
+            metadata: {
+              region: "us",
+            },
+            provider: "oura",
+            scopes: ["daily"],
+            status: "disconnected",
+            updatedAt: "2026-03-25T08:00:00.000Z",
+          },
+          localState: {
+            lastErrorCode: "REMOTE_REVOKE_FAILED",
+            lastErrorMessage: "Provider revoke request failed during disconnect.",
+            lastSyncCompletedAt: null,
+            lastSyncErrorAt: "2026-03-25T08:00:00.000Z",
+            lastSyncStartedAt: null,
+            lastWebhookAt: "2026-03-25T07:00:00.000Z",
+            nextReconcileAt: null,
+          },
+          tokenBundle: null,
+        },
+      ],
+      generatedAt: "2026-03-25T08:00:00.000Z",
+      userId: "user-123",
+    });
+    runtimeMocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      applyDeviceSyncRuntimeUpdates: runtimeMocks.applyDeviceSyncRuntimeUpdates,
+      getDeviceSyncRuntimeSnapshot: runtimeMocks.getDeviceSyncRuntimeSnapshot,
+    });
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {
+        deviceConnection: {
+          findFirst: async () => cloneConnection(connection),
+        },
+      } as never,
+    });
+
+    await expect(store.getRuntimeConnectionForUser("user-123", "dsc_123")).resolves.toEqual(expect.objectContaining({
+      id: "dsc_123",
+      status: "disconnected",
+      metadata: {},
+      lastWebhookAt: "2026-03-25T07:00:00.000Z",
+      updatedAt: "2026-03-25T08:00:00.000Z",
+    }));
+    expect(runtimeMocks.getDeviceSyncRuntimeSnapshot).toHaveBeenCalledWith("user-123", {
+      connectionId: "dsc_123",
+      provider: "oura",
+    });
+  });
+
   it("forwards webhook receipt timestamps into the Cloudflare runtime instead of Prisma runtime columns", async () => {
     const connection = createConnection({
       id: "dsc_123",
@@ -342,6 +537,14 @@ function cloneConnection(record: MutableConnectionRecord | null): MutableConnect
         updatedAt: new Date(record.updatedAt),
       }
     : null;
+}
+
+function cloneSignals(records: readonly MutableSignalRecord[]): MutableSignalRecord[] {
+  return records.map((record) => ({
+    ...record,
+    payloadJson: record.payloadJson ? { ...record.payloadJson } : null,
+    createdAt: new Date(record.createdAt),
+  }));
 }
 
 function createConnection(overrides: Partial<MutableConnectionRecord>): MutableConnectionRecord {

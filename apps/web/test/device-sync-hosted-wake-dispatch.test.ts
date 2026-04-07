@@ -9,9 +9,11 @@ const mocks = vi.hoisted(() => ({
   ensureWebhookSubscriptions: vi.fn(),
   enqueueHostedExecutionOutbox: vi.fn(),
   getConnectionForUser: vi.fn(),
+  getRuntimeConnectionForUser: vi.fn(),
   getConnectionOwnerId: vi.fn(),
   getDeviceSyncRuntimeSnapshot: vi.fn(),
   listConnectionsForUser: vi.fn(),
+  listRuntimeConnectionsForUser: vi.fn(),
   readHostedDeviceSyncEnvironment: vi.fn(),
   registryGet: vi.fn(),
   registryList: vi.fn(),
@@ -174,8 +176,10 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
     completeWebhookTrace = mocks.completeWebhookTrace;
     createSignal = mocks.createSignal;
     getConnectionForUser = mocks.getConnectionForUser;
+    getRuntimeConnectionForUser = mocks.getRuntimeConnectionForUser;
     getConnectionOwnerId = mocks.getConnectionOwnerId;
     listConnectionsForUser = mocks.listConnectionsForUser;
+    listRuntimeConnectionsForUser = mocks.listRuntimeConnectionsForUser;
     prisma = mocks.prisma;
   },
   generateHostedAgentBearerToken: vi.fn(),
@@ -359,8 +363,12 @@ describe("dispatchHostedDeviceSyncWake", () => {
     mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
     mocks.getConnectionForUser.mockResolvedValue(buildHostedConnection());
+    mocks.getRuntimeConnectionForUser.mockImplementation(async (...args: [string, string]) =>
+      mocks.getConnectionForUser(...args));
     mocks.getConnectionOwnerId.mockResolvedValue("user-123");
     mocks.listConnectionsForUser.mockResolvedValue([]);
+    mocks.listRuntimeConnectionsForUser.mockImplementation(async (...args: [string]) =>
+      mocks.listConnectionsForUser(...args));
     mocks.registryGet.mockReturnValue(undefined);
     mocks.registryList.mockReturnValue([]);
   });
@@ -1321,7 +1329,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
 
   it("skips runtime-snapshot webhook admin upkeep when the provider filter does not match the selected connection", async () => {
     const ensureOuraSubscriptions = vi.fn().mockResolvedValue(undefined);
-    mocks.getConnectionForUser.mockResolvedValue({
+    mocks.getRuntimeConnectionForUser.mockResolvedValue({
       id: "dsc_123",
       provider: "oura",
       status: "active",
@@ -1353,12 +1361,12 @@ describe("dispatchHostedDeviceSyncWake", () => {
 
   it("uses the requested connection for runtime-snapshot webhook admin upkeep instead of scanning all connections", async () => {
     const ensureOuraSubscriptions = vi.fn().mockResolvedValue(undefined);
-    mocks.getConnectionForUser.mockResolvedValue({
+    mocks.getRuntimeConnectionForUser.mockResolvedValue({
       id: "dsc_123",
       provider: "oura",
       status: "active",
     });
-    mocks.listConnectionsForUser.mockResolvedValue([
+    mocks.listRuntimeConnectionsForUser.mockResolvedValue([
       {
         id: "dsc_ignore",
         provider: "whoop",
@@ -1388,8 +1396,8 @@ describe("dispatchHostedDeviceSyncWake", () => {
       connectionId: "dsc_123",
     });
 
-    expect(mocks.getConnectionForUser).toHaveBeenCalledWith("user-123", "dsc_123");
-    expect(mocks.listConnectionsForUser).not.toHaveBeenCalled();
+    expect(mocks.getRuntimeConnectionForUser).toHaveBeenCalledWith("user-123", "dsc_123");
+    expect(mocks.listRuntimeConnectionsForUser).not.toHaveBeenCalled();
     expect(ensureOuraSubscriptions).toHaveBeenCalledTimes(1);
   });
 });

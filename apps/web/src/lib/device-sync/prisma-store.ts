@@ -129,6 +129,14 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.connections.getConnectionForUser(userId, connectionId);
   }
 
+  async listRuntimeConnectionsForUser(userId: string): Promise<PublicDeviceSyncAccount[]> {
+    return this.connections.listRuntimeConnectionsForUser(userId);
+  }
+
+  async getRuntimeConnectionForUser(userId: string, connectionId: string): Promise<PublicDeviceSyncAccount | null> {
+    return this.connections.getRuntimeConnectionForUser(userId, connectionId);
+  }
+
   async getConnectionOwnerId(connectionId: string): Promise<string | null> {
     return this.connections.getConnectionOwnerId(connectionId);
   }

@@ -21,7 +21,7 @@ export class PrismaHostedLocalHeartbeatStore {
     connectionId: string,
     patch: UpdateLocalHeartbeatInput,
   ): Promise<PublicDeviceSyncAccount | null> {
-    const existing = await this.connections.getConnectionForUser(userId, connectionId);
+    const existing = await this.connections.getRuntimeConnectionForUser(userId, connectionId);
 
     if (!existing) {
       return null;
@@ -57,7 +57,7 @@ export class PrismaHostedLocalHeartbeatStore {
       });
     }
 
-    return this.connections.getConnectionForUser(userId, connectionId);
+    return this.connections.getRuntimeConnectionForUser(userId, connectionId);
   }
 }
 
