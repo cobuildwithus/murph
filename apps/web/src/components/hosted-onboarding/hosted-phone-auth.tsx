@@ -96,7 +96,6 @@ function HostedPhoneAuthInner({
   mode,
   onCompleted,
   onSignOut,
-  phoneHint,
 }: Omit<HostedPhoneAuthProps, "privyAppId" | "wrapProvider">) {
   const { authenticated, logout, ready } = usePrivy();
   const { createWallet } = useCreateWallet();
@@ -107,6 +106,7 @@ function HostedPhoneAuthInner({
   const [code, setCode] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [finalizationState, setFinalizationState] = useState<HostedPrivyFinalizationState>("idle");
+  const [manualEntryVisible, setManualEntryVisible] = useState(mode !== "invite");
   const [pendingAction, setPendingAction] = useState<HostedPrivyClientPendingAction>(null);
   const [phoneCountryCode, setPhoneCountryCode] = useState<string>(DEFAULT_HOSTED_PHONE_COUNTRY_CODE);
   const [phoneNumber, setPhoneNumber] = useState("");
@@ -202,6 +202,40 @@ function HostedPhoneAuthInner({
     }
   }
 
+  async function handleInviteSendCode() {
+    setErrorMessage(null);
+
+    if (!inviteCode) {
+      setManualEntryVisible(true);
+      return;
+    }
+
+    setPendingAction("send-code");
+
+    try {
+      const payload = await requestHostedOnboardingJson<{ phoneNumber: string }>({
+        auth: "none",
+        method: "POST",
+        url: `/api/hosted-onboarding/invites/${encodeURIComponent(inviteCode)}/send-code`,
+      });
+      await sendCode({ phoneNumber: payload.phoneNumber });
+      setStep("code");
+    } catch (error) {
+      if (
+        error instanceof HostedOnboardingApiError
+        && error.code === "SIGNUP_PHONE_UNAVAILABLE"
+      ) {
+        setManualEntryVisible(true);
+        setErrorMessage("Enter the number that messaged Murph to continue.");
+        return;
+      }
+
+      setErrorMessage(toErrorMessage(error, "We could not send a verification code."));
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
   async function handleVerifyCode() {
     setErrorMessage(null);
 
@@ -258,6 +292,7 @@ function HostedPhoneAuthInner({
       await logout();
       await onSignOut?.();
       setCode("");
+      setManualEntryVisible(mode !== "invite");
       setPhoneCountryCode(DEFAULT_HOSTED_PHONE_COUNTRY_CODE);
       setPhoneNumber("");
       setStep("phone");
@@ -293,10 +328,40 @@ function HostedPhoneAuthInner({
         </Alert>
       ) : null}
 
-      {authenticated ? null : (
+      {!authenticated && mode === "invite" && step === "phone" && !manualEntryVisible ? (
+        <div className="space-y-3">
+          <p className="text-sm text-stone-600">
+            We&apos;ll text a verification code to the number that messaged Murph.
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <Button
+              type="button"
+              onClick={handleInviteSendCode}
+              disabled={!ready || pendingAction !== null}
+              size="lg"
+            >
+              {pendingAction === "send-code" ? "Sending code..." : "Send me a code"}
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                setErrorMessage(null);
+                setManualEntryVisible(true);
+              }}
+              disabled={pendingAction !== null}
+              variant="outline"
+              size="lg"
+            >
+              Use a different number
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {authenticated || (mode === "invite" && step === "phone" && !manualEntryVisible) ? null : (
         <div className="space-y-3">
           <Label htmlFor={`hosted-phone-${mode}`}>
-            {mode === "invite" ? "Phone number that received this invite" : "Your phone number"}
+            {mode === "invite" ? "Phone number" : "Your phone number"}
           </Label>
           <div className="flex flex-col gap-3 sm:flex-row">
             <Combobox
@@ -344,7 +409,7 @@ function HostedPhoneAuthInner({
           </div>
           {mode === "invite" ? (
             <p className="text-sm text-stone-500">
-              {`Use the same number we texted${phoneHint ? ` (${phoneHint})` : ""}.`}
+              Enter the number that messaged Murph.
             </p>
           ) : null}
         </div>
@@ -431,13 +496,16 @@ function HostedPhoneAuthInner({
                 type="button"
                 onClick={() => {
                   setCode("");
+                  if (mode === "invite") {
+                    setManualEntryVisible(true);
+                  }
                   setStep("phone");
                 }}
                 disabled={pendingAction !== null}
                 variant="outline"
                 size="lg"
               >
-                Change number
+                Use a different number
               </Button>
             </>
           )}

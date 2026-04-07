@@ -919,6 +919,8 @@ describe("cloudflare worker routes", () => {
       memberId: "member_123",
       privyUserId: "did:privy:123",
       schema: "murph.hosted-member-private-state.v1",
+      signupPhoneCodeSentAt: null,
+      signupPhoneNumber: "+15551234567",
       stripeCustomerId: "cus_123",
       stripeLatestBillingEventId: "evt_123",
       stripeLatestCheckoutSessionId: "cs_123",

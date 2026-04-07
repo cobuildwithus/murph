@@ -5,6 +5,8 @@ export interface HostedMemberPrivateState {
   memberId: string;
   privyUserId: string | null;
   schema: typeof HOSTED_MEMBER_PRIVATE_STATE_SCHEMA;
+  signupPhoneCodeSentAt: string | null;
+  signupPhoneNumber: string | null;
   stripeCustomerId: string | null;
   stripeLatestBillingEventId: string | null;
   stripeLatestCheckoutSessionId: string | null;
@@ -16,6 +18,8 @@ export interface HostedMemberPrivateState {
 export interface HostedMemberPrivateStatePatch {
   linqChatId?: string | null;
   privyUserId?: string | null;
+  signupPhoneCodeSentAt?: string | null;
+  signupPhoneNumber?: string | null;
   stripeCustomerId?: string | null;
   stripeLatestBillingEventId?: string | null;
   stripeLatestCheckoutSessionId?: string | null;
@@ -44,6 +48,14 @@ export function applyHostedMemberPrivateStatePatch(input: {
     memberId,
     privyUserId: patchNullableString(input.patch.privyUserId, current?.privyUserId ?? null),
     schema: HOSTED_MEMBER_PRIVATE_STATE_SCHEMA,
+    signupPhoneCodeSentAt: patchNullableIsoTimestamp(
+      input.patch.signupPhoneCodeSentAt,
+      current?.signupPhoneCodeSentAt ?? null,
+    ),
+    signupPhoneNumber: patchNullableString(
+      input.patch.signupPhoneNumber,
+      current?.signupPhoneNumber ?? null,
+    ),
     stripeCustomerId: patchNullableString(
       input.patch.stripeCustomerId,
       current?.stripeCustomerId ?? null,
@@ -70,6 +82,8 @@ export function createHostedMemberPrivateState(input: {
   memberId: string;
   now?: string;
   privyUserId?: string | null;
+  signupPhoneCodeSentAt?: string | null;
+  signupPhoneNumber?: string | null;
   stripeCustomerId?: string | null;
   stripeLatestBillingEventId?: string | null;
   stripeLatestCheckoutSessionId?: string | null;
@@ -83,6 +97,8 @@ export function createHostedMemberPrivateState(input: {
     patch: {
       linqChatId: input.linqChatId,
       privyUserId: input.privyUserId,
+      signupPhoneCodeSentAt: input.signupPhoneCodeSentAt,
+      signupPhoneNumber: input.signupPhoneNumber,
       stripeCustomerId: input.stripeCustomerId,
       stripeLatestBillingEventId: input.stripeLatestBillingEventId,
       stripeLatestCheckoutSessionId: input.stripeLatestCheckoutSessionId,
@@ -107,6 +123,10 @@ export function parseHostedMemberPrivateState(value: unknown): HostedMemberPriva
     memberId: requireNonEmptyString(record.memberId, "Hosted member private state memberId"),
     privyUserId: normalizeNullableString(record.privyUserId),
     schema: HOSTED_MEMBER_PRIVATE_STATE_SCHEMA,
+    signupPhoneCodeSentAt: normalizeIsoTimestamp(
+      typeof record.signupPhoneCodeSentAt === "string" ? record.signupPhoneCodeSentAt : null,
+    ),
+    signupPhoneNumber: normalizeNullableString(record.signupPhoneNumber),
     stripeCustomerId: normalizeNullableString(record.stripeCustomerId),
     stripeLatestBillingEventId: normalizeNullableString(record.stripeLatestBillingEventId),
     stripeLatestCheckoutSessionId: normalizeNullableString(record.stripeLatestCheckoutSessionId),
@@ -144,6 +164,13 @@ function patchNullableString(
   fallback: string | null,
 ): string | null {
   return value === undefined ? fallback : normalizeNullableString(value);
+}
+
+function patchNullableIsoTimestamp(
+  value: string | null | undefined,
+  fallback: string | null,
+): string | null {
+  return value === undefined ? fallback : normalizeIsoTimestamp(value);
 }
 
 function requireIsoTimestamp(value: unknown, label: string): string {

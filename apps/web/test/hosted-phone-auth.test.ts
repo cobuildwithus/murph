@@ -90,6 +90,26 @@ describe("HostedPhoneAuth", () => {
     assert.doesNotMatch(markup, /Preparing your account/);
   });
 
+  it("renders the one-tap invite send-code shortcut without exposing the phone hint", async () => {
+    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedPhoneAuth, {
+        inviteCode: "invite-code",
+        mode: "invite",
+        phoneHint: "*** 4567",
+        privyAppId: "privy-app-id",
+        privyClientId: "privy-client-id",
+      }),
+    );
+
+    assert.match(markup, /Send me a code/);
+    assert.match(markup, /We&#x27;ll text a verification code to the number that messaged Murph\./);
+    assert.match(markup, /Use a different number/);
+    assert.doesNotMatch(markup, /\*\*\* 4567/);
+    assert.doesNotMatch(markup, /Phone number that received this invite/);
+  });
+
   it("keeps the public homepage in a manual resume state for authenticated sessions", async () => {
     mocks.usePrivy.mockReturnValue({
       authenticated: true,

@@ -206,7 +206,7 @@ export function JoinInviteClient({
       <Card className="shadow-sm">
         <CardHeader className="gap-3">
           <Badge variant="secondary" className="w-fit">
-            Invite for {status.invite?.phoneHint ?? "your number"}
+            Text signup
           </Badge>
           <div className="space-y-3">
             <CardTitle className="text-4xl font-bold tracking-tight text-stone-900 md:text-5xl">
@@ -253,8 +253,7 @@ export function JoinInviteClient({
             <Alert className="border-amber-200 bg-amber-50 text-amber-900">
               <AlertTitle>This browser is signed in with a different number.</AlertTitle>
               <AlertDescription>
-                This browser is already signed in with a different number. Sign out first to continue with{" "}
-                {status.invite?.phoneHint ?? "this invite"}.
+                This browser is already signed in with a different number. Sign out first to continue with this invite.
               </AlertDescription>
               <div className="mt-3">
                 <Button
@@ -280,7 +279,6 @@ export function JoinInviteClient({
                     await refreshStatus();
                   }}
                   onCompleted={handlePhoneVerified}
-                  phoneHint={status.invite?.phoneHint ?? null}
                   privyAppId={privyAppId}
                   privyClientId={privyClientId}
                   wrapProvider={false}
@@ -357,7 +355,7 @@ export function JoinInviteClient({
           <CardTitle className="text-base text-stone-800">What happens next</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2.5 text-sm leading-relaxed text-stone-500">
-          <p>1. Confirm the phone number from your invite.</p>
+          <p>1. Verify the number that messaged Murph.</p>
           <p>2. Finish setting up your Murph account.</p>
           <p>3. Complete checkout.</p>
           <p>4. Start using Murph.</p>
@@ -408,7 +406,7 @@ function resolveSubtitle(status: HostedInviteStatusPayload): string {
     case "expired":
       return "Text the Murph number again and we\u2019ll send you a fresh link.";
     case "verify":
-      return `Use ${status.invite?.phoneHint ?? "your number"} to claim this invite and finish joining Murph.`;
+      return "Verify the number that messaged Murph to finish joining.";
     case "checkout":
       return "Your phone is confirmed. Finish checkout to start using Murph.";
     case "blocked":

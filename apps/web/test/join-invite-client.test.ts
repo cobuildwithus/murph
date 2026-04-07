@@ -51,6 +51,29 @@ test("JoinInviteClient keeps the fallback copy when phone auth is ready but the 
   assert.doesNotMatch(markup, /data-hosted-phone-auth=/);
 });
 
+test("verify-stage invite copy stays neutral and does not expose the masked phone hint", () => {
+  const markup = renderToStaticMarkup(
+    createElement(JoinInviteClient, {
+      initialStatus: createStatus({
+        capabilities: {
+          billingReady: true,
+          phoneAuthReady: true,
+        },
+      }),
+      inviteCode: "invite-code",
+      privyAppId: "cm_app_123",
+      shareCode: null,
+      sharePreview: null,
+    }),
+  );
+
+  assert.match(markup, /Text signup/);
+  assert.match(markup, /Verify the number that messaged Murph to finish joining\./);
+  assert.match(markup, /Verify the number that messaged Murph\./);
+  assert.doesNotMatch(markup, /Invite for/);
+  assert.doesNotMatch(markup, /\+1 415 555 2671/);
+});
+
 test("active invite state links to hosted settings with client navigation markup", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInviteClient, {
