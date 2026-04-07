@@ -25,6 +25,7 @@ import {
   optionalDateOnly,
   optionalEnum,
   optionalString,
+  frontmatterLinkObjects,
   resolveOptionalUpsertValue,
   resolveRequiredUpsertValue,
   requireMatchingDocType,
@@ -142,8 +143,8 @@ function canonicalizeAllergyRelations(input: {
   relatedConditionIds?: string[];
 }): Pick<AllergyEntity, "relatedConditionIds" | "links"> {
   const links = normalizeAllergyLinks(
-    (input.links?.length ?? 0) > 0
-      ? [...(input.links ?? [])]
+    input.links !== undefined
+      ? [...input.links]
       : buildAllergyLinksFromFields({
           relatedConditionIds: input.relatedConditionIds,
         }),
@@ -209,6 +210,7 @@ function buildAttributes(record: AllergyEntity): FrontmatterObject {
     reaction: record.reaction,
     recordedOn: record.recordedOn,
     relatedConditionIds: relations.relatedConditionIds,
+    links: frontmatterLinkObjects(relations.links),
     note: record.note,
   }) as FrontmatterObject;
 }
@@ -261,12 +263,17 @@ export async function upsertAllergy(input: UpsertAllergyInput): Promise<UpsertAl
     requestedSlug,
     defaultSlug: normalizeUpsertSelectorSlug(undefined, title) ?? "",
     buildDocument: (target) => {
+      const relatedConditionIds = resolveOptionalUpsertValue(
+        input.relatedConditionIds,
+        existingEntity?.relatedConditionIds,
+        (value) => normalizeRecordIdList(value, "relatedConditionIds", "cond"),
+      );
+      const usesRelationInputs =
+        input.links !== undefined ||
+        input.relatedConditionIds !== undefined;
       const relations = canonicalizeAllergyRelations({
-        relatedConditionIds: resolveOptionalUpsertValue(
-          input.relatedConditionIds,
-          existingEntity?.relatedConditionIds,
-          (value) => normalizeRecordIdList(value, "relatedConditionIds", "cond"),
-        ),
+        links: input.links !== undefined ? input.links : usesRelationInputs ? undefined : existingEntity?.links,
+        relatedConditionIds,
       });
       const entity = stripUndefined({
         schemaVersion: ALLERGY_SCHEMA_VERSION,

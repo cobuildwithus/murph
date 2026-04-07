@@ -25,6 +25,7 @@ export interface UpsertFamilyMemberInput {
   deceased?: boolean;
   note?: string;
   relatedVariantIds?: string[];
+  links?: FamilyMemberLink[];
 }
 
 export interface UpsertFamilyMemberResult {

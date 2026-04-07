@@ -1,4 +1,7 @@
-import type { FoodUpsertPayload } from "@murphai/contracts";
+import {
+  extractBankEntityRegistryLinks,
+  type FoodUpsertPayload,
+} from "@murphai/contracts";
 
 import { VaultError } from "../errors.ts";
 import { generateRecordId } from "../ids.ts";
@@ -14,6 +17,7 @@ import {
   buildDocumentFromAttributes,
   buildMarkdownBody,
   detailList,
+  frontmatterLinkObjects,
   listSection,
   normalizeDomainList,
   normalizeId,
@@ -37,6 +41,8 @@ import type {
   DeleteFoodInput,
   DeleteFoodResult,
   FoodAutoLogDailyRule,
+  FoodLink,
+  FoodLinkType,
   FoodRecord,
   FoodStatus,
   ReadFoodInput,
@@ -71,12 +77,13 @@ function normalizeFoodAutoLogDailyRule(
 }
 
 function buildBody(record: FoodRecord): string {
+  const relations = canonicalizeFoodRelations(record);
   const sections = [
     record.summary ? section("Summary", record.summary) : null,
     record.aliases?.length ? listSection("Aliases", record.aliases) : null,
     record.ingredients?.length ? listSection("Ingredients", record.ingredients) : null,
     listSection("Tags", record.tags),
-    listSection("Attached protocols", record.attachedProtocolIds),
+    listSection("Attached protocols", relations.attachedProtocolIds),
     record.note ? section("Notes", record.note) : null,
   ].filter((sectionValue): sectionValue is string => Boolean(sectionValue));
 
@@ -95,6 +102,76 @@ function buildBody(record: FoodRecord): string {
   );
 }
 
+function normalizeFoodLinkType(value: string): FoodLinkType | null {
+  return value === "related_protocol" ? value : null;
+}
+
+function compareFoodLinks(left: FoodLink, right: FoodLink): number {
+  return left.targetId.localeCompare(right.targetId);
+}
+
+function buildFoodLinksFromFields(input: {
+  attachedProtocolIds?: string[];
+}): FoodLink[] {
+  return (input.attachedProtocolIds ?? []).map((targetId) => ({
+    type: "related_protocol",
+    targetId,
+  }) satisfies FoodLink);
+}
+
+function normalizeFoodLinks(rawLinks: readonly FoodLink[]): FoodLink[] {
+  const sortedLinks = [...rawLinks].sort(compareFoodLinks);
+  const links: FoodLink[] = [];
+  const seen = new Set<string>();
+
+  for (const link of sortedLinks) {
+    const dedupeKey = `${link.type}:${link.targetId}`;
+    if (seen.has(dedupeKey)) {
+      continue;
+    }
+
+    seen.add(dedupeKey);
+    links.push(link);
+  }
+
+  return links;
+}
+
+function parseFoodLinks(attributes: FrontmatterObject): FoodLink[] {
+  return normalizeFoodLinks(
+    extractBankEntityRegistryLinks("food", attributes).flatMap((link) => {
+      const type = normalizeFoodLinkType(link.type);
+      return type ? [{ type, targetId: link.targetId } satisfies FoodLink] : [];
+    }),
+  );
+}
+
+function foodRelationsFromLinks(
+  links: readonly FoodLink[],
+): Pick<FoodRecord, "attachedProtocolIds" | "links"> {
+  const attachedProtocolIds = links.map((link) => link.targetId);
+
+  return {
+    attachedProtocolIds: attachedProtocolIds.length > 0 ? attachedProtocolIds : undefined,
+    links: [...links],
+  };
+}
+
+function canonicalizeFoodRelations(input: {
+  links?: readonly FoodLink[];
+  attachedProtocolIds?: string[];
+}): Pick<FoodRecord, "attachedProtocolIds" | "links"> {
+  const links = normalizeFoodLinks(
+    input.links !== undefined
+      ? [...input.links]
+      : buildFoodLinksFromFields({
+          attachedProtocolIds: input.attachedProtocolIds,
+        }),
+  );
+
+  return foodRelationsFromLinks(links);
+}
+
 function parseFoodRecord(
   attributes: FrontmatterObject,
   relativePath: string,
@@ -107,6 +184,11 @@ function parseFoodRecord(
     "VAULT_INVALID_FOOD",
     "Food registry document has an unexpected shape.",
   );
+
+  const relations = canonicalizeFoodRelations({
+    links: parseFoodLinks(attributes),
+    attachedProtocolIds: normalizeRecordIdList(attributes.attachedProtocolIds, "attachedProtocolIds", "prot"),
+  });
 
   return stripUndefined({
     schemaVersion: FOOD_SCHEMA_VERSION,
@@ -125,7 +207,8 @@ function parseFoodRecord(
     ingredients: normalizeUniqueTextList(attributes.ingredients, "ingredients"),
     tags: normalizeDomainList(attributes.tags, "tags"),
     note: optionalString(attributes.note, "note", 4000),
-    attachedProtocolIds: normalizeRecordIdList(attributes.attachedProtocolIds, "attachedProtocolIds", "prot"),
+    attachedProtocolIds: relations.attachedProtocolIds,
+    links: relations.links,
     autoLogDaily: normalizeFoodAutoLogDailyRule(attributes.autoLogDaily),
     relativePath,
     markdown,
@@ -133,6 +216,8 @@ function parseFoodRecord(
 }
 
 export function foodRecordToBasePayload(record: FoodRecord): Omit<FoodUpsertPayload, "foodId"> {
+  const relations = canonicalizeFoodRelations(record);
+
   return stripUndefined({
     slug: record.slug,
     title: record.title,
@@ -147,7 +232,8 @@ export function foodRecordToBasePayload(record: FoodRecord): Omit<FoodUpsertPayl
     ingredients: record.ingredients,
     tags: record.tags,
     note: record.note,
-    attachedProtocolIds: record.attachedProtocolIds,
+    attachedProtocolIds: relations.attachedProtocolIds,
+    links: frontmatterLinkObjects(relations.links),
     autoLogDaily: record.autoLogDaily,
   }) as Omit<FoodUpsertPayload, "foodId">;
 }
@@ -158,7 +244,7 @@ function buildAttributes(record: FoodRecord): FrontmatterObject {
     docType: FOOD_DOC_TYPE,
     foodId: record.foodId,
     ...foodRecordToBasePayload(record),
-  }) as unknown as FrontmatterObject;
+  }) as FrontmatterObject;
 }
 
 const foodRegistryApi = createMarkdownRegistryApi<FoodRecord>({
@@ -211,6 +297,18 @@ export async function upsertFood(input: UpsertFoodInput): Promise<UpsertFoodResu
     defaultSlug: normalizeUpsertSelectorSlug(undefined, title) ?? "",
     allowSlugUpdate: input.allowSlugRename === true,
     buildDocument: (target) => {
+      const attachedProtocolIds = resolveOptionalUpsertValue(
+        input.attachedProtocolIds,
+        existingRecord?.attachedProtocolIds,
+        (value) => normalizeRecordIdList(value, "attachedProtocolIds", "prot"),
+      );
+      const usesRelationInputs =
+        input.links !== undefined ||
+        input.attachedProtocolIds !== undefined;
+      const relations = canonicalizeFoodRelations({
+        links: input.links !== undefined ? input.links : usesRelationInputs ? undefined : existingRecord?.links,
+        attachedProtocolIds,
+      });
       const attributes = buildAttributes(
         stripUndefined({
           schemaVersion: FOOD_SCHEMA_VERSION,
@@ -249,11 +347,8 @@ export async function upsertFood(input: UpsertFoodInput): Promise<UpsertFoodResu
           note: resolveOptionalUpsertValue(input.note, existingRecord?.note, (value) =>
             optionalString(value, "note", 4000),
           ),
-          attachedProtocolIds: resolveOptionalUpsertValue(
-            input.attachedProtocolIds,
-            existingRecord?.attachedProtocolIds,
-            (value) => normalizeRecordIdList(value, "attachedProtocolIds", "prot"),
-          ),
+          attachedProtocolIds: relations.attachedProtocolIds,
+          links: relations.links,
           autoLogDaily: resolveOptionalUpsertValue(
             input.autoLogDaily,
             existingRecord?.autoLogDaily,

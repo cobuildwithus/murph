@@ -4,6 +4,7 @@ import {
 
 import {
   compareCanonicalEntities,
+  isCanonicalEntityLinkType,
   linkTargetIds,
   normalizeCanonicalDate,
   normalizeCanonicalLinks,
@@ -170,12 +171,28 @@ export function projectHistoryEntity(
     return null;
   }
 
-  const links = normalizeCanonicalLinks(
-    firstStringArray(source, ["relatedIds"]).map((targetId) => ({
-      type: "related_to" as const,
-      targetId,
-    })),
-  );
+  const explicitLinks = source.links;
+  const links =
+    Array.isArray(explicitLinks)
+      ? normalizeCanonicalLinks(
+          explicitLinks.flatMap((entry) => {
+            const link = asObject(entry);
+            const type = link ? firstString(link, ["type"]) : null;
+            const targetId = link ? firstString(link, ["targetId"]) : null;
+
+            if (!type || !targetId || !isCanonicalEntityLinkType(type)) {
+              return [];
+            }
+
+            return [{ type, targetId }];
+          }),
+        )
+      : normalizeCanonicalLinks(
+          firstStringArray(source, ["relatedIds"]).map((targetId) => ({
+            type: "related_to" as const,
+            targetId,
+          })),
+        );
   const tags = firstStringArray(source, ["tags"]);
   const status =
     kind === "test"

@@ -198,6 +198,41 @@ test("protocol query projection merges mixed relation alias arrays into normaliz
   ]);
 });
 
+test("explicit registry links remain authoritative over legacy relation arrays", () => {
+  const attributes = {
+    protocolId: "prot_01JNY0B2W4VG5C2A0G9S8M7R6Z",
+    slug: "cleared-protocol-links",
+    title: "Cleared protocol links",
+    kind: "supplement",
+    status: "active",
+    startedOn: "2026-03-12",
+    links: [],
+    relatedGoalIds: ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R"],
+    relatedConditionIds: ["cond_01JNY0B2W4VG5C2A0G9S8M7R6R"],
+    relatedProtocolIds: ["prot_01JNY0B2W4VG5C2A0G9S8M7R6Y"],
+  } satisfies Record<string, unknown>;
+
+  assert.deepEqual(extractHealthEntityRegistryLinks("protocol", attributes), []);
+  assert.deepEqual(extractHealthEntityRegistryRelatedIds("protocol", attributes), []);
+
+  const protocolRecord = toRegistryRecord(
+    {
+      relativePath: "bank/protocols/supplements/cleared-protocol-links.md",
+      markdown: "# Cleared protocol links",
+      body: "# Cleared protocol links",
+      attributes,
+    },
+    protocolRegistryDefinition,
+  );
+
+  assert.ok(protocolRecord);
+
+  const entity = projectRegistryEntity("protocol", protocolRecord!);
+
+  assert.deepEqual(entity.links, []);
+  assert.deepEqual(entity.relatedIds, []);
+});
+
 test("protocol query projection round-trips shared protocol relation and ingredient metadata", () => {
   const document: MarkdownDocumentRecord = {
     relativePath: "bank/protocols/supplements/sleep/magnesium-glycinate.md",
@@ -257,6 +292,7 @@ test("protocol query projection round-trips shared protocol relation and ingredi
   ]);
   assert.deepEqual(protocolRecord?.entity.relatedGoalIds, ["goal_01JNY0B2W4VG5C2A0G9S8M7R6Q"]);
   assert.deepEqual(protocolRecord?.entity.relatedConditionIds, ["cond_01JNY0B2W4VG5C2A0G9S8M7R6R"]);
+  assert.deepEqual(protocolRecord?.entity.relatedProtocolIds, ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"]);
   assert.equal(protocolRecord?.entity.group, "supplements/sleep");
 
   const entity = projectRegistryEntity("protocol", protocolRecord!);
@@ -266,6 +302,7 @@ test("protocol query projection round-trips shared protocol relation and ingredi
   assert.deepEqual(roundTripped?.entity.ingredients, protocolRecord?.entity.ingredients);
   assert.deepEqual(roundTripped?.entity.relatedGoalIds, ["goal_01JNY0B2W4VG5C2A0G9S8M7R6Q"]);
   assert.deepEqual(roundTripped?.entity.relatedConditionIds, ["cond_01JNY0B2W4VG5C2A0G9S8M7R6R"]);
+  assert.deepEqual(roundTripped?.entity.relatedProtocolIds, ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"]);
   assert.equal(roundTripped?.entity.group, "supplements/sleep");
 });
 
@@ -802,15 +839,22 @@ test("bank entity projections normalize food and workout format metadata through
         activityType: "strength-training",
         durationMinutes: 45,
         templateText: "45 min push day with incline bench.",
-        strengthExercises: [
-          {
-            exercise: "incline bench",
-            setCount: 4,
-            repsPerSet: 10,
-            load: 65,
-            loadUnit: "lb",
-          },
-        ],
+        template: {
+          routineNote: "45 min push day with incline bench.",
+          exercises: [
+            {
+              name: "incline bench",
+              order: 1,
+              mode: "weight_reps",
+              plannedSets: [
+                { order: 1, targetReps: 10, targetWeight: 65, targetWeightUnit: "lb" },
+                { order: 2, targetReps: 10, targetWeight: 65, targetWeightUnit: "lb" },
+                { order: 3, targetReps: 10, targetWeight: 65, targetWeightUnit: "lb" },
+                { order: 4, targetReps: 10, targetWeight: 65, targetWeightUnit: "lb" },
+              ],
+            },
+          ],
+        },
       },
     },
     workoutFormatRegistryDefinition,
@@ -849,6 +893,10 @@ test("recipe and provider bank records round-trip through the shared registry se
         title: "Salmon rice bowl",
         status: "saved",
         servings: 2,
+        links: [
+          { type: "supports_goal", targetId: "goal_01JNY0B2W4VG5C2A0G9S8M7R6Q" },
+          { type: "addresses_condition", targetId: "cond_01JNY0B2W4VG5C2A0G9S8M7R6R" },
+        ],
         relatedGoalIds: ["goal_01JNY0B2W4VG5C2A0G9S8M7R6Q"],
         relatedConditionIds: ["cond_01JNY0B2W4VG5C2A0G9S8M7R6R"],
       },
@@ -880,6 +928,10 @@ test("recipe and provider bank records round-trip through the shared registry se
 
   assert.equal(recipeEntity.recordClass, "bank");
   assert.equal(providerEntity.recordClass, "bank");
+  assert.deepEqual(recipeEntity.links, [
+    { type: "supports_goal", targetId: "goal_01JNY0B2W4VG5C2A0G9S8M7R6Q" },
+    { type: "addresses_condition", targetId: "cond_01JNY0B2W4VG5C2A0G9S8M7R6R" },
+  ]);
   assert.deepEqual(recipeEntity.relatedIds, [
     "goal_01JNY0B2W4VG5C2A0G9S8M7R6Q",
     "cond_01JNY0B2W4VG5C2A0G9S8M7R6R",

@@ -1,5 +1,6 @@
 import {
   deriveProtocolGroupFromRelativePath,
+  extractHealthEntityRegistryLinks,
   type ProtocolUpsertPayload,
 } from "@murphai/contracts";
 
@@ -23,6 +24,7 @@ import {
 import {
   buildMarkdownBody,
   detailList,
+  frontmatterLinkObjects,
   requireObject,
   listSection,
   normalizeGroupPath,
@@ -44,6 +46,8 @@ import {
 
 import type { FrontmatterObject } from "../types.ts";
 import type {
+  ProtocolLink,
+  ProtocolLinkType,
   ReadProtocolItemInput,
   ProtocolItemEntity,
   ProtocolItemStoredDocument,
@@ -122,6 +126,7 @@ function formatIngredientLine(ingredient: SupplementIngredientRecord): string {
 }
 
 function buildBody(record: ProtocolItemEntity): string {
+  const relations = canonicalizeProtocolRelations(record);
   const sections = [
     (record.brand || record.manufacturer || record.servingSize)
       ? section(
@@ -148,8 +153,9 @@ function buildBody(record: ProtocolItemEntity): string {
           record.ingredients.map((ingredient) => formatIngredientLine(ingredient)),
         )
       : null,
-    listSection("Related Goals", record.relatedGoalIds),
-    listSection("Related Conditions", record.relatedConditionIds),
+    listSection("Related Goals", relations.relatedGoalIds),
+    listSection("Related Conditions", relations.relatedConditionIds),
+    listSection("Related Protocols", relations.relatedProtocolIds),
   ].filter((sectionValue): sectionValue is string => Boolean(sectionValue));
 
   return buildMarkdownBody(
@@ -164,6 +170,130 @@ function buildBody(record: ProtocolItemEntity): string {
     ]),
     sections,
   );
+}
+
+function normalizeProtocolLinkType(value: string): ProtocolLinkType | null {
+  switch (value) {
+    case "supports_goal":
+    case "addresses_condition":
+    case "related_protocol":
+      return value;
+    default:
+      return null;
+  }
+}
+
+function compareProtocolLinks(left: ProtocolLink, right: ProtocolLink): number {
+  const order: Record<ProtocolLinkType, number> = {
+    supports_goal: 0,
+    addresses_condition: 1,
+    related_protocol: 2,
+  };
+
+  return order[left.type] - order[right.type] || left.targetId.localeCompare(right.targetId);
+}
+
+function buildProtocolLinksFromFields(input: {
+  relatedGoalIds?: string[];
+  relatedConditionIds?: string[];
+  relatedProtocolIds?: string[];
+}): ProtocolLink[] {
+  return [
+    ...(input.relatedGoalIds ?? []).map((targetId) => ({
+      type: "supports_goal",
+      targetId,
+    }) satisfies ProtocolLink),
+    ...(input.relatedConditionIds ?? []).map((targetId) => ({
+      type: "addresses_condition",
+      targetId,
+    }) satisfies ProtocolLink),
+    ...(input.relatedProtocolIds ?? []).map((targetId) => ({
+      type: "related_protocol",
+      targetId,
+    }) satisfies ProtocolLink),
+  ];
+}
+
+function normalizeProtocolLinks(rawLinks: readonly ProtocolLink[]): ProtocolLink[] {
+  const sortedLinks = [...rawLinks].sort(compareProtocolLinks);
+  const links: ProtocolLink[] = [];
+  const seen = new Set<string>();
+
+  for (const link of sortedLinks) {
+    const dedupeKey = `${link.type}:${link.targetId}`;
+    if (seen.has(dedupeKey)) {
+      continue;
+    }
+
+    seen.add(dedupeKey);
+    links.push(link);
+  }
+
+  return links;
+}
+
+function parseProtocolLinks(attributes: FrontmatterObject): ProtocolLink[] {
+  const protocolSelfId =
+    typeof attributes.protocolId === "string" && attributes.protocolId.trim().length > 0
+      ? attributes.protocolId.trim()
+      : null;
+
+  return normalizeProtocolLinks(
+    extractHealthEntityRegistryLinks("protocol", attributes)
+      .filter((link) =>
+        !(
+          protocolSelfId &&
+          link.type === "related_protocol" &&
+          link.targetId === protocolSelfId &&
+          link.sourceKeys.length === 1 &&
+          link.sourceKeys[0] === "protocolId"
+        )
+      )
+      .flatMap((link) => {
+      const type = normalizeProtocolLinkType(link.type);
+      return type ? [{ type, targetId: link.targetId } satisfies ProtocolLink] : [];
+      }),
+  );
+}
+
+function protocolRelationsFromLinks(
+  links: readonly ProtocolLink[],
+): Pick<ProtocolItemEntity, "relatedGoalIds" | "relatedConditionIds" | "relatedProtocolIds" | "links"> {
+  const relatedGoalIds = links
+    .filter((link) => link.type === "supports_goal")
+    .map((link) => link.targetId);
+  const relatedConditionIds = links
+    .filter((link) => link.type === "addresses_condition")
+    .map((link) => link.targetId);
+  const relatedProtocolIds = links
+    .filter((link) => link.type === "related_protocol")
+    .map((link) => link.targetId);
+
+  return {
+    relatedGoalIds: relatedGoalIds.length > 0 ? relatedGoalIds : undefined,
+    relatedConditionIds: relatedConditionIds.length > 0 ? relatedConditionIds : undefined,
+    relatedProtocolIds: relatedProtocolIds.length > 0 ? relatedProtocolIds : undefined,
+    links: [...links],
+  };
+}
+
+function canonicalizeProtocolRelations(input: {
+  links?: readonly ProtocolLink[];
+  relatedGoalIds?: string[];
+  relatedConditionIds?: string[];
+  relatedProtocolIds?: string[];
+}): Pick<ProtocolItemEntity, "relatedGoalIds" | "relatedConditionIds" | "relatedProtocolIds" | "links"> {
+  const links = normalizeProtocolLinks(
+    input.links !== undefined
+      ? [...input.links]
+      : buildProtocolLinksFromFields({
+          relatedGoalIds: input.relatedGoalIds,
+          relatedConditionIds: input.relatedConditionIds,
+          relatedProtocolIds: input.relatedProtocolIds,
+        }),
+  );
+
+  return protocolRelationsFromLinks(links);
 }
 
 function requireProtocolGroupFromRelativePath(relativePath: string): string {
@@ -194,6 +324,13 @@ function parseProtocolItemRecord(
     throw new VaultError("VAULT_INVALID_PROTOCOL", "Protocol registry document is missing startedOn.");
   }
 
+  const relations = canonicalizeProtocolRelations({
+    links: parseProtocolLinks(attributes),
+    relatedGoalIds: normalizeRecordIdList(attributes.relatedGoalIds, "relatedGoalIds", "goal"),
+    relatedConditionIds: normalizeRecordIdList(attributes.relatedConditionIds, "relatedConditionIds", "cond"),
+    relatedProtocolIds: normalizeRecordIdList(attributes.relatedProtocolIds, "relatedProtocolIds", "prot"),
+  });
+
   const entity = stripUndefined({
     schemaVersion: PROTOCOL_SCHEMA_VERSION,
     docType: PROTOCOL_DOC_TYPE,
@@ -212,8 +349,10 @@ function parseProtocolItemRecord(
     manufacturer: optionalString(attributes.manufacturer, "manufacturer", 160),
     servingSize: optionalString(attributes.servingSize, "servingSize", 160),
     ingredients: normalizeSupplementIngredients(attributes.ingredients),
-    relatedGoalIds: normalizeRecordIdList(attributes.relatedGoalIds, "relatedGoalIds", "goal"),
-    relatedConditionIds: normalizeRecordIdList(attributes.relatedConditionIds, "relatedConditionIds", "cond"),
+    relatedGoalIds: relations.relatedGoalIds,
+    relatedConditionIds: relations.relatedConditionIds,
+    relatedProtocolIds: relations.relatedProtocolIds,
+    links: relations.links,
     group: requireProtocolGroupFromRelativePath(relativePath),
   }) as ProtocolItemEntity;
 
@@ -229,6 +368,8 @@ function parseProtocolItemRecord(
 export function protocolRecordToUpsertPayload(
   record: ProtocolItemEntity,
 ): Omit<ProtocolUpsertPayload, "protocolId"> {
+  const relations = canonicalizeProtocolRelations(record);
+
   return stripUndefined({
     slug: record.slug,
     title: record.title,
@@ -253,8 +394,10 @@ export function protocolRecordToUpsertPayload(
         note: ingredient.note,
       }),
     ),
-    relatedGoalIds: record.relatedGoalIds,
-    relatedConditionIds: record.relatedConditionIds,
+    relatedGoalIds: relations.relatedGoalIds,
+    relatedConditionIds: relations.relatedConditionIds,
+    relatedProtocolIds: relations.relatedProtocolIds,
+    links: frontmatterLinkObjects(relations.links),
     group: record.group,
   }) as Omit<ProtocolUpsertPayload, "protocolId">;
 }
@@ -401,6 +544,26 @@ export async function upsertProtocolItem(
     getRecordRelativePath: (record) => record.document.relativePath,
     createRecordId: () => generateRecordId("prot"),
   });
+  const relatedGoalIds = resolveOptionalUpsertValue(
+    input.relatedGoalIds,
+    existingEntity?.relatedGoalIds,
+    (value) => normalizeRecordIdList(value, "relatedGoalIds", "goal"),
+  );
+  const relatedConditionIds = resolveOptionalUpsertValue(
+    input.relatedConditionIds,
+    existingEntity?.relatedConditionIds,
+    (value) => normalizeRecordIdList(value, "relatedConditionIds", "cond"),
+  );
+  const relatedProtocolIds = resolveOptionalUpsertValue(
+    input.relatedProtocolIds,
+    existingEntity?.relatedProtocolIds,
+    (value) => normalizeRecordIdList(value, "relatedProtocolIds", "prot"),
+  );
+  const usesRelationInputs =
+    input.links !== undefined ||
+    input.relatedGoalIds !== undefined ||
+    input.relatedConditionIds !== undefined ||
+    input.relatedProtocolIds !== undefined;
   const attributes = buildAttributes(
     validateProtocolTiming(
       stripUndefined({
@@ -443,16 +606,12 @@ export async function upsertProtocolItem(
         ingredients: resolveOptionalUpsertValue(input.ingredients, existingEntity?.ingredients, (value) =>
           normalizeSupplementIngredients(value),
         ),
-        relatedGoalIds: resolveOptionalUpsertValue(
-          input.relatedGoalIds,
-          existingEntity?.relatedGoalIds,
-          (value) => normalizeRecordIdList(value, "relatedGoalIds", "goal"),
-        ),
-        relatedConditionIds: resolveOptionalUpsertValue(
-          input.relatedConditionIds,
-          existingEntity?.relatedConditionIds,
-          (value) => normalizeRecordIdList(value, "relatedConditionIds", "cond"),
-        ),
+        ...canonicalizeProtocolRelations({
+          links: input.links !== undefined ? input.links : usesRelationInputs ? undefined : existingEntity?.links,
+          relatedGoalIds,
+          relatedConditionIds,
+          relatedProtocolIds,
+        }),
       }) as ProtocolItemEntity,
     ),
   );

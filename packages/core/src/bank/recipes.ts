@@ -1,4 +1,7 @@
-import type { RecipeUpsertPayload } from "@murphai/contracts";
+import {
+  extractBankEntityRegistryLinks,
+  type RecipeUpsertPayload,
+} from "@murphai/contracts";
 
 import { generateRecordId } from "../ids.ts";
 import { createMarkdownRegistryApi } from "../registry/api.ts";
@@ -13,6 +16,7 @@ import {
   buildDocumentFromAttributes,
   buildMarkdownBody,
   detailList,
+  frontmatterLinkObjects,
   listSection,
   normalizeDomainList,
   normalizeRecordIdList,
@@ -37,6 +41,8 @@ import type {
   DeleteRecipeInput,
   DeleteRecipeResult,
   ReadRecipeInput,
+  RecipeLink,
+  RecipeLinkType,
   RecipeRecord,
   RecipeStatus,
   UpsertRecipeInput,
@@ -60,13 +66,14 @@ function formatMinutes(value: number | undefined): string | undefined {
 }
 
 function buildBody(record: RecipeRecord): string {
+  const relations = canonicalizeRecipeRelations(record);
   const sections = [
     record.summary ? section("Summary", record.summary) : null,
     record.ingredients?.length ? listSection("Ingredients", record.ingredients) : null,
     record.steps?.length ? section("Steps", numberedList(record.steps)) : null,
     listSection("Tags", record.tags),
-    listSection("Related Goals", record.relatedGoalIds),
-    listSection("Related Conditions", record.relatedConditionIds),
+    listSection("Related Goals", relations.relatedGoalIds),
+    listSection("Related Conditions", relations.relatedConditionIds),
   ].filter((sectionValue): sectionValue is string => Boolean(sectionValue));
 
   return buildMarkdownBody(
@@ -85,6 +92,102 @@ function buildBody(record: RecipeRecord): string {
   );
 }
 
+function normalizeRecipeLinkType(value: string): RecipeLinkType | null {
+  switch (value) {
+    case "supports_goal":
+    case "addresses_condition":
+      return value;
+    default:
+      return null;
+  }
+}
+
+function compareRecipeLinks(left: RecipeLink, right: RecipeLink): number {
+  const order: Record<RecipeLinkType, number> = {
+    supports_goal: 0,
+    addresses_condition: 1,
+  };
+
+  return order[left.type] - order[right.type] || left.targetId.localeCompare(right.targetId);
+}
+
+function buildRecipeLinksFromFields(input: {
+  relatedGoalIds?: string[];
+  relatedConditionIds?: string[];
+}): RecipeLink[] {
+  return [
+    ...(input.relatedGoalIds ?? []).map((targetId) => ({
+      type: "supports_goal",
+      targetId,
+    }) satisfies RecipeLink),
+    ...(input.relatedConditionIds ?? []).map((targetId) => ({
+      type: "addresses_condition",
+      targetId,
+    }) satisfies RecipeLink),
+  ];
+}
+
+function normalizeRecipeLinks(rawLinks: readonly RecipeLink[]): RecipeLink[] {
+  const sortedLinks = [...rawLinks].sort(compareRecipeLinks);
+  const links: RecipeLink[] = [];
+  const seen = new Set<string>();
+
+  for (const link of sortedLinks) {
+    const dedupeKey = `${link.type}:${link.targetId}`;
+    if (seen.has(dedupeKey)) {
+      continue;
+    }
+
+    seen.add(dedupeKey);
+    links.push(link);
+  }
+
+  return links;
+}
+
+function parseRecipeLinks(attributes: FrontmatterObject): RecipeLink[] {
+  return normalizeRecipeLinks(
+    extractBankEntityRegistryLinks("recipe", attributes).flatMap((link) => {
+      const type = normalizeRecipeLinkType(link.type);
+      return type ? [{ type, targetId: link.targetId } satisfies RecipeLink] : [];
+    }),
+  );
+}
+
+function recipeRelationsFromLinks(
+  links: readonly RecipeLink[],
+): Pick<RecipeRecord, "relatedGoalIds" | "relatedConditionIds" | "links"> {
+  const relatedGoalIds = links
+    .filter((link) => link.type === "supports_goal")
+    .map((link) => link.targetId);
+  const relatedConditionIds = links
+    .filter((link) => link.type === "addresses_condition")
+    .map((link) => link.targetId);
+
+  return {
+    relatedGoalIds: relatedGoalIds.length > 0 ? relatedGoalIds : undefined,
+    relatedConditionIds: relatedConditionIds.length > 0 ? relatedConditionIds : undefined,
+    links: [...links],
+  };
+}
+
+function canonicalizeRecipeRelations(input: {
+  links?: readonly RecipeLink[];
+  relatedGoalIds?: string[];
+  relatedConditionIds?: string[];
+}): Pick<RecipeRecord, "relatedGoalIds" | "relatedConditionIds" | "links"> {
+  const links = normalizeRecipeLinks(
+    input.links !== undefined
+      ? [...input.links]
+      : buildRecipeLinksFromFields({
+          relatedGoalIds: input.relatedGoalIds,
+          relatedConditionIds: input.relatedConditionIds,
+        }),
+  );
+
+  return recipeRelationsFromLinks(links);
+}
+
 function parseRecipeRecord(
   attributes: FrontmatterObject,
   relativePath: string,
@@ -97,6 +200,10 @@ function parseRecipeRecord(
     "VAULT_INVALID_RECIPE",
     "Recipe registry document has an unexpected shape.",
   );
+
+  const relations = canonicalizeRecipeRelations({
+    links: parseRecipeLinks(attributes),
+  });
 
   return stripUndefined({
     schemaVersion: RECIPE_SCHEMA_VERSION,
@@ -116,8 +223,9 @@ function parseRecipeRecord(
     tags: normalizeDomainList(attributes.tags, "tags"),
     ingredients: normalizeUniqueTextList(attributes.ingredients, "ingredients"),
     steps: normalizeUniqueTextList(attributes.steps, "steps"),
-    relatedGoalIds: normalizeRecordIdList(attributes.relatedGoalIds, "relatedGoalIds", "goal"),
-    relatedConditionIds: normalizeRecordIdList(attributes.relatedConditionIds, "relatedConditionIds", "cond"),
+    relatedGoalIds: relations.relatedGoalIds,
+    relatedConditionIds: relations.relatedConditionIds,
+    links: relations.links,
     relativePath,
     markdown,
   });
@@ -126,6 +234,8 @@ function parseRecipeRecord(
 export function recipeRecordToUpsertPayload(
   record: RecipeRecord,
 ): Omit<RecipeUpsertPayload, "recipeId"> {
+  const relations = canonicalizeRecipeRelations(record);
+
   return stripUndefined({
     slug: record.slug,
     title: record.title,
@@ -141,8 +251,9 @@ export function recipeRecordToUpsertPayload(
     tags: record.tags,
     ingredients: record.ingredients,
     steps: record.steps,
-    relatedGoalIds: record.relatedGoalIds,
-    relatedConditionIds: record.relatedConditionIds,
+    relatedGoalIds: relations.relatedGoalIds,
+    relatedConditionIds: relations.relatedConditionIds,
+    links: frontmatterLinkObjects(relations.links),
   }) as Omit<RecipeUpsertPayload, "recipeId">;
 }
 
@@ -225,6 +336,25 @@ export async function upsertRecipe(input: UpsertRecipeInput): Promise<UpsertReci
     defaultSlug: normalizeUpsertSelectorSlug(undefined, title) ?? "",
     allowSlugUpdate: input.allowSlugRename === true,
     buildDocument: (target) => {
+      const relatedGoalIds = resolveOptionalUpsertValue(
+        input.relatedGoalIds,
+        existingRecord?.relatedGoalIds,
+        (value) => normalizeRecordIdList(value, "relatedGoalIds", "goal"),
+      );
+      const relatedConditionIds = resolveOptionalUpsertValue(
+        input.relatedConditionIds,
+        existingRecord?.relatedConditionIds,
+        (value) => normalizeRecordIdList(value, "relatedConditionIds", "cond"),
+      );
+      const usesRelationInputs =
+        input.links !== undefined ||
+        input.relatedGoalIds !== undefined ||
+        input.relatedConditionIds !== undefined;
+      const relations = canonicalizeRecipeRelations({
+        links: input.links !== undefined ? input.links : usesRelationInputs ? undefined : existingRecord?.links,
+        relatedGoalIds,
+        relatedConditionIds,
+      });
       const attributes = buildAttributes(
         stripUndefined({
           schemaVersion: RECIPE_SCHEMA_VERSION,
@@ -260,14 +390,9 @@ export async function upsertRecipe(input: UpsertRecipeInput): Promise<UpsertReci
           steps: resolveOptionalUpsertValue(input.steps, existingRecord?.steps, (value) =>
             normalizeUniqueTextList(value, "steps"),
           ),
-          relatedGoalIds: resolveOptionalUpsertValue(input.relatedGoalIds, existingRecord?.relatedGoalIds, (value) =>
-            normalizeRecordIdList(value, "relatedGoalIds", "goal"),
-          ),
-          relatedConditionIds: resolveOptionalUpsertValue(
-            input.relatedConditionIds,
-            existingRecord?.relatedConditionIds,
-            (value) => normalizeRecordIdList(value, "relatedConditionIds", "cond"),
-          ),
+          relatedGoalIds: relations.relatedGoalIds,
+          relatedConditionIds: relations.relatedConditionIds,
+          links: relations.links,
         }) as RecipeRecord,
       );
 

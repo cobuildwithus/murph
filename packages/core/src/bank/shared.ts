@@ -22,6 +22,19 @@ export function stripUndefined<TRecord>(record: TRecord): TRecord {
   ) as TRecord;
 }
 
+export function frontmatterLinkObjects<TLink extends { type: string; targetId: string }>(
+  links: readonly TLink[] | undefined,
+): FrontmatterObject[] | undefined {
+  if (!links || links.length === 0) {
+    return undefined;
+  }
+
+  return links.map((link) => ({
+    type: link.type,
+    targetId: link.targetId,
+  }) satisfies FrontmatterObject);
+}
+
 export function requireObject(value: unknown, fieldName: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new VaultError("VAULT_INVALID_INPUT", `${fieldName} must be an object.`);

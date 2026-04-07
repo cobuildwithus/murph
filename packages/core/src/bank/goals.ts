@@ -18,6 +18,7 @@ import {
 import {
   buildMarkdownBody,
   detailList,
+  frontmatterLinkObjects,
   listSection,
   normalizeDateOnly,
   normalizeDomainList,
@@ -190,8 +191,8 @@ function canonicalizeGoalRelations(input: {
   relatedExperimentIds?: string[];
 }): Pick<GoalEntity, "parentGoalId" | "relatedGoalIds" | "relatedExperimentIds" | "links"> {
   const links = normalizeGoalLinks(
-    (input.links?.length ?? 0) > 0
-      ? [...(input.links ?? [])]
+    input.links !== undefined
+      ? [...input.links]
       : buildGoalLinksFromFields({
           parentGoalId: input.parentGoalId,
           relatedGoalIds: input.relatedGoalIds,
@@ -298,6 +299,7 @@ function buildAttributes(record: GoalEntity): FrontmatterObject {
     parentGoalId: relations.parentGoalId,
     relatedGoalIds: relations.relatedGoalIds,
     relatedExperimentIds: relations.relatedExperimentIds,
+    links: frontmatterLinkObjects(relations.links),
     domains: record.domains,
   }) as FrontmatterObject;
 }
@@ -399,10 +401,17 @@ export async function upsertGoal(input: UpsertGoalInput): Promise<UpsertGoalResu
           parentGoalId,
           relatedGoalIds,
           relatedExperimentIds,
+          links:
+            input.links !== undefined
+              ? input.links
+              : input.parentGoalId !== undefined ||
+                  input.relatedGoalIds !== undefined ||
+                  input.relatedExperimentIds !== undefined
+                ? undefined
+                : existingEntity?.links,
           domains: resolveOptionalUpsertValue(input.domains, existingEntity?.domains, (value) =>
             normalizeDomainList(value, "domains"),
           ),
-          links: [],
         }) as GoalEntity,
       );
       const attributes = buildAttributes(entity);

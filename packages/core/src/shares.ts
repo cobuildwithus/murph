@@ -17,9 +17,12 @@ import { readRecipe, recipeRecordToUpsertPayload, upsertRecipe } from "./bank/re
 
 import type { DateInput } from "./types.ts";
 import type {
+  FoodLink,
   FoodRecord,
+  ProtocolLink,
   ProtocolItemEntity,
   ProtocolItemStoredDocument,
+  RecipeLink,
   RecipeRecord,
 } from "./bank/types.ts";
 
@@ -234,6 +237,7 @@ export async function importSharePackIntoVault(
     const result = await upsertProtocolItem({
       vaultRoot: input.vaultRoot,
       ...payload,
+      links: normalizeProtocolLinks(payload.links),
       protocolId,
       slug: buildImportedSlug(payload.slug ?? payload.title, protocolId),
     });
@@ -252,6 +256,7 @@ export async function importSharePackIntoVault(
     const result = await upsertRecipe({
       vaultRoot: input.vaultRoot,
       ...payload,
+      links: normalizeRecipeLinks(payload.links),
       recipeId,
       slug: buildImportedSlug(payload.slug ?? payload.title, recipeId),
     });
@@ -288,6 +293,7 @@ export async function importSharePackIntoVault(
     const result = await upsertFood({
       vaultRoot: input.vaultRoot,
       ...payload,
+      links: normalizeFoodLinks(payload.links),
       foodId,
       slug: buildImportedSlug(payload.slug ?? payload.title, foodId),
     });
@@ -316,6 +322,80 @@ export async function importSharePackIntoVault(
     recipes,
     meal,
   };
+}
+
+function normalizeFoodLinks(
+  links: readonly { type: string; targetId: string }[] | undefined,
+): FoodLink[] | undefined {
+  if (!links || links.length === 0) {
+    return undefined;
+  }
+
+  return links.map((link, index) => {
+    if (link.type !== "related_protocol") {
+      throw new TypeError(`Food share payload links[${index}] has unsupported type "${link.type}".`);
+    }
+
+    return {
+      type: "related_protocol",
+      targetId: link.targetId,
+    } satisfies FoodLink;
+  });
+}
+
+function normalizeRecipeLinks(
+  links: readonly { type: string; targetId: string }[] | undefined,
+): RecipeLink[] | undefined {
+  if (!links || links.length === 0) {
+    return undefined;
+  }
+
+  return links.map((link, index) => {
+    switch (link.type) {
+      case "supports_goal":
+        return {
+          type: "supports_goal",
+          targetId: link.targetId,
+        } satisfies RecipeLink;
+      case "addresses_condition":
+        return {
+          type: "addresses_condition",
+          targetId: link.targetId,
+        } satisfies RecipeLink;
+      default:
+        throw new TypeError(`Recipe share payload links[${index}] has unsupported type "${link.type}".`);
+    }
+  });
+}
+
+function normalizeProtocolLinks(
+  links: readonly { type: string; targetId: string }[] | undefined,
+): ProtocolLink[] | undefined {
+  if (!links || links.length === 0) {
+    return undefined;
+  }
+
+  return links.map((link, index) => {
+    switch (link.type) {
+      case "supports_goal":
+        return {
+          type: "supports_goal",
+          targetId: link.targetId,
+        } satisfies ProtocolLink;
+      case "addresses_condition":
+        return {
+          type: "addresses_condition",
+          targetId: link.targetId,
+        } satisfies ProtocolLink;
+      case "related_protocol":
+        return {
+          type: "related_protocol",
+          targetId: link.targetId,
+        } satisfies ProtocolLink;
+      default:
+        throw new TypeError(`Protocol share payload links[${index}] has unsupported type "${link.type}".`);
+    }
+  });
 }
 
 function buildFoodRef(record: FoodRecord): string {

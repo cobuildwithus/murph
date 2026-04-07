@@ -23,6 +23,7 @@ import {
   normalizeRecordIdList,
   normalizeSelectorSlug,
   normalizeUpsertSelectorSlug,
+  frontmatterLinkObjects,
   optionalDateOnly,
   optionalEnum,
   optionalString,
@@ -168,8 +169,8 @@ function canonicalizeConditionRelations(input: {
   relatedProtocolIds?: string[];
 }): Pick<ConditionEntity, "relatedGoalIds" | "relatedProtocolIds" | "links"> {
   const links = normalizeConditionLinks(
-    (input.links?.length ?? 0) > 0
-      ? [...(input.links ?? [])]
+    input.links !== undefined
+      ? [...input.links]
       : buildConditionLinksFromFields({
           relatedGoalIds: input.relatedGoalIds,
           relatedProtocolIds: input.relatedProtocolIds,
@@ -241,6 +242,7 @@ function buildAttributes(record: ConditionEntity): FrontmatterObject {
     bodySites: record.bodySites,
     relatedGoalIds: relations.relatedGoalIds,
     relatedProtocolIds: relations.relatedProtocolIds,
+    links: frontmatterLinkObjects(relations.links),
     note: record.note,
   }) as FrontmatterObject;
 }
@@ -317,7 +319,12 @@ export async function upsertCondition(
         existingEntity?.relatedProtocolIds,
         (value) => normalizeRecordIdList(value, "relatedProtocolIds", "prot"),
       );
+      const usesRelationInputs =
+        input.links !== undefined ||
+        input.relatedGoalIds !== undefined ||
+        input.relatedProtocolIds !== undefined;
       const relations = canonicalizeConditionRelations({
+        links: input.links !== undefined ? input.links : usesRelationInputs ? undefined : existingEntity?.links,
         relatedGoalIds,
         relatedProtocolIds,
       });

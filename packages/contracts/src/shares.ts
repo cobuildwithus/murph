@@ -19,12 +19,21 @@ import {
   ID_PREFIXES,
 } from "./constants.ts";
 import {
-  activityStrengthExerciseSchema,
   workoutTemplateSchema,
   FAMILY_MEMBER_LIMITS,
   GENETIC_VARIANT_LIMITS,
 } from "./zod.ts";
 import { idPattern } from "./ids.ts";
+import {
+  allergyRelationLinkSchema,
+  conditionRelationLinkSchema,
+  familyRelationLinkSchema,
+  foodRelationLinkSchema,
+  geneticVariantRelationLinkSchema,
+  goalRelationLinkSchema,
+  protocolRelationLinkSchema,
+  recipeRelationLinkSchema,
+} from "./relation-links.ts";
 import { isStrictIsoDate, isStrictIsoDateTime } from "./time.ts";
 
 function withContractMetadata<TSchema extends z.ZodTypeAny>(
@@ -193,6 +202,7 @@ export const foodUpsertPayloadSchema = withContractMetadata(
       note: boundedString(1, 4000).optional(),
       autoLogDaily: foodAutoLogDailySchema.optional(),
       attachedProtocolIds: attachedProtocolIdsSchema,
+      links: uniqueArray(foodRelationLinkSchema, { uniqueItems: true }).optional(),
     })
     .strict(),
   "@murphai/contracts/food-upsert-payload.schema.json",
@@ -219,6 +229,7 @@ export const recipeUpsertPayloadSchema = withContractMetadata(
       steps: uniqueArray(boundedString(1, 4000), { maxItems: 100 }).optional(),
       relatedGoalIds: uniqueArray(goalIdSchema, { uniqueItems: true }).optional(),
       relatedConditionIds: uniqueArray(conditionIdSchema, { uniqueItems: true }).optional(),
+      links: uniqueArray(recipeRelationLinkSchema, { uniqueItems: true }).optional(),
     })
     .strict(),
   "@murphai/contracts/recipe-upsert-payload.schema.json",
@@ -236,9 +247,6 @@ export const workoutFormatUpsertPayloadSchema = withContractMetadata(
       activityType: slugSchema,
       durationMinutes: integerSchema(1, 24 * 60).optional(),
       distanceKm: numberSchema(0, 1_000).optional(),
-      strengthExercises: uniqueArray(activityStrengthExerciseSchema, {
-        maxItems: 50,
-      }).optional(),
       template: workoutTemplateSchema.optional(),
       tags: uniqueArray(slugSchema, { uniqueItems: true }).optional(),
       note: boundedString(1, 4000).optional(),
@@ -270,6 +278,7 @@ export const goalUpsertPayloadSchema = withContractMetadata(
       relatedExperimentIds: uniqueArray(experimentIdSchema, {
         uniqueItems: true,
       }).optional(),
+      links: uniqueArray(goalRelationLinkSchema, { uniqueItems: true }).optional(),
       domains: uniqueArray(boundedString(1, 80), { uniqueItems: true }).optional(),
     })
     .strict(),
@@ -298,6 +307,7 @@ export const goalUpsertPatchPayloadSchema = withContractMetadata(
       relatedExperimentIds: uniqueArray(experimentIdSchema, {
         uniqueItems: true,
       }).optional(),
+      links: uniqueArray(goalRelationLinkSchema, { uniqueItems: true }).nullable().optional(),
       domains: uniqueArray(boundedString(1, 80), { uniqueItems: true }).optional(),
     })
     .strict(),
@@ -319,6 +329,7 @@ export const conditionUpsertPayloadSchema = withContractMetadata(
       bodySites: uniqueArray(boundedString(1, 120), { uniqueItems: true }).optional(),
       relatedGoalIds: uniqueArray(goalIdSchema, { uniqueItems: true }).optional(),
       relatedProtocolIds: uniqueArray(protocolIdSchema, { uniqueItems: true }).optional(),
+      links: uniqueArray(conditionRelationLinkSchema, { uniqueItems: true }).optional(),
       note: boundedString(1, 4000).optional(),
     })
     .strict(),
@@ -340,6 +351,7 @@ export const conditionUpsertPatchPayloadSchema = withContractMetadata(
       bodySites: uniqueArray(boundedString(1, 120), { uniqueItems: true }).nullable().optional(),
       relatedGoalIds: uniqueArray(goalIdSchema, { uniqueItems: true }).nullable().optional(),
       relatedProtocolIds: uniqueArray(protocolIdSchema, { uniqueItems: true }).nullable().optional(),
+      links: uniqueArray(conditionRelationLinkSchema, { uniqueItems: true }).nullable().optional(),
       note: boundedString(1, 4000).nullable().optional(),
     })
     .strict(),
@@ -359,6 +371,7 @@ export const allergyUpsertPayloadSchema = withContractMetadata(
       reaction: boundedString(1, 160).optional(),
       recordedOn: isoDateString().optional(),
       relatedConditionIds: uniqueArray(conditionIdSchema, { uniqueItems: true }).optional(),
+      links: uniqueArray(allergyRelationLinkSchema, { uniqueItems: true }).optional(),
       note: boundedString(1, 4000).optional(),
     })
     .strict(),
@@ -378,6 +391,7 @@ export const allergyUpsertPatchPayloadSchema = withContractMetadata(
       reaction: boundedString(1, 160).nullable().optional(),
       recordedOn: isoDateString().nullable().optional(),
       relatedConditionIds: uniqueArray(conditionIdSchema, { uniqueItems: true }).nullable().optional(),
+      links: uniqueArray(allergyRelationLinkSchema, { uniqueItems: true }).nullable().optional(),
       note: boundedString(1, 4000).nullable().optional(),
     })
     .strict(),
@@ -398,6 +412,7 @@ export const familyMemberUpsertPayloadSchema = withContractMetadata(
       deceased: z.boolean().optional(),
       note: boundedString(1, FAMILY_MEMBER_LIMITS.note).optional(),
       relatedVariantIds: uniqueArray(variantIdSchema, { uniqueItems: true }).optional(),
+      links: uniqueArray(familyRelationLinkSchema, { uniqueItems: true }).optional(),
     })
     .strict(),
   "@murphai/contracts/family-member-upsert-payload.schema.json",
@@ -417,6 +432,7 @@ export const familyMemberUpsertPatchPayloadSchema = withContractMetadata(
       deceased: z.boolean().nullable().optional(),
       note: boundedString(1, FAMILY_MEMBER_LIMITS.note).nullable().optional(),
       relatedVariantIds: uniqueArray(variantIdSchema, { uniqueItems: true }).nullable().optional(),
+      links: uniqueArray(familyRelationLinkSchema, { uniqueItems: true }).nullable().optional(),
     })
     .strict(),
   "@murphai/contracts/family-member-upsert-patch-payload.schema.json",
@@ -434,6 +450,7 @@ export const geneticVariantUpsertPayloadSchema = withContractMetadata(
       significance: z.enum(VARIANT_SIGNIFICANCES).optional(),
       inheritance: boundedString(1, GENETIC_VARIANT_LIMITS.inheritance).optional(),
       sourceFamilyMemberIds: uniqueArray(familyMemberIdSchema, { uniqueItems: true }).optional(),
+      links: uniqueArray(geneticVariantRelationLinkSchema, { uniqueItems: true }).optional(),
       note: boundedString(1, GENETIC_VARIANT_LIMITS.note).optional(),
     })
     .strict(),
@@ -452,6 +469,7 @@ export const geneticVariantUpsertPatchPayloadSchema = withContractMetadata(
       significance: z.enum(VARIANT_SIGNIFICANCES).nullable().optional(),
       inheritance: boundedString(1, GENETIC_VARIANT_LIMITS.inheritance).nullable().optional(),
       sourceFamilyMemberIds: uniqueArray(familyMemberIdSchema, { uniqueItems: true }).nullable().optional(),
+      links: uniqueArray(geneticVariantRelationLinkSchema, { uniqueItems: true }).nullable().optional(),
       note: boundedString(1, GENETIC_VARIANT_LIMITS.note).nullable().optional(),
     })
     .strict(),
@@ -479,6 +497,8 @@ export const protocolUpsertPayloadSchema = withContractMetadata(
       ingredients: uniqueArray(supplementIngredientPayloadSchema, { maxItems: 64 }).optional(),
       relatedGoalIds: uniqueArray(goalIdSchema, { uniqueItems: true }).optional(),
       relatedConditionIds: uniqueArray(conditionIdSchema, { uniqueItems: true }).optional(),
+      relatedProtocolIds: uniqueArray(protocolIdSchema, { uniqueItems: true }).optional(),
+      links: uniqueArray(protocolRelationLinkSchema, { uniqueItems: true }).optional(),
       group: patternedString(GROUP_PATTERN, 1, 160).optional(),
     })
     .strict(),

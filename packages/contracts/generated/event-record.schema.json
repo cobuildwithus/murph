@@ -55,6 +55,176 @@
           },
           "uniqueItems": true
         },
+        "links": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "parent_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "related_to"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "supports_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "addresses_condition"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_assessment"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_event"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_family_member"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "top_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "snapshot_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "uniqueItems": true
+        },
         "relatedIds": {
           "type": "array",
           "items": {
@@ -68,6 +238,61 @@
           "items": {
             "type": "string",
             "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+          },
+          "uniqueItems": true
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "audio",
+                  "document",
+                  "gif",
+                  "image",
+                  "other",
+                  "photo",
+                  "video"
+                ]
+              },
+              "relativePath": {
+                "type": "string",
+                "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+              },
+              "mediaType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "sha256": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64,
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "originalFileName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              }
+            },
+            "required": [
+              "role",
+              "kind",
+              "relativePath",
+              "mediaType",
+              "sha256",
+              "originalFileName"
+            ],
+            "additionalProperties": false
           },
           "uniqueItems": true
         },
@@ -215,6 +440,176 @@
           },
           "uniqueItems": true
         },
+        "links": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "parent_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "related_to"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "supports_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "addresses_condition"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_assessment"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_event"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_family_member"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "top_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "snapshot_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "uniqueItems": true
+        },
         "relatedIds": {
           "type": "array",
           "items": {
@@ -228,6 +623,61 @@
           "items": {
             "type": "string",
             "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+          },
+          "uniqueItems": true
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "audio",
+                  "document",
+                  "gif",
+                  "image",
+                  "other",
+                  "photo",
+                  "video"
+                ]
+              },
+              "relativePath": {
+                "type": "string",
+                "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+              },
+              "mediaType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "sha256": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64,
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "originalFileName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              }
+            },
+            "required": [
+              "role",
+              "kind",
+              "relativePath",
+              "mediaType",
+              "sha256",
+              "originalFileName"
+            ],
+            "additionalProperties": false
           },
           "uniqueItems": true
         },
@@ -370,6 +820,176 @@
           },
           "uniqueItems": true
         },
+        "links": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "parent_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "related_to"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "supports_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "addresses_condition"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_assessment"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_event"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_family_member"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "top_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "snapshot_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "uniqueItems": true
+        },
         "relatedIds": {
           "type": "array",
           "items": {
@@ -383,6 +1003,61 @@
           "items": {
             "type": "string",
             "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+          },
+          "uniqueItems": true
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "audio",
+                  "document",
+                  "gif",
+                  "image",
+                  "other",
+                  "photo",
+                  "video"
+                ]
+              },
+              "relativePath": {
+                "type": "string",
+                "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+              },
+              "mediaType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "sha256": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64,
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "originalFileName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              }
+            },
+            "required": [
+              "role",
+              "kind",
+              "relativePath",
+              "mediaType",
+              "sha256",
+              "originalFileName"
+            ],
+            "additionalProperties": false
           },
           "uniqueItems": true
         },
@@ -541,6 +1216,176 @@
           },
           "uniqueItems": true
         },
+        "links": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "parent_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "related_to"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "supports_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "addresses_condition"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_assessment"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_event"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_family_member"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "top_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "snapshot_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "uniqueItems": true
+        },
         "relatedIds": {
           "type": "array",
           "items": {
@@ -554,6 +1399,61 @@
           "items": {
             "type": "string",
             "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+          },
+          "uniqueItems": true
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "audio",
+                  "document",
+                  "gif",
+                  "image",
+                  "other",
+                  "photo",
+                  "video"
+                ]
+              },
+              "relativePath": {
+                "type": "string",
+                "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+              },
+              "mediaType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "sha256": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64,
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "originalFileName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              }
+            },
+            "required": [
+              "role",
+              "kind",
+              "relativePath",
+              "mediaType",
+              "sha256",
+              "originalFileName"
+            ],
+            "additionalProperties": false
           },
           "uniqueItems": true
         },
@@ -693,6 +1593,176 @@
           },
           "uniqueItems": true
         },
+        "links": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "parent_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "related_to"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "supports_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "addresses_condition"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_assessment"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_event"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_family_member"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "top_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "snapshot_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "uniqueItems": true
+        },
         "relatedIds": {
           "type": "array",
           "items": {
@@ -706,6 +1776,61 @@
           "items": {
             "type": "string",
             "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+          },
+          "uniqueItems": true
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "audio",
+                  "document",
+                  "gif",
+                  "image",
+                  "other",
+                  "photo",
+                  "video"
+                ]
+              },
+              "relativePath": {
+                "type": "string",
+                "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+              },
+              "mediaType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "sha256": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64,
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "originalFileName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              }
+            },
+            "required": [
+              "role",
+              "kind",
+              "relativePath",
+              "mediaType",
+              "sha256",
+              "originalFileName"
+            ],
+            "additionalProperties": false
           },
           "uniqueItems": true
         },
@@ -839,6 +1964,176 @@
           },
           "uniqueItems": true
         },
+        "links": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "parent_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "related_to"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "supports_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "addresses_condition"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_assessment"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_event"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_family_member"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "top_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "snapshot_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "uniqueItems": true
+        },
         "relatedIds": {
           "type": "array",
           "items": {
@@ -852,6 +2147,61 @@
           "items": {
             "type": "string",
             "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+          },
+          "uniqueItems": true
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "audio",
+                  "document",
+                  "gif",
+                  "image",
+                  "other",
+                  "photo",
+                  "video"
+                ]
+              },
+              "relativePath": {
+                "type": "string",
+                "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+              },
+              "mediaType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "sha256": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64,
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "originalFileName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              }
+            },
+            "required": [
+              "role",
+              "kind",
+              "relativePath",
+              "mediaType",
+              "sha256",
+              "originalFileName"
+            ],
+            "additionalProperties": false
           },
           "uniqueItems": true
         },
@@ -993,6 +2343,176 @@
           },
           "uniqueItems": true
         },
+        "links": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "parent_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "related_to"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "supports_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "addresses_condition"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_assessment"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_event"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_family_member"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "top_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "snapshot_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "uniqueItems": true
+        },
         "relatedIds": {
           "type": "array",
           "items": {
@@ -1006,6 +2526,61 @@
           "items": {
             "type": "string",
             "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+          },
+          "uniqueItems": true
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "audio",
+                  "document",
+                  "gif",
+                  "image",
+                  "other",
+                  "photo",
+                  "video"
+                ]
+              },
+              "relativePath": {
+                "type": "string",
+                "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+              },
+              "mediaType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "sha256": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64,
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "originalFileName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              }
+            },
+            "required": [
+              "role",
+              "kind",
+              "relativePath",
+              "mediaType",
+              "sha256",
+              "originalFileName"
+            ],
+            "additionalProperties": false
           },
           "uniqueItems": true
         },
@@ -1152,6 +2727,176 @@
           },
           "uniqueItems": true
         },
+        "links": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "parent_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "related_to"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "supports_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "addresses_condition"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_assessment"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_event"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_family_member"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "top_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "snapshot_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "uniqueItems": true
+        },
         "relatedIds": {
           "type": "array",
           "items": {
@@ -1165,6 +2910,61 @@
           "items": {
             "type": "string",
             "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+          },
+          "uniqueItems": true
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "audio",
+                  "document",
+                  "gif",
+                  "image",
+                  "other",
+                  "photo",
+                  "video"
+                ]
+              },
+              "relativePath": {
+                "type": "string",
+                "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+              },
+              "mediaType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "sha256": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64,
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "originalFileName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              }
+            },
+            "required": [
+              "role",
+              "kind",
+              "relativePath",
+              "mediaType",
+              "sha256",
+              "originalFileName"
+            ],
+            "additionalProperties": false
           },
           "uniqueItems": true
         },
@@ -1308,6 +3108,176 @@
           },
           "uniqueItems": true
         },
+        "links": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "parent_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "related_to"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "supports_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "addresses_condition"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_assessment"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_event"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_family_member"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "top_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "snapshot_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "uniqueItems": true
+        },
         "relatedIds": {
           "type": "array",
           "items": {
@@ -1321,6 +3291,61 @@
           "items": {
             "type": "string",
             "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+          },
+          "uniqueItems": true
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "audio",
+                  "document",
+                  "gif",
+                  "image",
+                  "other",
+                  "photo",
+                  "video"
+                ]
+              },
+              "relativePath": {
+                "type": "string",
+                "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+              },
+              "mediaType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "sha256": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64,
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "originalFileName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              }
+            },
+            "required": [
+              "role",
+              "kind",
+              "relativePath",
+              "mediaType",
+              "sha256",
+              "originalFileName"
+            ],
+            "additionalProperties": false
           },
           "uniqueItems": true
         },
@@ -1460,6 +3485,176 @@
           },
           "uniqueItems": true
         },
+        "links": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "parent_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "related_to"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "supports_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "addresses_condition"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_assessment"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_event"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_family_member"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "top_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "snapshot_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "uniqueItems": true
+        },
         "relatedIds": {
           "type": "array",
           "items": {
@@ -1473,6 +3668,61 @@
           "items": {
             "type": "string",
             "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+          },
+          "uniqueItems": true
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "audio",
+                  "document",
+                  "gif",
+                  "image",
+                  "other",
+                  "photo",
+                  "video"
+                ]
+              },
+              "relativePath": {
+                "type": "string",
+                "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+              },
+              "mediaType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "sha256": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64,
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "originalFileName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              }
+            },
+            "required": [
+              "role",
+              "kind",
+              "relativePath",
+              "mediaType",
+              "sha256",
+              "originalFileName"
+            ],
+            "additionalProperties": false
           },
           "uniqueItems": true
         },
@@ -1616,6 +3866,176 @@
           },
           "uniqueItems": true
         },
+        "links": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "parent_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "related_to"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "supports_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "addresses_condition"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_assessment"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_event"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_family_member"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "top_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "snapshot_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "uniqueItems": true
+        },
         "relatedIds": {
           "type": "array",
           "items": {
@@ -1629,6 +4049,61 @@
           "items": {
             "type": "string",
             "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+          },
+          "uniqueItems": true
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "audio",
+                  "document",
+                  "gif",
+                  "image",
+                  "other",
+                  "photo",
+                  "video"
+                ]
+              },
+              "relativePath": {
+                "type": "string",
+                "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+              },
+              "mediaType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "sha256": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64,
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "originalFileName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              }
+            },
+            "required": [
+              "role",
+              "kind",
+              "relativePath",
+              "mediaType",
+              "sha256",
+              "originalFileName"
+            ],
+            "additionalProperties": false
           },
           "uniqueItems": true
         },
@@ -1896,6 +4371,176 @@
           },
           "uniqueItems": true
         },
+        "links": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "parent_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "related_to"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "supports_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "addresses_condition"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_assessment"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_event"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_family_member"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "top_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "snapshot_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "uniqueItems": true
+        },
         "relatedIds": {
           "type": "array",
           "items": {
@@ -1909,6 +4554,61 @@
           "items": {
             "type": "string",
             "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+          },
+          "uniqueItems": true
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "audio",
+                  "document",
+                  "gif",
+                  "image",
+                  "other",
+                  "photo",
+                  "video"
+                ]
+              },
+              "relativePath": {
+                "type": "string",
+                "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+              },
+              "mediaType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "sha256": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64,
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "originalFileName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              }
+            },
+            "required": [
+              "role",
+              "kind",
+              "relativePath",
+              "mediaType",
+              "sha256",
+              "originalFileName"
+            ],
+            "additionalProperties": false
           },
           "uniqueItems": true
         },
@@ -1980,86 +4680,6 @@
         "distanceKm": {
           "type": "number",
           "minimum": 0
-        },
-        "strengthExercises": {
-          "minItems": 1,
-          "maxItems": 50,
-          "type": "array",
-          "items": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "exercise": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 160
-                  },
-                  "setCount": {
-                    "type": "integer",
-                    "minimum": 1
-                  },
-                  "repsPerSet": {
-                    "type": "integer",
-                    "minimum": 1
-                  },
-                  "loadDescription": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 240
-                  }
-                },
-                "required": [
-                  "exercise",
-                  "setCount",
-                  "repsPerSet"
-                ],
-                "additionalProperties": false
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "exercise": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 160
-                  },
-                  "setCount": {
-                    "type": "integer",
-                    "minimum": 1
-                  },
-                  "repsPerSet": {
-                    "type": "integer",
-                    "minimum": 1
-                  },
-                  "loadDescription": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 240
-                  },
-                  "load": {
-                    "type": "number",
-                    "minimum": 0
-                  },
-                  "loadUnit": {
-                    "type": "string",
-                    "enum": [
-                      "lb",
-                      "kg"
-                    ]
-                  }
-                },
-                "required": [
-                  "exercise",
-                  "setCount",
-                  "repsPerSet",
-                  "load",
-                  "loadUnit"
-                ],
-                "additionalProperties": false
-              }
-            ]
-          }
         },
         "workout": {
           "type": "object",
@@ -2275,7 +4895,8 @@
         "title",
         "kind",
         "activityType",
-        "durationMinutes"
+        "durationMinutes",
+        "workout"
       ],
       "additionalProperties": false
     },
@@ -2333,6 +4954,176 @@
           },
           "uniqueItems": true
         },
+        "links": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "parent_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "related_to"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "supports_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "addresses_condition"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_assessment"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_event"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_family_member"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "top_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "snapshot_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "uniqueItems": true
+        },
         "relatedIds": {
           "type": "array",
           "items": {
@@ -2346,6 +5137,61 @@
           "items": {
             "type": "string",
             "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+          },
+          "uniqueItems": true
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "audio",
+                  "document",
+                  "gif",
+                  "image",
+                  "other",
+                  "photo",
+                  "video"
+                ]
+              },
+              "relativePath": {
+                "type": "string",
+                "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+              },
+              "mediaType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "sha256": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64,
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "originalFileName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              }
+            },
+            "required": [
+              "role",
+              "kind",
+              "relativePath",
+              "mediaType",
+              "sha256",
+              "originalFileName"
+            ],
+            "additionalProperties": false
           },
           "uniqueItems": true
         },
@@ -2564,6 +5410,176 @@
           },
           "uniqueItems": true
         },
+        "links": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "parent_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "related_to"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "supports_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "addresses_condition"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_assessment"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_event"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_family_member"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "top_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "snapshot_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "uniqueItems": true
+        },
         "relatedIds": {
           "type": "array",
           "items": {
@@ -2577,6 +5593,61 @@
           "items": {
             "type": "string",
             "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+          },
+          "uniqueItems": true
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "audio",
+                  "document",
+                  "gif",
+                  "image",
+                  "other",
+                  "photo",
+                  "video"
+                ]
+              },
+              "relativePath": {
+                "type": "string",
+                "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+              },
+              "mediaType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "sha256": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64,
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "originalFileName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              }
+            },
+            "required": [
+              "role",
+              "kind",
+              "relativePath",
+              "mediaType",
+              "sha256",
+              "originalFileName"
+            ],
+            "additionalProperties": false
           },
           "uniqueItems": true
         },
@@ -2719,6 +5790,176 @@
           },
           "uniqueItems": true
         },
+        "links": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "parent_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "related_to"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "supports_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "addresses_condition"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_assessment"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_event"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_family_member"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "top_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "snapshot_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "uniqueItems": true
+        },
         "relatedIds": {
           "type": "array",
           "items": {
@@ -2732,6 +5973,61 @@
           "items": {
             "type": "string",
             "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+          },
+          "uniqueItems": true
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "audio",
+                  "document",
+                  "gif",
+                  "image",
+                  "other",
+                  "photo",
+                  "video"
+                ]
+              },
+              "relativePath": {
+                "type": "string",
+                "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+              },
+              "mediaType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "sha256": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64,
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "originalFileName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              }
+            },
+            "required": [
+              "role",
+              "kind",
+              "relativePath",
+              "mediaType",
+              "sha256",
+              "originalFileName"
+            ],
+            "additionalProperties": false
           },
           "uniqueItems": true
         },
@@ -2872,6 +6168,176 @@
           },
           "uniqueItems": true
         },
+        "links": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "parent_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "related_to"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "supports_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "addresses_condition"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_assessment"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_event"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_family_member"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "top_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "snapshot_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "uniqueItems": true
+        },
         "relatedIds": {
           "type": "array",
           "items": {
@@ -2885,6 +6351,61 @@
           "items": {
             "type": "string",
             "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+          },
+          "uniqueItems": true
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "audio",
+                  "document",
+                  "gif",
+                  "image",
+                  "other",
+                  "photo",
+                  "video"
+                ]
+              },
+              "relativePath": {
+                "type": "string",
+                "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+              },
+              "mediaType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "sha256": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64,
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "originalFileName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              }
+            },
+            "required": [
+              "role",
+              "kind",
+              "relativePath",
+              "mediaType",
+              "sha256",
+              "originalFileName"
+            ],
+            "additionalProperties": false
           },
           "uniqueItems": true
         },
@@ -3033,6 +6554,176 @@
           },
           "uniqueItems": true
         },
+        "links": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "parent_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "related_to"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "supports_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "addresses_condition"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_assessment"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_event"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_family_member"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "top_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "snapshot_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "uniqueItems": true
+        },
         "relatedIds": {
           "type": "array",
           "items": {
@@ -3046,6 +6737,61 @@
           "items": {
             "type": "string",
             "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+          },
+          "uniqueItems": true
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "audio",
+                  "document",
+                  "gif",
+                  "image",
+                  "other",
+                  "photo",
+                  "video"
+                ]
+              },
+              "relativePath": {
+                "type": "string",
+                "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+              },
+              "mediaType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "sha256": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64,
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "originalFileName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              }
+            },
+            "required": [
+              "role",
+              "kind",
+              "relativePath",
+              "mediaType",
+              "sha256",
+              "originalFileName"
+            ],
+            "additionalProperties": false
           },
           "uniqueItems": true
         },

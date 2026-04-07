@@ -40,6 +40,7 @@ import {
   prepareEventAttachments,
   stagePreparedEventAttachmentsInBatch,
 } from "./event-attachments.ts";
+import { canonicalizeEventRelations } from "./event-links.ts";
 import { VaultError } from "./errors.ts";
 import { pathExists, readUtf8File, writeVaultTextFile } from "./fs.ts";
 import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.ts";
@@ -556,48 +557,9 @@ function trimStringList(value: unknown): string[] | undefined {
   return entries.length > 0 ? entries : undefined;
 }
 
-function normalizeEventLinks(value: unknown): EventLinkInput[] | undefined {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-
-  const links: EventLinkInput[] = [];
-  const seen = new Set<string>();
-
-  for (const entry of value) {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-      throw new VaultError(
-        "VAULT_INVALID_INPUT",
-        "links entries must be objects with non-empty type and targetId fields.",
-      );
-    }
-
-    const candidate = entry as Record<string, unknown>;
-    const type = typeof candidate.type === "string" ? candidate.type.trim() : "";
-    const targetId = typeof candidate.targetId === "string" ? candidate.targetId.trim() : "";
-
-    if (!type || !targetId) {
-      throw new VaultError(
-        "VAULT_INVALID_INPUT",
-        "links entries must be objects with non-empty type and targetId fields.",
-      );
-    }
-
-    const dedupeKey = `${type}:${targetId}`;
-    if (seen.has(dedupeKey)) {
-      continue;
-    }
-
-    seen.add(dedupeKey);
-    links.push({ type, targetId });
-  }
-
-  return links.length > 0 ? links : [];
-}
-
-function relationTargetIdsFromLinks(links: readonly EventLinkInput[]): string[] | undefined {
-  const targetIds = [...new Set(links.map((link) => link.targetId))];
-  return targetIds.length > 0 ? targetIds : undefined;
+function uniqueTrimmedStringList(value: unknown): string[] | undefined {
+  const entries = trimStringList(value);
+  return entries ? [...new Set(entries)] : undefined;
 }
 
 const NUMERIC_UNIT_ALIASES = {
@@ -717,14 +679,13 @@ function buildNormalizedEventSeed<K extends EventKind>({
   const resolvedTimeZone = normalizeTimeZone(timeZone ?? fallbackTimeZone);
   const resolvedDayKey = normalizeDayKeyInput(dayKey) ??
     toLocalDayKey(occurredTimestamp, resolvedTimeZone ?? defaultTimeZone(), "occurredAt");
-  const normalizedLinksInput = normalizeEventLinks(links);
-  const canonicalLinks =
-    normalizedLinksInput !== undefined
-      ? normalizedLinksInput
-      : trimStringList(relatedIds)?.map((targetId) => ({
-          type: "related_to",
-          targetId,
-        }));
+  const canonicalRelations = canonicalizeEventRelations({
+    links,
+    relatedIds,
+    normalizeStringList: uniqueTrimmedStringList,
+    errorCode: "VAULT_INVALID_INPUT",
+    errorMessage: "links entries must be objects with non-empty type and targetId fields.",
+  });
 
   const seed: NormalizedEventSeed<K> = {
     kind,
@@ -736,11 +697,8 @@ function buildNormalizedEventSeed<K extends EventKind>({
     title: typeof title === "string" && title.trim() ? title.trim() : kind,
     note: typeof note === "string" && note.trim() ? note.trim() : undefined,
     tags: trimStringList(tags),
-    links: canonicalLinks,
-    relatedIds:
-      canonicalLinks !== undefined
-        ? relationTargetIdsFromLinks(canonicalLinks)
-        : trimStringList(relatedIds),
+    links: canonicalRelations.links,
+    relatedIds: canonicalRelations.relatedIds,
     rawRefs: trimStringList(rawRefs),
     externalRef: normalizeExternalRef(externalRef),
     fields: normalizedFields,
