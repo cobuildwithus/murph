@@ -153,6 +153,7 @@ declare module 'incur' {
       'memory search': { args: { text?: string }; options: { vault: string; section?: "Identity" | "Preferences" | "Instructions" | "Context"; limit: number } }
       'memory show': { args: { memoryId?: string }; options: { vault: string } }
       'memory upsert': { args: { text: string }; options: { vault: string; section: "Identity" | "Preferences" | "Instructions" | "Context"; memoryId?: string } }
+      'model': { args: {}; options: { show?: boolean; preset?: "codex" | "openai-compatible"; providerPreset?: "openai" | "openrouter" | "venice" | "deepseek" | "groq" | "together" | "fireworks" | "cerebras" | "xai" | "huggingface" | "nvidia" | "ollama" | "lm-studio" | "vllm" | "litellm" | "custom"; model?: string; baseUrl?: string; apiKeyEnv?: string; providerName?: string; codexCommand?: string; profile?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh"; oss?: boolean } }
       'profile current rebuild': { args: {}; options: { vault: string; requestId?: string } }
       'profile list': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string; limit: number } }
       'profile scaffold': { args: {}; options: { vault: string; requestId?: string } }
@@ -169,6 +170,8 @@ declare module 'incur' {
       'provider scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'provider show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'provider upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
+      'query projection rebuild': { args: {}; options: { vault: string; requestId?: string } }
+      'query projection status': { args: {}; options: { vault: string; requestId?: string } }
       'recipe delete': { args: { id: string }; options: { vault: string; requestId?: string } }
       'recipe edit': { args: { id: string }; options: { vault: string; requestId?: string; input?: string; set?: string[]; clear?: string[] } }
       'recipe list': { args: {}; options: { vault: string; requestId?: string; status?: "draft" | "saved" | "archived"; limit: number } }
@@ -183,8 +186,6 @@ declare module 'incur' {
       'samples import-csv': { args: { file: string }; options: { vault: string; requestId?: string; preset?: string; stream?: string; tsColumn?: string; valueColumn?: string; unit?: string; delimiter?: string; metadataColumns?: string[]; source?: string } }
       'samples list': { args: {}; options: { vault: string; requestId?: string; stream?: string; from?: string; to?: string; quality?: string; limit: number } }
       'samples show': { args: { id: string }; options: { vault: string; requestId?: string } }
-      'query projection rebuild': { args: {}; options: { vault: string; requestId?: string } }
-      'query projection status': { args: {}; options: { vault: string; requestId?: string } }
       'search query': { args: {}; options: { vault: string; requestId?: string; text?: string; recordType?: string[]; kind?: string[]; stream?: string[]; experiment?: string; from?: string; to?: string; tag?: string[]; limit: number } }
       'show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'status': { args: {}; options: { vault: string; requestId?: string; session?: string; limit: number } }
@@ -202,8 +203,8 @@ declare module 'incur' {
       'vault repair': { args: {}; options: { vault: string; requestId?: string } }
       'vault show': { args: {}; options: { vault: string; requestId?: string } }
       'vault stats': { args: {}; options: { vault: string; requestId?: string } }
-      'vault upgrade': { args: {}; options: { vault: string; requestId?: string; dryRun: boolean } }
       'vault update': { args: {}; options: { vault: string; requestId?: string; title?: string; timezone?: string } }
+      'vault upgrade': { args: {}; options: { vault: string; requestId?: string; dryRun: boolean } }
       'wearables activity list': { args: {}; options: { vault: string; requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'wearables body list': { args: {}; options: { vault: string; requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'wearables day': { args: {}; options: { vault: string; requestId?: string; date: string; provider?: string[] } }

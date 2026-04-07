@@ -37,6 +37,7 @@ import { registerProviderCommands } from './commands/provider.js'
 import { registerFoodCommands } from './commands/food.js'
 import { registerResearchCommands } from './commands/research.js'
 import { registerKnowledgeCommands } from './commands/knowledge.js'
+import { registerModelCommands } from './commands/model.js'
 import { researchRunResultSchema } from './research-cli-contracts.js'
 import {
   knowledgeIndexRebuildResultSchema,
@@ -357,6 +358,14 @@ export const vaultCliCommandDescriptors = [
     rootCommandNames: ['memory'],
     register({ cli }) {
       registerMemoryCommands(cli)
+    },
+  },
+  {
+    id: 'model',
+    bindingMode: 'none',
+    rootCommandNames: ['model'],
+    register({ cli }) {
+      registerModelCommands(cli)
     },
   },
   {
@@ -1059,6 +1068,8 @@ function assertValidVaultCliCommandManifest(
 
 assertValidVaultCliCommandManifest(vaultCliCommandDescriptors)
 
+const ROOT_COMMAND_NAMES_EXEMPT_FROM_VAULT = new Set(['model'])
+
 export function registerVaultCliCommandDescriptors(input: {
   cli: Cli.Cli
   services: VaultServices
@@ -1072,6 +1083,12 @@ export function registerVaultCliCommandDescriptors(input: {
 export function collectVaultCliDescriptorRootCommandNames() {
   return orderedUniqueStrings(
     vaultCliCommandDescriptors.flatMap((descriptor) => [...descriptor.rootCommandNames]),
+  )
+}
+
+export function collectVaultRequiredCliDescriptorRootCommandNames() {
+  return collectVaultCliDescriptorRootCommandNames().filter(
+    (commandName) => !ROOT_COMMAND_NAMES_EXEMPT_FROM_VAULT.has(commandName),
   )
 }
 

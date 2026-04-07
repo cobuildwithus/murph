@@ -31,7 +31,13 @@ import type { AssistantRunEvent } from '@murphai/assistant-engine/assistant/auto
 import { createIntegratedInboxServices } from '@murphai/assistant-engine/inbox-services'
 import { formatAssistantRunEventForTerminal } from '@murphai/assistant-cli/run-terminal-logging'
 import { formatStructuredErrorMessage } from '@murphai/operator-config/text/shared'
-import { collectVaultCliDescriptorRootCommandNames } from '../src/vault-cli-command-manifest.js'
+import type { SetupConfiguredAssistant } from '@murphai/operator-config/setup-cli-contracts'
+import type { SetupAssistantResolver } from '@murphai/setup-cli/setup-assistant'
+import {
+  collectVaultCliDescriptorRootCommandNames,
+  collectVaultRequiredCliDescriptorRootCommandNames,
+} from '../src/vault-cli-command-manifest.js'
+import { registerModelCommands } from '../src/commands/model.js'
 import { createVaultCli } from '../src/vault-cli.js'
 import { createUnwiredVaultServices } from '@murphai/assistant-engine/vault-services'
 import {
@@ -742,11 +748,186 @@ test('default-vault injection skips incomplete command groups', () => {
   )
 })
 
-test('default-vault root coverage stays aligned with manifest-backed root commands', () => {
+test('manifest marks query as vault-backed and model as exempt', () => {
+  assert.equal(collectVaultRequiredCliDescriptorRootCommandNames().includes('query'), true)
+  assert.equal(collectVaultCliDescriptorRootCommandNames().includes('model'), true)
+  assert.equal(collectVaultRequiredCliDescriptorRootCommandNames().includes('model'), false)
+})
+
+test('applyDefaultVaultToArgs keeps model outside default-vault injection', () => {
+  assert.deepEqual(applyDefaultVaultToArgs(['model'], '/tmp/default-vault'), ['model'])
   assert.deepEqual(
-    [...TOP_LEVEL_COMMANDS_REQUIRING_VAULT].sort(),
-    [...collectVaultCliDescriptorRootCommandNames()].sort(),
+    applyDefaultVaultToArgs(['model', '--show'], '/tmp/default-vault'),
+    ['model', '--show'],
   )
+})
+
+test('model --show returns the saved assistant backend', async () => {
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-show-'))
+  cleanupPaths.push(homeRoot)
+
+  await saveAssistantOperatorDefaultsPatch(
+    {
+      backend: {
+        adapter: 'codex-cli',
+        approvalPolicy: 'never',
+        codexCommand: null,
+        model: 'gpt-5.4',
+        oss: false,
+        profile: 'ops',
+        reasoningEffort: 'medium',
+        sandbox: 'danger-full-access',
+      },
+      account: {
+        source: 'codex',
+        kind: 'account',
+        planCode: null,
+        planName: 'Pro',
+        quota: null,
+      },
+    },
+    homeRoot,
+  )
+
+  const cli = Cli.create('vault-cli')
+  registerModelCommands(cli, {
+    resolveHomeDirectory: () => homeRoot,
+    terminal: {
+      stdinIsTTY: false,
+      stderrIsTTY: false,
+    },
+  })
+
+  const result = await runRegisteredCliJson<{
+    configured: boolean
+    backend: {
+      adapter: string
+      model: string | null
+      profile: string | null
+    } | null
+    summary: string | null
+  }>(cli, ['model', '--show'])
+
+  assert.equal(result.exitCode, null)
+  assert.equal(result.envelope.ok, true)
+  assert.equal(result.envelope.data?.configured, true)
+  assert.deepEqual(result.envelope.data?.backend, {
+    adapter: 'codex-cli',
+    approvalPolicy: 'never',
+    codexCommand: null,
+    model: 'gpt-5.4',
+    oss: false,
+    profile: 'ops',
+    reasoningEffort: 'medium',
+    sandbox: 'danger-full-access',
+  })
+  assert.equal(result.envelope.data?.summary, 'gpt-5.4 in Codex CLI (Pro account)')
+})
+
+test('model reuses existing backend defaults when only the model changes', async () => {
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-update-'))
+  cleanupPaths.push(homeRoot)
+
+  await saveAssistantOperatorDefaultsPatch(
+    {
+      backend: {
+        adapter: 'openai-compatible',
+        apiKeyEnv: 'OLLAMA_API_KEY',
+        endpoint: 'http://127.0.0.1:11434/v1',
+        headers: null,
+        model: 'llama3.2:latest',
+        providerName: 'ollama',
+        reasoningEffort: 'high',
+      },
+      account: null,
+    },
+    homeRoot,
+  )
+
+  const resolveAssistant = vi.fn(
+    async ({ options, preset }): Promise<SetupConfiguredAssistant> => ({
+      preset,
+      enabled: true,
+      provider: 'openai-compatible',
+      model: options.assistantModel ?? null,
+      baseUrl: options.assistantBaseUrl ?? null,
+      apiKeyEnv: options.assistantApiKeyEnv ?? null,
+      providerName: options.assistantProviderName ?? null,
+      codexCommand: null,
+      profile: null,
+      reasoningEffort: options.assistantReasoningEffort ?? null,
+      sandbox: null,
+      approvalPolicy: null,
+      oss: false,
+      account: null,
+      detail: 'saved openai-compatible backend',
+    }),
+  )
+  const assistantSetup: SetupAssistantResolver = {
+    resolve: resolveAssistant,
+  }
+
+  const cli = Cli.create('vault-cli')
+  registerModelCommands(cli, {
+    assistantSetup,
+    resolveHomeDirectory: () => homeRoot,
+    terminal: {
+      stdinIsTTY: false,
+      stderrIsTTY: false,
+    },
+  })
+
+  const result = await runRegisteredCliJson<{
+    backend: {
+      adapter: string
+      endpoint: string | null
+      apiKeyEnv: string | null
+      model: string | null
+      providerName: string | null
+    } | null
+    notes: string[]
+    summary: string | null
+  }>(cli, ['model', '--model', 'gpt-oss:20b'])
+
+  assert.equal(result.exitCode, null)
+  assert.equal(result.envelope.ok, true)
+  assert.equal(resolveAssistant.mock.calls.length, 1)
+  assert.deepEqual(resolveAssistant.mock.calls[0]?.[0], {
+    allowPrompt: false,
+    commandName: 'model',
+    options: {
+      vault: './vault',
+      strict: true,
+      whisperModel: 'base.en',
+      assistantPreset: 'openai-compatible',
+      assistantModel: 'gpt-oss:20b',
+      assistantBaseUrl: 'http://127.0.0.1:11434/v1',
+      assistantApiKeyEnv: 'OLLAMA_API_KEY',
+      assistantProviderName: 'ollama',
+    },
+    preset: 'openai-compatible',
+  })
+  assert.deepEqual(result.envelope.data?.backend, {
+    adapter: 'openai-compatible',
+    apiKeyEnv: 'OLLAMA_API_KEY',
+    endpoint: 'http://127.0.0.1:11434/v1',
+    headers: null,
+    model: 'gpt-oss:20b',
+    providerName: 'ollama',
+    reasoningEffort: null,
+  })
+  assert.deepEqual(result.envelope.data?.notes, [
+    'Export OLLAMA_API_KEY before using the saved OpenAI-compatible assistant backend.',
+  ])
+  assert.equal(
+    result.envelope.data?.summary,
+    'gpt-oss:20b via http://127.0.0.1:11434/v1',
+  )
+
+  const savedConfig = await readOperatorConfig(homeRoot)
+  assert.equal(savedConfig?.assistant?.backend?.adapter, 'openai-compatible')
+  assert.equal(savedConfig?.assistant?.backend?.model, 'gpt-oss:20b')
+  assert.equal(savedConfig?.assistant?.backend?.providerName, 'ollama')
 })
 
 test('root status, doctor, and stop aliases reuse the assistant command schemas', () => {
@@ -1021,6 +1202,48 @@ async function runInProcessCliWithTty(args: string[]): Promise<{
   return {
     stderr: stderr.join(''),
     stdout: stdout.join(''),
+  }
+}
+
+async function runRegisteredCliJson<TData>(
+  cli: Cli.Cli,
+  args: string[],
+): Promise<{
+  envelope: {
+    ok: boolean
+    data?: TData
+    error?: {
+      code?: string
+      message?: string
+      retryable?: boolean
+    }
+  }
+  exitCode: number | null
+}> {
+  const output: string[] = []
+  let exitCode: number | null = null
+
+  await cli.serve([...args, '--format', 'json', '--verbose'], {
+    env: process.env,
+    exit(code) {
+      exitCode = code
+    },
+    stdout(chunk) {
+      output.push(chunk)
+    },
+  })
+
+  return {
+    envelope: JSON.parse(output.join('').trim()) as {
+      ok: boolean
+      data?: TData
+      error?: {
+        code?: string
+        message?: string
+        retryable?: boolean
+      }
+    },
+    exitCode,
   }
 }
 
