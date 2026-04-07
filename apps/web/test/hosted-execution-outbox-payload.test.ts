@@ -1,44 +1,24 @@
 import { describe, expect, it } from "vitest";
 
-import type { SharePack } from "@murphai/contracts";
 import { serializeHostedExecutionOutboxPayload } from "@/src/lib/hosted-execution/outbox-payload";
 
-const SHARE_PACK: SharePack = {
-  createdAt: "2026-04-04T00:00:00.000Z",
-  entities: [
-    {
-      kind: "food",
-      payload: {
-        kind: "smoothie",
-        status: "active",
-        title: "Shared breakfast",
-      },
-      ref: "food.shared-breakfast",
-    },
-  ],
-  schemaVersion: "murph.share-pack.v1",
-  title: "Shared breakfast",
-};
-
 describe("hosted execution outbox payload storage", () => {
-  it("stores hosted share acceptance by reference without persisting the share id inline", () => {
+  it("stores hosted share acceptance inline as a tiny share ref", () => {
     const payload = serializeHostedExecutionOutboxPayload({
       event: {
         kind: "vault.share.accepted",
         share: {
-          pack: SHARE_PACK,
+          ownerUserId: "member_sender",
           shareId: "hshare_123",
         },
         userId: "member_123",
       },
       eventId: "evt_share_123",
       occurredAt: "2026-04-04T00:00:00.000Z",
-    }, {
-      payloadRef: buildTestPayloadRef("evt_share_123"),
     });
 
-    expect((payload as { storage?: unknown }).storage).toBe("reference");
-    expect(JSON.stringify(payload)).not.toContain("hshare_123");
+    expect((payload as { storage?: unknown }).storage).toBe("inline");
+    expect(JSON.stringify(payload)).not.toContain("Shared breakfast");
   });
 
   it("stores device-sync wake events by reference instead of persisting hint payloads inline", () => {

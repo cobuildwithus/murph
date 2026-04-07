@@ -48,11 +48,16 @@ describe("handleHostedShareAcceptedDispatch", () => {
           event: {
             kind: "vault.share.accepted",
             share: {
-              pack,
+              ownerUserId: "member_sender",
               shareId: "hshare_123",
             },
             userId: "member_123",
           },
+        },
+        sharePack: {
+          ownerUserId: "member_sender",
+          pack,
+          shareId: "hshare_123",
         },
         vaultRoot,
       });

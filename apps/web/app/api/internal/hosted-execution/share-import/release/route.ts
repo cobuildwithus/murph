@@ -2,11 +2,9 @@ import { requireHostedCloudflareCallbackRequest } from "@/src/lib/hosted-executi
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, readJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { getPrisma } from "@/src/lib/prisma";
-import { deleteHostedSharePackObject } from "@/src/lib/hosted-share/pack-store";
 import {
-  finalizeHostedShareAcceptance,
-  findHostedShareLinkById,
   normalizeOptionalString,
+  releaseHostedShareAcceptance,
 } from "@/src/lib/hosted-share/shared";
 
 export const POST = withJsonError(async (request: Request) => {
@@ -14,41 +12,20 @@ export const POST = withJsonError(async (request: Request) => {
   const body = await readJsonObject(request);
   const eventId = normalizeRequiredString(body.eventId, "eventId");
   const shareId = normalizeRequiredString(body.shareId, "shareId");
+  const reason = normalizeOptionalString(typeof body.reason === "string" ? body.reason : null);
   const prisma = getPrisma();
-  const shareRecord = await findHostedShareLinkById(shareId, prisma);
 
-  if (!shareRecord) {
-    throw hostedOnboardingError({
-      code: "HOSTED_SHARE_NOT_FOUND",
-      message: `Hosted share ${shareId} was not found.`,
-      httpStatus: 404,
-    });
-  }
-
-  const finalized = await finalizeHostedShareAcceptance({
+  const released = await releaseHostedShareAcceptance({
     eventId,
     memberId,
     prisma,
     shareId,
   });
 
-  if (finalized) {
-    try {
-      await deleteHostedSharePackObject({
-        ownerUserId: shareRecord.senderMemberId,
-        shareId,
-      });
-    } catch (error) {
-      console.error(
-        `Hosted share ${shareId} finalized but its Cloudflare pack could not be deleted.`,
-        error instanceof Error ? error.message : String(error),
-      );
-    }
-  }
-
   return jsonOk({
     eventId,
-    finalized,
+    released,
+    ...(reason ? { reason } : {}),
     shareId,
   });
 });

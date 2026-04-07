@@ -58,6 +58,9 @@ const HOSTED_EXECUTION_REFERENCE_OUTBOX_PAYLOAD_KEYS = new Set([
 const HOSTED_EXECUTION_DISPATCH_PAYLOAD_REF_KEYS = new Set([
   "key",
 ]);
+const HOSTED_EXECUTION_LEGACY_REFERENCE_OUTBOX_EVENT_KIND_SET = new Set<HostedExecutionEventKind>([
+  "vault.share.accepted",
+]);
 
 export function buildHostedExecutionOutboxPayload(
   dispatch: HostedExecutionDispatchRequest,
@@ -123,7 +126,10 @@ export function readHostedExecutionOutboxPayload(
       }
 
       const dispatchRef = readHostedExecutionDispatchRef(payloadObject);
-      if (!dispatchRef || !isHostedExecutionOutboxPayloadStorageAllowed(dispatchRef.eventKind, storage)) {
+      if (
+        !dispatchRef
+        || !isHostedExecutionReadableOutboxPayloadStorageAllowed(dispatchRef.eventKind, storage)
+      ) {
         return null;
       }
 
@@ -199,6 +205,17 @@ function isHostedExecutionOutboxPayloadStorageAllowed(
   storage: HostedExecutionOutboxPayloadStorage,
 ): boolean {
   return resolveHostedExecutionCanonicalOutboxPayloadStorage(eventKind) === storage;
+}
+
+function isHostedExecutionReadableOutboxPayloadStorageAllowed(
+  eventKind: HostedExecutionEventKind,
+  storage: HostedExecutionOutboxPayloadStorage,
+): boolean {
+  return isHostedExecutionOutboxPayloadStorageAllowed(eventKind, storage)
+    || (
+      storage === "reference"
+      && HOSTED_EXECUTION_LEGACY_REFERENCE_OUTBOX_EVENT_KIND_SET.has(eventKind)
+    );
 }
 
 function readText(value: unknown): string | null {

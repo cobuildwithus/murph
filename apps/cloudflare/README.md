@@ -16,6 +16,7 @@ This app is intentionally separate from `apps/web`:
 - restore a temporary execution context for one-shot runs
 - start the Durable Object's native Cloudflare container on demand for the runner process
 - run the existing Murph inbox, parser, assistant, device-sync, and hosted share-import seams for member activation, direct Linq messages, hosted share acceptance, hosted device-sync wake events, and periodic assistant ticks through the headless `@murphai/assistant-runtime` package
+- hydrate opaque hosted share packs from Cloudflare storage only when a `vault.share.accepted` runner job is about to import them
 
 ## Non-goals
 
@@ -40,7 +41,8 @@ Current worker env/config names read directly by `src/env.ts`:
 - required secret: `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK`
 - required secret: `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK`
 - required secret: `HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK`
-- required secret: `HOSTED_WEB_INTERNAL_SIGNING_SECRET` signs the narrow bound-user service seam back into `apps/web`
+- required secret: `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK` signs Cloudflare-owned callback requests back into `apps/web`
+- optional non-secret: `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID` defaults to `v1` and selects the active callback signing key id
 - required non-secret: `HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG`
 - required non-secret: `HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME`
 - optional non-secret: `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production`
@@ -156,7 +158,7 @@ The Cloudflare app now keeps two focused Vitest lanes:
 
 ## Operational notes
 
-- The worker never stores plaintext vault material in Durable Object storage. It stores only per-user coordination state plus encrypted bundle references. Sensitive hosted dispatch bodies now stay out of Durable Object SQLite rows: the queue stores only `payload_key` references while reconstructable or sensitive payload bodies live in separately encrypted transient blobs, and the hosted web outbox now stages reference-backed dispatch bodies into the same Cloudflare-owned encrypted dispatch-payload store instead of reconstructing them from Postgres in the steady state.
+- The worker never stores plaintext vault material in Durable Object storage. It stores only per-user coordination state plus encrypted bundle references. Sensitive hosted dispatch bodies now stay out of Durable Object SQLite rows: the queue stores only `payload_key` references while reconstructable or sensitive payload bodies live in separately encrypted transient blobs, and the hosted web outbox now stages reference-backed dispatch bodies into the same Cloudflare-owned encrypted dispatch-payload store instead of reconstructing them from Postgres in the steady state. `vault.share.accepted` is the explicit small inline exception: the queue stores only the share owner/id ref, then the runner hydrates the opaque pack from Cloudflare storage immediately before import.
 - Hosted assistant provider selection now has one explicit durable seam: a top-level `hostedAssistant` config in the operator config artifact. That durable hosted profile is the only persisted hosted assistant source of truth, while raw credentials still stay in Worker secrets or the separately encrypted per-user env object.
 - Hosted bundle reads/writes and per-user env object updates happen outside the Durable Object's SQLite mutation step; only the final bundle-ref/version compare-and-swap is committed inside Durable Object storage.
 - Hosted execution now writes one encrypted workspace snapshot back through the existing `vault` bundle slot. That workspace snapshot includes canonical `vault/**`, only the `.runtime/**` paths explicitly classified `portable`, and the minimal operator-home config needed for explicit `member.activated` bootstrap. Machine-local runtime state such as device-sync control/token stores, daemon state/logs, inbox daemon config/state, parser toolchain overrides, projections, caches, and tmp data stays out of the hosted bundle. Large raw artifacts under `vault/raw/**` are externalized into separately encrypted content-addressed objects behind opaque object keys; the runner restores inline workspace files first, only materializes the externalized artifact paths the current run actually needs, and preserves untouched artifact refs across later snapshots so old media does not churn through download/upload cycles just to stay referenced. Per-user runner env overrides live in their own encrypted hosted object behind an opaque per-user locator.
@@ -166,6 +168,7 @@ The Cloudflare app now keeps two focused Vitest lanes:
 - Replay suppression now uses only exact consumed-event tombstones in Durable Object SQLite. Those tombstones expire after 24 hours; there is no secondary replay filter.
 - The container bridge now ties each internal `/__internal/run` request to an abort signal, so a worker timeout or client disconnect kills the full isolated child process group instead of leaving compute running inside a one-shot hosted run.
 - Broad hosted idempotency no longer depends on the web outbox lifecycle: `apps/web` now uses the shared Postgres `execution_outbox` only for delivery handoff into Cloudflare, while the Durable Object queue owns retries, poison/backpressure, committed-result recovery, and any hosted-web business-outcome callback before it consumes the event. Hosted webhook receipts still keep their own durable side-effect state for Linq replies, and RevNet issuance stays on its invoice-owned idempotency path.
+- Missing hosted share packs are treated as an async runner-side failure instead of a web claim-time validation step. If hydration fails, Cloudflare releases the Postgres share claim through the signed hosted-web release callback and then poisons the queue event instead of retrying a permanently missing pack forever.
 - Follow-up hosted events now require an already bootstrapped member context; they no longer create the vault or force-enable Linq auto-reply as a hidden side effect.
 - The checked-in Wrangler scaffold now explicitly enables Workers Logs and Workers Traces so request logs, container logs, and trace spans are available before production rollout. The generated deploy config exposes log and trace sampling through `CF_LOG_HEAD_SAMPLING_RATE` and `CF_TRACE_HEAD_SAMPLING_RATE`.
 - Normal deployment flow now separates version upload from deployment. After the first deploy, the GitHub Actions workflow and local rollout helper upload a version, create a gradual deployment, and pin smoke checks to the candidate version. First deploys still require a direct `wrangler deploy`, and the rollout helper now refuses gradual mode when the rendered config introduces a newer Durable Object migration tag than the currently allowed gradual-deploy set.

@@ -8,16 +8,18 @@ import {
   buildHostedExecutionVaultShareAcceptedDispatch,
 } from "../src/builders";
 import {
+  HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
   buildHostedExecutionOutboxPayload,
   readHostedExecutionOutboxPayload,
   resolveHostedExecutionDispatchPayloadStorage,
 } from "../src/outbox-payload";
-import { TEST_HOSTED_SHARE_PACK } from "./test-fixtures.ts";
-
+import {
+  buildHostedExecutionDispatchRef,
+} from "../src/dispatch-ref";
 const occurredAt = "2026-04-04T00:00:00.000Z";
 
 describe("resolveHostedExecutionDispatchPayloadStorage", () => {
-  it("uses reference storage for reconstructable hosted events", () => {
+  it("uses canonical storage for hosted events", () => {
     expect(
       resolveHostedExecutionDispatchPayloadStorage(
         buildHostedExecutionMemberActivatedDispatch({
@@ -50,13 +52,13 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
           memberId: "user_123",
           occurredAt,
           share: {
-            pack: TEST_HOSTED_SHARE_PACK,
+            ownerUserId: "member_sender",
             shareId: "share_123",
           },
         }),
         "auto",
       ),
-    ).toBe("reference");
+    ).toBe("inline");
 
     expect(
       resolveHostedExecutionDispatchPayloadStorage(
@@ -87,6 +89,20 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
   });
 
   it("buildHostedExecutionOutboxPayload follows the canonical auto policy", () => {
+    expect(
+      buildHostedExecutionOutboxPayload(
+        buildHostedExecutionVaultShareAcceptedDispatch({
+          eventId: "share-accepted-2",
+          memberId: "user_123",
+          occurredAt,
+          share: {
+            ownerUserId: "member_sender",
+            shareId: "share_456",
+          },
+        }),
+      ).storage,
+    ).toBe("inline");
+
     expect(
       buildHostedExecutionOutboxPayload(
         buildHostedExecutionDeviceSyncWakeDispatch({
@@ -121,6 +137,34 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
         },
       ).storage,
     ).toBe("reference");
+  });
+
+  it("still reads legacy reference-backed share payloads during the inline cutover", () => {
+    const dispatch = buildHostedExecutionVaultShareAcceptedDispatch({
+      eventId: "share-accepted-legacy",
+      memberId: "user_123",
+      occurredAt,
+      share: {
+        ownerUserId: "member_sender",
+        shareId: "share_legacy_123",
+      },
+    });
+
+    expect(readHostedExecutionOutboxPayload({
+      dispatchRef: buildHostedExecutionDispatchRef(dispatch),
+      payloadRef: {
+        key: "transient/dispatch-payloads/user_123/share-legacy.json",
+      },
+      schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+      storage: "reference",
+    })).toEqual({
+      dispatchRef: buildHostedExecutionDispatchRef(dispatch),
+      payloadRef: {
+        key: "transient/dispatch-payloads/user_123/share-legacy.json",
+      },
+      schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+      storage: "reference",
+    });
   });
 
   it("rejects forcing inline storage for reference-only gateway sends", () => {

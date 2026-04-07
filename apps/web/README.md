@@ -156,6 +156,8 @@ pnpm --dir apps/web prisma:generate
 pnpm --dir apps/web prisma:migrate:deploy
 ```
 
+The hosted device-sync SQL hard-cut is currently greenfield/reset-only. Until a deployed hosted Postgres environment needs an in-place rollout, the repo keeps that hard-cut folded into the initial migration instead of carrying a separate forward migration for the removed raw-id/JSON columns.
+
 ## Local verification
 
 - `pnpm --dir apps/web lint` runs the explicit ESLint CLI with `eslint-config-next`.
