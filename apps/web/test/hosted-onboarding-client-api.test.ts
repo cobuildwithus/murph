@@ -55,8 +55,44 @@ describe("hosted onboarding client auth headers", () => {
   });
 
   it("fails explicitly before fetch when Privy token refresh stays unavailable", async () => {
-    mocks.getAccessToken.mockRejectedValue(new Error("rate limited"));
-    mocks.getIdentityToken.mockRejectedValue(new Error("rate limited"));
+    mocks.getAccessToken.mockRejectedValue(new Error("temporary failure"));
+    mocks.getIdentityToken.mockRejectedValue(new Error("temporary failure"));
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(requestHostedOnboardingJson<{ ok: true }>({
+      url: "/api/hosted-onboarding/example",
+    })).rejects.toMatchObject({
+      code: "PRIVY_AUTH_UNAVAILABLE",
+      message: "We could not refresh your Privy session. Wait a moment and try again.",
+      retryable: true,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a clearer retry message when Privy rate-limits token refresh", async () => {
+    const rateLimitError = Object.assign(new Error("Too Many Requests"), {
+      status: 429,
+    });
+    mocks.getAccessToken.mockRejectedValue(rateLimitError);
+    mocks.getIdentityToken.mockRejectedValue(rateLimitError);
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(requestHostedOnboardingJson<{ ok: true }>({
+      url: "/api/hosted-onboarding/example",
+    })).rejects.toMatchObject({
+      code: "PRIVY_RATE_LIMITED",
+      message:
+        "Privy is rate limiting this browser right now. Wait a minute, then try continuing signup again.",
+      retryable: true,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps message-only token refresh failures on the generic unavailable path", async () => {
+    mocks.getAccessToken.mockRejectedValue(new Error("Too Many Requests"));
+    mocks.getIdentityToken.mockRejectedValue(new Error("Too Many Requests"));
     const fetchMock = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetchMock);
 
