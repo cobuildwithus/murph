@@ -163,7 +163,7 @@
   "dependencies": {
     "@murphai/contracts": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
-    "@murphai/inboxd": "workspace:*",
+    "@murphai/messaging-ingress": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
     "zod": "^4.1.8"
   },

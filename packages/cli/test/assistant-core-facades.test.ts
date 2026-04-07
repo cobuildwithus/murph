@@ -54,7 +54,7 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   assert.equal(assistantCliManifest.exports?.['./assistant/automation'], undefined)
   assert.equal(assistantCliManifest.exports?.['./assistant/doctor-security'], undefined)
   assert.equal(assistantCliManifest.exports?.['./assistant/stop'], undefined)
-  assert.equal(assistantCliManifest.exports?.['./assistant/*'] !== undefined, true)
+  assert.equal(assistantCliManifest.exports?.['./assistant/*'], undefined)
   assert.equal(assistantCliManifest.exports?.['./commands/assistant'] !== undefined, true)
   assert.equal(assistantCliManifest.exports?.['./run-terminal-logging'] !== undefined, true)
 
@@ -65,7 +65,7 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   assert.equal(assistantEngineManifest.exports?.['./assistant-cli-contracts'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./assistant-cli-access'] !== undefined, true)
   assert.equal(assistantEngineManifest.exports?.['./assistant-cli-tools'] !== undefined, true)
-  assert.equal(assistantEngineManifest.exports?.['./assistant/*'] !== undefined, true)
+  assert.equal(assistantEngineManifest.exports?.['./assistant/*'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./commands/*'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./commands/query-record-command-helpers'] !== undefined, true)
   assert.equal(assistantEngineManifest.exports?.['./health-registry-command-metadata'] !== undefined, true)

@@ -8,13 +8,13 @@ import type {
 
 import type { ParserArtifactKind } from "../contracts/artifact.js";
 import type { ParserRegistry } from "../registry/registry.js";
-import { resolveInboxAttachmentArtifact } from "../inboxd/bridge.js";
 import { type FfmpegToolOptions } from "../adapters/ffmpeg.js";
 import {
   redactSensitiveText,
   removeVaultDirectoryIfExists,
 } from "../shared.js";
 import { parseAttachment } from "./parse-attachment.js";
+import { resolveAttachmentArtifact } from "./resolve-attachment-artifact.js";
 import { writeParserArtifacts } from "../publish/writer.js";
 
 export interface RunAttachmentParseJobResult {
@@ -83,7 +83,7 @@ async function runAttachmentParseJobAttempt(
   }
 
   try {
-    const artifact = await resolveInboxAttachmentArtifact({
+    const artifact = await resolveAttachmentArtifact({
       vaultRoot: input.vaultRoot,
       runtime: input.runtime,
       captureId: job.captureId,

@@ -34,10 +34,6 @@
     "./run-terminal-logging": {
       "types": "./dist/run-terminal-logging.d.ts",
       "default": "./dist/run-terminal-logging.js"
-    },
-    "./assistant/*": {
-      "types": "./dist/assistant/*.d.ts",
-      "default": "./dist/assistant/*.js"
     }
   },
   "files": [

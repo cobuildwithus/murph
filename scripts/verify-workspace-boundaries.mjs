@@ -9,6 +9,7 @@ export async function main() {
 
   await verifyTypecheckScripts(failures);
   await verifyTypecheckTsconfigs(failures);
+  await verifyWorkspacePackageExports(failures);
   await verifyTsconfigPathMappings(failures);
   await verifyWorkspaceImports(failures);
 
@@ -55,6 +56,26 @@ async function verifyTypecheckTsconfigs(failures) {
     if (tsconfig.compilerOptions?.disableSourceOfProjectReferenceRedirect === true) {
       failures.push(
         `${path.relative(repoRoot, tsconfigPath)} sets disableSourceOfProjectReferenceRedirect; package-local typecheck should resolve referenced workspace packages from source.`,
+      );
+    }
+  }
+}
+
+async function verifyWorkspacePackageExports(failures) {
+  const packageJsonPaths = await findFiles(["packages", "apps"], (filePath) =>
+    path.basename(filePath) === "package.json",
+  );
+
+  for (const packageJsonPath of packageJsonPaths) {
+    const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
+
+    for (const exportKey of Object.keys(packageJson.exports ?? {})) {
+      if (exportKey !== "./assistant/*") {
+        continue;
+      }
+
+      failures.push(
+        `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; assistant/* is an internal namespace and must be surfaced through dedicated top-level package exports instead.`,
       );
     }
   }
@@ -108,6 +129,7 @@ async function verifyWorkspaceImports(failures) {
   for (const filePath of sourceLikeFiles) {
     const source = await readFile(filePath, "utf8");
     const sourceMember = findWorkspaceMember(filePath);
+    const isTestFile = isTestSourceFile(filePath);
 
     for (const specifier of extractModuleSpecifiers(source)) {
       const importPolicyFailure = verifyWorkspaceImportPolicy({
@@ -145,6 +167,16 @@ async function verifyWorkspaceImports(failures) {
         failures.push(
           `${path.relative(repoRoot, filePath)} imports unknown workspace package specifier ${JSON.stringify(specifier)}.`,
         );
+        continue;
+      }
+
+      if (
+        isTestOnlyInternalAssistantSpecifier({
+          isTestFile,
+          packageName,
+          specifier,
+        })
+      ) {
         continue;
       }
 
@@ -193,12 +225,18 @@ function verifyWorkspaceImportPolicy({
   sourceMember,
   specifier,
 }) {
-  const isTestFile = /(?:^|[\\/])(test|tests)[\\/].*\.[cm]?[jt]sx?$|\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(
-    path.relative(repoRoot, filePath),
-  );
+  const isTestFile = isTestSourceFile(filePath);
 
   if (specifier === "@murphai/device-syncd" && sourceMember !== "packages/device-syncd") {
     return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} from the device-sync daemon root; internal workspace consumers must use @murphai/device-syncd/public-ingress, @murphai/device-syncd/client, or another explicit subpath so they do not depend on the daemon root convenience surface.`;
+  }
+
+  if (
+    sourceMember === "packages/operator-config"
+    && specifier === "@murphai/inboxd"
+    && filePath.includes(`${path.sep}packages${path.sep}operator-config${path.sep}src${path.sep}`)
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} from the inboxd root; packages/operator-config/src must depend on @murphai/messaging-ingress or another focused inbox owner surface instead of the inbox daemon convenience barrel.`;
   }
 
   if (
@@ -233,6 +271,31 @@ function verifyWorkspaceImportPolicy({
   }
 
   return null;
+}
+
+function isTestOnlyInternalAssistantSpecifier({
+  isTestFile,
+  packageName,
+  specifier,
+}) {
+  if (!isTestFile) {
+    return false;
+  }
+
+  return (
+    (packageName === "@murphai/assistant-cli"
+      && specifier.startsWith("@murphai/assistant-cli/assistant/"))
+    || (
+      packageName === "@murphai/assistant-engine"
+      && specifier.startsWith("@murphai/assistant-engine/assistant/")
+    )
+  );
+}
+
+function isTestSourceFile(filePath) {
+  return /(?:^|[\\/])(test|tests)[\\/].*\.[cm]?[jt]sx?$|\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(
+    path.relative(repoRoot, filePath),
+  );
 }
 
 function extractModuleSpecifiers(source) {
