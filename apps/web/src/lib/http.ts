@@ -19,12 +19,14 @@ export interface JsonErrorMapping {
 }
 
 export type JsonErrorMatcher = (error: unknown) => JsonErrorMapping | null;
+export type JsonErrorLogDetailProvider = (error: unknown) => Record<string, unknown> | null;
 
 interface JsonErrorResponseOptions {
   defaultHeaders?: HeadersInit;
   headers?: HeadersInit;
   internalMessage: string;
   logMessage: string;
+  logDetails?: JsonErrorLogDetailProvider;
   matchers?: JsonErrorMatcher[];
 }
 
@@ -32,6 +34,7 @@ export interface JsonRouteHelpersOptions {
   defaultHeaders?: HeadersInit;
   internalMessage: string;
   logMessage: string;
+  logDetails?: JsonErrorLogDetailProvider;
   matchers?: JsonErrorMatcher[];
 }
 
@@ -156,6 +159,7 @@ export function createJsonRouteHelpers(
       headers,
       internalMessage: options.internalMessage,
       logMessage: options.logMessage,
+      logDetails: options.logDetails,
       matchers: options.matchers,
     });
 
@@ -257,6 +261,7 @@ function logJsonError(
   log(options.logMessage, {
     errorType: describeLoggedErrorType(error),
     internalMessage: options.internalMessage,
+    ...(level === "error" ? (options.logDetails?.(error) ?? {}) : {}),
   });
 }
 
