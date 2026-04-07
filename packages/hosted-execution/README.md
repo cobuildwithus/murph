@@ -20,5 +20,6 @@ Cloudflare execution worker.
 - this package owns only the shared hosted-execution transport seam: dispatch/status codecs, route builders, outbox payload helpers, auth header names, and canonicalization helpers
 - deployment topology stays app-local: shared packages must not own worker hostnames, callback base-url defaults, or proxy-vs-server inference
 - app-local auth adapters still own deployment-specific bearer token acquisition plus callback signing and verification
+- operator-facing hosted public-origin fallback and Cloudflare callback-key config stay app-local and are intentionally documented in `apps/web/README.md`, not here
 - Cloudflare operational control routes are private owner APIs, not part of this public package
 - hosted device-sync runtime snapshot/apply/connect-link contracts live under `@murphai/device-syncd/hosted-runtime`
