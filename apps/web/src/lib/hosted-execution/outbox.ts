@@ -11,7 +11,6 @@ import {
   HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR,
   type HostedExecutionDispatchRequest,
   type HostedExecutionDispatchResult,
-  type HostedExecutionOutboxPayload,
   type HostedExecutionOutboxPayloadStorage,
   resolveHostedExecutionOutboxPayloadStorage,
 } from "@murphai/hosted-execution";
@@ -26,6 +25,7 @@ import {
 } from "./dispatch";
 import {
   buildHostedExecutionDispatchRef,
+  type HostedExecutionOutboxPayload,
   readHostedExecutionOutboxPayload,
   serializeHostedExecutionOutboxPayload,
 } from "./outbox-payload";
@@ -110,19 +110,11 @@ function serializeExistingHostedExecutionOutboxPayload(
     });
   }
 
-  return {
-    dispatchRef: {
-      eventId: payload.dispatchRef.eventId,
-      eventKind: payload.dispatchRef.eventKind,
-      occurredAt: payload.dispatchRef.occurredAt,
-      userId: payload.dispatchRef.userId,
-    },
-    payloadRef: {
-      key: payload.payloadRef.key,
-    },
-    schemaVersion: payload.schemaVersion,
-    storage: payload.storage,
-  } satisfies Prisma.InputJsonObject;
+  if (!payload.stagedPayloadId) {
+    throw createHostedExecutionOutboxPayloadRefError(payload.dispatchRef.eventId);
+  }
+
+  return clonePrismaInputJsonObject(payload);
 }
 
 export async function drainHostedExecutionOutbox(input: {
@@ -354,7 +346,7 @@ async function prepareHostedExecutionDispatchAttempt(
     };
   }
 
-  if (!payload.payloadRef) {
+  if (!payload.stagedPayloadId) {
     throw createHostedExecutionOutboxPayloadRefError(record.eventId);
   }
 
@@ -373,7 +365,7 @@ async function cleanupHostedExecutionOutboxPayloadIfSettled(
     return;
   }
 
-  if (payload.storage !== "reference" || !payload.payloadRef) {
+  if (payload.storage !== "reference" || !payload.stagedPayloadId) {
     return;
   }
 
@@ -389,7 +381,7 @@ async function cleanupHostedExecutionUnpersistedStagedPayloadIfNeeded(
   if (
     !requestedPayload
     || requestedPayload.storage !== "reference"
-    || !requestedPayload.payloadRef
+    || !requestedPayload.stagedPayloadId
   ) {
     return;
   }
@@ -398,7 +390,7 @@ async function cleanupHostedExecutionUnpersistedStagedPayloadIfNeeded(
 
   if (
     persistedPayload?.storage === "reference"
-    && persistedPayload.payloadRef?.key === requestedPayload.payloadRef.key
+    && persistedPayload.stagedPayloadId === requestedPayload.stagedPayloadId
   ) {
     return;
   }
@@ -532,8 +524,8 @@ async function prepareHostedExecutionOutboxPayloadJson(
 
   const stagedPayload = await maybeStageHostedExecutionDispatchPayload(dispatch);
 
-  if (stagedPayload && stagedPayload.storage === "reference" && stagedPayload.payloadRef) {
-    return stagedPayload as unknown as Prisma.InputJsonObject;
+  if (stagedPayload && stagedPayload.storage === "reference" && stagedPayload.stagedPayloadId) {
+    return serializeExistingHostedExecutionOutboxPayload(stagedPayload);
   }
 
   throw createHostedExecutionOutboxPayloadRefError(dispatch.eventId);
@@ -618,21 +610,17 @@ function areHostedExecutionOutboxPayloadsEquivalent(
       return false;
     }
 
-    return areHostedExecutionDispatchPayloadRefsEquivalent(left.payloadRef, right.payloadRef);
+    return areHostedExecutionDispatchPayloadRefsEquivalent(left.stagedPayloadId, right.stagedPayloadId);
   }
 
   return false;
 }
 
 function areHostedExecutionDispatchPayloadRefsEquivalent(
-  left: { key: string } | null,
-  right: { key: string } | null,
+  left: string | null,
+  right: string | null,
 ): boolean {
-  if (!left || !right) {
-    return left === right;
-  }
-
-  return left.key === right.key;
+  return left === right;
 }
 
 function resolveHostedExecutionDeliveryOutcome(
@@ -719,7 +707,7 @@ function createHostedExecutionOutboxPayloadRefError(eventId: string): Error & {
   retryable: false;
 } {
   const error = new Error(
-    `Hosted execution outbox record ${eventId} is missing a staged payloadRef for reference dispatch.`,
+    `Hosted execution outbox record ${eventId} is missing a staged payload id for reference dispatch.`,
   ) as Error & {
     code: string;
     permanent: true;
@@ -733,4 +721,8 @@ function createHostedExecutionOutboxPayloadRefError(eventId: string): Error & {
 
 function generateExecutionOutboxId(): string {
   return `execout_${randomBytes(10).toString("hex")}`;
+}
+
+function clonePrismaInputJsonObject(value: unknown): Prisma.InputJsonObject {
+  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonObject;
 }

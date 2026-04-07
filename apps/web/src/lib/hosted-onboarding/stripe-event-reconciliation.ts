@@ -6,6 +6,7 @@ import {
 } from "@prisma/client";
 import type Stripe from "stripe";
 
+import { provisionManagedUserCryptoInHostedExecution } from "../hosted-execution/control";
 import {
   applyStripeCheckoutCompleted,
   applyStripeCheckoutExpired,
@@ -288,6 +289,7 @@ async function processHostedStripeEventRecord(
   activatedMemberId: string | null;
   createdOrUpdatedRevnetIssuance: boolean;
   hostedExecutionEventId: string | null;
+  postCommitProvisionUserId: string | null;
 }> {
   const payload = event.data.object;
   const dispatchContext: HostedStripeDispatchContext = {
@@ -450,18 +452,19 @@ async function processClaimedHostedStripeEvent(
         processingContext,
         transaction as Prisma.TransactionClient,
       );
-      await transaction.hostedStripeEvent.update({
-        where: {
-          eventId: claimed.eventId,
-        },
-        data: {
-          claimExpiresAt: null,
-          lastErrorCode: null,
-          lastErrorMessage: null,
-          processedAt: new Date(),
-          status: HostedStripeEventStatus.completed,
-        },
-      });
+    });
+    await runHostedStripeEventPostCommitEffects(result);
+    await prisma.hostedStripeEvent.update({
+      where: {
+        eventId: claimed.eventId,
+      },
+      data: {
+        claimExpiresAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        processedAt: new Date(),
+        status: HostedStripeEventStatus.completed,
+      },
     });
 
     return {
@@ -502,6 +505,16 @@ async function fetchHostedStripeEventForReconciliation(eventId: string): Promise
   return requireHostedStripeApi().events.retrieve(eventId);
 }
 
+async function runHostedStripeEventPostCommitEffects(input: {
+  postCommitProvisionUserId: string | null;
+}): Promise<void> {
+  if (!input.postCommitProvisionUserId) {
+    return;
+  }
+
+  await provisionManagedUserCryptoInHostedExecution(input.postCommitProvisionUserId);
+}
+
 function buildDueHostedStripeEventWhere(now: Date): Prisma.HostedStripeEventWhereInput {
   return {
     OR: [
@@ -532,16 +545,19 @@ function mapHostedStripeActivationOutcome(
     activatedMemberId: string | null;
     createdOrUpdatedRevnetIssuance?: boolean;
     hostedExecutionEventId: string | null;
+    postCommitProvisionUserId?: string | null;
   },
 ): {
   activatedMemberId: string | null;
   createdOrUpdatedRevnetIssuance: boolean;
   hostedExecutionEventId: string | null;
+  postCommitProvisionUserId: string | null;
 } {
   return {
     activatedMemberId: outcome.activatedMemberId,
     createdOrUpdatedRevnetIssuance: outcome.createdOrUpdatedRevnetIssuance ?? false,
     hostedExecutionEventId: outcome.hostedExecutionEventId,
+    postCommitProvisionUserId: outcome.postCommitProvisionUserId ?? null,
   };
 }
 
@@ -549,11 +565,13 @@ function buildEmptyHostedStripeEventProcessingResult(): {
   activatedMemberId: string | null;
   createdOrUpdatedRevnetIssuance: boolean;
   hostedExecutionEventId: string | null;
+  postCommitProvisionUserId: string | null;
 } {
   return {
     activatedMemberId: null,
     createdOrUpdatedRevnetIssuance: false,
     hostedExecutionEventId: null,
+    postCommitProvisionUserId: null,
   };
 }
 

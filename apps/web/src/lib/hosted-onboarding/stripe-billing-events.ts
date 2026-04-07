@@ -26,6 +26,7 @@ type HostedOnboardingPrismaClient = Prisma.TransactionClient;
 type HostedStripeActivationOutcome = {
   activatedMemberId: string | null;
   hostedExecutionEventId: string | null;
+  postCommitProvisionUserId?: string | null;
 };
 
 export async function applyStripeCheckoutCompleted(
@@ -158,6 +159,7 @@ export async function applyStripeInvoicePaid(
     activatedMemberId: activation.activated ? updatedMember.id : null,
     createdOrUpdatedRevnetIssuance: false,
     hostedExecutionEventId: activation.hostedExecutionEventId,
+    postCommitProvisionUserId: activation.postCommitProvisionUserId,
   };
 }
 

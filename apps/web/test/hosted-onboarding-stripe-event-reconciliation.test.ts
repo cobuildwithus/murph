@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   applyStripeRefundCreated: vi.fn(),
   applyStripeSubscriptionUpdated: vi.fn(),
   drainHostedRevnetIssuanceSubmissionQueue: vi.fn(),
+  provisionManagedUserCryptoInHostedExecution: vi.fn(),
   resolveStripeCustomerContext: vi.fn(),
   stripe: {
     events: {
@@ -51,6 +52,18 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   };
 });
 
+vi.mock("@/src/lib/hosted-execution/control", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-execution/control")
+  >("@/src/lib/hosted-execution/control");
+
+  return {
+    ...actual,
+    provisionManagedUserCryptoInHostedExecution:
+      mocks.provisionManagedUserCryptoInHostedExecution,
+  };
+});
+
 vi.mock("@/src/lib/hosted-onboarding/stripe-revnet-issuance", async () => {
   const actual = await vi.importActual<
     typeof import("@/src/lib/hosted-onboarding/stripe-revnet-issuance")
@@ -80,6 +93,7 @@ describe("hosted Stripe event reconciliation", () => {
       activatedMemberId: "member_123",
       createdOrUpdatedRevnetIssuance: false,
       hostedExecutionEventId: "dispatch_123",
+      postCommitProvisionUserId: "member_123",
     });
     mocks.applyStripeInvoicePaymentFailed.mockResolvedValue(undefined);
     mocks.applyStripeRefundCreated.mockResolvedValue(undefined);
@@ -88,6 +102,7 @@ describe("hosted Stripe event reconciliation", () => {
       customerId: null,
     });
     mocks.drainHostedRevnetIssuanceSubmissionQueue.mockResolvedValue([]);
+    mocks.provisionManagedUserCryptoInHostedExecution.mockResolvedValue(undefined);
   });
 
   it("stores only minimal Stripe receipt state when recording an event", async () => {
@@ -147,6 +162,7 @@ describe("hosted Stripe event reconciliation", () => {
       }),
       expect.anything(),
     );
+    expect(mocks.provisionManagedUserCryptoInHostedExecution).toHaveBeenCalledWith("member_123");
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
       eventId: "evt_invoice_paid_123",
       lastErrorCode: null,
@@ -290,6 +306,43 @@ describe("hosted Stripe event reconciliation", () => {
       eventId: "evt_invoice_paid_123",
       lastErrorCode: "Error",
       lastErrorMessage: "Stripe unavailable",
+      status: HostedStripeEventStatus.failed,
+    }));
+  });
+
+  it("marks the receipt failed when post-commit provisioning fails", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeInvoicePaidEvent();
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.provisionManagedUserCryptoInHostedExecution.mockRejectedValue(
+      new Error("Cloudflare provisioning failed"),
+    );
+
+    await recordHostedStripeEvent({
+      event,
+      prisma: prisma.client as never,
+    });
+
+    await expect(
+      reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client as never,
+      }),
+    ).resolves.toEqual({
+      activatedMemberId: null,
+      createdOrUpdatedRevnetIssuance: false,
+      eventId: "evt_invoice_paid_123",
+      hostedExecutionEventId: null,
+      status: "failed",
+    });
+
+    expect(mocks.applyStripeInvoicePaid).toHaveBeenCalledTimes(1);
+    expect(mocks.provisionManagedUserCryptoInHostedExecution).toHaveBeenCalledWith("member_123");
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      eventId: "evt_invoice_paid_123",
+      lastErrorCode: "Error",
+      lastErrorMessage: "Cloudflare provisioning failed",
+      processedAt: null,
       status: HostedStripeEventStatus.failed,
     }));
   });
