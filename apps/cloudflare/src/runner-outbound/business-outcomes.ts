@@ -1,5 +1,6 @@
 import {
   type HostedExecutionDispatchRequest,
+  normalizeHostedExecutionString,
 } from "@murphai/hosted-execution";
 
 import {
@@ -12,6 +13,34 @@ import {
 } from "../outbound-routes.ts";
 
 export async function applyHostedWebBusinessOutcomeIfNeeded(input: {
+  callbackSigning: import("../web-callback-auth.ts").HostedWebCallbackSigningEnvironment;
+  dispatch: HostedExecutionDispatchRequest;
+  env: Readonly<Record<string, string | undefined>>;
+  fetchImpl?: typeof fetch;
+}): Promise<void> {
+  await applyHostedBusinessOutcomeIfNeeded(input);
+}
+
+const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
+const DEFAULT_LINQ_API_TIMEOUT_MS = 10_000;
+
+export async function applyHostedBusinessOutcomeIfNeeded(input: {
+  callbackSigning: import("../web-callback-auth.ts").HostedWebCallbackSigningEnvironment;
+  dispatch: HostedExecutionDispatchRequest;
+  env: Readonly<Record<string, string | undefined>>;
+  fetchImpl?: typeof fetch;
+}): Promise<void> {
+  if (input.dispatch.event.kind === "vault.share.accepted") {
+    await completeHostedWebShareImport(input);
+    return;
+  }
+
+  if (input.dispatch.event.kind === "linq.message.received") {
+    await deleteHostedLinqMessageFromSystem(input);
+  }
+}
+
+async function completeHostedWebShareImport(input: {
   callbackSigning: import("../web-callback-auth.ts").HostedWebCallbackSigningEnvironment;
   dispatch: HostedExecutionDispatchRequest;
   env: Readonly<Record<string, string | undefined>>;
@@ -91,6 +120,75 @@ export async function releaseHostedWebShareClaim(input: {
   throw new Error(
     `Hosted web share-claim release callback failed for ${input.dispatch.event.userId}/${input.dispatch.eventId} with HTTP ${response.status}${formatResponseSuffix(responseText)}.`,
   );
+}
+
+async function deleteHostedLinqMessageFromSystem(input: {
+  dispatch: HostedExecutionDispatchRequest;
+  env: Readonly<Record<string, string | undefined>>;
+  fetchImpl?: typeof fetch;
+}): Promise<void> {
+  if (input.dispatch.event.kind !== "linq.message.received") {
+    return;
+  }
+
+  const messageId = normalizeHostedExecutionString(input.dispatch.event.linqMessageId);
+  if (!messageId) {
+    return;
+  }
+
+  const apiToken = normalizeHostedExecutionString(input.env.LINQ_API_TOKEN);
+  if (!apiToken) {
+    throw new Error("LINQ_API_TOKEN must be configured for hosted Linq post-commit deletion.");
+  }
+
+  const fetchImpl = input.fetchImpl ?? fetch;
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, DEFAULT_LINQ_API_TIMEOUT_MS);
+
+  let response: Response;
+
+  try {
+    response = await fetchImpl(
+      new URL(
+        `messages/${encodeURIComponent(messageId)}`,
+        `${normalizeLinqApiBaseUrl(input.env.LINQ_API_BASE_URL)}/`,
+      ),
+      {
+        headers: {
+          authorization: `Bearer ${apiToken}`,
+        },
+        method: "DELETE",
+        signal: controller.signal,
+      },
+    );
+  } catch (error) {
+    if (timedOut) {
+      throw new Error(
+        `Hosted Linq post-commit delete timed out for ${input.dispatch.event.userId}/${input.dispatch.eventId}/${messageId}.`,
+      );
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  if (response.ok || response.status === 404) {
+    return;
+  }
+
+  const responseText = await response.text();
+  throw new Error(
+    `Hosted Linq post-commit delete failed for ${input.dispatch.event.userId}/${input.dispatch.eventId}/${messageId} with HTTP ${response.status}${formatResponseSuffix(responseText)}.`,
+  );
+}
+
+function normalizeLinqApiBaseUrl(value: string | undefined): string {
+  return normalizeHostedExecutionString(value)?.replace(/\/$/u, "") ?? DEFAULT_LINQ_API_BASE_URL;
 }
 
 function formatResponseSuffix(value: string): string {

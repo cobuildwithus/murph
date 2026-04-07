@@ -128,6 +128,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
                 omitRecipientPhone: true,
               },
             ),
+            linqMessageId: summary.messageId,
             occurredAt,
             phoneLookupKey,
             userId: existingMember.id,

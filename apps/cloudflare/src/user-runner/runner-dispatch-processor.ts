@@ -45,8 +45,10 @@ import {
   type PendingDispatchRecord,
   type RunnerStateRecord,
 } from "./types.js";
-import { applyHostedWebBusinessOutcomeIfNeeded } from "../runner-outbound/business-outcomes.ts";
-import { releaseHostedWebShareClaim } from "../runner-outbound/business-outcomes.ts";
+import {
+  applyHostedBusinessOutcomeIfNeeded as applyRunnerBusinessOutcomeIfNeeded,
+  releaseHostedWebShareClaim,
+} from "../runner-outbound/business-outcomes.ts";
 import {
   RunnerCommitRecovery,
   isCommittedResultFinalized,
@@ -604,7 +606,7 @@ export class RunnerDispatchProcessor {
   private async applyHostedBusinessOutcomeIfNeeded(
     dispatch: HostedExecutionDispatchRequest,
   ): Promise<void> {
-    await applyHostedWebBusinessOutcomeIfNeeded({
+    await applyRunnerBusinessOutcomeIfNeeded({
       callbackSigning: this.dependencies.env.webCallbackSigning,
       dispatch,
       env: this.dependencies.readWorkerStringEnvSource(),

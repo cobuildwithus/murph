@@ -30,6 +30,7 @@ export function buildHostedExecutionMemberActivatedDispatch(input: {
 export function buildHostedExecutionLinqMessageReceivedDispatch(input: {
   eventId: string;
   linqEvent: Record<string, unknown>;
+  linqMessageId?: string | null;
   occurredAt: string;
   phoneLookupKey: string;
   userId: string;
@@ -38,6 +39,7 @@ export function buildHostedExecutionLinqMessageReceivedDispatch(input: {
     event: {
       kind: "linq.message.received",
       linqEvent: { ...input.linqEvent },
+      ...(input.linqMessageId === undefined ? {} : { linqMessageId: input.linqMessageId }),
       phoneLookupKey: input.phoneLookupKey,
       userId: input.userId,
     } satisfies HostedExecutionLinqMessageReceivedEvent,

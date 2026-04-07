@@ -3,14 +3,17 @@ import { generateKeyPairSync } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
   HOSTED_EXECUTION_NONCE_HEADER,
+  HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
+  buildHostedExecutionLinqMessageReceivedDispatch,
+  parseHostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution";
 
 import {
+  applyHostedBusinessOutcomeIfNeeded,
   applyHostedWebBusinessOutcomeIfNeeded,
   releaseHostedWebShareClaim,
 } from "../src/runner-outbound/business-outcomes.ts";
@@ -141,6 +144,52 @@ describe("applyHostedWebBusinessOutcomeIfNeeded", () => {
   });
 });
 
+describe("applyHostedBusinessOutcomeIfNeeded", () => {
+  it("round-trips the raw Linq message id through dispatch parsing", () => {
+    const dispatch = createLinqDispatch();
+
+    expect(parseHostedExecutionDispatchRequest(dispatch)).toEqual(dispatch);
+  });
+
+  it("deletes the Linq source message after the hosted commit succeeds", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+
+    await applyHostedBusinessOutcomeIfNeeded({
+      dispatch: createLinqDispatch(),
+      env: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      callbackSigning: {
+        keyId: "test-callback-key",
+        privateKeyJwkJson: TEST_CALLBACK_PRIVATE_JWK_JSON,
+      },
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
+    expect(String(url)).toBe("https://api.linqapp.com/api/partner/v3/messages/msg_123");
+    expect(init.method).toBe("DELETE");
+    expect(init.headers).toEqual({
+      authorization: "Bearer linq-token",
+    });
+  });
+
+  it("treats missing Linq records as already deleted", async () => {
+    await expect(applyHostedBusinessOutcomeIfNeeded({
+      dispatch: createLinqDispatch(),
+      env: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      callbackSigning: {
+        keyId: "test-callback-key",
+        privateKeyJwkJson: TEST_CALLBACK_PRIVATE_JWK_JSON,
+      },
+      fetchImpl: vi.fn(async () => new Response(null, { status: 404 })) as typeof fetch,
+    })).resolves.toBeUndefined();
+  });
+});
+
 function createShareDispatch() {
   return {
     event: {
@@ -154,4 +203,26 @@ function createShareDispatch() {
     eventId: "evt_share",
     occurredAt: "2026-04-07T00:00:00.000Z",
   };
+}
+
+function createLinqDispatch() {
+  return buildHostedExecutionLinqMessageReceivedDispatch({
+    eventId: "evt_linq",
+    linqEvent: {
+      api_version: "v3",
+      created_at: "2026-04-07T00:00:00.000Z",
+      data: {
+        chat_id: "chat_123",
+        message: {
+          id: "opaque-message-id",
+        },
+      },
+      event_id: "evt_linq",
+      event_type: "message.received",
+    },
+    linqMessageId: "msg_123",
+    occurredAt: "2026-04-07T00:00:00.000Z",
+    phoneLookupKey: "phone_lookup_123",
+    userId: "user_123",
+  });
 }
