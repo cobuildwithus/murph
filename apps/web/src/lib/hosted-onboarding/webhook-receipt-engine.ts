@@ -17,7 +17,6 @@ import {
 } from "./webhook-receipt-transitions";
 import type {
   HostedWebhookDispatchSideEffect,
-  HostedWebhookEventPayload,
   HostedWebhookPlan,
   HostedWebhookReceiptClaim,
   HostedWebhookReceiptHandlers,
@@ -30,7 +29,6 @@ import { hostedOnboardingError } from "./errors";
 export async function runHostedWebhookWithReceipt<TResult extends HostedWebhookResponsePayload>(input: {
   duplicateResponse: TResult;
   eventId: string;
-  eventPayload: HostedWebhookEventPayload;
   handlers: HostedWebhookReceiptHandlers;
   plan: (prisma: Prisma.TransactionClient) => Promise<HostedWebhookPlan<TResult>>;
   prisma: PrismaClient;
@@ -39,7 +37,6 @@ export async function runHostedWebhookWithReceipt<TResult extends HostedWebhookR
 }): Promise<TResult> {
   let claimedReceipt = await recordHostedWebhookReceipt({
     eventId: input.eventId,
-    eventPayload: input.eventPayload,
     prisma: input.prisma,
     source: input.source,
   });
@@ -48,7 +45,7 @@ export async function runHostedWebhookWithReceipt<TResult extends HostedWebhookR
     return input.duplicateResponse;
   }
 
-  let response = claimedReceipt.state.response as TResult | null;
+  let response: TResult | null = null;
 
   try {
     if (!claimedReceipt.state.plannedAt) {
@@ -61,7 +58,6 @@ export async function runHostedWebhookWithReceipt<TResult extends HostedWebhookR
           desiredSideEffects: plan.desiredSideEffects,
           eventId: input.eventId,
           prisma: transaction,
-          response: plan.response,
           source: input.source,
         });
         nextClaim = await queueHostedWebhookDispatchSideEffects({
@@ -94,7 +90,6 @@ export async function runHostedWebhookWithReceipt<TResult extends HostedWebhookR
     await markHostedWebhookReceiptCompleted({
       claimedReceipt,
       eventId: input.eventId,
-      eventPayload: input.eventPayload,
       prisma: input.prisma,
       source: input.source,
     });
@@ -109,7 +104,6 @@ export async function runHostedWebhookWithReceipt<TResult extends HostedWebhookR
       claimedReceipt,
       error: failure,
       eventId: input.eventId,
-      eventPayload: input.eventPayload,
       prisma: input.prisma,
       source: input.source,
     });
@@ -177,10 +171,6 @@ async function drainHostedWebhookReceiptSideEffects(input: {
   let currentClaim = input.claimedReceipt;
 
   for (const queuedEffect of currentClaim.state.sideEffects) {
-    if (queuedEffect.status === "sent") {
-      continue;
-    }
-
     if (queuedEffect.status === "sent_unconfirmed") {
       throw new ReceiptSideEffectDrainError(
         currentClaim,

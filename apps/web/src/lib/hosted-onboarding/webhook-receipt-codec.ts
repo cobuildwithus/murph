@@ -1,8 +1,5 @@
-import { randomBytes } from "node:crypto";
-
 import { Prisma } from "@prisma/client";
 
-import { createHostedOpaqueIdentifier } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
 import {
   readHostedWebhookStoredDispatchSideEffectPayload,
@@ -10,379 +7,355 @@ import {
 } from "./webhook-dispatch-payload";
 import type {
   HostedWebhookDispatchSideEffect,
-  HostedWebhookEventPayload,
   HostedWebhookLinqMessageSideEffect,
-  HostedWebhookReceiptClaim,
   HostedWebhookReceiptErrorState,
-  HostedWebhookResponsePayload,
   HostedWebhookReceiptState,
-  HostedWebhookReceiptStatus,
   HostedWebhookRevnetIssuanceSideEffect,
   HostedWebhookSideEffect,
   HostedWebhookSideEffectErrorState,
-  HostedWebhookSideEffectStatus,
 } from "./webhook-receipt-types";
 
-export function serializeHostedWebhookReceiptState(
-  receiptState: HostedWebhookReceiptState,
-): Prisma.InputJsonValue {
-  return {
-    eventPayload: receiptState.eventPayload,
-    receiptState: {
-      attemptCount: Math.max(Math.trunc(receiptState.attemptCount), 1),
-      attemptId: receiptState.attemptId ?? generateHostedWebhookReceiptAttemptId(),
-      completedAt: receiptState.status === "completed" ? receiptState.completedAt : null,
-      lastError: receiptState.status === "failed" ? receiptState.lastError : null,
-      lastReceivedAt: receiptState.lastReceivedAt,
-      plannedAt: receiptState.plannedAt,
-      response: receiptState.response,
-      sideEffects: receiptState.sideEffects.map((effect) => serializeHostedWebhookSideEffect(effect)),
-      status: receiptState.status,
-    },
-  } satisfies Prisma.InputJsonObject;
-}
+type HostedWebhookReceiptRecordLike = {
+  attemptCount: number;
+  attemptId: string;
+  completedAt: Date | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  lastErrorName: string | null;
+  lastErrorRetryable: boolean | null;
+  lastReceivedAt: Date;
+  plannedAt: Date | null;
+  status: string;
+};
 
-export function readHostedWebhookReceiptState(
-  payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
-): HostedWebhookReceiptState {
-  const nestedState = toHostedWebhookReceiptObject(
-    toHostedWebhookReceiptObject(payloadJson).receiptState,
-  );
-  const attemptId = readHostedWebhookReceiptString(nestedState.attemptId);
-  const attemptCount = readHostedWebhookReceiptNumber(nestedState.attemptCount);
-  const status = readHostedWebhookReceiptStatusValue(nestedState.status);
+type HostedWebhookReceiptSideEffectRecordLike = {
+  attemptCount: number;
+  dispatchPayloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null;
+  effectId: string;
+  kind: string;
+  lastAttemptAt: Date | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  lastErrorName: string | null;
+  lastErrorRetryable: boolean | null;
+  linqChatId: string | null;
+  linqInviteId: string | null;
+  linqReplyToMessageId: string | null;
+  linqResultChatId: string | null;
+  linqResultMessageId: string | null;
+  linqTemplate: string | null;
+  revnetAmountPaid: number | null;
+  revnetChargeId: string | null;
+  revnetCurrency: string | null;
+  revnetInvoiceId: string | null;
+  revnetMemberId: string | null;
+  revnetPaymentIntentId: string | null;
+  revnetResultHandled: boolean | null;
+  sentAt: Date | null;
+  status: string;
+};
+
+export function readHostedWebhookReceiptState(input: {
+  receipt: HostedWebhookReceiptRecordLike;
+  sideEffects?: readonly HostedWebhookReceiptSideEffectRecordLike[] | null;
+}): HostedWebhookReceiptState {
+  const status = readHostedWebhookReceiptStatus(input.receipt.status);
+  const lastReceivedAt = input.receipt.lastReceivedAt.toISOString();
 
   return {
-    attemptCount: Math.max(attemptCount, 0),
-    attemptId,
-    completedAt: readHostedWebhookReceiptString(nestedState.completedAt),
-    eventPayload: readHostedWebhookReceiptEventPayload(payloadJson),
-    lastError: readHostedWebhookReceiptError(nestedState.lastError),
-    lastReceivedAt: readHostedWebhookReceiptString(nestedState.lastReceivedAt),
-    plannedAt: readHostedWebhookReceiptString(nestedState.plannedAt),
-    response: readHostedWebhookReceiptResponse(nestedState.response),
-    sideEffects: readHostedWebhookReceiptSideEffects(nestedState.sideEffects),
+    attemptCount: Math.max(Math.trunc(input.receipt.attemptCount), 1),
+    attemptId: input.receipt.attemptId,
+    completedAt: input.receipt.completedAt?.toISOString() ?? null,
+    lastError: readHostedWebhookErrorState({
+      code: input.receipt.lastErrorCode,
+      message: input.receipt.lastErrorMessage,
+      name: input.receipt.lastErrorName,
+      retryable: input.receipt.lastErrorRetryable,
+    }),
+    lastReceivedAt,
+    plannedAt: input.receipt.plannedAt?.toISOString() ?? null,
+    sideEffects: (input.sideEffects ?? []).map((effect) => readHostedWebhookReceiptSideEffect(effect)),
     status,
   };
 }
 
-export function toHostedWebhookReceiptObject(
-  payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
-): Record<string, Prisma.InputJsonValue | Prisma.JsonValue | null> {
-  if (payloadJson && typeof payloadJson === "object" && !Array.isArray(payloadJson)) {
-    return payloadJson as Record<string, Prisma.InputJsonValue | Prisma.JsonValue | null>;
-  }
-
-  if (payloadJson === null || payloadJson === undefined) {
-    return {};
-  }
-
+export function serializeHostedWebhookReceiptErrorState(
+  value: HostedWebhookReceiptErrorState | null,
+): {
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  lastErrorName: string | null;
+  lastErrorRetryable: boolean | null;
+} {
   return {
-    payload: payloadJson,
+    lastErrorCode: value?.code ?? null,
+    lastErrorMessage: value?.message ?? null,
+    lastErrorName: value?.name ?? null,
+    lastErrorRetryable: value?.retryable ?? null,
   };
 }
 
-export function toHostedWebhookReceiptRecord(
-  value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
-): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-}
-
-export function toHostedWebhookReceiptJsonInput(
-  value: HostedWebhookReceiptClaim["payloadJson"],
-): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput {
-  return value === null
-    ? Prisma.JsonNull
-    : value as Prisma.InputJsonValue;
-}
-
-function readHostedWebhookReceiptEventPayload(
-  payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
-): HostedWebhookEventPayload {
-  if (payloadJson && typeof payloadJson === "object" && !Array.isArray(payloadJson)) {
-    const payloadObject = payloadJson as Record<string, Prisma.InputJsonValue | Prisma.JsonValue | null>;
-    const nestedEventPayload = payloadObject.eventPayload;
-
-    if (nestedEventPayload && typeof nestedEventPayload === "object" && !Array.isArray(nestedEventPayload)) {
-      return nestedEventPayload as HostedWebhookEventPayload;
-    }
-  }
-
-  return {};
-}
-
-function readHostedWebhookReceiptResponse(
-  value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
-): HostedWebhookResponsePayload | null {
-  const response = toHostedWebhookReceiptRecord(value);
-
-  return response
-    ? response as HostedWebhookResponsePayload
-    : null;
-}
-
-function readHostedWebhookReceiptError(
-  value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
-): HostedWebhookReceiptErrorState | null {
-  return readHostedWebhookErrorState<HostedWebhookReceiptErrorState>(value);
-}
-
-function readHostedWebhookReceiptSideEffects(
-  value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
-): HostedWebhookSideEffect[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const sideEffects: HostedWebhookSideEffect[] = [];
-
-  for (const candidate of value) {
-    const parsed = readHostedWebhookSideEffect(candidate);
-    if (parsed) {
-      sideEffects.push(parsed);
-    }
-  }
-
-  return sideEffects;
-}
-
-function readHostedWebhookReceiptNumber(
-  value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
-): number {
-  return typeof value === "number" && Number.isFinite(value)
-    ? Math.max(Math.trunc(value), 0)
-    : 0;
-}
-
-function readHostedWebhookReceiptString(
-  value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
-): string | null {
-  return typeof value === "string" && value.trim().length > 0
-    ? value
-    : null;
-}
-
-function readHostedWebhookReceiptStatusValue(
-  value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
-): HostedWebhookReceiptStatus | null {
-  return value === "completed" || value === "failed" || value === "processing"
-    ? value
-    : null;
-}
-
-function readHostedWebhookSideEffectStatusValue(
-  value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
-): HostedWebhookSideEffectStatus | null {
-  return value === "pending" || value === "sent" || value === "sent_unconfirmed"
-    ? value
-    : null;
-}
-
-function readHostedWebhookSideEffectError(
-  value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
-): HostedWebhookSideEffectErrorState | null {
-  return readHostedWebhookErrorState<HostedWebhookSideEffectErrorState>(value);
-}
-
-function readHostedWebhookErrorState<TErrorState extends HostedWebhookReceiptErrorState | HostedWebhookSideEffectErrorState>(
-  value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
-): TErrorState | null {
-  const errorObject = toHostedWebhookReceiptObject(value);
-  const message = readHostedWebhookReceiptString(errorObject.message);
-  const name = readHostedWebhookReceiptString(errorObject.name);
-
-  if (!message || !name) {
-    return null;
-  }
-
+export function serializeHostedWebhookSideEffectErrorState(
+  value: HostedWebhookSideEffectErrorState | null,
+): {
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  lastErrorName: string | null;
+  lastErrorRetryable: boolean | null;
+} {
   return {
-    code: readHostedWebhookReceiptString(errorObject.code),
-    message,
-    name,
-    retryable:
-      typeof errorObject.retryable === "boolean"
-        ? errorObject.retryable
-        : null,
-  } as TErrorState;
+    lastErrorCode: value?.code ?? null,
+    lastErrorMessage: value?.message ?? null,
+    lastErrorName: value?.name ?? null,
+    lastErrorRetryable: value?.retryable ?? null,
+  };
 }
 
-function serializeHostedLinqMessageSideEffectPayload(
-  payload: HostedWebhookLinqMessageSideEffect["payload"],
-): Prisma.InputJsonObject {
-  return {
-    chatId: payload.chatId,
-    inviteId: payload.inviteId,
-    replyToMessageId: payload.replyToMessageId,
-    template: payload.template,
-  } satisfies Prisma.InputJsonObject;
-}
-
-function serializeHostedLinqMessageSideEffectResult(
-  result: HostedWebhookLinqMessageSideEffect["result"],
-): Prisma.InputJsonValue | null {
-  if (!result) {
-    return null;
-  }
-
-  return {
-    chatId: createHostedOpaqueIdentifier("linq.chat", result.chatId),
-    messageId: createHostedOpaqueIdentifier("linq.message", result.messageId),
-  } satisfies Prisma.InputJsonObject;
-}
-
-function readHostedWebhookLinqMessageSideEffectPayload(
-  payload: Record<string, Prisma.InputJsonValue | Prisma.JsonValue | null>,
-): HostedWebhookLinqMessageSideEffect["payload"] | null {
-  const chatId = readHostedWebhookReceiptString(payload.chatId);
-  const template = readHostedWebhookReceiptString(payload.template);
-
-  if (!chatId || !isHostedWebhookLinqMessageTemplate(template)) {
-    return null;
-  }
-
-  return {
-    chatId,
-    inviteId: readHostedWebhookReceiptString(payload.inviteId),
-    replyToMessageId: readHostedWebhookReceiptString(payload.replyToMessageId),
-    template,
-  } satisfies HostedWebhookLinqMessageSideEffect["payload"];
-}
-
-function serializeHostedWebhookSideEffect(
+export function serializeHostedWebhookReceiptSideEffect(
   effect: HostedWebhookSideEffect,
-): Prisma.InputJsonObject {
-  return {
-    attemptCount: effect.attemptCount,
-    effectId: effect.effectId,
-    kind: effect.kind,
-    lastAttemptAt: effect.lastAttemptAt,
-    lastError: effect.lastError,
-    payload:
-      effect.kind === "hosted_execution_dispatch"
-        ? serializeHostedWebhookDispatchSideEffectPayload(effect)
-        : effect.kind === "linq_message_send"
-          ? serializeHostedLinqMessageSideEffectPayload(effect.payload)
-          : effect.payload as unknown as Prisma.InputJsonValue,
-    result:
-      effect.kind === "linq_message_send"
-        ? serializeHostedLinqMessageSideEffectResult(effect.result)
-        : effect.result as unknown as Prisma.InputJsonValue,
-    sentAt: effect.sentAt,
-    status: effect.status,
-  } satisfies Prisma.InputJsonObject;
+): {
+  attemptCount: number;
+  dispatchPayloadJson: Prisma.InputJsonValue | typeof Prisma.DbNull;
+  kind: "hosted_execution_dispatch" | "linq_message_send" | "revnet_invoice_issue";
+  lastAttemptAt: Date | null;
+  linqChatId: string | null;
+  linqInviteId: string | null;
+  linqReplyToMessageId: string | null;
+  linqResultChatId: string | null;
+  linqResultMessageId: string | null;
+  linqTemplate: string | null;
+  revnetAmountPaid: number | null;
+  revnetChargeId: string | null;
+  revnetCurrency: string | null;
+  revnetInvoiceId: string | null;
+  revnetMemberId: string | null;
+  revnetPaymentIntentId: string | null;
+  revnetResultHandled: boolean | null;
+  sentAt: Date | null;
+  status: "pending" | "sent_unconfirmed";
+} & {
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  lastErrorName: string | null;
+  lastErrorRetryable: boolean | null;
+} {
+  const errorFields = serializeHostedWebhookSideEffectErrorState(effect.lastError);
+
+  switch (effect.kind) {
+    case "hosted_execution_dispatch":
+      return {
+        ...errorFields,
+        attemptCount: effect.attemptCount,
+        dispatchPayloadJson: requireHostedWebhookStoredDispatchSideEffectPayload(
+          effect.payload,
+          effect.effectId,
+        ) as unknown as Prisma.InputJsonValue,
+        kind: effect.kind,
+        lastAttemptAt: toDateOrNull(effect.lastAttemptAt),
+        linqChatId: null,
+        linqInviteId: null,
+        linqReplyToMessageId: null,
+        linqResultChatId: null,
+        linqResultMessageId: null,
+        linqTemplate: null,
+        revnetAmountPaid: null,
+        revnetChargeId: null,
+        revnetCurrency: null,
+        revnetInvoiceId: null,
+        revnetMemberId: null,
+        revnetPaymentIntentId: null,
+        revnetResultHandled: null,
+        sentAt: toDateOrNull(effect.sentAt),
+        status: effect.status,
+      };
+    case "linq_message_send":
+      return {
+        ...errorFields,
+        attemptCount: effect.attemptCount,
+        dispatchPayloadJson: Prisma.DbNull,
+        kind: effect.kind,
+        lastAttemptAt: toDateOrNull(effect.lastAttemptAt),
+        linqChatId: effect.payload.chatId,
+        linqInviteId: effect.payload.inviteId,
+        linqReplyToMessageId: effect.payload.replyToMessageId,
+        linqResultChatId: effect.result?.chatId ?? null,
+        linqResultMessageId: effect.result?.messageId ?? null,
+        linqTemplate: effect.payload.template,
+        revnetAmountPaid: null,
+        revnetChargeId: null,
+        revnetCurrency: null,
+        revnetInvoiceId: null,
+        revnetMemberId: null,
+        revnetPaymentIntentId: null,
+        revnetResultHandled: null,
+        sentAt: toDateOrNull(effect.sentAt),
+        status: effect.status,
+      };
+    case "revnet_invoice_issue":
+      return {
+        ...errorFields,
+        attemptCount: effect.attemptCount,
+        dispatchPayloadJson: Prisma.DbNull,
+        kind: effect.kind,
+        lastAttemptAt: toDateOrNull(effect.lastAttemptAt),
+        linqChatId: null,
+        linqInviteId: null,
+        linqReplyToMessageId: null,
+        linqResultChatId: null,
+        linqResultMessageId: null,
+        linqTemplate: null,
+        revnetAmountPaid: effect.payload.amountPaid,
+        revnetChargeId: effect.payload.chargeId,
+        revnetCurrency: effect.payload.currency,
+        revnetInvoiceId: effect.payload.invoiceId,
+        revnetMemberId: effect.payload.memberId,
+        revnetPaymentIntentId: effect.payload.paymentIntentId,
+        revnetResultHandled: effect.result?.handled ?? null,
+        sentAt: toDateOrNull(effect.sentAt),
+        status: effect.status,
+      };
+    default:
+      return assertNeverHostedWebhookSideEffect(effect);
+  }
 }
 
-function readHostedWebhookSideEffect(
-  value: Prisma.InputJsonValue | Prisma.JsonValue | null,
-): HostedWebhookSideEffect | null {
-  const effectObject = toHostedWebhookReceiptObject(value);
-  const effectId = readHostedWebhookReceiptString(effectObject.effectId);
-  const kind = readHostedWebhookReceiptString(effectObject.kind);
-  const status = readHostedWebhookSideEffectStatusValue(effectObject.status);
+function readHostedWebhookReceiptSideEffect(
+  record: HostedWebhookReceiptSideEffectRecordLike,
+): HostedWebhookSideEffect {
+  const lastError = readHostedWebhookErrorState({
+    code: record.lastErrorCode,
+    message: record.lastErrorMessage,
+    name: record.lastErrorName,
+    retryable: record.lastErrorRetryable,
+  });
+  const attemptCount = Math.max(Math.trunc(record.attemptCount), 0);
+  const lastAttemptAt = record.lastAttemptAt?.toISOString() ?? null;
+  const sentAt = record.sentAt?.toISOString() ?? null;
+  const status = readHostedWebhookSideEffectStatus(record.status);
 
-  if (!effectId || !kind || !status) {
-    return null;
-  }
-
-  const attemptCount = readHostedWebhookReceiptNumber(effectObject.attemptCount);
-  const lastAttemptAt = readHostedWebhookReceiptString(effectObject.lastAttemptAt);
-  const lastError = readHostedWebhookSideEffectError(effectObject.lastError);
-  const sentAt = readHostedWebhookReceiptString(effectObject.sentAt);
-  const payload = toHostedWebhookReceiptObject(effectObject.payload);
-  const result = toHostedWebhookReceiptObject(effectObject.result);
-
-  switch (kind) {
+  switch (record.kind) {
     case "hosted_execution_dispatch": {
-      const storedPayload = readHostedWebhookStoredDispatchSideEffectPayload(payload);
+      const payload = readHostedWebhookStoredDispatchSideEffectPayload(record.dispatchPayloadJson);
 
-      if (!storedPayload) {
-        throw buildHostedWebhookSideEffectPayloadError(effectId);
+      if (!payload) {
+        throw buildHostedWebhookSideEffectPayloadError(record.effectId);
       }
 
       return {
         attemptCount,
-        effectId,
-        kind,
+        effectId: record.effectId,
+        kind: "hosted_execution_dispatch",
         lastAttemptAt,
         lastError,
-        payload: storedPayload,
-        result: result.dispatched === true ? { dispatched: true } : null,
+        payload,
+        result: record.sentAt ? { dispatched: true } : null,
         sentAt,
         status,
-      };
+      } satisfies HostedWebhookDispatchSideEffect;
     }
     case "linq_message_send": {
-      const linqPayload = readHostedWebhookLinqMessageSideEffectPayload(payload);
-
-      if (!linqPayload) {
-        throw buildHostedWebhookSideEffectPayloadError(effectId);
+      if (!record.linqChatId || !isHostedWebhookLinqMessageTemplate(record.linqTemplate)) {
+        throw buildHostedWebhookSideEffectPayloadError(record.effectId);
       }
 
       return {
         attemptCount,
-        effectId,
-        kind,
-        lastAttemptAt,
-        lastError,
-        payload: linqPayload,
-        result:
-          Object.keys(result).length === 0
-            ? null
-            : {
-                chatId: readHostedWebhookReceiptString(result.chatId),
-                messageId: readHostedWebhookReceiptString(result.messageId),
-              },
-        sentAt,
-        status,
-      };
-    }
-    case "revnet_invoice_issue": {
-      const invoiceId = readHostedWebhookReceiptString(payload.invoiceId);
-      const memberId = readHostedWebhookReceiptString(payload.memberId);
-      const amountPaid = readHostedWebhookReceiptNumber(payload.amountPaid);
-
-      if (!invoiceId || !memberId) {
-        return null;
-      }
-
-      return {
-        attemptCount,
-        effectId,
-        kind,
+        effectId: record.effectId,
+        kind: "linq_message_send",
         lastAttemptAt,
         lastError,
         payload: {
-          amountPaid,
-          chargeId: readHostedWebhookReceiptString(payload.chargeId),
-          currency: readHostedWebhookReceiptString(payload.currency),
-          invoiceId,
-          memberId,
-          paymentIntentId: readHostedWebhookReceiptString(payload.paymentIntentId),
+          chatId: record.linqChatId,
+          inviteId: record.linqInviteId,
+          replyToMessageId: record.linqReplyToMessageId,
+          template: record.linqTemplate,
         },
         result:
-          result.handled === true
-            ? ({ handled: true } satisfies HostedWebhookRevnetIssuanceSideEffect["result"])
+          record.linqResultChatId || record.linqResultMessageId
+            ? {
+                chatId: record.linqResultChatId,
+                messageId: record.linqResultMessageId,
+              }
             : null,
         sentAt,
         status,
-      };
+      } satisfies HostedWebhookLinqMessageSideEffect;
+    }
+    case "revnet_invoice_issue": {
+      const amountPaid = record.revnetAmountPaid;
+
+      if (amountPaid === null || !Number.isFinite(amountPaid) || !record.revnetInvoiceId || !record.revnetMemberId) {
+        throw buildHostedWebhookSideEffectPayloadError(record.effectId);
+      }
+
+      return {
+        attemptCount,
+        effectId: record.effectId,
+        kind: "revnet_invoice_issue",
+        lastAttemptAt,
+        lastError,
+        payload: {
+          amountPaid: Math.max(Math.trunc(amountPaid), 0),
+          chargeId: record.revnetChargeId,
+          currency: record.revnetCurrency,
+          invoiceId: record.revnetInvoiceId,
+          memberId: record.revnetMemberId,
+          paymentIntentId: record.revnetPaymentIntentId,
+        },
+        result: record.revnetResultHandled === true ? { handled: true } : null,
+        sentAt,
+        status,
+      } satisfies HostedWebhookRevnetIssuanceSideEffect;
     }
     default:
-      return null;
+      throw buildHostedWebhookSideEffectPayloadError(record.effectId);
   }
 }
 
-function serializeHostedWebhookDispatchSideEffectPayload(
-  effect: HostedWebhookDispatchSideEffect,
-): Prisma.InputJsonValue {
-  const payload = requireHostedWebhookStoredDispatchSideEffectPayload(
-    effect.payload,
-    effect.effectId,
-  );
+function readHostedWebhookErrorState(input: {
+  code: string | null;
+  message: string | null;
+  name: string | null;
+  retryable: boolean | null;
+}): HostedWebhookReceiptErrorState | null {
+  if (!input.message || !input.name) {
+    return null;
+  }
 
-  return payload as unknown as Prisma.InputJsonValue;
+  return {
+    code: input.code,
+    message: input.message,
+    name: input.name,
+    retryable: input.retryable,
+  };
+}
+
+function readHostedWebhookReceiptStatus(
+  value: string,
+): HostedWebhookReceiptState["status"] {
+  if (value === "processing" || value === "completed" || value === "failed") {
+    return value;
+  }
+
+  throw hostedOnboardingError({
+    code: "WEBHOOK_RECEIPT_STATUS_INVALID",
+    message: `Hosted webhook receipt status ${JSON.stringify(value)} is invalid.`,
+    httpStatus: 500,
+  });
+}
+
+function readHostedWebhookSideEffectStatus(
+  value: string,
+): HostedWebhookSideEffect["status"] {
+  if (value === "pending" || value === "sent_unconfirmed") {
+    return value;
+  }
+
+  throw hostedOnboardingError({
+    code: "WEBHOOK_SIDE_EFFECT_STATUS_INVALID",
+    message: `Hosted webhook side-effect status ${JSON.stringify(value)} is invalid.`,
+    httpStatus: 500,
+  });
 }
 
 function buildHostedWebhookSideEffectPayloadError(effectId: string): Error {
@@ -393,12 +366,24 @@ function buildHostedWebhookSideEffectPayloadError(effectId: string): Error {
   });
 }
 
+function assertNeverHostedWebhookSideEffect(value: never): never {
+  throw hostedOnboardingError({
+    code: "WEBHOOK_SIDE_EFFECT_KIND_INVALID",
+    message: `Hosted webhook side effect kind is invalid: ${JSON.stringify(value)}.`,
+    httpStatus: 500,
+  });
+}
+
 function isHostedWebhookLinqMessageTemplate(
   value: string | null,
 ): value is HostedWebhookLinqMessageSideEffect["payload"]["template"] {
   return value === "daily_quota" || value === "invite_signin" || value === "invite_signup";
 }
 
-export function generateHostedWebhookReceiptAttemptId(): string {
-  return randomBytes(16).toString("hex");
+function toDateOrNull(value: string | null): Date | null {
+  if (!value) {
+    return null;
+  }
+
+  return new Date(value);
 }

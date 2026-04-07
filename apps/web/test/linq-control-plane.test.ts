@@ -31,6 +31,10 @@ const mocks = vi.hoisted(() => ({
     findUnique: vi.fn(),
     updateMany: vi.fn(),
   },
+  hostedWebhookReceiptSideEffect: {
+    deleteMany: vi.fn(),
+    upsert: vi.fn(),
+  },
 }));
 
 vi.mock("@/src/lib/device-sync/auth", () => ({
@@ -98,6 +102,8 @@ describe("HostedLinqControlPlane", () => {
     mocks.hostedWebhookReceipt.create.mockResolvedValue({});
     mocks.hostedWebhookReceipt.findUnique.mockResolvedValue(null);
     mocks.hostedWebhookReceipt.updateMany.mockResolvedValue({ count: 1 });
+    mocks.hostedWebhookReceiptSideEffect.deleteMany.mockResolvedValue({ count: 0 });
+    mocks.hostedWebhookReceiptSideEffect.upsert.mockResolvedValue({});
     mocks.assertBrowserMutationOrigin.mockReset();
     mocks.createHostedDeviceSyncControlPlaneContext.mockReturnValue({
       allowedReturnOrigins: ["https://example.test"],
@@ -110,6 +116,7 @@ describe("HostedLinqControlPlane", () => {
     });
     mocks.getPrisma.mockReturnValue({
       hostedWebhookReceipt: mocks.hostedWebhookReceipt,
+      hostedWebhookReceiptSideEffect: mocks.hostedWebhookReceiptSideEffect,
     });
     mocks.hostedAgentSessionService.mockImplementation(() => ({
       createAgentSession: vi.fn(),
@@ -504,22 +511,13 @@ describe("HostedLinqControlPlane", () => {
     });
     expect(mocks.hostedWebhookReceipt.create).toHaveBeenCalledTimes(1);
     expect(mocks.hostedWebhookReceipt.updateMany).toHaveBeenCalled();
-    const receiptUpdate = mocks.hostedWebhookReceipt.updateMany.mock.calls[0]?.[0];
-    expect(receiptUpdate).toEqual(
+    const receiptUpdates = mocks.hostedWebhookReceipt.updateMany.mock.calls.map((call) => call[0]);
+    expect(receiptUpdates.at(-1)).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          payloadJson: expect.objectContaining({
-            receiptState: expect.objectContaining({
-              response: expect.objectContaining({
-                accepted: true,
-                duplicate: false,
-                eventId: "evt_ignored_123",
-                eventType: "message.delivered",
-                ignored: true,
-                routed: false,
-              }),
-            }),
-          }),
+          completedAt: expect.any(Date),
+          plannedAt: expect.any(Date),
+          status: "completed",
         }),
       }),
     );

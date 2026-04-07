@@ -3,6 +3,7 @@ import type {
   HostedExecutionDispatchRequest,
   HostedExecutionReferenceOutboxPayload,
 } from "@murphai/hosted-execution";
+import { Prisma } from "@prisma/client";
 
 const {
   deleteHostedStoredDispatchPayloadBestEffort,
@@ -14,6 +15,7 @@ const {
 
 vi.mock("@prisma/client", () => ({
   Prisma: {
+    DbNull: null,
     JsonNull: null,
   },
 }));
@@ -53,7 +55,8 @@ import {
 } from "../../src/lib/hosted-onboarding/webhook-receipt-dispatch";
 import {
   readHostedWebhookReceiptState,
-  serializeHostedWebhookReceiptState,
+  serializeHostedWebhookReceiptErrorState,
+  serializeHostedWebhookReceiptSideEffect,
 } from "../../src/lib/hosted-onboarding/webhook-receipt-codec";
 import {
   stageHostedWebhookDispatchSideEffectPayload,
@@ -64,6 +67,7 @@ import {
 import {
   createHostedWebhookDispatchSideEffect,
   type HostedWebhookReceiptClaim,
+  type HostedWebhookReceiptState,
   type HostedWebhookSideEffect,
 } from "../../src/lib/hosted-onboarding/webhook-receipt-types";
 
@@ -89,11 +93,7 @@ describe("hosted webhook receipt privacy cutover", () => {
     const pendingEffect = createHostedWebhookDispatchSideEffect({ dispatch });
 
     expect(() =>
-      serializeHostedWebhookReceiptState(
-        createReceiptState({
-          sideEffects: [pendingEffect],
-        }),
-      ),
+      serializeHostedWebhookReceiptSideEffect(pendingEffect),
     ).toThrowError(/must be staged/i);
   });
 
@@ -114,8 +114,10 @@ describe("hosted webhook receipt privacy cutover", () => {
     maybeStageHostedExecutionDispatchPayload.mockResolvedValue(referencePayload);
 
     const claimedReceipt: HostedWebhookReceiptClaim = {
-      payloadJson: serializeHostedWebhookReceiptState(createReceiptState({ sideEffects: [] })),
+      eventId: dispatch.eventId,
+      source: "linq",
       state: createReceiptState({ sideEffects: [] }),
+      version: 1,
     };
     const prisma = {
       hostedWebhookReceipt: {
@@ -131,9 +133,6 @@ describe("hosted webhook receipt privacy cutover", () => {
       eventId: dispatch.eventId,
       // @ts-expect-error Minimal receipt persistence stub for cleanup-path coverage.
       prisma,
-      response: {
-        ok: true,
-      },
       source: "linq",
     })).rejects.toThrow("receipt write failed");
 
@@ -152,8 +151,10 @@ describe("hosted webhook receipt privacy cutover", () => {
       .mockResolvedValueOnce(null);
 
     const claimedReceipt: HostedWebhookReceiptClaim = {
-      payloadJson: serializeHostedWebhookReceiptState(createReceiptState({ sideEffects: [] })),
+      eventId: firstDispatch.eventId,
+      source: "linq",
       state: createReceiptState({ sideEffects: [] }),
+      version: 1,
     };
     const prisma = {
       hostedWebhookReceipt: {
@@ -170,9 +171,6 @@ describe("hosted webhook receipt privacy cutover", () => {
       eventId: firstDispatch.eventId,
       // @ts-expect-error Minimal receipt persistence stub for cleanup-path coverage.
       prisma,
-      response: {
-        ok: true,
-      },
       source: "linq",
     })).rejects.toMatchObject({
       code: "HOSTED_WEBHOOK_DISPATCH_PAYLOAD_REF_REQUIRED",
@@ -186,58 +184,70 @@ describe("hosted webhook receipt privacy cutover", () => {
   it("fails closed when receipt hydration sees a legacy dispatch snapshot shape", () => {
     expect(() =>
       readHostedWebhookReceiptState({
-        eventPayload: {
-          eventType: "message.received",
-        },
-        receiptState: {
+        receipt: {
           attemptCount: 1,
           attemptId: "attempt_legacy",
           completedAt: null,
-          lastError: null,
-          lastReceivedAt: "2026-04-06T09:00:00.000Z",
-          plannedAt: "2026-04-06T09:00:00.000Z",
-          response: {
-            ok: true,
-          },
-          sideEffects: [{
-            attemptCount: 0,
-            effectId: "dispatch:legacy",
-            kind: "hosted_execution_dispatch",
-            lastAttemptAt: null,
-            lastError: null,
-            payload: {
-              dispatchRef: {
-                eventId: "legacy",
-                eventKind: "telegram.message.received",
-                occurredAt: "2026-04-06T09:00:00.000Z",
-                userId: "member_123",
-              },
-              schemaVersion: "murph.execution-outbox.v2",
-              storage: "reference",
-              telegramUpdate: {
-                message: {
-                  text: "legacy plaintext",
-                },
-              },
-            },
-            result: null,
-            sentAt: null,
-            status: "pending",
-          }],
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastErrorName: null,
+          lastErrorRetryable: null,
+          lastReceivedAt: new Date("2026-04-06T09:00:00.000Z"),
+          plannedAt: new Date("2026-04-06T09:00:00.000Z"),
           status: "processing",
         },
+        sideEffects: [{
+          attemptCount: 0,
+          dispatchPayloadJson: {
+            dispatchRef: {
+              eventId: "legacy",
+              eventKind: "telegram.message.received",
+              occurredAt: "2026-04-06T09:00:00.000Z",
+              userId: "member_123",
+            },
+            schemaVersion: "murph.execution-outbox.v2",
+            storage: "reference",
+            telegramUpdate: {
+              message: {
+                text: "legacy plaintext",
+              },
+            },
+          },
+          effectId: "dispatch:legacy",
+          kind: "hosted_execution_dispatch",
+          lastAttemptAt: null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastErrorName: null,
+          lastErrorRetryable: null,
+          linqChatId: null,
+          linqInviteId: null,
+          linqReplyToMessageId: null,
+          linqResultChatId: null,
+          linqResultMessageId: null,
+          linqTemplate: null,
+          revnetAmountPaid: null,
+          revnetChargeId: null,
+          revnetCurrency: null,
+          revnetInvoiceId: null,
+          revnetMemberId: null,
+          revnetPaymentIntentId: null,
+          revnetResultHandled: null,
+          sentAt: null,
+          status: "pending",
+        }],
       }),
     ).toThrowError(/invalid or legacy payload shape/i);
   });
 
-  it("serializes staged dispatch side effects without leaking message content into receipt JSON", () => {
+  it("serializes staged dispatch side effects without leaking message content into receipt storage", () => {
     const dispatch = createSensitiveDispatch();
     const stagedEffect = {
       ...createHostedWebhookDispatchSideEffect({ dispatch }),
       payload: createReferencePayload(dispatch, "dispatch/staged-2"),
     };
 
-    const serialized = serializeHostedWebhookReceiptState(
+    const serialized = serializeHostedWebhookReceiptStateRecords(
       createReceiptState({
         sideEffects: [stagedEffect],
       }),
@@ -248,7 +258,7 @@ describe("hosted webhook receipt privacy cutover", () => {
     expect(serializedText).toContain("dispatch/staged-2");
     expect(serializedText).not.toContain("super secret hello from linq");
     expect(serializedText).not.toContain("hbidx:phone:v1:sensitive-phone-key");
-    expect(readHostedWebhookReceiptDispatchByEventId(serialized, dispatch.eventId)).toBeNull();
+    expect(readHostedWebhookReceiptDispatchByEventId(roundTripped, dispatch.eventId)).toBeNull();
     expect(buildHostedWebhookDispatchFromPayload(stagedEffect.payload)).toBeNull();
     expect(roundTripped.sideEffects).toEqual([
       expect.objectContaining({
@@ -307,22 +317,51 @@ function createReferencePayload(
 
 function createReceiptState(input: {
   sideEffects: HostedWebhookSideEffect[];
-}) {
+}): HostedWebhookReceiptState {
   return {
     attemptCount: 1,
-    attemptId: null,
+    attemptId: "attempt_123",
     completedAt: null,
-    eventPayload: {
-      eventType: "message.received",
-    },
     lastError: null,
     lastReceivedAt: "2026-04-06T09:00:00.000Z",
     plannedAt: "2026-04-06T09:00:00.000Z",
-    response: {
-      ok: true,
-    },
     sideEffects: input.sideEffects,
     status: "processing" as const,
+  };
+}
+
+function serializeHostedWebhookReceiptStateRecords(
+  state: HostedWebhookReceiptState,
+): Parameters<typeof readHostedWebhookReceiptState>[0] {
+  return {
+    receipt: {
+      attemptCount: state.attemptCount,
+      attemptId: state.attemptId,
+      completedAt: state.completedAt ? new Date(state.completedAt) : null,
+      ...serializeHostedWebhookReceiptErrorState(state.lastError),
+      lastReceivedAt: new Date(state.lastReceivedAt),
+      plannedAt: state.plannedAt ? new Date(state.plannedAt) : null,
+      status: state.status,
+    },
+    sideEffects: state.sideEffects.map((effect) =>
+      normalizeSerializedSideEffectForRead(effect.effectId, serializeHostedWebhookReceiptSideEffect(effect))
+    ),
+  };
+}
+
+function normalizeSerializedSideEffectForRead(
+  effectId: string,
+  effect: ReturnType<typeof serializeHostedWebhookReceiptSideEffect>,
+): NonNullable<Parameters<typeof readHostedWebhookReceiptState>[0]["sideEffects"]>[number] {
+  const dispatchPayloadJson: Prisma.InputJsonValue | null =
+    effect.dispatchPayloadJson === Prisma.DbNull
+      ? null
+      : effect.dispatchPayloadJson as Prisma.InputJsonValue;
+
+  return {
+    effectId,
+    ...effect,
+    dispatchPayloadJson,
   };
 }
 

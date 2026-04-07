@@ -1,15 +1,10 @@
+import { randomBytes } from "node:crypto";
+
 import { isHostedOnboardingError } from "./errors";
-import {
-  generateHostedWebhookReceiptAttemptId,
-  serializeHostedWebhookReceiptState,
-} from "./webhook-receipt-codec";
 import type {
   HostedWebhookDispatchSideEffect,
-  HostedWebhookEventPayload,
   HostedWebhookLinqMessageSideEffect,
-  HostedWebhookReceiptClaim,
   HostedWebhookReceiptErrorState,
-  HostedWebhookResponsePayload,
   HostedWebhookReceiptState,
   HostedWebhookReceiptStatus,
   HostedWebhookRevnetIssuanceSideEffect,
@@ -19,35 +14,26 @@ import type {
 } from "./webhook-receipt-types";
 
 export function claimHostedWebhookReceipt(input: {
-  eventPayload: HostedWebhookEventPayload;
   previousState?: HostedWebhookReceiptState | null;
   receivedAt: Date;
-}): HostedWebhookReceiptClaim {
-  return toHostedWebhookReceiptClaim(
-    buildHostedWebhookReceiptState({
-      attemptCount: Math.max(input.previousState?.attemptCount ?? 0, 0) + 1,
-      attemptId: generateHostedWebhookReceiptAttemptId(),
-      completedAt: null,
-      eventPayload: mergeHostedWebhookEventPayload(
-        input.eventPayload,
-        input.previousState?.eventPayload ?? null,
-      ),
-      lastError: null,
-      lastReceivedAt: input.receivedAt.toISOString(),
-      plannedAt: input.previousState?.plannedAt ?? null,
-      response: input.previousState?.response ?? null,
-      sideEffects: input.previousState?.sideEffects ?? [],
-      status: "processing",
-    }),
-  );
+}): HostedWebhookReceiptState {
+  return buildHostedWebhookReceiptState({
+    attemptCount: Math.max(input.previousState?.attemptCount ?? 0, 0) + 1,
+    attemptId: generateHostedWebhookReceiptAttemptId(),
+    completedAt: null,
+    lastError: null,
+    lastReceivedAt: input.receivedAt.toISOString(),
+    plannedAt: input.previousState?.plannedAt ?? null,
+    sideEffects: input.previousState?.sideEffects ?? [],
+    status: "processing",
+  });
 }
 
 export function queueHostedWebhookReceiptSideEffects(
   currentState: HostedWebhookReceiptState,
   desiredSideEffects: readonly HostedWebhookSideEffect[],
-  input?: {
+  input: {
     plannedAt: string;
-    response: HostedWebhookResponsePayload;
   },
 ): HostedWebhookReceiptState {
   const nextSideEffects =
@@ -55,13 +41,12 @@ export function queueHostedWebhookReceiptSideEffects(
       ? currentState.sideEffects
       : mergeHostedWebhookSideEffects(currentState.sideEffects, desiredSideEffects);
 
-  if (!input && nextSideEffects === currentState.sideEffects) {
+  if (nextSideEffects === currentState.sideEffects && input.plannedAt === currentState.plannedAt) {
     return currentState;
   }
 
   return updateHostedWebhookReceiptState(currentState, {
-    plannedAt: input?.plannedAt ?? currentState.plannedAt,
-    response: input?.response ?? currentState.response,
+    plannedAt: input.plannedAt,
     sideEffects: nextSideEffects,
   });
 }
@@ -82,12 +67,12 @@ export function startHostedWebhookReceiptSideEffect(
 export function markHostedWebhookReceiptSideEffectSent(
   currentState: HostedWebhookReceiptState,
   effectId: string,
-  result: HostedWebhookSideEffectResult,
-  sentAt: string,
+  _result: HostedWebhookSideEffectResult,
+  _sentAt: string,
 ): HostedWebhookReceiptState {
-  return updateHostedWebhookReceiptSideEffect(currentState, effectId, (effect) =>
-    markHostedWebhookSideEffectSent(effect, result, sentAt),
-  );
+  return updateHostedWebhookReceiptState(currentState, {
+    sideEffects: currentState.sideEffects.filter((effect) => effect.effectId !== effectId),
+  });
 }
 
 export function markHostedWebhookReceiptSideEffectSentUnconfirmed(
@@ -99,11 +84,36 @@ export function markHostedWebhookReceiptSideEffectSentUnconfirmed(
     sentAt: string;
   },
 ): HostedWebhookReceiptState {
-  return updateHostedWebhookReceiptSideEffect(currentState, effectId, (effect) => ({
-    ...markHostedWebhookSideEffectSent(effect, input.result, input.sentAt),
-    lastError: serializeHostedWebhookSideEffectError(input.error),
-    status: "sent_unconfirmed",
-  }));
+  return updateHostedWebhookReceiptSideEffect(currentState, effectId, (effect) => {
+    const lastError = serializeHostedWebhookSideEffectError(input.error);
+
+    switch (effect.kind) {
+      case "hosted_execution_dispatch":
+        return {
+          ...effect,
+          lastError,
+          result: readHostedWebhookDispatchSideEffectResult(input.result),
+          sentAt: input.sentAt,
+          status: "sent_unconfirmed",
+        } satisfies HostedWebhookDispatchSideEffect;
+      case "linq_message_send":
+        return {
+          ...effect,
+          lastError,
+          result: readHostedWebhookLinqMessageSideEffectResult(input.result),
+          sentAt: input.sentAt,
+          status: "sent_unconfirmed",
+        } satisfies HostedWebhookLinqMessageSideEffect;
+      case "revnet_invoice_issue":
+        return {
+          ...effect,
+          lastError,
+          result: readHostedWebhookRevnetIssuanceSideEffectResult(input.result),
+          sentAt: input.sentAt,
+          status: "sent_unconfirmed",
+        } satisfies HostedWebhookRevnetIssuanceSideEffect;
+    }
+  });
 }
 
 export function markHostedWebhookReceiptSideEffectFailed(
@@ -123,14 +133,13 @@ export function completeHostedWebhookReceipt(
   currentState: HostedWebhookReceiptState,
   input: {
     completedAt: string;
-    eventPayload: HostedWebhookEventPayload;
   },
 ): HostedWebhookReceiptState {
   return updateHostedWebhookReceiptState(currentState, {
     completedAt: input.completedAt,
-    eventPayload: mergeHostedWebhookEventPayload(input.eventPayload, currentState.eventPayload),
     lastError: null,
     lastReceivedAt: input.completedAt,
+    sideEffects: [],
     status: "completed",
   });
 }
@@ -139,17 +148,24 @@ export function failHostedWebhookReceipt(
   currentState: HostedWebhookReceiptState,
   input: {
     error: unknown;
-    eventPayload: HostedWebhookEventPayload;
     failedAt: string;
   },
 ): HostedWebhookReceiptState {
-  return updateHostedWebhookReceiptState(currentState, {
+  const lastError = serializeHostedWebhookReceiptError(input.error);
+  const nextState = updateHostedWebhookReceiptState(currentState, {
     completedAt: null,
-    eventPayload: mergeHostedWebhookEventPayload(input.eventPayload, currentState.eventPayload),
-    lastError: serializeHostedWebhookReceiptError(input.error),
+    lastError,
     lastReceivedAt: input.failedAt,
     status: "failed",
   });
+
+  if (lastError.retryable === false) {
+    return updateHostedWebhookReceiptState(nextState, {
+      sideEffects: nextState.sideEffects.filter((effect) => effect.status === "sent_unconfirmed"),
+    });
+  }
+
+  return nextState;
 }
 
 export function getHostedWebhookSideEffect(
@@ -165,36 +181,23 @@ export function getHostedWebhookSideEffect(
   return effect;
 }
 
-export function toHostedWebhookReceiptClaim(
-  state: HostedWebhookReceiptState,
-): HostedWebhookReceiptClaim {
-  return {
-    payloadJson: serializeHostedWebhookReceiptState(state),
-    state,
-  };
-}
-
 function buildHostedWebhookReceiptState(input: {
   attemptCount: number;
-  attemptId: string | null;
+  attemptId: string;
   completedAt: string | null;
-  eventPayload: HostedWebhookEventPayload;
   lastError: HostedWebhookReceiptErrorState | null;
-  lastReceivedAt: string | null;
+  lastReceivedAt: string;
   plannedAt: string | null;
-  response: HostedWebhookResponsePayload | null;
   sideEffects: HostedWebhookSideEffect[];
-  status: HostedWebhookReceiptStatus | null;
+  status: HostedWebhookReceiptStatus;
 }): HostedWebhookReceiptState {
   return {
     attemptCount: Math.max(Math.trunc(input.attemptCount), 1),
     attemptId: input.attemptId,
     completedAt: input.status === "completed" ? input.completedAt : null,
-    eventPayload: input.eventPayload,
     lastError: input.status === "failed" ? input.lastError : null,
     lastReceivedAt: input.lastReceivedAt,
     plannedAt: input.plannedAt,
-    response: input.response,
     sideEffects: input.sideEffects,
     status: input.status,
   };
@@ -205,16 +208,16 @@ function updateHostedWebhookReceiptState(
   overrides: Partial<HostedWebhookReceiptState>,
 ): HostedWebhookReceiptState {
   return buildHostedWebhookReceiptState({
-    attemptCount: "attemptCount" in overrides ? overrides.attemptCount ?? 0 : currentState.attemptCount,
-    attemptId: "attemptId" in overrides ? overrides.attemptId ?? null : currentState.attemptId,
+    attemptCount: "attemptCount" in overrides ? Math.max(overrides.attemptCount ?? 0, 0) : currentState.attemptCount,
+    attemptId: "attemptId" in overrides ? overrides.attemptId ?? currentState.attemptId : currentState.attemptId,
     completedAt: "completedAt" in overrides ? overrides.completedAt ?? null : currentState.completedAt,
-    eventPayload: "eventPayload" in overrides ? overrides.eventPayload ?? {} : currentState.eventPayload,
     lastError: "lastError" in overrides ? overrides.lastError ?? null : currentState.lastError,
-    lastReceivedAt: "lastReceivedAt" in overrides ? overrides.lastReceivedAt ?? null : currentState.lastReceivedAt,
+    lastReceivedAt: "lastReceivedAt" in overrides
+      ? overrides.lastReceivedAt ?? currentState.lastReceivedAt
+      : currentState.lastReceivedAt,
     plannedAt: "plannedAt" in overrides ? overrides.plannedAt ?? null : currentState.plannedAt,
-    response: "response" in overrides ? overrides.response ?? null : currentState.response,
     sideEffects: "sideEffects" in overrides ? overrides.sideEffects ?? [] : currentState.sideEffects,
-    status: "status" in overrides ? overrides.status ?? null : currentState.status,
+    status: "status" in overrides ? overrides.status ?? currentState.status : currentState.status,
   });
 }
 
@@ -228,16 +231,6 @@ function updateHostedWebhookReceiptSideEffect(
       effect.effectId === effectId ? mutate(effect) : effect,
     ),
   });
-}
-
-function mergeHostedWebhookEventPayload(
-  eventPayload: HostedWebhookEventPayload,
-  previousEventPayload: HostedWebhookEventPayload | null,
-): HostedWebhookEventPayload {
-  return {
-    ...(previousEventPayload ?? {}),
-    ...eventPayload,
-  };
 }
 
 function mergeHostedWebhookSideEffects(
@@ -268,6 +261,36 @@ function mergeHostedWebhookSideEffects(
   return mergedEffects;
 }
 
+function readHostedWebhookDispatchSideEffectResult(
+  value: HostedWebhookSideEffectResult,
+): NonNullable<HostedWebhookDispatchSideEffect["result"]> {
+  if ("dispatched" in value && value.dispatched === true) {
+    return value;
+  }
+
+  throw new Error("Hosted webhook dispatch side effect received an invalid terminal result.");
+}
+
+function readHostedWebhookLinqMessageSideEffectResult(
+  value: HostedWebhookSideEffectResult,
+): NonNullable<HostedWebhookLinqMessageSideEffect["result"]> {
+  if ("chatId" in value && "messageId" in value) {
+    return value;
+  }
+
+  throw new Error("Hosted webhook Linq message side effect received an invalid terminal result.");
+}
+
+function readHostedWebhookRevnetIssuanceSideEffectResult(
+  value: HostedWebhookSideEffectResult,
+): NonNullable<HostedWebhookRevnetIssuanceSideEffect["result"]> {
+  if ("handled" in value && value.handled === true) {
+    return value;
+  }
+
+  throw new Error("Hosted webhook Revnet issuance side effect received an invalid terminal result.");
+}
+
 function mergeHostedWebhookSideEffect(
   currentEffect: HostedWebhookSideEffect,
   desiredEffect: HostedWebhookSideEffect,
@@ -276,92 +299,59 @@ function mergeHostedWebhookSideEffect(
     return desiredEffect;
   }
 
+  if (currentEffect.status !== "sent_unconfirmed") {
+    return {
+      ...desiredEffect,
+      attemptCount: currentEffect.attemptCount,
+      lastAttemptAt: currentEffect.lastAttemptAt,
+      lastError: currentEffect.lastError,
+      sentAt: currentEffect.sentAt,
+      status: currentEffect.status,
+    };
+  }
+
   switch (desiredEffect.kind) {
     case "hosted_execution_dispatch": {
       const currentDispatchEffect = currentEffect as HostedWebhookDispatchSideEffect;
-      const terminalStatus = readHostedWebhookSideEffectTerminalStatus(currentDispatchEffect.status);
       return {
         ...desiredEffect,
         attemptCount: currentDispatchEffect.attemptCount,
         lastAttemptAt: currentDispatchEffect.lastAttemptAt,
-        lastError: terminalStatus === "sent" ? null : currentDispatchEffect.lastError,
-        payload: terminalStatus ? currentDispatchEffect.payload : desiredEffect.payload,
-        result: terminalStatus ? currentDispatchEffect.result : null,
-        sentAt: terminalStatus ? currentDispatchEffect.sentAt : null,
-        status: terminalStatus ?? "pending",
+        lastError: currentDispatchEffect.lastError,
+        payload: currentDispatchEffect.payload,
+        result: currentDispatchEffect.result,
+        sentAt: currentDispatchEffect.sentAt,
+        status: "sent_unconfirmed",
       };
     }
     case "linq_message_send": {
       const currentLinqEffect = currentEffect as HostedWebhookLinqMessageSideEffect;
-      const terminalStatus = readHostedWebhookSideEffectTerminalStatus(currentLinqEffect.status);
       return {
         ...desiredEffect,
         attemptCount: currentLinqEffect.attemptCount,
         lastAttemptAt: currentLinqEffect.lastAttemptAt,
-        lastError: terminalStatus === "sent" ? null : currentLinqEffect.lastError,
-        result: terminalStatus ? currentLinqEffect.result : null,
-        sentAt: terminalStatus ? currentLinqEffect.sentAt : null,
-        status: terminalStatus ?? "pending",
+        lastError: currentLinqEffect.lastError,
+        payload: currentLinqEffect.payload,
+        result: currentLinqEffect.result,
+        sentAt: currentLinqEffect.sentAt,
+        status: "sent_unconfirmed",
       };
     }
     case "revnet_invoice_issue": {
       const currentRevnetEffect = currentEffect as HostedWebhookRevnetIssuanceSideEffect;
-      const terminalStatus = readHostedWebhookSideEffectTerminalStatus(currentRevnetEffect.status);
       return {
         ...desiredEffect,
         attemptCount: currentRevnetEffect.attemptCount,
         lastAttemptAt: currentRevnetEffect.lastAttemptAt,
-        lastError: terminalStatus === "sent" ? null : currentRevnetEffect.lastError,
-        result: terminalStatus ? currentRevnetEffect.result : null,
-        sentAt: terminalStatus ? currentRevnetEffect.sentAt : null,
-        status: terminalStatus ?? "pending",
+        lastError: currentRevnetEffect.lastError,
+        payload: currentRevnetEffect.payload,
+        result: currentRevnetEffect.result,
+        sentAt: currentRevnetEffect.sentAt,
+        status: "sent_unconfirmed",
       };
     }
     default:
       return desiredEffect;
-  }
-}
-
-function readHostedWebhookSideEffectTerminalStatus(
-  status: HostedWebhookSideEffect["status"],
-): Exclude<HostedWebhookSideEffect["status"], "pending"> | null {
-  return status === "sent" || status === "sent_unconfirmed"
-    ? status
-    : null;
-}
-
-function markHostedWebhookSideEffectSent(
-  effect: HostedWebhookSideEffect,
-  result: HostedWebhookSideEffectResult,
-  sentAt: string,
-): HostedWebhookSideEffect {
-  switch (effect.kind) {
-    case "hosted_execution_dispatch":
-      return {
-        ...effect,
-        lastError: null,
-        result: result as HostedWebhookDispatchSideEffect["result"],
-        sentAt,
-        status: "sent",
-      };
-    case "linq_message_send":
-      return {
-        ...effect,
-        lastError: null,
-        result: result as HostedWebhookLinqMessageSideEffect["result"],
-        sentAt,
-        status: "sent",
-      };
-    case "revnet_invoice_issue":
-      return {
-        ...effect,
-        lastError: null,
-        result: result as HostedWebhookRevnetIssuanceSideEffect["result"],
-        sentAt,
-        status: "sent",
-      };
-    default:
-      return effect;
   }
 }
 
@@ -428,4 +418,8 @@ function readHostedWebhookSideEffectRetryable(error: Error): boolean | null {
   return "retryable" in error && typeof error.retryable === "boolean"
     ? error.retryable
     : null;
+}
+
+export function generateHostedWebhookReceiptAttemptId(): string {
+  return randomBytes(16).toString("hex");
 }

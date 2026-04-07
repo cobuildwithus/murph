@@ -1,7 +1,8 @@
 import type {
   HostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution";
-import { Prisma, type PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
+import { type Prisma } from "@prisma/client";
 
 import {
   createHostedWebhookDispatchSideEffectPayload,
@@ -26,7 +27,7 @@ export type HostedWebhookSideEffectErrorState = {
   retryable: boolean | null;
 };
 
-export type HostedWebhookSideEffectStatus = "pending" | "sent" | "sent_unconfirmed";
+export type HostedWebhookSideEffectStatus = "pending" | "sent_unconfirmed";
 
 export type HostedWebhookDispatchSideEffectPayload = HostedWebhookDispatchPayload;
 export type HostedWebhookStoredDispatchSideEffectPayload = HostedWebhookStoredDispatchPayload;
@@ -95,20 +96,20 @@ export type HostedWebhookReceiptStatus = "completed" | "failed" | "processing";
 
 export type HostedWebhookReceiptState = {
   attemptCount: number;
-  attemptId: string | null;
+  attemptId: string;
   completedAt: string | null;
-  eventPayload: HostedWebhookEventPayload;
   lastError: HostedWebhookReceiptErrorState | null;
-  lastReceivedAt: string | null;
+  lastReceivedAt: string;
   plannedAt: string | null;
-  response: HostedWebhookResponsePayload | null;
   sideEffects: HostedWebhookSideEffect[];
-  status: HostedWebhookReceiptStatus | null;
+  status: HostedWebhookReceiptStatus;
 };
 
 export type HostedWebhookReceiptClaim = {
-  payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null;
+  eventId: string;
+  source: string;
   state: HostedWebhookReceiptState;
+  version: number;
 };
 
 export type HostedWebhookSideEffectResult =
@@ -120,10 +121,7 @@ export type HostedWebhookReceiptPersistenceClient = PrismaClient | Prisma.Transa
 
 export type HostedWebhookDispatchEnqueueInput = {
   eventId: string;
-  nextPayloadJson: Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput;
-  nextStatus: HostedWebhookReceiptStatus | null;
   payload: HostedWebhookStoredDispatchSideEffectPayload;
-  previousClaim: HostedWebhookReceiptClaim;
   prismaOrTransaction: HostedWebhookReceiptPersistenceClient;
   source: string;
 };
@@ -133,7 +131,7 @@ export type HostedWebhookReceiptHandlers = {
     effect: HostedWebhookSideEffect;
     prisma: HostedWebhookReceiptPersistenceClient;
   }) => Promise<void>;
-  enqueueDispatchEffect: (input: HostedWebhookDispatchEnqueueInput) => Promise<number>;
+  enqueueDispatchEffect: (input: HostedWebhookDispatchEnqueueInput) => Promise<void>;
   performSideEffect: (
     effect: HostedWebhookSideEffect,
     options: {

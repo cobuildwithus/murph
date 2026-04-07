@@ -1,4 +1,4 @@
-import { Prisma, type PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { enqueueHostedExecutionOutboxPayload } from "../hosted-execution/outbox";
 import { hostedOnboardingError } from "./errors";
@@ -10,7 +10,6 @@ import {
   sendHostedLinqChatMessage,
 } from "./linq";
 import { maybeIssueHostedRevnetForStripeInvoice } from "./stripe-revnet-issuance";
-import { buildHostedWebhookReceiptLeaseWriteData } from "./webhook-receipt-store";
 import type {
   HostedWebhookDispatchEnqueueInput,
   HostedWebhookReceiptPersistenceClient,
@@ -36,7 +35,7 @@ export function createHostedWebhookReceiptHandlers(): HostedWebhookReceiptHandle
   };
 }
 
-async function enqueueHostedWebhookDispatchEffect(input: HostedWebhookDispatchEnqueueInput): Promise<number> {
+async function enqueueHostedWebhookDispatchEffect(input: HostedWebhookDispatchEnqueueInput): Promise<void> {
   if (isPrismaClient(input.prismaOrTransaction)) {
     return input.prismaOrTransaction.$transaction((tx) =>
       enqueueHostedWebhookDispatchEffectWithTransaction(input, tx),
@@ -55,28 +54,13 @@ function isPrismaClient(
 async function enqueueHostedWebhookDispatchEffectWithTransaction(
   input: HostedWebhookDispatchEnqueueInput,
   transaction: Prisma.TransactionClient,
-): Promise<number> {
+): Promise<void> {
   await enqueueHostedExecutionOutboxPayload({
     payload: input.payload,
     sourceId: `${input.source}:${input.eventId}`,
     sourceType: "hosted_webhook_receipt",
     tx: transaction,
   });
-  const updatedReceipt = await transaction.hostedWebhookReceipt.updateMany({
-    where: {
-      source: input.source,
-      eventId: input.eventId,
-      payloadJson: {
-        equals: input.previousClaim.payloadJson ?? Prisma.JsonNull,
-      },
-    },
-    data: {
-      ...buildHostedWebhookReceiptLeaseWriteData(input.nextStatus),
-      payloadJson: input.nextPayloadJson,
-    },
-  });
-
-  return updatedReceipt.count;
 }
 
 async function performHostedWebhookSideEffect(

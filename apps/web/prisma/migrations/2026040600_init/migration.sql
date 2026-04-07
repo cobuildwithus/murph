@@ -27,6 +27,15 @@ CREATE TYPE "HostedRevnetIssuanceStatus" AS ENUM ('pending', 'submitting', 'subm
 -- CreateEnum
 CREATE TYPE "ExecutionOutboxStatus" AS ENUM ('queued', 'dispatching', 'dispatched', 'delivery_failed');
 
+-- CreateEnum
+CREATE TYPE "HostedWebhookReceiptStatus" AS ENUM ('processing', 'completed', 'failed');
+
+-- CreateEnum
+CREATE TYPE "HostedWebhookReceiptSideEffectKind" AS ENUM ('hosted_execution_dispatch', 'linq_message_send', 'revnet_invoice_issue');
+
+-- CreateEnum
+CREATE TYPE "HostedWebhookReceiptSideEffectStatus" AS ENUM ('pending', 'sent_unconfirmed');
+
 -- CreateTable
 CREATE TABLE "device_connection" (
     "id" TEXT NOT NULL,
@@ -323,13 +332,57 @@ CREATE TABLE "hosted_share_link" (
 CREATE TABLE "hosted_webhook_receipt" (
     "source" TEXT NOT NULL,
     "event_id" TEXT NOT NULL,
+    "status" "HostedWebhookReceiptStatus" NOT NULL,
+    "attempt_count" INTEGER NOT NULL DEFAULT 1,
+    "version" INTEGER NOT NULL DEFAULT 1,
+    "attempt_id" TEXT NOT NULL,
     "first_received_at" TIMESTAMP(3) NOT NULL,
+    "last_received_at" TIMESTAMP(3) NOT NULL,
+    "planned_at" TIMESTAMP(3),
+    "completed_at" TIMESTAMP(3),
     "claim_expires_at" TIMESTAMP(3),
-    "payload_json" JSONB,
+    "last_error_code" TEXT,
+    "last_error_message" TEXT,
+    "last_error_name" TEXT,
+    "last_error_retryable" BOOLEAN,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "hosted_webhook_receipt_pkey" PRIMARY KEY ("source","event_id")
+);
+
+-- CreateTable
+CREATE TABLE "hosted_webhook_receipt_side_effect" (
+    "source" TEXT NOT NULL,
+    "event_id" TEXT NOT NULL,
+    "effect_id" TEXT NOT NULL,
+    "kind" "HostedWebhookReceiptSideEffectKind" NOT NULL,
+    "status" "HostedWebhookReceiptSideEffectStatus" NOT NULL DEFAULT 'pending',
+    "attempt_count" INTEGER NOT NULL DEFAULT 0,
+    "last_attempt_at" TIMESTAMP(3),
+    "sent_at" TIMESTAMP(3),
+    "last_error_code" TEXT,
+    "last_error_message" TEXT,
+    "last_error_name" TEXT,
+    "last_error_retryable" BOOLEAN,
+    "dispatch_payload_json" JSONB,
+    "linq_chat_id" TEXT,
+    "linq_invite_id" TEXT,
+    "linq_reply_to_message_id" TEXT,
+    "linq_template" TEXT,
+    "linq_result_chat_id" TEXT,
+    "linq_result_message_id" TEXT,
+    "revnet_amount_paid" INTEGER,
+    "revnet_charge_id" TEXT,
+    "revnet_currency" TEXT,
+    "revnet_invoice_id" TEXT,
+    "revnet_member_id" TEXT,
+    "revnet_payment_intent_id" TEXT,
+    "revnet_result_handled" BOOLEAN,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "hosted_webhook_receipt_side_effect_pkey" PRIMARY KEY ("source","event_id","effect_id")
 );
 
 -- CreateTable
@@ -617,6 +670,12 @@ CREATE INDEX "hosted_share_link_consumed_by_member_id_consumed_at_idx" ON "hoste
 CREATE INDEX "hosted_webhook_receipt_first_received_at_idx" ON "hosted_webhook_receipt"("first_received_at");
 
 -- CreateIndex
+CREATE INDEX "hosted_webhook_receipt_status_claim_expires_at_first_received_a_idx" ON "hosted_webhook_receipt"("status", "claim_expires_at", "first_received_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_webhook_receipt_side_effect_source_event_id_status_idx" ON "hosted_webhook_receipt_side_effect"("source", "event_id", "status");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "execution_outbox_event_id_key" ON "execution_outbox"("event_id");
 
 -- CreateIndex
@@ -693,6 +752,9 @@ ALTER TABLE "hosted_ai_usage" ADD CONSTRAINT "hosted_ai_usage_member_id_fkey" FO
 
 -- AddForeignKey
 ALTER TABLE "hosted_linq_daily_state" ADD CONSTRAINT "hosted_linq_daily_state_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "hosted_webhook_receipt_side_effect" ADD CONSTRAINT "hosted_webhook_receipt_side_effect_source_event_id_fkey" FOREIGN KEY ("source", "event_id") REFERENCES "hosted_webhook_receipt"("source", "event_id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "linq_webhook_event" ADD CONSTRAINT "linq_webhook_event_binding_id_fkey" FOREIGN KEY ("binding_id") REFERENCES "linq_recipient_binding"("id") ON DELETE CASCADE ON UPDATE CASCADE;

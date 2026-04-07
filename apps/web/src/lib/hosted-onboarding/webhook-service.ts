@@ -56,9 +56,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       duplicate: true,
     },
     eventId: event.event_id,
-    eventPayload: {
-      eventType: event.event_type,
-    },
     handlers: createHostedWebhookReceiptHandlers(),
     plan: (transaction) =>
       planHostedOnboardingLinqWebhook({
@@ -88,9 +85,6 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
       duplicate: true,
     },
     eventId: buildHostedTelegramWebhookEventId(update),
-    eventPayload: {
-      updateId: update.update_id,
-    },
     handlers: createHostedWebhookReceiptHandlers(),
     plan: (transaction) =>
       planHostedOnboardingTelegramWebhook({

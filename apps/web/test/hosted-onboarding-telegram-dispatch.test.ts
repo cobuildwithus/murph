@@ -182,27 +182,31 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(receiptWrites.at(-1)).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          payloadJson: expect.objectContaining({
-            receiptState: expect.objectContaining({
-              sideEffects: expect.arrayContaining([
-                expect.objectContaining({
-                  kind: "hosted_execution_dispatch",
-                  payload: expect.objectContaining({
-                    dispatchRef: expect.objectContaining({
-                      eventId: "telegram:update:321",
-                      eventKind: "telegram.message.received",
-                      userId: "member_telegram_123",
-                    }),
-                    payloadRef: expect.objectContaining({
-                      key: expect.stringContaining("/member_telegram_123/telegram:update:321.json"),
-                    }),
-                  }),
-                }),
-              ]),
-            }),
-          }),
+          completedAt: expect.any(Date),
+          plannedAt: expect.any(Date),
+          status: "completed",
         }),
       }),
+    );
+    expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          create: expect.objectContaining({
+            dispatchPayloadJson: expect.objectContaining({
+              dispatchRef: expect.objectContaining({
+                eventId: "telegram:update:321",
+                eventKind: "telegram.message.received",
+                userId: "member_telegram_123",
+              }),
+              payloadRef: expect.objectContaining({
+                key: expect.stringContaining("/member_telegram_123/telegram:update:321.json"),
+              }),
+            }),
+            kind: "hosted_execution_dispatch",
+            status: "pending",
+          }),
+        }),
+      ]),
     );
   });
 
@@ -805,6 +809,10 @@ function withPrismaTransaction<T extends Record<string, unknown>>(prisma: T): T 
       findFirst?: ReturnType<typeof vi.fn>;
       findUnique?: ReturnType<typeof vi.fn>;
     };
+    hostedWebhookReceiptSideEffect?: {
+      deleteMany?: ReturnType<typeof vi.fn>;
+      upsert?: ReturnType<typeof vi.fn>;
+    };
   };
   prismaWithTransaction.$queryRaw = async () => [];
   prismaWithTransaction.$transaction = async (callback) => callback(prismaWithTransaction);
@@ -814,6 +822,12 @@ function withPrismaTransaction<T extends Record<string, unknown>>(prisma: T): T 
   ) {
     prismaWithTransaction.hostedMemberRouting.findFirst =
       prismaWithTransaction.hostedMemberRouting.findUnique;
+  }
+  if (!prismaWithTransaction.hostedWebhookReceiptSideEffect?.deleteMany || !prismaWithTransaction.hostedWebhookReceiptSideEffect?.upsert) {
+    prismaWithTransaction.hostedWebhookReceiptSideEffect = {
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      upsert: vi.fn().mockResolvedValue({}),
+    };
   }
   return prismaWithTransaction;
 }
@@ -834,4 +848,20 @@ function createStagedPayload(
     schemaVersion: "murph.execution-outbox.v2",
     storage: "reference" as const,
   };
+}
+
+function readHostedWebhookSideEffectUpsertCalls(prisma: object | null | undefined): Record<string, unknown>[] {
+  const hostedWebhookReceiptSideEffect = (prisma as {
+    hostedWebhookReceiptSideEffect?: {
+      upsert?: {
+        mock?: {
+          calls?: unknown[][];
+        };
+      };
+    };
+  }).hostedWebhookReceiptSideEffect;
+
+  return (hostedWebhookReceiptSideEffect?.upsert?.mock?.calls ?? []).map(
+    (call) => ((call[0] as Record<string, unknown> | undefined) ?? {}),
+  );
 }
