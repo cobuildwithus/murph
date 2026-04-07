@@ -17,9 +17,15 @@ import { VaultError } from "../errors.ts";
 import { readJsonlRecords, toMonthlyShardRelativePath } from "../jsonl.ts";
 import { generateRecordId } from "../ids.ts";
 import { runCanonicalWrite } from "../operations/index.ts";
-import { defaultTimeZone, normalizeTimeZone, toLocalDayKey } from "../time.ts";
+import { normalizeTimeZone } from "../time.ts";
 import { walkVaultFiles } from "../fs.ts";
 import { loadVault } from "../vault.ts";
+import {
+  buildEventSpineEnvelope,
+  buildEventSpineLifecycle,
+  collapseEventSpineEntries,
+  parseStoredEventSpineLifecycle,
+} from "./event-spine.ts";
 
 import {
   compareIsoTimestamps,
@@ -108,35 +114,6 @@ type HistoryKindFields =
   | TestHistoryFields
   | AdverseEffectHistoryFields
   | ExposureHistoryFields;
-
-function normalizeBaseEvent(
-  input: AppendHistoryEventInput,
-  fallbackTimeZone?: string,
-) {
-  const occurredAt = normalizeTimestamp(input.occurredAt, "occurredAt");
-  const recordedAt = normalizeTimestamp(input.recordedAt ?? occurredAt, "recordedAt");
-  const eventId = normalizeId(input.eventId, "eventId", ID_PREFIXES.event) ?? generateRecordId("event");
-  const timeZone = normalizeTimeZone(input.timeZone ?? fallbackTimeZone);
-
-  return {
-    schemaVersion: "murph.event.v1" as const,
-    id: eventId,
-    kind: input.kind,
-    occurredAt,
-    recordedAt,
-    dayKey: toLocalDayKey(occurredAt, timeZone ?? defaultTimeZone(), "occurredAt"),
-    timeZone,
-    lifecycle: {
-      revision: 1,
-    },
-    source: optionalEnum(input.source ?? "manual", HEALTH_HISTORY_SOURCES, "source") ?? "manual",
-    title: requireString(input.title, "title", 160),
-    note: optionalString(input.note, "note", 4000),
-    tags: normalizeTagList(input.tags, "tags"),
-    relatedIds: validateSortedStringList(input.relatedIds, "relatedIds", "id", 32, 80),
-    rawRefs: normalizeRelativePathList(input.rawRefs, "rawRefs"),
-  };
-}
 
 function stripUndefined<TRecord>(record: TRecord): TRecord {
   return Object.fromEntries(
@@ -460,7 +437,29 @@ function buildHistoryEventRecord(
     throw new VaultError("VAULT_INVALID_INPUT", "Unsupported health history kind.");
   }
 
-  const baseRecord = normalizeBaseEvent(input, fallbackTimeZone);
+  const occurredAt = normalizeTimestamp(input.occurredAt, "occurredAt");
+  const recordedAt = normalizeTimestamp(input.recordedAt ?? occurredAt, "recordedAt");
+  const eventId = normalizeId(input.eventId, "eventId", ID_PREFIXES.event) ?? generateRecordId("event");
+  const timeZone = normalizeTimeZone(input.timeZone ?? fallbackTimeZone);
+  const baseRecord = buildEventSpineEnvelope({
+    id: eventId,
+    occurredAt,
+    recordedAt,
+    timeZone,
+    fallbackTimeZone,
+    source: optionalEnum(input.source ?? "manual", HEALTH_HISTORY_SOURCES, "source") ?? "manual",
+    title: requireString(input.title, "title", 160),
+    note: optionalString(input.note, "note", 4000),
+    tags: normalizeTagList(input.tags, "tags"),
+    links: input.links,
+    relatedIds: input.relatedIds,
+    normalizeRelationIds: (value) =>
+      validateSortedStringList(value, "relatedIds", "id", 32, 80),
+    relationErrorCode: "EVENT_INVALID",
+    relationErrorMessage: "History event links must contain objects with type and targetId fields.",
+    rawRefs: normalizeRelativePathList(input.rawRefs, "rawRefs"),
+    lifecycle: buildEventSpineLifecycle(1),
+  });
   const record = stripUndefined({
     ...baseRecord,
     kind: input.kind,
@@ -491,34 +490,35 @@ function parseStoredHistoryEvent(value: unknown): HistoryEventRecord | null {
     return null;
   }
 
-  const lifecycle = normalizeLifecycle(value.lifecycle);
-  if (
-    Object.prototype.hasOwnProperty.call(value, "lifecycle") &&
-    value.lifecycle !== undefined &&
-    lifecycle === undefined
-  ) {
-    throw new VaultError(
-      "VAULT_INVALID_HISTORY_EVENT",
-      "Stored health history event has an invalid lifecycle.",
-    );
-  }
+  const lifecycle = parseStoredEventSpineLifecycle(
+    value.lifecycle,
+    "VAULT_INVALID_HISTORY_EVENT",
+    "Stored health history event has an invalid lifecycle.",
+  );
 
-  const baseRecord = {
-    schemaVersion: requireString(value.schemaVersion, "schemaVersion", 40) as "murph.event.v1",
+  const baseRecord = buildEventSpineEnvelope({
+    schemaVersion: requireString(value.schemaVersion, "schemaVersion", 40) as HistoryEventRecord["schemaVersion"],
     id: requireString(value.id, "id", 64),
-    kind: value.kind as HistoryEventKind,
     occurredAt: normalizeTimestamp(value.occurredAt as string, "occurredAt"),
     recordedAt: normalizeTimestamp(value.recordedAt as string, "recordedAt"),
     dayKey: requireString(value.dayKey, "dayKey", 10),
+    strictDayKey: true,
+    invalidDayKeyCode: "VAULT_INVALID_HISTORY_EVENT",
+    invalidDayKeyMessage: "Stored health history event has an invalid dayKey.",
     timeZone: normalizeTimeZone(optionalString(value.timeZone, "timeZone", 64)),
-    lifecycle,
     source: optionalEnum(value.source, HEALTH_HISTORY_SOURCES, "source") ?? "manual",
     title: requireString(value.title, "title", 160),
     note: optionalString(value.note, "note", 4000),
     tags: normalizeTagList(value.tags, "tags"),
-    relatedIds: validateSortedStringList(value.relatedIds, "relatedIds", "id", 32, 80),
+    links: value.links,
+    relatedIds: value.relatedIds,
+    normalizeRelationIds: (relatedIds) =>
+      validateSortedStringList(relatedIds, "relatedIds", "id", 32, 80),
+    relationErrorCode: "VAULT_INVALID_HISTORY_EVENT",
+    relationErrorMessage: "Stored health history event links must contain objects with type and targetId fields.",
     rawRefs: normalizeRelativePathList(value.rawRefs, "rawRefs"),
-  };
+    lifecycle,
+  });
   const record = stripUndefined({
     ...baseRecord,
     kind,
@@ -533,75 +533,6 @@ function parseStoredHistoryEvent(value: unknown): HistoryEventRecord | null {
   }
 
   return result.data as HistoryEventRecord;
-}
-
-function normalizeLifecycle(
-  value: unknown,
-): HistoryEventRecord["lifecycle"] | undefined {
-  if (!isPlainRecord(value)) {
-    return undefined;
-  }
-
-  const revision = value.revision;
-  if (
-    typeof revision !== "number" ||
-    !Number.isInteger(revision) ||
-    revision < 1
-  ) {
-    return undefined;
-  }
-
-  const state = optionalString(value.state, "lifecycle.state", 32);
-  if (state && state !== "deleted") {
-    return undefined;
-  }
-
-  return stripUndefined({
-    revision,
-    state: state as "deleted" | undefined,
-  });
-}
-
-function historyEventRevision(record: Pick<HistoryEventRecord, "lifecycle">): number {
-  return record.lifecycle?.revision ?? 1;
-}
-
-function isDeletedHistoryEvent(record: Pick<HistoryEventRecord, "lifecycle">): boolean {
-  return record.lifecycle?.state === "deleted";
-}
-
-function compareStoredHistoryEntries(left: StoredHistoryEventEntry, right: StoredHistoryEventEntry): number {
-  const revisionComparison = historyEventRevision(left.record) - historyEventRevision(right.record);
-  if (revisionComparison !== 0) {
-    return revisionComparison;
-  }
-
-  const recordedAtComparison = left.record.recordedAt.localeCompare(right.record.recordedAt);
-  if (recordedAtComparison !== 0) {
-    return recordedAtComparison;
-  }
-
-  const occurredAtComparison = left.record.occurredAt.localeCompare(right.record.occurredAt);
-  if (occurredAtComparison !== 0) {
-    return occurredAtComparison;
-  }
-
-  return left.relativePath.localeCompare(right.relativePath);
-}
-
-function collapseStoredHistoryEntries(
-  entries: readonly StoredHistoryEventEntry[],
-): StoredHistoryEventEntry[] {
-  const latestById = new Map<string, StoredHistoryEventEntry>();
-
-  for (const entry of entries) {
-    const current = latestById.get(entry.record.id);
-    if (!current || compareStoredHistoryEntries(current, entry) < 0) {
-      latestById.set(entry.record.id, entry);
-    }
-  }
-
-  return [...latestById.values()].filter((entry) => !isDeletedHistoryEvent(entry.record));
 }
 
 async function loadStoredHistoryEntries(vaultRoot: string): Promise<StoredHistoryEventEntry[]> {
@@ -749,7 +680,7 @@ export async function listHistoryEvents({
   const fromTimestamp = from ? normalizeTimestamp(from, "from") : null;
   const toTimestamp = to ? normalizeTimestamp(to, "to") : null;
   const records: HistoryEventRecord[] = [];
-  const latestEntries = collapseStoredHistoryEntries(await loadStoredHistoryEntries(vaultRoot));
+  const latestEntries = collapseEventSpineEntries(await loadStoredHistoryEntries(vaultRoot));
 
   for (const { record } of latestEntries) {
     if (kindFilter && !kindFilter.has(record.kind)) {
@@ -786,7 +717,7 @@ export async function readHistoryEvent({
     throw new VaultError("VAULT_INVALID_INPUT", "eventId is required.");
   }
 
-  const latestEntry = collapseStoredHistoryEntries(await loadStoredHistoryEntries(vaultRoot)).find(
+  const latestEntry = collapseEventSpineEntries(await loadStoredHistoryEntries(vaultRoot)).find(
     ({ record }) => record.id === normalizedEventId,
   );
 

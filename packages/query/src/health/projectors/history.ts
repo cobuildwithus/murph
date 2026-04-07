@@ -1,5 +1,7 @@
 import {
   HEALTH_HISTORY_EVENT_KINDS,
+  collapseEventRevisions,
+  type EventRevisionCollapseFields,
 } from "@murphai/contracts";
 
 import {
@@ -12,136 +14,27 @@ import {
   uniqueStrings,
   type CanonicalEntity,
 } from "../../canonical-entities.ts";
-import {
-  asObject,
-  firstString,
-  firstStringArray,
-} from "../shared.ts";
-
-interface CanonicalEventLifecycle {
-  revision: number;
-  state?: "deleted";
-}
-
-type CanonicalEventLifecycleParseResult =
-  | {
-      state: "missing";
-    }
-  | {
-      state: "invalid";
-    }
-  | {
-      state: "valid";
-      lifecycle: CanonicalEventLifecycle;
-    };
+import { asObject, firstString, firstStringArray } from "../shared.ts";
 
 export const HEALTH_HISTORY_KINDS = new Set(HEALTH_HISTORY_EVENT_KINDS);
 
-function parseCanonicalEventLifecycle(
-  value: unknown,
-): CanonicalEventLifecycleParseResult {
-  if (value === undefined) {
-    return { state: "missing" };
-  }
-
-  const lifecycle = asObject(value);
-  if (!lifecycle) {
-    return { state: "invalid" };
-  }
-
-  const revision = lifecycle.revision;
-  if (
-    typeof revision !== "number" ||
-    !Number.isInteger(revision) ||
-    revision < 1
-  ) {
-    return { state: "invalid" };
-  }
-
-  const state = firstString(lifecycle, ["state"]);
-  if (state && state !== "deleted") {
-    return { state: "invalid" };
-  }
-
+function eventLedgerEntityRevisionFields(
+  entity: CanonicalEntity,
+): EventRevisionCollapseFields {
+  const attributes = asObject(entity.attributes);
   return {
-    state: "valid",
-    lifecycle: {
-      revision,
-      state: state as "deleted" | undefined,
-    },
+    eventId: entity.primaryLookupId,
+    lifecycle: attributes?.lifecycle,
+    recordedAt: attributes ? firstString(attributes, ["recordedAt"]) ?? "" : "",
+    occurredAt: entity.occurredAt ?? "",
+    relativePath: entity.path,
   };
-}
-
-function canonicalEventRevision(entity: Pick<CanonicalEntity, "attributes">): number {
-  const lifecycle = parseCanonicalEventLifecycle(
-    asObject(entity.attributes)?.lifecycle,
-  );
-  return lifecycle.state === "valid" ? lifecycle.lifecycle.revision : 1;
-}
-
-function isCanonicalEntityDeleted(entity: Pick<CanonicalEntity, "attributes">): boolean {
-  const lifecycle = parseCanonicalEventLifecycle(
-    asObject(entity.attributes)?.lifecycle,
-  );
-  return lifecycle.state === "valid" && lifecycle.lifecycle.state === "deleted";
-}
-
-function hasInvalidCanonicalEntityLifecycle(
-  entity: Pick<CanonicalEntity, "attributes">,
-): boolean {
-  return (
-    parseCanonicalEventLifecycle(asObject(entity.attributes)?.lifecycle).state === "invalid"
-  );
-}
-
-function compareEventLedgerEntityPriority(
-  left: CanonicalEntity,
-  right: CanonicalEntity,
-): number {
-  const revisionComparison = canonicalEventRevision(left) - canonicalEventRevision(right);
-  if (revisionComparison !== 0) {
-    return revisionComparison;
-  }
-
-  const leftAttributes = asObject(left.attributes);
-  const rightAttributes = asObject(right.attributes);
-  const leftRecordedAt = leftAttributes
-    ? firstString(leftAttributes, ["recordedAt"]) ?? ""
-    : "";
-  const rightRecordedAt = rightAttributes
-    ? firstString(rightAttributes, ["recordedAt"]) ?? ""
-    : "";
-  const recordedAtComparison = leftRecordedAt.localeCompare(rightRecordedAt);
-  if (recordedAtComparison !== 0) {
-    return recordedAtComparison;
-  }
-
-  const occurredAtComparison = (left.occurredAt ?? "").localeCompare(right.occurredAt ?? "");
-  if (occurredAtComparison !== 0) {
-    return occurredAtComparison;
-  }
-
-  return left.path.localeCompare(right.path);
 }
 
 export function collapseEventLedgerEntities(
   entities: readonly CanonicalEntity[],
 ): CanonicalEntity[] {
-  const latestByEventId = new Map<string, CanonicalEntity>();
-
-  for (const entity of entities) {
-    if (hasInvalidCanonicalEntityLifecycle(entity)) {
-      continue;
-    }
-
-    const current = latestByEventId.get(entity.primaryLookupId);
-    if (!current || compareEventLedgerEntityPriority(current, entity) < 0) {
-      latestByEventId.set(entity.primaryLookupId, entity);
-    }
-  }
-
-  return [...latestByEventId.values()]
-    .filter((entity) => !isCanonicalEntityDeleted(entity))
+  return collapseEventRevisions(entities, eventLedgerEntityRevisionFields)
     .sort(compareCanonicalEntities);
 }
 

@@ -76,6 +76,12 @@ export interface AttachmentCompatibilityProjections {
   rawRefs: string[];
 }
 
+export interface AttachmentPathProjectionSource {
+  role: string;
+  kind: EventAttachmentKind;
+  relativePath: string;
+}
+
 function toStoredMediaKind(kind: EventAttachmentKind): StoredMedia["kind"] {
   switch (kind) {
     case "image":
@@ -185,6 +191,28 @@ export function prepareEventAttachments(
 export function buildAttachmentCompatibilityProjections(
   attachments: readonly EventAttachment[],
 ): AttachmentCompatibilityProjections {
+  const { audioPaths, documentPath, photoPaths, rawRefs } =
+    buildAttachmentPathCompatibilityProjections(attachments);
+  const media = attachments.map((attachment) =>
+    storedMediaSchema.parse({
+      kind: toStoredMediaKind(attachment.kind),
+      relativePath: attachment.relativePath,
+      mediaType: attachment.mediaType,
+    }),
+  );
+
+  return {
+    audioPaths,
+    documentPath,
+    media,
+    photoPaths,
+    rawRefs,
+  };
+}
+
+export function buildAttachmentPathCompatibilityProjections(
+  attachments: readonly AttachmentPathProjectionSource[],
+): Omit<AttachmentCompatibilityProjections, "media"> {
   const rawRefs = [...new Set(attachments.map((attachment) => attachment.relativePath))];
   const documentPath =
     attachments.find((attachment) => attachment.kind === "document")?.relativePath
@@ -204,18 +232,10 @@ export function buildAttachmentCompatibilityProjections(
         .map((attachment) => attachment.relativePath),
     ),
   ];
-  const media = attachments.map((attachment) =>
-    storedMediaSchema.parse({
-      kind: toStoredMediaKind(attachment.kind),
-      relativePath: attachment.relativePath,
-      mediaType: attachment.mediaType,
-    }),
-  );
 
   return {
     audioPaths,
     documentPath,
-    media,
     photoPaths,
     rawRefs,
   };

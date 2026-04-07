@@ -9,9 +9,14 @@ import {
 } from "@murphai/contracts";
 
 import type {
-  BloodTestReferenceRange,
   BloodTestResultRecord,
+  EncounterEventRecord,
+  ProcedureEventRecord,
+  TestEventRecord,
+  AdverseEffectEventRecord,
+  ExposureEventRecord,
   EventSource,
+  EventRecord,
   HealthHistoryEventKind,
 } from "@murphai/contracts";
 import type { DateInput } from "../types.ts";
@@ -40,79 +45,17 @@ export type BloodTestCategory = typeof BLOOD_TEST_CATEGORY;
 export type BloodTestFastingStatus = (typeof BLOOD_TEST_FASTING_STATUSES)[number];
 export type BloodTestSpecimenType = (typeof BLOOD_TEST_SPECIMEN_TYPES)[number];
 
-export interface HistoryEventBase {
-  schemaVersion: "murph.event.v1";
-  id: string;
-  kind: HistoryEventKind;
-  occurredAt: string;
-  recordedAt: string;
-  dayKey: string;
-  timeZone?: string;
-  lifecycle?: {
-    revision: number;
-    state?: "deleted";
-  };
-  source: HistoryEventSource;
-  title: string;
-  note?: string;
-  tags?: string[];
-  relatedIds?: string[];
-  rawRefs?: string[];
-}
-
-export interface EncounterHistoryEventRecord extends HistoryEventBase {
-  kind: "encounter";
-  encounterType: string;
-  location?: string;
-  providerId?: string;
-}
-
-export interface ProcedureHistoryEventRecord extends HistoryEventBase {
-  kind: "procedure";
-  procedure: string;
-  status: ProcedureStatus;
-}
-
-export interface TestHistoryEventRecord extends HistoryEventBase {
-  kind: "test";
-  testName: string;
-  resultStatus: TestResultStatus;
-  summary?: string;
-  testCategory?: string;
-  specimenType?: string;
-  labName?: string;
-  labPanelId?: string;
-  collectedAt?: string;
-  reportedAt?: string;
-  fastingStatus?: BloodTestFastingStatus;
-  results?: BloodTestResultRecord[];
-}
+export type EncounterHistoryEventRecord = EncounterEventRecord;
+export type ProcedureHistoryEventRecord = ProcedureEventRecord;
+export type TestHistoryEventRecord = TestEventRecord;
+export type AdverseEffectHistoryEventRecord = AdverseEffectEventRecord;
+export type ExposureHistoryEventRecord = ExposureEventRecord;
 
 export type BloodTestHistoryEventRecord = TestHistoryEventRecord & {
   testCategory: BloodTestCategory;
   results: BloodTestResultRecord[];
 };
-
-export interface AdverseEffectHistoryEventRecord extends HistoryEventBase {
-  kind: "adverse_effect";
-  substance: string;
-  effect: string;
-  severity: AdverseEffectSeverity;
-}
-
-export interface ExposureHistoryEventRecord extends HistoryEventBase {
-  kind: "exposure";
-  exposureType: string;
-  substance: string;
-  duration?: string;
-}
-
-export type HistoryEventRecord =
-  | EncounterHistoryEventRecord
-  | ProcedureHistoryEventRecord
-  | TestHistoryEventRecord
-  | AdverseEffectHistoryEventRecord
-  | ExposureHistoryEventRecord;
+export type HistoryEventRecord = Extract<EventRecord, { kind: HistoryEventKind }>;
 
 interface HistoryEventDraftBase {
   vaultRoot: string;
@@ -124,6 +67,7 @@ interface HistoryEventDraftBase {
   title: string;
   note?: string;
   tags?: string[];
+  links?: EventRecord["links"];
   relatedIds?: string[];
   rawRefs?: string[];
 }

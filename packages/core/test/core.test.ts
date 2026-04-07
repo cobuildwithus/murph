@@ -297,6 +297,31 @@ test("upsertEvent rejects malformed specialized event kinds on the generic publi
   );
 });
 
+test("upsertEvent rejects malformed attachment payloads instead of silently dropping them", async () => {
+  const vaultRoot = await makeTempDirectory("murph-event-attachment-guard");
+  await initializeVault({ vaultRoot });
+
+  await assert.rejects(
+    () =>
+      upsertEvent({
+        vaultRoot,
+        payload: {
+          kind: "note",
+          occurredAt: "2026-03-12T12:32:00.000Z",
+          title: "Attachment guard",
+          attachments: [
+            {
+              role: "photo",
+              relativePath: "raw/workouts/2026/03/evt_01JQ9R7WF97M1WAB2B4QF2Q1B1/progress.jpg",
+            },
+          ],
+        },
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "EVENT_CONTRACT_INVALID",
+  );
+});
+
 test("upsertEvent appends new events without parsing unrelated invalid shards", async () => {
   const vaultRoot = await makeTempDirectory("murph-event-fast-path");
   await initializeVault({ vaultRoot });
@@ -951,13 +976,19 @@ test("createExperiment returns the existing experiment for idempotent retries", 
     vaultRoot,
     relativePath: "ledger/events/2026/2026-03.jsonl",
   });
+  const createdExperimentEvents = experimentEvents.filter(
+    (record): record is ExperimentEventRecord =>
+      expectRecord<ExperimentEventRecord>(record).kind === "experiment_event",
+  );
 
   assert.equal(
-    experimentEvents.filter(
-      (record) => expectRecord<ExperimentEventRecord>(record).kind === "experiment_event",
-    ).length,
+    createdExperimentEvents.length,
     1,
   );
+  assert.deepEqual(createdExperimentEvents[0]?.links, [
+    { type: "related_to", targetId: first.experiment.id },
+  ]);
+  assert.deepEqual(createdExperimentEvents[0]?.relatedIds, [first.experiment.id]);
   const operationPaths = await listWriteOperationMetadataPaths(vaultRoot);
   const operations = await Promise.all(
     operationPaths.map((relativePath) => readStoredWriteOperation(vaultRoot, relativePath)),
@@ -3461,14 +3492,21 @@ test("high-level canonical mutation ports own experiment and journal mutation se
     vaultRoot,
     relativePath: checkpoint.ledgerFile,
   });
-  const phases = lifecycleRecords
-    .filter(
-      (record): record is ExperimentEventRecord =>
-        expectRecord<{ kind?: string; experimentId?: string }>(record).kind === "experiment_event" &&
-        expectRecord<{ experimentId?: string }>(record).experimentId === created.experiment.id,
-    )
-    .map((record) => record.phase);
+  const experimentLifecycleRecords = lifecycleRecords.filter(
+    (record): record is ExperimentEventRecord =>
+      expectRecord<{ kind?: string; experimentId?: string }>(record).kind === "experiment_event" &&
+      expectRecord<{ experimentId?: string }>(record).experimentId === created.experiment.id,
+  );
+  const phases = experimentLifecycleRecords.map((record) => record.phase);
   assert.deepEqual(phases, ["start", "checkpoint", "stop"]);
+  assert.deepEqual(
+    experimentLifecycleRecords.map((record) => record.links),
+    [
+      [{ type: "related_to", targetId: created.experiment.id }],
+      [{ type: "related_to", targetId: created.experiment.id }],
+      [{ type: "related_to", targetId: created.experiment.id }],
+    ],
+  );
 
   const appended = await appendJournal({
     vaultRoot,

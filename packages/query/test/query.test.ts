@@ -367,6 +367,62 @@ test("readVault collapses append-only event revisions to the latest active curre
   }
 });
 
+test("readVault breaks equal event revisions by recordedAt when collapsing the current view", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-events-tie-"));
+
+  try {
+    const eventId = "evt_01JQ9R7WF97M1WAB2B4QF2Q1C3";
+    await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
+
+    await writeFile(
+      path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl"),
+      [
+        {
+          schemaVersion: "murph.event.v1",
+          id: eventId,
+          kind: "note",
+          occurredAt: "2026-03-12T08:15:00.000Z",
+          recordedAt: "2026-03-12T08:16:00.000Z",
+          dayKey: "2026-03-12",
+          source: "manual",
+          title: "Earlier tie-break note",
+          note: "First copy.",
+          lifecycle: {
+            revision: 2,
+          },
+        },
+        {
+          schemaVersion: "murph.event.v1",
+          id: eventId,
+          kind: "note",
+          occurredAt: "2026-03-12T08:15:00.000Z",
+          recordedAt: "2026-03-12T08:20:00.000Z",
+          dayKey: "2026-03-12",
+          source: "manual",
+          title: "Later tie-break note",
+          note: "Winning copy.",
+          lifecycle: {
+            revision: 2,
+          },
+        },
+      ]
+        .map((record) => JSON.stringify(record))
+        .join("\n")
+        .concat("\n"),
+      "utf8",
+    );
+
+    const vault = await readVault(vaultRoot);
+    const survivingEvent = lookupEntityById(vault, eventId);
+
+    assert.equal(survivingEvent?.title, "Later tie-break note");
+    assert.equal(survivingEvent?.occurredAt, "2026-03-12T08:15:00.000Z");
+    assert.deepEqual(survivingEvent?.attributes.lifecycle, { revision: 2 });
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("wearable source health reports derived sleep-window metrics for session-only providers", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-wearables-source-health-"));
 
