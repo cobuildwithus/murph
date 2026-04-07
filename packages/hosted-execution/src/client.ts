@@ -120,7 +120,7 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
     const body = await response.text();
     const suffix = body.trim().length > 0 ? `: ${body.trim().slice(0, 500)}` : "";
     throw new Error(
-      `Hosted execution ${input.label} failed with HTTP ${response.status}${suffix}`,
+      `Hosted execution ${input.label} failed with HTTP ${response.status}${suffix}.`,
     );
   }
 
