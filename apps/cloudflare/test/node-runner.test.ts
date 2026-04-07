@@ -232,77 +232,89 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("bootstraps a new hosted member context only during activation and records the result explicitly", async () => {
-    const result = await runHostedExecutionJob({
-      bundles: {
-        agentState: null,
-        vault: null,
-      },
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          userId: "member_123",
-        },
-        eventId: "evt_123",
-        occurredAt: "2026-03-26T12:00:00.000Z",
-      },
-    });
-    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-test-"));
-    cleanupPaths.push(workspaceRoot);
-    const restored = await restoreHostedExecutionContext({
-      agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
-      vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
-      workspaceRoot,
-    });
-    const automationState = await readAssistantAutomationState(restored.assistantStateRoot);
+    const previousHostedAssistantEnv = clearHostedAssistantSeedEnv();
 
-    expect(result.result.summary).toContain("Processed member activation");
-    expect(result.result.summary).toContain("created the canonical vault");
-    expect(result.result.summary).toContain("hosted assistant config missing");
-    expect(result.result.summary).toContain("hosted email auto-reply unavailable");
-    expect(result.result.summary).toContain("Parser jobs: 0.");
-    expect(automationState.autoReplyChannels).not.toContain("linq");
-    expect(automationState.autoReplyChannels).not.toContain("email");
-    await expect(
-      readFile(path.join(restored.operatorHomeRoot, ".murph", "config.json"), "utf8"),
-    ).rejects.toThrow();
-    await expect(
-      readFile(path.join(restored.operatorHomeRoot, ".murph", "hosted", "user-env.json"), "utf8"),
-    ).rejects.toThrow();
-    await expect(readFile(path.join(restored.vaultRoot, "vault.json"), "utf8")).resolves.toContain("{");
+    try {
+      const result = await runHostedExecutionJob({
+        bundles: {
+          agentState: null,
+          vault: null,
+        },
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            userId: "member_123",
+          },
+          eventId: "evt_123",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      });
+      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-test-"));
+      cleanupPaths.push(workspaceRoot);
+      const restored = await restoreHostedExecutionContext({
+        agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
+        vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
+        workspaceRoot,
+      });
+      const automationState = await readAssistantAutomationState(restored.assistantStateRoot);
+
+      expect(result.result.summary).toContain("Processed member activation");
+      expect(result.result.summary).toContain("created the canonical vault");
+      expect(result.result.summary).toContain("hosted assistant config missing");
+      expect(result.result.summary).toContain("hosted email auto-reply unavailable");
+      expect(result.result.summary).toContain("Parser jobs: 0.");
+      expect(automationState.autoReplyChannels).not.toContain("linq");
+      expect(automationState.autoReplyChannels).not.toContain("email");
+      await expect(
+        readFile(path.join(restored.operatorHomeRoot, ".murph", "config.json"), "utf8"),
+      ).rejects.toThrow();
+      await expect(
+        readFile(path.join(restored.operatorHomeRoot, ".murph", "hosted", "user-env.json"), "utf8"),
+      ).rejects.toThrow();
+      await expect(readFile(path.join(restored.vaultRoot, "vault.json"), "utf8")).resolves.toContain("{");
+    } finally {
+      restoreEnvVars(previousHostedAssistantEnv);
+    }
   });
 
   it("reuses the existing hosted member bootstrap on repeated activation", async () => {
-    const firstActivation = await runHostedExecutionJob({
-      bundles: {
-        agentState: null,
-        vault: null,
-      },
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          userId: "member_123",
-        },
-        eventId: "evt_activation_first",
-        occurredAt: "2026-03-26T12:00:00.000Z",
-      },
-    });
+    const previousHostedAssistantEnv = clearHostedAssistantSeedEnv();
 
-    const secondActivation = await runHostedExecutionJob({
-      bundles: firstActivation.bundles,
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          userId: "member_123",
+    try {
+      const firstActivation = await runHostedExecutionJob({
+        bundles: {
+          agentState: null,
+          vault: null,
         },
-        eventId: "evt_activation_second",
-        occurredAt: "2026-03-26T12:05:00.000Z",
-      },
-    });
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            userId: "member_123",
+          },
+          eventId: "evt_activation_first",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      });
 
-    expect(secondActivation.result.summary).toContain("Processed member activation");
-    expect(secondActivation.result.summary).toContain("reused the canonical vault");
-    expect(secondActivation.result.summary).toContain("hosted assistant config missing");
-    expect(secondActivation.result.summary).toContain("hosted email auto-reply unavailable");
+      const secondActivation = await runHostedExecutionJob({
+        bundles: firstActivation.bundles,
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            userId: "member_123",
+          },
+          eventId: "evt_activation_second",
+          occurredAt: "2026-03-26T12:05:00.000Z",
+        },
+      });
+
+      expect(secondActivation.result.summary).toContain("Processed member activation");
+      expect(secondActivation.result.summary).toContain("reused the canonical vault");
+      expect(secondActivation.result.summary).toContain("hosted assistant config missing");
+      expect(secondActivation.result.summary).toContain("hosted email auto-reply unavailable");
+    } finally {
+      restoreEnvVars(previousHostedAssistantEnv);
+    }
   });
 
 
@@ -524,6 +536,7 @@ describe("runHostedExecutionJob", () => {
     const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
     const previousHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
     const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
+    const previousHostedAssistantEnv = clearHostedAssistantSeedEnv();
 
     delete process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID;
     delete process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN;
@@ -580,6 +593,7 @@ describe("runHostedExecutionJob", () => {
         readFile(path.join(restored.operatorHomeRoot, ".murph", "config.json"), "utf8"),
       ).rejects.toThrow();
     } finally {
+      restoreEnvVars(previousHostedAssistantEnv);
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_API_TOKEN", previousHostedEmailApiToken);
       restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
@@ -2638,6 +2652,16 @@ function setHostedAssistantSeedEnv(): Record<string, string | undefined> {
   ]);
   process.env.HOSTED_ASSISTANT_MODEL = "gpt-4.1-mini";
   process.env.HOSTED_ASSISTANT_PROVIDER = "openai";
+  return previousEnv;
+}
+
+function clearHostedAssistantSeedEnv(): Record<string, string | undefined> {
+  const previousEnv = captureEnvVars([
+    "HOSTED_ASSISTANT_MODEL",
+    "HOSTED_ASSISTANT_PROVIDER",
+  ]);
+  restoreEnvVar("HOSTED_ASSISTANT_MODEL", undefined);
+  restoreEnvVar("HOSTED_ASSISTANT_PROVIDER", undefined);
   return previousEnv;
 }
 
