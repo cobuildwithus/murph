@@ -2159,6 +2159,14 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the CLI-firs
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
+      /The assistant is responsible for compiling and maintaining the wiki over time/u,
+    )
+    assert.match(
+      providerCall?.systemPrompt ?? '',
+      /When a turn produces durable understanding that is likely to help in future conversations, the assistant should usually capture it in the wiki/u,
+    )
+    assert.match(
+      providerCall?.systemPrompt ?? '',
       /Use targeted local file reads only when the CLI\/query surface does not expose the needed detail/u,
     )
     assert.doesNotMatch(
@@ -2337,6 +2345,14 @@ test('sendAssistantMessage keeps murph.device.connect out of the prompt when the
     assert.match(
       providerCall?.systemPrompt ?? '',
       /For wiki work, use `vault-cli knowledge \.\.\.` directly in this turn rather than assuming a dedicated knowledge surface is callable/u,
+    )
+    assert.match(
+      providerCall?.systemPrompt ?? '',
+      /The assistant is responsible for compiling and maintaining the wiki over time/u,
+    )
+    assert.match(
+      providerCall?.systemPrompt ?? '',
+      /The assistant should actively keep the wiki up to date when later turns materially sharpen, extend, supersede, contradict, or meaningfully validate an existing page/u,
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
