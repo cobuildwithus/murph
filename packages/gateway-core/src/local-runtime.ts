@@ -1,4 +1,7 @@
-import type { GatewayReplyRouteKind } from './contracts.js'
+import type {
+  GatewayDeliveryTargetKind,
+  GatewayReplyRouteKind,
+} from './contracts.js'
 
 export type GatewayLocalDispatchMode = 'immediate' | 'queue-only'
 export type GatewayLocalOutboxStatus =
@@ -43,7 +46,7 @@ export interface GatewayLocalOutboxSource {
     providerThreadId: string | null
     sentAt: string
     target: string
-    targetKind: 'explicit' | 'participant' | 'thread'
+    targetKind: GatewayDeliveryTargetKind
   } | null
   identityId: string | null
   intentId: string
@@ -67,7 +70,7 @@ export interface GatewayLocalDeliveredMessage {
   messageLength: number
   sentAt: string
   target: string
-  targetKind: 'explicit' | 'participant' | 'thread'
+  targetKind: GatewayDeliveryTargetKind
 }
 
 export interface GatewayLocalMessageSendRequest {

@@ -1,4 +1,7 @@
-import type { AssistantBindingDelivery } from '../../assistant-cli-contracts.js'
+import type {
+  AssistantBindingDelivery,
+  AssistantBindingDeliveryKind,
+} from '../../assistant-cli-contracts.js'
 import type { ConversationRef } from '../conversation-ref.js'
 import {
   inferFallbackBindingDelivery,
@@ -34,7 +37,7 @@ export { resolveDeliveryCandidates }
 export function inferAssistantBindingDelivery(input: {
   channel?: string | null
   conversation?: ConversationRef | null
-  deliveryKind?: 'participant' | 'thread' | null
+  deliveryKind?: AssistantBindingDeliveryKind | null
   deliveryTarget?: string | null
 }): AssistantBindingDelivery | null {
   const adapter = getAssistantChannelAdapter(input.channel ?? input.conversation?.channel)

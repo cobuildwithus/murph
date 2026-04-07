@@ -1,10 +1,11 @@
-export const hostedEmailSendTargetKindValues = [
-  "explicit",
-  "participant",
-  "thread",
-] as const;
+import {
+  gatewayDeliveryTargetKindValues,
+  type GatewayDeliveryTargetKind,
+} from "@murphai/gateway-core";
 
-export type HostedEmailSendTargetKind = (typeof hostedEmailSendTargetKindValues)[number];
+export const hostedEmailSendTargetKindValues = gatewayDeliveryTargetKindValues;
+
+export type HostedEmailSendTargetKind = GatewayDeliveryTargetKind;
 
 export interface HostedEmailSendRequest {
   identityId: string | null;

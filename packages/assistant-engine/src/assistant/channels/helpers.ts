@@ -2,6 +2,7 @@ import {
   assistantBindingDeliverySchema,
   assistantChannelDeliverySchema,
   type AssistantBindingDelivery,
+  type AssistantBindingDeliveryKind,
 } from '../../assistant-cli-contracts.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { ConversationRef } from '../conversation-ref.js'
@@ -141,7 +142,7 @@ export function createAssistantBindingDelivery(
 }
 
 export function resolveExplicitBindingDelivery(input: {
-  deliveryKind?: 'participant' | 'thread' | null
+  deliveryKind?: AssistantBindingDeliveryKind | null
   deliveryTarget?: string | null
 }): AssistantBindingDelivery | null {
   const explicitKind = input.deliveryKind ?? null
@@ -156,7 +157,7 @@ export function resolveExplicitBindingDelivery(input: {
 export function inferThreadFirstBindingDelivery(
   input: {
     conversation: ConversationRef
-    deliveryKind?: 'participant' | 'thread' | null
+    deliveryKind?: AssistantBindingDeliveryKind | null
     deliveryTarget?: string | null
   },
   options: {
@@ -184,7 +185,7 @@ export function inferThreadFirstBindingDelivery(
 
 export function inferFallbackBindingDelivery(input: {
   conversation: ConversationRef
-  deliveryKind?: 'participant' | 'thread' | null
+  deliveryKind?: AssistantBindingDeliveryKind | null
   deliveryTarget?: string | null
 }): AssistantBindingDelivery | null {
   const explicitDelivery = resolveExplicitBindingDelivery(input)
