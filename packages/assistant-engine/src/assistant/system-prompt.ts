@@ -11,6 +11,7 @@ export interface AssistantSystemPromptInput {
   assistantCliExecutorAvailable: boolean;
   assistantCronToolsAvailable: boolean;
   assistantHostedDeviceConnectAvailable?: boolean;
+  assistantKnowledgeToolsAvailable?: boolean;
   channel: string | null;
   cliAccess: Pick<AssistantCliAccessContext, "rawCommand" | "setupCommand">;
   firstTurnCheckIn: boolean;
@@ -33,6 +34,8 @@ export function buildAssistantSystemPrompt(
     buildAssistantFirstTurnCheckInGuidanceText(input.firstTurnCheckIn),
     buildAssistantKnowledgeGuidanceText({
       assistantCliExecutorAvailable: input.assistantCliExecutorAvailable,
+      assistantKnowledgeToolsAvailable:
+        input.assistantKnowledgeToolsAvailable ?? false,
       rawCommand: input.cliAccess.rawCommand,
     }),
     buildAssistantCronGuidanceText({
@@ -111,7 +114,7 @@ function buildAssistantVaultNavigationText(input: {
     "- For remembered foods or recipes, use `vault-cli food ...` and `vault-cli recipe ...`.",
     "- If the user is asking about themselves and a recent lab, active protocol, profile snapshot, symptom history, wearable trend, or prior log could change the answer, err on the side of a quick targeted read before responding.",
     "- For supplement, medication, biomarker, or lab-driven questions, gather the smallest personal context that could change the answer before replying. Usually that means the active supplement or medication records, the derived current profile when relevant, and recent blood-test or history reads that bear directly on the question.",
-    "- Use targeted `vault.fs.readText` only when the CLI/query surface does not expose the needed detail or the user explicitly asks for file-level inspection.",
+    "- Use targeted local file reads only when the CLI/query surface does not expose the needed detail or the user explicitly asks for file-level inspection.",
     "- Before writing into an existing record or creating a reusable item, inspect nearby existing records when there is meaningful risk of duplicate or wrong-target writes.",
     "- Default to read-only inspection. Only write canonical vault data when the user is clearly asking to log, create, update, or delete something in the vault.",
     '- Treat capture-style requests such as meal logging, journal updates, or an explicit "add this" request as permission to use the matching canonical write surface.',
@@ -233,22 +236,25 @@ function buildAssistantCronGuidanceText(input: {
 
 function buildAssistantKnowledgeGuidanceText(input: {
   assistantCliExecutorAvailable: boolean;
+  assistantKnowledgeToolsAvailable: boolean;
   rawCommand: "vault-cli";
 }): string {
   return [
-    "Derived knowledge tools are exposed directly in this session as `assistant.knowledge.search`, `assistant.knowledge.get`, `assistant.knowledge.list`, `assistant.knowledge.upsert`, `assistant.knowledge.lint`, and `assistant.knowledge.rebuildIndex`. Use those first for wiki work instead of routing derived-knowledge tasks through generic CLI execution.",
+    input.assistantKnowledgeToolsAvailable
+      ? "For wiki work, prefer the dedicated knowledge surface for this route over generic CLI execution."
+      : `For wiki work, use \`${input.rawCommand} knowledge ...\` directly in this turn rather than assuming a dedicated knowledge surface is callable.`,
     input.assistantCliExecutorAvailable
-      ? "Use `murph.cli.run` for knowledge work only when you truly need the operator-facing CLI surface itself, such as `vault-cli knowledge log tail`."
-      : `Use \`${input.rawCommand} knowledge ...\` directly only when the dedicated assistant knowledge tools do not expose the exact operator-facing surface you need.`,
+      ? "If you need the operator-facing CLI surface itself, use `murph.cli.run` for knowledge work only when you truly need `vault-cli knowledge ...` semantics such as `vault-cli knowledge log tail`."
+      : null,
     "Murph's knowledge system has two layers: `bank/library` is the stable health reference layer, while `derived/knowledge` is the user-specific compiled wiki for syntheses, dossiers, decisions, and continuity pages.",
-    "For wiki tasks, read `derived/knowledge/index.md` first through `vault.fs.readText`, then use knowledge search and one to three targeted page reads before synthesizing anything new.",
+    "For wiki tasks, read `derived/knowledge/index.md` first through a targeted file read, then use the knowledge surface and one to three targeted page reads before synthesizing anything new.",
     "When the user asks what Murph already knows about a topic, start with the saved wiki first instead of rebuilding the answer from raw sources from scratch.",
     "If an existing page already matches the topic closely, prefer refreshing that slug instead of creating a near-duplicate page.",
     "If no close existing page exists, and the current turn produced a reusable synthesis that would likely save work or improve continuity later, create a new knowledge page in the same turn.",
     "Good candidates for a new page include any reusable synthesis that Murph is likely to benefit from later, including durable topic summaries, recurring user-context dossiers, protocol or experiment summaries, decision histories, open questions or active hypotheses, recurring symptom or biomarker pattern syntheses, wearable-trend summaries, research digests, and concise reference pages for recurring entities such as supplements, medications, foods, labs, or conditions.",
     "Do not create a knowledge page for lightweight chat, one-off operational answers, weakly supported guesses, or single-record readbacks that are unlikely to matter again.",
     "Prefer creating a new page only when the synthesis would still be useful if the same topic comes up again days or weeks later.",
-    "When persisting a page, synthesize the page in the current assistant turn and then save it through `assistant.knowledge.upsert` instead of editing `derived/knowledge/**` files directly.",
+    "When persisting a page, synthesize it in the current assistant turn and then save it through the dedicated knowledge write surface for this route instead of editing `derived/knowledge/**` files directly.",
     "Frontmatter is the canonical metadata source for derived knowledge pages. Generated `## Related` and `## Sources` sections are rendered output, not the metadata authority.",
     "When a derived page clearly builds on stable health reference entities under `bank/library`, attach those stable links through `librarySlugs` metadata.",
     "Do not silently overwrite prior conclusions when new evidence is mixed or contradictory. Update the synthesis, preserve the uncertainty, and note when newer context weakens, supersedes, or conflicts with an earlier claim.",
