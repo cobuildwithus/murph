@@ -3,6 +3,12 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, test, vi } from 'vitest'
+import {
+  initializeVault,
+  readJsonlRecords,
+  toMonthlyShardRelativePath,
+  upsertFood,
+} from '@murphai/core'
 
 const robustnessMocks = vi.hoisted(() => ({
   deliverAssistantMessageOverBinding: vi.fn(),
@@ -36,6 +42,8 @@ vi.mock('@murphai/assistant-engine/assistant-provider', async () => {
 })
 
 import {
+  addAssistantCronJob,
+  getAssistantCronJob,
   getAssistantStatus,
   readAssistantStatusSnapshot,
   runAssistantAutomation,
@@ -1192,6 +1200,94 @@ test('runAssistantAutomation exposes active run-lock status and rejects concurre
 
   const after = await getAssistantStatus(vaultRoot)
   assert.equal(after.runLock.state, 'unlocked')
+})
+
+test('runAssistantAutomation processes due recurring food autolog jobs on startup', async () => {
+  vi.useFakeTimers()
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-startup-food-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await initializeVault({
+    vaultRoot,
+    timezone: 'America/New_York',
+  })
+
+  const food = await upsertFood({
+    vaultRoot,
+    title: 'Morning Smoothie',
+    slug: 'morning-smoothie',
+    note: 'Bone broth protein, creatine, inulin, GOS, coconut water.',
+    ingredients: [
+      'bone broth protein',
+      'creatine',
+      'inulin',
+      'GOS',
+      'coconut water',
+    ],
+    autoLogDaily: {
+      time: '08:00',
+    },
+  })
+
+  const job = await addAssistantCronJob({
+    vault: vaultRoot,
+    name: 'food-daily:morning-smoothie',
+    prompt: 'Auto-log recurring food "Morning Smoothie" as a note-only meal.',
+    foodAutoLog: {
+      foodId: food.record.foodId,
+    },
+    schedule: {
+      kind: 'dailyLocal',
+      localTime: '08:00',
+      timeZone: 'America/New_York',
+    },
+    now: new Date('2026-03-07T13:30:00.000Z'),
+  })
+
+  assert.equal(job.state.nextRunAt, '2026-03-08T12:00:00.000Z')
+  vi.setSystemTime(new Date('2026-03-08T12:05:00.000Z'))
+
+  const result = await runAssistantAutomation({
+    vault: vaultRoot,
+    once: true,
+    startDaemon: false,
+    inboxServices: {
+      list: async () => ({
+        items: [],
+      }),
+    } as never,
+  })
+
+  assert.equal(result.reason, 'completed')
+  assert.equal(result.scans, 1)
+  assert.equal(result.lastError, null)
+
+  const updated = await getAssistantCronJob(vaultRoot, job.jobId)
+  assert.equal(updated.state.lastError, null)
+  assert.equal(updated.state.lastRunAt !== null, true)
+  assert.equal(updated.state.lastSucceededAt !== null, true)
+  assert.equal(updated.state.nextRunAt, '2026-03-09T12:00:00.000Z')
+
+  const runTimestamp = updated.state.lastRunAt ?? new Date().toISOString()
+  const events = await readJsonlRecords({
+    vaultRoot,
+    relativePath: toMonthlyShardRelativePath('ledger/events', runTimestamp),
+  })
+  const mealEvent = events
+    .filter(
+      (entry): entry is {
+        kind?: string
+        source?: string
+        note?: string
+      } => entry !== null && typeof entry === 'object',
+    )
+    .findLast((entry) => entry.kind === 'meal')
+
+  assert.equal(mealEvent?.kind, 'meal')
+  assert.equal(mealEvent?.source, 'derived')
+  assert.match(mealEvent?.note ?? '', /Morning Smoothie/u)
+  assert.match(mealEvent?.note ?? '', /bone broth protein/u)
 })
 
 test('stopAssistantAutomation gracefully stops an active run lock', async () => {
