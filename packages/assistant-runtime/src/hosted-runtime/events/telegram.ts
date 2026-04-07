@@ -1,11 +1,8 @@
 import {
-  normalizeTelegramUpdate,
+  normalizeHostedTelegramMessage,
   type TelegramAttachmentDownloadDriver,
 } from "@murphai/inboxd/connectors/telegram/normalize";
-import type {
-  TelegramFile,
-  TelegramUpdateLike,
-} from "@murphai/messaging-ingress/telegram-webhook";
+import type { TelegramFile } from "@murphai/messaging-ingress/telegram-webhook";
 import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
 
 import { withHostedInboxPipeline } from "./inbox-pipeline.ts";
@@ -16,11 +13,13 @@ export async function ingestHostedTelegramMessage(
     event: Extract<HostedExecutionDispatchRequest["event"], { kind: "telegram.message.received" }>;
   },
 ): Promise<void> {
-  const capture = await normalizeTelegramUpdate({
+  const capture = await normalizeHostedTelegramMessage({
     accountId: "bot",
-    botUserId: dispatch.event.botUserId,
     downloadDriver: createHostedTelegramAttachmentDownloadDriver(),
-    update: dispatch.event.telegramUpdate as TelegramUpdateLike,
+    externalId: dispatch.eventId,
+    message: dispatch.event.telegramMessage,
+    occurredAt: dispatch.occurredAt,
+    receivedAt: dispatch.occurredAt,
   });
 
   await withHostedInboxPipeline(vaultRoot, async (pipeline) => {

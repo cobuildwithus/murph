@@ -2,8 +2,6 @@ import {
   buildHostedAssistantDeliveryPreparedRecord,
   buildHostedAssistantDeliverySentRecord,
   buildHostedAssistantDeliverySideEffect,
-  buildHostedExecutionRunnerCommitPath,
-  buildHostedExecutionRunnerSideEffectPath,
   parseHostedExecutionSideEffects,
   type HostedExecutionDispatchRequest,
   type HostedExecutionRunnerResult,
@@ -11,9 +9,6 @@ import {
   type HostedExecutionSideEffectRecord,
 } from "@murphai/hosted-execution";
 import type { GatewayProjectionSnapshot } from "@murphai/gateway-core";
-import {
-  createHostedEmailChannelDependencies,
-} from "../hosted-email.ts";
 import {
   dispatchAssistantOutboxIntent,
   listAssistantOutboxIntents,
@@ -29,9 +24,9 @@ import type {
   HostedExecutionCommitCallback,
   HostedAssistantRuntimeJobRequest,
 } from "./models.ts";
-import { readHostedRunnerCommitTimeoutMs } from "./timeouts.ts";
-
-export { readHostedRunnerCommitTimeoutMs } from "./timeouts.ts";
+import type {
+  HostedRuntimeEffectsPort,
+} from "./platform.ts";
 
 const HOSTED_MAX_COMMITTED_SIDE_EFFECTS = 20;
 
@@ -59,42 +54,29 @@ export function resumeHostedCommittedExecution(
 export async function commitHostedExecutionResult(input: {
   commit: HostedExecutionCommitCallback | null;
   dispatch: HostedExecutionDispatchRequest;
-  fetchImpl?: typeof fetch;
+  effectsPort: HostedRuntimeEffectsPort;
   gatewayProjectionSnapshot?: GatewayProjectionSnapshot | null;
   result: HostedExecutionRunnerResult;
   sideEffects: HostedExecutionSideEffect[];
-  runtime: {
-    resultsBaseUrl: string;
-    commitTimeoutMs: number | null;
-  };
 }): Promise<void> {
   if (!input.commit) {
     return;
   }
 
-  const response = await (input.fetchImpl ?? fetch)(
-    buildHostedRunnerCommitUrl(
-      input.runtime.resultsBaseUrl,
-      input.dispatch.eventId,
-    ).toString(),
-    {
-      body: JSON.stringify({
+  try {
+    await input.effectsPort.commit({
+      eventId: input.dispatch.eventId,
+      payload: {
         currentBundleRef: input.commit.bundleRef,
         gatewayProjectionSnapshot: input.gatewayProjectionSnapshot ?? null,
         ...input.result,
         sideEffects: input.sideEffects,
-      }),
-      headers: {
-        "content-type": "application/json; charset=utf-8",
       },
-      method: "POST",
-      signal: AbortSignal.timeout(readHostedRunnerCommitTimeoutMs(input.runtime.commitTimeoutMs)),
-    },
-  );
-
-  if (!response.ok) {
+    });
+  } catch (error) {
     throw new Error(
-      `Hosted runner durable commit failed for ${input.dispatch.event.userId}/${input.dispatch.eventId} with HTTP ${response.status}.`,
+      `Hosted runner durable commit failed for ${input.dispatch.event.userId}/${input.dispatch.eventId}.`,
+      { cause: error },
     );
   }
 }
@@ -120,19 +102,15 @@ export async function collectHostedExecutionSideEffects(
 
 export async function drainHostedCommittedSideEffectsAfterCommit(input: {
   commit: HostedExecutionCommitCallback | null;
-  commitTimeoutMs: number | null;
   dispatch: HostedExecutionDispatchRequest;
-  fetchImpl?: typeof fetch;
-  resultsBaseUrl: string;
+  effectsPort: HostedRuntimeEffectsPort;
   sideEffects: HostedExecutionSideEffect[];
   vaultRoot: string;
 }): Promise<void> {
   for (const sideEffect of input.sideEffects) {
     await dispatchHostedCommittedSideEffect({
       commit: input.commit,
-      commitTimeoutMs: input.commitTimeoutMs,
-      fetchImpl: input.fetchImpl,
-      resultsBaseUrl: input.resultsBaseUrl,
+      effectsPort: input.effectsPort,
       sideEffect,
       userId: input.dispatch.event.userId,
       vaultRoot: input.vaultRoot,
@@ -142,33 +120,25 @@ export async function drainHostedCommittedSideEffectsAfterCommit(input: {
 
 async function dispatchHostedCommittedSideEffect(input: {
   commit: HostedExecutionCommitCallback;
-  commitTimeoutMs: number | null;
-  fetchImpl?: typeof fetch;
-  resultsBaseUrl: string;
+  effectsPort: HostedRuntimeEffectsPort;
   sideEffect: HostedExecutionSideEffect;
   userId: string;
   vaultRoot: string;
 } | {
   commit: null;
-  commitTimeoutMs: number | null;
-  fetchImpl?: typeof fetch;
-  resultsBaseUrl: string;
+  effectsPort: HostedRuntimeEffectsPort;
   sideEffect: HostedExecutionSideEffect;
   userId: string;
   vaultRoot: string;
 }): Promise<void> {
   await dispatchAssistantOutboxIntent({
-    dependencies: createHostedEmailChannelDependencies({
-      resultsBaseUrl: input.resultsBaseUrl,
-      fetchImpl: input.fetchImpl,
-      timeoutMs: input.commitTimeoutMs,
-    }),
+    dependencies: {
+      sendEmail: (request) => input.effectsPort.sendEmail(request),
+    },
     dispatchHooks: input.commit
       ? createHostedAssistantDeliveryDispatchHooks({
           commit: input.commit,
-          commitTimeoutMs: input.commitTimeoutMs,
-          fetchImpl: input.fetchImpl,
-          resultsBaseUrl: input.resultsBaseUrl,
+          effectsPort: input.effectsPort,
           userId: input.userId,
         })
       : undefined,
@@ -179,9 +149,7 @@ async function dispatchHostedCommittedSideEffect(input: {
 
 function createHostedAssistantDeliveryDispatchHooks(input: {
   commit: HostedExecutionCommitCallback;
-  commitTimeoutMs: number | null;
-  fetchImpl?: typeof fetch;
-  resultsBaseUrl: string;
+  effectsPort: HostedRuntimeEffectsPort;
   userId: string;
 }): AssistantOutboxDispatchHooks {
   return {
@@ -191,14 +159,12 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
     }) => {
       await callHostedRunnerSideEffectJournal({
         commit: input.commit,
-        commitTimeoutMs: input.commitTimeoutMs,
-        fetchImpl: input.fetchImpl,
+        effectsPort: input.effectsPort,
         method: "DELETE",
         sideEffect: buildHostedAssistantDeliverySideEffect({
           dedupeKey: intent.dedupeKey,
           intentId: intent.intentId,
         }),
-        resultsBaseUrl: input.resultsBaseUrl,
         userId: input.userId,
       });
     },
@@ -209,11 +175,9 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
     }) => {
       await persistHostedAssistantDeliveryRecord({
         commit: input.commit,
-        commitTimeoutMs: input.commitTimeoutMs,
         delivery,
-        fetchImpl: input.fetchImpl,
+        effectsPort: input.effectsPort,
         intent,
-        resultsBaseUrl: input.resultsBaseUrl,
         userId: input.userId,
       });
     },
@@ -223,15 +187,13 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
     }) => {
       await callHostedRunnerSideEffectJournal({
         commit: input.commit,
-        commitTimeoutMs: input.commitTimeoutMs,
-        fetchImpl: input.fetchImpl,
+        effectsPort: input.effectsPort,
         method: "PUT",
         record: buildHostedAssistantDeliveryPreparedRecord({
           dedupeKey: intent.dedupeKey,
           intentId: intent.intentId,
           recordedAt: intent.lastAttemptAt ?? new Date().toISOString(),
         }),
-        resultsBaseUrl: input.resultsBaseUrl,
         userId: input.userId,
       });
     },
@@ -245,11 +207,9 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
       });
       const record = await callHostedRunnerSideEffectJournal({
         commit: input.commit,
-        commitTimeoutMs: input.commitTimeoutMs,
-        fetchImpl: input.fetchImpl,
+        effectsPort: input.effectsPort,
         method: "GET",
         sideEffect,
-        resultsBaseUrl: input.resultsBaseUrl,
         userId: input.userId,
       });
 
@@ -281,11 +241,9 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
       try {
         await persistHostedAssistantDeliveryRecord({
           commit: input.commit,
-          commitTimeoutMs: input.commitTimeoutMs,
           delivery: localDelivery,
-          fetchImpl: input.fetchImpl,
+          effectsPort: input.effectsPort,
           intent,
-          resultsBaseUrl: input.resultsBaseUrl,
           userId: input.userId,
         });
       } catch (error) {
@@ -303,11 +261,9 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
 
 async function persistHostedAssistantDeliveryRecord(input: {
   commit: HostedExecutionCommitCallback;
-  commitTimeoutMs: number | null;
   delivery: AssistantChannelDelivery;
-  fetchImpl?: typeof fetch;
+  effectsPort: HostedRuntimeEffectsPort;
   intent: Pick<AssistantOutboxIntent, "dedupeKey" | "intentId">;
-  resultsBaseUrl: string;
   userId: string;
 }): Promise<void> {
   if (!input.delivery.idempotencyKey) {
@@ -318,8 +274,7 @@ async function persistHostedAssistantDeliveryRecord(input: {
 
   await callHostedRunnerSideEffectJournal({
     commit: input.commit,
-    commitTimeoutMs: input.commitTimeoutMs,
-    fetchImpl: input.fetchImpl,
+    effectsPort: input.effectsPort,
     method: "PUT",
     record: buildHostedAssistantDeliverySentRecord({
       dedupeKey: input.intent.dedupeKey,
@@ -329,7 +284,6 @@ async function persistHostedAssistantDeliveryRecord(input: {
       },
       intentId: input.intent.intentId,
     }),
-    resultsBaseUrl: input.resultsBaseUrl,
     userId: input.userId,
   });
 }
@@ -355,20 +309,16 @@ function readLocallyRecordedAssistantDelivery(
 async function callHostedRunnerSideEffectJournal(input:
   | {
       commit: HostedExecutionCommitCallback;
-      commitTimeoutMs: number | null;
-      fetchImpl?: typeof fetch;
+      effectsPort: HostedRuntimeEffectsPort;
       method: "DELETE" | "GET";
       sideEffect: HostedExecutionSideEffect;
-      resultsBaseUrl: string;
       userId: string;
     }
   | {
       commit: HostedExecutionCommitCallback;
-      commitTimeoutMs: number | null;
-      fetchImpl?: typeof fetch;
+      effectsPort: HostedRuntimeEffectsPort;
       method: "PUT";
       record: HostedExecutionSideEffectRecord;
-      resultsBaseUrl: string;
       userId: string;
     }): Promise<HostedExecutionSideEffectRecord | null> {
   const sideEffect = input.method === "PUT"
@@ -377,42 +327,27 @@ async function callHostedRunnerSideEffectJournal(input:
         intentId: input.record.intentId,
       })
     : input.sideEffect;
-  const url = buildHostedRunnerSideEffectUrl(input.resultsBaseUrl, sideEffect.effectId);
-  url.searchParams.set("fingerprint", sideEffect.fingerprint);
-  url.searchParams.set("kind", sideEffect.kind);
-
-  let response: Response;
   try {
-    response = await (input.fetchImpl ?? fetch)(url.toString(), {
-      body: input.method === "PUT" ? JSON.stringify(input.record) : undefined,
-      headers: {
-        ...(input.method === "PUT"
-          ? {
-              "content-type": "application/json; charset=utf-8",
-            }
-          : {}),
-      },
-      method: input.method,
-      signal: AbortSignal.timeout(readHostedRunnerCommitTimeoutMs(input.commitTimeoutMs)),
-    });
+    switch (input.method) {
+      case "DELETE":
+        await input.effectsPort.deletePreparedSideEffect({
+          effectId: sideEffect.effectId,
+          fingerprint: sideEffect.fingerprint,
+          kind: sideEffect.kind,
+        });
+        return null;
+      case "GET":
+        return await input.effectsPort.readSideEffect({
+          effectId: sideEffect.effectId,
+          fingerprint: sideEffect.fingerprint,
+          kind: sideEffect.kind,
+        });
+      case "PUT":
+        return await input.effectsPort.writeSideEffect(input.record);
+    }
   } catch (error) {
     throw createHostedRunnerSideEffectJournalError(input, null, error);
   }
-
-  if (!response.ok) {
-    throw createHostedRunnerSideEffectJournalError(input, response.status);
-  }
-
-  if (input.method === "DELETE") {
-    return null;
-  }
-
-  const payload = (await response.json()) as {
-    effectId: string;
-    record: HostedExecutionSideEffectRecord | null;
-  };
-
-  return payload.record;
 }
 
 function createHostedAssistantDeliveryConfirmationPendingError(input: {
@@ -455,20 +390,6 @@ function createHostedAssistantDeliveryConfirmationPendingError(input: {
     error.cause = input.cause;
   }
   return error;
-}
-
-function buildHostedRunnerCommitUrl(
-  baseUrl: string,
-  eventId: string,
-): URL {
-  return new URL(
-    buildHostedExecutionRunnerCommitPath(eventId),
-    baseUrl,
-  );
-}
-
-function buildHostedRunnerSideEffectUrl(baseUrl: string, effectId: string): URL {
-  return new URL(buildHostedExecutionRunnerSideEffectPath(effectId), baseUrl);
 }
 
 function createHostedRunnerSideEffectJournalError(

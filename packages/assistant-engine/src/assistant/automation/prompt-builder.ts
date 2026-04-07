@@ -165,6 +165,10 @@ export async function loadTelegramAutoReplyMetadata(
     const envelope = asRecord(parsed)
     const input = asRecord(envelope?.input)
     const raw = asRecord(input?.raw)
+    const minimalMetadata = readMinimalTelegramMetadata(raw)
+    if (minimalMetadata) {
+      return minimalMetadata
+    }
     const message = extractTelegramRawMessage(raw)
 
     return {
@@ -178,6 +182,23 @@ export async function loadTelegramAutoReplyMetadata(
     }
   } catch {
     return null
+  }
+}
+
+function readMinimalTelegramMetadata(
+  raw: Record<string, unknown> | null,
+): TelegramAutoReplyMetadata | null {
+  if (!raw || raw.schema !== 'murph.telegram-capture.v1') {
+    return null
+  }
+
+  return {
+    mediaGroupId:
+      typeof raw.media_group_id === 'string'
+        ? normalizeNullableString(raw.media_group_id)
+        : null,
+    messageId: parseTelegramMessageId(raw.message_id),
+    replyContext: null,
   }
 }
 

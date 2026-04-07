@@ -1,8 +1,16 @@
 import { timingSafeEqual } from "node:crypto";
 
 import {
+  HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
+  type HostedExecutionTelegramMessage,
+} from "@murphai/hosted-execution";
+import {
+  buildTelegramThreadId,
+  extractTelegramMessage,
   parseTelegramWebhookUpdate,
   summarizeTelegramUpdate,
+  type TelegramFileBase,
+  type TelegramPhotoSize,
   type TelegramUpdateLike,
 } from "@murphai/messaging-ingress/telegram-webhook";
 
@@ -11,7 +19,6 @@ import { getHostedOnboardingEnvironment } from "./runtime";
 import { normalizeNullableString } from "./shared";
 
 export interface HostedTelegramWebhookSummary {
-  botUserId: string | null;
   chatType: string | null;
   isBotMessage: boolean;
   isDirect: boolean;
@@ -53,6 +60,29 @@ export function parseHostedTelegramWebhookUpdate(rawBody: string): TelegramUpdat
   return parseTelegramWebhookUpdate(rawBody);
 }
 
+export function buildHostedTelegramMessagePayload(
+  update: TelegramUpdateLike,
+): HostedExecutionTelegramMessage | null {
+  const message = extractTelegramMessage(update);
+
+  if (!message) {
+    return null;
+  }
+
+  const attachments = buildHostedTelegramAttachmentPayloads(message);
+  const mediaGroupId = normalizeNullableString(message.media_group_id ?? null);
+  const text = resolveHostedTelegramMessageText(message);
+
+  return {
+    ...(mediaGroupId === null ? {} : { mediaGroupId }),
+    ...(attachments.length > 0 ? { attachments } : {}),
+    messageId: String(message.message_id),
+    schema: HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
+    ...(text === null ? {} : { text }),
+    threadId: buildTelegramThreadId(message),
+  };
+}
+
 export async function summarizeHostedTelegramWebhook(
   update: TelegramUpdateLike,
 ): Promise<HostedTelegramWebhookSummary | null> {
@@ -66,7 +96,6 @@ export async function summarizeHostedTelegramWebhook(
   }
 
   return {
-    botUserId: summary.botUserId,
     chatType: summary.thread.chatType,
     isBotMessage: summary.actor.isSelf,
     isDirect: summary.thread.isDirect,
@@ -105,4 +134,100 @@ function timingSafeEquals(left: string, right: string): boolean {
   }
 
   return timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function resolveHostedTelegramMessageText(
+  message: NonNullable<ReturnType<typeof extractTelegramMessage>>,
+): string | null {
+  return normalizeNullableString(message.text ?? message.caption ?? null)
+    ?? hostedTelegramPlaceholderForMessage(message);
+}
+
+function hostedTelegramPlaceholderForMessage(
+  message: NonNullable<ReturnType<typeof extractTelegramMessage>>,
+): string | null {
+  if (message.contact) {
+    return "[shared contact]";
+  }
+
+  if (message.venue) {
+    return "[shared venue]";
+  }
+
+  if (message.location) {
+    return "[shared location]";
+  }
+
+  if (message.poll) {
+    return "[shared poll]";
+  }
+
+  return null;
+}
+
+function buildHostedTelegramAttachmentPayloads(
+  message: NonNullable<ReturnType<typeof extractTelegramMessage>>,
+): NonNullable<HostedExecutionTelegramMessage["attachments"]> {
+  const attachments: NonNullable<HostedExecutionTelegramMessage["attachments"]> = [];
+  const largestPhoto = selectHostedTelegramLargestPhoto(message.photo ?? []);
+
+  if (largestPhoto) {
+    attachments.push(buildHostedTelegramAttachmentPayload("photo", largestPhoto));
+  }
+
+  pushHostedTelegramAttachment(attachments, "document", message.document ?? null);
+  pushHostedTelegramAttachment(attachments, "audio", message.audio ?? null);
+  pushHostedTelegramAttachment(attachments, "voice", message.voice ?? null);
+  pushHostedTelegramAttachment(attachments, "video", message.video ?? null);
+  pushHostedTelegramAttachment(attachments, "video_note", message.video_note ?? null);
+  pushHostedTelegramAttachment(attachments, "animation", message.animation ?? null);
+  pushHostedTelegramAttachment(attachments, "sticker", message.sticker ?? null);
+
+  return attachments;
+}
+
+function pushHostedTelegramAttachment(
+  attachments: NonNullable<HostedExecutionTelegramMessage["attachments"]>,
+  kind: NonNullable<HostedExecutionTelegramMessage["attachments"]>[number]["kind"],
+  file: TelegramFileBase | null,
+): void {
+  if (!file) {
+    return;
+  }
+
+  attachments.push(buildHostedTelegramAttachmentPayload(kind, file));
+}
+
+function buildHostedTelegramAttachmentPayload(
+  kind: NonNullable<HostedExecutionTelegramMessage["attachments"]>[number]["kind"],
+  file: TelegramFileBase,
+): NonNullable<HostedExecutionTelegramMessage["attachments"]>[number] {
+  return {
+    fileId: file.file_id,
+    ...(file.file_name === undefined ? {} : { fileName: normalizeNullableString(file.file_name) }),
+    ...(file.file_size === undefined ? {} : { fileSize: file.file_size ?? null }),
+    ...(file.file_unique_id === undefined ? {} : { fileUniqueId: normalizeNullableString(file.file_unique_id) }),
+    ...(hasHostedTelegramDimension(file.height) ? { height: file.height } : {}),
+    kind,
+    ...(file.mime_type === undefined ? {} : { mimeType: normalizeNullableString(file.mime_type) }),
+    ...(hasHostedTelegramDimension(file.width) ? { width: file.width } : {}),
+  };
+}
+
+function selectHostedTelegramLargestPhoto(
+  photos: TelegramPhotoSize[],
+): TelegramPhotoSize | null {
+  if (photos.length === 0) {
+    return null;
+  }
+
+  return [...photos].sort((left, right) => {
+    const leftScore = (left.file_size ?? 0) || (left.width ?? 0) * (left.height ?? 0);
+    const rightScore = (right.file_size ?? 0) || (right.width ?? 0) * (right.height ?? 0);
+    return rightScore - leftScore;
+  })[0] ?? null;
+}
+
+function hasHostedTelegramDimension(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }

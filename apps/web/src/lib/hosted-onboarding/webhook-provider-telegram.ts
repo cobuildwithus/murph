@@ -1,26 +1,22 @@
 import { buildHostedExecutionTelegramMessageReceivedDispatch } from "@murphai/hosted-execution";
 
 import {
-  createHostedTelegramUserLookupKey,
-  sanitizeHostedTelegramUpdateForStorage,
-} from "./contact-privacy";
-import {
   hasHostedMemberActiveAccess,
   isHostedMemberSuspended,
 } from "./entitlement";
 import {
+  buildHostedTelegramMessagePayload,
   buildHostedTelegramWebhookEventId,
   parseHostedTelegramWebhookUpdate,
   summarizeHostedTelegramWebhook,
 } from "./telegram";
-import { findHostedMemberByTelegramUserLookupKey } from "./hosted-member-store";
+import { findHostedMemberByTelegramUserId } from "./hosted-member-store";
 import {
   createHostedWebhookDispatchSideEffect,
   type HostedWebhookDispatchSideEffect,
   type HostedWebhookPlan,
   type HostedWebhookReceiptPersistenceClient,
 } from "./webhook-receipts";
-import { minimizeHostedTelegramUpdate } from "./webhook-event-snapshots";
 
 export type HostedOnboardingTelegramWebhookResponse = {
   duplicate?: boolean;
@@ -61,16 +57,9 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     return buildIgnoredTelegramWebhookPlan("missing-sender");
   }
 
-  const telegramUserLookupKey = createHostedTelegramUserLookupKey(
-    summary.senderTelegramUserId,
-  );
-  if (!telegramUserLookupKey) {
-    return buildIgnoredTelegramWebhookPlan("missing-sender");
-  }
-
-  const existingMember = await findHostedMemberByTelegramUserLookupKey({
+  const existingMember = await findHostedMemberByTelegramUserId({
     prisma: input.prisma,
-    telegramUserLookupKey,
+    telegramUserId: summary.senderTelegramUserId,
   });
 
   if (!existingMember) {
@@ -85,16 +74,19 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     return buildIgnoredTelegramWebhookPlan("inactive-member");
   }
 
+  const telegramMessage = buildHostedTelegramMessagePayload(input.update);
+
+  if (!telegramMessage) {
+    return buildIgnoredTelegramWebhookPlan("unsupported-update");
+  }
+
   return {
     desiredSideEffects: [
       createHostedWebhookDispatchSideEffect({
         dispatch: buildHostedExecutionTelegramMessageReceivedDispatch({
-          botUserId: summary.botUserId,
           eventId: buildHostedTelegramWebhookEventId(input.update),
           occurredAt: summary.occurredAt,
-          telegramUpdate: sanitizeHostedTelegramUpdateForStorage(
-            minimizeHostedTelegramUpdate(input.update),
-          ),
+          telegramMessage,
           userId: existingMember.id,
         }),
       }),

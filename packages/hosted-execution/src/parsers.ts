@@ -28,6 +28,7 @@ import type {
   HostedExecutionTelegramMessageReceivedEvent,
   HostedExecutionEventDispatchState,
   HostedExecutionRunnerRequest,
+  HostedExecutionRunnerSharePack,
   HostedExecutionRunnerResult,
   HostedExecutionShareReference,
   HostedExecutionUserEnvStatus,
@@ -76,16 +77,47 @@ export function parseHostedExecutionOutboxPayload(value: unknown): HostedExecuti
 
 export function parseHostedExecutionRunnerRequest(value: unknown): HostedExecutionRunnerRequest {
   const record = requireObject(value, "Hosted execution runner request");
+  const dispatch = parseHostedExecutionDispatchRequest(record.dispatch);
+  const sharePack = record.sharePack === undefined
+    ? undefined
+    : record.sharePack === null
+      ? null
+      : parseHostedExecutionRunnerSharePack(record.sharePack);
+
+  if (dispatch.event.kind === "vault.share.accepted") {
+    if (!sharePack) {
+      throw new TypeError(
+        "Hosted execution runner request.sharePack is required for vault.share.accepted events.",
+      );
+    }
+
+    if (sharePack.ownerUserId !== dispatch.event.share.ownerUserId) {
+      throw new TypeError(
+        "Hosted execution runner request.sharePack ownerUserId must match dispatch.event.share.ownerUserId.",
+      );
+    }
+
+    if (sharePack.shareId !== dispatch.event.share.shareId) {
+      throw new TypeError(
+        "Hosted execution runner request.sharePack shareId must match dispatch.event.share.shareId.",
+      );
+    }
+  } else if (sharePack !== undefined) {
+    throw new TypeError(
+      "Hosted execution runner request.sharePack is only supported for vault.share.accepted events.",
+    );
+  }
 
   return {
     bundle: parseHostedExecutionBundlePayload(
       record.bundle,
       "Hosted execution runner request bundle",
     ),
-    dispatch: parseHostedExecutionDispatchRequest(record.dispatch),
+    dispatch,
     ...(record.run === undefined ? {} : {
       run: record.run === null ? null : parseHostedExecutionRunContext(record.run),
     }),
+    ...(sharePack === undefined ? {} : { sharePack }),
   };
 }
 
@@ -315,15 +347,8 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
       };
     case "telegram.message.received": {
       const event: HostedExecutionTelegramMessageReceivedEvent = {
-        botUserId: readNullableString(
-          record.botUserId,
-          "Hosted execution Telegram message botUserId",
-        ),
         kind,
-        telegramUpdate: requireObject(
-          record.telegramUpdate,
-          "Hosted execution Telegram message telegramUpdate",
-        ),
+        telegramMessage: parseHostedExecutionTelegramMessage(record.telegramMessage),
         userId,
       };
 
@@ -450,8 +475,24 @@ export function parseHostedExecutionShareReference(value: unknown): HostedExecut
   const record = requireObject(value, "Hosted execution share reference");
 
   return {
-    pack: assertContract(sharePackSchema, record.pack, "share pack"),
+    ownerUserId: requireString(
+      record.ownerUserId,
+      "Hosted execution share reference ownerUserId",
+    ),
     shareId: requireString(record.shareId, "Hosted execution share reference shareId"),
+  };
+}
+
+export function parseHostedExecutionRunnerSharePack(value: unknown): HostedExecutionRunnerSharePack {
+  const record = requireObject(value, "Hosted execution runner share pack");
+
+  return {
+    ownerUserId: requireString(
+      record.ownerUserId,
+      "Hosted execution runner share pack ownerUserId",
+    ),
+    pack: assertContract(sharePackSchema, record.pack, "share pack"),
+    shareId: requireString(record.shareId, "Hosted execution runner share pack shareId"),
   };
 }
 
@@ -1266,6 +1307,138 @@ function readNullablePositiveInteger(value: unknown, label: string): number | nu
   }
 
   return requirePositiveInteger(value, label);
+}
+
+function parseHostedExecutionTelegramMessage(
+  value: unknown,
+): HostedExecutionTelegramMessageReceivedEvent["telegramMessage"] {
+  const record = requireObject(value, "Hosted execution Telegram message telegramMessage");
+  const attachmentsValue = record.attachments;
+
+  return {
+    ...(attachmentsValue === undefined
+      ? {}
+      : {
+          attachments: requireArray(
+            attachmentsValue,
+            "Hosted execution Telegram message telegramMessage.attachments",
+          ).map((entry, index) =>
+            parseHostedExecutionTelegramAttachment(
+              entry,
+              `Hosted execution Telegram message telegramMessage.attachments[${index}]`,
+            ),
+          ),
+        }),
+    ...(record.mediaGroupId === undefined
+      ? {}
+      : {
+          mediaGroupId: readNullableStringValue(
+            record.mediaGroupId,
+            "Hosted execution Telegram message telegramMessage.mediaGroupId",
+          ),
+        }),
+    messageId: requireString(
+      record.messageId,
+      "Hosted execution Telegram message telegramMessage.messageId",
+    ),
+    schema: parseHostedExecutionTelegramMessageSchema(record.schema),
+    ...(record.text === undefined
+      ? {}
+      : {
+          text: readNullableStringValue(
+            record.text,
+            "Hosted execution Telegram message telegramMessage.text",
+          ),
+        }),
+    threadId: requireString(
+      record.threadId,
+      "Hosted execution Telegram message telegramMessage.threadId",
+    ),
+  };
+}
+
+function parseHostedExecutionTelegramAttachment(
+  value: unknown,
+  label: string,
+): NonNullable<HostedExecutionTelegramMessageReceivedEvent["telegramMessage"]["attachments"]>[number] {
+  const record = requireObject(value, label);
+
+  return {
+    fileId: requireString(record.fileId, `${label}.fileId`),
+    ...(record.fileName === undefined
+      ? {}
+      : {
+          fileName: readNullableStringValue(record.fileName, `${label}.fileName`),
+        }),
+    ...(record.fileSize === undefined
+      ? {}
+      : {
+          fileSize: readNullableNumber(record.fileSize, `${label}.fileSize`),
+        }),
+    ...(record.fileUniqueId === undefined
+      ? {}
+      : {
+          fileUniqueId: readNullableStringValue(record.fileUniqueId, `${label}.fileUniqueId`),
+        }),
+    ...(record.height === undefined
+      ? {}
+      : {
+          height: readNullableNumber(record.height, `${label}.height`),
+        }),
+    kind: parseHostedExecutionTelegramAttachmentKind(record.kind, `${label}.kind`),
+    ...(record.mimeType === undefined
+      ? {}
+      : {
+          mimeType: readNullableStringValue(record.mimeType, `${label}.mimeType`),
+        }),
+    ...(record.width === undefined
+      ? {}
+      : {
+          width: readNullableNumber(record.width, `${label}.width`),
+        }),
+  };
+}
+
+function parseHostedExecutionTelegramAttachmentKind(
+  value: unknown,
+  label: string,
+): NonNullable<HostedExecutionTelegramMessageReceivedEvent["telegramMessage"]["attachments"]>[number]["kind"] {
+  const kind = requireString(value, label);
+
+  if (
+    kind === "animation"
+    || kind === "audio"
+    || kind === "document"
+    || kind === "photo"
+    || kind === "sticker"
+    || kind === "video"
+    || kind === "video_note"
+    || kind === "voice"
+  ) {
+    return kind;
+  }
+
+  throw new TypeError(`${label} must be a supported hosted Telegram attachment kind.`);
+}
+
+function parseHostedExecutionTelegramMessageSchema(
+  value: unknown,
+): HostedExecutionTelegramMessageReceivedEvent["telegramMessage"]["schema"] {
+  const schema = requireString(value, "Hosted execution Telegram message telegramMessage.schema");
+
+  if (schema === "murph.hosted-telegram-message.v1") {
+    return schema;
+  }
+
+  throw new TypeError("Hosted execution Telegram message telegramMessage.schema is unsupported.");
+}
+
+function readNullableNumber(value: unknown, label: string): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  return requireNumber(value, label);
 }
 
 function readOptionalNullableString(value: unknown, label: string): string | null | undefined {

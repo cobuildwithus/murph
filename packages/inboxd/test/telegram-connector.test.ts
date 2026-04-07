@@ -10,6 +10,7 @@ import {
   createTelegramPollConnector,
   normalizeTelegramUpdate,
 } from "../src/index.ts";
+import { normalizeHostedTelegramMessage } from "../src/connectors/telegram/normalize.ts";
 import type {
   InboundCapture,
   PersistedCapture,
@@ -99,6 +100,49 @@ test("normalizeTelegramUpdate builds thread-aware captures and hydrates download
   assert.equal(capture.attachments[0]?.kind, "image");
   assert.equal(capture.attachments[0]?.fileName, "photo-photo-unique-1.jpg");
   assert.equal(capture.attachments[0]?.data?.byteLength, 4);
+});
+
+test("normalizeHostedTelegramMessage stores only minimal durable Telegram capture fields", async () => {
+  const capture = await normalizeHostedTelegramMessage({
+    accountId: "bot",
+    externalId: "evt_hosted_telegram",
+    message: {
+      attachments: [
+        {
+          fileId: "photo_1",
+          fileSize: 48,
+          fileUniqueId: "photo_unique_1",
+          height: 128,
+          kind: "photo",
+          width: 128,
+        },
+      ],
+      mediaGroupId: "album-7",
+      messageId: "17",
+      text: "[shared location]",
+      threadId: "-100555:dm-topic:9",
+    },
+    occurredAt: "2026-04-07T09:00:00.000Z",
+    receivedAt: "2026-04-07T09:00:00.000Z",
+  });
+
+  assert.equal(capture.externalId, "evt_hosted_telegram");
+  assert.equal(capture.thread.id, "-100555:dm-topic:9");
+  assert.equal(capture.thread.isDirect, true);
+  assert.equal(capture.thread.title, null);
+  assert.equal(capture.actor.id, null);
+  assert.equal(capture.actor.displayName, null);
+  assert.equal(capture.actor.isSelf, false);
+  assert.equal(capture.text, "[shared location]");
+  assert.deepEqual(capture.raw, {
+    media_group_id: "album-7",
+    message_id: "17",
+    schema: "murph.telegram-capture.v1",
+  });
+  assert.equal(capture.attachments.length, 1);
+  assert.equal(capture.attachments[0]?.externalId, "photo_unique_1");
+  assert.equal(capture.attachments[0]?.kind, "image");
+  assert.equal(capture.attachments[0]?.fileName, "photo-photo_unique_1.jpg");
 });
 
 test("normalizeTelegramUpdate allowlists raw update metadata and drops secret-bearing extras", async () => {

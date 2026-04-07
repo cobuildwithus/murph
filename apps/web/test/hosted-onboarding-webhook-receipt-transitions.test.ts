@@ -324,91 +324,42 @@ describe("hosted webhook receipt transitions", () => {
   it("stores pending Telegram dispatch payloads from creation time and preserves them when sent", () => {
     const dispatchEffect = createHostedWebhookDispatchSideEffect({
       dispatch: buildHostedExecutionTelegramMessageReceivedDispatch({
-        botUserId: "999",
         eventId: "evt_tg_123",
         occurredAt: "2026-03-26T12:00:00.000Z",
-        telegramUpdate: {
-          update_id: 123,
-          message: {
-            animation: {
-              file_id: "anim_123",
-              file_name: "anim.gif",
-              file_size: 10,
-              file_unique_id: "uniq_anim_123",
-              mime_type: "image/gif",
-              secret: "drop",
+        telegramMessage: {
+          attachments: [
+            {
+              fileId: "photo_123",
+              fileName: "photo.jpg",
+              fileSize: 12,
+              fileUniqueId: "uniq_photo_123",
+              height: 100,
+              kind: "photo",
+              mimeType: "image/jpeg",
+              width: 200,
             },
-            caption: "hello",
-            chat: {
-              first_name: "Jane",
-              id: 456,
-              type: "private",
-              username: "jane",
-              unused: "drop",
+            {
+              fileId: "doc_123",
+              fileName: "file.pdf",
+              fileSize: 42,
+              fileUniqueId: "uniq_doc_123",
+              kind: "document",
+              mimeType: "application/pdf",
             },
-            contact: {
-              first_name: "Jane",
-              phone_number: "+15551234567",
-              secret: "drop",
-              user_id: 456,
-              vcard: "BEGIN:VCARD",
+            {
+              fileId: "anim_123",
+              fileName: "anim.gif",
+              fileSize: 10,
+              fileUniqueId: "uniq_anim_123",
+              kind: "animation",
+              mimeType: "image/gif",
             },
-            date: 1711454400,
-            document: {
-              file_id: "doc_123",
-              file_name: "file.pdf",
-              file_size: 42,
-              file_unique_id: "uniq_doc_123",
-              mime_type: "application/pdf",
-              secret: "drop",
-            },
-            from: {
-              first_name: "Jane",
-              id: 456,
-              is_bot: false,
-              username: "jane",
-              unused: true,
-            },
-            message_id: 789,
-            photo: [
-              {
-                file_id: "photo_123",
-                file_name: "photo.jpg",
-                file_size: 12,
-                file_unique_id: "uniq_photo_123",
-                height: 100,
-                mime_type: "image/jpeg",
-                width: 200,
-                unused: "drop",
-              },
-            ],
-            reply_to_message: {
-              chat: {
-                id: 456,
-                type: "private",
-              },
-              date: 1711454300,
-              direct_messages_topic: {
-                title: "Priority thread",
-                topic_id: 9,
-              },
-              from: {
-                first_name: "Bot",
-                id: 999,
-                is_bot: true,
-              },
-              message_id: 700,
-              text: "prior",
-              unused: "drop",
-            },
-            sender_business_bot: {
-              first_name: "Bot",
-              id: 999,
-              is_bot: true,
-            },
-            text: "hello",
-            unknown_field: "drop",
-          },
+          ],
+          mediaGroupId: "album_7",
+          messageId: "789",
+          schema: "murph.hosted-telegram-message.v1",
+          text: "[shared contact]",
+          threadId: "456:business:biz_123:topic:9",
         },
         userId: "member_123",
       }),
@@ -442,18 +393,11 @@ describe("hosted webhook receipt transitions", () => {
       throw new Error("Expected a pending Telegram dispatch payload.");
     }
 
-    const telegramMessage = rebuiltDispatch.event.telegramUpdate.message as {
-      chat: { id: number };
-      contact?: { phone_number?: string };
-      from?: { id?: number };
-      reply_to_message?: { from?: { id?: number } };
-    };
-    assert.equal(rebuiltDispatch.event.botUserId, "999");
-    assert.equal(rebuiltDispatch.event.telegramUpdate.update_id, 123);
-    assert.equal(telegramMessage.chat.id, 456);
-    assert.equal(telegramMessage.contact?.phone_number, "+15551234567");
-    assert.equal(telegramMessage.from?.id, 456);
-    assert.equal(telegramMessage.reply_to_message?.from?.id, 999);
+    assert.equal(rebuiltDispatch.event.telegramMessage.schema, "murph.hosted-telegram-message.v1");
+    assert.equal(rebuiltDispatch.event.telegramMessage.messageId, "789");
+    assert.equal(rebuiltDispatch.event.telegramMessage.text, "[shared contact]");
+    assert.equal(rebuiltDispatch.event.telegramMessage.threadId, "456:business:biz_123:topic:9");
+    assert.equal(rebuiltDispatch.event.telegramMessage.attachments?.length, 3);
   });
 });
 

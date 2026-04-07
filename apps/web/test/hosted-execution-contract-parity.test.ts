@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import type { SharePack } from "@murphai/contracts";
 import {
   HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
   HOSTED_EXECUTION_EVENT_KINDS,
@@ -20,23 +19,6 @@ import {
 } from "@murphai/hosted-execution";
 
 import { serializeHostedExecutionOutboxPayload } from "@/src/lib/hosted-execution/outbox-payload";
-
-const SHARE_PACK: SharePack = {
-  createdAt: "2026-03-26T12:05:00.000Z",
-  entities: [
-    {
-      kind: "food",
-      payload: {
-        kind: "smoothie",
-        status: "active",
-        title: "Shared breakfast",
-      },
-      ref: "food.shared-breakfast",
-    },
-  ],
-  schemaVersion: "murph.share-pack.v1",
-  title: "Shared breakfast",
-};
 
 describe("hosted execution contract parity", () => {
   it("keeps builder, parser, and app-local outbox serialization aligned for every event kind", () => {
@@ -101,24 +83,13 @@ describe("hosted execution contract parity", () => {
         occurredAt: "2026-03-26T12:04:00.000Z",
       }),
       "telegram.message.received": () => buildHostedExecutionTelegramMessageReceivedDispatch({
-        botUserId: "999",
         eventId: "evt_telegram",
         occurredAt: "2026-03-26T12:04:30.000Z",
-        telegramUpdate: {
-          message: {
-            chat: {
-              id: 123,
-              type: "private",
-            },
-            date: 1_774_527_870,
-            from: {
-              first_name: "Alice",
-              id: 456,
-            },
-            message_id: 1,
-            text: "hello",
-          },
-          update_id: 99,
+        telegramMessage: {
+          messageId: "1",
+          schema: "murph.hosted-telegram-message.v1",
+          text: "hello",
+          threadId: "123",
         },
         userId: "member_123",
       }),
@@ -127,7 +98,7 @@ describe("hosted execution contract parity", () => {
         memberId: "member_123",
         occurredAt: "2026-03-26T12:05:00.000Z",
         share: {
-          pack: SHARE_PACK,
+          ownerUserId: "member_sender",
           shareId: "share_123",
         },
       }),
@@ -148,6 +119,7 @@ describe("hosted execution contract parity", () => {
       const dispatchRef = buildHostedExecutionDispatchRef(dispatch);
       const payload = serializeHostedExecutionOutboxPayload(dispatch, {
         ...(kind === "assistant.cron.tick"
+          || kind === "vault.share.accepted"
           ? {}
           : {
               payloadRef: {
@@ -167,7 +139,6 @@ describe("hosted execution contract parity", () => {
           || kind === "telegram.message.received"
           || kind === "email.message.received"
           || kind === "gateway.message.send"
-          || kind === "vault.share.accepted"
           ? "reference"
           : "inline",
       );

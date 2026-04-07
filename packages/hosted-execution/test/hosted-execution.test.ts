@@ -1153,46 +1153,50 @@ describe("@murphai/hosted-execution", () => {
   it("round-trips hosted Telegram dispatches through the shared builder and parser", () => {
     expect(parseHostedExecutionDispatchRequest(
       buildHostedExecutionTelegramMessageReceivedDispatch({
-        botUserId: "999",
         eventId: "telegram:update:123",
         occurredAt: "2026-03-28T09:05:00.000Z",
-        telegramUpdate: {
-          message: {
-            chat: {
-              id: 123,
-              type: "private",
+        telegramMessage: {
+          attachments: [
+            {
+              fileId: "photo_123",
+              fileName: "photo.jpg",
+              fileSize: 42,
+              fileUniqueId: "uniq_photo_123",
+              height: 200,
+              kind: "photo",
+              mimeType: "image/jpeg",
+              width: 100,
             },
-            date: 1_774_528_300,
-            from: {
-              first_name: "Alice",
-              id: 456,
-            },
-            message_id: 1,
-            text: "hello from Telegram",
-          },
-          update_id: 123,
+          ],
+          mediaGroupId: "group_123",
+          messageId: "1",
+          schema: "murph.hosted-telegram-message.v1",
+          text: "hello from Telegram",
+          threadId: "123",
         },
         userId: "member_123",
       }),
     )).toEqual({
       event: {
-        botUserId: "999",
         kind: "telegram.message.received",
-        telegramUpdate: {
-          message: {
-            chat: {
-              id: 123,
-              type: "private",
+        telegramMessage: {
+          attachments: [
+            {
+              fileId: "photo_123",
+              fileName: "photo.jpg",
+              fileSize: 42,
+              fileUniqueId: "uniq_photo_123",
+              height: 200,
+              kind: "photo",
+              mimeType: "image/jpeg",
+              width: 100,
             },
-            date: 1_774_528_300,
-            from: {
-              first_name: "Alice",
-              id: 456,
-            },
-            message_id: 1,
-            text: "hello from Telegram",
-          },
-          update_id: 123,
+          ],
+          mediaGroupId: "group_123",
+          messageId: "1",
+          schema: "murph.hosted-telegram-message.v1",
+          text: "hello from Telegram",
+          threadId: "123",
         },
         userId: "member_123",
       },
@@ -1301,7 +1305,7 @@ describe("@murphai/hosted-execution", () => {
       memberId: "member_123",
       occurredAt: "2026-03-28T09:20:00.000Z",
       share: {
-        pack: TEST_HOSTED_SHARE_PACK,
+        ownerUserId: "member_sender",
         shareId: "share_456",
       },
     });
@@ -1316,11 +1320,7 @@ describe("@murphai/hosted-execution", () => {
         key: "transient/dispatch-payloads/member_123/member-activated.json",
       },
     });
-    const sharePayload = buildHostedExecutionOutboxPayload(shareDispatch, {
-      payloadRef: {
-        key: "transient/dispatch-payloads/member_123/share.json",
-      },
-    });
+    const sharePayload = buildHostedExecutionOutboxPayload(shareDispatch);
 
     expect(inlinePayload).toEqual({
       dispatch: inlineDispatch,
@@ -1344,12 +1344,9 @@ describe("@murphai/hosted-execution", () => {
       storage: "reference",
     });
     expect(sharePayload).toEqual({
-      dispatchRef: buildHostedExecutionDispatchRef(shareDispatch),
-      payloadRef: {
-        key: "transient/dispatch-payloads/member_123/share.json",
-      },
+      dispatch: shareDispatch,
       schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
-      storage: "reference",
+      storage: "inline",
     });
     expect(
       readHostedExecutionOutboxPayload(inlinePayload),

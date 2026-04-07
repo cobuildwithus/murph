@@ -84,11 +84,11 @@ describe("hosted dispatch payload store confidentiality", () => {
       event: {
         kind: "telegram.message.received",
         userId: "user_live_789",
-        botUserId: "bot-1",
-        telegramUpdate: {
-          message: {
-            text: "private telegram text",
-          },
+        telegramMessage: {
+          messageId: "123",
+          schema: "murph.hosted-telegram-message.v1",
+          text: "private telegram text",
+          threadId: "thread_123",
         },
       },
       eventId: "evt_telegram_1",
@@ -100,13 +100,13 @@ describe("hosted dispatch payload store confidentiality", () => {
 
     expectOpaqueStrings(
       [linqPayloadJson, telegramPayloadJson],
-      ["private linq body", "phone-lookup", "private telegram text", "telegramUpdate"],
+      ["private linq body", "phone-lookup", "private telegram text", "telegramMessage"],
     );
     expect(await store.readStoredDispatch(linqPayloadJson)).toEqual(linqDispatch);
     expect(await store.readStoredDispatch(telegramPayloadJson)).toEqual(telegramDispatch);
   });
 
-  it("externalizes hosted share acceptance without persisting the share id inline", async () => {
+  it("keeps hosted share acceptance inline without persisting the opaque pack", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const store = createHostedDispatchPayloadStore({
       bucket,
@@ -117,7 +117,7 @@ describe("hosted dispatch payload store confidentiality", () => {
       event: {
         kind: "vault.share.accepted",
         share: {
-          pack: SHARE_PACK,
+          ownerUserId: "user_share_owner",
           shareId: "hshare_123",
         },
         userId: "user_live_share",
@@ -128,8 +128,8 @@ describe("hosted dispatch payload store confidentiality", () => {
 
     const payloadJson = await store.writeStoredDispatch(dispatch);
 
-    expect(resolveHostedRunnerDispatchPayloadStorage(dispatch)).toBe("reference");
-    expectOpaqueStrings([payloadJson], ["hshare_123"]);
+    expect(resolveHostedRunnerDispatchPayloadStorage(dispatch)).toBe("inline");
+    expect(JSON.stringify(payloadJson)).not.toContain(SHARE_PACK.title);
     expect(await store.readStoredDispatch(payloadJson)).toEqual(dispatch);
   });
 
