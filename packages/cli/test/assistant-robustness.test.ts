@@ -108,6 +108,7 @@ afterEach(async () => {
       })
     }),
   )
+  vi.useRealTimers()
   vi.restoreAllMocks()
 })
 
@@ -1274,15 +1275,15 @@ test('runAssistantAutomation processes due recurring food autolog jobs on startu
     vaultRoot,
     relativePath: toMonthlyShardRelativePath('ledger/events', runTimestamp),
   })
-  const mealEvent = events
-    .filter(
+  const mealEvent = [...events]
+    .reverse()
+    .find(
       (entry): entry is {
         kind?: string
         source?: string
         note?: string
-      } => entry !== null && typeof entry === 'object',
+      } => entry !== null && typeof entry === 'object' && (entry as { kind?: string }).kind === 'meal',
     )
-    .findLast((entry) => entry.kind === 'meal')
 
   assert.equal(mealEvent?.kind, 'meal')
   assert.equal(mealEvent?.source, 'derived')

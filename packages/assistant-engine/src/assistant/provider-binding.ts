@@ -10,6 +10,8 @@ import {
   readAssistantProviderSessionId,
   writeAssistantProviderStateResumeRouteId,
 } from './provider-state.js'
+import type { ResolvedAssistantFailoverRoute } from './failover.js'
+import { normalizeNullableString } from './shared.js'
 
 export function resolveAssistantProviderResumeKey(input: {
   binding: AssistantProviderBinding | null
@@ -23,15 +25,13 @@ export function resolveAssistantProviderResumeKey(input: {
 }
 
 export function resolveAssistantRouteResumeBinding(input: {
-  provider: AssistantChatProvider
-  routeId: string
+  route: ResolvedAssistantFailoverRoute
   sessionBinding: AssistantProviderBinding | null
 }): AssistantProviderBinding | null {
   if (
     doesAssistantResumeBindingMatchRoute({
       binding: input.sessionBinding,
-      provider: input.provider,
-      routeId: input.routeId,
+      route: input.route,
     })
   ) {
     return input.sessionBinding
@@ -42,18 +42,27 @@ export function resolveAssistantRouteResumeBinding(input: {
 
 export function doesAssistantResumeBindingMatchRoute(input: {
   binding: AssistantProviderBinding | null
-  provider: AssistantChatProvider
-  routeId: string
+  route: ResolvedAssistantFailoverRoute
 }): boolean {
-  if (input.binding?.provider !== input.provider) {
+  if (input.binding?.provider !== input.route.provider) {
     return false
   }
 
-  return (
-    readAssistantProviderResumeRouteId({
-      providerBinding: input.binding,
-    }) === input.routeId
-  )
+  const storedRouteId = readAssistantProviderResumeRouteId({
+    providerBinding: input.binding,
+  })
+  if (storedRouteId === null) {
+    return false
+  }
+
+  if (storedRouteId === input.route.routeId) {
+    return true
+  }
+
+  return areAssistantProviderOptionsCompatible({
+    current: input.route.providerOptions,
+    stored: input.binding.providerOptions,
+  })
 }
 
 export function resolveNextAssistantProviderBinding(input: {
@@ -135,5 +144,98 @@ function resolveNextAssistantProviderState(input: {
     return null
   }
 
+  const previousProviderSessionId = input.previousBinding
+    ? readAssistantProviderSessionId({
+        providerBinding: input.previousBinding,
+      })
+    : null
+  const previousResumeRouteId = input.previousBinding
+    ? readAssistantProviderResumeRouteId({
+        providerBinding: input.previousBinding,
+      })
+    : null
+
+  if (
+    previousProviderSessionId !== null &&
+    previousProviderSessionId === input.providerSessionId &&
+    previousResumeRouteId !== null
+  ) {
+    return writeAssistantProviderStateResumeRouteId(null, previousResumeRouteId)
+  }
+
   return writeAssistantProviderStateResumeRouteId(null, input.routeId)
+}
+
+function areAssistantProviderOptionsCompatible(input: {
+  current: AssistantProviderSessionOptions
+  stored: AssistantProviderSessionOptions
+}): boolean {
+  return (
+    nullableValuesMatch(input.stored.model, input.current.model) &&
+    nullableValuesMatch(
+      input.stored.reasoningEffort,
+      input.current.reasoningEffort,
+    ) &&
+    nullableValuesMatch(input.stored.sandbox, input.current.sandbox) &&
+    nullableValuesMatch(
+      input.stored.approvalPolicy,
+      input.current.approvalPolicy,
+    ) &&
+    nullableValuesMatch(input.stored.profile, input.current.profile) &&
+    input.stored.oss === input.current.oss &&
+    // Older Codex bindings often omitted codexHome, but that local state path
+    // is not part of the remote provider identity we need to preserve on resume.
+    nullableValuesCompatible(input.stored.codexHome, input.current.codexHome) &&
+    nullableValuesMatch(input.stored.baseUrl, input.current.baseUrl) &&
+    nullableValuesMatch(input.stored.apiKeyEnv, input.current.apiKeyEnv) &&
+    nullableValuesMatch(
+      input.stored.providerName,
+      input.current.providerName,
+    ) &&
+    headersMatch(input.stored.headers, input.current.headers)
+  )
+}
+
+function nullableValuesMatch(
+  stored: string | null | undefined,
+  current: string | null | undefined,
+): boolean {
+  return (
+    (normalizeNullableString(stored) ?? null) ===
+    (normalizeNullableString(current) ?? null)
+  )
+}
+
+function nullableValuesCompatible(
+  stored: string | null | undefined,
+  current: string | null | undefined,
+): boolean {
+  const normalizedStored = normalizeNullableString(stored)
+  if (normalizedStored === null) {
+    return true
+  }
+
+  return normalizedStored === (normalizeNullableString(current) ?? null)
+}
+
+function headersMatch(
+  stored: Record<string, string> | null | undefined,
+  current: Record<string, string> | null | undefined,
+): boolean {
+  return (
+    serializeHeaders(stored) ===
+    serializeHeaders(current)
+  )
+}
+
+function serializeHeaders(
+  value: Record<string, string> | null | undefined,
+): string {
+  if (!value || Object.keys(value).length === 0) {
+    return '[]'
+  }
+
+  return JSON.stringify(
+    Object.entries(value).sort(([left], [right]) => left.localeCompare(right)),
+  )
 }

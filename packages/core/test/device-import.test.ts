@@ -889,3 +889,151 @@ test("prepareRawArtifact and prepareInlineRawArtifact support integration snapsh
   assert.equal(inline.originalFileName, "payload.json");
   assert.equal(inline.mediaType, "application/json");
 });
+
+test("raw artifact helpers normalize category paths and inferred media types", () => {
+  const occurredAt = "2026-03-16T09:30:00.000Z";
+
+  const cases = [
+    {
+      artifact: prepareRawArtifact({
+        sourcePath: "/tmp/Lab Result.PDF",
+        category: "documents",
+        occurredAt,
+        recordId: "doc_01JQ9R7WF97M1WAB2B4QF2Q1A1",
+        targetName: "Lab Result.PDF",
+      }),
+      relativePath: "raw/documents/2026/03/doc_01JQ9R7WF97M1WAB2B4QF2Q1A1/lab-result.pdf",
+      originalFileName: "Lab Result.PDF",
+      mediaType: "application/pdf",
+    },
+    {
+      artifact: prepareRawArtifact({
+        sourcePath: "/tmp/Breakfast Photo.JPG",
+        category: "meal-photo",
+        occurredAt,
+        recordId: "meal_01JQ9R7WF97M1WAB2B4QF2Q1A2",
+        slot: "Photo 01",
+        targetName: "Breakfast Photo.JPG",
+      }),
+      relativePath:
+        "raw/meals/2026/03/meal_01JQ9R7WF97M1WAB2B4QF2Q1A2/photo-01-breakfast-photo.jpg",
+      originalFileName: "Breakfast Photo.JPG",
+      mediaType: "image/jpeg",
+    },
+    {
+      artifact: prepareRawArtifact({
+        sourcePath: "/tmp/Voice Note.M4A",
+        category: "meal-audio",
+        occurredAt,
+        recordId: "meal_01JQ9R7WF97M1WAB2B4QF2Q1A3",
+        slot: "Audio 02",
+        targetName: "Voice Note.M4A",
+      }),
+      relativePath:
+        "raw/meals/2026/03/meal_01JQ9R7WF97M1WAB2B4QF2Q1A3/audio-02-voice-note.m4a",
+      originalFileName: "Voice Note.M4A",
+      mediaType: "audio/mp4",
+    },
+    {
+      artifact: prepareRawArtifact({
+        sourcePath: "/tmp/Resting HRV.JSON",
+        category: "samples",
+        occurredAt,
+        recordId: "smp_01JQ9R7WF97M1WAB2B4QF2Q1A4",
+        stream: "hrv",
+        targetName: "Resting HRV.JSON",
+      }),
+      relativePath: "raw/samples/hrv/2026/03/smp_01JQ9R7WF97M1WAB2B4QF2Q1A4/resting-hrv.json",
+      originalFileName: "Resting HRV.JSON",
+      mediaType: "application/json",
+    },
+    {
+      artifact: prepareRawArtifact({
+        sourcePath: "/tmp/Assessment Source.TXT",
+        category: "assessments",
+        occurredAt,
+        recordId: "asmt_01JQ9R7WF97M1WAB2B4QF2Q1A5",
+        targetName: "Assessment Source.TXT",
+      }),
+      relativePath: "raw/assessments/2026/03/asmt_01JQ9R7WF97M1WAB2B4QF2Q1A5/source.json",
+      originalFileName: "Assessment Source.TXT",
+      mediaType: "text/plain",
+    },
+    {
+      artifact: prepareRawArtifact({
+        sourcePath: "/tmp/Snapshot.JSON",
+        category: "integrations",
+        provider: "whoop",
+        occurredAt,
+        recordId: "xfm_fixed",
+        targetName: "Snapshot.JSON",
+      }),
+      relativePath: "raw/integrations/whoop/2026/03/xfm_fixed/snapshot.json",
+      originalFileName: "Snapshot.JSON",
+      mediaType: "application/json",
+    },
+    {
+      artifact: prepareRawArtifact({
+        sourcePath: "/tmp/Body Weight.CSV",
+        category: "measurements",
+        occurredAt,
+        recordId: "evt_01JQ9R7WF97M1WAB2B4QF2Q1A6",
+        targetName: "Body Weight.CSV",
+      }),
+      relativePath: "raw/measurements/2026/03/evt_01JQ9R7WF97M1WAB2B4QF2Q1A6/body-weight.csv",
+      originalFileName: "Body Weight.CSV",
+      mediaType: "text/csv",
+    },
+    {
+      artifact: prepareRawArtifact({
+        sourcePath: "/tmp/Workout Session.WEBM",
+        category: "workouts",
+        occurredAt,
+        recordId: "evt_01JQ9R7WF97M1WAB2B4QF2Q1A7",
+        targetName: "Workout Session.WEBM",
+      }),
+      relativePath: "raw/workouts/2026/03/evt_01JQ9R7WF97M1WAB2B4QF2Q1A7/workout-session.webm",
+      originalFileName: "Workout Session.WEBM",
+      mediaType: "video/webm",
+    },
+    {
+      artifact: prepareRawArtifact({
+        sourcePath: "/tmp/Manual Backup.TXT",
+        category: "Custom Category",
+        occurredAt,
+        recordId: "Bad Record/Id",
+        targetName: "Manual Backup.TXT",
+      }),
+      relativePath: "raw/custom-category/2026/03/bad-record-id/manual-backup.txt",
+      originalFileName: "Manual Backup.TXT",
+      mediaType: "text/plain",
+    },
+  ] as const;
+
+  for (const { artifact, relativePath, originalFileName, mediaType } of cases) {
+    assert.equal(artifact.relativePath, relativePath);
+    assert.equal(artifact.originalFileName, originalFileName);
+    assert.equal(artifact.mediaType, mediaType);
+  }
+
+  const inferredInline = prepareInlineRawArtifact({
+    fileName: "Payload.BIN",
+    category: "artifact",
+    occurredAt,
+    targetName: "Payload.BIN",
+  });
+  const explicitInline = prepareInlineRawArtifact({
+    fileName: "Payload.JSON",
+    category: "integrations",
+    provider: "whoop",
+    occurredAt,
+    recordId: "xfm_fixed",
+    targetName: "Payload.JSON",
+    mediaType: "application/json",
+  });
+
+  assert.equal(inferredInline.relativePath, "raw/artifact/2026/03/item/payload.bin");
+  assert.equal(inferredInline.mediaType, "application/octet-stream");
+  assert.equal(explicitInline.relativePath, "raw/integrations/whoop/2026/03/xfm_fixed/payload.json");
+  assert.equal(explicitInline.mediaType, "application/json");
+});

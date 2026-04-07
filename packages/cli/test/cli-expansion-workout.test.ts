@@ -600,7 +600,7 @@ test(
       ])
 
       assert.equal(saved.ok, false)
-      assert.equal(saved.error.code, 'VALIDATION_ERROR')
+      assert.equal(saved.error.code, 'invalid_payload')
       assert.match(saved.error.message ?? '', /template/u)
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
@@ -1583,9 +1583,13 @@ test(
         vaultRoot,
       ])
       assert.equal(cleared.ok, true)
-      assert.equal(Array.isArray(requireData(cleared).entity.data.rawRefs), true)
+      const rawRefsValue = requireData(cleared).entity.data.rawRefs
+      const rawRefs = Array.isArray(rawRefsValue)
+        ? rawRefsValue.filter((entry): entry is string => typeof entry === 'string')
+        : []
+      assert.equal(rawRefs.length > 0, true)
       assert.match(
-        requireData(cleared).entity.data.rawRefs?.[0] ?? '',
+        rawRefs[0] ?? '',
         /^raw\/workouts\/2026\/03\/evt[-_].+\/workout-photo\.jpg$/u,
       )
 

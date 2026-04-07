@@ -38,9 +38,11 @@ import {
 } from './provider-turn-recovery.js'
 import {
   readAssistantProviderBinding,
-  readAssistantProviderResumeRouteId,
-  readAssistantProviderSessionId,
 } from './provider-state.js'
+import {
+  resolveAssistantProviderResumeKey,
+  resolveAssistantRouteResumeBinding,
+} from './provider-binding.js'
 import {
   listAssistantTranscriptEntries,
 } from './store.js'
@@ -297,12 +299,18 @@ async function resolveAssistantRouteTurnPlan(input: {
   sharedPlan: AssistantTurnSharedPlan
 }): Promise<AssistantRouteTurnPlan> {
   const workingDirectory = input.sharedPlan.requestedWorkingDirectory
-  const sessionResumeRouteId = readAssistantProviderResumeRouteId(input.session)
+  const resumeBinding = resolveAssistantRouteResumeBinding({
+    route: input.route,
+    sessionBinding: readAssistantProviderBinding(input.session),
+  })
   const resumeProviderSessionId =
     resolveAssistantProviderExecutionCapabilities(input.route.provider)
       .supportsNativeResume &&
-    sessionResumeRouteId === input.route.routeId
-      ? readAssistantProviderSessionId(input.session)
+    resumeBinding !== null
+      ? resolveAssistantProviderResumeKey({
+          binding: resumeBinding,
+          provider: input.route.provider,
+        })
       : null
   const shouldInjectBootstrapContext = resumeProviderSessionId === null
   const resolvedChannel = input.input.channel ?? input.session.binding.channel

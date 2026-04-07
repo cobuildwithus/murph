@@ -31,6 +31,15 @@ import {
   type QuerySourceManifestEntry,
   type VaultSourceSnapshot,
 } from "./vault-source.ts";
+import type {
+  QueryProjectionStatus,
+  RebuildQueryProjectionResult,
+} from "./query-projection-types.ts";
+
+export type {
+  QueryProjectionStatus,
+  RebuildQueryProjectionResult,
+} from "./query-projection-types.ts";
 
 const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection.v1";
 const QUERY_PROJECTION_SQLITE_VERSION = 1;
@@ -63,20 +72,6 @@ interface QueryProjectionSearchDocumentRow {
   body_text: string;
   tags_text: string;
   structured_text: string;
-}
-
-export interface QueryProjectionStatus {
-  dbPath: string;
-  exists: boolean;
-  schemaVersion: string | null;
-  builtAt: string | null;
-  entityCount: number;
-  searchDocumentCount: number;
-  fresh: boolean;
-}
-
-export interface RebuildQueryProjectionResult extends QueryProjectionStatus {
-  rebuilt: true;
 }
 
 export async function getQueryProjectionStatus(

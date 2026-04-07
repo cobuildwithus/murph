@@ -6,7 +6,6 @@ import {
   type CanonicalEntityFamily,
   type CanonicalRecordClass,
 } from "./canonical-entities.ts";
-import { loadProjectedVaultSource } from "./query-projection.ts";
 import { readVaultSourceTolerant, type QueryRecordData } from "./vault-source.ts";
 
 type VaultReadModelFamilyViews = {
@@ -307,6 +306,7 @@ export function createVaultReadModel(
 }
 
 export async function readVault(vaultRoot: string): Promise<VaultReadModel> {
+  const { loadProjectedVaultSource } = await import("./query-projection.ts");
   const snapshot = await loadProjectedVaultSource(vaultRoot);
 
   return createVaultReadModel({

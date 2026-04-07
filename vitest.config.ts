@@ -196,8 +196,12 @@ export default defineConfig({
     maxWorkers: rootRepoVitestMaxWorkers,
     coverage: {
       enabled: true,
-      provider: "v8",
-      clean: true,
+      provider: "custom",
+      customProviderModule: "./config/vitest-coverage-provider.ts",
+      // The workspace verify lane clears ./coverage once before the root
+      // multi-project run. Letting each project clean the shared directory
+      // races with sibling projects writing coverage shards into .tmp.
+      clean: false,
       reporter: ["text", "lcov"],
       reportsDirectory: "./coverage",
       include: [
@@ -243,18 +247,34 @@ export default defineConfig({
     // apps/web and apps/cloudflare stay in their dedicated verify lanes so the
     // root multi-project run does not execute them twice.
     projects: [
-      ...ROOT_REPO_PROJECTS.map(({ config, include }) =>
+      ...ROOT_REPO_PROJECTS.map(({ config, include }, index) =>
         mergeConfig(
           config,
           defineProject({
             test: {
               ...rootRepoVitestConcurrency,
               include,
+              sequence: {
+                ...rootRepoVitestConcurrency.sequence,
+                groupOrder: index,
+              },
             },
           }),
         ),
       ),
-      ...rootRepoCliProjects,
+      ...rootRepoCliProjects.map((project, index) =>
+        mergeConfig(
+          project,
+          defineProject({
+            test: {
+              sequence: {
+                ...project.test?.sequence,
+                groupOrder: ROOT_REPO_PROJECTS.length + index,
+              },
+            },
+          }),
+        ),
+      ),
     ],
   },
 });

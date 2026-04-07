@@ -47,12 +47,9 @@ export {
 } from "./search.ts";
 export type { SafeSearchHit, SafeSearchResult } from "./search.ts";
 export {
-  getQueryProjectionStatus,
-  rebuildQueryProjection,
-  searchVaultRuntime,
   type QueryProjectionStatus,
   type RebuildQueryProjectionResult,
-} from "./query-projection.ts";
+} from "./query-projection-types.ts";
 export { summarizeDailySamples } from "./summaries.ts";
 export {
   buildWearableAssistantSummary,
@@ -161,3 +158,24 @@ export {
 export * from "./automation.ts";
 export * from "./health/index.ts";
 export * from "./memory.ts";
+
+export async function getQueryProjectionStatus(
+  ...args: Parameters<typeof import("./query-projection.ts").getQueryProjectionStatus>
+): ReturnType<typeof import("./query-projection.ts").getQueryProjectionStatus> {
+  const mod = await import("./query-projection.ts");
+  return mod.getQueryProjectionStatus(...args);
+}
+
+export async function rebuildQueryProjection(
+  ...args: Parameters<typeof import("./query-projection.ts").rebuildQueryProjection>
+): ReturnType<typeof import("./query-projection.ts").rebuildQueryProjection> {
+  const mod = await import("./query-projection.ts");
+  return mod.rebuildQueryProjection(...args);
+}
+
+export async function searchVaultRuntime(
+  ...args: Parameters<typeof import("./query-projection.ts").searchVaultRuntime>
+): ReturnType<typeof import("./query-projection.ts").searchVaultRuntime> {
+  const mod = await import("./query-projection.ts");
+  return mod.searchVaultRuntime(...args);
+}
