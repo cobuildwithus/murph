@@ -9,6 +9,8 @@ import { test, vi } from "vitest";
 import {
   INBOX_DB_RELATIVE_PATH,
   QUERY_DB_RELATIVE_PATH,
+  openSqliteRuntimeDatabase,
+  readSqliteRuntimeUserVersion,
 } from "@murphai/runtime-state/node";
 
 import {
@@ -2921,7 +2923,7 @@ test("rebuildQueryProjection materializes the shared query projection and status
 
     assert.equal(rebuilt.exists, true);
     assert.equal(rebuilt.dbPath, QUERY_DB_RELATIVE_PATH);
-    assert.equal(rebuilt.schemaVersion, "murph.query-projection.v1");
+    assert.equal(rebuilt.schemaVersion, "murph.query-projection.v2");
     assert.equal(rebuilt.entityCount, vault.entities.length);
     assert.equal(rebuilt.searchDocumentCount, vault.entities.length);
     assert.equal(rebuilt.fresh, true);
@@ -2933,6 +2935,167 @@ test("rebuildQueryProjection materializes the shared query projection and status
     assert.equal(statusAfter.entityCount, rebuilt.entityCount);
     assert.equal(statusAfter.searchDocumentCount, rebuilt.searchDocumentCount);
     assert.equal(statusAfter.fresh, true);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("query projection upgrades legacy sqlite stores and drops the write-only lookup table", async () => {
+  const vaultRoot = await createFixtureVault();
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const database = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: true });
+
+  try {
+    database.exec(`
+      PRAGMA user_version = 1;
+
+      CREATE TABLE query_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+
+      CREATE TABLE query_entities (
+        entity_id TEXT PRIMARY KEY,
+        sort_rank INTEGER NOT NULL,
+        primary_lookup_id TEXT NOT NULL,
+        family TEXT NOT NULL,
+        record_class TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        status TEXT,
+        stream TEXT,
+        experiment_slug TEXT,
+        occurred_at TEXT,
+        date TEXT,
+        title TEXT,
+        tags_json TEXT NOT NULL,
+        entity_json TEXT NOT NULL
+      );
+
+      CREATE TABLE query_lookup_ids (
+        lookup_id TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        is_primary INTEGER NOT NULL,
+        sort_rank INTEGER NOT NULL,
+        PRIMARY KEY (lookup_id, entity_id)
+      );
+
+      CREATE TABLE query_source_manifest (
+        relative_path TEXT PRIMARY KEY,
+        size_bytes INTEGER NOT NULL,
+        mtime_ms REAL NOT NULL
+      );
+
+      CREATE TABLE query_search_document (
+        record_id TEXT PRIMARY KEY,
+        alias_ids_json TEXT NOT NULL,
+        record_type TEXT NOT NULL,
+        kind TEXT,
+        stream TEXT,
+        title TEXT,
+        occurred_at TEXT,
+        date TEXT,
+        experiment_slug TEXT,
+        tags_json TEXT NOT NULL,
+        path TEXT NOT NULL,
+        title_text TEXT NOT NULL,
+        body_text TEXT NOT NULL,
+        tags_text TEXT NOT NULL,
+        structured_text TEXT NOT NULL
+      );
+
+      CREATE VIRTUAL TABLE query_search_fts USING fts5(
+        record_id UNINDEXED,
+        title_text,
+        body_text,
+        tags_text,
+        structured_text
+      );
+    `);
+  } finally {
+    database.close();
+  }
+
+  try {
+    const rebuilt = await rebuildQueryProjection(vaultRoot);
+    const reopened = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false, readOnly: true });
+
+    try {
+      assert.equal(rebuilt.schemaVersion, "murph.query-projection.v2");
+      assert.equal(readSqliteRuntimeUserVersion(reopened), 2);
+      const legacyLookupTable = reopened
+        .prepare(`
+          SELECT name
+          FROM sqlite_master
+          WHERE type = 'table' AND name = 'query_lookup_ids'
+        `)
+        .get() as { name?: string } | undefined;
+      assert.equal(legacyLookupTable?.name ?? null, null);
+    } finally {
+      reopened.close();
+    }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("searchVaultRuntime upgrades a matching legacy projection before serving results", async () => {
+  const vaultRoot = await createFixtureVault();
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+    const legacyDatabase = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
+
+    try {
+      legacyDatabase.exec(`
+        PRAGMA user_version = 1;
+        CREATE TABLE IF NOT EXISTS query_lookup_ids (
+          lookup_id TEXT NOT NULL,
+          entity_id TEXT NOT NULL,
+          is_primary INTEGER NOT NULL,
+          sort_rank INTEGER NOT NULL,
+          PRIMARY KEY (lookup_id, entity_id)
+        );
+      `);
+      legacyDatabase
+        .prepare(`
+          INSERT INTO query_meta (key, value)
+          VALUES ('schema_version', ?)
+          ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        `)
+        .run("murph.query-projection.v1");
+    } finally {
+      legacyDatabase.close();
+    }
+
+    const statusBefore = await getQueryProjectionStatus(vaultRoot);
+    assert.equal(statusBefore.schemaVersion, "murph.query-projection.v1");
+    assert.equal(statusBefore.fresh, false);
+
+    const searchResult = await searchVaultRuntime(vaultRoot, "lab report", {
+      recordTypes: ["event"],
+      kinds: ["document"],
+    });
+    assert.equal(searchResult.total, 1);
+
+    const reopened = openSqliteRuntimeDatabase(runtimeDatabasePath, {
+      create: false,
+      readOnly: true,
+    });
+
+    try {
+      assert.equal(readSqliteRuntimeUserVersion(reopened), 2);
+      const legacyLookupTable = reopened
+        .prepare(`
+          SELECT name
+          FROM sqlite_master
+          WHERE type = 'table' AND name = 'query_lookup_ids'
+        `)
+        .get() as { name?: string } | undefined;
+      assert.equal(legacyLookupTable?.name ?? null, null);
+    } finally {
+      reopened.close();
+    }
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

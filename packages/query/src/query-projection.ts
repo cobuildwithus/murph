@@ -5,6 +5,7 @@ import {
   applySqliteRuntimeMigrations,
   hasLocalStatePath,
   openSqliteRuntimeDatabase,
+  readSqliteRuntimeUserVersion,
   resolveRuntimePaths,
   tableExists,
   withImmediateTransaction,
@@ -30,8 +31,8 @@ import {
   type VaultSourceSnapshot,
 } from "./vault-source.ts";
 
-const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection.v1";
-const QUERY_PROJECTION_SQLITE_VERSION = 1;
+const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection.v2";
+const QUERY_PROJECTION_SQLITE_VERSION = 2;
 const DEFAULT_CANDIDATE_MULTIPLIER = 25;
 const DEFAULT_MIN_CANDIDATES = 50;
 const MAX_CANDIDATES = 1_000;
@@ -96,14 +97,7 @@ export async function rebuildQueryProjection(
 export async function loadProjectedVaultSource(
   vaultRoot: string,
 ): Promise<VaultSourceSnapshot> {
-  const currentManifest = await listCanonicalSourceManifest(vaultRoot);
-  const location = currentQueryProjectionLocation(vaultRoot);
-  const status = await readProjectionStatus(location, currentManifest);
-
-  if (!status?.fresh) {
-    await rebuildQueryProjectionWithManifest(vaultRoot, currentManifest);
-  }
-
+  const location = await ensureFreshQueryProjection(vaultRoot);
   return readStoredVaultSource(location);
 }
 
@@ -112,31 +106,23 @@ export async function searchVaultRuntime(
   query: string,
   filters: SearchFilters = {},
 ): Promise<SearchResult> {
-  const location = currentQueryProjectionLocation(vaultRoot);
-  const currentManifest = await listCanonicalSourceManifest(vaultRoot);
-  const status = await readProjectionStatus(location, currentManifest);
-
-  if (!status?.fresh) {
-    await rebuildQueryProjectionWithManifest(vaultRoot, currentManifest);
-  }
-
+  const location = await ensureFreshQueryProjection(vaultRoot);
   return searchQueryProjection(location, query, filters);
 }
 
 async function rebuildQueryProjectionWithManifest(
   vaultRoot: string,
   currentManifest: readonly QuerySourceManifestEntry[],
+  location: QueryProjectionLocation = currentQueryProjectionLocation(vaultRoot),
 ): Promise<RebuildQueryProjectionResult> {
   const snapshot = await readVaultSourceStrict(vaultRoot);
   const searchDocuments = materializeSearchDocuments(snapshot.entities);
-  const location = currentQueryProjectionLocation(vaultRoot);
   const database = openQueryProjectionDatabase(location, { create: true });
 
   try {
     ensureQueryProjectionSchema(database);
     const builtAt = withImmediateTransaction(database, () => {
       database.exec(`
-        DELETE FROM query_lookup_ids;
         DELETE FROM query_entities;
         DELETE FROM query_source_manifest;
         DELETE FROM query_search_document;
@@ -160,14 +146,6 @@ async function rebuildQueryProjectionWithManifest(
           tags_json,
           entity_json
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-      const insertLookupId = database.prepare(`
-        INSERT INTO query_lookup_ids (
-          lookup_id,
-          entity_id,
-          is_primary,
-          sort_rank
-        ) VALUES (?, ?, ?, ?)
       `);
       const insertManifestEntry = database.prepare(`
         INSERT INTO query_source_manifest (
@@ -222,15 +200,6 @@ async function rebuildQueryProjectionWithManifest(
           JSON.stringify(entity.tags),
           JSON.stringify(entity),
         );
-
-        entity.lookupIds.forEach((lookupId) => {
-          insertLookupId.run(
-            lookupId,
-            entity.entityId,
-            lookupId === entity.primaryLookupId ? 1 : 0,
-            index,
-          );
-        });
       });
 
       currentManifest.forEach((entry) => {
@@ -286,6 +255,20 @@ async function rebuildQueryProjectionWithManifest(
   }
 }
 
+async function ensureFreshQueryProjection(
+  vaultRoot: string,
+): Promise<QueryProjectionLocation> {
+  const location = currentQueryProjectionLocation(vaultRoot);
+  const currentManifest = await listCanonicalSourceManifest(vaultRoot);
+  const status = await readProjectionStatus(location, currentManifest);
+
+  if (!status?.fresh) {
+    await rebuildQueryProjectionWithManifest(vaultRoot, currentManifest, location);
+  }
+
+  return location;
+}
+
 async function readProjectionStatus(
   location: QueryProjectionLocation,
   currentManifest: readonly QuerySourceManifestEntry[],
@@ -311,10 +294,10 @@ async function readProjectionStatus(
       builtAt: readMeta(database, "built_at"),
       entityCount: countRows(database, "query_entities"),
       searchDocumentCount: countRows(database, "query_search_document"),
-      fresh: sameSourceManifest(
-        currentManifest,
-        readStoredSourceManifest(database),
-      ),
+      fresh:
+        readMeta(database, "schema_version") === QUERY_PROJECTION_SCHEMA_ID &&
+        readSqliteRuntimeUserVersion(database) === QUERY_PROJECTION_SQLITE_VERSION &&
+        sameSourceManifest(currentManifest, readStoredSourceManifest(database)),
     };
   } finally {
     database.close();
@@ -474,12 +457,23 @@ function openQueryProjectionDatabase(
 
   if (!(options.readOnly ?? false)) {
     applySqliteRuntimeMigrations(database, {
-      migrations: [{
-        version: QUERY_PROJECTION_SQLITE_VERSION,
-        migrate(candidateDatabase) {
-          ensureQueryProjectionSchema(candidateDatabase);
+      migrations: [
+        {
+          version: 1,
+          migrate(candidateDatabase) {
+            ensureQueryProjectionSchema(candidateDatabase);
+          },
         },
-      }],
+        {
+          version: QUERY_PROJECTION_SQLITE_VERSION,
+          migrate(candidateDatabase) {
+            candidateDatabase.exec(`
+              DROP TABLE IF EXISTS query_lookup_ids;
+            `);
+            ensureQueryProjectionSchema(candidateDatabase);
+          },
+        },
+      ],
       schemaVersion: QUERY_PROJECTION_SQLITE_VERSION,
       storeName: "query projection",
     });
@@ -540,18 +534,6 @@ function ensureQueryProjectionSchema(database: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS query_entities_experiment_idx ON query_entities(experiment_slug);
     CREATE INDEX IF NOT EXISTS query_entities_date_idx ON query_entities(date);
     CREATE INDEX IF NOT EXISTS query_entities_occurred_at_idx ON query_entities(occurred_at);
-
-    CREATE TABLE IF NOT EXISTS query_lookup_ids (
-      lookup_id TEXT NOT NULL,
-      entity_id TEXT NOT NULL,
-      is_primary INTEGER NOT NULL,
-      sort_rank INTEGER NOT NULL,
-      PRIMARY KEY (lookup_id, entity_id),
-      FOREIGN KEY (entity_id) REFERENCES query_entities(entity_id) ON DELETE CASCADE
-    );
-
-    CREATE INDEX IF NOT EXISTS query_lookup_ids_entity_idx ON query_lookup_ids(entity_id);
-    CREATE INDEX IF NOT EXISTS query_lookup_ids_sort_rank_idx ON query_lookup_ids(sort_rank);
 
     CREATE TABLE IF NOT EXISTS query_source_manifest (
       relative_path TEXT PRIMARY KEY,
