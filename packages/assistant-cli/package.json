@@ -35,46 +35,6 @@
       "types": "./dist/run-terminal-logging.d.ts",
       "default": "./dist/run-terminal-logging.js"
     },
-    "./assistant/automation": {
-      "types": "./dist/assistant/automation.d.ts",
-      "default": "./dist/assistant/automation.js"
-    },
-    "./assistant/cron": {
-      "types": "./dist/assistant/cron.d.ts",
-      "default": "./dist/assistant/cron.js"
-    },
-    "./assistant/doctor": {
-      "types": "./dist/assistant/doctor.d.ts",
-      "default": "./dist/assistant/doctor.js"
-    },
-    "./assistant/doctor-security": {
-      "types": "./dist/assistant/doctor-security.d.ts",
-      "default": "./dist/assistant/doctor-security.js"
-    },
-    "./assistant/outbox": {
-      "types": "./dist/assistant/outbox.d.ts",
-      "default": "./dist/assistant/outbox.js"
-    },
-    "./assistant/provider-catalog": {
-      "types": "./dist/assistant/provider-catalog.d.ts",
-      "default": "./dist/assistant/provider-catalog.js"
-    },
-    "./assistant/service": {
-      "types": "./dist/assistant/service.d.ts",
-      "default": "./dist/assistant/service.js"
-    },
-    "./assistant/status": {
-      "types": "./dist/assistant/status.d.ts",
-      "default": "./dist/assistant/status.js"
-    },
-    "./assistant/stop": {
-      "types": "./dist/assistant/stop.d.ts",
-      "default": "./dist/assistant/stop.js"
-    },
-    "./assistant/store": {
-      "types": "./dist/assistant/store.d.ts",
-      "default": "./dist/assistant/store.js"
-    },
     "./assistant/*": {
       "types": "./dist/assistant/*.d.ts",
       "default": "./dist/assistant/*.js"

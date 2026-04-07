@@ -136,10 +136,10 @@
       "import": "./dist/telegram-runtime.js",
       "default": "./dist/telegram-runtime.js"
     },
-    "./text/*": {
-      "types": "./dist/text/*.d.ts",
-      "import": "./dist/text/*.js",
-      "default": "./dist/text/*.js"
+    "./text/shared": {
+      "types": "./dist/text/shared.d.ts",
+      "import": "./dist/text/shared.js",
+      "default": "./dist/text/shared.js"
     },
     "./vault-cli-contracts": {
       "types": "./dist/vault-cli-contracts.d.ts",

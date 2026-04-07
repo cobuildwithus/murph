@@ -75,9 +75,9 @@
       "types": "./dist/assistant/*.d.ts",
       "default": "./dist/assistant/*.js"
     },
-    "./commands/*": {
-      "types": "./dist/commands/*.d.ts",
-      "default": "./dist/commands/*.js"
+    "./commands/query-record-command-helpers": {
+      "types": "./dist/commands/query-record-command-helpers.d.ts",
+      "default": "./dist/commands/query-record-command-helpers.js"
     },
     "./child-process-env": {
       "types": "./dist/child-process-env.d.ts",
@@ -103,45 +103,9 @@
       "types": "./dist/inbox-app/linq-endpoint.d.ts",
       "default": "./dist/inbox-app/linq-endpoint.js"
     },
-    "./inbox-app/promotions": {
-      "types": "./dist/inbox-app/promotions.d.ts",
-      "default": "./dist/inbox-app/promotions.js"
-    },
-    "./inbox-app/reads": {
-      "types": "./dist/inbox-app/reads.d.ts",
-      "default": "./dist/inbox-app/reads.js"
-    },
-    "./inbox-app/sources": {
-      "types": "./dist/inbox-app/sources.d.ts",
-      "default": "./dist/inbox-app/sources.js"
-    },
     "./inbox-app/types": {
       "types": "./dist/inbox-app/types.d.ts",
       "default": "./dist/inbox-app/types.js"
-    },
-    "./inbox-services/connectors": {
-      "types": "./dist/inbox-services/connectors.d.ts",
-      "default": "./dist/inbox-services/connectors.js"
-    },
-    "./inbox-services/daemon": {
-      "types": "./dist/inbox-services/daemon.d.ts",
-      "default": "./dist/inbox-services/daemon.js"
-    },
-    "./inbox-services/parser": {
-      "types": "./dist/inbox-services/parser.d.ts",
-      "default": "./dist/inbox-services/parser.js"
-    },
-    "./inbox-services/query": {
-      "types": "./dist/inbox-services/query.d.ts",
-      "default": "./dist/inbox-services/query.js"
-    },
-    "./inbox-services/shared": {
-      "types": "./dist/inbox-services/shared.d.ts",
-      "default": "./dist/inbox-services/shared.js"
-    },
-    "./inbox-services/state": {
-      "types": "./dist/inbox-services/state.d.ts",
-      "default": "./dist/inbox-services/state.js"
     },
     "./inbox-services/*": {
       "types": "./dist/inbox-services/*.d.ts",
@@ -162,18 +126,6 @@
     "./json-input": {
       "types": "./dist/json-input.d.ts",
       "default": "./dist/json-input.js"
-    },
-    "./knowledge/contracts": {
-      "types": "./dist/knowledge/contracts.d.ts",
-      "default": "./dist/knowledge/contracts.js"
-    },
-    "./knowledge/documents": {
-      "types": "./dist/knowledge/documents.d.ts",
-      "default": "./dist/knowledge/documents.js"
-    },
-    "./knowledge/*": {
-      "types": "./dist/knowledge/*.d.ts",
-      "default": "./dist/knowledge/*.js"
     },
     "./knowledge": {
       "types": "./dist/knowledge.d.ts",
