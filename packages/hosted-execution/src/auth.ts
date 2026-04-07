@@ -1,5 +1,6 @@
 import {
   HOSTED_EXECUTION_NONCE_HEADER,
+  HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
 } from "./contracts.ts";
@@ -24,7 +25,7 @@ export async function createHostedExecutionSignature(input: {
   const signature = await crypto.subtle.sign(
     HMAC_ALGORITHM,
     cryptoKey,
-    encodeSignaturePayload({
+    encodeHostedExecutionSignedRequestPayload({
       method: input.method,
       nonce: input.nonce,
       path: input.path,
@@ -104,7 +105,7 @@ export async function verifyHostedExecutionSignature(input: {
     HMAC_ALGORITHM,
     cryptoKey,
     signatureBytes,
-    encodeSignaturePayload({
+    encodeHostedExecutionSignedRequestPayload({
       method: input.method,
       nonce: input.nonce,
       path: input.path,
@@ -117,11 +118,13 @@ export async function verifyHostedExecutionSignature(input: {
 }
 
 export function readHostedExecutionSignatureHeaders(headers: Headers): {
+  keyId: string | null;
   nonce: string | null;
   signature: string | null;
   timestamp: string | null;
 } {
   return {
+    keyId: headers.get(HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER),
     nonce: headers.get(HOSTED_EXECUTION_NONCE_HEADER),
     signature: headers.get(HOSTED_EXECUTION_SIGNATURE_HEADER),
     timestamp: headers.get(HOSTED_EXECUTION_TIMESTAMP_HEADER),
@@ -144,7 +147,7 @@ async function importHmacKey(
   );
 }
 
-function encodeSignaturePayload(input: {
+export function encodeHostedExecutionSignedRequestPayload(input: {
   method?: string;
   nonce?: string | null;
   path?: string;

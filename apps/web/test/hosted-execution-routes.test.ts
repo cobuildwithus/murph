@@ -1,7 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import { HOSTED_WEB_INTERNAL_SCHEDULER_USER_ID } from "@/src/lib/hosted-execution/internal";
 
 const mocks = vi.hoisted(() => ({
   buildHostedSharePageData: vi.fn(),
@@ -9,13 +8,12 @@ const mocks = vi.hoisted(() => ({
   drainHostedExecutionOutbox: vi.fn(),
   drainHostedAiUsageStripeMetering: vi.fn(),
   getPrisma: vi.fn(),
-  requireHostedWebInternalServiceRequest: vi.fn(),
+  requireVercelCronRequest: vi.fn(),
   resolveHostedPrivyRequestAuthContext: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-execution/internal", () => ({
-  HOSTED_WEB_INTERNAL_SCHEDULER_USER_ID: "system:hosted-execution-scheduler",
-  requireHostedWebInternalServiceRequest: mocks.requireHostedWebInternalServiceRequest,
+vi.mock("@/src/lib/hosted-execution/vercel-cron", () => ({
+  requireVercelCronRequest: mocks.requireVercelCronRequest,
 }));
 
 vi.mock("@/src/lib/hosted-execution/outbox", () => ({
@@ -59,7 +57,7 @@ describe("hosted execution async routes", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.requireHostedWebInternalServiceRequest.mockResolvedValue(undefined);
+    mocks.requireVercelCronRequest.mockReturnValue(undefined);
     mocks.getPrisma.mockReturnValue({ prisma: true });
     mocks.resolveHostedPrivyRequestAuthContext.mockResolvedValue({
       member: {
@@ -109,11 +107,8 @@ describe("hosted execution async routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireHostedWebInternalServiceRequest).toHaveBeenCalledTimes(1);
-    expect(mocks.requireHostedWebInternalServiceRequest).toHaveBeenCalledWith(
-      expect.any(Request),
-      HOSTED_WEB_INTERNAL_SCHEDULER_USER_ID,
-    );
+    expect(mocks.requireVercelCronRequest).toHaveBeenCalledTimes(1);
+    expect(mocks.requireVercelCronRequest).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.drainHostedExecutionOutbox).toHaveBeenCalledTimes(1);
     await expect(response.json()).resolves.toEqual({
       drained: 2,
@@ -132,12 +127,13 @@ describe("hosted execution async routes", () => {
   });
 
   it("maps missing signing secret configuration to a 500", async () => {
-    mocks.requireHostedWebInternalServiceRequest.mockRejectedValue(hostedOnboardingError({
-      code: "HOSTED_WEB_INTERNAL_SIGNING_SECRET_REQUIRED",
-      httpStatus: 500,
-      message:
-        "HOSTED_WEB_INTERNAL_SIGNING_SECRET must be configured for Cloudflare-owned hosted web routes.",
-    }));
+    mocks.requireVercelCronRequest.mockImplementation(() => {
+      throw hostedOnboardingError({
+        code: "CRON_SECRET_REQUIRED",
+        httpStatus: 500,
+        message: "CRON_SECRET must be configured for hosted cron routes.",
+      });
+    });
 
     const response = await hostedExecutionCronRoute.GET(
       new Request("https://join.example.test/api/internal/hosted-execution/outbox/cron"),
@@ -146,20 +142,21 @@ describe("hosted execution async routes", () => {
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "HOSTED_WEB_INTERNAL_SIGNING_SECRET_REQUIRED",
-        message:
-          "HOSTED_WEB_INTERNAL_SIGNING_SECRET must be configured for Cloudflare-owned hosted web routes.",
+        code: "CRON_SECRET_REQUIRED",
+        message: "CRON_SECRET must be configured for hosted cron routes.",
         retryable: false,
       },
     });
   });
 
-  it("maps a bad signed scheduler request to a 401", async () => {
-    mocks.requireHostedWebInternalServiceRequest.mockRejectedValue(hostedOnboardingError({
-      code: "HOSTED_WEB_INTERNAL_UNAUTHORIZED",
-      httpStatus: 401,
-      message: "Unauthorized hosted web internal request.",
-    }));
+  it("maps a bad Vercel cron request to a 401", async () => {
+    mocks.requireVercelCronRequest.mockImplementation(() => {
+      throw hostedOnboardingError({
+        code: "VERCEL_CRON_UNAUTHORIZED",
+        httpStatus: 401,
+        message: "Unauthorized Vercel cron request.",
+      });
+    });
 
     const response = await hostedExecutionCronRoute.GET(
       new Request("https://join.example.test/api/internal/hosted-execution/outbox/cron"),
@@ -168,8 +165,8 @@ describe("hosted execution async routes", () => {
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "HOSTED_WEB_INTERNAL_UNAUTHORIZED",
-        message: "Unauthorized hosted web internal request.",
+        code: "VERCEL_CRON_UNAUTHORIZED",
+        message: "Unauthorized Vercel cron request.",
         retryable: false,
       },
     });
@@ -182,11 +179,8 @@ describe("hosted execution async routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireHostedWebInternalServiceRequest).toHaveBeenCalledTimes(1);
-    expect(mocks.requireHostedWebInternalServiceRequest).toHaveBeenCalledWith(
-      expect.any(Request),
-      HOSTED_WEB_INTERNAL_SCHEDULER_USER_ID,
-    );
+    expect(mocks.requireVercelCronRequest).toHaveBeenCalledTimes(1);
+    expect(mocks.requireVercelCronRequest).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.drainHostedPendingAiUsageImports).toHaveBeenCalledTimes(1);
     expect(mocks.drainHostedAiUsageStripeMetering).toHaveBeenCalledTimes(1);
     await expect(response.json()).resolves.toEqual({

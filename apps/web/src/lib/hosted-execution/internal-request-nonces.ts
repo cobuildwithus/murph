@@ -2,8 +2,8 @@ import type { PrismaClient } from "@prisma/client";
 
 import { isUniqueViolation } from "../device-sync/prisma-store/prisma-errors";
 
-export interface HostedWebInternalRequestNonceStore {
-  consumeHostedWebInternalRequestNonce(input: {
+export interface HostedCallbackRequestNonceStore {
+  consumeHostedCallbackRequestNonce(input: {
     expiresAt: string;
     method: string;
     nonceHash: string;
@@ -14,15 +14,15 @@ export interface HostedWebInternalRequestNonceStore {
   }): Promise<boolean>;
 }
 
-export class PrismaHostedWebInternalRequestNonceStore
-  implements HostedWebInternalRequestNonceStore {
+export class PrismaHostedCallbackRequestNonceStore
+  implements HostedCallbackRequestNonceStore {
   readonly prisma: PrismaClient;
 
   constructor(prisma: PrismaClient) {
     this.prisma = prisma;
   }
 
-  async consumeHostedWebInternalRequestNonce(input: {
+  async consumeHostedCallbackRequestNonce(input: {
     expiresAt: string;
     method: string;
     nonceHash: string;
@@ -63,3 +63,6 @@ export class PrismaHostedWebInternalRequestNonceStore
     });
   }
 }
+
+export type HostedWebInternalRequestNonceStore = HostedCallbackRequestNonceStore;
+export const PrismaHostedWebInternalRequestNonceStore = PrismaHostedCallbackRequestNonceStore;

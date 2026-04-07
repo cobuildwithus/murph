@@ -1,12 +1,14 @@
 import {
-  createHostedExecutionSignatureHeaders,
-} from "@murphai/hosted-execution/auth";
-import {
   HOSTED_EXECUTION_USER_ID_HEADER,
 } from "@murphai/hosted-execution/contracts";
 import {
   normalizeHostedExecutionBaseUrl,
 } from "@murphai/hosted-execution/env";
+
+import {
+  createHostedWebCallbackSignatureHeaders,
+  type HostedWebCallbackSigningEnvironment,
+} from "./web-callback-auth.ts";
 
 export function normalizeHostedWebControlBaseUrl(
   value: string | null | undefined,
@@ -25,8 +27,8 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
   fetchImpl?: typeof fetch;
   method: "GET" | "POST";
   path: string;
+  callbackSigning?: HostedWebCallbackSigningEnvironment | null;
   search?: string | null;
-  signingSecret?: string | null;
   timeoutMs: number | null;
 }): Promise<Response> {
   const fetchImpl = input.fetchImpl ?? fetch;
@@ -46,17 +48,14 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
     headers.set("content-type", "application/json");
   }
 
-  const signingSecret = normalizeHostedWebControlSigningSecret(input.signingSecret);
-
-  if (signingSecret) {
-    const signatureHeaders = await createHostedExecutionSignatureHeaders({
+  if (input.callbackSigning) {
+    const signatureHeaders = await createHostedWebCallbackSignatureHeaders({
+      environment: input.callbackSigning,
       method: input.method,
       nonce: null,
       path: targetUrl.pathname,
       payload: input.body ?? "",
       search: targetUrl.search,
-      secret: signingSecret,
-      timestamp: new Date().toISOString(),
       userId: input.boundUserId,
     });
 
@@ -82,15 +81,4 @@ function requireHostedWebControlBaseUrl(value: string): string {
   }
 
   return normalized;
-}
-
-function normalizeHostedWebControlSigningSecret(
-  value: string | null | undefined,
-): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
 }

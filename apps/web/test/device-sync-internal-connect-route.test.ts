@@ -1,9 +1,10 @@
-import { createHostedExecutionSignatureHeaders } from "@murphai/hosted-execution";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
-  getPrisma: vi.fn(),
+  requireHostedCloudflareCallbackRequest: vi.fn(),
   startConnection: vi.fn(),
 }));
 
@@ -11,8 +12,8 @@ vi.mock("@/src/lib/device-sync/control-plane", () => ({
   createHostedDeviceSyncControlPlane: mocks.createHostedDeviceSyncControlPlane,
 }));
 
-vi.mock("@/src/lib/prisma", () => ({
-  getPrisma: mocks.getPrisma,
+vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
+  requireHostedCloudflareCallbackRequest: mocks.requireHostedCloudflareCallbackRequest,
 }));
 
 type InternalDeviceSyncConnectLinkRouteModule = typeof import(
@@ -22,46 +23,15 @@ type InternalDeviceSyncConnectLinkRouteModule = typeof import(
 let internalDeviceSyncConnectLinkRoute: InternalDeviceSyncConnectLinkRouteModule;
 
 describe("device sync internal connect-link route", () => {
-  const originalWebInternalSigningSecret = process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET;
-
   beforeAll(async () => {
     internalDeviceSyncConnectLinkRoute = await import(
       "../app/api/internal/device-sync/providers/[provider]/connect-link/route"
     );
   });
 
-  afterEach(() => {
-    if (originalWebInternalSigningSecret === undefined) {
-      delete process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET;
-    } else {
-      process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = originalWebInternalSigningSecret;
-    }
-  });
-
   beforeEach(() => {
     vi.clearAllMocks();
-    const consumedNonces = new Set<string>();
-    mocks.getPrisma.mockReturnValue({
-      $transaction: async <T>(callback: (tx: {
-        hostedWebInternalRequestNonce: {
-          create: (input: { data: { nonceHash: string } }) => Promise<void>;
-          deleteMany: () => Promise<void>;
-        };
-      }) => Promise<T>) => callback({
-        hostedWebInternalRequestNonce: {
-          async create({ data }) {
-            if (consumedNonces.has(data.nonceHash)) {
-              throw { code: "P2002" };
-            }
-
-            consumedNonces.add(data.nonceHash);
-          },
-          async deleteMany() {
-            return;
-          },
-        },
-      }),
-    });
+    mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
       startConnection: mocks.startConnection,
     });
@@ -73,12 +43,9 @@ describe("device sync internal connect-link route", () => {
     });
   });
 
-  it("creates a hosted device connect link for the bound execution user with the web internal signing secret", async () => {
-    process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = "web-internal-secret";
-    const headers = await createSignedRequestHeaders("web-internal-secret");
+  it("creates a hosted device connect link for the verified Cloudflare callback principal", async () => {
     const response = await internalDeviceSyncConnectLinkRoute.POST(
       new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
-        headers,
         method: "POST",
       }),
       {
@@ -89,6 +56,7 @@ describe("device sync internal connect-link route", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledTimes(1);
     expect(mocks.startConnection).toHaveBeenCalledWith(
       "member_123",
       "whoop",
@@ -102,12 +70,16 @@ describe("device sync internal connect-link route", () => {
     });
   });
 
-  it("rejects requests signed with the wrong web internal secret", async () => {
-    process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = "web-internal-secret";
+  it("maps rejected Cloudflare callbacks to a 401 without starting a connection", async () => {
+    mocks.requireHostedCloudflareCallbackRequest.mockRejectedValue(hostedOnboardingError({
+      code: "HOSTED_CLOUDFLARE_CALLBACK_UNAUTHORIZED",
+      httpStatus: 401,
+      message: "Unauthorized hosted Cloudflare callback request.",
+      retryable: false,
+    }));
 
     const response = await internalDeviceSyncConnectLinkRoute.POST(
       new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
-        headers: await createSignedRequestHeaders("wrong-secret"),
         method: "POST",
       }),
       {
@@ -121,103 +93,8 @@ describe("device sync internal connect-link route", () => {
     expect(mocks.startConnection).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "HOSTED_WEB_INTERNAL_UNAUTHORIZED",
-        message: "Unauthorized hosted web internal request.",
-        retryable: false,
-      },
-    });
-  });
-
-  it("rejects unsigned requests on the internal connect-link route", async () => {
-    process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = "web-internal-secret";
-
-    const response = await internalDeviceSyncConnectLinkRoute.POST(
-      new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
-        headers: {
-          "x-hosted-execution-user-id": "member_123",
-        },
-        method: "POST",
-      }),
-      {
-        params: Promise.resolve({
-          provider: "whoop",
-        }),
-      },
-    );
-
-    expect(response.status).toBe(401);
-    expect(mocks.startConnection).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "HOSTED_WEB_INTERNAL_UNAUTHORIZED",
-        message: "Unauthorized hosted web internal request.",
-        retryable: false,
-      },
-    });
-  });
-
-  it("rejects requests whose user header was changed after signing", async () => {
-    process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = "web-internal-secret";
-
-    const response = await internalDeviceSyncConnectLinkRoute.POST(
-      new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
-        headers: {
-          ...(await createSignedRequestHeaders("web-internal-secret", "member_123")),
-          "x-hosted-execution-user-id": "member_999",
-        },
-        method: "POST",
-      }),
-      {
-        params: Promise.resolve({
-          provider: "whoop",
-        }),
-      },
-    );
-
-    expect(response.status).toBe(401);
-    expect(mocks.startConnection).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "HOSTED_WEB_INTERNAL_UNAUTHORIZED",
-        message: "Unauthorized hosted web internal request.",
-        retryable: false,
-      },
-    });
-  });
-
-  it("rejects replayed signed requests on the internal connect-link route", async () => {
-    process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = "web-internal-secret";
-    const request = new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
-      headers: await createSignedRequestHeaders("web-internal-secret"),
-      method: "POST",
-    });
-
-    const firstResponse = await internalDeviceSyncConnectLinkRoute.POST(
-      request.clone(),
-      {
-        params: Promise.resolve({
-          provider: "whoop",
-        }),
-      },
-    );
-
-    expect(firstResponse.status).toBe(200);
-
-    const replayResponse = await internalDeviceSyncConnectLinkRoute.POST(
-      request.clone(),
-      {
-        params: Promise.resolve({
-          provider: "whoop",
-        }),
-      },
-    );
-
-    expect(replayResponse.status).toBe(401);
-    expect(mocks.startConnection).toHaveBeenCalledTimes(1);
-    await expect(replayResponse.json()).resolves.toEqual({
-      error: {
-        code: "HOSTED_WEB_INTERNAL_REPLAYED",
-        message: "Hosted web internal request was already used and cannot be replayed.",
+        code: "HOSTED_CLOUDFLARE_CALLBACK_UNAUTHORIZED",
+        message: "Unauthorized hosted Cloudflare callback request.",
         retryable: false,
       },
     });
@@ -237,22 +114,3 @@ describe("device sync internal connect-link route", () => {
     });
   });
 });
-
-async function createSignedRequestHeaders(
-  secret: string,
-  userId = "member_123",
-): Promise<HeadersInit> {
-  const headers = await createHostedExecutionSignatureHeaders({
-    method: "POST",
-    path: "/api/internal/device-sync/providers/whoop/connect-link",
-    payload: "",
-    secret,
-    timestamp: new Date().toISOString(),
-    userId,
-  });
-
-  return {
-    ...headers,
-    "x-hosted-execution-user-id": userId,
-  };
-}

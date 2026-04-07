@@ -29,7 +29,7 @@ describe("deploy preflight helpers", () => {
       "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK",
       "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK",
       "HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK",
-      "HOSTED_WEB_INTERNAL_SIGNING_SECRET",
+      "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
     ]);
   });
 
@@ -61,7 +61,7 @@ describe("deploy preflight helpers", () => {
       HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "{\"kty\":\"OKP\",\"crv\":\"X25519\",\"x\":\"recovery\"}",
       HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
       HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
-      HOSTED_WEB_INTERNAL_SIGNING_SECRET: "web-internal-secret",
+      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"public-x\",\"y\":\"public-y\",\"d\":\"private-d\"}",
       HOSTED_WEB_BASE_URL: "https://web.example.test",
       MURPH_WEB_SEARCH_PROVIDER: "brave",
     }, { deployWorker: true })).toThrowError(
@@ -82,7 +82,7 @@ describe("deploy preflight helpers", () => {
       HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "{\"kty\":\"OKP\",\"crv\":\"X25519\",\"x\":\"recovery\"}",
       HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
       HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
-      HOSTED_WEB_INTERNAL_SIGNING_SECRET: "web-internal-secret",
+      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"public-x\",\"y\":\"public-y\",\"d\":\"private-d\"}",
       HOSTED_WEB_BASE_URL: "https://web.example.test",
       MURPH_WEB_SEARCH_PROVIDER: "brave",
     }, { deployWorker: true })).not.toThrow();

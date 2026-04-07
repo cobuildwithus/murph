@@ -1,25 +1,27 @@
 import {
+  HOSTED_EXECUTION_NONCE_HEADER,
+  HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
+  HOSTED_EXECUTION_SIGNATURE_HEADER,
+  HOSTED_EXECUTION_TIMESTAMP_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
-  createHostedExecutionSignatureHeaders,
+  encodeHostedExecutionSignedRequestPayload,
 } from "@murphai/hosted-execution";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { HostedOnboardingError } from "../../src/lib/hosted-onboarding/errors";
 import {
-  HOSTED_WEB_INTERNAL_SCHEDULER_USER_ID,
-  requireHostedWebInternalServiceRequest,
-  requireHostedWebInternalSignedRequest,
-} from "../../src/lib/hosted-execution/internal";
-import type { HostedWebInternalRequestNonceStore } from "../../src/lib/hosted-execution/internal-request-nonces";
+  requireHostedCloudflareCallbackRequest,
+} from "../../src/lib/hosted-execution/cloudflare-callback-auth";
+import type { HostedCallbackRequestNonceStore } from "../../src/lib/hosted-execution/internal-request-nonces";
+import { requireVercelCronRequest } from "../../src/lib/hosted-execution/vercel-cron";
 
-const HOSTED_WEB_INTERNAL_SIGNING_SECRET = "test-hosted-web-internal-signing-secret";
 const FIXED_TIMESTAMP = "2026-04-05T00:00:00.000Z";
 const FIXED_NOW_MS = Date.parse(FIXED_TIMESTAMP);
 
-class MemoryNonceStore implements HostedWebInternalRequestNonceStore {
+class MemoryNonceStore implements HostedCallbackRequestNonceStore {
   readonly entries = new Set<string>();
 
-  async consumeHostedWebInternalRequestNonce(input: {
+  async consumeHostedCallbackRequestNonce(input: {
     expiresAt: string;
     method: string;
     nonceHash: string;
@@ -48,114 +50,241 @@ class MemoryNonceStore implements HostedWebInternalRequestNonceStore {
   }
 }
 
-describe("requireHostedWebInternalSignedRequest", () => {
-  const originalSigningSecret = process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET;
+describe("requireVercelCronRequest", () => {
+  const originalCronSecret = process.env.CRON_SECRET;
 
   beforeEach(() => {
-    process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = HOSTED_WEB_INTERNAL_SIGNING_SECRET;
+    process.env.CRON_SECRET = "cron-secret";
   });
 
   afterEach(() => {
-    if (originalSigningSecret === undefined) {
-      delete process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET;
+    if (originalCronSecret === undefined) {
+      delete process.env.CRON_SECRET;
       return;
     }
 
-    process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = originalSigningSecret;
+    process.env.CRON_SECRET = originalCronSecret;
   });
 
-  it("accepts a correctly signed bound-user request and rejects its replay", async () => {
+  it("accepts a matching Vercel cron bearer token", () => {
+    expect(() =>
+      requireVercelCronRequest(new Request("https://join.example.test/api/internal/hosted-execution/outbox/cron", {
+        headers: {
+          authorization: "Bearer cron-secret",
+        },
+      })),
+    ).not.toThrow();
+  });
+
+  it("rejects an invalid Vercel cron bearer token", () => {
+    const invoke = () =>
+      requireVercelCronRequest(new Request("https://join.example.test/api/internal/hosted-execution/outbox/cron", {
+        headers: {
+          authorization: "Bearer wrong-secret",
+        },
+      }));
+
+    expect(invoke).toThrow();
+    try {
+      invoke();
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "VERCEL_CRON_UNAUTHORIZED",
+        httpStatus: 401,
+      } satisfies Partial<HostedOnboardingError>);
+    }
+  });
+});
+
+describe("requireHostedCloudflareCallbackRequest", () => {
+  const originalKeyId = process.env.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID;
+  const originalPublicJwk = process.env.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK;
+  const originalPublicKeyring = process.env.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON;
+  let currentPrivateJwkJson = "";
+
+  beforeEach(async () => {
+    const keyPair = await crypto.subtle.generateKey(
+      {
+        name: "ECDSA",
+        namedCurve: "P-256",
+      },
+      true,
+      ["sign", "verify"],
+    );
+    const publicJwk = await crypto.subtle.exportKey("jwk", keyPair.publicKey);
+    const privateJwk = await crypto.subtle.exportKey("jwk", keyPair.privateKey);
+
+    process.env.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID = "v1";
+    process.env.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK = JSON.stringify(publicJwk);
+    process.env.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON = JSON.stringify({
+      v1: publicJwk,
+    });
+
+    currentPrivateJwkJson = JSON.stringify(privateJwk);
+  });
+
+  afterEach(() => {
+    if (originalKeyId === undefined) {
+      delete process.env.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID;
+    } else {
+      process.env.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID = originalKeyId;
+    }
+
+    if (originalPublicJwk === undefined) {
+      delete process.env.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK;
+    } else {
+      process.env.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK = originalPublicJwk;
+    }
+
+    if (originalPublicKeyring === undefined) {
+      delete process.env.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON;
+    } else {
+      process.env.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON = originalPublicKeyring;
+    }
+  });
+  it("accepts a correctly signed Cloudflare callback and rejects its replay", async () => {
     const nonceStore = new MemoryNonceStore();
-    const request = await createSignedRequest({
-      body: JSON.stringify({ action: "drain" }),
+    const request = await createSignedCallbackRequest({
+      body: JSON.stringify({ eventId: "evt_123", shareId: "share_123" }),
       nonce: "0123456789abcdef0123456789abcdef",
-      path: "/api/internal/hosted-execution/outbox/cron",
-      search: "?batch=1",
-      userId: HOSTED_WEB_INTERNAL_SCHEDULER_USER_ID,
+      path: "/api/internal/hosted-execution/share-import/complete",
+      privateJwkJson: currentPrivateJwkJson,
+      search: "?attempt=1",
+      userId: "member_123",
     });
 
     await expect(
-      requireHostedWebInternalSignedRequest(request, {
+      requireHostedCloudflareCallbackRequest(request, {
         nonceStore,
         nowMs: FIXED_NOW_MS,
       }),
-    ).resolves.toBe(HOSTED_WEB_INTERNAL_SCHEDULER_USER_ID);
+    ).resolves.toBe("member_123");
 
-    const replayedRequest = await createSignedRequest({
-      body: JSON.stringify({ action: "drain" }),
+    const replayedRequest = await createSignedCallbackRequest({
+      body: JSON.stringify({ eventId: "evt_123", shareId: "share_123" }),
       nonce: "0123456789abcdef0123456789abcdef",
-      path: "/api/internal/hosted-execution/outbox/cron",
-      search: "?batch=1",
-      userId: HOSTED_WEB_INTERNAL_SCHEDULER_USER_ID,
+      path: "/api/internal/hosted-execution/share-import/complete",
+      privateJwkJson: currentPrivateJwkJson,
+      search: "?attempt=1",
+      userId: "member_123",
     });
 
     await expect(
-      requireHostedWebInternalSignedRequest(replayedRequest, {
+      requireHostedCloudflareCallbackRequest(replayedRequest, {
         nonceStore,
         nowMs: FIXED_NOW_MS,
       }),
     ).rejects.toMatchObject({
-      code: "HOSTED_WEB_INTERNAL_REPLAYED",
+      code: "HOSTED_CLOUDFLARE_CALLBACK_REPLAYED",
       httpStatus: 401,
     } satisfies Partial<HostedOnboardingError>);
   });
 
-  it("rejects a correctly signed request when the expected service id does not match", async () => {
-    const nonceStore = new MemoryNonceStore();
-    const request = await createSignedRequest({
-      body: JSON.stringify({ action: "drain" }),
+  it("rejects requests whose bound user header was changed after signing", async () => {
+    const request = await createSignedCallbackRequest({
+      body: "",
       nonce: "abcdef0123456789abcdef0123456789",
-      path: "/api/internal/hosted-execution/usage/cron",
-      userId: HOSTED_WEB_INTERNAL_SCHEDULER_USER_ID,
+      path: "/api/internal/device-sync/providers/whoop/connect-link",
+      privateJwkJson: currentPrivateJwkJson,
+      userId: "member_123",
     });
+    const headers = new Headers(request.headers);
+    headers.set(HOSTED_EXECUTION_USER_ID_HEADER, "member_999");
 
     await expect(
-      requireHostedWebInternalServiceRequest(request, "system:wrong-scheduler", {
-        nonceStore,
+      requireHostedCloudflareCallbackRequest(new Request(request, { headers }), {
+        nonceStore: new MemoryNonceStore(),
         nowMs: FIXED_NOW_MS,
       }),
     ).rejects.toMatchObject({
-      code: "HOSTED_WEB_INTERNAL_UNAUTHORIZED",
+      code: "HOSTED_CLOUDFLARE_CALLBACK_UNAUTHORIZED",
       httpStatus: 401,
     } satisfies Partial<HostedOnboardingError>);
   });
 });
 
-async function createSignedRequest(input: {
+async function createSignedCallbackRequest(input: {
   body: string;
   nonce: string;
   path: string;
+  privateJwkJson: string;
   search?: string;
   userId: string;
 }): Promise<Request> {
-  const signatureHeaders = await createHostedExecutionSignatureHeaders({
+  const headers = await createHostedCloudflareCallbackHeaders({
+    keyId: "v1",
     method: "POST",
     nonce: input.nonce,
     path: input.path,
     payload: input.body,
+    privateKeyJwkJson: input.privateJwkJson,
     search: input.search ?? "",
-    secret: HOSTED_WEB_INTERNAL_SIGNING_SECRET,
     timestamp: FIXED_TIMESTAMP,
     userId: input.userId,
   });
-  const requestUrl = new URL(`https://hosted-web.example.test${input.path}`);
+  const requestUrl = new URL(`https://join.example.test${input.path}`);
 
   if (input.search) {
     requestUrl.search = input.search;
   }
 
-  const headers = new Headers({
-    "content-type": "application/json; charset=utf-8",
-    [HOSTED_EXECUTION_USER_ID_HEADER]: input.userId,
-  });
-
-  for (const [key, value] of Object.entries(signatureHeaders) as Array<[string, string]>) {
-    headers.set(key, value);
-  }
-
   return new Request(requestUrl.toString(), {
     body: input.body,
-    headers,
+    headers: {
+      ...headers,
+      "content-type": "application/json; charset=utf-8",
+      [HOSTED_EXECUTION_USER_ID_HEADER]: input.userId,
+    },
     method: "POST",
   });
+}
+
+async function createHostedCloudflareCallbackHeaders(input: {
+  keyId: string;
+  method: string;
+  nonce: string;
+  path: string;
+  payload: string;
+  privateKeyJwkJson: string;
+  search: string;
+  timestamp: string;
+  userId: string;
+}): Promise<Record<string, string>> {
+  const key = await crypto.subtle.importKey(
+    "jwk",
+    JSON.parse(input.privateKeyJwkJson) as JsonWebKey,
+    {
+      name: "ECDSA",
+      namedCurve: "P-256",
+    },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign(
+    {
+      name: "ECDSA",
+      hash: "SHA-256",
+    },
+    key,
+    encodeHostedExecutionSignedRequestPayload({
+      method: input.method,
+      nonce: input.nonce,
+      path: input.path,
+      payload: input.payload,
+      search: input.search,
+      timestamp: input.timestamp,
+      userId: input.userId,
+    }),
+  );
+
+  return {
+    [HOSTED_EXECUTION_NONCE_HEADER]: input.nonce,
+    [HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER]: input.keyId,
+    [HOSTED_EXECUTION_SIGNATURE_HEADER]: Buffer.from(signature)
+      .toString("base64")
+      .replace(/\+/gu, "-")
+      .replace(/\//gu, "_")
+      .replace(/=+$/u, ""),
+    [HOSTED_EXECUTION_TIMESTAMP_HEADER]: input.timestamp,
+  };
 }

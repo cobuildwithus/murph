@@ -56,7 +56,6 @@ import {
 } from './policy-wrappers.js'
 import {
   executeAssistantCliCommand,
-  issueHostedShareLink,
   readAssistantTextFile,
   writeAssistantPayloadFile,
 } from './execution-adapters.js'
@@ -1139,60 +1138,61 @@ export function createOutwardSideEffectToolDefinitions(
     )
   }
 
-  tools.push(
-    defineHostedApiBackedTool({
-      name: 'vault.share.createLink',
-      description:
-        'Create a one-time hosted share link for remembered foods, recipes, and protocols. When a food has attached protocol ids, keep includeAttachedProtocols=true so the recipient gets the full smoothie + supplement bundle.',
-      inputSchema: z.object({
-        title: z.string().min(1).optional(),
-        foods: z.array(shareEntitySelectorSchema).optional(),
-        protocols: z.array(shareEntitySelectorSchema).optional(),
-        recipes: z.array(shareEntitySelectorSchema).optional(),
-        includeAttachedProtocols: z.boolean().optional(),
-        logMeal: z.object({
-          food: shareEntitySelectorSchema,
-          note: z.string().min(1).optional(),
-          occurredAt: isoTimestampSchema.optional(),
-        }).optional(),
-        recipientPhoneNumber: z.string().min(1).optional(),
-        inviteCode: z.string().min(1).optional(),
-        expiresInHours: z.number().int().positive().max(24 * 30).optional(),
-      }),
-      inputExample: {
-        foods: [
-          {
-            slug: 'morning-smoothie',
-          },
-        ],
-        includeAttachedProtocols: true,
-        logMeal: {
-          food: {
-            slug: 'morning-smoothie',
+  if (input.executionContext?.hosted?.issueShareLink) {
+    tools.push(
+      defineHostedApiBackedTool({
+        name: 'vault.share.createLink',
+        description:
+          'Create a one-time hosted share link for remembered foods, recipes, and protocols. When a food has attached protocol ids, keep includeAttachedProtocols=true so the recipient gets the full smoothie + supplement bundle.',
+        inputSchema: z.object({
+          title: z.string().min(1).optional(),
+          foods: z.array(shareEntitySelectorSchema).optional(),
+          protocols: z.array(shareEntitySelectorSchema).optional(),
+          recipes: z.array(shareEntitySelectorSchema).optional(),
+          includeAttachedProtocols: z.boolean().optional(),
+          logMeal: z.object({
+            food: shareEntitySelectorSchema,
+            note: z.string().min(1).optional(),
+            occurredAt: isoTimestampSchema.optional(),
+          }).optional(),
+          recipientPhoneNumber: z.string().min(1).optional(),
+          inviteCode: z.string().min(1).optional(),
+          expiresInHours: z.number().int().positive().max(24 * 30).optional(),
+        }),
+        inputExample: {
+          foods: [
+            {
+              slug: 'morning-smoothie',
+            },
+          ],
+          includeAttachedProtocols: true,
+          logMeal: {
+            food: {
+              slug: 'morning-smoothie',
+            },
           },
         },
-      },
-      execute: async ({ expiresInHours, foods, includeAttachedProtocols, inviteCode, logMeal, protocols, recipientPhoneNumber, recipes, title }) => {
-        const pack = await buildSharePackFromVault({
-          vaultRoot: input.vault,
-          title,
-          foods,
-          protocols,
-          recipes,
-          includeAttachedProtocols,
-          logMeal,
-        })
+        execute: async ({ expiresInHours, foods, includeAttachedProtocols, inviteCode, logMeal, protocols, recipientPhoneNumber, recipes, title }) => {
+          const pack = await buildSharePackFromVault({
+            vaultRoot: input.vault,
+            title,
+            foods,
+            protocols,
+            recipes,
+            includeAttachedProtocols,
+            logMeal,
+          })
 
-        return issueHostedShareLink({
-          pack,
-          expiresInHours,
-          inviteCode,
-          recipientPhoneNumber,
-          senderMemberId: input.executionContext?.hosted?.memberId ?? null,
-        })
-      },
-    }),
-  )
+          return input.executionContext!.hosted!.issueShareLink!({
+            pack,
+            expiresInHours,
+            inviteCode,
+            recipientPhoneNumber,
+          })
+        },
+      }),
+    )
+  }
 
   return tools
 }

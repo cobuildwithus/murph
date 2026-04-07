@@ -108,7 +108,8 @@ export interface WorkerEnvironmentContract<
   HOSTED_EMAIL_FROM_ADDRESS?: string;
   HOSTED_EMAIL_LOCAL_PART?: string;
   HOSTED_EMAIL_SIGNING_SECRET?: string;
+  HOSTED_WEB_CALLBACK_SIGNING_KEY_ID?: string;
+  HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK?: string;
   HOSTED_WEB_BASE_URL?: string;
-  HOSTED_WEB_INTERNAL_SIGNING_SECRET?: string;
   USER_RUNNER: WorkerUserRunnerNamespaceLike<TStub>;
 }

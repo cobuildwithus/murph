@@ -58,14 +58,14 @@ describe("hosted assistant runner env policy", () => {
 
   it("does not forward referenced reserved worker secrets into the runner", () => {
     const env = buildHostedRunnerContainerEnv({
-      HOSTED_ASSISTANT_API_KEY_ENV: "HOSTED_WEB_INTERNAL_SIGNING_SECRET",
+      HOSTED_ASSISTANT_API_KEY_ENV: "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
       HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_WEB_INTERNAL_SIGNING_SECRET: "web-internal-secret",
+      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
     });
 
-    expect(env.HOSTED_ASSISTANT_API_KEY_ENV).toBe("HOSTED_WEB_INTERNAL_SIGNING_SECRET");
-    expect(env.HOSTED_WEB_INTERNAL_SIGNING_SECRET).toBeUndefined();
+    expect(env.HOSTED_ASSISTANT_API_KEY_ENV).toBe("HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK");
+    expect(env.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBeUndefined();
   });
 
   it("never allows per-user env overrides to shadow hosted assistant bootstrap vars", () => {
