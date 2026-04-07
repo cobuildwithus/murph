@@ -1,8 +1,8 @@
-import { deleteHostedSharePackFromHostedExecution } from "@/src/lib/hosted-execution/control";
 import { requireHostedWebInternalSignedRequest } from "@/src/lib/hosted-execution/internal";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, readJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { getPrisma } from "@/src/lib/prisma";
+import { deleteHostedSharePackObject } from "@/src/lib/hosted-share/pack-store";
 import {
   finalizeHostedShareAcceptance,
   findHostedShareLinkById,
@@ -33,7 +33,7 @@ export const POST = withJsonError(async (request: Request) => {
   });
 
   try {
-    await deleteHostedSharePackFromHostedExecution({
+    await deleteHostedSharePackObject({
       ownerUserId: shareRecord.senderMemberId,
       shareId,
     });

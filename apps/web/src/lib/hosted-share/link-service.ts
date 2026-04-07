@@ -6,9 +6,9 @@ import { assertContract, sharePackSchema, type SharePack } from "@murphai/contra
 
 import { getPrisma } from "../prisma";
 import {
-  deleteHostedSharePackFromHostedExecution,
-  writeHostedSharePackToHostedExecution,
-} from "../hosted-execution/control";
+  deleteHostedSharePackObject,
+  writeHostedSharePackObject,
+} from "./pack-store";
 import {
   issueHostedInviteForPhone,
 } from "../hosted-onboarding/invite-service";
@@ -25,8 +25,9 @@ import {
   generateHostedShareId,
   hostedShareExpiresAt,
   normalizeOptionalString,
-  readHostedSharePack,
+  readHostedSharePreview,
   requireHostedSharePublicBaseUrl,
+  serializeHostedSharePreview,
   hashHostedShareCode,
 } from "./shared";
 import type {
@@ -66,7 +67,7 @@ export async function createHostedShareLink(input: {
     inviteCode = invite.invite.inviteCode;
   }
 
-  await writeHostedSharePackToHostedExecution({
+  await writeHostedSharePackObject({
     ownerUserId: input.senderMemberId,
     pack,
     shareId,
@@ -78,11 +79,12 @@ export async function createHostedShareLink(input: {
       codeHash: hashHostedShareCode(shareCode),
       senderMemberId: input.senderMemberId,
       previewTitle: HOSTED_SHARE_PRIVATE_PREVIEW_TITLE,
+      previewJson: serializeHostedSharePreview(preview),
       expiresAt: hostedShareExpiresAt(input.expiresInHours),
     },
   }).catch(async (error) => {
     try {
-      await deleteHostedSharePackFromHostedExecution({ ownerUserId: input.senderMemberId, shareId });
+      await deleteHostedSharePackObject({ ownerUserId: input.senderMemberId, shareId });
     } catch (cleanupError) {
       console.error(
         `Hosted share ${shareId} cleanup failed after Postgres write error.`,
@@ -155,7 +157,7 @@ export async function buildHostedSharePageData(input: {
             : "signin";
   const preview = stage === "consumed" || stage === "expired"
     ? createHostedShareMinimalPreview(record.previewTitle)
-    : buildHostedSharePreview((await readHostedSharePack(record)).pack);
+    : readHostedSharePreview(record.previewJson);
 
   return {
     inviteCode: normalizeOptionalString(input.inviteCode) ?? null,

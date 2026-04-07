@@ -5,11 +5,11 @@ Cloudflare-hosted execution plane for the hosted Murph path.
 This app is intentionally separate from `apps/web`:
 
 - `apps/web` stays the public onboarding, billing, OAuth, and webhook control plane.
-- `apps/cloudflare` handles Vercel OIDC-authenticated web control/dispatch, per-user coordination, encrypted hosted bundle storage, and one-shot execution through `@murphai/assistant-runtime`.
+- `apps/cloudflare` handles Vercel OIDC-authenticated web control/dispatch through an app-local auth adapter, per-user coordination, encrypted hosted bundle storage, and one-shot execution through `@murphai/assistant-runtime`.
 
 ## Core responsibilities
 
-- verify Vercel OIDC-authenticated dispatch and control requests from `apps/web`
+- verify Vercel OIDC-authenticated dispatch and control requests from `apps/web` through the app-local auth adapter
 - coordinate per-user runs through a `USER_RUNNER` Durable Object
 - store one encrypted hosted workspace snapshot in the existing `vault` bundle slot plus separately encrypted raw-artifact objects in the `BUNDLES` R2 bucket
 - perform durable hosted bootstrap explicitly on `member.activated`
@@ -79,7 +79,7 @@ Current worker routes:
 - `PUT /internal/users/:userId/env` merges or replaces the user's separately encrypted hosted env object
 - `DELETE /internal/users/:userId/env` clears the user's separately encrypted hosted env object without rewriting the hosted vault bundle
 - `PUT /internal/users/:userId/crypto-context` explicitly provisions or reconciles the managed hosted root-key envelope for the user before runtime access
-- `PUT|GET|DELETE /internal/users/:userId/shares/:shareId/pack` stores owner-bound hosted share packs under the owning user root key
+- `PUT|GET|DELETE /internal/users/:userId/shares/:shareId/pack` stores owner-bound opaque hosted share-pack objects under the owning user root key for acceptance/import only; page preview metadata stays in Postgres
 
 `apps/cloudflare/wrangler.jsonc` is the checked-in scaffold for those bindings, env names, and the native container image reference. It intentionally leaves bucket names, worker name, and secrets as placeholders until a real Cloudflare account target exists, but it now pins the native container to the baseline `standard-1` instance type instead of relying on Cloudflare defaults.
 
@@ -177,7 +177,7 @@ The Cloudflare app now keeps two focused Vitest lanes:
 
 ## Runtime boundary
 
-`apps/cloudflare` should treat `@murphai/assistant-runtime` as its hosted execution surface for runtime behavior and `@murphai/hosted-execution` as the canonical owner of shared hosted execution contracts, callback hosts, env readers, and side-effect codecs. The worker/container app owns dispatch verification, bundle storage, control routes, and container lifecycle; the headless runtime package owns one-shot hosted execution behavior. The app-local no-emit typecheck now includes the Node runner and container entrypoint files.
+`apps/cloudflare` should treat `@murphai/assistant-runtime` as its hosted execution surface for runtime behavior and `@murphai/hosted-execution` as the canonical owner of shared hosted execution contracts, callback hosts, vendor-neutral env readers, and side-effect codecs. The worker/container app owns Vercel workload-identity verification, bundle storage, control routes, and container lifecycle; the headless runtime package owns one-shot hosted execution behavior. The app-local no-emit typecheck now includes the Node runner and container entrypoint files.
 
 ## Known follow-ups
 

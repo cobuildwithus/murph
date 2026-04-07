@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 
+import type { Prisma } from "@prisma/client";
 import {
   buildHostedExecutionVaultShareAcceptedDispatch,
   type HostedExecutionDispatchRequest,
@@ -10,7 +11,7 @@ import {
   requireHostedOnboardingPublicBaseUrl,
 } from "../hosted-onboarding/runtime";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
-import { readHostedSharePackFromHostedExecution } from "../hosted-execution/control";
+import { readHostedSharePackObject } from "./pack-store";
 
 import type { HostedSharePreview, HostedSharePrismaClient } from "./types";
 
@@ -49,6 +50,45 @@ export function buildHostedSharePreview(pack: SharePack): HostedSharePreview {
   };
 }
 
+export function serializeHostedSharePreview(preview: HostedSharePreview): Prisma.InputJsonObject {
+  return {
+    counts: {
+      foods: preview.counts.foods,
+      protocols: preview.counts.protocols,
+      recipes: preview.counts.recipes,
+    },
+    foodTitles: [...preview.foodTitles],
+    logMealAfterImport: preview.logMealAfterImport,
+    protocolTitles: [...preview.protocolTitles],
+    recipeTitles: [...preview.recipeTitles],
+    title: preview.title,
+  } satisfies Prisma.InputJsonObject;
+}
+
+export function readHostedSharePreview(value: Prisma.JsonValue): HostedSharePreview {
+  if (!isRecord(value)) {
+    throw new TypeError("Hosted share preview metadata must be a JSON object.");
+  }
+
+  const counts = value.counts;
+  if (!isRecord(counts)) {
+    throw new TypeError("Hosted share preview counts must be a JSON object.");
+  }
+
+  return {
+    counts: {
+      foods: readHostedSharePreviewCount(counts.foods, "foods"),
+      protocols: readHostedSharePreviewCount(counts.protocols, "protocols"),
+      recipes: readHostedSharePreviewCount(counts.recipes, "recipes"),
+    },
+    foodTitles: readHostedSharePreviewTitles(value.foodTitles, "foodTitles"),
+    logMealAfterImport: value.logMealAfterImport === true,
+    protocolTitles: readHostedSharePreviewTitles(value.protocolTitles, "protocolTitles"),
+    recipeTitles: readHostedSharePreviewTitles(value.recipeTitles, "recipeTitles"),
+    title: readHostedSharePreviewTitle(value.title),
+  };
+}
+
 export function findHostedShareLinkByCode(shareCode: string, prisma: HostedSharePrismaClient) {
   return prisma.hostedShareLink.findUnique({
     where: {
@@ -83,7 +123,7 @@ export async function readHostedSharePack(record: {
   id: string;
   senderMemberId: string;
 }): Promise<{ pack: SharePack }> {
-  const pack = await readHostedSharePackFromHostedExecution({
+  const pack = await readHostedSharePackObject({
     ownerUserId: record.senderMemberId,
     shareId: record.id,
   });
@@ -217,4 +257,32 @@ export function normalizeOptionalString(value: string | null | undefined): strin
 
 export function requireHostedSharePublicBaseUrl(): string {
   return requireHostedOnboardingPublicBaseUrl();
+}
+
+function readHostedSharePreviewCount(value: unknown, field: string): number {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new TypeError(`Hosted share preview ${field} count must be a non-negative integer.`);
+  }
+
+  return value;
+}
+
+function readHostedSharePreviewTitle(value: unknown): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new TypeError("Hosted share preview title must be a non-empty string.");
+  }
+
+  return value;
+}
+
+function readHostedSharePreviewTitles(value: unknown, field: string): string[] {
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+    throw new TypeError(`Hosted share preview ${field} must be a string array.`);
+  }
+
+  return [...value];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
