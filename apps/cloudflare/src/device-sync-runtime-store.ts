@@ -1,6 +1,6 @@
 import {
   parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
-} from "@murphai/hosted-execution";
+} from "@murphai/device-syncd/hosted-runtime";
 import type {
   HostedExecutionDeviceSyncRuntimeApplyEntry,
   HostedExecutionDeviceSyncRuntimeApplyRequest,
@@ -9,7 +9,7 @@ import type {
   HostedExecutionDeviceSyncRuntimeConnectionSnapshot,
   HostedExecutionDeviceSyncRuntimeSnapshotRequest,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
-} from "@murphai/hosted-execution";
+} from "@murphai/device-syncd/hosted-runtime";
 
 import type { R2BucketLike } from "./bundle-store.js";
 import { buildHostedStorageAad, deriveHostedStorageOpaqueId } from "./crypto-context.js";

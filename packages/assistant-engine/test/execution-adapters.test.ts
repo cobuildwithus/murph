@@ -9,7 +9,7 @@ const hostedExecutionMocks = vi.hoisted(() => {
   };
 });
 
-vi.mock("@murphai/hosted-execution", () => ({
+vi.mock("@murphai/hosted-execution/web-control-plane", () => ({
   createHostedExecutionServerShareLinkIssuer:
     hostedExecutionMocks.createHostedExecutionServerShareLinkIssuer,
 }));

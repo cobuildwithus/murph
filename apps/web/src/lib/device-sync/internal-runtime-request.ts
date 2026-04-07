@@ -6,7 +6,7 @@ import {
   type HostedExecutionDeviceSyncRuntimeConnectionUpdate as HostedDeviceSyncRuntimeConnectionUpdate,
   type HostedExecutionDeviceSyncRuntimeSnapshotRequest as HostedDeviceSyncRuntimeSnapshotRequest,
   type HostedExecutionDeviceSyncRuntimeTokenBundle as HostedDeviceSyncRuntimeTokenBundle,
-} from "@murphai/hosted-execution";
+} from "@murphai/device-syncd/hosted-runtime";
 
 export function parseHostedDeviceSyncRuntimeSnapshotRequest(
   value: Record<string, unknown>,

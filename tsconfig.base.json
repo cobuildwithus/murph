@@ -145,6 +145,9 @@
       "@murphai/device-syncd/client": [
         "packages/device-syncd/src/client.ts"
       ],
+      "@murphai/device-syncd/hosted-runtime": [
+        "packages/device-syncd/src/hosted-runtime.ts"
+      ],
       "@murphai/device-syncd/*": [
         "packages/device-syncd/src/*.ts"
       ]

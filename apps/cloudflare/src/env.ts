@@ -8,7 +8,7 @@ import {
   assertHostedExecutionOptionalJwkPairConfigured,
   readHostedExecutionWorkerEnvironment,
   type HostedExecutionWorkerEnvironment,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/env";
 
 import { decodeBase64Key } from "./base64.js";
 

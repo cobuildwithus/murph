@@ -4,17 +4,21 @@ export { ContainerProxy } from "@cloudflare/containers";
 import {
   emitHostedExecutionStructuredLog,
   parseHostedExecutionDispatchRequest,
-  verifyHostedExecutionVercelOidcRequest,
-  type HostedExecutionDeviceSyncRuntimeApplyRequest,
-  type HostedExecutionDeviceSyncRuntimeApplyResponse,
   type HostedExecutionDispatchRequest,
   type HostedExecutionDispatchResult,
-  type HostedExecutionDeviceSyncRuntimeSnapshotRequest,
-  type HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   type HostedExecutionOutboxPayload,
   type HostedExecutionUserEnvStatus,
   type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
+import {
+  verifyHostedExecutionVercelOidcRequest,
+} from "@murphai/hosted-execution/vercel-oidc";
+import type {
+  HostedExecutionDeviceSyncRuntimeApplyRequest,
+  HostedExecutionDeviceSyncRuntimeApplyResponse,
+  HostedExecutionDeviceSyncRuntimeSnapshotRequest,
+  HostedExecutionDeviceSyncRuntimeSnapshotResponse,
+} from "@murphai/device-syncd/hosted-runtime";
 import {
   type GatewayFetchAttachmentsInput,
   type GatewayGetConversationInput,

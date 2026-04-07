@@ -1,9 +1,13 @@
 import {
   HOSTED_EXECUTION_AI_USAGE_RECORD_PATH,
+} from "@murphai/hosted-execution";
+import {
   HOSTED_EXECUTION_CALLBACK_HOSTS,
   HOSTED_EXECUTION_PROXY_HOSTS,
-  type HostedExecutionAiUsageRecordRequest,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/callback-hosts";
+import type {
+  HostedExecutionAiUsageRecordRequest,
+} from "@murphai/hosted-execution/web-control-plane";
 
 import { createHostedArtifactStore } from "./bundle-store.ts";
 import { readHostedExecutionEnvironment } from "./env.ts";

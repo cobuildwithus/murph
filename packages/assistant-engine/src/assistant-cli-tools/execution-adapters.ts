@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { buildSharePackFromVault } from '@murphai/core'
 import {
   createHostedExecutionServerShareLinkIssuer,
-} from '@murphai/hosted-execution'
+} from '@murphai/hosted-execution/web-control-plane'
 import { prepareAssistantDirectCliEnv } from '../assistant-cli-access.js'
 import { normalizeNullableString } from '../assistant/shared.js'
 import { resolveAssistantVaultPath } from '../assistant-vault-paths.js'

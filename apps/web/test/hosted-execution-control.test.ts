@@ -7,8 +7,11 @@ const mocks = vi.hoisted(() => ({
   tokenProvider: vi.fn(),
 }));
 
-vi.mock("@murphai/hosted-execution", () => ({
+vi.mock("@murphai/hosted-execution/client", () => ({
   createHostedExecutionControlClient: mocks.createHostedExecutionControlClient,
+}));
+
+vi.mock("@murphai/hosted-execution/env", () => ({
   readHostedExecutionControlEnvironment: mocks.readHostedExecutionControlEnvironment,
 }));
 

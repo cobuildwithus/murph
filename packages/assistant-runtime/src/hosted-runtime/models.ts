@@ -9,8 +9,10 @@ import type {
   HostedExecutionRunnerRequest,
   HostedExecutionRunnerResult,
   HostedExecutionSideEffect,
-  HostedExecutionWebControlPlaneEnvironment,
 } from "@murphai/hosted-execution";
+import type {
+  HostedExecutionWebControlPlaneEnvironment,
+} from "@murphai/hosted-execution/env";
 
 export interface HostedExecutionCommitCallback {
   bundleRef: HostedExecutionBundleRefState;

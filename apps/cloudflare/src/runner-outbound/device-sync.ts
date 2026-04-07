@@ -2,13 +2,13 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
   buildHostedExecutionDeviceSyncConnectLinkPath,
-  fetchHostedExecutionWebControlPlaneResponse,
   type HostedExecutionDeviceSyncRuntimeApplyRequest,
   type HostedExecutionDeviceSyncRuntimeConnectionUpdate,
   type HostedExecutionDeviceSyncRuntimeSnapshotRequest,
-} from "@murphai/hosted-execution";
+} from "@murphai/device-syncd/hosted-runtime";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
+import { fetchHostedExecutionWebControlPlaneResponse } from "../web-control-plane.ts";
 import { json, methodNotAllowed, notFound, readJsonObject } from "../json.ts";
 import {
   decodeRouteParam,

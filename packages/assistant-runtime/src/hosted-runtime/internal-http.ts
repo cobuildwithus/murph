@@ -1,8 +1,10 @@
 import {
   HOSTED_EXECUTION_CALLBACK_HOSTS,
   HOSTED_EXECUTION_PROXY_HOSTS,
+} from "@murphai/hosted-execution/callback-hosts";
+import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/contracts";
 
 import { readHostedRunnerCommitTimeoutMs } from "./timeouts.ts";
 

@@ -1,14 +1,16 @@
 import type {
-  HostedExecutionDeviceSyncRuntimeApplyRequest,
-  HostedExecutionDeviceSyncRuntimeApplyResponse,
-  HostedExecutionDeviceSyncRuntimeSnapshotRequest,
-  HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   HostedExecutionDispatchRequest,
   HostedExecutionDispatchResult,
   HostedExecutionOutboxPayload,
   HostedExecutionUserEnvStatus,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
+import type {
+  HostedExecutionDeviceSyncRuntimeApplyRequest,
+  HostedExecutionDeviceSyncRuntimeApplyResponse,
+  HostedExecutionDeviceSyncRuntimeSnapshotRequest,
+  HostedExecutionDeviceSyncRuntimeSnapshotResponse,
+} from "@murphai/device-syncd/hosted-runtime";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
 import type { HostedExecutionCommittedResult } from "../execution-journal.js";

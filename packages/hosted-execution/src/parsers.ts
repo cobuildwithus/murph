@@ -765,9 +765,11 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionStateUpdate(
     );
   }
   if (record.metadata !== undefined) {
-    next.metadata = requireObject(
-      record.metadata,
-      `Hosted device-sync runtime apply request updates[${index}].connection.metadata`,
+    next.metadata = sanitizeHostedExecutionDeviceSyncMetadata(
+      requireObject(
+        record.metadata,
+        `Hosted device-sync runtime apply request updates[${index}].connection.metadata`,
+      ),
     );
   }
   if (record.scopes !== undefined) {

@@ -8,10 +8,12 @@ import {
   DEFAULT_HOSTED_EXECUTION_ARTIFACTS_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_RESULTS_BASE_URL,
   HOSTED_EXECUTION_CALLBACK_HOSTS,
+} from "@murphai/hosted-execution/callback-hosts";
+import {
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
   readHostedExecutionWebControlPlaneEnvironment,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/env";
 import type {
   HostedAssistantRuntimeConfig,
   NormalizedHostedAssistantRuntimeConfig,

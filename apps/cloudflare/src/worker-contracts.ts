@@ -15,11 +15,13 @@ import type {
 } from "@murphai/gateway-core";
 import type {
   HostedExecutionBundleRef,
+} from "@murphai/hosted-execution";
+import type {
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
   HostedExecutionDeviceSyncRuntimeSnapshotRequest,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
-} from "@murphai/hosted-execution";
+} from "@murphai/device-syncd/hosted-runtime";
 
 import type { R2BucketLike } from "./bundle-store.ts";
 import type {

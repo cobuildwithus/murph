@@ -17,6 +17,50 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./auth": {
+      "types": "./dist/auth.d.ts",
+      "default": "./dist/auth.js"
+    },
+    "./callback-hosts": {
+      "types": "./dist/callback-hosts.d.ts",
+      "default": "./dist/callback-hosts.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
+    },
+    "./contracts": {
+      "types": "./dist/contracts.d.ts",
+      "default": "./dist/contracts.js"
+    },
+    "./env": {
+      "types": "./dist/env.d.ts",
+      "default": "./dist/env.js"
+    },
+    "./hosted-email": {
+      "types": "./dist/hosted-email.d.ts",
+      "default": "./dist/hosted-email.js"
+    },
+    "./member-private-state": {
+      "types": "./dist/member-private-state.d.ts",
+      "default": "./dist/member-private-state.js"
+    },
+    "./parsers": {
+      "types": "./dist/parsers.d.ts",
+      "default": "./dist/parsers.js"
+    },
+    "./routes": {
+      "types": "./dist/routes.d.ts",
+      "default": "./dist/routes.js"
+    },
+    "./vercel-oidc": {
+      "types": "./dist/vercel-oidc.d.ts",
+      "default": "./dist/vercel-oidc.js"
+    },
+    "./web-control-plane": {
+      "types": "./dist/web-control-plane.d.ts",
+      "default": "./dist/web-control-plane.js"
     }
   },
   "files": [
