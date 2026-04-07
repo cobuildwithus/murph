@@ -210,6 +210,16 @@ function verifyWorkspaceImportPolicy({
   }
 
   if (
+    sourceMember === "packages/assistant-runtime"
+    && specifier === "@murphai/operator-config"
+    && filePath.includes(
+      `${path.sep}packages${path.sep}assistant-runtime${path.sep}src${path.sep}`,
+    )
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} from the operator-config root; packages/assistant-runtime/src must stay on explicit @murphai/operator-config/* owner subpaths so hosted runtime seams cannot drift back to the umbrella config root.`;
+  }
+
+  if (
     sourceMember === "apps/cloudflare"
     && (
       specifier === "@murphai/assistant-engine"

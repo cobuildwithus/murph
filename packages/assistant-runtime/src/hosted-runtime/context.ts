@@ -18,6 +18,9 @@ import {
   resolveHostedAssistantConfig,
 } from "@murphai/operator-config/operator-config";
 import {
+  normalizeNullableString,
+} from "@murphai/operator-config/text/shared";
+import {
   readAssistantAutomationState,
   saveAssistantAutomationState,
 } from "@murphai/assistant-engine";
@@ -234,15 +237,6 @@ function sameHostedAssistantChannels(
   right: readonly string[],
 ): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
-function normalizeNullableString(value: string | null | undefined): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
 }
 
 function normalizeHostedAssistantBootstrapStatus(
