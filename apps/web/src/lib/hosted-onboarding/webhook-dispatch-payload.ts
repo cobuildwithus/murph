@@ -1,16 +1,19 @@
 import type {
   HostedExecutionDispatchRequest,
-  HostedExecutionReferenceOutboxPayload,
 } from "@murphai/hosted-execution";
+import { Prisma } from "@prisma/client";
 import {
   parseHostedExecutionDispatchRequest,
-  readHostedExecutionOutboxPayload,
 } from "@murphai/hosted-execution";
 
 import {
   deleteHostedStoredDispatchPayloadBestEffort as deleteHostedStoredDispatchPayloadBestEffortFromControl,
   maybeStageHostedExecutionDispatchPayload,
 } from "../hosted-execution/control";
+import {
+  type HostedExecutionOutboxPayload,
+  readHostedExecutionOutboxPayload,
+} from "../hosted-execution/outbox-payload";
 import { hostedOnboardingError } from "./errors";
 
 export type HostedWebhookPendingDispatchSideEffectPayload = {
@@ -18,7 +21,7 @@ export type HostedWebhookPendingDispatchSideEffectPayload = {
   storage: "pending";
 };
 
-export type HostedWebhookStoredDispatchSideEffectPayload = HostedExecutionReferenceOutboxPayload;
+export type HostedWebhookStoredDispatchSideEffectPayload = HostedExecutionOutboxPayload;
 
 export type HostedWebhookDispatchSideEffectPayload =
   | HostedWebhookPendingDispatchSideEffectPayload
@@ -60,7 +63,7 @@ export async function stageHostedWebhookDispatchSideEffectPayload(
 
   throw hostedOnboardingError({
     code: "HOSTED_WEBHOOK_DISPATCH_PAYLOAD_REF_REQUIRED",
-    message: `Hosted webhook dispatch ${payload.dispatch.eventId} requires a staged Cloudflare payload ref.`,
+    message: `Hosted webhook dispatch ${payload.dispatch.eventId} requires a staged Cloudflare payload id.`,
     httpStatus: 500,
     retryable: false,
   });
@@ -69,9 +72,9 @@ export async function stageHostedWebhookDispatchSideEffectPayload(
 export function readHostedWebhookStoredDispatchSideEffectPayload(
   value: unknown,
 ): HostedWebhookStoredDispatchSideEffectPayload | null {
-  const payload = readHostedExecutionOutboxPayload(value);
+  const payload = readHostedExecutionOutboxPayload(value as Prisma.InputJsonValue | Prisma.JsonValue | null);
 
-  return payload?.storage === "reference" && payload.payloadRef
+  return payload?.storage === "reference" && payload.stagedPayloadId
     ? payload
     : null;
 }
