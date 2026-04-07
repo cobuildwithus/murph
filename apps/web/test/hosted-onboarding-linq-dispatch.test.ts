@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   deleteHostedStoredDispatchPayloadBestEffort: vi.fn(),
   claimHostedLinqOnboardingLinkNotice: vi.fn(),
   claimHostedLinqQuotaReplyNotice: vi.fn(),
+  drainHostedExecutionOutboxBestEffort: vi.fn(),
   enqueueHostedExecutionOutbox: vi.fn(),
   incrementHostedLinqInboundDailyState: vi.fn(),
   incrementHostedLinqOutboundDailyState: vi.fn(),
@@ -23,6 +24,7 @@ vi.mock("@/src/lib/hosted-execution/outbox", async () => {
 
   return {
     ...actual,
+    drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
     enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
     enqueueHostedExecutionOutboxPayload: (input: {
       payload: {
@@ -116,6 +118,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.stagedDispatches.clear();
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
+    mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValue(makeHostedLinqDailyState());
     mocks.incrementHostedLinqOutboundDailyState.mockResolvedValue(makeHostedLinqDailyState({
@@ -183,6 +186,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         sourceType: "hosted_webhook_receipt",
       }),
     );
+    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
+      eventIds: [
+        "evt_123",
+      ],
+      limit: 1,
+      prisma,
+    });
     const receiptWrites = (
       prisma as unknown as {
         hostedWebhookReceipt: {
@@ -611,6 +621,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(prismaMocks.hostedMember.create).toHaveBeenCalledTimes(1);
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",
@@ -705,6 +716,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedMember.create).toHaveBeenCalledTimes(1);
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",
@@ -764,6 +776,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       reason: "signup-link-already-sent",
     });
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
@@ -812,6 +825,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       prisma,
     });
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",
@@ -873,6 +887,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       prisma,
     });
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
