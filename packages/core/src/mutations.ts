@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type {
   ContractSchema,
   DocumentEventRecord,
+  EventAttachment,
   ExternalRef,
   EventKind,
   EventRecord,
@@ -59,6 +60,7 @@ import {
 } from "./time.ts";
 import { loadVault } from "./vault.ts";
 
+import type { EventAttachment, PreparedEventAttachment } from "./event-attachments.ts";
 import type { RawArtifact } from "./raw.ts";
 import type { DateInput, UnknownRecord } from "./types.ts";
 
@@ -642,6 +644,52 @@ function deterministicContractId(prefix: string, seed: string): string {
   return `${prefix}_${encodeBase32(hash, 26)}`;
 }
 
+function buildPreparedAttachmentState(
+  preparedAttachments: readonly PreparedEventAttachment[],
+): {
+  projections: {
+    audioPaths: string[];
+    documentPath: string | null;
+    photoPaths: string[];
+    rawRefs: string[];
+  };
+} {
+  return {
+    projections: {
+      audioPaths: [
+        ...new Set(
+          preparedAttachments
+            .filter((attachment) => attachment.role === "audio" || attachment.kind === "audio")
+            .map((attachment) => attachment.raw.relativePath),
+        ),
+      ],
+      documentPath:
+        preparedAttachments.find((attachment) => attachment.kind === "document")?.raw.relativePath
+        ?? preparedAttachments[0]?.raw.relativePath
+        ?? null,
+      photoPaths: [
+        ...new Set(
+          preparedAttachments
+            .filter((attachment) => attachment.role === "photo" || attachment.kind === "photo")
+            .map((attachment) => attachment.raw.relativePath),
+        ),
+      ],
+      rawRefs: [...new Set(preparedAttachments.map((attachment) => attachment.raw.relativePath))],
+    },
+  };
+}
+
+function requirePreparedAttachmentKind(attachment: PreparedEventAttachment): EventAttachment["kind"] {
+  if (!attachment.kind) {
+    throw new VaultError(
+      "EVENT_ATTACHMENT_KIND_MISSING",
+      `Prepared attachment "${attachment.role}" is missing an attachment kind.`,
+    );
+  }
+
+  return attachment.kind;
+}
+
 function buildNormalizedEventSeed<K extends EventKind>({
   kind,
   occurredAt,
@@ -704,23 +752,15 @@ function buildNormalizedEventSeed<K extends EventKind>({
     fields: normalizedFields,
   };
 
-  assertContractShape(
-    eventRecordSchema,
-    materializeEventRecord({ seed, recordId: EVENT_VALIDATION_PLACEHOLDER_ID }),
-    "EVENT_INVALID",
-    "Event record failed contract validation before write.",
-  );
+  validateEventSeed(seed);
 
   return seed;
 }
 
-function materializeEventRecord<K extends EventKind>({
-  seed,
-  recordId,
-}: {
-  seed: NormalizedEventSeed<K>;
-  recordId?: string;
-}): UnknownRecord {
+function buildEventContractInput<K extends EventKind>(
+  seed: NormalizedEventSeed<K>,
+  recordId?: string,
+): UnknownRecord {
   return compactRecord({
     schemaVersion: EVENT_SCHEMA_VERSION,
     id: recordId,
@@ -741,14 +781,20 @@ function materializeEventRecord<K extends EventKind>({
   });
 }
 
-function finalizeEventRecord<K extends EventKind>({
-  seed,
-  recordId,
-}: {
-  seed: NormalizedEventSeed<K>;
-  recordId: string;
-}): EventRecordByKind<K> {
-  const record = materializeEventRecord({ seed, recordId });
+function validateEventSeed<K extends EventKind>(seed: NormalizedEventSeed<K>): void {
+  assertContractShape(
+    eventRecordSchema,
+    buildEventContractInput(seed, EVENT_VALIDATION_PLACEHOLDER_ID),
+    "EVENT_INVALID",
+    "Event record failed contract validation before write.",
+  );
+}
+
+function buildStoredEventRecord<K extends EventKind>(
+  seed: NormalizedEventSeed<K>,
+  recordId: string,
+): EventRecordByKind<K> {
+  const record = buildEventContractInput(seed, recordId);
 
   assertContractShape(
     eventRecordSchema,
@@ -760,20 +806,12 @@ function finalizeEventRecord<K extends EventKind>({
   return record as EventRecordByKind<K>;
 }
 
-function buildEventRecord<K extends EventKind>({
-  recordId,
-  ...input
-}: BuildEventRecordInput<K>): EventRecordByKind<K> {
-  return finalizeEventRecord({
-    seed: buildNormalizedEventSeed(input),
-    recordId: recordId ?? generateRecordId(ID_PREFIXES.event),
-  });
-}
+function prepareStoredEventLedgerEntry<K extends EventKind>(
+  seed: NormalizedEventSeed<K>,
+  recordId: string,
+): PreparedJsonlEntry<EventRecordByKind<K>> {
+  const record = buildStoredEventRecord(seed, recordId);
 
-function prepareEventRecord<K extends EventKind>(
-  input: BuildEventRecordInput<K>,
-): { relativePath: string; record: EventRecordByKind<K> } {
-  const record = buildEventRecord(input);
   return {
     relativePath: toMonthlyShardRelativePath(
       VAULT_LAYOUT.eventLedgerDirectory,
@@ -782,6 +820,16 @@ function prepareEventRecord<K extends EventKind>(
     ),
     record,
   };
+}
+
+function prepareEventLedgerEntry<K extends EventKind>({
+  recordId,
+  ...input
+}: BuildEventRecordInput<K>): PreparedJsonlEntry<EventRecordByKind<K>> {
+  return prepareStoredEventLedgerEntry(
+    buildNormalizedEventSeed(input),
+    recordId ?? generateRecordId(ID_PREFIXES.event),
+  );
 }
 
 async function stageJsonlRecord(
@@ -1030,7 +1078,7 @@ function normalizeDeviceEventInputs(
       externalRef: eventInput.externalRef,
       fields,
     });
-    const { rawRefs: _rawRefs, ...seedRecord } = materializeEventRecord({ seed });
+    const { rawRefs: _rawRefs, ...seedRecord } = buildEventContractInput(seed);
 
     return {
       seed,
@@ -1272,13 +1320,13 @@ function prepareDeviceEventEntries(
       : soleRawArtifactPath
         ? [soleRawArtifactPath]
         : undefined;
-    const record = finalizeEventRecord({
-      seed: {
+    const record = buildStoredEventRecord(
+      {
         ...event.seed,
         rawRefs,
       },
-      recordId: event.recordId,
-    });
+      event.recordId,
+    );
 
     return {
       record,
@@ -1403,17 +1451,8 @@ export async function importDocument({
     ],
   });
   const raw = preparedAttachments[0]!.raw;
-  const attachmentProjections = buildAttachmentCompatibilityProjections([
-    {
-      role: "source_document",
-      kind: "document",
-      relativePath: raw.relativePath,
-      mediaType: raw.mediaType,
-      sha256: "0".repeat(64),
-      originalFileName: raw.originalFileName,
-    },
-  ]);
-  const event = prepareEventRecord({
+  const pendingAttachmentState = buildPreparedAttachmentState(preparedAttachments);
+  const event = prepareEventLedgerEntry({
     kind: "document",
     occurredAt,
     timeZone: vault.metadata.timezone,
@@ -1421,20 +1460,11 @@ export async function importDocument({
     title: String(title ?? raw.originalFileName).trim(),
     note,
     relatedIds: [documentId],
-    rawRefs: attachmentProjections.rawRefs,
+    rawRefs: pendingAttachmentState.projections.rawRefs,
     fields: {
       documentId,
-      attachments: [
-        {
-          role: "source_document",
-          kind: "document",
-          relativePath: raw.relativePath,
-          mediaType: raw.mediaType,
-          sha256: "0".repeat(64),
-          originalFileName: raw.originalFileName,
-        },
-      ],
-      documentPath: attachmentProjections.documentPath,
+      attachments: pendingAttachmentState.attachments,
+      documentPath: pendingAttachmentState.projections.documentPath,
       mimeType: raw.mediaType,
     },
   });
@@ -1537,17 +1567,8 @@ export async function addMeal({
   const photo = preparedAttachments.find((attachment) => attachment.role === "photo")?.raw ?? null;
   const audio = preparedAttachments.find((attachment) => attachment.role === "audio")?.raw ?? null;
   const rawDirectory = resolveRawMealDirectory(occurredAt, mealId);
-  const attachmentProjections = buildAttachmentCompatibilityProjections(
-    preparedAttachments.map((attachment) => ({
-      role: attachment.role,
-      kind: attachment.kind,
-      relativePath: attachment.raw.relativePath,
-      mediaType: attachment.raw.mediaType,
-      sha256: "0".repeat(64),
-      originalFileName: attachment.raw.originalFileName,
-    })),
-  );
-  const event = prepareEventRecord({
+  const pendingAttachmentState = buildPreparedAttachmentState(preparedAttachments);
+  const event = prepareEventLedgerEntry({
     kind: "meal",
     occurredAt,
     timeZone: vault.metadata.timezone,
@@ -1555,19 +1576,12 @@ export async function addMeal({
     title: "Meal",
     note,
     relatedIds: [mealId],
-    rawRefs: attachmentProjections.rawRefs,
+    rawRefs: pendingAttachmentState.projections.rawRefs,
     fields: {
-      attachments: preparedAttachments.map((attachment) => ({
-        role: attachment.role,
-        kind: attachment.kind,
-        relativePath: attachment.raw.relativePath,
-        mediaType: attachment.raw.mediaType,
-        sha256: "0".repeat(64),
-        originalFileName: attachment.raw.originalFileName,
-      })),
+      attachments: pendingAttachmentState.attachments,
       mealId,
-      photoPaths: attachmentProjections.photoPaths,
-      audioPaths: attachmentProjections.audioPaths,
+      photoPaths: pendingAttachmentState.projections.photoPaths,
+      audioPaths: pendingAttachmentState.projections.audioPaths,
     },
   });
   return runCanonicalWrite({
