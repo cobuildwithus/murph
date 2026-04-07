@@ -41,7 +41,6 @@ export type HostedExecutionEventKind =
   (typeof HOSTED_EXECUTION_EVENT_KINDS)[number];
 
 export const HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KINDS = [
-  "member.activated",
   "linq.message.received",
   "telegram.message.received",
   "email.message.received",
@@ -50,6 +49,7 @@ export const HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KINDS = [
 ] as const satisfies readonly HostedExecutionEventKind[];
 
 export const HOSTED_EXECUTION_INLINE_ONLY_OUTBOX_EVENT_KINDS = [
+  "member.activated",
   "assistant.cron.tick",
   "vault.share.accepted",
 ] as const satisfies readonly HostedExecutionEventKind[];

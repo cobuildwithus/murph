@@ -6,7 +6,9 @@ import {
 import type Stripe from "stripe";
 
 import { provisionManagedUserCryptoInHostedExecution } from "../hosted-execution/control";
-import { enqueueHostedExecutionOutbox } from "../hosted-execution/outbox";
+import {
+  enqueueHostedExecutionOutbox,
+} from "../hosted-execution/outbox";
 import {
   coerceStripeObjectId,
   mapStripeSubscriptionStatusToHostedBillingStatus,
@@ -43,6 +45,10 @@ export type HostedMemberActivationResult = {
   activated: boolean;
   hostedExecutionEventId: string | null;
   memberId: string;
+};
+
+export type HostedMemberActivationTransactionResult = HostedMemberActivationResult & {
+  postCommitProvisionUserId: string | null;
 };
 
 type HostedOnboardingPrismaClient = Prisma.TransactionClient;
@@ -112,43 +118,77 @@ export async function activateHostedMemberForPositiveSource(input: {
   prisma: HostedOnboardingPrismaClient;
   skipIfBillingAlreadyActive?: boolean;
   sourceType: string;
-}): Promise<HostedMemberActivationResult> {
-  const activated = await tryActivateHostedMemberIfStillAllowed({
-    member: input.member,
-    prisma: input.prisma,
-    skipIfBillingAlreadyActive: input.skipIfBillingAlreadyActive ?? false,
-  });
+}): Promise<HostedMemberActivationTransactionResult> {
+  return withHostedOnboardingTransaction(input.prisma, async (tx) => {
+    await lockHostedMemberRow(tx, input.member.id);
 
-  if (!activated) {
+    const currentMember = await findHostedMemberById(tx, input.member.id);
+
+    if (!currentMember || isHostedAccessBlockedBillingStatus(currentMember.billingStatus)) {
+      return buildHostedInactiveMemberActivationResult(input.member.id);
+    }
+
+    const dispatch = buildHostedMemberActivationDispatch({
+      linqChatId: currentMember.linqChatId,
+      memberId: currentMember.id,
+      phoneLookupKey: currentMember.phoneLookupKey,
+      occurredAt: input.dispatchContext.occurredAt,
+      sourceEventId: input.dispatchContext.sourceEventId,
+      sourceType: input.sourceType,
+    });
+
+    if (
+      input.skipIfBillingAlreadyActive &&
+      currentMember.billingStatus === HostedBillingStatus.active
+    ) {
+      const existingDispatch = await tx.executionOutbox.findUnique({
+        where: {
+          eventId: dispatch.eventId,
+        },
+        select: {
+          eventId: true,
+        },
+      });
+
+      return existingDispatch
+        ? {
+            activated: false,
+            hostedExecutionEventId: existingDispatch.eventId,
+            memberId: currentMember.id,
+            postCommitProvisionUserId: currentMember.id,
+          }
+        : buildHostedInactiveMemberActivationResult(currentMember.id);
+    }
+
+    const entitlement = deriveHostedEntitlement({
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: currentMember.suspendedAt,
+    });
+
+    if (!entitlement.activationReady) {
+      return buildHostedInactiveMemberActivationResult(currentMember.id);
+    }
+
+    await updateHostedMemberCoreState({
+      billingStatus: HostedBillingStatus.active,
+      memberId: currentMember.id,
+      prisma: tx,
+    });
+
+    const outboxRecord = await enqueueHostedExecutionOutbox({
+      dispatch,
+      sourceId: `stripe:${input.dispatchContext.sourceEventId}`,
+      sourceType: "hosted_stripe_event",
+      tx,
+    });
+
     return {
-      activated: false,
-      hostedExecutionEventId: null,
-      memberId: input.member.id,
+      activated: true,
+      hostedExecutionEventId: outboxRecord.eventId,
+      memberId: currentMember.id,
+      postCommitProvisionUserId: currentMember.id,
     };
-  }
-
-  await provisionManagedUserCryptoInHostedExecution(input.member.id);
-
-  const dispatch = buildHostedMemberActivationDispatch({
-    linqChatId: input.member.linqChatId,
-    memberId: input.member.id,
-    phoneLookupKey: input.member.phoneLookupKey,
-    occurredAt: input.dispatchContext.occurredAt,
-    sourceEventId: input.dispatchContext.sourceEventId,
-    sourceType: input.sourceType,
   });
-  await enqueueHostedExecutionOutbox({
-    dispatch,
-    sourceId: `stripe:${input.dispatchContext.sourceEventId}`,
-    sourceType: "hosted_stripe_event",
-    tx: input.prisma,
-  });
-
-  return {
-    activated: true,
-    hostedExecutionEventId: dispatch.eventId,
-    memberId: input.member.id,
-  };
 }
 
 async function tryActivateHostedMemberIfStillAllowed(input: {
@@ -193,6 +233,17 @@ async function tryActivateHostedMemberIfStillAllowed(input: {
 
     return true;
   });
+}
+
+function buildHostedInactiveMemberActivationResult(
+  memberId: string,
+): HostedMemberActivationTransactionResult {
+  return {
+    activated: false,
+    hostedExecutionEventId: null,
+    memberId,
+    postCommitProvisionUserId: null,
+  };
 }
 
 export async function updateHostedMemberStripeBillingIfFresh(input: {

@@ -40,9 +40,7 @@ describe("drainHostedExecutionOutbox", () => {
         occurredAt: dispatch.occurredAt,
         userId: dispatch.event.userId,
       },
-      payloadRef: {
-        key: `transient/dispatch-payloads/${dispatch.event.userId}/${dispatch.eventId}.json`,
-      },
+      stagedPayloadId: `staged/dispatch-payloads/${dispatch.event.userId}/${dispatch.eventId}`,
       schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
       storage: "reference",
     }));
@@ -251,6 +249,43 @@ describe("drainHostedExecutionOutbox", () => {
     });
   });
 
+  it("persists inline outbox rows without staging a Cloudflare payload id", async () => {
+    const dispatch = createMemberActivatedDispatch();
+    const upsert = vi.fn(async ({ create }: {
+      create: ExecutionOutbox;
+    }) => structuredClone({
+      ...createOutboxRecord({
+        eventId: dispatch.eventId,
+        eventKind: dispatch.event.kind,
+        payloadJson: create.payloadJson,
+        sourceType: "hosted_stripe_event",
+        userId: dispatch.event.userId,
+      }),
+      payloadJson: create.payloadJson,
+      sourceId: create.sourceId,
+      sourceType: create.sourceType,
+    }));
+    const prisma = {
+      executionOutbox: {
+        upsert,
+      },
+    } as unknown as Pick<PrismaClient, "executionOutbox">;
+
+    const record = await enqueueHostedExecutionOutbox({
+      dispatch,
+      sourceId: "stripe:evt_invoice_paid_123",
+      sourceType: "hosted_stripe_event",
+      storage: "inline",
+      tx: prisma as never,
+    });
+
+    expect(mocks.maybeStageHostedExecutionDispatchPayload).not.toHaveBeenCalled();
+    expect((record.payloadJson as { storage?: unknown }).storage).toBe("inline");
+    expect(record.payloadJson).toEqual(serializeHostedExecutionOutboxPayload(dispatch, {
+      storage: "inline",
+    }));
+  });
+
   it("persists gateway sends by reference without storing message text inline", async () => {
     const dispatch = createGatewaySendDispatch();
     const upsert = vi.fn(async ({ create }: {
@@ -287,7 +322,7 @@ describe("drainHostedExecutionOutbox", () => {
     expect(record.payloadJson).toEqual(persistedPayload);
   });
 
-  it("stages reference-backed payload refs when the Cloudflare control client is available", async () => {
+  it("stages reference-backed payload ids when the Cloudflare control client is available", async () => {
     const dispatch = createGatewaySendDispatch();
     const stagedPayload = {
       dispatchRef: {
@@ -296,9 +331,7 @@ describe("drainHostedExecutionOutbox", () => {
         occurredAt: dispatch.occurredAt,
         userId: dispatch.event.userId,
       },
-      payloadRef: {
-        key: "transient/dispatch-payloads/member_123/ref.json",
-      },
+      stagedPayloadId: "staged/dispatch-payloads/member_123/ref",
       schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
       storage: "reference",
     } as const;
@@ -343,9 +376,7 @@ describe("drainHostedExecutionOutbox", () => {
         occurredAt: dispatch.occurredAt,
         userId: dispatch.event.userId,
       },
-      payloadRef: {
-        key: "transient/dispatch-payloads/member_123/ref.json",
-      },
+      stagedPayloadId: "staged/dispatch-payloads/member_123/ref",
       schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
       storage: "reference",
     } as const;
@@ -378,6 +409,23 @@ function createTickDispatch(): HostedExecutionDispatchRequest {
       userId: "member_123",
     },
     eventId: "evt_tick",
+    occurredAt: "2026-03-28T11:00:00.000Z",
+  };
+}
+
+function createMemberActivatedDispatch(): HostedExecutionDispatchRequest {
+  return {
+    event: {
+      firstContact: {
+        channel: "linq",
+        identityId: "hbidx:phone:v1:test",
+        threadId: "chat_123",
+        threadIsDirect: true,
+      },
+      kind: "member.activated",
+      userId: "member_123",
+    },
+    eventId: "member.activated:stripe:member_123:evt_invoice_paid_123",
     occurredAt: "2026-03-28T11:00:00.000Z",
   };
 }
@@ -490,9 +538,7 @@ function createOutboxRecord(input: {
               occurredAt: "2026-03-28T11:00:00.000Z",
               userId: input.userId,
             },
-            payloadRef: {
-              key: `transient/dispatch-payloads/${input.userId}/${input.eventId}.json`,
-            },
+            stagedPayloadId: `staged/dispatch-payloads/${input.userId}/${input.eventId}`,
             schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
             storage: "reference",
           }

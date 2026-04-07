@@ -4,7 +4,7 @@ import { buildHostedExecutionMemberActivatedDispatch } from "../src/builders";
 import { buildHostedExecutionOutboxPayload } from "../src/outbox-payload";
 
 describe("member.activated outbox payload", () => {
-  it("keeps the stored reference minimal when first contact is omitted", () => {
+  it("keeps the stored inline payload self-contained when first contact is omitted", () => {
     const dispatch = buildHostedExecutionMemberActivatedDispatch({
       eventId: "member.activated:stripe:member_123:evt_123",
       memberId: "member_123",
@@ -14,27 +14,15 @@ describe("member.activated outbox payload", () => {
     expect(dispatch.event.kind).toBe("member.activated");
     expect("firstContact" in dispatch.event).toBe(false);
 
-    const payload = buildHostedExecutionOutboxPayload(dispatch, {
-      payloadRef: {
-        key: "transient/dispatch-payloads/member_123/member.activated.json",
-      },
-      storage: "auto",
-    });
+    const payload = buildHostedExecutionOutboxPayload(dispatch, { storage: "auto" });
 
-    expect(payload.storage).toBe("reference");
-    if (payload.storage !== "reference") {
-      throw new Error("Expected member activation dispatch to use reference storage.");
+    expect(payload.storage).toBe("inline");
+    if (payload.storage !== "inline") {
+      throw new Error("Expected member activation dispatch to use inline storage.");
     }
 
-    expect(payload.dispatchRef).toEqual({
-      eventId: dispatch.eventId,
-      eventKind: "member.activated",
-      occurredAt: dispatch.occurredAt,
-      userId: dispatch.event.userId,
-    });
-    expect(payload.payloadRef).toEqual({
-      key: "transient/dispatch-payloads/member_123/member.activated.json",
-    });
-    expect(payload).not.toHaveProperty("dispatch");
+    expect(payload.dispatch).toEqual(dispatch);
+    expect(payload).not.toHaveProperty("dispatchRef");
+    expect(payload).not.toHaveProperty("stagedPayloadId");
   });
 });

@@ -26,7 +26,7 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
         }),
         "auto",
       ),
-    ).toBe("reference");
+    ).toBe("inline");
 
     expect(
       resolveHostedExecutionDispatchPayloadStorage(
@@ -88,6 +88,16 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
   it("buildHostedExecutionOutboxPayload follows the canonical auto policy", () => {
     expect(
       buildHostedExecutionOutboxPayload(
+        buildHostedExecutionMemberActivatedDispatch({
+          eventId: "member-activated-2",
+          memberId: "user_123",
+          occurredAt,
+        }),
+      ).storage,
+    ).toBe("inline");
+
+    expect(
+      buildHostedExecutionOutboxPayload(
         buildHostedExecutionVaultShareAcceptedDispatch({
           eventId: "share-accepted-2",
           memberId: "user_123",
@@ -111,9 +121,7 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
           userId: "user_123",
         }),
         {
-          payloadRef: {
-            key: "transient/dispatch-payloads/user_123/device-sync-2.json",
-          },
+          stagedPayloadId: "staged-device-sync-2",
         },
       ).storage,
     ).toBe("reference");
@@ -128,9 +136,7 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
           userId: "user_123",
         }),
         {
-          payloadRef: {
-            key: "transient/dispatch-payloads/user_123/gateway-2.json",
-          },
+          stagedPayloadId: "staged-gateway-2",
         },
       ).storage,
     ).toBe("reference");
@@ -159,9 +165,7 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
         occurredAt,
         userId: "user_123",
       },
-      payloadRef: {
-        key: "transient/dispatch-payloads/user_123/share-legacy-1.json",
-      },
+      stagedPayloadId: "staged-share-legacy-1",
       schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
       storage: "reference",
     })).toBeNull();
