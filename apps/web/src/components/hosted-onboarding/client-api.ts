@@ -127,6 +127,15 @@ async function buildHostedOnboardingAuthHeaders(): Promise<Record<string, string
     throw lastError;
   }
 
+  if (isHostedPrivyRateLimitError(lastError)) {
+    throw new HostedOnboardingApiError({
+      code: "PRIVY_RATE_LIMITED",
+      message:
+        "Privy is rate limiting this browser right now. Wait a minute, then try continuing signup again.",
+      retryable: true,
+    });
+  }
+
   throw new HostedOnboardingApiError({
     code: "PRIVY_AUTH_UNAVAILABLE",
     message: "We could not refresh your Privy session. Wait a moment and try again.",
@@ -169,6 +178,34 @@ function readApiErrorPayload(value: unknown): ApiErrorPayload["error"] | null {
 
 function hasApiErrorKey(value: unknown): boolean {
   return isRecord(value) && "error" in value;
+}
+
+function isHostedPrivyRateLimitError(error: unknown): boolean {
+  return readErrorStatusCode(error) === 429;
+}
+
+function readErrorStatusCode(error: unknown): number | null {
+  if (!isRecord(error)) {
+    return null;
+  }
+
+  if (typeof error.status === "number" && Number.isFinite(error.status)) {
+    return error.status;
+  }
+
+  if (typeof error.statusCode === "number" && Number.isFinite(error.statusCode)) {
+    return error.statusCode;
+  }
+
+  if (isRecord(error.response) && typeof error.response.status === "number" && Number.isFinite(error.response.status)) {
+    return error.response.status;
+  }
+
+  if (isRecord(error.cause)) {
+    return readErrorStatusCode(error.cause);
+  }
+
+  return null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
