@@ -2149,6 +2149,22 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the CLI-firs
     assert.equal(toolCatalog?.hasTool('vault.journal.append'), false)
     assert.ok(providerCall?.systemPrompt)
     assert.doesNotMatch(providerCall?.systemPrompt ?? '', /murph\.device\.connect/u)
+    assert.match(
+      providerCall?.systemPrompt ?? '',
+      /For wiki work, prefer the dedicated knowledge surface for this route over generic CLI execution/u,
+    )
+    assert.match(
+      providerCall?.systemPrompt ?? '',
+      /If you need the operator-facing CLI surface itself, use `murph\.cli\.run` for knowledge work only when you truly need/u,
+    )
+    assert.match(
+      providerCall?.systemPrompt ?? '',
+      /Use targeted local file reads only when the CLI\/query surface does not expose the needed detail/u,
+    )
+    assert.doesNotMatch(
+      providerCall?.systemPrompt ?? '',
+      /assistant\.knowledge\.(search|upsert)/u,
+    )
 
     const toolResults = await toolCatalog!.executeCalls({
       mode: 'apply',
@@ -2314,6 +2330,18 @@ test('sendAssistantMessage keeps murph.device.connect out of the prompt when the
     assert.equal(providerCall?.provider, 'codex-cli')
     assert.equal(toolCatalog?.hasTool('murph.device.connect'), true)
     assert.doesNotMatch(providerCall?.systemPrompt ?? '', /murph\.device\.connect/u)
+    assert.doesNotMatch(
+      providerCall?.systemPrompt ?? '',
+      /assistant\.knowledge\.(search|upsert)/u,
+    )
+    assert.match(
+      providerCall?.systemPrompt ?? '',
+      /For wiki work, use `vault-cli knowledge \.\.\.` directly in this turn rather than assuming a dedicated knowledge surface is callable/u,
+    )
+    assert.match(
+      providerCall?.systemPrompt ?? '',
+      /Use targeted local file reads only when the CLI\/query surface does not expose the needed detail/u,
+    )
     assert.equal(result.response, 'codex hosted auto-reply')
   } finally {
     restoreEnvironmentVariable('HOME', originalHome)
