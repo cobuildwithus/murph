@@ -107,8 +107,6 @@ export async function backfillHostedContactPrivacyRotation(input: {
         memberId: true,
         stripeCustomerIdEncrypted: true,
         stripeCustomerLookupKey: true,
-        stripeLatestBillingEventIdEncrypted: true,
-        stripeLatestCheckoutSessionIdEncrypted: true,
         stripeSubscriptionIdEncrypted: true,
         stripeSubscriptionLookupKey: true,
       },

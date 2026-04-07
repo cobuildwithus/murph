@@ -67,8 +67,6 @@ describe("hosted contact privacy rotation", () => {
               value: "cus_123",
             }),
             stripeCustomerLookupKey: legacyStripeCustomerLookupKey,
-            stripeLatestBillingEventIdEncrypted: null,
-            stripeLatestCheckoutSessionIdEncrypted: null,
             stripeSubscriptionIdEncrypted: encryptHostedWebNullableString({
               field: "hosted-member-billing-ref.stripe-subscription-id",
               memberId: "member_123",

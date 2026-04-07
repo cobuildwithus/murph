@@ -65,10 +65,6 @@ export function generateHostedInviteCode(): string {
   return randomBytes(15).toString("base64url");
 }
 
-export function generateHostedCheckoutId(): string {
-  return `hbco_${randomBytes(12).toString("base64url")}`;
-}
-
 export function generateHostedRevnetIssuanceId(): string {
   return `hbrv_${randomBytes(12).toString("base64url")}`;
 }

@@ -45,9 +45,6 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'stripeCustomerIdEncrypted String? @map("stripe_customer_id_encrypted")',
     'stripeSubscriptionLookupKey String? @unique @map("stripe_subscription_lookup_key")',
     'stripeSubscriptionIdEncrypted String? @map("stripe_subscription_id_encrypted")',
-    'stripeLatestBillingEventCreatedAt DateTime? @map("stripe_latest_billing_event_created_at")',
-    'stripeLatestBillingEventIdEncrypted String? @map("stripe_latest_billing_event_id_encrypted")',
-    'stripeLatestCheckoutSessionIdEncrypted String? @map("stripe_latest_checkout_session_id_encrypted")',
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
   ],
@@ -55,7 +52,6 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
 
 const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedAiUsage",
-  "HostedBillingCheckout",
   "HostedInvite",
   "HostedLinqDailyState",
   "HostedMember",

@@ -434,17 +434,6 @@ describe("hosted-member-store", () => {
             value: "cus_123",
           }),
           stripeCustomerLookupKey: "hbidx:stripe-customer:v1:abc123",
-          stripeLatestBillingEventCreatedAt: null,
-          stripeLatestBillingEventIdEncrypted: encryptHostedWebNullableString({
-            field: "hosted-member-billing-ref.stripe-latest-billing-event-id",
-            memberId: "member_123",
-            value: "evt_123",
-          }),
-          stripeLatestCheckoutSessionIdEncrypted: encryptHostedWebNullableString({
-            field: "hosted-member-billing-ref.stripe-latest-checkout-session-id",
-            memberId: "member_123",
-            value: "cs_123",
-          }),
           stripeSubscriptionIdEncrypted: encryptHostedWebNullableString({
             field: "hosted-member-billing-ref.stripe-subscription-id",
             memberId: "member_123",
@@ -463,9 +452,6 @@ describe("hosted-member-store", () => {
     ).resolves.toEqual({
       memberId: "member_123",
       stripeCustomerId: "cus_123",
-      stripeLatestBillingEventCreatedAt: null,
-      stripeLatestBillingEventId: "evt_123",
-      stripeLatestCheckoutSessionId: "cs_123",
       stripeSubscriptionId: "sub_123",
     });
   });
@@ -529,17 +515,6 @@ describe("hosted-member-store", () => {
         value: "cus_123",
       }),
       stripeCustomerLookupKey: "hbidx:stripe-customer:v1:abc123",
-      stripeLatestBillingEventCreatedAt: null,
-      stripeLatestBillingEventIdEncrypted: encryptHostedWebNullableString({
-        field: "hosted-member-billing-ref.stripe-latest-billing-event-id",
-        memberId: "member_123",
-        value: "evt_123",
-      }),
-      stripeLatestCheckoutSessionIdEncrypted: encryptHostedWebNullableString({
-        field: "hosted-member-billing-ref.stripe-latest-checkout-session-id",
-        memberId: "member_123",
-        value: "cs_123",
-      }),
       stripeSubscriptionIdEncrypted: encryptHostedWebNullableString({
         field: "hosted-member-billing-ref.stripe-subscription-id",
         memberId: "member_123",
@@ -558,16 +533,11 @@ describe("hosted-member-store", () => {
         memberId: "member_123",
         prisma,
         stripeCustomerId: "cus_123",
-        stripeLatestBillingEventId: "evt_123",
-        stripeLatestCheckoutSessionId: "cs_123",
         stripeSubscriptionId: "sub_123",
       }),
     ).resolves.toEqual({
       memberId: "member_123",
       stripeCustomerId: "cus_123",
-      stripeLatestBillingEventCreatedAt: null,
-      stripeLatestBillingEventId: "evt_123",
-      stripeLatestCheckoutSessionId: "cs_123",
       stripeSubscriptionId: "sub_123",
     });
 
@@ -579,17 +549,12 @@ describe("hosted-member-store", () => {
         memberId: "member_123",
         stripeCustomerIdEncrypted: expect.stringMatching(/^hbds:/u),
         stripeCustomerLookupKey: expect.stringMatching(/^hbidx:stripe-customer:v1:/u),
-        stripeLatestBillingEventCreatedAt: null,
-        stripeLatestBillingEventIdEncrypted: expect.stringMatching(/^hbds:/u),
-        stripeLatestCheckoutSessionIdEncrypted: expect.stringMatching(/^hbds:/u),
         stripeSubscriptionIdEncrypted: expect.stringMatching(/^hbds:/u),
         stripeSubscriptionLookupKey: expect.stringMatching(/^hbidx:stripe-subscription:v1:/u),
       },
       update: {
         stripeCustomerIdEncrypted: expect.stringMatching(/^hbds:/u),
         stripeCustomerLookupKey: expect.stringMatching(/^hbidx:stripe-customer:v1:/u),
-        stripeLatestBillingEventIdEncrypted: expect.stringMatching(/^hbds:/u),
-        stripeLatestCheckoutSessionIdEncrypted: expect.stringMatching(/^hbds:/u),
         stripeSubscriptionIdEncrypted: expect.stringMatching(/^hbds:/u),
         stripeSubscriptionLookupKey: expect.stringMatching(/^hbidx:stripe-subscription:v1:/u),
       },
@@ -622,9 +587,6 @@ describe("hosted-member-store", () => {
         memberId: "member_123",
         stripeCustomerIdEncrypted: expect.stringMatching(/^hbds:/u),
         stripeCustomerLookupKey: expect.stringMatching(/^hbidx:stripe-customer:v1:/u),
-        stripeLatestBillingEventCreatedAt: null,
-        stripeLatestBillingEventIdEncrypted: null,
-        stripeLatestCheckoutSessionIdEncrypted: null,
         stripeSubscriptionIdEncrypted: null,
         stripeSubscriptionLookupKey: null,
       },
@@ -644,9 +606,6 @@ describe("hosted-member-store", () => {
           memberId: "member_123",
           stripeCustomerIdEncrypted: null,
           stripeCustomerLookupKey: null,
-          stripeLatestBillingEventCreatedAt: new Date("2026-04-07T00:00:00.000Z"),
-          stripeLatestBillingEventIdEncrypted: "hbds:v1:existing-event",
-          stripeLatestCheckoutSessionIdEncrypted: "hbds:v1:existing-checkout",
           stripeSubscriptionIdEncrypted: "hbds:v1:existing-subscription",
           stripeSubscriptionLookupKey: "hbidx:stripe-subscription:v1:existing",
         }),
@@ -668,8 +627,6 @@ describe("hosted-member-store", () => {
         stripeCustomerLookupKey: expect.stringMatching(/^hbidx:stripe-customer:v1:/u),
       },
     }));
-    expect(upsert.mock.calls[0]?.[0]?.update).not.toHaveProperty("stripeLatestBillingEventIdEncrypted");
-    expect(upsert.mock.calls[0]?.[0]?.update).not.toHaveProperty("stripeLatestCheckoutSessionIdEncrypted");
     expect(upsert.mock.calls[0]?.[0]?.update).not.toHaveProperty("stripeSubscriptionIdEncrypted");
   });
 
@@ -686,17 +643,6 @@ describe("hosted-member-store", () => {
               value: "cus_123",
             }),
             stripeCustomerLookupKey: "hbidx:stripe-customer:v1:abc123",
-            stripeLatestBillingEventCreatedAt: null,
-            stripeLatestBillingEventIdEncrypted: encryptHostedWebNullableString({
-              field: "hosted-member-billing-ref.stripe-latest-billing-event-id",
-              memberId: "member_123",
-              value: "evt_123",
-            }),
-            stripeLatestCheckoutSessionIdEncrypted: encryptHostedWebNullableString({
-              field: "hosted-member-billing-ref.stripe-latest-checkout-session-id",
-              memberId: "member_123",
-              value: "cs_123",
-            }),
             stripeSubscriptionIdEncrypted: encryptHostedWebNullableString({
               field: "hosted-member-billing-ref.stripe-subscription-id",
               memberId: "member_123",
@@ -759,9 +705,6 @@ describe("hosted-member-store", () => {
       privyUserId: "did:privy:user_123",
       suspendedAt: null,
       stripeCustomerId: "cus_123",
-      stripeLatestBillingEventCreatedAt: null,
-      stripeLatestBillingEventId: "evt_123",
-      stripeLatestCheckoutSessionId: "cs_123",
       stripeSubscriptionId: "sub_123",
       telegramUserLookupKey: "tg_user_123",
       updatedAt: new Date("2026-04-06T00:00:00.000Z"),
