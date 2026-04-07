@@ -1,15 +1,12 @@
 import { assertContract, sharePackSchema } from "@murphai/contracts";
+import { parseHostedExecutionDeviceSyncRuntimeSnapshotResponse as parseOwnedHostedExecutionDeviceSyncRuntimeSnapshotResponse } from "@murphai/device-syncd/hosted-runtime";
 import { parseHostedExecutionBundleRef as parseRuntimeHostedExecutionBundleRef } from "@murphai/runtime-state";
 
 import type {
   HostedExecutionAssistantCronTickEvent,
   HostedExecutionBundleRef,
   HostedExecutionDeviceSyncJobHint,
-  HostedExecutionDeviceSyncRuntimeConnectionSnapshot,
-  HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot,
-  HostedExecutionDeviceSyncRuntimeLocalStateSnapshot,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
-  HostedExecutionDeviceSyncRuntimeTokenBundle,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionDispatchResult,
   HostedExecutionDispatchRequest,
@@ -461,110 +458,7 @@ export function parseHostedExecutionSharePack(value: unknown): SharePack {
 export function parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
   value: unknown,
 ): HostedExecutionDeviceSyncRuntimeSnapshotResponse {
-  const record = requireObject(value, "Hosted device-sync runtime snapshot response");
-
-  return {
-    connections: requireArray(
-      record.connections,
-      "Hosted device-sync runtime snapshot response connections",
-    ).map((entry, index) => parseHostedExecutionDeviceSyncRuntimeConnectionSnapshot(entry, index)),
-    generatedAt: requireString(
-      record.generatedAt,
-      "Hosted device-sync runtime snapshot response generatedAt",
-    ),
-    userId: requireString(record.userId, "Hosted device-sync runtime snapshot response userId"),
-  };
-}
-
-function parseHostedExecutionDeviceSyncRuntimeConnectionSnapshot(
-  value: unknown,
-  index: number,
-): HostedExecutionDeviceSyncRuntimeConnectionSnapshot {
-  const record = requireObject(
-    value,
-    `Hosted device-sync runtime snapshot response connections[${index}]`,
-  );
-
-  return {
-    connection: parseHostedExecutionDeviceSyncRuntimeConnection(
-      record.connection,
-      `Hosted device-sync runtime snapshot response connections[${index}].connection`,
-    ),
-    localState: parseHostedExecutionDeviceSyncRuntimeLocalState(
-      record.localState,
-      `Hosted device-sync runtime snapshot response connections[${index}].localState`,
-    ),
-    tokenBundle: parseHostedExecutionDeviceSyncRuntimeTokenBundle(
-      record.tokenBundle,
-      `Hosted device-sync runtime snapshot response connections[${index}].tokenBundle`,
-    ),
-  };
-}
-
-function parseHostedExecutionDeviceSyncRuntimeConnection(
-  value: unknown,
-  label: string,
-): HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot {
-  const record = requireObject(value, label);
-  const status = requireString(record.status, `${label}.status`);
-
-  if (status !== "active" && status !== "reauthorization_required" && status !== "disconnected") {
-    throw new TypeError(`${label}.status must be an active, reauthorization_required, or disconnected status.`);
-  }
-
-  return {
-    accessTokenExpiresAt: readNullableIsoTimestamp(record.accessTokenExpiresAt, `${label}.accessTokenExpiresAt`),
-    connectedAt: requireIsoTimestamp(record.connectedAt, `${label}.connectedAt`),
-    createdAt: requireIsoTimestamp(record.createdAt, `${label}.createdAt`),
-    displayName: readNullableString(record.displayName, `${label}.displayName`),
-    externalAccountId: requireString(record.externalAccountId, `${label}.externalAccountId`),
-    id: requireString(record.id, `${label}.id`),
-    metadata: sanitizeHostedExecutionDeviceSyncMetadata(
-      requireObject(record.metadata, `${label}.metadata`),
-    ),
-    provider: requireString(record.provider, `${label}.provider`),
-    scopes: requireStringArray(record.scopes, `${label}.scopes`),
-    status,
-    ...(record.updatedAt === undefined
-      ? {}
-      : { updatedAt: readNullableIsoTimestamp(record.updatedAt, `${label}.updatedAt`) ?? undefined }),
-  };
-}
-
-function parseHostedExecutionDeviceSyncRuntimeLocalState(
-  value: unknown,
-  label: string,
-): HostedExecutionDeviceSyncRuntimeLocalStateSnapshot {
-  const record = requireObject(value, label);
-
-  return {
-    lastErrorCode: readNullableStringValue(record.lastErrorCode, `${label}.lastErrorCode`),
-    lastErrorMessage: readNullableStringValue(record.lastErrorMessage, `${label}.lastErrorMessage`),
-    lastSyncCompletedAt: readNullableIsoTimestamp(record.lastSyncCompletedAt, `${label}.lastSyncCompletedAt`),
-    lastSyncErrorAt: readNullableIsoTimestamp(record.lastSyncErrorAt, `${label}.lastSyncErrorAt`),
-    lastSyncStartedAt: readNullableIsoTimestamp(record.lastSyncStartedAt, `${label}.lastSyncStartedAt`),
-    lastWebhookAt: readNullableIsoTimestamp(record.lastWebhookAt, `${label}.lastWebhookAt`),
-    nextReconcileAt: readNullableIsoTimestamp(record.nextReconcileAt, `${label}.nextReconcileAt`),
-  };
-}
-
-function parseHostedExecutionDeviceSyncRuntimeTokenBundle(
-  value: unknown,
-  label: string,
-): HostedExecutionDeviceSyncRuntimeTokenBundle | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  const record = requireObject(value, label);
-
-  return {
-    accessToken: requireString(record.accessToken, `${label}.accessToken`),
-    accessTokenExpiresAt: readNullableIsoTimestamp(record.accessTokenExpiresAt, `${label}.accessTokenExpiresAt`),
-    keyVersion: requireString(record.keyVersion, `${label}.keyVersion`),
-    refreshToken: readNullableString(record.refreshToken, `${label}.refreshToken`),
-    tokenVersion: requirePositiveInteger(record.tokenVersion, `${label}.tokenVersion`),
-  };
+  return parseOwnedHostedExecutionDeviceSyncRuntimeSnapshotResponse(value);
 }
 
 function parseHostedExecutionEventDispatchState(
@@ -782,69 +676,7 @@ function requireObject(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-const HOSTED_EXECUTION_DEVICE_SYNC_METADATA_MAX_ENTRIES = 16;
-const HOSTED_EXECUTION_DEVICE_SYNC_METADATA_MAX_KEY_LENGTH = 64;
-const HOSTED_EXECUTION_DEVICE_SYNC_METADATA_MAX_STRING_LENGTH = 256;
-const HOSTED_EXECUTION_DEVICE_SYNC_METADATA_BLOCKED_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 const ISO_8601_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
-
-type HostedExecutionDeviceSyncMetadataScalar = string | number | boolean | null;
-
-function sanitizeHostedExecutionDeviceSyncMetadataValue(
-  value: unknown,
-): HostedExecutionDeviceSyncMetadataScalar | undefined {
-  if (value === null) {
-    return null;
-  }
-
-  if (typeof value === "string") {
-    return value.length <= HOSTED_EXECUTION_DEVICE_SYNC_METADATA_MAX_STRING_LENGTH
-      ? value
-      : undefined;
-  }
-
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : undefined;
-  }
-
-  if (typeof value === "boolean") {
-    return value;
-  }
-
-  return undefined;
-}
-
-function sanitizeHostedExecutionDeviceSyncMetadata(
-  value: Record<string, unknown>,
-): Record<string, HostedExecutionDeviceSyncMetadataScalar> {
-  const sanitized: Record<string, HostedExecutionDeviceSyncMetadataScalar> = {};
-
-  for (const [rawKey, rawValue] of Object.entries(value)) {
-    if (Object.keys(sanitized).length >= HOSTED_EXECUTION_DEVICE_SYNC_METADATA_MAX_ENTRIES) {
-      break;
-    }
-
-    const key = rawKey.trim();
-
-    if (
-      !key
-      || key.length > HOSTED_EXECUTION_DEVICE_SYNC_METADATA_MAX_KEY_LENGTH
-      || HOSTED_EXECUTION_DEVICE_SYNC_METADATA_BLOCKED_KEYS.has(key)
-    ) {
-      continue;
-    }
-
-    const normalizedValue = sanitizeHostedExecutionDeviceSyncMetadataValue(rawValue);
-
-    if (normalizedValue === undefined) {
-      continue;
-    }
-
-    sanitized[key] = normalizedValue;
-  }
-
-  return sanitized;
-}
 
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {

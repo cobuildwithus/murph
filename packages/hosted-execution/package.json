@@ -62,9 +62,11 @@
   },
   "dependencies": {
     "@murphai/contracts": "workspace:*",
+    "@murphai/device-syncd": "workspace:*",
     "@murphai/runtime-state": "workspace:*"
   },
   "bundleDependencies": [
+    "@murphai/device-syncd",
     "@murphai/runtime-state"
   ]
 }
