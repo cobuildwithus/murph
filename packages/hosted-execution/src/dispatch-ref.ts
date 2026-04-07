@@ -11,9 +11,6 @@ const HOSTED_EXECUTION_EVENT_KIND_SET = new Set<HostedExecutionEventKind>(HOSTED
 const HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KIND_SET = new Set<HostedExecutionEventKind>(
   HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KINDS,
 );
-const HOSTED_EXECUTION_LEGACY_REFERENCE_OUTBOX_EVENT_KIND_SET = new Set<HostedExecutionEventKind>([
-  "vault.share.accepted",
-]);
 const HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION = "murph.execution-outbox.v2";
 const HOSTED_EXECUTION_DISPATCH_REF_KEYS = new Set([
   "eventId",
@@ -76,10 +73,7 @@ export function readHostedExecutionDispatchRef(
 function readHostedExecutionEventKind(value: unknown): HostedExecutionEventKind | null {
   return typeof value === "string"
     && HOSTED_EXECUTION_EVENT_KIND_SET.has(value as HostedExecutionEventKind)
-    && (
-      HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KIND_SET.has(value as HostedExecutionEventKind)
-      || HOSTED_EXECUTION_LEGACY_REFERENCE_OUTBOX_EVENT_KIND_SET.has(value as HostedExecutionEventKind)
-    )
+    && HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KIND_SET.has(value as HostedExecutionEventKind)
     ? value as HostedExecutionEventKind
     : null;
 }
