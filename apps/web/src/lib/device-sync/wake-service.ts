@@ -40,7 +40,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   connection: PublicDeviceSyncAccount;
   warning?: { code: string; message: string };
 }> {
-  const existing = await input.store.getConnectionForUser(input.userId, input.connectionId);
+  const existing = await input.store.getRuntimeConnectionForUser(input.userId, input.connectionId);
 
   if (!existing) {
     throw deviceSyncError({
@@ -141,7 +141,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     });
   }
 
-  const connection = await input.store.getConnectionForUser(input.userId, input.connectionId);
+  const connection = await input.store.getRuntimeConnectionForUser(input.userId, input.connectionId);
 
   if (!connection || connection.status !== "disconnected") {
     throw deviceSyncError({

@@ -482,7 +482,7 @@ export class HostedDeviceSyncAgentSessionService {
   }
 
   private async requireOwnedConnection(userId: string, connectionId: string): Promise<PublicDeviceSyncAccount> {
-    const connection = await this.store.getConnectionForUser(userId, connectionId);
+    const connection = await this.store.getRuntimeConnectionForUser(userId, connectionId);
 
     if (!connection) {
       throw deviceSyncError({

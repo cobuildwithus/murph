@@ -36,7 +36,7 @@ Responsibilities:
 - OAuth start/callback routes
 - public webhook routes
 - provider account ownership mapping
-- metadata-only Postgres connection state plus token-audit history
+- durable Postgres-owned connection metadata plus sparse signal/token-audit history for ordinary hosted-web reads
 - Cloudflare-owned encrypted token escrow under the user root key
 - webhook subscription management where needed
 - minimal durable control state such as OAuth sessions, webhook traces, pending sync signals, disconnect state, and local-agent pairing state
@@ -111,12 +111,7 @@ Recommended tables:
 - `provider` (`whoop` | `oura`)
 - `external_account_id`
 - `display_name`
-- `status` (`active` | `reauthorization_required` | `disconnected`)
-- `scopes_json`
 - `connected_at`
-- `access_token_expires_at`
-- `next_sync_hint_at` or latest hosted signal timestamp
-- `metadata_json` for non-canonical provider identity details
 - `created_at`, `updated_at`
 
 #### `device_token_audit`
@@ -132,7 +127,7 @@ Recommended tables:
 - `metadata_json`
 - `created_at`
 
-Keep public connection metadata and audit history in Postgres. Do not store decryptable provider tokens there.
+Keep durable connection identity/mapping rows in Postgres. If hosted-web needs status hints without live runtime reads, derive or mirror a stale summary from durable hosted signals there instead of calling Cloudflare on ordinary settings reads. Do not store decryptable provider tokens there.
 
 #### Cloudflare device-sync runtime store
 - per-user encrypted runtime snapshot under the user root key
@@ -228,6 +223,8 @@ These are internet-facing and provider-facing only.
 These are the only browser-facing wearable-management routes.
 
 They rely on the hosted onboarding Privy identity-token flow plus the hosted onboarding `Origin` checks, not the signed browser-assertion contract used by the lower-level bridge routes.
+
+Ordinary reads on these routes should come from durable hosted-web metadata in Postgres, optionally enriched by stale or mirrored signal summaries. Live Cloudflare runtime inspection belongs only on explicit operational routes and internal runtime endpoints.
 
 - `GET /api/settings/device-sync`
 - `GET /api/settings/device-sync/connections/:connectionId/status`

@@ -83,10 +83,10 @@ export class HostedDeviceSyncWebhookAdminService {
     },
   ): Promise<DeviceSyncProvider[]> {
     const connections = input.connectionId
-      ? [await this.context.store.getConnectionForUser(userId, input.connectionId)].filter(
+      ? [await this.context.store.getRuntimeConnectionForUser(userId, input.connectionId)].filter(
           (connection): connection is PublicDeviceSyncAccount => connection !== null,
         )
-      : await this.context.store.listConnectionsForUser(userId);
+      : await this.context.store.listRuntimeConnectionsForUser(userId);
     const providerNames = selectHostedWebhookAdminProviderNames({
       connections,
       provider: input.provider ?? null,
