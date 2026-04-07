@@ -329,7 +329,7 @@ describe("hosted-onboarding member-service barrel", () => {
 });
 
 describe("prepareHostedInvitePhoneCode", () => {
-  it("returns the stored signup phone and records the send timestamp on the local identity row", async () => {
+  it("returns the stored signup phone and records only the transient send attempt on the local identity row", async () => {
     const hostedMemberIdentity = {
       findUnique: vi.fn().mockResolvedValue(makeIdentityRecord({
         memberId: "member_123",
@@ -363,7 +363,6 @@ describe("prepareHostedInvitePhoneCode", () => {
       data: {
         signupPhoneCodeSendAttemptId: expect.stringMatching(/^hbpc_/u),
         signupPhoneCodeSendAttemptStartedAt: NOW,
-        signupPhoneCodeSentAt: NOW,
       },
     });
   });
@@ -433,7 +432,7 @@ describe("confirmHostedInvitePhoneCode", () => {
         memberId: "member_123",
         signupPhoneCodeSendAttemptId: "hbpc_confirm",
         signupPhoneCodeSendAttemptStartedAt: NOW,
-        signupPhoneCodeSentAt: NOW,
+        signupPhoneCodeSentAt: null,
         signupPhoneNumber: "+15551234567",
       })),
       update: vi.fn().mockResolvedValue({}),
@@ -464,6 +463,7 @@ describe("confirmHostedInvitePhoneCode", () => {
       data: {
         signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null,
+        signupPhoneCodeSentAt: new Date("2026-04-07T01:00:08.000Z"),
       },
     });
   });
@@ -480,7 +480,7 @@ describe("confirmHostedInvitePhoneCode", () => {
           memberId: "member_123",
           signupPhoneCodeSendAttemptId: "hbpc_current",
           signupPhoneCodeSendAttemptStartedAt: NOW,
-          signupPhoneCodeSentAt: NOW,
+          signupPhoneCodeSentAt: null,
           signupPhoneNumber: "+15551234567",
         })),
         update,
@@ -503,13 +503,13 @@ describe("confirmHostedInvitePhoneCode", () => {
 });
 
 describe("abortHostedInvitePhoneCode", () => {
-  it("clears the cooldown and pending attempt after a failed Privy send", async () => {
+  it("clears only the pending attempt after a failed Privy send", async () => {
     const hostedMemberIdentity = {
       findUnique: vi.fn().mockResolvedValue(makeIdentityRecord({
         memberId: "member_123",
         signupPhoneCodeSendAttemptId: "hbpc_abort",
         signupPhoneCodeSendAttemptStartedAt: NOW,
-        signupPhoneCodeSentAt: NOW,
+        signupPhoneCodeSentAt: null,
         signupPhoneNumber: "+15551234567",
       })),
       update: vi.fn().mockResolvedValue({}),
@@ -540,7 +540,6 @@ describe("abortHostedInvitePhoneCode", () => {
       data: {
         signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null,
-        signupPhoneCodeSentAt: null,
       },
     });
   });
@@ -557,7 +556,7 @@ describe("abortHostedInvitePhoneCode", () => {
           memberId: "member_123",
           signupPhoneCodeSendAttemptId: "hbpc_current",
           signupPhoneCodeSendAttemptStartedAt: NOW,
-          signupPhoneCodeSentAt: NOW,
+          signupPhoneCodeSentAt: null,
           signupPhoneNumber: "+15551234567",
         })),
         update,
