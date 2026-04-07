@@ -3,7 +3,6 @@ import { Cli, z } from "incur";
 import {
   memoryDocumentSnapshotSchema,
   memoryRecordSchema,
-  memorySearchHitSchema,
   memorySectionSchema,
   type MemorySection,
 } from "@murphai/contracts";
@@ -11,7 +10,6 @@ import {
   forgetMemory,
   getMemoryRecord,
   readMemoryDocument,
-  searchMemory,
   upsertMemory,
 } from "@murphai/core";
 
@@ -24,22 +22,10 @@ const memoryUpsertOptionsSchema = vaultOptionSchema.extend({
   memoryId: z.string().min(1).optional().describe("Optional existing memory id to update."),
 });
 
-const memorySearchOptionsSchema = vaultOptionSchema.extend({
-  section: memorySectionSchema.optional().describe("Optional section filter."),
-  limit: z.number().int().positive().max(100).default(25),
-});
-
 const memoryShowResultSchema = z.object({
   vault: z.string().min(1),
   document: memoryDocumentSnapshotSchema,
   memory: memoryRecordSchema.nullable(),
-});
-
-const memorySearchResultSchema = z.object({
-  vault: z.string().min(1),
-  query: z.string().nullable(),
-  section: memorySectionSchema.nullable(),
-  results: z.array(memorySearchHitSchema),
 });
 
 const memoryUpsertResultSchema = z.object({
@@ -75,28 +61,6 @@ export function registerMemoryCommands(cli: Cli.Cli) {
         vault: options.vault,
         document,
         memory,
-      };
-    },
-  });
-
-  memory.command("search", {
-    description: "Search canonical memory records by text or section.",
-    args: z.object({
-      text: z.string().min(1).optional(),
-    }),
-    options: memorySearchOptionsSchema,
-    output: memorySearchResultSchema,
-    async run({ args, options }) {
-      const results = await searchMemory(options.vault, {
-        limit: options.limit,
-        query: args.text ?? null,
-        section: options.section ?? null,
-      });
-      return {
-        vault: options.vault,
-        query: args.text ?? null,
-        section: options.section ?? null,
-        results,
       };
     },
   });

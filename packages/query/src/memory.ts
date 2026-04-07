@@ -7,18 +7,13 @@ import {
   memoryDocumentRelativePath,
   parseMemoryDocument,
   renderMemoryDocument,
-  searchMemoryRecords,
   type MemoryDocumentSnapshot,
   type MemoryRecord,
-  type MemorySearchHit,
-  type SearchMemoryRecordsInput,
 } from "@murphai/contracts";
 
 export type {
   MemoryDocumentSnapshot,
   MemoryRecord,
-  MemorySearchHit,
-  SearchMemoryRecordsInput,
 } from "@murphai/contracts";
 
 export async function readMemoryDocument(
@@ -62,14 +57,6 @@ export async function getMemoryRecord(
 ): Promise<MemoryRecord | null> {
   const snapshot = await readMemoryDocument(vaultRoot);
   return snapshot.records.find((record) => record.id === recordId) ?? null;
-}
-
-export async function searchMemory(
-  vaultRoot: string,
-  input: SearchMemoryRecordsInput,
-): Promise<MemorySearchHit[]> {
-  const snapshot = await readMemoryDocument(vaultRoot);
-  return searchMemoryRecords(snapshot, input);
 }
 
 export async function buildMemoryReadPromptBlock(

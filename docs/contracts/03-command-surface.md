@@ -46,7 +46,6 @@ vault-cli stop --vault <path> [--request-id <id>]
 vault-cli assistant session list --vault <path> [--request-id <id>]
 vault-cli assistant session show <sessionId> --vault <path> [--request-id <id>]
 vault-cli memory show [memoryId] --vault <path>
-vault-cli memory search [text] --vault <path> [--section <section>] [--limit <n>]
 vault-cli memory upsert <text> --vault <path> --section <section> [--memoryId <id>]
 vault-cli memory forget <memoryId> --vault <path>
 vault-cli automation scaffold --vault <path>
@@ -215,7 +214,7 @@ The command surface is organized around reusable capability bundles, not a paylo
 - `audit` is a readable noun with `tail` as its stream-style follow-up.
 - `inbox` is a runtime-control noun, including attachment inspection, deterministic promotion flows, and audited model-routing helpers.
 - `assistant` is a provider-backed orchestration noun for local chat turns, outbound delivery, session inspection, runtime diagnostics, and always-on inbox triage; it stores only runtime metadata under `vault/.runtime/operations/assistant/**`, uses explicit conversation bindings for session reuse, can opt into self-authored auto-reply plus age-based session rollover for dedicated self-chat threads, treats `--deliveryTarget` as a one-send override, only fires due canonical automations while `assistant run` is active for the vault, and delegates canonical promotions back through inbox/core boundaries.
-- `memory` is a canonical product noun backed by `bank/memory.md`.
+- `memory` is a canonical product noun backed by the single curated `bank/memory.md` document; operators inspect the whole document with `show` and mutate individual records with `upsert` or `forget`.
 - `automation` is a canonical product noun backed by `bank/automations/*.md`.
 - Top-level `chat` is a shorthand alias for `assistant chat`; it shares the same prompt/options/output contract so installed `murph chat` discovery stays truthful.
 - Top-level `status` is a shorthand alias for `assistant status`; it shares the same option/output contract so installed `murph status` discovery stays truthful.

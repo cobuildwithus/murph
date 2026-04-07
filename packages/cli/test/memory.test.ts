@@ -10,7 +10,6 @@ import {
   memoryDocumentRelativePath,
   parseMemoryDocument,
   renderMemoryDocument,
-  searchMemoryRecords,
   upsertMemoryRecord,
 } from "@murphai/contracts";
 import {
@@ -19,10 +18,7 @@ import {
   resolveMemoryDocumentPath,
   upsertMemory,
 } from "@murphai/core";
-import {
-  readMemoryDocument as readMemoryDocumentFromQuery,
-  searchMemory as searchMemoryFromQuery,
-} from "@murphai/query";
+import { readMemoryDocument as readMemoryDocumentFromQuery } from "@murphai/query";
 
 import { createTempVaultContext } from "./cli-test-helpers.js";
 import { registerMemoryCommands } from "../src/commands/memory.js";
@@ -68,9 +64,6 @@ test("memory document renders and parses as one canonical markdown file", () => 
   const prompt = buildMemoryPromptBlock(parsed);
   assert.match(prompt ?? "", /Identity:/u);
   assert.match(prompt ?? "", /Preferences:/u);
-
-  const searchHits = searchMemoryRecords(parsed, { query: "Sam" });
-  assert.equal(searchHits[0]?.text, "Call the user Sam.");
 });
 
 test("core and query agree on the canonical bank/memory.md file", async () => {
@@ -95,12 +88,6 @@ test("core and query agree on the canonical bank/memory.md file", async () => {
   assert.equal(coreSnapshot.records.length, 1);
   assert.equal(querySnapshot.records.length, 1);
 
-  const queryHits = await searchMemoryFromQuery(vaultRoot, {
-    query: "cutover",
-    limit: 10,
-  });
-  assert.equal(queryHits[0]?.text, "Working on the memory cutover.");
-
   const forgotten = await forgetMemory(vaultRoot, {
     recordId: write.record.id,
   });
@@ -116,4 +103,27 @@ test("memory command module registers without throwing", () => {
 
   registerMemoryCommands(cli);
   assert.ok(cli);
+});
+
+test("memory command module does not register a search subcommand", async () => {
+  const cli = Cli.create("vault-cli", {
+    description: "memory test cli",
+    version: "0.0.0-test",
+  });
+  const output: string[] = [];
+  let exitCode: number | null = null;
+
+  registerMemoryCommands(cli);
+  await cli.serve(["memory", "search", "--schema", "--format", "json"], {
+    env: process.env,
+    exit(code) {
+      exitCode = code;
+    },
+    stdout(chunk) {
+      output.push(chunk);
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.match(output.join("").trim(), /'search' is not a command for 'vault-cli memory'/u);
 });

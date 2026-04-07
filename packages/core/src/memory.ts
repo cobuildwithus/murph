@@ -7,14 +7,11 @@ import {
   memoryDocumentRelativePath,
   parseMemoryDocument,
   renderMemoryDocument,
-  searchMemoryRecords,
   type ForgetMemoryRecordInput,
   type MemoryDocument,
   type MemoryDocumentSnapshot,
   type MemoryRecord,
-  type MemorySearchHit,
   type MemorySection,
-  type SearchMemoryRecordsInput,
   type UpsertMemoryRecordInput,
   upsertMemoryRecord,
 } from "@murphai/contracts";
@@ -32,9 +29,7 @@ export type {
   MemoryDocument,
   MemoryDocumentSnapshot,
   MemoryRecord,
-  MemorySearchHit,
   MemorySection,
-  SearchMemoryRecordsInput,
   UpsertMemoryRecordInput,
 } from "@murphai/contracts";
 
@@ -138,11 +133,4 @@ export async function forgetMemory(
 
 export async function buildMemoryCorePromptBlock(vaultRoot: string): Promise<string | null> {
   return buildMemoryPromptBlock(await readMemoryDocument(vaultRoot));
-}
-
-export async function searchMemory(
-  vaultRoot: string,
-  input: SearchMemoryRecordsInput,
-): Promise<MemorySearchHit[]> {
-  return searchMemoryRecords(await readMemoryDocument(vaultRoot), input);
 }
