@@ -20,9 +20,11 @@ import {
   normalizeHostedWalletAddress,
 } from "./revnet";
 import {
+  createHostedMember,
   findHostedMemberByPhoneLookupKey,
   findHostedMemberByPrivyUserId,
   findHostedMemberByWalletAddress,
+  readHostedMemberCoreState,
   readHostedMemberIdentity,
   upsertHostedMemberIdentity,
   upsertHostedMemberLinqChatBinding,
@@ -59,11 +61,10 @@ export async function ensureHostedMemberForPhone(input: {
     const memberId = generateHostedMemberId();
 
     try {
-      const createdMember = await tx.hostedMember.create({
-        data: {
-          id: memberId,
-          billingStatus: HostedBillingStatus.not_started,
-        },
+      const createdMember = await createHostedMember({
+        billingStatus: HostedBillingStatus.not_started,
+        memberId,
+        prisma: tx,
       });
       await upsertHostedMemberIdentity({
         ...buildHostedMemberPhoneIdentity(input.phoneNumber),
@@ -208,11 +209,10 @@ export async function ensureHostedMemberForPrivyIdentity(input: {
     if (!existingMember) {
       const memberId = generateHostedMemberId();
 
-      const createdMember = await tx.hostedMember.create({
-        data: {
-          id: memberId,
-          billingStatus: HostedBillingStatus.not_started,
-        },
+      const createdMember = await createHostedMember({
+        billingStatus: HostedBillingStatus.not_started,
+        memberId,
+        prisma: tx,
       });
       await upsertHostedMemberIdentity({
         ...buildHostedMemberPhoneIdentity(input.identity.phone.number),
@@ -251,10 +251,9 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
     const phoneLookupKey = createHostedPhoneLookupKey(input.identity.phone.number);
     await lockHostedMemberRow(tx, input.member.id);
 
-    const currentMember = await tx.hostedMember.findUnique({
-      where: {
-        id: input.member.id,
-      },
+    const currentMember = await readHostedMemberCoreState({
+      memberId: input.member.id,
+      prisma: tx,
     });
     const currentIdentity = await readHostedMemberIdentity({
       memberId: input.member.id,

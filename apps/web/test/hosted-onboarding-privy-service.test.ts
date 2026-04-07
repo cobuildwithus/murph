@@ -303,6 +303,13 @@ describe("completeHostedPrivyVerification", () => {
       data: expect.objectContaining({
         billingStatus: HostedBillingStatus.not_started,
       }),
+      select: {
+        billingStatus: true,
+        createdAt: true,
+        id: true,
+        suspendedAt: true,
+        updatedAt: true,
+      },
     });
     expect(prisma.hostedInvite.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -534,6 +541,14 @@ describe("completeHostedPrivyVerification", () => {
       hostedMember: {
         create: vi.fn(),
         findUnique: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => {
+          if (where.id === phoneMember.id) {
+            return phoneMember;
+          }
+
+          if (where.id === walletMember.id) {
+            return walletMember;
+          }
+
           if (where.privyUserId) {
             return null;
           }
@@ -542,7 +557,7 @@ describe("completeHostedPrivyVerification", () => {
             return phoneMember;
           }
 
-          if (where.walletAddress) {
+          if (where.walletAddress || where.walletAddressLookupKey) {
             return walletMember;
           }
 

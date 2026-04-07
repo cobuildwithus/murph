@@ -190,6 +190,13 @@ describe("ensureHostedMemberForPhone", () => {
       data: expect.objectContaining({
         billingStatus: "not_started",
       }),
+      select: {
+        billingStatus: true,
+        createdAt: true,
+        id: true,
+        suspendedAt: true,
+        updatedAt: true,
+      },
     });
     expect(identityUpsert).toHaveBeenCalledWith({
       where: {

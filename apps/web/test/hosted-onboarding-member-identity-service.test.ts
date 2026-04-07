@@ -77,6 +77,13 @@ describe("hosted-onboarding member-identity-service", () => {
 
     expect(lockQuery).toHaveBeenCalledTimes(1);
     expect(hostedMember.findUnique).toHaveBeenCalledWith({
+      select: {
+        billingStatus: true,
+        createdAt: true,
+        id: true,
+        suspendedAt: true,
+        updatedAt: true,
+      },
       where: {
         id: "member_123",
       },
