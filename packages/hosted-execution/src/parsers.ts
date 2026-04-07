@@ -294,6 +294,14 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
       return {
         kind,
         linqEvent: requireObject(record.linqEvent, "Hosted execution Linq message linqEvent"),
+        ...(record.linqMessageId === undefined
+          ? {}
+          : {
+              linqMessageId: readOptionalNullableString(
+                record.linqMessageId,
+                "Hosted execution Linq message linqMessageId",
+              ),
+            }),
         phoneLookupKey: requireString(
           record.phoneLookupKey,
           "Hosted execution Linq message phoneLookupKey",

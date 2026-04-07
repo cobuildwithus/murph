@@ -174,6 +174,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         dispatch: expect.objectContaining({
           event: expect.objectContaining({
             kind: "linq.message.received",
+            linqMessageId: "msg_123",
             userId: "member_123",
           }),
           eventId: "evt_123",
@@ -286,6 +287,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         dispatch: expect.objectContaining({
           event: expect.objectContaining({
             kind: "linq.message.received",
+            linqMessageId: "msg_123",
             userId: "member_123",
           }),
           eventId: "evt_123",

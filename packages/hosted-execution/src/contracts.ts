@@ -74,6 +74,7 @@ export interface HostedExecutionFirstContactTarget {
 export interface HostedExecutionLinqMessageReceivedEvent extends HostedExecutionBaseEvent {
   kind: "linq.message.received";
   linqEvent: Record<string, unknown>;
+  linqMessageId?: string | null;
   phoneLookupKey: string;
 }
 
