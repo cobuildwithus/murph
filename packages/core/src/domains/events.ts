@@ -1,14 +1,22 @@
-import type { EventRecord, ExperimentEventRecord } from "@murphai/contracts";
+import type { EventAttachment, EventRecord, ExperimentEventRecord, RawImportKind } from "@murphai/contracts";
 import {
   EVENT_KINDS,
   eventRecordSchema,
 } from "@murphai/contracts";
 
 import { ID_PREFIXES, VAULT_LAYOUT } from "../constants.ts";
-import { buildAttachmentCompatibilityProjections } from "../event-attachments.ts";
+import {
+  buildAttachmentCompatibilityProjections,
+  prepareEventAttachments,
+  stagePreparedEventAttachmentsInBatch,
+  type EventAttachmentOwnerKind,
+  type EventAttachmentSourceInput,
+} from "../event-attachments.ts";
 import { VaultError } from "../errors.ts";
 import { walkVaultFiles } from "../fs.ts";
+import { generateRecordId } from "../ids.ts";
 import { readJsonlRecords, toMonthlyShardRelativePath } from "../jsonl.ts";
+import { runCanonicalWrite } from "../operations/write-batch.ts";
 import { loadVault } from "../vault.ts";
 import {
   buildEventSpineEnvelope,
@@ -101,6 +109,41 @@ export interface DeleteEventResult {
   kind: EventRecord["kind"];
   retainedPaths: string[];
   deleted: true;
+}
+
+type AttachmentBackedPublicEventKind = "activity_session" | "body_measurement";
+type AttachmentBackedEventDraft<K extends AttachmentBackedPublicEventKind> = Omit<EventDraftByKind<K>, "kind">;
+
+interface RawImportOptions {
+  importId?: string;
+  importKind?: RawImportKind;
+  importedAt?: DateInput;
+  source?: string | null;
+  provenance?: Record<string, unknown>;
+}
+
+export interface AddActivitySessionInput {
+  vaultRoot: string;
+  draft: AttachmentBackedEventDraft<"activity_session">;
+  attachments?: readonly EventAttachmentSourceInput[];
+  rawImport?: RawImportOptions;
+}
+
+export interface AddBodyMeasurementInput {
+  vaultRoot: string;
+  draft: AttachmentBackedEventDraft<"body_measurement">;
+  attachments?: readonly EventAttachmentSourceInput[];
+  rawImport?: RawImportOptions;
+}
+
+export interface AddActivitySessionResult extends UpsertEventResult {
+  event: EventRecordByKind<"activity_session">;
+  manifestPath: string | null;
+}
+
+export interface AddBodyMeasurementResult extends UpsertEventResult {
+  event: EventRecordByKind<"body_measurement">;
+  manifestPath: string | null;
 }
 
 const RESERVED_EVENT_KEYS = new Set([
@@ -399,6 +442,253 @@ export function buildPublicEventRecord<K extends PublicWritableEventKind>(
   fallbackTimeZone?: string,
 ): EventRecordByKind<K> {
   return buildTypedEventRecord(draft as PublicEventDraft, fallbackTimeZone) as EventRecordByKind<K>;
+}
+
+function mergeByRelativePath<T extends { relativePath: string }>(
+  existing: readonly T[] | undefined,
+  next: readonly T[] | undefined,
+): T[] | undefined {
+  const merged = new Map<string, T>();
+
+  for (const entry of existing ?? []) {
+    merged.set(entry.relativePath, entry);
+  }
+
+  for (const entry of next ?? []) {
+    merged.set(entry.relativePath, entry);
+  }
+
+  return merged.size > 0 ? [...merged.values()] : undefined;
+}
+
+function mergeStringLists(
+  existing: readonly string[] | undefined,
+  next: readonly string[] | undefined,
+): string[] | undefined {
+  const merged = [...(existing ?? []), ...(next ?? [])]
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+
+  return merged.length > 0 ? [...new Set(merged)] : undefined;
+}
+
+function resolveRawImportSource(
+  source: string | null | undefined,
+  fallbackSource: unknown,
+): string | null {
+  if (source !== undefined) {
+    return normalizeOptionalText(source) ?? null;
+  }
+
+  return normalizeOptionalText(valueAsString(fallbackSource)) ?? "manual";
+}
+
+function resolveRawImportImportedAt(value: DateInput | undefined): string {
+  return normalizeTimestampInput(value) ?? new Date().toISOString();
+}
+
+function ensureSpecializedEventKind(
+  kind: AttachmentBackedPublicEventKind,
+  eventId: string,
+  matchedShards: readonly LoadedEventLedgerShard[],
+): void {
+  const latestMatchedEvent = selectLatestMatchedEvent(matchedShards);
+
+  if (!latestMatchedEvent) {
+    return;
+  }
+
+  if (latestMatchedEvent.record.kind !== kind) {
+    throw new VaultError(
+      "EVENT_KIND_INVALID",
+      `Event "${eventId}" already exists as kind "${latestMatchedEvent.record.kind}" and cannot be rewritten as "${kind}".`,
+    );
+  }
+}
+
+function applyActivitySessionAttachmentProjections(
+  draft: AttachmentBackedEventDraft<"activity_session">,
+  attachments: readonly EventAttachment[],
+): AttachmentBackedEventDraft<"activity_session"> {
+  if (attachments.length === 0) {
+    return draft;
+  }
+
+  const projections = buildAttachmentCompatibilityProjections(attachments);
+  const mergedAttachments = mergeByRelativePath(draft.attachments, attachments);
+  const mergedWorkoutMedia = mergeByRelativePath(draft.workout.media, projections.media);
+  const mergedRawRefs = mergeStringLists(draft.rawRefs, projections.rawRefs);
+
+  return {
+    ...draft,
+    ...(mergedAttachments ? { attachments: mergedAttachments } : {}),
+    ...(mergedRawRefs ? { rawRefs: mergedRawRefs } : {}),
+    workout: {
+      ...draft.workout,
+      ...(mergedWorkoutMedia ? { media: mergedWorkoutMedia } : {}),
+    },
+  };
+}
+
+function applyBodyMeasurementAttachmentProjections(
+  draft: AttachmentBackedEventDraft<"body_measurement">,
+  attachments: readonly EventAttachment[],
+): AttachmentBackedEventDraft<"body_measurement"> {
+  if (attachments.length === 0) {
+    return draft;
+  }
+
+  const projections = buildAttachmentCompatibilityProjections(attachments);
+  const mergedAttachments = mergeByRelativePath(draft.attachments, attachments);
+  const mergedMedia = mergeByRelativePath(draft.media, projections.media);
+  const mergedRawRefs = mergeStringLists(draft.rawRefs, projections.rawRefs);
+
+  return {
+    ...draft,
+    ...(mergedAttachments ? { attachments: mergedAttachments } : {}),
+    ...(mergedRawRefs ? { rawRefs: mergedRawRefs } : {}),
+    ...(mergedMedia ? { media: mergedMedia } : {}),
+  };
+}
+
+export async function addActivitySession(
+  input: AddActivitySessionInput,
+): Promise<AddActivitySessionResult> {
+  const vault = await loadVault({ vaultRoot: input.vaultRoot });
+  const eventId = normalizeDraftEventId(input.draft.id) ?? generateRecordId(ID_PREFIXES.event);
+  const draft: AttachmentBackedEventDraft<"activity_session"> = {
+    ...input.draft,
+    id: eventId,
+  };
+  const matchedShards = await loadEventLedgerShardsById(input.vaultRoot, eventId);
+  ensureSpecializedEventKind("activity_session", eventId, matchedShards);
+  const latestMatchedEvent = selectLatestMatchedEvent(matchedShards);
+  const lifecycle = buildEventSpineLifecycle(
+    latestMatchedEvent ? eventSpineRevision(latestMatchedEvent.record) + 1 : 1,
+  );
+  const preparedAttachments = prepareEventAttachments({
+    ownerKind: "workout",
+    ownerId: eventId,
+    occurredAt: draft.occurredAt,
+    attachments: input.attachments ?? [],
+  });
+
+  return runCanonicalWrite<AddActivitySessionResult>({
+    vaultRoot: input.vaultRoot,
+    operationType: "activity_session_write",
+    summary: `Write activity_session ${eventId}`,
+    occurredAt: draft.occurredAt,
+    mutate: async ({ batch }) => {
+      const stagedAttachments =
+        preparedAttachments.length > 0
+          ? await stagePreparedEventAttachmentsInBatch({
+              batch,
+              attachments: preparedAttachments,
+              importId: input.rawImport?.importId ?? eventId,
+              importKind: input.rawImport?.importKind ?? "workout_batch",
+              importedAt: resolveRawImportImportedAt(input.rawImport?.importedAt),
+              source: resolveRawImportSource(input.rawImport?.source, draft.source),
+              provenance: input.rawImport?.provenance ?? {
+                eventId,
+                family: "workout",
+                mediaCount: preparedAttachments.length,
+              },
+            })
+          : null;
+      const projectedDraft = stagedAttachments
+        ? applyActivitySessionAttachmentProjections(draft, stagedAttachments.attachments)
+        : draft;
+      const eventRecord = buildTypedEventRecord(
+        {
+          kind: "activity_session",
+          ...projectedDraft,
+        },
+        vault.metadata.timezone,
+        lifecycle,
+      ) as EventRecordByKind<"activity_session">;
+      const ledgerFile = toEventLedgerFile(eventRecord.occurredAt);
+
+      await batch.stageJsonlAppend(ledgerFile, `${JSON.stringify(eventRecord)}\n`);
+
+      return {
+        eventId,
+        ledgerFile,
+        created: matchedShards.length === 0,
+        event: eventRecord,
+        manifestPath: stagedAttachments?.manifestPath ?? null,
+      };
+    },
+  });
+}
+
+export async function addBodyMeasurement(
+  input: AddBodyMeasurementInput,
+): Promise<AddBodyMeasurementResult> {
+  const vault = await loadVault({ vaultRoot: input.vaultRoot });
+  const eventId = normalizeDraftEventId(input.draft.id) ?? generateRecordId(ID_PREFIXES.event);
+  const draft: AttachmentBackedEventDraft<"body_measurement"> = {
+    ...input.draft,
+    id: eventId,
+  };
+  const matchedShards = await loadEventLedgerShardsById(input.vaultRoot, eventId);
+  ensureSpecializedEventKind("body_measurement", eventId, matchedShards);
+  const latestMatchedEvent = selectLatestMatchedEvent(matchedShards);
+  const lifecycle = buildEventSpineLifecycle(
+    latestMatchedEvent ? eventSpineRevision(latestMatchedEvent.record) + 1 : 1,
+  );
+  const preparedAttachments = prepareEventAttachments({
+    ownerKind: "measurement",
+    ownerId: eventId,
+    occurredAt: draft.occurredAt,
+    attachments: input.attachments ?? [],
+  });
+
+  return runCanonicalWrite<AddBodyMeasurementResult>({
+    vaultRoot: input.vaultRoot,
+    operationType: "body_measurement_write",
+    summary: `Write body_measurement ${eventId}`,
+    occurredAt: draft.occurredAt,
+    mutate: async ({ batch }) => {
+      const stagedAttachments =
+        preparedAttachments.length > 0
+          ? await stagePreparedEventAttachmentsInBatch({
+              batch,
+              attachments: preparedAttachments,
+              importId: input.rawImport?.importId ?? eventId,
+              importKind: input.rawImport?.importKind ?? "measurement_batch",
+              importedAt: resolveRawImportImportedAt(input.rawImport?.importedAt),
+              source: resolveRawImportSource(input.rawImport?.source, draft.source),
+              provenance: input.rawImport?.provenance ?? {
+                eventId,
+                family: "measurement",
+                mediaCount: preparedAttachments.length,
+              },
+            })
+          : null;
+      const projectedDraft = stagedAttachments
+        ? applyBodyMeasurementAttachmentProjections(draft, stagedAttachments.attachments)
+        : draft;
+      const eventRecord = buildTypedEventRecord(
+        {
+          kind: "body_measurement",
+          ...projectedDraft,
+        },
+        vault.metadata.timezone,
+        lifecycle,
+      ) as EventRecordByKind<"body_measurement">;
+      const ledgerFile = toEventLedgerFile(eventRecord.occurredAt);
+
+      await batch.stageJsonlAppend(ledgerFile, `${JSON.stringify(eventRecord)}\n`);
+
+      return {
+        eventId,
+        ledgerFile,
+        created: matchedShards.length === 0,
+        event: eventRecord,
+        manifestPath: stagedAttachments?.manifestPath ?? null,
+      };
+    },
+  });
 }
 
 export function buildExperimentEventRecord(input: {

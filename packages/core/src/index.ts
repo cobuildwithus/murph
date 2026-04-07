@@ -28,10 +28,17 @@ export {
   stageEventAttachments,
   stagePreparedEventAttachmentsInBatch,
 } from "./event-attachments.ts";
+export type {
+  EventAttachmentOwnerKind,
+  EventAttachmentSourceInput,
+  PreparedEventAttachment,
+} from "./event-attachments.ts";
 export { readJsonlRecords, toMonthlyShardRelativePath } from "./jsonl.ts";
 export { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.ts";
 export { loadVault } from "./vault.ts";
 export {
+  addActivitySession,
+  addBodyMeasurement,
   addMeal,
   applyCanonicalWriteBatch,
   appendBloodTest,
@@ -157,6 +164,10 @@ export {
   buildSymptomEventDraft,
 } from "./domains/events.ts";
 export type {
+  AddActivitySessionInput,
+  AddActivitySessionResult,
+  AddBodyMeasurementInput,
+  AddBodyMeasurementResult,
   EventDraftByKind,
   PublicEventDraft,
   PublicWritableEventKind,
