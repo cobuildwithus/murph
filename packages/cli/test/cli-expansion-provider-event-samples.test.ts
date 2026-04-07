@@ -16,6 +16,7 @@ import { registerRecipeCommands } from '../src/commands/recipe.js'
 import { registerSamplesCommands } from '../src/commands/samples.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { registerWearablesCommands } from '../src/commands/wearables.js'
+import { registerWorkoutCommands } from '../src/commands/workout.js'
 import { createIntegratedVaultServices } from '@murphai/assistant-engine/vault-services'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData } from './cli-test-helpers.js'
@@ -46,6 +47,7 @@ function createSliceCli() {
   registerMealCommands(cli, services)
   registerSamplesCommands(cli, services)
   registerWearablesCommands(cli, services)
+  registerWorkoutCommands(cli, services)
 
   return cli
 }
@@ -189,6 +191,91 @@ test('provider, food, recipe, and event edit/delete schemas expose shared record
   assert.deepEqual(eventEditSchema.options.required, ['vault'])
 
   assert.deepEqual(providerDeleteSchema.options.required, ['vault'])
+})
+
+test('event scaffold keeps activity_session aligned with the canonical nested workout shape', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-event-scaffold-'))
+
+  try {
+    const initResult = await runSliceCli<{ created: boolean }>([
+      'init',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(initResult.ok, true)
+    assert.equal(requireData(initResult).created, true)
+
+    const scaffold = await runSliceCli<{
+      kind: string
+      payload: {
+        activityType?: string
+        durationMinutes?: number
+        workout?: {
+          exercises?: unknown[]
+        }
+      }
+    }>([
+      'event',
+      'scaffold',
+      '--kind',
+      'activity_session',
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(scaffold.ok, true)
+    assert.equal(requireData(scaffold).kind, 'activity_session')
+    assert.equal(requireData(scaffold).payload.activityType, 'walking')
+    assert.equal(requireData(scaffold).payload.durationMinutes, 35)
+    assert.ok(requireData(scaffold).payload.workout)
+    assert.deepEqual(requireData(scaffold).payload.workout?.exercises, [])
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('workout format save rejects structured payloads that omit canonical template detail', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-format-source-'))
+  const payloadPath = path.join(vaultRoot, 'workout-format.json')
+
+  try {
+    const initResult = await runSliceCli<{ created: boolean }>([
+      'init',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(initResult.ok, true)
+    assert.equal(requireData(initResult).created, true)
+
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        title: 'Push Day A',
+        activityType: 'strength-training',
+        durationMinutes: 20,
+        templateText: '20 min strength training. 4 sets of 20 pushups.',
+      }),
+      'utf8',
+    )
+
+    const saved = await runSliceCli([
+      'workout',
+      'format',
+      'save',
+      'ignored-name',
+      'ignored-text',
+      '--input',
+      `@${payloadPath}`,
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(saved.ok, false)
+    assert.equal(saved.error?.code, 'invalid_payload')
+    assert.match(saved.error?.message ?? '', /template/u)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
 })
 
 test('provider/food/recipe/event/samples help uses generic id selectors for read commands', async () => {

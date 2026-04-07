@@ -258,6 +258,13 @@ export function normalizeGarminActivities(
             activityType,
             durationMinutes,
             distanceKm,
+            workout: {
+              sourceApp: "garmin",
+              sourceWorkoutId: activityId,
+              startedAt: occurredAt,
+              sessionNote: `Garmin ${activityLabel}`,
+              exercises: [],
+            },
           }),
         }),
       );

@@ -470,6 +470,9 @@ status: active
 summary: Default garage session.
 activityType: strength-training
 durationMinutes: 40
+template:
+  routineNote: Garage day template.
+  exercises: []
 tags:
   - garage
   - strength
@@ -554,6 +557,51 @@ test(
         invalidSavedFormat.error.message ?? '',
         /Pass --duration <minutes> to record it explicitly/u,
       )
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test(
+  'workout format save rejects structured payloads that omit canonical template detail',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-format-'))
+    const payloadPath = path.join(vaultRoot, 'workout-format.json')
+
+    try {
+      const initResult = await runCli<{ created: boolean }>([
+        'init',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(initResult.ok, true)
+      assert.equal(requireData(initResult).created, true)
+
+      await writeFile(
+        payloadPath,
+        JSON.stringify({
+          title: 'Push Day A',
+          activityType: 'strength-training',
+          durationMinutes: 20,
+          templateText: '20 min strength training. 4 sets of 20 pushups.',
+        }),
+        'utf8',
+      )
+
+      const saved = await runCli([
+        'workout',
+        'format',
+        'save',
+        '--input',
+        `@${payloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(saved.ok, false)
+      assert.equal(saved.error.code, 'invalid_payload')
+      assert.match(saved.error.message ?? '', /template/u)
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }
@@ -997,6 +1045,9 @@ title: Good Day
 status: active
 activityType: strength-training
 durationMinutes: 30
+template:
+  routineNote: Good day template.
+  exercises: []
 templateText: Good day template.
 ---
 # Good Day

@@ -1024,6 +1024,10 @@ test("workout formats use first-class markdown registry reads for repeated sessi
     status: "archived",
     activityType: "running",
     distanceKm: 21.1,
+    template: {
+      routineNote: "Archived race template.",
+      exercises: [],
+    },
     tags: ["race"],
   });
 
