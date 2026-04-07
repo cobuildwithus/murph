@@ -2,7 +2,7 @@ import {
   applyHostedMemberPrivateStatePatch,
   type HostedMemberPrivateState,
   type HostedMemberPrivateStatePatch,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/member-private-state";
 
 import {
   deleteHostedMemberPrivateStateFromHostedExecution,
@@ -95,6 +95,8 @@ function isHostedMemberPrivateStateEmpty(state: HostedMemberPrivateState): boole
   return ![
     state.linqChatId,
     state.privyUserId,
+    state.signupPhoneCodeSentAt,
+    state.signupPhoneNumber,
     state.stripeCustomerId,
     state.stripeLatestBillingEventId,
     state.stripeLatestCheckoutSessionId,

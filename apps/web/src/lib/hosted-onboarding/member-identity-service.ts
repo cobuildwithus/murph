@@ -8,6 +8,7 @@ import {
   readHostedPhoneHint,
 } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
+import { writeHostedMemberPrivateStatePatch } from "./member-private-state";
 import { type HostedPrivyIdentity } from "./privy";
 import {
   generateHostedMemberId,
@@ -34,7 +35,7 @@ export async function ensureHostedMemberForPhone(input: {
   phoneNumber: string;
   prisma: HostedOnboardingPrismaClient;
 }): Promise<HostedMember> {
-  return withHostedOnboardingTransaction(input.prisma, async (tx) => {
+  const member = await withHostedOnboardingTransaction(input.prisma, async (tx) => {
     const phoneLookupKey = createHostedPhoneLookupKey(input.phoneNumber);
 
     if (!phoneLookupKey) {
@@ -91,6 +92,13 @@ export async function ensureHostedMemberForPhone(input: {
       throw error;
     }
   });
+
+  await persistHostedMemberSignupPhoneBestEffort({
+    memberId: member.id,
+    phoneNumber: input.phoneNumber,
+  });
+
+  return member;
 }
 
 async function refreshHostedMemberForPhone(input: {
@@ -200,7 +208,7 @@ export async function ensureHostedMemberForPrivyIdentity(input: {
 }): Promise<HostedMember> {
   assertHostedPrivyWalletAvailableWhenRequired(input.identity);
 
-  return withHostedOnboardingTransaction(input.prisma, async (tx) => {
+  const member = await withHostedOnboardingTransaction(input.prisma, async (tx) => {
     const existingMember = await findHostedMemberForPrivyIdentity({
       identity: input.identity,
       prisma: tx,
@@ -235,6 +243,10 @@ export async function ensureHostedMemberForPrivyIdentity(input: {
       now: input.now,
     });
   });
+
+  await clearHostedMemberSignupPhone(member.id);
+
+  return member;
 }
 
 export async function reconcileHostedPrivyIdentityOnMember(input: {
@@ -247,7 +259,7 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
 }): Promise<HostedMember> {
   assertHostedPrivyWalletAvailableWhenRequired(input.identity);
 
-  return withHostedOnboardingTransaction(input.prisma, async (tx) => {
+  const member = await withHostedOnboardingTransaction(input.prisma, async (tx) => {
     const phoneLookupKey = createHostedPhoneLookupKey(input.identity.phone.number);
     await lockHostedMemberRow(tx, input.member.id);
 
@@ -340,6 +352,10 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
       throw error;
     }
   });
+
+  await clearHostedMemberSignupPhone(member.id);
+
+  return member;
 }
 
 export async function findHostedMemberForPrivyIdentity(input: {
@@ -394,4 +410,35 @@ export async function findHostedMemberForPrivyIdentity(input: {
   }
 
   return matches.values().next().value ?? null;
+}
+
+async function persistHostedMemberSignupPhoneBestEffort(input: {
+  memberId: string;
+  phoneNumber: string;
+}): Promise<void> {
+  try {
+    await writeHostedMemberPrivateStatePatch({
+      memberId: input.memberId,
+      patch: {
+        signupPhoneCodeSentAt: null,
+        signupPhoneNumber: input.phoneNumber,
+      },
+    });
+  } catch {
+    // Manual phone entry remains the fallback if private-state storage is unavailable.
+  }
+}
+
+async function clearHostedMemberSignupPhone(memberId: string): Promise<void> {
+  try {
+    await writeHostedMemberPrivateStatePatch({
+      memberId,
+      patch: {
+        signupPhoneCodeSentAt: null,
+        signupPhoneNumber: null,
+      },
+    });
+  } catch {
+    // Verified signup should not fail just because private-state cleanup is unavailable.
+  }
 }

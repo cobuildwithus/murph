@@ -9,8 +9,12 @@ import type { HostedInviteStatusPayload } from "./types";
 
 import { getPrisma } from "../prisma";
 import { readHostedPhoneHint } from "./contact-privacy";
-import { hostedOnboardingError } from "./errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import { deriveHostedOnboardingStage } from "./lifecycle";
+import {
+  readHostedMemberPrivateState,
+  writeHostedMemberPrivateStatePatch,
+} from "./member-private-state";
 import { ensureHostedMemberForPhone } from "./member-identity-service";
 import { hasHostedPrivyPhoneAuthConfig } from "./privy";
 import {
@@ -24,6 +28,8 @@ import {
   lockHostedMemberRow,
   withHostedOnboardingTransaction,
 } from "./shared";
+
+const HOSTED_INVITE_SEND_CODE_COOLDOWN_MS = 60_000;
 
 export async function getHostedInviteStatus(input: {
   authenticatedMember?: HostedMember | null;
@@ -167,7 +173,7 @@ export function buildHostedInviteUrl(inviteCode: string): string {
 
 export async function requireHostedInviteForAuthentication(
   inviteCode: string,
-  prisma: PrismaClient,
+  prisma: PrismaClient | Prisma.TransactionClient,
   now: Date,
 ) {
   const invite = await findHostedInviteByCode(inviteCode, prisma);
@@ -189,6 +195,59 @@ export async function requireHostedInviteForAuthentication(
   }
 
   return invite;
+}
+
+export async function prepareHostedInvitePhoneCode(input: {
+  inviteCode: string;
+  now?: Date;
+  prisma?: PrismaClient;
+}): Promise<{ phoneNumber: string }> {
+  const prisma = input.prisma ?? getPrisma();
+  const now = input.now ?? new Date();
+  return withHostedOnboardingTransaction(prisma, async (tx) => {
+    const invite = await requireHostedInviteForAuthentication(input.inviteCode, tx, now);
+    await lockHostedMemberRow(tx, invite.memberId);
+
+    const privateState = await readHostedInvitePrivateStateOrThrow(invite.memberId);
+    const signupPhoneNumber = privateState?.signupPhoneNumber ?? null;
+
+    if (!signupPhoneNumber) {
+      throw hostedOnboardingError({
+        code: "SIGNUP_PHONE_UNAVAILABLE",
+        message: "Enter the number that messaged Murph to continue.",
+        httpStatus: 409,
+      });
+    }
+
+    const retryAfterMs = readPhoneCodeRetryAfterMs({
+      now,
+      sentAt: privateState?.signupPhoneCodeSentAt ?? null,
+    });
+
+    if (retryAfterMs > 0) {
+      throw hostedOnboardingError({
+        code: "PHONE_CODE_COOLDOWN",
+        message: "Wait a moment before requesting another code.",
+        httpStatus: 429,
+        retryable: true,
+        details: {
+          retryAfterMs,
+        },
+      });
+    }
+
+    await writeHostedMemberPrivateStatePatch({
+      memberId: invite.memberId,
+      now: now.toISOString(),
+      patch: {
+        signupPhoneCodeSentAt: now.toISOString(),
+      },
+    });
+
+    return {
+      phoneNumber: signupPhoneNumber,
+    };
+  });
 }
 
 export function requireHostedInviteMemberIdentity(
@@ -226,4 +285,42 @@ async function findHostedInviteByCode(inviteCode: string, prisma: PrismaClient) 
       },
     },
   });
+}
+
+async function readHostedInvitePrivateStateOrThrow(memberId: string) {
+  try {
+    return await readHostedMemberPrivateState({
+      memberId,
+    });
+  } catch (error) {
+    if (
+      isHostedOnboardingError(error)
+      && error.code === "HOSTED_MEMBER_PRIVATE_STATE_NOT_CONFIGURED"
+    ) {
+      throw hostedOnboardingError({
+        code: "SIGNUP_PHONE_UNAVAILABLE",
+        message: "Enter the number that messaged Murph to continue.",
+        httpStatus: 409,
+      });
+    }
+
+    throw error;
+  }
+}
+
+function readPhoneCodeRetryAfterMs(input: {
+  now: Date;
+  sentAt: string | null;
+}): number {
+  if (!input.sentAt) {
+    return 0;
+  }
+
+  const sentAtMs = Date.parse(input.sentAt);
+
+  if (!Number.isFinite(sentAtMs)) {
+    return 0;
+  }
+
+  return Math.max(0, sentAtMs + HOSTED_INVITE_SEND_CODE_COOLDOWN_MS - input.now.getTime());
 }

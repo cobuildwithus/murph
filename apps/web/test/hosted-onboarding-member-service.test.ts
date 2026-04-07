@@ -51,6 +51,7 @@ import {
   getHostedInviteStatus,
   issueHostedInvite,
   issueHostedInviteForPhone,
+  prepareHostedInvitePhoneCode,
   requireHostedInviteForAuthentication,
 } from "@/src/lib/hosted-onboarding/invite-service";
 import {
@@ -71,6 +72,8 @@ describe("ensureHostedMemberForPhone", () => {
         memberId,
         privyUserId: patch.privyUserId ?? null,
         schema: "murph.hosted-member-private-state.v1",
+        signupPhoneCodeSentAt: patch.signupPhoneCodeSentAt ?? null,
+        signupPhoneNumber: patch.signupPhoneNumber ?? null,
         stripeCustomerId: patch.stripeCustomerId ?? null,
         stripeLatestBillingEventId: patch.stripeLatestBillingEventId ?? null,
         stripeLatestCheckoutSessionId: patch.stripeLatestCheckoutSessionId ?? null,
@@ -158,6 +161,13 @@ describe("ensureHostedMemberForPhone", () => {
         }),
       }),
     );
+    expect(memberPrivateStateMocks.writeHostedMemberPrivateStatePatch).toHaveBeenCalledWith({
+      memberId: "member_123",
+      patch: {
+        signupPhoneCodeSentAt: null,
+        signupPhoneNumber: "+15551234567",
+      },
+    });
   });
 
   it("creates new members with blind phone lookup storage", async () => {
@@ -210,6 +220,13 @@ describe("ensureHostedMemberForPhone", () => {
         maskedPhoneNumberHint: "*** 4567",
         phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/),
       }),
+    });
+    expect(memberPrivateStateMocks.writeHostedMemberPrivateStatePatch).toHaveBeenCalledWith({
+      memberId: "member_123",
+      patch: {
+        signupPhoneCodeSentAt: null,
+        signupPhoneNumber: "+15551234567",
+      },
     });
   });
 
@@ -344,6 +361,13 @@ describe("ensureHostedMemberForPhone", () => {
         phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/),
       }),
     });
+    expect(memberPrivateStateMocks.writeHostedMemberPrivateStatePatch).toHaveBeenCalledWith({
+      memberId: "member_123",
+      patch: {
+        signupPhoneCodeSentAt: null,
+        signupPhoneNumber: "+15551234567",
+      },
+    });
   });
 
   it("rejects invalid phone numbers", async () => {
@@ -375,6 +399,151 @@ describe("hosted-onboarding member-service barrel", () => {
     expect(barrel.ensureHostedMemberForPhone).toBe(ensureHostedMemberForPhone);
     expect(barrel.completeHostedPrivyVerification).toBe(completeHostedPrivyVerification);
     expect(barrel.buildHostedMemberActivationDispatch).toBe(buildHostedMemberActivationDispatch);
+  });
+});
+
+describe("prepareHostedInvitePhoneCode", () => {
+  it("returns the stored signup phone and records the send timestamp", async () => {
+    memberPrivateStateMocks.readHostedMemberPrivateState.mockResolvedValue({
+      linqChatId: null,
+      memberId: "member_123",
+      privyUserId: null,
+      schema: "murph.hosted-member-private-state.v1",
+      signupPhoneCodeSentAt: null,
+      signupPhoneNumber: "+15551234567",
+      stripeCustomerId: null,
+      stripeLatestBillingEventId: null,
+      stripeLatestCheckoutSessionId: null,
+      stripeSubscriptionId: null,
+      updatedAt: "2026-04-07T00:00:00.000Z",
+      walletAddress: null,
+    });
+    const prisma = {
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue({
+          expiresAt: new Date("2026-04-08T00:00:00.000Z"),
+          inviteCode: "invite-code",
+          member: {
+            id: "member_123",
+            identity: {
+              maskedPhoneNumberHint: "*** 4567",
+            },
+          },
+          memberId: "member_123",
+        }),
+      },
+    } as never;
+
+    await expect(
+      prepareHostedInvitePhoneCode({
+        inviteCode: "invite-code",
+        now: new Date("2026-04-07T01:00:00.000Z"),
+        prisma,
+      }),
+    ).resolves.toEqual({
+      phoneNumber: "+15551234567",
+    });
+
+    expect(memberPrivateStateMocks.writeHostedMemberPrivateStatePatch).toHaveBeenCalledWith({
+      memberId: "member_123",
+      now: "2026-04-07T01:00:00.000Z",
+      patch: {
+        signupPhoneCodeSentAt: "2026-04-07T01:00:00.000Z",
+      },
+    });
+  });
+
+  it("falls back to manual entry when the private signup phone is unavailable", async () => {
+    memberPrivateStateMocks.readHostedMemberPrivateState.mockResolvedValue({
+      linqChatId: null,
+      memberId: "member_123",
+      privyUserId: null,
+      schema: "murph.hosted-member-private-state.v1",
+      signupPhoneCodeSentAt: null,
+      signupPhoneNumber: null,
+      stripeCustomerId: null,
+      stripeLatestBillingEventId: null,
+      stripeLatestCheckoutSessionId: null,
+      stripeSubscriptionId: null,
+      updatedAt: "2026-04-07T00:00:00.000Z",
+      walletAddress: null,
+    });
+    const prisma = {
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue({
+          expiresAt: new Date("2026-04-08T00:00:00.000Z"),
+          inviteCode: "invite-code",
+          member: {
+            id: "member_123",
+            identity: {
+              maskedPhoneNumberHint: "*** 4567",
+            },
+          },
+          memberId: "member_123",
+        }),
+      },
+    } as never;
+
+    await expect(
+      prepareHostedInvitePhoneCode({
+        inviteCode: "invite-code",
+        now: new Date("2026-04-07T01:00:00.000Z"),
+        prisma,
+      }),
+    ).rejects.toMatchObject({
+      code: "SIGNUP_PHONE_UNAVAILABLE",
+      httpStatus: 409,
+    });
+  });
+
+  it("rate limits repeated invite send-code requests", async () => {
+    memberPrivateStateMocks.readHostedMemberPrivateState.mockResolvedValue({
+      linqChatId: null,
+      memberId: "member_123",
+      privyUserId: null,
+      schema: "murph.hosted-member-private-state.v1",
+      signupPhoneCodeSentAt: "2026-04-07T01:00:30.000Z",
+      signupPhoneNumber: "+15551234567",
+      stripeCustomerId: null,
+      stripeLatestBillingEventId: null,
+      stripeLatestCheckoutSessionId: null,
+      stripeSubscriptionId: null,
+      updatedAt: "2026-04-07T01:00:30.000Z",
+      walletAddress: null,
+    });
+    const prisma = {
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue({
+          expiresAt: new Date("2026-04-08T00:00:00.000Z"),
+          inviteCode: "invite-code",
+          member: {
+            id: "member_123",
+            identity: {
+              maskedPhoneNumberHint: "*** 4567",
+            },
+          },
+          memberId: "member_123",
+        }),
+      },
+    } as never;
+
+    await expect(
+      prepareHostedInvitePhoneCode({
+        inviteCode: "invite-code",
+        now: new Date("2026-04-07T01:00:45.000Z"),
+        prisma,
+      }),
+    ).rejects.toMatchObject({
+      code: "PHONE_CODE_COOLDOWN",
+      httpStatus: 429,
+    });
+    expect(memberPrivateStateMocks.writeHostedMemberPrivateStatePatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        patch: {
+          signupPhoneCodeSentAt: "2026-04-07T01:00:45.000Z",
+        },
+      }),
+    );
   });
 });
 

@@ -185,6 +185,8 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
       memberId: "member_123",
       privyUserId: null,
       schema: "murph.hosted-member-private-state.v1",
+      signupPhoneCodeSentAt: null,
+      signupPhoneNumber: null,
       stripeCustomerId: "cus_123",
       stripeLatestBillingEventId: null,
       stripeLatestCheckoutSessionId: null,
