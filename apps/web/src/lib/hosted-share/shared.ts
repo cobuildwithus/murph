@@ -11,7 +11,6 @@ import {
   requireHostedOnboardingPublicBaseUrl,
 } from "../hosted-onboarding/runtime";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
-import { readHostedSharePackObject } from "./pack-store";
 
 import type { HostedShareKind, HostedSharePreview, HostedSharePrismaClient } from "./types";
 
@@ -131,38 +130,18 @@ export async function requireHostedShareLink(shareCode: string, prisma: HostedSh
   return record;
 }
 
-export async function readHostedSharePack(record: {
-  id: string;
-  senderMemberId: string;
-}): Promise<{ pack: SharePack }> {
-  const pack = await readHostedSharePackObject({
-    ownerUserId: record.senderMemberId,
-    shareId: record.id,
-  });
-
-  if (!pack) {
-    throw hostedOnboardingError({
-      code: "HOSTED_SHARE_PACK_NOT_FOUND",
-      message: `Hosted share pack ${record.id} was not found.`,
-      httpStatus: 404,
-    });
-  }
-
-  return {
-    pack,
-  };
-}
-
 export async function releaseHostedShareAcceptance(input: {
+  eventId: string;
   memberId: string;
   prisma: HostedSharePrismaClient;
-  shareCode: string;
-}): Promise<void> {
-  await input.prisma.hostedShareLink.updateMany({
+  shareId: string;
+}): Promise<boolean> {
+  const released = await input.prisma.hostedShareLink.updateMany({
     where: {
       acceptedByMemberId: input.memberId,
-      codeHash: hashHostedShareCode(input.shareCode),
       consumedAt: null,
+      id: input.shareId,
+      lastEventId: input.eventId,
     },
     data: {
       acceptedAt: null,
@@ -170,6 +149,8 @@ export async function releaseHostedShareAcceptance(input: {
       lastEventId: null,
     },
   });
+
+  return released.count === 1;
 }
 
 export async function finalizeHostedShareAcceptance(input: {
@@ -177,16 +158,17 @@ export async function finalizeHostedShareAcceptance(input: {
   memberId: string | null;
   prisma: HostedSharePrismaClient;
   shareId: string;
-}): Promise<void> {
+}): Promise<boolean> {
   if (!input.memberId) {
-    return;
+    return false;
   }
 
-  await input.prisma.hostedShareLink.updateMany({
+  const finalized = await input.prisma.hostedShareLink.updateMany({
     where: {
       acceptedByMemberId: input.memberId,
       consumedAt: null,
       id: input.shareId,
+      lastEventId: input.eventId,
     },
     data: {
       acceptedAt: new Date(),
@@ -196,6 +178,8 @@ export async function finalizeHostedShareAcceptance(input: {
       lastEventId: input.eventId,
     },
   });
+
+  return finalized.count === 1;
 }
 
 export function generateHostedShareCode(): string {
@@ -232,7 +216,7 @@ export function buildHostedShareAcceptanceDispatch(input: {
   acceptedAt: string;
   eventId: string;
   memberId: string;
-  pack: SharePack;
+  ownerUserId: string;
   shareId: string;
 }): HostedExecutionDispatchRequest {
   return buildHostedExecutionVaultShareAcceptedDispatch({
@@ -240,7 +224,7 @@ export function buildHostedShareAcceptanceDispatch(input: {
     memberId: input.memberId,
     occurredAt: input.acceptedAt,
     share: {
-      pack: input.pack,
+      ownerUserId: input.ownerUserId,
       shareId: input.shareId,
     },
   });

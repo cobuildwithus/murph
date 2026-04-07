@@ -10,7 +10,6 @@ import {
   buildHostedShareAcceptanceEventId,
   hashHostedShareCode,
   normalizeOptionalString,
-  readHostedSharePack,
   requireHostedShareLink,
 } from "./shared";
 import type { AcceptHostedShareResult } from "./types";
@@ -104,9 +103,6 @@ export async function acceptHostedShareLink(input: {
       memberId,
       shareId: latest.id,
     });
-    // Validate the Cloudflare-backed pack before claiming the share so a missing pack
-    // cannot leave the link in a half-accepted state.
-    const { pack } = await readHostedSharePack(latest);
     const record = latest.acceptedAt?.getTime() === acceptedAt.getTime()
       && latest.acceptedByMemberId === memberId
       && latest.lastEventId === eventId
@@ -127,7 +123,7 @@ export async function acceptHostedShareLink(input: {
         acceptedAt: acceptedAt.toISOString(),
         eventId,
         memberId,
-        pack,
+        ownerUserId: latest.senderMemberId,
         shareId: record.id,
       }),
       sourceId: record.id,

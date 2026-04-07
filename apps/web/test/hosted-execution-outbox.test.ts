@@ -48,7 +48,7 @@ describe("drainHostedExecutionOutbox", () => {
     }));
   });
 
-  it("marks completed outcomes as dispatched and settles the payload cleanup locally", async () => {
+  it("marks completed inline share outcomes as dispatched without staged-payload cleanup", async () => {
     const dispatch = createShareDispatch();
     const prisma = createOutboxPrisma(createOutboxRecord({
       eventId: dispatch.eventId,
@@ -65,7 +65,7 @@ describe("drainHostedExecutionOutbox", () => {
 
     expect(record?.status).toBe(ExecutionOutboxStatus.dispatched);
     expect(record?.nextAttemptAt).toBeNull();
-    expect(mocks.deleteHostedStoredDispatchPayloadBestEffort).toHaveBeenCalledTimes(1);
+    expect(mocks.deleteHostedStoredDispatchPayloadBestEffort).not.toHaveBeenCalled();
   });
 
   it("treats duplicate consumed outcomes as dispatched without any web-owned share finalization", async () => {
@@ -157,11 +157,11 @@ describe("drainHostedExecutionOutbox", () => {
   it("marks missing staged payload refs as terminal delivery failures instead of retrying forever", async () => {
     const prisma = createOutboxPrisma(createOutboxRecord({
       eventId: "evt_tick",
-      eventKind: "vault.share.accepted",
+      eventKind: "gateway.message.send",
       payloadJson: {
         dispatchRef: {
           eventId: "evt_tick",
-          eventKind: "vault.share.accepted",
+          eventKind: "gateway.message.send",
           occurredAt: "2026-03-28T11:00:00.000Z",
           userId: "member_123",
         },
@@ -235,11 +235,7 @@ describe("drainHostedExecutionOutbox", () => {
     const prisma = createEnqueueOutboxPrisma(createOutboxRecord({
       eventId: dispatch.eventId,
       eventKind: dispatch.event.kind,
-      payloadJson: JSON.parse(JSON.stringify(serializeHostedExecutionOutboxPayload(dispatch, {
-        payloadRef: {
-          key: "transient/dispatch-payloads/member_123/evt_share.json",
-        },
-      }))),
+      payloadJson: JSON.parse(JSON.stringify(serializeHostedExecutionOutboxPayload(dispatch))),
       sourceId: "share_123",
       sourceType: "hosted_share_link",
       userId: dispatch.event.userId,
@@ -391,22 +387,7 @@ function createShareDispatch(): HostedExecutionDispatchRequest {
     event: {
       kind: "vault.share.accepted",
       share: {
-        pack: {
-          createdAt: "2026-03-28T11:00:00.000Z",
-          entities: [
-            {
-              kind: "food",
-              payload: {
-                kind: "smoothie",
-                status: "active",
-                title: "Shared Smoothie",
-              },
-              ref: "food:shared-smoothie",
-            },
-          ],
-          schemaVersion: "murph.share-pack.v1",
-          title: "Shared Smoothie",
-        },
+        ownerUserId: "member_sender",
         shareId: "share_123",
       },
       userId: "member_123",
@@ -482,12 +463,23 @@ function createOutboxRecord(input: {
     nextAttemptAt: new Date("2026-03-28T11:00:00.000Z"),
     payloadJson: (input.payloadJson ?? (
       input.eventKind === "assistant.cron.tick"
+      || input.eventKind === "vault.share.accepted"
         ? serializeHostedExecutionOutboxPayload({
-            event: {
-              kind: "assistant.cron.tick",
-              reason: "manual",
-              userId: input.userId,
-            },
+            event:
+              input.eventKind === "vault.share.accepted"
+                ? {
+                    kind: "vault.share.accepted",
+                    share: {
+                      ownerUserId: "member_sender",
+                      shareId: "share_123",
+                    },
+                    userId: input.userId,
+                  }
+                : {
+                    kind: "assistant.cron.tick",
+                    reason: "manual",
+                    userId: input.userId,
+                  },
             eventId: input.eventId,
             occurredAt: "2026-03-28T11:00:00.000Z",
           })

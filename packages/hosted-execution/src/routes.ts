@@ -24,6 +24,8 @@ export const HOSTED_EXECUTION_AI_USAGE_RECORD_PATH =
   "/api/internal/hosted-execution/usage/record";
 export const HOSTED_EXECUTION_SHARE_IMPORT_COMPLETE_PATH =
   "/api/internal/hosted-execution/share-import/complete";
+export const HOSTED_EXECUTION_SHARE_IMPORT_RELEASE_PATH =
+  "/api/internal/hosted-execution/share-import/release";
 
 export function buildHostedExecutionSharePackPath(userId: string, shareId: string): string {
   return `/internal/users/${encodeURIComponent(userId)}/shares/${encodeURIComponent(shareId)}/pack`;

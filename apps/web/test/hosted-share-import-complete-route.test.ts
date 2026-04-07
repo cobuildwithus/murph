@@ -7,15 +7,15 @@ const mocks = vi.hoisted(() => ({
   finalizeHostedShareAcceptance: vi.fn(),
   findHostedShareLinkById: vi.fn(),
   getPrisma: vi.fn(),
-  requireHostedWebInternalSignedRequest: vi.fn(),
+  requireHostedCloudflareCallbackRequest: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-share/pack-store", () => ({
   deleteHostedSharePackObject: mocks.deleteHostedSharePackObject,
 }));
 
-vi.mock("@/src/lib/hosted-execution/internal", () => ({
-  requireHostedWebInternalSignedRequest: mocks.requireHostedWebInternalSignedRequest,
+vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
+  requireHostedCloudflareCallbackRequest: mocks.requireHostedCloudflareCallbackRequest,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -45,13 +45,13 @@ describe("hosted share-import complete route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.deleteHostedSharePackObject.mockResolvedValue(undefined);
-    mocks.finalizeHostedShareAcceptance.mockResolvedValue(undefined);
+    mocks.finalizeHostedShareAcceptance.mockResolvedValue(true);
     mocks.findHostedShareLinkById.mockResolvedValue({
       id: "share_123",
       senderMemberId: "member_sender",
     });
     mocks.getPrisma.mockReturnValue({ prisma: true });
-    mocks.requireHostedWebInternalSignedRequest.mockImplementation(async (request: Request) => {
+    mocks.requireHostedCloudflareCallbackRequest.mockImplementation(async (request: Request) => {
       await expect(request.clone().text()).resolves.toContain("\"shareId\":\"share_123\"");
       return "member_recipient";
     });
@@ -69,7 +69,7 @@ describe("hosted share-import complete route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.requireHostedWebInternalSignedRequest).toHaveBeenCalledTimes(1);
+    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledTimes(1);
     expect(mocks.findHostedShareLinkById).toHaveBeenCalledWith("share_123", { prisma: true });
     expect(mocks.finalizeHostedShareAcceptance).toHaveBeenCalledWith({
       eventId: "evt_share",
@@ -108,5 +108,27 @@ describe("hosted share-import complete route", () => {
       "delete failed",
     );
     consoleError.mockRestore();
+  });
+
+  it("does not delete the pack when the callback is stale for the current claim", async () => {
+    mocks.finalizeHostedShareAcceptance.mockResolvedValue(false);
+
+    const response = await hostedShareImportCompleteRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/internal/hosted-execution/share-import/complete",
+        {
+          eventId: "evt_share",
+          shareId: "share_123",
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.deleteHostedSharePackObject).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      eventId: "evt_share",
+      finalized: false,
+      shareId: "share_123",
+    });
   });
 });

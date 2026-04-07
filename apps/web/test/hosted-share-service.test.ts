@@ -56,7 +56,11 @@ import {
   buildHostedSharePageData,
   createHostedShareLink,
 } from "@/src/lib/hosted-share/service";
-import { finalizeHostedShareAcceptance, readHostedSharePreview } from "@/src/lib/hosted-share/shared";
+import {
+  finalizeHostedShareAcceptance,
+  readHostedSharePreview,
+  releaseHostedShareAcceptance,
+} from "@/src/lib/hosted-share/shared";
 
 let originalHostedOnboardingPublicBaseUrl: string | undefined;
 let originalHostedContactPrivacyKey: string | undefined;
@@ -344,7 +348,7 @@ describe("hosted share service", () => {
     });
   });
 
-  it("fails before enqueue when the Cloudflare-backed pack is missing at claim time", async () => {
+  it("accepts the share even when the Cloudflare-backed pack is already missing at claim time", async () => {
     const prisma = createHostedSharePrisma();
     const created = await createHostedShareLink({
       prisma: prisma as never,
@@ -362,12 +366,12 @@ describe("hosted share service", () => {
       } as never,
       prisma: prisma as never,
       shareCode: created.shareCode,
-    })).rejects.toMatchObject({
-      code: "HOSTED_SHARE_PACK_NOT_FOUND",
-      httpStatus: 404,
+    })).resolves.toMatchObject({
+      imported: false,
+      pending: true,
     });
 
-    expect(prisma.outboxRows).toHaveLength(0);
+    expect(prisma.outboxRows).toHaveLength(1);
     expect(shareHarness.stagedPayloads).toHaveLength(0);
   });
 
@@ -394,7 +398,7 @@ describe("hosted share service", () => {
     expect(prisma.rows[0]?.acceptedByMemberId).toBe("member_123");
     expect(prisma.rows[0]?.consumedAt).toBeNull();
     expect(prisma.outboxRows).toHaveLength(1);
-    expect(shareHarness.stagedPayloads).toHaveLength(1);
+    expect(shareHarness.stagedPayloads).toHaveLength(0);
 
     const retried = await acceptHostedShareLink({
       member: {
@@ -410,8 +414,7 @@ describe("hosted share service", () => {
     expect(retried.pending).toBe(true);
     expect(prisma.outboxRows).toHaveLength(1);
     expect(prisma.outboxRows[0]?.eventId).toBe(prisma.rows[0]?.lastEventId);
-    expect(shareHarness.stagedPayloads).toHaveLength(2);
-    expect(shareHarness.stagedPayloads[0]?.eventId).toBe(shareHarness.stagedPayloads[1]?.eventId);
+    expect(shareHarness.stagedPayloads).toHaveLength(0);
 
     await finalizeHostedShareAcceptance({
       eventId: prisma.rows[0]?.lastEventId ?? "",
@@ -433,6 +436,74 @@ describe("hosted share service", () => {
     expect(finalized.alreadyImported).toBe(true);
     expect(finalized.imported).toBe(true);
     expect(prisma.rows[0]?.consumedByMemberId).toBe("member_123");
+  });
+
+  it("ignores stale release and finalize callbacks after the share is reaccepted", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+      const prisma = createHostedSharePrisma();
+      const created = await createHostedShareLink({
+        prisma: prisma as never,
+        pack: buildPack(),
+        senderMemberId: "member_sender",
+      });
+
+      await acceptHostedShareLink({
+        member: {
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          suspendedAt: null,
+        } as never,
+        prisma: prisma as never,
+        shareCode: created.shareCode,
+      });
+      const firstEventId = prisma.rows[0]?.lastEventId;
+
+      expect(firstEventId).toBeTruthy();
+      expect(await releaseHostedShareAcceptance({
+        eventId: firstEventId ?? "",
+        memberId: "member_123",
+        prisma: prisma as never,
+        shareId: prisma.rows[0]?.id ?? "",
+      })).toBe(true);
+
+      vi.setSystemTime(new Date("2026-03-26T12:05:00.000Z"));
+      await acceptHostedShareLink({
+        member: {
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          suspendedAt: null,
+        } as never,
+        prisma: prisma as never,
+        shareCode: created.shareCode,
+      });
+      const secondEventId = prisma.rows[0]?.lastEventId;
+
+      expect(secondEventId).toBeTruthy();
+      expect(secondEventId).not.toBe(firstEventId);
+
+      expect(await releaseHostedShareAcceptance({
+        eventId: firstEventId ?? "",
+        memberId: "member_123",
+        prisma: prisma as never,
+        shareId: prisma.rows[0]?.id ?? "",
+      })).toBe(false);
+      expect(await finalizeHostedShareAcceptance({
+        eventId: firstEventId ?? "",
+        memberId: "member_123",
+        prisma: prisma as never,
+        shareId: prisma.rows[0]?.id ?? "",
+      })).toBe(false);
+
+      expect(prisma.rows[0]).toMatchObject({
+        acceptedByMemberId: "member_123",
+        consumedAt: null,
+        lastEventId: secondEventId,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("treats suspended members as inactive for share page access and share acceptance", async () => {

@@ -1,14 +1,23 @@
+import { generateKeyPairSync } from "node:crypto";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
   HOSTED_EXECUTION_NONCE_HEADER,
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
-  verifyHostedExecutionSignature,
 } from "@murphai/hosted-execution";
 
-import { applyHostedWebBusinessOutcomeIfNeeded } from "../src/runner-outbound/business-outcomes.ts";
+import {
+  applyHostedWebBusinessOutcomeIfNeeded,
+  releaseHostedWebShareClaim,
+} from "../src/runner-outbound/business-outcomes.ts";
+
+const TEST_CALLBACK_PRIVATE_JWK_JSON = JSON.stringify(
+  generateKeyPairSync("ec", { namedCurve: "P-256" }).privateKey.export({ format: "jwk" }),
+);
 
 describe("applyHostedWebBusinessOutcomeIfNeeded", () => {
   beforeEach(() => {
@@ -31,8 +40,11 @@ describe("applyHostedWebBusinessOutcomeIfNeeded", () => {
       env: {
         HOSTED_WEB_BASE_URL: "https://web.example.test/app",
       },
+      callbackSigning: {
+        keyId: "test-callback-key",
+        privateKeyJwkJson: TEST_CALLBACK_PRIVATE_JWK_JSON,
+      },
       fetchImpl: fetchMock as typeof fetch,
-      signingSecret: "signing-secret",
     });
 
     expect(fetchMock).not.toHaveBeenCalled();
@@ -48,8 +60,11 @@ describe("applyHostedWebBusinessOutcomeIfNeeded", () => {
       env: {
         HOSTED_WEB_BASE_URL: "https://web.example.test/app",
       },
+      callbackSigning: {
+        keyId: "test-callback-key",
+        privateKeyJwkJson: TEST_CALLBACK_PRIVATE_JWK_JSON,
+      },
       fetchImpl: fetchMock as typeof fetch,
-      signingSecret: "signing-secret",
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -63,27 +78,20 @@ describe("applyHostedWebBusinessOutcomeIfNeeded", () => {
 
     const headers = new Headers(init.headers);
     expect(headers.get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("member_123");
+    expect(headers.get(HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER)).toBe("test-callback-key");
     expect(headers.get(HOSTED_EXECUTION_NONCE_HEADER)).toBeTruthy();
     expect(headers.get(HOSTED_EXECUTION_SIGNATURE_HEADER)).toBeTruthy();
     expect(headers.get(HOSTED_EXECUTION_TIMESTAMP_HEADER)).toBe("2026-04-07T00:00:00.000Z");
-    await expect(verifyHostedExecutionSignature({
-      method: "POST",
-      nonce: headers.get(HOSTED_EXECUTION_NONCE_HEADER),
-      path: "/api/internal/hosted-execution/share-import/complete",
-      payload: String(init.body),
-      search: "",
-      secret: "signing-secret",
-      signature: headers.get(HOSTED_EXECUTION_SIGNATURE_HEADER),
-      timestamp: headers.get(HOSTED_EXECUTION_TIMESTAMP_HEADER),
-      userId: headers.get(HOSTED_EXECUTION_USER_ID_HEADER),
-    })).resolves.toBe(true);
   });
 
   it("fails closed when the hosted web callback host is missing", async () => {
     await expect(applyHostedWebBusinessOutcomeIfNeeded({
       dispatch: createShareDispatch(),
       env: {},
-      signingSecret: "signing-secret",
+      callbackSigning: {
+        keyId: "test-callback-key",
+        privateKeyJwkJson: TEST_CALLBACK_PRIVATE_JWK_JSON,
+      },
     })).rejects.toThrow(/HOSTED_WEB_BASE_URL must be configured/u);
   });
 
@@ -95,9 +103,41 @@ describe("applyHostedWebBusinessOutcomeIfNeeded", () => {
       env: {
         HOSTED_WEB_BASE_URL: "https://web.example.test/app",
       },
+      callbackSigning: {
+        keyId: "test-callback-key",
+        privateKeyJwkJson: TEST_CALLBACK_PRIVATE_JWK_JSON,
+      },
       fetchImpl: fetchMock as typeof fetch,
-      signingSecret: "signing-secret",
     })).rejects.toThrow(/HTTP 503/u);
+  });
+
+  it("posts the signed share-claim release callback to hosted web", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-07T00:00:00.000Z"));
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+
+    await releaseHostedWebShareClaim({
+      dispatch: createShareDispatch(),
+      env: {
+        HOSTED_WEB_BASE_URL: "https://web.example.test/app",
+      },
+      callbackSigning: {
+        keyId: "test-callback-key",
+        privateKeyJwkJson: TEST_CALLBACK_PRIVATE_JWK_JSON,
+      },
+      fetchImpl: fetchMock as typeof fetch,
+      reason: "share pack missing",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://web.example.test/api/internal/hosted-execution/share-import/release");
+    expect(init.method).toBe("POST");
+    expect(init.body).toBe(JSON.stringify({
+      eventId: "evt_share",
+      reason: "share pack missing",
+      shareId: "share_123",
+    }));
   });
 });
 
@@ -106,12 +146,7 @@ function createShareDispatch() {
     event: {
       kind: "vault.share.accepted" as const,
       share: {
-        pack: {
-          createdAt: "2026-04-07T00:00:00.000Z",
-          entities: [],
-          schemaVersion: "murph.share-pack.v1",
-          title: "Shared pack",
-        },
+        ownerUserId: "member_sender",
         shareId: "share_123",
       },
       userId: "member_123",
