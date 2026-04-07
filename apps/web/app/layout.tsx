@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { Outfit, Geist } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 
 import { resolveHostedPublicBaseUrl } from "@/src/lib/hosted-web/public-url";
 
@@ -45,6 +47,8 @@ export default function RootLayout(input: { children: React.ReactNode }) {
             </div>
           </footer>
         </div>
+        <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );
