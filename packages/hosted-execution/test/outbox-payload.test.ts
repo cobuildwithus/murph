@@ -13,9 +13,6 @@ import {
   readHostedExecutionOutboxPayload,
   resolveHostedExecutionDispatchPayloadStorage,
 } from "../src/outbox-payload";
-import {
-  buildHostedExecutionDispatchRef,
-} from "../src/dispatch-ref";
 const occurredAt = "2026-04-04T00:00:00.000Z";
 
 describe("resolveHostedExecutionDispatchPayloadStorage", () => {
@@ -139,34 +136,6 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
     ).toBe("reference");
   });
 
-  it("still reads legacy reference-backed share payloads during the inline cutover", () => {
-    const dispatch = buildHostedExecutionVaultShareAcceptedDispatch({
-      eventId: "share-accepted-legacy",
-      memberId: "user_123",
-      occurredAt,
-      share: {
-        ownerUserId: "member_sender",
-        shareId: "share_legacy_123",
-      },
-    });
-
-    expect(readHostedExecutionOutboxPayload({
-      dispatchRef: buildHostedExecutionDispatchRef(dispatch),
-      payloadRef: {
-        key: "transient/dispatch-payloads/user_123/share-legacy.json",
-      },
-      schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
-      storage: "reference",
-    })).toEqual({
-      dispatchRef: buildHostedExecutionDispatchRef(dispatch),
-      payloadRef: {
-        key: "transient/dispatch-payloads/user_123/share-legacy.json",
-      },
-      schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
-      storage: "reference",
-    });
-  });
-
   it("rejects forcing inline storage for reference-only gateway sends", () => {
     expect(() => buildHostedExecutionOutboxPayload(
       buildHostedExecutionGatewayMessageSendDispatch({
@@ -183,6 +152,20 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
   });
 
   it("rejects non-canonical stored payload shapes for gateway sends and cron ticks", () => {
+    expect(readHostedExecutionOutboxPayload({
+      dispatchRef: {
+        eventId: "share-legacy-1",
+        eventKind: "vault.share.accepted",
+        occurredAt,
+        userId: "user_123",
+      },
+      payloadRef: {
+        key: "transient/dispatch-payloads/user_123/share-legacy-1.json",
+      },
+      schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+      storage: "reference",
+    })).toBeNull();
+
     expect(readHostedExecutionOutboxPayload({
       dispatch: buildHostedExecutionGatewayMessageSendDispatch({
         eventId: "gateway-4",
