@@ -3,12 +3,12 @@ import type {
   HostedWorkspaceArtifactPersistInput,
 } from "@murphai/runtime-state/node";
 
-import { readHostedRunnerCommitTimeoutMs } from "./callbacks.ts";
+import type {
+  HostedRuntimeArtifactStore,
+} from "./platform.ts";
 
 export function createHostedArtifactResolver(input: {
-  baseUrl: string;
-  fetchImpl?: typeof fetch;
-  timeoutMs: number | null;
+  artifactStore: HostedRuntimeArtifactStore;
 }) {
   const cache = new Map<string, Promise<Uint8Array>>();
 
@@ -22,10 +22,8 @@ export function createHostedArtifactResolver(input: {
 }
 
 export function createHostedArtifactUploadSink(input: {
-  artifactsBaseUrl: string;
-  fetchImpl?: typeof fetch;
+  artifactStore: HostedRuntimeArtifactStore;
   knownArtifactHashes: ReadonlySet<string>;
-  timeoutMs: number | null;
 }) {
   const uploadedHashes = new Set<string>();
 
@@ -39,55 +37,31 @@ export function createHostedArtifactUploadSink(input: {
   };
 }
 
-function buildHostedRunnerArtifactUrl(baseUrl: string, sha256: string): URL {
-  return new URL(`/objects/${encodeURIComponent(sha256)}`, baseUrl);
-}
-
 async function fetchHostedArtifact(
   input: {
-    baseUrl: string;
-    fetchImpl?: typeof fetch;
-    timeoutMs: number | null;
+    artifactStore: HostedRuntimeArtifactStore;
   },
   ref: HostedBundleArtifactRef,
 ): Promise<Uint8Array> {
-  const response = await (input.fetchImpl ?? fetch)(buildHostedRunnerArtifactUrl(input.baseUrl, ref.sha256).toString(), {
-    method: "GET",
-    signal: AbortSignal.timeout(readHostedRunnerCommitTimeoutMs(input.timeoutMs)),
-  });
+  const bytes = await input.artifactStore.get(ref.sha256);
 
-  if (!response.ok) {
-    throw new Error(`Hosted runner artifact fetch failed for ${ref.sha256} with HTTP ${response.status}.`);
+  if (!bytes) {
+    throw new Error(`Hosted runner artifact fetch failed for ${ref.sha256}.`);
   }
 
-  return new Uint8Array(await response.arrayBuffer());
+  return bytes;
 }
 
 async function uploadHostedArtifact(
   input: {
-    artifactsBaseUrl: string;
-    fetchImpl?: typeof fetch;
-    timeoutMs: number | null;
+    artifactStore: HostedRuntimeArtifactStore;
   },
   artifact: HostedWorkspaceArtifactPersistInput,
 ): Promise<void> {
   const uploadBytes = new Uint8Array(artifact.bytes.byteLength);
   uploadBytes.set(artifact.bytes);
-  const response = await (input.fetchImpl ?? fetch)(
-    buildHostedRunnerArtifactUrl(input.artifactsBaseUrl, artifact.ref.sha256).toString(),
-    {
-      body: uploadBytes.buffer,
-      headers: {
-        "content-type": "application/octet-stream",
-      },
-      method: "PUT",
-      signal: AbortSignal.timeout(readHostedRunnerCommitTimeoutMs(input.timeoutMs)),
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error(
-      `Hosted runner artifact upload failed for ${artifact.ref.sha256} with HTTP ${response.status}.`,
-    );
-  }
+  await input.artifactStore.put({
+    bytes: uploadBytes,
+    sha256: artifact.ref.sha256,
+  });
 }

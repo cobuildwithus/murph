@@ -5,9 +5,10 @@ import {
 import {
   summarizeHostedExecutionError,
 } from "@murphai/hosted-execution";
-import {
-  resolveHostedExecutionAiUsageClient,
-} from "@murphai/hosted-execution/web-control-plane";
+
+import type {
+  HostedRuntimeUsageExportPort,
+} from "./platform.ts";
 
 export interface HostedPendingAssistantUsageExportResult {
   exported: number;
@@ -18,17 +19,14 @@ export interface HostedPendingAssistantUsageExportResult {
 const HOSTED_USAGE_EXPORT_BATCH_LIMIT = 50;
 
 export async function exportHostedPendingAssistantUsage(input: {
-  baseUrl: string | null;
-  fetchImpl?: typeof fetch;
-  timeoutMs: number | null;
-  userId: string;
+  usageExportPort?: HostedRuntimeUsageExportPort | null;
   vaultRoot: string;
 }): Promise<HostedPendingAssistantUsageExportResult> {
   const pendingRecords = await listPendingAssistantUsageRecords({
     vault: input.vaultRoot,
   });
 
-  if (!input.baseUrl || pendingRecords.length === 0) {
+  if (!input.usageExportPort || pendingRecords.length === 0) {
     return {
       exported: 0,
       failed: 0,
@@ -38,30 +36,12 @@ export async function exportHostedPendingAssistantUsage(input: {
 
   let exported = 0;
   let failed = 0;
-  const client = resolveHostedExecutionAiUsageClient({
-    baseUrl: input.baseUrl,
-    boundUserId: input.userId,
-    fetchImpl: input.fetchImpl,
-    timeoutMs: input.timeoutMs,
-  });
-
-  if (!client) {
-    console.warn(
-      `Hosted AI usage export is not configured for the current bound user; leaving ${pendingRecords.length} records pending.`,
-    );
-
-    return {
-      exported: 0,
-      failed: pendingRecords.length,
-      pending: pendingRecords.length,
-    };
-  }
 
   for (const batch of chunkPendingUsageRecords(pendingRecords, HOSTED_USAGE_EXPORT_BATCH_LIMIT)) {
     try {
       const result = await exportHostedUsageBatch({
         batch,
-        client,
+        usageExportPort: input.usageExportPort,
         vaultRoot: input.vaultRoot,
       });
       exported += result.exported;
@@ -83,7 +63,7 @@ export async function exportHostedPendingAssistantUsage(input: {
         try {
           const result = await exportHostedUsageBatch({
             batch: [record],
-            client,
+            usageExportPort: input.usageExportPort,
             vaultRoot: input.vaultRoot,
           });
           exported += result.exported;
@@ -117,10 +97,10 @@ function chunkPendingUsageRecords<T>(records: readonly T[], size: number): T[][]
 
 async function exportHostedUsageBatch(input: {
   batch: readonly Awaited<ReturnType<typeof listPendingAssistantUsageRecords>>[number][];
-  client: NonNullable<ReturnType<typeof resolveHostedExecutionAiUsageClient>>;
+  usageExportPort: HostedRuntimeUsageExportPort;
   vaultRoot: string;
 }): Promise<{ exported: number; failed: number }> {
-  const response = await input.client.recordUsage(input.batch);
+  const response = await input.usageExportPort.recordUsage(input.batch);
 
   const batchUsageIds = new Set(input.batch.map((record) => record.usageId));
   const acknowledgedUsageIds = response.usageIds.filter((usageId) => batchUsageIds.has(usageId));

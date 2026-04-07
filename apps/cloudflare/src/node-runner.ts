@@ -1,6 +1,5 @@
 import {
   runHostedAssistantRuntimeJobInProcessDetailed,
-  runHostedAssistantRuntimeJobIsolatedDetailed,
   type HostedAssistantRuntimeConfig,
   type HostedAssistantRuntimeJobInput,
   type HostedAssistantRuntimeJobResult,
@@ -11,11 +10,23 @@ import {
   buildHostedRunnerContainerEnv,
   buildHostedRunnerJobRuntimeConfig,
 } from "./runner-env.ts";
+import {
+  runHostedExecutionJobIsolatedDetailed,
+  type HostedExecutionIsolatedRunnerInput,
+} from "./node-runner-isolated.ts";
+import {
+  buildHostedExecutionRuntimePlatform,
+} from "./runtime-platform.ts";
 import { normalizeHostedUserEnv } from "./user-env.ts";
 
 let hostedExecutionRunStartHookForTests: (() => void) | null = null;
 let hostedExecutionRunModeForTests: "in-process" | "isolated" | null = null;
-let hostedExecutionIsolatedRunnerForTests: typeof runHostedAssistantRuntimeJobIsolatedDetailed | null = null;
+let hostedExecutionIsolatedRunnerForTests:
+  | ((
+    input: HostedExecutionIsolatedRunnerInput,
+    options?: { signal?: AbortSignal },
+  ) => Promise<HostedAssistantRuntimeJobResult>)
+  | null = null;
 const hostedExecutionWorkerOnlyRuntimeEnvKeys = new Set([
   "HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS",
   "HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS",
@@ -32,7 +43,12 @@ export function setHostedExecutionRunStartHookForTests(hook: (() => void) | null
 }
 
 export function setHostedExecutionIsolatedRunnerForTests(
-  runner: typeof runHostedAssistantRuntimeJobIsolatedDetailed | null,
+  runner:
+    | ((
+      input: HostedExecutionIsolatedRunnerInput,
+      options?: { signal?: AbortSignal },
+    ) => Promise<HostedAssistantRuntimeJobResult>)
+    | null,
 ): void {
   hostedExecutionIsolatedRunnerForTests = runner;
 }
@@ -46,26 +62,40 @@ export function buildHostedExecutionJobRuntimeForTests(
 export async function runHostedExecutionJob(
   input: HostedAssistantRuntimeJobInput,
   options?: {
+    internalWorkerProxyToken?: string | null;
     signal?: AbortSignal;
   },
 ): Promise<HostedAssistantRuntimeJobResult> {
   hostedExecutionRunStartHookForTests?.();
   const runtime = buildHostedExecutionJobRuntime(input.runtime ?? {});
+  const runtimePlatform = buildHostedExecutionRuntimePlatform({
+    boundUserId: input.request.dispatch.event.userId,
+    commitTimeoutMs: runtime.commitTimeoutMs,
+    internalWorkerProxyToken: options?.internalWorkerProxyToken ?? null,
+  });
 
   if (hostedExecutionRunModeForTests === "in-process") {
     return await runHostedAssistantRuntimeJobInProcessDetailed({
       request: input.request,
       runtime,
+    }, {
+      platform: runtimePlatform,
     });
   }
 
   const runIsolated =
-    hostedExecutionIsolatedRunnerForTests ?? runHostedAssistantRuntimeJobIsolatedDetailed;
+    hostedExecutionIsolatedRunnerForTests ?? runHostedExecutionJobIsolatedDetailed;
 
-  return await runIsolated({
-    request: input.request,
-    runtime,
-  }, options);
+  return await runIsolated(
+    {
+      internalWorkerProxyToken: options?.internalWorkerProxyToken ?? null,
+      job: {
+        request: input.request,
+        runtime,
+      },
+    },
+    options,
+  );
 }
 
 function buildHostedExecutionJobRuntime(
@@ -90,7 +120,6 @@ function buildHostedExecutionJobRuntime(
       userEnv: normalizeHostedUserEnv(requestedRuntime.userEnv ?? {}, runtimeConfigSource),
       userEnvSource: runtimeConfigSource,
     }),
-    internalWorkerProxyToken: requestedRuntime.internalWorkerProxyToken ?? null,
   };
 }
 

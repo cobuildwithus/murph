@@ -97,15 +97,15 @@ describe("RunnerContainer", () => {
     );
     expect(destroy).toHaveBeenCalledTimes(1);
     const forwardedBody = JSON.parse(containerFetch.mock.calls[0]?.[1]?.body as string) as {
-      request: ReturnType<typeof createRunnerRequest>;
-      runtime: {
-        internalWorkerProxyToken: string;
+      internalWorkerProxyToken: string;
+      job: {
+        request: ReturnType<typeof createRunnerRequest>;
       };
     };
     expect(forwardedBody).toMatchObject({
-      request: createRunnerRequest(),
-      runtime: {
-        internalWorkerProxyToken: expect.any(String),
+      internalWorkerProxyToken: expect.any(String),
+      job: {
+        request: createRunnerRequest(),
       },
     });
   });
@@ -183,11 +183,13 @@ describe("RunnerContainer", () => {
 
     expect(response).toEqual(createRunnerResult());
     const forwardedBody = JSON.parse(containerFetch.mock.calls[0]?.[1]?.body as string) as {
-      request?: {
-        run?: typeof run;
+      job?: {
+        request?: {
+          run?: typeof run;
+        };
       };
     };
-    expect(forwardedBody.request?.run).toEqual(run);
+    expect(forwardedBody.job?.request?.run).toEqual(run);
   });
 
   it("caps readiness waits to the caller timeout budget when the budget is small", async () => {
@@ -379,29 +381,31 @@ describe("RunnerContainer", () => {
     expect(containerFetch).toHaveBeenCalledTimes(1);
     const forwarded = JSON.parse(containerFetch.mock.calls[0]?.[1]?.body as string) as Record<string, unknown>;
     expect(forwarded).toMatchObject({
-      request: {
-        commit: {
-          bundleRef: null,
-        },
-        resume: {
-          committedResult: {
-            result: {
-              eventsHandled: 1,
-              summary: "already committed",
+      internalWorkerProxyToken: expect.any(String),
+      job: {
+        request: {
+          commit: {
+            bundleRef: null,
+          },
+          resume: {
+            committedResult: {
+              result: {
+                eventsHandled: 1,
+                summary: "already committed",
+              },
+              sideEffects: [],
             },
-            sideEffects: [],
+          },
+          run: {
+            attempt: 2,
+            runId: "run_123",
+            startedAt: "2026-03-27T00:00:00.000Z",
           },
         },
-        run: {
-          attempt: 2,
-          runId: "run_123",
-          startedAt: "2026-03-27T00:00:00.000Z",
-        },
-      },
-      runtime: {
-        internalWorkerProxyToken: expect.any(String),
-        userEnv: {
-          OPENAI_API_KEY: "sk-user",
+        runtime: {
+          userEnv: {
+            OPENAI_API_KEY: "sk-user",
+          },
         },
       },
     });

@@ -7,11 +7,10 @@ import {
 import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
-import {
-  HOSTED_EXECUTION_CALLBACK_HOSTS,
-  HOSTED_EXECUTION_PROXY_HOSTS,
-} from "@murphai/hosted-execution/callback-hosts";
 
+import {
+  CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
+} from "./internal-hosts.ts";
 import { methodNotAllowed } from "./json.ts";
 import { handleRunnerOutboundRequest, type RunnerOutboundEnvironmentSource } from "./runner-outbound.ts";
 
@@ -70,10 +69,10 @@ type RunnerOutboundHandlerName =
   | "usageWorker";
 
 const RUNNER_OUTBOUND_HOSTS = {
-  [HOSTED_EXECUTION_CALLBACK_HOSTS.artifacts]: "artifactsWorker",
-  [HOSTED_EXECUTION_CALLBACK_HOSTS.results]: "resultsWorker",
-  [HOSTED_EXECUTION_PROXY_HOSTS.deviceSync]: "deviceSyncWorker",
-  [HOSTED_EXECUTION_PROXY_HOSTS.usage]: "usageWorker",
+  [CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore]: "artifactsWorker",
+  [CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort]: "resultsWorker",
+  [CLOUDFLARE_HOSTED_RUNTIME_HOSTS.deviceSyncPort]: "deviceSyncWorker",
+  [CLOUDFLARE_HOSTED_RUNTIME_HOSTS.usageExportPort]: "usageWorker",
 } as const satisfies Record<string, RunnerOutboundHandlerName>;
 
 export class RunnerContainer extends Container {
@@ -157,9 +156,10 @@ export class RunnerContainer extends Container {
 
       const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - startTime));
       const response = await this.containerFetch(RUNNER_EXECUTE_URL, {
-        body: JSON.stringify(
-          injectInternalWorkerProxyToken(input.job, internalWorkerProxyToken),
-        ),
+        body: JSON.stringify({
+          internalWorkerProxyToken,
+          job: input.job,
+        }),
         headers: {
           authorization: `Bearer ${input.runnerControlToken}`,
           "content-type": "application/json; charset=utf-8",
@@ -320,19 +320,6 @@ function parseHostedExecutionContainerInvokeInput(
     runnerControlToken: requireString(payload.runnerControlToken, "payload.runnerControlToken"),
     timeoutMs: readTimeoutMs(payload.timeoutMs, RUNNER_READY_TIMEOUT_MS),
     userId: requireString(payload.userId, "payload.userId"),
-  };
-}
-
-function injectInternalWorkerProxyToken(
-  job: HostedAssistantRuntimeJobInput,
-  internalWorkerProxyToken: string,
-): HostedAssistantRuntimeJobInput {
-  return {
-    ...job,
-    runtime: {
-      ...(job.runtime ?? {}),
-      internalWorkerProxyToken,
-    },
   };
 }
 

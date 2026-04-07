@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -15,9 +14,6 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
-  resolveHostedExecutionDeviceSyncConnectLinkClient,
-} from "@murphai/hosted-execution/web-control-plane";
-import {
   HostedAssistantConfigurationError,
 } from "@murphai/operator-config/hosted-assistant-config";
 import type { AssistantExecutionContext } from "@murphai/assistant-engine";
@@ -28,14 +24,9 @@ import {
 } from "./hosted-runtime/callbacks.ts";
 import { createHostedArtifactResolver } from "./hosted-runtime/artifacts.ts";
 import {
-  createHostedRuntimeChildLauncherDirectories,
-  createHostedRuntimeChildProcessEnv,
   normalizeHostedAssistantRuntimeConfig,
-  resolveHostedRuntimeChildEntry,
-  resolveHostedRuntimeTsxImportSpecifier,
   withHostedProcessEnvironment,
 } from "./hosted-runtime/environment.ts";
-import { createHostedInternalWorkerFetch } from "./hosted-runtime/internal-http.ts";
 import {
   completeHostedExecutionAfterCommit,
   executeHostedDispatchForCommit,
@@ -44,6 +35,9 @@ import type {
   HostedAssistantRuntimeJobResult,
   HostedAssistantRuntimeJobInput,
 } from "./hosted-runtime/models.ts";
+import type {
+  HostedRuntimePlatform,
+} from "./hosted-runtime/platform.ts";
 
 export type {
   HostedAssistantRuntimeConfig,
@@ -52,9 +46,22 @@ export type {
   HostedAssistantRuntimeJobRequest,
   HostedExecutionCommitCallback,
 } from "./hosted-runtime/models.ts";
+export type {
+  HostedRuntimeArtifactStore,
+  HostedRuntimeDeviceSyncPort,
+  HostedRuntimeEffectsPort,
+  HostedRuntimePlatform,
+  HostedRuntimeUsageExportPort,
+} from "./hosted-runtime/platform.ts";
+export {
+  createHostedRuntimeChildLauncherDirectories,
+  createHostedRuntimeChildProcessEnv,
+  resolveHostedRuntimeTsconfigPath,
+  resolveHostedRuntimeTsxImportSpecifier,
+} from "./hosted-runtime/environment.ts";
 export {
   readHostedRunnerCommitTimeoutMs,
-} from "./hosted-runtime/callbacks.ts";
+} from "./hosted-runtime/timeouts.ts";
 export {
   parseHostedAssistantRuntimeConfig,
   parseHostedAssistantRuntimeJobInput,
@@ -76,12 +83,18 @@ const HOSTED_RUNTIME_CHILD_RESULT_PREFIX = "__HB_ASSISTANT_RUNTIME_RESULT__";
 
 export async function runHostedAssistantRuntimeJobInProcess(
   input: HostedAssistantRuntimeJobInput,
+  options: {
+    platform: HostedRuntimePlatform;
+  },
 ): Promise<HostedExecutionRunnerResult> {
-  return (await runHostedAssistantRuntimeJobInProcessDetailed(input)).result;
+  return (await runHostedAssistantRuntimeJobInProcessDetailed(input, options)).result;
 }
 
 export async function runHostedAssistantRuntimeJobInProcessDetailed(
   input: HostedAssistantRuntimeJobInput,
+  options: {
+    platform: HostedRuntimePlatform;
+  },
 ): Promise<HostedAssistantRuntimeJobResult> {
   emitHostedExecutionStructuredLog({
     component: "runtime",
@@ -90,16 +103,13 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
     phase: "runtime.starting",
     run: input.request.run ?? null,
   });
-  const runtime = normalizeHostedAssistantRuntimeConfig(input.runtime);
+  const runtime = normalizeHostedAssistantRuntimeConfig(input.runtime, options.platform);
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-"));
 
   try {
     const incomingBundle = decodeHostedBundleBase64(input.request.bundle);
-    const internalWorkerFetch = createHostedInternalWorkerFetch(runtime.internalWorkerProxyToken);
     const artifactResolver = createHostedArtifactResolver({
-      baseUrl: runtime.artifactsBaseUrl,
-      fetchImpl: internalWorkerFetch,
-      timeoutMs: runtime.commitTimeoutMs,
+      artifactStore: runtime.platform.artifactStore,
     });
     const materializedArtifactPaths = new Set<string>();
     const restored = await restoreHostedExecutionContext({
@@ -116,9 +126,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
       hosted: {
         issueDeviceConnectLink: createHostedDeviceConnectLinkIssuer({
           boundUserId: input.request.dispatch.event.userId,
-          fetchImpl: internalWorkerFetch,
-          timeoutMs: runtime.commitTimeoutMs,
-          webControlPlane: runtime.webControlPlane,
+          platform: runtime.platform,
         }),
         memberId: input.request.dispatch.event.userId,
         userEnvKeys: Object.keys(runtime.userEnv),
@@ -157,7 +165,6 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
                   }
                 : null,
               materializedArtifactPaths,
-              internalWorkerFetch,
               request: input.request,
               restored,
               runtime,
@@ -169,11 +176,10 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
           await commitHostedExecutionResult({
             commit: input.request.commit ?? null,
             dispatch: input.request.dispatch,
-            fetchImpl: internalWorkerFetch,
+            effectsPort: runtime.platform.effectsPort,
             gatewayProjectionSnapshot: committedExecution.committedGatewayProjectionSnapshot,
             result: committedExecution.committedResult,
             sideEffects: committedExecution.committedSideEffects,
-            runtime,
           });
           emitHostedExecutionStructuredLog({
             component: "runtime",
@@ -187,7 +193,6 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
         const finalResult = await completeHostedExecutionAfterCommit({
           commit: input.request.commit ?? null,
           dispatch: input.request.dispatch,
-          internalWorkerFetch,
           materializedArtifactPaths,
           run: input.request.run ?? null,
           runtime,
@@ -223,18 +228,10 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
 
 function createHostedDeviceConnectLinkIssuer(input: {
   boundUserId: string;
-  fetchImpl: typeof fetch;
-  timeoutMs: number | null;
-  webControlPlane: NonNullable<ReturnType<typeof normalizeHostedAssistantRuntimeConfig>["webControlPlane"]>;
+  platform: HostedRuntimePlatform;
 }) {
   return async ({ provider }: { provider: string }) => {
-    const client = resolveHostedExecutionDeviceSyncConnectLinkClient({
-      baseUrl: input.webControlPlane.deviceSyncRuntimeBaseUrl,
-      boundUserId: input.boundUserId,
-      fetchImpl: input.fetchImpl,
-      signingSecret: input.webControlPlane.signingSecret,
-      timeoutMs: input.timeoutMs,
-    });
+    const client = input.platform.deviceSyncPort ?? null;
 
     if (!client) {
       throw new HostedAssistantConfigurationError(
@@ -247,185 +244,6 @@ function createHostedDeviceConnectLinkIssuer(input: {
       provider,
     });
   };
-}
-
-export async function runHostedAssistantRuntimeJobIsolated(
-  input: HostedAssistantRuntimeJobInput,
-  options?: {
-    signal?: AbortSignal;
-  },
-): Promise<HostedExecutionRunnerResult> {
-  return (await runHostedAssistantRuntimeJobIsolatedDetailed(input, options)).result;
-}
-
-export async function runHostedAssistantRuntimeJobIsolatedDetailed(
-  input: HostedAssistantRuntimeJobInput,
-  options?: {
-    signal?: AbortSignal;
-  },
-): Promise<HostedAssistantRuntimeJobResult> {
-  const runtime = input.runtime;
-  const childEntry = resolveHostedRuntimeChildEntry();
-  const isTypeScriptChild = childEntry.endsWith(".ts");
-  const childArgs = isTypeScriptChild
-    ? ["--import", resolveHostedRuntimeTsxImportSpecifier(), childEntry]
-    : [childEntry];
-  const launcherRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-launch-"));
-  const abortSignal = options?.signal ?? null;
-
-  try {
-    const launcherDirectories = await createHostedRuntimeChildLauncherDirectories(launcherRoot);
-
-    if (abortSignal?.aborted) {
-      throw createHostedRuntimeAbortError(abortSignal);
-    }
-
-    return await new Promise<HostedAssistantRuntimeJobResult>((resolve, reject) => {
-      const child = spawn(process.execPath, childArgs, {
-        cwd: launcherRoot,
-        detached: process.platform !== "win32",
-        env: createHostedRuntimeChildProcessEnv({
-          forwardedEnv: { ...(runtime?.forwardedEnv ?? {}) },
-          isTypeScriptChild,
-          launcherDirectories,
-        }),
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-      let stdout = "";
-      let stderr = "";
-      let settled = false;
-      const removeAbortListener = attachHostedRuntimeAbortHandler({
-        child,
-        onAbort: (error) => {
-          settleError(error);
-        },
-        signal: abortSignal,
-      });
-
-      const settleError = (error: Error) => {
-        if (settled) {
-          return;
-        }
-
-        settled = true;
-        removeAbortListener();
-        reject(error);
-      };
-
-      const settleResult = (result: HostedAssistantRuntimeJobResult) => {
-        if (settled) {
-          return;
-        }
-
-        settled = true;
-        removeAbortListener();
-        resolve(result);
-      };
-
-      child.stdout.setEncoding("utf8");
-      child.stdout.on("data", (chunk) => {
-        stdout += chunk;
-      });
-      child.stderr.setEncoding("utf8");
-      child.stderr.on("data", (chunk) => {
-        stderr += chunk;
-      });
-      child.on("error", (error) => {
-        settleError(error);
-      });
-      child.on("close", (code) => {
-        if (settled) {
-          return;
-        }
-
-        try {
-          const payload = parseHostedRuntimeChildResult(stdout);
-
-          if (!payload.ok) {
-            settleError(createHostedRuntimeChildError(payload.error, code));
-            return;
-          }
-
-          settleResult(payload.result as HostedAssistantRuntimeJobResult);
-        } catch (error) {
-          settleError(
-            new Error(
-              [
-                `Hosted assistant runtime child failed${code === null ? "" : ` with exit code ${code}`}.`,
-                stderr.trim(),
-                stdout.trim(),
-                error instanceof Error ? error.message : String(error),
-              ]
-                .filter(Boolean)
-                .join("\n"),
-            ),
-          );
-        }
-      });
-
-      child.stdin.on("error", () => {});
-      child.stdin.end(JSON.stringify(input));
-    });
-  } finally {
-    await rm(launcherRoot, { force: true, recursive: true });
-  }
-}
-
-function attachHostedRuntimeAbortHandler(input: {
-  child: ReturnType<typeof spawn>;
-  onAbort: (error: Error) => void;
-  signal: AbortSignal | null;
-}): () => void {
-  if (!input.signal) {
-    return () => {};
-  }
-
-  if (input.signal.aborted) {
-    terminateHostedRuntimeChildProcess(input.child);
-    queueMicrotask(() => {
-      input.onAbort(createHostedRuntimeAbortError(input.signal));
-    });
-    return () => {};
-  }
-
-  const handleAbort = () => {
-    terminateHostedRuntimeChildProcess(input.child);
-    input.onAbort(createHostedRuntimeAbortError(input.signal));
-  };
-
-  input.signal.addEventListener("abort", handleAbort, { once: true });
-  return () => {
-    input.signal?.removeEventListener("abort", handleAbort);
-  };
-}
-
-function terminateHostedRuntimeChildProcess(child: ReturnType<typeof spawn>): void {
-  const pid = typeof child.pid === "number" && child.pid > 0 ? child.pid : null;
-
-  if (pid !== null && process.platform !== "win32") {
-    try {
-      process.kill(-pid, "SIGKILL");
-      return;
-    } catch {
-      // Fall back to killing the child directly below.
-    }
-  }
-
-  try {
-    child.kill("SIGKILL");
-  } catch {
-    // best-effort cleanup only
-  }
-}
-
-function createHostedRuntimeAbortError(signal: AbortSignal | null): Error {
-  const reason = signal?.reason;
-
-  if (reason instanceof Error) {
-    return reason;
-  }
-
-  return new Error("Hosted assistant runtime child was aborted.");
 }
 
 function createHostedRuntimeChildError(

@@ -77,14 +77,6 @@ export function parseHostedAssistantRuntimeConfig(
             "Hosted assistant runtime config.forwardedEnv",
           ),
         }),
-    ...(record.internalWorkerProxyToken === undefined
-      ? {}
-      : {
-          internalWorkerProxyToken: readNullableString(
-            record.internalWorkerProxyToken,
-            "Hosted assistant runtime config.internalWorkerProxyToken",
-          ),
-        }),
     ...(record.userEnv === undefined
       ? {}
       : {

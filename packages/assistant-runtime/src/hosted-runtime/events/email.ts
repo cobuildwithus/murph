@@ -9,10 +9,9 @@ import {
   type HostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution";
 
-import {
-  buildHostedRunnerEmailMessageUrl,
-} from "../../hosted-email.ts";
-import { fetchHostedBytesResponse } from "../internal-http.ts";
+import type {
+  HostedRuntimeEffectsPort,
+} from "../platform.ts";
 import { withHostedInboxPipeline } from "./inbox-pipeline.ts";
 
 export async function ingestHostedEmailMessage(
@@ -20,21 +19,14 @@ export async function ingestHostedEmailMessage(
   dispatch: HostedExecutionDispatchRequest & {
     event: Extract<HostedExecutionDispatchRequest["event"], { kind: "email.message.received" }>;
   },
-  resultsBaseUrl: string,
-  fetchImpl: typeof fetch | undefined,
-  timeoutMs: number | null,
+  effectsPort: HostedRuntimeEffectsPort,
   _runtimeEnv: Readonly<Record<string, string>>,
 ): Promise<void> {
-  const { bytes, response } = await fetchHostedBytesResponse({
-    description: "Hosted email message fetch",
-    fetchImpl,
-    timeoutMs,
-    url: buildHostedRunnerEmailMessageUrl(resultsBaseUrl, dispatch.event.rawMessageKey).toString(),
-  });
+  const bytes = await effectsPort.readRawEmailMessage(dispatch.event.rawMessageKey);
 
-  if (!response.ok) {
+  if (!bytes) {
     throw new Error(
-      `Hosted email message fetch failed for ${dispatch.event.userId}/${dispatch.event.rawMessageKey} with HTTP ${response.status}.`,
+      `Hosted email message fetch failed for ${dispatch.event.userId}/${dispatch.event.rawMessageKey}.`,
     );
   }
 

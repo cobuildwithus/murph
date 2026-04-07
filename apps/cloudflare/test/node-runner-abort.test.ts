@@ -35,17 +35,16 @@ describe("runHostedExecutionJob abort forwarding", () => {
     const controller = new AbortController();
 
     await runHostedExecutionJob({
-      bundles: {
-        agentState: null,
-        vault: null,
-      },
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          userId: "member_abort_forwarding",
+      request: {
+        bundle: null,
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            userId: "member_abort_forwarding",
+          },
+          eventId: "evt_abort_forwarding",
+          occurredAt: "2026-03-29T10:45:00.000Z",
         },
-        eventId: "evt_abort_forwarding",
-        occurredAt: "2026-03-29T10:45:00.000Z",
       },
     }, {
       signal: controller.signal,

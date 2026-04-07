@@ -1,16 +1,11 @@
 import {
   HOSTED_EXECUTION_AI_USAGE_RECORD_PATH,
+  type HostedExecutionAiUsageRecordRequest,
 } from "@murphai/hosted-execution";
-import {
-  HOSTED_EXECUTION_CALLBACK_HOSTS,
-  HOSTED_EXECUTION_PROXY_HOSTS,
-} from "@murphai/hosted-execution/callback-hosts";
-import type {
-  HostedExecutionAiUsageRecordRequest,
-} from "@murphai/hosted-execution/web-control-plane";
 
 import { createHostedArtifactStore } from "./bundle-store.ts";
 import { readHostedExecutionEnvironment } from "./env.ts";
+import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "./internal-hosts.ts";
 import { json, methodNotAllowed, notFound, readJsonObject } from "./json.ts";
 import { createHostedPendingUsageStore } from "./usage-store.ts";
 import { handleRunnerDeviceSyncControlRequest } from "./runner-outbound/device-sync.ts";
@@ -44,7 +39,7 @@ export async function handleRunnerOutboundRequest(
     return authorizationError;
   }
 
-  if (url.hostname === HOSTED_EXECUTION_CALLBACK_HOSTS.results) {
+  if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort) {
     return handleRunnerResultsRequest({
       bucket: env.BUNDLES,
       env,
@@ -55,7 +50,7 @@ export async function handleRunnerOutboundRequest(
     });
   }
 
-  if (url.hostname === HOSTED_EXECUTION_CALLBACK_HOSTS.artifacts) {
+  if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore) {
     const match = /^\/objects\/(?<sha256>[a-f0-9]{64})$/u.exec(url.pathname);
     if (!match?.groups) {
       return notFound();
@@ -75,7 +70,7 @@ export async function handleRunnerOutboundRequest(
     });
   }
 
-  if (url.hostname === HOSTED_EXECUTION_PROXY_HOSTS.deviceSync) {
+  if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.deviceSyncPort) {
     return handleRunnerDeviceSyncControlRequest({
       env,
       environment,
@@ -85,7 +80,7 @@ export async function handleRunnerOutboundRequest(
     });
   }
 
-  if (url.hostname === HOSTED_EXECUTION_PROXY_HOSTS.usage) {
+  if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.usageExportPort) {
     return handleRunnerUsageRecordRequest({
       bucket: env.BUNDLES,
       env,

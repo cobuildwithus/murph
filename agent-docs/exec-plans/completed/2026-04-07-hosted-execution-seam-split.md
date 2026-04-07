@@ -1,4 +1,4 @@
-# Shrink hosted-execution to a narrow seam
+# Shrink @murphai/hosted-execution to semantic ports and move Cloudflare topology behind injected runtime capabilities
 
 Status: completed
 Created: 2026-04-07
@@ -6,85 +6,68 @@ Updated: 2026-04-07
 
 ## Goal
 
-- Reduce `@murphai/hosted-execution` to the transport-neutral hosted seam: shared dispatch/control contracts, stable route shapes, parsers, and only the minimal generic helpers that still belong at that boundary.
-- Move app-local hosted infra adapters out of the public seam package.
-- Move subsystem-owned hosted contracts out of `@murphai/hosted-execution` and into their actual owners.
+- Hard-cut the hosted execution runtime so shared/runtime packages consume semantic injected capabilities only, while `apps/cloudflare` becomes the sole owner of worker-host topology and outbound proxy policy.
 
 ## Success criteria
 
-- `packages/hosted-execution/src/index.ts` exports only the narrow hosted seam surface and stops re-exporting app-local env/auth/callback/client/control helpers.
-- Hosted device-sync runtime request/response types and parsers move to `@murphai/device-syncd`.
-- Hosted usage export, hosted share-pack control, hosted member-private-state control, and hosted user-env control no longer originate from `@murphai/hosted-execution`.
-- `apps/web`, `apps/cloudflare`, and `packages/assistant-runtime` consume the new owners without changing hosted behavior.
-- Architecture/docs describe `@murphai/hosted-execution` as a narrow contract package rather than a grab-bag hosted owner.
+- `packages/assistant-runtime/**` no longer constructs or inspects Cloudflare worker URLs/hostnames.
+- `packages/hosted-execution/**` no longer exports worker host constants or shared Cloudflare callback/proxy base URL defaults.
+- `packages/device-syncd/**` no longer hardcodes `device-sync.worker`.
+- `apps/cloudflare/**` owns the internal worker host map and injects method-based runtime capabilities into the hosted runner.
+- Hosted runtime behavior still passes the required verification lanes for the touched packages/apps.
 
 ## Scope
 
 - In scope:
+- `packages/assistant-runtime/**`
 - `packages/hosted-execution/**`
 - `packages/device-syncd/**`
-- `packages/runtime-state/**`
-- `packages/assistant-runtime/**`
-- `apps/web/src/lib/hosted-execution/**`
-- `apps/web/src/lib/hosted-onboarding/**`
-- `apps/web/src/lib/hosted-share/**`
 - `apps/cloudflare/**`
-- matching tests/docs needed to keep ownership and verification truthful
+- `ARCHITECTURE.md`
+- package/app README files that describe the hosted boundary
 - Out of scope:
-- behavior changes to hosted onboarding, hosted share semantics, or hosted device-sync flows beyond ownership movement
-- new product capabilities or hosted protocol redesigns
+- changing hosted product behavior beyond the boundary cleanup
+- adding new hosted ports beyond `artifactStore`, `effectsPort`, `deviceSyncPort`, and `usageExportPort`
+- reviving removed share-pack fetch routes or adding speculative runtime seams
 
 ## Constraints
 
-- Preserve adjacent dirty-tree edits; this refactor overlaps active hosted lanes.
-- Keep sibling-package imports on declared package entrypoints only.
-- Avoid introducing new third-party dependencies.
-- Keep the final `@murphai/hosted-execution` surface transport-neutral and small.
+- Technical constraints:
+- The hosted runner crosses JSON process boundaries inside the container, so method-based capability injection must be rebuilt inside app-local runner bootstrap rather than serialized directly through the job payload.
+- Missing injected capabilities must fail closed.
+- Product/process constraints:
+- Preserve unrelated dirty-tree edits.
+- Keep the results/effects lane combined behind one semantic `effectsPort`.
 
 ## Risks and mitigations
 
-1. Risk: Route/path or parser ownership moves can silently drift caller/callee behavior.
-   Mitigation: move shared types/parsers with the owner package and run focused tests on the moved seams.
-2. Risk: Existing dirty-tree edits in hosted files can be clobbered during the refactor.
-   Mitigation: re-read touched files before each edit and keep patches narrowly scoped.
-3. Risk: Public-package export changes break internal workspace consumers.
-   Mitigation: update every import site in-tree in the same turn and keep the remaining seam package coherent.
+1. Risk: runtime/platform inversion sprawls across too many files and regresses hosted execution.
+   Mitigation: cut `assistant-runtime` first around a small `HostedRuntimePlatform` interface, then adapt Cloudflare onto it before deleting old topology helpers.
+2. Risk: serializable runner payload constraints tempt a fallback to URL-based shared config.
+   Mitigation: move the isolated child bootstrap into `apps/cloudflare` so method-based runtime dependencies stay app-local and non-serializable.
+3. Risk: active hosted/device-sync lanes overlap touched files.
+   Mitigation: stay within the existing hosted seam-split coordination lane, re-read files before edits, and avoid unrelated behavior changes.
 
 ## Tasks
 
-1. Register the ledger lane and inspect the current hosted-execution export/import surface.
-2. Move hosted device-sync runtime contracts/parsers/routes to `@murphai/device-syncd`.
-3. Re-home hosted usage/share/member-state/user-env adapters to local or owning package surfaces.
-4. Trim `@murphai/hosted-execution` exports, package docs, and architecture wording to the new narrow seam.
-5. Run required verification, complete the required audit pass, and close/commit the plan.
+1. Add `HostedRuntimePlatform` and refactor `assistant-runtime` internals to depend on semantic methods rather than callback URLs or worker hostnames.
+2. Replace the Cloudflare hosted-runner entry/bootstrap path so `apps/cloudflare` builds the platform adapter, including isolated child execution.
+3. Move worker-host constants and outbound routing ownership fully into `apps/cloudflare`.
+4. Remove shared Cloudflare topology/defaulting from `hosted-execution` and `device-syncd`.
+5. Update docs/tests, run required verification, audit the final diff, and commit via `scripts/finish-task`.
 
 ## Decisions
 
-- Prefer existing owner packages plus app-local adapters over adding another generic hosted helper package.
-- Keep `@murphai/hosted-execution` focused on shared dispatch/auth/route/outbox/seam contracts, not Cloudflare or Vercel deployment wiring.
+- Use a method-based `HostedRuntimePlatform` interface with four semantic capabilities: `artifactStore`, `effectsPort`, `deviceSyncPort`, and `usageExportPort`.
+- Keep the current combined results lane as semantic `effectsPort` instead of splitting commit/email/journal into separate ports.
+- Treat the serialized job payload as transport glue only; runtime behavior itself consumes injected methods, not URLs.
+- Rebuild the injected platform inside `apps/cloudflare` runner bootstrap, including the isolated child path.
 
 ## Verification
 
 - Commands to run:
-- `./node_modules/.bin/tsc -p packages/hosted-execution/tsconfig.json --noEmit --pretty false`
-- `./node_modules/.bin/tsc -p packages/assistant-runtime/tsconfig.json --noEmit --pretty false`
-- `./node_modules/.bin/tsc -p packages/assistant-engine/tsconfig.json --noEmit --pretty false`
-- `./node_modules/.bin/tsc -p apps/cloudflare/tsconfig.json --noEmit --pretty false`
-- `./node_modules/.bin/tsc -p apps/web/tsconfig.json --noEmit --pretty false`
-- `../../node_modules/.bin/vitest run --config vitest.config.ts test/hosted-share-issuer.test.ts test/member-private-state.test.ts test/hosted-execution.test.ts` from `packages/hosted-execution`
-- `../../node_modules/.bin/vitest run --config vitest.config.ts test/hosted-runtime-usage.test.ts test/hosted-runtime-http.test.ts` from `packages/assistant-runtime`
-- `../../node_modules/.bin/vitest run --config vitest.config.ts test/execution-adapters.test.ts` from `packages/assistant-engine`
-- `./node_modules/.bin/vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/business-outcomes.test.ts`
-- `./node_modules/.bin/vitest run --config apps/web/vitest.config.ts apps/web/test/hosted-execution-control.test.ts`
+- `pnpm typecheck`
+- `pnpm test:coverage`
 - Expected outcomes:
-- Passed:
-- `packages/hosted-execution` typecheck
-- `packages/assistant-runtime` typecheck
-- `packages/assistant-engine` typecheck
-- `apps/cloudflare` typecheck
-- targeted hosted seam tests listed above
-- Unrelated blocker:
-- `./node_modules/.bin/tsc -p apps/web/tsconfig.json --noEmit --pretty false`
-- failure: `apps/web/src/lib/hosted-onboarding/invite-service.ts(179,59)` rejects `TransactionClient | PrismaClient` where `PrismaClient` is required
-- this file was already dirty outside the seam-split edits and was not changed as part of the narrow-seam refactor
+- Hosted runtime and Cloudflare runner tests cover the boundary cut without shared worker-host defaults remaining in runtime/shared packages.
 Completed: 2026-04-07

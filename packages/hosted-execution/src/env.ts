@@ -1,7 +1,3 @@
-import {
-  DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
-  DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
-} from "./callback-hosts.ts";
 export interface HostedExecutionDispatchEnvironment {
   dispatchTimeoutMs: number;
   dispatchUrl: string | null;
@@ -9,12 +5,6 @@ export interface HostedExecutionDispatchEnvironment {
 
 export interface HostedExecutionControlEnvironment {
   baseUrl: string | null;
-}
-
-export interface HostedExecutionWebControlPlaneEnvironment {
-  deviceSyncRuntimeBaseUrl: string;
-  signingSecret: string | null;
-  usageBaseUrl: string;
 }
 
 export interface HostedExecutionWorkerEnvironment {
@@ -34,7 +24,6 @@ export interface HostedExecutionWorkerEnvironment {
   maxEventAttempts: number;
   retryDelayMs: number;
   runnerTimeoutMs: number;
-  webInternalSigningSecret: string;
 }
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
@@ -65,16 +54,6 @@ export function readHostedExecutionControlEnvironment(
 ): HostedExecutionControlEnvironment {
   return {
     baseUrl: normalizeHostedExecutionBaseUrl(source.HOSTED_EXECUTION_DISPATCH_URL),
-  };
-}
-
-export function readHostedExecutionWebControlPlaneEnvironment(
-  source: EnvSource = process.env,
-): HostedExecutionWebControlPlaneEnvironment {
-  return {
-    deviceSyncRuntimeBaseUrl: DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
-    signingSecret: normalizeHostedExecutionString(source.HOSTED_WEB_INTERNAL_SIGNING_SECRET),
-    usageBaseUrl: DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
   };
 }
 
@@ -156,10 +135,6 @@ export function readHostedExecutionWorkerEnvironment(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS),
       60_000,
       "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS",
-    ),
-    webInternalSigningSecret: requireHostedExecutionString(
-      normalizeHostedExecutionString(source.HOSTED_WEB_INTERNAL_SIGNING_SECRET),
-      "HOSTED_WEB_INTERNAL_SIGNING_SECRET",
     ),
   };
 }

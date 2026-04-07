@@ -22,6 +22,7 @@ export async function startHostedContainerEntrypoint(input: {
   const server = createServer(async (request, response) => {
     const requestAbort = createRequestAbortController(request, response);
     let job: HostedAssistantRuntimeJobInput | null = null;
+    let internalWorkerProxyToken: string | null = null;
 
     try {
       if (request.method === "GET" && request.url === "/health") {
@@ -72,9 +73,11 @@ export async function startHostedContainerEntrypoint(input: {
       }
 
       try {
-        job = parseHostedAssistantRuntimeJobInput(
+        const parsed = parseHostedExecutionContainerRunRequest(
           JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown,
         );
+        job = parsed.job;
+        internalWorkerProxyToken = parsed.internalWorkerProxyToken;
       } catch (error) {
         emitHostedExecutionStructuredLog({
           component: "container",
@@ -91,6 +94,7 @@ export async function startHostedContainerEntrypoint(input: {
       }
 
       const result = await runHostedExecutionJob(job, {
+        internalWorkerProxyToken,
         signal: requestAbort.signal,
       });
 
@@ -129,6 +133,25 @@ export async function startHostedContainerEntrypoint(input: {
   return server;
 }
 
+function parseHostedExecutionContainerRunRequest(value: unknown): {
+  internalWorkerProxyToken: string | null;
+  job: HostedAssistantRuntimeJobInput;
+} {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Hosted container runner request must be an object.");
+  }
+
+  const record = value as Record<string, unknown>;
+
+  return {
+    internalWorkerProxyToken: readNullableString(
+      record.internalWorkerProxyToken,
+      "Hosted container runner request.internalWorkerProxyToken",
+    ),
+    job: parseHostedAssistantRuntimeJobInput(record.job),
+  };
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const port = Number.parseInt(process.env.PORT ?? "8080", 10) || 8080;
 
@@ -151,6 +174,18 @@ function normalizeOptionalString(value: string | null | undefined): string | nul
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function readNullableString(value: unknown, label: string): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    throw new TypeError(`${label} must be a string or null.`);
+  }
+
+  return normalizeOptionalString(value);
 }
 
 function readBearerAuthorizationToken(value: string | undefined): string | null {
