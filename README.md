@@ -77,10 +77,13 @@ Installed package:
 
 ```bash
 murph onboard
+murph model
 murph chat
 murph run
 vault-cli inbox doctor
 ```
+
+Use `murph model` any time after onboarding to reopen the assistant model/provider picker and switch the saved default model without rerunning the full setup flow.
 
 From this repo:
 
