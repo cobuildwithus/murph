@@ -2029,6 +2029,96 @@
             }
           }
         },
+        "model": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "options": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "show": {
+                  "description": "Show the saved default assistant backend without changing it.",
+                  "type": "boolean"
+                },
+                "preset": {
+                  "description": "Assistant backend preset to save: Codex or an OpenAI-compatible endpoint.",
+                  "type": "string",
+                  "enum": [
+                    "codex",
+                    "openai-compatible"
+                  ]
+                },
+                "providerPreset": {
+                  "description": "Optional named OpenAI-compatible provider preset to seed the endpoint prompts.",
+                  "type": "string",
+                  "enum": [
+                    "openai",
+                    "openrouter",
+                    "venice",
+                    "deepseek",
+                    "groq",
+                    "together",
+                    "fireworks",
+                    "cerebras",
+                    "xai",
+                    "huggingface",
+                    "nvidia",
+                    "ollama",
+                    "lm-studio",
+                    "vllm",
+                    "litellm",
+                    "custom"
+                  ]
+                },
+                "model": {
+                  "description": "Default model to save for the selected backend.",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "baseUrl": {
+                  "description": "OpenAI-compatible base URL to save, such as http://127.0.0.1:11434/v1.",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "apiKeyEnv": {
+                  "description": "Environment variable name that should hold the OpenAI-compatible API key.",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "providerName": {
+                  "description": "Stable label for the saved OpenAI-compatible provider.",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "codexCommand": {
+                  "description": "Optional Codex CLI executable path. Defaults to codex.",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "profile": {
+                  "description": "Optional Codex profile name to save.",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "reasoningEffort": {
+                  "description": "Optional assistant reasoning effort default to save.",
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh"
+                  ]
+                },
+                "oss": {
+                  "description": "Save a local Codex OSS model target instead of the signed-in Codex cloud path.",
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        },
         "meal": {
           "type": "object",
           "additionalProperties": false,
@@ -5206,15 +5296,6 @@
                           "type": "string",
                           "minLength": 1
                         },
-                        "backend": {
-                          "description": "Retrieval backend. Defaults to `auto`, which prefers SQLite when an index exists and otherwise falls back to the scan backend.",
-                          "type": "string",
-                          "enum": [
-                            "auto",
-                            "scan",
-                            "sqlite"
-                          ]
-                        },
                         "recordType": {
                           "description": "Optional record families. Repeat --record-type for multiple values: core, experiment, journal, event, sample, audit, assessment, profile_snapshot, current_profile, goal, condition, allergy, protocol, history, family, genetics.",
                           "type": "array",
@@ -5272,8 +5353,20 @@
                       }
                     }
                   }
-                },
-                "index": {
+                }
+              }
+            }
+          }
+        },
+        "query": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "commands": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "projection": {
                   "type": "object",
                   "additionalProperties": false,
                   "properties": {

@@ -13,13 +13,10 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { resolveEffectiveTopLevelToken } from '@murphai/operator-config/command-helpers'
 import {
-  buildAssistantProviderDefaultsPatch,
   normalizeVaultForConfig,
   readOperatorConfig,
-  resolveAssistantBackendTarget,
   saveAssistantOperatorDefaultsPatch,
   saveDefaultVaultConfig,
-  type AssistantOperatorDefaults,
 } from '@murphai/operator-config/operator-config'
 import {
   type SetupChannel,
@@ -42,6 +39,11 @@ import {
   createSetupAgentmailSelectionResolver,
   type SetupAgentmailSelectionResolver,
 } from './setup-agentmail.js'
+import {
+  assistantOperatorDefaultsMatch,
+  assistantSelectionToOperatorDefaults,
+  formatAssistantDefaultsSummary,
+} from './setup-assistant-defaults.js'
 import {
   createDefaultCommandRunner,
   defaultDownloadFile,
@@ -985,8 +987,6 @@ async function ensureDefaultVaultSelection(input: {
   )
 }
 
-
-
 async function ensureAssistantDefaultSelection(input: {
   assistant: SetupConfiguredAssistant
   dryRun: boolean
@@ -1051,97 +1051,6 @@ async function ensureAssistantDefaultSelection(input: {
 
   return input.assistant
 }
-
-function assistantSelectionToOperatorDefaults(
-  assistant: SetupConfiguredAssistant,
-  existingDefaults: AssistantOperatorDefaults | null,
-): Partial<AssistantOperatorDefaults> {
-  if (!assistant.provider) {
-    return {
-      backend: null,
-      account: assistant.account ?? null,
-    }
-  }
-
-  return {
-    ...buildAssistantProviderDefaultsPatch({
-      defaults: existingDefaults,
-      provider: assistant.provider,
-      providerConfig: {
-        model: assistant.model,
-        ...(assistant.codexCommand !== null
-          ? {
-              codexCommand: assistant.codexCommand,
-            }
-          : {}),
-        reasoningEffort: assistant.reasoningEffort,
-        sandbox: assistant.sandbox,
-        approvalPolicy: assistant.approvalPolicy,
-        profile: assistant.profile,
-        oss: assistant.oss === true,
-        baseUrl: assistant.baseUrl,
-        apiKeyEnv: assistant.apiKeyEnv,
-        providerName: assistant.providerName,
-      },
-    }),
-    account: assistant.account ?? null,
-  }
-}
-
-function assistantOperatorDefaultsMatch(
-  existing: AssistantOperatorDefaults | null,
-  next: Partial<AssistantOperatorDefaults>,
-): boolean {
-  return (
-    JSON.stringify(resolveAssistantBackendTarget(existing)) ===
-      JSON.stringify(next.backend ?? null) &&
-    JSON.stringify(existing?.account ?? null) ===
-      JSON.stringify(next.account ?? null)
-  )
-}
-
-function formatAssistantDefaultsSummary(
-  assistant: SetupConfiguredAssistant,
-): string {
-  if (assistant.provider === 'openai-compatible') {
-    return assistant.baseUrl
-      ? `${assistant.model ?? 'the configured model'} via ${assistant.baseUrl}`
-      : `${assistant.model ?? 'the configured model'} via the saved OpenAI-compatible endpoint`
-  }
-
-  if (assistant.oss) {
-    return appendAssistantAccountSummary(
-      `${assistant.model ?? 'the configured local model'} in Codex OSS`,
-      assistant,
-    )
-  }
-
-  return appendAssistantAccountSummary(
-    `${assistant.model ?? 'the configured model'} in Codex CLI`,
-    assistant,
-  )
-}
-
-function normalizeNullableConfigField(value: unknown): string | null {
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
-}
-
-function appendAssistantAccountSummary(
-  summary: string,
-  assistant: SetupConfiguredAssistant,
-): string {
-  const planName = normalizeNullableConfigField(assistant.account?.planName)
-  if (planName) {
-    return `${summary} (${planName} account)`
-  }
-
-  if (assistant.account?.kind === 'api-key') {
-    return `${summary} (API key account)`
-  }
-
-  return summary
-}
-
 function defaultResolveCliBinPath(): string {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'bin.js')
 }
