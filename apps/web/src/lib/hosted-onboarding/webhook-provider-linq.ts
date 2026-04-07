@@ -17,7 +17,7 @@ import {
   ensureHostedMemberForPhone,
   persistHostedMemberLinqChatBinding,
 } from "./member-identity-service";
-import { findHostedMemberByPhoneLookupKey } from "./hosted-member-store";
+import { findHostedMemberByPhoneNumber } from "./hosted-member-store";
 import {
   claimHostedLinqOnboardingLinkNotice,
   claimHostedLinqQuotaReplyNotice,
@@ -66,8 +66,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
     return buildIgnoredLinqWebhookPlan("invalid-phone");
   }
 
-  const existingMember = await findHostedMemberByPhoneLookupKey({
-    phoneLookupKey,
+  const existingMember = await findHostedMemberByPhoneNumber({
+    phoneNumber: participantPhoneNumber,
     prisma: input.prisma,
   });
 

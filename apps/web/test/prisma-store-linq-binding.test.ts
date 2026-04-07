@@ -56,7 +56,7 @@ describe("PrismaLinqControlPlaneStore hosted Linq bindings", () => {
   });
 
   it("looks up a binding by the canonical recipient phone", async () => {
-    const findUnique = vi.fn().mockResolvedValue(
+    const findFirst = vi.fn().mockResolvedValue(
       createBindingRecord({
         id: "linqb_found",
         label: "Primary",
@@ -67,7 +67,7 @@ describe("PrismaLinqControlPlaneStore hosted Linq bindings", () => {
     const store = new PrismaLinqControlPlaneStore({
       prisma: {
         linqRecipientBinding: {
-          findUnique,
+          findFirst,
         },
       } as never,
     });
@@ -80,9 +80,11 @@ describe("PrismaLinqControlPlaneStore hosted Linq bindings", () => {
         userId: "user-123",
       }),
     );
-    expect(findUnique).toHaveBeenCalledWith({
+    expect(findFirst).toHaveBeenCalledWith({
       where: {
-        recipientPhone: createHostedPhoneLookupKey("+15557654321"),
+        recipientPhone: {
+          in: [createHostedPhoneLookupKey("+15557654321")],
+        },
       },
     });
   });
@@ -104,7 +106,7 @@ describe("PrismaLinqControlPlaneStore hosted Linq bindings", () => {
     const store = new PrismaLinqControlPlaneStore({
       prisma: {
         linqRecipientBinding: {
-          findUnique: vi.fn().mockResolvedValue(cloneBindingRecord(existing)),
+          findFirst: vi.fn().mockResolvedValue(cloneBindingRecord(existing)),
           update,
         },
       } as never,
@@ -133,7 +135,7 @@ describe("PrismaLinqControlPlaneStore hosted Linq bindings", () => {
     const store = new PrismaLinqControlPlaneStore({
       prisma: {
         linqRecipientBinding: {
-          findUnique: vi.fn().mockResolvedValue(
+          findFirst: vi.fn().mockResolvedValue(
             createBindingRecord({
               id: "linqb_conflict",
               recipientPhone: "+15557654321",
@@ -160,7 +162,7 @@ describe("PrismaLinqControlPlaneStore hosted Linq bindings", () => {
       recipientPhone: "+15557654321",
       userId: "user-123",
     });
-    const findUnique = vi.fn()
+    const findFirst = vi.fn()
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(cloneBindingRecord(existing));
     const create = vi.fn().mockRejectedValue({ code: "P2002" });
@@ -176,7 +178,7 @@ describe("PrismaLinqControlPlaneStore hosted Linq bindings", () => {
       prisma: {
         linqRecipientBinding: {
           create,
-          findUnique,
+          findFirst,
           update,
         },
       } as never,
@@ -194,14 +196,18 @@ describe("PrismaLinqControlPlaneStore hosted Linq bindings", () => {
     }));
 
     expect(create).toHaveBeenCalledTimes(1);
-    expect(findUnique).toHaveBeenNthCalledWith(1, {
+    expect(findFirst).toHaveBeenNthCalledWith(1, {
       where: {
-        recipientPhone: createHostedPhoneLookupKey("+15557654321"),
+        recipientPhone: {
+          in: [createHostedPhoneLookupKey("+15557654321")],
+        },
       },
     });
-    expect(findUnique).toHaveBeenNthCalledWith(2, {
+    expect(findFirst).toHaveBeenNthCalledWith(2, {
       where: {
-        recipientPhone: createHostedPhoneLookupKey("+15557654321"),
+        recipientPhone: {
+          in: [createHostedPhoneLookupKey("+15557654321")],
+        },
       },
     });
     expect(update).toHaveBeenCalledWith({

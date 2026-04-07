@@ -7,10 +7,17 @@ import {
 
 import {
   createHostedLinqChatLookupKey,
+  createHostedPhoneLookupKeyReadCandidates,
   createHostedPrivyUserLookupKey,
+  createHostedPrivyUserLookupKeyReadCandidates,
   createHostedStripeCustomerLookupKey,
+  createHostedStripeCustomerLookupKeyReadCandidates,
   createHostedStripeSubscriptionLookupKey,
+  createHostedStripeSubscriptionLookupKeyReadCandidates,
+  createHostedTelegramUserLookupKey,
+  createHostedTelegramUserLookupKeyReadCandidates,
   createHostedWalletAddressLookupKey,
+  createHostedWalletAddressLookupKeyReadCandidates,
 } from "./contact-privacy";
 import {
   type HostedOnboardingPrismaClient,
@@ -51,6 +58,7 @@ type HostedMemberRoutingRecord = {
   linqChatLookupKey: string | null;
   memberId: string;
   telegramUserLookupKey: string | null;
+  telegramUserIdEncrypted: string | null;
 };
 
 export interface HostedMemberStripeBillingRefSnapshot {
@@ -84,6 +92,7 @@ export interface HostedMemberIdentityWriteInput {
   phoneLookupKey: string;
   phoneNumberVerifiedAt: Date | null;
   prisma: HostedMemberStoreClient;
+  phoneNumber: string | null;
   privyUserId: string | null;
   signupPhoneCodeSendAttemptId: string | null;
   signupPhoneCodeSendAttemptStartedAt: Date | null;
@@ -170,15 +179,17 @@ export async function findHostedMemberByPrivyUserId(input: {
   prisma: HostedMemberStoreClient;
   privyUserId: string;
 }): Promise<HostedMember | null> {
-  const privyUserLookupKey = createHostedPrivyUserLookupKey(input.privyUserId);
+  const privyUserLookupKeys = createHostedPrivyUserLookupKeyReadCandidates(input.privyUserId);
 
-  if (!privyUserLookupKey) {
+  if (privyUserLookupKeys.length === 0) {
     return null;
   }
 
-  const identityRecord = await input.prisma.hostedMemberIdentity.findUnique({
+  const identityRecord = await input.prisma.hostedMemberIdentity.findFirst({
     where: {
-      privyUserLookupKey,
+      privyUserLookupKey: {
+        in: privyUserLookupKeys,
+      },
     },
     include: {
       member: true,
@@ -204,19 +215,47 @@ export async function findHostedMemberByPhoneLookupKey(input: {
   return identityRecord?.member ?? null;
 }
 
+export async function findHostedMemberByPhoneNumber(input: {
+  phoneNumber: string;
+  prisma: HostedMemberStoreClient;
+}): Promise<HostedMember | null> {
+  const phoneLookupKeys = createHostedPhoneLookupKeyReadCandidates(input.phoneNumber);
+
+  if (phoneLookupKeys.length === 0) {
+    return null;
+  }
+
+  const identityRecord = await input.prisma.hostedMemberIdentity.findFirst({
+    where: {
+      phoneLookupKey: {
+        in: phoneLookupKeys,
+      },
+    },
+    include: {
+      member: true,
+    },
+  });
+
+  return identityRecord?.member ?? null;
+}
+
 export async function findHostedMemberByWalletAddress(input: {
   prisma: HostedMemberStoreClient;
   walletAddress: string;
 }): Promise<HostedMember | null> {
-  const walletAddressLookupKey = createHostedWalletAddressLookupKey(input.walletAddress);
+  const walletAddressLookupKeys = createHostedWalletAddressLookupKeyReadCandidates(
+    input.walletAddress,
+  );
 
-  if (!walletAddressLookupKey) {
+  if (walletAddressLookupKeys.length === 0) {
     return null;
   }
 
-  const identityRecord = await input.prisma.hostedMemberIdentity.findUnique({
+  const identityRecord = await input.prisma.hostedMemberIdentity.findFirst({
     where: {
-      walletAddressLookupKey,
+      walletAddressLookupKey: {
+        in: walletAddressLookupKeys,
+      },
     },
     include: {
       member: true,
@@ -248,19 +287,55 @@ export async function findHostedMemberByTelegramUserLookupKey(input: {
   return routingRecord?.member ?? null;
 }
 
+export async function findHostedMemberByTelegramUserId(input: {
+  prisma: HostedMemberStoreClient;
+  telegramUserId: string;
+}): Promise<HostedMemberTelegramLookupSnapshot | null> {
+  const telegramUserLookupKeys = createHostedTelegramUserLookupKeyReadCandidates(
+    input.telegramUserId,
+  );
+
+  if (telegramUserLookupKeys.length === 0) {
+    return null;
+  }
+
+  const routingRecord = await input.prisma.hostedMemberRouting.findFirst({
+    where: {
+      telegramUserLookupKey: {
+        in: telegramUserLookupKeys,
+      },
+    },
+    select: {
+      member: {
+        select: {
+          billingStatus: true,
+          id: true,
+          suspendedAt: true,
+        },
+      },
+    },
+  });
+
+  return routingRecord?.member ?? null;
+}
+
 export async function findHostedMemberByStripeCustomerId(input: {
   prisma: HostedMemberStoreClient;
   stripeCustomerId: string;
 }): Promise<HostedMember | null> {
-  const stripeCustomerLookupKey = createHostedStripeCustomerLookupKey(input.stripeCustomerId);
+  const stripeCustomerLookupKeys = createHostedStripeCustomerLookupKeyReadCandidates(
+    input.stripeCustomerId,
+  );
 
-  if (!stripeCustomerLookupKey) {
+  if (stripeCustomerLookupKeys.length === 0) {
     return null;
   }
 
-  const billingRefRecord = await input.prisma.hostedMemberBillingRef.findUnique({
+  const billingRefRecord = await input.prisma.hostedMemberBillingRef.findFirst({
     where: {
-      stripeCustomerLookupKey,
+      stripeCustomerLookupKey: {
+        in: stripeCustomerLookupKeys,
+      },
     },
     include: {
       member: true,
@@ -274,17 +349,19 @@ export async function findHostedMemberByStripeSubscriptionId(input: {
   prisma: HostedMemberStoreClient;
   stripeSubscriptionId: string;
 }): Promise<HostedMember | null> {
-  const stripeSubscriptionLookupKey = createHostedStripeSubscriptionLookupKey(
+  const stripeSubscriptionLookupKeys = createHostedStripeSubscriptionLookupKeyReadCandidates(
     input.stripeSubscriptionId,
   );
 
-  if (!stripeSubscriptionLookupKey) {
+  if (stripeSubscriptionLookupKeys.length === 0) {
     return null;
   }
 
-  const billingRefRecord = await input.prisma.hostedMemberBillingRef.findUnique({
+  const billingRefRecord = await input.prisma.hostedMemberBillingRef.findFirst({
     where: {
-      stripeSubscriptionLookupKey,
+      stripeSubscriptionLookupKey: {
+        in: stripeSubscriptionLookupKeys,
+      },
     },
     include: {
       member: true,
@@ -332,6 +409,7 @@ export async function readHostedMemberRoutingState(input: {
       linqChatLookupKey: true,
       memberId: true,
       telegramUserLookupKey: true,
+      telegramUserIdEncrypted: true,
     },
   });
 
@@ -466,16 +544,18 @@ export async function upsertHostedMemberLinqChatBinding(input: {
             ...buildHostedMemberRoutingPrivateColumns({
               linqChatId: input.linqChatId,
               memberId: input.memberId,
+              telegramUserId: null,
             }),
             memberId: input.memberId,
             linqChatLookupKey,
             telegramUserLookupKey: null,
           },
           update: {
-            ...buildHostedMemberRoutingPrivateColumns({
+            linqChatIdEncrypted: buildHostedMemberRoutingPrivateColumns({
               linqChatId: input.linqChatId,
               memberId: input.memberId,
-            }),
+              telegramUserId: null,
+            }).linqChatIdEncrypted,
             linqChatLookupKey,
           },
         });
@@ -494,20 +574,36 @@ export async function upsertHostedMemberLinqChatBinding(input: {
 export async function upsertHostedMemberTelegramRoutingBinding(input: {
   memberId: string;
   prisma: HostedMemberStoreClient;
-  telegramUserLookupKey: string;
+  telegramUserId: string;
 }): Promise<void> {
+  const telegramUserLookupKey = createHostedTelegramUserLookupKey(input.telegramUserId);
+
+  if (!telegramUserLookupKey) {
+    throw new TypeError("Hosted Telegram routing requires a non-empty Telegram user id.");
+  }
+
   await withHostedOnboardingTransaction(input.prisma, async (tx) => {
     await tx.hostedMemberRouting.upsert({
       where: {
         memberId: input.memberId,
       },
       create: {
+        ...buildHostedMemberRoutingPrivateColumns({
+          linqChatId: null,
+          memberId: input.memberId,
+          telegramUserId: input.telegramUserId,
+        }),
         memberId: input.memberId,
         linqChatLookupKey: null,
-        telegramUserLookupKey: input.telegramUserLookupKey,
+        telegramUserLookupKey,
       },
       update: {
-        telegramUserLookupKey: input.telegramUserLookupKey,
+        telegramUserIdEncrypted: buildHostedMemberRoutingPrivateColumns({
+          linqChatId: null,
+          memberId: input.memberId,
+          telegramUserId: input.telegramUserId,
+        }).telegramUserIdEncrypted,
+        telegramUserLookupKey,
       },
     });
   });
@@ -603,6 +699,7 @@ export async function writeHostedMemberSignupPhoneState(
   if (input.signupPhoneNumber !== undefined) {
     data.signupPhoneNumberEncrypted = buildHostedMemberIdentityPrivateColumns({
       memberId: input.memberId,
+      phoneNumber: null,
       privyUserId: null,
       signupPhoneCodeSendAttemptId: null,
       signupPhoneCodeSendAttemptStartedAt: null,
@@ -635,6 +732,7 @@ function buildHostedMemberIdentityCreateData(
     privyUserLookupKey: createHostedPrivyUserLookupKey(input.privyUserId),
     ...buildHostedMemberIdentityPrivateColumns({
       memberId: input.memberId,
+      phoneNumber: input.phoneNumber,
       privyUserId: input.privyUserId,
       signupPhoneCodeSendAttemptId: input.signupPhoneCodeSendAttemptId,
       signupPhoneCodeSendAttemptStartedAt: input.signupPhoneCodeSendAttemptStartedAt,
@@ -659,6 +757,7 @@ function buildHostedMemberIdentityUpdateData(
     privyUserLookupKey: createHostedPrivyUserLookupKey(input.privyUserId),
     ...buildHostedMemberIdentityPrivateColumns({
       memberId: input.memberId,
+      phoneNumber: input.phoneNumber,
       privyUserId: input.privyUserId,
       signupPhoneCodeSendAttemptId: input.signupPhoneCodeSendAttemptId,
       signupPhoneCodeSendAttemptStartedAt: input.signupPhoneCodeSendAttemptStartedAt,

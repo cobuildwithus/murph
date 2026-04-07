@@ -1,20 +1,63 @@
-import { HostedBillingStatus, HostedMemberStatus } from "@prisma/client";
+import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
+import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildHostedInviteReply } from "@/src/lib/hosted-onboarding/linq";
 
 const mocks = vi.hoisted(() => ({
+  deleteHostedStoredDispatchPayloadBestEffort: vi.fn(),
   claimHostedLinqOnboardingLinkNotice: vi.fn(),
   claimHostedLinqQuotaReplyNotice: vi.fn(),
   enqueueHostedExecutionOutbox: vi.fn(),
   incrementHostedLinqInboundDailyState: vi.fn(),
   incrementHostedLinqOutboundDailyState: vi.fn(),
+  maybeStageHostedExecutionDispatchPayload: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
+  stagedDispatches: new Map<string, HostedExecutionDispatchRequest>(),
 }));
 
-vi.mock("@/src/lib/hosted-execution/outbox", () => ({
-  enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
-}));
+vi.mock("@/src/lib/hosted-execution/outbox", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-execution/outbox")>(
+    "@/src/lib/hosted-execution/outbox",
+  );
+
+  return {
+    ...actual,
+    enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
+    enqueueHostedExecutionOutboxPayload: (input: {
+      payload: {
+        dispatch?: HostedExecutionDispatchRequest;
+        dispatchRef?: {
+          eventId: string;
+        };
+      };
+      sourceId: string;
+      sourceType: string;
+      tx: unknown;
+    }) => mocks.enqueueHostedExecutionOutbox({
+      dispatch:
+        input.payload.dispatch
+        ?? (input.payload.dispatchRef
+          ? mocks.stagedDispatches.get(input.payload.dispatchRef.eventId)
+          : undefined),
+      sourceId: input.sourceId,
+      sourceType: input.sourceType,
+      tx: input.tx,
+    }),
+  };
+});
+
+vi.mock("@/src/lib/hosted-execution/control", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-execution/control")>(
+    "@/src/lib/hosted-execution/control",
+  );
+
+  return {
+    ...actual,
+    deleteHostedStoredDispatchPayloadBestEffort: mocks.deleteHostedStoredDispatchPayloadBestEffort,
+    maybeStageHostedExecutionDispatchPayload: mocks.maybeStageHostedExecutionDispatchPayload,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
   claimHostedLinqOnboardingLinkNotice: mocks.claimHostedLinqOnboardingLinkNotice,
@@ -70,6 +113,7 @@ import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/w
 describe("handleHostedOnboardingLinqWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.stagedDispatches.clear();
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
@@ -77,6 +121,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.incrementHostedLinqOutboundDailyState.mockResolvedValue(makeHostedLinqDailyState({
       outboundCount: 1,
     }));
+    mocks.maybeStageHostedExecutionDispatchPayload.mockImplementation(
+      async (dispatch: HostedExecutionDispatchRequest) => {
+        mocks.stagedDispatches.set(dispatch.eventId, dispatch);
+        return createStagedPayload(dispatch);
+      },
+    );
   });
 
   it("reuses an existing transaction when dispatching active-member Linq messages", async () => {
@@ -155,11 +205,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
                       eventKind: "linq.message.received",
                       userId: "member_123",
                     }),
-                    linqEvent: expect.objectContaining({
-                      event_id: "evt_123",
-                      data: expect.not.objectContaining({
-                        extra_field: "discard-me",
-                      }),
+                    payloadRef: expect.objectContaining({
+                      key: expect.stringContaining("/member_123/evt_123.json"),
                     }),
                   }),
                 }),
@@ -169,12 +216,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         }),
       }),
     );
-    const persistedLinqEvent = readPersistedLinqDispatchEvent(receiptWrites.at(-1));
-    expect(persistedLinqEvent?.data).not.toHaveProperty("extra_field");
-    expect((persistedLinqEvent?.data as { message?: Record<string, unknown> } | undefined)?.message).not.toHaveProperty(
-      "extra_message_field",
-    );
-    expect(persistedLinqEvent?.data).not.toHaveProperty("recipient_phone");
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
       memberId: "member_123",
@@ -471,7 +512,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           id: "member_123",
           invites: [],
           phoneLookupKey: "+15551234567",
-          status: HostedMemberStatus.suspended,
+          suspendedAt: new Date("2026-03-26T12:00:00.000Z"),
         }),
       },
     });
@@ -707,7 +748,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
           phoneLookupKey: "+15551234567",
-          status: HostedMemberStatus.invited,
+          suspendedAt: null,
         }),
       },
     });
@@ -751,7 +792,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           phoneLookupKey: "+15551234567",
-          status: HostedMemberStatus.registered,
+          suspendedAt: null,
         }),
       },
     });
@@ -802,7 +843,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
           phoneLookupKey: "+15551234567",
-          status: HostedMemberStatus.invited,
+          suspendedAt: null,
         }),
       },
     });
@@ -881,13 +922,15 @@ function asPrismaTransactionClient<T extends Record<string, unknown>>(prisma: T)
       findUnique?: ReturnType<typeof vi.fn>;
     };
     hostedMemberIdentity?: {
-      findUnique?: ReturnType<typeof vi.fn>;
-      upsert?: ReturnType<typeof vi.fn>;
+      findFirst?: ((input: { include?: Record<string, unknown>; where: Record<string, unknown> }) => Promise<unknown>) | undefined;
+      findUnique?: ((input: { include?: Record<string, unknown>; where: Record<string, unknown> }) => Promise<unknown>) | undefined;
+      upsert?: ((input: { create: Record<string, unknown>; update: Record<string, unknown> }) => Promise<unknown>) | undefined;
     };
     hostedMemberRouting?: {
-      findUnique?: ReturnType<typeof vi.fn>;
-      updateMany?: ReturnType<typeof vi.fn>;
-      upsert?: ReturnType<typeof vi.fn>;
+      findFirst?: ((input: { where: Record<string, unknown> }) => Promise<unknown>) | undefined;
+      findUnique?: ((input: { where: Record<string, unknown> }) => Promise<unknown>) | undefined;
+      updateMany?: ((input: { data: Record<string, unknown>; where: Record<string, unknown> }) => Promise<unknown>) | undefined;
+      upsert?: ((input: { create: Record<string, unknown> }) => Promise<unknown>) | undefined;
     };
     hostedMember?: {
       findUnique?: ((input: { where?: Record<string, unknown>; include?: Record<string, unknown> }) => Promise<unknown>) | undefined;
@@ -916,6 +959,28 @@ function asPrismaTransactionClient<T extends Record<string, unknown>>(prisma: T)
     Object.defineProperty(prismaWithHostedMember, "hostedMemberIdentity", {
       configurable: true,
       value: {
+        findFirst: vi.fn(async ({ include, where }: { include?: Record<string, unknown>; where: Record<string, unknown> }) => {
+          const phoneLookupKey = Array.isArray((where.phoneLookupKey as { in?: unknown[] } | undefined)?.in)
+            ? (where.phoneLookupKey as { in: unknown[] }).in[0]
+            : undefined;
+          const member = await hostedMember?.findUnique?.({
+            include,
+            where: {
+              ...(typeof phoneLookupKey === "string"
+                ? {
+                    phoneLookupKey,
+                  }
+                : {}),
+            },
+          });
+          const identity = readHostedMemberIdentityFromMockMember(member, phoneLookupKey);
+
+          if (!identity) {
+            return null;
+          }
+
+          return include?.member ? { ...identity, member } : identity;
+        }),
         findUnique: vi.fn(async ({ include, where }: { include?: Record<string, unknown>; where: Record<string, unknown> }) => {
           const member = await hostedMember?.findUnique?.({
             include,
@@ -935,17 +1000,49 @@ function asPrismaTransactionClient<T extends Record<string, unknown>>(prisma: T)
         })),
       },
     });
+  } else if (!hostedMemberIdentity.findFirst && hostedMemberIdentity.findUnique) {
+    hostedMemberIdentity.findFirst = vi.fn(async ({
+      include,
+      where,
+    }: {
+      include?: Record<string, unknown>;
+      where: Record<string, unknown>;
+    }) => {
+      const phoneLookupKey = Array.isArray((where.phoneLookupKey as { in?: unknown[] } | undefined)?.in)
+        ? (where.phoneLookupKey as { in: unknown[] }).in[0]
+        : undefined;
+
+      const findUnique = hostedMemberIdentity.findUnique;
+
+      if (!findUnique) {
+        return null;
+      }
+
+      return findUnique({
+        include,
+        where: {
+          ...(typeof phoneLookupKey === "string"
+            ? {
+                phoneLookupKey,
+              }
+            : {}),
+        },
+      });
+    });
   }
 
   if (!hostedMemberRouting?.upsert) {
     Object.defineProperty(prismaWithHostedMember, "hostedMemberRouting", {
       configurable: true,
       value: {
+        findFirst: vi.fn().mockResolvedValue(null),
         findUnique: vi.fn().mockResolvedValue(null),
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
         upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
       },
     });
+  } else if (!hostedMemberRouting.findFirst && hostedMemberRouting.findUnique) {
+    hostedMemberRouting.findFirst = hostedMemberRouting.findUnique;
   }
 
   return prismaWithHostedMember as unknown as Parameters<typeof handleHostedOnboardingLinqWebhook>[0]["prisma"];
@@ -972,33 +1069,6 @@ function withPrismaTransaction<
   return prismaWithTransaction;
 }
 
-function readPersistedLinqDispatchEvent(
-  receiptWrite: Record<string, unknown> | undefined,
-): Record<string, unknown> | undefined {
-  const data =
-    receiptWrite?.data && typeof receiptWrite.data === "object"
-      ? (receiptWrite.data as Record<string, unknown>)
-      : null;
-  const payloadJson =
-    data?.payloadJson && typeof data.payloadJson === "object"
-      ? (data.payloadJson as Record<string, unknown>)
-      : null;
-  const receiptState =
-    payloadJson?.receiptState && typeof payloadJson.receiptState === "object"
-      ? (payloadJson.receiptState as Record<string, unknown>)
-      : null;
-  const sideEffect = Array.isArray(receiptState?.sideEffects)
-    ? (receiptState.sideEffects[0] as Record<string, unknown> | undefined)
-    : undefined;
-  const payload =
-    sideEffect?.payload && typeof sideEffect.payload === "object"
-      ? (sideEffect.payload as Record<string, unknown>)
-      : null;
-
-  return payload?.linqEvent && typeof payload.linqEvent === "object"
-    ? (payload.linqEvent as Record<string, unknown>)
-    : undefined;
-}
 
 function readHostedMemberIdentityFromMockMember(
   member: unknown,
@@ -1089,6 +1159,24 @@ function buildHostedLinqWebhookBody(input: {
     event_id: input.eventId ?? "evt_123",
     event_type: "message.received",
   });
+}
+
+function createStagedPayload(
+  dispatch: HostedExecutionDispatchRequest,
+) {
+  return {
+    dispatchRef: {
+      eventId: dispatch.eventId,
+      eventKind: dispatch.event.kind,
+      occurredAt: dispatch.occurredAt,
+      userId: dispatch.event.userId,
+    },
+    payloadRef: {
+      key: `transient/dispatch-payloads/${dispatch.event.userId}/${dispatch.eventId}.json`,
+    },
+    schemaVersion: "murph.execution-outbox.v2",
+    storage: "reference" as const,
+  };
 }
 
 function makeHostedLinqDailyState(input: {

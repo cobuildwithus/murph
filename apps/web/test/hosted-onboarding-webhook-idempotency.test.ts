@@ -2,8 +2,10 @@ import {
   HostedBillingStatus,
   Prisma,
 } from "@prisma/client";
+import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  createHostedLinqChatLookupKey,
   createHostedOpaqueIdentifier,
   createHostedPhoneLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
@@ -16,6 +18,7 @@ const mocks = vi.hoisted(() => {
   return {
     claimHostedLinqOnboardingLinkNotice: vi.fn(),
     claimHostedLinqQuotaReplyNotice: vi.fn(),
+    deleteHostedStoredDispatchPayloadBestEffort: vi.fn(),
     drainHostedExecutionOutboxBestEffort: vi.fn(),
     drainHostedRevnetIssuanceSubmissionQueue: vi.fn(),
     enqueueHostedExecutionOutbox: vi.fn(),
@@ -23,22 +26,63 @@ const mocks = vi.hoisted(() => {
     incrementHostedLinqOutboundDailyState: vi.fn(),
     isHostedRevnetBroadcastStatusUnknownError: vi.fn(),
     isHostedOnboardingRevnetEnabled: vi.fn(),
+    maybeStageHostedExecutionDispatchPayload: vi.fn(),
     normalizeHostedWalletAddress: vi.fn((value: string | null | undefined) => value ?? null),
     requireHostedRevnetConfig: vi.fn(),
     reconcileHostedStripeEventById: vi.fn(),
     recordHostedStripeEvent: vi.fn(),
     sendHostedLinqChatMessage: vi.fn(),
     submitHostedRevnetPayment: vi.fn(),
+    stagedDispatches: new Map<string, HostedExecutionDispatchRequest>(),
     stripeChargesRetrieve,
     stripeConstructEvent,
     stripePaymentIntentsRetrieve,
   };
 });
 
-vi.mock("@/src/lib/hosted-execution/outbox", () => ({
-  drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
-  enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
-}));
+vi.mock("@/src/lib/hosted-execution/outbox", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-execution/outbox")>(
+    "@/src/lib/hosted-execution/outbox",
+  );
+
+  return {
+    ...actual,
+    drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
+    enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
+    enqueueHostedExecutionOutboxPayload: (input: {
+      payload: {
+        dispatch?: HostedExecutionDispatchRequest;
+        dispatchRef?: {
+          eventId: string;
+        };
+      };
+      sourceId: string;
+      sourceType: string;
+      tx: unknown;
+    }) => mocks.enqueueHostedExecutionOutbox({
+      dispatch:
+        input.payload.dispatch
+        ?? (input.payload.dispatchRef
+          ? mocks.stagedDispatches.get(input.payload.dispatchRef.eventId)
+          : undefined),
+      sourceId: input.sourceId,
+      sourceType: input.sourceType,
+      tx: input.tx,
+    }),
+  };
+});
+
+vi.mock("@/src/lib/hosted-execution/control", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-execution/control")>(
+    "@/src/lib/hosted-execution/control",
+  );
+
+  return {
+    ...actual,
+    deleteHostedStoredDispatchPayloadBestEffort: mocks.deleteHostedStoredDispatchPayloadBestEffort,
+    maybeStageHostedExecutionDispatchPayload: mocks.maybeStageHostedExecutionDispatchPayload,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
   claimHostedLinqOnboardingLinkNotice: mocks.claimHostedLinqOnboardingLinkNotice,
@@ -135,6 +179,7 @@ type HostedWebhookPrisma = Parameters<typeof handleHostedOnboardingLinqWebhook>[
 
 describe("hosted onboarding webhook retry safety", () => {
   beforeEach(() => {
+    mocks.stagedDispatches.clear();
     mocks.claimHostedLinqOnboardingLinkNotice.mockReset();
     mocks.claimHostedLinqQuotaReplyNotice.mockReset();
     mocks.drainHostedExecutionOutboxBestEffort.mockReset();
@@ -144,6 +189,7 @@ describe("hosted onboarding webhook retry safety", () => {
     mocks.incrementHostedLinqOutboundDailyState.mockReset();
     mocks.isHostedRevnetBroadcastStatusUnknownError.mockReset();
     mocks.isHostedOnboardingRevnetEnabled.mockReset();
+    mocks.maybeStageHostedExecutionDispatchPayload.mockReset();
     mocks.normalizeHostedWalletAddress.mockReset();
     mocks.recordHostedStripeEvent.mockReset();
     mocks.requireHostedRevnetConfig.mockReset();
@@ -162,6 +208,12 @@ describe("hosted onboarding webhook retry safety", () => {
     mocks.incrementHostedLinqOutboundDailyState.mockResolvedValue(makeHostedLinqDailyState({
       outboundCount: 1,
     }));
+    mocks.maybeStageHostedExecutionDispatchPayload.mockImplementation(
+      async (dispatch: HostedExecutionDispatchRequest) => {
+        mocks.stagedDispatches.set(dispatch.eventId, dispatch);
+        return createStagedPayload(dispatch);
+      },
+    );
     mocks.isHostedRevnetBroadcastStatusUnknownError.mockImplementation((error: unknown) =>
       String(error instanceof Error ? error.message : error).toLowerCase().includes("already known"),
     );
@@ -355,16 +407,19 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(prisma.hostedMember.create).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.upsert).toHaveBeenCalledWith({
       create: {
-        linqChatId: "chat_123",
+        linqChatIdEncrypted: expect.stringMatching(/^hbds:/u),
+        linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
         memberId: "member_123",
+        telegramUserIdEncrypted: null,
         telegramUserLookupKey: null,
       },
       update: {
-        linqChatId: "chat_123",
+        linqChatIdEncrypted: expect.stringMatching(/^hbds:/u),
+        linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
       },
-      where: expect.objectContaining({
+      where: {
         memberId: "member_123",
-      }),
+      },
     });
     expect(prisma.hostedInvite.create).toHaveBeenCalledTimes(1);
     expect(prisma.hostedInvite.update).toHaveBeenCalledWith({
@@ -2418,7 +2473,6 @@ function buildDispatchSideEffect(input: {
     lastAttemptAt: input.lastAttemptAt ?? null,
     lastError: input.lastError ?? null,
     payload: {
-      storage: "reference",
       schemaVersion: "murph.execution-outbox.v2",
       dispatchRef: {
         eventId: input.eventId,
@@ -2426,8 +2480,10 @@ function buildDispatchSideEffect(input: {
         occurredAt,
         userId: "member_123",
       },
-      phoneLookupKey: createHostedPhoneLookupKey("+15551234567"),
-      linqEvent,
+      payloadRef: {
+        key: `transient/dispatch-payloads/member_123/${input.eventId}.json`,
+      },
+      storage: "reference",
     },
     result: input.status === "sent" ? { dispatched: true } : null,
     sentAt:
@@ -2510,10 +2566,12 @@ function asHostedWebhookPrisma<T extends Record<string, unknown>>(prisma: T): T 
       updateMany?: unknown;
     };
     hostedMemberIdentity?: {
+      findFirst?: ReturnType<typeof vi.fn>;
       findUnique?: ReturnType<typeof vi.fn>;
       upsert?: ReturnType<typeof vi.fn>;
     };
     hostedMemberRouting?: {
+      findFirst?: ReturnType<typeof vi.fn>;
       findUnique?: ReturnType<typeof vi.fn>;
       updateMany?: ReturnType<typeof vi.fn>;
       upsert?: ReturnType<typeof vi.fn>;
@@ -2525,10 +2583,12 @@ function asHostedWebhookPrisma<T extends Record<string, unknown>>(prisma: T): T 
     updateMany?: unknown;
   } | undefined;
   const hostedMemberIdentity = prismaWithHostedMember.hostedMemberIdentity as {
+    findFirst?: ((input: { include?: Record<string, unknown>; where: Record<string, unknown> }) => Promise<unknown>) | undefined;
     findUnique?: ((input: { include?: Record<string, unknown>; where: Record<string, unknown> }) => Promise<unknown>) | undefined;
     upsert?: ((input: { create: Record<string, unknown>; update: Record<string, unknown> }) => Promise<unknown>) | undefined;
   } | undefined;
   const hostedMemberRouting = prismaWithHostedMember.hostedMemberRouting as {
+    findFirst?: ((input: { where: Record<string, unknown> }) => Promise<unknown>) | undefined;
     findUnique?: ((input: { where: Record<string, unknown> }) => Promise<unknown>) | undefined;
     updateMany?: ((input: { data: Record<string, unknown>; where: Record<string, unknown> }) => Promise<unknown>) | undefined;
     upsert?: ((input: { create: Record<string, unknown>; update: Record<string, unknown> }) => Promise<unknown>) | undefined;
@@ -2550,6 +2610,7 @@ function asHostedWebhookPrisma<T extends Record<string, unknown>>(prisma: T): T 
 
   if (!hostedMemberRouting?.upsert) {
     const hostedMemberRoutingFallback = {
+      findFirst: vi.fn().mockResolvedValue(null),
       findUnique: vi.fn().mockResolvedValue(null),
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       upsert: vi.fn(async (input: { create: Record<string, unknown>; update: Record<string, unknown> }) => {
@@ -2566,10 +2627,34 @@ function asHostedWebhookPrisma<T extends Record<string, unknown>>(prisma: T): T 
       configurable: true,
       value: hostedMemberRoutingFallback,
     });
+  } else if (!hostedMemberRouting.findFirst && hostedMemberRouting.findUnique) {
+    hostedMemberRouting.findFirst = hostedMemberRouting.findUnique;
   }
 
   if (!hostedMemberIdentity?.findUnique) {
     const hostedMemberIdentityFallback = {
+      findFirst: vi.fn(async ({ include, where }: { include?: Record<string, unknown>; where: Record<string, unknown> }) => {
+        const phoneLookupKey = Array.isArray((where.phoneLookupKey as { in?: unknown[] } | undefined)?.in)
+          ? (where.phoneLookupKey as { in: unknown[] }).in[0]
+          : undefined;
+        const member = await hostedMember?.findUnique?.({
+          include,
+          where: {
+            ...(typeof phoneLookupKey === "string"
+              ? {
+                  phoneLookupKey,
+                }
+              : {}),
+          },
+        });
+        const identity = readHostedMemberIdentityFromMockMember(member, phoneLookupKey);
+
+        if (!identity) {
+          return null;
+        }
+
+        return include?.member ? { ...identity, member } : identity;
+      }),
       findUnique: vi.fn(async ({ include, where }: { include?: Record<string, unknown>; where: Record<string, unknown> }) => {
         const member = await hostedMember?.findUnique?.({
           include,
@@ -2591,6 +2676,29 @@ function asHostedWebhookPrisma<T extends Record<string, unknown>>(prisma: T): T 
     Object.defineProperty(prismaWithHostedMember, "hostedMemberIdentity", {
       configurable: true,
       value: hostedMemberIdentityFallback,
+    });
+  } else if (!hostedMemberIdentity.findFirst && hostedMemberIdentity.findUnique) {
+    hostedMemberIdentity.findFirst = vi.fn(async ({
+      include,
+      where,
+    }: {
+      include?: Record<string, unknown>;
+      where: Record<string, unknown>;
+    }) => {
+      const phoneLookupKey = Array.isArray((where.phoneLookupKey as { in?: unknown[] } | undefined)?.in)
+        ? (where.phoneLookupKey as { in: unknown[] }).in[0]
+        : undefined;
+
+      return hostedMemberIdentity.findUnique?.({
+        include,
+        where: {
+          ...(typeof phoneLookupKey === "string"
+            ? {
+                phoneLookupKey,
+              }
+            : {}),
+        },
+      });
     });
   }
 
@@ -2684,4 +2792,22 @@ function readPayloadJsonFromUpdateCall(call: Record<string, unknown> | undefined
   }
 
   return (data as { payloadJson?: unknown }).payloadJson;
+}
+
+function createStagedPayload(
+  dispatch: HostedExecutionDispatchRequest,
+) {
+  return {
+    dispatchRef: {
+      eventId: dispatch.eventId,
+      eventKind: dispatch.event.kind,
+      occurredAt: dispatch.occurredAt,
+      userId: dispatch.event.userId,
+    },
+    payloadRef: {
+      key: `transient/dispatch-payloads/${dispatch.event.userId}/${dispatch.eventId}.json`,
+    },
+    schemaVersion: "murph.execution-outbox.v2",
+    storage: "reference" as const,
+  };
 }

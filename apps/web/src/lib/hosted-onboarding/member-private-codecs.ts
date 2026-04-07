@@ -11,9 +11,11 @@ import {
 import { normalizeNullableString } from "./shared";
 
 const HOSTED_MEMBER_IDENTITY_PRIVY_USER_FIELD = "hosted-member-identity.privy-user-id";
+const HOSTED_MEMBER_IDENTITY_PHONE_NUMBER_FIELD = "hosted-member-identity.phone-number";
 const HOSTED_MEMBER_IDENTITY_WALLET_ADDRESS_FIELD = "hosted-member-identity.wallet-address";
 const HOSTED_MEMBER_IDENTITY_SIGNUP_PHONE_FIELD = "hosted-member-identity.signup-phone-number";
 const HOSTED_MEMBER_ROUTING_LINQ_CHAT_FIELD = "hosted-member-routing.linq-chat-id";
+const HOSTED_MEMBER_ROUTING_TELEGRAM_USER_FIELD = "hosted-member-routing.telegram-user-id";
 const HOSTED_MEMBER_BILLING_STRIPE_CUSTOMER_FIELD = "hosted-member-billing-ref.stripe-customer-id";
 const HOSTED_MEMBER_BILLING_STRIPE_SUBSCRIPTION_FIELD =
   "hosted-member-billing-ref.stripe-subscription-id";
@@ -23,6 +25,7 @@ const HOSTED_MEMBER_BILLING_STRIPE_CHECKOUT_FIELD =
   "hosted-member-billing-ref.stripe-latest-checkout-session-id";
 
 export interface HostedMemberIdentityPrivateState {
+  phoneNumber: string | null;
   privyUserId: string | null;
   signupPhoneCodeSendAttemptId: string | null;
   signupPhoneCodeSendAttemptStartedAt: Date | null;
@@ -33,6 +36,7 @@ export interface HostedMemberIdentityPrivateState {
 
 export interface HostedMemberRoutingPrivateState {
   linqChatId: string | null;
+  telegramUserId: string | null;
 }
 
 export interface HostedMemberBillingPrivateState {
@@ -44,6 +48,7 @@ export interface HostedMemberBillingPrivateState {
 
 export function buildHostedMemberIdentityPrivateColumns(input: {
   memberId: string;
+  phoneNumber: string | null;
   privyUserId: string | null;
   signupPhoneCodeSendAttemptId: string | null;
   signupPhoneCodeSendAttemptStartedAt: Date | null;
@@ -52,6 +57,11 @@ export function buildHostedMemberIdentityPrivateColumns(input: {
   walletAddress: string | null;
 }) {
   return {
+    phoneNumberEncrypted: encryptHostedWebNullableString({
+      field: HOSTED_MEMBER_IDENTITY_PHONE_NUMBER_FIELD,
+      memberId: input.memberId,
+      value: input.phoneNumber,
+    }),
     privyUserIdEncrypted: encryptHostedWebNullableString({
       field: HOSTED_MEMBER_IDENTITY_PRIVY_USER_FIELD,
       memberId: input.memberId,
@@ -77,6 +87,7 @@ export function readHostedMemberIdentityPrivateState(
   identity: Pick<
     HostedMemberIdentity,
     | "memberId"
+    | "phoneNumberEncrypted"
     | "privyUserIdEncrypted"
     | "signupPhoneCodeSendAttemptId"
     | "signupPhoneCodeSendAttemptStartedAt"
@@ -86,6 +97,11 @@ export function readHostedMemberIdentityPrivateState(
   >,
 ): HostedMemberIdentityPrivateState {
   return {
+    phoneNumber: decryptHostedWebNullableString({
+      field: HOSTED_MEMBER_IDENTITY_PHONE_NUMBER_FIELD,
+      memberId: identity.memberId,
+      value: identity.phoneNumberEncrypted,
+    }),
     privyUserId: decryptHostedWebNullableString({
       field: HOSTED_MEMBER_IDENTITY_PRIVY_USER_FIELD,
       memberId: identity.memberId,
@@ -110,6 +126,7 @@ export function readHostedMemberIdentityPrivateState(
 export function buildHostedMemberRoutingPrivateColumns(input: {
   linqChatId: string | null;
   memberId: string;
+  telegramUserId: string | null;
 }) {
   return {
     linqChatIdEncrypted: encryptHostedWebNullableString({
@@ -117,17 +134,30 @@ export function buildHostedMemberRoutingPrivateColumns(input: {
       memberId: input.memberId,
       value: input.linqChatId,
     }),
+    telegramUserIdEncrypted: encryptHostedWebNullableString({
+      field: HOSTED_MEMBER_ROUTING_TELEGRAM_USER_FIELD,
+      memberId: input.memberId,
+      value: input.telegramUserId,
+    }),
   } as const;
 }
 
 export function readHostedMemberRoutingPrivateState(
-  routing: Pick<HostedMemberRouting, "linqChatIdEncrypted" | "memberId">,
+  routing: Pick<
+    HostedMemberRouting,
+    "linqChatIdEncrypted" | "memberId" | "telegramUserIdEncrypted"
+  >,
 ): HostedMemberRoutingPrivateState {
   return {
     linqChatId: decryptHostedWebNullableString({
       field: HOSTED_MEMBER_ROUTING_LINQ_CHAT_FIELD,
       memberId: routing.memberId,
       value: routing.linqChatIdEncrypted,
+    }),
+    telegramUserId: decryptHostedWebNullableString({
+      field: HOSTED_MEMBER_ROUTING_TELEGRAM_USER_FIELD,
+      memberId: routing.memberId,
+      value: routing.telegramUserIdEncrypted,
     }),
   };
 }

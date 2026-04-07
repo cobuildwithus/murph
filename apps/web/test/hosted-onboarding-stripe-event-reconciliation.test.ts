@@ -62,6 +62,14 @@ import {
   reconcileHostedStripeEventById,
   reconcileSubmittedHostedRevnetIssuances,
 } from "@/src/lib/hosted-onboarding/stripe-event-reconciliation";
+import {
+  createHostedStripeCustomerLookupKey,
+  createHostedStripeSubscriptionLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
+  buildHostedMemberBillingPrivateColumns,
+  readHostedMemberBillingPrivateState,
+} from "@/src/lib/hosted-onboarding/member-private-codecs";
 import { drainHostedRevnetIssuanceSubmissionQueue } from "@/src/lib/hosted-onboarding/stripe-revnet-issuance";
 
 const HostedBillingMode = {
@@ -2299,14 +2307,7 @@ function createStripeQueueHarness(input: {
   const checkouts = input.checkouts ?? [];
   const invites = input.invites ?? [];
   const members = input.members ?? [];
-  const memberBillingRefs = members.map((member) => ({
-    memberId: member.id,
-    stripeCustomerId: member.stripeCustomerId,
-    stripeLatestBillingEventCreatedAt: member.stripeLatestBillingEventCreatedAt,
-    stripeLatestBillingEventId: member.stripeLatestBillingEventId,
-    stripeLatestCheckoutSessionId: member.stripeLatestCheckoutSessionId,
-    stripeSubscriptionId: member.stripeSubscriptionId,
-  }));
+  const memberBillingRefs = members.map((member) => buildBillingRefFromMember(member));
   const memberRouting = members.map((member) => ({
     linqChatId: member.linqChatId,
     memberId: member.id,
@@ -2338,21 +2339,25 @@ function createStripeQueueHarness(input: {
       return;
     }
 
-    member.stripeCustomerId = billingRef.stripeCustomerId;
+    const privateState = readHostedMemberBillingPrivateState(billingRef);
+
+    member.stripeCustomerId = privateState.stripeCustomerId;
     member.stripeLatestBillingEventCreatedAt = billingRef.stripeLatestBillingEventCreatedAt;
-    member.stripeLatestBillingEventId = billingRef.stripeLatestBillingEventId;
-    member.stripeLatestCheckoutSessionId = billingRef.stripeLatestCheckoutSessionId;
-    member.stripeSubscriptionId = billingRef.stripeSubscriptionId;
+    member.stripeLatestBillingEventId = privateState.stripeLatestBillingEventId;
+    member.stripeLatestCheckoutSessionId = privateState.stripeLatestCheckoutSessionId;
+    member.stripeSubscriptionId = privateState.stripeSubscriptionId;
   };
   const findMember = (where: Record<string, unknown>) => members.find((member) =>
     ("id" in where && where.id === member.id) || (
       "stripeCustomerId" in where &&
       memberBillingRefs.some((billingRef) =>
-        billingRef.memberId === member.id && billingRef.stripeCustomerId === where.stripeCustomerId)
+        billingRef.memberId === member.id &&
+        readHostedMemberBillingPrivateState(billingRef).stripeCustomerId === where.stripeCustomerId)
     ) || (
       "stripeSubscriptionId" in where &&
       memberBillingRefs.some((billingRef) =>
-        billingRef.memberId === member.id && billingRef.stripeSubscriptionId === where.stripeSubscriptionId)
+        billingRef.memberId === member.id &&
+        readHostedMemberBillingPrivateState(billingRef).stripeSubscriptionId === where.stripeSubscriptionId)
     ));
 
   const hostedStripeEventCreate = vi.fn(async ({ data }: { data: MutableStripeEventCreate }) => {
@@ -2494,6 +2499,50 @@ function createStripeQueueHarness(input: {
     const identity = buildIdentityFromMember(member);
     return include?.member ? { ...identity, member } : identity;
   });
+  const hostedMemberIdentityFindFirst = vi.fn(async ({
+    include,
+    where,
+  }: {
+    include?: { member?: boolean };
+    where: Record<string, unknown>;
+  }) => {
+    const phoneLookupKey = Array.isArray(
+      (where.phoneLookupKey as { in?: unknown[] } | undefined)?.in,
+    )
+      ? (where.phoneLookupKey as { in: unknown[] }).in[0]
+      : undefined;
+    const privyUserLookupKey = Array.isArray(
+      (where.privyUserLookupKey as { in?: unknown[] } | undefined)?.in,
+    )
+      ? (where.privyUserLookupKey as { in: unknown[] }).in[0]
+      : undefined;
+    const walletAddressLookupKey = Array.isArray(
+      (where.walletAddressLookupKey as { in?: unknown[] } | undefined)?.in,
+    )
+      ? (where.walletAddressLookupKey as { in: unknown[] }).in[0]
+      : undefined;
+
+    return hostedMemberIdentityFindUnique({
+      include,
+      where: {
+        ...(typeof phoneLookupKey === "string"
+          ? {
+              phoneLookupKey,
+            }
+          : {}),
+        ...(typeof privyUserLookupKey === "string"
+          ? {
+              privyUserLookupKey,
+            }
+          : {}),
+        ...(typeof walletAddressLookupKey === "string"
+          ? {
+              walletAddressLookupKey,
+            }
+          : {}),
+      },
+    });
+  });
   const hostedMemberBillingRefFindUnique = vi.fn(async ({
     include,
     where,
@@ -2503,8 +2552,14 @@ function createStripeQueueHarness(input: {
   }) => {
     const billingRef = memberBillingRefs.find((candidate) =>
       ("memberId" in where && candidate.memberId === where.memberId) ||
-      ("stripeCustomerId" in where && candidate.stripeCustomerId === where.stripeCustomerId) ||
-      ("stripeSubscriptionId" in where && candidate.stripeSubscriptionId === where.stripeSubscriptionId));
+      ("stripeCustomerLookupKey" in where &&
+        candidate.stripeCustomerLookupKey === where.stripeCustomerLookupKey) ||
+      ("stripeCustomerId" in where &&
+        readHostedMemberBillingPrivateState(candidate).stripeCustomerId === where.stripeCustomerId) ||
+      ("stripeSubscriptionLookupKey" in where &&
+        candidate.stripeSubscriptionLookupKey === where.stripeSubscriptionLookupKey) ||
+      ("stripeSubscriptionId" in where &&
+        readHostedMemberBillingPrivateState(candidate).stripeSubscriptionId === where.stripeSubscriptionId));
 
     if (!billingRef) {
       return null;
@@ -2519,13 +2574,47 @@ function createStripeQueueHarness(input: {
       member: members.find((candidate) => candidate.id === billingRef.memberId) ?? null,
     };
   });
+  const hostedMemberBillingRefFindFirst = vi.fn(async ({
+    include,
+    where,
+  }: {
+    include?: { member?: boolean };
+    where: Record<string, unknown>;
+  }) => {
+    const stripeCustomerLookupKey = Array.isArray(
+      (where.stripeCustomerLookupKey as { in?: unknown[] } | undefined)?.in,
+    )
+      ? (where.stripeCustomerLookupKey as { in: unknown[] }).in[0]
+      : undefined;
+    const stripeSubscriptionLookupKey = Array.isArray(
+      (where.stripeSubscriptionLookupKey as { in?: unknown[] } | undefined)?.in,
+    )
+      ? (where.stripeSubscriptionLookupKey as { in: unknown[] }).in[0]
+      : undefined;
+
+    return hostedMemberBillingRefFindUnique({
+      include,
+      where: {
+        ...(typeof stripeCustomerLookupKey === "string"
+          ? {
+              stripeCustomerLookupKey,
+            }
+          : {}),
+        ...(typeof stripeSubscriptionLookupKey === "string"
+          ? {
+              stripeSubscriptionLookupKey,
+            }
+          : {}),
+      },
+    });
+  });
   const hostedMemberBillingRefUpsert = vi.fn(async ({
     create,
     update,
     where,
   }: {
-    create: MutableMemberBillingRef;
-    update: Partial<MutableMemberBillingRef>;
+    create: Record<string, unknown>;
+    update: Record<string, unknown>;
     where: { memberId: string };
   }) => {
     const current = memberBillingRefs.find((candidate) => candidate.memberId === where.memberId);
@@ -2536,9 +2625,10 @@ function createStripeQueueHarness(input: {
       return current;
     }
 
-    const created = {
+    const created = normalizeMutableMemberBillingRef({
+      memberId: where.memberId,
       ...create,
-    };
+    });
     memberBillingRefs.push(created);
     syncBillingRefToMember(created);
     return created;
@@ -2547,6 +2637,23 @@ function createStripeQueueHarness(input: {
     memberRouting.find((routing) =>
       ("memberId" in where && routing.memberId === where.memberId) ||
       ("telegramUserLookupKey" in where && routing.telegramUserLookupKey === where.telegramUserLookupKey)) ?? null);
+  const hostedMemberRoutingFindFirst = vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
+    const telegramUserLookupKey = Array.isArray(
+      (where.telegramUserLookupKey as { in?: unknown[] } | undefined)?.in,
+    )
+      ? (where.telegramUserLookupKey as { in: unknown[] }).in[0]
+      : undefined;
+
+    return hostedMemberRoutingFindUnique({
+      where: {
+        ...(typeof telegramUserLookupKey === "string"
+          ? {
+              telegramUserLookupKey,
+            }
+          : {}),
+      },
+    });
+  });
   const hostedMemberUpdateMany = vi.fn(async ({ data, where }: { data: Record<string, unknown>; where: Record<string, unknown> }) => {
     const member = members.find((candidate) => candidate.id === where.id);
 
@@ -2892,13 +2999,16 @@ function createStripeQueueHarness(input: {
       updateMany: hostedMemberUpdateMany,
     },
     hostedMemberIdentity: {
+      findFirst: hostedMemberIdentityFindFirst,
       findUnique: hostedMemberIdentityFindUnique,
     },
     hostedMemberBillingRef: {
+      findFirst: hostedMemberBillingRefFindFirst,
       findUnique: hostedMemberBillingRefFindUnique,
       upsert: hostedMemberBillingRefUpsert,
     },
     hostedMemberRouting: {
+      findFirst: hostedMemberRoutingFindFirst,
       findUnique: hostedMemberRoutingFindUnique,
     },
     hostedRevnetIssuance: {
@@ -2934,6 +3044,89 @@ function createStripeQueueHarness(input: {
     revnetIssuances,
     sessions,
     stripeEvents,
+  };
+}
+
+function buildBillingRefFromMember(member: MutableMember): MutableMemberBillingRef {
+  return {
+    memberId: member.id,
+    stripeCustomerLookupKey: createHostedStripeCustomerLookupKey(member.stripeCustomerId),
+    stripeLatestBillingEventCreatedAt: member.stripeLatestBillingEventCreatedAt,
+    stripeSubscriptionLookupKey: createHostedStripeSubscriptionLookupKey(
+      member.stripeSubscriptionId,
+    ),
+    ...buildHostedMemberBillingPrivateColumns({
+      memberId: member.id,
+      stripeCustomerId: member.stripeCustomerId,
+      stripeLatestBillingEventId: member.stripeLatestBillingEventId,
+      stripeLatestCheckoutSessionId: member.stripeLatestCheckoutSessionId,
+      stripeSubscriptionId: member.stripeSubscriptionId,
+    }),
+  };
+}
+
+function normalizeMutableMemberBillingRef(input: Record<string, unknown>): MutableMemberBillingRef {
+  const memberId =
+    typeof input.memberId === "string"
+      ? input.memberId
+      : "member_123";
+  const rawStripeCustomerId =
+    typeof input.stripeCustomerId === "string" || input.stripeCustomerId === null
+      ? input.stripeCustomerId
+      : null;
+  const rawStripeLatestBillingEventId =
+    typeof input.stripeLatestBillingEventId === "string" || input.stripeLatestBillingEventId === null
+      ? input.stripeLatestBillingEventId
+      : null;
+  const rawStripeLatestCheckoutSessionId =
+    typeof input.stripeLatestCheckoutSessionId === "string" || input.stripeLatestCheckoutSessionId === null
+      ? input.stripeLatestCheckoutSessionId
+      : null;
+  const rawStripeSubscriptionId =
+    typeof input.stripeSubscriptionId === "string" || input.stripeSubscriptionId === null
+      ? input.stripeSubscriptionId
+      : null;
+  const privateColumns = buildHostedMemberBillingPrivateColumns({
+    memberId,
+    stripeCustomerId: rawStripeCustomerId,
+    stripeLatestBillingEventId: rawStripeLatestBillingEventId,
+    stripeLatestCheckoutSessionId: rawStripeLatestCheckoutSessionId,
+    stripeSubscriptionId: rawStripeSubscriptionId,
+  });
+
+  return {
+    memberId,
+    stripeCustomerIdEncrypted:
+      typeof input.stripeCustomerIdEncrypted === "string" || input.stripeCustomerIdEncrypted === null
+        ? input.stripeCustomerIdEncrypted
+        : privateColumns.stripeCustomerIdEncrypted,
+    stripeCustomerLookupKey:
+      typeof input.stripeCustomerLookupKey === "string" || input.stripeCustomerLookupKey === null
+        ? input.stripeCustomerLookupKey
+        : createHostedStripeCustomerLookupKey(rawStripeCustomerId),
+    stripeLatestBillingEventCreatedAt:
+      input.stripeLatestBillingEventCreatedAt instanceof Date
+        ? input.stripeLatestBillingEventCreatedAt
+        : null,
+    stripeLatestBillingEventIdEncrypted:
+      typeof input.stripeLatestBillingEventIdEncrypted === "string"
+        || input.stripeLatestBillingEventIdEncrypted === null
+        ? input.stripeLatestBillingEventIdEncrypted
+        : privateColumns.stripeLatestBillingEventIdEncrypted,
+    stripeLatestCheckoutSessionIdEncrypted:
+      typeof input.stripeLatestCheckoutSessionIdEncrypted === "string"
+        || input.stripeLatestCheckoutSessionIdEncrypted === null
+        ? input.stripeLatestCheckoutSessionIdEncrypted
+        : privateColumns.stripeLatestCheckoutSessionIdEncrypted,
+    stripeSubscriptionIdEncrypted:
+      typeof input.stripeSubscriptionIdEncrypted === "string"
+        || input.stripeSubscriptionIdEncrypted === null
+        ? input.stripeSubscriptionIdEncrypted
+        : privateColumns.stripeSubscriptionIdEncrypted,
+    stripeSubscriptionLookupKey:
+      typeof input.stripeSubscriptionLookupKey === "string" || input.stripeSubscriptionLookupKey === null
+        ? input.stripeSubscriptionLookupKey
+        : createHostedStripeSubscriptionLookupKey(rawStripeSubscriptionId),
   };
 }
 
@@ -2980,11 +3173,13 @@ type MutableMember = {
 
 type MutableMemberBillingRef = {
   memberId: string;
-  stripeCustomerId: string | null;
+  stripeCustomerIdEncrypted: string | null;
+  stripeCustomerLookupKey: string | null;
   stripeLatestBillingEventCreatedAt: Date | null;
-  stripeLatestBillingEventId: string | null;
-  stripeLatestCheckoutSessionId: string | null;
-  stripeSubscriptionId: string | null;
+  stripeLatestBillingEventIdEncrypted: string | null;
+  stripeLatestCheckoutSessionIdEncrypted: string | null;
+  stripeSubscriptionIdEncrypted: string | null;
+  stripeSubscriptionLookupKey: string | null;
 };
 
 type MutableRevnetIssuance = {

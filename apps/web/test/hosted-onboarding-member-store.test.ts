@@ -8,10 +8,12 @@ import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption"
 
 import {
   bindHostedMemberStripeCustomerIdIfMissing,
+  findHostedMemberByPhoneNumber,
   findHostedMemberByPhoneLookupKey,
   findHostedMemberByPrivyUserId,
   findHostedMemberByStripeCustomerId,
   findHostedMemberByStripeSubscriptionId,
+  findHostedMemberByTelegramUserId,
   findHostedMemberByTelegramUserLookupKey,
   readHostedMemberAggregate,
   readHostedMemberRoutingState,
@@ -29,12 +31,12 @@ describe("hosted-member-store", () => {
 
   it("finds a member by privy user id from the identity table", async () => {
     const member = createHostedMember();
-    const findUnique = vi.fn().mockResolvedValue({
+    const findFirst = vi.fn().mockResolvedValue({
       member,
     });
     const prisma = {
       hostedMemberIdentity: {
-        findUnique,
+        findFirst,
       },
     } as never;
 
@@ -45,9 +47,11 @@ describe("hosted-member-store", () => {
       }),
     ).resolves.toEqual(member);
 
-    expect(findUnique).toHaveBeenCalledWith({
+    expect(findFirst).toHaveBeenCalledWith({
       where: {
-        privyUserLookupKey: expect.stringMatching(/^hbidx:privy-user:v1:/u),
+        privyUserLookupKey: {
+          in: [expect.stringMatching(/^hbidx:privy-user:v1:/u)],
+        },
       },
       include: {
         member: true,
@@ -73,6 +77,36 @@ describe("hosted-member-store", () => {
     ).resolves.toEqual(member);
   });
 
+  it("finds a member by raw phone number through read candidates", async () => {
+    const member = createHostedMember();
+    const findFirst = vi.fn().mockResolvedValue({
+      member,
+    });
+    const prisma = {
+      hostedMemberIdentity: {
+        findFirst,
+      },
+    } as never;
+
+    await expect(
+      findHostedMemberByPhoneNumber({
+        phoneNumber: "+15551234567",
+        prisma,
+      }),
+    ).resolves.toEqual(member);
+
+    expect(findFirst).toHaveBeenCalledWith({
+      where: {
+        phoneLookupKey: {
+          in: [expect.stringMatching(/^hbidx:phone:v1:/u)],
+        },
+      },
+      include: {
+        member: true,
+      },
+    });
+  });
+
   it("finds a member by Telegram lookup key from the routing table", async () => {
     const prisma = {
       hostedMemberRouting: {
@@ -95,6 +129,49 @@ describe("hosted-member-store", () => {
       billingStatus: HostedBillingStatus.active,
       id: "member_123",
       suspendedAt: null,
+    });
+  });
+
+  it("finds a member by raw Telegram user id through read candidates", async () => {
+    const findFirst = vi.fn().mockResolvedValue({
+      member: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+        suspendedAt: null,
+      },
+    });
+    const prisma = {
+      hostedMemberRouting: {
+        findFirst,
+      },
+    } as never;
+
+    await expect(
+      findHostedMemberByTelegramUserId({
+        prisma,
+        telegramUserId: "456",
+      }),
+    ).resolves.toEqual({
+      billingStatus: HostedBillingStatus.active,
+      id: "member_123",
+      suspendedAt: null,
+    });
+
+    expect(findFirst).toHaveBeenCalledWith({
+      where: {
+        telegramUserLookupKey: {
+          in: [expect.stringMatching(/^hbidx:telegram-user:v1:/u)],
+        },
+      },
+      select: {
+        member: {
+          select: {
+            billingStatus: true,
+            id: true,
+            suspendedAt: true,
+          },
+        },
+      },
     });
   });
 
@@ -163,6 +240,7 @@ describe("hosted-member-store", () => {
         linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
         memberId: "member_123",
         telegramUserLookupKey: null,
+        telegramUserIdEncrypted: null,
       },
       update: {
         linqChatIdEncrypted: expect.stringMatching(/^hbds:/u),
@@ -211,7 +289,7 @@ describe("hosted-member-store", () => {
     await upsertHostedMemberTelegramRoutingBinding({
       memberId: "member_123",
       prisma,
-      telegramUserLookupKey: "tg_user_123",
+      telegramUserId: "456",
     });
 
     expect(upsert).toHaveBeenCalledWith({
@@ -219,12 +297,15 @@ describe("hosted-member-store", () => {
         memberId: "member_123",
       },
       create: {
+        linqChatIdEncrypted: null,
         linqChatLookupKey: null,
         memberId: "member_123",
-        telegramUserLookupKey: "tg_user_123",
+        telegramUserIdEncrypted: expect.stringMatching(/^hbds:/u),
+        telegramUserLookupKey: expect.stringMatching(/^hbidx:telegram-user:v1:/u),
       },
       update: {
-        telegramUserLookupKey: "tg_user_123",
+        telegramUserIdEncrypted: expect.stringMatching(/^hbds:/u),
+        telegramUserLookupKey: expect.stringMatching(/^hbidx:telegram-user:v1:/u),
       },
     });
   });
@@ -234,6 +315,11 @@ describe("hosted-member-store", () => {
       maskedPhoneNumberHint: "*** 4567",
       memberId: "member_123",
       phoneLookupKey: "hbidx:phone:v1:abc123",
+      phoneNumberEncrypted: encryptHostedWebNullableString({
+        field: "hosted-member-identity.phone-number",
+        memberId: "member_123",
+        value: "+15551234567",
+      }),
       phoneNumberVerifiedAt: null,
       privyUserLookupKey: "hbidx:privy-user:v1:abc123",
       privyUserIdEncrypted: encryptHostedWebNullableString({
@@ -267,6 +353,7 @@ describe("hosted-member-store", () => {
         memberId: "member_123",
         phoneLookupKey: "hbidx:phone:v1:abc123",
         phoneNumberVerifiedAt: null,
+        phoneNumber: "+15551234567",
         prisma,
         privyUserId: "did:privy:user_123",
         signupPhoneCodeSendAttemptId: null,
@@ -302,6 +389,7 @@ describe("hosted-member-store", () => {
         maskedPhoneNumberHint: "*** 4567",
         memberId: "member_123",
         phoneLookupKey: "hbidx:phone:v1:abc123",
+        phoneNumberEncrypted: expect.stringMatching(/^hbds:/u),
         phoneNumberVerifiedAt: null,
         privyUserLookupKey: expect.stringMatching(/^hbidx:privy-user:v1:/u),
         privyUserIdEncrypted: expect.stringMatching(/^hbds:/u),
@@ -318,6 +406,7 @@ describe("hosted-member-store", () => {
       update: {
         maskedPhoneNumberHint: "*** 4567",
         phoneLookupKey: "hbidx:phone:v1:abc123",
+        phoneNumberEncrypted: expect.stringMatching(/^hbds:/u),
         phoneNumberVerifiedAt: null,
         privyUserLookupKey: expect.stringMatching(/^hbidx:privy-user:v1:/u),
         privyUserIdEncrypted: expect.stringMatching(/^hbds:/u),
@@ -383,7 +472,7 @@ describe("hosted-member-store", () => {
 
   it("finds members by Stripe billing refs from lookup-key columns", async () => {
     const member = createHostedMember();
-    const findUnique = vi.fn()
+    const findFirst = vi.fn()
       .mockResolvedValueOnce({
         member,
       })
@@ -392,7 +481,7 @@ describe("hosted-member-store", () => {
       });
     const prisma = {
       hostedMemberBillingRef: {
-        findUnique,
+        findFirst,
       },
     } as never;
 
@@ -409,17 +498,21 @@ describe("hosted-member-store", () => {
       }),
     ).resolves.toEqual(member);
 
-    expect(findUnique).toHaveBeenNthCalledWith(1, {
+    expect(findFirst).toHaveBeenNthCalledWith(1, {
       where: {
-        stripeCustomerLookupKey: expect.stringMatching(/^hbidx:stripe-customer:v1:/u),
+        stripeCustomerLookupKey: {
+          in: [expect.stringMatching(/^hbidx:stripe-customer:v1:/u)],
+        },
       },
       include: {
         member: true,
       },
     });
-    expect(findUnique).toHaveBeenNthCalledWith(2, {
+    expect(findFirst).toHaveBeenNthCalledWith(2, {
       where: {
-        stripeSubscriptionLookupKey: expect.stringMatching(/^hbidx:stripe-subscription:v1:/u),
+        stripeSubscriptionLookupKey: {
+          in: [expect.stringMatching(/^hbidx:stripe-subscription:v1:/u)],
+        },
       },
       include: {
         member: true,

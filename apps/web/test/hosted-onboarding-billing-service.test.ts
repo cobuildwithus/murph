@@ -69,6 +69,8 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 }));
 
 import { createHostedBillingCheckout } from "@/src/lib/hosted-onboarding/billing-service";
+import { createHostedStripeCustomerLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
+import { buildHostedMemberBillingPrivateColumns } from "@/src/lib/hosted-onboarding/member-private-codecs";
 
 const NOW = new Date("2026-03-27T12:00:00.000Z");
 type CreateHostedBillingCheckoutInput = Parameters<typeof createHostedBillingCheckout>[0];
@@ -762,11 +764,16 @@ describe("createHostedBillingCheckout", () => {
       hostedMemberBillingRef: {
         findUnique: vi.fn().mockResolvedValue({
           memberId: "member_123",
-          stripeCustomerId: "cus_existing_123",
+          stripeCustomerLookupKey: createHostedStripeCustomerLookupKey("cus_existing_123"),
           stripeLatestBillingEventCreatedAt: null,
-          stripeLatestBillingEventId: null,
-          stripeLatestCheckoutSessionId: null,
-          stripeSubscriptionId: null,
+          stripeSubscriptionLookupKey: null,
+          ...buildHostedMemberBillingPrivateColumns({
+            memberId: "member_123",
+            stripeCustomerId: "cus_existing_123",
+            stripeLatestBillingEventId: null,
+            stripeLatestCheckoutSessionId: null,
+            stripeSubscriptionId: null,
+          }),
         }),
       },
     });
@@ -859,6 +866,7 @@ function asHostedBillingCheckoutPrisma<T extends Record<string, unknown>>(prisma
     Object.defineProperty(prismaWithQueryRaw, "hostedMemberBillingRef", {
       configurable: true,
       value: {
+        findFirst: vi.fn().mockResolvedValue(null),
         findUnique: vi.fn().mockResolvedValue(null),
         upsert: vi.fn().mockResolvedValue({}),
       },
@@ -866,6 +874,46 @@ function asHostedBillingCheckoutPrisma<T extends Record<string, unknown>>(prisma
   } else {
     const hostedMemberBillingRef =
       prismaWithQueryRaw.hostedMemberBillingRef as unknown as Record<string, unknown>;
+    if (hostedMemberBillingRef.findFirst === undefined && hostedMemberBillingRef.findUnique) {
+      hostedMemberBillingRef.findFirst = vi.fn(async (input: {
+        include?: Record<string, unknown>;
+        where?: {
+          stripeCustomerLookupKey?: {
+            in?: string[];
+          };
+          stripeSubscriptionLookupKey?: {
+            in?: string[];
+          };
+        };
+      }) => {
+        const stripeCustomerLookupKey = input.where?.stripeCustomerLookupKey?.in?.[0];
+        const stripeSubscriptionLookupKey = input.where?.stripeSubscriptionLookupKey?.in?.[0];
+
+        if (typeof hostedMemberBillingRef.findUnique !== "function") {
+          return null;
+        }
+
+        if (stripeCustomerLookupKey) {
+          return hostedMemberBillingRef.findUnique({
+            include: input.include,
+            where: {
+              stripeCustomerLookupKey,
+            },
+          });
+        }
+
+        if (stripeSubscriptionLookupKey) {
+          return hostedMemberBillingRef.findUnique({
+            include: input.include,
+            where: {
+              stripeSubscriptionLookupKey,
+            },
+          });
+        }
+
+        return null;
+      });
+    }
     hostedMemberBillingRef.findUnique ??= vi.fn().mockResolvedValue(null);
     hostedMemberBillingRef.upsert ??= vi.fn().mockResolvedValue({});
   }
