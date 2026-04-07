@@ -38,12 +38,6 @@ export async function assistantChatReplyArtifactExists(
     await assistantArtifactExists(
       vaultRoot,
       captureId,
-      'chat-error.json',
-    )
-  ) || (
-    await assistantArtifactExists(
-      vaultRoot,
-      captureId,
       'chat-deferred.json',
     )
   )

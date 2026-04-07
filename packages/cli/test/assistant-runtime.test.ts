@@ -6450,6 +6450,24 @@ test('scanAssistantAutoReplyOnce records provider quota failures with a safe sum
       },
     ),
   )
+  runtimeMocks.executeAssistantProviderTurn.mockResolvedValueOnce({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-usage-limit-retry',
+    response: 'Thanks, I am back online.',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+    usage: null,
+  })
+  runtimeMocks.deliverAssistantMessageOverBinding.mockResolvedValueOnce({
+    delivery: {
+      channel: 'telegram',
+      target: '123',
+      targetKind: 'thread',
+      sentAt: '2026-03-18T09:00:05Z',
+      messageLength: 25,
+    },
+  })
 
   const events: Array<{
     captureId?: string
@@ -6458,46 +6476,21 @@ test('scanAssistantAutoReplyOnce records provider quota failures with a safe sum
     safeDetails?: string
     type: string
   }> = []
-
-  const result = await scanAssistantAutoReplyOnce({
-    afterCursor: null,
-    autoReplyPrimed: true,
-    enabledChannels: ['telegram'],
-    inboxServices: {
-      async list() {
-        return {
-          items: [
-            {
-              captureId: 'cap-usage-limit',
-              source: 'telegram',
-              accountId: 'bot',
-              externalId: 'update:usage-limit',
-              threadId: '123',
-              threadTitle: 'Direct',
-              actorId: '111',
-              actorName: 'Bob',
-              actorIsSelf: false,
-              occurredAt: '2026-03-18T09:00:00Z',
-              receivedAt: null,
-              text: 'hello there',
-              attachmentCount: 0,
-              envelopePath: 'raw/inbox/usage-limit.json',
-              eventId: 'evt-usage-limit',
-              promotions: [],
-            },
-          ],
-        }
-      },
-      async show() {
-        return {
-          capture: {
+  const stateProgress: Array<{
+    cursor: { captureId: string; occurredAt: string } | null
+    primed: boolean
+  }> = []
+  const inboxServices = {
+    async list() {
+      return {
+        items: [
+          {
             captureId: 'cap-usage-limit',
             source: 'telegram',
             accountId: 'bot',
             externalId: 'update:usage-limit',
             threadId: '123',
             threadTitle: 'Direct',
-            threadIsDirect: true,
             actorId: '111',
             actorName: 'Bob',
             actorIsSelf: false,
@@ -6507,24 +6500,86 @@ test('scanAssistantAutoReplyOnce records provider quota failures with a safe sum
             attachmentCount: 0,
             envelopePath: 'raw/inbox/usage-limit.json',
             eventId: 'evt-usage-limit',
-            createdAt: '2026-03-18T09:00:00Z',
             promotions: [],
-            attachments: [],
           },
-        }
-      },
-    } as any,
+        ],
+      }
+    },
+    async show() {
+      return {
+        capture: {
+          captureId: 'cap-usage-limit',
+          source: 'telegram',
+          accountId: 'bot',
+          externalId: 'update:usage-limit',
+          threadId: '123',
+          threadTitle: 'Direct',
+          threadIsDirect: true,
+          actorId: '111',
+          actorName: 'Bob',
+          actorIsSelf: false,
+          occurredAt: '2026-03-18T09:00:00Z',
+          receivedAt: null,
+          text: 'hello there',
+          attachmentCount: 0,
+          envelopePath: 'raw/inbox/usage-limit.json',
+          eventId: 'evt-usage-limit',
+          createdAt: '2026-03-18T09:00:00Z',
+          promotions: [],
+          attachments: [],
+        },
+      }
+    },
+  } as any
+
+  const first = await scanAssistantAutoReplyOnce({
+    afterCursor: null,
+    autoReplyPrimed: true,
+    enabledChannels: ['telegram'],
+    inboxServices,
     onEvent(event) {
       events.push(event)
+    },
+    async onStateProgress(next) {
+      stateProgress.push(next)
     },
     vault: vaultRoot,
   })
 
-  assert.deepEqual(result, {
+  const second = await scanAssistantAutoReplyOnce({
+    afterCursor: stateProgress[0]?.cursor ?? null,
+    autoReplyPrimed: true,
+    enabledChannels: ['telegram'],
+    inboxServices,
+    async onStateProgress(next) {
+      stateProgress.push(next)
+    },
+    vault: vaultRoot,
+  })
+
+  assert.deepEqual(first, {
     considered: 1,
     failed: 1,
     replied: 0,
     skipped: 0,
+  })
+  assert.deepEqual(second, {
+    considered: 1,
+    failed: 0,
+    replied: 1,
+    skipped: 0,
+  })
+  assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 2)
+  assert.deepEqual(stateProgress[0], {
+    cursor: null,
+    primed: true,
+  })
+  assert.deepEqual(stateProgress[1], {
+    cursor: {
+      occurredAt: '2026-03-18T09:00:00Z',
+      captureId: 'cap-usage-limit',
+    },
+    primed: true,
   })
   assert.equal(
     events.some(
@@ -6562,6 +6617,21 @@ test('scanAssistantAutoReplyOnce records provider quota failures with a safe sum
     'provider usage limit reached (ASSISTANT_CODEX_FAILED)',
   )
   assert.equal(errorArtifact.context.providerSessionId, 'thread-usage-limit')
+
+  const successArtifact = JSON.parse(
+    await readFile(
+      path.join(
+        vaultRoot,
+        'derived',
+        'inbox',
+        'cap-usage-limit',
+        'assistant',
+        'chat-result.json',
+      ),
+      'utf8',
+    ),
+  )
+  assert.equal(successArtifact.schema, 'murph.assistant-chat-result.v1')
 })
 
 test('scanAssistantAutoReplyOnce groups Telegram media albums into one assistant reply', async () => {
