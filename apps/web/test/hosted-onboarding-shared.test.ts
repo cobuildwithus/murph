@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   extractLinqTextMessage,
   maskPhoneNumber,
   normalizePhoneNumber,
   normalizePhoneNumberForCountry,
+  withHostedOnboardingTransaction,
 } from "@/src/lib/hosted-onboarding/shared";
 
 describe("hosted onboarding shared helpers", () => {
@@ -35,5 +36,36 @@ describe("hosted onboarding shared helpers", () => {
         ],
       }),
     ).toBe("I want to get healthy\nPlease");
+  });
+
+  it("uses an explicit transaction maxWait for hosted onboarding transactions", async () => {
+    const tx = { kind: "tx" };
+    const callback = vi.fn(async () => "ok");
+    const transaction = vi.fn(async (fn: (txArg: { kind: string }) => Promise<string>, options?: { maxWait?: number }) => {
+      expect(options).toEqual({ maxWait: 5_000 });
+      return fn(tx);
+    });
+
+    const result = await withHostedOnboardingTransaction(
+      { $transaction: transaction } as never,
+      callback as never,
+    );
+
+    expect(result).toBe("ok");
+    expect(transaction).toHaveBeenCalledOnce();
+    expect(callback).toHaveBeenCalledWith(tx);
+  });
+
+  it("passes through an existing transaction client without nesting another transaction", async () => {
+    const tx = { kind: "existing-tx" };
+    const callback = vi.fn(async () => "ok");
+
+    const result = await withHostedOnboardingTransaction(
+      tx as never,
+      callback as never,
+    );
+
+    expect(result).toBe("ok");
+    expect(callback).toHaveBeenCalledWith(tx);
   });
 });
