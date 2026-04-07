@@ -23,6 +23,10 @@ interface RecipeReadModel {
   docType?: string
   relativePath: string
   markdown: string
+  links?: Array<{
+    type: 'supports_goal' | 'addresses_condition'
+    targetId: string
+  }>
 }
 
 interface RecipeCoreRuntime {
@@ -417,6 +421,7 @@ function buildRecipePayload(recipe: RecipeReadModel): RecipePayload {
     docType: _docType,
     relativePath: _relativePath,
     markdown: _markdown,
+    links: _links,
     ...payload
   } = recipe
 
@@ -441,6 +446,11 @@ async function loadRecipeCoreRuntime(): Promise<RecipeCoreRuntime> {
 }
 
 function buildRecipeData(recipe: RecipeReadModel): JsonObject {
-  const { relativePath: _relativePath, markdown: _markdown, ...data } = recipe
+  const {
+    relativePath: _relativePath,
+    markdown: _markdown,
+    links: _links,
+    ...data
+  } = recipe
   return structuredClone(data) as JsonObject
 }
