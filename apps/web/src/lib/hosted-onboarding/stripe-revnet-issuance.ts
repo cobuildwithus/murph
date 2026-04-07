@@ -10,7 +10,7 @@ import type Stripe from "stripe";
 import { requireHostedMemberWalletAddressForRevnet } from "./billing-service";
 import { coerceStripeObjectId } from "./billing";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
-import { type HostedMemberAggregate } from "./hosted-member-store";
+import { type HostedMemberSnapshot } from "./hosted-member-store";
 import {
   coerceHostedWalletAddress,
   convertStripeMinorAmountToRevnetPaymentAmount,
@@ -101,7 +101,7 @@ type HostedRevnetIssuanceClaimState =
 
 export async function maybeIssueHostedRevnetForStripeInvoice(input: {
   invoice: Stripe.Invoice;
-  member: HostedMemberAggregate;
+  member: HostedMemberSnapshot;
   prisma: PrismaClient | Prisma.TransactionClient;
 }): Promise<void> {
   const issuance = await ensureHostedRevnetIssuanceForStripeInvoice(input);
@@ -135,7 +135,7 @@ export async function maybeIssueHostedRevnetForStripeInvoice(input: {
 
 export async function ensureHostedRevnetIssuanceForStripeInvoice(input: {
   invoice: Stripe.Invoice;
-  member: HostedMemberAggregate;
+  member: HostedMemberSnapshot;
   prisma: PrismaClient | Prisma.TransactionClient;
 }): Promise<HostedRevnetIssuanceRecord | null> {
   const eligibility = loadHostedRevnetIssuanceEligibility(input);
@@ -332,10 +332,10 @@ function isHostedRevnetIssuanceBroadcastStatusUnknown(issuance: HostedRevnetIssu
 
 function loadHostedRevnetIssuanceEligibility(input: {
   invoice: Stripe.Invoice;
-  member: HostedMemberAggregate;
+  member: HostedMemberSnapshot;
   prisma: PrismaClient | Prisma.TransactionClient;
 }): HostedRevnetIssuanceEligibility {
-  if (input.member.suspendedAt) {
+  if (input.member.core.suspendedAt) {
     return {
       kind: "skip",
       reason: "member_suspended",
@@ -371,7 +371,10 @@ function loadHostedRevnetIssuanceEligibility(input: {
 
   return {
     amountPaid,
-    beneficiaryAddress: requireHostedMemberWalletAddressForRevnet(input.member),
+    beneficiaryAddress: requireHostedMemberWalletAddressForRevnet({
+      id: input.member.core.id,
+      walletAddress: input.member.identity?.walletAddress ?? null,
+    }),
     chargeId: coerceStripeObjectId(
       (input.invoice as Stripe.Invoice & { charge?: string | { id?: unknown } | null }).charge ?? null,
     ),
@@ -379,7 +382,7 @@ function loadHostedRevnetIssuanceEligibility(input: {
     idempotencyKey: `stripe:invoice:${input.invoice.id}`,
     invoiceId: input.invoice.id,
     kind: "ready",
-    memberId: input.member.id,
+    memberId: input.member.core.id,
     paymentAmount: convertStripeMinorAmountToRevnetPaymentAmount(
       amountPaid,
       config.weiPerStripeMinorUnit,

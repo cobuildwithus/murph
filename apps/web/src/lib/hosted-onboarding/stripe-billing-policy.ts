@@ -21,8 +21,8 @@ import {
   isHostedAccessBlockedBillingStatus,
 } from "./entitlement";
 import {
-  type HostedMemberAggregate,
-  readHostedMemberAggregate,
+  type HostedMemberSnapshot,
+  readHostedMemberSnapshot,
   updateHostedMemberCoreState,
 } from "./hosted-member-store";
 import {
@@ -56,7 +56,7 @@ export type HostedMemberActivationTransactionResult = HostedMemberActivationResu
 type HostedOnboardingPrismaClient = Prisma.TransactionClient;
 
 export async function activateHostedMemberFromConfirmedRevnetIssuance(input: {
-  member: HostedMemberAggregate;
+  member: HostedMemberSnapshot;
   occurredAt: string;
   prisma: HostedOnboardingPrismaClient;
   sourceEventId: string;
@@ -73,16 +73,14 @@ export async function activateHostedMemberFromConfirmedRevnetIssuance(input: {
     return {
       activated: false,
       hostedExecutionEventId: null,
-      memberId: input.member.id,
+      memberId: input.member.core.id,
     };
   }
 
-  await provisionManagedUserCryptoInHostedExecution(input.member.id);
+  await provisionManagedUserCryptoInHostedExecution(input.member.core.id);
 
-  const dispatch = buildHostedMemberActivationDispatch({
-    linqChatId: input.member.linqChatId,
-    memberId: input.member.id,
-    phoneLookupKey: input.member.phoneLookupKey,
+  const dispatch = buildHostedMemberActivationDispatchForMember({
+    member: input.member,
     occurredAt: input.occurredAt,
     sourceEventId: input.sourceEventId,
     sourceType: input.sourceType,
@@ -97,7 +95,7 @@ export async function activateHostedMemberFromConfirmedRevnetIssuance(input: {
   return {
     activated: true,
     hostedExecutionEventId: dispatch.eventId,
-    memberId: input.member.id,
+    memberId: input.member.core.id,
   };
 }
 
@@ -116,24 +114,22 @@ export function resolveHostedSubscriptionBillingStatus(input: {
 
 export async function activateHostedMemberForPositiveSource(input: {
   dispatchContext: HostedStripeDispatchContext;
-  member: HostedMemberAggregate;
+  member: HostedMemberSnapshot;
   prisma: HostedOnboardingPrismaClient;
   skipIfBillingAlreadyActive?: boolean;
   sourceType: string;
 }): Promise<HostedMemberActivationTransactionResult> {
   return withHostedOnboardingTransaction(input.prisma, async (tx) => {
-    await lockHostedMemberRow(tx, input.member.id);
+    await lockHostedMemberRow(tx, input.member.core.id);
 
-    const currentMember = await findHostedMemberById(tx, input.member.id);
+    const currentMember = await findHostedMemberById(tx, input.member.core.id);
 
-    if (!currentMember || isHostedAccessBlockedBillingStatus(currentMember.billingStatus)) {
-      return buildHostedInactiveMemberActivationResult(input.member.id);
+    if (!currentMember || isHostedAccessBlockedBillingStatus(currentMember.core.billingStatus)) {
+      return buildHostedInactiveMemberActivationResult(input.member.core.id);
     }
 
-    const dispatch = buildHostedMemberActivationDispatch({
-      linqChatId: currentMember.linqChatId,
-      memberId: currentMember.id,
-      phoneLookupKey: currentMember.phoneLookupKey,
+    const dispatch = buildHostedMemberActivationDispatchForMember({
+      member: currentMember,
       occurredAt: input.dispatchContext.occurredAt,
       sourceEventId: input.dispatchContext.sourceEventId,
       sourceType: input.sourceType,
@@ -141,7 +137,7 @@ export async function activateHostedMemberForPositiveSource(input: {
 
     if (
       input.skipIfBillingAlreadyActive &&
-      currentMember.billingStatus === HostedBillingStatus.active
+      currentMember.core.billingStatus === HostedBillingStatus.active
     ) {
       const existingDispatch = await tx.executionOutbox.findUnique({
         where: {
@@ -156,24 +152,24 @@ export async function activateHostedMemberForPositiveSource(input: {
         ? {
             activated: false,
             hostedExecutionEventId: existingDispatch.eventId,
-            memberId: currentMember.id,
-            postCommitProvisionUserId: currentMember.id,
+            memberId: currentMember.core.id,
+            postCommitProvisionUserId: currentMember.core.id,
           }
-        : buildHostedInactiveMemberActivationResult(currentMember.id);
+        : buildHostedInactiveMemberActivationResult(currentMember.core.id);
     }
 
     const entitlement = deriveHostedEntitlement({
       billingStatus: HostedBillingStatus.active,
-      suspendedAt: currentMember.suspendedAt,
+      suspendedAt: currentMember.core.suspendedAt,
     });
 
     if (!entitlement.activationReady) {
-      return buildHostedInactiveMemberActivationResult(currentMember.id);
+      return buildHostedInactiveMemberActivationResult(currentMember.core.id);
     }
 
     await updateHostedMemberCoreState({
       billingStatus: HostedBillingStatus.active,
-      memberId: currentMember.id,
+      memberId: currentMember.core.id,
       prisma: tx,
     });
 
@@ -187,31 +183,31 @@ export async function activateHostedMemberForPositiveSource(input: {
     return {
       activated: true,
       hostedExecutionEventId: outboxRecord.eventId,
-      memberId: currentMember.id,
-      postCommitProvisionUserId: currentMember.id,
+      memberId: currentMember.core.id,
+      postCommitProvisionUserId: currentMember.core.id,
     };
   });
 }
 
 async function tryActivateHostedMemberIfStillAllowed(input: {
-  member: HostedMemberAggregate;
+  member: HostedMemberSnapshot;
   prisma: HostedOnboardingPrismaClient;
   revnetIssuanceStatus?: HostedRevnetIssuanceStatus | null;
   revnetRequired?: boolean;
   skipIfBillingAlreadyActive?: boolean;
 }): Promise<boolean> {
   return withHostedOnboardingTransaction(input.prisma, async (tx) => {
-    await lockHostedMemberRow(tx, input.member.id);
+    await lockHostedMemberRow(tx, input.member.core.id);
 
-    const currentMember = await findHostedMemberById(tx, input.member.id);
+    const currentMember = await findHostedMemberById(tx, input.member.core.id);
 
-    if (!currentMember || isHostedAccessBlockedBillingStatus(currentMember.billingStatus)) {
+    if (!currentMember || isHostedAccessBlockedBillingStatus(currentMember.core.billingStatus)) {
       return false;
     }
 
     if (
       input.skipIfBillingAlreadyActive &&
-      currentMember.billingStatus === HostedBillingStatus.active
+      currentMember.core.billingStatus === HostedBillingStatus.active
     ) {
       return false;
     }
@@ -220,7 +216,7 @@ async function tryActivateHostedMemberIfStillAllowed(input: {
       billingStatus: HostedBillingStatus.active,
       revnetIssuanceStatus: input.revnetIssuanceStatus,
       revnetRequired: input.revnetRequired,
-      suspendedAt: currentMember.suspendedAt,
+      suspendedAt: currentMember.core.suspendedAt,
     });
 
     if (!entitlement.activationReady) {
@@ -229,7 +225,7 @@ async function tryActivateHostedMemberIfStillAllowed(input: {
 
     await updateHostedMemberCoreState({
       billingStatus: HostedBillingStatus.active,
-      memberId: currentMember.id,
+      memberId: currentMember.core.id,
       prisma: tx,
     });
 
@@ -248,19 +244,35 @@ function buildHostedInactiveMemberActivationResult(
   };
 }
 
+function buildHostedMemberActivationDispatchForMember(input: {
+  member: HostedMemberSnapshot;
+  occurredAt: string;
+  sourceEventId: string;
+  sourceType: string;
+}) {
+  return buildHostedMemberActivationDispatch({
+    linqChatId: input.member.routing?.linqChatId ?? null,
+    memberId: input.member.core.id,
+    phoneLookupKey: input.member.identity?.phoneLookupKey ?? null,
+    occurredAt: input.occurredAt,
+    sourceEventId: input.sourceEventId,
+    sourceType: input.sourceType,
+  });
+}
+
 export async function updateHostedMemberStripeBillingIfFresh(input: {
   billingStatus: HostedBillingStatus;
   dispatchContext: HostedStripeDispatchContext;
-  member: HostedMemberAggregate;
+  member: HostedMemberSnapshot;
   prisma: HostedOnboardingPrismaClient;
   stripeCustomerId?: string | null;
   stripeSubscriptionId?: string | null;
   suspendedAtOverride?: Date | null;
-}): Promise<HostedMemberAggregate | null> {
+}): Promise<HostedMemberSnapshot | null> {
   return withHostedOnboardingTransaction(input.prisma, async (tx) => {
-    await lockHostedMemberRow(tx, input.member.id);
+    await lockHostedMemberRow(tx, input.member.core.id);
 
-    const currentMember = await findHostedMemberById(tx, input.member.id);
+    const currentMember = await findHostedMemberById(tx, input.member.core.id);
 
     if (!currentMember) {
       return null;
@@ -275,27 +287,27 @@ export async function updateHostedMemberStripeBillingIfFresh(input: {
 
     await updateHostedMemberCoreState({
       billingStatus: nextBillingStatus,
-      memberId: currentMember.id,
+      memberId: currentMember.core.id,
       prisma: tx,
       suspendedAt: input.suspendedAtOverride,
     });
 
     await writeHostedMemberStripeBillingRef({
-      memberId: currentMember.id,
+      memberId: currentMember.core.id,
       prisma: tx,
       stripeCustomerId: input.stripeCustomerId,
       stripeSubscriptionId: input.stripeSubscriptionId,
     });
 
-    return findHostedMemberById(tx, currentMember.id);
+    return findHostedMemberById(tx, currentMember.core.id);
   });
 }
 
 async function findHostedMemberById(
   prisma: HostedOnboardingPrismaClient,
   memberId: string,
-): Promise<HostedMemberAggregate | null> {
-  return readHostedMemberAggregate({
+): Promise<HostedMemberSnapshot | null> {
+  return readHostedMemberSnapshot({
     memberId,
     prisma,
   });
@@ -303,7 +315,7 @@ async function findHostedMemberById(
 
 async function resolveHostedBillingStatusForWrite(input: {
   billingStatus: HostedBillingStatus;
-  currentMember: HostedMemberAggregate;
+  currentMember: HostedMemberSnapshot;
   dispatchContext: HostedStripeDispatchContext;
   stripeSubscriptionId?: string | null;
 }): Promise<HostedBillingStatus> {
@@ -316,7 +328,7 @@ async function resolveHostedBillingStatusForWrite(input: {
   if (canonicalBillingStatus !== null) {
     if (isHostedStripeSubscriptionSourceType(input.dispatchContext.sourceType)) {
       return resolveHostedSubscriptionBillingStatus({
-        currentBillingStatus: input.currentMember.billingStatus,
+        currentBillingStatus: input.currentMember.core.billingStatus,
         nextBillingStatus: canonicalBillingStatus,
       });
     }
@@ -343,11 +355,12 @@ async function resolveHostedBillingStatusForWrite(input: {
 }
 
 async function resolveHostedCanonicalStripeBillingStatus(input: {
-  currentMember: HostedMemberAggregate;
+  currentMember: HostedMemberSnapshot;
   dispatchContext: HostedStripeDispatchContext;
   stripeSubscriptionId?: string | null;
 }): Promise<HostedBillingStatus | null> {
-  const subscriptionId = input.stripeSubscriptionId ?? input.currentMember.stripeSubscriptionId;
+  const subscriptionId =
+    input.stripeSubscriptionId ?? input.currentMember.billingRef?.stripeSubscriptionId ?? null;
 
   if (!subscriptionId) {
     return null;
@@ -375,7 +388,7 @@ function isHostedStripeInvoiceSourceType(sourceType: string): boolean {
 
 export async function suspendHostedMemberForBillingReversal(input: {
   dispatchContext: Pick<HostedStripeDispatchContext, "eventCreatedAt" | "sourceEventId">;
-  member: HostedMemberAggregate;
+  member: HostedMemberSnapshot;
   prisma: HostedOnboardingPrismaClient;
   reason: string;
   stripeCustomerId?: string | null;
@@ -401,7 +414,7 @@ export async function findMemberForStripeObject(input: {
   memberId: string | null;
   prisma: HostedOnboardingPrismaClient;
   subscriptionId: string | null;
-}): Promise<HostedMemberAggregate | null> {
+}): Promise<HostedMemberSnapshot | null> {
   if (input.memberId) {
     const member = await findHostedMemberById(input.prisma, input.memberId);
 
@@ -449,7 +462,7 @@ export async function findMemberForStripeReversal(input: {
   paymentIntentId: string | null;
   prisma: HostedOnboardingPrismaClient;
   subscriptionId: string | null;
-}): Promise<HostedMemberAggregate | null> {
+}): Promise<HostedMemberSnapshot | null> {
   const directMember = await findMemberForStripeObject({
     clientReferenceId: null,
     customerId: input.customerId,

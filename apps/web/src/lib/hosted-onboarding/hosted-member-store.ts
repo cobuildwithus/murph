@@ -1,6 +1,7 @@
 /**
- * Owns the core hosted_member row plus aggregate reads that compose the
- * specialized identity, routing, and billing store slices.
+ * Owns the core hosted_member row plus composed reads over the specialized
+ * identity, routing, and billing store slices without flattening them back into
+ * a pre-cutover wide row.
  */
 import { type HostedMember, Prisma } from "@prisma/client";
 
@@ -30,19 +31,11 @@ export type HostedMemberCoreState = Prisma.HostedMemberGetPayload<{
   select: typeof hostedMemberCoreStateSelect;
 }>;
 
-export interface HostedMemberAggregate extends HostedMemberCoreState {
-  linqChatId: string | null;
-  maskedPhoneNumberHint: string | null;
-  phoneLookupKey: string | null;
-  phoneNumberVerifiedAt: Date | null;
-  privyUserId: string | null;
-  stripeCustomerId: string | null;
-  stripeSubscriptionId: string | null;
-  telegramUserLookupKey: string | null;
-  walletAddress: string | null;
-  walletChainType: string | null;
-  walletCreatedAt: Date | null;
-  walletProvider: string | null;
+export interface HostedMemberSnapshot {
+  billingRef: HostedMemberStripeBillingRefSnapshot | null;
+  core: HostedMemberCoreState;
+  identity: HostedMemberIdentityState | null;
+  routing: HostedMemberRoutingStateSnapshot | null;
 }
 
 export async function createHostedMember(input: {
@@ -77,10 +70,10 @@ export async function readHostedMemberCoreState(input: {
   });
 }
 
-export async function readHostedMemberAggregate(input: {
+export async function readHostedMemberSnapshot(input: {
   memberId: string;
   prisma: HostedOnboardingPrismaClient;
-}): Promise<HostedMemberAggregate | null> {
+}): Promise<HostedMemberSnapshot | null> {
   const memberRecord = await input.prisma.hostedMember.findUnique({
     where: {
       id: input.memberId,
@@ -106,7 +99,7 @@ export async function readHostedMemberAggregate(input: {
     ? projectHostedMemberStripeBillingRefSnapshot(memberRecord.billingRef)
     : null;
 
-  return buildHostedMemberAggregate(
+  return composeHostedMemberSnapshot(
     {
       billingStatus: memberRecord.billingStatus,
       createdAt: memberRecord.createdAt,
@@ -154,27 +147,18 @@ export async function updateHostedMemberCoreState(input: {
   });
 }
 
-function buildHostedMemberAggregate(
-  member: HostedMemberCoreState,
+export function composeHostedMemberSnapshot(
+  core: HostedMemberCoreState,
   input: {
     billingRef: HostedMemberStripeBillingRefSnapshot | null;
     identity: HostedMemberIdentityState | null;
     routing: HostedMemberRoutingStateSnapshot | null;
   },
-): HostedMemberAggregate {
+): HostedMemberSnapshot {
   return {
-    ...member,
-    linqChatId: input.routing?.linqChatId ?? null,
-    maskedPhoneNumberHint: input.identity?.maskedPhoneNumberHint ?? null,
-    phoneLookupKey: input.identity?.phoneLookupKey ?? null,
-    phoneNumberVerifiedAt: input.identity?.phoneNumberVerifiedAt ?? null,
-    privyUserId: input.identity?.privyUserId ?? null,
-    stripeCustomerId: input.billingRef?.stripeCustomerId ?? null,
-    stripeSubscriptionId: input.billingRef?.stripeSubscriptionId ?? null,
-    telegramUserLookupKey: input.routing?.telegramUserLookupKey ?? null,
-    walletAddress: input.identity?.walletAddress ?? null,
-    walletChainType: input.identity?.walletChainType ?? null,
-    walletCreatedAt: input.identity?.walletCreatedAt ?? null,
-    walletProvider: input.identity?.walletProvider ?? null,
+    billingRef: input.billingRef,
+    core,
+    identity: input.identity,
+    routing: input.routing,
   };
 }

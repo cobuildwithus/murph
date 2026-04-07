@@ -2,7 +2,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { enqueueHostedExecutionOutboxPayload } from "../hosted-execution/outbox";
 import { hostedOnboardingError } from "./errors";
-import { readHostedMemberAggregate } from "./hosted-member-store";
+import { readHostedMemberSnapshot } from "./hosted-member-store";
 import { buildHostedInviteUrl } from "./invite-service";
 import {
   buildHostedDailyQuotaReply,
@@ -86,7 +86,7 @@ async function performHostedWebhookSideEffect(
         signal: options.signal,
       });
     case "revnet_invoice_issue": {
-      const member = await readHostedMemberAggregate({
+      const member = await readHostedMemberSnapshot({
         memberId: effect.payload.memberId,
         prisma: options.prisma,
       });
