@@ -1,3 +1,4 @@
+import type { SharePack } from "@murphai/contracts";
 import type {
   HostedExecutionDeviceSyncConnectLinkResponse,
   HostedExecutionDeviceSyncRuntimeApplyRequest,
@@ -29,6 +30,9 @@ export interface HostedExecutionAiUsageRecordResponse {
   recorded: number;
   usageIds: string[];
 }
+
+export const HOSTED_EXECUTION_HOSTED_SHARE_INTERNAL_CREATE_PATH =
+  "/api/hosted-share/internal/create";
 
 interface HostedExecutionUserBoundWebControlPlaneRequester {
   requestJson<TResponse>(input: {
@@ -72,6 +76,20 @@ export interface HostedExecutionProxyAiUsageClient {
   recordUsage(
     usage: HostedExecutionAiUsageRecordRequest["usage"],
   ): Promise<HostedExecutionAiUsageRecordResponse>;
+}
+
+export interface HostedExecutionShareLinkResult extends Record<string, unknown> {
+  shareCode: string;
+  url: string;
+}
+
+export interface HostedExecutionServerShareLinkIssuer {
+  issue(input: {
+    expiresInHours?: number;
+    inviteCode?: string | null;
+    pack: SharePack;
+    recipientPhoneNumber?: string | null;
+  }): Promise<HostedExecutionShareLinkResult>;
 }
 
 export function createHostedExecutionProxyDeviceSyncRuntimeClient(input: {
@@ -124,6 +142,25 @@ export function createHostedExecutionServerDeviceSyncConnectLinkClient(input: {
       signingSecret: input.signingSecret,
       timeoutMs: input.timeoutMs ?? null,
     }),
+  );
+}
+
+export function createHostedExecutionServerShareLinkIssuer(input: {
+  baseUrl: string;
+  boundUserId: string;
+  fetchImpl?: typeof fetch;
+  signingSecret: string;
+  timeoutMs?: number | null;
+}): HostedExecutionServerShareLinkIssuer {
+  return buildHostedExecutionShareLinkIssuer(
+    createHostedExecutionServerRequester({
+      baseUrl: input.baseUrl,
+      boundUserId: input.boundUserId,
+      fetchImpl: input.fetchImpl,
+      signingSecret: input.signingSecret,
+      timeoutMs: input.timeoutMs ?? null,
+    }),
+    input.boundUserId,
   );
 }
 
@@ -304,6 +341,29 @@ function buildHostedExecutionAiUsageClient(
         method: "POST",
         parse: parseHostedExecutionAiUsageRecordResponse,
         path: HOSTED_EXECUTION_AI_USAGE_RECORD_PATH,
+      });
+    },
+  };
+}
+
+function buildHostedExecutionShareLinkIssuer(
+  requester: HostedExecutionUserBoundWebControlPlaneRequester,
+  boundUserId: string,
+): HostedExecutionServerShareLinkIssuer {
+  return {
+    issue(input) {
+      return requester.requestJson({
+        body: {
+          expiresInHours: input.expiresInHours,
+          inviteCode: input.inviteCode,
+          pack: input.pack,
+          recipientPhoneNumber: input.recipientPhoneNumber,
+          senderMemberId: boundUserId,
+        },
+        label: "Hosted share link creation",
+        method: "POST",
+        parse: parseHostedExecutionShareLinkResult,
+        path: HOSTED_EXECUTION_HOSTED_SHARE_INTERNAL_CREATE_PATH,
       });
     },
   };
@@ -525,15 +585,60 @@ function parseJsonBody(text: string): unknown {
 }
 
 function formatHostedExecutionErrorSuffix(payload: unknown, text: string): string {
-  if (payload && typeof payload === "object") {
-    const message = (payload as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim().length > 0) {
-      return `: ${message.trim()}`;
-    }
+  const message = readHostedExecutionErrorMessage(payload);
+
+  if (message) {
+    return `: ${message}`;
   }
 
   const trimmed = text.trim();
   return trimmed.length > 0 ? `: ${trimmed.slice(0, 500)}` : "";
+}
+
+function parseHostedExecutionShareLinkResult(value: unknown): HostedExecutionShareLinkResult {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Hosted share link response must be a JSON object.");
+  }
+
+  const shareCode = (value as { shareCode?: unknown }).shareCode;
+  const url = (value as { url?: unknown }).url;
+
+  if (typeof shareCode !== "string" || shareCode.trim().length === 0) {
+    throw new TypeError("Hosted share link response shareCode must be a non-empty string.");
+  }
+
+  if (typeof url !== "string" || url.trim().length === 0) {
+    throw new TypeError("Hosted share link response url must be a non-empty string.");
+  }
+
+  return {
+    ...(value as Record<string, unknown>),
+    shareCode,
+    url,
+  };
+}
+
+function readHostedExecutionErrorMessage(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+
+  const topLevelMessage = (payload as { message?: unknown }).message;
+
+  if (typeof topLevelMessage === "string" && topLevelMessage.trim().length > 0) {
+    return topLevelMessage.trim();
+  }
+
+  const nestedError = (payload as { error?: unknown }).error;
+
+  if (!nestedError || typeof nestedError !== "object" || Array.isArray(nestedError)) {
+    return null;
+  }
+
+  const nestedMessage = (nestedError as { message?: unknown }).message;
+  return typeof nestedMessage === "string" && nestedMessage.trim().length > 0
+    ? nestedMessage.trim()
+    : null;
 }
 
 function buildHostedExecutionRequestHeaders(input: {

@@ -6,8 +6,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildSharePackFromVault } from '@murphai/core'
 import {
-  HOSTED_EXECUTION_USER_ID_HEADER,
-  createHostedExecutionSignatureHeaders,
+  createHostedExecutionServerShareLinkIssuer,
 } from '@murphai/hosted-execution'
 import { prepareAssistantDirectCliEnv } from '../assistant-cli-access.js'
 import { normalizeNullableString } from '../assistant/shared.js'
@@ -307,55 +306,17 @@ export async function issueHostedShareLink(input: {
     )
   }
 
-  const body = JSON.stringify({
+  return await createHostedExecutionServerShareLinkIssuer({
+    baseUrl,
+    boundUserId: senderMemberId,
+    fetchImpl: fetch,
+    signingSecret,
+  }).issue({
     pack: input.pack,
     expiresInHours: input.expiresInHours,
     inviteCode: input.inviteCode,
     recipientPhoneNumber: input.recipientPhoneNumber,
-    senderMemberId,
   })
-  const requestUrl = new URL('/api/hosted-share/internal/create', `${baseUrl}/`)
-  const signatureHeaders = await createHostedExecutionSignatureHeaders({
-    method: 'POST',
-    nonce: null,
-    path: requestUrl.pathname,
-    payload: body,
-    search: requestUrl.search,
-    secret: signingSecret,
-    timestamp: new Date().toISOString(),
-    userId: senderMemberId,
-  })
-  const headers = new Headers({
-    'content-type': 'application/json; charset=utf-8',
-    [HOSTED_EXECUTION_USER_ID_HEADER]: senderMemberId,
-  })
-
-  for (const [key, value] of Object.entries(signatureHeaders) as Array<[string, string]>) {
-    headers.set(key, value)
-  }
-
-  const response = await fetch(requestUrl, {
-    method: 'POST',
-    headers,
-    body,
-  })
-  const payload = (await response.json()) as
-    | ({
-        error?: {
-          message?: string
-        }
-      } & Record<string, unknown>)
-    | null
-
-  if (!response.ok) {
-    throw new Error(
-      typeof payload?.error?.message === 'string'
-        ? payload.error.message
-        : 'Hosted share link creation failed.',
-    )
-  }
-
-  return payload
 }
 
 export async function writeAssistantPayloadFile(
