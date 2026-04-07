@@ -50,7 +50,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
   if (event.event_type === "message.received") {
     requireHostedLinqMessageReceivedEvent(event);
   }
-  return runHostedWebhookWithReceipt({
+  const response = await runHostedWebhookWithReceipt({
     duplicateResponse: {
       ok: true,
       duplicate: true,
@@ -66,6 +66,12 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     signal: input.signal,
     source: "linq",
   });
+  await maybeDrainHostedExecutionWebhookDispatch({
+    eventId: event.event_id,
+    prisma,
+    response,
+  });
+  return response;
 }
 
 export async function handleHostedOnboardingTelegramWebhook(input: {
@@ -79,7 +85,7 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
   assertHostedTelegramWebhookSecret(input.secretToken);
 
   const update = parseHostedTelegramWebhookUpdate(input.rawBody);
-  return runHostedWebhookWithReceipt({
+  const response = await runHostedWebhookWithReceipt({
     duplicateResponse: {
       ok: true,
       duplicate: true,
@@ -95,6 +101,12 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
     signal: input.signal,
     source: "telegram",
   });
+  await maybeDrainHostedExecutionWebhookDispatch({
+    eventId: buildHostedTelegramWebhookEventId(update),
+    prisma,
+    response,
+  });
+  return response;
 }
 
 export async function handleHostedStripeWebhook(input: {
@@ -192,4 +204,24 @@ async function drainHostedRevnetIssuanceSubmissionQueueBestEffort(
       error instanceof Error ? error.message : String(error),
     );
   }
+}
+
+async function maybeDrainHostedExecutionWebhookDispatch(input: {
+  eventId: string;
+  prisma: PrismaClient;
+  response:
+    | HostedOnboardingLinqWebhookResponse
+    | HostedOnboardingTelegramWebhookResponse;
+}): Promise<void> {
+  if (input.response.reason !== "dispatched-active-member") {
+    return;
+  }
+
+  await drainHostedExecutionOutboxBestEffort({
+    eventIds: [
+      input.eventId,
+    ],
+    limit: 1,
+    prisma: input.prisma,
+  });
 }

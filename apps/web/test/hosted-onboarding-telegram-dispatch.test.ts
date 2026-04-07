@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   deleteHostedStoredDispatchPayloadBestEffort: vi.fn(),
+  drainHostedExecutionOutboxBestEffort: vi.fn(),
   enqueueHostedExecutionOutbox: vi.fn(),
   maybeStageHostedExecutionDispatchPayload: vi.fn(),
   runtimeEnv: {
@@ -40,6 +41,7 @@ vi.mock("@/src/lib/hosted-execution/outbox", async () => {
 
   return {
     ...actual,
+    drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
     enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
     enqueueHostedExecutionOutboxPayload: (input: {
       payload: {
@@ -93,6 +95,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.stagedDispatches.clear();
+    mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
     mocks.maybeStageHostedExecutionDispatchPayload.mockImplementation(
       async (dispatch: HostedExecutionDispatchRequest) => {
@@ -170,6 +173,13 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         sourceType: "hosted_webhook_receipt",
       }),
     );
+    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
+      eventIds: [
+        "telegram:update:321",
+      ],
+      limit: 1,
+      prisma,
+    });
 
     const receiptWrites = (
       prisma as unknown as {
@@ -248,6 +258,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       httpStatus: 401,
     });
     expect(hostedMemberRoutingFindUnique).not.toHaveBeenCalled();
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
@@ -290,6 +301,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       httpStatus: 500,
     });
     expect(hostedMemberRoutingFindUnique).not.toHaveBeenCalled();
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
@@ -348,6 +360,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       ok: true,
       reason: "suspended-member",
     });
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 

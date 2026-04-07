@@ -879,7 +879,13 @@ describe("hosted onboarding webhook retry safety", () => {
       }),
     );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
-    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
+      eventIds: [
+        "evt_123",
+      ],
+      limit: 1,
+      prisma,
+    });
   });
 
   it("processes Stripe events inline and immediately drains activation side effects", async () => {
@@ -1136,6 +1142,13 @@ describe("hosted onboarding webhook retry safety", () => {
         sourceType: "hosted_webhook_receipt",
       }),
     );
+    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
+      eventIds: [
+        "evt_123",
+      ],
+      limit: 1,
+      prisma,
+    });
   });
 
   it("fails dispatch queueing after three stale compare-and-swap misses", async () => {
@@ -1957,6 +1970,13 @@ describe("hosted onboarding webhook retry safety", () => {
       }),
     );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
+    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
+      eventIds: [
+        "evt_123",
+      ],
+      limit: 1,
+      prisma,
+    });
   });
 
   it("fails reclaiming malformed Linq receipts after three stale compare-and-swap misses", async () => {
