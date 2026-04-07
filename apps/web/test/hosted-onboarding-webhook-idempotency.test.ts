@@ -372,35 +372,32 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(receiptCalls.at(-1)).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          payloadJson: buildWebhookReceiptPayload({
-            attemptCount: 1,
-            attemptId: expect.any(String),
-            completedAt: expect.any(String),
-            eventPayload: {
-              eventType: "message.received",
-            },
-            lastReceivedAt: expect.any(String),
-            plannedAt: expect.any(String),
-            response: expect.objectContaining({
-              inviteCode: "code_returning_member",
-              joinUrl: "https://join.example.test/join/code_returning_member",
-              ok: true,
-              reason: "sent-signup-link",
-            }),
-            sideEffects: [
-              buildLinqMessageSideEffect({
-                attemptCount: 1,
-                inviteId: "invite_123",
-                lastAttemptAt: expect.any(String),
-                sentAt: expect.any(String),
-                status: "sent",
-                template: "invite_signup",
-              }),
-            ],
-            status: "completed",
-          }),
+          attemptCount: 1,
+          attemptId: expect.any(String),
+          completedAt: expect.any(Date),
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastErrorName: null,
+          lastErrorRetryable: null,
+          lastReceivedAt: expect.any(Date),
+          plannedAt: expect.any(Date),
+          status: "completed",
         }),
       }),
+    );
+    expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          create: expect.objectContaining({
+            attemptCount: 1,
+            linqChatId: "chat_123",
+            linqInviteId: "invite_123",
+            linqReplyToMessageId: "msg_123",
+            linqTemplate: "invite_signup",
+            status: "pending",
+          }),
+        }),
+      ]),
     );
     expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(1);
     expect(prisma.hostedInvite.findFirst).toHaveBeenCalledTimes(1);
@@ -499,35 +496,32 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(receiptCalls.at(-1)).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          payloadJson: buildWebhookReceiptPayload({
-            attemptCount: 1,
-            attemptId: expect.any(String),
-            completedAt: expect.any(String),
-            eventPayload: {
-              eventType: "message.received",
-            },
-            lastReceivedAt: expect.any(String),
-            plannedAt: expect.any(String),
-            response: expect.objectContaining({
-              inviteCode: "code_first_contact",
-              joinUrl: "https://join.example.test/join/code_first_contact",
-              ok: true,
-              reason: "sent-signup-link",
-            }),
-            sideEffects: [
-              buildLinqMessageSideEffect({
-                attemptCount: 1,
-                inviteId: "invite_123",
-                lastAttemptAt: expect.any(String),
-                sentAt: expect.any(String),
-                status: "sent",
-                template: "invite_signup",
-              }),
-            ],
-            status: "completed",
-          }),
+          attemptCount: 1,
+          attemptId: expect.any(String),
+          completedAt: expect.any(Date),
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastErrorName: null,
+          lastErrorRetryable: null,
+          lastReceivedAt: expect.any(Date),
+          plannedAt: expect.any(Date),
+          status: "completed",
         }),
       }),
+    );
+    expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          create: expect.objectContaining({
+            attemptCount: 1,
+            linqChatId: "chat_123",
+            linqInviteId: "invite_123",
+            linqReplyToMessageId: "msg_123",
+            linqTemplate: "invite_signup",
+            status: "pending",
+          }),
+        }),
+      ]),
     );
     expect(prisma.hostedInvite.findFirst).toHaveBeenCalledTimes(1);
     expect(prisma.hostedInvite.create).toHaveBeenCalledTimes(1);
@@ -602,23 +596,16 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(receiptCalls.at(-1)).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          payloadJson: buildWebhookReceiptPayload({
-            attemptCount: 1,
-            attemptId: expect.any(String),
-            completedAt: expect.any(String),
-            eventPayload: {
-              eventType: "message.received",
-            },
-            lastReceivedAt: expect.any(String),
-            plannedAt: expect.any(String),
-            response: expect.objectContaining({
-              ignored: true,
-              ok: true,
-              reason: "signup-link-already-sent",
-            }),
-            sideEffects: [],
-            status: "completed",
-          }),
+          attemptCount: 1,
+          attemptId: expect.any(String),
+          completedAt: expect.any(Date),
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastErrorName: null,
+          lastErrorRetryable: null,
+          lastReceivedAt: expect.any(Date),
+          plannedAt: expect.any(Date),
+          status: "completed",
         }),
       }),
     );
@@ -829,57 +816,56 @@ describe("hosted onboarding webhook retry safety", () => {
 
     const receiptCalls = readMockCallPayloads(prisma.hostedWebhookReceipt.updateMany.mock.calls);
     expect(receiptCalls).toHaveLength(4);
-    expect(((receiptCalls[0]?.data as { payloadJson?: unknown } | undefined)?.payloadJson)).toEqual(
-      buildWebhookReceiptPayload({
+    expect(receiptCalls[0]?.data).toEqual(
+      expect.objectContaining({
         attemptCount: 1,
         attemptId: expect.any(String),
-        eventPayload: {
-          eventType: "message.received",
-        },
-        lastReceivedAt: expect.any(String),
-        plannedAt: expect.any(String),
-        response: expect.objectContaining({
-          ok: true,
-          reason: "dispatched-active-member",
-        }),
-        sideEffects: [
-          buildDispatchSideEffect({
-            eventId: "evt_123",
-            status: "pending",
-          }),
-        ],
+        completedAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastErrorName: null,
+        lastErrorRetryable: null,
+        lastReceivedAt: expect.any(Date),
+        plannedAt: expect.any(Date),
         status: "processing",
       }),
     );
     expect(receiptCalls.at(-1)).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          payloadJson: buildWebhookReceiptPayload({
-            attemptCount: 1,
-            attemptId: expect.any(String),
-            completedAt: expect.any(String),
-            eventPayload: {
-              eventType: "message.received",
-            },
-            lastReceivedAt: expect.any(String),
-            plannedAt: expect.any(String),
-            response: expect.objectContaining({
-              ok: true,
-              reason: "dispatched-active-member",
-            }),
-            sideEffects: [
-              buildDispatchSideEffect({
-                attemptCount: 1,
-                eventId: "evt_123",
-                lastAttemptAt: expect.any(String),
-                sentAt: expect.any(String),
-                status: "sent",
-              }),
-            ],
-            status: "completed",
-          }),
+          attemptCount: 1,
+          attemptId: expect.any(String),
+          completedAt: expect.any(Date),
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastErrorName: null,
+          lastErrorRetryable: null,
+          lastReceivedAt: expect.any(Date),
+          plannedAt: expect.any(Date),
+          status: "completed",
         }),
       }),
+    );
+    expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          create: expect.objectContaining({
+            attemptCount: 1,
+            dispatchPayloadJson: expect.objectContaining({
+              dispatchRef: expect.objectContaining({
+                eventId: "evt_123",
+                eventKind: "linq.message.received",
+                userId: "member_123",
+              }),
+              payloadRef: expect.objectContaining({
+                key: expect.stringContaining("/member_123/evt_123.json"),
+              }),
+            }),
+            kind: "hosted_execution_dispatch",
+            status: "pending",
+          }),
+        }),
+      ]),
     );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1048,7 +1034,7 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
   });
 
-  it("does not redispatch an already-sent Linq side effect when reclaiming a failed receipt", async () => {
+  it("replans a failed active-member dispatch after durable handoff and relies on outbox idempotency", async () => {
     const failedReceiptPayload = buildWebhookReceiptPayload({
       attemptCount: 1,
       attemptId: "attempt-1",
@@ -1099,78 +1085,59 @@ describe("hosted onboarding webhook retry safety", () => {
     const receiptCalls = readMockCallPayloads(prisma.hostedWebhookReceipt.updateMany.mock.calls);
     expect(receiptCalls[0]).toEqual(
       expect.objectContaining({
-        where: expect.objectContaining({
-          payloadJson: {
-            equals: failedReceiptPayload,
+        where: {
+          eventId: "evt_123",
+          source: "linq",
+          version: 1,
+        },
+        data: expect.objectContaining({
+          attemptCount: 2,
+          attemptId: expect.any(String),
+          completedAt: null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastErrorName: null,
+          lastErrorRetryable: null,
+          lastReceivedAt: expect.any(Date),
+          plannedAt: null,
+          status: "processing",
+          version: {
+            increment: 1,
           },
-        }),
-      }),
-    );
-    expect(receiptCalls[0]?.data).toEqual(
-      expect.objectContaining({
-        payloadJson: expect.objectContaining({
-          eventPayload: {
-            eventType: "message.received",
-          },
-          receiptState: expect.objectContaining({
-            attemptCount: 2,
-            attemptId: expect.any(String),
-            lastReceivedAt: expect.any(String),
-            status: "processing",
-          }),
         }),
       }),
     );
     expect(receiptCalls.at(-1)).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          payloadJson: expect.objectContaining({
-            eventPayload: {
-              eventType: "message.received",
-            },
-            receiptState: expect.objectContaining({
-              attemptCount: 2,
-              attemptId: expect.any(String),
-              completedAt: expect.any(String),
-              lastReceivedAt: expect.any(String),
-              plannedAt: expect.any(String),
-              response: expect.objectContaining({
-                ok: true,
-                reason: "dispatched-active-member",
-              }),
-              sideEffects: expect.arrayContaining([
-                expect.objectContaining({
-                  attemptCount: 1,
-                  effectId: "dispatch:evt_123",
-                  kind: "hosted_execution_dispatch",
-                  lastAttemptAt: expect.any(String),
-                  result: {
-                    dispatched: true,
-                  },
-                  sentAt: expect.any(String),
-                  status: "sent",
-                }),
-              ]),
-              status: "completed",
-            }),
-          }),
+          attemptCount: 2,
+          attemptId: expect.any(String),
+          completedAt: expect.any(Date),
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastErrorName: null,
+          lastErrorRetryable: null,
+          lastReceivedAt: expect.any(Date),
+          plannedAt: expect.any(Date),
+          status: "completed",
         }),
         where: expect.objectContaining({
-          payloadJson: {
-            equals: expect.objectContaining({
-              eventPayload: {
-                eventType: "message.received",
-              },
-              receiptState: expect.objectContaining({
-                attemptCount: 2,
-                status: "processing",
-              }),
-            }),
-          },
+          eventId: "evt_123",
+          source: "linq",
+          version: expect.any(Number),
         }),
       }),
     );
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dispatch: expect.objectContaining({
+          eventId: "evt_123",
+        }),
+        sourceId: "linq:evt_123",
+        sourceType: "hosted_webhook_receipt",
+      }),
+    );
   });
 
   it("fails dispatch queueing after three stale compare-and-swap misses", async () => {
@@ -1240,58 +1207,38 @@ describe("hosted onboarding webhook retry safety", () => {
         expect.objectContaining({
           where: expect.objectContaining({
             eventId: "evt_123",
-            payloadJson: {
-              equals: expect.objectContaining({
-                eventPayload: {
-                  eventType: "message.received",
-                },
-                receiptState: expect.objectContaining({
-                  attemptCount: 1,
-                  sideEffects: expect.arrayContaining([
-                    expect.objectContaining({
-                      attemptCount: 1,
-                      effectId: "dispatch:evt_123",
-                      kind: "hosted_execution_dispatch",
-                      result: null,
-                      status: "pending",
-                    }),
-                  ]),
-                  status: "processing",
-                }),
-              }),
-            },
+            source: "linq",
+            version: expect.any(Number),
           }),
           data: expect.objectContaining({
-            payloadJson: expect.objectContaining({
-              receiptState: expect.objectContaining({
-                sideEffects: expect.arrayContaining([
-                  expect.objectContaining({
-                    effectId: "dispatch:evt_123",
-                    kind: "hosted_execution_dispatch",
-                    result: {
-                      dispatched: true,
-                    },
-                    status: "sent",
-                  }),
-                ]),
-                status: "processing",
-              }),
-            }),
+            attemptCount: 1,
+            attemptId: expect.any(String),
+            completedAt: null,
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastErrorName: null,
+            lastErrorRetryable: null,
+            lastReceivedAt: expect.any(Date),
+            status: "processing",
+            version: {
+              increment: 1,
+            },
           }),
         }),
       );
     }
     expect(prisma.hostedWebhookReceipt.findUnique).toHaveBeenCalledTimes(3);
-    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(3);
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(1);
     expect(receiptCalls.at(-1)).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          payloadJson: expect.objectContaining({
-            receiptState: expect.objectContaining({
-              status: "failed",
-            }),
-          }),
+          completedAt: null,
+          lastErrorCode: "WEBHOOK_RECEIPT_UPDATE_FAILED",
+          lastErrorName: "HostedOnboardingError",
+          lastErrorRetryable: true,
+          plannedAt: null,
+          status: "failed",
         }),
       }),
     );
@@ -1334,14 +1281,10 @@ describe("hosted onboarding webhook retry safety", () => {
       status: "pending",
       updatedAt: new Date("2026-03-26T12:00:00.000Z"),
     };
+    const receiptStore = createInMemoryHostedWebhookReceiptStore();
     const prisma = withPrismaTransaction({
-      hostedWebhookReceipt: {
-        create: vi.fn()
-          .mockResolvedValueOnce({})
-          .mockRejectedValueOnce(createUniqueConstraintError()),
-        findUnique: vi.fn(),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
+      hostedWebhookReceipt: receiptStore.hostedWebhookReceipt,
+      hostedWebhookReceiptSideEffect: receiptStore.hostedWebhookReceiptSideEffect,
       hostedMember: {
         create: vi.fn().mockResolvedValue(member),
         findUnique: vi.fn()
@@ -1385,80 +1328,35 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(firstAttemptCalls[0]).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          payloadJson: buildWebhookReceiptPayload({
-            attemptCount: 1,
-            attemptId: expect.any(String),
-            eventPayload: {
-              eventType: "message.received",
-            },
-            lastReceivedAt: expect.any(String),
-            plannedAt: expect.any(String),
-            response: expect.objectContaining({
-              inviteCode: "join_123",
-              joinUrl: "https://join.example.test/join/join_123",
-              ok: true,
-              reason: "sent-signup-link",
-            }),
-            sideEffects: [
-              buildLinqMessageSideEffect({
-                inviteId: "invite_123",
-                replyToMessageId: "msg_123",
-                status: "pending",
-                template: "invite_signup",
-              }),
-            ],
-            status: "processing",
-          }),
+          attemptCount: 1,
+          attemptId: expect.any(String),
+          completedAt: null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastErrorName: null,
+          lastErrorRetryable: null,
+          lastReceivedAt: expect.any(Date),
+          plannedAt: expect.any(Date),
+          status: "processing",
         }),
       }),
     );
     expect(firstAttemptCalls.at(-1)).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          payloadJson: buildWebhookReceiptPayload({
-            attemptCount: 1,
-            attemptId: expect.any(String),
-            eventPayload: {
-              eventType: "message.received",
-            },
-            lastError: {
-              code: null,
-              message: "Linq outbound reply failed with HTTP 429.",
-              name: "HostedOnboardingError",
-              retryable: null,
-            },
-            lastReceivedAt: expect.any(String),
-            plannedAt: expect.any(String),
-            response: expect.objectContaining({
-              inviteCode: "join_123",
-              joinUrl: "https://join.example.test/join/join_123",
-              ok: true,
-              reason: "sent-signup-link",
-            }),
-            sideEffects: [
-              buildLinqMessageSideEffect({
-                attemptCount: 1,
-                inviteId: "invite_123",
-                lastAttemptAt: expect.any(String),
-                lastError: {
-                  code: null,
-                  message: "Linq outbound reply failed with HTTP 429.",
-                  name: "HostedOnboardingError",
-                  retryable: true,
-                },
-                replyToMessageId: "msg_123",
-                status: "pending",
-                template: "invite_signup",
-              }),
-            ],
-            status: "failed",
-          }),
+          attemptCount: 1,
+          attemptId: expect.any(String),
+          completedAt: null,
+          lastErrorCode: null,
+          lastErrorMessage: "Linq outbound reply failed with HTTP 429.",
+          lastErrorName: "HostedOnboardingError",
+          lastErrorRetryable: null,
+          lastReceivedAt: expect.any(Date),
+          plannedAt: expect.any(Date),
+          status: "failed",
         }),
       }),
     );
-    prisma.hostedWebhookReceipt.findUnique.mockResolvedValueOnce({
-      payloadJson: readPayloadJsonFromUpdateCall(firstAttemptCalls.at(-1)),
-    });
 
     await expect(
       handleHostedOnboardingLinqWebhook({
@@ -1470,10 +1368,8 @@ describe("hosted onboarding webhook retry safety", () => {
         timestamp: null,
       }),
     ).resolves.toMatchObject({
-      inviteCode: "join_123",
-      joinUrl: "https://join.example.test/join/join_123",
+      duplicate: true,
       ok: true,
-      reason: "sent-signup-link",
     });
 
     const secondAttemptCalls = prisma.hostedWebhookReceipt.updateMany.mock.calls
@@ -1482,19 +1378,16 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(secondAttemptCalls.at(-1)).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          payloadJson: expect.objectContaining({
-            receiptState: expect.objectContaining({
-              attemptCount: 2,
-              completedAt: expect.any(String),
-              response: expect.objectContaining({
-                inviteCode: "join_123",
-                joinUrl: "https://join.example.test/join/join_123",
-                ok: true,
-                reason: "sent-signup-link",
-              }),
-              status: "completed",
-            }),
-          }),
+          attemptCount: 2,
+          attemptId: expect.any(String),
+          completedAt: expect.any(Date),
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastErrorName: null,
+          lastErrorRetryable: null,
+          lastReceivedAt: expect.any(Date),
+          plannedAt: expect.any(Date),
+          status: "completed",
         }),
       }),
     );
@@ -1595,46 +1488,47 @@ describe("hosted onboarding webhook retry safety", () => {
         signature: null,
         timestamp: null,
       }),
-    ).resolves.toMatchObject({
-      inviteCode: "join_123",
-      joinUrl: "https://join.example.test/join/join_123",
-      ok: true,
+    ).rejects.toMatchObject({
+      code: "hosted_webhook_side_effect_delivery_uncertain",
+      name: "HostedOnboardingError",
+      retryable: false,
     });
 
     const receiptCalls = readMockCallPayloads(prisma.hostedWebhookReceipt.updateMany.mock.calls);
     expect(receiptCalls[0]).toEqual(
       expect.objectContaining({
-        where: expect.objectContaining({
-          payloadJson: {
-            equals: failedReceiptPayload,
-          },
-        }),
+        where: {
+          eventId: "evt_123",
+          source: "linq",
+          version: 1,
+        },
         data: expect.objectContaining({
-          payloadJson: expect.objectContaining({
-            receiptState: expect.objectContaining({
-              attemptCount: 2,
-              lastReceivedAt: expect.any(String),
-              status: "processing",
-            }),
-          }),
+          attemptCount: 2,
+          attemptId: expect.any(String),
+          completedAt: null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastErrorName: null,
+          lastErrorRetryable: null,
+          lastReceivedAt: expect.any(Date),
+          plannedAt: null,
+          status: "processing",
         }),
       }),
     );
     expect(receiptCalls.at(-1)).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          payloadJson: expect.objectContaining({
-            receiptState: expect.objectContaining({
-              attemptCount: 2,
-              completedAt: expect.any(String),
-              response: expect.objectContaining({
-                inviteCode: "join_123",
-                joinUrl: "https://join.example.test/join/join_123",
-                ok: true,
-              }),
-              status: "completed",
-            }),
-          }),
+          attemptCount: 2,
+          attemptId: expect.any(String),
+          completedAt: null,
+          lastErrorCode: "hosted_webhook_side_effect_delivery_uncertain",
+          lastErrorMessage: expect.stringContaining("may already have been delivered"),
+          lastErrorName: "HostedOnboardingError",
+          lastErrorRetryable: false,
+          lastReceivedAt: expect.any(Date),
+          plannedAt: expect.any(Date),
+          status: "failed",
         }),
       }),
     );
@@ -1705,42 +1599,21 @@ describe("hosted onboarding webhook retry safety", () => {
       status: "pending",
       updatedAt: new Date("2026-03-26T12:00:00.000Z"),
     };
-    let storedReceiptPayload: Record<string, unknown> | null = null;
+    const receiptStore = createInMemoryHostedWebhookReceiptStore();
     let failSentWriteOnce = true;
+    const baseDeleteMany = receiptStore.hostedWebhookReceiptSideEffect.deleteMany;
+    receiptStore.hostedWebhookReceiptSideEffect.deleteMany = vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
+      if (failSentWriteOnce && !("effectId" in where)) {
+        failSentWriteOnce = false;
+        throw new Error("Receipt persistence failed after the Linq send.");
+      }
+
+      return baseDeleteMany({ where });
+    });
 
     const prisma = withPrismaTransaction({
-      hostedWebhookReceipt: {
-        create: vi.fn().mockImplementation(({ data }: { data: { payloadJson: Record<string, unknown> } }) => {
-          if (storedReceiptPayload) {
-            throw createUniqueConstraintError();
-          }
-          storedReceiptPayload = data.payloadJson;
-          return {};
-        }),
-        findUnique: vi.fn().mockImplementation(() =>
-          storedReceiptPayload
-            ? {
-                payloadJson: storedReceiptPayload,
-              }
-            : null),
-        updateMany: vi.fn().mockImplementation(({ data }: { data: { payloadJson: Record<string, unknown> } }) => {
-          const nextPayload = data.payloadJson;
-          const nextSideEffects = (
-            nextPayload.receiptState as {
-              sideEffects?: Array<{ kind?: string; status?: string }>;
-            } | undefined
-          )?.sideEffects;
-          const nextLinqStatus = nextSideEffects?.find((effect) => effect.kind === "linq_message_send")?.status;
-
-          if (failSentWriteOnce && nextLinqStatus === "sent") {
-            failSentWriteOnce = false;
-            throw new Error("Receipt persistence failed after the Linq send.");
-          }
-
-          storedReceiptPayload = nextPayload;
-          return { count: 1 };
-        }),
-      },
+      hostedWebhookReceipt: receiptStore.hostedWebhookReceipt,
+      hostedWebhookReceiptSideEffect: receiptStore.hostedWebhookReceiptSideEffect,
       hostedMember: {
         findUnique: vi.fn()
           .mockResolvedValueOnce(member)
@@ -1775,35 +1648,29 @@ describe("hosted onboarding webhook retry safety", () => {
     });
 
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
-    expect(storedReceiptPayload).toEqual(
+    expect(receiptStore.readStoredReceipt()).toEqual(
       expect.objectContaining({
-        receiptState: expect.objectContaining({
-          lastError: expect.objectContaining({
-            message: expect.stringContaining("may already have been delivered"),
-            name: "HostedOnboardingError",
+        attemptCount: 1,
+        completedAt: null,
+        lastErrorCode: "hosted_webhook_side_effect_delivery_uncertain",
+        lastErrorMessage: expect.stringContaining("may already have been delivered"),
+        lastErrorName: "HostedOnboardingError",
+        lastErrorRetryable: false,
+        plannedAt: expect.any(Date),
+        sideEffects: [
+          expect.objectContaining({
+            attemptCount: 1,
+            linqChatId: "chat_123",
+            linqInviteId: "invite_123",
+            linqReplyToMessageId: "msg_123",
+            linqResultChatId: "chat_123",
+            linqResultMessageId: "out_msg_123",
+            linqTemplate: "invite_signup",
+            lastErrorMessage: "Receipt persistence failed after the Linq send.",
+            status: "sent_unconfirmed",
           }),
-          response: expect.objectContaining({
-            inviteCode: "join_123",
-            joinUrl: "https://join.example.test/join/join_123",
-            ok: true,
-          }),
-          sideEffects: [
-            expect.objectContaining({
-              payload: expect.objectContaining({
-                chatId: "chat_123",
-                inviteId: "invite_123",
-                replyToMessageId: "msg_123",
-                template: "invite_signup",
-              }),
-              result: expect.objectContaining({
-                chatId: expect.stringMatching(/^hbid:linq\.chat:v1:/),
-                messageId: expect.stringMatching(/^hbid:linq\.message:v1:/),
-              }),
-              status: "sent_unconfirmed",
-            }),
-          ],
-          status: "failed",
-        }),
+        ],
+        status: "failed",
       }),
     );
 
@@ -1822,46 +1689,29 @@ describe("hosted onboarding webhook retry safety", () => {
     });
 
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
-    expect(storedReceiptPayload).toEqual(
+    expect(receiptStore.readStoredReceipt()).toEqual(
       expect.objectContaining({
-        eventPayload: {
-          eventType: "message.received",
-        },
-        receiptState: expect.objectContaining({
-          attemptCount: 1,
-          lastError: expect.objectContaining({
-            message: expect.stringContaining("may already have been delivered"),
-            name: "HostedOnboardingError",
+        attemptCount: 1,
+        completedAt: null,
+        lastErrorCode: "hosted_webhook_side_effect_delivery_uncertain",
+        lastErrorMessage: expect.stringContaining("may already have been delivered"),
+        lastErrorName: "HostedOnboardingError",
+        lastErrorRetryable: false,
+        plannedAt: expect.any(Date),
+        sideEffects: [
+          expect.objectContaining({
+            attemptCount: 1,
+            linqChatId: "chat_123",
+            linqInviteId: "invite_123",
+            linqReplyToMessageId: "msg_123",
+            linqResultChatId: "chat_123",
+            linqResultMessageId: "out_msg_123",
+            linqTemplate: "invite_signup",
+            lastErrorMessage: "Receipt persistence failed after the Linq send.",
+            status: "sent_unconfirmed",
           }),
-          plannedAt: expect.any(String),
-          response: expect.objectContaining({
-            inviteCode: "join_123",
-            joinUrl: "https://join.example.test/join/join_123",
-            ok: true,
-          }),
-          sideEffects: [
-            expect.objectContaining({
-              attemptCount: 1,
-              kind: "linq_message_send",
-              lastAttemptAt: expect.any(String),
-              lastError: {
-                code: null,
-                message: "Receipt persistence failed after the Linq send.",
-                name: "Error",
-                retryable: null,
-              },
-              payload: expect.objectContaining({
-                chatId: "chat_123",
-                inviteId: "invite_123",
-                replyToMessageId: "msg_123",
-                template: "invite_signup",
-              }),
-              sentAt: expect.any(String),
-              status: "sent_unconfirmed",
-            }),
-          ],
-          status: "failed",
-        }),
+        ],
+        status: "failed",
       }),
     );
   });
@@ -1888,45 +1738,39 @@ describe("hosted onboarding webhook retry safety", () => {
       status: "pending",
       updatedAt: new Date("2026-03-26T12:00:00.000Z"),
     };
-    let storedReceiptPayload: Record<string, unknown> | null = null;
+    const receiptStore = createInMemoryHostedWebhookReceiptStore();
+    let failSentWriteOnce = true;
+    const baseDeleteMany = receiptStore.hostedWebhookReceiptSideEffect.deleteMany;
+    const baseUpsert = receiptStore.hostedWebhookReceiptSideEffect.upsert;
+    receiptStore.hostedWebhookReceiptSideEffect.deleteMany = vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
+      if (failSentWriteOnce && !("effectId" in where)) {
+        failSentWriteOnce = false;
+        throw new Error("Receipt persistence failed after the Linq send.");
+      }
+
+      return baseDeleteMany({ where });
+    });
+    receiptStore.hostedWebhookReceiptSideEffect.upsert = vi.fn(async (input: {
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+      where: {
+        source_eventId_effectId: {
+          effectId: string;
+          eventId: string;
+          source: string;
+        };
+      };
+    }) => {
+      if (input.create.status === "sent_unconfirmed" || input.update.status === "sent_unconfirmed") {
+        throw new Error("Receipt persistence failed while recording sent_unconfirmed.");
+      }
+
+      return baseUpsert(input);
+    });
 
     const prisma = withPrismaTransaction({
-      hostedWebhookReceipt: {
-        create: vi.fn().mockImplementation(({ data }: { data: { payloadJson: Record<string, unknown> } }) => {
-          if (storedReceiptPayload) {
-            throw createUniqueConstraintError();
-          }
-          storedReceiptPayload = data.payloadJson;
-          return {};
-        }),
-        findUnique: vi.fn().mockImplementation(() =>
-          storedReceiptPayload
-            ? {
-                payloadJson: storedReceiptPayload,
-              }
-            : null),
-        updateMany: vi.fn().mockImplementation(({ data }: { data: { payloadJson: Record<string, unknown> } }) => {
-          const nextPayload = data.payloadJson;
-          const nextReceiptState = nextPayload.receiptState as {
-            sideEffects?: Array<{ kind?: string; status?: string }>;
-            status?: string;
-          } | undefined;
-          const nextLinqStatus = nextReceiptState?.sideEffects?.find(
-            (effect) => effect.kind === "linq_message_send",
-          )?.status;
-
-          if (nextLinqStatus === "sent") {
-            throw new Error("Receipt persistence failed after the Linq send.");
-          }
-
-          if (nextLinqStatus === "sent_unconfirmed") {
-            throw new Error("Receipt persistence failed while recording sent_unconfirmed.");
-          }
-
-          storedReceiptPayload = nextPayload;
-          return { count: 1 };
-        }),
-      },
+      hostedWebhookReceipt: receiptStore.hostedWebhookReceipt,
+      hostedWebhookReceiptSideEffect: receiptStore.hostedWebhookReceiptSideEffect,
       hostedMember: {
         findUnique: vi.fn()
           .mockResolvedValueOnce(member)
@@ -1958,34 +1802,17 @@ describe("hosted onboarding webhook retry safety", () => {
     });
 
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
-    expect(storedReceiptPayload).toEqual(
+    expect(receiptStore.readStoredReceipt()).toEqual(
       expect.objectContaining({
-        receiptState: expect.objectContaining({
-          lastError: expect.objectContaining({
-            code: "hosted_webhook_side_effect_delivery_uncertain",
-            message: expect.stringContaining("may already have been delivered"),
-            name: "HostedOnboardingError",
-            retryable: false,
-          }),
-          response: expect.objectContaining({
-            inviteCode: "join_123",
-            joinUrl: "https://join.example.test/join/join_123",
-            ok: true,
-          }),
-          sideEffects: [
-            expect.objectContaining({
-              payload: expect.objectContaining({
-                chatId: "chat_123",
-                inviteId: "invite_123",
-                replyToMessageId: "msg_123",
-                template: "invite_signup",
-              }),
-              result: null,
-              status: "pending",
-            }),
-          ],
-          status: "failed",
-        }),
+        attemptCount: 1,
+        completedAt: null,
+        lastErrorCode: "hosted_webhook_side_effect_delivery_uncertain",
+        lastErrorMessage: expect.stringContaining("may already have been delivered"),
+        lastErrorName: "HostedOnboardingError",
+        lastErrorRetryable: false,
+        plannedAt: expect.any(Date),
+        sideEffects: [],
+        status: "failed",
       }),
     );
 
@@ -2004,43 +1831,17 @@ describe("hosted onboarding webhook retry safety", () => {
     });
 
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
-    expect(storedReceiptPayload).toEqual(
+    expect(receiptStore.readStoredReceipt()).toEqual(
       expect.objectContaining({
-        eventPayload: {
-          eventType: "message.received",
-        },
-        receiptState: expect.objectContaining({
-          attemptCount: 1,
-          lastError: expect.objectContaining({
-            code: "hosted_webhook_side_effect_delivery_uncertain",
-            message: expect.stringContaining("may already have been delivered"),
-            name: "HostedOnboardingError",
-            retryable: false,
-          }),
-          plannedAt: expect.any(String),
-          response: expect.objectContaining({
-            inviteCode: "join_123",
-            joinUrl: "https://join.example.test/join/join_123",
-            ok: true,
-          }),
-          sideEffects: [
-            expect.objectContaining({
-              attemptCount: 1,
-              kind: "linq_message_send",
-              lastAttemptAt: expect.any(String),
-              lastError: null,
-              payload: expect.objectContaining({
-                chatId: "chat_123",
-                inviteId: "invite_123",
-                replyToMessageId: "msg_123",
-                template: "invite_signup",
-              }),
-              sentAt: null,
-              status: "pending",
-            }),
-          ],
-          status: "failed",
-        }),
+        attemptCount: 1,
+        completedAt: null,
+        lastErrorCode: "hosted_webhook_side_effect_delivery_uncertain",
+        lastErrorMessage: expect.stringContaining("may already have been delivered"),
+        lastErrorName: "HostedOnboardingError",
+        lastErrorRetryable: false,
+        plannedAt: expect.any(Date),
+        sideEffects: [],
+        status: "failed",
       }),
     );
   });
@@ -2120,47 +1921,39 @@ describe("hosted onboarding webhook retry safety", () => {
     });
 
     const receiptCalls = readMockCallPayloads(prisma.hostedWebhookReceipt.updateMany.mock.calls);
-    expect((receiptCalls[0]?.where as { payloadJson?: { equals?: unknown } } | undefined)?.payloadJson).toEqual({
-      equals: malformedReceiptPayload,
-    });
-    expect(((receiptCalls[0]?.data as { payloadJson?: unknown } | undefined)?.payloadJson)).toEqual(
+    expect(receiptCalls[0]).toEqual(
       expect.objectContaining({
-        eventPayload: {
-          eventType: "message.received",
+        where: {
+          eventId: "evt_123",
+          source: "linq",
+          version: 1,
         },
-        receiptState: expect.objectContaining({
-          attemptCount: 1,
+        data: expect.objectContaining({
+          attemptCount: 2,
           attemptId: expect.any(String),
-          lastReceivedAt: expect.any(String),
-          sideEffects: [],
+          completedAt: null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastErrorName: null,
+          lastErrorRetryable: null,
+          lastReceivedAt: expect.any(Date),
+          plannedAt: null,
           status: "processing",
         }),
       }),
     );
-    expect(((receiptCalls.at(-1)?.data as { payloadJson?: unknown } | undefined)?.payloadJson)).toEqual(
+    expect(receiptCalls.at(-1)).toEqual(
       expect.objectContaining({
-        eventPayload: {
-          eventType: "message.received",
-        },
-        receiptState: expect.objectContaining({
-          attemptCount: 1,
+        data: expect.objectContaining({
+          attemptCount: 2,
           attemptId: expect.any(String),
-          completedAt: expect.any(String),
-          lastReceivedAt: expect.any(String),
-          plannedAt: expect.any(String),
-          response: expect.objectContaining({
-            ok: true,
-            reason: "dispatched-active-member",
-          }),
-          sideEffects: [
-            buildDispatchSideEffect({
-              attemptCount: 1,
-              eventId: "evt_123",
-              lastAttemptAt: expect.any(String),
-              sentAt: expect.any(String),
-              status: "sent",
-            }),
-          ],
+          completedAt: expect.any(Date),
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastErrorName: null,
+          lastErrorRetryable: null,
+          lastReceivedAt: expect.any(Date),
+          plannedAt: expect.any(Date),
           status: "completed",
         }),
       }),
@@ -2207,10 +2000,22 @@ describe("hosted onboarding webhook retry safety", () => {
     for (const call of reclaimCalls) {
       expect(call).toEqual(
         expect.objectContaining({
-          where: expect.objectContaining({
-            payloadJson: {
-              equals: malformedReceiptPayload,
-            },
+          where: {
+            eventId: "evt_123",
+            source: "linq",
+            version: 1,
+          },
+          data: expect.objectContaining({
+            attemptCount: 2,
+            attemptId: expect.any(String),
+            completedAt: null,
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastErrorName: null,
+            lastErrorRetryable: null,
+            lastReceivedAt: expect.any(Date),
+            plannedAt: null,
+            status: "processing",
           }),
         }),
       );
@@ -2277,11 +2082,11 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(prisma.hostedWebhookReceipt.updateMany).toHaveBeenCalledTimes(1);
     expect(prisma.hostedWebhookReceipt.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({
-          payloadJson: {
-            equals: expiredProcessingReceiptPayload,
-          },
-        }),
+        where: {
+          eventId: "evt_123",
+          source: "linq",
+          version: 1,
+        },
       }),
     );
     expect(prisma.hostedWebhookReceipt.findUnique).toHaveBeenCalledTimes(2);
@@ -2576,6 +2381,13 @@ function asHostedWebhookPrisma<T extends Record<string, unknown>>(prisma: T): T 
       updateMany?: ReturnType<typeof vi.fn>;
       upsert?: ReturnType<typeof vi.fn>;
     };
+    hostedWebhookReceipt?: {
+      findUnique?: ((input: { include?: Record<string, unknown>; where?: Record<string, unknown> }) => Promise<unknown>) | undefined;
+    };
+    hostedWebhookReceiptSideEffect?: {
+      deleteMany?: ReturnType<typeof vi.fn>;
+      upsert?: ReturnType<typeof vi.fn>;
+    };
   };
   const hostedMember = prismaWithHostedMember.hostedMember as {
     findUnique?: ((input: { where?: Record<string, unknown>; include?: Record<string, unknown> }) => Promise<unknown>) | undefined;
@@ -2596,6 +2408,13 @@ function asHostedWebhookPrisma<T extends Record<string, unknown>>(prisma: T): T 
   const hostedInvite = prismaWithHostedMember.hostedInvite as {
     findFirst?: ((input: { where?: Record<string, unknown>; select?: Record<string, unknown> }) => Promise<unknown>) | undefined;
     findUnique?: ReturnType<typeof vi.fn>;
+  } | undefined;
+  const hostedWebhookReceipt = prismaWithHostedMember.hostedWebhookReceipt as {
+    findUnique?: ((input: { include?: Record<string, unknown>; where?: Record<string, unknown> }) => Promise<unknown>) | undefined;
+  } | undefined;
+  const hostedWebhookReceiptSideEffect = prismaWithHostedMember.hostedWebhookReceiptSideEffect as {
+    deleteMany?: ReturnType<typeof vi.fn>;
+    upsert?: ReturnType<typeof vi.fn>;
   } | undefined;
 
   if (hostedMember && !hostedMember.updateMany) {
@@ -2711,6 +2530,23 @@ function asHostedWebhookPrisma<T extends Record<string, unknown>>(prisma: T): T 
     );
   }
 
+  if (hostedWebhookReceipt?.findUnique) {
+    const originalFindUnique = hostedWebhookReceipt.findUnique;
+    hostedWebhookReceipt.findUnique = vi.fn(async (input: { include?: Record<string, unknown>; where?: Record<string, unknown> }) =>
+      normalizeLegacyMockHostedWebhookReceipt(await originalFindUnique(input), input),
+    );
+  }
+
+  if (!hostedWebhookReceiptSideEffect?.deleteMany || !hostedWebhookReceiptSideEffect?.upsert) {
+    Object.defineProperty(prismaWithHostedMember, "hostedWebhookReceiptSideEffect", {
+      configurable: true,
+      value: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        upsert: vi.fn().mockResolvedValue({}),
+      },
+    });
+  }
+
   return prismaWithHostedMember;
 }
 
@@ -2732,6 +2568,424 @@ function withPrismaTransaction<T extends Record<string, unknown>>(prisma: T): T 
 
 function readMockCallPayloads(calls: unknown[][]): Record<string, unknown>[] {
   return calls.map((call) => ((call[0] as Record<string, unknown> | undefined) ?? {}));
+}
+
+function readHostedWebhookSideEffectUpsertCalls(
+  prisma: object,
+): Record<string, unknown>[] {
+  const hostedWebhookReceiptSideEffect = (prisma as {
+    hostedWebhookReceiptSideEffect?: {
+      upsert?: {
+        mock?: {
+          calls?: unknown[][];
+        };
+      };
+    };
+  }).hostedWebhookReceiptSideEffect as {
+    upsert?: {
+      mock?: {
+        calls?: unknown[][];
+      };
+    };
+  } | undefined;
+
+  return readMockCallPayloads(hostedWebhookReceiptSideEffect?.upsert?.mock?.calls ?? []);
+}
+
+function createInMemoryHostedWebhookReceiptStore() {
+  let receipt: Record<string, unknown> | null = null;
+  let sideEffects: Array<Record<string, unknown>> = [];
+
+  const hostedWebhookReceipt = {
+    create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+      if (receipt) {
+        throw createUniqueConstraintError();
+      }
+
+      receipt = {
+        ...data,
+        claimExpiresAt: data.claimExpiresAt ?? null,
+        completedAt: data.completedAt ?? null,
+        plannedAt: data.plannedAt ?? null,
+        updatedAt: data.updatedAt ?? new Date("2026-03-26T12:00:00.000Z"),
+        version: typeof data.version === "number" ? data.version : 1,
+      };
+      return {};
+    }),
+    findUnique: vi.fn(async () =>
+      receipt
+        ? {
+            ...receipt,
+            sideEffects: sideEffects.map((effect) => ({ ...effect })),
+          }
+        : null),
+    updateMany: vi.fn(async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+      if (!receipt) {
+        return { count: 0 };
+      }
+
+      if (typeof where.version === "number" && where.version !== receipt.version) {
+        return { count: 0 };
+      }
+
+      const versionIncrement =
+        data.version && typeof data.version === "object" && "increment" in data.version
+          ? Number((data.version as { increment: number }).increment)
+          : 0;
+      const { version, ...nextData } = data;
+
+      receipt = {
+        ...receipt,
+        ...nextData,
+        updatedAt: new Date("2026-03-26T12:00:00.000Z"),
+        version: typeof receipt.version === "number" ? receipt.version + versionIncrement : versionIncrement,
+      };
+
+      return { count: 1 };
+    }),
+  };
+
+  const hostedWebhookReceiptSideEffect = {
+    deleteMany: vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
+      const before = sideEffects.length;
+      const notIn = Array.isArray((where.effectId as { notIn?: unknown[] } | undefined)?.notIn)
+        ? new Set((where.effectId as { notIn: string[] }).notIn)
+        : null;
+
+      sideEffects = sideEffects.filter((effect) => {
+        if (effect.source !== where.source || effect.eventId !== where.eventId) {
+          return true;
+        }
+
+        if (!notIn) {
+          return false;
+        }
+
+        return notIn.has(effect.effectId as string);
+      });
+
+      return { count: before - sideEffects.length };
+    }),
+    upsert: vi.fn(async ({ where, create, update }: {
+      where: {
+        source_eventId_effectId: {
+          effectId: string;
+          eventId: string;
+          source: string;
+        };
+      };
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }) => {
+      const key = where.source_eventId_effectId;
+      const index = sideEffects.findIndex((effect) =>
+        effect.source === key.source
+        && effect.eventId === key.eventId
+        && effect.effectId === key.effectId,
+      );
+
+      if (index === -1) {
+        sideEffects.push({ ...create });
+      } else {
+        sideEffects[index] = {
+          ...sideEffects[index],
+          ...update,
+        };
+      }
+
+      return {};
+    }),
+  };
+
+  return {
+    hostedWebhookReceipt,
+    hostedWebhookReceiptSideEffect,
+    readStoredReceipt() {
+      return receipt
+        ? {
+            ...receipt,
+            sideEffects: sideEffects.map((effect) => ({ ...effect })),
+          }
+        : null;
+    },
+  };
+}
+
+function normalizeLegacyMockHostedWebhookReceipt(
+  value: unknown,
+  input: {
+    where?: Record<string, unknown>;
+  },
+) {
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  const record = value as Record<string, unknown>;
+  const payloadJson = record.payloadJson;
+  const normalizedPayload = readLegacyWebhookReceiptPayload(payloadJson);
+  const compoundWhere = readCompoundReceiptWhere(input.where);
+
+  if (!normalizedPayload) {
+    return {
+      ...record,
+      attemptCount: typeof record.attemptCount === "number" ? record.attemptCount : 1,
+      attemptId: typeof record.attemptId === "string" ? record.attemptId : "attempt-1",
+      claimExpiresAt: record.claimExpiresAt ?? null,
+      completedAt: record.completedAt ?? null,
+      eventId: typeof record.eventId === "string" ? record.eventId : compoundWhere?.eventId ?? "evt_123",
+      lastErrorCode: record.lastErrorCode ?? null,
+      lastErrorMessage: record.lastErrorMessage ?? null,
+      lastErrorName: record.lastErrorName ?? null,
+      lastErrorRetryable: record.lastErrorRetryable ?? null,
+      lastReceivedAt:
+        record.lastReceivedAt instanceof Date
+          ? record.lastReceivedAt
+          : new Date("2026-03-26T12:00:00.000Z"),
+      plannedAt: record.plannedAt ?? null,
+      sideEffects: Array.isArray(record.sideEffects) ? record.sideEffects : [],
+      source: typeof record.source === "string" ? record.source : compoundWhere?.source ?? "linq",
+      status: typeof record.status === "string" ? record.status : undefined,
+      updatedAt: record.updatedAt ?? null,
+      version: typeof record.version === "number" ? record.version : 1,
+    };
+  }
+
+  return {
+    ...record,
+    attemptCount: normalizedPayload.receipt.attemptCount,
+    attemptId: normalizedPayload.receipt.attemptId,
+    claimExpiresAt: record.claimExpiresAt ?? null,
+    completedAt: normalizedPayload.receipt.completedAt,
+    eventId: typeof record.eventId === "string" ? record.eventId : compoundWhere?.eventId ?? "evt_123",
+    lastErrorCode: normalizedPayload.receipt.lastErrorCode,
+    lastErrorMessage: normalizedPayload.receipt.lastErrorMessage,
+    lastErrorName: normalizedPayload.receipt.lastErrorName,
+    lastErrorRetryable: normalizedPayload.receipt.lastErrorRetryable,
+    lastReceivedAt: normalizedPayload.receipt.lastReceivedAt,
+    plannedAt: normalizedPayload.receipt.plannedAt,
+    sideEffects: normalizedPayload.sideEffects,
+    source: typeof record.source === "string" ? record.source : compoundWhere?.source ?? "linq",
+    status: normalizedPayload.receipt.status,
+    updatedAt: record.updatedAt ?? null,
+    version: typeof record.version === "number" ? record.version : 1,
+  };
+}
+
+function readCompoundReceiptWhere(where: Record<string, unknown> | undefined) {
+  const sourceEventId =
+    where?.source_eventId && typeof where.source_eventId === "object"
+      ? where.source_eventId as Record<string, unknown>
+      : null;
+
+  return sourceEventId
+    && typeof sourceEventId.source === "string"
+    && typeof sourceEventId.eventId === "string"
+    ? {
+        eventId: sourceEventId.eventId,
+        source: sourceEventId.source,
+      }
+    : null;
+}
+
+function readLegacyWebhookReceiptPayload(value: unknown): null | {
+  receipt: {
+    attemptCount: number;
+    attemptId: string;
+    completedAt: Date | null;
+    lastErrorCode: string | null;
+    lastErrorMessage: string | null;
+    lastErrorName: string | null;
+    lastErrorRetryable: boolean | null;
+    lastReceivedAt: Date;
+    plannedAt: Date | null;
+    status: "completed" | "failed" | "processing";
+  };
+  sideEffects: Record<string, unknown>[];
+} {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const payload = value as Record<string, unknown>;
+  const receiptState =
+    payload.receiptState && typeof payload.receiptState === "object" && !Array.isArray(payload.receiptState)
+      ? payload.receiptState as Record<string, unknown>
+      : null;
+
+  if (!receiptState || !isHostedWebhookReceiptStatus(receiptState.status)) {
+    return null;
+  }
+
+  const lastError =
+    receiptState.lastError && typeof receiptState.lastError === "object" && !Array.isArray(receiptState.lastError)
+      ? receiptState.lastError as Record<string, unknown>
+      : null;
+  const sideEffects = Array.isArray(receiptState.sideEffects)
+    ? receiptState.sideEffects.flatMap((effect) => normalizeLegacyWebhookReceiptSideEffect(effect))
+    : [];
+
+  return {
+    receipt: {
+      attemptCount:
+        typeof receiptState.attemptCount === "number" && Number.isFinite(receiptState.attemptCount)
+          ? Math.max(Math.trunc(receiptState.attemptCount), 1)
+          : 1,
+      attemptId: typeof receiptState.attemptId === "string" ? receiptState.attemptId : "attempt-1",
+      completedAt: toDateOrNull(receiptState.completedAt),
+      lastErrorCode: typeof lastError?.code === "string" ? lastError.code : null,
+      lastErrorMessage: typeof lastError?.message === "string" ? lastError.message : null,
+      lastErrorName: typeof lastError?.name === "string" ? lastError.name : null,
+      lastErrorRetryable: typeof lastError?.retryable === "boolean" ? lastError.retryable : null,
+      lastReceivedAt: toRequiredDate(receiptState.lastReceivedAt),
+      plannedAt: toDateOrNull(receiptState.plannedAt),
+      status: receiptState.status,
+    },
+    sideEffects,
+  };
+}
+
+function normalizeLegacyWebhookReceiptSideEffect(value: unknown): Record<string, unknown>[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return [];
+  }
+
+  const effect = value as Record<string, unknown>;
+  const lastError =
+    effect.lastError && typeof effect.lastError === "object" && !Array.isArray(effect.lastError)
+      ? effect.lastError as Record<string, unknown>
+      : null;
+  const status =
+    effect.status === "sent_unconfirmed"
+      ? "sent_unconfirmed"
+      : effect.status === "sent"
+        ? (effect.kind === "hosted_execution_dispatch" ? null : "sent_unconfirmed")
+        : "pending";
+
+  if (!status || typeof effect.effectId !== "string" || typeof effect.kind !== "string") {
+    return [];
+  }
+
+  if (effect.kind === "hosted_execution_dispatch") {
+    return [{
+      attemptCount: typeof effect.attemptCount === "number" ? effect.attemptCount : 0,
+      dispatchPayloadJson: effect.payload ?? null,
+      effectId: effect.effectId,
+      kind: effect.kind,
+      lastAttemptAt: toDateOrNull(effect.lastAttemptAt),
+      lastErrorCode: typeof lastError?.code === "string" ? lastError.code : null,
+      lastErrorMessage: typeof lastError?.message === "string" ? lastError.message : null,
+      lastErrorName: typeof lastError?.name === "string" ? lastError.name : null,
+      lastErrorRetryable: typeof lastError?.retryable === "boolean" ? lastError.retryable : null,
+      linqChatId: null,
+      linqInviteId: null,
+      linqReplyToMessageId: null,
+      linqResultChatId: null,
+      linqResultMessageId: null,
+      linqTemplate: null,
+      revnetAmountPaid: null,
+      revnetChargeId: null,
+      revnetCurrency: null,
+      revnetInvoiceId: null,
+      revnetMemberId: null,
+      revnetPaymentIntentId: null,
+      revnetResultHandled: null,
+      sentAt: toDateOrNull(effect.sentAt),
+      status,
+    }];
+  }
+
+  if (effect.kind === "linq_message_send") {
+    const payload =
+      effect.payload && typeof effect.payload === "object" && !Array.isArray(effect.payload)
+        ? effect.payload as Record<string, unknown>
+        : null;
+    const result =
+      effect.result && typeof effect.result === "object" && !Array.isArray(effect.result)
+        ? effect.result as Record<string, unknown>
+        : null;
+
+    return [{
+      attemptCount: typeof effect.attemptCount === "number" ? effect.attemptCount : 0,
+      dispatchPayloadJson: null,
+      effectId: effect.effectId,
+      kind: effect.kind,
+      lastAttemptAt: toDateOrNull(effect.lastAttemptAt),
+      lastErrorCode: typeof lastError?.code === "string" ? lastError.code : null,
+      lastErrorMessage: typeof lastError?.message === "string" ? lastError.message : null,
+      lastErrorName: typeof lastError?.name === "string" ? lastError.name : null,
+      lastErrorRetryable: typeof lastError?.retryable === "boolean" ? lastError.retryable : null,
+      linqChatId: typeof payload?.chatId === "string" ? payload.chatId : null,
+      linqInviteId: typeof payload?.inviteId === "string" ? payload.inviteId : null,
+      linqReplyToMessageId: typeof payload?.replyToMessageId === "string" ? payload.replyToMessageId : null,
+      linqResultChatId: typeof result?.chatId === "string" ? result.chatId : null,
+      linqResultMessageId: typeof result?.messageId === "string" ? result.messageId : null,
+      linqTemplate: typeof payload?.template === "string" ? payload.template : null,
+      revnetAmountPaid: null,
+      revnetChargeId: null,
+      revnetCurrency: null,
+      revnetInvoiceId: null,
+      revnetMemberId: null,
+      revnetPaymentIntentId: null,
+      revnetResultHandled: null,
+      sentAt: toDateOrNull(effect.sentAt),
+      status,
+    }];
+  }
+
+  if (effect.kind === "revnet_invoice_issue") {
+    const payload =
+      effect.payload && typeof effect.payload === "object" && !Array.isArray(effect.payload)
+        ? effect.payload as Record<string, unknown>
+        : null;
+    const result =
+      effect.result && typeof effect.result === "object" && !Array.isArray(effect.result)
+        ? effect.result as Record<string, unknown>
+        : null;
+
+    return [{
+      attemptCount: typeof effect.attemptCount === "number" ? effect.attemptCount : 0,
+      dispatchPayloadJson: null,
+      effectId: effect.effectId,
+      kind: effect.kind,
+      lastAttemptAt: toDateOrNull(effect.lastAttemptAt),
+      lastErrorCode: typeof lastError?.code === "string" ? lastError.code : null,
+      lastErrorMessage: typeof lastError?.message === "string" ? lastError.message : null,
+      lastErrorName: typeof lastError?.name === "string" ? lastError.name : null,
+      lastErrorRetryable: typeof lastError?.retryable === "boolean" ? lastError.retryable : null,
+      linqChatId: null,
+      linqInviteId: null,
+      linqReplyToMessageId: null,
+      linqResultChatId: null,
+      linqResultMessageId: null,
+      linqTemplate: null,
+      revnetAmountPaid: typeof payload?.amountPaid === "number" ? payload.amountPaid : null,
+      revnetChargeId: typeof payload?.chargeId === "string" ? payload.chargeId : null,
+      revnetCurrency: typeof payload?.currency === "string" ? payload.currency : null,
+      revnetInvoiceId: typeof payload?.invoiceId === "string" ? payload.invoiceId : null,
+      revnetMemberId: typeof payload?.memberId === "string" ? payload.memberId : null,
+      revnetPaymentIntentId: typeof payload?.paymentIntentId === "string" ? payload.paymentIntentId : null,
+      revnetResultHandled: result?.handled === true ? true : null,
+      sentAt: toDateOrNull(effect.sentAt),
+      status,
+    }];
+  }
+
+  return [];
+}
+
+function isHostedWebhookReceiptStatus(
+  value: unknown,
+): value is "completed" | "failed" | "processing" {
+  return value === "completed" || value === "failed" || value === "processing";
+}
+
+function toDateOrNull(value: unknown): Date | null {
+  return typeof value === "string" ? new Date(value) : value instanceof Date ? value : null;
+}
+
+function toRequiredDate(value: unknown): Date {
+  return toDateOrNull(value) ?? new Date("2026-03-26T12:00:00.000Z");
 }
 
 function readHostedMemberIdentityFromMockMember(

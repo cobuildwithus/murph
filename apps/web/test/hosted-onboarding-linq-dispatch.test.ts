@@ -194,27 +194,31 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(receiptWrites.at(-1)).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          payloadJson: expect.objectContaining({
-            receiptState: expect.objectContaining({
-              sideEffects: expect.arrayContaining([
-                expect.objectContaining({
-                  kind: "hosted_execution_dispatch",
-                  payload: expect.objectContaining({
-                    dispatchRef: expect.objectContaining({
-                      eventId: "evt_123",
-                      eventKind: "linq.message.received",
-                      userId: "member_123",
-                    }),
-                    payloadRef: expect.objectContaining({
-                      key: expect.stringContaining("/member_123/evt_123.json"),
-                    }),
-                  }),
-                }),
-              ]),
-            }),
-          }),
+          completedAt: expect.any(Date),
+          plannedAt: expect.any(Date),
+          status: "completed",
         }),
       }),
+    );
+    expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          create: expect.objectContaining({
+            dispatchPayloadJson: expect.objectContaining({
+              dispatchRef: expect.objectContaining({
+                eventId: "evt_123",
+                eventKind: "linq.message.received",
+                userId: "member_123",
+              }),
+              payloadRef: expect.objectContaining({
+                key: expect.stringContaining("/member_123/evt_123.json"),
+              }),
+            }),
+            kind: "hosted_execution_dispatch",
+            status: "pending",
+          }),
+        }),
+      ]),
     );
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
@@ -277,7 +281,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "dispatched-active-member",
     });
-    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
     expect(transactionHostedMemberFindUnique).toHaveBeenCalledTimes(1);
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -300,32 +304,32 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(receiptUpdateWrites).toContainEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          payloadJson: expect.objectContaining({
-            receiptState: expect.objectContaining({
-              sideEffects: expect.arrayContaining([
-                expect.objectContaining({
-                  kind: "hosted_execution_dispatch",
-                  payload: expect.objectContaining({
-                    dispatchRef: expect.objectContaining({
-                      eventId: "evt_123",
-                      eventKind: "linq.message.received",
-                      userId: "member_123",
-                    }),
-                  }),
-                  result: {
-                    dispatched: true,
-                  },
-                  status: "sent",
-                }),
-              ]),
-            }),
-          }),
+          completedAt: expect.any(Date),
+          plannedAt: expect.any(Date),
+          status: "completed",
         }),
         where: expect.objectContaining({
           eventId: "evt_123",
           source: "linq",
         }),
       }),
+    );
+    expect(readHostedWebhookSideEffectUpsertCalls(transactionClient)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          create: expect.objectContaining({
+            dispatchPayloadJson: expect.objectContaining({
+              dispatchRef: expect.objectContaining({
+                eventId: "evt_123",
+                eventKind: "linq.message.received",
+                userId: "member_123",
+              }),
+            }),
+            kind: "hosted_execution_dispatch",
+            status: "pending",
+          }),
+        }),
+      ]),
     );
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
@@ -463,27 +467,19 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         }),
       }),
     );
-    expect(transactionReceiptUpdateMany.mock.calls).toEqual(
+    expect(readHostedWebhookSideEffectUpsertCalls(transactionClient)).toEqual(
       expect.arrayContaining([
-        [
-          expect.objectContaining({
-            data: expect.objectContaining({
-              payloadJson: expect.objectContaining({
-                receiptState: expect.objectContaining({
-                  sideEffects: expect.arrayContaining([
-                    expect.objectContaining({
-                      payload: expect.objectContaining({
-                        dispatchRef: expect.objectContaining({
-                          occurredAt: "2026-03-26T12:00:05.000Z",
-                        }),
-                      }),
-                    }),
-                  ]),
-                }),
+        expect.objectContaining({
+          create: expect.objectContaining({
+            dispatchPayloadJson: expect.objectContaining({
+              dispatchRef: expect.objectContaining({
+                occurredAt: "2026-03-26T12:00:05.000Z",
               }),
             }),
+            kind: "hosted_execution_dispatch",
+            status: "pending",
           }),
-        ],
+        }),
       ]),
     );
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
@@ -936,6 +932,10 @@ function asPrismaTransactionClient<T extends Record<string, unknown>>(prisma: T)
       findUnique?: ((input: { where?: Record<string, unknown>; include?: Record<string, unknown> }) => Promise<unknown>) | undefined;
       updateMany?: ReturnType<typeof vi.fn>;
     };
+    hostedWebhookReceiptSideEffect?: {
+      deleteMany?: ReturnType<typeof vi.fn>;
+      upsert?: ReturnType<typeof vi.fn>;
+    };
   };
   const hostedInvite = prismaWithHostedMember.hostedInvite;
   const hostedMemberIdentity = prismaWithHostedMember.hostedMemberIdentity;
@@ -1043,6 +1043,16 @@ function asPrismaTransactionClient<T extends Record<string, unknown>>(prisma: T)
     });
   } else if (!hostedMemberRouting.findFirst && hostedMemberRouting.findUnique) {
     hostedMemberRouting.findFirst = hostedMemberRouting.findUnique;
+  }
+
+  if (!prismaWithHostedMember.hostedWebhookReceiptSideEffect?.deleteMany || !prismaWithHostedMember.hostedWebhookReceiptSideEffect?.upsert) {
+    Object.defineProperty(prismaWithHostedMember, "hostedWebhookReceiptSideEffect", {
+      configurable: true,
+      value: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        upsert: vi.fn().mockResolvedValue({}),
+      },
+    });
   }
 
   return prismaWithHostedMember as unknown as Parameters<typeof handleHostedOnboardingLinqWebhook>[0]["prisma"];
@@ -1177,6 +1187,22 @@ function createStagedPayload(
     schemaVersion: "murph.execution-outbox.v2",
     storage: "reference" as const,
   };
+}
+
+function readHostedWebhookSideEffectUpsertCalls(prisma: object | null | undefined): Record<string, unknown>[] {
+  const hostedWebhookReceiptSideEffect = (prisma as {
+    hostedWebhookReceiptSideEffect?: {
+      upsert?: {
+        mock?: {
+          calls?: unknown[][];
+        };
+      };
+    };
+  }).hostedWebhookReceiptSideEffect;
+
+  return (hostedWebhookReceiptSideEffect?.upsert?.mock?.calls ?? []).map(
+    (call) => ((call[0] as Record<string, unknown> | undefined) ?? {}),
+  );
 }
 
 function makeHostedLinqDailyState(input: {

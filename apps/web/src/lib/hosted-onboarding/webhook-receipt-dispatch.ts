@@ -1,18 +1,29 @@
-import type { Prisma } from "@prisma/client";
 import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
 
-import { readHostedWebhookReceiptState } from "./webhook-receipt-codec";
 import { buildHostedWebhookDispatchFromPayload } from "./webhook-dispatch-payload";
+import type {
+  HostedWebhookReceiptState,
+  HostedWebhookSideEffect,
+} from "./webhook-receipt-types";
 
 export { buildHostedWebhookDispatchFromPayload } from "./webhook-dispatch-payload";
 
 export function readHostedWebhookReceiptDispatchByEventId(
-  payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
+  value: HostedWebhookReceiptState | readonly HostedWebhookSideEffect[],
   eventId: string,
 ): HostedExecutionDispatchRequest | null {
-  const receiptState = readHostedWebhookReceiptState(payloadJson);
+  if ("sideEffects" in value) {
+    return readHostedWebhookDispatchByEventIdFromSideEffects(value.sideEffects, eventId);
+  }
 
-  for (const sideEffect of receiptState.sideEffects) {
+  return readHostedWebhookDispatchByEventIdFromSideEffects(value, eventId);
+}
+
+function readHostedWebhookDispatchByEventIdFromSideEffects(
+  sideEffects: readonly HostedWebhookSideEffect[],
+  eventId: string,
+): HostedExecutionDispatchRequest | null {
+  for (const sideEffect of sideEffects) {
     if (sideEffect.kind !== "hosted_execution_dispatch") {
       continue;
     }

@@ -4,7 +4,7 @@ import {
   buildHostedExecutionLinqMessageReceivedDispatch,
   buildHostedExecutionTelegramMessageReceivedDispatch,
 } from "@murphai/hosted-execution";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { beforeEach, describe, it, vi } from "vitest";
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
@@ -40,7 +40,8 @@ import {
 import { isHostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import {
   readHostedWebhookReceiptState,
-  serializeHostedWebhookReceiptState,
+  serializeHostedWebhookReceiptErrorState,
+  serializeHostedWebhookReceiptSideEffect,
 } from "../src/lib/hosted-onboarding/webhook-receipt-codec";
 import { buildHostedWebhookDispatchFromPayload } from "../src/lib/hosted-onboarding/webhook-receipt-dispatch";
 import {
@@ -55,19 +56,11 @@ describe("hosted webhook receipt transitions", () => {
   });
 
   it("stores planning metadata even when planning produces no side effects", () => {
-    const response = {
-      ignored: true,
-      ok: true,
-      reason: "no-trigger",
-    };
-
     const nextState = queueHostedWebhookReceiptSideEffects(buildReceiptState(), [], {
       plannedAt: "2026-03-26T12:01:00.000Z",
-      response,
     });
 
     assert.equal(nextState.plannedAt, "2026-03-26T12:01:00.000Z");
-    assert.deepEqual(nextState.response, response);
     assert.deepEqual(nextState.sideEffects, []);
   });
 
@@ -105,7 +98,7 @@ describe("hosted webhook receipt transitions", () => {
     assert.equal(nextEffect.lastError?.message, "Delivery confirmation timed out.");
   });
 
-  it("stores pending Linq dispatch payloads from creation time and preserves them when sent", () => {
+  it("stores pending Linq dispatch payloads from creation time and drops them once queued", () => {
     const dispatchEffect = createHostedWebhookDispatchSideEffect({
       dispatch: buildHostedExecutionLinqMessageReceivedDispatch({
         eventId: "evt_123",
@@ -169,20 +162,8 @@ describe("hosted webhook receipt transitions", () => {
       { dispatched: true },
       "2026-03-26T12:00:30.000Z",
     );
-    const nextEffect = getHostedWebhookSideEffect(nextState, dispatchEffect.effectId);
 
-    assert.equal(nextEffect.kind, "hosted_execution_dispatch");
-    if (nextEffect.kind !== "hosted_execution_dispatch") {
-      throw new Error("Expected a hosted execution dispatch side effect.");
-    }
-
-    if (!("dispatch" in nextEffect.payload)) {
-      throw new Error("Expected an in-memory pending dispatch payload.");
-    }
-
-    assert.equal(nextEffect.status, "sent");
-    assert.equal(nextEffect.payload.storage, "pending");
-    const rebuiltDispatch = buildHostedWebhookDispatchFromPayload(nextEffect.payload);
+    const rebuiltDispatch = buildHostedWebhookDispatchFromPayload(dispatchEffect.payload);
     assert.equal(rebuiltDispatch?.event.kind, "linq.message.received");
     if (rebuiltDispatch?.event.kind !== "linq.message.received") {
       throw new Error("Expected a pending Linq dispatch payload.");
@@ -197,7 +178,7 @@ describe("hosted webhook receipt transitions", () => {
     assert.equal(linqData.chat_id, "chat_123");
     assert.equal(linqData.from, "+15551234567");
     assert.equal(linqData.recipient_phone, "+15550000000");
-    assert.deepEqual(nextEffect.result, { dispatched: true });
+    assert.deepEqual(nextState.sideEffects, []);
   });
 
   it("persists only staged Linq dispatch refs through receipt serialization", () => {
@@ -250,9 +231,7 @@ describe("hosted webhook receipt transitions", () => {
     };
 
     const persistedState = readHostedWebhookReceiptState(
-      serializeHostedWebhookReceiptState(
-        buildReceiptState({ sideEffects: [stagedEffect] }),
-      ),
+      serializeHostedWebhookReceiptStateRecords(buildReceiptState({ sideEffects: [stagedEffect] })),
     );
     const persistedEffect = getHostedWebhookSideEffect(persistedState, stagedEffect.effectId);
 
@@ -267,7 +246,7 @@ describe("hosted webhook receipt transitions", () => {
     assert.equal(rebuiltDispatch, null);
   });
 
-  it("fails closed when a persisted Linq side effect still uses the removed plaintext payload shape", () => {
+  it("fails closed when a persisted Linq side effect is missing the new typed payload columns", () => {
     const sideEffect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat_123",
       inviteId: "invite_123",
@@ -275,40 +254,38 @@ describe("hosted webhook receipt transitions", () => {
       sourceEventId: "evt_123",
       template: "invite_signup",
     });
-    const payloadJson = {
-      eventPayload: {},
-      receiptState: {
-        attemptCount: 1,
-        attemptId: "attempt_123",
-        completedAt: null,
-        lastError: null,
-        lastReceivedAt: null,
-        plannedAt: null,
-        response: null,
-        sideEffects: [
-          {
-            attemptCount: sideEffect.attemptCount,
-            effectId: sideEffect.effectId,
-            kind: sideEffect.kind,
-            lastAttemptAt: sideEffect.lastAttemptAt,
-            lastError: sideEffect.lastError,
-            payload: {
-              chatId: "chat_123",
-              inviteId: "invite_123",
-              message: "legacy plaintext invite body",
-              replyToMessageId: "msg_123",
-            },
-            result: null,
-            sentAt: sideEffect.sentAt,
-            status: sideEffect.status,
-          },
-        ],
-        status: "processing",
-      },
-    } satisfies Prisma.InputJsonValue;
+    const persistedState = serializeHostedWebhookReceiptStateRecords(buildReceiptState());
 
     try {
-      readHostedWebhookReceiptState(payloadJson);
+      readHostedWebhookReceiptState({
+        receipt: persistedState.receipt,
+        sideEffects: [{
+          attemptCount: sideEffect.attemptCount,
+          dispatchPayloadJson: null,
+          effectId: sideEffect.effectId,
+          kind: sideEffect.kind,
+          lastAttemptAt: null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastErrorName: null,
+          lastErrorRetryable: null,
+          linqChatId: null,
+          linqInviteId: sideEffect.payload.inviteId,
+          linqReplyToMessageId: sideEffect.payload.replyToMessageId,
+          linqResultChatId: null,
+          linqResultMessageId: null,
+          linqTemplate: null,
+          revnetAmountPaid: null,
+          revnetChargeId: null,
+          revnetCurrency: null,
+          revnetInvoiceId: null,
+          revnetMemberId: null,
+          revnetPaymentIntentId: null,
+          revnetResultHandled: null,
+          sentAt: null,
+          status: sideEffect.status,
+        }],
+      });
       assert.fail("Expected plaintext Linq payloads to fail closed.");
     } catch (error) {
       assert.equal(isHostedOnboardingError(error), true);
@@ -321,7 +298,7 @@ describe("hosted webhook receipt transitions", () => {
     }
   });
 
-  it("stores pending Telegram dispatch payloads from creation time and preserves them when sent", () => {
+  it("stores pending Telegram dispatch payloads from creation time and drops them once queued", () => {
     const dispatchEffect = createHostedWebhookDispatchSideEffect({
       dispatch: buildHostedExecutionTelegramMessageReceivedDispatch({
         eventId: "evt_tg_123",
@@ -375,19 +352,7 @@ describe("hosted webhook receipt transitions", () => {
       { dispatched: true },
       "2026-03-26T12:00:30.000Z",
     );
-    const nextEffect = getHostedWebhookSideEffect(nextState, dispatchEffect.effectId);
-
-    assert.equal(nextEffect.kind, "hosted_execution_dispatch");
-    if (nextEffect.kind !== "hosted_execution_dispatch") {
-      throw new Error("Expected a hosted execution dispatch side effect.");
-    }
-
-    if (!("dispatch" in nextEffect.payload)) {
-      throw new Error("Expected an in-memory pending dispatch payload.");
-    }
-
-    assert.equal(nextEffect.payload.storage, "pending");
-    const rebuiltDispatch = buildHostedWebhookDispatchFromPayload(nextEffect.payload);
+    const rebuiltDispatch = buildHostedWebhookDispatchFromPayload(dispatchEffect.payload);
     assert.equal(rebuiltDispatch?.event.kind, "telegram.message.received");
     if (rebuiltDispatch?.event.kind !== "telegram.message.received") {
       throw new Error("Expected a pending Telegram dispatch payload.");
@@ -398,6 +363,7 @@ describe("hosted webhook receipt transitions", () => {
     assert.equal(rebuiltDispatch.event.telegramMessage.text, "[shared contact]");
     assert.equal(rebuiltDispatch.event.telegramMessage.threadId, "456:business:biz_123:topic:9");
     assert.equal(rebuiltDispatch.event.telegramMessage.attachments?.length, 3);
+    assert.deepEqual(nextState.sideEffects, []);
   });
 });
 
@@ -408,15 +374,46 @@ function buildReceiptState(
     attemptCount: 1,
     attemptId: "attempt_123",
     completedAt: null,
-    eventPayload: {
-      eventType: "message.received",
-    },
     lastError: null,
     lastReceivedAt: "2026-03-26T12:00:00.000Z",
     plannedAt: null,
-    response: null,
     sideEffects: [],
     status: "processing",
     ...overrides,
+  };
+}
+
+function serializeHostedWebhookReceiptStateRecords(
+  state: HostedWebhookReceiptState,
+): Parameters<typeof readHostedWebhookReceiptState>[0] {
+  return {
+    receipt: {
+      attemptCount: state.attemptCount,
+      attemptId: state.attemptId,
+      completedAt: state.completedAt ? new Date(state.completedAt) : null,
+      ...serializeHostedWebhookReceiptErrorState(state.lastError),
+      lastReceivedAt: new Date(state.lastReceivedAt),
+      plannedAt: state.plannedAt ? new Date(state.plannedAt) : null,
+      status: state.status,
+    },
+    sideEffects: state.sideEffects.map((effect) =>
+      normalizeSerializedSideEffectForRead(effect.effectId, serializeHostedWebhookReceiptSideEffect(effect))
+    ),
+  };
+}
+
+function normalizeSerializedSideEffectForRead(
+  effectId: string,
+  effect: ReturnType<typeof serializeHostedWebhookReceiptSideEffect>,
+): NonNullable<Parameters<typeof readHostedWebhookReceiptState>[0]["sideEffects"]>[number] {
+  const dispatchPayloadJson: Prisma.InputJsonValue | null =
+    effect.dispatchPayloadJson === Prisma.DbNull
+      ? null
+      : effect.dispatchPayloadJson as Prisma.InputJsonValue;
+
+  return {
+    effectId,
+    ...effect,
+    dispatchPayloadJson,
   };
 }
