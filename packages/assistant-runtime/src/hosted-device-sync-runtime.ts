@@ -6,7 +6,6 @@ import type {
 } from "@murphai/device-syncd/types";
 import {
   normalizeHostedDeviceSyncJobHints,
-  resolveHostedExecutionDeviceSyncRuntimeClient,
   resolveHostedDeviceSyncWakeContext,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
@@ -23,8 +22,8 @@ import type {
   HostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution";
 import type {
-  HostedExecutionWebControlPlaneEnvironment,
-} from "@murphai/hosted-execution/env";
+  HostedRuntimeDeviceSyncPort,
+} from "./hosted-runtime/platform.ts";
 
 export interface HostedDeviceSyncRuntimeSyncState {
   hostedToLocalAccountIds: Map<string, string>;
@@ -34,27 +33,21 @@ export interface HostedDeviceSyncRuntimeSyncState {
 }
 
 type HostedAccountHydrationInput = Parameters<DeviceSyncService["store"]["hydrateHostedAccount"]>[0];
-type HostedDeviceSyncRuntimeClient = ReturnType<typeof resolveHostedExecutionDeviceSyncRuntimeClient>;
+type HostedDeviceSyncRuntimeClient = HostedRuntimeDeviceSyncPort | null;
 
 export async function syncHostedDeviceSyncControlPlaneState(input: {
   dispatch: HostedExecutionDispatchRequest;
-  fetchImpl?: typeof fetch;
+  deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   secret: string;
   service: DeviceSyncService;
   timeoutMs: number | null;
-  webControlPlane: HostedExecutionWebControlPlaneEnvironment;
 }): Promise<HostedDeviceSyncRuntimeSyncState> {
   const inlineSnapshot = input.dispatch.event.kind === "device-sync.wake"
     ? input.dispatch.event.runtimeSnapshot ?? null
     : null;
   const client = inlineSnapshot
     ? null
-    : resolveHostedDeviceSyncRuntimeClientForUser({
-        boundUserId: input.dispatch.event.userId,
-        fetchImpl: input.fetchImpl,
-        timeoutMs: input.timeoutMs,
-        webControlPlane: input.webControlPlane,
-      });
+    : resolveHostedDeviceSyncRuntimeClientForUser(input.deviceSyncPort);
   if (!client && !inlineSnapshot) {
     return createEmptyHostedDeviceSyncRuntimeSyncState();
   }
@@ -112,23 +105,17 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
 
 export async function reconcileHostedDeviceSyncControlPlaneState(input: {
   dispatch: HostedExecutionDispatchRequest;
-  fetchImpl?: typeof fetch;
+  deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   secret: string;
   service: DeviceSyncService;
   state: HostedDeviceSyncRuntimeSyncState;
   timeoutMs: number | null;
-  webControlPlane: HostedExecutionWebControlPlaneEnvironment;
 }): Promise<void> {
   if (!input.state.snapshot) {
     return;
   }
 
-  const client = resolveHostedDeviceSyncRuntimeClientForUser({
-    boundUserId: input.dispatch.event.userId,
-    fetchImpl: input.fetchImpl,
-    timeoutMs: input.timeoutMs,
-    webControlPlane: input.webControlPlane,
-  });
+  const client = resolveHostedDeviceSyncRuntimeClientForUser(input.deviceSyncPort);
   if (!client) {
     return;
   }
@@ -176,18 +163,10 @@ function createEmptyHostedDeviceSyncRuntimeSyncState(
   };
 }
 
-function resolveHostedDeviceSyncRuntimeClientForUser(input: {
-  boundUserId: string;
-  fetchImpl?: typeof fetch;
-  timeoutMs: number | null;
-  webControlPlane: HostedExecutionWebControlPlaneEnvironment;
-}): HostedDeviceSyncRuntimeClient {
-  return resolveHostedExecutionDeviceSyncRuntimeClient({
-    baseUrl: input.webControlPlane.deviceSyncRuntimeBaseUrl,
-    boundUserId: input.boundUserId,
-    fetchImpl: input.fetchImpl,
-    timeoutMs: input.timeoutMs,
-  });
+function resolveHostedDeviceSyncRuntimeClientForUser(
+  deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined,
+): HostedDeviceSyncRuntimeClient {
+  return deviceSyncPort ?? null;
 }
 
 function applyHostedDeviceSyncWakeHint(input: {

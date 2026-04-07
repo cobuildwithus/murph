@@ -48,7 +48,6 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
         },
       },
       runtime: {
-        internalWorkerProxyToken: "proxy_123",
         userEnv: {
           OPENAI_API_KEY: "secret",
         },
@@ -68,7 +67,6 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
     });
     expect(parsed.request.bundle).toBe("vault-bundle");
     expect(parsed.request.commit?.bundleRef?.key).toBe("bundles/user/vault.json");
-    expect(parsed.runtime?.internalWorkerProxyToken).toBe("proxy_123");
     expect(parsed.runtime?.userEnv).toEqual({ OPENAI_API_KEY: "secret" });
   });
 

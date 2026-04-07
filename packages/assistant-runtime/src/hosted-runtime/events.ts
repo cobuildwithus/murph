@@ -1,4 +1,7 @@
-import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
+import type {
+  HostedExecutionDispatchRequest,
+  HostedExecutionRunnerSharePack,
+} from "@murphai/hosted-execution";
 import { queueAssistantFirstContactWelcome } from "@murphai/assistant-engine";
 import {
   assistantGatewayLocalMessageSender,
@@ -20,13 +23,12 @@ import { assertNever } from "./utils.ts";
 
 export async function executeHostedDispatchEvent(input: {
   dispatch: HostedExecutionDispatchRequest;
-  resultsBaseUrl: string;
-  internalWorkerFetch?: typeof fetch;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "commitTimeoutMs" | "userEnv" | "webControlPlane"
+    "commitTimeoutMs" | "platform" | "userEnv"
   >;
   runtimeEnv: Readonly<Record<string, string>>;
+  sharePack?: HostedExecutionRunnerSharePack | null;
   vaultRoot: string;
 }): Promise<HostedDispatchExecutionMetrics> {
   const bootstrapResult = await prepareHostedDispatchContext(
@@ -36,9 +38,8 @@ export async function executeHostedDispatchEvent(input: {
   );
   const dispatchEffect = await handleHostedDispatchEvent({
     dispatch: input.dispatch,
-    resultsBaseUrl: input.resultsBaseUrl,
-    internalWorkerFetch: input.internalWorkerFetch,
     runtime: input.runtime,
+    sharePack: input.sharePack ?? null,
     vaultRoot: input.vaultRoot,
   });
 
@@ -51,12 +52,11 @@ export async function executeHostedDispatchEvent(input: {
 
 async function handleHostedDispatchEvent(input: {
   dispatch: HostedExecutionDispatchRequest;
-  resultsBaseUrl: string;
-  internalWorkerFetch?: typeof fetch;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "commitTimeoutMs" | "userEnv" | "webControlPlane"
+    "commitTimeoutMs" | "platform" | "userEnv"
   >;
+  sharePack?: HostedExecutionRunnerSharePack | null;
   vaultRoot: string;
 }): Promise<HostedDispatchEffect> {
   const dispatch = input.dispatch;
@@ -92,9 +92,7 @@ async function handleHostedDispatchEvent(input: {
           ...dispatch,
           event: dispatch.event,
         },
-        input.resultsBaseUrl,
-        input.internalWorkerFetch,
-        input.runtime.commitTimeoutMs,
+        input.runtime.platform.effectsPort,
         input.runtime.userEnv,
       );
       return createNoopDispatchEffect();
@@ -102,11 +100,15 @@ async function handleHostedDispatchEvent(input: {
     case "device-sync.wake":
       return createNoopDispatchEffect();
     case "vault.share.accepted":
+      if (!input.sharePack) {
+        throw new TypeError("Hosted share accepted dispatch requires a hydrated runner sharePack.");
+      }
       return await handleHostedShareAcceptedDispatch({
         dispatch: {
           ...dispatch,
           event: dispatch.event,
         },
+        sharePack: input.sharePack,
         vaultRoot: input.vaultRoot,
       });
     case "gateway.message.send":

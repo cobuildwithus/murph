@@ -1,8 +1,4 @@
 import {
-  HOSTED_EXECUTION_CALLBACK_HOSTS,
-  HOSTED_EXECUTION_PROXY_HOSTS,
-} from "@murphai/hosted-execution/callback-hosts";
-import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
 } from "@murphai/hosted-execution/contracts";
 import {
@@ -10,6 +6,7 @@ import {
 } from "@murphai/hosted-execution/env";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
+import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "../internal-hosts.ts";
 import { json } from "../json.ts";
 import { createHostedUserKeyStore } from "../user-key-store.js";
 import type {
@@ -22,10 +19,10 @@ type RunnerOutboundUserRunnerStubLike = WorkerUserRunnerStubLike;
 export interface RunnerOutboundEnvironmentSource extends WorkerEnvironmentContract {}
 
 const RUNNER_INTERNAL_PROXY_HOSTNAMES = new Set<string>([
-  HOSTED_EXECUTION_CALLBACK_HOSTS.artifacts,
-  HOSTED_EXECUTION_CALLBACK_HOSTS.results,
-  HOSTED_EXECUTION_PROXY_HOSTS.deviceSync,
-  HOSTED_EXECUTION_PROXY_HOSTS.usage,
+  CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore,
+  CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort,
+  CLOUDFLARE_HOSTED_RUNTIME_HOSTS.deviceSyncPort,
+  CLOUDFLARE_HOSTED_RUNTIME_HOSTS.usageExportPort,
 ]);
 
 export async function resolveRunnerOutboundUserCryptoContext(input: {

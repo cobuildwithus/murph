@@ -43,13 +43,12 @@ import { exportHostedPendingAssistantUsage } from "./usage.ts";
 export async function executeHostedDispatchForCommit(input: {
   artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
   executionContext: AssistantExecutionContext;
-  internalWorkerFetch?: typeof fetch;
   materializedArtifactPaths?: ReadonlySet<string>;
   request: HostedAssistantRuntimeJobRequest;
   restored: HostedRestoredExecutionContext;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "artifactsBaseUrl" | "commitTimeoutMs" | "resultsBaseUrl" | "userEnv" | "webControlPlane"
+    "commitTimeoutMs" | "platform" | "userEnv"
   >;
   runtimeEnv: Readonly<Record<string, string>>;
 }): Promise<HostedCommittedExecutionState> {
@@ -62,33 +61,29 @@ export async function executeHostedDispatchForCommit(input: {
   });
   const dispatchMetrics = await executeHostedDispatchEvent({
     dispatch: input.request.dispatch,
-    resultsBaseUrl: input.runtime.resultsBaseUrl,
-    internalWorkerFetch: input.internalWorkerFetch,
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
+    sharePack: input.request.sharePack ?? null,
     vaultRoot: input.restored.vaultRoot,
   });
   const maintenanceMetrics = await runHostedMaintenanceLoop({
     artifactMaterializer: input.artifactMaterializer ?? null,
+    deviceSyncPort: input.runtime.platform.deviceSyncPort,
     dispatch: input.request.dispatch,
     executionContext: input.executionContext,
-    internalWorkerFetch: input.internalWorkerFetch,
     requestId: input.request.dispatch.eventId,
     skipAssistantAutomation: input.request.dispatch.event.kind === "member.activated"
       && dispatchMetrics.bootstrapResult?.assistantConfigured === false,
     timeoutMs: input.runtime.commitTimeoutMs,
     runtimeEnv: input.runtimeEnv,
-    webControlPlane: input.runtime.webControlPlane,
     vaultRoot: input.restored.vaultRoot,
   });
   const committedSnapshot = await snapshotHostedExecutionContext({
     artifactSink: createHostedArtifactUploadSink({
-      artifactsBaseUrl: input.runtime.artifactsBaseUrl,
-      fetchImpl: input.internalWorkerFetch,
+      artifactStore: input.runtime.platform.artifactStore,
       knownArtifactHashes: collectHostedBundleArtifactHashes(
         decodeHostedBundleBase64(input.request.bundle),
       ),
-      timeoutMs: input.runtime.commitTimeoutMs,
     }),
     operatorHomeRoot: input.restored.operatorHomeRoot,
     preservedArtifacts: collectPreservedHostedArtifacts({
@@ -125,12 +120,11 @@ export async function executeHostedDispatchForCommit(input: {
 export async function completeHostedExecutionAfterCommit(input: {
   commit: HostedExecutionCommitCallback | null;
   dispatch: HostedExecutionDispatchRequest;
-  internalWorkerFetch?: typeof fetch;
   materializedArtifactPaths?: ReadonlySet<string>;
   run?: HostedExecutionRunContext | null;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "artifactsBaseUrl" | "commitTimeoutMs" | "resultsBaseUrl" | "userEnv" | "webControlPlane"
+    "commitTimeoutMs" | "platform" | "userEnv"
   >;
   restored: HostedRestoredExecutionContext;
   committedExecution: HostedCommittedExecutionState;
@@ -144,18 +138,13 @@ export async function completeHostedExecutionAfterCommit(input: {
   });
   await drainHostedCommittedSideEffectsAfterCommit({
     commit: input.commit,
-    commitTimeoutMs: input.runtime.commitTimeoutMs,
     dispatch: input.dispatch,
-    resultsBaseUrl: input.runtime.resultsBaseUrl,
-    fetchImpl: input.internalWorkerFetch,
+    effectsPort: input.runtime.platform.effectsPort,
     sideEffects: input.committedExecution.committedSideEffects,
     vaultRoot: input.restored.vaultRoot,
   });
   await exportHostedPendingAssistantUsage({
-    baseUrl: input.runtime.webControlPlane.usageBaseUrl,
-    fetchImpl: input.internalWorkerFetch,
-    timeoutMs: input.runtime.commitTimeoutMs,
-    userId: input.dispatch.event.userId,
+    usageExportPort: input.runtime.platform.usageExportPort,
     vaultRoot: input.restored.vaultRoot,
   });
   await reconcileHostedVerifiedEmailSelfTarget({
@@ -167,12 +156,10 @@ export async function completeHostedExecutionAfterCommit(input: {
 
   const finalSnapshot = await snapshotHostedExecutionContext({
     artifactSink: createHostedArtifactUploadSink({
-      artifactsBaseUrl: input.runtime.artifactsBaseUrl,
-      fetchImpl: input.internalWorkerFetch,
+      artifactStore: input.runtime.platform.artifactStore,
       knownArtifactHashes: collectHostedBundleArtifactHashes(
         decodeHostedBundleBase64(input.committedExecution.committedResult.bundle),
       ),
-      timeoutMs: input.runtime.commitTimeoutMs,
     }),
     operatorHomeRoot: input.restored.operatorHomeRoot,
     preservedArtifacts: collectPreservedHostedArtifacts({

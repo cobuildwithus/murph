@@ -2,8 +2,6 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH =
   "/api/internal/device-sync/runtime/snapshot";
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH =
   "/api/internal/device-sync/runtime/apply";
-const HOSTED_EXECUTION_DEVICE_SYNC_PROXY_HOST = "device-sync.worker";
-const HOSTED_EXECUTION_USER_ID_HEADER = "x-hosted-execution-user-id";
 
 export interface HostedExecutionDeviceSyncConnectLinkResponse {
   authorizationUrl: string;
@@ -145,17 +143,6 @@ export interface HostedExecutionDeviceSyncWakeEventLike {
   provider?: string | null;
 }
 
-export interface HostedExecutionProxyDeviceSyncRuntimeClient {
-  applyUpdates(input: {
-    occurredAt?: string | null;
-    updates: HostedExecutionDeviceSyncRuntimeApplyRequest["updates"];
-  }): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse>;
-  fetchSnapshot(input?: {
-    connectionId?: string | null;
-    provider?: string | null;
-  }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
-}
-
 export function buildHostedExecutionDeviceSyncConnectLinkPath(provider: string): string {
   return `/api/internal/device-sync/providers/${encodeURIComponent(provider)}/connect-link`;
 }
@@ -285,56 +272,6 @@ export function normalizeHostedDeviceSyncJobHints(
         ...(typeof job.priority === "number" ? { priority: job.priority } : {}),
       }))
     : [];
-}
-
-export function resolveHostedExecutionDeviceSyncRuntimeClient(input: {
-  baseUrl: string | null | undefined;
-  boundUserId: string;
-  fetchImpl?: typeof fetch;
-  timeoutMs?: number | null;
-}): HostedExecutionProxyDeviceSyncRuntimeClient | null {
-  const normalizedBaseUrl = input.baseUrl
-    ? requireHostedExecutionDeviceSyncRuntimeBaseUrl(input.baseUrl)
-    : null;
-
-  if (!normalizedBaseUrl || new URL(normalizedBaseUrl).hostname !== HOSTED_EXECUTION_DEVICE_SYNC_PROXY_HOST) {
-    return null;
-  }
-
-  return {
-    applyUpdates(runtimeInput) {
-      return requestHostedDeviceSyncRuntimeJson({
-        baseUrl: normalizedBaseUrl,
-        body: {
-          ...(runtimeInput.occurredAt ? { occurredAt: runtimeInput.occurredAt } : {}),
-          updates: runtimeInput.updates,
-          userId: input.boundUserId,
-        } satisfies HostedExecutionDeviceSyncRuntimeApplyRequest,
-        fetchImpl: input.fetchImpl,
-        label: "Hosted device-sync runtime apply",
-        parse: parseHostedExecutionDeviceSyncRuntimeApplyResponse,
-        path: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
-        timeoutMs: input.timeoutMs ?? null,
-        userId: input.boundUserId,
-      });
-    },
-    fetchSnapshot(runtimeInput = {}) {
-      return requestHostedDeviceSyncRuntimeJson({
-        baseUrl: normalizedBaseUrl,
-        body: {
-          ...(runtimeInput.connectionId ? { connectionId: runtimeInput.connectionId } : {}),
-          ...(runtimeInput.provider ? { provider: runtimeInput.provider } : {}),
-          userId: input.boundUserId,
-        } satisfies HostedExecutionDeviceSyncRuntimeSnapshotRequest,
-        fetchImpl: input.fetchImpl,
-        label: "Hosted device-sync runtime snapshot",
-        parse: parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
-        path: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
-        timeoutMs: input.timeoutMs ?? null,
-        userId: input.boundUserId,
-      });
-    },
-  };
 }
 
 function parseHostedExecutionDeviceSyncRuntimeConnectionSnapshot(
@@ -657,103 +594,6 @@ function resolveHostedDeviceSyncRuntimeRequestUserId(
   return requireString(value, "Hosted device-sync runtime request userId");
 }
 
-async function requestHostedDeviceSyncRuntimeJson<TResponse>(input: {
-  baseUrl: string;
-  body: Record<string, unknown>;
-  fetchImpl?: typeof fetch;
-  label: string;
-  parse: (value: unknown) => TResponse;
-  path: string;
-  timeoutMs: number | null;
-  userId: string;
-}): Promise<TResponse> {
-  const url = new URL(input.path, `${input.baseUrl}/`);
-  const response = await (input.fetchImpl ?? fetch)(url, {
-    body: JSON.stringify(input.body),
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      [HOSTED_EXECUTION_USER_ID_HEADER]: input.userId,
-    },
-    method: "POST",
-    signal: AbortSignal.timeout(readPositiveIntegerOrDefault(input.timeoutMs, 30_000)),
-  });
-
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(
-      `${input.label} request failed (${response.status}): ${text.trim() || response.statusText || "Unknown error"}`,
-    );
-  }
-
-  const parsed = text.trim() ? JSON.parse(text) as unknown : null;
-  return input.parse(parsed);
-}
-
-function requireHostedExecutionDeviceSyncRuntimeBaseUrl(value: string): string {
-  const normalized = normalizeHostedExecutionBaseUrl(value, {
-    allowHttpHosts: [HOSTED_EXECUTION_DEVICE_SYNC_PROXY_HOST],
-    allowHttpLocalhost: true,
-  });
-
-  if (!normalized) {
-    throw new TypeError("Hosted device-sync runtime baseUrl must be configured.");
-  }
-
-  return normalized;
-}
-
-function normalizeHostedExecutionBaseUrl(
-  value: string | null | undefined,
-  options?: {
-    allowHttpHosts?: readonly string[];
-    allowHttpLocalhost?: boolean;
-  },
-): string | null {
-  const normalized = normalizeHostedExecutionString(value);
-
-  if (!normalized) {
-    return null;
-  }
-
-  const url = new URL(normalized);
-  const protocol = url.protocol.toLowerCase();
-  const hostname = url.hostname.toLowerCase();
-  const allowHttpHosts = new Set((options?.allowHttpHosts ?? []).map((entry) => entry.toLowerCase()));
-  const allowHttp =
-    protocol === "http:"
-    && (
-      allowHttpHosts.has(hostname)
-      || (options?.allowHttpLocalhost === true && isLoopbackHost(hostname))
-    );
-
-  if (protocol !== "https:" && !allowHttp) {
-    throw new TypeError(
-      "Hosted execution base URLs must use HTTPS unless the host is explicitly allowlisted for HTTP.",
-    );
-  }
-
-  if (url.username || url.password) {
-    throw new TypeError("Hosted execution base URLs must not include embedded credentials.");
-  }
-
-  url.hash = "";
-  url.search = "";
-  return url.toString().replace(/\/$/u, "");
-}
-
-function normalizeHostedExecutionString(value: string | null | undefined): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
-function isLoopbackHost(value: string): boolean {
-  return value === "localhost" || value === "127.0.0.1" || value === "::1";
-}
-
 function requireObject(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError(`${label} must be an object.`);
@@ -831,8 +671,4 @@ function readNullableIsoTimestamp(value: unknown, label: string): string | null 
   }
 
   return new Date(timestamp).toISOString();
-}
-
-function readPositiveIntegerOrDefault(value: number | null, fallback: number): number {
-  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : fallback;
 }

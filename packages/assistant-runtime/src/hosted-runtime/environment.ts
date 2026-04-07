@@ -1,23 +1,15 @@
-import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import {
-  DEFAULT_HOSTED_EXECUTION_ARTIFACTS_BASE_URL,
-  DEFAULT_HOSTED_EXECUTION_RESULTS_BASE_URL,
-  HOSTED_EXECUTION_CALLBACK_HOSTS,
-} from "@murphai/hosted-execution/callback-hosts";
-import {
-  normalizeHostedExecutionBaseUrl,
-  normalizeHostedExecutionString,
-  readHostedExecutionWebControlPlaneEnvironment,
-} from "@murphai/hosted-execution/env";
 import type {
   HostedAssistantRuntimeConfig,
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
+import type {
+  HostedRuntimePlatform,
+} from "./platform.ts";
 
 const HOSTED_RUNTIME_CHILD_AMBIENT_ENV_KEYS = [
   "LANG",
@@ -29,17 +21,6 @@ const HOSTED_RUNTIME_CHILD_AMBIENT_ENV_KEYS = [
   "SSL_CERT_FILE",
   "TZ",
 ] as const;
-const HOSTED_RUNTIME_TEST_ARTIFACTS_BASE_URL_ENV =
-  "HOSTED_EXECUTION_TEST_ARTIFACTS_BASE_URL";
-const HOSTED_RUNTIME_TEST_RESULTS_BASE_URL_ENV =
-  "HOSTED_EXECUTION_TEST_RESULTS_BASE_URL";
-const HOSTED_RUNTIME_TEST_COMMIT_BASE_URL_ENV =
-  "HOSTED_EXECUTION_TEST_COMMIT_BASE_URL";
-const HOSTED_RUNTIME_TEST_EMAIL_BASE_URL_ENV =
-  "HOSTED_EXECUTION_TEST_EMAIL_BASE_URL";
-const HOSTED_RUNTIME_TEST_SIDE_EFFECTS_BASE_URL_ENV =
-  "HOSTED_EXECUTION_TEST_SIDE_EFFECTS_BASE_URL";
-
 export interface HostedRuntimeChildLauncherDirectories {
   cacheRoot: string;
   homeRoot: string;
@@ -49,30 +30,21 @@ export interface HostedRuntimeChildLauncherDirectories {
 
 export function normalizeHostedAssistantRuntimeConfig(
   input: HostedAssistantRuntimeConfig | undefined,
+  platform: HostedRuntimePlatform | null | undefined,
 ): NormalizedHostedAssistantRuntimeConfig {
   const forwardedEnv = { ...(input?.forwardedEnv ?? {}) };
-  const callbackBaseUrls = resolveHostedRuntimeCallbackBaseUrls(forwardedEnv);
-  const webControlPlane = readHostedExecutionWebControlPlaneEnvironment(forwardedEnv);
+  const normalizedPlatform = platform ?? null;
 
-  return {
-    artifactsBaseUrl: callbackBaseUrls.artifactsBaseUrl,
-    commitTimeoutMs: input?.commitTimeoutMs ?? null,
-    forwardedEnv,
-    internalWorkerProxyToken: normalizeHostedExecutionString(input?.internalWorkerProxyToken),
-    resultsBaseUrl: callbackBaseUrls.resultsBaseUrl,
-    userEnv: { ...(input?.userEnv ?? {}) },
-    webControlPlane,
-  };
-}
-
-export function resolveHostedRuntimeChildEntry(): string {
-  const builtPath = fileURLToPath(new URL("../hosted-runtime-child.js", import.meta.url));
-
-  if (existsSync(builtPath)) {
-    return builtPath;
+  if (!normalizedPlatform) {
+    throw new TypeError("Hosted assistant runtime platform must be injected.");
   }
 
-  return fileURLToPath(new URL("../hosted-runtime-child.ts", import.meta.url));
+  return {
+    commitTimeoutMs: input?.commitTimeoutMs ?? null,
+    forwardedEnv,
+    platform: normalizedPlatform,
+    userEnv: { ...(input?.userEnv ?? {}) },
+  };
 }
 
 export function resolveHostedRuntimeTsconfigPath(): string {
@@ -89,69 +61,6 @@ export function resolveHostedRuntimeTsxImportSpecifier(): string {
 
 function resolveHostedRuntimeModuleRequire(): NodeJS.Require {
   return createRequire(import.meta.url);
-}
-
-function resolveHostedRuntimeCallbackBaseUrls(
-  forwardedEnv: Readonly<Record<string, string>>,
-): Pick<
-  NormalizedHostedAssistantRuntimeConfig,
-  "artifactsBaseUrl" | "resultsBaseUrl"
-> {
-  return {
-    artifactsBaseUrl: normalizeHostedRuntimeCallbackBaseUrl(
-      forwardedEnv[HOSTED_RUNTIME_TEST_ARTIFACTS_BASE_URL_ENV],
-      DEFAULT_HOSTED_EXECUTION_ARTIFACTS_BASE_URL,
-      HOSTED_EXECUTION_CALLBACK_HOSTS.artifacts,
-    ),
-    resultsBaseUrl: normalizeHostedRuntimeCallbackBaseUrl(
-      readHostedRuntimeResultsBaseUrlOverride(forwardedEnv),
-      DEFAULT_HOSTED_EXECUTION_RESULTS_BASE_URL,
-      HOSTED_EXECUTION_CALLBACK_HOSTS.results,
-    ),
-  };
-}
-
-function readHostedRuntimeResultsBaseUrlOverride(
-  forwardedEnv: Readonly<Record<string, string>>,
-): string | undefined {
-  const configuredValues = [
-    forwardedEnv[HOSTED_RUNTIME_TEST_RESULTS_BASE_URL_ENV],
-    forwardedEnv[HOSTED_RUNTIME_TEST_COMMIT_BASE_URL_ENV],
-    forwardedEnv[HOSTED_RUNTIME_TEST_EMAIL_BASE_URL_ENV],
-    forwardedEnv[HOSTED_RUNTIME_TEST_SIDE_EFFECTS_BASE_URL_ENV],
-  ]
-    .map((value) => normalizeHostedExecutionString(value))
-    .filter((value): value is string => value !== null);
-
-  if (configuredValues.length === 0) {
-    return undefined;
-  }
-
-  const [firstValue, ...restValues] = configuredValues;
-  if (restValues.some((value) => value !== firstValue)) {
-    throw new TypeError(
-      "Hosted assistant runtime results callback base URL overrides must agree.",
-    );
-  }
-
-  return firstValue;
-}
-
-function normalizeHostedRuntimeCallbackBaseUrl(
-  value: string | undefined,
-  fallback: string,
-  host: string,
-): string {
-  const normalized = normalizeHostedExecutionBaseUrl(value ?? fallback, {
-    allowHttpHosts: [host],
-    allowHttpLocalhost: true,
-  });
-
-  if (!normalized) {
-    throw new TypeError("Hosted assistant runtime callback baseUrl must be configured.");
-  }
-
-  return normalized;
 }
 
 export async function createHostedRuntimeChildLauncherDirectories(

@@ -10,9 +10,10 @@ import type {
   HostedExecutionRunnerResult,
   HostedExecutionSideEffect,
 } from "@murphai/hosted-execution";
+
 import type {
-  HostedExecutionWebControlPlaneEnvironment,
-} from "@murphai/hosted-execution/env";
+  HostedRuntimePlatform,
+} from "./platform.ts";
 
 export interface HostedExecutionCommitCallback {
   bundleRef: HostedExecutionBundleRefState;
@@ -20,7 +21,6 @@ export interface HostedExecutionCommitCallback {
 
 export interface HostedAssistantRuntimeConfig {
   commitTimeoutMs?: number | null;
-  internalWorkerProxyToken?: string | null;
   forwardedEnv?: Readonly<Record<string, string>>;
   userEnv?: Readonly<Record<string, string>>;
 }
@@ -56,13 +56,10 @@ export interface HostedBootstrapResult {
 }
 
 export interface NormalizedHostedAssistantRuntimeConfig {
-  artifactsBaseUrl: string;
   commitTimeoutMs: number | null;
   forwardedEnv: Record<string, string>;
-  internalWorkerProxyToken: string | null;
-  resultsBaseUrl: string;
+  platform: HostedRuntimePlatform;
   userEnv: Record<string, string>;
-  webControlPlane: HostedExecutionWebControlPlaneEnvironment;
 }
 
 export interface HostedCommittedExecutionState {

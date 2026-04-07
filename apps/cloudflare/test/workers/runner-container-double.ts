@@ -11,6 +11,7 @@ import { DurableObject } from "cloudflare:workers";
 import { handleRunnerOutboundRequest } from "../../src/runner-outbound.js";
 
 interface RunnerContainerInvokePayload {
+  internalWorkerProxyToken?: string | null;
   job: HostedAssistantRuntimeJobInput & {
     request: HostedExecutionRunnerRequest & {
       commit?: {
@@ -23,7 +24,7 @@ interface RunnerContainerInvokePayload {
 
 export class RunnerContainerTestDouble extends DurableObject {
   async invoke(payload: RunnerContainerInvokePayload): Promise<HostedAssistantRuntimeJobResult> {
-    const internalWorkerProxyToken = payload.job.runtime?.internalWorkerProxyToken ?? "proxy-token";
+    const internalWorkerProxyToken = payload.internalWorkerProxyToken ?? "proxy-token";
     const runnerResult = buildRunnerResult(payload.job.request);
     const commitResponse = await handleRunnerOutboundRequest(
       new Request(
