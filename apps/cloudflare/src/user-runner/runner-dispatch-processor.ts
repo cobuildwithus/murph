@@ -41,6 +41,7 @@ import {
   type PendingDispatchRecord,
   type RunnerStateRecord,
 } from "./types.js";
+import { applyHostedWebBusinessOutcomeIfNeeded } from "../runner-outbound/business-outcomes.ts";
 import {
   RunnerCommitRecovery,
   isCommittedResultFinalized,
@@ -79,6 +80,7 @@ interface RunnerDispatchProcessorDependencies {
   env: HostedExecutionEnvironment;
   queueStore: RunnerQueueStore;
   readRunnerRuntimeConfigSource(): Readonly<Record<string, string | undefined>>;
+  readWorkerStringEnvSource(): Readonly<Record<string, string | undefined>>;
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
   runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
   scheduler: RunnerScheduler;
@@ -249,17 +251,18 @@ export class RunnerDispatchProcessor {
           finalGatewayProjectionSnapshot: runnerResult.finalGatewayProjectionSnapshot,
           result: runnerResult.result,
         });
-        record = await (await this.dependencies.ensureRunnerStores(record.userId))
-          .commitRecovery.requireCommittedDispatch(record.userId, nextPending.dispatch.eventId);
-        record = await this.advanceRunPhase({
-          clearError: true,
-          dispatch: nextPending.dispatch,
-          message: "Hosted dispatch completed.",
-          phase: "completed",
+        const finalizedCommit = await (await this.dependencies.ensureRunnerStores(record.userId))
+          .commitRecovery.readCommittedDispatch(record.userId, nextPending.dispatch.eventId);
+        if (!finalizedCommit) {
+          throw new Error("Hosted runner returned before recording a durable commit.");
+        }
+        record = await this.applyCommittedDispatchAndCleanup(
+          record.userId,
+          finalizedCommit,
+          nextPending.dispatch,
+          nextPending.dispatch,
           run,
-        });
-        await this.deleteCommittedDispatchBestEffort(record.userId, nextPending.dispatch.eventId);
-        await this.deleteTransientDispatchDataBestEffort(nextPending.dispatch);
+        );
         processedDispatch = true;
       } catch (error) {
         const committed = await (await this.dependencies.ensureRunnerStores(record.userId))
@@ -267,13 +270,34 @@ export class RunnerDispatchProcessor {
 
         if (committed) {
           if (isCommittedResultFinalized(committed)) {
-            record = await this.applyCommittedDispatchAndCleanup(
-              record.userId,
-              committed,
-              nextPending.dispatch,
-              nextPending.dispatch,
-              run,
-            );
+            try {
+              record = await this.applyCommittedDispatchAndCleanup(
+                record.userId,
+                committed,
+                nextPending.dispatch,
+                nextPending.dispatch,
+                run,
+              );
+            } catch (finalizeError) {
+              record = await (await this.dependencies.ensureRunnerStores(record.userId))
+                .commitRecovery.rescheduleCommittedFinalizeRetry({
+                  attempts: nextPending.attempts + 1,
+                  committed,
+                  error: finalizeError,
+                  retryDelayMs: computeRetryDelayMs(
+                    this.dependencies.env.retryDelayMs,
+                    nextPending.attempts + 1,
+                  ),
+                });
+              record = await this.advanceRunPhase({
+                dispatch: nextPending.dispatch,
+                error: finalizeError,
+                level: "warn",
+                message: "Hosted dispatch scheduled a business outcome retry.",
+                phase: "retry.scheduled",
+                run,
+              });
+            }
             continue;
           }
 
@@ -425,7 +449,7 @@ export class RunnerDispatchProcessor {
   private async recoverCommittedPendingDispatchAndCleanup(
     record: RunnerStateRecord,
   ): Promise<RunnerStateRecord | null> {
-    const { commitRecovery, gatewayStore } = await this.dependencies.ensureRunnerStores(
+    const { commitRecovery } = await this.dependencies.ensureRunnerStores(
       record.userId,
     );
     const recovered = await commitRecovery.recoverCommittedPendingDispatch(record);
@@ -433,31 +457,21 @@ export class RunnerDispatchProcessor {
       return null;
     }
 
-    if (recovered.committedEventId) {
-      await gatewayStore.applySnapshot(recovered.committed.gatewayProjectionSnapshot ?? null);
-      const completedRecord = await this.advanceRunPhase({
-        clearError: true,
-        dispatch: {
-          event: {
-            userId: record.userId,
-          },
-          eventId: recovered.committedEventId,
+    return this.applyCommittedDispatchAndCleanup(
+      record.userId,
+      recovered.committed,
+      recovered.cleanupDispatch ?? {
+        event: {
+          userId: record.userId,
         },
-        message: "Recovered a finalized committed dispatch.",
-        phase: "completed",
-        run: this.resolveRunContext(recovered.record, {
-          eventId: recovered.committedEventId,
-          startedAt: recovered.record.lastRunAt ?? new Date().toISOString(),
-        }),
-      });
-      await this.deleteCommittedDispatchBestEffort(record.userId, recovered.committedEventId);
-      if (recovered.cleanupDispatch) {
-        await this.deleteTransientDispatchDataBestEffort(recovered.cleanupDispatch);
-      }
-      return completedRecord;
-    }
-
-    return recovered.record;
+        eventId: recovered.committedEventId,
+      },
+      recovered.cleanupDispatch,
+      this.resolveRunContext(recovered.record, {
+        eventId: recovered.committedEventId,
+        startedAt: recovered.record.lastRunAt ?? recovered.committed.committedAt,
+      }),
+    );
   }
 
   private async applyCommittedDispatchAndCleanup(
@@ -468,6 +482,9 @@ export class RunnerDispatchProcessor {
     run: HostedExecutionRunContext | null = null,
   ): Promise<RunnerStateRecord> {
     const { commitRecovery, gatewayStore } = await this.dependencies.ensureRunnerStores(userId);
+    if (cleanupDispatch) {
+      await this.applyHostedBusinessOutcomeIfNeeded(cleanupDispatch);
+    }
     await gatewayStore.applySnapshot(committed.gatewayProjectionSnapshot ?? null);
     let record = await commitRecovery.applyCommittedDispatch(userId, committed);
     record = await this.advanceRunPhase({
@@ -485,6 +502,16 @@ export class RunnerDispatchProcessor {
       await this.deleteTransientDispatchDataBestEffort(cleanupDispatch);
     }
     return record;
+  }
+
+  private async applyHostedBusinessOutcomeIfNeeded(
+    dispatch: HostedExecutionDispatchRequest,
+  ): Promise<void> {
+    await applyHostedWebBusinessOutcomeIfNeeded({
+      dispatch,
+      env: this.dependencies.readWorkerStringEnvSource(),
+      signingSecret: this.dependencies.env.webInternalSigningSecret,
+    });
   }
 
   private createRunContext(

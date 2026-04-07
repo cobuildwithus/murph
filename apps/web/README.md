@@ -197,6 +197,7 @@ Hosted execution maintenance routes:
 
 - `GET /api/internal/hosted-execution/outbox/cron`
 - `GET /api/internal/hosted-execution/usage/cron`
+- `POST /api/internal/hosted-execution/share-import/complete` (Cloudflare-signed internal callback only)
 
 The old `POST /api/internal/hosted-execution/outbox/drain` route has been removed. Cloudflare no longer round-trips through hosted-web runtime snapshot/apply routes or direct usage-record writes in the hot path. Device-sync hydration and usage buffering now stay on the Cloudflare side during execution, `apps/web` later imports buffered usage from Cloudflare-owned storage, and the optional usage cron sends total-token meter events to Stripe while skipping member-supplied API-key runs.
 
@@ -232,7 +233,7 @@ The onboarding lane is intentionally thin:
 - hosted share links now keep preview metadata plus a Cloudflare-backed one-time share-pack reference for foods, recipes, and supplement/protocol records, optionally issuing or reusing a phone-bound invite so `/join/:inviteCode?share=...` can import the shared bundle after activation; the default and maximum hosted share-link lifetime is now 24 hours to keep that transient share-pack storage privacy-first
 - once a member has active billing entitlement, hosted onboarding, hosted share acceptance, and hosted device-sync wakes write signed internal execution intents to the shared Postgres `execution_outbox` in the same transaction as their control-plane state changes instead of synchronously depending on `apps/cloudflare`
 - new steady-state outbox rows are immutable: inline events store the full dispatch body, while reference-backed events stage the full dispatch into Cloudflare-owned encrypted dispatch-payload storage and persist only the dispatch ref plus opaque payload ref in Postgres
-- a best-effort drain still runs after commit, but Cloudflare delivery retries and dedupe now converge through the outbox row instead of request/response coupling; new reference-backed rows now require a staged Cloudflare payload ref instead of falling back to web-side dispatch reconstruction
+- a best-effort drain still runs after commit, but the Postgres outbox is now delivery-only: once Cloudflare accepts the dispatch, retries, poison/backpressure, in-flight execution, business-outcome callbacks, and completion live in the Cloudflare queue instead of on the outbox row; new reference-backed rows still require a staged Cloudflare payload ref instead of falling back to web-side dispatch reconstruction
 - hosted onboarding webhook receipts still keep receipt-local side-effect markers for retry-safe Linq invite replies, persist the planned response plus queued side effects before any external send, and use a reclaimable processing lease so a retried Linq or Telegram webhook can resume abandoned work instead of being dropped as a duplicate
 - the current hosted outward-effect lanes are now explicit: Cloudflare-bound execution uses `execution_outbox`, receipt-owned Linq or Telegram replies use the webhook receipt side-effect journal, and Stripe facts use inline webhook reconciliation plus cron recovery
 - Stripe customer/subscription/invoice entitlement writes now carry a latest-applied billing event marker so out-of-order webhook delivery cannot regress a later cancellation, pause, or unpaid state back to active

@@ -10,7 +10,7 @@ Cloudflare execution worker.
 - define the shared worker callback hosts and default callback base URLs, including the single runner results seam
 - normalize the shared hosted execution env variables
 - build stable internal route paths for dispatch and user control calls
-- own the canonical dispatch lifecycle, immutable outbox payload envelopes, and staged dispatch-payload ref helpers
+- own the shared dispatch contracts, signed callback routes, immutable outbox payload envelopes, and staged dispatch-payload ref helpers
 - provide typed fetch clients for signed dispatch requests and OIDC bearer-authenticated
   control-plane requests, including dispatch-payload stage/dispatch/delete helpers
 

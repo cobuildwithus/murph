@@ -11,7 +11,7 @@ import type { RunnerStateRecord } from "./types.js";
 export interface RecoveredCommittedPendingDispatch {
   cleanupDispatch: HostedExecutionDispatchRequest | null;
   committed: HostedExecutionCommittedResult;
-  committedEventId: string | null;
+  committedEventId: string;
   record: RunnerStateRecord;
 }
 
@@ -50,7 +50,7 @@ export class RunnerCommitRecovery {
           cleanupDispatch: pending.dispatch,
           committed,
           committedEventId: pending.eventId,
-          record: await this.applyCommittedDispatch(record.userId, committed),
+          record: await this.syncCommittedBundlesWithoutConsuming(record.userId, committed),
         };
       }
 

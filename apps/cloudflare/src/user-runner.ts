@@ -1,15 +1,17 @@
 import type {
   HostedExecutionBundleRef,
-  HostedExecutionDeviceSyncRuntimeApplyRequest,
-  HostedExecutionDeviceSyncRuntimeApplyResponse,
-  HostedExecutionDeviceSyncRuntimeSnapshotRequest,
-  HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   HostedExecutionDispatchResult,
   HostedExecutionDispatchRequest,
   HostedExecutionOutboxPayload,
   HostedExecutionUserEnvStatus,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
+import type {
+  HostedExecutionDeviceSyncRuntimeApplyRequest,
+  HostedExecutionDeviceSyncRuntimeApplyResponse,
+  HostedExecutionDeviceSyncRuntimeSnapshotRequest,
+  HostedExecutionDeviceSyncRuntimeSnapshotResponse,
+} from "@murphai/device-syncd/hosted-runtime";
 import type {
   GatewayFetchAttachmentsInput,
   GatewayGetConversationInput,
@@ -197,6 +199,7 @@ export class HostedUserRunner {
       env: this.env,
       queueStore: this.queueStore,
       readRunnerRuntimeConfigSource: () => this.readRunnerRuntimeConfigSource(),
+      readWorkerStringEnvSource: () => this.readWorkerStringEnvSource(),
       runnerContainerNamespace: this.runnerContainerNamespace,
       runnerRuntimeEnvSource: this.runnerRuntimeEnvSource,
       scheduler: this.scheduler,

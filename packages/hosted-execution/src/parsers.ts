@@ -5,17 +5,19 @@ import type {
   HostedExecutionAssistantCronTickEvent,
   HostedExecutionBundleRef,
   HostedExecutionDeviceSyncConnectLinkResponse,
-  HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncJobHint,
-  HostedExecutionDeviceSyncRuntimeConnectionUpdate,
+  HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
+  HostedExecutionDeviceSyncRuntimeConnectionSnapshot,
   HostedExecutionDeviceSyncRuntimeConnectionSeed,
   HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot,
-  HostedExecutionDeviceSyncRuntimeConnectionSnapshot,
+  HostedExecutionDeviceSyncRuntimeConnectionStateUpdate,
+  HostedExecutionDeviceSyncRuntimeConnectionUpdate,
   HostedExecutionDeviceSyncRuntimeLocalStateSnapshot,
+  HostedExecutionDeviceSyncRuntimeLocalStateUpdate,
   HostedExecutionDeviceSyncRuntimeSnapshotRequest,
-  HostedExecutionDeviceSyncRuntimeTokenBundle,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
+  HostedExecutionDeviceSyncRuntimeTokenBundle,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionDispatchResult,
   HostedExecutionDispatchRequest,
@@ -50,10 +52,7 @@ import {
   isHostedExecutionRunLevel,
   isHostedExecutionRunPhase,
 } from "./observability.ts";
-
-export function parseHostedExecutionSharePack(value: unknown) {
-  return assertContract(sharePackSchema, value, "hosted execution share pack");
-}
+import type { SharePack } from "@murphai/contracts";
 
 export function parseHostedExecutionDispatchRequest(value: unknown): HostedExecutionDispatchRequest {
   const record = requireObject(value, "Hosted execution dispatch request");
@@ -286,498 +285,6 @@ export function parseHostedExecutionUserEnvUpdate(value: unknown): HostedExecuti
   };
 }
 
-export function parseHostedExecutionDeviceSyncConnectLinkResponse(
-  value: unknown,
-): HostedExecutionDeviceSyncConnectLinkResponse {
-  const record = requireObject(value, "Hosted device-sync connect link response");
-
-  return {
-    authorizationUrl: requireString(
-      record.authorizationUrl,
-      "Hosted device-sync connect link response authorizationUrl",
-    ),
-    expiresAt: requireString(
-      record.expiresAt,
-      "Hosted device-sync connect link response expiresAt",
-    ),
-    provider: requireString(record.provider, "Hosted device-sync connect link response provider"),
-    providerLabel: requireString(
-      record.providerLabel,
-      "Hosted device-sync connect link response providerLabel",
-    ),
-  };
-}
-
-export function parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
-  value: unknown,
-): HostedExecutionDeviceSyncRuntimeSnapshotResponse {
-  const record = requireObject(value, "Hosted device-sync runtime snapshot response");
-
-  return {
-    connections: requireArray(
-      record.connections,
-      "Hosted device-sync runtime snapshot response connections",
-    ).map((entry, index) => parseHostedExecutionDeviceSyncRuntimeConnectionSnapshot(entry, index)),
-    generatedAt: requireString(
-      record.generatedAt,
-      "Hosted device-sync runtime snapshot response generatedAt",
-    ),
-    userId: requireString(record.userId, "Hosted device-sync runtime snapshot response userId"),
-  };
-}
-
-export function parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(
-  value: unknown,
-  trustedUserId: string | null = null,
-): HostedExecutionDeviceSyncRuntimeSnapshotRequest {
-  const record = requireObject(value, "Hosted device-sync runtime snapshot request");
-
-  return {
-    ...(record.connectionId === undefined
-      ? {}
-      : { connectionId: readNullableStringValue(record.connectionId, "Hosted device-sync runtime snapshot request connectionId") }),
-    ...(record.provider === undefined
-      ? {}
-      : { provider: readNullableStringValue(record.provider, "Hosted device-sync runtime snapshot request provider") }),
-    userId: resolveHostedDeviceSyncRuntimeRequestUserId(record.userId, trustedUserId),
-  };
-}
-
-export function parseHostedExecutionDeviceSyncRuntimeApplyRequest(
-  value: unknown,
-  trustedUserId: string | null = null,
-): HostedExecutionDeviceSyncRuntimeApplyRequest {
-  const record = requireObject(value, "Hosted device-sync runtime apply request");
-  const updates = requireArray(
-    record.updates,
-    "Hosted device-sync runtime apply request updates",
-  ).map((entry, index) => parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(entry, index));
-
-  assertUniqueHostedExecutionDeviceSyncRuntimeApplyConnectionIds(updates);
-
-  return {
-    ...(record.occurredAt === undefined
-      ? {}
-      : {
-          occurredAt: readNullableIsoTimestamp(
-            record.occurredAt,
-            "Hosted device-sync runtime apply request occurredAt",
-          ),
-        }),
-    updates,
-    userId: resolveHostedDeviceSyncRuntimeRequestUserId(record.userId, trustedUserId),
-  };
-}
-
-export function parseHostedExecutionDeviceSyncRuntimeApplyResponse(
-  value: unknown,
-): HostedExecutionDeviceSyncRuntimeApplyResponse {
-  const record = requireObject(value, "Hosted device-sync runtime apply response");
-
-  return {
-    appliedAt: requireString(record.appliedAt, "Hosted device-sync runtime apply response appliedAt"),
-    updates: requireArray(
-      record.updates,
-      "Hosted device-sync runtime apply response updates",
-    ).map((entry, index) => parseHostedExecutionDeviceSyncRuntimeApplyEntry(entry, index)),
-    userId: requireString(record.userId, "Hosted device-sync runtime apply response userId"),
-  };
-}
-
-function parseHostedExecutionDeviceSyncRuntimeConnectionSnapshot(
-  value: unknown,
-  index: number,
-): HostedExecutionDeviceSyncRuntimeConnectionSnapshot {
-  const record = requireObject(
-    value,
-    `Hosted device-sync runtime snapshot response connections[${index}]`,
-  );
-
-  return {
-    connection: parseHostedExecutionDeviceSyncRuntimeConnection(
-      record.connection,
-      `Hosted device-sync runtime snapshot response connections[${index}].connection`,
-    ),
-    localState: parseHostedExecutionDeviceSyncRuntimeLocalState(
-      record.localState,
-      `Hosted device-sync runtime snapshot response connections[${index}].localState`,
-    ),
-    tokenBundle: parseHostedExecutionDeviceSyncRuntimeTokenBundle(
-      record.tokenBundle,
-      `Hosted device-sync runtime snapshot response connections[${index}].tokenBundle`,
-    ),
-  };
-}
-
-function parseHostedExecutionDeviceSyncRuntimeApplyEntry(
-  value: unknown,
-  index: number,
-): HostedExecutionDeviceSyncRuntimeApplyResponse["updates"][number] {
-  const record = requireObject(value, `Hosted device-sync runtime apply response updates[${index}]`);
-  const status = requireString(
-    record.status,
-    `Hosted device-sync runtime apply response updates[${index}].status`,
-  );
-  const tokenUpdate = requireString(
-    record.tokenUpdate,
-    `Hosted device-sync runtime apply response updates[${index}].tokenUpdate`,
-  );
-
-  if (status !== "created" && status !== "missing" && status !== "updated") {
-    throw new TypeError(
-      `Hosted device-sync runtime apply response updates[${index}].status must be "created", "missing", or "updated".`,
-    );
-  }
-
-  if (
-    tokenUpdate !== "applied"
-    && tokenUpdate !== "cleared"
-    && tokenUpdate !== "missing"
-    && tokenUpdate !== "skipped_version_mismatch"
-    && tokenUpdate !== "unchanged"
-  ) {
-    throw new TypeError(
-      `Hosted device-sync runtime apply response updates[${index}].tokenUpdate is invalid.`,
-    );
-  }
-
-  return {
-    connection: record.connection === null
-      ? null
-      : parseHostedExecutionDeviceSyncRuntimeConnection(
-          record.connection,
-          `Hosted device-sync runtime apply response updates[${index}].connection`,
-        ),
-    connectionId: requireString(
-      record.connectionId,
-      `Hosted device-sync runtime apply response updates[${index}].connectionId`,
-    ),
-    status,
-    tokenUpdate,
-  };
-}
-
-function parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(
-  value: unknown,
-  index: number,
-): HostedExecutionDeviceSyncRuntimeConnectionUpdate {
-  const record = requireObject(
-    value,
-    `Hosted device-sync runtime apply request updates[${index}]`,
-  );
-
-  return {
-    connectionId: requireString(
-      record.connectionId,
-      `Hosted device-sync runtime apply request updates[${index}].connectionId`,
-    ),
-    ...(record.connection === undefined
-      ? {}
-      : {
-          connection: parseHostedExecutionDeviceSyncRuntimeConnectionStateUpdate(
-            record.connection,
-            index,
-          ),
-        }),
-    ...(record.localState === undefined
-      ? {}
-      : {
-          localState: parseHostedExecutionDeviceSyncRuntimeLocalStateUpdate(
-            record.localState,
-            index,
-          ),
-        }),
-    ...(record.observedUpdatedAt === undefined
-      ? {}
-      : {
-          observedUpdatedAt: readNullableIsoTimestamp(
-            record.observedUpdatedAt,
-            `Hosted device-sync runtime apply request updates[${index}].observedUpdatedAt`,
-          ),
-        }),
-    ...(record.observedTokenVersion === undefined
-      ? {}
-      : {
-          observedTokenVersion: readNullablePositiveInteger(
-            record.observedTokenVersion,
-            `Hosted device-sync runtime apply request updates[${index}].observedTokenVersion`,
-          ),
-        }),
-    ...(record.seed === undefined
-      ? {}
-      : {
-          seed: parseHostedExecutionDeviceSyncRuntimeConnectionSeed(
-            record.seed,
-            `Hosted device-sync runtime apply request updates[${index}].seed`,
-          ),
-        }),
-    ...(record.tokenBundle === undefined
-      ? {}
-      : {
-          tokenBundle: parseHostedExecutionDeviceSyncRuntimeTokenBundle(
-            record.tokenBundle,
-            `Hosted device-sync runtime apply request updates[${index}].tokenBundle`,
-          ),
-        }),
-  };
-}
-
-function parseHostedExecutionDeviceSyncRuntimeConnectionSeed(
-  value: unknown,
-  label: string,
-): HostedExecutionDeviceSyncRuntimeConnectionSeed {
-  const record = requireObject(value, label);
-
-  return {
-    connection: parseHostedExecutionDeviceSyncRuntimeConnection(
-      record.connection,
-      `${label}.connection`,
-    ),
-    localState: parseHostedExecutionDeviceSyncRuntimeLocalState(
-      record.localState,
-      `${label}.localState`,
-    ),
-    tokenBundle: parseHostedExecutionDeviceSyncRuntimeTokenBundle(
-      record.tokenBundle,
-      `${label}.tokenBundle`,
-    ),
-  };
-}
-
-function parseHostedExecutionDeviceSyncRuntimeConnectionStateUpdate(
-  value: unknown,
-  index: number,
-): NonNullable<HostedExecutionDeviceSyncRuntimeConnectionUpdate["connection"]> {
-  const record = requireObject(
-    value,
-    `Hosted device-sync runtime apply request updates[${index}].connection`,
-  );
-
-  return {
-    ...(record.displayName === undefined
-      ? {}
-      : {
-          displayName: readNullableStringValue(
-            record.displayName,
-            `Hosted device-sync runtime apply request updates[${index}].connection.displayName`,
-          ),
-        }),
-    ...(record.metadata === undefined
-      ? {}
-      : {
-          metadata: sanitizeHostedExecutionDeviceSyncMetadata(
-            requireObject(
-              record.metadata,
-              `Hosted device-sync runtime apply request updates[${index}].connection.metadata`,
-            ),
-          ),
-        }),
-    ...(record.scopes === undefined
-      ? {}
-      : {
-          scopes: requireStringArray(
-            record.scopes,
-            `Hosted device-sync runtime apply request updates[${index}].connection.scopes`,
-          ),
-        }),
-    ...(record.status === undefined
-      ? {}
-      : {
-          status: parseHostedExecutionDeviceSyncConnectionStatus(
-            record.status,
-            `Hosted device-sync runtime apply request updates[${index}].connection.status`,
-          ),
-        }),
-  };
-}
-
-function parseHostedExecutionDeviceSyncRuntimeLocalStateUpdate(
-  value: unknown,
-  index: number,
-): NonNullable<HostedExecutionDeviceSyncRuntimeConnectionUpdate["localState"]> {
-  const record = requireObject(
-    value,
-    `Hosted device-sync runtime apply request updates[${index}].localState`,
-  );
-
-  return {
-    ...(record.clearError === undefined
-      ? {}
-      : {
-          clearError: requireBoolean(
-            record.clearError,
-            `Hosted device-sync runtime apply request updates[${index}].localState.clearError`,
-          ),
-        }),
-    ...(record.lastErrorCode === undefined
-      ? {}
-      : {
-          lastErrorCode: readNullableStringValue(
-            record.lastErrorCode,
-            `Hosted device-sync runtime apply request updates[${index}].localState.lastErrorCode`,
-          ),
-        }),
-    ...(record.lastErrorMessage === undefined
-      ? {}
-      : {
-          lastErrorMessage: readNullableStringValue(
-            record.lastErrorMessage,
-            `Hosted device-sync runtime apply request updates[${index}].localState.lastErrorMessage`,
-          ),
-        }),
-    ...(record.lastSyncCompletedAt === undefined
-      ? {}
-      : {
-          lastSyncCompletedAt: readNullableIsoTimestamp(
-            record.lastSyncCompletedAt,
-            `Hosted device-sync runtime apply request updates[${index}].localState.lastSyncCompletedAt`,
-          ),
-        }),
-    ...(record.lastSyncErrorAt === undefined
-      ? {}
-      : {
-          lastSyncErrorAt: readNullableIsoTimestamp(
-            record.lastSyncErrorAt,
-            `Hosted device-sync runtime apply request updates[${index}].localState.lastSyncErrorAt`,
-          ),
-        }),
-    ...(record.lastSyncStartedAt === undefined
-      ? {}
-      : {
-          lastSyncStartedAt: readNullableIsoTimestamp(
-            record.lastSyncStartedAt,
-            `Hosted device-sync runtime apply request updates[${index}].localState.lastSyncStartedAt`,
-          ),
-        }),
-    ...(record.lastWebhookAt === undefined
-      ? {}
-      : {
-          lastWebhookAt: readNullableIsoTimestamp(
-            record.lastWebhookAt,
-            `Hosted device-sync runtime apply request updates[${index}].localState.lastWebhookAt`,
-          ),
-        }),
-    ...(record.nextReconcileAt === undefined
-      ? {}
-      : {
-          nextReconcileAt: readNullableIsoTimestamp(
-            record.nextReconcileAt,
-            `Hosted device-sync runtime apply request updates[${index}].localState.nextReconcileAt`,
-          ),
-        }),
-  };
-}
-
-function assertUniqueHostedExecutionDeviceSyncRuntimeApplyConnectionIds(
-  updates: readonly HostedExecutionDeviceSyncRuntimeConnectionUpdate[],
-): void {
-  const seen = new Set<string>();
-
-  for (const [index, update] of updates.entries()) {
-    if (seen.has(update.connectionId)) {
-      throw new TypeError(
-        `Hosted device-sync runtime apply request updates[${index}].connectionId must be unique within one request.`,
-      );
-    }
-
-    seen.add(update.connectionId);
-  }
-}
-
-function parseHostedExecutionDeviceSyncRuntimeConnection(
-  value: unknown,
-  label: string,
-): HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot {
-  const record = requireObject(value, label);
-  const status = requireString(record.status, `${label}.status`);
-
-  if (status !== "active" && status !== "reauthorization_required" && status !== "disconnected") {
-    throw new TypeError(`${label}.status must be an active, reauthorization_required, or disconnected status.`);
-  }
-
-  return {
-    accessTokenExpiresAt: readNullableIsoTimestamp(record.accessTokenExpiresAt, `${label}.accessTokenExpiresAt`),
-    connectedAt: requireIsoTimestamp(record.connectedAt, `${label}.connectedAt`),
-    createdAt: requireIsoTimestamp(record.createdAt, `${label}.createdAt`),
-    displayName: readNullableString(record.displayName, `${label}.displayName`),
-    externalAccountId: requireString(record.externalAccountId, `${label}.externalAccountId`),
-    id: requireString(record.id, `${label}.id`),
-    metadata: sanitizeHostedExecutionDeviceSyncMetadata(
-      requireObject(record.metadata, `${label}.metadata`),
-    ),
-    provider: requireString(record.provider, `${label}.provider`),
-    scopes: requireStringArray(record.scopes, `${label}.scopes`),
-    status,
-    ...(record.updatedAt === undefined
-      ? {}
-      : { updatedAt: readNullableIsoTimestamp(record.updatedAt, `${label}.updatedAt`) ?? undefined }),
-  };
-}
-
-function parseHostedExecutionDeviceSyncRuntimeLocalState(
-  value: unknown,
-  label: string,
-): HostedExecutionDeviceSyncRuntimeLocalStateSnapshot {
-  const record = requireObject(value, label);
-
-  return {
-    lastErrorCode: readNullableString(record.lastErrorCode, `${label}.lastErrorCode`),
-    lastErrorMessage: readNullableString(record.lastErrorMessage, `${label}.lastErrorMessage`),
-    lastSyncCompletedAt: readNullableIsoTimestamp(record.lastSyncCompletedAt, `${label}.lastSyncCompletedAt`),
-    lastSyncErrorAt: readNullableIsoTimestamp(record.lastSyncErrorAt, `${label}.lastSyncErrorAt`),
-    lastSyncStartedAt: readNullableIsoTimestamp(record.lastSyncStartedAt, `${label}.lastSyncStartedAt`),
-    lastWebhookAt: readNullableIsoTimestamp(record.lastWebhookAt, `${label}.lastWebhookAt`),
-    nextReconcileAt: readNullableIsoTimestamp(record.nextReconcileAt, `${label}.nextReconcileAt`),
-  };
-}
-
-function parseHostedExecutionDeviceSyncRuntimeTokenBundle(
-  value: unknown,
-  label: string,
-): HostedExecutionDeviceSyncRuntimeTokenBundle | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  const record = requireObject(value, label);
-
-  return {
-    accessToken: requireString(record.accessToken, `${label}.accessToken`),
-    accessTokenExpiresAt: readNullableIsoTimestamp(record.accessTokenExpiresAt, `${label}.accessTokenExpiresAt`),
-    keyVersion: requireString(record.keyVersion, `${label}.keyVersion`),
-    refreshToken: readNullableString(record.refreshToken, `${label}.refreshToken`),
-    tokenVersion: requirePositiveInteger(record.tokenVersion, `${label}.tokenVersion`),
-  };
-}
-
-function resolveHostedDeviceSyncRuntimeRequestUserId(
-  value: unknown,
-  trustedUserId: string | null,
-): string {
-  if (typeof trustedUserId === "string" && trustedUserId.trim().length > 0) {
-    if (value !== undefined && value !== trustedUserId) {
-      throw new TypeError("Hosted device-sync runtime request userId must match the route user.");
-    }
-
-    return trustedUserId;
-  }
-
-  return requireString(value, "Hosted device-sync runtime request userId");
-}
-
-function parseHostedExecutionDeviceSyncConnectionStatus(
-  value: unknown,
-  label: string,
-): HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot["status"] {
-  const status = requireString(value, label);
-
-  if (status === "active" || status === "reauthorization_required" || status === "disconnected") {
-    return status;
-  }
-
-  throw new TypeError(`${label} must be an active, reauthorization_required, or disconnected status.`);
-}
-
 export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent {
   const record = requireObject(value, "Hosted execution event");
   const kind = requireString(record.kind, "Hosted execution event kind");
@@ -946,6 +453,468 @@ export function parseHostedExecutionShareReference(value: unknown): HostedExecut
     pack: assertContract(sharePackSchema, record.pack, "share pack"),
     shareId: requireString(record.shareId, "Hosted execution share reference shareId"),
   };
+}
+
+export function parseHostedExecutionSharePack(value: unknown): SharePack {
+  return assertContract(sharePackSchema, value, "share pack");
+}
+
+export function parseHostedExecutionDeviceSyncConnectLinkResponse(
+  value: unknown,
+): HostedExecutionDeviceSyncConnectLinkResponse {
+  const record = requireObject(value, "Hosted device-sync connect link response");
+
+  return {
+    authorizationUrl: requireString(
+      record.authorizationUrl,
+      "Hosted device-sync connect link response authorizationUrl",
+    ),
+    expiresAt: requireString(
+      record.expiresAt,
+      "Hosted device-sync connect link response expiresAt",
+    ),
+    provider: requireString(record.provider, "Hosted device-sync connect link response provider"),
+    providerLabel: requireString(
+      record.providerLabel,
+      "Hosted device-sync connect link response providerLabel",
+    ),
+  };
+}
+
+export function parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(
+  value: unknown,
+  trustedUserId: string | null = null,
+): HostedExecutionDeviceSyncRuntimeSnapshotRequest {
+  const record = requireObject(value, "Hosted device-sync runtime snapshot request");
+
+  return {
+    ...(record.connectionId === undefined
+      ? {}
+      : { connectionId: readNullableStringValue(record.connectionId, "Hosted device-sync runtime snapshot request connectionId") }),
+    ...(record.provider === undefined
+      ? {}
+      : { provider: readNullableStringValue(record.provider, "Hosted device-sync runtime snapshot request provider") }),
+    userId: resolveHostedDeviceSyncRuntimeRequestUserId(record.userId, trustedUserId),
+  };
+}
+
+export function parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
+  value: unknown,
+): HostedExecutionDeviceSyncRuntimeSnapshotResponse {
+  const record = requireObject(value, "Hosted device-sync runtime snapshot response");
+
+  return {
+    connections: requireArray(
+      record.connections,
+      "Hosted device-sync runtime snapshot response connections",
+    ).map((entry, index) => parseHostedExecutionDeviceSyncRuntimeConnectionSnapshot(entry, index)),
+    generatedAt: requireString(
+      record.generatedAt,
+      "Hosted device-sync runtime snapshot response generatedAt",
+    ),
+    userId: requireString(record.userId, "Hosted device-sync runtime snapshot response userId"),
+  };
+}
+
+export function parseHostedExecutionDeviceSyncRuntimeApplyRequest(
+  value: unknown,
+  trustedUserId: string | null = null,
+): HostedExecutionDeviceSyncRuntimeApplyRequest {
+  const record = requireObject(value, "Hosted device-sync runtime apply request");
+  const updates = requireArray(
+    record.updates,
+    "Hosted device-sync runtime apply request updates",
+  ).map((entry, index) => parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(entry, index));
+
+  assertUniqueHostedExecutionDeviceSyncRuntimeApplyConnectionIds(updates);
+
+  return {
+    ...(record.occurredAt === undefined
+      ? {}
+      : {
+          occurredAt: readNullableIsoTimestamp(
+            record.occurredAt,
+            "Hosted device-sync runtime apply request occurredAt",
+          ),
+        }),
+    updates,
+    userId: resolveHostedDeviceSyncRuntimeRequestUserId(record.userId, trustedUserId),
+  };
+}
+
+export function parseHostedExecutionDeviceSyncRuntimeApplyResponse(
+  value: unknown,
+): HostedExecutionDeviceSyncRuntimeApplyResponse {
+  const record = requireObject(value, "Hosted device-sync runtime apply response");
+
+  return {
+    appliedAt: requireString(record.appliedAt, "Hosted device-sync runtime apply response appliedAt"),
+    updates: requireArray(
+      record.updates,
+      "Hosted device-sync runtime apply response updates",
+    ).map((entry, index) => parseHostedExecutionDeviceSyncRuntimeApplyEntry(entry, index)),
+    userId: requireString(record.userId, "Hosted device-sync runtime apply response userId"),
+  };
+}
+
+function parseHostedExecutionDeviceSyncRuntimeConnectionSnapshot(
+  value: unknown,
+  index: number,
+): HostedExecutionDeviceSyncRuntimeConnectionSnapshot {
+  const record = requireObject(
+    value,
+    `Hosted device-sync runtime snapshot response connections[${index}]`,
+  );
+
+  return {
+    connection: parseHostedExecutionDeviceSyncRuntimeConnection(
+      record.connection,
+      `Hosted device-sync runtime snapshot response connections[${index}].connection`,
+    ),
+    localState: parseHostedExecutionDeviceSyncRuntimeLocalState(
+      record.localState,
+      `Hosted device-sync runtime snapshot response connections[${index}].localState`,
+    ),
+    tokenBundle: parseHostedExecutionDeviceSyncRuntimeTokenBundle(
+      record.tokenBundle,
+      `Hosted device-sync runtime snapshot response connections[${index}].tokenBundle`,
+    ),
+  };
+}
+
+function parseHostedExecutionDeviceSyncRuntimeApplyEntry(
+  value: unknown,
+  index: number,
+): HostedExecutionDeviceSyncRuntimeApplyResponse["updates"][number] {
+  const record = requireObject(value, `Hosted device-sync runtime apply response updates[${index}]`);
+  const status = requireString(
+    record.status,
+    `Hosted device-sync runtime apply response updates[${index}].status`,
+  );
+  const tokenUpdate = requireString(
+    record.tokenUpdate,
+    `Hosted device-sync runtime apply response updates[${index}].tokenUpdate`,
+  );
+
+  if (status !== "created" && status !== "missing" && status !== "updated") {
+    throw new TypeError(`Hosted device-sync runtime apply response updates[${index}].status is invalid.`);
+  }
+
+  if (
+    tokenUpdate !== "applied"
+    && tokenUpdate !== "cleared"
+    && tokenUpdate !== "missing"
+    && tokenUpdate !== "skipped_version_mismatch"
+    && tokenUpdate !== "unchanged"
+  ) {
+    throw new TypeError(`Hosted device-sync runtime apply response updates[${index}].tokenUpdate is invalid.`);
+  }
+
+  return {
+    connection: record.connection === null
+      ? null
+      : parseHostedExecutionDeviceSyncRuntimeConnection(
+          record.connection,
+          `Hosted device-sync runtime apply response updates[${index}].connection`,
+        ),
+    connectionId: requireString(
+      record.connectionId,
+      `Hosted device-sync runtime apply response updates[${index}].connectionId`,
+    ),
+    status,
+    tokenUpdate,
+  };
+}
+
+function parseHostedExecutionDeviceSyncRuntimeConnection(
+  value: unknown,
+  label: string,
+): HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot {
+  const record = requireObject(value, label);
+  const status = requireString(record.status, `${label}.status`);
+
+  if (status !== "active" && status !== "reauthorization_required" && status !== "disconnected") {
+    throw new TypeError(`${label}.status must be an active, reauthorization_required, or disconnected status.`);
+  }
+
+  return {
+    accessTokenExpiresAt: readNullableIsoTimestamp(record.accessTokenExpiresAt, `${label}.accessTokenExpiresAt`),
+    connectedAt: requireIsoTimestamp(record.connectedAt, `${label}.connectedAt`),
+    createdAt: requireIsoTimestamp(record.createdAt, `${label}.createdAt`),
+    displayName: readNullableString(record.displayName, `${label}.displayName`),
+    externalAccountId: requireString(record.externalAccountId, `${label}.externalAccountId`),
+    id: requireString(record.id, `${label}.id`),
+    metadata: sanitizeHostedExecutionDeviceSyncMetadata(
+      requireObject(record.metadata, `${label}.metadata`),
+    ),
+    provider: requireString(record.provider, `${label}.provider`),
+    scopes: requireStringArray(record.scopes, `${label}.scopes`),
+    status,
+    ...(record.updatedAt === undefined
+      ? {}
+      : { updatedAt: readNullableIsoTimestamp(record.updatedAt, `${label}.updatedAt`) ?? undefined }),
+  };
+}
+
+function parseHostedExecutionDeviceSyncRuntimeLocalState(
+  value: unknown,
+  label: string,
+): HostedExecutionDeviceSyncRuntimeLocalStateSnapshot {
+  const record = requireObject(value, label);
+
+  return {
+    lastErrorCode: readNullableStringValue(record.lastErrorCode, `${label}.lastErrorCode`),
+    lastErrorMessage: readNullableStringValue(record.lastErrorMessage, `${label}.lastErrorMessage`),
+    lastSyncCompletedAt: readNullableIsoTimestamp(record.lastSyncCompletedAt, `${label}.lastSyncCompletedAt`),
+    lastSyncErrorAt: readNullableIsoTimestamp(record.lastSyncErrorAt, `${label}.lastSyncErrorAt`),
+    lastSyncStartedAt: readNullableIsoTimestamp(record.lastSyncStartedAt, `${label}.lastSyncStartedAt`),
+    lastWebhookAt: readNullableIsoTimestamp(record.lastWebhookAt, `${label}.lastWebhookAt`),
+    nextReconcileAt: readNullableIsoTimestamp(record.nextReconcileAt, `${label}.nextReconcileAt`),
+  };
+}
+
+function parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(
+  value: unknown,
+  index: number,
+): HostedExecutionDeviceSyncRuntimeConnectionUpdate {
+  const record = requireObject(value, `Hosted device-sync runtime apply request updates[${index}]`);
+
+  return {
+    connectionId: requireString(
+      record.connectionId,
+      `Hosted device-sync runtime apply request updates[${index}].connectionId`,
+    ),
+    ...(record.connection === undefined
+      ? {}
+      : {
+          connection: parseHostedExecutionDeviceSyncRuntimeConnectionStateUpdate(
+            record.connection,
+            index,
+          ),
+        }),
+    ...(record.localState === undefined
+      ? {}
+      : {
+          localState: parseHostedExecutionDeviceSyncRuntimeLocalStateUpdate(record.localState, index),
+        }),
+    ...(record.observedUpdatedAt === undefined
+      ? {}
+      : {
+          observedUpdatedAt: readNullableIsoTimestamp(
+            record.observedUpdatedAt,
+            `Hosted device-sync runtime apply request updates[${index}].observedUpdatedAt`,
+          ),
+        }),
+    ...(record.observedTokenVersion === undefined
+      ? {}
+      : {
+          observedTokenVersion: readNullablePositiveInteger(
+            record.observedTokenVersion,
+            `Hosted device-sync runtime apply request updates[${index}].observedTokenVersion`,
+          ),
+        }),
+    ...(record.seed === undefined
+      ? {}
+      : {
+          seed: parseHostedExecutionDeviceSyncRuntimeConnectionSeed(record.seed, index),
+        }),
+    ...(record.tokenBundle === undefined
+      ? {}
+      : {
+          tokenBundle: parseHostedExecutionDeviceSyncRuntimeTokenBundle(
+            record.tokenBundle,
+            `Hosted device-sync runtime apply request updates[${index}].tokenBundle`,
+          ),
+        }),
+  };
+}
+
+function parseHostedExecutionDeviceSyncRuntimeConnectionSeed(
+  value: unknown,
+  index: number,
+): HostedExecutionDeviceSyncRuntimeConnectionSeed {
+  const record = requireObject(value, `Hosted device-sync runtime apply request updates[${index}].seed`);
+
+  return {
+    connection: parseHostedExecutionDeviceSyncRuntimeConnection(
+      record.connection,
+      `Hosted device-sync runtime apply request updates[${index}].seed.connection`,
+    ),
+    localState: parseHostedExecutionDeviceSyncRuntimeLocalState(
+      record.localState,
+      `Hosted device-sync runtime apply request updates[${index}].seed.localState`,
+    ),
+    tokenBundle: parseHostedExecutionDeviceSyncRuntimeTokenBundle(
+      record.tokenBundle,
+      `Hosted device-sync runtime apply request updates[${index}].seed.tokenBundle`,
+    ),
+  };
+}
+
+function parseHostedExecutionDeviceSyncRuntimeConnectionStateUpdate(
+  value: unknown,
+  index: number,
+): HostedExecutionDeviceSyncRuntimeConnectionStateUpdate {
+  const record = requireObject(value, `Hosted device-sync runtime apply request updates[${index}].connection`);
+  const next: HostedExecutionDeviceSyncRuntimeConnectionStateUpdate = {};
+
+  if (record.displayName !== undefined) {
+    next.displayName = readNullableStringValue(
+      record.displayName,
+      `Hosted device-sync runtime apply request updates[${index}].connection.displayName`,
+    );
+  }
+  if (record.metadata !== undefined) {
+    next.metadata = requireObject(
+      record.metadata,
+      `Hosted device-sync runtime apply request updates[${index}].connection.metadata`,
+    );
+  }
+  if (record.scopes !== undefined) {
+    next.scopes = requireStringArray(
+      record.scopes,
+      `Hosted device-sync runtime apply request updates[${index}].connection.scopes`,
+    );
+  }
+  if (record.status !== undefined) {
+    const status = requireString(
+      record.status,
+      `Hosted device-sync runtime apply request updates[${index}].connection.status`,
+    );
+
+    if (status !== "active" && status !== "reauthorization_required" && status !== "disconnected") {
+      throw new TypeError(
+        `Hosted device-sync runtime apply request updates[${index}].connection.status is invalid.`,
+      );
+    }
+
+    next.status = status;
+  }
+
+  return next;
+}
+
+function parseHostedExecutionDeviceSyncRuntimeLocalStateUpdate(
+  value: unknown,
+  index: number,
+): HostedExecutionDeviceSyncRuntimeLocalStateUpdate {
+  const record = requireObject(value, `Hosted device-sync runtime apply request updates[${index}].localState`);
+  return {
+    ...(record.clearError === undefined
+      ? {}
+      : {
+          clearError: requireBoolean(
+            record.clearError,
+            `Hosted device-sync runtime apply request updates[${index}].localState.clearError`,
+          ),
+        }),
+    ...(record.lastErrorCode === undefined
+      ? {}
+      : {
+          lastErrorCode: readNullableStringValue(
+            record.lastErrorCode,
+            `Hosted device-sync runtime apply request updates[${index}].localState.lastErrorCode`,
+          ),
+        }),
+    ...(record.lastErrorMessage === undefined
+      ? {}
+      : {
+          lastErrorMessage: readNullableStringValue(
+            record.lastErrorMessage,
+            `Hosted device-sync runtime apply request updates[${index}].localState.lastErrorMessage`,
+          ),
+        }),
+    ...(record.lastSyncCompletedAt === undefined
+      ? {}
+      : {
+          lastSyncCompletedAt: readNullableIsoTimestamp(
+            record.lastSyncCompletedAt,
+            `Hosted device-sync runtime apply request updates[${index}].localState.lastSyncCompletedAt`,
+          ),
+        }),
+    ...(record.lastSyncErrorAt === undefined
+      ? {}
+      : {
+          lastSyncErrorAt: readNullableIsoTimestamp(
+            record.lastSyncErrorAt,
+            `Hosted device-sync runtime apply request updates[${index}].localState.lastSyncErrorAt`,
+          ),
+        }),
+    ...(record.lastSyncStartedAt === undefined
+      ? {}
+      : {
+          lastSyncStartedAt: readNullableIsoTimestamp(
+            record.lastSyncStartedAt,
+            `Hosted device-sync runtime apply request updates[${index}].localState.lastSyncStartedAt`,
+          ),
+        }),
+    ...(record.lastWebhookAt === undefined
+      ? {}
+      : {
+          lastWebhookAt: readNullableIsoTimestamp(
+            record.lastWebhookAt,
+            `Hosted device-sync runtime apply request updates[${index}].localState.lastWebhookAt`,
+          ),
+        }),
+    ...(record.nextReconcileAt === undefined
+      ? {}
+      : {
+          nextReconcileAt: readNullableIsoTimestamp(
+            record.nextReconcileAt,
+            `Hosted device-sync runtime apply request updates[${index}].localState.nextReconcileAt`,
+          ),
+        }),
+  };
+}
+
+function parseHostedExecutionDeviceSyncRuntimeTokenBundle(
+  value: unknown,
+  label: string,
+): HostedExecutionDeviceSyncRuntimeTokenBundle | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const record = requireObject(value, label);
+
+  return {
+    accessToken: requireString(record.accessToken, `${label}.accessToken`),
+    accessTokenExpiresAt: readNullableIsoTimestamp(record.accessTokenExpiresAt, `${label}.accessTokenExpiresAt`),
+    keyVersion: requireString(record.keyVersion, `${label}.keyVersion`),
+    refreshToken: readNullableString(record.refreshToken, `${label}.refreshToken`),
+    tokenVersion: requirePositiveInteger(record.tokenVersion, `${label}.tokenVersion`),
+  };
+}
+
+function assertUniqueHostedExecutionDeviceSyncRuntimeApplyConnectionIds(
+  updates: readonly HostedExecutionDeviceSyncRuntimeConnectionUpdate[],
+): void {
+  const seen = new Set<string>();
+
+  for (const update of updates) {
+    if (seen.has(update.connectionId)) {
+      throw new TypeError(
+        `Hosted device-sync runtime apply request updates contain duplicate connectionId ${update.connectionId}.`,
+      );
+    }
+
+    seen.add(update.connectionId);
+  }
+}
+
+function resolveHostedDeviceSyncRuntimeRequestUserId(
+  value: unknown,
+  trustedUserId: string | null,
+): string {
+  if (typeof trustedUserId === "string" && trustedUserId.trim().length > 0) {
+    if (value !== undefined && value !== trustedUserId) {
+      throw new TypeError("Hosted device-sync runtime request userId must match the route user.");
+    }
+
+    return trustedUserId;
+  }
+
+  return requireString(value, "Hosted device-sync runtime request userId");
 }
 
 function parseHostedExecutionEventDispatchState(

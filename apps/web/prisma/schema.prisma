@@ -172,11 +172,10 @@ enum HostedRevnetIssuanceStatus {
 }
 
 enum ExecutionOutboxStatus {
-  pending
+  queued
   dispatching
-  accepted
-  completed
-  failed
+  dispatched
+  delivery_failed
 }
 
 model HostedMember {
@@ -393,15 +392,12 @@ model ExecutionOutbox {
   eventId        String                @unique @map("event_id")
   eventKind      String                @map("event_kind")
   payloadJson    Json                  @map("payload_json")
-  status         ExecutionOutboxStatus @default(pending)
+  status         ExecutionOutboxStatus @default(queued)
   attemptCount   Int                   @default(0) @map("attempt_count")
   lastAttemptAt  DateTime?             @map("last_attempt_at")
   nextAttemptAt  DateTime?             @default(now()) @map("next_attempt_at")
   claimToken     String?               @map("claim_token")
   claimExpiresAt DateTime?             @map("claim_expires_at")
-  acceptedAt     DateTime?             @map("accepted_at")
-  completedAt    DateTime?             @map("completed_at")
-  failedAt       DateTime?             @map("failed_at")
   lastError      String?               @map("last_error")
   createdAt      DateTime              @default(now()) @map("created_at")
   updatedAt      DateTime              @updatedAt @map("updated_at")

@@ -1,13 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  createHostedExecutionServerShareLinkIssuer,
-  HOSTED_EXECUTION_HOSTED_SHARE_INTERNAL_CREATE_PATH,
   HOSTED_EXECUTION_NONCE_HEADER,
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
   verifyHostedExecutionSignature,
 } from "@murphai/hosted-execution";
+import {
+  createHostedExecutionServerShareLinkIssuer,
+  HOSTED_EXECUTION_HOSTED_SHARE_INTERNAL_CREATE_PATH,
+} from "@murphai/hosted-execution/web-control-plane";
 
 import { TEST_HOSTED_SHARE_PACK } from "./test-fixtures.ts";
 

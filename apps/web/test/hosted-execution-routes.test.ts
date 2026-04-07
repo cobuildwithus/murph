@@ -78,11 +78,11 @@ describe("hosted execution async routes", () => {
     mocks.drainHostedExecutionOutbox.mockResolvedValue([
       {
         eventId: "evt_1",
-        status: "completed",
+        status: "dispatched",
       },
       {
         eventId: "evt_2",
-        status: "accepted",
+        status: "delivery_failed",
       },
     ]);
     mocks.drainHostedAiUsageStripeMetering.mockResolvedValue({
@@ -121,11 +121,11 @@ describe("hosted execution async routes", () => {
       statuses: [
         {
           eventId: "evt_1",
-          status: "completed",
+          status: "dispatched",
         },
         {
           eventId: "evt_2",
-          status: "accepted",
+          status: "delivery_failed",
         },
       ],
     });
