@@ -2,7 +2,7 @@
 
 Hosted integration control plane for Vercel deployments.
 
-`apps/web` is the hosted integration control plane for OAuth callbacks, webhooks, sparse connection metadata, sparse Linq routing state, and sparse local-agent APIs. Canonical decryptable device-sync token escrow plus mutable hosted device-sync runtime state now live in the Cloudflare runtime store; Postgres keeps static connection identity/mapping rows, sparse signal history, and token-audit history. Ordinary hosted-web settings and control-plane reads stay on that durable Postgres metadata path, while live Cloudflare runtime inspection is reserved for explicit operational routes such as agent token export/refresh, heartbeat reconciliation, disconnect, and runtime upkeep.
+`apps/web` is the hosted integration control plane for OAuth callbacks, webhooks, sparse connection metadata, sparse Linq routing state, sparse local-agent APIs, and the durable encrypted hosted-member private fields that power onboarding and billing. Canonical decryptable device-sync token escrow plus mutable hosted device-sync runtime state now live in the Cloudflare runtime store; Postgres keeps static connection identity/mapping rows, sparse signal history, token-audit history, and the encrypted owner-table fields for hosted member identity, routing, and billing references. Ordinary hosted-web settings and control-plane reads stay on that durable Postgres metadata path, while live Cloudflare runtime inspection is reserved for explicit operational routes such as agent token export/refresh, heartbeat reconciliation, disconnect, and runtime upkeep.
 
 ## Core responsibilities
 
@@ -11,6 +11,7 @@ Hosted integration control plane for Vercel deployments.
 - hosted Linq webhook ingress plus sparse chat routing state
 - per-user connection ownership mapping
 - public connection metadata plus sparse durable status hints and token-audit history
+- encrypted hosted-member private fields on the owner Prisma tables for onboarding identity, routing, and billing references
 - durable `execution_outbox` records for Cloudflare-bound hosted execution intents, persisted as immutable inline envelopes or staged Cloudflare-owned dispatch refs
 - immutable hosted AI usage rows imported after successful hosted commits, with optional downstream Stripe token metering
 - local-agent pairing plus sparse signal/token routes for hosted integrations
@@ -66,6 +67,9 @@ Hosted onboarding extras:
 
 - `HOSTED_ONBOARDING_PUBLIC_BASE_URL`
 - `HOSTED_CONTACT_PRIVACY_KEY`
+- `HOSTED_WEB_ENCRYPTION_KEY`
+- `HOSTED_WEB_ENCRYPTION_KEY_VERSION`
+- `HOSTED_WEB_ENCRYPTION_KEYRING_JSON` when rotating hosted-member private field keys
 - `HOSTED_ONBOARDING_SIGNUP_PHONE_NUMBER` to show a public `Text to start` CTA on `/`
 - `NEXT_PUBLIC_PRIVY_APP_ID`
 - `NEXT_PUBLIC_PRIVY_CLIENT_ID` if you want the hosted web app to select a specific Privy web client per environment
@@ -84,6 +88,8 @@ Hosted onboarding extras:
 - `HOSTED_EXECUTION_DISPATCH_URL`
 - `HOSTED_WEB_INTERNAL_SIGNING_SECRET`
 - `HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS`
+
+Hosted onboarding private state is now local to `apps/web`: blind lookup keys stay queryable in Postgres, while recoverable raw member ids and signup phone state are encrypted into the owning Prisma rows instead of being mirrored into Cloudflare.
 
 Optional hosted AI usage metering:
 
@@ -230,7 +236,7 @@ The onboarding lane is intentionally thin:
 - checkout uses Stripe Checkout so Apple Pay can appear directly inside the hosted payment handoff when available in Safari, but the hosted app now reuses one open checkout attempt per member and sends Stripe idempotency keys for customer/session creation so retries do not mint parallel customers or subscriptions
 - Stripe webhook ingress now verifies and stores a durable Stripe fact quickly, then immediately reconciles that specific event inline so billing activation and `member.activated` dispatching are not gated on a scheduler; the hosted Stripe cron remains the recovery path that replays failed or deferred Stripe facts
 - hosted billing is subscription-only, `invoice.paid` is the only positive Stripe entitlement source, `customer.subscription.*` only tracks negative or status transitions, and `checkout.session.completed` just completes the local checkout attempt plus attaches Stripe ids
-- hosted share links now keep preview, expiry, and lifecycle metadata in Postgres while Cloudflare stores only the opaque one-time share-pack object needed at acceptance/import time for foods, recipes, and supplement/protocol records; the flow can still issue or reuse a phone-bound invite so `/join/:inviteCode?share=...` can import the shared bundle after activation, and the default and maximum hosted share-link lifetime remains 24 hours to keep that transient share-pack storage privacy-first
+- hosted share links now keep only a tiny UX summary plus expiry and lifecycle metadata in Postgres while Cloudflare stores only the opaque one-time share-pack object needed at acceptance/import time for foods, recipes, and supplement/protocol records; the flow can still issue or reuse a phone-bound invite so `/join/:inviteCode?share=...` can import the shared bundle after activation, and the default and maximum hosted share-link lifetime remains 24 hours to keep that transient share-pack storage privacy-first
 - once a member has active billing entitlement, hosted onboarding, hosted share acceptance, and hosted device-sync wakes write signed internal execution intents to the shared Postgres `execution_outbox` in the same transaction as their control-plane state changes instead of synchronously depending on `apps/cloudflare`
 - new steady-state outbox rows are immutable: inline events store the full dispatch body, while reference-backed events stage the full dispatch into Cloudflare-owned encrypted dispatch-payload storage and persist only the dispatch ref plus opaque payload ref in Postgres
 - a best-effort drain still runs after commit, but the Postgres outbox is now delivery-only: once Cloudflare accepts the dispatch, retries, poison/backpressure, in-flight execution, business-outcome callbacks, and completion live in the Cloudflare queue instead of on the outbox row; new reference-backed rows still require a staged Cloudflare payload ref instead of falling back to web-side dispatch reconstruction

@@ -12,7 +12,6 @@ export type HostedStorageScope =
   | "email-route"
   | "execution-journal"
   | "gateway-store"
-  | "member-private-state"
   | "root-key-envelope"
   | "root-key-recipient"
   | "share-pack"

@@ -8,7 +8,7 @@ import {
   type AssistantUsageRecord,
 } from "@murphai/runtime-state/node";
 
-import { readHostedMemberPrivateState } from "../hosted-onboarding/member-private-state";
+import { readHostedMemberBillingPrivateState } from "../hosted-onboarding/member-private-codecs";
 import { getPrisma } from "../prisma";
 import { requireHostedExecutionControlClient } from "./control";
 
@@ -70,6 +70,19 @@ export async function listHostedAiUsagePendingStripeMetering(input: {
       credentialSource: true,
       id: true,
       inputTokens: true,
+      member: {
+        select: {
+          billingRef: {
+            select: {
+              memberId: true,
+              stripeCustomerIdEncrypted: true,
+              stripeLatestBillingEventIdEncrypted: true,
+              stripeLatestCheckoutSessionIdEncrypted: true,
+              stripeSubscriptionIdEncrypted: true,
+            },
+          },
+        },
+      },
       memberId: true,
       occurredAt: true,
       outputTokens: true,
@@ -81,9 +94,9 @@ export async function listHostedAiUsagePendingStripeMetering(input: {
   });
 
   const candidates = await Promise.all(records.map(async (record) => {
-    const stripeCustomerId = (await readHostedMemberPrivateState({
-      memberId: record.memberId,
-    }))?.stripeCustomerId;
+    const stripeCustomerId = record.member.billingRef
+      ? readHostedMemberBillingPrivateState(record.member.billingRef).stripeCustomerId
+      : null;
 
     if (!stripeCustomerId || !isAssistantUsageCredentialSource(record.credentialSource)) {
       return null;

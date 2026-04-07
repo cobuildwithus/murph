@@ -4,16 +4,7 @@ import {
   HostedBillingStatus,
 } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
-const memberPrivateStateMocks = vi.hoisted(() => ({
-  readHostedMemberPrivateState: vi.fn(),
-  writeHostedMemberPrivateStatePatch: vi.fn(),
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/member-private-state", () => ({
-  readHostedMemberPrivateState: memberPrivateStateMocks.readHostedMemberPrivateState,
-  writeHostedMemberPrivateStatePatch: memberPrivateStateMocks.writeHostedMemberPrivateStatePatch,
-}));
+import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 
 import {
   bindHostedMemberStripeCustomerIdIfMissing,
@@ -34,23 +25,6 @@ import {
 describe("hosted-member-store", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    memberPrivateStateMocks.readHostedMemberPrivateState.mockResolvedValue(null);
-    memberPrivateStateMocks.writeHostedMemberPrivateStatePatch.mockImplementation(
-      async ({ memberId, patch }: { memberId: string; patch: Record<string, string | null | undefined> }) => ({
-        linqChatId: patch.linqChatId ?? null,
-        memberId,
-        privyUserId: patch.privyUserId ?? null,
-        schema: "murph.hosted-member-private-state.v1",
-        signupPhoneCodeSentAt: patch.signupPhoneCodeSentAt ?? null,
-        signupPhoneNumber: patch.signupPhoneNumber ?? null,
-        stripeCustomerId: patch.stripeCustomerId ?? null,
-        stripeLatestBillingEventId: patch.stripeLatestBillingEventId ?? null,
-        stripeLatestCheckoutSessionId: patch.stripeLatestCheckoutSessionId ?? null,
-        stripeSubscriptionId: patch.stripeSubscriptionId ?? null,
-        updatedAt: "2026-04-07T00:00:00.000Z",
-        walletAddress: patch.walletAddress ?? null,
-      }),
-    );
   });
 
   it("finds a member by privy user id from the identity table", async () => {
@@ -124,24 +98,15 @@ describe("hosted-member-store", () => {
     });
   });
 
-  it("reads member routing state from routing lookup keys plus private state", async () => {
-    memberPrivateStateMocks.readHostedMemberPrivateState.mockResolvedValue({
-      linqChatId: "chat_123",
-      memberId: "member_123",
-      privyUserId: null,
-      schema: "murph.hosted-member-private-state.v1",
-      signupPhoneCodeSentAt: null,
-      signupPhoneNumber: null,
-      stripeCustomerId: null,
-      stripeLatestBillingEventId: null,
-      stripeLatestCheckoutSessionId: null,
-      stripeSubscriptionId: null,
-      updatedAt: "2026-04-07T00:00:00.000Z",
-      walletAddress: null,
-    });
+  it("reads member routing state from routing lookup keys plus encrypted local columns", async () => {
     const prisma = {
       hostedMemberRouting: {
         findUnique: vi.fn().mockResolvedValue({
+          linqChatIdEncrypted: encryptHostedWebNullableString({
+            field: "hosted-member-routing.linq-chat-id",
+            memberId: "member_123",
+            value: "chat_123",
+          }),
           linqChatLookupKey: "hbidx:linq-chat:v1:abc123",
           memberId: "member_123",
           telegramUserLookupKey: "tg_user_123",
@@ -161,7 +126,7 @@ describe("hosted-member-store", () => {
     });
   });
 
-  it("upserts Linq chat bindings into the routing table and private state", async () => {
+  it("upserts Linq chat bindings into the routing table with encrypted local storage", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
@@ -185,6 +150,7 @@ describe("hosted-member-store", () => {
         },
       },
       data: {
+        linqChatIdEncrypted: null,
         linqChatLookupKey: null,
       },
     });
@@ -193,18 +159,14 @@ describe("hosted-member-store", () => {
         memberId: "member_123",
       },
       create: {
+        linqChatIdEncrypted: expect.stringMatching(/^hbds:/u),
         linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
         memberId: "member_123",
         telegramUserLookupKey: null,
       },
       update: {
+        linqChatIdEncrypted: expect.stringMatching(/^hbds:/u),
         linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
-      },
-    });
-    expect(memberPrivateStateMocks.writeHostedMemberPrivateStatePatch).toHaveBeenCalledWith({
-      memberId: "member_123",
-      patch: {
-        linqChatId: "chat_123",
       },
     });
   });
@@ -267,14 +229,28 @@ describe("hosted-member-store", () => {
     });
   });
 
-  it("upserts identity rows through blind lookup keys and private state", async () => {
+  it("upserts identity rows through blind lookup keys and encrypted local columns", async () => {
     const upsert = vi.fn().mockResolvedValue({
       maskedPhoneNumberHint: "*** 4567",
       memberId: "member_123",
       phoneLookupKey: "hbidx:phone:v1:abc123",
       phoneNumberVerifiedAt: null,
       privyUserLookupKey: "hbidx:privy-user:v1:abc123",
+      privyUserIdEncrypted: encryptHostedWebNullableString({
+        field: "hosted-member-identity.privy-user-id",
+        memberId: "member_123",
+        value: "did:privy:user_123",
+      }),
+      signupPhoneCodeSendAttemptId: null,
+      signupPhoneCodeSendAttemptStartedAt: null,
+      signupPhoneCodeSentAt: null,
+      signupPhoneNumberEncrypted: null,
       walletAddressLookupKey: "hbidx:wallet-address:v1:abc123",
+      walletAddressEncrypted: encryptHostedWebNullableString({
+        field: "hosted-member-identity.wallet-address",
+        memberId: "member_123",
+        value: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+      }),
       walletChainType: "ethereum",
       walletCreatedAt: null,
       walletProvider: "privy",
@@ -293,6 +269,10 @@ describe("hosted-member-store", () => {
         phoneNumberVerifiedAt: null,
         prisma,
         privyUserId: "did:privy:user_123",
+        signupPhoneCodeSendAttemptId: null,
+        signupPhoneCodeSendAttemptStartedAt: null,
+        signupPhoneCodeSentAt: null,
+        signupPhoneNumber: null,
         walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
         walletChainType: "ethereum",
         walletCreatedAt: null,
@@ -304,6 +284,10 @@ describe("hosted-member-store", () => {
       phoneLookupKey: "hbidx:phone:v1:abc123",
       phoneNumberVerifiedAt: null,
       privyUserId: "did:privy:user_123",
+      signupPhoneCodeSendAttemptId: null,
+      signupPhoneCodeSendAttemptStartedAt: null,
+      signupPhoneCodeSentAt: null,
+      signupPhoneNumber: null,
       walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
       walletChainType: "ethereum",
       walletCreatedAt: null,
@@ -320,7 +304,13 @@ describe("hosted-member-store", () => {
         phoneLookupKey: "hbidx:phone:v1:abc123",
         phoneNumberVerifiedAt: null,
         privyUserLookupKey: expect.stringMatching(/^hbidx:privy-user:v1:/u),
+        privyUserIdEncrypted: expect.stringMatching(/^hbds:/u),
+        signupPhoneCodeSendAttemptId: null,
+        signupPhoneCodeSendAttemptStartedAt: null,
+        signupPhoneCodeSentAt: null,
+        signupPhoneNumberEncrypted: null,
         walletAddressLookupKey: expect.stringMatching(/^hbidx:wallet-address:v1:/u),
+        walletAddressEncrypted: expect.stringMatching(/^hbds:/u),
         walletChainType: "ethereum",
         walletCreatedAt: null,
         walletProvider: "privy",
@@ -330,42 +320,47 @@ describe("hosted-member-store", () => {
         phoneLookupKey: "hbidx:phone:v1:abc123",
         phoneNumberVerifiedAt: null,
         privyUserLookupKey: expect.stringMatching(/^hbidx:privy-user:v1:/u),
+        privyUserIdEncrypted: expect.stringMatching(/^hbds:/u),
+        signupPhoneCodeSendAttemptId: null,
+        signupPhoneCodeSendAttemptStartedAt: null,
+        signupPhoneCodeSentAt: null,
+        signupPhoneNumberEncrypted: null,
         walletAddressLookupKey: expect.stringMatching(/^hbidx:wallet-address:v1:/u),
+        walletAddressEncrypted: expect.stringMatching(/^hbds:/u),
         walletChainType: "ethereum",
         walletCreatedAt: null,
         walletProvider: "privy",
       },
     });
-    expect(memberPrivateStateMocks.writeHostedMemberPrivateStatePatch).toHaveBeenCalledWith({
-      memberId: "member_123",
-      patch: {
-        privyUserId: "did:privy:user_123",
-        walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
-      },
-    });
   });
 
-  it("reads Stripe billing refs from billing lookup keys plus private state", async () => {
-    memberPrivateStateMocks.readHostedMemberPrivateState.mockResolvedValue({
-      linqChatId: null,
-      memberId: "member_123",
-      privyUserId: null,
-      schema: "murph.hosted-member-private-state.v1",
-      signupPhoneCodeSentAt: null,
-      signupPhoneNumber: null,
-      stripeCustomerId: "cus_123",
-      stripeLatestBillingEventId: "evt_123",
-      stripeLatestCheckoutSessionId: "cs_123",
-      stripeSubscriptionId: "sub_123",
-      updatedAt: "2026-04-07T00:00:00.000Z",
-      walletAddress: null,
-    });
+  it("reads Stripe billing refs from billing lookup keys plus encrypted local columns", async () => {
     const prisma = {
       hostedMemberBillingRef: {
         findUnique: vi.fn().mockResolvedValue({
           memberId: "member_123",
+          stripeCustomerIdEncrypted: encryptHostedWebNullableString({
+            field: "hosted-member-billing-ref.stripe-customer-id",
+            memberId: "member_123",
+            value: "cus_123",
+          }),
           stripeCustomerLookupKey: "hbidx:stripe-customer:v1:abc123",
           stripeLatestBillingEventCreatedAt: null,
+          stripeLatestBillingEventIdEncrypted: encryptHostedWebNullableString({
+            field: "hosted-member-billing-ref.stripe-latest-billing-event-id",
+            memberId: "member_123",
+            value: "evt_123",
+          }),
+          stripeLatestCheckoutSessionIdEncrypted: encryptHostedWebNullableString({
+            field: "hosted-member-billing-ref.stripe-latest-checkout-session-id",
+            memberId: "member_123",
+            value: "cs_123",
+          }),
+          stripeSubscriptionIdEncrypted: encryptHostedWebNullableString({
+            field: "hosted-member-billing-ref.stripe-subscription-id",
+            memberId: "member_123",
+            value: "sub_123",
+          }),
           stripeSubscriptionLookupKey: "hbidx:stripe-subscription:v1:abc123",
         }),
       },
@@ -432,11 +427,31 @@ describe("hosted-member-store", () => {
     });
   });
 
-  it("writes Stripe billing refs through lookup keys and private state", async () => {
+  it("writes Stripe billing refs through lookup keys and encrypted local columns", async () => {
     const upsert = vi.fn().mockResolvedValue({
       memberId: "member_123",
+      stripeCustomerIdEncrypted: encryptHostedWebNullableString({
+        field: "hosted-member-billing-ref.stripe-customer-id",
+        memberId: "member_123",
+        value: "cus_123",
+      }),
       stripeCustomerLookupKey: "hbidx:stripe-customer:v1:abc123",
       stripeLatestBillingEventCreatedAt: null,
+      stripeLatestBillingEventIdEncrypted: encryptHostedWebNullableString({
+        field: "hosted-member-billing-ref.stripe-latest-billing-event-id",
+        memberId: "member_123",
+        value: "evt_123",
+      }),
+      stripeLatestCheckoutSessionIdEncrypted: encryptHostedWebNullableString({
+        field: "hosted-member-billing-ref.stripe-latest-checkout-session-id",
+        memberId: "member_123",
+        value: "cs_123",
+      }),
+      stripeSubscriptionIdEncrypted: encryptHostedWebNullableString({
+        field: "hosted-member-billing-ref.stripe-subscription-id",
+        memberId: "member_123",
+        value: "sub_123",
+      }),
       stripeSubscriptionLookupKey: "hbidx:stripe-subscription:v1:abc123",
     });
     const prisma = {
@@ -469,22 +484,21 @@ describe("hosted-member-store", () => {
       },
       create: {
         memberId: "member_123",
+        stripeCustomerIdEncrypted: expect.stringMatching(/^hbds:/u),
         stripeCustomerLookupKey: expect.stringMatching(/^hbidx:stripe-customer:v1:/u),
         stripeLatestBillingEventCreatedAt: null,
+        stripeLatestBillingEventIdEncrypted: expect.stringMatching(/^hbds:/u),
+        stripeLatestCheckoutSessionIdEncrypted: expect.stringMatching(/^hbds:/u),
+        stripeSubscriptionIdEncrypted: expect.stringMatching(/^hbds:/u),
         stripeSubscriptionLookupKey: expect.stringMatching(/^hbidx:stripe-subscription:v1:/u),
       },
       update: {
+        stripeCustomerIdEncrypted: expect.stringMatching(/^hbds:/u),
         stripeCustomerLookupKey: expect.stringMatching(/^hbidx:stripe-customer:v1:/u),
+        stripeLatestBillingEventIdEncrypted: expect.stringMatching(/^hbds:/u),
+        stripeLatestCheckoutSessionIdEncrypted: expect.stringMatching(/^hbds:/u),
+        stripeSubscriptionIdEncrypted: expect.stringMatching(/^hbds:/u),
         stripeSubscriptionLookupKey: expect.stringMatching(/^hbidx:stripe-subscription:v1:/u),
-      },
-    });
-    expect(memberPrivateStateMocks.writeHostedMemberPrivateStatePatch).toHaveBeenCalledWith({
-      memberId: "member_123",
-      patch: {
-        stripeCustomerId: "cus_123",
-        stripeLatestBillingEventId: "evt_123",
-        stripeLatestCheckoutSessionId: "cs_123",
-        stripeSubscriptionId: "sub_123",
       },
     });
   });
@@ -513,45 +527,88 @@ describe("hosted-member-store", () => {
       },
       create: {
         memberId: "member_123",
+        stripeCustomerIdEncrypted: expect.stringMatching(/^hbds:/u),
         stripeCustomerLookupKey: expect.stringMatching(/^hbidx:stripe-customer:v1:/u),
         stripeLatestBillingEventCreatedAt: null,
+        stripeLatestBillingEventIdEncrypted: null,
+        stripeLatestCheckoutSessionIdEncrypted: null,
+        stripeSubscriptionIdEncrypted: null,
         stripeSubscriptionLookupKey: null,
       },
-      update: {
+      update: expect.objectContaining({
+        stripeCustomerIdEncrypted: expect.stringMatching(/^hbds:/u),
         stripeCustomerLookupKey: expect.stringMatching(/^hbidx:stripe-customer:v1:/u),
-      },
-    });
-    expect(memberPrivateStateMocks.writeHostedMemberPrivateStatePatch).toHaveBeenCalledWith({
-      memberId: "member_123",
-      patch: {
-        stripeCustomerId: "cus_123",
-      },
+      }),
     });
   });
 
-  it("reads the canonical aggregate from lookup-key tables plus private state", async () => {
-    memberPrivateStateMocks.readHostedMemberPrivateState.mockResolvedValue({
-      linqChatId: "chat_123",
-      memberId: "member_123",
-      privyUserId: "did:privy:user_123",
-      schema: "murph.hosted-member-private-state.v1",
-      signupPhoneCodeSentAt: null,
-      signupPhoneNumber: null,
-      stripeCustomerId: "cus_123",
-      stripeLatestBillingEventId: "evt_123",
-      stripeLatestCheckoutSessionId: "cs_123",
-      stripeSubscriptionId: "sub_123",
-      updatedAt: "2026-04-07T00:00:00.000Z",
-      walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
-    });
+  it("binds Stripe customer ids without clearing existing encrypted billing fields", async () => {
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedMemberBillingRef: {
+        findUnique: vi.fn().mockResolvedValue({
+          memberId: "member_123",
+          stripeCustomerIdEncrypted: null,
+          stripeCustomerLookupKey: null,
+          stripeLatestBillingEventCreatedAt: new Date("2026-04-07T00:00:00.000Z"),
+          stripeLatestBillingEventIdEncrypted: "hbds:v1:existing-event",
+          stripeLatestCheckoutSessionIdEncrypted: "hbds:v1:existing-checkout",
+          stripeSubscriptionIdEncrypted: "hbds:v1:existing-subscription",
+          stripeSubscriptionLookupKey: "hbidx:stripe-subscription:v1:existing",
+        }),
+        upsert,
+      },
+    } as never;
+
+    await expect(
+      bindHostedMemberStripeCustomerIdIfMissing({
+        memberId: "member_123",
+        prisma,
+        stripeCustomerId: "cus_123",
+      }),
+    ).resolves.toBe(true);
+
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: {
+        stripeCustomerIdEncrypted: expect.stringMatching(/^hbds:/u),
+        stripeCustomerLookupKey: expect.stringMatching(/^hbidx:stripe-customer:v1:/u),
+      },
+    }));
+    expect(upsert.mock.calls[0]?.[0]?.update).not.toHaveProperty("stripeLatestBillingEventIdEncrypted");
+    expect(upsert.mock.calls[0]?.[0]?.update).not.toHaveProperty("stripeLatestCheckoutSessionIdEncrypted");
+    expect(upsert.mock.calls[0]?.[0]?.update).not.toHaveProperty("stripeSubscriptionIdEncrypted");
+  });
+
+  it("reads the canonical aggregate from lookup-key tables plus encrypted local columns", async () => {
     const prisma = {
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
           ...createHostedMember(),
           billingRef: {
             memberId: "member_123",
+            stripeCustomerIdEncrypted: encryptHostedWebNullableString({
+              field: "hosted-member-billing-ref.stripe-customer-id",
+              memberId: "member_123",
+              value: "cus_123",
+            }),
             stripeCustomerLookupKey: "hbidx:stripe-customer:v1:abc123",
             stripeLatestBillingEventCreatedAt: null,
+            stripeLatestBillingEventIdEncrypted: encryptHostedWebNullableString({
+              field: "hosted-member-billing-ref.stripe-latest-billing-event-id",
+              memberId: "member_123",
+              value: "evt_123",
+            }),
+            stripeLatestCheckoutSessionIdEncrypted: encryptHostedWebNullableString({
+              field: "hosted-member-billing-ref.stripe-latest-checkout-session-id",
+              memberId: "member_123",
+              value: "cs_123",
+            }),
+            stripeSubscriptionIdEncrypted: encryptHostedWebNullableString({
+              field: "hosted-member-billing-ref.stripe-subscription-id",
+              memberId: "member_123",
+              value: "sub_123",
+            }),
             stripeSubscriptionLookupKey: "hbidx:stripe-subscription:v1:abc123",
           },
           identity: {
@@ -560,12 +617,31 @@ describe("hosted-member-store", () => {
             phoneLookupKey: "hbidx:phone:v1:abc123",
             phoneNumberVerifiedAt: null,
             privyUserLookupKey: "hbidx:privy-user:v1:abc123",
+            privyUserIdEncrypted: encryptHostedWebNullableString({
+              field: "hosted-member-identity.privy-user-id",
+              memberId: "member_123",
+              value: "did:privy:user_123",
+            }),
+            signupPhoneCodeSendAttemptId: null,
+            signupPhoneCodeSendAttemptStartedAt: null,
+            signupPhoneCodeSentAt: null,
+            signupPhoneNumberEncrypted: null,
             walletAddressLookupKey: "hbidx:wallet-address:v1:abc123",
+            walletAddressEncrypted: encryptHostedWebNullableString({
+              field: "hosted-member-identity.wallet-address",
+              memberId: "member_123",
+              value: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+            }),
             walletChainType: "ethereum",
             walletCreatedAt: null,
             walletProvider: "privy",
           },
           routing: {
+            linqChatIdEncrypted: encryptHostedWebNullableString({
+              field: "hosted-member-routing.linq-chat-id",
+              memberId: "member_123",
+              value: "chat_123",
+            }),
             linqChatLookupKey: "hbidx:linq-chat:v1:abc123",
             memberId: "member_123",
             telegramUserLookupKey: "tg_user_123",
@@ -595,6 +671,10 @@ describe("hosted-member-store", () => {
         maskedPhoneNumberHint: "*** 4567",
         memberId: "member_123",
         phoneLookupKey: "hbidx:phone:v1:abc123",
+        signupPhoneCodeSendAttemptId: null,
+        signupPhoneCodeSendAttemptStartedAt: null,
+        signupPhoneCodeSentAt: null,
+        signupPhoneNumber: null,
         phoneNumberVerifiedAt: null,
         privyUserId: "did:privy:user_123",
         walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",

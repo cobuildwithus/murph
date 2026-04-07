@@ -49,30 +49,6 @@ export async function hostedArtifactObjectKeys(
   );
 }
 
-export async function hostedMemberPrivateStateObjectKey(
-  rootKey: Uint8Array,
-  userId: string,
-): Promise<string> {
-  const userSegment = await deriveHostedStorageOpaqueId({
-    length: 24,
-    rootKey,
-    scope: "member-private-state-path",
-    value: `user:${userId}`,
-  });
-
-  return `users/member-private-state/${userSegment}.json`;
-}
-
-export async function hostedMemberPrivateStateObjectKeys(
-  rootKey: Uint8Array,
-  keysById: Readonly<Record<string, Uint8Array>> | undefined,
-  userId: string,
-): Promise<string[]> {
-  return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
-    hostedMemberPrivateStateObjectKey(candidateRootKey, userId)
-  );
-}
-
 export async function hostedUserEnvObjectKey(
   rootKey: Uint8Array,
   userId: string,

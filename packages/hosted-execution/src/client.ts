@@ -1,5 +1,4 @@
 import type { SharePack } from "@murphai/contracts";
-import type { HostedMemberPrivateState } from "./member-private-state.ts";
 import type {
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
@@ -11,7 +10,6 @@ import type {
   HostedExecutionUserEnvUpdate,
   HostedExecutionUserStatus,
 } from "./contracts.ts";
-import { parseHostedMemberPrivateState } from "./member-private-state.ts";
 import { normalizeHostedExecutionBaseUrl } from "./env.ts";
 import type { HostedExecutionOutboxPayload } from "./outbox-payload.ts";
 import {
@@ -26,7 +24,6 @@ import {
   parseHostedExecutionUserStatus,
 } from "./parsers.ts";
 import {
-  buildHostedExecutionMemberPrivateStatePath,
   buildHostedExecutionSharePackPath,
   buildHostedExecutionUserCryptoContextPath,
   buildHostedExecutionPendingUsageUsersPath,
@@ -63,7 +60,6 @@ export interface HostedExecutionControlClient {
     input: Omit<HostedExecutionDeviceSyncRuntimeApplyRequest, "userId">,
   ): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse>;
   clearUserEnv(userId: string): Promise<HostedExecutionUserEnvStatus>;
-  deleteMemberPrivateState(userId: string): Promise<void>;
   deletePendingUsage(userId: string, usageIds: readonly string[]): Promise<void>;
   deleteSharePack(userId: string, shareId: string): Promise<void>;
   deleteStoredDispatchPayload(payload: HostedExecutionOutboxPayload): Promise<void>;
@@ -72,16 +68,11 @@ export interface HostedExecutionControlClient {
     userId: string,
     input?: Omit<HostedExecutionDeviceSyncRuntimeSnapshotRequest, "userId">,
   ): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
-  getMemberPrivateState(userId: string): Promise<HostedMemberPrivateState | null>;
   getPendingUsage(userId: string, limit?: number): Promise<Record<string, unknown>[]>;
   getPendingUsageDirtyUsers(limit?: number): Promise<string[]>;
   getSharePack(userId: string, shareId: string): Promise<SharePack | null>;
   getStatus(userId: string): Promise<HostedExecutionUserStatus>;
   getUserEnvStatus(userId: string): Promise<HostedExecutionUserEnvStatus>;
-  putMemberPrivateState(
-    userId: string,
-    state: HostedMemberPrivateState,
-  ): Promise<HostedMemberPrivateState>;
   putSharePack(userId: string, shareId: string, pack: SharePack): Promise<SharePack>;
   provisionManagedUserCrypto(userId: string): Promise<HostedExecutionManagedUserCryptoStatus>;
   run(userId: string): Promise<HostedExecutionUserStatus>;
@@ -167,18 +158,6 @@ export function createHostedExecutionControlClient(
         label: "user env clear",
         parse: parseHostedExecutionUserEnvStatus,
         path: buildHostedExecutionUserEnvPath(userId),
-        request: { method: "DELETE" },
-        timeoutMs: options.timeoutMs,
-      });
-    },
-    deleteMemberPrivateState(userId) {
-      return requestHostedExecutionAuthorizedJson({
-        baseUrl,
-        fetchImpl,
-        getAuthorizationHeader,
-        label: "delete member private state",
-        parse: () => undefined,
-        path: buildHostedExecutionMemberPrivateStatePath(userId),
         request: { method: "DELETE" },
         timeoutMs: options.timeoutMs,
       });
@@ -272,27 +251,6 @@ export function createHostedExecutionControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
-    getMemberPrivateState(userId) {
-      return requestHostedExecutionAuthorizedJson({
-        baseUrl,
-        fetchImpl,
-        getAuthorizationHeader,
-        label: "member private state",
-        parse: parseHostedMemberPrivateState,
-        path: buildHostedExecutionMemberPrivateStatePath(userId),
-        request: { method: "GET" },
-        timeoutMs: options.timeoutMs,
-      }).catch((error) => {
-        if (
-          error instanceof Error
-          && error.message.startsWith("Hosted execution member private state failed with HTTP 404")
-        ) {
-          return null;
-        }
-
-        throw error;
-      });
-    },
     getPendingUsage(userId, limit) {
       const search = typeof limit === "number" && Number.isFinite(limit) && limit > 0
         ? new URLSearchParams({ limit: String(Math.floor(limit)) }).toString()
@@ -376,30 +334,6 @@ export function createHostedExecutionControlClient(
         }
 
         throw error;
-      });
-    },
-    putMemberPrivateState(userId, state) {
-      const requestPayload = parseHostedMemberPrivateState(state);
-
-      if (requestPayload.memberId !== userId) {
-        throw new TypeError(
-          `Hosted member private state memberId mismatch: expected ${userId}, received ${requestPayload.memberId}.`,
-        );
-      }
-
-      return requestHostedExecutionAuthorizedJson({
-        baseUrl,
-        fetchImpl,
-        getAuthorizationHeader,
-        label: "member private state write",
-        parse: parseHostedMemberPrivateState,
-        path: buildHostedExecutionMemberPrivateStatePath(userId),
-        request: {
-          body: JSON.stringify(requestPayload),
-          headers: { "content-type": "application/json; charset=utf-8" },
-          method: "PUT",
-        },
-        timeoutMs: options.timeoutMs,
       });
     },
     putSharePack(userId, shareId, pack) {

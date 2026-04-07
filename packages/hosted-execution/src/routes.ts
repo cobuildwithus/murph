@@ -41,10 +41,6 @@ export function buildHostedExecutionUserRunPath(userId: string): string {
   return `/internal/users/${encodeURIComponent(userId)}/run`;
 }
 
-export function buildHostedExecutionMemberPrivateStatePath(userId: string): string {
-  return `/internal/users/${encodeURIComponent(userId)}/member-private-state`;
-}
-
 export function buildHostedExecutionUserEnvPath(userId: string): string {
   return `/internal/users/${encodeURIComponent(userId)}/env`;
 }

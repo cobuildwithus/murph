@@ -15,6 +15,9 @@ describe("member.activated outbox payload", () => {
     expect("firstContact" in dispatch.event).toBe(false);
 
     const payload = buildHostedExecutionOutboxPayload(dispatch, {
+      payloadRef: {
+        key: "transient/dispatch-payloads/member_123/member.activated.json",
+      },
       storage: "auto",
     });
 
@@ -28,6 +31,9 @@ describe("member.activated outbox payload", () => {
       eventKind: "member.activated",
       occurredAt: dispatch.occurredAt,
       userId: dispatch.event.userId,
+    });
+    expect(payload.payloadRef).toEqual({
+      key: "transient/dispatch-payloads/member_123/member.activated.json",
     });
     expect(payload).not.toHaveProperty("dispatch");
   });

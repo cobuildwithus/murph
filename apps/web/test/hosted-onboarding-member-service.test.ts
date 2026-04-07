@@ -1,53 +1,16 @@
 import { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const memberPrivateStateMocks = vi.hoisted(() => ({
-  readHostedMemberPrivateState: vi.fn(),
-  writeHostedMemberPrivateStatePatch: vi.fn(),
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/runtime")>(
-    "@/src/lib/hosted-onboarding/runtime",
-  );
-
-  return {
-    ...actual,
-    getHostedOnboardingEnvironment: () => ({
-      encryptionKeyVersion: "v1",
-      inviteTtlHours: 24,
-      isProduction: false,
-      linqApiBaseUrl: "https://linq.example.test",
-      linqApiToken: "linq-token",
-      linqWebhookSecret: "linq-secret",
-      publicBaseUrl: "https://join.example.test",
-      stripeBillingMode: "payment",
-      stripePriceId: "price_123",
-      stripeSecretKey: "sk_test_123",
-      stripeWebhookSecret: "whsec_123",
-      encryptionKey: "test-hosted-contact-privacy-key",
-      telegramBotUsername: null,
-      telegramWebhookSecret: null,
-    }),
-    getHostedOnboardingSecretCodec: () => ({
-      encrypt: (value: string) => `enc:${value}`,
-      keyVersion: "v1",
-    }),
-  };
-});
-
-vi.mock("@/src/lib/hosted-onboarding/member-private-state", () => ({
-  readHostedMemberPrivateState: memberPrivateStateMocks.readHostedMemberPrivateState,
-  writeHostedMemberPrivateStatePatch: memberPrivateStateMocks.writeHostedMemberPrivateStatePatch,
-}));
-
+import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 import * as barrel from "@/src/lib/hosted-onboarding/member-service";
 import {
   completeHostedPrivyVerification,
 } from "@/src/lib/hosted-onboarding/authentication-service";
 import {
+  abortHostedInvitePhoneCode,
   buildHostedInvitePageData,
   buildHostedInviteUrl,
+  confirmHostedInvitePhoneCode,
   getHostedInviteStatus,
   issueHostedInvite,
   issueHostedInviteForPhone,
@@ -62,49 +25,60 @@ import {
   persistHostedMemberLinqChatBinding,
 } from "@/src/lib/hosted-onboarding/member-identity-service";
 
+vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/runtime")>(
+    "@/src/lib/hosted-onboarding/runtime",
+  );
+
+  return {
+    ...actual,
+    getHostedOnboardingEnvironment: () => ({
+      encryptionKey: "test-hosted-contact-privacy-key",
+      encryptionKeyVersion: "v1",
+      inviteTtlHours: 24,
+      isProduction: false,
+      linqApiBaseUrl: "https://linq.example.test",
+      linqApiToken: "linq-token",
+      linqWebhookSecret: "linq-secret",
+      publicBaseUrl: "https://join.example.test",
+      stripeBillingMode: "payment",
+      stripePriceId: "price_123",
+      stripeSecretKey: "sk_test_123",
+      stripeWebhookSecret: "whsec_123",
+      telegramBotUsername: null,
+      telegramWebhookSecret: null,
+    }),
+  };
+});
+
+const NOW = new Date("2026-04-07T01:00:00.000Z");
+
 describe("ensureHostedMemberForPhone", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    memberPrivateStateMocks.readHostedMemberPrivateState.mockResolvedValue(null);
-    memberPrivateStateMocks.writeHostedMemberPrivateStatePatch.mockImplementation(
-      async ({ memberId, patch }: { memberId: string; patch: Record<string, string | null | undefined> }) => ({
-        linqChatId: patch.linqChatId ?? null,
-        memberId,
-        privyUserId: patch.privyUserId ?? null,
-        schema: "murph.hosted-member-private-state.v1",
-        signupPhoneCodeSentAt: patch.signupPhoneCodeSentAt ?? null,
-        signupPhoneNumber: patch.signupPhoneNumber ?? null,
-        stripeCustomerId: patch.stripeCustomerId ?? null,
-        stripeLatestBillingEventId: patch.stripeLatestBillingEventId ?? null,
-        stripeLatestCheckoutSessionId: patch.stripeLatestCheckoutSessionId ?? null,
-        stripeSubscriptionId: patch.stripeSubscriptionId ?? null,
-        updatedAt: "2026-04-07T00:00:00.000Z",
-        walletAddress: patch.walletAddress ?? null,
-      }),
-    );
   });
 
-  it("rewrites phone storage to blind-indexed lookup data without dropping the stored signup chat binding", async () => {
-    const existingMember = {
+  it("rewrites phone lookup storage while preserving verified identity fields on existing members", async () => {
+    const existingMember = makeMember({
       id: "member_123",
-      linqChatId: "chat_existing",
-      maskedPhoneNumberHint: "*** 4567",
-      phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
-    };
-    const identityUpsert = vi.fn().mockResolvedValue({
-      memberId: "member_123",
+      suspendedAt: null,
     });
-    const currentIdentity = {
-      maskedPhoneNumberHint: "*** 4567",
+    const currentIdentity = makeIdentityRecord({
       memberId: "member_123",
-      phoneLookupKey: "hbidx:phone:v1:existing",
       phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
+      privyUserId: "did:privy:user_existing",
       privyUserLookupKey: "hbidx:privy-user:v1:existing",
+      signupPhoneCodeSendAttemptId: "hbpc_old",
+      signupPhoneCodeSendAttemptStartedAt: new Date("2026-03-20T12:05:00.000Z"),
+      signupPhoneCodeSentAt: new Date("2026-03-20T12:05:00.000Z"),
+      signupPhoneNumber: "+15550001111",
+      walletAddress: "0x1234",
       walletAddressLookupKey: "hbidx:wallet-address:v1:existing",
       walletChainType: "ethereum",
       walletCreatedAt: new Date("2026-03-20T12:00:00.000Z"),
       walletProvider: "privy",
-    };
+    });
+    const identityUpsert = vi.fn().mockResolvedValue(currentIdentity);
     const identityFindUnique = vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => {
       if (where.memberId === "member_123") {
         return currentIdentity;
@@ -135,58 +109,64 @@ describe("ensureHostedMemberForPhone", () => {
       prisma,
     });
 
-    expect(identityUpsert).toHaveBeenCalledWith({
+    expect(identityUpsert).toHaveBeenCalledWith(expect.objectContaining({
       where: {
         memberId: "member_123",
       },
       create: expect.objectContaining({
         maskedPhoneNumberHint: "*** 4567",
-        phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/),
-      }),
-      update: expect.objectContaining({
-        maskedPhoneNumberHint: "*** 4567",
-        phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/),
+        phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
         phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
-        privyUserLookupKey: null,
-        walletAddressLookupKey: null,
+        privyUserLookupKey: expect.stringMatching(/^hbidx:privy-user:v1:/u),
+        privyUserIdEncrypted: expect.stringMatching(/^hbds:/u),
+        signupPhoneCodeSendAttemptId: null,
+        signupPhoneCodeSendAttemptStartedAt: null,
+        signupPhoneCodeSentAt: null,
+        signupPhoneNumberEncrypted: expect.stringMatching(/^hbds:/u),
+        walletAddressEncrypted: expect.stringMatching(/^hbds:/u),
+        walletAddressLookupKey: expect.stringMatching(/^hbidx:wallet-address:v1:/u),
         walletChainType: "ethereum",
         walletCreatedAt: new Date("2026-03-20T12:00:00.000Z"),
         walletProvider: "privy",
       }),
-    });
-    expect(identityUpsert.mock.calls[0]?.[0]).toEqual(
-      expect.objectContaining({
-        create: expect.objectContaining({
-          phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
-        }),
-      }),
-    );
-    expect(memberPrivateStateMocks.writeHostedMemberPrivateStatePatch).toHaveBeenCalledWith({
-      memberId: "member_123",
-      patch: {
+      update: expect.objectContaining({
+        maskedPhoneNumberHint: "*** 4567",
+        phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
+        phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
+        privyUserLookupKey: expect.stringMatching(/^hbidx:privy-user:v1:/u),
+        privyUserIdEncrypted: expect.stringMatching(/^hbds:/u),
+        signupPhoneCodeSendAttemptId: null,
+        signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
-        signupPhoneNumber: "+15551234567",
-      },
-    });
+        signupPhoneNumberEncrypted: expect.stringMatching(/^hbds:/u),
+        walletAddressEncrypted: expect.stringMatching(/^hbds:/u),
+        walletAddressLookupKey: expect.stringMatching(/^hbidx:wallet-address:v1:/u),
+        walletChainType: "ethereum",
+        walletCreatedAt: new Date("2026-03-20T12:00:00.000Z"),
+        walletProvider: "privy",
+      }),
+    }));
   });
 
-  it("creates new members with blind phone lookup storage", async () => {
-    const identityUpsert = vi.fn().mockResolvedValue({
-      memberId: "member_123",
-    });
-    const identityFindUnique = vi.fn().mockResolvedValue(null);
-    const create = vi.fn().mockResolvedValue({
+  it("creates new members with blind phone lookup storage plus encrypted signup phone state", async () => {
+    const identityUpsert = vi.fn().mockResolvedValue(
+      makeIdentityRecord({
+        memberId: "member_123",
+        phoneLookupKey: "hbidx:phone:v1:new",
+        signupPhoneNumber: "+15551234567",
+      }),
+    );
+    const create = vi.fn().mockResolvedValue(makeMember({
       id: "member_123",
-      linqChatId: null,
-      maskedPhoneNumberHint: "*** 4567",
-    });
+      suspendedAt: null,
+    }));
     const prisma = {
       hostedMember: {
         create,
         findUnique: vi.fn().mockResolvedValue(null),
       },
       hostedMemberIdentity: {
-        findUnique: identityFindUnique,
+        findUnique: vi.fn().mockResolvedValue(null),
         upsert: identityUpsert,
       },
     } as never;
@@ -208,116 +188,46 @@ describe("ensureHostedMemberForPhone", () => {
         updatedAt: true,
       },
     });
-    expect(identityUpsert).toHaveBeenCalledWith({
-      where: {
-        memberId: expect.any(String),
-      },
+    expect(identityUpsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({
         maskedPhoneNumberHint: "*** 4567",
-        phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/),
+        phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
+        signupPhoneNumberEncrypted: expect.stringMatching(/^hbds:/u),
       }),
       update: expect.objectContaining({
         maskedPhoneNumberHint: "*** 4567",
-        phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/),
+        phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
+        signupPhoneNumberEncrypted: expect.stringMatching(/^hbds:/u),
       }),
-    });
-    expect(memberPrivateStateMocks.writeHostedMemberPrivateStatePatch).toHaveBeenCalledWith({
-      memberId: "member_123",
-      patch: {
-        signupPhoneCodeSentAt: null,
-        signupPhoneNumber: "+15551234567",
+      where: {
+        memberId: expect.any(String),
       },
-    });
-  });
-
-  it("fails closed instead of clearing lookup keys when member private state is unavailable", async () => {
-    const identityUpsert = vi.fn();
-    const currentIdentity = {
-      maskedPhoneNumberHint: "*** 4567",
-      memberId: "member_123",
-      phoneLookupKey: "hbidx:phone:v1:existing",
-      phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
-      privyUserLookupKey: "hbidx:privy-user:v1:existing",
-      walletAddressLookupKey: "hbidx:wallet-address:v1:existing",
-      walletChainType: "ethereum",
-      walletCreatedAt: new Date("2026-03-20T12:00:00.000Z"),
-      walletProvider: "privy",
-    };
-    const prisma = {
-      hostedMember: {
-        findUnique: vi.fn().mockResolvedValue({
-          id: "member_123",
-          linqChatId: "chat_existing",
-          maskedPhoneNumberHint: "*** 4567",
-          phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
-        }),
-      },
-      hostedMemberIdentity: {
-        findUnique: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => {
-          if (where.memberId === "member_123") {
-            return currentIdentity;
-          }
-
-          if (typeof where.phoneLookupKey === "string") {
-            return {
-              ...currentIdentity,
-              member: {
-                id: "member_123",
-                linqChatId: "chat_existing",
-                maskedPhoneNumberHint: "*** 4567",
-                phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
-              },
-              phoneLookupKey: where.phoneLookupKey,
-            };
-          }
-
-          return null;
-        }),
-        upsert: identityUpsert,
-      },
-    } as never;
-    memberPrivateStateMocks.readHostedMemberPrivateState.mockRejectedValue({
-      code: "HOSTED_MEMBER_PRIVATE_STATE_NOT_CONFIGURED",
-      httpStatus: 500,
-    });
-
-    await expect(
-      ensureHostedMemberForPhone({
-        phoneNumber: "+15551234567",
-        prisma,
-      }),
-    ).rejects.toMatchObject({
-      code: "HOSTED_MEMBER_PRIVATE_STATE_NOT_CONFIGURED",
-      httpStatus: 500,
-    });
-
-    expect(identityUpsert).not.toHaveBeenCalled();
+    }));
   });
 
   it("recovers from a concurrent create conflict by refreshing the winning member row", async () => {
-    const concurrentMember = {
+    const concurrentMember = makeMember({
       id: "member_123",
-      linqChatId: "chat_existing",
-      maskedPhoneNumberHint: "*** 4567",
-    };
-    const identityUpsert = vi.fn().mockResolvedValue({
-      memberId: "member_123",
+      suspendedAt: null,
     });
+    const currentIdentity = makeIdentityRecord({
+      memberId: "member_123",
+      phoneLookupKey: "hbidx:phone:v1:existing",
+      signupPhoneNumber: "+15550001111",
+    });
+    const identityUpsert = vi.fn().mockResolvedValue(currentIdentity);
     const identityFindUnique = vi.fn()
       .mockResolvedValueOnce(null)
       .mockImplementation(async ({ where }: { where: Record<string, unknown> }) => {
+        if (where.memberId === "member_123") {
+          return currentIdentity;
+        }
+
         if (typeof where.phoneLookupKey === "string") {
           return {
-            maskedPhoneNumberHint: "*** 4567",
+            ...currentIdentity,
             member: concurrentMember,
-            memberId: "member_123",
             phoneLookupKey: where.phoneLookupKey,
-            phoneNumberVerifiedAt: null,
-            privyUserId: null,
-            walletAddress: null,
-            walletChainType: null,
-            walletCreatedAt: null,
-            walletProvider: null,
           };
         }
 
@@ -348,26 +258,15 @@ describe("ensureHostedMemberForPhone", () => {
     });
 
     expect(create).toHaveBeenCalledTimes(1);
-    expect(identityUpsert).toHaveBeenCalledWith({
+    expect(identityUpsert).toHaveBeenCalledWith(expect.objectContaining({
       where: {
         memberId: "member_123",
       },
-      create: expect.objectContaining({
-        maskedPhoneNumberHint: "*** 4567",
-        phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/),
-      }),
       update: expect.objectContaining({
-        maskedPhoneNumberHint: "*** 4567",
-        phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/),
+        phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
+        signupPhoneNumberEncrypted: expect.stringMatching(/^hbds:/u),
       }),
-    });
-    expect(memberPrivateStateMocks.writeHostedMemberPrivateStatePatch).toHaveBeenCalledWith({
-      memberId: "member_123",
-      patch: {
-        signupPhoneCodeSentAt: null,
-        signupPhoneNumber: "+15551234567",
-      },
-    });
+    }));
   });
 
   it("rejects invalid phone numbers", async () => {
@@ -403,91 +302,64 @@ describe("hosted-onboarding member-service barrel", () => {
 });
 
 describe("prepareHostedInvitePhoneCode", () => {
-  it("returns the stored signup phone and records the send timestamp", async () => {
-    memberPrivateStateMocks.readHostedMemberPrivateState.mockResolvedValue({
-      linqChatId: null,
-      memberId: "member_123",
-      privyUserId: null,
-      schema: "murph.hosted-member-private-state.v1",
-      signupPhoneCodeSentAt: null,
-      signupPhoneNumber: "+15551234567",
-      stripeCustomerId: null,
-      stripeLatestBillingEventId: null,
-      stripeLatestCheckoutSessionId: null,
-      stripeSubscriptionId: null,
-      updatedAt: "2026-04-07T00:00:00.000Z",
-      walletAddress: null,
-    });
+  it("returns the stored signup phone and records the send timestamp on the local identity row", async () => {
+    const hostedMemberIdentity = {
+      findUnique: vi.fn().mockResolvedValue(makeIdentityRecord({
+        memberId: "member_123",
+        signupPhoneNumber: "+15551234567",
+      })),
+      update: vi.fn().mockResolvedValue({}),
+    };
     const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
       hostedInvite: {
-        findUnique: vi.fn().mockResolvedValue({
-          expiresAt: new Date("2026-04-08T00:00:00.000Z"),
-          inviteCode: "invite-code",
-          member: {
-            id: "member_123",
-            identity: {
-              maskedPhoneNumberHint: "*** 4567",
-            },
-          },
-          memberId: "member_123",
-        }),
+        findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
       },
+      hostedMemberIdentity,
     } as never;
 
     await expect(
       prepareHostedInvitePhoneCode({
         inviteCode: "invite-code",
-        now: new Date("2026-04-07T01:00:00.000Z"),
+        now: NOW,
         prisma,
       }),
     ).resolves.toEqual({
       phoneNumber: "+15551234567",
+      sendAttemptId: expect.stringMatching(/^hbpc_/u),
     });
 
-    expect(memberPrivateStateMocks.writeHostedMemberPrivateStatePatch).toHaveBeenCalledWith({
-      memberId: "member_123",
-      now: "2026-04-07T01:00:00.000Z",
-      patch: {
-        signupPhoneCodeSentAt: "2026-04-07T01:00:00.000Z",
+    expect(hostedMemberIdentity.update).toHaveBeenCalledWith({
+      where: {
+        memberId: "member_123",
+      },
+      data: {
+        signupPhoneCodeSendAttemptId: expect.stringMatching(/^hbpc_/u),
+        signupPhoneCodeSendAttemptStartedAt: NOW,
+        signupPhoneCodeSentAt: NOW,
       },
     });
   });
 
-  it("falls back to manual entry when the private signup phone is unavailable", async () => {
-    memberPrivateStateMocks.readHostedMemberPrivateState.mockResolvedValue({
-      linqChatId: null,
-      memberId: "member_123",
-      privyUserId: null,
-      schema: "murph.hosted-member-private-state.v1",
-      signupPhoneCodeSentAt: null,
-      signupPhoneNumber: null,
-      stripeCustomerId: null,
-      stripeLatestBillingEventId: null,
-      stripeLatestCheckoutSessionId: null,
-      stripeSubscriptionId: null,
-      updatedAt: "2026-04-07T00:00:00.000Z",
-      walletAddress: null,
-    });
+  it("falls back to manual entry when the stored signup phone is unavailable", async () => {
     const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
       hostedInvite: {
-        findUnique: vi.fn().mockResolvedValue({
-          expiresAt: new Date("2026-04-08T00:00:00.000Z"),
-          inviteCode: "invite-code",
-          member: {
-            id: "member_123",
-            identity: {
-              maskedPhoneNumberHint: "*** 4567",
-            },
-          },
+        findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue(makeIdentityRecord({
           memberId: "member_123",
-        }),
+          signupPhoneNumber: null,
+        })),
+        update: vi.fn(),
       },
     } as never;
 
     await expect(
       prepareHostedInvitePhoneCode({
         inviteCode: "invite-code",
-        now: new Date("2026-04-07T01:00:00.000Z"),
+        now: NOW,
         prisma,
       }),
     ).rejects.toMatchObject({
@@ -497,33 +369,19 @@ describe("prepareHostedInvitePhoneCode", () => {
   });
 
   it("rate limits repeated invite send-code requests", async () => {
-    memberPrivateStateMocks.readHostedMemberPrivateState.mockResolvedValue({
-      linqChatId: null,
-      memberId: "member_123",
-      privyUserId: null,
-      schema: "murph.hosted-member-private-state.v1",
-      signupPhoneCodeSentAt: "2026-04-07T01:00:30.000Z",
-      signupPhoneNumber: "+15551234567",
-      stripeCustomerId: null,
-      stripeLatestBillingEventId: null,
-      stripeLatestCheckoutSessionId: null,
-      stripeSubscriptionId: null,
-      updatedAt: "2026-04-07T01:00:30.000Z",
-      walletAddress: null,
-    });
+    const update = vi.fn();
     const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
       hostedInvite: {
-        findUnique: vi.fn().mockResolvedValue({
-          expiresAt: new Date("2026-04-08T00:00:00.000Z"),
-          inviteCode: "invite-code",
-          member: {
-            id: "member_123",
-            identity: {
-              maskedPhoneNumberHint: "*** 4567",
-            },
-          },
+        findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue(makeIdentityRecord({
           memberId: "member_123",
-        }),
+          signupPhoneCodeSentAt: new Date("2026-04-07T01:00:30.000Z"),
+          signupPhoneNumber: "+15551234567",
+        })),
+        update,
       },
     } as never;
 
@@ -537,13 +395,159 @@ describe("prepareHostedInvitePhoneCode", () => {
       code: "PHONE_CODE_COOLDOWN",
       httpStatus: 429,
     });
-    expect(memberPrivateStateMocks.writeHostedMemberPrivateStatePatch).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        patch: {
-          signupPhoneCodeSentAt: "2026-04-07T01:00:45.000Z",
-        },
+    expect(update).not.toHaveBeenCalled();
+  });
+});
+
+describe("confirmHostedInvitePhoneCode", () => {
+  it("clears the pending attempt after a successful Privy send confirmation", async () => {
+    const hostedMemberIdentity = {
+      findUnique: vi.fn().mockResolvedValue(makeIdentityRecord({
+        memberId: "member_123",
+        signupPhoneCodeSendAttemptId: "hbpc_confirm",
+        signupPhoneCodeSendAttemptStartedAt: NOW,
+        signupPhoneCodeSentAt: NOW,
+        signupPhoneNumber: "+15551234567",
+      })),
+      update: vi.fn().mockResolvedValue({}),
+    };
+    const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
+      },
+      hostedMemberIdentity,
+    } as never;
+
+    await expect(
+      confirmHostedInvitePhoneCode({
+        inviteCode: "invite-code",
+        now: new Date("2026-04-07T01:00:08.000Z"),
+        prisma,
+        sendAttemptId: "hbpc_confirm",
       }),
-    );
+    ).resolves.toEqual({
+      ok: true,
+    });
+
+    expect(hostedMemberIdentity.update).toHaveBeenCalledWith({
+      where: {
+        memberId: "member_123",
+      },
+      data: {
+        signupPhoneCodeSendAttemptId: null,
+        signupPhoneCodeSendAttemptStartedAt: null,
+      },
+    });
+  });
+
+  it("rejects stale or mismatched invite send-code confirmations", async () => {
+    const update = vi.fn();
+    const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue(makeIdentityRecord({
+          memberId: "member_123",
+          signupPhoneCodeSendAttemptId: "hbpc_current",
+          signupPhoneCodeSendAttemptStartedAt: NOW,
+          signupPhoneCodeSentAt: NOW,
+          signupPhoneNumber: "+15551234567",
+        })),
+        update,
+      },
+    } as never;
+
+    await expect(
+      confirmHostedInvitePhoneCode({
+        inviteCode: "invite-code",
+        now: new Date("2026-04-07T01:00:20.000Z"),
+        prisma,
+        sendAttemptId: "hbpc_old",
+      }),
+    ).rejects.toMatchObject({
+      code: "PHONE_CODE_ATTEMPT_INVALID",
+      httpStatus: 409,
+    });
+    expect(update).not.toHaveBeenCalled();
+  });
+});
+
+describe("abortHostedInvitePhoneCode", () => {
+  it("clears the cooldown and pending attempt after a failed Privy send", async () => {
+    const hostedMemberIdentity = {
+      findUnique: vi.fn().mockResolvedValue(makeIdentityRecord({
+        memberId: "member_123",
+        signupPhoneCodeSendAttemptId: "hbpc_abort",
+        signupPhoneCodeSendAttemptStartedAt: NOW,
+        signupPhoneCodeSentAt: NOW,
+        signupPhoneNumber: "+15551234567",
+      })),
+      update: vi.fn().mockResolvedValue({}),
+    };
+    const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
+      },
+      hostedMemberIdentity,
+    } as never;
+
+    await expect(
+      abortHostedInvitePhoneCode({
+        inviteCode: "invite-code",
+        now: new Date("2026-04-07T01:00:05.000Z"),
+        prisma,
+        sendAttemptId: "hbpc_abort",
+      }),
+    ).resolves.toEqual({
+      ok: true,
+    });
+
+    expect(hostedMemberIdentity.update).toHaveBeenCalledWith({
+      where: {
+        memberId: "member_123",
+      },
+      data: {
+        signupPhoneCodeSendAttemptId: null,
+        signupPhoneCodeSendAttemptStartedAt: null,
+        signupPhoneCodeSentAt: null,
+      },
+    });
+  });
+
+  it("ignores stale abort requests so they cannot clear a later cooldown", async () => {
+    const update = vi.fn();
+    const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue(makeIdentityRecord({
+          memberId: "member_123",
+          signupPhoneCodeSendAttemptId: "hbpc_current",
+          signupPhoneCodeSendAttemptStartedAt: NOW,
+          signupPhoneCodeSentAt: NOW,
+          signupPhoneNumber: "+15551234567",
+        })),
+        update,
+      },
+    } as never;
+
+    await expect(
+      abortHostedInvitePhoneCode({
+        inviteCode: "invite-code",
+        now: new Date("2026-04-07T01:00:05.000Z"),
+        prisma,
+        sendAttemptId: "hbpc_old",
+      }),
+    ).resolves.toEqual({
+      ok: true,
+    });
+    expect(update).not.toHaveBeenCalled();
   });
 });
 
@@ -566,6 +570,7 @@ describe("persistHostedMemberLinqChatBinding", () => {
 
     expect(updateMany).toHaveBeenCalledWith({
       data: {
+        linqChatIdEncrypted: null,
         linqChatLookupKey: null,
       },
       where: {
@@ -577,11 +582,13 @@ describe("persistHostedMemberLinqChatBinding", () => {
     });
     expect(upsert).toHaveBeenCalledWith({
       create: {
+        linqChatIdEncrypted: expect.stringMatching(/^hbds:/u),
         linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
         memberId: "member_123",
         telegramUserLookupKey: null,
       },
       update: {
+        linqChatIdEncrypted: expect.stringMatching(/^hbds:/u),
         linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
       },
       where: {
@@ -610,3 +617,75 @@ describe("persistHostedMemberLinqChatBinding", () => {
     expect(upsert).not.toHaveBeenCalled();
   });
 });
+
+function makeMember(overrides: Record<string, unknown> = {}) {
+  return {
+    billingStatus: "not_started",
+    createdAt: NOW,
+    id: "member_123",
+    suspendedAt: null,
+    updatedAt: NOW,
+    ...overrides,
+  };
+}
+
+function makeInviteRecord() {
+  return {
+    expiresAt: new Date("2026-04-08T00:00:00.000Z"),
+    inviteCode: "invite-code",
+    member: {
+      id: "member_123",
+      identity: {
+        maskedPhoneNumberHint: "*** 4567",
+      },
+    },
+    memberId: "member_123",
+  };
+}
+
+function makeIdentityRecord(input: {
+  memberId: string;
+  phoneLookupKey?: string;
+  phoneNumberVerifiedAt?: Date | null;
+  privyUserId?: string | null;
+  privyUserLookupKey?: string | null;
+  signupPhoneCodeSendAttemptId?: string | null;
+  signupPhoneCodeSendAttemptStartedAt?: Date | null;
+  signupPhoneCodeSentAt?: Date | null;
+  signupPhoneNumber?: string | null;
+  walletAddress?: string | null;
+  walletAddressLookupKey?: string | null;
+  walletChainType?: string | null;
+  walletCreatedAt?: Date | null;
+  walletProvider?: string | null;
+}) {
+  return {
+    maskedPhoneNumberHint: "*** 4567",
+    memberId: input.memberId,
+    phoneLookupKey: input.phoneLookupKey ?? "hbidx:phone:v1:existing",
+    phoneNumberVerifiedAt: input.phoneNumberVerifiedAt ?? null,
+    privyUserIdEncrypted: encryptHostedWebNullableString({
+      field: "hosted-member-identity.privy-user-id",
+      memberId: input.memberId,
+      value: input.privyUserId ?? null,
+    }),
+    privyUserLookupKey: input.privyUserLookupKey ?? null,
+    signupPhoneCodeSendAttemptId: input.signupPhoneCodeSendAttemptId ?? null,
+    signupPhoneCodeSendAttemptStartedAt: input.signupPhoneCodeSendAttemptStartedAt ?? null,
+    signupPhoneCodeSentAt: input.signupPhoneCodeSentAt ?? null,
+    signupPhoneNumberEncrypted: encryptHostedWebNullableString({
+      field: "hosted-member-identity.signup-phone-number",
+      memberId: input.memberId,
+      value: input.signupPhoneNumber ?? null,
+    }),
+    walletAddressEncrypted: encryptHostedWebNullableString({
+      field: "hosted-member-identity.wallet-address",
+      memberId: input.memberId,
+      value: input.walletAddress ?? null,
+    }),
+    walletAddressLookupKey: input.walletAddressLookupKey ?? null,
+    walletChainType: input.walletChainType ?? null,
+    walletCreatedAt: input.walletCreatedAt ?? null,
+    walletProvider: input.walletProvider ?? null,
+  };
+}

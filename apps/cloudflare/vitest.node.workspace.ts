@@ -61,7 +61,6 @@ export const cloudflareNodeVitestProjects = [
     "env.test.ts",
     "hosted-email*.test.ts",
     "index.test.ts",
-    "member-private-state-store.test.ts",
     "wrangler-runner.test.ts",
   ]),
   createCloudflareNodeProject("cloudflare-node-deploy", [

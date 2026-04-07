@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   isHostedOnboardingRevnetEnabled: vi.fn(),
-  writeHostedMemberPrivateStatePatch: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/revnet", async () => {
@@ -17,10 +16,6 @@ vi.mock("@/src/lib/hosted-onboarding/revnet", async () => {
   };
 });
 
-vi.mock("@/src/lib/hosted-onboarding/member-private-state", () => ({
-  writeHostedMemberPrivateStatePatch: mocks.writeHostedMemberPrivateStatePatch,
-}));
-
 import { reconcileHostedPrivyIdentityOnMember } from "@/src/lib/hosted-onboarding/member-identity-service";
 import type { HostedPrivyIdentity } from "@/src/lib/hosted-onboarding/privy";
 
@@ -30,7 +25,6 @@ describe("hosted-onboarding member-identity-service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(false);
-    mocks.writeHostedMemberPrivateStatePatch.mockResolvedValue(null);
   });
 
   it("locks and re-reads the current member before reconciling a Privy identity", async () => {
@@ -102,16 +96,14 @@ describe("hosted-onboarding member-identity-service", () => {
       },
       update: expect.objectContaining({
         phoneNumberVerifiedAt: NOW,
-        privyUserId: "did:privy:user_123",
+        privyUserLookupKey: expect.stringMatching(/^hbidx:privy-user:v1:/u),
+        privyUserIdEncrypted: expect.stringMatching(/^hbds:/u),
+        signupPhoneCodeSendAttemptId: null,
+        signupPhoneCodeSendAttemptStartedAt: null,
+        signupPhoneCodeSentAt: null,
+        signupPhoneNumberEncrypted: null,
       }),
     }));
-    expect(mocks.writeHostedMemberPrivateStatePatch).toHaveBeenCalledWith({
-      memberId: "member_123",
-      patch: {
-        signupPhoneCodeSentAt: null,
-        signupPhoneNumber: null,
-      },
-    });
   });
 
   it("fails closed when the member disappears before the locked reconciliation write", async () => {

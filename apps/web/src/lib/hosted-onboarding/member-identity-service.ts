@@ -8,7 +8,6 @@ import {
   readHostedPhoneHint,
 } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
-import { writeHostedMemberPrivateStatePatch } from "./member-private-state";
 import { type HostedPrivyIdentity } from "./privy";
 import {
   generateHostedMemberId,
@@ -71,6 +70,10 @@ export async function ensureHostedMemberForPhone(input: {
         ...buildHostedMemberPhoneIdentity(input.phoneNumber),
         memberId,
         prisma: tx,
+        signupPhoneCodeSendAttemptId: null,
+        signupPhoneCodeSendAttemptStartedAt: null,
+        signupPhoneCodeSentAt: null,
+        signupPhoneNumber: input.phoneNumber,
       });
       return createdMember;
     } catch (error) {
@@ -93,11 +96,6 @@ export async function ensureHostedMemberForPhone(input: {
     }
   });
 
-  await persistHostedMemberSignupPhoneBestEffort({
-    memberId: member.id,
-    phoneNumber: input.phoneNumber,
-  });
-
   return member;
 }
 
@@ -117,6 +115,10 @@ async function refreshHostedMemberForPhone(input: {
     phoneNumberVerifiedAt: currentIdentity?.phoneNumberVerifiedAt ?? null,
     prisma: input.prisma,
     privyUserId: currentIdentity?.privyUserId ?? null,
+    signupPhoneCodeSendAttemptId: null,
+    signupPhoneCodeSendAttemptStartedAt: null,
+    signupPhoneCodeSentAt: null,
+    signupPhoneNumber: input.phoneNumber,
     walletAddress: currentIdentity?.walletAddress ?? null,
     walletChainType: currentIdentity?.walletChainType ?? null,
     walletCreatedAt: currentIdentity?.walletCreatedAt ?? null,
@@ -228,6 +230,10 @@ export async function ensureHostedMemberForPrivyIdentity(input: {
         phoneNumberVerifiedAt: input.now,
         prisma: tx,
         privyUserId: input.identity.userId,
+        signupPhoneCodeSendAttemptId: null,
+        signupPhoneCodeSendAttemptStartedAt: null,
+        signupPhoneCodeSentAt: null,
+        signupPhoneNumber: null,
         ...buildHostedMemberWalletStorage({
           now: input.now,
           wallet: input.identity.wallet,
@@ -243,8 +249,6 @@ export async function ensureHostedMemberForPrivyIdentity(input: {
       now: input.now,
     });
   });
-
-  await clearHostedMemberSignupPhone(member.id);
 
   return member;
 }
@@ -330,6 +334,10 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
         phoneNumberVerifiedAt: input.now,
         prisma: tx,
         privyUserId: input.identity.userId,
+        signupPhoneCodeSendAttemptId: null,
+        signupPhoneCodeSendAttemptStartedAt: null,
+        signupPhoneCodeSentAt: null,
+        signupPhoneNumber: null,
         ...buildHostedMemberWalletStorage({
           existingWalletAddress: currentIdentity?.walletAddress,
           existingWalletChainType: currentIdentity?.walletChainType,
@@ -352,8 +360,6 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
       throw error;
     }
   });
-
-  await clearHostedMemberSignupPhone(member.id);
 
   return member;
 }
@@ -410,35 +416,4 @@ export async function findHostedMemberForPrivyIdentity(input: {
   }
 
   return matches.values().next().value ?? null;
-}
-
-async function persistHostedMemberSignupPhoneBestEffort(input: {
-  memberId: string;
-  phoneNumber: string;
-}): Promise<void> {
-  try {
-    await writeHostedMemberPrivateStatePatch({
-      memberId: input.memberId,
-      patch: {
-        signupPhoneCodeSentAt: null,
-        signupPhoneNumber: input.phoneNumber,
-      },
-    });
-  } catch {
-    // Manual phone entry remains the fallback if private-state storage is unavailable.
-  }
-}
-
-async function clearHostedMemberSignupPhone(memberId: string): Promise<void> {
-  try {
-    await writeHostedMemberPrivateStatePatch({
-      memberId,
-      patch: {
-        signupPhoneCodeSentAt: null,
-        signupPhoneNumber: null,
-      },
-    });
-  } catch {
-    // Verified signup should not fail just because private-state cleanup is unavailable.
-  }
 }
