@@ -4,4 +4,4 @@ You can send me things as they happen — meals, supplements, workouts, recipes,
 
 Everything here stays in your private vault. It's like having a private health team in your pocket.
 
-What should I call you, and what are you working on health-wise right now?`;
+Ready to get started?`;
