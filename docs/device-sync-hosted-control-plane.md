@@ -1,6 +1,6 @@
 # Device Sync Hosted Control Plane Proposal
 
-Last verified against repo layout: 2026-04-05
+Last verified against repo layout: 2026-04-07
 
 ## What exists today
 
@@ -35,11 +35,11 @@ Responsibilities:
 - user-authenticated provider connect UI
 - OAuth start/callback routes
 - public webhook routes
-- provider account ownership mapping
-- durable Postgres-owned connection metadata plus sparse signal/token-audit history for ordinary hosted-web reads
+- provider account ownership mapping through blind indexes plus opaque connection ids
+- durable Postgres-owned typed connection summaries plus sparse signal/token-audit history for ordinary hosted-web reads
 - Cloudflare-owned encrypted token escrow under the user root key
 - webhook subscription management where needed
-- minimal durable control state such as OAuth sessions, webhook traces, pending sync signals, disconnect state, and local-agent pairing state
+- minimal durable control state such as OAuth sessions, webhook traces, typed wake signals, disconnect state, and local-agent pairing state
 - optional token refresh helper so provider app secrets stay server-side
 
 Non-responsibilities:
@@ -109,9 +109,15 @@ Recommended tables:
 - `id`
 - `user_id`
 - `provider` (`whoop` | `oura`)
-- `external_account_id`
-- `display_name`
+- `provider_account_blind_index`
+- `status`
 - `connected_at`
+- `last_webhook_at`
+- `last_sync_started_at`
+- `last_sync_completed_at`
+- `last_sync_error_at`
+- `last_error_code`
+- `next_reconcile_at`
 - `created_at`, `updated_at`
 
 #### `device_token_audit`
@@ -124,10 +130,13 @@ Recommended tables:
 - `session_id`
 - `token_version`
 - `key_version`
-- `metadata_json`
+- `expected_token_version`
+- `force_refresh`
+- `refresh_outcome`
+- `token_version_changed`
 - `created_at`
 
-Keep durable connection identity/mapping rows in Postgres. If hosted-web needs status hints without live runtime reads, derive or mirror a stale summary from durable hosted signals there instead of calling Cloudflare on ordinary settings reads. Do not store decryptable provider tokens there.
+Keep durable connection identity/mapping rows in Postgres, but keep them narrow: opaque connection ids, blind indexes, typed status/timestamp summaries, and audit history only. Ordinary hosted settings reads should come from `device_connection` directly instead of replaying signal blobs or calling Cloudflare. Raw provider account ids, provider labels, raw provider tokens, and provider payloads should not live in Postgres.
 
 #### Cloudflare device-sync runtime store
 - per-user encrypted runtime snapshot under the user root key
@@ -163,21 +172,26 @@ Keep durable connection identity/mapping rows in Postgres. If hosted-web needs s
 #### `device_webhook_trace`
 - `provider`
 - `trace_id` or provider-native dedupe key
-- `external_account_id`
+- `provider_account_blind_index`
 - `event_type`
 - `received_at`
-- optional small payload/debug JSON with a retention policy
 
 #### `device_sync_signal`
 Append-only mailbox for the local app or hosted runner to hydrate with a cursor:
 - `id` / sequence
 - `connection_id`
 - `provider`
-- `kind` (`initial_backfill`, `reconcile_hint`, `resource_changed`, `resource_deleted`, `disconnected`, `reauthorization_required`)
-- `payload_json`
+- `kind` (`connected`, `webhook_hint`, `disconnected`, `reauthorization_required`)
+- `occurred_at`
+- `trace_id`
+- `event_type`
+- `resource_category`
+- `reason`
+- `next_reconcile_at`
+- `revoke_warning_code`
 - `created_at`
 
-`payload_json` should stay sparse and sanitized. It may include normalized hosted job hints and reconcile metadata that let the hosted runner rebuild provider work, but it should not store raw provider webhook bodies or provider tokens.
+`device_sync_signal` should stay a sparse typed wake mailbox. It may carry just enough typed metadata to wake the local agent or hosted runner, but it should not store raw provider webhook bodies, raw provider account ids, provider labels, or provider tokens.
 
 #### `device_agent_session`
 - `id`
@@ -224,7 +238,7 @@ These are the only browser-facing wearable-management routes.
 
 They rely on the hosted onboarding Privy identity-token flow plus the hosted onboarding `Origin` checks, not the signed browser-assertion contract used by the lower-level bridge routes.
 
-Ordinary reads on these routes should come from durable hosted-web metadata in Postgres, optionally enriched by stale or mirrored signal summaries. Live Cloudflare runtime inspection belongs only on explicit operational routes and internal runtime endpoints.
+Ordinary reads on these routes should come from durable hosted-web metadata in Postgres, primarily the typed `device_connection` summary row. Live Cloudflare runtime inspection belongs only on explicit operational routes and internal runtime endpoints.
 
 - `GET /api/settings/device-sync`
 - `GET /api/settings/device-sync/connections/:connectionId/status`
@@ -275,7 +289,7 @@ Move to the hosted control plane in hosted mode:
 - public OAuth callback routes
 - public webhook routes
 - OAuth session persistence
-- per-user provider connection ownership mapping
+- per-user provider connection ownership mapping through blind indexes
 - Cloudflare-owned encrypted token escrow plus signed runtime read/apply routes
 - webhook dedupe traces
 - pending-sync mailbox/signals for the local app
@@ -301,7 +315,7 @@ Keep local-only:
 Recommended hosted responsibilities:
 - OAuth callback
 - webhook verification and dedupe
-- external-account mapping
+- blind-index account mapping
 - Cloudflare-owned token escrow
 - optional refresh helper
 
@@ -360,10 +374,14 @@ If the local agent lets its bearer expire, the hosted app rejects export/refresh
 
 That preserves a local-first data plane without requiring every sync request to transit the hosted app.
 
+## Current rollout note
+
+The hosted device-sync SQL hard-cut is currently treated as a greenfield/reset-only schema change. Until there is a live hosted rollout to migrate, the repo intentionally rewrites the initial Prisma migration instead of layering a forward migration over a deployed legacy schema.
+
 ## Sparse synchronization model
 
 To avoid constant hosted chatter:
-- local app polls `device_sync_signal` on startup, on manual sync, and on a modest timer
+- local app polls the sparse typed `device_sync_signal` mailbox on startup, on manual sync, and on a modest timer
 - hosted app never proxies normal provider data payloads
 - hosted app is only consulted for control-plane events: pending signals, token export, token refresh, disconnect state, explicit session revoke, and bearer rotation/renewal through export or refresh
 

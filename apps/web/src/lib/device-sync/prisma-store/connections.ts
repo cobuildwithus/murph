@@ -8,24 +8,37 @@ import {
   type UpsertPublicDeviceSyncConnectionInput,
 } from "@murphai/device-syncd/public-ingress";
 
-import {
-  readHostedExecutionControlClientIfConfigured,
-} from "../../hosted-execution/control";
+import { readHostedExecutionControlClientIfConfigured } from "../../hosted-execution/control";
+import { buildHostedProviderAccountBlindIndex } from "../crypto";
 import {
   buildHostedPublicDeviceSyncAccount,
   findHostedDeviceSyncRuntimeConnection,
   type HostedStaticDeviceSyncConnectionRecord,
 } from "../internal-runtime";
-import { asRecord, generateHostedRandomPrefixedId } from "../shared";
+import {
+  maybeDate,
+  maybeIsoTimestamp,
+  normalizeNullableString,
+  sanitizeHostedSqlErrorText,
+  generateHostedRandomPrefixedId,
+} from "../shared";
+import type { HostedPrismaTransactionClient } from "./types";
 
 export const hostedConnectionRecordArgs = {
   select: {
     connectedAt: true,
     createdAt: true,
-    displayName: true,
-    externalAccountId: true,
     id: true,
+    lastErrorCode: true,
+    lastErrorMessage: true,
+    lastSyncCompletedAt: true,
+    lastSyncErrorAt: true,
+    lastSyncStartedAt: true,
+    lastWebhookAt: true,
+    nextReconcileAt: true,
     provider: true,
+    providerAccountBlindIndex: true,
+    status: true,
     updatedAt: true,
     userId: true,
   },
@@ -33,47 +46,27 @@ export const hostedConnectionRecordArgs = {
 
 export type HostedConnectionRecord = Prisma.DeviceConnectionGetPayload<typeof hostedConnectionRecordArgs>;
 
-const hostedConnectionSignalRecordArgs = {
-  select: {
-    connectionId: true,
-    createdAt: true,
-    id: true,
-    kind: true,
-    payloadJson: true,
-  },
-} satisfies Prisma.DeviceSyncSignalDefaultArgs;
-
-type HostedConnectionSignalRecord = Prisma.DeviceSyncSignalGetPayload<typeof hostedConnectionSignalRecordArgs>;
-
-interface HostedDurableConnectionSummary {
-  lastErrorCode?: string | null;
-  lastErrorMessage?: string | null;
-  lastSyncErrorAt?: string | null;
-  lastWebhookAt?: string | null;
-  nextReconcileAt?: string | null;
-  scopes?: string[];
-  status?: "active" | "disconnected" | "reauthorization_required";
-  updatedAt?: string | null;
-}
-
 export class PrismaHostedConnectionStore {
   readonly prisma: PrismaClient;
+  private readonly providerAccountBlindIndexKey: Buffer | null;
 
-  constructor(input: { prisma: PrismaClient }) {
+  constructor(input: { prisma: PrismaClient; providerAccountBlindIndexKey?: Buffer | null }) {
     this.prisma = input.prisma;
+    this.providerAccountBlindIndexKey = input.providerAccountBlindIndexKey ?? null;
   }
 
   async upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): Promise<PublicDeviceSyncAccount> {
-    const ownerId = typeof input.ownerId === "string" && input.ownerId.trim() ? input.ownerId.trim() : null;
+    const ownerId = normalizeNullableString(input.ownerId);
     const displayName = normalizeNullableString(input.displayName);
     const connectedAt = new Date(input.connectedAt);
+    const providerAccountBlindIndex = this.buildProviderAccountBlindIndex(input.provider, input.externalAccountId);
 
     const record = await this.prisma.$transaction(async (tx) => {
       const existing = await tx.deviceConnection.findUnique({
         where: {
-          provider_externalAccountId: {
+          provider_providerAccountBlindIndex: {
             provider: input.provider,
-            externalAccountId: input.externalAccountId,
+            providerAccountBlindIndex,
           },
         },
         ...hostedConnectionRecordArgs,
@@ -95,7 +88,8 @@ export class PrismaHostedConnectionStore {
           },
           data: {
             connectedAt,
-            displayName,
+            nextReconcileAt: maybeDate(input.nextReconcileAt),
+            status: input.status ?? "active",
           },
           ...hostedConnectionRecordArgs,
         });
@@ -113,10 +107,11 @@ export class PrismaHostedConnectionStore {
       return tx.deviceConnection.create({
         data: {
           connectedAt,
-          displayName,
-          externalAccountId: input.externalAccountId,
           id: generateHostedRandomPrefixedId("dsc"),
+          nextReconcileAt: maybeDate(input.nextReconcileAt),
           provider: input.provider,
+          providerAccountBlindIndex,
+          status: input.status ?? "active",
           userId: ownerId,
         },
         ...hostedConnectionRecordArgs,
@@ -144,15 +139,19 @@ export class PrismaHostedConnectionStore {
   ): Promise<PublicDeviceSyncAccount | null> {
     const record = await this.prisma.deviceConnection.findUnique({
       where: {
-        provider_externalAccountId: {
+        provider_providerAccountBlindIndex: {
           provider,
-          externalAccountId,
+          providerAccountBlindIndex: this.buildProviderAccountBlindIndex(provider, externalAccountId),
         },
       },
       ...hostedConnectionRecordArgs,
     });
 
-    return record ? this.hydrateRuntimeConnectionRecord(record) : null;
+    return record
+      ? this.hydrateRuntimeConnectionRecord(record, {
+          externalAccountId,
+        })
+      : null;
   }
 
   async markWebhookReceived(accountId: string, now: string): Promise<void> {
@@ -161,6 +160,15 @@ export class PrismaHostedConnectionStore {
     if (!record) {
       return;
     }
+
+    await this.prisma.deviceConnection.update({
+      where: {
+        id: accountId,
+      },
+      data: {
+        lastWebhookAt: new Date(now),
+      },
+    });
 
     const controlClient = readHostedExecutionControlClientIfConfigured();
 
@@ -181,27 +189,47 @@ export class PrismaHostedConnectionStore {
     });
   }
 
+  async syncDurableConnectionState(
+    account: PublicDeviceSyncAccount,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<void> {
+    const prisma = tx ?? this.prisma;
+
+    await prisma.deviceConnection.update({
+      where: {
+        id: account.id,
+      },
+      data: {
+        status: account.status,
+        connectedAt: new Date(account.connectedAt),
+        lastWebhookAt: maybeDate(account.lastWebhookAt),
+        lastSyncStartedAt: maybeDate(account.lastSyncStartedAt),
+        lastSyncCompletedAt: maybeDate(account.lastSyncCompletedAt),
+        lastSyncErrorAt: maybeDate(account.lastSyncErrorAt),
+        lastErrorCode: normalizeNullableString(account.lastErrorCode),
+        lastErrorMessage: sanitizeHostedSqlErrorText(account.lastErrorMessage),
+        nextReconcileAt: maybeDate(account.nextReconcileAt),
+      },
+    });
+  }
+
   async listConnectionsForUser(userId: string): Promise<PublicDeviceSyncAccount[]> {
     const records = await this.listConnectionRecordsForUser(userId);
-
-    return this.buildDurableConnectionRecords(records);
+    return records.map((record) => this.buildDurableConnectionRecord(record));
   }
 
   async getConnectionForUser(userId: string, connectionId: string): Promise<PublicDeviceSyncAccount | null> {
     const record = await this.getConnectionRecordForUser(userId, connectionId);
-
     return record ? this.buildDurableConnectionRecord(record) : null;
   }
 
   async listRuntimeConnectionsForUser(userId: string): Promise<PublicDeviceSyncAccount[]> {
     const records = await this.listConnectionRecordsForUser(userId);
-
     return this.hydrateRuntimeConnectionRecords(records);
   }
 
   async getRuntimeConnectionForUser(userId: string, connectionId: string): Promise<PublicDeviceSyncAccount | null> {
     const record = await this.getConnectionRecordForUser(userId, connectionId);
-
     return record ? this.hydrateRuntimeConnectionRecord(record) : null;
   }
 
@@ -247,19 +275,33 @@ export class PrismaHostedConnectionStore {
     });
   }
 
-  private async buildDurableConnectionRecord(record: HostedConnectionRecord): Promise<PublicDeviceSyncAccount> {
-    const summaries = await this.listDurableConnectionSummaries(record.userId, [record.id]);
-    const summary = summaries.get(record.id);
+  private buildProviderAccountBlindIndex(provider: string, externalAccountId: string): string {
+    if (!this.providerAccountBlindIndexKey) {
+      throw new TypeError("Hosted device-sync provider account blind-index key is required.");
+    }
 
+    return buildHostedProviderAccountBlindIndex({
+      key: this.providerAccountBlindIndexKey,
+      provider,
+      externalAccountId,
+    });
+  }
+
+  private buildDurableConnectionRecord(record: HostedConnectionRecord): PublicDeviceSyncAccount {
     return toRedactedPublicDeviceSyncAccount(
       buildHostedPublicDeviceSyncAccount({
         record: mapHostedConnectionRecord(record),
-        fallback: buildHostedDurableConnectionFallback(record, summary),
       }),
     );
   }
 
-  private async hydrateRuntimeConnectionRecord(record: HostedConnectionRecord): Promise<PublicDeviceSyncAccount> {
+  private async hydrateRuntimeConnectionRecord(
+    record: HostedConnectionRecord,
+    fallback: {
+      externalAccountId?: string | null;
+      displayName?: string | null;
+    } = {},
+  ): Promise<PublicDeviceSyncAccount> {
     const controlClient = readHostedExecutionControlClientIfConfigured();
     const runtimeSnapshot = controlClient
       ? await controlClient.getDeviceSyncRuntimeSnapshot(record.userId, {
@@ -275,26 +317,9 @@ export class PrismaHostedConnectionStore {
       buildHostedPublicDeviceSyncAccount({
         record: mapHostedConnectionRecord(record),
         runtimeConnection,
+        fallback,
       }),
     );
-  }
-
-  private async buildDurableConnectionRecords(records: readonly HostedConnectionRecord[]): Promise<PublicDeviceSyncAccount[]> {
-    if (records.length === 0) {
-      return [];
-    }
-
-    const summaries = await this.listDurableConnectionSummaries(
-      records[0].userId,
-      records.map((record) => record.id),
-    );
-
-    return records.map((record) => toRedactedPublicDeviceSyncAccount(
-      buildHostedPublicDeviceSyncAccount({
-        record: mapHostedConnectionRecord(record),
-        fallback: buildHostedDurableConnectionFallback(record, summaries.get(record.id)),
-      }),
-    ));
   }
 
   private async hydrateRuntimeConnectionRecords(records: readonly HostedConnectionRecord[]): Promise<PublicDeviceSyncAccount[]> {
@@ -314,184 +339,23 @@ export class PrismaHostedConnectionStore {
       }),
     ));
   }
-
-  private async listDurableConnectionSummaries(
-    userId: string,
-    connectionIds: readonly string[],
-  ): Promise<Map<string, HostedDurableConnectionSummary>> {
-    const normalizedConnectionIds = [...new Set(connectionIds)];
-
-    if (normalizedConnectionIds.length === 0) {
-      return new Map();
-    }
-
-    const signalRecords = await this.prisma.deviceSyncSignal.findMany({
-      where: {
-        userId,
-        connectionId: {
-          in: normalizedConnectionIds,
-        },
-      },
-      orderBy: [{ id: "desc" }],
-      ...hostedConnectionSignalRecordArgs,
-    });
-    const summaries = new Map<string, HostedDurableConnectionSummary>();
-
-    for (const signalRecord of signalRecords) {
-      if (!signalRecord.connectionId) {
-        continue;
-      }
-
-      const summary = summaries.get(signalRecord.connectionId) ?? {};
-      applyHostedDurableSignalSummary(summary, signalRecord);
-      summaries.set(signalRecord.connectionId, summary);
-    }
-
-    return summaries;
-  }
 }
 
-function mapHostedConnectionRecord(record: HostedConnectionRecord): HostedStaticDeviceSyncConnectionRecord {
+export function mapHostedConnectionRecord(record: HostedConnectionRecord): HostedStaticDeviceSyncConnectionRecord {
   return {
     connectedAt: record.connectedAt.toISOString(),
     createdAt: record.createdAt.toISOString(),
-    displayName: normalizeNullableString(record.displayName),
-    externalAccountId: record.externalAccountId,
     id: record.id,
+    lastErrorCode: normalizeNullableString(record.lastErrorCode),
+    lastErrorMessage: sanitizeHostedSqlErrorText(record.lastErrorMessage),
+    lastSyncCompletedAt: maybeIsoTimestamp(record.lastSyncCompletedAt),
+    lastSyncErrorAt: maybeIsoTimestamp(record.lastSyncErrorAt),
+    lastSyncStartedAt: maybeIsoTimestamp(record.lastSyncStartedAt),
+    lastWebhookAt: maybeIsoTimestamp(record.lastWebhookAt),
+    nextReconcileAt: maybeIsoTimestamp(record.nextReconcileAt),
     provider: record.provider,
+    status: record.status as HostedStaticDeviceSyncConnectionRecord["status"],
     updatedAt: record.updatedAt.toISOString(),
     userId: record.userId,
   } satisfies HostedStaticDeviceSyncConnectionRecord;
-}
-
-function normalizeNullableString(value: string | null | undefined): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
-function buildHostedDurableConnectionFallback(
-  record: HostedConnectionRecord,
-  summary: HostedDurableConnectionSummary | undefined,
-): {
-  lastErrorCode?: string | null;
-  lastErrorMessage?: string | null;
-  lastSyncErrorAt?: string | null;
-  lastWebhookAt?: string | null;
-  nextReconcileAt?: string | null;
-  scopes?: readonly string[] | null;
-  status?: "active" | "disconnected" | "reauthorization_required";
-  updatedAt?: string | null;
-} {
-  const updatedAt = newestIsoTimestamp(summary?.updatedAt ?? null, record.updatedAt.toISOString());
-
-  return {
-    lastErrorCode: summary?.lastErrorCode ?? null,
-    lastErrorMessage: summary?.lastErrorMessage ?? null,
-    lastSyncErrorAt: summary?.lastSyncErrorAt ?? null,
-    lastWebhookAt: summary?.lastWebhookAt ?? null,
-    nextReconcileAt: summary?.nextReconcileAt ?? null,
-    scopes: summary?.scopes ?? [],
-    status: summary?.status ?? "active",
-    updatedAt,
-  };
-}
-
-function applyHostedDurableSignalSummary(
-  summary: HostedDurableConnectionSummary,
-  signalRecord: HostedConnectionSignalRecord,
-): void {
-  const signalCreatedAt = signalRecord.createdAt.toISOString();
-  const payload = asRecord(signalRecord.payloadJson);
-
-  summary.updatedAt = newestIsoTimestamp(summary.updatedAt ?? null, signalCreatedAt);
-
-  if (summary.scopes === undefined) {
-    const scopes = readStringList(payload.scopes);
-
-    if (scopes) {
-      summary.scopes = scopes;
-    }
-  }
-
-  if (summary.nextReconcileAt === undefined && payload.nextReconcileAt !== undefined) {
-    summary.nextReconcileAt = readNullableString(payload.nextReconcileAt);
-  }
-
-  if (signalRecord.kind === "webhook_hint" && summary.lastWebhookAt === undefined) {
-    summary.lastWebhookAt = readNullableString(payload.occurredAt) ?? signalCreatedAt;
-  }
-
-  if (summary.status === undefined) {
-    switch (signalRecord.kind) {
-      case "connected":
-        summary.status = "active";
-        break;
-      case "disconnected":
-        summary.status = "disconnected";
-        summary.nextReconcileAt = null;
-        applyHostedSignalErrorFields(summary, payload, signalCreatedAt);
-        break;
-      case "reauthorization_required":
-        summary.status = "reauthorization_required";
-        applyHostedSignalErrorFields(summary, payload, signalCreatedAt);
-        break;
-      default:
-        break;
-    }
-  }
-}
-
-function applyHostedSignalErrorFields(
-  summary: HostedDurableConnectionSummary,
-  payload: Record<string, unknown>,
-  signalCreatedAt: string,
-): void {
-  if (summary.lastSyncErrorAt === undefined) {
-    summary.lastSyncErrorAt = readNullableString(payload.occurredAt) ?? signalCreatedAt;
-  }
-
-  const warning = asRecord(payload.revokeWarning);
-  const code = readNullableString(payload.code) ?? readNullableString(warning.code);
-  const message = readNullableString(payload.message) ?? readNullableString(warning.message);
-
-  if (summary.lastErrorCode === undefined) {
-    summary.lastErrorCode = code ?? null;
-  }
-
-  if (summary.lastErrorMessage === undefined) {
-    summary.lastErrorMessage = message ?? null;
-  }
-}
-
-function readNullableString(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
-}
-
-function readStringList(value: unknown): string[] | null {
-  if (!Array.isArray(value)) {
-    return null;
-  }
-
-  const entries = value
-    .filter((entry): entry is string => typeof entry === "string")
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
-
-  return entries.length > 0 ? [...new Set(entries)] : [];
-}
-
-function newestIsoTimestamp(left: string | null, right: string | null): string | null {
-  if (!left) {
-    return right;
-  }
-
-  if (!right) {
-    return left;
-  }
-
-  return left >= right ? left : right;
 }

@@ -75,11 +75,17 @@ export class HostedDeviceSyncPublicIngressService {
                     accessTokenExpiresAt: tokenBundle.accessTokenExpiresAt,
                     metadata,
                   },
+                  externalAccountId: connection.externalAccountId,
                   tokenBundle,
                 }),
                 tokenBundle,
               },
             ],
+          });
+          await this.context.store.syncDurableConnectionState({
+            ...account,
+            accessTokenExpiresAt: tokenBundle.accessTokenExpiresAt,
+            metadata,
           });
 
           await handleHostedDeviceSyncConnectionEstablished({

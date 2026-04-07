@@ -31,6 +31,7 @@ import { PrismaHostedWebhookTraceStore } from "./prisma-store/webhook-traces";
 
 export {
   hostedConnectionRecordArgs,
+  mapHostedConnectionRecord,
   type HostedConnectionRecord,
 } from "./prisma-store/connections";
 export { generateHostedAgentBearerToken } from "./prisma-store/agent-sessions";
@@ -50,7 +51,6 @@ export class PrismaDeviceSyncControlPlaneStore
   implements DeviceSyncPublicIngressStore, HostedBrowserAssertionNonceStore
 {
   readonly prisma: PrismaClient;
-  readonly codec?: HostedSecretCodec;
   private readonly oauthSessions: PrismaHostedOAuthSessionStore;
   private readonly connections: PrismaHostedConnectionStore;
   private readonly webhookTraces: PrismaHostedWebhookTraceStore;
@@ -60,14 +60,17 @@ export class PrismaDeviceSyncControlPlaneStore
   private readonly localHeartbeats: PrismaHostedLocalHeartbeatStore;
   private readonly tokenAudits: PrismaHostedTokenAuditStore;
 
-  constructor(input: { prisma: PrismaClient; codec?: HostedSecretCodec }) {
+  constructor(input: { prisma: PrismaClient; codec?: HostedSecretCodec; providerAccountBlindIndexKey?: Buffer | null }) {
     this.prisma = input.prisma;
-    this.codec = input.codec;
     this.oauthSessions = new PrismaHostedOAuthSessionStore(this.prisma);
     this.connections = new PrismaHostedConnectionStore({
       prisma: this.prisma,
+      providerAccountBlindIndexKey: input.providerAccountBlindIndexKey,
     });
-    this.webhookTraces = new PrismaHostedWebhookTraceStore(this.prisma);
+    this.webhookTraces = new PrismaHostedWebhookTraceStore({
+      prisma: this.prisma,
+      providerAccountBlindIndexKey: input.providerAccountBlindIndexKey,
+    });
     this.signals = new PrismaHostedSignalStore(this.prisma);
     this.browserAssertionNonces = new PrismaHostedBrowserAssertionNonceStore(this.prisma);
     this.agentSessions = new PrismaHostedAgentSessionStore(this.prisma);
@@ -143,6 +146,10 @@ export class PrismaDeviceSyncControlPlaneStore
 
   async getConnectionRecordForUser(userId: string, connectionId: string) {
     return this.connections.getConnectionRecordForUser(userId, connectionId);
+  }
+
+  async syncDurableConnectionState(account: PublicDeviceSyncAccount, tx?: HostedPrismaTransactionClient): Promise<void> {
+    return this.connections.syncDurableConnectionState(account, tx);
   }
 
   async createSignal(input: CreateHostedSignalInput): Promise<HostedSignalRecord> {

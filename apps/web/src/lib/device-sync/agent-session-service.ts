@@ -1,4 +1,3 @@
-import { Prisma } from "@prisma/client";
 import { deviceSyncError, isDeviceSyncError } from "@murphai/device-syncd/public-ingress";
 
 import type {
@@ -23,14 +22,14 @@ import {
 } from "./internal-runtime";
 import { requireHostedDeviceSyncProvider } from "./providers";
 import {
-  type HostedConnectionRecord,
   hostedConnectionRecordArgs,
   type HostedAgentSessionRecord,
   type HostedPrismaTransactionClient,
+  mapHostedConnectionRecord,
   type UpdateLocalHeartbeatInput,
   PrismaDeviceSyncControlPlaneStore,
 } from "./prisma-store";
-import { parseInteger, toIsoTimestamp, toJsonRecord } from "./shared";
+import { parseInteger, toIsoTimestamp } from "./shared";
 
 const HOSTED_DEVICE_SYNC_AGENT_PAIR_PATH = "/api/device-sync/agents/pair";
 const TOKEN_REFRESH_LEEWAY_MS = 5 * 60_000;
@@ -147,9 +146,6 @@ export class HostedDeviceSyncAgentSessionService {
       tokenVersion: tokenBundle.tokenVersion,
       keyVersion: tokenBundle.keyVersion,
       createdAt: now,
-      metadata: {
-        exportedAt: now,
-      },
     });
 
     return {
@@ -204,6 +200,7 @@ export class HostedDeviceSyncAgentSessionService {
         record: staticConnection,
         runtimeConnection,
       });
+      const currentExternalAccountId = runtimeConnection?.connection.externalAccountId ?? null;
       const currentTokenBundle = requireHostedDeviceSyncRuntimeTokenBundle({
         connectionId,
         runtimeConnection,
@@ -226,12 +223,9 @@ export class HostedDeviceSyncAgentSessionService {
           tokenVersion: tokenBundle.tokenVersion,
           keyVersion: tokenBundle.keyVersion,
           createdAt: now,
-          metadata: {
-            expectedTokenVersion: options.expectedTokenVersion,
-            exportedAt: now,
-            refreshed: false,
-            tokenVersionChanged: true,
-          },
+          expectedTokenVersion: options.expectedTokenVersion,
+          refreshOutcome: "skipped_version_mismatch",
+          tokenVersionChanged: true,
           tx,
         });
 
@@ -256,12 +250,9 @@ export class HostedDeviceSyncAgentSessionService {
           tokenVersion: tokenBundle.tokenVersion,
           keyVersion: tokenBundle.keyVersion,
           createdAt: now,
-          metadata: {
-            exportedAt: now,
-            refreshed: false,
-            tokenVersionChanged: false,
-            force: forceRefresh,
-          },
+          forceRefresh,
+          refreshOutcome: "skipped_fresh",
+          tokenVersionChanged: false,
           tx,
         });
 
@@ -274,11 +265,21 @@ export class HostedDeviceSyncAgentSessionService {
         };
       }
 
+      if (!currentExternalAccountId) {
+        throw deviceSyncError({
+          code: "RUNTIME_STATE_CONFLICT",
+          message: `Hosted device-sync runtime is missing provider identity for connection ${connectionId}.`,
+          retryable: true,
+          httpStatus: 409,
+        });
+      }
+
       const provider = requireHostedDeviceSyncProvider(this.registry, currentConnection.provider);
       const refreshResult = await this.refreshProviderTokensWithStatusHandling({
         tx,
         account: composeHostedRuntimeDeviceSyncAccount({
           connection: currentConnection,
+          externalAccountId: currentExternalAccountId,
           tokenBundle: currentTokenBundle,
         }),
         currentTokenBundle,
@@ -313,6 +314,7 @@ export class HostedDeviceSyncAgentSessionService {
                 lastSyncErrorAt: null,
                 status: "active",
               },
+              externalAccountId: currentExternalAccountId,
               localState: {
                 lastErrorCode: null,
                 lastErrorMessage: null,
@@ -361,13 +363,15 @@ export class HostedDeviceSyncAgentSessionService {
       });
       const tokenVersionChanged = refreshedTokenBundle.tokenVersion !== currentTokenBundle.tokenVersion;
       const tokenBundle = buildTokenExport(refreshedTokenBundle, now);
+      const nextConnection = buildHostedPublicDeviceSyncAccount({
+        record: staticConnection,
+        runtimeConnection: refreshedRuntimeConnection,
+      });
+      await this.store.syncDurableConnectionState(nextConnection, tx);
 
       return {
         status: "success",
-        connection: buildHostedPublicDeviceSyncAccount({
-          record: staticConnection,
-          runtimeConnection: refreshedRuntimeConnection,
-        }),
+        connection: nextConnection,
         tokenBundle,
         refreshed: true,
         tokenVersionChanged,
@@ -389,10 +393,8 @@ export class HostedDeviceSyncAgentSessionService {
         tokenVersion: result.tokenBundle.tokenVersion,
         keyVersion: result.tokenBundle.keyVersion,
         createdAt: now,
-        metadata: {
-          exportedAt: now,
-          force: forceRefresh,
-        },
+        forceRefresh,
+        refreshOutcome: "performed",
       });
       await this.recordTokenAudit({
         userId: session.userId,
@@ -404,12 +406,9 @@ export class HostedDeviceSyncAgentSessionService {
         tokenVersion: result.tokenBundle.tokenVersion,
         keyVersion: result.tokenBundle.keyVersion,
         createdAt: now,
-        metadata: {
-          exportedAt: now,
-          force: forceRefresh,
-          refreshed: true,
-          tokenVersionChanged: result.tokenVersionChanged,
-        },
+        forceRefresh,
+        refreshOutcome: "performed",
+        tokenVersionChanged: result.tokenVersionChanged,
       });
     }
 
@@ -463,7 +462,10 @@ export class HostedDeviceSyncAgentSessionService {
     tokenVersion: number;
     keyVersion: string;
     createdAt: string;
-    metadata?: Record<string, unknown> | null;
+    expectedTokenVersion?: number | null;
+    forceRefresh?: boolean | null;
+    refreshOutcome?: "performed" | "skipped_fresh" | "skipped_version_mismatch" | null;
+    tokenVersionChanged?: boolean | null;
     tx?: HostedPrismaTransactionClient;
   }): Promise<void> {
     await this.store.createTokenAudit({
@@ -476,7 +478,10 @@ export class HostedDeviceSyncAgentSessionService {
       tokenVersion: input.tokenVersion,
       keyVersion: input.keyVersion,
       createdAt: input.createdAt,
-      metadata: input.metadata ?? null,
+      expectedTokenVersion: input.expectedTokenVersion ?? null,
+      forceRefresh: input.forceRefresh ?? null,
+      refreshOutcome: input.refreshOutcome ?? null,
+      tokenVersionChanged: input.tokenVersionChanged ?? null,
       tx: input.tx,
     });
   }
@@ -546,6 +551,7 @@ export class HostedDeviceSyncAgentSessionService {
               },
               seed: buildHostedDeviceSyncRuntimeSeedFromPublicAccount({
                 account: seedAccount,
+                externalAccountId: input.account.externalAccountId,
                 localState: {
                   lastErrorCode: error.code,
                   lastErrorMessage: error.message,
@@ -560,20 +566,21 @@ export class HostedDeviceSyncAgentSessionService {
             },
           ],
         });
-        await input.tx.deviceSyncSignal.create({
-          data: {
-            userId: input.userId,
-            connectionId: input.account.id,
-            provider: input.account.provider,
-            kind: error.accountStatus === "disconnected" ? "disconnected" : "reauthorization_required",
-            payloadJson: toJsonRecord({
-              reason: "token_refresh_failed",
-              code: error.code,
-              message: error.message,
-            }) as Prisma.InputJsonObject,
-            createdAt: new Date(input.now),
+        await this.store.createSignal({
+          userId: input.userId,
+          connectionId: input.account.id,
+          provider: input.account.provider,
+          kind: error.accountStatus === "disconnected" ? "disconnected" : "reauthorization_required",
+          occurredAt: input.now,
+          reason: "token_refresh_failed",
+          revokeWarning: {
+            code: error.code,
+            message: error.message,
           },
+          createdAt: input.now,
+          tx: input.tx,
         });
+        await this.store.syncDurableConnectionState(seedAccount, input.tx);
       }
 
       return {
@@ -582,28 +589,6 @@ export class HostedDeviceSyncAgentSessionService {
       };
     }
   }
-}
-
-function mapHostedConnectionRecord(record: HostedConnectionRecord): {
-  connectedAt: string;
-  createdAt: string;
-  displayName: string | null;
-  externalAccountId: string;
-  id: string;
-  provider: string;
-  updatedAt: string;
-  userId: string;
-} {
-  return {
-    connectedAt: record.connectedAt.toISOString(),
-    createdAt: record.createdAt.toISOString(),
-    displayName: record.displayName,
-    externalAccountId: record.externalAccountId,
-    id: record.id,
-    provider: record.provider,
-    updatedAt: record.updatedAt.toISOString(),
-    userId: record.userId,
-  };
 }
 
 function buildTokenExport(

@@ -29,6 +29,7 @@ export function createHostedDeviceSyncControlPlaneContext(
     env,
     registry: createHostedDeviceSyncRegistry(env),
     store: new PrismaDeviceSyncControlPlaneStore({
+      providerAccountBlindIndexKey: env.encryptionKey,
       prisma: getPrisma(),
     }),
     publicIngressBaseUrl: publicBaseUrl.baseUrl,

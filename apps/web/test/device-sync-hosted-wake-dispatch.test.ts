@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   readHostedDeviceSyncEnvironment: vi.fn(),
   registryGet: vi.fn(),
   registryList: vi.fn(),
+  syncDurableConnectionState: vi.fn(),
   prismaTx: {
     __tx: true,
     deviceSyncSignal: {
@@ -163,6 +164,16 @@ function buildHostedConnection(
   };
 }
 
+function buildBrowserConnection(
+  overrides: Parameters<typeof buildHostedConnection>[0] = {},
+): Omit<ReturnType<typeof buildHostedConnection>, "externalAccountId"> {
+  const connection = Object.fromEntries(
+    Object.entries(buildHostedConnection(overrides)).filter(([key]) => key !== "externalAccountId"),
+  );
+
+  return connection as Omit<ReturnType<typeof buildHostedConnection>, "externalAccountId">;
+}
+
 vi.mock("@/src/lib/device-sync/providers", () => ({
   createHostedDeviceSyncRegistry: vi.fn(() => ({
     get: mocks.registryGet,
@@ -180,6 +191,7 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
     getConnectionOwnerId = mocks.getConnectionOwnerId;
     listConnectionsForUser = mocks.listConnectionsForUser;
     listRuntimeConnectionsForUser = mocks.listRuntimeConnectionsForUser;
+    syncDurableConnectionState = mocks.syncDurableConnectionState;
     prisma = mocks.prisma;
   },
   generateHostedAgentBearerToken: vi.fn(),
@@ -187,6 +199,8 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
 }));
 
 vi.mock("@/src/lib/device-sync/shared", () => ({
+  normalizeNullableString: vi.fn((value: unknown) =>
+    typeof value === "string" && value.trim().length > 0 ? value.trim() : null),
   parseInteger: vi.fn(),
   sha256Hex: vi.fn(),
   toIsoTimestamp: vi.fn(() => "2026-03-26T12:00:00.000Z"),
@@ -424,17 +438,20 @@ describe("dispatchHostedDeviceSyncWake", () => {
       userId: "user-123",
     });
 
-    expect(mocks.prismaTx.deviceSyncSignal.create).toHaveBeenCalledWith({
-      data: {
-        connectionId: "dsc_123",
-        createdAt: new Date("2026-03-26T12:00:00.000Z"),
-        kind: "connected",
-        payloadJson: {
-          occurredAt: "2026-03-26T12:00:00.000Z",
-        },
-        provider: "oura",
-        userId: "user-123",
-      },
+    expect(mocks.createSignal).toHaveBeenCalledWith({
+      connectionId: "dsc_123",
+      createdAt: "2026-03-26T12:00:00.000Z",
+      eventType: null,
+      kind: "connected",
+      nextReconcileAt: null,
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      provider: "oura",
+      reason: null,
+      resourceCategory: null,
+      revokeWarning: null,
+      traceId: null,
+      tx: mocks.prismaTx,
+      userId: "user-123",
     });
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -471,18 +488,20 @@ describe("dispatchHostedDeviceSyncWake", () => {
       userId: "user-123",
     });
 
-    expect(mocks.prismaTx.deviceSyncSignal.create).toHaveBeenCalledWith({
-      data: {
-        connectionId: "dsc_123",
-        createdAt: new Date("2026-03-26T12:00:00.000Z"),
-        kind: "webhook_hint",
-        payloadJson: {
-          occurredAt: "2026-03-26T12:00:00.000Z",
-          traceId: "trace_123",
-        },
-        provider: "oura",
-        userId: "user-123",
-      },
+    expect(mocks.createSignal).toHaveBeenCalledWith({
+      connectionId: "dsc_123",
+      createdAt: "2026-03-26T12:00:00.000Z",
+      eventType: null,
+      kind: "webhook_hint",
+      nextReconcileAt: null,
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      provider: "oura",
+      reason: null,
+      resourceCategory: null,
+      revokeWarning: null,
+      traceId: "trace_123",
+      tx: mocks.prismaTx,
+      userId: "user-123",
     });
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -517,17 +536,20 @@ describe("dispatchHostedDeviceSyncWake", () => {
       userId: "user-123",
     });
 
-    expect(mocks.prismaTx.deviceSyncSignal.create).toHaveBeenCalledWith({
-      data: {
-        connectionId: "dsc_123",
-        createdAt: new Date("2026-03-26T12:00:00.000Z"),
-        kind: "disconnected",
-        payloadJson: {
-          occurredAt: "2026-03-26T12:00:00.000Z",
-        },
-        provider: "oura",
-        userId: "user-123",
-      },
+    expect(mocks.createSignal).toHaveBeenCalledWith({
+      connectionId: "dsc_123",
+      createdAt: "2026-03-26T12:00:00.000Z",
+      eventType: null,
+      kind: "disconnected",
+      nextReconcileAt: null,
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      provider: "oura",
+      reason: null,
+      resourceCategory: null,
+      revokeWarning: null,
+      traceId: null,
+      tx: mocks.prismaTx,
+      userId: "user-123",
     });
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -579,10 +601,10 @@ describe("dispatchHostedDeviceSyncWake", () => {
         connectionId: "dsc_123",
         createdAt: "2026-03-26T12:00:00.000Z",
         kind: "disconnected",
-        payload: {
-          reason: "user_disconnect",
-        },
+        occurredAt: "2026-03-26T12:00:00.000Z",
         provider: "oura",
+        reason: "user_disconnect",
+        revokeWarning: null,
         tx: mocks.prismaTx,
         userId: "user-123",
       }),
@@ -605,7 +627,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
     );
   });
 
-  it("seeds a missing runtime connection during disconnect and clears escrow in one apply call", async () => {
+  it("fails disconnect when the runtime no longer has provider identity to reseed", async () => {
     const controlPlane = new HostedDeviceSyncControlPlane(
       new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
     );
@@ -624,29 +646,13 @@ describe("dispatchHostedDeviceSyncWake", () => {
     });
     const publicConnectionId = controlPlane.createBrowserConnectionId("dsc_123");
 
-    await expect(controlPlane.disconnectConnection("user-123", publicConnectionId)).resolves.toMatchObject({
-      connection: {
-        id: publicConnectionId,
-        provider: "oura",
-        status: "disconnected",
-      },
-    });
-
-    expect(mocks.applyDeviceSyncRuntimeUpdates).toHaveBeenCalledTimes(1);
-    expect(mocks.getDeviceSyncRuntimeSnapshot).toHaveBeenCalledTimes(1);
-    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
-    expect(mocks.applyDeviceSyncRuntimeUpdates).toHaveBeenCalledWith(
-      "user-123",
-      expect.objectContaining({
-        updates: [
-          expect.objectContaining({
-            connectionId: "dsc_123",
-            seed: expect.any(Object),
-            tokenBundle: null,
-          }),
-        ],
-      }),
+    await expect(controlPlane.disconnectConnection("user-123", publicConnectionId)).rejects.toThrow(
+      "Hosted device-sync runtime is missing provider identity for connection dsc_123.",
     );
+
+    expect(mocks.getDeviceSyncRuntimeSnapshot).toHaveBeenCalledTimes(1);
+    expect(mocks.applyDeviceSyncRuntimeUpdates).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
   it("returns opaque browser connection ids and omits external account ids from browser reads", async () => {
@@ -654,26 +660,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
       new Request("https://control.example.test/api/settings/device-sync"),
     );
     mocks.listConnectionsForUser.mockResolvedValue([
-      {
-        id: "dsc_123",
-        provider: "oura",
-        externalAccountId: "acct_sensitive",
-        displayName: "Oura",
-        status: "active",
-        scopes: ["heartrate"],
-        accessTokenExpiresAt: null,
-        metadata: {},
-        connectedAt: "2026-03-26T12:00:00.000Z",
-        lastWebhookAt: null,
-        lastSyncStartedAt: null,
-        lastSyncCompletedAt: null,
-        lastSyncErrorAt: null,
-        lastErrorCode: null,
-        lastErrorMessage: null,
-        nextReconcileAt: null,
-        createdAt: "2026-03-26T12:00:00.000Z",
-        updatedAt: "2026-03-26T12:00:00.000Z",
-      },
+      buildBrowserConnection(),
     ]);
 
     await expect(controlPlane.listConnections("user-123")).resolves.toEqual({
@@ -707,26 +694,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
       new Request("https://control.example.test/api/settings/device-sync/connections/dspc_demo/status"),
     );
     mocks.listConnectionsForUser.mockResolvedValue([
-      {
-        id: "dsc_123",
-        provider: "oura",
-        externalAccountId: "acct_sensitive",
-        displayName: "Oura",
-        status: "active",
-        scopes: ["heartrate"],
-        accessTokenExpiresAt: null,
-        metadata: {},
-        connectedAt: "2026-03-26T12:00:00.000Z",
-        lastWebhookAt: null,
-        lastSyncStartedAt: null,
-        lastSyncCompletedAt: null,
-        lastSyncErrorAt: null,
-        lastErrorCode: null,
-        lastErrorMessage: null,
-        nextReconcileAt: null,
-        createdAt: "2026-03-26T12:00:00.000Z",
-        updatedAt: "2026-03-26T12:00:00.000Z",
-      },
+      buildBrowserConnection(),
     ]);
     const publicConnectionId = controlPlane.createBrowserConnectionId("dsc_123");
 
@@ -781,15 +749,32 @@ describe("dispatchHostedDeviceSyncWake", () => {
         connectionId: "dsc_123",
         createdAt: "2026-03-26T12:00:00.000Z",
         kind: "connected",
-        payload: {
-          jobs: [],
-          nextReconcileAt: null,
-          occurredAt: "2026-03-26T12:00:00.000Z",
-          scopes: ["heartrate"],
-        },
+        nextReconcileAt: null,
+        occurredAt: "2026-03-26T12:00:00.000Z",
         provider: "oura",
         tx: mocks.prismaTx,
         userId: "user-123",
+      }),
+    );
+    expect(mocks.syncDurableConnectionState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accessTokenExpiresAt: null,
+        connectedAt: "2026-03-26T12:00:00.000Z",
+        createdAt: "2026-03-26T12:00:00.000Z",
+        displayName: "Oura",
+        id: "dsc_123",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: null,
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: null,
+        lastWebhookAt: null,
+        metadata: {},
+        nextReconcileAt: null,
+        provider: "oura",
+        scopes: ["heartrate"],
+        status: "active",
+        updatedAt: "2026-03-26T12:00:00.000Z",
       }),
     );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
@@ -865,35 +850,40 @@ describe("dispatchHostedDeviceSyncWake", () => {
     await controlPlane.handleWebhook("oura");
 
     const signalInput = mocks.createSignal.mock.calls[0]?.[0];
+    const dispatchedHint = mocks.enqueueHostedExecutionOutbox.mock.calls[0]?.[0]?.dispatch?.event?.hint;
 
     expect(mocks.createSignal).toHaveBeenCalledWith(
       {
         connectionId: "dsc_123",
         kind: "webhook_hint",
-        payload: {
-          eventType: "sleep.updated",
-          jobs: [
-            {
-              dedupeKey: expect.any(String),
-              kind: "reconcile",
-              payload: {
-                windowStart: "2026-03-19T00:00:00.000Z",
-              },
-            },
-          ],
-          occurredAt: "2026-03-26T11:59:00.000Z",
-          resourceCategory: "daily_sleep",
-          traceId: "trace_123",
-        },
+        eventType: "sleep.updated",
+        occurredAt: "2026-03-26T11:59:00.000Z",
+        resourceCategory: "daily_sleep",
+        traceId: "trace_123",
         userId: "user-123",
         provider: "oura",
         createdAt: "2026-03-26T12:00:00.000Z",
         tx: mocks.prismaTx,
       },
     );
-    expect(JSON.stringify(signalInput?.payload ?? {})).not.toContain("provider-secret-token");
-    expect(JSON.stringify(signalInput?.payload ?? {})).not.toContain("123-45-6789");
-    expect(JSON.stringify(signalInput?.payload ?? {})).not.toContain("job-secret-refresh-token");
+    expect(JSON.stringify(signalInput ?? {})).not.toContain("provider-secret-token");
+    expect(JSON.stringify(signalInput ?? {})).not.toContain("123-45-6789");
+    expect(JSON.stringify(signalInput ?? {})).not.toContain("job-secret-refresh-token");
+    expect(dispatchedHint).toEqual({
+      eventType: "sleep.updated",
+      jobs: [
+        {
+          dedupeKey: expect.any(String),
+          kind: "reconcile",
+          payload: {
+            windowStart: "2026-03-19T00:00:00.000Z",
+          },
+        },
+      ],
+      occurredAt: "2026-03-26T11:59:00.000Z",
+      resourceCategory: "daily_sleep",
+      traceId: "trace_123",
+    });
     expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", mocks.prismaTx);
     expect(mocks.enqueueHostedExecutionOutbox.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.createSignal.mock.invocationCallOrder[0],
@@ -1007,7 +997,8 @@ describe("dispatchHostedDeviceSyncWake", () => {
     await controlPlane.handleWebhook("oura");
 
     const signalInput = mocks.createSignal.mock.calls[0]?.[0];
-    const signalJson = JSON.stringify(signalInput?.payload ?? {});
+    const signalJson = JSON.stringify(signalInput ?? {});
+    const dispatchedHint = mocks.enqueueHostedExecutionOutbox.mock.calls[0]?.[0]?.dispatch?.event?.hint;
 
     expect(signalJson).not.toContain("provider-secret-token");
     expect(signalJson).not.toContain("job-auth-secret");
@@ -1017,7 +1008,13 @@ describe("dispatchHostedDeviceSyncWake", () => {
     expect(signalJson).not.toContain("provider-verification-token");
     expect(signalJson).not.toContain("job-next-page-token");
     expect(signalJson).not.toContain("array-secret-token");
-    expect(signalInput?.payload).toEqual({
+    expect(signalInput).toEqual(expect.objectContaining({
+      eventType: "sleep.updated",
+      occurredAt: "2026-03-26T11:59:00.000Z",
+      resourceCategory: null,
+      traceId: "trace_case_123",
+    }));
+    expect(dispatchedHint).toEqual({
       eventType: "sleep.updated",
       jobs: [
         {
@@ -1107,12 +1104,19 @@ describe("dispatchHostedDeviceSyncWake", () => {
     await controlPlane.handleWebhook("whoop");
 
     const signalInput = mocks.createSignal.mock.calls[0]?.[0];
-    const signalJson = JSON.stringify(signalInput?.payload ?? {});
+    const signalJson = JSON.stringify(signalInput ?? {});
+    const dispatchedHint = mocks.enqueueHostedExecutionOutbox.mock.calls[0]?.[0]?.dispatch?.event?.hint;
 
     expect(signalJson).not.toContain("whoop-session-secret");
     expect(signalJson).not.toContain("drop-me");
     expect(signalJson).not.toContain("drop-trace");
-    expect(signalInput?.payload).toEqual({
+    expect(signalInput).toEqual(expect.objectContaining({
+      eventType: "workout.updated",
+      occurredAt: "2026-03-26T11:59:00.000Z",
+      resourceCategory: "workout",
+      traceId: "trace_whoop_123",
+    }));
+    expect(dispatchedHint).toEqual({
       eventType: "workout.updated",
       jobs: [
         {
@@ -1243,8 +1247,8 @@ describe("dispatchHostedDeviceSyncWake", () => {
 
     await controlPlane.handleWebhook("oura");
 
-    const signalInput = mocks.createSignal.mock.calls[0]?.[0];
-    const hintJob = Array.isArray(signalInput?.payload?.jobs) ? signalInput.payload.jobs[0] : null;
+    const dispatchedHint = mocks.enqueueHostedExecutionOutbox.mock.calls[0]?.[0]?.dispatch?.event?.hint;
+    const hintJob = Array.isArray(dispatchedHint?.jobs) ? dispatchedHint.jobs[0] : null;
     const hintPayload =
       hintJob && typeof hintJob === "object" && "payload" in hintJob
         ? (hintJob.payload as Record<string, unknown>)
@@ -1271,7 +1275,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
     expect(hintPayload).not.toHaveProperty("windowStart");
     expect(hintPayload).not.toHaveProperty("windowEnd");
     expect(hintPayload).not.toHaveProperty("includePersonalInfo");
-    expect(signalInput?.payload?.traceId).toBe("trace_delete_123");
+    expect(dispatchedHint?.traceId).toBe("trace_delete_123");
   });
 
   it("resolves runtime-snapshot webhook admin upkeep from active connections only once per provider", async () => {

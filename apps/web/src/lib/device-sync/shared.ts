@@ -19,6 +19,13 @@ export function normalizeNullableString(value: string | null | undefined): strin
   return normalized ? normalized : null;
 }
 
+// Keep durable hosted SQL free of provider-sourced free-form text.
+// Runtime-only operational paths may still carry human-readable messages.
+export function sanitizeHostedSqlErrorText(_value: string | null | undefined): string | null {
+  void _value;
+  return null;
+}
+
 export function parseCommaSeparatedList(value: string | null | undefined): string[] {
   if (typeof value !== "string") {
     return [];

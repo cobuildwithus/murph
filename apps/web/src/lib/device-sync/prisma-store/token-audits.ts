@@ -1,8 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 
-import { toJsonRecord } from "../shared";
-import { toNullablePrismaJsonValue } from "./prisma-json";
 import type { CreateHostedTokenAuditInput, HostedTokenAuditRecord } from "./types";
 
 type HostedTokenAuditPrismaRecord = Prisma.DeviceTokenAuditGetPayload<Prisma.DeviceTokenAuditDefaultArgs>;
@@ -26,7 +24,10 @@ export class PrismaHostedTokenAuditStore {
         sessionId: input.sessionId ?? null,
         tokenVersion: input.tokenVersion,
         keyVersion: input.keyVersion,
-        metadataJson: toNullablePrismaJsonValue(input.metadata),
+        expectedTokenVersion: input.expectedTokenVersion ?? null,
+        forceRefresh: input.forceRefresh ?? null,
+        refreshOutcome: input.refreshOutcome ?? null,
+        tokenVersionChanged: input.tokenVersionChanged ?? null,
         createdAt: input.createdAt ? new Date(input.createdAt) : new Date(),
       },
     });
@@ -47,7 +48,10 @@ function mapHostedTokenAuditRecord(record: HostedTokenAuditPrismaRecord): Hosted
     sessionId: record.sessionId,
     tokenVersion: record.tokenVersion,
     keyVersion: record.keyVersion,
-    metadata: toJsonRecord(record.metadataJson),
+    expectedTokenVersion: record.expectedTokenVersion,
+    forceRefresh: record.forceRefresh,
+    refreshOutcome: record.refreshOutcome as HostedTokenAuditRecord["refreshOutcome"],
+    tokenVersionChanged: record.tokenVersionChanged,
     createdAt: record.createdAt.toISOString(),
   } satisfies HostedTokenAuditRecord;
 }

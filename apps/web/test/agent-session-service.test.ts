@@ -106,6 +106,71 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
     const store: PrismaDeviceSyncControlPlaneStore = Object.assign(
       Object.create(PrismaDeviceSyncControlPlaneStore.prototype),
       {
+        async createSignal(input: {
+          connectionId?: string | null;
+          createdAt?: string;
+          eventType?: string | null;
+          kind: string;
+          occurredAt?: string | null;
+          provider: string;
+          reason?: string | null;
+          resourceCategory?: string | null;
+          revokeWarning?: { code?: string | null; message?: string | null } | null;
+          traceId?: string | null;
+          tx?: typeof tx;
+          userId: string;
+        }) {
+          return ((input.tx ?? tx).deviceSyncSignal.create as unknown as (payload: {
+            data: Record<string, unknown>;
+          }) => Promise<unknown>)({
+            data: {
+              connectionId: input.connectionId ?? null,
+              createdAt: new Date(input.createdAt ?? "2026-04-01T00:10:00.000Z"),
+              eventType: input.eventType ?? null,
+              kind: input.kind,
+              occurredAt: input.occurredAt ? new Date(input.occurredAt) : null,
+              provider: input.provider,
+              reason: input.reason ?? null,
+              resourceCategory: input.resourceCategory ?? null,
+              revokeWarningCode: input.revokeWarning?.code ?? null,
+              revokeWarningMessage: null,
+              traceId: input.traceId ?? null,
+              userId: input.userId,
+            },
+          });
+        },
+        async syncDurableConnectionState(account: {
+          connectedAt: string;
+          id: string;
+          lastErrorCode: string | null;
+          lastErrorMessage: string | null;
+          lastSyncCompletedAt: string | null;
+          lastSyncErrorAt: string | null;
+          lastSyncStartedAt: string | null;
+          lastWebhookAt: string | null;
+          nextReconcileAt: string | null;
+          status: string;
+        }, txArg: typeof tx) {
+          await (txArg.deviceConnection.update as unknown as (input: {
+            data: Record<string, unknown>;
+            where: { id: string };
+          }) => Promise<unknown>)({
+            where: {
+              id: account.id,
+            },
+            data: {
+              status: account.status,
+              connectedAt: new Date(account.connectedAt),
+              lastWebhookAt: account.lastWebhookAt ? new Date(account.lastWebhookAt) : null,
+              lastSyncStartedAt: account.lastSyncStartedAt ? new Date(account.lastSyncStartedAt) : null,
+              lastSyncCompletedAt: account.lastSyncCompletedAt ? new Date(account.lastSyncCompletedAt) : null,
+              lastSyncErrorAt: account.lastSyncErrorAt ? new Date(account.lastSyncErrorAt) : null,
+              lastErrorCode: account.lastErrorCode,
+              lastErrorMessage: null,
+              nextReconcileAt: account.nextReconcileAt ? new Date(account.nextReconcileAt) : null,
+            },
+          });
+        },
         async withConnectionRefreshLock<TResult>(
           _connectionId: string,
           callback: (tx: HostedPrismaTransactionClient) => Promise<TResult>,
@@ -127,8 +192,39 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
       accountStatus: "reauthorization_required",
     });
 
-    expect(tx.deviceConnection.update).not.toHaveBeenCalled();
+    expect(tx.deviceConnection.update).toHaveBeenCalledWith({
+      where: {
+        id: "conn-1",
+      },
+      data: {
+        connectedAt: new Date("2026-03-20T00:00:00.000Z"),
+        lastErrorCode: "WHOOP_REFRESH_TOKEN_MISSING",
+        lastErrorMessage: null,
+        lastSyncCompletedAt: null,
+        lastSyncErrorAt: expect.any(Date),
+        lastSyncStartedAt: null,
+        lastWebhookAt: null,
+        nextReconcileAt: null,
+        status: "reauthorization_required",
+      },
+    });
     expect(tx.deviceSyncSignal.create).toHaveBeenCalledTimes(1);
+    expect(tx.deviceSyncSignal.create).toHaveBeenCalledWith({
+      data: {
+        connectionId: "conn-1",
+        createdAt: expect.any(Date),
+        eventType: null,
+        kind: "reauthorization_required",
+        occurredAt: expect.any(Date),
+        provider: "whoop",
+        reason: "token_refresh_failed",
+        resourceCategory: null,
+        revokeWarningCode: "WHOOP_REFRESH_TOKEN_MISSING",
+        revokeWarningMessage: null,
+        traceId: null,
+        userId: "user-1",
+      },
+    });
     expect(mocks.applyDeviceSyncRuntimeUpdates).toHaveBeenCalledTimes(1);
     expect(mocks.applyDeviceSyncRuntimeUpdates).toHaveBeenCalledWith("user-1", {
       occurredAt: expect.any(String),
