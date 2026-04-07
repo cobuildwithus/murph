@@ -10,6 +10,7 @@ export async function main() {
   await verifyTypecheckScripts(failures);
   await verifyTypecheckTsconfigs(failures);
   await verifyWorkspacePackageExports(failures);
+  await verifyWorkspacePackageExportTargets(failures);
   await verifyTsconfigPathMappings(failures);
   await verifyWorkspaceImports(failures);
 
@@ -70,12 +71,48 @@ async function verifyWorkspacePackageExports(failures) {
     const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
 
     for (const exportKey of Object.keys(packageJson.exports ?? {})) {
-      if (exportKey !== "./assistant/*") {
+      if (exportKey === "./assistant/*") {
+        failures.push(
+          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; assistant/* is an internal namespace and must be surfaced through dedicated top-level package exports instead.`,
+        );
+      }
+
+      if (
+        packageJson.name === "@murphai/assistant-engine"
+        && isAssistantEngineWildcardHelperNamespace(exportKey)
+      ) {
+        failures.push(
+          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; assistant-engine helper namespaces must stay on explicit named exports so inbox and usecase internals do not become ambient package surface.`,
+        );
+      }
+    }
+  }
+}
+
+async function verifyWorkspacePackageExportTargets(failures) {
+  const packageJsonPaths = await findFiles(["packages", "apps"], (filePath) =>
+    path.basename(filePath) === "package.json",
+  );
+
+  for (const packageJsonPath of packageJsonPaths) {
+    const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
+    const packageDir = path.dirname(packageJsonPath);
+
+    for (const [exportKey, exportTarget] of listWorkspaceExportTargets(packageJson.exports ?? {})) {
+      if (
+        typeof exportTarget !== "string"
+        || exportTarget.includes("*")
+        || !exportTarget.startsWith("./dist/")
+      ) {
+        continue;
+      }
+
+      if (await workspaceExportTargetHasSourceModule(packageDir, exportTarget)) {
         continue;
       }
 
       failures.push(
-        `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; assistant/* is an internal namespace and must be surfaced through dedicated top-level package exports instead.`,
+        `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} -> ${JSON.stringify(exportTarget)}, but no matching owner source module exists. Remove the stale public entrypoint or restore its source file.`,
       );
     }
   }
@@ -393,6 +430,88 @@ async function findFiles(searchRoots, predicate) {
   }
 
   return files;
+}
+
+function listWorkspaceExportTargets(exportsField) {
+  if (!exportsField || typeof exportsField !== "object" || Array.isArray(exportsField)) {
+    return [];
+  }
+
+  return Object.entries(exportsField).flatMap(([exportKey, exportValue]) =>
+    collectWorkspaceExportTargets(exportValue).map((exportTarget) => [exportKey, exportTarget]),
+  );
+}
+
+function isAssistantEngineWildcardHelperNamespace(exportKey) {
+  return (
+    /^\.\/inbox-services(?:\/.+)?\/\*$/u.test(exportKey)
+    || /^\.\/usecases(?:\/.+)?\/\*$/u.test(exportKey)
+  );
+}
+
+function collectWorkspaceExportTargets(exportValue) {
+  if (typeof exportValue === "string") {
+    return [exportValue];
+  }
+
+  if (Array.isArray(exportValue)) {
+    return exportValue.flatMap((entry) => collectWorkspaceExportTargets(entry));
+  }
+
+  if (exportValue && typeof exportValue === "object") {
+    return Object.values(exportValue).flatMap((entry) => collectWorkspaceExportTargets(entry));
+  }
+
+  return [];
+}
+
+async function workspaceExportTargetHasSourceModule(packageDir, exportTarget) {
+  for (const candidatePath of resolveWorkspaceExportSourceCandidates(packageDir, exportTarget)) {
+    if (await pathExists(candidatePath)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function resolveWorkspaceExportSourceCandidates(packageDir, exportTarget) {
+  const sourceStem = stripWorkspaceBuildOutputExtension(exportTarget.slice("./dist/".length));
+  const baseCandidates = [
+    path.join(packageDir, "src", sourceStem),
+    path.join(packageDir, sourceStem),
+  ];
+  const fileExtensions = [
+    ".ts",
+    ".tsx",
+    ".mts",
+    ".cts",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+  ];
+  const indexFiles = [
+    "index.ts",
+    "index.tsx",
+    "index.mts",
+    "index.cts",
+    "index.js",
+    "index.jsx",
+    "index.mjs",
+    "index.cjs",
+  ];
+
+  return baseCandidates.flatMap((basePath) => [
+    ...fileExtensions.map((extension) => `${basePath}${extension}`),
+    ...indexFiles.map((indexFile) => path.join(basePath, indexFile)),
+  ]);
+}
+
+function stripWorkspaceBuildOutputExtension(value) {
+  return value
+    .replace(/\.d\.ts$/u, "")
+    .replace(/\.[cm]?jsx?$/u, "");
 }
 
 async function findFilesRecursive(directoryPath, predicate) {
