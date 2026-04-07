@@ -69,6 +69,7 @@ export interface AssistantProviderTurnInput {
   apiKeyEnv?: string | null
   baseUrl?: string | null
   codexCommand?: string | null
+  codexHome?: string | null
   continuityContext?: string | null
   conversationMessages?: ReadonlyArray<{
     content: string | AssistantUserMessageContentPart[]

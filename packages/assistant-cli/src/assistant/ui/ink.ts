@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import path from 'node:path'
 import tty from 'node:tty'
 import * as React from 'react'
 import { Box, render } from 'ink'
@@ -204,7 +205,18 @@ export async function runAssistantChatWithInk(
     resolved.session.sessionId,
   )
   const redactedVault = redactAssistantDisplayPath(input.vault)
+  const codexHomeForDisplay =
+    resolved.session.provider === 'codex-cli'
+      ? (
+          resolved.session.providerOptions.codexHome ??
+          selectedProviderDefaults?.codexHome ??
+          null
+        )
+      : null
   const codexDisplay = await resolveCodexDisplayOptions({
+    configPath: codexHomeForDisplay
+      ? path.join(codexHomeForDisplay, 'config.toml')
+      : undefined,
     model:
       input.model ??
       selectedProviderDefaults?.model ??

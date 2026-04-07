@@ -425,6 +425,7 @@ async function executeAssistantProviderAttempt(input: {
         attemptPlan.route.codexCommand ??
         executionPlan.input.codexCommand ??
         undefined,
+      codexHome: attemptPlan.route.providerOptions.codexHome,
       model: attemptPlan.route.providerOptions.model,
       reasoningEffort: attemptPlan.route.providerOptions.reasoningEffort,
       sandbox: attemptPlan.route.providerOptions.sandbox,

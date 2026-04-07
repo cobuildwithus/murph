@@ -132,6 +132,7 @@ export const setupConfiguredAssistantSchema = z.object({
   apiKeyEnv: z.string().min(1).nullable(),
   providerName: z.string().min(1).nullable(),
   codexCommand: z.string().min(1).nullable(),
+  codexHome: z.string().min(1).nullable().optional(),
   profile: z.string().min(1).nullable(),
   reasoningEffort: z.string().min(1).nullable(),
   sandbox: z.enum(assistantSandboxValues).nullable(),
@@ -201,6 +202,11 @@ export const setupCommandOptionsSchema = z.object({
     .min(1)
     .optional()
     .describe('Optional Codex CLI executable path to save during setup. Defaults to codex.'),
+  assistantCodexHome: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional Codex home directory to save during setup.'),
   assistantProfile: z
     .string()
     .min(1)

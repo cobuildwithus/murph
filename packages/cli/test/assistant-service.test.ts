@@ -645,6 +645,62 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
   )
 })
 
+test('buildResolveAssistantSessionInput carries an explicit Codex home into the session target', () => {
+  const defaults = {
+    backend: {
+      adapter: 'codex-cli' as const,
+      model: 'gpt-5.4',
+      approvalPolicy: 'never' as const,
+      codexCommand: null,
+      codexHome: '/tmp/codex-1',
+      oss: false,
+      profile: null,
+      reasoningEffort: 'medium' as const,
+      sandbox: 'danger-full-access' as const,
+    },
+    identityId: null,
+    failoverRoutes: null,
+    account: null,
+    selfDeliveryTargets: null,
+  } as const
+
+  assert.deepEqual(
+    buildResolveAssistantSessionInput(
+      {
+        vault: '/tmp/vault',
+      },
+      defaults,
+    ),
+    {
+      vault: '/tmp/vault',
+      provider: 'codex-cli',
+      model: 'gpt-5.4',
+      maxSessionAgeMs: null,
+      sandbox: 'danger-full-access',
+      approvalPolicy: 'never',
+      oss: false,
+      profile: null,
+      codexHome: '/tmp/codex-1',
+      baseUrl: null,
+      apiKeyEnv: null,
+      providerName: null,
+      headers: null,
+      reasoningEffort: 'medium',
+      target: {
+        adapter: 'codex-cli',
+        approvalPolicy: 'never',
+        codexCommand: null,
+        codexHome: '/tmp/codex-1',
+        model: 'gpt-5.4',
+        oss: false,
+        profile: null,
+        reasoningEffort: 'medium',
+        sandbox: 'danger-full-access',
+      },
+    },
+  )
+})
+
 test('buildResolveAssistantSessionInput requires an explicit provider family when no boundary target exists', () => {
   assert.throws(
     () =>

@@ -12,7 +12,7 @@ import {
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
-import { test } from 'vitest'
+import { test, vi } from 'vitest'
 import {
   createSetupCli,
   detectSetupProgramName,
@@ -540,6 +540,64 @@ test('setup assistant account resolver merges codex auth plan with rpc quota met
       },
     },
   })
+})
+
+test('setup assistant account resolver scopes auth and rpc probes to the selected Codex home', async () => {
+  let probedEnv: Record<string, string | undefined> | null = null
+  let readPath: string | null = null
+  const readTextFile = vi.fn(async (filePath: string) => {
+    readPath = filePath
+    return JSON.stringify({
+      tokens: {
+        idToken: buildFakeJwt({
+          chatgpt_plan_type: 'plus',
+        }),
+      },
+    })
+  })
+  const probeCodexRpc = vi.fn(async (input: {
+    codexCommand: string | null
+    env: NodeJS.ProcessEnv
+  }) => {
+    probedEnv = input.env
+    return null
+  })
+  const resolver = createSetupAssistantAccountResolver({
+    env: () => ({
+      CODEX_HOME: '/tmp/ambient-codex-home',
+    }),
+    readTextFile,
+    probeCodexRpc,
+  })
+
+  await resolver.resolve({
+    assistant: {
+      preset: 'codex',
+      enabled: true,
+      provider: 'codex-cli',
+      model: 'gpt-5.4',
+      baseUrl: null,
+      apiKeyEnv: null,
+      providerName: null,
+      codexCommand: null,
+      codexHome: '/tmp/codex-1',
+      profile: null,
+      reasoningEffort: null,
+      sandbox: 'danger-full-access',
+      approvalPolicy: 'never',
+      oss: false,
+      account: null,
+      detail: 'Use Codex CLI with gpt-5.4.',
+    },
+  })
+
+  assert.equal(readPath, '/tmp/codex-1/auth.json')
+  const capturedProbeEnv = probedEnv
+  assert.notEqual(capturedProbeEnv, null)
+  if (capturedProbeEnv === null) {
+    throw new Error('Expected Codex RPC probe env to be captured.')
+  }
+  assert.equal(capturedProbeEnv['CODEX_HOME'], '/tmp/codex-1')
 })
 
 async function writeExecutable(

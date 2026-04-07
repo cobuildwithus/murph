@@ -23,6 +23,7 @@ export function createDefaultLocalAssistantModelTarget(): AssistantModelTarget {
     adapter: 'codex-cli',
     approvalPolicy: 'never',
     codexCommand: null,
+    codexHome: null,
     model: null,
     oss: false,
     profile: null,
@@ -81,6 +82,7 @@ export function assistantModelTargetToProviderConfigInput(
             assistantApprovalPolicyValues,
           ) ?? null,
         codexCommand: normalizeNullableString(target.codexCommand),
+        codexHome: normalizeNullableString(target.codexHome),
         model: normalizeNullableString(target.model),
         oss: target.oss === true,
         profile: normalizeNullableString(target.profile),
@@ -151,6 +153,7 @@ function convertAssistantProviderConfigToModelTarget(
         adapter: 'codex-cli',
         approvalPolicy: config.approvalPolicy,
         codexCommand: config.codexCommand,
+        ...(config.codexHome ? { codexHome: config.codexHome } : {}),
         model: config.model,
         oss: config.oss,
         profile: config.profile,
@@ -189,6 +192,7 @@ function hasAssistantModelTargetValues(target: AssistantModelTarget): boolean {
         target.model ??
           target.reasoningEffort ??
           target.profile ??
+          target.codexHome ??
           target.codexCommand ??
           target.sandbox ??
           target.approvalPolicy ??

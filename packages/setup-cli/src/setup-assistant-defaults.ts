@@ -31,6 +31,11 @@ export function assistantSelectionToOperatorDefaults(
               codexCommand: assistant.codexCommand,
             }
           : {}),
+        ...(assistant.codexHome !== undefined
+          ? {
+              codexHome: assistant.codexHome ?? null,
+            }
+          : {}),
         reasoningEffort: assistant.reasoningEffort,
         sandbox: assistant.sandbox,
         approvalPolicy: assistant.approvalPolicy,
@@ -145,6 +150,7 @@ export function buildSetupAssistantOptionsFromDefaults(
         assistantPreset: 'codex',
         assistantModel: savedDefaults?.model ?? undefined,
         assistantCodexCommand: savedDefaults?.codexCommand ?? undefined,
+        assistantCodexHome: savedDefaults?.codexHome ?? undefined,
         assistantProfile: savedDefaults?.profile ?? undefined,
         assistantReasoningEffort: savedDefaults?.reasoningEffort ?? undefined,
         assistantOss: savedDefaults?.oss === true ? true : undefined,

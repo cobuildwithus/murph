@@ -905,6 +905,48 @@ test('model --show summarizes a saved OpenAI-compatible backend without an endpo
   )
 })
 
+test('model --show includes a note for an explicit saved Codex home', async () => {
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-show-codex-home-'))
+  cleanupPaths.push(homeRoot)
+
+  await saveAssistantOperatorDefaultsPatch(
+    {
+      backend: {
+        adapter: 'codex-cli',
+        approvalPolicy: 'never',
+        codexCommand: null,
+        codexHome: '/tmp/codex-1',
+        model: 'gpt-5.4',
+        oss: false,
+        profile: null,
+        reasoningEffort: 'medium',
+        sandbox: 'danger-full-access',
+      },
+      account: null,
+    },
+    homeRoot,
+  )
+
+  const cli = Cli.create('vault-cli')
+  registerModelCommands(cli, {
+    resolveHomeDirectory: () => homeRoot,
+    terminal: {
+      stdinIsTTY: false,
+      stderrIsTTY: false,
+    },
+  })
+
+  const result = await runRegisteredCliJson<{
+    notes: string[]
+  }>(cli, ['model', '--show'])
+
+  assert.equal(result.exitCode, null)
+  assert.equal(result.envelope.ok, true)
+  assert.deepEqual(result.envelope.data?.notes, [
+    'Use the saved Codex home at /tmp/codex-1.',
+  ])
+})
+
 test('interactive bare model uses the assistant Ink wizard selection before resolving details', async () => {
   const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-wizard-'))
   cleanupPaths.push(homeRoot)

@@ -556,6 +556,9 @@ function buildAssistantBackendNotes(
   defaults: AssistantOperatorDefaults | null | undefined,
 ): string[] {
   const backend = defaults?.backend
+  if (backend?.adapter === 'codex-cli' && backend.codexHome) {
+    return [`Use the saved Codex home at ${backend.codexHome}.`]
+  }
 
   return backend?.adapter === 'openai-compatible' && backend.apiKeyEnv
     ? [
@@ -584,6 +587,11 @@ function assistantSelectionToOperatorDefaults(
         ...(assistant.codexCommand !== null
           ? {
               codexCommand: assistant.codexCommand,
+            }
+          : {}),
+        ...(assistant.codexHome !== undefined
+          ? {
+              codexHome: assistant.codexHome ?? null,
             }
           : {}),
         reasoningEffort: assistant.reasoningEffort,
@@ -656,6 +664,7 @@ function buildSetupAssistantOptionsFromDefaults(
         assistantPreset: 'codex',
         assistantModel: savedDefaults?.model ?? undefined,
         assistantCodexCommand: savedDefaults?.codexCommand ?? undefined,
+        assistantCodexHome: savedDefaults?.codexHome ?? undefined,
         assistantProfile: savedDefaults?.profile ?? undefined,
         assistantReasoningEffort: savedDefaults?.reasoningEffort ?? undefined,
         assistantOss: savedDefaults?.oss === true ? true : undefined,

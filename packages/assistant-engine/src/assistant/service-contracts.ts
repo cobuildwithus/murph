@@ -40,6 +40,7 @@ export interface AssistantSessionResolutionFields {
   apiKeyEnv?: string | null
   baseUrl?: string | null
   channel?: string | null
+  codexHome?: string | null
   conversation?: ConversationRef | null
   headers?: Record<string, string> | null
   identityId?: string | null

@@ -179,6 +179,7 @@ export const assistantCodexModelTargetSchema = z
     adapter: z.literal('codex-cli'),
     approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable().default(null),
     codexCommand: z.string().min(1).nullable().default(null),
+    codexHome: z.string().min(1).nullable().optional(),
     model: z.string().min(1).nullable().default(null),
     oss: z.boolean().default(false),
     profile: z.string().min(1).nullable().default(null),
@@ -229,6 +230,7 @@ export const assistantProviderSessionOptionsSchema = z.object({
   approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable(),
   profile: z.string().min(1).nullable(),
   oss: z.boolean(),
+  codexHome: z.string().min(1).nullable().optional(),
   baseUrl: z.string().min(1).nullable().optional(),
   apiKeyEnv: z.string().min(1).nullable().optional(),
   providerName: z.string().min(1).nullable().optional(),
@@ -250,6 +252,7 @@ export const assistantProviderFailoverRouteSchema = z
     name: z.string().min(1).nullable().default(null),
     provider: z.enum(assistantChatProviderValues),
     codexCommand: z.string().min(1).nullable().default(null),
+    codexHome: z.string().min(1).nullable().optional(),
     model: z.string().min(1).nullable().default(null),
     reasoningEffort: z.string().min(1).nullable().default(null),
     sandbox: z.enum(assistantSandboxValues).nullable().default(null),
@@ -363,6 +366,7 @@ function buildAssistantRuntimeSession(
           approvalPolicy: value.target.approvalPolicy,
           profile: value.target.profile,
           oss: value.target.oss,
+          ...(value.target.codexHome ? { codexHome: value.target.codexHome } : {}),
         })
   const providerBinding =
     value.resumeState &&

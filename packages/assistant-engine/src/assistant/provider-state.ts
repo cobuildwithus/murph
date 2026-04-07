@@ -80,6 +80,7 @@ export function readAssistantProviderBinding(
           approvalPolicy: target.approvalPolicy,
           profile: target.profile,
           oss: target.oss,
+          ...(target.codexHome ? { codexHome: target.codexHome } : {}),
         })
 
   return assistantProviderBindingSchema.parse({
