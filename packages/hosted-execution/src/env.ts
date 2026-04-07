@@ -5,23 +5,6 @@ export interface HostedExecutionBaseUrlNormalizationOptions {
   allowHttpLocalhost?: boolean;
 }
 
-export function readHostedExecutionVercelProductionBaseUrl(
-  source: EnvSource = process.env,
-  options?: HostedExecutionBaseUrlNormalizationOptions,
-): string | null {
-  const productionUrl = normalizeHostedExecutionString(source.VERCEL_PROJECT_PRODUCTION_URL);
-
-  if (!productionUrl) {
-    return null;
-  }
-
-  const normalizedInput = /^[a-z][a-z\d+.-]*:\/\//iu.test(productionUrl)
-    ? productionUrl
-    : `https://${productionUrl}`;
-
-  return normalizeHostedExecutionBaseUrl(normalizedInput, options);
-}
-
 export function normalizeHostedExecutionBaseUrl(
   value: string | null | undefined,
   options?: HostedExecutionBaseUrlNormalizationOptions,

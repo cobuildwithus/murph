@@ -1,6 +1,7 @@
 import {
+  type HostedExecutionBaseUrlNormalizationOptions,
   normalizeHostedExecutionBaseUrl,
-  readHostedExecutionVercelProductionBaseUrl,
+  normalizeHostedExecutionString,
 } from "@murphai/hosted-execution/env";
 
 import { normalizeNullableString } from "../device-sync/shared";
@@ -19,7 +20,7 @@ export function readHostedPublicBaseUrl(
   return (
     normalizeConfiguredBaseUrl(source.HOSTED_ONBOARDING_PUBLIC_BASE_URL)
     ?? normalizeConfiguredBaseUrl(source.HOSTED_WEB_BASE_URL)
-    ?? readHostedExecutionVercelProductionBaseUrl(source, {
+    ?? readHostedWebVercelProductionBaseUrl(source, {
       allowHttpLocalhost: true,
     })
   );
@@ -83,4 +84,21 @@ function normalizeConfiguredBaseUrl(value: string | null | undefined): string | 
   return normalizeHostedExecutionBaseUrl(normalized, {
     allowHttpLocalhost: true,
   });
+}
+
+function readHostedWebVercelProductionBaseUrl(
+  source: EnvSource,
+  options?: HostedExecutionBaseUrlNormalizationOptions,
+): string | null {
+  const productionUrl = normalizeHostedExecutionString(source.VERCEL_PROJECT_PRODUCTION_URL);
+
+  if (!productionUrl) {
+    return null;
+  }
+
+  const normalizedInput = /^[a-z][a-z\d+.-]*:\/\//iu.test(productionUrl)
+    ? productionUrl
+    : `https://${productionUrl}`;
+
+  return normalizeHostedExecutionBaseUrl(normalizedInput, options);
 }
