@@ -1,12 +1,8 @@
-import {
-  HOSTED_EXECUTION_AI_USAGE_RECORD_PATH,
-  type HostedExecutionAiUsageRecordRequest,
-} from "@murphai/hosted-execution";
-
 import { createHostedArtifactStore } from "./bundle-store.ts";
 import { readHostedExecutionEnvironment } from "./env.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "./internal-hosts.ts";
 import { json, methodNotAllowed, notFound, readJsonObject } from "./json.ts";
+import { CLOUDFLARE_HOSTED_USAGE_RECORD_PATH } from "./outbound-routes.ts";
 import { createHostedPendingUsageStore } from "./usage-store.ts";
 import { handleRunnerDeviceSyncControlRequest } from "./runner-outbound/device-sync.ts";
 import { handleRunnerResultsRequest } from "./runner-outbound/results.ts";
@@ -148,8 +144,8 @@ async function handleRunnerUsageRecordRequest(input: {
   url: URL;
   userId: string;
 }): Promise<Response> {
-  if (input.request.method !== "POST" || input.url.pathname !== HOSTED_EXECUTION_AI_USAGE_RECORD_PATH) {
-    return input.url.pathname === HOSTED_EXECUTION_AI_USAGE_RECORD_PATH
+  if (input.request.method !== "POST" || input.url.pathname !== CLOUDFLARE_HOSTED_USAGE_RECORD_PATH) {
+    return input.url.pathname === CLOUDFLARE_HOSTED_USAGE_RECORD_PATH
       ? methodNotAllowed()
       : notFound();
   }
@@ -179,7 +175,7 @@ async function handleRunnerUsageRecordRequest(input: {
 
 function parseHostedAiUsageRecordRequest(
   value: Record<string, unknown>,
-): HostedExecutionAiUsageRecordRequest & { usage: readonly Record<string, unknown>[] } {
+): { usage: readonly Record<string, unknown>[] } {
   return {
     usage: requireArray(value.usage, "usage").map((entry, index) =>
       requireRecord(entry, `usage[${index}]`)

@@ -4,17 +4,17 @@ import {
   type HostedUserRecipientPrivateKeyJwk,
   type HostedUserRecipientPublicKeyJwk,
 } from "@murphai/runtime-state";
-import {
-  assertHostedExecutionOptionalJwkPairConfigured,
-  readHostedExecutionWorkerEnvironment,
-  type HostedExecutionWorkerEnvironment,
-} from "@murphai/hosted-execution/env";
 
 import {
   requireHostedExecutionVercelOidcValidationEnvironment,
   type HostedExecutionVercelOidcValidationEnvironment,
 } from "./auth-adapter.ts";
 import { decodeBase64Key } from "./base64.js";
+import {
+  assertHostedExecutionOptionalJwkPairConfigured,
+  readHostedExecutionWorkerEnvironment,
+  type HostedExecutionWorkerEnvironment,
+} from "./hosted-execution-worker-env.ts";
 import {
   readHostedWebCallbackSigningEnvironment,
   type HostedWebCallbackSigningEnvironment,

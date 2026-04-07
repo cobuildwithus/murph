@@ -38,6 +38,9 @@ importers:
       '@murphai/assistant-runtime':
         specifier: workspace:*
         version: link:../../packages/assistant-runtime
+      '@murphai/cloudflare-hosted-control':
+        specifier: workspace:*
+        version: link:../../packages/cloudflare-hosted-control
       '@murphai/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -93,6 +96,9 @@ importers:
       '@cobuild/wire':
         specifier: ^0.3.6
         version: 0.3.6(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)
+      '@murphai/cloudflare-hosted-control':
+        specifier: workspace:*
+        version: link:../../packages/cloudflare-hosted-control
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -429,6 +435,12 @@ importers:
       '@types/react':
         specifier: ^19.2.14
         version: 19.2.14
+
+  packages/cloudflare-hosted-control:
+    dependencies:
+      '@murphai/hosted-execution':
+        specifier: workspace:*
+        version: link:../hosted-execution
 
   packages/contracts:
     dependencies:

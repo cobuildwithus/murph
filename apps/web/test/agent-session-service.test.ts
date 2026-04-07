@@ -34,8 +34,8 @@ const mocks = vi.hoisted(() => ({
   applyDeviceSyncRuntimeUpdates: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-execution/control", () => ({
-  requireHostedExecutionControlClient: vi.fn(() => ({
+vi.mock("@/src/lib/device-sync/runtime-client", () => ({
+  requireHostedDeviceSyncRuntimeClient: vi.fn(() => ({
     applyDeviceSyncRuntimeUpdates: mocks.applyDeviceSyncRuntimeUpdates,
     getDeviceSyncRuntimeSnapshot: mocks.getDeviceSyncRuntimeSnapshot,
   })),

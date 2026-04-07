@@ -8,13 +8,13 @@ import {
   type UpsertPublicDeviceSyncConnectionInput,
 } from "@murphai/device-syncd/public-ingress";
 
-import { readHostedExecutionControlClientIfConfigured } from "../../hosted-execution/control";
 import { buildHostedProviderAccountBlindIndex } from "../crypto";
 import {
   buildHostedPublicDeviceSyncAccount,
   findHostedDeviceSyncRuntimeConnection,
   type HostedStaticDeviceSyncConnectionRecord,
 } from "../internal-runtime";
+import { readHostedDeviceSyncRuntimeClientIfConfigured } from "../runtime-client";
 import {
   maybeDate,
   maybeIsoTimestamp,
@@ -170,7 +170,7 @@ export class PrismaHostedConnectionStore {
       },
     });
 
-    const controlClient = readHostedExecutionControlClientIfConfigured();
+    const controlClient = readHostedDeviceSyncRuntimeClientIfConfigured();
 
     if (!controlClient) {
       return;
@@ -302,7 +302,7 @@ export class PrismaHostedConnectionStore {
       displayName?: string | null;
     } = {},
   ): Promise<PublicDeviceSyncAccount> {
-    const controlClient = readHostedExecutionControlClientIfConfigured();
+    const controlClient = readHostedDeviceSyncRuntimeClientIfConfigured();
     const runtimeSnapshot = controlClient
       ? await controlClient.getDeviceSyncRuntimeSnapshot(record.userId, {
           connectionId: record.id,
@@ -327,7 +327,7 @@ export class PrismaHostedConnectionStore {
       return [];
     }
 
-    const controlClient = readHostedExecutionControlClientIfConfigured();
+    const controlClient = readHostedDeviceSyncRuntimeClientIfConfigured();
     const runtimeSnapshot = controlClient
       ? await controlClient.getDeviceSyncRuntimeSnapshot(records[0].userId, {})
       : null;

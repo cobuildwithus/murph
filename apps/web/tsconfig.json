@@ -31,6 +31,12 @@
       "@murphai/contracts/*": [
         "packages/contracts/src/*"
       ],
+      "@murphai/cloudflare-hosted-control": [
+        "packages/cloudflare-hosted-control/src/index.ts"
+      ],
+      "@murphai/cloudflare-hosted-control/*": [
+        "packages/cloudflare-hosted-control/src/*"
+      ],
       "@murphai/hosted-execution": [
         "packages/hosted-execution/src/index.ts"
       ],

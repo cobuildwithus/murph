@@ -2,8 +2,8 @@ import { PrismaClient } from "@prisma/client";
 
 import { deviceSyncError, type PublicDeviceSyncAccount } from "@murphai/device-syncd/public-ingress";
 
-import { requireHostedExecutionControlClient } from "../../hosted-execution/control";
 import { buildHostedLocalHeartbeatUpdate } from "../local-heartbeat";
+import { requireHostedDeviceSyncRuntimeClient } from "../runtime-client";
 import { PrismaHostedConnectionStore } from "./connections";
 import type { UpdateLocalHeartbeatInput } from "./types";
 
@@ -29,7 +29,7 @@ export class PrismaHostedLocalHeartbeatStore {
 
     buildHostedLocalHeartbeatUpdate(existing, toLocalHeartbeatValidationPatch(patch));
 
-    const response = await requireHostedExecutionControlClient().applyDeviceSyncRuntimeUpdates(userId, {
+    const response = await requireHostedDeviceSyncRuntimeClient().applyDeviceSyncRuntimeUpdates(userId, {
       occurredAt: new Date().toISOString(),
       updates: [
         {

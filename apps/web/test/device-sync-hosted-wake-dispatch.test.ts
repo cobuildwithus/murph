@@ -48,8 +48,8 @@ vi.mock("@/src/lib/hosted-execution/outbox", () => ({
   enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
 }));
 
-vi.mock("@/src/lib/hosted-execution/control", () => ({
-  requireHostedExecutionControlClient: vi.fn(() => ({
+vi.mock("@/src/lib/device-sync/runtime-client", () => ({
+  requireHostedDeviceSyncRuntimeClient: vi.fn(() => ({
     applyDeviceSyncRuntimeUpdates: mocks.applyDeviceSyncRuntimeUpdates,
     getDeviceSyncRuntimeSnapshot: mocks.getDeviceSyncRuntimeSnapshot,
   })),

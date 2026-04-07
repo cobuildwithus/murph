@@ -32,6 +32,7 @@
   "dependencies": {
     "@cloudflare/containers": "^0.2.0",
     "@murphai/assistant-runtime": "workspace:*",
+    "@murphai/cloudflare-hosted-control": "workspace:*",
     "@murphai/core": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
     "@murphai/gateway-core": "workspace:*",

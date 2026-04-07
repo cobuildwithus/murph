@@ -16,7 +16,6 @@ import type {
 } from "@murphai/hosted-execution";
 
 import { getPrisma } from "../prisma";
-import { requireHostedExecutionControlClient } from "../hosted-execution/control";
 import { enqueueHostedExecutionOutbox } from "../hosted-execution/outbox";
 import {
   buildHostedDeviceSyncWakeDispatch,
@@ -28,6 +27,7 @@ import {
   findHostedDeviceSyncRuntimeConnection,
 } from "./internal-runtime";
 import { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
+import { requireHostedDeviceSyncRuntimeClient } from "./runtime-client";
 import { normalizeNullableString, sha256Hex, toIsoTimestamp } from "./shared";
 
 export async function disconnectHostedDeviceSyncConnection(input: {
@@ -50,8 +50,8 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     });
   }
 
-  const controlClient = requireHostedExecutionControlClient();
-  const runtimeSnapshot = await controlClient.getDeviceSyncRuntimeSnapshot(input.userId, {
+  const runtimeClient = requireHostedDeviceSyncRuntimeClient();
+  const runtimeSnapshot = await runtimeClient.getDeviceSyncRuntimeSnapshot(input.userId, {
     connectionId: input.connectionId,
     provider: existing.provider,
   });
@@ -105,7 +105,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     });
   }
 
-  const applyResponse = await controlClient.applyDeviceSyncRuntimeUpdates(input.userId, {
+  const applyResponse = await runtimeClient.applyDeviceSyncRuntimeUpdates(input.userId, {
     occurredAt: now,
     updates: [
       {

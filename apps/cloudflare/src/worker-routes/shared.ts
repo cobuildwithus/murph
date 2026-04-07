@@ -1,8 +1,8 @@
+import type { CloudflareHostedUserEnvStatus } from "@murphai/cloudflare-hosted-control";
 import type {
   HostedExecutionDispatchRequest,
   HostedExecutionDispatchResult,
   HostedExecutionOutboxPayload,
-  HostedExecutionUserEnvStatus,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
 import type {
@@ -29,10 +29,10 @@ import type {
 export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLike {
   bootstrapUser(userId: string): Promise<{ userId: string }>;
   provisionManagedUserCrypto(userId: string): Promise<{ recipientKinds: string[]; rootKeyId: string; userId: string }>;
-  clearUserEnv(): Promise<HostedExecutionUserEnvStatus>;
+  clearUserEnv(): Promise<CloudflareHostedUserEnvStatus>;
   dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus>;
   dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult>;
-  getUserEnvStatus(): Promise<HostedExecutionUserEnvStatus>;
+  getUserEnvStatus(): Promise<CloudflareHostedUserEnvStatus>;
   getDeviceSyncRuntimeSnapshot(input: {
     request: HostedExecutionDeviceSyncRuntimeSnapshotRequest;
   }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
@@ -47,7 +47,7 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
   dispatchStoredPayload(input: { payload: HostedExecutionOutboxPayload }): Promise<HostedExecutionDispatchResult>;
   status(): Promise<HostedExecutionUserStatus>;
   storeDispatchPayload(input: { dispatch: HostedExecutionDispatchRequest }): Promise<HostedExecutionOutboxPayload>;
-  updateUserEnv(update: HostedUserEnvUpdate): Promise<HostedExecutionUserEnvStatus>;
+  updateUserEnv(update: HostedUserEnvUpdate): Promise<CloudflareHostedUserEnvStatus>;
   deletePendingUsage(input: { usageIds: readonly string[] }): Promise<void>;
   commit(input: WorkerUserRunnerCommitInput): Promise<HostedExecutionCommittedResult>;
 }

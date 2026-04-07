@@ -45,10 +45,6 @@
     "./routes": {
       "types": "./dist/routes.d.ts",
       "default": "./dist/routes.js"
-    },
-    "./web-control-plane": {
-      "types": "./dist/web-control-plane.d.ts",
-      "default": "./dist/web-control-plane.js"
     }
   },
   "files": [

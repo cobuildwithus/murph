@@ -182,15 +182,6 @@ export interface HostedExecutionDispatchRequest {
   occurredAt: string;
 }
 
-export interface HostedExecutionAiUsageRecordRequest {
-  usage: readonly object[];
-}
-
-export interface HostedExecutionAiUsageRecordResponse {
-  recorded: number;
-  usageIds: string[];
-}
-
 export type HostedExecutionBundleKind = RuntimeHostedExecutionBundleKind;
 
 export interface HostedExecutionRunnerRequest {
@@ -253,26 +244,9 @@ export interface HostedExecutionDispatchResult {
   status: HostedExecutionUserStatus;
 }
 
-export interface HostedExecutionUserEnvStatus {
-  configuredUserEnvKeys: string[];
-  userId: string;
-}
-
-export interface HostedExecutionUserEnvUpdate {
-  env: Record<string, string | null>;
-  mode: "merge" | "replace";
-}
-
 export const HOSTED_EXECUTION_USER_ID_HEADER = "x-hosted-execution-user-id";
 export const HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER =
   "x-hosted-execution-runner-proxy-token";
-
-export interface HostedExecutionDeviceSyncConnectLinkResponse {
-  authorizationUrl: string;
-  expiresAt: string;
-  provider: string;
-  providerLabel: string;
-}
 
 export interface HostedExecutionDeviceSyncRuntimeTokenBundle {
   accessToken: string;
@@ -312,68 +286,9 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionSnapshot {
   tokenBundle: HostedExecutionDeviceSyncRuntimeTokenBundle | null;
 }
 
-export interface HostedExecutionDeviceSyncRuntimeConnectionSeed {
-  connection: HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot;
-  localState: HostedExecutionDeviceSyncRuntimeLocalStateSnapshot;
-  tokenBundle: HostedExecutionDeviceSyncRuntimeTokenBundle | null;
-}
-
-export interface HostedExecutionDeviceSyncRuntimeSnapshotRequest {
-  connectionId?: string | null;
-  provider?: string | null;
-  userId: string;
-}
-
 export interface HostedExecutionDeviceSyncRuntimeSnapshotResponse {
   connections: HostedExecutionDeviceSyncRuntimeConnectionSnapshot[];
   generatedAt: string;
-  userId: string;
-}
-
-export interface HostedExecutionDeviceSyncRuntimeConnectionStateUpdate {
-  displayName?: string | null;
-  metadata?: Record<string, unknown>;
-  scopes?: string[];
-  status?: "active" | "reauthorization_required" | "disconnected";
-}
-
-export interface HostedExecutionDeviceSyncRuntimeLocalStateUpdate {
-  clearError?: boolean;
-  lastErrorCode?: string | null;
-  lastErrorMessage?: string | null;
-  lastSyncCompletedAt?: string | null;
-  lastSyncErrorAt?: string | null;
-  lastSyncStartedAt?: string | null;
-  lastWebhookAt?: string | null;
-  nextReconcileAt?: string | null;
-}
-
-export interface HostedExecutionDeviceSyncRuntimeConnectionUpdate {
-  connectionId: string;
-  connection?: HostedExecutionDeviceSyncRuntimeConnectionStateUpdate;
-  localState?: HostedExecutionDeviceSyncRuntimeLocalStateUpdate;
-  observedUpdatedAt?: string | null;
-  observedTokenVersion?: number | null;
-  seed?: HostedExecutionDeviceSyncRuntimeConnectionSeed;
-  tokenBundle?: HostedExecutionDeviceSyncRuntimeTokenBundle | null;
-}
-
-export interface HostedExecutionDeviceSyncRuntimeApplyRequest {
-  occurredAt?: string | null;
-  updates: HostedExecutionDeviceSyncRuntimeConnectionUpdate[];
-  userId: string;
-}
-
-export interface HostedExecutionDeviceSyncRuntimeApplyEntry {
-  connection: HostedExecutionDeviceSyncRuntimeConnectionSnapshot["connection"] | null;
-  connectionId: string;
-  status: "created" | "missing" | "updated";
-  tokenUpdate: "applied" | "cleared" | "missing" | "skipped_version_mismatch" | "unchanged";
-}
-
-export interface HostedExecutionDeviceSyncRuntimeApplyResponse {
-  appliedAt: string;
-  updates: HostedExecutionDeviceSyncRuntimeApplyEntry[];
   userId: string;
 }
 
@@ -413,33 +328,4 @@ export function resolveHostedExecutionDispatchOutcomeState(input: {
   }
 
   return "queued";
-}
-
-export function resolveHostedDeviceSyncWakeContext(
-  event: HostedExecutionDeviceSyncWakeEvent,
-): {
-  connectionId: string | null;
-  hint: HostedExecutionDeviceSyncWakeEvent["hint"];
-  provider: string | null;
-} {
-  return {
-    connectionId: event.connectionId ?? null,
-    hint: event.hint ?? null,
-    provider: event.provider ?? null,
-  };
-}
-
-export function normalizeHostedDeviceSyncJobHints(
-  value: HostedExecutionDeviceSyncWakeEvent["hint"],
-): HostedExecutionDeviceSyncJobHint[] {
-  return Array.isArray(value?.jobs)
-    ? value.jobs.map((job) => ({
-        kind: job.kind,
-        ...(job.availableAt ? { availableAt: job.availableAt } : {}),
-        ...(job.dedupeKey !== undefined ? { dedupeKey: job.dedupeKey ?? null } : {}),
-        ...(typeof job.maxAttempts === "number" ? { maxAttempts: job.maxAttempts } : {}),
-        ...(job.payload ? { payload: { ...job.payload } } : {}),
-        ...(typeof job.priority === "number" ? { priority: job.priority } : {}),
-      }))
-    : [];
 }

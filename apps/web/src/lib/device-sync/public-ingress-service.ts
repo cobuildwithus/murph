@@ -21,8 +21,8 @@ import {
   handleHostedDeviceSyncConnectionEstablished,
   handleHostedDeviceSyncWebhookAccepted,
 } from "./wake-service";
+import { requireHostedDeviceSyncRuntimeClient } from "./runtime-client";
 import { HostedDeviceSyncWebhookAdminService } from "./webhook-admin-service";
-import { requireHostedExecutionControlClient } from "../hosted-execution/control";
 
 export class HostedDeviceSyncPublicIngressService {
   private readonly ingress;
@@ -39,7 +39,7 @@ export class HostedDeviceSyncPublicIngressService {
       hooks: {
         onConnectionEstablished: async ({ account, connection, now, provider }) => {
           const userId = await this.requireHostedConnectionOwnerId(account.id);
-          const controlClient = requireHostedExecutionControlClient();
+          const runtimeClient = requireHostedDeviceSyncRuntimeClient();
           const metadata = sanitizeStoredDeviceSyncMetadata(connection.metadata ?? {});
           const tokenBundle = {
             accessToken: connection.tokens.accessToken,
@@ -49,7 +49,7 @@ export class HostedDeviceSyncPublicIngressService {
             tokenVersion: 1,
           } as const;
 
-          await controlClient.applyDeviceSyncRuntimeUpdates(userId, {
+          await runtimeClient.applyDeviceSyncRuntimeUpdates(userId, {
             occurredAt: now,
             updates: [
               {

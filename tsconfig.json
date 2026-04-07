@@ -8,6 +8,9 @@
       "path": "./packages/hosted-execution"
     },
     {
+      "path": "./packages/cloudflare-hosted-control"
+    },
+    {
       "path": "./packages/messaging-ingress"
     },
     {

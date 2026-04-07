@@ -1,6 +1,4 @@
 import {
-  HOSTED_EXECUTION_SHARE_IMPORT_COMPLETE_PATH,
-  HOSTED_EXECUTION_SHARE_IMPORT_RELEASE_PATH,
   type HostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution";
 
@@ -8,6 +6,10 @@ import {
   fetchHostedExecutionWebControlPlaneResponse,
   normalizeHostedWebControlBaseUrl,
 } from "../web-control-plane.ts";
+import {
+  CLOUDFLARE_HOSTED_SHARE_IMPORT_COMPLETE_PATH,
+  CLOUDFLARE_HOSTED_SHARE_IMPORT_RELEASE_PATH,
+} from "../outbound-routes.ts";
 
 export async function applyHostedWebBusinessOutcomeIfNeeded(input: {
   callbackSigning: import("../web-callback-auth.ts").HostedWebCallbackSigningEnvironment;
@@ -35,7 +37,7 @@ export async function applyHostedWebBusinessOutcomeIfNeeded(input: {
     callbackSigning: input.callbackSigning,
     fetchImpl: input.fetchImpl,
     method: "POST",
-    path: HOSTED_EXECUTION_SHARE_IMPORT_COMPLETE_PATH,
+    path: CLOUDFLARE_HOSTED_SHARE_IMPORT_COMPLETE_PATH,
     timeoutMs: null,
   });
 
@@ -77,7 +79,7 @@ export async function releaseHostedWebShareClaim(input: {
     callbackSigning: input.callbackSigning,
     fetchImpl: input.fetchImpl,
     method: "POST",
-    path: HOSTED_EXECUTION_SHARE_IMPORT_RELEASE_PATH,
+    path: CLOUDFLARE_HOSTED_SHARE_IMPORT_RELEASE_PATH,
     timeoutMs: null,
   });
 

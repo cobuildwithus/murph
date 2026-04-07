@@ -8,13 +8,13 @@ import {
 import {
   createHostedExecutionDispatchClient,
 } from "@murphai/hosted-execution/client";
-import {
-  type HostedExecutionDispatchEnvironment,
-  readHostedExecutionDispatchEnvironment,
-} from "@murphai/hosted-execution/env";
 
 import { readHostedExecutionControlClientIfConfigured } from "./control";
 import { createHostedExecutionVercelOidcBearerTokenProvider } from "./auth-adapter";
+import {
+  type HostedExecutionDispatchEnvironment,
+  readHostedExecutionDispatchEnvironment,
+} from "./environment";
 
 export async function dispatchHostedExecutionStatus(
   input: HostedExecutionDispatchRequest,

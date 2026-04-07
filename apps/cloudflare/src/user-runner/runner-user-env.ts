@@ -1,5 +1,5 @@
 import { readHostedVerifiedEmailFromEnv } from "@murphai/runtime-state";
-import type { HostedExecutionUserEnvStatus } from "@murphai/hosted-execution";
+import type { CloudflareHostedUserEnvStatus } from "@murphai/cloudflare-hosted-control";
 
 import {
   ensureHostedEmailVerifiedSenderRouteAvailable,
@@ -41,7 +41,7 @@ export class RunnerUserEnvService {
   async updateUserEnv(
     userId: string,
     update: HostedUserEnvUpdate,
-  ): Promise<HostedExecutionUserEnvStatus> {
+  ): Promise<CloudflareHostedUserEnvStatus> {
     const currentUserEnv = await this.readUserEnv(userId);
     const nextUserEnv = applyHostedUserEnvUpdate({
       current: currentUserEnv,

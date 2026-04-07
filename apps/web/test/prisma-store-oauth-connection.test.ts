@@ -5,7 +5,7 @@ const { randomBytesMock, runtimeMocks } = vi.hoisted(() => ({
   runtimeMocks: {
     applyDeviceSyncRuntimeUpdates: vi.fn(),
     getDeviceSyncRuntimeSnapshot: vi.fn(),
-    readHostedExecutionControlClientIfConfigured: vi.fn(),
+    readHostedDeviceSyncRuntimeClientIfConfigured: vi.fn(),
   },
 }));
 
@@ -17,8 +17,9 @@ vi.mock("node:crypto", async () => {
   };
 });
 
-vi.mock("@/src/lib/hosted-execution/control", () => ({
-  readHostedExecutionControlClientIfConfigured: runtimeMocks.readHostedExecutionControlClientIfConfigured,
+vi.mock("@/src/lib/device-sync/runtime-client", () => ({
+  readHostedDeviceSyncRuntimeClientIfConfigured:
+    runtimeMocks.readHostedDeviceSyncRuntimeClientIfConfigured,
 }));
 
 import { buildHostedProviderAccountBlindIndex } from "@/src/lib/device-sync/crypto";
@@ -56,7 +57,7 @@ const BLIND_INDEX_KEY = Buffer.alloc(32, 7);
 describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    runtimeMocks.readHostedExecutionControlClientIfConfigured.mockReturnValue(null);
+    runtimeMocks.readHostedDeviceSyncRuntimeClientIfConfigured.mockReturnValue(null);
   });
 
   it("consumes and deletes an unexpired oauth state record", async () => {
@@ -154,7 +155,7 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
 describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    runtimeMocks.readHostedExecutionControlClientIfConfigured.mockReturnValue(null);
+    runtimeMocks.readHostedDeviceSyncRuntimeClientIfConfigured.mockReturnValue(null);
   });
 
   it("creates new hosted connections without creating a Prisma secret row", async () => {
@@ -305,7 +306,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       userId: "user-123",
     });
 
-    runtimeMocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+    runtimeMocks.readHostedDeviceSyncRuntimeClientIfConfigured.mockReturnValue({
       applyDeviceSyncRuntimeUpdates: runtimeMocks.applyDeviceSyncRuntimeUpdates,
       getDeviceSyncRuntimeSnapshot: runtimeMocks.getDeviceSyncRuntimeSnapshot,
     });
@@ -370,7 +371,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       generatedAt: "2026-03-25T08:00:00.000Z",
       userId: "user-123",
     });
-    runtimeMocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+    runtimeMocks.readHostedDeviceSyncRuntimeClientIfConfigured.mockReturnValue({
       applyDeviceSyncRuntimeUpdates: runtimeMocks.applyDeviceSyncRuntimeUpdates,
       getDeviceSyncRuntimeSnapshot: runtimeMocks.getDeviceSyncRuntimeSnapshot,
     });
@@ -443,7 +444,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       generatedAt: "2026-03-25T08:00:00.000Z",
       userId: "user-123",
     });
-    runtimeMocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+    runtimeMocks.readHostedDeviceSyncRuntimeClientIfConfigured.mockReturnValue({
       applyDeviceSyncRuntimeUpdates: runtimeMocks.applyDeviceSyncRuntimeUpdates,
       getDeviceSyncRuntimeSnapshot: runtimeMocks.getDeviceSyncRuntimeSnapshot,
     });
@@ -476,7 +477,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       userId: "user-123",
     });
     const updateConnection = vi.fn(async () => undefined);
-    runtimeMocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+    runtimeMocks.readHostedDeviceSyncRuntimeClientIfConfigured.mockReturnValue({
       applyDeviceSyncRuntimeUpdates: runtimeMocks.applyDeviceSyncRuntimeUpdates,
       getDeviceSyncRuntimeSnapshot: runtimeMocks.getDeviceSyncRuntimeSnapshot,
     });

@@ -1,18 +1,16 @@
 import {
+  createCloudflareHostedControlClient,
+  type CloudflareHostedControlClient,
+  type CloudflareHostedManagedUserCryptoStatus,
+} from "@murphai/cloudflare-hosted-control";
+import {
   type HostedExecutionDispatchRequest,
   type HostedExecutionOutboxPayload,
 } from "@murphai/hosted-execution";
-import {
-  createHostedExecutionControlClient,
-  type HostedExecutionControlClient,
-  type HostedExecutionManagedUserCryptoStatus,
-} from "@murphai/hosted-execution/client";
-import {
-  readHostedExecutionControlEnvironment,
-} from "@murphai/hosted-execution/env";
 import { createHostedVerifiedEmailUserEnv } from "@murphai/runtime-state";
 
 import { createHostedExecutionVercelOidcBearerTokenProvider } from "./auth-adapter";
+import { readHostedExecutionControlBaseUrl } from "./environment";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
 export interface HostedVerifiedEmailSyncResult {
@@ -21,20 +19,20 @@ export interface HostedVerifiedEmailSyncResult {
   verifiedAt: string;
 }
 
-export function readHostedExecutionControlClientIfConfigured(): HostedExecutionControlClient | null {
-  const environment = readHostedExecutionControlEnvironment();
+export function readHostedExecutionControlClientIfConfigured(): CloudflareHostedControlClient | null {
+  const baseUrl = readHostedExecutionControlBaseUrl();
 
-  if (!environment.baseUrl) {
+  if (!baseUrl) {
     return null;
   }
 
-  return createHostedExecutionControlClient({
-    baseUrl: environment.baseUrl,
+  return createCloudflareHostedControlClient({
+    baseUrl,
     getBearerToken: createHostedExecutionVercelOidcBearerTokenProvider(),
   });
 }
 
-export function requireHostedExecutionControlClient(): HostedExecutionControlClient {
+export function requireHostedExecutionControlClient(): CloudflareHostedControlClient {
   const client = readHostedExecutionControlClientIfConfigured();
 
   if (!client) {
@@ -113,6 +111,6 @@ export async function syncHostedVerifiedEmailToHostedExecution(input: {
 
 export async function provisionManagedUserCryptoInHostedExecution(
   userId: string,
-): Promise<HostedExecutionManagedUserCryptoStatus> {
+): Promise<CloudflareHostedManagedUserCryptoStatus> {
   return requireHostedExecutionControlClient().provisionManagedUserCrypto(userId);
 }

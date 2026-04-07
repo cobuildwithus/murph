@@ -1,18 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  createHostedExecutionControlClient: vi.fn(),
+  createCloudflareHostedControlClient: vi.fn(),
   createHostedExecutionVercelOidcBearerTokenProvider: vi.fn(),
-  readHostedExecutionControlEnvironment: vi.fn(),
+  readHostedExecutionControlBaseUrl: vi.fn(),
   tokenProvider: vi.fn(),
 }));
 
-vi.mock("@murphai/hosted-execution/client", () => ({
-  createHostedExecutionControlClient: mocks.createHostedExecutionControlClient,
+vi.mock("@murphai/cloudflare-hosted-control", () => ({
+  createCloudflareHostedControlClient: mocks.createCloudflareHostedControlClient,
 }));
 
-vi.mock("@murphai/hosted-execution/env", () => ({
-  readHostedExecutionControlEnvironment: mocks.readHostedExecutionControlEnvironment,
+vi.mock("@/src/lib/hosted-execution/environment", () => ({
+  readHostedExecutionControlBaseUrl: mocks.readHostedExecutionControlBaseUrl,
 }));
 
 vi.mock("@/src/lib/hosted-execution/auth-adapter", () => ({
@@ -26,11 +26,9 @@ describe("hosted verified email sync helper", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.readHostedExecutionControlEnvironment.mockReturnValue({
-      baseUrl: "https://dispatch.example.test",
-    });
+    mocks.readHostedExecutionControlBaseUrl.mockReturnValue("https://dispatch.example.test");
     mocks.createHostedExecutionVercelOidcBearerTokenProvider.mockReturnValue(mocks.tokenProvider);
-    mocks.createHostedExecutionControlClient.mockReturnValue({
+    mocks.createCloudflareHostedControlClient.mockReturnValue({
       run,
       updateUserEnv,
     });
@@ -54,7 +52,7 @@ describe("hosted verified email sync helper", () => {
       runTriggered: true,
       verifiedAt: "2026-03-27T08:30:00.000Z",
     });
-    expect(mocks.createHostedExecutionControlClient).toHaveBeenCalledWith({
+    expect(mocks.createCloudflareHostedControlClient).toHaveBeenCalledWith({
       baseUrl: "https://dispatch.example.test",
       getBearerToken: mocks.tokenProvider,
     });
@@ -97,9 +95,7 @@ describe("hosted verified email sync helper", () => {
   });
 
   it("fails fast when hosted execution control is not configured", async () => {
-    mocks.readHostedExecutionControlEnvironment.mockReturnValue({
-      baseUrl: null,
-    });
+    mocks.readHostedExecutionControlBaseUrl.mockReturnValue(null);
 
     const { syncHostedVerifiedEmailToHostedExecution } = await import(
       "@/src/lib/hosted-execution/control"
@@ -115,6 +111,6 @@ describe("hosted verified email sync helper", () => {
       code: "HOSTED_EXECUTION_CONTROL_NOT_CONFIGURED",
       httpStatus: 500,
     });
-    expect(mocks.createHostedExecutionControlClient).not.toHaveBeenCalled();
+    expect(mocks.createCloudflareHostedControlClient).not.toHaveBeenCalled();
   });
 });

@@ -12,7 +12,6 @@ import {
   type HostedAgentSessionBearer,
   type HostedAgentUser,
 } from "../hosted-agent-sessions";
-import { requireHostedExecutionControlClient } from "../hosted-execution/control";
 import {
   buildHostedDeviceSyncRuntimeSeedFromPublicAccount,
   buildHostedPublicDeviceSyncAccount,
@@ -29,6 +28,7 @@ import {
   type UpdateLocalHeartbeatInput,
   PrismaDeviceSyncControlPlaneStore,
 } from "./prisma-store";
+import { requireHostedDeviceSyncRuntimeClient } from "./runtime-client";
 import { parseInteger, toIsoTimestamp } from "./shared";
 
 const HOSTED_DEVICE_SYNC_AGENT_PAIR_PATH = "/api/device-sync/agents/pair";
@@ -126,7 +126,7 @@ export class HostedDeviceSyncAgentSessionService {
       requireHostedDeviceSyncRuntimeTokenBundle({
         connectionId,
         runtimeConnection: findHostedDeviceSyncRuntimeConnection(
-          await requireHostedExecutionControlClient().getDeviceSyncRuntimeSnapshot(session.userId, {
+          await requireHostedDeviceSyncRuntimeClient().getDeviceSyncRuntimeSnapshot(session.userId, {
             connectionId,
             provider: connection.provider,
           }),
@@ -188,7 +188,7 @@ export class HostedDeviceSyncAgentSessionService {
       }
 
       const staticConnection = mapHostedConnectionRecord(record);
-      const runtimeSnapshot = await requireHostedExecutionControlClient().getDeviceSyncRuntimeSnapshot(
+      const runtimeSnapshot = await requireHostedDeviceSyncRuntimeClient().getDeviceSyncRuntimeSnapshot(
         session.userId,
         {
           connectionId,
@@ -294,7 +294,7 @@ export class HostedDeviceSyncAgentSessionService {
 
       const nextTokens = refreshResult.tokens;
       const nextRefreshToken = nextTokens.refreshToken ?? currentTokenBundle.refreshToken;
-      await requireHostedExecutionControlClient().applyDeviceSyncRuntimeUpdates(session.userId, {
+      await requireHostedDeviceSyncRuntimeClient().applyDeviceSyncRuntimeUpdates(session.userId, {
         occurredAt: now,
         updates: [
           {
@@ -338,7 +338,7 @@ export class HostedDeviceSyncAgentSessionService {
           },
         ],
       });
-      const refreshedSnapshot = await requireHostedExecutionControlClient().getDeviceSyncRuntimeSnapshot(
+      const refreshedSnapshot = await requireHostedDeviceSyncRuntimeClient().getDeviceSyncRuntimeSnapshot(
         session.userId,
         {
           connectionId,
@@ -535,7 +535,7 @@ export class HostedDeviceSyncAgentSessionService {
           status: error.accountStatus,
         };
 
-        await requireHostedExecutionControlClient().applyDeviceSyncRuntimeUpdates(input.userId, {
+        await requireHostedDeviceSyncRuntimeClient().applyDeviceSyncRuntimeUpdates(input.userId, {
           occurredAt: input.now,
           updates: [
             {
