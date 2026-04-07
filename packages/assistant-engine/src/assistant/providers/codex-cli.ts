@@ -44,6 +44,7 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
       abortSignal: input.abortSignal,
       approvalPolicy: providerConfig.approvalPolicy ?? undefined,
       codexCommand: providerConfig.codexCommand ?? undefined,
+      codexHome: providerConfig.codexHome ?? undefined,
       configOverrides: mergeCodexConfigOverrides({
         showThinkingTraces: input.showThinkingTraces ?? false,
       }),

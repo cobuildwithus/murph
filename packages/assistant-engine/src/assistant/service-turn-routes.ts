@@ -25,6 +25,7 @@ export type AssistantTurnRouteOverride = Pick<
   | 'approvalPolicy'
   | 'baseUrl'
   | 'codexCommand'
+  | 'codexHome'
   | 'headers'
   | 'model'
   | 'oss'
@@ -109,6 +110,7 @@ export function selectAssistantTurnRouteOverride(
       approvalPolicy: selectedRoute.providerOptions.approvalPolicy ?? null,
       baseUrl: selectedRoute.providerOptions.baseUrl ?? null,
       codexCommand: selectedRoute.codexCommand ?? undefined,
+      codexHome: selectedRoute.providerOptions.codexHome ?? null,
       headers: selectedRoute.providerOptions.headers ?? null,
       model: selectedRoute.providerOptions.model ?? null,
       oss: selectedRoute.providerOptions.oss,

@@ -89,6 +89,7 @@ export function buildResolveAssistantSessionInput(
     approvalPolicy: defaultApprovalPolicy,
     oss: providerConfig.oss ?? false,
     profile: providerConfig.profile,
+    ...(providerConfig.codexHome ? { codexHome: providerConfig.codexHome } : {}),
     baseUrl: providerConfig.baseUrl,
     apiKeyEnv: providerConfig.apiKeyEnv,
     providerName: providerConfig.providerName,

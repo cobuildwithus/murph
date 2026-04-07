@@ -75,6 +75,11 @@ export function createSetupAssistantAccountResolver(
 
       const effectiveEnv = {
         ...env(),
+        ...(normalizeNullableString(input.assistant.codexHome) !== null
+          ? {
+              CODEX_HOME: normalizeNullableString(input.assistant.codexHome) ?? '',
+            }
+          : {}),
       }
       const authSnapshot = await loadCodexAuthAccountSnapshot({
         env: effectiveEnv,

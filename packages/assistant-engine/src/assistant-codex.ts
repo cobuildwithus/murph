@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { constants as fsConstants } from 'node:fs'
+import { access, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import type {
@@ -23,6 +24,7 @@ export interface CodexExecInput {
   approvalPolicy?: AssistantApprovalPolicy
   configOverrides?: readonly string[]
   codexCommand?: string
+  codexHome?: string | null
   env?: NodeJS.ProcessEnv
   model?: string | null
   onProgress?: ((event: CodexProgressEvent) => void) | null
@@ -56,6 +58,10 @@ export async function executeCodexPrompt(
 ): Promise<CodexExecResult> {
   const codexCommand = input.codexCommand?.trim() || 'codex'
   const workingDirectory = path.resolve(input.workingDirectory)
+  const childEnv = await resolveCodexChildEnv({
+    codexHome: input.codexHome,
+    env: input.env,
+  })
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-codex-'))
   const outputFile = path.join(tempRoot, 'last-message.txt')
   const args = buildCodexArgs({
@@ -129,7 +135,7 @@ export async function executeCodexPrompt(
     await new Promise<void>((resolve, reject) => {
       const child = spawn(codexCommand, args, {
         cwd: workingDirectory,
-        env: sanitizeChildProcessEnv(input.env),
+        env: childEnv,
         stdio: ['pipe', 'pipe', 'pipe'],
       })
 
@@ -279,6 +285,23 @@ export async function executeCodexPrompt(
   }
 }
 
+async function resolveCodexChildEnv(input: {
+  codexHome?: string | null
+  env?: NodeJS.ProcessEnv
+}): Promise<NodeJS.ProcessEnv> {
+  const nextEnv = sanitizeChildProcessEnv(input.env)
+  const resolvedHome = resolveConfiguredCodexHome(input.codexHome)
+  if (!resolvedHome) {
+    return nextEnv
+  }
+  await assertAccessibleCodexHomeDirectory(resolvedHome)
+
+  return {
+    ...nextEnv,
+    CODEX_HOME: resolvedHome,
+  }
+}
+
 export async function resolveCodexDisplayOptions(input: {
   configPath?: string
   model?: string | null
@@ -395,6 +418,60 @@ async function readCodexDisplayConfig(
     }
   }
 }
+
+function resolveConfiguredCodexHome(
+  codexHome: string | null | undefined,
+): string | null {
+  const normalized = normalizeNullableString(codexHome)
+  if (!normalized) {
+    return null
+  }
+
+  if (normalized === '~') {
+    return homedir()
+  }
+
+  if (normalized.startsWith(`~${path.sep}`)) {
+    return path.resolve(homedir(), normalized.slice(2))
+  }
+
+  return path.resolve(normalized)
+}
+
+async function assertAccessibleCodexHomeDirectory(
+  resolvedHome: string,
+): Promise<void> {
+  try {
+    await stat(resolvedHome)
+  } catch {
+    throw new VaultCliError(
+      'ASSISTANT_CODEX_HOME_INVALID',
+      `Configured Codex home does not exist: ${resolvedHome}`,
+    )
+  }
+
+  let resolvedStats
+  try {
+    await access(
+      resolvedHome,
+      fsConstants.R_OK | fsConstants.W_OK | fsConstants.X_OK,
+    )
+    resolvedStats = await stat(resolvedHome)
+  } catch {
+    throw new VaultCliError(
+      'ASSISTANT_CODEX_HOME_INVALID',
+      `Configured Codex home is not accessible: ${resolvedHome}`,
+    )
+  }
+
+  if (!resolvedStats.isDirectory()) {
+    throw new VaultCliError(
+      'ASSISTANT_CODEX_HOME_INVALID',
+      `Configured Codex home is not a directory: ${resolvedHome}`,
+    )
+  }
+}
+
 
 function parseCodexDisplayConfig(raw: string): CodexDisplayConfig {
   const config: CodexDisplayConfig = {

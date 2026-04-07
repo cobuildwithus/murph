@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, test, vi } from 'vitest'
@@ -552,6 +552,33 @@ test('executeCodexPrompt prefers JSON error events when codex exits non-zero', a
   )
 })
 
+test('executeCodexPrompt rejects explicit Codex homes that are not accessible', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-codex-home-'))
+  cleanupPaths.push(tempRoot)
+  const codexHome = path.join(tempRoot, 'Codex-1')
+  await mkdir(codexHome, {
+    recursive: true,
+  })
+  await chmod(codexHome, 0o000)
+
+  try {
+    await assert.rejects(
+      executeCodexPrompt({
+        codexHome,
+        prompt: 'Summarize the vault.',
+        workingDirectory: '/tmp/vault',
+      }),
+      (error: any) => {
+        assert.equal(error.code, 'ASSISTANT_CODEX_HOME_INVALID')
+        assert.match(String(error.message), /not accessible/u)
+        return true
+      },
+    )
+  } finally {
+    await chmod(codexHome, 0o700)
+  }
+})
+
 test('resolveCodexDisplayOptions uses explicit model overrides but keeps reasoning from the active profile', async () => {
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-codex-config-'))
   cleanupPaths.push(tempRoot)
@@ -637,6 +664,38 @@ test('resolveCodexDisplayOptions falls back to top-level config defaults when no
     }),
     {
       model: 'gpt-5.4',
+      reasoningEffort: 'xhigh',
+    },
+  )
+})
+
+test('resolveCodexDisplayOptions reads config from a Codex-home config path', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-codex-config-home-'))
+  cleanupPaths.push(tempRoot)
+  const codexHome = path.join(tempRoot, 'Codex-1')
+  await mkdir(codexHome, {
+    recursive: true,
+  })
+  await writeFile(
+    path.join(codexHome, 'config.toml'),
+    [
+      'model = "gpt-5.4"',
+      'model_reasoning_effort = "high"',
+      'profile = "full_access"',
+      '',
+      '[profiles.full_access]',
+      'model = "gpt-5.3-codex"',
+      'model_reasoning_effort = "xhigh"',
+    ].join('\n'),
+    'utf8',
+  )
+
+  assert.deepEqual(
+    await resolveCodexDisplayOptions({
+      configPath: path.join(codexHome, 'config.toml'),
+    }),
+    {
+      model: 'gpt-5.3-codex',
       reasoningEffort: 'xhigh',
     },
   )

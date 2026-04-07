@@ -15,6 +15,7 @@ export interface AssistantProviderConfig {
   apiKeyEnv: string | null
   baseUrl: string | null
   codexCommand: string | null
+  codexHome: string | null
   headers: Record<string, string> | null
   model: string | null
   oss: boolean
@@ -32,6 +33,7 @@ export type AssistantProviderConfigInput = {
   apiKeyEnv?: string | null
   baseUrl?: string | null
   codexCommand?: string | null
+  codexHome?: string | null
   headers?: Record<string, string> | null
   model?: string | null
   oss?: boolean | null
@@ -47,6 +49,7 @@ const ASSISTANT_PROVIDER_CONFIG_FIELDS = [
   'apiKeyEnv',
   'baseUrl',
   'codexCommand',
+  'codexHome',
   'headers',
   'model',
   'oss',
@@ -80,6 +83,7 @@ export function inferAssistantProviderFromConfigInput(
 
   if (
     normalizeNullableString(input?.codexCommand) ||
+    normalizeNullableString(input?.codexHome) ||
     normalizeNullableString(input?.profile) ||
     input?.approvalPolicy !== null && input?.approvalPolicy !== undefined ||
     input?.sandbox !== null && input?.sandbox !== undefined ||
@@ -112,6 +116,7 @@ export function sanitizeAssistantProviderConfig(
         apiKeyEnv: normalizeNullableString(input?.apiKeyEnv),
         baseUrl: normalizeNullableString(input?.baseUrl),
         codexCommand: null,
+        codexHome: null,
         headers: normalizeAssistantHeaders(input?.headers),
         model: normalizeNullableString(input?.model),
         oss: false,
@@ -128,6 +133,7 @@ export function sanitizeAssistantProviderConfig(
         apiKeyEnv: null,
         baseUrl: null,
         codexCommand: normalizeNullableString(input?.codexCommand),
+        codexHome: normalizeNullableString(input?.codexHome),
         headers: null,
         model: normalizeNullableString(input?.model),
         oss: input?.oss === true,
@@ -219,6 +225,7 @@ export function serializeAssistantProviderSessionOptions(
     approvalPolicy: normalized.approvalPolicy,
     profile: normalized.profile,
     oss: normalized.oss,
+    ...(normalized.codexHome ? { codexHome: normalized.codexHome } : {}),
     ...(normalized.baseUrl ? { baseUrl: normalized.baseUrl } : {}),
     ...(normalized.apiKeyEnv ? { apiKeyEnv: normalized.apiKeyEnv } : {}),
     ...(normalized.providerName ? { providerName: normalized.providerName } : {}),
@@ -234,6 +241,7 @@ export function serializeAssistantProviderOperatorDefaults(
   const normalized = normalizeAssistantProviderConfig(input)
   return {
     codexCommand: normalized.codexCommand,
+    codexHome: normalized.codexHome,
     model: normalized.model,
     reasoningEffort: normalized.reasoningEffort,
     sandbox: normalized.sandbox,
