@@ -62,7 +62,7 @@ import {
   type AssistantModelDiscoveryResult,
   resolveAssistantModelCatalog,
   resolveAssistantTargetCapabilities,
-} from '@murphai/assistant-cli/assistant/provider-catalog'
+} from '@murphai/assistant-engine/assistant-provider-catalog'
 import {
   buildAssistantProviderDefaultsPatch,
   resolveAssistantProviderDefaults,
@@ -96,6 +96,7 @@ test('serializeAssistantProviderSessionOptions sanitizes settings for the select
     serializeAssistantProviderSessionOptions({
       provider: 'openai-compatible',
       model: ' gpt-oss:20b ',
+      codexHome: ' /tmp/codex-1 ',
       sandbox: 'read-only',
       approvalPolicy: 'never',
       profile: ' primary ',
@@ -122,6 +123,31 @@ test('serializeAssistantProviderSessionOptions sanitizes settings for the select
         'X-Bar': 'baz',
         'X-Foo': 'bar',
       },
+    },
+  )
+})
+
+test('serializeAssistantProviderSessionOptions preserves an explicit Codex home for Codex targets', () => {
+  assert.deepEqual(
+    serializeAssistantProviderSessionOptions({
+      provider: 'codex-cli',
+      model: ' gpt-5.4 ',
+      codexCommand: ' codex ',
+      codexHome: ' /tmp/codex-1 ',
+      profile: ' primary ',
+      reasoningEffort: ' high ',
+      sandbox: 'workspace-write',
+      approvalPolicy: 'on-request',
+      oss: false,
+    }),
+    {
+      model: 'gpt-5.4',
+      reasoningEffort: 'high',
+      sandbox: 'workspace-write',
+      approvalPolicy: 'on-request',
+      profile: 'primary',
+      oss: false,
+      codexHome: '/tmp/codex-1',
     },
   )
 })
@@ -1514,12 +1540,27 @@ test('createSetupAssistantResolver applies named provider preset defaults before
 })
 
 test('createSetupAssistantResolver defaults Codex reasoning effort when it is not specified', async () => {
+  let resolveCodexHomeInput: Record<string, unknown> | null = null
+  const resolveCodexHome = vi.fn(async (input: {
+    allowPrompt: boolean
+    currentCodexHome?: string | null
+    explicitCodexHome?: string | null
+    input: NodeJS.ReadableStream
+    output: NodeJS.WritableStream
+  }) => {
+    resolveCodexHomeInput = input
+    return {
+      codexHome: '/tmp/codex-1',
+      discoveredHomes: ['/tmp/codex-1'],
+    }
+  })
   const resolver = createSetupAssistantResolver({
     assistantAccount: {
       resolve: async () => null,
     },
     input: new PassThrough(),
     output: new PassThrough(),
+    resolveCodexHome,
   })
 
   const resolved = await resolver.resolve({
@@ -1532,10 +1573,19 @@ test('createSetupAssistantResolver defaults Codex reasoning effort when it is no
   })
 
   assert.equal(resolved.provider, 'codex-cli')
+  assert.equal(resolved.codexHome, '/tmp/codex-1')
   assert.equal(
     resolved.reasoningEffort,
     DEFAULT_SETUP_CODEX_REASONING_EFFORT,
   )
+  const capturedCodexHomeInput = resolveCodexHomeInput
+  assert.notEqual(capturedCodexHomeInput, null)
+  if (capturedCodexHomeInput === null) {
+    throw new Error('Expected Codex-home resolver input to be captured.')
+  }
+  assert.equal(capturedCodexHomeInput['allowPrompt'], false)
+  assert.equal(capturedCodexHomeInput['currentCodexHome'], null)
+  assert.equal(capturedCodexHomeInput['explicitCodexHome'], null)
 })
 
 test('createSetupAssistantResolver accepts reasoning effort for OpenAI-compatible targets', async () => {

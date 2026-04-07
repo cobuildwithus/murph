@@ -10,13 +10,17 @@ import {
   resolveOpenAICompatibleProviderPreset,
   resolveOpenAICompatibleProviderPresetFromId,
   type OpenAICompatibleProviderPreset,
-} from '@murphai/assistant-engine/assistant-provider'
+} from '@murphai/operator-config/assistant/openai-compatible-provider-presets'
 import { normalizeNullableString } from '@murphai/operator-config/assistant/shared'
 import {
   createSetupAssistantAccountResolver,
   formatSetupAssistantAccountLabel,
   type SetupAssistantAccountResolver,
 } from './setup-assistant-account.js'
+import {
+  resolveSetupCodexHomeSelection,
+  type SetupCodexHomeSelection,
+} from './setup-codex-home.js'
 import { prepareSetupPromptInput } from '@murphai/operator-config/setup-prompt-io'
 import {
   type SetupAssistantPreset,
@@ -53,6 +57,13 @@ interface SetupAssistantResolverDependencies {
   }) => Promise<AssistantModelDiscoveryResult>
   input?: NodeJS.ReadableStream
   output?: NodeJS.WritableStream
+  resolveCodexHome?: (input: {
+    allowPrompt: boolean
+    currentCodexHome?: string | null
+    explicitCodexHome?: string | null
+    input: NodeJS.ReadableStream
+    output: NodeJS.WritableStream
+  }) => Promise<SetupCodexHomeSelection>
 }
 
 export function getDefaultSetupAssistantPreset(): SetupAssistantPreset {
@@ -69,6 +80,7 @@ export function hasExplicitSetupAssistantOptions(
     | 'assistantApiKeyEnv'
     | 'assistantProviderName'
     | 'assistantCodexCommand'
+    | 'assistantCodexHome'
     | 'assistantProfile'
     | 'assistantReasoningEffort'
     | 'assistantOss'
@@ -82,6 +94,7 @@ export function hasExplicitSetupAssistantOptions(
       options.assistantApiKeyEnv ||
       options.assistantProviderName ||
       options.assistantCodexCommand ||
+      options.assistantCodexHome ||
       options.assistantProfile ||
       options.assistantReasoningEffort ||
       options.assistantOss,
@@ -98,6 +111,7 @@ export function inferSetupAssistantPresetFromOptions(
     | 'assistantApiKeyEnv'
     | 'assistantProviderName'
     | 'assistantCodexCommand'
+    | 'assistantCodexHome'
     | 'assistantProfile'
     | 'assistantReasoningEffort'
     | 'assistantOss'
@@ -119,6 +133,7 @@ export function inferSetupAssistantPresetFromOptions(
   if (
     options.assistantModel ||
     options.assistantCodexCommand ||
+    options.assistantCodexHome ||
     options.assistantProfile ||
     options.assistantReasoningEffort ||
     options.assistantOss
@@ -172,6 +187,8 @@ export function createSetupAssistantResolver(
     dependencies.assistantAccount ?? createSetupAssistantAccountResolver()
   const input = dependencies.input ?? defaultInput
   const output = dependencies.output ?? defaultOutput
+  const resolveCodexHome =
+    dependencies.resolveCodexHome ?? resolveSetupCodexHomeSelection
 
   return {
     async resolve(resolutionInput) {
@@ -200,6 +217,19 @@ export function createSetupAssistantResolver(
 
         case 'codex': {
           const useLocalModel = resolutionInput.options.assistantOss === true
+          const selectedCodexHome = await resolveCodexHome({
+            allowPrompt: resolutionInput.allowPrompt,
+            currentCodexHome:
+              normalizeNullableString(
+                resolutionInput.options.assistantCodexHome,
+              ) ?? null,
+            explicitCodexHome:
+              resolutionInput.allowPrompt
+                ? null
+                : (resolutionInput.options.assistantCodexHome ?? null),
+            input,
+            output,
+          })
           const model = await resolvePromptedValue({
             allowPrompt: resolutionInput.allowPrompt,
             defaultValue:
@@ -226,6 +256,7 @@ export function createSetupAssistantResolver(
               normalizeNullableString(
                 resolutionInput.options.assistantCodexCommand,
               ) ?? null,
+            codexHome: selectedCodexHome.codexHome,
             profile:
               normalizeNullableString(resolutionInput.options.assistantProfile) ??
               null,
@@ -238,6 +269,7 @@ export function createSetupAssistantResolver(
             oss: useLocalModel,
             account: null,
             detail: buildCodexAssistantDetail({
+              codexHome: selectedCodexHome.codexHome,
               model,
               oss: useLocalModel,
             }),
@@ -531,12 +563,17 @@ function buildOpenAICompatibleAssistantDetail(input: {
 }
 
 function buildCodexAssistantDetail(input: {
+  codexHome?: string | null
   model: string
   oss: boolean
 }): string {
-  return input.oss
+  const detail = input.oss
     ? `Use Codex with the local model ${input.model}.`
     : `Use Codex with ${input.model}.`
+
+  return input.codexHome
+    ? `${detail} Use the explicit Codex home at ${input.codexHome}.`
+    : detail
 }
 
 function appendDetectedAssistantAccountDetail(

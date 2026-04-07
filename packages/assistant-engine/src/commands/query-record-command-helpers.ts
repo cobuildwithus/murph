@@ -245,8 +245,6 @@ export function numberOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
-export { createRuntimeUnavailableError } from '@murphai/operator-config/runtime-errors'
-
 export async function readJsonObject(
   absolutePath: string,
   label: string,

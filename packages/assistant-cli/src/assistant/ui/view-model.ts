@@ -8,7 +8,7 @@ import {
   resolveAssistantTargetCapabilities,
   type AssistantModelOption,
   type AssistantReasoningOption,
-} from '../provider-catalog.js'
+} from '@murphai/assistant-engine/assistant-provider-catalog'
 import { normalizeNullableString } from '@murphai/assistant-engine/assistant-runtime'
 
 export type InkChatTraceKind =
@@ -52,7 +52,7 @@ export interface InkChatTraceUpdate {
 export type {
   AssistantModelOption,
   AssistantReasoningOption,
-} from '../provider-catalog.js'
+} from '@murphai/assistant-engine/assistant-provider-catalog'
 
 export interface AssistantSlashCommand {
   command: string

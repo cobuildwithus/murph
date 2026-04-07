@@ -5,7 +5,7 @@ import { normalizeNullableString } from '@murphai/assistant-engine/assistant-run
 import {
   resolveAssistantCatalogReasoningOptions,
   type AssistantCatalogModel,
-} from '../provider-catalog.js'
+} from '@murphai/assistant-engine/assistant-provider-catalog'
 import {
   findAssistantModelOptionIndex,
   findAssistantReasoningOptionIndex,
