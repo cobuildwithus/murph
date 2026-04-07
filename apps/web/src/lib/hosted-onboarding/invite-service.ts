@@ -9,12 +9,12 @@ import type { HostedInviteStatusPayload } from "./types";
 
 import { getPrisma } from "../prisma";
 import { readHostedPhoneHint } from "./contact-privacy";
-import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
+import { hostedOnboardingError } from "./errors";
 import { deriveHostedOnboardingStage } from "./lifecycle";
 import {
-  readHostedMemberPrivateState,
-  writeHostedMemberPrivateStatePatch,
-} from "./member-private-state";
+  readHostedMemberIdentity,
+  writeHostedMemberSignupPhoneState,
+} from "./hosted-member-store";
 import { ensureHostedMemberForPhone } from "./member-identity-service";
 import { hasHostedPrivyPhoneAuthConfig } from "./privy";
 import {
@@ -24,8 +24,10 @@ import {
 import {
   generateHostedInviteCode,
   generateHostedInviteId,
+  generateHostedPhoneCodeAttemptId,
   inviteExpiresAt,
   lockHostedMemberRow,
+  type HostedOnboardingPrismaClient,
   withHostedOnboardingTransaction,
 } from "./shared";
 
@@ -201,15 +203,15 @@ export async function prepareHostedInvitePhoneCode(input: {
   inviteCode: string;
   now?: Date;
   prisma?: PrismaClient;
-}): Promise<{ phoneNumber: string }> {
+}): Promise<{ phoneNumber: string; sendAttemptId: string }> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
   return withHostedOnboardingTransaction(prisma, async (tx) => {
     const invite = await requireHostedInviteForAuthentication(input.inviteCode, tx, now);
     await lockHostedMemberRow(tx, invite.memberId);
 
-    const privateState = await readHostedInvitePrivateStateOrThrow(invite.memberId);
-    const signupPhoneNumber = privateState?.signupPhoneNumber ?? null;
+    const identity = await readHostedInviteIdentityStateOrThrow(invite.memberId, tx);
+    const signupPhoneNumber = identity.signupPhoneNumber;
 
     if (!signupPhoneNumber) {
       throw hostedOnboardingError({
@@ -221,7 +223,7 @@ export async function prepareHostedInvitePhoneCode(input: {
 
     const retryAfterMs = readPhoneCodeRetryAfterMs({
       now,
-      sentAt: privateState?.signupPhoneCodeSentAt ?? null,
+      sentAt: identity.signupPhoneCodeSentAt,
     });
 
     if (retryAfterMs > 0) {
@@ -236,16 +238,82 @@ export async function prepareHostedInvitePhoneCode(input: {
       });
     }
 
-    await writeHostedMemberPrivateStatePatch({
+    const sendAttemptId = generateHostedPhoneCodeAttemptId();
+    await writeHostedMemberSignupPhoneState({
       memberId: invite.memberId,
-      now: now.toISOString(),
-      patch: {
-        signupPhoneCodeSentAt: now.toISOString(),
-      },
+      prisma: tx,
+      signupPhoneCodeSendAttemptId: sendAttemptId,
+      signupPhoneCodeSendAttemptStartedAt: now,
+      signupPhoneCodeSentAt: now,
     });
 
     return {
       phoneNumber: signupPhoneNumber,
+      sendAttemptId,
+    };
+  });
+}
+
+export async function confirmHostedInvitePhoneCode(input: {
+  inviteCode: string;
+  now?: Date;
+  prisma?: PrismaClient;
+  sendAttemptId: string;
+}): Promise<{ ok: true }> {
+  const prisma = input.prisma ?? getPrisma();
+  const now = input.now ?? new Date();
+  return withHostedOnboardingTransaction(prisma, async (tx) => {
+    const invite = await requireHostedInviteForAuthentication(input.inviteCode, tx, now);
+    await lockHostedMemberRow(tx, invite.memberId);
+
+    const identity = await readHostedInviteIdentityStateOrThrow(invite.memberId, tx);
+    if (identity.signupPhoneCodeSendAttemptId !== input.sendAttemptId) {
+      throw hostedOnboardingError({
+        code: "PHONE_CODE_ATTEMPT_INVALID",
+        message: "Request a fresh verification code to continue.",
+        httpStatus: 409,
+        retryable: true,
+      });
+    }
+
+    await writeHostedMemberSignupPhoneState({
+      memberId: invite.memberId,
+      prisma: tx,
+      signupPhoneCodeSendAttemptId: null,
+      signupPhoneCodeSendAttemptStartedAt: null,
+    });
+
+    return {
+      ok: true,
+    };
+  });
+}
+
+export async function abortHostedInvitePhoneCode(input: {
+  inviteCode: string;
+  now?: Date;
+  prisma?: PrismaClient;
+  sendAttemptId: string;
+}): Promise<{ ok: true }> {
+  const prisma = input.prisma ?? getPrisma();
+  const now = input.now ?? new Date();
+  return withHostedOnboardingTransaction(prisma, async (tx) => {
+    const invite = await requireHostedInviteForAuthentication(input.inviteCode, tx, now);
+    await lockHostedMemberRow(tx, invite.memberId);
+
+    const identity = await readHostedInviteIdentityStateOrThrow(invite.memberId, tx);
+    if (identity.signupPhoneCodeSendAttemptId === input.sendAttemptId) {
+      await writeHostedMemberSignupPhoneState({
+        memberId: invite.memberId,
+        prisma: tx,
+        signupPhoneCodeSendAttemptId: null,
+        signupPhoneCodeSendAttemptStartedAt: null,
+        signupPhoneCodeSentAt: null,
+      });
+    }
+
+    return {
+      ok: true,
     };
   });
 }
@@ -272,7 +340,10 @@ export function requireHostedInviteMemberIdentity(
   });
 }
 
-async function findHostedInviteByCode(inviteCode: string, prisma: PrismaClient) {
+async function findHostedInviteByCode(
+  inviteCode: string,
+  prisma: HostedOnboardingPrismaClient,
+) {
   return prisma.hostedInvite.findUnique({
     where: {
       inviteCode,
@@ -287,40 +358,33 @@ async function findHostedInviteByCode(inviteCode: string, prisma: PrismaClient) 
   });
 }
 
-async function readHostedInvitePrivateStateOrThrow(memberId: string) {
-  try {
-    return await readHostedMemberPrivateState({
-      memberId,
-    });
-  } catch (error) {
-    if (
-      isHostedOnboardingError(error)
-      && error.code === "HOSTED_MEMBER_PRIVATE_STATE_NOT_CONFIGURED"
-    ) {
-      throw hostedOnboardingError({
-        code: "SIGNUP_PHONE_UNAVAILABLE",
-        message: "Enter the number that messaged Murph to continue.",
-        httpStatus: 409,
-      });
-    }
+async function readHostedInviteIdentityStateOrThrow(
+  memberId: string,
+  prisma: HostedOnboardingPrismaClient,
+) {
+  const identity = await readHostedMemberIdentity({
+    memberId,
+    prisma,
+  });
 
-    throw error;
+  if (!identity) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_IDENTITY_MISSING",
+      message: "Hosted invite identity state is missing.",
+      httpStatus: 500,
+    });
   }
+
+  return identity;
 }
 
 function readPhoneCodeRetryAfterMs(input: {
   now: Date;
-  sentAt: string | null;
+  sentAt: Date | null;
 }): number {
   if (!input.sentAt) {
     return 0;
   }
 
-  const sentAtMs = Date.parse(input.sentAt);
-
-  if (!Number.isFinite(sentAtMs)) {
-    return 0;
-  }
-
-  return Math.max(0, sentAtMs + HOSTED_INVITE_SEND_CODE_COOLDOWN_MS - input.now.getTime());
+  return Math.max(0, input.sentAt.getTime() + HOSTED_INVITE_SEND_CODE_COOLDOWN_MS - input.now.getTime());
 }

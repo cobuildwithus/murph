@@ -3,6 +3,7 @@ import { getAccessToken, getIdentityToken } from "@privy-io/react-auth";
 interface ApiErrorPayload {
   error: {
     code?: string;
+    details?: Record<string, unknown>;
     message: string;
     retryable?: boolean;
   };
@@ -14,18 +15,26 @@ type HostedOnboardingAuthMode = "none" | "optional" | "required";
 
 export class HostedOnboardingApiError extends Error {
   readonly code: string | null;
+  readonly details: Record<string, unknown> | null;
   readonly retryable: boolean;
 
-  constructor(input: { code: string | null; message: string; retryable?: boolean }) {
+  constructor(input: {
+    code: string | null;
+    details?: Record<string, unknown> | null;
+    message: string;
+    retryable?: boolean;
+  }) {
     super(input.message);
     this.name = "HostedOnboardingApiError";
     this.code = input.code;
+    this.details = input.details ?? null;
     this.retryable = input.retryable ?? false;
   }
 }
 
 export async function requestHostedOnboardingJson<T>(input: {
   auth?: HostedOnboardingAuthMode;
+  keepalive?: boolean;
   method?: "GET" | "POST";
   payload?: Record<string, unknown>;
   url: string;
@@ -43,6 +52,7 @@ export async function requestHostedOnboardingJson<T>(input: {
     },
     credentials: "same-origin",
     cache: "no-store",
+    keepalive: input.keepalive ?? false,
     body: input.payload ? JSON.stringify(input.payload) : undefined,
   });
   const data = await readOptionalJsonValue(response);
@@ -51,6 +61,7 @@ export async function requestHostedOnboardingJson<T>(input: {
   if (!response.ok || errorPayload) {
     throw new HostedOnboardingApiError({
       code: errorPayload?.code ?? null,
+      details: errorPayload?.details ?? null,
       message: errorPayload?.message ?? "Request failed.",
       retryable: errorPayload?.retryable === true,
     });
@@ -150,6 +161,7 @@ function readApiErrorPayload(value: unknown): ApiErrorPayload["error"] | null {
 
   return {
     code: typeof value.error.code === "string" ? value.error.code : undefined,
+    details: isRecord(value.error.details) ? value.error.details : undefined,
     message: value.error.message,
     retryable: value.error.retryable === true ? true : undefined,
   };

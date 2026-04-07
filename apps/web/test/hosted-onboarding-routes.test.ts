@@ -3,8 +3,10 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
+  abortHostedInvitePhoneCode: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   completeHostedPrivyVerification: vi.fn(),
+  confirmHostedInvitePhoneCode: vi.fn(),
   createHostedBillingCheckout: vi.fn(),
   prepareHostedInvitePhoneCode: vi.fn(),
   requireHostedPrivyCompletionRequestAuthContext: vi.fn(),
@@ -44,6 +46,8 @@ vi.mock("@/src/lib/hosted-onboarding/invite-service", async () => {
 
   return {
     ...actual,
+    abortHostedInvitePhoneCode: mocks.abortHostedInvitePhoneCode,
+    confirmHostedInvitePhoneCode: mocks.confirmHostedInvitePhoneCode,
     prepareHostedInvitePhoneCode: mocks.prepareHostedInvitePhoneCode,
   };
 });
@@ -62,11 +66,15 @@ vi.mock("@/src/lib/hosted-onboarding/route-helpers", () => ({
 }));
 
 type BillingCheckoutRouteModule = typeof import("../app/api/hosted-onboarding/billing/checkout/route");
+type AbortSendCodeRouteModule = typeof import("../app/api/hosted-onboarding/invites/[inviteCode]/send-code/abort/route");
+type ConfirmSendCodeRouteModule = typeof import("../app/api/hosted-onboarding/invites/[inviteCode]/send-code/confirm/route");
 type HostedOnboardingHttpModule = typeof import("../src/lib/hosted-onboarding/http");
 type PrivyCompleteRouteModule = typeof import("../app/api/hosted-onboarding/privy/complete/route");
 type SendCodeRouteModule = typeof import("../app/api/hosted-onboarding/invites/[inviteCode]/send-code/route");
 
 let billingCheckoutRoute: BillingCheckoutRouteModule;
+let abortSendCodeRoute: AbortSendCodeRouteModule;
+let confirmSendCodeRoute: ConfirmSendCodeRouteModule;
 let hostedOnboardingHttp: HostedOnboardingHttpModule;
 let privyCompleteRoute: PrivyCompleteRouteModule;
 let sendCodeRoute: SendCodeRouteModule;
@@ -77,7 +85,9 @@ const SAME_ORIGIN_HEADERS = {
 
 describe("hosted onboarding routes", () => {
   beforeAll(async () => {
+    abortSendCodeRoute = await import("../app/api/hosted-onboarding/invites/[inviteCode]/send-code/abort/route");
     billingCheckoutRoute = await import("../app/api/hosted-onboarding/billing/checkout/route");
+    confirmSendCodeRoute = await import("../app/api/hosted-onboarding/invites/[inviteCode]/send-code/confirm/route");
     hostedOnboardingHttp = await import("../src/lib/hosted-onboarding/http");
     privyCompleteRoute = await import("../app/api/hosted-onboarding/privy/complete/route");
     sendCodeRoute = await import("../app/api/hosted-onboarding/invites/[inviteCode]/send-code/route");
@@ -114,8 +124,15 @@ describe("hosted onboarding routes", () => {
       alreadyActive: false,
       url: "https://billing.example.test/session_123",
     });
+    mocks.confirmHostedInvitePhoneCode.mockResolvedValue({
+      ok: true,
+    });
+    mocks.abortHostedInvitePhoneCode.mockResolvedValue({
+      ok: true,
+    });
     mocks.prepareHostedInvitePhoneCode.mockResolvedValue({
       phoneNumber: "+15551234567",
+      sendAttemptId: "send_attempt_123",
     });
     mocks.requireHostedPrivyRequestAuthContext.mockResolvedValue({
       linkedAccounts: [
@@ -433,6 +450,7 @@ describe("hosted onboarding routes", () => {
     });
     await expect(response.json()).resolves.toEqual({
       phoneNumber: "+15551234567",
+      sendAttemptId: "send_attempt_123",
     });
   });
 
@@ -466,6 +484,66 @@ describe("hosted onboarding routes", () => {
         message: "Wait a moment before requesting another code.",
         retryable: true,
       },
+    });
+  });
+
+  it("confirms invite send-code attempts through the same-origin no-store route", async () => {
+    const request = new Request("https://join.example.test/api/hosted-onboarding/invites/invite-code/send-code/confirm", {
+      body: JSON.stringify({
+        sendAttemptId: "send_attempt_123",
+      }),
+      headers: {
+        ...SAME_ORIGIN_HEADERS,
+        "content-type": "application/json",
+      },
+      method: "POST",
+    });
+
+    const response = await confirmSendCodeRoute.POST(request, {
+      params: Promise.resolve({
+        inviteCode: "invite-code",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(request);
+    expect(mocks.confirmHostedInvitePhoneCode).toHaveBeenCalledWith({
+      inviteCode: "invite-code",
+      sendAttemptId: "send_attempt_123",
+    });
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+    });
+  });
+
+  it("aborts failed invite send-code attempts through the same-origin no-store route", async () => {
+    const request = new Request("https://join.example.test/api/hosted-onboarding/invites/invite-code/send-code/abort", {
+      body: JSON.stringify({
+        sendAttemptId: "send_attempt_123",
+      }),
+      headers: {
+        ...SAME_ORIGIN_HEADERS,
+        "content-type": "application/json",
+      },
+      method: "POST",
+    });
+
+    const response = await abortSendCodeRoute.POST(request, {
+      params: Promise.resolve({
+        inviteCode: "invite-code",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(request);
+    expect(mocks.abortHostedInvitePhoneCode).toHaveBeenCalledWith({
+      inviteCode: "invite-code",
+      sendAttemptId: "send_attempt_123",
+    });
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
     });
   });
 
