@@ -9,12 +9,13 @@ import {
 } from "./projectors/history.ts";
 import {
   fallbackCurrentProfileEntity,
+  materializeCurrentProfileDocumentFromSnapshotEntity,
   projectCurrentProfileEntity,
   projectProfileSnapshotEntity,
 } from "./projectors/profile.ts";
 import {
   resolveCurrentProfileDocument,
-  resolveCurrentProfileSnapshot,
+  selectLatestCurrentProfileSnapshot,
   type CurrentProfileDocumentOutcome,
   type CurrentProfileSnapshotSortFields,
 } from "./current-profile-resolution.ts";
@@ -154,11 +155,20 @@ function resolveCurrentProfileCollection(
   markdownByPath: Map<string, string>,
   currentProfileDocumentInput: MarkdownDocumentRecord | MarkdownDocumentOutcome | null,
 ): CurrentProfileCollection {
-  const resolution = resolveCurrentProfileSnapshot(
+  const latestSnapshot = selectLatestCurrentProfileSnapshot(
     profileSnapshots,
     canonicalProfileSnapshotSortFields,
-    fallbackCurrentProfileEntity,
   );
+  const fallbackCurrentProfile = latestSnapshot
+    ? fallbackCurrentProfileEntity(latestSnapshot)
+    : null;
+  const fallbackCurrentProfileDocument = latestSnapshot
+    ? materializeCurrentProfileDocumentFromSnapshotEntity(latestSnapshot)
+    : null;
+  const resolution = {
+    latestSnapshotId: latestSnapshot?.entityId ?? null,
+    fallbackCurrentProfile,
+  };
   const currentProfileDocument = buildCurrentProfileDocumentResolutionInput(
     currentProfileDocumentInput,
   );
@@ -168,6 +178,17 @@ function resolveCurrentProfileCollection(
     currentProfileSnapshotId,
     buildCurrentProfileRetainOptions(markdownByPath, currentProfileDocument.markdown),
   );
+
+  if (
+    fallbackCurrentProfile &&
+    resolvedCurrentProfile.currentProfile === fallbackCurrentProfile &&
+    fallbackCurrentProfileDocument
+  ) {
+    markdownByPath.set(
+      fallbackCurrentProfile.path,
+      fallbackCurrentProfileDocument.markdown,
+    );
+  }
 
   return {
     entity: resolvedCurrentProfile.currentProfile,

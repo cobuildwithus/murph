@@ -24,10 +24,14 @@ vault/
   raw/documents/YYYY/MM/<documentId>/manifest.json
   raw/assessments/YYYY/MM/<assessmentId>/source.json
   raw/assessments/YYYY/MM/<assessmentId>/manifest.json
+  raw/measurements/YYYY/MM/<eventId>/<filename>
+  raw/measurements/YYYY/MM/<eventId>/manifest.json
   raw/meals/YYYY/MM/<mealId>/<slot>-<filename>
   raw/meals/YYYY/MM/<mealId>/manifest.json
   raw/samples/<stream>/YYYY/MM/<transformId>/<filename>.csv
   raw/samples/<stream>/YYYY/MM/<transformId>/manifest.json
+  raw/workouts/YYYY/MM/<eventId>/<filename>
+  raw/workouts/YYYY/MM/<eventId>/manifest.json
   raw/integrations/<provider>/YYYY/MM/<transformId>/<filename>
   raw/integrations/<provider>/YYYY/MM/<transformId>/manifest.json
   ledger/inbox-captures/YYYY/YYYY-MM.jsonl
@@ -73,13 +77,13 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - Sample shards use `recordedAt`: `ledger/samples/<stream>/YYYY/YYYY-MM.jsonl`.
 - Audit shards use `occurredAt`: `audit/YYYY/YYYY-MM.jsonl`.
 - Export-pack directories under `exports/packs/<packId>/` are derived, read-only outputs. Current pack ids are path-safe names derived from scope rather than canonical record ids.
-- `bank/profile/current.md` is a derived current-state document rebuilt from profile snapshots; append-only truth remains in `ledger/profile-snapshots/`.
-- Keep both the snapshot ledger and `bank/profile/current.md`: the ledger is the authoritative historical source and rebuild input, while the Markdown page remains the operator-facing current view.
-- Query readers must tolerate `bank/profile/current.md` being stale, missing, or malformed by falling back to the latest snapshot; the materialized page improves human readability but must not become a hard dependency for current-state reads.
+- `bank/profile/current.md` is a generated current-state document rebuilt from profile snapshots; append-only truth remains in `ledger/profile-snapshots/`.
+- Keep both the snapshot ledger and `bank/profile/current.md`: the ledger is the authoritative historical source and rebuild input, while the Markdown page remains the operator-facing generated view owned by `profile current rebuild` and `vault repair`.
+- Query readers must tolerate `bank/profile/current.md` being stale, missing, or malformed by regenerating the view from the latest snapshot in memory; the materialized page improves human readability but must not become a hard dependency for current-state reads.
 - `bank/goals`, `bank/conditions`, `bank/allergies`, `bank/foods`, `bank/workout-formats`, `bank/family`, and `bank/genetics` store one Markdown document per canonical record id or slug-safe alias or saved-default lookup key.
 - `bank/library/**/*.md` is the stable health reference layer for reusable entities such as biomarkers, domains, protocol variants, and source artifacts. It is durable reference context, not the user-specific synthesized wiki.
 - `bank/foods` stores long-lived remembered foods such as regular restaurant orders, smoothie presets, and grocery staples so assistants can resolve shorthand references without re-scraping menus or ingredient lists, and food records may optionally carry a narrow `autoLogDaily.time` rule for daily note-only meal auto-logging.
-- `bank/workout-formats` stores thin reusable workout defaults such as a saved lifting note plus optional duration, type, or distance overrides; `workout format log` still writes the canonical `activity_session` event and does not create a separate workout record family.
+- `bank/workout-formats` stores reusable workout templates plus summary defaults such as activity type, duration, distance, and saved routine text; `workout format log` still writes the canonical `activity_session` event and does not create a separate workout record family.
 - `bank/protocols/**/*.md` allows nested protocol group folders, but every path segment must remain slug-safe ASCII.
 - `derived/knowledge/index.md` is the content-oriented entrypoint into the personal compiled wiki.
 - `derived/knowledge/log.md` is the append-only chronological log of derived knowledge writes.
@@ -90,8 +94,10 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - Document imports use `raw/documents/YYYY/MM/<documentId>/<filename>`.
 - Auto-preserved inbox document attachments reuse the same `raw/documents/YYYY/MM/<documentId>/<filename>` contract instead of introducing a second evidence folder family.
 - Assessment imports use `raw/assessments/YYYY/MM/<assessmentId>/source.json`.
+- Body-measurement attachments use `raw/measurements/YYYY/MM/<eventId>/<filename>`.
 - Meal attachments use `raw/meals/YYYY/MM/<mealId>/<slot>-<filename>`.
 - Sample CSV imports use `raw/samples/<stream>/YYYY/MM/<transformId>/<filename>.csv`, where `transformId` is the returned import-batch id.
+- Workout attachments use `raw/workouts/YYYY/MM/<eventId>/<filename>`.
 - Device/provider API snapshot imports use `raw/integrations/<provider>/YYYY/MM/<transformId>/<filename>`, where `transformId` is the returned device-batch id.
 - Each raw import directory also reserves `manifest.json` for the immutable sidecar describing imported artifacts, checksums, and provenance.
 - `raw/inbox/**` instead reserves `envelope.json` as the immutable capture record and may include copied attachments without manifest sidecars.

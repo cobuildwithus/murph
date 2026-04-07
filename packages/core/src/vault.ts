@@ -51,7 +51,12 @@ import {
   readStoredWriteOperation,
   runCanonicalWrite,
 } from "./operations/write-batch.ts";
-import { buildCurrentProfileMarkdown, listProfileSnapshots } from "./profile/storage.ts";
+import {
+  buildCurrentProfileMarkdown,
+  listProfileSnapshots,
+  readCurrentProfileMarkdown,
+  stageCurrentProfileMaterialization,
+} from "./profile/storage.ts";
 import { toIsoTimestamp } from "./time.ts";
 import { buildVaultCoreDocument } from "./vault-core-document.ts";
 import {
@@ -248,8 +253,23 @@ export async function repairVault({ vaultRoot }: LoadVaultInput = {}): Promise<R
     "Vault metadata failed contract validation.",
   );
   const createdDirectories = await ensureMissingRequiredDirectories(absoluteRoot);
+  const currentState = await readCurrentProfileMarkdown(absoluteRoot);
+  let latestSnapshot: Awaited<ReturnType<typeof listProfileSnapshots>>[number] | null | undefined;
 
-  if (createdDirectories.length === 0) {
+  try {
+    latestSnapshot = (await listProfileSnapshots({ vaultRoot: absoluteRoot })).at(-1) ?? null;
+  } catch {
+    latestSnapshot = undefined;
+  }
+
+  const currentProfileNeedsRepair =
+    latestSnapshot === undefined
+      ? false
+      : latestSnapshot === null
+        ? currentState.exists
+        : currentState.markdown !== buildCurrentProfileMarkdown(latestSnapshot);
+
+  if (createdDirectories.length === 0 && !currentProfileNeedsRepair) {
     return {
       metadataFile: VAULT_LAYOUT.metadata,
       title: metadata.title,
@@ -263,28 +283,50 @@ export async function repairVault({ vaultRoot }: LoadVaultInput = {}): Promise<R
   let auditPath: string | null = null;
   const occurredAt = new Date().toISOString();
 
-  if (createdDirectories.length > 0) {
-    auditPath = await runCanonicalWrite({
-      vaultRoot: absoluteRoot,
-      operationType: "vault_repair",
-      summary: `Repair vault ${metadata.vaultId}`,
-      occurredAt,
-      mutate: async ({ batch }) => {
-        const audit = await emitAuditRecord({
-          vaultRoot: absoluteRoot,
-          batch,
-          action: "vault_repair",
-          commandName: "core.repairVault",
-          summary: "Created missing required scaffold directories.",
-          occurredAt,
-          files: createdDirectories,
-          targetIds: [metadata.vaultId],
-        });
+  auditPath = await runCanonicalWrite({
+    vaultRoot: absoluteRoot,
+    operationType: "vault_repair",
+    summary: `Repair vault ${metadata.vaultId}`,
+    occurredAt,
+    mutate: async ({ batch }) => {
+      const repairSummaries: string[] = [];
+      const repairFiles = [...createdDirectories];
+      const repairTargetIds = [metadata.vaultId];
 
-        return audit.relativePath;
-      },
-    });
-  }
+      if (createdDirectories.length > 0) {
+        repairSummaries.push("Created missing required scaffold directories.");
+      }
+
+      if (latestSnapshot !== undefined) {
+        const materialized = await stageCurrentProfileMaterialization(
+          batch,
+          currentState,
+          latestSnapshot,
+        );
+
+        if (materialized.updated) {
+          repairSummaries.push(materialized.rebuildAudit.summary);
+          repairFiles.push(
+            ...materialized.rebuildAudit.changes.map((change) => change.path),
+          );
+          repairTargetIds.push(...materialized.rebuildAudit.targetIds);
+        }
+      }
+
+      const audit = await emitAuditRecord({
+        vaultRoot: absoluteRoot,
+        batch,
+        action: "vault_repair",
+        commandName: "core.repairVault",
+        summary: repairSummaries.join(" "),
+        occurredAt,
+        files: repairFiles,
+        targetIds: repairTargetIds,
+      });
+
+      return audit.relativePath;
+    },
+  });
 
   return {
     metadataFile: VAULT_LAYOUT.metadata,

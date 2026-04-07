@@ -88,8 +88,8 @@ Storage and authority rules for the cutover:
 
 - Keep curated current state in Markdown bank docs. The cutover plan reserves Markdown registries for profile, goals, conditions, allergies, protocols, family members, and genetics.
 - Keep append-only machine history in JSONL. Assessments, profile snapshots, timed history, samples, and audit records stay ledger-backed rather than becoming mutable Markdown truth.
-- Keep `bank/profile/current.md` derived from profile snapshots instead of promoting it to the only source of truth.
-- Keep the current-profile seam intentionally split: the snapshot ledger is the durable historical source and rebuild anchor, `bank/profile/current.md` is the human-facing materialized current page, and query-side tolerant fallback keeps reads working when that page is stale, missing, or malformed.
+- Keep `bank/profile/current.md` generated from profile snapshots instead of promoting it to the only source of truth.
+- Keep the current-profile seam intentionally split: the snapshot ledger is the durable historical source and rebuild anchor, `bank/profile/current.md` is the human-facing generated page owned by rebuild or repair, and query-side tolerant fallback regenerates the same view in memory when that page is stale, missing, or malformed.
 - Keep timed history in the existing `ledger/events` family. New health history kinds such as `encounter`, `procedure`, `test`, `adverse_effect`, and `exposure` extend that ledger instead of creating a second event timeline.
 - Keep assessment provenance split across immutable `raw/assessments` inputs and append-only assessment ledgers. Intake projection may return typed proposals, but noun-specific upserts still own canonical writes.
 

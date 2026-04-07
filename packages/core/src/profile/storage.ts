@@ -1,11 +1,11 @@
 import {
+  buildCurrentProfileDocument,
   profileCurrentFrontmatterSchema,
   profileSnapshotSchema,
   safeParseContract,
 } from "@murphai/contracts";
 
 import { buildAuditRecord, resolveAuditShardPath } from "../audit.ts";
-import { stringifyFrontmatterDocument } from "../frontmatter.ts";
 import { pathExists, readUtf8File, walkVaultFiles } from "../fs.ts";
 import { generateRecordId } from "../ids.ts";
 import { readJsonlRecords, toMonthlyShardRelativePath } from "../jsonl.ts";
@@ -13,9 +13,7 @@ import { WriteBatch } from "../operations/write-batch.ts";
 import { resolveVaultPath } from "../path-safety.ts";
 import { toIsoTimestamp } from "../time.ts";
 import { VaultError } from "../errors.ts";
-import { isPlainRecord } from "../types.ts";
 
-import type { FrontmatterObject } from "../types.ts";
 import type {
   AppendProfileSnapshotInput,
   CurrentProfileState,
@@ -23,9 +21,7 @@ import type {
   RebuiltCurrentProfile,
 } from "./types.ts";
 import {
-  PROFILE_CURRENT_DOC_TYPE,
   PROFILE_CURRENT_DOCUMENT_PATH,
-  PROFILE_CURRENT_SCHEMA_VERSION,
   PROFILE_SNAPSHOT_LEDGER_DIRECTORY,
   PROFILE_SNAPSHOT_SCHEMA_VERSION,
 } from "./types.ts";
@@ -74,89 +70,34 @@ function findLatestAcceptedProfileSnapshot(
   return records.length === 0 ? null : records.at(-1) ?? null;
 }
 
-function renderProfileValue(
-  value: unknown,
-  depth = 0,
-): string[] {
-  const indent = "  ".repeat(depth);
-
-  if (Array.isArray(value)) {
-    if (value.length === 0) {
-      return [`${indent}[]`];
-    }
-
-    return value.flatMap((entry) => {
-      if (isPlainRecord(entry) || Array.isArray(entry)) {
-        return [`${indent}-`, ...renderProfileValue(entry, depth + 1)];
-      }
-
-      return [`${indent}- ${String(entry)}`];
-    });
-  }
-
-  if (isPlainRecord(value)) {
-    const entries = Object.entries(value).sort(([left], [right]) => left.localeCompare(right));
-
-    if (entries.length === 0) {
-      return [`${indent}{}`];
-    }
-
-    return entries.flatMap(([key, entry]) => {
-      if (isPlainRecord(entry) || Array.isArray(entry)) {
-        return [`${indent}- ${key}:`, ...renderProfileValue(entry, depth + 1)];
-      }
-
-      return [`${indent}- ${key}: ${String(entry)}`];
-    });
-  }
-
-  return [`${indent}${String(value)}`];
-}
-
 export function buildCurrentProfileMarkdown(snapshot: ProfileSnapshotRecord): string {
-  const attributesResult = safeParseContract(profileCurrentFrontmatterSchema, {
-    schemaVersion: PROFILE_CURRENT_SCHEMA_VERSION,
-    docType: PROFILE_CURRENT_DOC_TYPE,
-    snapshotId: snapshot.id,
-    updatedAt: snapshot.recordedAt,
-    sourceAssessmentIds: snapshot.sourceAssessmentIds,
-    sourceEventIds: snapshot.sourceEventIds,
-    topGoalIds: snapshot.profile.goals?.topGoalIds,
-    unitPreferences: snapshot.profile.unitPreferences,
-  });
+  try {
+    const document = buildCurrentProfileDocument({
+      snapshotId: snapshot.id,
+      updatedAt: snapshot.recordedAt,
+      source: snapshot.source,
+      sourceAssessmentIds: snapshot.sourceAssessmentIds,
+      sourceEventIds: snapshot.sourceEventIds,
+      profile: snapshot.profile,
+    });
+    const attributesResult = safeParseContract(
+      profileCurrentFrontmatterSchema,
+      document.attributes,
+    );
 
-  if (!attributesResult.success) {
+    if (!attributesResult.success) {
+      throw new Error(attributesResult.errors.join("; "));
+    }
+
+    return document.markdown;
+  } catch (error) {
     throw new VaultError("PROFILE_INVALID", "Current profile attributes failed contract validation.", {
-      errors: attributesResult.errors,
+      errors: [error instanceof Error ? error.message : String(error)],
     });
   }
-
-  return stringifyFrontmatterDocument({
-    attributes: Object.fromEntries(
-      Object.entries(attributesResult.data).filter(([, value]) => value !== undefined),
-    ) as FrontmatterObject,
-    body: [
-      "# Current Profile",
-      "",
-      `Snapshot ID: \`${snapshot.id}\``,
-      `Recorded At: ${snapshot.recordedAt}`,
-      `Source: ${snapshot.source}`,
-      "",
-      "## Structured Profile",
-      "",
-      ...renderProfileValue(snapshot.profile),
-      "",
-      "## JSON",
-      "",
-      "```json",
-      JSON.stringify(snapshot.profile, null, 2),
-      "```",
-      "",
-    ].join("\n"),
-  });
 }
 
-async function readCurrentProfileMarkdown(
+export async function readCurrentProfileMarkdown(
   vaultRoot: string,
 ): Promise<{ exists: boolean; markdown: string | null }> {
   const resolved = resolveVaultPath(vaultRoot, PROFILE_CURRENT_DOCUMENT_PATH);
@@ -190,7 +131,7 @@ interface StagedCurrentProfileMaterialization {
   rebuildAudit: CurrentProfileRebuildAudit;
 }
 
-async function stageCurrentProfileMaterialization(
+export async function stageCurrentProfileMaterialization(
   batch: WriteBatch,
   currentState: StoredCurrentProfileMarkdown,
   snapshot: ProfileSnapshotRecord | null,
