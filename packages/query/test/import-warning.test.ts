@@ -19,6 +19,13 @@ test("source query root import stays free of sqlite warnings", async () => {
     `import(${JSON.stringify(modulePath)})`,
   ], {
     cwd: packageDir,
+    env: {
+      HOME: process.env.HOME,
+      PATH: process.env.PATH,
+      TEMP: process.env.TEMP,
+      TMP: process.env.TMP,
+      TMPDIR: process.env.TMPDIR,
+    },
   });
 
   assert.equal(result.stdout.trim(), "");

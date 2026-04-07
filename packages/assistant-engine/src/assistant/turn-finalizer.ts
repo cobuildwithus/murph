@@ -11,6 +11,8 @@ import {
   serializeAssistantProviderSessionOptions,
 } from './provider-config.js'
 import {
+  readAssistantProviderResumeRouteId,
+  readAssistantProviderSessionId,
   writeAssistantProviderResumeRouteId,
   writeAssistantSessionProviderSessionId,
 } from './provider-state.js'
@@ -68,12 +70,20 @@ export async function persistAssistantTurnAndSession(input: {
     }) ?? input.session.target
   const nextProviderConfig = assistantBackendTargetToProviderConfigInput(nextTarget)
   const nextProviderOptions = serializeAssistantProviderSessionOptions(nextProviderConfig)
+  const previousProviderSessionId = readAssistantProviderSessionId(input.session)
+  const previousResumeRouteId = readAssistantProviderResumeRouteId(input.session)
+  const nextResumeRouteId =
+    previousProviderSessionId !== null &&
+    previousProviderSessionId === input.providerResult.providerSessionId &&
+    previousResumeRouteId !== null
+      ? previousResumeRouteId
+      : input.providerResult.route.routeId
   const nextResumeState = writeAssistantProviderResumeRouteId(
     writeAssistantSessionProviderSessionId(
       input.session.resumeState,
       input.providerResult.providerSessionId,
     ),
-    input.providerResult.route.routeId,
+    nextResumeRouteId,
   )
   const nextProviderBinding =
     nextResumeState &&

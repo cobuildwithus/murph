@@ -67,6 +67,12 @@ import {
   VaultError,
 } from "../src/index.ts";
 import {
+  buildVaultMetadata,
+  detectVaultMetadataFormatVersion,
+  resolveVaultMetadataFormatVersion,
+  validateVaultMetadata,
+} from "../src/vault-metadata.ts";
+import {
   appendVaultTextFile,
   copyImmutableFileIntoVaultRaw,
   writeImmutableJsonFileIntoVaultRaw,
@@ -188,6 +194,50 @@ test("initializeVault bootstraps the baseline contract layout and passes validat
   assert.deepEqual(
     auditRecord.changes.map((change: AuditRecord["changes"][number]) => change.path),
     ["CORE.md", "vault.json"],
+  );
+});
+
+test("vault metadata helpers preserve the current format version and validate schema shape", () => {
+  const metadata = buildVaultMetadata({
+    vaultId: "vault_01JQ9R7WF97M1WAB2B4QF2Q1A1",
+    createdAt: "2026-03-12T12:00:00.000Z",
+    title: "Baseline vault",
+    timezone: "Australia/Melbourne",
+  });
+
+  assert.deepEqual(metadata, {
+    formatVersion: 1,
+    vaultId: "vault_01JQ9R7WF97M1WAB2B4QF2Q1A1",
+    createdAt: "2026-03-12T12:00:00.000Z",
+    title: "Baseline vault",
+    timezone: "Australia/Melbourne",
+  });
+  assert.equal(resolveVaultMetadataFormatVersion(metadata), 1);
+  assert.equal(detectVaultMetadataFormatVersion(metadata), 1);
+  assert.deepEqual(validateVaultMetadata(metadata, "VAULT_INVALID_METADATA", "broken"), {
+    metadata,
+    storedFormatVersion: 1,
+  });
+});
+
+test("validateVaultMetadata remaps invalid schema details to the caller supplied code", () => {
+  assert.throws(
+    () =>
+      validateVaultMetadata(
+        {
+          formatVersion: 1,
+          vaultId: "vault_01JQ9R7WF97M1WAB2B4QF2Q1A1",
+          createdAt: "2026-03-12T12:00:00.000Z",
+          title: "",
+          timezone: "Australia/Melbourne",
+        },
+        "CORE_INVALID_METADATA",
+        "broken metadata",
+      ),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "CORE_INVALID_METADATA" &&
+      "errors" in error.details,
   );
 });
 
@@ -1583,6 +1633,7 @@ test("validateVault accepts workout and body-measurement media references", asyn
   const workoutEventId = "evt_01JNW000A1B2C3D4E5F6G7H8JK";
   const workoutRawDirectory = `raw/workouts/2026/03/${workoutEventId}`;
   const workoutMediaRelativePath = `${workoutRawDirectory}/01-progress-front.jpg`;
+  const workoutMediaBuffer = Buffer.from("workout-media", "utf8");
   await writeMediaBatch({
     eventId: workoutEventId,
     rawDirectory: workoutRawDirectory,
@@ -1605,7 +1656,7 @@ test("validateVault accepts workout and body-measurement media references", asyn
           kind: "photo",
           relativePath: workoutMediaRelativePath,
           mediaType: "image/jpeg",
-          sha256: createHash("sha256").update(mediaBuffer).digest("hex"),
+          sha256: createHash("sha256").update(workoutMediaBuffer).digest("hex"),
           originalFileName: "progress-front.jpg",
         },
       ],
@@ -1626,6 +1677,7 @@ test("validateVault accepts workout and body-measurement media references", asyn
   const measurementEventId = "evt_01JNW000Z9Y8X7W6V5T4S3R2QP";
   const measurementRawDirectory = `raw/measurements/2026/03/${measurementEventId}`;
   const measurementMediaRelativePath = `${measurementRawDirectory}/01-progress-front.jpg`;
+  const measurementMediaBuffer = Buffer.from("measurement-media", "utf8");
   await writeMediaBatch({
     eventId: measurementEventId,
     rawDirectory: measurementRawDirectory,
@@ -1653,7 +1705,7 @@ test("validateVault accepts workout and body-measurement media references", asyn
           kind: "photo",
           relativePath: measurementMediaRelativePath,
           mediaType: "image/jpeg",
-          sha256: createHash("sha256").update(mediaBuffer).digest("hex"),
+          sha256: createHash("sha256").update(measurementMediaBuffer).digest("hex"),
           originalFileName: "progress-front.jpg",
         },
       ],

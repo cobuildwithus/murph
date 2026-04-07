@@ -136,6 +136,22 @@ test("upgradeVault returns a no-op result for current-format vaults", async () =
   }
 });
 
+test("upgradeVault rejects future format versions as unsupported", async () => {
+  const vaultRoot = await createTempVaultRoot("murph-vault-upgrade-future");
+
+  try {
+    await initializeVault({ vaultRoot, timezone: "America/New_York" });
+    await rewriteVaultMetadataWithFormatVersion(vaultRoot, CURRENT_VAULT_FORMAT_VERSION + 1);
+
+    await assert.rejects(
+      () => upgradeVault({ vaultRoot }),
+      (error) => hasVaultErrorCode(error, "VAULT_UPGRADE_UNSUPPORTED"),
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("upgradeVault rejects older format versions when no migration is registered", async () => {
   const vaultRoot = await createTempVaultRoot("murph-vault-upgrade-unsupported-old");
 

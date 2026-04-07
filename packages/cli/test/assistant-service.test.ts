@@ -3778,6 +3778,84 @@ test('sendAssistantMessage cold-starts when an OpenAI Responses binding is missi
   )
 })
 
+test('sendAssistantMessage does not reuse an OpenAI Responses session when route auth metadata changes', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-openai-route-mismatch-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:openai-route-mismatch',
+    provider: 'openai-compatible',
+    baseUrl: 'https://api.openai.com/v1',
+    apiKeyEnv: 'OPENAI_API_KEY',
+    model: 'gpt-5',
+  })
+  await saveAssistantSession(vaultRoot, {
+    ...resolved.session,
+    provider: 'openai-compatible',
+    providerOptions: {
+      model: 'gpt-5',
+      reasoningEffort: null,
+      sandbox: null,
+      approvalPolicy: null,
+      profile: null,
+      oss: false,
+      baseUrl: 'https://api.openai.com/v1',
+      apiKeyEnv: 'OPENAI_API_KEY',
+    },
+    providerBinding: {
+      provider: 'openai-compatible',
+      providerSessionId: 'resp_old_route',
+      providerOptions: {
+        model: 'gpt-5',
+        reasoningEffort: null,
+        sandbox: null,
+        approvalPolicy: null,
+        profile: null,
+        oss: false,
+        baseUrl: 'https://api.openai.com/v1',
+        apiKeyEnv: 'OPENAI_API_KEY',
+      },
+      providerState: {
+        resumeRouteId: 'openai-compatible:legacy-route',
+      },
+    },
+    updatedAt: '2026-04-02T08:00:00.000Z',
+    lastTurnAt: '2026-04-02T08:00:00.000Z',
+    turnCount: 1,
+  })
+
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValueOnce({
+    provider: 'openai-compatible',
+    providerSessionId: 'resp_new_route',
+    response: 'Started fresh with the new route.',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:openai-route-mismatch',
+    prompt: 'keep going',
+    provider: 'openai-compatible',
+    baseUrl: 'https://api.openai.com/v1',
+    apiKeyEnv: 'OPENAI_API_KEY',
+    providerName: 'openai',
+    headers: {
+      'x-openai-project': 'proj_123',
+    },
+    model: 'gpt-5',
+  })
+
+  const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  assert.equal(firstCall?.resumeProviderSessionId, null)
+  assert.equal(result.session.providerBinding?.providerSessionId, 'resp_new_route')
+})
+
 test('sendAssistantMessage does not reuse an OpenAI Responses session on a cooled-down same-provider backup route', async () => {
   const parent = await mkdtemp(
     path.join(tmpdir(), 'murph-assistant-service-openai-responses-failover-'),
