@@ -107,19 +107,16 @@ function configureHostedContactPrivacyKeyringForTest(input: {
 }): () => void {
   const previousKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
   const previousCurrentVersion = process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
-  const previousLegacyKey = process.env.HOSTED_CONTACT_PRIVACY_KEY;
 
   process.env.HOSTED_CONTACT_PRIVACY_KEYS = Object.entries(input.entries)
     .map(([version, key]) => `${version}:${key}`)
     .join(",");
   process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = input.currentVersion;
-  delete process.env.HOSTED_CONTACT_PRIVACY_KEY;
   clearHostedOnboardingEnvCache();
 
   return () => {
     restoreEnvValue("HOSTED_CONTACT_PRIVACY_KEYS", previousKeys);
     restoreEnvValue("HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION", previousCurrentVersion);
-    restoreEnvValue("HOSTED_CONTACT_PRIVACY_KEY", previousLegacyKey);
     clearHostedOnboardingEnvCache();
   };
 }

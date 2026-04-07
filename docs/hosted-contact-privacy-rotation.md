@@ -27,8 +27,6 @@ This keeps the steady state simple:
   Format: comma-separated `version:base64key` entries such as `v1:...,v2:...`
 - `HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION`
   Required when the keyring contains more than one version
-- `HOSTED_CONTACT_PRIVACY_KEY`
-  Legacy single-key fallback only; it implies one readable/writeable version, `v1`
 
 ## Backfill Scope
 

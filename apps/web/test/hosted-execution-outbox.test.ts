@@ -220,7 +220,7 @@ describe("drainHostedExecutionOutbox", () => {
     );
   });
 
-  it("migrates legacy numeric device-sync source ids onto stable event ids", async () => {
+  it("rejects stale numeric device-sync source ids when the stable event id is re-enqueued", async () => {
     const dispatch = createTickDispatch();
     const prisma = createEnqueueOutboxPrisma(createOutboxRecord({
       eventId: dispatch.eventId,
@@ -235,19 +235,9 @@ describe("drainHostedExecutionOutbox", () => {
       sourceId: dispatch.eventId,
       sourceType: "device_sync_signal",
       tx: prisma as never,
-    })).resolves.toMatchObject({
-      eventId: dispatch.eventId,
-      sourceId: dispatch.eventId,
-    });
-
-    expect(prisma.executionOutbox.update).toHaveBeenCalledWith({
-      where: {
-        id: "execout_123",
-      },
-      data: {
-        sourceId: dispatch.eventId,
-      },
-    });
+    })).rejects.toThrow(
+      "Hosted execution outbox event evt_tick already exists with conflicting metadata.",
+    );
   });
 
   it("accepts idempotent re-enqueue when stored payload JSON key order differs", async () => {

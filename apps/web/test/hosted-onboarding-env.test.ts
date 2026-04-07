@@ -56,12 +56,12 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.linqApiBaseUrl).toBe("https://api.linqapp.com/api/partner/v3");
   });
 
-  it("requires HOSTED_CONTACT_PRIVACY_KEY", () => {
+  it("requires HOSTED_CONTACT_PRIVACY_KEYS", () => {
     expect(() =>
       readHostedOnboardingEnvironment({
         NODE_ENV: "test",
       }),
-    ).toThrow(/HOSTED_CONTACT_PRIVACY_KEY/u);
+    ).toThrow(/HOSTED_CONTACT_PRIVACY_KEYS/u);
   });
 
   it("rejects non-localhost HTTP public base URLs", () => {
@@ -83,7 +83,7 @@ describe("readHostedOnboardingEnvironment", () => {
 
 function createProcessEnv(values: Record<string, string>): NodeJS.ProcessEnv {
   return {
-    HOSTED_CONTACT_PRIVACY_KEY: TEST_KEY,
+    HOSTED_CONTACT_PRIVACY_KEYS: `v1:${TEST_KEY}`,
     NODE_ENV: "test",
     ...values,
   };
