@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@cobuild/review-gpt@0.5.50':
+    hash: 1953787be440e04193c79f167ab8f4d0af70e2d9acaf665669e664aa586bcb57
+    path: patches/@cobuild__review-gpt@0.5.50.patch
+
 importers:
 
   .:
@@ -13,7 +18,7 @@ importers:
         version: 0.1.15
       '@cobuild/review-gpt':
         specifier: ^0.5.50
-        version: 0.5.50
+        version: 0.5.50(patch_hash=1953787be440e04193c79f167ab8f4d0af70e2d9acaf665669e664aa586bcb57)
       '@types/node':
         specifier: ^25.5.0
         version: 25.5.0
@@ -8303,7 +8308,7 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.15': {}
 
-  '@cobuild/review-gpt@0.5.50':
+  '@cobuild/review-gpt@0.5.50(patch_hash=1953787be440e04193c79f167ab8f4d0af70e2d9acaf665669e664aa586bcb57)':
     dependencies:
       '@cobuild/repo-tools': 0.1.15
       incur: 0.3.13(openapi-types@12.1.3)

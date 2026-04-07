@@ -1,0 +1,495 @@
+diff --git a/README.md b/README.md
+index a6537f55bfd9db7492d38191d26f842b5fa98dfc..e470a0147ac7b2adee37cab332b70354be21dea3 100644
+--- a/README.md
++++ b/README.md
+@@ -218,9 +218,9 @@ cobuild-review-gpt thread wake \
+ Resume notes:
+ 
+ - `cobuild-review-gpt thread wake` does not touch the managed browser until the configured `--delay` has elapsed, so scheduling a 60m or 100m follow-up does not immediately reopen or navigate the ChatGPT tab.
+-- Polling is enabled by default. After the initial delay, `thread wake` keeps re-exporting the thread until it no longer looks busy. `--poll-interval` defaults to `1m`, `--poll-jitter` defaults to `1m` so the normal retry cadence lands between 60 and 120 seconds, and polling also adds a small hidden startup spread before the first export so several simultaneous wake runs do not all hit ChatGPT at once. `--poll-timeout` can bound that wait, and `--no-poll-until-complete` restores the old one-shot behavior.
++- Polling is enabled by default. After the initial delay, `thread wake` keeps re-exporting the thread until it sees a stable final state: assistant-owned artifacts end the wait immediately, while no-artifact replies must stay terminal and unchanged across consecutive idle polls before wake exits. `--poll-interval` defaults to `1m`, `--poll-jitter` defaults to `1m` so the normal retry cadence lands between 60 and 120 seconds, and polling also adds a small hidden startup spread before the first export so several simultaneous wake runs do not all hit ChatGPT at once. `--poll-timeout` can bound that wait, and `--no-poll-until-complete` restores the old one-shot behavior.
+ - Polling tolerates a few transient thread-export failures before the first successful snapshot, and after a good snapshot exists it keeps polling until the overall timeout instead of aborting immediately on a short flaky stretch.
+-- Wake now treats one-word or otherwise fragmentary assistant turns without assistant-owned artifacts as still in-progress, forces one immediate refresh, and keeps polling until a stable final state appears. It also records the last assistant preview, busy reason, artifact labels, and download outcomes in `status.json` for debugging.
++- Wake now treats punctuation-less or artifact-referencing assistant turns without assistant-owned artifacts as still settling instead of declaring the thread complete from a single idle-looking snapshot. It also records the last assistant preview, busy reason, artifact labels, and download outcomes in `status.json` for debugging.
+ - `thread wake` reuses an existing tab only when it is already on the same `/c/<thread-id>` conversation, and treats same-thread URLs with extra query parameters as the same thread.
+ - After the delay elapses, thread export inspects the current ChatGPT tab first, only navigates or reloads when needed, and still requires real conversation signals before capture so generic ChatGPT chrome does not masquerade as a ready thread. Thread download keeps the hydrated thread tab alive and activates the visible attachment control inside the page before falling back to a native browser click.
+ - Thread export and download scope artifact discovery to the conversation body, ignore ChatGPT conversation links that only look like attachments, and only consider assistant-owned downloadable controls that appear after the latest user message in the thread. Within that latest request, they prefer the final assistant turn but still carry forward all assistant artifact labels for wake/debug handoff.
+diff --git a/dist/chatgpt-thread-lib.d.mts b/dist/chatgpt-thread-lib.d.mts
+index 3e027f8f91e3dd7edb200ee1b9efe65170859b03..890326f608ccef2eee9415d66af600ccef17fbed 100644
+--- a/dist/chatgpt-thread-lib.d.mts
++++ b/dist/chatgpt-thread-lib.d.mts
+@@ -1,5 +1,5 @@
+ import { type ExportedThreadSnapshot, type ThreadSnapshot } from './chatgpt-thread-snapshot-lib.mjs';
+-export { assistantSnapshotLooksIncomplete, extractAssistantArtifactLabels, hasThreadPayload, normalizeThreadSnapshot, snapshotBusyReason, snapshotHasAssistantArtifacts, snapshotHasPatchArtifacts, snapshotIndicatesBusy, threadStatusTextIndicatesBusy, } from './chatgpt-thread-snapshot-lib.mjs';
++export { assistantSnapshotLooksIncomplete, assistantSnapshotLooksTerminal, extractAssistantArtifactLabels, hasThreadPayload, normalizeThreadSnapshot, snapshotBusyReason, snapshotHasAssistantArtifacts, snapshotHasPatchArtifacts, snapshotIndicatesBusy, threadStatusTextIndicatesComplete, threadStatusTextIndicatesBusy, } from './chatgpt-thread-snapshot-lib.mjs';
+ export type { ExportedThreadSnapshot, ThreadAssistantSnapshot, ThreadAttachmentButton, ThreadSnapshot, } from './chatgpt-thread-snapshot-lib.mjs';
+ export declare const DEFAULT_BROWSER_ENDPOINT = "http://127.0.0.1:9222";
+ export type ExportThreadSnapshotOptions = {
+diff --git a/dist/chatgpt-thread-lib.mjs b/dist/chatgpt-thread-lib.mjs
+index 967e17e4b028fe67236a3b10a89ef56142dba8d8..e98919343cae71a0aa38430f68ad9db1e8326a78 100644
+--- a/dist/chatgpt-thread-lib.mjs
++++ b/dist/chatgpt-thread-lib.mjs
+@@ -1,7 +1,7 @@
+ import { access, mkdir, rm, writeFile } from 'node:fs/promises';
+ import path from 'node:path';
+ import { buildCaptureThreadSnapshotExpression, deriveAttachmentLabel, extractAssistantArtifactButtons, hasThreadPayload, isPatchArtifactAttachment, normalizeThreadSnapshot, normalizeAttachmentValue, } from './chatgpt-thread-snapshot-lib.mjs';
+-export { assistantSnapshotLooksIncomplete, extractAssistantArtifactLabels, hasThreadPayload, normalizeThreadSnapshot, snapshotBusyReason, snapshotHasAssistantArtifacts, snapshotHasPatchArtifacts, snapshotIndicatesBusy, threadStatusTextIndicatesBusy, } from './chatgpt-thread-snapshot-lib.mjs';
++export { assistantSnapshotLooksIncomplete, assistantSnapshotLooksTerminal, extractAssistantArtifactLabels, hasThreadPayload, normalizeThreadSnapshot, snapshotBusyReason, snapshotHasAssistantArtifacts, snapshotHasPatchArtifacts, snapshotIndicatesBusy, threadStatusTextIndicatesComplete, threadStatusTextIndicatesBusy, } from './chatgpt-thread-snapshot-lib.mjs';
+ export const DEFAULT_BROWSER_ENDPOINT = 'http://127.0.0.1:9222';
+ const BROWSER_ENDPOINT_REQUEST_TIMEOUT_MS = 10_000;
+ const TARGET_READY_TIMEOUT_MS = 60_000;
+diff --git a/dist/chatgpt-thread-snapshot-lib.d.mts b/dist/chatgpt-thread-snapshot-lib.d.mts
+index f186caa9f72315970c3d9ea45f9bbc872c7eba70..f4b7ada688b46fd7fd40b4e1623b183f50f49f00 100644
+--- a/dist/chatgpt-thread-snapshot-lib.d.mts
++++ b/dist/chatgpt-thread-snapshot-lib.d.mts
+@@ -47,10 +47,12 @@ export declare function extractAssistantArtifactButtons(snapshot: Pick<ThreadSna
+ export declare function extractAssistantArtifactLabels(snapshot: Pick<ThreadSnapshot, 'attachmentButtons'> | Partial<ThreadSnapshot> | null | undefined): string[];
+ export declare function snapshotHasAssistantArtifacts(snapshot: Partial<ThreadSnapshot> | null | undefined): boolean;
+ export declare function threadStatusTextIndicatesBusy(value: string): boolean;
++export declare function threadStatusTextIndicatesComplete(value: string): boolean;
++export declare function assistantSnapshotLooksTerminal(snapshot: Partial<ThreadSnapshot> | null | undefined): boolean;
+ export declare function assistantSnapshotLooksIncomplete(snapshot: Partial<ThreadSnapshot> | null | undefined): boolean;
+ export declare function snapshotHasPatchArtifacts(snapshot: Partial<ThreadSnapshot> | null | undefined): boolean;
+ type SnapshotBusyInput = Partial<Pick<ThreadSnapshot, 'assistantSnapshots' | 'attachmentButtons' | 'patchMarkers' | 'statusBusy' | 'stopVisible'>>;
+-export declare function snapshotBusyReason(snapshot: SnapshotBusyInput | null | undefined): 'assistant-fragment' | 'idle' | 'status-busy' | 'stop-visible';
++export declare function snapshotBusyReason(snapshot: SnapshotBusyInput | null | undefined): 'assistant-settling' | 'idle' | 'status-busy' | 'stop-visible';
+ export declare function snapshotIndicatesBusy(snapshot: Pick<ThreadSnapshot, 'statusBusy' | 'stopVisible'> | null | undefined): boolean;
+ export declare function hasThreadPayload(snapshot: Partial<ThreadSnapshot> | null | undefined): boolean;
+ export declare function buildCaptureThreadSnapshotExpression(): string;
+diff --git a/dist/chatgpt-thread-snapshot-lib.mjs b/dist/chatgpt-thread-snapshot-lib.mjs
+index 5e8637f7065416b2dfd56ee5430df5d0551d51fe..7dd120397a2a359e53df63f8d42097dfd7b9e5f2 100644
+--- a/dist/chatgpt-thread-snapshot-lib.mjs
++++ b/dist/chatgpt-thread-snapshot-lib.mjs
+@@ -28,9 +28,8 @@ const PATCH_ATTACHMENT_FILE_PATTERN = /\.(patch|diff|patched)\b/iu;
+ const PATCH_ARCHIVE_FILE_PATTERN = /\.zip\b/iu;
+ const PATCH_BUTTON_TEXT_PATTERN = /\b(?:patch|diff)\b/iu;
+ const ASSISTANT_ARTIFACT_BUTTON_TEXT_PATTERN = /\b(?:patch|diff|zip|snapshot|files?)\b/iu;
++const ARTIFACT_REFERENCE_TEXT_PATTERN = /\b(?:patch|diff|zip|download|attachment|artifact|file|files)\b/iu;
+ const TERMINAL_ASSISTANT_PUNCTUATION_PATTERN = /[.!?:)\]"'`…]$/u;
+-const TRIVIAL_ASSISTANT_TEXT_LENGTH_LIMIT = 12;
+-const TRIVIAL_ASSISTANT_WORD_LIMIT = 2;
+ function scopeItemsToLatestUser(items) {
+     if (!items.some((item) => typeof item.afterLastUserMessage === 'boolean')) {
+         return items;
+@@ -165,31 +164,43 @@ export function threadStatusTextIndicatesBusy(value) {
+     }
+     return /\b(researching|searching|gathering|analyzing|analysing|browsing|writing|reading|processing|loading|thinking|drafting|generating|synthesizing)\b/iu.test(normalizedText);
+ }
++export function threadStatusTextIndicatesComplete(value) {
++    const normalizedText = value
++        .toLowerCase()
++        .replace(/[^a-z0-9]+/gu, ' ')
++        .replace(/\s+/gu, ' ')
++        .trim();
++    if (!normalizedText) {
++        return false;
++    }
++    return (/\b(complete|completed|finished|done|ready|available|success|succeeded)\b/iu.test(normalizedText) &&
++        !threadStatusTextIndicatesBusy(normalizedText));
++}
+ function lastAssistantText(snapshot) {
+     return String(assistantSnapshotsForLatestUser(snapshot).at(-1)?.text ?? '')
+         .replace(/\s+/gu, ' ')
+         .trim();
+ }
+-export function assistantSnapshotLooksIncomplete(snapshot) {
++export function assistantSnapshotLooksTerminal(snapshot) {
+     const normalized = normalizeThreadSnapshot(snapshot);
+     if (snapshotHasAssistantArtifacts(normalized) || snapshotHasPatchArtifacts(normalized)) {
+-        return false;
++        return true;
+     }
+     const lastText = lastAssistantText(normalized);
+     if (lastText.length === 0) {
+         return false;
+     }
+-    if (lastText.length <= 1) {
++    if (normalized.statusTexts.some((statusText) => threadStatusTextIndicatesComplete(statusText))) {
+         return true;
+     }
+-    const wordCount = lastText.split(/\s+/u).filter(Boolean).length;
+-    const referencesArtifact = PATCH_ATTACHMENT_FILE_PATTERN.test(lastText) ||
+-        PATCH_ARCHIVE_FILE_PATTERN.test(lastText) ||
+-        PATCH_BUTTON_TEXT_PATTERN.test(lastText);
+-    return (wordCount <= TRIVIAL_ASSISTANT_WORD_LIMIT &&
+-        lastText.length <= TRIVIAL_ASSISTANT_TEXT_LENGTH_LIMIT &&
+-        !TERMINAL_ASSISTANT_PUNCTUATION_PATTERN.test(lastText) &&
+-        !referencesArtifact);
++    if (ARTIFACT_REFERENCE_TEXT_PATTERN.test(lastText)) {
++        return false;
++    }
++    return TERMINAL_ASSISTANT_PUNCTUATION_PATTERN.test(lastText);
++}
++export function assistantSnapshotLooksIncomplete(snapshot) {
++    const normalized = normalizeThreadSnapshot(snapshot);
++    return lastAssistantText(normalized).length > 0 && !assistantSnapshotLooksTerminal(normalized);
+ }
+ export function snapshotHasPatchArtifacts(snapshot) {
+     const normalized = normalizeThreadSnapshot(snapshot);
+@@ -207,7 +218,7 @@ export function snapshotBusyReason(snapshot) {
+         return 'status-busy';
+     }
+     if (assistantSnapshotLooksIncomplete(normalized)) {
+-        return 'assistant-fragment';
++        return 'assistant-settling';
+     }
+     if (normalized.stopVisible && !snapshotHasAssistantArtifacts(normalized) && !snapshotHasPatchArtifacts(normalized)) {
+         return 'stop-visible';
+diff --git a/dist/chatgpt-thread-wake-lib.mjs b/dist/chatgpt-thread-wake-lib.mjs
+index 4e33be44c6c635d37d123c4200040dd018e82df6..c13245b91d34a92eda8eff2af686eb5b4d965c0f 100644
+--- a/dist/chatgpt-thread-wake-lib.mjs
++++ b/dist/chatgpt-thread-wake-lib.mjs
+@@ -4,13 +4,14 @@ import process from 'node:process';
+ import { spawn } from 'node:child_process';
+ import { closeSync, existsSync, openSync, readFileSync } from 'node:fs';
+ import { fileURLToPath } from 'node:url';
+-import { assistantSnapshotLooksIncomplete, DEFAULT_BROWSER_ENDPOINT, downloadThreadAttachment, extractAssistantArtifactLabels, exportThreadSnapshot, snapshotBusyReason, snapshotIndicatesBusy, sleep, } from './chatgpt-thread-lib.mjs';
++import { DEFAULT_BROWSER_ENDPOINT, downloadThreadAttachment, extractAssistantArtifactLabels, exportThreadSnapshot, snapshotBusyReason, snapshotIndicatesBusy, sleep, } from './chatgpt-thread-lib.mjs';
+ import { formatCodexHomeForDisplay, formatPathForDisplay, homeContainsSession, listCodexSessionEvidence, resolveCodexBin, resolveCodexHomeForSession, } from './codex-session-lib.mjs';
+ const DEFAULT_DOWNLOAD_TIMEOUT_MS = 30_000;
+ const DEFAULT_CHILD_SESSION_DISCOVERY_TIMEOUT_MS = 15_000;
+ const DEFAULT_CHILD_SESSION_POLL_MS = 250;
+ const DEFAULT_INITIAL_POLL_JITTER_CAP_MS = 15_000;
+ const DEFAULT_MAX_CONSECUTIVE_EXPORT_FAILURES = 3;
++const DEFAULT_STABLE_IDLE_POLLS_REQUIRED = 2;
+ const DEFAULT_POLL_JITTER_MS = 60_000;
+ const DEFAULT_POLL_INTERVAL_MS = 60_000;
+ const DEFAULT_WAKE_DEPENDENCIES = {
+@@ -264,10 +265,13 @@ export function formatWakePollSummary(snapshot, artifactLabels) {
+         `lastAssistant=${JSON.stringify(lastAssistantPreview)}`,
+     ].join(', ');
+ }
+-function summarizeAssistantPreview(snapshot) {
+-    const latestRequestSnapshots = snapshot.assistantSnapshots.some((assistantSnapshot) => typeof assistantSnapshot.afterLastUserMessage === 'boolean')
++function latestAssistantSnapshotsForWake(snapshot) {
++    return snapshot.assistantSnapshots.some((assistantSnapshot) => typeof assistantSnapshot.afterLastUserMessage === 'boolean')
+         ? snapshot.assistantSnapshots.filter((assistantSnapshot) => assistantSnapshot.afterLastUserMessage === true)
+         : snapshot.assistantSnapshots;
++}
++function summarizeAssistantPreview(snapshot) {
++    const latestRequestSnapshots = latestAssistantSnapshotsForWake(snapshot);
+     const value = String(latestRequestSnapshots.at(-1)?.text ?? '')
+         .replace(/\s+/gu, ' ')
+         .trim();
+@@ -276,6 +280,19 @@ function summarizeAssistantPreview(snapshot) {
+     }
+     return value.length > 96 ? `${value.slice(0, 93)}...` : value;
+ }
++function buildStableIdleFingerprint(snapshot, artifactLabels) {
++    const latestRequestSnapshots = latestAssistantSnapshotsForWake(snapshot);
++    return JSON.stringify({
++        artifactLabels,
++        patchMarkers: snapshot.patchMarkers,
++        statusTexts: snapshot.statusTexts,
++        stopVisible: snapshot.stopVisible,
++        summaries: latestRequestSnapshots.map((assistantSnapshot) => ({
++            hasCopyButton: assistantSnapshot.hasCopyButton,
++            signature: assistantSnapshot.signature,
++        })),
++    });
++}
+ function expandResumePromptTemplate(template, input) {
+     return template
+         .replaceAll('{{chat_url}}', input.chatUrl)
+@@ -411,6 +428,8 @@ export async function runWakeFlow(options, dependencies = {}) {
+     const downloadedPatches = [];
+     let lastSuccessfulSnapshot;
+     let lastSuccessfulArtifactLabels = [];
++    let stableIdleFingerprint;
++    let stableIdlePolls = 0;
+     let lastAssistantPreview;
+     let lastBusyReason;
+     let lastSnapshotSummary;
+@@ -507,24 +526,35 @@ export async function runWakeFlow(options, dependencies = {}) {
+             lastSuccessfulArtifactLabels = artifactLabels;
+             let busy = snapshotIndicatesBusy(snapshot);
+             let busyReason = snapshotBusyReason(snapshot);
+-            let forcedReload = false;
+-            if (busyReason === 'assistant-fragment' && artifactLabels.length === 0 && assistantSnapshotLooksIncomplete(snapshot)) {
+-                forcedReload = true;
+-                wakeDependencies.log(`Wake check ${attemptCount}: saw an idle-looking assistant fragment (${JSON.stringify(summarizeAssistantPreview(snapshot))}); forcing one immediate refresh before deciding the thread is complete.\n`);
+-                snapshot = await wakeDependencies.exportThreadSnapshot(browserEndpoint, options.chatUrl, exportPath, {
+-                    forceReload: true,
+-                });
+-                artifactLabels = extractAssistantArtifactLabels(snapshot);
+-                lastSuccessfulSnapshot = snapshot;
+-                lastSuccessfulArtifactLabels = artifactLabels;
+-                busy = snapshotIndicatesBusy(snapshot);
+-                busyReason = snapshotBusyReason(snapshot);
++            if (busy) {
++                stableIdleFingerprint = undefined;
++                stableIdlePolls = 0;
++            }
++            else if (artifactLabels.length === 0) {
++                const idleFingerprint = buildStableIdleFingerprint(snapshot, artifactLabels);
++                stableIdlePolls =
++                    idleFingerprint === stableIdleFingerprint
++                        ? stableIdlePolls + 1
++                        : 1;
++                stableIdleFingerprint = idleFingerprint;
++                if (stableIdlePolls < DEFAULT_STABLE_IDLE_POLLS_REQUIRED) {
++                    busy = true;
++                    busyReason = 'assistant-settling';
++                }
++            }
++            else {
++                stableIdleFingerprint = undefined;
++                stableIdlePolls = 0;
+             }
+             lastAssistantPreview = summarizeAssistantPreview(snapshot);
+             lastBusyReason = busyReason;
+             lastSnapshotSummary = formatWakePollSummary(snapshot, artifactLabels);
+             await writeWakeStatus('waiting');
+-            wakeDependencies.log(`Wake check ${attemptCount}: ${lastSnapshotSummary}${forcedReload ? ' (after forced refresh)' : ''}.\n`);
++            wakeDependencies.log(`Wake check ${attemptCount}: ${lastSnapshotSummary}${!busy && artifactLabels.length === 0
++                ? `, stableIdle=${stableIdlePolls}/${DEFAULT_STABLE_IDLE_POLLS_REQUIRED}`
++                : busyReason === 'assistant-settling'
++                    ? `, stableIdle=${stableIdlePolls}/${DEFAULT_STABLE_IDLE_POLLS_REQUIRED}`
++                    : ''}.\n`);
+             if (artifactLabels.length > 0) {
+                 wakeDependencies.log(`Wake check ${attemptCount}: assistant artifact labels: ${artifactLabels.join(' | ')}.\n`);
+             }
+diff --git a/src/chatgpt-thread-lib.mts b/src/chatgpt-thread-lib.mts
+index adc7fecef5b0761ca668599fd2983e567f354eb7..f7a61b4e7bf3eb361aa3a1f6c3c1fb021861c303 100644
+--- a/src/chatgpt-thread-lib.mts
++++ b/src/chatgpt-thread-lib.mts
+@@ -14,6 +14,7 @@ import {
+ } from './chatgpt-thread-snapshot-lib.mjs';
+ export {
+   assistantSnapshotLooksIncomplete,
++  assistantSnapshotLooksTerminal,
+   extractAssistantArtifactLabels,
+   hasThreadPayload,
+   normalizeThreadSnapshot,
+@@ -21,6 +22,7 @@ export {
+   snapshotHasAssistantArtifacts,
+   snapshotHasPatchArtifacts,
+   snapshotIndicatesBusy,
++  threadStatusTextIndicatesComplete,
+   threadStatusTextIndicatesBusy,
+ } from './chatgpt-thread-snapshot-lib.mjs';
+ export type {
+diff --git a/src/chatgpt-thread-snapshot-lib.mts b/src/chatgpt-thread-snapshot-lib.mts
+index 36b1538cf8055b930a0e9376e6214f4e45a627f1..b8971140847a36888b93d7c9661492efe6999e0f 100644
+--- a/src/chatgpt-thread-snapshot-lib.mts
++++ b/src/chatgpt-thread-snapshot-lib.mts
+@@ -72,9 +72,8 @@ const PATCH_ATTACHMENT_FILE_PATTERN = /\.(patch|diff|patched)\b/iu;
+ const PATCH_ARCHIVE_FILE_PATTERN = /\.zip\b/iu;
+ const PATCH_BUTTON_TEXT_PATTERN = /\b(?:patch|diff)\b/iu;
+ const ASSISTANT_ARTIFACT_BUTTON_TEXT_PATTERN = /\b(?:patch|diff|zip|snapshot|files?)\b/iu;
++const ARTIFACT_REFERENCE_TEXT_PATTERN = /\b(?:patch|diff|zip|download|attachment|artifact|file|files)\b/iu;
+ const TERMINAL_ASSISTANT_PUNCTUATION_PATTERN = /[.!?:)\]"'`…]$/u;
+-const TRIVIAL_ASSISTANT_TEXT_LENGTH_LIMIT = 12;
+-const TRIVIAL_ASSISTANT_WORD_LIMIT = 2;
+ 
+ function scopeItemsToLatestUser<T extends { afterLastUserMessage?: boolean }>(items: T[]): T[] {
+   if (!items.some((item) => typeof item.afterLastUserMessage === 'boolean')) {
+@@ -259,17 +258,34 @@ export function threadStatusTextIndicatesBusy(value: string): boolean {
+   );
+ }
+ 
++export function threadStatusTextIndicatesComplete(value: string): boolean {
++  const normalizedText = value
++    .toLowerCase()
++    .replace(/[^a-z0-9]+/gu, ' ')
++    .replace(/\s+/gu, ' ')
++    .trim();
++
++  if (!normalizedText) {
++    return false;
++  }
++
++  return (
++    /\b(complete|completed|finished|done|ready|available|success|succeeded)\b/iu.test(normalizedText) &&
++    !threadStatusTextIndicatesBusy(normalizedText)
++  );
++}
++
+ function lastAssistantText(snapshot: ThreadSnapshot): string {
+   return String(assistantSnapshotsForLatestUser(snapshot).at(-1)?.text ?? '')
+     .replace(/\s+/gu, ' ')
+     .trim();
+ }
+ 
+-export function assistantSnapshotLooksIncomplete(snapshot: Partial<ThreadSnapshot> | null | undefined): boolean {
++export function assistantSnapshotLooksTerminal(snapshot: Partial<ThreadSnapshot> | null | undefined): boolean {
+   const normalized = normalizeThreadSnapshot(snapshot);
+ 
+   if (snapshotHasAssistantArtifacts(normalized) || snapshotHasPatchArtifacts(normalized)) {
+-    return false;
++    return true;
+   }
+ 
+   const lastText = lastAssistantText(normalized);
+@@ -277,22 +293,20 @@ export function assistantSnapshotLooksIncomplete(snapshot: Partial<ThreadSnapsho
+     return false;
+   }
+ 
+-  if (lastText.length <= 1) {
++  if (normalized.statusTexts.some((statusText) => threadStatusTextIndicatesComplete(statusText))) {
+     return true;
+   }
+ 
+-  const wordCount = lastText.split(/\s+/u).filter(Boolean).length;
+-  const referencesArtifact =
+-    PATCH_ATTACHMENT_FILE_PATTERN.test(lastText) ||
+-    PATCH_ARCHIVE_FILE_PATTERN.test(lastText) ||
+-    PATCH_BUTTON_TEXT_PATTERN.test(lastText);
++  if (ARTIFACT_REFERENCE_TEXT_PATTERN.test(lastText)) {
++    return false;
++  }
+ 
+-  return (
+-    wordCount <= TRIVIAL_ASSISTANT_WORD_LIMIT &&
+-    lastText.length <= TRIVIAL_ASSISTANT_TEXT_LENGTH_LIMIT &&
+-    !TERMINAL_ASSISTANT_PUNCTUATION_PATTERN.test(lastText) &&
+-    !referencesArtifact
+-  );
++  return TERMINAL_ASSISTANT_PUNCTUATION_PATTERN.test(lastText);
++}
++
++export function assistantSnapshotLooksIncomplete(snapshot: Partial<ThreadSnapshot> | null | undefined): boolean {
++  const normalized = normalizeThreadSnapshot(snapshot);
++  return lastAssistantText(normalized).length > 0 && !assistantSnapshotLooksTerminal(normalized);
+ }
+ 
+ export function snapshotHasPatchArtifacts(snapshot: Partial<ThreadSnapshot> | null | undefined): boolean {
+@@ -316,7 +330,7 @@ type SnapshotBusyInput = Partial<Pick<ThreadSnapshot, 'assistantSnapshots' | 'at
+ 
+ export function snapshotBusyReason(
+   snapshot: SnapshotBusyInput | null | undefined,
+-): 'assistant-fragment' | 'idle' | 'status-busy' | 'stop-visible' {
++): 'assistant-settling' | 'idle' | 'status-busy' | 'stop-visible' {
+   const normalized = normalizeThreadSnapshot(snapshot);
+ 
+   if (normalized.statusBusy) {
+@@ -324,7 +338,7 @@ export function snapshotBusyReason(
+   }
+ 
+   if (assistantSnapshotLooksIncomplete(normalized)) {
+-    return 'assistant-fragment';
++    return 'assistant-settling';
+   }
+ 
+   if (normalized.stopVisible && !snapshotHasAssistantArtifacts(normalized) && !snapshotHasPatchArtifacts(normalized)) {
+diff --git a/src/chatgpt-thread-wake-lib.mts b/src/chatgpt-thread-wake-lib.mts
+index 353d43ab15a6b777aa7d7910b3a853a61e576a99..025d9ffafe7f4ea1e214be48679d644d72be4ec1 100644
+--- a/src/chatgpt-thread-wake-lib.mts
++++ b/src/chatgpt-thread-wake-lib.mts
+@@ -6,7 +6,6 @@ import { closeSync, existsSync, openSync, readFileSync } from 'node:fs';
+ import { fileURLToPath } from 'node:url';
+ 
+ import {
+-  assistantSnapshotLooksIncomplete,
+   DEFAULT_BROWSER_ENDPOINT,
+   downloadThreadAttachment,
+   extractAssistantArtifactLabels,
+@@ -73,6 +72,7 @@ const DEFAULT_CHILD_SESSION_DISCOVERY_TIMEOUT_MS = 15_000;
+ const DEFAULT_CHILD_SESSION_POLL_MS = 250;
+ const DEFAULT_INITIAL_POLL_JITTER_CAP_MS = 15_000;
+ const DEFAULT_MAX_CONSECUTIVE_EXPORT_FAILURES = 3;
++const DEFAULT_STABLE_IDLE_POLLS_REQUIRED = 2;
+ const DEFAULT_POLL_JITTER_MS = 60_000;
+ const DEFAULT_POLL_INTERVAL_MS = 60_000;
+ 
+@@ -442,10 +442,14 @@ export function formatWakePollSummary(snapshot: ThreadSnapshot, artifactLabels:
+   ].join(', ');
+ }
+ 
+-function summarizeAssistantPreview(snapshot: Pick<ThreadSnapshot, 'assistantSnapshots'>): string {
+-  const latestRequestSnapshots = snapshot.assistantSnapshots.some((assistantSnapshot) => typeof assistantSnapshot.afterLastUserMessage === 'boolean')
++function latestAssistantSnapshotsForWake(snapshot: Pick<ThreadSnapshot, 'assistantSnapshots'>): ThreadSnapshot['assistantSnapshots'] {
++  return snapshot.assistantSnapshots.some((assistantSnapshot) => typeof assistantSnapshot.afterLastUserMessage === 'boolean')
+     ? snapshot.assistantSnapshots.filter((assistantSnapshot) => assistantSnapshot.afterLastUserMessage === true)
+     : snapshot.assistantSnapshots;
++}
++
++function summarizeAssistantPreview(snapshot: Pick<ThreadSnapshot, 'assistantSnapshots'>): string {
++  const latestRequestSnapshots = latestAssistantSnapshotsForWake(snapshot);
+   const value = String(latestRequestSnapshots.at(-1)?.text ?? '')
+     .replace(/\s+/gu, ' ')
+     .trim();
+@@ -455,6 +459,20 @@ function summarizeAssistantPreview(snapshot: Pick<ThreadSnapshot, 'assistantSnap
+   return value.length > 96 ? `${value.slice(0, 93)}...` : value;
+ }
+ 
++function buildStableIdleFingerprint(snapshot: ThreadSnapshot, artifactLabels: string[]): string {
++  const latestRequestSnapshots = latestAssistantSnapshotsForWake(snapshot);
++  return JSON.stringify({
++    artifactLabels,
++    patchMarkers: snapshot.patchMarkers,
++    statusTexts: snapshot.statusTexts,
++    stopVisible: snapshot.stopVisible,
++    summaries: latestRequestSnapshots.map((assistantSnapshot) => ({
++      hasCopyButton: assistantSnapshot.hasCopyButton,
++      signature: assistantSnapshot.signature,
++    })),
++  });
++}
++
+ function expandResumePromptTemplate(
+   template: string,
+   input: {
+@@ -636,6 +654,8 @@ export async function runWakeFlow(
+   const downloadedPatches: string[] = [];
+   let lastSuccessfulSnapshot: ThreadSnapshot | undefined;
+   let lastSuccessfulArtifactLabels: string[] = [];
++  let stableIdleFingerprint: string | undefined;
++  let stableIdlePolls = 0;
+   let lastAssistantPreview: string | undefined;
+   let lastBusyReason: string | undefined;
+   let lastSnapshotSummary: string | undefined;
+@@ -751,21 +771,24 @@ export async function runWakeFlow(
+       lastSuccessfulArtifactLabels = artifactLabels;
+       let busy = snapshotIndicatesBusy(snapshot);
+       let busyReason = snapshotBusyReason(snapshot);
+-      let forcedReload = false;
+ 
+-      if (busyReason === 'assistant-fragment' && artifactLabels.length === 0 && assistantSnapshotLooksIncomplete(snapshot)) {
+-        forcedReload = true;
+-        wakeDependencies.log(
+-          `Wake check ${attemptCount}: saw an idle-looking assistant fragment (${JSON.stringify(summarizeAssistantPreview(snapshot))}); forcing one immediate refresh before deciding the thread is complete.\n`,
+-        );
+-        snapshot = await wakeDependencies.exportThreadSnapshot(browserEndpoint, options.chatUrl, exportPath, {
+-          forceReload: true,
+-        });
+-        artifactLabels = extractAssistantArtifactLabels(snapshot);
+-        lastSuccessfulSnapshot = snapshot;
+-        lastSuccessfulArtifactLabels = artifactLabels;
+-        busy = snapshotIndicatesBusy(snapshot);
+-        busyReason = snapshotBusyReason(snapshot);
++      if (busy) {
++        stableIdleFingerprint = undefined;
++        stableIdlePolls = 0;
++      } else if (artifactLabels.length === 0) {
++        const idleFingerprint = buildStableIdleFingerprint(snapshot, artifactLabels);
++        stableIdlePolls =
++          idleFingerprint === stableIdleFingerprint
++            ? stableIdlePolls + 1
++            : 1;
++        stableIdleFingerprint = idleFingerprint;
++        if (stableIdlePolls < DEFAULT_STABLE_IDLE_POLLS_REQUIRED) {
++          busy = true;
++          busyReason = 'assistant-settling';
++        }
++      } else {
++        stableIdleFingerprint = undefined;
++        stableIdlePolls = 0;
+       }
+ 
+       lastAssistantPreview = summarizeAssistantPreview(snapshot);
+@@ -774,7 +797,13 @@ export async function runWakeFlow(
+       await writeWakeStatus('waiting');
+ 
+       wakeDependencies.log(
+-        `Wake check ${attemptCount}: ${lastSnapshotSummary}${forcedReload ? ' (after forced refresh)' : ''}.\n`,
++        `Wake check ${attemptCount}: ${lastSnapshotSummary}${
++          !busy && artifactLabels.length === 0
++            ? `, stableIdle=${stableIdlePolls}/${DEFAULT_STABLE_IDLE_POLLS_REQUIRED}`
++            : busyReason === 'assistant-settling'
++              ? `, stableIdle=${stableIdlePolls}/${DEFAULT_STABLE_IDLE_POLLS_REQUIRED}`
++              : ''
++        }.\n`,
+       );
+       if (artifactLabels.length > 0) {
+         wakeDependencies.log(`Wake check ${attemptCount}: assistant artifact labels: ${artifactLabels.join(' | ')}.\n`);
