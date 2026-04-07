@@ -84,7 +84,37 @@ describe("prisma module", () => {
     const prismaB = prismaModule.getPrisma();
 
     expect(prismaA).toBe(prismaB);
-    expect(PrismaPg).toHaveBeenCalledTimes(1);
-    expect(PrismaClient).toHaveBeenCalledTimes(1);
+    expect(PrismaPg).toHaveBeenCalledWith({
+      connectionString: "postgresql://user:pass@example.com/db?sslmode=require",
+      connectionTimeoutMillis: 5_000,
+      idleTimeoutMillis: 30_000,
+      max: 5,
+    });
+    expect(PrismaClient).toHaveBeenCalledWith({
+      adapter: expect.any(Object),
+      log: ["error"],
+      transactionOptions: {
+        maxWait: 10_000,
+        timeout: 15_000,
+      },
+    });
+  });
+
+  it("uses DATABASE_POOL_MAX when it is a positive integer", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_POOL_MAX: "9",
+      DATABASE_URL: "postgresql://user:pass@example.com/db?sslmode=require",
+    };
+
+    await import("@/src/lib/prisma");
+
+    expect(PrismaPg).toHaveBeenCalledWith({
+      connectionString: "postgresql://user:pass@example.com/db?sslmode=require",
+      connectionTimeoutMillis: 5_000,
+      idleTimeoutMillis: 30_000,
+      max: 9,
+    });
   });
 });
