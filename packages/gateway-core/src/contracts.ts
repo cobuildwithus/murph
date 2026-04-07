@@ -314,6 +314,7 @@ export type GatewayPollEventsInput = z.infer<typeof gatewayPollEventsInputSchema
 export type GatewayPollEventsResult = z.infer<typeof gatewayPollEventsResultSchema>
 export type GatewayReadMessagesInput = z.infer<typeof gatewayReadMessagesInputSchema>
 export type GatewayReadMessagesResult = z.infer<typeof gatewayReadMessagesResultSchema>
+export type GatewayDeliveryTargetKind = (typeof gatewayDeliveryTargetKindValues)[number]
 export type GatewayReplyRouteKind = (typeof gatewayReplyRouteKindValues)[number]
 export type GatewayReplyRoute = z.infer<typeof gatewayReplyRouteSchema>
 export type GatewayRespondToPermissionInput = z.infer<

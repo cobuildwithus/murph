@@ -196,7 +196,7 @@ export function gatewayBindingDeliveryFromRoute(
 function inferGatewayBindingDelivery(input: {
   channel?: string | null
   conversation?: GatewayConversationRef | null
-  deliveryKind?: 'participant' | 'thread' | null
+  deliveryKind?: GatewayReplyRouteKind | null
   deliveryTarget?: string | null
 }) {
   switch (input.channel) {

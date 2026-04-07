@@ -3,11 +3,11 @@ import type {
 } from '@murphai/operator-config/agentmail-runtime'
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
 import type { LinqFetch } from '@murphai/operator-config/linq-runtime'
-import type {
-  AssistantBindingDelivery,
-} from '../../assistant-cli-contracts.js'
 import {
   assistantChannelDeliverySchema,
+  type AssistantBindingDelivery,
+  type AssistantBindingDeliveryKind,
+  type AssistantChannelDeliveryTargetKind,
 } from '../../assistant-cli-contracts.js'
 import type { ConversationRef } from '../conversation-ref.js'
 
@@ -112,7 +112,7 @@ export interface AssistantChannelDependencies {
 }
 
 export interface AssistantDeliveryCandidate {
-  kind: 'explicit' | 'participant' | 'thread'
+  kind: AssistantChannelDeliveryTargetKind
   target: string
 }
 
@@ -121,7 +121,7 @@ export interface AssistantChannelAdapter {
   canAutoReply: (capture: InboxShowResult['capture']) => string | null
   inferBindingDelivery: (input: {
     conversation: ConversationRef
-    deliveryKind?: 'participant' | 'thread' | null
+    deliveryKind?: AssistantBindingDeliveryKind | null
     deliveryTarget?: string | null
   }) => AssistantBindingDelivery | null
   isReadyForSetup: (env: NodeJS.ProcessEnv) => boolean

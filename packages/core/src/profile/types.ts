@@ -3,6 +3,7 @@ import {
   FRONTMATTER_DOC_TYPES,
   PROFILE_SNAPSHOT_SOURCES as CONTRACT_PROFILE_SNAPSHOT_SOURCES,
   type ProfileSnapshotProfile,
+  type ProfileSnapshotRecord as ContractProfileSnapshotRecord,
   type ProfileSnapshotSource,
 } from "@murphai/contracts";
 
@@ -15,15 +16,7 @@ export const PROFILE_CURRENT_DOC_TYPE = FRONTMATTER_DOC_TYPES.profileCurrent;
 export const PROFILE_SNAPSHOT_SOURCES = CONTRACT_PROFILE_SNAPSHOT_SOURCES;
 export type { ProfileSnapshotProfile, ProfileSnapshotSource };
 
-export interface ProfileSnapshotRecord {
-  schemaVersion: typeof PROFILE_SNAPSHOT_SCHEMA_VERSION;
-  id: string;
-  recordedAt: string;
-  source: ProfileSnapshotSource;
-  sourceAssessmentIds?: string[];
-  sourceEventIds?: string[];
-  profile: ProfileSnapshotProfile;
-}
+export type ProfileSnapshotRecord = ContractProfileSnapshotRecord;
 
 export interface AppendProfileSnapshotInput {
   vaultRoot: string;
