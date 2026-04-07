@@ -1,3 +1,5 @@
+import { isObjectRecord, normalizeOptionalString } from "./shared.ts";
+
 export interface HostedWorkerDeploymentVersionTraffic {
   percentage: number;
   versionId: string;
@@ -177,20 +179,11 @@ function readHostedWorkerMigrationTags(config: Record<string, unknown>): string[
   }
 
   return migrations.flatMap((entry) => {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    if (!isObjectRecord(entry)) {
       return [];
     }
 
-    const tag = "tag" in entry ? normalizeString(String(entry.tag)) : null;
+    const tag = "tag" in entry ? normalizeOptionalString(String(entry.tag)) : null;
     return tag ? [tag] : [];
   });
-}
-
-function normalizeString(value: string | undefined): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
 }

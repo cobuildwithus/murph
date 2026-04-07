@@ -1,3 +1,9 @@
+import {
+  isObjectRecord,
+  normalizeOptionalString,
+  requireConfiguredString,
+} from "./shared.ts";
+
 export interface HostedContainerImageListing {
   name: string;
   tags: string[];
@@ -57,12 +63,12 @@ function parseHostedContainerImageListEntry(
   entry: unknown,
   index: number,
 ): HostedContainerImageListing {
-  if (!isRecord(entry)) {
+  if (!isObjectRecord(entry)) {
     throw new Error(`Cloudflare image list entry ${index} must be an object.`);
   }
 
   return {
-    name: requireString(
+    name: requireConfiguredString(
       typeof entry.name === "string" ? entry.name : undefined,
       `Cloudflare image list entry ${index} name`,
     ),
@@ -77,7 +83,7 @@ function normalizeHostedContainerImageTags(value: unknown): string[] {
 
   return value
     .filter((tag): tag is string => typeof tag === "string")
-    .map((tag) => normalizeString(tag))
+    .map((tag) => normalizeOptionalString(tag))
     .filter((tag): tag is string => tag !== null && !tag.startsWith("sha256"));
 }
 
@@ -91,26 +97,4 @@ function listHostedContainerImageTagsForCleanup(
 
 function sortHostedContainerImageTagsDescending(left: string, right: string): number {
   return right.localeCompare(left);
-}
-function normalizeString(value: string | undefined): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
-function requireString(value: string | undefined, label: string): string {
-  const normalized = normalizeString(value);
-
-  if (!normalized) {
-    throw new Error(`${label} must be configured.`);
-  }
-
-  return normalized;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

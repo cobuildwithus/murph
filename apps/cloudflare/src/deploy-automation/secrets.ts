@@ -1,5 +1,7 @@
 import { isAllowedHostedAssistantReferencedRunnerEnvKey } from "../hosted-env-policy.ts";
 
+import { normalizeOptionalString, requireConfiguredString } from "./shared.ts";
+
 export const HOSTED_WORKER_REQUIRED_SECRET_NAMES = [
   "HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY",
   "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK",
@@ -61,33 +63,14 @@ export function buildHostedWorkerSecretsPayload(
 function readHostedAssistantReferencedSecret(
   source: EnvSource,
 ): Record<string, string> {
-  const envName = normalizeString(source.HOSTED_ASSISTANT_API_KEY_ENV);
+  const envName = normalizeOptionalString(source.HOSTED_ASSISTANT_API_KEY_ENV);
 
   if (!envName || !isAllowedHostedAssistantReferencedRunnerEnvKey(envName)) {
     return {};
   }
 
-  const value = normalizeString(source[envName]);
+  const value = normalizeOptionalString(source[envName]);
   return value ? { [envName]: value } : {};
-}
-
-function normalizeString(value: string | undefined): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
-function requireString(value: string | undefined, label: string): string {
-  const normalized = normalizeString(value);
-
-  if (!normalized) {
-    throw new Error(`${label} must be configured.`);
-  }
-
-  return normalized;
 }
 
 function readPresentStringMap(
@@ -95,7 +78,7 @@ function readPresentStringMap(
   keys: readonly string[],
 ): Record<string, string> {
   const entries = keys.flatMap((key) => {
-    const value = normalizeString(source[key]);
+    const value = normalizeOptionalString(source[key]);
     return value ? [[key, value] as const] : [];
   });
 
@@ -107,6 +90,6 @@ function readRequiredStringMap(
   keys: readonly string[],
 ): Record<string, string> {
   return Object.fromEntries(
-    keys.map((key) => [key, requireString(source[key], key)]),
+    keys.map((key) => [key, requireConfiguredString(source[key], key)]),
   );
 }

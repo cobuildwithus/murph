@@ -1,5 +1,11 @@
 import { isAllowedHostedAssistantReferencedRunnerEnvKey } from "../hosted-env-policy.ts";
 
+import {
+  isObjectRecord,
+  normalizeOptionalString,
+  requireConfiguredString,
+} from "./shared.ts";
+
 const HOSTED_WORKER_OPTIONAL_VAR_NAMES = [
   "DEVICE_SYNC_PUBLIC_BASE_URL",
   "FFMPEG_COMMAND",
@@ -98,14 +104,14 @@ export function readHostedDeployAutomationEnvironment(
   source: EnvSource = process.env,
 ): HostedDeployAutomationEnvironment {
   return {
-    allowedUserEnvKeys: normalizeString(source.CF_ALLOWED_USER_ENV_KEYS),
-    bundlesBucketName: requireString(source.CF_BUNDLES_BUCKET, "CF_BUNDLES_BUCKET"),
-    bundlesPreviewBucketName: requireString(
+    allowedUserEnvKeys: normalizeOptionalString(source.CF_ALLOWED_USER_ENV_KEYS),
+    bundlesBucketName: requireConfiguredString(source.CF_BUNDLES_BUCKET, "CF_BUNDLES_BUCKET"),
+    bundlesPreviewBucketName: requireConfiguredString(
       source.CF_BUNDLES_PREVIEW_BUCKET,
       "CF_BUNDLES_PREVIEW_BUCKET",
     ),
-    platformEnvelopeKeyId: normalizeString(source.CF_PLATFORM_ENVELOPE_KEY_ID) ?? "v1",
-    compatibilityDate: normalizeString(source.CF_COMPATIBILITY_DATE) ?? "2026-03-27",
+    platformEnvelopeKeyId: normalizeOptionalString(source.CF_PLATFORM_ENVELOPE_KEY_ID) ?? "v1",
+    compatibilityDate: normalizeOptionalString(source.CF_COMPATIBILITY_DATE) ?? "2026-03-27",
     containerInstanceType: normalizeContainerInstanceType(
       source.CF_CONTAINER_INSTANCE_TYPE,
       DEFAULT_CONTAINER_INSTANCE_TYPE,
@@ -151,7 +157,7 @@ export function readHostedDeployAutomationEnvironment(
       DEFAULT_TRACE_HEAD_SAMPLING_RATE,
       "CF_TRACE_HEAD_SAMPLING_RATE",
     ),
-    workerName: requireString(source.CF_WORKER_NAME, "CF_WORKER_NAME"),
+    workerName: requireConfiguredString(source.CF_WORKER_NAME, "CF_WORKER_NAME"),
     workerVars: readHostedWorkerVars(source),
   };
 }
@@ -170,7 +176,7 @@ function normalizePositiveInteger(
   fallback: number,
   label: string,
 ): number {
-  const normalized = normalizeString(value);
+  const normalized = normalizeOptionalString(value);
 
   if (!normalized) {
     return fallback;
@@ -190,7 +196,7 @@ function normalizeContainerInstanceType(
   fallback: HostedContainerInstanceType,
   label: string,
 ): HostedContainerInstanceType {
-  const normalized = normalizeString(value);
+  const normalized = normalizeOptionalString(value);
 
   if (!normalized) {
     return fallback;
@@ -209,7 +215,7 @@ function normalizeContainerInstanceType(
     );
   }
 
-  if (!isRecord(parsed)) {
+  if (!isObjectRecord(parsed)) {
     throw new Error(`${label} custom values must be a JSON object.`);
   }
 
@@ -236,7 +242,7 @@ function normalizePositiveIntegerString(
   fallback: string,
   label: string,
 ): string {
-  const normalized = normalizeString(value) ?? fallback;
+  const normalized = normalizeOptionalString(value) ?? fallback;
   const parsed = Number.parseInt(normalized, 10);
 
   if (!Number.isInteger(parsed) || parsed < 1) {
@@ -251,7 +257,7 @@ function normalizeSamplingRate(
   fallback: number,
   label: string,
 ): number {
-  const normalized = normalizeString(value);
+  const normalized = normalizeOptionalString(value);
 
   if (!normalized) {
     return fallback;
@@ -270,7 +276,7 @@ function resolveHostedWorkerVar(
   source: EnvSource,
   key: typeof HOSTED_WORKER_OPTIONAL_VAR_NAMES[number],
 ): string | null {
-  const value = normalizeString(source[key]);
+  const value = normalizeOptionalString(source[key]);
 
   if (
     key === "HOSTED_ASSISTANT_API_KEY_ENV"
@@ -297,27 +303,4 @@ function requirePositiveNumber(value: unknown, label: string): number {
   }
 
   return value;
-}
-
-function normalizeString(value: string | undefined): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
-function requireString(value: string | undefined, label: string): string {
-  const normalized = normalizeString(value);
-
-  if (!normalized) {
-    throw new Error(`${label} must be configured.`);
-  }
-
-  return normalized;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
