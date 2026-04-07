@@ -233,6 +233,10 @@ Those are contributor workflows, not the main product entrypoint, which is why t
 - The Cloudflare deployment path is documented in [`apps/cloudflare/DEPLOY.md`](apps/cloudflare/DEPLOY.md).
 - Package-local operational details live in each package `README.md`.
 
+## License
+
+Murph is licensed under Apache-2.0. The published `@murphai/*` packages now carry Apache 2.0 metadata and include a copy of the license text in their package contents. See [`LICENSE`](LICENSE) for the full terms.
+
 ## Read next
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) for the top-level system map and trust boundaries

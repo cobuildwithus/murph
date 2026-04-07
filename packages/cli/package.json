@@ -3,7 +3,7 @@
   "version": "0.1.16",
   "private": false,
   "description": "Murph is a personal health assistant you run locally. Install this package to get the murph CLI.",
-  "license": "GPL-3.0-only",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/cobuildwithus/murph"
@@ -24,7 +24,8 @@
     "dist",
     "README.md",
     "CHANGELOG.md",
-    "config.schema.json"
+    "config.schema.json",
+    "LICENSE"
   ],
   "keywords": [
     "murph",

@@ -3,7 +3,7 @@
   "version": "0.1.16",
   "private": true,
   "description": "Local inbox ingestion runtime for Murph.",
-  "license": "GPL-3.0-only",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/cobuildwithus/murph"
