@@ -19,6 +19,7 @@ import {
   writePendingAssistantUsageRecord,
 } from "@murphai/runtime-state/node";
 import { assistantOutboxIntentSchema } from "@murphai/operator-config/assistant-cli-contracts";
+import { HOSTED_ASSISTANT_CONFIG_ENV_NAMES } from "@murphai/operator-config/hosted-assistant-config";
 import type {
   HostedAssistantRuntimeConfig,
   HostedAssistantRuntimeJobInput,
@@ -2646,22 +2647,17 @@ function restoreEnvVar(key: string, value: string | undefined): void {
 }
 
 function setHostedAssistantSeedEnv(): Record<string, string | undefined> {
-  const previousEnv = captureEnvVars([
-    "HOSTED_ASSISTANT_MODEL",
-    "HOSTED_ASSISTANT_PROVIDER",
-  ]);
+  const previousEnv = captureEnvVars(HOSTED_ASSISTANT_CONFIG_ENV_NAMES);
   process.env.HOSTED_ASSISTANT_MODEL = "gpt-4.1-mini";
   process.env.HOSTED_ASSISTANT_PROVIDER = "openai";
   return previousEnv;
 }
 
 function clearHostedAssistantSeedEnv(): Record<string, string | undefined> {
-  const previousEnv = captureEnvVars([
-    "HOSTED_ASSISTANT_MODEL",
-    "HOSTED_ASSISTANT_PROVIDER",
-  ]);
-  restoreEnvVar("HOSTED_ASSISTANT_MODEL", undefined);
-  restoreEnvVar("HOSTED_ASSISTANT_PROVIDER", undefined);
+  const previousEnv = captureEnvVars(HOSTED_ASSISTANT_CONFIG_ENV_NAMES);
+  for (const key of HOSTED_ASSISTANT_CONFIG_ENV_NAMES) {
+    restoreEnvVar(key, undefined);
+  }
   return previousEnv;
 }
 
