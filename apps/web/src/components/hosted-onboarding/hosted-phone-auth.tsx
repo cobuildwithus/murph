@@ -70,12 +70,25 @@ interface HostedPrivyFinalizationAttemptInput {
   updateFinalizationState: (nextState: HostedPrivyFinalizationState) => void;
 }
 
+interface InvitePhoneCodePayload {
+  phoneNumber: string;
+  sendAttemptId: string;
+}
+
+interface PendingInvitePhoneCodeMutation {
+  inviteCode: string;
+  kind: "abort" | "confirm";
+  sendAttemptId: string;
+}
+
 const HOSTED_PHONE_COUNTRY_OPTIONS: HostedPhoneCountryOption[] = [
   { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
   { code: "CA", dialCode: "+1", label: "Canada", placeholder: "(416) 555-0123" },
 ];
 
 const DEFAULT_HOSTED_PHONE_COUNTRY_CODE = "US";
+const HOSTED_INVITE_SEND_CONFIRM_RETRY_DELAYS_MS = [0, 250, 1_000] as const;
+const HOSTED_INVITE_PHONE_CODE_MUTATION_STORAGE_KEY = "murph.hosted-onboarding.invite-phone-code-mutation";
 
 export function HostedPhoneAuth({ privyAppId, privyClientId, wrapProvider = true, ...props }: HostedPhoneAuthProps) {
   const content = <HostedPhoneAuthInner {...props} />;
@@ -182,6 +195,14 @@ function HostedPhoneAuthInner({
     }
   }, [authenticated]);
 
+  useEffect(() => {
+    if (mode !== "invite" || !inviteCode) {
+      return;
+    }
+
+    void flushPendingInvitePhoneCodeMutation(inviteCode);
+  }, [inviteCode, mode]);
+
   async function handleSendCode() {
     setErrorMessage(null);
 
@@ -193,8 +214,7 @@ function HostedPhoneAuthInner({
     setPendingAction("send-code");
 
     try {
-      await sendCode({ phoneNumber: normalizedPhoneNumber });
-      setStep("code");
+      await sendVerificationCode(normalizedPhoneNumber);
     } catch (error) {
       setErrorMessage(toErrorMessage(error, "We could not send a verification code."));
     } finally {
@@ -213,19 +233,49 @@ function HostedPhoneAuthInner({
     setPendingAction("send-code");
 
     try {
-      const payload = await requestHostedOnboardingJson<{ phoneNumber: string }>({
+      await flushPendingInvitePhoneCodeMutation(inviteCode);
+      const payload = await requestHostedOnboardingJson<InvitePhoneCodePayload>({
         auth: "none",
         method: "POST",
         url: `/api/hosted-onboarding/invites/${encodeURIComponent(inviteCode)}/send-code`,
       });
-      await sendCode({ phoneNumber: payload.phoneNumber });
-      setStep("code");
+
+      try {
+        await sendVerificationCode(payload.phoneNumber);
+      } catch (error) {
+        const abortSucceeded = await abortInvitePhoneCodeSend({
+          inviteCode,
+          sendAttemptId: payload.sendAttemptId,
+        });
+        if (!abortSucceeded) {
+          writePendingInvitePhoneCodeMutation({
+            inviteCode,
+            kind: "abort",
+            sendAttemptId: payload.sendAttemptId,
+          });
+        }
+        throw error;
+      }
+
+      const confirmSucceeded = await confirmInvitePhoneCodeSend({
+        inviteCode,
+        sendAttemptId: payload.sendAttemptId,
+      });
+      if (!confirmSucceeded) {
+        writePendingInvitePhoneCodeMutation({
+          inviteCode,
+          kind: "confirm",
+          sendAttemptId: payload.sendAttemptId,
+        });
+      }
     } catch (error) {
       if (
         error instanceof HostedOnboardingApiError
         && error.code === "SIGNUP_PHONE_UNAVAILABLE"
       ) {
+        setCode("");
         setManualEntryVisible(true);
+        setStep("phone");
         setErrorMessage("Enter the number that messaged Murph to continue.");
         return;
       }
@@ -234,6 +284,20 @@ function HostedPhoneAuthInner({
     } finally {
       setPendingAction(null);
     }
+  }
+
+  async function sendVerificationCode(nextPhoneNumber: string) {
+    await sendCode({ phoneNumber: nextPhoneNumber });
+    setStep("code");
+  }
+
+  async function handleResendCode() {
+    if (mode === "invite" && !manualEntryVisible && inviteCode) {
+      await handleInviteSendCode();
+      return;
+    }
+
+    await handleSendCode();
   }
 
   async function handleVerifyCode() {
@@ -494,6 +558,15 @@ function HostedPhoneAuthInner({
               </Button>
               <Button
                 type="button"
+                onClick={handleResendCode}
+                disabled={!ready || pendingAction !== null}
+                variant="outline"
+                size="lg"
+              >
+                {pendingAction === "send-code" ? "Sending code..." : "Text me another code"}
+              </Button>
+              <Button
+                type="button"
                 onClick={() => {
                   setCode("");
                   if (mode === "invite") {
@@ -635,4 +708,140 @@ function sleep(delayMs: number): Promise<void> {
   return new Promise((resolve) => {
     globalThis.setTimeout(resolve, delayMs);
   });
+}
+
+async function confirmInvitePhoneCodeSend(input: {
+  inviteCode: string;
+  sendAttemptId: string;
+}): Promise<boolean> {
+  for (const delayMs of HOSTED_INVITE_SEND_CONFIRM_RETRY_DELAYS_MS) {
+    if (delayMs > 0) {
+      await sleep(delayMs);
+    }
+
+    try {
+      await requestHostedOnboardingJson<{ ok: true }>({
+        auth: "none",
+        method: "POST",
+        payload: {
+          sendAttemptId: input.sendAttemptId,
+        },
+        keepalive: true,
+        url: `/api/hosted-onboarding/invites/${encodeURIComponent(input.inviteCode)}/send-code/confirm`,
+      });
+      clearPendingInvitePhoneCodeMutation(input.inviteCode, input.sendAttemptId);
+      return true;
+    } catch {
+      // Retry the confirm a few times before falling back to queued retry.
+    }
+  }
+
+  return false;
+}
+
+async function abortInvitePhoneCodeSend(input: {
+  inviteCode: string;
+  sendAttemptId: string;
+}): Promise<boolean> {
+  try {
+    await requestHostedOnboardingJson<{ ok: true }>({
+      auth: "none",
+      method: "POST",
+      payload: {
+        sendAttemptId: input.sendAttemptId,
+      },
+      keepalive: true,
+      url: `/api/hosted-onboarding/invites/${encodeURIComponent(input.inviteCode)}/send-code/abort`,
+    });
+    clearPendingInvitePhoneCodeMutation(input.inviteCode, input.sendAttemptId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function flushPendingInvitePhoneCodeMutation(inviteCode: string): Promise<void> {
+  const pending = readPendingInvitePhoneCodeMutation();
+
+  if (!pending || pending.inviteCode !== inviteCode) {
+    return;
+  }
+
+  const succeeded =
+    pending.kind === "confirm"
+      ? await confirmInvitePhoneCodeSend({
+          inviteCode,
+          sendAttemptId: pending.sendAttemptId,
+        })
+      : await abortInvitePhoneCodeSend({
+          inviteCode,
+          sendAttemptId: pending.sendAttemptId,
+        });
+
+  if (succeeded) {
+    clearPendingInvitePhoneCodeMutation(inviteCode, pending.sendAttemptId);
+  }
+}
+
+function readPendingInvitePhoneCodeMutation(): PendingInvitePhoneCodeMutation | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(HOSTED_INVITE_PHONE_CODE_MUTATION_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    if (
+      typeof value.inviteCode !== "string"
+      || typeof value.kind !== "string"
+      || (value.kind !== "abort" && value.kind !== "confirm")
+      || typeof value.sendAttemptId !== "string"
+    ) {
+      return null;
+    }
+
+    return {
+      inviteCode: value.inviteCode,
+      kind: value.kind,
+      sendAttemptId: value.sendAttemptId,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writePendingInvitePhoneCodeMutation(input: PendingInvitePhoneCodeMutation): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(
+      HOSTED_INVITE_PHONE_CODE_MUTATION_STORAGE_KEY,
+      JSON.stringify(input),
+    );
+  } catch {
+    // Local storage is best effort only.
+  }
+}
+
+function clearPendingInvitePhoneCodeMutation(inviteCode: string, sendAttemptId: string): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const pending = readPendingInvitePhoneCodeMutation();
+  if (!pending || pending.inviteCode !== inviteCode || pending.sendAttemptId !== sendAttemptId) {
+    return;
+  }
+
+  try {
+    window.localStorage.removeItem(HOSTED_INVITE_PHONE_CODE_MUTATION_STORAGE_KEY);
+  } catch {
+    // Local storage is best effort only.
+  }
 }
