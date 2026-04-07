@@ -59,7 +59,7 @@ repo/
 - Markdown canonical docs:
   - `CORE.md`
   - `journal/YYYY/YYYY-MM-DD.md`
-  - `bank/memory.md`
+  - `bank/memory.md` as one curated canonical memory document that stays small enough to read whole
   - `bank/automations/*.md`
   - `bank/experiments/<slug>.md`
 - Append-only JSONL ledgers:

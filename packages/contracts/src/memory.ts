@@ -60,10 +60,6 @@ export const memoryDocumentSnapshotSchema = memoryDocumentSchema.extend({
   updatedAt: z.string().min(1).nullable(),
 });
 
-export const memorySearchHitSchema = memoryRecordSchema.extend({
-  score: z.number().int().nonnegative(),
-});
-
 export type MemoryDocumentDocType = typeof memoryDocumentDocType;
 export type MemorySection = (typeof memorySectionValues)[number];
 export type MemoryDocumentFrontmatter = z.infer<typeof memoryDocumentFrontmatterSchema>;
@@ -71,7 +67,6 @@ export type MemoryRecordMetadata = z.infer<typeof memoryRecordMetadataSchema>;
 export type MemoryRecord = z.infer<typeof memoryRecordSchema>;
 export type MemoryDocument = z.infer<typeof memoryDocumentSchema>;
 export type MemoryDocumentSnapshot = z.infer<typeof memoryDocumentSnapshotSchema>;
-export type MemorySearchHit = z.infer<typeof memorySearchHitSchema>;
 
 export interface ParseMemoryDocumentInput {
   sourcePath?: string | null;
@@ -91,12 +86,6 @@ export interface UpsertMemoryRecordInput {
 
 export interface ForgetMemoryRecordInput {
   recordId: string;
-}
-
-export interface SearchMemoryRecordsInput {
-  query?: string | null;
-  section?: MemorySection | null;
-  limit?: number;
 }
 
 const MEMORY_COMMENT_PREFIX = "murph-memory:";
@@ -213,27 +202,6 @@ export function forgetMemoryRecord(
     },
     record,
   };
-}
-
-export function searchMemoryRecords(
-  input: MemoryDocument,
-  next: SearchMemoryRecordsInput,
-): MemorySearchHit[] {
-  const query = normalizeMemorySearchQuery(next.query ?? null);
-  const section = next.section ?? null;
-  const limit = normalizeMemorySearchLimit(next.limit);
-  const filtered = input.records.filter((record) =>
-    section === null ? true : record.section === section,
-  );
-
-  return filtered
-    .map((record) => ({
-      ...record,
-      score: scoreMemoryRecord(record, query),
-    }))
-    .filter((record) => (query === null ? true : record.score > 0))
-    .sort((left, right) => compareMemorySearchHits(left, right, query !== null))
-    .slice(0, limit);
 }
 
 export function buildMemoryPromptBlock(input: MemoryDocument): string | null {
@@ -420,60 +388,6 @@ function normalizeMemoryText(value: string): string {
   }
 
   return normalized;
-}
-
-function normalizeMemorySearchQuery(value: string | null): string | null {
-  const normalized = value?.replace(/\s+/gu, " ").trim() ?? "";
-  return normalized.length > 0 ? normalized.toLowerCase() : null;
-}
-
-function normalizeMemorySearchLimit(value: number | undefined): number {
-  if (!value || !Number.isFinite(value) || value < 1) {
-    return 25;
-  }
-
-  return Math.min(Math.trunc(value), 100);
-}
-
-function scoreMemoryRecord(record: MemoryRecord, query: string | null): number {
-  if (!query) {
-    return 1;
-  }
-
-  const text = record.text.toLowerCase();
-  let score = text.includes(query) ? 10 : 0;
-  const tokens = query.split(/\s+/u).filter(Boolean);
-
-  for (const token of tokens) {
-    if (text.includes(token)) {
-      score += 2;
-    }
-  }
-
-  if (record.section.toLowerCase().includes(query)) {
-    score += 1;
-  }
-
-  return score;
-}
-
-function compareMemorySearchHits(
-  left: MemorySearchHit,
-  right: MemorySearchHit,
-  prioritizeScore: boolean,
-): number {
-  if (prioritizeScore && left.score !== right.score) {
-    return right.score - left.score;
-  }
-
-  const leftUpdated = left.updatedAt ?? left.createdAt ?? "";
-  const rightUpdated = right.updatedAt ?? right.createdAt ?? "";
-
-  if (leftUpdated !== rightUpdated) {
-    return rightUpdated.localeCompare(leftUpdated);
-  }
-
-  return left.id.localeCompare(right.id);
 }
 
 function findMemoryInsertionIndex(

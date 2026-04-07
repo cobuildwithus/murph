@@ -150,7 +150,6 @@ declare module 'incur' {
       'meal manifest': { args: { id: string }; options: { vault: string; requestId?: string } }
       'meal show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'memory forget': { args: { memoryId: string }; options: { vault: string } }
-      'memory search': { args: { text?: string }; options: { vault: string; section?: "Identity" | "Preferences" | "Instructions" | "Context"; limit: number } }
       'memory show': { args: { memoryId?: string }; options: { vault: string } }
       'memory upsert': { args: { text: string }; options: { vault: string; section: "Identity" | "Preferences" | "Instructions" | "Context"; memoryId?: string } }
       'model': { args: {}; options: { show?: boolean; preset?: "codex" | "openai-compatible"; providerPreset?: "openai" | "openrouter" | "venice" | "deepseek" | "groq" | "together" | "fireworks" | "cerebras" | "xai" | "huggingface" | "nvidia" | "ollama" | "lm-studio" | "vllm" | "litellm" | "custom"; model?: string; baseUrl?: string; apiKeyEnv?: string; providerName?: string; codexCommand?: string; profile?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh"; oss?: boolean } }
