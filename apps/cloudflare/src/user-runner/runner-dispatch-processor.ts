@@ -84,6 +84,7 @@ interface RunnerDispatchProcessorDependencies {
   bucket: R2BucketLike;
   ensureRunnerStores(userId?: string): Promise<RunnerUserStores>;
   env: HostedExecutionEnvironment;
+  provisionManagedUserCrypto(userId: string): Promise<void>;
   queueStore: RunnerQueueStore;
   readRunnerRuntimeConfigSource(): Readonly<Record<string, string | undefined>>;
   readWorkerStringEnvSource(): Readonly<Record<string, string | undefined>>;
@@ -101,6 +102,10 @@ export class RunnerDispatchProcessor {
     input: HostedExecutionDispatchRequest,
     stagedPayloadId: string | null = null,
   ): Promise<HostedExecutionUserStatus> {
+    if (input.event.kind === "member.activated") {
+      await this.dependencies.provisionManagedUserCrypto(input.event.userId);
+    }
+
     const { commitRecovery, gatewayStore } = await this.dependencies.ensureRunnerStores(
       input.event.userId,
     );

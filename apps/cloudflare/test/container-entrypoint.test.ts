@@ -34,10 +34,15 @@ function buildJobBody(input: {
   };
 }) {
   return {
-    request: {
-      bundles: { agentState: null, vault: null },
-      dispatch: input.dispatch,
-      ...(input.run ? { run: input.run } : {}),
+    job: {
+      request: {
+        bundle: null,
+        commit: {
+          bundleRef: null,
+        },
+        dispatch: input.dispatch,
+        ...(input.run ? { run: input.run } : {}),
+      },
     },
   };
 }

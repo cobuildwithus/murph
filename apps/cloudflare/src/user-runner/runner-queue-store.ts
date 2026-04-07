@@ -192,7 +192,11 @@ export class RunnerQueueStore {
 
     const meta = this.requireMetaRowSync();
     const nowIso = new Date().toISOString();
-    if (this.hasPendingDispatchSync(dispatch.eventId) || this.hasConsumedEventSync(dispatch.eventId)) {
+    if (
+      this.hasPendingDispatchSync(dispatch.eventId)
+      || this.hasConsumedEventSync(dispatch.eventId)
+      || this.readPoisonedEventByIdSync(dispatch.eventId) !== null
+    ) {
       return {
         accepted: false,
         alreadySeen: true,
