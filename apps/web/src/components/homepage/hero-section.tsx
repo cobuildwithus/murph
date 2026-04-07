@@ -32,7 +32,7 @@ export function HeroSection({
               className="inline-flex items-center gap-2 rounded-lg border border-stone-200 bg-white/80 px-4 py-2.5 font-medium text-stone-600 transition-colors hover:text-stone-900"
             >
               <GitHubIcon className="h-5 w-5" />
-              Open source — GPL 3.0
+              Open source — Apache 2.0
             </a>
           </div>
         </div>

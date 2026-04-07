@@ -65,7 +65,7 @@ test("HomePage renders the fallback copy when hosted phone auth is not ready", a
   const markup = renderToStaticMarkup(HomePage());
 
   assert.match(markup, /Phone signup is not configured for this environment yet\./);
-  assert.match(markup, /Open source — GPL 3\.0/u);
+  assert.match(markup, /Open source — Apache 2\.0/u);
   assert.match(markup, /https:\/\/github\.com\/cobuildwithus\/murph/u);
   assert.match(markup, /Syncs with Garmin, Oura, and WHOOP/);
   assert.match(markup, /Local mode keeps your data on your device\. Hosted runs use encrypted cloud snapshots\./);
@@ -105,7 +105,7 @@ test("HomePage renders the hosted phone auth UI when hosted phone auth is ready"
 
   const markup = renderToStaticMarkup(HomePage());
 
-  assert.match(markup, /Open source — GPL 3\.0/u);
+  assert.match(markup, /Open source — Apache 2\.0/u);
   assert.match(markup, /https:\/\/github\.com\/cobuildwithus\/murph/u);
   assert.match(markup, /data-hosted-phone-auth="public"/);
   assert.match(markup, /data-privy-app-id="cm_app_123"/);
@@ -149,7 +149,7 @@ test("HomePage keeps the fallback copy when the server auth config is ready but 
   const markup = renderToStaticMarkup(HomePage());
 
   assert.match(markup, /Phone signup is not configured for this environment yet\./);
-  assert.match(markup, /Open source — GPL 3\.0/u);
+  assert.match(markup, /Open source — Apache 2\.0/u);
   assert.match(markup, /https:\/\/github\.com\/cobuildwithus\/murph/u);
   assert.match(markup, /Local mode keeps your data on your device\. Hosted runs use encrypted cloud snapshots\./);
   assert.match(markup, /Local mode keeps your data on your device, and hosted runs use encrypted cloud snapshots\./);

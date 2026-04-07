@@ -3,7 +3,7 @@
   "version": "0.1.16",
   "private": false,
   "type": "module",
-  "license": "GPL-3.0-only",
+  "license": "Apache-2.0",
   "publishConfig": {
     "access": "public"
   },
@@ -16,7 +16,8 @@
   "files": [
     "README.md",
     "generated",
-    "dist"
+    "dist",
+    "LICENSE"
   ],
   "exports": {
     ".": {

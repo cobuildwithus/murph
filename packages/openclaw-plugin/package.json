@@ -3,7 +3,7 @@
   "version": "0.1.16",
   "private": false,
   "type": "module",
-  "license": "GPL-3.0-only",
+  "license": "Apache-2.0",
   "publishConfig": {
     "access": "public"
   },
@@ -22,7 +22,8 @@
   "files": [
     "dist",
     "skills",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.json",

@@ -3,7 +3,7 @@
   "version": "0.1.16",
   "private": true,
   "type": "module",
-  "license": "GPL-3.0-only",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/cobuildwithus/murph"
