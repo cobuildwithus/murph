@@ -1,0 +1,12 @@
+{
+  "id": "query-projection-rebuild",
+  "command": "vault-cli query projection rebuild --vault <path> [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md",
+    "fixtures/minimal-vault/raw/README.md",
+    "fixtures/minimal-vault/journal/2026/2026-03-10.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/query-projection-rebuild",
+  "purpose": "Covers the documented query projection rebuild command while leaving behavioral verification to the CLI and query package tests."
+}
