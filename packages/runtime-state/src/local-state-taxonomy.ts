@@ -1,7 +1,19 @@
 import path from "node:path";
 
-export type VaultLocalStateClassification = "operational" | "projection" | "ephemeral";
-export type VaultLocalStatePortability = "portable" | "machine_local";
+import {
+  findMostSpecificMatchingLocalStateDescriptor,
+  isPortableLocalStateContainerRelativePath,
+  normalizeVaultLocalStateRelativePath,
+  type VaultLocalStateClassification,
+  type VaultLocalStatePortability,
+} from "./local-state-descriptor-helpers.ts";
+import { vaultLocalStatePathDescriptors } from "./local-state-descriptor-manifests.ts";
+
+export type {
+  VaultLocalStateClassification,
+  VaultLocalStatePortability,
+  VaultLocalStatePathDescriptor,
+} from "./local-state-descriptor-helpers.ts";
 
 export interface VaultLocalStateBucketDescriptor {
   classification: VaultLocalStateClassification;
@@ -12,7 +24,9 @@ export interface VaultLocalStateBucketDescriptor {
 }
 
 export interface VaultLocalStateDescriptor extends VaultLocalStateBucketDescriptor {
+  owner?: string;
   portability: VaultLocalStatePortability;
+  relativePath: string;
 }
 
 export const RUNTIME_ROOT_RELATIVE_PATH = ".runtime";
@@ -79,11 +93,21 @@ export function describeVaultLocalStateRelativePath(
     return null;
   }
 
-  const portability = resolveVaultLocalStatePortability(normalized, bucket);
+  const explicitDescriptor = findMostSpecificMatchingLocalStateDescriptor(
+    normalized,
+    vaultLocalStatePathDescriptors,
+    bucket.classification,
+  );
 
   return {
-    ...bucket,
-    portability,
+    classification: explicitDescriptor?.classification ?? bucket.classification,
+    defaultPortability: bucket.defaultPortability,
+    description: explicitDescriptor?.description ?? bucket.description,
+    owner: explicitDescriptor?.owner,
+    portability: explicitDescriptor?.portability ?? bucket.defaultPortability,
+    rebuildable: explicitDescriptor?.rebuildable ?? bucket.rebuildable,
+    relativePath: normalized,
+    rootRelativePath: bucket.rootRelativePath,
   };
 }
 
@@ -115,60 +139,10 @@ export function isVaultEphemeralRelativePath(relativePath: string): boolean {
   );
 }
 
+export function isPortableVaultOperationalContainerRelativePath(relativePath: string): boolean {
+  return isPortableLocalStateContainerRelativePath(relativePath, vaultLocalStatePathDescriptors, "operational");
+}
+
 function hasVaultLocalStatePrefix(relativePath: string, prefix: string): boolean {
   return relativePath === prefix || relativePath.startsWith(`${prefix}${path.posix.sep}`);
 }
-
-function resolveVaultLocalStatePortability(
-  relativePath: string,
-  bucket: VaultLocalStateBucketDescriptor,
-): VaultLocalStatePortability {
-  if (bucket.classification !== "operational") {
-    return bucket.defaultPortability;
-  }
-
-  if (isPortableOperationalRelativePath(relativePath)) {
-    return "portable";
-  }
-
-  return bucket.defaultPortability;
-}
-
-function isPortableOperationalRelativePath(relativePath: string): boolean {
-  return (
-    relativePath === INBOX_PROMOTIONS_RELATIVE_PATH
-    || relativePath.startsWith(PORTABLE_WRITE_OPERATION_PREFIX)
-    || relativePath === ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH
-    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/automation-state.json`
-    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/failover.json`
-    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/cron`
-    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/cron/automation-runtime.json`
-    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/cron/jobs.json`
-    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/outbox`
-    || relativePath.startsWith(`${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/outbox/`)
-    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/receipts`
-    || relativePath.startsWith(`${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/receipts/`)
-    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/sessions`
-    || relativePath.startsWith(`${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/sessions/`)
-    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/state`
-    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/state/onboarding`
-    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/transcripts`
-    || relativePath.startsWith(`${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/transcripts/`)
-    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/state/onboarding/first-contact`
-    || relativePath.startsWith(`${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/state/onboarding/first-contact/`)
-    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/usage`
-    || relativePath === `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/usage/pending`
-    || relativePath.startsWith(`${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/usage/pending/`)
-  );
-}
-
-function normalizeVaultLocalStateRelativePath(value: string): string {
-  return value
-    .replace(/\\/gu, "/")
-    .replace(/\/+/gu, "/")
-    .replace(/^\.\//u, "")
-    .replace(/^\/+|\/+$/gu, "");
-}
-
-const INBOX_PROMOTIONS_RELATIVE_PATH = `${RUNTIME_OPERATIONAL_ROOT_RELATIVE_PATH}/inbox/promotions.json`;
-const PORTABLE_WRITE_OPERATION_PREFIX = `${RUNTIME_OPERATIONAL_ROOT_RELATIVE_PATH}/op_`;

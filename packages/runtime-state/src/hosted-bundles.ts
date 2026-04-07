@@ -5,12 +5,10 @@ import { mkdir } from "node:fs/promises";
 import { resolveAssistantStatePaths } from "./assistant-state.ts";
 import {
   describeVaultLocalStateRelativePath,
+  isPortableVaultOperationalContainerRelativePath,
   RUNTIME_OPERATIONAL_ROOT_RELATIVE_PATH,
   RUNTIME_ROOT_RELATIVE_PATH,
 } from "./local-state-taxonomy.ts";
-import {
-  INBOX_RUNTIME_DIRECTORY_RELATIVE_PATH,
-} from "./runtime-paths.ts";
 import type { HostedBundleArtifactRef } from "./hosted-bundle.ts";
 import {
   materializeHostedBundleArtifacts,
@@ -174,7 +172,7 @@ function shouldIncludeWorkspaceSnapshotVaultRelativePath(relativePath: string): 
       !isEnvironmentRelativePath(normalizedRelativePath)
       && (
         localStateDescriptor?.portability === "portable"
-        || isPortableVaultLocalStateContainerRelativePath(normalizedRelativePath)
+        || isPortableVaultOperationalContainerRelativePath(normalizedRelativePath)
       )
     );
   }
@@ -186,7 +184,6 @@ function shouldIncludeWorkspaceSnapshotVaultRelativePath(relativePath: string): 
     && (
       localStateDescriptor === null
       || localStateDescriptor.portability === "portable"
-      || isPortableVaultLocalStateContainerRelativePath(normalizedRelativePath)
     )
   );
 }
@@ -211,14 +208,6 @@ function isExportPackRelativePath(relativePath: string): boolean {
   return (
     relativePath === "exports/packs"
     || relativePath.startsWith(`exports/packs${path.posix.sep}`)
-  );
-}
-
-function isPortableVaultLocalStateContainerRelativePath(relativePath: string): boolean {
-  return (
-    relativePath === RUNTIME_ROOT_RELATIVE_PATH
-    || relativePath === RUNTIME_OPERATIONAL_ROOT_RELATIVE_PATH
-    || relativePath === INBOX_RUNTIME_DIRECTORY_RELATIVE_PATH
   );
 }
 

@@ -423,6 +423,10 @@ test("runtime-state portability defaults operational paths to machine-local unle
     classification: "operational",
     portability: "portable",
   });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/cron")).toMatchObject({
+    classification: "operational",
+    portability: "portable",
+  });
   expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/cron/automation-runtime.json")).toMatchObject({
     classification: "operational",
     portability: "portable",
@@ -442,6 +446,10 @@ test("runtime-state portability defaults operational paths to machine-local unle
   expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/state/onboarding")).toMatchObject({
     classification: "operational",
     portability: "portable",
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/outbox/.quarantine/ignored.json")).toMatchObject({
+    classification: "operational",
+    portability: "machine_local",
   });
   expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/status.json")).toMatchObject({
     classification: "operational",
@@ -467,7 +475,18 @@ test("runtime-state portability defaults operational paths to machine-local unle
     classification: "operational",
     portability: "portable",
   });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/op_test/payloads/staged.md")).toMatchObject({
+    classification: "operational",
+    portability: "portable",
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/op_test/payloads/staged.md")?.relativePath).toBe(
+    ".runtime/operations/op_test/payloads/staged.md",
+  );
   expect(describeVaultLocalStateRelativePath(".runtime/operations/inbox/config.json")).toMatchObject({
+    classification: "operational",
+    portability: "machine_local",
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/device-sync/launcher.json")).toMatchObject({
     classification: "operational",
     portability: "machine_local",
   });
@@ -475,6 +494,9 @@ test("runtime-state portability defaults operational paths to machine-local unle
     classification: "operational",
     portability: "machine_local",
   });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/cron/runs/cronrun_1.jsonl")?.relativePath).toBe(
+    ".runtime/operations/assistant/cron/runs/cronrun_1.jsonl",
+  );
   expect(describeVaultLocalStateRelativePath(".runtime/projections/search.sqlite")).toMatchObject({
     classification: "projection",
     portability: "machine_local",
