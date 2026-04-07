@@ -47,14 +47,12 @@ export {
 } from "./search.ts";
 export type { SafeSearchHit, SafeSearchResult } from "./search.ts";
 export {
-  getSqliteSearchStatus,
-  rebuildSqliteSearchIndex,
+  getQueryProjectionStatus,
+  rebuildQueryProjection,
   searchVaultRuntime,
-  searchVaultSqlite,
-  type RebuildSqliteSearchIndexResult,
-  type SearchBackend,
-  type SqliteSearchStatus,
-} from "./search-sqlite.ts";
+  type QueryProjectionStatus,
+  type RebuildQueryProjectionResult,
+} from "./query-projection.ts";
 export { summarizeDailySamples } from "./summaries.ts";
 export {
   buildWearableAssistantSummary,

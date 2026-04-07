@@ -183,9 +183,9 @@ declare module 'incur' {
       'samples import-csv': { args: { file: string }; options: { vault: string; requestId?: string; preset?: string; stream?: string; tsColumn?: string; valueColumn?: string; unit?: string; delimiter?: string; metadataColumns?: string[]; source?: string } }
       'samples list': { args: {}; options: { vault: string; requestId?: string; stream?: string; from?: string; to?: string; quality?: string; limit: number } }
       'samples show': { args: { id: string }; options: { vault: string; requestId?: string } }
-      'search index rebuild': { args: {}; options: { vault: string; requestId?: string } }
-      'search index status': { args: {}; options: { vault: string; requestId?: string } }
-      'search query': { args: {}; options: { vault: string; requestId?: string; text?: string; backend?: "auto" | "scan" | "sqlite"; recordType?: string[]; kind?: string[]; stream?: string[]; experiment?: string; from?: string; to?: string; tag?: string[]; limit: number } }
+      'query projection rebuild': { args: {}; options: { vault: string; requestId?: string } }
+      'query projection status': { args: {}; options: { vault: string; requestId?: string } }
+      'search query': { args: {}; options: { vault: string; requestId?: string; text?: string; recordType?: string[]; kind?: string[]; stream?: string[]; experiment?: string; from?: string; to?: string; tag?: string[]; limit: number } }
       'show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'status': { args: {}; options: { vault: string; requestId?: string; session?: string; limit: number } }
       'stop': { args: {}; options: { vault: string; requestId?: string } }

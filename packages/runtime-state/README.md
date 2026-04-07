@@ -15,7 +15,7 @@ next to a vault without turning that state into canonical product truth.
 Inside the vault, `.runtime/**` is now split by durability/rebuildability and by portability:
 
 - `.runtime/operations/**`: durable local operational state. Paths in this bucket default to `machine_local` and must be classified explicitly before they can travel in hosted snapshots. Current portable examples include canonical write-operation receipts and inbox promotion ledgers; current machine-local examples include device-sync runtime state, daemon state/logs, inbox daemon config/state, and parser toolchain overrides.
-- `.runtime/projections/**`: rebuildable local projections and indexes such as inbox capture indexes, lexical search, and the gateway source-backed projection store. These are `machine_local`.
+- `.runtime/projections/**`: rebuildable local projections and indexes such as inbox capture indexes, the query-owned canonical read/search projection, and the gateway source-backed projection store. These are `machine_local`.
 - `.runtime/cache/**` and `.runtime/tmp/**`: ephemeral scratch state that may be deleted freely. These are `machine_local`.
 
 `vault/.runtime/operations/assistant/**` is the assistant runtime residue root. Assistant runtime paths are portable only when the assistant descriptor manifest marks them portable; current portable examples include session resume metadata, transcripts, outbox intents, receipts, automation execution state/cursors, and failover cooldowns. Current machine-local examples include locks, status snapshots, diagnostics, caches, secrets, and other throwaway operational state.

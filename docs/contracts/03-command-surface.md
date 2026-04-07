@@ -120,9 +120,9 @@ vault-cli journal link <date> --vault <path> [--event-id <evt_*> ...] [--stream 
 vault-cli journal unlink <date> --vault <path> [--event-id <evt_*> ...] [--stream <stream> ...] [--request-id <id>]
 vault-cli show <id> --vault <path> [--request-id <id>]
 vault-cli list --vault <path> [--record-type <type> ...] [--kind <kind>] [--status <status>] [--stream <stream> ...] [--tag <tag> ...] [--experiment <slug>] [--from <date>] [--to <date>] [--limit <n>] [--request-id <id>]
-vault-cli search query --vault <path> --text <query> [--backend auto|scan|sqlite] [--record-type <type> ...] [--kind <kind> ...] [--stream <stream> ...] [--experiment <slug>] [--from <date>] [--to <date>] [--tag <tag> ...] [--limit <n>] [--request-id <id>]
-vault-cli search index status --vault <path> [--request-id <id>]
-vault-cli search index rebuild --vault <path> [--request-id <id>]
+vault-cli search query --vault <path> --text <query> [--record-type <type> ...] [--kind <kind> ...] [--stream <stream> ...] [--experiment <slug>] [--from <date>] [--to <date>] [--tag <tag> ...] [--limit <n>] [--request-id <id>]
+vault-cli query projection status --vault <path> [--request-id <id>]
+vault-cli query projection rebuild --vault <path> [--request-id <id>]
 vault-cli timeline --vault <path> [--from <date>] [--to <date>] [--experiment <slug>] [--kind <kind> ...] [--stream <stream> ...] [--entry-type <type> ...] [--limit <n>] [--request-id <id>]
 vault-cli export pack create --vault <path> --from <date> --to <date> [--experiment <slug>] [--out <dir>] [--request-id <id>]
 vault-cli export pack show <id> --vault <path> [--request-id <id>]
@@ -574,7 +574,6 @@ The freeform note is preserved verbatim in `note`. The structured fields stay in
   "query": "ferritin labcorp",
   "filters": {
     "text": "ferritin labcorp",
-    "backend": "auto",
     "recordTypes": ["event"],
     "kinds": ["document"],
     "streams": [],
@@ -611,33 +610,35 @@ The freeform note is preserved verbatim in `note`. The structured fields stay in
 }
 ```
 
-### `search index status`
+### `query projection status`
 
 ```json
 {
   "vault": "<path>",
-  "backend": "sqlite",
-  "dbPath": ".runtime/search.sqlite",
+  "dbPath": ".runtime/projections/query.sqlite",
   "exists": true,
-  "schemaVersion": "murph.search.v1",
-  "indexedAt": "2026-03-13T03:55:00.000Z",
-  "documentCount": 42
+  "schemaVersion": "murph.query-projection.v1",
+  "builtAt": "2026-04-07T03:55:00.000Z",
+  "entityCount": 42,
+  "searchDocumentCount": 42,
+  "fresh": true
 }
 ```
 
-`dbPath` always reports the dedicated search index at `.runtime/search.sqlite`. Older inbox runtime databases are ignored by search status and should not be treated as a fallback search backend.
+`dbPath` always reports the shared query-owned local projection at `.runtime/projections/query.sqlite`. Inbox or gateway runtime databases are separate stores and are never treated as fallbacks for query reads or lexical search.
 
-### `search index rebuild`
+### `query projection rebuild`
 
 ```json
 {
   "vault": "<path>",
-  "backend": "sqlite",
-  "dbPath": ".runtime/search.sqlite",
+  "dbPath": ".runtime/projections/query.sqlite",
   "exists": true,
-  "schemaVersion": "murph.search.v1",
-  "indexedAt": "2026-03-13T03:55:00.000Z",
-  "documentCount": 42,
+  "schemaVersion": "murph.query-projection.v1",
+  "builtAt": "2026-04-07T03:55:00.000Z",
+  "entityCount": 42,
+  "searchDocumentCount": 42,
+  "fresh": true,
   "rebuilt": true
 }
 ```
@@ -706,7 +707,7 @@ The five-file pack shape stays stable; health extensions enrich `manifest.json`,
 
 - `init`, `validate`, `meal add`, `document import`, `samples import-csv`, and `intake import` delegate to `packages/core` or `packages/importers` write paths that preserve immutable raw evidence and append-only ledgers.
 - `provider upsert`, `food upsert`, `food schedule`, `recipe upsert`, `event upsert`, `samples add`, `workout add`, `workout format save|show|list|log`, `intervention add`, `experiment create|update|checkpoint|stop`, `journal ensure|append|link|unlink`, `vault repair|update`, `intake project`, health `<noun> scaffold`, health `<noun> upsert`, `profile current rebuild`, `protocol stop`, and `supplement stop` all delegate to `packages/core` exports or to CLI-local helpers built only on top of `packages/core` frontmatter/jsonl primitives, importer entrypoints, canonical write locks, and assistant runtime automation state.
-- `show`, `list`, `search query`, `search index status|rebuild`, `timeline`, `document/meal/samples/intake/export` follow-up reads, `audit show|list|tail`, and `vault show|paths|stats` delegate to the read model plus immutable-manifest inspection helpers.
+- `show`, `list`, `search query`, `query projection status|rebuild`, `timeline`, `document/meal/samples/intake/export` follow-up reads, `audit show|list|tail`, and `vault show|paths|stats` delegate to the read model plus immutable-manifest inspection helpers.
 - `inbox` bootstrap/setup, capture review, attachment parse, and promote commands delegate to `packages/inboxd`, `packages/parsers`, and shared `packages/core` primitives without directly writing arbitrary vault files from the CLI layer.
 - Contract validation errors normalize to the shared codes in `docs/contracts/04-error-codes.md`.
 - The default CLI service layer is expected to delegate to the real `core`, `importers`, and `query` package exports. If the local TypeScript or `incur` toolchain is unavailable, that is an environment blocker, not a contract excuse to return placeholder payloads.

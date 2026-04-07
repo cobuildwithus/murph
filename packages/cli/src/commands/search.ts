@@ -27,7 +27,6 @@ const timelineEntryTypeValues = [
   'event',
   'sample_summary',
 ] as const
-const searchBackendValues = ['auto', 'scan', 'sqlite'] as const
 
 const searchHitSchema = z.object({
   recordId: z.string().min(1),
@@ -56,7 +55,6 @@ const searchResultSchema = z.object({
   query: z.string().min(1),
   filters: z.object({
     text: z.string().min(1),
-    backend: z.enum(searchBackendValues),
     recordTypes: z.array(z.enum(recordTypeValues)),
     kinds: z.array(z.string().min(1)),
     streams: z.array(z.string().min(1)),
@@ -99,17 +97,18 @@ const timelineResultSchema = z.object({
   items: z.array(timelineEntrySchema),
 })
 
-const searchIndexStatusSchema = z.object({
+const queryProjectionStatusSchema = z.object({
   vault: pathSchema,
-  backend: z.literal('sqlite'),
   dbPath: pathSchema,
   exists: z.boolean(),
   schemaVersion: z.string().min(1).nullable(),
-  indexedAt: isoTimestampSchema.nullable(),
-  documentCount: z.number().int().nonnegative(),
+  builtAt: isoTimestampSchema.nullable(),
+  entityCount: z.number().int().nonnegative(),
+  searchDocumentCount: z.number().int().nonnegative(),
+  fresh: z.boolean(),
 })
 
-const searchIndexRebuildSchema = searchIndexStatusSchema.extend({
+const queryProjectionRebuildSchema = queryProjectionStatusSchema.extend({
   rebuilt: z.literal(true),
 })
 
@@ -119,12 +118,12 @@ export function registerSearchCommands(
 ) {
   const search = Cli.create('search', {
     description:
-      'Search commands for the local read model and the optional SQLite lexical index.',
+      'Search commands for the shared local query projection over canonical vault records.',
   })
 
   search.command('query', {
     description:
-      'Search the local read model with lexical scoring and optional SQLite-backed candidate retrieval when the target is fuzzy or remembered by phrase rather than exact id.',
+      'Search the shared local query projection when the target is fuzzy or remembered by phrase rather than exact id.',
     args: emptyArgsSchema,
     options: withBaseOptions({
       text: z
@@ -132,10 +131,6 @@ export function registerSearchCommands(
         .min(1)
         .optional()
         .describe('Search text to run across titles, notes, tags, ids, and record payloads.'),
-      backend: z
-        .enum(searchBackendValues)
-        .optional()
-        .describe('Retrieval backend. Defaults to `auto`, which prefers SQLite when an index exists and otherwise falls back to the scan backend.'),
       recordType: z
         .array(z.string().min(1))
         .optional()
@@ -209,7 +204,6 @@ export function registerSearchCommands(
       const kinds = normalizeRepeatableFlagOption(options.kind, 'kind') ?? []
       const streams = normalizeRepeatableFlagOption(options.stream, 'stream') ?? []
       const tags = normalizeRepeatableFlagOption(options.tag, 'tag') ?? []
-      const backend = options.backend ?? 'auto'
       const result = await query.searchVaultRuntime(
         options.vault,
         text,
@@ -223,7 +217,6 @@ export function registerSearchCommands(
           tags: tags.length > 0 ? tags : undefined,
           limit: options.limit,
         },
-        { backend },
       )
 
       return {
@@ -231,7 +224,6 @@ export function registerSearchCommands(
         query: result.query,
         filters: {
           text,
-          backend,
           recordTypes,
           kinds,
           streams,
@@ -246,19 +238,26 @@ export function registerSearchCommands(
       }
     },
   })
+  cli.command(search)
 
-  const index = Cli.create('index', {
-    description: 'Inspect and rebuild the optional SQLite lexical search index.',
+  const query = Cli.create('query', {
+    description:
+      'Commands for the shared local query projection that powers canonical reads and lexical search.',
   })
 
-  index.command('status', {
-    description: 'Show the current SQLite lexical search index status.',
+  const projection = Cli.create('projection', {
+    description:
+      'Inspect and rebuild the shared local query projection under .runtime/projections/query.sqlite.',
+  })
+
+  projection.command('status', {
+    description: 'Show the current query projection status and freshness.',
     args: emptyArgsSchema,
     options: withBaseOptions(),
-    output: searchIndexStatusSchema,
+    output: queryProjectionStatusSchema,
     async run({ options }) {
-      const query = await loadQueryRuntime()
-      const status = query.getSqliteSearchStatus(options.vault)
+      const queryRuntime = await loadQueryRuntime()
+      const status = await queryRuntime.getQueryProjectionStatus(options.vault)
 
       return {
         vault: options.vault,
@@ -267,14 +266,14 @@ export function registerSearchCommands(
     },
   })
 
-  index.command('rebuild', {
-    description: 'Rebuild the SQLite lexical search index from the current read model.',
+  projection.command('rebuild', {
+    description: 'Rebuild the shared local query projection from canonical vault data.',
     args: emptyArgsSchema,
     options: withBaseOptions(),
-    output: searchIndexRebuildSchema,
+    output: queryProjectionRebuildSchema,
     async run({ options }) {
-      const query = await loadQueryRuntime()
-      const rebuilt = await query.rebuildSqliteSearchIndex(options.vault)
+      const queryRuntime = await loadQueryRuntime()
+      const rebuilt = await queryRuntime.rebuildQueryProjection(options.vault)
 
       return {
         vault: options.vault,
@@ -283,8 +282,8 @@ export function registerSearchCommands(
     },
   })
 
-  search.command(index)
-  cli.command(search)
+  query.command(projection)
+  cli.command(query)
 
   cli.command(
     'timeline',

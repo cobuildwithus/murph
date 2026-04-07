@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { test, vi } from "vitest";
 import {
   INBOX_DB_RELATIVE_PATH,
-  SEARCH_DB_RELATIVE_PATH,
+  QUERY_DB_RELATIVE_PATH,
 } from "@murphai/runtime-state/node";
 
 import {
@@ -23,7 +23,7 @@ import {
   buildTimeline,
   getExperiment,
   getJournalEntry,
-  getSqliteSearchStatus,
+  getQueryProjectionStatus,
   listFamilyMembers,
   listEntities,
   listGeneticVariants,
@@ -31,7 +31,7 @@ import {
   listJournalEntries,
   lookupEntityById,
   readVault,
-  rebuildSqliteSearchIndex,
+  rebuildQueryProjection,
   searchVault,
   searchVaultSafe,
   searchVaultRuntime,
@@ -2904,79 +2904,64 @@ function createRecord(
   };
 }
 
-test("rebuildSqliteSearchIndex only materializes non-sample documents and search index status stays read-only when absent", async () => {
+test("rebuildQueryProjection materializes the shared query projection and status stays read-only when absent", async () => {
   const vaultRoot = await createFixtureVault();
-  const runtimeDatabasePath = path.join(vaultRoot, SEARCH_DB_RELATIVE_PATH);
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
 
   try {
     assert.equal(existsSync(runtimeDatabasePath), false);
 
-    const statusBefore = getSqliteSearchStatus(vaultRoot);
+    const statusBefore = await getQueryProjectionStatus(vaultRoot);
     assert.equal(statusBefore.exists, false);
-    assert.equal(statusBefore.dbPath, SEARCH_DB_RELATIVE_PATH);
+    assert.equal(statusBefore.dbPath, QUERY_DB_RELATIVE_PATH);
     assert.equal(existsSync(runtimeDatabasePath), false);
 
     const vault = await readVault(vaultRoot);
-    const expectedDocumentCount = vault.entities.filter(
-      (record) => record.family !== "sample",
-    ).length;
+    const rebuilt = await rebuildQueryProjection(vaultRoot);
 
-    const rebuilt = await rebuildSqliteSearchIndex(vaultRoot);
-    assert.equal(rebuilt.backend, "sqlite");
     assert.equal(rebuilt.exists, true);
-    assert.equal(rebuilt.dbPath, SEARCH_DB_RELATIVE_PATH);
-    assert.equal(rebuilt.schemaVersion, "murph.search.v1");
-    assert.equal(rebuilt.documentCount, expectedDocumentCount);
+    assert.equal(rebuilt.dbPath, QUERY_DB_RELATIVE_PATH);
+    assert.equal(rebuilt.schemaVersion, "murph.query-projection.v1");
+    assert.equal(rebuilt.entityCount, vault.entities.length);
+    assert.equal(rebuilt.searchDocumentCount, vault.entities.length);
+    assert.equal(rebuilt.fresh, true);
     assert.equal(existsSync(runtimeDatabasePath), true);
 
-    const statusAfter = getSqliteSearchStatus(vaultRoot);
+    const statusAfter = await getQueryProjectionStatus(vaultRoot);
     assert.equal(statusAfter.exists, true);
-    assert.equal(statusAfter.documentCount, expectedDocumentCount);
     assert.equal(statusAfter.schemaVersion, rebuilt.schemaVersion);
+    assert.equal(statusAfter.entityCount, rebuilt.entityCount);
+    assert.equal(statusAfter.searchDocumentCount, rebuilt.searchDocumentCount);
+    assert.equal(statusAfter.fresh, true);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
 });
 
-test("searchVaultRuntime auto falls back to scan and sqlite merges sample rows only when explicitly requested", async () => {
+test("searchVaultRuntime rebuilds the projection automatically and only returns sample rows when explicitly requested", async () => {
   const vaultRoot = await createFixtureVault();
 
   try {
-    const scanFallback = await searchVaultRuntime(vaultRoot, "lab report", {
+    const eventResult = await searchVaultRuntime(vaultRoot, "lab report", {
       recordTypes: ["event"],
       kinds: ["document"],
     });
 
-    assert.equal(scanFallback.total, 1);
-    assert.equal(scanFallback.hits[0]?.recordId, "doc_01JNV4DOC0000000000000001");
+    assert.equal(eventResult.total, 1);
+    assert.equal(eventResult.hits[0]?.recordId, "doc_01JNV4DOC0000000000000001");
+    assert.match(eventResult.hits[0]?.snippet ?? "", /lab report/i);
 
-    await rebuildSqliteSearchIndex(vaultRoot);
-
-    const sqliteResult = await searchVaultRuntime(
-      vaultRoot,
-      "lab report",
-      {
-        recordTypes: ["event"],
-        kinds: ["document"],
-      },
-      { backend: "sqlite" },
-    );
-
-    assert.equal(sqliteResult.total, 1);
-    assert.equal(sqliteResult.hits[0]?.recordId, "doc_01JNV4DOC0000000000000001");
-    assert.match(sqliteResult.hits[0]?.snippet ?? "", /lab report/i);
-
-    const sqliteSampleResult = await searchVaultRuntime(
-      vaultRoot,
-      "heart_rate",
-      {
-        streams: ["heart_rate"],
-      },
-      { backend: "sqlite" },
-    );
-
+    const defaultSampleResult = await searchVaultRuntime(vaultRoot, "heart_rate");
     assert.equal(
-      sqliteSampleResult.hits.some(
+      defaultSampleResult.hits.some((hit) => hit.recordType === "sample"),
+      false,
+    );
+
+    const requestedSampleResult = await searchVaultRuntime(vaultRoot, "heart_rate", {
+      streams: ["heart_rate"],
+    });
+    assert.equal(
+      requestedSampleResult.hits.some(
         (hit) => hit.recordType === "sample" && hit.stream === "heart_rate",
       ),
       true,
@@ -2986,146 +2971,13 @@ test("searchVaultRuntime auto falls back to scan and sqlite merges sample rows o
   }
 });
 
-test("getSqliteSearchStatus ignores a copied inbox search db until rebuild restores the canonical search db", async () => {
+test("query projection ignores inbox runtime state and leaves inbox sqlite untouched", async () => {
   const vaultRoot = await createFixtureVault();
-  const searchDatabasePath = path.join(vaultRoot, SEARCH_DB_RELATIVE_PATH);
-  const legacyDatabasePath = path.join(vaultRoot, INBOX_DB_RELATIVE_PATH);
+  const inboxDatabasePath = path.join(vaultRoot, INBOX_DB_RELATIVE_PATH);
+  const queryDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
 
-  try {
-    await rebuildSqliteSearchIndex(vaultRoot);
-    await mkdir(path.dirname(legacyDatabasePath), { recursive: true });
-    await copyFile(searchDatabasePath, legacyDatabasePath);
-    await rm(searchDatabasePath, { force: true });
-
-    const legacyStatus = getSqliteSearchStatus(vaultRoot);
-    assert.equal(legacyStatus.exists, false);
-    assert.equal(legacyStatus.dbPath, SEARCH_DB_RELATIVE_PATH);
-
-    await assert.rejects(
-      () =>
-        searchVaultRuntime(
-          vaultRoot,
-          "lab report",
-          {
-            recordTypes: ["event"],
-            kinds: ["document"],
-          },
-          { backend: "sqlite" },
-        ),
-      /index rebuild|--backend scan/u,
-    );
-
-    const rebuilt = await rebuildSqliteSearchIndex(vaultRoot);
-    assert.equal(rebuilt.dbPath, SEARCH_DB_RELATIVE_PATH);
-    assert.equal(existsSync(searchDatabasePath), true);
-
-    const statusAfterRebuild = getSqliteSearchStatus(vaultRoot);
-    assert.equal(statusAfterRebuild.exists, true);
-    assert.equal(statusAfterRebuild.dbPath, SEARCH_DB_RELATIVE_PATH);
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true });
-  }
-});
-
-test("getSqliteSearchStatus ignores an inbox runtime copy when the canonical search db exists", async () => {
-  const vaultRoot = await createFixtureVault();
-  const searchDatabasePath = path.join(vaultRoot, SEARCH_DB_RELATIVE_PATH);
-  const legacyDatabasePath = path.join(vaultRoot, INBOX_DB_RELATIVE_PATH);
-  const journalPath = path.join(vaultRoot, "journal/2026/2026-03-10.md");
-
-  try {
-    await rebuildSqliteSearchIndex(vaultRoot);
-    await mkdir(path.dirname(legacyDatabasePath), { recursive: true });
-    await copyFile(searchDatabasePath, legacyDatabasePath);
-
-    await writeFile(
-      journalPath,
-      `---
-schemaVersion: murph.frontmatter.journal-day.v1
-docType: journal_day
-dayKey: 2026-03-10
-title: March 10
-tags:
-  - energy
----
-# March 10
-
-Saffron tea replaced the usual afternoon coffee.
-`,
-      "utf8",
-    );
-    await rebuildSqliteSearchIndex(vaultRoot);
-
-    const status = getSqliteSearchStatus(vaultRoot);
-    assert.equal(status.exists, true);
-    assert.equal(status.dbPath, SEARCH_DB_RELATIVE_PATH);
-
-    const sqliteResult = await searchVaultRuntime(
-      vaultRoot,
-      "saffron",
-      {},
-      { backend: "sqlite" },
-    );
-
-    assert.equal(sqliteResult.total, 1);
-    assert.equal(sqliteResult.hits[0]?.recordId, "journal:2026-03-10");
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true });
-  }
-});
-
-test("getSqliteSearchStatus stays false against a pre-existing inbox runtime db without search tables and sqlite backend errors with rebuild guidance", async () => {
-  const vaultRoot = await createFixtureVault();
-  const runtimeRoot = path.join(vaultRoot, ".runtime");
-  const runtimeDatabasePath = path.join(runtimeRoot, "inboxd.sqlite");
-
-  await mkdir(runtimeRoot, { recursive: true });
-  const database = openDatabaseSync(runtimeDatabasePath);
-  database.exec("CREATE TABLE inbox_state (id TEXT PRIMARY KEY, value TEXT NOT NULL);");
-  database.close();
-
-  try {
-    const status = getSqliteSearchStatus(vaultRoot);
-    assert.equal(status.exists, false);
-    assert.equal(status.dbPath, SEARCH_DB_RELATIVE_PATH);
-
-    const schemaDatabase = openDatabaseSync(runtimeDatabasePath, { readOnly: true });
-    const tableNames = schemaDatabase
-      .prepare(`
-        SELECT name
-        FROM sqlite_master
-        WHERE type = 'table'
-          AND name LIKE 'murph_search_%'
-        ORDER BY name ASC
-      `)
-      .all() as Array<{ name: string }>;
-    schemaDatabase.close();
-
-    assert.deepEqual(tableNames, []);
-
-    await assert.rejects(
-      () =>
-        searchVaultRuntime(
-          vaultRoot,
-          "labcorp",
-          { recordTypes: ["event"] },
-          { backend: "sqlite" },
-        ),
-      /index rebuild|--backend scan/u,
-    );
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true });
-  }
-});
-
-test("rebuildSqliteSearchIndex leaves a pre-existing inbox runtime db untouched and writes search tables to search.sqlite", async () => {
-  const vaultRoot = await createFixtureVault();
-  const runtimeRoot = path.join(vaultRoot, ".runtime");
-  const runtimeDatabasePath = path.join(runtimeRoot, "inboxd.sqlite");
-  const searchDatabasePath = path.join(vaultRoot, SEARCH_DB_RELATIVE_PATH);
-
-  await mkdir(runtimeRoot, { recursive: true });
-  const inboxDatabase = openDatabaseSync(runtimeDatabasePath);
+  await mkdir(path.dirname(inboxDatabasePath), { recursive: true });
+  const inboxDatabase = openDatabaseSync(inboxDatabasePath);
   inboxDatabase.exec("CREATE TABLE inbox_state (id TEXT PRIMARY KEY, value TEXT NOT NULL);");
   inboxDatabase
     .prepare("INSERT INTO inbox_state (id, value) VALUES (?, ?)")
@@ -3133,62 +2985,52 @@ test("rebuildSqliteSearchIndex leaves a pre-existing inbox runtime db untouched 
   inboxDatabase.close();
 
   try {
-    const rebuilt = await rebuildSqliteSearchIndex(vaultRoot);
-    assert.equal(rebuilt.dbPath, SEARCH_DB_RELATIVE_PATH);
-    assert.equal(existsSync(searchDatabasePath), true);
+    const statusBefore = await getQueryProjectionStatus(vaultRoot);
+    assert.equal(statusBefore.exists, false);
+    assert.equal(statusBefore.dbPath, QUERY_DB_RELATIVE_PATH);
 
-    const searchDatabase = openDatabaseSync(searchDatabasePath, { readOnly: true });
-    const searchTables = searchDatabase
+    const rebuilt = await rebuildQueryProjection(vaultRoot);
+    assert.equal(rebuilt.dbPath, QUERY_DB_RELATIVE_PATH);
+    assert.equal(existsSync(queryDatabasePath), true);
+
+    const queryDatabase = openDatabaseSync(queryDatabasePath, { readOnly: true });
+    const queryTables = queryDatabase
       .prepare(`
         SELECT name
         FROM sqlite_master
         WHERE type = 'table'
-          AND name LIKE 'murph_search_%'
+          AND name LIKE 'query_%'
         ORDER BY name ASC
       `)
       .all() as Array<{ name: string }>;
-    searchDatabase.close();
+    queryDatabase.close();
 
-    assert.equal(searchTables.some((table) => table.name === "murph_search_document"), true);
-    assert.equal(searchTables.some((table) => table.name === "murph_search_meta"), true);
-    assert.equal(searchTables.some((table) => table.name === "murph_search_fts"), true);
-
-    const inboxStateDatabase = openDatabaseSync(runtimeDatabasePath, { readOnly: true });
+    const inboxStateDatabase = openDatabaseSync(inboxDatabasePath, { readOnly: true });
     const inboxState = inboxStateDatabase
       .prepare("SELECT value FROM inbox_state WHERE id = ?")
       .get("cursor") as { value: string } | undefined;
-    const inboxSearchTables = inboxStateDatabase
+    const inboxQueryTables = inboxStateDatabase
       .prepare(`
         SELECT name
         FROM sqlite_master
         WHERE type = 'table'
-          AND name LIKE 'murph_search_%'
+          AND name LIKE 'query_%'
         ORDER BY name ASC
       `)
       .all() as Array<{ name: string }>;
     inboxStateDatabase.close();
 
+    assert.equal(queryTables.some((table) => table.name === "query_entities"), true);
+    assert.equal(queryTables.some((table) => table.name === "query_search_document"), true);
+    assert.equal(queryTables.some((table) => table.name === "query_search_fts"), true);
     assert.equal(inboxState?.value, "{\"offset\":1}");
-    assert.deepEqual(inboxSearchTables, []);
-
-    const sqliteResult = await searchVaultRuntime(
-      vaultRoot,
-      "lab report",
-      {
-        recordTypes: ["event"],
-        kinds: ["document"],
-      },
-      { backend: "sqlite" },
-    );
-
-    assert.equal(sqliteResult.total, 1);
-    assert.equal(sqliteResult.hits[0]?.recordId, "doc_01JNV4DOC0000000000000001");
+    assert.deepEqual(inboxQueryTables, []);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
 });
 
-test("searchVaultRuntime auto switches from scan results to stale sqlite state after rebuild", async () => {
+test("searchVaultRuntime keeps results fresh by rebuilding the projection when canonical files change", async () => {
   const vaultRoot = await createFixtureVault();
   const journalPath = path.join(vaultRoot, "journal/2026/2026-03-10.md");
 
@@ -3212,17 +3054,10 @@ sampleStreams:
 ---
 Steady energy after electrolyte drink.
 `,
+      "utf8",
     );
 
-    const autoBeforeRebuild = await searchVaultRuntime(
-      vaultRoot,
-      "electrolyte",
-      { recordTypes: ["journal"] },
-      { backend: "auto" },
-    );
-    assert.equal(autoBeforeRebuild.hits[0]?.recordId, "journal:2026-03-10");
-
-    await rebuildSqliteSearchIndex(vaultRoot);
+    await rebuildQueryProjection(vaultRoot);
 
     await writeFile(
       journalPath,
@@ -3243,23 +3078,21 @@ sampleStreams:
 ---
 Steady energy after saffron tea.
 `,
+      "utf8",
     );
 
-    const autoAfterRebuild = await searchVaultRuntime(
-      vaultRoot,
-      "saffron",
-      { recordTypes: ["journal"] },
-      { backend: "auto" },
-    );
-    const scanAfterRebuild = await searchVaultRuntime(
-      vaultRoot,
-      "saffron",
-      { recordTypes: ["journal"] },
-      { backend: "scan" },
-    );
+    const statusAfterEdit = await getQueryProjectionStatus(vaultRoot);
+    assert.equal(statusAfterEdit.exists, true);
+    assert.equal(statusAfterEdit.fresh, false);
 
-    assert.equal(autoAfterRebuild.total, 0);
-    assert.equal(scanAfterRebuild.hits[0]?.recordId, "journal:2026-03-10");
+    const searchResult = await searchVaultRuntime(vaultRoot, "saffron", {
+      recordTypes: ["journal"],
+    });
+
+    assert.equal(searchResult.hits[0]?.recordId, "journal:2026-03-10");
+
+    const statusAfterSearch = await getQueryProjectionStatus(vaultRoot);
+    assert.equal(statusAfterSearch.fresh, true);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

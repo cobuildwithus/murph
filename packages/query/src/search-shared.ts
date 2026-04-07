@@ -1,7 +1,10 @@
 import { extractIsoDatePrefix } from "@murphai/contracts";
 
-import type { CanonicalEntity, CanonicalEntityFamily } from "./canonical-entities.ts";
-import { entityRelationTargetIds } from "./model.ts";
+import {
+  linkTargetIds,
+  type CanonicalEntity,
+  type CanonicalEntityFamily,
+} from "./canonical-entities.ts";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 200;
@@ -97,6 +100,16 @@ export function materializeSafeSearchDocuments(
   entities: readonly CanonicalEntity[],
 ): SearchableDocument[] {
   return entities.map(materializeSafeSearchDocument);
+}
+
+function entityRelationTargetIds(
+  entity: Pick<CanonicalEntity, "links" | "relatedIds" | "lookupIds">,
+): string[] {
+  return entity.links.length > 0
+    ? linkTargetIds(entity.links)
+    : entity.relatedIds.length > 0
+      ? entity.relatedIds
+      : entity.lookupIds;
 }
 
 function buildSearchDocument(

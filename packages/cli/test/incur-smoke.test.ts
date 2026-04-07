@@ -102,7 +102,7 @@ test('root help exposes the Incur built-ins', async () => {
   assert.match(help, new RegExp(`vault-cli@${packageJson.version ?? '0.0.0'}`, 'u'))
   assert.match(help, /Integrations:/u)
   assert.match(help, /chat\s+Open the same assistant chat UI as/u)
-  assert.match(help, /search\s+Search commands for the local read model/u)
+  assert.match(help, /search\s+Search commands for the shared local query projection/u)
   assert.match(help, /timeline\s+Build a descending cross-record timeline/u)
   assert.match(help, /completions\s+Generate shell completion script/u)
   assert.match(help, /mcp add\s+Register as MCP server/u)
@@ -387,7 +387,7 @@ test('search query schema exposes retrieval-specific filters', async () => {
   }
 
   assert.equal('text' in schema.options.properties, true)
-  assert.equal('backend' in schema.options.properties, true)
+  assert.equal('backend' in schema.options.properties, false)
   assert.equal('recordType' in schema.options.properties, true)
   assert.equal('from' in schema.options.properties, true)
   assert.equal('to' in schema.options.properties, true)
@@ -414,9 +414,9 @@ test('blood-test list schema stays scoped to shared date-range and status filter
   assert.deepEqual(schema.options.required, ['vault', 'limit'])
 })
 
-test('search index status schema stays scoped to index-management options', async () => {
+test('query projection status schema stays scoped to projection-management options', async () => {
   const schema = JSON.parse(
-    await runRawCli(['search', 'index', 'status', '--schema', '--format', 'json']),
+    await runRawCli(['query', 'projection', 'status', '--schema', '--format', 'json']),
   ) as {
     options: {
       properties: Record<string, unknown>
@@ -1181,11 +1181,11 @@ test('compact llms json manifest remains available', async () => {
     true,
   )
   assert.equal(
-    manifest.commands.some((command) => command.name === 'search index status'),
+    manifest.commands.some((command) => command.name === 'query projection status'),
     true,
   )
   assert.equal(
-    manifest.commands.some((command) => command.name === 'search index rebuild'),
+    manifest.commands.some((command) => command.name === 'query projection rebuild'),
     true,
   )
 })
@@ -1213,7 +1213,7 @@ test('full llms json manifest remains available for schema-rich commands', async
     true,
   )
   assert.equal(
-    manifest.commands.some((command) => command.name === 'search index status'),
+    manifest.commands.some((command) => command.name === 'query projection status'),
     true,
   )
 })

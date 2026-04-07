@@ -152,10 +152,6 @@ export interface QuerySearchFilters {
   includeSamples?: boolean
 }
 
-export interface QuerySearchOptions {
-  backend?: 'auto' | 'scan' | 'sqlite'
-}
-
 export interface QuerySearchResult {
   format: string
   query: string
@@ -163,16 +159,17 @@ export interface QuerySearchResult {
   hits: QuerySearchHit[]
 }
 
-export interface QuerySqliteSearchStatus {
-  backend: 'sqlite'
+export interface QueryProjectionStatus {
   dbPath: string
   exists: boolean
   schemaVersion: string | null
-  indexedAt: string | null
-  documentCount: number
+  builtAt: string | null
+  entityCount: number
+  searchDocumentCount: number
+  fresh: boolean
 }
 
-export interface QuerySqliteSearchRebuildResult extends QuerySqliteSearchStatus {
+export interface QueryProjectionRebuildResult extends QueryProjectionStatus {
   rebuilt: true
 }
 
@@ -259,7 +256,7 @@ export interface QueryRuntimeModule {
     filters?: QueryTimelineFilters,
   ): QueryTimelineEntry[]
   describeLookupConstraint(id: string): string | null
-  getSqliteSearchStatus(vaultRoot: string): QuerySqliteSearchStatus
+  getQueryProjectionStatus(vaultRoot: string): Promise<QueryProjectionStatus>
   inferIdEntityKind(id: string): string
   isQueryableLookupId(id: string): boolean
   listEntities(
@@ -276,14 +273,13 @@ export interface QueryRuntimeModule {
   ): Promise<JsonObject[]>
   readVault(vaultRoot: string): Promise<QueryVaultReadModel>
   readVaultTolerant(vaultRoot: string): Promise<QueryVaultReadModel>
-  rebuildSqliteSearchIndex(
+  rebuildQueryProjection(
     vaultRoot: string,
-  ): Promise<QuerySqliteSearchRebuildResult>
+  ): Promise<QueryProjectionRebuildResult>
   searchVaultRuntime(
     vaultRoot: string,
     query: string,
     filters?: QuerySearchFilters,
-    options?: QuerySearchOptions,
   ): Promise<QuerySearchResult>
   summarizeWearableSleep(
     vault: QueryVaultReadModel,
