@@ -46,13 +46,6 @@ const hostedMemberCoreStateSelect = Prisma.validator<Prisma.HostedMemberSelect>(
 export type HostedMemberCoreState = Prisma.HostedMemberGetPayload<{
   select: typeof hostedMemberCoreStateSelect;
 }>;
-type HostedMemberRecordWithRelations = Prisma.HostedMemberGetPayload<{
-  include: {
-    billingRef: true;
-    identity: true;
-    routing: true;
-  };
-}>;
 type HostedMemberRoutingRecord = {
   linqChatIdEncrypted: string | null;
   linqChatLookupKey: string | null;
@@ -121,14 +114,11 @@ export interface HostedMemberRoutingStateSnapshot {
 }
 
 export interface HostedMemberAggregate extends HostedMemberCoreState {
-  billingRef: HostedMemberStripeBillingRefSnapshot | null;
-  identity: HostedMemberIdentityState | null;
   linqChatId: string | null;
   maskedPhoneNumberHint: string | null;
   phoneLookupKey: string | null;
   phoneNumberVerifiedAt: Date | null;
   privyUserId: string | null;
-  routing: HostedMemberRoutingStateSnapshot | null;
   stripeCustomerId: string | null;
   stripeLatestBillingEventCreatedAt: Date | null;
   stripeLatestBillingEventId: string | null;
@@ -454,7 +444,13 @@ export async function readHostedMemberAggregate(input: {
     ? mapHostedMemberBillingRefSnapshot(memberRecord.billingRef)
     : null;
 
-  return buildHostedMemberAggregate(memberRecord, {
+  return buildHostedMemberAggregate({
+    billingStatus: memberRecord.billingStatus,
+    createdAt: memberRecord.createdAt,
+    id: memberRecord.id,
+    suspendedAt: memberRecord.suspendedAt,
+    updatedAt: memberRecord.updatedAt,
+  }, {
     billingRef,
     identity,
     routing,
@@ -907,14 +903,11 @@ function buildHostedMemberAggregate(
 ): HostedMemberAggregate {
   return {
     ...member,
-    billingRef: input.billingRef,
-    identity: input.identity,
     linqChatId: input.routing?.linqChatId ?? null,
     maskedPhoneNumberHint: input.identity?.maskedPhoneNumberHint ?? null,
     phoneLookupKey: input.identity?.phoneLookupKey ?? null,
     phoneNumberVerifiedAt: input.identity?.phoneNumberVerifiedAt ?? null,
     privyUserId: input.identity?.privyUserId ?? null,
-    routing: input.routing,
     stripeCustomerId: input.billingRef?.stripeCustomerId ?? null,
     stripeLatestBillingEventCreatedAt: input.billingRef?.stripeLatestBillingEventCreatedAt ?? null,
     stripeLatestBillingEventId: input.billingRef?.stripeLatestBillingEventId ?? null,
