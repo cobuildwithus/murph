@@ -672,6 +672,7 @@ function createSuccessfulReplyGroupOutcome(
 function createFailedGroupOutcome(input: {
   advanceCursor: boolean
   error: unknown
+  stopScanning?: boolean
 }): AssistantAutoReplyGroupOutcome {
   const failure = describeAssistantAutoReplyFailure(input.error)
 
@@ -689,7 +690,7 @@ function createFailedGroupOutcome(input: {
       type: 'capture.reply-failed',
     },
     kind: 'failed',
-    stopScanning: false,
+    stopScanning: input.stopScanning ?? false,
     summary: createAssistantAutoReplyOutcomeSummary({
       failed: 1,
     }),
@@ -1000,10 +1001,45 @@ function classifyAssistantAutoReplyFailure(input: {
     })
   }
 
+  if (isAssistantProviderCapacityError(input.error)) {
+    return createFailedGroupOutcome({
+      advanceCursor: false,
+      error: input.error,
+      stopScanning: true,
+    })
+  }
+
   return createFailedGroupOutcome({
     advanceCursor: true,
     error: input.error,
   })
+}
+
+function isAssistantProviderCapacityError(error: unknown): boolean {
+  const message = errorMessage(error).toLowerCase()
+  const code =
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    typeof (error as { code?: unknown }).code === 'string'
+      ? (error as { code: string }).code.toUpperCase()
+      : ''
+  const providerFailure =
+    code.startsWith('ASSISTANT_') ||
+    message.includes('codex cli failed') ||
+    message.includes('assistant provider')
+
+  return providerFailure && (
+    code.includes('RATE') ||
+    code.includes('LIMIT') ||
+    code.includes('QUOTA') ||
+    message.includes('rate limit') ||
+    message.includes('usage limit') ||
+    message.includes('quota') ||
+    message.includes('too many requests') ||
+    message.includes('purchase more credits') ||
+    message.includes('try again at ')
+  )
 }
 
 function classifyAssistantAutoReplyGroupArtifactStatus(
