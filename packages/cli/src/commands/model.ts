@@ -6,7 +6,6 @@ import {
   assistantReasoningEffortValues,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
-  buildAssistantProviderDefaultsPatch,
   resolveAssistantOperatorDefaults,
   resolveAssistantBackendTarget,
   resolveOperatorHomeDirectory,
@@ -28,11 +27,17 @@ import {
   type SetupAssistantResolver,
 } from '@murphai/setup-cli/setup-assistant'
 import {
+  assistantOperatorDefaultsMatch,
+  assistantSelectionToOperatorDefaults,
+  buildSetupAssistantOptionsFromDefaults,
+  formatAssistantDefaultsSummary,
+  formatSavedAssistantDefaultsSummary,
+} from '@murphai/setup-cli/setup-assistant-defaults'
+import {
   runSetupAssistantWizard,
   type SetupAssistantWizardInput,
   type SetupAssistantWizardResult,
 } from '@murphai/setup-cli/setup-assistant-wizard'
-import type { SetupConfiguredAssistant } from '@murphai/operator-config/setup-cli-contracts'
 
 const modelCommandPresetSchema = z.enum(['codex', 'openai-compatible'])
 
@@ -426,7 +431,7 @@ function createModelSetupOptions(input: {
   preset: ModelCommandPreset
   wizardSelection?: SetupAssistantWizardResult | null
 }): SetupCommandOptions {
-  const savedAssistantOptions = buildSetupAssistantOptionsFromDefaults(
+  const savedAssistantOptions = buildModelSetupAssistantOptionsFromDefaults(
     input.defaults,
     input.preset,
   )
@@ -493,6 +498,31 @@ function createModelSetupOptions(input: {
         }
       : {}),
   })
+}
+
+function buildModelSetupAssistantOptionsFromDefaults(
+  defaults: AssistantOperatorDefaults | null | undefined,
+  preset: ModelCommandPreset,
+): Partial<SetupCommandOptions> {
+  const backend = resolveAssistantBackendTarget(defaults)
+  if (
+    !backend ||
+    (preset === 'openai-compatible' && backend.adapter !== 'openai-compatible') ||
+    (preset === 'codex' && backend.adapter !== 'codex-cli')
+  ) {
+    return {}
+  }
+
+  const savedAssistantOptions = buildSetupAssistantOptionsFromDefaults(defaults)
+
+  // `murph model` intentionally does not seed OpenAI-compatible edits with a
+  // persisted reasoning-effort value because compatibility is target-specific
+  // and the resolved endpoint/model may change during the edit flow.
+  if (preset === 'openai-compatible') {
+    delete savedAssistantOptions.assistantReasoningEffort
+  }
+
+  return savedAssistantOptions
 }
 
 async function promptForModelPreset(input: {
@@ -567,112 +597,6 @@ function buildAssistantBackendNotes(
     : []
 }
 
-function assistantSelectionToOperatorDefaults(
-  assistant: SetupConfiguredAssistant,
-  existingDefaults: AssistantOperatorDefaults | null,
-): Partial<AssistantOperatorDefaults> {
-  if (!assistant.provider) {
-    return {
-      backend: null,
-      account: assistant.account ?? null,
-    }
-  }
-
-  return {
-    ...buildAssistantProviderDefaultsPatch({
-      defaults: existingDefaults,
-      provider: assistant.provider,
-      providerConfig: {
-        model: assistant.model,
-        ...(assistant.codexCommand !== null
-          ? {
-              codexCommand: assistant.codexCommand,
-            }
-          : {}),
-        ...(assistant.codexHome !== undefined
-          ? {
-              codexHome: assistant.codexHome ?? null,
-            }
-          : {}),
-        reasoningEffort: assistant.reasoningEffort,
-        sandbox: assistant.sandbox,
-        approvalPolicy: assistant.approvalPolicy,
-        profile: assistant.profile,
-        oss: assistant.oss === true,
-        baseUrl: assistant.baseUrl,
-        apiKeyEnv: assistant.apiKeyEnv,
-        providerName: assistant.providerName,
-      },
-    }),
-    account: assistant.account ?? null,
-  }
-}
-
-function assistantOperatorDefaultsMatch(
-  existing: AssistantOperatorDefaults | null,
-  next: Partial<AssistantOperatorDefaults>,
-): boolean {
-  return (
-    JSON.stringify(resolveAssistantBackendTarget(existing)) ===
-      JSON.stringify(next.backend ?? null) &&
-    JSON.stringify(existing?.account ?? null) ===
-      JSON.stringify(next.account ?? null)
-  )
-}
-
-function buildSetupAssistantOptionsFromDefaults(
-  defaults: AssistantOperatorDefaults | null | undefined,
-  preset?: ModelCommandPreset,
-): Partial<SetupCommandOptions> {
-  const backend = resolveAssistantBackendTarget(defaults)
-  if (!backend) {
-    return {}
-  }
-
-  if (
-    preset &&
-    ((preset === 'openai-compatible' && backend.adapter !== 'openai-compatible') ||
-      (preset === 'codex' && backend.adapter !== 'codex-cli'))
-  ) {
-    return {}
-  }
-
-  switch (backend.adapter) {
-    case 'openai-compatible': {
-      const savedDefaults = resolveAssistantProviderDefaults(
-        defaults ?? null,
-        'openai-compatible',
-      )
-
-      return {
-        assistantPreset: 'openai-compatible',
-        assistantModel: savedDefaults?.model ?? undefined,
-        assistantBaseUrl: savedDefaults?.baseUrl ?? undefined,
-        assistantApiKeyEnv: savedDefaults?.apiKeyEnv ?? undefined,
-        assistantProviderName: savedDefaults?.providerName ?? undefined,
-      }
-    }
-
-    case 'codex-cli':
-    default: {
-      const savedDefaults = resolveAssistantProviderDefaults(
-        defaults ?? null,
-        'codex-cli',
-      )
-
-      return {
-        assistantPreset: 'codex',
-        assistantModel: savedDefaults?.model ?? undefined,
-        assistantCodexCommand: savedDefaults?.codexCommand ?? undefined,
-        assistantCodexHome: savedDefaults?.codexHome ?? undefined,
-        assistantProfile: savedDefaults?.profile ?? undefined,
-        assistantReasoningEffort: savedDefaults?.reasoningEffort ?? undefined,
-        assistantOss: savedDefaults?.oss === true ? true : undefined,
-      }
-    }
-  }
-}
-
 function buildSetupAssistantWizardInputFromDefaults(
   defaults: AssistantOperatorDefaults | null | undefined,
 ): SetupAssistantWizardInput {
@@ -702,109 +626,4 @@ function buildSetupAssistantWizardInputFromDefaults(
         initialAssistantOss: backend.oss === true ? true : undefined,
       }
   }
-}
-
-function formatAssistantDefaultsSummary(
-  assistant: SetupConfiguredAssistant,
-): string {
-  return assistant.provider === 'openai-compatible'
-    ? formatAssistantSummary({
-        account: assistant.account ?? null,
-        adapter: 'openai-compatible',
-        endpoint: assistant.baseUrl,
-        model: assistant.model,
-      })
-    : formatAssistantSummary({
-        account: assistant.account ?? null,
-        adapter: 'codex-cli',
-        model: assistant.model,
-        oss: assistant.oss === true,
-      })
-}
-
-function formatSavedAssistantDefaultsSummary(
-  defaults: AssistantOperatorDefaults | null | undefined,
-): string | null {
-  const backend = resolveAssistantBackendTarget(defaults)
-  if (!backend) {
-    return null
-  }
-
-  return backend.adapter === 'openai-compatible'
-    ? formatAssistantSummary({
-        account: defaults?.account ?? null,
-        adapter: 'openai-compatible',
-        endpoint: backend.endpoint,
-        model: backend.model,
-      })
-    : formatAssistantSummary({
-        account: defaults?.account ?? null,
-        adapter: 'codex-cli',
-        model: backend.model,
-        oss: backend.oss === true,
-      })
-}
-
-type AssistantSummaryInput =
-  | {
-      account:
-        | SetupConfiguredAssistant['account']
-        | AssistantOperatorDefaults['account']
-        | null
-        | undefined
-      adapter: 'openai-compatible'
-      endpoint: string | null | undefined
-      model: string | null | undefined
-    }
-  | {
-      account:
-        | SetupConfiguredAssistant['account']
-        | AssistantOperatorDefaults['account']
-        | null
-        | undefined
-      adapter: 'codex-cli'
-      model: string | null | undefined
-      oss: boolean
-    }
-
-function formatAssistantSummary(input: AssistantSummaryInput): string {
-  if (input.adapter === 'openai-compatible') {
-    return appendAssistantAccountSummary(
-      input.endpoint
-        ? `${input.model ?? 'the configured model'} via ${input.endpoint}`
-        : `${input.model ?? 'the configured model'} via the saved OpenAI-compatible endpoint`,
-      input.account,
-    )
-  }
-
-  return appendAssistantAccountSummary(
-    input.oss
-      ? `${input.model ?? 'the configured local model'} in Codex OSS`
-      : `${input.model ?? 'the configured model'} in Codex CLI`,
-    input.account,
-  )
-}
-
-function normalizeNullableConfigField(value: unknown): string | null {
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
-}
-
-function appendAssistantAccountSummary(
-  summary: string,
-  account:
-    | SetupConfiguredAssistant['account']
-    | AssistantOperatorDefaults['account']
-    | null
-    | undefined,
-): string {
-  const planName = normalizeNullableConfigField(account?.planName)
-  if (planName) {
-    return `${summary} (${planName} account)`
-  }
-
-  if (account?.kind === 'api-key') {
-    return `${summary} (API key account)`
-  }
-
-  return summary
 }
