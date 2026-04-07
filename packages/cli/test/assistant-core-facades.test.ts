@@ -48,9 +48,9 @@ test('cli and split owner packages publish the expected owner dependencies', asy
 
   assert.equal(assistantCliManifest.dependencies?.['@murphai/assistant-engine'], 'workspace:*')
   assert.equal(assistantCliManifest.dependencies?.['@murphai/operator-config'], 'workspace:*')
-  assert.equal(assistantCliManifest.exports?.['./assistant-runtime'] !== undefined, true)
-  assert.equal(assistantCliManifest.exports?.['./assistant-chat-ink'] !== undefined, true)
-  assert.equal(assistantCliManifest.exports?.['./assistant-daemon-client'] !== undefined, true)
+  assert.equal(assistantCliManifest.exports?.['./assistant-runtime'], undefined)
+  assert.equal(assistantCliManifest.exports?.['./assistant-chat-ink'], undefined)
+  assert.equal(assistantCliManifest.exports?.['./assistant-daemon-client'], undefined)
   assert.equal(assistantCliManifest.exports?.['./assistant/automation'], undefined)
   assert.equal(assistantCliManifest.exports?.['./assistant/doctor-security'], undefined)
   assert.equal(assistantCliManifest.exports?.['./assistant/stop'], undefined)

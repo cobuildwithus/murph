@@ -271,7 +271,7 @@ test('workout format save rejects structured payloads that omit canonical templa
     ])
 
     assert.equal(saved.ok, false)
-    assert.equal(saved.error?.code, 'VALIDATION_ERROR')
+    assert.equal(saved.error?.code, 'invalid_payload')
     assert.match(saved.error?.message ?? '', /template/u)
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
@@ -324,7 +324,7 @@ test('generic read and semantic summary help surfaces explain when to use them',
   )
   assert.match(
     mealManifestHelp,
-    /Show the immutable raw import manifest for a meal event\./u,
+    /Show the immutable raw import manifest for a meal\./u,
   )
 })
 
