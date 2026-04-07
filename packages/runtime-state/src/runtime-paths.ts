@@ -17,7 +17,7 @@ export {
   RUNTIME_TEMP_ROOT_RELATIVE_PATH,
 } from "./local-state-taxonomy.ts";
 
-export const SEARCH_DB_RELATIVE_PATH = `${RUNTIME_PROJECTION_ROOT_RELATIVE_PATH}/search.sqlite`;
+export const QUERY_DB_RELATIVE_PATH = `${RUNTIME_PROJECTION_ROOT_RELATIVE_PATH}/query.sqlite`;
 export const INBOX_DB_RELATIVE_PATH = `${RUNTIME_PROJECTION_ROOT_RELATIVE_PATH}/inboxd.sqlite`;
 export const INBOX_RUNTIME_DIRECTORY_RELATIVE_PATH = `${RUNTIME_OPERATIONAL_ROOT_RELATIVE_PATH}/inbox`;
 export const INBOX_CONFIG_RELATIVE_PATH = `${INBOX_RUNTIME_DIRECTORY_RELATIVE_PATH}/config.json`;
@@ -40,7 +40,7 @@ export interface RuntimePaths {
   projectionsRoot: string;
   cacheRoot: string;
   tempRoot: string;
-  searchDbPath: string;
+  queryDbPath: string;
   inboxDbPath: string;
   inboxRuntimeRoot: string;
   inboxConfigPath: string;
@@ -111,7 +111,7 @@ export function resolveRuntimePaths(vaultRoot: string): RuntimePaths {
     projectionsRoot,
     cacheRoot: path.join(absoluteVaultRoot, RUNTIME_CACHE_ROOT_RELATIVE_PATH),
     tempRoot: path.join(absoluteVaultRoot, RUNTIME_TEMP_ROOT_RELATIVE_PATH),
-    searchDbPath: path.join(absoluteVaultRoot, SEARCH_DB_RELATIVE_PATH),
+    queryDbPath: path.join(absoluteVaultRoot, QUERY_DB_RELATIVE_PATH),
     inboxDbPath: path.join(absoluteVaultRoot, INBOX_DB_RELATIVE_PATH),
     inboxRuntimeRoot: path.join(absoluteVaultRoot, INBOX_RUNTIME_DIRECTORY_RELATIVE_PATH),
     inboxConfigPath: path.join(absoluteVaultRoot, INBOX_CONFIG_RELATIVE_PATH),

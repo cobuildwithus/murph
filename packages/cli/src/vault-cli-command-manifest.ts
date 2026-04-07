@@ -786,12 +786,22 @@ export const vaultCliCommandDescriptors = [
   {
     id: 'search',
     bindingMode: 'none',
-    rootCommandNames: ['search', 'timeline'],
+    rootCommandNames: ['search', 'query', 'timeline'],
     leafCommands: [
       {
         path: ['search', 'query'],
         description:
-          'Search the local read model by fuzzy text when the target is remembered by phrase rather than exact id. Prefer this over broad raw-file reads.',
+          'Search the shared local query projection by fuzzy text when the target is remembered by phrase rather than exact id. Prefer this over broad raw-file reads.',
+      },
+      {
+        path: ['query', 'projection', 'status'],
+        description:
+          'Inspect the shared local query projection that powers canonical reads and lexical search.',
+      },
+      {
+        path: ['query', 'projection', 'rebuild'],
+        description:
+          'Rebuild the shared local query projection from canonical vault data.',
       },
       {
         path: ['timeline'],

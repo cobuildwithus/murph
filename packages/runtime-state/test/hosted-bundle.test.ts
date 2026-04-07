@@ -127,6 +127,7 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await mkdir(path.join(vaultRoot, ".runtime", "operations", "inbox"), { recursive: true });
     await mkdir(path.join(vaultRoot, ".runtime", "operations", "op_test", "payloads"), { recursive: true });
     await mkdir(path.join(vaultRoot, ".runtime", "operations", "parsers"), { recursive: true });
+    await mkdir(path.join(vaultRoot, ".runtime", "projections"), { recursive: true });
     await writeFile(path.join(vaultRoot, "vault.json"), "{\"schema\":\"vault\"}\n");
     await writeFile(path.join(vaultRoot, ".runtime", "operations", "device-sync", "state.sqlite"), "sqlite-control-state\n");
     await writeFile(path.join(vaultRoot, ".runtime", "operations", "device-sync", "launcher.json"), "{\"pid\":1234}\n");
@@ -137,6 +138,7 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await writeFile(path.join(vaultRoot, ".runtime", "operations", "parsers", "toolchain.json"), "{\"version\":1}\n");
     await writeFile(path.join(vaultRoot, ".runtime", "operations", "op_test.json"), "{\"status\":\"committed\"}\n");
     await writeFile(path.join(vaultRoot, ".runtime", "operations", "op_test", "payloads", "staged.md"), "staged payload\n");
+    await writeFile(path.join(vaultRoot, ".runtime", "projections", "query.sqlite"), "query-projection\n");
     await writeFile(path.join(vaultRoot, ".runtime", "search.sqlite"), "legacy-search\n");
     await writeFile(path.join(vaultRoot, ".env.local"), "secret=true\n");
     await writeFile(path.join(vaultRoot, "exports", "packs", "bundle.zip"), "skip-me\n");
@@ -253,6 +255,7 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       { expected: null, path: ".runtime/operations/assistant/secrets/sessions/session_1.json", root: "vault" },
       { expected: null, path: ".runtime/operations/inbox/config.json", root: "vault" },
       { expected: null, path: ".runtime/operations/device-sync/state.sqlite", root: "vault" },
+      { expected: null, path: ".runtime/projections/query.sqlite", root: "vault" },
       { expected: null, path: ".runtime/search.sqlite", root: "vault" },
       { expected: null, path: ".runtime/operations/parsers/toolchain.json", root: "vault" },
     ]);
@@ -385,6 +388,9 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       readFile(path.join(restored.vaultRoot, ".runtime", "operations", "parsers", "toolchain.json"), "utf8"),
     );
     await assert.rejects(
+      readFile(path.join(restored.vaultRoot, ".runtime", "projections", "query.sqlite"), "utf8"),
+    );
+    await assert.rejects(
       readFile(path.join(restored.vaultRoot, ".runtime", "search.sqlite"), "utf8"),
     );
   } finally {
@@ -497,9 +503,10 @@ test("runtime-state portability defaults operational paths to machine-local unle
   expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/cron/runs/cronrun_1.jsonl")?.relativePath).toBe(
     ".runtime/operations/assistant/cron/runs/cronrun_1.jsonl",
   );
-  expect(describeVaultLocalStateRelativePath(".runtime/projections/search.sqlite")).toMatchObject({
+  expect(describeVaultLocalStateRelativePath(".runtime/projections/query.sqlite")).toMatchObject({
     classification: "projection",
     portability: "machine_local",
+    owner: "query",
   });
 });
 

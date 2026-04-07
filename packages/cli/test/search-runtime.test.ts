@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { existsSync } from 'node:fs'
-import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
@@ -479,64 +479,63 @@ test('timeline merges journals, events, and sample summaries into one descending
   }
 })
 
-test('search index status and rebuild expose the shared sqlite runtime state without creating it early', async () => {
+test('query projection status and rebuild expose the shared local projection without creating it early', async () => {
   const fixture = await makeRetrievalFixture()
-  const runtimeDatabasePath = path.join(fixture.vaultRoot, '.runtime/projections/search.sqlite')
+  const runtimeDatabasePath = path.join(fixture.vaultRoot, '.runtime/projections/query.sqlite')
 
   try {
     assert.equal(existsSync(runtimeDatabasePath), false)
 
     const initialStatus = await runCli<{
-      backend: string
       exists: boolean
-      documentCount: number
       dbPath: string
+      entityCount: number
+      searchDocumentCount: number
+      fresh: boolean
     }>([
-      'search',
-      'index',
+      'query',
+      'projection',
       'status',
       '--vault',
       fixture.vaultRoot,
     ])
 
     assert.equal(initialStatus.ok, true)
-    assert.equal(requireData(initialStatus).backend, 'sqlite')
     assert.equal(requireData(initialStatus).exists, false)
-    assert.equal(requireData(initialStatus).dbPath, '.runtime/projections/search.sqlite')
+    assert.equal(requireData(initialStatus).dbPath, '.runtime/projections/query.sqlite')
     assert.equal(existsSync(runtimeDatabasePath), false)
 
     const rebuild = await runCli<{
-      backend: string
       exists: boolean
       rebuilt: boolean
-      documentCount: number
       dbPath: string
+      entityCount: number
+      searchDocumentCount: number
+      fresh: boolean
     }>([
-      'search',
-      'index',
+      'query',
+      'projection',
       'rebuild',
       '--vault',
       fixture.vaultRoot,
     ])
 
     assert.equal(rebuild.ok, true)
-    assert.equal(requireData(rebuild).backend, 'sqlite')
     assert.equal(requireData(rebuild).exists, true)
     assert.equal(requireData(rebuild).rebuilt, true)
-    assert.equal(requireData(rebuild).dbPath, '.runtime/projections/search.sqlite')
-    assert.equal(requireData(rebuild).documentCount > 0, true)
+    assert.equal(requireData(rebuild).dbPath, '.runtime/projections/query.sqlite')
+    assert.equal(requireData(rebuild).entityCount > 0, true)
+    assert.equal(requireData(rebuild).searchDocumentCount > 0, true)
+    assert.equal(requireData(rebuild).fresh, true)
     assert.equal(existsSync(runtimeDatabasePath), true)
 
     const indexedSearch = await runCli<{
-      filters: { backend: string }
       hits: Array<{ recordId: string; recordType: string; stream: string | null }>
     }>([
       'search',
       'query',
       '--text',
       'heart_rate',
-      '--backend',
-      'sqlite',
       '--stream',
       'heart_rate',
       '--vault',
@@ -544,7 +543,6 @@ test('search index status and rebuild expose the shared sqlite runtime state wit
     ])
 
     assert.equal(indexedSearch.ok, true)
-    assert.equal(requireData(indexedSearch).filters.backend, 'sqlite')
     assert.equal(
       requireData(indexedSearch).hits.some(
         (hit) => hit.recordType === 'sample' && hit.stream === 'heart_rate',
@@ -556,143 +554,66 @@ test('search index status and rebuild expose the shared sqlite runtime state wit
   }
 })
 
-test('search index status ignores a copied inbox search db until index rebuild restores the canonical search db', async () => {
+test('query projection status ignores inbox runtime sqlite state and rebuild leaves it untouched', async () => {
   const fixture = await makeRetrievalFixture()
-  const searchDatabasePath = path.join(fixture.vaultRoot, '.runtime/projections/search.sqlite')
-  const legacyDatabasePath = path.join(fixture.vaultRoot, '.runtime/inboxd.sqlite')
+  const queryDatabasePath = path.join(fixture.vaultRoot, '.runtime/projections/query.sqlite')
+  const inboxDatabasePath = path.join(fixture.vaultRoot, '.runtime/projections/inboxd.sqlite')
 
   try {
-    const initialRebuild = await runCli<{
-      dbPath: string
-      rebuilt: boolean
-    }>([
-      'search',
-      'index',
-      'rebuild',
-      '--vault',
-      fixture.vaultRoot,
-    ])
+    await mkdir(path.dirname(inboxDatabasePath), { recursive: true })
+    const inboxDatabase = openDatabaseSync(inboxDatabasePath)
+    inboxDatabase.exec('CREATE TABLE inbox_state (id TEXT PRIMARY KEY, value TEXT NOT NULL);')
+    inboxDatabase
+      .prepare('INSERT INTO inbox_state (id, value) VALUES (?, ?)')
+      .run('cursor', '{"offset":1}')
+    inboxDatabase.close()
 
-    assert.equal(initialRebuild.ok, true)
-    assert.equal(requireData(initialRebuild).dbPath, '.runtime/projections/search.sqlite')
-
-    await mkdir(path.dirname(legacyDatabasePath), { recursive: true })
-    await copyFile(searchDatabasePath, legacyDatabasePath)
-    await rm(searchDatabasePath, { force: true })
-
-    const legacyStatus = await runCli<{
-      backend: string
+    const status = await runCli<{
       exists: boolean
       dbPath: string
     }>([
-      'search',
-      'index',
+      'query',
+      'projection',
       'status',
       '--vault',
       fixture.vaultRoot,
     ])
 
-    assert.equal(legacyStatus.ok, true)
-    assert.equal(requireData(legacyStatus).backend, 'sqlite')
-    assert.equal(requireData(legacyStatus).exists, false)
-    assert.equal(requireData(legacyStatus).dbPath, '.runtime/projections/search.sqlite')
-
-    const sqliteSearch = await runCli<{
-      filters: { backend: string }
-      hits: Array<{ recordId: string }>
-    }>([
-      'search',
-      'query',
-      '--text',
-      'heart_rate',
-      '--backend',
-      'sqlite',
-      '--stream',
-      'heart_rate',
-      '--vault',
-      fixture.vaultRoot,
-    ])
-
-    assert.equal(sqliteSearch.ok, false)
-    assert.match(
-      sqliteSearch.error.message ?? '',
-      /index rebuild|--backend scan/u,
-    )
+    assert.equal(status.ok, true)
+    assert.equal(requireData(status).exists, false)
+    assert.equal(requireData(status).dbPath, '.runtime/projections/query.sqlite')
 
     const rebuilt = await runCli<{
-      backend: string
       exists: boolean
       rebuilt: boolean
       dbPath: string
     }>([
-      'search',
-      'index',
+      'query',
+      'projection',
       'rebuild',
       '--vault',
       fixture.vaultRoot,
     ])
 
     assert.equal(rebuilt.ok, true)
-    assert.equal(requireData(rebuilt).backend, 'sqlite')
     assert.equal(requireData(rebuilt).exists, true)
     assert.equal(requireData(rebuilt).rebuilt, true)
-    assert.equal(requireData(rebuilt).dbPath, '.runtime/projections/search.sqlite')
-    assert.equal(existsSync(searchDatabasePath), true)
+    assert.equal(requireData(rebuilt).dbPath, '.runtime/projections/query.sqlite')
+    assert.equal(existsSync(queryDatabasePath), true)
+
+    const inboxStateDatabase = openDatabaseSync(inboxDatabasePath)
+    const inboxState = inboxStateDatabase
+      .prepare('SELECT value FROM inbox_state WHERE id = ?')
+      .get('cursor') as { value: string } | undefined
+    inboxStateDatabase.close()
+
+    assert.equal(inboxState?.value, '{"offset":1}')
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
   }
 })
 
-test('search index status treats a pre-existing inbox runtime db as unindexed and sqlite backend returns operator guidance', async () => {
-  const fixture = await makeRetrievalFixture()
-  const runtimeRoot = path.join(fixture.vaultRoot, '.runtime')
-  const runtimeDatabasePath = path.join(runtimeRoot, 'inboxd.sqlite')
-
-  try {
-    await mkdir(runtimeRoot, { recursive: true })
-    const database = openDatabaseSync(runtimeDatabasePath)
-    database.exec('CREATE TABLE inbox_state (id TEXT PRIMARY KEY, value TEXT NOT NULL);')
-    database.close()
-
-    const initialStatus = await runCli<{
-      backend: string
-      exists: boolean
-      dbPath: string
-    }>([
-      'search',
-      'index',
-      'status',
-      '--vault',
-      fixture.vaultRoot,
-    ])
-
-    assert.equal(initialStatus.ok, true)
-    assert.equal(requireData(initialStatus).backend, 'sqlite')
-    assert.equal(requireData(initialStatus).exists, false)
-    assert.equal(requireData(initialStatus).dbPath, '.runtime/projections/search.sqlite')
-
-    const sqliteSearch = await runCli([
-      'search',
-      'query',
-      '--text',
-      'pasta',
-      '--backend',
-      'sqlite',
-      '--vault',
-      fixture.vaultRoot,
-    ])
-
-    assert.equal(sqliteSearch.ok, false)
-    assert.match(
-      sqliteSearch.error.message ?? '',
-      /index rebuild|--backend scan/u,
-    )
-  } finally {
-    await rm(fixture.vaultRoot, { recursive: true, force: true })
-  }
-})
-
-test('search backend auto switches from scan results to sqlite-backed stale state after rebuild', async () => {
+test('search query rebuilds the projection automatically when canonical files change', async () => {
   const fixture = await makeRetrievalFixture()
   const journalFilePath = path.join(fixture.vaultRoot, fixture.journalPath)
 
@@ -719,8 +640,6 @@ Steady energy after electrolyte drink.
       'query',
       '--text',
       'electrolyte',
-      '--backend',
-      'auto',
       '--vault',
       fixture.vaultRoot,
     ])
@@ -734,8 +653,8 @@ Steady energy after electrolyte drink.
     )
 
     const rebuild = await runCli([
-      'search',
-      'index',
+      'query',
+      'projection',
       'rebuild',
       '--vault',
       fixture.vaultRoot,
@@ -765,33 +684,28 @@ Steady energy after saffron tea.
       'query',
       '--text',
       'saffron',
-      '--backend',
-      'auto',
       '--vault',
       fixture.vaultRoot,
     ])
-    const scanAfterRebuild = await runCli<{
-      hits: Array<{ recordId: string }>
+    const projectionStatus = await runCli<{
+      fresh: boolean
     }>([
-      'search',
       'query',
-      '--text',
-      'saffron',
-      '--backend',
-      'scan',
+      'projection',
+      'status',
       '--vault',
       fixture.vaultRoot,
     ])
 
     assert.equal(autoAfterRebuild.ok, true)
-    assert.equal(requireData(autoAfterRebuild).total, 0)
-    assert.equal(scanAfterRebuild.ok, true)
     assert.equal(
-      requireData(scanAfterRebuild).hits.some(
+      requireData(autoAfterRebuild).hits.some(
         (hit) => hit.recordId === 'journal:2026-03-12',
       ),
       true,
     )
+    assert.equal(projectionStatus.ok, true)
+    assert.equal(requireData(projectionStatus).fresh, true)
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
   }
