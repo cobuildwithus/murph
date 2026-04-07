@@ -1,5 +1,3 @@
-import { HostedBillingStatus, HostedMemberStatus } from "@prisma/client";
-
 import {
   type HostedLinqWebhookEvent,
   requireHostedLinqMessageReceivedEvent,
@@ -11,6 +9,10 @@ import {
   buildHostedInviteUrl,
   issueHostedInvite,
 } from "./invite-service";
+import {
+  hasHostedMemberActiveAccess,
+  isHostedMemberSuspended,
+} from "./entitlement";
 import {
   ensureHostedMemberForPhone,
   persistHostedMemberLinqChatBinding,
@@ -81,11 +83,11 @@ export async function planHostedOnboardingLinqWebhook(input: {
     return buildIgnoredLinqWebhookPlan("own-message");
   }
 
-  if (existingMember?.status === HostedMemberStatus.suspended) {
+  if (existingMember && isHostedMemberSuspended(existingMember.suspendedAt)) {
     return buildIgnoredLinqWebhookPlan("suspended-member");
   }
 
-  if (existingMember?.billingStatus === HostedBillingStatus.active) {
+  if (existingMember && hasHostedMemberActiveAccess(existingMember)) {
     await persistHostedMemberLinqChatBinding({
       linqChatId: summary.chatId,
       memberId: existingMember.id,
@@ -176,7 +178,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
   });
 
   return buildSignupLinkResponse({
-    activeSubscription: member.billingStatus === HostedBillingStatus.active,
+    activeSubscription: hasHostedMemberActiveAccess(member),
     inviteCode: invite.inviteCode,
     inviteId: invite.id,
     messageId: summary.messageId,

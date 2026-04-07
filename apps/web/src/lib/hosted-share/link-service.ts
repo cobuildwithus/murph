@@ -1,5 +1,4 @@
 import {
-  HostedMemberStatus,
   type HostedMember,
   type PrismaClient,
 } from "@prisma/client";
@@ -124,7 +123,7 @@ export async function buildHostedSharePageData(input: {
   const sessionActive = authenticatedMember
     ? hasHostedMemberActiveAccess({
         billingStatus: authenticatedMember.billingStatus,
-        memberStatus: authenticatedMember.status,
+        suspendedAt: authenticatedMember.suspendedAt,
       })
     : false;
 
@@ -191,7 +190,7 @@ async function requireActiveHostedShareSenderMember(input: {
     });
   }
 
-  if (member.status === HostedMemberStatus.suspended) {
+  if (member.suspendedAt) {
     throw hostedOnboardingError({
       code: "HOSTED_MEMBER_SUSPENDED",
       message: "This hosted account is suspended. Contact support to restore access.",
@@ -201,7 +200,7 @@ async function requireActiveHostedShareSenderMember(input: {
 
   if (!hasHostedMemberActiveAccess({
     billingStatus: member.billingStatus,
-    memberStatus: member.status,
+    suspendedAt: member.suspendedAt,
   })) {
     throw hostedOnboardingError({
       code: "HOSTED_SHARE_ACTIVE_REQUIRED",

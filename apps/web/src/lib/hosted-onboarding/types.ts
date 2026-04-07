@@ -1,3 +1,5 @@
+import type { HostedOnboardingStage } from "./lifecycle";
+
 export interface HostedInviteStatusPayload {
   capabilities: {
     billingReady: boolean;
@@ -7,22 +9,17 @@ export interface HostedInviteStatusPayload {
     code: string;
     expiresAt: string;
     phoneHint: string;
-    status: string;
-  } | null;
-  member: {
-    phoneHint: string;
-    status: string;
   } | null;
   session: {
     authenticated: boolean;
     expiresAt: string | null;
     matchesInvite: boolean;
   };
-  stage: "invalid" | "expired" | "register" | "authenticate" | "checkout" | "active";
+  stage: HostedOnboardingStage;
 }
 
 export interface HostedPrivyCompletionPayload {
   inviteCode: string;
   joinUrl: string;
-  stage: "checkout" | "active";
+  stage: "checkout" | "blocked" | "active";
 }

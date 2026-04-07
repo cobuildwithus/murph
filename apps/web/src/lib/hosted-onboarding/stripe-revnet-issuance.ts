@@ -4,7 +4,7 @@ import {
   type HostedRevnetIssuance,
   type PrismaClient,
 } from "@prisma/client";
-import { HostedMemberStatus, HostedRevnetIssuanceStatus } from "@prisma/client";
+import { HostedRevnetIssuanceStatus } from "@prisma/client";
 import type Stripe from "stripe";
 
 import { requireHostedMemberWalletAddressForRevnet } from "./billing-service";
@@ -335,7 +335,7 @@ function loadHostedRevnetIssuanceEligibility(input: {
   member: HostedMemberAggregate;
   prisma: PrismaClient | Prisma.TransactionClient;
 }): HostedRevnetIssuanceEligibility {
-  if (input.member.status === HostedMemberStatus.suspended) {
+  if (input.member.suspendedAt) {
     return {
       kind: "skip",
       reason: "member_suspended",

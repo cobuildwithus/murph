@@ -1,21 +1,20 @@
 import {
   HostedBillingStatus,
-  HostedMemberStatus,
   HostedRevnetIssuanceStatus,
 } from "@prisma/client";
 
 export type HostedEntitlementInput = {
   billingStatus: HostedBillingStatus;
-  memberStatus: HostedMemberStatus;
   revnetIssuanceStatus?: HostedRevnetIssuanceStatus | null;
   revnetRequired?: boolean;
+  suspendedAt?: Date | null;
 };
 
 export type HostedEntitlement = {
   accessAllowed: boolean;
   activationReady: boolean;
   billingStatus: HostedBillingStatus;
-  memberStatus: HostedMemberStatus;
+  suspendedAt: Date | null;
 };
 
 export function deriveHostedEntitlement(input: HostedEntitlementInput): HostedEntitlement {
@@ -25,25 +24,25 @@ export function deriveHostedEntitlement(input: HostedEntitlementInput): HostedEn
     accessAllowed: hasHostedMemberGeneralAccess(input),
     activationReady: hasHostedMemberActiveAccess(input) && revnetReady,
     billingStatus: input.billingStatus,
-    memberStatus: input.memberStatus,
+    suspendedAt: input.suspendedAt ?? null,
   };
 }
 
 export function hasHostedMemberActiveAccess(
-  input: Pick<HostedEntitlementInput, "billingStatus" | "memberStatus">,
+  input: Pick<HostedEntitlementInput, "billingStatus" | "suspendedAt">,
 ): boolean {
-  return !isHostedMemberSuspended(input.memberStatus) && input.billingStatus === HostedBillingStatus.active;
+  return !isHostedMemberSuspended(input.suspendedAt) && input.billingStatus === HostedBillingStatus.active;
 }
 
 export function hasHostedMemberGeneralAccess(
-  input: Pick<HostedEntitlementInput, "billingStatus" | "memberStatus">,
+  input: Pick<HostedEntitlementInput, "billingStatus" | "suspendedAt">,
 ): boolean {
-  return !isHostedMemberSuspended(input.memberStatus)
+  return !isHostedMemberSuspended(input.suspendedAt)
     && !isHostedAccessBlockedBillingStatus(input.billingStatus);
 }
 
-export function isHostedMemberSuspended(memberStatus: HostedMemberStatus): boolean {
-  return memberStatus === HostedMemberStatus.suspended;
+export function isHostedMemberSuspended(suspendedAt: Date | null | undefined): boolean {
+  return suspendedAt instanceof Date;
 }
 
 export function isHostedAccessBlockedBillingStatus(billingStatus: HostedBillingStatus): boolean {

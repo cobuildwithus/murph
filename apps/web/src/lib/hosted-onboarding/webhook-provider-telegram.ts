@@ -1,10 +1,13 @@
 import { buildHostedExecutionTelegramMessageReceivedDispatch } from "@murphai/hosted-execution";
-import { HostedBillingStatus, HostedMemberStatus } from "@prisma/client";
 
 import {
   createHostedTelegramUserLookupKey,
   sanitizeHostedTelegramUpdateForStorage,
 } from "./contact-privacy";
+import {
+  hasHostedMemberActiveAccess,
+  isHostedMemberSuspended,
+} from "./entitlement";
 import {
   buildHostedTelegramWebhookEventId,
   parseHostedTelegramWebhookUpdate,
@@ -74,12 +77,12 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     return buildIgnoredTelegramWebhookPlan("unlinked-telegram");
   }
 
-  if (existingMember.billingStatus !== HostedBillingStatus.active) {
-    return buildIgnoredTelegramWebhookPlan("inactive-member");
+  if (isHostedMemberSuspended(existingMember.suspendedAt)) {
+    return buildIgnoredTelegramWebhookPlan("suspended-member");
   }
 
-  if (existingMember.status === HostedMemberStatus.suspended) {
-    return buildIgnoredTelegramWebhookPlan("suspended-member");
+  if (!hasHostedMemberActiveAccess(existingMember)) {
+    return buildIgnoredTelegramWebhookPlan("inactive-member");
   }
 
   return {

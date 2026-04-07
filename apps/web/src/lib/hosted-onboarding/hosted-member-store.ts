@@ -26,7 +26,7 @@ import {
 type HostedMemberStoreClient = HostedOnboardingPrismaClient;
 type HostedMemberCoreState = Pick<
   HostedMember,
-  "billingMode" | "billingStatus" | "createdAt" | "id" | "status" | "updatedAt"
+  "billingStatus" | "createdAt" | "id" | "suspendedAt" | "updatedAt"
 >;
 type HostedMemberRecordWithRelations = Prisma.HostedMemberGetPayload<{
   include: {
@@ -114,7 +114,7 @@ export interface HostedMemberAggregate extends HostedMemberCoreState {
 
 export type HostedMemberTelegramLookupSnapshot = Pick<
   HostedMember,
-  "billingStatus" | "id" | "status"
+  "billingStatus" | "id" | "suspendedAt"
 >;
 
 export async function findHostedMemberByPrivyUserId(input: {
@@ -190,7 +190,7 @@ export async function findHostedMemberByTelegramUserLookupKey(input: {
         select: {
           billingStatus: true,
           id: true,
-          status: true,
+          suspendedAt: true,
         },
       },
     },

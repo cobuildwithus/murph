@@ -1,7 +1,6 @@
 import {
   HostedBillingCheckoutStatus,
   type HostedBillingCheckout,
-  type HostedBillingMode,
   type Prisma,
   type PrismaClient,
 } from "@prisma/client";
@@ -34,7 +33,6 @@ export async function createPendingHostedBillingAttempt(input: {
   hasShareContext: boolean;
   inviteId: string;
   memberId: string;
-  mode: HostedBillingMode;
   priceId: string;
   prisma: HostedBillingAttemptClient;
   stripeCustomerId: string | null;
@@ -48,7 +46,6 @@ export async function createPendingHostedBillingAttempt(input: {
     stripeCustomerId: input.stripeCustomerId,
     stripeSubscriptionId: null,
     priceId: input.priceId,
-    mode: input.mode,
     status: HostedBillingCheckoutStatus.pending,
     checkoutUrl: null,
   } as Prisma.HostedBillingCheckoutUncheckedCreateInput;

@@ -1,13 +1,12 @@
 import {
-  HostedInviteStatus,
-  HostedMemberStatus,
   type PrismaClient,
 } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
 import { readHostedPhoneHint } from "./contact-privacy";
-import { hasHostedMemberActiveAccess } from "./entitlement";
+import { isHostedMemberSuspended } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
+import { deriveHostedPostVerificationStage } from "./lifecycle";
 import { type HostedPrivyIdentity } from "./privy";
 import {
   buildHostedInviteUrl,
@@ -49,7 +48,7 @@ export async function completeHostedPrivyVerification(input: {
         now,
       });
 
-  if (member.status === HostedMemberStatus.suspended) {
+  if (isHostedMemberSuspended(member.suspendedAt)) {
     throw hostedOnboardingError({
       code: "HOSTED_MEMBER_SUSPENDED",
       message: "This hosted account is suspended. Contact support to restore access.",
@@ -62,22 +61,9 @@ export async function completeHostedPrivyVerification(input: {
     memberId: member.id,
     prisma,
   });
-  const stage = hasHostedMemberActiveAccess({
+  const stage = deriveHostedPostVerificationStage({
     billingStatus: member.billingStatus,
-    memberStatus: member.status,
-  }) ? "active" : "checkout";
-
-  await prisma.hostedInvite.update({
-    where: {
-      id: activeInvite.id,
-    },
-    data: {
-      authenticatedAt: now,
-      status: stage === "active"
-        ? HostedInviteStatus.paid
-        : HostedInviteStatus.authenticated,
-      ...(stage === "active" ? { paidAt: activeInvite.paidAt ?? now } : {}),
-    },
+    suspendedAt: member.suspendedAt,
   });
 
   return {

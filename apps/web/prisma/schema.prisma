@@ -136,34 +136,14 @@ model HostedWebInternalRequestNonce {
   @@map("hosted_web_internal_request_nonce")
 }
 
-enum HostedMemberStatus {
-  invited
-  registered
-  suspended
-}
-
-enum HostedInviteStatus {
-  pending
-  opened
-  authenticated
-  paid
-  expired
-}
-
 enum HostedBillingStatus {
   not_started
-  checkout_open
   active
   incomplete
   past_due
   canceled
   unpaid
   paused
-}
-
-enum HostedBillingMode {
-  payment
-  subscription
 }
 
 enum HostedBillingCheckoutStatus {
@@ -201,9 +181,8 @@ enum ExecutionOutboxStatus {
 
 model HostedMember {
   id              String                  @id
-  status          HostedMemberStatus      @default(invited)
   billingStatus   HostedBillingStatus     @default(not_started) @map("billing_status")
-  billingMode     HostedBillingMode?      @map("billing_mode")
+  suspendedAt     DateTime?               @map("suspended_at")
   createdAt       DateTime                @default(now()) @map("created_at")
   updatedAt       DateTime                @updatedAt @map("updated_at")
   invites         HostedInvite[]
@@ -215,7 +194,6 @@ model HostedMember {
   routing         HostedMemberRouting?
   billingRef      HostedMemberBillingRef?
 
-  @@index([status])
   @@index([billingStatus])
   @@map("hosted_member")
 }
@@ -262,20 +240,16 @@ model HostedMemberBillingRef {
 }
 
 model HostedInvite {
-  id              String                  @id
-  memberId        String                  @map("member_id")
-  inviteCode      String                  @unique @map("invite_code")
-  status          HostedInviteStatus      @default(pending)
-  channel         String                  @default("linq")
-  sentAt          DateTime?               @map("sent_at")
-  openedAt        DateTime?               @map("opened_at")
-  authenticatedAt DateTime?               @map("authenticated_at")
-  paidAt          DateTime?               @map("paid_at")
-  expiresAt       DateTime                @map("expires_at")
-  createdAt       DateTime                @default(now()) @map("created_at")
-  updatedAt       DateTime                @updatedAt @map("updated_at")
-  member          HostedMember            @relation(fields: [memberId], references: [id], onDelete: Cascade)
-  checkouts       HostedBillingCheckout[]
+  id         String                  @id
+  memberId   String                  @map("member_id")
+  inviteCode String                  @unique @map("invite_code")
+  channel    String                  @default("linq")
+  sentAt     DateTime?               @map("sent_at")
+  expiresAt  DateTime                @map("expires_at")
+  createdAt  DateTime                @default(now()) @map("created_at")
+  updatedAt  DateTime                @updatedAt @map("updated_at")
+  member     HostedMember            @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  checkouts  HostedBillingCheckout[]
 
   @@index([memberId, createdAt])
   @@index([expiresAt])
@@ -291,7 +265,6 @@ model HostedBillingCheckout {
   stripeCustomerId        String?                     @map("stripe_customer_id")
   stripeSubscriptionId    String?                     @map("stripe_subscription_id")
   priceId                 String                      @map("price_id")
-  mode                    HostedBillingMode
   status                  HostedBillingCheckoutStatus @default(pending)
   checkoutUrl             String?                     @map("checkout_url")
   amountTotal             Int?                        @map("amount_total")

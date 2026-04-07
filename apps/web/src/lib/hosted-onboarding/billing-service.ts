@@ -1,20 +1,18 @@
 import {
   HostedBillingCheckoutStatus,
+  HostedBillingStatus,
   Prisma,
   type HostedBillingCheckout,
   type HostedMember,
   type PrismaClient,
 } from "@prisma/client";
-import {
-  HostedBillingMode,
-  HostedBillingStatus,
-  HostedMemberStatus,
-} from "@prisma/client";
 import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
+import { isHostedMemberSuspended } from "./entitlement";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import { requireHostedInviteForAuthentication } from "./invite-service";
+import { requiresHostedBillingCheckout } from "./lifecycle";
 import {
   createPendingHostedBillingAttempt,
   expireHostedBillingAttemptBySessionId,
@@ -63,8 +61,8 @@ export async function createHostedBillingCheckout(input: HostedBillingCheckoutIn
   }
 
   if (
-    auth.member.status === HostedMemberStatus.suspended ||
-    invite.member.status === HostedMemberStatus.suspended
+    isHostedMemberSuspended(auth.member.suspendedAt) ||
+    isHostedMemberSuspended(invite.member.suspendedAt)
   ) {
     throw hostedOnboardingError({
       code: "HOSTED_MEMBER_SUSPENDED",
@@ -80,6 +78,14 @@ export async function createHostedBillingCheckout(input: HostedBillingCheckoutIn
     };
   }
 
+  if (!requiresHostedBillingCheckout(invite.member.billingStatus)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_BILLING_CHECKOUT_BLOCKED",
+      message: "This hosted account cannot start a new checkout right now. Contact support to restore access.",
+      httpStatus: 403,
+    });
+  }
+
   const shareCode = normalizeNullableString(input.shareCode);
   const { priceId, stripe } = requireHostedStripeCheckoutConfig();
   const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
@@ -88,12 +94,10 @@ export async function createHostedBillingCheckout(input: HostedBillingCheckoutIn
     prisma,
     stripe,
   });
-  const mode = HostedBillingMode.subscription;
   const requestContext = {
     hasShareContext: shareCode !== null,
     inviteId: invite.id,
     memberId: invite.member.id,
-    mode,
     priceId,
   };
 
@@ -148,15 +152,6 @@ export async function createHostedBillingCheckout(input: HostedBillingCheckoutIn
 
     await runHostedBillingCheckoutTransaction(prisma, async (transaction) => {
       await lockHostedMemberRow(transaction, invite.member.id);
-      await transaction.hostedMember.update({
-        where: {
-          id: invite.member.id,
-        },
-        data: {
-          billingMode: mode,
-          billingStatus: HostedBillingStatus.checkout_open,
-        },
-      });
       await writeHostedMemberStripeBillingRef({
         memberId: invite.member.id,
         prisma: transaction,
@@ -325,13 +320,12 @@ function buildHostedStripeCheckoutIdempotencyKey(checkoutId: string): string {
 }
 
 function isMatchingHostedBillingCheckout(
-  attempt: Pick<HostedBillingCheckout, "hasShareContext" | "inviteId" | "memberId" | "mode" | "priceId">,
+  attempt: Pick<HostedBillingCheckout, "hasShareContext" | "inviteId" | "memberId" | "priceId">,
   requestContext: HostedBillingCheckoutRequestContext,
 ): boolean {
   return attempt.hasShareContext === requestContext.hasShareContext
     && attempt.inviteId === requestContext.inviteId
     && attempt.memberId === requestContext.memberId
-    && attempt.mode === requestContext.mode
     && attempt.priceId === requestContext.priceId;
 }
 
@@ -339,7 +333,6 @@ type HostedBillingCheckoutRequestContext = {
   hasShareContext: boolean;
   inviteId: string;
   memberId: string;
-  mode: HostedBillingMode;
   priceId: string;
 };
 
@@ -388,7 +381,6 @@ async function reserveHostedBillingCheckout(input: {
           hasShareContext: input.requestContext.hasShareContext,
           inviteId: input.requestContext.inviteId,
           memberId: input.requestContext.memberId,
-          mode: input.requestContext.mode,
           priceId: input.requestContext.priceId,
           prisma: transaction,
           stripeCustomerId: input.customerId,
@@ -494,15 +486,6 @@ async function finalizeHostedBillingCheckoutReservation(input: {
         latestAttempt.status === HostedBillingCheckoutStatus.open
         && latestAttempt.stripeCheckoutSessionId === checkoutSession.id
       ) {
-        await transaction.hostedMember.update({
-          where: {
-            id: input.memberId,
-          },
-          data: {
-            billingMode: latestAttempt.mode,
-            billingStatus: HostedBillingStatus.checkout_open,
-          },
-        });
         await writeHostedMemberStripeBillingRef({
           memberId: input.memberId,
           prisma: transaction,
@@ -529,15 +512,6 @@ async function finalizeHostedBillingCheckoutReservation(input: {
         stripeCheckoutSessionId: checkoutSession.id,
         stripeCustomerId: input.customerId,
         stripeSubscriptionId: coerceStripeSubscriptionId(checkoutSession.subscription),
-      });
-      await transaction.hostedMember.update({
-        where: {
-          id: input.memberId,
-        },
-        data: {
-          billingMode: latestAttempt.mode,
-          billingStatus: HostedBillingStatus.checkout_open,
-        },
       });
       await writeHostedMemberStripeBillingRef({
         memberId: input.memberId,

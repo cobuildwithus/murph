@@ -2,7 +2,6 @@ import {
   Prisma,
   type HostedMember,
   HostedBillingStatus,
-  HostedMemberStatus,
 } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -105,7 +104,7 @@ describe("hosted-member-store", () => {
           member: {
             billingStatus: HostedBillingStatus.active,
             id: "member_123",
-            status: HostedMemberStatus.registered,
+            suspendedAt: null,
           },
         }),
       },
@@ -119,7 +118,7 @@ describe("hosted-member-store", () => {
     ).resolves.toEqual({
       billingStatus: HostedBillingStatus.active,
       id: "member_123",
-      status: HostedMemberStatus.registered,
+      suspendedAt: null,
     });
   });
 
@@ -573,7 +572,6 @@ describe("hosted-member-store", () => {
         prisma,
       }),
     ).resolves.toEqual({
-      billingMode: null,
       billingRef: {
         memberId: "member_123",
         stripeCustomerId: "cus_123",
@@ -606,7 +604,7 @@ describe("hosted-member-store", () => {
         memberId: "member_123",
         telegramUserLookupKey: "tg_user_123",
       },
-      status: HostedMemberStatus.invited,
+      suspendedAt: null,
       stripeCustomerId: "cus_123",
       stripeLatestBillingEventCreatedAt: null,
       stripeLatestBillingEventId: "evt_123",
@@ -624,11 +622,10 @@ describe("hosted-member-store", () => {
 
 function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember {
   return {
-    billingMode: null,
     billingStatus: HostedBillingStatus.not_started,
     createdAt: new Date("2026-04-06T00:00:00.000Z"),
     id: "member_123",
-    status: HostedMemberStatus.invited,
+    suspendedAt: null,
     updatedAt: new Date("2026-04-06T00:00:00.000Z"),
     ...overrides,
   };

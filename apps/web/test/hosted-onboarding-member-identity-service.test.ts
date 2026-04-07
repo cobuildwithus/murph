@@ -1,4 +1,4 @@
-import { HostedBillingStatus, HostedMemberStatus } from "@prisma/client";
+import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -29,20 +29,13 @@ describe("hosted-onboarding member-identity-service", () => {
 
   it("locks and re-reads the current member before reconciling a Privy identity", async () => {
     const lockedMember = makeMember({
-      status: HostedMemberStatus.suspended,
+      suspendedAt: NOW,
     });
     const lockQuery = vi.fn().mockResolvedValue([]);
     const hostedMember = {
       findUnique: vi.fn().mockResolvedValue(lockedMember),
-      update: vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
-        ...lockedMember,
-        ...data,
-      })),
+      update: vi.fn(),
     };
-    const update = vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
-      ...lockedMember,
-      ...data,
-    }));
     const identityUpsert = vi.fn(async ({
       create,
       update: updateData,
@@ -53,7 +46,6 @@ describe("hosted-onboarding member-identity-service", () => {
       ...create,
       ...updateData,
     }));
-    hostedMember.update = update;
     const hostedMemberIdentity = {
       findUnique: vi.fn().mockResolvedValue({
         maskedPhoneNumberHint: "*** 4567",
@@ -77,7 +69,7 @@ describe("hosted-onboarding member-identity-service", () => {
     const result = await reconcileHostedPrivyIdentityOnMember({
       identity: makeIdentity(),
       member: makeMember({
-        status: HostedMemberStatus.registered,
+        suspendedAt: null,
       }),
       now: NOW,
       prisma: prisma as never,
@@ -89,15 +81,8 @@ describe("hosted-onboarding member-identity-service", () => {
         id: "member_123",
       },
     });
-    expect(update).toHaveBeenCalledWith({
-      where: {
-        id: "member_123",
-      },
-      data: {
-        status: HostedMemberStatus.suspended,
-      },
-    });
-    expect(result.status).toBe(HostedMemberStatus.suspended);
+    expect(hostedMember.update).not.toHaveBeenCalled();
+    expect(result.suspendedAt).toEqual(NOW);
     expect(identityUpsert).toHaveBeenCalledWith(expect.objectContaining({
       where: {
         memberId: "member_123",
@@ -151,14 +136,13 @@ function makeIdentity(): HostedPrivyIdentity {
 function makeMember(overrides: Partial<{
   billingStatus: HostedBillingStatus;
   id: string;
-  status: HostedMemberStatus;
+  suspendedAt: Date | null;
 }> = {}) {
   return {
-    billingMode: null,
     billingStatus: HostedBillingStatus.not_started,
     createdAt: NOW,
     id: "member_123",
-    status: HostedMemberStatus.invited,
+    suspendedAt: null,
     updatedAt: NOW,
     ...overrides,
   };

@@ -133,7 +133,7 @@ export async function requireHostedPrivyActiveRequestAuthContext(
 }
 
 function assertHostedMemberActiveAccessAllowed(member: HostedMember): void {
-  if (isHostedMemberSuspended(member.status)) {
+  if (isHostedMemberSuspended(member.suspendedAt)) {
     throw hostedOnboardingError({
       code: "HOSTED_MEMBER_SUSPENDED",
       message: "This hosted account is suspended. Contact support to restore access.",
@@ -143,7 +143,7 @@ function assertHostedMemberActiveAccessAllowed(member: HostedMember): void {
 
   if (!hasHostedMemberActiveAccess({
     billingStatus: member.billingStatus,
-    memberStatus: member.status,
+    suspendedAt: member.suspendedAt,
   })) {
     throw hostedOnboardingError({
       code: "HOSTED_ACCESS_REQUIRED",
