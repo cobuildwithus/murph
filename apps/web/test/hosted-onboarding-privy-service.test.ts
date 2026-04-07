@@ -112,7 +112,6 @@ function makeMember(overrides: Record<string, unknown> = {}) {
     privyUserId: null,
     suspendedAt: null,
     stripeCustomerId: null,
-    stripeLatestCheckoutSessionId: null,
     stripeSubscriptionId: null,
     updatedAt: NOW,
     walletAddress: null,

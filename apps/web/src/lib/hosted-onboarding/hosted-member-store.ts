@@ -57,9 +57,6 @@ type HostedMemberRoutingRecord = {
 export interface HostedMemberStripeBillingRefSnapshot {
   memberId: string;
   stripeCustomerId: string | null;
-  stripeLatestBillingEventCreatedAt: Date | null;
-  stripeLatestBillingEventId: string | null;
-  stripeLatestCheckoutSessionId: string | null;
   stripeSubscriptionId: string | null;
 }
 
@@ -101,9 +98,6 @@ export interface HostedMemberStripeBillingRefWriteInput {
   memberId: string;
   prisma: HostedMemberStoreClient;
   stripeCustomerId?: string | null;
-  stripeLatestBillingEventCreatedAt?: Date | null;
-  stripeLatestBillingEventId?: string | null;
-  stripeLatestCheckoutSessionId?: string | null;
   stripeSubscriptionId?: string | null;
 }
 
@@ -120,9 +114,6 @@ export interface HostedMemberAggregate extends HostedMemberCoreState {
   phoneNumberVerifiedAt: Date | null;
   privyUserId: string | null;
   stripeCustomerId: string | null;
-  stripeLatestBillingEventCreatedAt: Date | null;
-  stripeLatestBillingEventId: string | null;
-  stripeLatestCheckoutSessionId: string | null;
   stripeSubscriptionId: string | null;
   telegramUserLookupKey: string | null;
   walletAddress: string | null;
@@ -653,21 +644,16 @@ export async function bindHostedMemberStripeCustomerIdIfMissing(input: {
         ...buildHostedMemberBillingPrivateColumns({
           memberId: input.memberId,
           stripeCustomerId: input.stripeCustomerId,
-          stripeLatestBillingEventId: null,
-          stripeLatestCheckoutSessionId: null,
           stripeSubscriptionId: null,
         }),
         memberId: input.memberId,
         stripeCustomerLookupKey,
-        stripeLatestBillingEventCreatedAt: null,
         stripeSubscriptionLookupKey: null,
       },
       update: {
         stripeCustomerIdEncrypted: buildHostedMemberBillingPrivateColumns({
           memberId: input.memberId,
           stripeCustomerId: input.stripeCustomerId,
-          stripeLatestBillingEventId: null,
-          stripeLatestCheckoutSessionId: null,
           stripeSubscriptionId: null,
         }).stripeCustomerIdEncrypted,
         stripeCustomerLookupKey,
@@ -776,12 +762,9 @@ function buildHostedMemberBillingRefCreateData(
     ...buildHostedMemberBillingPrivateColumns({
       memberId: input.memberId,
       stripeCustomerId: input.stripeCustomerId ?? null,
-      stripeLatestBillingEventId: input.stripeLatestBillingEventId ?? null,
-      stripeLatestCheckoutSessionId: input.stripeLatestCheckoutSessionId ?? null,
       stripeSubscriptionId: input.stripeSubscriptionId ?? null,
     }),
     stripeCustomerLookupKey: createHostedStripeCustomerLookupKey(input.stripeCustomerId ?? null),
-    stripeLatestBillingEventCreatedAt: input.stripeLatestBillingEventCreatedAt ?? null,
     stripeSubscriptionLookupKey: createHostedStripeSubscriptionLookupKey(
       input.stripeSubscriptionId ?? null,
     ),
@@ -798,31 +781,8 @@ function buildHostedMemberBillingRefUpdateData(
     data.stripeCustomerIdEncrypted = buildHostedMemberBillingPrivateColumns({
       memberId: input.memberId,
       stripeCustomerId: input.stripeCustomerId,
-      stripeLatestBillingEventId: null,
-      stripeLatestCheckoutSessionId: null,
       stripeSubscriptionId: null,
     }).stripeCustomerIdEncrypted;
-  }
-  if (input.stripeLatestBillingEventCreatedAt !== undefined) {
-    data.stripeLatestBillingEventCreatedAt = input.stripeLatestBillingEventCreatedAt;
-  }
-  if (input.stripeLatestBillingEventId !== undefined) {
-    data.stripeLatestBillingEventIdEncrypted = buildHostedMemberBillingPrivateColumns({
-      memberId: input.memberId,
-      stripeCustomerId: null,
-      stripeLatestBillingEventId: input.stripeLatestBillingEventId,
-      stripeLatestCheckoutSessionId: null,
-      stripeSubscriptionId: null,
-    }).stripeLatestBillingEventIdEncrypted;
-  }
-  if (input.stripeLatestCheckoutSessionId !== undefined) {
-    data.stripeLatestCheckoutSessionIdEncrypted = buildHostedMemberBillingPrivateColumns({
-      memberId: input.memberId,
-      stripeCustomerId: null,
-      stripeLatestBillingEventId: null,
-      stripeLatestCheckoutSessionId: input.stripeLatestCheckoutSessionId,
-      stripeSubscriptionId: null,
-    }).stripeLatestCheckoutSessionIdEncrypted;
   }
   if (input.stripeSubscriptionId !== undefined) {
     data.stripeSubscriptionLookupKey = createHostedStripeSubscriptionLookupKey(
@@ -831,8 +791,6 @@ function buildHostedMemberBillingRefUpdateData(
     data.stripeSubscriptionIdEncrypted = buildHostedMemberBillingPrivateColumns({
       memberId: input.memberId,
       stripeCustomerId: null,
-      stripeLatestBillingEventId: null,
-      stripeLatestCheckoutSessionId: null,
       stripeSubscriptionId: input.stripeSubscriptionId,
     }).stripeSubscriptionIdEncrypted;
   }
@@ -852,9 +810,6 @@ function mapHostedMemberBillingRefSnapshot(
   return {
     memberId: billingRef.memberId,
     stripeCustomerId: privateState.stripeCustomerId,
-    stripeLatestBillingEventCreatedAt: billingRef.stripeLatestBillingEventCreatedAt,
-    stripeLatestBillingEventId: privateState.stripeLatestBillingEventId,
-    stripeLatestCheckoutSessionId: privateState.stripeLatestCheckoutSessionId,
     stripeSubscriptionId: privateState.stripeSubscriptionId,
   };
 }
@@ -909,9 +864,6 @@ function buildHostedMemberAggregate(
     phoneNumberVerifiedAt: input.identity?.phoneNumberVerifiedAt ?? null,
     privyUserId: input.identity?.privyUserId ?? null,
     stripeCustomerId: input.billingRef?.stripeCustomerId ?? null,
-    stripeLatestBillingEventCreatedAt: input.billingRef?.stripeLatestBillingEventCreatedAt ?? null,
-    stripeLatestBillingEventId: input.billingRef?.stripeLatestBillingEventId ?? null,
-    stripeLatestCheckoutSessionId: input.billingRef?.stripeLatestCheckoutSessionId ?? null,
     stripeSubscriptionId: input.billingRef?.stripeSubscriptionId ?? null,
     telegramUserLookupKey: input.routing?.telegramUserLookupKey ?? null,
     walletAddress: input.identity?.walletAddress ?? null,

@@ -161,15 +161,6 @@ enum HostedBillingStatus {
   paused
 }
 
-enum HostedBillingCheckoutStatus {
-  pending
-  open
-  completed
-  expired
-  failed
-  superseded
-}
-
 enum HostedStripeEventStatus {
   pending
   processing
@@ -193,6 +184,23 @@ enum ExecutionOutboxStatus {
   delivery_failed
 }
 
+enum HostedWebhookReceiptStatus {
+  processing
+  completed
+  failed
+}
+
+enum HostedWebhookReceiptSideEffectKind {
+  hosted_execution_dispatch
+  linq_message_send
+  revnet_invoice_issue
+}
+
+enum HostedWebhookReceiptSideEffectStatus {
+  pending
+  sent_unconfirmed
+}
+
 model HostedMember {
   id              String                  @id
   billingStatus   HostedBillingStatus     @default(not_started) @map("billing_status")
@@ -200,7 +208,6 @@ model HostedMember {
   createdAt       DateTime                @default(now()) @map("created_at")
   updatedAt       DateTime                @updatedAt @map("updated_at")
   invites         HostedInvite[]
-  checkouts       HostedBillingCheckout[]
   revnetIssuances HostedRevnetIssuance[]
   aiUsage         HostedAiUsage[]
   linqDailyStates HostedLinqDailyState[]
@@ -251,17 +258,14 @@ model HostedMemberRouting {
 }
 
 model HostedMemberBillingRef {
-  memberId                        String       @unique @map("member_id")
-  stripeCustomerLookupKey         String?      @unique @map("stripe_customer_lookup_key")
-  stripeCustomerIdEncrypted       String?      @map("stripe_customer_id_encrypted")
-  stripeSubscriptionLookupKey     String?      @unique @map("stripe_subscription_lookup_key")
-  stripeSubscriptionIdEncrypted   String?      @map("stripe_subscription_id_encrypted")
-  stripeLatestBillingEventCreatedAt DateTime?  @map("stripe_latest_billing_event_created_at")
-  stripeLatestBillingEventIdEncrypted String?  @map("stripe_latest_billing_event_id_encrypted")
-  stripeLatestCheckoutSessionIdEncrypted String? @map("stripe_latest_checkout_session_id_encrypted")
-  createdAt                       DateTime     @default(now()) @map("created_at")
-  updatedAt                       DateTime     @updatedAt @map("updated_at")
-  member                          HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  memberId                      String       @unique @map("member_id")
+  stripeCustomerLookupKey       String?      @unique @map("stripe_customer_lookup_key")
+  stripeCustomerIdEncrypted     String?      @map("stripe_customer_id_encrypted")
+  stripeSubscriptionLookupKey   String?      @unique @map("stripe_subscription_lookup_key")
+  stripeSubscriptionIdEncrypted String?      @map("stripe_subscription_id_encrypted")
+  createdAt                     DateTime     @default(now()) @map("created_at")
+  updatedAt                     DateTime     @updatedAt @map("updated_at")
+  member                        HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@map("hosted_member_billing_ref")
 }
@@ -276,69 +280,30 @@ model HostedInvite {
   createdAt  DateTime                @default(now()) @map("created_at")
   updatedAt  DateTime                @updatedAt @map("updated_at")
   member     HostedMember            @relation(fields: [memberId], references: [id], onDelete: Cascade)
-  checkouts  HostedBillingCheckout[]
 
   @@index([memberId, createdAt])
   @@index([expiresAt])
   @@map("hosted_invite")
 }
 
-model HostedBillingCheckout {
-  id                      String                      @id
-  memberId                String                      @map("member_id")
-  inviteId                String?                     @map("invite_id")
-  hasShareContext         Boolean                     @default(false) @map("has_share_context")
-  stripeCheckoutSessionId String?                     @unique @map("stripe_checkout_session_id")
-  stripeCustomerId        String?                     @map("stripe_customer_id")
-  stripeSubscriptionId    String?                     @map("stripe_subscription_id")
-  priceId                 String                      @map("price_id")
-  status                  HostedBillingCheckoutStatus @default(pending)
-  checkoutUrl             String?                     @map("checkout_url")
-  amountTotal             Int?                        @map("amount_total")
-  currency                String?                     @map("currency")
-  createdAt               DateTime                    @default(now()) @map("created_at")
-  completedAt             DateTime?                   @map("completed_at")
-  expiredAt               DateTime?                   @map("expired_at")
-  supersededAt            DateTime?                   @map("superseded_at")
-  member                  HostedMember                @relation(fields: [memberId], references: [id], onDelete: Cascade)
-  invite                  HostedInvite?               @relation(fields: [inviteId], references: [id], onDelete: SetNull)
-
-  @@index([memberId, createdAt])
-  @@index([inviteId, createdAt])
-  @@index([stripeCustomerId])
-  @@index([stripeSubscriptionId])
-  @@map("hosted_billing_checkout")
-}
-
 model HostedStripeEvent {
-  eventId           String                  @id @map("event_id")
-  type              String
-  stripeCreatedAt   DateTime                @map("stripe_created_at")
-  receivedAt        DateTime                @map("received_at")
-  status            HostedStripeEventStatus @default(pending)
-  attemptCount      Int                     @default(0) @map("attempt_count")
-  nextAttemptAt     DateTime                @default(now()) @map("next_attempt_at")
-  claimExpiresAt    DateTime?               @map("claim_expires_at")
-  processedAt       DateTime?               @map("processed_at")
-  lastErrorCode     String?                 @map("last_error_code")
-  lastErrorMessage  String?                 @map("last_error_message")
-  customerId        String?                 @map("customer_id")
-  subscriptionId    String?                 @map("subscription_id")
-  invoiceId         String?                 @map("invoice_id")
-  checkoutSessionId String?                 @map("checkout_session_id")
-  chargeId          String?                 @map("charge_id")
-  paymentIntentId   String?                 @map("payment_intent_id")
-  payloadJson       Json                    @map("payload_json")
-  createdAt         DateTime                @default(now()) @map("created_at")
-  updatedAt         DateTime                @updatedAt @map("updated_at")
+  eventId          String                  @id @map("event_id")
+  type             String
+  stripeCreatedAt  DateTime                @map("stripe_created_at")
+  receivedAt       DateTime                @map("received_at")
+  status           HostedStripeEventStatus @default(pending)
+  attemptCount     Int                     @default(0) @map("attempt_count")
+  nextAttemptAt    DateTime                @default(now()) @map("next_attempt_at")
+  claimExpiresAt   DateTime?               @map("claim_expires_at")
+  processedAt      DateTime?               @map("processed_at")
+  lastErrorCode    String?                 @map("last_error_code")
+  lastErrorMessage String?                 @map("last_error_message")
+  createdAt        DateTime                @default(now()) @map("created_at")
+  updatedAt        DateTime                @updatedAt @map("updated_at")
 
   @@index([status, stripeCreatedAt, createdAt])
   @@index([status, nextAttemptAt, stripeCreatedAt, createdAt])
   @@index([claimExpiresAt])
-  @@index([customerId, stripeCreatedAt])
-  @@index([subscriptionId, stripeCreatedAt])
-  @@index([invoiceId, stripeCreatedAt])
-  @@index([checkoutSessionId, stripeCreatedAt])
   @@map("hosted_stripe_event")
 }
 
@@ -399,17 +364,65 @@ model HostedShareLink {
 }
 
 model HostedWebhookReceipt {
-  source          String
-  eventId         String    @map("event_id")
-  firstReceivedAt DateTime  @map("first_received_at")
-  claimExpiresAt  DateTime? @map("claim_expires_at")
-  payloadJson     Json?     @map("payload_json")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+  source            String
+  eventId           String                            @map("event_id")
+  status            HostedWebhookReceiptStatus
+  attemptCount      Int                               @default(1) @map("attempt_count")
+  version           Int                               @default(1)
+  attemptId         String                            @map("attempt_id")
+  firstReceivedAt   DateTime                          @map("first_received_at")
+  lastReceivedAt    DateTime                          @map("last_received_at")
+  plannedAt         DateTime?                         @map("planned_at")
+  completedAt       DateTime?                         @map("completed_at")
+  claimExpiresAt    DateTime?                         @map("claim_expires_at")
+  lastErrorCode     String?                           @map("last_error_code")
+  lastErrorMessage  String?                           @map("last_error_message")
+  lastErrorName     String?                           @map("last_error_name")
+  lastErrorRetryable Boolean?                         @map("last_error_retryable")
+  createdAt         DateTime                          @default(now()) @map("created_at")
+  updatedAt         DateTime                          @updatedAt @map("updated_at")
+  sideEffects       HostedWebhookReceiptSideEffect[]
 
   @@id([source, eventId])
   @@index([firstReceivedAt])
+  @@index([status, claimExpiresAt, firstReceivedAt])
   @@map("hosted_webhook_receipt")
+}
+
+model HostedWebhookReceiptSideEffect {
+  source               String
+  eventId              String                               @map("event_id")
+  effectId             String                               @map("effect_id")
+  kind                 HostedWebhookReceiptSideEffectKind
+  status               HostedWebhookReceiptSideEffectStatus @default(pending)
+  attemptCount         Int                                  @default(0) @map("attempt_count")
+  lastAttemptAt        DateTime?                            @map("last_attempt_at")
+  sentAt               DateTime?                            @map("sent_at")
+  lastErrorCode        String?                              @map("last_error_code")
+  lastErrorMessage     String?                              @map("last_error_message")
+  lastErrorName        String?                              @map("last_error_name")
+  lastErrorRetryable   Boolean?                             @map("last_error_retryable")
+  dispatchPayloadJson  Json?                                @map("dispatch_payload_json")
+  linqChatId           String?                              @map("linq_chat_id")
+  linqInviteId         String?                              @map("linq_invite_id")
+  linqReplyToMessageId String?                              @map("linq_reply_to_message_id")
+  linqTemplate         String?                              @map("linq_template")
+  linqResultChatId     String?                              @map("linq_result_chat_id")
+  linqResultMessageId  String?                              @map("linq_result_message_id")
+  revnetAmountPaid     Int?                                 @map("revnet_amount_paid")
+  revnetChargeId       String?                              @map("revnet_charge_id")
+  revnetCurrency       String?                              @map("revnet_currency")
+  revnetInvoiceId      String?                              @map("revnet_invoice_id")
+  revnetMemberId       String?                              @map("revnet_member_id")
+  revnetPaymentIntentId String?                             @map("revnet_payment_intent_id")
+  revnetResultHandled  Boolean?                             @map("revnet_result_handled")
+  createdAt            DateTime                             @default(now()) @map("created_at")
+  updatedAt            DateTime                             @updatedAt @map("updated_at")
+  receipt              HostedWebhookReceipt                 @relation(fields: [source, eventId], references: [source, eventId], onDelete: Cascade)
+
+  @@id([source, eventId, effectId])
+  @@index([source, eventId, status])
+  @@map("hosted_webhook_receipt_side_effect")
 }
 
 model ExecutionOutbox {

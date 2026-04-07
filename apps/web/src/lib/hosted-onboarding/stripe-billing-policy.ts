@@ -201,7 +201,6 @@ export async function updateHostedMemberStripeBillingIfFresh(input: {
   member: HostedMemberAggregate;
   prisma: HostedOnboardingPrismaClient;
   stripeCustomerId?: string | null;
-  stripeLatestCheckoutSessionId?: string | null;
   stripeSubscriptionId?: string | null;
   suspendedAtOverride?: Date | null;
 }): Promise<HostedMemberAggregate | null> {
@@ -214,19 +213,15 @@ export async function updateHostedMemberStripeBillingIfFresh(input: {
       return null;
     }
 
-    const isFresh = await shouldApplyHostedStripeBillingUpdate({
+    const nextBillingStatus = await resolveHostedBillingStatusForWrite({
       billingStatus: input.billingStatus,
       currentMember,
       dispatchContext: input.dispatchContext,
       stripeSubscriptionId: input.stripeSubscriptionId,
     });
 
-    if (!isFresh) {
-      return null;
-    }
-
     await updateHostedMemberCoreState({
-      billingStatus: input.billingStatus,
+      billingStatus: nextBillingStatus,
       memberId: currentMember.id,
       prisma: tx,
       suspendedAt: input.suspendedAtOverride,
@@ -236,9 +231,6 @@ export async function updateHostedMemberStripeBillingIfFresh(input: {
       memberId: currentMember.id,
       prisma: tx,
       stripeCustomerId: input.stripeCustomerId,
-      stripeLatestBillingEventCreatedAt: input.dispatchContext.eventCreatedAt,
-      stripeLatestBillingEventId: input.dispatchContext.sourceEventId,
-      stripeLatestCheckoutSessionId: input.stripeLatestCheckoutSessionId,
       stripeSubscriptionId: input.stripeSubscriptionId,
     });
 
@@ -256,82 +248,45 @@ async function findHostedMemberById(
   });
 }
 
-async function shouldApplyHostedStripeBillingUpdate(input: {
+async function resolveHostedBillingStatusForWrite(input: {
   billingStatus: HostedBillingStatus;
   currentMember: HostedMemberAggregate;
   dispatchContext: HostedStripeDispatchContext;
   stripeSubscriptionId?: string | null;
-}): Promise<boolean> {
-  const currentEventCreatedAt = input.currentMember.stripeLatestBillingEventCreatedAt;
-
-  if (!currentEventCreatedAt) {
-    return true;
-  }
-
-  const currentEventTime = currentEventCreatedAt.getTime();
-  const nextEventTime = input.dispatchContext.eventCreatedAt.getTime();
-
-  if (currentEventTime < nextEventTime) {
-    return true;
-  }
-
-  if (currentEventTime > nextEventTime) {
-    return false;
-  }
-
-  if (input.currentMember.stripeLatestBillingEventId === input.dispatchContext.sourceEventId) {
-    return true;
-  }
-
-  return shouldApplyHostedSameSecondStripeCollision(input);
-}
-
-async function shouldApplyHostedSameSecondStripeCollision(input: {
-  billingStatus: HostedBillingStatus;
-  currentMember: HostedMemberAggregate;
-  dispatchContext: HostedStripeDispatchContext;
-  stripeSubscriptionId?: string | null;
-}): Promise<boolean> {
+}): Promise<HostedBillingStatus> {
   if (isHostedStripeBillingReversalSourceType(input.dispatchContext.sourceType)) {
-    return true;
+    return input.billingStatus;
   }
 
   const canonicalBillingStatus = await resolveHostedCanonicalStripeBillingStatus(input);
 
   if (canonicalBillingStatus !== null) {
-    if (input.billingStatus === canonicalBillingStatus) {
-      return true;
-    }
-
-    if (
-      input.dispatchContext.sourceType === "stripe.invoice.paid" &&
-      input.billingStatus ===
-        resolveHostedSubscriptionBillingStatus({
-          currentBillingStatus: input.currentMember.billingStatus,
-          nextBillingStatus: canonicalBillingStatus,
-        })
-    ) {
-      return true;
-    }
-
     if (isHostedStripeSubscriptionSourceType(input.dispatchContext.sourceType)) {
-      return (
-        input.billingStatus ===
-        resolveHostedSubscriptionBillingStatus({
-          currentBillingStatus: input.currentMember.billingStatus,
-          nextBillingStatus: canonicalBillingStatus,
-        })
-      );
+      return resolveHostedSubscriptionBillingStatus({
+        currentBillingStatus: input.currentMember.billingStatus,
+        nextBillingStatus: canonicalBillingStatus,
+      });
     }
 
-    return false;
+    if (input.dispatchContext.sourceType === "stripe.invoice.paid") {
+      return canonicalBillingStatus === HostedBillingStatus.active
+        ? HostedBillingStatus.active
+        : canonicalBillingStatus;
+    }
+
+    return canonicalBillingStatus;
   }
 
-  if (isHostedAccessBlockedBillingStatus(input.billingStatus)) {
-    return true;
+  if (
+    isHostedStripeSubscriptionSourceType(input.dispatchContext.sourceType) ||
+    isHostedStripeInvoiceSourceType(input.dispatchContext.sourceType)
+  ) {
+    throw new Error(
+      `Canonical Stripe subscription state is required for ${input.dispatchContext.sourceType}.`,
+    );
   }
 
-  return false;
+  return input.billingStatus;
 }
 
 async function resolveHostedCanonicalStripeBillingStatus(input: {
@@ -345,13 +300,9 @@ async function resolveHostedCanonicalStripeBillingStatus(input: {
     return null;
   }
 
-  try {
-    const stripe = requireHostedStripeApi();
-    const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-    return mapStripeSubscriptionStatusToHostedBillingStatus(subscription.status);
-  } catch {
-    return null;
-  }
+  const stripe = requireHostedStripeApi();
+  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+  return mapStripeSubscriptionStatusToHostedBillingStatus(subscription.status);
 }
 
 function isHostedStripeBillingReversalSourceType(sourceType: string): boolean {
@@ -362,6 +313,11 @@ function isHostedStripeSubscriptionSourceType(sourceType: string): boolean {
   return sourceType === "stripe.customer.subscription.created" ||
     sourceType === "stripe.customer.subscription.updated" ||
     sourceType === "stripe.customer.subscription.deleted";
+}
+
+function isHostedStripeInvoiceSourceType(sourceType: string): boolean {
+  return sourceType === "stripe.invoice.paid" ||
+    sourceType === "stripe.invoice.payment_failed";
 }
 
 export async function suspendHostedMemberForBillingReversal(input: {
@@ -516,23 +472,4 @@ export async function resolveStripeCustomerContext(input: {
   return {
     customerId: null,
   };
-}
-
-export function requireHostedStripeEventPayload(
-  payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
-): { object: Record<string, unknown>; type: string } {
-  if (payloadJson && typeof payloadJson === "object" && !Array.isArray(payloadJson)) {
-    const payload = payloadJson as Record<string, unknown>;
-    const object = payload.object;
-    const type = payload.type;
-
-    if (object && typeof object === "object" && !Array.isArray(object) && typeof type === "string") {
-      return {
-        object: object as Record<string, unknown>,
-        type,
-      };
-    }
-  }
-
-  throw new TypeError("Hosted Stripe event payload is invalid.");
 }

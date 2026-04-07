@@ -127,8 +127,6 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
             memberId: "member_123",
             value: "cus_123",
           }),
-          stripeLatestBillingEventIdEncrypted: null,
-          stripeLatestCheckoutSessionIdEncrypted: null,
           stripeSubscriptionIdEncrypted: null,
         },
       },
@@ -187,8 +185,6 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
               select: {
                 memberId: true,
                 stripeCustomerIdEncrypted: true,
-                stripeLatestBillingEventIdEncrypted: true,
-                stripeLatestCheckoutSessionIdEncrypted: true,
                 stripeSubscriptionIdEncrypted: true,
               },
             },

@@ -76,8 +76,6 @@ export async function listHostedAiUsagePendingStripeMetering(input: {
             select: {
               memberId: true,
               stripeCustomerIdEncrypted: true,
-              stripeLatestBillingEventIdEncrypted: true,
-              stripeLatestCheckoutSessionIdEncrypted: true,
               stripeSubscriptionIdEncrypted: true,
             },
           },

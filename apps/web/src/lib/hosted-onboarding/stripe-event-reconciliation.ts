@@ -17,20 +17,18 @@ import {
 } from "./stripe-billing-events";
 import {
   activateHostedMemberFromConfirmedRevnetIssuance,
-  requireHostedStripeEventPayload,
   resolveStripeCustomerContext,
   type HostedStripeDispatchContext,
 } from "./stripe-billing-policy";
 import {
-  coerceStripeInvoiceSubscriptionId,
   coerceStripeObjectId,
-  coerceStripeSubscriptionId,
 } from "./billing";
 import { readHostedMemberAggregate } from "./hosted-member-store";
 import {
   isHostedOnboardingRevnetEnabled,
   readHostedRevnetPaymentReceipt,
 } from "./revnet";
+import { requireHostedStripeApi } from "./runtime";
 import { drainHostedRevnetIssuanceSubmissionQueue } from "./stripe-revnet-issuance";
 
 const STRIPE_EVENT_LEASE_MS = 10 * 60_000;
@@ -55,24 +53,19 @@ export async function recordHostedStripeEvent(input: {
   event: Stripe.Event;
   prisma: PrismaClient;
 }): Promise<{ duplicate: boolean; type: string }> {
-  const normalized = normalizeHostedStripeEventFact(input.event);
+  const stripeCreatedAt = Number.isFinite(input.event.created)
+    ? new Date(input.event.created * 1000)
+    : new Date();
 
   try {
     await input.prisma.hostedStripeEvent.create({
       data: {
         attemptCount: 0,
-        chargeId: normalized.chargeId,
-        checkoutSessionId: normalized.checkoutSessionId,
-        customerId: normalized.customerId,
         eventId: input.event.id,
-        invoiceId: normalized.invoiceId,
         nextAttemptAt: new Date(),
-        paymentIntentId: normalized.paymentIntentId,
-        payloadJson: normalized.payloadJson,
         receivedAt: new Date(),
         status: HostedStripeEventStatus.pending,
-        stripeCreatedAt: normalized.stripeCreatedAt,
-        subscriptionId: normalized.subscriptionId,
+        stripeCreatedAt,
         type: input.event.type,
       },
     });
@@ -256,126 +249,6 @@ export async function reconcileSubmittedHostedRevnetIssuances(input: {
   return confirmedIssuanceIds;
 }
 
-function normalizeHostedStripeEventFact(event: Stripe.Event): {
-  chargeId: string | null;
-  checkoutSessionId: string | null;
-  customerId: string | null;
-  invoiceId: string | null;
-  paymentIntentId: string | null;
-  payloadJson: Prisma.InputJsonValue;
-  stripeCreatedAt: Date;
-  subscriptionId: string | null;
-} {
-  const object = event.data.object as unknown as Record<string, unknown>;
-  const type = event.type;
-  const stripeCreatedAt = Number.isFinite(event.created)
-    ? new Date(event.created * 1000)
-    : new Date();
-
-  return {
-    chargeId: readHostedStripeEventChargeId(type, object),
-    checkoutSessionId: type.startsWith("checkout.session.") ? coerceStripeObjectId(object.id as never) : null,
-    customerId: readHostedStripeEventCustomerId(type, object),
-    invoiceId: type.startsWith("invoice.") ? coerceStripeObjectId(object.id as never) : null,
-    paymentIntentId: readHostedStripeEventPaymentIntentId(type, object),
-    payloadJson: buildHostedStripeEventPayload(type, object),
-    stripeCreatedAt,
-    subscriptionId: readHostedStripeEventSubscriptionId(type, object),
-  };
-}
-
-function buildHostedStripeEventPayload(
-  type: string,
-  object: Record<string, unknown>,
-): Prisma.InputJsonObject {
-  return {
-    object: minimizeHostedStripeEventObject(type, object),
-    type,
-  } satisfies Prisma.InputJsonObject;
-}
-
-function minimizeHostedStripeEventObject(
-  type: string,
-  object: Record<string, unknown>,
-): Prisma.InputJsonObject {
-  switch (type) {
-    case "checkout.session.completed":
-    case "checkout.session.expired":
-      return compactHostedStripeRecord({
-        amount_total: object.amount_total,
-        client_reference_id: object.client_reference_id,
-        currency: object.currency,
-        customer: coerceStripeObjectId(object.customer as never),
-        id: coerceStripeObjectId(object.id as never),
-        metadata: pickHostedStripeMetadata(object.metadata),
-        mode: object.mode,
-        payment_status: object.payment_status,
-        subscription: coerceStripeSubscriptionId(object.subscription as never),
-      });
-    case "customer.subscription.created":
-    case "customer.subscription.updated":
-    case "customer.subscription.deleted":
-      return compactHostedStripeRecord({
-        customer: coerceStripeObjectId(object.customer as never),
-        id: coerceStripeSubscriptionId(object.id as never),
-        metadata: pickHostedStripeMetadata(object.metadata),
-        status: object.status,
-      });
-    case "invoice.paid":
-    case "invoice.payment_failed":
-      return compactHostedStripeRecord({
-        amount_paid: object.amount_paid,
-        charge: coerceStripeObjectId(object.charge as never),
-        currency: object.currency,
-        customer: coerceStripeObjectId(object.customer as never),
-        id: coerceStripeObjectId(object.id as never),
-        payment_intent: coerceStripeObjectId(object.payment_intent as never),
-        subscription: coerceStripeInvoiceSubscriptionId(object as never),
-      });
-    case "refund.created":
-      return compactHostedStripeRecord({
-        charge: coerceStripeObjectId(object.charge as never),
-        id: coerceStripeObjectId(object.id as never),
-        payment_intent: coerceStripeObjectId(object.payment_intent as never),
-      });
-    case "charge.dispute.created":
-    case "charge.dispute.closed":
-    case "charge.dispute.funds_reinstated":
-    case "charge.dispute.funds_withdrawn":
-      return compactHostedStripeRecord({
-        charge: coerceStripeObjectId(object.charge as never),
-        id: coerceStripeObjectId(object.id as never),
-        payment_intent: coerceStripeObjectId(object.payment_intent as never),
-      });
-    default:
-      return compactHostedStripeRecord({
-        id: coerceStripeObjectId(object.id as never),
-      });
-  }
-}
-
-function pickHostedStripeMetadata(value: unknown): Prisma.InputJsonObject | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return undefined;
-  }
-
-  const metadata = value as Record<string, unknown>;
-
-  if (!("memberId" in metadata)) {
-    return undefined;
-  }
-
-  return compactHostedStripeRecord({
-    memberId: metadata.memberId,
-  });
-}
-
-function compactHostedStripeRecord(fields: Record<string, unknown>): Prisma.InputJsonObject {
-  return Object.fromEntries(
-    Object.entries(fields).filter(([, value]) => value !== undefined),
-  ) as Prisma.InputJsonObject;
-}
-
 async function claimHostedStripeEvent(input: {
   eventId: string;
   now: Date;
@@ -408,7 +281,7 @@ async function claimHostedStripeEvent(input: {
 }
 
 async function processHostedStripeEventRecord(
-  event: NonNullable<Awaited<ReturnType<typeof claimHostedStripeEvent>>>,
+  event: Stripe.Event,
   processingContext: HostedStripeEventProcessingContext,
   prisma: Prisma.TransactionClient,
 ): Promise<{
@@ -416,11 +289,13 @@ async function processHostedStripeEventRecord(
   createdOrUpdatedRevnetIssuance: boolean;
   hostedExecutionEventId: string | null;
 }> {
-  const payload = requireHostedStripeEventPayload(event.payloadJson);
+  const payload = event.data.object;
   const dispatchContext: HostedStripeDispatchContext = {
-    eventCreatedAt: event.stripeCreatedAt,
-    occurredAt: event.stripeCreatedAt.toISOString(),
-    sourceEventId: event.eventId,
+    eventCreatedAt: Number.isFinite(event.created) ? new Date(event.created * 1000) : new Date(),
+    occurredAt: Number.isFinite(event.created)
+      ? new Date(event.created * 1000).toISOString()
+      : new Date().toISOString(),
+    sourceEventId: event.id,
     sourceType: normalizeHostedStripeDispatchSourceType(event.type),
   };
 
@@ -428,33 +303,33 @@ async function processHostedStripeEventRecord(
     case "checkout.session.completed":
       return mapHostedStripeActivationOutcome(
         await applyStripeCheckoutCompleted(
-          payload.object as unknown as Stripe.Checkout.Session,
+          payload as Stripe.Checkout.Session,
           dispatchContext,
           prisma,
         ),
       );
     case "checkout.session.expired":
-      await applyStripeCheckoutExpired(payload.object as unknown as Stripe.Checkout.Session, dispatchContext, prisma);
+      await applyStripeCheckoutExpired(payload as Stripe.Checkout.Session, dispatchContext, prisma);
       return buildEmptyHostedStripeEventProcessingResult();
     case "customer.subscription.created":
     case "customer.subscription.updated":
     case "customer.subscription.deleted":
-      await applyStripeSubscriptionUpdated(payload.object as unknown as Stripe.Subscription, dispatchContext, prisma);
+      await applyStripeSubscriptionUpdated(payload as Stripe.Subscription, dispatchContext, prisma);
       return buildEmptyHostedStripeEventProcessingResult();
     case "invoice.paid":
       return mapHostedStripeActivationOutcome(
         await applyStripeInvoicePaid(
-          payload.object as unknown as Stripe.Invoice,
+          payload as Stripe.Invoice,
           dispatchContext,
           prisma,
         ),
       );
     case "invoice.payment_failed":
-      await applyStripeInvoicePaymentFailed(payload.object as unknown as Stripe.Invoice, dispatchContext, prisma);
+      await applyStripeInvoicePaymentFailed(payload as Stripe.Invoice, dispatchContext, prisma);
       return buildEmptyHostedStripeEventProcessingResult();
     case "refund.created":
       await applyStripeRefundCreated(
-        payload.object as unknown as Stripe.Refund,
+        payload as Stripe.Refund,
         dispatchContext,
         prisma,
         processingContext.customerId,
@@ -465,7 +340,7 @@ async function processHostedStripeEventRecord(
     case "charge.dispute.funds_reinstated":
     case "charge.dispute.funds_withdrawn":
       await applyStripeDisputeUpdated(
-        payload.object as unknown as Stripe.Dispute,
+        payload as Stripe.Dispute,
         dispatchContext,
         prisma,
         processingContext.customerId,
@@ -481,7 +356,7 @@ type HostedStripeEventProcessingContext = {
 };
 
 async function prepareHostedStripeEventProcessingContext(
-  event: NonNullable<Awaited<ReturnType<typeof claimHostedStripeEvent>>>,
+  event: Stripe.Event,
 ): Promise<HostedStripeEventProcessingContext> {
   if (event.type !== "refund.created" && !event.type.startsWith("charge.dispute.")) {
     return {
@@ -489,9 +364,10 @@ async function prepareHostedStripeEventProcessingContext(
     };
   }
 
+  const object = event.data.object as unknown as Record<string, unknown>;
   const customerContext = await resolveStripeCustomerContext({
-    chargeId: event.chargeId,
-    paymentIntentId: event.paymentIntentId,
+    chargeId: readHostedStripeEventChargeId(event.type, object),
+    paymentIntentId: readHostedStripeEventPaymentIntentId(event.type, object),
   });
 
   return {
@@ -501,38 +377,6 @@ async function prepareHostedStripeEventProcessingContext(
 
 function normalizeHostedStripeDispatchSourceType(eventType: string): string {
   return `stripe.${eventType}`;
-}
-
-function readHostedStripeEventCustomerId(type: string, object: Record<string, unknown>): string | null {
-  if (type.startsWith("checkout.session.")) {
-    return coerceStripeObjectId(object.customer as never);
-  }
-
-  if (type.startsWith("customer.subscription.")) {
-    return coerceStripeObjectId(object.customer as never);
-  }
-
-  if (type.startsWith("invoice.")) {
-    return coerceStripeObjectId(object.customer as never);
-  }
-
-  return null;
-}
-
-function readHostedStripeEventSubscriptionId(type: string, object: Record<string, unknown>): string | null {
-  if (type.startsWith("checkout.session.")) {
-    return coerceStripeSubscriptionId(object.subscription as never);
-  }
-
-  if (type.startsWith("customer.subscription.")) {
-    return coerceStripeSubscriptionId(object.id as never);
-  }
-
-  if (type === "invoice.paid" || type === "invoice.payment_failed") {
-    return coerceStripeInvoiceSubscriptionId(object as never);
-  }
-
-  return null;
 }
 
 function readHostedStripeEventChargeId(type: string, object: Record<string, unknown>): string | null {
@@ -597,11 +441,12 @@ async function processClaimedHostedStripeEvent(
   prisma: PrismaClient,
 ): Promise<HostedStripeEventReconcileResult> {
   try {
-    const processingContext = await prepareHostedStripeEventProcessingContext(claimed);
+    const stripeEvent = await fetchHostedStripeEventForReconciliation(claimed.eventId);
+    const processingContext = await prepareHostedStripeEventProcessingContext(stripeEvent);
     let result!: Awaited<ReturnType<typeof processHostedStripeEventRecord>>;
     await prisma.$transaction(async (transaction) => {
       result = await processHostedStripeEventRecord(
-        claimed,
+        stripeEvent,
         processingContext,
         transaction as Prisma.TransactionClient,
       );
@@ -613,7 +458,6 @@ async function processClaimedHostedStripeEvent(
           claimExpiresAt: null,
           lastErrorCode: null,
           lastErrorMessage: null,
-          payloadJson: Prisma.JsonNull,
           processedAt: new Date(),
           status: HostedStripeEventStatus.completed,
         },
@@ -652,6 +496,10 @@ async function processClaimedHostedStripeEvent(
       status: "failed",
     };
   }
+}
+
+async function fetchHostedStripeEventForReconciliation(eventId: string): Promise<Stripe.Event> {
+  return requireHostedStripeApi().events.retrieve(eventId);
 }
 
 function buildDueHostedStripeEventWhere(now: Date): Prisma.HostedStripeEventWhereInput {

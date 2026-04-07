@@ -19,10 +19,6 @@ const HOSTED_MEMBER_ROUTING_TELEGRAM_USER_FIELD = "hosted-member-routing.telegra
 const HOSTED_MEMBER_BILLING_STRIPE_CUSTOMER_FIELD = "hosted-member-billing-ref.stripe-customer-id";
 const HOSTED_MEMBER_BILLING_STRIPE_SUBSCRIPTION_FIELD =
   "hosted-member-billing-ref.stripe-subscription-id";
-const HOSTED_MEMBER_BILLING_STRIPE_EVENT_FIELD =
-  "hosted-member-billing-ref.stripe-latest-billing-event-id";
-const HOSTED_MEMBER_BILLING_STRIPE_CHECKOUT_FIELD =
-  "hosted-member-billing-ref.stripe-latest-checkout-session-id";
 
 export interface HostedMemberIdentityPrivateState {
   phoneNumber: string | null;
@@ -41,8 +37,6 @@ export interface HostedMemberRoutingPrivateState {
 
 export interface HostedMemberBillingPrivateState {
   stripeCustomerId: string | null;
-  stripeLatestBillingEventId: string | null;
-  stripeLatestCheckoutSessionId: string | null;
   stripeSubscriptionId: string | null;
 }
 
@@ -165,8 +159,6 @@ export function readHostedMemberRoutingPrivateState(
 export function buildHostedMemberBillingPrivateColumns(input: {
   memberId: string;
   stripeCustomerId: string | null;
-  stripeLatestBillingEventId: string | null;
-  stripeLatestCheckoutSessionId: string | null;
   stripeSubscriptionId: string | null;
 }) {
   return {
@@ -174,16 +166,6 @@ export function buildHostedMemberBillingPrivateColumns(input: {
       field: HOSTED_MEMBER_BILLING_STRIPE_CUSTOMER_FIELD,
       memberId: input.memberId,
       value: input.stripeCustomerId,
-    }),
-    stripeLatestBillingEventIdEncrypted: encryptHostedWebNullableString({
-      field: HOSTED_MEMBER_BILLING_STRIPE_EVENT_FIELD,
-      memberId: input.memberId,
-      value: input.stripeLatestBillingEventId,
-    }),
-    stripeLatestCheckoutSessionIdEncrypted: encryptHostedWebNullableString({
-      field: HOSTED_MEMBER_BILLING_STRIPE_CHECKOUT_FIELD,
-      memberId: input.memberId,
-      value: input.stripeLatestCheckoutSessionId,
     }),
     stripeSubscriptionIdEncrypted: encryptHostedWebNullableString({
       field: HOSTED_MEMBER_BILLING_STRIPE_SUBSCRIPTION_FIELD,
@@ -198,8 +180,6 @@ export function readHostedMemberBillingPrivateState(
     HostedMemberBillingRef,
     | "memberId"
     | "stripeCustomerIdEncrypted"
-    | "stripeLatestBillingEventIdEncrypted"
-    | "stripeLatestCheckoutSessionIdEncrypted"
     | "stripeSubscriptionIdEncrypted"
   >,
 ): HostedMemberBillingPrivateState {
@@ -208,16 +188,6 @@ export function readHostedMemberBillingPrivateState(
       field: HOSTED_MEMBER_BILLING_STRIPE_CUSTOMER_FIELD,
       memberId: billingRef.memberId,
       value: billingRef.stripeCustomerIdEncrypted,
-    }),
-    stripeLatestBillingEventId: decryptHostedWebNullableString({
-      field: HOSTED_MEMBER_BILLING_STRIPE_EVENT_FIELD,
-      memberId: billingRef.memberId,
-      value: billingRef.stripeLatestBillingEventIdEncrypted,
-    }),
-    stripeLatestCheckoutSessionId: decryptHostedWebNullableString({
-      field: HOSTED_MEMBER_BILLING_STRIPE_CHECKOUT_FIELD,
-      memberId: billingRef.memberId,
-      value: billingRef.stripeLatestCheckoutSessionIdEncrypted,
     }),
     stripeSubscriptionId: decryptHostedWebNullableString({
       field: HOSTED_MEMBER_BILLING_STRIPE_SUBSCRIPTION_FIELD,
