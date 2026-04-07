@@ -7,6 +7,7 @@ import {
   type DeploymentStatusPayload,
   type HostedWorkerDeploymentResult,
 } from "./deploy-worker-version.shared.js";
+import { requireConfiguredString } from "../src/deploy-automation/shared.js";
 import { resolveDeployWorkerCliPaths } from "./deploy-worker-version-paths.js";
 import { runWranglerJson, runWranglerLogged } from "./wrangler-runner.js";
 
@@ -193,20 +194,5 @@ function parseJsonValue<T>(value: string, label: string): T {
 }
 
 function requireEnv(name: string, env: Readonly<Record<string, string | undefined>>): string {
-  const value = normalizeString(env[name]);
-
-  if (!value) {
-    throw new Error(`${name} must be configured.`);
-  }
-
-  return value;
-}
-
-function normalizeString(value: string | undefined): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
+  return requireConfiguredString(env[name], name);
 }

@@ -5,6 +5,7 @@ import {
   resolveHostedWorkerGradualDeploymentSupport,
   resolveHostedWorkerDeploymentTraffic,
 } from "../src/deploy-automation/deployment-traffic.js";
+import { normalizeOptionalString } from "../src/deploy-automation/shared.js";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
@@ -273,12 +274,12 @@ function resolveHostedWorkerDeploymentSettings(
 ): HostedWorkerDeploymentSettings {
   const mode = readDeploymentMode(env.HOSTED_EXECUTION_DEPLOYMENT_MODE);
   const includeSecrets = readBooleanEnv(env.HOSTED_EXECUTION_INCLUDE_SECRETS, true);
-  const deployContext = normalizeString(env.HOSTED_EXECUTION_DEPLOY_CONTEXT)
-    ?? normalizeString(env.GITHUB_REF_NAME)
+  const deployContext = normalizeOptionalString(env.HOSTED_EXECUTION_DEPLOY_CONTEXT)
+    ?? normalizeOptionalString(env.GITHUB_REF_NAME)
     ?? "manual";
-  const versionTag = normalizeString(env.HOSTED_EXECUTION_DEPLOY_TAG)
+  const versionTag = normalizeOptionalString(env.HOSTED_EXECUTION_DEPLOY_TAG)
     ?? buildDefaultVersionTag(env, now);
-  const deploymentMessageOverride = normalizeString(env.HOSTED_EXECUTION_DEPLOYMENT_MESSAGE);
+  const deploymentMessageOverride = normalizeOptionalString(env.HOSTED_EXECUTION_DEPLOYMENT_MESSAGE);
 
   if (mode === "direct") {
     return {
@@ -290,12 +291,12 @@ function resolveHostedWorkerDeploymentSettings(
   }
 
   const rolloutPercentage = readRolloutPercentage(env.HOSTED_EXECUTION_GRADUAL_ROLLOUT_PERCENTAGE);
-  const versionMessage = normalizeString(env.HOSTED_EXECUTION_VERSION_MESSAGE)
+  const versionMessage = normalizeOptionalString(env.HOSTED_EXECUTION_VERSION_MESSAGE)
     ?? `${deployContext} version ${versionTag}`;
 
   return {
     deploymentMessage: deploymentMessageOverride ?? `${deployContext} rollout ${rolloutPercentage}% ${versionTag}`,
-    existingVersionId: normalizeString(env.HOSTED_EXECUTION_DEPLOY_VERSION_ID),
+    existingVersionId: normalizeOptionalString(env.HOSTED_EXECUTION_DEPLOY_VERSION_ID),
     includeSecrets,
     mode,
     rolloutPercentage,
@@ -328,7 +329,7 @@ function mapDeploymentVersions(
 }
 
 function readDeploymentMode(value: string | undefined): DeploymentMode {
-  const normalized = normalizeString(value);
+  const normalized = normalizeOptionalString(value);
 
   if (!normalized) {
     return "gradual";
@@ -342,7 +343,7 @@ function readDeploymentMode(value: string | undefined): DeploymentMode {
 }
 
 function readRolloutPercentage(value: string | undefined): number {
-  const normalized = normalizeString(value) ?? "10";
+  const normalized = normalizeOptionalString(value) ?? "10";
   const parsed = Number.parseInt(normalized, 10);
 
   if (!Number.isInteger(parsed) || parsed < 0 || parsed > 100) {
@@ -353,7 +354,7 @@ function readRolloutPercentage(value: string | undefined): number {
 }
 
 function readBooleanEnv(value: string | undefined, fallback: boolean): boolean {
-  const normalized = normalizeString(value);
+  const normalized = normalizeOptionalString(value);
 
   if (!normalized) {
     return fallback;
@@ -370,20 +371,11 @@ function readBooleanEnv(value: string | undefined, fallback: boolean): boolean {
   throw new Error("Boolean env values must be one of: 1, 0, true, false.");
 }
 
-function normalizeString(value: string | undefined): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
 function buildDefaultVersionTag(
   env: EnvSource,
   now: () => Date,
 ): string {
-  const sha = normalizeString(env.GITHUB_SHA);
+  const sha = normalizeOptionalString(env.GITHUB_SHA);
 
   if (sha) {
     return `git-${sha.slice(0, 12)}`;
@@ -397,7 +389,7 @@ async function writeGitHubOutputs(
   env: EnvSource,
   result: HostedWorkerDeploymentResult,
 ): Promise<void> {
-  const outputPath = normalizeString(env.GITHUB_OUTPUT);
+  const outputPath = normalizeOptionalString(env.GITHUB_OUTPUT);
 
   if (!outputPath) {
     return;
