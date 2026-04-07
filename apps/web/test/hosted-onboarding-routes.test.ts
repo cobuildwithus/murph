@@ -1,6 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
+import { hostedWebConfigurationError } from "../src/lib/hosted-web/encryption";
 
 const mocks = vi.hoisted(() => ({
   abortHostedInvitePhoneCode: vi.fn(),
@@ -390,6 +391,37 @@ describe("hosted onboarding routes", () => {
         code: "PRIVY_WALLET_NOT_READY",
         message: "Your setup has not reached the server-side Privy session yet. Wait a moment and try again.",
         retryable: true,
+      },
+    });
+  });
+
+  it("maps hosted private-field encryption config failures to a server error during completion", async () => {
+    mocks.completeHostedPrivyVerification.mockRejectedValue(
+      hostedWebConfigurationError({
+        code: "HOSTED_WEB_ENCRYPTION_KEY_REQUIRED",
+        httpStatus: 500,
+        message: "HOSTED_WEB_ENCRYPTION_KEY must be configured for hosted member private field encryption.",
+      }),
+    );
+
+    const response = await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        body: JSON.stringify({}),
+        headers: {
+          "x-privy-identity-token": "header-token",
+          origin: SAME_ORIGIN_HEADERS.origin,
+          "user-agent": "test-agent",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_WEB_ENCRYPTION_KEY_REQUIRED",
+        message: "HOSTED_WEB_ENCRYPTION_KEY must be configured for hosted member private field encryption.",
       },
     });
   });
