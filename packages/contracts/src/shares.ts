@@ -247,7 +247,7 @@ export const workoutFormatUpsertPayloadSchema = withContractMetadata(
       activityType: slugSchema,
       durationMinutes: integerSchema(1, 24 * 60).optional(),
       distanceKm: numberSchema(0, 1_000).optional(),
-      template: workoutTemplateSchema.optional(),
+      template: workoutTemplateSchema,
       tags: uniqueArray(slugSchema, { uniqueItems: true }).optional(),
       note: boundedString(1, 4000).optional(),
       templateText: boundedString(1, 4000).optional(),

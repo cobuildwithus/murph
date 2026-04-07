@@ -4,7 +4,6 @@ import path from 'node:path'
 import { readFile } from 'node:fs/promises'
 import {
   CONTRACT_SCHEMA_VERSION,
-  type ActivityStrengthExercise,
   type JsonObject,
   type RawImportManifest,
   type WorkoutSession,
@@ -540,28 +539,6 @@ function buildWorkoutSessionsFromCsv(headers: readonly string[], rows: readonly 
   }))
 }
 
-function summarizeSessionExercises(session: WorkoutCsvSession): ActivityStrengthExercise[] | undefined {
-  const summary = session.exercises.flatMap((exercise) => {
-    const repValues = exercise.sets
-      .map((set) => set.reps)
-      .filter((value): value is number => typeof value === 'number' && value > 0)
-    if (repValues.length === 0) {
-      return []
-    }
-
-    const loadSet = exercise.sets.find((set) => typeof set.weight === 'number' && set.weightUnit)
-    return [{
-      exercise: exercise.name,
-      setCount: exercise.sets.length,
-      repsPerSet: repValues[0] ?? 0,
-      load: loadSet?.weight,
-      loadUnit: loadSet?.weightUnit,
-    } satisfies ActivityStrengthExercise]
-  })
-
-  return summary.length > 0 ? summary : undefined
-}
-
 function buildManifest(input: {
   importId: string
   importKind: 'workout_batch'
@@ -734,7 +711,6 @@ export async function importWorkoutCsv(input: {
             resourceId: session.key.slice(0, 200),
           },
           workout,
-          strengthExercises: summarizeSessionExercises(session),
         }) as JsonObject,
         source: 'import',
       })

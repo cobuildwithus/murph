@@ -35,19 +35,6 @@ function projectFoodAutoLogDaily(
   return time ? { time } : null;
 }
 
-function projectWorkoutStrengthExercises(
-  value: unknown,
-): Record<string, unknown>[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value.filter(
-    (entry): entry is Record<string, unknown> =>
-      typeof entry === "object" && entry !== null && !Array.isArray(entry),
-  );
-}
-
 const bankRegistryQueryMetadataByKind: Record<NonHealthBankEntityKind, BankRegistryQueryMetadata> = {
   food: {
     sortBehavior: "title",
@@ -110,7 +97,6 @@ const bankRegistryQueryMetadataByKind: Record<NonHealthBankEntityKind, BankRegis
         activityType: helpers.firstString(attributes, ["activityType"]),
         durationMinutes: helpers.firstNumber(attributes, ["durationMinutes"]),
         distanceKm: helpers.firstNumber(attributes, ["distanceKm"]),
-        strengthExercises: projectWorkoutStrengthExercises(attributes.strengthExercises),
         template: helpers.firstObject(attributes, ["template"]),
         tags: helpers.firstStringArray(attributes, ["tags"]),
         note: helpers.firstString(attributes, ["note"]),

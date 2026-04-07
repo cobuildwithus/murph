@@ -72,6 +72,8 @@ title: Garage Day
 status: active
 activityType: strength-training
 durationMinutes: 40
+template:
+  exercises: []
 templateText: Garage day template.
 ---
 # Garage Day

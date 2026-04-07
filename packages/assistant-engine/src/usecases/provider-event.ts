@@ -280,6 +280,10 @@ const eventTemplates: Record<(typeof EVENT_KINDS)[number], JsonObject> = {
     activityType: 'walking',
     durationMinutes: 35,
     distanceKm: 2.7,
+    workout: {
+      sessionNote: 'Easy evening walk.',
+      exercises: [],
+    },
   },
   body_measurement: {
     kind: 'body_measurement',

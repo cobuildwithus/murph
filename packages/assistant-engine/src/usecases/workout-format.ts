@@ -1,8 +1,6 @@
 import {
-  type ActivityStrengthExercise,
   type JsonObject,
   type WorkoutFormatUpsertPayload,
-  type WorkoutTemplate,
   workoutFormatUpsertPayloadSchema,
 } from '@murphai/contracts'
 import {
@@ -22,10 +20,10 @@ import {
   addWorkoutRecord,
   resolveWorkoutCapture,
   type AddWorkoutRecordInput,
-  type ResolvedWorkoutCapture,
 } from './workout.js'
 import {
   buildWorkoutSessionFromTemplate,
+  buildWorkoutTemplateFromSummary,
 } from './workout-model.js'
 
 
@@ -67,34 +65,6 @@ function valueAsNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
-function buildTemplateFromCapture(capture: ResolvedWorkoutCapture): WorkoutTemplate | undefined {
-  if (!capture.strengthExercises || capture.strengthExercises.length === 0) {
-    return undefined
-  }
-
-  return {
-    routineNote: capture.note,
-    exercises: capture.strengthExercises.map((exercise, index) => ({
-      name: exercise.exercise,
-      order: index + 1,
-      mode: 'weight_reps' as const,
-      ...(exercise.loadDescription
-        ? { note: exercise.loadDescription }
-        : {}),
-      plannedSets: Array.from({ length: exercise.setCount }, (_, setIndex) => ({
-        order: setIndex + 1,
-        targetReps: exercise.repsPerSet,
-        ...('load' in exercise
-          ? {
-              targetWeight: exercise.load,
-              targetWeightUnit: exercise.loadUnit,
-            }
-          : {}),
-      })),
-    })),
-  }
-}
-
 function toWorkoutFormatEntity(record: WorkoutFormatRecord, includeMarkdown: boolean) {
   return {
     id: record.workoutFormatId,
@@ -112,7 +82,6 @@ function toWorkoutFormatEntity(record: WorkoutFormatRecord, includeMarkdown: boo
       activityType: record.activityType,
       durationMinutes: record.durationMinutes,
       distanceKm: record.distanceKm,
-      strengthExercises: record.strengthExercises,
       template: record.template,
       tags: record.tags,
       note: record.note,
@@ -235,7 +204,10 @@ export async function saveWorkoutFormat(input: SaveWorkoutFormatInput) {
       activityType: input.activityType,
       distanceKm: input.distanceKm,
     })
-    const template = buildTemplateFromCapture(capture)
+    const template = buildWorkoutTemplateFromSummary({
+      note: capture.note,
+      strengthExercises: capture.strengthExercises,
+    })
 
     payload = {
       title,
@@ -244,7 +216,6 @@ export async function saveWorkoutFormat(input: SaveWorkoutFormatInput) {
       activityType: capture.activityType,
       durationMinutes: capture.durationMinutes,
       distanceKm: capture.distanceKm ?? undefined,
-      strengthExercises: capture.strengthExercises ?? undefined,
       template,
       note: undefined,
       templateText: text,
@@ -264,7 +235,6 @@ export async function saveWorkoutFormat(input: SaveWorkoutFormatInput) {
       activityType: payload.activityType,
       durationMinutes: payload.durationMinutes,
       distanceKm: payload.distanceKm,
-      strengthExercises: payload.strengthExercises,
       template: payload.template,
       tags: payload.tags,
       note: payload.note,
@@ -312,64 +282,32 @@ export async function listWorkoutFormats(input: {
 
 export async function logWorkoutFormat(input: LogWorkoutFormatInput) {
   const record = await resolveWorkoutFormat(input.vault, input.name)
+  const templateNote =
+    record.templateText
+    ?? record.template.routineNote
+    ?? record.title
 
-  if (record.template) {
-    const templateNote =
-      record.templateText
-      ?? record.template.routineNote
-      ?? record.title
-
-    return addWorkoutRecord({
-      vault: input.vault,
-      workout: buildWorkoutSessionFromTemplate(record.template, {
-        routineId: record.workoutFormatId,
-        routineName: record.title,
-      }),
-      text: templateNote,
-      durationMinutes:
-        typeof input.durationMinutes === 'number'
-          ? input.durationMinutes
-          : record.durationMinutes,
-      activityType:
-        typeof input.activityType === 'string'
-          ? input.activityType
-          : record.activityType,
-      distanceKm:
-        typeof input.distanceKm === 'number'
-          ? input.distanceKm
-          : record.distanceKm,
-      occurredAt: input.occurredAt,
-      source: input.source,
-      mediaPaths: input.mediaPaths,
-    })
-  }
-
-  if (record.templateText) {
-    return addWorkoutRecord({
-      vault: input.vault,
-      text: record.templateText,
-      durationMinutes:
-        typeof input.durationMinutes === 'number'
-          ? input.durationMinutes
-          : record.durationMinutes,
-      activityType:
-        typeof input.activityType === 'string'
-          ? input.activityType
-          : record.activityType,
-      distanceKm:
-        typeof input.distanceKm === 'number'
-          ? input.distanceKm
-          : record.distanceKm,
-      strengthExercises: record.strengthExercises ?? null,
-      occurredAt: input.occurredAt,
-      source: input.source,
-      title: record.title,
-      mediaPaths: input.mediaPaths,
-    })
-  }
-
-  throw new VaultCliError(
-    'contract_invalid',
-    `Workout format document "${record.relativePath}" is missing templateText.`,
-  )
+  return addWorkoutRecord({
+    vault: input.vault,
+    workout: buildWorkoutSessionFromTemplate(record.template, {
+      routineId: record.workoutFormatId,
+      routineName: record.title,
+    }),
+    text: templateNote,
+    durationMinutes:
+      typeof input.durationMinutes === 'number'
+        ? input.durationMinutes
+        : record.durationMinutes,
+    activityType:
+      typeof input.activityType === 'string'
+        ? input.activityType
+        : record.activityType,
+    distanceKm:
+      typeof input.distanceKm === 'number'
+        ? input.distanceKm
+        : record.distanceKm,
+    occurredAt: input.occurredAt,
+    source: input.source,
+    mediaPaths: input.mediaPaths,
+  })
 }

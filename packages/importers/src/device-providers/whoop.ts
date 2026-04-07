@@ -487,6 +487,14 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
               finiteNumber(score?.distance_meter ?? workout.distance_meter) !== undefined
                 ? Number(score?.distance_meter ?? workout.distance_meter) / 1000
                 : undefined,
+            workout: {
+              sourceApp: "whoop",
+              sourceWorkoutId: workoutId,
+              startedAt: startAt,
+              endedAt: endAt,
+              sessionNote: `WHOOP ${sportName}`,
+              exercises: [],
+            },
           }),
         }),
       );

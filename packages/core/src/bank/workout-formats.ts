@@ -1,9 +1,6 @@
 import {
-  type ActivityStrengthExercise,
   type WorkoutFormatFrontmatter,
   type WorkoutTemplate,
-  type WorkoutTemplateExercise,
-  type WorkoutTemplateSet,
   workoutFormatFrontmatterSchema,
   workoutTemplateSchema,
 } from "@murphai/contracts";
@@ -47,8 +44,6 @@ import type {
   WorkoutFormatStatus,
 } from "./types.ts";
 
-const LOAD_UNITS = ["lb", "kg"] as const;
-
 function normalizeWorkoutFormatStatus(value: unknown): WorkoutFormatStatus {
   const status = typeof value === "string" ? value.trim() : "";
 
@@ -74,83 +69,6 @@ function normalizeWorkoutActivityType(value: unknown): string {
   return normalized;
 }
 
-function normalizeStrengthExercises(
-  value: unknown,
-  fieldName = "strengthExercises",
-): ActivityStrengthExercise[] | undefined {
-  if (value === undefined || value === null) {
-    return undefined;
-  }
-
-  if (!Array.isArray(value)) {
-    throw new VaultError("VAULT_INVALID_INPUT", `${fieldName} must be an array of exercise objects.`);
-  }
-
-  if (value.length > 50) {
-    throw new VaultError("VAULT_INVALID_INPUT", `${fieldName} exceeds the maximum item count.`);
-  }
-
-  const exercises = value.map((entry, index) => {
-    const exerciseField = `${fieldName}[${index}]`;
-    const objectValue =
-      typeof entry === "object" && entry !== null && !Array.isArray(entry)
-        ? (entry as Record<string, unknown>)
-        : null;
-
-    if (!objectValue) {
-      throw new VaultError("VAULT_INVALID_INPUT", `${exerciseField} must be an object.`);
-    }
-
-    const exercise = requireString(objectValue.exercise, `${exerciseField}.exercise`, 160);
-    const setCount = optionalInteger(objectValue.setCount, `${exerciseField}.setCount`, 1);
-    const repsPerSet = optionalInteger(objectValue.repsPerSet, `${exerciseField}.repsPerSet`, 1);
-    const load = optionalFiniteNumber(objectValue.load, `${exerciseField}.load`, 0);
-    const loadUnit = objectValue.loadUnit;
-    const normalizedLoadUnit =
-      typeof loadUnit === "string" && (LOAD_UNITS as readonly string[]).includes(loadUnit)
-        ? (loadUnit as "lb" | "kg")
-        : loadUnit === undefined || loadUnit === null
-          ? undefined
-          : (() => {
-              throw new VaultError(
-                "VAULT_INVALID_INPUT",
-                `${exerciseField}.loadUnit must be one of ${LOAD_UNITS.join(", ")}.`,
-              )
-            })();
-    const loadDescription = optionalString(
-      objectValue.loadDescription,
-      `${exerciseField}.loadDescription`,
-      240,
-    );
-
-    if (setCount === undefined) {
-      throw new VaultError("VAULT_INVALID_INPUT", `${exerciseField}.setCount is required.`);
-    }
-
-    if (repsPerSet === undefined) {
-      throw new VaultError("VAULT_INVALID_INPUT", `${exerciseField}.repsPerSet is required.`);
-    }
-
-    if ((load === undefined) !== (normalizedLoadUnit === undefined)) {
-      throw new VaultError(
-        "VAULT_INVALID_INPUT",
-        `${exerciseField}.load and ${exerciseField}.loadUnit must either both be set or both be omitted.`,
-      );
-    }
-
-    return stripUndefined({
-      exercise,
-      setCount,
-      repsPerSet,
-      load,
-      loadUnit: normalizedLoadUnit,
-      loadDescription,
-    }) as ActivityStrengthExercise;
-  });
-
-  return exercises.length > 0 ? exercises : undefined;
-}
-
 function normalizeTemplate(value: unknown, fieldName = "template"): WorkoutTemplate | undefined {
   if (value === undefined || value === null) {
     return undefined;
@@ -164,17 +82,7 @@ function normalizeTemplate(value: unknown, fieldName = "template"): WorkoutTempl
   );
 }
 
-function formatStrengthExerciseLine(exercise: ActivityStrengthExercise): string {
-  const load =
-    "load" in exercise && exercise.loadUnit
-      ? ` @ ${exercise.load} ${exercise.loadUnit}`
-      : exercise.loadDescription
-        ? ` (${exercise.loadDescription})`
-        : "";
-  return `${exercise.exercise}: ${exercise.setCount}×${exercise.repsPerSet}${load}`;
-}
-
-function formatTemplateSet(set: WorkoutTemplateSet): string {
+function formatTemplateSet(set: WorkoutTemplate["exercises"][number]["plannedSets"][number]): string {
   const parts: string[] = [];
 
   if (set.type) {
@@ -206,7 +114,7 @@ function formatTemplateSet(set: WorkoutTemplateSet): string {
   return parts.length > 0 ? parts.join(" · ") : `set ${set.order}`;
 }
 
-function formatTemplateExerciseLine(exercise: WorkoutTemplateExercise): string {
+function formatTemplateExerciseLine(exercise: WorkoutTemplate["exercises"][number]): string {
   const group = exercise.groupId ? ` [${exercise.groupId}]` : "";
   const mode = exercise.mode ? ` (${exercise.mode})` : "";
   const setSummary = exercise.plannedSets
@@ -216,50 +124,6 @@ function formatTemplateExerciseLine(exercise: WorkoutTemplateExercise): string {
     .join("; ");
 
   return `${exercise.name}${group}${mode}: ${setSummary}`;
-}
-
-function summarizeTemplateExercises(
-  template: WorkoutTemplate | undefined,
-): ActivityStrengthExercise[] | undefined {
-  if (!template) {
-    return undefined;
-  }
-
-  const exercises = template.exercises
-    .slice()
-    .sort((left, right) => left.order - right.order)
-    .flatMap((exercise) => {
-      const repTargets = exercise.plannedSets
-        .map((set) => set.targetReps)
-        .filter((value): value is number => typeof value === "number" && value > 0);
-
-      if (repTargets.length === 0) {
-        return [];
-      }
-
-      const firstReps = repTargets[0] ?? null;
-      if (firstReps === null) {
-        return [];
-      }
-
-      const loadTarget = exercise.plannedSets.find(
-        (set) => typeof set.targetWeight === "number" && set.targetWeightUnit,
-      );
-
-      return [stripUndefined({
-        exercise: exercise.name,
-        setCount: exercise.plannedSets.length,
-        repsPerSet: firstReps,
-        load: loadTarget?.targetWeight,
-        loadUnit: loadTarget?.targetWeightUnit,
-        loadDescription:
-          loadTarget?.targetWeight !== undefined && exercise.note
-            ? exercise.note
-            : undefined,
-      }) as ActivityStrengthExercise];
-    });
-
-  return exercises.length > 0 ? exercises : undefined;
 }
 
 function validateWorkoutFormatFrontmatter(
@@ -302,12 +166,6 @@ function buildBody(record: WorkoutFormatRecord): string {
         )
       : null,
     record.templateText ? section("Saved workout text", record.templateText) : null,
-    record.strengthExercises?.length
-      ? listSection(
-          "Strength Exercises",
-          record.strengthExercises.map((exercise) => formatStrengthExerciseLine(exercise)),
-        )
-      : null,
     listSection("Tags", record.tags),
     record.note ? section("Notes", record.note) : null,
   ].filter((sectionValue): sectionValue is string => Boolean(sectionValue));
@@ -333,8 +191,6 @@ function parseWorkoutFormatRecord(
 
   return {
     ...frontmatter,
-    strengthExercises:
-      frontmatter.strengthExercises ?? summarizeTemplateExercises(frontmatter.template),
     relativePath,
     markdown,
   };
@@ -356,7 +212,6 @@ function buildAttributes(
       activityType: record.activityType,
       durationMinutes: record.durationMinutes,
       distanceKm: record.distanceKm,
-      strengthExercises: record.strengthExercises,
       template: record.template,
       tags: record.tags,
       note: record.note,
@@ -422,17 +277,19 @@ export async function upsertWorkoutFormat(
     defaultSlug: normalizeUpsertSelectorSlug(undefined, title) ?? "",
     allowSlugUpdate: input.allowSlugRename === true,
     buildDocument: (target) => {
+      const templateText = resolveOptionalUpsertValue(
+        input.templateText,
+        existingRecord?.templateText,
+        (value) => optionalString(value, "templateText", 4000),
+      );
       const template = resolveOptionalUpsertValue(
         input.template,
         existingRecord?.template,
         (value) => normalizeTemplate(value),
       );
-      const explicitStrengthSummary = resolveOptionalUpsertValue(
-        input.strengthExercises,
-        existingRecord?.strengthExercises,
-        (value) => normalizeStrengthExercises(value),
-      );
-      const strengthExercises = explicitStrengthSummary ?? summarizeTemplateExercises(template);
+      if (!template) {
+        throw new VaultError("VAULT_INVALID_INPUT", "template is required.");
+      }
       const attributes = buildAttributes(
         stripUndefined({
           schemaVersion: WORKOUT_FORMAT_SCHEMA_VERSION,
@@ -458,7 +315,6 @@ export async function upsertWorkoutFormat(
           distanceKm: resolveOptionalUpsertValue(input.distanceKm, existingRecord?.distanceKm, (value) =>
             optionalFiniteNumber(value, "distanceKm", 0, 1_000),
           ),
-          strengthExercises,
           template,
           tags: resolveOptionalUpsertValue(input.tags, existingRecord?.tags, (value) =>
             normalizeDomainList(value, "tags"),
@@ -466,11 +322,7 @@ export async function upsertWorkoutFormat(
           note: resolveOptionalUpsertValue(input.note, existingRecord?.note, (value) =>
             optionalString(value, "note", 4000),
           ),
-          templateText: resolveOptionalUpsertValue(
-            input.templateText,
-            existingRecord?.templateText,
-            (value) => optionalString(value, "templateText", 4000),
-          ),
+          templateText,
         }),
       );
 

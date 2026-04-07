@@ -98,6 +98,34 @@ function summarizeTemplateSet(
   }
 }
 
+function modeFromStrengthExercise(
+  exercise: ActivityStrengthExercise,
+): WorkoutSession['exercises'][number]['mode'] {
+  return typeof exercise.load === 'number' ? 'weight_reps' : 'bodyweight'
+}
+
+function buildWorkoutSetsFromStrengthExercise(
+  exercise: ActivityStrengthExercise,
+): WorkoutSet[] {
+  return Array.from({ length: exercise.setCount }, (_, index) => ({
+    order: index + 1,
+    reps: exercise.repsPerSet,
+    ...(typeof exercise.load === 'number' ? { weight: exercise.load } : {}),
+    ...(exercise.loadUnit ? { weightUnit: exercise.loadUnit } : {}),
+  }))
+}
+
+function buildWorkoutTemplateSetFromStrengthExercise(
+  exercise: ActivityStrengthExercise,
+): WorkoutTemplateSet[] {
+  return Array.from({ length: exercise.setCount }, (_, index) => ({
+    order: index + 1,
+    targetReps: exercise.repsPerSet,
+    ...(typeof exercise.load === 'number' ? { targetWeight: exercise.load } : {}),
+    ...(exercise.loadUnit ? { targetWeightUnit: exercise.loadUnit } : {}),
+  }))
+}
+
 export function deriveDurationMinutesFromTimestamps(
   startedAt?: string,
   endedAt?: string,
@@ -127,6 +155,50 @@ export function buildWorkoutTitle(
 
   const label = formatActivityLabel(activityType)
   return `${durationMinutes}-minute ${label.toLowerCase()}`
+}
+
+export function buildWorkoutSessionFromSummary(input: {
+  note?: string
+  strengthExercises?: readonly ActivityStrengthExercise[] | null
+  sourceApp?: string
+  sourceWorkoutId?: string
+  startedAt?: string
+  endedAt?: string
+  routineId?: string
+  routineName?: string
+}): WorkoutSession {
+  return {
+    ...(input.sourceApp ? { sourceApp: input.sourceApp } : {}),
+    ...(input.sourceWorkoutId ? { sourceWorkoutId: input.sourceWorkoutId } : {}),
+    ...(input.startedAt ? { startedAt: input.startedAt } : {}),
+    ...(input.endedAt ? { endedAt: input.endedAt } : {}),
+    ...(input.routineId ? { routineId: input.routineId } : {}),
+    ...(input.routineName ? { routineName: input.routineName } : {}),
+    ...(input.note ? { sessionNote: input.note } : {}),
+    exercises: (input.strengthExercises ?? []).map((exercise, index) => ({
+      name: exercise.exercise,
+      order: index + 1,
+      mode: modeFromStrengthExercise(exercise),
+      ...(exercise.loadDescription ? { note: exercise.loadDescription } : {}),
+      sets: buildWorkoutSetsFromStrengthExercise(exercise),
+    })),
+  }
+}
+
+export function buildWorkoutTemplateFromSummary(input: {
+  note?: string
+  strengthExercises?: readonly ActivityStrengthExercise[] | null
+}): WorkoutTemplate {
+  return {
+    ...(input.note ? { routineNote: input.note } : {}),
+    exercises: (input.strengthExercises ?? []).map((exercise, index) => ({
+      name: exercise.exercise,
+      order: index + 1,
+      mode: modeFromStrengthExercise(exercise),
+      ...(exercise.loadDescription ? { note: exercise.loadDescription } : {}),
+      plannedSets: buildWorkoutTemplateSetFromStrengthExercise(exercise),
+    })),
+  }
 }
 
 export function summarizeWorkoutSessionExercises(
@@ -204,35 +276,41 @@ export function buildWorkoutSessionFromTemplate(
   } = {},
 ): WorkoutSession {
   return {
-    sourceApp: input.sourceApp,
-    sourceWorkoutId: input.sourceWorkoutId,
-    startedAt: input.startedAt,
-    endedAt: input.endedAt,
-    routineId: input.routineId,
-    routineName: input.routineName,
-    sessionNote: input.sessionNote ?? template.routineNote,
+    ...(input.sourceApp ? { sourceApp: input.sourceApp } : {}),
+    ...(input.sourceWorkoutId ? { sourceWorkoutId: input.sourceWorkoutId } : {}),
+    ...(input.startedAt ? { startedAt: input.startedAt } : {}),
+    ...(input.endedAt ? { endedAt: input.endedAt } : {}),
+    ...(input.routineId ? { routineId: input.routineId } : {}),
+    ...(input.routineName ? { routineName: input.routineName } : {}),
+    ...(input.sessionNote ?? template.routineNote
+      ? { sessionNote: input.sessionNote ?? template.routineNote }
+      : {}),
     exercises: template.exercises
       .slice()
       .sort((left, right) => left.order - right.order)
       .map((exercise) => ({
         name: exercise.name,
         order: exercise.order,
-        groupId: exercise.groupId,
-        mode: exercise.mode,
-        unitOverride: exercise.unitOverride,
-        note: exercise.note,
+        ...(exercise.groupId ? { groupId: exercise.groupId } : {}),
+        ...(exercise.mode ? { mode: exercise.mode } : {}),
+        ...(exercise.unitOverride ? { unitOverride: exercise.unitOverride } : {}),
+        ...(exercise.note ? { note: exercise.note } : {}),
         sets: exercise.plannedSets
           .slice()
           .sort((left, right) => left.order - right.order)
           .map((set) => ({
             order: set.order,
-            type: set.type,
-            reps: set.targetReps,
-            weight: set.targetWeight,
-            weightUnit: set.targetWeightUnit,
-            durationSeconds: set.targetDurationSeconds,
-            distanceMeters: set.targetDistanceMeters,
-            rpe: set.targetRpe,
+            ...(set.type ? { type: set.type } : {}),
+            ...(typeof set.targetReps === 'number' ? { reps: set.targetReps } : {}),
+            ...(typeof set.targetWeight === 'number' ? { weight: set.targetWeight } : {}),
+            ...(set.targetWeightUnit ? { weightUnit: set.targetWeightUnit } : {}),
+            ...(typeof set.targetDurationSeconds === 'number'
+              ? { durationSeconds: set.targetDurationSeconds }
+              : {}),
+            ...(typeof set.targetDistanceMeters === 'number'
+              ? { distanceMeters: set.targetDistanceMeters }
+              : {}),
+            ...(typeof set.targetRpe === 'number' ? { rpe: set.targetRpe } : {}),
           })),
       })),
   }

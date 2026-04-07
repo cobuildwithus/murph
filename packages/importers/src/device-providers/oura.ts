@@ -642,6 +642,14 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
           fields: stripUndefined({
             activityType: sessionType,
             durationMinutes,
+            workout: {
+              sourceApp: "oura",
+              sourceWorkoutId: sessionId,
+              startedAt: startAt,
+              endedAt: endAt,
+              sessionNote: `Oura ${sessionType} session`,
+              exercises: [],
+            },
           }),
         }),
       );
@@ -699,6 +707,14 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
             activityType,
             durationMinutes,
             distanceKm,
+            workout: {
+              sourceApp: "oura",
+              sourceWorkoutId: workoutId,
+              startedAt: startAt,
+              endedAt: endAt,
+              sessionNote: `Oura ${activityType}`,
+              exercises: [],
+            },
           }),
         }),
       );

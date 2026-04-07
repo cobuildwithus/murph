@@ -49,86 +49,6 @@
       "minimum": 0,
       "maximum": 1000
     },
-    "strengthExercises": {
-      "minItems": 1,
-      "maxItems": 50,
-      "type": "array",
-      "items": {
-        "anyOf": [
-          {
-            "type": "object",
-            "properties": {
-              "exercise": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 160
-              },
-              "setCount": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "repsPerSet": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "loadDescription": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 240
-              }
-            },
-            "required": [
-              "exercise",
-              "setCount",
-              "repsPerSet"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "exercise": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 160
-              },
-              "setCount": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "repsPerSet": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "loadDescription": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 240
-              },
-              "load": {
-                "type": "number",
-                "minimum": 0
-              },
-              "loadUnit": {
-                "type": "string",
-                "enum": [
-                  "lb",
-                  "kg"
-                ]
-              }
-            },
-            "required": [
-              "exercise",
-              "setCount",
-              "repsPerSet",
-              "load",
-              "loadUnit"
-            ],
-            "additionalProperties": false
-          }
-        ]
-      }
-    },
     "template": {
       "type": "object",
       "properties": {
@@ -138,7 +58,6 @@
           "maxLength": 4000
         },
         "exercises": {
-          "minItems": 1,
           "maxItems": 100,
           "type": "array",
           "items": {
@@ -277,7 +196,8 @@
     "slug",
     "title",
     "status",
-    "activityType"
+    "activityType",
+    "template"
   ],
   "additionalProperties": false,
   "$id": "@murphai/contracts/frontmatter-workout-format.schema.json",

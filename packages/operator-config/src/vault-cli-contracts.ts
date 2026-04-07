@@ -105,15 +105,6 @@ export const mealAddResultSchema = z.object({
   note: z.string().nullable(),
 })
 
-const strengthExerciseResultSchema = z.object({
-  exercise: z.string().min(1),
-  setCount: z.number().int().positive(),
-  repsPerSet: z.number().int().positive(),
-  load: z.number().nonnegative().optional(),
-  loadUnit: z.enum(['lb', 'kg']).optional(),
-  loadDescription: z.string().min(1).optional(),
-})
-
 const workoutSetResultSchema = z.object({
   order: z.number().int().positive(),
   type: z.enum(['normal', 'warmup', 'dropset', 'failure']).optional(),
@@ -240,7 +231,6 @@ export const workoutAddResultSchema = z.object({
   activityType: z.string().min(1),
   durationMinutes: z.number().int().positive(),
   distanceKm: z.number().nonnegative().nullable(),
-  strengthExercises: z.array(strengthExerciseResultSchema).nullable(),
   workout: workoutSessionResultSchema.nullable(),
   note: z.string().min(1),
 })
