@@ -50,10 +50,10 @@ export async function applyStripeCheckoutCompleted(
   }
 
   await writeHostedMemberStripeBillingRef({
-    memberId: member.id,
+    memberId: member.core.id,
     prisma,
-    stripeCustomerId: coerceStripeObjectId(session.customer) ?? member.stripeCustomerId,
-    stripeSubscriptionId: coerceStripeSubscriptionId(session.subscription) ?? member.stripeSubscriptionId,
+    stripeCustomerId: coerceStripeObjectId(session.customer) ?? member.billingRef?.stripeCustomerId ?? null,
+    stripeSubscriptionId: coerceStripeSubscriptionId(session.subscription) ?? member.billingRef?.stripeSubscriptionId ?? null,
   });
 
   return {
@@ -89,11 +89,11 @@ export async function applyStripeSubscriptionUpdated(
   }
 
   await updateHostedMemberStripeBillingIfFresh({
-    billingStatus: member.billingStatus,
+    billingStatus: member.core.billingStatus,
     dispatchContext,
     member,
     prisma,
-    stripeCustomerId: coerceStripeObjectId(subscription.customer) ?? member.stripeCustomerId,
+    stripeCustomerId: coerceStripeObjectId(subscription.customer) ?? member.billingRef?.stripeCustomerId ?? null,
     stripeSubscriptionId: subscription.id,
   });
 }
@@ -120,14 +120,14 @@ export async function applyStripeInvoicePaid(
     };
   }
 
-  const hadActiveBilling = member.billingStatus === HostedBillingStatus.active;
-  const startingBillingStatus = member.billingStatus;
+  const hadActiveBilling = member.core.billingStatus === HostedBillingStatus.active;
+  const startingBillingStatus = member.core.billingStatus;
   const updatedMember = await updateHostedMemberStripeBillingIfFresh({
     billingStatus: HostedBillingStatus.active,
     dispatchContext,
     member,
     prisma,
-    stripeCustomerId: coerceStripeObjectId(invoice.customer) ?? member.stripeCustomerId,
+    stripeCustomerId: coerceStripeObjectId(invoice.customer) ?? member.billingRef?.stripeCustomerId ?? null,
     stripeSubscriptionId: subscriptionId,
   });
 
@@ -156,7 +156,7 @@ export async function applyStripeInvoicePaid(
   });
 
   return {
-    activatedMemberId: activation.activated ? updatedMember.id : null,
+    activatedMemberId: activation.activated ? updatedMember.core.id : null,
     createdOrUpdatedRevnetIssuance: false,
     hostedExecutionEventId: activation.hostedExecutionEventId,
     postCommitProvisionUserId: activation.postCommitProvisionUserId,
@@ -186,8 +186,8 @@ export async function applyStripeInvoicePaymentFailed(
     dispatchContext,
     member,
     prisma,
-    stripeCustomerId: coerceStripeObjectId(invoice.customer) ?? member.stripeCustomerId,
-    stripeSubscriptionId: subscriptionId ?? member.stripeSubscriptionId,
+    stripeCustomerId: coerceStripeObjectId(invoice.customer) ?? member.billingRef?.stripeCustomerId ?? null,
+    stripeSubscriptionId: subscriptionId ?? member.billingRef?.stripeSubscriptionId ?? null,
   });
 }
 

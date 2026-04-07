@@ -7,25 +7,30 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 
 import {
-  readHostedMemberAggregate,
+  composeHostedMemberSnapshot,
+  readHostedMemberSnapshot,
+  type HostedMemberCoreState,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import {
   bindHostedMemberStripeCustomerIdIfMissing,
   findHostedMemberByStripeCustomerId,
   findHostedMemberByStripeSubscriptionId,
   readHostedMemberStripeBillingRef,
+  type HostedMemberStripeBillingRefSnapshot,
   writeHostedMemberStripeBillingRef,
 } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import {
   findHostedMemberByPhoneNumber,
   findHostedMemberByPhoneLookupKey,
   findHostedMemberByPrivyUserId,
+  type HostedMemberIdentityState,
   upsertHostedMemberIdentity,
 } from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
 import {
   findHostedMemberByTelegramUserId,
   findHostedMemberByTelegramUserLookupKey,
   readHostedMemberRoutingState,
+  type HostedMemberRoutingStateSnapshot,
   upsertHostedMemberLinqChatBinding,
   upsertHostedMemberTelegramRoutingBinding,
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
@@ -33,6 +38,66 @@ import {
 describe("hosted-member-store", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("keeps identity, routing, and billing refs nested under their owning slices", () => {
+    const core: HostedMemberCoreState = {
+      billingStatus: HostedBillingStatus.incomplete,
+      createdAt: new Date("2026-04-07T00:00:00.000Z"),
+      id: "member_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-04-07T00:05:00.000Z"),
+    };
+    const identity: HostedMemberIdentityState = {
+      maskedPhoneNumberHint: "+1 **** 1234",
+      memberId: core.id,
+      phoneLookupKey: "phone_lookup_123",
+      phoneNumberVerifiedAt: new Date("2026-04-07T00:02:00.000Z"),
+      privyUserId: "did:privy:member_123",
+      signupPhoneCodeSendAttemptId: null,
+      signupPhoneCodeSendAttemptStartedAt: null,
+      signupPhoneCodeSentAt: null,
+      signupPhoneNumber: "+15551234",
+      walletAddress: "0x1234",
+      walletChainType: "ethereum",
+      walletCreatedAt: new Date("2026-04-07T00:03:00.000Z"),
+      walletProvider: "privy",
+    };
+    const routing: HostedMemberRoutingStateSnapshot = {
+      linqChatId: "linq_chat_123",
+      memberId: core.id,
+      telegramUserLookupKey: "telegram_lookup_123",
+    };
+    const billingRef: HostedMemberStripeBillingRefSnapshot = {
+      memberId: core.id,
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    };
+
+    const snapshot = composeHostedMemberSnapshot(core, {
+      billingRef,
+      identity,
+      routing,
+    });
+
+    expect(snapshot).toEqual({
+      billingRef,
+      core,
+      identity,
+      routing,
+    });
+    expect(Object.keys(snapshot).sort()).toEqual([
+      "billingRef",
+      "core",
+      "identity",
+      "routing",
+    ]);
+    expect("phoneLookupKey" in snapshot).toBe(false);
+    expect("linqChatId" in snapshot).toBe(false);
+    expect("stripeCustomerId" in snapshot).toBe(false);
+    expect(snapshot.identity?.phoneLookupKey).toBe(identity.phoneLookupKey);
+    expect(snapshot.routing?.linqChatId).toBe(routing.linqChatId);
+    expect(snapshot.billingRef?.stripeSubscriptionId).toBe(billingRef.stripeSubscriptionId);
   });
 
   it("finds a member by privy user id from the identity table", async () => {
@@ -696,28 +761,43 @@ describe("hosted-member-store", () => {
     } as never;
 
     await expect(
-      readHostedMemberAggregate({
+      readHostedMemberSnapshot({
         memberId: "member_123",
         prisma,
       }),
     ).resolves.toEqual({
-      billingStatus: HostedBillingStatus.not_started,
-      createdAt: new Date("2026-04-06T00:00:00.000Z"),
-      id: "member_123",
-      linqChatId: "chat_123",
-      maskedPhoneNumberHint: "*** 4567",
-      phoneLookupKey: "hbidx:phone:v1:abc123",
-      phoneNumberVerifiedAt: null,
-      privyUserId: "did:privy:user_123",
-      suspendedAt: null,
-      stripeCustomerId: "cus_123",
-      stripeSubscriptionId: "sub_123",
-      telegramUserLookupKey: "tg_user_123",
-      updatedAt: new Date("2026-04-06T00:00:00.000Z"),
-      walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
-      walletChainType: "ethereum",
-      walletCreatedAt: null,
-      walletProvider: "privy",
+      billingRef: {
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+      core: {
+        billingStatus: HostedBillingStatus.not_started,
+        createdAt: new Date("2026-04-06T00:00:00.000Z"),
+        id: "member_123",
+        suspendedAt: null,
+        updatedAt: new Date("2026-04-06T00:00:00.000Z"),
+      },
+      identity: {
+        maskedPhoneNumberHint: "*** 4567",
+        memberId: "member_123",
+        phoneLookupKey: "hbidx:phone:v1:abc123",
+        phoneNumberVerifiedAt: null,
+        privyUserId: "did:privy:user_123",
+        signupPhoneCodeSendAttemptId: null,
+        signupPhoneCodeSendAttemptStartedAt: null,
+        signupPhoneCodeSentAt: null,
+        signupPhoneNumber: null,
+        walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+        walletChainType: "ethereum",
+        walletCreatedAt: null,
+        walletProvider: "privy",
+      },
+      routing: {
+        linqChatId: "chat_123",
+        memberId: "member_123",
+        telegramUserLookupKey: "tg_user_123",
+      },
     });
   });
 });

@@ -137,6 +137,26 @@ The query package goes back to owning projection application rather than project
 **Main refactor risk:** do not let the contracts projection metadata start absorbing query-only presentation concerns.
 The shared owner should describe stable read-model extraction from frontmatter, not package-specific sorting or presentation behavior beyond what multiple consumers genuinely share.
 
+### 9. Keep hosted member identity, routing, and billing slices nested at the onboarding composition seam
+
+**Seam:** `apps/web/src/lib/hosted-onboarding/hosted-member-store.ts`, `apps/web/src/lib/hosted-onboarding/stripe-billing-policy.ts`, `apps/web/src/lib/hosted-onboarding/stripe-billing-events.ts`, `apps/web/src/lib/hosted-onboarding/stripe-revnet-issuance.ts`, `apps/web/src/lib/hosted-onboarding/webhook-transport.ts`, `apps/web/src/lib/hosted-onboarding/stripe-event-reconciliation.ts`
+
+The hosted-member privacy split introduced separate identity, routing, and billing-reference tables, but `HostedMemberAggregate` in `hosted-member-store.ts` immediately flattened those slices back into one wide object.
+That recreated the old coupling shape in memory: adding or changing one field on any slice widened the read model used by Stripe, RevNet, and webhook orchestration even when those callers only needed one slice.
+
+This patch:
+
+- replaces the flattened `HostedMemberAggregate` with a nested `HostedMemberSnapshot` made of `{ core, identity, routing, billingRef }`
+- updates Stripe billing, RevNet issuance, and webhook orchestration to read through the owning slice instead of through a re-widened helper
+- adds one focused activation-dispatch helper in `stripe-billing-policy.ts` so the only real cross-slice composition stays explicit
+- adds a hosted-web test that locks in the non-flattening snapshot shape
+
+**Why this is simpler:** the privacy split now stays visible at the main onboarding composition seam.
+Identity changes no longer imply a billing-shaped type update, routing changes no longer widen RevNet callers, and orchestration code has to name which slice it depends on.
+
+**Main refactor risk:** do not respond by adding a second layer of generic selectors that hides the slice ownership again.
+Small task-specific composition helpers are fine, but the shared store surface should keep returning nested slice owners rather than another compatibility aggregate.
+
 ## Current targeted review findings
 
 No code changes landed below.

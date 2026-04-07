@@ -24,7 +24,7 @@ import {
 import {
   coerceStripeObjectId,
 } from "./billing";
-import { readHostedMemberAggregate } from "./hosted-member-store";
+import { readHostedMemberSnapshot } from "./hosted-member-store";
 import {
   isHostedOnboardingRevnetEnabled,
   readHostedRevnetPaymentReceipt,
@@ -226,7 +226,7 @@ export async function reconcileSubmittedHostedRevnetIssuances(input: {
         },
       });
 
-      const member = await readHostedMemberAggregate({
+      const member = await readHostedMemberSnapshot({
         memberId: issuance.memberId,
         prisma: transaction,
       });
