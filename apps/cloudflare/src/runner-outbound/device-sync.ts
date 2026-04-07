@@ -45,9 +45,9 @@ export async function handleRunnerDeviceSyncControlRequest(input: {
     }
 
     return forwardRunnerDeviceSyncConnectLinkRequest({
+      callbackSigning: input.environment.webCallbackSigning,
       env: input.env,
       provider: decodeRouteParam(connectLinkMatch.groups.provider),
-      signingSecret: input.environment.webInternalSigningSecret,
       userId: input.userId,
     });
   }
@@ -84,18 +84,18 @@ export async function handleRunnerDeviceSyncControlRequest(input: {
 }
 
 async function forwardRunnerDeviceSyncConnectLinkRequest(input: {
+  callbackSigning: ReturnType<typeof readHostedExecutionEnvironment>["webCallbackSigning"];
   env: RunnerOutboundEnvironmentSource;
   provider: string;
-  signingSecret: string;
   userId: string;
 }): Promise<Response> {
   const config = requireRunnerOutboundHostedWebControlConfig(input.env);
   const response = await fetchHostedExecutionWebControlPlaneResponse({
     baseUrl: config.baseUrl,
     boundUserId: input.userId,
+    callbackSigning: input.callbackSigning,
     method: "POST",
     path: buildHostedExecutionDeviceSyncConnectLinkPath(input.provider),
-    signingSecret: input.signingSecret,
     timeoutMs: null,
   });
 

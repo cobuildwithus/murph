@@ -4,10 +4,6 @@ import { access, mkdir, open, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { buildSharePackFromVault } from '@murphai/core'
-import {
-  createHostedExecutionServerShareLinkIssuer,
-} from '@murphai/hosted-execution/web-control-plane'
 import { prepareAssistantDirectCliEnv } from '../assistant-cli-access.js'
 import { normalizeNullableString } from '../assistant/shared.js'
 import { resolveAssistantVaultPath } from '../assistant-vault-paths.js'
@@ -281,44 +277,6 @@ export async function readAssistantTextFile(
   }
 }
 
-export async function issueHostedShareLink(input: {
-  pack: Awaited<ReturnType<typeof buildSharePackFromVault>>
-  expiresInHours?: number
-  inviteCode?: string
-  recipientPhoneNumber?: string
-  senderMemberId?: string | null
-}) {
-  const baseUrl = normalizeHostedShareApiBaseUrl(
-    process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL ?? null,
-  )
-  const signingSecret = normalizeNullableString(process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET)
-  const senderMemberId = normalizeNullableString(input.senderMemberId)
-
-  if (!baseUrl || !signingSecret) {
-    throw new Error(
-      'Hosted share link creation requires HOSTED_ONBOARDING_PUBLIC_BASE_URL plus HOSTED_WEB_INTERNAL_SIGNING_SECRET in the assistant environment.',
-    )
-  }
-
-  if (!senderMemberId) {
-    throw new Error(
-      'Hosted share link creation requires a hosted member identity so the share pack stays bound to its owner.',
-    )
-  }
-
-  return await createHostedExecutionServerShareLinkIssuer({
-    baseUrl,
-    boundUserId: senderMemberId,
-    fetchImpl: fetch,
-    signingSecret,
-  }).issue({
-    pack: input.pack,
-    expiresInHours: input.expiresInHours,
-    inviteCode: input.inviteCode,
-    recipientPhoneNumber: input.recipientPhoneNumber,
-  })
-}
-
 export async function writeAssistantPayloadFile(
   vaultRoot: string,
   toolName: string,
@@ -509,22 +467,6 @@ function decodeAssistantTextChunk(
   } catch {
     throw createAssistantToolFileNotTextError(candidatePath)
   }
-}
-
-function normalizeHostedShareApiBaseUrl(value: string | null): string | null {
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  const normalized = value.trim()
-  if (!normalized) {
-    return null
-  }
-
-  const url = new URL(normalized)
-  url.hash = ''
-  url.search = ''
-  return url.toString().replace(/\/$/u, '')
 }
 
 function sanitizeToolName(value: string): string {

@@ -135,7 +135,7 @@ Set these in the selected GitHub environment as secrets:
 - `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK`
 - `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK`
 - `HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK`
-- `HOSTED_WEB_INTERNAL_SIGNING_SECRET`
+- `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`
 
 Set these in the selected GitHub environment as vars:
 
@@ -155,12 +155,12 @@ Optional hosted email bridge secrets:
 - `HOSTED_EMAIL_CLOUDFLARE_API_TOKEN`
 - `HOSTED_EMAIL_SIGNING_SECRET`
 
-The checked-in scaffold and rendered deploy config declare the web-internal signing secret, platform envelope key, automation recipient keypair, and recovery recipient public JWK in Wrangler's experimental `secrets.required` field, so `wrangler deploy` and `wrangler versions upload` fail early when any of them are missing from the Worker.
+The checked-in scaffold and rendered deploy config declare the Cloudflare callback signing key, platform envelope key, automation recipient keypair, and recovery recipient public JWK in Wrangler's experimental `secrets.required` field, so `wrangler deploy` and `wrangler versions upload` fail early when any of them are missing from the Worker.
 
-The worker now authenticates `apps/web -> apps/cloudflare` dispatch/control traffic with Vercel OIDC bearer identity derived from the configured team slug, project name, and environment. The only remaining shared-secret seam is the narrow signed service boundary between `apps/cloudflare`, trusted scheduler/share callers, and `apps/web`, all bound with `HOSTED_WEB_INTERNAL_SIGNING_SECRET`, a bound user or service id, a timestamp, and a single-use nonce. Each native container invocation still gets its own one-shot runner control token injected at start time.
+The worker now authenticates `apps/web -> apps/cloudflare` dispatch/control traffic with Vercel OIDC bearer identity derived from the configured team slug, project name, and environment. Cloudflare-owned callbacks back into `apps/web` now use a dedicated asymmetric callback key: the worker signs the bound user, method, path, query, payload, timestamp, and nonce with `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`, while `apps/web` verifies with the matching public JWK. Each native container invocation still gets its own one-shot runner control token injected at start time.
 
 - missing `HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG` or `HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME` makes bearer-authenticated web dispatch/control requests fail closed
-- mismatched `HOSTED_WEB_INTERNAL_SIGNING_SECRET` breaks signed service routes into `apps/web`
+- missing or mismatched `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK` breaks Cloudflare-owned callback routes into `apps/web`
 - missing `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY` prevents encrypted hosted storage from decrypting
 - missing automation recipient JWKs prevents the worker from unwrapping managed per-user root keys
 - missing recovery recipient public JWK prevents explicit managed-user provisioning from succeeding
@@ -223,7 +223,7 @@ export HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY=...
 export HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK=...
 export HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK=...
 export HOSTED_WEB_BASE_URL=https://your-web.example.com
-export HOSTED_WEB_INTERNAL_SIGNING_SECRET=...
+export HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK=...
 export HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID=...
 export HOSTED_EMAIL_CLOUDFLARE_API_TOKEN=...
 export HOSTED_EMAIL_DOMAIN=mail.example.test

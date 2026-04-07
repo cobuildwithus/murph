@@ -15,6 +15,10 @@ import {
   type HostedExecutionVercelOidcValidationEnvironment,
 } from "./auth-adapter.ts";
 import { decodeBase64Key } from "./base64.js";
+import {
+  readHostedWebCallbackSigningEnvironment,
+  type HostedWebCallbackSigningEnvironment,
+} from "./web-callback-auth.ts";
 
 export type HostedExecutionEnvironment = Omit<
   HostedExecutionWorkerEnvironment,
@@ -34,6 +38,7 @@ export type HostedExecutionEnvironment = Omit<
   recoveryRecipientPublicKey: HostedUserRecipientPublicKeyJwk;
   teeAutomationRecipientPublicKey: HostedUserRecipientPublicKeyJwk | null;
   vercelOidcValidation: HostedExecutionVercelOidcValidationEnvironment;
+  webCallbackSigning: HostedWebCallbackSigningEnvironment;
 };
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
@@ -98,6 +103,7 @@ export function readHostedExecutionEnvironment(
       )
       : null,
     vercelOidcValidation: requireHostedExecutionVercelOidcValidationEnvironment(source),
+    webCallbackSigning: readHostedWebCallbackSigningEnvironment(source),
   };
 }
 

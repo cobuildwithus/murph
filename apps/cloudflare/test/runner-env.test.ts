@@ -118,7 +118,7 @@ describe("buildHostedRunnerContainerEnv", () => {
 
   it("does not forward hosted web control tokens into the runner", () => {
     expect(buildHostedRunnerContainerEnv({
-      HOSTED_WEB_INTERNAL_SIGNING_SECRET: "web-internal-secret",
+      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
     })).toEqual({
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",

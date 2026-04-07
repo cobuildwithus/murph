@@ -25,7 +25,8 @@ describe("readHostedExecutionEnvironment", () => {
     expect(environment.retryDelayMs).toBe(30_000);
     expect(environment.runnerTimeoutMs).toBe(60_000);
     expect(environment.vercelOidcValidation.teamSlug).toBe("murph-team");
-    expect(environment.webInternalSigningSecret).toBe("web-internal-secret");
+    expect(environment.webCallbackSigning.keyId).toBe("v1");
+    expect(environment.webCallbackSigning.privateKeyJwkJson).toContain("\"kty\":\"EC\"");
   });
 
   it("reads the configured Vercel OIDC environment when provided", () => {
@@ -105,9 +106,9 @@ describe("readHostedExecutionEnvironment", () => {
     expect(() =>
       readHostedExecutionEnvironment(createHostedExecutionTestEnv({
         HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET: "dispatch-secret",
-        HOSTED_WEB_INTERNAL_SIGNING_SECRET: undefined,
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: undefined,
       } as Record<string, string | undefined>)),
-    ).toThrow(/HOSTED_WEB_INTERNAL_SIGNING_SECRET/u);
+    ).toThrow(/HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK/u);
   });
 });
 

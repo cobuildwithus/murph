@@ -199,7 +199,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "bundle-key",
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON: "{\"v0\":\"old-key\"}",
       HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "recovery-public-jwk",
-      HOSTED_WEB_INTERNAL_SIGNING_SECRET: "web-internal-secret",
+      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       OPENAI_API_KEY: "sk-user",
       TELEGRAM_BOT_TOKEN: "bot-token",
     })).toEqual({
@@ -212,7 +212,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "bundle-key",
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON: "{\"v0\":\"old-key\"}",
       HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "recovery-public-jwk",
-      HOSTED_WEB_INTERNAL_SIGNING_SECRET: "web-internal-secret",
+      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       OPENAI_API_KEY: "sk-user",
       TELEGRAM_BOT_TOKEN: "bot-token",
     });
@@ -227,7 +227,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "automation-public-jwk",
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "bundle-key",
       HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "recovery-public-jwk",
-      HOSTED_WEB_INTERNAL_SIGNING_SECRET: "web-internal-secret",
+      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       OPENAI_API_KEY: "sk-user",
     })).toMatchObject({
       OPENAI_API_KEY: "sk-user",
@@ -241,7 +241,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "automation-public-jwk",
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "bundle-key",
       HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "recovery-public-jwk",
-      HOSTED_WEB_INTERNAL_SIGNING_SECRET: "web-internal-secret",
+      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       OPENAI_ENTERPRISE_API_KEY: "sk-enterprise",
     })).toMatchObject({
       OPENAI_ENTERPRISE_API_KEY: "sk-enterprise",
@@ -251,7 +251,7 @@ describe("hosted deploy automation helpers", () => {
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",
-      HOSTED_ASSISTANT_API_KEY_ENV: "HOSTED_WEB_INTERNAL_SIGNING_SECRET",
+      HOSTED_ASSISTANT_API_KEY_ENV: "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
       HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
       HOSTED_ASSISTANT_PROVIDER: "openai",
     }).workerVars.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();

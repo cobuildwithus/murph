@@ -1,9 +1,9 @@
 import { beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
 import {
   HOSTED_EXECUTION_NONCE_HEADER,
+  HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
-  verifyHostedExecutionSignature,
 } from "@murphai/hosted-execution";
 
 import { readHostedExecutionEnvironment } from "../src/env.ts";
@@ -224,7 +224,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("proxies hosted device connect-link requests through hosted web with the web internal signing secret", async () => {
+  it("proxies hosted device connect-link requests through hosted web with the Cloudflare callback signature", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       authorizationUrl: "https://provider.example.test/oauth/start",
       expiresAt: "2026-04-04T12:00:00.000Z",
@@ -258,7 +258,7 @@ describe("handleRunnerOutboundRequest", () => {
       providerLabel: "WHOOP",
     });
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://web.example.test/app/api/internal/device-sync/providers/whoop/connect-link",
+      "https://web.example.test/api/internal/device-sync/providers/whoop/connect-link",
       expect.objectContaining({
         headers: expect.any(Headers),
         method: "POST",
@@ -267,21 +267,10 @@ describe("handleRunnerOutboundRequest", () => {
     const requestHeaders = fetchMock.mock.calls[0]?.[1]?.headers;
     expect((requestHeaders as Headers).get("authorization")).toBeNull();
     expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
-    const nonce = (requestHeaders as Headers).get(HOSTED_EXECUTION_NONCE_HEADER);
-    const timestamp = (requestHeaders as Headers).get(HOSTED_EXECUTION_TIMESTAMP_HEADER);
-    await expect(
-      verifyHostedExecutionSignature({
-        method: "POST",
-        nonce,
-        path: "/app/api/internal/device-sync/providers/whoop/connect-link",
-        payload: "",
-        secret: "web-internal-secret",
-        signature: (requestHeaders as Headers).get(HOSTED_EXECUTION_SIGNATURE_HEADER),
-        timestamp,
-        nowMs: timestamp ? Date.parse(timestamp) : Date.now(),
-        userId: "member_123",
-      }),
-    ).resolves.toBe(true);
+    expect((requestHeaders as Headers).get(HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER)).toBe("v1");
+    expect((requestHeaders as Headers).get(HOSTED_EXECUTION_NONCE_HEADER)).toMatch(/^[a-f0-9]{32}$/u);
+    expect((requestHeaders as Headers).get(HOSTED_EXECUTION_TIMESTAMP_HEADER)).toMatch(/^\d{4}-\d{2}-\d{2}T/u);
+    expect((requestHeaders as Headers).get(HOSTED_EXECUTION_SIGNATURE_HEADER)).toMatch(/^[A-Za-z0-9\-_]+$/u);
   });
 
   it("returns 404 when a share pack has not been published for the bound user", async () => {
@@ -496,7 +485,8 @@ function createRunnerOutboundEnv(overrides: Partial<Record<string, unknown>> = {
     HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: Buffer.alloc(32, 9).toString("base64"),
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
-    HOSTED_WEB_INTERNAL_SIGNING_SECRET: "web-internal-secret",
+    HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK:
+      "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"xSelVJv6r6LPUS8GCNgj1T_7z5GXOrhgY1cCdzGb5ao\",\"y\":\"8HhciS1cAPKs_fPfgZnb1USdRtBX-4Nvp8XiBHuMcmY\",\"d\":\"HAPljluiFVW3g-UEmrJ9NVYTlclAhaC8N5LT0h7vitQ\",\"ext\":true,\"key_ops\":[\"sign\"]}",
     ...overrides,
   };
   const bootstrappedByUserId = new Map<string, Promise<void>>();

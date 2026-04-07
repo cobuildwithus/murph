@@ -26,6 +26,12 @@ export const TEST_RECOVERY_RECIPIENT_PUBLIC_JWK_JSON = JSON.stringify(
 export const TEST_AUTOMATION_RECIPIENT_PRIVATE_JWK_JSON = JSON.stringify(
   TEST_AUTOMATION_RECIPIENT_PRIVATE_JWK,
 );
+export const TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON = JSON.stringify(
+  TEST_AUTOMATION_RECIPIENT_PRIVATE_JWK,
+);
+export const TEST_HOSTED_WEB_CALLBACK_PUBLIC_JWK_JSON = JSON.stringify(
+  TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK,
+);
 
 export function createHostedExecutionTestEnv(
   overrides: Partial<Record<string, unknown>> = {},
@@ -42,7 +48,7 @@ export function createHostedExecutionTestEnv(
     HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: Buffer.alloc(32, 9).toString("base64"),
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
-    HOSTED_WEB_INTERNAL_SIGNING_SECRET: "web-internal-secret",
+    HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
     ...overrides,
   };
 }

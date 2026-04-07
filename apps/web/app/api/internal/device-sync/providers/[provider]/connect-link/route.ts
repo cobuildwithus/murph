@@ -2,8 +2,8 @@ import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/contro
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 import {
-  requireHostedWebInternalSignedRequest,
-} from "@/src/lib/hosted-execution/internal";
+  requireHostedCloudflareCallbackRequest,
+} from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 
 const HOSTED_ASSISTANT_DEVICE_CONNECT_RETURN_TO = "/settings?tab=wearables";
 
@@ -27,7 +27,7 @@ export const POST = withJsonError(async (
   request: Request,
   context: { params: Promise<{ provider: string }> },
 ) => {
-  const userId = await requireHostedWebInternalSignedRequest(request);
+  const userId = await requireHostedCloudflareCallbackRequest(request);
   const provider = await resolveDecodedRouteParam(context.params, "provider");
   const controlPlane = createHostedDeviceSyncControlPlane(request);
   const result = await controlPlane.startConnection(

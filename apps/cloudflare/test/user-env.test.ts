@@ -224,7 +224,7 @@ describe("hosted user env helpers", () => {
       current: {},
       update: {
         env: {
-          HOSTED_WEB_INTERNAL_SIGNING_SECRET: "nope",
+          HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "nope",
         },
         mode: "replace",
       },

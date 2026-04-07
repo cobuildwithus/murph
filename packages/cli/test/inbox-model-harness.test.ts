@@ -8,11 +8,6 @@ import {
   upsertFood,
   upsertProtocolItem,
 } from '@murphai/core'
-import {
-  HOSTED_EXECUTION_USER_ID_HEADER,
-  readHostedExecutionSignatureHeaders,
-  verifyHostedExecutionSignature,
-} from '@murphai/hosted-execution'
 import type { AssistantAskResult } from '@murphai/operator-config/assistant-cli-contracts'
 import { writeAssistantChatResultArtifacts } from '@murphai/assistant-engine/assistant/automation/artifacts'
 import {
@@ -1136,7 +1131,7 @@ test('createDefaultAssistantToolCatalog exposes the current assistant runtime, r
   assert.equal(catalog.hasTool('vault.food.show'), true)
   assert.equal(catalog.hasTool('vault.food.list'), true)
   assert.equal(catalog.hasTool('vault.food.upsert'), true)
-  assert.equal(catalog.hasTool('vault.share.createLink'), true)
+  assert.equal(catalog.hasTool('vault.share.createLink'), false)
   assert.equal(readTextTool?.provenance.origin, 'native-local-only')
   assert.deepEqual(readTextTool?.provenance.policyWrappers, ['output-redaction'])
   assert.equal(readTextTool?.backendKind, 'native-file')
@@ -1149,10 +1144,7 @@ test('createDefaultAssistantToolCatalog exposes the current assistant runtime, r
   assert.equal(goalUpsertTool?.mutationSemantics, 'canonical-write')
   assert.equal(goalUpsertTool?.riskClass, 'high')
   assert.equal(goalUpsertTool?.preferredHostKind, 'native-local')
-  assert.equal(shareLinkTool?.provenance.origin, 'hosted-api-backed')
-  assert.equal(shareLinkTool?.backendKind, 'hosted-api')
-  assert.equal(shareLinkTool?.mutationSemantics, 'outward-side-effect')
-  assert.equal(shareLinkTool?.selectedHostKind, 'native-local')
+  assert.equal(shareLinkTool, undefined)
   assert.deepEqual(toolNames, registryToolNames)
 })
 
@@ -1536,7 +1528,7 @@ test('createDefaultAssistantToolCatalog lets canonical writes and outward side e
   assert.equal(noWriteCatalog.hasTool('vault.recipe.upsert'), false)
   assert.equal(noWriteCatalog.hasTool('vault.share.createLink'), false)
   assert.equal(explicitOverrideCatalog.hasTool('vault.recipe.upsert'), false)
-  assert.equal(explicitOverrideCatalog.hasTool('vault.share.createLink'), true)
+  assert.equal(explicitOverrideCatalog.hasTool('vault.share.createLink'), false)
 })
 
 test('createDefaultAssistantToolCatalog disables inbox promotion tools when canonical writes are disabled', () => {
@@ -1900,45 +1892,16 @@ test('createDefaultAssistantToolCatalog food upsert writes payload files and cal
   }
 })
 
-test('createDefaultAssistantToolCatalog share-link tool exports attached protocols and posts the hosted request', async () => {
+test('createDefaultAssistantToolCatalog share-link tool exports attached protocols through the injected hosted capability', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-share-tools-'))
-  const originalBaseUrl = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL
-  const originalSigningSecret = process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET
-  const originalFetch = global.fetch
   let recordedRequest:
     | {
-        body: Record<string, unknown>
-        headers: Headers
-        rawBody: string
-        url: string
+        expiresInHours?: number
+        inviteCode?: string
+        pack: Record<string, unknown>
+        recipientPhoneNumber?: string
       }
     | undefined
-
-  process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = 'https://share.example.test/join'
-  process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = 'share-signing-secret'
-  global.fetch = vi.fn(async (input, init) => {
-    const rawBody = String(init?.body ?? '{}')
-    recordedRequest = {
-      body: JSON.parse(rawBody) as Record<string, unknown>,
-      headers: new Headers(init?.headers),
-      rawBody,
-      url: String(input),
-    }
-
-    return new Response(
-      JSON.stringify({
-        shareCode: 'share_123',
-        shareUrl: 'https://share.example.test/share/share_123',
-        url: 'https://share.example.test/share/share_123',
-      }),
-      {
-        headers: {
-          'content-type': 'application/json; charset=utf-8',
-        },
-        status: 200,
-      },
-    )
-  }) as typeof global.fetch
 
   try {
     await initializeVault({ vaultRoot })
@@ -1961,6 +1924,14 @@ test('createDefaultAssistantToolCatalog share-link tool exports attached protoco
       {
         executionContext: {
           hosted: {
+            issueShareLink: async (input) => {
+              recordedRequest = input as typeof recordedRequest
+              return {
+                shareCode: 'share_123',
+                shareUrl: 'https://share.example.test/share/share_123',
+                url: 'https://share.example.test/share/share_123',
+              }
+            },
             memberId: 'member_123',
             userEnvKeys: ['OPENAI_API_KEY'],
           },
@@ -1991,34 +1962,13 @@ test('createDefaultAssistantToolCatalog share-link tool exports attached protoco
     })
 
     assert.equal(results[0]?.status, 'succeeded')
-    assert.equal(recordedRequest?.url, 'https://share.example.test/api/hosted-share/internal/create')
-    assert.equal(recordedRequest?.headers.get('authorization'), null)
-    assert.equal(recordedRequest?.headers.get(HOSTED_EXECUTION_USER_ID_HEADER), 'member_123')
-    assert.equal(recordedRequest?.body.shareCode, undefined)
-    assert.equal(recordedRequest?.body.senderMemberId, 'member_123')
-    const signatureHeaders = readHostedExecutionSignatureHeaders(recordedRequest!.headers)
-    const requestUrl = new URL(recordedRequest!.url)
+    assert.equal((recordedRequest?.pack as { title?: string })?.title, 'Morning Smoothie')
     assert.equal(
-      await verifyHostedExecutionSignature({
-        method: 'POST',
-        nonce: signatureHeaders.nonce,
-        path: requestUrl.pathname,
-        payload: recordedRequest!.rawBody,
-        search: requestUrl.search,
-        secret: 'share-signing-secret',
-        signature: signatureHeaders.signature,
-        timestamp: signatureHeaders.timestamp,
-        userId: 'member_123',
-      }),
-      true,
-    )
-    assert.equal((recordedRequest?.body.pack as { title?: string })?.title, 'Morning Smoothie')
-    assert.equal(
-      Array.isArray((recordedRequest?.body.pack as { entities?: unknown[] })?.entities),
+      Array.isArray((recordedRequest?.pack as { entities?: unknown[] })?.entities),
       true,
     )
     assert.equal(
-      ((recordedRequest?.body.pack as {
+      ((recordedRequest?.pack as {
         entities?: Array<{ kind: string; payload?: { attachedProtocolRefs?: string[] } }>
       })?.entities ?? []).some(
         (entity) =>
@@ -2034,59 +1984,12 @@ test('createDefaultAssistantToolCatalog share-link tool exports attached protoco
       url: 'https://share.example.test/share/share_123',
     })
   } finally {
-    if (originalBaseUrl === undefined) {
-      delete process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL
-    } else {
-      process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = originalBaseUrl
-    }
-
-    if (originalSigningSecret === undefined) {
-      delete process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET
-    } else {
-      process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = originalSigningSecret
-    }
-
-    global.fetch = originalFetch
     await rm(vaultRoot, { recursive: true, force: true })
   }
 })
 
-test('createDefaultAssistantToolCatalog share-link tool uses hosted sender identity from execution context', async () => {
+test('createDefaultAssistantToolCatalog only exposes the share-link tool when a hosted share capability is injected', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-share-tools-hosted-'))
-  const originalBaseUrl = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL
-  const originalSigningSecret = process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET
-  const originalFetch = global.fetch
-  let recordedRequest:
-    | {
-        body: Record<string, unknown>
-        headers: Headers
-        url: string
-      }
-    | undefined
-
-  process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = 'https://share.example.test'
-  process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = 'share-signing-secret'
-  global.fetch = vi.fn(async (input, init) => {
-    recordedRequest = {
-      body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>,
-      headers: new Headers(init?.headers),
-      url: String(input),
-    }
-
-    return new Response(
-      JSON.stringify({
-        shareCode: 'share_456',
-        shareUrl: 'https://share.example.test/share/share_456',
-        url: 'https://share.example.test/share/share_456',
-      }),
-      {
-        headers: {
-          'content-type': 'application/json; charset=utf-8',
-        },
-        status: 200,
-      },
-    )
-  }) as typeof global.fetch
 
   try {
     await initializeVault({ vaultRoot })
@@ -2110,63 +2013,35 @@ test('createDefaultAssistantToolCatalog share-link tool uses hosted sender ident
       },
       { includeQueryTools: false },
     )
-
-    const results = await catalog.executeCalls({
-      calls: [
-        {
-          tool: 'vault.share.createLink',
-          input: {
-            foods: [{ slug: 'morning-smoothie' }],
+    const hostedCatalog = createDefaultAssistantToolCatalog(
+      {
+        executionContext: {
+          hosted: {
+            issueShareLink: async () => ({
+              shareCode: 'share_456',
+              shareUrl: 'https://share.example.test/share/share_456',
+              url: 'https://share.example.test/share/share_456',
+            }),
+            memberId: 'member_123',
+            userEnvKeys: ['OPENAI_API_KEY'],
           },
         },
-      ],
-      mode: 'apply',
-    })
+        requestId: 'req_share_hosted_capability',
+        vault: vaultRoot,
+        vaultServices: createStubVaultServices(),
+      },
+      { includeQueryTools: false },
+    )
 
-    assert.equal(results[0]?.status, 'succeeded')
-    assert.equal(recordedRequest?.body.senderMemberId, 'member_123')
-    assert.equal(recordedRequest?.headers.get(HOSTED_EXECUTION_USER_ID_HEADER), 'member_123')
+    assert.equal(catalog.hasTool('vault.share.createLink'), false)
+    assert.equal(hostedCatalog.hasTool('vault.share.createLink'), true)
   } finally {
-    if (originalBaseUrl === undefined) {
-      delete process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL
-    } else {
-      process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = originalBaseUrl
-    }
-
-    if (originalSigningSecret === undefined) {
-      delete process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET
-    } else {
-      process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = originalSigningSecret
-    }
-
-    global.fetch = originalFetch
     await rm(vaultRoot, { recursive: true, force: true })
   }
 })
 
-test('createDefaultAssistantToolCatalog share-link tool surfaces hosted API errors', async () => {
+test('createDefaultAssistantToolCatalog share-link tool surfaces injected hosted capability errors', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-share-tools-error-'))
-  const originalBaseUrl = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL
-  const originalSigningSecret = process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET
-  const originalFetch = global.fetch
-
-  process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = 'https://share.example.test'
-  process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = 'share-signing-secret'
-  global.fetch = vi.fn(async () =>
-    new Response(
-      JSON.stringify({
-        error: {
-          message: 'Hosted share link creation failed upstream.',
-        },
-      }),
-      {
-        headers: {
-          'content-type': 'application/json; charset=utf-8',
-        },
-        status: 502,
-      },
-    ),
-  ) as typeof global.fetch
 
   try {
     await initializeVault({ vaultRoot })
@@ -2180,6 +2055,9 @@ test('createDefaultAssistantToolCatalog share-link tool surfaces hosted API erro
       {
         executionContext: {
           hosted: {
+            issueShareLink: async () => {
+              throw new Error('Hosted share link creation failed upstream.')
+            },
             memberId: 'member_123',
             userEnvKeys: ['OPENAI_API_KEY'],
           },
@@ -2207,19 +2085,6 @@ test('createDefaultAssistantToolCatalog share-link tool surfaces hosted API erro
     assert.equal(results[0]?.errorCode, 'ASSISTANT_TOOL_EXECUTION_FAILED')
     assert.match(results[0]?.errorMessage ?? '', /Hosted share link creation failed upstream\./u)
   } finally {
-    if (originalBaseUrl === undefined) {
-      delete process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL
-    } else {
-      process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = originalBaseUrl
-    }
-
-    if (originalSigningSecret === undefined) {
-      delete process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET
-    } else {
-      process.env.HOSTED_WEB_INTERNAL_SIGNING_SECRET = originalSigningSecret
-    }
-
-    global.fetch = originalFetch
     await rm(vaultRoot, { recursive: true, force: true })
   }
 })

@@ -3,25 +3,30 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createJsonPostRequest } from "./route-test-helpers";
 
 const mocks = vi.hoisted(() => ({
+  assertHostedOnboardingMutationOrigin: vi.fn(),
   createHostedShareLink: vi.fn(),
-  requireHostedWebInternalSignedRequest: vi.fn(),
+  requireHostedPrivyActiveRequestAuthContext: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-execution/internal", () => ({
-  requireHostedWebInternalSignedRequest: mocks.requireHostedWebInternalSignedRequest,
+vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
+  assertHostedOnboardingMutationOrigin: mocks.assertHostedOnboardingMutationOrigin,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
+  requireHostedPrivyActiveRequestAuthContext: mocks.requireHostedPrivyActiveRequestAuthContext,
 }));
 
 vi.mock("@/src/lib/hosted-share/service", () => ({
   createHostedShareLink: mocks.createHostedShareLink,
 }));
 
-type HostedShareInternalCreateRouteModule = typeof import("../app/api/hosted-share/internal/create/route");
+type HostedShareCreateRouteModule = typeof import("../app/api/hosted-share/create/route");
 
-let hostedShareInternalCreateRoute: HostedShareInternalCreateRouteModule;
+let hostedShareCreateRoute: HostedShareCreateRouteModule;
 
-describe("hosted share internal create route", () => {
+describe("hosted share create route", () => {
   beforeAll(async () => {
-    hostedShareInternalCreateRoute = await import("../app/api/hosted-share/internal/create/route");
+    hostedShareCreateRoute = await import("../app/api/hosted-share/create/route");
   });
 
   beforeEach(() => {
@@ -30,15 +35,16 @@ describe("hosted share internal create route", () => {
       shareCode: "share_123",
       url: "https://join.example.test/share/share_123",
     });
-    mocks.requireHostedWebInternalSignedRequest.mockImplementation(async (request: Request) => {
-      await expect(request.clone().text()).resolves.toContain("\"senderMemberId\":\"member_sender\"");
-      return "member_sender";
+    mocks.requireHostedPrivyActiveRequestAuthContext.mockResolvedValue({
+      member: {
+        id: "member_sender",
+      },
     });
   });
 
-  it("verifies the signed request before consuming the JSON body", async () => {
-    const response = await hostedShareInternalCreateRoute.POST(
-      createJsonPostRequest("https://join.example.test/api/hosted-share/internal/create", {
+  it("uses the authenticated hosted member instead of trusting caller-supplied sender ids", async () => {
+    const response = await hostedShareCreateRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/hosted-share/create", {
         pack: {
           createdAt: "2026-04-05T00:00:00.000Z",
           entities: [
@@ -53,12 +59,13 @@ describe("hosted share internal create route", () => {
           schemaVersion: "murph.share-pack.v1",
           title: "Shared pack",
         },
-        senderMemberId: "member_sender",
+        senderMemberId: "member_attacker",
       }),
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.requireHostedWebInternalSignedRequest).toHaveBeenCalledTimes(1);
+    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledTimes(1);
+    expect(mocks.requireHostedPrivyActiveRequestAuthContext).toHaveBeenCalledTimes(1);
     expect(mocks.createHostedShareLink).toHaveBeenCalledWith({
       expiresInHours: undefined,
       inviteCode: null,
