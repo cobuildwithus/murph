@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
@@ -516,6 +517,91 @@ describe("hosted onboarding routes", () => {
         message: "Wait a moment before requesting another code.",
         retryable: true,
       },
+    });
+  });
+
+  it("logs sanitized Prisma diagnostics for unexpected invite send-code failures", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.prepareHostedInvitePhoneCode.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError("column missing", {
+        clientVersion: "test",
+        code: "P2022",
+        meta: {
+          column: "signup_phone_code_send_attempt_id",
+          modelName: "HostedMemberIdentity",
+          secretValue: "should-not-log",
+        },
+      }),
+    );
+
+    const response = await sendCodeRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/invites/invite-code/send-code", {
+        headers: SAME_ORIGIN_HEADERS,
+        method: "POST",
+      }),
+      {
+        params: Promise.resolve({
+          inviteCode: "invite-code",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "Internal error.",
+      },
+    });
+    expect(errorSpy).toHaveBeenCalledWith("Hosted onboarding route failed.", {
+      errorType: "PrismaClientKnownRequestError",
+      internalMessage: "Hosted onboarding route failed unexpectedly.",
+      prismaClientVersion: "test",
+      prismaCode: "P2022",
+      prismaMessage: "column missing",
+      prismaMeta: {
+        column: "signup_phone_code_send_attempt_id",
+        modelName: "HostedMemberIdentity",
+      },
+    });
+  });
+
+  it("logs sanitized Prisma initialization diagnostics for unexpected invite send-code failures", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.prepareHostedInvitePhoneCode.mockRejectedValue(
+      new Prisma.PrismaClientInitializationError(
+        "connect failed for https://db.example.test from /Users/test/app while notifying user@example.com at +1 415 555 2671",
+        "7.5.0",
+        "P1001",
+      ),
+    );
+
+    const response = await sendCodeRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/invites/invite-code/send-code", {
+        headers: SAME_ORIGIN_HEADERS,
+        method: "POST",
+      }),
+      {
+        params: Promise.resolve({
+          inviteCode: "invite-code",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "Internal error.",
+      },
+    });
+    expect(errorSpy).toHaveBeenCalledWith("Hosted onboarding route failed.", {
+      errorType: "PrismaClientInitializationError",
+      internalMessage: "Hosted onboarding route failed unexpectedly.",
+      prismaClientVersion: "7.5.0",
+      prismaCode: "P1001",
+      prismaMessage:
+        "connect failed for <redacted-url> from <redacted-path> while notifying <redacted-email> at <redacted-phone>",
     });
   });
 
