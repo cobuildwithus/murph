@@ -15,7 +15,7 @@ vi.mock("@murphai/hosted-execution/env", () => ({
   readHostedExecutionControlEnvironment: mocks.readHostedExecutionControlEnvironment,
 }));
 
-vi.mock("@/src/lib/hosted-execution/vercel-oidc", () => ({
+vi.mock("@/src/lib/hosted-execution/auth-adapter", () => ({
   createHostedExecutionVercelOidcBearerTokenProvider:
     mocks.createHostedExecutionVercelOidcBearerTokenProvider,
 }));

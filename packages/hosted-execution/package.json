@@ -42,10 +42,6 @@
       "types": "./dist/hosted-email.d.ts",
       "default": "./dist/hosted-email.js"
     },
-    "./member-private-state": {
-      "types": "./dist/member-private-state.d.ts",
-      "default": "./dist/member-private-state.js"
-    },
     "./parsers": {
       "types": "./dist/parsers.d.ts",
       "default": "./dist/parsers.js"
@@ -53,10 +49,6 @@
     "./routes": {
       "types": "./dist/routes.d.ts",
       "default": "./dist/routes.js"
-    },
-    "./vercel-oidc": {
-      "types": "./dist/vercel-oidc.d.ts",
-      "default": "./dist/vercel-oidc.js"
     },
     "./web-control-plane": {
       "types": "./dist/web-control-plane.d.ts",
@@ -77,8 +69,7 @@
   },
   "dependencies": {
     "@murphai/contracts": "workspace:*",
-    "@murphai/runtime-state": "workspace:*",
-    "jose": "^6.2.2"
+    "@murphai/runtime-state": "workspace:*"
   },
   "bundleDependencies": [
     "@murphai/runtime-state"

@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   tokenProvider: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-execution/vercel-oidc", () => ({
+vi.mock("@/src/lib/hosted-execution/auth-adapter", () => ({
   createHostedExecutionVercelOidcBearerTokenProvider:
     mocks.createHostedExecutionVercelOidcBearerTokenProvider,
 }));

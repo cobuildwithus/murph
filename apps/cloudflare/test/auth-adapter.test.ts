@@ -8,7 +8,7 @@ import {
   readHostedExecutionVercelOidcValidationEnvironment,
   verifyHostedExecutionVercelOidcBearerToken,
   verifyHostedExecutionVercelOidcRequest,
-} from "@murphai/hosted-execution";
+} from "../src/auth-adapter.js";
 
 const TEST_TEAM_SLUG = "murph-team";
 const TEST_PROJECT_NAME = "murph-web";
@@ -25,7 +25,7 @@ const TEST_PUBLIC_JWK = {
   use: "sig",
 };
 
-describe("vercel oidc helpers", () => {
+describe("cloudflare hosted execution auth adapter", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -37,7 +37,7 @@ describe("vercel oidc helpers", () => {
     expect(readBearerAuthorizationToken(null)).toBeNull();
   });
 
-  it("reads the hosted execution Vercel OIDC validation environment", () => {
+  it("reads the Vercel OIDC validation environment from worker env vars", () => {
     expect(readHostedExecutionVercelOidcValidationEnvironment({
       HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: TEST_PROJECT_NAME,
       HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: TEST_TEAM_SLUG,

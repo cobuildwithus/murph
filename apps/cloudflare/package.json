@@ -38,7 +38,8 @@
     "@murphai/hosted-execution": "workspace:*",
     "@murphai/inboxd": "workspace:*",
     "@murphai/parsers": "workspace:*",
-    "@murphai/runtime-state": "workspace:*"
+    "@murphai/runtime-state": "workspace:*",
+    "jose": "^6.2.2"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.13.4",

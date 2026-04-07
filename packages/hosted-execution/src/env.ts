@@ -2,10 +2,6 @@ import {
   DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
 } from "./callback-hosts.ts";
-import {
-  requireHostedExecutionVercelOidcValidationEnvironment,
-  type HostedExecutionVercelOidcValidationEnvironment,
-} from "./vercel-oidc.ts";
 export interface HostedExecutionDispatchEnvironment {
   dispatchTimeoutMs: number;
   dispatchUrl: string | null;
@@ -38,7 +34,6 @@ export interface HostedExecutionWorkerEnvironment {
   maxEventAttempts: number;
   retryDelayMs: number;
   runnerTimeoutMs: number;
-  vercelOidcValidation: HostedExecutionVercelOidcValidationEnvironment;
   webInternalSigningSecret: string;
 }
 
@@ -162,7 +157,6 @@ export function readHostedExecutionWorkerEnvironment(
       60_000,
       "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS",
     ),
-    vercelOidcValidation: requireHostedExecutionVercelOidcValidationEnvironment(source),
     webInternalSigningSecret: requireHostedExecutionString(
       normalizeHostedExecutionString(source.HOSTED_WEB_INTERNAL_SIGNING_SECRET),
       "HOSTED_WEB_INTERNAL_SIGNING_SECRET",

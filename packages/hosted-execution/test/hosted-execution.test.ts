@@ -74,9 +74,6 @@ import {
   readHostedExecutionWorkerEnvironment,
 } from "@murphai/hosted-execution/env";
 import {
-  createHostedExecutionVercelOidcValidationEnvironment,
-} from "@murphai/hosted-execution/vercel-oidc";
-import {
   createHostedExecutionProxyAiUsageClient,
   createHostedExecutionProxyDeviceSyncRuntimeClient,
   createHostedExecutionServerDeviceSyncConnectLinkClient,
@@ -310,7 +307,7 @@ describe("@murphai/hosted-execution", () => {
     });
   });
 
-  it("reads hosted worker env defaults from the OIDC and web-internal callback envs", () => {
+  it("reads hosted worker env defaults from the shared worker and web-internal callback envs", () => {
     expect(
       readHostedExecutionWorkerEnvironment({
         HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "OPENAI_API_KEY",
@@ -324,8 +321,6 @@ describe("@murphai/hosted-execution", () => {
         HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: JSON.stringify(
           TEST_HOSTED_RECIPIENT_PUBLIC_JWK,
         ),
-        HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
-        HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
         HOSTED_WEB_INTERNAL_SIGNING_SECRET: "web-internal-secret",
       }),
     ).toEqual({
@@ -345,11 +340,6 @@ describe("@murphai/hosted-execution", () => {
       maxEventAttempts: 3,
       retryDelayMs: 30_000,
       runnerTimeoutMs: 60_000,
-      vercelOidcValidation: createHostedExecutionVercelOidcValidationEnvironment({
-        environment: "production",
-        projectName: "murph-web",
-        teamSlug: "murph-team",
-      }),
       webInternalSigningSecret: "web-internal-secret",
     });
   });
@@ -385,8 +375,6 @@ describe("@murphai/hosted-execution", () => {
         HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS: "5",
         HOSTED_EXECUTION_RETRY_DELAY_MS: "60000",
         HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "120000",
-        HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
-        HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
         HOSTED_WEB_INTERNAL_SIGNING_SECRET: "web-internal-secret",
       }),
     ).toMatchObject({
@@ -423,8 +411,6 @@ describe("@murphai/hosted-execution", () => {
           TEST_HOSTED_RECIPIENT_PUBLIC_JWK,
         ),
         HOSTED_EXECUTION_RETRY_DELAY_MS: "0",
-        HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
-        HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
         HOSTED_WEB_INTERNAL_SIGNING_SECRET: "web-internal-secret",
       }),
     ).toThrow("HOSTED_EXECUTION_RETRY_DELAY_MS must be a positive integer.");
@@ -1547,8 +1533,6 @@ describe("@murphai/hosted-execution", () => {
         HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: JSON.stringify(
           TEST_HOSTED_RECIPIENT_PUBLIC_JWK,
         ),
-        HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
-        HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
         HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET: "dispatch-secret",
       } as Record<string, string>),
     ).toThrow(/HOSTED_WEB_INTERNAL_SIGNING_SECRET/u);

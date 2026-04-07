@@ -10,6 +10,10 @@ import {
   type HostedExecutionWorkerEnvironment,
 } from "@murphai/hosted-execution/env";
 
+import {
+  requireHostedExecutionVercelOidcValidationEnvironment,
+  type HostedExecutionVercelOidcValidationEnvironment,
+} from "./auth-adapter.ts";
 import { decodeBase64Key } from "./base64.js";
 
 export type HostedExecutionEnvironment = Omit<
@@ -29,6 +33,7 @@ export type HostedExecutionEnvironment = Omit<
   platformEnvelopeKeysById: Readonly<Record<string, Uint8Array>>;
   recoveryRecipientPublicKey: HostedUserRecipientPublicKeyJwk;
   teeAutomationRecipientPublicKey: HostedUserRecipientPublicKeyJwk | null;
+  vercelOidcValidation: HostedExecutionVercelOidcValidationEnvironment;
 };
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
@@ -92,6 +97,7 @@ export function readHostedExecutionEnvironment(
         "HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK",
       )
       : null,
+    vercelOidcValidation: requireHostedExecutionVercelOidcValidationEnvironment(source),
   };
 }
 
