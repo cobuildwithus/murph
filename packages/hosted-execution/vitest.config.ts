@@ -14,6 +14,8 @@ import {
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/contracts": "../contracts/src/index.ts",
+  "@murphai/device-syncd": "../device-syncd/src/index.ts",
+  "@murphai/device-syncd/hosted-runtime": "../device-syncd/src/hosted-runtime.ts",
   "@murphai/hosted-execution": "./src/index.ts",
 } as const;
 

@@ -3,6 +3,13 @@ import type {
   HostedExecutionBundleRef as RuntimeHostedExecutionBundleRef,
 } from "@murphai/runtime-state";
 import type {
+  HostedExecutionDeviceSyncRuntimeConnectionSnapshot as DeviceSyncHostedExecutionDeviceSyncRuntimeConnectionSnapshot,
+  HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot as DeviceSyncHostedExecutionDeviceSyncRuntimeConnectionStateSnapshot,
+  HostedExecutionDeviceSyncRuntimeLocalStateSnapshot as DeviceSyncHostedExecutionDeviceSyncRuntimeLocalStateSnapshot,
+  HostedExecutionDeviceSyncRuntimeSnapshotResponse as DeviceSyncHostedExecutionDeviceSyncRuntimeSnapshotResponse,
+  HostedExecutionDeviceSyncRuntimeTokenBundle as DeviceSyncHostedExecutionDeviceSyncRuntimeTokenBundle,
+} from "@murphai/device-syncd/hosted-runtime";
+import type {
   HostedExecutionBundlePayload,
   HostedExecutionBundleRefState,
 } from "./bundles.ts";
@@ -139,7 +146,7 @@ export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseE
   kind: "device-sync.wake";
   provider?: string | null;
   reason: "connected" | "webhook_hint" | "disconnected" | "reauthorization_required";
-  runtimeSnapshot?: HostedExecutionDeviceSyncRuntimeSnapshotResponse | null;
+  runtimeSnapshot?: DeviceSyncHostedExecutionDeviceSyncRuntimeSnapshotResponse | null;
 }
 
 export interface HostedExecutionShareReference {
@@ -248,49 +255,20 @@ export const HOSTED_EXECUTION_USER_ID_HEADER = "x-hosted-execution-user-id";
 export const HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER =
   "x-hosted-execution-runner-proxy-token";
 
-export interface HostedExecutionDeviceSyncRuntimeTokenBundle {
-  accessToken: string;
-  accessTokenExpiresAt: string | null;
-  keyVersion: string;
-  refreshToken: string | null;
-  tokenVersion: number;
-}
+export type HostedExecutionDeviceSyncRuntimeTokenBundle =
+  DeviceSyncHostedExecutionDeviceSyncRuntimeTokenBundle;
 
-export interface HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot {
-  accessTokenExpiresAt: string | null;
-  connectedAt: string;
-  createdAt: string;
-  displayName: string | null;
-  externalAccountId: string;
-  id: string;
-  metadata: Record<string, unknown>;
-  provider: string;
-  scopes: string[];
-  status: "active" | "reauthorization_required" | "disconnected";
-  updatedAt?: string;
-}
+export type HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot =
+  DeviceSyncHostedExecutionDeviceSyncRuntimeConnectionStateSnapshot;
 
-export interface HostedExecutionDeviceSyncRuntimeLocalStateSnapshot {
-  lastErrorCode: string | null;
-  lastErrorMessage: string | null;
-  lastSyncCompletedAt: string | null;
-  lastSyncErrorAt: string | null;
-  lastSyncStartedAt: string | null;
-  lastWebhookAt: string | null;
-  nextReconcileAt: string | null;
-}
+export type HostedExecutionDeviceSyncRuntimeLocalStateSnapshot =
+  DeviceSyncHostedExecutionDeviceSyncRuntimeLocalStateSnapshot;
 
-export interface HostedExecutionDeviceSyncRuntimeConnectionSnapshot {
-  connection: HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot;
-  localState: HostedExecutionDeviceSyncRuntimeLocalStateSnapshot;
-  tokenBundle: HostedExecutionDeviceSyncRuntimeTokenBundle | null;
-}
+export type HostedExecutionDeviceSyncRuntimeConnectionSnapshot =
+  DeviceSyncHostedExecutionDeviceSyncRuntimeConnectionSnapshot;
 
-export interface HostedExecutionDeviceSyncRuntimeSnapshotResponse {
-  connections: HostedExecutionDeviceSyncRuntimeConnectionSnapshot[];
-  generatedAt: string;
-  userId: string;
-}
+export type HostedExecutionDeviceSyncRuntimeSnapshotResponse =
+  DeviceSyncHostedExecutionDeviceSyncRuntimeSnapshotResponse;
 
 export interface HostedExecutionDispatchStateSnapshot {
   backpressured: boolean;

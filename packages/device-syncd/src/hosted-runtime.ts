@@ -1,3 +1,5 @@
+import { sanitizeStoredDeviceSyncMetadata } from "./shared.ts";
+
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH =
   "/api/internal/device-sync/runtime/snapshot";
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH =
@@ -360,12 +362,14 @@ function parseHostedExecutionDeviceSyncRuntimeConnection(
 
   return {
     accessTokenExpiresAt: readNullableIsoTimestamp(record.accessTokenExpiresAt, `${label}.accessTokenExpiresAt`),
-    connectedAt: requireString(record.connectedAt, `${label}.connectedAt`),
-    createdAt: requireString(record.createdAt, `${label}.createdAt`),
+    connectedAt: requireIsoTimestamp(record.connectedAt, `${label}.connectedAt`),
+    createdAt: requireIsoTimestamp(record.createdAt, `${label}.createdAt`),
     displayName: readNullableStringValue(record.displayName, `${label}.displayName`),
     externalAccountId: requireString(record.externalAccountId, `${label}.externalAccountId`),
     id: requireString(record.id, `${label}.id`),
-    metadata: requireObject(record.metadata, `${label}.metadata`),
+    metadata: sanitizeStoredDeviceSyncMetadata(
+      requireObject(record.metadata, `${label}.metadata`),
+    ),
     provider: requireString(record.provider, `${label}.provider`),
     scopes: requireStringArray(record.scopes, `${label}.scopes`),
     status,
@@ -627,6 +631,8 @@ function requireString(value: unknown, label: string): string {
   return value;
 }
 
+const ISO_8601_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
+
 function readNullableStringValue(value: unknown, label: string): string | null {
   if (value === null) {
     return null;
@@ -668,10 +674,19 @@ function readNullableIsoTimestamp(value: unknown, label: string): string | null 
     return null;
   }
 
+  return requireIsoTimestamp(value, label);
+}
+
+function requireIsoTimestamp(value: unknown, label: string): string {
   const parsed = requireString(value, label);
+
+  if (!ISO_8601_TIMESTAMP_PATTERN.test(parsed)) {
+    throw new TypeError(`${label} must be an ISO timestamp.`);
+  }
+
   const timestamp = Date.parse(parsed);
   if (!Number.isFinite(timestamp)) {
-    throw new TypeError(`${label} must be an ISO timestamp or null.`);
+    throw new TypeError(`${label} must be an ISO timestamp.`);
   }
 
   return new Date(timestamp).toISOString();
