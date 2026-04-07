@@ -488,9 +488,11 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionStateUpdate(
     );
   }
   if (record.metadata !== undefined) {
-    next.metadata = requireObject(
-      record.metadata,
-      `Hosted device-sync runtime apply request updates[${index}].connection.metadata`,
+    next.metadata = sanitizeStoredDeviceSyncMetadata(
+      requireObject(
+        record.metadata,
+        `Hosted device-sync runtime apply request updates[${index}].connection.metadata`,
+      ),
     );
   }
   if (record.scopes !== undefined) {
@@ -534,6 +536,16 @@ function parseHostedExecutionDeviceSyncRuntimeLocalStateUpdate(
   for (const field of [
     "lastErrorCode",
     "lastErrorMessage",
+  ] as const) {
+    if (record[field] !== undefined) {
+      next[field] = readNullableStringValue(
+        record[field],
+        `Hosted device-sync runtime apply request updates[${index}].localState.${field}`,
+      );
+    }
+  }
+
+  for (const field of [
     "lastSyncCompletedAt",
     "lastSyncErrorAt",
     "lastSyncStartedAt",

@@ -120,6 +120,68 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("rejects seeded device-sync runtime apply requests from the untrusted runner path", async () => {
+    const applyDeviceSyncRuntimeUpdates = vi.fn();
+
+    await expect(handleRunnerOutboundRequest(
+      new Request("http://device-sync.worker/api/internal/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [
+            {
+              connectionId: "conn_123",
+              seed: {
+                connection: {
+                  accessTokenExpiresAt: null,
+                  connectedAt: "2026-04-07T00:00:00.000Z",
+                  createdAt: "2026-04-07T00:00:00.000Z",
+                  displayName: "Oura",
+                  externalAccountId: "acct_123",
+                  id: "conn_123",
+                  metadata: {},
+                  provider: "oura",
+                  scopes: ["heartrate:read"],
+                  status: "active",
+                },
+                localState: {
+                  lastErrorCode: null,
+                  lastErrorMessage: null,
+                  lastSyncCompletedAt: null,
+                  lastSyncErrorAt: null,
+                  lastSyncStartedAt: null,
+                  lastWebhookAt: null,
+                  nextReconcileAt: null,
+                },
+                tokenBundle: null,
+              },
+            },
+          ],
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return {
+              applyDeviceSyncRuntimeUpdates,
+              async commit() {
+                throw new Error("not used");
+              },
+            };
+          },
+        },
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    )).rejects.toThrow(
+      "Runner device-sync runtime apply requests must not include seeded connections.",
+    );
+
+    expect(applyDeviceSyncRuntimeUpdates).not.toHaveBeenCalled();
+  });
+
   it("does not depend on hosted-web allowlists for local device-sync runtime paths", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
