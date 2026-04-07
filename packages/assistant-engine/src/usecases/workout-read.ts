@@ -11,6 +11,7 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { pathSchema } from '@murphai/operator-config/vault-cli-contracts'
 import { asListEnvelope } from './shared.js'
+import { relativePathEntries } from './vault-usecase-helpers.js'
 
 const DEFAULT_LIST_LIMIT = 50
 const TRACKED_WORKOUT_EVENT_KINDS = ['activity_session', 'body_measurement'] as const
@@ -43,26 +44,13 @@ function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))]
 }
 
-function mediaRelativePaths(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return []
-  }
-
-  return value.flatMap((entry) => {
-    if (!isJsonObject(entry) || typeof entry.relativePath !== 'string') {
-      return []
-    }
-
-    return entry.relativePath.trim().length > 0 ? [entry.relativePath] : []
-  })
-}
-
 function resolveManifestFile(record: QueryRecord): string {
   const workoutAttributes = isJsonObject(record.attributes.workout) ? record.attributes.workout : null
   const rawRefs = uniqueStrings([
+    ...relativePathEntries(record.attributes.attachments),
     ...stringArray(record.attributes.rawRefs),
-    ...mediaRelativePaths(record.attributes.media),
-    ...mediaRelativePaths(workoutAttributes?.media),
+    ...relativePathEntries(record.attributes.media),
+    ...relativePathEntries(workoutAttributes?.media),
   ])
 
   if (rawRefs.length === 0) {

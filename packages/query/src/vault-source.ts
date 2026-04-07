@@ -7,8 +7,10 @@ import {
 
 import {
   compareCanonicalEntities,
+  isCanonicalEntityLinkType,
   linkTargetIds,
   normalizeCanonicalDate,
+  normalizeCanonicalLinks,
   normalizeUniqueStringArray,
   relatedToLinks,
   resolveCanonicalRecordClass,
@@ -95,6 +97,41 @@ class QueryVaultSourceError extends Error {
 
 function relatedIdsToLinks(...groups: readonly unknown[]) {
   return relatedToLinks(groups.flatMap((group) => normalizeUniqueStringArray(group)));
+}
+
+function explicitCanonicalLinks(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return normalizeCanonicalLinks(
+    value.flatMap((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        return [];
+      }
+
+      const candidate = entry as Record<string, unknown>;
+      const type = typeof candidate.type === "string" ? candidate.type.trim() : "";
+      const targetId = typeof candidate.targetId === "string" ? candidate.targetId.trim() : "";
+
+      if (!type || !targetId || !isCanonicalEntityLinkType(type)) {
+        return [];
+      }
+
+      return [{ type, targetId }];
+    }),
+  );
+}
+
+function relationFieldsToLinks(
+  explicitLinks: unknown,
+  ...legacyGroups: readonly unknown[]
+) {
+  if (Array.isArray(explicitLinks)) {
+    return explicitCanonicalLinks(explicitLinks);
+  }
+
+  return relatedIdsToLinks(...legacyGroups);
 }
 
 export async function readVaultSourceStrict(
@@ -302,7 +339,7 @@ async function readExperimentEntities(vaultRoot: string): Promise<CanonicalEntit
         pickString(attributes, ["title"]) ??
         extractMarkdownHeading(document.body) ??
         slug;
-      const links = relatedIdsToLinks(attributes.relatedIds, attributes.eventIds);
+      const links = relationFieldsToLinks(attributes.links, attributes.relatedIds, attributes.eventIds);
 
       return {
         entityId: id,
@@ -357,7 +394,7 @@ async function readJournalEntities(vaultRoot: string): Promise<CanonicalEntity[]
         extractMarkdownHeading(document.body) ??
         date;
       const id = `journal:${date}`;
-      const links = relatedIdsToLinks(attributes.relatedIds, attributes.eventIds);
+      const links = relationFieldsToLinks(attributes.links, attributes.relatedIds, attributes.eventIds);
 
       pages.push({
         entityId: id,
@@ -422,7 +459,7 @@ async function readJsonlRecordFamily(
         `${recordType} record at ${sourcePath}:${lineNumber}`,
       );
       const identity = deriveVaultRecordIdentity(recordType, payload, rawRecordId);
-      const links = relatedIdsToLinks(payload.relatedIds, payload.eventIds);
+      const links = relationFieldsToLinks(payload.links, payload.relatedIds, payload.eventIds);
       const relatedIds = linkTargetIds(links);
 
       return {
@@ -483,7 +520,7 @@ async function readSampleEntities(vaultRoot: string): Promise<CanonicalEntity[]>
         "stream",
         `sample record at ${sourcePath}:${lineNumber}`,
       );
-      const links = relatedIdsToLinks(payload.relatedIds);
+      const links = relationFieldsToLinks(payload.links, payload.relatedIds);
 
       return {
         entityId: rawRecordId,
@@ -716,6 +753,7 @@ function normalizeJsonRecordPayload(
     "audio_paths",
   ]);
   normalizeArrayField(normalized, "tags");
+  normalizeObjectArrayField(normalized, "attachments");
   normalizeArrayField(normalized, "relatedIds");
   normalizeArrayField(normalized, "rawRefs");
   normalizeArrayField(normalized, "eventIds");
@@ -780,6 +818,16 @@ function normalizeArrayField(target: QueryRecordData, key: string): void {
   if (key in target) {
     target[key] = normalizeUniqueStringArray(target[key]);
   }
+}
+
+function normalizeObjectArrayField(target: QueryRecordData, key: string): void {
+  if (!(key in target)) {
+    return;
+  }
+
+  target[key] = Array.isArray(target[key])
+    ? target[key].filter((entry) => entry !== null && typeof entry === "object" && !Array.isArray(entry))
+    : [];
 }
 
 function hasMarkdownExtension(entry: string): boolean {

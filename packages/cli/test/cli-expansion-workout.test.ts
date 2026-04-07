@@ -6,6 +6,7 @@ import { Cli } from 'incur'
 import { localParallelCliTest as test } from './local-parallel-test.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import {
+  initializeVault,
   listWriteOperationMetadataPaths,
   parseFrontmatterDocument,
   readStoredWriteOperation,
@@ -36,14 +37,7 @@ interface WorkoutAddEnvelope {
   activityType: string
   durationMinutes: number
   distanceKm: number | null
-  strengthExercises: Array<{
-    exercise: string
-    setCount: number
-    repsPerSet: number
-    load?: number
-    loadUnit?: 'lb' | 'kg'
-    loadDescription?: string
-  }> | null
+  workout: Record<string, unknown> | null
   note: string
 }
 
@@ -91,6 +85,92 @@ interface WorkoutManifestEnvelope {
   manifest: {
     rawDirectory: string
   }
+}
+
+function summarizeWorkoutExercises(
+  workout: Record<string, unknown> | null | undefined,
+): Array<{
+  exercise: string
+  setCount: number
+  repsPerSet: number
+  load?: number
+  loadUnit?: 'lb' | 'kg'
+  loadDescription?: string
+}> | null {
+  const exercises = Array.isArray(workout?.exercises)
+    ? workout.exercises.filter((entry): entry is Record<string, unknown> => typeof entry === 'object' && entry !== null)
+    : []
+
+  if (exercises.length === 0) {
+    return null
+  }
+
+  return exercises.map((exercise) => {
+    const sets = Array.isArray(exercise.sets)
+      ? exercise.sets.filter((entry): entry is Record<string, unknown> => typeof entry === 'object' && entry !== null)
+      : []
+    const firstSet = sets[0]
+    const repsPerSet = typeof firstSet?.reps === 'number' ? firstSet.reps : 0
+    const load = typeof firstSet?.weight === 'number' ? firstSet.weight : undefined
+    const loadUnit =
+      firstSet?.weightUnit === 'lb' || firstSet?.weightUnit === 'kg'
+        ? firstSet.weightUnit
+        : undefined
+
+    return {
+      exercise: typeof exercise.name === 'string' ? exercise.name : '',
+      setCount: sets.length,
+      repsPerSet,
+      ...(load !== undefined ? { load } : {}),
+      ...(loadUnit ? { loadUnit } : {}),
+      ...(typeof exercise.note === 'string' ? { loadDescription: exercise.note } : {}),
+    }
+  })
+}
+
+function summarizeTemplateExercises(
+  template: unknown,
+): Array<{
+  exercise: string
+  setCount: number
+  repsPerSet: number
+  load?: number
+  loadUnit?: 'lb' | 'kg'
+  loadDescription?: string
+}> | null {
+  if (typeof template !== 'object' || template === null || !Array.isArray((template as { exercises?: unknown }).exercises)) {
+    return null
+  }
+
+  const exercises = (template as { exercises: unknown[] }).exercises.filter(
+    (entry): entry is Record<string, unknown> => typeof entry === 'object' && entry !== null,
+  )
+
+  if (exercises.length === 0) {
+    return null
+  }
+
+  return exercises.map((exercise) => {
+    const sets = Array.isArray(exercise.plannedSets)
+      ? exercise.plannedSets.filter((entry): entry is Record<string, unknown> => typeof entry === 'object' && entry !== null)
+      : []
+    const firstSet = sets[0]
+    const repsPerSet = typeof firstSet?.targetReps === 'number' ? firstSet.targetReps : 0
+    const load = typeof firstSet?.targetWeight === 'number' ? firstSet.targetWeight : undefined
+    const loadUnit =
+      firstSet?.targetWeightUnit === 'lb' || firstSet?.targetWeightUnit === 'kg'
+        ? firstSet.targetWeightUnit
+        : undefined
+
+    return {
+      exercise: typeof exercise.name === 'string' ? exercise.name : '',
+      setCount: sets.length,
+      repsPerSet,
+      ...(load !== undefined ? { load } : {}),
+      ...(loadUnit ? { loadUnit } : {}),
+      ...(typeof exercise.note === 'string' ? { loadDescription: exercise.note } : {}),
+    }
+  })
 }
 
 function createSliceCli() {
@@ -327,7 +407,7 @@ test(
       assert.equal(requireData(logFormat).activityType, 'strength-training')
       assert.equal(requireData(logFormat).durationMinutes, 20)
       assert.equal(requireData(logFormat).title, '20-minute strength training')
-      assert.deepEqual(requireData(logFormat).strengthExercises, [
+      assert.deepEqual(summarizeWorkoutExercises(requireData(logFormat).workout), [
         {
           exercise: 'pushups',
           setCount: 4,
@@ -581,12 +661,30 @@ title: Garage Day
 status: active
 activityType: strength-training
 durationMinutes: 40
-strengthExercises:
-  -
-    exercise: kettlebell swing
-    setCount: 5
-    repsPerSet: 15
 templateText: Garage day template.
+template:
+  routineNote: Garage day template.
+  exercises:
+    -
+      name: kettlebell swing
+      order: 1
+      mode: bodyweight
+      plannedSets:
+        -
+          order: 1
+          targetReps: 15
+        -
+          order: 2
+          targetReps: 15
+        -
+          order: 3
+          targetReps: 15
+        -
+          order: 4
+          targetReps: 15
+        -
+          order: 5
+          targetReps: 15
 ---
 # Garage Day
 `,
@@ -619,7 +717,7 @@ templateText: Garage day template.
         requireData(firstShow).entity.data.workoutFormatId,
         'wfmt_01JNV422Y2M5ZBV64ZP4N1DRB1',
       )
-      assert.deepEqual(requireData(firstShow).entity.data.strengthExercises, [
+      assert.deepEqual(summarizeTemplateExercises(requireData(firstShow).entity.data.template), [
         {
           exercise: 'kettlebell swing',
           setCount: 5,
@@ -638,7 +736,7 @@ templateText: Garage day template.
         vaultRoot,
       ])
       assert.equal(loggedWorkout.ok, true)
-      assert.deepEqual(requireData(loggedWorkout).strengthExercises, [
+      assert.deepEqual(summarizeWorkoutExercises(requireData(loggedWorkout).workout), [
         {
           exercise: 'kettlebell swing',
           setCount: 5,
@@ -678,7 +776,7 @@ templateText: Garage day template.
 )
 
 test(
-  'workout format show tolerates first-class docs without templateText and log fails with a targeted error',
+  'workout format show and log work from the canonical template payload without templateText',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-format-'))
 
@@ -703,6 +801,8 @@ title: No Template
 status: active
 activityType: strength-training
 durationMinutes: 30
+template:
+  exercises: []
 ---
 # No Template
 `,
@@ -721,7 +821,7 @@ durationMinutes: 30
       assert.equal(requireData(shown).entity.title, 'No Template')
       assert.equal(requireData(shown).entity.data.templateText, undefined)
 
-      const logged = await runCli([
+      const logged = await runCli<WorkoutAddEnvelope>([
         'workout',
         'format',
         'log',
@@ -729,9 +829,10 @@ durationMinutes: 30
         '--vault',
         vaultRoot,
       ])
-      assert.equal(logged.ok, false)
-      assert.equal(logged.error.code, 'contract_invalid')
-      assert.match(logged.error.message ?? '', /missing templateText/u)
+      assert.equal(logged.ok, true)
+      assert.equal(requireData(logged).title, '30-minute strength training')
+      assert.equal(requireData(logged).note, 'No Template')
+      assert.equal(summarizeWorkoutExercises(requireData(logged).workout), null)
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }
@@ -993,7 +1094,7 @@ test(
       assert.equal(requireData(runWorkout).activityType, 'running')
       assert.equal(requireData(runWorkout).durationMinutes, 30)
       assert.equal(requireData(runWorkout).distanceKm, null)
-      assert.equal(requireData(runWorkout).strengthExercises, null)
+      assert.equal(summarizeWorkoutExercises(requireData(runWorkout).workout), null)
       assert.equal(requireData(runWorkout).title, '30-minute run')
       assert.equal(
         requireData(runWorkout).note,
@@ -1017,6 +1118,12 @@ test(
       assert.equal(requireData(showWorkout).entity.data.activityType, 'running')
       assert.equal(requireData(showWorkout).entity.data.durationMinutes, 30)
       assert.equal(
+        summarizeWorkoutExercises(
+          requireData(showWorkout).entity.data.workout as Record<string, unknown> | null | undefined,
+        ),
+        null,
+      )
+      assert.equal(
         requireData(showWorkout).entity.data.note,
         'Went for a 30-minute run around the neighborhood.',
       )
@@ -1034,7 +1141,7 @@ test(
         'strength-training',
       )
       assert.equal(requireData(structuredStrengthWorkout).durationMinutes, 20)
-      assert.deepEqual(requireData(structuredStrengthWorkout).strengthExercises, [
+      assert.deepEqual(summarizeWorkoutExercises(requireData(structuredStrengthWorkout).workout), [
         {
           exercise: 'pushups',
           setCount: 4,
@@ -1059,7 +1166,9 @@ test(
       ])
       assert.equal(showStructuredStrengthWorkout.ok, true)
       assert.deepEqual(
-        requireData(showStructuredStrengthWorkout).entity.data.strengthExercises,
+        summarizeWorkoutExercises(
+          requireData(showStructuredStrengthWorkout).entity.data.workout as Record<string, unknown> | null | undefined,
+        ),
         [
           {
             exercise: 'pushups',
@@ -1108,7 +1217,7 @@ test(
         'strength-training',
       )
       assert.equal(requireData(strengthWorkout).durationMinutes, 30)
-      assert.equal(requireData(strengthWorkout).strengthExercises, null)
+      assert.equal(summarizeWorkoutExercises(requireData(strengthWorkout).workout), null)
       assert.equal(
         requireData(strengthWorkout).title,
         '30-minute strength training',
@@ -1198,6 +1307,108 @@ test(
           && 'code' in error
           && error.code === 'invalid_option'
           && /Pass --duration <minutes> to record it explicitly/u.test(error.message),
+      )
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test(
+  'workout add rejects structured payload attachments that bypass canonical staging',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-attachments-'))
+    const payloadPath = path.join(vaultRoot, 'workout.json')
+
+    try {
+      await initializeVault({ vaultRoot, title: 'Workout attachment rejection vault' })
+      await writeFile(
+        payloadPath,
+        JSON.stringify({
+          title: 'Lift session',
+          durationMinutes: 35,
+          attachments: [{
+            role: 'media_1',
+            kind: 'photo',
+            relativePath: 'raw/workouts/2026/04/evt_demo/photo.jpg',
+            mediaType: 'image/jpeg',
+            sha256: '0'.repeat(64),
+            originalFileName: 'photo.jpg',
+          }],
+          workout: {
+            exercises: [{
+              name: 'squat',
+              order: 1,
+              sets: [{
+                order: 1,
+                reps: 5,
+                weight: 225,
+                weightUnit: 'lb',
+              }],
+            }],
+          },
+        }),
+        'utf8',
+      )
+
+      await assert.rejects(
+        () =>
+          addWorkoutRecord({
+            vault: vaultRoot,
+            inputFile: payloadPath,
+          }),
+        (error: unknown) =>
+          error instanceof Error
+          && 'code' in error
+          && error.code === 'invalid_payload'
+          && /cannot set attachments\[\]/u.test(error.message),
+      )
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test(
+  'workout measurements reject structured payload attachments that bypass canonical staging',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-measurement-attachments-'))
+    const payloadPath = path.join(vaultRoot, 'measurement.json')
+
+    try {
+      await initializeVault({ vaultRoot, title: 'Measurement attachment rejection vault' })
+      await writeFile(
+        payloadPath,
+        JSON.stringify({
+          title: 'Weight check-in',
+          measurements: [{
+            type: 'weight',
+            value: 180,
+            unit: 'lb',
+          }],
+          attachments: [{
+            role: 'media_1',
+            kind: 'audio',
+            relativePath: 'raw/measurements/2026/04/evt_demo/note.m4a',
+            mediaType: 'audio/mp4',
+            sha256: '1'.repeat(64),
+            originalFileName: 'note.m4a',
+          }],
+        }),
+        'utf8',
+      )
+
+      await assert.rejects(
+        () =>
+          addWorkoutMeasurementRecord({
+            vault: vaultRoot,
+            inputFile: payloadPath,
+          }),
+        (error: unknown) =>
+          error instanceof Error
+          && 'code' in error
+          && error.code === 'invalid_payload'
+          && /cannot set attachments\[\]/u.test(error.message),
       )
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })

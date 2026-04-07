@@ -8,20 +8,20 @@ import {
 } from '@murphai/contracts'
 import {
   appendProfileSnapshot,
+  buildAttachmentCompatibilityProjections,
+  cleanupStagedEventAttachments,
   readCurrentProfile,
+  stageEventAttachments,
 } from '@murphai/core'
 import { loadJsonInputObject } from '../json-input.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { upsertEventRecord } from './provider-event.js'
 import {
   compactObject,
+  mergeByRelativePath,
   normalizeOptionalText,
 } from './vault-usecase-helpers.js'
 import { generateUlid } from '@murphai/runtime-state'
-import {
-  cleanupStagedWorkoutMediaBatch,
-  stageWorkoutMediaBatch,
-} from './workout-artifacts.js'
 
 interface MeasurementPayloadInput {
   occurredAt?: string
@@ -154,25 +154,15 @@ function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))]
 }
 
-function mergeStoredMedia(
-  existing: StoredMedia[] | undefined,
-  additions: readonly StoredMedia[],
-): StoredMedia[] {
-  const merged = new Map<string, StoredMedia>()
-
-  for (const entry of existing ?? []) {
-    merged.set(entry.relativePath, entry)
-  }
-
-  for (const entry of additions) {
-    merged.set(entry.relativePath, entry)
-  }
-
-  return [...merged.values()]
-}
-
 async function loadStructuredMeasurementPayload(inputFile: string): Promise<MeasurementPayloadInput> {
   const payload = await loadJsonInputObject(inputFile, 'body measurement payload')
+
+  if (Array.isArray(payload.attachments) && payload.attachments.length > 0) {
+    throw new VaultCliError(
+      'invalid_payload',
+      'Structured body-measurement payloads cannot set attachments[]. Use --media <path> to stage body-measurement files.',
+    )
+  }
 
   const measurements = Array.isArray(payload.measurements)
     ? payload.measurements.map((entry, index) => normalizeMeasurementEntry(entry, `measurements[${index}]`))
@@ -276,24 +266,42 @@ export async function addWorkoutMeasurementRecord(input: AddWorkoutMeasurementIn
     const eventId = valueAsString(payload.id) ?? `evt_${generateUlid()}`
     payload.id = eventId
     const occurredAt = String(payload.occurredAt ?? input.occurredAt ?? new Date().toISOString())
-    const stagedMedia = await stageWorkoutMediaBatch({
-      vault: input.vault,
-      eventId,
+    const stagedMedia = await stageEventAttachments({
+      vaultRoot: input.vault,
+      operationType: 'measurement_import_raw',
+      summary: `Stage measurement media for ${eventId}`,
       occurredAt,
-      family: 'measurement',
+      ownerKind: 'measurement',
+      ownerId: eventId,
+      importId: eventId,
+      importKind: 'measurement_batch',
+      importedAt: new Date().toISOString(),
       source: input.source ?? structuredPayload?.source ?? 'manual',
-      mediaPaths,
+      provenance: {
+        eventId,
+        family: 'measurement',
+        mediaCount: mediaPaths.length,
+      },
+      attachments: mediaPaths.map((sourcePath, index) => ({
+        role: `media_${index + 1}`,
+        sourcePath,
+      })),
     })
 
     if (stagedMedia) {
-      manifestFile = stagedMedia.manifestFile
+      manifestFile = stagedMedia.manifestPath
+      const projections = buildAttachmentCompatibilityProjections(stagedMedia.attachments)
       payload = {
         ...payload,
+        attachments: mergeByRelativePath(
+          Array.isArray(payload.attachments) ? payload.attachments as EventAttachment[] : undefined,
+          stagedMedia.attachments,
+        ),
         rawRefs: uniqueStrings([
           ...((payload.rawRefs as string[] | undefined) ?? []),
-          ...stagedMedia.rawRefs,
+          ...projections.rawRefs,
         ]),
-        media: mergeStoredMedia(payload.media as StoredMedia[] | undefined, stagedMedia.media),
+        media: mergeByRelativePath(payload.media as StoredMedia[] | undefined, projections.media),
       }
     }
   }
@@ -306,9 +314,9 @@ export async function addWorkoutMeasurementRecord(input: AddWorkoutMeasurementIn
       })
     } catch (error) {
       if (manifestFile) {
-        await cleanupStagedWorkoutMediaBatch({
-          vault: input.vault,
-          manifestFile,
+        await cleanupStagedEventAttachments({
+          vaultRoot: input.vault,
+          manifestPath: manifestFile,
         })
       }
       throw error

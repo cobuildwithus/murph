@@ -21,6 +21,13 @@ export {
   resolveVaultPathOnDisk,
 } from "./path-safety.ts";
 export { walkVaultFiles } from "./fs.ts";
+export {
+  buildAttachmentCompatibilityProjections,
+  cleanupStagedEventAttachments,
+  prepareEventAttachments,
+  stageEventAttachments,
+  stagePreparedEventAttachmentsInBatch,
+} from "./event-attachments.ts";
 export { readJsonlRecords, toMonthlyShardRelativePath } from "./jsonl.ts";
 export { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.ts";
 export { loadVault } from "./vault.ts";

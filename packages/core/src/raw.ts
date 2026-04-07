@@ -110,6 +110,14 @@ function resolveRawRelativePath({
     return `${VAULT_LAYOUT.rawDirectory}/integrations/${safeProvider}/${year}/${month}/${stableId}/${safeFileName}`;
   }
 
+  if (category === "measurements") {
+    return `${VAULT_LAYOUT.rawMeasurementsDirectory}/${year}/${month}/${stableId}/${safeFileName}`;
+  }
+
+  if (category === "workouts") {
+    return `${VAULT_LAYOUT.rawWorkoutsDirectory}/${year}/${month}/${stableId}/${safeFileName}`;
+  }
+
   return `${VAULT_LAYOUT.rawDirectory}/${sanitizePathSegment(category, "artifact")}/${year}/${month}/${stableId}/${safeFileName}`;
 }
 
