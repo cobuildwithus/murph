@@ -404,6 +404,7 @@ function HostedPhoneAuthInner({
               onClick={handleInviteSendCode}
               disabled={!ready || pendingAction !== null}
               size="xl"
+              className="w-full"
             >
               {pendingAction === "send-code" ? "Sending code..." : "Send me a code"}
             </Button>
