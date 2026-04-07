@@ -1,13 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-
-const memberPrivateStateMocks = vi.hoisted(() => ({
-  readHostedMemberPrivateState: vi.fn(),
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/member-private-state", () => ({
-  readHostedMemberPrivateState: memberPrivateStateMocks.readHostedMemberPrivateState,
-}));
+import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 
 import {
   importHostedAiUsageRecords,
@@ -180,25 +173,24 @@ describe("importHostedAiUsageRecords", () => {
 
 describe("listHostedAiUsagePendingStripeMetering", () => {
   it("queries pending metering candidates in occurred order", async () => {
-    memberPrivateStateMocks.readHostedMemberPrivateState.mockResolvedValue({
-      linqChatId: null,
-      memberId: "member_123",
-      privyUserId: null,
-      schema: "murph.hosted-member-private-state.v1",
-      signupPhoneCodeSentAt: null,
-      signupPhoneNumber: null,
-      stripeCustomerId: "cus_123",
-      stripeLatestBillingEventId: null,
-      stripeLatestCheckoutSessionId: null,
-      stripeSubscriptionId: null,
-      updatedAt: "2026-04-07T00:00:00.000Z",
-      walletAddress: null,
-    });
     const findMany = vi.fn(async () => [{
       apiKeyEnv: null,
       credentialSource: "platform",
       id: "usage_123",
       inputTokens: 10,
+      member: {
+        billingRef: {
+          memberId: "member_123",
+          stripeCustomerIdEncrypted: encryptHostedWebNullableString({
+            field: "hosted-member-billing-ref.stripe-customer-id",
+            memberId: "member_123",
+            value: "cus_123",
+          }),
+          stripeLatestBillingEventIdEncrypted: null,
+          stripeLatestCheckoutSessionIdEncrypted: null,
+          stripeSubscriptionIdEncrypted: null,
+        },
+      },
       memberId: "member_123",
       occurredAt: new Date("2026-03-29T12:00:00.000Z"),
       outputTokens: 5,
@@ -248,6 +240,19 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
         credentialSource: true,
         id: true,
         inputTokens: true,
+        member: {
+          select: {
+            billingRef: {
+              select: {
+                memberId: true,
+                stripeCustomerIdEncrypted: true,
+                stripeLatestBillingEventIdEncrypted: true,
+                stripeLatestCheckoutSessionIdEncrypted: true,
+                stripeSubscriptionIdEncrypted: true,
+              },
+            },
+          },
+        },
         memberId: true,
         occurredAt: true,
         outputTokens: true,

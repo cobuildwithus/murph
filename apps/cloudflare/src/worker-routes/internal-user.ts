@@ -6,9 +6,6 @@ import {
   readHostedEmailCapabilities,
 } from "@murphai/hosted-execution";
 import {
-  parseHostedMemberPrivateState,
-} from "@murphai/hosted-execution/member-private-state";
-import {
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
 } from "@murphai/device-syncd/hosted-runtime";
@@ -17,7 +14,6 @@ import {
   createHostedEmailUserAddress,
   readHostedEmailConfig,
 } from "../hosted-email.ts";
-import { createHostedMemberPrivateStateStore } from "../member-private-state-store.ts";
 import { parseHostedUserEnvUpdate } from "../user-env.ts";
 import { createHostedPendingUsageDirtyUserStore } from "../usage-store.ts";
 import { createHostedShareStore } from "../share-store.ts";
@@ -212,62 +208,6 @@ export async function handleUserStoredDispatchRoute(
   );
   const result = await requireUserRunnerStubMethod(stub, "dispatchStoredPayload")({ payload });
   return result.event.state === "backpressured" ? json(result, 429) : json(result);
-}
-
-export async function handleMemberPrivateStateRoute(
-  context: WorkerRouteContext,
-  encodedUserId: string,
-): Promise<Response> {
-  const userId = decodeRouteParam(encodedUserId);
-  let ownerCrypto: Awaited<ReturnType<typeof resolveHostedExecutionUserCryptoContext>>;
-
-  try {
-    ownerCrypto = await resolveHostedExecutionUserCryptoContext({
-      bucket: context.env.BUNDLES,
-      environment: context.environment,
-      userId,
-    });
-  } catch (error) {
-    if (isMissingHostedUserCryptoContext(error, userId)) {
-      if (context.request.method === "GET") {
-        return notFound();
-      }
-
-      if (context.request.method === "DELETE") {
-        return json({ ok: true, userId });
-      }
-    }
-
-    throw error;
-  }
-
-  const store = createHostedMemberPrivateStateStore({
-    bucket: context.env.BUNDLES,
-    key: ownerCrypto.rootKey,
-    keyId: ownerCrypto.rootKeyId,
-    keysById: ownerCrypto.keysById,
-    userId,
-  });
-
-  if (context.request.method === "GET") {
-    const state = await store.readState();
-    return state ? json(state) : notFound();
-  }
-
-  if (context.request.method === "DELETE") {
-    await store.deleteState();
-    return json({ ok: true, userId });
-  }
-
-  const state = parseHostedMemberPrivateState(await readCachedJsonObject(context));
-
-  if (state.memberId !== userId) {
-    return json({
-      error: "Hosted member private state memberId does not match the route user.",
-    }, 400);
-  }
-
-  return json(await store.writeState(state));
 }
 
 export async function handleSharePackRoute(
