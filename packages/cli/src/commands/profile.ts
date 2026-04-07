@@ -20,21 +20,21 @@ export function registerProfileCommands(
 ) {
   const profile = createHealthEntityCrudGroup(services, "profile");
   const current = Cli.create("current", {
-    description: "Derived current-profile commands.",
+    description: "Generated current-profile commands.",
   });
 
   current.command("rebuild", {
     args: z.object({}),
-    description: "Rebuild bank/profile/current.md from the latest accepted profile snapshot.",
+    description: "Rebuild the generated bank/profile/current.md view from the latest accepted profile snapshot.",
     examples: [
       {
-        description: "Regenerate the derived current profile after editing snapshots.",
+        description: "Regenerate the generated current profile view after editing snapshots.",
         options: {
           vault: "./vault",
         },
       },
     ],
-    hint: "Run this after accepting a snapshot if you need to refresh the derived current profile document immediately.",
+    hint: "Run this after accepting a snapshot if you need to refresh the generated current profile document immediately.",
     options: withBaseOptions(),
     output: rebuildResultSchema,
     async run(context) {
@@ -50,7 +50,7 @@ export function registerProfileCommands(
             args: {
               id: "current",
             },
-            description: "Show the rebuilt derived current profile.",
+            description: "Show the rebuilt generated current profile.",
             options: {
               vault: true,
             },

@@ -200,7 +200,7 @@ The command surface is organized around reusable capability bundles, not a paylo
 - `goal`, `condition`, `allergy`, `family`, `genetics`, `history`, `blood-test`, `provider`, `food`, and `event` are payload-CRUD nouns.
 - `food` is a payload-CRUD noun backed by `bank/foods/*.md` for recurring meals, grocery staples, smoothies, and remembered restaurant orders, and `food schedule` adds the thinnest first-class recurring-food layer by pairing a remembered food with a daily note-only meal auto-log rule backed by assistant runtime automation internals.
 - `recipe` is also a payload-CRUD noun backed by `bank/recipes/*.md`.
-- `profile` is primarily payload CRUD and also exposes `rebuild` for the derived current-profile view.
+- `profile` is primarily payload CRUD and also exposes `rebuild` for the generated current-profile view.
 - `protocol` is primarily payload CRUD and also exposes `stop` as an id-preserving lifecycle helper.
 - `supplement` is a protocol-backed payload-CRUD noun for branded supplement products and also exposes `stop` plus a derived `compound` ledger that rolls overlapping active ingredients into canonical compound rows.
 - `document` and `meal` are artifact-import nouns.
@@ -269,7 +269,7 @@ Every command now uses native `incur` command definitions directly:
 ## Lookup Rules
 
 - `show` accepts canonical read ids such as `core`, `journal:<YYYY-MM-DD>`, `exp_*`, `evt_*`, `smp_*`, `aud_*`, `asmt_*`, `psnap_*`, `goal_*`, `cond_*`, `alg_*`, `prot_*`, `fam_*`, `var_*`, `doc_*`, and `meal_*`.
-- `profile show current` and `profile current rebuild` target the derived `bank/profile/current.md` view rather than a standalone canonical record id.
+- `profile show current` and `profile current rebuild` target the generated `bank/profile/current.md` view rather than a standalone canonical record id.
 - `provider show` accepts either the canonical `prov_*` id or the stable provider slug stored in `bank/providers/<slug>.md`.
 - `food show` accepts either the canonical `food_*` id or the stable food slug stored in `bank/foods/<slug>.md`.
 - `recipe show` accepts either the canonical `rcp_*` id or the stable recipe slug stored in `bank/recipes/<slug>.md`.
@@ -400,26 +400,39 @@ The examples below are the full successful non-verbose `--format json` response 
   "activityType": "strength-training",
   "durationMinutes": 20,
   "distanceKm": null,
-  "strengthExercises": [
-    {
-      "exercise": "pushups",
-      "setCount": 4,
-      "repsPerSet": 20
-    },
-    {
-      "exercise": "incline bench",
-      "setCount": 4,
-      "repsPerSet": 12,
-      "load": 65,
-      "loadUnit": "lb",
-      "loadDescription": "45 lb bar plus 10 lb plates on both sides"
-    }
-  ],
+  "workout": {
+    "sessionNote": "20 min strength training. 4 sets of 20 pushups. 4 sets of 12 incline bench with a 45 lb bar plus 10 lb plates on both sides.",
+    "exercises": [
+      {
+        "name": "pushups",
+        "order": 1,
+        "mode": "bodyweight",
+        "sets": [
+          { "order": 1, "reps": 20 },
+          { "order": 2, "reps": 20 },
+          { "order": 3, "reps": 20 },
+          { "order": 4, "reps": 20 }
+        ]
+      },
+      {
+        "name": "incline bench",
+        "order": 2,
+        "mode": "weight_reps",
+        "note": "45 lb bar plus 10 lb plates on both sides",
+        "sets": [
+          { "order": 1, "reps": 12, "weight": 65, "weightUnit": "lb" },
+          { "order": 2, "reps": 12, "weight": 65, "weightUnit": "lb" },
+          { "order": 3, "reps": 12, "weight": 65, "weightUnit": "lb" },
+          { "order": 4, "reps": 12, "weight": 65, "weightUnit": "lb" }
+        ]
+      }
+    ]
+  },
   "note": "20 min strength training. 4 sets of 20 pushups. 4 sets of 12 incline bench with a 45 lb bar plus 10 lb plates on both sides."
 }
 ```
 
-The freeform note is preserved verbatim in `note`. The structured fields stay intentionally small: one canonical `activity_session` event plus optional duration, type, and distance fields for general workouts, and optional `strengthExercises` only when an explicit lifting note clearly names exercises, sets, reps, or load.
+The freeform note is preserved verbatim in `note`. Top-level `activityType`, `durationMinutes`, and optional `distanceKm` stay as summary fields, while all rich workout detail lives under the canonical nested `workout` payload.
 
 ### `workout format save`
 
@@ -433,7 +446,7 @@ The freeform note is preserved verbatim in `note`. The structured fields stay in
 }
 ```
 
-Saved workout formats are vault-local Markdown docs only. They store a reusable workout note plus optional duration, type, and distance defaults, and they are validated up front by the same inference rules that power `workout add`.
+Saved workout formats are vault-local Markdown docs only. They store a reusable workout template plus optional duration, type, and distance summaries, and they are validated up front by the same inference rules that power `workout add`.
 
 ### `workout format log`
 

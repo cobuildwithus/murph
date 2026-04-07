@@ -340,13 +340,22 @@ test("upsertEvent accepts typed public event drafts and still validates against 
     note: "Usual upper-body work.",
     activityType: "strength-training",
     durationMinutes: 45,
-    strengthExercises: [
-      {
-        exercise: "pushups",
-        setCount: 4,
-        repsPerSet: 20,
-      },
-    ],
+    workout: {
+      sessionNote: "Usual upper-body work.",
+      exercises: [
+        {
+          name: "pushups",
+          order: 1,
+          mode: "bodyweight",
+          sets: [
+            { order: 1, reps: 20 },
+            { order: 2, reps: 20 },
+            { order: 3, reps: 20 },
+            { order: 4, reps: 20 },
+          ],
+        },
+      ],
+    },
   });
   const preview = buildPublicEventRecord(draft, "Australia/Melbourne");
   const result = await upsertEvent({
@@ -555,6 +564,39 @@ test("repairVault returns a no-op result when metadata and directories are alrea
   assert.deepEqual(operationPathsAfterRepair, operationPathsBeforeRepair);
 });
 
+test("repairVault rebuilds the generated current profile when it is missing", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+
+  const appended = await appendProfileSnapshot({
+    vaultRoot,
+    recordedAt: "2026-03-12T11:00:00.000Z",
+    source: "manual",
+    profile: {
+      goals: {
+        topGoalIds: [],
+      },
+      custom: {
+        domains: ["sleep"],
+      },
+    },
+  });
+  const currentProfilePath = path.join(vaultRoot, "bank/profile/current.md");
+  await fs.rm(currentProfilePath, { force: true });
+
+  const repaired = await repairVault({ vaultRoot });
+  const repairedCurrent = await fs.readFile(currentProfilePath, "utf8");
+
+  assert.equal(repaired.updated, true);
+  assert.deepEqual(repaired.createdDirectories, []);
+  assert.equal(typeof repaired.auditPath, "string");
+  assert.match(repairedCurrent, /^---\n/u);
+  assert.match(repairedCurrent, new RegExp(`Snapshot ID: \`${appended.snapshot.id}\``,"u"));
+
+  const validation = await validateVault({ vaultRoot });
+  assert.equal(validation.valid, true);
+});
+
 test("loadVault and repairVault reject vault metadata with unexpected extra fields", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
@@ -628,6 +670,9 @@ test("copyRawArtifact enforces raw immutability and importDocument appends contr
   assert.equal(documentEvent.kind, "document");
   assert.equal(documentEvent.documentId, imported.documentId);
   assert.equal(documentEvent.documentPath, imported.raw.relativePath);
+  assert.equal(documentEvent.attachments?.length, 1);
+  assert.equal(documentEvent.attachments?.[0]?.relativePath, imported.raw.relativePath);
+  assert.equal(documentEvent.attachments?.[0]?.kind, "document");
   assert.equal(documentEvent.schemaVersion, "murph.event.v1");
   assert.equal("sourcePath" in documentEvent, false);
 
@@ -662,6 +707,8 @@ test("photo-only meals preserve an empty audioPaths array in the stored event", 
 
   assert.equal(mealEvents.length, 1);
   assert.equal(mealEvent.kind, "meal");
+  assert.equal(mealEvent.attachments?.length, 1);
+  assert.equal(mealEvent.attachments?.[0]?.kind, "photo");
   assert.deepEqual(mealEvent.audioPaths, []);
   assert.equal(meal.audio, null);
 });
@@ -688,6 +735,7 @@ test("note-only meals stay first-class meal events without raw artifacts", async
   };
 
   assert.equal(mealEvent.kind, "meal");
+  assert.deepEqual(mealEvent.attachments ?? [], []);
   assert.deepEqual(mealEvent.photoPaths, []);
   assert.deepEqual(mealEvent.audioPaths, []);
   assert.deepEqual(mealEvent.rawRefs, [meal.manifestPath]);
@@ -744,6 +792,7 @@ test("meal, journal, experiment, and samples mutations write expected contract d
 
   assert.equal(meal.mealId, mealEvent.mealId);
   assert.equal(mealEvent.kind, "meal");
+  assert.equal(mealEvent.attachments?.length, 2);
   assert.equal(mealEvent.photoPaths.length, 1);
   assert.equal(mealEvent.audioPaths.length, 1);
 
@@ -1519,6 +1568,16 @@ test("validateVault accepts workout and body-measurement media references", asyn
       title: "Gym check-in",
       activityType: "strength-training",
       durationMinutes: 45,
+      attachments: [
+        {
+          role: "media_1",
+          kind: "photo",
+          relativePath: workoutMediaRelativePath,
+          mediaType: "image/jpeg",
+          sha256: createHash("sha256").update(mediaBuffer).digest("hex"),
+          originalFileName: "progress-front.jpg",
+        },
+      ],
       rawRefs: [workoutMediaRelativePath],
       workout: {
         media: [
@@ -1555,6 +1614,16 @@ test("validateVault accepts workout and body-measurement media references", asyn
           type: "weight",
           value: 182.4,
           unit: "lb",
+        },
+      ],
+      attachments: [
+        {
+          role: "media_1",
+          kind: "photo",
+          relativePath: measurementMediaRelativePath,
+          mediaType: "image/jpeg",
+          sha256: createHash("sha256").update(mediaBuffer).digest("hex"),
+          originalFileName: "progress-front.jpg",
         },
       ],
       rawRefs: [measurementMediaRelativePath],
@@ -3528,6 +3597,7 @@ test("high-level canonical mutation ports own provider, event, and vault summary
     (record) => expectRecord<{ id?: string }>(record).id === eventPayload.id,
   ) as EventRecord | undefined;
   assert.ok(eventRecord);
+  assert.deepEqual(eventRecord.links, [{ type: "related_to", targetId: createdProvider.providerId }]);
   assert.deepEqual(eventRecord.relatedIds, [createdProvider.providerId]);
   assert.equal(eventRecord.kind, "note");
 });

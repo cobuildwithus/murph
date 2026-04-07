@@ -43,6 +43,17 @@ import {
 import { materializeSearchDocument } from "../src/search-shared.ts";
 import type { VaultReadModel } from "../src/model.ts";
 
+const ASSESSMENT_HEALTH_01_ID = "asmt_01JNW7YJ7MNE7M9Q2QWQK4Z3F9";
+const ASSESSMENT_HEALTH_00_ID = "asmt_01JNW7YJ7MNE7M9Q2QWQK4Z3FA";
+const GOAL_SLEEP_ID = "goal_01JNW7YJ7MNE7M9Q2QWQK4Z3FB";
+const GOAL_SLEEP_LEGACY_ID = "goal_01JNW7YJ7MNE7M9Q2QWQK4Z3FC";
+const GOAL_SAME_01_ID = "goal_01JNW7YJ7MNE7M9Q2QWQK4Z3FD";
+const GOAL_SAME_02_ID = "goal_01JNW7YJ7MNE7M9Q2QWQK4Z3FE";
+const PROFILE_SNAPSHOT_HEALTH_01_ID = "psnap_01JNW7YJ7MNE7M9Q2QWQK4Z3FF";
+const PROFILE_SNAPSHOT_HEALTH_00_ID = "psnap_01JNW7YJ7MNE7M9Q2QWQK4Z3FG";
+const PROFILE_SNAPSHOT_SAME_01_ID = "psnap_01JNW7YJ7MNE7M9Q2QWQK4Z3FH";
+const PROFILE_SNAPSHOT_SAME_02_ID = "psnap_01JNW7YJ7MNE7M9Q2QWQK4Z3FJ";
+
 async function writeVaultFile(
   vaultRoot: string,
   relativePath: string,
@@ -81,12 +92,12 @@ async function createHealthVault(options: {
     [
       JSON.stringify({
         schemaVersion: "murph.assessment-response.v1",
-        id: "asmt_health_01",
+        id: ASSESSMENT_HEALTH_01_ID,
         assessmentType: "full-intake",
         recordedAt: "2026-03-12T13:00:00Z",
         importedAt: "2026-03-12T13:05:00Z",
         source: "import",
-        rawPath: "raw/assessments/2026/03/asmt_health_01/source.json",
+        rawPath: `raw/assessments/2026/03/${ASSESSMENT_HEALTH_01_ID}/source.json`,
         title: "Comprehensive intake questionnaire",
         questionnaireSlug: "health-history-intake",
         responses: {
@@ -94,12 +105,12 @@ async function createHealthVault(options: {
             averageHours: 6.5,
           },
         },
-        relatedIds: ["goal_sleep_01"],
+        relatedIds: [GOAL_SLEEP_ID],
       }),
       options.includeAlternateRecords
         ? JSON.stringify({
             schemaVersion: "murph.assessment-response.v1",
-            id: "asmt_health_00",
+            id: ASSESSMENT_HEALTH_00_ID,
             assessmentType: "follow-up",
             recordedAt: "2026-03-01T08:00:00Z",
             source: "import",
@@ -147,13 +158,13 @@ async function createHealthVault(options: {
     [
       JSON.stringify({
         schemaVersion: "murph.profile-snapshot.v1",
-        id: "psnap_health_01",
+        id: PROFILE_SNAPSHOT_HEALTH_01_ID,
         recordedAt: "2026-03-12T14:00:00Z",
         source: "assessment_projection",
-        sourceAssessmentIds: ["asmt_health_01"],
+        sourceAssessmentIds: [ASSESSMENT_HEALTH_01_ID],
         profile: {
           goals: {
-            topGoalIds: ["goal_sleep_01"],
+            topGoalIds: [GOAL_SLEEP_ID],
           },
           custom: {
             sleep: {
@@ -165,15 +176,15 @@ async function createHealthVault(options: {
       options.includeAlternateRecords
         ? JSON.stringify({
             schemaVersion: "murph.profile-snapshot.v1",
-            id: "psnap_health_00",
+            id: PROFILE_SNAPSHOT_HEALTH_00_ID,
             recordedAt: "2026-03-01T09:00:00Z",
             source: {
               kind: "projection",
-              assessmentId: "asmt_health_00",
+              assessmentId: ASSESSMENT_HEALTH_00_ID,
             },
             profile: {
               goals: {
-                topGoalIds: ["goal_sleep_legacy"],
+                topGoalIds: [GOAL_SLEEP_LEGACY_ID],
               },
             },
           })
@@ -207,7 +218,7 @@ async function createHealthVault(options: {
         recordedAt: "2026-03-12T12:50:00Z",
         source: "manual",
         title: "Sleep medicine intake visit",
-        relatedIds: ["goal_sleep_01", "cond_sleep_01"],
+        relatedIds: [GOAL_SLEEP_ID, "cond_sleep_01"],
       }),
       options.includeAlternateRecords
         ? JSON.stringify({
@@ -243,7 +254,7 @@ Snapshot ID: \`${currentProfileSnapshotId}\`
     "bank/goals/improve-sleep.md",
     `---
 schemaVersion: hv/goal@v1
-goalId: goal_sleep_01
+goalId: ${GOAL_SLEEP_ID}
 slug: improve-sleep
 title: Improve sleep quality and duration
 status: active
@@ -566,9 +577,12 @@ test("showProfile derives the current profile from the latest snapshot when the 
     if (!("snapshotId" in current)) {
       throw new Error("Expected the derived current-profile record.");
     }
-    assert.equal(current.snapshotId, "psnap_health_01");
-    assert.deepEqual(current.topGoalIds, ["goal_sleep_01"]);
-    assert.equal(current.markdown, null);
+    assert.equal(current.snapshotId, PROFILE_SNAPSHOT_HEALTH_01_ID);
+    assert.deepEqual(current.topGoalIds, [GOAL_SLEEP_ID]);
+    assert.match(current.markdown ?? "", /^---\n/);
+    assert.match(current.markdown ?? "", /docType: profile_current/);
+    assert.match(current.markdown ?? "", new RegExp(`Snapshot ID: \`${PROFILE_SNAPSHOT_HEALTH_01_ID}\``, "u"));
+    assert.match(current.body ?? "", /^# Current Profile/);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -576,7 +590,7 @@ test("showProfile derives the current profile from the latest snapshot when the 
 
 test("readCurrentProfile falls back to the latest snapshot when current-profile markdown is malformed", async () => {
   const vaultRoot = await createHealthVault({
-    currentProfileSnapshotId: "psnap_health_01",
+    currentProfileSnapshotId: PROFILE_SNAPSHOT_HEALTH_01_ID,
   });
 
   try {
@@ -585,7 +599,7 @@ test("readCurrentProfile falls back to the latest snapshot when current-profile 
       "bank/profile/current.md",
       `---
 schemaVersion: murph.frontmatter.profile-current.v1
-snapshotId psnap_health_01
+snapshotId ${PROFILE_SNAPSHOT_HEALTH_01_ID}
 ---
 # Current Profile
 `,
@@ -594,9 +608,12 @@ snapshotId psnap_health_01
     const current = await readCurrentProfile(vaultRoot);
 
     assert.ok(current);
-    assert.equal(current.snapshotId, "psnap_health_01");
-    assert.deepEqual(current.topGoalIds, ["goal_sleep_01"]);
-    assert.equal(current.markdown, null);
+    assert.equal(current.snapshotId, PROFILE_SNAPSHOT_HEALTH_01_ID);
+    assert.deepEqual(current.topGoalIds, [GOAL_SLEEP_ID]);
+    assert.match(current.markdown ?? "", /^---\n/);
+    assert.match(current.markdown ?? "", /docType: profile_current/);
+    assert.match(current.markdown ?? "", new RegExp(`Snapshot ID: \`${PROFILE_SNAPSHOT_HEALTH_01_ID}\``, "u"));
+    assert.match(current.body ?? "", /^# Current Profile/);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -604,14 +621,14 @@ snapshotId psnap_health_01
 
 test("readCurrentProfile retains the raw current-profile markdown when the document matches the latest snapshot", async () => {
   const vaultRoot = await createHealthVault({
-    currentProfileSnapshotId: "psnap_health_01",
+    currentProfileSnapshotId: PROFILE_SNAPSHOT_HEALTH_01_ID,
   });
 
   try {
     const current = await readCurrentProfile(vaultRoot);
 
     assert.ok(current);
-    assert.equal(current.snapshotId, "psnap_health_01");
+    assert.equal(current.snapshotId, PROFILE_SNAPSHOT_HEALTH_01_ID);
     assert.match(current.markdown ?? "", /^---\n/);
     assert.match(current.markdown ?? "", /docType: profile_current/);
     assert.match(current.markdown ?? "", /updatedAt: 2026-03-01T00:00:00Z/);
@@ -624,7 +641,7 @@ test("readCurrentProfile retains the raw current-profile markdown when the docum
 
 test("dedicated health readers stay aligned with the shared canonical collector selectors", async () => {
   const vaultRoot = await createHealthVault({
-    currentProfileSnapshotId: "psnap_health_01",
+    currentProfileSnapshotId: PROFILE_SNAPSHOT_HEALTH_01_ID,
     includeAlternateRecords: true,
   });
 
@@ -659,7 +676,7 @@ test("dedicated health readers stay aligned with the shared canonical collector 
 
 test("history readers and collectors collapse append-only event revisions to the latest active record", async () => {
   const vaultRoot = await createHealthVault({
-    currentProfileSnapshotId: "psnap_health_01",
+    currentProfileSnapshotId: PROFILE_SNAPSHOT_HEALTH_01_ID,
   });
 
   try {
@@ -749,7 +766,7 @@ test("history readers and collectors collapse append-only event revisions to the
 
 test("strict narrow health readers ignore malformed unrelated registry markdown", async () => {
   const vaultRoot = await createHealthVault({
-    currentProfileSnapshotId: "psnap_health_01",
+    currentProfileSnapshotId: PROFILE_SNAPSHOT_HEALTH_01_ID,
     includeAlternateRecords: true,
   });
 
@@ -768,7 +785,7 @@ slug broken-frontmatter
 
     assert.deepEqual(
       (await listAssessments(vaultRoot)).map((record) => record.id),
-      ["asmt_health_01", "asmt_health_00", "asmt_health_before", "asmt_health_missing_date", "asmt_health_undated"],
+      [ASSESSMENT_HEALTH_01_ID, ASSESSMENT_HEALTH_00_ID, "asmt_health_before", "asmt_health_missing_date", "asmt_health_undated"],
     );
     assert.deepEqual(
       (await listHistoryEvents(vaultRoot)).map((record) => record.id),
@@ -776,9 +793,9 @@ slug broken-frontmatter
     );
     assert.deepEqual(
       (await listProfileSnapshots(vaultRoot)).map((record) => record.id),
-      ["psnap_health_01", "psnap_health_00", "psnap_health_missing_date"],
+      [PROFILE_SNAPSHOT_HEALTH_01_ID, PROFILE_SNAPSHOT_HEALTH_00_ID, "psnap_health_missing_date"],
     );
-    assert.equal((await readCurrentProfile(vaultRoot))?.snapshotId, "psnap_health_01");
+    assert.equal((await readCurrentProfile(vaultRoot))?.snapshotId, PROFILE_SNAPSHOT_HEALTH_01_ID);
     await assert.rejects(
       () => readVault(vaultRoot),
       /Failed to parse frontmatter at bank\/genetics\/broken\.md:/,
@@ -790,7 +807,7 @@ slug broken-frontmatter
 
 test("profile snapshot list accepts day-only date bounds for recorded timestamps", async () => {
   const vaultRoot = await createHealthVault({
-    currentProfileSnapshotId: "psnap_health_01",
+    currentProfileSnapshotId: PROFILE_SNAPSHOT_HEALTH_01_ID,
     includeAlternateRecords: true,
   });
 
@@ -802,7 +819,7 @@ test("profile snapshot list accepts day-only date bounds for recorded timestamps
 
     assert.deepEqual(
       snapshots.map((record) => record.id),
-      ["psnap_health_01"],
+      [PROFILE_SNAPSHOT_HEALTH_01_ID],
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
@@ -821,23 +838,23 @@ test("profile snapshot recency tie-break stays aligned between listing and curre
       [
         JSON.stringify({
           schemaVersion: "murph.profile-snapshot.v1",
-          id: "psnap_same_01",
+          id: PROFILE_SNAPSHOT_SAME_01_ID,
           recordedAt: "2026-03-12T14:00:00Z",
-          sourceAssessmentIds: ["asmt_health_01"],
+          sourceAssessmentIds: [ASSESSMENT_HEALTH_01_ID],
           profile: {
             goals: {
-              topGoalIds: ["goal_same_01"],
+              topGoalIds: [GOAL_SAME_01_ID],
             },
           },
         }),
         JSON.stringify({
           schemaVersion: "murph.profile-snapshot.v1",
-          id: "psnap_same_02",
+          id: PROFILE_SNAPSHOT_SAME_02_ID,
           recordedAt: "2026-03-12T14:00:00Z",
           sourceEventIds: ["evt_health_01"],
           profile: {
             goals: {
-              topGoalIds: ["goal_same_02"],
+              topGoalIds: [GOAL_SAME_02_ID],
             },
           },
         }),
@@ -849,12 +866,13 @@ test("profile snapshot recency tie-break stays aligned between listing and curre
 
     assert.deepEqual(
       snapshots.map((record) => record.id),
-      ["psnap_same_01", "psnap_same_02"],
+      [PROFILE_SNAPSHOT_SAME_01_ID, PROFILE_SNAPSHOT_SAME_02_ID],
     );
-    assert.equal(current?.snapshotId, "psnap_same_01");
-    assert.deepEqual(current?.sourceAssessmentIds, ["asmt_health_01"]);
-    assert.deepEqual(current?.topGoalIds, ["goal_same_01"]);
-    assert.equal(current?.markdown, null);
+    assert.equal(current?.snapshotId, PROFILE_SNAPSHOT_SAME_01_ID);
+    assert.deepEqual(current?.sourceAssessmentIds, [ASSESSMENT_HEALTH_01_ID]);
+    assert.deepEqual(current?.topGoalIds, [GOAL_SAME_01_ID]);
+    assert.match(current?.markdown ?? "", new RegExp(`Snapshot ID: \`${PROFILE_SNAPSHOT_SAME_01_ID}\``, "u"));
+    assert.match(current?.body ?? "", /^# Current Profile/);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -897,7 +915,7 @@ test("blood tests can be queried through dedicated helpers while remaining canon
           },
         ],
         tags: ["lab", "lipids"],
-        relatedIds: ["goal_sleep_01"],
+        relatedIds: [GOAL_SLEEP_ID],
       })}\n`,
     );
 
@@ -969,7 +987,7 @@ test("readVault promotes health families into the shared search and timeline pro
       ]),
     );
     assert.deepEqual(vault.byFamily.goal?.map((record) => record.entityId), [
-      "goal_sleep_01",
+      GOAL_SLEEP_ID,
     ]);
     assert.equal(vault.byFamily.current_profile?.[0]?.entityId, "current");
     assert.deepEqual(
@@ -1172,7 +1190,7 @@ test("canonical entity helpers filter projected health families and preserve leg
 
 test("readVault rejects malformed health inputs in the strict shared collector", async () => {
   const vaultRoot = await createHealthVault({
-    currentProfileSnapshotId: "psnap_health_01",
+    currentProfileSnapshotId: PROFILE_SNAPSHOT_HEALTH_01_ID,
     includeAlternateRecords: true,
   });
 
@@ -1205,7 +1223,7 @@ conditionId cond_broken
 
 test("readVaultTolerant falls back to the latest snapshot when current profile is missing and skips malformed health inputs", async () => {
   const vaultRoot = await createHealthVault({
-    currentProfileSnapshotId: "psnap_health_01",
+    currentProfileSnapshotId: PROFILE_SNAPSHOT_HEALTH_01_ID,
     includeAlternateRecords: true,
   });
 
@@ -1230,10 +1248,10 @@ conditionId cond_broken
     const vault = await readVaultTolerant(vaultRoot);
 
     assert.equal(vault.currentProfile?.entityId, "current");
-    assert.equal(vault.currentProfile?.attributes.snapshotId, "psnap_health_01");
+    assert.equal(vault.currentProfile?.attributes.snapshotId, PROFILE_SNAPSHOT_HEALTH_01_ID);
     assert.deepEqual(
       vault.profileSnapshots.map((record) => record.entityId),
-      ["psnap_health_00", "psnap_health_01", "psnap_health_missing_date"],
+      [PROFILE_SNAPSHOT_HEALTH_00_ID, PROFILE_SNAPSHOT_HEALTH_01_ID, "psnap_health_missing_date"],
     );
     assert.deepEqual(
       vault.conditions.map((record) => record.entityId),
@@ -1246,7 +1264,7 @@ conditionId cond_broken
 
 test("readVault rejects malformed current-profile frontmatter in the strict shared collector", async () => {
   const vaultRoot = await createHealthVault({
-    currentProfileSnapshotId: "psnap_health_01",
+    currentProfileSnapshotId: PROFILE_SNAPSHOT_HEALTH_01_ID,
   });
 
   try {
@@ -1255,7 +1273,7 @@ test("readVault rejects malformed current-profile frontmatter in the strict shar
       "bank/profile/current.md",
       `---
 schemaVersion: murph.frontmatter.profile-current.v1
-snapshotId psnap_health_01
+snapshotId ${PROFILE_SNAPSHOT_HEALTH_01_ID}
 ---
 # Current Profile
 `,
@@ -1496,9 +1514,9 @@ test("buildExportPack preserves the five-file pack while embedding health contex
     assert.equal(pack.manifest.profileSnapshotCount, 1);
     assert.equal(pack.manifest.historyEventCount, 1);
     assert.equal(pack.manifest.bankPageCount, 6);
-    assert.equal(pack.health.currentProfile?.snapshotId, "psnap_health_01");
+    assert.equal(pack.health.currentProfile?.snapshotId, PROFILE_SNAPSHOT_HEALTH_01_ID);
     assert.equal(narrowPack.health.profileSnapshots.length, 0);
-    assert.equal(narrowPack.health.currentProfile?.snapshotId, "psnap_health_01");
+    assert.equal(narrowPack.health.currentProfile?.snapshotId, PROFILE_SNAPSHOT_HEALTH_01_ID);
 
     const questionPackFile = pack.files.find((file) => file.path.endsWith("question-pack.json"));
     const entitiesFile = pack.files.find((file) => file.path.endsWith("entities.json"));
@@ -1522,17 +1540,17 @@ test("buildExportPack preserves the five-file pack while embedding health contex
 
     assert.deepEqual(
       questionPackPayload.context.health.assessments.map((entry) => entry.id),
-      ["asmt_health_01"],
+      [ASSESSMENT_HEALTH_01_ID],
     );
     assert.deepEqual(
       questionPackPayload.context.health.goals.map((entry) => entry.id),
-      ["goal_sleep_01"],
+      [GOAL_SLEEP_ID],
     );
     assert.deepEqual(
       questionPackPayload.context.health.historyEvents.map((entry) => entry.id),
       ["evt_health_01"],
     );
-    assert.equal(questionPackPayload.context.health.currentProfile?.snapshotId, "psnap_health_01");
+    assert.equal(questionPackPayload.context.health.currentProfile?.snapshotId, PROFILE_SNAPSHOT_HEALTH_01_ID);
     assert.ok(
       questionPackPayload.questions.some((question) =>
         question.includes("intake-assessment answers"),
@@ -1553,7 +1571,7 @@ test("buildExportPack preserves the five-file pack while embedding health contex
 
 test("buildExportPack keeps matching current-profile markdown and ignores malformed health artifacts", async () => {
   const vaultRoot = await createHealthVault({
-    currentProfileSnapshotId: "psnap_health_01",
+    currentProfileSnapshotId: PROFILE_SNAPSHOT_HEALTH_01_ID,
     includeAlternateRecords: true,
   });
 
@@ -1596,9 +1614,9 @@ slug broken-frontmatter
       pack.health.geneticVariants.map((entry) => entry.id),
       ["var_01"],
     );
-    assert.equal(pack.health.currentProfile?.snapshotId, "psnap_health_01");
-    assert.deepEqual(pack.health.profileSnapshots[1]?.sourceAssessmentIds, ["asmt_health_00"]);
-    assert.match(pack.health.currentProfile?.markdown ?? "", /Snapshot ID: `psnap_health_01`/);
+    assert.equal(pack.health.currentProfile?.snapshotId, PROFILE_SNAPSHOT_HEALTH_01_ID);
+    assert.deepEqual(pack.health.profileSnapshots[1]?.sourceAssessmentIds, [ASSESSMENT_HEALTH_00_ID]);
+    assert.match(pack.health.currentProfile?.markdown ?? "", new RegExp(`Snapshot ID: \`${PROFILE_SNAPSHOT_HEALTH_01_ID}\``, "u"));
     assert.deepEqual(
       healthRead.failures.map((failure) => ({
         parser: failure.parser,
@@ -1632,7 +1650,7 @@ slug broken-frontmatter
 
 test("health query readers surface actionable parse failures while export-pack reads stay tolerant", async () => {
   const vaultRoot = await createHealthVault({
-    currentProfileSnapshotId: "psnap_health_01",
+    currentProfileSnapshotId: PROFILE_SNAPSHOT_HEALTH_01_ID,
     includeAlternateRecords: true,
   });
 
@@ -1656,7 +1674,7 @@ test("health query readers surface actionable parse failures while export-pack r
 
     assert.deepEqual(
       healthRead.health.assessments.map((entry) => entry.id),
-      ["asmt_health_01", "asmt_health_00"],
+      [ASSESSMENT_HEALTH_01_ID, ASSESSMENT_HEALTH_00_ID],
     );
     assert.equal(healthRead.failures[0]?.parser, "json");
     assert.equal(
@@ -1671,7 +1689,7 @@ test("health query readers surface actionable parse failures while export-pack r
 
 test("buildExportPack falls back to the latest snapshot when current-profile markdown is malformed", async () => {
   const vaultRoot = await createHealthVault({
-    currentProfileSnapshotId: "psnap_health_01",
+    currentProfileSnapshotId: PROFILE_SNAPSHOT_HEALTH_01_ID,
   });
 
   try {
@@ -1681,7 +1699,7 @@ test("buildExportPack falls back to the latest snapshot when current-profile mar
       "bank/profile/current.md",
       `---
 schemaVersion: murph.frontmatter.profile-current.v1
-snapshotId psnap_health_01
+snapshotId ${PROFILE_SNAPSHOT_HEALTH_01_ID}
 ---
 # Current Profile
 `,
@@ -1699,8 +1717,11 @@ snapshotId psnap_health_01
       generatedAt: "2026-03-13T12:00:00.000Z",
     });
 
-    assert.equal(pack.health.currentProfile?.snapshotId, "psnap_health_01");
-    assert.equal(pack.health.currentProfile?.markdown, null);
+    assert.equal(pack.health.currentProfile?.snapshotId, PROFILE_SNAPSHOT_HEALTH_01_ID);
+    assert.match(
+      pack.health.currentProfile?.markdown ?? "",
+      new RegExp(`Snapshot ID: \`${PROFILE_SNAPSHOT_HEALTH_01_ID}\``, "u"),
+    );
     assert.deepEqual(
       healthRead.failures.map((failure) => failure.relativePath),
       ["bank/profile/current.md"],
@@ -1712,7 +1733,7 @@ snapshotId psnap_health_01
 
 test("tolerant async collector preserves fallback and failure ordering for malformed current-profile and registry markdown", async () => {
   const vaultRoot = await createHealthVault({
-    currentProfileSnapshotId: "psnap_health_01",
+    currentProfileSnapshotId: PROFILE_SNAPSHOT_HEALTH_01_ID,
   });
 
   try {
@@ -1721,7 +1742,7 @@ test("tolerant async collector preserves fallback and failure ordering for malfo
       "bank/profile/current.md",
       `---
 schemaVersion: murph.frontmatter.profile-current.v1
-snapshotId psnap_health_01
+snapshotId ${PROFILE_SNAPSHOT_HEALTH_01_ID}
 ---
 # Current Profile
 `,
@@ -1742,7 +1763,7 @@ conditionId cond_broken
     });
 
     assert.equal(collected.currentProfile?.entityId, "current");
-    assert.equal(collected.currentProfile?.attributes.snapshotId, "psnap_health_01");
+    assert.equal(collected.currentProfile?.attributes.snapshotId, PROFILE_SNAPSHOT_HEALTH_01_ID);
     assert.deepEqual(
       collected.conditions.map((entity) => entity.entityId),
       ["cond_sleep_01"],
@@ -1751,7 +1772,7 @@ conditionId cond_broken
       collected.failures.map((failure) => failure.relativePath),
       ["bank/profile/current.md", "bank/conditions/broken.md"],
     );
-    assert.equal(collected.markdownByPath.has("bank/profile/current.md"), false);
+    assert.equal(collected.markdownByPath.has("bank/profile/current.md"), true);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -1759,7 +1780,7 @@ conditionId cond_broken
 
 test("buildExportPack date filters exclude older health slices while keeping current profile derivation", async () => {
   const vaultRoot = await createHealthVault({
-    currentProfileSnapshotId: "psnap_health_01",
+    currentProfileSnapshotId: PROFILE_SNAPSHOT_HEALTH_01_ID,
     includeAlternateRecords: true,
   });
 
@@ -1772,9 +1793,9 @@ test("buildExportPack date filters exclude older health slices while keeping cur
       generatedAt: "2026-03-13T12:00:00.000Z",
     });
 
-    assert.deepEqual(pack.health.assessments.map((entry) => entry.id), ["asmt_health_01"]);
-    assert.deepEqual(pack.health.profileSnapshots.map((entry) => entry.id), ["psnap_health_01"]);
-    assert.equal(pack.health.currentProfile?.snapshotId, "psnap_health_01");
+    assert.deepEqual(pack.health.assessments.map((entry) => entry.id), [ASSESSMENT_HEALTH_01_ID]);
+    assert.deepEqual(pack.health.profileSnapshots.map((entry) => entry.id), [PROFILE_SNAPSHOT_HEALTH_01_ID]);
+    assert.equal(pack.health.currentProfile?.snapshotId, PROFILE_SNAPSHOT_HEALTH_01_ID);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -1782,7 +1803,7 @@ test("buildExportPack date filters exclude older health slices while keeping cur
 
 test("buildExportPack trims health export strings and drops non-string array entries", async () => {
   const vaultRoot = await createHealthVault({
-    currentProfileSnapshotId: "psnap_health_01",
+    currentProfileSnapshotId: PROFILE_SNAPSHOT_HEALTH_01_ID,
   });
 
   try {
@@ -1791,14 +1812,14 @@ test("buildExportPack trims health export strings and drops non-string array ent
       "ledger/profile-snapshots/2026/2026-03.jsonl",
       `${JSON.stringify({
         schemaVersion: "murph.profile-snapshot.v1",
-        id: "psnap_health_01",
+        id: PROFILE_SNAPSHOT_HEALTH_01_ID,
         recordedAt: "2026-03-12T14:00:00Z",
         source: "  assessment_projection  ",
-        sourceAssessmentIds: ["  asmt_health_01  ", "", 42],
+        sourceAssessmentIds: [`  ${ASSESSMENT_HEALTH_01_ID}  `, "", 42],
         sourceEventIds: ["  evt_health_01  ", null],
         profile: {
           goals: {
-            topGoalIds: ["  goal_sleep_01  ", "", 42],
+            topGoalIds: [`  ${GOAL_SLEEP_ID}  `, "", 42],
           },
         },
       })}\n`,
@@ -1816,7 +1837,7 @@ test("buildExportPack trims health export strings and drops non-string array ent
         source: "  manual  ",
         title: "  Sleep medicine intake visit  ",
         tags: ["  endocrine  ", "", 1],
-        relatedIds: ["  goal_sleep_01  ", " cond_sleep_01 ", null],
+        relatedIds: [`  ${GOAL_SLEEP_ID}  `, " cond_sleep_01 ", null],
       })}\n`,
     );
 
@@ -1826,15 +1847,15 @@ test("buildExportPack trims health export strings and drops non-string array ent
       `---
 schemaVersion: murph.frontmatter.profile-current.v1
 docType: profile_current
-snapshotId: psnap_health_01
+snapshotId: ${PROFILE_SNAPSHOT_HEALTH_01_ID}
 updatedAt: " 2026-03-12T14:00:00Z "
 topGoalIds:
-  - "  goal_sleep_01  "
+  - "  ${GOAL_SLEEP_ID}  "
   - ""
 ---
 # Current Profile
 
-Snapshot ID: \`psnap_health_01\`
+Snapshot ID: \`${PROFILE_SNAPSHOT_HEALTH_01_ID}\`
 `,
     );
 
@@ -1846,15 +1867,15 @@ Snapshot ID: \`psnap_health_01\`
       generatedAt: "2026-03-13T12:00:00.000Z",
     });
 
-    assert.deepEqual(pack.health.profileSnapshots[0]?.sourceAssessmentIds, ["asmt_health_01"]);
+    assert.deepEqual(pack.health.profileSnapshots[0]?.sourceAssessmentIds, [ASSESSMENT_HEALTH_01_ID]);
     assert.deepEqual(pack.health.profileSnapshots[0]?.sourceEventIds, ["evt_health_01"]);
     assert.equal(pack.health.profileSnapshots[0]?.source, "assessment_projection");
     assert.equal(pack.health.historyEvents[0]?.kind, "encounter");
     assert.equal(pack.health.historyEvents[0]?.title, "Sleep medicine intake visit");
     assert.equal(pack.health.historyEvents[0]?.source, "manual");
     assert.deepEqual(pack.health.historyEvents[0]?.tags, ["endocrine"]);
-    assert.deepEqual(pack.health.historyEvents[0]?.relatedIds, ["goal_sleep_01", "cond_sleep_01"]);
-    assert.deepEqual(pack.health.currentProfile?.topGoalIds, ["goal_sleep_01"]);
+    assert.deepEqual(pack.health.historyEvents[0]?.relatedIds, [GOAL_SLEEP_ID, "cond_sleep_01"]);
+    assert.deepEqual(pack.health.currentProfile?.topGoalIds, [GOAL_SLEEP_ID]);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

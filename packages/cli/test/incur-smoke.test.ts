@@ -1071,7 +1071,7 @@ test('health command help surfaces examples and hints through Incur metadata', a
   )
   assert.match(
     profileRebuildHelp,
-    /Run this after accepting a snapshot if you need to refresh the derived current profile document immediately\./u,
+    /Run this after accepting a snapshot if you need to refresh the generated current profile document immediately\./u,
   )
   assert.match(
     protocolStopHelp,

@@ -1,4 +1,8 @@
 import {
+  buildCurrentProfileDocument,
+} from "@murphai/contracts";
+
+import {
   linkTargetIds,
   normalizeCanonicalDate,
   normalizeCanonicalLinks,
@@ -131,11 +135,24 @@ export function fallbackCurrentProfileEntity(
     latestSnapshot.attributes.sourceEventIds,
   );
   const topGoalIds = extractProfileTopGoalIds(profile);
+  const materialized = materializeCurrentProfileDocumentFromSnapshotEntity(latestSnapshot);
+  const currentProfileAttributes =
+    (materialized?.attributes as Record<string, unknown> | undefined) ?? {
+      snapshotId: latestSnapshot.entityId,
+      updatedAt: latestSnapshot.occurredAt,
+      sourceAssessmentIds,
+      sourceEventIds,
+      topGoalIds,
+    };
   const links = buildCurrentProfileLinks({
     snapshotId: latestSnapshot.entityId,
-    sourceAssessmentIds,
-    sourceEventIds,
-    topGoalIds,
+    sourceAssessmentIds: normalizeUniqueStringArray(
+      currentProfileAttributes.sourceAssessmentIds,
+    ),
+    sourceEventIds: normalizeUniqueStringArray(
+      currentProfileAttributes.sourceEventIds,
+    ),
+    topGoalIds: normalizeUniqueStringArray(currentProfileAttributes.topGoalIds),
   });
 
   return {
@@ -150,27 +167,53 @@ export function fallbackCurrentProfileEntity(
     date: latestSnapshot.date,
     path: "bank/profile/current.md",
     title: "Current profile",
-    body: null,
-    attributes: {
-      snapshotId: latestSnapshot.entityId,
-      updatedAt: latestSnapshot.occurredAt,
-      sourceAssessmentIds,
-      sourceEventIds,
-      topGoalIds,
-    },
-    frontmatter: {
-      snapshotId: latestSnapshot.entityId,
-      updatedAt: latestSnapshot.occurredAt,
-      sourceAssessmentIds,
-      sourceEventIds,
-      topGoalIds,
-    },
+    body: materialized?.body ?? null,
+    attributes: currentProfileAttributes,
+    frontmatter: currentProfileAttributes,
     links,
     relatedIds: linkTargetIds(links),
     stream: null,
     experimentSlug: null,
     tags: ["current_profile"],
   };
+}
+
+export function materializeCurrentProfileDocumentFromSnapshotEntity(
+  latestSnapshot: CanonicalEntity,
+): { attributes: Record<string, unknown>; body: string; markdown: string } | null {
+  if (latestSnapshot.family !== "profile_snapshot") {
+    return null;
+  }
+
+  const profile = asObject(latestSnapshot.attributes.profile) ?? {};
+  const updatedAt = latestSnapshot.occurredAt;
+
+  if (!updatedAt) {
+    return null;
+  }
+
+  try {
+    const document = buildCurrentProfileDocument({
+      snapshotId: latestSnapshot.entityId,
+      updatedAt,
+      source: latestSnapshot.attributes.source ?? "unknown",
+      sourceAssessmentIds: normalizeUniqueStringArray(
+        latestSnapshot.attributes.sourceAssessmentIds,
+      ),
+      sourceEventIds: normalizeUniqueStringArray(
+        latestSnapshot.attributes.sourceEventIds,
+      ),
+      profile,
+    });
+
+    return {
+      attributes: document.attributes as Record<string, unknown>,
+      body: document.body,
+      markdown: document.markdown,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function buildCurrentProfileLinks(input: {
