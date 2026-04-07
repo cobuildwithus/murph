@@ -27,6 +27,11 @@ import {
   createSetupAssistantResolver,
   type SetupAssistantResolver,
 } from '@murphai/setup-cli/setup-assistant'
+import {
+  runSetupAssistantWizard,
+  type SetupAssistantWizardInput,
+  type SetupAssistantWizardResult,
+} from '@murphai/setup-cli/setup-assistant-wizard'
 import type { SetupConfiguredAssistant } from '@murphai/operator-config/setup-cli-contracts'
 
 const modelCommandPresetSchema = z.enum(['codex', 'openai-compatible'])
@@ -99,6 +104,9 @@ type ModelCommandPreset = z.infer<typeof modelCommandPresetSchema>
 
 interface ModelCommandDependencies {
   assistantSetup?: SetupAssistantResolver
+  assistantWizard?: (
+    input: SetupAssistantWizardInput,
+  ) => Promise<SetupAssistantWizardResult>
   input?: NodeJS.ReadableStream
   output?: NodeJS.WritableStream
   readDefaults?: (homeDirectory: string) => Promise<AssistantOperatorDefaults | null>
@@ -119,6 +127,8 @@ export function registerModelCommands(
 ) {
   const assistantSetup =
     dependencies.assistantSetup ?? createSetupAssistantResolver()
+  const assistantWizard =
+    dependencies.assistantWizard ?? runSetupAssistantWizard
   const input = dependencies.input ?? defaultInput
   const output = dependencies.output ?? defaultOutput
   const readDefaults =
@@ -188,21 +198,34 @@ export function registerModelCommands(
       }
 
       const allowPrompt = terminal.stdinIsTTY && terminal.stderrIsTTY
-      const preset = await resolveModelCommandPreset({
-        allowPrompt,
-        currentPreset:
-          buildSetupAssistantOptionsFromDefaults(existingDefaults).assistantPreset ??
-          null,
-        input,
+      const wizardSelection =
+        allowPrompt && shouldRunModelAssistantWizard(options)
+          ? await assistantWizard({
+              ...buildSetupAssistantWizardInputFromDefaults(existingDefaults),
+            })
+          : null
+      const resolvedOptions = mergeModelCommandOptionsWithWizardSelection(
         options,
-        output,
-      })
-      assertCompatibleModelCommandOptions(preset, options)
+        wizardSelection,
+      )
+      const preset =
+        wizardSelection?.assistantPreset ??
+        (await resolveModelCommandPreset({
+          allowPrompt,
+          currentPreset:
+            buildSetupAssistantOptionsFromDefaults(existingDefaults).assistantPreset ??
+            null,
+          input,
+          options: resolvedOptions,
+          output,
+        }))
+      assertCompatibleModelCommandOptions(preset, resolvedOptions)
 
       const setupOptions = createModelSetupOptions({
         defaults: existingDefaults,
-        options,
+        options: resolvedOptions,
         preset,
+        wizardSelection,
       })
       const selectedAssistant = await assistantSetup.resolve({
         allowPrompt,
@@ -271,6 +294,45 @@ function hasModelUpdateOptions(options: ModelCommandOptions): boolean {
       options.reasoningEffort ??
       options.oss,
   )
+}
+
+function shouldRunModelAssistantWizard(options: ModelCommandOptions): boolean {
+  return !hasModelUpdateOptions(options)
+}
+
+function mergeModelCommandOptionsWithWizardSelection(
+  options: ModelCommandOptions,
+  wizardSelection: SetupAssistantWizardResult | null,
+): ModelCommandOptions {
+  if (!wizardSelection?.assistantPreset) {
+    return options
+  }
+
+  return {
+    ...options,
+    preset: wizardSelection.assistantPreset,
+    ...(wizardSelection.assistantBaseUrl !== undefined
+      ? {
+          baseUrl: wizardSelection.assistantBaseUrl ?? undefined,
+        }
+      : {}),
+    ...(wizardSelection.assistantApiKeyEnv !== undefined
+      ? {
+          apiKeyEnv: wizardSelection.assistantApiKeyEnv ?? undefined,
+        }
+      : {}),
+    ...(wizardSelection.assistantProviderName !== undefined
+      ? {
+          providerName: wizardSelection.assistantProviderName ?? undefined,
+        }
+      : {}),
+    ...(wizardSelection.assistantPreset === 'codex' &&
+    wizardSelection.assistantOss !== undefined
+      ? {
+          oss: wizardSelection.assistantOss ?? undefined,
+        }
+      : {}),
+  }
 }
 
 async function resolveModelCommandPreset(input: {
@@ -362,10 +424,28 @@ function createModelSetupOptions(input: {
   defaults: AssistantOperatorDefaults | null
   options: ModelCommandOptions
   preset: ModelCommandPreset
+  wizardSelection?: SetupAssistantWizardResult | null
 }): SetupCommandOptions {
+  const savedAssistantOptions = buildSetupAssistantOptionsFromDefaults(
+    input.defaults,
+    input.preset,
+  )
+  if (input.wizardSelection) {
+    delete savedAssistantOptions.assistantModel
+    if (input.wizardSelection.assistantBaseUrl === null) {
+      delete savedAssistantOptions.assistantBaseUrl
+    }
+    if (input.wizardSelection.assistantApiKeyEnv === null) {
+      delete savedAssistantOptions.assistantApiKeyEnv
+    }
+    if (input.wizardSelection.assistantProviderName === null) {
+      delete savedAssistantOptions.assistantProviderName
+    }
+  }
+
   return setupCommandOptionsSchema.parse({
     vault: './vault',
-    ...buildSetupAssistantOptionsFromDefaults(input.defaults),
+    ...savedAssistantOptions,
     assistantPreset: input.preset,
     ...(input.options.providerPreset !== undefined
       ? {
@@ -534,9 +614,18 @@ function assistantOperatorDefaultsMatch(
 
 function buildSetupAssistantOptionsFromDefaults(
   defaults: AssistantOperatorDefaults | null | undefined,
+  preset?: ModelCommandPreset,
 ): Partial<SetupCommandOptions> {
   const backend = resolveAssistantBackendTarget(defaults)
   if (!backend) {
+    return {}
+  }
+
+  if (
+    preset &&
+    ((preset === 'openai-compatible' && backend.adapter !== 'openai-compatible') ||
+      (preset === 'codex' && backend.adapter !== 'codex-cli'))
+  ) {
     return {}
   }
 
@@ -572,6 +661,37 @@ function buildSetupAssistantOptionsFromDefaults(
         assistantOss: savedDefaults?.oss === true ? true : undefined,
       }
     }
+  }
+}
+
+function buildSetupAssistantWizardInputFromDefaults(
+  defaults: AssistantOperatorDefaults | null | undefined,
+): SetupAssistantWizardInput {
+  const backend = resolveAssistantBackendTarget(defaults)
+  if (!backend) {
+    return {}
+  }
+
+  switch (backend.adapter) {
+    case 'openai-compatible': {
+      const savedDefaults = resolveAssistantProviderDefaults(
+        defaults ?? null,
+        'openai-compatible',
+      )
+
+      return {
+        initialAssistantPreset: 'openai-compatible',
+        initialAssistantBaseUrl: savedDefaults?.baseUrl ?? undefined,
+        initialAssistantApiKeyEnv: savedDefaults?.apiKeyEnv ?? undefined,
+        initialAssistantProviderName: savedDefaults?.providerName ?? undefined,
+      }
+    }
+    case 'codex-cli':
+    default:
+      return {
+        initialAssistantPreset: 'codex',
+        initialAssistantOss: backend.oss === true ? true : undefined,
+      }
   }
 }
 

@@ -27,6 +27,10 @@
       "types": "./dist/setup-assistant.d.ts",
       "default": "./dist/setup-assistant.js"
     },
+    "./setup-assistant-wizard": {
+      "types": "./dist/setup-assistant-wizard.d.ts",
+      "default": "./dist/setup-assistant-wizard.js"
+    },
     "./setup-assistant-account": {
       "types": "./dist/setup-assistant-account.d.ts",
       "default": "./dist/setup-assistant-account.js"

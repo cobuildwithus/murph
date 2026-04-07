@@ -1,6 +1,7 @@
 export * from './setup-cli.js'
 export * from './setup-services.js'
 export * from './setup-assistant.js'
+export * from './setup-assistant-wizard.js'
 export * from './setup-assistant-account.js'
 export * from './setup-agentmail.js'
 export * from './setup-wizard.js'
