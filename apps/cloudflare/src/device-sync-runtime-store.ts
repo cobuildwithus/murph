@@ -1,3 +1,4 @@
+import { sanitizeStoredDeviceSyncMetadata } from "@murphai/device-syncd/public-ingress";
 import {
   parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/device-syncd/hosted-runtime";
@@ -89,7 +90,9 @@ export function createHostedDeviceSyncRuntimeStore(input: {
             nextConnection.connection.displayName = update.connection.displayName ?? null;
           }
           if (Object.prototype.hasOwnProperty.call(update.connection, "metadata")) {
-            nextConnection.connection.metadata = structuredClone(update.connection.metadata ?? {});
+            nextConnection.connection.metadata = sanitizeStoredDeviceSyncMetadata(
+              update.connection.metadata ?? {},
+            );
           }
           if (Object.prototype.hasOwnProperty.call(update.connection, "scopes")) {
             nextConnection.connection.scopes = [...(update.connection.scopes ?? [])];
@@ -239,6 +242,7 @@ function createSeededConnectionSnapshot(
     connection: {
       ...structuredClone(seed.connection),
       accessTokenExpiresAt: seed.tokenBundle?.accessTokenExpiresAt ?? seed.connection.accessTokenExpiresAt,
+      metadata: sanitizeStoredDeviceSyncMetadata(seed.connection.metadata ?? {}),
       updatedAt: seed.connection.updatedAt ?? seed.connection.createdAt ?? appliedAt,
     },
     localState: structuredClone(seed.localState),
