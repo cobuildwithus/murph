@@ -60,6 +60,7 @@ export const cloudflareNodeVitestProjects = [
     "crypto.test.ts",
     "env.test.ts",
     "hosted-email*.test.ts",
+    "index-backpressure.test.ts",
     "index.test.ts",
     "wrangler-runner.test.ts",
   ]),
