@@ -12,7 +12,7 @@ engineStrict: true
 managePackageManagerVersions: true
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
-  - '@cobuild/review-gpt@0.5.50'
+  - '@cobuild/review-gpt@0.5.51'
   - next@16.2.2
   - '@next/env@16.2.2'
   - '@next/swc-darwin-arm64@16.2.2'
@@ -25,8 +25,6 @@ minimumReleaseAgeExclude:
   - '@next/swc-win32-x64-msvc@16.2.2'
 nodeVersion: 22.16.0
 packageManagerStrictVersion: true
-patchedDependencies:
-  '@cobuild/review-gpt@0.5.50': patches/@cobuild__review-gpt@0.5.50.patch
 savePrefix: ''
 trustPolicy: no-downgrade
 # Ignore provenance-era drift for older releases that predate broad trusted publishing.

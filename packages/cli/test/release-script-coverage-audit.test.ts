@@ -132,10 +132,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(reviewGptVersionRange).toMatch(/^\^0\.5\.\d+$/u)
     expect(pnpmWorkspace).toContain(`  - '@cobuild/review-gpt@${reviewGptPinnedVersion}'`)
-    expect(pnpmWorkspace).toContain(
-      `patchedDependencies:\n  '@cobuild/review-gpt@${reviewGptPinnedVersion}': patches/@cobuild__review-gpt@${reviewGptPinnedVersion}.patch`,
-    )
-    expect(existsSync(path.join(repoRoot, 'patches', `@cobuild__review-gpt@${reviewGptPinnedVersion}.patch`))).toBe(true)
+    expect(pnpmWorkspace).not.toContain('patchedDependencies:')
+    expect(existsSync(path.join(repoRoot, 'patches', `@cobuild__review-gpt@${reviewGptPinnedVersion}.patch`))).toBe(false)
   })
 
   it('keeps the lean and full review-gpt wrappers wired to the expected package scripts', () => {
