@@ -33,7 +33,7 @@ Derived export-pack directories use a path-safe pack name and are not canonical 
 ## Record Families
 
 - Vault metadata:
-  `schemaVersion`, `vaultId`, `createdAt`, `title`, `timezone`, `idPolicy`, `paths`, `shards`
+  `formatVersion`, `vaultId`, `createdAt`, `title`, `timezone`
 - Event records:
   `schemaVersion`, `id`, `kind`, `occurredAt`, `recordedAt`, `dayKey`, `source`, `title`, plus kind-specific fields and optional provenance fields
 - Sample records:

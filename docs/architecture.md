@@ -78,7 +78,7 @@ repo/
   - `derived/knowledge/log.md`
   - `derived/knowledge/pages/*.md`
 - Local runtime state:
-  - canonical `vault.json` / markdown evolution happens through ordered, audited `vault upgrade` steps in `packages/core`; rebuildable `.runtime/projections/**` stores are repaired or rebuilt separately and never become canonical migration state; validation may read known legacy metadata in memory to classify upgrade requirements, but scaffold-only repair stays current-format-only and older vaults must run `vault upgrade` before core write paths resume; only `vault upgrade` writes upgraded canonical metadata back to disk
+  - canonical `vault.json` / markdown evolution happens through ordered, audited `vault upgrade` steps in `packages/core`; `vault.json` stores only instance-owned facts plus `formatVersion`, while layout and id/shard policy stay code-owned; rebuildable `.runtime/projections/**` stores are repaired or rebuilt separately and never become canonical migration state
   - `.runtime/operations/inbox/*.json`
   - `.runtime/operations/parsers/toolchain.json`
   - `.runtime/operations/device-sync/state.sqlite`

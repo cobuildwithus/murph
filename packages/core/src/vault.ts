@@ -28,7 +28,6 @@ import {
 
 import {
   DEFAULT_TIMEZONE,
-  CURRENT_VAULT_FORMAT_VERSION,
   REQUIRED_DIRECTORIES,
   VAULT_LAYOUT,
 } from "./constants.ts";
@@ -57,9 +56,7 @@ import { toIsoTimestamp } from "./time.ts";
 import { buildVaultCoreDocument } from "./vault-core-document.ts";
 import {
   buildVaultMetadata,
-  buildVaultMetadataUpgradeError,
   loadVaultMetadata,
-  loadVaultMetadataWithCompatibility,
 } from "./vault-metadata.ts";
 
 import type { DateInput, UnknownRecord, ValidationIssue } from "./types.ts";
@@ -866,29 +863,12 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
   let metadata: VaultMetadata | null = null;
 
   try {
-    const loadedVault = await loadVaultMetadataWithCompatibility(
+    const loadedVault = await loadVaultMetadata(
       absoluteRoot,
       "VAULT_INVALID_METADATA",
       "Vault metadata failed contract validation.",
     );
     metadata = loadedVault.metadata;
-
-    if (loadedVault.storedFormatVersion !== CURRENT_VAULT_FORMAT_VERSION) {
-      const upgradeError = buildVaultMetadataUpgradeError(loadedVault.storedFormatVersion);
-      issues.push(
-        validationIssue(
-          upgradeError.code,
-          upgradeError.message,
-          VAULT_LAYOUT.metadata,
-        ),
-      );
-
-      return {
-        valid: false,
-        issues,
-        metadata,
-      };
-    }
   } catch (error) {
     issues.push(
       validationIssue(

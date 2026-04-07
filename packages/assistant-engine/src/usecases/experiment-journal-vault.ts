@@ -1,4 +1,4 @@
-import { EXPERIMENT_STATUSES, type JsonObject } from '@murphai/contracts'
+import { EXPERIMENT_STATUSES } from '@murphai/contracts'
 import { z } from 'zod'
 import {
   loadQueryRuntime,
@@ -23,6 +23,7 @@ import {
   normalizeIsoTimestamp,
   normalizeOptionalText,
   toVaultCliError,
+  toVaultMetadataCliError,
   stringArray,
   uniqueStrings,
 } from './vault-usecase-helpers.js'
@@ -341,7 +342,7 @@ export async function listExperimentRecords(input: {
   limit: number
 }) {
   const query = await loadExperimentJournalVaultQueryRuntime()
-  const readModel = await query.readVault(input.vault)
+  const readModel = await readExperimentJournalVault(input.vault)
   const items = query
     .listEntities(readModel, {
       families: ['experiment'],
@@ -475,7 +476,7 @@ export async function listJournalRecords(input: {
   limit: number
 }) {
   const query = await loadExperimentJournalVaultQueryRuntime()
-  const readModel = await query.readVault(input.vault)
+  const readModel = await readExperimentJournalVault(input.vault)
   const items = query
     .listEntities(readModel, {
       families: ['journal'],
@@ -494,13 +495,11 @@ export async function listJournalRecords(input: {
 }
 
 export async function showVaultSummary(vault: string) {
-  const query = await loadExperimentJournalVaultQueryRuntime()
-  const readModel = await query.readVault(vault)
+  const readModel = await readExperimentJournalVault(vault)
   const metadata = readModel.metadata
 
   return {
     vault,
-    schemaVersion: stringOrNull(metadata?.schemaVersion),
     formatVersion: resolveVaultFormatVersion(metadata),
     vaultId: stringOrNull(metadata?.vaultId),
     title: stringOrNull(metadata?.title),
@@ -519,7 +518,7 @@ function resolveVaultFormatVersion(metadata: Record<string, unknown> | null | un
 
   return typeof metadata.formatVersion === 'number' && Number.isInteger(metadata.formatVersion)
     ? metadata.formatVersion
-    : 0
+    : null
 }
 
 export async function updateVaultSummary(input: {
@@ -549,21 +548,8 @@ export async function updateVaultSummary(input: {
   }
 }
 
-export async function showVaultPaths(vault: string) {
-  const query = await loadExperimentJournalVaultQueryRuntime()
-  const readModel = await query.readVault(vault)
-  const metadata = readModel.metadata
-
-  return {
-    vault,
-    paths: objectOrNull(metadata?.paths),
-    shards: objectOrNull(metadata?.shards),
-  }
-}
-
 export async function showVaultStats(vault: string) {
-  const query = await loadExperimentJournalVaultQueryRuntime()
-  const readModel = await query.readVault(vault)
+  const readModel = await readExperimentJournalVault(vault)
 
   return {
     vault,
@@ -683,7 +669,7 @@ async function requireEntityFamily(
   family: EntityFamily,
 ) {
   const query = await loadExperimentJournalVaultQueryRuntime()
-  const readModel = await query.readVault(vault)
+  const readModel = await readExperimentJournalVault(vault)
   const entity = query.lookupEntityById(readModel, lookup)
 
   if (!entity || entity.family !== family) {
@@ -745,6 +731,16 @@ async function loadExperimentJournalVaultQueryRuntime(): Promise<QueryRuntimeMod
   return loadQueryRuntime()
 }
 
+async function readExperimentJournalVault(vault: string) {
+  const query = await loadExperimentJournalVaultQueryRuntime()
+
+  try {
+    return await query.readVault(vault)
+  } catch (error) {
+    throw toVaultMetadataCliError(error)
+  }
+}
+
 async function loadExperimentJournalVaultCoreRuntime(): Promise<ExperimentJournalVaultCoreRuntime> {
   return loadRuntimeModule<ExperimentJournalVaultCoreRuntime>('@murphai/core')
 }
@@ -769,10 +765,4 @@ function latestDate(records: readonly QueryCanonicalEntity[]) {
 
 function stringOrNull(value: unknown) {
   return typeof value === 'string' && value.length > 0 ? value : null
-}
-
-function objectOrNull(value: unknown): JsonObject | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as JsonObject)
-    : null
 }

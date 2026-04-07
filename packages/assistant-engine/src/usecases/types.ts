@@ -309,7 +309,6 @@ export type WearableSourceListResult = WearableListResult<QueryWearableSourceHea
 
 export interface VaultShowResult {
   vault: string
-  schemaVersion: string | null
   formatVersion: number | null
   vaultId: string | null
   title: string | null
@@ -318,12 +317,6 @@ export interface VaultShowResult {
   corePath: string | null
   coreTitle: string | null
   coreUpdatedAt: string | null
-}
-
-export interface VaultPathsResult {
-  vault: string
-  paths: JsonObject | null
-  shards: JsonObject | null
 }
 
 export interface VaultStatsResult {
@@ -751,7 +744,6 @@ export interface QueryServices extends HealthQueryServiceMethods {
     },
   ): Promise<ListResult>
   showVault(input: CommandContext): Promise<VaultShowResult>
-  showVaultPaths(input: CommandContext): Promise<VaultPathsResult>
   showVaultStats(input: CommandContext): Promise<VaultStatsResult>
   show(
     input: CommandContext & {

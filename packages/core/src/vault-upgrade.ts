@@ -6,12 +6,10 @@ import {
   VAULT_LAYOUT,
 } from "./constants.ts";
 import { VaultError } from "./errors.ts";
-import { pathExists, readJsonFile } from "./fs.ts";
+import { readJsonFile } from "./fs.ts";
 import { runCanonicalWrite } from "./operations/write-batch.ts";
-import { normalizeVaultRoot, resolveVaultPath } from "./path-safety.ts";
-import { buildVaultCoreDocument } from "./vault-core-document.ts";
+import { normalizeVaultRoot } from "./path-safety.ts";
 import {
-  buildCurrentVaultMetadataFromLegacy,
   detectVaultMetadataFormatVersion,
   validateVaultMetadata,
 } from "./vault-metadata.ts";
@@ -75,46 +73,7 @@ interface VaultUpgradeMigration {
   toFormatVersion: number;
 }
 
-const VAULT_UPGRADE_MIGRATIONS: readonly VaultUpgradeMigration[] = [
-  {
-    fromFormatVersion: 0,
-    toFormatVersion: 1,
-    description:
-      "Write explicit vault formatVersion metadata and restore the canonical CORE.md baseline when missing.",
-    async prepare({ occurredAt, rawMetadata, vaultRoot }) {
-      const nextMetadata = buildCurrentVaultMetadataFromLegacy(rawMetadata);
-      const textWrites: VaultUpgradeTextWrite[] = [
-        {
-          relativePath: VAULT_LAYOUT.metadata,
-          content: `${JSON.stringify(nextMetadata, null, 2)}\n`,
-          overwrite: true,
-        },
-      ];
-      const affectedFiles: string[] = [VAULT_LAYOUT.metadata];
-      const coreDocumentPath = resolveVaultPath(vaultRoot, VAULT_LAYOUT.coreDocument);
-
-      if (!(await pathExists(coreDocumentPath.absolutePath))) {
-        textWrites.push({
-          relativePath: VAULT_LAYOUT.coreDocument,
-          content: buildVaultCoreDocument({
-            vaultId: nextMetadata.vaultId,
-            title: nextMetadata.title,
-            timezone: nextMetadata.timezone,
-            updatedAt: occurredAt,
-          }),
-          overwrite: false,
-        });
-        affectedFiles.push(VAULT_LAYOUT.coreDocument);
-      }
-
-      return {
-        nextMetadata,
-        textWrites,
-        affectedFiles,
-      };
-    },
-  },
-] as const;
+const VAULT_UPGRADE_MIGRATIONS: readonly VaultUpgradeMigration[] = [] as const;
 
 export async function upgradeVault({
   dryRun = false,

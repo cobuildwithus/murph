@@ -563,80 +563,11 @@ function sampleSchema<const TStream extends SampleStream, TExtra extends z.ZodRa
 export const vaultMetadataSchema = withContractMetadata(
   z
     .object({
-      schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.vault),
-      formatVersion: z.literal(CURRENT_VAULT_FORMAT_VERSION).optional(),
+      formatVersion: z.literal(CURRENT_VAULT_FORMAT_VERSION),
       vaultId: idSchema(ID_PREFIXES.vault),
       createdAt: isoDateTimeString(),
       title: boundedString(1, 120),
       timezone: timeZoneString(),
-      idPolicy: z
-        .object({
-          format: z.literal(CONTRACT_ID_FORMAT),
-          prefixes: z
-            .object({
-              allergy: z.literal(ID_PREFIXES.allergy),
-              assessment: z.literal(ID_PREFIXES.assessment),
-              audit: z.literal(ID_PREFIXES.audit),
-              automation: z.literal(ID_PREFIXES.automation),
-              condition: z.literal(ID_PREFIXES.condition),
-              document: z.literal(ID_PREFIXES.document),
-              event: z.literal(ID_PREFIXES.event),
-              experiment: z.literal(ID_PREFIXES.experiment),
-              family: z.literal(ID_PREFIXES.family),
-              food: z.literal(ID_PREFIXES.food),
-              goal: z.literal(ID_PREFIXES.goal),
-              meal: z.literal(ID_PREFIXES.meal),
-              memory: z.literal(ID_PREFIXES.memory),
-              pack: z.literal(ID_PREFIXES.pack),
-              profileSnapshot: z.literal(ID_PREFIXES.profileSnapshot),
-              provider: z.literal(ID_PREFIXES.provider),
-              recipe: z.literal(ID_PREFIXES.recipe),
-              protocol: z.literal(ID_PREFIXES.protocol),
-              sample: z.literal(ID_PREFIXES.sample),
-              transform: z.literal(ID_PREFIXES.transform),
-              variant: z.literal(ID_PREFIXES.variant),
-              vault: z.literal(ID_PREFIXES.vault),
-              workoutFormat: z.literal(ID_PREFIXES.workoutFormat),
-            })
-            .strict(),
-        })
-        .strict(),
-      paths: z
-        .object({
-          allergiesRoot: z.literal("bank/allergies"),
-          assessmentLedgerRoot: z.literal("ledger/assessments"),
-          conditionsRoot: z.literal("bank/conditions"),
-          coreDocument: z.literal("CORE.md"),
-          familyRoot: z.literal("bank/family"),
-          foodsRoot: z.literal("bank/foods"),
-          geneticsRoot: z.literal("bank/genetics"),
-          goalsRoot: z.literal("bank/goals"),
-          journalRoot: z.literal("journal"),
-          experimentsRoot: z.literal("bank/experiments"),
-          profileCurrentDocument: z.literal("bank/profile/current.md"),
-          profileRoot: z.literal("bank/profile"),
-          profileSnapshotsRoot: z.literal("ledger/profile-snapshots"),
-          providersRoot: z.literal("bank/providers"),
-          recipesRoot: z.literal("bank/recipes"),
-          workoutFormatsRoot: z.literal("bank/workout-formats"),
-          rawAssessmentsRoot: z.literal("raw/assessments"),
-          rawRoot: z.literal("raw"),
-          eventsRoot: z.literal("ledger/events"),
-          protocolsRoot: z.literal("bank/protocols"),
-          samplesRoot: z.literal("ledger/samples"),
-          auditRoot: z.literal("audit"),
-          exportsRoot: z.literal("exports"),
-        })
-        .strict(),
-      shards: z
-        .object({
-          assessments: z.literal("ledger/assessments/YYYY/YYYY-MM.jsonl"),
-          events: z.literal("ledger/events/YYYY/YYYY-MM.jsonl"),
-          profileSnapshots: z.literal("ledger/profile-snapshots/YYYY/YYYY-MM.jsonl"),
-          samples: z.literal("ledger/samples/<stream>/YYYY/YYYY-MM.jsonl"),
-          audit: z.literal("audit/YYYY/YYYY-MM.jsonl"),
-        })
-        .strict(),
     })
     .strict(),
   "@murphai/contracts/vault-metadata.schema.json",

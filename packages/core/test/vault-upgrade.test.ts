@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -22,20 +22,15 @@ async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
   await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
-async function rewriteVaultMetadataAsLegacy(vaultRoot: string): Promise<Record<string, unknown>> {
+async function rewriteVaultMetadataWithFormatVersion(
+  vaultRoot: string,
+  formatVersion: number,
+): Promise<Record<string, unknown>> {
   const metadataPath = path.join(vaultRoot, "vault.json");
   const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as Record<string, unknown>;
-  const legacyMetadata = {
-    schemaVersion: metadata.schemaVersion,
-    vaultId: metadata.vaultId,
-    createdAt: metadata.createdAt,
-    title: metadata.title,
-    timezone: metadata.timezone,
-  } satisfies Record<string, unknown>;
-
-  await writeJsonFile(metadataPath, legacyMetadata);
-
-  return legacyMetadata;
+  metadata.formatVersion = formatVersion;
+  await writeJsonFile(metadataPath, metadata);
+  return metadata;
 }
 
 function hasVaultErrorCode(error: unknown, expectedCode: string): boolean {
@@ -47,15 +42,15 @@ function hasVaultErrorCode(error: unknown, expectedCode: string): boolean {
   );
 }
 
-test("validateVault classifies legacy metadata as upgrade required", async () => {
+test("validateVault classifies explicit older format versions as upgrade required", async () => {
   const vaultRoot = await createTempVaultRoot("murph-vault-upgrade-required");
 
   try {
-    const initialized = await initializeVault({
+    await initializeVault({
       vaultRoot,
       timezone: "Australia/Melbourne",
     });
-    const legacyMetadata = await rewriteVaultMetadataAsLegacy(vaultRoot);
+    await rewriteVaultMetadataWithFormatVersion(vaultRoot, 0);
 
     const result = await validateVault({ vaultRoot });
 
@@ -68,19 +63,18 @@ test("validateVault classifies legacy metadata as upgrade required", async () =>
           issue.path === "vault.json",
       ),
     );
-    assert.equal(result.metadata?.vaultId, initialized.metadata.vaultId);
-    assert.equal(result.metadata?.title, legacyMetadata.title);
+    assert.equal(result.metadata, null);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
 });
 
-test("loadVault and repairVault reject legacy metadata until upgradeVault runs", async () => {
+test("loadVault and repairVault reject explicit older format versions", async () => {
   const vaultRoot = await createTempVaultRoot("murph-vault-upgrade-gate");
 
   try {
     await initializeVault({ vaultRoot, timezone: "Australia/Melbourne" });
-    await rewriteVaultMetadataAsLegacy(vaultRoot);
+    await rewriteVaultMetadataWithFormatVersion(vaultRoot, 0);
 
     await assert.rejects(
       () => loadVault({ vaultRoot }),
@@ -122,55 +116,37 @@ test("validateVault surfaces unsupported future vault formats as hard errors", a
   }
 });
 
-test("upgradeVault plans and applies the initial canonical vault migration without touching rebuildable runtime stores", async () => {
-  const vaultRoot = await createTempVaultRoot("murph-vault-upgrade-apply");
+test("upgradeVault returns a no-op result for current-format vaults", async () => {
+  const vaultRoot = await createTempVaultRoot("murph-vault-upgrade-noop");
 
   try {
     await initializeVault({ vaultRoot, timezone: "America/New_York" });
+    const result = await upgradeVault({ vaultRoot, dryRun: true });
 
-    const legacyMetadata = await rewriteVaultMetadataAsLegacy(vaultRoot);
-    const metadataPath = path.join(vaultRoot, "vault.json");
-    await unlink(path.join(vaultRoot, "CORE.md"));
+    assert.equal(result.updated, false);
+    assert.equal(result.dryRun, true);
+    assert.equal(result.auditPath, null);
+    assert.equal(result.fromFormatVersion, CURRENT_VAULT_FORMAT_VERSION);
+    assert.equal(result.toFormatVersion, CURRENT_VAULT_FORMAT_VERSION);
+    assert.deepEqual(result.steps, []);
+    assert.deepEqual(result.affectedFiles, []);
+    assert.deepEqual(result.rebuildableProjectionStores, []);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
 
-    const dryRun = await upgradeVault({ vaultRoot, dryRun: true });
+test("upgradeVault rejects older format versions when no migration is registered", async () => {
+  const vaultRoot = await createTempVaultRoot("murph-vault-upgrade-unsupported-old");
 
-    assert.equal(dryRun.updated, false);
-    assert.equal(dryRun.dryRun, true);
-    assert.equal(dryRun.auditPath, null);
-    assert.equal(dryRun.fromFormatVersion, 0);
-    assert.equal(dryRun.toFormatVersion, CURRENT_VAULT_FORMAT_VERSION);
-    assert.deepEqual(dryRun.rebuildableProjectionStores, []);
-    assert.deepEqual(dryRun.affectedFiles, ["CORE.md", "vault.json"]);
-    assert.deepEqual(dryRun.steps, [
-      {
-        description:
-          "Write explicit vault formatVersion metadata and restore the canonical CORE.md baseline when missing.",
-        fromFormatVersion: 0,
-        toFormatVersion: CURRENT_VAULT_FORMAT_VERSION,
-      },
-    ]);
-    assert.equal(JSON.parse(await readFile(metadataPath, "utf8")).formatVersion, undefined);
+  try {
+    await initializeVault({ vaultRoot, timezone: "America/New_York" });
+    await rewriteVaultMetadataWithFormatVersion(vaultRoot, 0);
 
-    const applied = await upgradeVault({ vaultRoot });
-
-    assert.equal(applied.updated, true);
-    assert.equal(applied.dryRun, false);
-    assert.equal(applied.fromFormatVersion, 0);
-    assert.equal(applied.toFormatVersion, CURRENT_VAULT_FORMAT_VERSION);
-    assert.deepEqual(applied.rebuildableProjectionStores, []);
-    assert.deepEqual(applied.affectedFiles, ["CORE.md", "vault.json"]);
-    assert.match(applied.auditPath ?? "", /^audit\/.+\.jsonl$/u);
-
-    const upgradedMetadata = JSON.parse(await readFile(metadataPath, "utf8")) as Record<string, unknown>;
-    assert.equal(upgradedMetadata.formatVersion, CURRENT_VAULT_FORMAT_VERSION);
-    assert.ok(typeof upgradedMetadata.idPolicy === "object" && upgradedMetadata.idPolicy !== null);
-    assert.ok(typeof upgradedMetadata.paths === "object" && upgradedMetadata.paths !== null);
-    assert.ok(typeof upgradedMetadata.shards === "object" && upgradedMetadata.shards !== null);
-
-    const coreDocument = await readFile(path.join(vaultRoot, "CORE.md"), "utf8");
-    assert.ok(coreDocument.startsWith("---\n"));
-    assert.match(coreDocument, /docType: core/u);
-    assert.ok(coreDocument.includes(`# ${legacyMetadata.title}`));
+    await assert.rejects(
+      () => upgradeVault({ vaultRoot }),
+      (error) => hasVaultErrorCode(error, "VAULT_UPGRADE_UNSUPPORTED"),
+    );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

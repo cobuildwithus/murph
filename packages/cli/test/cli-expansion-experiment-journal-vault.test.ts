@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
@@ -234,7 +234,7 @@ test.sequential(
 )
 
 test.sequential(
-  'vault show, stats, and paths surface read-only vault metadata and counts',
+  'vault show and stats surface read-only vault metadata and counts',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-vault-'))
 
@@ -260,7 +260,6 @@ test.sequential(
       ])
 
       const showResult = await runCli<{
-        schemaVersion: string | null
         formatVersion: number | null
         vaultId: string | null
         title: string | null
@@ -289,19 +288,9 @@ test.sequential(
         '--vault',
         vaultRoot,
       ])
-      const pathsResult = await runCli<{
-        paths: Record<string, unknown> | null
-        shards: Record<string, unknown> | null
-      }>([
-        'vault',
-        'paths',
-        '--vault',
-        vaultRoot,
-      ])
 
       assert.equal(showResult.ok, true)
       assert.equal(showResult.meta?.command, 'vault show')
-      assert.match(requireData(showResult).schemaVersion ?? '', /^murph\./u)
       assert.equal(requireData(showResult).formatVersion, 1)
       assert.match(requireData(showResult).vaultId ?? '', /^vault_/u)
       assert.equal(requireData(showResult).corePath, 'CORE.md')
@@ -316,14 +305,65 @@ test.sequential(
       assert.equal(requireData(statsResult).counts.audits >= 1, true)
       assert.equal(requireData(statsResult).latest.journalDate, '2026-03-12')
       assert.equal(requireData(statsResult).latest.experimentTitle, 'Focus Sprint')
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
 
-      assert.equal(pathsResult.ok, true)
-      assert.equal(pathsResult.meta?.command, 'vault paths')
-      assert.equal(requireData(pathsResult).paths?.experimentsRoot, 'bank/experiments')
-      assert.equal(
-        requireData(pathsResult).shards?.events,
-        'ledger/events/YYYY/YYYY-MM.jsonl',
-      )
+test.sequential(
+  'vault show and stats reject invalid vault metadata',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-vault-invalid-'))
+
+    try {
+      await runCli(['init', '--vault', vaultRoot])
+      const metadataPath = path.join(vaultRoot, 'vault.json')
+      const metadata = JSON.parse(await readFile(metadataPath, 'utf8')) as Record<string, unknown>
+      metadata.paths = {
+        coreDocument: 'CORE.md',
+      }
+      await writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`)
+
+      const showResult = await runCli([
+        'vault',
+        'show',
+        '--vault',
+        vaultRoot,
+      ])
+      const statsResult = await runCli([
+        'vault',
+        'stats',
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(showResult.ok, false)
+      assert.equal(showResult.error?.code, 'invalid_metadata')
+      assert.equal(statsResult.ok, false)
+      assert.equal(statsResult.error?.code, 'invalid_metadata')
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'vault paths is not a registered command',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-vault-paths-'))
+
+    try {
+      await runCli(['init', '--vault', vaultRoot])
+      const pathsResult = await runCli([
+        'vault',
+        'paths',
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(pathsResult.ok, false)
+      assert.equal(pathsResult.error?.code, 'COMMAND_NOT_FOUND')
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }
