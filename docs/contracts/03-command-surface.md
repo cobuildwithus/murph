@@ -16,7 +16,6 @@ Status: frozen baseline plus health extension fence for `vault-cli`
 vault-cli init --vault <path> [--request-id <id>]
 vault-cli validate --vault <path> [--request-id <id>]
 vault-cli vault show --vault <path> [--request-id <id>]
-vault-cli vault paths --vault <path> [--request-id <id>]
 vault-cli vault stats --vault <path> [--request-id <id>]
 vault-cli vault repair --vault <path> [--request-id <id>]
 vault-cli vault update --vault <path> [--title <title>] [--timezone <tz>] [--request-id <id>]
@@ -192,7 +191,7 @@ The command surface is organized around reusable capability bundles, not a paylo
 - `batchInspection`: `batch show | batch list`
 - `lifecycle`: `create | show | list | update | checkpoint | stop`
 - `dateAddressedDoc`: `ensure | show | list | append | link | unlink`
-- `derivedAdmin`: `stats | paths | rebuild | materialize | prune | validate`
+- `derivedAdmin`: `stats | rebuild | materialize | prune | validate`
 - `runtimeControl`: `bootstrap | setup | doctor | parse | requeue | attachment list/show/show-status/parse/reparse | promote | model bundle/route`
 - `deviceControl`: `provider list | connect | account list/show/reconcile/disconnect | daemon status/start/stop`
 
@@ -279,7 +278,7 @@ Every command now uses native `incur` command definitions directly:
 - Generic `show` accepts canonical read ids for event-backed records, including the stable `doc_*` and `meal_*` family ids. `event show` remains the explicit provenance-oriented follow-up surface when the caller needs the internal event id path, while `document manifest` and `meal manifest` expose immutable import artifacts.
 - `samples batch show` and `samples batch list` are the first-class follow-up surface for `xfm_*` import-batch ids; generic `show` still does not accept them.
 - `intake manifest` and `intake raw` are the first-class follow-up surface for immutable assessment evidence under `raw/assessments/**`.
-- `audit show|list|tail` and `vault show|paths|stats|repair|update` are first-class vault noun commands layered on top of the read model and core metadata write path.
+- `audit show|list|tail` and `vault show|stats|repair|update` are first-class vault noun commands layered on top of the read model and core metadata write path.
 - Export pack ids identify derived files under `exports/packs/`; they are not valid `show` targets.
 - `sample-summary:<date>:<stream>` ids emitted by `timeline` are derived context handles, not valid `show` targets.
 - A successful `show` response surfaces the canonical read id in `entity.id`.
@@ -617,7 +616,7 @@ The freeform note is preserved verbatim in `note`. The structured fields stay in
   "vault": "<path>",
   "dbPath": ".runtime/projections/query.sqlite",
   "exists": true,
-  "schemaVersion": "murph.query-projection.v1",
+  "schemaVersion": "murph.query-projection.v2",
   "builtAt": "2026-04-07T03:55:00.000Z",
   "entityCount": 42,
   "searchDocumentCount": 42,
@@ -634,7 +633,7 @@ The freeform note is preserved verbatim in `note`. The structured fields stay in
   "vault": "<path>",
   "dbPath": ".runtime/projections/query.sqlite",
   "exists": true,
-  "schemaVersion": "murph.query-projection.v1",
+  "schemaVersion": "murph.query-projection.v2",
   "builtAt": "2026-04-07T03:55:00.000Z",
   "entityCount": 42,
   "searchDocumentCount": 42,
@@ -707,7 +706,7 @@ The five-file pack shape stays stable; health extensions enrich `manifest.json`,
 
 - `init`, `validate`, `meal add`, `document import`, `samples import-csv`, and `intake import` delegate to `packages/core` or `packages/importers` write paths that preserve immutable raw evidence and append-only ledgers.
 - `provider upsert`, `food upsert`, `food schedule`, `recipe upsert`, `event upsert`, `samples add`, `workout add`, `workout format save|show|list|log`, `intervention add`, `experiment create|update|checkpoint|stop`, `journal ensure|append|link|unlink`, `vault repair|update`, `intake project`, health `<noun> scaffold`, health `<noun> upsert`, `profile current rebuild`, `protocol stop`, and `supplement stop` all delegate to `packages/core` exports or to CLI-local helpers built only on top of `packages/core` frontmatter/jsonl primitives, importer entrypoints, canonical write locks, and assistant runtime automation state.
-- `show`, `list`, `search query`, `query projection status|rebuild`, `timeline`, `document/meal/samples/intake/export` follow-up reads, `audit show|list|tail`, and `vault show|paths|stats` delegate to the read model plus immutable-manifest inspection helpers.
+- `show`, `list`, `search query`, `query projection status|rebuild`, `timeline`, `document/meal/samples/intake/export` follow-up reads, `audit show|list|tail`, and `vault show|stats` delegate to the read model plus immutable-manifest inspection helpers.
 - `inbox` bootstrap/setup, capture review, attachment parse, and promote commands delegate to `packages/inboxd`, `packages/parsers`, and shared `packages/core` primitives without directly writing arbitrary vault files from the CLI layer.
 - Contract validation errors normalize to the shared codes in `docs/contracts/04-error-codes.md`.
 - The default CLI service layer is expected to delegate to the real `core`, `importers`, and `query` package exports. If the local TypeScript or `incur` toolchain is unavailable, that is an environment blocker, not a contract excuse to return placeholder payloads.

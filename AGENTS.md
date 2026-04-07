@@ -30,7 +30,7 @@ Always read these before repo code/docs/test/config work:
 | Vault-only data under `vault/**` | `agent-docs/operations/verification-and-runtime.md` | No repo ledger or repo-wide checks by default. |
 | Review-only repo inspection with no file edits planned | `agent-docs/operations/verification-and-runtime.md` | No repo ledger or repo-wide checks by default unless the user asks for runtime proof. |
 | Docs/process-only | `agent-docs/operations/verification-and-runtime.md` | No audit subagents by default. |
-| Repo code/test/config | `agent-docs/operations/completion-workflow.md`, `agent-docs/operations/verification-and-runtime.md` | Use the task classes in the workflow-routing doc. |
+| Repo code/test/config | `agent-docs/operations/completion-workflow.md`, `agent-docs/operations/verification-and-runtime.md` | Use the task classes in the workflow-routing doc. When that workflow requires audit subagents, spawn them; repo policy already authorizes those passes. |
 | Auth, secrets, trust boundaries, external runtime surfaces | `agent-docs/SECURITY.md` | Treat as higher-risk by default. |
 | Retries, queues, cron, concurrency, failure handling | `agent-docs/RELIABILITY.md` | Capture direct proof for operational changes. |
 | Test selection or verification changes | `agent-docs/references/testing-ci-map.md` | Keep test coverage and doc claims aligned. |
@@ -63,7 +63,7 @@ Always read these before repo code/docs/test/config work:
 - Preserve unrelated worktree edits. Do not overwrite, discard, or revert work you did not make.
 - Use an execution plan for multi-file or high-risk work. Narrow supplied-patch landings may stay ledger-only when they remain bounded and single-turn.
 - If architecture-significant behavior changes, update `ARCHITECTURE.md` and the matching durable docs.
-- Required completion-workflow audit subagent passes are part of the repo workflow once the user has asked for repo work. They are pre-authorized by repo policy, so do not pause only to ask for separate permission to run them.
+- Required completion-workflow audit subagent passes are part of the repo workflow once the user has asked for repo work. That standing repo instruction is already sufficient permission to spawn those required audit subagents, so do not wait for or ask for an extra explicit "use subagents" message.
 - Completion-workflow audit subagents default to one pass per task. Re-run at most one additional audit pass only when the first pass leads to a large or high-risk follow-up diff; otherwise finish locally without spawning another workflow audit subagent.
 - Same-turn task completion counts as acceptance unless the user says `review first` or `do not commit`.
 - If repo files changed and the user did not say `review first` or `do not commit`, create a scoped commit before final handoff.

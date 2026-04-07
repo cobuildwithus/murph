@@ -64,7 +64,7 @@ If any of those conditions fail, use the normal audit path.
 - Prefer a fresh non-forked review handoff packet over inheriting the full implementation thread. Only widen context when a specific review question cannot be answered from the narrowed packet.
 - The final completion review owns remaining coverage/proof-gap review; there is no separate required `test-coverage-audit` pass.
 - Treat the main implementation agent as the integrator of audit findings, not the auditor of record.
-- Within this repo, required audit passes are standing-authorized by repo policy. Once the user has asked for repo work that reaches this workflow, do not stop only to ask for separate permission to run the required audit subagent passes.
+- Within this repo, required audit passes are standing-authorized by repo policy. `AGENTS.md` plus this workflow count as standing permission to spawn the required audit subagent passes once the user has asked for repo work that reaches this workflow, so do not stop only to ask for a second explicit "use subagents" instruction.
 - When the current environment supports spawned agents, run those required audit passes directly as part of task completion instead of treating them as optional follow-up delegation.
 - Use a fresh subagent per pass unless the user explicitly instructs otherwise.
 - After the first final-review pass, do not spawn another workflow audit subagent by default. One extra rerun is the maximum, and only when the first pass produced a large or high-risk repair diff that materially changed the review surface.
