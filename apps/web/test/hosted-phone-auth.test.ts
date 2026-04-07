@@ -106,6 +106,7 @@ describe("HostedPhoneAuth", () => {
     assert.match(markup, /Send me a code/);
     assert.match(markup, /We&#x27;ll text a verification code to the number that messaged Murph\./);
     assert.match(markup, /Use a different number/);
+    assert.doesNotMatch(markup, /Text me a code/);
     assert.doesNotMatch(markup, /\*\*\* 4567/);
     assert.doesNotMatch(markup, /Phone number that received this invite/);
   });
