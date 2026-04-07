@@ -22,12 +22,14 @@ import {
 } from "./entitlement";
 import {
   type HostedMemberAggregate,
-  findHostedMemberByStripeCustomerId,
-  findHostedMemberByStripeSubscriptionId,
   readHostedMemberAggregate,
   updateHostedMemberCoreState,
-  writeHostedMemberStripeBillingRef,
 } from "./hosted-member-store";
+import {
+  findHostedMemberByStripeCustomerId,
+  findHostedMemberByStripeSubscriptionId,
+  writeHostedMemberStripeBillingRef,
+} from "./hosted-member-billing-store";
 import { requireHostedStripeApi } from "./runtime";
 import {
   lockHostedMemberRow,

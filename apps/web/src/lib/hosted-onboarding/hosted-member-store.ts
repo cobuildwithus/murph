@@ -1,40 +1,23 @@
-import {
-  type HostedMember,
-  type HostedMemberBillingRef,
-  type HostedMemberIdentity,
-  Prisma,
-} from "@prisma/client";
+/**
+ * Owns the core hosted_member row plus aggregate reads that compose the
+ * specialized identity, routing, and billing store slices.
+ */
+import { type HostedMember, Prisma } from "@prisma/client";
 
 import {
-  createHostedLinqChatLookupKey,
-  createHostedPhoneLookupKeyReadCandidates,
-  createHostedPrivyUserLookupKey,
-  createHostedPrivyUserLookupKeyReadCandidates,
-  createHostedStripeCustomerLookupKey,
-  createHostedStripeCustomerLookupKeyReadCandidates,
-  createHostedStripeSubscriptionLookupKey,
-  createHostedStripeSubscriptionLookupKeyReadCandidates,
-  createHostedTelegramUserLookupKey,
-  createHostedTelegramUserLookupKeyReadCandidates,
-  createHostedWalletAddressLookupKey,
-  createHostedWalletAddressLookupKeyReadCandidates,
-} from "./contact-privacy";
+  type HostedMemberStripeBillingRefSnapshot,
+  projectHostedMemberStripeBillingRefSnapshot,
+} from "./hosted-member-billing-store";
 import {
-  type HostedOnboardingPrismaClient,
-  lockHostedMemberRow,
-  normalizeNullableString,
-  withHostedOnboardingTransaction,
-} from "./shared";
+  type HostedMemberIdentityState,
+  projectHostedMemberIdentityState,
+} from "./hosted-member-identity-store";
 import {
-  buildHostedMemberBillingPrivateColumns,
-  buildHostedMemberIdentityPrivateColumns,
-  buildHostedMemberRoutingPrivateColumns,
-  readHostedMemberBillingPrivateState,
-  readHostedMemberIdentityPrivateState,
-  readHostedMemberRoutingPrivateState,
-} from "./member-private-codecs";
+  type HostedMemberRoutingStateSnapshot,
+  projectHostedMemberRoutingState,
+} from "./hosted-member-routing-store";
+import { type HostedOnboardingPrismaClient } from "./shared";
 
-type HostedMemberStoreClient = HostedOnboardingPrismaClient;
 const hostedMemberCoreStateSelect = Prisma.validator<Prisma.HostedMemberSelect>()({
   billingStatus: true,
   createdAt: true,
@@ -46,66 +29,6 @@ const hostedMemberCoreStateSelect = Prisma.validator<Prisma.HostedMemberSelect>(
 export type HostedMemberCoreState = Prisma.HostedMemberGetPayload<{
   select: typeof hostedMemberCoreStateSelect;
 }>;
-type HostedMemberRoutingRecord = {
-  linqChatIdEncrypted: string | null;
-  linqChatLookupKey: string | null;
-  memberId: string;
-  telegramUserLookupKey: string | null;
-  telegramUserIdEncrypted: string | null;
-};
-
-export interface HostedMemberStripeBillingRefSnapshot {
-  memberId: string;
-  stripeCustomerId: string | null;
-  stripeSubscriptionId: string | null;
-}
-
-export interface HostedMemberIdentityState {
-  maskedPhoneNumberHint: string;
-  memberId: string;
-  phoneLookupKey: string;
-  signupPhoneCodeSendAttemptId: string | null;
-  signupPhoneCodeSendAttemptStartedAt: Date | null;
-  signupPhoneCodeSentAt: Date | null;
-  signupPhoneNumber: string | null;
-  phoneNumberVerifiedAt: Date | null;
-  privyUserId: string | null;
-  walletAddress: string | null;
-  walletChainType: string | null;
-  walletCreatedAt: Date | null;
-  walletProvider: string | null;
-}
-
-export interface HostedMemberIdentityWriteInput {
-  maskedPhoneNumberHint: string;
-  memberId: string;
-  phoneLookupKey: string;
-  phoneNumberVerifiedAt: Date | null;
-  prisma: HostedMemberStoreClient;
-  phoneNumber: string | null;
-  privyUserId: string | null;
-  signupPhoneCodeSendAttemptId: string | null;
-  signupPhoneCodeSendAttemptStartedAt: Date | null;
-  signupPhoneCodeSentAt: Date | null;
-  signupPhoneNumber: string | null;
-  walletAddress: string | null;
-  walletChainType: string | null;
-  walletCreatedAt: Date | null;
-  walletProvider: string | null;
-}
-
-export interface HostedMemberStripeBillingRefWriteInput {
-  memberId: string;
-  prisma: HostedMemberStoreClient;
-  stripeCustomerId?: string | null;
-  stripeSubscriptionId?: string | null;
-}
-
-export interface HostedMemberRoutingStateSnapshot {
-  linqChatId: string | null;
-  memberId: string;
-  telegramUserLookupKey: string | null;
-}
 
 export interface HostedMemberAggregate extends HostedMemberCoreState {
   linqChatId: string | null;
@@ -122,24 +45,10 @@ export interface HostedMemberAggregate extends HostedMemberCoreState {
   walletProvider: string | null;
 }
 
-export interface HostedMemberSignupPhoneStateWriteInput {
-  memberId: string;
-  prisma: HostedMemberStoreClient;
-  signupPhoneCodeSendAttemptId?: string | null;
-  signupPhoneCodeSendAttemptStartedAt?: Date | null;
-  signupPhoneCodeSentAt?: Date | null;
-  signupPhoneNumber?: string | null;
-}
-
-export type HostedMemberTelegramLookupSnapshot = Pick<
-  HostedMember,
-  "billingStatus" | "id" | "suspendedAt"
->;
-
 export async function createHostedMember(input: {
   billingStatus: HostedMember["billingStatus"];
   memberId: string;
-  prisma: HostedMemberStoreClient;
+  prisma: HostedOnboardingPrismaClient;
   suspendedAt?: Date | null;
 }): Promise<HostedMemberCoreState> {
   return input.prisma.hostedMember.create({
@@ -156,205 +65,9 @@ export async function createHostedMember(input: {
   });
 }
 
-export async function findHostedMemberByPrivyUserId(input: {
-  prisma: HostedMemberStoreClient;
-  privyUserId: string;
-}): Promise<HostedMember | null> {
-  const privyUserLookupKeys = createHostedPrivyUserLookupKeyReadCandidates(input.privyUserId);
-
-  if (privyUserLookupKeys.length === 0) {
-    return null;
-  }
-
-  const identityRecord = await input.prisma.hostedMemberIdentity.findFirst({
-    where: {
-      privyUserLookupKey: {
-        in: privyUserLookupKeys,
-      },
-    },
-    include: {
-      member: true,
-    },
-  });
-
-  return identityRecord?.member ?? null;
-}
-
-export async function findHostedMemberByPhoneLookupKey(input: {
-  phoneLookupKey: string;
-  prisma: HostedMemberStoreClient;
-}): Promise<HostedMember | null> {
-  const identityRecord = await input.prisma.hostedMemberIdentity.findUnique({
-    where: {
-      phoneLookupKey: input.phoneLookupKey,
-    },
-    include: {
-      member: true,
-    },
-  });
-
-  return identityRecord?.member ?? null;
-}
-
-export async function findHostedMemberByPhoneNumber(input: {
-  phoneNumber: string;
-  prisma: HostedMemberStoreClient;
-}): Promise<HostedMember | null> {
-  const phoneLookupKeys = createHostedPhoneLookupKeyReadCandidates(input.phoneNumber);
-
-  if (phoneLookupKeys.length === 0) {
-    return null;
-  }
-
-  const identityRecord = await input.prisma.hostedMemberIdentity.findFirst({
-    where: {
-      phoneLookupKey: {
-        in: phoneLookupKeys,
-      },
-    },
-    include: {
-      member: true,
-    },
-  });
-
-  return identityRecord?.member ?? null;
-}
-
-export async function findHostedMemberByWalletAddress(input: {
-  prisma: HostedMemberStoreClient;
-  walletAddress: string;
-}): Promise<HostedMember | null> {
-  const walletAddressLookupKeys = createHostedWalletAddressLookupKeyReadCandidates(
-    input.walletAddress,
-  );
-
-  if (walletAddressLookupKeys.length === 0) {
-    return null;
-  }
-
-  const identityRecord = await input.prisma.hostedMemberIdentity.findFirst({
-    where: {
-      walletAddressLookupKey: {
-        in: walletAddressLookupKeys,
-      },
-    },
-    include: {
-      member: true,
-    },
-  });
-
-  return identityRecord?.member ?? null;
-}
-
-export async function findHostedMemberByTelegramUserLookupKey(input: {
-  prisma: HostedMemberStoreClient;
-  telegramUserLookupKey: string;
-}): Promise<HostedMemberTelegramLookupSnapshot | null> {
-  const routingRecord = await input.prisma.hostedMemberRouting.findUnique({
-    where: {
-      telegramUserLookupKey: input.telegramUserLookupKey,
-    },
-    select: {
-      member: {
-        select: {
-          billingStatus: true,
-          id: true,
-          suspendedAt: true,
-        },
-      },
-    },
-  });
-
-  return routingRecord?.member ?? null;
-}
-
-export async function findHostedMemberByTelegramUserId(input: {
-  prisma: HostedMemberStoreClient;
-  telegramUserId: string;
-}): Promise<HostedMemberTelegramLookupSnapshot | null> {
-  const telegramUserLookupKeys = createHostedTelegramUserLookupKeyReadCandidates(
-    input.telegramUserId,
-  );
-
-  if (telegramUserLookupKeys.length === 0) {
-    return null;
-  }
-
-  const routingRecord = await input.prisma.hostedMemberRouting.findFirst({
-    where: {
-      telegramUserLookupKey: {
-        in: telegramUserLookupKeys,
-      },
-    },
-    select: {
-      member: {
-        select: {
-          billingStatus: true,
-          id: true,
-          suspendedAt: true,
-        },
-      },
-    },
-  });
-
-  return routingRecord?.member ?? null;
-}
-
-export async function findHostedMemberByStripeCustomerId(input: {
-  prisma: HostedMemberStoreClient;
-  stripeCustomerId: string;
-}): Promise<HostedMember | null> {
-  const stripeCustomerLookupKeys = createHostedStripeCustomerLookupKeyReadCandidates(
-    input.stripeCustomerId,
-  );
-
-  if (stripeCustomerLookupKeys.length === 0) {
-    return null;
-  }
-
-  const billingRefRecord = await input.prisma.hostedMemberBillingRef.findFirst({
-    where: {
-      stripeCustomerLookupKey: {
-        in: stripeCustomerLookupKeys,
-      },
-    },
-    include: {
-      member: true,
-    },
-  });
-
-  return billingRefRecord?.member ?? null;
-}
-
-export async function findHostedMemberByStripeSubscriptionId(input: {
-  prisma: HostedMemberStoreClient;
-  stripeSubscriptionId: string;
-}): Promise<HostedMember | null> {
-  const stripeSubscriptionLookupKeys = createHostedStripeSubscriptionLookupKeyReadCandidates(
-    input.stripeSubscriptionId,
-  );
-
-  if (stripeSubscriptionLookupKeys.length === 0) {
-    return null;
-  }
-
-  const billingRefRecord = await input.prisma.hostedMemberBillingRef.findFirst({
-    where: {
-      stripeSubscriptionLookupKey: {
-        in: stripeSubscriptionLookupKeys,
-      },
-    },
-    include: {
-      member: true,
-    },
-  });
-
-  return billingRefRecord?.member ?? null;
-}
-
 export async function readHostedMemberCoreState(input: {
   memberId: string;
-  prisma: HostedMemberStoreClient;
+  prisma: HostedOnboardingPrismaClient;
 }): Promise<HostedMemberCoreState | null> {
   return input.prisma.hostedMember.findUnique({
     where: {
@@ -364,55 +77,9 @@ export async function readHostedMemberCoreState(input: {
   });
 }
 
-export async function readHostedMemberIdentity(input: {
-  memberId: string;
-  prisma: HostedMemberStoreClient;
-}): Promise<HostedMemberIdentityState | null> {
-  const identityRecord = await input.prisma.hostedMemberIdentity.findUnique({
-    where: {
-      memberId: input.memberId,
-    },
-  });
-
-  return identityRecord ? mapHostedMemberIdentityState(identityRecord) : null;
-}
-
-export async function readHostedMemberRoutingState(input: {
-  memberId: string;
-  prisma: HostedMemberStoreClient;
-}): Promise<HostedMemberRoutingStateSnapshot | null> {
-  const routingRecord = await input.prisma.hostedMemberRouting.findUnique({
-    where: {
-      memberId: input.memberId,
-    },
-    select: {
-      linqChatIdEncrypted: true,
-      linqChatLookupKey: true,
-      memberId: true,
-      telegramUserLookupKey: true,
-      telegramUserIdEncrypted: true,
-    },
-  });
-
-  return routingRecord ? mapHostedMemberRoutingState(routingRecord) : null;
-}
-
-export async function readHostedMemberStripeBillingRef(input: {
-  memberId: string;
-  prisma: HostedMemberStoreClient;
-}): Promise<HostedMemberStripeBillingRefSnapshot | null> {
-  const billingRef = await input.prisma.hostedMemberBillingRef.findUnique({
-    where: {
-      memberId: input.memberId,
-    },
-  });
-
-  return billingRef ? mapHostedMemberBillingRefSnapshot(billingRef) : null;
-}
-
 export async function readHostedMemberAggregate(input: {
   memberId: string;
-  prisma: HostedMemberStoreClient;
+  prisma: HostedOnboardingPrismaClient;
 }): Promise<HostedMemberAggregate | null> {
   const memberRecord = await input.prisma.hostedMember.findUnique({
     where: {
@@ -429,29 +96,36 @@ export async function readHostedMemberAggregate(input: {
     return null;
   }
 
-  const identity = memberRecord.identity ? mapHostedMemberIdentityState(memberRecord.identity) : null;
-  const routing = memberRecord.routing ? mapHostedMemberRoutingState(memberRecord.routing) : null;
+  const identity = memberRecord.identity
+    ? projectHostedMemberIdentityState(memberRecord.identity)
+    : null;
+  const routing = memberRecord.routing
+    ? projectHostedMemberRoutingState(memberRecord.routing)
+    : null;
   const billingRef = memberRecord.billingRef
-    ? mapHostedMemberBillingRefSnapshot(memberRecord.billingRef)
+    ? projectHostedMemberStripeBillingRefSnapshot(memberRecord.billingRef)
     : null;
 
-  return buildHostedMemberAggregate({
-    billingStatus: memberRecord.billingStatus,
-    createdAt: memberRecord.createdAt,
-    id: memberRecord.id,
-    suspendedAt: memberRecord.suspendedAt,
-    updatedAt: memberRecord.updatedAt,
-  }, {
-    billingRef,
-    identity,
-    routing,
-  });
+  return buildHostedMemberAggregate(
+    {
+      billingStatus: memberRecord.billingStatus,
+      createdAt: memberRecord.createdAt,
+      id: memberRecord.id,
+      suspendedAt: memberRecord.suspendedAt,
+      updatedAt: memberRecord.updatedAt,
+    },
+    {
+      billingRef,
+      identity,
+      routing,
+    },
+  );
 }
 
 export async function updateHostedMemberCoreState(input: {
   billingStatus?: HostedMember["billingStatus"];
   memberId: string;
-  prisma: HostedMemberStoreClient;
+  prisma: HostedOnboardingPrismaClient;
   suspendedAt?: Date | null;
 }): Promise<HostedMemberCoreState> {
   const data = {
@@ -478,374 +152,6 @@ export async function updateHostedMemberCoreState(input: {
     data,
     select: hostedMemberCoreStateSelect,
   });
-}
-
-export async function upsertHostedMemberIdentity(
-  input: HostedMemberIdentityWriteInput,
-): Promise<HostedMemberIdentityState> {
-  const identity = await input.prisma.hostedMemberIdentity.upsert({
-    where: {
-      memberId: input.memberId,
-    },
-    create: buildHostedMemberIdentityCreateData(input),
-    update: buildHostedMemberIdentityUpdateData(input),
-  });
-
-  return mapHostedMemberIdentityState(identity);
-}
-
-export async function upsertHostedMemberLinqChatBinding(input: {
-  linqChatId: string | null;
-  memberId: string;
-  prisma: HostedMemberStoreClient;
-}): Promise<void> {
-  const linqChatLookupKey = createHostedLinqChatLookupKey(input.linqChatId);
-
-  if (!linqChatLookupKey) {
-    return;
-  }
-
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      await withHostedOnboardingTransaction(input.prisma, async (tx) => {
-        // Hosted Linq replies and activation welcomes reuse the direct thread id, so
-        // the latest observed chat binding must be exclusive to one member.
-        await tx.hostedMemberRouting.updateMany({
-          where: {
-            linqChatLookupKey,
-            NOT: {
-              memberId: input.memberId,
-            },
-          },
-          data: {
-            linqChatIdEncrypted: null,
-            linqChatLookupKey: null,
-          },
-        });
-
-        await tx.hostedMemberRouting.upsert({
-          where: {
-            memberId: input.memberId,
-          },
-          create: {
-            ...buildHostedMemberRoutingPrivateColumns({
-              linqChatId: input.linqChatId,
-              memberId: input.memberId,
-              telegramUserId: null,
-            }),
-            memberId: input.memberId,
-            linqChatLookupKey,
-            telegramUserLookupKey: null,
-          },
-          update: {
-            linqChatIdEncrypted: buildHostedMemberRoutingPrivateColumns({
-              linqChatId: input.linqChatId,
-              memberId: input.memberId,
-              telegramUserId: null,
-            }).linqChatIdEncrypted,
-            linqChatLookupKey,
-          },
-        });
-      });
-      return;
-    } catch (error) {
-      if (attempt === 0 && isPrismaUniqueConstraintError(error)) {
-        continue;
-      }
-
-      throw error;
-    }
-  }
-}
-
-export async function upsertHostedMemberTelegramRoutingBinding(input: {
-  memberId: string;
-  prisma: HostedMemberStoreClient;
-  telegramUserId: string;
-}): Promise<void> {
-  const telegramUserLookupKey = createHostedTelegramUserLookupKey(input.telegramUserId);
-
-  if (!telegramUserLookupKey) {
-    throw new TypeError("Hosted Telegram routing requires a non-empty Telegram user id.");
-  }
-
-  await withHostedOnboardingTransaction(input.prisma, async (tx) => {
-    await tx.hostedMemberRouting.upsert({
-      where: {
-        memberId: input.memberId,
-      },
-      create: {
-        ...buildHostedMemberRoutingPrivateColumns({
-          linqChatId: null,
-          memberId: input.memberId,
-          telegramUserId: input.telegramUserId,
-        }),
-        memberId: input.memberId,
-        linqChatLookupKey: null,
-        telegramUserLookupKey,
-      },
-      update: {
-        telegramUserIdEncrypted: buildHostedMemberRoutingPrivateColumns({
-          linqChatId: null,
-          memberId: input.memberId,
-          telegramUserId: input.telegramUserId,
-        }).telegramUserIdEncrypted,
-        telegramUserLookupKey,
-      },
-    });
-  });
-}
-
-export async function writeHostedMemberStripeBillingRef(
-  input: HostedMemberStripeBillingRefWriteInput,
-): Promise<HostedMemberStripeBillingRefSnapshot> {
-  return withHostedOnboardingTransaction(input.prisma, async (tx) => {
-    const billingRef = await tx.hostedMemberBillingRef.upsert({
-      where: {
-        memberId: input.memberId,
-      },
-      create: buildHostedMemberBillingRefCreateData(input),
-      update: buildHostedMemberBillingRefUpdateData(input),
-    });
-
-    return mapHostedMemberBillingRefSnapshot(billingRef);
-  });
-}
-
-export async function bindHostedMemberStripeCustomerIdIfMissing(input: {
-  memberId: string;
-  prisma: HostedMemberStoreClient;
-  stripeCustomerId: string;
-}): Promise<boolean> {
-  const stripeCustomerLookupKey = createHostedStripeCustomerLookupKey(input.stripeCustomerId);
-
-  if (!stripeCustomerLookupKey) {
-    return false;
-  }
-
-  return withHostedOnboardingTransaction(input.prisma, async (tx) => {
-    await lockHostedMemberRow(tx, input.memberId);
-
-    const currentBillingRef = await tx.hostedMemberBillingRef.findUnique({
-      where: {
-        memberId: input.memberId,
-      },
-    });
-
-    if (currentBillingRef?.stripeCustomerLookupKey) {
-      return false;
-    }
-
-    await tx.hostedMemberBillingRef.upsert({
-      where: {
-        memberId: input.memberId,
-      },
-      create: {
-        ...buildHostedMemberBillingPrivateColumns({
-          memberId: input.memberId,
-          stripeCustomerId: input.stripeCustomerId,
-          stripeSubscriptionId: null,
-        }),
-        memberId: input.memberId,
-        stripeCustomerLookupKey,
-        stripeSubscriptionLookupKey: null,
-      },
-      update: {
-        stripeCustomerIdEncrypted: buildHostedMemberBillingPrivateColumns({
-          memberId: input.memberId,
-          stripeCustomerId: input.stripeCustomerId,
-          stripeSubscriptionId: null,
-        }).stripeCustomerIdEncrypted,
-        stripeCustomerLookupKey,
-      },
-    });
-
-    return true;
-  });
-}
-
-export async function writeHostedMemberSignupPhoneState(
-  input: HostedMemberSignupPhoneStateWriteInput,
-): Promise<void> {
-  const data: Prisma.HostedMemberIdentityUncheckedUpdateInput = {};
-
-  if (input.signupPhoneCodeSendAttemptId !== undefined) {
-    data.signupPhoneCodeSendAttemptId = normalizeNullableString(input.signupPhoneCodeSendAttemptId);
-  }
-  if (input.signupPhoneCodeSendAttemptStartedAt !== undefined) {
-    data.signupPhoneCodeSendAttemptStartedAt = input.signupPhoneCodeSendAttemptStartedAt;
-  }
-  if (input.signupPhoneCodeSentAt !== undefined) {
-    data.signupPhoneCodeSentAt = input.signupPhoneCodeSentAt;
-  }
-  if (input.signupPhoneNumber !== undefined) {
-    data.signupPhoneNumberEncrypted = buildHostedMemberIdentityPrivateColumns({
-      memberId: input.memberId,
-      phoneNumber: null,
-      privyUserId: null,
-      signupPhoneCodeSendAttemptId: null,
-      signupPhoneCodeSendAttemptStartedAt: null,
-      signupPhoneCodeSentAt: null,
-      signupPhoneNumber: input.signupPhoneNumber,
-      walletAddress: null,
-    }).signupPhoneNumberEncrypted;
-  }
-
-  if (Object.keys(data).length === 0) {
-    throw new TypeError("Hosted member signup phone updates require at least one field.");
-  }
-
-  await input.prisma.hostedMemberIdentity.update({
-    where: {
-      memberId: input.memberId,
-    },
-    data,
-  });
-}
-
-function buildHostedMemberIdentityCreateData(
-  input: HostedMemberIdentityWriteInput,
-): Prisma.HostedMemberIdentityUncheckedCreateInput {
-  return {
-    maskedPhoneNumberHint: input.maskedPhoneNumberHint,
-    memberId: input.memberId,
-    phoneLookupKey: input.phoneLookupKey,
-    phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
-    privyUserLookupKey: createHostedPrivyUserLookupKey(input.privyUserId),
-    ...buildHostedMemberIdentityPrivateColumns({
-      memberId: input.memberId,
-      phoneNumber: input.phoneNumber,
-      privyUserId: input.privyUserId,
-      signupPhoneCodeSendAttemptId: input.signupPhoneCodeSendAttemptId,
-      signupPhoneCodeSendAttemptStartedAt: input.signupPhoneCodeSendAttemptStartedAt,
-      signupPhoneCodeSentAt: input.signupPhoneCodeSentAt,
-      signupPhoneNumber: input.signupPhoneNumber,
-      walletAddress: input.walletAddress,
-    }),
-    walletAddressLookupKey: createHostedWalletAddressLookupKey(input.walletAddress),
-    walletChainType: input.walletChainType,
-    walletCreatedAt: input.walletCreatedAt,
-    walletProvider: input.walletProvider,
-  };
-}
-
-function buildHostedMemberIdentityUpdateData(
-  input: HostedMemberIdentityWriteInput,
-): Prisma.HostedMemberIdentityUncheckedUpdateInput {
-  return {
-    maskedPhoneNumberHint: input.maskedPhoneNumberHint,
-    phoneLookupKey: input.phoneLookupKey,
-    phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
-    privyUserLookupKey: createHostedPrivyUserLookupKey(input.privyUserId),
-    ...buildHostedMemberIdentityPrivateColumns({
-      memberId: input.memberId,
-      phoneNumber: input.phoneNumber,
-      privyUserId: input.privyUserId,
-      signupPhoneCodeSendAttemptId: input.signupPhoneCodeSendAttemptId,
-      signupPhoneCodeSendAttemptStartedAt: input.signupPhoneCodeSendAttemptStartedAt,
-      signupPhoneCodeSentAt: input.signupPhoneCodeSentAt,
-      signupPhoneNumber: input.signupPhoneNumber,
-      walletAddress: input.walletAddress,
-    }),
-    walletAddressLookupKey: createHostedWalletAddressLookupKey(input.walletAddress),
-    walletChainType: input.walletChainType,
-    walletCreatedAt: input.walletCreatedAt,
-    walletProvider: input.walletProvider,
-  };
-}
-
-function buildHostedMemberBillingRefCreateData(
-  input: HostedMemberStripeBillingRefWriteInput,
-): Prisma.HostedMemberBillingRefUncheckedCreateInput {
-  return {
-    memberId: input.memberId,
-    ...buildHostedMemberBillingPrivateColumns({
-      memberId: input.memberId,
-      stripeCustomerId: input.stripeCustomerId ?? null,
-      stripeSubscriptionId: input.stripeSubscriptionId ?? null,
-    }),
-    stripeCustomerLookupKey: createHostedStripeCustomerLookupKey(input.stripeCustomerId ?? null),
-    stripeSubscriptionLookupKey: createHostedStripeSubscriptionLookupKey(
-      input.stripeSubscriptionId ?? null,
-    ),
-  };
-}
-
-function buildHostedMemberBillingRefUpdateData(
-  input: HostedMemberStripeBillingRefWriteInput,
-): Prisma.HostedMemberBillingRefUncheckedUpdateInput {
-  const data: Prisma.HostedMemberBillingRefUncheckedUpdateInput = {};
-
-  if (input.stripeCustomerId !== undefined) {
-    data.stripeCustomerLookupKey = createHostedStripeCustomerLookupKey(input.stripeCustomerId);
-    data.stripeCustomerIdEncrypted = buildHostedMemberBillingPrivateColumns({
-      memberId: input.memberId,
-      stripeCustomerId: input.stripeCustomerId,
-      stripeSubscriptionId: null,
-    }).stripeCustomerIdEncrypted;
-  }
-  if (input.stripeSubscriptionId !== undefined) {
-    data.stripeSubscriptionLookupKey = createHostedStripeSubscriptionLookupKey(
-      input.stripeSubscriptionId,
-    );
-    data.stripeSubscriptionIdEncrypted = buildHostedMemberBillingPrivateColumns({
-      memberId: input.memberId,
-      stripeCustomerId: null,
-      stripeSubscriptionId: input.stripeSubscriptionId,
-    }).stripeSubscriptionIdEncrypted;
-  }
-
-  return data;
-}
-
-function isPrismaUniqueConstraintError(error: unknown): error is Prisma.PrismaClientKnownRequestError {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
-}
-
-function mapHostedMemberBillingRefSnapshot(
-  billingRef: HostedMemberBillingRef,
-): HostedMemberStripeBillingRefSnapshot {
-  const privateState = readHostedMemberBillingPrivateState(billingRef);
-
-  return {
-    memberId: billingRef.memberId,
-    stripeCustomerId: privateState.stripeCustomerId,
-    stripeSubscriptionId: privateState.stripeSubscriptionId,
-  };
-}
-
-function mapHostedMemberIdentityState(
-  identity: HostedMemberIdentity,
-): HostedMemberIdentityState {
-  const privateState = readHostedMemberIdentityPrivateState(identity);
-
-  return {
-    maskedPhoneNumberHint: identity.maskedPhoneNumberHint,
-    memberId: identity.memberId,
-    phoneLookupKey: identity.phoneLookupKey,
-    signupPhoneCodeSendAttemptId: privateState.signupPhoneCodeSendAttemptId,
-    signupPhoneCodeSendAttemptStartedAt: privateState.signupPhoneCodeSendAttemptStartedAt,
-    signupPhoneCodeSentAt: privateState.signupPhoneCodeSentAt,
-    signupPhoneNumber: privateState.signupPhoneNumber,
-    phoneNumberVerifiedAt: identity.phoneNumberVerifiedAt,
-    privyUserId: privateState.privyUserId,
-    walletAddress: privateState.walletAddress,
-    walletChainType: identity.walletChainType,
-    walletCreatedAt: identity.walletCreatedAt,
-    walletProvider: identity.walletProvider,
-  };
-}
-
-function mapHostedMemberRoutingState(
-  routing: HostedMemberRoutingRecord,
-): HostedMemberRoutingStateSnapshot {
-  const privateState = readHostedMemberRoutingPrivateState(routing);
-
-  return {
-    linqChatId: privateState.linqChatId,
-    memberId: routing.memberId,
-    telegramUserLookupKey: routing.telegramUserLookupKey ?? null,
-  };
 }
 
 function buildHostedMemberAggregate(

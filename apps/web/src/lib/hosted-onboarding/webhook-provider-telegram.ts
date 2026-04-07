@@ -10,7 +10,7 @@ import {
   parseHostedTelegramWebhookUpdate,
   summarizeHostedTelegramWebhook,
 } from "./telegram";
-import { findHostedMemberByTelegramUserId } from "./hosted-member-store";
+import { findHostedMemberByTelegramUserId } from "./hosted-member-routing-store";
 import {
   createHostedWebhookDispatchSideEffect,
   type HostedWebhookDispatchSideEffect,

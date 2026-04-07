@@ -14,7 +14,7 @@ import { deriveHostedOnboardingStage } from "./lifecycle";
 import {
   readHostedMemberIdentity,
   writeHostedMemberSignupPhoneState,
-} from "./hosted-member-store";
+} from "./hosted-member-identity-store";
 import { ensureHostedMemberForPhone } from "./member-identity-service";
 import { hasHostedPrivyPhoneAuthConfig } from "./privy";
 import {

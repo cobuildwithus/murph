@@ -12,7 +12,7 @@ import { hostedOnboardingError } from "./errors";
 import {
   bindHostedMemberStripeCustomerIdIfMissing,
   readHostedMemberStripeBillingRef,
-} from "./hosted-member-store";
+} from "./hosted-member-billing-store";
 import { requireHostedInviteForAuthentication } from "./invite-service";
 import { requiresHostedBillingCheckout } from "./lifecycle";
 import { coerceHostedWalletAddress } from "./revnet";

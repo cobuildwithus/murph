@@ -17,7 +17,7 @@ import {
   ensureHostedMemberForPhone,
   persistHostedMemberLinqChatBinding,
 } from "./member-identity-service";
-import { findHostedMemberByPhoneNumber } from "./hosted-member-store";
+import { findHostedMemberByPhoneNumber } from "./hosted-member-identity-store";
 import {
   claimHostedLinqOnboardingLinkNotice,
   claimHostedLinqQuotaReplyNotice,
