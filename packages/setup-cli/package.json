@@ -11,17 +11,9 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    },
     "./setup-cli": {
       "types": "./dist/setup-cli.d.ts",
       "default": "./dist/setup-cli.js"
-    },
-    "./setup-services": {
-      "types": "./dist/setup-services.d.ts",
-      "default": "./dist/setup-services.js"
     },
     "./setup-assistant": {
       "types": "./dist/setup-assistant.d.ts",
@@ -31,25 +23,9 @@
       "types": "./dist/setup-assistant-wizard.d.ts",
       "default": "./dist/setup-assistant-wizard.js"
     },
-    "./setup-assistant-account": {
-      "types": "./dist/setup-assistant-account.d.ts",
-      "default": "./dist/setup-assistant-account.js"
-    },
     "./setup-assistant-defaults": {
       "types": "./dist/setup-assistant-defaults.d.ts",
       "default": "./dist/setup-assistant-defaults.js"
-    },
-    "./setup-agentmail": {
-      "types": "./dist/setup-agentmail.d.ts",
-      "default": "./dist/setup-agentmail.js"
-    },
-    "./setup-wizard": {
-      "types": "./dist/setup-wizard.d.ts",
-      "default": "./dist/setup-wizard.js"
-    },
-    "./setup-services/*": {
-      "types": "./dist/setup-services/*.d.ts",
-      "default": "./dist/setup-services/*.js"
     }
   },
   "files": [

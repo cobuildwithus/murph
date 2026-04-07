@@ -44,12 +44,11 @@ vi.mock('@murphai/assistant-engine/assistant-provider', async () => {
 import {
   addAssistantCronJob,
   getAssistantCronJob,
-  getAssistantStatus,
-  readAssistantStatusSnapshot,
   runAssistantAutomation,
-  sendAssistantMessage,
-  stopAssistantAutomation,
-} from '@murphai/assistant-cli/assistant-runtime'
+} from '@murphai/assistant-cli/assistant/runtime'
+import { getAssistantStatus, readAssistantStatusSnapshot } from '@murphai/assistant-cli/assistant/status'
+import { sendAssistantMessage } from '@murphai/assistant-cli/assistant/service'
+import { stopAssistantAutomation } from '@murphai/assistant-cli/assistant/stop'
 import { resolveAssistantStatePaths } from '@murphai/assistant-engine/assistant-state'
 import { readAssistantDiagnosticsSnapshot } from '@murphai/assistant-engine/assistant/diagnostics'
 import {

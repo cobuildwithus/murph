@@ -6,16 +6,18 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   buildAssistantProviderDefaultsPatch,
-  ensureHostedAssistantOperatorDefaults,
-  parseHostedAssistantConfig,
   resolveAssistantBackendTarget,
   resolveAssistantOperatorDefaults,
   resolveHostedAssistantConfig,
   resolveOperatorConfigPath,
   saveAssistantOperatorDefaultsPatch,
   saveHostedAssistantConfig,
+} from "@murphai/operator-config/operator-config";
+import {
+  ensureHostedAssistantOperatorDefaults,
+  parseHostedAssistantConfig,
   tryParseHostedAssistantConfig,
-} from "@murphai/operator-config";
+} from "@murphai/operator-config/hosted-assistant-config";
 
 const temporaryPaths: string[] = [];
 

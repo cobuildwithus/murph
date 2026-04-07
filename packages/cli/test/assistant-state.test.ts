@@ -17,7 +17,7 @@ import {
 } from '@murphai/assistant-engine/assistant-state'
 import {
   getAssistantStatus,
-} from '@murphai/assistant-cli/assistant-runtime'
+} from '@murphai/assistant-cli/assistant/status'
 import { createAssistantBackendTarget } from '@murphai/operator-config/assistant-backend'
 import {
   readAssistantRuntimeBudgetStatus,
