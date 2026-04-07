@@ -5,6 +5,7 @@ import {
 
 import {
   createHostedPhoneLookupKey,
+  hostedPhoneLookupKeyMatchesValue,
   readHostedPhoneHint,
 } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
@@ -22,6 +23,7 @@ import {
 import {
   createHostedMember,
   findHostedMemberByPhoneLookupKey,
+  findHostedMemberByPhoneNumber,
   findHostedMemberByPrivyUserId,
   findHostedMemberByWalletAddress,
   readHostedMemberCoreState,
@@ -45,8 +47,8 @@ export async function ensureHostedMemberForPhone(input: {
       });
     }
 
-    const existingMember = await findHostedMemberByPhoneLookupKey({
-      phoneLookupKey,
+    const existingMember = await findHostedMemberByPhoneNumber({
+      phoneNumber: input.phoneNumber,
       prisma: tx,
     });
 
@@ -79,7 +81,7 @@ export async function ensureHostedMemberForPhone(input: {
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         const concurrentMember = await findHostedMemberByPhoneLookupKey({
-          phoneLookupKey,
+          phoneLookupKey: buildHostedMemberPhoneIdentity(input.phoneNumber).phoneLookupKey,
           prisma: tx,
         });
 
@@ -128,7 +130,9 @@ async function refreshHostedMemberForPhone(input: {
 }
 
 function buildHostedMemberPhoneIdentity(phoneNumber: string) {
+  const maskedPhoneNumberHint = readHostedPhoneHint(phoneNumber);
   const phoneLookupKey = createHostedPhoneLookupKey(phoneNumber);
+
   if (!phoneLookupKey) {
     throw hostedOnboardingError({
       code: "PHONE_NUMBER_INVALID",
@@ -138,9 +142,10 @@ function buildHostedMemberPhoneIdentity(phoneNumber: string) {
   }
 
   return {
-    maskedPhoneNumberHint: readHostedPhoneHint(phoneNumber),
+    maskedPhoneNumberHint,
     phoneLookupKey,
     phoneNumberVerifiedAt: null,
+    phoneNumber: phoneNumber.trim(),
     privyUserId: null,
     walletAddress: null,
     walletChainType: null,
@@ -294,7 +299,7 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
 
     if (
       input.expectedPhoneLookupKey
-      && input.expectedPhoneLookupKey !== phoneLookupKey
+      && !hostedPhoneLookupKeyMatchesValue(input.identity.phone.number, input.expectedPhoneLookupKey)
     ) {
       throw hostedOnboardingError({
         code: "PRIVY_PHONE_MISMATCH",
@@ -386,8 +391,8 @@ export async function findHostedMemberForPrivyIdentity(input: {
   }
 
   const memberByPhoneNumber = phoneLookupKey
-    ? await findHostedMemberByPhoneLookupKey({
-        phoneLookupKey,
+    ? await findHostedMemberByPhoneNumber({
+        phoneNumber: input.identity.phone.number,
         prisma: input.prisma,
       })
     : null;

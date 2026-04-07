@@ -7,35 +7,45 @@ datasource db {
 }
 
 model DeviceConnection {
-  id                String             @id
-  userId            String             @map("user_id")
-  provider          String
-  externalAccountId String             @map("external_account_id")
-  displayName       String?            @map("display_name")
-  connectedAt       DateTime           @map("connected_at")
-  createdAt         DateTime           @default(now()) @map("created_at")
-  updatedAt         DateTime           @updatedAt @map("updated_at")
-  signals           DeviceSyncSignal[]
-  tokenAudits       DeviceTokenAudit[]
+  id                       String             @id
+  userId                   String             @map("user_id")
+  provider                 String
+  providerAccountBlindIndex String            @map("provider_account_blind_index")
+  status                   String             @default("active")
+  connectedAt              DateTime           @map("connected_at")
+  lastWebhookAt            DateTime?          @map("last_webhook_at")
+  lastSyncStartedAt        DateTime?          @map("last_sync_started_at")
+  lastSyncCompletedAt      DateTime?          @map("last_sync_completed_at")
+  lastSyncErrorAt          DateTime?          @map("last_sync_error_at")
+  lastErrorCode            String?            @map("last_error_code")
+  lastErrorMessage         String?            @map("last_error_message")
+  nextReconcileAt          DateTime?          @map("next_reconcile_at")
+  createdAt                DateTime           @default(now()) @map("created_at")
+  updatedAt                DateTime           @updatedAt @map("updated_at")
+  signals                  DeviceSyncSignal[]
+  tokenAudits              DeviceTokenAudit[]
 
-  @@unique([provider, externalAccountId])
+  @@unique([provider, providerAccountBlindIndex])
   @@index([userId, provider])
   @@map("device_connection")
 }
 
 model DeviceTokenAudit {
-  id           Int              @id @default(autoincrement())
-  userId       String           @map("user_id")
-  connectionId String           @map("connection_id")
-  provider     String
-  action       String
-  channel      String
-  sessionId    String?          @map("session_id")
-  tokenVersion Int              @map("token_version")
-  keyVersion   String           @map("key_version")
-  metadataJson Json?            @map("metadata_json")
-  createdAt    DateTime         @default(now()) @map("created_at")
-  connection   DeviceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  id                   Int              @id @default(autoincrement())
+  userId               String           @map("user_id")
+  connectionId         String           @map("connection_id")
+  provider             String
+  action               String
+  channel              String
+  sessionId            String?          @map("session_id")
+  tokenVersion         Int              @map("token_version")
+  keyVersion           String           @map("key_version")
+  expectedTokenVersion Int?             @map("expected_token_version")
+  forceRefresh         Boolean?         @map("force_refresh")
+  refreshOutcome       String?          @map("refresh_outcome")
+  tokenVersionChanged  Boolean?         @map("token_version_changed")
+  createdAt            DateTime         @default(now()) @map("created_at")
+  connection           DeviceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
   @@index([userId, id])
   @@index([connectionId, createdAt])
@@ -48,7 +58,6 @@ model DeviceOauthSession {
   userId       String?  @map("user_id")
   provider     String
   returnTo     String?  @map("return_to")
-  metadataJson Json     @map("metadata_json")
   createdAt    DateTime @map("created_at")
   expiresAt    DateTime @map("expires_at")
 
@@ -58,31 +67,37 @@ model DeviceOauthSession {
 }
 
 model DeviceWebhookTrace {
-  provider            String
-  traceId             String    @map("trace_id")
-  externalAccountId   String    @map("external_account_id")
-  eventType           String    @map("event_type")
-  status              String    @default("processed")
-  processingExpiresAt DateTime? @map("processing_expires_at")
-  receivedAt          DateTime  @map("received_at")
-  payloadJson         Json?     @map("payload_json")
-  createdAt           DateTime  @default(now()) @map("created_at")
+  provider                 String
+  traceId                  String    @map("trace_id")
+  providerAccountBlindIndex String   @map("provider_account_blind_index")
+  eventType                String    @map("event_type")
+  status                   String    @default("processed")
+  processingExpiresAt      DateTime? @map("processing_expires_at")
+  receivedAt               DateTime  @map("received_at")
+  createdAt                DateTime  @default(now()) @map("created_at")
 
   @@id([provider, traceId])
-  @@index([provider, externalAccountId])
+  @@index([provider, providerAccountBlindIndex])
   @@index([receivedAt])
   @@map("device_webhook_trace")
 }
 
 model DeviceSyncSignal {
-  id           Int               @id @default(autoincrement())
-  userId       String            @map("user_id")
-  connectionId String?           @map("connection_id")
-  provider     String
-  kind         String
-  payloadJson  Json?             @map("payload_json")
-  createdAt    DateTime          @default(now()) @map("created_at")
-  connection   DeviceConnection? @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  id                   Int               @id @default(autoincrement())
+  userId               String            @map("user_id")
+  connectionId         String?           @map("connection_id")
+  provider             String
+  kind                 String
+  occurredAt           DateTime?         @map("occurred_at")
+  traceId              String?           @map("trace_id")
+  eventType            String?           @map("event_type")
+  resourceCategory     String?           @map("resource_category")
+  reason               String?           @map("reason")
+  nextReconcileAt      DateTime?         @map("next_reconcile_at")
+  revokeWarningCode    String?           @map("revoke_warning_code")
+  revokeWarningMessage String?           @map("revoke_warning_message")
+  createdAt            DateTime          @default(now()) @map("created_at")
+  connection           DeviceConnection? @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
   @@index([userId, id])
   @@index([connectionId])
@@ -201,6 +216,7 @@ model HostedMemberIdentity {
   memberId                       String       @unique @map("member_id")
   maskedPhoneNumberHint          String       @map("masked_phone_number_hint")
   phoneLookupKey                 String       @unique @map("phone_lookup_key")
+  phoneNumberEncrypted           String?      @map("phone_number_encrypted")
   phoneNumberVerifiedAt          DateTime?    @map("phone_number_verified_at")
   privyUserLookupKey             String?      @unique @map("privy_user_lookup_key")
   privyUserIdEncrypted           String?      @map("privy_user_id_encrypted")
@@ -226,6 +242,7 @@ model HostedMemberRouting {
   linqChatLookupKey     String?      @unique @map("linq_chat_lookup_key")
   linqChatIdEncrypted   String?      @map("linq_chat_id_encrypted")
   telegramUserLookupKey String?      @unique @map("telegram_user_lookup_key")
+  telegramUserIdEncrypted String?    @map("telegram_user_id_encrypted")
   createdAt             DateTime     @default(now()) @map("created_at")
   updatedAt             DateTime     @updatedAt @map("updated_at")
   member                HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)

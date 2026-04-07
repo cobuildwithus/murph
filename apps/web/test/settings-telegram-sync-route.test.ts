@@ -1,7 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createHostedTelegramUserLookupKey } from "../src/lib/hosted-onboarding/contact-privacy";
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
@@ -93,7 +92,7 @@ describe("settings telegram sync route", () => {
     expect(mocks.upsertHostedMemberTelegramRoutingBinding).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prismaClient,
-      telegramUserLookupKey: createHostedTelegramUserLookupKey("456"),
+      telegramUserId: "456",
     });
     expect(mocks.buildHostedTelegramBotLink).toHaveBeenCalledWith("connect");
     await expect(response.json()).resolves.toEqual({

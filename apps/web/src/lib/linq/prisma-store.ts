@@ -4,6 +4,7 @@ import { generateHostedRandomPrefixedId, toIsoTimestamp } from "../device-sync/s
 import {
   createHostedOpaqueIdentifier,
   createHostedPhoneLookupKey,
+  createHostedPhoneLookupKeyReadCandidates,
   readHostedPhoneHint,
 } from "../hosted-onboarding/contact-privacy";
 import { hostedLinqError } from "./errors";
@@ -249,14 +250,16 @@ export class PrismaLinqControlPlaneStore {
   }
 
   private async findBindingByRecipientPhone(recipientPhone: string): Promise<LinqBindingPrismaRecord | null> {
-    const recipientPhoneLookupKey = createHostedPhoneLookupKey(recipientPhone);
-    if (!recipientPhoneLookupKey) {
+    const recipientPhoneLookupKeys = createHostedPhoneLookupKeyReadCandidates(recipientPhone);
+    if (recipientPhoneLookupKeys.length === 0) {
       return null;
     }
 
-    return this.prisma.linqRecipientBinding.findUnique({
+    return this.prisma.linqRecipientBinding.findFirst({
       where: {
-        recipientPhone: recipientPhoneLookupKey,
+        recipientPhone: {
+          in: recipientPhoneLookupKeys,
+        },
       },
     });
   }

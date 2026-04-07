@@ -79,6 +79,27 @@ describe("ensureHostedMemberForPhone", () => {
       walletProvider: "privy",
     });
     const identityUpsert = vi.fn().mockResolvedValue(currentIdentity);
+    const identityFindFirst = vi.fn().mockImplementation(async ({
+      where,
+    }: {
+      where: {
+        phoneLookupKey?: {
+          in?: string[];
+        };
+      };
+    }) => {
+      const phoneLookupKeys = where.phoneLookupKey?.in ?? [];
+
+      if (phoneLookupKeys.length === 0) {
+        return null;
+      }
+
+      return {
+        ...currentIdentity,
+        member: existingMember,
+        phoneLookupKey: phoneLookupKeys[0] ?? currentIdentity.phoneLookupKey,
+      };
+    });
     const identityFindUnique = vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => {
       if (where.memberId === "member_123") {
         return currentIdentity;
@@ -99,6 +120,7 @@ describe("ensureHostedMemberForPhone", () => {
         findUnique: vi.fn().mockResolvedValue(existingMember),
       },
       hostedMemberIdentity: {
+        findFirst: identityFindFirst,
         findUnique: identityFindUnique,
         upsert: identityUpsert,
       },
@@ -166,6 +188,7 @@ describe("ensureHostedMemberForPhone", () => {
         findUnique: vi.fn().mockResolvedValue(null),
       },
       hostedMemberIdentity: {
+        findFirst: vi.fn().mockResolvedValue(null),
         findUnique: vi.fn().mockResolvedValue(null),
         upsert: identityUpsert,
       },
@@ -216,23 +239,26 @@ describe("ensureHostedMemberForPhone", () => {
       signupPhoneNumber: "+15550001111",
     });
     const identityUpsert = vi.fn().mockResolvedValue(currentIdentity);
-    const identityFindUnique = vi.fn()
-      .mockResolvedValueOnce(null)
-      .mockImplementation(async ({ where }: { where: Record<string, unknown> }) => {
-        if (where.memberId === "member_123") {
-          return currentIdentity;
-        }
+    const identityFindFirst = vi.fn().mockResolvedValue(null);
+    const identityFindUnique = vi.fn().mockImplementation(async ({
+      where,
+    }: {
+      where: Record<string, unknown>;
+    }) => {
+      if (where.memberId === "member_123") {
+        return currentIdentity;
+      }
 
-        if (typeof where.phoneLookupKey === "string") {
-          return {
-            ...currentIdentity,
-            member: concurrentMember,
-            phoneLookupKey: where.phoneLookupKey,
-          };
-        }
+      if (typeof where.phoneLookupKey === "string") {
+        return {
+          ...currentIdentity,
+          member: concurrentMember,
+          phoneLookupKey: where.phoneLookupKey,
+        };
+      }
 
-        return null;
-      });
+      return null;
+    });
     const create = vi.fn().mockRejectedValue(
       new Prisma.PrismaClientKnownRequestError("duplicate", {
         clientVersion: "test",
@@ -247,6 +273,7 @@ describe("ensureHostedMemberForPhone", () => {
           .mockResolvedValueOnce(concurrentMember),
       },
       hostedMemberIdentity: {
+        findFirst: identityFindFirst,
         findUnique: identityFindUnique,
         upsert: identityUpsert,
       },
@@ -585,6 +612,7 @@ describe("persistHostedMemberLinqChatBinding", () => {
         linqChatIdEncrypted: expect.stringMatching(/^hbds:/u),
         linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
         memberId: "member_123",
+        telegramUserIdEncrypted: null,
         telegramUserLookupKey: null,
       },
       update: {

@@ -1,7 +1,6 @@
 import { Prisma } from "@prisma/client";
 
 import { getPrisma } from "@/src/lib/prisma";
-import { createHostedTelegramUserLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { upsertHostedMemberTelegramRoutingBinding } from "@/src/lib/hosted-onboarding/hosted-member-store";
@@ -38,14 +37,9 @@ export const POST = withJsonError(async (request: Request) => {
     }
 
     const telegramAccount = telegramSelection.account;
-    const telegramLookupKey = createHostedTelegramUserLookupKey(
-      telegramAccount?.telegramUserId,
-    );
-
     if (
       !telegramAccount
       || telegramAccount.telegramUserId !== expectedTelegramUserId
-      || !telegramLookupKey
     ) {
       throw hostedOnboardingError({
         code: "PRIVY_TELEGRAM_NOT_READY",
@@ -59,7 +53,7 @@ export const POST = withJsonError(async (request: Request) => {
       await upsertHostedMemberTelegramRoutingBinding({
         memberId: auth.member.id,
         prisma: getPrisma(),
-        telegramUserLookupKey: telegramLookupKey,
+        telegramUserId: telegramAccount.telegramUserId,
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {

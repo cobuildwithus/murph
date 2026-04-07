@@ -2,7 +2,7 @@
 
 Hosted integration control plane for Vercel deployments.
 
-`apps/web` is the hosted integration control plane for OAuth callbacks, webhooks, sparse connection metadata, sparse Linq routing state, sparse local-agent APIs, and the durable encrypted hosted-member private fields that power onboarding and billing. Canonical decryptable device-sync token escrow plus mutable hosted device-sync runtime state now live in the Cloudflare runtime store; Postgres keeps static connection identity/mapping rows, sparse signal history, token-audit history, and the encrypted owner-table fields for hosted member identity, routing, and billing references. Ordinary hosted-web settings and control-plane reads stay on that durable Postgres metadata path, while live Cloudflare runtime inspection is reserved for explicit operational routes such as agent token export/refresh, heartbeat reconciliation, disconnect, and runtime upkeep.
+`apps/web` is the hosted integration control plane for OAuth callbacks, webhooks, sparse connection metadata, sparse Linq routing state, sparse local-agent APIs, and the durable encrypted hosted-member private fields that power onboarding and billing. Canonical decryptable device-sync token escrow plus mutable hosted device-sync runtime state now live in the Cloudflare runtime store; Postgres keeps only opaque connection ids, blind-index ownership mapping, typed connection summary fields, sparse signal history, token-audit history, and the encrypted owner-table fields for hosted member identity, routing, and billing references. Ordinary hosted-web settings and control-plane reads stay on that durable Postgres metadata path, while live Cloudflare runtime inspection is reserved for explicit operational routes such as agent token export/refresh, heartbeat reconciliation, disconnect, and runtime upkeep.
 
 ## Core responsibilities
 
@@ -11,6 +11,7 @@ Hosted integration control plane for Vercel deployments.
 - hosted Linq webhook ingress plus sparse chat routing state
 - per-user connection ownership mapping
 - public connection metadata plus sparse durable status hints and token-audit history
+- blind-index provider account ownership mapping without raw provider ids in SQL
 - encrypted hosted-member private fields on the owner Prisma tables for onboarding identity, routing, and billing references
 - durable `execution_outbox` records for Cloudflare-bound hosted execution intents, persisted as immutable inline envelopes or staged Cloudflare-owned dispatch refs
 - immutable hosted AI usage rows imported after successful hosted commits, with optional downstream Stripe token metering
@@ -25,6 +26,7 @@ Hosted integration control plane for Vercel deployments.
 - proxying provider health payloads through the hosted app
 - storing canonical Linq chat captures in Postgres
 - storing raw provider webhook bodies or provider tokens inside hosted device-sync signal payloads
+- storing raw provider account ids or provider-supplied account labels in hosted Postgres
 
 ## Key environment variables
 
@@ -59,14 +61,19 @@ Optional but recommended:
 - `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET`
 - `HOSTED_WEB_BASE_URL` as an optional fallback canonical public base URL for hosted-web links when the explicit hosted public-base envs are unset
 - `OURA_WEBHOOK_VERIFICATION_TOKEN`
-- `HOSTED_WEB_INTERNAL_SIGNING_SECRET` for Cloudflare-owned callbacks plus any trusted server-to-server hosted share or scheduler caller that signs requests with the bound user or service id
+- `CRON_SECRET` for Vercel-owned hosted cron routes
+- `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK` for Cloudflare-owned callbacks back into `apps/web`
+- `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID` to select the active Cloudflare callback key id, defaults to `v1`
+- `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON` when rotating callback verification keys
 
 On Vercel, the hosted web app now falls back to `VERCEL_PROJECT_PRODUCTION_URL` for the canonical public origin when the explicit hosted public-base envs are unset. Explicit envs still win, and you should keep setting them if you need a non-default path or additional allowed origins.
 
 Hosted onboarding extras:
 
 - `HOSTED_ONBOARDING_PUBLIC_BASE_URL`
-- `HOSTED_CONTACT_PRIVACY_KEY`
+- `HOSTED_CONTACT_PRIVACY_KEY` for the legacy single-key `v1` fallback only
+- `HOSTED_CONTACT_PRIVACY_KEYS` as a comma-separated `version:base64key` keyring when preparing blind-index rotation
+- `HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION` when `HOSTED_CONTACT_PRIVACY_KEYS` defines more than one version
 - `HOSTED_WEB_ENCRYPTION_KEY`
 - `HOSTED_WEB_ENCRYPTION_KEY_VERSION`
 - `HOSTED_WEB_ENCRYPTION_KEYRING_JSON` when rotating hosted-member private field keys
@@ -86,10 +93,9 @@ Hosted onboarding extras:
 - `LINQ_API_TOKEN`
 - `LINQ_API_BASE_URL`
 - `HOSTED_EXECUTION_DISPATCH_URL`
-- `HOSTED_WEB_INTERNAL_SIGNING_SECRET`
 - `HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS`
 
-Hosted onboarding private state is now local to `apps/web`: blind lookup keys stay queryable in Postgres, while recoverable raw member ids and signup phone state are encrypted into the owning Prisma rows instead of being mirrored into Cloudflare.
+Hosted onboarding private state is now local to `apps/web`: blind lookup keys stay queryable in Postgres, while recoverable raw member ids and the raw source values needed to re-derive those lookup keys are encrypted into the owning Prisma rows instead of being mirrored into Cloudflare. Blind-index rotation follows one simple model: write one current version, read any configured keyring versions, backfill the owner tables in place, and only then remove the old version from the contact-privacy keyring. Drain lookup-bearing hosted execution outbox events before a write-mode rotation backfill so staged payload refs do not preserve stale lookup identities.
 
 Optional hosted AI usage metering:
 
@@ -103,7 +109,10 @@ When you set `DEVICE_SYNC_PUBLIC_BASE_URL`, point it at the stable production pr
 Set these under `Settings -> Environment Variables` in the Vercel project that deploys `apps/web`. Production is the minimum. Only set Preview if you also have matching preview peers and secrets instead of pointing preview deploys at production control planes.
 
 - Enable Vercel OIDC for the project so the app-local hosted-execution auth adapter in `apps/web` can present bearer workload identity to Cloudflare on hosted execution dispatch/control requests.
-- `HOSTED_WEB_INTERNAL_SIGNING_SECRET`: generate a strong random secret and use the exact same value in Vercel, the Cloudflare hosted-execution worker, and any trusted server-to-server caller that signs hosted share or scheduler requests. Those callers must also set `x-hosted-execution-user-id` to the owning hosted member id for share routes or `system:hosted-execution-scheduler` for scheduler routes.
+- `CRON_SECRET`: configure the Vercel cron bearer secret for the hosted cron routes under `/api/internal/**/cron`.
+- `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`: publish the Cloudflare callback verification key to `apps/web`.
+- `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`: keep this aligned with Cloudflare's active callback signing key id.
+- `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON`: optional JSON object of `{ keyId: publicJwk }` entries so old callback keys can verify during rotation.
 - `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET`: generate a distinct strong random secret and use the same value in Vercel plus whichever trusted auth proxy or middleware signs the hosted user assertion headers. `apps/web` verifies that signature before trusting the lower-level assertion-backed device-sync bridge routes.
 
 If you prefer the CLI, Vercel's current docs cover `vercel env add`, `vercel env update`, and `vercel env pull` for managing these project environment variables.
@@ -155,7 +164,8 @@ pnpm --dir apps/web prisma:migrate:deploy
 - `pnpm --dir apps/web build` and `pnpm --dir apps/web start` keep using `apps/web/.next`.
 - `pnpm --dir apps/web test` is the fast hosted-web Vitest lane. `pnpm --dir apps/web verify` adds the app-local typecheck, lint, a cold-boot `next dev` smoke under `apps/web/.next-smoke`, and the production build so the heavier preflight checks stay out of the default unit-test loop.
 - Treat `apps/web/.next`, `apps/web/.next-dev`, and `apps/web/.next-smoke` as generated local artifacts that must stay out of commits and raw source bundles.
-- Hosted execution outbox draining and hosted AI usage metering now require a signed service caller that sets `x-hosted-execution-user-id: system:hosted-execution-scheduler` and MACs the request with `HOSTED_WEB_INTERNAL_SIGNING_SECRET`; the old bearer-token and `CRON_SECRET` lanes are gone. Cloudflare-owned hosted device connect-link requests and trusted hosted share issuance now reuse that same signed-request primitive with bound user ids instead of separate bearer-token families.
+- Hosted execution outbox draining and hosted AI usage metering now accept only Vercel cron bearer auth via `CRON_SECRET`.
+- Cloudflare-owned callback routes such as hosted device connect-link and share-import completion/release now accept only the dedicated Cloudflare callback signature verified against `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`.
 - Hosted Stripe webhooks now attempt inline reconciliation for the just-recorded event, then best-effort drain the matching hosted execution outbox rows immediately. The Stripe cron route remains the recovery path for failed or deferred Stripe facts and RevNet follow-up only; first-contact welcomes now commit as assistant outbox intents during hosted `member.activated` handling and drain afterward through the same post-commit assistant-delivery path as other hosted assistant sends.
 
 ## Main routes
@@ -196,7 +206,7 @@ Local-agent routes:
 
 Hosted device-sync agent signals stay sparse by design:
 
-- webhook wake hints expose only sparse metadata plus normalized job hints and reconcile metadata that the hosted runner can safely replay
+- webhook wake hints expose only sparse typed metadata plus normalized job hints and reconcile metadata that the hosted runner can safely replay in-memory
 - hosted Postgres/API state must not persist or return raw provider webhook payload blobs or provider tokens
 
 Hosted execution maintenance routes:
@@ -204,6 +214,7 @@ Hosted execution maintenance routes:
 - `GET /api/internal/hosted-execution/outbox/cron`
 - `GET /api/internal/hosted-execution/usage/cron`
 - `POST /api/internal/hosted-execution/share-import/complete` (Cloudflare-signed internal callback only)
+- `POST /api/internal/hosted-execution/share-import/release` (Cloudflare-signed internal callback only)
 
 The old `POST /api/internal/hosted-execution/outbox/drain` route has been removed. Cloudflare no longer round-trips through hosted-web runtime snapshot/apply routes or direct usage-record writes in the hot path. Device-sync hydration and usage buffering now stay on the Cloudflare side during execution, `apps/web` later imports buffered usage from Cloudflare-owned storage, and the optional usage cron sends total-token meter events to Stripe while skipping member-supplied API-key runs.
 
@@ -225,7 +236,7 @@ This repo now also includes a hosted onboarding lane for phone-bound invites and
 - `POST /api/hosted-onboarding/stripe/webhook`
 - `GET /share/:shareCode`
 - `POST /api/hosted-share/:shareCode/accept`
-- `POST /api/hosted-share/internal/create`
+- `POST /api/hosted-share/create`
 
 The onboarding lane is intentionally thin:
 
@@ -236,10 +247,12 @@ The onboarding lane is intentionally thin:
 - checkout uses Stripe Checkout so Apple Pay can appear directly inside the hosted payment handoff when available in Safari, but the hosted app now reuses one open checkout attempt per member and sends Stripe idempotency keys for customer/session creation so retries do not mint parallel customers or subscriptions
 - Stripe webhook ingress now verifies and stores a durable Stripe fact quickly, then immediately reconciles that specific event inline so billing activation and `member.activated` dispatching are not gated on a scheduler; the hosted Stripe cron remains the recovery path that replays failed or deferred Stripe facts
 - hosted billing is subscription-only, `invoice.paid` is the only positive Stripe entitlement source, `customer.subscription.*` only tracks negative or status transitions, and `checkout.session.completed` just completes the local checkout attempt plus attaches Stripe ids
-- hosted share links now keep only a tiny UX summary plus expiry and lifecycle metadata in Postgres while Cloudflare stores only the opaque one-time share-pack object needed at acceptance/import time for foods, recipes, and supplement/protocol records; the flow can still issue or reuse a phone-bound invite so `/join/:inviteCode?share=...` can import the shared bundle after activation, and the default and maximum hosted share-link lifetime remains 24 hours to keep that transient share-pack storage privacy-first
+- hosted share links now keep only a tiny UX summary plus expiry and lifecycle metadata in Postgres while Cloudflare stores only the opaque one-time share-pack object for foods, recipes, and supplement/protocol records; the flow can still issue or reuse a phone-bound invite so `/join/:inviteCode?share=...` can import the shared bundle after activation, and the default and maximum hosted share-link lifetime remains 24 hours to keep that transient share-pack storage privacy-first
 - once a member has active billing entitlement, hosted onboarding, hosted share acceptance, and hosted device-sync wakes write signed internal execution intents to the shared Postgres `execution_outbox` in the same transaction as their control-plane state changes instead of synchronously depending on `apps/cloudflare`
+- hosted share acceptance no longer reads Cloudflare during the claim transaction: Postgres writes only the durable claim state plus a tiny inline `vault.share.accepted` share ref, and Cloudflare hydrates the opaque pack later when the runner is actually about to import it
 - new steady-state outbox rows are immutable: inline events store the full dispatch body, while reference-backed events stage the full dispatch into Cloudflare-owned encrypted dispatch-payload storage and persist only the dispatch ref plus opaque payload ref in Postgres
 - a best-effort drain still runs after commit, but the Postgres outbox is now delivery-only: once Cloudflare accepts the dispatch, retries, poison/backpressure, in-flight execution, business-outcome callbacks, and completion live in the Cloudflare queue instead of on the outbox row; new reference-backed rows still require a staged Cloudflare payload ref instead of falling back to web-side dispatch reconstruction
+- if Cloudflare later cannot hydrate the share pack, it releases the hosted share claim through the signed `/api/internal/hosted-execution/share-import/release` callback instead of leaving the acceptance stuck
 - hosted onboarding webhook receipts still keep receipt-local side-effect markers for retry-safe Linq invite replies, persist the planned response plus queued side effects before any external send, and use a reclaimable processing lease so a retried Linq or Telegram webhook can resume abandoned work instead of being dropped as a duplicate
 - the current hosted outward-effect lanes are now explicit: Cloudflare-bound execution uses `execution_outbox`, receipt-owned Linq or Telegram replies use the webhook receipt side-effect journal, and Stripe facts use inline webhook reconciliation plus cron recovery
 - Stripe customer/subscription/invoice entitlement writes now carry a latest-applied billing event marker so out-of-order webhook delivery cannot regress a later cancellation, pause, or unpaid state back to active

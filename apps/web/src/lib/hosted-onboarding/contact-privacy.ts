@@ -3,66 +3,177 @@ import { createHmac } from "node:crypto";
 import { getHostedOnboardingEnvironment } from "./runtime";
 import { maskPhoneNumber, normalizePhoneNumber } from "./phone";
 
-// Lookup keys are durable at-rest identifiers. Keep this version stable until an
-// explicit dual-read migration/backfill exists for rotating contact-privacy keys.
-const HOSTED_PRIVACY_KEY_VERSION = "v1";
+const HOSTED_PRIVACY_LEGACY_FALLBACK_VERSION = "v1";
 const HOSTED_BLIND_INDEX_PREFIX = "hbidx";
 const HOSTED_OPAQUE_ID_PREFIX = "hbid";
 const MASKED_PHONE_HINT_PATTERN = /^\*{3}\s+\d{4}$/u;
 const HOSTED_LINQ_ATTACHMENT_CDN_HOST = "cdn.linqapp.com";
-const TEST_HOSTED_PRIVACY_ROOT_KEY = Buffer.from(
-  "vitest-hosted-contact-privacy-root-key",
-  "utf8",
-);
+const HOSTED_BLIND_INDEX_PATTERN =
+  /^(?<prefix>hbidx):(?<kind>[a-z0-9-]+):(?<version>v[0-9]+):(?<digest>[0-9a-f]+)$/u;
+const TEST_HOSTED_PRIVACY_KEYRING = {
+  currentVersion: HOSTED_PRIVACY_LEGACY_FALLBACK_VERSION,
+  keysByVersion: {
+    [HOSTED_PRIVACY_LEGACY_FALLBACK_VERSION]: Buffer.from(
+      "vitest-hosted-contact-privacy-root-key",
+      "utf8",
+    ),
+  },
+  readVersions: [HOSTED_PRIVACY_LEGACY_FALLBACK_VERSION],
+} as const;
+
+export type HostedBlindIndexKind =
+  | "email"
+  | "linq-chat"
+  | "phone"
+  | "privy-user"
+  | "stripe-billing-event"
+  | "stripe-checkout-session"
+  | "stripe-customer"
+  | "stripe-subscription"
+  | "telegram-user"
+  | "wallet-address";
+
+export interface HostedBlindIndexParts {
+  digest: string;
+  kind: string;
+  prefix: typeof HOSTED_BLIND_INDEX_PREFIX;
+  version: string;
+}
 
 export function createHostedPhoneLookupKey(value: string | null | undefined): string | null {
-  const normalized = normalizePhoneNumber(value);
-  return normalized ? createHostedBlindIndex("phone", normalized) : null;
+  return createHostedLookupKey("phone", normalizePhoneNumber(value));
+}
+
+export function createHostedPhoneLookupKeyReadCandidates(
+  value: string | null | undefined,
+): string[] {
+  return createHostedLookupKeyReadCandidates("phone", normalizePhoneNumber(value));
 }
 
 export function createHostedTelegramUserLookupKey(value: string | null | undefined): string | null {
-  const normalized = normalizeHostedOpaqueInput(value);
-  return normalized ? createHostedBlindIndex("telegram-user", normalized) : null;
+  return createHostedLookupKey("telegram-user", normalizeHostedOpaqueInput(value));
+}
+
+export function createHostedTelegramUserLookupKeyReadCandidates(
+  value: string | null | undefined,
+): string[] {
+  return createHostedLookupKeyReadCandidates("telegram-user", normalizeHostedOpaqueInput(value));
 }
 
 export function createHostedEmailLookupKey(value: string | null | undefined): string | null {
-  const normalized = normalizeHostedEmailAddress(value);
-  return normalized ? createHostedBlindIndex("email", normalized) : null;
+  return createHostedLookupKey("email", normalizeHostedEmailAddress(value));
 }
 
 export function createHostedPrivyUserLookupKey(value: string | null | undefined): string | null {
-  const normalized = normalizeHostedOpaqueInput(value);
-  return normalized ? createHostedBlindIndex("privy-user", normalized) : null;
+  return createHostedLookupKey("privy-user", normalizeHostedOpaqueInput(value));
+}
+
+export function createHostedPrivyUserLookupKeyReadCandidates(
+  value: string | null | undefined,
+): string[] {
+  return createHostedLookupKeyReadCandidates("privy-user", normalizeHostedOpaqueInput(value));
 }
 
 export function createHostedWalletAddressLookupKey(value: string | null | undefined): string | null {
-  const normalized = normalizeHostedOpaqueInput(value);
-  return normalized ? createHostedBlindIndex("wallet-address", normalized.toLowerCase()) : null;
+  const normalized = normalizeHostedOpaqueInput(value)?.toLowerCase() ?? null;
+  return createHostedLookupKey("wallet-address", normalized);
+}
+
+export function createHostedWalletAddressLookupKeyReadCandidates(
+  value: string | null | undefined,
+): string[] {
+  const normalized = normalizeHostedOpaqueInput(value)?.toLowerCase() ?? null;
+  return createHostedLookupKeyReadCandidates("wallet-address", normalized);
 }
 
 export function createHostedLinqChatLookupKey(value: string | number | null | undefined): string | null {
-  const normalized = normalizeHostedOpaqueInput(value);
-  return normalized ? createHostedBlindIndex("linq-chat", normalized) : null;
+  return createHostedLookupKey("linq-chat", normalizeHostedOpaqueInput(value));
+}
+
+export function createHostedLinqChatLookupKeyReadCandidates(
+  value: string | number | null | undefined,
+): string[] {
+  return createHostedLookupKeyReadCandidates("linq-chat", normalizeHostedOpaqueInput(value));
 }
 
 export function createHostedStripeCustomerLookupKey(value: string | null | undefined): string | null {
-  const normalized = normalizeHostedOpaqueInput(value);
-  return normalized ? createHostedBlindIndex("stripe-customer", normalized) : null;
+  return createHostedLookupKey("stripe-customer", normalizeHostedOpaqueInput(value));
+}
+
+export function createHostedStripeCustomerLookupKeyReadCandidates(
+  value: string | null | undefined,
+): string[] {
+  return createHostedLookupKeyReadCandidates("stripe-customer", normalizeHostedOpaqueInput(value));
 }
 
 export function createHostedStripeSubscriptionLookupKey(value: string | null | undefined): string | null {
-  const normalized = normalizeHostedOpaqueInput(value);
-  return normalized ? createHostedBlindIndex("stripe-subscription", normalized) : null;
+  return createHostedLookupKey("stripe-subscription", normalizeHostedOpaqueInput(value));
+}
+
+export function createHostedStripeSubscriptionLookupKeyReadCandidates(
+  value: string | null | undefined,
+): string[] {
+  return createHostedLookupKeyReadCandidates(
+    "stripe-subscription",
+    normalizeHostedOpaqueInput(value),
+  );
 }
 
 export function createHostedStripeCheckoutSessionLookupKey(value: string | null | undefined): string | null {
-  const normalized = normalizeHostedOpaqueInput(value);
-  return normalized ? createHostedBlindIndex("stripe-checkout-session", normalized) : null;
+  return createHostedLookupKey("stripe-checkout-session", normalizeHostedOpaqueInput(value));
 }
 
 export function createHostedStripeBillingEventLookupKey(value: string | null | undefined): string | null {
-  const normalized = normalizeHostedOpaqueInput(value);
-  return normalized ? createHostedBlindIndex("stripe-billing-event", normalized) : null;
+  return createHostedLookupKey("stripe-billing-event", normalizeHostedOpaqueInput(value));
+}
+
+export function hostedLookupKeyMatchesValue(input: {
+  expectedLookupKey: string | null | undefined;
+  kind: HostedBlindIndexKind;
+  normalizedValue: string | null;
+}): boolean {
+  const expectedLookupKey = normalizeHostedOpaqueInput(input.expectedLookupKey);
+
+  if (!expectedLookupKey || !input.normalizedValue) {
+    return false;
+  }
+
+  return createHostedLookupKeyReadCandidates(input.kind, input.normalizedValue)
+    .includes(expectedLookupKey);
+}
+
+export function hostedPhoneLookupKeyMatchesValue(
+  phoneNumber: string | null | undefined,
+  expectedLookupKey: string | null | undefined,
+): boolean {
+  return hostedLookupKeyMatchesValue({
+    expectedLookupKey,
+    kind: "phone",
+    normalizedValue: normalizePhoneNumber(phoneNumber),
+  });
+}
+
+export function parseHostedBlindIndex(value: string | null | undefined): HostedBlindIndexParts | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const match = value.trim().match(HOSTED_BLIND_INDEX_PATTERN);
+
+  if (!match?.groups) {
+    return null;
+  }
+
+  return {
+    digest: match.groups.digest,
+    kind: match.groups.kind,
+    prefix: HOSTED_BLIND_INDEX_PREFIX,
+    version: match.groups.version,
+  };
+}
+
+export function readHostedContactPrivacyCurrentVersion(): string {
+  return readHostedPrivacyKeyring().currentVersion;
 }
 
 export function createHostedOpaqueIdentifier(
@@ -74,7 +185,9 @@ export function createHostedOpaqueIdentifier(
     return null;
   }
 
-  if (normalized.startsWith(`${HOSTED_OPAQUE_ID_PREFIX}:${kind}:${HOSTED_PRIVACY_KEY_VERSION}:`)) {
+  const currentVersion = readHostedContactPrivacyCurrentVersion();
+
+  if (normalized.startsWith(`${HOSTED_OPAQUE_ID_PREFIX}:${kind}:${currentVersion}:`)) {
     return normalized;
   }
 
@@ -82,7 +195,7 @@ export function createHostedOpaqueIdentifier(
     return normalized;
   }
 
-  return `${HOSTED_OPAQUE_ID_PREFIX}:${kind}:${HOSTED_PRIVACY_KEY_VERSION}:${digestHostedPrivacyValue(kind, normalized)}`;
+  return `${HOSTED_OPAQUE_ID_PREFIX}:${kind}:${currentVersion}:${digestHostedPrivacyValue(kind, currentVersion, normalized)}`;
 }
 
 export function readHostedPhoneHint(value: string | null | undefined): string {
@@ -351,23 +464,61 @@ function normalizeHostedLinqAttachmentUrl(value: unknown): string | null {
   }
 }
 
-function createHostedBlindIndex(kind: string, value: string): string {
-  return `${HOSTED_BLIND_INDEX_PREFIX}:${kind}:${HOSTED_PRIVACY_KEY_VERSION}:${digestHostedPrivacyValue(kind, value)}`;
+function createHostedLookupKey(
+  kind: HostedBlindIndexKind,
+  normalizedValue: string | null,
+): string | null {
+  if (!normalizedValue) {
+    return null;
+  }
+
+  const { currentVersion } = readHostedPrivacyKeyring();
+  return createHostedBlindIndex(kind, normalizedValue, currentVersion);
 }
 
-function digestHostedPrivacyValue(kind: string, value: string): string {
-  return createHmac("sha256", deriveHostedPrivacyKey(`blind-index:${kind}`))
+function createHostedLookupKeyReadCandidates(
+  kind: HostedBlindIndexKind,
+  normalizedValue: string | null,
+): string[] {
+  if (!normalizedValue) {
+    return [];
+  }
+
+  const { readVersions } = readHostedPrivacyKeyring();
+  return [...new Set(readVersions.map((version) => createHostedBlindIndex(kind, normalizedValue, version)))];
+}
+
+function createHostedBlindIndex(
+  kind: HostedBlindIndexKind,
+  value: string,
+  version: string,
+): string {
+  return `${HOSTED_BLIND_INDEX_PREFIX}:${kind}:${version}:${digestHostedPrivacyValue(kind, version, value)}`;
+}
+
+function digestHostedPrivacyValue(kind: string, version: string, value: string): string {
+  return createHmac("sha256", deriveHostedPrivacyKey(`blind-index:${kind}`, version))
     .update(value)
     .digest("hex");
 }
 
-function deriveHostedPrivacyKey(purpose: string): Buffer {
-  return createHmac("sha256", readHostedPrivacyRootKey())
-    .update(`hosted-contact-privacy:${purpose}`)
+function deriveHostedPrivacyKey(purpose: string, version: string): Buffer {
+  const keyMaterial = readHostedPrivacyKeyring().keysByVersion[version];
+
+  if (!keyMaterial) {
+    throw new TypeError(`Hosted contact privacy keyring is missing ${version}.`);
+  }
+
+  return createHmac("sha256", keyMaterial)
+    .update(`hosted-contact-privacy:${version}:${purpose}`)
     .digest();
 }
 
-function readHostedPrivacyRootKey(): string | Buffer {
+function readHostedPrivacyKeyring(): {
+  currentVersion: string;
+  keysByVersion: Readonly<Record<string, Buffer>>;
+  readVersions: readonly string[];
+} {
   let environment: ReturnType<typeof getHostedOnboardingEnvironment> | null = null;
 
   try {
@@ -380,16 +531,18 @@ function readHostedPrivacyRootKey(): string | Buffer {
 
   if (
     environment
-    && (typeof environment.contactPrivacyKey === "string" || Buffer.isBuffer(environment.contactPrivacyKey))
+    && environment.contactPrivacyKeyring
   ) {
-    return environment.contactPrivacyKey;
+    return environment.contactPrivacyKeyring;
   }
 
   if (process.env.NODE_ENV === "test" || typeof process.env.VITEST === "string") {
-    return TEST_HOSTED_PRIVACY_ROOT_KEY;
+    return TEST_HOSTED_PRIVACY_KEYRING;
   }
 
-  throw new TypeError("HOSTED_CONTACT_PRIVACY_KEY is required for hosted contact privacy.");
+  throw new TypeError(
+    "HOSTED_CONTACT_PRIVACY_KEY or HOSTED_CONTACT_PRIVACY_KEYS is required for hosted contact privacy.",
+  );
 }
 
 function normalizeHostedOpaqueInput(

@@ -6,6 +6,7 @@ import {
   createHostedWalletAddressLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import type { HostedPrivyIdentity } from "@/src/lib/hosted-onboarding/privy";
+import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 
 const mocks = vi.hoisted(() => ({
   isHostedOnboardingRevnetEnabled: vi.fn(),
@@ -767,39 +768,199 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
   }
 
   if (!("hostedMemberIdentity" in prismaWithQueryRaw) || !prismaWithQueryRaw.hostedMemberIdentity) {
+    const hostedMemberIdentityFallback = {
+      findFirst: vi.fn(async ({
+        include,
+        where,
+      }: {
+        include?: { member?: boolean };
+        where: Record<string, unknown>;
+      }) => {
+        const privyUserLookupKey = Array.isArray(
+          (where.privyUserLookupKey as { in?: unknown[] } | undefined)?.in,
+        )
+          ? ((where.privyUserLookupKey as { in: unknown[] }).in[0] ?? null)
+          : null;
+        const phoneLookupKey = Array.isArray(
+          (where.phoneLookupKey as { in?: unknown[] } | undefined)?.in,
+        )
+          ? ((where.phoneLookupKey as { in: unknown[] }).in[0] ?? null)
+          : null;
+        const walletAddressLookupKey = Array.isArray(
+          (where.walletAddressLookupKey as { in?: unknown[] } | undefined)?.in,
+        )
+          ? ((where.walletAddressLookupKey as { in: unknown[] }).in[0] ?? null)
+          : null;
+
+        return hostedMemberIdentityFallback.findUnique({
+          include,
+          where: {
+            ...(typeof privyUserLookupKey === "string"
+              ? {
+                  privyUserLookupKey,
+                }
+              : {}),
+            ...(typeof phoneLookupKey === "string"
+              ? {
+                  phoneLookupKey,
+                }
+              : {}),
+            ...(typeof walletAddressLookupKey === "string"
+              ? {
+                  walletAddressLookupKey,
+                }
+              : {}),
+          },
+        });
+      }),
+      findUnique: vi.fn(async ({
+        include,
+        where,
+      }: {
+        include?: { member?: boolean };
+        where: Record<string, unknown>;
+      }) => {
+        const invite = await hostedInvite?.findUnique?.({ where: {} });
+        const inviteMember = (invite as { member?: unknown } | null)?.member ?? null;
+        const inviteIdentity = readMemberIdentity(inviteMember);
+        if (
+          inviteIdentity &&
+          (where.memberId === inviteIdentity.memberId ||
+            where.privyUserLookupKey === inviteIdentity.privyUserLookupKey ||
+            where.phoneLookupKey === inviteIdentity.phoneLookupKey ||
+            where.walletAddressLookupKey === inviteIdentity.walletAddressLookupKey)
+        ) {
+          return include?.member ? { ...inviteIdentity, member: inviteMember } : inviteIdentity;
+        }
+
+        const member = await hostedMember?.findUnique?.({ where });
+        const identity = readMemberIdentity(member);
+        return identity && include?.member ? { ...identity, member } : identity;
+      }),
+      upsert: vi.fn(async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => ({
+        ...create,
+        ...update,
+      })),
+    };
+
     Object.defineProperty(prismaWithQueryRaw, "hostedMemberIdentity", {
       configurable: true,
-      value: {
-        findUnique: vi.fn(async ({
+      value: hostedMemberIdentityFallback,
+    });
+  } else {
+    const hostedMemberIdentityRecord = prismaWithQueryRaw.hostedMemberIdentity;
+    const originalFindUnique =
+      typeof hostedMemberIdentityRecord.findUnique === "function"
+        ? hostedMemberIdentityRecord.findUnique.bind(hostedMemberIdentityRecord)
+        : undefined;
+
+    if (originalFindUnique) {
+      Object.defineProperty(hostedMemberIdentityRecord, "findUnique", {
+        configurable: true,
+        value: vi.fn(async ({
           include,
           where,
         }: {
           include?: { member?: boolean };
           where: Record<string, unknown>;
         }) => {
-          const invite = await hostedInvite?.findUnique?.({ where: {} });
-          const inviteMember = (invite as { member?: unknown } | null)?.member ?? null;
-          const inviteIdentity = readMemberIdentity(inviteMember);
-          if (
-            inviteIdentity &&
-            (where.memberId === inviteIdentity.memberId ||
-              where.privyUserLookupKey === inviteIdentity.privyUserLookupKey ||
-              where.phoneLookupKey === inviteIdentity.phoneLookupKey ||
-              where.walletAddressLookupKey === inviteIdentity.walletAddressLookupKey)
-          ) {
-            return include?.member ? { ...inviteIdentity, member: inviteMember } : inviteIdentity;
+          const result = await Reflect.apply(originalFindUnique, hostedMemberIdentityRecord, [
+            {
+              include,
+              where,
+            },
+          ]);
+          const identity = readMemberIdentity(result);
+
+          if (!identity) {
+            return result;
           }
 
-          const member = await hostedMember?.findUnique?.({ where });
-          const identity = readMemberIdentity(member);
-          return identity && include?.member ? { ...identity, member } : identity;
+          const member =
+            include?.member
+              ? ((result as { member?: unknown } | null)?.member
+                ?? await hostedMember?.findUnique?.({
+                  where: {
+                    id: identity.memberId,
+                  },
+                }))
+              : undefined;
+
+          return include?.member ? { ...identity, member } : identity;
         }),
-        upsert: vi.fn(async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => ({
+      });
+    }
+
+    if (
+      typeof hostedMemberIdentityRecord.findFirst !== "function"
+      && typeof hostedMemberIdentityRecord.findUnique === "function"
+    ) {
+      Object.defineProperty(hostedMemberIdentityRecord, "findFirst", {
+        configurable: true,
+        value: vi.fn(async ({
+          include,
+          where,
+        }: {
+          include?: { member?: boolean };
+          where: Record<string, unknown>;
+        }) => {
+          const privyUserLookupKey = Array.isArray(
+            (where.privyUserLookupKey as { in?: unknown[] } | undefined)?.in,
+          )
+            ? ((where.privyUserLookupKey as { in: unknown[] }).in[0] ?? null)
+            : null;
+          const phoneLookupKey = Array.isArray(
+            (where.phoneLookupKey as { in?: unknown[] } | undefined)?.in,
+          )
+            ? ((where.phoneLookupKey as { in: unknown[] }).in[0] ?? null)
+            : null;
+          const walletAddressLookupKey = Array.isArray(
+            (where.walletAddressLookupKey as { in?: unknown[] } | undefined)?.in,
+          )
+            ? ((where.walletAddressLookupKey as { in: unknown[] }).in[0] ?? null)
+            : null;
+
+          return Reflect.apply(hostedMemberIdentityRecord.findUnique, hostedMemberIdentityRecord, [
+            {
+              include,
+              where: {
+                ...(typeof privyUserLookupKey === "string"
+                  ? {
+                      privyUserLookupKey,
+                    }
+                  : {}),
+                ...(typeof phoneLookupKey === "string"
+                  ? {
+                      phoneLookupKey,
+                    }
+                  : {}),
+                ...(typeof walletAddressLookupKey === "string"
+                  ? {
+                      walletAddressLookupKey,
+                    }
+                  : {}),
+              },
+            },
+          ]);
+        }),
+      });
+    }
+
+    if (typeof hostedMemberIdentityRecord.upsert !== "function") {
+      Object.defineProperty(hostedMemberIdentityRecord, "upsert", {
+        configurable: true,
+        value: vi.fn(async ({
+          create,
+          update,
+        }: {
+          create: Record<string, unknown>;
+          update: Record<string, unknown>;
+        }) => ({
           ...create,
           ...update,
         })),
-      },
-    });
+      });
+    }
   }
 
   if (!("$queryRaw" in prismaWithQueryRaw)) {
@@ -830,6 +991,10 @@ function readMemberIdentity(member: unknown) {
         : null;
   const phoneLookupKey =
     typeof identity.phoneLookupKey === "string" ? identity.phoneLookupKey : null;
+  const phoneNumber =
+    phoneLookupKey === SECONDARY_PHONE_LOOKUP_KEY
+      ? SECONDARY_PHONE_NUMBER
+      : DEFAULT_PHONE_NUMBER;
 
   if (!memberId || !phoneLookupKey) {
     return null;
@@ -840,16 +1005,33 @@ function readMemberIdentity(member: unknown) {
     maskedPhoneNumberHint:
       typeof identity.maskedPhoneNumberHint === "string" ? identity.maskedPhoneNumberHint : "*** 4567",
     memberId,
+    phoneNumberEncrypted: encryptHostedWebNullableString({
+      field: "hosted-member-identity.phone-number",
+      memberId,
+      value: phoneNumber,
+    }),
     phoneLookupKey,
     phoneNumberVerifiedAt:
       identity.phoneNumberVerifiedAt instanceof Date ? identity.phoneNumberVerifiedAt : null,
-    privyUserId: typeof identity.privyUserId === "string" ? identity.privyUserId : null,
+    privyUserIdEncrypted: encryptHostedWebNullableString({
+      field: "hosted-member-identity.privy-user-id",
+      memberId,
+      value: typeof identity.privyUserId === "string" ? identity.privyUserId : null,
+    }),
     privyUserLookupKey:
       typeof identity.privyUserId === "string"
         ? createHostedPrivyUserLookupKey(identity.privyUserId)
         : null,
+    signupPhoneCodeSendAttemptId: null,
+    signupPhoneCodeSendAttemptStartedAt: null,
+    signupPhoneCodeSentAt: null,
+    signupPhoneNumberEncrypted: null,
     updatedAt: identity.updatedAt instanceof Date ? identity.updatedAt : NOW,
-    walletAddress: typeof identity.walletAddress === "string" ? identity.walletAddress : null,
+    walletAddressEncrypted: encryptHostedWebNullableString({
+      field: "hosted-member-identity.wallet-address",
+      memberId,
+      value: typeof identity.walletAddress === "string" ? identity.walletAddress : null,
+    }),
     walletAddressLookupKey:
       typeof identity.walletAddress === "string"
         ? createHostedWalletAddressLookupKey(identity.walletAddress)
