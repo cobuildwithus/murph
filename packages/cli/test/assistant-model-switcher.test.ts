@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'vitest'
 
-import { resolveAssistantModelCatalog } from '@murphai/assistant-cli/assistant/provider-catalog'
+import { resolveAssistantModelCatalog } from '@murphai/assistant-engine/assistant-provider-catalog'
 import {
   createModelSwitcherState,
   dismissModelSwitcher,

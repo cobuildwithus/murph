@@ -1,6 +1,6 @@
 import { loadRuntimeModule } from '@murphai/assistant-engine/runtime-import'
 import type { ImportersRuntimeModule } from '@murphai/assistant-engine/usecases/types'
-import { createRuntimeUnavailableError } from '@murphai/assistant-engine/commands/query-record-command-helpers'
+import { createRuntimeUnavailableError } from '@murphai/operator-config/runtime-errors'
 
 export interface ImportCsvSamplesOptions {
   delimiter?: string

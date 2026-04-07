@@ -5,7 +5,7 @@ import {
   resolveOpenAICompatibleProviderPreset,
   resolveOpenAICompatibleProviderPresetFromId,
   type OpenAICompatibleProviderPreset,
-} from '@murphai/assistant-engine/assistant-provider'
+} from '@murphai/operator-config/assistant/openai-compatible-provider-presets'
 import {
   DEFAULT_SETUP_OPENAI_COMPATIBLE_BASE_URL,
   getDefaultSetupAssistantPreset as getDefaultAssistantPreset,

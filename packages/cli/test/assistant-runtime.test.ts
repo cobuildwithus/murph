@@ -136,7 +136,7 @@ import {
 import {
   DEFAULT_ASSISTANT_CHAT_MODEL_OPTIONS,
   DEFAULT_ASSISTANT_REASONING_OPTIONS,
-} from '@murphai/assistant-cli/assistant/provider-catalog'
+} from '@murphai/assistant-engine/assistant-provider-catalog'
 import {
   applyComposerEditingInput,
   formatFooterBadgeText,

@@ -13,7 +13,7 @@ import {
   discoverAssistantProviderModels,
   resolveAssistantModelCatalog,
   type AssistantModelDiscoveryResult,
-} from '../provider-catalog.js'
+} from '@murphai/assistant-engine/assistant-provider-catalog'
 import { updateAssistantSessionOptions, type AssistantChatInput } from '../service.js'
 
 function assistantModelDiscoveryResultsEqual(
