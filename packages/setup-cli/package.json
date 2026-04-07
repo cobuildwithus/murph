@@ -35,6 +35,10 @@
       "types": "./dist/setup-assistant-account.d.ts",
       "default": "./dist/setup-assistant-account.js"
     },
+    "./setup-assistant-defaults": {
+      "types": "./dist/setup-assistant-defaults.d.ts",
+      "default": "./dist/setup-assistant-defaults.js"
+    },
     "./setup-agentmail": {
       "types": "./dist/setup-agentmail.d.ts",
       "default": "./dist/setup-agentmail.js"
