@@ -147,6 +147,7 @@ function HostedPhoneAuthInner({
     issue: authenticatedSessionIssue,
     showAuthenticatedLoadingState,
   });
+  const showInviteSendCodeShortcut = !authenticated && mode === "invite" && step === "phone" && !manualEntryVisible;
   const authenticatedLoadingTitle =
     checkingAuthenticatedSession
       ? "Checking your setup..."
@@ -392,7 +393,7 @@ function HostedPhoneAuthInner({
         </Alert>
       ) : null}
 
-      {!authenticated && mode === "invite" && step === "phone" && !manualEntryVisible ? (
+      {showInviteSendCodeShortcut ? (
         <div className="space-y-3">
           <p className="text-sm text-stone-600">
             We&apos;ll text a verification code to the number that messaged Murph.
@@ -422,7 +423,7 @@ function HostedPhoneAuthInner({
         </div>
       ) : null}
 
-      {authenticated || (mode === "invite" && step === "phone" && !manualEntryVisible) ? null : (
+      {authenticated || showInviteSendCodeShortcut ? null : (
         <div className="space-y-3">
           <Label htmlFor={`hosted-phone-${mode}`}>
             {mode === "invite" ? "Phone number" : "Your phone number"}
@@ -547,7 +548,7 @@ function HostedPhoneAuthInner({
             </Button>
           </div>
         </Alert>
-      ) : (
+      ) : showInviteSendCodeShortcut ? null : (
         <div className="flex flex-wrap gap-3">
           {step === "phone" ? (
             <Button type="button" onClick={handleSendCode} disabled={!ready || pendingAction !== null} size="xl">

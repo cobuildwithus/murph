@@ -69,7 +69,7 @@ test("verify-stage invite copy stays neutral and does not expose the masked phon
 
   assert.match(markup, /Text signup/);
   assert.match(markup, /Verify the number that messaged Murph to finish joining\./);
-  assert.match(markup, /Verify the number that messaged Murph\./);
+  assert.doesNotMatch(markup, /What happens next/);
   assert.doesNotMatch(markup, /Invite for/);
   assert.doesNotMatch(markup, /\+1 415 555 2671/);
 });

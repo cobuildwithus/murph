@@ -344,17 +344,6 @@ export function JoinInviteClient({
         </CardContent>
       </Card>
 
-      <Card className="border-stone-200/60 bg-white/80">
-        <CardHeader>
-          <CardTitle className="text-base text-stone-800">What happens next</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2.5 text-sm leading-relaxed text-stone-500">
-          <p>1. Verify the number that messaged Murph.</p>
-          <p>2. Finish setting up your Murph account.</p>
-          <p>3. Complete checkout.</p>
-          <p>4. Start using Murph.</p>
-        </CardContent>
-      </Card>
     </div>
   );
 }
