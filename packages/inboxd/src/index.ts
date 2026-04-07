@@ -103,29 +103,9 @@ export type {
 export {
   createLinqWebhookConnector,
 } from "./connectors/linq/connector.ts";
-export {
-  assertLinqWebhookTimestampFresh,
-  isLinqWebhookPayloadError,
-  isLinqWebhookVerificationError,
-  parseLinqWebhookEvent,
-  readLinqWebhookHeader,
-  verifyAndParseLinqWebhookRequest,
-  verifyLinqWebhookSignature,
-  LinqWebhookPayloadError,
-  LinqWebhookVerificationError,
-} from "@murphai/messaging-ingress/linq-webhook";
 export type {
   LinqWebhookConnectorOptions,
 } from "./connectors/linq/connector.ts";
-export {
-  buildLinqMessageText,
-  minimizeLinqMessageReceivedEvent,
-  minimizeLinqWebhookEvent,
-  parseCanonicalLinqMessageReceivedEvent,
-  resolveLinqWebhookOccurredAt,
-  requireLinqMessageReceivedEvent,
-  summarizeLinqMessageReceivedEvent,
-} from "@murphai/messaging-ingress/linq-webhook";
 export {
   normalizeLinqWebhookEvent,
   toLinqChatMessage,
@@ -134,19 +114,6 @@ export type {
   LinqAttachmentDownloadDriver,
   NormalizeLinqWebhookEventInput,
 } from "./connectors/linq/normalize.ts";
-export type {
-  LinqCreateChatResponse,
-  LinqCreateWebhookSubscriptionResponse,
-  LinqIncomingMessage,
-  LinqListPhoneNumbersResponse,
-  LinqMediaPart,
-  LinqMessagePart,
-  LinqMessageReceivedData,
-  LinqMessageReceivedEvent,
-  LinqSendMessageResponse,
-  LinqTextPart,
-  LinqWebhookEvent,
-} from "@murphai/messaging-ingress/linq-webhook";
 export {
   createImessageConnector,
   loadImessageKitDriver,
@@ -166,17 +133,6 @@ export type {
   ImessageKitChatLike,
   ImessageKitMessageLike,
 } from "./connectors/imessage/normalize.ts";
-export {
-  buildTelegramThreadId,
-  buildTelegramThreadTarget,
-  extractTelegramMessage,
-  minimizeTelegramUpdate,
-  parseTelegramThreadTarget,
-  parseTelegramWebhookUpdate,
-  serializeTelegramThreadTarget,
-  summarizeTelegramMessage,
-  summarizeTelegramUpdate,
-} from "@murphai/messaging-ingress/telegram-webhook";
 export {
   DEFAULT_TELEGRAM_ALLOWED_UPDATES,
   createTelegramApiPollDriver,
@@ -202,25 +158,6 @@ export type {
   NormalizeTelegramUpdateInput,
   TelegramAttachmentDownloadDriver,
 } from "./connectors/telegram/normalize.ts";
-export type {
-  TelegramThreadTarget,
-} from "@murphai/messaging-ingress/telegram-webhook";
-export type {
-  TelegramChat,
-  TelegramContact,
-  TelegramDirectMessagesTopic,
-  TelegramFile,
-  TelegramFileBase,
-  TelegramLocation,
-  TelegramMessageLike,
-  TelegramPoll,
-  TelegramPhotoSize,
-  TelegramTextQuote,
-  TelegramUpdateLike,
-  TelegramUser,
-  TelegramVenue,
-  TelegramWebhookInfo,
-} from "@murphai/messaging-ingress/telegram-webhook";
 export {
   createConnectorRegistry,
 } from "./kernel/registry.ts";

@@ -3,7 +3,7 @@ import type {
   LinqCreateWebhookSubscriptionResponse,
   LinqListPhoneNumbersResponse,
   LinqSendMessageResponse,
-} from '@murphai/inboxd'
+} from '@murphai/messaging-ingress/linq-webhook'
 import {
   waitForRetryDelay,
   type ResponseHeadersLike,

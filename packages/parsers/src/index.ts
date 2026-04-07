@@ -66,7 +66,6 @@ export { createPdfToTextProvider } from "./adapters/pdftotext.js";
 export { createTextFileProvider } from "./adapters/text-file.js";
 export type { PublishedParserArtifacts } from "./publish/writer.js";
 export { writeParserArtifacts } from "./publish/writer.js";
-export { resolveInboxAttachmentArtifact } from "./inboxd/bridge.js";
 export type {
   CreateInboxParserServiceInput,
   InboxParserService,

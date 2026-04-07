@@ -100,6 +100,9 @@
       "@murphai/assistant-cli": [
         "packages/assistant-cli/src/index.ts"
       ],
+      "@murphai/assistant-cli/assistant/*": [
+        "packages/assistant-cli/src/assistant/*.ts"
+      ],
       "@murphai/assistant-cli/*": [
         "packages/assistant-cli/src/*"
       ],
@@ -132,6 +135,9 @@
       ],
       "@murphai/assistant-engine": [
         "packages/assistant-engine/src/index.ts"
+      ],
+      "@murphai/assistant-engine/assistant/*": [
+        "packages/assistant-engine/src/assistant/*.ts"
       ],
       "@murphai/assistant-engine/*": [
         "packages/assistant-engine/src/*"

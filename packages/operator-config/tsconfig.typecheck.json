@@ -14,7 +14,7 @@
       "path": "../device-syncd"
     },
     {
-      "path": "../inboxd"
+      "path": "../messaging-ingress"
     },
     {
       "path": "../runtime-state"

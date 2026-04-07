@@ -71,10 +71,6 @@
       "types": "./dist/assistant-vault-paths.d.ts",
       "default": "./dist/assistant-vault-paths.js"
     },
-    "./assistant/*": {
-      "types": "./dist/assistant/*.d.ts",
-      "default": "./dist/assistant/*.js"
-    },
     "./commands/query-record-command-helpers": {
       "types": "./dist/commands/query-record-command-helpers.d.ts",
       "default": "./dist/commands/query-record-command-helpers.js"

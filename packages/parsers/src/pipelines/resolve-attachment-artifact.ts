@@ -1,8 +1,8 @@
-import type { ParserRuntimeStore } from "../contracts/runtime.js";
 import type { ParserArtifactRef } from "../contracts/artifact.js";
+import type { ParserRuntimeStore } from "../contracts/runtime.js";
 import { resolveVaultRelativePath } from "../shared.js";
 
-export async function resolveInboxAttachmentArtifact(input: {
+export async function resolveAttachmentArtifact(input: {
   vaultRoot: string;
   runtime: ParserRuntimeStore;
   captureId: string;
