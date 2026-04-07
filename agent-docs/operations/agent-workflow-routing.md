@@ -1,6 +1,6 @@
 # Agent Workflow Routing
 
-Last verified: 2026-04-06
+Last verified: 2026-04-07
 
 This doc is the durable workflow map behind `AGENTS.md`.
 Use it to classify the task, load only the relevant docs, and choose the right verification, audit, and commit path.
@@ -21,6 +21,7 @@ Then load only the task-relevant docs listed below.
 | Task class | Typical scope | Also read | Ledger | Plan | Audits | Verification | Commit path |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Vault-only data | Writes stay under `vault/**` | `agent-docs/operations/verification-and-runtime.md` | No | No by default | No by default | Read back touched records and any mutation artifacts | No repo commit unless asked |
+| Review-only repo inspection | Repo code/docs/config review, architecture checks, or code review with no file edits planned | `agent-docs/operations/verification-and-runtime.md` | No | No | No by default | No repo-wide commands by default; cite direct file evidence and only run checks when the user asks for runtime proof or static inspection leaves a material gap | No repo commit unless asked |
 | Docs/process-only | Repo docs, process docs, plans, agent workflow docs | `agent-docs/operations/verification-and-runtime.md` | Yes | For multi-file, durable-rule, or likely multi-turn work | No by default | Text-only `.md` docs edits/deletions may use the docs-only fast path; other docs/process work still follows the repo baseline or scoped-verification rules in the verification doc | `scripts/finish-task` if plan-bearing, otherwise `scripts/committer` |
 | Tiny low-risk repo change | Narrow, single-purpose repo code/test/config change in one subsystem | `agent-docs/operations/completion-workflow.md`, `agent-docs/operations/verification-and-runtime.md` | Yes | Usually optional unless multi-file/high-risk | Use the tiny repo-internal fast path's local final review when eligible; otherwise `task-finish-review` | Use the low-risk fast path when eligible, otherwise follow the verification doc and add focused proof | `scripts/finish-task` if plan-bearing, otherwise `scripts/committer` |
 | Standard repo change | Ordinary repo code/test/config change | `agent-docs/operations/completion-workflow.md`, `agent-docs/operations/verification-and-runtime.md` | Yes | Yes for multi-file or high-risk work | `task-finish-review` by default; add `simplify` only for locally developed non-patch changes at 200+ changed lines | Follow verification doc; add direct scenario proof when required | `scripts/finish-task` if plan-bearing, otherwise `scripts/committer` |

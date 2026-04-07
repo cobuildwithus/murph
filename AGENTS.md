@@ -28,6 +28,7 @@ Always read these before repo code/docs/test/config work:
 | Task | Also read | Notes |
 | --- | --- | --- |
 | Vault-only data under `vault/**` | `agent-docs/operations/verification-and-runtime.md` | No repo ledger or repo-wide checks by default. |
+| Review-only repo inspection with no file edits planned | `agent-docs/operations/verification-and-runtime.md` | No repo ledger or repo-wide checks by default unless the user asks for runtime proof. |
 | Docs/process-only | `agent-docs/operations/verification-and-runtime.md` | No audit subagents by default. |
 | Repo code/test/config | `agent-docs/operations/completion-workflow.md`, `agent-docs/operations/verification-and-runtime.md` | Use the task classes in the workflow-routing doc. |
 | Auth, secrets, trust boundaries, external runtime surfaces | `agent-docs/SECURITY.md` | Treat as higher-risk by default. |
@@ -58,6 +59,7 @@ Always read these before repo code/docs/test/config work:
 ## Workflow Defaults
 
 - Repo code/docs/test/config work uses `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`; vault-only data work does not by default.
+- Review-only repo inspection with no file edits does not require default test or typecheck runs; use direct file readback unless the user asks for runtime proof or the review question cannot be resolved statically.
 - Preserve unrelated worktree edits. Do not overwrite, discard, or revert work you did not make.
 - Use an execution plan for multi-file or high-risk work. Narrow supplied-patch landings may stay ledger-only when they remain bounded and single-turn.
 - If architecture-significant behavior changes, update `ARCHITECTURE.md` and the matching durable docs.
