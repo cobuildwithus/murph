@@ -222,10 +222,7 @@ describe("hosted webhook receipt transitions", () => {
           occurredAt: "2026-03-26T12:00:00.000Z",
           userId: "member_123",
         },
-        payloadRef: {
-          key: "dispatch/staged-linq-123",
-        },
-        schemaVersion: "murph.execution-outbox.v2" as const,
+        stagedPayloadId: "dispatch/staged-linq-123",
         storage: "reference" as const,
       },
     };

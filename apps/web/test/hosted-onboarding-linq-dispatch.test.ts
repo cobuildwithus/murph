@@ -210,9 +210,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
                 eventKind: "linq.message.received",
                 userId: "member_123",
               }),
-              payloadRef: expect.objectContaining({
-                key: expect.stringContaining("/member_123/evt_123.json"),
-              }),
+              stagedPayloadId: expect.stringContaining("/member_123/evt_123.json"),
             }),
             kind: "hosted_execution_dispatch",
             status: "pending",
@@ -1181,10 +1179,7 @@ function createStagedPayload(
       occurredAt: dispatch.occurredAt,
       userId: dispatch.event.userId,
     },
-    payloadRef: {
-      key: `transient/dispatch-payloads/${dispatch.event.userId}/${dispatch.eventId}.json`,
-    },
-    schemaVersion: "murph.execution-outbox.v2",
+    stagedPayloadId: `transient/dispatch-payloads/${dispatch.event.userId}/${dispatch.eventId}.json`,
     storage: "reference" as const,
   };
 }

@@ -110,10 +110,6 @@ function serializeExistingHostedExecutionOutboxPayload(
     });
   }
 
-  if (!payload.stagedPayloadId) {
-    throw createHostedExecutionOutboxPayloadRefError(payload.dispatchRef.eventId);
-  }
-
   return clonePrismaInputJsonObject(payload);
 }
 
@@ -304,7 +300,11 @@ async function processHostedExecutionOutboxRecord(
       payloadJson: persistedPayloadJson,
       status: delivery.status,
     });
-    await cleanupHostedExecutionOutboxPayloadIfSettled(nextRecord, cleanupPayload);
+    await cleanupHostedExecutionOutboxPayloadIfSettled(
+      nextRecord,
+      cleanupPayload,
+      delivery.deleteStoredPayload,
+    );
     return nextRecord;
   } catch (error) {
     const permanentPayloadFailure = isPermanentHostedExecutionOutboxError(error);
@@ -316,7 +316,11 @@ async function processHostedExecutionOutboxRecord(
       payloadJson: persistedPayloadJson,
       status: ExecutionOutboxStatus.delivery_failed,
     });
-    await cleanupHostedExecutionOutboxPayloadIfSettled(nextRecord, cleanupPayload);
+    await cleanupHostedExecutionOutboxPayloadIfSettled(
+      nextRecord,
+      cleanupPayload,
+      permanentPayloadFailure,
+    );
     return nextRecord;
   }
 }
@@ -346,10 +350,6 @@ async function prepareHostedExecutionDispatchAttempt(
     };
   }
 
-  if (!payload.stagedPayloadId) {
-    throw createHostedExecutionOutboxPayloadRefError(record.eventId);
-  }
-
   return {
     dispatchMode: "stored",
     payload,
@@ -360,12 +360,13 @@ async function prepareHostedExecutionDispatchAttempt(
 async function cleanupHostedExecutionOutboxPayloadIfSettled(
   record: ExecutionOutbox,
   payload: HostedExecutionOutboxPayload | null,
+  shouldDeleteStoredPayload: boolean,
 ): Promise<void> {
-  if (!payload || !isHostedExecutionOutboxPayloadSettled(record)) {
+  if (!payload || !isHostedExecutionOutboxPayloadSettled(record) || !shouldDeleteStoredPayload) {
     return;
   }
 
-  if (payload.storage !== "reference" || !payload.stagedPayloadId) {
+  if (payload.storage !== "reference") {
     return;
   }
 
@@ -378,11 +379,7 @@ async function cleanupHostedExecutionUnpersistedStagedPayloadIfNeeded(
 ): Promise<void> {
   const requestedPayload = readHostedExecutionOutboxPayload(requestedPayloadJson);
 
-  if (
-    !requestedPayload
-    || requestedPayload.storage !== "reference"
-    || !requestedPayload.stagedPayloadId
-  ) {
+  if (!requestedPayload || requestedPayload.storage !== "reference") {
     return;
   }
 
@@ -524,7 +521,7 @@ async function prepareHostedExecutionOutboxPayloadJson(
 
   const stagedPayload = await maybeStageHostedExecutionDispatchPayload(dispatch);
 
-  if (stagedPayload && stagedPayload.storage === "reference" && stagedPayload.stagedPayloadId) {
+  if (stagedPayload?.storage === "reference") {
     return serializeExistingHostedExecutionOutboxPayload(stagedPayload);
   }
 
@@ -626,12 +623,14 @@ function areHostedExecutionDispatchPayloadRefsEquivalent(
 function resolveHostedExecutionDeliveryOutcome(
   dispatchResult: HostedExecutionDispatchResult,
 ): {
+  deleteStoredPayload: boolean;
   lastError: string | null;
   retryable: boolean;
   status: ExecutionOutboxStatus;
 } {
   if (dispatchResult.status.lastError === HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR) {
     return {
+      deleteStoredPayload: false,
       lastError: dispatchResult.status.lastError,
       retryable: true,
       status: ExecutionOutboxStatus.delivery_failed,
@@ -641,6 +640,7 @@ function resolveHostedExecutionDeliveryOutcome(
   switch (dispatchResult.event.state) {
     case "backpressured":
       return {
+        deleteStoredPayload: false,
         lastError:
           dispatchResult.event.lastError
           ?? dispatchResult.status.lastError
@@ -650,10 +650,17 @@ function resolveHostedExecutionDeliveryOutcome(
       };
     case "queued":
     case "duplicate_pending":
+      return {
+        deleteStoredPayload: false,
+        lastError: null,
+        retryable: false,
+        status: ExecutionOutboxStatus.dispatched,
+      };
     case "duplicate_consumed":
     case "completed":
     case "poisoned":
       return {
+        deleteStoredPayload: true,
         lastError: null,
         retryable: false,
         status: ExecutionOutboxStatus.dispatched,

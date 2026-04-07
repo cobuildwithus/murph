@@ -2,7 +2,6 @@ import {
   deriveHostedExecutionErrorCode,
   normalizeHostedExecutionOperatorMessage,
   summarizeHostedExecutionErrorCode,
-  summarizeHostedExecutionError,
   type HostedExecutionDispatchRequest,
   type HostedExecutionRunLevel,
   type HostedExecutionRunPhase,
@@ -185,6 +184,7 @@ export class RunnerQueueStore {
 
   async enqueueDispatch(
     dispatch: HostedExecutionDispatchRequest,
+    stagedPayloadId: string | null = null,
   ): Promise<{ accepted: boolean; alreadySeen: boolean; record: RunnerStateRecord }> {
     await this.ready;
     await this.bootstrapUser(dispatch.event.userId);
@@ -210,7 +210,7 @@ export class RunnerQueueStore {
       };
     }
 
-    const payloadKey = await this.writePendingDispatchPayload(dispatch);
+    const payloadKey = await this.writePendingDispatchPayload(dispatch, stagedPayloadId);
     try {
       this.sql.exec(
         `INSERT INTO pending_events (
@@ -229,7 +229,7 @@ export class RunnerQueueStore {
         null,
       );
     } catch (error) {
-      await this.deletePendingDispatchPayloadBestEffort(payloadKey);
+      await this.deletePendingDispatchPayloadBestEffort(payloadKey, stagedPayloadId === null);
       throw error;
     }
 
@@ -290,7 +290,7 @@ export class RunnerQueueStore {
     const bundleState = this.selectBundleStateSync();
     const pending = this.readPendingDispatchRowByEventIdSync(committed.eventId);
     if (pending) {
-      await this.deletePendingDispatchPayloadBestEffort(pending.payload_key);
+      await this.deletePendingDispatchPayloadBestEffort(pending.payload_key, true);
     }
     this.removePendingDispatchSync(committed.eventId);
     this.deletePoisonedEventSync(committed.eventId);
@@ -343,8 +343,6 @@ export class RunnerQueueStore {
     const meta = this.requireMetaRowSync();
     const errorAt = new Date().toISOString();
     const errorCode = deriveHostedExecutionErrorCode(input.error);
-    const errorMessage = summarizeHostedExecutionError(input.error);
-
     if (!pending) {
       meta.in_flight = 0;
       meta.last_error_at = errorAt;
@@ -363,7 +361,7 @@ export class RunnerQueueStore {
 
     if (nextAttempts >= input.maxEventAttempts) {
       this.removePendingDispatchSync(input.eventId);
-      await this.deletePendingDispatchPayloadBestEffort(pending.payload_key);
+      await this.deletePendingDispatchPayloadBestEffort(pending.payload_key, true);
       this.writeConsumedEventSync(input.eventId, errorAt, nextConsumedEventExactExpiryIso());
       this.writePoisonedEventSync(input.eventId, errorCode, errorAt);
       this.writeMetaRowSync(meta);
@@ -984,7 +982,7 @@ export class RunnerQueueStore {
 
   private async requirePendingDispatchPayload(row: PendingEventRow): Promise<HostedExecutionDispatchRequest> {
     const dispatch = await this.dispatchPayloadStore.readDispatchPayload({
-      key: row.payload_key,
+      stagedPayloadId: row.payload_key,
     });
 
     if (!dispatch) {
@@ -994,17 +992,31 @@ export class RunnerQueueStore {
     return dispatch;
   }
 
-  private async writePendingDispatchPayload(dispatch: HostedExecutionDispatchRequest): Promise<string> {
-    return (await this.dispatchPayloadStore.writeDispatchPayload(dispatch)).key;
+  private async writePendingDispatchPayload(
+    dispatch: HostedExecutionDispatchRequest,
+    stagedPayloadId: string | null,
+  ): Promise<string> {
+    if (stagedPayloadId) {
+      return stagedPayloadId;
+    }
+
+    return (await this.dispatchPayloadStore.writeDispatchPayload(dispatch)).stagedPayloadId;
   }
 
-  private async deletePendingDispatchPayloadBestEffort(payloadKey: string | null): Promise<void> {
+  private async deletePendingDispatchPayloadBestEffort(
+    payloadKey: string | null,
+    canDelete: boolean,
+  ): Promise<void> {
     if (!payloadKey) {
       return;
     }
 
+    if (!canDelete) {
+      return;
+    }
+
     try {
-      await this.dispatchPayloadStore.deleteDispatchPayload({ key: payloadKey });
+      await this.dispatchPayloadStore.deleteDispatchPayload({ stagedPayloadId: payloadKey });
     } catch {
       // Best-effort cleanup only; TTL backstops any failed transient blob deletion.
     }
@@ -1013,7 +1025,7 @@ export class RunnerQueueStore {
   private async poisonMalformedPendingDispatchRow(row: PendingEventRow, error: unknown): Promise<void> {
     const malformedError = classifyMalformedPendingDispatchError(error);
     const errorAt = new Date().toISOString();
-    await this.deletePendingDispatchPayloadBestEffort(row.payload_key);
+    await this.deletePendingDispatchPayloadBestEffort(row.payload_key, true);
     this.removePendingDispatchSync(row.event_id);
     this.writeConsumedEventSync(row.event_id, errorAt, nextConsumedEventExactExpiryIso());
     this.writePoisonedEventSync(row.event_id, malformedError.errorCode, errorAt);

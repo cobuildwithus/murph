@@ -136,7 +136,7 @@ export class HostedUserRunner {
           return;
         }
 
-        await bucket.delete(ref.key);
+        await bucket.delete(ref.stagedPayloadId);
       },
 
       deleteStoredDispatchPayload: async (payloadJson) => {
@@ -469,13 +469,16 @@ export class HostedUserRunner {
   async dispatchStoredPayload(input: {
     payload: HostedExecutionOutboxPayload;
   }): Promise<HostedExecutionDispatchResult> {
-    const dispatch = await (await this.resolveUserDispatchPayloadStore(
-      input.payload.storage === "inline"
-        ? input.payload.dispatch.event.userId
-        : input.payload.dispatchRef.userId,
-    )).readStoredDispatch(input.payload);
+    const userId = input.payload.storage === "inline"
+      ? input.payload.dispatch.event.userId
+      : input.payload.dispatchRef.userId;
+    const dispatch = await (await this.resolveUserDispatchPayloadStore(userId))
+      .readStoredDispatch(input.payload);
 
-    return this.dispatchWithOutcome(dispatch);
+    return this.dispatchWithOutcome(
+      dispatch,
+      input.payload.storage === "reference" ? input.payload.stagedPayloadId : null,
+    );
   }
 
   async dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {
@@ -486,11 +489,12 @@ export class HostedUserRunner {
 
   async dispatchWithOutcome(
     input: HostedExecutionDispatchRequest,
+    stagedPayloadId: string | null = null,
   ): Promise<HostedExecutionDispatchResult> {
     await this.queueStore.bootstrapUser(input.event.userId);
     await this.ensureRunnerStores(input.event.userId);
     const initialState = await this.queueStore.readEventState(input.eventId);
-    const status = await this.dispatchProcessor.dispatchBootstrapped(input);
+    const status = await this.dispatchProcessor.dispatchBootstrapped(input, stagedPayloadId);
     const nextState = await this.queueStore.readEventState(input.eventId);
 
     return {

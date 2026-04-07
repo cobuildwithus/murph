@@ -13,24 +13,16 @@ import {
   type HostedExecutionDispatchRef,
 } from "./dispatch-ref.ts";
 
-export const HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION = "murph.execution-outbox.v2";
-
 export type HostedExecutionOutboxPayloadStorage = "inline" | "reference";
-
-export interface HostedExecutionDispatchPayloadRef {
-  key: string;
-}
 
 export interface HostedExecutionInlineOutboxPayload {
   dispatch: HostedExecutionDispatchRequest;
-  schemaVersion: typeof HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION;
   storage: "inline";
 }
 
 export interface HostedExecutionReferenceOutboxPayload {
   dispatchRef: HostedExecutionDispatchRef;
-  payloadRef: HostedExecutionDispatchPayloadRef;
-  schemaVersion: typeof HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION;
+  stagedPayloadId: string;
   storage: "reference";
 }
 
@@ -46,23 +38,18 @@ const HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KIND_SET = new Set<HostedExec
 );
 const HOSTED_EXECUTION_INLINE_OUTBOX_PAYLOAD_KEYS = new Set([
   "dispatch",
-  "schemaVersion",
   "storage",
 ]);
 const HOSTED_EXECUTION_REFERENCE_OUTBOX_PAYLOAD_KEYS = new Set([
   "dispatchRef",
-  "payloadRef",
-  "schemaVersion",
+  "stagedPayloadId",
   "storage",
-]);
-const HOSTED_EXECUTION_DISPATCH_PAYLOAD_REF_KEYS = new Set([
-  "key",
 ]);
 
 export function buildHostedExecutionOutboxPayload(
   dispatch: HostedExecutionDispatchRequest,
   options: {
-    payloadRef?: HostedExecutionDispatchPayloadRef | null;
+    stagedPayloadId?: string | null;
     storage?: HostedExecutionOutboxPayloadStorage | "auto";
   } = {},
 ): HostedExecutionOutboxPayload {
@@ -71,21 +58,18 @@ export function buildHostedExecutionOutboxPayload(
   if (storage === "inline") {
     return {
       dispatch: parseHostedExecutionDispatchRequest(dispatch),
-      schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
       storage,
     };
   }
 
-  if (!options.payloadRef) {
-    throw new TypeError(
-      `Hosted execution ${dispatch.event.kind} reference payloads require a staged payloadRef.`,
-    );
-  }
+  const stagedPayloadId = requireText(
+    options.stagedPayloadId,
+    `Hosted execution ${dispatch.event.kind} reference payloads require a staged payload id.`,
+  );
 
   return {
     dispatchRef: buildHostedExecutionDispatchRef(dispatch),
-    payloadRef: options.payloadRef,
-    schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+    stagedPayloadId,
     storage,
   };
 }
@@ -94,68 +78,54 @@ export function readHostedExecutionOutboxPayload(
   payloadJson: unknown,
 ): HostedExecutionOutboxPayload | null {
   const payloadObject = toObject(payloadJson);
-  const schemaVersion = readText(payloadObject.schemaVersion);
+  const storage = readText(payloadObject.storage);
 
-  if (schemaVersion === HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION) {
-    const storage = readText(payloadObject.storage);
-
-    if (storage === "inline") {
-      if (!hasOnlyHostedExecutionKeys(payloadObject, HOSTED_EXECUTION_INLINE_OUTBOX_PAYLOAD_KEYS)) {
-        return null;
-      }
-
-      const dispatch = parseHostedExecutionDispatchRequest(payloadObject.dispatch);
-
-      if (!isHostedExecutionOutboxPayloadStorageAllowed(dispatch.event.kind, storage)) {
-        return null;
-      }
-
-      return {
-        dispatch,
-        schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
-        storage,
-      };
+  if (storage === "inline") {
+    if (!hasOnlyHostedExecutionKeys(payloadObject, HOSTED_EXECUTION_INLINE_OUTBOX_PAYLOAD_KEYS)) {
+      return null;
     }
 
-    if (storage === "reference") {
-      if (!hasOnlyHostedExecutionKeys(payloadObject, HOSTED_EXECUTION_REFERENCE_OUTBOX_PAYLOAD_KEYS)) {
-        return null;
-      }
+    const dispatch = parseHostedExecutionDispatchRequest(payloadObject.dispatch);
 
-      const dispatchRef = readHostedExecutionDispatchRef(payloadObject);
-      if (!dispatchRef || !isHostedExecutionOutboxPayloadStorageAllowed(dispatchRef.eventKind, storage)) {
-        return null;
-      }
-
-      const payloadRef = readHostedExecutionDispatchPayloadRef(payloadObject.payloadRef);
-      if (!payloadRef) {
-        return null;
-      }
-
-      return {
-        dispatchRef,
-        payloadRef,
-        schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
-        storage,
-      };
+    if (!isHostedExecutionOutboxPayloadStorageAllowed(dispatch.event.kind, storage)) {
+      return null;
     }
 
-    return null;
+    return {
+      dispatch,
+      storage,
+    };
   }
+
+  if (storage === "reference") {
+    if (!hasOnlyHostedExecutionKeys(payloadObject, HOSTED_EXECUTION_REFERENCE_OUTBOX_PAYLOAD_KEYS)) {
+      return null;
+    }
+
+    const dispatchRef = readHostedExecutionDispatchRef(payloadObject);
+    if (!dispatchRef || !isHostedExecutionOutboxPayloadStorageAllowed(dispatchRef.eventKind, storage)) {
+      return null;
+    }
+
+    const stagedPayloadId = readHostedExecutionStagedPayloadId(payloadObject.stagedPayloadId);
+    if (!stagedPayloadId) {
+      return null;
+    }
+
+    return {
+      dispatchRef,
+      stagedPayloadId,
+      storage,
+    };
+  }
+
   return null;
 }
 
-export function readHostedExecutionDispatchPayloadRef(
+export function readHostedExecutionStagedPayloadId(
   value: unknown,
-): HostedExecutionDispatchPayloadRef | null {
-  const payloadObject = toObject(value);
-
-  if (!hasOnlyHostedExecutionKeys(payloadObject, HOSTED_EXECUTION_DISPATCH_PAYLOAD_REF_KEYS)) {
-    return null;
-  }
-
-  const key = readText(payloadObject.key);
-  return key ? { key } : null;
+): string | null {
+  return readText(value);
 }
 
 export function resolveHostedExecutionDispatchPayloadStorage(
@@ -203,6 +173,15 @@ function isHostedExecutionOutboxPayloadStorageAllowed(
 
 function readText(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function requireText(value: unknown, errorMessage: string): string {
+  const text = readText(value);
+  if (text === null) {
+    throw new TypeError(errorMessage);
+  }
+
+  return text;
 }
 
 function toObject(value: unknown): Record<string, unknown> {

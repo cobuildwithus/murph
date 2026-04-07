@@ -857,9 +857,7 @@ describe("hosted onboarding webhook retry safety", () => {
                 eventKind: "linq.message.received",
                 userId: "member_123",
               }),
-              payloadRef: expect.objectContaining({
-                key: expect.stringContaining("/member_123/evt_123.json"),
-              }),
+              stagedPayloadId: expect.stringContaining("/member_123/evt_123.json"),
             }),
             kind: "hosted_execution_dispatch",
             status: "pending",
@@ -2278,16 +2276,13 @@ function buildDispatchSideEffect(input: {
     lastAttemptAt: input.lastAttemptAt ?? null,
     lastError: input.lastError ?? null,
     payload: {
-      schemaVersion: "murph.execution-outbox.v2",
       dispatchRef: {
         eventId: input.eventId,
         eventKind: "linq.message.received",
         occurredAt,
         userId: "member_123",
       },
-      payloadRef: {
-        key: `transient/dispatch-payloads/member_123/${input.eventId}.json`,
-      },
+      stagedPayloadId: `transient/dispatch-payloads/member_123/${input.eventId}.json`,
       storage: "reference",
     },
     result: input.status === "sent" ? { dispatched: true } : null,
@@ -3058,10 +3053,7 @@ function createStagedPayload(
       occurredAt: dispatch.occurredAt,
       userId: dispatch.event.userId,
     },
-    payloadRef: {
-      key: `transient/dispatch-payloads/${dispatch.event.userId}/${dispatch.eventId}.json`,
-    },
-    schemaVersion: "murph.execution-outbox.v2",
+    stagedPayloadId: `transient/dispatch-payloads/${dispatch.event.userId}/${dispatch.eventId}.json`,
     storage: "reference" as const,
   };
 }

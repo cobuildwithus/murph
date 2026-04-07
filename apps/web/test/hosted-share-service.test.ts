@@ -1,7 +1,6 @@
 import { HostedBillingStatus, type ExecutionOutbox } from "@prisma/client";
 import type { SharePack } from "@murphai/contracts";
 import {
-  HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
   type HostedExecutionDispatchRequest,
   type HostedExecutionOutboxPayload,
 } from "@murphai/hosted-execution";
@@ -110,10 +109,7 @@ function createStagedPayload(
       occurredAt: dispatch.occurredAt,
       userId: dispatch.event.userId,
     },
-    payloadRef: {
-      key: `transient/dispatch-payloads/${dispatch.event.userId}/${dispatch.eventId}.json`,
-    },
-    schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+    stagedPayloadId: `transient/dispatch-payloads/${dispatch.event.userId}/${dispatch.eventId}.json`,
     storage: "reference",
   };
 }
