@@ -137,29 +137,120 @@ The query package goes back to owning projection application rather than project
 **Main refactor risk:** do not let the contracts projection metadata start absorbing query-only presentation concerns.
 The shared owner should describe stable read-model extraction from frontmatter, not package-specific sorting or presentation behavior beyond what multiple consumers genuinely share.
 
-## Residual concerns left untouched
+## Current targeted review findings
 
-### A. Assistant delivery target kinds still have multiple owners across operator-config, gateway-core, and hosted-execution
+No code changes landed below.
+This is the current review-only pass over the live tree for the next data-model simplifications that look highest-leverage without weakening canonical-write or trust-boundary rules.
 
-**Seam:** `packages/operator-config/src/assistant-cli-contracts.ts`, `packages/gateway-core/src/contracts.ts`, `packages/hosted-execution/src/side-effects.ts`
+### High leverage now
 
-This pass removed the extra assistant-engine copy and aligned assistant-runtime hosted email with gateway-core, but the repo still has more than one surviving owner for delivery-target vocabulary.
-`assistantChannelDeliveryTargetKindValues`, `gatewayDeliveryTargetKindValues`, and `HostedExecutionAssistantDelivery.targetKind` still describe overlapping concepts from different package roots.
+#### 1. Collapse assistant-engine's `query-runtime` mirror back to the shared query owner
 
-**Why not changed here:** collapsing the remaining owners cleanly still needs a dependency-boundary choice between the gateway, assistant-contract, and hosted-execution packages.
+**Seam:** `packages/assistant-engine/src/query-runtime.ts` (`ALL_QUERY_ENTITY_FAMILIES`, `QueryCanonicalEntity`, `QueryVaultReadModel`, `QueryListEntityFilters`, `QuerySearchFilters`, `QuerySearchResult`, `QueryProjectionStatus`, `QueryTimelineEntry`, `QueryExportPack`, `QueryRuntimeModule`), `packages/query/src/index.ts`, `packages/query/src/canonical-entities.ts`, `packages/query/src/model.ts`, `packages/query/src/search-shared.ts`, `packages/query/src/query-projection-types.ts`, `packages/query/src/timeline.ts`, `packages/query/src/export-pack.ts`, `packages/assistant-engine/src/usecases/types.ts`
 
-### B. Hosted execution side effects still model one real effect as a generic effect framework
+The assistant-engine wrapper currently owns a second copy of most of the query read model even though `@murphai/query` already exports the canonical entity, read-model, projection-status, timeline, export-pack, and wearable-summary shapes.
+The same file already aliases the wearable summary types from `@murphai/query`, so the remaining local interfaces are mostly a parallel contract surface rather than a true adapter.
 
-**Seam:** `packages/hosted-execution/src/side-effects.ts`, `packages/assistant-runtime/src/hosted-runtime/callbacks.ts`, `apps/cloudflare/src/side-effect-journal.ts`
+**Current cost:** every query-shape change now wants two edits: the real query owner plus the assistant-engine mirror.
+Adding one more search field or canonical entity property can ripple through `query-runtime.ts`, its consumers in `usecases/types.ts`, and the runtime loader interface even when the product concept never changed.
 
-The current model has generic side-effect kind/state helpers even though the only real product effect today is `assistant.delivery`.
-That abstraction cost may not be earning its keep yet.
+**Simpler target:** make `@murphai/query` the only owner of the query model.
+Export the missing search-runtime types (`SearchFilters`, `SearchResult`, or a dedicated public runtime-search type) from the query public entrypoint, then collapse the assistant-engine file down to type aliases or `Pick<...>` views plus the local `loadQueryRuntime()` dynamic-import seam.
+Keep intentionally narrower views as `Pick<ExportPack, ...>` or `Pick<typeof import("@murphai/query"), ...>` rather than restating fields.
 
-**Why not changed here:** specializing it now would touch persisted records and multiple recovery paths, so it deserves its own narrow pass.
+**Main refactor risk:** do not make assistant-engine reach into non-public query internals just to remove duplication.
+The shared owner has to stay the public `@murphai/query` surface; the assistant-engine file should remain only a runtime-loader and optional-runtime boundary.
 
-### C. Keep health entity taxonomy ownership as-is
+#### 2. Give knowledge result contracts one owner instead of separate assistant-engine and CLI copies
 
-**Seam:** `packages/contracts/src/health-entities.ts`
+**Seam:** `packages/assistant-engine/src/knowledge/contracts.ts`, `packages/assistant-engine/src/knowledge.ts`, `packages/cli/src/knowledge-cli-contracts.ts`, `packages/cli/src/commands/knowledge.ts`, `packages/cli/src/vault-cli-command-manifest.ts`, `packages/query/src/knowledge-model.ts`
 
-This area already has a clear shared owner and should stay centralized rather than being split back across query/CLI/core.
-See `agent-docs/references/health-entity-taxonomy-seam.md`.
+`KnowledgePageReference`, `KnowledgePage`, `KnowledgeSearchHit`, `KnowledgeSearchResult`, `KnowledgeLogTailResult`, and the lint/index result shapes are defined once as assistant-engine interfaces and again as CLI incur schemas plus inferred types.
+Even the result format constant is already shared from `packages/query/src/knowledge-model.ts` via `DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT`, which highlights that the contract already spans packages while the rest of the field set does not.
+
+**Current cost:** one more field on a knowledge page or lint result requires synchronized manual edits in two owners.
+That makes CLI validation, assistant-engine return types, and future web/hosted knowledge surfaces easy to drift out of alignment.
+
+**Simpler target:** move the canonical knowledge result shape to one shared owner below CLI/app packages.
+In the current package graph, the least disruptive owner is a new shared contract surface under `packages/operator-config` or `packages/contracts`.
+Then turn `packages/assistant-engine/src/knowledge/contracts.ts` into a re-export or alias layer, and keep `packages/cli/src/knowledge-cli-contracts.ts` as a thin incur boundary adapter over that shared shape instead of a second nominal owner.
+
+**Main refactor risk:** do not solve this by making assistant-engine depend on CLI or by letting the shared owner absorb CLI-only help text and parser ergonomics.
+The shared layer should own the product record shape and constants; CLI can still own its boundary schemas and presentation-only constraints.
+
+### Worth planning
+
+#### 3. Finish collapsing assistant delivery target vocabulary to one route owner
+
+**Seam:** `packages/operator-config/src/assistant-cli-contracts.ts` (`assistantChannelDeliveryTargetKindValues`, `assistantBindingDeliveryKindValues`), `packages/gateway-core/src/contracts.ts` (`gatewayDeliveryTargetKindValues`, `gatewayReplyRouteKindValues`), `packages/hosted-execution/src/side-effects.ts` (`HostedExecutionAssistantDelivery.targetKind`)
+
+The same delivery-target vocabulary still survives in three packages: operator-config, gateway-core, and hosted-execution.
+The words are the same (`explicit`, `participant`, `thread`), but the owner is not.
+
+**Current cost:** one more target kind or route variant would require copy/paste edits across assistant settings/contracts, gateway routing, and hosted delivery receipts.
+That is exactly the kind of change that tends to produce partial rollouts and adapter glue.
+
+**Simpler target:** keep the shared route vocabulary in `packages/gateway-core/src/contracts.ts`, since that package already owns the concrete reply-route semantics.
+Let operator-config and hosted-execution alias the shared target-kind types/constants from that owner, while keeping their higher-level receipts and CLI schemas local.
+
+**Main refactor risk:** do not pull assistant policy, hosted callback rules, or CLI help text down into gateway-core just to centralize string unions.
+Only the route-kind vocabulary should move; layer-specific policy should stay where it is.
+
+#### 4. Collapse hosted execution side-effect modeling to the one effect that actually exists today
+
+**Seam:** `packages/hosted-execution/src/side-effects.ts` (`HOSTED_EXECUTION_SIDE_EFFECT_KINDS`, `HostedExecutionSideEffect`, `HostedExecutionSideEffectRecord`), `packages/assistant-runtime/src/hosted-runtime/callbacks.ts`, `apps/cloudflare/src/side-effect-journal.ts`
+
+The current side-effect model is a generic framework with kind/state parsing, merging, and identity helpers even though the only real product effect today is `assistant.delivery`.
+Both assistant-runtime and the Cloudflare journal are already effectively specialized to that one case.
+
+**Current cost:** the system pays generic-framework complexity on every read/write path even though there is no second effect family to compose.
+A future maintainer has to reason about kinds, prepared-vs-sent record unions, and generic journal identity rules when the product behavior is still “track assistant delivery confirmation.”
+
+**Simpler target:** rename and narrow the model to an assistant-delivery-specific record/journal surface now: `HostedAssistantDeliveryRecord`, `HostedAssistantDeliveryPreparedRecord`, `HostedAssistantDeliverySentRecord`, and a delivery journal store that keeps the same idempotent prepared/sent transitions.
+If a second effect really appears later, re-generalize from two concrete cases instead of carrying the abstraction in advance.
+
+**Main refactor risk:** do not entangle this cleanup with Cloudflare-specific storage paths or callback protocol logic.
+The simplification should specialize the shared data model, not move trust-boundary or deployment policy into the wrong package.
+
+#### 5. Normalize hosted webhook side-effect persistence around common retry fields plus kind-owned details
+
+**Seam:** `apps/web/prisma/schema.prisma` (`HostedWebhookReceiptSideEffect`), `apps/web/src/lib/hosted-onboarding/webhook-receipt-types.ts` (`HostedWebhookSideEffect`), `apps/web/src/lib/hosted-onboarding/webhook-receipt-codec.ts` (`serializeHostedWebhookReceiptSideEffect`, `readHostedWebhookReceiptSideEffect`), `apps/web/src/lib/hosted-onboarding/webhook-dispatch-payload.ts`
+
+`HostedWebhookReceiptSideEffect` is now a wide sparse row that carries dispatch, Linq, and Revnet payload/result fields side-by-side.
+The codec then has to switch over `kind` and reconstruct whichever subset of columns matters.
+The current tree also suggests those effect-specific columns are not queried outside the codec/store seam, so the relational width is not buying much composition.
+
+**Current cost:** adding one more webhook side effect means adding more nullable columns, widening Prisma types, extending the codec switch, and updating store sync logic even if the shared retry/status behavior did not change.
+The effect owner is unclear because the table itself tries to own every variant at once.
+
+**Simpler target:** keep the common retry/idempotency fields first-class on `HostedWebhookReceiptSideEffect` (`source`, `eventId`, `effectId`, `kind`, `status`, `attemptCount`, `lastAttemptAt`, `sentAt`, `lastError*`), but move effect-specific payload/result data behind a single kind-owned `detailJson` envelope or a small keyed detail table per kind.
+`webhook-receipt-codec.ts` would then parse one common shell plus one detail owner instead of a wide sparse record.
+
+**Main refactor risk:** do not use this cleanup to reintroduce raw webhook event blobs or to hide fields that the retry/idempotency logic actually needs for indexed lookup.
+Preserve the privacy-minimized common fields, and only move the effect-specific remainder.
+
+### Keep as-is
+
+#### A. Keep health registry taxonomy, projection metadata, and command metadata owned by contracts
+
+**Seam:** `packages/contracts/src/health-entities.ts`, `packages/query/src/health/registries.ts`, `packages/assistant-engine/src/health-registry-command-metadata.ts`, `packages/cli/src/commands/health-command-factory.ts`
+
+This is one of the healthier cross-package model seams in the repo today.
+Contracts own the health taxonomy and shared registry metadata; query and assistant-engine consume it through thin adapters instead of restating the same kinds and command names.
+
+**Why keep it:** the current central owner removes drift across contracts/query/assistant/CLI without weakening trust boundaries.
+It already does the thing the higher-leverage findings above still need to do.
+
+**Main failure mode if changed poorly:** spreading these definitions back across query, assistant-engine, and CLI would recreate exactly the taxonomy drift and duplicate command metadata the repo has been paying down elsewhere.
+
+#### B. Keep hosted execution outbox payload ownership in `@murphai/hosted-execution` with only a thin web Prisma adapter
+
+**Seam:** `packages/hosted-execution/src/outbox-payload.ts`, `apps/web/src/lib/hosted-execution/outbox-payload.ts`
+
+This seam is already simple and composable enough.
+The hosted-execution package owns the real payload/storage model (`HostedExecutionOutboxPayload`, `buildHostedExecutionOutboxPayload`, `readHostedExecutionOutboxPayload`, canonical storage selection), while the web layer only wraps it to convert the payload into `Prisma.InputJsonObject`.
+
+**Why keep it:** this split respects the trust boundary and avoids a second owner.
+Web does not redefine inline-vs-reference payload semantics; it just adapts the shared owner to Prisma.
+
+**Main failure mode if changed poorly:** moving the payload model back into web or letting Prisma types leak into the shared hosted-execution package would recreate a cross-layer contract fork and make Cloudflare/web rollouts harder to keep aligned.
