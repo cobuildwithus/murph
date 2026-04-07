@@ -189,7 +189,6 @@ describe("ensureHostedMemberForPhone", () => {
     expect(create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         billingStatus: "not_started",
-        status: "invited",
       }),
     });
     expect(identityUpsert).toHaveBeenCalledWith({

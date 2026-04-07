@@ -1,4 +1,4 @@
-import { HostedBillingStatus, HostedMemberStatus, type HostedMember } from "@prisma/client";
+import { HostedBillingStatus, type HostedMember } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -187,7 +187,7 @@ describe("hosted Privy request auth", () => {
   it("blocks suspended members from active hosted mutations", async () => {
     mocks.findHostedMemberForPrivyIdentity.mockResolvedValue(
       createHostedMember({
-        status: HostedMemberStatus.suspended,
+        suspendedAt: new Date("2025-03-27T08:00:00.000Z"),
       }),
     );
 
@@ -224,11 +224,10 @@ function createHostedMember(
   overrides: Partial<HostedMember> = {},
 ): HostedMember {
   return {
-    billingMode: null,
     billingStatus: HostedBillingStatus.active,
     createdAt: new Date("2025-03-27T08:00:00.000Z"),
     id: "member_123",
-    status: HostedMemberStatus.registered,
+    suspendedAt: null,
     updatedAt: new Date("2025-03-27T08:00:00.000Z"),
     ...overrides,
   };

@@ -1,6 +1,10 @@
-import { HostedBillingStatus, HostedInviteStatus, HostedMemberStatus } from "@prisma/client";
+import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
+  createHostedPhoneLookupKey,
+  createHostedPrivyUserLookupKey,
+  createHostedWalletAddressLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 import type { HostedPrivyIdentity } from "@/src/lib/hosted-onboarding/privy";
 
 const mocks = vi.hoisted(() => ({
@@ -97,7 +101,6 @@ function baseIdentity(): HostedPrivyIdentity {
 
 function makeMember(overrides: Record<string, unknown> = {}) {
   return {
-    billingMode: null,
     billingStatus: HostedBillingStatus.not_started,
     createdAt: NOW,
     id: "member_123",
@@ -106,7 +109,7 @@ function makeMember(overrides: Record<string, unknown> = {}) {
     phoneLookupKey: DEFAULT_PHONE_LOOKUP_KEY,
     phoneNumberVerifiedAt: null,
     privyUserId: null,
-    status: HostedMemberStatus.invited,
+    suspendedAt: null,
     stripeCustomerId: null,
     stripeLatestCheckoutSessionId: null,
     stripeSubscriptionId: null,
@@ -121,7 +124,6 @@ function makeMember(overrides: Record<string, unknown> = {}) {
 
 function makeInvite(member: ReturnType<typeof makeMember>, overrides: Record<string, unknown> = {}) {
   return {
-    authenticatedAt: null,
     channel: "linq",
     checkouts: [],
     createdAt: NOW,
@@ -147,10 +149,7 @@ function makeInvite(member: ReturnType<typeof makeMember>, overrides: Record<str
           },
         },
     memberId: member.id,
-    openedAt: NOW,
-    paidAt: null,
     sentAt: NOW,
-    status: HostedInviteStatus.opened,
     updatedAt: NOW,
     ...overrides,
   };
@@ -206,23 +205,8 @@ describe("completeHostedPrivyVerification", () => {
       prisma,
     });
 
-    expect(prisma.hostedMember.update).toHaveBeenCalledWith({
-      where: {
-        id: "member_123",
-      },
-      data: expect.objectContaining({
-        status: HostedMemberStatus.registered,
-      }),
-    });
-    expect(prisma.hostedInvite.update).toHaveBeenCalledWith({
-      where: {
-        id: "invite_123",
-      },
-      data: {
-        authenticatedAt: NOW,
-        status: HostedInviteStatus.authenticated,
-      },
-    });
+    expect(prisma.hostedMember.update).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
     expect(result).toEqual({
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
@@ -285,7 +269,6 @@ describe("completeHostedPrivyVerification", () => {
       phoneLookupKey: DEFAULT_PHONE_LOOKUP_KEY,
       phoneNumberVerifiedAt: NOW,
       privyUserId: "did:privy:user_123",
-      status: HostedMemberStatus.registered,
       walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
       walletChainType: "ethereum",
       walletCreatedAt: NOW,
@@ -296,7 +279,6 @@ describe("completeHostedPrivyVerification", () => {
       id: "invite_new",
       inviteCode: "public-invite-code",
       memberId: "member_new",
-      status: HostedInviteStatus.pending,
     });
     const prisma = asCompleteHostedPrivyVerificationPrisma({
       hostedInvite: {
@@ -320,25 +302,15 @@ describe("completeHostedPrivyVerification", () => {
     expect(prisma.hostedMember.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         billingStatus: HostedBillingStatus.not_started,
-        status: HostedMemberStatus.registered,
       }),
     });
     expect(prisma.hostedInvite.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         channel: "web",
         memberId: "member_new",
-        status: HostedInviteStatus.pending,
       }),
     });
-    expect(prisma.hostedInvite.update).toHaveBeenCalledWith({
-      where: {
-        id: "invite_new",
-      },
-      data: {
-        authenticatedAt: NOW,
-        status: HostedInviteStatus.authenticated,
-      },
-    });
+    expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
     expect(result.joinUrl).toBe("https://join.example.test/join/public-invite-code");
     expect(result.inviteCode).toBe("public-invite-code");
     expect(result.stage).toBe("checkout");
@@ -350,7 +322,6 @@ describe("completeHostedPrivyVerification", () => {
       phoneLookupKey: DEFAULT_PHONE_LOOKUP_KEY,
       phoneNumberVerifiedAt: NOW,
       privyUserId: "did:privy:user_123",
-      status: HostedMemberStatus.registered,
       walletAddress: null,
       walletChainType: null,
       walletCreatedAt: null,
@@ -361,7 +332,6 @@ describe("completeHostedPrivyVerification", () => {
       id: "invite_phone_only",
       inviteCode: "public-phone-only-invite",
       memberId: "member_phone_only",
-      status: HostedInviteStatus.pending,
     });
     const prisma = asCompleteHostedPrivyVerificationPrisma({
       hostedInvite: {
@@ -428,16 +398,12 @@ describe("completeHostedPrivyVerification", () => {
       billingStatus: HostedBillingStatus.active,
       phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
       privyUserId: "did:privy:user_123",
-      status: HostedMemberStatus.registered,
       walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
       walletChainType: "ethereum",
       walletCreatedAt: new Date("2026-03-20T12:00:00.000Z"),
       walletProvider: "privy",
     });
-    const invite = makeInvite(activeMember, {
-      paidAt: new Date("2026-03-21T12:00:00.000Z"),
-      status: HostedInviteStatus.paid,
-    });
+    const invite = makeInvite(activeMember);
     const prisma = asCompleteHostedPrivyVerificationPrisma({
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(invite),
@@ -458,16 +424,7 @@ describe("completeHostedPrivyVerification", () => {
       prisma,
     });
 
-    expect(prisma.hostedInvite.update).toHaveBeenCalledWith({
-      where: {
-        id: "invite_123",
-      },
-      data: {
-        authenticatedAt: NOW,
-        paidAt: new Date("2026-03-21T12:00:00.000Z"),
-        status: HostedInviteStatus.paid,
-      },
-    });
+    expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
     expect(result.stage).toBe("active");
   });
 
@@ -476,7 +433,7 @@ describe("completeHostedPrivyVerification", () => {
       billingStatus: HostedBillingStatus.active,
       phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
       privyUserId: "did:privy:user_123",
-      status: HostedMemberStatus.suspended,
+      suspendedAt: new Date("2026-03-21T12:00:00.000Z"),
       walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
       walletChainType: "ethereum",
       walletCreatedAt: new Date("2026-03-20T12:00:00.000Z"),
@@ -508,14 +465,7 @@ describe("completeHostedPrivyVerification", () => {
       httpStatus: 403,
     });
 
-    expect(prisma.hostedMember.update).toHaveBeenCalledWith({
-      where: {
-        id: "member_123",
-      },
-      data: expect.objectContaining({
-        status: HostedMemberStatus.suspended,
-      }),
-    });
+    expect(prisma.hostedMember.update).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
   });
 
@@ -524,7 +474,7 @@ describe("completeHostedPrivyVerification", () => {
       billingStatus: HostedBillingStatus.not_started,
       phoneNumberVerifiedAt: NOW,
       privyUserId: "did:privy:user_123",
-      status: HostedMemberStatus.suspended,
+      suspendedAt: NOW,
       walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
       walletChainType: "ethereum",
       walletCreatedAt: NOW,
@@ -752,7 +702,7 @@ describe("completeHostedPrivyVerification", () => {
 
     expect(identityUpsert).toHaveBeenCalledWith(expect.objectContaining({
       update: expect.objectContaining({
-        walletAddress: storedIdentity.walletAddress,
+        walletAddressLookupKey: expect.any(String),
         walletChainType: storedIdentity.walletChainType,
         walletCreatedAt: existingWalletCreatedAt,
         walletProvider: storedIdentity.walletProvider,
@@ -818,9 +768,9 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
           if (
             inviteIdentity &&
             (where.memberId === inviteIdentity.memberId ||
-              where.privyUserId === inviteIdentity.privyUserId ||
+              where.privyUserLookupKey === inviteIdentity.privyUserLookupKey ||
               where.phoneLookupKey === inviteIdentity.phoneLookupKey ||
-              where.walletAddress === inviteIdentity.walletAddress)
+              where.walletAddressLookupKey === inviteIdentity.walletAddressLookupKey)
           ) {
             return include?.member ? { ...inviteIdentity, member: inviteMember } : inviteIdentity;
           }
@@ -879,8 +829,16 @@ function readMemberIdentity(member: unknown) {
     phoneNumberVerifiedAt:
       identity.phoneNumberVerifiedAt instanceof Date ? identity.phoneNumberVerifiedAt : null,
     privyUserId: typeof identity.privyUserId === "string" ? identity.privyUserId : null,
+    privyUserLookupKey:
+      typeof identity.privyUserId === "string"
+        ? createHostedPrivyUserLookupKey(identity.privyUserId)
+        : null,
     updatedAt: identity.updatedAt instanceof Date ? identity.updatedAt : NOW,
     walletAddress: typeof identity.walletAddress === "string" ? identity.walletAddress : null,
+    walletAddressLookupKey:
+      typeof identity.walletAddress === "string"
+        ? createHostedWalletAddressLookupKey(identity.walletAddress)
+        : null,
     walletChainType: typeof identity.walletChainType === "string" ? identity.walletChainType : null,
     walletCreatedAt: identity.walletCreatedAt instanceof Date ? identity.walletCreatedAt : null,
     walletProvider: typeof identity.walletProvider === "string" ? identity.walletProvider : null,

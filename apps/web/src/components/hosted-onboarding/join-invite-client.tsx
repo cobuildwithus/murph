@@ -270,7 +270,7 @@ export function JoinInviteClient({
             </Alert>
           ) : null}
 
-          {(status.stage === "register" || status.stage === "authenticate") ? (
+          {status.stage === "verify" ? (
             phoneAuthReady && privyAppId ? (
               <div className="rounded-xl border border-stone-200/60 bg-stone-50/60 p-5">
                 <HostedPhoneAuth
@@ -280,7 +280,7 @@ export function JoinInviteClient({
                     await refreshStatus();
                   }}
                   onCompleted={handlePhoneVerified}
-                  phoneHint={status.invite?.phoneHint ?? status.member?.phoneHint ?? null}
+                  phoneHint={status.invite?.phoneHint ?? null}
                   privyAppId={privyAppId}
                   privyClientId={privyClientId}
                   wrapProvider={false}
@@ -294,6 +294,15 @@ export function JoinInviteClient({
                 </AlertDescription>
               </Alert>
             )
+          ) : null}
+
+          {status.stage === "blocked" ? (
+            <Alert className="border-amber-200 bg-amber-50 text-amber-900">
+              <AlertTitle>This hosted account needs support.</AlertTitle>
+              <AlertDescription>
+                This hosted account cannot continue from this invite right now. Contact support to restore access.
+              </AlertDescription>
+            </Alert>
           ) : null}
 
           {status.stage === "checkout" ? (
@@ -379,12 +388,12 @@ function resolveTitle(status: HostedInviteStatusPayload): string {
       return "That invite link is not valid";
     case "expired":
       return "That invite link expired";
-    case "register":
+    case "verify":
       return "Finish joining Murph";
-    case "authenticate":
-      return "Keep going";
     case "checkout":
       return "One last step";
+    case "blocked":
+      return "This account is blocked";
     case "active":
       return "You\u2019re in";
     default:
@@ -398,12 +407,12 @@ function resolveSubtitle(status: HostedInviteStatusPayload): string {
       return "Text the Murph number again and we\u2019ll send you a fresh hosted link.";
     case "expired":
       return "Text the Murph number again and we\u2019ll send you a fresh link.";
-    case "register":
+    case "verify":
       return `Use ${status.invite?.phoneHint ?? "your number"} to claim this invite and finish joining Murph.`;
-    case "authenticate":
-      return `You already started with ${status.invite?.phoneHint ?? "this number"}. Keep going and we’ll finish the rest.`;
     case "checkout":
       return "Your phone is confirmed. Finish checkout to start using Murph.";
+    case "blocked":
+      return "This hosted account cannot continue from the invite right now. Contact support to restore access.";
     case "active":
       return "Your Murph account is ready.";
     default:

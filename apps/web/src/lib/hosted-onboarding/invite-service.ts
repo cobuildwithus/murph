@@ -1,5 +1,4 @@
 import {
-  HostedInviteStatus,
   type HostedInvite,
   type HostedMember,
   type Prisma,
@@ -10,12 +9,9 @@ import type { HostedInviteStatusPayload } from "./types";
 
 import { getPrisma } from "../prisma";
 import { readHostedPhoneHint } from "./contact-privacy";
-import { hasHostedMemberActiveAccess } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
-import {
-  ensureHostedMemberForPhone,
-  hasHostedMemberPrivyIdentity,
-} from "./member-identity-service";
+import { deriveHostedOnboardingStage } from "./lifecycle";
+import { ensureHostedMemberForPhone } from "./member-identity-service";
 import { hasHostedPrivyPhoneAuthConfig } from "./privy";
 import {
   getHostedOnboardingEnvironment,
@@ -49,7 +45,6 @@ export async function getHostedInviteStatus(input: {
         phoneAuthReady,
       },
       invite: null,
-      member: null,
       session: {
         authenticated: Boolean(input.authenticatedMember),
         expiresAt: null,
@@ -59,73 +54,31 @@ export async function getHostedInviteStatus(input: {
     };
   }
 
-  let inviteStatus = invite.status;
-
-  if (invite.expiresAt <= now && invite.status !== HostedInviteStatus.expired) {
-    await prisma.hostedInvite.update({
-      where: { id: invite.id },
-      data: {
-        status: HostedInviteStatus.expired,
-      },
-    });
-    inviteStatus = HostedInviteStatus.expired;
-  } else if (!invite.openedAt) {
-    const openedInvite = await prisma.hostedInvite.update({
-      where: { id: invite.id },
-      data: {
-        openedAt: now,
-        status:
-          invite.status === HostedInviteStatus.pending
-            ? HostedInviteStatus.opened
-            : invite.status,
-      },
-      select: {
-        openedAt: true,
-        status: true,
-      },
-    });
-    inviteStatus = openedInvite.status;
-  }
-
   const sessionMatchesInvite = input.authenticatedMember?.id === invite.memberId;
   const inviteIdentity = requireHostedInviteMemberIdentity(invite.member);
-  const hasPrivyIdentity = hasHostedMemberPrivyIdentity(inviteIdentity);
-  const isActive = hasHostedMemberActiveAccess({
-    billingStatus: invite.member.billingStatus,
-    memberStatus: invite.member.status,
-  });
-  const stage =
-    invite.expiresAt <= now || inviteStatus === HostedInviteStatus.expired
-      ? "expired"
-      : sessionMatchesInvite
-        ? isActive
-          ? "active"
-          : "checkout"
-        : hasPrivyIdentity
-          ? "authenticate"
-          : "register";
 
   return {
     capabilities: {
       billingReady,
       phoneAuthReady,
     },
-      invite: {
-        code: invite.inviteCode,
-        expiresAt: invite.expiresAt.toISOString(),
-        phoneHint: readHostedPhoneHint(inviteIdentity.maskedPhoneNumberHint),
-        status: inviteStatus,
-      },
-      member: {
+    invite: {
+      code: invite.inviteCode,
+      expiresAt: invite.expiresAt.toISOString(),
       phoneHint: readHostedPhoneHint(inviteIdentity.maskedPhoneNumberHint),
-        status: invite.member.status,
-      },
+    },
     session: {
       authenticated: Boolean(input.authenticatedMember),
       expiresAt: null,
       matchesInvite: Boolean(sessionMatchesInvite),
     },
-    stage,
+    stage: deriveHostedOnboardingStage({
+      billingStatus: invite.member.billingStatus,
+      expiresAt: invite.expiresAt,
+      now,
+      sessionMatchesInvite,
+      suspendedAt: invite.member.suspendedAt,
+    }),
   };
 }
 
@@ -179,14 +132,6 @@ export async function issueHostedInvite(input: {
         expiresAt: {
           gt: now,
         },
-        status: {
-          in: [
-            HostedInviteStatus.pending,
-            HostedInviteStatus.opened,
-            HostedInviteStatus.authenticated,
-            HostedInviteStatus.paid,
-          ],
-        },
       },
       orderBy: {
         createdAt: "desc",
@@ -209,7 +154,6 @@ export async function issueHostedInvite(input: {
         id: generateHostedInviteId(),
         memberId: input.memberId,
         inviteCode: generateHostedInviteCode(),
-        status: HostedInviteStatus.pending,
         channel: input.channel,
         expiresAt: inviteExpiresAt(now, getHostedOnboardingEnvironment().inviteTtlHours),
       },
@@ -236,7 +180,7 @@ export async function requireHostedInviteForAuthentication(
     });
   }
 
-  if (invite.expiresAt <= now || invite.status === HostedInviteStatus.expired) {
+  if (invite.expiresAt <= now) {
     throw hostedOnboardingError({
       code: "INVITE_EXPIRED",
       message: "That Murph invite link has expired. Text the number again for a fresh link.",

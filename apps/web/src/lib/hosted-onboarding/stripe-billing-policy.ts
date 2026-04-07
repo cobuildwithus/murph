@@ -1,8 +1,5 @@
 import {
-  HostedBillingMode,
   HostedBillingStatus,
-  HostedInviteStatus,
-  HostedMemberStatus,
   HostedRevnetIssuanceStatus,
   type Prisma,
 } from "@prisma/client";
@@ -21,7 +18,6 @@ import {
   deriveHostedEntitlement,
   isHostedAccessBlockedBillingStatus,
 } from "./entitlement";
-import { hostedOnboardingError } from "./errors";
 import {
   type HostedMemberAggregate,
   findHostedMemberByStripeCustomerId,
@@ -58,7 +54,6 @@ export async function activateHostedMemberFromConfirmedRevnetIssuance(input: {
   sourceType: string;
 }): Promise<HostedMemberActivationResult> {
   const activated = await tryActivateHostedMemberIfStillAllowed({
-    billingMode: HostedBillingMode.subscription,
     member: input.member,
     prisma: input.prisma,
     revnetIssuanceStatus: HostedRevnetIssuanceStatus.confirmed,
@@ -111,7 +106,6 @@ export function resolveHostedSubscriptionBillingStatus(input: {
 }
 
 export async function activateHostedMemberForPositiveSource(input: {
-  billingMode: HostedBillingMode;
   dispatchContext: HostedStripeDispatchContext;
   member: HostedMemberAggregate;
   prisma: HostedOnboardingPrismaClient;
@@ -119,7 +113,6 @@ export async function activateHostedMemberForPositiveSource(input: {
   sourceType: string;
 }): Promise<HostedMemberActivationResult> {
   const activated = await tryActivateHostedMemberIfStillAllowed({
-    billingMode: input.billingMode,
     member: input.member,
     prisma: input.prisma,
     skipIfBillingAlreadyActive: input.skipIfBillingAlreadyActive ?? false,
@@ -158,7 +151,6 @@ export async function activateHostedMemberForPositiveSource(input: {
 }
 
 async function tryActivateHostedMemberIfStillAllowed(input: {
-  billingMode: HostedBillingMode | null;
   member: HostedMemberAggregate;
   prisma: HostedOnboardingPrismaClient;
   revnetIssuanceStatus?: HostedRevnetIssuanceStatus | null;
@@ -183,9 +175,9 @@ async function tryActivateHostedMemberIfStillAllowed(input: {
 
     const entitlement = deriveHostedEntitlement({
       billingStatus: HostedBillingStatus.active,
-      memberStatus: currentMember.status,
       revnetIssuanceStatus: input.revnetIssuanceStatus,
       revnetRequired: input.revnetRequired,
+      suspendedAt: currentMember.suspendedAt,
     });
 
     if (!entitlement.activationReady) {
@@ -197,20 +189,7 @@ async function tryActivateHostedMemberIfStillAllowed(input: {
         id: currentMember.id,
       },
       data: {
-        billingMode: input.billingMode ?? currentMember.billingMode,
         billingStatus: HostedBillingStatus.active,
-        status: HostedMemberStatus.registered,
-      },
-    });
-
-    await tx.hostedInvite.updateMany({
-      where: {
-        memberId: currentMember.id,
-        paidAt: null,
-      },
-      data: {
-        paidAt: new Date(),
-        status: HostedInviteStatus.paid,
       },
     });
 
@@ -219,15 +198,14 @@ async function tryActivateHostedMemberIfStillAllowed(input: {
 }
 
 export async function updateHostedMemberStripeBillingIfFresh(input: {
-  billingMode: HostedBillingMode | null;
   billingStatus: HostedBillingStatus;
   dispatchContext: HostedStripeDispatchContext;
   member: HostedMemberAggregate;
-  memberStatusOverride?: HostedMemberStatus;
   prisma: HostedOnboardingPrismaClient;
   stripeCustomerId?: string | null;
   stripeLatestCheckoutSessionId?: string | null;
   stripeSubscriptionId?: string | null;
+  suspendedAtOverride?: Date | null;
 }): Promise<HostedMemberAggregate | null> {
   return withHostedOnboardingTransaction(input.prisma, async (tx) => {
     await lockHostedMemberRow(tx, input.member.id);
@@ -239,7 +217,6 @@ export async function updateHostedMemberStripeBillingIfFresh(input: {
     }
 
     const isFresh = await shouldApplyHostedStripeBillingUpdate({
-      billingMode: input.billingMode,
       billingStatus: input.billingStatus,
       currentMember,
       dispatchContext: input.dispatchContext,
@@ -250,19 +227,17 @@ export async function updateHostedMemberStripeBillingIfFresh(input: {
       return null;
     }
 
-    const entitlement = deriveHostedEntitlement({
-      billingStatus: input.billingStatus,
-      memberStatus: currentMember.status,
-    });
-
     await tx.hostedMember.update({
       where: {
         id: currentMember.id,
       },
       data: {
-        billingMode: input.billingMode,
         billingStatus: input.billingStatus,
-        status: input.memberStatusOverride ?? entitlement.memberStatus,
+        ...(input.suspendedAtOverride !== undefined
+          ? {
+              suspendedAt: input.suspendedAtOverride,
+            }
+          : {}),
       },
     });
 
@@ -291,7 +266,6 @@ async function findHostedMemberById(
 }
 
 async function shouldApplyHostedStripeBillingUpdate(input: {
-  billingMode: HostedBillingMode | null;
   billingStatus: HostedBillingStatus;
   currentMember: HostedMemberAggregate;
   dispatchContext: HostedStripeDispatchContext;
@@ -406,8 +380,7 @@ export async function suspendHostedMemberForBillingReversal(input: {
   reason: string;
   stripeCustomerId?: string | null;
 }): Promise<void> {
-  const updatedMember = await updateHostedMemberStripeBillingIfFresh({
-    billingMode: input.member.billingMode,
+  await updateHostedMemberStripeBillingIfFresh({
     billingStatus: HostedBillingStatus.unpaid,
     dispatchContext: {
       eventCreatedAt: input.dispatchContext.eventCreatedAt,
@@ -416,14 +389,10 @@ export async function suspendHostedMemberForBillingReversal(input: {
       sourceType: input.reason,
     },
     member: input.member,
-    memberStatusOverride: HostedMemberStatus.suspended,
     prisma: input.prisma,
     stripeCustomerId: input.stripeCustomerId,
+    suspendedAtOverride: input.dispatchContext.eventCreatedAt,
   });
-
-  if (!updatedMember) {
-    return;
-  }
 }
 
 export async function findMemberForStripeObject(input: {
@@ -502,17 +471,17 @@ export async function findMemberForStripeReversal(input: {
       OR: [
         ...(input.chargeId
           ? [
-            {
-              stripeChargeId: input.chargeId,
-            },
-          ]
+              {
+                stripeChargeId: input.chargeId,
+              },
+            ]
           : []),
         ...(input.paymentIntentId
           ? [
-            {
-              stripePaymentIntentId: input.paymentIntentId,
-            },
-          ]
+              {
+                stripePaymentIntentId: input.paymentIntentId,
+              },
+            ]
           : []),
       ],
     },
@@ -558,38 +527,21 @@ export async function resolveStripeCustomerContext(input: {
   };
 }
 
-export function requireHostedStripeEventPayload(payloadJson: Prisma.JsonValue): {
-  object: Record<string, unknown>;
-  type: string;
-} {
-  if (!payloadJson || typeof payloadJson !== "object" || Array.isArray(payloadJson)) {
-    throw hostedOnboardingError({
-      code: "STRIPE_EVENT_PAYLOAD_INVALID",
-      message: "Stored hosted Stripe event payload must be an object.",
-      httpStatus: 500,
-    });
+export function requireHostedStripeEventPayload(
+  payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
+): { object: Record<string, unknown>; type: string } {
+  if (payloadJson && typeof payloadJson === "object" && !Array.isArray(payloadJson)) {
+    const payload = payloadJson as Record<string, unknown>;
+    const object = payload.object;
+    const type = payload.type;
+
+    if (object && typeof object === "object" && !Array.isArray(object) && typeof type === "string") {
+      return {
+        object: object as Record<string, unknown>,
+        type,
+      };
+    }
   }
 
-  const payload = payloadJson as Record<string, unknown>;
-
-  if (!payload.object || typeof payload.object !== "object" || Array.isArray(payload.object)) {
-    throw hostedOnboardingError({
-      code: "STRIPE_EVENT_PAYLOAD_INVALID",
-      message: "Stored hosted Stripe event payload is missing its object snapshot.",
-      httpStatus: 500,
-    });
-  }
-
-  if (typeof payload.type !== "string") {
-    throw hostedOnboardingError({
-      code: "STRIPE_EVENT_PAYLOAD_INVALID",
-      message: "Stored hosted Stripe event payload is missing its type.",
-      httpStatus: 500,
-    });
-  }
-
-  return {
-    object: payload.object as Record<string, unknown>,
-    type: payload.type,
-  };
+  throw new TypeError("Hosted Stripe event payload is invalid.");
 }

@@ -1,8 +1,4 @@
-import {
-  HostedBillingStatus,
-  HostedInviteStatus,
-  HostedMemberStatus,
-} from "@prisma/client";
+import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -85,11 +81,8 @@ describe("getHostedInviteStatus", () => {
         prisma,
       }),
     ).resolves.toMatchObject({
-      stage: "authenticate",
+      stage: "verify",
       invite: {
-        phoneHint: "*** 4567",
-      },
-      member: {
         phoneHint: "*** 4567",
       },
     });
@@ -107,10 +100,7 @@ function createInvite(overrides: Record<string, unknown> = {}) {
     inviteCode: "invite-code",
     member,
     memberId: member.id,
-    openedAt: NOW,
-    paidAt: null,
     sentAt: NOW,
-    status: HostedInviteStatus.opened,
     updatedAt: NOW,
     ...overrides,
   };
@@ -135,7 +125,6 @@ function createIdentity(overrides: Record<string, unknown> = {}) {
 
 function createMember(overrides: Record<string, unknown> = {}) {
   return {
-    billingMode: null,
     billingStatus: HostedBillingStatus.not_started,
     createdAt: NOW,
     id: "member_123",
@@ -145,7 +134,7 @@ function createMember(overrides: Record<string, unknown> = {}) {
     phoneLookupKey: "hbidx:phone:v1:legacy",
     phoneNumberVerifiedAt: null,
     privyUserId: null,
-    status: HostedMemberStatus.invited,
+    suspendedAt: null,
     stripeCustomerId: null,
     stripeLatestBillingEventCreatedAt: null,
     stripeLatestBillingEventId: null,

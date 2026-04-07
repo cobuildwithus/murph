@@ -1,4 +1,4 @@
-import { HostedBillingStatus, HostedMemberStatus } from "@prisma/client";
+import { HostedBillingStatus } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -11,38 +11,38 @@ describe("hosted onboarding entitlement", () => {
   it("requires active billing plus a non-suspended member for active access", () => {
     expect(hasHostedMemberActiveAccess({
       billingStatus: HostedBillingStatus.active,
-      memberStatus: HostedMemberStatus.registered,
+      suspendedAt: null,
     })).toBe(true);
 
     expect(hasHostedMemberActiveAccess({
       billingStatus: HostedBillingStatus.past_due,
-      memberStatus: HostedMemberStatus.registered,
+      suspendedAt: null,
     })).toBe(false);
 
     expect(hasHostedMemberActiveAccess({
       billingStatus: HostedBillingStatus.active,
-      memberStatus: HostedMemberStatus.suspended,
+      suspendedAt: new Date("2026-04-06T10:00:00.000Z"),
     })).toBe(false);
   });
 
   it("keeps general access broader than active access without allowing suspended members", () => {
     expect(hasHostedMemberGeneralAccess({
       billingStatus: HostedBillingStatus.past_due,
-      memberStatus: HostedMemberStatus.registered,
+      suspendedAt: null,
     })).toBe(true);
 
     expect(hasHostedMemberGeneralAccess({
       billingStatus: HostedBillingStatus.active,
-      memberStatus: HostedMemberStatus.suspended,
+      suspendedAt: new Date("2026-04-06T10:00:00.000Z"),
     })).toBe(false);
   });
 
   it("derives activation readiness from active access plus revnet readiness", () => {
     expect(deriveHostedEntitlement({
       billingStatus: HostedBillingStatus.active,
-      memberStatus: HostedMemberStatus.registered,
       revnetRequired: true,
       revnetIssuanceStatus: null,
+      suspendedAt: null,
     })).toMatchObject({
       accessAllowed: true,
       activationReady: false,
@@ -50,9 +50,9 @@ describe("hosted onboarding entitlement", () => {
 
     expect(deriveHostedEntitlement({
       billingStatus: HostedBillingStatus.active,
-      memberStatus: HostedMemberStatus.registered,
       revnetRequired: false,
       revnetIssuanceStatus: null,
+      suspendedAt: null,
     })).toMatchObject({
       accessAllowed: true,
       activationReady: true,

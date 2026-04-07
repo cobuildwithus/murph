@@ -224,7 +224,7 @@ The onboarding lane is intentionally thin:
 
 - a Linq webhook can text back a hosted join link to a new phone number or a trigger phrase like "I want to get healthy"
 - the public landing page can start the same flow with Privy SMS verification
-- the invite page binds the verified phone number to a hosted member row in Postgres
+- the invite page binds the verified phone number to a hosted member row in Postgres, while the UI stage itself is derived from invite expiry, session match, billing entitlement, and suspension facts instead of persisted invite/member lifecycle enums
 - Privy handles phone OTP, the browser makes one explicit completion attempt after verifying phone and best-effort wallet provisioning, and the backend locally verifies the client's bearer access token plus identity token instead of minting a separate hosted session cookie; the wallet only becomes mandatory later if RevNet-backed billing is ever enabled again
 - checkout uses Stripe Checkout so Apple Pay can appear directly inside the hosted payment handoff when available in Safari, but the hosted app now reuses one open checkout attempt per member and sends Stripe idempotency keys for customer/session creation so retries do not mint parallel customers or subscriptions
 - Stripe webhook ingress now verifies and stores a durable Stripe fact quickly, then immediately reconciles that specific event inline so billing activation and `member.activated` dispatching are not gated on a scheduler; the hosted Stripe cron remains the recovery path that replays failed or deferred Stripe facts
@@ -236,7 +236,7 @@ The onboarding lane is intentionally thin:
 - hosted onboarding webhook receipts still keep receipt-local side-effect markers for retry-safe Linq invite replies, persist the planned response plus queued side effects before any external send, and use a reclaimable processing lease so a retried Linq or Telegram webhook can resume abandoned work instead of being dropped as a duplicate
 - the current hosted outward-effect lanes are now explicit: Cloudflare-bound execution uses `execution_outbox`, receipt-owned Linq or Telegram replies use the webhook receipt side-effect journal, and Stripe facts use inline webhook reconciliation plus cron recovery
 - Stripe customer/subscription/invoice entitlement writes now carry a latest-applied billing event marker so out-of-order webhook delivery cannot regress a later cancellation, pause, or unpaid state back to active
-- subscription cancellation, pause, unpaid, refund, and dispute paths revoke hosted access by suspending the member until manual recovery or a newer fresh Stripe success event restores entitlement
+- subscription cancellation, pause, unpaid, refund, and dispute paths revoke hosted access through billing or suspension state; refund and dispute suspensions stay blocked until an operator clears them explicitly
 
 Current hosted billing assumptions:
 

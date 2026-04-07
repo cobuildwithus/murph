@@ -1,5 +1,4 @@
 import {
-  HostedBillingMode,
   HostedBillingStatus,
   type Prisma,
 } from "@prisma/client";
@@ -15,6 +14,7 @@ import {
   coerceStripeSubscriptionId,
   mapStripeSubscriptionStatusToHostedBillingStatus,
 } from "./billing";
+import { isHostedAccessBlockedBillingStatus } from "./entitlement";
 import { normalizeNullableString } from "./shared";
 import {
   activateHostedMemberForPositiveSource,
@@ -25,7 +25,6 @@ import {
   type HostedStripeDispatchContext,
   updateHostedMemberStripeBillingIfFresh,
 } from "./stripe-billing-policy";
-import { isHostedAccessBlockedBillingStatus } from "./entitlement";
 
 type HostedOnboardingPrismaClient = Prisma.TransactionClient;
 
@@ -46,13 +45,8 @@ export async function applyStripeCheckoutCompleted(
     prisma,
     subscriptionId: coerceStripeSubscriptionId(session.subscription),
   });
-  const mode = session.mode === "subscription" ? HostedBillingMode.subscription : HostedBillingMode.payment;
-  const paymentSettled =
-    session.payment_status === "paid" || session.payment_status === "no_payment_required";
   const nextBillingStatus = resolveHostedCheckoutCompletedBillingStatus({
     currentBillingStatus: member?.billingStatus ?? null,
-    mode,
-    paymentSettled,
   });
 
   await completeHostedBillingAttemptBySessionId({
@@ -71,9 +65,7 @@ export async function applyStripeCheckoutCompleted(
     };
   }
 
-  const hadActiveBilling = member.billingStatus === HostedBillingStatus.active;
   const updatedMember = await updateHostedMemberStripeBillingIfFresh({
-    billingMode: mode,
     billingStatus: nextBillingStatus,
     dispatchContext,
     member,
@@ -90,23 +82,6 @@ export async function applyStripeCheckoutCompleted(
     };
   }
 
-  // Keep old payment-mode checkout sessions drainable until the persisted rows age out.
-  if (mode === HostedBillingMode.payment && paymentSettled) {
-    const activation = await activateHostedMemberForPositiveSource({
-      billingMode: mode,
-      dispatchContext,
-      member: updatedMember,
-      prisma,
-      skipIfBillingAlreadyActive: hadActiveBilling,
-      sourceType: "stripe.checkout.session.completed",
-    });
-
-    return {
-      activatedMemberId: activation.activated ? updatedMember.id : null,
-      hostedExecutionEventId: activation.hostedExecutionEventId,
-    };
-  }
-
   return {
     activatedMemberId: null,
     hostedExecutionEventId: null,
@@ -115,36 +90,13 @@ export async function applyStripeCheckoutCompleted(
 
 export async function applyStripeCheckoutExpired(
   session: Stripe.Checkout.Session,
-  dispatchContext: HostedStripeDispatchContext,
+  _dispatchContext: HostedStripeDispatchContext,
   prisma: HostedOnboardingPrismaClient,
 ): Promise<void> {
   await expireHostedBillingAttemptBySessionId({
     prisma,
     stripeCheckoutSessionId: session.id,
   });
-
-  const member = await findMemberForStripeObject({
-    clientReferenceId: normalizeNullableString(session.client_reference_id),
-    customerId: coerceStripeObjectId(session.customer),
-    memberId: normalizeNullableString(session.metadata?.memberId),
-    prisma,
-    subscriptionId: coerceStripeSubscriptionId(session.subscription),
-  });
-
-  if (
-    member &&
-    member.billingStatus === HostedBillingStatus.checkout_open &&
-    member.stripeLatestCheckoutSessionId === session.id
-  ) {
-    await updateHostedMemberStripeBillingIfFresh({
-      billingMode: member.billingMode,
-      billingStatus: HostedBillingStatus.not_started,
-      dispatchContext,
-      member,
-      prisma,
-      stripeLatestCheckoutSessionId: session.id,
-    });
-  }
 }
 
 export async function applyStripeSubscriptionUpdated(
@@ -168,8 +120,7 @@ export async function applyStripeSubscriptionUpdated(
     currentBillingStatus: member.billingStatus,
     nextBillingStatus: mapStripeSubscriptionStatusToHostedBillingStatus(subscription.status),
   });
-  const updatedMember = await updateHostedMemberStripeBillingIfFresh({
-    billingMode: HostedBillingMode.subscription,
+  await updateHostedMemberStripeBillingIfFresh({
     billingStatus: nextBillingStatus,
     dispatchContext,
     member,
@@ -177,10 +128,6 @@ export async function applyStripeSubscriptionUpdated(
     stripeCustomerId: coerceStripeObjectId(subscription.customer) ?? member.stripeCustomerId,
     stripeSubscriptionId: subscription.id,
   });
-
-  if (!updatedMember) {
-    return;
-  }
 }
 
 export async function applyStripeInvoicePaid(
@@ -197,15 +144,7 @@ export async function applyStripeInvoicePaid(
     subscriptionId,
   });
 
-  if (!member) {
-    return {
-      activatedMemberId: null,
-      createdOrUpdatedRevnetIssuance: false,
-      hostedExecutionEventId: null,
-    };
-  }
-
-  if (!subscriptionId) {
+  if (!member || !subscriptionId) {
     return {
       activatedMemberId: null,
       createdOrUpdatedRevnetIssuance: false,
@@ -216,7 +155,6 @@ export async function applyStripeInvoicePaid(
   const hadActiveBilling = member.billingStatus === HostedBillingStatus.active;
   const startingBillingStatus = member.billingStatus;
   const updatedMember = await updateHostedMemberStripeBillingIfFresh({
-    billingMode: HostedBillingMode.subscription,
     billingStatus: HostedBillingStatus.active,
     dispatchContext,
     member,
@@ -233,9 +171,7 @@ export async function applyStripeInvoicePaid(
     };
   }
 
-  if (
-    isHostedAccessBlockedBillingStatus(startingBillingStatus)
-  ) {
+  if (isHostedAccessBlockedBillingStatus(startingBillingStatus)) {
     return {
       activatedMemberId: null,
       createdOrUpdatedRevnetIssuance: false,
@@ -244,7 +180,6 @@ export async function applyStripeInvoicePaid(
   }
 
   const activation = await activateHostedMemberForPositiveSource({
-    billingMode: HostedBillingMode.subscription,
     dispatchContext,
     member: updatedMember,
     prisma,
@@ -278,7 +213,6 @@ export async function applyStripeInvoicePaymentFailed(
   }
 
   await updateHostedMemberStripeBillingIfFresh({
-    billingMode: HostedBillingMode.subscription,
     billingStatus: HostedBillingStatus.past_due,
     dispatchContext,
     member,
@@ -344,16 +278,8 @@ export async function applyStripeDisputeUpdated(
 
 function resolveHostedCheckoutCompletedBillingStatus(input: {
   currentBillingStatus: HostedBillingStatus | null;
-  mode: HostedBillingMode;
-  paymentSettled: boolean;
 }): HostedBillingStatus {
-  if (input.mode === HostedBillingMode.subscription) {
-    return input.currentBillingStatus === HostedBillingStatus.active
-      ? HostedBillingStatus.active
-      : HostedBillingStatus.incomplete;
-  }
-
-  return input.paymentSettled
+  return input.currentBillingStatus === HostedBillingStatus.active
     ? HostedBillingStatus.active
     : HostedBillingStatus.incomplete;
 }

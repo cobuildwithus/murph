@@ -1,7 +1,6 @@
 import { Prisma, type HostedMember } from "@prisma/client";
 import {
   HostedBillingStatus,
-  HostedMemberStatus,
 } from "@prisma/client";
 
 import {
@@ -63,7 +62,6 @@ export async function ensureHostedMemberForPhone(input: {
       const createdMember = await tx.hostedMember.create({
         data: {
           id: memberId,
-          status: HostedMemberStatus.invited,
           billingStatus: HostedBillingStatus.not_started,
         },
       });
@@ -213,7 +211,6 @@ export async function ensureHostedMemberForPrivyIdentity(input: {
       const createdMember = await tx.hostedMember.create({
         data: {
           id: memberId,
-          status: HostedMemberStatus.registered,
           billingStatus: HostedBillingStatus.not_started,
         },
       });
@@ -316,17 +313,6 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
     }
 
     try {
-      const updatedMember = await tx.hostedMember.update({
-        where: {
-          id: currentMember.id,
-        },
-        data: {
-          status:
-            currentMember.status === HostedMemberStatus.suspended
-              ? HostedMemberStatus.suspended
-              : HostedMemberStatus.registered,
-        },
-      });
       await upsertHostedMemberIdentity({
         ...buildHostedMemberPhoneIdentity(input.identity.phone.number),
         memberId: currentMember.id,
@@ -342,7 +328,7 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
           wallet: input.identity.wallet,
         }),
       });
-      return updatedMember;
+      return currentMember;
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         throw hostedOnboardingError({

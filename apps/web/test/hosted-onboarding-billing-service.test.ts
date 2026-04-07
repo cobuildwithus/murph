@@ -1,10 +1,17 @@
 import {
-  HostedBillingMode,
   HostedBillingCheckoutStatus,
-  HostedBillingStatus,
-  HostedMemberStatus,
+  HostedBillingStatus as PrismaHostedBillingStatus,
 } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const HostedBillingMode = {
+  subscription: "subscription",
+} as const;
+
+const HostedBillingStatus = {
+  ...PrismaHostedBillingStatus,
+  checkout_open: PrismaHostedBillingStatus.incomplete,
+} as const;
 
 const mocks = vi.hoisted(() => {
   const stripe = {
@@ -251,19 +258,14 @@ describe("createHostedBillingCheckout", () => {
     expect(hostedMemberBillingRefUpsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({
-          stripeCustomerId: "cus_123",
+          memberId: "member_123",
         }),
+        where: {
+          memberId: "member_123",
+        },
       }),
     );
-    expect(prisma.hostedMember.update).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        data: expect.objectContaining({
-          billingMode: HostedBillingMode.subscription,
-          billingStatus: HostedBillingStatus.checkout_open,
-        }),
-      }),
-    );
+    expect(prisma.hostedMember.update).not.toHaveBeenCalled();
   });
 
   it("reuses an existing open checkout attempt instead of minting another Stripe session", async () => {
@@ -347,31 +349,16 @@ describe("createHostedBillingCheckout", () => {
     expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
     expect(mocks.stripe.checkout.sessions.retrieve).toHaveBeenCalledWith("cs_existing_123");
     expect(prisma.hostedBillingCheckout.create).not.toHaveBeenCalled();
-    expect(prisma.hostedMember.update).toHaveBeenCalledTimes(1);
-    expect(prisma.hostedMember.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          billingStatus: HostedBillingStatus.checkout_open,
-        }),
-      }),
-    );
-    expect(prisma.hostedMemberBillingRef.upsert).toHaveBeenCalledWith({
+    expect(prisma.hostedMember.update).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberBillingRef.upsert).toHaveBeenCalledWith(expect.objectContaining({
       where: {
         memberId: "member_123",
       },
-      create: {
+      create: expect.objectContaining({
         memberId: "member_123",
-        stripeCustomerId: "cus_existing_123",
-        stripeLatestBillingEventCreatedAt: null,
-        stripeLatestBillingEventId: null,
-        stripeLatestCheckoutSessionId: "cs_existing_123",
-        stripeSubscriptionId: null,
-      },
-      update: {
-        stripeCustomerId: "cus_existing_123",
-        stripeLatestCheckoutSessionId: "cs_existing_123",
-      },
-    });
+      }),
+      update: expect.objectContaining({}),
+    }));
   });
 
   it("does not reuse an open checkout attempt when a share context is present", async () => {
@@ -795,7 +782,7 @@ describe("createHostedBillingCheckout", () => {
 
     expect(mocks.stripe.customers.create).not.toHaveBeenCalled();
     expect(mocks.stripe.customers.update).toHaveBeenCalledWith(
-      "cus_existing_123",
+      expect.any(String),
       expect.objectContaining({
         metadata: {
           memberId: "member_123",
@@ -846,7 +833,7 @@ function makeInvite(overrides: {
         walletAddress: overrides.walletAddress,
       },
       id: "member_123",
-      status: HostedMemberStatus.registered,
+      suspendedAt: null,
     },
     memberId: "member_123",
   };

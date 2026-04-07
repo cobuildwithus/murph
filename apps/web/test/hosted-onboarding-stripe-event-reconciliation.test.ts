@@ -1,9 +1,6 @@
 import {
   HostedBillingCheckoutStatus,
-  HostedBillingMode,
-  HostedBillingStatus,
-  HostedInviteStatus,
-  HostedMemberStatus,
+  HostedBillingStatus as PrismaHostedBillingStatus,
   HostedRevnetIssuanceStatus,
   HostedStripeEventStatus,
   Prisma,
@@ -66,6 +63,35 @@ import {
   reconcileSubmittedHostedRevnetIssuances,
 } from "@/src/lib/hosted-onboarding/stripe-event-reconciliation";
 import { drainHostedRevnetIssuanceSubmissionQueue } from "@/src/lib/hosted-onboarding/stripe-revnet-issuance";
+
+const HostedBillingMode = {
+  payment: "payment",
+  subscription: "subscription",
+} as const;
+
+type HostedBillingMode = (typeof HostedBillingMode)[keyof typeof HostedBillingMode];
+
+const HostedBillingStatus = {
+  ...PrismaHostedBillingStatus,
+  checkout_open: PrismaHostedBillingStatus.incomplete,
+} as const;
+
+type HostedBillingStatus = (typeof HostedBillingStatus)[keyof typeof HostedBillingStatus];
+
+const HostedInviteStatus = {
+  paid: "paid",
+  pending: "pending",
+} as const;
+
+type HostedInviteStatus = (typeof HostedInviteStatus)[keyof typeof HostedInviteStatus];
+
+const HostedMemberStatus = {
+  invited: "invited",
+  registered: "registered",
+  suspended: "suspended",
+} as const;
+
+type HostedMemberStatus = (typeof HostedMemberStatus)[keyof typeof HostedMemberStatus];
 
 type HostedStripeEventQueuePrisma = Parameters<typeof reconcileDueHostedStripeEvents>[0]["prisma"];
 
@@ -2209,13 +2235,18 @@ function makeInvite(overrides: Partial<MutableInvite> = {}): MutableInvite {
 }
 
 function makeMember(overrides: Partial<MutableMember> = {}): MutableMember {
+  const status = overrides.status ?? HostedMemberStatus.registered;
+
   return {
     billingMode: HostedBillingMode.subscription,
     billingStatus: HostedBillingStatus.not_started,
     id: "member_123",
     linqChatId: null,
     phoneLookupKey: "+15551234567",
-    status: HostedMemberStatus.registered,
+    status,
+    suspendedAt: status === HostedMemberStatus.suspended
+      ? new Date("2026-03-28T09:00:00.000Z")
+      : null,
     stripeCustomerId: "cus_123",
     stripeLatestBillingEventCreatedAt: null,
     stripeLatestBillingEventId: null,
@@ -2938,6 +2969,7 @@ type MutableMember = {
   linqChatId: string | null;
   phoneLookupKey: string;
   status: HostedMemberStatus;
+  suspendedAt: Date | null;
   stripeCustomerId: string | null;
   stripeLatestBillingEventCreatedAt: Date | null;
   stripeLatestBillingEventId: string | null;

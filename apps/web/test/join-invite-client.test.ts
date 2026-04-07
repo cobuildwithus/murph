@@ -98,7 +98,7 @@ test("share status only resolves to completed after the async import is consumed
 test("resolveInviteStatusAfterPrivyCompletion marks the invite session authenticated and matched", () => {
   const nextStatus = resolveInviteStatusAfterPrivyCompletion(
     createStatus({
-      stage: "register",
+      stage: "verify",
     }),
     createCompletionPayload("checkout"),
   );
@@ -127,18 +127,13 @@ function createStatus(
       code: "invite-code",
       expiresAt: "2026-03-27T12:00:00.000Z",
       phoneHint: "+1 415 555 2671",
-      status: "opened",
-    },
-    member: {
-      phoneHint: "+1 415 555 2671",
-      status: "registered",
     },
     session: {
       authenticated: false,
       expiresAt: null,
       matchesInvite: false,
     },
-    stage: "register",
+    stage: "verify",
     ...overrides,
   };
 }
