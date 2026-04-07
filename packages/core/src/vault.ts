@@ -305,11 +305,19 @@ export async function repairVault({ vaultRoot }: LoadVaultInput = {}): Promise<R
         );
 
         if (materialized.updated) {
-          repairSummaries.push(materialized.rebuildAudit.summary);
-          repairFiles.push(
-            ...materialized.rebuildAudit.changes.map((change) => change.path),
+          const rebuildAudit = materialized.rebuildAudit;
+          const rebuildChanges = rebuildAudit.changes ?? [];
+          const rebuildTargetIds = rebuildAudit.targetIds ?? [];
+
+          repairSummaries.push(
+            rebuildAudit.summary ?? "Rebuilt current profile from snapshot.",
           );
-          repairTargetIds.push(...materialized.rebuildAudit.targetIds);
+          if (rebuildChanges.length > 0) {
+            repairFiles.push(...rebuildChanges.map((change) => change.path));
+          }
+          if (rebuildTargetIds.length > 0) {
+            repairTargetIds.push(...rebuildTargetIds);
+          }
         }
       }
 

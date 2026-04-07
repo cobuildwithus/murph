@@ -72,7 +72,6 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       try {
         await provider.revokeAccess(composeHostedRuntimeDeviceSyncAccount({
           connection: existing,
-          externalAccountId: runtimeConnection.connection.externalAccountId,
           tokenBundle: runtimeConnection.tokenBundle,
         }));
       } catch (error) {

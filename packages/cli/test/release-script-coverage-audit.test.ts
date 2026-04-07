@@ -296,7 +296,12 @@ describe('monorepo release flow coverage audit', () => {
     ])
 
     expect(summary.packages).toContainEqual(expect.objectContaining({
-      bundledWorkspaceDependencies: ['@murphai/runtime-state'],
+      bundledWorkspaceDependencies: [
+        '@murphai/core',
+        '@murphai/device-syncd',
+        '@murphai/importers',
+        '@murphai/runtime-state',
+      ],
       name: '@murphai/hosted-execution',
     }))
     expect(summary.packages).toContainEqual(expect.objectContaining({

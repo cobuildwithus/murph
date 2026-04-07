@@ -14,6 +14,12 @@ interface StrengthExerciseSummary {
   loadDescription?: string
 }
 
+function hasStrengthExerciseLoad(
+  exercise: ActivityStrengthExercise,
+): exercise is ActivityStrengthExercise & { load: number; loadUnit: 'lb' | 'kg' } {
+  return 'load' in exercise && 'loadUnit' in exercise
+}
+
 function formatActivityLabel(activityType: string): string {
   const knownLabels: Record<string, string> = {
     running: 'Run',
@@ -101,7 +107,7 @@ function summarizeTemplateSet(
 function modeFromStrengthExercise(
   exercise: ActivityStrengthExercise,
 ): WorkoutSession['exercises'][number]['mode'] {
-  return typeof exercise.load === 'number' ? 'weight_reps' : 'bodyweight'
+  return hasStrengthExerciseLoad(exercise) ? 'weight_reps' : 'bodyweight'
 }
 
 function buildWorkoutSetsFromStrengthExercise(
@@ -110,8 +116,8 @@ function buildWorkoutSetsFromStrengthExercise(
   return Array.from({ length: exercise.setCount }, (_, index) => ({
     order: index + 1,
     reps: exercise.repsPerSet,
-    ...(typeof exercise.load === 'number' ? { weight: exercise.load } : {}),
-    ...(exercise.loadUnit ? { weightUnit: exercise.loadUnit } : {}),
+    ...(hasStrengthExerciseLoad(exercise) ? { weight: exercise.load } : {}),
+    ...(hasStrengthExerciseLoad(exercise) ? { weightUnit: exercise.loadUnit } : {}),
   }))
 }
 
@@ -121,8 +127,8 @@ function buildWorkoutTemplateSetFromStrengthExercise(
   return Array.from({ length: exercise.setCount }, (_, index) => ({
     order: index + 1,
     targetReps: exercise.repsPerSet,
-    ...(typeof exercise.load === 'number' ? { targetWeight: exercise.load } : {}),
-    ...(exercise.loadUnit ? { targetWeightUnit: exercise.loadUnit } : {}),
+    ...(hasStrengthExerciseLoad(exercise) ? { targetWeight: exercise.load } : {}),
+    ...(hasStrengthExerciseLoad(exercise) ? { targetWeightUnit: exercise.loadUnit } : {}),
   }))
 }
 

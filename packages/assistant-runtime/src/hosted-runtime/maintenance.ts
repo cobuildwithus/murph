@@ -31,15 +31,12 @@ import { readHostedAssistantRuntimeState } from "./context.ts";
 import type {
   HostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution";
-import type {
-  HostedExecutionWebControlPlaneEnvironment,
-} from "@murphai/hosted-execution/env";
 import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
-import {
-  readHostedExecutionWebControlPlaneEnvironment,
-} from "@murphai/hosted-execution/env";
+import type {
+  HostedRuntimeDeviceSyncPort,
+} from "./platform.ts";
 
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
 const HOSTED_MAX_PARSER_JOBS = 50;
@@ -87,18 +84,15 @@ function reportHostedAssistantAutomationSkipped(
 
 export async function runHostedMaintenanceLoop(input: {
   artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
+  deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   dispatch: HostedExecutionDispatchRequest;
   executionContext: AssistantExecutionContext;
-  internalWorkerFetch?: typeof fetch;
   requestId: string;
   skipAssistantAutomation?: boolean;
   timeoutMs: number | null;
   runtimeEnv: Readonly<Record<string, string>>;
-  webControlPlane?: HostedExecutionWebControlPlaneEnvironment;
   vaultRoot: string;
 }): Promise<HostedMaintenanceMetrics> {
-  const webControlPlane = input.webControlPlane
-    ?? readHostedExecutionWebControlPlaneEnvironment(input.runtimeEnv);
   const parserResult = await drainHostedParserQueue({
     artifactMaterializer: input.artifactMaterializer ?? null,
     vaultRoot: input.vaultRoot,
@@ -130,8 +124,7 @@ export async function runHostedMaintenanceLoop(input: {
     input.dispatch,
     input.vaultRoot,
     input.runtimeEnv,
-    webControlPlane,
-    input.internalWorkerFetch,
+    input.deviceSyncPort,
     input.timeoutMs,
   );
 
@@ -248,8 +241,7 @@ export async function runHostedDeviceSyncPass(
   dispatch: HostedExecutionDispatchRequest,
   vaultRoot: string,
   env: Readonly<Record<string, string>>,
-  webControlPlane: HostedExecutionWebControlPlaneEnvironment,
-  fetchImpl: typeof fetch | undefined,
+  deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined,
   timeoutMs: number | null,
 ): Promise<{ nextWakeAt: string | null; processedJobs: number; skipped: boolean }> {
   const service = createHostedDeviceSyncRuntime({
@@ -279,12 +271,11 @@ export async function runHostedDeviceSyncPass(
     if (secret) {
       try {
         syncState = await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort,
           dispatch,
-          fetchImpl,
           secret,
           service,
           timeoutMs,
-          webControlPlane,
         });
         controlPlaneSynced = true;
       } catch (error) {
@@ -302,13 +293,12 @@ export async function runHostedDeviceSyncPass(
     if (secret && controlPlaneSynced) {
       try {
         await reconcileHostedDeviceSyncControlPlaneState({
+          deviceSyncPort,
           dispatch,
-          fetchImpl,
           secret,
           service,
           state: syncState,
           timeoutMs,
-          webControlPlane,
         });
       } catch (error) {
         if (failHardOnControlPlaneError) {

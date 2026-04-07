@@ -279,7 +279,6 @@ export class HostedDeviceSyncAgentSessionService {
         tx,
         account: composeHostedRuntimeDeviceSyncAccount({
           connection: currentConnection,
-          externalAccountId: currentExternalAccountId,
           tokenBundle: currentTokenBundle,
         }),
         currentTokenBundle,

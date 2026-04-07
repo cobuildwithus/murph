@@ -279,6 +279,16 @@ test("share packs reuse bank payload projections for protocol, recipe, and food 
     ],
     relatedGoalIds: ["goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
     relatedConditionIds: ["cond_01JNW7YJ7MNE7M9Q2QWQK4Z3F9"],
+    links: [
+      {
+        type: "supports_goal",
+        targetId: "goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
+      },
+      {
+        type: "addresses_condition",
+        targetId: "cond_01JNW7YJ7MNE7M9Q2QWQK4Z3F9",
+      },
+    ],
     group: "supplement/omega",
   });
   assert.deepEqual(exportedRecipe?.payload, {
@@ -298,6 +308,16 @@ test("share packs reuse bank payload projections for protocol, recipe, and food 
     steps: ["Roast the broccoli.", "Add the salmon and finish roasting."],
     relatedGoalIds: ["goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
     relatedConditionIds: ["cond_01JNW7YJ7MNE7M9Q2QWQK4Z3F9"],
+    links: [
+      {
+        type: "supports_goal",
+        targetId: "goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
+      },
+      {
+        type: "addresses_condition",
+        targetId: "cond_01JNW7YJ7MNE7M9Q2QWQK4Z3F9",
+      },
+    ],
   });
   assert.deepEqual(exportedFood?.payload, {
     slug: "usual-salmon-bowl",
@@ -313,6 +333,12 @@ test("share packs reuse bank payload projections for protocol, recipe, and food 
     ingredients: ["salmon", "rice", "broccoli"],
     tags: ["favorite", "lunch"],
     note: "Usually add lemon.",
+    links: [
+      {
+        type: "related_protocol",
+        targetId: protocol.record.entity.protocolId,
+      },
+    ],
     autoLogDaily: {
       time: "12:30",
     },

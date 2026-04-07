@@ -548,7 +548,6 @@ export class DeviceSyncService {
     const {
       accessTokenEncrypted: _accessTokenEncrypted,
       disconnectGeneration: _disconnectGeneration,
-      externalAccountId: _externalAccountId,
       hostedObservedTokenVersion: _hostedObservedTokenVersion,
       hostedObservedUpdatedAt: _hostedObservedUpdatedAt,
       refreshTokenEncrypted: _refreshTokenEncrypted,
@@ -560,7 +559,6 @@ export class DeviceSyncService {
   private toDecryptedAccount(account: StoredDeviceSyncAccount): DeviceSyncAccount {
     return {
       disconnectGeneration: account.disconnectGeneration,
-      externalAccountId: account.externalAccountId,
       ...this.toInternalAccountRecord(account),
       accessToken: account.accessTokenEncrypted ? this.codec.decrypt(account.accessTokenEncrypted) : "",
       refreshToken: account.refreshTokenEncrypted ? this.codec.decrypt(account.refreshTokenEncrypted) : null,
