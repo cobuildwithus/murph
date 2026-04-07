@@ -1,7 +1,6 @@
 import { spawn } from 'node:child_process'
 import { constants } from 'node:fs'
 import { access, mkdir, open, rm, writeFile } from 'node:fs/promises'
-import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { prepareAssistantDirectCliEnv } from '../assistant-cli-access.js'
@@ -25,21 +24,6 @@ interface AssistantCliLauncher {
   argvPrefix: string[]
   command: string
 }
-
-const assistantCliRequire = createRequire(import.meta.url)
-const workspaceCliBinPath = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '../../../cli/src/bin.ts',
-)
-const workspaceBuiltCliBinPath = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '../../../cli/dist/bin.js',
-)
-const workspaceTsxBinPath = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '../../../../node_modules/.bin',
-  process.platform === 'win32' ? 'tsx.cmd' : 'tsx',
-)
 
 export async function readAssistantCliLlmsManifest(input: {
   cliEnv?: NodeJS.ProcessEnv
@@ -300,6 +284,9 @@ async function resolveAssistantCliLauncher(
   env: NodeJS.ProcessEnv,
 ): Promise<AssistantCliLauncher> {
   const preparedEnv = prepareAssistantDirectCliEnv(env)
+  const workspaceCliBinPath = resolveWorkspaceCliBinPath()
+  const workspaceBuiltCliBinPath = resolveWorkspaceBuiltCliBinPath()
+  const workspaceTsxBinPath = resolveWorkspaceTsxBinPath()
   const vaultCliBinary = await resolveExecutableOnPath(
     'vault-cli',
     preparedEnv,
@@ -311,22 +298,22 @@ async function resolveAssistantCliLauncher(
     }
   }
 
-  if (await pathExists(workspaceBuiltCliBinPath)) {
+  if (workspaceBuiltCliBinPath && await pathExists(workspaceBuiltCliBinPath)) {
     return {
       argvPrefix: [workspaceBuiltCliBinPath],
       command: process.execPath,
     }
   }
 
-  const workspaceTsxCliPath = resolveWorkspaceTsxCliPath()
-  if (workspaceTsxCliPath !== null) {
+  const workspaceTsxCliPath = await resolveWorkspaceTsxCliPath()
+  if (workspaceTsxCliPath !== null && workspaceCliBinPath !== null) {
     return {
       argvPrefix: [workspaceTsxCliPath, workspaceCliBinPath],
       command: process.execPath,
     }
   }
 
-  if (await isExecutable(workspaceTsxBinPath)) {
+  if (workspaceTsxBinPath && workspaceCliBinPath && await isExecutable(workspaceTsxBinPath)) {
     return {
       argvPrefix: [workspaceCliBinPath],
       command: workspaceTsxBinPath,
@@ -337,7 +324,7 @@ async function resolveAssistantCliLauncher(
     'pnpm',
     preparedEnv,
   )
-  if (pnpmBinary) {
+  if (pnpmBinary && workspaceCliBinPath !== null) {
     return {
       argvPrefix: ['exec', 'tsx', workspaceCliBinPath],
       command: pnpmBinary,
@@ -348,7 +335,7 @@ async function resolveAssistantCliLauncher(
     'npx',
     preparedEnv,
   )
-  if (npxBinary) {
+  if (npxBinary && workspaceCliBinPath !== null) {
     return {
       argvPrefix: ['--yes', 'tsx', workspaceCliBinPath],
       command: npxBinary,
@@ -359,6 +346,49 @@ async function resolveAssistantCliLauncher(
     'ASSISTANT_CLI_COMMAND_FAILED',
     'Could not resolve `vault-cli` on PATH and no workspace tsx fallback was available.',
   )
+}
+
+function resolveWorkspaceCliBinPath(): string | null {
+  const moduleDir = resolveExecutionAdaptersModuleDir()
+  if (!moduleDir) {
+    return null
+  }
+
+  return path.resolve(moduleDir, '../../../cli/src/bin.ts')
+}
+
+function resolveWorkspaceBuiltCliBinPath(): string | null {
+  const moduleDir = resolveExecutionAdaptersModuleDir()
+  if (!moduleDir) {
+    return null
+  }
+
+  return path.resolve(moduleDir, '../../../cli/dist/bin.js')
+}
+
+function resolveWorkspaceTsxBinPath(): string | null {
+  const moduleDir = resolveExecutionAdaptersModuleDir()
+  if (!moduleDir) {
+    return null
+  }
+
+  return path.resolve(
+    moduleDir,
+    '../../../../node_modules/.bin',
+    process.platform === 'win32' ? 'tsx.cmd' : 'tsx',
+  )
+}
+
+function resolveExecutionAdaptersModuleDir(): string | null {
+  if (typeof import.meta.url !== 'string' || import.meta.url.length === 0) {
+    return null
+  }
+
+  try {
+    return path.dirname(fileURLToPath(import.meta.url))
+  } catch {
+    return null
+  }
 }
 
 async function resolveExecutableOnPath(
@@ -408,8 +438,14 @@ async function isExecutable(candidatePath: string): Promise<boolean> {
   }
 }
 
-function resolveWorkspaceTsxCliPath(): string | null {
+async function resolveWorkspaceTsxCliPath(): Promise<string | null> {
+  if (typeof import.meta.url !== 'string' || import.meta.url.length === 0) {
+    return null
+  }
+
   try {
+    const { createRequire } = await import('node:module')
+    const assistantCliRequire = createRequire(import.meta.url)
     return assistantCliRequire.resolve('tsx/cli')
   } catch {
     return null
