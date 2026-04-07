@@ -425,6 +425,7 @@ const checkedHealthEntityDefinitions = [
             ingredients: projectSupplementIngredients(attributes.ingredients),
             relatedGoalIds: helpers.firstStringArray(attributes, ["relatedGoalIds", "goalIds"]),
             relatedConditionIds: helpers.firstStringArray(attributes, ["relatedConditionIds", "conditionIds"]),
+            relatedProtocolIds: helpers.firstStringArray(attributes, ["relatedProtocolIds", "protocolIds"]),
             group:
               helpers.firstString(attributes, ["group"])
               ?? deriveProtocolGroupFromRelativePath(relativePath),

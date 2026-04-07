@@ -154,8 +154,8 @@ function canonicalizeGeneticRelations(input: {
   sourceFamilyMemberIds?: string[];
 }): Pick<GeneticVariantEntity, "sourceFamilyMemberIds" | "links"> {
   const links = normalizeGeneticLinks(
-    (input.links?.length ?? 0) > 0
-      ? [...(input.links ?? [])]
+    input.links !== undefined
+      ? [...input.links]
       : buildGeneticLinksFromFields({
           sourceFamilyMemberIds: input.sourceFamilyMemberIds,
         }),
@@ -243,6 +243,7 @@ function buildAttributes(input: {
       significance: input.significance,
       inheritance: input.inheritance,
       sourceFamilyMemberIds: relations.sourceFamilyMemberIds,
+      links: relations.links.length > 0 ? relations.links : undefined,
       note: input.note,
     }).filter(([, value]) => value !== undefined),
   ) as GeneticVariantFrontmatter;
@@ -275,7 +276,11 @@ export async function upsertGeneticVariant(
           24,
           GENETIC_FAMILY_ID_MAX_LENGTH,
         );
+  const usesRelationInputs =
+    input.links !== undefined ||
+    input.sourceFamilyMemberIds !== undefined;
   const relations = canonicalizeGeneticRelations({
+    links: input.links !== undefined ? input.links : usesRelationInputs ? undefined : existingEntity?.links,
     sourceFamilyMemberIds,
   });
   const note =

@@ -36,6 +36,7 @@ export interface UpsertGeneticVariantInput {
   significance?: VariantSignificance;
   inheritance?: VariantInheritance;
   sourceFamilyMemberIds?: string[];
+  links?: GeneticVariantLink[];
   note?: string;
 }
 

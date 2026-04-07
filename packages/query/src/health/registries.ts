@@ -449,6 +449,7 @@ export interface ProtocolQueryEntity extends RegistryQueryEntity {
   ingredients: SupplementIngredientQueryRecord[];
   relatedGoalIds: string[];
   relatedConditionIds: string[];
+  relatedProtocolIds: string[];
   group: string | null;
 }
 
@@ -549,7 +550,6 @@ export interface WorkoutFormatQueryEntity extends RegistryQueryEntity {
   activityType: string | null;
   durationMinutes: number | null;
   distanceKm: number | null;
-  strengthExercises: Record<string, unknown>[];
   template: Record<string, unknown> | null;
   tags: string[];
   note: string | null;

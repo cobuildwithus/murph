@@ -61,6 +61,28 @@
       },
       "uniqueItems": true
     },
+    "links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "related_condition"
+          },
+          "targetId": {
+            "type": "string",
+            "pattern": "^cond_[0-9A-HJKMNP-TV-Z]{26}$"
+          }
+        },
+        "required": [
+          "type",
+          "targetId"
+        ],
+        "additionalProperties": false
+      },
+      "uniqueItems": true
+    },
     "note": {
       "type": "string",
       "minLength": 1,

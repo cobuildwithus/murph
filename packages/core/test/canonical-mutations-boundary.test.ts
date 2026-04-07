@@ -198,7 +198,7 @@ test("high-level core provider, event, and summary mutation ports preserve canon
     occurredAt: "2026-03-12T08:15:00.000Z",
     title: "Morning note",
     note: "Provider follow-up scheduled.",
-    relatedIds: [createdProvider.providerId],
+    links: [{ type: "related_to", targetId: createdProvider.providerId }],
   } satisfies Record<string, unknown>;
   const firstEvent = await upsertEvent({
     vaultRoot,
@@ -245,6 +245,7 @@ test("high-level core provider, event, and summary mutation ports preserve canon
   assert.equal(providerDocument.attributes.slug, "labcorp-west");
   assert.equal(providerDocument.attributes.title, "Labcorp West");
   assert.ok(eventRecord);
+  assert.deepEqual(eventRecord.links, [{ type: "related_to", targetId: createdProvider.providerId }]);
   assert.deepEqual(eventRecord.relatedIds, [createdProvider.providerId]);
 });
 
@@ -389,6 +390,10 @@ test("high-level canonical mutation ports dedupe trimmed duplicate experiment an
 
   assert.ok(eventRecord);
   assert.deepEqual(eventRecord.tags, ["focus", "energy"]);
+  assert.deepEqual(eventRecord.links, [
+    { type: "related_to", targetId: created.experiment.id },
+    { type: "related_to", targetId: "goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
+  ]);
   assert.deepEqual(eventRecord.relatedIds, [
     created.experiment.id,
     "goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",

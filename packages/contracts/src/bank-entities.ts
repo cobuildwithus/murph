@@ -140,12 +140,12 @@ const checkedBankEntityDefinitions = [
       upsertPayloadSchema: recipeUpsertPayloadSchema as ZodTypeAny,
       relationKeys: [
         {
-          type: "related_goal",
+          type: "supports_goal",
           keys: ["relatedGoalIds"],
           cardinality: "many",
         },
         {
-          type: "related_condition",
+          type: "addresses_condition",
           keys: ["relatedConditionIds"],
           cardinality: "many",
         },

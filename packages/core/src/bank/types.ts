@@ -13,7 +13,6 @@ import {
   PROTOCOL_STATUSES as CONTRACT_PROTOCOL_STATUSES,
   RECIPE_STATUSES as CONTRACT_RECIPE_STATUSES,
   WORKOUT_FORMAT_STATUSES as CONTRACT_WORKOUT_FORMAT_STATUSES,
-  type ActivityStrengthExercise,
   type WorkoutTemplate,
   type MarkdownDocumentEnvelope as ContractMarkdownDocumentEnvelope,
   type StoredMarkdownDocument as ContractStoredMarkdownDocument,
@@ -97,8 +96,7 @@ export interface WorkoutFormatRecord {
   activityType: string;
   durationMinutes?: number;
   distanceKm?: number;
-  strengthExercises?: ActivityStrengthExercise[];
-  template?: WorkoutTemplate;
+  template: WorkoutTemplate;
   tags?: string[];
   note?: string;
   templateText?: string;
@@ -117,7 +115,6 @@ export interface UpsertWorkoutFormatInput {
   activityType?: string;
   durationMinutes?: number;
   distanceKm?: number;
-  strengthExercises?: ActivityStrengthExercise[];
   template?: WorkoutTemplate;
   tags?: string[];
   note?: string;
@@ -134,6 +131,13 @@ export interface ReadWorkoutFormatInput {
   vaultRoot: string;
   workoutFormatId?: string;
   slug?: string;
+}
+
+export type FoodLinkType = "related_protocol";
+
+export interface FoodLink {
+  type: FoodLinkType;
+  targetId: string;
 }
 
 export interface FoodRecord {
@@ -154,6 +158,7 @@ export interface FoodRecord {
   tags?: string[];
   note?: string;
   attachedProtocolIds?: string[];
+  links: FoodLink[];
   autoLogDaily?: FoodAutoLogDailyRule;
   relativePath: string;
   markdown: string;
@@ -177,6 +182,7 @@ export interface UpsertFoodInput {
   tags?: string[];
   note?: string;
   attachedProtocolIds?: string[];
+  links?: FoodLink[];
   autoLogDaily?: FoodAutoLogDailyRule | null;
 }
 
@@ -213,6 +219,13 @@ export interface SupplementIngredientRecord {
   note?: string;
 }
 
+export type RecipeLinkType = "supports_goal" | "addresses_condition";
+
+export interface RecipeLink {
+  type: RecipeLinkType;
+  targetId: string;
+}
+
 export interface RecipeRecord {
   schemaVersion: typeof RECIPE_SCHEMA_VERSION;
   docType: typeof RECIPE_DOC_TYPE;
@@ -233,6 +246,7 @@ export interface RecipeRecord {
   steps?: string[];
   relatedGoalIds?: string[];
   relatedConditionIds?: string[];
+  links: RecipeLink[];
   relativePath: string;
   markdown: string;
 }
@@ -257,6 +271,7 @@ export interface UpsertRecipeInput {
   steps?: string[];
   relatedGoalIds?: string[];
   relatedConditionIds?: string[];
+  links?: RecipeLink[];
 }
 
 export interface UpsertRecipeResult {
@@ -329,6 +344,7 @@ export interface UpsertGoalInput {
   parentGoalId?: string | null;
   relatedGoalIds?: string[];
   relatedExperimentIds?: string[];
+  links?: GoalLink[];
   domains?: string[];
 }
 
@@ -384,6 +400,7 @@ export interface UpsertConditionInput {
   bodySites?: string[];
   relatedGoalIds?: string[];
   relatedProtocolIds?: string[];
+  links?: ConditionLink[];
   note?: string;
 }
 
@@ -435,7 +452,15 @@ export interface UpsertAllergyInput {
   reaction?: string;
   recordedOn?: DateInput;
   relatedConditionIds?: string[];
+  links?: AllergyLink[];
   note?: string;
+}
+
+export type ProtocolLinkType = "supports_goal" | "addresses_condition" | "related_protocol";
+
+export interface ProtocolLink {
+  type: ProtocolLinkType;
+  targetId: string;
 }
 
 export interface UpsertAllergyResult {
@@ -470,6 +495,8 @@ export interface ProtocolItemEntity {
   ingredients?: SupplementIngredientRecord[];
   relatedGoalIds?: string[];
   relatedConditionIds?: string[];
+  relatedProtocolIds?: string[];
+  links: ProtocolLink[];
   group: string;
 }
 
@@ -495,6 +522,8 @@ export interface UpsertProtocolItemInput {
   ingredients?: SupplementIngredientRecord[];
   relatedGoalIds?: string[];
   relatedConditionIds?: string[];
+  relatedProtocolIds?: string[];
+  links?: ProtocolLink[];
   group?: string;
 }
 

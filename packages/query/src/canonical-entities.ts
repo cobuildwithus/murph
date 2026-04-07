@@ -1,6 +1,8 @@
 import {
+  CANONICAL_RELATION_LINK_TYPES,
   extractIsoDatePrefix,
   type BankEntityKind,
+  type CanonicalRelationLinkType,
 } from "@murphai/contracts";
 
 export type CanonicalRecordClass = "bank" | "ledger" | "sample" | "snapshot";
@@ -40,16 +42,9 @@ export interface CanonicalEntity {
   tags: string[];
 }
 
-export type CanonicalEntityLinkType =
-  | "parent_of"
-  | "related_to"
-  | "supports_goal"
-  | "addresses_condition"
-  | "source_assessment"
-  | "source_event"
-  | "source_family_member"
-  | "top_goal"
-  | "snapshot_of";
+export const canonicalEntityLinkTypes = CANONICAL_RELATION_LINK_TYPES;
+
+export type CanonicalEntityLinkType = CanonicalRelationLinkType;
 
 export interface CanonicalEntityLink {
   type: CanonicalEntityLinkType;
@@ -152,6 +147,12 @@ export function normalizeCanonicalLinks(
   }
 
   return normalized;
+}
+
+export function isCanonicalEntityLinkType(
+  value: string,
+): value is CanonicalEntityLinkType {
+  return (canonicalEntityLinkTypes as readonly string[]).includes(value);
 }
 
 export function relatedToLinks(

@@ -79,6 +79,44 @@ function readMergedRegistryStringArray(
   ];
 }
 
+function readExplicitRegistryLinks(
+  source: Record<string, unknown>,
+  allowedTypes: ReadonlySet<string>,
+): RegistryLink[] | null {
+  if (!Object.prototype.hasOwnProperty.call(source, "links")) {
+    return null;
+  }
+
+  const rawLinks = source.links;
+  if (!Array.isArray(rawLinks)) {
+    return [];
+  }
+
+  const links: RegistryLink[] = [];
+
+  for (const rawLink of rawLinks) {
+    if (!rawLink || typeof rawLink !== "object" || Array.isArray(rawLink)) {
+      continue;
+    }
+
+    const candidate = rawLink as Record<string, unknown>;
+    const type = normalizeRegistryString(candidate.type);
+    const targetId = normalizeRegistryString(candidate.targetId);
+
+    if (!type || !targetId || !allowedTypes.has(type)) {
+      continue;
+    }
+
+    links.push({
+      type,
+      targetId,
+      sourceKeys: ["links"],
+    });
+  }
+
+  return links;
+}
+
 export function extractRegistryRelationTargets(
   source: Record<string, unknown>,
   relation: RegistryRelationDefinition,
@@ -94,13 +132,31 @@ export function extractRegistryLinks(
   source: Record<string, unknown>,
   relations: readonly RegistryRelationDefinition[],
 ): RegistryLink[] {
-  return relations.flatMap((relation) =>
-    extractRegistryRelationTargets(source, relation).map((targetId) => ({
-      type: relation.type,
-      targetId,
-      sourceKeys: relation.keys,
-    })),
-  );
+  const allowedTypes = new Set(relations.map((relation) => relation.type));
+  const explicitLinks = readExplicitRegistryLinks(source, allowedTypes);
+  const links: RegistryLink[] =
+    explicitLinks ??
+    relations.flatMap((relation) =>
+      extractRegistryRelationTargets(source, relation).map((targetId) => ({
+        type: relation.type,
+        targetId,
+        sourceKeys: relation.keys,
+      })),
+    );
+  const deduped: RegistryLink[] = [];
+  const seen = new Set<string>();
+
+  for (const link of links) {
+    const dedupeKey = `${link.type}:${link.targetId}`;
+    if (seen.has(dedupeKey)) {
+      continue;
+    }
+
+    seen.add(dedupeKey);
+    deduped.push(link);
+  }
+
+  return deduped;
 }
 
 export function extractRegistryRelatedIds<TLink extends { targetId: string }>(

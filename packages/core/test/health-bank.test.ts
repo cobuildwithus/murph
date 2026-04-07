@@ -947,21 +947,34 @@ test("workout formats use first-class markdown registry reads for repeated sessi
     summary: "Default upper-body strength session I repeat most weeks.",
     activityType: "strength training",
     durationMinutes: 45,
-    strengthExercises: [
-      {
-        exercise: "pushups",
-        setCount: 4,
-        repsPerSet: 20,
-      },
-      {
-        exercise: "incline bench",
-        setCount: 4,
-        repsPerSet: 12,
-        load: 65,
-        loadUnit: "lb",
-        loadDescription: "45 lb bar plus 10 lb plates on both sides",
-      },
-    ],
+    template: {
+      routineNote: "Usual upper-body session.",
+      exercises: [
+        {
+          name: "pushups",
+          order: 1,
+          mode: "bodyweight",
+          plannedSets: [
+            { order: 1, targetReps: 20 },
+            { order: 2, targetReps: 20 },
+            { order: 3, targetReps: 20 },
+            { order: 4, targetReps: 20 },
+          ],
+        },
+        {
+          name: "incline bench",
+          order: 2,
+          mode: "weight_reps",
+          note: "45 lb bar plus 10 lb plates on both sides",
+          plannedSets: [
+            { order: 1, targetReps: 12, targetWeight: 65, targetWeightUnit: "lb" },
+            { order: 2, targetReps: 12, targetWeight: 65, targetWeightUnit: "lb" },
+            { order: 3, targetReps: 12, targetWeight: 65, targetWeightUnit: "lb" },
+            { order: 4, targetReps: 12, targetWeight: 65, targetWeightUnit: "lb" },
+          ],
+        },
+      ],
+    },
     tags: ["gym", "strength"],
     note: "Usual upper-body session.",
   });
@@ -972,21 +985,35 @@ test("workout formats use first-class markdown registry reads for repeated sessi
     summary: "Default upper-body lift with push and incline bench work.",
     activityType: "strength-training",
     durationMinutes: 50,
-    strengthExercises: [
-      {
-        exercise: "pushups",
-        setCount: 4,
-        repsPerSet: 20,
-      },
-      {
-        exercise: "incline bench",
-        setCount: 5,
-        repsPerSet: 10,
-        load: 65,
-        loadUnit: "lb",
-        loadDescription: "45 lb bar plus 10 lb plates on both sides",
-      },
-    ],
+    template: {
+      routineNote: "Usual upper-body session.",
+      exercises: [
+        {
+          name: "pushups",
+          order: 1,
+          mode: "bodyweight",
+          plannedSets: [
+            { order: 1, targetReps: 20 },
+            { order: 2, targetReps: 20 },
+            { order: 3, targetReps: 20 },
+            { order: 4, targetReps: 20 },
+          ],
+        },
+        {
+          name: "incline bench",
+          order: 2,
+          mode: "weight_reps",
+          note: "45 lb bar plus 10 lb plates on both sides",
+          plannedSets: [
+            { order: 1, targetReps: 10, targetWeight: 65, targetWeightUnit: "lb" },
+            { order: 2, targetReps: 10, targetWeight: 65, targetWeightUnit: "lb" },
+            { order: 3, targetReps: 10, targetWeight: 65, targetWeightUnit: "lb" },
+            { order: 4, targetReps: 10, targetWeight: 65, targetWeightUnit: "lb" },
+            { order: 5, targetReps: 10, targetWeight: 65, targetWeightUnit: "lb" },
+          ],
+        },
+      ],
+    },
     tags: ["gym", "strength"],
     note: "Usual upper-body session.",
   });
@@ -1028,7 +1055,7 @@ test("workout formats use first-class markdown registry reads for repeated sessi
   assert.equal(listedFormats[1]?.workoutFormatId, createdFormat.record.workoutFormatId);
   assert.match(workoutFormatMarkdown, /workoutFormatId:/u);
   assert.match(workoutFormatMarkdown, /activityType: strength-training/u);
-  assert.match(workoutFormatMarkdown, /## Strength Exercises/u);
+  assert.match(workoutFormatMarkdown, /## Template Exercises/u);
   assert.match(workoutFormatMarkdown, /Default duration/u);
 
   await assert.rejects(
@@ -1073,6 +1100,8 @@ title: Garage Day
 status: active
 activityType: strength-training
 durationMinutes: 40
+template:
+  exercises: []
 templateText: Garage day template.
 ---
 # Garage Day
@@ -1475,6 +1504,18 @@ test("condition and allergy reads reject non-canonical frontmatter after the har
 test("protocols support medication and supplement groups plus stop handling", async () => {
   const vaultRoot = await makeTempDirectory("murph-protocols");
   await initializeVault({ vaultRoot });
+  const goal = await upsertGoal({
+    vaultRoot,
+    title: "Improve recovery consistency",
+    window: {
+      startAt: "2026-02-01",
+    },
+  });
+  const condition = await upsertCondition({
+    vaultRoot,
+    title: "Delayed recovery",
+    clinicalStatus: "active",
+  });
 
   const medication = await upsertProtocolItem({
     vaultRoot,
@@ -1514,6 +1555,8 @@ test("protocols support medication and supplement groups plus stop handling", as
         unit: "mg",
       },
     ],
+    relatedGoalIds: [goal.record.entity.goalId],
+    relatedConditionIds: [condition.record.entity.conditionId],
   });
   const stopped = await stopProtocolItem({
     vaultRoot,
@@ -1559,6 +1602,12 @@ test("protocols support medication and supplement groups plus stop handling", as
   assert.equal(readSupplement.entity.brand, "Nordic Naturals");
   assert.equal(readSupplement.entity.manufacturer, "Nordic Naturals");
   assert.equal(readSupplement.entity.servingSize, "2 softgels");
+  assert.deepEqual(readSupplement.entity.relatedGoalIds, [goal.record.entity.goalId]);
+  assert.deepEqual(readSupplement.entity.relatedConditionIds, [condition.record.entity.conditionId]);
+  assert.deepEqual(readSupplement.entity.links, [
+    { type: "supports_goal", targetId: goal.record.entity.goalId },
+    { type: "addresses_condition", targetId: condition.record.entity.conditionId },
+  ]);
   assert.deepEqual(
     readSupplement.entity.ingredients?.map((ingredient) => ({
       compound: ingredient.compound,
@@ -1588,6 +1637,10 @@ test("protocols support medication and supplement groups plus stop handling", as
   assert.equal(patchedSupplement.record.entity.startedOn, "2026-02-15");
   assert.equal(patchedSupplement.record.entity.brand, "Nordic Naturals");
   assert.equal(patchedSupplement.record.entity.servingSize, "2 softgels");
+  assert.deepEqual(patchedSupplement.record.entity.links, [
+    { type: "supports_goal", targetId: goal.record.entity.goalId },
+    { type: "addresses_condition", targetId: condition.record.entity.conditionId },
+  ]);
   assert.match(stopped.record.document.relativePath, /^bank\/protocols\/medication\//);
   assert.match(readMedication.document.markdown, /Stopped on: 2026-03-20/);
   assert.match(readSupplement.document.markdown, /## Product/);

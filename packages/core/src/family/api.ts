@@ -154,8 +154,8 @@ function canonicalizeFamilyRelations(input: {
   relatedVariantIds?: string[];
 }): Pick<FamilyMemberEntity, "relatedVariantIds" | "links"> {
   const links = normalizeFamilyLinks(
-    (input.links?.length ?? 0) > 0
-      ? [...(input.links ?? [])]
+    input.links !== undefined
+      ? [...input.links]
       : buildFamilyLinksFromFields({
           relatedVariantIds: input.relatedVariantIds,
         }),
@@ -247,6 +247,7 @@ function buildAttributes(input: {
       deceased: input.deceased,
       note: input.note,
       relatedVariantIds: relations.relatedVariantIds,
+      links: relations.links.length > 0 ? relations.links : undefined,
     }).filter(([, value]) => value !== undefined),
   ) as FamilyMemberFrontmatter;
 }
@@ -294,7 +295,11 @@ export async function upsertFamilyMember(
           24,
           FAMILY_VARIANT_ID_MAX_LENGTH,
         );
+  const usesRelationInputs =
+    input.links !== undefined ||
+    input.relatedVariantIds !== undefined;
   const relations = canonicalizeFamilyRelations({
+    links: input.links !== undefined ? input.links : usesRelationInputs ? undefined : existingEntity?.links,
     relatedVariantIds,
   });
   return familyRegistryApi.upsertRecord({
