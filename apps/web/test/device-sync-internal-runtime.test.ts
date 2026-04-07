@@ -87,7 +87,6 @@ describe("device-sync hosted runtime helpers", () => {
       connection: {
         id: "dsc_123",
         provider: "oura",
-        externalAccountId: "oura_alice",
         displayName: "Oura",
         status: "active",
         scopes: ["heartrate"],
@@ -109,10 +108,12 @@ describe("device-sync hosted runtime helpers", () => {
         createdAt: "2026-03-26T12:00:00.000Z",
         updatedAt: "2026-03-26T12:00:00.000Z",
       },
+      externalAccountId: "oura_alice",
       tokenBundle,
     })).toEqual(expect.objectContaining({
       accessToken: "access-token",
       disconnectGeneration: 0,
+      externalAccountId: "oura_alice",
       metadata: {
         source: "oauth",
       },

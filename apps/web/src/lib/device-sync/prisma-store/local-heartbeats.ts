@@ -57,7 +57,13 @@ export class PrismaHostedLocalHeartbeatStore {
       });
     }
 
-    return this.connections.getRuntimeConnectionForUser(userId, connectionId);
+    const connection = await this.connections.getRuntimeConnectionForUser(userId, connectionId);
+
+    if (connection) {
+      await this.connections.syncDurableConnectionState(connection);
+    }
+
+    return connection;
   }
 }
 

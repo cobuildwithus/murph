@@ -22,9 +22,15 @@ export interface HostedStaticDeviceSyncConnectionRecord {
   id: string;
   userId: string;
   provider: string;
-  externalAccountId: string;
-  displayName: string | null;
+  status: DeviceSyncAccountStatus;
   connectedAt: string;
+  lastWebhookAt: string | null;
+  lastSyncStartedAt: string | null;
+  lastSyncCompletedAt: string | null;
+  lastSyncErrorAt: string | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  nextReconcileAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -34,6 +40,7 @@ interface HostedPublicDeviceSyncAccountFallback {
   connectedAt?: string | null;
   createdAt?: string | null;
   displayName?: string | null;
+  externalAccountId?: string | null;
   lastErrorCode?: string | null;
   lastErrorMessage?: string | null;
   lastSyncCompletedAt?: string | null;
@@ -79,12 +86,14 @@ export function requireHostedDeviceSyncRuntimeTokenBundle(input: {
 
 export function composeHostedRuntimeDeviceSyncAccount(input: {
   connection: PublicDeviceSyncAccount;
+  externalAccountId: string;
   tokenBundle: HostedExecutionDeviceSyncRuntimeTokenBundle;
 }): DeviceSyncAccount {
   return {
     accessToken: input.tokenBundle.accessToken,
     refreshToken: input.tokenBundle.refreshToken,
     disconnectGeneration: 0,
+    externalAccountId: input.externalAccountId,
     ...input.connection,
     accessTokenExpiresAt: input.tokenBundle.accessTokenExpiresAt,
     metadata: sanitizeStoredDeviceSyncMetadata(input.connection.metadata ?? {}),
@@ -105,8 +114,7 @@ export function buildHostedPublicDeviceSyncAccount(input: {
     return {
       id: input.record.id,
       provider: input.record.provider,
-      externalAccountId: input.record.externalAccountId,
-      displayName: runtimeConnection.connection.displayName ?? input.record.displayName,
+      displayName: runtimeConnection.connection.displayName ?? input.fallback?.displayName ?? null,
       status: runtimeConnection.connection.status,
       scopes: [...runtimeConnection.connection.scopes],
       accessTokenExpiresAt: runtimeConnection.connection.accessTokenExpiresAt ?? null,
@@ -129,20 +137,19 @@ export function buildHostedPublicDeviceSyncAccount(input: {
   return {
     id: input.record.id,
     provider: input.record.provider,
-    externalAccountId: input.record.externalAccountId,
-    displayName: fallback.displayName ?? input.record.displayName,
-    status: fallback.status ?? input.missingRuntimeStatus ?? DEFAULT_MISSING_RUNTIME_STATUS,
+    displayName: fallback.displayName ?? null,
+    status: fallback.status ?? input.record.status ?? input.missingRuntimeStatus ?? DEFAULT_MISSING_RUNTIME_STATUS,
     scopes: fallback.scopes ? [...fallback.scopes] : [],
     accessTokenExpiresAt: fallback.accessTokenExpiresAt ?? null,
     metadata: sanitizeStoredDeviceSyncMetadata(fallback.metadata ?? {}),
     connectedAt: fallback.connectedAt ?? input.record.connectedAt,
-    lastWebhookAt: fallback.lastWebhookAt ?? null,
-    lastSyncStartedAt: fallback.lastSyncStartedAt ?? null,
-    lastSyncCompletedAt: fallback.lastSyncCompletedAt ?? null,
-    lastSyncErrorAt: fallback.lastSyncErrorAt ?? null,
-    lastErrorCode: fallback.lastErrorCode ?? null,
-    lastErrorMessage: fallback.lastErrorMessage ?? null,
-    nextReconcileAt: fallback.nextReconcileAt ?? null,
+    lastWebhookAt: fallback.lastWebhookAt ?? input.record.lastWebhookAt,
+    lastSyncStartedAt: fallback.lastSyncStartedAt ?? input.record.lastSyncStartedAt,
+    lastSyncCompletedAt: fallback.lastSyncCompletedAt ?? input.record.lastSyncCompletedAt,
+    lastSyncErrorAt: fallback.lastSyncErrorAt ?? input.record.lastSyncErrorAt,
+    lastErrorCode: fallback.lastErrorCode ?? input.record.lastErrorCode,
+    lastErrorMessage: fallback.lastErrorMessage ?? input.record.lastErrorMessage,
+    nextReconcileAt: fallback.nextReconcileAt ?? input.record.nextReconcileAt,
     createdAt: fallback.createdAt ?? input.record.createdAt,
     updatedAt: fallback.updatedAt ?? input.record.updatedAt,
   } satisfies PublicDeviceSyncAccount;
@@ -150,6 +157,7 @@ export function buildHostedPublicDeviceSyncAccount(input: {
 
 export function buildHostedDeviceSyncRuntimeSeedFromPublicAccount(input: {
   account: PublicDeviceSyncAccount;
+  externalAccountId: string;
   localState?: Partial<HostedExecutionDeviceSyncRuntimeLocalStateSnapshot>;
   tokenBundle: HostedExecutionDeviceSyncRuntimeTokenBundle | null;
 }): HostedExecutionDeviceSyncRuntimeConnectionSeed {
@@ -159,7 +167,7 @@ export function buildHostedDeviceSyncRuntimeSeedFromPublicAccount(input: {
       connectedAt: input.account.connectedAt,
       createdAt: input.account.createdAt,
       displayName: input.account.displayName,
-      externalAccountId: input.account.externalAccountId,
+      externalAccountId: input.externalAccountId,
       id: input.account.id,
       metadata: sanitizeStoredDeviceSyncMetadata(input.account.metadata ?? {}),
       provider: input.account.provider,
@@ -187,7 +195,6 @@ function assertHostedRuntimeConnectionMatchesRecord(
   if (
     runtimeConnection.connection.id === record.id
     && runtimeConnection.connection.provider === record.provider
-    && runtimeConnection.connection.externalAccountId === record.externalAccountId
   ) {
     return;
   }

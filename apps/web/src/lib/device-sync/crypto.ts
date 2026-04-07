@@ -1,8 +1,9 @@
-import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes } from "node:crypto";
 
 import { normalizeNullableString } from "./shared";
 
 const ENCRYPTED_SECRET_PREFIX = "hbds";
+const BLIND_INDEX_PREFIX = "hbdi";
 const AES_256_GCM = "aes-256-gcm";
 const GCM_IV_BYTES = 12;
 const HOSTED_SECRET_SCOPE_SALT = Buffer.from("murph.hosted.device-sync.secret.v1", "utf8");
@@ -121,6 +122,28 @@ export function buildHostedConnectionTokenCipherOptions(input: {
     }),
     keyScope: input.purpose,
   } satisfies HostedSecretCipherOptions;
+}
+
+export function buildHostedProviderAccountBlindIndex(input: {
+  key: Buffer;
+  provider: string;
+  externalAccountId: string;
+}): string {
+  const normalizedProvider = normalizeNullableString(input.provider)?.toLowerCase();
+  const normalizedExternalAccountId = normalizeNullableString(input.externalAccountId);
+
+  if (!normalizedProvider || !normalizedExternalAccountId) {
+    throw new TypeError("Hosted provider account blind indexes require a provider and external account id.");
+  }
+
+  return `${BLIND_INDEX_PREFIX}_${createHmac(
+    "sha256",
+    deriveHostedSecretScopeKey(input.key, "device-sync-provider-account-blind-index"),
+  )
+    .update(normalizedProvider, "utf8")
+    .update(":", "utf8")
+    .update(normalizedExternalAccountId, "utf8")
+    .digest("base64url")}`;
 }
 
 export function createHostedSecretCodec(input: {

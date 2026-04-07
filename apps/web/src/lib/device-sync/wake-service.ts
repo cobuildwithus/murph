@@ -1,4 +1,3 @@
-import { Prisma } from "@prisma/client";
 import {
   deviceSyncError,
   isDeviceSyncError,
@@ -29,7 +28,7 @@ import {
   findHostedDeviceSyncRuntimeConnection,
 } from "./internal-runtime";
 import { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
-import { sha256Hex, toIsoTimestamp, toJsonRecord } from "./shared";
+import { normalizeNullableString, sha256Hex, toIsoTimestamp } from "./shared";
 
 export async function disconnectHostedDeviceSyncConnection(input: {
   connectionId: string;
@@ -73,6 +72,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       try {
         await provider.revokeAccess(composeHostedRuntimeDeviceSyncAccount({
           connection: existing,
+          externalAccountId: runtimeConnection.connection.externalAccountId,
           tokenBundle: runtimeConnection.tokenBundle,
         }));
       } catch (error) {
@@ -94,6 +94,17 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     lastWebhookAt: runtimeConnection?.localState.lastWebhookAt ?? existing.lastWebhookAt,
     nextReconcileAt: null,
   } as const;
+  const seedExternalAccountId = runtimeConnection?.connection.externalAccountId ?? null;
+
+  if (!seedExternalAccountId) {
+    throw deviceSyncError({
+      code: "RUNTIME_STATE_CONFLICT",
+      message: `Hosted device-sync runtime is missing provider identity for connection ${input.connectionId}.`,
+      retryable: true,
+      httpStatus: 409,
+    });
+  }
+
   const applyResponse = await controlClient.applyDeviceSyncRuntimeUpdates(input.userId, {
     occurredAt: now,
     updates: [
@@ -123,6 +134,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
             status: "disconnected",
             updatedAt: now,
           },
+          externalAccountId: seedExternalAccountId,
           localState: disconnectLocalState,
           tokenBundle: runtimeConnection?.tokenBundle ?? null,
         }),
@@ -152,6 +164,8 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     });
   }
 
+  await input.store.syncDurableConnectionState(connection);
+
   const hint = {
     reason: "user_disconnect",
     ...(warning ? { revokeWarning: warning } : {}),
@@ -170,7 +184,9 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       connectionId: input.connectionId,
       provider: existing.provider,
       kind: "disconnected",
-      payload: hint,
+      occurredAt: now,
+      reason: normalizeNullableString(hint.reason),
+      revokeWarning: warning ?? null,
       createdAt: now,
       tx,
     });
@@ -228,7 +244,8 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
       connectionId: input.account.id,
       provider: input.account.provider,
       kind: "connected",
-      payload: hint,
+      occurredAt: input.now,
+      nextReconcileAt: input.connection.nextReconcileAt ?? null,
       createdAt: input.now,
       tx,
     });
@@ -301,7 +318,10 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
       connectionId: input.account.id,
       provider: input.account.provider,
       kind: "webhook_hint",
-      payload: toJsonRecord(hint),
+      occurredAt: input.webhook.occurredAt ?? input.now,
+      traceId: input.webhook.traceId ?? null,
+      eventType: input.webhook.eventType,
+      resourceCategory: hint.resourceCategory ?? null,
       createdAt: input.now,
       tx,
     });
@@ -332,15 +352,20 @@ export async function dispatchHostedDeviceSyncWake(input: {
   });
 
   await prisma.$transaction(async (tx) => {
-    return tx.deviceSyncSignal.create({
-      data: {
-        connectionId: input.connectionId,
-        createdAt: new Date(input.occurredAt),
-        kind: mapHostedDeviceSyncSignalKind(input.source),
-        payloadJson: hint,
-        provider: input.provider,
-        userId: input.userId,
-      },
+    return store.createSignal({
+      userId: input.userId,
+      connectionId: input.connectionId,
+      provider: input.provider,
+      kind: mapHostedDeviceSyncSignalKind(input.source),
+      occurredAt: hint.occurredAt ?? null,
+      traceId: normalizeNullableString(hint.traceId),
+      eventType: normalizeNullableString(hint.eventType),
+      resourceCategory: normalizeNullableString(hint.resourceCategory),
+      reason: normalizeNullableString(hint.reason),
+      nextReconcileAt: hint.nextReconcileAt ?? null,
+      revokeWarning: hint.revokeWarning ?? null,
+      createdAt: input.occurredAt,
+      tx,
     });
   });
 
@@ -373,14 +398,12 @@ function buildHostedDeviceSyncSignalPayload(input: {
   hint?: HostedExecutionDeviceSyncWakeEvent["hint"] | null;
   occurredAt: string;
   traceId?: string | null;
-}): Prisma.InputJsonObject {
-  const hint = input.hint ? toJsonRecord(input.hint) : {};
-
+}): NonNullable<HostedExecutionDeviceSyncWakeEvent["hint"]> {
   return {
-    ...hint,
-    ...(hint.occurredAt === undefined ? { occurredAt: input.occurredAt } : {}),
-    ...(input.traceId && hint.traceId === undefined ? { traceId: input.traceId } : {}),
-  } satisfies Prisma.InputJsonObject;
+    ...(input.hint ?? {}),
+    ...(input.hint?.occurredAt === undefined ? { occurredAt: input.occurredAt } : {}),
+    ...(input.traceId && input.hint?.traceId === undefined ? { traceId: input.traceId } : {}),
+  };
 }
 
 function mapHostedDeviceSyncSignalKind(source: HostedDeviceSyncWakeSource): string {
@@ -404,7 +427,7 @@ function buildHostedWebhookHintSignal(input: {
   occurredAt?: string | null;
   payload?: Record<string, unknown>;
   provider: string;
-}): HostedExecutionDeviceSyncWakeEvent["hint"] {
+}): NonNullable<HostedExecutionDeviceSyncWakeEvent["hint"]> {
   const resourceCategory =
     typeof input.payload?.dataType === "string"
       ? input.payload.dataType

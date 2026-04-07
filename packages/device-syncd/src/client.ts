@@ -43,7 +43,6 @@ export interface DeviceSyncProviderDescriptor {
 export interface DeviceSyncAccountRecord {
   id: string;
   provider: string;
-  externalAccountId: string;
   displayName: string | null;
   status: DeviceSyncAccountStatus;
   scopes: string[];

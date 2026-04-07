@@ -58,6 +58,7 @@ export interface OAuthStateRecord {
 export type PublicDeviceSyncAccount = DeviceSyncAccountRecord;
 
 export interface StoredDeviceSyncAccount extends PublicDeviceSyncAccount {
+  externalAccountId: string;
   disconnectGeneration: number;
   accessTokenEncrypted: string;
   hostedObservedTokenVersion: number | null;
@@ -66,6 +67,7 @@ export interface StoredDeviceSyncAccount extends PublicDeviceSyncAccount {
 }
 
 export interface DeviceSyncAccount extends PublicDeviceSyncAccount {
+  externalAccountId: string;
   disconnectGeneration: number;
   accessToken: string;
   refreshToken: string | null;

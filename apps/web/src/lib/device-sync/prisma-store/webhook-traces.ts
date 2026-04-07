@@ -1,23 +1,27 @@
-import { Prisma, PrismaClient } from "@prisma/client";
+import { PrismaClient } from "@prisma/client";
 
 import type {
   ClaimDeviceSyncWebhookTraceInput,
   DeviceSyncWebhookTraceClaimResult,
 } from "@murphai/device-syncd/public-ingress";
 
+import { buildHostedProviderAccountBlindIndex } from "../crypto";
 import { isUniqueViolation } from "./prisma-errors";
 import type { HostedPrismaTransactionClient } from "./types";
 
 export class PrismaHostedWebhookTraceStore {
   readonly prisma: PrismaClient;
+  private readonly providerAccountBlindIndexKey: Buffer | null;
 
-  constructor(prisma: PrismaClient) {
-    this.prisma = prisma;
+  constructor(input: { prisma: PrismaClient; providerAccountBlindIndexKey?: Buffer | null }) {
+    this.prisma = input.prisma;
+    this.providerAccountBlindIndexKey = input.providerAccountBlindIndexKey ?? null;
   }
 
   async claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): Promise<DeviceSyncWebhookTraceClaimResult> {
     const claimedAt = new Date(input.receivedAt);
     const processingExpiresAt = new Date(input.processingExpiresAt);
+    const providerAccountBlindIndex = this.buildProviderAccountBlindIndex(input.provider, input.externalAccountId);
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
@@ -25,11 +29,10 @@ export class PrismaHostedWebhookTraceStore {
           data: {
             provider: input.provider,
             traceId: input.traceId,
-            externalAccountId: input.externalAccountId,
+            providerAccountBlindIndex,
             eventType: input.eventType,
             processingExpiresAt,
             receivedAt: claimedAt,
-            payloadJson: Prisma.DbNull,
             status: "processing",
           },
         });
@@ -82,9 +85,8 @@ export class PrismaHostedWebhookTraceStore {
           ],
         },
         data: {
-          externalAccountId: input.externalAccountId,
+          providerAccountBlindIndex,
           eventType: input.eventType,
-          payloadJson: Prisma.DbNull,
           processingExpiresAt,
           receivedAt: claimedAt,
           status: "processing",
@@ -123,6 +125,18 @@ export class PrismaHostedWebhookTraceStore {
         traceId,
         status: "processing",
       },
+    });
+  }
+
+  private buildProviderAccountBlindIndex(provider: string, externalAccountId: string): string {
+    if (!this.providerAccountBlindIndexKey) {
+      throw new TypeError("Hosted device-sync provider account blind-index key is required.");
+    }
+
+    return buildHostedProviderAccountBlindIndex({
+      key: this.providerAccountBlindIndexKey,
+      provider,
+      externalAccountId,
     });
   }
 }

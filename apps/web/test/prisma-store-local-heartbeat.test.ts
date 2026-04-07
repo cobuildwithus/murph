@@ -20,9 +20,16 @@ type StaticConnectionRecord = {
   id: string;
   userId: string;
   provider: string;
-  externalAccountId: string;
-  displayName: string | null;
+  providerAccountBlindIndex: string;
+  status: "active" | "disconnected" | "reauthorization_required";
   connectedAt: Date;
+  lastWebhookAt: Date | null;
+  lastSyncStartedAt: Date | null;
+  lastSyncCompletedAt: Date | null;
+  lastSyncErrorAt: Date | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  nextReconcileAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -64,12 +71,56 @@ function createHeartbeatStore(seed: Partial<RuntimeConnection["localState"]> = {
     id: "dsc_123",
     userId: "user-123",
     provider: "oura",
-    externalAccountId: "acct-123",
-    displayName: "Oura",
+    providerAccountBlindIndex: "hbdi_test",
+    status: "active",
     connectedAt: new Date("2026-03-25T00:00:00.000Z"),
+    lastWebhookAt: null,
+    lastSyncStartedAt: null,
+    lastSyncCompletedAt: null,
+    lastSyncErrorAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    nextReconcileAt: null,
     createdAt: new Date("2026-03-25T00:00:00.000Z"),
     updatedAt: new Date("2026-03-25T00:00:00.000Z"),
   };
+  const updateConnection = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+    ...staticRecord,
+    status: typeof data.status === "string" ? data.status : staticRecord.status,
+    connectedAt: data.connectedAt instanceof Date ? data.connectedAt : staticRecord.connectedAt,
+    lastWebhookAt: data.lastWebhookAt instanceof Date ? data.lastWebhookAt : data.lastWebhookAt === null ? null : staticRecord.lastWebhookAt,
+    lastSyncStartedAt:
+      data.lastSyncStartedAt instanceof Date
+        ? data.lastSyncStartedAt
+        : data.lastSyncStartedAt === null
+          ? null
+          : staticRecord.lastSyncStartedAt,
+    lastSyncCompletedAt:
+      data.lastSyncCompletedAt instanceof Date
+        ? data.lastSyncCompletedAt
+        : data.lastSyncCompletedAt === null
+          ? null
+          : staticRecord.lastSyncCompletedAt,
+    lastSyncErrorAt:
+      data.lastSyncErrorAt instanceof Date
+        ? data.lastSyncErrorAt
+        : data.lastSyncErrorAt === null
+          ? null
+          : staticRecord.lastSyncErrorAt,
+    lastErrorCode: typeof data.lastErrorCode === "string" ? data.lastErrorCode : data.lastErrorCode === null ? null : staticRecord.lastErrorCode,
+    lastErrorMessage:
+      typeof data.lastErrorMessage === "string"
+        ? data.lastErrorMessage
+        : data.lastErrorMessage === null
+          ? null
+          : staticRecord.lastErrorMessage,
+    nextReconcileAt:
+      data.nextReconcileAt instanceof Date
+        ? data.nextReconcileAt
+        : data.nextReconcileAt === null
+          ? null
+          : staticRecord.nextReconcileAt,
+  }));
   const runtimeConnection: RuntimeConnection = {
     connection: {
       accessTokenExpiresAt: null,
@@ -188,6 +239,7 @@ function createHeartbeatStore(seed: Partial<RuntimeConnection["localState"]> = {
       deviceConnection: {
         findFirst: async ({ where }: { where: { id: string; userId: string } }) =>
           where.id === staticRecord.id && where.userId === staticRecord.userId ? { ...staticRecord } : null,
+        update: updateConnection,
       },
     } as never,
   });
@@ -195,6 +247,7 @@ function createHeartbeatStore(seed: Partial<RuntimeConnection["localState"]> = {
   return {
     runtimeConnection,
     store,
+    updateConnection,
   };
 }
 
@@ -204,7 +257,7 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
   });
 
   it("treats clearError as authoritative even when error fields are also present", async () => {
-    const { runtimeConnection, store } = createHeartbeatStore({
+    const { runtimeConnection, store, updateConnection } = createHeartbeatStore({
       lastErrorCode: "OLD_CODE",
       lastErrorMessage: "Old failure",
       lastSyncErrorAt: "2026-03-25T01:00:00.000Z",
@@ -230,6 +283,12 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
       lastSyncCompletedAt: "2026-03-25T01:30:00.000Z",
       lastSyncErrorAt: null,
     });
+    expect(updateConnection).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        lastErrorCode: "IGNORED_CODE",
+        lastErrorMessage: null,
+      }),
+    }));
   });
 
   it("only applies the provided error fields when clearError is not set", async () => {

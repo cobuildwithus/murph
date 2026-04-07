@@ -1,6 +1,6 @@
-import { Prisma } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
+import { buildHostedProviderAccountBlindIndex } from "@/src/lib/device-sync/crypto";
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 
 type MutableSignal = {
@@ -9,20 +9,28 @@ type MutableSignal = {
   connectionId: string | null;
   provider: string;
   kind: string;
-  payloadJson: Record<string, unknown>;
+  occurredAt: Date | null;
+  traceId: string | null;
+  eventType: string | null;
+  resourceCategory: string | null;
+  reason: string | null;
+  nextReconcileAt: Date | null;
+  revokeWarningCode: string | null;
+  revokeWarningMessage: string | null;
   createdAt: Date;
 };
 
 type MutableWebhookTrace = {
   provider: string;
   traceId: string;
-  externalAccountId: string;
+  providerAccountBlindIndex: string;
   eventType: string;
   status: string;
   processingExpiresAt: Date | null;
   receivedAt: Date;
-  payloadJson: Record<string, unknown> | null;
 };
+
+const BLIND_INDEX_KEY = Buffer.alloc(32, 7);
 
 function createSignalStore(seed: MutableSignal[] = []) {
   const signals = new Map<number, MutableSignal>(
@@ -31,7 +39,14 @@ function createSignalStore(seed: MutableSignal[] = []) {
       {
         ...signal,
         connectionId: signal.connectionId,
-        payloadJson: { ...signal.payloadJson },
+        occurredAt: cloneDate(signal.occurredAt),
+        traceId: signal.traceId,
+        eventType: signal.eventType,
+        resourceCategory: signal.resourceCategory,
+        reason: signal.reason,
+        nextReconcileAt: cloneDate(signal.nextReconcileAt),
+        revokeWarningCode: signal.revokeWarningCode,
+        revokeWarningMessage: signal.revokeWarningMessage,
         createdAt: new Date(signal.createdAt),
       },
     ]),
@@ -58,6 +73,7 @@ function createSignalStore(seed: MutableSignal[] = []) {
     prisma: {
       deviceSyncSignal,
     } as never,
+    providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     codec: {
       keyVersion: "v1",
       encrypt: (value: string) => value,
@@ -85,7 +101,6 @@ function createWebhookTraceStore(
         ...trace,
         processingExpiresAt: cloneDate(trace.processingExpiresAt),
         receivedAt: new Date(trace.receivedAt),
-        payloadJson: trace.payloadJson ? { ...trace.payloadJson } : null,
       },
     ]),
   );
@@ -167,6 +182,7 @@ function createWebhookTraceStore(
     prisma: {
       deviceWebhookTrace,
     } as never,
+    providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     codec: {
       keyVersion: "v1",
       encrypt: (value: string) => value,
@@ -189,12 +205,10 @@ describe("PrismaDeviceSyncControlPlaneStore device-sync signals", () => {
       connectionId: "dsc_123",
       provider: "oura",
       kind: "webhook_hint",
-      payload: {
-        eventType: "sleep.updated",
-        traceId: "trace_123",
-        occurredAt: "2026-03-26T11:59:00.000Z",
-        resourceCategory: "daily_sleep",
-      },
+      eventType: "sleep.updated",
+      traceId: "trace_123",
+      occurredAt: "2026-03-26T11:59:00.000Z",
+      resourceCategory: "daily_sleep",
       createdAt: "2026-03-26T12:00:00.000Z",
     });
 
@@ -204,12 +218,14 @@ describe("PrismaDeviceSyncControlPlaneStore device-sync signals", () => {
       connectionId: "dsc_123",
       provider: "oura",
       kind: "webhook_hint",
-      payloadJson: {
-        eventType: "sleep.updated",
-        traceId: "trace_123",
-        occurredAt: "2026-03-26T11:59:00.000Z",
-        resourceCategory: "daily_sleep",
-      },
+      eventType: "sleep.updated",
+      traceId: "trace_123",
+      occurredAt: new Date("2026-03-26T11:59:00.000Z"),
+      resourceCategory: "daily_sleep",
+      reason: null,
+      nextReconcileAt: null,
+      revokeWarningCode: null,
+      revokeWarningMessage: null,
       createdAt: new Date("2026-03-26T12:00:00.000Z"),
     });
     expect(created).toEqual({
@@ -218,12 +234,13 @@ describe("PrismaDeviceSyncControlPlaneStore device-sync signals", () => {
       connectionId: "dsc_123",
       provider: "oura",
       kind: "webhook_hint",
-      payload: {
-        eventType: "sleep.updated",
-        traceId: "trace_123",
-        occurredAt: "2026-03-26T11:59:00.000Z",
-        resourceCategory: "daily_sleep",
-      },
+      occurredAt: "2026-03-26T11:59:00.000Z",
+      traceId: "trace_123",
+      eventType: "sleep.updated",
+      resourceCategory: "daily_sleep",
+      reason: null,
+      nextReconcileAt: null,
+      revokeWarning: null,
       createdAt: "2026-03-26T12:00:00.000Z",
     });
 
@@ -239,38 +256,29 @@ describe("PrismaDeviceSyncControlPlaneStore webhook traces", () => {
       {
         provider: "oura",
         traceId: "trace-processed",
-        externalAccountId: "acct-processed",
+        providerAccountBlindIndex: buildTestBlindIndex("oura", "acct-processed"),
         eventType: "sleep.updated",
         status: "processed",
         processingExpiresAt: null,
         receivedAt: new Date("2026-03-27T00:00:00.000Z"),
-        payloadJson: {
-          eventType: "sleep.updated",
-        },
       },
       {
         provider: "oura",
         traceId: "trace-processing",
-        externalAccountId: "acct-processing",
+        providerAccountBlindIndex: buildTestBlindIndex("oura", "acct-processing"),
         eventType: "sleep.updated",
         status: "processing",
         processingExpiresAt: new Date("2026-03-27T00:10:00.000Z"),
         receivedAt: new Date("2026-03-27T00:05:00.000Z"),
-        payloadJson: {
-          eventType: "sleep.updated",
-        },
       },
       {
         provider: "oura",
         traceId: "trace-expired",
-        externalAccountId: "acct-expired",
+        providerAccountBlindIndex: buildTestBlindIndex("oura", "acct-expired"),
         eventType: "sleep.updated",
         status: "processing",
         processingExpiresAt: new Date("2026-03-27T00:01:00.000Z"),
         receivedAt: new Date("2026-03-27T00:00:00.000Z"),
-        payloadJson: {
-          eventType: "sleep.updated",
-        },
       },
     ]);
 
@@ -282,9 +290,6 @@ describe("PrismaDeviceSyncControlPlaneStore webhook traces", () => {
         eventType: "sleep.updated",
         receivedAt: "2026-03-27T00:02:00.000Z",
         processingExpiresAt: "2026-03-27T00:07:00.000Z",
-        payload: {
-          eventType: "sleep.updated",
-        },
       }),
     ).toBe("claimed");
     expect(
@@ -295,9 +300,6 @@ describe("PrismaDeviceSyncControlPlaneStore webhook traces", () => {
         eventType: "sleep.updated",
         receivedAt: "2026-03-27T00:02:00.000Z",
         processingExpiresAt: "2026-03-27T00:07:00.000Z",
-        payload: {
-          eventType: "sleep.updated",
-        },
       }),
     ).toBe("processed");
     expect(
@@ -308,9 +310,6 @@ describe("PrismaDeviceSyncControlPlaneStore webhook traces", () => {
         eventType: "sleep.updated",
         receivedAt: "2026-03-27T00:06:00.000Z",
         processingExpiresAt: "2026-03-27T00:11:00.000Z",
-        payload: {
-          eventType: "sleep.updated",
-        },
       }),
     ).toBe("processing");
     expect(
@@ -321,9 +320,6 @@ describe("PrismaDeviceSyncControlPlaneStore webhook traces", () => {
         eventType: "sleep.updated",
         receivedAt: "2026-03-27T00:06:00.000Z",
         processingExpiresAt: "2026-03-27T00:11:00.000Z",
-        payload: {
-          eventType: "sleep.updated",
-        },
       }),
     ).toBe("claimed");
 
@@ -333,12 +329,11 @@ describe("PrismaDeviceSyncControlPlaneStore webhook traces", () => {
     expect(traces.get("oura:trace-new")).toMatchObject({
       status: "processed",
       processingExpiresAt: null,
-      payloadJson: null,
     });
     expect(traces.get("oura:trace-expired")).toBeUndefined();
     expect(traces.get("oura:trace-processing")).toMatchObject({
       status: "processing",
-      externalAccountId: "acct-processing",
+      providerAccountBlindIndex: buildTestBlindIndex("oura", "acct-processing"),
     });
   });
 
@@ -356,15 +351,12 @@ describe("PrismaDeviceSyncControlPlaneStore webhook traces", () => {
         eventType: "sleep.updated",
         receivedAt: "2026-03-27T00:02:00.000Z",
         processingExpiresAt: "2026-03-27T00:07:00.000Z",
-        payload: {
-          eventType: "sleep.updated",
-        },
       }),
     ).resolves.toBe("claimed");
 
     expect(traces.get("oura:trace-raced")).toMatchObject({
       status: "processing",
-      externalAccountId: "acct-raced",
+      providerAccountBlindIndex: buildTestBlindIndex("oura", "acct-raced"),
     });
   });
 });
@@ -375,7 +367,6 @@ function normalizeSignalRecord(id: number, data: Record<string, unknown>): Mutab
     (typeof data.connectionId !== "string" && data.connectionId !== null) ||
     typeof data.provider !== "string" ||
     typeof data.kind !== "string" ||
-    !isRecord(data.payloadJson) ||
     !(data.createdAt instanceof Date)
   ) {
     throw new TypeError("Invalid device-sync signal record.");
@@ -387,7 +378,14 @@ function normalizeSignalRecord(id: number, data: Record<string, unknown>): Mutab
     connectionId: data.connectionId,
     provider: data.provider,
     kind: data.kind,
-    payloadJson: { ...data.payloadJson },
+    occurredAt: data.occurredAt instanceof Date ? new Date(data.occurredAt) : null,
+    traceId: typeof data.traceId === "string" ? data.traceId : null,
+    eventType: typeof data.eventType === "string" ? data.eventType : null,
+    resourceCategory: typeof data.resourceCategory === "string" ? data.resourceCategory : null,
+    reason: typeof data.reason === "string" ? data.reason : null,
+    nextReconcileAt: data.nextReconcileAt instanceof Date ? new Date(data.nextReconcileAt) : null,
+    revokeWarningCode: typeof data.revokeWarningCode === "string" ? data.revokeWarningCode : null,
+    revokeWarningMessage: typeof data.revokeWarningMessage === "string" ? data.revokeWarningMessage : null,
     createdAt: new Date(data.createdAt),
   };
 }
@@ -408,7 +406,8 @@ function cloneSignal(signal: MutableSignal): MutableSignal {
   return {
     ...signal,
     connectionId: signal.connectionId,
-    payloadJson: { ...signal.payloadJson },
+    occurredAt: cloneDate(signal.occurredAt),
+    nextReconcileAt: cloneDate(signal.nextReconcileAt),
     createdAt: new Date(signal.createdAt),
   };
 }
@@ -417,12 +416,11 @@ function normalizeWebhookTraceRecord(data: Record<string, unknown>): MutableWebh
   if (
     typeof data.provider !== "string"
     || typeof data.traceId !== "string"
-    || typeof data.externalAccountId !== "string"
+    || typeof data.providerAccountBlindIndex !== "string"
     || typeof data.eventType !== "string"
     || typeof data.status !== "string"
     || !(data.receivedAt instanceof Date)
     || (data.processingExpiresAt !== null && !(data.processingExpiresAt instanceof Date))
-    || (!isPrismaNullSentinel(data.payloadJson) && data.payloadJson !== null && data.payloadJson !== undefined && !isRecord(data.payloadJson))
   ) {
     throw new TypeError("Invalid webhook trace record.");
   }
@@ -430,12 +428,11 @@ function normalizeWebhookTraceRecord(data: Record<string, unknown>): MutableWebh
   return {
     provider: data.provider,
     traceId: data.traceId,
-    externalAccountId: data.externalAccountId,
+    providerAccountBlindIndex: data.providerAccountBlindIndex,
     eventType: data.eventType,
     status: data.status,
     processingExpiresAt: cloneDate(data.processingExpiresAt),
     receivedAt: new Date(data.receivedAt),
-    payloadJson: normalizeWebhookTracePayloadJson(data.payloadJson),
   };
 }
 
@@ -482,16 +479,12 @@ function matchesWebhookTraceOrBranch(trace: MutableWebhookTrace, candidate: unkn
 }
 
 function applyWebhookTraceUpdate(trace: MutableWebhookTrace, data: Record<string, unknown>): void {
-  if (typeof data.externalAccountId === "string") {
-    trace.externalAccountId = data.externalAccountId;
+  if (typeof data.providerAccountBlindIndex === "string") {
+    trace.providerAccountBlindIndex = data.providerAccountBlindIndex;
   }
 
   if (typeof data.eventType === "string") {
     trace.eventType = data.eventType;
-  }
-
-  if ("payloadJson" in data) {
-    trace.payloadJson = normalizeWebhookTracePayloadJson(data.payloadJson);
   }
 
   if ("processingExpiresAt" in data) {
@@ -517,7 +510,6 @@ function cloneWebhookTrace(trace: MutableWebhookTrace | null): MutableWebhookTra
     ...trace,
     processingExpiresAt: cloneDate(trace.processingExpiresAt),
     receivedAt: new Date(trace.receivedAt),
-    payloadJson: trace.payloadJson ? { ...trace.payloadJson } : null,
   };
 }
 
@@ -529,19 +521,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isPrismaNullSentinel(value: unknown): boolean {
-  return (
-    value === Prisma.DbNull
-    || value === Prisma.JsonNull
-    || value === Prisma.AnyNull
-    || (
-      typeof value === "object"
-      && value !== null
-      && Object.getOwnPropertySymbols(value).some((symbol) => String(symbol) === "Symbol(prisma.objectEnumValue)")
-    )
-  );
-}
-
-function normalizeWebhookTracePayloadJson(value: unknown): Record<string, unknown> | null {
-  return isRecord(value) && !isPrismaNullSentinel(value) ? { ...value } : null;
+function buildTestBlindIndex(provider: string, externalAccountId: string): string {
+  return buildHostedProviderAccountBlindIndex({
+    key: BLIND_INDEX_KEY,
+    provider,
+    externalAccountId,
+  });
 }

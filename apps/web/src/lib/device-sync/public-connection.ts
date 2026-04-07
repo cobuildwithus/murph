@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto";
 
 import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/public-ingress";
 
-export interface HostedBrowserDeviceSyncConnection extends Omit<PublicDeviceSyncAccount, "externalAccountId"> {
+export interface HostedBrowserDeviceSyncConnection extends PublicDeviceSyncAccount {
   id: string;
 }
 
@@ -18,7 +18,7 @@ export function toHostedBrowserDeviceSyncConnection(
   account: PublicDeviceSyncAccount,
   secret: Buffer | Uint8Array | string,
 ): HostedBrowserDeviceSyncConnection {
-  const { externalAccountId: _externalAccountId, id, ...rest } = account;
+  const { id, ...rest } = account;
 
   return {
     ...rest,

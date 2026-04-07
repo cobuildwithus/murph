@@ -2,9 +2,6 @@ import { PrismaClient } from "@prisma/client";
 
 import type { OAuthStateRecord } from "@murphai/device-syncd/public-ingress";
 
-import { toJsonRecord } from "../shared";
-import { toPrismaJsonObject } from "./prisma-json";
-
 export class PrismaHostedOAuthSessionStore {
   readonly prisma: PrismaClient;
 
@@ -30,7 +27,6 @@ export class PrismaHostedOAuthSessionStore {
         userId: typeof input.metadata?.ownerId === "string" ? input.metadata.ownerId : null,
         provider: input.provider,
         returnTo: input.returnTo,
-        metadataJson: toPrismaJsonObject(input.metadata ?? {}),
         createdAt: new Date(input.createdAt),
         expiresAt: new Date(input.expiresAt),
       },
@@ -65,7 +61,7 @@ export class PrismaHostedOAuthSessionStore {
         state: record.state,
         provider: record.provider,
         returnTo: record.returnTo,
-        metadata: toJsonRecord(record.metadataJson),
+        metadata: record.userId ? { ownerId: record.userId } : {},
         createdAt: record.createdAt.toISOString(),
         expiresAt: record.expiresAt.toISOString(),
       } satisfies OAuthStateRecord;

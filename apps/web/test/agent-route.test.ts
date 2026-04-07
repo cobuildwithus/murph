@@ -65,12 +65,13 @@ describe("hosted device-sync agent and webhook routes", () => {
         {
           id: 8,
           kind: "webhook_hint",
-          payload: {
-            eventType: "sleep.updated",
-            traceId: "trace_123",
-            occurredAt: "2026-03-26T11:59:00.000Z",
-            resourceCategory: "daily_sleep",
-          },
+          occurredAt: "2026-03-26T11:59:00.000Z",
+          traceId: "trace_123",
+          eventType: "sleep.updated",
+          resourceCategory: "daily_sleep",
+          reason: null,
+          nextReconcileAt: null,
+          revokeWarning: null,
         },
       ],
     });
@@ -170,12 +171,13 @@ describe("hosted device-sync agent and webhook routes", () => {
         {
           id: 8,
           kind: "webhook_hint",
-          payload: {
-            eventType: "sleep.updated",
-            traceId: "trace_123",
-            occurredAt: "2026-03-26T11:59:00.000Z",
-            resourceCategory: "daily_sleep",
-          },
+          occurredAt: "2026-03-26T11:59:00.000Z",
+          traceId: "trace_123",
+          eventType: "sleep.updated",
+          resourceCategory: "daily_sleep",
+          reason: null,
+          nextReconcileAt: null,
+          revokeWarning: null,
         },
       ],
     });

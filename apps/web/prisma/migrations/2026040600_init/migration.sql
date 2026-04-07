@@ -32,9 +32,16 @@ CREATE TABLE "device_connection" (
     "id" TEXT NOT NULL,
     "user_id" TEXT NOT NULL,
     "provider" TEXT NOT NULL,
-    "external_account_id" TEXT NOT NULL,
-    "display_name" TEXT,
+    "provider_account_blind_index" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'active',
     "connected_at" TIMESTAMP(3) NOT NULL,
+    "last_webhook_at" TIMESTAMP(3),
+    "last_sync_started_at" TIMESTAMP(3),
+    "last_sync_completed_at" TIMESTAMP(3),
+    "last_sync_error_at" TIMESTAMP(3),
+    "last_error_code" TEXT,
+    "last_error_message" TEXT,
+    "next_reconcile_at" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
@@ -52,7 +59,10 @@ CREATE TABLE "device_token_audit" (
     "session_id" TEXT,
     "token_version" INTEGER NOT NULL,
     "key_version" TEXT NOT NULL,
-    "metadata_json" JSONB,
+    "expected_token_version" INTEGER,
+    "force_refresh" BOOLEAN,
+    "refresh_outcome" TEXT,
+    "token_version_changed" BOOLEAN,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "device_token_audit_pkey" PRIMARY KEY ("id")
@@ -64,7 +74,6 @@ CREATE TABLE "device_oauth_session" (
     "user_id" TEXT,
     "provider" TEXT NOT NULL,
     "return_to" TEXT,
-    "metadata_json" JSONB NOT NULL,
     "created_at" TIMESTAMP(3) NOT NULL,
     "expires_at" TIMESTAMP(3) NOT NULL,
 
@@ -75,12 +84,11 @@ CREATE TABLE "device_oauth_session" (
 CREATE TABLE "device_webhook_trace" (
     "provider" TEXT NOT NULL,
     "trace_id" TEXT NOT NULL,
-    "external_account_id" TEXT NOT NULL,
+    "provider_account_blind_index" TEXT NOT NULL,
     "event_type" TEXT NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'processed',
     "processing_expires_at" TIMESTAMP(3),
     "received_at" TIMESTAMP(3) NOT NULL,
-    "payload_json" JSONB,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "device_webhook_trace_pkey" PRIMARY KEY ("provider","trace_id")
@@ -93,7 +101,14 @@ CREATE TABLE "device_sync_signal" (
     "connection_id" TEXT,
     "provider" TEXT NOT NULL,
     "kind" TEXT NOT NULL,
-    "payload_json" JSONB,
+    "occurred_at" TIMESTAMP(3),
+    "trace_id" TEXT,
+    "event_type" TEXT,
+    "resource_category" TEXT,
+    "reason" TEXT,
+    "next_reconcile_at" TIMESTAMP(3),
+    "revoke_warning_code" TEXT,
+    "revoke_warning_message" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "device_sync_signal_pkey" PRIMARY KEY ("id")
@@ -426,7 +441,7 @@ CREATE TABLE "linq_webhook_event" (
 CREATE INDEX "device_connection_user_id_provider_idx" ON "device_connection"("user_id", "provider");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "device_connection_provider_external_account_id_key" ON "device_connection"("provider", "external_account_id");
+CREATE UNIQUE INDEX "device_connection_provider_provider_account_blind_index_key" ON "device_connection"("provider", "provider_account_blind_index");
 
 -- CreateIndex
 CREATE INDEX "device_token_audit_user_id_id_idx" ON "device_token_audit"("user_id", "id");
@@ -444,7 +459,7 @@ CREATE INDEX "device_oauth_session_expires_at_idx" ON "device_oauth_session"("ex
 CREATE INDEX "device_oauth_session_user_id_provider_idx" ON "device_oauth_session"("user_id", "provider");
 
 -- CreateIndex
-CREATE INDEX "device_webhook_trace_provider_external_account_id_idx" ON "device_webhook_trace"("provider", "external_account_id");
+CREATE INDEX "device_webhook_trace_provider_provider_account_blind_index_idx" ON "device_webhook_trace"("provider", "provider_account_blind_index");
 
 -- CreateIndex
 CREATE INDEX "device_webhook_trace_received_at_idx" ON "device_webhook_trace"("received_at");

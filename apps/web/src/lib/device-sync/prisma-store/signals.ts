@@ -1,8 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 
-import { toJsonRecord } from "../shared";
-import { toNullablePrismaJsonValue } from "./prisma-json";
+import { normalizeNullableString, sanitizeHostedSqlErrorText } from "../shared";
 import type { CreateHostedSignalInput, HostedSignalRecord } from "./types";
 
 type HostedSignalPrismaRecord = Prisma.DeviceSyncSignalGetPayload<Prisma.DeviceSyncSignalDefaultArgs>;
@@ -22,7 +21,14 @@ export class PrismaHostedSignalStore {
         connectionId: input.connectionId ?? null,
         provider: input.provider,
         kind: input.kind,
-        payloadJson: toNullablePrismaJsonValue(input.payload),
+        occurredAt: input.occurredAt ? new Date(input.occurredAt) : null,
+        traceId: normalizeNullableString(input.traceId),
+        eventType: normalizeNullableString(input.eventType),
+        resourceCategory: normalizeNullableString(input.resourceCategory),
+        reason: normalizeNullableString(input.reason),
+        nextReconcileAt: input.nextReconcileAt ? new Date(input.nextReconcileAt) : null,
+        revokeWarningCode: normalizeNullableString(input.revokeWarning?.code),
+        revokeWarningMessage: sanitizeHostedSqlErrorText(input.revokeWarning?.message),
         createdAt: input.createdAt ? new Date(input.createdAt) : new Date(),
       },
     });
@@ -60,7 +66,20 @@ function mapHostedSignalRecord(record: HostedSignalPrismaRecord): HostedSignalRe
     connectionId: record.connectionId,
     provider: record.provider,
     kind: record.kind,
-    payload: toJsonRecord(record.payloadJson),
+    occurredAt: record.occurredAt?.toISOString() ?? null,
+    traceId: record.traceId,
+    eventType: record.eventType,
+    resourceCategory: record.resourceCategory,
+    reason: record.reason,
+    nextReconcileAt: record.nextReconcileAt?.toISOString() ?? null,
+    revokeWarning: record.revokeWarningCode || sanitizeHostedSqlErrorText(record.revokeWarningMessage)
+      ? {
+          ...(record.revokeWarningCode ? { code: record.revokeWarningCode } : {}),
+          ...(sanitizeHostedSqlErrorText(record.revokeWarningMessage)
+            ? { message: sanitizeHostedSqlErrorText(record.revokeWarningMessage) }
+            : {}),
+        }
+      : null,
     createdAt: record.createdAt.toISOString(),
   } satisfies HostedSignalRecord;
 }
