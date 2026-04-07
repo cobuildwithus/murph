@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -731,6 +731,44 @@ test("readVault keeps legacy convenience arrays isolated from byFamily buckets",
     assert.equal(vault.events.length, 2);
     assert.equal(vault.byFamily.experiment?.length, 1);
     assert.equal(vault.byFamily.event?.length, 3);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("readVault rejects vault metadata with removed layout fields", async () => {
+  const vaultRoot = await createFixtureVault();
+
+  try {
+    const metadataPath = path.join(vaultRoot, "vault.json");
+    const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as Record<string, unknown>;
+    metadata.paths = {
+      coreDocument: "CORE.md",
+    };
+    await writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`);
+
+    await assert.rejects(
+      () => readVault(vaultRoot),
+      (error) => hasErrorCode(error, "VAULT_INVALID_METADATA"),
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("readVault rejects explicit older vault format versions", async () => {
+  const vaultRoot = await createFixtureVault();
+
+  try {
+    const metadataPath = path.join(vaultRoot, "vault.json");
+    const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as Record<string, unknown>;
+    metadata.formatVersion = 0;
+    await writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`);
+
+    await assert.rejects(
+      () => readVault(vaultRoot),
+      (error) => hasErrorCode(error, "VAULT_UPGRADE_REQUIRED"),
+    );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -2377,42 +2415,11 @@ async function createFixtureVault(): Promise<string> {
     path.join(vaultRoot, "vault.json"),
     JSON.stringify(
       {
-        schemaVersion: "murph.vault.v1",
+        formatVersion: 1,
         vaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
         createdAt: "2026-03-10T06:00:00Z",
         title: "Murph Vault",
         timezone: "America/New_York",
-        idPolicy: {
-          format: "prefix_ulid",
-          prefixes: {
-            audit: "aud",
-            document: "doc",
-            event: "evt",
-            experiment: "exp",
-            meal: "meal",
-            pack: "pack",
-            provider: "prov",
-            sample: "smp",
-            transform: "xfm",
-            vault: "vault",
-          },
-        },
-        paths: {
-          coreDocument: "CORE.md",
-          journalRoot: "journal",
-          experimentsRoot: "bank/experiments",
-          providersRoot: "bank/providers",
-          rawRoot: "raw",
-          eventsRoot: "ledger/events",
-          samplesRoot: "ledger/samples",
-          auditRoot: "audit",
-          exportsRoot: "exports",
-        },
-        shards: {
-          events: "ledger/events/YYYY/YYYY-MM.jsonl",
-          samples: "ledger/samples/<stream>/YYYY/YYYY-MM.jsonl",
-          audit: "audit/YYYY/YYYY-MM.jsonl",
-        },
       },
       null,
       2,
@@ -2789,6 +2796,15 @@ function createEmptyReadModel(): Awaited<ReturnType<typeof readVault>> {
   return createReadModelFromEntities([]);
 }
 
+function hasErrorCode(error: unknown, expectedCode: string): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code: unknown }).code === expectedCode
+  );
+}
+
 function createReadModelFromEntities(
   entities: Awaited<ReturnType<typeof readVault>>["entities"],
 ): Awaited<ReturnType<typeof readVault>> {
@@ -2923,7 +2939,7 @@ test("rebuildQueryProjection materializes the shared query projection and status
 
     assert.equal(rebuilt.exists, true);
     assert.equal(rebuilt.dbPath, QUERY_DB_RELATIVE_PATH);
-    assert.equal(rebuilt.schemaVersion, "murph.query-projection.v2");
+    assert.equal(rebuilt.schemaVersion, "murph.query-projection.v1");
     assert.equal(rebuilt.entityCount, vault.entities.length);
     assert.equal(rebuilt.searchDocumentCount, vault.entities.length);
     assert.equal(rebuilt.fresh, true);
@@ -2940,14 +2956,14 @@ test("rebuildQueryProjection materializes the shared query projection and status
   }
 });
 
-test("query projection upgrades legacy sqlite stores and drops the write-only lookup table", async () => {
+test("rebuildQueryProjection discards unsupported local stores and recreates the current projection", async () => {
   const vaultRoot = await createFixtureVault();
   const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
   const database = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: true });
 
   try {
     database.exec(`
-      PRAGMA user_version = 1;
+      PRAGMA user_version = 2;
 
       CREATE TABLE query_meta (
         key TEXT PRIMARY KEY,
@@ -3020,8 +3036,8 @@ test("query projection upgrades legacy sqlite stores and drops the write-only lo
     const reopened = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false, readOnly: true });
 
     try {
-      assert.equal(rebuilt.schemaVersion, "murph.query-projection.v2");
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 2);
+      assert.equal(rebuilt.schemaVersion, "murph.query-projection.v1");
+      assert.equal(readSqliteRuntimeUserVersion(reopened), 1);
       const legacyLookupTable = reopened
         .prepare(`
           SELECT name
@@ -3038,7 +3054,51 @@ test("query projection upgrades legacy sqlite stores and drops the write-only lo
   }
 });
 
-test("searchVaultRuntime upgrades a matching legacy projection before serving results", async () => {
+test("rebuildQueryProjection discards malformed local stores and recreates the current projection", async () => {
+  const vaultRoot = await createFixtureVault();
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const database = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: true });
+
+  try {
+    database.exec(`
+      PRAGMA user_version = 1;
+
+      CREATE TABLE query_entities (
+        entity_id TEXT PRIMARY KEY,
+        entity_json TEXT NOT NULL
+      );
+    `);
+  } finally {
+    database.close();
+  }
+
+  try {
+    const rebuilt = await rebuildQueryProjection(vaultRoot);
+    const reopened = openSqliteRuntimeDatabase(runtimeDatabasePath, {
+      create: false,
+      readOnly: true,
+    });
+
+    try {
+      assert.equal(rebuilt.schemaVersion, "murph.query-projection.v1");
+      assert.equal(readSqliteRuntimeUserVersion(reopened), 1);
+      const queryMetaTable = reopened
+        .prepare(`
+          SELECT name
+          FROM sqlite_master
+          WHERE type = 'table' AND name = 'query_meta'
+        `)
+        .get() as { name?: string } | undefined;
+      assert.equal(queryMetaTable?.name ?? null, "query_meta");
+    } finally {
+      reopened.close();
+    }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("searchVaultRuntime discards unsupported local stores before serving results", async () => {
   const vaultRoot = await createFixtureVault();
   const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
 
@@ -3048,7 +3108,7 @@ test("searchVaultRuntime upgrades a matching legacy projection before serving re
 
     try {
       legacyDatabase.exec(`
-        PRAGMA user_version = 1;
+        PRAGMA user_version = 2;
         CREATE TABLE IF NOT EXISTS query_lookup_ids (
           lookup_id TEXT NOT NULL,
           entity_id TEXT NOT NULL,
@@ -3063,13 +3123,13 @@ test("searchVaultRuntime upgrades a matching legacy projection before serving re
           VALUES ('schema_version', ?)
           ON CONFLICT(key) DO UPDATE SET value = excluded.value
         `)
-        .run("murph.query-projection.v1");
+        .run("murph.query-projection.v2");
     } finally {
       legacyDatabase.close();
     }
 
     const statusBefore = await getQueryProjectionStatus(vaultRoot);
-    assert.equal(statusBefore.schemaVersion, "murph.query-projection.v1");
+    assert.equal(statusBefore.schemaVersion, "murph.query-projection.v2");
     assert.equal(statusBefore.fresh, false);
 
     const searchResult = await searchVaultRuntime(vaultRoot, "lab report", {
@@ -3084,7 +3144,7 @@ test("searchVaultRuntime upgrades a matching legacy projection before serving re
     });
 
     try {
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 2);
+      assert.equal(readSqliteRuntimeUserVersion(reopened), 1);
       const legacyLookupTable = reopened
         .prepare(`
           SELECT name
@@ -3096,6 +3156,10 @@ test("searchVaultRuntime upgrades a matching legacy projection before serving re
     } finally {
       reopened.close();
     }
+
+    const statusAfter = await getQueryProjectionStatus(vaultRoot);
+    assert.equal(statusAfter.schemaVersion, "murph.query-projection.v1");
+    assert.equal(statusAfter.fresh, true);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

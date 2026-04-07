@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { rm } from "node:fs/promises";
 
 import {
   QUERY_DB_RELATIVE_PATH,
@@ -31,8 +32,8 @@ import {
   type VaultSourceSnapshot,
 } from "./vault-source.ts";
 
-const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection.v2";
-const QUERY_PROJECTION_SQLITE_VERSION = 2;
+const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection.v1";
+const QUERY_PROJECTION_SQLITE_VERSION = 1;
 const DEFAULT_CANDIDATE_MULTIPLIER = 25;
 const DEFAULT_MIN_CANDIDATES = 50;
 const MAX_CANDIDATES = 1_000;
@@ -115,6 +116,7 @@ async function rebuildQueryProjectionWithManifest(
   currentManifest: readonly QuerySourceManifestEntry[],
   location: QueryProjectionLocation = currentQueryProjectionLocation(vaultRoot),
 ): Promise<RebuildQueryProjectionResult> {
+  await resetUnsupportedQueryProjection(location);
   const snapshot = await readVaultSourceStrict(vaultRoot);
   const searchDocuments = materializeSearchDocuments(snapshot.entities);
   const database = openQueryProjectionDatabase(location, { create: true });
@@ -255,6 +257,41 @@ async function rebuildQueryProjectionWithManifest(
   }
 }
 
+async function resetUnsupportedQueryProjection(
+  location: QueryProjectionLocation,
+): Promise<void> {
+  if (!(await hasLocalStatePath({ currentPath: location.absolutePath }))) {
+    return;
+  }
+
+  let supportedProjection = false;
+
+  try {
+    const database = openSqliteRuntimeDatabase(location.absolutePath, {
+      create: false,
+      readOnly: true,
+    });
+
+    try {
+      supportedProjection = hasCurrentQueryProjectionSchema(database);
+    } finally {
+      database.close();
+    }
+  } catch {
+    supportedProjection = false;
+  }
+
+  if (supportedProjection) {
+    return;
+  }
+
+  await Promise.all([
+    rm(location.absolutePath, { force: true }),
+    rm(`${location.absolutePath}-wal`, { force: true }),
+    rm(`${location.absolutePath}-shm`, { force: true }),
+  ]);
+}
+
 async function ensureFreshQueryProjection(
   vaultRoot: string,
 ): Promise<QueryProjectionLocation> {
@@ -295,8 +332,7 @@ async function readProjectionStatus(
       entityCount: countRows(database, "query_entities"),
       searchDocumentCount: countRows(database, "query_search_document"),
       fresh:
-        readMeta(database, "schema_version") === QUERY_PROJECTION_SCHEMA_ID &&
-        readSqliteRuntimeUserVersion(database) === QUERY_PROJECTION_SQLITE_VERSION &&
+        hasCurrentQueryProjectionSchema(database) &&
         sameSourceManifest(currentManifest, readStoredSourceManifest(database)),
     };
   } finally {
@@ -457,29 +493,35 @@ function openQueryProjectionDatabase(
 
   if (!(options.readOnly ?? false)) {
     applySqliteRuntimeMigrations(database, {
-      migrations: [
-        {
-          version: 1,
-          migrate(candidateDatabase) {
-            ensureQueryProjectionSchema(candidateDatabase);
-          },
+      migrations: [{
+        version: QUERY_PROJECTION_SQLITE_VERSION,
+        migrate(candidateDatabase) {
+          ensureQueryProjectionSchema(candidateDatabase);
         },
-        {
-          version: QUERY_PROJECTION_SQLITE_VERSION,
-          migrate(candidateDatabase) {
-            candidateDatabase.exec(`
-              DROP TABLE IF EXISTS query_lookup_ids;
-            `);
-            ensureQueryProjectionSchema(candidateDatabase);
-          },
-        },
-      ],
+      }],
       schemaVersion: QUERY_PROJECTION_SQLITE_VERSION,
       storeName: "query projection",
     });
   }
 
   return database;
+}
+
+function hasCurrentQueryProjectionSchema(database: DatabaseSync): boolean {
+  if (
+    !tableExists(database, "query_meta") ||
+    !tableExists(database, "query_entities") ||
+    !tableExists(database, "query_source_manifest") ||
+    !tableExists(database, "query_search_document") ||
+    !tableExists(database, "query_search_fts")
+  ) {
+    return false;
+  }
+
+  return (
+    readMeta(database, "schema_version") === QUERY_PROJECTION_SCHEMA_ID &&
+    readSqliteRuntimeUserVersion(database) === QUERY_PROJECTION_SQLITE_VERSION
+  );
 }
 
 function currentQueryProjectionLocation(vaultRoot: string): QueryProjectionLocation {
