@@ -22,8 +22,6 @@ Inside the vault, `.runtime/**` is now split by durability/rebuildability and by
 
 That assistant runtime root is intentionally not a product-state incubator. If a datum is user-facing, queryable, or something future product features will build on, it belongs in canonical `vault/**` or explicit `derived/**` materializations, not under assistant runtime.
 
-Legacy flat paths such as `.runtime/search.sqlite`, `.runtime/gateway.sqlite`, `.runtime/inboxd.sqlite`, `.runtime/device-syncd.sqlite`, `.runtime/inboxd/**`, and `.runtime/parsers/**` are still read and are promoted forward automatically when the owning runtime next opens them.
-
 ## Contract
 
 - canonical user truth stays in `vault/**`; local runtime state must never become the canonical store of health facts

@@ -14,7 +14,6 @@ import {
 import type { R2BucketLike } from "./bundle-store.js";
 import { buildHostedStorageAad, deriveHostedStorageOpaqueId } from "./crypto-context.js";
 import { readEncryptedR2Payload, writeEncryptedR2Json } from "./crypto.js";
-import { listHostedStorageObjectKeys } from "./storage-paths.js";
 
 export interface HostedUserCryptoContext {
   envelope: HostedUserRootKeyEnvelope;
@@ -154,13 +153,18 @@ async function resolveHostedUserRootKeyEnvelope(input: {
   reason: string;
   userId: string;
 }): Promise<{ envelope: HostedUserRootKeyEnvelope; rootKey: Uint8Array | null }> {
-  const existingEnvelope = await readStoredHostedUserRootKeyEnvelope({
+  const currentObjectKey = await hostedUserRootKeyEnvelopeObjectKey(
+    input.envelopeEncryptionKey,
+    input.userId,
+  );
+  const storedEnvelope = await readStoredHostedUserRootKeyEnvelope({
     bucket: input.bucket,
     envelopeEncryptionKey: input.envelopeEncryptionKey,
     envelopeEncryptionKeyId: input.envelopeEncryptionKeyId,
     envelopeEncryptionKeysById: input.envelopeEncryptionKeysById,
     userId: input.userId,
   });
+  const existingEnvelope = storedEnvelope?.envelope ?? null;
 
   if (!existingEnvelope) {
     if (!input.allowMissingEnvelopeBootstrap) {
@@ -178,7 +182,6 @@ async function resolveHostedUserRootKeyEnvelope(input: {
       envelope: created.envelope,
       envelopeEncryptionKey: input.envelopeEncryptionKey,
       envelopeEncryptionKeyId: input.envelopeEncryptionKeyId,
-      envelopeEncryptionKeysById: input.envelopeEncryptionKeysById,
     });
     await emitHostedUserKeyAudit(input.auditLog, {
       action: "root-key-bootstrap",
@@ -191,6 +194,16 @@ async function resolveHostedUserRootKeyEnvelope(input: {
       envelope: created.envelope,
       rootKey: created.rootKey,
     };
+  }
+
+  if (storedEnvelope && storedEnvelope.objectKey !== currentObjectKey) {
+    await writeHostedUserRootKeyEnvelope({
+      bucket: input.bucket,
+      envelope: existingEnvelope,
+      envelopeEncryptionKey: input.envelopeEncryptionKey,
+      envelopeEncryptionKeyId: input.envelopeEncryptionKeyId,
+      envelopeEncryptionKeysById: input.envelopeEncryptionKeysById,
+    });
   }
 
   const needsReconciliation = input.desiredManagedRecipients.some((desiredRecipient) => {
@@ -243,7 +256,6 @@ async function resolveHostedUserRootKeyEnvelope(input: {
     envelope: reconciledEnvelope,
     envelopeEncryptionKey: input.envelopeEncryptionKey,
     envelopeEncryptionKeyId: input.envelopeEncryptionKeyId,
-    envelopeEncryptionKeysById: input.envelopeEncryptionKeysById,
   });
   await emitHostedUserKeyAudit(input.auditLog, {
     action: "root-key-reconcile",
@@ -265,7 +277,7 @@ async function readStoredHostedUserRootKeyEnvelope(input: {
   envelopeEncryptionKeyId: string;
   envelopeEncryptionKeysById: Readonly<Record<string, Uint8Array>>;
   userId: string;
-}): Promise<HostedUserRootKeyEnvelope | null> {
+}): Promise<{ envelope: HostedUserRootKeyEnvelope; objectKey: string } | null> {
   for (const objectKey of await hostedUserRootKeyEnvelopeObjectKeys(
     input.envelopeEncryptionKey,
     input.envelopeEncryptionKeysById,
@@ -289,7 +301,10 @@ async function readStoredHostedUserRootKeyEnvelope(input: {
       continue;
     }
 
-    return parseHostedUserRootKeyEnvelope(JSON.parse(new TextDecoder().decode(plaintext)) as unknown);
+    return {
+      envelope: parseHostedUserRootKeyEnvelope(JSON.parse(new TextDecoder().decode(plaintext)) as unknown),
+      objectKey,
+    };
   }
 
   return null;
@@ -392,9 +407,14 @@ async function hostedUserRootKeyEnvelopeObjectKeys(
   envelopeEncryptionKeysById: Readonly<Record<string, Uint8Array>>,
   userId: string,
 ): Promise<string[]> {
-  return listHostedStorageObjectKeys(envelopeEncryptionKey, envelopeEncryptionKeysById, (candidateKey) =>
+  const candidateKeys = dedupeHostedStorageKeys([
+    envelopeEncryptionKey,
+    ...Object.values(envelopeEncryptionKeysById),
+  ]);
+
+  return Promise.all(candidateKeys.map((candidateKey) =>
     hostedUserRootKeyEnvelopeObjectKey(candidateKey, userId)
-  );
+  ));
 }
 
 function buildDesiredManagedRecipients(input: {
@@ -431,6 +451,23 @@ function buildDesiredManagedRecipients(input: {
 
 function isManagedRecipientKind(kind: HostedUserRootKeyRecipientKind): boolean {
   return kind === "automation" || kind === "recovery" || kind === "tee-automation";
+}
+
+function dedupeHostedStorageKeys(keys: readonly Uint8Array[]): Uint8Array[] {
+  const seen = new Set<string>();
+  const deduped: Uint8Array[] = [];
+
+  for (const key of keys) {
+    const fingerprint = Array.from(key).join(",");
+    if (seen.has(fingerprint)) {
+      continue;
+    }
+
+    seen.add(fingerprint);
+    deduped.push(key);
+  }
+
+  return deduped;
 }
 
 function assertOptionalRecipientPairConfigured(input: {

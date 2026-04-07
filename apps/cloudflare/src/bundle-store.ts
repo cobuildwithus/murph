@@ -13,9 +13,7 @@ import {
 import {
   hostedBundleObjectKey,
   hostedArtifactObjectKey,
-  hostedArtifactObjectKeys,
   hostedUserEnvObjectKey,
-  hostedUserEnvObjectKeys,
 } from "./storage-paths.js";
 import {
   readEncryptedR2Payload,
@@ -207,44 +205,26 @@ export function createHostedArtifactStore(input: {
         return;
       }
 
-      for (const key of await hostedArtifactObjectKeys(
-        input.key,
-        input.keysById,
-        input.userId,
-        sha256,
-      )) {
-        await input.bucket.delete(key);
-      }
+      const key = await hostedArtifactObjectKey(input.key, input.userId, sha256);
+      await input.bucket.delete(key);
     },
 
     async readArtifact(sha256) {
-      for (const key of await hostedArtifactObjectKeys(
-        input.key,
-        input.keysById,
-        input.userId,
-        sha256,
-      )) {
-        const payload = await readEncryptedR2Payload({
-          aad: buildHostedStorageAad({
-            key,
-            purpose: "artifact",
-            sha256,
-            userId: input.userId,
-          }),
-          bucket: input.bucket,
-          cryptoKey: input.key,
-          cryptoKeysById: input.keysById,
-          expectedKeyId: input.keyId,
+      const key = await hostedArtifactObjectKey(input.key, input.userId, sha256);
+      return readEncryptedR2Payload({
+        aad: buildHostedStorageAad({
           key,
-          scope: "artifact",
-        });
-
-        if (payload) {
-          return payload;
-        }
-      }
-
-      return null;
+          purpose: "artifact",
+          sha256,
+          userId: input.userId,
+        }),
+        bucket: input.bucket,
+        cryptoKey: input.key,
+        cryptoKeysById: input.keysById,
+        expectedKeyId: input.keyId,
+        key,
+        scope: "artifact",
+      });
     },
 
     async writeArtifact(sha256, plaintext) {
@@ -280,33 +260,25 @@ export function createHostedUserEnvStore(input: {
         return;
       }
 
-      for (const key of await hostedUserEnvObjectKeys(input.key, input.keysById, userId)) {
-        await input.bucket.delete(key);
-      }
+      const key = await hostedUserEnvObjectKey(input.key, userId);
+      await input.bucket.delete(key);
     },
 
     async readUserEnv(userId) {
-      for (const key of await hostedUserEnvObjectKeys(input.key, input.keysById, userId)) {
-        const payload = await readEncryptedR2Payload({
-          aad: buildHostedStorageAad({
-            key,
-            purpose: "user-env",
-            userId,
-          }),
-          bucket: input.bucket,
-          cryptoKey: input.key,
-          cryptoKeysById: input.keysById,
-          expectedKeyId: input.keyId,
+      const key = await hostedUserEnvObjectKey(input.key, userId);
+      return readEncryptedR2Payload({
+        aad: buildHostedStorageAad({
           key,
-          scope: "user-env",
-        });
-
-        if (payload) {
-          return payload;
-        }
-      }
-
-      return null;
+          purpose: "user-env",
+          userId,
+        }),
+        bucket: input.bucket,
+        cryptoKey: input.key,
+        cryptoKeysById: input.keysById,
+        expectedKeyId: input.keyId,
+        key,
+        scope: "user-env",
+      });
     },
 
     async writeUserEnv(userId, plaintext) {
