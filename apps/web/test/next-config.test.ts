@@ -29,6 +29,10 @@ const require = createRequire(import.meta.url);
 
 test("resolveHostedWebWorkspaceSourceEntries points at hosted source package entries", () => {
   assert.equal(
+    resolveHostedWebWorkspaceSourceEntries("/repo/apps/web")["@murphai/cloudflare-hosted-control"],
+    path.resolve("/repo/packages/cloudflare-hosted-control/src/index.ts"),
+  );
+  assert.equal(
     resolveHostedWebWorkspaceSourceEntries("/repo/apps/web")["@murphai/device-syncd"],
     path.resolve("/repo/packages/device-syncd/src/index.ts"),
   );
