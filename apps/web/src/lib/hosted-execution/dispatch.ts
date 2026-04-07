@@ -1,13 +1,17 @@
 import {
-  createHostedExecutionDispatchClient,
   HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR,
   type HostedExecutionOutboxPayload,
   type HostedExecutionDispatchResult,
   type HostedExecutionDispatchRequest,
-  type HostedExecutionDispatchEnvironment,
-  readHostedExecutionDispatchEnvironment,
   type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
+import {
+  createHostedExecutionDispatchClient,
+} from "@murphai/hosted-execution/client";
+import {
+  type HostedExecutionDispatchEnvironment,
+  readHostedExecutionDispatchEnvironment,
+} from "@murphai/hosted-execution/env";
 
 import { readHostedExecutionControlClientIfConfigured } from "./control";
 import { createHostedExecutionVercelOidcBearerTokenProvider } from "./vercel-oidc";

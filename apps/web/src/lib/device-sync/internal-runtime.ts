@@ -11,7 +11,7 @@ import type {
   HostedExecutionDeviceSyncRuntimeLocalStateSnapshot,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   HostedExecutionDeviceSyncRuntimeTokenBundle,
-} from "@murphai/hosted-execution";
+} from "@murphai/device-syncd/hosted-runtime";
 
 export {
   parseHostedDeviceSyncRuntimeApplyRequest,

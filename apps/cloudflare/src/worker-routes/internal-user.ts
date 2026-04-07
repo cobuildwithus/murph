@@ -1,13 +1,17 @@
 import {
   buildHostedExecutionAssistantCronTickDispatch,
-  parseHostedExecutionDeviceSyncRuntimeApplyRequest,
-  parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
   parseHostedExecutionDispatchRequest,
   parseHostedExecutionOutboxPayload,
   parseHostedExecutionSharePack,
-  parseHostedMemberPrivateState,
   readHostedEmailCapabilities,
 } from "@murphai/hosted-execution";
+import {
+  parseHostedMemberPrivateState,
+} from "@murphai/hosted-execution/member-private-state";
+import {
+  parseHostedExecutionDeviceSyncRuntimeApplyRequest,
+  parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
+} from "@murphai/device-syncd/hosted-runtime";
 
 import {
   createHostedEmailUserAddress,

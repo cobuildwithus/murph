@@ -30,12 +30,16 @@ import {
 import { readHostedAssistantRuntimeState } from "./context.ts";
 import type {
   HostedExecutionDispatchRequest,
-  HostedExecutionWebControlPlaneEnvironment,
 } from "@murphai/hosted-execution";
+import type {
+  HostedExecutionWebControlPlaneEnvironment,
+} from "@murphai/hosted-execution/env";
 import {
   emitHostedExecutionStructuredLog,
-  readHostedExecutionWebControlPlaneEnvironment,
 } from "@murphai/hosted-execution";
+import {
+  readHostedExecutionWebControlPlaneEnvironment,
+} from "@murphai/hosted-execution/env";
 
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
 const HOSTED_MAX_PARSER_JOBS = 50;

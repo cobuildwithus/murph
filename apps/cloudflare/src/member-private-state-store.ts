@@ -1,7 +1,7 @@
 import {
   parseHostedMemberPrivateState,
   type HostedMemberPrivateState,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/member-private-state";
 
 import type { R2BucketLike } from "./bundle-store.js";
 import { buildHostedStorageAad } from "./crypto-context.js";

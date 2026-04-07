@@ -24,9 +24,11 @@ vi.mock("../src/hosted-runtime/events/inbox-pipeline.ts", () => ({
 }));
 
 import {
-  createHostedExecutionProxyDeviceSyncRuntimeClient,
   parseHostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution";
+import {
+  createHostedExecutionProxyDeviceSyncRuntimeClient,
+} from "@murphai/hosted-execution/web-control-plane";
 import { parseHostedEmailThreadTarget } from "@murphai/runtime-state";
 import { syncHostedDeviceSyncControlPlaneState } from "../src/hosted-device-sync-runtime.ts";
 import { sendHostedEmailOverWorker } from "../src/hosted-email.ts";

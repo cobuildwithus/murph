@@ -6,9 +6,11 @@ import {
 } from "@murphai/assistant-runtime";
 import {
   emitHostedExecutionStructuredLog,
+} from "@murphai/hosted-execution";
+import {
   HOSTED_EXECUTION_CALLBACK_HOSTS,
   HOSTED_EXECUTION_PROXY_HOSTS,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/callback-hosts";
 
 import { methodNotAllowed } from "./json.ts";
 import { handleRunnerOutboundRequest, type RunnerOutboundEnvironmentSource } from "./runner-outbound.ts";

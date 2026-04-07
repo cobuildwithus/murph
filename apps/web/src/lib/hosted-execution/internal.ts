@@ -1,9 +1,11 @@
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
-  normalizeHostedExecutionString,
   readHostedExecutionSignatureHeaders,
   verifyHostedExecutionSignature,
 } from "@murphai/hosted-execution";
+import {
+  normalizeHostedExecutionString,
+} from "@murphai/hosted-execution/env";
 
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { getPrisma } from "../prisma";

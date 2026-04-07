@@ -2,9 +2,13 @@ import {
   buildHostedExecutionUserRunPath,
   buildHostedExecutionUserStatusPath,
   parseHostedExecutionUserStatus,
-  readBearerAuthorizationToken,
-  type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
+import type {
+  HostedExecutionUserStatus,
+} from "@murphai/hosted-execution";
+import {
+  readBearerAuthorizationToken,
+} from "@murphai/hosted-execution/vercel-oidc";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 

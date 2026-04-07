@@ -13,8 +13,10 @@ import type {
 } from "@murphai/hosted-execution";
 import {
   emitHostedExecutionStructuredLog,
-  resolveHostedExecutionDeviceSyncConnectLinkClient,
 } from "@murphai/hosted-execution";
+import {
+  resolveHostedExecutionDeviceSyncConnectLinkClient,
+} from "@murphai/hosted-execution/web-control-plane";
 import {
   HostedAssistantConfigurationError,
 } from "@murphai/operator-config/hosted-assistant-config";

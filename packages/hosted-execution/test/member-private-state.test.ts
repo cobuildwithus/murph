@@ -3,9 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 import {
   HOSTED_MEMBER_PRIVATE_STATE_SCHEMA,
   applyHostedMemberPrivateStatePatch,
-  createHostedExecutionControlClient,
   parseHostedMemberPrivateState,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/member-private-state";
+import {
+  createHostedExecutionControlClient,
+} from "@murphai/hosted-execution/client";
 
 describe("hosted member private state", () => {
   it("applies patches while preserving existing values", () => {
@@ -15,6 +17,8 @@ describe("hosted member private state", () => {
         memberId: "member_123",
         privyUserId: "privy_existing",
         schema: HOSTED_MEMBER_PRIVATE_STATE_SCHEMA,
+        signupPhoneCodeSendAttemptId: null,
+        signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: "2026-04-06T10:30:00.000Z",
         signupPhoneNumber: "+15551230000",
         stripeCustomerId: "cus_existing",
@@ -39,6 +43,8 @@ describe("hosted member private state", () => {
       memberId: "member_123",
       privyUserId: "privy_next",
       schema: HOSTED_MEMBER_PRIVATE_STATE_SCHEMA,
+      signupPhoneCodeSendAttemptId: null,
+      signupPhoneCodeSendAttemptStartedAt: null,
       signupPhoneCodeSentAt: null,
       signupPhoneNumber: "+15551234567",
       stripeCustomerId: null,
@@ -71,6 +77,8 @@ describe("hosted member private state", () => {
       memberId: "member_123",
       privyUserId: "privy_123",
       schema: HOSTED_MEMBER_PRIVATE_STATE_SCHEMA,
+      signupPhoneCodeSendAttemptId: null,
+      signupPhoneCodeSendAttemptStartedAt: null,
       signupPhoneCodeSentAt: "2026-04-06T11:30:00.000Z",
       signupPhoneNumber: "+15551234567",
       stripeCustomerId: "cus_123",
@@ -98,6 +106,8 @@ describe("hosted member private state", () => {
       memberId: "member/123",
       privyUserId: "did:privy:123",
       schema: HOSTED_MEMBER_PRIVATE_STATE_SCHEMA,
+      signupPhoneCodeSendAttemptId: null,
+      signupPhoneCodeSendAttemptStartedAt: null,
       signupPhoneCodeSentAt: "2026-04-07T00:00:00.000Z",
       signupPhoneNumber: "+15551234567",
       stripeCustomerId: "cus_123",
@@ -156,6 +166,8 @@ describe("hosted member private state", () => {
       memberId: "member_b",
       privyUserId: null,
       schema: HOSTED_MEMBER_PRIVATE_STATE_SCHEMA,
+      signupPhoneCodeSendAttemptId: null,
+      signupPhoneCodeSendAttemptStartedAt: null,
       signupPhoneCodeSentAt: null,
       signupPhoneNumber: null,
       stripeCustomerId: null,

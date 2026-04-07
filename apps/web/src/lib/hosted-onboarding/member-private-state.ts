@@ -95,6 +95,8 @@ function isHostedMemberPrivateStateEmpty(state: HostedMemberPrivateState): boole
   return ![
     state.linqChatId,
     state.privyUserId,
+    state.signupPhoneCodeSendAttemptId,
+    state.signupPhoneCodeSendAttemptStartedAt,
     state.signupPhoneCodeSentAt,
     state.signupPhoneNumber,
     state.stripeCustomerId,

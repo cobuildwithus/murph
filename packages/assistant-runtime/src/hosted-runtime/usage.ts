@@ -3,9 +3,11 @@ import {
   listPendingAssistantUsageRecords,
 } from "@murphai/runtime-state/node";
 import {
-  resolveHostedExecutionAiUsageClient,
   summarizeHostedExecutionError,
 } from "@murphai/hosted-execution";
+import {
+  resolveHostedExecutionAiUsageClient,
+} from "@murphai/hosted-execution/web-control-plane";
 
 export interface HostedPendingAssistantUsageExportResult {
   exported: number;

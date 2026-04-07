@@ -20,8 +20,10 @@ vi.mock("@murphai/runtime-state/node", async () => {
   };
 });
 
-vi.mock("@murphai/hosted-execution", async () => {
-  const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>("@murphai/hosted-execution");
+vi.mock("@murphai/hosted-execution/web-control-plane", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/hosted-execution/web-control-plane")>(
+    "@murphai/hosted-execution/web-control-plane",
+  );
 
   return {
     ...actual,

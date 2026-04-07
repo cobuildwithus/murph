@@ -9,8 +9,10 @@ import {
 } from "@murphai/device-syncd/public-ingress";
 import { shapeHostedDeviceSyncJobHintPayload } from "@murphai/device-syncd/hosted-hints";
 import type {
-  HostedExecutionDispatchRequest,
   HostedExecutionDeviceSyncJobHint,
+} from "@murphai/device-syncd/hosted-runtime";
+import type {
+  HostedExecutionDispatchRequest,
   HostedExecutionDeviceSyncWakeEvent,
 } from "@murphai/hosted-execution";
 
