@@ -14,9 +14,9 @@ import { applyCanonicalWriteBatch } from '@murphai/core'
 import { parseDelimitedRows } from '@murphai/importers'
 import { generateUlid } from '@murphai/runtime-state'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { upsertEventRecord } from './provider-event.js'
-import { compactObject, normalizeOptionalText } from './vault-usecase-helpers.js'
-import { buildStructuredWorkoutEventPayload } from './workout.js'
+import { compactObject, normalizeOptionalText, toEventUpsertVaultCliError } from './vault-usecase-helpers.js'
+import { buildStructuredWorkoutActivitySessionDraft } from './workout.js'
+import { loadWorkoutCoreRuntime } from './workout-core.js'
 
 const DEFAULT_SOURCE = 'strong'
 const DEFAULT_DELIMITER = ','
@@ -659,11 +659,11 @@ export async function importWorkoutCsv(input: {
       originalFileName: path.basename(input.file),
       mediaType: 'text/csv',
       allowExistingMatch: true,
-    }],
-    textWrites: [{
-      relativePath: manifestFile,
+    }, {
+      targetRelativePath: manifestFile,
       content: `${JSON.stringify(manifest, null, 2)}\n`,
-      overwrite: false,
+      originalFileName: 'manifest.json',
+      mediaType: 'application/json',
       allowExistingMatch: true,
     }],
   })
@@ -672,6 +672,8 @@ export async function importWorkoutCsv(input: {
   const ledgerFiles = new Set<string>()
 
   if (!input.storeRawOnly) {
+    const core = await loadWorkoutCoreRuntime()
+
     for (const session of sessions) {
       if (session.exercises.length === 0) {
         continue
@@ -695,7 +697,7 @@ export async function importWorkoutCsv(input: {
         })),
       }
 
-      const payload = buildStructuredWorkoutEventPayload({
+      const draft = buildStructuredWorkoutActivitySessionDraft({
         payload: compactObject({
           title: session.title,
           occurredAt: session.occurredAt,
@@ -715,12 +717,16 @@ export async function importWorkoutCsv(input: {
         source: 'import',
       })
 
-      const result = await upsertEventRecord({
-        vault: input.vault,
-        payload,
-      })
-      lookupIds.push(result.lookupId)
-      ledgerFiles.add(result.ledgerFile)
+      try {
+        const result = await core.addActivitySession({
+          vaultRoot: input.vault,
+          draft,
+        })
+        lookupIds.push(result.eventId)
+        ledgerFiles.add(result.ledgerFile)
+      } catch (error) {
+        throw toEventUpsertVaultCliError(error)
+      }
     }
   }
 

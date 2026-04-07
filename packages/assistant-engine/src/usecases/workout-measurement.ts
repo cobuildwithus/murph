@@ -1,7 +1,6 @@
 import {
   bodyMeasurementEntrySchema,
   profileUnitPreferencesSchema,
-  type EventAttachment,
   type BodyMeasurementEntry,
   type JsonObject,
   type ProfileUnitPreferences,
@@ -9,20 +8,16 @@ import {
 } from '@murphai/contracts'
 import {
   appendProfileSnapshot,
-  buildAttachmentCompatibilityProjections,
-  cleanupStagedEventAttachments,
   readCurrentProfile,
-  stageEventAttachments,
 } from '@murphai/core'
 import { loadJsonInputObject } from '../json-input.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { upsertEventRecord } from './provider-event.js'
 import {
   compactObject,
-  mergeByRelativePath,
   normalizeOptionalText,
+  toEventUpsertVaultCliError,
 } from './vault-usecase-helpers.js'
-import { generateUlid } from '@murphai/runtime-state'
+import { type BodyMeasurementDraftInput, loadWorkoutCoreRuntime } from './workout-core.js'
 
 interface MeasurementPayloadInput {
   occurredAt?: string
@@ -35,6 +30,8 @@ interface MeasurementPayloadInput {
   tags?: string[]
   relatedIds?: string[]
   externalRef?: JsonObject
+  links?: unknown
+  timeZone?: string
 }
 
 export interface AddWorkoutMeasurementInput {
@@ -151,10 +148,6 @@ function buildMeasurementTitle(measurements: readonly BodyMeasurementEntry[]): s
   return 'Body measurement check-in'
 }
 
-function uniqueStrings(values: readonly string[]): string[] {
-  return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))]
-}
-
 async function loadStructuredMeasurementPayload(inputFile: string): Promise<MeasurementPayloadInput> {
   const payload = await loadJsonInputObject(inputFile, 'body measurement payload')
 
@@ -192,20 +185,21 @@ async function loadStructuredMeasurementPayload(inputFile: string): Promise<Meas
       ? payload.relatedIds.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
       : undefined,
     externalRef: asJsonObject(payload.externalRef) ?? undefined,
+    links: payload.links,
+    timeZone: valueAsString(payload.timeZone),
   }
 }
 
-function buildMeasurementEventPayload(input: {
+function buildMeasurementEventDraft(input: {
   payload?: MeasurementPayloadInput
   occurredAt?: string
   title?: string
   note?: string
   measurements: BodyMeasurementEntry[]
   source?: AddWorkoutMeasurementInput['source']
-}): JsonObject {
+}): BodyMeasurementDraftInput {
   const payload = input.payload
   return compactObject({
-    kind: 'body_measurement',
     occurredAt: payload?.occurredAt ?? input.occurredAt ?? new Date().toISOString(),
     source: input.source ?? payload?.source ?? 'manual',
     title: normalizeOptionalText(input.title) ?? payload?.title ?? buildMeasurementTitle(input.measurements),
@@ -214,9 +208,11 @@ function buildMeasurementEventPayload(input: {
     media: payload?.media,
     rawRefs: payload?.rawRefs,
     tags: payload?.tags,
+    links: payload?.links,
     relatedIds: payload?.relatedIds,
     externalRef: payload?.externalRef,
-  }) as JsonObject
+    timeZone: payload?.timeZone,
+  }) as BodyMeasurementDraftInput
 }
 
 export async function addWorkoutMeasurementRecord(input: AddWorkoutMeasurementInput) {
@@ -249,7 +245,7 @@ export async function addWorkoutMeasurementRecord(input: AddWorkoutMeasurementIn
     })]
   })()
 
-  let payload = buildMeasurementEventPayload({
+  const draft = buildMeasurementEventDraft({
     payload: structuredPayload,
     occurredAt: input.occurredAt,
     title: input.title,
@@ -261,78 +257,38 @@ export async function addWorkoutMeasurementRecord(input: AddWorkoutMeasurementIn
   const mediaPaths = Array.isArray(input.mediaPaths)
     ? input.mediaPaths.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
     : []
-  let manifestFile: string | null = null
+  const core = await loadWorkoutCoreRuntime()
 
-  if (mediaPaths.length > 0) {
-    const eventId = valueAsString(payload.id) ?? `evt_${generateUlid()}`
-    payload.id = eventId
-    const occurredAt = String(payload.occurredAt ?? input.occurredAt ?? new Date().toISOString())
-    const stagedMedia = await stageEventAttachments({
+  try {
+    const result = await core.addBodyMeasurement({
       vaultRoot: input.vault,
-      operationType: 'measurement_import_raw',
-      summary: `Stage measurement media for ${eventId}`,
-      occurredAt,
-      ownerKind: 'measurement',
-      ownerId: eventId,
-      importId: eventId,
-      importKind: 'measurement_batch',
-      importedAt: new Date().toISOString(),
-      source: input.source ?? structuredPayload?.source ?? 'manual',
-      provenance: {
-        eventId,
-        family: 'measurement',
-        mediaCount: mediaPaths.length,
-      },
-      attachments: mediaPaths.map((sourcePath, index) => ({
-        role: `media_${index + 1}`,
-        sourcePath,
-      })),
+      draft,
+      ...(mediaPaths.length > 0
+        ? {
+            attachments: mediaPaths.map((sourcePath, index) => ({
+              role: `media_${index + 1}`,
+              sourcePath,
+            })),
+          }
+        : {}),
     })
 
-    if (stagedMedia) {
-      manifestFile = stagedMedia.manifestPath
-      const projections = buildAttachmentCompatibilityProjections(stagedMedia.attachments)
-      payload = {
-        ...payload,
-        attachments: mergeByRelativePath(
-          Array.isArray(payload.attachments) ? payload.attachments as EventAttachment[] : undefined,
-          stagedMedia.attachments,
-        ),
-        rawRefs: uniqueStrings([
-          ...((payload.rawRefs as string[] | undefined) ?? []),
-          ...projections.rawRefs,
-        ]),
-        media: mergeByRelativePath(payload.media as StoredMedia[] | undefined, projections.media),
-      }
+    return {
+      vault: input.vault,
+      eventId: result.eventId,
+      lookupId: result.eventId,
+      ledgerFile: result.ledgerFile,
+      created: result.created,
+      occurredAt: result.event.occurredAt,
+      kind: 'body_measurement' as const,
+      title: result.event.title,
+      measurements: result.event.measurements,
+      media: result.event.media ?? [],
+      manifestFile: result.manifestPath,
+      note: normalizeOptionalText(result.event.note) ?? null,
     }
-  }
-
-  const result = await (async () => {
-    try {
-      return await upsertEventRecord({
-        vault: input.vault,
-        payload,
-      })
-    } catch (error) {
-      if (manifestFile) {
-        await cleanupStagedEventAttachments({
-          vaultRoot: input.vault,
-          manifestPath: manifestFile,
-        })
-      }
-      throw error
-    }
-  })()
-
-  return {
-    ...result,
-    occurredAt: String(payload.occurredAt ?? input.occurredAt ?? new Date().toISOString()),
-    kind: 'body_measurement' as const,
-    title: String(payload.title ?? ''),
-    measurements,
-    media: Array.isArray(payload.media) ? payload.media as StoredMedia[] : [],
-    manifestFile,
-    note: normalizeOptionalText(valueAsString(payload.note)) ?? null,
+  } catch (error) {
+    throw toEventUpsertVaultCliError(error)
   }
 }
 

@@ -47,7 +47,12 @@ import {
   unlinkJournalEventIds as unlinkJournalEventIdsInternal,
   unlinkJournalStreams as unlinkJournalStreamsInternal,
 } from "./domains/journal.ts";
-import { deleteEvent as deleteEventInternal, upsertEvent as upsertEventInternal } from "./domains/events.ts";
+import {
+  addActivitySession as addActivitySessionInternal,
+  addBodyMeasurement as addBodyMeasurementInternal,
+  deleteEvent as deleteEventInternal,
+  upsertEvent as upsertEventInternal,
+} from "./domains/events.ts";
 import { updateVaultSummary as updateVaultSummaryInternal } from "./domains/vault-summary.ts";
 import {
   appendProfileSnapshot as appendProfileSnapshotInternal,
@@ -357,6 +362,18 @@ export async function addMeal(
   input: Parameters<typeof addMealInternal>[0],
 ): ReturnType<typeof addMealInternal> {
   return withCanonicalInputWriteLock(input, addMealInternal);
+}
+
+export async function addActivitySession(
+  input: Parameters<typeof addActivitySessionInternal>[0],
+): ReturnType<typeof addActivitySessionInternal> {
+  return withCanonicalInputWriteLock(input, addActivitySessionInternal);
+}
+
+export async function addBodyMeasurement(
+  input: Parameters<typeof addBodyMeasurementInternal>[0],
+): ReturnType<typeof addBodyMeasurementInternal> {
+  return withCanonicalInputWriteLock(input, addBodyMeasurementInternal);
 }
 
 export async function importSamples(

@@ -62,7 +62,7 @@ export function registerWorkoutCommands(
 ) {
   const workout = Cli.create('workout', {
     description:
-      'Workout capture, reusable routine, and CSV import commands routed through canonical activity-session events plus bank workout-format docs.',
+      'Workout façade commands over core activity-session writes, body-measurement writes, workout-format docs, CSV import, and saved unit preferences.',
   })
 
   workout.command('add', {
@@ -244,7 +244,7 @@ export function registerWorkoutCommands(
 
   const measurement = Cli.create('measurement', {
     description:
-      'Body-measurement capture routed through canonical body_measurement events plus optional progress photos under raw/measurements/**.',
+      'Body-measurement capture routed through the core body_measurement write seam with optional progress photos under raw/measurements/**.',
   })
 
   measurement.command('add', {
