@@ -2,6 +2,16 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.1.18] - 2026-04-07
+
+### Fixed
+- tweak first-contact onboarding copy
+- update hosted deploy secret wiring
+- support interactive npm publish auth
+
+### Changed
+- tighten workspace package exports
+
 ## [0.1.17] - 2026-04-07
 
 ### Added
