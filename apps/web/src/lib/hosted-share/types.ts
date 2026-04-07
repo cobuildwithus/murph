@@ -1,18 +1,17 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 export type HostedSharePageStage = "invalid" | "expired" | "signin" | "ready" | "processing" | "consumed";
+export type HostedShareKind = "food" | "protocol" | "recipe";
 
 export interface HostedSharePreview {
+  kinds: HostedShareKind[];
   counts: {
     foods: number;
     protocols: number;
     recipes: number;
+    total: number;
   };
-  foodTitles: string[];
-  protocolTitles: string[];
-  recipeTitles: string[];
   logMealAfterImport: boolean;
-  title: string;
 }
 
 export interface HostedSharePageData {
@@ -33,7 +32,6 @@ export interface HostedSharePageData {
 export interface CreateHostedShareLinkResult {
   inviteCode: string | null;
   joinUrl: string | null;
-  preview: HostedSharePreview;
   shareCode: string;
   shareUrl: string;
   url: string;
@@ -43,7 +41,6 @@ export interface AcceptHostedShareResult {
   alreadyImported: boolean;
   imported: boolean;
   pending: boolean;
-  preview: HostedSharePreview;
   shareCode: string;
 }
 

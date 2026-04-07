@@ -144,29 +144,25 @@ describe("hosted share service", () => {
     }
   });
 
-  it("accepts the hosted-share preview JSON shape backfilled by migration", () => {
+  it("accepts the tiny hosted-share preview JSON shape", () => {
     expect(readHostedSharePreview({
+      kinds: [],
       counts: {
         foods: 0,
         protocols: 0,
         recipes: 0,
+        total: 0,
       },
-      foodTitles: [],
-      protocolTitles: [],
-      recipeTitles: [],
       logMealAfterImport: false,
-      title: "Shared Murph pack",
     })).toEqual({
+      kinds: [],
       counts: {
         foods: 0,
         protocols: 0,
         recipes: 0,
+        total: 0,
       },
-      foodTitles: [],
-      protocolTitles: [],
-      recipeTitles: [],
       logMealAfterImport: false,
-      title: "Shared Murph pack",
     });
   });
 
@@ -183,10 +179,17 @@ describe("hosted share service", () => {
     expect(result.joinUrl).toContain("/join/invite_123?share=");
     expect(result.shareUrl).toContain(`/share/${encodeURIComponent(result.shareCode)}?invite=invite_123`);
     expect(result.url).toBe(result.joinUrl);
-    expect(result.preview.counts.foods).toBe(1);
     expect(prisma.rows).toHaveLength(1);
-    expect(prisma.rows[0]?.previewTitle).toBe("Shared Murph pack");
-    expect(prisma.rows[0]?.previewJson).toEqual(result.preview);
+    expect(prisma.rows[0]?.previewJson).toEqual({
+      kinds: ["food", "protocol"],
+      counts: {
+        foods: 1,
+        protocols: 1,
+        recipes: 0,
+        total: 2,
+      },
+      logMealAfterImport: true,
+    });
     expect((prisma.rows[0]?.expiresAt?.getTime() ?? 0) - startedAt).toBeGreaterThan(23 * 60 * 60 * 1000);
     expect((prisma.rows[0]?.expiresAt?.getTime() ?? 0) - startedAt).toBeLessThanOrEqual(24 * 60 * 60 * 1000 + 5_000);
     expect(shareHarness.sharePacks.get(`member_sender:${prisma.rows[0]?.id ?? ""}`)).toEqual(buildPack());
@@ -302,16 +305,14 @@ describe("hosted share service", () => {
 
     expect(consumedWithoutPackPageData.stage).toBe("consumed");
     expect(consumedWithoutPackPageData.share?.preview).toEqual({
+      kinds: [],
       counts: {
         foods: 0,
         protocols: 0,
         recipes: 0,
+        total: 0,
       },
-      foodTitles: [],
-      protocolTitles: [],
-      recipeTitles: [],
       logMealAfterImport: false,
-      title: "Shared Murph pack",
     });
   });
 
@@ -331,7 +332,16 @@ describe("hosted share service", () => {
     });
 
     expect(pageData.stage).toBe("signin");
-    expect(pageData.share?.preview).toEqual(created.preview);
+    expect(pageData.share?.preview).toEqual({
+      kinds: ["food", "protocol"],
+      counts: {
+        foods: 1,
+        protocols: 1,
+        recipes: 0,
+        total: 2,
+      },
+      logMealAfterImport: true,
+    });
   });
 
   it("fails before enqueue when the Cloudflare-backed pack is missing at claim time", async () => {
@@ -516,7 +526,6 @@ type HostedShareRow = {
   id: string;
   lastEventId: string | null;
   previewJson: Record<string, unknown>;
-  previewTitle: string;
   senderMemberId: string | null;
   updatedAt: Date;
 };

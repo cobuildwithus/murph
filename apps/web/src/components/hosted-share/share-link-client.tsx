@@ -8,7 +8,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import type { HostedSharePageData } from "@/src/lib/hosted-share/service";
+import type { HostedSharePageData, HostedSharePreview } from "@/src/lib/hosted-share/service";
 
 import { requestHostedOnboardingJson } from "../hosted-onboarding/client-api";
 
@@ -25,13 +25,7 @@ export function ShareLinkClient({ initialData, shareCode }: ShareLinkClientProps
   const statusUrl = buildHostedShareStatusUrl(shareCode, data.inviteCode);
 
   const summary = data.share
-    ? [
-        data.share.preview.counts.foods ? `${data.share.preview.counts.foods} foods` : null,
-        data.share.preview.counts.protocols ? `${data.share.preview.counts.protocols} protocols` : null,
-        data.share.preview.counts.recipes ? `${data.share.preview.counts.recipes} recipes` : null,
-      ]
-        .filter((value): value is string => Boolean(value))
-        .join(" · ")
+    ? formatHostedSharePreviewSummary(data.share.preview)
     : null;
 
   async function handleAccept() {
@@ -133,19 +127,12 @@ export function ShareLinkClient({ initialData, shareCode }: ShareLinkClientProps
       <CardContent className="flex flex-col gap-5">
         {data.share ? (
           <Alert className="border-stone-200/60 bg-stone-50/60">
-            <AlertTitle className="text-lg text-stone-900">{data.share.preview.title}</AlertTitle>
+            <AlertTitle className="text-lg text-stone-900">
+              {describeHostedSharePreview(data.share.preview)}
+            </AlertTitle>
             {summary ? <AlertDescription>{summary}</AlertDescription> : null}
-            {data.share.preview.foodTitles.length > 0 ? (
-              <AlertDescription>Foods: {data.share.preview.foodTitles.join(", ")}</AlertDescription>
-            ) : null}
-            {data.share.preview.protocolTitles.length > 0 ? (
-              <AlertDescription>Protocols: {data.share.preview.protocolTitles.join(", ")}</AlertDescription>
-            ) : null}
-            {data.share.preview.recipeTitles.length > 0 ? (
-              <AlertDescription>Recipes: {data.share.preview.recipeTitles.join(", ")}</AlertDescription>
-            ) : null}
             {data.share.preview.logMealAfterImport ? (
-              <AlertDescription>This link also logs the smoothie after import.</AlertDescription>
+              <AlertDescription>This import also logs the shared food after import.</AlertDescription>
             ) : null}
           </Alert>
         ) : null}
@@ -256,7 +243,7 @@ function resolveSubtitle(data: HostedSharePageData): string {
       return "Ask for a fresh Murph share link.";
     case "signin":
       return data.inviteCode
-        ? "This link will keep the shared smoothie bundle attached while you finish hosted setup."
+        ? "This link keeps the shared bundle attached while you finish hosted setup."
         : "Finish hosted setup on this device, then return here to import the bundle.";
     case "processing":
       return "The shared bundle has been queued for import into your hosted vault.";
@@ -264,6 +251,30 @@ function resolveSubtitle(data: HostedSharePageData): string {
       return "This one-time bundle has already been added.";
     case "ready":
     default:
-      return "This copies the food, its attached supplements/protocols, and any optional first meal log into your own hosted vault.";
+      return "This copies the shared bundle into your own hosted vault.";
   }
+}
+
+function formatHostedSharePreviewSummary(preview: HostedSharePreview): string {
+  return [
+    preview.counts.foods ? formatHostedSharePreviewCount(preview.counts.foods, "food") : null,
+    preview.counts.protocols ? formatHostedSharePreviewCount(preview.counts.protocols, "protocol") : null,
+    preview.counts.recipes ? formatHostedSharePreviewCount(preview.counts.recipes, "recipe") : null,
+  ].filter((value): value is string => Boolean(value)).join(" · ");
+}
+
+function describeHostedSharePreview(preview: HostedSharePreview): string {
+  if (preview.kinds.length === 0) {
+    return "Shared bundle";
+  }
+
+  if (preview.kinds.length === 1) {
+    return `Shared ${preview.kinds[0]} bundle`;
+  }
+
+  return "Shared bundle";
+}
+
+function formatHostedSharePreviewCount(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }

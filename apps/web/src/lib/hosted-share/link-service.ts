@@ -35,8 +35,6 @@ import type {
   HostedSharePageData,
 } from "./types";
 
-const HOSTED_SHARE_PRIVATE_PREVIEW_TITLE = "Shared Murph pack";
-
 export async function createHostedShareLink(input: {
   expiresInHours?: number;
   inviteCode?: string | null;
@@ -78,7 +76,6 @@ export async function createHostedShareLink(input: {
       id: shareId,
       codeHash: hashHostedShareCode(shareCode),
       senderMemberId: input.senderMemberId,
-      previewTitle: HOSTED_SHARE_PRIVATE_PREVIEW_TITLE,
       previewJson: serializeHostedSharePreview(preview),
       expiresAt: hostedShareExpiresAt(input.expiresInHours),
     },
@@ -107,7 +104,6 @@ export async function createHostedShareLink(input: {
   return {
     inviteCode,
     joinUrl,
-    preview,
     shareCode,
     shareUrl,
     url: joinUrl ?? shareUrl,
@@ -156,7 +152,7 @@ export async function buildHostedSharePageData(input: {
             ? "ready"
             : "signin";
   const preview = stage === "consumed" || stage === "expired"
-    ? createHostedShareMinimalPreview(record.previewTitle)
+    ? createHostedShareMinimalPreview()
     : readHostedSharePreview(record.previewJson);
 
   return {

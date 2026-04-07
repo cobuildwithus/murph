@@ -11,7 +11,6 @@ import {
   hashHostedShareCode,
   normalizeOptionalString,
   readHostedSharePack,
-  readHostedSharePreview,
   requireHostedShareLink,
 } from "./shared";
 import type { AcceptHostedShareResult } from "./types";
@@ -80,7 +79,6 @@ export async function acceptHostedShareLink(input: {
       if (latest.consumedByMemberId === memberId) {
         return {
           outcome: "alreadyImported" as const,
-          preview: readHostedSharePreview(latest.previewJson),
           record: latest,
         };
       }
@@ -139,7 +137,6 @@ export async function acceptHostedShareLink(input: {
 
     return {
       outcome: "pending" as const,
-      preview: readHostedSharePreview(record.previewJson),
       record,
     };
   });
@@ -149,7 +146,6 @@ export async function acceptHostedShareLink(input: {
       alreadyImported: true,
       imported: true,
       pending: false,
-      preview: claim.preview,
       shareCode,
     };
   }
@@ -162,7 +158,6 @@ export async function acceptHostedShareLink(input: {
     alreadyImported: false,
     imported,
     pending: !imported,
-    preview: claim.preview,
     shareCode,
   };
 }
