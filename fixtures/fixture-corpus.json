@@ -145,12 +145,12 @@
       "path": "fixtures/golden-outputs/search"
     },
     {
-      "id": "search-index-status",
-      "path": "fixtures/golden-outputs/search-index-status"
+      "id": "query-projection-status",
+      "path": "fixtures/golden-outputs/query-projection-status"
     },
     {
-      "id": "search-index-rebuild",
-      "path": "fixtures/golden-outputs/search-index-rebuild"
+      "id": "query-projection-rebuild",
+      "path": "fixtures/golden-outputs/query-projection-rebuild"
     },
     {
       "id": "timeline",

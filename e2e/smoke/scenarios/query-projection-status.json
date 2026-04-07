@@ -1,0 +1,11 @@
+{
+  "id": "query-projection-status",
+  "command": "vault-cli query projection status --vault <path> [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md",
+    "fixtures/minimal-vault/raw/README.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/query-projection-status",
+  "purpose": "Covers the documented query projection status command without asserting runtime details that already live in package tests."
+}
