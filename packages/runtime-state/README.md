@@ -7,7 +7,7 @@ next to a vault without turning that state into canonical product truth.
 
 - root `@murphai/runtime-state` exports the worker-safe hosted email/env/loopback/id helpers plus pure hosted bundle identity types/equality used by shared contracts
 - `@murphai/runtime-state/node` exports hosted bundle codec/materialization helpers plus the local filesystem, process, assistant runtime state, `.runtime` path, JSON-state versioning, and SQLite migration helpers used by Node-backed callers
-- runtime-state aggregates small per-subsystem descriptor manifests for operational path classification and hosted-snapshot portability instead of relying on one central hard-coded allowlist
+- runtime-state aggregates small per-subsystem descriptor manifests for operational path classification and hosted-snapshot portability instead of relying on one central hard-coded allowlist, including assistant, inbox, device-sync, parser, query, gateway-local, and write-operation owners
 - keep inbox, query, CLI, assistant-runtime, and other local runtime packages aligned on one explicit Node-only owner surface instead of letting each package invent its own local-state layout
 
 ## Local-state taxonomy
