@@ -202,7 +202,12 @@ async function buildExportedSpecifiersByPackage() {
       continue;
     }
 
-    const patterns = [new RegExp(`^${escapeRegExp(packageJson.name)}$`, "u")];
+    const patterns = [];
+
+    if (workspacePackageAllowsRootSpecifier(packageJson)) {
+      patterns.push(new RegExp(`^${escapeRegExp(packageJson.name)}$`, "u"));
+    }
+
     for (const exportKey of Object.keys(packageJson.exports ?? {})) {
       if (exportKey === "." || !exportKey.startsWith("./")) {
         continue;
@@ -218,6 +223,28 @@ async function buildExportedSpecifiersByPackage() {
   }
 
   return exportedSpecifiersByPackage;
+}
+
+function workspacePackageAllowsRootSpecifier(packageJson) {
+  if (!("exports" in packageJson)) {
+    return true;
+  }
+
+  const exportsField = packageJson.exports;
+  if (typeof exportsField === "string" || Array.isArray(exportsField)) {
+    return true;
+  }
+
+  if (!exportsField || typeof exportsField !== "object") {
+    return false;
+  }
+
+  const exportKeys = Object.keys(exportsField);
+  if (exportKeys.some((key) => !key.startsWith("."))) {
+    return true;
+  }
+
+  return Object.hasOwn(exportsField, ".");
 }
 
 function verifyWorkspaceImportPolicy({

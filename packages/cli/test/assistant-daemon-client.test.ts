@@ -20,7 +20,7 @@ import {
   maybeSetAssistantCronTargetViaDaemon,
   maybeUpdateAssistantSessionOptionsViaDaemon,
   resolveAssistantDaemonClientConfig,
-} from '@murphai/assistant-cli/assistant-daemon-client'
+} from '@murphai/assistant-cli/assistant/daemon-client'
 
 const test = baseTest.sequential
 

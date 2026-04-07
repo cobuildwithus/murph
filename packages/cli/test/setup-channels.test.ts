@@ -4,8 +4,10 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test, vi } from 'vitest'
 import { readAssistantAutomationState } from '@murphai/assistant-engine/assistant-state'
-import { createSetupAgentmailSelectionResolver } from '@murphai/setup-cli/setup-agentmail'
-import { configureSetupChannels } from '@murphai/setup-cli/setup-services/channels'
+import {
+  createSetupAgentmailSelectionResolver,
+  configureSetupChannels,
+} from '@murphai/setup-cli/setup-cli'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 test('configureSetupChannels enables Telegram auto-reply only after the doctor probe passes', async () => {

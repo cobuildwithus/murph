@@ -120,6 +120,9 @@ function hasPublishedWorkspaceSmokeImports() {
 
 function collectWorkspacePackageSmokeImports(input) {
   const distRoot = path.join(repoRoot, "packages", input.packageName, "dist");
+  const packageJson = JSON.parse(
+    readFileSync(path.join(repoRoot, "packages", input.packageName, "package.json"), "utf8"),
+  );
   const subpaths = new Set();
   const importPattern = new RegExp(
     `["'\`]@murph(?:ai)?/${input.packageName}/([^"'\\\`\\s]+)["'\`]`,
@@ -154,10 +157,13 @@ function collectWorkspacePackageSmokeImports(input) {
   }
 
   const discoveredSubpaths = [...subpaths].sort();
-  const publishedImportSpecifiers = [
-    `@murphai/${input.packageName}`,
-    ...discoveredSubpaths.map((subpath) => `@murphai/${input.packageName}/${subpath}`),
-  ];
+  const publishedImportSpecifiers = discoveredSubpaths.map(
+    (subpath) => `@murphai/${input.packageName}/${subpath}`,
+  );
+
+  if (workspacePackageAllowsRootSpecifier(packageJson)) {
+    publishedImportSpecifiers.unshift(`@murphai/${input.packageName}`);
+  }
 
   return {
     distImportPaths: discoveredSubpaths.map((subpath) =>
@@ -165,6 +171,28 @@ function collectWorkspacePackageSmokeImports(input) {
     ),
     publishedImportSpecifiers,
   };
+}
+
+function workspacePackageAllowsRootSpecifier(packageJson) {
+  if (!("exports" in packageJson)) {
+    return true;
+  }
+
+  const exportsField = packageJson.exports;
+  if (typeof exportsField === "string" || Array.isArray(exportsField)) {
+    return true;
+  }
+
+  if (!exportsField || typeof exportsField !== "object") {
+    return false;
+  }
+
+  const exportKeys = Object.keys(exportsField);
+  if (exportKeys.some((key) => !key.startsWith("."))) {
+    return true;
+  }
+
+  return Object.hasOwn(exportsField, ".");
 }
 
 function walkTypeScriptFiles(directoryPath) {

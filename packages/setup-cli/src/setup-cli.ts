@@ -36,14 +36,44 @@ import {
   detectSetupProgramName,
   isSetupInvocation,
 } from './setup-services.js'
+import { createSetupAgentmailSelectionResolver } from './setup-agentmail.js'
 import {
+  createSetupAssistantAccountResolver,
+  detectCodexAccountFromAuthJson,
+} from './setup-assistant-account.js'
+import {
+  buildSetupWizardPublicUrlReview,
+  createSetupWizardCompletionController,
+  describeSetupWizardPublicUrlStrategyChoice,
   getDefaultSetupWizardChannels,
   getDefaultSetupWizardScheduledUpdates,
   getDefaultSetupWizardWearables,
+  inferSetupWizardAssistantProvider,
+  resolveSetupWizardInitialScheduledUpdates,
+  resolveSetupWizardAssistantSelection,
   runSetupWizard,
   type SetupWizardResult,
 } from './setup-wizard.js'
+import { configureSetupChannels } from './setup-services/channels.js'
+import { configureSetupScheduledUpdates } from './setup-services/scheduled-updates.js'
 import { incurErrorBridge } from './incur-error-bridge.js'
+
+export {
+  buildSetupWizardPublicUrlReview,
+  configureSetupChannels,
+  configureSetupScheduledUpdates,
+  createSetupWizardCompletionController,
+  createSetupAgentmailSelectionResolver,
+  createSetupAssistantAccountResolver,
+  createSetupServices,
+  detectCodexAccountFromAuthJson,
+  describeSetupWizardPublicUrlStrategyChoice,
+  getDefaultSetupWizardScheduledUpdates,
+  inferSetupWizardAssistantProvider,
+  resolveSetupWizardInitialScheduledUpdates,
+  resolveSetupWizardAssistantSelection,
+  type SetupWizardResult,
+}
 
 export interface SuccessfulSetupContext {
   agent: boolean

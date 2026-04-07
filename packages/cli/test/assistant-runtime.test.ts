@@ -65,9 +65,16 @@ const runtimeMocks = vi.hoisted(() => ({
   ),
 }))
 
-vi.mock('@murphai/assistant-cli/assistant-chat-ink', () => ({
-  runAssistantChatWithInk: runtimeMocks.runAssistantChatWithInk,
-}))
+vi.mock('@murphai/assistant-cli/assistant/ui/ink', async () => {
+  const actual = await vi.importActual<typeof import('@murphai/assistant-cli/assistant/ui/ink')>(
+    '@murphai/assistant-cli/assistant/ui/ink',
+  )
+
+  return {
+    ...actual,
+    runAssistantChatWithInk: runtimeMocks.runAssistantChatWithInk,
+  }
+})
 
 vi.mock('@murphai/assistant-engine/outbound-channel', async () => {
   const actual = await vi.importActual<typeof import('@murphai/assistant-engine/outbound-channel')>(
@@ -110,7 +117,7 @@ import {
   scanAssistantAutoReplyOnce,
   scanAssistantInboxOnce,
   sendAssistantMessage,
-} from '@murphai/assistant-cli/assistant-runtime'
+} from '@murphai/assistant-cli/assistant/runtime'
 import { bridgeAbortSignals } from '@murphai/assistant-engine/assistant/automation/shared'
 import {
   CHAT_BANNER,

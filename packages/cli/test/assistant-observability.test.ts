@@ -13,7 +13,7 @@ import {
   readAssistantOutboxIntent,
 } from '@murphai/assistant-cli/assistant/outbox'
 import { getAssistantStatus } from '@murphai/assistant-cli/assistant/status'
-import { readAssistantStatusSnapshot } from '@murphai/assistant-cli/assistant-runtime'
+import { readAssistantStatusSnapshot } from '@murphai/assistant-cli/assistant/status'
 import { resolveAssistantStatePaths } from '@murphai/assistant-engine/assistant-state'
 import { deliverAssistantMessage } from '@murphai/assistant-engine/outbound-channel'
 import { createVersionedJsonStateEnvelope } from '@murphai/runtime-state/node'

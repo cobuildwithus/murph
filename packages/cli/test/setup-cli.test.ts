@@ -14,17 +14,29 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import { test, vi } from 'vitest'
 import {
+  buildSetupWizardPublicUrlReview,
+  configureSetupScheduledUpdates,
+  createSetupAssistantAccountResolver,
   createSetupCli,
+  createSetupServices,
+  createSetupWizardCompletionController,
+  describeSetupWizardPublicUrlStrategyChoice,
+  detectCodexAccountFromAuthJson,
   detectSetupProgramName,
+  getDefaultSetupWizardScheduledUpdates,
+  inferSetupWizardAssistantProvider,
   isSetupInvocation,
   listSetupPendingWearables,
   listSetupReadyWearables,
-  resolveInitialSetupWizardScheduledUpdates,
-  resolveSetupPostLaunchAction,
   resolveInitialSetupWizardChannels,
+  resolveInitialSetupWizardScheduledUpdates,
+  resolveSetupWizardInitialScheduledUpdates,
+  resolveSetupWizardAssistantSelection,
+  resolveSetupPostLaunchAction,
   shouldAutoLaunchAssistantAfterSetup,
   shouldRunSetupWizard,
   type SuccessfulSetupContext,
+  type SetupWizardResult,
 } from '@murphai/setup-cli/setup-cli'
 import {
   readAssistantAutomationState,
@@ -39,12 +51,6 @@ import {
   saveDefaultVaultConfig,
 } from '@murphai/operator-config/operator-config'
 import {
-  createSetupAssistantAccountResolver,
-  detectCodexAccountFromAuthJson,
-} from '@murphai/setup-cli/setup-assistant-account'
-import { createSetupServices } from '@murphai/setup-cli/setup-services'
-import { configureSetupScheduledUpdates } from '@murphai/setup-cli/setup-services/scheduled-updates'
-import {
   describeSelectedSetupWearables,
   resolveSetupChannelMissingEnv,
   resolveSetupWearableMissingEnv,
@@ -52,16 +58,6 @@ import {
 import type { InboxSourceSetEnabledResult } from '@murphai/assistant-engine/inbox-app/types'
 import type { InboxConnectorConfig } from '@murphai/operator-config/inbox-cli-contracts'
 import type { SetupResult } from '@murphai/operator-config/setup-cli-contracts'
-import {
-  buildSetupWizardPublicUrlReview,
-  createSetupWizardCompletionController,
-  describeSetupWizardPublicUrlStrategyChoice,
-  getDefaultSetupWizardScheduledUpdates,
-  inferSetupWizardAssistantProvider,
-  resolveSetupWizardInitialScheduledUpdates,
-  resolveSetupWizardAssistantSelection,
-  type SetupWizardResult,
-} from '@murphai/setup-cli/setup-wizard'
 import {
   commandOutputFromError,
   ensureCliRuntimeArtifacts,

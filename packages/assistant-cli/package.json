@@ -11,22 +11,6 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    },
-    "./assistant-runtime": {
-      "types": "./dist/assistant-runtime.d.ts",
-      "default": "./dist/assistant-runtime.js"
-    },
-    "./assistant-chat-ink": {
-      "types": "./dist/assistant-chat-ink.d.ts",
-      "default": "./dist/assistant-chat-ink.js"
-    },
-    "./assistant-daemon-client": {
-      "types": "./dist/assistant-daemon-client.d.ts",
-      "default": "./dist/assistant-daemon-client.js"
-    },
     "./commands/assistant": {
       "types": "./dist/commands/assistant.d.ts",
       "default": "./dist/commands/assistant.js"

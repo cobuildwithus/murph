@@ -24,7 +24,7 @@ import {
   runAssistantChat,
   sendAssistantMessage,
   stopAssistantAutomation,
-} from '../assistant-runtime.js'
+} from '../assistant/runtime.js'
 import { runAssistantDoctor } from '../assistant/doctor.js'
 import { getAssistantStatus } from '../assistant/status.js'
 import {
