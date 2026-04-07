@@ -111,6 +111,18 @@ const eventUpsertVaultErrorMappings: Record<string, VaultErrorMapping> = {
   },
 }
 
+const vaultMetadataVaultErrorMappings: Record<string, VaultErrorMapping> = {
+  VAULT_INVALID_METADATA: {
+    code: 'invalid_metadata',
+  },
+  VAULT_UPGRADE_REQUIRED: {
+    code: 'upgrade_required',
+  },
+  VAULT_UPGRADE_UNSUPPORTED: {
+    code: 'upgrade_unsupported',
+  },
+}
+
 export function toVaultCliError(
   error: unknown,
   mappings: Record<string, VaultErrorMapping> = {},
@@ -138,6 +150,14 @@ export function toVaultCliError(
 
 export function toEventUpsertVaultCliError(error: unknown) {
   return toVaultCliError(error, eventUpsertVaultErrorMappings)
+}
+
+export function toVaultMetadataCliError(error: unknown) {
+  return toVaultCliError(error, vaultMetadataVaultErrorMappings)
+}
+
+export function toVaultUpgradeCliError(error: unknown) {
+  return toVaultCliError(error, vaultMetadataVaultErrorMappings)
 }
 
 function toVaultRelativePathError(relativePath: string, error: unknown) {

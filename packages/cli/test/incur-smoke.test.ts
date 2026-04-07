@@ -126,7 +126,7 @@ test('root config file can provide command option defaults', async () => {
         commands: {
           vault: {
             commands: {
-              paths: {
+              show: {
                 options: {
                   vault: vaultRoot,
                 },
@@ -137,17 +137,17 @@ test('root config file can provide command option defaults', async () => {
       }),
     )
 
-    const pathsResult = requireData(
-      await runCli<{ vault: string }>(['--config', configPath, 'vault', 'paths']),
+    const showResult = requireData(
+      await runCli<{ vault: string }>(['--config', configPath, 'vault', 'show']),
     )
-    assert.equal(pathsResult.vault, vaultRoot)
+    assert.equal(showResult.vault, vaultRoot)
 
     const withoutConfig = await runCli([
       '--config',
       configPath,
       '--no-config',
       'vault',
-      'paths',
+      'show',
     ])
     assert.equal(withoutConfig.ok, false)
 
@@ -176,7 +176,7 @@ test('root config autodiscovery resolves ~/.config/murph/config.json', async () 
         commands: {
           vault: {
             commands: {
-              paths: {
+              show: {
                 options: {
                   vault: homeVaultRoot,
                 },
@@ -188,7 +188,7 @@ test('root config autodiscovery resolves ~/.config/murph/config.json', async () 
     )
 
     const output = await runBuiltCliFromCwd(
-      ['vault', 'paths', '--format', 'json', '--filter-output', 'vault'],
+      ['vault', 'show', '--format', 'json', '--filter-output', 'vault'],
       {
         cwd: tempRoot,
         env: {
@@ -214,7 +214,7 @@ test('published config schema artifact covers nested config defaults', async () 
             properties?: {
               commands?: {
                 properties?: {
-                  paths?: {
+                  show?: {
                     properties?: {
                       options?: {
                         properties?: {
@@ -251,7 +251,7 @@ test('published config schema artifact covers nested config defaults', async () 
 
   assert.equal(schema.type, 'object')
   assert.ok(
-    schema.properties?.commands?.properties?.vault?.properties?.commands?.properties?.paths?.properties?.options?.properties?.vault,
+    schema.properties?.commands?.properties?.vault?.properties?.commands?.properties?.show?.properties?.options?.properties?.vault,
   )
   assert.ok(
     schema.properties?.commands?.properties?.assistant?.properties?.commands?.properties?.chat?.properties?.options?.properties?.model,

@@ -12,6 +12,7 @@ import type {
   ExperimentEventRecord,
   MealEventRecord,
   SampleRecord,
+  VaultMetadata,
 } from "@murphai/contracts";
 import {
   AUDIT_ACTORS as CONTRACT_AUDIT_ACTORS,
@@ -159,7 +160,7 @@ test("initializeVault bootstraps the baseline contract layout and passes validat
     createdAt: "2026-03-12T12:00:00.000Z",
   });
 
-  assert.equal(initialized.metadata.schemaVersion, "murph.vault.v1");
+  assert.equal(initialized.metadata.formatVersion, 1);
   assert.match(initialized.metadata.vaultId, /^vault_[0-9A-HJKMNP-TV-Z]{26}$/);
 
   const coreContent = await fs.readFile(path.join(vaultRoot, "CORE.md"), "utf8");
@@ -504,21 +505,13 @@ test("repairVault recreates missing required directories when metadata is curren
   await initializeVault({ vaultRoot });
 
   const metadataPath = path.join(vaultRoot, "vault.json");
-  const originalMetadata = JSON.parse(await fs.readFile(metadataPath, "utf8")) as {
-    idPolicy: {
-      prefixes: Record<string, string>;
-    };
-    paths: Record<string, string>;
-  };
+  const originalMetadata = JSON.parse(await fs.readFile(metadataPath, "utf8")) as VaultMetadata;
   await fs.rm(path.join(vaultRoot, "bank/recipes"), { recursive: true, force: true });
   await fs.rm(path.join(vaultRoot, "bank/foods"), { recursive: true, force: true });
 
   const loaded = await loadVault({ vaultRoot });
 
-  assert.equal(loaded.metadata.idPolicy.prefixes.recipe, "rcp");
-  assert.equal(loaded.metadata.idPolicy.prefixes.food, "food");
-  assert.equal(loaded.metadata.paths.recipesRoot, "bank/recipes");
-  assert.equal(loaded.metadata.paths.foodsRoot, "bank/foods");
+  assert.equal(loaded.metadata.formatVersion, 1);
   const validationBeforeRepair = await validateVault({ vaultRoot });
   assert.equal(validationBeforeRepair.valid, false);
   assert.equal(
@@ -531,12 +524,7 @@ test("repairVault recreates missing required directories when metadata is curren
   );
 
   const repaired = await repairVault({ vaultRoot });
-  const persistedMetadata = JSON.parse(await fs.readFile(metadataPath, "utf8")) as {
-    idPolicy: {
-      prefixes: Record<string, string>;
-    };
-    paths: Record<string, string>;
-  };
+  const persistedMetadata = JSON.parse(await fs.readFile(metadataPath, "utf8")) as VaultMetadata;
   const repairedRecipesDirectory = await fs.stat(path.join(vaultRoot, "bank/recipes"));
   const repairedFoodsDirectory = await fs.stat(path.join(vaultRoot, "bank/foods"));
 
@@ -567,19 +555,15 @@ test("repairVault returns a no-op result when metadata and directories are alrea
   assert.deepEqual(operationPathsAfterRepair, operationPathsBeforeRepair);
 });
 
-test("loadVault and repairVault reject stale metadata instead of auto-repairing additive fields", async () => {
+test("loadVault and repairVault reject vault metadata with unexpected extra fields", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   const metadataPath = path.join(vaultRoot, "vault.json");
-  const staleMetadata = JSON.parse(await fs.readFile(metadataPath, "utf8")) as {
-    idPolicy: {
-      prefixes: Record<string, string>;
-    };
-    paths: Record<string, string>;
+  const staleMetadata = JSON.parse(await fs.readFile(metadataPath, "utf8")) as Record<string, unknown>;
+  staleMetadata.paths = {
+    experimentsRoot: "bank/experiments",
   };
-  delete staleMetadata.idPolicy.prefixes.recipe;
-  delete staleMetadata.paths.recipesRoot;
   await fs.writeFile(metadataPath, `${JSON.stringify(staleMetadata, null, 2)}\n`, "utf8");
 
   await assert.rejects(
@@ -1277,7 +1261,7 @@ test("validateVault reports invalid metadata before deeper validation", async ()
   await fs.writeFile(
     path.join(vaultRoot, "vault.json"),
     JSON.stringify({
-      schemaVersion: "murph.vault.v1",
+      formatVersion: 1,
       title: "",
     }),
     "utf8",

@@ -2,6 +2,11 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  safeParseContract,
+  vaultMetadataSchema,
+} from "@murphai/contracts";
+
+import {
   compareCanonicalEntities,
   linkTargetIds,
   normalizeCanonicalDate,
@@ -76,6 +81,19 @@ const CANONICAL_OPTIONAL_FILES = [
   "CORE.md",
   "bank/profile/current.md",
 ] as const;
+const CURRENT_VAULT_METADATA_FORMAT_VERSION = 1;
+
+class QueryVaultSourceError extends Error {
+  readonly code: string;
+  readonly details?: Record<string, unknown>;
+
+  constructor(code: string, message: string, details?: Record<string, unknown>) {
+    super(message);
+    this.name = "VaultError";
+    this.code = code;
+    this.details = details;
+  }
+}
 
 function relatedIdsToLinks(...groups: readonly unknown[]) {
   return relatedToLinks(groups.flatMap((group) => normalizeUniqueStringArray(group)));
@@ -84,7 +102,7 @@ function relatedIdsToLinks(...groups: readonly unknown[]) {
 export async function readVaultSourceStrict(
   vaultRoot: string,
 ): Promise<VaultSourceSnapshot> {
-  const metadata = await readOptionalJson(path.join(vaultRoot, "vault.json"));
+  const metadata = await readOptionalVaultMetadata(path.join(vaultRoot, "vault.json"));
   const [baseEntities, healthEntities] = await Promise.all([
     readBaseEntities(vaultRoot, metadata),
     collectCanonicalEntities(vaultRoot, { mode: "strict-async" }),
@@ -99,7 +117,7 @@ export async function readVaultSourceStrict(
 export async function readVaultSourceTolerant(
   vaultRoot: string,
 ): Promise<VaultSourceSnapshot> {
-  const metadata = await readOptionalJson(path.join(vaultRoot, "vault.json"));
+  const metadata = await readOptionalVaultMetadata(path.join(vaultRoot, "vault.json"));
   const [baseEntities, healthEntities] = await Promise.all([
     readBaseEntities(vaultRoot, metadata),
     collectCanonicalEntities(vaultRoot, { mode: "tolerant-async" }),
@@ -161,10 +179,10 @@ async function pathExists(targetPath: string): Promise<boolean> {
   }
 }
 
-async function readOptionalJson(filePath: string): Promise<QueryRecordData | null> {
+async function readOptionalVaultMetadata(filePath: string): Promise<QueryRecordData | null> {
   try {
     const contents = await readFile(filePath, "utf8");
-    return JSON.parse(contents) as QueryRecordData;
+    return validateVaultMetadataForQuery(JSON.parse(contents));
   } catch (error) {
     if (isMissingFileError(error)) {
       return null;
@@ -172,6 +190,91 @@ async function readOptionalJson(filePath: string): Promise<QueryRecordData | nul
 
     throw error;
   }
+}
+
+function validateVaultMetadataForQuery(value: unknown): QueryRecordData {
+  const formatVersion = detectVaultMetadataFormatVersion(value);
+
+  if (formatVersion > CURRENT_VAULT_METADATA_FORMAT_VERSION) {
+    throw new QueryVaultSourceError(
+      "VAULT_UPGRADE_UNSUPPORTED",
+      `Vault formatVersion ${formatVersion} is newer than supported formatVersion ${CURRENT_VAULT_METADATA_FORMAT_VERSION}.`,
+      {
+        relativePath: "vault.json",
+        storedFormatVersion: formatVersion,
+        supportedFormatVersion: CURRENT_VAULT_METADATA_FORMAT_VERSION,
+      },
+    );
+  }
+
+  if (formatVersion < CURRENT_VAULT_METADATA_FORMAT_VERSION) {
+    throw new QueryVaultSourceError(
+      "VAULT_UPGRADE_REQUIRED",
+      `Vault formatVersion ${formatVersion} must be upgraded to ${CURRENT_VAULT_METADATA_FORMAT_VERSION} before current-format operations can continue. Run "vault upgrade" first.`,
+      {
+        relativePath: "vault.json",
+        storedFormatVersion: formatVersion,
+        targetFormatVersion: CURRENT_VAULT_METADATA_FORMAT_VERSION,
+      },
+    );
+  }
+
+  const result = safeParseContract(vaultMetadataSchema, value);
+  if (result.success) {
+    return result.data;
+  }
+
+  throw new QueryVaultSourceError(
+    "VAULT_INVALID_METADATA",
+    "Vault metadata failed contract validation.",
+    {
+      relativePath: "vault.json",
+      errors: result.errors,
+    },
+  );
+}
+
+function detectVaultMetadataFormatVersion(rawMetadata: unknown): number {
+  if (!isPlainRecord(rawMetadata)) {
+    throw new QueryVaultSourceError(
+      "VAULT_INVALID_METADATA",
+      "Vault metadata must be a JSON object.",
+      {
+        relativePath: "vault.json",
+      },
+    );
+  }
+
+  if (!Object.hasOwn(rawMetadata, "formatVersion")) {
+    throw new QueryVaultSourceError(
+      "VAULT_INVALID_METADATA",
+      "Vault metadata formatVersion is required.",
+      {
+        relativePath: "vault.json",
+      },
+    );
+  }
+
+  const formatVersion = rawMetadata.formatVersion;
+  if (
+    typeof formatVersion !== "number" ||
+    !Number.isInteger(formatVersion) ||
+    formatVersion < 0
+  ) {
+    throw new QueryVaultSourceError(
+      "VAULT_INVALID_METADATA",
+      "Vault metadata formatVersion must be a non-negative integer.",
+      {
+        relativePath: "vault.json",
+      },
+    );
+  }
+
+  return formatVersion;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 async function readBaseEntities(

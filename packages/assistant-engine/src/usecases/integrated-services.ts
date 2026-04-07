@@ -86,7 +86,6 @@ import {
   listJournalRecords,
   showExperimentRecord,
   showJournalRecord,
-  showVaultPaths as showVaultPathsUseCase,
   showVaultStats as showVaultStatsUseCase,
   showVaultSummary as showVaultSummaryUseCase,
   stopExperimentRecord,
@@ -99,7 +98,10 @@ import {
   unlinkJournalEventIds,
   unlinkJournalStreams,
 } from "./experiment-journal-vault.js"
-import { toVaultCliError } from "./vault-usecase-helpers.js"
+import {
+  toVaultCliError,
+  toVaultUpgradeCliError,
+} from "./vault-usecase-helpers.js"
 
 function createIntegratedCoreServices(): CoreWriteServices {
   return {
@@ -150,24 +152,28 @@ function createIntegratedCoreServices(): CoreWriteServices {
     ) {
       const { vault } = input
       const { core } = await loadIntegratedRuntime()
-      const result = await core.upgradeVault({
-        vaultRoot: vault,
-        dryRun: input.dryRun,
-      })
+      try {
+        const result = await core.upgradeVault({
+          vaultRoot: vault,
+          dryRun: input.dryRun,
+        })
 
-      return {
-        vault,
-        metadataFile: result.metadataFile,
-        title: result.title,
-        timezone: result.timezone,
-        fromFormatVersion: result.fromFormatVersion,
-        toFormatVersion: result.toFormatVersion,
-        steps: result.steps,
-        affectedFiles: result.affectedFiles,
-        rebuildableProjectionStores: result.rebuildableProjectionStores,
-        updated: result.updated,
-        dryRun: result.dryRun,
-        auditPath: result.auditPath,
+        return {
+          vault,
+          metadataFile: result.metadataFile,
+          title: result.title,
+          timezone: result.timezone,
+          fromFormatVersion: result.fromFormatVersion,
+          toFormatVersion: result.toFormatVersion,
+          steps: result.steps,
+          affectedFiles: result.affectedFiles,
+          rebuildableProjectionStores: result.rebuildableProjectionStores,
+          updated: result.updated,
+          dryRun: result.dryRun,
+          auditPath: result.auditPath,
+        }
+      } catch (error) {
+        throw toVaultUpgradeCliError(error)
       }
     },
     async addMeal(input: CommandContext & {
@@ -542,9 +548,6 @@ function createIntegratedQueryServices(): QueryServices {
     },
     async showVault(input: CommandContext) {
       return showVaultSummaryUseCase(input.vault)
-    },
-    async showVaultPaths(input: CommandContext) {
-      return showVaultPathsUseCase(input.vault)
     },
     async showVaultStats(input: CommandContext) {
       return showVaultStatsUseCase(input.vault)

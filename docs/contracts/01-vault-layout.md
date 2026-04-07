@@ -43,14 +43,13 @@ vault/
 
 `vault.json` is a closed metadata document with these required keys:
 
-- `schemaVersion`
+- `formatVersion`
 - `vaultId`
 - `createdAt`
 - `title`
 - `timezone`
-- `idPolicy`
-- `paths`
-- `shards`
+
+`vault.json` stores instance facts only. Layout paths, shard patterns, and id-prefix policy are code-owned runtime contract details rather than per-vault durable data.
 
 Source contract: `packages/contracts/src/schemas.ts`
 Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
@@ -100,6 +99,7 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 
 ## Schema Version Policy
 
+- `vault.json` uses `formatVersion` as its sole compatibility knob.
 - Stored documents and ledgers use explicit `schemaVersion` fields; raw import sidecars also carry a versioned manifest shape.
 - Published version strings are immutable.
 - Any incompatible change must mint a new version string and come with an explicit cutover decision: ship a one-time core migration or intentionally drop older read support.

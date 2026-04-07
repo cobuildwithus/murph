@@ -46,10 +46,13 @@ async function runSliceCli<TData>(
   return JSON.parse(output.join('').trim()) as CliEnvelope<TData>
 }
 
-async function rewriteVaultMetadataAsLegacy(vaultRoot: string): Promise<void> {
+async function rewriteVaultMetadataWithFormatVersion(
+  vaultRoot: string,
+  formatVersion: number,
+): Promise<void> {
   const metadataPath = path.join(vaultRoot, 'vault.json')
   const metadata = JSON.parse(await readFile(metadataPath, 'utf8')) as Record<string, unknown>
-  delete metadata.formatVersion
+  metadata.formatVersion = formatVersion
   await writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`, 'utf8')
 }
 
@@ -465,18 +468,12 @@ test.sequential(
         formatVersion: number
         title: string
         timezone: string
-        idPolicy: {
-          prefixes: Record<string, string>
-        }
-        paths: Record<string, string>
       }
       const coreMarkdown = await readFile(path.join(vaultRoot, 'CORE.md'), 'utf8')
 
       assert.equal(metadata.title, 'Precision Health Vault')
       assert.equal(metadata.timezone, 'UTC')
       assert.equal(metadata.formatVersion, 1)
-      assert.equal(metadata.idPolicy.prefixes.recipe, 'rcp')
-      assert.equal(metadata.paths.recipesRoot, 'bank/recipes')
       assert.match(coreMarkdown, /^# Precision Health Vault/mu)
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
@@ -496,10 +493,6 @@ test.sequential(
         await readFile(metadataPath, 'utf8'),
       ) as {
         formatVersion: number
-        idPolicy: {
-          prefixes: Record<string, string>
-        }
-        paths: Record<string, string>
       }
       await rm(path.join(vaultRoot, 'bank/recipes'), { recursive: true, force: true })
 
@@ -526,10 +519,6 @@ test.sequential(
         await readFile(metadataPath, 'utf8'),
       ) as {
         formatVersion: number
-        idPolicy: {
-          prefixes: Record<string, string>
-        }
-        paths: Record<string, string>
       }
 
       assert.deepEqual(repairedMetadata, initialMetadata)
@@ -553,114 +542,66 @@ test.sequential(
 )
 
 test.sequential(
-  'vault upgrade plans and applies canonical metadata migrations for legacy vaults',
+  'vault upgrade rejects explicit older format versions when no migration is registered',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-vault-upgrade-'))
 
     try {
       await runSliceCli(['init', '--vault', vaultRoot])
-      await rewriteVaultMetadataAsLegacy(vaultRoot)
+      await rewriteVaultMetadataWithFormatVersion(vaultRoot, 0)
       await rm(path.join(vaultRoot, 'CORE.md'), { force: true })
 
-      const shownBeforeUpgrade = await runSliceCli<{
-        formatVersion: number | null
-        title: string | null
-      }>([
+      const shownBeforeUpgrade = await runSliceCli([
         'vault',
         'show',
         '--vault',
         vaultRoot,
       ])
-      const dryRunUpgrade = await runSliceCli<{
-        fromFormatVersion: number
-        toFormatVersion: number
-        steps: Array<{
-          description: string
-          fromFormatVersion: number
-          toFormatVersion: number
-        }>
-        affectedFiles: string[]
-        rebuildableProjectionStores: string[]
-        updated: boolean
-        dryRun: boolean
-        auditPath: string | null
-      }>([
+      const dryRunUpgrade = await runSliceCli([
         'vault',
         'upgrade',
         '--vault',
         vaultRoot,
         '--dry-run',
       ])
-      const appliedUpgrade = await runSliceCli<{
-        fromFormatVersion: number
-        toFormatVersion: number
-        steps: Array<{
-          description: string
-          fromFormatVersion: number
-          toFormatVersion: number
-        }>
-        affectedFiles: string[]
-        rebuildableProjectionStores: string[]
-        updated: boolean
-        dryRun: boolean
-        auditPath: string | null
-      }>([
+      const appliedUpgrade = await runSliceCli([
         'vault',
         'upgrade',
         '--vault',
         vaultRoot,
       ])
-      const shownAfterUpgrade = await runSliceCli<{
-        formatVersion: number | null
-        coreTitle: string | null
-      }>([
+      const shownAfterUpgrade = await runSliceCli([
         'vault',
         'show',
         '--vault',
         vaultRoot,
       ])
 
-      assert.equal(shownBeforeUpgrade.ok, true)
-      assert.equal(requireData(shownBeforeUpgrade).formatVersion, 0)
-      assert.equal(requireData(shownBeforeUpgrade).title !== null, true)
+      assert.equal(shownBeforeUpgrade.ok, false)
+      assert.equal(shownBeforeUpgrade.error?.code, 'upgrade_required')
 
-      assert.equal(dryRunUpgrade.ok, true)
-      assert.equal(requireData(dryRunUpgrade).dryRun, true)
-      assert.equal(requireData(dryRunUpgrade).updated, false)
-      assert.equal(requireData(dryRunUpgrade).fromFormatVersion, 0)
-      assert.equal(requireData(dryRunUpgrade).toFormatVersion, 1)
-      assert.deepEqual(requireData(dryRunUpgrade).affectedFiles, ['CORE.md', 'vault.json'])
-      assert.deepEqual(requireData(dryRunUpgrade).rebuildableProjectionStores, [])
-      assert.deepEqual(requireData(dryRunUpgrade).steps, [
-        {
-          description: 'Write explicit vault formatVersion metadata and restore the canonical CORE.md baseline when missing.',
-          fromFormatVersion: 0,
-          toFormatVersion: 1,
-        },
-      ])
-      assert.equal(requireData(dryRunUpgrade).auditPath, null)
+      assert.equal(dryRunUpgrade.ok, false)
+      assert.equal(dryRunUpgrade.error?.code, 'upgrade_unsupported')
+      assert.equal(
+        dryRunUpgrade.error?.message,
+        'No vault upgrade migration is registered for formatVersion 0.',
+      )
+      assert.equal(appliedUpgrade.ok, false)
+      assert.equal(appliedUpgrade.error?.code, 'upgrade_unsupported')
+      assert.equal(
+        appliedUpgrade.error?.message,
+        'No vault upgrade migration is registered for formatVersion 0.',
+      )
 
-      assert.equal(appliedUpgrade.ok, true)
-      assert.equal(requireData(appliedUpgrade).dryRun, false)
-      assert.equal(requireData(appliedUpgrade).updated, true)
-      assert.equal(requireData(appliedUpgrade).fromFormatVersion, 0)
-      assert.equal(requireData(appliedUpgrade).toFormatVersion, 1)
-      assert.deepEqual(requireData(appliedUpgrade).affectedFiles, ['CORE.md', 'vault.json'])
-      assert.deepEqual(requireData(appliedUpgrade).rebuildableProjectionStores, [])
-      assert.equal(typeof requireData(appliedUpgrade).auditPath, 'string')
-
-      assert.equal(shownAfterUpgrade.ok, true)
-      assert.equal(requireData(shownAfterUpgrade).formatVersion, 1)
-      assert.equal(requireData(shownAfterUpgrade).coreTitle !== null, true)
+      assert.equal(shownAfterUpgrade.ok, false)
+      assert.equal(shownAfterUpgrade.error?.code, 'upgrade_required')
 
       const upgradedMetadata = JSON.parse(
         await readFile(path.join(vaultRoot, 'vault.json'), 'utf8'),
       ) as {
         formatVersion: number
       }
-      assert.equal(upgradedMetadata.formatVersion, 1)
-      const coreMarkdown = await readFile(path.join(vaultRoot, 'CORE.md'), 'utf8')
-      assert.ok(coreMarkdown.startsWith('---\n'))
+      assert.equal(upgradedMetadata.formatVersion, 0)
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

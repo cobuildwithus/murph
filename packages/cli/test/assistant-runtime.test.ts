@@ -7295,7 +7295,7 @@ test('runAssistantAutomation preserves structured daemon failure details in the 
       code: 'VAULT_INVALID_METADATA',
       details: {
         errors: [
-          '$.idPolicy.prefixes.protocol: Invalid input: expected "prot"',
+          '$.formatVersion: Invalid input: expected 1',
           '$.paths: Unrecognized key: "regimensRoot"',
         ],
       },
@@ -7325,7 +7325,7 @@ test('runAssistantAutomation preserves structured daemon failure details in the 
   const expectedDetail = [
     'Vault metadata failed contract validation.',
     'details:',
-    '- $.idPolicy.prefixes.protocol: Invalid input: expected "prot"',
+    '- $.formatVersion: Invalid input: expected 1',
     '- $.paths: Unrecognized key: "regimensRoot"',
   ].join('\n')
 

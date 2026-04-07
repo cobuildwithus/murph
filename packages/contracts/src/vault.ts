@@ -13,5 +13,5 @@ export function resolveVaultMetadataFormatVersion(
     return null;
   }
 
-  return metadata.formatVersion ?? 0;
+  return metadata.formatVersion;
 }

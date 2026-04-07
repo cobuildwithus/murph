@@ -199,7 +199,6 @@ declare module 'incur' {
       'supplement upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'timeline': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string; experiment?: string; kind?: string[]; stream?: string[]; entryType?: string[]; limit: number } }
       'validate': { args: {}; options: { vault: string; requestId?: string } }
-      'vault paths': { args: {}; options: { vault: string; requestId?: string } }
       'vault repair': { args: {}; options: { vault: string; requestId?: string } }
       'vault show': { args: {}; options: { vault: string; requestId?: string } }
       'vault stats': { args: {}; options: { vault: string; requestId?: string } }

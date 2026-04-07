@@ -15,11 +15,8 @@ import {
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { VaultServices } from '@murphai/assistant-engine/vault-services'
 
-const unknownRecordSchema = z.record(z.string(), z.unknown())
-
 const vaultShowResultSchema = z.object({
   vault: pathSchema,
-  schemaVersion: z.string().min(1).nullable(),
   formatVersion: z.number().int().nonnegative().nullable(),
   vaultId: z.string().min(1).nullable(),
   title: z.string().min(1).nullable(),
@@ -28,12 +25,6 @@ const vaultShowResultSchema = z.object({
   corePath: pathSchema.nullable(),
   coreTitle: z.string().min(1).nullable(),
   coreUpdatedAt: isoTimestampSchema.nullable(),
-})
-
-const vaultPathsResultSchema = z.object({
-  vault: pathSchema,
-  paths: unknownRecordSchema.nullable(),
-  shards: unknownRecordSchema.nullable(),
 })
 
 const vaultStatsResultSchema = z.object({
@@ -130,19 +121,6 @@ export function registerVaultCommands(cli: Cli.Cli, services: VaultServices) {
     output: vaultShowResultSchema,
     async run({ options }) {
       return services.query.showVault({
-        vault: options.vault,
-        requestId: requestIdFromOptions(options),
-      })
-    },
-  })
-
-  vaultGroup.command('paths', {
-    description: 'Show the path and shard layout advertised by vault metadata.',
-    args: emptyArgsSchema,
-    options: withBaseOptions(),
-    output: vaultPathsResultSchema,
-    async run({ options }) {
-      return services.query.showVaultPaths({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
       })
