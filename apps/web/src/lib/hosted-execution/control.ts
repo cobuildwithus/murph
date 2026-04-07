@@ -8,15 +8,11 @@ import {
   type HostedExecutionManagedUserCryptoStatus,
 } from "@murphai/hosted-execution/client";
 import {
-  type HostedMemberPrivateState,
-} from "@murphai/hosted-execution/member-private-state";
-import {
   readHostedExecutionControlEnvironment,
 } from "@murphai/hosted-execution/env";
-import type { SharePack } from "@murphai/contracts";
 import { createHostedVerifiedEmailUserEnv } from "@murphai/runtime-state";
 
-import { createHostedExecutionVercelOidcBearerTokenProvider } from "./vercel-oidc";
+import { createHostedExecutionVercelOidcBearerTokenProvider } from "./auth-adapter";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
 export interface HostedVerifiedEmailSyncResult {
@@ -78,31 +74,6 @@ export async function deleteHostedStoredDispatchPayloadBestEffort(
   }
 }
 
-export async function readHostedMemberPrivateStateFromHostedExecution(
-  memberId: string,
-): Promise<HostedMemberPrivateState | null> {
-  const client = readHostedExecutionControlClientIfConfigured();
-  return client ? client.getMemberPrivateState(memberId) : null;
-}
-
-export async function writeHostedMemberPrivateStateToHostedExecution(
-  state: HostedMemberPrivateState,
-): Promise<HostedMemberPrivateState> {
-  return requireHostedExecutionControlClient().putMemberPrivateState(state.memberId, state);
-}
-
-export async function deleteHostedMemberPrivateStateFromHostedExecution(
-  memberId: string,
-): Promise<void> {
-  const client = readHostedExecutionControlClientIfConfigured();
-
-  if (!client) {
-    return;
-  }
-
-  await client.deleteMemberPrivateState(memberId);
-}
-
 export async function syncHostedVerifiedEmailToHostedExecution(input: {
   userId: string;
   emailAddress: string;
@@ -144,26 +115,4 @@ export async function provisionManagedUserCryptoInHostedExecution(
   userId: string,
 ): Promise<HostedExecutionManagedUserCryptoStatus> {
   return requireHostedExecutionControlClient().provisionManagedUserCrypto(userId);
-}
-
-export async function writeHostedSharePackToHostedExecution(input: {
-  ownerUserId: string;
-  pack: SharePack;
-  shareId: string;
-}): Promise<SharePack> {
-  return requireHostedExecutionControlClient().putSharePack(input.ownerUserId, input.shareId, input.pack);
-}
-
-export async function readHostedSharePackFromHostedExecution(input: {
-  ownerUserId: string;
-  shareId: string;
-}): Promise<SharePack | null> {
-  return requireHostedExecutionControlClient().getSharePack(input.ownerUserId, input.shareId);
-}
-
-export async function deleteHostedSharePackFromHostedExecution(input: {
-  ownerUserId: string;
-  shareId: string;
-}): Promise<void> {
-  await requireHostedExecutionControlClient().deleteSharePack(input.ownerUserId, input.shareId);
 }

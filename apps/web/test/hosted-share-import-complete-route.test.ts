@@ -3,15 +3,15 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createJsonPostRequest } from "./route-test-helpers";
 
 const mocks = vi.hoisted(() => ({
-  deleteHostedSharePackFromHostedExecution: vi.fn(),
+  deleteHostedSharePackObject: vi.fn(),
   finalizeHostedShareAcceptance: vi.fn(),
   findHostedShareLinkById: vi.fn(),
   getPrisma: vi.fn(),
   requireHostedWebInternalSignedRequest: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-execution/control", () => ({
-  deleteHostedSharePackFromHostedExecution: mocks.deleteHostedSharePackFromHostedExecution,
+vi.mock("@/src/lib/hosted-share/pack-store", () => ({
+  deleteHostedSharePackObject: mocks.deleteHostedSharePackObject,
 }));
 
 vi.mock("@/src/lib/hosted-execution/internal", () => ({
@@ -44,7 +44,7 @@ describe("hosted share-import complete route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.deleteHostedSharePackFromHostedExecution.mockResolvedValue(undefined);
+    mocks.deleteHostedSharePackObject.mockResolvedValue(undefined);
     mocks.finalizeHostedShareAcceptance.mockResolvedValue(undefined);
     mocks.findHostedShareLinkById.mockResolvedValue({
       id: "share_123",
@@ -77,7 +77,7 @@ describe("hosted share-import complete route", () => {
       prisma: { prisma: true },
       shareId: "share_123",
     });
-    expect(mocks.deleteHostedSharePackFromHostedExecution).toHaveBeenCalledWith({
+    expect(mocks.deleteHostedSharePackObject).toHaveBeenCalledWith({
       ownerUserId: "member_sender",
       shareId: "share_123",
     });
@@ -90,7 +90,7 @@ describe("hosted share-import complete route", () => {
 
   it("keeps the finalize success response even when pack cleanup fails", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    mocks.deleteHostedSharePackFromHostedExecution.mockRejectedValue(new Error("delete failed"));
+    mocks.deleteHostedSharePackObject.mockRejectedValue(new Error("delete failed"));
 
     const response = await hostedShareImportCompleteRoute.POST(
       createJsonPostRequest(
