@@ -271,7 +271,7 @@ test('workout format save rejects structured payloads that omit canonical templa
     ])
 
     assert.equal(saved.ok, false)
-    assert.equal(saved.error?.code, 'invalid_payload')
+    assert.equal(saved.error?.code, 'VALIDATION_ERROR')
     assert.match(saved.error?.message ?? '', /template/u)
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
