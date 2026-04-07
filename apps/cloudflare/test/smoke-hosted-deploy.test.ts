@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   readBearerAuthorizationToken,
-} from "@murphai/hosted-execution";
+} from "../src/auth-adapter.js";
 
 import {
   buildVersionOverrideHeaders,

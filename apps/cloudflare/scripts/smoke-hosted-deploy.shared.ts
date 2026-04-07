@@ -8,7 +8,7 @@ import type {
 } from "@murphai/hosted-execution";
 import {
   readBearerAuthorizationToken,
-} from "@murphai/hosted-execution/vercel-oidc";
+} from "../src/auth-adapter.ts";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 

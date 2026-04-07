@@ -14,7 +14,7 @@ import {
 } from "@murphai/hosted-execution/env";
 
 import { readHostedExecutionControlClientIfConfigured } from "./control";
-import { createHostedExecutionVercelOidcBearerTokenProvider } from "./vercel-oidc";
+import { createHostedExecutionVercelOidcBearerTokenProvider } from "./auth-adapter";
 
 export async function dispatchHostedExecutionStatus(
   input: HostedExecutionDispatchRequest,
