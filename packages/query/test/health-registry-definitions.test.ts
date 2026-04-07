@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import {
   allergyRegistryEntityDefinition,
+  bankEntityDefinitions,
   bankEntityDefinitionByKind,
   conditionRegistryEntityDefinition,
   extractBankEntityRegistryLinks,
@@ -10,10 +11,12 @@ import {
   extractHealthEntityRegistryRelatedIds,
   familyRegistryEntityDefinition,
   geneticsRegistryEntityDefinition,
+  getBankEntityRegistryProjectionMetadata,
   goalRegistryEntityDefinition,
   hasHealthEntityRegistry,
   healthEntityDefinitionByKind,
   protocolRegistryEntityDefinition,
+  type BankEntityRegistryProjectionHelpers,
 } from "@murphai/contracts";
 import { test } from "vitest";
 
@@ -41,9 +44,25 @@ import {
   workoutFormatRecordFromEntity,
   workoutFormatRegistryDefinition,
 } from "../src/health/registries.ts";
+import { getBankRegistryQueryMetadata } from "../src/health/bank-registry-query-metadata.ts";
 import { getHealthRegistryQueryMetadata } from "../src/health/health-registry-query-metadata.ts";
 import { projectRegistryEntity } from "../src/health/projectors/registry.ts";
 import type { MarkdownDocumentRecord } from "../src/health/shared.ts";
+import {
+  firstBoolean,
+  firstNumber,
+  firstObject,
+  firstString,
+  firstStringArray,
+} from "../src/health/shared.ts";
+
+const registryProjectionHelpers: BankEntityRegistryProjectionHelpers = {
+  firstBoolean,
+  firstNumber,
+  firstObject,
+  firstString,
+  firstStringArray,
+};
 
 test("query registry definitions combine canonical registry metadata with query-owned projection metadata", () => {
   const registryDefinitions = [
@@ -80,6 +99,58 @@ test("query registry definitions combine canonical registry metadata with query-
       queryMetadata.sortBehavior ? "function" : "undefined",
     );
   }
+});
+
+test("bank registry definitions reuse the contracts projection owner for every family", () => {
+  for (const { kind } of bankEntityDefinitions) {
+    assert.equal(
+      getBankRegistryQueryMetadata(kind),
+      getBankEntityRegistryProjectionMetadata(kind),
+    );
+  }
+});
+
+test("food auto-log projection metadata stays owned by contracts", () => {
+  const projection = getBankEntityRegistryProjectionMetadata("food");
+
+  assert.deepEqual(
+    projection.transform({
+      attributes: {
+        summary: "Quick weekday breakfast",
+        kind: "meal",
+        brand: "House",
+        vendor: "Cafe",
+        location: "Home",
+        serving: "1 bowl",
+        aliases: ["Acai"],
+        ingredients: ["acai", "banana"],
+        tags: ["breakfast"],
+        note: "Seasonal fruit works too.",
+        attachedProtocolIds: ["protocol_123"],
+        autoLogDaily: {
+          time: "08:00",
+        },
+      },
+      helpers: registryProjectionHelpers,
+      relativePath: "bank/foods/acai-bowl.md",
+    }),
+    {
+      summary: "Quick weekday breakfast",
+      kind: "meal",
+      brand: "House",
+      vendor: "Cafe",
+      location: "Home",
+      serving: "1 bowl",
+      aliases: ["Acai"],
+      ingredients: ["acai", "banana"],
+      tags: ["breakfast"],
+      note: "Seasonal fruit works too.",
+      attachedProtocolIds: ["protocol_123"],
+      autoLogDaily: {
+        time: "08:00",
+      },
+    },
+  );
 });
 
 test("protocol registry projection keeps the shared relative-path grouping rule", () => {

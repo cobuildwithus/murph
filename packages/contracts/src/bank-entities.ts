@@ -10,6 +10,10 @@ import {
   type HealthEntityRegistryLinkCardinality,
   type HealthEntityRegistryLinkMetadata,
   type HealthEntityRegistryMetadata,
+  type HealthEntityRegistryProjectionContext,
+  type HealthEntityRegistryProjectionHelpers,
+  type HealthEntityRegistryProjectionMetadata,
+  type HealthEntityRegistryProjectionSortBehavior,
 } from "./health-entities.ts";
 import {
   foodUpsertPayloadSchema,
@@ -43,11 +47,14 @@ export type BankEntityKind =
 export type BankEntityRegistryLink = HealthEntityRegistryLink;
 export type BankEntityRegistryLinkCardinality = HealthEntityRegistryLinkCardinality;
 export type BankEntityRegistryLinkMetadata = HealthEntityRegistryLinkMetadata;
+export type BankEntityRegistryProjectionContext = HealthEntityRegistryProjectionContext;
+export type BankEntityRegistryProjectionHelpers = HealthEntityRegistryProjectionHelpers;
+export type BankEntityRegistryProjectionMetadata = HealthEntityRegistryProjectionMetadata;
+export type BankEntityRegistryProjectionSortBehavior =
+  HealthEntityRegistryProjectionSortBehavior;
 
-// Health-backed bank entities inherit shared registry command/projection metadata
-// from `health-entities.ts`. Non-health bank families still add any extra
-// read-model projection metadata in their owning adapter layers until they are
-// ported onto the same shared definition shape.
+// Bank registry command/projection metadata should have one shared owner in
+// contracts so query adapters can stay thin regardless of family.
 export interface BankEntityRegistryMetadata extends HealthEntityRegistryMetadata {}
 
 export type BankEntityDefinitionWithRegistry = BankEntityDefinition;
@@ -81,6 +88,22 @@ const HEALTH_BANK_ENTITY_KINDS = [
   "genetics",
 ] as const satisfies readonly HealthBackedBankEntityKind[];
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function projectFoodAutoLogDaily(
+  value: unknown,
+  helpers: BankEntityRegistryProjectionHelpers,
+): { time: string } | null {
+  if (!isPlainObject(value)) {
+    return null;
+  }
+
+  const time = helpers.firstString(value, ["time"]);
+  return time ? { time } : null;
+}
+
 function defineBankRegistryEntity(
   input: DefineBankRegistryEntityInput,
 ): BankEntityDefinition {
@@ -110,6 +133,25 @@ const checkedBankEntityDefinitions = [
       directory: "bank/foods",
       idField: "foodId",
       upsertPayloadSchema: foodUpsertPayloadSchema as ZodTypeAny,
+      projection: {
+        sortBehavior: "title",
+        transform({ attributes, helpers }) {
+          return {
+            summary: helpers.firstString(attributes, ["summary"]),
+            kind: helpers.firstString(attributes, ["kind"]),
+            brand: helpers.firstString(attributes, ["brand"]),
+            vendor: helpers.firstString(attributes, ["vendor"]),
+            location: helpers.firstString(attributes, ["location"]),
+            serving: helpers.firstString(attributes, ["serving"]),
+            aliases: helpers.firstStringArray(attributes, ["aliases"]),
+            ingredients: helpers.firstStringArray(attributes, ["ingredients"]),
+            tags: helpers.firstStringArray(attributes, ["tags"]),
+            note: helpers.firstString(attributes, ["note"]),
+            attachedProtocolIds: helpers.firstStringArray(attributes, ["attachedProtocolIds"]),
+            autoLogDaily: projectFoodAutoLogDaily(attributes.autoLogDaily, helpers),
+          };
+        },
+      },
       relationKeys: [
         {
           type: "related_protocol",
@@ -138,6 +180,26 @@ const checkedBankEntityDefinitions = [
       directory: "bank/recipes",
       idField: "recipeId",
       upsertPayloadSchema: recipeUpsertPayloadSchema as ZodTypeAny,
+      projection: {
+        sortBehavior: "title",
+        transform({ attributes, helpers }) {
+          return {
+            summary: helpers.firstString(attributes, ["summary"]),
+            cuisine: helpers.firstString(attributes, ["cuisine"]),
+            dishType: helpers.firstString(attributes, ["dishType"]),
+            source: helpers.firstString(attributes, ["source"]),
+            servings: helpers.firstNumber(attributes, ["servings"]),
+            prepTimeMinutes: helpers.firstNumber(attributes, ["prepTimeMinutes"]),
+            cookTimeMinutes: helpers.firstNumber(attributes, ["cookTimeMinutes"]),
+            totalTimeMinutes: helpers.firstNumber(attributes, ["totalTimeMinutes"]),
+            tags: helpers.firstStringArray(attributes, ["tags"]),
+            ingredients: helpers.firstStringArray(attributes, ["ingredients"]),
+            steps: helpers.firstStringArray(attributes, ["steps"]),
+            relatedGoalIds: helpers.firstStringArray(attributes, ["relatedGoalIds"]),
+            relatedConditionIds: helpers.firstStringArray(attributes, ["relatedConditionIds"]),
+          };
+        },
+      },
       relationKeys: [
         {
           type: "supports_goal",
@@ -169,6 +231,20 @@ const checkedBankEntityDefinitions = [
       frontmatterSchema: providerFrontmatterSchema as ZodTypeAny,
       directory: "bank/providers",
       idField: "providerId",
+      projection: {
+        sortBehavior: "title",
+        transform({ attributes, helpers }) {
+          return {
+            specialty: helpers.firstString(attributes, ["specialty"]),
+            organization: helpers.firstString(attributes, ["organization"]),
+            location: helpers.firstString(attributes, ["location"]),
+            website: helpers.firstString(attributes, ["website"]),
+            phone: helpers.firstString(attributes, ["phone"]),
+            note: helpers.firstString(attributes, ["note"]),
+            aliases: helpers.firstStringArray(attributes, ["aliases"]),
+          };
+        },
+      },
       titleKeys: ["title"],
       statusKeys: ["status"],
     },
@@ -190,6 +266,21 @@ const checkedBankEntityDefinitions = [
       directory: "bank/workout-formats",
       idField: "workoutFormatId",
       upsertPayloadSchema: workoutFormatUpsertPayloadSchema as ZodTypeAny,
+      projection: {
+        sortBehavior: "title",
+        transform({ attributes, helpers }) {
+          return {
+            summary: helpers.firstString(attributes, ["summary"]),
+            activityType: helpers.firstString(attributes, ["activityType"]),
+            durationMinutes: helpers.firstNumber(attributes, ["durationMinutes"]),
+            distanceKm: helpers.firstNumber(attributes, ["distanceKm"]),
+            template: helpers.firstObject(attributes, ["template"]),
+            tags: helpers.firstStringArray(attributes, ["tags"]),
+            note: helpers.firstString(attributes, ["note"]),
+            templateText: helpers.firstString(attributes, ["templateText"]),
+          };
+        },
+      },
       titleKeys: ["title"],
       statusKeys: ["status"],
     },
@@ -213,6 +304,18 @@ export function requireBankEntityRegistryDefinition(
   }
 
   return definition;
+}
+
+export function getBankEntityRegistryProjectionMetadata(
+  kind: BankEntityKind,
+): BankEntityRegistryProjectionMetadata {
+  const projection = requireBankEntityRegistryDefinition(kind).registry.projection;
+
+  if (!projection) {
+    throw new Error(`Bank entity "${kind}" is missing shared registry projection metadata.`);
+  }
+
+  return projection;
 }
 
 function isHealthBackedBankEntityKind(kind: BankEntityKind): kind is HealthBackedBankEntityKind {
