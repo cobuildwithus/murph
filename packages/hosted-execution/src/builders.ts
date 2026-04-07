@@ -16,7 +16,7 @@ export function buildHostedExecutionMemberActivatedDispatch(input: {
   memberId: string;
   occurredAt: string;
 }): HostedExecutionDispatchRequest {
-  return buildHostedExecutionDispatch({
+  return {
     event: {
       ...(input.firstContact === undefined ? {} : { firstContact: input.firstContact }),
       kind: "member.activated",
@@ -24,7 +24,7 @@ export function buildHostedExecutionMemberActivatedDispatch(input: {
     } satisfies HostedExecutionMemberActivatedEvent,
     eventId: input.eventId,
     occurredAt: input.occurredAt,
-  });
+  };
 }
 
 export function buildHostedExecutionLinqMessageReceivedDispatch(input: {
@@ -34,7 +34,7 @@ export function buildHostedExecutionLinqMessageReceivedDispatch(input: {
   phoneLookupKey: string;
   userId: string;
 }): HostedExecutionDispatchRequest {
-  return buildHostedExecutionDispatch({
+  return {
     event: {
       kind: "linq.message.received",
       linqEvent: { ...input.linqEvent },
@@ -43,26 +43,31 @@ export function buildHostedExecutionLinqMessageReceivedDispatch(input: {
     } satisfies HostedExecutionLinqMessageReceivedEvent,
     eventId: input.eventId,
     occurredAt: input.occurredAt,
-  });
+  };
 }
 
 export function buildHostedExecutionTelegramMessageReceivedDispatch(input: {
-  botUserId: string | null;
   eventId: string;
   occurredAt: string;
-  telegramUpdate: Record<string, unknown>;
+  telegramMessage: HostedExecutionTelegramMessageReceivedEvent["telegramMessage"];
   userId: string;
 }): HostedExecutionDispatchRequest {
-  return buildHostedExecutionDispatch({
+  return {
     event: {
-      botUserId: input.botUserId,
       kind: "telegram.message.received",
-      telegramUpdate: { ...input.telegramUpdate },
+      telegramMessage: {
+        ...input.telegramMessage,
+        ...(input.telegramMessage.attachments
+          ? {
+              attachments: input.telegramMessage.attachments.map((attachment) => ({ ...attachment })),
+            }
+          : {}),
+      },
       userId: input.userId,
     } satisfies HostedExecutionTelegramMessageReceivedEvent,
     eventId: input.eventId,
     occurredAt: input.occurredAt,
-  });
+  };
 }
 
 export function buildHostedExecutionEmailMessageReceivedDispatch(input: {
@@ -73,7 +78,7 @@ export function buildHostedExecutionEmailMessageReceivedDispatch(input: {
   selfAddress?: string | null;
   userId: string;
 }): HostedExecutionDispatchRequest {
-  return buildHostedExecutionDispatch({
+  return {
     event: {
       identityId: input.identityId,
       kind: "email.message.received",
@@ -83,7 +88,7 @@ export function buildHostedExecutionEmailMessageReceivedDispatch(input: {
     } satisfies HostedExecutionEmailMessageReceivedEvent,
     eventId: input.eventId,
     occurredAt: input.occurredAt,
-  });
+  };
 }
 
 export function buildHostedExecutionAssistantCronTickDispatch(input: {
@@ -92,7 +97,7 @@ export function buildHostedExecutionAssistantCronTickDispatch(input: {
   reason: HostedExecutionAssistantCronTickEvent["reason"];
   userId: string;
 }): HostedExecutionDispatchRequest {
-  return buildHostedExecutionDispatch({
+  return {
     event: {
       kind: "assistant.cron.tick",
       reason: input.reason,
@@ -100,7 +105,7 @@ export function buildHostedExecutionAssistantCronTickDispatch(input: {
     } satisfies HostedExecutionAssistantCronTickEvent,
     eventId: input.eventId,
     occurredAt: input.occurredAt,
-  });
+  };
 }
 
 export function buildHostedExecutionDeviceSyncWakeDispatch(input: {
@@ -113,7 +118,7 @@ export function buildHostedExecutionDeviceSyncWakeDispatch(input: {
   runtimeSnapshot?: HostedExecutionDeviceSyncWakeEvent["runtimeSnapshot"];
   userId: string;
 }): HostedExecutionDispatchRequest {
-  return buildHostedExecutionDispatch({
+  return {
     event: {
       ...(input.connectionId === undefined ? {} : { connectionId: input.connectionId }),
       ...(input.hint === undefined ? {} : { hint: input.hint }),
@@ -125,7 +130,7 @@ export function buildHostedExecutionDeviceSyncWakeDispatch(input: {
     } satisfies HostedExecutionDeviceSyncWakeEvent,
     eventId: input.eventId,
     occurredAt: input.occurredAt,
-  });
+  };
 }
 
 export function buildHostedExecutionVaultShareAcceptedDispatch(input: {
@@ -134,7 +139,7 @@ export function buildHostedExecutionVaultShareAcceptedDispatch(input: {
   occurredAt: string;
   share: HostedExecutionVaultShareAcceptedEvent["share"];
 }): HostedExecutionDispatchRequest {
-  return buildHostedExecutionDispatch({
+  return {
     event: {
       kind: "vault.share.accepted",
       share: input.share,
@@ -142,7 +147,7 @@ export function buildHostedExecutionVaultShareAcceptedDispatch(input: {
     } satisfies HostedExecutionVaultShareAcceptedEvent,
     eventId: input.eventId,
     occurredAt: input.occurredAt,
-  });
+  };
 }
 
 export function buildHostedExecutionGatewayMessageSendDispatch(input: {
@@ -154,7 +159,7 @@ export function buildHostedExecutionGatewayMessageSendDispatch(input: {
   text: string;
   userId: string;
 }): HostedExecutionDispatchRequest {
-  return buildHostedExecutionDispatch({
+  return {
     event: {
       clientRequestId: input.clientRequestId ?? null,
       kind: "gateway.message.send",
@@ -163,16 +168,6 @@ export function buildHostedExecutionGatewayMessageSendDispatch(input: {
       text: input.text,
       userId: input.userId,
     } satisfies HostedExecutionGatewayMessageSendEvent,
-    eventId: input.eventId,
-    occurredAt: input.occurredAt,
-  });
-}
-
-export function buildHostedExecutionDispatch(
-  input: HostedExecutionDispatchRequest,
-): HostedExecutionDispatchRequest {
-  return {
-    event: input.event,
     eventId: input.eventId,
     occurredAt: input.occurredAt,
   };

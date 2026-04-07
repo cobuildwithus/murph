@@ -42,6 +42,34 @@ export interface NormalizeTelegramMessageInput {
   signal?: AbortSignal;
 }
 
+export interface HostedTelegramAttachmentInput {
+  fileId: string;
+  fileName?: string | null;
+  fileSize?: number | null;
+  fileUniqueId?: string | null;
+  height?: number | null;
+  kind: "animation" | "audio" | "document" | "photo" | "sticker" | "video" | "video_note" | "voice";
+  mimeType?: string | null;
+  width?: number | null;
+}
+
+export interface NormalizeHostedTelegramMessageInput {
+  accountId?: string | null;
+  downloadDriver?: TelegramAttachmentDownloadDriver | null;
+  externalId: string;
+  message: {
+    attachments?: HostedTelegramAttachmentInput[];
+    mediaGroupId?: string | null;
+    messageId: string;
+    text?: string | null;
+    threadId: string;
+  };
+  occurredAt: string;
+  receivedAt?: string | null;
+  signal?: AbortSignal;
+  source?: string;
+}
+
 export async function normalizeTelegramUpdate({
   update,
   source = "telegram",
@@ -91,6 +119,46 @@ export async function normalizeTelegramMessage({
   return createInboundCaptureFromChatMessage({
     accountId,
     message: chatMessage,
+    source,
+  });
+}
+
+export async function normalizeHostedTelegramMessage({
+  accountId = "bot",
+  downloadDriver = null,
+  externalId,
+  message,
+  occurredAt,
+  receivedAt = null,
+  signal,
+  source = "telegram",
+}: NormalizeHostedTelegramMessageInput): Promise<InboundCapture> {
+  const attachments = await buildHostedTelegramAttachments(
+    message.attachments ?? [],
+    downloadDriver,
+    signal,
+  );
+
+  return createInboundCaptureFromChatMessage({
+    accountId,
+    message: {
+      actor: {
+        id: null,
+        displayName: null,
+        isSelf: false,
+      },
+      attachments,
+      externalId,
+      occurredAt,
+      raw: buildHostedTelegramRawMetadata(message),
+      receivedAt,
+      text: normalizeTextValue(message.text ?? null),
+      thread: {
+        id: message.threadId,
+        isDirect: true,
+        title: null,
+      },
+    },
     source,
   });
 }
@@ -151,6 +219,20 @@ async function buildTelegramAttachments(
   }
 
   return attachments;
+}
+
+async function buildHostedTelegramAttachments(
+  attachments: readonly HostedTelegramAttachmentInput[],
+  downloadDriver: TelegramAttachmentDownloadDriver | null,
+  signal: AbortSignal | undefined,
+): Promise<InboundAttachment[]> {
+  const normalized: InboundAttachment[] = [];
+
+  for (const attachment of attachments) {
+    normalized.push(await hydrateHostedTelegramAttachment(attachment, downloadDriver, signal));
+  }
+
+  return normalized;
 }
 
 interface TelegramAttachmentSpec {
@@ -274,6 +356,15 @@ async function hydrateTelegramAttachment(
   }
 }
 
+async function hydrateHostedTelegramAttachment(
+  attachment: HostedTelegramAttachmentInput,
+  downloadDriver: TelegramAttachmentDownloadDriver | null,
+  signal: AbortSignal | undefined,
+): Promise<InboundAttachment> {
+  const spec = buildHostedTelegramAttachmentSpec(attachment);
+  return hydrateTelegramAttachment(spec, downloadDriver, signal);
+}
+
 function selectLargestPhoto(photos: TelegramPhotoSize[]): TelegramPhotoSize | null {
   if (photos.length === 0) {
     return null;
@@ -311,4 +402,118 @@ function inferAttachmentKind(
   }
 
   return fallback;
+}
+
+function buildHostedTelegramAttachmentSpec(
+  attachment: HostedTelegramAttachmentInput,
+): TelegramAttachmentSpec {
+  switch (attachment.kind) {
+    case "photo":
+      return {
+        file: toHostedTelegramFileBase(attachment),
+        fileName: normalizeTextValue(attachment.fileName ?? null)
+          ?? `photo-${attachment.fileUniqueId ?? attachment.fileId}.jpg`,
+        kind: "image",
+        mime: normalizeTextValue(attachment.mimeType ?? null) ?? "image/jpeg",
+      };
+    case "document":
+      return {
+        file: toHostedTelegramFileBase(attachment),
+        fileName: normalizeTextValue(attachment.fileName ?? null),
+        kind: inferAttachmentKind(
+          normalizeTextValue(attachment.mimeType ?? null),
+          normalizeTextValue(attachment.fileName ?? null),
+          "document",
+        ),
+        mime: normalizeTextValue(attachment.mimeType ?? null),
+      };
+    case "audio":
+      return {
+        file: toHostedTelegramFileBase(attachment),
+        fileName: normalizeTextValue(attachment.fileName ?? null)
+          ?? `audio-${attachment.fileUniqueId ?? attachment.fileId}.bin`,
+        kind: "audio",
+        mime: normalizeTextValue(attachment.mimeType ?? null) ?? "audio/mpeg",
+      };
+    case "voice":
+      return {
+        file: toHostedTelegramFileBase(attachment),
+        fileName: normalizeTextValue(attachment.fileName ?? null)
+          ?? `voice-${attachment.fileUniqueId ?? attachment.fileId}.ogg`,
+        kind: "audio",
+        mime: normalizeTextValue(attachment.mimeType ?? null) ?? "audio/ogg",
+      };
+    case "video":
+      return {
+        file: toHostedTelegramFileBase(attachment),
+        fileName: normalizeTextValue(attachment.fileName ?? null)
+          ?? `video-${attachment.fileUniqueId ?? attachment.fileId}.mp4`,
+        kind: "video",
+        mime: normalizeTextValue(attachment.mimeType ?? null) ?? "video/mp4",
+      };
+    case "video_note":
+      return {
+        file: toHostedTelegramFileBase(attachment),
+        fileName: normalizeTextValue(attachment.fileName ?? null)
+          ?? `video-note-${attachment.fileUniqueId ?? attachment.fileId}.mp4`,
+        kind: "video",
+        mime: normalizeTextValue(attachment.mimeType ?? null) ?? "video/mp4",
+      };
+    case "animation":
+      return {
+        file: toHostedTelegramFileBase(attachment),
+        fileName: normalizeTextValue(attachment.fileName ?? null)
+          ?? `animation-${attachment.fileUniqueId ?? attachment.fileId}.mp4`,
+        kind: "video",
+        mime: normalizeTextValue(attachment.mimeType ?? null) ?? "video/mp4",
+      };
+    case "sticker":
+      return {
+        file: toHostedTelegramFileBase(attachment),
+        fileName: normalizeTextValue(attachment.fileName ?? null)
+          ?? `sticker-${attachment.fileUniqueId ?? attachment.fileId}.webp`,
+        kind: "image",
+        mime: normalizeTextValue(attachment.mimeType ?? null),
+      };
+  }
+}
+
+function toHostedTelegramFileBase(
+  attachment: HostedTelegramAttachmentInput,
+): TelegramFileBase {
+  const fileName = normalizeTextValue(attachment.fileName ?? null);
+  const fileSize =
+    typeof attachment.fileSize === "number" && Number.isFinite(attachment.fileSize)
+      ? attachment.fileSize
+      : undefined;
+  const fileUniqueId = normalizeTextValue(attachment.fileUniqueId ?? null);
+  const height =
+    typeof attachment.height === "number" && Number.isFinite(attachment.height)
+      ? attachment.height
+      : undefined;
+  const mimeType = normalizeTextValue(attachment.mimeType ?? null);
+  const width =
+    typeof attachment.width === "number" && Number.isFinite(attachment.width)
+      ? attachment.width
+      : undefined;
+
+  return {
+    file_id: attachment.fileId,
+    ...(fileName === null ? {} : { file_name: fileName }),
+    ...(fileSize === undefined ? {} : { file_size: fileSize }),
+    ...(fileUniqueId === null ? {} : { file_unique_id: fileUniqueId }),
+    ...(height === undefined ? {} : { height }),
+    ...(mimeType === null ? {} : { mime_type: mimeType }),
+    ...(width === undefined ? {} : { width }),
+  };
+}
+
+function buildHostedTelegramRawMetadata(
+  message: NormalizeHostedTelegramMessageInput["message"],
+): Record<string, unknown> {
+  return {
+    message_id: message.messageId,
+    ...(typeof message.mediaGroupId === "string" ? { media_group_id: message.mediaGroupId } : {}),
+    schema: "murph.telegram-capture.v1",
+  };
 }

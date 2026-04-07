@@ -1,8 +1,11 @@
-import { HostedBillingStatus, HostedMemberStatus } from "@prisma/client";
+import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
+import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  deleteHostedStoredDispatchPayloadBestEffort: vi.fn(),
   enqueueHostedExecutionOutbox: vi.fn(),
+  maybeStageHostedExecutionDispatchPayload: vi.fn(),
   runtimeEnv: {
     encryptionKeyVersion: "v1",
     inviteTtlHours: 24,
@@ -27,11 +30,51 @@ const mocks = vi.hoisted(() => ({
     telegramBotUsername: "murph_bot",
     telegramWebhookSecret: null as string | null,
   },
+  stagedDispatches: new Map<string, HostedExecutionDispatchRequest>(),
 }));
 
-vi.mock("@/src/lib/hosted-execution/outbox", () => ({
-  enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
-}));
+vi.mock("@/src/lib/hosted-execution/outbox", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-execution/outbox")>(
+    "@/src/lib/hosted-execution/outbox",
+  );
+
+  return {
+    ...actual,
+    enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
+    enqueueHostedExecutionOutboxPayload: (input: {
+      payload: {
+        dispatch?: HostedExecutionDispatchRequest;
+        dispatchRef?: {
+          eventId: string;
+        };
+      };
+      sourceId: string;
+      sourceType: string;
+      tx: unknown;
+    }) => mocks.enqueueHostedExecutionOutbox({
+      dispatch:
+        input.payload.dispatch
+        ?? (input.payload.dispatchRef
+          ? mocks.stagedDispatches.get(input.payload.dispatchRef.eventId)
+          : undefined),
+      sourceId: input.sourceId,
+      sourceType: input.sourceType,
+      tx: input.tx,
+    }),
+  };
+});
+
+vi.mock("@/src/lib/hosted-execution/control", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-execution/control")>(
+    "@/src/lib/hosted-execution/control",
+  );
+
+  return {
+    ...actual,
+    deleteHostedStoredDispatchPayloadBestEffort: mocks.deleteHostedStoredDispatchPayloadBestEffort,
+    maybeStageHostedExecutionDispatchPayload: mocks.maybeStageHostedExecutionDispatchPayload,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/runtime")>(
@@ -49,7 +92,14 @@ import { handleHostedOnboardingTelegramWebhook } from "@/src/lib/hosted-onboardi
 describe("handleHostedOnboardingTelegramWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.stagedDispatches.clear();
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
+    mocks.maybeStageHostedExecutionDispatchPayload.mockImplementation(
+      async (dispatch: HostedExecutionDispatchRequest) => {
+        mocks.stagedDispatches.set(dispatch.eventId, dispatch);
+        return createStagedPayload(dispatch);
+      },
+    );
     mocks.runtimeEnv.telegramWebhookSecret = null;
   });
 
@@ -76,7 +126,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
           member: {
             billingStatus: HostedBillingStatus.active,
             id: "member_telegram_123",
-            status: HostedMemberStatus.registered,
+            suspendedAt: null,
           },
         }),
       },
@@ -111,7 +161,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       expect.objectContaining({
         dispatch: expect.objectContaining({
           event: expect.objectContaining({
-            botUserId: null,
             kind: "telegram.message.received",
             userId: "member_telegram_123",
           }),
@@ -144,9 +193,8 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
                       eventKind: "telegram.message.received",
                       userId: "member_telegram_123",
                     }),
-                    botUserId: null,
-                    telegramUpdate: expect.objectContaining({
-                      update_id: 321,
+                    payloadRef: expect.objectContaining({
+                      key: expect.stringContaining("/member_telegram_123/telegram:update:321.json"),
                     }),
                   }),
                 }),
@@ -266,7 +314,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
           member: {
             billingStatus: HostedBillingStatus.active,
             id: "member_telegram_123",
-            status: HostedMemberStatus.suspended,
+            suspendedAt: new Date("2026-03-26T12:00:00.000Z"),
           },
         }),
       },
@@ -441,7 +489,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
           member: {
             billingStatus: HostedBillingStatus.active,
             id: "member_telegram_456",
-            status: HostedMemberStatus.registered,
+            suspendedAt: null,
           },
         }),
       },
@@ -482,19 +530,12 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       expect.objectContaining({
         dispatch: expect.objectContaining({
           event: expect.objectContaining({
-            botUserId: null,
             kind: "telegram.message.received",
-            telegramUpdate: expect.objectContaining({
-              message: expect.objectContaining({
-                chat: expect.objectContaining({
-                  id: -100555,
-                  is_direct_messages: true,
-                }),
-                direct_messages_topic: expect.objectContaining({
-                  topic_id: 9,
-                  title: "Priority",
-                }),
-              }),
+            telegramMessage: expect.objectContaining({
+              messageId: "4",
+              schema: "murph.hosted-telegram-message.v1",
+              text: "hello from the DM topic",
+              threadId: "-100555:dm-topic:9",
             }),
             userId: "member_telegram_456",
           }),
@@ -502,6 +543,170 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         }),
       }),
     );
+  });
+
+  it("coarsens non-text Telegram payloads into placeholder text without carrying durable PII fields", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const hostedMemberRoutingFindUnique = vi.fn().mockResolvedValue({
+      member: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_telegram_789",
+        suspendedAt: null,
+      },
+    });
+    const prisma = withPrismaTransaction({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventPayload: {
+              updateId: 880,
+            },
+            receiptState: {
+              attemptCount: 1,
+              status: "processing",
+            },
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMemberRouting: {
+        findUnique: hostedMemberRoutingFindUnique,
+      },
+    }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
+
+    const cases = [
+      {
+        expectedText: "[shared contact]",
+        message: {
+          chat: {
+            first_name: "Alice",
+            id: 123,
+            type: "private",
+            username: "alice_private",
+          },
+          contact: {
+            first_name: "Alice",
+            last_name: "Example",
+            phone_number: "+15555550123",
+            user_id: 456,
+          },
+          date: 1_774_522_604,
+          from: {
+            first_name: "Alice",
+            id: 456,
+            username: "alice_sender",
+          },
+          message_id: 6,
+        },
+        updateId: 880,
+      },
+      {
+        expectedText: "[shared location]",
+        message: {
+          chat: {
+            first_name: "Alice",
+            id: 123,
+            type: "private",
+          },
+          date: 1_774_522_605,
+          from: {
+            first_name: "Alice",
+            id: 456,
+          },
+          location: {
+            latitude: 12.34,
+            longitude: 56.78,
+          },
+          message_id: 7,
+        },
+        updateId: 881,
+      },
+      {
+        expectedText: "[shared venue]",
+        message: {
+          chat: {
+            first_name: "Alice",
+            id: 123,
+            type: "private",
+          },
+          date: 1_774_522_606,
+          from: {
+            first_name: "Alice",
+            id: 456,
+          },
+          message_id: 8,
+          venue: {
+            address: "123 Secret Street",
+            latitude: 12.34,
+            longitude: 56.78,
+            title: "Secret Cafe",
+          },
+        },
+        updateId: 882,
+      },
+      {
+        expectedText: "[shared poll]",
+        message: {
+          chat: {
+            first_name: "Alice",
+            id: 123,
+            type: "private",
+          },
+          date: 1_774_522_607,
+          from: {
+            first_name: "Alice",
+            id: 456,
+          },
+          message_id: 9,
+          poll: {
+            id: "poll_123",
+            options: [
+              { text: "Yes", voter_count: 1 },
+              { text: "No", voter_count: 0 },
+            ],
+            question: "Where should we meet?",
+            total_voter_count: 1,
+          },
+        },
+        updateId: 883,
+      },
+    ];
+
+    for (const testCase of cases) {
+      mocks.enqueueHostedExecutionOutbox.mockClear();
+
+      const response = await handleHostedOnboardingTelegramWebhook({
+        prisma,
+        rawBody: JSON.stringify({
+          message: testCase.message,
+          update_id: testCase.updateId,
+        }),
+        secretToken: "telegram-secret",
+      });
+
+      expect(response).toEqual({
+        ok: true,
+        reason: "dispatched-active-member",
+      });
+
+      const enqueueCall = mocks.enqueueHostedExecutionOutbox.mock.calls.at(-1)?.[0] as {
+        dispatch: HostedExecutionDispatchRequest;
+      } | undefined;
+      expect(enqueueCall?.dispatch.event.kind).toBe("telegram.message.received");
+      if (enqueueCall?.dispatch.event.kind !== "telegram.message.received") {
+        throw new Error("Expected a hosted Telegram dispatch.");
+      }
+
+      expect(enqueueCall.dispatch.event.telegramMessage).toEqual({
+        messageId: String(testCase.message.message_id),
+        schema: "murph.hosted-telegram-message.v1",
+        text: testCase.expectedText,
+        threadId: "123",
+      });
+    }
+
+    expect(hostedMemberRoutingFindUnique).toHaveBeenCalledTimes(cases.length);
   });
 
   it("rejects malformed Telegram message payloads before receipt persistence", async () => {
@@ -596,8 +801,37 @@ function withPrismaTransaction<T extends Record<string, unknown>>(prisma: T): T 
   const prismaWithTransaction = prisma as T & {
     $queryRaw: () => Promise<unknown>;
     $transaction: (callback: (tx: T) => Promise<unknown>) => Promise<unknown>;
+    hostedMemberRouting?: {
+      findFirst?: ReturnType<typeof vi.fn>;
+      findUnique?: ReturnType<typeof vi.fn>;
+    };
   };
   prismaWithTransaction.$queryRaw = async () => [];
   prismaWithTransaction.$transaction = async (callback) => callback(prismaWithTransaction);
+  if (
+    prismaWithTransaction.hostedMemberRouting?.findFirst === undefined &&
+    prismaWithTransaction.hostedMemberRouting?.findUnique
+  ) {
+    prismaWithTransaction.hostedMemberRouting.findFirst =
+      prismaWithTransaction.hostedMemberRouting.findUnique;
+  }
   return prismaWithTransaction;
+}
+
+function createStagedPayload(
+  dispatch: HostedExecutionDispatchRequest,
+) {
+  return {
+    dispatchRef: {
+      eventId: dispatch.eventId,
+      eventKind: dispatch.event.kind,
+      occurredAt: dispatch.occurredAt,
+      userId: dispatch.event.userId,
+    },
+    payloadRef: {
+      key: `transient/dispatch-payloads/${dispatch.event.userId}/${dispatch.eventId}.json`,
+    },
+    schemaVersion: "murph.execution-outbox.v2",
+    storage: "reference" as const,
+  };
 }

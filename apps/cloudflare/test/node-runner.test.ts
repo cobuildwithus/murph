@@ -55,8 +55,9 @@ const initialGlobalFetch = global.fetch;
 type NodeRunnerTestInput =
   Pick<
     HostedAssistantRuntimeConfig,
-    "forwardedEnv" | "internalWorkerProxyToken" | "userEnv"
+    "forwardedEnv" | "userEnv"
   > & {
+    internalWorkerProxyToken?: string | null;
     bundles: HostedAssistantRuntimeJobInput["request"]["bundle"];
     commit?: {
       bundleRef?: NonNullable<HostedAssistantRuntimeJobInput["request"]["commit"]>["bundleRef"] | null;
@@ -129,7 +130,6 @@ async function runHostedExecutionJob(
   } = input;
   const runtime: HostedAssistantRuntimeConfig = {
     ...(forwardedEnv === undefined ? {} : { forwardedEnv }),
-    ...(internalWorkerProxyToken === undefined ? {} : { internalWorkerProxyToken }),
     ...(userEnv === undefined ? {} : { userEnv }),
   };
 
@@ -147,7 +147,10 @@ async function runHostedExecutionJob(
       }),
     },
     ...(Object.keys(runtime).length === 0 ? {} : { runtime }),
-  }, options);
+  }, {
+    ...(internalWorkerProxyToken === undefined ? {} : { internalWorkerProxyToken }),
+    ...options,
+  });
 
   return {
     ...result,
@@ -361,31 +364,20 @@ describe("runHostedExecutionJob", () => {
       },
     });
 
-	      const result = await runHostedExecutionJob({
-	        bundles: activation.bundles,
-	        dispatch: {
-	          event: {
-          botUserId: null,
+    const result = await runHostedExecutionJob({
+      bundles: activation.bundles,
+      dispatch: {
+        event: {
           kind: "telegram.message.received",
-          telegramUpdate: {
-            message: {
-              chat: {
-                id: 123,
-                type: "private",
-              },
-              date: 1_774_522_600,
-              from: {
-                first_name: "Alice",
-                id: 456,
-              },
-              message_id: 1,
-              text: "hello from Telegram",
-            },
-            update_id: 321,
+          telegramMessage: {
+            messageId: "1",
+            schema: "murph.hosted-telegram-message.v1",
+            text: "hello from Telegram",
+            threadId: "123",
           },
           userId: "member_telegram_ingress",
         },
-        eventId: "telegram:update:321",
+        eventId: "evt_telegram_ingress",
         occurredAt: "2026-03-26T12:05:00.000Z",
       },
     });
@@ -408,10 +400,17 @@ describe("runHostedExecutionJob", () => {
       const capture = runtime.listCaptures({ limit: 1 })[0];
 
       expect(result.result.summary).toContain("Persisted Telegram capture");
-      expect(capture?.actor.id).toBe("456");
+      expect(capture?.actor.id).toBeNull();
+      expect(capture?.actor.displayName).toBeNull();
       expect(capture?.text).toBe("hello from Telegram");
+      expect(capture?.thread.title).toBeNull();
       expect(capture?.thread.isDirect).toBe(true);
-      expect(capture?.thread.id).toContain("123");
+      expect(capture?.thread.id).toBe("123");
+      expect(capture?.externalId).toBe("evt_telegram_ingress");
+      expect(capture?.raw).toEqual({
+        message_id: "1",
+        schema: "murph.telegram-capture.v1",
+      });
     } finally {
       runtime.close();
     }
@@ -786,25 +785,12 @@ describe("runHostedExecutionJob", () => {
       bundles: activation.bundles,
       dispatch: {
         event: {
-          botUserId: null,
           kind: "telegram.message.received",
-          telegramUpdate: {
-            update_id: 123,
-            message: {
-              chat: {
-                first_name: "Alice",
-                id: 456,
-                type: "private",
-              },
-              date: 1_711_620_000,
-              from: {
-                first_name: "Alice",
-                id: 456,
-                is_bot: false,
-              },
-              message_id: 789,
-              text: "Hello from hosted Telegram.",
-            },
+          telegramMessage: {
+            messageId: "789",
+            schema: "murph.hosted-telegram-message.v1",
+            text: "Hello from hosted Telegram.",
+            threadId: "456",
           },
           userId: "member_telegram",
         },
@@ -832,8 +818,14 @@ describe("runHostedExecutionJob", () => {
 
       expect(result.result.summary).toContain("Persisted Telegram capture");
       expect(capture?.source).toBe("telegram");
-      expect(capture?.externalId).toBe("update:123");
+      expect(capture?.externalId).toBe("evt_telegram");
       expect(capture?.text).toBe("Hello from hosted Telegram.");
+      expect(capture?.actor.id).toBeNull();
+      expect(capture?.thread.title).toBeNull();
+      expect(capture?.raw).toEqual({
+        message_id: "789",
+        schema: "murph.telegram-capture.v1",
+      });
     } finally {
       runtime.close();
     }
@@ -929,34 +921,22 @@ describe("runHostedExecutionJob", () => {
         bundles: activation.bundles,
         dispatch: {
           event: {
-            botUserId: null,
             kind: "telegram.message.received",
-            telegramUpdate: {
-              update_id: 124,
-              message: {
-                caption: "Photo from hosted Telegram.",
-                chat: {
-                  first_name: "Alice",
-                  id: 456,
-                  type: "private",
+            telegramMessage: {
+              attachments: [
+                {
+                  fileId: "file_123",
+                  fileSize: attachmentBytes.byteLength,
+                  fileUniqueId: "photo_unique_123",
+                  height: 20,
+                  kind: "photo",
+                  width: 20,
                 },
-                date: 1_711_620_001,
-                from: {
-                  first_name: "Alice",
-                  id: 456,
-                  is_bot: false,
-                },
-                message_id: 790,
-                photo: [
-                  {
-                    file_id: "file_123",
-                    file_size: attachmentBytes.byteLength,
-                    file_unique_id: "photo_unique_123",
-                    height: 20,
-                    width: 20,
-                  },
-                ],
-              },
+              ],
+              messageId: "790",
+              schema: "murph.hosted-telegram-message.v1",
+              text: "Photo from hosted Telegram.",
+              threadId: "456",
             },
             userId: "member_telegram_attachment",
           },
@@ -1382,13 +1362,18 @@ describe("runHostedExecutionJob", () => {
         event: {
           kind: "vault.share.accepted",
           share: {
-            pack,
+            ownerUserId: "member_sender",
             shareId: "share_123",
           },
           userId: "member_456",
         },
         eventId: "evt_share_123",
         occurredAt: "2026-03-26T12:30:00.000Z",
+      },
+      sharePack: {
+        ownerUserId: "member_sender",
+        pack,
+        shareId: "share_123",
       },
     });
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-share-direct-"));
@@ -1404,7 +1389,7 @@ describe("runHostedExecutionJob", () => {
     expect(result.result.summary).toContain(`Imported share pack "${pack.title}"`);
   });
 
-  it("ignores hosted web env when importing an inline dispatch pack", async () => {
+  it("ignores hosted web env when importing a runner-hydrated share pack", async () => {
     const previousHostedWebBaseUrl = process.env.HOSTED_WEB_BASE_URL;
     process.env.HOSTED_WEB_BASE_URL = "https://join.example.test";
 
@@ -1463,13 +1448,18 @@ describe("runHostedExecutionJob", () => {
           event: {
             kind: "vault.share.accepted",
             share: {
-              pack,
+              ownerUserId: "member_sender",
               shareId: "share_proxy_123",
             },
             userId: "member_proxy",
+          },
+          eventId: "evt_share_proxy_123",
+          occurredAt: "2026-03-26T12:30:00.000Z",
         },
-        eventId: "evt_share_proxy_123",
-        occurredAt: "2026-03-26T12:30:00.000Z",
+        sharePack: {
+          ownerUserId: "member_sender",
+          pack,
+          shareId: "share_proxy_123",
         },
       });
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-share-proxy-"));

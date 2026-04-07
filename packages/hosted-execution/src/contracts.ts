@@ -16,6 +16,8 @@ import type {
 export const HOSTED_EXECUTION_SIGNATURE_HEADER = "x-hosted-execution-signature";
 export const HOSTED_EXECUTION_TIMESTAMP_HEADER = "x-hosted-execution-timestamp";
 export const HOSTED_EXECUTION_NONCE_HEADER = "x-hosted-execution-nonce";
+export const HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER =
+  "x-hosted-execution-signing-key-id";
 
 export const HOSTED_EXECUTION_EVENT_KINDS = [
   "member.activated",
@@ -37,12 +39,12 @@ export const HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KINDS = [
   "telegram.message.received",
   "email.message.received",
   "device-sync.wake",
-  "vault.share.accepted",
   "gateway.message.send",
 ] as const satisfies readonly HostedExecutionEventKind[];
 
 export const HOSTED_EXECUTION_INLINE_ONLY_OUTBOX_EVENT_KINDS = [
   "assistant.cron.tick",
+  "vault.share.accepted",
 ] as const satisfies readonly HostedExecutionEventKind[];
 
 export interface HostedExecutionBaseEvent {
@@ -68,10 +70,32 @@ export interface HostedExecutionLinqMessageReceivedEvent extends HostedExecution
   phoneLookupKey: string;
 }
 
+export const HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA =
+  "murph.hosted-telegram-message.v1";
+
+export interface HostedExecutionTelegramAttachment {
+  fileId: string;
+  fileName?: string | null;
+  fileSize?: number | null;
+  fileUniqueId?: string | null;
+  height?: number | null;
+  kind: "animation" | "audio" | "document" | "photo" | "sticker" | "video" | "video_note" | "voice";
+  mimeType?: string | null;
+  width?: number | null;
+}
+
+export interface HostedExecutionTelegramMessage {
+  attachments?: HostedExecutionTelegramAttachment[];
+  mediaGroupId?: string | null;
+  messageId: string;
+  schema: typeof HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA;
+  text?: string | null;
+  threadId: string;
+}
+
 export interface HostedExecutionTelegramMessageReceivedEvent extends HostedExecutionBaseEvent {
-  botUserId: string | null;
   kind: "telegram.message.received";
-  telegramUpdate: Record<string, unknown>;
+  telegramMessage: HostedExecutionTelegramMessage;
 }
 
 export interface HostedExecutionEmailMessageReceivedEvent extends HostedExecutionBaseEvent {
@@ -119,13 +143,19 @@ export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseE
 }
 
 export interface HostedExecutionShareReference {
-  pack: SharePack;
+  ownerUserId: string;
   shareId: string;
 }
 
 export interface HostedExecutionVaultShareAcceptedEvent extends HostedExecutionBaseEvent {
   kind: "vault.share.accepted";
   share: HostedExecutionShareReference;
+}
+
+export interface HostedExecutionRunnerSharePack {
+  ownerUserId: string;
+  pack: SharePack;
+  shareId: string;
 }
 
 export interface HostedExecutionGatewayMessageSendEvent extends HostedExecutionBaseEvent {
@@ -152,12 +182,22 @@ export interface HostedExecutionDispatchRequest {
   occurredAt: string;
 }
 
+export interface HostedExecutionAiUsageRecordRequest {
+  usage: readonly object[];
+}
+
+export interface HostedExecutionAiUsageRecordResponse {
+  recorded: number;
+  usageIds: string[];
+}
+
 export type HostedExecutionBundleKind = RuntimeHostedExecutionBundleKind;
 
 export interface HostedExecutionRunnerRequest {
   bundle: HostedExecutionBundlePayload;
   dispatch: HostedExecutionDispatchRequest;
   run?: HostedExecutionRunContext | null;
+  sharePack?: HostedExecutionRunnerSharePack | null;
 }
 
 export interface HostedExecutionRunnerResult {

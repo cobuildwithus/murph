@@ -206,7 +206,6 @@ describe("hosted webhook receipt privacy cutover", () => {
             lastAttemptAt: null,
             lastError: null,
             payload: {
-              botUserId: "999",
               dispatchRef: {
                 eventId: "legacy",
                 eventKind: "telegram.message.received",
