@@ -59,14 +59,12 @@ Optional but recommended:
 - `DEVICE_SYNC_TRUSTED_USER_ASSERTION_HEADER`
 - `DEVICE_SYNC_TRUSTED_USER_SIGNATURE_HEADER`
 - `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET`
-- `HOSTED_WEB_BASE_URL` as an optional fallback canonical public base URL for hosted-web links when the explicit hosted public-base envs are unset
+- `HOSTED_WEB_BASE_URL`
 - `OURA_WEBHOOK_VERIFICATION_TOKEN`
 - `CRON_SECRET` for Vercel-owned hosted cron routes
-- `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK` for Cloudflare-owned callbacks back into `apps/web`
-- `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID` to select the active Cloudflare callback key id, defaults to `v1`
+- `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`
+- `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON` when rotating callback verification keys
-
-On Vercel, the hosted web app now falls back to `VERCEL_PROJECT_PRODUCTION_URL` for the canonical public origin when the explicit hosted public-base envs are unset. Explicit envs still win, and you should keep setting them if you need a non-default path or additional allowed origins.
 
 Hosted onboarding extras:
 
@@ -95,9 +93,6 @@ Hosted onboarding extras:
 - `HOSTED_EXECUTION_DISPATCH_URL`
 - `HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS`
 - `CRON_SECRET`
-- `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`
-- `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`
-- `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON` when rotating callback verification keys
 
 Hosted onboarding private state is now local to `apps/web`: blind lookup keys stay queryable in Postgres, while recoverable raw member ids and the raw source values needed to re-derive those lookup keys are encrypted into the owning Prisma rows instead of being mirrored into Cloudflare. Blind-index rotation follows one simple model: write one current version, read any configured keyring versions, backfill the owner tables in place, and only then remove the old version from the contact-privacy keyring. Drain lookup-bearing hosted execution outbox events before a write-mode rotation backfill so staged payload refs do not preserve stale lookup identities.
 
@@ -105,6 +100,24 @@ Optional hosted AI usage metering:
 
 - `HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME`
 - `HOSTED_AI_USAGE_STRIPE_BATCH_LIMIT`
+
+## Hosted public origin and Cloudflare callback auth
+
+Treat this section as the canonical operator-facing contract for hosted public origin and Cloudflare-owned callbacks. The Cloudflare docs only list the worker-side envs they consume and point back here instead of restating the precedence rules.
+
+Public origin precedence:
+
+- `HOSTED_ONBOARDING_PUBLIC_BASE_URL` wins for invite, join, and hosted-share links.
+- Otherwise `HOSTED_WEB_BASE_URL` is the canonical hosted-web public base URL.
+- On Vercel, when neither explicit hosted public-base env is set, `apps/web` falls back to `VERCEL_PROJECT_PRODUCTION_URL`.
+- `DEVICE_SYNC_PUBLIC_BASE_URL` overrides the provider-facing callback and webhook base for hosted device sync. When it is unset, `apps/web` derives that base as `<canonical hosted public origin>/api/device-sync`.
+
+Callback auth contract:
+
+- `apps/web` verifies Cloudflare-owned internal callbacks with `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`.
+- `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID` selects the active callback key id and defaults to `v1`.
+- `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON` is the optional `{ keyId: publicJwk }` verification keyring for staged callback-key rotation.
+- `apps/cloudflare` signs those callbacks with the matching private key at `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`; keep its active key id aligned with `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`.
 
 When you set `DEVICE_SYNC_PUBLIC_BASE_URL`, point it at the stable production project domain or a custom domain for the hosted app, for example `https://your-project.vercel.app/api/device-sync`. Do not use an ephemeral preview deployment URL as the long-lived provider callback or webhook base.
 
@@ -114,9 +127,7 @@ Set these under `Settings -> Environment Variables` in the Vercel project that d
 
 - Enable Vercel OIDC for the project so the app-local hosted-execution auth adapter in `apps/web` can present bearer workload identity to Cloudflare on hosted execution dispatch/control requests.
 - `CRON_SECRET`: configure the Vercel cron bearer secret for the hosted cron routes under `/api/internal/**/cron`.
-- `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`: publish the Cloudflare callback verification key to `apps/web`.
-- `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`: keep this aligned with Cloudflare's active callback signing key id.
-- `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON`: optional JSON object of `{ keyId: publicJwk }` entries so old callback keys can verify during rotation.
+- Configure the hosted public-origin envs and `HOSTED_WEB_CALLBACK_SIGNING_*` values exactly as documented in the `Hosted public origin and Cloudflare callback auth` section above.
 - `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET`: generate a distinct strong random secret and use the same value in Vercel plus whichever trusted auth proxy or middleware signs the hosted user assertion headers. `apps/web` verifies that signature before trusting the lower-level assertion-backed device-sync bridge routes.
 
 If you prefer the CLI, Vercel's current docs cover `vercel env add`, `vercel env update`, and `vercel env pull` for managing these project environment variables.

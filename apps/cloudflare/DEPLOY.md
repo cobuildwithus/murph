@@ -155,12 +155,14 @@ Optional hosted email bridge secrets:
 - `HOSTED_EMAIL_CLOUDFLARE_API_TOKEN`
 - `HOSTED_EMAIL_SIGNING_SECRET`
 
+`apps/web/README.md` is the canonical operator doc for hosted public-origin precedence and Cloudflare callback-key alignment. This deploy guide only lists the Worker-side envs that must match that hosted-web contract.
+
 The checked-in scaffold and rendered deploy config declare the Cloudflare callback signing key, platform envelope key, automation recipient keypair, and recovery recipient public JWK in Wrangler's experimental `secrets.required` field, so `wrangler deploy` and `wrangler versions upload` fail early when any of them are missing from the Worker.
 
-The worker now authenticates `apps/web -> apps/cloudflare` dispatch/control traffic with Vercel OIDC bearer identity derived from the configured team slug, project name, and environment. Cloudflare-owned callbacks back into `apps/web` now use a dedicated asymmetric callback key: the worker signs the bound user, method, path, query, payload, timestamp, and nonce with `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`, while `apps/web` verifies with the matching public JWK. Each native container invocation still gets its own one-shot runner control token injected at start time.
+The worker now authenticates `apps/web -> apps/cloudflare` dispatch/control traffic with Vercel OIDC bearer identity derived from the configured team slug, project name, and environment. For Cloudflare-owned callbacks back into `apps/web`, configure the matching Worker-side private key in `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK` and keep `HOSTED_WEB_BASE_URL` plus the active callback key id aligned with the hosted-web contract documented in `apps/web/README.md`. Each native container invocation still gets its own one-shot runner control token injected at start time.
 
 - missing `HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG` or `HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME` makes bearer-authenticated web dispatch/control requests fail closed
-- missing or mismatched `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK` breaks Cloudflare-owned callback routes into `apps/web`
+- missing or misaligned hosted-web callback config (`HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`, `HOSTED_WEB_BASE_URL`, or the active callback key id) breaks Cloudflare-owned callback routes into `apps/web`
 - missing `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY` prevents encrypted hosted storage from decrypting
 - missing automation recipient JWKs prevents the worker from unwrapping managed per-user root keys
 - missing recovery recipient public JWK prevents explicit managed-user provisioning from succeeding
