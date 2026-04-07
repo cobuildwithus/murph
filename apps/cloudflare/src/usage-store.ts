@@ -130,14 +130,8 @@ export function createHostedPendingUsageStore(input: {
 
       if (input.bucket.delete) {
         for (const usageId of usageIds) {
-          for (const key of await pendingUsageRecordObjectKeys(
-            input.key,
-            input.keysById,
-            request.userId,
-            usageId,
-          )) {
-            await input.bucket.delete(key);
-          }
+          const key = await pendingUsageRecordObjectKey(input.key, request.userId, usageId);
+          await input.bucket.delete(key);
         }
       }
 
@@ -274,15 +268,12 @@ async function readStoredHostedPendingUsageRecords(input: {
     return [];
   }
 
-  const keys = new Set<string>();
-  for (const prefix of await pendingUsageRecordObjectPrefixes(input.key, input.keysById, input.userId)) {
-    for (const key of await listHostedR2ObjectKeys({
+  const keys = new Set(
+    await listHostedR2ObjectKeys({
       bucket: input.bucket,
-      prefix,
-    })) {
-      keys.add(key);
-    }
-  }
+      prefix: await pendingUsageRecordObjectPrefix(input.key, input.userId),
+    }),
+  );
 
   const recordsByUsageId = new Map<string, Record<string, unknown>>();
 
@@ -322,35 +313,25 @@ async function readStoredHostedPendingUsageRecordByUsageId(input: {
   usageId: string;
   userId: string;
 }): Promise<Record<string, unknown> | null> {
-  for (const key of await pendingUsageRecordObjectKeys(
-    input.key,
-    input.keysById,
-    input.userId,
-    input.usageId,
-  )) {
-    const record = await readEncryptedR2Json({
-      aad: buildHostedStorageAad({
-        key,
-        purpose: "assistant-usage",
-        userId: input.userId,
-      }),
-      bucket: input.bucket,
-      cryptoKey: input.key,
-      cryptoKeysById: input.keysById,
-      expectedKeyId: input.keyId,
+  const key = await pendingUsageRecordObjectKey(input.key, input.userId, input.usageId);
+  const record = await readEncryptedR2Json({
+    aad: buildHostedStorageAad({
       key,
-      parse(value) {
-        return parseStoredHostedPendingUsageRecord(value).record;
-      },
-      scope: "assistant-usage",
-    });
+      purpose: "assistant-usage",
+      userId: input.userId,
+    }),
+    bucket: input.bucket,
+    cryptoKey: input.key,
+    cryptoKeysById: input.keysById,
+    expectedKeyId: input.keyId,
+    key,
+    parse(value) {
+      return parseStoredHostedPendingUsageRecord(value).record;
+    },
+    scope: "assistant-usage",
+  });
 
-    if (record) {
-      return cloneUsageRecord(record);
-    }
-  }
-
-  return null;
+  return record ? cloneUsageRecord(record) : null;
 }
 
 async function writeStoredHostedPendingUsageRecord(input: {
@@ -420,9 +401,8 @@ async function deleteHostedPendingUsageDirtyUser(input: {
     return;
   }
 
-  for (const key of await pendingUsageDirtyUserObjectKeys(input.key, input.keysById, input.userId)) {
-    await input.bucket.delete(key);
-  }
+  const key = await pendingUsageDirtyUserObjectKey(input.key, input.userId);
+  await input.bucket.delete(key);
 }
 
 function parseStoredHostedPendingUsageRecord(value: unknown): StoredHostedPendingUsageRecord {
@@ -504,15 +484,6 @@ async function pendingUsageRecordObjectKey(
   return `${prefix}${usageSegment}.json`;
 }
 
-async function pendingUsageRecordObjectKeys(
-  rootKey: Uint8Array,
-  _keysById: Readonly<Record<string, Uint8Array>> | undefined,
-  userId: string,
-  usageId: string,
-): Promise<string[]> {
-  return [await pendingUsageRecordObjectKey(rootKey, userId, usageId)];
-}
-
 async function pendingUsageRecordObjectPrefix(rootKey: Uint8Array, userId: string): Promise<string> {
   const userSegment = await deriveHostedStorageOpaqueId({
     length: 24,
@@ -524,14 +495,6 @@ async function pendingUsageRecordObjectPrefix(rootKey: Uint8Array, userId: strin
   return `${HOSTED_PENDING_USAGE_RECORD_PREFIX}${userSegment}/`;
 }
 
-async function pendingUsageRecordObjectPrefixes(
-  rootKey: Uint8Array,
-  _keysById: Readonly<Record<string, Uint8Array>> | undefined,
-  userId: string,
-): Promise<string[]> {
-  return [await pendingUsageRecordObjectPrefix(rootKey, userId)];
-}
-
 async function pendingUsageDirtyUserObjectKey(rootKey: Uint8Array, userId: string): Promise<string> {
   const userSegment = await deriveHostedStorageOpaqueId({
     length: 24,
@@ -541,14 +504,6 @@ async function pendingUsageDirtyUserObjectKey(rootKey: Uint8Array, userId: strin
   });
 
   return `${HOSTED_PENDING_USAGE_DIRTY_PREFIX}${userSegment}.json`;
-}
-
-async function pendingUsageDirtyUserObjectKeys(
-  rootKey: Uint8Array,
-  _keysById: Readonly<Record<string, Uint8Array>> | undefined,
-  userId: string,
-): Promise<string[]> {
-  return [await pendingUsageDirtyUserObjectKey(rootKey, userId)];
 }
 
 async function listHostedR2ObjectKeys(input: {

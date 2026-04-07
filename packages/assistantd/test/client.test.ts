@@ -107,6 +107,13 @@ test('resolveAssistantDaemonClientConfig trims loopback URLs, honors disable fla
       token: 'secret-token',
     },
   )
+  assert.equal(
+    resolveAssistantDaemonClientConfig({
+      ASSISTANTD_BASE_URL: 'http://127.0.0.1:50241/',
+      ASSISTANTD_CONTROL_TOKEN: 'secret-token',
+    }),
+    null,
+  )
   assert.throws(
     () =>
       resolveAssistantDaemonClientConfig({

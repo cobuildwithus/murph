@@ -38,17 +38,6 @@ export async function hostedArtifactObjectKey(
   return `users/artifacts/${userSegment}/${artifactSegment}.artifact.bin`;
 }
 
-export async function hostedArtifactObjectKeys(
-  rootKey: Uint8Array,
-  keysById: Readonly<Record<string, Uint8Array>> | undefined,
-  userId: string,
-  sha256: string,
-): Promise<string[]> {
-  return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
-    hostedArtifactObjectKey(candidateRootKey, userId, sha256)
-  );
-}
-
 export async function hostedUserEnvObjectKey(
   rootKey: Uint8Array,
   userId: string,
@@ -61,16 +50,6 @@ export async function hostedUserEnvObjectKey(
   });
 
   return `users/env/${userSegment}.json`;
-}
-
-export async function hostedUserEnvObjectKeys(
-  rootKey: Uint8Array,
-  keysById: Readonly<Record<string, Uint8Array>> | undefined,
-  userId: string,
-): Promise<string[]> {
-  return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
-    hostedUserEnvObjectKey(candidateRootKey, userId)
-  );
 }
 
 export async function hostedExecutionJournalObjectKey(
@@ -94,17 +73,6 @@ export async function hostedExecutionJournalObjectKey(
   return `transient/execution-journal/${userSegment}/${eventSegment}.json`;
 }
 
-export async function hostedExecutionJournalObjectKeys(
-  rootKey: Uint8Array,
-  keysById: Readonly<Record<string, Uint8Array>> | undefined,
-  userId: string,
-  eventId: string,
-): Promise<string[]> {
-  return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
-    hostedExecutionJournalObjectKey(candidateRootKey, userId, eventId)
-  );
-}
-
 export async function hostedSideEffectRecordKey(
   rootKey: Uint8Array,
   userId: string,
@@ -124,17 +92,6 @@ export async function hostedSideEffectRecordKey(
   });
 
   return `transient/side-effects/${userSegment}/${effectSegment}.json`;
-}
-
-export async function hostedSideEffectRecordKeys(
-  rootKey: Uint8Array,
-  keysById: Readonly<Record<string, Uint8Array>> | undefined,
-  userId: string,
-  effectId: string,
-): Promise<string[]> {
-  return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
-    hostedSideEffectRecordKey(candidateRootKey, userId, effectId)
-  );
 }
 
 export async function hostedDispatchPayloadObjectKey(
@@ -180,18 +137,6 @@ export async function hostedDispatchPayloadObjectKeyForSignature(
   return `transient/dispatch-payloads/${userSegment}/${payloadSegment}.json`;
 }
 
-
-export async function hostedDispatchPayloadObjectKeys(
-  rootKey: Uint8Array,
-  keysById: Readonly<Record<string, Uint8Array>> | undefined,
-  userId: string,
-  eventId: string,
-): Promise<string[]> {
-  return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
-    hostedDispatchPayloadObjectKey(candidateRootKey, userId, eventId)
-  );
-}
-
 export async function hostedSharePackObjectKey(
   rootKey: Uint8Array,
   userId: string,
@@ -211,23 +156,4 @@ export async function hostedSharePackObjectKey(
   });
 
   return `transient/share-packs/${userSegment}/${shareSegment}.json`;
-}
-
-export async function hostedSharePackObjectKeys(
-  rootKey: Uint8Array,
-  keysById: Readonly<Record<string, Uint8Array>> | undefined,
-  userId: string,
-  shareId: string,
-): Promise<string[]> {
-  return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
-    hostedSharePackObjectKey(candidateRootKey, userId, shareId)
-  );
-}
-
-export async function listHostedStorageObjectKeys(
-  rootKey: Uint8Array,
-  _keysById: Readonly<Record<string, Uint8Array>> | undefined,
-  mapKey: (candidateRootKey: Uint8Array) => Promise<string> | string,
-): Promise<string[]> {
-  return [await mapKey(rootKey)];
 }

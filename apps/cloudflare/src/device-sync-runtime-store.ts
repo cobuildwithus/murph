@@ -15,7 +15,6 @@ import type {
 import type { R2BucketLike } from "./bundle-store.js";
 import { buildHostedStorageAad, deriveHostedStorageOpaqueId } from "./crypto-context.js";
 import { readEncryptedR2Json, writeEncryptedR2Json } from "./crypto.js";
-import { listHostedStorageObjectKeys } from "./storage-paths.js";
 
 const DEVICE_SYNC_RUNTIME_SCHEMA = "murph.hosted-device-sync-runtime.v1";
 
@@ -281,30 +280,23 @@ async function readStoredDeviceSyncRuntimeState(input: {
   keysById?: Readonly<Record<string, Uint8Array>>;
   userId: string;
 }): Promise<StoredDeviceSyncRuntimeState | null> {
-  for (const key of await deviceSyncRuntimeStateObjectKeys(input.key, input.keysById, input.userId)) {
-    const value = await readEncryptedR2Json({
-      aad: buildHostedStorageAad({
-        key,
-        purpose: "device-sync-runtime",
-        userId: input.userId,
-      }),
-      bucket: input.bucket,
-      cryptoKey: input.key,
-      cryptoKeysById: input.keysById,
-      expectedKeyId: input.keyId,
+  const key = await deviceSyncRuntimeStateObjectKey(input.key, input.userId);
+  return readEncryptedR2Json({
+    aad: buildHostedStorageAad({
       key,
-      parse(value) {
-        return parseStoredDeviceSyncRuntimeState(value);
-      },
-      scope: "device-sync-runtime",
-    });
-
-    if (value) {
-      return value;
-    }
-  }
-
-  return null;
+      purpose: "device-sync-runtime",
+      userId: input.userId,
+    }),
+    bucket: input.bucket,
+    cryptoKey: input.key,
+    cryptoKeysById: input.keysById,
+    expectedKeyId: input.keyId,
+    key,
+    parse(value) {
+      return parseStoredDeviceSyncRuntimeState(value);
+    },
+    scope: "device-sync-runtime",
+  });
 }
 
 async function writeStoredDeviceSyncRuntimeState(input: {
@@ -360,16 +352,6 @@ async function deviceSyncRuntimeStateObjectKey(rootKey: Uint8Array, userId: stri
   });
 
   return `transient/device-sync-runtime/${userSegment}.json`;
-}
-
-async function deviceSyncRuntimeStateObjectKeys(
-  rootKey: Uint8Array,
-  keysById: Readonly<Record<string, Uint8Array>> | undefined,
-  userId: string,
-): Promise<string[]> {
-  return listHostedStorageObjectKeys(rootKey, keysById, (candidateRootKey) =>
-    deviceSyncRuntimeStateObjectKey(candidateRootKey, userId)
-  );
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
