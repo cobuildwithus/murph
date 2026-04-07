@@ -578,26 +578,19 @@ function buildSetupAssistantOptionsFromDefaults(
 function formatAssistantDefaultsSummary(
   assistant: SetupConfiguredAssistant,
 ): string {
-  if (assistant.provider === 'openai-compatible') {
-    return appendAssistantAccountSummary(
-      assistant.baseUrl
-        ? `${assistant.model ?? 'the configured model'} via ${assistant.baseUrl}`
-        : `${assistant.model ?? 'the configured model'} via the saved OpenAI-compatible endpoint`,
-      assistant.account ?? null,
-    )
-  }
-
-  if (assistant.oss) {
-    return appendAssistantAccountSummary(
-      `${assistant.model ?? 'the configured local model'} in Codex OSS`,
-      assistant.account ?? null,
-    )
-  }
-
-  return appendAssistantAccountSummary(
-    `${assistant.model ?? 'the configured model'} in Codex CLI`,
-    assistant.account ?? null,
-  )
+  return assistant.provider === 'openai-compatible'
+    ? formatAssistantSummary({
+        account: assistant.account ?? null,
+        adapter: 'openai-compatible',
+        endpoint: assistant.baseUrl,
+        model: assistant.model,
+      })
+    : formatAssistantSummary({
+        account: assistant.account ?? null,
+        adapter: 'codex-cli',
+        model: assistant.model,
+        oss: assistant.oss === true,
+      })
 }
 
 function formatSavedAssistantDefaultsSummary(
@@ -608,23 +601,59 @@ function formatSavedAssistantDefaultsSummary(
     return null
   }
 
-  switch (backend.adapter) {
-    case 'openai-compatible':
-      return appendAssistantAccountSummary(
-        backend.endpoint
-          ? `${backend.model ?? 'the configured model'} via ${backend.endpoint}`
-          : `${backend.model ?? 'the configured model'} via the saved OpenAI-compatible endpoint`,
-        defaults?.account ?? null,
-      )
-    case 'codex-cli':
-    default:
-      return appendAssistantAccountSummary(
-        backend.oss
-          ? `${backend.model ?? 'the configured local model'} in Codex OSS`
-          : `${backend.model ?? 'the configured model'} in Codex CLI`,
-        defaults?.account ?? null,
-      )
+  return backend.adapter === 'openai-compatible'
+    ? formatAssistantSummary({
+        account: defaults?.account ?? null,
+        adapter: 'openai-compatible',
+        endpoint: backend.endpoint,
+        model: backend.model,
+      })
+    : formatAssistantSummary({
+        account: defaults?.account ?? null,
+        adapter: 'codex-cli',
+        model: backend.model,
+        oss: backend.oss === true,
+      })
+}
+
+type AssistantSummaryInput =
+  | {
+      account:
+        | SetupConfiguredAssistant['account']
+        | AssistantOperatorDefaults['account']
+        | null
+        | undefined
+      adapter: 'openai-compatible'
+      endpoint: string | null | undefined
+      model: string | null | undefined
+    }
+  | {
+      account:
+        | SetupConfiguredAssistant['account']
+        | AssistantOperatorDefaults['account']
+        | null
+        | undefined
+      adapter: 'codex-cli'
+      model: string | null | undefined
+      oss: boolean
+    }
+
+function formatAssistantSummary(input: AssistantSummaryInput): string {
+  if (input.adapter === 'openai-compatible') {
+    return appendAssistantAccountSummary(
+      input.endpoint
+        ? `${input.model ?? 'the configured model'} via ${input.endpoint}`
+        : `${input.model ?? 'the configured model'} via the saved OpenAI-compatible endpoint`,
+      input.account,
+    )
   }
+
+  return appendAssistantAccountSummary(
+    input.oss
+      ? `${input.model ?? 'the configured local model'} in Codex OSS`
+      : `${input.model ?? 'the configured model'} in Codex CLI`,
+    input.account,
+  )
 }
 
 function normalizeNullableConfigField(value: unknown): string | null {

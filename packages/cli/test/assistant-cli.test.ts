@@ -824,6 +824,86 @@ test('model --show returns the saved assistant backend', async () => {
   assert.equal(result.envelope.data?.summary, 'gpt-5.4 in Codex CLI (Pro account)')
 })
 
+test('model --show summarizes a saved Codex OSS backend', async () => {
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-show-oss-'))
+  cleanupPaths.push(homeRoot)
+
+  await saveAssistantOperatorDefaultsPatch(
+    {
+      backend: {
+        adapter: 'codex-cli',
+        approvalPolicy: 'never',
+        codexCommand: null,
+        model: 'qwen3-coder',
+        oss: true,
+        profile: null,
+        reasoningEffort: null,
+        sandbox: 'danger-full-access',
+      },
+      account: null,
+    },
+    homeRoot,
+  )
+
+  const cli = Cli.create('vault-cli')
+  registerModelCommands(cli, {
+    resolveHomeDirectory: () => homeRoot,
+    terminal: {
+      stdinIsTTY: false,
+      stderrIsTTY: false,
+    },
+  })
+
+  const result = await runRegisteredCliJson<{
+    summary: string | null
+  }>(cli, ['model', '--show'])
+
+  assert.equal(result.exitCode, null)
+  assert.equal(result.envelope.ok, true)
+  assert.equal(result.envelope.data?.summary, 'qwen3-coder in Codex OSS')
+})
+
+test('model --show summarizes a saved OpenAI-compatible backend without an endpoint', async () => {
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-show-openai-'))
+  cleanupPaths.push(homeRoot)
+
+  await saveAssistantOperatorDefaultsPatch(
+    {
+      backend: {
+        adapter: 'openai-compatible',
+        apiKeyEnv: 'OPENAI_API_KEY',
+        endpoint: null,
+        headers: null,
+        model: 'gpt-4.1-mini',
+        providerName: 'openai',
+        reasoningEffort: null,
+      },
+      account: null,
+    },
+    homeRoot,
+  )
+
+  const cli = Cli.create('vault-cli')
+  registerModelCommands(cli, {
+    resolveHomeDirectory: () => homeRoot,
+    terminal: {
+      stdinIsTTY: false,
+      stderrIsTTY: false,
+    },
+  })
+
+  const result = await runRegisteredCliJson<{
+    summary: string | null
+  }>(cli, ['model', '--show'])
+
+  assert.equal(result.exitCode, null)
+  assert.equal(result.envelope.ok, true)
+  assert.equal(
+    result.envelope.data?.summary,
+    'gpt-4.1-mini via the saved OpenAI-compatible endpoint',
+  )
+})
+
 test('model reuses existing backend defaults when only the model changes', async () => {
   const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-update-'))
   cleanupPaths.push(homeRoot)
