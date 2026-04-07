@@ -2,7 +2,6 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 
 const globalForPrisma = globalThis as typeof globalThis & {
-  __murphHostedWebPrismaAdapter?: PrismaPg;
   __murphHostedWebPrisma?: PrismaClient;
 };
 
@@ -16,22 +15,20 @@ function createPrismaAdapter(): PrismaPg {
   return new PrismaPg({ connectionString: normalizePrismaConnectionString(databaseUrl) });
 }
 
-export function getPrisma(): PrismaClient {
-  if (globalForPrisma.__murphHostedWebPrisma) {
-    return globalForPrisma.__murphHostedWebPrisma;
-  }
-
-  const adapter = globalForPrisma.__murphHostedWebPrismaAdapter ?? createPrismaAdapter();
-  const prisma = new PrismaClient({
-    adapter,
+function createPrisma(): PrismaClient {
+  return new PrismaClient({
+    adapter: createPrismaAdapter(),
     log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
   });
+}
 
-  if (process.env.NODE_ENV !== "production") {
-    globalForPrisma.__murphHostedWebPrismaAdapter = adapter;
-    globalForPrisma.__murphHostedWebPrisma = prisma;
-  }
+const prisma = globalForPrisma.__murphHostedWebPrisma ?? createPrisma();
 
+if (process.env.NODE_ENV !== "production") {
+  globalForPrisma.__murphHostedWebPrisma = prisma;
+}
+
+export function getPrisma(): PrismaClient {
   return prisma;
 }
 
