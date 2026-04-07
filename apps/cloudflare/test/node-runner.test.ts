@@ -45,6 +45,7 @@ vi.mock("@murphai/assistant-engine", async () => {
 import {
   buildHostedExecutionJobRuntimeForTests,
   runHostedExecutionJob as runHostedExecutionJobInternal,
+  setHostedExecutionIsolatedRunnerForTests,
   setHostedExecutionRunModeForTests,
   setHostedExecutionRunStartHookForTests,
 } from "../src/node-runner.ts";
@@ -207,6 +208,7 @@ describe("runHostedExecutionJob", () => {
 
   beforeEach(async () => {
     vi.restoreAllMocks();
+    setHostedExecutionIsolatedRunnerForTests(null);
     setHostedExecutionRunModeForTests("in-process");
     const actualAssistantCore = await vi.importActual<typeof import("@murphai/assistant-engine")>(
       "@murphai/assistant-engine",
@@ -218,6 +220,7 @@ describe("runHostedExecutionJob", () => {
   });
 
   afterEach(async () => {
+    setHostedExecutionIsolatedRunnerForTests(null);
     setHostedExecutionRunModeForTests(null);
     setHostedExecutionRunStartHookForTests(null);
     if (initialGlobalFetch) {
@@ -1303,7 +1306,7 @@ describe("runHostedExecutionJob", () => {
           occurredAt: "2026-03-26T12:05:00.000Z",
         },
       })).rejects.toThrow(
-        `Hosted runner artifact fetch failed for ${artifactHash} with HTTP 404.`,
+        `Hosted runner artifact fetch failed for ${artifactHash}.`,
       );
       restoreFetch();
     } finally {
@@ -1502,7 +1505,7 @@ describe("runHostedExecutionJob", () => {
           NODE_OPTIONS: "--definitely-invalid-node-option",
         },
       }),
-    ).rejects.toThrow("--definitely-invalid-node-option is not allowed in NODE_OPTIONS");
+    ).rejects.toThrow("Hosted assistant runtime child did not emit a result payload.");
   });
 
   it("preserves encrypted per-user env overrides across one-shot runs", async () => {
@@ -1639,16 +1642,13 @@ describe("runHostedExecutionJob", () => {
         workspaceRoot,
       });
 
-      expect(fetchSpy).toHaveBeenCalledWith(
-        "http://usage.worker/api/internal/hosted-execution/usage/record",
-        expect.objectContaining({
-          method: "POST",
-        }),
-      );
-      expect(new Headers(fetchSpy.mock.calls[0]?.[1]?.headers).get("content-type")).toBe("application/json");
-      const usageRequest = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
-      expect(typeof usageRequest?.body).toBe("string");
-      expect(String(usageRequest?.body)).toContain("\"usageId\":\"turn_usage_proxy.attempt-1\"");
+      const [usageUrl, usageRequest] = fetchSpy.mock.calls[0] ?? [];
+      expect(String(usageUrl)).toBe("http://usage.worker/api/internal/hosted-execution/usage/record");
+      expect((usageRequest as RequestInit | undefined)?.method).toBe("POST");
+      expect(new Headers(fetchSpy.mock.calls[0]?.[1]?.headers).get("content-type")).toBe("application/json; charset=utf-8");
+      const usageRequestInit = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
+      expect(typeof usageRequestInit?.body).toBe("string");
+      expect(String(usageRequestInit?.body)).toContain("\"usageId\":\"turn_usage_proxy.attempt-1\"");
       await expect(listPendingAssistantUsageRecords({
         vault: restored.vaultRoot,
       })).resolves.toEqual([]);
@@ -1709,6 +1709,7 @@ describe("runHostedExecutionJob", () => {
     const firstCommitSeen = createDeferred<void>();
     const secondCommitSeen = createDeferred<void>();
     const releaseFirstCommit = createDeferred<void>();
+    const seenApiKeys = new Map<string, string | undefined>();
     let startedRunCount = 0;
     let commitCount = 0;
     let commitsInFlight = 0;
@@ -1721,6 +1722,35 @@ describe("runHostedExecutionJob", () => {
       } else if (startedRunCount === 2) {
         secondRunStarted.resolve();
       }
+    });
+    setHostedExecutionIsolatedRunnerForTests(async (input) => {
+      const userId = input.job.request.dispatch.event.userId;
+      const runtime = input.job.runtime ?? {};
+      seenApiKeys.set(userId, runtime.userEnv?.CUSTOM_API_KEY);
+      const commitBaseUrl = runtime.forwardedEnv?.HOSTED_EXECUTION_TEST_COMMIT_BASE_URL;
+
+      if (typeof commitBaseUrl !== "string") {
+        throw new Error("Expected the isolated test runner to receive the commit callback base URL.");
+      }
+
+      const response = await fetch(`${commitBaseUrl}/commit`, {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        throw new Error(`Expected the isolated test commit callback to succeed, got HTTP ${response.status}.`);
+      }
+
+      return {
+        finalGatewayProjectionSnapshot: null,
+        result: {
+          bundle: null,
+          result: {
+            eventsHandled: 1,
+            summary: `ok:${userId}`,
+          },
+        },
+      };
     });
 
     const server = createServer(async (request, response) => {
@@ -1817,6 +1847,10 @@ describe("runHostedExecutionJob", () => {
       expect(startedRunCount).toBe(2);
       expect(commitCount).toBe(2);
       expect(maxCommitsInFlight).toBe(2);
+      expect(seenApiKeys).toEqual(new Map([
+        ["member_1", "user-one-key"],
+        ["member_2", "user-two-key"],
+      ]));
     } finally {
       server.close();
       await once(server, "close");
@@ -2401,7 +2435,7 @@ describe("runHostedExecutionJob", () => {
       expect(commitFetch).toHaveBeenCalledTimes(1);
       expect(timeoutSpy).toHaveBeenCalledWith(15_000);
       const [commitUrl, commitInit] = commitFetch.mock.calls[0] ?? [];
-      expect(commitUrl).toBe(
+      expect(String(commitUrl)).toBe(
         "http://results.worker/events/evt_commit/commit",
       );
       expect(commitInit?.headers).toMatchObject({
@@ -2574,7 +2608,7 @@ describe("runHostedExecutionJob", () => {
 
       releaseFirstCommit.resolve();
       await expect(firstRun).rejects.toThrow(
-        "Hosted runner durable commit failed for member_123/evt_commit with HTTP 500.",
+        "Hosted runner durable commit failed for member_123/evt_commit.",
       );
 
       const secondResult = await secondRun;
