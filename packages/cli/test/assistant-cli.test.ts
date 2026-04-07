@@ -33,6 +33,7 @@ import { formatAssistantRunEventForTerminal } from '@murphai/assistant-cli/run-t
 import { formatStructuredErrorMessage } from '@murphai/operator-config/text/shared'
 import type { SetupConfiguredAssistant } from '@murphai/operator-config/setup-cli-contracts'
 import type { SetupAssistantResolver } from '@murphai/setup-cli/setup-assistant'
+import type { SetupAssistantWizardInput } from '@murphai/setup-cli/setup-assistant-wizard'
 import {
   collectVaultCliDescriptorRootCommandNames,
   collectVaultRequiredCliDescriptorRootCommandNames,
@@ -904,6 +905,162 @@ test('model --show summarizes a saved OpenAI-compatible backend without an endpo
   )
 })
 
+test('interactive bare model uses the assistant Ink wizard selection before resolving details', async () => {
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-wizard-'))
+  cleanupPaths.push(homeRoot)
+
+  const assistantWizard = vi.fn(async (_input: SetupAssistantWizardInput) => ({
+    assistantPreset: 'openai-compatible' as const,
+    assistantBaseUrl: 'http://127.0.0.1:11434/v1',
+    assistantApiKeyEnv: 'OLLAMA_API_KEY',
+    assistantProviderName: 'ollama',
+    assistantOss: false,
+  }))
+  const resolveAssistant = vi.fn(
+    async ({ options, preset }): Promise<SetupConfiguredAssistant> => ({
+      preset,
+      enabled: true,
+      provider: 'openai-compatible',
+      model: 'gpt-oss:20b',
+      baseUrl: options.assistantBaseUrl ?? null,
+      apiKeyEnv: options.assistantApiKeyEnv ?? null,
+      providerName: options.assistantProviderName ?? null,
+      codexCommand: null,
+      profile: null,
+      reasoningEffort: options.assistantReasoningEffort ?? null,
+      sandbox: null,
+      approvalPolicy: null,
+      oss: false,
+      account: null,
+      detail: 'resolved after wizard selection',
+    }),
+  )
+  const assistantSetup: SetupAssistantResolver = {
+    resolve: resolveAssistant,
+  }
+
+  const cli = Cli.create('vault-cli')
+  registerModelCommands(cli, {
+    assistantSetup,
+    assistantWizard,
+    resolveHomeDirectory: () => homeRoot,
+    terminal: {
+      stdinIsTTY: true,
+      stderrIsTTY: true,
+    },
+  })
+
+  const result = await runRegisteredCliJson<{
+    summary: string | null
+  }>(cli, ['model'])
+
+  assert.equal(result.exitCode, null)
+  assert.equal(result.envelope.ok, true)
+  assert.equal(assistantWizard.mock.calls.length, 1)
+  assert.deepEqual(assistantWizard.mock.calls[0]?.[0], {})
+  assert.equal(resolveAssistant.mock.calls.length, 1)
+  assert.deepEqual(resolveAssistant.mock.calls[0]?.[0], {
+    allowPrompt: true,
+    commandName: 'model',
+    options: {
+      vault: './vault',
+      strict: true,
+      whisperModel: 'base.en',
+      assistantPreset: 'openai-compatible',
+      assistantBaseUrl: 'http://127.0.0.1:11434/v1',
+      assistantApiKeyEnv: 'OLLAMA_API_KEY',
+      assistantProviderName: 'ollama',
+    },
+    preset: 'openai-compatible',
+  })
+  assert.equal(
+    result.envelope.data?.summary,
+    'gpt-oss:20b via http://127.0.0.1:11434/v1',
+  )
+})
+
+test('interactive bare model clears stale saved model and provider metadata when the wizard changes endpoint details', async () => {
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-wizard-reset-'))
+  cleanupPaths.push(homeRoot)
+
+  await saveAssistantOperatorDefaultsPatch(
+    {
+      backend: {
+        adapter: 'openai-compatible',
+        apiKeyEnv: 'OPENROUTER_API_KEY',
+        endpoint: 'https://openrouter.ai/api/v1',
+        headers: null,
+        model: 'openai/gpt-4.1-mini',
+        providerName: 'OpenRouter',
+        reasoningEffort: 'high',
+      },
+      account: null,
+    },
+    homeRoot,
+  )
+
+  const assistantWizard = vi.fn(async (_input: SetupAssistantWizardInput) => ({
+    assistantPreset: 'openai-compatible' as const,
+    assistantBaseUrl: 'http://127.0.0.1:11434/v1',
+    assistantApiKeyEnv: null,
+    assistantProviderName: null,
+    assistantOss: false,
+  }))
+  const resolveAssistant = vi.fn(
+    async ({ options, preset }): Promise<SetupConfiguredAssistant> => ({
+      preset,
+      enabled: true,
+      provider: 'openai-compatible',
+      model: 'gpt-oss:20b',
+      baseUrl: options.assistantBaseUrl ?? null,
+      apiKeyEnv: options.assistantApiKeyEnv ?? null,
+      providerName: options.assistantProviderName ?? null,
+      codexCommand: null,
+      profile: null,
+      reasoningEffort: options.assistantReasoningEffort ?? null,
+      sandbox: null,
+      approvalPolicy: null,
+      oss: false,
+      account: null,
+      detail: 'resolved after wizard selection',
+    }),
+  )
+  const assistantSetup: SetupAssistantResolver = {
+    resolve: resolveAssistant,
+  }
+
+  const cli = Cli.create('vault-cli')
+  registerModelCommands(cli, {
+    assistantSetup,
+    assistantWizard,
+    resolveHomeDirectory: () => homeRoot,
+    terminal: {
+      stdinIsTTY: true,
+      stderrIsTTY: true,
+    },
+  })
+
+  const result = await runRegisteredCliJson<{
+    summary: string | null
+  }>(cli, ['model'])
+
+  assert.equal(result.exitCode, null)
+  assert.equal(result.envelope.ok, true)
+  assert.equal(resolveAssistant.mock.calls.length, 1)
+  assert.deepEqual(resolveAssistant.mock.calls[0]?.[0], {
+    allowPrompt: true,
+    commandName: 'model',
+    options: {
+      vault: './vault',
+      strict: true,
+      whisperModel: 'base.en',
+      assistantPreset: 'openai-compatible',
+      assistantBaseUrl: 'http://127.0.0.1:11434/v1',
+    },
+    preset: 'openai-compatible',
+  })
+})
+
 test('model reuses existing backend defaults when only the model changes', async () => {
   const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-update-'))
   cleanupPaths.push(homeRoot)
@@ -1008,6 +1165,84 @@ test('model reuses existing backend defaults when only the model changes', async
   assert.equal(savedConfig?.assistant?.backend?.adapter, 'openai-compatible')
   assert.equal(savedConfig?.assistant?.backend?.model, 'gpt-oss:20b')
   assert.equal(savedConfig?.assistant?.backend?.providerName, 'ollama')
+})
+
+test('changing presets does not leak saved defaults from a different backend adapter', async () => {
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-preset-switch-'))
+  cleanupPaths.push(homeRoot)
+
+  await saveAssistantOperatorDefaultsPatch(
+    {
+      backend: {
+        adapter: 'openai-compatible',
+        apiKeyEnv: 'OPENROUTER_API_KEY',
+        endpoint: 'https://openrouter.ai/api/v1',
+        headers: null,
+        model: 'openai/gpt-4.1-mini',
+        providerName: 'OpenRouter',
+        reasoningEffort: 'high',
+      },
+      account: null,
+    },
+    homeRoot,
+  )
+
+  const resolveAssistant = vi.fn(
+    async ({ options, preset }): Promise<SetupConfiguredAssistant> => ({
+      preset,
+      enabled: true,
+      provider: 'codex-cli',
+      model: options.assistantModel ?? null,
+      baseUrl: options.assistantBaseUrl ?? null,
+      apiKeyEnv: options.assistantApiKeyEnv ?? null,
+      providerName: options.assistantProviderName ?? null,
+      codexCommand: options.assistantCodexCommand ?? null,
+      profile: options.assistantProfile ?? null,
+      reasoningEffort: options.assistantReasoningEffort ?? null,
+      sandbox: null,
+      approvalPolicy: null,
+      oss: options.assistantOss ?? false,
+      account: null,
+      detail: 'saved codex backend',
+    }),
+  )
+  const assistantSetup: SetupAssistantResolver = {
+    resolve: resolveAssistant,
+  }
+
+  const cli = Cli.create('vault-cli')
+  registerModelCommands(cli, {
+    assistantSetup,
+    resolveHomeDirectory: () => homeRoot,
+    terminal: {
+      stdinIsTTY: false,
+      stderrIsTTY: false,
+    },
+  })
+
+  const result = await runRegisteredCliJson(cli, [
+    'model',
+    '--preset',
+    'codex',
+    '--model',
+    'gpt-5.4',
+  ])
+
+  assert.equal(result.exitCode, null)
+  assert.equal(result.envelope.ok, true)
+  assert.equal(resolveAssistant.mock.calls.length, 1)
+  assert.deepEqual(resolveAssistant.mock.calls[0]?.[0], {
+    allowPrompt: false,
+    commandName: 'model',
+    options: {
+      vault: './vault',
+      strict: true,
+      whisperModel: 'base.en',
+      assistantPreset: 'codex',
+      assistantModel: 'gpt-5.4',
+    },
+    preset: 'codex',
+  })
 })
 
 test('root status, doctor, and stop aliases reuse the assistant command schemas', () => {
