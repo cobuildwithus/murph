@@ -166,6 +166,9 @@ jobs:
           HOSTED_EXECUTION_DEPLOY_WORKER: ${{ inputs.deploy_worker }}
         run: pnpm --dir apps/cloudflare deploy:preflight
 
+      - name: Prebuild workspace package outputs
+        run: pnpm build:workspace:incremental
+
       - name: Run focused Cloudflare checks
         run: pnpm --dir apps/cloudflare verify
 
