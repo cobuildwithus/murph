@@ -1,14 +1,11 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawn } from 'node:child_process';
 import {
   loadReleaseContext,
   parseReleaseArgs,
   validateReleaseContext,
 } from './release-helpers.mjs';
-
-const execFileAsync = promisify(execFile);
 
 function isAlreadyPublished(output) {
   return /previously published|cannot publish over|version already exists/ui.test(
@@ -18,6 +15,95 @@ function isAlreadyPublished(output) {
 
 function isPermissionOrScopeNotFound(output) {
   return /npm error 404 Not Found - PUT https:\/\/registry\.npmjs\.org\/@/ui.test(output);
+}
+
+function isOtpRequired(output) {
+  return /npm error code EOTP|one-time password|OTP required for authentication/ui.test(
+    output,
+  );
+}
+
+function shellEscapeArgument(argument) {
+  if (/^[A-Za-z0-9_./:@=+-]+$/u.test(argument)) {
+    return argument;
+  }
+
+  return `'${argument.replace(/'/gu, `'\\''`)}'`;
+}
+
+function buildShellCommand(command, args) {
+  return [command, ...args].map(shellEscapeArgument).join(' ');
+}
+
+function shouldUseInteractivePublishWrapper() {
+  return (
+    !process.env.CI &&
+    process.platform !== 'win32' &&
+    Boolean(process.stdin.isTTY) &&
+    Boolean(process.stdout.isTTY)
+  );
+}
+
+function resolvePublishCommand(publishArgs) {
+  if (!shouldUseInteractivePublishWrapper()) {
+    return {
+      command: 'npm',
+      args: publishArgs,
+    };
+  }
+
+  if (process.platform === 'darwin') {
+    return {
+      command: 'script',
+      args: ['-q', '/dev/null', 'npm', ...publishArgs],
+    };
+  }
+
+  return {
+    command: 'script',
+    args: ['-q', '-e', '-c', buildShellCommand('npm', publishArgs), '/dev/null'],
+  };
+}
+
+async function execFileStreaming(command, args, cwd) {
+  const child = spawn(command, args, {
+    cwd,
+    stdio: ['inherit', 'pipe', 'pipe'],
+  });
+
+  let stdout = '';
+  let stderr = '';
+
+  child.stdout.on('data', (chunk) => {
+    const text = chunk.toString();
+    stdout += text;
+    process.stdout.write(chunk);
+  });
+
+  child.stderr.on('data', (chunk) => {
+    const text = chunk.toString();
+    stderr += text;
+    process.stderr.write(chunk);
+  });
+
+  return await new Promise((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', (code, signal) => {
+      if (code === 0) {
+        resolve({ stderr, stdout });
+        return;
+      }
+
+      const error = new Error(
+        `Command failed: ${command} ${args.map(shellEscapeArgument).join(' ')}`,
+      );
+      error.code = code ?? 1;
+      error.signal = signal ?? null;
+      error.stderr = stderr;
+      error.stdout = stdout;
+      reject(error);
+    });
+  });
 }
 
 const options = parseReleaseArgs(process.argv.slice(2), {
@@ -88,24 +174,25 @@ for (const entry of summary.packages) {
   }
 
   console.log(`+ npm ${publishArgs.join(' ')}`);
+  const publishCommand = resolvePublishCommand(publishArgs);
 
   try {
-    const { stdout, stderr } = await execFileAsync('npm', publishArgs);
-    if (stdout.length > 0) {
-      process.stdout.write(stdout);
-    }
-    if (stderr.length > 0) {
-      process.stderr.write(stderr);
-    }
+    await execFileStreaming(publishCommand.command, publishCommand.args, context.repoRoot);
   } catch (error) {
     const output = `${error.stdout ?? ''}${error.stderr ?? ''}`;
-    if (output.length > 0) {
-      process.stdout.write(output);
-    }
 
     if (isAlreadyPublished(output)) {
       console.log(`Skipping ${entry.name}@${entry.version}; version already published.`);
       continue;
+    }
+
+    if (isOtpRequired(output)) {
+      throw new Error(
+        `npm publish failed for ${entry.name}@${entry.version} because npm still requires interactive authentication. `
+          + 'Run `npm login --auth-type=web` or complete the browser auth URL that npm prints, '
+          + 'then rerun `node scripts/publish-publishables.mjs --pack-output '
+          + `${options.packOutput}` + '`.',
+      );
     }
 
     if (isPermissionOrScopeNotFound(output)) {
