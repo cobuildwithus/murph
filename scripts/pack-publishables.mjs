@@ -41,6 +41,10 @@ function stageDirectoryName(packageName) {
   return packageName.replace(/^@/u, '').replace(/\//gu, '__');
 }
 
+function shouldSkipPayloadArtifact(sourcePath) {
+  return path.basename(sourcePath).endsWith('.tsbuildinfo');
+}
+
 async function pathExists(targetPath) {
   try {
     await stat(targetPath);
@@ -54,10 +58,17 @@ async function pathExists(targetPath) {
 }
 
 async function copyPayloadPath(sourcePath, targetPath) {
+  if (shouldSkipPayloadArtifact(sourcePath)) {
+    return;
+  }
+
   const sourceStats = await stat(sourcePath);
 
   if (sourceStats.isDirectory()) {
     await cp(sourcePath, targetPath, {
+      filter(candidatePath) {
+        return !shouldSkipPayloadArtifact(candidatePath);
+      },
       recursive: true,
     });
     return;
