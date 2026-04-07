@@ -138,6 +138,7 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await writeFile(path.join(vaultRoot, ".runtime", "operations", "parsers", "toolchain.json"), "{\"version\":1}\n");
     await writeFile(path.join(vaultRoot, ".runtime", "operations", "op_test.json"), "{\"status\":\"committed\"}\n");
     await writeFile(path.join(vaultRoot, ".runtime", "operations", "op_test", "payloads", "staged.md"), "staged payload\n");
+    await writeFile(path.join(vaultRoot, ".runtime", "projections", "gateway.sqlite"), "gateway-projection\n");
     await writeFile(path.join(vaultRoot, ".runtime", "projections", "query.sqlite"), "query-projection\n");
     await writeFile(path.join(vaultRoot, ".runtime", "search.sqlite"), "legacy-search\n");
     await writeFile(path.join(vaultRoot, ".env.local"), "secret=true\n");
@@ -255,6 +256,7 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       { expected: null, path: ".runtime/operations/assistant/secrets/sessions/session_1.json", root: "vault" },
       { expected: null, path: ".runtime/operations/inbox/config.json", root: "vault" },
       { expected: null, path: ".runtime/operations/device-sync/state.sqlite", root: "vault" },
+      { expected: null, path: ".runtime/projections/gateway.sqlite", root: "vault" },
       { expected: null, path: ".runtime/projections/query.sqlite", root: "vault" },
       { expected: null, path: ".runtime/search.sqlite", root: "vault" },
       { expected: null, path: ".runtime/operations/parsers/toolchain.json", root: "vault" },
@@ -388,6 +390,9 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       readFile(path.join(restored.vaultRoot, ".runtime", "operations", "parsers", "toolchain.json"), "utf8"),
     );
     await assert.rejects(
+      readFile(path.join(restored.vaultRoot, ".runtime", "projections", "gateway.sqlite"), "utf8"),
+    );
+    await assert.rejects(
       readFile(path.join(restored.vaultRoot, ".runtime", "projections", "query.sqlite"), "utf8"),
     );
     await assert.rejects(
@@ -507,6 +512,11 @@ test("runtime-state portability defaults operational paths to machine-local unle
     classification: "projection",
     portability: "machine_local",
     owner: "query",
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/projections/gateway.sqlite")).toMatchObject({
+    classification: "projection",
+    portability: "machine_local",
+    owner: "gateway-local",
   });
 });
 
