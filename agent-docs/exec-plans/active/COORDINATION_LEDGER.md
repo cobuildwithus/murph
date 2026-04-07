@@ -6,5 +6,4 @@ Use `Notes` to mark a lane as exclusive when overlap is unsafe, such as a large 
 
 | Agent | Scope | Files | Symbols | Status | Notes |
 | --- | --- | --- | --- | --- | --- |
-
 No active work is currently registered.
