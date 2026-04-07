@@ -8,7 +8,6 @@ import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
 export interface HostedSharePackClient {
   deleteSharePack(userId: string, shareId: string): Promise<void>;
-  getSharePack(userId: string, shareId: string): Promise<SharePack | null>;
   putSharePack(userId: string, shareId: string, pack: SharePack): Promise<SharePack>;
 }
 
@@ -35,15 +34,6 @@ export function requireHostedSharePackClient(): HostedSharePackClient {
         label: "delete share pack",
         method: "DELETE",
         parse: () => undefined,
-        path: buildHostedSharePackPath(userId, shareId),
-      });
-    },
-    async getSharePack(userId, shareId) {
-      return requester.requestJson({
-        allowNotFound: true,
-        label: "share pack",
-        method: "GET",
-        parse: parseHostedExecutionSharePack,
         path: buildHostedSharePackPath(userId, shareId),
       });
     },

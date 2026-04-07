@@ -17,8 +17,6 @@ vi.mock("@/src/lib/hosted-share/pack-store", () => ({
   deleteHostedSharePackObject: async ({ ownerUserId, shareId }: { ownerUserId: string; shareId: string }) => {
     shareHarness.sharePacks.delete(`${ownerUserId}:${shareId}`);
   },
-  readHostedSharePackObject: async ({ ownerUserId, shareId }: { ownerUserId: string; shareId: string }) =>
-    shareHarness.sharePacks.get(`${ownerUserId}:${shareId}`) ?? null,
   writeHostedSharePackObject: async ({
     ownerUserId,
     pack,

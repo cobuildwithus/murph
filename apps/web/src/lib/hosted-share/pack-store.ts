@@ -10,13 +10,6 @@ export async function writeHostedSharePackObject(input: {
   return requireHostedSharePackClient().putSharePack(input.ownerUserId, input.shareId, input.pack);
 }
 
-export async function readHostedSharePackObject(input: {
-  ownerUserId: string;
-  shareId: string;
-}): Promise<SharePack | null> {
-  return requireHostedSharePackClient().getSharePack(input.ownerUserId, input.shareId);
-}
-
 export async function deleteHostedSharePackObject(input: {
   ownerUserId: string;
   shareId: string;

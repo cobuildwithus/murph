@@ -17,7 +17,7 @@ import {
 import { parseHostedUserEnvUpdate } from "../user-env.ts";
 import { createHostedPendingUsageDirtyUserStore } from "../usage-store.ts";
 import { createHostedShareStore } from "../share-store.ts";
-import { json, notFound } from "../json.ts";
+import { json } from "../json.ts";
 import {
   decodeRouteParam,
   readCachedJsonObject,
@@ -229,11 +229,6 @@ export async function handleSharePackRoute(
     keysById: ownerCrypto.keysById,
     ownerUserId: userId,
   });
-
-  if (context.request.method === "GET") {
-    const pack = await store.readSharePack(shareId);
-    return pack ? json(pack) : notFound();
-  }
 
   if (context.request.method === "DELETE") {
     await store.deleteSharePack(shareId);

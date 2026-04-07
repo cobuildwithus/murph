@@ -167,7 +167,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
       return handleSharePackRoute(context, params.userId, params.shareId);
     },
     match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/shares\/(?<shareId>[^/]+)\/pack$/u),
-    methods: ["GET", "PUT", "DELETE"],
+    methods: ["PUT", "DELETE"],
     wrongMethodResponse: "method-not-allowed",
   },
   {
