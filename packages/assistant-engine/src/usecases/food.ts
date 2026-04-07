@@ -4,6 +4,7 @@ import { z } from 'zod'
 import {
   addAssistantCronJob,
   listAssistantCronJobs,
+  removeAssistantCronJob,
 } from '../assistant/cron.js'
 import { loadRuntimeModule } from '../runtime-import.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -143,23 +144,30 @@ export async function upsertFoodRecord(input: {
   allowSlugRename?: boolean
 }) {
   const core = await loadFoodCoreRuntime()
+  const existingFood = await findFoodForPersist(core, input.vault, {
+    foodId: input.payload.foodId,
+    slug: input.payload.slug,
+  })
 
   try {
-    const result = await core.upsertFood(
-      buildFoodCoreInput({
+    const persisted = await persistFoodRecord({
+      core,
+      previousFood: existingFood,
+      vault: input.vault,
+      payload: buildFoodCoreInput({
         vault: input.vault,
         payload: input.payload,
         clearedFields: input.clearedFields,
         allowSlugRename: input.allowSlugRename,
       }),
-    )
+    })
 
     return {
       vault: input.vault,
-      foodId: result.record.foodId,
-      lookupId: result.record.foodId,
-      path: result.record.relativePath,
-      created: result.created,
+      foodId: persisted.food.foodId,
+      lookupId: persisted.food.foodId,
+      path: persisted.food.relativePath,
+      created: persisted.created,
     }
   } catch (error) {
     throw toVaultCliError(error, {
@@ -275,33 +283,38 @@ export async function renameFoodRecord(input: {
   const slug = slugInput ?? slugifyFoodLookup(title)
 
   try {
-    const result = await core.upsertFood({
-      vaultRoot: input.vault,
-      foodId: existing.foodId,
-      slug,
-      allowSlugRename: true,
-      title,
-      status: existing.status,
-      summary: existing.summary,
-      kind: existing.kind,
-      brand: existing.brand,
-      vendor: existing.vendor,
-      location: existing.location,
-      serving: existing.serving,
-      aliases: mergeFoodAliases(existing.aliases, existing.title, title),
-      ingredients: existing.ingredients,
-      tags: existing.tags,
-      note: existing.note,
-      attachedProtocolIds: existing.attachedProtocolIds,
-      autoLogDaily: existing.autoLogDaily ?? undefined,
+    const persisted = await persistFoodRecord({
+      core,
+      previousFood: existing,
+      vault: input.vault,
+      payload: {
+        vaultRoot: input.vault,
+        foodId: existing.foodId,
+        slug,
+        allowSlugRename: true,
+        title,
+        status: existing.status,
+        summary: existing.summary,
+        kind: existing.kind,
+        brand: existing.brand,
+        vendor: existing.vendor,
+        location: existing.location,
+        serving: existing.serving,
+        aliases: mergeFoodAliases(existing.aliases, existing.title, title),
+        ingredients: existing.ingredients,
+        tags: existing.tags,
+        note: existing.note,
+        attachedProtocolIds: existing.attachedProtocolIds,
+        autoLogDaily: existing.autoLogDaily ?? undefined,
+      },
     })
 
     return {
       vault: input.vault,
-      foodId: result.record.foodId,
-      lookupId: result.record.foodId,
-      path: result.record.relativePath,
-      created: result.created,
+      foodId: persisted.food.foodId,
+      lookupId: persisted.food.foodId,
+      path: persisted.food.relativePath,
+      created: persisted.created,
     }
   } catch (error) {
     throw toVaultCliError(error, {
@@ -335,116 +348,56 @@ export async function addDailyFoodRecord(input: {
     throw new VaultCliError('contract_invalid', 'title must be a non-empty string.')
   }
 
-  let savedFoodId: string | null = null
-  let existingFood: FoodReadModel | null = null
-  let existingDailyJobs: Awaited<ReturnType<typeof listAssistantCronJobs>> = []
-
   try {
-    const vault = await core.loadVault({
-      vaultRoot: input.vault,
-    })
-    const timeZone = vault.metadata.timezone ?? 'UTC'
-    const desiredExpression = buildDailyFoodCronExpression(time)
-    existingFood = await findFoodForDailyAdd(core, {
+    const existingFood = await findFoodForDailyAdd(core, {
       vault: input.vault,
       title,
       slug,
     })
-    const existingJobs = await listAssistantCronJobs(input.vault)
-    const existingFoodId = existingFood?.foodId
-    existingDailyJobs = existingFoodId
-      ? existingJobs.filter((job) => job.foodAutoLog?.foodId === existingFoodId)
-      : []
-
-    if (existingDailyJobs.length > 1) {
-      throw new VaultCliError(
-        'conflict',
-        `Food "${existingFood?.title ?? title}" already has multiple recurring auto-log jobs. Remove the extras before changing it.`,
-      )
-    }
-
-    const existingJob = existingDailyJobs[0] ?? null
-    if (existingFood?.autoLogDaily && existingFood.autoLogDaily.time !== time) {
-      throw new VaultCliError(
-        'conflict',
-        `Food "${existingFood.title}" already auto-logs daily at ${existingFood.autoLogDaily.time}. Remove or change the existing recurring food before setting a new time.`,
-      )
-    }
-
-    if (
-      existingJob &&
-      !isDailyFoodScheduleMatch(existingJob.schedule, {
-        desiredExpression,
-        time,
-        timeZone,
-      })
-    ) {
-      throw new VaultCliError(
-        'conflict',
-        `Food "${existingFood?.title ?? title}" already has a recurring auto-log job with a different schedule. Remove or change the existing recurring food before setting a new time.`,
-      )
-    }
-
-    const result = await core.upsertFood({
-      vaultRoot: input.vault,
-      foodId: existingFood?.foodId,
-      slug: existingFood?.slug ?? slug,
-      title,
-      note,
-      autoLogDaily: {
-        time,
+    const persisted = await persistFoodRecord({
+      core,
+      previousFood: existingFood,
+      vault: input.vault,
+      payload: {
+        vaultRoot: input.vault,
+        foodId: existingFood?.foodId,
+        slug: existingFood?.slug ?? slug,
+        title,
+        note,
+        autoLogDaily: {
+          time,
+        },
       },
     })
-    savedFoodId = result.record.foodId
-    const food = await core.readFood({
-      vaultRoot: input.vault,
-      foodId: result.record.foodId,
-    })
-
-    const job =
-      existingJob ??
-      (await addAssistantCronJob({
-        vault: input.vault,
-        name: buildDailyFoodCronJobName(food.slug),
-        prompt: buildDailyFoodCronPrompt(food.title),
-        schedule: buildDailyFoodSchedule(time, timeZone),
-        foodAutoLog: {
-          foodId: food.foodId,
-        },
-      }))
+    const job = persisted.job
+    if (!job) {
+      throw new VaultCliError(
+        'ASSISTANT_CRON_INVALID_STATE',
+        `Food "${persisted.food.title}" still lacks a recurring auto-log job after scheduling.`,
+      )
+    }
 
     return {
       vault: input.vault,
-      foodId: food.foodId,
-      lookupId: food.foodId,
-      path: food.relativePath,
-      created: result.created,
+      foodId: persisted.food.foodId,
+      lookupId: persisted.food.foodId,
+      path: persisted.food.relativePath,
+      created: persisted.created,
       time,
       jobId: job.jobId,
       jobName: job.name,
       nextRunAt: job.state.nextRunAt,
     }
   } catch (error) {
-    if (savedFoodId && !existingFood?.autoLogDaily && existingDailyJobs.length === 0) {
-      try {
-        await core.upsertFood({
-          vaultRoot: input.vault,
-          foodId: savedFoodId,
-          slug: existingFood?.slug ?? slug,
-          title,
-          autoLogDaily: null,
-        })
-      } catch {
-        // Best-effort cleanup only when cron creation fails after saving a new daily rule.
-      }
-    }
-
     throw toVaultCliError(error, {
       ASSISTANT_CRON_INVALID_INPUT: {
         code: 'contract_invalid',
       },
       ASSISTANT_CRON_INVALID_SCHEDULE: {
         code: 'contract_invalid',
+      },
+      ASSISTANT_CRON_INVALID_STATE: {
+        code: 'conflict',
       },
       ASSISTANT_CRON_JOB_EXISTS: {
         code: 'conflict',
@@ -459,6 +412,42 @@ export async function addDailyFoodRecord(input: {
         code: 'conflict',
       },
     })
+  }
+}
+
+async function persistFoodRecord(input: {
+  core: FoodCoreRuntime
+  payload: FoodCoreUpsertInput
+  previousFood?: FoodReadModel | null
+  vault: string
+}) {
+  const result = await input.core.upsertFood(input.payload)
+  const food = await input.core.readFood({
+    vaultRoot: input.vault,
+    foodId: result.record.foodId,
+  })
+
+  let job: Awaited<ReturnType<typeof reconcileDailyFoodAutoLog>>
+  try {
+    job = await reconcileDailyFoodAutoLog({
+      core: input.core,
+      food,
+      vault: input.vault,
+    })
+  } catch (error) {
+    await rollbackFoodRecordAfterRecurringCronFailure({
+      core: input.core,
+      food,
+      previousFood: input.previousFood ?? null,
+      vault: input.vault,
+    })
+    throw error
+  }
+
+  return {
+    created: result.created,
+    food,
+    job,
   }
 }
 
@@ -655,6 +644,128 @@ async function findFoodForDailyAdd(
 
   const foods = await core.listFoods(input.vault)
   return foods.find((food) => food.title === input.title) ?? null
+}
+
+async function findFoodForPersist(
+  core: FoodCoreRuntime,
+  vault: string,
+  input: {
+    foodId?: string
+    slug?: string
+  },
+): Promise<FoodReadModel | null> {
+  if (input.foodId) {
+    try {
+      return await core.readFood({
+        vaultRoot: vault,
+        foodId: input.foodId,
+      })
+    } catch {
+      return null
+    }
+  }
+
+  if (input.slug) {
+    try {
+      return await core.readFood({
+        vaultRoot: vault,
+        slug: input.slug,
+      })
+    } catch {
+      return null
+    }
+  }
+
+  return null
+}
+
+async function rollbackFoodRecordAfterRecurringCronFailure(input: {
+  core: FoodCoreRuntime
+  food: FoodReadModel
+  previousFood: FoodReadModel | null
+  vault: string
+}) {
+  if (input.previousFood) {
+    await input.core.upsertFood(
+      buildFoodCoreInput({
+        vault: input.vault,
+        payload: buildFoodPayload(input.previousFood),
+        allowSlugRename: true,
+      }),
+    )
+    const restoredFood = await input.core.readFood({
+      vaultRoot: input.vault,
+      foodId: input.previousFood.foodId,
+    })
+    await reconcileDailyFoodAutoLog({
+      core: input.core,
+      food: restoredFood,
+      vault: input.vault,
+    })
+    return
+  }
+
+  await input.core.upsertFood(
+    buildFoodCoreInput({
+      vault: input.vault,
+      payload: buildFoodPayload(input.food),
+      clearedFields: new Set(['autoLogDaily']),
+      allowSlugRename: true,
+    }),
+  )
+}
+
+async function reconcileDailyFoodAutoLog(input: {
+  core: FoodCoreRuntime
+  food: FoodReadModel
+  vault: string
+}) {
+  const existingJobs = (await listAssistantCronJobs(input.vault)).filter(
+    (job) => job.foodAutoLog?.foodId === input.food.foodId,
+  )
+
+  if (!input.food.autoLogDaily) {
+    for (const job of existingJobs) {
+      await removeAssistantCronJob(input.vault, job.jobId)
+    }
+    return null
+  }
+
+  const vault = await input.core.loadVault({
+    vaultRoot: input.vault,
+  })
+  const time = input.food.autoLogDaily.time
+  const timeZone = vault.metadata.timezone ?? 'UTC'
+  const desiredName = buildDailyFoodCronJobName(input.food.slug)
+  const desiredPrompt = buildDailyFoodCronPrompt(input.food.title)
+  const desiredExpression = buildDailyFoodCronExpression(time)
+  const desiredJob = existingJobs.find((job) =>
+    job.name === desiredName &&
+    job.prompt === desiredPrompt &&
+    isDailyFoodScheduleMatch(job.schedule, {
+      desiredExpression,
+      time,
+      timeZone,
+    }),
+  )
+
+  if (desiredJob && existingJobs.length === 1) {
+    return desiredJob
+  }
+
+  for (const job of existingJobs) {
+    await removeAssistantCronJob(input.vault, job.jobId)
+  }
+
+  return addAssistantCronJob({
+    vault: input.vault,
+    name: desiredName,
+    prompt: desiredPrompt,
+    schedule: buildDailyFoodSchedule(time, timeZone),
+    foodAutoLog: {
+      foodId: input.food.foodId,
+    },
+  })
 }
 
 function isDailyFoodScheduleMatch(
