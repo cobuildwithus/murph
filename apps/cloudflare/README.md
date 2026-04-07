@@ -81,7 +81,7 @@ Current worker routes:
 - `PUT /internal/users/:userId/env` merges or replaces the user's separately encrypted hosted env object
 - `DELETE /internal/users/:userId/env` clears the user's separately encrypted hosted env object without rewriting the hosted vault bundle
 - `PUT /internal/users/:userId/crypto-context` explicitly provisions or reconciles the managed hosted root-key envelope for the user before runtime access
-- `PUT|GET|DELETE /internal/users/:userId/shares/:shareId/pack` stores owner-bound opaque hosted share-pack objects under the owning user root key for acceptance/import only; page preview reads come from the tiny Postgres summary instead
+- `PUT|DELETE /internal/users/:userId/shares/:shareId/pack` stores or removes owner-bound opaque hosted share-pack objects under the owning user root key for acceptance/import only; page preview reads come from the tiny Postgres summary instead, and live share-pack reads are not exposed over the control plane
 
 Hosted member private identifiers are no longer a Cloudflare-owned storage surface. `apps/web` now sends self-contained onboarding activation events and keeps encrypted member identity, routing, and billing-reference fields in Postgres owner tables.
 

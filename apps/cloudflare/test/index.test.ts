@@ -17,6 +17,7 @@ import { readHostedExecutionEnvironment } from "../src/env.ts";
 import { createHostedExecutionJournalStore, persistHostedExecutionCommit } from "../src/execution-journal.ts";
 import { reconcileHostedEmailVerifiedSenderRoute } from "../src/hosted-email.ts";
 import worker, { ContainerProxy as ExportedContainerProxy, UserRunnerDurableObject } from "../src/index.ts";
+import { createHostedShareStore } from "../src/share-store.ts";
 import { hostedArtifactObjectKey } from "../src/storage-paths.ts";
 import { createHostedUserKeyStore } from "../src/user-key-store.ts";
 import { encodeHostedUserEnvPayload } from "../src/user-env.ts";
@@ -837,7 +838,7 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("stores hosted share packs on the signed direct worker route", async () => {
+  it("stores and deletes hosted share packs on the signed direct worker route without exposing reads", async () => {
     const stub = createUserRunnerStub();
     const env = createWorkerEnv(stub, {
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
@@ -883,8 +884,10 @@ describe("cloudflare worker routes", () => {
       })),
       env,
     );
-    expect(getResponse.status).toBe(200);
-    await expect(getResponse.json()).resolves.toEqual(pack);
+    expect(getResponse.status).toBe(405);
+    await expect(getResponse.json()).resolves.toEqual({
+      error: "Method not allowed.",
+    });
 
     const deleteResponse = await worker.fetch(
       await signControlRequest(new Request("https://runner.example.test/internal/users/member_sender/shares/share_123/pack", {
@@ -896,17 +899,16 @@ describe("cloudflare worker routes", () => {
       env,
     );
     expect(deleteResponse.status).toBe(200);
-
-    const missingResponse = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/member_sender/shares/share_123/pack", {
-        headers: {
-          authorization: "Bearer control-token",
-        },
-        method: "GET",
-      })),
-      env,
-    );
-    expect(missingResponse.status).toBe(404);
+    const ownerCrypto = await resolveHostedUserCryptoContextForTest(env, "member_sender");
+    await expect(
+      createHostedShareStore({
+        bucket: env.BUNDLES,
+        key: ownerCrypto.rootKey,
+        keyId: ownerCrypto.rootKeyId,
+        keysById: ownerCrypto.keysById,
+        ownerUserId: "member_sender",
+      }).readSharePack("share_123"),
+    ).resolves.toBeNull();
   });
 
   it("forwards hosted gateway read and send routes through the gateway seam", async () => {
