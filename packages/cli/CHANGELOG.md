@@ -2,6 +2,186 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.1.17] - 2026-04-07
+
+### Added
+- tighten knowledge wiki guidance
+- hard-cut webhook receipt persistence
+- support explicit codex homes
+- hard-cut hosted sql privacy surface
+- add contact privacy rotation
+- hard-cut canonical session payload
+- hard-cut canonical event attachments
+- add root model command
+- hard-cut preview metadata to postgres
+- hard-cut delivery-only outbox
+- add invite send-code flow
+- cut member identifiers to private state
+- schedule delayed review-gpt sends
+- add format-version upgrade flow
+- hard cut hosted member privacy state
+- cut hosted member privacy surfaces
+- add canonical memory surface
+
+### Fixed
+- harden hosted runtime parsing
+- land remaining cleanup worktree
+- retry telegram auto-replies after codex limits
+- get repo checks green
+- clarify privy 429 signup retry copy
+- restore workout format save structured input
+- reconcile recurring auto-log cron state
+- simplify staged payload storage
+- align staged payload ids
+- move hosted stripe activation effects post-commit
+- simplify route-aware prompt guidance
+- start invite cooldown on confirm
+- hard-cut ai usage debug persistence
+- delegate device-sync runtime snapshot contract
+- wire private control seam into tests
+- strip tsbuildinfo from packed tarballs
+- harden invite send-code recovery
+- stop ordinary device-sync runtime reads
+- share vault metadata validation gate
+- add gateway projection descriptor
+- harden hosted wake replay
+- remove legacy reply-key auth remnants
+- cut webhook receipts over to staged dispatch refs
+- serialize privy reconciliation
+- validate sender and suspended access
+- gate wallet requirement to revnet
+- harden loopback and minimize webhook traces
+- restore green verification baseline
+- collapse billing to subscription-only
+- relax non-revnet wallet prerequisites
+- enforce unique linq chat binding
+- hard-cut document and meal read ids
+- use canonical family read ids
+- isolate device-sync schema cutover
+- finish versioned local state cleanup
+- require inline share packs for accepted shares
+- land final cleanup patch
+- tighten capability tool bindings
+- shorten transient retention
+- shorten replay tombstone retention
+- correct homepage privacy retention copy
+- project tool catalogs from registries
+
+### Changed
+- route writes through core primitives
+- centralize bank registry projection metadata
+- collapse duplicate contract owners
+- tighten package ownership seams
+- hard-cut hosted legacy contact privacy fallbacks
+- split hosted member stores
+- align query projection scenario surface
+- cover startup cron catch-up
+- remove memory search surface
+- simplify stripe billing durability
+- keep seam transport-only
+- remove live share pack reads
+- unify public-origin callback config
+- mention murph model
+- share model default helpers
+- split codex event parsing
+- tighten boundary imports
+- unify event spine internals
+- finalize legacy event staging path
+- simplify legacy event builder path
+- hard-cut cloudflare control seam
+- reuse extracted assistant wizard for model
+- simplify member aggregate shape
+- drop greenfield share compat shim
+- split auth by principal
+- document hosted platform seam
+- hard-cut claim-time pack reads
+- inject hosted runtime platform
+- minimize hosted telegram payloads
+- migrate to apache-2.0
+- canonicalize write-side links
+- simplify model command summaries
+- guard hosted member owner-table schema
+- treat current profile as generated view
+- shrink preview metadata contract
+- move member private state into web
+- move vercel-cloudflare auth app-local
+- narrow hosted execution seam
+- hide hosted share signing behind hosted client
+- centralize member-core persistence
+- hard-cut metadata contract
+- hard-cut projection compatibility
+- close onboarding hard-cut lane
+- hard-cut lifecycle state
+- finish projection cleanup and audit routing
+- bump @cobuild/review-gpt to 0.5.48
+- hard-cut shared projection store
+- replace portability allowlist with descriptors
+- skip default verification for review-only tasks
+- hard-cut operator config subpaths
+- hard-cut projection compatibility
+- finish vault-inbox owner collapse
+- hard-cut operator-config owners
+- unify source event persistence
+- hard-cut shared leaves to assistant-engine
+- clarify deploy and email helper state
+- simplify deploy helper paths
+- split hosted email routing helpers
+- align shared ownership seams
+- bump review-gpt to 0.5.45
+- canonicalize v1 docs and hosted schema baseline
+- bump review-gpt to 0.5.44
+- narrow public package surface
+- cut wrapper seams
+- document upgrade seam
+- add vault upgrade seam
+- hard-cut assistant-core owners
+- split operator-config from assistant-core
+- bump review-gpt to 0.5.43
+- split worker and runner owner surfaces
+- align onboarding identity docs
+- hard cut hosted member privacy naming
+- simplify hosted storage state access
+- squash hosted member privacy migrations
+- hard-cut hosted finalize callback seam
+- tighten permission override handling
+- remove dead legacy compatibility paths
+- harden vault versus assistant runtime boundary
+- move hosted device-sync runtime ownership to cloudflare
+- share assistant runtime path ownership
+- cut smoke manifests to memory automation and runtime
+- hard cut state into canonical memory automation and runtime
+- harden brittle mock seams
+- replace abort mock with runner hook
+- replace brittle share mock with real vault import
+- dedupe seam-local helpers
+- collapse runner callback hosts
+- dedupe shared test setup
+- hard-cut legacy local store schema
+- move assistant runtime under vault
+- remove residual legacy cleanup seams
+- hard cut hosted storage fallback readers
+- split local authority storage
+- hard-cut local state envelopes
+- hard cut to a single vault bundle
+- persist source projections only
+- defer vitest worker selection to config
+- canonicalize inbox intake on capture ledger
+- add hosted snapshot portability axis
+- reuse shared workspace helpers
+- make coverage the acceptance lane
+- hard cut compatibility fallbacks
+- add low-risk repo fast path
+- quiet sqlite warning noise
+- land architecture cleanups
+- parallelize workspace typecheck
+- simplify capability tool runtime
+- land local-state architecture cleanups
+- rename unpublished package
+- hard-cut capability host selection
+- stabilize shim stdin coverage
+- centralize inbox routing capability selection
+- allow multi-host capability bindings
+
 ## [0.1.16] - 2026-04-06
 
 ### Added
