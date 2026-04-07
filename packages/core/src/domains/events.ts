@@ -1,24 +1,26 @@
-import type { EventAttachment, EventRecord, ExperimentEventRecord } from "@murphai/contracts";
+import type { EventRecord, ExperimentEventRecord } from "@murphai/contracts";
 import {
-  CONTRACT_SCHEMA_VERSION,
   EVENT_KINDS,
-  eventAttachmentSchema,
   eventRecordSchema,
 } from "@murphai/contracts";
 
 import { ID_PREFIXES, VAULT_LAYOUT } from "../constants.ts";
 import { buildAttachmentCompatibilityProjections } from "../event-attachments.ts";
-import { canonicalizeEventRelations } from "../event-links.ts";
 import { VaultError } from "../errors.ts";
 import { walkVaultFiles } from "../fs.ts";
-import { generateRecordId } from "../ids.ts";
 import { readJsonlRecords, toMonthlyShardRelativePath } from "../jsonl.ts";
-import { defaultTimeZone, normalizeTimeZone, toLocalDayKey } from "../time.ts";
 import { loadVault } from "../vault.ts";
+import {
+  buildEventSpineEnvelope,
+  buildEventSpineLifecycle,
+  eventSpineRevision,
+  isDeletedEventSpineRecord,
+  parseEventSpineAttachments,
+  selectLatestEventSpineEntry,
+} from "../history/event-spine.ts";
 
 import {
   compactObject,
-  normalizeLocalDate,
   normalizeOptionalText,
   normalizeTimestampInput,
   runLoadedCanonicalWrite,
@@ -146,41 +148,6 @@ function normalizeDraftEventId(value: unknown): string | undefined {
   return typeof value === "string" ? normalizeOptionalText(value) ?? undefined : undefined;
 }
 
-function parseEventAttachments(value: unknown): EventAttachment[] | undefined {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-
-  const attachments = value
-    .map((attachment) => eventAttachmentSchema.safeParse(attachment))
-    .filter((result): result is { success: true; data: EventAttachment } => result.success)
-    .map((result) => result.data);
-
-  return attachments.length > 0 ? attachments : undefined;
-}
-
-function buildEventLifecycle(
-  revision: number,
-  state?: EventLifecycle["state"],
-): EventLifecycle {
-  if (!Number.isInteger(revision) || revision < 1) {
-    throw new VaultError("INVALID_INPUT", "Event lifecycle revision must be a positive integer.");
-  }
-
-  return compactObject({
-    revision,
-    state,
-  }) as EventLifecycle;
-}
-
-function eventRevision(record: Pick<EventRecord, "lifecycle">): number {
-  return record.lifecycle?.revision ?? 1;
-}
-
-function isDeletedEventRecord(record: Pick<EventRecord, "lifecycle">): boolean {
-  return record.lifecycle?.state === "deleted";
-}
-
 function eventSpecificFields(payload: JsonObject): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(payload).filter(
@@ -204,48 +171,34 @@ function buildEventRecord(
   lifecycle?: EventLifecycle,
 ): EventRecord {
   const kind = normalizeEventKind(payload);
-  const attachments = parseEventAttachments(payload.attachments);
-  const attachmentProjections = attachments
-    ? buildAttachmentCompatibilityProjections(attachments)
-    : null;
-
   const occurredAt = normalizeTimestampInput(payload.occurredAt);
   if (!occurredAt) {
     throw new VaultError("EVENT_OCCURRED_AT_MISSING", "Event payload requires occurredAt.");
   }
-
-  const timeZone = normalizeTimeZone(valueAsString(payload.timeZone));
-  const effectiveTimeZone = timeZone ?? normalizeTimeZone(fallbackTimeZone) ?? defaultTimeZone();
-  const dayKey =
-    normalizeLocalDate(valueAsString(payload.dayKey)) ??
-    toLocalDayKey(occurredAt, effectiveTimeZone, "occurredAt");
-  const canonicalRelations = canonicalizeEventRelations({
-    links: payload.links,
-    relatedIds: payload.relatedIds,
-    normalizeStringList: uniqueTrimmedStringList,
-    errorCode: "EVENT_CONTRACT_INVALID",
-    errorMessage: "Event payload links must contain objects with type and targetId fields.",
-  });
+  const attachments = parseEventSpineAttachments(payload.attachments);
 
   return validateContract(
     eventRecordSchema,
     compactObject({
-      schemaVersion: CONTRACT_SCHEMA_VERSION.event,
-      id: normalizeEventId(payload) ?? generateRecordId(ID_PREFIXES.event),
+      ...buildEventSpineEnvelope({
+        id: normalizeEventId(payload),
+        occurredAt,
+        recordedAt: normalizeTimestampInput(payload.recordedAt),
+        dayKey: valueAsString(payload.dayKey),
+        timeZone: valueAsString(payload.timeZone),
+        fallbackTimeZone,
+        source: valueAsString(payload.source),
+        title: requireText(payload.title, "Event payload requires a title."),
+        note: normalizeOptionalText(valueAsString(payload.note)) ?? undefined,
+        tags: uniqueTrimmedStringList(payload.tags) ?? undefined,
+        links: payload.links,
+        relatedIds: payload.relatedIds,
+        normalizeRelationIds: uniqueTrimmedStringList,
+        rawRefs: uniqueTrimmedStringList(payload.rawRefs) ?? undefined,
+        attachments,
+        lifecycle,
+      }),
       kind,
-      occurredAt,
-      recordedAt: normalizeTimestampInput(payload.recordedAt) ?? new Date().toISOString(),
-      dayKey,
-      timeZone,
-      source: normalizeOptionalText(valueAsString(payload.source)) ?? "manual",
-      title: requireText(payload.title, "Event payload requires a title."),
-      note: normalizeOptionalText(valueAsString(payload.note)) ?? undefined,
-      tags: uniqueTrimmedStringList(payload.tags) ?? undefined,
-      links: canonicalRelations.links,
-      relatedIds: canonicalRelations.relatedIds,
-      rawRefs: uniqueTrimmedStringList(payload.rawRefs) ?? attachmentProjections?.rawRefs ?? undefined,
-      attachments,
-      lifecycle,
       ...eventSpecificFields(payload),
     }),
     "EVENT_CONTRACT_INVALID",
@@ -258,41 +211,29 @@ function buildBaseEventContractInput(
   fallbackTimeZone?: string,
 ): Omit<EventRecord, "kind"> {
   const occurredAt = normalizeTimestampInput(draft.occurredAt);
-  const attachmentProjections = draft.attachments
-    ? buildAttachmentCompatibilityProjections(draft.attachments)
-    : null;
   if (!occurredAt) {
     throw new VaultError("EVENT_OCCURRED_AT_MISSING", "Event draft requires occurredAt.");
   }
 
-  const timeZone = normalizeTimeZone(valueAsString(draft.timeZone));
-  const effectiveTimeZone = timeZone ?? normalizeTimeZone(fallbackTimeZone) ?? defaultTimeZone();
-  const dayKey =
-    normalizeLocalDate(valueAsString(draft.dayKey)) ??
-    toLocalDayKey(occurredAt, effectiveTimeZone, "occurredAt");
-  const canonicalRelations = canonicalizeEventRelations({
-    links: draft.links,
-    relatedIds: draft.relatedIds,
-    normalizeStringList: uniqueTrimmedStringList,
-    errorCode: "EVENT_CONTRACT_INVALID",
-    errorMessage: "Event payload links must contain objects with type and targetId fields.",
-  });
-
   return compactObject({
-    schemaVersion: CONTRACT_SCHEMA_VERSION.event,
-    id: normalizeDraftEventId(draft.id) ?? generateRecordId(ID_PREFIXES.event),
-    occurredAt,
-    recordedAt: normalizeTimestampInput(draft.recordedAt) ?? new Date().toISOString(),
-    dayKey,
-    timeZone,
-    source: normalizeOptionalText(valueAsString(draft.source)) ?? "manual",
-    title: requireText(draft.title, "Event draft requires a title."),
-    note: normalizeOptionalText(valueAsString(draft.note)) ?? undefined,
-    tags: uniqueTrimmedStringList(draft.tags) ?? undefined,
-    links: canonicalRelations.links,
-    relatedIds: canonicalRelations.relatedIds,
-    rawRefs: uniqueTrimmedStringList(draft.rawRefs) ?? attachmentProjections?.rawRefs ?? undefined,
-    attachments: draft.attachments,
+    ...buildEventSpineEnvelope({
+      id: normalizeDraftEventId(draft.id),
+      occurredAt,
+      recordedAt: normalizeTimestampInput(draft.recordedAt),
+      dayKey: valueAsString(draft.dayKey),
+      timeZone: valueAsString(draft.timeZone),
+      fallbackTimeZone,
+      source: valueAsString(draft.source),
+      title: requireText(draft.title, "Event draft requires a title."),
+      note: normalizeOptionalText(valueAsString(draft.note)) ?? undefined,
+      tags: uniqueTrimmedStringList(draft.tags) ?? undefined,
+      links: draft.links,
+      relatedIds: draft.relatedIds,
+      normalizeRelationIds: uniqueTrimmedStringList,
+      rawRefs: uniqueTrimmedStringList(draft.rawRefs) ?? undefined,
+      attachments: draft.attachments,
+      lifecycle: undefined,
+    }),
     externalRef: draft.externalRef,
   }) as Omit<EventRecord, "kind">;
 }
@@ -469,22 +410,19 @@ export function buildExperimentEventRecord(input: {
   phase: ExperimentEventRecord["phase"];
   timeZone?: string;
 }): ExperimentEventRecord {
-  const timeZone = normalizeTimeZone(input.timeZone);
-
   return validateContract(
     eventRecordSchema,
     compactObject({
-      schemaVersion: CONTRACT_SCHEMA_VERSION.event,
-      id: generateRecordId(ID_PREFIXES.event),
+      ...buildEventSpineEnvelope({
+        occurredAt: input.occurredAt,
+        timeZone: input.timeZone,
+        source: "manual",
+        title: input.title.trim(),
+        note: normalizeOptionalText(input.note) ?? undefined,
+        relatedIds: [input.experimentId],
+        normalizeRelationIds: uniqueTrimmedStringList,
+      }),
       kind: "experiment_event",
-      occurredAt: input.occurredAt,
-      recordedAt: new Date().toISOString(),
-      dayKey: toLocalDayKey(input.occurredAt, timeZone ?? defaultTimeZone(), "occurredAt"),
-      timeZone,
-      source: "manual",
-      title: input.title.trim(),
-      note: normalizeOptionalText(input.note) ?? undefined,
-      relatedIds: [input.experimentId],
       experimentId: input.experimentId,
       experimentSlug: input.experimentSlug,
       phase: input.phase,
@@ -520,25 +458,6 @@ function validateStoredEventRecord(record: JsonObject): EventRecord {
   );
 }
 
-function compareMatchedEventRecords(left: MatchedEventRecord, right: MatchedEventRecord): number {
-  const revisionComparison = eventRevision(left.record) - eventRevision(right.record);
-  if (revisionComparison !== 0) {
-    return revisionComparison;
-  }
-
-  const recordedAtComparison = left.record.recordedAt.localeCompare(right.record.recordedAt);
-  if (recordedAtComparison !== 0) {
-    return recordedAtComparison;
-  }
-
-  const occurredAtComparison = left.record.occurredAt.localeCompare(right.record.occurredAt);
-  if (occurredAtComparison !== 0) {
-    return occurredAtComparison;
-  }
-
-  return left.relativePath.localeCompare(right.relativePath);
-}
-
 function flattenMatchedEventRecords(
   matchedShards: readonly LoadedEventLedgerShard[],
 ): MatchedEventRecord[] {
@@ -553,14 +472,7 @@ function flattenMatchedEventRecords(
 function selectLatestMatchedEvent(
   matchedShards: readonly LoadedEventLedgerShard[],
 ): MatchedEventRecord | null {
-  const flattened = flattenMatchedEventRecords(matchedShards);
-  if (flattened.length === 0) {
-    return null;
-  }
-
-  return flattened.reduce((latest, candidate) =>
-    compareMatchedEventRecords(latest, candidate) >= 0 ? latest : candidate,
-  );
+  return selectLatestEventSpineEntry(flattenMatchedEventRecords(matchedShards));
 }
 
 async function loadEventLedgerShardsById(
@@ -681,8 +593,8 @@ export async function upsertEvent(
   }
 
   const latestMatchedEvent = selectLatestMatchedEvent(matchedShards);
-  const lifecycle = buildEventLifecycle(
-    latestMatchedEvent ? eventRevision(latestMatchedEvent.record) + 1 : 1,
+  const lifecycle = buildEventSpineLifecycle(
+    latestMatchedEvent ? eventSpineRevision(latestMatchedEvent.record) + 1 : 1,
   );
   const eventRecord = isDraftUpsertInput(input)
     ? buildTypedEventRecord(input.draft, vault.metadata.timezone, lifecycle)
@@ -717,7 +629,7 @@ export async function deleteEvent(
   }
 
   const latestMatchedEvent = selectLatestMatchedEvent(matchedShards);
-  if (!latestMatchedEvent || isDeletedEventRecord(latestMatchedEvent.record)) {
+  if (!latestMatchedEvent || isDeletedEventSpineRecord(latestMatchedEvent.record)) {
     throw new VaultError("EVENT_MISSING", `Event "${input.eventId}" was not found.`);
   }
   const tombstoneRecord = validateContract(
@@ -725,7 +637,7 @@ export async function deleteEvent(
     compactObject({
       ...latestMatchedEvent.record,
       recordedAt: new Date().toISOString(),
-      lifecycle: buildEventLifecycle(eventRevision(latestMatchedEvent.record) + 1, "deleted"),
+      lifecycle: buildEventSpineLifecycle(eventSpineRevision(latestMatchedEvent.record) + 1, "deleted"),
     }),
     "EVENT_CONTRACT_INVALID",
     "Deleted event tombstone is invalid.",

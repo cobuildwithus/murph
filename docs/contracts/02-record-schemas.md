@@ -70,7 +70,7 @@ Baseline does not define a standalone transform record family. `xfm_*` ids are b
 | `adverse_effect` | `substance`, `effect`, `severity` |
 | `exposure` | `exposureType`, `substance` |
 
-Shared optional event fields are limited to `note`, `tags`, `relatedIds`, `rawRefs`, `attachments`, and `externalRef`. `attachments[]` stores canonical file metadata as `role`, `kind`, `relativePath`, `mediaType`, `sha256`, and `originalFileName`. `externalRef` stores device/provider provenance as `system`, `resourceType`, `resourceId`, optional `version`, and optional `facet`.
+Shared event envelope fields include `note`, `tags`, canonical `links[]`, compatibility `relatedIds`, `rawRefs`, `attachments`, optional `lifecycle`, and `externalRef`. `links[]` is the canonical relation primitive; `relatedIds` remains a compatibility projection for legacy/read-side surfaces. `attachments[]` stores canonical file metadata as `role`, `kind`, `relativePath`, `mediaType`, `sha256`, and `originalFileName`. `lifecycle` carries append-only revision state and optional `"deleted"` tombstones. `externalRef` stores device/provider provenance as `system`, `resourceType`, `resourceId`, optional `version`, and optional `facet`.
 
 Legacy file-specific fields such as `documentPath`, `photoPaths`, `audioPaths`, `media`, and nested `workout.media` remain compatibility projections rather than independent sources of truth.
 

@@ -2,6 +2,7 @@ export * from "./bank-entities.ts";
 export * from "./command-capabilities.ts";
 export * from "./constants.ts";
 export * from "./current-profile.ts";
+export * from "./event-lifecycle.ts";
 export * from "./examples.ts";
 export * from "./frontmatter.ts";
 export * from "./health-entities.ts";

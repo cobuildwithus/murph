@@ -38,6 +38,7 @@ import {
 import { emitAuditRecord } from "./audit.ts";
 import {
   buildAttachmentCompatibilityProjections,
+  buildAttachmentPathCompatibilityProjections,
   prepareEventAttachments,
   stagePreparedEventAttachmentsInBatch,
 } from "./event-attachments.ts";
@@ -654,27 +655,20 @@ function buildPreparedAttachmentState(
     rawRefs: string[];
   };
 } {
+  const projections = buildAttachmentPathCompatibilityProjections(
+    preparedAttachments.map((attachment) => ({
+      role: attachment.role,
+      kind: attachment.kind ?? "other",
+      relativePath: attachment.raw.relativePath,
+    })),
+  );
+
   return {
     projections: {
-      audioPaths: [
-        ...new Set(
-          preparedAttachments
-            .filter((attachment) => attachment.role === "audio" || attachment.kind === "audio")
-            .map((attachment) => attachment.raw.relativePath),
-        ),
-      ],
-      documentPath:
-        preparedAttachments.find((attachment) => attachment.kind === "document")?.raw.relativePath
-        ?? preparedAttachments[0]?.raw.relativePath
-        ?? null,
-      photoPaths: [
-        ...new Set(
-          preparedAttachments
-            .filter((attachment) => attachment.role === "photo" || attachment.kind === "photo")
-            .map((attachment) => attachment.raw.relativePath),
-        ),
-      ],
-      rawRefs: [...new Set(preparedAttachments.map((attachment) => attachment.raw.relativePath))],
+      audioPaths: projections.audioPaths,
+      documentPath: projections.documentPath,
+      photoPaths: projections.photoPaths,
+      rawRefs: projections.rawRefs,
     },
   };
 }

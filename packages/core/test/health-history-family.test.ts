@@ -105,6 +105,53 @@ test("health history appends to the shared event ledger and supports list/read f
   assert.ok(historyOperations.every((operation) => operation.status === "committed"));
 });
 
+test("history links round-trip through write, storage, read, and list surfaces", async () => {
+  const vaultRoot = await makeTempDirectory("murph-history-links");
+  await initializeVault({ vaultRoot });
+
+  const appended = await appendHistoryEvent({
+    vaultRoot,
+    kind: "encounter",
+    occurredAt: "2026-03-03T12:00:00.000Z",
+    title: "Linked encounter",
+    encounterType: "office_visit",
+    links: [{ type: "related_to", targetId: "prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" }],
+  });
+  const listed = await listHistoryEvents({
+    vaultRoot,
+    kinds: ["encounter"],
+  });
+  const read = await readHistoryEvent({
+    vaultRoot,
+    eventId: appended.record.id,
+  });
+  const stored = await readJsonlRecords({
+    vaultRoot,
+    relativePath: appended.relativePath,
+  });
+  const storedRecord = stored.find(
+    (record) => (record as { id?: string }).id === appended.record.id,
+  ) as {
+    links?: unknown;
+    relatedIds?: unknown;
+  } | undefined;
+
+  assert.deepEqual(appended.record.links, [
+    { type: "related_to", targetId: "prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
+  ]);
+  assert.deepEqual(appended.record.relatedIds, ["prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"]);
+  assert.deepEqual(listed[0]?.links, [
+    { type: "related_to", targetId: "prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
+  ]);
+  assert.deepEqual(read.record.links, [
+    { type: "related_to", targetId: "prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
+  ]);
+  assert.deepEqual(storedRecord?.links, [
+    { type: "related_to", targetId: "prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
+  ]);
+  assert.deepEqual(storedRecord?.relatedIds, ["prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"]);
+});
+
 test("health history writes store the vault-local dayKey and timezone when UTC crosses midnight", async () => {
   const vaultRoot = await makeTempDirectory("murph-history-local-day");
   await initializeVault({
@@ -131,6 +178,52 @@ test("health history writes store the vault-local dayKey and timezone when UTC c
   assert.equal(appended.record.timeZone, "Australia/Melbourne");
   assert.equal(storedRecord?.dayKey, "2026-03-27");
   assert.equal(storedRecord?.timeZone, "Australia/Melbourne");
+});
+
+test("history readers fail closed on malformed stored dayKey values", async () => {
+  const vaultRoot = await makeTempDirectory("murph-history-invalid-daykey");
+  await initializeVault({ vaultRoot });
+
+  const original = await appendHistoryEvent({
+    vaultRoot,
+    eventId: "evt_01JQ9R7WF97M1WAB2B4QF2Q1D1",
+    kind: "encounter",
+    occurredAt: "2026-03-03T12:00:00.000Z",
+    title: "Original visit",
+    encounterType: "office_visit",
+  });
+
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: original.relativePath,
+    record: {
+      ...original.record,
+      recordedAt: "2026-03-03T12:05:00.000Z",
+      dayKey: "2026-3-3",
+      lifecycle: {
+        revision: 2,
+      },
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      readHistoryEvent({
+        vaultRoot,
+        eventId: original.record.id,
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_INVALID_HISTORY_EVENT",
+  );
+  await assert.rejects(
+    () =>
+      listHistoryEvents({
+        vaultRoot,
+        kinds: ["encounter"],
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_INVALID_HISTORY_EVENT",
+  );
 });
 
 test("history read and list collapse append-only revisions, tombstones, and later revival", async () => {
