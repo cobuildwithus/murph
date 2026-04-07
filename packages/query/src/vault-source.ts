@@ -2,8 +2,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 
 import {
-  safeParseContract,
-  vaultMetadataSchema,
+  validateCurrentVaultMetadata,
 } from "@murphai/contracts";
 
 import {
@@ -81,7 +80,6 @@ const CANONICAL_OPTIONAL_FILES = [
   "CORE.md",
   "bank/profile/current.md",
 ] as const;
-const CURRENT_VAULT_METADATA_FORMAT_VERSION = 1;
 
 class QueryVaultSourceError extends Error {
   readonly code: string;
@@ -193,88 +191,19 @@ async function readOptionalVaultMetadata(filePath: string): Promise<QueryRecordD
 }
 
 function validateVaultMetadataForQuery(value: unknown): QueryRecordData {
-  const formatVersion = detectVaultMetadataFormatVersion(value);
+  const result = validateCurrentVaultMetadata(value, {
+    relativePath: "vault.json",
+  });
 
-  if (formatVersion > CURRENT_VAULT_METADATA_FORMAT_VERSION) {
-    throw new QueryVaultSourceError(
-      "VAULT_UPGRADE_UNSUPPORTED",
-      `Vault formatVersion ${formatVersion} is newer than supported formatVersion ${CURRENT_VAULT_METADATA_FORMAT_VERSION}.`,
-      {
-        relativePath: "vault.json",
-        storedFormatVersion: formatVersion,
-        supportedFormatVersion: CURRENT_VAULT_METADATA_FORMAT_VERSION,
-      },
-    );
-  }
-
-  if (formatVersion < CURRENT_VAULT_METADATA_FORMAT_VERSION) {
-    throw new QueryVaultSourceError(
-      "VAULT_UPGRADE_REQUIRED",
-      `Vault formatVersion ${formatVersion} must be upgraded to ${CURRENT_VAULT_METADATA_FORMAT_VERSION} before current-format operations can continue. Run "vault upgrade" first.`,
-      {
-        relativePath: "vault.json",
-        storedFormatVersion: formatVersion,
-        targetFormatVersion: CURRENT_VAULT_METADATA_FORMAT_VERSION,
-      },
-    );
-  }
-
-  const result = safeParseContract(vaultMetadataSchema, value);
   if (result.success) {
-    return result.data;
+    return result.data.metadata;
   }
 
   throw new QueryVaultSourceError(
-    "VAULT_INVALID_METADATA",
-    "Vault metadata failed contract validation.",
-    {
-      relativePath: "vault.json",
-      errors: result.errors,
-    },
+    result.error.code,
+    result.error.message,
+    result.error.details,
   );
-}
-
-function detectVaultMetadataFormatVersion(rawMetadata: unknown): number {
-  if (!isPlainRecord(rawMetadata)) {
-    throw new QueryVaultSourceError(
-      "VAULT_INVALID_METADATA",
-      "Vault metadata must be a JSON object.",
-      {
-        relativePath: "vault.json",
-      },
-    );
-  }
-
-  if (!Object.hasOwn(rawMetadata, "formatVersion")) {
-    throw new QueryVaultSourceError(
-      "VAULT_INVALID_METADATA",
-      "Vault metadata formatVersion is required.",
-      {
-        relativePath: "vault.json",
-      },
-    );
-  }
-
-  const formatVersion = rawMetadata.formatVersion;
-  if (
-    typeof formatVersion !== "number" ||
-    !Number.isInteger(formatVersion) ||
-    formatVersion < 0
-  ) {
-    throw new QueryVaultSourceError(
-      "VAULT_INVALID_METADATA",
-      "Vault metadata formatVersion must be a non-negative integer.",
-      {
-        relativePath: "vault.json",
-      },
-    );
-  }
-
-  return formatVersion;
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 async function readBaseEntities(

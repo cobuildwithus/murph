@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { test, vi } from "vitest";
+import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
 import {
   INBOX_DB_RELATIVE_PATH,
   QUERY_DB_RELATIVE_PATH,
@@ -768,6 +769,24 @@ test("readVault rejects explicit older vault format versions", async () => {
     await assert.rejects(
       () => readVault(vaultRoot),
       (error) => hasErrorCode(error, "VAULT_UPGRADE_REQUIRED"),
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("searchVaultRuntime rejects explicit newer vault format versions before rebuilding", async () => {
+  const vaultRoot = await createFixtureVault();
+
+  try {
+    const metadataPath = path.join(vaultRoot, "vault.json");
+    const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as Record<string, unknown>;
+    metadata.formatVersion = CURRENT_VAULT_FORMAT_VERSION + 1;
+    await writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`);
+
+    await assert.rejects(
+      () => searchVaultRuntime(vaultRoot, "lab report"),
+      (error) => hasErrorCode(error, "VAULT_UPGRADE_UNSUPPORTED"),
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
