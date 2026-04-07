@@ -112,7 +112,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(rootPackageJson.scripts?.['zip:src:full']).toBe('bash scripts/package-audit-context-full.sh --zip')
   })
 
-  it('keeps repo thread helpers routed through the packaged review-gpt commands without a local patch fork', () => {
+  it('keeps repo thread helpers routed through the packaged review-gpt commands without local shadow logic', () => {
     const rootPackageJson = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'))
     const pnpmWorkspace = readFileSync(
       path.join(repoRoot, 'pnpm-workspace.yaml'),
@@ -126,10 +126,16 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-thread-export.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-thread-download.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-thread-wake.mjs'))).toBe(false)
+    expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-attachment-files.mjs'))).toBe(false)
+    expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-attachment-files.test.mjs'))).toBe(false)
+    expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.mjs'))).toBe(false)
+    expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(reviewGptVersionRange).toMatch(/^\^0\.5\.\d+$/u)
     expect(pnpmWorkspace).toContain(`  - '@cobuild/review-gpt@${reviewGptPinnedVersion}'`)
-    expect(pnpmWorkspace).not.toContain('patchedDependencies:')
-    expect(existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.19.patch'))).toBe(false)
+    expect(pnpmWorkspace).toContain(
+      `patchedDependencies:\n  '@cobuild/review-gpt@${reviewGptPinnedVersion}': patches/@cobuild__review-gpt@${reviewGptPinnedVersion}.patch`,
+    )
+    expect(existsSync(path.join(repoRoot, 'patches', `@cobuild__review-gpt@${reviewGptPinnedVersion}.patch`))).toBe(true)
   })
 
   it('keeps the lean and full review-gpt wrappers wired to the expected package scripts', () => {

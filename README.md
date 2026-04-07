@@ -227,7 +227,7 @@ The repo also carries local review and ChatGPT-thread tooling for maintainers:
 
 `pnpm review:gpt` now stages the lean default bundle: repo source plus the durable `agent-docs` context, while leaving out broad test trees, CI workflows, generated `agent-docs`, historical completed plans, prompt boilerplate, and the wider `docs/**` set beyond `docs/architecture.md`. Use `pnpm review:gpt:full` when you explicitly want the larger audit context.
 
-Those are contributor workflows, not the main product entrypoint, which is why they belong down here instead of near the top of the README.
+Those are contributor workflows, not the main product entrypoint, which is why they belong down here instead of near the top of the README. Their thread export/download/wake behavior is owned by the packaged `@cobuild/review-gpt` CLI rather than repo-local helper mirrors.
 
 ## Development notes
 
