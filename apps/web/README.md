@@ -14,7 +14,7 @@ Hosted integration control plane for Vercel deployments.
 - blind-index provider account ownership mapping without raw provider ids in SQL
 - encrypted hosted-member private fields on the owner Prisma tables for onboarding identity, routing, and billing references
 - durable `execution_outbox` records for Cloudflare-bound hosted execution intents, persisted as immutable inline envelopes or staged Cloudflare-owned dispatch refs
-- immutable hosted AI usage rows imported after successful hosted commits, with optional downstream Stripe token metering
+- immutable hosted AI usage rows imported after successful hosted commits, limited to billing-safe counters plus routing metadata for downstream Stripe token metering
 - local-agent pairing plus sparse signal/token routes for hosted integrations
 - internal runner snapshot/apply APIs for explicit hosted device-sync operational reads and reconciliation
 
@@ -94,6 +94,10 @@ Hosted onboarding extras:
 - `LINQ_API_BASE_URL`
 - `HOSTED_EXECUTION_DISPATCH_URL`
 - `HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS`
+- `CRON_SECRET`
+- `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`
+- `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`
+- `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON` when rotating callback verification keys
 
 Hosted onboarding private state is now local to `apps/web`: blind lookup keys stay queryable in Postgres, while recoverable raw member ids and the raw source values needed to re-derive those lookup keys are encrypted into the owning Prisma rows instead of being mirrored into Cloudflare. Blind-index rotation follows one simple model: write one current version, read any configured keyring versions, backfill the owner tables in place, and only then remove the old version from the contact-privacy keyring. Drain lookup-bearing hosted execution outbox events before a write-mode rotation backfill so staged payload refs do not preserve stale lookup identities.
 
@@ -167,6 +171,7 @@ The hosted device-sync SQL hard-cut is currently greenfield/reset-only. Until a 
 - `pnpm --dir apps/web test` is the fast hosted-web Vitest lane. `pnpm --dir apps/web verify` adds the app-local typecheck, lint, a cold-boot `next dev` smoke under `apps/web/.next-smoke`, and the production build so the heavier preflight checks stay out of the default unit-test loop.
 - Treat `apps/web/.next`, `apps/web/.next-dev`, and `apps/web/.next-smoke` as generated local artifacts that must stay out of commits and raw source bundles.
 - Hosted execution outbox draining and hosted AI usage metering now accept only Vercel cron bearer auth via `CRON_SECRET`.
+- Hosted AI usage rows no longer persist provider/session/request ids or raw provider usage JSON; hosted Postgres keeps only billing-safe counters and routing metadata.
 - Cloudflare-owned callback routes such as hosted device connect-link and share-import completion/release now accept only the dedicated Cloudflare callback signature verified against `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`.
 - Hosted Stripe webhooks now attempt inline reconciliation for the just-recorded event, then best-effort drain the matching hosted execution outbox rows immediately. The Stripe cron route remains the recovery path for failed or deferred Stripe facts and RevNet follow-up only; first-contact welcomes now commit as assistant outbox intents during hosted `member.activated` handling and drain afterward through the same post-commit assistant-delivery path as other hosted assistant sends.
 

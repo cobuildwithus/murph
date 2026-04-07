@@ -1,11 +1,9 @@
-import { Prisma } from "@prisma/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 
 import {
   importHostedAiUsageRecords,
   listHostedAiUsagePendingStripeMetering,
-  readHostedAiUsageStoragePolicy,
 } from "@/src/lib/hosted-execution/usage";
 
 const BASE_USAGE_RECORD = {
@@ -46,32 +44,9 @@ const BASE_USAGE_RECORD = {
   usageId: "turn_123.attempt-1",
 } as const;
 
-afterEach(() => {
-  delete process.env.HOSTED_AI_USAGE_PERSIST_DEBUG_FIELDS;
-  vi.clearAllMocks();
-});
-
-describe("readHostedAiUsageStoragePolicy", () => {
-  it("defaults to the privacy-first policy", () => {
-    expect(readHostedAiUsageStoragePolicy({} as unknown as NodeJS.ProcessEnv)).toEqual({
-      includeDebugFields: false,
-    });
-  });
-
-  it("enables debug storage only when explicitly configured", () => {
-    expect(
-      readHostedAiUsageStoragePolicy({
-        HOSTED_AI_USAGE_PERSIST_DEBUG_FIELDS: "true",
-      } as unknown as NodeJS.ProcessEnv),
-    ).toEqual({
-      includeDebugFields: true,
-    });
-  });
-});
-
 describe("importHostedAiUsageRecords", () => {
-  it("drops provider debug fields by default", async () => {
-    const hostedAiUsageUpsert = vi.fn(async () => ({}));
+  it("never persists provider debug fields", async () => {
+    const hostedAiUsageUpsert = vi.fn(async (..._args: unknown[]) => ({}));
     const prisma = {
       hostedAiUsage: {
         upsert: hostedAiUsageUpsert,
@@ -93,49 +68,15 @@ describe("importHostedAiUsageRecords", () => {
         id: "turn_123.attempt-1",
         memberId: "member_123",
         totalTokens: 165,
-        providerSessionId: null,
-        providerRequestId: null,
-        providerMetadataJson: Prisma.DbNull,
-        rawUsageJson: Prisma.DbNull,
       }),
       update: {},
     });
-  });
-
-  it("persists provider debug fields only when the explicit debug flag is enabled", async () => {
-    process.env.HOSTED_AI_USAGE_PERSIST_DEBUG_FIELDS = "true";
-
-    const hostedAiUsageUpsert = vi.fn(async () => ({}));
-    const prisma = {
-      hostedAiUsage: {
-        upsert: hostedAiUsageUpsert,
-      },
-    };
-
-    await importHostedAiUsageRecords({
-      prisma: prisma as never,
-      trustedUserId: "member_123",
-      usage: [BASE_USAGE_RECORD],
-    });
-
-    expect(hostedAiUsageUpsert).toHaveBeenCalledWith({
-      where: {
-        id: "turn_123.attempt-1",
-      },
-      create: expect.objectContaining({
-        providerSessionId: "session_123",
-        providerRequestId: "req_123",
-        providerMetadataJson: {
-          nested: {},
-          provider: "example",
-        },
-        rawUsageJson: {
-          nested: {},
-          totalTokens: 165,
-        },
-      }),
-      update: {},
-    });
+    const upsertCall = hostedAiUsageUpsert.mock.calls[0]?.[0] as { create?: Record<string, unknown> } | undefined;
+    expect(upsertCall?.create).toBeDefined();
+    expect(upsertCall?.create).not.toHaveProperty("providerSessionId");
+    expect(upsertCall?.create).not.toHaveProperty("providerRequestId");
+    expect(upsertCall?.create).not.toHaveProperty("providerMetadataJson");
+    expect(upsertCall?.create).not.toHaveProperty("rawUsageJson");
   });
 
   it("rejects usage rows whose memberId does not match the trusted hosted execution user", async () => {

@@ -1,7 +1,7 @@
 # Copy to apps/cloudflare/.dev.vars for wrangler dev or set these as real Cloudflare secrets/vars.
 # This local scaffold mirrors the current hosted architecture:
 # - Vercel OIDC authenticates the web -> Cloudflare control edge.
-# - HOSTED_WEB_INTERNAL_SIGNING_SECRET authenticates the narrow signed Cloudflare <-> web service seam.
+# - Dedicated callback signing keys authenticate the narrow Cloudflare -> web callback seam.
 # - Hosted bundle/env/journal objects use the platform envelope key.
 # - Managed user provisioning creates automation + recovery recipients today and may add tee-automation later.
 # - Future browser-generated user-unlock recipients are intentionally not worker env material and are preserved on envelope reconciliation.
@@ -24,7 +24,9 @@ HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK={"kty":"EC","crv":"P-256","x":"re
 HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG=replace-me-with-your-vercel-team-slug
 HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME=replace-me-with-your-vercel-project-name
 HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT=production
-HOSTED_WEB_INTERNAL_SIGNING_SECRET=replace-me-with-a-random-shared-secret
+# Publish the matching public JWK into apps/web as HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK.
+HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK={"kty":"EC","crv":"P-256","d":"replace-me-base64url-private-scalar","x":"replace-me-base64url-x-coordinate","y":"replace-me-base64url-y-coordinate"}
+HOSTED_WEB_CALLBACK_SIGNING_KEY_ID=v1
 HOSTED_WEB_BASE_URL=https://your-hosted-web.example.com
 
 HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS=21600000

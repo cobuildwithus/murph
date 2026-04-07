@@ -219,7 +219,6 @@ export async function importHostedAiUsageRecords(input: {
   const prisma = input.prisma ?? getPrisma();
   const records = input.usage.map((entry) => parseAssistantUsageRecord(entry));
   const recordedIds: string[] = [];
-  const storagePolicy = readHostedAiUsageStoragePolicy();
 
   for (const record of records) {
     const memberId = requireHostedAiUsageMemberId(record, input.trustedUserId ?? null);
@@ -249,14 +248,6 @@ export async function importHostedAiUsageRecords(input: {
         cachedInputTokens: record.cachedInputTokens,
         cacheWriteTokens: record.cacheWriteTokens,
         totalTokens: record.totalTokens,
-        providerSessionId: storagePolicy.includeDebugFields ? record.providerSessionId : null,
-        providerRequestId: storagePolicy.includeDebugFields ? record.providerRequestId : null,
-        providerMetadataJson: storagePolicy.includeDebugFields
-          ? toHostedAiUsageJson(record.providerMetadataJson)
-          : Prisma.DbNull,
-        rawUsageJson: storagePolicy.includeDebugFields
-          ? toHostedAiUsageJson(record.rawUsageJson)
-          : Prisma.DbNull,
       },
       update: {},
     });
@@ -322,14 +313,6 @@ export async function drainHostedPendingAiUsageImports(input: {
   };
 }
 
-export function readHostedAiUsageStoragePolicy(
-  source: NodeJS.ProcessEnv = process.env,
-): { includeDebugFields: boolean } {
-  return {
-    includeDebugFields: readHostedAiUsageBooleanEnv(source.HOSTED_AI_USAGE_PERSIST_DEBUG_FIELDS),
-  };
-}
-
 function requireHostedAiUsageMemberId(
   record: AssistantUsageRecord,
   trustedUserId: string | null,
@@ -347,44 +330,4 @@ function requireHostedAiUsageMemberId(
   }
 
   return record.memberId;
-}
-
-function readHostedAiUsageBooleanEnv(value: string | undefined): boolean {
-  if (!value) {
-    return false;
-  }
-
-  const normalized = value.trim().toLowerCase();
-
-  if (normalized === "1" || normalized === "true" || normalized === "yes") {
-    return true;
-  }
-
-  if (normalized === "0" || normalized === "false" || normalized === "no") {
-    return false;
-  }
-
-  throw new TypeError(
-    "HOSTED_AI_USAGE_PERSIST_DEBUG_FIELDS must be one of: 1, 0, true, false, yes, no.",
-  );
-}
-
-function toHostedAiUsageJson(value: unknown): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput {
-  if (value === null || value === undefined) {
-    return Prisma.DbNull;
-  }
-
-  try {
-    const serialized = JSON.stringify(value);
-
-    if (serialized === undefined) {
-      return Prisma.DbNull;
-    }
-
-    return JSON.parse(serialized) as Prisma.InputJsonValue;
-  } catch (error) {
-    throw new TypeError(
-      `Hosted AI usage JSON payload must be JSON-serializable: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
 }
