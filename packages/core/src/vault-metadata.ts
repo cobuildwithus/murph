@@ -1,7 +1,7 @@
 import type { VaultMetadata } from "@murphai/contracts";
 import {
-  safeParseContract,
-  vaultMetadataSchema,
+  detectVaultMetadataFormatVersion as detectContractVaultMetadataFormatVersion,
+  validateCurrentVaultMetadata,
 } from "@murphai/contracts";
 
 import {
@@ -10,7 +10,6 @@ import {
 } from "./constants.ts";
 import { VaultError } from "./errors.ts";
 import { readJsonFile } from "./fs.ts";
-import { isPlainRecord } from "./types.ts";
 
 export interface BuildVaultMetadataInput {
   vaultId: string;
@@ -59,86 +58,33 @@ export function validateVaultMetadata(
   code: string,
   message: string,
 ): LoadedVaultMetadata {
-  const storedFormatVersion = detectVaultMetadataFormatVersion(value);
-
-  if (storedFormatVersion !== CURRENT_VAULT_FORMAT_VERSION) {
-    throw buildVaultMetadataUpgradeError(storedFormatVersion);
-  }
-
-  const strictResult = safeParseContract(vaultMetadataSchema, value);
-
-  if (strictResult.success) {
-    return {
-      metadata: strictResult.data,
-      storedFormatVersion,
-    };
-  }
-
-  throw new VaultError(code, message, {
-    errors: strictResult.errors,
+  const result = validateCurrentVaultMetadata(value, {
+    invalidSchemaMessage: message,
+    relativePath: VAULT_LAYOUT.metadata,
   });
-}
 
-export function buildVaultMetadataUpgradeError(storedFormatVersion: number): VaultError {
-  if (storedFormatVersion > CURRENT_VAULT_FORMAT_VERSION) {
-    return new VaultError(
-      "VAULT_UPGRADE_UNSUPPORTED",
-      `Vault formatVersion ${storedFormatVersion} is newer than supported formatVersion ${CURRENT_VAULT_FORMAT_VERSION}.`,
-      {
-        relativePath: VAULT_LAYOUT.metadata,
-        storedFormatVersion,
-        supportedFormatVersion: CURRENT_VAULT_FORMAT_VERSION,
-      },
-    );
+  if (!result.success) {
+    if (
+      result.error.code === "VAULT_INVALID_METADATA" &&
+      Object.hasOwn(result.error.details, "errors")
+    ) {
+      throw new VaultError(code, result.error.message, result.error.details);
+    }
+
+    throw new VaultError(result.error.code, result.error.message, result.error.details);
   }
 
-  return new VaultError(
-    "VAULT_UPGRADE_REQUIRED",
-    `Vault formatVersion ${storedFormatVersion} must be upgraded to ${CURRENT_VAULT_FORMAT_VERSION} before current-format operations can continue. Run "vault upgrade" first.`,
-    {
-      relativePath: VAULT_LAYOUT.metadata,
-      storedFormatVersion,
-      targetFormatVersion: CURRENT_VAULT_FORMAT_VERSION,
-    },
-  );
+  return result.data;
 }
 
 export function detectVaultMetadataFormatVersion(rawMetadata: unknown): number {
-  if (!isPlainRecord(rawMetadata)) {
-    throw new VaultError(
-      "VAULT_INVALID_METADATA",
-      "Vault metadata must be a JSON object.",
-      {
-        relativePath: VAULT_LAYOUT.metadata,
-      },
-    );
+  const result = detectContractVaultMetadataFormatVersion(rawMetadata, {
+    relativePath: VAULT_LAYOUT.metadata,
+  });
+
+  if (!result.success) {
+    throw new VaultError(result.error.code, result.error.message, result.error.details);
   }
 
-  if (!Object.hasOwn(rawMetadata, "formatVersion")) {
-    throw new VaultError(
-      "VAULT_INVALID_METADATA",
-      "Vault metadata formatVersion is required.",
-      {
-        relativePath: VAULT_LAYOUT.metadata,
-      },
-    );
-  }
-
-  const formatVersion = rawMetadata.formatVersion;
-
-  if (
-    typeof formatVersion !== "number" ||
-    !Number.isInteger(formatVersion) ||
-    formatVersion < 0
-  ) {
-    throw new VaultError(
-      "VAULT_INVALID_METADATA",
-      "Vault metadata formatVersion must be a non-negative integer.",
-      {
-        relativePath: VAULT_LAYOUT.metadata,
-      },
-    );
-  }
-
-  return formatVersion;
+  return result.storedFormatVersion;
 }
