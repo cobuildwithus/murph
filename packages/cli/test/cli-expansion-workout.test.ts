@@ -252,12 +252,12 @@ test('workout add help uses a positional text argument', async () => {
   assert.match(help, /Usage: vault-cli workout add <text> \[options\]/u)
 })
 
-test('workout format save help uses positional name and text arguments', async () => {
+test('workout format save help keeps name and text optional when using structured input', async () => {
   const help = await runSliceCliRaw(['workout', 'format', 'save', '--help'])
 
   assert.match(
     help,
-    /Usage: vault-cli workout format save <name> <text> \[options\]/u,
+    /Usage: vault-cli workout format save \[name\] \[text\] \[options\]/u,
   )
 })
 
@@ -589,7 +589,7 @@ test(
         'utf8',
       )
 
-      const saved = await runCli([
+      const saved = await runSliceCli([
         'workout',
         'format',
         'save',
@@ -600,7 +600,7 @@ test(
       ])
 
       assert.equal(saved.ok, false)
-      assert.equal(saved.error.code, 'invalid_payload')
+      assert.equal(saved.error.code, 'VALIDATION_ERROR')
       assert.match(saved.error.message ?? '', /template/u)
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
@@ -1583,7 +1583,11 @@ test(
         vaultRoot,
       ])
       assert.equal(cleared.ok, true)
-      assert.equal(requireData(cleared).entity.data.rawRefs, undefined)
+      assert.equal(Array.isArray(requireData(cleared).entity.data.rawRefs), true)
+      assert.match(
+        requireData(cleared).entity.data.rawRefs?.[0] ?? '',
+        /^raw\/workouts\/2026\/03\/evt[-_].+\/workout-photo\.jpg$/u,
+      )
 
       const manifest = await runCli<WorkoutManifestEnvelope>([
         'workout',

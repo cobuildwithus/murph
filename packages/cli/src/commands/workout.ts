@@ -4,6 +4,7 @@ import {
   inputFileOptionSchema,
   normalizeInputFileOption,
 } from '@murphai/assistant-engine/json-input'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   isoTimestampSchema,
   listResultSchema,
@@ -501,11 +502,13 @@ export function registerWorkoutCommands(
         .string()
         .min(1)
         .max(160)
+        .optional()
         .describe('Saved workout format name such as "Push Day A".'),
       text: z
         .string()
         .min(1)
         .max(4000)
+        .optional()
         .describe('Saved workout text.'),
     }),
     examples: [
@@ -560,14 +563,34 @@ export function registerWorkoutCommands(
     }),
     output: workoutFormatSaveResultSchema,
     async run({ args, options }) {
+      const inputFile =
+        typeof options.input === 'string'
+          ? normalizeInputFileOption(options.input)
+          : undefined
+      const name = typeof args.name === 'string' ? args.name : undefined
+      const text = typeof args.text === 'string' ? args.text : undefined
+
+      if (!inputFile) {
+        if (!name) {
+          throw new VaultCliError(
+            'contract_invalid',
+            'Workout format name is required when --input is not provided.',
+          )
+        }
+
+        if (!text) {
+          throw new VaultCliError(
+            'contract_invalid',
+            'Workout format text is required when --input is not provided.',
+          )
+        }
+      }
+
       return saveWorkoutFormat({
         vault: options.vault,
-        name: typeof args.name === 'string' ? args.name : undefined,
-        text: typeof args.text === 'string' ? args.text : undefined,
-        inputFile:
-          typeof options.input === 'string'
-            ? normalizeInputFileOption(options.input)
-            : undefined,
+        name,
+        text,
+        inputFile,
         durationMinutes: options.duration,
         activityType:
           typeof options.type === 'string' ? options.type : undefined,
