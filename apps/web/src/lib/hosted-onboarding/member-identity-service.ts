@@ -1,6 +1,7 @@
-import { Prisma, type HostedMember } from "@prisma/client";
 import {
   HostedBillingStatus,
+  Prisma,
+  type HostedMember,
 } from "@prisma/client";
 
 import {
@@ -20,17 +21,16 @@ import {
   isHostedOnboardingRevnetEnabled,
   normalizeHostedWalletAddress,
 } from "./revnet";
+import { createHostedMember, readHostedMemberCoreState } from "./hosted-member-store";
 import {
-  createHostedMember,
   findHostedMemberByPhoneLookupKey,
   findHostedMemberByPhoneNumber,
   findHostedMemberByPrivyUserId,
   findHostedMemberByWalletAddress,
-  readHostedMemberCoreState,
   readHostedMemberIdentity,
   upsertHostedMemberIdentity,
-  upsertHostedMemberLinqChatBinding,
-} from "./hosted-member-store";
+} from "./hosted-member-identity-store";
+import { upsertHostedMemberLinqChatBinding } from "./hosted-member-routing-store";
 
 export async function ensureHostedMemberForPhone(input: {
   phoneNumber: string;

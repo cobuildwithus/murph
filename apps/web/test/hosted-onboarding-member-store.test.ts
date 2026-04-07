@@ -7,22 +7,28 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 
 import {
+  readHostedMemberAggregate,
+} from "@/src/lib/hosted-onboarding/hosted-member-store";
+import {
   bindHostedMemberStripeCustomerIdIfMissing,
+  findHostedMemberByStripeCustomerId,
+  findHostedMemberByStripeSubscriptionId,
+  readHostedMemberStripeBillingRef,
+  writeHostedMemberStripeBillingRef,
+} from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
+import {
   findHostedMemberByPhoneNumber,
   findHostedMemberByPhoneLookupKey,
   findHostedMemberByPrivyUserId,
-  findHostedMemberByStripeCustomerId,
-  findHostedMemberByStripeSubscriptionId,
+  upsertHostedMemberIdentity,
+} from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
+import {
   findHostedMemberByTelegramUserId,
   findHostedMemberByTelegramUserLookupKey,
-  readHostedMemberAggregate,
   readHostedMemberRoutingState,
-  readHostedMemberStripeBillingRef,
-  upsertHostedMemberIdentity,
   upsertHostedMemberLinqChatBinding,
   upsertHostedMemberTelegramRoutingBinding,
-  writeHostedMemberStripeBillingRef,
-} from "@/src/lib/hosted-onboarding/hosted-member-store";
+} from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 
 describe("hosted-member-store", () => {
   beforeEach(() => {

@@ -23,9 +23,9 @@ vi.mock("../src/lib/hosted-onboarding/runtime", async () => {
   };
 });
 
-vi.mock("../src/lib/hosted-onboarding/hosted-member-store", async () => {
-  const actual = await vi.importActual<typeof import("../src/lib/hosted-onboarding/hosted-member-store")>(
-    "../src/lib/hosted-onboarding/hosted-member-store",
+vi.mock("../src/lib/hosted-onboarding/hosted-member-identity-store", async () => {
+  const actual = await vi.importActual<typeof import("../src/lib/hosted-onboarding/hosted-member-identity-store")>(
+    "../src/lib/hosted-onboarding/hosted-member-identity-store",
   );
 
   return {

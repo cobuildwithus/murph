@@ -10,7 +10,7 @@ import {
   coerceStripeSubscriptionId,
 } from "./billing";
 import { isHostedAccessBlockedBillingStatus } from "./entitlement";
-import { writeHostedMemberStripeBillingRef } from "./hosted-member-store";
+import { writeHostedMemberStripeBillingRef } from "./hosted-member-billing-store";
 import { normalizeNullableString } from "./shared";
 import {
   activateHostedMemberForPositiveSource,

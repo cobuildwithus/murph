@@ -25,7 +25,7 @@ vi.mock("@/src/lib/hosted-onboarding/telegram", () => ({
   buildHostedTelegramBotLink: mocks.buildHostedTelegramBotLink,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   upsertHostedMemberTelegramRoutingBinding: mocks.upsertHostedMemberTelegramRoutingBinding,
 }));
 

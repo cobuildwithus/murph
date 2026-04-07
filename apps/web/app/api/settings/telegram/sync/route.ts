@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { getPrisma } from "@/src/lib/prisma";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import { upsertHostedMemberTelegramRoutingBinding } from "@/src/lib/hosted-onboarding/hosted-member-store";
+import { upsertHostedMemberTelegramRoutingBinding } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
 import { resolveHostedPrivyTelegramAccountSelection } from "@/src/lib/hosted-onboarding/privy-shared";
 import { requireHostedPrivyActiveRequestAuthContext } from "@/src/lib/hosted-onboarding/request-auth";
