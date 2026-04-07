@@ -23,6 +23,7 @@ import {
   findHostedMemberByStripeCustomerId,
   findHostedMemberByStripeSubscriptionId,
   readHostedMemberAggregate,
+  updateHostedMemberCoreState,
   writeHostedMemberStripeBillingRef,
 } from "./hosted-member-store";
 import { requireHostedStripeApi } from "./runtime";
@@ -184,13 +185,10 @@ async function tryActivateHostedMemberIfStillAllowed(input: {
       return false;
     }
 
-    await tx.hostedMember.update({
-      where: {
-        id: currentMember.id,
-      },
-      data: {
-        billingStatus: HostedBillingStatus.active,
-      },
+    await updateHostedMemberCoreState({
+      billingStatus: HostedBillingStatus.active,
+      memberId: currentMember.id,
+      prisma: tx,
     });
 
     return true;
@@ -227,18 +225,11 @@ export async function updateHostedMemberStripeBillingIfFresh(input: {
       return null;
     }
 
-    await tx.hostedMember.update({
-      where: {
-        id: currentMember.id,
-      },
-      data: {
-        billingStatus: input.billingStatus,
-        ...(input.suspendedAtOverride !== undefined
-          ? {
-              suspendedAt: input.suspendedAtOverride,
-            }
-          : {}),
-      },
+    await updateHostedMemberCoreState({
+      billingStatus: input.billingStatus,
+      memberId: currentMember.id,
+      prisma: tx,
+      suspendedAt: input.suspendedAtOverride,
     });
 
     await writeHostedMemberStripeBillingRef({

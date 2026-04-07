@@ -22,6 +22,7 @@ import {
 } from "./billing-attempts";
 import {
   bindHostedMemberStripeCustomerIdIfMissing,
+  readHostedMemberCoreState,
   readHostedMemberStripeBillingRef,
   writeHostedMemberStripeBillingRef,
 } from "./hosted-member-store";
@@ -352,16 +353,10 @@ async function reserveHostedBillingCheckout(input: {
   return runHostedBillingCheckoutTransaction(input.prisma, async (transaction) => {
     await lockHostedMemberRow(transaction, input.requestContext.memberId);
 
-    const member = typeof transaction.hostedMember.findUnique === "function"
-      ? await transaction.hostedMember.findUnique({
-          where: {
-            id: input.requestContext.memberId,
-          },
-          select: {
-            billingStatus: true,
-          },
-        })
-      : null;
+    const member = await readHostedMemberCoreState({
+      memberId: input.requestContext.memberId,
+      prisma: transaction,
+    });
 
     if (member?.billingStatus === HostedBillingStatus.active) {
       return {

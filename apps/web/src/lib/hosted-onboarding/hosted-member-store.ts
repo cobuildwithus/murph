@@ -24,10 +24,17 @@ import {
 } from "./shared";
 
 type HostedMemberStoreClient = HostedOnboardingPrismaClient;
-type HostedMemberCoreState = Pick<
-  HostedMember,
-  "billingStatus" | "createdAt" | "id" | "suspendedAt" | "updatedAt"
->;
+const hostedMemberCoreStateSelect = Prisma.validator<Prisma.HostedMemberSelect>()({
+  billingStatus: true,
+  createdAt: true,
+  id: true,
+  suspendedAt: true,
+  updatedAt: true,
+});
+
+export type HostedMemberCoreState = Prisma.HostedMemberGetPayload<{
+  select: typeof hostedMemberCoreStateSelect;
+}>;
 type HostedMemberRecordWithRelations = Prisma.HostedMemberGetPayload<{
   include: {
     billingRef: true;
@@ -116,6 +123,26 @@ export type HostedMemberTelegramLookupSnapshot = Pick<
   HostedMember,
   "billingStatus" | "id" | "suspendedAt"
 >;
+
+export async function createHostedMember(input: {
+  billingStatus: HostedMember["billingStatus"];
+  memberId: string;
+  prisma: HostedMemberStoreClient;
+  suspendedAt?: Date | null;
+}): Promise<HostedMemberCoreState> {
+  return input.prisma.hostedMember.create({
+    data: {
+      billingStatus: input.billingStatus,
+      id: input.memberId,
+      ...(input.suspendedAt !== undefined
+        ? {
+            suspendedAt: input.suspendedAt,
+          }
+        : {}),
+    },
+    select: hostedMemberCoreStateSelect,
+  });
+}
 
 export async function findHostedMemberByPrivyUserId(input: {
   prisma: HostedMemberStoreClient;
@@ -245,6 +272,18 @@ export async function findHostedMemberByStripeSubscriptionId(input: {
   return billingRefRecord?.member ?? null;
 }
 
+export async function readHostedMemberCoreState(input: {
+  memberId: string;
+  prisma: HostedMemberStoreClient;
+}): Promise<HostedMemberCoreState | null> {
+  return input.prisma.hostedMember.findUnique({
+    where: {
+      id: input.memberId,
+    },
+    select: hostedMemberCoreStateSelect,
+  });
+}
+
 export async function readHostedMemberIdentity(input: {
   memberId: string;
   prisma: HostedMemberStoreClient;
@@ -342,6 +381,38 @@ export async function readHostedMemberAggregate(input: {
     billingRef,
     identity,
     routing,
+  });
+}
+
+export async function updateHostedMemberCoreState(input: {
+  billingStatus?: HostedMember["billingStatus"];
+  memberId: string;
+  prisma: HostedMemberStoreClient;
+  suspendedAt?: Date | null;
+}): Promise<HostedMemberCoreState> {
+  const data = {
+    ...(input.billingStatus !== undefined
+      ? {
+          billingStatus: input.billingStatus,
+        }
+      : {}),
+    ...(input.suspendedAt !== undefined
+      ? {
+          suspendedAt: input.suspendedAt,
+        }
+      : {}),
+  };
+
+  if (Object.keys(data).length === 0) {
+    throw new TypeError("Hosted member core state updates require at least one field.");
+  }
+
+  return input.prisma.hostedMember.update({
+    where: {
+      id: input.memberId,
+    },
+    data,
+    select: hostedMemberCoreStateSelect,
   });
 }
 

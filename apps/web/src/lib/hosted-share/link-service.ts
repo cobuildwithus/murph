@@ -14,6 +14,7 @@ import {
 } from "../hosted-onboarding/invite-service";
 import { hasHostedMemberActiveAccess } from "../hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import { readHostedMemberCoreState } from "../hosted-onboarding/hosted-member-store";
 
 import {
   buildHostedSharePreview,
@@ -176,10 +177,9 @@ async function requireActiveHostedShareSenderMember(input: {
   memberId: string;
   prisma: PrismaClient;
 }): Promise<void> {
-  const member = await input.prisma.hostedMember.findUnique({
-    where: {
-      id: input.memberId,
-    },
+  const member = await readHostedMemberCoreState({
+    memberId: input.memberId,
+    prisma: input.prisma,
   });
 
   if (!member) {
