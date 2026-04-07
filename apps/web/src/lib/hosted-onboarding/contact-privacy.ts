@@ -3,7 +3,7 @@ import { createHmac } from "node:crypto";
 import { getHostedOnboardingEnvironment } from "./runtime";
 import { maskPhoneNumber, normalizePhoneNumber } from "./phone";
 
-const HOSTED_PRIVACY_LEGACY_FALLBACK_VERSION = "v1";
+const TEST_HOSTED_PRIVACY_VERSION = "v1";
 const HOSTED_BLIND_INDEX_PREFIX = "hbidx";
 const HOSTED_OPAQUE_ID_PREFIX = "hbid";
 const MASKED_PHONE_HINT_PATTERN = /^\*{3}\s+\d{4}$/u;
@@ -11,14 +11,14 @@ const HOSTED_LINQ_ATTACHMENT_CDN_HOST = "cdn.linqapp.com";
 const HOSTED_BLIND_INDEX_PATTERN =
   /^(?<prefix>hbidx):(?<kind>[a-z0-9-]+):(?<version>v[0-9]+):(?<digest>[0-9a-f]+)$/u;
 const TEST_HOSTED_PRIVACY_KEYRING = {
-  currentVersion: HOSTED_PRIVACY_LEGACY_FALLBACK_VERSION,
+  currentVersion: TEST_HOSTED_PRIVACY_VERSION,
   keysByVersion: {
-    [HOSTED_PRIVACY_LEGACY_FALLBACK_VERSION]: Buffer.from(
+    [TEST_HOSTED_PRIVACY_VERSION]: Buffer.from(
       "vitest-hosted-contact-privacy-root-key",
       "utf8",
     ),
   },
-  readVersions: [HOSTED_PRIVACY_LEGACY_FALLBACK_VERSION],
+  readVersions: [TEST_HOSTED_PRIVACY_VERSION],
 } as const;
 
 export type HostedBlindIndexKind =
@@ -541,7 +541,7 @@ function readHostedPrivacyKeyring(): {
   }
 
   throw new TypeError(
-    "HOSTED_CONTACT_PRIVACY_KEY or HOSTED_CONTACT_PRIVACY_KEYS is required for hosted contact privacy.",
+    "HOSTED_CONTACT_PRIVACY_KEYS is required for hosted contact privacy.",
   );
 }
 

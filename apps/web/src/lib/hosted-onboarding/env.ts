@@ -40,7 +40,7 @@ export function readHostedOnboardingEnvironment(
   return {
     contactPrivacyKeyring: readHostedContactPrivacyKeyring(source),
     inviteTtlHours: readPositiveInteger(
-      readEnv(source, ["HOSTED_ONBOARDING_INVITE_TTL_HOURS"]),
+      readEnv(source, "HOSTED_ONBOARDING_INVITE_TTL_HOURS"),
       24 * 7,
       "HOSTED_ONBOARDING_INVITE_TTL_HOURS",
     ),
@@ -49,40 +49,26 @@ export function readHostedOnboardingEnvironment(
     linqApiToken: linq.apiToken,
     linqWebhookSecret: linq.webhookSecret,
     linqWebhookTimestampToleranceMs: linq.webhookTimestampToleranceMs,
-    privyAppId: readEnv(source, ["NEXT_PUBLIC_PRIVY_APP_ID"]),
-    privyVerificationKey: readEnv(source, ["PRIVY_VERIFICATION_KEY"]),
+    privyAppId: readEnv(source, "NEXT_PUBLIC_PRIVY_APP_ID"),
+    privyVerificationKey: readEnv(source, "PRIVY_VERIFICATION_KEY"),
     publicBaseUrl,
-    stripePriceId: readEnv(source, ["HOSTED_ONBOARDING_STRIPE_PRICE_ID"]),
-    stripeSecretKey: readEnv(source, ["STRIPE_SECRET_KEY"]),
-    stripeWebhookSecret: readEnv(source, ["STRIPE_WEBHOOK_SECRET"]),
-    telegramBotUsername: readEnv(source, ["TELEGRAM_BOT_USERNAME"]),
-    telegramWebhookSecret: readEnv(source, ["TELEGRAM_WEBHOOK_SECRET"]),
+    stripePriceId: readEnv(source, "HOSTED_ONBOARDING_STRIPE_PRICE_ID"),
+    stripeSecretKey: readEnv(source, "STRIPE_SECRET_KEY"),
+    stripeWebhookSecret: readEnv(source, "STRIPE_WEBHOOK_SECRET"),
+    telegramBotUsername: readEnv(source, "TELEGRAM_BOT_USERNAME"),
+    telegramWebhookSecret: readEnv(source, "TELEGRAM_WEBHOOK_SECRET"),
   };
 }
 
 function readHostedContactPrivacyKeyring(
   source: HostedOnboardingEnvSource,
 ): HostedContactPrivacyKeyring {
-  const keyringValue = readEnv(source, ["HOSTED_CONTACT_PRIVACY_KEYS"]);
+  const keyringValue = readEnv(source, "HOSTED_CONTACT_PRIVACY_KEYS");
 
   if (!keyringValue) {
-    const legacyKeyValue = readEnv(source, ["HOSTED_CONTACT_PRIVACY_KEY"]);
-
-    if (!legacyKeyValue) {
-      throw new TypeError(
-        "HOSTED_CONTACT_PRIVACY_KEY or HOSTED_CONTACT_PRIVACY_KEYS is required for hosted contact privacy.",
-      );
-    }
-
-    const legacyVersion = "v1";
-
-    return {
-      currentVersion: legacyVersion,
-      keysByVersion: {
-        [legacyVersion]: decodeHostedEncryptionKey(legacyKeyValue),
-      },
-      readVersions: [legacyVersion],
-    };
+    throw new TypeError(
+      "HOSTED_CONTACT_PRIVACY_KEYS is required for hosted contact privacy.",
+    );
   }
 
   const entries = keyringValue
@@ -123,7 +109,7 @@ function readHostedContactPrivacyKeyring(
     readVersions.push(version);
   }
 
-  const configuredCurrentVersion = readEnv(source, ["HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION"]);
+  const configuredCurrentVersion = readEnv(source, "HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION");
   const currentVersion = configuredCurrentVersion ?? (
     readVersions.length === 1 ? readVersions[0] : null
   );
@@ -150,16 +136,8 @@ function readHostedContactPrivacyKeyring(
   };
 }
 
-function readEnv(source: HostedOnboardingEnvSource, keys: readonly string[]): string | null {
-  for (const key of keys) {
-    const value = normalizeNullableString(source[key]);
-
-    if (value) {
-      return value;
-    }
-  }
-
-  return null;
+function readEnv(source: HostedOnboardingEnvSource, key: string): string | null {
+  return normalizeNullableString(source[key]);
 }
 
 function readPositiveInteger(value: string | null, fallback: number, label: string): number {

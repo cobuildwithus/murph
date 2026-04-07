@@ -459,7 +459,7 @@ async function upsertHostedExecutionOutboxRecord(input: {
   sourceType: string;
   tx: HostedExecutionOutboxClient;
 }): Promise<ExecutionOutbox> {
-  let record = await input.tx.executionOutbox.upsert({
+  const record = await input.tx.executionOutbox.upsert({
     where: {
       eventId: input.dispatchRef.eventId,
     },
@@ -476,24 +476,6 @@ async function upsertHostedExecutionOutboxRecord(input: {
       nextAttemptAt: input.now,
     },
   });
-
-  if (shouldMigrateLegacyDeviceSyncSignalSourceId(record, {
-    eventId: input.dispatchRef.eventId,
-    eventKind: input.dispatchRef.eventKind,
-    payloadJson: input.payloadJson,
-    sourceId: input.sourceId,
-    sourceType: input.sourceType,
-    userId: input.dispatchRef.userId,
-  })) {
-    record = await input.tx.executionOutbox.update({
-      where: {
-        id: record.id,
-      },
-      data: {
-        sourceId: input.sourceId,
-      },
-    });
-  }
 
   assertHostedExecutionOutboxRecordMatches(record, {
     eventId: input.dispatchRef.eventId,
@@ -557,37 +539,6 @@ function assertHostedExecutionOutboxRecordMatches(
       `Hosted execution outbox event ${expected.eventId} already exists with conflicting metadata.`,
     );
   }
-}
-
-function shouldMigrateLegacyDeviceSyncSignalSourceId(
-  record: Pick<
-    ExecutionOutbox,
-    "eventId" | "eventKind" | "payloadJson" | "sourceId" | "sourceType" | "userId"
-  >,
-  expected: {
-    eventId: string;
-    eventKind: string;
-    payloadJson: Prisma.InputJsonValue;
-    sourceId: string | null;
-    sourceType: string;
-    userId: string;
-  },
-): boolean {
-  return record.eventId === expected.eventId
-    && record.eventKind === expected.eventKind
-    && record.sourceType === "device_sync_signal"
-    && expected.sourceType === "device_sync_signal"
-    && expected.sourceId === expected.eventId
-    && isLegacyDeviceSyncSignalSourceId(record.sourceId)
-    && record.userId === expected.userId
-    && areHostedExecutionOutboxPayloadsEquivalent(
-      readHostedExecutionOutboxPayload(record.payloadJson),
-      readHostedExecutionOutboxPayload(expected.payloadJson),
-    );
-}
-
-function isLegacyDeviceSyncSignalSourceId(sourceId: string | null): boolean {
-  return typeof sourceId === "string" && /^[1-9]\d*$/.test(sourceId);
 }
 
 function areHostedExecutionOutboxPayloadsEquivalent(

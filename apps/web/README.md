@@ -69,8 +69,7 @@ Optional but recommended:
 Hosted onboarding extras:
 
 - `HOSTED_ONBOARDING_PUBLIC_BASE_URL`
-- `HOSTED_CONTACT_PRIVACY_KEY` for the legacy single-key `v1` fallback only
-- `HOSTED_CONTACT_PRIVACY_KEYS` as a comma-separated `version:base64key` keyring when preparing blind-index rotation
+- `HOSTED_CONTACT_PRIVACY_KEYS` as a comma-separated `version:base64key` keyring
 - `HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION` when `HOSTED_CONTACT_PRIVACY_KEYS` defines more than one version
 - `HOSTED_WEB_ENCRYPTION_KEY`
 - `HOSTED_WEB_ENCRYPTION_KEY_VERSION`

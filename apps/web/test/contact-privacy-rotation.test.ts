@@ -312,14 +312,12 @@ function configureHostedContactPrivacyKeyringForTest(input: {
     .map(([version, key]) => `${version}:${key}`)
     .join(",");
   process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = input.currentVersion;
-  delete process.env.HOSTED_CONTACT_PRIVACY_KEY;
   clearHostedOnboardingEnvCache();
 }
 
 function restoreHostedContactPrivacyEnv(): void {
   delete process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
   delete process.env.HOSTED_CONTACT_PRIVACY_KEYS;
-  delete process.env.HOSTED_CONTACT_PRIVACY_KEY;
   clearHostedOnboardingEnvCache();
 }
 

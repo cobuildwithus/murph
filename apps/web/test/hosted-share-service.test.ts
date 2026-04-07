@@ -60,7 +60,8 @@ import {
 } from "@/src/lib/hosted-share/shared";
 
 let originalHostedOnboardingPublicBaseUrl: string | undefined;
-let originalHostedContactPrivacyKey: string | undefined;
+let originalHostedContactPrivacyCurrentKeyVersion: string | undefined;
+let originalHostedContactPrivacyKeys: string | undefined;
 const TEST_CONTACT_PRIVACY_KEY = Buffer.alloc(32, 7).toString("base64url");
 
 function buildPack(): SharePack {
@@ -123,8 +124,10 @@ describe("hosted share service", () => {
     shareHarness.sharePacks.clear();
     shareHarness.stagedPayloads = [];
     originalHostedOnboardingPublicBaseUrl = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
-    originalHostedContactPrivacyKey = process.env.HOSTED_CONTACT_PRIVACY_KEY;
-    process.env.HOSTED_CONTACT_PRIVACY_KEY = TEST_CONTACT_PRIVACY_KEY;
+    originalHostedContactPrivacyCurrentKeyVersion = process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
+    originalHostedContactPrivacyKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
+    process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v1";
+    process.env.HOSTED_CONTACT_PRIVACY_KEYS = `v1:${TEST_CONTACT_PRIVACY_KEY}`;
     process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = "https://join.example.test";
   });
 
@@ -135,10 +138,16 @@ describe("hosted share service", () => {
       process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = originalHostedOnboardingPublicBaseUrl;
     }
 
-    if (originalHostedContactPrivacyKey === undefined) {
-      delete process.env.HOSTED_CONTACT_PRIVACY_KEY;
+    if (originalHostedContactPrivacyCurrentKeyVersion === undefined) {
+      delete process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
     } else {
-      process.env.HOSTED_CONTACT_PRIVACY_KEY = originalHostedContactPrivacyKey;
+      process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = originalHostedContactPrivacyCurrentKeyVersion;
+    }
+
+    if (originalHostedContactPrivacyKeys === undefined) {
+      delete process.env.HOSTED_CONTACT_PRIVACY_KEYS;
+    } else {
+      process.env.HOSTED_CONTACT_PRIVACY_KEYS = originalHostedContactPrivacyKeys;
     }
   });
 
