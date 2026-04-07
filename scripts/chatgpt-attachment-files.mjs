@@ -36,12 +36,7 @@ function isChatConversationHref(href) {
   }
 }
 
-export function deriveAttachmentLabel(item) {
-  const text = normalizeAttachmentValue(
-    typeof item === 'string' ? item : item?.text,
-  )
-  const hrefLabel = deriveHrefLabel(typeof item === 'string' ? '' : item?.href)
-
+function deriveAttachmentLabelFromParts({ hrefLabel, text }) {
   if (
     hrefLabel.length > 0 &&
     PATCH_ARTIFACT_LABEL_PATTERN.test(hrefLabel) &&
@@ -57,93 +52,112 @@ export function deriveAttachmentLabel(item) {
   return hrefLabel
 }
 
-export function isThreadAttachmentCandidate(item) {
-  const text = normalizeAttachmentValue(
-    typeof item === 'string' ? item : item?.text,
-  )
-  const href = normalizeAttachmentValue(
-    typeof item === 'string' ? '' : item?.href,
-  )
-  const download =
-    typeof item === 'string' ? false : Boolean(item?.download)
-  const behaviorButton =
-    typeof item === 'string' ? false : Boolean(item?.behaviorButton)
-  const insideAssistantMessage =
-    typeof item === 'string' ? false : Boolean(item?.insideAssistantMessage)
+function normalizeAttachmentItem(item) {
+  const isStringItem = typeof item === 'string'
+  const text = normalizeAttachmentValue(isStringItem ? item : item?.text)
+  const href = normalizeAttachmentValue(isStringItem ? '' : item?.href)
+  const download = isStringItem ? false : Boolean(item?.download)
+  const behaviorButton = isStringItem ? false : Boolean(item?.behaviorButton)
+  const insideAssistantMessage = isStringItem ? false : Boolean(item?.insideAssistantMessage)
   const hrefLabel = deriveHrefLabel(href)
+  const label = deriveAttachmentLabelFromParts({ hrefLabel, text })
 
-  if (isChatConversationHref(href)) {
+  return {
+    behaviorButton,
+    download,
+    href,
+    hrefLabel,
+    insideAssistantMessage,
+    isAssistantDownloadControl: download && insideAssistantMessage,
+    isAssistantPatchButton:
+      behaviorButton &&
+      insideAssistantMessage &&
+      PATCH_BUTTON_TEXT_PATTERN.test(text),
+    item,
+    label,
+    text,
+  }
+}
+
+function isThreadAttachmentCandidateRecord(item) {
+  if (isChatConversationHref(item.href)) {
     return false
   }
 
   return (
-    download ||
-    (behaviorButton &&
-      insideAssistantMessage &&
-      PATCH_BUTTON_TEXT_PATTERN.test(text)) ||
-    DOWNLOADABLE_ATTACHMENT_FILE_PATTERN.test(text) ||
-    DOWNLOADABLE_ATTACHMENT_FILE_PATTERN.test(href) ||
-    DOWNLOADABLE_ATTACHMENT_FILE_PATTERN.test(hrefLabel) ||
-    THREAD_ATTACHMENT_KEYWORD_PATTERN.test(text)
+    item.download ||
+    item.isAssistantPatchButton ||
+    DOWNLOADABLE_ATTACHMENT_FILE_PATTERN.test(item.text) ||
+    DOWNLOADABLE_ATTACHMENT_FILE_PATTERN.test(item.href) ||
+    DOWNLOADABLE_ATTACHMENT_FILE_PATTERN.test(item.hrefLabel) ||
+    THREAD_ATTACHMENT_KEYWORD_PATTERN.test(item.text)
   )
+}
+
+function listNormalizedThreadAttachmentCandidates(items) {
+  return (items ?? [])
+    .map((item) => normalizeAttachmentItem(item))
+    .filter((item) => isThreadAttachmentCandidateRecord(item))
+}
+
+function isPatchArtifactCandidate(item) {
+  if (item.label.length === 0 && !item.isAssistantDownloadControl) {
+    return false
+  }
+
+  return (
+    PATCH_ARTIFACT_LABEL_PATTERN.test(item.label) ||
+    PATCH_ARTIFACT_LABEL_PATTERN.test(item.href) ||
+    item.isAssistantDownloadControl ||
+    (item.behaviorButton && PATCH_BUTTON_TEXT_PATTERN.test(item.label))
+  )
+}
+
+function isDownloadablePatchArtifact(item) {
+  return (
+    (
+      PATCH_ARTIFACT_LABEL_PATTERN.test(item.label) ||
+      PATCH_ARTIFACT_LABEL_PATTERN.test(item.href) ||
+      item.isAssistantDownloadControl
+    ) &&
+    (
+      item.download ||
+      item.href.length > 0 ||
+      item.insideAssistantMessage
+    )
+  )
+}
+
+export function deriveAttachmentLabel(item) {
+  return normalizeAttachmentItem(item).label
+}
+
+export function isThreadAttachmentCandidate(item) {
+  return isThreadAttachmentCandidateRecord(normalizeAttachmentItem(item))
 }
 
 export function filterThreadAttachmentCandidates(items) {
-  return (items ?? []).filter((item) => isThreadAttachmentCandidate(item))
+  return listNormalizedThreadAttachmentCandidates(items).map((item) => item.item)
 }
 
 export function collectPatchArtifactLabels(items) {
-  const candidates = filterThreadAttachmentCandidates(items).filter((item) => {
-    const label = deriveAttachmentLabel(item)
-    const href = String(item?.href ?? '')
-    const isAssistantDownloadControl =
-      Boolean(item?.download) &&
-      Boolean(item?.insideAssistantMessage)
-    if (label.length === 0 && !isAssistantDownloadControl) {
-      return false
-    }
-    if (
-      PATCH_ARTIFACT_LABEL_PATTERN.test(label) ||
-      PATCH_ARTIFACT_LABEL_PATTERN.test(href)
-    ) {
-      return true
-    }
-    if (isAssistantDownloadControl) {
-      return true
-    }
-    return Boolean(item?.behaviorButton) && PATCH_BUTTON_TEXT_PATTERN.test(label)
-  })
-
+  const candidates = listNormalizedThreadAttachmentCandidates(items)
+    .filter((item) => isPatchArtifactCandidate(item))
   const preferredAssistantPatchButtons = candidates.filter(
-    (item) =>
-      Boolean(item?.behaviorButton) &&
-      Boolean(item?.insideAssistantMessage) &&
-      PATCH_BUTTON_TEXT_PATTERN.test(deriveAttachmentLabel(item)),
+    (item) => item.isAssistantPatchButton,
   )
-  const downloadablePatchFiles = candidates.filter((item) => {
-    const label = deriveAttachmentLabel(item)
-    return (
-      (
-        PATCH_ARTIFACT_LABEL_PATTERN.test(label) ||
-        PATCH_ARTIFACT_LABEL_PATTERN.test(String(item?.href ?? '')) ||
-        (Boolean(item?.download) && Boolean(item?.insideAssistantMessage))
-      ) &&
-      (
-        Boolean(item?.download) ||
-        Boolean(item?.href) ||
-        Boolean(item?.insideAssistantMessage)
-      )
-    )
-  })
   const selectedItems =
     preferredAssistantPatchButtons.length > 0
-      ? [...preferredAssistantPatchButtons, ...downloadablePatchFiles]
+      ? [
+          ...preferredAssistantPatchButtons,
+          ...candidates.filter((item) => isDownloadablePatchArtifact(item)),
+        ]
       : candidates
 
   return [
     ...new Set(
       selectedItems
-        .map((item) => deriveAttachmentLabel(item))
+        .map((item) => item.label)
         .filter((label) => label.length > 0),
     ),
   ]

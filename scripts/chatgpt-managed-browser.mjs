@@ -15,6 +15,26 @@ export async function fetchJson(url) {
   return response.json()
 }
 
+export async function pollUntil(readValue, options = {}) {
+  const timeoutMs = options.timeoutMs ?? TARGET_READY_TIMEOUT_MS
+  const pollMs = options.pollMs ?? TARGET_READY_POLL_MS
+  const isReady = options.isReady ?? ((value) => Boolean(value))
+  const timeoutMessage =
+    options.timeoutMessage ?? `Timed out waiting after ${timeoutMs}ms`
+  const startedAt = Date.now()
+
+  for (;;) {
+    const value = await readValue()
+    if (isReady(value)) {
+      return value
+    }
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error(timeoutMessage)
+    }
+    await sleep(pollMs)
+  }
+}
+
 export class CdpClient {
   constructor(url) {
     this.ws = new WebSocket(url)
@@ -109,6 +129,21 @@ async function createTarget(browserEndpoint, chatUrl) {
   }
 }
 
+function isTargetContentReady(state, chatUrl) {
+  return Boolean(
+    state &&
+      state.href === chatUrl &&
+      state.readyState === 'complete' &&
+      (
+        state.mainLength > 500 ||
+        state.articleCount > 0 ||
+        state.messageCount > 0 ||
+        state.attachmentButtonCount > 0 ||
+        state.patchButtonCount > 0
+      ),
+  )
+}
+
 export async function ensureTarget(browserEndpoint, chatUrl) {
   const existingTarget = await findMatchingTarget(browserEndpoint, chatUrl)
   if (existingTarget) {
@@ -116,23 +151,17 @@ export async function ensureTarget(browserEndpoint, chatUrl) {
   }
 
   await createTarget(browserEndpoint, chatUrl)
-  const startedAt = Date.now()
-  for (;;) {
-    const target = await findMatchingTarget(browserEndpoint, chatUrl)
-    if (target) {
-      return target
-    }
-    if (Date.now() - startedAt > TARGET_READY_TIMEOUT_MS) {
-      throw new Error(`Timed out waiting for a browser tab for ${chatUrl}`)
-    }
-    await sleep(TARGET_READY_POLL_MS)
-  }
+  return pollUntil(
+    () => findMatchingTarget(browserEndpoint, chatUrl),
+    {
+      timeoutMessage: `Timed out waiting for a browser tab for ${chatUrl}`,
+    },
+  )
 }
 
 export async function waitForTargetContent(client, chatUrl) {
-  const startedAt = Date.now()
-  for (;;) {
-    const state = await client.evaluate(`(() => ({
+  return pollUntil(
+    () => client.evaluate(`(() => ({
       href: location.href,
       readyState: document.readyState,
       title: document.title,
@@ -146,24 +175,10 @@ export async function waitForTargetContent(client, chatUrl) {
       patchButtonCount: Array.from(document.querySelectorAll('main button'))
         .filter((element) => element.classList?.contains('behavior-btn') && ${PATCH_BUTTON_TEXT_PATTERN}.test((element.innerText || element.getAttribute('aria-label') || '').trim()))
         .length,
-    }))()`)
-    if (
-      state &&
-      state.href === chatUrl &&
-      state.readyState === 'complete' &&
-      (
-        state.mainLength > 500 ||
-        state.articleCount > 0 ||
-        state.messageCount > 0 ||
-        state.attachmentButtonCount > 0 ||
-        state.patchButtonCount > 0
-      )
-    ) {
-      return state
-    }
-    if (Date.now() - startedAt > TARGET_READY_TIMEOUT_MS) {
-      throw new Error(`Timed out waiting for ChatGPT thread content for ${chatUrl}`)
-    }
-    await sleep(TARGET_READY_POLL_MS)
-  }
+    }))()`),
+    {
+      isReady: (state) => isTargetContentReady(state, chatUrl),
+      timeoutMessage: `Timed out waiting for ChatGPT thread content for ${chatUrl}`,
+    },
+  )
 }

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   collectPatchArtifactLabels,
+  deriveAttachmentLabel,
   isThreadAttachmentCandidate,
 } from './chatgpt-attachment-files.mjs'
 
@@ -51,6 +52,16 @@ test('accepts download controls even when the label is not file-like', () => {
       download: true,
     }),
     true,
+  )
+})
+
+test('uses the href filename when the visible label hides the patch artifact name', () => {
+  assert.equal(
+    deriveAttachmentLabel({
+      text: 'Download',
+      href: 'https://files.example.invalid/audit.patch',
+    }),
+    'audit.patch',
   )
 })
 
@@ -123,5 +134,44 @@ test('keeps assistant download controls even when the visible label is generic',
   assert.deepEqual(collectPatchArtifactLabels(items), [
     'Combined patch',
     'Download',
+  ])
+})
+
+test('deduplicates repeated patch labels without changing their first-seen order', () => {
+  const items = [
+    {
+      text: 'same.patch',
+      href: 'https://files.example.invalid/same.patch',
+    },
+    {
+      text: 'same.patch',
+      href: 'https://files.example.invalid/same.patch',
+      download: true,
+      insideAssistantMessage: true,
+    },
+  ]
+
+  assert.deepEqual(collectPatchArtifactLabels(items), ['same.patch'])
+})
+
+test('keeps assistant patch buttons ahead of generic download controls with file-backed hrefs', () => {
+  const items = [
+    {
+      text: 'Download the unified patch',
+      href: null,
+      behaviorButton: true,
+      insideAssistantMessage: true,
+    },
+    {
+      text: 'Download',
+      href: 'https://files.example.invalid/audit.patch',
+      download: true,
+      insideAssistantMessage: true,
+    },
+  ]
+
+  assert.deepEqual(collectPatchArtifactLabels(items), [
+    'Download the unified patch',
+    'audit.patch',
   ])
 })
