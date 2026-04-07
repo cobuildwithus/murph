@@ -11,7 +11,6 @@ const HOSTED_EXECUTION_EVENT_KIND_SET = new Set<HostedExecutionEventKind>(HOSTED
 const HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KIND_SET = new Set<HostedExecutionEventKind>(
   HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KINDS,
 );
-const HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION = "murph.execution-outbox.v2";
 const HOSTED_EXECUTION_DISPATCH_REF_KEYS = new Set([
   "eventId",
   "eventKind",
@@ -42,12 +41,10 @@ export function readHostedExecutionDispatchRef(
 ): HostedExecutionDispatchRef | null {
   const payloadObject = toHostedExecutionObject(payloadJson);
   const nestedRef = toHostedExecutionObject(payloadObject.dispatchRef);
-  const schemaVersion = readHostedExecutionText(payloadObject.schemaVersion);
   const storage = readHostedExecutionText(payloadObject.storage);
 
   if (
-    schemaVersion !== HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION
-    || storage !== "reference"
+    storage !== "reference"
     || !hasOnlyHostedExecutionKeys(nestedRef, HOSTED_EXECUTION_DISPATCH_REF_KEYS)
   ) {
     return null;

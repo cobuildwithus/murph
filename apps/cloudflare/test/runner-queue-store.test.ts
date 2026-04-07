@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
 import { createHostedDispatchPayloadStore } from "../src/dispatch-payload-store.js";
 import type { HostedExecutionCommittedResult } from "../src/execution-journal.js";
 import { RunnerQueueStore } from "../src/user-runner/runner-queue-store.js";
@@ -64,7 +65,7 @@ describe("RunnerQueueStore", () => {
         last_error_code
       ) VALUES (?, ?, ?, ?, ?, ?)`,
       "evt_good",
-      payloadKey.key,
+      payloadKey.stagedPayloadId,
       0,
       "2026-03-29T10:00:00.000Z",
       "2026-03-29T10:00:00.000Z",
@@ -244,6 +245,42 @@ describe("RunnerQueueStore", () => {
 
     expect(bucket.objects.size).toBe(0);
     expect(bucket.deleted).toHaveLength(1);
+  });
+
+  it("reuses an adopted staged payload id when enqueueing a stored reference dispatch", async () => {
+    const state = createState();
+    const { bucket, dispatchPayloadStore, store } = createQueueHarness(state);
+    await store.bootstrapUser("member_123");
+
+    const dispatch: HostedExecutionDispatchRequest = {
+      event: {
+        connectionId: "conn_staged_1",
+        hint: {
+          traceId: "trace_staged_1",
+        },
+        kind: "device-sync.wake",
+        provider: "oura",
+        reason: "webhook_hint",
+        userId: "member_123",
+      },
+      eventId: "evt_staged_payload",
+      occurredAt: "2026-03-29T10:00:00.000Z",
+    };
+
+    const storedPayload = await dispatchPayloadStore.writeStoredDispatch(dispatch);
+    expect(storedPayload.storage).toBe("reference");
+    expect(bucket.objects.size).toBe(1);
+
+    const result = await store.enqueueDispatch(dispatch, storedPayload.stagedPayloadId);
+    expect(result.accepted).toBe(true);
+    expect(bucket.objects.size).toBe(1);
+    expect(state.storage.sql!.exec<{ payload_key: string }>(
+      "SELECT payload_key FROM pending_events WHERE event_id = ?",
+      dispatch.eventId,
+    ).one().payload_key).toBe(storedPayload.stagedPayloadId);
+
+    const claimed = await store.claimNextDuePendingDispatch(Date.now() + 1_000);
+    expect(claimed.pendingDispatch?.dispatch).toEqual(dispatch);
   });
 
   it("clears malformed bundle refs to null and surfaces a corruption warning", async () => {

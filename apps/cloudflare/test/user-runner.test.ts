@@ -6,7 +6,10 @@ import path from "node:path";
 import { beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 import { createGatewayConversationSessionKey } from "@murphai/gateway-core";
-import { deriveHostedExecutionErrorCode } from "@murphai/hosted-execution";
+import {
+  buildHostedExecutionGatewayMessageSendDispatch,
+  deriveHostedExecutionErrorCode,
+} from "@murphai/hosted-execution";
 import {
   encodeHostedBundleBase64,
   listHostedBundleArtifacts,
@@ -1223,14 +1226,26 @@ describe("HostedUserRunner", () => {
     expectHostedBundleKeys(bucket.keys(), ["agent-state", "vault"]);
   });
 
-  it("stores queued dispatch payload blobs under the per-user root key", async () => {
+  it("reuses one staged payload id across stored handoff and queue persistence", async () => {
     const firstRun = createDeferred<Response>();
     const fetchMock = vi.fn().mockImplementationOnce(async () => firstRun.promise);
     vi.stubGlobal("fetch", fetchMock);
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    const dispatch = createDispatch("evt_root_key_payload");
+    const dispatch = createReferenceDispatch("evt_root_key_payload");
+    const crypto = await resolveHostedUserCryptoContextForTest({
+      bucket,
+      environment,
+      userId: dispatch.event.userId,
+    });
+    const userStore = createHostedDispatchPayloadStore({
+      bucket: bucket.api,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
+    });
 
-    const dispatchPromise = runner.dispatch(dispatch);
+    const payload = await userStore.writeStoredDispatch(dispatch);
+    const dispatchPromise = runner.dispatchStoredPayload({ payload });
     await vi.waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });
@@ -1245,26 +1260,12 @@ describe("HostedUserRunner", () => {
       dispatch.eventId,
     ).one().payload_key;
 
-    const workerStore = createHostedDispatchPayloadStore({
-      bucket: bucket.api,
-      key: environment.platformEnvelopeKey,
-      keyId: environment.platformEnvelopeKeyId,
-      keysById: environment.platformEnvelopeKeysById,
-    });
-    const crypto = await resolveHostedUserCryptoContextForTest({
-      bucket,
-      environment,
-      userId: dispatch.event.userId,
-    });
-    const userStore = createHostedDispatchPayloadStore({
-      bucket: bucket.api,
-      key: crypto.rootKey,
-      keyId: crypto.rootKeyId,
-      keysById: crypto.keysById,
-    });
-
-    await expect(workerStore.readDispatchPayload({ key: payloadKey })).rejects.toThrow();
-    await expect(userStore.readDispatchPayload({ key: payloadKey })).resolves.toEqual(dispatch);
+    expect(payload.storage).toBe("reference");
+    expect(payloadKey).toBe(payload.stagedPayloadId);
+    expect(bucket.keys()).toContain(payload.stagedPayloadId);
+    expect(bucket.keys().filter((key) => key.startsWith("transient/dispatch-payloads/"))).toEqual([
+      payload.stagedPayloadId,
+    ]);
 
     firstRun.resolve(new Response("runner failed", { status: 503 }));
     await dispatchPromise;
@@ -3448,7 +3449,7 @@ async function seedRunnerQueueState(
         last_error_code
       ) VALUES (?, ?, ?, ?, ?, ?)`,
       pendingEvent.dispatch.eventId,
-      payloadRef.key,
+      payloadRef.stagedPayloadId,
       pendingEvent.attempts,
       pendingEvent.availableAt,
       pendingEvent.enqueuedAt,
@@ -3614,6 +3615,18 @@ function createDispatch(eventId: string) {
     eventId,
     occurredAt: "2026-03-26T12:00:00.000Z",
   };
+}
+
+function createReferenceDispatch(eventId: string) {
+  return buildHostedExecutionGatewayMessageSendDispatch({
+    clientRequestId: `req_${eventId}`,
+    eventId,
+    occurredAt: "2026-03-26T12:00:00.000Z",
+    replyToMessageId: "5001",
+    sessionKey: createGatewayConversationSessionKey("conversation_123"),
+    text: "Please keep this private.",
+    userId: "member_123",
+  });
 }
 
 function createDeferred<T>() {

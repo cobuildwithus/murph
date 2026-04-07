@@ -207,7 +207,6 @@ describe("hosted webhook receipt privacy cutover", () => {
               occurredAt: "2026-04-06T09:00:00.000Z",
               userId: "member_123",
             },
-            schemaVersion: "murph.execution-outbox.v3",
             storage: "reference",
             telegramUpdate: {
               message: {
@@ -310,7 +309,6 @@ function createReferencePayload(
       userId: dispatch.event.userId,
     },
     stagedPayloadId,
-    schemaVersion: "murph.execution-outbox.v3",
     storage: "reference" as const,
   };
 }
@@ -400,7 +398,6 @@ function looksLikeReferenceOutboxPayload(value: unknown): value is {
     userId: string;
   };
   stagedPayloadId: string;
-  schemaVersion: "murph.execution-outbox.v3";
   storage: "reference";
 } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -412,7 +409,6 @@ function looksLikeReferenceOutboxPayload(value: unknown): value is {
   const stagedPayloadId = payload.stagedPayloadId;
 
   return payload.storage === "reference"
-    && payload.schemaVersion === "murph.execution-outbox.v3"
     && !!dispatchRef
     && typeof dispatchRef === "object"
     && !Array.isArray(dispatchRef)

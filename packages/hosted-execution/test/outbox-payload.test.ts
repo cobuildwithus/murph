@@ -8,7 +8,6 @@ import {
   buildHostedExecutionVaultShareAcceptedDispatch,
 } from "../src/builders";
 import {
-  HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
   buildHostedExecutionOutboxPayload,
   readHostedExecutionOutboxPayload,
   resolveHostedExecutionDispatchPayloadStorage,
@@ -166,7 +165,6 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
         userId: "user_123",
       },
       stagedPayloadId: "staged-share-legacy-1",
-      schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
       storage: "reference",
     })).toBeNull();
 
@@ -178,7 +176,7 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
         text: "still private",
         userId: "user_123",
       }),
-      schemaVersion: "murph.execution-outbox.v2",
+      unexpected: true,
       storage: "inline",
     })).toBeNull();
 
@@ -189,7 +187,6 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
         occurredAt,
         userId: "user_123",
       },
-      schemaVersion: "murph.execution-outbox.v2",
       storage: "reference",
     })).toBeNull();
 
@@ -209,7 +206,6 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
         occurredAt,
         userId: "user_123",
       },
-      schemaVersion: "murph.execution-outbox.v2",
       storage: "reference",
     })).toBeNull();
   });

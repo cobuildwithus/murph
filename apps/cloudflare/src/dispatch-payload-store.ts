@@ -4,10 +4,10 @@ import {
   parseHostedExecutionDispatchRequest,
   readHostedExecutionOutboxPayload,
   resolveHostedExecutionOutboxPayloadStorage,
-  type HostedExecutionDispatchPayloadRef,
   type HostedExecutionDispatchRef,
   type HostedExecutionDispatchRequest,
   type HostedExecutionOutboxPayload,
+  type HostedExecutionReferenceOutboxPayload,
 } from "@murphai/hosted-execution";
 
 import type { R2BucketLike } from "./bundle-store.js";
@@ -19,6 +19,11 @@ import {
   readEncryptedR2Json,
   writeEncryptedR2Json,
 } from "./crypto.js";
+
+export type HostedExecutionDispatchPayloadRef = Pick<
+  HostedExecutionReferenceOutboxPayload,
+  "stagedPayloadId"
+>;
 
 export interface HostedDispatchPayloadStore {
   deleteDispatchPayload(ref: HostedExecutionDispatchPayloadRef): Promise<void>;
@@ -48,27 +53,27 @@ export function createHostedDispatchPayloadStore(input: {
         return;
       }
 
-      await input.bucket.delete(ref.key);
+      await input.bucket.delete(ref.stagedPayloadId);
     },
 
     async deleteStoredDispatchPayload(payloadJson) {
       const payload = readStoredDispatchPayloadEnvelope(payloadJson);
 
-      if (!payload || payload.storage !== "reference" || !payload.payloadRef) {
+      if (!payload || payload.storage !== "reference") {
         return;
       }
 
-      await this.deleteDispatchPayload(payload.payloadRef);
+      await this.deleteDispatchPayload({ stagedPayloadId: payload.stagedPayloadId });
     },
 
     async readDispatchPayload(ref) {
       return readEncryptedR2Json({
-        aad: buildCurrentDispatchPayloadAad(ref.key),
+        aad: buildCurrentDispatchPayloadAad(ref.stagedPayloadId),
         bucket: input.bucket,
         cryptoKey: input.key,
         cryptoKeysById: input.keysById,
         expectedKeyId: input.keyId,
-        key: ref.key,
+        key: ref.stagedPayloadId,
         parse(value) {
           return parseHostedExecutionDispatchRequest(value);
         },
@@ -84,11 +89,9 @@ export function createHostedDispatchPayloadStore(input: {
       }
 
       if (payload?.storage === "reference") {
-        if (!payload.payloadRef) {
-          throw new TypeError("Hosted dispatch reference payloads must include payloadRef.");
-        }
-
-        const dispatch = await this.readDispatchPayload(payload.payloadRef);
+        const dispatch = await this.readDispatchPayload({
+          stagedPayloadId: payload.stagedPayloadId,
+        });
 
         if (!dispatch) {
           throw new Error(
@@ -107,7 +110,7 @@ export function createHostedDispatchPayloadStore(input: {
       try {
         const payload = readStoredDispatchPayloadEnvelope(payloadJson);
 
-        if (payload?.storage === "reference" && payload.payloadRef) {
+        if (payload?.storage === "reference") {
           return payload.dispatchRef;
         }
 
@@ -123,23 +126,23 @@ export function createHostedDispatchPayloadStore(input: {
 
     async writeDispatchPayload(dispatch) {
       const normalizedDispatch = parseHostedExecutionDispatchRequest(dispatch);
-      const key = await hostedDispatchPayloadObjectKeyForSignature(
+      const stagedPayloadId = await hostedDispatchPayloadObjectKeyForSignature(
         input.key,
         normalizedDispatch.event.userId,
         normalizedDispatch.eventId,
         await createHostedDispatchPayloadSignature(normalizedDispatch),
       );
       await writeEncryptedR2Json({
-        aad: buildCurrentDispatchPayloadAad(key),
+        aad: buildCurrentDispatchPayloadAad(stagedPayloadId),
         bucket: input.bucket,
         cryptoKey: input.key,
-        key,
+        key: stagedPayloadId,
         keyId: input.keyId,
         scope: "dispatch-payload",
         value: normalizedDispatch,
       });
 
-      return { key };
+      return { stagedPayloadId };
     },
 
     async writeStoredDispatch(dispatch) {
@@ -152,7 +155,7 @@ export function createHostedDispatchPayloadStore(input: {
 
       const payloadRef = await this.writeDispatchPayload(normalizedDispatch);
       return buildHostedExecutionOutboxPayload(normalizedDispatch, {
-        payloadRef,
+        stagedPayloadId: payloadRef.stagedPayloadId,
         storage,
       });
     },

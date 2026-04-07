@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildHostedExecutionMemberActivatedDispatch,
-  buildHostedExecutionOutboxPayload,
+  buildHostedExecutionDeviceSyncWakeDispatch,
+  buildHostedExecutionDispatchRef,
   type HostedExecutionDispatchRequest,
-  type HostedExecutionMemberActivatedEvent,
 } from "@murphai/hosted-execution";
 
 import {
@@ -12,9 +11,11 @@ import {
 import type { R2BucketLike } from "../src/bundle-store.ts";
 
 class MemoryR2Bucket implements R2BucketLike {
+  readonly deleted: string[] = [];
   readonly objects = new Map<string, string>();
 
   async delete(key: string): Promise<void> {
+    this.deleted.push(key);
     this.objects.delete(key);
   }
 
@@ -39,13 +40,16 @@ class MemoryR2Bucket implements R2BucketLike {
 
 function createTestDispatch(input?: Partial<{
   eventId: string;
-  firstContact: HostedExecutionMemberActivatedEvent["firstContact"];
+  hint: Record<string, unknown> | null;
 }>): HostedExecutionDispatchRequest {
-  return buildHostedExecutionMemberActivatedDispatch({
-    eventId: input?.eventId ?? "member.activated:test-user:event-1",
-    ...(input?.firstContact === undefined ? {} : { firstContact: input.firstContact }),
-    memberId: "test-user",
+  return buildHostedExecutionDeviceSyncWakeDispatch({
+    connectionId: "conn_test_1",
+    eventId: input?.eventId ?? "device-sync.wake:test-user:event-1",
+    ...(input?.hint === undefined ? {} : { hint: input.hint }),
     occurredAt: "2026-04-05T00:00:00.000Z",
+    provider: "oura",
+    reason: "webhook_hint",
+    userId: "test-user",
   });
 }
 
@@ -62,8 +66,11 @@ describe("hosted dispatch payload store", () => {
     const payload = await store.writeStoredDispatch(dispatch);
 
     expect(payload.storage).toBe("reference");
-    expect(payload.payloadRef?.key).toBeTruthy();
+    expect(payload.stagedPayloadId).toBeTruthy();
+    expect(bucket.objects.size).toBe(1);
     await expect(store.readStoredDispatch(payload)).resolves.toEqual(dispatch);
+    await store.deleteStoredDispatchPayload(payload);
+    expect(bucket.deleted).toEqual([payload.stagedPayloadId]);
   });
 
   it("uses content-addressed payload keys for new staged blobs", async () => {
@@ -76,11 +83,8 @@ describe("hosted dispatch payload store", () => {
     const baseDispatch = createTestDispatch();
     const sameDispatch = createTestDispatch();
     const changedDispatch = createTestDispatch({
-      firstContact: {
-        channel: "linq",
-        identityId: "+15555550123",
-        threadId: "linq-thread-2",
-        threadIsDirect: true,
+      hint: {
+        traceId: "trace-2",
       },
     });
 
@@ -88,22 +92,25 @@ describe("hosted dispatch payload store", () => {
     const secondRef = await store.writeDispatchPayload(sameDispatch);
     const changedRef = await store.writeDispatchPayload(changedDispatch);
 
-    expect(secondRef.key).toBe(firstRef.key);
-    expect(changedRef.key).not.toBe(firstRef.key);
+    expect(secondRef.stagedPayloadId).toBe(firstRef.stagedPayloadId);
+    expect(changedRef.stagedPayloadId).not.toBe(firstRef.stagedPayloadId);
   });
 
-  it("rejects reference payload envelopes without payload refs", async () => {
+  it("rejects reference payload envelopes without staged payload ids", async () => {
     const bucket = new MemoryR2Bucket();
     const store = createHostedExecutionDispatchPayloadStore({
       bucket,
       key: new Uint8Array(Array.from({ length: 32 }, (_, index) => index + 1)),
       keyId: "test-key",
     });
-    const dispatch = createTestDispatch({ eventId: "member.activated:test-user:event-legacy" });
-    const legacyPayload = buildHostedExecutionOutboxPayload(dispatch, { storage: "reference" });
+    const dispatch = createTestDispatch({ eventId: "device-sync.wake:test-user:event-legacy" });
+    const legacyPayload = {
+      dispatchRef: buildHostedExecutionDispatchRef(dispatch),
+      storage: "reference",
+    };
 
     await expect(store.readStoredDispatch(legacyPayload)).rejects.toThrow(
-      "Hosted dispatch reference payloads must include payloadRef.",
+      "Hosted dispatch payload envelope is invalid.",
     );
     expect(store.readStoredDispatchRef(legacyPayload)).toBeNull();
     await expect(store.deleteStoredDispatchPayload(legacyPayload)).resolves.toBeUndefined();

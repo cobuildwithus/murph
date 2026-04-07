@@ -198,9 +198,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
                 eventKind: "telegram.message.received",
                 userId: "member_telegram_123",
               }),
-              payloadRef: expect.objectContaining({
-                key: expect.stringContaining("/member_telegram_123/telegram:update:321.json"),
-              }),
+              stagedPayloadId: expect.stringContaining("/member_telegram_123/telegram:update:321.json"),
             }),
             kind: "hosted_execution_dispatch",
             status: "pending",
@@ -842,10 +840,7 @@ function createStagedPayload(
       occurredAt: dispatch.occurredAt,
       userId: dispatch.event.userId,
     },
-    payloadRef: {
-      key: `transient/dispatch-payloads/${dispatch.event.userId}/${dispatch.eventId}.json`,
-    },
-    schemaVersion: "murph.execution-outbox.v2",
+    stagedPayloadId: `transient/dispatch-payloads/${dispatch.event.userId}/${dispatch.eventId}.json`,
     storage: "reference" as const,
   };
 }

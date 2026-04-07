@@ -1,5 +1,4 @@
 import { ExecutionOutboxStatus } from "@prisma/client";
-import { HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION } from "@murphai/hosted-execution";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ExecutionOutbox, PrismaClient } from "@prisma/client";
@@ -41,7 +40,6 @@ describe("drainHostedExecutionOutbox", () => {
         userId: dispatch.event.userId,
       },
       stagedPayloadId: `staged/dispatch-payloads/${dispatch.event.userId}/${dispatch.eventId}`,
-      schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
       storage: "reference",
     }));
   });
@@ -152,6 +150,31 @@ describe("drainHostedExecutionOutbox", () => {
     expect(record?.lastError).toBeNull();
   });
 
+  it.each([
+    "queued",
+    "duplicate_pending",
+  ] as const)(
+    "keeps adopted staged payloads when Cloudflare reports %s",
+    async (eventState) => {
+      const dispatch = createGatewaySendDispatch();
+      const prisma = createOutboxPrisma(createOutboxRecord({
+        eventId: dispatch.eventId,
+        eventKind: dispatch.event.kind,
+        sourceType: "gateway_send",
+        userId: dispatch.event.userId,
+      }));
+      mocks.dispatchStoredHostedExecutionStatus.mockResolvedValue(createDispatchResult(eventState));
+
+      const [record] = await drainHostedExecutionOutbox({
+        now: "2026-03-28T11:00:00.000Z",
+        prisma,
+      });
+
+      expect(record?.status).toBe(ExecutionOutboxStatus.dispatched);
+      expect(mocks.deleteHostedStoredDispatchPayloadBestEffort).not.toHaveBeenCalled();
+    },
+  );
+
   it("marks missing staged payload refs as terminal delivery failures instead of retrying forever", async () => {
     const prisma = createOutboxPrisma(createOutboxRecord({
       eventId: "evt_tick",
@@ -163,7 +186,6 @@ describe("drainHostedExecutionOutbox", () => {
           occurredAt: "2026-03-28T11:00:00.000Z",
           userId: "member_123",
         },
-        schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
         storage: "reference",
       },
       userId: "member_123",
@@ -332,7 +354,6 @@ describe("drainHostedExecutionOutbox", () => {
         userId: dispatch.event.userId,
       },
       stagedPayloadId: "staged/dispatch-payloads/member_123/ref",
-      schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
       storage: "reference",
     } as const;
     mocks.maybeStageHostedExecutionDispatchPayload.mockResolvedValue(stagedPayload);
@@ -377,7 +398,6 @@ describe("drainHostedExecutionOutbox", () => {
         userId: dispatch.event.userId,
       },
       stagedPayloadId: "staged/dispatch-payloads/member_123/ref",
-      schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
       storage: "reference",
     } as const;
     const upsertError = new Error("write failed");
@@ -539,7 +559,6 @@ function createOutboxRecord(input: {
               userId: input.userId,
             },
             stagedPayloadId: `staged/dispatch-payloads/${input.userId}/${input.eventId}`,
-            schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
             storage: "reference",
           }
     )) as ExecutionOutbox["payloadJson"],

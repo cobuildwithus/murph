@@ -74,7 +74,7 @@ export function readHostedWebhookStoredDispatchSideEffectPayload(
 ): HostedWebhookStoredDispatchSideEffectPayload | null {
   const payload = readHostedExecutionOutboxPayload(value as Prisma.InputJsonValue | Prisma.JsonValue | null);
 
-  return payload?.storage === "reference" && payload.stagedPayloadId
+  return payload?.storage === "reference"
     ? payload
     : null;
 }

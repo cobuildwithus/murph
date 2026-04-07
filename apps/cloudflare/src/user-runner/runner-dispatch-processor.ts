@@ -99,6 +99,7 @@ export class RunnerDispatchProcessor {
 
   async dispatchBootstrapped(
     input: HostedExecutionDispatchRequest,
+    stagedPayloadId: string | null = null,
   ): Promise<HostedExecutionUserStatus> {
     const { commitRecovery, gatewayStore } = await this.dependencies.ensureRunnerStores(
       input.event.userId,
@@ -155,7 +156,7 @@ export class RunnerDispatchProcessor {
       await commitRecovery.deleteCommittedDispatch(input.event.userId, input.eventId);
     }
 
-    const enqueueResult = await this.dependencies.queueStore.enqueueDispatch(input);
+    const enqueueResult = await this.dependencies.queueStore.enqueueDispatch(input, stagedPayloadId);
     let record = enqueueResult.record;
 
     if (enqueueResult.accepted) {
