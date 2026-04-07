@@ -117,6 +117,121 @@ title broken
   );
 });
 
+test("readVault preserves canonical event links while deriving relatedIds for compatibility", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-event-links-"));
+
+  try {
+    await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
+    await writeFile(
+      path.join(vaultRoot, "vault.json"),
+      `${JSON.stringify({
+        formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+        vaultId: "vault_01K72NVW6Z4QK8VYAVX7GT7S4B",
+        createdAt: "2026-04-07T00:00:00.000Z",
+        title: "Event links vault",
+        timezone: "UTC",
+      })}\n`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(vaultRoot, "ledger/events/2026/2026-04.jsonl"),
+      `${JSON.stringify({
+        schemaVersion: "murph.event.v1",
+        id: "evt_01K72NW6HB9Y8M6W6VNZG4TF4M",
+        kind: "note",
+        occurredAt: "2026-04-07T08:15:00.000Z",
+        recordedAt: "2026-04-07T08:15:00.000Z",
+        dayKey: "2026-04-07",
+        source: "manual",
+        title: "Morning note",
+        note: "Preserve canonical links.",
+        links: [
+          { type: "supports_goal", targetId: "goal_01K72NWBXGH4TPP8B9X7TNF1Z9" },
+          { type: "addresses_condition", targetId: "cond_01K72NWD0QQP7NFK1G06NEPG5P" },
+        ],
+      })}\n`,
+      "utf8",
+    );
+
+    const vault = await readVault(vaultRoot);
+    const event = vault.events[0];
+
+    assert.ok(event);
+    assert.deepEqual(event?.links, [
+      { type: "supports_goal", targetId: "goal_01K72NWBXGH4TPP8B9X7TNF1Z9" },
+      { type: "addresses_condition", targetId: "cond_01K72NWD0QQP7NFK1G06NEPG5P" },
+    ]);
+    assert.deepEqual(event?.relatedIds, [
+      "goal_01K72NWBXGH4TPP8B9X7TNF1Z9",
+      "cond_01K72NWD0QQP7NFK1G06NEPG5P",
+    ]);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("readVault preserves canonical event attachments for downstream readers", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-event-attachments-"));
+
+  try {
+    await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
+    await writeFile(
+      path.join(vaultRoot, "vault.json"),
+      `${JSON.stringify({
+        formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+        vaultId: "vault_01K72P0M9QW0RXBJV3JQ4V0Q2N",
+        createdAt: "2026-04-07T00:00:00.000Z",
+        title: "Event attachments vault",
+        timezone: "UTC",
+      })}\n`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(vaultRoot, "ledger/events/2026/2026-04.jsonl"),
+      `${JSON.stringify({
+        schemaVersion: "murph.event.v1",
+        id: "evt_01K72P1A9SMQ8Y4VGTTRSBDR0V",
+        kind: "activity_session",
+        occurredAt: "2026-04-07T08:15:00.000Z",
+        recordedAt: "2026-04-07T08:15:00.000Z",
+        dayKey: "2026-04-07",
+        source: "manual",
+        title: "Lift session",
+        activityType: "strength-training",
+        durationMinutes: 35,
+        attachments: [{
+          role: "media_1",
+          kind: "photo",
+          relativePath: "raw/workouts/2026/04/evt_01K72P1A9SMQ8Y4VGTTRSBDR0V/photo.jpg",
+          mediaType: "image/jpeg",
+          sha256: "0".repeat(64),
+          originalFileName: "photo.jpg",
+        }],
+        rawRefs: ["raw/workouts/2026/04/evt_01K72P1A9SMQ8Y4VGTTRSBDR0V/photo.jpg"],
+        workout: {
+          exercises: [],
+        },
+      })}\n`,
+      "utf8",
+    );
+
+    const readModel = await readVault(vaultRoot);
+    const event = lookupEntityById(readModel, "evt_01K72P1A9SMQ8Y4VGTTRSBDR0V");
+
+    assert.ok(event);
+    assert.deepEqual(event?.attributes.attachments, [{
+      role: "media_1",
+      kind: "photo",
+      relativePath: "raw/workouts/2026/04/evt_01K72P1A9SMQ8Y4VGTTRSBDR0V/photo.jpg",
+      mediaType: "image/jpeg",
+      sha256: "0".repeat(64),
+      originalFileName: "photo.jpg",
+    }]);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("id-family helpers no longer register the hard-cut legacy colon-prefixed families", () => {
   assert.deepEqual(
     ID_FAMILY_REGISTRY.filter((family) => family.family.endsWith("_legacy")).map(

@@ -70,11 +70,13 @@ Baseline does not define a standalone transform record family. `xfm_*` ids are b
 | `adverse_effect` | `substance`, `effect`, `severity` |
 | `exposure` | `exposureType`, `substance` |
 
-Shared optional event fields are limited to `note`, `tags`, `relatedIds`, `rawRefs`, and `externalRef`. `externalRef` stores device/provider provenance as `system`, `resourceType`, `resourceId`, optional `version`, and optional `facet`.
+Shared optional event fields are limited to `note`, `tags`, `relatedIds`, `rawRefs`, `attachments`, and `externalRef`. `attachments[]` stores canonical file metadata as `role`, `kind`, `relativePath`, `mediaType`, `sha256`, and `originalFileName`. `externalRef` stores device/provider provenance as `system`, `resourceType`, `resourceId`, optional `version`, and optional `facet`.
+
+Legacy file-specific fields such as `documentPath`, `photoPaths`, `audioPaths`, `media`, and nested `workout.media` remain compatibility projections rather than independent sources of truth.
 
 `test` events may also carry optional structured lab payloads. When `testCategory` is `blood`, the canonical `test` event may include `specimenType`, `labName`, `labPanelId`, `collectedAt`, `reportedAt`, `fastingStatus`, and `results`. Each `results[]` entry stores `analyte`, optional `slug`, optional numeric `value` or textual `textValue`, optional `comparator`, optional `unit`, optional `flag`, optional `biomarkerSlug`, optional `note`, and an optional `referenceRange` with numeric `low`, numeric `high`, and/or textual `text` boundaries.
 
-`activity_session` may also include optional `distanceKm` for cardio sessions and optional `strengthExercises` for explicit lifting notes. Each `strengthExercises` entry stores `exercise`, `setCount`, `repsPerSet`, and may also carry `load`, `loadUnit`, and `loadDescription`.
+`activity_session` also carries a required nested `workout` payload as the canonical structured workout/session detail. Top-level `activityType`, `durationMinutes`, and optional `distanceKm` stay as query-friendly summaries, while exercises, sets, loads, session notes, source ids, and workout media descriptors live under `workout`.
 
 `intervention_session` may also include optional `durationMinutes` when the session length is known and optional `protocolId` when the intervention should stay linked back to one therapy or habit protocol.
 
@@ -105,7 +107,7 @@ Sample records may also carry optional `externalRef` provenance with the same sh
 - Food frontmatter:
   `schemaVersion`, `docType`, `foodId`, `slug`, `title`, `status`, `kind`, `vendor`, `ingredients`, optional `autoLogDaily.time`
 - Workout-format frontmatter (vault-local saved defaults, not a canonical event family):
-  `schemaVersion`, `docType`, `slug`, `title`, `text`, optional `type`, optional `durationMinutes`, optional `distanceKm`
+  `schemaVersion`, `docType`, `workoutFormatId`, `slug`, `title`, `status`, `activityType`, required `template`, optional `durationMinutes`, optional `distanceKm`, optional `templateText`
 - Profile current frontmatter:
   `schemaVersion`, `docType`, `snapshotId`, `updatedAt`
 - Goal frontmatter:

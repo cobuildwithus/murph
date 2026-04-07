@@ -1,10 +1,16 @@
 import {
   type ActivityStrengthExercise,
+  type EventAttachment,
   type JsonObject,
   type StoredMedia,
   type WorkoutSession,
   workoutSessionSchema,
 } from '@murphai/contracts'
+import {
+  buildAttachmentCompatibilityProjections,
+  cleanupStagedEventAttachments,
+  stageEventAttachments,
+} from '@murphai/core'
 import { loadJsonInputObject } from '../json-input.js'
 import { showWorkoutRecord } from './workout-read.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -17,6 +23,7 @@ import {
 } from './provider-event.js'
 import {
   compactObject,
+  mergeByRelativePath,
   normalizeOptionalText,
 } from './vault-usecase-helpers.js'
 import {
@@ -25,13 +32,9 @@ import {
 } from './text-duration.js'
 import {
   buildWorkoutTitle,
+  buildWorkoutSessionFromSummary,
   deriveDurationMinutesFromTimestamps,
-  summarizeWorkoutSessionExercises,
 } from './workout-model.js'
-import {
-  cleanupStagedWorkoutMediaBatch,
-  stageWorkoutMediaBatch,
-} from './workout-artifacts.js'
 import { generateUlid } from '@murphai/runtime-state'
 
 const MILES_TO_KM = 1.609344
@@ -186,12 +189,6 @@ export function resolveWorkoutCapture(
   }
 }
 
-function asJsonObject(value: unknown): JsonObject | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as JsonObject)
-    : null
-}
-
 function valueAsString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined
 }
@@ -204,23 +201,6 @@ function stringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
     : []
-}
-
-function mergeStoredMedia(
-  existing: StoredMedia[] | undefined,
-  additions: readonly StoredMedia[],
-): StoredMedia[] {
-  const merged = new Map<string, StoredMedia>()
-
-  for (const entry of existing ?? []) {
-    merged.set(entry.relativePath, entry)
-  }
-
-  for (const entry of additions) {
-    merged.set(entry.relativePath, entry)
-  }
-
-  return [...merged.values()]
 }
 
 function ensureWorkoutEventId(payload: JsonObject): string {
@@ -237,17 +217,25 @@ function ensureWorkoutEventId(payload: JsonObject): string {
 function applyStagedWorkoutMedia(input: {
   payload: JsonObject
   eventId: string
-  media: readonly StoredMedia[]
-  rawRefs: readonly string[]
+  attachments: readonly EventAttachment[]
 }): JsonObject {
-  if (input.media.length === 0 && input.rawRefs.length === 0) {
+  if (input.attachments.length === 0) {
     return input.payload
   }
 
   const payload: JsonObject = { ...input.payload, id: input.eventId }
   const existingWorkout = normalizeStructuredWorkout(payload.workout)
-  const mergedRawRefs = [...new Set([...stringArray(payload.rawRefs), ...input.rawRefs])]
-  const mergedWorkoutMedia = mergeStoredMedia(existingWorkout?.media, input.media)
+  const existingAttachments = Array.isArray(payload.attachments)
+    ? payload.attachments.filter((entry): entry is EventAttachment =>
+        typeof entry === 'object'
+        && entry !== null
+        && !Array.isArray(entry)
+        && typeof entry.relativePath === 'string')
+    : []
+  const attachments = mergeByRelativePath(existingAttachments, input.attachments)
+  const projections = buildAttachmentCompatibilityProjections(attachments)
+  const mergedRawRefs = [...new Set([...stringArray(payload.rawRefs), ...projections.rawRefs])]
+  const mergedWorkoutMedia = mergeByRelativePath(existingWorkout?.media, projections.media)
 
   const workout = existingWorkout
     ? {
@@ -261,6 +249,7 @@ function applyStagedWorkoutMedia(input: {
 
   return {
     ...payload,
+    attachments,
     rawRefs: mergedRawRefs,
     workout,
   }
@@ -334,6 +323,17 @@ function normalizeStructuredWorkout(
   return parsed.data
 }
 
+function assertNoStructuredAttachments(payload: JsonObject): void {
+  if (!Array.isArray(payload.attachments) || payload.attachments.length === 0) {
+    return
+  }
+
+  throw new VaultCliError(
+    'invalid_payload',
+    'Structured workout payloads cannot set attachments[]. Use --media <path> to stage workout files.',
+  )
+}
+
 function pickPassthroughEventFields(payload: JsonObject): JsonObject {
   const keys = ['rawRefs', 'externalRef', 'relatedIds', 'tags', 'timeZone'] as const
   const entries = keys.flatMap((key) =>
@@ -356,7 +356,8 @@ export function buildStructuredWorkoutEventPayload(input: {
   title?: string
 }): JsonObject {
   const sourcePayload = input.payload
-  const structuredWorkout =
+  assertNoStructuredAttachments(sourcePayload)
+  const explicitStructuredWorkout =
     normalizeStructuredWorkout(input.workout, 'workout')
     ?? (sourcePayload.workout !== undefined
       ? normalizeStructuredWorkout(sourcePayload.workout, 'payload.workout')
@@ -369,8 +370,8 @@ export function buildStructuredWorkoutEventPayload(input: {
     normalizeOptionalText(valueAsString(sourcePayload.note))
     ?? normalizeOptionalText(valueAsString(sourcePayload.text))
     ?? normalizeOptionalText(input.text)
-    ?? normalizeOptionalText(structuredWorkout?.sessionNote)
-    ?? normalizeOptionalText(structuredWorkout?.routineName)
+    ?? normalizeOptionalText(explicitStructuredWorkout?.sessionNote)
+    ?? normalizeOptionalText(explicitStructuredWorkout?.routineName)
 
   const activityDescriptor = fallbackText
     ? resolveWorkoutActivityDescriptor(
@@ -386,7 +387,7 @@ export function buildStructuredWorkoutEventPayload(input: {
     resolveStructuredDurationMinutes({
       explicitDurationMinutes: input.durationMinutes,
       payloadDurationMinutes: valueAsNumber(sourcePayload.durationMinutes),
-      structuredWorkout,
+      structuredWorkout: explicitStructuredWorkout,
       fallbackText: fallbackText ?? undefined,
     })
   const distanceKm =
@@ -395,17 +396,16 @@ export function buildStructuredWorkoutEventPayload(input: {
       : typeof sourcePayload.distanceKm === 'number'
         ? sourcePayload.distanceKm
         : resolveDistanceKm(fallbackText ?? '', undefined)
-  const strengthExercises =
+  const inferredStrengthExercises =
     input.strengthExercises
     ?? (Array.isArray(sourcePayload.strengthExercises)
       ? (sourcePayload.strengthExercises as ActivityStrengthExercise[])
       : null)
-    ?? summarizeWorkoutSessionExercises(structuredWorkout)
     ?? null
   const occurredAt =
     input.occurredAt
     ?? valueAsString(sourcePayload.occurredAt)
-    ?? structuredWorkout?.startedAt
+    ?? explicitStructuredWorkout?.startedAt
     ?? new Date().toISOString()
   const title =
     normalizeOptionalText(input.title)
@@ -415,6 +415,17 @@ export function buildStructuredWorkoutEventPayload(input: {
       durationMinutes,
     )
   const note = fallbackText ?? title
+  const structuredWorkout = explicitStructuredWorkout
+    ? {
+        ...explicitStructuredWorkout,
+        ...(note && !explicitStructuredWorkout.sessionNote
+          ? { sessionNote: note }
+          : {}),
+      }
+    : buildWorkoutSessionFromSummary({
+        note,
+        strengthExercises: inferredStrengthExercises,
+      })
 
   return {
     ...pickPassthroughEventFields(sourcePayload),
@@ -425,8 +436,7 @@ export function buildStructuredWorkoutEventPayload(input: {
     activityType: activityDescriptor.activityType,
     durationMinutes,
     ...(typeof distanceKm === 'number' ? { distanceKm } : {}),
-    ...(strengthExercises ? { strengthExercises } : {}),
-    ...(structuredWorkout ? { workout: structuredWorkout } : {}),
+    workout: structuredWorkout,
     note,
   }
 }
@@ -482,9 +492,10 @@ export async function addWorkoutRecord(input: AddWorkoutRecordInput) {
       ...(typeof capture.distanceKm === 'number'
         ? { distanceKm: capture.distanceKm }
         : {}),
-      ...(capture.strengthExercises
-        ? { strengthExercises: capture.strengthExercises }
-        : {}),
+      workout: buildWorkoutSessionFromSummary({
+        note: capture.note,
+        strengthExercises: capture.strengthExercises,
+      }),
       note: capture.note,
     }
   }
@@ -497,22 +508,34 @@ export async function addWorkoutRecord(input: AddWorkoutRecordInput) {
   if (mediaPaths.length > 0) {
     const eventId = ensureWorkoutEventId(payload)
     const occurredAt = String(payload.occurredAt ?? input.occurredAt ?? new Date().toISOString())
-    const stagedMedia = await stageWorkoutMediaBatch({
-      vault: input.vault,
-      eventId,
+    const stagedMedia = await stageEventAttachments({
+      vaultRoot: input.vault,
+      operationType: 'workout_import_raw',
+      summary: `Stage workout media for ${eventId}`,
       occurredAt,
-      family: 'workout',
+      ownerKind: 'workout',
+      ownerId: eventId,
+      importId: eventId,
+      importKind: 'workout_batch',
+      importedAt: new Date().toISOString(),
       source: valueAsString(payload.source) ?? input.source ?? 'manual',
-      mediaPaths,
+      provenance: {
+        eventId,
+        family: 'workout',
+        mediaCount: mediaPaths.length,
+      },
+      attachments: mediaPaths.map((sourcePath, index) => ({
+        role: `media_${index + 1}`,
+        sourcePath,
+      })),
     })
 
     if (stagedMedia) {
-      manifestFile = stagedMedia.manifestFile
+      manifestFile = stagedMedia.manifestPath
       payload = applyStagedWorkoutMedia({
         payload,
         eventId,
-        media: stagedMedia.media,
-        rawRefs: stagedMedia.rawRefs,
+        attachments: stagedMedia.attachments,
       })
     }
   }
@@ -525,9 +548,9 @@ export async function addWorkoutRecord(input: AddWorkoutRecordInput) {
       })
     } catch (error) {
       if (manifestFile) {
-        await cleanupStagedWorkoutMediaBatch({
-          vault: input.vault,
-          manifestFile,
+        await cleanupStagedEventAttachments({
+          vaultRoot: input.vault,
+          manifestPath: manifestFile,
         })
       }
       throw error
@@ -542,9 +565,6 @@ export async function addWorkoutRecord(input: AddWorkoutRecordInput) {
     activityType: String(payload.activityType ?? ''),
     durationMinutes: Number(payload.durationMinutes ?? 1),
     distanceKm: typeof payload.distanceKm === 'number' ? payload.distanceKm : null,
-    strengthExercises: Array.isArray(payload.strengthExercises)
-      ? (payload.strengthExercises as ActivityStrengthExercise[])
-      : null,
     workout: normalizeStructuredWorkout(payload.workout) ?? null,
     manifestFile,
     note: String(payload.note ?? payload.title ?? ''),

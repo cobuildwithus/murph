@@ -69,6 +69,43 @@ export function uniqueStrings(values: readonly string[]) {
   return [...new Set(values)]
 }
 
+export function relativePathEntries(value: unknown) {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.flatMap((entry) => {
+    if (
+      typeof entry !== 'object'
+      || entry === null
+      || Array.isArray(entry)
+      || typeof entry.relativePath !== 'string'
+    ) {
+      return []
+    }
+
+    const relativePath = entry.relativePath.trim()
+    return relativePath.length > 0 ? [relativePath] : []
+  })
+}
+
+export function mergeByRelativePath<TEntry extends { relativePath: string }>(
+  existing: readonly TEntry[] | undefined,
+  additions: readonly TEntry[],
+) {
+  const merged = new Map<string, TEntry>()
+
+  for (const entry of existing ?? []) {
+    merged.set(entry.relativePath, entry)
+  }
+
+  for (const entry of additions) {
+    merged.set(entry.relativePath, entry)
+  }
+
+  return [...merged.values()]
+}
+
 export function compactObject<TRecord extends Record<string, unknown>>(record: TRecord) {
   return Object.fromEntries(
     Object.entries(record).filter(([, value]) => value !== undefined),

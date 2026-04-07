@@ -35,6 +35,11 @@ import {
   VAULT_LAYOUT,
 } from "./constants.ts";
 import { emitAuditRecord } from "./audit.ts";
+import {
+  buildAttachmentCompatibilityProjections,
+  prepareEventAttachments,
+  stagePreparedEventAttachmentsInBatch,
+} from "./event-attachments.ts";
 import { VaultError } from "./errors.ts";
 import { pathExists, readUtf8File, writeVaultTextFile } from "./fs.ts";
 import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.ts";
@@ -317,11 +322,17 @@ interface BuildEventRecordInput<K extends EventKind> {
   title?: string;
   note?: string;
   tags?: unknown;
+  links?: unknown;
   relatedIds?: unknown;
   rawRefs?: unknown;
   externalRef?: unknown;
   fields?: LooseRecord;
   recordId?: string;
+}
+
+interface EventLinkInput {
+  type: string;
+  targetId: string;
 }
 
 interface BuildSampleRecordInput {
@@ -348,6 +359,7 @@ interface NormalizedEventSeed<K extends EventKind> {
   title: string;
   note?: string;
   tags?: string[];
+  links?: EventLinkInput[];
   relatedIds?: string[];
   rawRefs?: string[];
   externalRef?: ExternalRef;
@@ -544,6 +556,50 @@ function trimStringList(value: unknown): string[] | undefined {
   return entries.length > 0 ? entries : undefined;
 }
 
+function normalizeEventLinks(value: unknown): EventLinkInput[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const links: EventLinkInput[] = [];
+  const seen = new Set<string>();
+
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new VaultError(
+        "VAULT_INVALID_INPUT",
+        "links entries must be objects with non-empty type and targetId fields.",
+      );
+    }
+
+    const candidate = entry as Record<string, unknown>;
+    const type = typeof candidate.type === "string" ? candidate.type.trim() : "";
+    const targetId = typeof candidate.targetId === "string" ? candidate.targetId.trim() : "";
+
+    if (!type || !targetId) {
+      throw new VaultError(
+        "VAULT_INVALID_INPUT",
+        "links entries must be objects with non-empty type and targetId fields.",
+      );
+    }
+
+    const dedupeKey = `${type}:${targetId}`;
+    if (seen.has(dedupeKey)) {
+      continue;
+    }
+
+    seen.add(dedupeKey);
+    links.push({ type, targetId });
+  }
+
+  return links.length > 0 ? links : [];
+}
+
+function relationTargetIdsFromLinks(links: readonly EventLinkInput[]): string[] | undefined {
+  const targetIds = [...new Set(links.map((link) => link.targetId))];
+  return targetIds.length > 0 ? targetIds : undefined;
+}
+
 const NUMERIC_UNIT_ALIASES = {
   glucose: {
     "mg/dl": "mg_dL",
@@ -635,6 +691,7 @@ function buildNormalizedEventSeed<K extends EventKind>({
   title,
   note,
   tags,
+  links,
   relatedIds,
   rawRefs,
   externalRef,
@@ -660,6 +717,14 @@ function buildNormalizedEventSeed<K extends EventKind>({
   const resolvedTimeZone = normalizeTimeZone(timeZone ?? fallbackTimeZone);
   const resolvedDayKey = normalizeDayKeyInput(dayKey) ??
     toLocalDayKey(occurredTimestamp, resolvedTimeZone ?? defaultTimeZone(), "occurredAt");
+  const normalizedLinksInput = normalizeEventLinks(links);
+  const canonicalLinks =
+    normalizedLinksInput !== undefined
+      ? normalizedLinksInput
+      : trimStringList(relatedIds)?.map((targetId) => ({
+          type: "related_to",
+          targetId,
+        }));
 
   const seed: NormalizedEventSeed<K> = {
     kind,
@@ -671,7 +736,11 @@ function buildNormalizedEventSeed<K extends EventKind>({
     title: typeof title === "string" && title.trim() ? title.trim() : kind,
     note: typeof note === "string" && note.trim() ? note.trim() : undefined,
     tags: trimStringList(tags),
-    relatedIds: trimStringList(relatedIds),
+    links: canonicalLinks,
+    relatedIds:
+      canonicalLinks !== undefined
+        ? relationTargetIdsFromLinks(canonicalLinks)
+        : trimStringList(relatedIds),
     rawRefs: trimStringList(rawRefs),
     externalRef: normalizeExternalRef(externalRef),
     fields: normalizedFields,
@@ -706,6 +775,7 @@ function materializeEventRecord<K extends EventKind>({
     title: seed.title,
     note: seed.note,
     tags: seed.tags,
+    links: seed.links?.length ? seed.links : undefined,
     relatedIds: seed.relatedIds,
     rawRefs: seed.rawRefs,
     externalRef: seed.externalRef,
@@ -1362,12 +1432,29 @@ export async function importDocument({
 }: ImportDocumentInput): Promise<ImportDocumentResult> {
   const vault = await loadVault({ vaultRoot });
   const documentId = generateRecordId(ID_PREFIXES.document);
-  const raw = prepareRawArtifact({
-    sourcePath,
-    category: "documents",
+  const preparedAttachments = prepareEventAttachments({
+    ownerKind: "document",
+    ownerId: documentId,
     occurredAt,
-    recordId: documentId,
+    attachments: [
+      {
+        role: "source_document",
+        kind: "document",
+        sourcePath,
+      },
+    ],
   });
+  const raw = preparedAttachments[0]!.raw;
+  const attachmentProjections = buildAttachmentCompatibilityProjections([
+    {
+      role: "source_document",
+      kind: "document",
+      relativePath: raw.relativePath,
+      mediaType: raw.mediaType,
+      sha256: "0".repeat(64),
+      originalFileName: raw.originalFileName,
+    },
+  ]);
   const event = prepareEventRecord({
     kind: "document",
     occurredAt,
@@ -1376,10 +1463,20 @@ export async function importDocument({
     title: String(title ?? raw.originalFileName).trim(),
     note,
     relatedIds: [documentId],
-    rawRefs: [raw.relativePath],
+    rawRefs: attachmentProjections.rawRefs,
     fields: {
       documentId,
-      documentPath: raw.relativePath,
+      attachments: [
+        {
+          role: "source_document",
+          kind: "document",
+          relativePath: raw.relativePath,
+          mediaType: raw.mediaType,
+          sha256: "0".repeat(64),
+          originalFileName: raw.originalFileName,
+        },
+      ],
+      documentPath: attachmentProjections.documentPath,
       mimeType: raw.mediaType,
     },
   });
@@ -1389,25 +1486,14 @@ export async function importDocument({
     summary: `Import document ${documentId}`,
     occurredAt,
     mutate: async ({ batch }) => {
-      const stagedRaw = await batch.stageRawCopy({
-        sourcePath,
-        targetRelativePath: raw.relativePath,
-        originalFileName: raw.originalFileName,
-        mediaType: raw.mediaType,
-      });
-      const manifestPath = await stageRawImportManifest({
+      const stagedAttachments = await stagePreparedEventAttachmentsInBatch({
         batch,
         importId: documentId,
         importKind: "document",
         importedAt: event.record.recordedAt ?? event.record.occurredAt,
         source: event.record.source ?? source ?? null,
-        artifacts: [
-          {
-            role: "source_document",
-            raw: stagedRaw,
-          },
-        ],
-        canonicalProvenance: {
+        attachments: preparedAttachments,
+        provenance: {
           eventId: event.record.id,
           lookupId: documentId,
           occurredAt: event.record.occurredAt,
@@ -1415,6 +1501,14 @@ export async function importDocument({
           note: event.record.note ?? null,
         },
       });
+      if (!stagedAttachments) {
+        throw new VaultError("EVENT_ATTACHMENTS_MISSING", "Document import expected one staged attachment.");
+      }
+      event.record.attachments = stagedAttachments.attachments;
+      event.record.rawRefs = stagedAttachments.rawRefs;
+      event.record.documentPath =
+        buildAttachmentCompatibilityProjections(stagedAttachments.attachments).documentPath ?? raw.relativePath;
+      const manifestPath = stagedAttachments.manifestPath;
       await stageJsonlRecord(batch, event.relativePath, event.record);
       const audit = await emitAuditRecord({
         vaultRoot,
@@ -1457,25 +1551,44 @@ export async function addMeal({
   }
 
   const mealId = generateRecordId(ID_PREFIXES.meal);
-  const photo = photoPath
-    ? prepareRawArtifact({
-        sourcePath: photoPath,
-        category: "meal-photo",
-        occurredAt,
-        recordId: mealId,
-        slot: "photo",
-      })
-    : null;
-  const audio = audioPath
-    ? prepareRawArtifact({
-        sourcePath: audioPath,
-        category: "meal-audio",
-        occurredAt,
-        recordId: mealId,
-        slot: "audio",
-      })
-    : null;
+  const preparedAttachments = prepareEventAttachments({
+    ownerKind: "meal",
+    ownerId: mealId,
+    occurredAt,
+    attachments: [
+      ...(photoPath
+        ? [
+            {
+              role: "photo",
+              kind: "photo" as const,
+              sourcePath: photoPath,
+            },
+          ]
+        : []),
+      ...(audioPath
+        ? [
+            {
+              role: "audio",
+              kind: "audio" as const,
+              sourcePath: audioPath,
+            },
+          ]
+        : []),
+    ],
+  });
+  const photo = preparedAttachments.find((attachment) => attachment.role === "photo")?.raw ?? null;
+  const audio = preparedAttachments.find((attachment) => attachment.role === "audio")?.raw ?? null;
   const rawDirectory = resolveRawMealDirectory(occurredAt, mealId);
+  const attachmentProjections = buildAttachmentCompatibilityProjections(
+    preparedAttachments.map((attachment) => ({
+      role: attachment.role,
+      kind: attachment.kind,
+      relativePath: attachment.raw.relativePath,
+      mediaType: attachment.raw.mediaType,
+      sha256: "0".repeat(64),
+      originalFileName: attachment.raw.originalFileName,
+    })),
+  );
   const event = prepareEventRecord({
     kind: "meal",
     occurredAt,
@@ -1484,13 +1597,19 @@ export async function addMeal({
     title: "Meal",
     note,
     relatedIds: [mealId],
-    rawRefs: [photo?.relativePath, audio?.relativePath].filter(
-      (value): value is string => typeof value === "string",
-    ),
+    rawRefs: attachmentProjections.rawRefs,
     fields: {
+      attachments: preparedAttachments.map((attachment) => ({
+        role: attachment.role,
+        kind: attachment.kind,
+        relativePath: attachment.raw.relativePath,
+        mediaType: attachment.raw.mediaType,
+        sha256: "0".repeat(64),
+        originalFileName: attachment.raw.originalFileName,
+      })),
       mealId,
-      photoPaths: photo ? [photo.relativePath] : [],
-      audioPaths: audio ? [audio.relativePath] : [],
+      photoPaths: attachmentProjections.photoPaths,
+      audioPaths: attachmentProjections.audioPaths,
     },
   });
   return runCanonicalWrite({
@@ -1499,55 +1618,46 @@ export async function addMeal({
     summary: `Import meal ${mealId}`,
     occurredAt,
     mutate: async ({ batch }) => {
-      const stagedPhoto = photo && photoPath
-        ? await batch.stageRawCopy({
-            sourcePath: photoPath,
-            targetRelativePath: photo.relativePath,
-            originalFileName: photo.originalFileName,
-            mediaType: photo.mediaType,
-          })
-        : null;
-      const stagedAudio = audio
-        ? await batch.stageRawCopy({
-            sourcePath: audioPath as string,
-            targetRelativePath: audio.relativePath,
-            originalFileName: audio.originalFileName,
-            mediaType: audio.mediaType,
-          })
-        : null;
-      const manifestPath = await stageRawImportManifest({
+      const stagedAttachments = await stagePreparedEventAttachmentsInBatch({
         batch,
         importId: mealId,
         importKind: "meal",
         importedAt: event.record.recordedAt ?? event.record.occurredAt,
         rawDirectory,
         source: event.record.source ?? source ?? null,
-        artifacts: [
-          ...(stagedPhoto
-            ? [
-                {
-                  role: "photo",
-                  raw: stagedPhoto,
-                },
-              ]
-            : []),
-          ...(stagedAudio
-            ? [
-                {
-                  role: "audio",
-                  raw: stagedAudio,
-                },
-              ]
-            : []),
-        ],
-        canonicalProvenance: {
+        attachments: preparedAttachments,
+        provenance: {
           eventId: event.record.id,
           lookupId: mealId,
           occurredAt: event.record.occurredAt,
           note: event.record.note ?? null,
         },
       });
-      if (!stagedPhoto && !stagedAudio) {
+      if (stagedAttachments) {
+        const projections = buildAttachmentCompatibilityProjections(stagedAttachments.attachments);
+        event.record.attachments = stagedAttachments.attachments;
+        event.record.rawRefs = projections.rawRefs;
+        event.record.photoPaths = projections.photoPaths;
+        event.record.audioPaths = projections.audioPaths;
+      }
+      const manifestPath = stagedAttachments
+        ? stagedAttachments.manifestPath
+        : await stageRawImportManifest({
+            batch,
+            importId: mealId,
+            importKind: "meal",
+            importedAt: event.record.recordedAt ?? event.record.occurredAt,
+            rawDirectory,
+            source: event.record.source ?? source ?? null,
+            artifacts: [],
+            canonicalProvenance: {
+              eventId: event.record.id,
+              lookupId: mealId,
+              occurredAt: event.record.occurredAt,
+              note: event.record.note ?? null,
+            },
+          });
+      if (!stagedAttachments) {
         event.record.rawRefs = [manifestPath];
       }
       await stageJsonlRecord(batch, event.relativePath, event.record);

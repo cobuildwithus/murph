@@ -1,7 +1,13 @@
-import type { EventRecord, ExperimentEventRecord } from "@murphai/contracts";
-import { CONTRACT_SCHEMA_VERSION, EVENT_KINDS, eventRecordSchema } from "@murphai/contracts";
+import type { EventAttachment, EventRecord, ExperimentEventRecord } from "@murphai/contracts";
+import {
+  CONTRACT_SCHEMA_VERSION,
+  EVENT_KINDS,
+  eventAttachmentSchema,
+  eventRecordSchema,
+} from "@murphai/contracts";
 
 import { ID_PREFIXES, VAULT_LAYOUT } from "../constants.ts";
+import { buildAttachmentCompatibilityProjections } from "../event-attachments.ts";
 import { VaultError } from "../errors.ts";
 import { walkVaultFiles } from "../fs.ts";
 import { generateRecordId } from "../ids.ts";
@@ -107,6 +113,7 @@ const RESERVED_EVENT_KEYS = new Set([
   "title",
   "note",
   "tags",
+  "links",
   "relatedIds",
   "rawRefs",
   "lifecycle",
@@ -136,6 +143,19 @@ function normalizeEventId(payload: JsonObject): string | undefined {
 
 function normalizeDraftEventId(value: unknown): string | undefined {
   return typeof value === "string" ? normalizeOptionalText(value) ?? undefined : undefined;
+}
+
+function parseEventAttachments(value: unknown): EventAttachment[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const attachments = value
+    .map((attachment) => eventAttachmentSchema.safeParse(attachment))
+    .filter((result): result is { success: true; data: EventAttachment } => result.success)
+    .map((result) => result.data);
+
+  return attachments.length > 0 ? attachments : undefined;
 }
 
 function buildEventLifecycle(
@@ -177,12 +197,67 @@ function normalizeEventKind(payload: JsonObject): EventRecord["kind"] {
   return kind as EventRecord["kind"];
 }
 
+function normalizeEventLinks(
+  value: unknown,
+): Array<{ type: string; targetId: string }> | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    throw new VaultError("EVENT_CONTRACT_INVALID", "Event payload links must be an array.");
+  }
+
+  const links: Array<{ type: string; targetId: string }> = [];
+  const seen = new Set<string>();
+
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      throw new VaultError(
+        "EVENT_CONTRACT_INVALID",
+        "Event payload links must contain objects with type and targetId fields.",
+      );
+    }
+
+    const type = normalizeOptionalText((entry as { type?: unknown }).type);
+    const targetId = normalizeOptionalText((entry as { targetId?: unknown }).targetId);
+
+    if (!type || !targetId) {
+      throw new VaultError(
+        "EVENT_CONTRACT_INVALID",
+        "Event payload links must contain objects with type and targetId fields.",
+      );
+    }
+
+    const dedupeKey = `${type}:${targetId}`;
+    if (seen.has(dedupeKey)) {
+      continue;
+    }
+
+    seen.add(dedupeKey);
+    links.push({ type, targetId });
+  }
+
+  return links.length > 0 ? links : [];
+}
+
+function relationTargetIdsFromLinks(
+  links: readonly { type: string; targetId: string }[],
+): string[] | undefined {
+  const targetIds = uniqueTrimmedStringList(links.map((link) => link.targetId));
+  return targetIds?.length ? targetIds : undefined;
+}
+
 function buildEventRecord(
   payload: JsonObject,
   fallbackTimeZone?: string,
   lifecycle?: EventLifecycle,
 ): EventRecord {
   const kind = normalizeEventKind(payload);
+  const attachments = parseEventAttachments(payload.attachments);
+  const attachmentProjections = attachments
+    ? buildAttachmentCompatibilityProjections(attachments)
+    : null;
 
   const occurredAt = normalizeTimestampInput(payload.occurredAt);
   if (!occurredAt) {
@@ -194,6 +269,14 @@ function buildEventRecord(
   const dayKey =
     normalizeLocalDate(valueAsString(payload.dayKey)) ??
     toLocalDayKey(occurredAt, effectiveTimeZone, "occurredAt");
+  const normalizedLinksInput = normalizeEventLinks(payload.links);
+  const canonicalLinks =
+    normalizedLinksInput !== undefined
+      ? normalizedLinksInput
+      : uniqueTrimmedStringList(payload.relatedIds)?.map((targetId) => ({
+          type: "related_to",
+          targetId,
+        }));
 
   return validateContract(
     eventRecordSchema,
@@ -209,8 +292,13 @@ function buildEventRecord(
       title: requireText(payload.title, "Event payload requires a title."),
       note: normalizeOptionalText(valueAsString(payload.note)) ?? undefined,
       tags: uniqueTrimmedStringList(payload.tags) ?? undefined,
-      relatedIds: uniqueTrimmedStringList(payload.relatedIds) ?? undefined,
-      rawRefs: uniqueTrimmedStringList(payload.rawRefs) ?? undefined,
+      links: canonicalLinks,
+      relatedIds:
+        canonicalLinks !== undefined
+          ? relationTargetIdsFromLinks(canonicalLinks)
+          : uniqueTrimmedStringList(payload.relatedIds) ?? undefined,
+      rawRefs: uniqueTrimmedStringList(payload.rawRefs) ?? attachmentProjections?.rawRefs ?? undefined,
+      attachments,
       lifecycle,
       ...eventSpecificFields(payload),
     }),
@@ -224,6 +312,9 @@ function buildBaseEventContractInput(
   fallbackTimeZone?: string,
 ): Omit<EventRecord, "kind"> {
   const occurredAt = normalizeTimestampInput(draft.occurredAt);
+  const attachmentProjections = draft.attachments
+    ? buildAttachmentCompatibilityProjections(draft.attachments)
+    : null;
   if (!occurredAt) {
     throw new VaultError("EVENT_OCCURRED_AT_MISSING", "Event draft requires occurredAt.");
   }
@@ -233,6 +324,13 @@ function buildBaseEventContractInput(
   const dayKey =
     normalizeLocalDate(valueAsString(draft.dayKey)) ??
     toLocalDayKey(occurredAt, effectiveTimeZone, "occurredAt");
+  const canonicalLinks =
+    draft.links !== undefined
+      ? normalizeEventLinks(draft.links)
+      : uniqueTrimmedStringList(draft.relatedIds)?.map((targetId) => ({
+          type: "related_to",
+          targetId,
+        }));
 
   return compactObject({
     schemaVersion: CONTRACT_SCHEMA_VERSION.event,
@@ -245,8 +343,13 @@ function buildBaseEventContractInput(
     title: requireText(draft.title, "Event draft requires a title."),
     note: normalizeOptionalText(valueAsString(draft.note)) ?? undefined,
     tags: uniqueTrimmedStringList(draft.tags) ?? undefined,
-    relatedIds: uniqueTrimmedStringList(draft.relatedIds) ?? undefined,
-    rawRefs: uniqueTrimmedStringList(draft.rawRefs) ?? undefined,
+    links: canonicalLinks,
+    relatedIds:
+      canonicalLinks !== undefined
+        ? relationTargetIdsFromLinks(canonicalLinks)
+        : uniqueTrimmedStringList(draft.relatedIds) ?? undefined,
+    rawRefs: uniqueTrimmedStringList(draft.rawRefs) ?? attachmentProjections?.rawRefs ?? undefined,
+    attachments: draft.attachments,
     externalRef: draft.externalRef,
   }) as Omit<EventRecord, "kind">;
 }
@@ -304,7 +407,6 @@ function buildTypedEventRecord(
           activityType: draft.activityType,
           durationMinutes: draft.durationMinutes,
           distanceKm: draft.distanceKm,
-          strengthExercises: draft.strengthExercises,
           workout: draft.workout,
         });
       case "body_measurement":
@@ -550,6 +652,10 @@ async function loadEventLedgerShardsById(
 function extractRetainedPaths(record: EventRecord): string[] {
   const retained = new Set<string>();
 
+  for (const attachment of record.attachments ?? []) {
+    retained.add(attachment.relativePath);
+  }
+
   uniqueTrimmedStringList(record.rawRefs)?.forEach((relativePath) => retained.add(relativePath));
   uniqueTrimmedStringList((record as { photoPaths?: unknown }).photoPaths)?.forEach((relativePath) =>
     retained.add(relativePath),
@@ -561,6 +667,11 @@ function extractRetainedPaths(record: EventRecord): string[] {
   const documentPath = valueAsString((record as { documentPath?: unknown }).documentPath);
   if (documentPath) {
     retained.add(documentPath);
+  } else if ((record.kind === "document" || record.kind === "meal") && (record.attachments?.length ?? 0) > 0) {
+    const projections = buildAttachmentCompatibilityProjections(record.attachments ?? []);
+    if (projections.documentPath) {
+      retained.add(projections.documentPath);
+    }
   }
 
   const mediaSources = [

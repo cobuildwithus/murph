@@ -127,6 +127,16 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     tags: ["clinic", "pdf"],
     relatedIds: ["doc_01JNV41Q9MN0S1R6ZMW7FGD9DG"],
     rawRefs: ["raw/documents/2026/03/doc_01JNV41Q9MN0S1R6ZMW7FGD9DG/visit-summary.pdf"],
+    attachments: [
+      {
+        role: "source_document",
+        kind: "document",
+        relativePath: "raw/documents/2026/03/doc_01JNV41Q9MN0S1R6ZMW7FGD9DG/visit-summary.pdf",
+        mediaType: "application/pdf",
+        sha256: "1111111111111111111111111111111111111111111111111111111111111111",
+        originalFileName: "visit-summary.pdf",
+      },
+    ],
     documentId: "doc_01JNV41Q9MN0S1R6ZMW7FGD9DG",
     documentPath: "raw/documents/2026/03/doc_01JNV41Q9MN0S1R6ZMW7FGD9DG/visit-summary.pdf",
     mimeType: "application/pdf",
@@ -145,6 +155,16 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     tags: ["meal", "lunch"],
     relatedIds: ["meal_01JNV42NP0KH6JQXMZM1G0V6SE"],
     rawRefs: ["raw/meals/2026/03/meal_01JNV42NP0KH6JQXMZM1G0V6SE/photo-01.jpg"],
+    attachments: [
+      {
+        role: "photo",
+        kind: "photo",
+        relativePath: "raw/meals/2026/03/meal_01JNV42NP0KH6JQXMZM1G0V6SE/photo-01.jpg",
+        mediaType: "image/jpeg",
+        sha256: "2222222222222222222222222222222222222222222222222222222222222222",
+        originalFileName: "photo-01.jpg",
+      },
+    ],
     mealId: "meal_01JNV42NP0KH6JQXMZM1G0V6SE",
     photoPaths: ["raw/meals/2026/03/meal_01JNV42NP0KH6JQXMZM1G0V6SE/photo-01.jpg"],
     audioPaths: [],
@@ -291,6 +311,14 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     activityType: "walk",
     durationMinutes: 42,
     distanceKm: 3.4,
+    workout: {
+      sourceApp: "oura",
+      sourceWorkoutId: "walk-01JNV44WS3W0R27XPTKFC3QFJA",
+      startedAt: "2026-03-12T17:18:00Z",
+      endedAt: "2026-03-12T18:00:00Z",
+      sessionNote: "Evening walk",
+      exercises: [],
+    },
   },
   {
     schemaVersion: "murph.event.v1",
@@ -304,19 +332,18 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     note: "Paused the first rep on each work set.",
     activityType: "strength-training",
     durationMinutes: 20,
-    strengthExercises: [
+    attachments: [
       {
-        exercise: "Pushups",
-        setCount: 4,
-        repsPerSet: 20,
+        role: "media_1",
+        kind: "photo",
+        relativePath: "raw/workouts/2026/03/evt_01JNV44WS3W0R27XPTKFC3QFJB/progress-front.jpg",
+        mediaType: "image/jpeg",
+        sha256: "3333333333333333333333333333333333333333333333333333333333333333",
+        originalFileName: "progress-front.jpg",
       },
-      {
-        exercise: "Incline Bench Press",
-        setCount: 4,
-        repsPerSet: 12,
-        load: 65,
-        loadUnit: "lb",
-      },
+    ],
+    rawRefs: [
+      "raw/workouts/2026/03/evt_01JNV44WS3W0R27XPTKFC3QFJB/progress-front.jpg"
     ],
     workout: {
       sourceApp: "manual",
@@ -370,6 +397,16 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     source: "manual",
     title: "Weekly check-in",
     note: "Morning fasted check-in.",
+    attachments: [
+      {
+        role: "media_1",
+        kind: "photo",
+        relativePath: "raw/measurements/2026/03/evt_01JNV450A1B2C3D4E5F6G7H8JK/front.jpg",
+        mediaType: "image/jpeg",
+        sha256: "4444444444444444444444444444444444444444444444444444444444444444",
+        originalFileName: "front.jpg",
+      }
+    ],
     measurements: [
       { type: "weight", value: 182.4, unit: "lb" },
       { type: "waist", value: 33.5, unit: "in" },
@@ -707,20 +744,6 @@ export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.f
     summary: "Default push-focused strength session I repeat most weeks.",
     activityType: "strength-training",
     durationMinutes: 45,
-    strengthExercises: [
-      {
-        exercise: "Pushups",
-        setCount: 4,
-        repsPerSet: 20,
-      },
-      {
-        exercise: "Incline Bench Press",
-        setCount: 4,
-        repsPerSet: 12,
-        load: 65,
-        loadUnit: "lb",
-      },
-    ],
     template: {
       routineNote: "Add one extra triceps set if the session feels easy.",
       exercises: [
@@ -1019,17 +1042,6 @@ status: active
 summary: Default push-focused strength session I repeat most weeks.
 activityType: strength-training
 durationMinutes: 45
-strengthExercises:
-  -
-    exercise: Pushups
-    setCount: 4
-    repsPerSet: 20
-  -
-    exercise: Incline Bench Press
-    setCount: 4
-    repsPerSet: 12
-    load: 65
-    loadUnit: lb
 template:
   routineNote: Add one extra triceps set if the session feels easy.
   exercises:

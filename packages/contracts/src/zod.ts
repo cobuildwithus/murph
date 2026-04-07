@@ -47,6 +47,17 @@ import {
   isStrictIsoDateTime,
   isValidIanaTimeZone,
 } from "./time.ts";
+import {
+  allergyRelationLinkSchema,
+  conditionRelationLinkSchema,
+  eventRelationLinkSchema,
+  familyRelationLinkSchema,
+  foodRelationLinkSchema,
+  geneticVariantRelationLinkSchema,
+  goalRelationLinkSchema,
+  protocolRelationLinkSchema,
+  recipeRelationLinkSchema,
+} from "./relation-links.ts";
 
 export type AssessmentSource = (typeof ASSESSMENT_SOURCES)[number];
 export type EventKind = (typeof EVENT_KINDS)[number];
@@ -293,6 +304,15 @@ export const workoutExerciseModeSchema = z.enum([
 ]);
 export const workoutLoadUnitSchema = z.enum(["lb", "kg"]);
 export const storedMediaKindSchema = z.enum(["photo", "video", "gif", "image", "other"]);
+export const eventAttachmentKindSchema = z.enum([
+  "audio",
+  "document",
+  "gif",
+  "image",
+  "other",
+  "photo",
+  "video",
+]);
 export const bodyMeasurementTypeSchema = z.enum([
   "weight",
   "body_fat_pct",
@@ -318,6 +338,17 @@ export const storedMediaSchema = z
     relativePath: patternedString(RAW_PATH_PATTERN),
     mediaType: boundedString(1, 255).optional(),
     caption: boundedString(1, 4000).optional(),
+  })
+  .strict();
+
+export const eventAttachmentSchema = z
+  .object({
+    role: boundedString(1, 160),
+    kind: eventAttachmentKindSchema,
+    relativePath: patternedString(RAW_PATH_PATTERN),
+    mediaType: boundedString(1, 255),
+    sha256: patternedString(SHA256_HEX_PATTERN, 64, 64),
+    originalFileName: boundedString(1, 255),
   })
   .strict();
 
@@ -447,7 +478,7 @@ export const workoutTemplateExerciseSchema = z
 export const workoutTemplateSchema = z
   .object({
     routineNote: boundedString(1, 4000).optional(),
-    exercises: z.array(workoutTemplateExerciseSchema).min(1).max(100),
+    exercises: z.array(workoutTemplateExerciseSchema).max(100),
   })
   .strict();
 
@@ -510,8 +541,10 @@ const eventLifecycleSchema = z
 
 const baseEventOptionalShape = {
   tags: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
+  links: uniqueArray(eventRelationLinkSchema, { uniqueItems: true }).optional(),
   relatedIds: uniqueArray(patternedString(GENERIC_CONTRACT_ID_PATTERN), { uniqueItems: true }).optional(),
   rawRefs: uniqueArray(patternedString(RAW_PATH_PATTERN), { uniqueItems: true }).optional(),
+  attachments: uniqueArray(eventAttachmentSchema, { uniqueItems: true }).optional(),
   externalRef: externalRefSchema.optional(),
   lifecycle: eventLifecycleSchema.optional(),
   timeZone: timeZoneString({ optional: true }),
@@ -647,8 +680,7 @@ export const eventRecordSchema = withContractMetadata(
       activityType: patternedString(SLUG_PATTERN),
       durationMinutes: integerSchema(1),
       distanceKm: numberSchema(0).optional(),
-      strengthExercises: z.array(activityStrengthExerciseSchema).min(1).max(50).optional(),
-      workout: workoutSessionSchema.optional(),
+      workout: workoutSessionSchema,
     }),
     eventSchema("body_measurement", {
       measurements: z.array(bodyMeasurementEntrySchema).min(1).max(25),
@@ -903,6 +935,7 @@ export const foodFrontmatterSchema = withContractMetadata(
         maxItems: 32,
         uniqueItems: true,
       }).optional(),
+      links: uniqueArray(foodRelationLinkSchema, { uniqueItems: true }).optional(),
       autoLogDaily: z
         .object({
           time: patternedString(DAILY_TIME_PATTERN),
@@ -937,6 +970,7 @@ export const recipeFrontmatterSchema = withContractMetadata(
       steps: uniqueArray(boundedString(1, 4000), { maxItems: 100 }).optional(),
       relatedGoalIds: uniqueArray(idSchema(ID_PREFIXES.goal), { uniqueItems: true }).optional(),
       relatedConditionIds: uniqueArray(idSchema(ID_PREFIXES.condition), { uniqueItems: true }).optional(),
+      links: uniqueArray(recipeRelationLinkSchema, { uniqueItems: true }).optional(),
     })
     .strict(),
   "@murphai/contracts/frontmatter-recipe.schema.json",
@@ -956,8 +990,7 @@ export const workoutFormatFrontmatterSchema = withContractMetadata(
       activityType: patternedString(SLUG_PATTERN),
       durationMinutes: integerSchema(1, 24 * 60).optional(),
       distanceKm: numberSchema(0, 1_000).optional(),
-      strengthExercises: z.array(activityStrengthExerciseSchema).min(1).max(50).optional(),
-      template: workoutTemplateSchema.optional(),
+      template: workoutTemplateSchema,
       tags: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
       note: boundedString(1, 4000).optional(),
       templateText: boundedString(1, 4000).optional(),
@@ -1085,6 +1118,7 @@ export const goalFrontmatterSchema = withContractMetadata(
       parentGoalId: z.union([idSchema(ID_PREFIXES.goal), z.null()]).optional(),
       relatedGoalIds: uniqueArray(idSchema(ID_PREFIXES.goal), { uniqueItems: true }).optional(),
       relatedExperimentIds: uniqueArray(idSchema(ID_PREFIXES.experiment), { uniqueItems: true }).optional(),
+      links: uniqueArray(goalRelationLinkSchema, { uniqueItems: true }).optional(),
       domains: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
     })
     .strict(),
@@ -1108,6 +1142,7 @@ export const conditionFrontmatterSchema = withContractMetadata(
       bodySites: uniqueArray(boundedString(1, 120), { uniqueItems: true }).optional(),
       relatedGoalIds: uniqueArray(idSchema(ID_PREFIXES.goal), { uniqueItems: true }).optional(),
       relatedProtocolIds: uniqueArray(idSchema(ID_PREFIXES.protocol), { uniqueItems: true }).optional(),
+      links: uniqueArray(conditionRelationLinkSchema, { uniqueItems: true }).optional(),
       note: boundedString(1, 4000).optional(),
     })
     .strict(),
@@ -1129,6 +1164,7 @@ export const allergyFrontmatterSchema = withContractMetadata(
       reaction: boundedString(1, 160).optional(),
       recordedOn: isoDateString().optional(),
       relatedConditionIds: uniqueArray(idSchema(ID_PREFIXES.condition), { uniqueItems: true }).optional(),
+      links: uniqueArray(allergyRelationLinkSchema, { uniqueItems: true }).optional(),
       note: boundedString(1, 4000).optional(),
     })
     .strict(),
@@ -1170,6 +1206,8 @@ export const protocolFrontmatterSchema = withContractMetadata(
         ingredients: z.array(supplementIngredientSchema).optional(),
         relatedGoalIds: uniqueArray(idSchema(ID_PREFIXES.goal), { uniqueItems: true }).optional(),
         relatedConditionIds: uniqueArray(idSchema(ID_PREFIXES.condition), { uniqueItems: true }).optional(),
+        relatedProtocolIds: uniqueArray(idSchema(ID_PREFIXES.protocol), { uniqueItems: true }).optional(),
+        links: uniqueArray(protocolRelationLinkSchema, { uniqueItems: true }).optional(),
       })
       .strict();
   })(),
@@ -1190,6 +1228,7 @@ export const familyMemberFrontmatterSchema = withContractMetadata(
       deceased: z.boolean().optional(),
       note: boundedString(1, FAMILY_MEMBER_LIMITS.note).optional(),
       relatedVariantIds: uniqueArray(idSchema(ID_PREFIXES.variant), { uniqueItems: true }).optional(),
+      links: uniqueArray(familyRelationLinkSchema, { uniqueItems: true }).optional(),
     })
     .strict(),
   "@murphai/contracts/frontmatter-family-member.schema.json",
@@ -1209,6 +1248,7 @@ export const geneticVariantFrontmatterSchema = withContractMetadata(
       significance: z.enum(VARIANT_SIGNIFICANCES).optional(),
       inheritance: boundedString(1, GENETIC_VARIANT_LIMITS.inheritance).optional(),
       sourceFamilyMemberIds: uniqueArray(idSchema(ID_PREFIXES.family), { uniqueItems: true }).optional(),
+      links: uniqueArray(geneticVariantRelationLinkSchema, { uniqueItems: true }).optional(),
       note: boundedString(1, GENETIC_VARIANT_LIMITS.note).optional(),
     })
     .strict(),
@@ -1223,6 +1263,8 @@ export type WorkoutExerciseMode = z.infer<typeof workoutExerciseModeSchema>;
 export type WorkoutLoadUnit = z.infer<typeof workoutLoadUnitSchema>;
 export type StoredMediaKind = z.infer<typeof storedMediaKindSchema>;
 export type StoredMedia = z.infer<typeof storedMediaSchema>;
+export type EventAttachmentKind = z.infer<typeof eventAttachmentKindSchema>;
+export type EventAttachment = z.infer<typeof eventAttachmentSchema>;
 export type BodyMeasurementType = z.infer<typeof bodyMeasurementTypeSchema>;
 export type BodyMeasurementUnit = z.infer<typeof bodyMeasurementUnitSchema>;
 export type BodyMeasurementEntry = z.infer<typeof bodyMeasurementEntrySchema>;

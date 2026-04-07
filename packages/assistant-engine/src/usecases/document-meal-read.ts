@@ -16,6 +16,7 @@ import {
   editEventRecord,
 } from './event-record-mutations.js'
 import { asListEnvelope } from './shared.js'
+import { relativePathEntries } from './vault-usecase-helpers.js'
 
 type DocumentMealKind = 'document' | 'meal'
 
@@ -67,6 +68,7 @@ function resolveManifestArtifactPaths(record: QueryRecord): string[] {
   const documentPath = firstString(record.attributes, ['documentPath', 'document_path'])
 
   return uniqueStrings([
+    ...relativePathEntries(record.attributes.attachments),
     ...stringArray(record.attributes.rawRefs),
     ...(documentPath ? [documentPath] : []),
     ...stringArray(record.attributes.photoPaths),

@@ -39,7 +39,7 @@ interface StageRawImportManifestInput {
 
 const RAW_MANIFEST_OPERATOR_METADATA_KEY = "operatorMetadata";
 
-async function describeRawArtifact(
+export async function describeRawArtifact(
   artifact: RawArtifactLike,
   role: string,
 ): Promise<RawImportManifestArtifact> {
