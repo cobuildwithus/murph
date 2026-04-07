@@ -478,6 +478,21 @@ run_repo_vitest() {
   MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run --config "vitest.config.ts" "$@"
 }
 
+run_owner_package_coverage() {
+  run_timed_step \
+    "Core owner coverage" \
+    pnpm --dir "packages/core" exec vitest run --config "vitest.config.ts" --coverage
+  run_timed_step \
+    "Hosted execution owner coverage" \
+    pnpm --dir "packages/hosted-execution" exec vitest run --config "vitest.config.ts" --coverage
+  run_timed_step \
+    "Importers owner coverage" \
+    pnpm --dir "packages/importers" exec vitest run --config "vitest.config.ts" --coverage
+  run_timed_step \
+    "Query owner coverage" \
+    pnpm --dir "packages/query" exec vitest run --config "vitest.config.ts" --coverage
+}
+
 run_typecheck() {
   run_timed_step "Shell syntax" check_shell_syntax
   run_timed_step "Node syntax" check_node_syntax
@@ -528,12 +543,15 @@ run_test_packages() {
 run_test_packages_coverage() {
   local artifacts_prepared="${1:-0}"
 
-  run_timed_step "Coverage cleanup" node "scripts/rm-paths.mjs" "coverage"
+  run_timed_step \
+    "Coverage cleanup" \
+    node "scripts/rm-paths.mjs" "coverage" "packages/core/coverage" "packages/hosted-execution/coverage" "packages/importers/coverage" "packages/query/coverage"
   run_timed_step "Package smoke prerequisites" run_test_packages_common
   if [[ "$artifacts_prepared" != "1" ]]; then
     run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts
   fi
-  run_timed_step "Repo Vitest coverage" run_repo_vitest --coverage
+  run_timed_step "Repo Vitest" run_repo_vitest --no-coverage
+  run_timed_step "Owner package coverage" run_owner_package_coverage
 }
 
 run_test_coverage() {

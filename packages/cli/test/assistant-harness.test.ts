@@ -9,31 +9,11 @@ const harnessMocks = vi.hoisted(() => {
     provider: 'gateway',
     model,
   }))
-  const openAICompatibleProvider = vi.fn((model: string) => ({
-    provider: 'openai-compatible',
-    model,
-  }))
-  const openAIResponsesProvider = vi.fn((model: string) => ({
-    provider: 'openai-responses',
-    model,
-  }))
-  const openAIProvider = Object.assign(
-    vi.fn((model: string) => ({
-      provider: 'openai',
-      model,
-    })),
-    {
-      responses: openAIResponsesProvider,
-    },
-  )
-  const createOpenAI = vi.fn(() => openAIProvider)
-  const createOpenAICompatible = vi.fn(() => openAICompatibleProvider)
+  const createOpenAI = vi.fn()
+  const createOpenAICompatible = vi.fn()
 
   return {
     gateway,
-    openAICompatibleProvider,
-    openAIProvider,
-    openAIResponsesProvider,
     createOpenAI,
     createOpenAICompatible,
   }
@@ -47,13 +27,31 @@ vi.mock('ai', async () => {
   }
 })
 
-vi.mock('@ai-sdk/openai', () => ({
-  createOpenAI: harnessMocks.createOpenAI,
-}))
+vi.mock('@ai-sdk/openai', async () => {
+  const actual = await vi.importActual<typeof import('@ai-sdk/openai')>('@ai-sdk/openai')
 
-vi.mock('@ai-sdk/openai-compatible', () => ({
-  createOpenAICompatible: harnessMocks.createOpenAICompatible,
-}))
+  return {
+    ...actual,
+    createOpenAI: (...args: Parameters<typeof actual.createOpenAI>) => {
+      harnessMocks.createOpenAI(...args)
+      return actual.createOpenAI(...args)
+    },
+  }
+})
+
+vi.mock('@ai-sdk/openai-compatible', async () => {
+  const actual = await vi.importActual<typeof import('@ai-sdk/openai-compatible')>(
+    '@ai-sdk/openai-compatible',
+  )
+
+  return {
+    ...actual,
+    createOpenAICompatible: (...args: Parameters<typeof actual.createOpenAICompatible>) => {
+      harnessMocks.createOpenAICompatible(...args)
+      return actual.createOpenAICompatible(...args)
+    },
+  }
+})
 
 import {
   type AssistantCapabilityHost,
@@ -69,9 +67,6 @@ const TEST_API_KEY_ENV = 'ASSISTANT_TEST_KEY'
 
 beforeEach(() => {
   harnessMocks.gateway.mockClear()
-  harnessMocks.openAICompatibleProvider.mockClear()
-  harnessMocks.openAIProvider.mockClear()
-  harnessMocks.openAIResponsesProvider.mockClear()
   harnessMocks.createOpenAI.mockClear()
   harnessMocks.createOpenAICompatible.mockClear()
   delete process.env[TEST_API_KEY_ENV]

@@ -86,15 +86,13 @@ export function requireHostedDeviceSyncRuntimeTokenBundle(input: {
 
 export function composeHostedRuntimeDeviceSyncAccount(input: {
   connection: PublicDeviceSyncAccount;
-  externalAccountId: string;
   tokenBundle: HostedExecutionDeviceSyncRuntimeTokenBundle;
 }): DeviceSyncAccount {
   return {
+    ...input.connection,
     accessToken: input.tokenBundle.accessToken,
     refreshToken: input.tokenBundle.refreshToken,
     disconnectGeneration: 0,
-    externalAccountId: input.externalAccountId,
-    ...input.connection,
     accessTokenExpiresAt: input.tokenBundle.accessTokenExpiresAt,
     metadata: sanitizeStoredDeviceSyncMetadata(input.connection.metadata ?? {}),
   };
@@ -112,6 +110,7 @@ export function buildHostedPublicDeviceSyncAccount(input: {
     assertHostedRuntimeConnectionMatchesRecord(input.record, runtimeConnection);
 
     return {
+      externalAccountId: runtimeConnection.connection.externalAccountId,
       id: input.record.id,
       provider: input.record.provider,
       displayName: runtimeConnection.connection.displayName ?? input.fallback?.displayName ?? null,
@@ -133,8 +132,13 @@ export function buildHostedPublicDeviceSyncAccount(input: {
   }
 
   const fallback = input.fallback ?? {};
+  const externalAccountId = normalizeHostedExternalAccountId(
+    fallback.externalAccountId,
+    input.record.id,
+  );
 
   return {
+    externalAccountId,
     id: input.record.id,
     provider: input.record.provider,
     displayName: fallback.displayName ?? null,
@@ -205,4 +209,17 @@ function assertHostedRuntimeConnectionMatchesRecord(
     retryable: true,
     httpStatus: 409,
   });
+}
+
+function normalizeHostedExternalAccountId(
+  value: string | null | undefined,
+  connectionId: string,
+): string {
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value;
+  }
+
+  // Hosted durable SQL intentionally omits raw provider account ids. Keep the
+  // internal account shape total even when only the opaque connection id is available.
+  return `opaque:${connectionId}`;
 }

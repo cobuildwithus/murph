@@ -402,7 +402,7 @@ function HostedPhoneAuthInner({
               type="button"
               onClick={handleInviteSendCode}
               disabled={!ready || pendingAction !== null}
-              size="lg"
+              size="xl"
             >
               {pendingAction === "send-code" ? "Sending code..." : "Send me a code"}
             </Button>
@@ -414,7 +414,7 @@ function HostedPhoneAuthInner({
               }}
               disabled={pendingAction !== null}
               variant="outline"
-              size="lg"
+              size="xl"
             >
               Use a different number
             </Button>
@@ -481,9 +481,21 @@ function HostedPhoneAuthInner({
 
       {!authenticated && step === "code" ? (
         <div className="space-y-3">
-          <Label htmlFor={`hosted-code-${mode}`}>
-            Verification code
-          </Label>
+          <div className="flex items-baseline justify-between">
+            <Label htmlFor={`hosted-code-${mode}`}>
+              Verification code
+            </Label>
+            <Button
+              type="button"
+              onClick={handleResendCode}
+              disabled={!ready || pendingAction !== null}
+              variant="link"
+              size="xs"
+              className="h-auto p-0 text-xs text-stone-500"
+            >
+              {pendingAction === "send-code" ? "Sending..." : "Resend code"}
+            </Button>
+          </div>
           <Input
             id={`hosted-code-${mode}`}
             autoComplete="one-time-code"
@@ -493,7 +505,6 @@ function HostedPhoneAuthInner({
             onChange={(event) => setCode(event.currentTarget.value)}
             className="h-12 px-4 text-base md:text-sm"
           />
-          <p className="text-sm text-stone-500">Enter the code we just texted you.</p>
         </div>
       ) : null}
 
@@ -514,11 +525,11 @@ function HostedPhoneAuthInner({
               type="button"
               onClick={handleContinueAuthenticated}
               disabled={!ready || pendingAction !== null}
-              size="lg"
+              size="xl"
             >
               Continue signup
             </Button>
-            <Button type="button" onClick={handleLogout} disabled={pendingAction !== null} variant="outline" size="lg">
+            <Button type="button" onClick={handleLogout} disabled={pendingAction !== null} variant="outline" size="xl">
               {pendingAction === "logout" ? "Signing out..." : "Use a different number"}
             </Button>
           </div>
@@ -531,7 +542,7 @@ function HostedPhoneAuthInner({
               ?? "Sign out and request a fresh code to continue."}
           </AlertDescription>
           <div className="mt-3 flex flex-wrap gap-3">
-            <Button type="button" onClick={handleLogout} disabled={pendingAction !== null} variant="outline" size="lg">
+            <Button type="button" onClick={handleLogout} disabled={pendingAction !== null} variant="outline" size="xl">
               {pendingAction === "logout" ? "Signing out..." : "Use a different number"}
             </Button>
           </div>
@@ -539,7 +550,7 @@ function HostedPhoneAuthInner({
       ) : (
         <div className="flex flex-wrap gap-3">
           {step === "phone" ? (
-            <Button type="button" onClick={handleSendCode} disabled={!ready || pendingAction !== null} size="lg">
+            <Button type="button" onClick={handleSendCode} disabled={!ready || pendingAction !== null} size="xl">
               {pendingAction === "send-code" ? "Sending code..." : "Text me a code"}
             </Button>
           ) : (
@@ -548,22 +559,10 @@ function HostedPhoneAuthInner({
                 type="button"
                 onClick={handleVerifyCode}
                 disabled={!ready || pendingAction !== null}
-                size="lg"
+                size="xl"
+                className="w-full"
               >
-                {pendingAction === "verify-code"
-                  ? "Finishing setup..."
-                  : mode === "invite"
-                    ? "Verify phone and continue"
-                    : "Verify phone and create account"}
-              </Button>
-              <Button
-                type="button"
-                onClick={handleResendCode}
-                disabled={!ready || pendingAction !== null}
-                variant="outline"
-                size="lg"
-              >
-                {pendingAction === "send-code" ? "Sending code..." : "Text me another code"}
+                {pendingAction === "verify-code" ? "Finishing setup..." : "Verify phone"}
               </Button>
               <Button
                 type="button"
@@ -575,8 +574,8 @@ function HostedPhoneAuthInner({
                   setStep("phone");
                 }}
                 disabled={pendingAction !== null}
-                variant="outline"
-                size="lg"
+                variant="link"
+                className="w-full"
               >
                 Use a different number
               </Button>

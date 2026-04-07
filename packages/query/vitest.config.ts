@@ -1,7 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { defineProject } from "vitest/config";
+import { defineConfig } from "vitest/config";
 
 import { resolveMurphVitestConcurrency } from "../../config/vitest-parallelism.js";
 import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
@@ -18,7 +18,7 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/runtime-state": "../runtime-state/src/index.ts",
 } as const;
 
-export default defineProject({
+export default defineConfig({
   resolve: {
     alias: createVitestWorkspaceRuntimeAliases(
       resolveWorkspaceSourceEntries(packageDir, WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS),
@@ -30,5 +30,31 @@ export default defineProject({
     environment: "node",
     ...resolveMurphVitestConcurrency(),
     include: ["test/**/*.test.ts"],
+    coverage: {
+      provider: "custom",
+      customProviderModule: "../../config/vitest-coverage-provider.ts",
+      reporter: ["text", "lcov"],
+      reportsDirectory: "./coverage",
+      include: [
+        "src/export-pack.ts",
+        "src/model.ts",
+        "src/search.ts",
+        "src/summaries.ts",
+        "src/timeline.ts",
+      ],
+      exclude: [
+        "coverage/**",
+        "dist/**",
+        "**/*.d.ts",
+      ],
+      thresholds: {
+        perFile: true,
+        lines: 85,
+        functions: 85,
+        branches: 80,
+        statements: 85,
+      },
+      reportOnFailure: true,
+    },
   },
 });

@@ -1943,39 +1943,6 @@
                     }
                   }
                 },
-                "search": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root."
-                        },
-                        "section": {
-                          "description": "Optional section filter.",
-                          "type": "string",
-                          "enum": [
-                            "Identity",
-                            "Preferences",
-                            "Instructions",
-                            "Context"
-                          ]
-                        },
-                        "limit": {
-                          "default": 25,
-                          "type": "integer",
-                          "exclusiveMinimum": 0,
-                          "maximum": 100
-                        }
-                      }
-                    }
-                  }
-                },
                 "upsert": {
                   "type": "object",
                   "additionalProperties": false,

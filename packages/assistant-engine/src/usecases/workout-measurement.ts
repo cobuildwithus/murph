@@ -1,6 +1,7 @@
 import {
   bodyMeasurementEntrySchema,
   profileUnitPreferencesSchema,
+  type EventAttachment,
   type BodyMeasurementEntry,
   type JsonObject,
   type ProfileUnitPreferences,

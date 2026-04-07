@@ -20,6 +20,7 @@ import type {
   ProfileSnapshotRecord,
   RebuiltCurrentProfile,
 } from "./types.ts";
+import type { FileChange } from "../types.ts";
 import {
   PROFILE_CURRENT_DOCUMENT_PATH,
   PROFILE_SNAPSHOT_LEDGER_DIRECTORY,
@@ -120,10 +121,12 @@ async function stageAuditRecord(
 }
 
 type StoredCurrentProfileMarkdown = Awaited<ReturnType<typeof readCurrentProfileMarkdown>>;
-type CurrentProfileRebuildAudit = Pick<
-  Parameters<typeof buildAuditRecord>[0],
-  "summary" | "occurredAt" | "targetIds" | "changes"
->;
+interface CurrentProfileRebuildAudit {
+  summary: string;
+  occurredAt?: string;
+  targetIds: string[];
+  changes: FileChange[];
+}
 
 interface StagedCurrentProfileMaterialization {
   updated: boolean;

@@ -111,7 +111,10 @@ export function readAssistantSessionResumeState(
   }
 
   if ('resumeState' in input) {
-    return normalizeAssistantSessionResumeState(input.resumeState)
+    const normalizedResumeState = normalizeAssistantSessionResumeState(input.resumeState)
+    if (normalizedResumeState) {
+      return normalizedResumeState
+    }
   }
 
   return normalizeAssistantSessionResumeState(
