@@ -96,6 +96,36 @@ test("active invite state links to hosted settings with client navigation markup
   assert.match(markup, /Manage email settings/);
 });
 
+test("invite share preview renders the generic bundle copy from the tiny summary", () => {
+  const markup = renderToStaticMarkup(
+    createElement(JoinInviteClient, {
+      initialStatus: createStatus({
+        capabilities: {
+          billingReady: true,
+          phoneAuthReady: true,
+        },
+      }),
+      inviteCode: "invite-code",
+      privyAppId: "cm_app_123",
+      shareCode: "share-code",
+      sharePreview: {
+        kinds: ["food", "recipe"],
+        counts: {
+          foods: 1,
+          protocols: 0,
+          recipes: 1,
+          total: 2,
+        },
+        logMealAfterImport: true,
+      },
+    }),
+  );
+
+  assert.match(markup, /Add after signup: Shared bundle/);
+  assert.match(markup, /1 food · 1 recipe/);
+  assert.match(markup, /Murph will also log the shared food after import\./);
+});
+
 test("pending share acceptance stays in processing instead of announcing success", () => {
   assert.equal(
     resolveJoinInviteShareStateFromAccept({
@@ -173,16 +203,14 @@ function createShareStatus(stage: HostedSharePageData["stage"]): HostedSharePage
       consumed: stage === "consumed",
       expiresAt: "2026-03-27T12:00:00.000Z",
       preview: {
+        kinds: ["food"],
         counts: {
           foods: 1,
           protocols: 0,
           recipes: 0,
+          total: 1,
         },
-        foodTitles: ["Smoothie"],
         logMealAfterImport: false,
-        protocolTitles: [],
-        recipeTitles: [],
-        title: "Smoothie pack",
       },
     },
     stage,

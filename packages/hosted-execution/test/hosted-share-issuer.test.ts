@@ -31,18 +31,6 @@ describe("hosted share issuer", () => {
       new Response(JSON.stringify({
         inviteCode: "invite_123",
         joinUrl: "https://join.example.test/join/invite_123?share=share_123",
-        preview: {
-          counts: {
-            foods: 1,
-            protocols: 0,
-            recipes: 0,
-          },
-          foodTitles: ["Shared smoothie"],
-          logMealAfterImport: false,
-          protocolTitles: [],
-          recipeTitles: [],
-          title: "Shared pack",
-        },
         shareCode: "share_123",
         shareUrl: "https://join.example.test/share/share_123?invite=invite_123",
         url: "https://join.example.test/join/invite_123?share=share_123",

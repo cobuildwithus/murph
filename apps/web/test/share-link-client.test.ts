@@ -23,16 +23,14 @@ test("ShareLinkClient links invite sign-in flows through the hosted join route",
           consumed: false,
           expiresAt: "2026-03-27T12:00:00.000Z",
           preview: {
+            kinds: ["food"],
             counts: {
               foods: 1,
               protocols: 0,
               recipes: 0,
+              total: 1,
             },
-            foodTitles: ["Smoothie"],
-            logMealAfterImport: false,
-            protocolTitles: [],
-            recipeTitles: [],
-            title: "Smoothie pack",
+            logMealAfterImport: true,
           },
         },
         stage: "signin",
@@ -42,6 +40,9 @@ test("ShareLinkClient links invite sign-in flows through the hosted join route",
   );
 
   assert.ok(markup.includes('href="/join/invite-code?share=share-code"'));
+  assert.match(markup, /Shared food bundle/);
+  assert.match(markup, /1 food/);
+  assert.match(markup, /This import also logs the shared food after import\./);
   assert.match(markup, /Verify your phone and checkout/);
 });
 

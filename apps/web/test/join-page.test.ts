@@ -73,8 +73,14 @@ beforeEach(() => {
   mocks.buildHostedSharePageData.mockResolvedValue({
     share: {
       preview: {
-        protocolTitles: [],
-        title: "Shared bundle",
+        kinds: ["protocol"],
+        counts: {
+          foods: 0,
+          protocols: 1,
+          recipes: 0,
+          total: 1,
+        },
+        logMealAfterImport: false,
       },
     },
   });

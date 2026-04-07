@@ -44,6 +44,7 @@ export function JoinInviteClient({
   const [pendingAction, setPendingAction] = useState<"checkout" | "logout" | "share" | null>(null);
   const [shareImportState, setShareImportState] = useState<JoinInviteShareImportState>("idle");
   const phoneAuthReady = status.capabilities.phoneAuthReady && Boolean(privyAppId);
+  const sharePreviewSummary = sharePreview ? formatHostedSharePreviewSummary(sharePreview) : null;
 
   const title = resolveTitle(status);
   const subtitle = resolveSubtitle(status);
@@ -228,22 +229,15 @@ export function JoinInviteClient({
 
           {sharePreview ? (
             <Alert className="border-green-200 bg-green-50 text-green-800">
-              <AlertTitle>Add after signup: {sharePreview.title}</AlertTitle>
-              <AlertDescription className="text-green-700">
-                {[
-                  sharePreview.counts.foods ? `${sharePreview.counts.foods} foods` : null,
-                  sharePreview.counts.protocols ? `${sharePreview.counts.protocols} protocols` : null,
-                  sharePreview.counts.recipes ? `${sharePreview.counts.recipes} recipes` : null,
-                ].filter(Boolean).join(" · ")}
-              </AlertDescription>
-              {sharePreview.protocolTitles.length > 0 ? (
+              <AlertTitle>Add after signup: {describeHostedSharePreview(sharePreview)}</AlertTitle>
+              {sharePreviewSummary ? (
                 <AlertDescription className="text-green-700">
-                  Protocols: {sharePreview.protocolTitles.join(", ")}
+                  {sharePreviewSummary}
                 </AlertDescription>
               ) : null}
               {sharePreview.logMealAfterImport ? (
                 <AlertDescription className="text-green-700">
-                  Murph will also log the smoothie after import.
+                  Murph will also log the shared food after import.
                 </AlertDescription>
               ) : null}
             </Alert>
@@ -330,9 +324,9 @@ export function JoinInviteClient({
                 </Button>
                 {sharePreview ? (
                   shareImportState === "completed" ? (
-                    <p>{sharePreview.title} has been added to this hosted vault.</p>
+                    <p>{describeHostedSharePreview(sharePreview)} has been added to this hosted vault.</p>
                   ) : shareImportState === "processing" ? (
-                    <p>{sharePreview.title} is being added to this hosted vault.</p>
+                    <p>{describeHostedSharePreview(sharePreview)} is being added to this hosted vault.</p>
                   ) : (
                     <Button
                       type="button"
@@ -340,7 +334,7 @@ export function JoinInviteClient({
                       disabled={pendingAction !== null}
                       size="lg"
                     >
-                      {pendingAction === "share" ? "Adding shared bundle..." : `Add ${sharePreview.title}`}
+                      {pendingAction === "share" ? "Adding shared bundle..." : `Add ${describeHostedSharePreview(sharePreview).toLowerCase()}`}
                     </Button>
                   )
                 ) : null}
@@ -440,6 +434,30 @@ export function resolveJoinInviteShareStateFromStatus(
   }
 
   return "idle";
+}
+
+function formatHostedSharePreviewSummary(preview: HostedSharePreview): string {
+  return [
+    preview.counts.foods ? formatHostedSharePreviewCount(preview.counts.foods, "food") : null,
+    preview.counts.protocols ? formatHostedSharePreviewCount(preview.counts.protocols, "protocol") : null,
+    preview.counts.recipes ? formatHostedSharePreviewCount(preview.counts.recipes, "recipe") : null,
+  ].filter((value): value is string => Boolean(value)).join(" · ");
+}
+
+function describeHostedSharePreview(preview: HostedSharePreview): string {
+  if (preview.kinds.length === 0) {
+    return "Shared bundle";
+  }
+
+  if (preview.kinds.length === 1) {
+    return `Shared ${preview.kinds[0]} bundle`;
+  }
+
+  return "Shared bundle";
+}
+
+function formatHostedSharePreviewCount(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
 function buildHostedShareStatusUrl(input: {

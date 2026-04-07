@@ -13,55 +13,69 @@ import {
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { readHostedSharePackObject } from "./pack-store";
 
-import type { HostedSharePreview, HostedSharePrismaClient } from "./types";
+import type { HostedShareKind, HostedSharePreview, HostedSharePrismaClient } from "./types";
 
 const DEFAULT_HOSTED_SHARE_TTL_HOURS = 24;
 const MAX_HOSTED_SHARE_TTL_HOURS = 24;
 const HOSTED_SHARE_CODE_BYTES = 24;
-const DEFAULT_HOSTED_SHARE_PRIVATE_PREVIEW_TITLE = "Shared Murph pack";
-
-export function createHostedShareMinimalPreview(title: string | null | undefined): HostedSharePreview {
+export function createHostedShareMinimalPreview(): HostedSharePreview {
   return {
+    kinds: [],
     counts: {
       foods: 0,
       protocols: 0,
       recipes: 0,
+      total: 0,
     },
-    foodTitles: [],
-    protocolTitles: [],
-    recipeTitles: [],
     logMealAfterImport: false,
-    title: normalizeOptionalString(title) ?? DEFAULT_HOSTED_SHARE_PRIVATE_PREVIEW_TITLE,
   };
 }
 
 export function buildHostedSharePreview(pack: SharePack): HostedSharePreview {
+  const kinds = new Set<HostedShareKind>();
+  let foods = 0;
+  let protocols = 0;
+  let recipes = 0;
+
+  for (const entity of pack.entities) {
+    if (entity.kind === "food") {
+      foods += 1;
+      kinds.add("food");
+      continue;
+    }
+
+    if (entity.kind === "protocol") {
+      protocols += 1;
+      kinds.add("protocol");
+      continue;
+    }
+
+    recipes += 1;
+    kinds.add("recipe");
+  }
+
   return {
+    kinds: [...kinds].sort(),
     counts: {
-      foods: pack.entities.filter((entity) => entity.kind === "food").length,
-      protocols: pack.entities.filter((entity) => entity.kind === "protocol").length,
-      recipes: pack.entities.filter((entity) => entity.kind === "recipe").length,
+      foods,
+      protocols,
+      recipes,
+      total: pack.entities.length,
     },
-    foodTitles: pack.entities.filter((entity) => entity.kind === "food").map((entity) => entity.payload.title),
-    protocolTitles: pack.entities.filter((entity) => entity.kind === "protocol").map((entity) => entity.payload.title),
-    recipeTitles: pack.entities.filter((entity) => entity.kind === "recipe").map((entity) => entity.payload.title),
     logMealAfterImport: Boolean(pack.afterImport?.logMeal),
-    title: pack.title,
   };
 }
 
 export function serializeHostedSharePreview(preview: HostedSharePreview): Prisma.InputJsonObject {
   return {
+    kinds: [...preview.kinds],
     counts: {
       foods: preview.counts.foods,
       protocols: preview.counts.protocols,
       recipes: preview.counts.recipes,
+      total: preview.counts.total,
     },
-    foodTitles: [...preview.foodTitles],
     logMealAfterImport: preview.logMealAfterImport,
-    protocolTitles: [...preview.protocolTitles],
-    recipeTitles: [...preview.recipeTitles],
-    title: preview.title,
   } satisfies Prisma.InputJsonObject;
 }
 
@@ -76,16 +90,14 @@ export function readHostedSharePreview(value: Prisma.JsonValue): HostedSharePrev
   }
 
   return {
+    kinds: readHostedSharePreviewKinds(value.kinds),
     counts: {
       foods: readHostedSharePreviewCount(counts.foods, "foods"),
       protocols: readHostedSharePreviewCount(counts.protocols, "protocols"),
       recipes: readHostedSharePreviewCount(counts.recipes, "recipes"),
+      total: readHostedSharePreviewCount(counts.total, "total"),
     },
-    foodTitles: readHostedSharePreviewTitles(value.foodTitles, "foodTitles"),
     logMealAfterImport: value.logMealAfterImport === true,
-    protocolTitles: readHostedSharePreviewTitles(value.protocolTitles, "protocolTitles"),
-    recipeTitles: readHostedSharePreviewTitles(value.recipeTitles, "recipeTitles"),
-    title: readHostedSharePreviewTitle(value.title),
   };
 }
 
@@ -267,20 +279,15 @@ function readHostedSharePreviewCount(value: unknown, field: string): number {
   return value;
 }
 
-function readHostedSharePreviewTitle(value: unknown): string {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new TypeError("Hosted share preview title must be a non-empty string.");
+function readHostedSharePreviewKinds(value: unknown): HostedShareKind[] {
+  if (
+    !Array.isArray(value)
+    || value.some((entry) => entry !== "food" && entry !== "protocol" && entry !== "recipe")
+  ) {
+    throw new TypeError("Hosted share preview kinds must be a HostedShareKind array.");
   }
 
-  return value;
-}
-
-function readHostedSharePreviewTitles(value: unknown, field: string): string[] {
-  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
-    throw new TypeError(`Hosted share preview ${field} must be a string array.`);
-  }
-
-  return [...value];
+  return [...new Set(value)].sort();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
