@@ -103,13 +103,21 @@
       "types": "./dist/inbox-app/types.d.ts",
       "default": "./dist/inbox-app/types.js"
     },
-    "./inbox-services/*": {
-      "types": "./dist/inbox-services/*.d.ts",
-      "default": "./dist/inbox-services/*.js"
-    },
     "./inbox-services": {
       "types": "./dist/inbox-services.d.ts",
       "default": "./dist/inbox-services.js"
+    },
+    "./inbox-services/connectors": {
+      "types": "./dist/inbox-services/connectors.d.ts",
+      "default": "./dist/inbox-services/connectors.js"
+    },
+    "./inbox-services/daemon": {
+      "types": "./dist/inbox-services/daemon.d.ts",
+      "default": "./dist/inbox-services/daemon.js"
+    },
+    "./inbox-services/promotions": {
+      "types": "./dist/inbox-services/promotions.d.ts",
+      "default": "./dist/inbox-services/promotions.js"
     },
     "./inbox-model-contracts": {
       "types": "./dist/inbox-model-contracts.d.ts",
@@ -151,25 +159,81 @@
       "types": "./dist/runtime-import.d.ts",
       "default": "./dist/runtime-import.js"
     },
-    "./usecases/*": {
-      "types": "./dist/usecases/*.d.ts",
-      "default": "./dist/usecases/*.js"
+    "./usecases/document-meal-read": {
+      "types": "./dist/usecases/document-meal-read.d.ts",
+      "default": "./dist/usecases/document-meal-read.js"
+    },
+    "./usecases/event-record-mutations": {
+      "types": "./dist/usecases/event-record-mutations.d.ts",
+      "default": "./dist/usecases/event-record-mutations.js"
+    },
+    "./usecases/experiment-journal-vault": {
+      "types": "./dist/usecases/experiment-journal-vault.d.ts",
+      "default": "./dist/usecases/experiment-journal-vault.js"
+    },
+    "./usecases/explicit-health-family-services": {
+      "types": "./dist/usecases/explicit-health-family-services.d.ts",
+      "default": "./dist/usecases/explicit-health-family-services.js"
+    },
+    "./usecases/food": {
+      "types": "./dist/usecases/food.d.ts",
+      "default": "./dist/usecases/food.js"
+    },
+    "./usecases/food-autolog": {
+      "types": "./dist/usecases/food-autolog.d.ts",
+      "default": "./dist/usecases/food-autolog.js"
+    },
+    "./usecases/intervention": {
+      "types": "./dist/usecases/intervention.d.ts",
+      "default": "./dist/usecases/intervention.js"
+    },
+    "./usecases/provider-event": {
+      "types": "./dist/usecases/provider-event.d.ts",
+      "default": "./dist/usecases/provider-event.js"
+    },
+    "./usecases/recipe": {
+      "types": "./dist/usecases/recipe.d.ts",
+      "default": "./dist/usecases/recipe.js"
     },
     "./usecases/record-mutations": {
       "types": "./dist/usecases/record-mutations.d.ts",
       "default": "./dist/usecases/record-mutations.js"
     },
-    "./usecases/text-duration": {
-      "types": "./dist/usecases/text-duration.d.ts",
-      "default": "./dist/usecases/text-duration.js"
+    "./usecases/runtime": {
+      "types": "./dist/usecases/runtime.d.ts",
+      "default": "./dist/usecases/runtime.js"
     },
-    "./usecases/workout-artifacts": {
-      "types": "./dist/usecases/workout-artifacts.d.ts",
-      "default": "./dist/usecases/workout-artifacts.js"
+    "./usecases/shared": {
+      "types": "./dist/usecases/shared.d.ts",
+      "default": "./dist/usecases/shared.js"
     },
-    "./usecases/workout-model": {
-      "types": "./dist/usecases/workout-model.d.ts",
-      "default": "./dist/usecases/workout-model.js"
+    "./usecases/types": {
+      "types": "./dist/usecases/types.d.ts",
+      "default": "./dist/usecases/types.js"
+    },
+    "./usecases/vault-usecase-helpers": {
+      "types": "./dist/usecases/vault-usecase-helpers.d.ts",
+      "default": "./dist/usecases/vault-usecase-helpers.js"
+    },
+    "./usecases/workout": {
+      "types": "./dist/usecases/workout.d.ts",
+      "default": "./dist/usecases/workout.js"
+    },
+    "./usecases/workout-format": {
+      "types": "./dist/usecases/workout-format.d.ts",
+      "default": "./dist/usecases/workout-format.js"
+    },
+    "./usecases/workout-import": {
+      "types": "./dist/usecases/workout-import.d.ts",
+      "default": "./dist/usecases/workout-import.js"
+    },
+    "./usecases/workout-measurement": {
+      "types": "./dist/usecases/workout-measurement.d.ts",
+      "default": "./dist/usecases/workout-measurement.js"
+    },
+    "./usecases/workout-read": {
+      "types": "./dist/usecases/workout-read.d.ts",
+      "default": "./dist/usecases/workout-read.js"
     },
     "./vault-services": {
       "types": "./dist/vault-services.d.ts",
