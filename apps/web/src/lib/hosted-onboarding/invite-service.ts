@@ -244,7 +244,6 @@ export async function prepareHostedInvitePhoneCode(input: {
       prisma: tx,
       signupPhoneCodeSendAttemptId: sendAttemptId,
       signupPhoneCodeSendAttemptStartedAt: now,
-      signupPhoneCodeSentAt: now,
     });
 
     return {
@@ -281,6 +280,7 @@ export async function confirmHostedInvitePhoneCode(input: {
       prisma: tx,
       signupPhoneCodeSendAttemptId: null,
       signupPhoneCodeSendAttemptStartedAt: null,
+      signupPhoneCodeSentAt: now,
     });
 
     return {
@@ -308,7 +308,6 @@ export async function abortHostedInvitePhoneCode(input: {
         prisma: tx,
         signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null,
-        signupPhoneCodeSentAt: null,
       });
     }
 

@@ -49,7 +49,7 @@ describe("invite send-code lifecycle", () => {
     });
   });
 
-  it("records the durable cooldown and attempt id before returning the stored signup phone", async () => {
+  it("records only the transient attempt id before returning the stored signup phone", async () => {
     storeMocks.readHostedMemberIdentity.mockResolvedValue(makeIdentity());
 
     await expect(
@@ -68,15 +68,14 @@ describe("invite send-code lifecycle", () => {
       prisma: expect.any(Object),
       signupPhoneCodeSendAttemptId: expect.stringMatching(/^hbpc_/),
       signupPhoneCodeSendAttemptStartedAt: new Date("2026-04-07T01:00:00.000Z"),
-      signupPhoneCodeSentAt: new Date("2026-04-07T01:00:00.000Z"),
     });
   });
 
-  it("keeps the durable cooldown on confirm and only clears the temporary attempt markers", async () => {
+  it("starts the durable cooldown on confirm and clears the temporary attempt markers", async () => {
     storeMocks.readHostedMemberIdentity.mockResolvedValue(makeIdentity({
       signupPhoneCodeSendAttemptId: "hbpc_confirm",
       signupPhoneCodeSendAttemptStartedAt: new Date("2026-04-07T01:00:00.000Z"),
-      signupPhoneCodeSentAt: new Date("2026-04-07T01:00:00.000Z"),
+      signupPhoneCodeSentAt: null,
     }));
 
     await expect(
@@ -95,14 +94,15 @@ describe("invite send-code lifecycle", () => {
       prisma: expect.any(Object),
       signupPhoneCodeSendAttemptId: null,
       signupPhoneCodeSendAttemptStartedAt: null,
+      signupPhoneCodeSentAt: new Date("2026-04-07T01:00:02.000Z"),
     });
   });
 
-  it("rolls back the cooldown after a failed Privy send while the attempt is still current", async () => {
+  it("clears only the transient attempt after a failed Privy send while the attempt is still current", async () => {
     storeMocks.readHostedMemberIdentity.mockResolvedValue(makeIdentity({
       signupPhoneCodeSendAttemptId: "hbpc_abort",
       signupPhoneCodeSendAttemptStartedAt: new Date("2026-04-07T01:00:00.000Z"),
-      signupPhoneCodeSentAt: new Date("2026-04-07T01:00:00.000Z"),
+      signupPhoneCodeSentAt: null,
     }));
 
     await expect(
@@ -121,7 +121,6 @@ describe("invite send-code lifecycle", () => {
       prisma: expect.any(Object),
       signupPhoneCodeSendAttemptId: null,
       signupPhoneCodeSendAttemptStartedAt: null,
-      signupPhoneCodeSentAt: null,
     });
   });
 
@@ -129,7 +128,7 @@ describe("invite send-code lifecycle", () => {
     storeMocks.readHostedMemberIdentity.mockResolvedValue(makeIdentity({
       signupPhoneCodeSendAttemptId: "hbpc_current",
       signupPhoneCodeSendAttemptStartedAt: new Date("2026-04-07T01:00:00.000Z"),
-      signupPhoneCodeSentAt: new Date("2026-04-07T01:00:00.000Z"),
+      signupPhoneCodeSentAt: null,
     }));
 
     await expect(
