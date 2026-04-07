@@ -7,17 +7,13 @@ import type { HostedExecutionDispatchRequest, HostedExecutionDispatchResult } fr
 import { serializeHostedExecutionOutboxPayload } from "@/src/lib/hosted-execution/outbox-payload";
 
 const mocks = vi.hoisted(() => ({
-  deleteHostedSharePackFromHostedExecution: vi.fn(),
   deleteHostedStoredDispatchPayloadBestEffort: vi.fn(),
   dispatchHostedExecutionStatus: vi.fn(),
   dispatchStoredHostedExecutionStatus: vi.fn(),
-  finalizeHostedShareAcceptance: vi.fn(),
-  getPrisma: vi.fn(),
   maybeStageHostedExecutionDispatchPayload: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/control", () => ({
-  deleteHostedSharePackFromHostedExecution: mocks.deleteHostedSharePackFromHostedExecution,
   deleteHostedStoredDispatchPayloadBestEffort: mocks.deleteHostedStoredDispatchPayloadBestEffort,
   maybeStageHostedExecutionDispatchPayload: mocks.maybeStageHostedExecutionDispatchPayload,
 }));
@@ -27,19 +23,6 @@ vi.mock("@/src/lib/hosted-execution/dispatch", () => ({
   dispatchStoredHostedExecutionStatus: mocks.dispatchStoredHostedExecutionStatus,
 }));
 
-vi.mock("@/src/lib/prisma", () => ({
-  getPrisma: mocks.getPrisma,
-}));
-
-vi.mock("@/src/lib/hosted-share/shared", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/hosted-share/shared")>("@/src/lib/hosted-share/shared");
-
-  return {
-    ...actual,
-    finalizeHostedShareAcceptance: mocks.finalizeHostedShareAcceptance,
-  };
-});
-
 import {
   drainHostedExecutionOutbox,
   enqueueHostedExecutionOutbox,
@@ -48,16 +31,8 @@ import {
 describe("drainHostedExecutionOutbox", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.deleteHostedSharePackFromHostedExecution.mockResolvedValue(undefined);
     mocks.deleteHostedStoredDispatchPayloadBestEffort.mockResolvedValue(undefined);
     mocks.dispatchStoredHostedExecutionStatus.mockImplementation(mocks.dispatchHostedExecutionStatus);
-    mocks.getPrisma.mockReturnValue({
-      hostedShareLink: {
-        findUnique: vi.fn(async () => ({
-          senderMemberId: "member_owner",
-        })),
-      },
-    });
     mocks.maybeStageHostedExecutionDispatchPayload.mockImplementation(async (dispatch: HostedExecutionDispatchRequest) => ({
       dispatchRef: {
         eventId: dispatch.eventId,
@@ -73,74 +48,27 @@ describe("drainHostedExecutionOutbox", () => {
     }));
   });
 
-  it("marks completed outcomes as completed, stores the dispatch result, and finalizes hosted share imports", async () => {
+  it("marks completed outcomes as dispatched and settles the payload cleanup locally", async () => {
     const dispatch = createShareDispatch();
-    const dispatchResult = createDispatchResult("completed");
     const prisma = createOutboxPrisma(createOutboxRecord({
       eventId: dispatch.eventId,
       eventKind: dispatch.event.kind,
       sourceType: "hosted_share_link",
       userId: dispatch.event.userId,
     }));
-    mocks.dispatchHostedExecutionStatus.mockResolvedValue(dispatchResult);
+    mocks.dispatchHostedExecutionStatus.mockResolvedValue(createDispatchResult("completed"));
 
     const [record] = await drainHostedExecutionOutbox({
       now: "2026-03-28T11:00:00.000Z",
       prisma,
     });
 
-    expect(record?.status).toBe(ExecutionOutboxStatus.completed);
+    expect(record?.status).toBe(ExecutionOutboxStatus.dispatched);
     expect(record?.nextAttemptAt).toBeNull();
-    expect(mocks.finalizeHostedShareAcceptance).toHaveBeenCalledWith({
-      eventId: dispatch.eventId,
-      memberId: dispatch.event.userId,
-      prisma,
-      shareId: "share_123",
-    });
-    expect(mocks.deleteHostedSharePackFromHostedExecution).toHaveBeenCalledWith({
-      ownerUserId: "member_owner",
-      shareId: "share_123",
-    });
+    expect(mocks.deleteHostedStoredDispatchPayloadBestEffort).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps completed share imports completed when share-pack cleanup fails", async () => {
-    const dispatch = createShareDispatch();
-    const dispatchResult = createDispatchResult("completed");
-    const prisma = createOutboxPrisma(createOutboxRecord({
-      eventId: dispatch.eventId,
-      eventKind: dispatch.event.kind,
-      sourceType: "hosted_share_link",
-      userId: dispatch.event.userId,
-    }));
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    mocks.dispatchHostedExecutionStatus.mockResolvedValue(dispatchResult);
-    mocks.deleteHostedSharePackFromHostedExecution.mockRejectedValue(new Error("delete failed"));
-
-    const [record] = await drainHostedExecutionOutbox({
-      now: "2026-03-28T11:00:00.000Z",
-      prisma,
-    });
-
-    expect(record?.status).toBe(ExecutionOutboxStatus.completed);
-    expect(mocks.finalizeHostedShareAcceptance).toHaveBeenCalledWith({
-      eventId: dispatch.eventId,
-      memberId: dispatch.event.userId,
-      prisma,
-      shareId: "share_123",
-    });
-    expect(mocks.deleteHostedSharePackFromHostedExecution).toHaveBeenCalledWith({
-      ownerUserId: "member_owner",
-      shareId: "share_123",
-    });
-    expect(consoleError).toHaveBeenCalledWith(
-      "Hosted share share_123 completed but its Cloudflare pack could not be deleted.",
-      "delete failed",
-    );
-
-    consoleError.mockRestore();
-  });
-
-  it("treats duplicate consumed outcomes as completed without requiring hosted-share finalization", async () => {
+  it("treats duplicate consumed outcomes as dispatched without any web-owned share finalization", async () => {
     const dispatch = createTickDispatch();
     const prisma = createOutboxPrisma(createOutboxRecord({
       eventId: dispatch.eventId,
@@ -155,14 +83,13 @@ describe("drainHostedExecutionOutbox", () => {
       prisma,
     });
 
-    expect(record?.status).toBe(ExecutionOutboxStatus.completed);
-    expect(mocks.finalizeHostedShareAcceptance).not.toHaveBeenCalled();
+    expect(record?.status).toBe(ExecutionOutboxStatus.dispatched);
   });
 
   it.each([
-    ["queued", ExecutionOutboxStatus.accepted, null],
-    ["duplicate_pending", ExecutionOutboxStatus.accepted, null],
-    ["backpressured", ExecutionOutboxStatus.pending, "runner full"],
+    ["queued", ExecutionOutboxStatus.dispatched, null],
+    ["duplicate_pending", ExecutionOutboxStatus.dispatched, null],
+    ["backpressured", ExecutionOutboxStatus.delivery_failed, "runner full"],
   ] as const)(
     "maps %s outcomes onto the right retry status",
     async (eventState, expectedStatus, lastError) => {
@@ -185,50 +112,49 @@ describe("drainHostedExecutionOutbox", () => {
     },
   );
 
-  it("keeps not-configured queued outcomes pending", async () => {
+  it("keeps not-configured queued outcomes retryable as delivery failures", async () => {
     const dispatch = createTickDispatch();
-    const dispatchResult = createDispatchResult("queued", {
-      statusLastError: "Hosted execution dispatch is not configured.",
-    });
     const prisma = createOutboxPrisma(createOutboxRecord({
       eventId: dispatch.eventId,
       eventKind: dispatch.event.kind,
       userId: dispatch.event.userId,
     }));
-    mocks.dispatchHostedExecutionStatus.mockResolvedValue(dispatchResult);
+    mocks.dispatchHostedExecutionStatus.mockResolvedValue(createDispatchResult("queued", {
+      statusLastError: "Hosted execution dispatch is not configured.",
+    }));
 
     const [record] = await drainHostedExecutionOutbox({
       now: "2026-03-28T11:00:00.000Z",
       prisma,
     });
 
-    expect(record?.status).toBe(ExecutionOutboxStatus.pending);
+    expect(record?.status).toBe(ExecutionOutboxStatus.delivery_failed);
     expect(record?.lastError).toBe("Hosted execution dispatch is not configured.");
+    expect(record?.nextAttemptAt).toEqual(new Date("2026-03-28T11:00:05.000Z"));
   });
 
-  it("marks poisoned outcomes as failed and prefers the event-level error", async () => {
+  it("treats poisoned outcomes as dispatched because Cloudflare owns the post-handoff lifecycle", async () => {
     const dispatch = createTickDispatch();
-    const dispatchResult = createDispatchResult("poisoned", {
+    const prisma = createOutboxPrisma(createOutboxRecord({
+      eventId: dispatch.eventId,
+      eventKind: dispatch.event.kind,
+      userId: dispatch.event.userId,
+    }));
+    mocks.dispatchHostedExecutionStatus.mockResolvedValue(createDispatchResult("poisoned", {
       eventLastError: "poisoned by runner",
       statusLastError: "global fallback",
-    });
-    const prisma = createOutboxPrisma(createOutboxRecord({
-      eventId: dispatch.eventId,
-      eventKind: dispatch.event.kind,
-      userId: dispatch.event.userId,
     }));
-    mocks.dispatchHostedExecutionStatus.mockResolvedValue(dispatchResult);
 
     const [record] = await drainHostedExecutionOutbox({
       now: "2026-03-28T11:00:00.000Z",
       prisma,
     });
 
-    expect(record?.status).toBe(ExecutionOutboxStatus.failed);
-    expect(record?.lastError).toBe("poisoned by runner");
+    expect(record?.status).toBe(ExecutionOutboxStatus.dispatched);
+    expect(record?.lastError).toBeNull();
   });
 
-  it("marks missing staged payload refs as terminal failed rows instead of retrying forever", async () => {
+  it("marks missing staged payload refs as terminal delivery failures instead of retrying forever", async () => {
     const prisma = createOutboxPrisma(createOutboxRecord({
       eventId: "evt_tick",
       eventKind: "vault.share.accepted",
@@ -250,8 +176,7 @@ describe("drainHostedExecutionOutbox", () => {
       prisma,
     });
 
-    expect(record?.status).toBe(ExecutionOutboxStatus.failed);
-    expect(record?.failedAt).toEqual(new Date("2026-03-28T11:00:00.000Z"));
+    expect(record?.status).toBe(ExecutionOutboxStatus.delivery_failed);
     expect(record?.nextAttemptAt).toBeNull();
   });
 
@@ -545,15 +470,12 @@ function createOutboxRecord(input: {
   userId: string;
 }): ExecutionOutbox {
   return {
-    acceptedAt: null,
     attemptCount: 0,
     claimExpiresAt: null,
     claimToken: null,
-    completedAt: null,
     createdAt: new Date("2026-03-28T11:00:00.000Z"),
     eventId: input.eventId,
     eventKind: input.eventKind,
-    failedAt: null,
     id: "execout_123",
     lastAttemptAt: null,
     lastError: null,
@@ -585,7 +507,7 @@ function createOutboxRecord(input: {
     )) as ExecutionOutbox["payloadJson"],
     sourceId: input.sourceId ?? (input.sourceType === "hosted_share_link" ? "share_123" : null),
     sourceType: input.sourceType ?? "hosted_execution",
-    status: ExecutionOutboxStatus.pending,
+    status: ExecutionOutboxStatus.queued,
     updatedAt: new Date("2026-03-28T11:00:00.000Z"),
     userId: input.userId,
   };

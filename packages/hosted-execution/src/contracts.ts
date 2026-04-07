@@ -348,21 +348,6 @@ export interface HostedExecutionDispatchStateSnapshot {
 export const HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR =
   "Hosted execution dispatch is not configured.";
 
-export const HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATUSES = [
-  "pending",
-  "accepted",
-  "completed",
-  "failed",
-] as const;
-
-export type HostedExecutionDispatchLifecycleStatus =
-  (typeof HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATUSES)[number];
-
-export interface HostedExecutionDispatchLifecycle {
-  lastError: string | null;
-  status: HostedExecutionDispatchLifecycleStatus;
-}
-
 export function resolveHostedExecutionDispatchOutcomeState(input: {
   initialState: HostedExecutionDispatchStateSnapshot;
   nextState: HostedExecutionDispatchStateSnapshot;
@@ -388,48 +373,6 @@ export function resolveHostedExecutionDispatchOutcomeState(input: {
   }
 
   return "queued";
-}
-
-export function resolveHostedExecutionDispatchLifecycle(
-  dispatchResult: HostedExecutionDispatchResult,
-): HostedExecutionDispatchLifecycle {
-  const {
-    event,
-    status,
-  } = dispatchResult;
-
-  switch (event.state) {
-    case "completed":
-    case "duplicate_consumed":
-      return {
-        lastError: null,
-        status: "completed",
-      };
-    case "poisoned":
-      return {
-        lastError: event.lastError ?? status.lastError ?? "Hosted execution event was poisoned.",
-        status: "failed",
-      };
-    case "backpressured":
-      return {
-        lastError: event.lastError ?? status.lastError,
-        status: "pending",
-      };
-    case "queued":
-    case "duplicate_pending":
-      return {
-        lastError:
-          status.lastError === HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR
-            ? status.lastError
-            : event.lastError ?? status.lastError,
-        status:
-          status.lastError === HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR
-            ? "pending"
-            : "accepted",
-      };
-    default:
-      return event.state satisfies never;
-  }
 }
 
 export function resolveHostedDeviceSyncWakeContext(

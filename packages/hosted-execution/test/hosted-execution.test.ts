@@ -1,14 +1,7 @@
 import { afterEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 import {
-  DEFAULT_HOSTED_EXECUTION_ARTIFACTS_BASE_URL,
-  DEFAULT_HOSTED_EXECUTION_COMMIT_BASE_URL,
-  DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
-  DEFAULT_HOSTED_EXECUTION_EMAIL_BASE_URL,
-  DEFAULT_HOSTED_EXECUTION_SIDE_EFFECTS_BASE_URL,
-  DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
   HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
-  HOSTED_EXECUTION_CALLBACK_HOSTS,
   buildHostedExecutionDeviceSyncConnectLinkPath,
   buildHostedExecutionRunnerCommitPath,
   buildHostedExecutionRunnerEmailMessagePath,
@@ -24,6 +17,7 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
   HOSTED_EXECUTION_AI_USAGE_RECORD_PATH,
+  HOSTED_EXECUTION_SHARE_IMPORT_COMPLETE_PATH,
   buildHostedExecutionPendingUsageUsersPath,
   buildHostedExecutionSharePackPath,
   buildHostedExecutionUserCryptoContextPath,
@@ -34,17 +28,11 @@ import {
   buildHostedExecutionUserRunPath,
   buildHostedExecutionUserStatusPath,
   buildHostedExecutionUserStoredDispatchPath,
-  createHostedExecutionControlClient,
-  createHostedExecutionDispatchClient,
-  createHostedExecutionProxyAiUsageClient,
-  createHostedExecutionProxyDeviceSyncRuntimeClient,
-  createHostedExecutionServerDeviceSyncConnectLinkClient,
   createHostedExecutionSignature,
   createHostedExecutionSignatureHeaders,
   buildHostedExecutionStructuredLogRecord,
   emitHostedExecutionStructuredLog,
   deriveHostedExecutionErrorCode,
-  fetchHostedExecutionWebControlPlaneResponse,
   summarizeHostedExecutionError,
   HOSTED_EXECUTION_DISPATCH_PATH,
   HOSTED_EXECUTION_NONCE_HEADER,
@@ -54,27 +42,49 @@ import {
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
   readHostedExecutionDispatchRef,
   readHostedEmailCapabilities,
-  readHostedExecutionControlEnvironment,
-  readHostedExecutionDispatchEnvironment,
   readHostedExecutionSignatureHeaders,
   readHostedExecutionOutboxPayload,
   parseHostedExecutionSideEffectRecord,
-  readHostedExecutionVercelProductionBaseUrl,
-  readHostedExecutionWebControlPlaneEnvironment,
-  readHostedExecutionWorkerEnvironment,
-  assertHostedExecutionOptionalJwkPairConfigured,
-  createHostedExecutionVercelOidcValidationEnvironment,
-  normalizeHostedExecutionBaseUrl,
   normalizeHostedDeviceSyncJobHints,
   parseHostedExecutionUserStatus,
   resolveHostedDeviceSyncWakeContext,
-  resolveHostedExecutionAiUsageClient,
-  resolveHostedExecutionDeviceSyncConnectLinkClient,
-  resolveHostedExecutionDeviceSyncRuntimeClient,
-  resolveHostedExecutionDispatchLifecycle,
   resolveHostedExecutionDispatchOutcomeState,
   verifyHostedExecutionSignature,
 } from "@murphai/hosted-execution";
+import {
+  DEFAULT_HOSTED_EXECUTION_ARTIFACTS_BASE_URL,
+  DEFAULT_HOSTED_EXECUTION_COMMIT_BASE_URL,
+  DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
+  DEFAULT_HOSTED_EXECUTION_EMAIL_BASE_URL,
+  DEFAULT_HOSTED_EXECUTION_SIDE_EFFECTS_BASE_URL,
+  DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
+  HOSTED_EXECUTION_CALLBACK_HOSTS,
+} from "@murphai/hosted-execution/callback-hosts";
+import {
+  createHostedExecutionControlClient,
+  createHostedExecutionDispatchClient,
+} from "@murphai/hosted-execution/client";
+import {
+  assertHostedExecutionOptionalJwkPairConfigured,
+  normalizeHostedExecutionBaseUrl,
+  readHostedExecutionControlEnvironment,
+  readHostedExecutionDispatchEnvironment,
+  readHostedExecutionVercelProductionBaseUrl,
+  readHostedExecutionWebControlPlaneEnvironment,
+  readHostedExecutionWorkerEnvironment,
+} from "@murphai/hosted-execution/env";
+import {
+  createHostedExecutionVercelOidcValidationEnvironment,
+} from "@murphai/hosted-execution/vercel-oidc";
+import {
+  createHostedExecutionProxyAiUsageClient,
+  createHostedExecutionProxyDeviceSyncRuntimeClient,
+  createHostedExecutionServerDeviceSyncConnectLinkClient,
+  fetchHostedExecutionWebControlPlaneResponse,
+  resolveHostedExecutionAiUsageClient,
+  resolveHostedExecutionDeviceSyncConnectLinkClient,
+  resolveHostedExecutionDeviceSyncRuntimeClient,
+} from "@murphai/hosted-execution/web-control-plane";
 import {
   TEST_HOSTED_RECIPIENT_PRIVATE_JWK,
   TEST_HOSTED_RECIPIENT_PUBLIC_JWK,
@@ -1427,7 +1437,7 @@ describe("@murphai/hosted-execution", () => {
     })).toThrow("Hosted assistant side effect record delivery.idempotencyKey must be a non-empty string.");
   });
 
-  it("centralizes dispatch outcome and lifecycle mapping", () => {
+  it("centralizes dispatch outcome mapping", () => {
     expect(
       resolveHostedExecutionDispatchOutcomeState({
         initialState: {
@@ -1446,60 +1456,6 @@ describe("@murphai/hosted-execution", () => {
         },
       }),
     ).toBe("completed");
-
-    expect(
-      resolveHostedExecutionDispatchLifecycle({
-        event: {
-          eventId: "evt_queued",
-          lastError: null,
-          state: "queued",
-          userId: "member_123",
-        },
-        status: {
-          backpressuredEventIds: [],
-          bundleRef: null,
-          inFlight: false,
-          lastError: null,
-          lastEventId: "evt_queued",
-          lastRunAt: null,
-          nextWakeAt: null,
-          pendingEventCount: 1,
-          poisonedEventIds: [],
-          retryingEventId: null,
-          userId: "member_123",
-        },
-      }),
-    ).toEqual({
-      lastError: null,
-      status: "accepted",
-    });
-
-    expect(
-      resolveHostedExecutionDispatchLifecycle({
-        event: {
-          eventId: "evt_poisoned",
-          lastError: null,
-          state: "poisoned",
-          userId: "member_123",
-        },
-        status: {
-          backpressuredEventIds: [],
-          bundleRef: null,
-          inFlight: false,
-          lastError: "runner failed repeatedly",
-          lastEventId: "evt_poisoned",
-          lastRunAt: null,
-          nextWakeAt: null,
-          pendingEventCount: 0,
-          poisonedEventIds: ["evt_poisoned"],
-          retryingEventId: null,
-          userId: "member_123",
-        },
-      }),
-    ).toEqual({
-      lastError: "runner failed repeatedly",
-      status: "failed",
-    });
 
     expect(
       resolveHostedExecutionDispatchOutcomeState({
@@ -1576,87 +1532,6 @@ describe("@murphai/hosted-execution", () => {
         },
       }),
     ).toBe("queued");
-
-    expect(
-      resolveHostedExecutionDispatchLifecycle({
-        event: {
-          eventId: "evt_duplicate",
-          lastError: "ignored",
-          state: "duplicate_consumed",
-          userId: "member_123",
-        },
-        status: {
-          backpressuredEventIds: [],
-          bundleRef: null,
-          inFlight: false,
-          lastError: null,
-          lastEventId: "evt_duplicate",
-          lastRunAt: null,
-          nextWakeAt: null,
-          pendingEventCount: 0,
-          poisonedEventIds: [],
-          retryingEventId: null,
-          userId: "member_123",
-        },
-      }),
-    ).toEqual({
-      lastError: null,
-      status: "completed",
-    });
-
-    expect(
-      resolveHostedExecutionDispatchLifecycle({
-        event: {
-          eventId: "evt_backpressured",
-          lastError: "runner busy",
-          state: "backpressured",
-          userId: "member_123",
-        },
-        status: {
-          backpressuredEventIds: ["evt_backpressured"],
-          bundleRef: null,
-          inFlight: true,
-          lastError: "runner busy",
-          lastEventId: "evt_backpressured",
-          lastRunAt: null,
-          nextWakeAt: "2026-03-28T10:00:00.000Z",
-          pendingEventCount: 1,
-          poisonedEventIds: [],
-          retryingEventId: "evt_backpressured",
-          userId: "member_123",
-        },
-      }),
-    ).toEqual({
-      lastError: "runner busy",
-      status: "pending",
-    });
-
-    expect(
-      resolveHostedExecutionDispatchLifecycle({
-        event: {
-          eventId: "evt_config",
-          lastError: null,
-          state: "duplicate_pending",
-          userId: "member_123",
-        },
-        status: {
-          backpressuredEventIds: [],
-          bundleRef: null,
-          inFlight: false,
-          lastError: "Hosted execution dispatch is not configured.",
-          lastEventId: "evt_config",
-          lastRunAt: null,
-          nextWakeAt: null,
-          pendingEventCount: 1,
-          poisonedEventIds: [],
-          retryingEventId: null,
-          userId: "member_123",
-        },
-      }),
-    ).toEqual({
-      lastError: "Hosted execution dispatch is not configured.",
-      status: "pending",
-    });
   });
 
   it("does not accept the removed Cloudflare signing-secret alias", () => {
@@ -1685,6 +1560,9 @@ describe("@murphai/hosted-execution", () => {
     );
     expect(HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH).toBe(
       "/api/internal/device-sync/runtime/apply",
+    );
+    expect(HOSTED_EXECUTION_SHARE_IMPORT_COMPLETE_PATH).toBe(
+      "/api/internal/hosted-execution/share-import/complete",
     );
     expect(buildHostedExecutionUserStatusPath("member/123")).toBe("/internal/users/member%2F123/status");
     expect(buildHostedExecutionUserRunPath("member/123")).toBe("/internal/users/member%2F123/run");

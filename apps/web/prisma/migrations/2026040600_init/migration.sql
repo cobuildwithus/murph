@@ -25,7 +25,7 @@ CREATE TYPE "HostedStripeEventStatus" AS ENUM ('pending', 'processing', 'complet
 CREATE TYPE "HostedRevnetIssuanceStatus" AS ENUM ('pending', 'submitting', 'submitted', 'confirmed', 'failed');
 
 -- CreateEnum
-CREATE TYPE "ExecutionOutboxStatus" AS ENUM ('pending', 'dispatching', 'accepted', 'completed', 'failed');
+CREATE TYPE "ExecutionOutboxStatus" AS ENUM ('queued', 'dispatching', 'dispatched', 'delivery_failed');
 
 -- CreateTable
 CREATE TABLE "device_connection" (
@@ -326,15 +326,12 @@ CREATE TABLE "execution_outbox" (
     "event_id" TEXT NOT NULL,
     "event_kind" TEXT NOT NULL,
     "payload_json" JSONB NOT NULL,
-    "status" "ExecutionOutboxStatus" NOT NULL DEFAULT 'pending',
+    "status" "ExecutionOutboxStatus" NOT NULL DEFAULT 'queued',
     "attempt_count" INTEGER NOT NULL DEFAULT 0,
     "last_attempt_at" TIMESTAMP(3),
     "next_attempt_at" TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP,
     "claim_token" TEXT,
     "claim_expires_at" TIMESTAMP(3),
-    "accepted_at" TIMESTAMP(3),
-    "completed_at" TIMESTAMP(3),
-    "failed_at" TIMESTAMP(3),
     "last_error" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
