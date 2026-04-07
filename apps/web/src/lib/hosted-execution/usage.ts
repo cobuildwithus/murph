@@ -10,7 +10,7 @@ import {
 
 import { readHostedMemberBillingPrivateState } from "../hosted-onboarding/member-private-codecs";
 import { getPrisma } from "../prisma";
-import { requireHostedExecutionControlClient } from "./control";
+import { requireHostedPendingUsageClient } from "./pending-usage-client";
 
 export interface ImportHostedAiUsageResult {
   recordedIds: string[];
@@ -280,7 +280,7 @@ export async function drainHostedPendingAiUsageImports(input: {
   prisma?: PrismaClient;
 } = {}): Promise<HostedPendingAiUsageImportDrainResult> {
   const prisma = input.prisma ?? getPrisma();
-  const client = requireHostedExecutionControlClient();
+  const client = requireHostedPendingUsageClient();
   const dirtyUserIds = await client.getPendingUsageDirtyUsers();
 
   let imported = 0;

@@ -1,13 +1,13 @@
 import { DurableObject } from "cloudflare:workers";
 export { ContainerProxy } from "@cloudflare/containers";
 
+import type { CloudflareHostedUserEnvStatus } from "@murphai/cloudflare-hosted-control";
 import {
   emitHostedExecutionStructuredLog,
   parseHostedExecutionDispatchRequest,
   type HostedExecutionDispatchRequest,
   type HostedExecutionDispatchResult,
   type HostedExecutionOutboxPayload,
-  type HostedExecutionUserEnvStatus,
   type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
 import type {
@@ -373,15 +373,15 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.status();
   }
 
-  async getUserEnvStatus(): Promise<HostedExecutionUserEnvStatus> {
+  async getUserEnvStatus(): Promise<CloudflareHostedUserEnvStatus> {
     return this.runner.getUserEnvStatus();
   }
 
-  async updateUserEnv(update: HostedUserEnvUpdate): Promise<HostedExecutionUserEnvStatus> {
+  async updateUserEnv(update: HostedUserEnvUpdate): Promise<CloudflareHostedUserEnvStatus> {
     return this.runner.updateUserEnv(update);
   }
 
-  async clearUserEnv(): Promise<HostedExecutionUserEnvStatus> {
+  async clearUserEnv(): Promise<CloudflareHostedUserEnvStatus> {
     return this.runner.clearUserEnv();
   }
 

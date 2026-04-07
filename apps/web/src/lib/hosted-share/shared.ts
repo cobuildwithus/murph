@@ -256,7 +256,7 @@ export function requireHostedSharePublicBaseUrl(): string {
 }
 
 function readHostedSharePreviewCount(value: unknown, field: string): number {
-  if (!Number.isInteger(value) || value < 0) {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
     throw new TypeError(`Hosted share preview ${field} count must be a non-negative integer.`);
   }
 

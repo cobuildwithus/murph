@@ -1,73 +1,52 @@
-# Shrink @murphai/hosted-execution to semantic ports and move Cloudflare topology behind injected runtime capabilities
-
-Status: completed
-Created: 2026-04-07
-Updated: 2026-04-07
+# Hosted Execution Seam Split
 
 ## Goal
 
-- Hard-cut the hosted execution runtime so shared/runtime packages consume semantic injected capabilities only, while `apps/cloudflare` becomes the sole owner of worker-host topology and outbound proxy policy.
+Hard-cut `@murphai/hosted-execution` down to the shared dispatch/transport seam so it no longer publishes the broad Cloudflare control SDK, owner route builders, or duplicated device-sync control-plane contracts.
 
-## Success criteria
+## Why
 
-- `packages/assistant-runtime/**` no longer constructs or inspects Cloudflare worker URLs/hostnames.
-- `packages/hosted-execution/**` no longer exports worker host constants or shared Cloudflare callback/proxy base URL defaults.
-- `packages/device-syncd/**` no longer hardcodes `device-sync.worker`.
-- `apps/cloudflare/**` owns the internal worker host map and injects method-based runtime capabilities into the hosted runner.
-- Hosted runtime behavior still passes the required verification lanes for the touched packages/apps.
+- The public hosted package still acts like a mini platform SDK.
+- Cloudflare topology has already moved app-local, so the remaining work is ownership cleanup rather than transport inversion.
+- A hard cut is acceptable; no compatibility window is required.
 
 ## Scope
 
-- In scope:
-- `packages/assistant-runtime/**`
-- `packages/hosted-execution/**`
-- `packages/device-syncd/**`
-- `apps/cloudflare/**`
-- `ARCHITECTURE.md`
-- package/app README files that describe the hosted boundary
-- Out of scope:
-- changing hosted product behavior beyond the boundary cleanup
-- adding new hosted ports beyond `artifactStore`, `effectsPort`, `deviceSyncPort`, and `usageExportPort`
-- reviving removed share-pack fetch routes or adding speculative runtime seams
+- Trim `packages/hosted-execution/**` to shared dispatch/auth/runner/outbox/status surfaces.
+- Move broad hosted control client ownership into app-local web code.
+- Move device-sync hosted runtime request/apply/connect-link seams out of the public hosted package.
+- Localize Cloudflare owner routes/callback paths/env readers under `apps/cloudflare/**`.
+- Update docs/exports/imports accordingly.
 
 ## Constraints
 
-- Technical constraints:
-- The hosted runner crosses JSON process boundaries inside the container, so method-based capability injection must be rebuilt inside app-local runner bootstrap rather than serialized directly through the job payload.
-- Missing injected capabilities must fail closed.
-- Product/process constraints:
-- Preserve unrelated dirty-tree edits.
-- Keep the results/effects lane combined behind one semantic `effectsPort`.
-
-## Risks and mitigations
-
-1. Risk: runtime/platform inversion sprawls across too many files and regresses hosted execution.
-   Mitigation: cut `assistant-runtime` first around a small `HostedRuntimePlatform` interface, then adapt Cloudflare onto it before deleting old topology helpers.
-2. Risk: serializable runner payload constraints tempt a fallback to URL-based shared config.
-   Mitigation: move the isolated child bootstrap into `apps/cloudflare` so method-based runtime dependencies stay app-local and non-serializable.
-3. Risk: active hosted/device-sync lanes overlap touched files.
-   Mitigation: stay within the existing hosted seam-split coordination lane, re-read files before edits, and avoid unrelated behavior changes.
-
-## Tasks
-
-1. Add `HostedRuntimePlatform` and refactor `assistant-runtime` internals to depend on semantic methods rather than callback URLs or worker hostnames.
-2. Replace the Cloudflare hosted-runner entry/bootstrap path so `apps/cloudflare` builds the platform adapter, including isolated child execution.
-3. Move worker-host constants and outbound routing ownership fully into `apps/cloudflare`.
-4. Remove shared Cloudflare topology/defaulting from `hosted-execution` and `device-syncd`.
-5. Update docs/tests, run required verification, audit the final diff, and commit via `scripts/finish-task`.
-
-## Decisions
-
-- Use a method-based `HostedRuntimePlatform` interface with four semantic capabilities: `artifactStore`, `effectsPort`, `deviceSyncPort`, and `usageExportPort`.
-- Keep the current combined results lane as semantic `effectsPort` instead of splitting commit/email/journal into separate ports.
-- Treat the serialized job payload as transport glue only; runtime behavior itself consumes injected methods, not URLs.
-- Rebuild the injected platform inside `apps/cloudflare` runner bootstrap, including the isolated child path.
+- Preserve unrelated dirty edits in the worktree.
+- Re-read overlapping hosted files immediately before editing them.
+- Keep status sharing acceptable on the public seam.
+- Avoid introducing cross-package cycles or making the public package depend on non-publishable owner packages.
 
 ## Verification
 
-- Commands to run:
 - `pnpm typecheck`
 - `pnpm test:coverage`
-- Expected outcomes:
-- Hosted runtime and Cloudflare runner tests cover the boundary cut without shared worker-host defaults remaining in runtime/shared packages.
+- Targeted proof where the hard cut changes a trust/owner boundary.
+
+## Notes
+
+- This plan restores the active plan path referenced by `COORDINATION_LEDGER.md`.
+- Expected follow-up completion path: required `simplify` audit if the implementation diff crosses the size threshold, then required `task-finish-review`, then scoped commit via `scripts/finish-task`.
+- Implemented:
+  - added private `packages/cloudflare-hosted-control`
+  - moved Cloudflare operational control contracts/routes/client out of the public hosted package
+  - moved web device-sync runtime callers onto `@murphai/device-syncd/hosted-runtime`
+  - localized Cloudflare worker env and outbound route ownership under `apps/cloudflare`
+  - removed `packages/hosted-execution/src/web-control-plane.ts`
+- Verification status:
+  - targeted `apps/web` execution/device-sync/store tests passed under explicit Vitest project selection
+  - `pnpm --filter @murphai/hosted-execution test` passed
+  - `pnpm --filter @murphai/cloudflare-hosted-control build` passed
+  - `pnpm --filter @murphai/hosted-web typecheck` now reaches only pre-existing `packages/core` failures after local hosted seam fixes
+  - repo-wide `pnpm typecheck`, `pnpm test:coverage`, `pnpm --filter @murphai/cloudflare-runner typecheck`, and `pnpm --filter @murphai/assistant-runtime typecheck` are blocked by pre-existing failures in `packages/core` and `packages/assistant-engine`
+Status: completed
+Updated: 2026-04-07
 Completed: 2026-04-07

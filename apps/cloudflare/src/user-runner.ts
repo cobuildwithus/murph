@@ -1,9 +1,9 @@
+import type { CloudflareHostedUserEnvStatus } from "@murphai/cloudflare-hosted-control";
 import type {
   HostedExecutionBundleRef,
   HostedExecutionDispatchResult,
   HostedExecutionDispatchRequest,
   HostedExecutionOutboxPayload,
-  HostedExecutionUserEnvStatus,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
 import type {
@@ -549,7 +549,7 @@ export class HostedUserRunner {
     return toUserStatus(await this.queueStore.readState());
   }
 
-  async getUserEnvStatus(): Promise<HostedExecutionUserEnvStatus> {
+  async getUserEnvStatus(): Promise<CloudflareHostedUserEnvStatus> {
     const userId = await this.requireBoundUserId();
     const { userEnv } = await this.ensureRunnerStores(userId);
     return {
@@ -560,7 +560,7 @@ export class HostedUserRunner {
 
   async updateUserEnv(
     update: HostedUserEnvUpdate,
-  ): Promise<HostedExecutionUserEnvStatus> {
+  ): Promise<CloudflareHostedUserEnvStatus> {
     return this.withUserKeyEnvelopeLock(async () => {
       const userId = await this.requireBoundUserId();
       const { userEnv } = await this.ensureRunnerStoresWhileHoldingKeyLock(userId);
@@ -568,7 +568,7 @@ export class HostedUserRunner {
     });
   }
 
-  async clearUserEnv(): Promise<HostedExecutionUserEnvStatus> {
+  async clearUserEnv(): Promise<CloudflareHostedUserEnvStatus> {
     return this.updateUserEnv({
       env: {},
       mode: "replace",

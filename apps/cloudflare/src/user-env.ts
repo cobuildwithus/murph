@@ -1,7 +1,7 @@
 import {
-  parseHostedExecutionUserEnvUpdate,
-  type HostedExecutionUserEnvUpdate,
-} from "@murphai/hosted-execution";
+  parseCloudflareHostedUserEnvUpdate,
+  type CloudflareHostedUserEnvUpdate,
+} from "@murphai/cloudflare-hosted-control";
 
 import { isHostedUserEnvKeyAllowed } from "./hosted-env-policy.ts";
 
@@ -13,7 +13,7 @@ export interface HostedUserEnvConfig {
   updatedAt: string;
 }
 
-export type HostedUserEnvUpdate = HostedExecutionUserEnvUpdate;
+export type HostedUserEnvUpdate = CloudflareHostedUserEnvUpdate;
 
 const utf8Decoder = new TextDecoder();
 const utf8Encoder = new TextEncoder();
@@ -108,7 +108,7 @@ export function parseHostedUserEnvUpdate(value: unknown): HostedUserEnvUpdate {
     "Hosted user env request body must be a JSON object.",
   );
 
-  return parseHostedExecutionUserEnvUpdate({
+  return parseCloudflareHostedUserEnvUpdate({
     env: requireHostedUserEnvObject(
       payload.env,
       "Hosted user env request body field `env` must be a JSON object.",

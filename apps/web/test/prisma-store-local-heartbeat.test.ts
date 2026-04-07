@@ -4,14 +4,15 @@ const { controlClientMocks } = vi.hoisted(() => ({
   controlClientMocks: {
     applyDeviceSyncRuntimeUpdates: vi.fn(),
     getDeviceSyncRuntimeSnapshot: vi.fn(),
-    requireHostedExecutionControlClient: vi.fn(),
-    readHostedExecutionControlClientIfConfigured: vi.fn(),
+    requireHostedDeviceSyncRuntimeClient: vi.fn(),
+    readHostedDeviceSyncRuntimeClientIfConfigured: vi.fn(),
   },
 }));
 
-vi.mock("@/src/lib/hosted-execution/control", () => ({
-  requireHostedExecutionControlClient: controlClientMocks.requireHostedExecutionControlClient,
-  readHostedExecutionControlClientIfConfigured: controlClientMocks.readHostedExecutionControlClientIfConfigured,
+vi.mock("@/src/lib/device-sync/runtime-client", () => ({
+  requireHostedDeviceSyncRuntimeClient: controlClientMocks.requireHostedDeviceSyncRuntimeClient,
+  readHostedDeviceSyncRuntimeClientIfConfigured:
+    controlClientMocks.readHostedDeviceSyncRuntimeClientIfConfigured,
 }));
 
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
@@ -225,11 +226,11 @@ function createHeartbeatStore(seed: Partial<RuntimeConnection["localState"]> = {
       userId: "user-123",
     };
   });
-  controlClientMocks.requireHostedExecutionControlClient.mockReturnValue({
+  controlClientMocks.requireHostedDeviceSyncRuntimeClient.mockReturnValue({
     applyDeviceSyncRuntimeUpdates: controlClientMocks.applyDeviceSyncRuntimeUpdates,
     getDeviceSyncRuntimeSnapshot: controlClientMocks.getDeviceSyncRuntimeSnapshot,
   });
-  controlClientMocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+  controlClientMocks.readHostedDeviceSyncRuntimeClientIfConfigured.mockReturnValue({
     applyDeviceSyncRuntimeUpdates: controlClientMocks.applyDeviceSyncRuntimeUpdates,
     getDeviceSyncRuntimeSnapshot: controlClientMocks.getDeviceSyncRuntimeSnapshot,
   });

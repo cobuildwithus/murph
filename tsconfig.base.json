@@ -31,6 +31,12 @@
       "@murphai/hosted-execution/*": [
         "packages/hosted-execution/src/*"
       ],
+      "@murphai/cloudflare-hosted-control": [
+        "packages/cloudflare-hosted-control/src/index.ts"
+      ],
+      "@murphai/cloudflare-hosted-control/*": [
+        "packages/cloudflare-hosted-control/src/*"
+      ],
       "@murphai/messaging-ingress": [
         "packages/messaging-ingress/src/index.ts"
       ],

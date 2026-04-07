@@ -5,7 +5,6 @@ import type {
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
-  HostedExecutionAiUsageRecordResponse,
   HostedExecutionSideEffectRecord,
 } from "@murphai/hosted-execution";
 
@@ -56,7 +55,7 @@ export interface HostedRuntimeDeviceSyncPort {
 }
 
 export interface HostedRuntimeUsageExportPort {
-  recordUsage(usage: readonly object[]): Promise<HostedExecutionAiUsageRecordResponse>;
+  recordUsage(usage: readonly object[]): Promise<HostedRuntimeUsageRecordResponse>;
 }
 
 export interface HostedRuntimePlatform {
@@ -64,4 +63,9 @@ export interface HostedRuntimePlatform {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   effectsPort: HostedRuntimeEffectsPort;
   usageExportPort?: HostedRuntimeUsageExportPort | null;
+}
+
+export interface HostedRuntimeUsageRecordResponse {
+  recorded: number;
+  usageIds: string[];
 }

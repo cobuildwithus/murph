@@ -4,24 +4,26 @@ import {
 } from "@murphai/assistant-runtime";
 import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
-  HOSTED_EXECUTION_AI_USAGE_RECORD_PATH,
-  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
-  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
-  buildHostedExecutionDeviceSyncConnectLinkPath,
   buildHostedExecutionRunnerCommitPath,
   buildHostedExecutionRunnerEmailMessagePath,
   buildHostedExecutionRunnerSideEffectPath,
+  parseHostedExecutionSideEffectRecord,
+} from "@murphai/hosted-execution";
+import {
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
+  buildHostedExecutionDeviceSyncConnectLinkPath,
   parseHostedExecutionDeviceSyncConnectLinkResponse,
   parseHostedExecutionDeviceSyncRuntimeApplyResponse,
   parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
-  parseHostedExecutionSideEffectRecord,
-} from "@murphai/hosted-execution";
+} from "@murphai/device-syncd/hosted-runtime";
 
 import {
   CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS,
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
 } from "./internal-hosts.ts";
+import { CLOUDFLARE_HOSTED_USAGE_RECORD_PATH } from "./outbound-routes.ts";
 
 interface HostedExecutionAiUsageRecordResponse {
   recorded: number;
@@ -234,7 +236,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
           method: "POST",
           timeoutMs,
           url: new URL(
-            HOSTED_EXECUTION_AI_USAGE_RECORD_PATH,
+            CLOUDFLARE_HOSTED_USAGE_RECORD_PATH,
             `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.usageExportPort}/`,
           ),
         });

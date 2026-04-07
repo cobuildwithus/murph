@@ -1,6 +1,8 @@
 import {
-  buildHostedExecutionUserRunPath,
-  buildHostedExecutionUserStatusPath,
+  buildCloudflareHostedControlUserRunPath,
+  buildCloudflareHostedControlUserStatusPath,
+} from "@murphai/cloudflare-hosted-control";
+import {
   parseHostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
 import type {
@@ -89,12 +91,12 @@ export async function runSmokeHostedDeploy(input: {
       authorizationHeader,
       fetchImpl,
       headers: versionOverrideHeaders,
-      url: new URL(buildHostedExecutionUserStatusPath(smokeUserId), `${workerBaseUrl}/`).toString(),
+      url: new URL(buildCloudflareHostedControlUserStatusPath(smokeUserId), `${workerBaseUrl}/`).toString(),
     };
     const initialStatus = await readSmokeUserStatus(statusRequest);
     await invokeManualRun({
       ...statusRequest,
-      url: new URL(buildHostedExecutionUserRunPath(smokeUserId), `${workerBaseUrl}/`).toString(),
+      url: new URL(buildCloudflareHostedControlUserRunPath(smokeUserId), `${workerBaseUrl}/`).toString(),
     });
     const pollIntervalMs = readPositiveInteger(
       source.HOSTED_EXECUTION_SMOKE_STATUS_POLL_INTERVAL_MS,

@@ -244,10 +244,13 @@ async function verifyHostedCloudflareCallbackSignature(input: {
     return false;
   }
 
+  const signatureBuffer = new ArrayBuffer(signatureBytes.byteLength);
+  new Uint8Array(signatureBuffer).set(signatureBytes);
+
   return crypto.subtle.verify(
     HOSTED_CLOUDFLARE_CALLBACK_VERIFY_ALGORITHM,
     input.key,
-    signatureBytes,
+    signatureBuffer,
     encodeHostedExecutionSignedRequestPayload({
       method: input.method,
       nonce: input.nonce,
@@ -326,7 +329,7 @@ function decodeBase64Url(value: string): Uint8Array | null {
   const withPadding = remainder === 0 ? padded : `${padded}${"=".repeat(4 - remainder)}`;
 
   try {
-    return Uint8Array.from(Buffer.from(withPadding, "base64"));
+    return Uint8Array.from([...Buffer.from(withPadding, "base64")]);
   } catch {
     return null;
   }
