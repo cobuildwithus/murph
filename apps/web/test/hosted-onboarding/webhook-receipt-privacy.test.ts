@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   HostedExecutionDispatchRequest,
-  HostedExecutionReferenceOutboxPayload,
 } from "@murphai/hosted-execution";
 import { Prisma } from "@prisma/client";
+import type {
+  HostedExecutionOutboxPayload,
+} from "../../src/lib/hosted-execution/outbox-payload";
 
 const {
   deleteHostedStoredDispatchPayloadBestEffort,
@@ -78,7 +80,7 @@ describe("hosted webhook receipt privacy cutover", () => {
 
   it("stages dispatch side effects into reference-only Cloudflare payload refs", async () => {
     const dispatch = createSensitiveDispatch();
-    const referencePayload = createReferencePayload(dispatch, "dispatch/staged-1");
+    const referencePayload = createReferencePayload(dispatch, "staged/dispatch-1");
     maybeStageHostedExecutionDispatchPayload.mockResolvedValue(referencePayload);
 
     const pendingEffect = createHostedWebhookDispatchSideEffect({ dispatch });
@@ -110,7 +112,7 @@ describe("hosted webhook receipt privacy cutover", () => {
 
   it("cleans up newly staged payloads when receipt persistence fails", async () => {
     const dispatch = createSensitiveDispatch();
-    const referencePayload = createReferencePayload(dispatch, "dispatch/staged-cleanup");
+    const referencePayload = createReferencePayload(dispatch, "staged/dispatch-cleanup");
     maybeStageHostedExecutionDispatchPayload.mockResolvedValue(referencePayload);
 
     const claimedReceipt: HostedWebhookReceiptClaim = {
@@ -145,7 +147,7 @@ describe("hosted webhook receipt privacy cutover", () => {
       ...createSensitiveDispatch(),
       eventId: "linq-event-456",
     };
-    const firstReferencePayload = createReferencePayload(firstDispatch, "dispatch/staged-first");
+    const firstReferencePayload = createReferencePayload(firstDispatch, "staged/dispatch-first");
     maybeStageHostedExecutionDispatchPayload
       .mockResolvedValueOnce(firstReferencePayload)
       .mockResolvedValueOnce(null);
@@ -205,7 +207,7 @@ describe("hosted webhook receipt privacy cutover", () => {
               occurredAt: "2026-04-06T09:00:00.000Z",
               userId: "member_123",
             },
-            schemaVersion: "murph.execution-outbox.v2",
+            schemaVersion: "murph.execution-outbox.v3",
             storage: "reference",
             telegramUpdate: {
               message: {
@@ -298,19 +300,17 @@ function createSensitiveDispatch(): HostedExecutionDispatchRequest {
 
 function createReferencePayload(
   dispatch: ReturnType<typeof createSensitiveDispatch>,
-  key: string,
-): HostedExecutionReferenceOutboxPayload {
+  stagedPayloadId: string,
+): HostedExecutionOutboxPayload {
   return {
     dispatchRef: {
       eventId: dispatch.eventId,
-      eventKind: dispatch.event.kind,
+      eventKind: "linq.message.received" as const,
       occurredAt: dispatch.occurredAt,
       userId: dispatch.event.userId,
     },
-    payloadRef: {
-      key,
-    },
-    schemaVersion: "murph.execution-outbox.v2",
+    stagedPayloadId,
+    schemaVersion: "murph.execution-outbox.v3",
     storage: "reference" as const,
   };
 }
@@ -399,10 +399,8 @@ function looksLikeReferenceOutboxPayload(value: unknown): value is {
     eventKind: string;
     userId: string;
   };
-  payloadRef: {
-    key: string;
-  };
-  schemaVersion: "murph.execution-outbox.v2";
+  stagedPayloadId: string;
+  schemaVersion: "murph.execution-outbox.v3";
   storage: "reference";
 } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -411,18 +409,15 @@ function looksLikeReferenceOutboxPayload(value: unknown): value is {
 
   const payload = value as Record<string, unknown>;
   const dispatchRef = payload.dispatchRef;
-  const payloadRef = payload.payloadRef;
+  const stagedPayloadId = payload.stagedPayloadId;
 
   return payload.storage === "reference"
-    && payload.schemaVersion === "murph.execution-outbox.v2"
+    && payload.schemaVersion === "murph.execution-outbox.v3"
     && !!dispatchRef
     && typeof dispatchRef === "object"
     && !Array.isArray(dispatchRef)
     && typeof (dispatchRef as Record<string, unknown>).eventId === "string"
     && typeof (dispatchRef as Record<string, unknown>).eventKind === "string"
     && typeof (dispatchRef as Record<string, unknown>).userId === "string"
-    && !!payloadRef
-    && typeof payloadRef === "object"
-    && !Array.isArray(payloadRef)
-    && typeof (payloadRef as Record<string, unknown>).key === "string";
+    && typeof stagedPayloadId === "string";
 }

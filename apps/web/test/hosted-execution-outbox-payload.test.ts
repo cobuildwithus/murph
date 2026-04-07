@@ -37,35 +37,29 @@ describe("hosted execution outbox payload storage", () => {
       eventId: "evt_wake_123",
       occurredAt: "2026-04-04T00:00:00.000Z",
     }, {
-      payloadRef: buildTestPayloadRef("evt_wake_123"),
+      stagedPayloadId: buildTestPayloadRef("evt_wake_123"),
     });
 
     expect((payload as { storage?: unknown }).storage).toBe("reference");
+    expect((payload as { stagedPayloadId?: unknown }).stagedPayloadId)
+      .toBe("staged/dispatch-payloads/member_123/evt_wake_123");
     expect(JSON.stringify(payload)).not.toContain("sleep.updated");
     expect(JSON.stringify(payload)).not.toContain("trace_123");
   });
 
-  it("stores member activation first-contact targets by reference", () => {
+  it("stores member activation inline when first contact is omitted", () => {
     const payload = serializeHostedExecutionOutboxPayload({
       event: {
-        firstContact: {
-          channel: "linq",
-          identityId: "hbidx:phone:v1:test",
-          threadId: "chat_123",
-          threadIsDirect: true,
-        },
         kind: "member.activated",
         userId: "member_123",
       },
       eventId: "evt_activation_123",
       occurredAt: "2026-04-04T00:00:00.000Z",
-    }, {
-      payloadRef: buildTestPayloadRef("evt_activation_123"),
     });
 
-    expect((payload as { storage?: unknown }).storage).toBe("reference");
-    expect(JSON.stringify(payload)).not.toContain("chat_123");
-    expect(JSON.stringify(payload)).not.toContain("hbidx:phone:v1:test");
+    expect((payload as { storage?: unknown }).storage).toBe("inline");
+    expect(payload).not.toHaveProperty("stagedPayloadId");
+    expect(JSON.stringify(payload)).not.toContain("firstContact");
   });
 
   it("stores gateway message sends by reference without persisting text or session identifiers", () => {
@@ -81,10 +75,12 @@ describe("hosted execution outbox payload storage", () => {
       eventId: "evt_gateway_123",
       occurredAt: "2026-04-04T00:00:00.000Z",
     }, {
-      payloadRef: buildTestPayloadRef("evt_gateway_123"),
+      stagedPayloadId: buildTestPayloadRef("evt_gateway_123"),
     });
 
     expect((payload as { storage?: unknown }).storage).toBe("reference");
+    expect((payload as { stagedPayloadId?: unknown }).stagedPayloadId)
+      .toBe("staged/dispatch-payloads/member_123/evt_gateway_123");
     expect(JSON.stringify(payload)).not.toContain("private outbound message");
     expect(JSON.stringify(payload)).not.toContain("gwcs_secret_123");
     expect(JSON.stringify(payload)).not.toContain("req_123");
@@ -111,8 +107,6 @@ describe("hosted execution outbox payload storage", () => {
   });
 });
 
-function buildTestPayloadRef(eventId: string): { key: string } {
-  return {
-    key: `transient/dispatch-payloads/member_123/${eventId}.json`,
-  };
+function buildTestPayloadRef(eventId: string): string {
+  return `staged/dispatch-payloads/member_123/${eventId}`;
 }
