@@ -44,12 +44,12 @@ export default function SettingsPage() {
             </div>
             <div className="grid gap-6 xl:grid-cols-2">
               <Card className="border-stone-200/80 shadow-sm transition-shadow hover:shadow-md">
-                <CardContent className="pt-4 md:pt-6">
+                <CardContent>
                   <HostedEmailSettings />
                 </CardContent>
               </Card>
               <Card className="border-stone-200/80 shadow-sm transition-shadow hover:shadow-md">
-                <CardContent className="pt-4 md:pt-6">
+                <CardContent>
                   <HostedTelegramSettings />
                 </CardContent>
               </Card>
