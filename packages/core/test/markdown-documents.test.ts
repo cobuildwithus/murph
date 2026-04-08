@@ -9,7 +9,15 @@ import {
   resolveSlugMarkdownDocumentTarget,
   writeCanonicalMarkdownDocument,
 } from "../src/markdown-documents.ts";
-import { scaffoldAutomationPayload, upsertAutomation } from "../src/automation.ts";
+import {
+  buildAutomationMarkdownPreview,
+  listAutomations,
+  readAutomation,
+  readAutomationMarkdown,
+  scaffoldAutomationPayload,
+  showAutomation,
+  upsertAutomation,
+} from "../src/automation.ts";
 
 async function createTempVaultRoot(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), "murph-core-markdown-"));
@@ -21,6 +29,19 @@ async function makeVaultRoot(): Promise<string> {
   const root = await createTempVaultRoot();
   tempRoots.push(root);
   return root;
+}
+
+type AutomationTestPayload = ReturnType<typeof scaffoldAutomationPayload> & {
+  automationId?: string;
+};
+
+function createAutomationPayload(
+  overrides: Partial<AutomationTestPayload> = {},
+): AutomationTestPayload {
+  return {
+    ...scaffoldAutomationPayload(),
+    ...overrides,
+  };
 }
 
 afterEach(async () => {
@@ -186,5 +207,179 @@ describe("markdown document primitives", () => {
     expect(parsed.attributes.automationId).toBe(result.record.automationId);
     expect(parsed.attributes.slug).toBe(result.record.slug);
     expect(parsed.body).toContain(result.record.prompt);
+  });
+
+  it("lists automations with status/text filters and limit", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const now = new Date("2026-04-08T00:00:00.000Z");
+
+    await upsertAutomation({
+      vaultRoot,
+      automationId: "automation_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      now,
+      ...createAutomationPayload({
+        title: "Sleep Check In",
+        slug: "sleep-check-in",
+        summary: "Weekly sleep digest.",
+        status: "active",
+        prompt: "Report the sleep recovery highlights.",
+        tags: ["sleep", "recovery"],
+      }),
+    });
+
+    await upsertAutomation({
+      vaultRoot,
+      automationId: "automation_01ARZ3NDEKTSV4RRFFQ69G5FAW",
+      now,
+      ...createAutomationPayload({
+        title: "Project Handoff",
+        slug: "project-handoff",
+        summary: "Paused handoff tracker.",
+        status: "paused",
+        prompt: "Track project handoff blockers.",
+        tags: ["project", "handoff"],
+      }),
+    });
+
+    await upsertAutomation({
+      vaultRoot,
+      automationId: "automation_01ARZ3NDEKTSV4RRFFQ69G5FAX",
+      now,
+      ...createAutomationPayload({
+        title: "Archive Sweep",
+        slug: "archive-sweep",
+        summary: "Legacy cleanup.",
+        status: "archived",
+        prompt: "Retire stale automation notes.",
+        tags: ["cleanup"],
+      }),
+    });
+
+    const statusMatches = await listAutomations({
+      vaultRoot,
+      status: ["archived", "paused"],
+      limit: 1,
+    });
+
+    expect(statusMatches.count).toBe(2);
+    expect(statusMatches.items).toHaveLength(1);
+    expect(statusMatches.items[0].automationId).toBe("automation_01ARZ3NDEKTSV4RRFFQ69G5FAX");
+
+    const textMatches = await listAutomations({
+      vaultRoot,
+      status: "paused",
+      text: "HANDOFF",
+    });
+
+    expect(textMatches.count).toBe(1);
+    expect(textMatches.items.map((record) => record.automationId)).toEqual([
+      "automation_01ARZ3NDEKTSV4RRFFQ69G5FAW",
+    ]);
+
+    const promptMatches = await listAutomations({
+      vaultRoot,
+      text: "recovery",
+    });
+
+    expect(promptMatches.count).toBe(1);
+    expect(promptMatches.items[0].automationId).toBe("automation_01ARZ3NDEKTSV4RRFFQ69G5FAV");
+  });
+
+  it("reads automations by id, shows them by slug, and rejects conflicting selectors", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const now = new Date("2026-04-08T00:00:00.000Z");
+    const active = await upsertAutomation({
+      vaultRoot,
+      automationId: "automation_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      now,
+      ...createAutomationPayload({
+        title: "Sleep Check In",
+        slug: "sleep-check-in",
+        summary: "Weekly sleep digest.",
+        status: "active",
+        prompt: "Report the sleep recovery highlights.",
+        tags: ["sleep", "recovery"],
+      }),
+    });
+
+    const paused = await upsertAutomation({
+      vaultRoot,
+      automationId: "automation_01ARZ3NDEKTSV4RRFFQ69G5FAW",
+      now,
+      ...createAutomationPayload({
+        title: "Project Handoff",
+        slug: "project-handoff",
+        summary: "Paused handoff tracker.",
+        status: "paused",
+        prompt: "Track project handoff blockers.",
+        tags: ["project", "handoff"],
+      }),
+    });
+
+    const readById = await readAutomation({
+      vaultRoot,
+      automationId: active.record.automationId,
+    });
+
+    expect(readById.slug).toBe("sleep-check-in");
+    expect(readById.prompt).toBe("Report the sleep recovery highlights.");
+
+    const shownBySlug = await showAutomation({
+      vaultRoot,
+      slug: paused.record.slug,
+    });
+
+    expect(shownBySlug?.automationId).toBe(paused.record.automationId);
+
+    await expect(
+      showAutomation({
+        vaultRoot,
+        automationId: active.record.automationId,
+        slug: paused.record.slug,
+      }),
+    ).rejects.toMatchObject({
+      code: "VAULT_AUTOMATION_CONFLICT",
+      message: "Automation id and slug resolve to different records.",
+    });
+  });
+
+  it("normalizes automation preview markdown and round-trips stored markdown", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const previewInput = createAutomationPayload({
+      automationId: "automation_01ARZ3NDEKTSV4RRFFQ69G5FAZ",
+      slug: undefined,
+      title: "  Nightly Digest  ",
+      summary: "  Trimmed summary  ",
+      status: "paused",
+      continuityPolicy: "fresh",
+      prompt: "Draft a nightly digest.  \n",
+      tags: ["nightly", "nightly", "assistant"],
+    });
+
+    const previewMarkdown = buildAutomationMarkdownPreview(previewInput);
+    const previewDocument = parseFrontmatterDocument(previewMarkdown);
+    const previewRelativePath = `bank/automations/${previewDocument.attributes.slug}.md`;
+
+    await fs.mkdir(path.join(vaultRoot, "bank/automations"), { recursive: true });
+    await fs.writeFile(path.join(vaultRoot, previewRelativePath), previewMarkdown, "utf8");
+
+    expect(previewDocument.attributes.slug).toBe("nightly-digest");
+    expect(previewDocument.attributes.summary).toBe("Trimmed summary");
+    expect(previewDocument.attributes.tags).toEqual(["nightly", "assistant"]);
+    expect(previewDocument.body).toBe("Draft a nightly digest.");
+
+    const readMarkdown = await readAutomationMarkdown(vaultRoot, previewInput.automationId!);
+    expect(readMarkdown).toBe(previewMarkdown);
+
+    const readRecord = await readAutomation({
+      vaultRoot,
+      automationId: previewInput.automationId!,
+    });
+
+    expect(readRecord.relativePath).toBe(previewRelativePath);
+    expect(readRecord.prompt).toBe("Draft a nightly digest.");
+    expect(readRecord.status).toBe("paused");
+    expect(readRecord.summary).toBe("Trimmed summary");
+    expect(readRecord.tags).toEqual(["nightly", "assistant"]);
   });
 });

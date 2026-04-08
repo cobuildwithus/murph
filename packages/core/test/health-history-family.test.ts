@@ -16,6 +16,7 @@ import {
 import {
   appendBloodTest,
   appendHistoryEvent,
+  isBloodTestHistoryRecord,
   listHistoryEvents,
   readHistoryEvent,
 } from "../src/history/index.ts";
@@ -636,6 +637,204 @@ test("blood-test writes infer result status and persist structured analytes cano
   assert.equal((stored[0] as { resultStatus?: string }).resultStatus, "mixed");
   assert.equal((stored[0] as { testCategory?: string }).testCategory, "blood");
   assert.equal((stored[0] as { specimenType?: string }).specimenType, "blood");
+});
+
+test("blood-test writes accept textValue-only results and reject empty or incomplete result payloads", async () => {
+  const vaultRoot = await makeTempDirectory("murph-blood-test-text-only");
+  await initializeVault({ vaultRoot });
+
+  const appended = await appendBloodTest({
+    vaultRoot,
+    occurredAt: "2026-03-05T09:00:00.000Z",
+    title: "Blood panel with textual result",
+    testName: "text_only_panel",
+    results: [
+      {
+        analyte: "Ferritin",
+        textValue: "Reported as elevated by external lab",
+      },
+    ],
+  });
+  const stored = await readJsonlRecords({
+    vaultRoot,
+    relativePath: appended.relativePath,
+  });
+  const storedRecord = stored[0] as {
+    results?: Array<{ analyte?: string; value?: number; textValue?: string }>;
+    resultStatus?: string;
+  };
+
+  assert.equal(appended.record.kind, "test");
+  assert.equal(appended.record.testCategory, "blood");
+  assert.equal(appended.record.specimenType, "blood");
+  assert.equal(appended.record.resultStatus, "unknown");
+  assert.equal(appended.record.results[0]?.analyte, "Ferritin");
+  assert.equal(appended.record.results[0]?.value, undefined);
+  assert.equal(appended.record.results[0]?.textValue, "Reported as elevated by external lab");
+  assert.equal(storedRecord.results?.[0]?.textValue, "Reported as elevated by external lab");
+  assert.equal(storedRecord.results?.[0]?.value, undefined);
+  assert.equal(storedRecord.resultStatus, "unknown");
+
+  await assert.rejects(
+    () =>
+      appendBloodTest({
+        vaultRoot,
+        occurredAt: "2026-03-05T10:00:00.000Z",
+        title: "Empty blood panel",
+        testName: "empty_panel",
+        results: [],
+      }),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_INVALID_INPUT",
+  );
+
+  const incompleteResult: {
+    analyte: string;
+    value?: number;
+    textValue?: string;
+  } = {
+    analyte: "Transferrin",
+    value: 18,
+  };
+  delete incompleteResult.value;
+
+  await assert.rejects(
+    () =>
+      appendBloodTest({
+        vaultRoot,
+        occurredAt: "2026-03-05T11:00:00.000Z",
+        title: "Incomplete blood panel",
+        testName: "incomplete_panel",
+        results: [incompleteResult],
+      }),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_INVALID_INPUT",
+  );
+});
+
+test("isBloodTestHistoryRecord matches blood-category and specimen-driven test records", () => {
+  assert.equal(
+    isBloodTestHistoryRecord({
+      kind: "test",
+      testCategory: "chemistry",
+      specimenType: "urine",
+    }),
+    false,
+  );
+  assert.equal(
+    isBloodTestHistoryRecord({
+      kind: "test",
+      testCategory: "blood",
+      specimenType: "urine",
+    }),
+    true,
+  );
+  assert.equal(
+    isBloodTestHistoryRecord({
+      kind: "test",
+      testCategory: "chemistry",
+      specimenType: "serum",
+    }),
+    true,
+  );
+  assert.equal(
+    isBloodTestHistoryRecord({
+      kind: "test",
+      testCategory: "chemistry",
+      specimenType: "urine",
+    }),
+    false,
+  );
+});
+
+test("history list filters by source and date range, respects limit, and rejects invalid inputs", async () => {
+  const vaultRoot = await makeTempDirectory("murph-history-list-filters");
+  await initializeVault({ vaultRoot });
+
+  const manualEarly = await appendHistoryEvent({
+    vaultRoot,
+    kind: "encounter",
+    occurredAt: "2026-03-10T08:00:00.000Z",
+    title: "Manual early visit",
+    encounterType: "office_visit",
+    source: "manual",
+  });
+  const importedMiddle = await appendHistoryEvent({
+    vaultRoot,
+    kind: "test",
+    occurredAt: "2026-03-11T08:00:00.000Z",
+    title: "Imported lab result",
+    testName: "imported_panel",
+    source: "import",
+  });
+  const manualLate = await appendHistoryEvent({
+    vaultRoot,
+    kind: "procedure",
+    occurredAt: "2026-03-12T08:00:00.000Z",
+    title: "Manual late procedure",
+    procedure: "screening",
+    source: "manual",
+  });
+
+  const imported = await listHistoryEvents({
+    vaultRoot,
+    source: "import",
+    order: "asc",
+  });
+  const manualRange = await listHistoryEvents({
+    vaultRoot,
+    source: "manual",
+    from: "2026-03-10T08:00:00.000Z",
+    to: "2026-03-12T08:00:00.000Z",
+    order: "asc",
+  });
+  const manualLimited = await listHistoryEvents({
+    vaultRoot,
+    source: "manual",
+    from: "2026-03-10T08:00:00.000Z",
+    to: "2026-03-12T08:00:00.000Z",
+    order: "asc",
+    limit: 1,
+  });
+
+  assert.deepEqual(imported.map((record) => record.id), [importedMiddle.record.id]);
+  assert.deepEqual(manualRange.map((record) => record.id), [
+    manualEarly.record.id,
+    manualLate.record.id,
+  ]);
+  assert.deepEqual(manualLimited.map((record) => record.id), [manualEarly.record.id]);
+
+  await assert.rejects(
+    () =>
+      listHistoryEvents({
+        vaultRoot,
+        // @ts-expect-error runtime validation case
+        source: "invalid",
+      }),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_INVALID_INPUT",
+  );
+  await assert.rejects(
+    () =>
+      listHistoryEvents({
+        vaultRoot,
+        from: "not-a-timestamp",
+      }),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_INVALID_DATE",
+  );
+  await assert.rejects(
+    () =>
+      listHistoryEvents({
+        vaultRoot,
+        to: "not-a-timestamp",
+      }),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_INVALID_DATE",
+  );
+  await assert.rejects(
+    () =>
+      listHistoryEvents({
+        vaultRoot,
+        limit: 0,
+      }),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_INVALID_INPUT",
+  );
 });
 
 test("history writes reject provider ids and raw refs that violate the canonical event contract", async () => {
