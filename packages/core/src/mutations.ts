@@ -1171,6 +1171,30 @@ function normalizeDeviceRawArtifactInputs(
   });
 }
 
+function normalizeDeviceBatchObjectArray<T extends LooseRecord>(input: {
+  value: unknown;
+  code: string;
+  message: string;
+  itemCode: string;
+  itemLabel: string;
+}): T[] {
+  if (input.value === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(input.value)) {
+    throw new VaultError(input.code, input.message);
+  }
+
+  return input.value.map((entry, index) =>
+    assertPlainObject<T>(
+      entry,
+      input.itemCode,
+      `${input.itemLabel} ${index + 1} must be a plain object.`,
+    ),
+  );
+}
+
 function normalizeDeviceBatchInputs({
   provider,
   accountId,
@@ -1193,33 +1217,27 @@ function normalizeDeviceBatchInputs({
     "VAULT_INVALID_DEVICE_PROVENANCE",
     "Device import provenance must be a plain object.",
   ) ?? {};
-  const eventInputs = Array.isArray(events)
-    ? events.map((event, index) =>
-        assertPlainObject<DeviceEventInput>(
-          event,
-          "VAULT_INVALID_EVENT",
-          `Device event ${index + 1} must be a plain object.`,
-        ),
-      )
-    : [];
-  const sampleInputs = Array.isArray(samples)
-    ? samples.map((sample, index) =>
-        assertPlainObject<DeviceSampleInput>(
-          sample,
-          "VAULT_INVALID_SAMPLE",
-          `Device sample ${index + 1} must be a plain object.`,
-        ),
-      )
-    : [];
-  const rawArtifactInputs = Array.isArray(rawArtifacts)
-    ? rawArtifacts.map((artifact, index) =>
-        assertPlainObject<DeviceRawArtifactInput>(
-          artifact,
-          "VAULT_INVALID_RAW_ARTIFACT",
-          `Device raw artifact ${index + 1} must be a plain object.`,
-        ),
-      )
-    : [];
+  const eventInputs = normalizeDeviceBatchObjectArray<DeviceEventInput>({
+    value: events,
+    code: "VAULT_INVALID_DEVICE_EVENTS",
+    message: "Device batch events must be an array when provided.",
+    itemCode: "VAULT_INVALID_EVENT",
+    itemLabel: "Device event",
+  });
+  const sampleInputs = normalizeDeviceBatchObjectArray<DeviceSampleInput>({
+    value: samples,
+    code: "VAULT_INVALID_DEVICE_SAMPLES",
+    message: "Device batch samples must be an array when provided.",
+    itemCode: "VAULT_INVALID_SAMPLE",
+    itemLabel: "Device sample",
+  });
+  const rawArtifactInputs = normalizeDeviceBatchObjectArray<DeviceRawArtifactInput>({
+    value: rawArtifacts,
+    code: "VAULT_INVALID_DEVICE_RAW_ARTIFACTS",
+    message: "Device batch rawArtifacts must be an array when provided.",
+    itemCode: "VAULT_INVALID_RAW_ARTIFACT",
+    itemLabel: "Device raw artifact",
+  });
 
   if (eventInputs.length === 0 && sampleInputs.length === 0 && rawArtifactInputs.length === 0) {
     throw new VaultError(

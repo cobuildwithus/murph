@@ -70,8 +70,30 @@ const DEVICE_SYNC_METADATA_MAX_ENTRIES = 16;
 const DEVICE_SYNC_METADATA_MAX_KEY_LENGTH = 64;
 const DEVICE_SYNC_METADATA_MAX_STRING_LENGTH = 256;
 const DEVICE_SYNC_METADATA_BLOCKED_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+const DEVICE_SYNC_METADATA_BLOCKED_KEY_SUBSTRINGS = [
+  "accesstoken",
+  "refreshtoken",
+  "authorization",
+  "bearer",
+  "cookie",
+  "setcookie",
+  "apikey",
+  "clientsecret",
+  "password",
+  "sessiontoken",
+  "sessionid",
+];
 
 type DeviceSyncMetadataScalar = string | number | boolean | null;
+
+function isBlockedDeviceSyncMetadataKey(value: string): boolean {
+  if (DEVICE_SYNC_METADATA_BLOCKED_KEYS.has(value)) {
+    return true;
+  }
+
+  const normalized = value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return DEVICE_SYNC_METADATA_BLOCKED_KEY_SUBSTRINGS.some((token) => normalized.includes(token));
+}
 
 function sanitizeStoredDeviceSyncMetadataValue(value: unknown): DeviceSyncMetadataScalar | undefined {
   if (value === null) {
@@ -109,7 +131,7 @@ export function sanitizeStoredDeviceSyncMetadata(
 
     const key = rawKey.trim();
 
-    if (!key || key.length > DEVICE_SYNC_METADATA_MAX_KEY_LENGTH || DEVICE_SYNC_METADATA_BLOCKED_KEYS.has(key)) {
+    if (!key || key.length > DEVICE_SYNC_METADATA_MAX_KEY_LENGTH || isBlockedDeviceSyncMetadataKey(key)) {
       continue;
     }
 

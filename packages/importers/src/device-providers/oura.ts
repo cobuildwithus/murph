@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import { extractIsoDatePrefix } from "@murphai/contracts";
 
 import { stripEmptyObject, stripUndefined } from "../shared.ts";
@@ -49,6 +51,29 @@ export interface OuraSnapshotInput {
   heartrate?: unknown[];
   heartRate?: unknown[];
   deletions?: unknown[];
+}
+
+const ouraCollectionSchema = z.array(z.unknown());
+
+const ouraSnapshotSchema = z.object({
+  accountId: z.union([z.string(), z.number()]).optional(),
+  importedAt: z.union([z.string(), z.number(), z.date()]).optional(),
+  personalInfo: z.unknown().optional(),
+  dailyActivity: ouraCollectionSchema.optional(),
+  dailySleep: ouraCollectionSchema.optional(),
+  dailyReadiness: ouraCollectionSchema.optional(),
+  dailySpO2: ouraCollectionSchema.optional(),
+  dailySpo2: ouraCollectionSchema.optional(),
+  sleeps: ouraCollectionSchema.optional(),
+  sessions: ouraCollectionSchema.optional(),
+  workouts: ouraCollectionSchema.optional(),
+  heartrate: ouraCollectionSchema.optional(),
+  heartRate: ouraCollectionSchema.optional(),
+  deletions: ouraCollectionSchema.optional(),
+}).catchall(z.unknown());
+
+function parseOuraSnapshot(snapshot: unknown): OuraSnapshotInput {
+  return ouraSnapshotSchema.parse(snapshot);
 }
 
 function secondsToMinutes(value: unknown): number | undefined {
@@ -787,5 +812,6 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
 
 export const ouraProviderAdapter: DeviceProviderAdapter<OuraSnapshotInput> = {
   ...OURA_DEVICE_PROVIDER_DESCRIPTOR,
+  parseSnapshot: parseOuraSnapshot,
   normalizeSnapshot: normalizeOuraSnapshot,
 };
