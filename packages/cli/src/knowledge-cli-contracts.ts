@@ -4,6 +4,21 @@ import {
   pathSchema,
   slugSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
+import type {
+  KnowledgeIndexRebuildResult as SharedKnowledgeIndexRebuildResult,
+  KnowledgeLintProblem as SharedKnowledgeLintProblem,
+  KnowledgeLintResult as SharedKnowledgeLintResult,
+  KnowledgeListResult as SharedKnowledgeListResult,
+  KnowledgeLogEntry as SharedKnowledgeLogEntry,
+  KnowledgeLogTailResult as SharedKnowledgeLogTailResult,
+  KnowledgePage as SharedKnowledgePage,
+  KnowledgePageMetadata as SharedKnowledgePageMetadata,
+  KnowledgePageReference as SharedKnowledgePageReference,
+  KnowledgeSearchHit as SharedKnowledgeSearchHit,
+  KnowledgeSearchResult as SharedKnowledgeSearchResult,
+  KnowledgeShowResult as SharedKnowledgeShowResult,
+  KnowledgeUpsertResult as SharedKnowledgeUpsertResult,
+} from '@murphai/operator-config/knowledge-contracts'
 import { DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT } from '@murphai/query'
 
 export const knowledgePageReferenceSchema = z.object({
@@ -17,14 +32,15 @@ export const knowledgePageReferenceSchema = z.object({
   status: z.string().min(1).nullable(),
   summary: z.string().min(1).nullable(),
   title: z.string().min(1),
-})
+}) satisfies z.ZodType<SharedKnowledgePageReference>
 
-export const knowledgePageMetadataSchema = knowledgePageReferenceSchema
+export const knowledgePageMetadataSchema =
+  knowledgePageReferenceSchema satisfies z.ZodType<SharedKnowledgePageMetadata>
 
 export const knowledgePageSchema = knowledgePageMetadataSchema.extend({
   body: z.string(),
   markdown: z.string().min(1),
-})
+}) satisfies z.ZodType<SharedKnowledgePage>
 
 export const knowledgeUpsertResultSchema = z.object({
   vault: pathSchema,
@@ -32,7 +48,7 @@ export const knowledgeUpsertResultSchema = z.object({
   page: knowledgePageMetadataSchema,
   bodyLength: z.number().int().nonnegative(),
   savedAt: isoTimestampSchema,
-})
+}) satisfies z.ZodType<SharedKnowledgeUpsertResult>
 
 export const knowledgeListResultSchema = z.object({
   pageCount: z.number().int().nonnegative(),
@@ -40,13 +56,13 @@ export const knowledgeListResultSchema = z.object({
   pages: z.array(knowledgePageMetadataSchema),
   status: z.string().min(1).nullable(),
   vault: pathSchema,
-})
+}) satisfies z.ZodType<SharedKnowledgeListResult>
 
 export const knowledgeSearchHitSchema = knowledgePageReferenceSchema.extend({
   matchedTerms: z.array(z.string().min(1)),
   score: z.number(),
   snippet: z.string().min(1),
-})
+}) satisfies z.ZodType<SharedKnowledgeSearchHit>
 
 export const knowledgeSearchResultSchema = z.object({
   format: z.literal(DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT),
@@ -56,14 +72,14 @@ export const knowledgeSearchResultSchema = z.object({
   status: z.string().min(1).nullable(),
   total: z.number().int().nonnegative(),
   vault: pathSchema,
-})
+}) satisfies z.ZodType<SharedKnowledgeSearchResult>
 
 export const knowledgeLogEntrySchema = z.object({
   action: z.string().min(1),
   block: z.string().min(1),
   occurredAt: isoTimestampSchema,
   title: z.string().min(1),
-})
+}) satisfies z.ZodType<SharedKnowledgeLogEntry>
 
 export const knowledgeLogTailResultSchema = z.object({
   count: z.number().int().nonnegative(),
@@ -71,12 +87,12 @@ export const knowledgeLogTailResultSchema = z.object({
   limit: z.number().int().positive().max(200),
   logPath: pathSchema,
   vault: pathSchema,
-})
+}) satisfies z.ZodType<SharedKnowledgeLogTailResult>
 
 export const knowledgeShowResultSchema = z.object({
   page: knowledgePageSchema,
   vault: pathSchema,
-})
+}) satisfies z.ZodType<SharedKnowledgeShowResult>
 
 export const knowledgeIndexRebuildResultSchema = z.object({
   indexPath: pathSchema,
@@ -84,7 +100,7 @@ export const knowledgeIndexRebuildResultSchema = z.object({
   pageTypes: z.array(z.string().min(1)),
   rebuilt: z.literal(true),
   vault: pathSchema,
-})
+}) satisfies z.ZodType<SharedKnowledgeIndexRebuildResult>
 
 export const knowledgeLintProblemSchema = z.object({
   code: z.string().min(1),
@@ -92,7 +108,7 @@ export const knowledgeLintProblemSchema = z.object({
   pagePath: pathSchema,
   slug: slugSchema.nullable(),
   severity: z.enum(['error', 'warning']),
-})
+}) satisfies z.ZodType<SharedKnowledgeLintProblem>
 
 export const knowledgeLintResultSchema = z.object({
   ok: z.boolean(),
@@ -100,18 +116,20 @@ export const knowledgeLintResultSchema = z.object({
   problemCount: z.number().int().nonnegative(),
   problems: z.array(knowledgeLintProblemSchema),
   vault: pathSchema,
-})
+}) satisfies z.ZodType<SharedKnowledgeLintResult>
 
-export type KnowledgeUpsertResult = z.infer<typeof knowledgeUpsertResultSchema>
-export type KnowledgeIndexRebuildResult = z.infer<typeof knowledgeIndexRebuildResultSchema>
-export type KnowledgeLintResult = z.infer<typeof knowledgeLintResultSchema>
-export type KnowledgeLintProblem = z.infer<typeof knowledgeLintProblemSchema>
-export type KnowledgeListResult = z.infer<typeof knowledgeListResultSchema>
-export type KnowledgeLogEntry = z.infer<typeof knowledgeLogEntrySchema>
-export type KnowledgeLogTailResult = z.infer<typeof knowledgeLogTailResultSchema>
-export type KnowledgePage = z.infer<typeof knowledgePageSchema>
-export type KnowledgePageMetadata = z.infer<typeof knowledgePageMetadataSchema>
-export type KnowledgePageReference = z.infer<typeof knowledgePageReferenceSchema>
-export type KnowledgeSearchHit = z.infer<typeof knowledgeSearchHitSchema>
-export type KnowledgeSearchResult = z.infer<typeof knowledgeSearchResultSchema>
-export type KnowledgeShowResult = z.infer<typeof knowledgeShowResultSchema>
+export type {
+  KnowledgeIndexRebuildResult,
+  KnowledgeLintProblem,
+  KnowledgeLintResult,
+  KnowledgeListResult,
+  KnowledgeLogEntry,
+  KnowledgeLogTailResult,
+  KnowledgePage,
+  KnowledgePageMetadata,
+  KnowledgePageReference,
+  KnowledgeSearchHit,
+  KnowledgeSearchResult,
+  KnowledgeShowResult,
+  KnowledgeUpsertResult,
+} from '@murphai/operator-config/knowledge-contracts'

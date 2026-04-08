@@ -177,33 +177,33 @@ Adding one more query field now flows from the real query owner through the CLI/
 **Main refactor risk:** keep the adapter limited to runtime loading and narrow naming compatibility.
 Do not let `vault-usecases` start reaching into query internals or reintroducing narrower local copies just to preserve older field subsets.
 
+### 11. Keep knowledge result contracts owned by `operator-config`, with CLI schemas as the boundary adapter
+
+**Seam:** `packages/operator-config/src/knowledge-contracts.ts`, `packages/operator-config/package.json`, `packages/assistant-engine/src/knowledge/contracts.ts`, `packages/cli/src/knowledge-cli-contracts.ts`
+
+`KnowledgePageReference`, `KnowledgePage`, `KnowledgeSearchResult`, `KnowledgeLogTailResult`, and the lint/index result shapes were split between assistant-engine interfaces and CLI-local inferred types.
+That forced the same product contract to drift across two packages even though both layers already depend on `operator-config` for shared contract surfaces.
+
+This patch:
+
+- adds one shared `Knowledge*` contract owner in `packages/operator-config/src/knowledge-contracts.ts`
+- turns `packages/assistant-engine/src/knowledge/contracts.ts` into a pure re-export of those shared result types
+- keeps `packages/cli/src/knowledge-cli-contracts.ts` as the CLI boundary schema layer, but types each schema against the shared owner instead of inferring a second nominal contract surface
+
+**Why this is simpler:** assistant-engine and CLI now share one source of truth for the knowledge result model while CLI still owns its parse/validation boundary.
+Adding or renaming a knowledge result field now has one type owner instead of two.
+
+**Main refactor risk:** do not move CLI-only descriptions or parsing ergonomics into `operator-config` just because the result types are shared there.
+The shared owner should stay on the product record shape; the CLI file should remain a thin boundary adapter.
+
 ## Current targeted review findings
 
-No code changes landed below.
-This is the current review-only pass over the live tree for the next data-model simplifications that look highest-leverage without weakening canonical-write or trust-boundary rules.
-
-### High leverage now
-
-#### 1. Give knowledge result contracts one owner instead of separate assistant-engine and CLI copies
-
-**Seam:** `packages/assistant-engine/src/knowledge/contracts.ts`, `packages/assistant-engine/src/knowledge.ts`, `packages/cli/src/knowledge-cli-contracts.ts`, `packages/cli/src/commands/knowledge.ts`, `packages/cli/src/vault-cli-command-manifest.ts`, `packages/query/src/knowledge-model.ts`
-
-`KnowledgePageReference`, `KnowledgePage`, `KnowledgeSearchHit`, `KnowledgeSearchResult`, `KnowledgeLogTailResult`, and the lint/index result shapes are defined once as assistant-engine interfaces and again as CLI incur schemas plus inferred types.
-Even the result format constant is already shared from `packages/query/src/knowledge-model.ts` via `DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT`, which highlights that the contract already spans packages while the rest of the field set does not.
-
-**Current cost:** one more field on a knowledge page or lint result requires synchronized manual edits in two owners.
-That makes CLI validation, assistant-engine return types, and future web/hosted knowledge surfaces easy to drift out of alignment.
-
-**Simpler target:** move the canonical knowledge result shape to one shared owner below CLI/app packages.
-In the current package graph, the least disruptive owner is a new shared contract surface under `packages/operator-config` or `packages/contracts`.
-Then turn `packages/assistant-engine/src/knowledge/contracts.ts` into a re-export or alias layer, and keep `packages/cli/src/knowledge-cli-contracts.ts` as a thin incur boundary adapter over that shared shape instead of a second nominal owner.
-
-**Main refactor risk:** do not solve this by making assistant-engine depend on CLI or by letting the shared owner absorb CLI-only help text and parser ergonomics.
-The shared layer should own the product record shape and constants; CLI can still own its boundary schemas and presentation-only constraints.
+The notes below are the remaining review-only pass after the simplifications landed above.
+They focus on the next data-model simplifications that still look highest-leverage without weakening canonical-write or trust-boundary rules.
 
 ### Worth planning
 
-#### 2. Finish collapsing assistant delivery target vocabulary to one route owner
+#### 1. Finish collapsing assistant delivery target vocabulary to one route owner
 
 **Seam:** `packages/operator-config/src/assistant-cli-contracts.ts` (`assistantChannelDeliveryTargetKindValues`, `assistantBindingDeliveryKindValues`), `packages/gateway-core/src/contracts.ts` (`gatewayDeliveryTargetKindValues`, `gatewayReplyRouteKindValues`), `packages/hosted-execution/src/side-effects.ts` (`HostedExecutionAssistantDelivery.targetKind`)
 
@@ -219,7 +219,7 @@ Let operator-config and hosted-execution alias the shared target-kind types/cons
 **Main refactor risk:** do not pull assistant policy, hosted callback rules, or CLI help text down into gateway-core just to centralize string unions.
 Only the route-kind vocabulary should move; layer-specific policy should stay where it is.
 
-#### 3. Collapse hosted execution side-effect modeling to the one effect that actually exists today
+#### 2. Collapse hosted execution side-effect modeling to the one effect that actually exists today
 
 **Seam:** `packages/hosted-execution/src/side-effects.ts` (`HOSTED_EXECUTION_SIDE_EFFECT_KINDS`, `HostedExecutionSideEffect`, `HostedExecutionSideEffectRecord`), `packages/assistant-runtime/src/hosted-runtime/callbacks.ts`, `apps/cloudflare/src/side-effect-journal.ts`
 
@@ -235,7 +235,7 @@ If a second effect really appears later, re-generalize from two concrete cases i
 **Main refactor risk:** do not entangle this cleanup with Cloudflare-specific storage paths or callback protocol logic.
 The simplification should specialize the shared data model, not move trust-boundary or deployment policy into the wrong package.
 
-#### 4. Normalize hosted webhook side-effect persistence around common retry fields plus kind-owned details
+#### 3. Normalize hosted webhook side-effect persistence around common retry fields plus kind-owned details
 
 **Seam:** `apps/web/prisma/schema.prisma` (`HostedWebhookReceiptSideEffect`), `apps/web/src/lib/hosted-onboarding/webhook-receipt-types.ts` (`HostedWebhookSideEffect`), `apps/web/src/lib/hosted-onboarding/webhook-receipt-codec.ts` (`serializeHostedWebhookReceiptSideEffect`, `readHostedWebhookReceiptSideEffect`), `apps/web/src/lib/hosted-onboarding/webhook-dispatch-payload.ts`
 

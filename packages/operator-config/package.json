@@ -81,6 +81,11 @@
       "import": "./dist/imessage-readiness.js",
       "default": "./dist/imessage-readiness.js"
     },
+    "./knowledge-contracts": {
+      "types": "./dist/knowledge-contracts.d.ts",
+      "import": "./dist/knowledge-contracts.js",
+      "default": "./dist/knowledge-contracts.js"
+    },
     "./inbox-cli-contracts": {
       "types": "./dist/inbox-cli-contracts.d.ts",
       "import": "./dist/inbox-cli-contracts.js",
