@@ -121,7 +121,9 @@ The default image now bakes the local parser toolchain directly into the contain
 Current expectations for the container image:
 
 - Node `>=22.16.0`
-- the runner app assembled as a built package bundle under `apps/cloudflare/.deploy/runner-bundle`, with runtime dependencies materialized through `pnpm deploy` before `wrangler deploy` starts the Docker build
+- the runner app assembled by `apps/cloudflare` into `apps/cloudflare/.deploy/runner-bundle` before `wrangler deploy` starts the Docker build
+- a copy-only Docker contract: the final image copies `/app` from `apps/cloudflare/.deploy/runner-bundle`, then starts `dist/container-entrypoint.js`
+- bundle assembly is the app-owned artifact step and no longer ends with a workspace repair install
 - writable temp storage for ephemeral hosted bundle restore/snapshot work
 - the baked `/app` tree is a runtime artifact bundle and the runtime executes as a dedicated non-root user, so any job that needs scratch space must use temp/vault paths rather than mutating shipped assets
 - `PORT` for the internal bridge listen port, defaulting to `8080`
