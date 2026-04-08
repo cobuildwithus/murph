@@ -58,7 +58,7 @@ import {
   resolveForegroundTerminalLogOptions,
 } from '../run-terminal-logging.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import type { VaultServices } from '@murphai/vault-usecases/vault-services'
+import type { VaultServices } from '@murphai/vault-usecases'
 import { requestIdSchema } from '@murphai/operator-config/vault-cli-contracts'
 
 const assistantSessionOptionFields = {

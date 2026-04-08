@@ -6,7 +6,7 @@ import { test } from 'vitest'
 import { openSqliteRuntimeDatabase } from '@murphai/runtime-state/node'
 import { createIntegratedInboxServices } from '@murphai/inbox-services'
 import { createVaultCli } from '../src/vault-cli.js'
-import { createUnwiredVaultServices } from '@murphai/vault-usecases/vault-services'
+import { createUnwiredVaultServices } from '@murphai/vault-usecases'
 import { requireData, type CliEnvelope } from './cli-test-helpers.js'
 
 const builtCoreRuntimeUrl = new URL('../../core/dist/index.js', import.meta.url).href

@@ -46,7 +46,7 @@ import {
   formatInboxRunEventForTerminal,
   resolveForegroundTerminalLogOptions,
 } from '@murphai/assistant-cli/run-terminal-logging'
-import type { VaultServices } from '@murphai/vault-usecases/vault-services'
+import type { VaultServices } from '@murphai/vault-usecases'
 
 const inboxInitOptionFields = {
   rebuild: z

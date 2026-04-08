@@ -28,13 +28,10 @@ const workspaceSmokePackages = [
   {
     packageName: "vault-usecases",
     requiredSubpaths: [
-      "option-utils",
-      "usecases/intervention",
-      "usecases/workout",
-      "usecases/workout-format",
-      "usecases/workout-import",
-      "usecases/workout-measurement",
-      "vault-services",
+      "helpers",
+      "records",
+      "runtime",
+      "workouts",
     ],
   },
   {

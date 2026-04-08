@@ -9,7 +9,7 @@ import { registerExperimentCommands } from '../src/commands/experiment.js'
 import { registerJournalCommands } from '../src/commands/journal.js'
 import { registerReadCommands } from '../src/commands/read.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
-import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
+import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData } from './cli-test-helpers.js'
 

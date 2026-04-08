@@ -13,9 +13,8 @@ import {
 } from '@murphai/core'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { registerWorkoutCommands } from '../src/commands/workout.js'
-import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
-import { addWorkoutRecord } from '@murphai/vault-usecases/usecases/workout'
-import { addWorkoutMeasurementRecord } from '@murphai/vault-usecases/usecases/workout-measurement'
+import { createIntegratedVaultServices } from '@murphai/vault-usecases'
+import { addWorkoutMeasurementRecord, addWorkoutRecord } from '@murphai/vault-usecases/workouts'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData, runCli } from './cli-test-helpers.js'
 

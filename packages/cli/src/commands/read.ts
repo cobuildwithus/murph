@@ -5,7 +5,7 @@ import {
   listResultSchema,
   showResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
-import type { VaultServices } from '@murphai/vault-usecases/vault-services'
+import type { VaultServices } from '@murphai/vault-usecases'
 
 export function registerReadCommands(cli: Cli.Cli, services: VaultServices) {
   cli.command(

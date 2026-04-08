@@ -20,7 +20,7 @@ import {
 } from '@murphai/assistant-cli/run-terminal-logging'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { createVaultCli } from '../src/vault-cli.js'
-import { createUnwiredVaultServices } from '@murphai/vault-usecases/vault-services'
+import { createUnwiredVaultServices } from '@murphai/vault-usecases'
 import { requireData, type CliEnvelope } from './cli-test-helpers.js'
 
 const builtCoreRuntimeUrl = new URL('../../core/dist/index.js', import.meta.url).href

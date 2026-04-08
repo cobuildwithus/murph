@@ -11,11 +11,11 @@ import {
   getHealthRegistryCommandMetadata,
   healthEntityDescriptorByKind,
   inferHealthEntityKind,
-} from "@murphai/vault-usecases/health-cli-descriptors";
+} from "@murphai/vault-usecases";
 import {
   createExplicitHealthCoreServices,
   createExplicitHealthQueryServices,
-} from "@murphai/vault-usecases/usecases/shared";
+} from "@murphai/vault-usecases/helpers";
 
 test("CLI health descriptors reuse shared taxonomy lookup metadata and scaffold templates", () => {
   for (const definition of healthEntityDefinitions) {

@@ -11,7 +11,7 @@ import {
   pathSchema,
   slugSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
-import type { VaultServices } from '@murphai/vault-usecases/vault-services'
+import type { VaultServices } from '@murphai/vault-usecases'
 import {
   exportPackManifestSchema,
   listStoredExportPacks,

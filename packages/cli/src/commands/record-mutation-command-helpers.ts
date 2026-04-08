@@ -6,7 +6,7 @@ import {
 import {
   inputFileOptionSchema,
   normalizeInputFileOption,
-} from '@murphai/vault-usecases/json-input'
+} from '@murphai/vault-usecases'
 import {
   deleteResultSchema,
   showResultSchema,
