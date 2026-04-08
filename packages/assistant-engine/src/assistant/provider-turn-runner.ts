@@ -49,7 +49,7 @@ import {
 import {
   appendAssistantTurnReceiptEvent,
 } from './turns.js'
-import { createIntegratedVaultServices } from '@murphai/vault-usecases'
+import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
 import { createAssistantFoodAutoLogHooks } from './food-auto-log-hooks.js'
 import type { AssistantMessageInput } from './service-contracts.js'
 
@@ -547,21 +547,15 @@ async function executeAssistantProviderAttempt(input: {
     const session = recoveredSession ?? attemptPlan.session
     attachRecoveredAssistantSession(error, recoveredSession)
 
-    let nextFailoverState = input.failoverState
-    const shouldRecordRouteFailure = shouldRecordAssistantRouteFailure(errorCode)
-    if (shouldRecordRouteFailure) {
-      nextFailoverState = await recordAssistantFailoverRouteFailure({
-        error,
-        route: attemptPlan.route,
-        vault: executionPlan.input.vault,
-      })
-    }
-    const cooldownUntil = shouldRecordRouteFailure
-      ? getAssistantFailoverCooldownUntil({
-          route: attemptPlan.route,
-          state: nextFailoverState,
-        })
-      : null
+    const nextFailoverState = await recordAssistantFailoverRouteFailure({
+      error,
+      route: attemptPlan.route,
+      vault: executionPlan.input.vault,
+    })
+    const cooldownUntil = getAssistantFailoverCooldownUntil({
+      route: attemptPlan.route,
+      state: nextFailoverState,
+    })
 
     await recordProviderAttemptFailed({
       activityLabels: attemptMetadata.activityLabels,
@@ -924,10 +918,6 @@ function attachAssistantFailoverExhaustionContext(input: {
   return new Error('Assistant provider routes were exhausted.', {
     cause: input.error,
   })
-}
-
-function shouldRecordAssistantRouteFailure(errorCode: string | null): boolean {
-  return true
 }
 
 function truncateAssistantContinuityText(text: string): string {

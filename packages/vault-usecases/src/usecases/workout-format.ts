@@ -61,10 +61,6 @@ function valueAsString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined
 }
 
-function valueAsNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
 function toWorkoutFormatEntity(record: WorkoutFormatRecord, includeMarkdown: boolean) {
   return {
     id: record.workoutFormatId,

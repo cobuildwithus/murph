@@ -57,10 +57,6 @@ function valueAsString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined
 }
 
-function valueAsNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
 function formatSchemaIssues(issues: readonly { path: PropertyKey[]; message: string }[]): string {
   return issues
     .map((issue) => {

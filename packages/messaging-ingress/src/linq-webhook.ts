@@ -548,14 +548,6 @@ function normalizeOptionalTimestamp(value: unknown, label: string): string | nul
   return normalized ? toIsoTimestamp(normalized) : null;
 }
 
-function normalizeRequiredBoolean(value: unknown, label: string): boolean {
-  if (typeof value !== "boolean") {
-    throw new TypeError(`${label} must be a boolean.`);
-  }
-
-  return value;
-}
-
 function normalizeRequiredDirection(
   value: unknown,
   label: string,
@@ -577,17 +569,7 @@ function parseLinqMessagePart(part: unknown, index: number): LinqMessagePart {
   const record = toLinqObjectRecord(part, `Linq message.received message.parts[${index}]`);
   const type = normalizeRequiredString(record.type, `Linq message.received message.parts[${index}] type`);
 
-  if (type === "text") {
-    return {
-      type,
-      value: normalizeRequiredString(
-        record.value,
-        `Linq message.received message.parts[${index}] value`,
-      ),
-    };
-  }
-
-  if (type === "link") {
+  if (type === "text" || type === "link") {
     return {
       type,
       value: normalizeRequiredString(
