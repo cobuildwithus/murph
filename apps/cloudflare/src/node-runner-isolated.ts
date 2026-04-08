@@ -85,7 +85,7 @@ export async function runHostedExecutionJobIsolatedDetailed(
       });
       const childResult = parseHostedRuntimeChildResult(stdoutChunks.join(""));
 
-      if (!childResult.ok || !childResult.result) {
+      if (!childResult.ok || !isHostedAssistantRuntimeJobResult(childResult.result)) {
         throw createHostedRuntimeChildFailure(childResult.error, code);
       }
 
@@ -162,4 +162,24 @@ function createHostedRuntimeChildFailure(
     untyped.stack = error.stack;
   }
   return untyped;
+}
+
+function isHostedAssistantRuntimeJobResult(
+  value: unknown,
+): value is HostedAssistantRuntimeJobResult {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  if (!("finalGatewayProjectionSnapshot" in candidate)) {
+    return false;
+  }
+
+  if (typeof candidate.result !== "object" || candidate.result === null) {
+    return false;
+  }
+
+  const runnerResult = candidate.result as Record<string, unknown>;
+  return "bundle" in runnerResult && "result" in runnerResult;
 }
