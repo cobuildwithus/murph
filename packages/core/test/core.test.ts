@@ -709,9 +709,11 @@ test("copyRawArtifact enforces raw immutability and importDocument appends contr
   await copyRawArtifact({
     vaultRoot,
     sourcePath: documentPath,
-    category: "documents",
+    owner: {
+      kind: "document",
+      id: "doc_01JQ9R7WF97M1WAB2B4QF2Q1AA",
+    },
     targetName: "lab-result.pdf",
-    recordId: "fixed-record",
   });
 
   await assert.rejects(
@@ -719,9 +721,11 @@ test("copyRawArtifact enforces raw immutability and importDocument appends contr
       copyRawArtifact({
         vaultRoot,
         sourcePath: documentPath,
-        category: "documents",
+        owner: {
+          kind: "document",
+          id: "doc_01JQ9R7WF97M1WAB2B4QF2Q1AA",
+        },
         targetName: "lab-result.pdf",
-        recordId: "fixed-record",
       }),
     (error: unknown) => error instanceof VaultError && error.code === "VAULT_RAW_IMMUTABLE",
   );
@@ -1609,6 +1613,10 @@ test("validateVault accepts workout and body-measurement media references", asyn
         importKind: input.importKind,
         importedAt: "2026-03-12T08:00:00.000Z",
         source: "manual",
+        owner: {
+          kind: input.family,
+          id: input.eventId,
+        },
         rawDirectory: input.rawDirectory,
         artifacts: [
           {

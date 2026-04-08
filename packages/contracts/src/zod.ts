@@ -28,6 +28,7 @@ import {
   GOAL_STATUSES,
   ID_PREFIXES,
   PROFILE_SNAPSHOT_SOURCES,
+  RAW_ASSET_OWNER_KINDS,
   RAW_IMPORT_KINDS,
   RECIPE_STATUSES,
   PROTOCOL_KINDS,
@@ -65,6 +66,7 @@ export type EventSource = (typeof EVENT_SOURCES)[number];
 export type ExperimentPhase = (typeof EXPERIMENT_PHASES)[number];
 export type GoalHorizon = (typeof GOAL_HORIZONS)[number];
 export type GoalStatus = (typeof GOAL_STATUSES)[number];
+export type RawAssetOwnerKind = (typeof RAW_ASSET_OWNER_KINDS)[number];
 export type RawImportKind = (typeof RAW_IMPORT_KINDS)[number];
 export type ConditionClinicalStatus = (typeof CONDITION_CLINICAL_STATUSES)[number];
 export type ConditionVerificationStatus = (typeof CONDITION_VERIFICATION_STATUSES)[number];
@@ -105,10 +107,14 @@ const RAW_DOCUMENT_PATH_PATTERN = "^raw/documents/[A-Za-z0-9._/-]+$";
 const RAW_MEAL_PATH_PATTERN = "^raw/meals/[A-Za-z0-9._/-]+$";
 const RAW_ASSESSMENT_SOURCE_PATTERN = "^raw/assessments/[A-Za-z0-9._/-]+/source\\.json$";
 const RELATIVE_PATH_PATTERN = "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$";
+const SINGLE_PATH_SEGMENT_PATTERN = "^[A-Za-z0-9._-]+$";
 const SHA256_HEX_PATTERN = "^[a-f0-9]{64}$";
 const SLUG_PATTERN = "^[a-z0-9]+(?:-[a-z0-9]+)*$";
 const DAILY_TIME_PATTERN = "^(?:[01]\\d|2[0-3]):[0-5]\\d$";
 const UNIT_PATTERN = "^[A-Za-z0-9._/%-]+$";
+const LEGACY_WORKOUT_IMPORT_ID_PATTERN = "^wkimp_[0-9A-HJKMNP-TV-Z]{26}$";
+const GENERIC_CONTRACT_ID_REGEX = new RegExp(GENERIC_CONTRACT_ID_PATTERN);
+const LEGACY_WORKOUT_IMPORT_ID_REGEX = new RegExp(LEGACY_WORKOUT_IMPORT_ID_PATTERN);
 export const FAMILY_MEMBER_LIMITS = Object.freeze({
   title: 160,
   relationship: 120,
@@ -1030,13 +1036,60 @@ export const rawImportManifestArtifactSchema = z
   })
   .strict();
 
+const RAW_ASSET_OWNER_KINDS_REQUIRING_PARTITION = new Set<RawAssetOwnerKind>([
+  "device_batch",
+  "sample_batch",
+  "workout_batch",
+]);
+
+export const rawAssetOwnerSchema = z
+  .object({
+    kind: z.enum(RAW_ASSET_OWNER_KINDS),
+    id: z.string(),
+    partition: patternedString(SINGLE_PATH_SEGMENT_PATTERN).optional(),
+  })
+  .strict()
+  .superRefine((owner, context) => {
+    const requiresPartition = RAW_ASSET_OWNER_KINDS_REQUIRING_PARTITION.has(owner.kind);
+    const hasGenericId = GENERIC_CONTRACT_ID_REGEX.test(owner.id);
+    const hasLegacyWorkoutImportId = LEGACY_WORKOUT_IMPORT_ID_REGEX.test(owner.id);
+
+    if (!hasGenericId && !(owner.kind === "workout_batch" && hasLegacyWorkoutImportId)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Raw asset owner id must match ${GENERIC_CONTRACT_ID_PATTERN}${owner.kind === "workout_batch" ? ` or ${LEGACY_WORKOUT_IMPORT_ID_PATTERN}` : ""}.`,
+        path: ["id"],
+      });
+    }
+
+    if (requiresPartition && owner.partition === undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Raw asset owner kind "${owner.kind}" requires partition.`,
+        path: ["partition"],
+      });
+    }
+
+    if (!requiresPartition && owner.partition !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Raw asset owner kind "${owner.kind}" must not include partition.`,
+        path: ["partition"],
+      });
+    }
+  });
+
 export const rawImportManifestSchema = z
   .object({
     schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.rawImportManifest),
-    importId: patternedString(GENERIC_CONTRACT_ID_PATTERN),
+    importId: z.string().refine(
+      (value) => GENERIC_CONTRACT_ID_REGEX.test(value) || LEGACY_WORKOUT_IMPORT_ID_REGEX.test(value),
+      `Invalid raw import id. Expected ${GENERIC_CONTRACT_ID_PATTERN} or ${LEGACY_WORKOUT_IMPORT_ID_PATTERN}.`,
+    ),
     importKind: z.enum(RAW_IMPORT_KINDS),
     importedAt: isoDateTimeString(),
     source: boundedString(1, 160).nullable(),
+    owner: rawAssetOwnerSchema,
     rawDirectory: patternedString(RAW_PATH_PATTERN),
     artifacts: uniqueArray(rawImportManifestArtifactSchema, { uniqueItems: true }),
     provenance: jsonObjectSchema,
@@ -1265,6 +1318,7 @@ export type StoredMediaKind = z.infer<typeof storedMediaKindSchema>;
 export type StoredMedia = z.infer<typeof storedMediaSchema>;
 export type EventAttachmentKind = z.infer<typeof eventAttachmentKindSchema>;
 export type EventAttachment = z.infer<typeof eventAttachmentSchema>;
+export type RawAssetOwner = z.infer<typeof rawAssetOwnerSchema>;
 export type BodyMeasurementType = z.infer<typeof bodyMeasurementTypeSchema>;
 export type BodyMeasurementUnit = z.infer<typeof bodyMeasurementUnitSchema>;
 export type BodyMeasurementEntry = z.infer<typeof bodyMeasurementEntrySchema>;

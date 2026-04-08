@@ -583,6 +583,10 @@ export async function addActivitySession(
         preparedAttachments.length > 0
           ? await stagePreparedEventAttachmentsInBatch({
               batch,
+              owner: {
+                kind: "workout",
+                id: eventId,
+              },
               attachments: preparedAttachments,
               importId: input.rawImport?.importId ?? eventId,
               importKind: input.rawImport?.importKind ?? "workout_batch",
@@ -653,6 +657,10 @@ export async function addBodyMeasurement(
         preparedAttachments.length > 0
           ? await stagePreparedEventAttachmentsInBatch({
               batch,
+              owner: {
+                kind: "measurement",
+                id: eventId,
+              },
               attachments: preparedAttachments,
               importId: input.rawImport?.importId ?? eventId,
               importKind: input.rawImport?.importKind ?? "measurement_batch",

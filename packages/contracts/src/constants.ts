@@ -19,7 +19,7 @@ export const CONTRACT_SCHEMA_VERSION = Object.freeze({
   providerFrontmatter: "murph.frontmatter.provider.v1",
   recipeFrontmatter: "murph.frontmatter.recipe.v1",
   workoutFormatFrontmatter: "murph.frontmatter.workout-format.v1",
-  rawImportManifest: "murph.raw-import-manifest.v1",
+  rawImportManifest: "murph.raw-import-manifest.v2",
   protocolFrontmatter: "murph.frontmatter.protocol.v1",
   sample: "murph.sample.v1",
   sharePack: "murph.share-pack.v1",
@@ -115,6 +115,17 @@ export const RAW_IMPORT_KINDS = Object.freeze([
   "measurement_batch",
   "meal",
   "sample_batch",
+  "workout_batch",
+] as const);
+
+export const RAW_ASSET_OWNER_KINDS = Object.freeze([
+  "assessment",
+  "device_batch",
+  "document",
+  "meal",
+  "measurement",
+  "sample_batch",
+  "workout",
   "workout_batch",
 ] as const);
 

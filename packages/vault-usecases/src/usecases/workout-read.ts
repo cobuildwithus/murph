@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { rawImportManifestSchema, type RawImportManifest } from '@murphai/contracts'
+import { parseRawImportManifestWithLegacySupport } from '@murphai/core'
 import { z } from 'zod'
 import {
   isJsonObject,
@@ -130,7 +131,7 @@ async function readImportManifest(
   }
 
   try {
-    return rawImportManifestSchema.parse(manifest)
+    return parseRawImportManifestWithLegacySupport(manifest)
   } catch (error) {
     throw new VaultCliError(
       'manifest_invalid',

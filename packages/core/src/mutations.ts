@@ -52,7 +52,7 @@ import { stageRawImportManifest } from "./operations/raw-manifests.ts";
 import { runCanonicalWrite, type WriteBatch } from "./operations/write-batch.ts";
 import { resolveVaultPath } from "./path-safety.ts";
 import { sanitizePathSegment } from "./path-safety.ts";
-import { prepareInlineRawArtifact, prepareRawArtifact } from "./raw.ts";
+import { prepareInlineRawArtifact, prepareRawArtifact, resolveRawAssetDirectory } from "./raw.ts";
 import {
   defaultTimeZone,
   normalizeTimeZone,
@@ -1265,12 +1265,14 @@ function prepareDeviceRawArtifacts(
     content: artifact.content,
     raw: prepareInlineRawArtifact({
       fileName: artifact.fileName,
+      owner: {
+        kind: "device_batch",
+        id: options.importId,
+        partition: options.provider,
+      },
       targetName: `${String(artifact.index + 1).padStart(2, "0")}-${artifact.fileName}`,
       mediaType: artifact.mediaType,
-      category: "integrations",
-      provider: options.provider,
       occurredAt: options.effectiveOccurredAt,
-      recordId: options.importId,
     }),
     metadata: artifact.metadata,
     sha256: artifact.sha256,
@@ -1451,6 +1453,10 @@ export async function importDocument({
     mutate: async ({ batch }) => {
       const stagedAttachments = await stagePreparedEventAttachmentsInBatch({
         batch,
+        owner: {
+          kind: "document",
+          id: documentId,
+        },
         importId: documentId,
         importKind: "document",
         importedAt: eventSeed.recordedAt,
@@ -1551,7 +1557,13 @@ export async function addMeal({
   });
   const photo = preparedAttachments.find((attachment) => attachment.role === "photo")?.raw ?? null;
   const audio = preparedAttachments.find((attachment) => attachment.role === "audio")?.raw ?? null;
-  const rawDirectory = resolveRawMealDirectory(occurredAt, mealId);
+  const rawDirectory = resolveRawAssetDirectory({
+    owner: {
+      kind: "meal",
+      id: mealId,
+    },
+    occurredAt,
+  });
   const pendingAttachmentState = buildPreparedAttachmentState(preparedAttachments);
   const eventSeed = buildNormalizedEventSeed({
     kind: "meal",
@@ -1577,10 +1589,13 @@ export async function addMeal({
     mutate: async ({ batch }) => {
       const stagedAttachments = await stagePreparedEventAttachmentsInBatch({
         batch,
+        owner: {
+          kind: "meal",
+          id: mealId,
+        },
         importId: mealId,
         importKind: "meal",
         importedAt: eventSeed.recordedAt,
-        rawDirectory,
         source: eventSeed.source ?? source ?? null,
         attachments: preparedAttachments,
         provenance: {
@@ -1609,10 +1624,14 @@ export async function addMeal({
             importId: mealId,
             importKind: "meal",
             importedAt: eventSeed.recordedAt,
+            owner: {
+              kind: "meal",
+              id: mealId,
+            },
             rawDirectory,
             source: eventSeed.source ?? source ?? null,
             artifacts: [],
-            canonicalProvenance: {
+            provenance: {
               eventId,
               lookupId: mealId,
               occurredAt: eventSeed.occurredAt,
@@ -1661,11 +1680,6 @@ export async function addMeal({
       };
     },
   });
-}
-
-function resolveRawMealDirectory(occurredAt: DateInput, mealId: string): string {
-  const timestamp = toIsoTimestamp(occurredAt, "occurredAt");
-  return `${VAULT_LAYOUT.rawMealsDirectory}/${timestamp.slice(0, 4)}/${timestamp.slice(5, 7)}/${mealId}`;
 }
 
 export async function importSamples({
@@ -1750,11 +1764,12 @@ export async function importSamples({
   const raw = sourcePath
     ? prepareRawArtifact({
         sourcePath,
-        category: "samples",
+        owner: {
+          kind: "sample_batch",
+          id: transformId,
+          partition: normalizedStream,
+        },
         occurredAt: preparedRecords[0]?.record.recordedAt ?? new Date(),
-        recordId: transformId,
-        stream: normalizedStream,
-        allowExistingMatch: true,
       })
     : null;
   const touchedFiles = raw ? [raw.relativePath] : [];
@@ -1782,6 +1797,11 @@ export async function importSamples({
             importId: transformId,
             importKind: "sample_batch",
             importedAt: records[0]?.recordedAt ?? new Date().toISOString(),
+            owner: {
+              kind: "sample_batch",
+              id: transformId,
+              partition: normalizedStream,
+            },
             source: source ?? null,
             artifacts: [
               {
@@ -1789,7 +1809,7 @@ export async function importSamples({
                 raw: stagedRaw,
               },
             ],
-            canonicalProvenance: {
+            provenance: {
               stream: normalizedStream,
               unit,
               importedCount: records.length,
@@ -1890,9 +1910,14 @@ export async function importDeviceBatch({
             importId: deviceBatchPlan.importId,
             importKind: "device_batch",
             importedAt: deviceBatchPlan.importedAt,
+            owner: {
+              kind: "device_batch",
+              id: deviceBatchPlan.importId,
+              partition: deviceBatchPlan.provider,
+            },
             source: deviceBatchPlan.source ?? null,
             artifacts: stagedRawArtifacts,
-            canonicalProvenance: {
+            provenance: {
               provider: deviceBatchPlan.provider,
               accountId: deviceBatchPlan.accountId ?? null,
               importedAt: deviceBatchPlan.importedAt,

@@ -45,7 +45,9 @@ import { parseFrontmatterDocument } from "./frontmatter.ts";
 import { generateVaultId } from "./ids.ts";
 import { readJsonlRecords } from "./jsonl.ts";
 import { stageMarkdownDocumentWrite } from "./markdown-documents.ts";
+import { parseRawImportManifestWithLegacySupport } from "./operations/raw-manifests.ts";
 import { normalizeVaultRoot, resolveVaultPath } from "./path-safety.ts";
+import { rawDirectoryMatchesOwner } from "./raw.ts";
 import {
   isTerminalWriteOperationStatus,
   listWriteOperationMetadataPaths,
@@ -670,9 +672,21 @@ async function validateRawManifestFile(
 
   const issues: ValidationIssue[] = [];
   const expectedRawDirectory = path.posix.dirname(relativePath);
-  const contractResult = safeParseContract(rawImportManifestSchema, manifest);
+  const isInboxAttachmentRecoveryManifest =
+    isEnvelopeBasedInboxRawPath(relativePath)
+    && expectedRawDirectory.endsWith("/attachments");
+  const contractResult = (() => {
+    try {
+      return {
+        success: true as const,
+        data: parseRawImportManifestWithLegacySupport(manifest),
+      };
+    } catch {
+      return safeParseContract(rawImportManifestSchema, manifest);
+    }
+  })();
 
-  if (!contractResult.success) {
+  if (!contractResult.success && !isInboxAttachmentRecoveryManifest) {
     issues.push(
       ...contractResult.errors.map((error: string) =>
         validationIssue(
@@ -693,6 +707,20 @@ async function validateRawManifestFile(
       validationIssue(
         "RAW_MANIFEST_INVALID",
         `Raw import manifest rawDirectory must equal "${expectedRawDirectory}".`,
+        relativePath,
+      ),
+    );
+  }
+
+  if (
+    contractResult.success
+    && !isInboxAttachmentRecoveryManifest
+    && !rawDirectoryMatchesOwner(contractResult.data.rawDirectory, contractResult.data.owner)
+  ) {
+    issues.push(
+      validationIssue(
+        "RAW_MANIFEST_INVALID",
+        `Raw import manifest rawDirectory "${contractResult.data.rawDirectory}" does not match owner ${contractResult.data.owner.kind}:${contractResult.data.owner.id}.`,
         relativePath,
       ),
     );
