@@ -90,6 +90,25 @@ describe("hosted Privy request auth", () => {
     expect(mocks.verifyHostedPrivyIdentityToken).not.toHaveBeenCalled();
   });
 
+  it("accepts Privy access and identity tokens from same-origin cookies", async () => {
+    await expect(
+      requireHostedPrivyRequestAuthContext(
+        new Request("https://join.example.test/api/settings/email/sync", {
+          headers: {
+            cookie: "privy-token=signed-access-token; privy-id-token=signed-identity-token",
+          },
+        }),
+        prisma,
+      ),
+    ).resolves.toMatchObject({
+      member: {
+        id: "member_123",
+      },
+    });
+    expect(mocks.verifyHostedPrivyAccessToken).toHaveBeenCalledWith("signed-access-token");
+    expect(mocks.verifyHostedPrivyIdentityToken).toHaveBeenCalledWith("signed-identity-token");
+  });
+
   it("requires the full bearer plus identity-token auth header set", async () => {
     await expect(
       requireHostedPrivyRequestAuthContext(

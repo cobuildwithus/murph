@@ -11,7 +11,13 @@ interface ApiErrorPayload {
 
 const HOSTED_PRIVY_IDENTITY_TOKEN_HEADER_NAME = "x-privy-identity-token";
 const HOSTED_PRIVY_AUTH_RETRY_DELAYS_MS = [0, 250] as const;
+const HOSTED_PRIVY_AUTH_HEADER_CACHE_TTL_MS = 5_000;
 type HostedOnboardingAuthMode = "none" | "optional" | "required";
+
+let hostedOnboardingAuthHeaderCache:
+  | { expiresAt: number; headers: Record<string, string> }
+  | null = null;
+let hostedOnboardingAuthHeaderPromise: Promise<Record<string, string>> | null = null;
 
 export class HostedOnboardingApiError extends Error {
   readonly code: string | null;
@@ -39,22 +45,44 @@ export async function requestHostedOnboardingJson<T>(input: {
   payload?: Record<string, unknown>;
   url: string;
 }): Promise<T> {
-  const authHeaders = await resolveHostedOnboardingAuthHeaders(input.auth ?? "required");
-  const response = await fetch(input.url, {
-    method: input.method ?? (input.payload ? "POST" : "GET"),
-    headers: {
-      ...(input.payload
-        ? {
-            "content-type": "application/json",
-          }
-        : {}),
-      ...authHeaders,
-    },
+  const mode = input.auth ?? "required";
+  const method = input.method ?? (input.payload ? "POST" : "GET");
+  const body = input.payload ? JSON.stringify(input.payload) : undefined;
+  const baseHeaders: Record<string, string> = {};
+
+  if (input.payload) {
+    baseHeaders["content-type"] = "application/json";
+  }
+
+  let response = await fetch(input.url, {
+    method,
+    headers: baseHeaders,
     credentials: "same-origin",
     cache: "no-store",
     keepalive: input.keepalive ?? false,
-    body: input.payload ? JSON.stringify(input.payload) : undefined,
+    body,
   });
+
+  if (shouldRetryWithExplicitPrivyHeaders({
+    mode,
+    response,
+    url: input.url,
+  })) {
+    invalidateHostedOnboardingAuthHeaderCache();
+    const authHeaders = await resolveHostedOnboardingAuthHeaders(mode);
+    response = await fetch(input.url, {
+      method,
+      headers: {
+        ...baseHeaders,
+        ...authHeaders,
+      },
+      credentials: "same-origin",
+      cache: "no-store",
+      keepalive: input.keepalive ?? false,
+      body,
+    });
+  }
+
   const data = await readOptionalJsonValue(response);
   const errorPayload = readApiErrorPayload(data);
 
@@ -84,6 +112,12 @@ async function resolveHostedOnboardingAuthHeaders(
     return {};
   }
 
+  const cached = readHostedOnboardingAuthHeaderCache();
+
+  if (cached) {
+    return cached;
+  }
+
   if (mode === "optional") {
     try {
       return await buildHostedOnboardingAuthHeaders();
@@ -96,6 +130,30 @@ async function resolveHostedOnboardingAuthHeaders(
 }
 
 async function buildHostedOnboardingAuthHeaders(): Promise<Record<string, string>> {
+  if (hostedOnboardingAuthHeaderPromise) {
+    return hostedOnboardingAuthHeaderPromise;
+  }
+
+  const existing = readHostedOnboardingAuthHeaderCache();
+  if (existing) {
+    return existing;
+  }
+
+  hostedOnboardingAuthHeaderPromise = buildHostedOnboardingAuthHeadersUncached();
+
+  try {
+    const headers = await hostedOnboardingAuthHeaderPromise;
+    hostedOnboardingAuthHeaderCache = {
+      expiresAt: Date.now() + HOSTED_PRIVY_AUTH_HEADER_CACHE_TTL_MS,
+      headers,
+    };
+    return headers;
+  } finally {
+    hostedOnboardingAuthHeaderPromise = null;
+  }
+}
+
+async function buildHostedOnboardingAuthHeadersUncached(): Promise<Record<string, string>> {
   let lastError: unknown = null;
 
   for (const delayMs of HOSTED_PRIVY_AUTH_RETRY_DELAYS_MS) {
@@ -143,6 +201,22 @@ async function buildHostedOnboardingAuthHeaders(): Promise<Record<string, string
   });
 }
 
+function shouldRetryWithExplicitPrivyHeaders(input: {
+  mode: HostedOnboardingAuthMode;
+  response: Response;
+  url: string;
+}): boolean {
+  if (input.mode === "none") {
+    return false;
+  }
+
+  if (!isHostedOnboardingSameOriginUrl(input.url)) {
+    return true;
+  }
+
+  return input.mode === "required" && input.response.status === 401;
+}
+
 function sleep(delayMs: number): Promise<void> {
   return new Promise((resolve) => {
     globalThis.setTimeout(resolve, delayMs);
@@ -178,6 +252,42 @@ function readApiErrorPayload(value: unknown): ApiErrorPayload["error"] | null {
 
 function hasApiErrorKey(value: unknown): boolean {
   return isRecord(value) && "error" in value;
+}
+
+function readHostedOnboardingAuthHeaderCache(): Record<string, string> | null {
+  if (!hostedOnboardingAuthHeaderCache) {
+    return null;
+  }
+
+  if (hostedOnboardingAuthHeaderCache.expiresAt <= Date.now()) {
+    hostedOnboardingAuthHeaderCache = null;
+    return null;
+  }
+
+  return hostedOnboardingAuthHeaderCache.headers;
+}
+
+function invalidateHostedOnboardingAuthHeaderCache(): void {
+  hostedOnboardingAuthHeaderCache = null;
+}
+
+function isHostedOnboardingSameOriginUrl(url: string): boolean {
+  if (!url.trim()) {
+    return true;
+  }
+
+  try {
+    const target = new URL(url, globalThis.location?.origin ?? "https://murph.invalid");
+    const currentOrigin = globalThis.location?.origin;
+
+    if (!currentOrigin) {
+      return !/^[a-z][a-z0-9+.-]*:/iu.test(url);
+    }
+
+    return target.origin === currentOrigin;
+  } catch {
+    return false;
+  }
 }
 
 function isHostedPrivyRateLimitError(error: unknown): boolean {

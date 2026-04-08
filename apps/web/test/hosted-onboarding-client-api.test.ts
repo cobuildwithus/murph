@@ -15,6 +15,9 @@ import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/
 describe("hosted onboarding client auth headers", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal("location", {
+      origin: "https://join.example.test",
+    });
   });
 
   it("fails explicitly before fetch when the Privy session is missing required tokens", async () => {
@@ -34,8 +37,6 @@ describe("hosted onboarding client auth headers", () => {
   });
 
   it("allows optional-auth requests to proceed without Privy headers when tokens are unavailable", async () => {
-    mocks.getAccessToken.mockResolvedValue(null);
-    mocks.getIdentityToken.mockResolvedValue(null);
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(JSON.stringify({
       ok: true,
     }), {
@@ -51,6 +52,62 @@ describe("hosted onboarding client auth headers", () => {
     });
     expect(fetchMock).toHaveBeenCalledWith("/api/hosted-onboarding/example", expect.objectContaining({
       headers: {},
+    }));
+    expect(mocks.getAccessToken).not.toHaveBeenCalled();
+    expect(mocks.getIdentityToken).not.toHaveBeenCalled();
+  });
+
+  it("uses same-origin cookie auth before forcing Privy token getters", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(JSON.stringify({
+      ok: true,
+    }), {
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(requestHostedOnboardingJson<{ ok: true }>({
+      url: "/api/hosted-onboarding/example",
+    })).resolves.toEqual({
+      ok: true,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/hosted-onboarding/example", expect.objectContaining({
+      headers: {},
+    }));
+    expect(mocks.getAccessToken).not.toHaveBeenCalled();
+    expect(mocks.getIdentityToken).not.toHaveBeenCalled();
+  });
+
+  it("falls back to explicit Privy headers after same-origin cookie auth returns 401", async () => {
+    mocks.getAccessToken.mockResolvedValue("signed-access-token");
+    mocks.getIdentityToken.mockResolvedValue("signed-identity-token");
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: {
+          code: "AUTH_REQUIRED",
+          message: "Verify your phone to continue.",
+        },
+      }), {
+        status: 401,
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ok: true,
+      }), {
+        status: 200,
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(requestHostedOnboardingJson<{ ok: true }>({
+      url: "/api/hosted-onboarding/example",
+    })).resolves.toEqual({
+      ok: true,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/hosted-onboarding/example", expect.objectContaining({
+      headers: expect.objectContaining({
+        Authorization: "Bearer signed-access-token",
+        "x-privy-identity-token": "signed-identity-token",
+      }),
     }));
   });
 
@@ -113,11 +170,20 @@ describe("hosted onboarding client auth headers", () => {
     mocks.getIdentityToken
       .mockRejectedValueOnce(new Error("transient"))
       .mockResolvedValueOnce("signed-identity-token");
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(JSON.stringify({
-      ok: true,
-    }), {
-      status: 200,
-    }));
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: {
+          code: "AUTH_REQUIRED",
+          message: "Verify your phone to continue.",
+        },
+      }), {
+        status: 401,
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ok: true,
+      }), {
+        status: 200,
+      }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(requestHostedOnboardingJson<{ ok: true }>({
@@ -131,6 +197,49 @@ describe("hosted onboarding client auth headers", () => {
         "x-privy-identity-token": "signed-identity-token",
       }),
     }));
+  });
+
+  it("reuses a short-lived explicit auth header burst after the first fallback", async () => {
+    mocks.getAccessToken.mockResolvedValue("signed-access-token");
+    mocks.getIdentityToken.mockResolvedValue("signed-identity-token");
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: {
+          code: "AUTH_REQUIRED",
+          message: "Verify your phone to continue.",
+        },
+      }), {
+        status: 401,
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ok: true,
+      }), {
+        status: 200,
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: {
+          code: "AUTH_REQUIRED",
+          message: "Verify your phone to continue.",
+        },
+      }), {
+        status: 401,
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ok: true,
+      }), {
+        status: 200,
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(requestHostedOnboardingJson<{ ok: true }>({
+      url: "/api/hosted-onboarding/example",
+    })).resolves.toEqual({ ok: true });
+    await expect(requestHostedOnboardingJson<{ ok: true }>({
+      url: "/api/hosted-onboarding/example",
+    })).resolves.toEqual({ ok: true });
+
+    expect(mocks.getAccessToken).toHaveBeenCalledTimes(1);
+    expect(mocks.getIdentityToken).toHaveBeenCalledTimes(1);
   });
 
   it("fails cleanly when a successful response has an empty body", async () => {
