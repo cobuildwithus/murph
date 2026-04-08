@@ -551,7 +551,7 @@ test('linq runtime covers optional payload omissions, fallback http messages, an
   await timeoutAssertion
 })
 
-test('device sync client covers list, begin, and default browser open paths', async () => {
+test('device sync client covers list, begin, and browser open paths', async () => {
   const seenRequests: Array<{ method: string; url: string; body: string | null }> = []
   const openBrowser = vi.fn(async () => true)
   const client = createDeviceSyncClient({
@@ -635,7 +635,8 @@ test('device sync client covers list, begin, and default browser open paths', as
     account: { accountId: 'acct-1', disconnected: true },
   })
 
-  assert.equal(openBrowser, openBrowser)
+  assert.equal(openBrowser.mock.calls.length, 1)
+  assert.equal(openBrowser.mock.calls[0]?.[0], 'https://example.test/oauth')
   assert.deepEqual(seenRequests.map(({ method, url }) => ({ method, url })), [
     { method: 'GET', url: 'http://127.0.0.1:8788/providers' },
     { method: 'POST', url: 'http://127.0.0.1:8788/providers/oura/connect' },
@@ -648,7 +649,7 @@ test('device sync client covers list, begin, and default browser open paths', as
     returnTo: 'https://murph.example.test/return',
   })
 
-  const spawn = vi.fn((_command: string, _args: string[]) => {
+  const successfulSpawn = vi.fn((_command: string, _args: string[]) => {
     const child = new EventEmitter() as EventEmitter & {
       unref(): void
     }
@@ -658,7 +659,7 @@ test('device sync client covers list, begin, and default browser open paths', as
     })
     return child
   })
-  const dynamicModule = await loadDeviceSyncClientWithMockedSpawn(spawn)
+  const dynamicModule = await loadDeviceSyncClientWithMockedSpawn(successfulSpawn)
   const browserClient = dynamicModule.createDeviceSyncClient({
     baseUrl: 'http://127.0.0.1:8788',
     fetchImpl: async () =>
@@ -675,13 +676,33 @@ test('device sync client covers list, begin, and default browser open paths', as
   })
   assert.equal(browserResult.openedBrowser, true)
   assert.equal(
-    spawn.mock.calls[0]?.[0],
+    successfulSpawn.mock.calls[0]?.[0],
     process.platform === 'darwin'
       ? 'open'
       : process.platform === 'win32'
         ? 'cmd'
         : 'xdg-open',
   )
+
+  const failingSpawn = vi.fn(() => {
+    throw new Error('missing browser launcher')
+  })
+  const failureModule = await loadDeviceSyncClientWithMockedSpawn(failingSpawn)
+  const failingBrowserClient = failureModule.createDeviceSyncClient({
+    baseUrl: 'http://127.0.0.1:8788',
+    fetchImpl: async () =>
+      createJsonResponse({
+        authorizationUrl: 'https://example.test/oauth',
+        expiresAt: '2026-04-08T00:00:00.000Z',
+        provider: 'oura',
+        state: 'state-3',
+      }),
+  })
+  const failedBrowserResult = await failingBrowserClient.beginConnection({
+    open: true,
+    provider: 'oura',
+  })
+  assert.equal(failedBrowserResult.openedBrowser, false)
 })
 
 test('device sync client wraps transport and http failures with control-plane context', async () => {

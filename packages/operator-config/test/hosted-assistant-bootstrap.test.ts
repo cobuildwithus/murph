@@ -6,7 +6,6 @@ import {
   createHostedAssistantConfig,
   createHostedAssistantProfile,
 } from '../src/assistant/hosted-config.ts'
-import { importWithMocks } from './import-with-mocks.ts'
 
 afterEach(() => {
   vi.unstubAllEnvs()
@@ -16,20 +15,19 @@ async function loadHostedAssistantModule(options?: {
   readOperatorConfigResult?: unknown
   saveHostedAssistantConfigImpl?: (config: unknown, homeDirectory: string | undefined) => Promise<unknown>
 }) {
-  vi.doUnmock('../src/operator-config.ts')
-
+  vi.resetModules()
   const readOperatorConfig = vi.fn(async () => options?.readOperatorConfigResult ?? null)
   const saveHostedAssistantConfig = vi.fn(
     options?.saveHostedAssistantConfigImpl ??
       (async (config: unknown) => ({ hostedAssistant: config })),
   )
 
-  const module = await importWithMocks('../src/hosted-assistant-config.ts', () => {
-    vi.doMock('../src/operator-config.ts', () => ({
-      readOperatorConfig,
-      saveHostedAssistantConfig,
-    }))
-  })
+  vi.doMock('../src/operator-config.ts', () => ({
+    readOperatorConfig,
+    saveHostedAssistantConfig,
+  }))
+
+  const module = await import('../src/hosted-assistant-config.ts')
   return {
     ...module,
     readOperatorConfig,
