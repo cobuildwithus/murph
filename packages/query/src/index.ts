@@ -1,3 +1,9 @@
+import type {
+  QueryProjectionStatus,
+  RebuildQueryProjectionResult,
+} from "./query-projection-types.ts";
+import type { SearchFilters, SearchResult } from "./search-shared.ts";
+
 export {
   ALL_QUERY_ENTITY_FAMILIES,
   createVaultReadModel,
@@ -19,7 +25,13 @@ export type {
   VaultEntitiesByFamily,
   VaultReadModel,
 } from "./model.ts";
-export type { CanonicalEntity, CanonicalEntityFamily, CanonicalRecordClass } from "./canonical-entities.ts";
+export type {
+  CanonicalEntity,
+  CanonicalEntityFamily,
+  CanonicalEntityLink,
+  CanonicalEntityLinkType,
+  CanonicalRecordClass,
+} from "./canonical-entities.ts";
 export {
   describeLookupConstraint,
   ID_FAMILY_REGISTRY,
@@ -46,6 +58,12 @@ export {
   searchVaultSafe,
 } from "./search.ts";
 export type { SafeSearchHit, SafeSearchResult } from "./search.ts";
+export type {
+  SearchFilters,
+  SearchCitation,
+  SearchHit,
+  SearchResult,
+} from "./search-shared.ts";
 export {
   type QueryProjectionStatus,
   type RebuildQueryProjectionResult,
@@ -122,6 +140,13 @@ export {
   type HealthLibraryNode,
 } from "./health-library.ts";
 export {
+  listSupplementCompounds,
+  listSupplements,
+  readSupplement,
+  showSupplement,
+  showSupplementCompound,
+} from "./health/index.ts";
+export {
   DERIVED_KNOWLEDGE_INDEX_PATH,
   DERIVED_KNOWLEDGE_LOG_PATH,
   DERIVED_KNOWLEDGE_PAGES_ROOT,
@@ -160,22 +185,24 @@ export * from "./health/index.ts";
 export * from "./memory.ts";
 
 export async function getQueryProjectionStatus(
-  ...args: Parameters<typeof import("./query-projection.ts").getQueryProjectionStatus>
-): ReturnType<typeof import("./query-projection.ts").getQueryProjectionStatus> {
+  vaultRoot: string,
+): Promise<QueryProjectionStatus> {
   const mod = await import("./query-projection.ts");
-  return mod.getQueryProjectionStatus(...args);
+  return mod.getQueryProjectionStatus(vaultRoot);
 }
 
 export async function rebuildQueryProjection(
-  ...args: Parameters<typeof import("./query-projection.ts").rebuildQueryProjection>
-): ReturnType<typeof import("./query-projection.ts").rebuildQueryProjection> {
+  vaultRoot: string,
+): Promise<RebuildQueryProjectionResult> {
   const mod = await import("./query-projection.ts");
-  return mod.rebuildQueryProjection(...args);
+  return mod.rebuildQueryProjection(vaultRoot);
 }
 
 export async function searchVaultRuntime(
-  ...args: Parameters<typeof import("./query-projection.ts").searchVaultRuntime>
-): ReturnType<typeof import("./query-projection.ts").searchVaultRuntime> {
+  vaultRoot: string,
+  query: string,
+  filters: SearchFilters = {},
+): Promise<SearchResult> {
   const mod = await import("./query-projection.ts");
-  return mod.searchVaultRuntime(...args);
+  return mod.searchVaultRuntime(vaultRoot, query, filters);
 }

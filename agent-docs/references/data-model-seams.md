@@ -1,6 +1,6 @@
 # Data Model Seams
 
-Last verified: 2026-04-07
+Last verified: 2026-04-08
 
 ## Implemented in this patch
 
@@ -157,6 +157,26 @@ Identity changes no longer imply a billing-shaped type update, routing changes n
 **Main refactor risk:** do not respond by adding a second layer of generic selectors that hides the slice ownership again.
 Small task-specific composition helpers are fine, but the shared store surface should keep returning nested slice owners rather than another compatibility aggregate.
 
+### 10. Keep `vault-usecases` query runtime as a thin compatibility adapter over `@murphai/query`
+
+**Seam:** `packages/vault-usecases/src/query-runtime.ts`, `packages/vault-usecases/src/runtime.ts`, `packages/query/src/index.ts`
+
+`packages/vault-usecases/src/query-runtime.ts` was still restating the query read model even though `@murphai/query` already owned the canonical entity, read-model, search, projection-status, timeline, export-pack, and wearable-summary shapes.
+That made one query concept look local to the CLI/usecase layer again even though the package already loads the shared query runtime dynamically.
+
+This patch:
+
+- exports the shared search result/filter types from `packages/query/src/index.ts`
+- aliases `QueryCanonicalEntity`, `QueryVaultReadModel`, `QuerySearch*`, `QueryProjection*`, `QueryTimeline*`, and `QueryExportPack*` in `packages/vault-usecases/src/query-runtime.ts` back to the shared `@murphai/query` owner types
+- reduces `QueryRuntimeModule` to a `Pick<typeof import("@murphai/query"), ...>` view over the shared runtime surface instead of a second hand-written function contract
+- adds `packages/vault-usecases/test/query-runtime.test.ts` to prove the compatibility layer forwards the shared owner exports directly
+
+**Why this is simpler:** `vault-usecases` keeps the optional-runtime loader seam it actually needs, but stops owning a second nominal copy of the query model.
+Adding one more query field now flows from the real query owner through the CLI/usecase layer without a parallel type-edit pass.
+
+**Main refactor risk:** keep the adapter limited to runtime loading and narrow naming compatibility.
+Do not let `vault-usecases` start reaching into query internals or reintroducing narrower local copies just to preserve older field subsets.
+
 ## Current targeted review findings
 
 No code changes landed below.
@@ -164,24 +184,7 @@ This is the current review-only pass over the live tree for the next data-model 
 
 ### High leverage now
 
-#### 1. Collapse assistant-engine's `query-runtime` mirror back to the shared query owner
-
-**Seam:** `packages/assistant-engine/src/query-runtime.ts` (`ALL_QUERY_ENTITY_FAMILIES`, `QueryCanonicalEntity`, `QueryVaultReadModel`, `QueryListEntityFilters`, `QuerySearchFilters`, `QuerySearchResult`, `QueryProjectionStatus`, `QueryTimelineEntry`, `QueryExportPack`, `QueryRuntimeModule`), `packages/query/src/index.ts`, `packages/query/src/canonical-entities.ts`, `packages/query/src/model.ts`, `packages/query/src/search-shared.ts`, `packages/query/src/query-projection-types.ts`, `packages/query/src/timeline.ts`, `packages/query/src/export-pack.ts`, `packages/assistant-engine/src/usecases/types.ts`
-
-The assistant-engine wrapper currently owns a second copy of most of the query read model even though `@murphai/query` already exports the canonical entity, read-model, projection-status, timeline, export-pack, and wearable-summary shapes.
-The same file already aliases the wearable summary types from `@murphai/query`, so the remaining local interfaces are mostly a parallel contract surface rather than a true adapter.
-
-**Current cost:** every query-shape change now wants two edits: the real query owner plus the assistant-engine mirror.
-Adding one more search field or canonical entity property can ripple through `query-runtime.ts`, its consumers in `usecases/types.ts`, and the runtime loader interface even when the product concept never changed.
-
-**Simpler target:** make `@murphai/query` the only owner of the query model.
-Export the missing search-runtime types (`SearchFilters`, `SearchResult`, or a dedicated public runtime-search type) from the query public entrypoint, then collapse the assistant-engine file down to type aliases or `Pick<...>` views plus the local `loadQueryRuntime()` dynamic-import seam.
-Keep intentionally narrower views as `Pick<ExportPack, ...>` or `Pick<typeof import("@murphai/query"), ...>` rather than restating fields.
-
-**Main refactor risk:** do not make assistant-engine reach into non-public query internals just to remove duplication.
-The shared owner has to stay the public `@murphai/query` surface; the assistant-engine file should remain only a runtime-loader and optional-runtime boundary.
-
-#### 2. Give knowledge result contracts one owner instead of separate assistant-engine and CLI copies
+#### 1. Give knowledge result contracts one owner instead of separate assistant-engine and CLI copies
 
 **Seam:** `packages/assistant-engine/src/knowledge/contracts.ts`, `packages/assistant-engine/src/knowledge.ts`, `packages/cli/src/knowledge-cli-contracts.ts`, `packages/cli/src/commands/knowledge.ts`, `packages/cli/src/vault-cli-command-manifest.ts`, `packages/query/src/knowledge-model.ts`
 
@@ -200,7 +203,7 @@ The shared layer should own the product record shape and constants; CLI can stil
 
 ### Worth planning
 
-#### 3. Finish collapsing assistant delivery target vocabulary to one route owner
+#### 2. Finish collapsing assistant delivery target vocabulary to one route owner
 
 **Seam:** `packages/operator-config/src/assistant-cli-contracts.ts` (`assistantChannelDeliveryTargetKindValues`, `assistantBindingDeliveryKindValues`), `packages/gateway-core/src/contracts.ts` (`gatewayDeliveryTargetKindValues`, `gatewayReplyRouteKindValues`), `packages/hosted-execution/src/side-effects.ts` (`HostedExecutionAssistantDelivery.targetKind`)
 
@@ -216,7 +219,7 @@ Let operator-config and hosted-execution alias the shared target-kind types/cons
 **Main refactor risk:** do not pull assistant policy, hosted callback rules, or CLI help text down into gateway-core just to centralize string unions.
 Only the route-kind vocabulary should move; layer-specific policy should stay where it is.
 
-#### 4. Collapse hosted execution side-effect modeling to the one effect that actually exists today
+#### 3. Collapse hosted execution side-effect modeling to the one effect that actually exists today
 
 **Seam:** `packages/hosted-execution/src/side-effects.ts` (`HOSTED_EXECUTION_SIDE_EFFECT_KINDS`, `HostedExecutionSideEffect`, `HostedExecutionSideEffectRecord`), `packages/assistant-runtime/src/hosted-runtime/callbacks.ts`, `apps/cloudflare/src/side-effect-journal.ts`
 
@@ -232,7 +235,7 @@ If a second effect really appears later, re-generalize from two concrete cases i
 **Main refactor risk:** do not entangle this cleanup with Cloudflare-specific storage paths or callback protocol logic.
 The simplification should specialize the shared data model, not move trust-boundary or deployment policy into the wrong package.
 
-#### 5. Normalize hosted webhook side-effect persistence around common retry fields plus kind-owned details
+#### 4. Normalize hosted webhook side-effect persistence around common retry fields plus kind-owned details
 
 **Seam:** `apps/web/prisma/schema.prisma` (`HostedWebhookReceiptSideEffect`), `apps/web/src/lib/hosted-onboarding/webhook-receipt-types.ts` (`HostedWebhookSideEffect`), `apps/web/src/lib/hosted-onboarding/webhook-receipt-codec.ts` (`serializeHostedWebhookReceiptSideEffect`, `readHostedWebhookReceiptSideEffect`), `apps/web/src/lib/hosted-onboarding/webhook-dispatch-payload.ts`
 
