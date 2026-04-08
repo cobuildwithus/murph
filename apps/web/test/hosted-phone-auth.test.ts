@@ -182,6 +182,75 @@ describe("HostedPhoneAuth", () => {
     assert.deepEqual(pendingActions, ["continue", null]);
   });
 
+  it("writes a queued confirm mutation when invite confirmation does not finish inline", async () => {
+    const { finalizeInvitePhoneCodeSendConfirmation } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+
+    const queued: Array<{ inviteCode: string; kind: "abort" | "confirm"; sendAttemptId: string }> = [];
+
+    await finalizeInvitePhoneCodeSendConfirmation({
+      async confirm() {
+        return false;
+      },
+      inviteCode: "invite-code",
+      sendAttemptId: "attempt-id",
+      writePending(input) {
+        queued.push(input);
+      },
+    });
+
+    assert.deepEqual(queued, [
+      {
+        inviteCode: "invite-code",
+        kind: "confirm",
+        sendAttemptId: "attempt-id",
+      },
+    ]);
+  });
+
+  it("skips queueing when invite confirmation finishes inline", async () => {
+    const { finalizeInvitePhoneCodeSendConfirmation } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+
+    const queued: Array<{ inviteCode: string; kind: "abort" | "confirm"; sendAttemptId: string }> = [];
+
+    await finalizeInvitePhoneCodeSendConfirmation({
+      async confirm() {
+        return true;
+      },
+      inviteCode: "invite-code",
+      sendAttemptId: "attempt-id",
+      writePending(input) {
+        queued.push(input);
+      },
+    });
+
+    assert.deepEqual(queued, []);
+  });
+
+  it("queues invite confirmation when the background confirm throws", async () => {
+    const { finalizeInvitePhoneCodeSendConfirmation } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+
+    const queued: Array<{ inviteCode: string; kind: "abort" | "confirm"; sendAttemptId: string }> = [];
+
+    await finalizeInvitePhoneCodeSendConfirmation({
+      async confirm() {
+        throw new Error("network");
+      },
+      inviteCode: "invite-code",
+      sendAttemptId: "attempt-id",
+      writePending(input) {
+        queued.push(input);
+      },
+    });
+
+    assert.deepEqual(queued, [
+      {
+        inviteCode: "invite-code",
+        kind: "confirm",
+        sendAttemptId: "attempt-id",
+      },
+    ]);
+  });
+
   it("resolves authenticated phone auth recovery states in priority order", async () => {
     const { resolveHostedAuthenticatedPhoneAuthView } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
 
