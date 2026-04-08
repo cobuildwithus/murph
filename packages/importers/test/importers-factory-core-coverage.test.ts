@@ -1,7 +1,4 @@
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { test, vi } from "vitest";
 
 import {
@@ -20,45 +17,7 @@ import {
 import type { DocumentImportPayload } from "../src/core-port.ts";
 import { assertAssessmentImportPort } from "../src/assessment/core-port.ts";
 import { assertCanonicalWritePort } from "../src/core-port.ts";
-
-async function createTempFile(name: string, contents: string): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "murph-importers-coverage-"));
-  const filePath = join(directory, name);
-  await writeFile(filePath, contents);
-  return filePath;
-}
-
-interface CorePortSpyCalls {
-  documents: unknown[];
-  meals: unknown[];
-  samples: unknown[];
-}
-
-function createCorePortSpy() {
-  const calls: CorePortSpyCalls = {
-    documents: [],
-    meals: [],
-    samples: [],
-  };
-
-  return {
-    calls,
-    corePort: {
-      async importDocument(payload: unknown) {
-        calls.documents.push(payload);
-        return { ok: true, kind: "document" as const };
-      },
-      async addMeal(payload: unknown) {
-        calls.meals.push(payload);
-        return { ok: true, kind: "meal" as const };
-      },
-      async importSamples(payload: unknown) {
-        calls.samples.push(payload);
-        return { ok: true, kind: "samples" as const };
-      },
-    },
-  };
-}
+import { createCorePortSpy, createTempFile } from "./test-helpers.ts";
 
 const coreModuleCalls = vi.hoisted(() => ({
   importDocument: [] as unknown[],
@@ -98,13 +57,18 @@ test("createImporters builds default registries when options are omitted", () =>
   assert.ok(importers.deviceProviderRegistry.list().length > 0);
 });
 
-test("createImporters lazily delegates through the default core module proxy", async () => {
-  const documentFilePath = await createTempFile("visit-note.txt", "note");
-  const mealPhotoPath = await createTempFile("breakfast.jpg", "image-placeholder");
-  const assessmentFilePath = await createTempFile("sleep-survey.json", "{\"ok\":true}");
+test("createImporters delegates through the default core runtime exports", async () => {
+  const documentFilePath = await createTempFile("visit-note.txt", "note", "murph-importers-coverage-");
+  const mealPhotoPath = await createTempFile("breakfast.jpg", "image-placeholder", "murph-importers-coverage-");
+  const assessmentFilePath = await createTempFile(
+    "sleep-survey.json",
+    "{\"ok\":true}",
+    "murph-importers-coverage-",
+  );
   const csvFilePath = await createTempFile(
     "samples.csv",
     ["timestamp,value", "2026-03-11T08:00:00Z,1"].join("\n"),
+    "murph-importers-coverage-",
   );
   const deviceProviderRegistry = createDeviceProviderRegistry([
     {
@@ -313,7 +277,11 @@ test("resolveSampleImportConfig rejects unknown presets and normalizes null meta
 });
 
 test("prepareAssessmentResponseImport defaults the title from the file basename", async () => {
-  const filePath = await createTempFile("sleep-survey.json", "{\"ok\":true}");
+  const filePath = await createTempFile(
+    "sleep-survey.json",
+    "{\"ok\":true}",
+    "murph-importers-coverage-",
+  );
 
   const payload = await prepareAssessmentResponseImport({
     filePath: `  ${filePath}  `,
@@ -331,7 +299,7 @@ test("prepareAssessmentResponseImport defaults the title from the file basename"
 });
 
 test("importDocument delegates a core-shaped document payload", async () => {
-  const filePath = await createTempFile("labs.pdf", "pdf-placeholder");
+  const filePath = await createTempFile("labs.pdf", "pdf-placeholder", "murph-importers-coverage-");
   const { calls, corePort } = createCorePortSpy();
 
   const result = await importDocument<{ ok: boolean; kind: string }>(
@@ -352,8 +320,12 @@ test("importDocument delegates a core-shaped document payload", async () => {
 });
 
 test("addMeal validates attachments and maps to addMeal-compatible input", async () => {
-  const photoPath = await createTempFile("dinner.jpg", "image-placeholder");
-  const audioPath = await createTempFile("dinner-note.m4a", "audio-placeholder");
+  const photoPath = await createTempFile("dinner.jpg", "image-placeholder", "murph-importers-coverage-");
+  const audioPath = await createTempFile(
+    "dinner-note.m4a",
+    "audio-placeholder",
+    "murph-importers-coverage-",
+  );
   const { calls, corePort } = createCorePortSpy();
 
   await addMeal(
@@ -412,6 +384,7 @@ test("importCsvSamples parses rows and emits recordedAt values for core", async 
       "2026-03-11T08:00:00Z,72,watch,resting",
       "2026-03-11T08:05:00Z,75,watch,\"post, walk\"",
     ].join("\n"),
+    "murph-importers-coverage-",
   );
   const { calls, corePort } = createCorePortSpy();
   const presetRegistry = createSamplePresetRegistry([
@@ -450,6 +423,7 @@ test("importCsvSamples ignores the removed vault alias and still handles escaped
       "2026-03-11T08:05:00Z,75,resting\r",
       "",
     ].join("\n"),
+    "murph-importers-coverage-",
   );
   const { calls, corePort } = createCorePortSpy();
 
@@ -485,10 +459,12 @@ test("importCsvSamples rejects blank sample rows and unterminated quoted fields"
   const blankRowsPath = await createTempFile(
     "blank.csv",
     ["timestamp,bpm", "", "   ,   ", ""].join("\n"),
+    "murph-importers-coverage-",
   );
   const brokenQuotesPath = await createTempFile(
     "broken.csv",
     ['timestamp,bpm', '"2026-03-11T08:00:00Z,72'].join("\n"),
+    "murph-importers-coverage-",
   );
   const { corePort } = createCorePortSpy();
 
@@ -529,7 +505,7 @@ test("importCsvSamples rejects blank sample rows and unterminated quoted fields"
 });
 
 test("importDocument accepts a narrow core port with only the called export", async () => {
-  const filePath = await createTempFile("visit-note.txt", "note");
+  const filePath = await createTempFile("visit-note.txt", "note", "murph-importers-coverage-");
 
   const result = await importDocument<string>(
     { filePath },
@@ -546,7 +522,7 @@ test("importDocument accepts a narrow core port with only the called export", as
 });
 
 test("prepareMealImport requires canonical vaultRoot and omits missing audio", async () => {
-  const photoPath = await createTempFile("breakfast.jpg", "image-placeholder");
+  const photoPath = await createTempFile("breakfast.jpg", "image-placeholder", "murph-importers-coverage-");
 
   const payload = await prepareMealImport({
     photoPath,
@@ -583,6 +559,7 @@ test("prepareCsvSampleImport skips blank rows and omits empty metadata columns",
       "2026-03-11T09:00:00Z,95",
       "",
     ].join("\n"),
+    "murph-importers-coverage-",
   );
 
   const payload = await prepareCsvSampleImport({
@@ -609,7 +586,11 @@ test("prepareCsvSampleImport skips blank rows and omits empty metadata columns",
 });
 
 test("prepareCsvSampleImport rejects header-only files", async () => {
-  const filePath = await createTempFile("header-only.csv", "recorded,value\n");
+  const filePath = await createTempFile(
+    "header-only.csv",
+    "recorded,value\n",
+    "murph-importers-coverage-",
+  );
 
   await assert.rejects(
     () =>
