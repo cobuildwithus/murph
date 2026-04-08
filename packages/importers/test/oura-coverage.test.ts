@@ -163,6 +163,8 @@ test("normalizeOuraSnapshot covers sleep deleted, rest, nap, and partial timing 
   assert.equal(partialSleepEvent, undefined);
   assert.equal(partialSessionEvent, undefined);
   assert.equal(partialWorkoutEvent, undefined);
+  assert.ok(unknownDistanceWorkoutEvent);
+  assert.equal(unknownDistanceWorkoutEvent?.fields?.activityType, "rowing");
   assert.equal(unknownDistanceWorkoutEvent?.fields?.distanceKm, undefined);
   assert.ok(
     payload.samples?.some((sample) => sample.externalRef?.resourceId === "sleep-rest" && sample.stream === "heart_rate"),
