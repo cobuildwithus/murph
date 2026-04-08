@@ -152,9 +152,7 @@ export function HostedPhoneEntryStep({
         <Button type="submit" disabled={sendCodeDisabled} size="lg" className="w-full">
           {pendingAction === "send-code"
             ? "Sending code..."
-            : intent === "signin"
-              ? "Text me a sign-in code"
-              : "Text me a code"}
+            : "Text me a code"}
         </Button>
       </div>
     </form>
