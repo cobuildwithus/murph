@@ -84,6 +84,12 @@ const ownerPackageSmokeImportPaths = ownerPackageSmokeImports.flatMap(
 const publishedWorkspaceSmokeImportSpecifiers = ownerPackageSmokeImports.flatMap(
   (ownerPackageSmokeImport) => ownerPackageSmokeImport.publishedImportSpecifiers,
 );
+const publishedSelfSmokeImportGroups = [
+  {
+    cwd: path.join(repoRoot, "packages/runtime-state"),
+    specifiers: ["@murphai/runtime-state", "@murphai/runtime-state/node"],
+  },
+];
 const smokeImportPaths = [
   ...baseSmokeImportPaths,
   ...ownerPackageSmokeImportPaths,
@@ -115,22 +121,32 @@ async function hasPreparedArtifacts(importAttempt = 0) {
     }
   }
 
-  if (!hasPublishedWorkspaceSmokeImports()) {
+  if (!hasPublishedPackageSmokeImports()) {
     return false;
   }
 
   return true;
 }
 
-function hasPublishedWorkspaceSmokeImports() {
+function hasPublishedPackageSmokeImports() {
+  return [
+    {
+      cwd: path.join(repoRoot, "packages/cli"),
+      specifiers: publishedWorkspaceSmokeImportSpecifiers,
+    },
+    ...publishedSelfSmokeImportGroups,
+  ].every(({ cwd, specifiers }) => runPublishedImportSmoke(cwd, specifiers));
+}
+
+function runPublishedImportSmoke(cwd, specifiers) {
   const smokeScript = `
-    const specifiers = ${JSON.stringify(publishedWorkspaceSmokeImportSpecifiers)};
+    const specifiers = ${JSON.stringify(specifiers)};
     for (const specifier of specifiers) {
       await import(specifier);
     }
   `;
   const result = spawnSync(process.execPath, ["--input-type=module", "-e", smokeScript], {
-    cwd: path.join(repoRoot, "packages/cli"),
+    cwd,
     stdio: "pipe",
   });
 
