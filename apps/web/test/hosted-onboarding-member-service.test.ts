@@ -22,8 +22,8 @@ import {
 } from "@/src/lib/hosted-onboarding/member-activation";
 import {
   ensureHostedMemberForPhone,
-  persistHostedMemberLinqChatBinding,
 } from "@/src/lib/hosted-onboarding/member-identity-service";
+import { upsertHostedMemberLinqChatBinding } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/runtime")>(
@@ -606,7 +606,7 @@ describe("abortHostedInvitePhoneCode", () => {
   });
 });
 
-describe("persistHostedMemberLinqChatBinding", () => {
+describe("upsertHostedMemberLinqChatBinding", () => {
   it("stores the latest Linq chat id in the additive routing table for future activation welcomes", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const upsert = vi.fn().mockResolvedValue({});
@@ -617,7 +617,7 @@ describe("persistHostedMemberLinqChatBinding", () => {
       },
     } as never;
 
-    await persistHostedMemberLinqChatBinding({
+    await upsertHostedMemberLinqChatBinding({
       linqChatId: "chat_new",
       memberId: "member_123",
       prisma,
@@ -663,7 +663,7 @@ describe("persistHostedMemberLinqChatBinding", () => {
       },
     } as never;
 
-    await persistHostedMemberLinqChatBinding({
+    await upsertHostedMemberLinqChatBinding({
       linqChatId: null,
       memberId: "member_123",
       prisma,

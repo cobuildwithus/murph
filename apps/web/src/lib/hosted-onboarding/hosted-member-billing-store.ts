@@ -128,6 +128,12 @@ export async function bindHostedMemberStripeCustomerIdIfMissing(input: {
     return false;
   }
 
+  const billingPrivateColumns = buildHostedMemberBillingPrivateColumns({
+    memberId: input.memberId,
+    stripeCustomerId: input.stripeCustomerId,
+    stripeSubscriptionId: null,
+  });
+
   return withHostedOnboardingTransaction(input.prisma, async (tx) => {
     await lockHostedMemberRow(tx, input.memberId);
 
@@ -146,21 +152,13 @@ export async function bindHostedMemberStripeCustomerIdIfMissing(input: {
         memberId: input.memberId,
       },
       create: {
-        ...buildHostedMemberBillingPrivateColumns({
-          memberId: input.memberId,
-          stripeCustomerId: input.stripeCustomerId,
-          stripeSubscriptionId: null,
-        }),
+        ...billingPrivateColumns,
         memberId: input.memberId,
         stripeCustomerLookupKey,
         stripeSubscriptionLookupKey: null,
       },
       update: {
-        stripeCustomerIdEncrypted: buildHostedMemberBillingPrivateColumns({
-          memberId: input.memberId,
-          stripeCustomerId: input.stripeCustomerId,
-          stripeSubscriptionId: null,
-        }).stripeCustomerIdEncrypted,
+        stripeCustomerIdEncrypted: billingPrivateColumns.stripeCustomerIdEncrypted,
         stripeCustomerLookupKey,
       },
     });

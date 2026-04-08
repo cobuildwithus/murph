@@ -13,11 +13,9 @@ import {
   hasHostedMemberActiveAccess,
   isHostedMemberSuspended,
 } from "./entitlement";
-import {
-  ensureHostedMemberForPhone,
-  persistHostedMemberLinqChatBinding,
-} from "./member-identity-service";
+import { ensureHostedMemberForPhone } from "./member-identity-service";
 import { findHostedMemberByPhoneNumber } from "./hosted-member-identity-store";
+import { upsertHostedMemberLinqChatBinding } from "./hosted-member-routing-store";
 import {
   claimHostedLinqOnboardingLinkNotice,
   claimHostedLinqQuotaReplyNotice,
@@ -88,12 +86,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
   }
 
   if (existingMember && hasHostedMemberActiveAccess(existingMember)) {
-    await persistHostedMemberLinqChatBinding({
-      linqChatId: summary.chatId,
-      memberId: existingMember.id,
-      prisma: input.prisma,
-    });
-    const dailyState = await incrementHostedLinqInboundDailyState({
+    const dailyState = await bindHostedMemberLinqChatAndTrackInbound({
+      chatId: summary.chatId,
       memberId: existingMember.id,
       occurredAt,
       prisma: input.prisma,
@@ -147,12 +141,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
     phoneNumber: participantPhoneNumber,
     prisma: input.prisma,
   });
-  await persistHostedMemberLinqChatBinding({
-    linqChatId: summary.chatId,
-    memberId: member.id,
-    prisma: input.prisma,
-  });
-  const dailyState = await incrementHostedLinqInboundDailyState({
+  const dailyState = await bindHostedMemberLinqChatAndTrackInbound({
+    chatId: summary.chatId,
     memberId: member.id,
     occurredAt,
     prisma: input.prisma,
@@ -250,4 +240,23 @@ function buildQuotaReplyResponse(input: {
       reason: "sent-daily-quota-reply",
     },
   };
+}
+
+async function bindHostedMemberLinqChatAndTrackInbound(input: {
+  chatId: string;
+  memberId: string;
+  occurredAt: string;
+  prisma: HostedWebhookReceiptPersistenceClient;
+}) {
+  await upsertHostedMemberLinqChatBinding({
+    linqChatId: input.chatId,
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+
+  return incrementHostedLinqInboundDailyState({
+    memberId: input.memberId,
+    occurredAt: input.occurredAt,
+    prisma: input.prisma,
+  });
 }
