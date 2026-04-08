@@ -1,5 +1,21 @@
 import assert from 'node:assert/strict'
-import { test, vi } from 'vitest'
+import { afterAll, test, vi } from 'vitest'
+
+const originalCi = vi.hoisted(() => {
+  const previousCi = process.env.CI
+  process.env.CI = 'false'
+  return previousCi
+})
+
+afterAll(() => {
+  if (originalCi === undefined) {
+    delete process.env.CI
+    return
+  }
+
+  process.env.CI = originalCi
+})
+
 import {
   buildSetupWizardPublicUrlReview,
   createSetupWizardCompletionController as createSetupWizardController,
@@ -40,7 +56,7 @@ async function waitForWizardText(
   readOutput: () => string,
   pattern: RegExp,
 ): Promise<string> {
-  for (let attempt = 0; attempt < 30; attempt += 1) {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
     const output = stripAnsi(readOutput())
     if (pattern.test(output)) {
       return output

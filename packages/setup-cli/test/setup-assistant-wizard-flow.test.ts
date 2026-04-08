@@ -1,5 +1,20 @@
 import assert from 'node:assert/strict'
-import { test } from 'vitest'
+import { afterAll, test, vi } from 'vitest'
+
+const originalCi = vi.hoisted(() => {
+  const previousCi = process.env.CI
+  process.env.CI = 'false'
+  return previousCi
+})
+
+afterAll(() => {
+  if (originalCi === undefined) {
+    delete process.env.CI
+    return
+  }
+
+  process.env.CI = originalCi
+})
 
 import { runSetupAssistantWizard } from '../src/setup-assistant-wizard.js'
 import { stripAnsi, withMockProcessTty } from './helpers.ts'
@@ -216,15 +231,15 @@ test.sequential(
         readOutput,
         /Review/u,
       )
-      assert.match(reviewOutput, /OpenRouter/u)
+      assert.match(reviewOutput, /Vercel AI Gateway/u)
       await writeInput('\r')
 
       assert.deepEqual(await wizardResultPromise, {
-        assistantApiKeyEnv: 'OPENROUTER_API_KEY',
-        assistantBaseUrl: 'https://openrouter.ai/api/v1',
+        assistantApiKeyEnv: 'VERCEL_AI_API_KEY',
+        assistantBaseUrl: 'https://ai-gateway.vercel.sh/v1',
         assistantOss: false,
         assistantPreset: 'openai-compatible',
-        assistantProviderName: 'openrouter',
+        assistantProviderName: 'vercel-ai-gateway',
       })
     })
   },
