@@ -3,6 +3,10 @@ import { fileURLToPath } from "node:url";
 
 import { defineProject } from "vitest/config";
 
+import {
+  createMurphVitestCoverage,
+  resolveMurphVitestCoverageProviderModule,
+} from "../../config/vitest-coverage.js";
 import { resolveMurphVitestConcurrency } from "../../config/vitest-parallelism.js";
 import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
 
@@ -32,5 +36,15 @@ export default defineProject({
     environment: "node",
     ...resolveMurphVitestConcurrency(),
     include: ["test/**/*.test.ts"],
+    coverage: createMurphVitestCoverage({
+      customProviderModule: resolveMurphVitestCoverageProviderModule(packageDir),
+      include: [
+        "src/env-values.ts",
+        "src/inbox-cli-contracts.ts",
+        "src/setup-cli-contracts.ts",
+        "src/telegram-runtime.ts",
+        "src/vault-cli-errors.ts",
+      ],
+    }),
   },
 });
