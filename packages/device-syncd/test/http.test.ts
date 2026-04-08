@@ -3,17 +3,31 @@ import { EventEmitter } from "node:events";
 
 import { afterEach, test, vi } from "vitest";
 
+const nodeHttpMocks = vi.hoisted(() => ({
+  createServer: vi.fn<typeof import("node:http")["createServer"]>(),
+}));
+
+vi.mock("node:http", async () => {
+  const actual = await vi.importActual<typeof import("node:http")>("node:http");
+  return {
+    ...actual,
+    createServer: nodeHttpMocks.createServer,
+  };
+});
+
 import { DeviceSyncError, formatDeviceSyncStartupError } from "../src/errors.ts";
 import {
   assertDeviceSyncControlRequest,
   buildPublicDeviceSyncErrorPayload,
-  createDeviceSyncHttpRequestHandler,
   renderCallbackHtml,
   startDeviceSyncHttpServer,
 } from "../src/http.ts";
 import { createOuraDeviceSyncProvider } from "../src/providers/oura.ts";
 
 import type { DeviceSyncService } from "../src/service.ts";
+
+const CONTROL_TOKEN = "control-token-for-tests";
+const CONTROL_AUTHORIZATION = `Bearer ${CONTROL_TOKEN}`;
 
 const accountRecord = {
   id: "acct_demo_01",
@@ -35,7 +49,7 @@ const accountRecord = {
   updatedAt: "2026-03-17T12:00:00.000Z",
 };
 
-type IncomingMessageLike = AsyncIterable<Buffer> & {
+type IncomingMessageLike = AsyncIterable<Buffer | string> & {
   method?: string;
   url?: string;
   headers: Record<string, string | string[]>;
@@ -58,7 +72,39 @@ type MockHttpResponse = {
   readJson(): unknown;
 };
 
-type NodeHttpCreateServer = typeof import("node:http")["createServer"];
+type MockHttpRequestHandler = (
+  request: IncomingMessageLike,
+  response: ServerResponseLike,
+) => Promise<void>;
+
+class MockListeningServer extends EventEmitter {
+  private readonly host: string;
+  private readonly port: number;
+
+  constructor(port: number, host: string) {
+    super();
+    this.port = port;
+    this.host = host;
+  }
+
+  listen(_port: number, _host: string, callback: () => void) {
+    callback();
+    return this;
+  }
+
+  address() {
+    return {
+      address: this.host,
+      family: "IPv4",
+      port: this.port,
+    };
+  }
+
+  close(callback: (error?: Error | null) => void) {
+    callback(null);
+    return this;
+  }
+}
 
 function createMockHttpRequest(input: {
   method: string;
@@ -66,8 +112,9 @@ function createMockHttpRequest(input: {
   headers?: Record<string, string | string[]>;
   remoteAddress?: string;
   body?: string;
+  bodyChunks?: ReadonlyArray<Buffer | string>;
 }): IncomingMessageLike {
-  const chunks = input.body ? [Buffer.from(input.body, "utf8")] : [];
+  const chunks = input.bodyChunks ?? (input.body ? [Buffer.from(input.body, "utf8")] : []);
 
   return {
     method: input.method,
@@ -117,26 +164,82 @@ function createMockHttpResponse(): MockHttpResponse {
   };
 }
 
-async function loadDeviceSyncHttpModule(input: {
-  createServer: NodeHttpCreateServer;
-}): Promise<typeof import("../src/http.ts")> {
-  vi.resetModules();
-
-  vi.doMock("node:http", async () => {
-    const actual = await vi.importActual<typeof import("node:http")>("node:http");
-    return {
-      ...actual,
-      createServer: input.createServer,
-    };
+async function createHandlerHarness(input: {
+  service?: DeviceSyncService;
+  surface: "control" | "public" | "combined";
+  config?: Parameters<typeof startDeviceSyncHttpServer>[0]["config"];
+  controlToken?: string;
+  bodyLimitBytes?: number;
+}): Promise<{
+  invoke(request: {
+    method: string;
+    url: string;
+    headers?: Record<string, string | string[]>;
+    remoteAddress?: string;
+    body?: string;
+    bodyChunks?: ReadonlyArray<Buffer | string>;
+  }): Promise<MockHttpResponse>;
+  close(): Promise<void>;
+}> {
+  const servers: MockHttpRequestHandler[] = [];
+  nodeHttpMocks.createServer.mockImplementation((handler) => {
+    servers.push(handler as MockHttpRequestHandler);
+    return new MockListeningServer(43100 + servers.length, "127.0.0.1") as unknown as import("node:http").Server;
   });
+  const controlToken = input.controlToken ?? input.config?.controlToken ?? CONTROL_TOKEN;
+  const config =
+    input.surface === "combined"
+      ? {
+          ...input.config,
+          controlToken,
+          host: input.config?.host ?? "127.0.0.1",
+          port: input.config?.port ?? 0,
+        }
+      : {
+          ...input.config,
+          controlToken,
+          host: input.config?.host ?? "127.0.0.1",
+          port: input.config?.port ?? 0,
+          publicHost: input.config?.publicHost ?? "127.0.0.1",
+          publicPort: input.config?.publicPort ?? 9797,
+        };
+  const serverHandle = await startDeviceSyncHttpServer({
+    service: input.service ?? createStubService(),
+    bodyLimitBytes: input.bodyLimitBytes,
+    config,
+  });
+  const handler = input.surface === "public" ? servers[1] : servers[0];
 
-  return import("../src/http.ts");
+  if (!handler) {
+    await serverHandle.close();
+    throw new Error(`Mock device sync ${input.surface} handler was not created.`);
+  }
+
+  return {
+    async invoke(request) {
+      const response = createMockHttpResponse();
+      await handler(
+        createMockHttpRequest({
+          method: request.method,
+          url: request.url,
+          headers: request.headers,
+          remoteAddress: request.remoteAddress,
+          body: request.body,
+          bodyChunks: request.bodyChunks,
+        }),
+        response.response,
+      );
+      return response;
+    },
+    async close() {
+      await serverHandle.close();
+    },
+  };
 }
 
 afterEach(() => {
   vi.restoreAllMocks();
-  vi.resetModules();
-  vi.doUnmock("node:http");
+  nodeHttpMocks.createServer.mockReset();
 });
 
 async function invokeHandler(input: {
@@ -146,32 +249,32 @@ async function invokeHandler(input: {
   headers?: Record<string, string | string[]>;
   remoteAddress?: string;
   body?: string;
+  bodyChunks?: ReadonlyArray<Buffer | string>;
   surface: "control" | "public" | "combined";
-  config?: Parameters<typeof createDeviceSyncHttpRequestHandler>[0]["config"];
+  config?: Parameters<typeof startDeviceSyncHttpServer>[0]["config"];
   controlToken?: string;
   bodyLimitBytes?: number;
 }): Promise<MockHttpResponse> {
-  const response = createMockHttpResponse();
-  const handler = createDeviceSyncHttpRequestHandler({
+  const harness = await createHandlerHarness({
     service: input.service ?? createStubService(),
-    bodyLimitBytes: input.bodyLimitBytes,
     surface: input.surface,
     config: input.config,
-    controlToken: input.controlToken ?? "control-token-for-tests",
+    controlToken: input.controlToken ?? CONTROL_TOKEN,
+    bodyLimitBytes: input.bodyLimitBytes,
   });
 
-  await handler(
-    createMockHttpRequest({
+  try {
+    return await harness.invoke({
       method: input.method,
       url: input.url,
       headers: input.headers,
       remoteAddress: input.remoteAddress,
       body: input.body,
-    }) as never,
-    response.response as never,
-  );
-
-  return response;
+      bodyChunks: input.bodyChunks,
+    });
+  } finally {
+    await harness.close();
+  }
 }
 
 test("assertDeviceSyncControlRequest rejects non-loopback callers", () => {
@@ -179,10 +282,10 @@ test("assertDeviceSyncControlRequest rejects non-loopback callers", () => {
     () =>
       assertDeviceSyncControlRequest({
         headers: {
-          authorization: "Bearer control-token-for-tests",
+          authorization: CONTROL_AUTHORIZATION,
         },
         remoteAddress: "203.0.113.10",
-        controlToken: "control-token-for-tests",
+        controlToken: CONTROL_TOKEN,
       }),
     (error: unknown) =>
       error instanceof DeviceSyncError
@@ -195,10 +298,10 @@ test("assertDeviceSyncControlRequest accepts loopback callers with a single-valu
   assert.doesNotThrow(() =>
     assertDeviceSyncControlRequest({
       headers: {
-        authorization: ["Bearer control-token-for-tests"],
+        authorization: [CONTROL_AUTHORIZATION],
       },
       remoteAddress: " ::Ffff:127.0.0.1 ",
-      controlToken: "control-token-for-tests",
+      controlToken: CONTROL_TOKEN,
     }),
   );
 });
@@ -237,7 +340,7 @@ test("device sync http handler routes control and public requests without socket
     surface: "combined",
     remoteAddress: "203.0.113.10",
     headers: {
-      authorization: "Bearer control-token-for-tests",
+      authorization: CONTROL_AUTHORIZATION,
     },
   });
   assert.equal(rejectedRemote.statusCode, 403);
@@ -255,7 +358,7 @@ test("device sync http handler routes control and public requests without socket
     url: "/device-sync/",
     surface: "combined",
     headers: {
-      authorization: "Bearer control-token-for-tests",
+      authorization: CONTROL_AUTHORIZATION,
     },
   });
   assert.equal(root.statusCode, 200);
@@ -271,7 +374,7 @@ test("device sync http handler routes control and public requests without socket
     url: "/device-sync/healthz",
     surface: "combined",
     headers: {
-      authorization: "Bearer control-token-for-tests",
+      authorization: CONTROL_AUTHORIZATION,
     },
   });
   assert.equal(health.statusCode, 200);
@@ -286,7 +389,7 @@ test("device sync http handler routes control and public requests without socket
     url: "/device-sync/providers",
     surface: "combined",
     headers: {
-      authorization: "Bearer control-token-for-tests",
+      authorization: CONTROL_AUTHORIZATION,
     },
   });
   assert.equal(providers.statusCode, 200);
@@ -300,7 +403,7 @@ test("device sync http handler routes control and public requests without socket
     url: "/device-sync/connect/demo?returnTo=%2Fsettings%2Fdevices",
     surface: "combined",
     headers: {
-      authorization: "Bearer control-token-for-tests",
+      authorization: CONTROL_AUTHORIZATION,
     },
   });
   assert.equal(connectRedirect.statusCode, 302);
@@ -312,7 +415,7 @@ test("device sync http handler routes control and public requests without socket
     url: "/device-sync/providers/demo/connect",
     surface: "combined",
     headers: {
-      authorization: "Bearer control-token-for-tests",
+      authorization: CONTROL_AUTHORIZATION,
       "content-type": "application/json; charset=utf-8",
     },
     body: JSON.stringify({
@@ -333,7 +436,7 @@ test("device sync http handler routes control and public requests without socket
     url: "/device-sync/accounts",
     surface: "combined",
     headers: {
-      authorization: "Bearer control-token-for-tests",
+      authorization: CONTROL_AUTHORIZATION,
     },
   });
   assert.equal(accounts.statusCode, 200);
@@ -347,7 +450,7 @@ test("device sync http handler routes control and public requests without socket
     url: `/device-sync/accounts/${accountRecord.id}`,
     surface: "combined",
     headers: {
-      authorization: "Bearer control-token-for-tests",
+      authorization: CONTROL_AUTHORIZATION,
     },
   });
   assert.equal(account.statusCode, 200);
@@ -372,7 +475,7 @@ test("device sync http handler routes control and public requests without socket
     url: `/device-sync/accounts/${accountRecord.id}/reconcile`,
     surface: "combined",
     headers: {
-      authorization: "Bearer control-token-for-tests",
+      authorization: CONTROL_AUTHORIZATION,
     },
   });
   assert.equal(reconcile.statusCode, 202);
@@ -408,7 +511,7 @@ test("device sync http handler routes control and public requests without socket
     url: `/device-sync/accounts/${accountRecord.id}/disconnect`,
     surface: "combined",
     headers: {
-      authorization: "Bearer control-token-for-tests",
+      authorization: CONTROL_AUTHORIZATION,
     },
   });
   assert.equal(disconnect.statusCode, 200);
@@ -483,7 +586,7 @@ test("device sync http handler respects root and exact base-path routing", async
     url: "/providers",
     surface: "combined",
     headers: {
-      authorization: "Bearer control-token-for-tests",
+      authorization: CONTROL_AUTHORIZATION,
     },
   });
   assert.equal(rootBaseProviders.statusCode, 200);
@@ -496,7 +599,7 @@ test("device sync http handler respects root and exact base-path routing", async
     url: "/device-sync",
     surface: "combined",
     headers: {
-      authorization: "Bearer control-token-for-tests",
+      authorization: CONTROL_AUTHORIZATION,
     },
   });
   assert.equal(exactBasePath.statusCode, 200);
@@ -511,7 +614,7 @@ test("device sync http handler respects root and exact base-path routing", async
     url: "/outside-base-path/providers",
     surface: "combined",
     headers: {
-      authorization: "Bearer control-token-for-tests",
+      authorization: CONTROL_AUTHORIZATION,
     },
   });
   assert.equal(outsideBasePath.statusCode, 404);
@@ -529,8 +632,7 @@ test("device sync http handler forwards single-value webhook headers and string 
     provider: string;
     rawBody: string;
   }> = [];
-  const response = createMockHttpResponse();
-  const handler = createDeviceSyncHttpRequestHandler({
+  const response = await invokeHandler({
     service: createStubService({
       async handleWebhook(provider, headers, rawBody) {
         observed.push({
@@ -547,27 +649,15 @@ test("device sync http handler forwards single-value webhook headers and string 
         };
       },
     }),
+    method: "POST",
+    url: "/device-sync/webhooks/demo",
+    headers: {
+      "x-device-sync-trace": "trace-single-header",
+    },
+    bodyChunks: ["{\"ok\":", "true}"],
     surface: "public",
-    controlToken: "control-token-for-tests",
+    controlToken: CONTROL_TOKEN,
   });
-
-  await handler(
-    {
-      method: "POST",
-      url: "/device-sync/webhooks/demo",
-      headers: {
-        "x-device-sync-trace": "trace-single-header",
-      },
-      socket: {
-        remoteAddress: "127.0.0.1",
-      },
-      async *[Symbol.asyncIterator]() {
-        yield "{\"ok\":";
-        yield "true}";
-      },
-    } as never,
-    response.response as never,
-  );
 
   assert.equal(response.statusCode, 202);
   assert.deepEqual(observed, [
@@ -581,8 +671,7 @@ test("device sync http handler forwards single-value webhook headers and string 
 
 test("device sync http handler preserves repeated webhook headers", async () => {
   const observedHeaders: string[] = [];
-  const response = createMockHttpResponse();
-  const handler = createDeviceSyncHttpRequestHandler({
+  const response = await invokeHandler({
     service: createStubService({
       async handleWebhook(_provider, headers) {
         observedHeaders.push(headers.get("x-device-sync-trace") ?? "");
@@ -594,21 +683,15 @@ test("device sync http handler preserves repeated webhook headers", async () => 
         };
       },
     }),
+    method: "POST",
+    url: "/device-sync/webhooks/demo",
+    headers: {
+      "x-device-sync-trace": ["trace-one", "trace-two"],
+    },
+    body: "{\"ok\":true}",
     surface: "public",
-    controlToken: "control-token-for-tests",
+    controlToken: CONTROL_TOKEN,
   });
-
-  await handler(
-    createMockHttpRequest({
-      method: "POST",
-      url: "/device-sync/webhooks/demo",
-      headers: {
-        "x-device-sync-trace": ["trace-one", "trace-two"],
-      },
-      body: "{\"ok\":true}",
-    }) as never,
-    response.response as never,
-  );
 
   assert.equal(response.statusCode, 202);
   assert.deepEqual(observedHeaders, ["trace-one, trace-two"]);
@@ -620,7 +703,7 @@ test("device sync http handler validates request bodies and payload limits", asy
     url: "/device-sync/providers/demo/connect",
     surface: "combined",
     headers: {
-      authorization: "Bearer control-token-for-tests",
+      authorization: CONTROL_AUTHORIZATION,
       "content-type": "application/json; charset=utf-8",
     },
     body: "",
@@ -638,7 +721,7 @@ test("device sync http handler validates request bodies and payload limits", asy
     url: "/device-sync/providers/demo/connect",
     surface: "combined",
     headers: {
-      authorization: "Bearer control-token-for-tests",
+      authorization: CONTROL_AUTHORIZATION,
       "content-type": "application/json; charset=utf-8",
     },
     body: "{",
@@ -656,7 +739,7 @@ test("device sync http handler validates request bodies and payload limits", asy
     url: "/device-sync/providers/demo/connect",
     surface: "combined",
     headers: {
-      authorization: "Bearer control-token-for-tests",
+      authorization: CONTROL_AUTHORIZATION,
       "content-type": "application/json; charset=utf-8",
     },
     body: "[]",
@@ -740,7 +823,7 @@ test("device sync http handler returns not found for unknown accounts", async ()
     url: "/device-sync/accounts/acct_missing",
     surface: "combined",
     headers: {
-      authorization: "Bearer control-token-for-tests",
+      authorization: CONTROL_AUTHORIZATION,
     },
   });
 
@@ -761,7 +844,7 @@ test("device sync http server rejects non-loopback control listener hosts", asyn
         config: {
           host: "0.0.0.0",
           port: 0,
-          controlToken: "control-token-for-tests",
+          controlToken: CONTROL_TOKEN,
         },
       }),
     /Device sync control listener host must be a loopback hostname or address/u,
@@ -773,13 +856,13 @@ test("device sync http server requires both public listener fields together", as
     {
       host: "127.0.0.1",
       port: 0,
-      controlToken: "control-token-for-tests",
+      controlToken: CONTROL_TOKEN,
       publicHost: "127.0.0.1",
     },
     {
       host: "127.0.0.1",
       port: 0,
-      controlToken: "control-token-for-tests",
+      controlToken: CONTROL_TOKEN,
       publicPort: 9797,
     },
   ]) {
@@ -795,49 +878,18 @@ test("device sync http server requires both public listener fields together", as
 });
 
 test("device sync http server can start without a public listener and rejects missing control tokens", async () => {
-  class MockServer extends EventEmitter {
-    private readonly host: string;
-    private readonly port: number;
-
-    constructor(port: number, host: string) {
-      super();
-      this.port = port;
-      this.host = host;
-    }
-
-    listen(_port: number, _host: string, callback: () => void) {
-      callback();
-      return this;
-    }
-
-    address() {
-      return {
-        address: this.host,
-        family: "IPv4",
-        port: this.port,
-      };
-    }
-
-    close(callback: (error?: Error | null) => void) {
-      callback(null);
-      return this;
-    }
-  }
-
-  const servers: MockServer[] = [];
-  const { startDeviceSyncHttpServer: startServer } = await loadDeviceSyncHttpModule({
-    createServer() {
-      const server = new MockServer(43110, "127.0.0.1");
-      servers.push(server);
-      return server as unknown as import("node:http").Server;
-    },
+  const servers: MockListeningServer[] = [];
+  nodeHttpMocks.createServer.mockImplementation(() => {
+    const server = new MockListeningServer(43110, "127.0.0.1");
+    servers.push(server);
+    return server as unknown as import("node:http").Server;
   });
-  const handle = await startServer({
+  const handle = await startDeviceSyncHttpServer({
     service: createStubService(),
     config: {
       host: "127.0.0.1",
       port: 0,
-      controlToken: "control-token-for-tests",
+      controlToken: CONTROL_TOKEN,
     },
   });
 
@@ -854,7 +906,7 @@ test("device sync http server can start without a public listener and rejects mi
 
   await assert.rejects(
     () =>
-      startServer({
+      startDeviceSyncHttpServer({
         service: createStubService(),
         config: {
           host: "127.0.0.1",
@@ -866,59 +918,27 @@ test("device sync http server can start without a public listener and rejects mi
 });
 
 test("device sync http server wires control and public listeners to the correct handler surfaces", async () => {
-  class MockServer extends EventEmitter {
-    private readonly host: string;
-    private readonly port: number;
-
-    constructor(port: number, host: string) {
-      super();
-      this.port = port;
-      this.host = host;
-    }
-
-    listen(_port: number, _host: string, callback: () => void) {
-      callback();
-      return this;
-    }
-
-    address() {
-      return {
-        address: this.host,
-        family: "IPv4",
-        port: this.port,
-      };
-    }
-
-    close(callback: (error?: Error | null) => void) {
-      callback(null);
-      return this;
-    }
-  }
-
   const servers: Array<{
     handler: (request: IncomingMessageLike, response: ServerResponseLike) => Promise<void>;
-    server: MockServer;
+    server: MockListeningServer;
   }> = [];
 
   let nextPort = 43100;
-  const { startDeviceSyncHttpServer: startServer } = await loadDeviceSyncHttpModule({
-    createServer(handler: (request: IncomingMessageLike, response: ServerResponseLike) => Promise<void>) {
-      const server = new MockServer(nextPort, "127.0.0.1");
-      nextPort += 1;
-      servers.push({
-        handler,
-        server,
-      });
-      return server as unknown as import("node:http").Server;
-    },
+  nodeHttpMocks.createServer.mockImplementation((handler) => {
+    servers.push({
+      handler: handler as (request: IncomingMessageLike, response: ServerResponseLike) => Promise<void>,
+      server: new MockListeningServer(nextPort, "127.0.0.1"),
+    });
+    nextPort += 1;
+    return servers.at(-1)!.server as unknown as import("node:http").Server;
   });
   const service = createStubService();
-  const handle = await startServer({
+  const handle = await startDeviceSyncHttpServer({
     service,
     config: {
       host: "127.0.0.1",
       port: 8788,
-      controlToken: "control-token-for-tests",
+      controlToken: CONTROL_TOKEN,
       publicHost: "127.0.0.1",
       publicPort: 9797,
     },
@@ -940,7 +960,7 @@ test("device sync http server wires control and public listeners to the correct 
       method: "GET",
       url: "/device-sync/accounts",
       headers: {
-        authorization: "Bearer control-token-for-tests",
+        authorization: CONTROL_AUTHORIZATION,
       },
     }),
     controlResponse.response,
@@ -1008,7 +1028,7 @@ test("device sync http handler redacts provider response bodies from control-pla
     url: "/device-sync/accounts",
     surface: "combined",
     headers: {
-      authorization: "Bearer control-token-for-tests",
+      authorization: CONTROL_AUTHORIZATION,
     },
   });
 
@@ -1041,7 +1061,7 @@ test("device sync http handler does not expose raw unexpected error text to cont
     url: "/device-sync/providers",
     surface: "combined",
     headers: {
-      authorization: "Bearer control-token-for-tests",
+      authorization: CONTROL_AUTHORIZATION,
     },
   });
 
@@ -1224,7 +1244,7 @@ test("device sync http handler serves the Oura webhook verification challenge on
     url: "/device-sync/webhooks/oura?verification_token=verify-token-for-tests&challenge=random-challenge",
     surface: "public",
     config: {
-      controlToken: "control-token-for-tests",
+      controlToken: CONTROL_TOKEN,
       ouraWebhookVerificationToken: "verify-token-for-tests",
     },
   });
@@ -1253,7 +1273,7 @@ test("device sync http handler returns the shared Oura mismatch error on the pub
     url: "/device-sync/webhooks/oura?verification_token=wrong-token&challenge=random-challenge",
     surface: "public",
     config: {
-      controlToken: "control-token-for-tests",
+      controlToken: CONTROL_TOKEN,
       ouraWebhookVerificationToken: "verify-token-for-tests",
     },
   });
@@ -1286,7 +1306,7 @@ test("device sync http handler returns the shared Oura missing-token error on th
     url: "/device-sync/webhooks/oura?verification_token=verify-token-for-tests&challenge=random-challenge",
     surface: "public",
     config: {
-      controlToken: "control-token-for-tests",
+      controlToken: CONTROL_TOKEN,
     },
   });
 

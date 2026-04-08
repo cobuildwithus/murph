@@ -49,7 +49,7 @@ interface DeviceSyncHttpRouteMatch {
   params: DeviceSyncHttpRouteParams;
 }
 
-export type DeviceSyncHttpRequestHandler = (
+type DeviceSyncHttpRequestHandler = (
   request: IncomingMessage,
   response: ServerResponse,
 ) => Promise<void>;
@@ -379,7 +379,7 @@ async function routeRequest(input: {
   });
 }
 
-export function createDeviceSyncHttpRequestHandler(input: {
+function createDeviceSyncHttpRequestHandler(input: {
   service: DeviceSyncService;
   bodyLimitBytes?: number;
   controlToken: string;
