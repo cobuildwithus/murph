@@ -59,6 +59,28 @@ describe("HostedPhoneAuth", () => {
     assert.doesNotMatch(markup, /Defaulting to United States/);
   });
 
+  it("uses unique phone input ids for separate public auth instances", async () => {
+    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+
+    const markup = renderToStaticMarkup(
+      React.createElement(React.Fragment, null,
+        React.createElement(HostedPhoneAuth, {
+          mode: "public",
+        }),
+        React.createElement(HostedPhoneAuth, {
+          intent: "signin",
+          mode: "public",
+        }),
+      ),
+    );
+
+    const ids = [...markup.matchAll(/id="([^"]+)"/g)].map((match) => match[1]);
+    const phoneIds = ids.filter((id) => id.startsWith("_R"));
+
+    assert.equal(phoneIds.length, 2);
+    assert.notEqual(phoneIds[0], phoneIds[1]);
+  });
+
   it("renders the explicit manual-resume banner for authenticated invite sessions", async () => {
     mocks.usePrivy.mockReturnValue({
       authenticated: true,
@@ -343,7 +365,8 @@ describe("HostedPhoneAuth", () => {
       }),
     );
 
-    assert.match(phoneEntryMarkup, /Phone number on your account/);
+    assert.match(phoneEntryMarkup, /Phone number/);
+    assert.doesNotMatch(phoneEntryMarkup, /Phone number on your account/);
     assert.match(phoneEntryMarkup, /Text me a sign-in code/);
     assert.match(codeEntryMarkup, /We texted the latest sign-in code to \*\*\* 2671\./);
     assert.match(codeEntryMarkup, />Sign in</);

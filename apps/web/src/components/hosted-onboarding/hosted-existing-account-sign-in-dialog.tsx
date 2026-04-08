@@ -33,9 +33,7 @@ export function HostedExistingAccountSignInDialog() {
             <DialogTitle className="text-xl font-bold tracking-tight text-stone-900">
               Sign in with your phone
             </DialogTitle>
-            <DialogDescription>
-              Enter your phone number and we&apos;ll text you a sign-in code.
-            </DialogDescription>
+            <DialogDescription>We&apos;ll text you a sign-in code.</DialogDescription>
           </DialogHeader>
           {open ? (
             <HostedPhoneAuth
