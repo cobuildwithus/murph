@@ -27,8 +27,7 @@ export async function readJsonWithSchema<T>(
 ): Promise<T> {
   try {
     const raw = await readFile(absolutePath, 'utf8')
-    const parsed = JSON.parse(raw) as unknown
-    return schema.parse(parsed)
+    return schema.parse(JSON.parse(raw))
   } catch (error) {
     throw new VaultCliError(code, message, { error: errorMessage(error) })
   }

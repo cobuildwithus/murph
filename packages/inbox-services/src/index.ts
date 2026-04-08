@@ -13,6 +13,7 @@ export type {
   CoreRuntimeModule,
   EmailDriver,
   ImessageDriver,
+  InboxImessageRuntimeModule,
   InboxServices,
   InboxSourceSetEnabledResult,
   InboxParserServiceRuntime,
