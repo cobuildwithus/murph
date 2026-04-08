@@ -39,6 +39,11 @@ export {
   compareInboundCaptures,
   createInboundCaptureFromChatMessage,
 } from "./connectors/chat/message.ts";
+export {
+  normalizeTextValue,
+  sanitizeRawMetadata,
+  toIsoTimestamp,
+} from "./shared-runtime.ts";
 export type {
   ChatPollDriver,
   ChatPollWatcherHandle,
@@ -114,25 +119,6 @@ export type {
   LinqAttachmentDownloadDriver,
   NormalizeLinqWebhookEventInput,
 } from "./connectors/linq/normalize.ts";
-export {
-  createImessageConnector,
-  loadImessageKitDriver,
-} from "./connectors/imessage/connector.ts";
-export type {
-  ImessageConnectorOptions,
-  ImessageGetMessagesInput,
-  ImessagePollDriver,
-  ImessageWatchOptions,
-} from "./connectors/imessage/connector.ts";
-export {
-  normalizeImessageAttachment,
-  normalizeImessageMessage,
-} from "./connectors/imessage/normalize.ts";
-export type {
-  ImessageKitAttachmentLike,
-  ImessageKitChatLike,
-  ImessageKitMessageLike,
-} from "./connectors/imessage/normalize.ts";
 export {
   DEFAULT_TELEGRAM_ALLOWED_UPDATES,
   createTelegramApiPollDriver,

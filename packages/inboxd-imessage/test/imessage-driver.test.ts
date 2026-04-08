@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
 
+import { loadImessageKitDriver } from "../src/index.ts";
+
 const imessageMocks = vi.hoisted(() => ({
   closeCalls: 0,
   getMessagesResult: {
@@ -46,8 +48,6 @@ vi.mock("@photon-ai/imessage-kit", () => ({
     }
   },
 }));
-
-import { loadImessageKitDriver } from "../src/connectors/imessage/connector.ts";
 
 afterEach(() => {
   imessageMocks.closeCalls = 0;
@@ -191,7 +191,9 @@ test("loadImessageKitDriver watch filtering skips own messages and closes the SD
   assert.equal(received[0]?.guid, "im-other");
 
   controller.abort();
-  await handle?.done;
+  if (handle && typeof handle === "object" && "done" in handle) {
+    await handle.done;
+  }
 
   assert.equal(imessageMocks.stopWatchingCalls, 1);
   assert.equal(imessageMocks.closeCalls, 1);

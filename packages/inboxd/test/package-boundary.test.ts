@@ -17,7 +17,7 @@ const removedSubpaths = [
   "./telegram-webhook",
 ] as const;
 
-const normalizationSubpaths = [
+const publishedSubpaths = [
   {
     exportKey: "./connectors/linq/normalize",
     label: "linq normalize",
@@ -52,9 +52,9 @@ async function readPackageManifest(): Promise<InboxdPackageManifest> {
 }
 
 async function resolveImportSpecifier(input: {
-  exportKey: (typeof normalizationSubpaths)[number]["exportKey"];
-  packageImport: (typeof normalizationSubpaths)[number]["packageImport"];
-  sourceFile: (typeof normalizationSubpaths)[number]["sourceFile"];
+  exportKey: (typeof publishedSubpaths)[number]["exportKey"] | ".";
+  packageImport: (typeof publishedSubpaths)[number]["packageImport"] | "@murphai/inboxd";
+  sourceFile: (typeof publishedSubpaths)[number]["sourceFile"] | "src/index.ts";
 }): Promise<string> {
   const packageManifest = await readPackageManifest();
   const exportEntry = packageManifest.exports?.[input.exportKey];
@@ -78,7 +78,7 @@ test("@murphai/inboxd no longer publishes the removed Linq and Telegram compatib
   }
 });
 
-for (const subpath of normalizationSubpaths) {
+for (const subpath of publishedSubpaths) {
   test(`${subpath.label} subpath stays published and importable`, async () => {
     const modulePath = await resolveImportSpecifier(subpath);
     const result = await execFileAsync(process.execPath, [
@@ -95,3 +95,30 @@ for (const subpath of normalizationSubpaths) {
     assert.doesNotMatch(result.stderr, /SQLite is an experimental feature/u);
   });
 }
+
+test("@murphai/inboxd root barrel no longer exposes iMessage helpers", async () => {
+  const modulePath = await resolveImportSpecifier({
+    exportKey: ".",
+    packageImport: "@murphai/inboxd",
+    sourceFile: "src/index.ts",
+  });
+  const result = await execFileAsync(process.execPath, [
+    "--import",
+    "tsx",
+    "--input-type=module",
+    "-e",
+    [
+      `const mod = await import(${JSON.stringify(modulePath)});`,
+      `for (const key of ["createImessageConnector", "loadImessageKitDriver", "normalizeImessageAttachment", "normalizeImessageMessage"]) {`,
+      "  if (key in mod) {",
+      '    throw new Error(`unexpected iMessage export: ${key}`);',
+      "  }",
+      "}",
+    ].join(" "),
+  ], {
+    cwd: packageDir,
+  });
+
+  assert.equal(result.stdout.trim(), "");
+  assert.doesNotMatch(result.stderr, /unexpected iMessage export/u);
+});
