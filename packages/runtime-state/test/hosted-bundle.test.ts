@@ -10,7 +10,7 @@ import {
   sameHostedExecutionBundleRef,
   type HostedExecutionBundleRef,
 } from "../src/index.ts";
-import { serializeHostedBundleArchive } from "../src/hosted-bundle.ts";
+import * as hostedBundle from "../src/hosted-bundle.ts";
 import {
   describeVaultLocalStateRelativePath,
   decodeHostedBundleBase64,
@@ -87,10 +87,276 @@ test("hosted bundle helpers round-trip multi-root archives and base64 helpers", 
 });
 
 test("hosted bundle base64 decoding rejects malformed payloads but preserves empty bundles", () => {
+  expect(encodeHostedBundleBase64(null)).toBeNull();
+  expect(decodeHostedBundleBase64(null)).toBeNull();
   expect(decodeHostedBundleBase64("")).toEqual(new Uint8Array());
   expect(Buffer.from(decodeHostedBundleBase64(" Zm9v ") ?? [])).toEqual(Buffer.from("foo"));
   expect(() => decodeHostedBundleBase64("%%%")).toThrow("Hosted bundle payload must be valid base64.");
   expect(() => decodeHostedBundleBase64("Zg")).toThrow("Hosted bundle payload must be valid base64.");
+});
+
+test("hosted bundle archive helpers validate text entries, artifact entries, and invalid archives", async () => {
+  const textBundle = writeHostedBundleTextFile({
+    bytes: null,
+    kind: "vault",
+    path: "nested\\state.json",
+    root: "vault",
+    text: "{\"ok\":true}\n",
+  });
+
+  assert.equal(readHostedBundleTextFile({
+    bytes: textBundle,
+    expectedKind: "vault",
+    path: "nested/state.json",
+    root: "vault",
+  }), "{\"ok\":true}\n");
+  assert.equal(hasHostedBundleArtifactPath({
+    bytes: textBundle,
+    expectedKind: "vault",
+    path: "nested/state.json",
+    root: "vault",
+  }), false);
+
+  const artifactBundle = hostedBundle.serializeHostedBundleArchive({
+    files: [
+      {
+        artifact: {
+          byteSize: 3,
+          sha256: sha256HostedBundleHex(Buffer.from("pdf")),
+        },
+        path: "artifacts/report.pdf",
+        root: "vault",
+      },
+    ],
+    kind: "vault",
+    schema: HOSTED_BUNDLE_SCHEMA,
+  });
+
+  assert.equal(readHostedBundleTextFile({
+    bytes: artifactBundle,
+    expectedKind: "vault",
+    path: "artifacts/report.pdf",
+    root: "vault",
+  }), null);
+  assert.equal(hasHostedBundleArtifactPath({
+    bytes: artifactBundle,
+    expectedKind: "vault",
+    path: "artifacts/report.pdf",
+    root: "vault",
+  }), true);
+  assert.deepEqual(listHostedBundleArtifacts({
+    bytes: artifactBundle,
+    expectedKind: "vault",
+  }), [{
+    path: "artifacts/report.pdf",
+    ref: {
+      byteSize: 3,
+      sha256: sha256HostedBundleHex(Buffer.from("pdf")),
+    },
+    root: "vault",
+  }]);
+  assert.equal(readHostedBundleTextFile({
+    bytes: null,
+    expectedKind: "vault",
+    path: "missing.txt",
+    root: "vault",
+  }), null);
+  assert.deepEqual(listHostedBundleArtifacts({
+    bytes: null,
+    expectedKind: "vault",
+  }), []);
+
+  const deletedBundle = writeHostedBundleTextFile({
+    bytes: textBundle,
+    kind: "vault",
+    path: "nested/state.json",
+    root: "vault",
+    text: null,
+  });
+  assert.equal(readHostedBundleTextFile({
+    bytes: deletedBundle,
+    expectedKind: "vault",
+    path: "nested/state.json",
+    root: "vault",
+  }), null);
+
+  assert.throws(
+    () => hostedBundle.assertHostedBundleArtifactIntegrity({
+      bytes: Uint8Array.from(Buffer.from("bad")),
+      path: "artifacts/report.pdf",
+      ref: { byteSize: 4, sha256: "nope" },
+      root: "vault",
+    }),
+    /size mismatch/u,
+  );
+  assert.throws(
+    () => hostedBundle.assertHostedBundleArtifactIntegrity({
+      bytes: Uint8Array.from(Buffer.from("pdf")),
+      path: "artifacts/report.pdf",
+      ref: { byteSize: 3, sha256: "nope" },
+      root: "vault",
+    }),
+    /hash mismatch/u,
+  );
+  assert.deepEqual(hostedBundle.toHostedBundleBytes(new Uint8Array([1, 2, 3]).buffer), new Uint8Array([1, 2, 3]));
+  assert.throws(
+    () => hostedBundle.parseHostedBundleArchive(Uint8Array.from(Buffer.from("not-gzip"))),
+    /Hosted bundle archive is invalid\./u,
+  );
+  assert.throws(
+    () => hostedBundle.parseHostedBundleArchive(gzipSync(Buffer.from(JSON.stringify({
+      files: [],
+      kind: "other",
+      schema: HOSTED_BUNDLE_SCHEMA,
+    })))),
+    /Hosted bundle archive kind is invalid\./u,
+  );
+  assert.throws(
+    () => hostedBundle.parseHostedBundleArchive(gzipSync(Buffer.from(JSON.stringify({
+      files: [{ path: "a.txt", root: " " }],
+      kind: "vault",
+      schema: HOSTED_BUNDLE_SCHEMA,
+    })))),
+    /Hosted bundle root is invalid/u,
+  );
+  assert.throws(
+    () => hostedBundle.serializeHostedBundleArchive({
+      files: [
+        { contentsBase64: "YQ==", path: "dup.txt", root: "vault" },
+        { contentsBase64: "Yg==", path: "dup.txt", root: "vault" },
+      ],
+      kind: "vault",
+      schema: HOSTED_BUNDLE_SCHEMA,
+    }),
+    /duplicate file entry/u,
+  );
+});
+
+test("hosted bundle node helpers cover preserved artifacts, ignored roots, and restore safety checks", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-bundle-node-"));
+
+  try {
+    const bundleRoot = path.join(workspaceRoot, "bundle");
+    const restoreRoot = path.join(workspaceRoot, "restore");
+    await mkdir(path.join(bundleRoot, "nested"), { recursive: true });
+    await writeFile(path.join(bundleRoot, "nested", "inline.txt"), "inline\n");
+    await writeFile(path.join(bundleRoot, "nested", "artifact.bin"), "artifact\n");
+
+    const bundle = await snapshotHostedBundleRoots({
+      externalizeFile: async (entry) => entry.path.endsWith(".bin")
+        ? {
+            byteSize: entry.bytes.byteLength,
+            sha256: sha256HostedBundleHex(entry.bytes),
+          }
+        : null,
+      kind: "vault",
+      preservedArtifacts: [
+        {
+          path: "preserved/old.bin",
+          ref: {
+            byteSize: 3,
+            sha256: sha256HostedBundleHex(Buffer.from("old")),
+          },
+          root: "vault",
+        },
+      ],
+      roots: [
+        { optional: true, root: path.join(workspaceRoot, "missing"), rootKey: "vault" },
+        { root: bundleRoot, rootKey: "vault" },
+      ],
+    });
+
+    assert.ok(bundle);
+    assert.equal(hasHostedBundleArtifactPath({
+      bytes: bundle,
+      expectedKind: "vault",
+      path: "nested/artifact.bin",
+      root: "vault",
+    }), true);
+    assert.equal(hasHostedBundleArtifactPath({
+      bytes: bundle,
+      expectedKind: "vault",
+      path: "preserved/old.bin",
+      root: "vault",
+    }), true);
+
+    const materializeWorkspaceRoot = path.join(workspaceRoot, "materialized-workspace");
+
+    await materializeHostedExecutionArtifacts({
+      artifactResolver: async ({ path: artifactPath }) => {
+        if (artifactPath === "nested/artifact.bin") {
+          return Uint8Array.from(Buffer.from("artifact\n"));
+        }
+
+        return Uint8Array.from(Buffer.from("old"));
+      },
+      bundle,
+      shouldRestoreArtifact: ({ path: artifactPath }) => artifactPath !== "preserved/old.bin",
+      workspaceRoot: materializeWorkspaceRoot,
+    });
+
+    await assert.rejects(readFile(path.join(materializeWorkspaceRoot, "vault", "nested", "inline.txt"), "utf8"));
+    assert.equal(
+      await readFile(path.join(materializeWorkspaceRoot, "vault", "nested", "artifact.bin"), "utf8"),
+      "artifact\n",
+    );
+    await assert.rejects(readFile(path.join(materializeWorkspaceRoot, "vault", "preserved", "old.bin"), "utf8"));
+
+    await restoreHostedBundleRoots({
+      bytes: hostedBundle.serializeHostedBundleArchive({
+        files: [
+          { contentsBase64: Buffer.from("skip\n").toString("base64"), path: "ignored.txt", root: "ignored" },
+        ],
+        kind: "vault",
+        schema: HOSTED_BUNDLE_SCHEMA,
+      }),
+      expectedKind: "vault",
+      ignoredRoots: ["ignored"],
+      roots: {
+        vault: restoreRoot,
+      },
+    });
+
+    await assert.rejects(
+      restoreHostedBundleRoots({
+        bytes: artifactBundleBytes("artifact.bin", "vault", "artifact\n"),
+        expectedKind: "vault",
+        roots: { vault: restoreRoot },
+      }),
+      /requires an artifact resolver/u,
+    );
+
+    const symlinkRoot = path.join(workspaceRoot, "symlink-root");
+    await mkdir(symlinkRoot, { recursive: true });
+    await symlink(path.join(workspaceRoot, "symlink-target"), path.join(symlinkRoot, "linked"));
+    await assert.rejects(
+      restoreHostedBundleRoots({
+        bytes: inlineBundleBytes("linked/file.txt", "vault", "data\n"),
+        expectedKind: "vault",
+        roots: { vault: symlinkRoot },
+      }),
+      /may not traverse symbolic links/u,
+    );
+
+    const blockedRoot = path.join(workspaceRoot, "blocked-root");
+    await mkdir(blockedRoot, { recursive: true });
+    await writeFile(path.join(blockedRoot, "parent"), "file\n");
+    await assert.rejects(
+      restoreHostedBundleRoots({
+        bytes: inlineBundleBytes("parent/child.txt", "vault", "data\n"),
+        expectedKind: "vault",
+        roots: { vault: blockedRoot },
+      }),
+      /restore parent is not a directory/u,
+    );
+
+    assert.equal(await snapshotHostedBundleRoots({
+      kind: "vault",
+      roots: [{ optional: true, root: path.join(workspaceRoot, "absent"), rootKey: "vault" }],
+    }), null);
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
 });
 
 test("hosted execution snapshots collapse into one workspace bundle and externalize raw artifacts", async () => {
@@ -423,6 +689,37 @@ function assertHostedBundleTextEntries(
       expected,
     );
   }
+}
+
+function artifactBundleBytes(relativePath: string, root: string, contents: string): Uint8Array {
+  return hostedBundle.serializeHostedBundleArchive({
+    files: [
+      {
+        artifact: {
+          byteSize: Buffer.byteLength(contents),
+          sha256: sha256HostedBundleHex(Buffer.from(contents)),
+        },
+        path: relativePath,
+        root,
+      },
+    ],
+    kind: "vault",
+    schema: HOSTED_BUNDLE_SCHEMA,
+  });
+}
+
+function inlineBundleBytes(relativePath: string, root: string, contents: string): Uint8Array {
+  return hostedBundle.serializeHostedBundleArchive({
+    files: [
+      {
+        contentsBase64: Buffer.from(contents).toString("base64"),
+        path: relativePath,
+        root,
+      },
+    ],
+    kind: "vault",
+    schema: HOSTED_BUNDLE_SCHEMA,
+  });
 }
 
 test("runtime-state portability defaults operational paths to machine-local unless explicitly marked portable", () => {
@@ -813,7 +1110,7 @@ test("hosted bundle restore rejects backslash and drive-style traversal archive 
 
 test("hosted bundle restore rejects duplicate root and path entries", () => {
   expect(() => writeHostedBundleTextFile({
-    bytes: serializeHostedBundleArchive({
+    bytes: hostedBundle.serializeHostedBundleArchive({
       files: [
         {
           contentsBase64: Buffer.from("first", "utf8").toString("base64"),
@@ -830,7 +1127,7 @@ test("hosted bundle restore rejects duplicate root and path entries", () => {
     text: "second",
   })).not.toThrow();
 
-  expect(() => serializeHostedBundleArchive({
+  expect(() => hostedBundle.serializeHostedBundleArchive({
     files: [
       {
         contentsBase64: Buffer.from("first", "utf8").toString("base64"),

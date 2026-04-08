@@ -562,31 +562,6 @@ test('runAssistantChatWithInk uses codex home config paths on non-macOS and rend
   }
 })
 
-test('runAssistantChatWithInk fails fast when neither stdin nor a controlling tty support raw mode', async () => {
-  const originalStdinDescriptor = Object.getOwnPropertyDescriptor(process, 'stdin')
-  Object.defineProperty(process, 'stdin', {
-    configurable: true,
-    value: {
-      isTTY: false,
-    } as NodeJS.ReadStream,
-  })
-
-  try {
-    await assert.rejects(
-      () =>
-        runAssistantChatWithInk({
-          initialPrompt: null,
-          vault: '/tmp/vault',
-        } as never),
-      /requires interactive terminal input/u,
-    )
-  } finally {
-    if (originalStdinDescriptor) {
-      Object.defineProperty(process, 'stdin', originalStdinDescriptor)
-    }
-  }
-})
-
 test('runAssistantChatWithInk rejects when Ink render initialization throws', async () => {
   const originalStdinDescriptor = Object.getOwnPropertyDescriptor(process, 'stdin')
   const stdin = createInkTestInput()

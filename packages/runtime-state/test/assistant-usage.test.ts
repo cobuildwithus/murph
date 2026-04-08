@@ -15,6 +15,25 @@ import {
   writePendingAssistantUsageRecord,
 } from "../src/node/index.ts";
 
+test("assistant usage ids validate and normalize turn ids before formatting", () => {
+  assert.equal(
+    createAssistantUsageId({
+      attemptCount: 3,
+      turnId: " turn_123 ",
+    }),
+    "turn_123.attempt-3",
+  );
+
+  assert.throws(
+    () =>
+      createAssistantUsageId({
+        attemptCount: -1,
+        turnId: "turn_123",
+      }),
+    /attemptCount must be a non-negative integer when provided/u,
+  );
+});
+
 test("assistant usage records round-trip through pending storage and sort by occurredAt", async () => {
   const parent = await mkdtemp(path.join(tmpdir(), "murph-assistant-usage-"));
   const vaultRoot = path.join(parent, "vault");
@@ -138,6 +157,22 @@ test("assistant usage parsing preserves a missing totalTokens value", () => {
   );
 });
 
+test("listing pending assistant usage records returns an empty array when the directory is absent", async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), "murph-assistant-usage-"));
+  const vaultRoot = path.join(parent, "vault");
+
+  try {
+    assert.deepEqual(
+      await listPendingAssistantUsageRecords({
+        vault: vaultRoot,
+      }),
+      [],
+    );
+  } finally {
+    await rm(parent, { force: true, recursive: true });
+  }
+});
+
 test("assistant usage parsing rejects missing credentialSource", () => {
   assert.throws(
     () => parseAssistantUsageRecord({
@@ -152,6 +187,39 @@ test("assistant usage parsing rejects missing credentialSource", () => {
       usageId: "turn_123.attempt-1",
     }),
     /credentialSource must be a non-empty string/u,
+  );
+});
+
+test("assistant usage parsing rejects invalid schema and non-string optional values", () => {
+  assert.throws(
+    () =>
+      parseAssistantUsageRecord({
+        apiKeyEnv: 1,
+        attemptCount: 1,
+        credentialSource: "platform",
+        occurredAt: "2026-03-29T12:00:00.000Z",
+        provider: "codex-cli",
+        schema: ASSISTANT_USAGE_SCHEMA,
+        sessionId: "asst_123",
+        turnId: "turn_123",
+        usageId: "turn_123.attempt-1",
+      }),
+    /apiKeyEnv must be a string when provided/u,
+  );
+
+  assert.throws(
+    () =>
+      parseAssistantUsageRecord({
+        attemptCount: 1,
+        credentialSource: "invalid",
+        occurredAt: "2026-03-29T12:00:00.000Z",
+        provider: "codex-cli",
+        schema: "murph.assistant-usage.v0",
+        sessionId: "asst_123",
+        turnId: "turn_123",
+        usageId: "turn_123.attempt-1",
+      }),
+    /credentialSource must be 'member', 'platform', or 'unknown'/u,
   );
 });
 
@@ -187,5 +255,30 @@ test("assistant usage credential source resolves against the hosted user env sna
       userEnvKeys: ["VENICE_API_KEY"],
     }),
     "unknown",
+  );
+  assert.equal(
+    resolveAssistantUsageCredentialSource({
+      apiKeyEnv: null,
+      provider: "openai-compatible",
+      userEnvKeys: ["VENICE_API_KEY"],
+    }),
+    "platform",
+  );
+  assert.equal(
+    resolveAssistantUsageCredentialSource({
+      apiKeyEnv: " OPENAI_API_KEY ",
+      provider: "openai-compatible",
+      userEnvKeys: ["OPENAI_API_KEY"],
+    }),
+    "platform",
+  );
+  assert.throws(
+    () =>
+      Reflect.apply(resolveAssistantUsageCredentialSource, undefined, [{
+        apiKeyEnv: "OPENAI_API_KEY",
+        provider: "openai-compatible",
+        userEnvKeys: [123],
+      }]),
+    /userEnvKey must be a string when provided/u,
   );
 });
