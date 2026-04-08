@@ -1,7 +1,7 @@
 import type {
   AssistantSession,
   AssistantTurnTrigger,
-} from '../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import {
   appendAssistantTranscriptEntries,
   listAssistantTranscriptEntries,

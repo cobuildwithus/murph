@@ -8,7 +8,7 @@ import {
 import {
   normalizeAssistantHeaders,
   type AssistantProviderConfig,
-} from '../provider-config.js'
+} from '@murphai/operator-config/assistant/provider-config'
 import type {
   AssistantUserMessageContentPart,
 } from '../../model-harness.js'

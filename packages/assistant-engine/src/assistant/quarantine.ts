@@ -7,7 +7,7 @@ import {
   type AssistantQuarantineArtifactKind,
   type AssistantQuarantineEntry,
   type AssistantQuarantineSummary,
-} from '../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import {
   ensureAssistantStateDirectory,
   errorMessage,

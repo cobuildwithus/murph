@@ -26,10 +26,10 @@ import {
   createAssistantProviderToolProgressEvent,
 } from '../provider-progress.js'
 import {
-  resolveAssistantModelSpecFromProviderConfig,
   supportsAssistantReasoningEffort,
   shouldUseAssistantOpenAIResponsesApi,
-} from '../provider-config.js'
+} from '@murphai/operator-config/assistant/provider-config'
+import { resolveAssistantModelSpecFromProviderConfig } from '../provider-config.js'
 import type { AssistantProviderDefinition } from './types.js'
 
 const OPENAI_COMPATIBLE_PROVIDER_TIMEOUT_MS = 10 * 60 * 1000

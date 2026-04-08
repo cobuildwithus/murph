@@ -4,7 +4,7 @@ import {
 import type { AssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import {
   compactAssistantProviderConfigInput,
-} from './provider-config.js'
+} from '@murphai/operator-config/assistant/provider-config'
 import { resolveAssistantSession, type ResolveAssistantSessionInput } from './store.js'
 import type {
   AssistantMessageInput,

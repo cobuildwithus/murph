@@ -393,12 +393,7 @@ function isTestOnlyInternalAssistantSpecifier({
       && specifier.startsWith("@murphai/assistant-cli/assistant/"))
     || (
       packageName === "@murphai/assistant-engine"
-      && (
-        specifier.startsWith("@murphai/assistant-engine/assistant/")
-        || specifier === "@murphai/assistant-engine/assistant-cli-access"
-        || specifier === "@murphai/assistant-engine/assistant-cli-tools"
-        || specifier === "@murphai/assistant-engine/assistant-vault-paths"
-      )
+      && specifier.startsWith("@murphai/assistant-engine/assistant/")
     )
   );
 }
@@ -498,10 +493,7 @@ function isAssistantEngineWildcardHelperNamespace(exportKey) {
 
 function isAssistantEngineInternalHelperExport(exportKey) {
   return (
-    exportKey === "./assistant-cli-access"
-    || exportKey === "./assistant-cli-tools"
-    || exportKey === "./assistant-vault-paths"
-    || exportKey === "./health-registry-command-metadata"
+    exportKey === "./health-registry-command-metadata"
     || exportKey === "./inbox-app/types"
     || exportKey === "./inbox-services/connectors"
     || exportKey === "./inbox-services/daemon"

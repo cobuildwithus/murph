@@ -2,7 +2,7 @@ import {
   assistantDeliveryErrorSchema,
   type AssistantDeliveryError,
   type AssistantOutboxIntent,
-} from '../../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import { redactAssistantStateString } from '../redaction.js'
 
 const OUTBOX_RETRY_DELAYS_MS = [30_000, 120_000, 600_000, 1_800_000]

@@ -7,7 +7,7 @@ import {
   type AssistantCronJob,
   type AssistantCronRunRecord,
   type AssistantCronTarget,
-} from '../../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { quarantineAssistantStateFile } from '../quarantine.js'
 import type { AssistantStatePaths } from '../store/paths.js'

@@ -1,4 +1,4 @@
-import type { AssistantSessionBinding } from '../assistant-cli-contracts.js'
+import type { AssistantSessionBinding } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeNullableString } from './shared.js'
 
 export const assistantConversationDirectnessValues = [

@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { z } from 'zod'
-import { assistantCronJobStateSchema } from '../../assistant-cli-contracts.js'
+import { assistantCronJobStateSchema } from '@murphai/operator-config/assistant-cli-contracts'
 import { quarantineAssistantStateFile } from '../quarantine.js'
 import type { AssistantStatePaths } from '../store/paths.js'
 import {

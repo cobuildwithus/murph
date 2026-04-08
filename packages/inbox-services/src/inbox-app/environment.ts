@@ -7,7 +7,6 @@ import {
   resolveAgentmailBaseUrl,
 } from '@murphai/operator-config/agentmail-runtime'
 import { ensureImessageMessagesDbReadable } from '@murphai/operator-config/imessage-readiness'
-import { loadQueryRuntime, loadRuntimeModule } from '@murphai/vault-usecases'
 import { SETUP_RUNTIME_ENV_NOTICE } from '@murphai/operator-config/setup-runtime-env'
 import {
   resolveTelegramApiBaseUrl,
@@ -28,7 +27,11 @@ import type {
   RecoveredProvisionedMailbox,
   TelegramDriver,
 } from './types.js'
-import type { ImportersFactoryRuntimeModule } from '@murphai/vault-usecases/runtime'
+import {
+  loadQueryRuntime,
+  loadRuntimeModule,
+  type ImportersFactoryRuntimeModule,
+} from '@murphai/vault-usecases/runtime'
 
 import { normalizeNullableString } from '../inbox-services/shared.js'
 

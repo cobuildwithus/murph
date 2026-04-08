@@ -7,7 +7,7 @@ import type {
   AssistantSandbox,
   AssistantSession,
   AssistantTranscriptEntryKind,
-} from '../../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import type { ConversationRef } from '../conversation-ref.js'
 
 export interface AssistantSessionLocator {

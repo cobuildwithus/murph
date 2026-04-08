@@ -1,4 +1,4 @@
-import type { AssistantAutomationState } from '../../assistant-cli-contracts.js'
+import type { AssistantAutomationState } from '@murphai/operator-config/assistant-cli-contracts'
 import type { InboxServices } from '@murphai/inbox-services'
 import type { AssistantModelSpec } from '../../model-harness.js'
 import type { VaultServices } from '@murphai/vault-usecases'

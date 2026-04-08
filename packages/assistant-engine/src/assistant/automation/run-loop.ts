@@ -1,6 +1,6 @@
 import {
   assistantRunResultSchema,
-} from '../../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import type {
   InboxServices,
   InboxRunEvent,

@@ -10,7 +10,7 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type {
   AssistantApprovalPolicy,
   AssistantSandbox,
-} from './assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import type {
   CodexProgressEvent,
 } from './assistant-codex-events.js'

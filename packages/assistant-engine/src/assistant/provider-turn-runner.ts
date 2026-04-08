@@ -3,7 +3,7 @@ import type {
   AssistantProviderBinding,
   AssistantProviderSessionOptions,
   AssistantSession,
-} from '../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import {
   resolveAssistantCliAccessContext,
 } from '../assistant-cli-access.js'

@@ -4,7 +4,7 @@ import {
   buildDailyFoodCronPrompt,
   buildDailyFoodSchedule,
 } from '@murphai/vault-usecases/records'
-import { loadRuntimeModule } from '@murphai/vault-usecases'
+import { loadRuntimeModule } from '@murphai/vault-usecases/runtime'
 import {
   addAssistantCronJob,
   listAssistantCronJobs,

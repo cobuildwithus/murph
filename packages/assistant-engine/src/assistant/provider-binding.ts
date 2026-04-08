@@ -3,7 +3,7 @@ import type {
   AssistantProviderBinding,
   AssistantProviderSessionOptions,
   AssistantSessionProviderState,
-} from '../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import {
   normalizeAssistantProviderBinding,
   readAssistantProviderResumeRouteId,

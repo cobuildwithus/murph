@@ -1,4 +1,4 @@
-import type { AssistantAutomationCursor } from '../../assistant-cli-contracts.js'
+import type { AssistantAutomationCursor } from '@murphai/operator-config/assistant-cli-contracts'
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
 import type { InboxServices } from '@murphai/inbox-services'
 import { routeInboxCaptureWithModel } from '../../inbox-model-harness.js'

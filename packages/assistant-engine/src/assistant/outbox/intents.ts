@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import path from 'node:path'
-import type { AssistantOutboxIntent } from '../../assistant-cli-contracts.js'
+import type { AssistantOutboxIntent } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeNullableString } from '../shared.js'
 import { resolveAssistantOpaqueStateFilePath } from '../state-ids.js'
 

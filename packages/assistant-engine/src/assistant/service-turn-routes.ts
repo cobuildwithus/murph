@@ -5,7 +5,7 @@ import type { AssistantOperatorDefaults } from '@murphai/operator-config/operato
 import type { ResolvedAssistantFailoverRoute } from './failover.js'
 import {
   compactAssistantProviderConfigInput,
-} from './provider-config.js'
+} from '@murphai/operator-config/assistant/provider-config'
 import {
   buildResolveAssistantSessionInput,
 } from './session-resolution.js'

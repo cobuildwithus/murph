@@ -8,7 +8,7 @@ import type {
   AssistantSandbox,
   AssistantSession,
   AssistantTurnTrigger,
-} from '../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import type { AssistantProviderTraceEvent } from './provider-traces.js'
 import type {
   AssistantProviderProgressEvent,

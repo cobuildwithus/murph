@@ -6,7 +6,7 @@ import {
   assistantSessionSecretsSchema,
   type AssistantSession,
   type AssistantSessionSecrets,
-} from '../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { quarantineAssistantStateFile } from './quarantine.js'
 import {

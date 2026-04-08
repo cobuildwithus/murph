@@ -1,7 +1,7 @@
 import type {
   AssistantBindingDelivery,
   AssistantSession,
-} from '../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import type { AssistantMessageInput } from './service-contracts.js'
 import {
   isAcceptedInboundMessageOperatorAuthority,

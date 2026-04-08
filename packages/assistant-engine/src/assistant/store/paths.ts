@@ -8,8 +8,8 @@ import {
   type AssistantApprovalPolicy,
   type AssistantProviderSessionOptions,
   type AssistantSandbox,
-} from '../../assistant-cli-contracts.js'
-import { serializeAssistantProviderSessionOptions } from '../provider-config.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
+import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import {
   resolveAssistantConversationKey,
   type AssistantBindingPatch,

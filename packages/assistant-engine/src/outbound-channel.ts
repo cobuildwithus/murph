@@ -3,7 +3,7 @@ import {
   type AssistantChannelDelivery,
   type AssistantDeliverResult,
   type AssistantSession,
-} from './assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import {
   getAssistantChannelAdapter,
   resolveDeliveryCandidates,

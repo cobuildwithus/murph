@@ -1,9 +1,9 @@
-import type { AssistantChatProvider } from '../../assistant-cli-contracts.js'
+import type { AssistantChatProvider } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   normalizeAssistantProviderConfig,
   supportsAssistantReasoningEffort,
   type AssistantProviderConfigInput,
-} from '../provider-config.js'
+} from '@murphai/operator-config/assistant/provider-config'
 import {
   mergeAssistantProviderActivityLabels,
   type AssistantProviderProgressEvent,

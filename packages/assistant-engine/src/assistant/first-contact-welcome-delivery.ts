@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 
-import type { AssistantSession } from '../assistant-cli-contracts.js'
+import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import { resolveAssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'

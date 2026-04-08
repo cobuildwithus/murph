@@ -5,7 +5,7 @@ import {
   type AssistantBindingDeliveryKind,
   type AssistantSession,
   type AssistantSessionBinding,
-} from '../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import { inferAssistantBindingDelivery } from './channel-adapters.js'
 import {
   conversationDirectnessFromThreadIsDirect,

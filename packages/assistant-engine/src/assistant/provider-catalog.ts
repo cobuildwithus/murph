@@ -1,9 +1,9 @@
-import type { AssistantChatProvider } from '../assistant-cli-contracts.js'
+import type { AssistantChatProvider } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   normalizeAssistantProviderConfig,
   type AssistantProviderConfig,
   type AssistantProviderConfigInput,
-} from './provider-config.js'
+} from '@murphai/operator-config/assistant/provider-config'
 import {
   createCatalogModel,
   discoverAssistantProviderModels as discoverAssistantProviderModelsWithRegistry,

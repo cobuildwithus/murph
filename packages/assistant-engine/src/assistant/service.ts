@@ -1,5 +1,5 @@
 // Local-only assistant orchestration surface for headless consumers.
-import type { AssistantSession } from '../assistant-cli-contracts.js'
+import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import type {
   AssistantMessageInput,
   AssistantSessionResolutionFields,
